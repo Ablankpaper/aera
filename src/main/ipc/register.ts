@@ -811,6 +811,10 @@ export function registerIpcHandlers(context: IpcContext): void {
       owner: getAgenteraRuntimeOwner(),
       createProfile,
       resolveProfilePath: (profileId) => profileHome(profileId),
+      activateProfile: (profileId) => {
+        setActiveProfile(profileId);
+        notifyProfileSwitched();
+      },
     });
     return {
       status: "bound",
@@ -854,6 +858,13 @@ export function registerIpcHandlers(context: IpcContext): void {
       getAgenteraRuntimeOwner(),
     );
     return { status: "bound" };
+  });
+  ipcMain.handle("agentera-switch-to-local", () => {
+    const existing = getConnectionConfig();
+    stopSshTunnel();
+    setConnectionConfig({ ...existing, mode: "local" });
+    resetSshDashboardAvailability();
+    notifyConnectionConfigChanged();
   });
 
   // Installation

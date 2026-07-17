@@ -1682,6 +1682,8 @@ const agenteraRuntimeAccessAPI = {
     ipcRenderer.invoke("agentera-connection-inspect-current"),
   bindCurrentConnection: (): Promise<AgenteraBoundConnectionPublicState> =>
     ipcRenderer.invoke("agentera-connection-bind-current"),
+  switchToLocal: (): Promise<void> =>
+    ipcRenderer.invoke("agentera-switch-to-local"),
 };
 
 if (process.contextIsolated) {

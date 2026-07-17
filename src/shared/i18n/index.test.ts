@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { t, getLocaleDirection } from "./index";
+import { t, getLocaleDirection, resources, APP_LOCALES } from "./index";
+
+function leafKeys(value: unknown, prefix = ""): string[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return prefix ? [prefix] : [];
+  }
+  return Object.entries(value as Record<string, unknown>).flatMap(
+    ([key, child]) => leafKeys(child, prefix ? `${prefix}.${key}` : key),
+  );
+}
 
 describe("shared i18n", () => {
   it("returns English text by default", () => {
@@ -55,5 +64,21 @@ describe("shared i18n", () => {
     expect(t("common.updateAvailable", "pl", { version: "1.2.3" })).toBe(
       "Aktualizacja v1.2.3",
     );
+  });
+
+  it("provides the complete AgentEra auth copy in every supported locale", () => {
+    const expected = leafKeys(resources.en.translation.auth).sort();
+    expect(expected.length).toBeGreaterThan(30);
+
+    for (const locale of APP_LOCALES) {
+      expect(leafKeys(resources[locale].translation.auth).sort()).toEqual(
+        expected,
+      );
+    }
+  });
+
+  it("keeps Arabic and Hebrew authentication screens right-to-left", () => {
+    expect(getLocaleDirection("ar")).toBe("rtl");
+    expect(getLocaleDirection("he")).toBe("rtl");
   });
 });

@@ -26,6 +26,18 @@ The result contains connection mode, the saved post-auth target, and a soft veri
 
 The separate `window.agenteraRuntimeAccess` preload namespace returns only sanitized preflight and claim states. Other owners' IDs, local Profile paths, remote URLs, SSH configuration, credentials, and product secrets never appear in those types.
 
+### Renderer state machine
+
+[[src/renderer/src/App.tsx#App]] applies the sanitized startup target only after product authentication and Runtime ownership checks.
+
+The three-second branded splash remains unchanged. `welcome` is reachable only for an authenticated fresh installation; `setup` and `main` additionally require the current local Profile or remote/SSH connection context to match the signed-in owner.
+
+[[src/renderer/src/screens/AuthGate/AuthGate.tsx#AuthGate]] opens registration, sign-in, and recovery only in the system browser. It never renders password, email, phone, verification-code, WebView, or local-bypass inputs, and it explains fail-closed platform secure-storage errors.
+
+[[src/renderer/src/screens/ProfileClaim/ProfileClaim.tsx#ProfileClaim]] automatically binds an empty Profile, but meaningful existing data remains untouched until the user explicitly chooses to bind it in place or create a separate empty Profile. Fresh creation activates the new physical Profile and always continues to setup rather than inheriting the previous Profile's configured target.
+
+The splash local-mode escape is retained, but its configuration mutation is queued until product authentication succeeds and then runs through the authenticated main-process `agentera-switch-to-local` channel. It cannot bypass the product gate.
+
 ## Browser authorization
 
 The system browser handles registration, login, recovery, identity binding, and device management through Authorization Code with PKCE and a one-use loopback callback.
@@ -54,7 +66,7 @@ The client signs the cloud protocol digest through the installation Ed25519 key,
 
 ## Desktop authentication foundation
 
-The desktop foundation keeps product authentication in the main process and exposes only an allowlisted public state before browser authorization is wired into startup.
+The desktop foundation keeps product authentication in the main process and exposes only an allowlisted public state to the renderer and startup gate.
 
 ### Cloud origin boundary
 

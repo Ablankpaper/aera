@@ -65,6 +65,7 @@ export interface FreshProfileBindingRequest {
     cloneFrom: string | null,
   ) => ProfileCreationResult;
   resolveProfilePath: (profileId: string) => string;
+  activateProfile: (profileId: string) => void;
 }
 
 export type ProfileClaimInspection =
@@ -266,10 +267,12 @@ export class AgenteraProfileBindingStore {
         "Fresh Runtime Profile creation unexpectedly produced private data.",
       );
     }
-    return {
+    const result = {
       profileId: created.id,
       binding: this.bindExistingProfile(profilePath, request.owner),
     };
+    request.activateProfile(created.id);
+    return result;
   }
 
   listUnboundProfiles<T extends { path: string }>(profiles: T[]): T[] {

@@ -134,6 +134,7 @@ const AUTHENTICATED_CHANNELS = [
   "agentera-profile-create-fresh",
   "agentera-profile-inspect-active",
   "agentera-profile-list-unbound",
+  "agentera-switch-to-local",
   "check-install",
   "check-openclaw",
   "copy-to-clipboard",

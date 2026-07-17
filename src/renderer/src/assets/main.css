@@ -14015,6 +14015,123 @@ body {
 }
 
 /* ========================================================================
+   AGENTERA PRODUCT AUTH + LOCAL OWNERSHIP GATES
+   ======================================================================== */
+.agentera-gate-screen {
+  min-height: 100%;
+  padding: 72px 28px 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  background:
+    radial-gradient(
+      circle at 50% 14%,
+      color-mix(in srgb, var(--accent) 16%, transparent),
+      transparent 42%
+    ),
+    var(--bg-primary);
+}
+
+.agentera-gate-card {
+  width: min(460px, 100%);
+  padding: 38px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.18);
+  text-align: center;
+}
+
+.agentera-profile-card {
+  width: min(520px, 100%);
+}
+
+.agentera-gate-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  color: var(--text-primary);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.agentera-gate-brand img {
+  display: block;
+  object-fit: contain;
+}
+
+.agentera-gate-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: clamp(24px, 4vw, 30px);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.035em;
+}
+
+.agentera-gate-description {
+  max-width: 420px;
+  margin: 14px auto 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.agentera-gate-privacy,
+.agentera-profile-privacy {
+  margin: 14px auto 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.agentera-profile-privacy {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+}
+
+.agentera-gate-actions,
+.agentera-profile-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 26px;
+}
+
+.agentera-gate-actions .btn,
+.agentera-profile-actions .btn {
+  min-height: 44px;
+  justify-content: center;
+}
+
+.agentera-gate-primary {
+  width: 100%;
+}
+
+.agentera-gate-error {
+  margin: 14px 0 0;
+  color: var(--error);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+@media (max-width: 560px) {
+  .agentera-gate-screen {
+    padding: 64px 18px 24px;
+  }
+
+  .agentera-gate-card {
+    padding: 30px 22px;
+    border-radius: 18px;
+  }
+}
+
+/* ========================================================================
    ERROR BOUNDARY
    ======================================================================== */
 .error-boundary {

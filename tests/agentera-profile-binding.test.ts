@@ -145,6 +145,7 @@ describe("AgentEra non-destructive Runtime Profile ownership", () => {
       mkdirSync(freshPath, { recursive: true });
       return { success: true, id: basename(freshPath) };
     });
+    const activateProfile = vi.fn();
 
     const created = store.createAndBindFreshProfile({
       name: "Fresh Space",
@@ -154,10 +155,13 @@ describe("AgentEra non-destructive Runtime Profile ownership", () => {
         expect(id).toBe("fresh-space");
         return freshPath;
       },
+      activateProfile,
     });
 
     expect(createProfile).toHaveBeenCalledOnce();
     expect(createProfile).toHaveBeenCalledWith("Fresh Space", null);
+    expect(activateProfile).toHaveBeenCalledOnce();
+    expect(activateProfile).toHaveBeenCalledWith("fresh-space");
     expect(created.profileId).toBe("fresh-space");
     expect(store.inspectProfile(profilePath, owner)).toMatchObject({
       status: "unbound",

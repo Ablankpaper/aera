@@ -144,6 +144,7 @@ describe("AgentEra Runtime-access preload namespace", () => {
     "listUnboundProfiles",
     "inspectCurrentConnection",
     "bindCurrentConnection",
+    "switchToLocal",
   ];
 
   it("exposes only the reviewed ownership and preflight methods", () => {

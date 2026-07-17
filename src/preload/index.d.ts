@@ -78,6 +78,7 @@ interface AgenteraRuntimeAccessAPI {
   listUnboundProfiles: () => Promise<AgenteraUnboundProfilePublicState[]>;
   inspectCurrentConnection: () => Promise<AgenteraConnectionClaimPublicState>;
   bindCurrentConnection: () => Promise<AgenteraBoundConnectionPublicState>;
+  switchToLocal: () => Promise<void>;
 }
 
 interface InstallStatus {
