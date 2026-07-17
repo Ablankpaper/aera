@@ -196,9 +196,10 @@ OAuth 模块验证固定桌面 `client_id`、精确回环 Redirect URI、PKCE ch
 
 1. 显示 AgentEra Studio 启动页并执行不读取用户内容的 Runtime/连接预检。
 2. 主进程检查 AgentEra 在线会话和签名离线凭证。
-3. 有效时选择已绑定本地 Profile，然后进入 `postAuthTarget`。
+3. 有效时检查本地 Profile 绑定；Runtime 已安装时先完成选择或认领，再进入 `setup` 或 `main`。
 4. 无效时进入 AgentEra 登录门禁；即使 Runtime 尚未安装，也必须先登录再进入安装页。
-5. 登录、首次 Profile 选择和绑定完成后进入 `postAuthTarget`。
+5. 全新未安装设备在认证后可以进入 `welcome/installing`，但安装完成后必须先创建并绑定空 Profile，才能进入 `setup` 或 `main`。
+6. 任何能够启动用户任务、读取会话或展示 Memory 的界面都要求认证和 Profile 绑定同时完成。
 
 远程和 SSH Runtime 模式同样受 AgentEra 产品门禁约束。预检可以启动必要连接探测，但在确定 AgentEra 用户前不得挂载、同步或展示用户 Profile 内容。
 

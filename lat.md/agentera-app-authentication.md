@@ -12,7 +12,7 @@ The existing Hermes account client remains a separate compatibility feature. The
 
 The splash may preflight Runtime and connection readiness without mounting user content, then every local, remote, SSH, setup, and install path passes through the AgentEra product gate.
 
-An online session or valid signed offline entitlement selects the bound Runtime Profile before the deferred post-auth screen opens. Authentication never becomes a writer to [[agentera-self-evolution#AgentEra self-evolution compatibility#Local learning loop|Hermes local learning]].
+An online session or valid signed offline entitlement selects the bound Runtime Profile before any runnable user screen opens. A fresh authenticated device may install Runtime first, but must create and bind its empty Profile before setup or main. Authentication never becomes a writer to [[agentera-self-evolution#AgentEra self-evolution compatibility#Local learning loop|Hermes local learning]].
 
 ## Browser authorization
 
