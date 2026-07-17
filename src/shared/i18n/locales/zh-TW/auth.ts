@@ -56,6 +56,34 @@ const auth = {
       "沒有任何 Runtime 私密資料被變更。準備好後可重新檢查歸屬。",
     retry: "重新檢查歸屬",
   },
+  offline: {
+    title: "本機離線模式",
+    description:
+      "雲端帳戶功能已暫停；在簽章離線期限內，本機 Agent、模型 API 與 Hermes 自我學習仍可正常使用。",
+  },
+  account: {
+    settingsNav: "AgentEra 帳戶",
+    title: "AgentEra 帳戶",
+    openMenu: "開啟 AgentEra 帳戶選單",
+    online: "線上 · 已驗證",
+    offline: "離線 · 本機可用",
+    manage: "管理帳戶",
+    devices: "管理裝置",
+    recharge: "儲值模型 API",
+    switch: "切換帳戶",
+    signOut: "登出",
+    actionFailed: "暫時無法完成此帳戶操作。",
+    unavailable: "AgentEra 帳戶資訊暫時不可用。",
+    userId: "使用者",
+    deviceId: "裝置",
+    offlineUntil: "簽章離線授權有效至 {{date}}。",
+    localDataWarning:
+      "刪除雲端帳戶或登出都不會刪除、移動、上傳或解除綁定本機 Hermes Profile、Memory、工作階段、檔案、技能及自我學習狀態。",
+    rechargeSeparateAccount:
+      "儲值會開啟獨立的模型 API 網站；該網站的帳戶、餘額、API Key、Cookie 與 Token 均不與 AgentEra 帳戶共用。",
+    pendingRevocationWarning:
+      "若控制服務無法連線時登出，此裝置在簽章撤銷要求自動補送成功前，仍可能暫時占用最多 5 台裝置的名額。",
+  },
 };
 
 export default auth;

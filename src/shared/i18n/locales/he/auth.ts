@@ -61,6 +61,34 @@ const auth = {
       "לא שונו נתוני Runtime פרטיים. אפשר לנסות שוב את בדיקת הבעלות.",
     retry: "בדיקה חוזרת של הבעלות",
   },
+  offline: {
+    title: "מצב מקומי לא מקוון",
+    description:
+      "תכונות החשבון בענן מושהות. עבודה מקומית, ממשקי מודלים ולמידת Hermes ממשיכים עד מועד ההרשאה החתומה.",
+  },
+  account: {
+    settingsNav: "חשבון AgentEra",
+    title: "חשבון AgentEra",
+    openMenu: "פתיחת תפריט חשבון AgentEra",
+    online: "מקוון · מאומת",
+    offline: "לא מקוון · גישה מקומית",
+    manage: "ניהול חשבון",
+    devices: "ניהול מכשירים",
+    recharge: "טעינת API למודלים",
+    switch: "החלפת חשבון",
+    signOut: "יציאה",
+    actionFailed: "לא ניתן להשלים את פעולת החשבון.",
+    unavailable: "פרטי חשבון AgentEra אינם זמינים.",
+    userId: "משתמש",
+    deviceId: "מכשיר",
+    offlineUntil: "הגישה החתומה הלא מקוונת תקפה עד {{date}}.",
+    localDataWarning:
+      "מחיקת חשבון הענן או יציאה אינן מוחקות, מעבירות, מעלות או מנתקות Profiles, Memory, הפעלות, קבצים, מיומנויות או למידת Hermes המקומית.",
+    rechargeSeparateAccount:
+      "הטעינה פותחת אתר API עצמאי; החשבונות, היתרות, המפתחות, העוגיות והאסימונים שלו נפרדים מחשבון AgentEra.",
+    pendingRevocationWarning:
+      "ביציאה כאשר שירות הבקרה אינו זמין, המכשיר עשוי להיספר במגבלת חמשת המכשירים עד למסירת הביטול החתום אוטומטית.",
+  },
 };
 
 export default auth;

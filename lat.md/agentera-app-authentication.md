@@ -62,7 +62,7 @@ The client signs the cloud protocol digest through the installation Ed25519 key,
 
 [[src/main/app/start.ts#startMainProcess]] creates one controller, restores the window after a valid callback, disposes the listener on quit, and routes the authorization URL through [[src/main/security.ts#isAllowedAgenteraAuthExternalUrl]]. The policy allows only the configured cloud Origin and exact OAuth request shape.
 
-[[src/preload/index.ts]] exposes the separate `window.agenteraAuth` namespace. Its six methods carry only [[src/shared/agentera-auth.ts#AgenteraAuthPublicState]] and login-control options; AgentEra tokens, device keys, codes, verifiers, and encrypted blobs have no preload field.
+[[src/preload/index.ts]] exposes the separate `window.agenteraAuth` namespace. Its seven methods carry only [[src/shared/agentera-auth.ts#AgenteraAuthPublicState]], login-control options, and an allowlisted portal target; AgentEra tokens, device keys, codes, verifiers, and encrypted blobs have no preload field.
 
 ## Desktop authentication foundation
 
@@ -86,7 +86,7 @@ Refresh tokens, offline entitlements, device private keys, and pending self-revo
 
 [[src/main/agentera-auth/device-key.ts#getOrCreateAgenteraDeviceIdentity]] creates one installation-scoped Ed25519 key pair, stores its private key only through the app-level encrypted store, and reuses the same identity after logout.
 
-[[src/main/agentera-auth/device-key.ts#signAgenteraDeviceDigest]] signs only SHA-256-sized protocol digests. Development signing keys are not desktop trust roots; the bundled offline verification-key map remains fail-closed until a reviewed release adds approved public key IDs.
+[[src/main/agentera-auth/device-key.ts#signAgenteraDeviceDigest]] signs only SHA-256-sized protocol digests. The only bundled development trust root is issuer-scoped to `http://127.0.0.1:8086`; every production issuer remains fail-closed until a reviewed release adds its public key ID.
 
 ## Sessions and offline use
 
@@ -94,11 +94,47 @@ Access tokens last fifteen minutes in main-process memory, rotating refresh toke
 
 A valid offline entitlement allows local use and native Hermes learning when the configured model endpoint remains reachable. Cloud functions pause, and expiry gates new work without deleting local state.
 
+### Signed entitlement validation
+
+Offline access accepts only an exact cloud-issued Ed25519 entitlement bound to the current user, device, installation, personal space, issuer, audience, policy, issue time, and seven-day expiry.
+
+[[src/main/agentera-auth/entitlement.ts#verifyAgenteraOfflineEntitlement]] rejects unknown keys, extra or malformed claims, non-canonical encodings, altered signatures, copied-device credentials, future issue times, and expired credentials. [[src/main/agentera-auth/config.ts#getBundledAgenteraOfflinePublicKeys]] selects trust roots only for their approved issuer.
+
+### Trusted time and rolling validation
+
+Online state renews every fifteen minutes, while a control-plane outage retries with bounded exponential backoff and jitter without treating model-endpoint availability as cloud authorization.
+
+[[src/main/agentera-auth/time-anchor.ts#AgenteraTrustedTimeAnchor]] combines the last trusted server time with monotonic elapsed time and requires online validation after a material wall-clock rollback. [[src/main/agentera-auth/lifecycle.ts#AgenteraAuthLifecycle]] owns the single refresh timer and recovery schedule.
+
+The controller serializes refreshes so a rotating Refresh Token is never replayed and rejects a late response after logout or account switching. Every successful response must contain a newly verified entitlement before any replacement session is persisted.
+
+### Runtime edge enforcement
+
+Every authenticated Runtime IPC edge rechecks the current trusted deadline before its handler can start new work.
+
+[[src/main/ipc/auth-guard.ts#createProductAccessGuard]] calls the controller's synchronous entitlement assertion before Profile ownership checks. Expiry, rollback, revocation, account disablement, or deletion publishes a blocked state; the existing owner-switch coordinator then aborts active runs and closes Gateway, SSH, dashboard, and SQLite state without editing Hermes files.
+
 ## Device and account lifecycle
 
 Each account has at most five active devices and receives one personal space during the registration transaction.
 
 Password recovery revokes all sessions. Sign-out clears product credentials but retains local data. Self-service deletion immediately suspends the account, starts a seven-day cooling period, and never erases local Hermes data automatically.
+
+### Safe sign-out and pending revocation
+
+Sign-out blocks local product access immediately, then revokes the current cloud device before clearing the encrypted session when the control plane is reachable.
+
+[[src/main/agentera-auth/lifecycle.ts#createPendingAgenteraSelfRevocation]] signs an installation-bound, nonce-protected self-revocation digest that contains no bearer token. If delivery fails, the store atomically keeps only that encrypted intent after clearing the session, retries with a fresh timestamp, and treats replay or an already-absent device as complete.
+
+Logout, revocation, and retry never delete, move, upload, hash for upload, or unbind Memory, USER, sessions, files, skills, Curator state, or any other Hermes learning asset.
+
+### Account and recharge controls
+
+The sidebar account menu and Settings account pane expose only online/offline status, truncated identifiers, expiry, and allowlisted actions.
+
+[[src/renderer/src/components/AgenteraAccountMenu.tsx#AgenteraAccountMenu]] and [[src/renderer/src/components/settings/AgenteraAccountPane.tsx#AgenteraAccountPane]] open account and device management on the configured cloud Origin. Recharge opens the separately configured URL validated by [[src/main/agentera-auth/config.ts#parseAgenteraRechargePublicUrl]] and shares no AgentEra APP credential.
+
+Switching accounts completes safe sign-out first and then opens browser authorization with explicit account selection. The UI warns that a pending offline revocation may temporarily count toward the five-device limit and that cloud account deletion cannot erase local Hermes data.
 
 ## Existing Profile migration
 
@@ -135,3 +171,5 @@ Authorization codes, verification codes, and refresh tokens are stored only as h
 Authentication is delivered before Agent configuration/version sync, but this ordering does not enable cloud ownership of Hermes adaptive state.
 
 Agent sync, client-side encrypted backup, workspace/organization scopes, and official Agent evolution pipelines remain later independently designed projects. Every authentication release remains blocked by the Hermes compatibility gate.
+
+The loopback development key proves local integration only. A production build cannot grant offline access until a reviewed key ceremony places the matching public key and exact production issuer in the desktop trust map; private signing material never enters this repository.

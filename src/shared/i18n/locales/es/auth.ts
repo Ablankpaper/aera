@@ -63,6 +63,34 @@ const auth = {
       "No se modificó ningún dato privado del Runtime. Vuelve a comprobar la propiedad cuando quieras.",
     retry: "Reintentar la comprobación",
   },
+  offline: {
+    title: "Modo local sin conexión",
+    description:
+      "Las funciones de cuenta en la nube están pausadas. El Agent local, las API de modelos y el aprendizaje de Hermes siguen disponibles hasta el límite firmado.",
+  },
+  account: {
+    settingsNav: "Cuenta AgentEra",
+    title: "Cuenta AgentEra",
+    openMenu: "Abrir menú de cuenta AgentEra",
+    online: "En línea · verificada",
+    offline: "Sin conexión · acceso local",
+    manage: "Gestionar cuenta",
+    devices: "Gestionar dispositivos",
+    recharge: "Recargar API de modelos",
+    switch: "Cambiar de cuenta",
+    signOut: "Cerrar sesión",
+    actionFailed: "No se pudo completar esta acción de cuenta.",
+    unavailable: "La información de la cuenta AgentEra no está disponible.",
+    userId: "Usuario",
+    deviceId: "Dispositivo",
+    offlineUntil: "El acceso firmado sin conexión es válido hasta {{date}}.",
+    localDataWarning:
+      "Eliminar la cuenta en la nube o cerrar sesión no borra, mueve, sube ni desvincula Profiles, Memory, sesiones, archivos, habilidades ni aprendizaje local de Hermes.",
+    rechargeSeparateAccount:
+      "La recarga abre el sitio independiente de API de modelos. Sus cuentas, saldos, claves, cookies y tokens están separados de AgentEra.",
+    pendingRevocationWarning:
+      "Si cierras sesión sin conexión al servicio de control, el dispositivo puede contar entre los cinco permitidos hasta que se entregue automáticamente la revocación firmada.",
+  },
 };
 
 export default auth;

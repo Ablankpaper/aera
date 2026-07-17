@@ -17,6 +17,7 @@ import {
 } from "../src/main/agentera-auth/client";
 import { getOrCreateAgenteraDeviceIdentity } from "../src/main/agentera-auth/device-key";
 import { createAgenteraPkceAttempt } from "../src/main/agentera-auth/pkce";
+import { createPendingAgenteraSelfRevocation } from "../src/main/agentera-auth/lifecycle";
 import {
   AgenteraAuthStore,
   type InstallationIdentity,
@@ -237,5 +238,58 @@ describe("AgentEra cloud desktop client", () => {
     expect((caught as AgenteraCloudClientError).status).toBe(401);
     expect(String(caught)).toContain("session_revoked");
     expect(String(caught)).not.toContain(refreshToken);
+  });
+
+  it("delivers a bearer-free device-signed self-revocation", async () => {
+    let requestHeaders: Record<string, string | string[] | undefined> = {};
+    let requestBody: Record<string, unknown> = {};
+    const origin = await listen(async (request, response) => {
+      requestHeaders = request.headers;
+      let raw = "";
+      for await (const chunk of request) raw += chunk;
+      requestBody = JSON.parse(raw) as Record<string, unknown>;
+      response.statusCode = 204;
+      response.end();
+    });
+    const client = new AgenteraCloudClient({ origin });
+    const record = createPendingAgenteraSelfRevocation({
+      deviceId: ids.device,
+      identity,
+      now: new Date("2026-07-18T01:00:00.000Z"),
+      nonce: Buffer.alloc(32, 9),
+    });
+
+    await client.deliverSelfRevocation(record);
+
+    expect(requestHeaders.authorization).toBeUndefined();
+    expect(requestBody).toEqual({
+      device_id: ids.device,
+      installation_id: identity.installationId,
+      timestamp: Math.floor(Date.parse("2026-07-18T01:00:00.000Z") / 1000),
+      nonce: record.nonce,
+      signature: record.signature,
+    });
+  });
+
+  it("understands the cloud contract's nested bounded error envelope", async () => {
+    const origin = await listen((_request, response) => {
+      response.statusCode = 401;
+      response.setHeader("content-type", "application/json");
+      response.end(
+        JSON.stringify({
+          error: {
+            code: "account_pending_deletion",
+            message: "localized by the client",
+            request_id: crypto.randomUUID(),
+          },
+        }),
+      );
+    });
+    const client = new AgenteraCloudClient({ origin });
+
+    await expect(client.refreshSession(refreshToken)).rejects.toMatchObject({
+      status: 401,
+      code: "account_pending_deletion",
+    });
   });
 });

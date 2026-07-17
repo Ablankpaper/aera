@@ -63,6 +63,34 @@ const auth = {
       "No private Runtime data was changed. Retry the ownership check when you are ready.",
     retry: "Retry ownership check",
   },
+  offline: {
+    title: "Local offline mode",
+    description:
+      "Cloud account features are paused. Local Agent work, model APIs, and Hermes learning remain available until the signed offline deadline.",
+  },
+  account: {
+    settingsNav: "AgentEra account",
+    title: "AgentEra account",
+    openMenu: "Open AgentEra account menu",
+    online: "Online · verified",
+    offline: "Offline · local access",
+    manage: "Manage account",
+    devices: "Manage devices",
+    recharge: "Recharge model API",
+    switch: "Switch account",
+    signOut: "Sign out",
+    actionFailed: "This account action could not be completed.",
+    unavailable: "AgentEra account information is unavailable.",
+    userId: "User",
+    deviceId: "Device",
+    offlineUntil: "Signed offline access is valid until {{date}}.",
+    localDataWarning:
+      "Deleting or signing out of the cloud account does not delete, move, upload, or unbind local Hermes Profiles, Memory, sessions, files, skills, or learning state.",
+    rechargeSeparateAccount:
+      "Recharge opens the independent model API website. Its accounts, balances, API keys, cookies, and tokens are separate from this AgentEra account.",
+    pendingRevocationWarning:
+      "If you sign out while the control plane is unreachable, this device may still count toward the five-device limit until the signed self-revocation is delivered automatically.",
+  },
 };
 
 export default auth;

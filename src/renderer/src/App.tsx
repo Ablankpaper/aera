@@ -479,6 +479,7 @@ function App(): React.JSX.Element {
       case "main":
         return (
           <Layout
+            authState={authState as AuthorizedAuthState}
             verifyWarning={verifyWarning}
             onReinstall={handleVerifyReinstall}
             onDismissVerifyWarning={handleDismissVerifyWarning}

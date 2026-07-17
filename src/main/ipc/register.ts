@@ -757,6 +757,12 @@ export function registerIpcHandlers(context: IpcContext): void {
     agenteraAuth.refreshOnline(),
   );
   ipcMain.handle("agentera-auth-logout", () => agenteraAuth.logout());
+  ipcMain.handle("agentera-auth-open-portal", (_event, target: unknown) => {
+    if (target !== "account" && target !== "devices" && target !== "recharge") {
+      throw new Error("AgentEra portal target is invalid.");
+    }
+    return agenteraAuth.openPortal(target);
+  });
 
   ipcMain.handle("agentera-install-file-probe", () => ({
     installed: probeAgenteraInstallFiles().installed,

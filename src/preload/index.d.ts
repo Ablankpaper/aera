@@ -33,7 +33,10 @@ import type {
 } from "../shared/messaging-platforms";
 import type { ChatToolEvent } from "../shared/chat-stream";
 import type { GpuPreferenceMode, GpuStatus } from "../shared/gpu";
-import type { AgenteraAuthPublicState } from "../shared/agentera-auth";
+import type {
+  AgenteraAuthPublicState,
+  AgenteraPortalTarget,
+} from "../shared/agentera-auth";
 import type {
   AgenteraBoundConnectionPublicState,
   AgenteraBoundProfilePublicState,
@@ -62,6 +65,7 @@ interface AgenteraAuthAPI {
   cancelLogin: () => Promise<void>;
   retryOnline: () => Promise<AgenteraAuthPublicState>;
   logout: () => Promise<void>;
+  openPortal: (target: AgenteraPortalTarget) => Promise<void>;
   onStateChanged: (
     callback: (state: AgenteraAuthPublicState) => void,
   ) => () => void;

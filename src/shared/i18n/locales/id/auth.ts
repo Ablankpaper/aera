@@ -64,6 +64,34 @@ const auth = {
       "Tidak ada data Runtime pribadi yang diubah. Coba pemeriksaan kepemilikan lagi saat siap.",
     retry: "Coba pemeriksaan kepemilikan lagi",
   },
+  offline: {
+    title: "Mode lokal offline",
+    description:
+      "Fitur akun cloud dijeda. Agent lokal, API model, dan pembelajaran Hermes tetap tersedia sampai batas offline bertanda tangan.",
+  },
+  account: {
+    settingsNav: "Akun AgentEra",
+    title: "Akun AgentEra",
+    openMenu: "Buka menu akun AgentEra",
+    online: "Online · terverifikasi",
+    offline: "Offline · akses lokal",
+    manage: "Kelola akun",
+    devices: "Kelola perangkat",
+    recharge: "Isi saldo API model",
+    switch: "Ganti akun",
+    signOut: "Keluar",
+    actionFailed: "Tindakan akun ini tidak dapat diselesaikan.",
+    unavailable: "Informasi akun AgentEra tidak tersedia.",
+    userId: "Pengguna",
+    deviceId: "Perangkat",
+    offlineUntil: "Akses offline bertanda tangan berlaku hingga {{date}}.",
+    localDataWarning:
+      "Menghapus akun cloud atau keluar tidak menghapus, memindahkan, mengunggah, atau melepas ikatan Profile, Memory, sesi, file, skill, maupun pembelajaran Hermes lokal.",
+    rechargeSeparateAccount:
+      "Isi saldo membuka situs API model yang terpisah. Akun, saldo, API key, cookie, dan tokennya terpisah dari akun AgentEra.",
+    pendingRevocationWarning:
+      "Jika keluar saat layanan kontrol tidak terjangkau, perangkat mungkin tetap dihitung dalam batas lima perangkat sampai pencabutan bertanda tangan terkirim otomatis.",
+  },
 };
 
 export default auth;

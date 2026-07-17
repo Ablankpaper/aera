@@ -65,6 +65,34 @@ const auth = {
       "Nenhum dado privado do Runtime foi alterado. Tente verificar a propriedade novamente.",
     retry: "Verificar a propriedade novamente",
   },
+  offline: {
+    title: "Modo local offline",
+    description:
+      "Os recursos da conta na nuvem estão pausados. Agent local, APIs de modelos e aprendizado do Hermes continuam até o prazo offline assinado.",
+  },
+  account: {
+    settingsNav: "Conta AgentEra",
+    title: "Conta AgentEra",
+    openMenu: "Abrir menu da conta AgentEra",
+    online: "Online · verificada",
+    offline: "Offline · acesso local",
+    manage: "Gerenciar conta",
+    devices: "Gerenciar dispositivos",
+    recharge: "Recarregar API de modelos",
+    switch: "Trocar conta",
+    signOut: "Sair",
+    actionFailed: "Não foi possível concluir esta ação da conta.",
+    unavailable: "As informações da conta AgentEra não estão disponíveis.",
+    userId: "Usuário",
+    deviceId: "Dispositivo",
+    offlineUntil: "O acesso offline assinado é válido até {{date}}.",
+    localDataWarning:
+      "Excluir a conta na nuvem ou sair não apaga, move, envia nem desvincula Profiles, Memory, sessões, arquivos, skills ou aprendizado local do Hermes.",
+    rechargeSeparateAccount:
+      "A recarga abre o site independente de API de modelos. Contas, saldos, chaves, cookies e tokens são separados da conta AgentEra.",
+    pendingRevocationWarning:
+      "Ao sair sem acesso ao serviço de controle, o dispositivo pode continuar no limite de cinco até a revogação assinada ser entregue automaticamente.",
+  },
 };
 
 export default auth;

@@ -3,6 +3,7 @@ import { agenteraCloudUrl, parseAgenteraCloudOrigin } from "./config";
 import { signAgenteraDeviceDigest } from "./device-key";
 import type { AgenteraPkceAttempt } from "./pkce";
 import type { InstallationIdentity } from "./store";
+import type { PendingSelfRevocation } from "./store";
 
 const RESPONSE_LIMIT = 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -50,6 +51,7 @@ export interface AgenteraCloudClientPort {
   ): Promise<AgenteraTokenSet>;
   refreshSession(refreshToken: string): Promise<AgenteraTokenSet>;
   revokeSession(refreshToken: string): Promise<void>;
+  deliverSelfRevocation(record: PendingSelfRevocation): Promise<void>;
 }
 
 export interface AgenteraCloudClientOptions {
@@ -131,7 +133,19 @@ function validRawTokenResponse(value: unknown): value is RawTokenResponse {
 function safeErrorCode(body: string): string {
   if (body.length > RESPONSE_LIMIT) return "response_too_large";
   try {
-    const parsed = JSON.parse(body) as { error?: unknown };
+    const parsed = JSON.parse(body) as {
+      error?: unknown | { code?: unknown };
+    };
+    const nestedError =
+      parsed.error && typeof parsed.error === "object"
+        ? (parsed.error as { code?: unknown })
+        : null;
+    if (
+      typeof nestedError?.code === "string" &&
+      /^[a-z][a-z0-9_]{0,63}$/.test(nestedError.code)
+    ) {
+      return nestedError.code;
+    }
     if (
       typeof parsed.error === "string" &&
       /^[a-z][a-z0-9_]{0,63}$/.test(parsed.error)
@@ -234,6 +248,36 @@ export class AgenteraCloudClient implements AgenteraCloudClientPort {
     }
   }
 
+  async deliverSelfRevocation(record: PendingSelfRevocation): Promise<void> {
+    const timestamp = Number(record.timestamp);
+    if (
+      !UUID_PATTERN.test(record.deviceId) ||
+      !UUID_PATTERN.test(record.installationId) ||
+      !Number.isSafeInteger(timestamp) ||
+      timestamp <= 0 ||
+      String(timestamp) !== record.timestamp ||
+      !/^[A-Za-z0-9_-]{43}$/.test(record.nonce) ||
+      Buffer.from(record.nonce, "base64url").toString("base64url") !==
+        record.nonce ||
+      !/^[A-Za-z0-9_-]{86}$/.test(record.signature) ||
+      Buffer.from(record.signature, "base64url").toString("base64url") !==
+        record.signature
+    ) {
+      throw new AgenteraCloudClientError(0, "invalid_self_revocation");
+    }
+    const response = await this.post("/api/v1/devices/self-revoke", {
+      device_id: record.deviceId,
+      installation_id: record.installationId,
+      timestamp,
+      nonce: record.nonce,
+      signature: record.signature,
+    });
+    if (response.status !== 204) {
+      const body = await response.text();
+      throw new AgenteraCloudClientError(response.status, safeErrorCode(body));
+    }
+  }
+
   private async postForTokenSet(
     path: string,
     body: Record<string, string>,
@@ -277,7 +321,7 @@ export class AgenteraCloudClient implements AgenteraCloudClientPort {
 
   private async post(
     path: string,
-    body: Record<string, string>,
+    body: Record<string, string | number>,
   ): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);

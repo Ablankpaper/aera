@@ -128,6 +128,9 @@ describe("AgentEra central IPC product-access guard", () => {
     expect(AGENTERA_IPC_CHANNEL_POLICY["agentera-switch-to-local"]).toBe(
       "authenticated",
     );
+    expect(AGENTERA_IPC_CHANNEL_POLICY["agentera-auth-open-portal"]).toBe(
+      "authenticated",
+    );
     expect(AGENTERA_IPC_CHANNEL_POLICY["send-message"]).toBe("bound-profile");
     expect(AGENTERA_IPC_CHANNEL_POLICY["list-sessions"]).toBe("bound-profile");
     expect(AGENTERA_IPC_CHANNEL_POLICY["read-memory"]).toBe("bound-profile");

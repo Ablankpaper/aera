@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { generateKeyPairSync, sign } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,8 +19,10 @@ import type {
   AgenteraLoopbackOptions,
 } from "../src/main/agentera-auth/loopback";
 import type { AgenteraPkceAttempt } from "../src/main/agentera-auth/pkce";
+import { AgenteraCloudClientError } from "../src/main/agentera-auth/client";
 import {
   AgenteraAuthStore,
+  type PendingSelfRevocation,
   type SecureStorageAdapter,
 } from "../src/main/agentera-auth/store";
 
@@ -35,6 +38,13 @@ class FakeSecureStorage implements SecureStorageAdapter {
   }
 }
 
+const offlineSigningKeys = generateKeyPairSync("ed25519");
+const offlinePublicDer = offlineSigningKeys.publicKey.export({
+  format: "der",
+  type: "spki",
+}) as Buffer;
+const offlinePublicKey = offlinePublicDer.subarray(-32).toString("base64url");
+
 const tokenSet: AgenteraTokenSet = {
   accessToken: "memory-only-access-token",
   accessExpiresAt: "2026-07-18T01:15:00.000Z",
@@ -48,12 +58,67 @@ const tokenSet: AgenteraTokenSet = {
   trustedServerTime: "2026-07-18T01:00:00.000Z",
 };
 
+function signedTokenSet(installationId: string): AgenteraTokenSet {
+  const issuedAt = Math.floor(
+    new Date(tokenSet.trustedServerTime).getTime() / 1000,
+  );
+  const header = Buffer.from(
+    JSON.stringify({
+      alg: "EdDSA",
+      kid: "offline-test-v1",
+      typ: "agentera-offline-entitlement+jwt",
+    }),
+  ).toString("base64url");
+  const payload = Buffer.from(
+    JSON.stringify({
+      iss: "https://accounts.agentera.example",
+      aud: "agentera-studio",
+      jti: "55555555-5555-4555-8555-555555555555",
+      sub: tokenSet.userId,
+      device_id: tokenSet.deviceId,
+      installation_id: installationId,
+      personal_space_id: tokenSet.personalSpaceId,
+      policy_version: 1,
+      iat: issuedAt,
+      exp: issuedAt + 7 * 24 * 60 * 60,
+    }),
+  ).toString("base64url");
+  const signingInput = `${header}.${payload}`;
+  return {
+    ...tokenSet,
+    offlineEntitlement: `${signingInput}.${sign(null, Buffer.from(signingInput), offlineSigningKeys.privateKey).toString("base64url")}`,
+  };
+}
+
+function installationIdentity(installationId: string): {
+  installationId: string;
+  devicePublicKey: string;
+  devicePrivateKey: string;
+} {
+  const pair = generateKeyPairSync("ed25519");
+  const publicDer = pair.publicKey.export({
+    format: "der",
+    type: "spki",
+  }) as Buffer;
+  const privateDer = pair.privateKey.export({
+    format: "der",
+    type: "pkcs8",
+  }) as Buffer;
+  return {
+    installationId,
+    devicePublicKey: publicDer.subarray(-32).toString("base64url"),
+    devicePrivateKey: privateDer.toString("base64"),
+  };
+}
+
 class FakeCloudClient implements AgenteraCloudClientPort {
   readonly origin = "https://accounts.agentera.example";
   readonly authorizationRequests: AgenteraAuthorizationRequest[] = [];
   readonly exchanged: string[] = [];
   readonly refreshed: string[] = [];
   readonly revoked: string[] = [];
+  readonly selfRevocations: PendingSelfRevocation[] = [];
+  installationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
   createAuthorizationUrl(request: AgenteraAuthorizationRequest): URL {
     this.authorizationRequests.push(request);
@@ -68,21 +133,27 @@ class FakeCloudClient implements AgenteraCloudClientPort {
   async exchangeAuthorizationCode(input: {
     authorizationCode: string;
     codeVerifier: string;
+    identity: { installationId: string };
   }): Promise<AgenteraTokenSet> {
     this.exchanged.push(`${input.authorizationCode}:${input.codeVerifier}`);
-    return tokenSet;
+    this.installationId = input.identity.installationId;
+    return signedTokenSet(this.installationId);
   }
 
   async refreshSession(refreshToken: string): Promise<AgenteraTokenSet> {
     this.refreshed.push(refreshToken);
     return {
-      ...tokenSet,
+      ...signedTokenSet(this.installationId),
       refreshToken: `${tokenSet.refreshToken.slice(0, 42)}A`,
     };
   }
 
   async revokeSession(refreshToken: string): Promise<void> {
     this.revoked.push(refreshToken);
+  }
+
+  async deliverSelfRevocation(record: PendingSelfRevocation): Promise<void> {
+    this.selfRevocations.push(record);
   }
 }
 
@@ -158,6 +229,7 @@ describe("AgentEra authentication controller", () => {
         platform: "darwin",
         appVersion: "0.7.3",
       }),
+      offlinePublicKeys: { "offline-test-v1": offlinePublicKey },
     };
   }
 
@@ -208,7 +280,8 @@ describe("AgentEra authentication controller", () => {
     expect(new URL(opened[1]).searchParams.get("prompt")).toBe(
       "select_account",
     );
-    expect(cloud.revoked).toEqual([tokenSet.refreshToken]);
+    expect(cloud.revoked).toEqual([]);
+    expect(cloud.selfRevocations).toHaveLength(1);
     expect(store.getInstallation()).not.toBeNull();
   });
 
@@ -288,6 +361,7 @@ describe("AgentEra authentication controller", () => {
       },
       null,
     );
+    cloud.installationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const controller = createAgenteraAuthController(runtime());
 
     expect(await controller.initialize()).toMatchObject({
@@ -298,5 +372,205 @@ describe("AgentEra authentication controller", () => {
     expect(store.getProductSession()?.refreshToken).not.toBe(
       tokenSet.refreshToken,
     );
+  });
+
+  it("serializes concurrent refreshes so a rotating token is never replayed", async () => {
+    const installationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    store.saveInstallation({
+      installationId,
+      devicePublicKey: Buffer.alloc(32, 70).toString("base64url"),
+      devicePrivateKey: "private-key",
+    });
+    const signed = signedTokenSet(installationId);
+    store.replaceProductSession(
+      {
+        userId: signed.userId,
+        personalSpaceId: signed.personalSpaceId,
+        deviceId: signed.deviceId,
+        refreshToken: signed.refreshToken,
+        offlineEntitlement: signed.offlineEntitlement,
+        offlineExpiresAt: signed.offlineExpiresAt,
+        lastTrustedServerTime: signed.trustedServerTime,
+      },
+      null,
+    );
+    cloud.installationId = installationId;
+    let resolveRefresh: (tokens: AgenteraTokenSet) => void = () => undefined;
+    const refresh = vi.spyOn(cloud, "refreshSession").mockImplementation(
+      () =>
+        new Promise<AgenteraTokenSet>((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+    const controller = createAgenteraAuthController(runtime());
+
+    const first = controller.refreshOnline();
+    const second = controller.refreshOnline();
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+    resolveRefresh(signedTokenSet(installationId));
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ status: "authenticated" }),
+      expect.objectContaining({ status: "authenticated" }),
+    ]);
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it("automatically recovers from offline mode without an app restart", async () => {
+    const installationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const signed = signedTokenSet(installationId);
+    store.saveInstallation({
+      installationId,
+      devicePublicKey: Buffer.alloc(32, 70).toString("base64url"),
+      devicePrivateKey: "private-key",
+    });
+    store.replaceProductSession(
+      {
+        userId: signed.userId,
+        personalSpaceId: signed.personalSpaceId,
+        deviceId: signed.deviceId,
+        refreshToken: signed.refreshToken,
+        offlineEntitlement: signed.offlineEntitlement,
+        offlineExpiresAt: signed.offlineExpiresAt,
+        lastTrustedServerTime: signed.trustedServerTime,
+      },
+      null,
+    );
+    cloud.installationId = installationId;
+    const refresh = vi
+      .spyOn(cloud, "refreshSession")
+      .mockRejectedValueOnce(
+        new AgenteraCloudClientError(0, "network_unavailable"),
+      )
+      .mockResolvedValue(signedTokenSet(installationId));
+    const scheduled: Array<() => void> = [];
+    const controller = createAgenteraAuthController({
+      ...runtime(),
+      wallNow: () => Date.parse(tokenSet.trustedServerTime),
+      monotonicNow: () => 1_000,
+      lifecycle: {
+        random: () => 0.5,
+        setTimer: (callback) => {
+          scheduled.push(callback);
+          return scheduled.length;
+        },
+        clearTimer: vi.fn(),
+      },
+    });
+
+    expect(await controller.initialize()).toMatchObject({
+      status: "offline",
+      cloudAvailable: false,
+    });
+    scheduled.at(-1)?.();
+    await vi.waitFor(() =>
+      expect(controller.getPublicState()).toMatchObject({
+        status: "authenticated",
+        cloudAvailable: true,
+      }),
+    );
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not resurrect a product session when a refresh finishes after logout", async () => {
+    const installationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const signed = signedTokenSet(installationId);
+    store.saveInstallation(installationIdentity(installationId));
+    store.replaceProductSession(
+      {
+        userId: signed.userId,
+        personalSpaceId: signed.personalSpaceId,
+        deviceId: signed.deviceId,
+        refreshToken: signed.refreshToken,
+        offlineEntitlement: signed.offlineEntitlement,
+        offlineExpiresAt: signed.offlineExpiresAt,
+        lastTrustedServerTime: signed.trustedServerTime,
+      },
+      null,
+    );
+    cloud.installationId = installationId;
+    let resolveRefresh: (tokens: AgenteraTokenSet) => void = () => undefined;
+    const refreshRequest = vi.spyOn(cloud, "refreshSession").mockImplementation(
+      () =>
+        new Promise<AgenteraTokenSet>((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+    const controller = createAgenteraAuthController(runtime());
+    const refresh = controller.refreshOnline();
+    await vi.waitFor(() => expect(refreshRequest).toHaveBeenCalledOnce());
+
+    await controller.logout();
+    resolveRefresh(signedTokenSet(installationId));
+    await refresh;
+
+    expect(store.getProductSession()).toBeNull();
+    expect(controller.getPublicState()).toEqual({
+      status: "unauthenticated",
+      reason: "sign_in_required",
+    });
+  });
+
+  it("revokes an online device before clearing its stored product session", async () => {
+    const installationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const signed = signedTokenSet(installationId);
+    store.saveInstallation(installationIdentity(installationId));
+    store.replaceProductSession(
+      {
+        userId: signed.userId,
+        personalSpaceId: signed.personalSpaceId,
+        deviceId: signed.deviceId,
+        refreshToken: signed.refreshToken,
+        offlineEntitlement: signed.offlineEntitlement,
+        offlineExpiresAt: signed.offlineExpiresAt,
+        lastTrustedServerTime: signed.trustedServerTime,
+      },
+      null,
+    );
+    let sessionPresentDuringDelivery = false;
+    const delivery = vi
+      .spyOn(cloud, "deliverSelfRevocation")
+      .mockImplementation(async (record) => {
+        sessionPresentDuringDelivery =
+          store.getProductSession()?.deviceId === signed.deviceId;
+        cloud.selfRevocations.push(record);
+      });
+    const controller = createAgenteraAuthController(runtime());
+
+    await controller.logout();
+
+    expect(delivery).toHaveBeenCalledOnce();
+    expect(sessionPresentDuringDelivery).toBe(true);
+    expect(store.getProductSession()).toBeNull();
+    expect(store.getPendingRevocation()).toBeNull();
+  });
+
+  it("returns a fail-closed public state when cloud configuration is invalid", async () => {
+    const installationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const signed = signedTokenSet(installationId);
+    store.saveInstallation(installationIdentity(installationId));
+    store.replaceProductSession(
+      {
+        userId: signed.userId,
+        personalSpaceId: signed.personalSpaceId,
+        deviceId: signed.deviceId,
+        refreshToken: signed.refreshToken,
+        offlineEntitlement: signed.offlineEntitlement,
+        offlineExpiresAt: signed.offlineExpiresAt,
+        lastTrustedServerTime: signed.trustedServerTime,
+      },
+      null,
+    );
+    const controller = createAgenteraAuthController({
+      ...runtime(),
+      getCloudClient: () => {
+        throw new Error("AgentEra cloud origin is invalid.");
+      },
+    });
+
+    await expect(controller.refreshOnline()).resolves.toEqual({
+      status: "blocked",
+      reason: "sign_in_required",
+    });
   });
 });

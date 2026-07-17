@@ -64,6 +64,34 @@ const auth = {
       "Runtime の非公開データは変更されていません。準備ができたら所有権確認を再試行してください。",
     retry: "所有権確認を再試行",
   },
+  offline: {
+    title: "ローカルオフラインモード",
+    description:
+      "クラウドアカウント機能は一時停止します。署名済み期限まではローカル Agent、モデル API、Hermes の学習を利用できます。",
+  },
+  account: {
+    settingsNav: "AgentEra アカウント",
+    title: "AgentEra アカウント",
+    openMenu: "AgentEra アカウントメニューを開く",
+    online: "オンライン・確認済み",
+    offline: "オフライン・ローカル利用",
+    manage: "アカウント管理",
+    devices: "デバイス管理",
+    recharge: "モデル API をチャージ",
+    switch: "アカウント切替",
+    signOut: "サインアウト",
+    actionFailed: "アカウント操作を完了できませんでした。",
+    unavailable: "AgentEra アカウント情報を利用できません。",
+    userId: "ユーザー",
+    deviceId: "デバイス",
+    offlineUntil: "署名済みオフラインアクセスは {{date}} まで有効です。",
+    localDataWarning:
+      "クラウドアカウントの削除やサインアウトで、ローカルの Hermes Profile、Memory、セッション、ファイル、スキル、学習状態が削除・移動・アップロード・解除されることはありません。",
+    rechargeSeparateAccount:
+      "チャージは独立したモデル API サイトを開きます。そのアカウント、残高、API キー、Cookie、Token は AgentEra と共有されません。",
+    pendingRevocationWarning:
+      "制御サービスに接続できない状態でサインアウトすると、署名済み取消要求が自動送信されるまで最大 5 台の枠に残る場合があります。",
+  },
 };
 
 export default auth;

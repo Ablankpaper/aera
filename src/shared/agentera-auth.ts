@@ -7,6 +7,8 @@ export type AgenteraAuthBlockReason =
   | "account_pending_deletion"
   | "secure_storage_unavailable";
 
+export type AgenteraPortalTarget = "account" | "devices" | "recharge";
+
 export type AgenteraAuthPublicState =
   | { status: "checking" }
   | { status: "unauthenticated"; reason?: AgenteraAuthBlockReason }

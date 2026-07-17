@@ -64,6 +64,34 @@ const auth = {
       "Żadne prywatne dane Runtime nie zostały zmienione. Spróbuj ponownie sprawdzić właściciela.",
     retry: "Ponów sprawdzanie właściciela",
   },
+  offline: {
+    title: "Lokalny tryb offline",
+    description:
+      "Funkcje konta w chmurze są wstrzymane. Lokalny Agent, API modeli i uczenie Hermes działają do końca podpisanego okresu offline.",
+  },
+  account: {
+    settingsNav: "Konto AgentEra",
+    title: "Konto AgentEra",
+    openMenu: "Otwórz menu konta AgentEra",
+    online: "Online · zweryfikowano",
+    offline: "Offline · dostęp lokalny",
+    manage: "Zarządzaj kontem",
+    devices: "Zarządzaj urządzeniami",
+    recharge: "Doładuj API modeli",
+    switch: "Przełącz konto",
+    signOut: "Wyloguj",
+    actionFailed: "Nie udało się wykonać operacji na koncie.",
+    unavailable: "Informacje o koncie AgentEra są niedostępne.",
+    userId: "Użytkownik",
+    deviceId: "Urządzenie",
+    offlineUntil: "Podpisany dostęp offline jest ważny do {{date}}.",
+    localDataWarning:
+      "Usunięcie konta w chmurze lub wylogowanie nie usuwa, przenosi, wysyła ani odłącza lokalnych Profiles, Memory, sesji, plików, umiejętności ani nauki Hermes.",
+    rechargeSeparateAccount:
+      "Doładowanie otwiera niezależny serwis API modeli. Jego konta, salda, klucze, cookies i tokeny są oddzielne od AgentEra.",
+    pendingRevocationWarning:
+      "Wylogowanie bez dostępu do usługi sterującej może pozostawić urządzenie w limicie pięciu do czasu automatycznego dostarczenia podpisanego odwołania.",
+  },
 };
 
 export default auth;

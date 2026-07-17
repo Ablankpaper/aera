@@ -27,7 +27,10 @@ import type {
 } from "../shared/account";
 import type { AgentSyncResult, AgentSyncStatus } from "../shared/agent-sync";
 import type { GpuPreferenceMode, GpuStatus } from "../shared/gpu";
-import type { AgenteraAuthPublicState } from "../shared/agentera-auth";
+import type {
+  AgenteraAuthPublicState,
+  AgenteraPortalTarget,
+} from "../shared/agentera-auth";
 import type {
   AgenteraBoundConnectionPublicState,
   AgenteraBoundProfilePublicState,
@@ -1650,6 +1653,8 @@ const agenteraAuthAPI = {
   retryOnline: (): Promise<AgenteraAuthPublicState> =>
     ipcRenderer.invoke("agentera-auth-retry-online"),
   logout: (): Promise<void> => ipcRenderer.invoke("agentera-auth-logout"),
+  openPortal: (target: AgenteraPortalTarget): Promise<void> =>
+    ipcRenderer.invoke("agentera-auth-open-portal", target),
   onStateChanged: (
     callback: (state: AgenteraAuthPublicState) => void,
   ): (() => void) => {

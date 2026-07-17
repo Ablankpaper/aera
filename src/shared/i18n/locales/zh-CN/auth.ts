@@ -57,6 +57,34 @@ const auth = {
       "没有任何 Runtime 私有数据被更改。准备好后可重新检查归属。",
     retry: "重新检查归属",
   },
+  offline: {
+    title: "本地离线模式",
+    description:
+      "云端账户功能已暂停；在签名离线期限内，本地 Agent、模型 API 与 Hermes 自学习仍可正常使用。",
+  },
+  account: {
+    settingsNav: "AgentEra 账户",
+    title: "AgentEra 账户",
+    openMenu: "打开 AgentEra 账户菜单",
+    online: "在线 · 已验证",
+    offline: "离线 · 本地可用",
+    manage: "管理账户",
+    devices: "管理设备",
+    recharge: "充值模型 API",
+    switch: "切换账户",
+    signOut: "退出登录",
+    actionFailed: "暂时无法完成此账户操作。",
+    unavailable: "AgentEra 账户信息暂不可用。",
+    userId: "用户",
+    deviceId: "设备",
+    offlineUntil: "签名离线授权有效至 {{date}}。",
+    localDataWarning:
+      "注销云端账户或退出登录都不会删除、移动、上传或解绑本地 Hermes Profile、Memory、会话、文件、技能及自学习状态。",
+    rechargeSeparateAccount:
+      "充值会打开独立的模型 API 网站；该网站的账户、余额、API Key、Cookie 与 Token 均不和 AgentEra 账户共用。",
+    pendingRevocationWarning:
+      "若控制服务不可达时退出，此设备在签名撤销请求自动补发成功前，仍可能暂时占用最多 5 台设备的名额。",
+  },
 };
 
 export default auth;

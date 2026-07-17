@@ -128,6 +128,7 @@ const PREFLIGHT_CHANNELS = [
 
 const AUTHENTICATED_CHANNELS = [
   "adopt-hermes-home",
+  "agentera-auth-open-portal",
   "agentera-connection-bind-current",
   "agentera-connection-inspect-current",
   "agentera-profile-bind-active",
@@ -369,6 +370,7 @@ export const AGENTERA_IPC_CHANNEL_POLICY = buildChannelPolicy();
 export function createProductAccessGuard(options: {
   getAuthState: () => AgenteraAuthPublicState;
   isRuntimeContextBound: () => boolean;
+  assertCurrentEntitlement?: () => void;
 }): ProductAccessGuard {
   return {
     assert(level: ProductAccessLevel): void {
@@ -377,6 +379,7 @@ export function createProductAccessGuard(options: {
       if (state.status !== "authenticated" && state.status !== "offline") {
         throw new Error("AgentEra product sign-in is required.");
       }
+      options.assertCurrentEntitlement?.();
       if (level === "bound-profile" && !options.isRuntimeContextBound()) {
         throw new Error("AgentEra Runtime Profile binding is required.");
       }

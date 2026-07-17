@@ -115,6 +115,7 @@ describe("AgentEra product-auth preload namespace", () => {
     "cancelLogin",
     "retryOnline",
     "logout",
+    "openPortal",
     "onStateChanged",
   ];
 

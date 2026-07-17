@@ -70,6 +70,7 @@ export function startMainProcess(): void {
     getCloudClient: () =>
       new AgenteraCloudClient({ origin: getAgenteraCloudOrigin() }),
     openExternal: openAgenteraAuthUrl,
+    openTrustedExternal: openExternalUrl,
     bringMainWindowToFront: () => {
       if (!mainWindow || mainWindow.isDestroyed()) return;
       if (mainWindow.isMinimized()) mainWindow.restore();
@@ -104,6 +105,7 @@ export function startMainProcess(): void {
   };
   const productAccessGuard = createProductAccessGuard({
     getAuthState: () => agenteraAuth.getPublicState(),
+    assertCurrentEntitlement: () => agenteraAuth.assertCanStartNewTask(),
     isRuntimeContextBound: () => {
       try {
         const owner = getAgenteraRuntimeOwner();

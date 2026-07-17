@@ -3,7 +3,9 @@
 import { describe, expect, it } from "vitest";
 import {
   agenteraCloudUrl,
+  getBundledAgenteraOfflinePublicKeys,
   parseAgenteraCloudOrigin,
+  parseAgenteraRechargePublicUrl,
   resolveAgenteraCloudOrigin,
 } from "../src/main/agentera-auth/config";
 
@@ -87,5 +89,34 @@ describe("AgentEra cloud endpoint configuration", () => {
     expect(() => agenteraCloudUrl(origin, "//evil.example/token")).toThrow(
       /origin/i,
     );
+  });
+
+  it("scopes the local development offline key to its exact loopback issuer", () => {
+    expect(
+      getBundledAgenteraOfflinePublicKeys("http://127.0.0.1:8086"),
+    ).toHaveProperty("offline-dev-v1");
+    expect(
+      getBundledAgenteraOfflinePublicKeys("https://accounts.agentera.example"),
+    ).toEqual({});
+    expect(
+      getBundledAgenteraOfflinePublicKeys("http://localhost:8086"),
+    ).toEqual({});
+  });
+
+  it("accepts a separate HTTPS recharge page and loopback development URL", () => {
+    expect(
+      parseAgenteraRechargePublicUrl(
+        "https://pay.agentera.example/recharge?source=desktop",
+      ),
+    ).toBe("https://pay.agentera.example/recharge?source=desktop");
+    expect(parseAgenteraRechargePublicUrl("http://127.0.0.1:8080")).toBe(
+      "http://127.0.0.1:8080/",
+    );
+    expect(() =>
+      parseAgenteraRechargePublicUrl("http://pay.agentera.example"),
+    ).toThrow(/https/i);
+    expect(() =>
+      parseAgenteraRechargePublicUrl("https://user:pass@pay.example"),
+    ).toThrow(/https/i);
   });
 });

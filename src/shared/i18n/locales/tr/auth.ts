@@ -64,6 +64,35 @@ const auth = {
       "Hiçbir özel Runtime verisi değiştirilmedi. Hazır olduğunuzda sahiplik denetimini yeniden deneyin.",
     retry: "Sahiplik denetimini yeniden dene",
   },
+  offline: {
+    title: "Yerel çevrimdışı mod",
+    description:
+      "Bulut hesap özellikleri duraklatıldı. Yerel Agent, model API'leri ve Hermes öğrenmesi imzalı çevrimdışı süre dolana kadar kullanılabilir.",
+  },
+  account: {
+    settingsNav: "AgentEra hesabı",
+    title: "AgentEra hesabı",
+    openMenu: "AgentEra hesap menüsünü aç",
+    online: "Çevrimiçi · doğrulandı",
+    offline: "Çevrimdışı · yerel erişim",
+    manage: "Hesabı yönet",
+    devices: "Cihazları yönet",
+    recharge: "Model API bakiyesi yükle",
+    switch: "Hesap değiştir",
+    signOut: "Çıkış yap",
+    actionFailed: "Bu hesap işlemi tamamlanamadı.",
+    unavailable: "AgentEra hesap bilgileri kullanılamıyor.",
+    userId: "Kullanıcı",
+    deviceId: "Cihaz",
+    offlineUntil:
+      "İmzalı çevrimdışı erişim {{date}} tarihine kadar geçerlidir.",
+    localDataWarning:
+      "Bulut hesabını silmek veya çıkış yapmak yerel Hermes Profile, Memory, oturum, dosya, beceri ya da öğrenme durumunu silmez, taşımaz, yüklemez veya bağını kaldırmaz.",
+    rechargeSeparateAccount:
+      "Bakiye yükleme bağımsız model API sitesini açar. Hesapları, bakiyeleri, anahtarları, çerezleri ve tokenları AgentEra hesabından ayrıdır.",
+    pendingRevocationWarning:
+      "Kontrol hizmetine erişilemezken çıkış yapılırsa, imzalı iptal otomatik teslim edilene kadar cihaz beş cihaz sınırında sayılabilir.",
+  },
 };
 
 export default auth;
