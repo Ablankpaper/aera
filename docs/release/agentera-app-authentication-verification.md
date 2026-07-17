@@ -11,7 +11,7 @@ This state means the implementation, automated gates, and the macOS packaged-dev
 | Component | Branch | Verified revision |
 | --- | --- | --- |
 | Desktop Tasks 1–13 baseline | `aera/app-authentication` | `7cd521d9ed26e1492b83a4e64a5a40c975f50796` |
-| Desktop Task 14 integration | `aera/app-authentication` | This document's commit (`test: verify AgentEra authentication integration`) |
+| Desktop Task 14 integration | `aera/app-authentication` | `86849cdefddf7f23fc8fc7e5ea6f99ff12467fe2` |
 | AgentEra cloud | `aera/app-auth-service` | `72e579a394869fbb87bac8c07a58f0d013d52460` |
 | Cloud account-switching fix | `aera/app-auth-service` | `3d6ab85` |
 | AgentEra Runtime compatibility gate | `aera/hermes-compatibility-gate` | `9c00e1dfd3eba06a96d6d2dc6e59cc55cf29adb0` |
