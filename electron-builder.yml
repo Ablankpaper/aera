@@ -1,5 +1,5 @@
-appId: com.nousresearch.hermes
-productName: Hermes One
+appId: com.bignormal.agentera.studio
+productName: AgentEra Studio
 directories:
   buildResources: build
 files:
@@ -13,7 +13,7 @@ asarUnpack:
   - resources/**
   - node_modules/better-sqlite3/build/Release/*.node
 win:
-  executableName: hermes-agent
+  executableName: agentera-studio
   target:
     - nsis
     - portable
@@ -47,14 +47,13 @@ linux:
     - snap
     - deb
     - rpm
-  maintainer: electronjs.org
-  vendor: Nous Research
+  maintainer: AgentEra
+  vendor: AgentEra
   category: Utility
-  synopsis: Self-improving AI assistant desktop app
+  synopsis: Private AI agent desktop
   description: >-
-    Hermes One is a native desktop app for installing, configuring, and chatting
-    with Hermes Agent — a self-improving AI assistant with tool use, multi-platform
-    messaging, and a closed learning loop.
+    AgentEra Studio is a native desktop app for installing, configuring, and
+    chatting with AgentEra Runtime.
 appImage:
   artifactName: ${name}-${version}.${ext}
 deb:
@@ -69,5 +68,5 @@ rpm:
 npmRebuild: false
 publish:
   provider: github
-  owner: fathah
-  repo: hermes-desktop
+  owner: bignormal
+  repo: aera

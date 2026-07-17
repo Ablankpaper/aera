@@ -2,9 +2,9 @@
 //
 // Fills the YAML templates in build/winget/ with the current version,
 // installer URL, and SHA256 of the NSIS installer in dist/, and writes
-// the result under dist/winget/manifests/n/NousResearch/HermesDesktop/<version>/.
+// the result under dist/winget/manifests/b/Bignormal/AgentEraStudio/<version>/.
 //
-// Run from CLI: VERSION=0.2.3 PUBLISH_OWNER=fathah node scripts/generate-winget-manifests.mjs
+// Run from CLI: VERSION=0.2.3 PUBLISH_OWNER=bignormal node scripts/generate-winget-manifests.mjs
 // Or import as ESM and call generateWingetManifests({ rootDir, version, name, publishOwner }).
 
 import { createHash } from "node:crypto";
@@ -32,8 +32,8 @@ export function generateWingetManifests({
     .digest("hex")
     .toUpperCase();
   const releaseDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-  const installerUrl = `https://github.com/${publishOwner}/hermes-desktop/releases/download/v${version}/${name}-${version}-setup.exe`;
-  const releaseNotesUrl = `https://github.com/${publishOwner}/hermes-desktop/releases/tag/v${version}`;
+  const installerUrl = `https://github.com/${publishOwner}/aera/releases/download/v${version}/${name}-${version}-setup.exe`;
+  const releaseNotesUrl = `https://github.com/${publishOwner}/aera/releases/tag/v${version}`;
 
   const replacements = {
     VERSION: version,
@@ -46,7 +46,7 @@ export function generateWingetManifests({
   // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
   const fillTemplate = (str) =>
     Object.entries(replacements).reduce(
-      (acc, [key, value]) => acc.replaceAll(`{{${key}}}`, value),
+      (acc, [key, value]) => acc.replaceAll(`__${key}__`, value),
       str,
     );
 
@@ -62,20 +62,20 @@ export function generateWingetManifests({
     "dist",
     "winget",
     "manifests",
-    "n",
-    "NousResearch",
-    "HermesDesktop",
+    "b",
+    "Bignormal",
+    "AgentEraStudio",
     version,
   );
   mkdirSync(outDir, { recursive: true });
 
   const files = [
-    ["Installer.template.yaml", "NousResearch.HermesDesktop.installer.yaml"],
+    ["Installer.template.yaml", "Bignormal.AgentEraStudio.installer.yaml"],
     [
       "Locale.en-US.template.yaml",
-      "NousResearch.HermesDesktop.locale.en-US.yaml",
+      "Bignormal.AgentEraStudio.locale.en-US.yaml",
     ],
-    ["Version.template.yaml", "NousResearch.HermesDesktop.yaml"],
+    ["Version.template.yaml", "Bignormal.AgentEraStudio.yaml"],
   ];
 
   for (const [tmplName, outName] of files) {
@@ -96,7 +96,7 @@ if (isCli) {
     rootDir,
     version: process.env.VERSION || pkg.version,
     name: pkg.name,
-    publishOwner: process.env.PUBLISH_OWNER || "fathah",
+    publishOwner: process.env.PUBLISH_OWNER || "bignormal",
   });
   console.log(`Winget manifests generated in ${result.outDir}`);
   console.log(`InstallerSha256: ${result.sha256}`);

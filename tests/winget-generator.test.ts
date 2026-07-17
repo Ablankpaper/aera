@@ -27,51 +27,68 @@ function setupTemplates(rootDir: string): void {
   mkdirSync(buildDir, { recursive: true });
   writeFileSync(
     join(buildDir, "Installer.template.yaml"),
-    "Version: {{VERSION}}\nUrl: {{INSTALLER_URL}}\nSha: {{INSTALLER_SHA256}}\nDate: {{RELEASE_DATE}}\n",
+    "Version: __VERSION__\nUrl: __INSTALLER_URL__\nSha: __INSTALLER_SHA256__\nDate: __RELEASE_DATE__\n",
   );
   writeFileSync(
     join(buildDir, "Locale.en-US.template.yaml"),
-    "Version: {{VERSION}}\nNotes: {{RELEASE_NOTES_URL}}\n",
+    "Version: __VERSION__\nNotes: __RELEASE_NOTES_URL__\n",
   );
   writeFileSync(
     join(buildDir, "Version.template.yaml"),
-    "Version: {{VERSION}}\n",
+    "Version: __VERSION__\n",
   );
 }
 
 describe("generateWingetManifests", () => {
+  it("keeps usable replacement tokens in the checked-in templates", () => {
+    const templateDir = join(process.cwd(), "build", "winget");
+    const installer = readFileSync(
+      join(templateDir, "Installer.template.yaml"),
+      "utf-8",
+    );
+    const locale = readFileSync(
+      join(templateDir, "Locale.en-US.template.yaml"),
+      "utf-8",
+    );
+
+    expect(installer).toContain("__VERSION__");
+    expect(installer).toContain("__INSTALLER_URL__");
+    expect(installer).toContain("__INSTALLER_SHA256__");
+    expect(locale).toContain("__RELEASE_NOTES_URL__");
+  });
+
   it("produces three YAML files under the winget-pkgs directory layout", () => {
     setupTemplates(TEST_DIR);
     const distDir = join(TEST_DIR, "dist");
     mkdirSync(distDir, { recursive: true });
     writeFileSync(
-      join(distDir, "hermes-desktop-9.9.9-setup.exe"),
+      join(distDir, "agentera-studio-9.9.9-setup.exe"),
       "fake-installer-bytes",
     );
 
     generateWingetManifests({
       rootDir: TEST_DIR,
       version: "9.9.9",
-      name: "hermes-desktop",
-      publishOwner: "fathah",
+      name: "agentera-studio",
+      publishOwner: "bignormal",
     });
 
     const outDir = join(
       distDir,
       "winget",
       "manifests",
-      "n",
-      "NousResearch",
-      "HermesDesktop",
+      "b",
+      "Bignormal",
+      "AgentEraStudio",
       "9.9.9",
     );
     expect(
-      existsSync(join(outDir, "NousResearch.HermesDesktop.installer.yaml")),
+      existsSync(join(outDir, "Bignormal.AgentEraStudio.installer.yaml")),
     ).toBe(true);
     expect(
-      existsSync(join(outDir, "NousResearch.HermesDesktop.locale.en-US.yaml")),
+      existsSync(join(outDir, "Bignormal.AgentEraStudio.locale.en-US.yaml")),
     ).toBe(true);
-    expect(existsSync(join(outDir, "NousResearch.HermesDesktop.yaml"))).toBe(
+    expect(existsSync(join(outDir, "Bignormal.AgentEraStudio.yaml"))).toBe(
       true,
     );
   });
@@ -81,35 +98,35 @@ describe("generateWingetManifests", () => {
     const distDir = join(TEST_DIR, "dist");
     mkdirSync(distDir, { recursive: true });
     writeFileSync(
-      join(distDir, "hermes-desktop-9.9.9-setup.exe"),
+      join(distDir, "agentera-studio-9.9.9-setup.exe"),
       "fake-installer-bytes",
     );
 
     generateWingetManifests({
       rootDir: TEST_DIR,
       version: "9.9.9",
-      name: "hermes-desktop",
-      publishOwner: "fathah",
+      name: "agentera-studio",
+      publishOwner: "bignormal",
     });
 
     const outFile = join(
       distDir,
       "winget",
       "manifests",
-      "n",
-      "NousResearch",
-      "HermesDesktop",
+      "b",
+      "Bignormal",
+      "AgentEraStudio",
       "9.9.9",
-      "NousResearch.HermesDesktop.installer.yaml",
+      "Bignormal.AgentEraStudio.installer.yaml",
     );
     const content = readFileSync(outFile, "utf-8");
     expect(content).toContain("Version: 9.9.9");
     expect(content).toContain(
-      "Url: https://github.com/fathah/hermes-desktop/releases/download/v9.9.9/hermes-desktop-9.9.9-setup.exe",
+      "Url: https://github.com/bignormal/aera/releases/download/v9.9.9/agentera-studio-9.9.9-setup.exe",
     );
     expect(content).toMatch(/Sha: [A-F0-9]{64}/);
     expect(content).toMatch(/Date: \d{4}-\d{2}-\d{2}/);
-    expect(content).not.toContain("{{");
+    expect(content).not.toContain("__");
   });
 
   it("replaces ReleaseNotesUrl in the locale manifest", () => {
@@ -117,32 +134,32 @@ describe("generateWingetManifests", () => {
     const distDir = join(TEST_DIR, "dist");
     mkdirSync(distDir, { recursive: true });
     writeFileSync(
-      join(distDir, "hermes-desktop-9.9.9-setup.exe"),
+      join(distDir, "agentera-studio-9.9.9-setup.exe"),
       "fake-installer-bytes",
     );
 
     generateWingetManifests({
       rootDir: TEST_DIR,
       version: "9.9.9",
-      name: "hermes-desktop",
-      publishOwner: "fathah",
+      name: "agentera-studio",
+      publishOwner: "bignormal",
     });
 
     const outFile = join(
       distDir,
       "winget",
       "manifests",
-      "n",
-      "NousResearch",
-      "HermesDesktop",
+      "b",
+      "Bignormal",
+      "AgentEraStudio",
       "9.9.9",
-      "NousResearch.HermesDesktop.locale.en-US.yaml",
+      "Bignormal.AgentEraStudio.locale.en-US.yaml",
     );
     const content = readFileSync(outFile, "utf-8");
     expect(content).toContain(
-      "Notes: https://github.com/fathah/hermes-desktop/releases/tag/v9.9.9",
+      "Notes: https://github.com/bignormal/aera/releases/tag/v9.9.9",
     );
-    expect(content).not.toContain("{{");
+    expect(content).not.toContain("__");
   });
 
   it("throws a clear error when the installer .exe is missing", () => {
@@ -153,8 +170,8 @@ describe("generateWingetManifests", () => {
       generateWingetManifests({
         rootDir: TEST_DIR,
         version: "9.9.9",
-        name: "hermes-desktop",
-        publishOwner: "fathah",
+        name: "agentera-studio",
+        publishOwner: "bignormal",
       }),
     ).toThrow(/installer not found/i);
   });
@@ -164,7 +181,7 @@ describe("generateWingetManifests", () => {
     const distDir = join(TEST_DIR, "dist");
     mkdirSync(distDir, { recursive: true });
     writeFileSync(
-      join(distDir, "hermes-desktop-9.9.9-setup.exe"),
+      join(distDir, "agentera-studio-9.9.9-setup.exe"),
       "fake-installer-bytes",
     );
 
@@ -172,8 +189,8 @@ describe("generateWingetManifests", () => {
       generateWingetManifests({
         rootDir: TEST_DIR,
         version: "9.9.9",
-        name: "hermes-desktop",
-        publishOwner: "fathah",
+        name: "agentera-studio",
+        publishOwner: "bignormal",
       }),
     ).toThrow(/templates not found/i);
   });

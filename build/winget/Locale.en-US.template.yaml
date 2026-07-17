@@ -1,25 +1,24 @@
 # Generated from this template by scripts/generate-winget-manifests.mjs.
-PackageIdentifier: NousResearch.HermesDesktop
-PackageVersion: { { VERSION } }
+PackageIdentifier: Bignormal.AgentEraStudio
+PackageVersion: __VERSION__
 PackageLocale: en-US
-Publisher: Nous Research
-PublisherUrl: https://github.com/fathah/hermes-desktop
-PublisherSupportUrl: https://github.com/fathah/hermes-desktop/issues
-PackageName: Hermes One
-PackageUrl: https://github.com/fathah/hermes-desktop
+Publisher: AgentEra
+PublisherUrl: https://github.com/bignormal/aera
+PublisherSupportUrl: https://github.com/bignormal/aera/issues
+PackageName: AgentEra Studio
+PackageUrl: https://github.com/bignormal/aera
 License: MIT
-LicenseUrl: https://github.com/fathah/hermes-desktop/blob/main/LICENSE
-ShortDescription: Self-improving AI assistant desktop app
+LicenseUrl: https://github.com/bignormal/aera/blob/main/LICENSE
+ShortDescription: Private AI agent desktop
 Description: |-
-  Hermes One is a native desktop app for installing, configuring, and chatting
-  with Hermes Agent — a self-improving AI assistant with tool use, multi-platform
-  messaging, and a closed learning loop.
+  AgentEra Studio is a native desktop app for installing, configuring, and
+  chatting with AgentEra Runtime.
 Tags:
-- ai
-- agent
-- desktop
-- electron
-- llm
-ReleaseNotesUrl: { { RELEASE_NOTES_URL } }
+  - ai
+  - agent
+  - desktop
+  - electron
+  - llm
+ReleaseNotesUrl: __RELEASE_NOTES_URL__
 ManifestType: defaultLocale
 ManifestVersion: 1.12.0

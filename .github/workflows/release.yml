@@ -120,9 +120,9 @@ jobs:
       - name: Verify native module architecture
         run: |
           set -euo pipefail
-          NODE_FILE="dist/mac-${{ matrix.arch }}/Hermes One.app/Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+          NODE_FILE="dist/mac-${{ matrix.arch }}/AgentEra Studio.app/Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
           if [ ! -f "$NODE_FILE" ]; then
-            NODE_FILE="dist/mac/Hermes One.app/Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+            NODE_FILE="dist/mac/AgentEra Studio.app/Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
           fi
           file "$NODE_FILE"
           case "${{ matrix.arch }}" in
@@ -265,7 +265,7 @@ jobs:
       - name: Generate winget manifests
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
-          PUBLISH_OWNER: fathah
+          PUBLISH_OWNER: bignormal
         run: node scripts/generate-winget-manifests.mjs
 
       - name: Upload winget manifests artifact
@@ -312,7 +312,7 @@ jobs:
             .readdirSync(artifactsDir)
             .filter(
               (name) =>
-                name.startsWith(`hermes-desktop-${version}-`) &&
+                name.startsWith(`agentera-studio-${version}-`) &&
                 name.endsWith("-mac.zip"),
             )
             .sort((a, b) => {
@@ -365,7 +365,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
-          name: Hermes Desktop ${{ needs.prepare.outputs.tag }}
+          name: AgentEra Studio ${{ needs.prepare.outputs.tag }}
           generate_release_notes: true
           files: |
             artifacts/*.dmg
@@ -378,26 +378,3 @@ jobs:
             artifacts/latest.yml
             artifacts/latest-linux.yml
             artifacts/latest-mac.yml
-
-  rebuild_landing_page:
-    name: Rebuild landing page
-    needs: [prepare, publish]
-    # Only after a real release that actually published a new tag.
-    if: needs.prepare.outputs.is_dry_run == 'false' && needs.prepare.outputs.tag_exists == 'false'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Wait for release to propagate
-        # Give GitHub's releases/latest API time to settle before the landing
-        # page rebuilds and re-fetches the latest version.
-        run: sleep 300
-
-      - name: Trigger landing page deploy
-        # SITE_DEPLOY_TOKEN is a fine-grained PAT with "Actions: read and write"
-        # on fathah/hermes-landing-page. The default GITHUB_TOKEN cannot dispatch
-        # workflows in another repository.
-        env:
-          GH_TOKEN: ${{ secrets.SITE_DEPLOY_TOKEN }}
-        run: |
-          gh workflow run deploy.yml \
-            --repo fathah/hermes-landing-page \
-            --ref main
