@@ -37,11 +37,12 @@ describe("AgentEra composed application surfaces", () => {
     const about = read("src/renderer/src/components/settings/AboutPane.tsx");
     const empty = read("src/renderer/src/screens/Chat/ChatEmptyState.tsx");
     const logo = read("src/renderer/src/components/common/HermesLogo.tsx");
+    const office = read("src/renderer/src/screens/Office/Office.tsx");
 
-    for (const source of [layout, about, empty, logo]) {
+    for (const source of [layout, about, empty, logo, office]) {
       expect(source).toContain("iconv2.png");
       expect(source).not.toMatch(
-        /hermes-one\.svg|hermes-icon\.svg|title-line\.svg/,
+        /hermes-one\.svg|hermes-icon\.svg|title-line\.svg|one-chat\.svg/,
       );
       expect(source).not.toContain('alt="Hermes"');
       expect(source).not.toContain('aria-label="Hermes"');

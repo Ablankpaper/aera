@@ -12,7 +12,7 @@ import {
 import type { GpuStatus } from "../../../../shared/gpu";
 import { useI18n } from "../../components/useI18n";
 import { useProfileModal } from "../../components/profile/ProfileModalContext";
-import oneChatIcon from "../../assets/images/one-chat.svg";
+import agenteraIcon from "../../assets/iconv2.png";
 import OneChatModal from "./OneChatModal";
 import Office3D from "./office3d/Office3D";
 import RepInteractionPanel from "./RepInteractionPanel";
@@ -589,11 +589,7 @@ function Office({ visible }: OfficeProps): React.JSX.Element {
           onClick={() => setChatOpen(true)}
           className="absolute bottom-5 right-5 w-30 h-11 rounded-lg border-none bg-black cursor-pointer flex items-center justify-center px-3 gap-2 z-10"
         >
-          <img
-            src={oneChatIcon}
-            alt="Chat"
-            className="h-6 brightness-0 invert"
-          />
+          <img src={agenteraIcon} alt="AgentEra" className="h-6" />
         </button>
 
         <OneChatModal
