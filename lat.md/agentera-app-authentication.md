@@ -20,6 +20,30 @@ The system browser handles registration, login, recovery, identity binding, and 
 
 Only a two-minute authorization code and state return through `127.0.0.1`; access, refresh, and offline tokens never appear in the callback URL. Passwords and verification codes never enter the Electron renderer or main process.
 
+## Desktop authentication foundation
+
+The desktop foundation keeps product authentication in the main process and exposes only an allowlisted public state before browser authorization is wired into startup.
+
+### Cloud origin boundary
+
+[[src/main/agentera-auth/config.ts#parseAgenteraCloudOrigin]] accepts trusted HTTPS and loopback development HTTP only, requires an exact credential-free Origin, and refuses the separately configured recharge-site Origin.
+
+[[src/main/agentera-auth/config.ts#agenteraCloudUrl]] rejects absolute and host-relative paths that could escape that Origin. Runtime configuration precedes build-time configuration, and no production domain or server IP is hard-coded.
+
+### App-level secure store
+
+[[src/main/agentera-auth/store.ts#AgenteraAuthStore]] keeps installation identity, product session, and pending self-revocation in one atomically replaced versioned file rooted by Electron `app.getPath("userData")` through [[src/main/agentera-auth/store.ts#createAgenteraAuthStoreForApp]].
+
+Refresh tokens, offline entitlements, device private keys, and pending self-revocations are protected with the platform secure-storage adapter. Unavailable encryption fails closed; logout clears product session material without reading or modifying a Hermes Profile.
+
+[[src/shared/agentera-auth.ts#serializeAgenteraAuthPublicState]] rebuilds the renderer-visible state from an explicit allowlist, so extra token-, key-, code-, verifier-, or encrypted-blob fields cannot cross IPC by object spreading.
+
+### Installation device identity
+
+[[src/main/agentera-auth/device-key.ts#getOrCreateAgenteraDeviceIdentity]] creates one installation-scoped Ed25519 key pair, stores its private key only through the app-level encrypted store, and reuses the same identity after logout.
+
+[[src/main/agentera-auth/device-key.ts#signAgenteraDeviceDigest]] signs only SHA-256-sized protocol digests. Development signing keys are not desktop trust roots; the bundled offline verification-key map remains fail-closed until a reviewed release adds approved public key IDs.
+
 ## Sessions and offline use
 
 Access tokens last fifteen minutes in main-process memory, rotating refresh tokens last thirty days in platform secure storage, and device-bound signed offline entitlements roll for seven days after successful validation.
