@@ -10,6 +10,7 @@ import {
 } from "electron";
 import { extname } from "path";
 import { randomUUID } from "crypto";
+import type { AgenteraAuthController } from "../agentera-auth/controller";
 import { readdir, readFile, stat } from "fs/promises";
 import { getActiveProfileNameSync } from "../utils";
 import type { Attachment } from "../../shared/attachments";
@@ -406,6 +407,7 @@ export interface IpcContext {
   notifyModelLibraryChanged: () => void;
   notifyCustomProvidersChanged: () => void;
   openExternalUrl: (rawUrl: unknown) => void;
+  agenteraAuth: AgenteraAuthController;
 }
 
 const APP_NAME =
@@ -657,8 +659,43 @@ export function registerIpcHandlers(context: IpcContext): void {
     notifyModelLibraryChanged,
     notifyCustomProvidersChanged,
     openExternalUrl,
+    agenteraAuth,
   } = context;
   const mainWindow = getMainWindow();
+  // AgentEra product authentication is intentionally namespaced away from the
+  // legacy Hermes account and provider OAuth channels.
+  ipcMain.handle("agentera-auth-get-state", () =>
+    agenteraAuth.getPublicState(),
+  );
+  ipcMain.handle("agentera-auth-start-login", (_event, rawOptions: unknown) => {
+    if (rawOptions === undefined) return agenteraAuth.startBrowserLogin();
+    if (
+      !rawOptions ||
+      typeof rawOptions !== "object" ||
+      Array.isArray(rawOptions)
+    ) {
+      throw new Error("AgentEra login options are invalid.");
+    }
+    const options = rawOptions as Record<string, unknown>;
+    if (
+      Object.keys(options).some((key) => key !== "forceAccountSelection") ||
+      (options.forceAccountSelection !== undefined &&
+        typeof options.forceAccountSelection !== "boolean")
+    ) {
+      throw new Error("AgentEra login options are invalid.");
+    }
+    return agenteraAuth.startBrowserLogin({
+      forceAccountSelection: options.forceAccountSelection === true,
+    });
+  });
+  ipcMain.handle("agentera-auth-cancel-login", () =>
+    agenteraAuth.cancelBrowserLogin(),
+  );
+  ipcMain.handle("agentera-auth-retry-online", () =>
+    agenteraAuth.refreshOnline(),
+  );
+  ipcMain.handle("agentera-auth-logout", () => agenteraAuth.logout());
+
   // Installation
   ipcMain.handle("check-install", () => {
     return checkInstallStatus();

@@ -33,6 +33,7 @@ import type {
 } from "../shared/messaging-platforms";
 import type { ChatToolEvent } from "../shared/chat-stream";
 import type { GpuPreferenceMode, GpuStatus } from "../shared/gpu";
+import type { AgenteraAuthPublicState } from "../shared/agentera-auth";
 
 interface ElectronAPI {
   process: {
@@ -43,6 +44,17 @@ interface ElectronAPI {
       node: string;
     };
   };
+}
+
+interface AgenteraAuthAPI {
+  getState: () => Promise<AgenteraAuthPublicState>;
+  startLogin: (options?: { forceAccountSelection?: boolean }) => Promise<void>;
+  cancelLogin: () => Promise<void>;
+  retryOnline: () => Promise<AgenteraAuthPublicState>;
+  logout: () => Promise<void>;
+  onStateChanged: (
+    callback: (state: AgenteraAuthPublicState) => void,
+  ) => () => void;
 }
 
 interface InstallStatus {
@@ -1253,5 +1265,6 @@ declare global {
   interface Window {
     electron: ElectronAPI;
     hermesAPI: HermesAPI;
+    agenteraAuth: AgenteraAuthAPI;
   }
 }

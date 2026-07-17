@@ -27,6 +27,7 @@ import type {
 } from "../shared/account";
 import type { AgentSyncResult, AgentSyncStatus } from "../shared/agent-sync";
 import type { GpuPreferenceMode, GpuStatus } from "../shared/gpu";
+import type { AgenteraAuthPublicState } from "../shared/agentera-auth";
 
 /**
  * Mirror of the renderer-side `CredentialPoolEntry` ambient type
@@ -1628,10 +1629,34 @@ const hermesAPI = {
     ipcRenderer.invoke("read-logs", logFile, lines),
 };
 
+const agenteraAuthAPI = {
+  getState: (): Promise<AgenteraAuthPublicState> =>
+    ipcRenderer.invoke("agentera-auth-get-state"),
+  startLogin: (options?: { forceAccountSelection?: boolean }): Promise<void> =>
+    ipcRenderer.invoke("agentera-auth-start-login", options),
+  cancelLogin: (): Promise<void> =>
+    ipcRenderer.invoke("agentera-auth-cancel-login"),
+  retryOnline: (): Promise<AgenteraAuthPublicState> =>
+    ipcRenderer.invoke("agentera-auth-retry-online"),
+  logout: (): Promise<void> => ipcRenderer.invoke("agentera-auth-logout"),
+  onStateChanged: (
+    callback: (state: AgenteraAuthPublicState) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      state: AgenteraAuthPublicState,
+    ): void => callback(state);
+    ipcRenderer.on("agentera-auth-state-changed", handler);
+    return () =>
+      ipcRenderer.removeListener("agentera-auth-state-changed", handler);
+  },
+};
+
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld("electron", electronAPI);
     contextBridge.exposeInMainWorld("hermesAPI", hermesAPI);
+    contextBridge.exposeInMainWorld("agenteraAuth", agenteraAuthAPI);
   } catch (error) {
     console.error(error);
   }
@@ -1640,4 +1665,6 @@ if (process.contextIsolated) {
   window.electron = electronAPI;
   // @ts-ignore (define in dts)
   window.hermesAPI = hermesAPI;
+  // @ts-ignore (define in dts)
+  window.agenteraAuth = agenteraAuthAPI;
 }

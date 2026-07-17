@@ -14,10 +14,12 @@ const preloadTypes = readFileSync(
  * Matches lines like `  methodName: (...` or `  methodName: ()`.
  */
 function extractPreloadMethods(src: string): string[] {
+  const objectMatch = src.match(/const\s+hermesAPI\s*=\s*\{([\s\S]*?)^\};/m);
+  if (!objectMatch) return [];
   const methods: string[] = [];
   const re = /^\s{2}(\w+)\s*:\s*\(/gm;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(src)) !== null) {
+  while ((m = re.exec(objectMatch[1])) !== null) {
     methods.push(m[1]);
   }
   return [...new Set(methods)];
@@ -43,6 +45,29 @@ function extractTypeMethods(src: string): string[] {
 const preloadMethods = extractPreloadMethods(preloadSrc);
 const typeMethods = extractTypeMethods(preloadTypes);
 
+function extractAgenteraPreloadMethods(src: string): string[] {
+  const objectMatch = src.match(
+    /const\s+agenteraAuthAPI\s*=\s*\{([\s\S]*?)^\};/m,
+  );
+  if (!objectMatch) return [];
+  return [...objectMatch[1].matchAll(/^\s{2}(\w+)\s*:\s*\(/gm)].map(
+    (match) => match[1],
+  );
+}
+
+function extractAgenteraTypeMethods(src: string): string[] {
+  const interfaceMatch = src.match(
+    /interface\s+AgenteraAuthAPI\s*\{([\s\S]*?)^\}/m,
+  );
+  if (!interfaceMatch) return [];
+  return [...interfaceMatch[1].matchAll(/^\s{2}(\w+)\s*[:(]/gm)].map(
+    (match) => match[1],
+  );
+}
+
+const agenteraPreloadMethods = extractAgenteraPreloadMethods(preloadSrc);
+const agenteraTypeMethods = extractAgenteraTypeMethods(preloadTypes);
+
 describe("Preload API Surface", () => {
   it("preload exposes methods", () => {
     expect(preloadMethods.length).toBeGreaterThan(30);
@@ -60,6 +85,32 @@ describe("Preload API Surface", () => {
   it("every type declaration has a preload implementation", () => {
     const missing = typeMethods.filter((m) => !preloadMethods.includes(m));
     expect(missing).toEqual([]);
+  });
+});
+
+describe("AgentEra product-auth preload namespace", () => {
+  const expected = [
+    "getState",
+    "startLogin",
+    "cancelLogin",
+    "retryOnline",
+    "logout",
+    "onStateChanged",
+  ];
+
+  it("exposes only the reviewed namespaced methods", () => {
+    expect(agenteraPreloadMethods).toEqual(expected);
+    expect(agenteraTypeMethods).toEqual(expected);
+  });
+
+  it("never declares product tokens, device keys, codes, or verifiers", () => {
+    const namespace = preloadTypes.match(
+      /interface\s+AgenteraAuthAPI\s*\{([\s\S]*?)^\}/m,
+    )?.[1];
+    expect(namespace).toBeDefined();
+    expect(namespace).not.toMatch(
+      /accessToken|refreshToken|offlineEntitlement|privateKey|code|verifier|encrypted/i,
+    );
   });
 });
 

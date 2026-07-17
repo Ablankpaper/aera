@@ -20,6 +20,26 @@ The system browser handles registration, login, recovery, identity binding, and 
 
 Only a two-minute authorization code and state return through `127.0.0.1`; access, refresh, and offline tokens never appear in the callback URL. Passwords and verification codes never enter the Electron renderer or main process.
 
+### Loopback callback
+
+[[src/main/agentera-auth/pkce.ts#createAgenteraPkceAttempt]] creates fresh 256-bit state and verifier values for each attempt, while [[src/main/agentera-auth/loopback.ts#startAgenteraLoopbackListener]] binds only an ephemeral `127.0.0.1` port.
+
+The listener accepts one canonical authorization code on the exact callback path, compares state in constant time, bounds the query, rejects other methods and paths, and returns a static page that contains no protocol value before closing on success, cancellation, error, or timeout.
+
+### Cloud token exchange
+
+[[src/main/agentera-auth/client.ts#AgenteraCloudClient]] builds the fixed authorization URL and sends authorization codes, PKCE verifiers, refresh tokens, and device proofs only in bounded same-Origin POST bodies.
+
+The client signs the cloud protocol digest through the installation Ed25519 key, rejects redirects and unexpected response fields, maps only documented token fields, and never includes a token-bearing response body in an error.
+
+### Main-process controller
+
+[[src/main/agentera-auth/controller.ts#AgenteraAuthControllerImpl]] owns transient access tokens, browser-attempt lifecycle, encrypted session persistence, online refresh, logout, and the allowlisted state published to the renderer.
+
+[[src/main/app/start.ts#startMainProcess]] creates one controller, restores the window after a valid callback, disposes the listener on quit, and routes the authorization URL through [[src/main/security.ts#isAllowedAgenteraAuthExternalUrl]]. The policy allows only the configured cloud Origin and exact OAuth request shape.
+
+[[src/preload/index.ts]] exposes the separate `window.agenteraAuth` namespace. Its six methods carry only [[src/shared/agentera-auth.ts#AgenteraAuthPublicState]] and login-control options; AgentEra tokens, device keys, codes, verifiers, and encrypted blobs have no preload field.
+
 ## Desktop authentication foundation
 
 The desktop foundation keeps product authentication in the main process and exposes only an allowlisted public state before browser authorization is wired into startup.

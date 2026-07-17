@@ -1,5 +1,6 @@
-import { app, BrowserWindow, session, shell } from "electron";
+import { app, BrowserWindow, safeStorage, session, shell } from "electron";
 import { join } from "path";
+import { hostname } from "node:os";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import icon from "../../../resources/icon.png?asset";
 import { getPublicConnectionConfig } from "../config";
@@ -12,6 +13,7 @@ import {
   hardenAttachedWebContents,
   hardenWebviewPreferences,
   isAllowedAppNavigationUrl,
+  isAllowedAgenteraAuthExternalUrl,
   isAllowedExternalUrl,
   isAllowedWebviewUrl,
 } from "../security";
@@ -21,6 +23,10 @@ import { showChatContextMenu } from "./context-menu";
 import { buildMenu } from "./menu";
 import { setupUpdater } from "./updater";
 import { DESKTOP_APP_ID, DESKTOP_PRODUCT_NAME } from "../../shared/branding";
+import { getAgenteraCloudOrigin } from "../agentera-auth/config";
+import { AgenteraCloudClient } from "../agentera-auth/client";
+import { createAgenteraAuthController } from "../agentera-auth/controller";
+import { createAgenteraAuthStoreForApp } from "../agentera-auth/store";
 
 const APP_NAME =
   process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
@@ -40,6 +46,33 @@ export function startMainProcess(): void {
     console.error("[MAIN UNHANDLED REJECTION]", reason);
   });
 
+  const agenteraAuth = createAgenteraAuthController({
+    store: createAgenteraAuthStoreForApp(app, safeStorage),
+    getCloudClient: () =>
+      new AgenteraCloudClient({ origin: getAgenteraCloudOrigin() }),
+    openExternal: openAgenteraAuthUrl,
+    bringMainWindowToFront: () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    },
+    getDeviceMetadata: () => ({
+      deviceName: (hostname().trim() || "AgentEra device").slice(0, 100),
+      platform:
+        process.platform === "win32"
+          ? "windows"
+          : process.platform === "darwin"
+            ? "darwin"
+            : "linux",
+      appVersion: (app.getVersion().trim() || "unknown").slice(0, 64),
+    }),
+  });
+  const unsubscribeAgenteraAuth = agenteraAuth.subscribe((state) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send("agentera-auth-state-changed", state);
+  });
+
   registerIpcHandlers({
     activeRuns,
     getMainWindow: () => mainWindow,
@@ -47,6 +80,7 @@ export function startMainProcess(): void {
     notifyModelLibraryChanged,
     notifyCustomProvidersChanged,
     openExternalUrl,
+    agenteraAuth,
   });
 
   setupUpdater({ getMainWindow: () => mainWindow });
@@ -93,6 +127,7 @@ export function startMainProcess(): void {
     });
 
     createWindow();
+    void agenteraAuth.initialize();
     buildMenu({ getMainWindow: () => mainWindow, openExternalUrl });
 
     app.on("activate", () => {
@@ -105,6 +140,8 @@ export function startMainProcess(): void {
   });
 
   app.on("before-quit", () => {
+    unsubscribeAgenteraAuth();
+    agenteraAuth.dispose();
     stopHealthPolling();
     for (const abort of activeRuns.values()) abort();
     activeRuns.clear();
@@ -134,13 +171,31 @@ function notifyCustomProvidersChanged(): void {
 }
 
 function openExternalUrl(rawUrl: unknown): void {
-  if (!isAllowedExternalUrl(rawUrl)) {
+  dispatchExternalUrl(rawUrl, isAllowedExternalUrl);
+}
+
+function dispatchExternalUrl(
+  rawUrl: unknown,
+  policy: (candidate: unknown) => boolean,
+): boolean {
+  if (!policy(rawUrl)) {
     console.warn("[SECURITY] Blocked unsafe external URL");
-    return;
+    return false;
   }
-  shell.openExternal(rawUrl).catch((err) => {
+  shell.openExternal(rawUrl as string).catch((err) => {
     console.error("[SECURITY] Failed to open external URL:", err);
   });
+  return true;
+}
+
+function openAgenteraAuthUrl(rawUrl: string, expectedOrigin: string): void {
+  if (
+    !dispatchExternalUrl(rawUrl, (candidate) =>
+      isAllowedAgenteraAuthExternalUrl(candidate, expectedOrigin),
+    )
+  ) {
+    throw new Error("AgentEra browser authorization URL was blocked.");
+  }
 }
 
 function createWindow(): void {
