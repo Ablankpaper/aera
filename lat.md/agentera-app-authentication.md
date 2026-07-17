@@ -136,6 +136,8 @@ The sidebar account menu and Settings account pane expose only online/offline st
 
 Switching accounts completes safe sign-out first and then opens browser authorization with explicit account selection. The UI warns that a pending offline revocation may temporarily count toward the five-device limit and that cloud account deletion cannot erase local Hermes data.
 
+The cloud may transfer an installation to another AgentEra account only after the previous owner has revoked that device and the installation presents the identical public key. Active devices and changed keys remain owner-conflicted.
+
 ## Existing Profile migration
 
 The first authenticated launch binds an empty Profile automatically or asks whether an existing learned Profile should be bound in place or left untouched while a new isolated Profile is created.
@@ -169,6 +171,16 @@ Authorization codes, verification codes, and refresh tokens are stored only as h
 ## Release boundary
 
 Authentication is delivered before Agent configuration/version sync, but this ordering does not enable cloud ownership of Hermes adaptive state.
+
+### Cross-repository verification
+
+The desktop pins the reviewed cloud OpenAPI document, generates deterministic TypeScript, and rejects stale output or sibling-contract drift before authentication code can pass its release gate.
+
+`scripts/generate-agentera-cloud-types.mjs` derives the contract hash and formatted types, while `scripts/check-agentera-cloud-contract.mjs` validates critical endpoints, exact fields, documented errors, and the strict loopback redirect shape. The desktop client consumes those generated request and response types without permissive casts.
+
+[[tests/e2e/agentera-auth.e2e.ts]] exercises the real browser, cloud, and Electron lifecycle only against isolated services and a synthetic Hermes boundary fixture. Hashes prove authentication never modifies the fixture, and the same suite can target the unpacked macOS application.
+
+Desktop CI compiles, type-checks, tests, and validates the contract on macOS, Windows, and Linux. CI success is not a substitute for physical Windows/Linux secure-storage, firewall, loopback-return, install, update, and uninstall evidence.
 
 Agent sync, client-side encrypted backup, workspace/organization scopes, and official Agent evolution pipelines remain later independently designed projects. Every authentication release remains blocked by the Hermes compatibility gate.
 

@@ -8,6 +8,11 @@ node_modules/
 dist/
 out/
 
+# Browser test artifacts may include local callback URLs and captured pages
+test-results/
+playwright-report/
+blob-report/
+
 # TypeScript incremental build info
 *.tsbuildinfo
 
@@ -29,7 +34,7 @@ pnpm-debug.log*
 .sandbox/
 
 # Electron packaging artifacts
-release/
+/release/
 .claude/worktrees
 
 # Tauri

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { components } from "../../shared/agentera-cloud-api.generated";
 import { agenteraCloudUrl, parseAgenteraCloudOrigin } from "./config";
 import { signAgenteraDeviceDigest } from "./device-key";
 import type { AgenteraPkceAttempt } from "./pkce";
@@ -73,17 +74,15 @@ export class AgenteraCloudClientError extends Error {
   }
 }
 
-interface RawTokenResponse {
-  access_token: string;
-  access_expires_at: string;
-  refresh_token: string;
-  refresh_expires_at: string;
-  offline_entitlement: string;
-  offline_expires_at: string;
-  user_id: string;
-  personal_space_id: string;
-  device_id: string;
-}
+type RawTokenResponse = components["schemas"]["TokenResponse"];
+type AuthorizationCodeExchangeRequest =
+  components["schemas"]["AuthorizationCodeExchangeRequest"];
+type RefreshTokenRequest = components["schemas"]["RefreshTokenRequest"];
+type DeviceSelfRevokeRequest = components["schemas"]["DeviceSelfRevokeRequest"];
+type AgenteraCloudRequestBody =
+  | AuthorizationCodeExchangeRequest
+  | RefreshTokenRequest
+  | DeviceSelfRevokeRequest;
 
 const TOKEN_KEYS = [
   "access_expires_at",
@@ -218,30 +217,33 @@ export class AgenteraCloudClient implements AgenteraCloudClientPort {
       input.identity.devicePrivateKey,
       digest,
     );
-    return this.postForTokenSet("/api/v1/oauth/token", {
+    const body: AuthorizationCodeExchangeRequest = {
       authorization_code: input.authorizationCode,
       code_verifier: input.codeVerifier,
       installation_id: input.identity.installationId,
       device_proof: deviceProof,
-    });
+    };
+    return this.postForTokenSet("/api/v1/oauth/token", body);
   }
 
   async refreshSession(refreshToken: string): Promise<AgenteraTokenSet> {
     if (!SECRET_PATTERN.test(refreshToken)) {
       throw new AgenteraCloudClientError(0, "invalid_refresh_token");
     }
-    return this.postForTokenSet("/api/v1/oauth/refresh", {
+    const body: RefreshTokenRequest = {
       refresh_token: refreshToken,
-    });
+    };
+    return this.postForTokenSet("/api/v1/oauth/refresh", body);
   }
 
   async revokeSession(refreshToken: string): Promise<void> {
     if (!SECRET_PATTERN.test(refreshToken)) {
       throw new AgenteraCloudClientError(0, "invalid_refresh_token");
     }
-    const response = await this.post("/api/v1/oauth/revoke", {
+    const body: RefreshTokenRequest = {
       refresh_token: refreshToken,
-    });
+    };
+    const response = await this.post("/api/v1/oauth/revoke", body);
     if (response.status !== 204) {
       const body = await response.text();
       throw new AgenteraCloudClientError(response.status, safeErrorCode(body));
@@ -265,13 +267,14 @@ export class AgenteraCloudClient implements AgenteraCloudClientPort {
     ) {
       throw new AgenteraCloudClientError(0, "invalid_self_revocation");
     }
-    const response = await this.post("/api/v1/devices/self-revoke", {
+    const body: DeviceSelfRevokeRequest = {
       device_id: record.deviceId,
       installation_id: record.installationId,
       timestamp,
       nonce: record.nonce,
       signature: record.signature,
-    });
+    };
+    const response = await this.post("/api/v1/devices/self-revoke", body);
     if (response.status !== 204) {
       const body = await response.text();
       throw new AgenteraCloudClientError(response.status, safeErrorCode(body));
@@ -280,7 +283,7 @@ export class AgenteraCloudClient implements AgenteraCloudClientPort {
 
   private async postForTokenSet(
     path: string,
-    body: Record<string, string>,
+    body: AuthorizationCodeExchangeRequest | RefreshTokenRequest,
   ): Promise<AgenteraTokenSet> {
     const response = await this.post(path, body);
     const rawBody = await response.text();
@@ -321,7 +324,7 @@ export class AgenteraCloudClient implements AgenteraCloudClientPort {
 
   private async post(
     path: string,
-    body: Record<string, string | number>,
+    body: AgenteraCloudRequestBody,
   ): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);

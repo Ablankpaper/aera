@@ -162,7 +162,9 @@ describe("AgentEra signed offline entitlement", () => {
     ) as Record<string, unknown>;
     payload.sub = crypto.randomUUID();
     const alteredPayload = `${parts[0]}.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.${parts[2]}`;
-    const alteredSignature = `${parts[0]}.${parts[1]}.${parts[2].slice(0, -1)}A`;
+    const signature = Buffer.from(parts[2], "base64url");
+    signature[0] ^= 1;
+    const alteredSignature = `${parts[0]}.${parts[1]}.${signature.toString("base64url")}`;
     const padded = `${parts[0]}=.${parts[1]}.${parts[2]}`;
 
     for (const serialized of [alteredPayload, alteredSignature, padded]) {
