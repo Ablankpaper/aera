@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ========================================================================
-   Hermes One Desktop — Clean Design System
+   AgentEra Studio — Clean Design System
    Dark + Light mode, no gradients, flat design
    ======================================================================== */
 
@@ -1436,18 +1436,27 @@ body {
   margin-top: 25px;
 }
 
+.sidebar-product {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .sidebar-logo {
   height: 30px;
-  width: 150px;
-  /* Follow the foreground colour (white on dark themes, black on light) rather
-     than a fixed brand yellow, so the wordmark always reads against the bg. */
-  background-color: var(--text-primary);
-  mask-repeat: no-repeat;
-  mask-position: center;
-  mask-size: contain;
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-  -webkit-mask-size: contain;
+  width: 30px;
+  border-radius: 8px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.sidebar-wordmark {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
 }
 
 .sidebar-collapse-toggle {
@@ -1486,9 +1495,8 @@ body {
   margin: auto;
   width: 20px;
   height: 20px;
-  border-radius: 50%;
-  /* White on dark themes, dark on light — follows the foreground colour. */
-  background: var(--text-primary);
+  border-radius: 6px;
+  object-fit: contain;
   transition: opacity var(--transition);
 }
 
@@ -1516,7 +1524,7 @@ body {
   margin-top: 18px;
 }
 
-.sidebar-collapsed .sidebar-logo {
+.sidebar-collapsed .sidebar-product {
   display: none;
 }
 
@@ -3818,18 +3826,11 @@ body {
   margin-bottom: 4px;
 }
 
-/* The wordmark SVG ships with a black fill; recolour it to white via masking so
-   it reads on the black circle, regardless of the source artwork's colours. */
 .chat-empty-logo {
   width: 52px;
-  height: 40px;
-  background-color: #fff;
-  mask-repeat: no-repeat;
-  mask-position: center;
-  mask-size: contain;
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-  -webkit-mask-size: contain;
+  height: 52px;
+  border-radius: 13px;
+  object-fit: contain;
 }
 
 .chat-empty-text {
@@ -7183,7 +7184,7 @@ body {
   margin: 0 0 10px;
 }
 
-/* Hermes account (device login) — section hint + summary row. */
+/* Provider account (device login) — section hint + summary row. */
 .settings-section-hint {
   font-size: 12px;
   color: var(--text-muted);
@@ -9308,8 +9309,8 @@ body {
   margin: 0;
 }
 
-/* Cards — visually separate distinct concerns within a pane (e.g. the Hermes
-   Agent vs Hermes Desktop update channels in About). */
+/* Cards — visually separate distinct concerns within a pane (e.g. the AgentEra
+   Runtime vs AgentEra Studio update channels in About). */
 .settings-card {
   display: flex;
   flex-direction: column;

@@ -172,7 +172,7 @@ function unsupportedReasonForLocalSpawn(): string | undefined {
     return `Hermes repo not found at ${HERMES_REPO}.`;
   }
   if (!existsSync(HERMES_PYTHON)) {
-    return `Hermes Python environment not found at ${HERMES_PYTHON}.`;
+    return `AgentEra Runtime Python environment not found at ${HERMES_PYTHON}.`;
   }
   return undefined;
 }
@@ -267,7 +267,7 @@ function requestJson(
     req.setTimeout(timeoutMs, () => {
       req.destroy(
         new Error(
-          `Timed out connecting to Hermes dashboard after ${timeoutMs}ms`,
+          `Timed out connecting to the AgentEra Runtime dashboard after ${timeoutMs}ms`,
         ),
       );
     });
@@ -313,7 +313,7 @@ export function probeDashboardWebSocket(
         const body = Buffer.concat(chunks).toString("utf8").trim();
         finish(
           new Error(
-            `Hermes dashboard chat WebSocket is unavailable (${res.statusCode}${
+            `AgentEra Runtime dashboard chat WebSocket is unavailable (${res.statusCode}${
               body ? `: ${body.slice(0, 160)}` : ""
             })`,
           ),
@@ -324,7 +324,7 @@ export function probeDashboardWebSocket(
     req.setTimeout(timeoutMs, () => {
       finish(
         new Error(
-          `Timed out connecting to Hermes dashboard chat WebSocket after ${timeoutMs}ms`,
+          `Timed out connecting to the AgentEra Runtime dashboard chat WebSocket after ${timeoutMs}ms`,
         ),
       );
     });
@@ -351,7 +351,9 @@ async function waitForDashboardReady(
     lastError instanceof Error
       ? lastError.message
       : "dashboard did not respond";
-  throw new Error(`Timed out waiting for Hermes dashboard: ${message}`);
+  throw new Error(
+    `Timed out waiting for the AgentEra Runtime dashboard: ${message}`,
+  );
 }
 
 function dashboardStatusRequiresOAuth(status: unknown): boolean {
@@ -485,7 +487,7 @@ async function getSshDashboardStatusForConfig(
       supported: true,
       running: false,
       error:
-        "SSH dashboard transport needs an active tunnel and API_SERVER_KEY on the remote Hermes host.",
+        "SSH dashboard transport needs an active tunnel and API_SERVER_KEY on the remote AgentEra Runtime host.",
     };
   }
 
@@ -500,7 +502,7 @@ async function getSshDashboardStatusForConfig(
         running: false,
         connection,
         error:
-          "SSH dashboard requires OAuth browser authentication. Token-based dashboard over SSH is supported now; OAuth ticket flow is not wired in Hermes One yet.",
+          "SSH dashboard requires OAuth browser authentication. Token-based dashboard over SSH is supported now; OAuth ticket flow is not wired in AgentEra Studio yet.",
       };
     }
 

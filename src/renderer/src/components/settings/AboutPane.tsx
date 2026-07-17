@@ -11,8 +11,7 @@ import {
   Stethoscope,
 } from "lucide-react";
 import { useI18n } from "../useI18n";
-import BrandLogo from "../common/BrandLogo";
-import hermesIcon from "../../assets/hermes-icon.svg";
+import agentEraIcon from "../../assets/iconv2.png";
 import pythonLogo from "../../assets/logos/python.svg";
 import openaiLogo from "../../assets/logos/openai.svg";
 import { ConfigHealth } from "../../screens/Settings/ConfigHealth";
@@ -20,7 +19,7 @@ import { useSettings } from "./SettingsDataContext";
 
 /**
  * About & Updates. Two clearly-separated cards for the two distinct update
- * channels: the **Hermes Agent** (Python engine) and **Hermes Desktop** (this
+ * channels: the **AgentEra Runtime** (Python engine) and **AgentEra Studio** (this
  * Electron app). They ship independently, so each owns its own update action.
  */
 export default function AboutPane(): React.JSX.Element {
@@ -59,11 +58,17 @@ export default function AboutPane(): React.JSX.Element {
     <div className="settings-modal-pane">
       <ConfigHealth />
 
-      {/* ── Hermes Agent (engine) ─────────────────────────────── */}
+      {/* ── AgentEra Runtime (engine) ─────────────────────────── */}
       <section className="settings-card">
         <header className="settings-card-head">
           <span className="settings-card-icon">
-            <BrandLogo provider="nous" size={20} />
+            <img
+              src={agentEraIcon}
+              width={20}
+              height={20}
+              className="brand-logo"
+              alt={t("settings.sections.hermesAgent")}
+            />
           </span>
           <div className="settings-card-headtext">
             <div className="settings-card-title">
@@ -197,15 +202,15 @@ export default function AboutPane(): React.JSX.Element {
         </div>
       </section>
 
-      {/* ── Hermes Desktop (this app) ─────────────────────────── */}
+      {/* ── AgentEra Studio (this app) ────────────────────────── */}
       <section className="settings-card">
         <header className="settings-card-head">
           <span className="settings-card-icon">
             <img
-              src={hermesIcon}
+              src={agentEraIcon}
               width={20}
               height={20}
-              className="brand-logo brand-logo--match-theme"
+              className="brand-logo"
               alt={t("settings.desktopTitle")}
             />
           </span>

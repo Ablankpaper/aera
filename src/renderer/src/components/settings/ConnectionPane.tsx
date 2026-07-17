@@ -367,9 +367,10 @@ export default function ConnectionPane(): React.JSX.Element {
               ))}
             </div>
             <div className="settings-field-hint">
-              Auto tries the Hermes dashboard WebSocket through the SSH tunnel
-              first, then falls back to legacy SSH chat. Dashboard forces the
-              upstream dashboard path; Legacy keeps the older SSH transport.
+              Auto tries the AgentEra Runtime dashboard WebSocket through the
+              SSH tunnel first, then falls back to legacy SSH chat. Dashboard
+              forces the upstream dashboard path; Legacy keeps the older SSH
+              transport.
             </div>
             {transportProbe && (
               <div

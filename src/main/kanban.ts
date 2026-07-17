@@ -165,9 +165,9 @@ export function unsupportedInRemote<T>(): KanbanResult<T> {
     success: false,
     unsupportedMode: true,
     error:
-      "Kanban requires either a local Hermes install or SSH tunnel mode. " +
+      "Kanban requires either a local AgentEra Runtime install or SSH tunnel mode. " +
       "Plain remote (HTTP+API key) mode does not yet expose the kanban API. " +
-      "Switch to SSH tunnel mode in Settings to use the board against a remote Hermes.",
+      "Switch to SSH tunnel mode in Settings to use the board against a remote AgentEra Runtime.",
   };
 }
 

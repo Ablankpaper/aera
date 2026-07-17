@@ -273,7 +273,7 @@ function resolveOfficeModel(profile?: string): string {
 }
 
 /**
- * Build the `.env` Hermes One writes into the hermes-office directory.
+ * Build the `.env` AgentEra Studio writes into the hermes-office directory.
  * Exported so the contents (notably `HERMES_MODEL`, issue #256) can be
  * unit tested without a live Office install.
  */
@@ -286,7 +286,7 @@ export function buildOfficeEnv(opts: {
 }): string {
   const adapterPort = opts.adapterPort ?? adapterPortFromWsUrl(opts.url);
   return [
-    "# Auto-configured by Hermes One",
+    "# Auto-configured by AgentEra Studio",
     `PORT=${opts.port}`,
     `HOST=127.0.0.1`,
     `NEXT_PUBLIC_GATEWAY_URL=${opts.url}`,
@@ -296,7 +296,7 @@ export function buildOfficeEnv(opts: {
     `HERMES_API_KEY=${opts.apiKey}`,
     `HERMES_ADAPTER_PORT=${adapterPort}`,
     `HERMES_MODEL=${opts.model || "hermes"}`,
-    `HERMES_AGENT_NAME=Hermes`,
+    `HERMES_AGENT_NAME=AgentEra`,
     "",
   ].join("\n");
 }
@@ -995,7 +995,7 @@ export function startAdapter(): boolean {
 
   proc.on("close", (code) => {
     if (code && code !== 0 && !adapterError) {
-      adapterError = `Hermes adapter exited with code ${code}`;
+      adapterError = `AgentEra Runtime adapter exited with code ${code}`;
     }
     adapterProcess = null;
     cleanupPid(ADAPTER_PID_FILE);
@@ -1056,7 +1056,10 @@ export function startAll(profile?: string): {
   // Start adapter
   const adapterOk = startAdapter();
   if (!adapterOk) {
-    return { success: false, error: "Failed to start Hermes adapter" };
+    return {
+      success: false,
+      error: "Failed to start AgentEra Runtime adapter",
+    };
   }
 
   return { success: true };

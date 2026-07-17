@@ -609,7 +609,7 @@ export function clearVersionCache(): void {
 
 export function runHermesDoctor(): string {
   if (!canInvokeHermesCli()) {
-    return "Hermes is not installed.";
+    return "AgentEra Runtime is not installed.";
   }
   try {
     const output = execFileSync(HERMES_PYTHON, hermesCliArgs(["doctor"]), {
@@ -672,7 +672,7 @@ export async function runClawMigrate(
   onProgress: (progress: InstallProgress) => void,
 ): Promise<void> {
   if (!existsSync(HERMES_PYTHON) || !existsSync(HERMES_SCRIPT)) {
-    throw new Error("Hermes is not installed.");
+    throw new Error("AgentEra Runtime is not installed.");
   }
 
   const openclaw = checkOpenClawExists();
@@ -737,7 +737,9 @@ export async function runHermesUpdate(
   onProgress: (progress: InstallProgress) => void,
 ): Promise<void> {
   if (!existsSync(HERMES_PYTHON) || !existsSync(HERMES_SCRIPT)) {
-    throw new Error("Hermes is not installed. Please install it first.");
+    throw new Error(
+      "AgentEra Runtime is not installed. Please install it first.",
+    );
   }
 
   let log = "";
@@ -746,7 +748,7 @@ export async function runHermesUpdate(
     onProgress({
       step: 1,
       totalSteps: 1,
-      title: "Updating Hermes Agent",
+      title: "Updating AgentEra Runtime",
       detail: text.trim().slice(0, 120),
       log,
     });
@@ -827,7 +829,7 @@ const STAGE_MARKERS: { pattern: RegExp; step: number; title: string }[] = [
     pattern:
       /Cloning|cloning|Updating.*repository|Repository|Installing to .*hermes-agent|Downloading PortableGit/i,
     step: 4,
-    title: "Downloading Hermes Agent",
+    title: "Downloading AgentEra Runtime",
   },
   {
     pattern: /Creating virtual|virtual environment|uv venv|\bvenv\b/i,
@@ -882,7 +884,7 @@ export async function runInstall(
     });
   }
 
-  emit("Running official Hermes install script...\n");
+  emit("Running the official AgentEra Runtime install script...\n");
 
   if (IS_WINDOWS) {
     return runInstallWindows(emit);
@@ -964,7 +966,7 @@ export async function runInstall(
           // If Hermes is actually installed and working, treat as success.
           if (existsSync(HERMES_PYTHON) && existsSync(HERMES_SCRIPT)) {
             emit(
-              "\nInstall script exited with warnings, but Hermes is installed successfully.\n",
+              "\nInstall script exited with warnings, but AgentEra Runtime is installed successfully.\n",
             );
             resolve();
           } else {
@@ -1126,7 +1128,7 @@ async function runInstallWindows(emit: (t: string) => void): Promise<void> {
       // Same tolerance as the bash path: if the binary tree exists, count it.
       if (existsSync(HERMES_PYTHON) && existsSync(HERMES_SCRIPT)) {
         emit(
-          "\nInstall script exited with warnings, but Hermes is installed successfully.\n",
+          "\nInstall script exited with warnings, but AgentEra Runtime is installed successfully.\n",
         );
         resolve();
       } else {
@@ -1162,7 +1164,7 @@ export async function runHermesBackup(
   profile?: string,
 ): Promise<{ success: boolean; path?: string; error?: string }> {
   if (!existsSync(HERMES_PYTHON) || !existsSync(HERMES_SCRIPT)) {
-    return { success: false, error: "Hermes is not installed." };
+    return { success: false, error: "AgentEra Runtime is not installed." };
   }
   const args = hermesCliArgs();
   if (profile && profile !== "default") args.push("-p", profile);
@@ -1216,7 +1218,7 @@ export async function runHermesImport(
   }
 
   if (!existsSync(HERMES_PYTHON) || !existsSync(HERMES_SCRIPT)) {
-    return { success: false, error: "Hermes is not installed." };
+    return { success: false, error: "AgentEra Runtime is not installed." };
   }
   const args = hermesCliArgs();
   if (profile && profile !== "default") args.push("-p", profile);
@@ -1281,7 +1283,7 @@ export function validateImportArchivePath(
 
 export function runHermesDump(): Promise<string> {
   if (!existsSync(HERMES_PYTHON) || !existsSync(HERMES_SCRIPT)) {
-    return Promise.resolve("Hermes is not installed.");
+    return Promise.resolve("AgentEra Runtime is not installed.");
   }
   return new Promise((resolve) => {
     execFile(

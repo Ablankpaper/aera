@@ -7,7 +7,6 @@ import {
   Palette,
   Plug,
   ShieldCheck,
-  Users,
   X,
 } from "lucide-react";
 import { useI18n } from "../useI18n";
@@ -20,7 +19,6 @@ import PrivacyPane from "./PrivacyPane";
 import ConnectionPane from "./ConnectionPane";
 import DataPane from "./DataPane";
 import AboutPane from "./AboutPane";
-import CommunityPane from "./CommunityPane";
 import LogsPane from "./LogsPane";
 
 export type SettingsSection =
@@ -30,7 +28,6 @@ export type SettingsSection =
   | "connection"
   | "data"
   | "about"
-  | "community"
   | "logs";
 
 type NavGroup = "general" | "hermes";
@@ -73,12 +70,6 @@ const SETTINGS_NAV: ReadonlyArray<{
     Icon: Database,
   },
   { group: "hermes", id: "about", labelKey: "settings.nav.about", Icon: Info },
-  {
-    group: "hermes",
-    id: "community",
-    labelKey: "settings.nav.community",
-    Icon: Users,
-  },
   {
     group: "hermes",
     id: "logs",
@@ -194,7 +185,6 @@ export default function SettingsModal({
             {section === "connection" && <ConnectionPane />}
             {section === "data" && <DataPane />}
             {section === "about" && <AboutPane />}
-            {section === "community" && <CommunityPane />}
             {section === "logs" && <LogsPane />}
           </SettingsDataContext.Provider>
         </div>

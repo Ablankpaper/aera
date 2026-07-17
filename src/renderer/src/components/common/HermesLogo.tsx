@@ -7,7 +7,7 @@ function HermesLogo({ size = 32 }: { size?: number }): React.JSX.Element {
       width={size}
       height={size}
       className="rounded-xl"
-      alt="Hermes"
+      alt="AgentEra"
     />
   );
 }

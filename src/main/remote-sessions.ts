@@ -39,7 +39,8 @@ type RemoteRecord = Record<string, unknown>;
 
 function normalizeRemoteDashboardBaseUrl(value: string): string {
   const raw = value.trim();
-  if (!raw) throw new Error("Remote Hermes dashboard URL is not configured.");
+  if (!raw)
+    throw new Error("Remote AgentEra Runtime dashboard URL is not configured.");
   const url = new URL(raw);
   url.hash = "";
   url.search = "";
@@ -89,7 +90,9 @@ export function remoteRequestJson<T>(
 
   const token = config.apiKey.trim();
   if (!token)
-    throw new Error("Remote Hermes dashboard token is not configured.");
+    throw new Error(
+      "Remote AgentEra Runtime dashboard token is not configured.",
+    );
 
   return new Promise((resolve, reject) => {
     const parsed = new URL(dashboardApiUrl(config, path));
@@ -140,7 +143,7 @@ export function remoteRequestJson<T>(
     req.setTimeout(options.timeoutMs ?? 15_000, () => {
       req.destroy(
         new Error(
-          `Timed out connecting to remote Hermes dashboard after ${
+          `Timed out connecting to remote AgentEra Runtime dashboard after ${
             options.timeoutMs ?? 15_000
           }ms`,
         ),

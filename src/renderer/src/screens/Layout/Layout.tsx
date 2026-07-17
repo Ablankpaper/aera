@@ -33,7 +33,7 @@ import Kanban from "../Kanban/Kanban";
 import RemoteNotice from "../../components/RemoteNotice";
 import VerifyWarningBanner from "../../components/VerifyWarningBanner";
 import { useSettingsModal } from "../../components/settings/SettingsModalContext";
-import hermeslogo from "../../assets/hermes-one.svg";
+import agentEraIcon from "../../assets/iconv2.png";
 import {
   Compass,
   Settings as SettingsIcon,
@@ -663,15 +663,14 @@ function Layout({
     <div className={`layout ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <span
-            className="sidebar-logo"
-            role="img"
-            aria-label="Hermes"
-            style={{
-              maskImage: `url(${hermeslogo})`,
-              WebkitMaskImage: `url(${hermeslogo})`,
-            }}
-          />
+          <div className="sidebar-product" aria-label="AgentEra Studio">
+            <img
+              className="sidebar-logo"
+              src={agentEraIcon}
+              alt="AgentEra Studio"
+            />
+            <span className="sidebar-wordmark">AgentEra Studio</span>
+          </div>
           <button
             className="sidebar-collapse-toggle"
             type="button"
@@ -685,7 +684,12 @@ function Layout({
               // the expand icon on hover/focus. Both sit in a fixed-size box so
               // the swap never changes the button's footprint.
               <span className="sidebar-collapse-swap">
-                <span className="sidebar-collapse-mark" aria-hidden="true" />
+                <img
+                  className="sidebar-collapse-mark"
+                  src={agentEraIcon}
+                  alt=""
+                  aria-hidden="true"
+                />
                 <PanelLeftOpen
                   size={16}
                   className="sidebar-collapse-expand-icon"

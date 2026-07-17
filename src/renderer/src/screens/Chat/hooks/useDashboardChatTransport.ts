@@ -625,7 +625,7 @@ function logDashboardEvent(
   const events = window.__HERMES_DASHBOARD_EVENTS__ ?? [];
   events.push(summary);
   window.__HERMES_DASHBOARD_EVENTS__ = events.slice(-200);
-  console.info("[Hermes dashboard event]", summary);
+  console.info("[AgentEra Runtime dashboard event]", summary);
 }
 
 export function usageFromPayload(payload: unknown): Partial<UsageState> | null {
@@ -1123,7 +1123,7 @@ export function useDashboardChatTransport({
       // Already known unavailable on this remote/SSH connection — fail fast so the
       // caller falls back to legacy without re-running the slow status+probe.
       if (dashboardUnavailableRef.current) {
-        throw new Error("Hermes dashboard transport is unavailable");
+        throw new Error("AgentEra Runtime dashboard transport is unavailable");
       }
       if (connectingRef.current) return connectingRef.current;
 
@@ -1141,7 +1141,9 @@ export function useDashboardChatTransport({
         for (let attempt = 0; attempt < 3; attempt++) {
           const status = await window.hermesAPI.startDashboard(profile);
           if (clientGenerationRef.current !== generation) {
-            throw new Error("Hermes dashboard connection was superseded");
+            throw new Error(
+              "AgentEra Runtime dashboard connection was superseded",
+            );
           }
           if (!status.running || !status.connection) {
             if (status.needsOAuthLogin) {
@@ -1160,11 +1162,13 @@ export function useDashboardChatTransport({
             ) {
               dashboardUnavailableRef.current = true;
               onDashboardUnavailable?.(
-                status.error || "Hermes dashboard transport is unavailable",
+                status.error ||
+                  "AgentEra Runtime dashboard transport is unavailable",
               );
             }
             throw new Error(
-              status.error || "Hermes dashboard transport is unavailable",
+              status.error ||
+                "AgentEra Runtime dashboard transport is unavailable",
             );
           }
           const client: DashboardGatewayClient = new DashboardGatewayClient({
@@ -1180,14 +1184,18 @@ export function useDashboardChatTransport({
               ? await window.hermesAPI.freshDashboardWsUrl(profile)
               : status.connection.wsUrl;
             if (!freshUrl) {
-              throw new Error("Hermes dashboard WebSocket URL is unavailable");
+              throw new Error(
+                "AgentEra Runtime dashboard WebSocket URL is unavailable",
+              );
             }
             await client.connect(freshUrl);
           } catch (err) {
             lastConnectErr = err;
             client.close();
             if (clientGenerationRef.current !== generation) {
-              throw new Error("Hermes dashboard connection was superseded");
+              throw new Error(
+                "AgentEra Runtime dashboard connection was superseded",
+              );
             }
             // Transient connect failure while the dashboard IS up — back off and
             // retry (the tunnel may be re-establishing).
@@ -1196,7 +1204,9 @@ export function useDashboardChatTransport({
           }
           if (clientGenerationRef.current !== generation) {
             client.close();
-            throw new Error("Hermes dashboard connection was superseded");
+            throw new Error(
+              "AgentEra Runtime dashboard connection was superseded",
+            );
           }
           clientRef.current = client;
           return client;
@@ -1206,8 +1216,8 @@ export function useDashboardChatTransport({
         // /v1 to the dashboard tunnel (which 405s).
         const err = new Error(
           lastConnectErr instanceof Error
-            ? `Hermes dashboard chat connection failed: ${lastConnectErr.message}`
-            : "Hermes dashboard chat connection failed",
+            ? `AgentEra Runtime dashboard chat connection failed: ${lastConnectErr.message}`
+            : "AgentEra Runtime dashboard chat connection failed",
         ) as Error & { dashboardWasReachable?: boolean };
         err.dashboardWasReachable = true;
         throw err;
@@ -1403,7 +1413,7 @@ export function useDashboardChatTransport({
             ? `; /model output: ${slashResponse.output}`
             : "";
           throw new Error(
-            `Hermes dashboard did not switch to ${dashboardProvider}/${model}; live model is ${live.provider || "unknown"}/${live.model || "unknown"}${warning}${output}; custom inventory: ${modelOptionsSummary(before)}`,
+            `AgentEra Runtime dashboard did not switch to ${dashboardProvider}/${model}; live model is ${live.provider || "unknown"}/${live.model || "unknown"}${warning}${output}; custom inventory: ${modelOptionsSummary(before)}`,
           );
         }
         appliedModelRef.current = key;
@@ -1599,7 +1609,7 @@ export function useDashboardChatTransport({
         if (!syncedAttachments.handled) {
           if (fallbackOnUnavailable) return false;
           return failActiveTurn(
-            "Hermes dashboard could not attach the selected file. Use Auto or Legacy to fall back to the legacy attachment path.",
+            "AgentEra Runtime dashboard could not attach the selected file. Use Auto or Legacy to fall back to the legacy attachment path.",
           );
         }
         const submitText = dashboardPromptTextWithAttachmentRefs(

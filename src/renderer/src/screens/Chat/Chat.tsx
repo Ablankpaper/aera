@@ -27,7 +27,6 @@ import {
 import { useI18n } from "../../components/useI18n";
 import { buildChatTranscript } from "./transcriptUtils";
 import { ConfigHealthBanner } from "../../components/ConfigHealthBanner";
-import FollowUsModal from "../../components/FollowUsModal";
 import type { Attachment } from "../../../../shared/attachments";
 import type { SessionModelOverride } from "../../../../shared/model-override";
 import type { ActiveTurn, ChatMessage, UsageState } from "./types";
@@ -1141,8 +1140,6 @@ function Chat({
           setFolderPickerOpen(false);
         }}
       />
-      {/* Show follow-us modal only after setup is complete */}
-      {active && connectionModeLoaded && readiness.ok && <FollowUsModal />}
     </div>
   );
 }

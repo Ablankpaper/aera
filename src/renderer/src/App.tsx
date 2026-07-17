@@ -66,7 +66,9 @@ function App(): React.JSX.Element {
         if (ok) {
           next = "main";
         } else {
-          console.warn(`Cannot reach remote Hermes at ${conn.remoteUrl}.`);
+          console.warn(
+            `Cannot reach remote AgentEra Runtime at ${conn.remoteUrl}.`,
+          );
           next = "main";
         }
       } else {

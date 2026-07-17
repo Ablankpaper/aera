@@ -430,7 +430,7 @@ async function getSshDashboardSessionConfig(
   const dash = await sshEnsureDashboard(conn.ssh, profile);
   if (!dash)
     throw new Error(
-      "Hermes dashboard is unavailable on this SSH remote (needs Node + the dashboard web dist).",
+      "AgentEra Runtime dashboard is unavailable on this SSH remote (needs Node + the dashboard web dist).",
     );
   await ensureSshTunnel({ ...conn.ssh, remotePort: dash.port });
   const remoteUrl = getSshTunnelUrl();
@@ -743,7 +743,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         event.sender.send("install-progress", {
           step: 1,
           totalSteps: 1,
-          title: "Updating remote Hermes Agent",
+          title: "Updating remote AgentEra Runtime",
           detail: "Running hermes update over SSH...",
           log: "Running hermes update over SSH...\n",
         });
@@ -753,7 +753,7 @@ export function registerIpcHandlers(context: IpcContext): void {
           event.sender.send("install-progress", {
             step: 1,
             totalSteps: 1,
-            title: "Updating remote Hermes Agent",
+            title: "Updating remote AgentEra Runtime",
             detail: "Dashboard compatibility check needs attention.",
             log: `Dashboard compatibility warning: ${
               compat.error ? `${compat.detail}: ${compat.error}` : compat.detail
@@ -776,7 +776,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         event.sender.send("install-progress", {
           step: 1,
           totalSteps: 1,
-          title: "Updating Hermes Agent",
+          title: "Updating AgentEra Runtime",
           detail: "Dashboard compatibility check needs attention.",
           log: `Dashboard compatibility warning: ${
             compat.error ? `${compat.detail}: ${compat.error}` : compat.detail
@@ -1671,7 +1671,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         success: false,
         running: false,
         error:
-          "Remote mode points at an already-running Hermes server. Start or restart the gateway on that remote host.",
+          "Remote mode points at an already-running AgentEra Runtime server. Start or restart the gateway on that remote host.",
       };
     }
     return startGatewayDetailed();

@@ -9,7 +9,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
-// Hermes Desktop writes the hermes-office `.env`. It used to hardcode
+// AgentEra Studio writes the hermes-office `.env`. It used to hardcode
 // `HERMES_MODEL=hermes`, so Office ignored the user's configured model
 // (issue #256). The model is now passed through.
 describe("buildOfficeEnv (issue #256)", () => {

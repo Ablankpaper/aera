@@ -52,7 +52,9 @@ function remoteStatus(config: RemoteSessionConfig): Promise<RemoteRecord> {
     );
     req.on("error", reject);
     req.setTimeout(30_000, () => {
-      req.destroy(new Error("Timed out connecting to remote Hermes dashboard"));
+      req.destroy(
+        new Error("Timed out connecting to remote AgentEra Runtime dashboard"),
+      );
     });
     req.end();
   });
@@ -85,7 +87,7 @@ export async function remoteGetHermesVersion(
     stringValue(status.update_available) || stringValue(status.update_info);
 
   const lines = [
-    `Hermes Agent v${version}${releaseDate ? ` (${releaseDate})` : ""}`,
+    `AgentEra Runtime v${version}${releaseDate ? ` (${releaseDate})` : ""}`,
     project ? `Project: ${project}` : "",
     python ? `Python: ${python}` : "",
     sdk ? `OpenAI SDK: ${sdk}` : "",
