@@ -431,7 +431,7 @@ async function runSyncPass(): Promise<AgentSyncResult> {
           agentId: state.agentId,
           action: "skipped",
           warnings: [
-            "Linked to a different Hermes account; left untouched. It resumes syncing when that account signs back in.",
+            "Linked to a different AgentEra account; left untouched. It resumes syncing when that account signs back in.",
           ],
         });
         continue;

@@ -74,4 +74,46 @@ describe("AgentEra composed application surfaces", () => {
     expect(office).toContain("iconv2.png");
     expect(office).not.toContain("hermes-one-hq.webp");
   });
+
+  it("removes bare Hermes branding from user-facing copy", () => {
+    const messaging = read("src/shared/messaging-platforms.ts");
+    const dashboard = read("src/main/dashboard.ts");
+    const registry = read("src/main/registry.ts");
+    const sync = read("src/main/agent-sync.ts");
+    const slashCommands = read(
+      "src/renderer/src/screens/Chat/slashCommands.ts",
+    );
+    const desktopCommands = read(
+      "src/renderer/src/screens/Chat/slash/desktopCommands.ts",
+    );
+    const transcript = read("src/renderer/src/screens/Chat/transcriptUtils.ts");
+    const chatMessages = read("src/renderer/src/screens/Chat/chatMessages.ts");
+    const dashboardTransport = read(
+      "src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts",
+    );
+
+    expect(messaging).not.toMatch(/description:\s*["`][^"`]*Hermes/);
+    expect(dashboard).not.toContain("Hermes repo not found");
+    expect(registry).not.toContain('label: "Requires Hermes"');
+    expect(sync).not.toContain("different Hermes account");
+    expect(slashCommands).not.toMatch(/(Update|Show) Hermes/);
+    expect(desktopCommands).not.toContain("Show Hermes version");
+    expect(transcript).not.toMatch(/["`]Hermes[:"`]/);
+    expect(chatMessages).not.toContain("Hermes reported an error");
+    expect(dashboardTransport).not.toContain("Hermes reported an error");
+
+    expect(
+      [
+        messaging,
+        dashboard,
+        registry,
+        sync,
+        slashCommands,
+        desktopCommands,
+        transcript,
+        chatMessages,
+        dashboardTransport,
+      ].join("\n"),
+    ).toContain("AgentEra");
+  });
 });

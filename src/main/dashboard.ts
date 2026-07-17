@@ -169,7 +169,7 @@ function getManagedDashboard(profile?: string): ManagedDashboard | undefined {
 
 function unsupportedReasonForLocalSpawn(): string | undefined {
   if (!existsSync(HERMES_REPO)) {
-    return `Hermes repo not found at ${HERMES_REPO}.`;
+    return `AgentEra Runtime repository not found at ${HERMES_REPO}.`;
   }
   if (!existsSync(HERMES_PYTHON)) {
     return `AgentEra Runtime Python environment not found at ${HERMES_PYTHON}.`;

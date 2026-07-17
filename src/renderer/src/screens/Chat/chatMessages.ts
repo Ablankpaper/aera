@@ -39,7 +39,7 @@ export function displayTextForTranscript(m: ChatBubbleMessage): string {
 
 function formatErrorMessage(error: string): string {
   const text = error.trim();
-  return text || "Hermes reported an error";
+  return text || "AgentEra Runtime reported an error";
 }
 
 function findActiveUserIndex(

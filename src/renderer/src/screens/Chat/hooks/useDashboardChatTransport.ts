@@ -734,7 +734,9 @@ export function completionFailed(payload: unknown): boolean {
 function completionErrorMessage(payload: unknown): string {
   const row = asRecord(payload);
   const raw = String(row.error || row.text || row.rendered || "").trim();
-  return raw.replace(/^error\s*:\s*/i, "") || "Hermes reported an error";
+  return (
+    raw.replace(/^error\s*:\s*/i, "") || "AgentEra Runtime reported an error"
+  );
 }
 
 function userContentById(
