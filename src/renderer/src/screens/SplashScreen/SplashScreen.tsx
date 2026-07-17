@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import startVid from "../../assets/startvid.mp4";
-import splashLogo from "../../assets/hermes-one.svg";
 
 interface SplashScreenProps {
   onFinished: () => void;
@@ -59,7 +58,7 @@ function SplashScreen({
         preload="auto"
         style={{ display: "block", objectFit: "cover" }}
       />
-      <img className="splash-logo" src={splashLogo} alt="Hermes One" />
+      <div className="splash-wordmark">AgentEra Studio</div>
       {onSwitchToLocal && showEscape && (
         <div className="splash-escape">
           <span className="splash-escape-hint">Taking longer than usual?</span>

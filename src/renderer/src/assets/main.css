@@ -13921,12 +13921,30 @@ body {
   background: #000;
 }
 
-.splash-logo {
+.splash-wordmark {
   position: relative;
   z-index: 1;
-  width: 600px;
-  max-width: 60%;
+  max-width: 80%;
+  padding: 0 24px;
   opacity: 0;
+  color: #fff;
+  font-family:
+    "Manrope",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  font-size: clamp(48px, 7.5vw, 104px);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.055em;
+  white-space: nowrap;
+  user-select: none;
+  background: linear-gradient(105deg, #fff 0%, #e8fbff 48%, #d7ccff 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 12px 36px rgba(0, 0, 0, 0.5));
   animation: splashFadeIn 1.1s ease-out forwards;
 }
 
