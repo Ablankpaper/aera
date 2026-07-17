@@ -24,7 +24,7 @@ export default {
   startingClaw3dService: "Memulai layanan Claw3D...",
   clickToStart: 'Klik "Mulai" untuk menjalankan Claw3D',
   setupDesc1:
-    "Claw3D adalah lingkungan visualisasi 3D untuk agent Hermes Anda. Ini memungkinkan Anda melihat agent bekerja di ruang office interaktif.",
+    "Claw3D adalah lingkungan visualisasi 3D untuk agent AgentEra Anda. Ini memungkinkan Anda melihat agent bekerja di ruang office interaktif.",
   setupDesc2:
     "Klik di bawah untuk mengunduh dan menyiapkan Claw3D otomatis. Ini akan meng-clone repository dan menginstal semua dependency.",
   // Enterable building interiors
@@ -47,15 +47,17 @@ export default {
   repComingSoon: "Segera hadir",
   repLoading: "Memproses…",
   repErrorGeneric: "Terjadi kesalahan. Silakan coba lagi.",
-  repStatusSignedOut: "Masuk ke akun Hermes Anda untuk menggunakan bank.",
-  repStatusUnlinked: "Agen ini belum tertaut ke agen cloud. Masuk lalu coba lagi.",
+  repStatusSignedOut: "Masuk ke akun AgentEra Anda untuk menggunakan bank.",
+  repStatusUnlinked:
+    "Agen ini belum tertaut ke agen cloud. Masuk lalu coba lagi.",
   repWalletsNone: "Belum ada akun — buat satu untuk memulai.",
   repBadgeTransactable: "Dapat bertransaksi",
   repBadgeReceiveOnly: "Hanya menerima",
-  repBalanceNoTransactable: "Agen ini belum punya akun yang dapat bertransaksi — buat dulu.",
+  repBalanceNoTransactable:
+    "Agen ini belum punya akun yang dapat bertransaksi — buat dulu.",
   repBalanceEmpty: "Belum ada saldo token.",
   repBalanceTotal: "Total",
   repCreateSuccess: "Akun dibuat",
   repCreateExists: "Agen ini sudah memiliki akun bank.",
-  repStatusForeign: "Agen ini tertaut ke akun Hermes One yang berbeda.",
+  repStatusForeign: "Agen ini tertaut ke akun AgentEra Studio yang berbeda.",
 } as const;

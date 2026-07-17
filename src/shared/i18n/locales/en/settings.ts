@@ -1,7 +1,7 @@
 export default {
   title: "Settings",
   sections: {
-    hermesAgent: "Hermes Agent",
+    hermesAgent: "AgentEra Runtime",
     appearance: "Appearance",
     privacy: "Privacy",
     credentialPool: "Credential Pool",
@@ -9,7 +9,7 @@ export default {
   nav: {
     groups: {
       general: "General",
-      hermes: "Hermes One",
+      hermes: "AgentEra Studio",
     },
     appearance: "Appearance",
     language: "Language",
@@ -22,7 +22,7 @@ export default {
     logs: "Logs & Diagnostics",
   },
   agentSubtitle: "The local AI engine",
-  desktopTitle: "Hermes One Desktop",
+  desktopTitle: "AgentEra Studio",
   desktopSubtitle: "This desktop app",
   statusUpToDate: "Up to date",
   statusUpdateAvailable: "Update available",
@@ -73,11 +73,11 @@ export default {
   },
   analytics: {
     label: "Send anonymous usage analytics",
-    hint: "Collected anonymously and used only to improve Hermes One — never your chats, files, prompts, or any personal data.",
+    hint: "Collected anonymously and used only to improve AgentEra Studio — never your chats, files, prompts, or any personal data.",
   },
   notDetected: "Not detected",
   updatedSuccessfully: "Updated successfully!",
-  updateSuccess: "Hermes updated successfully.",
+  updateSuccess: "AgentEra updated successfully.",
   updateFailed: "Update failed.",
   version: "v{{version}}",
   proxyPlaceholder: "e.g. socks5://127.0.0.1:1080 or http://proxy:8080",
@@ -106,14 +106,14 @@ export default {
   compatApiKeyHint:
     "Stored as {{envVar}} — required for remote endpoints, optional for localhost.",
   poolHint:
-    "Add multiple API Keys for the same provider for automatic rotation and load balancing. Hermes will cycle through them.",
+    "Add multiple API Keys for the same provider for automatic rotation and load balancing. AgentEra will cycle through them.",
   add: "Add",
   remove: "Remove",
   keyLabel: "Key",
   empty: "(empty)",
   dataSection: "Data",
   dataHint:
-    "Export or import your Hermes configuration, sessions, skills, and memory.",
+    "Export or import your AgentEra configuration, sessions, skills, and memory.",
   backingUp: "Backing up...",
   exportBackup: "Export Backup",
   importing: "Importing...",
@@ -126,17 +126,17 @@ export default {
   latestVersion: "Already up to date",
   autoUpgradeDesktop: "Auto-upgrade desktop app",
   autoUpgradeDesktopHint:
-    "Automatically download new Hermes One releases from GitHub when the app starts. Turn this off to show the startup upgrade button without downloading until you click it.",
+    "Automatically download new AgentEra Studio releases from GitHub when the app starts. Turn this off to show the startup upgrade button without downloading until you click it.",
   runningDiagnosis: "Running diagnosis...",
   runDiagnosis: "Run Diagnosis",
   running: "Running...",
   debugDump: "Debug Dump",
   migrationDetected: "OpenClaw Installation Detected",
   migrationDesc:
-    "Found OpenClaw at <code>{{path}}</code>. You can migrate your configuration, API keys, sessions, and skills to Hermes.",
+    "Found OpenClaw at <code>{{path}}</code>. You can migrate your configuration, API keys, sessions, and skills to AgentEra.",
   migrationDismiss: "Don't show again",
   migrating: "Migrating...",
-  migrateToHermes: "Migrate to Hermes",
+  migrateToHermes: "Migrate to AgentEra",
   skip: "Skip",
   appearanceHint: "Choose your preferred interface appearance",
   apiKeyPlaceholder: "API Key",
@@ -144,11 +144,11 @@ export default {
   connectionSection: "Connection",
   modeLocal: "Local",
   modeRemote: "Remote",
-  modeLocalHint: "Using Hermes installed on this device",
-  modeRemoteHint: "Connect to a Hermes API server on your network or cloud",
+  modeLocalHint: "Using AgentEra installed on this device",
+  modeRemoteHint: "Connect to a AgentEra API server on your network or cloud",
   remoteUrl: "Remote URL",
   remoteUrlHint:
-    "The Hermes API server URL (must expose /health and /v1/chat/completions)",
+    "The AgentEra API server URL (must expose /health and /v1/chat/completions)",
   remoteApiKey: "API Key",
   remoteApiKeyHint:
     "Matches API_SERVER_KEY on the remote host. Leave empty if the server accepts unauthenticated requests.",
@@ -172,30 +172,30 @@ export default {
   save: "Save",
   serverConfigTitle: "Server Configuration",
   serverConfigHint:
-    "You&apos;re connected to a remote Hermes server. Model selection, provider API keys, and credentials are managed on the server&apos;s <code>~/.hermes/.env</code> and <code>config.yaml</code>. Edit them on the host (e.g. <code>docker exec -it hermes vi /opt/data/.env</code>) and restart the container.",
+    "You&apos;re connected to a remote AgentEra server. Model selection, provider API keys, and credentials are managed on the server&apos;s <code>~/.hermes/.env</code> and <code>config.yaml</code>. Edit them on the host (e.g. <code>docker exec -it hermes vi /opt/data/.env</code>) and restart the container.",
   connectionMode: "Connection Mode",
   switchedToLocal: "Switched to local mode",
 
   // Community
   communityTitle: "Community",
   communityHint:
-    "Join our Discord channel to ask questions, report issues, and chat with other Hermes users.",
+    "Join our Discord channel to ask questions, report issues, and chat with other AgentEra users.",
   joinDiscord: "Join Discord Channel",
   communityLinksHint:
-    "Connect with the Hermes One community, get help, and stay up to date.",
+    "Connect with the AgentEra Studio community, get help, and stay up to date.",
   linkWebsite: "Website",
   linkDiscord: "Discord",
   linkX: "X",
   linkTelegram: "Telegram",
   supportTitle: "Support the developer",
   supportHint:
-    "Hermes One is free and open source — if it helps you, consider supporting its development.",
+    "AgentEra Studio is free and open source — if it helps you, consider supporting its development.",
   supportKofi: "Support on Ko-fi",
 
   // SSH & Server Config
   modeSsh: "SSH Tunnel",
   modeSshHint:
-    "Tunnel to a remote Hermes over SSH — no exposed ports or API keys needed.",
+    "Tunnel to a remote AgentEra over SSH — no exposed ports or API keys needed.",
   sessionDisabledTitle: "Session history disabled — API_SERVER_KEY not set",
   sessionDisabledDesc:
     "Without an API server key the gateway cannot authenticate session continuation requests. Messages will still send, but conversation history won't be preserved across restarts.",
@@ -205,13 +205,13 @@ export default {
   remoteEnvSshDesc:
     "SSH mode: add API_SERVER_KEY=<your-key> to ~/.hermes/profiles/<profile>/.env on the remote host, then restart the gateway there.",
   remoteEnvDesc:
-    "Remote mode: add API_SERVER_KEY=<your-key> to the .env on your remote Hermes server, then restart the gateway.",
+    "Remote mode: add API_SERVER_KEY=<your-key> to the .env on your remote AgentEra server, then restart the gateway.",
   sshHost: "SSH Host",
   sshPort: "SSH Port",
   sshUsername: "Username",
   sshKeyPath: "Private Key Path",
   sshKeyPathOptional: "(optional, defaults to ~/.ssh/id_rsa)",
-  sshRemotePort: "Remote Hermes Port",
+  sshRemotePort: "Remote AgentEra Port",
   sshRemotePortDefault: "(default 8642)",
   sshHint:
     "Make sure you can run ssh {{cmd}} without a password prompt. The first connection trusts the host key and stores it in ~/.ssh/known_hosts; SSH will fail closed if that key changes later.",
@@ -222,17 +222,17 @@ export default {
   connectSsh: "Connect via SSH",
   sshTitle: "Connect via SSH",
   sshSubtitle:
-    "Tunnel to a remote Hermes over SSH — no exposed ports or API keys needed.",
+    "Tunnel to a remote AgentEra over SSH — no exposed ports or API keys needed.",
   sshHostPlaceholder: "192.168.1.100 or myserver.local",
   sshUsernamePlaceholder: "hermes",
   sshErrorRequired: "Host and username are required.",
   sshErrorConnection:
-    "Could not connect via SSH or reach Hermes on the remote. Make sure:\n• SSH key is correct (or default ~/.ssh/id_rsa works)\n• Hermes gateway is running on the remote\n• The remote port is correct (default 8642)",
+    "Could not connect via SSH or reach AgentEra on the remote. Make sure:\n• SSH key is correct (or default ~/.ssh/id_rsa works)\n• AgentEra gateway is running on the remote\n• The remote port is correct (default 8642)",
   sshErrorFailed: "SSH connection test failed: {{msg}}",
   sshErrorFailedSimple: "SSH connection test failed.",
   remoteErrorUrl: "Please enter a URL.",
   remoteErrorConnection:
-    "Could not reach Hermes at this URL. Check the URL and API key.\n\nLeave the key empty if the server accepts unauthenticated requests (e.g. via SSH tunnel to localhost).",
+    "Could not reach AgentEra at this URL. Check the URL and API key.\n\nLeave the key empty if the server accepts unauthenticated requests (e.g. via SSH tunnel to localhost).",
   remoteErrorFailed: "Connection test failed.",
   sshSuccess: "SSH tunnel connected!",
   sshErrorRequiredSimple: "Host and username are required",

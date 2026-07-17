@@ -13,8 +13,8 @@ export default {
   startExited: "השער הופעל, אך נעצר שוב לפני שהספיק להיות מוכן.",
   checkLog: "בדקו את יומן השער:",
   gatewayHint:
-    "מחבר את Hermes ל-Telegram, ל-Discord, ל-Slack ולפלטפורמות נוספות",
-  subtitle: "ניהול פלטפורמות המסרים שאליהן Hermes Agent יכול להתחבר.",
+    "מחבר את AgentEra ל-Telegram, ל-Discord, ל-Slack ולפלטפורמות נוספות",
+  subtitle: "ניהול פלטפורמות המסרים שאליהן AgentEra Runtime יכול להתחבר.",
   refreshTooltip: "רענון מצב הפלטפורמות",
   refresh: "רענון",
   configHint:

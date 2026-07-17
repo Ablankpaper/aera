@@ -39,7 +39,10 @@ export default {
     label: "توليد الفيديو",
     description: "توليد فيديوهات من نصوص أو صور",
   },
-  tts: { label: "تحويل النص إلى كلام", description: "تحويل النص إلى صوت منطوق" },
+  tts: {
+    label: "تحويل النص إلى كلام",
+    description: "تحويل النص إلى صوت منطوق",
+  },
   skills: {
     label: "المهارات",
     description: "إنشاء وإدارة وتنفيذ مهارات قابلة لإعادة الاستخدام",
@@ -88,7 +91,7 @@ export default {
   mcpNoResults: "لا توجد خوادم MCP تطابق عامل التصفية.",
   mcpEmptyTitle: "لم يتم تكوين خوادم MCP",
   mcpEmptyDescription:
-    "أضف خادم HTTP أو stdio مخصص، أو قم بتثبيت واحد من كتالوج Hermes MCP.",
+    "أضف خادم HTTP أو stdio مخصص، أو قم بتثبيت واحد من كتالوج AgentEra MCP.",
   mcpLoadFailed: "فشل تحميل خوادم MCP.",
   mcpAddFailed: "فشل إضافة خادم MCP.",
   mcpRemoveFailed: "فشل إزالة خادم MCP.",

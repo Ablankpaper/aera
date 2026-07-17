@@ -102,6 +102,33 @@ describe("AgentEra Studio visible branding", () => {
     expect(firstPartyLeaks).toEqual([]);
   });
 
+  it("publishes only AgentEra repository documentation", () => {
+    const readmes = [
+      "README.md",
+      "README.zh-CN.md",
+      "README.ja-JP.md",
+      "README.es-LATAM.md",
+    ];
+    const contributorGuides = [
+      "CONTRIBUTING.md",
+      "CONTRIBUTING.zh-CN.md",
+      "CONTRIBUTING.ja-JP.md",
+    ];
+
+    for (const path of [...readmes, ...contributorGuides]) {
+      const content = read(path);
+      expect(content, path).toContain("AgentEra Studio");
+      expect(content, path).toContain("https://github.com/bignormal/aera");
+      expect(content, path).not.toMatch(
+        /Hermes One|Hermes Desktop|Hermes Agent|Nous Research|fathah/,
+      );
+    }
+
+    for (const path of readmes) {
+      expect(read(path), path).not.toMatch(/<img|!\[[^\]]*\]\([^)]*\)/);
+    }
+  });
+
   // @lat: [[agentera-branding#Compatibility boundary#Stable runtime identifiers]]
   it("preserves runtime compatibility identifiers", () => {
     expect(read("src/main/installer.ts")).toContain("HERMES_HOME");

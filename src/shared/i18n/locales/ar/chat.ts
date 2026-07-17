@@ -5,8 +5,7 @@ export default {
   auto: "تلقائي",
   commandsTitle: "الأوامر",
   typeMessage: "اسأل أي شيء",
-  quickAskTitle:
-    "سؤال سريع (/btw) — سؤال جانبي لا يؤثر على سياق المحادثة",
+  quickAskTitle: "سؤال سريع (/btw) — سؤال جانبي لا يؤثر على سياق المحادثة",
   send: "إرسال",
   searchModels: "البحث في النماذج...",
   custom: "مخصص",
@@ -14,7 +13,7 @@ export default {
   reasoningEffort: {
     title: "مستوى التفكير",
     auto: "تلقائي",
-    autoDescription: "دع Hermes والنموذج يقرران.",
+    autoDescription: "دع AgentEra والنموذج يقرران.",
     hint: "التلقائي هو الأكثر أماناً. المستويات اليدوية قد يتم تجاهلها أو رفضها من قبل النماذج التي لا تدعم مستوى التفكير.",
     saveError: "تعذر حفظ مستوى التفكير. تمت استعادة التحديد السابق.",
     minimal: "أدنى",
@@ -39,11 +38,11 @@ export default {
   approve: "موافقة",
   deny: "رفض",
   clarify: {
-    defaultQuestion: "يحتاج Hermes إلى مدخلاتك.",
+    defaultQuestion: "يحتاج AgentEra إلى مدخلاتك.",
     placeholder: "اكتب إجابتك… (Ctrl+Enter للإرسال)",
     send: "إرسال",
-    skip: "تخطي — دع Hermes يقرر",
-    skipped: "تم التخطي — قرر Hermes",
+    skip: "تخطي — دع AgentEra يقرر",
+    skipped: "تم التخطي — قرر AgentEra",
     error: "تعذر تسليم إجابتك — ربما انتهت الجولة. حاول مرة أخرى.",
   },
   thinking: "جارٍ التفكير...",
@@ -64,7 +63,8 @@ export default {
   contextWindow: "نافذة السياق",
   contextUsed: "{{pct}}% مستخدم ({{left}}% متبقي)",
   contextTokens: "{{used}} / {{total}} رمز مستخدم",
-  contextCache: "الذاكرة المؤقتة: {{pct}}% إصابة ({{read}} قراءة / {{write}} كتابة)",
+  contextCache:
+    "الذاكرة المؤقتة: {{pct}}% إصابة ({{read}} قراءة / {{write}} كتابة)",
   removeAttachment: "إزالة المرفق",
   dropToAttach: "أسقط الملفات للإرفاق",
   dashboardUnavailableFallback:
@@ -127,7 +127,7 @@ export default {
     model: "عرض أو تبديل النموذج الحالي",
     memory: "عرض ذاكرة الوكيل",
     persona: "عرض الشخصية الحالية",
-    version: "عرض إصدار Hermes",
+    version: "عرض إصدار AgentEra",
   },
   queued: "{{count}} رسالة في قائمة الانتظار — سيتم الإرسال عندما ينتهي الوكيل",
   queuedCount: "{{count}} في الانتظار",
@@ -161,7 +161,7 @@ export default {
   followUs: {
     title: "تابعنا على X",
     description:
-      "ابق على اطلاع بآخر ميزات ونصائح وتحديثات Hermes One. تابعنا على X!",
+      "ابق على اطلاع بآخر ميزات ونصائح وتحديثات AgentEra Studio. تابعنا على X!",
     follow: "متابعة",
     notNow: "ليس الآن",
   },

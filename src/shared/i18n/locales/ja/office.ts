@@ -24,7 +24,7 @@ export default {
   startingClaw3dService: "Claw3D サービスを起動中...",
   clickToStart: "「開始」をクリックして Claw3D を実行",
   setupDesc1:
-    "Claw3D は Hermes エージェント用の 3D 可視化環境です。インタラクティブなオフィス空間でエージェントの動きが見られます。",
+    "Claw3D は AgentEra エージェント用の 3D 可視化環境です。インタラクティブなオフィス空間でエージェントの動きが見られます。",
   setupDesc2:
     "下のボタンで Claw3D を自動ダウンロード・セットアップします。リポジトリをクローンし、依存関係をすべてインストールします。",
   // Enterable building interiors
@@ -47,15 +47,19 @@ export default {
   repComingSoon: "近日公開",
   repLoading: "処理中…",
   repErrorGeneric: "問題が発生しました。もう一度お試しください。",
-  repStatusSignedOut: "銀行を利用するには Hermes アカウントにサインインしてください。",
-  repStatusUnlinked: "このエージェントはまだクラウドエージェントに連携されていません。サインインして再試行してください。",
+  repStatusSignedOut:
+    "銀行を利用するには AgentEra アカウントにサインインしてください。",
+  repStatusUnlinked:
+    "このエージェントはまだクラウドエージェントに連携されていません。サインインして再試行してください。",
   repWalletsNone: "口座はまだありません。まず開設してください。",
   repBadgeTransactable: "取引可能",
   repBadgeReceiveOnly: "受取専用",
-  repBalanceNoTransactable: "このエージェントには取引可能な口座がまだありません。まず開設してください。",
+  repBalanceNoTransactable:
+    "このエージェントには取引可能な口座がまだありません。まず開設してください。",
   repBalanceEmpty: "トークン残高はまだありません。",
   repBalanceTotal: "合計",
   repCreateSuccess: "口座を開設しました",
   repCreateExists: "このエージェントはすでに銀行口座を持っています。",
-  repStatusForeign: "このエージェントは別の Hermes One アカウントに連携されています。",
+  repStatusForeign:
+    "このエージェントは別の AgentEra Studio アカウントに連携されています。",
 } as const;

@@ -17,7 +17,7 @@ export default {
   reasoningEffort: {
     title: "Reasoning Level",
     auto: "Auto",
-    autoDescription: "Let Hermes and the model decide.",
+    autoDescription: "Let AgentEra and the model decide.",
     hint: "Auto is safest. Manual levels may be ignored or rejected by models that do not support reasoning effort.",
     saveError: "Could not save reasoning level. Selection was restored.",
     minimal: "Minimal",
@@ -43,11 +43,11 @@ export default {
   approve: "Approve",
   deny: "Deny",
   clarify: {
-    defaultQuestion: "Hermes needs your input.",
+    defaultQuestion: "AgentEra needs your input.",
     placeholder: "Type your answer…  (Ctrl+Enter to send)",
     send: "Send",
-    skip: "Skip — let Hermes decide",
-    skipped: "Skipped — Hermes decided",
+    skip: "Skip — let AgentEra decide",
+    skipped: "Skipped — AgentEra decided",
     error: "Couldn't deliver your answer — the turn may have ended. Try again.",
   },
   thinking: "Thinking…",
@@ -131,7 +131,7 @@ export default {
     model: "Show or switch the current model",
     memory: "Show agent memory",
     persona: "Show current persona",
-    version: "Show Hermes version",
+    version: "Show AgentEra version",
   },
   queued: "{{count}} message(s) queued — will send when the agent finishes",
   queuedCount: "{{count}} queued",
@@ -165,7 +165,7 @@ export default {
   followUs: {
     title: "Follow Us on X",
     description:
-      "Stay up to date with the latest Hermes One features, tips, and updates. Follow us on X!",
+      "Stay up to date with the latest AgentEra Studio features, tips, and updates. Follow us on X!",
     follow: "Follow",
     notNow: "Not Now",
   },

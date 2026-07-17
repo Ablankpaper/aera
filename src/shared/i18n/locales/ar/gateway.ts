@@ -7,16 +7,13 @@ export default {
   stopped: "متوقفة",
   working: "جارٍ العمل...",
   restart: "إعادة التشغيل",
-  restartFailed:
-    "فشلت إعادة تشغيل البوابة. تفقّد gateway-stderr.log للتفاصيل.",
+  restartFailed: "فشلت إعادة تشغيل البوابة. تفقّد gateway-stderr.log للتفاصيل.",
   startFailed: "تعذر بدء تشغيل البوابة.",
   stopFailed: "تعذر إيقاف البوابة.",
-  startExited:
-    "تم بدء تشغيل البوابة، لكنها توقفت مرة أخرى قبل أن تصبح جاهزة.",
+  startExited: "تم بدء تشغيل البوابة، لكنها توقفت مرة أخرى قبل أن تصبح جاهزة.",
   checkLog: "تفقّد سجل البوابة:",
-  gatewayHint:
-    "يربط Hermes بـ Telegram و Discord و Slack ومنصات أخرى",
-  subtitle: "إدارة منصات المراسلة التي يمكن لوكيل Hermes الاتصال بها.",
+  gatewayHint: "يربط AgentEra بـ Telegram و Discord و Slack ومنصات أخرى",
+  subtitle: "إدارة منصات المراسلة التي يمكن لوكيل AgentEra الاتصال بها.",
   refreshTooltip: "تحديث حالة المنصة",
   refresh: "تحديث",
   configHint:

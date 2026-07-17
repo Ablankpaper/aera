@@ -24,7 +24,7 @@ export default {
   startingClaw3dService: "A iniciar o serviço Claw3D...",
   clickToStart: 'Clique em "Iniciar" para executar o Claw3D',
   setupDesc1:
-    "O Claw3D é um ambiente de visualização 3D para os seus agentes Hermes. Permite-lhe ver os seus agentes a trabalhar num espaço de escritório interactivo.",
+    "O Claw3D é um ambiente de visualização 3D para os seus agentes AgentEra. Permite-lhe ver os seus agentes a trabalhar num espaço de escritório interactivo.",
   setupDesc2:
     "Clique abaixo para transferir e configurar automaticamente o Claw3D. Isto irá clonar o repositório e instalar todas as dependências.",
   // Enterable building interiors
@@ -47,15 +47,17 @@ export default {
   repComingSoon: "Brevemente",
   repLoading: "A processar…",
   repErrorGeneric: "Algo correu mal. Tente novamente.",
-  repStatusSignedOut: "Inicie sessão na sua conta Hermes para usar o banco.",
-  repStatusUnlinked: "Este agente ainda não está associado a um agente na nuvem. Inicie sessão e tente novamente.",
+  repStatusSignedOut: "Inicie sessão na sua conta AgentEra para usar o banco.",
+  repStatusUnlinked:
+    "Este agente ainda não está associado a um agente na nuvem. Inicie sessão e tente novamente.",
   repWalletsNone: "Ainda não há contas — crie uma para começar.",
   repBadgeTransactable: "Transacional",
   repBadgeReceiveOnly: "Apenas receção",
-  repBalanceNoTransactable: "Este agente ainda não tem uma conta transacional — crie uma primeiro.",
+  repBalanceNoTransactable:
+    "Este agente ainda não tem uma conta transacional — crie uma primeiro.",
   repBalanceEmpty: "Ainda não há saldos de tokens.",
   repBalanceTotal: "Total",
   repCreateSuccess: "Conta criada",
   repCreateExists: "Este agente já tem uma conta bancária.",
-  repStatusForeign: "Este agente está associado a outra conta Hermes One.",
+  repStatusForeign: "Este agente está associado a outra conta AgentEra Studio.",
 } as const;

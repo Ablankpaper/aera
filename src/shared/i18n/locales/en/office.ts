@@ -30,7 +30,7 @@ export default {
   startingClaw3dService: "Starting Claw3D service...",
   clickToStart: 'Click "Start" to run Claw3D',
   setupDesc1:
-    "Claw3D is a 3D visualization environment for your Hermes agents. It lets you see your agents working in an interactive office space.",
+    "Claw3D is a 3D visualization environment for your AgentEra agents. It lets you see your agents working in an interactive office space.",
   setupDesc2:
     "Click below to automatically download and set up Claw3D. This will clone the repository and install all dependencies.",
   // Agent details sidebar
@@ -76,7 +76,7 @@ export default {
   repComingSoon: "Coming soon",
   repLoading: "Working…",
   repErrorGeneric: "Something went wrong. Please try again.",
-  repStatusSignedOut: "Sign in to your Hermes account to use the bank.",
+  repStatusSignedOut: "Sign in to your AgentEra account to use the bank.",
   repStatusUnlinked:
     "This agent isn't linked to a cloud agent yet. Sign in and try again.",
   repWalletsNone: "No accounts yet — create one to get started.",
@@ -89,5 +89,5 @@ export default {
   repCreateSuccess: "Account created",
   repCreateExists: "This agent already has a bank account.",
   repStatusForeign:
-    "This agent is linked to a different Hermes One account.",
+    "This agent is linked to a different AgentEra Studio account.",
 } as const;

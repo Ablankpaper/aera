@@ -1,5 +1,5 @@
 export default {
-  title: "Welcome to Hermes One",
+  title: "Welcome to AgentEra Studio",
   subtitle:
     "Your self-improving AI assistant that runs locally on your machine. Private, powerful, and always learning.",
   installIssueTitle: "Installation Issue",
@@ -11,9 +11,9 @@ export default {
   installSizeHint: "This will install required components (~2 GB)",
   copyInstallCommand: "Copy install command",
   dividerOr: "or",
-  connectRemote: "Connect to Remote Hermes",
-  connectRemoteTitle: "Connect to Remote Hermes",
-  connectRemoteSubtitle: "Enter the URL of a running Hermes API server.",
+  connectRemote: "Connect to Remote AgentEra",
+  connectRemoteTitle: "Connect to Remote AgentEra",
+  connectRemoteSubtitle: "Enter the URL of a running AgentEra API server.",
   remoteServerUrl: "Server URL",
   remoteApiKey: "API Key (optional)",
   remoteApiKeyPlaceholder: "Bearer token (API_SERVER_KEY)",

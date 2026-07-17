@@ -24,7 +24,7 @@ export default {
   startingClaw3dService: "Uruchamianie usługi Claw3D...",
   clickToStart: 'Kliknij "Uruchom", aby uruchomić Claw3D',
   setupDesc1:
-    "Claw3D to środowisko wizualizacji 3D dla agentów Hermes. Pozwala obserwować pracę agentów w interaktywnej przestrzeni biurowej.",
+    "Claw3D to środowisko wizualizacji 3D dla agentów AgentEra. Pozwala obserwować pracę agentów w interaktywnej przestrzeni biurowej.",
   setupDesc2:
     "Kliknij poniżej, aby automatycznie pobrać i skonfigurować Claw3D. Repozytorium zostanie sklonowane, a zależności zainstalowane.",
   // Enterable building interiors
@@ -47,15 +47,17 @@ export default {
   repComingSoon: "Wkrótce",
   repLoading: "Przetwarzanie…",
   repErrorGeneric: "Coś poszło nie tak. Spróbuj ponownie.",
-  repStatusSignedOut: "Zaloguj się na konto Hermes, aby korzystać z banku.",
-  repStatusUnlinked: "Ten agent nie jest jeszcze połączony z agentem w chmurze. Zaloguj się i spróbuj ponownie.",
+  repStatusSignedOut: "Zaloguj się na konto AgentEra, aby korzystać z banku.",
+  repStatusUnlinked:
+    "Ten agent nie jest jeszcze połączony z agentem w chmurze. Zaloguj się i spróbuj ponownie.",
   repWalletsNone: "Brak kont — utwórz jedno, aby zacząć.",
   repBadgeTransactable: "Transakcyjne",
   repBadgeReceiveOnly: "Tylko odbiór",
-  repBalanceNoTransactable: "Ten agent nie ma jeszcze konta transakcyjnego — najpierw je utwórz.",
+  repBalanceNoTransactable:
+    "Ten agent nie ma jeszcze konta transakcyjnego — najpierw je utwórz.",
   repBalanceEmpty: "Brak sald tokenów.",
   repBalanceTotal: "Suma",
   repCreateSuccess: "Konto utworzone",
   repCreateExists: "Ten agent ma już konto bankowe.",
-  repStatusForeign: "Ten agent jest połączony z innym kontem Hermes One.",
+  repStatusForeign: "Ten agent jest połączony z innym kontem AgentEra Studio.",
 } as const;

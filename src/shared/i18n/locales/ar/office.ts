@@ -30,7 +30,7 @@ export default {
   startingClaw3dService: "جارٍ بدء تشغيل Claw3D...",
   clickToStart: 'انقر "بدء" لتشغيل Claw3D',
   setupDesc1:
-    "Claw3D هي بيئة تصور ثلاثي الأبعاد لوكلاء Hermes. تتيح لك رؤية وكلائك يعملون في مساحة مكتب تفاعلية.",
+    "Claw3D هي بيئة تصور ثلاثي الأبعاد لوكلاء AgentEra. تتيح لك رؤية وكلائك يعملون في مساحة مكتب تفاعلية.",
   setupDesc2:
     "انقر أدناه لتنزيل Claw3D وإعداده تلقائياً. سيؤدي ذلك إلى استنساخ المستودع وتثبيت جميع التبعيات.",
   // Agent details sidebar
@@ -66,15 +66,17 @@ export default {
   repComingSoon: "قريباً",
   repLoading: "جارٍ العمل…",
   repErrorGeneric: "حدث خطأ ما. حاول مرة أخرى.",
-  repStatusSignedOut: "سجّل الدخول إلى حساب Hermes لاستخدام البنك.",
-  repStatusUnlinked: "هذا الوكيل غير مرتبط بوكيل سحابي بعد. سجّل الدخول وحاول مرة أخرى.",
+  repStatusSignedOut: "سجّل الدخول إلى حساب AgentEra لاستخدام البنك.",
+  repStatusUnlinked:
+    "هذا الوكيل غير مرتبط بوكيل سحابي بعد. سجّل الدخول وحاول مرة أخرى.",
   repWalletsNone: "لا توجد حسابات بعد — أنشئ حساباً للبدء.",
   repBadgeTransactable: "قابل للتحويل",
   repBadgeReceiveOnly: "استقبال فقط",
-  repBalanceNoTransactable: "لا يملك هذا الوكيل حساباً قابلاً للتحويل بعد — أنشئ حساباً أولاً.",
+  repBalanceNoTransactable:
+    "لا يملك هذا الوكيل حساباً قابلاً للتحويل بعد — أنشئ حساباً أولاً.",
   repBalanceEmpty: "لا توجد أرصدة رموز بعد.",
   repBalanceTotal: "الإجمالي",
   repCreateSuccess: "تم إنشاء الحساب",
   repCreateExists: "لدى هذا الوكيل حساب بنكي بالفعل.",
-  repStatusForeign: "هذا الوكيل مرتبط بحساب Hermes One مختلف.",
+  repStatusForeign: "هذا الوكيل مرتبط بحساب AgentEra Studio مختلف.",
 } as const;

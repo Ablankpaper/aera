@@ -1,5 +1,5 @@
 export default {
-  appName: "Hermes One",
+  appName: "AgentEra Studio",
   continue: "繼續",
   cancel: "取消",
   retry: "重試",
