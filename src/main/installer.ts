@@ -24,16 +24,6 @@ import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 
 const IS_WINDOWS = process.platform === "win32";
 
-const HERMES_DESKTOP_USER_DATA_DIR =
-  process.env.HERMES_DESKTOP_USER_DATA_DIR?.trim();
-if (HERMES_DESKTOP_USER_DATA_DIR) {
-  try {
-    app.setPath("userData", HERMES_DESKTOP_USER_DATA_DIR);
-  } catch {
-    /* best effort: Electron may reject late path changes in tests */
-  }
-}
-
 // Resolve the Hermes data directory. Precedence:
 //   1. HERMES_HOME env var if set (install.ps1 sets it User-scope on
 //      Windows; users may also override manually for WSL/custom setups).

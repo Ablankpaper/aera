@@ -5,9 +5,10 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { I18nProvider } from "./components/I18nProvider";
 import { initAnalytics } from "./utils/analytics";
+import { DESKTOP_PRODUCT_NAME } from "../../shared/branding";
 
 const appName = import.meta.env.VITE_HERMES_DESKTOP_APP_NAME?.trim();
-document.title = appName || "Hermes One";
+document.title = appName || DESKTOP_PRODUCT_NAME;
 
 // Initialize analytics (privacy-first, only if user consented and key is configured)
 initAnalytics();

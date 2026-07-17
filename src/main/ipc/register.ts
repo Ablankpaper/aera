@@ -15,6 +15,7 @@ import { getActiveProfileNameSync } from "../utils";
 import type { Attachment } from "../../shared/attachments";
 import type { SessionModelOverride } from "../../shared/model-override";
 import type { AppLocale } from "../../shared/i18n/types";
+import { DESKTOP_PRODUCT_NAME } from "../../shared/branding";
 import type {
   DesktopSessionContinuationItem,
   DesktopSessionLocalError,
@@ -407,7 +408,8 @@ export interface IpcContext {
   openExternalUrl: (rawUrl: unknown) => void;
 }
 
-const APP_NAME = process.env.HERMES_DESKTOP_APP_NAME?.trim() || "Hermes One";
+const APP_NAME =
+  process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
 
 type RemoteSessionBridgeConfig = RemoteSessionConfig;
 

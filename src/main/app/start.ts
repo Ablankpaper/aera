@@ -20,8 +20,10 @@ import { setGatewayPromptParent } from "../gatewayPrompt";
 import { showChatContextMenu } from "./context-menu";
 import { buildMenu } from "./menu";
 import { setupUpdater } from "./updater";
+import { DESKTOP_APP_ID, DESKTOP_PRODUCT_NAME } from "../../shared/branding";
 
-const APP_NAME = process.env.HERMES_DESKTOP_APP_NAME?.trim() || "Hermes One";
+const APP_NAME =
+  process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
 const OPEN_DEVTOOLS_ON_START =
   process.env.HERMES_OPEN_DEVTOOLS === "1" ||
   process.env.HERMES_DESKTOP_OPEN_DEVTOOLS === "1";
@@ -50,7 +52,7 @@ export function startMainProcess(): void {
   setupUpdater({ getMainWindow: () => mainWindow });
 
   app.whenReady().then(() => {
-    electronApp.setAppUserModelId("com.hermes.desktop");
+    electronApp.setAppUserModelId(DESKTOP_APP_ID);
 
     app.on("browser-window-created", (_, window) => {
       optimizer.watchWindowShortcuts(window);
