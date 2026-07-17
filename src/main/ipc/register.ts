@@ -2,7 +2,7 @@ import {
   app,
   shell,
   BrowserWindow,
-  ipcMain,
+  ipcMain as electronIpcMain,
   Menu,
   Notification,
   dialog,
@@ -12,7 +12,11 @@ import { extname } from "path";
 import { randomUUID } from "crypto";
 import type { AgenteraAuthController } from "../agentera-auth/controller";
 import { readdir, readFile, stat } from "fs/promises";
-import { getActiveProfileNameSync } from "../utils";
+import {
+  getActiveProfileNameSync,
+  isValidProfileName,
+  profileHome,
+} from "../utils";
 import type { Attachment } from "../../shared/attachments";
 import type { SessionModelOverride } from "../../shared/model-override";
 import type { AppLocale } from "../../shared/i18n/types";
@@ -55,7 +59,6 @@ import {
 } from "../gpu-fallback";
 import type { GpuPreferenceMode } from "../../shared/gpu";
 import {
-  checkInstallStatus,
   verifyInstall,
   runInstall,
   inspectInstallTarget,
@@ -173,6 +176,7 @@ import {
   getPublicConnectionConfig,
   normalizeRemoteChatTransport,
   resolveConnectionApiKeyUpdate,
+  rotateConnectionContextId,
   setConnectionConfig,
   getPlatformEnabled,
   setPlatformEnabled,
@@ -247,10 +251,26 @@ import {
 } from "../config-health";
 import {
   listProfiles,
+  listLocalProfileLocations,
   createProfile,
   deleteProfile,
   setActiveProfile,
 } from "../profiles";
+import {
+  hasMeaningfulHermesProfileData,
+  type AgenteraProfileBindingStore,
+  type AgenteraRuntimeOwner,
+} from "../agentera-profile-binding";
+import type { AgenteraConnectionOwnerStore } from "../agentera-connection-owner";
+import {
+  probeAgenteraInstallFiles,
+  runAgenteraStartupPreflight,
+} from "../agentera-startup-preflight";
+import {
+  AGENTERA_PROFILE_ARGUMENT_INDEX,
+  createGuardedIpcMain,
+  type ProductAccessGuard,
+} from "./auth-guard";
 import {
   setProfileColor,
   setProfileAvatar,
@@ -408,6 +428,10 @@ export interface IpcContext {
   notifyCustomProvidersChanged: () => void;
   openExternalUrl: (rawUrl: unknown) => void;
   agenteraAuth: AgenteraAuthController;
+  productAccessGuard: ProductAccessGuard;
+  getAgenteraRuntimeOwner: () => AgenteraRuntimeOwner;
+  agenteraProfileBindings: AgenteraProfileBindingStore;
+  agenteraConnectionOwners: AgenteraConnectionOwnerStore;
 }
 
 const APP_NAME =
@@ -660,7 +684,45 @@ export function registerIpcHandlers(context: IpcContext): void {
     notifyCustomProvidersChanged,
     openExternalUrl,
     agenteraAuth,
+    productAccessGuard,
+    getAgenteraRuntimeOwner,
+    agenteraProfileBindings,
+    agenteraConnectionOwners,
   } = context;
+  const directProfileTargetIndex: Readonly<Record<string, number>> = {
+    "set-profile-avatar": 0,
+    "set-profile-color": 0,
+    "set-profile-name": 0,
+    "remove-profile-avatar": 0,
+  };
+  const assertChannelProfileTarget = (
+    channel: string,
+    rendererArguments: readonly unknown[],
+  ): void => {
+    const index =
+      AGENTERA_PROFILE_ARGUMENT_INDEX[channel] ??
+      directProfileTargetIndex[channel];
+    if (index === undefined) return;
+    const connection = getConnectionConfig();
+    if (connection.mode !== "local") return;
+    const candidate = rendererArguments[index];
+    const profile =
+      candidate === undefined || candidate === null || candidate === ""
+        ? getActiveProfileNameSync()
+        : candidate;
+    if (typeof profile !== "string" || !isValidProfileName(profile)) {
+      throw new Error("AgentEra Runtime Profile target is invalid.");
+    }
+    agenteraProfileBindings.verifyProfileBinding(
+      profileHome(profile),
+      getAgenteraRuntimeOwner(),
+    );
+  };
+  const ipcMain = createGuardedIpcMain(
+    electronIpcMain,
+    productAccessGuard,
+    assertChannelProfileTarget,
+  );
   const mainWindow = getMainWindow();
   // AgentEra product authentication is intentionally namespaced away from the
   // legacy Hermes account and provider OAuth channels.
@@ -696,9 +758,113 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
   ipcMain.handle("agentera-auth-logout", () => agenteraAuth.logout());
 
+  ipcMain.handle("agentera-install-file-probe", () => ({
+    installed: probeAgenteraInstallFiles().installed,
+  }));
+  ipcMain.handle("agentera-startup-preflight", () =>
+    runAgenteraStartupPreflight({
+      getConnectionConfig,
+      checkInstallStatus: probeAgenteraInstallFiles,
+      verifyInstall,
+      probeRemote: (config) => testRemoteConnection(config.remoteUrl),
+      probeSsh: (config) => testSshConnection(config.ssh),
+    }),
+  );
+
+  ipcMain.handle("agentera-profile-inspect-active", () => {
+    const config = getConnectionConfig();
+    if (config.mode !== "local") {
+      throw new Error("The active Runtime context is not a local Profile.");
+    }
+    const inspection = agenteraProfileBindings.inspectProfile(
+      profileHome(getActiveProfileNameSync()),
+      getAgenteraRuntimeOwner(),
+    );
+    if (inspection.status === "unbound") return inspection;
+    return {
+      status: inspection.status,
+      meaningfulData: inspection.meaningfulData,
+      isCurrentOwner: inspection.isCurrentOwner,
+      ...(inspection.isCurrentOwner
+        ? { runtimeProfileId: inspection.binding.runtimeProfileId }
+        : {}),
+    };
+  });
+  ipcMain.handle("agentera-profile-bind-active", () => {
+    const config = getConnectionConfig();
+    if (config.mode !== "local") {
+      throw new Error("The active Runtime context is not a local Profile.");
+    }
+    const binding = agenteraProfileBindings.bindExistingProfile(
+      profileHome(getActiveProfileNameSync()),
+      getAgenteraRuntimeOwner(),
+    );
+    return { status: "bound", runtimeProfileId: binding.runtimeProfileId };
+  });
+  ipcMain.handle("agentera-profile-create-fresh", (_event, name: string) => {
+    const config = getConnectionConfig();
+    if (config.mode !== "local") {
+      throw new Error("Fresh local Profiles require local Runtime mode.");
+    }
+    const created = agenteraProfileBindings.createAndBindFreshProfile({
+      name,
+      owner: getAgenteraRuntimeOwner(),
+      createProfile,
+      resolveProfilePath: (profileId) => profileHome(profileId),
+    });
+    return {
+      status: "bound",
+      profileId: created.profileId,
+      runtimeProfileId: created.binding.runtimeProfileId,
+    };
+  });
+  ipcMain.handle("agentera-profile-list-unbound", async () => {
+    const locations = await listLocalProfileLocations();
+    return agenteraProfileBindings
+      .listUnboundProfiles(locations)
+      .map((profile) => ({
+        id: profile.id,
+        isActive: profile.isActive,
+        meaningfulData: hasMeaningfulHermesProfileData(profile.path),
+      }));
+  });
+  ipcMain.handle("agentera-connection-inspect-current", () => {
+    const config = getConnectionConfig();
+    if (config.mode === "local") {
+      throw new Error("The active Runtime context is not remote or SSH.");
+    }
+    const inspection = agenteraConnectionOwners.inspectConnectionContext(
+      config.connectionContextId,
+      getAgenteraRuntimeOwner(),
+    );
+    return inspection.status === "unbound"
+      ? inspection
+      : {
+          status: inspection.status,
+          isCurrentOwner: inspection.isCurrentOwner,
+        };
+  });
+  ipcMain.handle("agentera-connection-bind-current", () => {
+    const config = getConnectionConfig();
+    if (config.mode === "local") {
+      throw new Error("The active Runtime context is not remote or SSH.");
+    }
+    agenteraConnectionOwners.bindConnectionContext(
+      config.connectionContextId,
+      getAgenteraRuntimeOwner(),
+    );
+    return { status: "bound" };
+  });
+
   // Installation
   ipcMain.handle("check-install", () => {
-    return checkInstallStatus();
+    const status = probeAgenteraInstallFiles();
+    return {
+      installed: status.installed,
+      configured: status.configured,
+      hasApiKey: status.hasApiKey,
+      verified: status.installed,
+    };
   });
 
   ipcMain.handle("verify-install", () => verifyInstall());
@@ -1337,6 +1503,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         getConnectionConfig(),
       ),
     );
+    rotateConnectionContextId();
     notifyConnectionConfigChanged();
     return result;
   });
@@ -1347,6 +1514,8 @@ export function registerIpcHandlers(context: IpcContext): void {
       throw new Error("Remote gateway is not configured.");
     }
     await clearRemoteOAuthSession(conn.remoteUrl);
+    rotateConnectionContextId();
+    notifyConnectionConfigChanged();
     return { signedIn: false };
   });
 
@@ -2047,7 +2216,23 @@ export function registerIpcHandlers(context: IpcContext): void {
         isActive: p.name === active,
       }));
     }
-    return listProfiles();
+    const owner = getAgenteraRuntimeOwner();
+    const locations = await listLocalProfileLocations();
+    const allowedProfileIds = new Set<string>();
+    for (const profile of locations) {
+      try {
+        const inspection = agenteraProfileBindings.inspectProfile(
+          profile.path,
+          owner,
+        );
+        if (inspection.status === "owned" && inspection.isCurrentOwner) {
+          allowedProfileIds.add(profile.id);
+        }
+      } catch {
+        // A missing/corrupt/unowned Profile is not opened for rich metadata.
+      }
+    }
+    return listProfiles(allowedProfileIds);
   });
   ipcMain.handle(
     "create-profile",
@@ -2055,13 +2240,31 @@ export function registerIpcHandlers(context: IpcContext): void {
       const conn = getConnectionConfig();
       if (conn.mode === "ssh" && conn.ssh)
         return sshCreateProfile(conn.ssh, name, cloneFrom);
-      return createProfile(name, cloneFrom);
+      const owner = getAgenteraRuntimeOwner();
+      if (cloneFrom) {
+        agenteraProfileBindings.verifyProfileBinding(
+          profileHome(cloneFrom),
+          owner,
+        );
+      }
+      const created = createProfile(name, cloneFrom);
+      if (created.success && created.id) {
+        agenteraProfileBindings.bindExistingProfile(
+          profileHome(created.id),
+          owner,
+        );
+      }
+      return created;
     },
   );
   ipcMain.handle("delete-profile", (_event, name: string) => {
     const conn = getConnectionConfig();
     if (conn.mode === "ssh" && conn.ssh)
       return sshDeleteProfile(conn.ssh, name);
+    agenteraProfileBindings.verifyProfileBinding(
+      profileHome(name),
+      getAgenteraRuntimeOwner(),
+    );
     return deleteProfile(name);
   });
   ipcMain.handle("set-active-profile", async (_event, name: string) => {
@@ -2070,11 +2273,17 @@ export function registerIpcHandlers(context: IpcContext): void {
     // so without this an SSH session forgot the choice and reset to `default`
     // on every relaunch. Then drop the cached health flag so the next check
     // probes the newly-active profile's gateway, not the previous one's.
+    const conn = getConnectionConfig();
+    if (conn.mode === "local") {
+      agenteraProfileBindings.verifyProfileBinding(
+        profileHome(name),
+        getAgenteraRuntimeOwner(),
+      );
+    }
     setActiveProfile(name);
     notifyProfileSwitched();
     // Bring the activated profile's own gateway up if it isn't already —
     // without stopping any other profile's gateway (their bots stay online).
-    const conn = getConnectionConfig();
     if (conn.mode === "ssh" && conn.ssh) {
       // Per-profile gateway lives on the remote; start it over SSH. (Previously
       // SSH was skipped entirely, so selecting/Chatting a profile in the Agents

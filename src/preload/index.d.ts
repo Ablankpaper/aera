@@ -34,6 +34,16 @@ import type {
 import type { ChatToolEvent } from "../shared/chat-stream";
 import type { GpuPreferenceMode, GpuStatus } from "../shared/gpu";
 import type { AgenteraAuthPublicState } from "../shared/agentera-auth";
+import type {
+  AgenteraBoundConnectionPublicState,
+  AgenteraBoundProfilePublicState,
+  AgenteraConnectionClaimPublicState,
+  AgenteraFreshProfilePublicState,
+  AgenteraInstallFileProbe,
+  AgenteraProfileClaimPublicState,
+  AgenteraStartupPreflightPublicResult,
+  AgenteraUnboundProfilePublicState,
+} from "../shared/agentera-runtime-access";
 
 interface ElectronAPI {
   process: {
@@ -55,6 +65,19 @@ interface AgenteraAuthAPI {
   onStateChanged: (
     callback: (state: AgenteraAuthPublicState) => void,
   ) => () => void;
+}
+
+interface AgenteraRuntimeAccessAPI {
+  probeInstallFiles: () => Promise<AgenteraInstallFileProbe>;
+  runStartupPreflight: () => Promise<AgenteraStartupPreflightPublicResult>;
+  inspectActiveProfile: () => Promise<AgenteraProfileClaimPublicState>;
+  bindActiveProfile: () => Promise<AgenteraBoundProfilePublicState>;
+  createFreshProfile: (
+    name: string,
+  ) => Promise<AgenteraFreshProfilePublicState>;
+  listUnboundProfiles: () => Promise<AgenteraUnboundProfilePublicState[]>;
+  inspectCurrentConnection: () => Promise<AgenteraConnectionClaimPublicState>;
+  bindCurrentConnection: () => Promise<AgenteraBoundConnectionPublicState>;
 }
 
 interface InstallStatus {
@@ -351,6 +374,7 @@ interface HermesAPI {
   isRemoteMode: () => Promise<boolean>;
   isRemoteOnlyMode: () => Promise<boolean>;
   getConnectionConfig: () => Promise<{
+    connectionContextId: string;
     mode: "local" | "remote" | "ssh";
     remoteUrl: string;
     remoteAuthMode: "auto" | "token" | "oauth";
@@ -1266,5 +1290,6 @@ declare global {
     electron: ElectronAPI;
     hermesAPI: HermesAPI;
     agenteraAuth: AgenteraAuthAPI;
+    agenteraRuntimeAccess: AgenteraRuntimeAccessAPI;
   }
 }

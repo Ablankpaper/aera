@@ -10,6 +10,7 @@ type PublicConnectionConfig = Awaited<
 
 function connectionConfig(): PublicConnectionConfig {
   return {
+    connectionContextId: "11111111-1111-4111-8111-111111111111",
     mode: "remote" as const,
     remoteUrl: "https://hermes.example",
     remoteAuthMode: "auto" as const,

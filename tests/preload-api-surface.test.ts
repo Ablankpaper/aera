@@ -68,6 +68,26 @@ function extractAgenteraTypeMethods(src: string): string[] {
 const agenteraPreloadMethods = extractAgenteraPreloadMethods(preloadSrc);
 const agenteraTypeMethods = extractAgenteraTypeMethods(preloadTypes);
 
+function extractAgenteraRuntimeAccessMethods(src: string): string[] {
+  const objectMatch = src.match(
+    /const\s+agenteraRuntimeAccessAPI\s*=\s*\{([\s\S]*?)^\};/m,
+  );
+  if (!objectMatch) return [];
+  return [...objectMatch[1].matchAll(/^\s{2}(\w+)\s*:\s*\(/gm)].map(
+    (match) => match[1],
+  );
+}
+
+function extractAgenteraRuntimeAccessTypeMethods(src: string): string[] {
+  const interfaceMatch = src.match(
+    /interface\s+AgenteraRuntimeAccessAPI\s*\{([\s\S]*?)^\}/m,
+  );
+  if (!interfaceMatch) return [];
+  return [...interfaceMatch[1].matchAll(/^\s{2}(\w+)\s*[:(]/gm)].map(
+    (match) => match[1],
+  );
+}
+
 describe("Preload API Surface", () => {
   it("preload exposes methods", () => {
     expect(preloadMethods.length).toBeGreaterThan(30);
@@ -110,6 +130,36 @@ describe("AgentEra product-auth preload namespace", () => {
     expect(namespace).toBeDefined();
     expect(namespace).not.toMatch(
       /accessToken|refreshToken|offlineEntitlement|privateKey|code|verifier|encrypted/i,
+    );
+  });
+});
+
+describe("AgentEra Runtime-access preload namespace", () => {
+  const expected = [
+    "probeInstallFiles",
+    "runStartupPreflight",
+    "inspectActiveProfile",
+    "bindActiveProfile",
+    "createFreshProfile",
+    "listUnboundProfiles",
+    "inspectCurrentConnection",
+    "bindCurrentConnection",
+  ];
+
+  it("exposes only the reviewed ownership and preflight methods", () => {
+    expect(extractAgenteraRuntimeAccessMethods(preloadSrc)).toEqual(expected);
+    expect(extractAgenteraRuntimeAccessTypeMethods(preloadTypes)).toEqual(
+      expected,
+    );
+  });
+
+  it("does not declare owner IDs, credentials, Profile paths, or product secrets", () => {
+    const namespace = preloadTypes.match(
+      /interface\s+AgenteraRuntimeAccessAPI\s*\{([\s\S]*?)^\}/m,
+    )?.[1];
+    expect(namespace).toBeDefined();
+    expect(namespace).not.toMatch(
+      /ownerId|tenantId|installationId|profilePath|remoteUrl|ssh|apiKey|accessToken|refreshToken|offlineEntitlement|privateKey/i,
     );
   });
 });

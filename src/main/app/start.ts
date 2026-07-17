@@ -3,8 +3,8 @@ import { join } from "path";
 import { hostname } from "node:os";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import icon from "../../../resources/icon.png?asset";
-import { getPublicConnectionConfig } from "../config";
-import { stopHealthPolling } from "../hermes";
+import { getConnectionConfig, getPublicConnectionConfig } from "../config";
+import { stopGateway, stopHealthPolling } from "../hermes";
 import { stopAllDashboards } from "../dashboard";
 import { cleanupTempMediaFiles } from "../media";
 import { closeDbConnection } from "../db";
@@ -27,6 +27,16 @@ import { getAgenteraCloudOrigin } from "../agentera-auth/config";
 import { AgenteraCloudClient } from "../agentera-auth/client";
 import { createAgenteraAuthController } from "../agentera-auth/controller";
 import { createAgenteraAuthStoreForApp } from "../agentera-auth/store";
+import {
+  AgenteraProfileBindingStore,
+  type AgenteraRuntimeOwner,
+} from "../agentera-profile-binding";
+import {
+  AgenteraConnectionOwnerStore,
+  createAgenteraOwnerSwitchCoordinator,
+} from "../agentera-connection-owner";
+import { createProductAccessGuard } from "../ipc/auth-guard";
+import { getActiveProfileNameSync, profileHome } from "../utils";
 
 const APP_NAME =
   process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
@@ -46,8 +56,17 @@ export function startMainProcess(): void {
     console.error("[MAIN UNHANDLED REJECTION]", reason);
   });
 
+  const agenteraAuthStore = createAgenteraAuthStoreForApp(app, safeStorage);
+  const agenteraProfileBindings = new AgenteraProfileBindingStore({
+    userDataPath: app.getPath("userData"),
+    secureStorage: safeStorage,
+  });
+  const agenteraConnectionOwners = new AgenteraConnectionOwnerStore({
+    userDataPath: app.getPath("userData"),
+    secureStorage: safeStorage,
+  });
   const agenteraAuth = createAgenteraAuthController({
-    store: createAgenteraAuthStoreForApp(app, safeStorage),
+    store: agenteraAuthStore,
     getCloudClient: () =>
       new AgenteraCloudClient({ origin: getAgenteraCloudOrigin() }),
     openExternal: openAgenteraAuthUrl,
@@ -68,7 +87,53 @@ export function startMainProcess(): void {
       appVersion: (app.getVersion().trim() || "unknown").slice(0, 64),
     }),
   });
+  const getAgenteraRuntimeOwner = (): AgenteraRuntimeOwner => {
+    const state = agenteraAuth.getPublicState();
+    const installation = agenteraAuthStore.getInstallation();
+    if (
+      (state.status !== "authenticated" && state.status !== "offline") ||
+      !installation
+    ) {
+      throw new Error("AgentEra product sign-in is required.");
+    }
+    return {
+      tenantId: state.personalSpaceId,
+      ownerId: state.userId,
+      installationId: installation.installationId,
+    };
+  };
+  const productAccessGuard = createProductAccessGuard({
+    getAuthState: () => agenteraAuth.getPublicState(),
+    isRuntimeContextBound: () => {
+      try {
+        const owner = getAgenteraRuntimeOwner();
+        const connection = getConnectionConfig();
+        if (connection.mode === "local") {
+          agenteraProfileBindings.verifyProfileBinding(
+            profileHome(getActiveProfileNameSync()),
+            owner,
+          );
+        } else {
+          agenteraConnectionOwners.verifyConnectionContext(
+            connection.connectionContextId,
+            owner,
+          );
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  });
+  const ownerSwitchCoordinator = createAgenteraOwnerSwitchCoordinator({
+    stopRuntimeContext: stopActiveRuntimeContext,
+  });
   const unsubscribeAgenteraAuth = agenteraAuth.subscribe((state) => {
+    ownerSwitchCoordinator.transitionTo(
+      state.status === "authenticated" || state.status === "offline"
+        ? state.userId
+        : null,
+    );
     if (!mainWindow || mainWindow.isDestroyed()) return;
     mainWindow.webContents.send("agentera-auth-state-changed", state);
   });
@@ -81,6 +146,10 @@ export function startMainProcess(): void {
     notifyCustomProvidersChanged,
     openExternalUrl,
     agenteraAuth,
+    productAccessGuard,
+    getAgenteraRuntimeOwner,
+    agenteraProfileBindings,
+    agenteraConnectionOwners,
   });
 
   setupUpdater({ getMainWindow: () => mainWindow });
@@ -142,17 +211,22 @@ export function startMainProcess(): void {
   app.on("before-quit", () => {
     unsubscribeAgenteraAuth();
     agenteraAuth.dispose();
-    stopHealthPolling();
-    for (const abort of activeRuns.values()) abort();
-    activeRuns.clear();
-    cleanupTempMediaFiles();
-    stopAllDashboards();
-    // Kill the SSH tunnel process on quit — otherwise the `ssh -N -L` child is
-    // orphaned (reparented to PID 1) and keeps holding its local port, so each
-    // relaunch leaks another tunnel and the port drifts (18642 → 61799 → …).
-    stopSshTunnel();
-    closeDbConnection();
+    stopActiveRuntimeContext();
   });
+}
+
+function stopActiveRuntimeContext(): void {
+  stopHealthPolling();
+  for (const abort of activeRuns.values()) abort();
+  activeRuns.clear();
+  cleanupTempMediaFiles();
+  stopAllDashboards();
+  // A Profile or connection context must never remain mounted across an
+  // AgentEra owner transition. Stop local execution, remote/SSH transport,
+  // and cached SQLite access before the next owner can claim a context.
+  stopGateway(undefined, true);
+  stopSshTunnel();
+  closeDbConnection();
 }
 
 function notifyConnectionConfigChanged(): void {

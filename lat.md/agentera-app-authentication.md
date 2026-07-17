@@ -14,6 +14,18 @@ The splash may preflight Runtime and connection readiness without mounting user 
 
 An online session or valid signed offline entitlement selects the bound Runtime Profile before any runnable user screen opens. A fresh authenticated device may install Runtime first, but must create and bind its empty Profile before setup or main. Authentication never becomes a writer to [[agentera-self-evolution#AgentEra self-evolution compatibility#Local learning loop|Hermes local learning]].
 
+### Sanitized preflight
+
+[[src/main/agentera-startup-preflight.ts#runAgenteraStartupPreflight]] keeps pre-auth connection and installation checks inside the main process and returns only three allowlisted fields.
+
+The result contains connection mode, the saved post-auth target, and a soft verification warning. [[src/main/agentera-startup-preflight.ts#probeAgenteraInstallFiles]] checks approved file existence without opening Profile config, credentials, Memory, sessions, or learning state.
+
+### IPC enforcement
+
+[[src/main/ipc/auth-guard.ts#AGENTERA_IPC_CHANNEL_POLICY]] assigns every main-process IPC channel exactly one preflight, authenticated, or bound-Profile access level. [[src/main/ipc/auth-guard.ts#createGuardedIpcMain]] asserts that level before the original handler can read Runtime data.
+
+The separate `window.agenteraRuntimeAccess` preload namespace returns only sanitized preflight and claim states. Other owners' IDs, local Profile paths, remote URLs, SSH configuration, credentials, and product secrets never appear in those types.
+
 ## Browser authorization
 
 The system browser handles registration, login, recovery, identity binding, and device management through Authorization Code with PKCE and a one-use loopback callback.
@@ -81,6 +93,18 @@ Password recovery revokes all sessions. Sign-out clears product credentials but 
 The first authenticated launch binds an empty Profile automatically or asks whether an existing learned Profile should be bound in place or left untouched while a new isolated Profile is created.
 
 Binding never copies, uploads, or rewrites Memory, USER, skills, sessions, files, or Curator state. One physical Profile belongs to one AgentEra owner, consistent with [[agentera-self-evolution#AgentEra self-evolution compatibility#Runtime isolation|Runtime isolation]].
+
+### Physical Profile ownership
+
+[[src/main/agentera-profile-binding.ts#AgenteraProfileBindingStore]] stores encrypted, versioned ownership metadata under Electron `userData`, keyed by the canonical physical Profile path and a stable random Runtime Profile ID. There is no ordinary unbind or reassignment operation.
+
+[[src/main/agentera-profile-binding.ts#hasMeaningfulHermesProfileData]] uses only approved filenames, file types, sizes, and directory entry presence. Existing data is bound in place, while fresh creation always calls the Hermes Profile API with `cloneFrom` set to `null` and refuses unexpectedly copied private markers.
+
+### Connection context ownership
+
+[[src/main/config.ts#getConnectionConfig]] persists a stable opaque `connectionContextId`; remote URL, API-key, SSH identity, or Remote OAuth credential changes rotate it. [[src/main/agentera-connection-owner.ts#AgenteraConnectionOwnerStore]] encrypts only the context-to-owner binding and never stores the URL, SSH fields, or credentials.
+
+[[src/main/agentera-connection-owner.ts#createAgenteraOwnerSwitchCoordinator]] makes account changes tear down active runs, the cached SQLite connection, local Gateway execution, dashboards, and SSH transport before another owner can claim a Runtime context.
 
 ## Cloud service shape
 
