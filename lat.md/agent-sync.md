@@ -2,7 +2,7 @@
 
 Syncs desktop profiles (the app's agents) with the signed-in [[hermes-account-login|Hermes One account]]'s cloud agents, bidirectionally, via the backend's `/api/agents` CRUD.
 
-Phase 1 covers the free parts from the backend's `docs/agent-sync.md`: color, persona (`SOUL.md` ↔ `systemPrompt`), memory (`memories/MEMORY.md` ↔ `memory`), and config basics (`model`/`provider` only — never the whole `config.yaml`, so no secrets leave the device). Skills, automations, and sessions are deferred. Deletions never propagate in either direction.
+The transitional sync covers color, persona (`SOUL.md` ↔ `systemPrompt`), and config basics (`model`/`provider` only). Private `MEMORY.md` and `USER.md` never enter cloud reconciliation. Skills, automations, and sessions are deferred; deletions never propagate.
 
 ## Sync engine
 
@@ -16,15 +16,17 @@ Links are **account-scoped**: every state write records the owning backend user 
 
 Per part, the pure [[src/main/agent-sync.ts#decidePartAction]] compares the last-sync base hash with both sides' current hashes: only one side moved → that side wins; both moved (or first sync) → last-writer-wins by timestamp (local file mtime vs the agent's `updatedAt`). Equal content is always a no-op.
 
-Pushes are built by [[src/main/agent-sync.ts#buildPushBody]], which enforces the backend's field limits by *skipping* oversize parts with a warning — truncating and later pulling back would destroy local content. An unset local model is also skipped so a PATCH can't clobber the cloud value with an empty string. Pulls write through the existing per-part helpers: [[src/main/soul.ts#writeSoul]], [[src/main/memory.ts#writeMemoryRaw]], [[src/main/profile-meta.ts#setProfileColor]], and [[src/main/config.ts#setModelConfig]] (preserving the local base URL).
+Pushes are built by [[src/main/agent-sync.ts#buildPushBody]], which enforces the persona limit by _skipping_ oversize content with a warning. An unset local model is also skipped so a PATCH cannot clobber the cloud value with an empty string. Pulls use [[src/main/soul.ts#writeSoul]], [[src/main/profile-meta.ts#setProfileColor]], and [[src/main/config.ts#setModelConfig]] while preserving the local base URL.
 
-A profile's stable **id** (its directory slug), not its editable display **name**, keys every on-disk operation — `getModelConfig`/`readSoul`/`readMemoryRaw`, the `cloud-sync.json` state file, and all pull writes — so a renamed profile keeps syncing against the same directory. The display `name` is used only as the cloud agent's human label (create/name-match/warnings).
+A profile's stable **id** (its directory slug), not its editable display **name**, keys `getModelConfig`, `readSoul`, `cloud-sync.json`, and all pull writes, so a renamed profile keeps syncing against the same directory. The display `name` is used only as the cloud agent's human label.
 
-Cloud-only agents are materialized locally by [[src/main/profiles.ts#createProfile]], which derives a valid, collision-free id from the cloud agent's display name and returns it; the pulled parts are then written under that id.
+Cloud-only agents are materialized locally by [[src/main/profiles.ts#createProfile]], which derives a valid, collision-free id from the cloud agent's display name. Only persona, color, and model/provider are written under that id; remote Memory is ignored.
 
 ## State file
 
-Each linked profile stores its mapping in `cloud-sync.json` under the profile home: the cloud `agentId`, the owning account's user id, the cloud-side name, and a per-part content hash from the last successful sync (the conflict-detection base).
+Each linked profile stores its mapping in `cloud-sync.json`: cloud `agentId`, owning account user id, cloud-side name, and hashes for the three supported parts.
+
+A successful pass discards obsolete legacy `base.memory` hashes without reading or writing Memory.
 
 Parts that failed to push (or were skipped as oversize) keep their old base, so they stay pending rather than being silently marked clean. Deleting the file unlinks the profile — which is exactly what a pass does when the cloud agent was deleted in the console, leaving the local profile untouched.
 
@@ -54,7 +56,11 @@ The profile modal's **Sync** tab, [[src/renderer/src/components/profile/ProfileS
 
 ### Push bodies stay within limits
 
-`buildPushBody` maps parts to exactly the backend's fields and nothing else, and skips oversize persona/memory and unset models instead of truncating or sending empty strings.
+`buildPushBody` maps the supported parts to exactly the backend fields and skips an oversize persona or unset model instead of truncating or sending empty strings.
+
+### Never syncs private Memory
+
+Local `MEMORY.md` content never appears in POST or PATCH bodies, remote `memory` fields never write to disk, and legacy `base.memory` hashes are discarded without changing the Memory file.
 
 ### Keys on-disk work off the stable id
 
@@ -62,7 +68,7 @@ A renamed profile (id `hello-agent`, display name `Hello Agent`) drives all on-d
 
 ### Backs up new local profiles
 
-A never-synced local profile is POSTed to the backend with its four parts and the returned agent id is persisted to `cloud-sync.json`.
+A never-synced local profile is POSTed with persona, color, and model/provider only; the returned agent id is persisted to `cloud-sync.json`.
 
 ### Links by name and pulls the newer side
 
@@ -70,7 +76,7 @@ An unmapped profile links to its cloud namesake without creating a duplicate, an
 
 ### Pull-creates cloud-only agents
 
-A cloud agent with no local counterpart becomes a local profile (via `createProfile`, which derives the id from the agent's display name), and its persona/color/memory/config are written locally under that id.
+A cloud agent with no local counterpart becomes a local profile through `createProfile`; persona, color, and model/provider are written under its derived id while Memory remains untouched.
 
 ### Unlinks deleted cloud agents
 

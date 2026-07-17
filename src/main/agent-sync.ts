@@ -11,7 +11,6 @@ import { apiHeaders } from "./hermes-account";
 import { listProfiles, createProfile, type ProfileInfo } from "./profiles";
 import { setProfileColor } from "./profile-meta";
 import { readSoul, writeSoul } from "./soul";
-import { readMemoryRaw, writeMemoryRaw } from "./memory";
 import { getModelConfig, setModelConfig } from "./config";
 import { profileHome, safeWriteFile } from "./utils";
 import type {
@@ -23,10 +22,11 @@ import type {
 // Syncs desktop profiles (the app's "agents") with the signed-in Hermes One
 // account's cloud agents (backend /api/agents CRUD, bearer-authenticated with
 // the device-login token). Phase 1 scope — the free parts from the backend's
-// docs/agent-sync.md: color, persona (SOUL.md ↔ systemPrompt), memory
-// (memories/MEMORY.md ↔ memory), and config basics (model/provider). Names are
-// used to link and create, never to rename. Deletions never propagate: a cloud
-// agent deleted in the console just unlinks the local profile.
+// docs/agent-sync.md: color, persona (SOUL.md ↔ systemPrompt), and config
+// basics (model/provider). Private MEMORY.md and USER.md are deliberately
+// excluded. Names are used to link and create, never to rename. Deletions
+// never propagate: a cloud agent deleted in the console just unlinks the local
+// profile.
 //
 // Per part we keep the content hash from the last sync ("base") in the
 // profile's cloud-sync.json. base vs local vs remote decides push / pull /
@@ -36,11 +36,10 @@ import type {
 // are skipped with a warning rather than truncated — truncating and later
 // pulling back would destroy local content.
 const MAX_SOUL_CHARS = 20000;
-const MAX_MEMORY_CHARS = 40000;
 const MAX_NAME_CHARS = 80;
 
-export type SyncPart = "color" | "soul" | "memory" | "config";
-const PARTS: SyncPart[] = ["color", "soul", "memory", "config"];
+export type SyncPart = "color" | "soul" | "config";
+const PARTS: SyncPart[] = ["color", "soul", "config"];
 
 const STATE_FILE = "cloud-sync.json";
 
@@ -67,7 +66,6 @@ interface RemoteAgent {
   name: string;
   color: string;
   systemPrompt: string | null;
-  memory: string | null;
   model: string;
   provider: string;
   updatedAt: string;
@@ -76,7 +74,6 @@ interface RemoteAgent {
 interface PartValues {
   color: string;
   soul: string;
-  memory: string;
   config: { model: string; provider: string };
 }
 
@@ -113,8 +110,9 @@ export function decidePartAction(
 /**
  * Build the JSON body for a create/patch from the parts being pushed.
  * Enforces backend limits by omitting oversize parts (returned in `skipped`)
- * and never includes anything beyond the four synced parts — in particular no
- * config.yaml content other than the model/provider strings.
+ * and never includes anything beyond the three synced parts — in particular
+ * no private Memory/USER data and no config.yaml content other than the
+ * model/provider strings.
  */
 export function buildPushBody(
   parts: SyncPart[],
@@ -136,15 +134,6 @@ export function buildPushBody(
           body.systemPrompt = values.soul || null;
         }
         break;
-      case "memory":
-        if (values.memory.length > MAX_MEMORY_CHARS) {
-          skipped.push(
-            `memory (MEMORY.md) is ${values.memory.length} chars — over the ${MAX_MEMORY_CHARS} cloud limit, not pushed`,
-          );
-        } else {
-          body.memory = values.memory || null;
-        }
-        break;
       case "config":
         // An unset local model would clobber the cloud value with "" on PATCH.
         if (values.config.model) {
@@ -163,6 +152,15 @@ export function buildPushBody(
 
 function statePath(profile: string): string {
   return join(profileHome(profile), STATE_FILE);
+}
+
+function sanitizeBase(base: Record<string, unknown>): SyncState["base"] {
+  const sanitized: SyncState["base"] = {};
+  for (const part of PARTS) {
+    const value = base[part];
+    if (typeof value === "string") sanitized[part] = value;
+  }
+  return sanitized;
 }
 
 function readSyncState(profile: string): SyncState | null {
@@ -186,7 +184,7 @@ function readSyncState(profile: string): SyncState | null {
           typeof parsed.accountId === "string" ? parsed.accountId : undefined,
         remoteName:
           typeof parsed.remoteName === "string" ? parsed.remoteName : "",
-        base: parsed.base,
+        base: sanitizeBase(parsed.base as Record<string, unknown>),
       };
     }
   } catch {
@@ -240,7 +238,6 @@ function localPartValues(profile: ProfileInfo): PartValues {
   return {
     color: profile.color,
     soul: readSoul(profile.id),
-    memory: readMemoryRaw(profile.id),
     config: { model: cfg.model, provider: cfg.provider || "auto" },
   };
 }
@@ -250,7 +247,6 @@ function localPartMtimes(profile: ProfileInfo): Record<SyncPart, number> {
   return {
     color: mtimeMs(join(home, "profile-meta.json")),
     soul: mtimeMs(join(home, "SOUL.md")),
-    memory: mtimeMs(join(home, "memories", "MEMORY.md")),
     config: mtimeMs(join(home, "config.yaml")),
   };
 }
@@ -259,7 +255,6 @@ function remotePartValues(agent: RemoteAgent): PartValues {
   return {
     color: agent.color,
     soul: agent.systemPrompt ?? "",
-    memory: agent.memory ?? "",
     config: { model: agent.model, provider: agent.provider || "auto" },
   };
 }
@@ -268,7 +263,6 @@ function partHashes(values: PartValues): Record<SyncPart, string> {
   return {
     color: hashPart(values.color),
     soul: hashPart(values.soul),
-    memory: hashPart(values.memory),
     config: hashPart(values.config),
   };
 }
@@ -325,9 +319,6 @@ function applyPull(
       break;
     case "soul":
       writeSoul(remote.soul, profileName);
-      break;
-    case "memory":
-      writeMemoryRaw(remote.memory, profileName);
       break;
     case "config": {
       if (!remote.config.model) break;
@@ -424,7 +415,7 @@ async function runSyncPass(): Promise<AgentSyncResult> {
     if (state) {
       // Linked to a different account: leave it completely alone. Unlinking
       // here would make the profile look never-synced and push the other
-      // account's persona/memory to this one on the next pass.
+      // account's profile settings to this one on the next pass.
       if (state.accountId && state.accountId !== userId) {
         outcomes.push({
           profile: profile.id,
@@ -673,7 +664,6 @@ async function runSyncPass(): Promise<AgentSyncResult> {
 /** Whether buildPushBody would omit this part (oversize / unset model). */
 function isPartSkipped(part: SyncPart, values: PartValues): boolean {
   if (part === "soul") return values.soul.length > MAX_SOUL_CHARS;
-  if (part === "memory") return values.memory.length > MAX_MEMORY_CHARS;
   if (part === "config") return !values.config.model;
   return false;
 }

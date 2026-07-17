@@ -46,9 +46,9 @@ Raw conversations, local files, credentials, `MEMORY.md`, `USER.md`, and unpromo
 
 ## Legacy sync containment
 
-The imported bidirectional Memory sync is incompatible with the AgentEra boundary and must be contained before cloud Agent rollout.
+The imported profile reconciler excludes `MEMORY.md` from upload, download, conflict hashes, and cloud-only profile creation, and no longer exposes a whole-file Memory replacement helper.
 
-Automatic Memory push/pull and whole-file remote replacement are disabled first. Immutable version installation then replaces generic profile reconciliation for official Agents.
+Color, SOUL, and model/provider remain in the transitional reconciler until immutable Agent version installation replaces it in Project 2.
 
 ## Release gate
 
