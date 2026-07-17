@@ -32,6 +32,8 @@ Every installation maps to a distinct writable `HERMES_HOME`; a database `owner_
 
 Workspace and organization knowledge is exposed as approved read-only assets. Personal learning is not copied across scopes through the generic Profile clone path.
 
+The normative lifecycle and path-ownership rules are recorded in `docs/agentera-runtime-profile-contract.md` for every later installation and binding implementation.
+
 ## Binding stability
 
 A RuntimeBinding is immutable for one conversation or isolated job and records the Agent version, Runtime Profile, Runtime distribution, policy, tools, and adaptive-state revision used at start.
