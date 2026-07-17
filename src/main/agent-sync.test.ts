@@ -234,37 +234,35 @@ describe("buildPushBody", () => {
   const values = {
     color: "#abcdef",
     soul: "persona",
-    memory: "notes",
     config: { model: "m1", provider: "openai" },
   };
 
   // @lat: [[agent-sync#Tests#Push bodies stay within limits]]
-  it("maps parts to backend fields and nothing else", async () => {
+  it("maps supported parts to backend fields and nothing else", async () => {
     const { buildPushBody } = await engine();
     const { body, skipped } = buildPushBody(
-      ["color", "soul", "memory", "config"],
+      ["color", "soul", "config"],
       values,
     );
     expect(body).toEqual({
       color: "#abcdef",
       systemPrompt: "persona",
-      memory: "notes",
       model: "m1",
       provider: "openai",
     });
+    expect(body).not.toHaveProperty("memory");
     expect(skipped).toEqual([]);
   });
 
-  it("skips oversize parts and unset models instead of truncating", async () => {
+  it("skips an oversize persona and unset model instead of truncating", async () => {
     const { buildPushBody } = await engine();
-    const { body, skipped } = buildPushBody(["soul", "memory", "config"], {
+    const { body, skipped } = buildPushBody(["soul", "config"], {
       ...values,
       soul: "x".repeat(20001),
-      memory: "y".repeat(40001),
       config: { model: "", provider: "auto" },
     });
     expect(body).toEqual({});
-    expect(skipped).toHaveLength(3);
+    expect(skipped).toHaveLength(2);
   });
 });
 
@@ -278,11 +276,51 @@ describe("syncAgents", () => {
     expect(fetchSpy).toHaveLength(0);
   });
 
+  // @lat: [[agent-sync#Tests#Never syncs private Memory]]
+  it("never transfers MEMORY.md in either direction", async () => {
+    mockState.profiles = [fakeProfile("alpha")];
+    mockState.memories.set("alpha", "private-local-memory");
+    mockState.models.set("alpha", {
+      model: "m1",
+      provider: "auto",
+      baseUrl: "",
+    });
+
+    const memoryFile = join(
+      mockState.home,
+      "profiles",
+      "alpha",
+      "memories",
+      "MEMORY.md",
+    );
+    mkdirSync(dirname(memoryFile), { recursive: true });
+    writeFileSync(memoryFile, "private-local-memory", "utf-8");
+
+    const calls = stubFetch([
+      remoteAgent({
+        id: "agent-1",
+        name: "alpha",
+        memory: "remote-memory-must-be-ignored",
+        model: "m1",
+        updatedAt: "1970-01-01T00:00:00.000Z",
+      }),
+    ]);
+
+    const { syncAgents } = await engine();
+    const result = await syncAgents();
+
+    expect(result.status).toBe("ok");
+    for (const call of calls.filter((entry) => entry.body !== undefined)) {
+      expect(call.body).not.toHaveProperty("memory");
+    }
+    expect(mockState.writtenMemories).toEqual([]);
+  });
+
   // @lat: [[agent-sync#Tests#Backs up new local profiles]]
   it("creates a cloud agent for a never-synced local profile", async () => {
     mockState.profiles = [fakeProfile("alpha")];
     mockState.souls.set("alpha", "soul-a");
-    mockState.memories.set("alpha", "mem-a");
+    mockState.memories.set("alpha", "private-memory-must-stay-local");
     mockState.models.set("alpha", {
       model: "m1",
       provider: "auto",
@@ -305,10 +343,10 @@ describe("syncAgents", () => {
     expect(post?.body).toMatchObject({
       name: "alpha",
       systemPrompt: "soul-a",
-      memory: "mem-a",
       model: "m1",
       color: "#123456",
     });
+    expect(post?.body).not.toHaveProperty("memory");
     // Mapping persisted next to the profile.
     const state = JSON.parse(
       readFileSync(
@@ -388,10 +426,7 @@ describe("syncAgents", () => {
       profile: "alpha",
       content: "cloud-soul",
     });
-    expect(mockState.writtenMemories).toContainEqual({
-      profile: "alpha",
-      content: "cloud-mem",
-    });
+    expect(mockState.writtenMemories).toEqual([]);
   });
 
   // @lat: [[agent-sync#Tests#Pull-creates cloud-only agents]]
@@ -402,6 +437,7 @@ describe("syncAgents", () => {
         id: "agent-2",
         name: "Console Agent",
         systemPrompt: "persona",
+        memory: "cloud-only-private-memory",
         color: "#00ff00",
         model: "m2",
       }),
@@ -425,6 +461,7 @@ describe("syncAgents", () => {
       profile: "console-agent",
       color: "#00ff00",
     });
+    expect(mockState.writtenMemories).toEqual([]);
   });
 
   // @lat: [[agent-sync#Tests#Unlinks deleted cloud agents]]
@@ -560,5 +597,49 @@ describe("syncAgents", () => {
     expect(result.status).toBe("ok");
     const state = JSON.parse(readFileSync(stateFile, "utf-8"));
     expect(state.accountId).toBe("u1");
+  });
+
+  it("drops a legacy Memory base hash without touching Memory", async () => {
+    mockState.profiles = [fakeProfile("beta")];
+    mockState.models.set("beta", {
+      model: "m1",
+      provider: "auto",
+      baseUrl: "",
+    });
+    const stateFile = join(
+      mockState.home,
+      "profiles",
+      "beta",
+      "cloud-sync.json",
+    );
+    mkdirSync(dirname(stateFile), { recursive: true });
+    writeFileSync(
+      stateFile,
+      JSON.stringify({
+        version: 1,
+        agentId: "a1",
+        accountId: "u1",
+        remoteName: "beta",
+        base: { memory: "legacy-memory-hash" },
+      }),
+      "utf-8",
+    );
+    stubFetch([
+      remoteAgent({
+        id: "a1",
+        name: "beta",
+        memory: "remote-private",
+        model: "m1",
+      }),
+    ]);
+
+    const { syncAgents } = await engine();
+    const result = await syncAgents();
+
+    expect(result.status).toBe("ok");
+    const state = JSON.parse(readFileSync(stateFile, "utf-8"));
+    expect(state.version).toBe(1);
+    expect(state.base).not.toHaveProperty("memory");
+    expect(mockState.writtenMemories).toEqual([]);
   });
 });
