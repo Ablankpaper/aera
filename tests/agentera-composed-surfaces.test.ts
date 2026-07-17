@@ -75,6 +75,14 @@ describe("AgentEra composed application surfaces", () => {
     expect(office).not.toContain("hermes-one-hq.webp");
   });
 
+  it("keeps the empty-state AgentEra mark transparent", () => {
+    const styles = read("src/renderer/src/assets/main.css");
+    const emptyIconRule = styles.match(/\.chat-empty-icon\s*\{([^}]*)\}/)?.[1];
+
+    expect(emptyIconRule).toBeDefined();
+    expect(emptyIconRule).not.toMatch(/background\s*:\s*#000/i);
+  });
+
   it("removes bare Hermes branding from user-facing copy", () => {
     const messaging = read("src/shared/messaging-platforms.ts");
     const dashboard = read("src/main/dashboard.ts");

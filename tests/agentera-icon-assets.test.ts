@@ -13,6 +13,11 @@ function pngSize(path: string): { width: number; height: number } {
   };
 }
 
+function pngHasAlpha(path: string): boolean {
+  const colorType = readAsset(path).readUInt8(25);
+  return colorType === 4 || colorType === 6;
+}
+
 describe("AgentEra icon assets", () => {
   // @lat: [[agentera-branding#Naming contract#Desktop identity]]
   it("uses the approved source and generated platform assets", () => {
@@ -30,6 +35,7 @@ describe("AgentEra icon assets", () => {
       width: 512,
       height: 512,
     });
+    expect(pngHasAlpha("src/renderer/src/assets/iconv2.png")).toBe(true);
     expect(readAsset("build/icon.icns").subarray(0, 4).toString("ascii")).toBe(
       "icns",
     );
