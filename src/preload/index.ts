@@ -112,8 +112,13 @@ const hermesAPI = {
 
   verifyInstall: (): Promise<boolean> => ipcRenderer.invoke("verify-install"),
 
-  startInstall: (): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke("start-install"),
+  startInstall: (): Promise<{
+    success: boolean;
+    error?: string;
+    errorCode?: string;
+    repairRequired?: boolean;
+    action?: "reinstall-desktop" | "free-disk-space" | "retry";
+  }> => ipcRenderer.invoke("start-install"),
 
   // Pre-install inspection + "use an existing installation" (issue #272)
   inspectInstallTarget: (): Promise<{

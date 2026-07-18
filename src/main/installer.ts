@@ -7,7 +7,7 @@ import {
   writeFileSync,
   unlinkSync,
 } from "fs";
-import { join, delimiter, resolve } from "path";
+import { join, delimiter, isAbsolute, resolve } from "path";
 import { homedir, tmpdir } from "os";
 import { randomBytes } from "crypto";
 import { app, type BrowserWindow } from "electron";
@@ -27,6 +27,13 @@ import {
   refreshRuntimeInvocation,
   type RuntimeInvocation,
 } from "./agentera-runtime-distribution/invocation";
+import { createRuntimeDistributionPaths } from "./agentera-runtime-distribution/paths";
+import {
+  getAvailableRuntimeDiskBytes,
+  installPackagedSeed,
+  type PackagedSeedInstallResult,
+} from "./agentera-runtime-distribution/seed-installer";
+import { loadRuntimeTrustFile } from "./agentera-runtime-distribution/trust";
 
 const IS_WINDOWS = process.platform === "win32";
 
@@ -822,6 +829,95 @@ function getShellProfile(home: string): string | null {
   return null;
 }
 
+function packagedRuntimeSeedDirectory(): string {
+  const developmentOverride = process.env.AGENTERA_RUNTIME_SEED_DIR?.trim();
+  if (!app.isPackaged && developmentOverride) {
+    if (!isAbsolute(developmentOverride)) {
+      throw new Error("AGENTERA_RUNTIME_SEED_DIR must be an absolute path");
+    }
+    return resolve(developmentOverride);
+  }
+  return join(process.resourcesPath, "agentera-runtime-seed");
+}
+
+function runtimeTrustFile(): string {
+  const candidates = [
+    join(
+      process.resourcesPath,
+      "app.asar.unpacked",
+      "resources",
+      "agentera-runtime-trust.json",
+    ),
+    join(
+      process.resourcesPath,
+      "app.asar",
+      "resources",
+      "agentera-runtime-trust.json",
+    ),
+    join(process.cwd(), "resources", "agentera-runtime-trust.json"),
+  ];
+  const path = candidates.find((candidate) => existsSync(candidate));
+  if (!path) throw new Error("AgentEra Runtime trust document is missing");
+  return path;
+}
+
+function nativeRuntimeTarget(): {
+  platform: "darwin" | "windows";
+  arch: "arm64" | "x64";
+} {
+  if (process.platform === "darwin" && process.arch === "arm64") {
+    return { platform: "darwin", arch: "arm64" };
+  }
+  if (process.platform === "win32" && process.arch === "x64") {
+    return { platform: "windows", arch: "x64" };
+  }
+  throw new Error(
+    `Bundled AgentEra Runtime is not available for ${process.platform}-${process.arch}`,
+  );
+}
+
+/** Prepare the signed Seed shipped inside the desktop package. This path is
+ * deliberately local-only: no Git, package manager, shell installer, or HTTP
+ * fallback is reachable from it. */
+export async function runPackagedSeedInstall(
+  onProgress: (progress: InstallProgress) => void,
+): Promise<PackagedSeedInstallResult> {
+  const target = nativeRuntimeTarget();
+  const userDataPath = app.getPath("userData");
+  configureRuntimeInvocationContext({
+    hermesHome: HERMES_HOME,
+    userDataPath,
+    platform: process.platform,
+  });
+  const paths = createRuntimeDistributionPaths(
+    userDataPath,
+    packagedRuntimeSeedDirectory(),
+  );
+  let log = "";
+  const result = await installPackagedSeed({
+    paths,
+    trustedPublicKeys: loadRuntimeTrustFile(runtimeTrustFile()),
+    manifestContext: {
+      repository: "bignormal/aera-runtime",
+      platform: target.platform,
+      arch: target.arch,
+      desktopVersion: app.getVersion(),
+      allowedChannels: new Set(["candidate", "stable"]),
+    },
+    availableDiskBytes: getAvailableRuntimeDiskBytes,
+    onProgress: (progress) => {
+      const line = `${progress.detail}\n`;
+      log += line;
+      onProgress({ ...progress, log });
+    },
+  });
+  if (result.status === "installed") clearVersionCache();
+  return result;
+}
+
+// Legacy online installer retained temporarily for migration-only code review.
+// The authenticated `start-install` IPC path no longer calls it. Task 14
+// removes this implementation after packaged macOS and Windows proofs pass.
 // Parse install.sh / install.ps1 output to detect progress stages.
 // Patterns are tuned to match both bash and PowerShell installer phrasing.
 const STAGE_MARKERS: { pattern: RegExp; step: number; title: string }[] = [

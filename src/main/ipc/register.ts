@@ -60,7 +60,7 @@ import {
 import type { GpuPreferenceMode } from "../../shared/gpu";
 import {
   verifyInstall,
-  runInstall,
+  runPackagedSeedInstall,
   inspectInstallTarget,
   validateHermesHome,
   setHermesHomeOverride,
@@ -888,12 +888,35 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   ipcMain.handle("start-install", async (event) => {
     try {
-      await runInstall((progress: InstallProgress) => {
-        event.sender.send("install-progress", progress);
-      }, mainWindow);
-      return { success: true };
+      const result = await runPackagedSeedInstall(
+        (progress: InstallProgress) => {
+          event.sender.send("install-progress", progress);
+        },
+      );
+      if (result.status === "installed") return { success: true };
+      const error =
+        result.errorCode === "packaged-seed-invalid"
+          ? "The Runtime included with AgentEra Studio is missing or invalid. Reinstall AgentEra Studio."
+          : result.errorCode === "insufficient-disk-space"
+            ? "There is not enough free disk space to prepare AgentEra Runtime."
+            : result.errorCode === "runtime-health-failed"
+              ? "The included AgentEra Runtime did not pass its local health check."
+              : "AgentEra Runtime could not be prepared from the local installer resources.";
+      return {
+        success: false,
+        error,
+        errorCode: result.errorCode,
+        repairRequired: true,
+        action: result.action,
+      };
     } catch (err) {
-      return { success: false, error: (err as Error).message };
+      return {
+        success: false,
+        error: (err as Error).message,
+        errorCode: "runtime-install-failed",
+        repairRequired: true,
+        action: "retry",
+      };
     }
   });
 

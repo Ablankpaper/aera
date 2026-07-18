@@ -20,6 +20,20 @@ After product authentication, the main process verifies the packaged seed, insta
 
 A missing or invalid seed enters a repair state. The desktop never falls back to cloning upstream `main`, executing a remote install script, or downloading an unsigned Runtime.
 
+## Offline Seed installation and repair
+
+Packaged Seed installation is verified, transactional, local-only, and isolated from Hermes-owned adaptive state.
+
+[[src/main/agentera-runtime-distribution/extractor.ts#extractRuntimeArchive]] accepts only the signed platform format: TAR/Zstandard for macOS ARM64 and ZIP for Windows x64. Archive paths, normalized metadata, case-folded Windows duplicates, symlink targets, entry types, sizes, and the decompression budget are checked against the signed inventory before a version can be published. The extracted tree is then walked without following links, re-hashed, permission-normalized, and compared path-for-path with the manifest.
+
+Extraction occurs only below a fresh `userData/runtime/staging/seed-*` transaction. Failure or cancellation deletes the destination owned by that transaction; it cannot clean another staging child, a current version, or `HERMES_HOME`.
+
+[[src/main/agentera-runtime-distribution/seed-installer.ts#installPackagedSeed]] discovers exactly one packaged archive, canonical manifest, and signature, verifies them with the production trust set, and checks free space for archive bytes plus extracted bytes plus one rollback-version reserve plus a ten-percent margin. It health-checks the candidate in staging, renames the verified payload into `versions`, writes `current.json` atomically, selects managed mode, and refreshes the live invocation.
+
+[[src/main/agentera-runtime-distribution/health.ts#runIsolatedRuntimeHealthCheck]] runs version, server-help, and core-import probes with a disposable fake HOME and HERMES_HOME, an allowlisted environment, no inherited credentials, and offline package-manager flags. A corrupt same-version current Runtime is repaired into a new version directory, leaving the old directory and every Hermes-owned Profile, Memory, session, learned Skill, and Curator file untouched.
+
+The authenticated `start-install` IPC path calls only the packaged Seed installer. Missing or corrupt packaged resources return `repair-required` with a reinstall-desktop action; low disk returns a free-space action. Neither result can reach the retained migration-only online installer.
+
 ## Version state journal
 
 Mutable Runtime versions and current, previous, and candidate pointers live only below Electron `userData/runtime`. Each pointer update fsyncs a temp file, renames it atomically, then fsyncs the parent directory where supported.

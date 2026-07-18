@@ -270,7 +270,13 @@ interface HermesAPI {
   // Installation
   checkInstall: () => Promise<InstallStatus>;
   verifyInstall: () => Promise<boolean>;
-  startInstall: () => Promise<{ success: boolean; error?: string }>;
+  startInstall: () => Promise<{
+    success: boolean;
+    error?: string;
+    errorCode?: string;
+    repairRequired?: boolean;
+    action?: "reinstall-desktop" | "free-disk-space" | "retry";
+  }>;
   inspectInstallTarget: () => Promise<{
     hermesHome: string;
     repoPath: string;

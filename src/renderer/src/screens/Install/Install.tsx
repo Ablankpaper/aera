@@ -1,7 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { ArrowRight, Copy, Send } from "../../assets/icons";
-
-const TELEGRAM_COMMUNITY_URL = "https://t.me/hermes_agent_desktop";
+import { ArrowRight, Copy } from "../../assets/icons";
 import { useI18n } from "../../components/useI18n";
 
 interface InstallProgress {
@@ -10,12 +8,6 @@ interface InstallProgress {
   title: string;
   detail: string;
   log: string;
-}
-
-interface InstallTarget {
-  hermesHome: string;
-  repoPath: string;
-  state: "fresh" | "update" | "replace";
 }
 
 interface InstallProps {
@@ -30,42 +22,26 @@ function Install({
   onCancel,
 }: InstallProps): React.JSX.Element {
   const { t } = useI18n();
-  // Gate the install behind an explicit confirmation so it can't run
-  // silently and surprise a user who already has Hermes installed (#272).
+  // Preparing the packaged Runtime remains an explicit post-login action.
   const [phase, setPhase] = useState<"confirm" | "running">("confirm");
-  const [target, setTarget] = useState<InstallTarget | null>(null);
   const [useExistingError, setUseExistingError] = useState<string | null>(null);
   // Set once the user adopts an existing install — the new location only
   // applies on the next launch, so we ask them to restart.
   const [adopted, setAdopted] = useState(false);
   const [progress, setProgress] = useState<InstallProgress>({
     step: 0,
-    totalSteps: 7,
-    title: t("install.preparing"),
-    detail: t("install.startingInstall"),
+    totalSteps: 5,
+    title: t("install.preparingRuntime"),
+    detail: t("install.verifyingPackagedRuntime"),
     log: "",
   });
   const [done, setDone] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
+  const [repairAction, setRepairAction] = useState<
+    "reinstall-desktop" | "free-disk-space" | "retry" | null
+  >(null);
   const [copied, setCopied] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
-
-  // Inspect what the installer will do to the target directory, so the
-  // confirmation can say exactly what to expect (fresh / update / replace).
-  useEffect(() => {
-    let mounted = true;
-    window.hermesAPI
-      .inspectInstallTarget()
-      .then((info) => {
-        if (mounted) setTarget(info);
-      })
-      .catch(() => {
-        /* leave target null — the confirmation falls back to generic copy */
-      });
-    return () => {
-      mounted = false;
-    };
-  }, []);
 
   // The install itself runs only once the user confirms.
   useEffect(() => {
@@ -82,19 +58,27 @@ function Install({
         if (result.success) {
           setDone(true);
         } else {
-          setFailed(result.error || t("install.installationFailedHint"));
+          setRepairAction(result.action ?? "retry");
+          setFailed(
+            result.action === "reinstall-desktop"
+              ? t("install.packagedRuntimeInvalid")
+              : result.action === "free-disk-space"
+                ? t("install.insufficientDiskSpace")
+                : result.error || t("install.preparationFailedHint"),
+          );
         }
       })
       .catch((err) => {
         if (!isMounted) return;
-        setFailed(err.message || t("install.installationFailedHint"));
+        setRepairAction("retry");
+        setFailed(err.message || t("install.preparationFailedHint"));
       });
 
     return () => {
       isMounted = false;
       cleanup();
     };
-  }, [phase]);
+  }, [phase, t]);
 
   useEffect(() => {
     if (logRef.current) {
@@ -159,36 +143,16 @@ function Install({
       );
     }
 
-    const stateMessage =
-      target?.state === "update"
-        ? t("install.confirmUpdate")
-        : target?.state === "replace"
-          ? t("install.confirmReplace")
-          : t("install.confirmFresh");
-
     return (
       <div className="screen install-screen">
         <h1 className="install-title">{t("install.confirmTitle")}</h1>
 
         <div className="install-confirm">
-          <div className="install-confirm-location">
-            <span className="install-confirm-label">
-              {t("install.confirmLocationLabel")}
-            </span>
-            <code className="install-confirm-path">
-              {target?.repoPath || "…"}
-            </code>
-          </div>
-
-          <p
-            className={`install-confirm-state install-confirm-state--${
-              target?.state ?? "fresh"
-            }`}
-          >
-            {stateMessage}
+          <p className="install-confirm-state install-confirm-state--fresh">
+            {t("install.confirmBundledRuntime")}
           </p>
           <p className="install-confirm-note">
-            {t("install.confirmNotInherited")}
+            {t("install.confirmOfflinePreparation")}
           </p>
 
           <div className="install-confirm-actions">
@@ -196,7 +160,7 @@ function Install({
               className="btn btn-primary"
               onClick={() => setPhase("running")}
             >
-              {t("install.confirmInstallBtn")}
+              {t("install.confirmPrepareBtn")}
             </button>
             <button className="btn btn-secondary" onClick={handleUseExisting}>
               {t("install.useExistingBtn")}
@@ -221,7 +185,7 @@ function Install({
           ? t("install.installationComplete")
           : failed
             ? t("install.installationFailed")
-            : t("install.installingHermes")}
+            : t("install.preparingRuntime")}
       </h1>
 
       <div className="install-progress-container">
@@ -242,18 +206,21 @@ function Install({
               className="btn btn-primary btn-sm"
               onClick={() => {
                 setFailed(null);
+                setRepairAction(null);
                 setProgress({
                   step: 0,
-                  totalSteps: 7,
-                  title: t("install.preparing"),
-                  detail: t("install.startingInstall"),
+                  totalSteps: 5,
+                  title: t("install.preparingRuntime"),
+                  detail: t("install.verifyingPackagedRuntime"),
                   log: "",
                 });
                 // Re-trigger install via parent
                 onFailed(failed);
               }}
             >
-              {t("install.retryInstallation")}
+              {repairAction === "reinstall-desktop"
+                ? t("install.reinstallDesktop")
+                : t("install.retryPreparation")}
             </button>
             <button
               className="btn btn-secondary btn-sm"
@@ -261,16 +228,6 @@ function Install({
             >
               <Copy size={13} />
               {copied ? t("install.copied") : t("install.copyLogs")}
-            </button>
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={() =>
-                window.hermesAPI.openExternal(TELEGRAM_COMMUNITY_URL)
-              }
-              title={TELEGRAM_COMMUNITY_URL}
-            >
-              <Send size={13} />
-              Join Community
             </button>
           </div>
         </div>
