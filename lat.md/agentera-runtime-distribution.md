@@ -38,6 +38,12 @@ Every seed must pass the native Hermes compatibility gate and a clean extracted-
 
 The gate proves stable conversations, background learning, next-conversation recall, Curator behavior, Profile isolation, offline use, migration, update, and rollback without changing private adaptive state.
 
+## Independent verification
+
+The main process verifies canonical manifest bytes, Ed25519 trust, signed context, archive size, and SHA-256 before accepting a Runtime artifact.
+
+A separate build-time MJS verifier repeats the checks without importing desktop TypeScript. Packaging reads an exact repository, tag, full commit, and target asset lock; it never resolves `latest`.
+
 ## Later delivery
 
 Cloud Agent definition and immutable-version sync starts only after Runtime distribution is stable, followed by a separate workspace and organization project.
