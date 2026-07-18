@@ -114,8 +114,10 @@ describe("AgentEra app-level authentication store", () => {
 
     expect(writes).toHaveLength(1);
     expect(writes[0].path).toBe(store.filePath);
-    expect(store.filePath.startsWith(`${userData}/`)).toBe(true);
-    expect(store.filePath.startsWith(`${hermesHome}/`)).toBe(false);
+    expect(store.filePath).toBe(join(userData, "agentera-auth", "state.json"));
+    expect(store.filePath).not.toBe(
+      join(hermesHome, "agentera-auth", "state.json"),
+    );
     expect(existsSync(join(hermesHome, "agentera-auth.json"))).toBe(false);
 
     const raw = readFileSync(store.filePath, "utf8");

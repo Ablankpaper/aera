@@ -22,6 +22,8 @@ Every supported locale keeps the AgentEra names unchanged while translating the 
 
 All twelve locale packs expose AgentEra Studio consistently and contain no inherited first-party promotion copy.
 
+Branding and desktop-identity regression tests use Node path utilities for filenames and data directories, preserving identical assertions across macOS, Windows, and Linux.
+
 ## Compatibility boundary
 
 Branding changes never rename runtime protocols, data directories, commands, provider ids, or third-party services.

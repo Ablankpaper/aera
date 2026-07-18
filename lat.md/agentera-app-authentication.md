@@ -80,6 +80,8 @@ The desktop foundation keeps product authentication in the main process and expo
 
 Refresh tokens, offline entitlements, device private keys, and pending self-revocations are protected with the platform secure-storage adapter. Unavailable encryption fails closed; logout clears product session material without reading or modifying a Hermes Profile.
 
+Secure-store boundary tests construct expected descendants through Node path APIs, so the same user-data isolation invariant is verified with native separators on macOS, Windows, and Linux.
+
 [[src/shared/agentera-auth.ts#serializeAgenteraAuthPublicState]] rebuilds the renderer-visible state from an explicit allowlist, so extra token-, key-, code-, verifier-, or encrypted-blob fields cannot cross IPC by object spreading.
 
 ### Installation device identity
