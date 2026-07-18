@@ -20,6 +20,12 @@ After product authentication, the main process verifies the packaged seed, insta
 
 A missing or invalid seed enters a repair state. The desktop never falls back to cloning upstream `main`, executing a remote install script, or downloading an unsigned Runtime.
 
+## Version state journal
+
+Mutable Runtime versions and current, previous, and candidate pointers live only below Electron `userData/runtime`. Each pointer update fsyncs a temp file, renames it atomically, then fsyncs the parent directory where supported.
+
+Recovery removes only pointer temp files and stale transactions proven to be under Runtime staging or downloads. Version cleanup keeps every referenced directory and rejects lexical or real-path escape, including parent symlinks.
+
 ## Program and Profile isolation
 
 Runtime program versions live below Electron `userData`, while Hermes-owned state remains in its physically isolated `HERMES_HOME`.
