@@ -72,6 +72,7 @@ export interface RuntimeDistributionManagerOptions {
   activeRunCount?: () => number;
   stopRuntimeContext?: () => void | Promise<void>;
   relaunch?: () => void | Promise<void>;
+  isExternalRuntime?: () => boolean;
   repair?: () => Promise<{
     success: boolean;
     runtimeVersion: string | null;
@@ -156,6 +157,24 @@ function createBaseState(
     canDownload: false,
     canCancel: false,
     canRestart: candidateReady,
+  };
+}
+
+function createExternalState(): RuntimeDistributionPublicState {
+  return {
+    phase: "external",
+    currentVersion: null,
+    currentSourceCommit: null,
+    packagedSeedVersion: null,
+    availableVersion: null,
+    downloadSize: null,
+    downloadPercent: null,
+    lastCheckedAt: null,
+    lastErrorCode: null,
+    canCheck: false,
+    canDownload: false,
+    canCancel: false,
+    canRestart: false,
   };
 }
 
@@ -269,6 +288,9 @@ export function createRuntimeDistributionManager(
 
   const initialize = async (): Promise<RuntimeDistributionPublicState> => {
     if (state !== null) return cloneState(state);
+    if (options.isExternalRuntime?.()) {
+      return publish(createExternalState());
+    }
     const journal = await store.recover();
     return publish(
       createBaseState(
@@ -571,11 +593,13 @@ export function createRuntimeDistributionManager(
       if (
         currentState.phase !== "missing" &&
         currentState.phase !== "repair-required" &&
-        currentState.phase !== "rollback"
+        currentState.phase !== "rollback" &&
+        currentState.phase !== "external"
       ) {
         return currentState;
       }
 
+      const startedInExternalMode = currentState.phase === "external";
       publish({
         ...currentState,
         phase: "installing",
@@ -583,10 +607,10 @@ export function createRuntimeDistributionManager(
       });
       try {
         const repaired = await options.repair?.();
-        if (!repaired?.success) {
+        if (!repaired?.success || options.isExternalRuntime?.()) {
           return publish({
             ...currentState,
-            phase: "repair-required",
+            phase: startedInExternalMode ? "external" : "repair-required",
             lastErrorCode: publicRepairErrorCode(
               repaired?.errorCode ?? "runtime_repair_required",
             ),
@@ -611,7 +635,7 @@ export function createRuntimeDistributionManager(
       } catch {
         return publish({
           ...currentState,
-          phase: "repair-required",
+          phase: startedInExternalMode ? "external" : "repair-required",
           lastErrorCode: "runtime_repair_required",
         });
       }

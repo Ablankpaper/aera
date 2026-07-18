@@ -19,6 +19,9 @@ export const runtimeDistributionEn = {
   restart: "Restart and apply",
   retry: "Retry repair",
   externalUpdate: "Update external Runtime",
+  switchToManaged: "Switch to managed Runtime",
+  externalUnmanagedHint:
+    "This is an explicitly selected, unmanaged checkout. Its local update command runs only when you choose it; AgentEra Studio never changes or deletes it while using managed Runtime.",
   currentVersion: "Managed version",
   sourceCommit: "Source commit",
   packagedSeedVersion: "Packaged Seed",
@@ -74,6 +77,9 @@ export const runtimeDistributionZhCn = {
   restart: "重启并应用",
   retry: "重试修复",
   externalUpdate: "更新外部 Runtime",
+  switchToManaged: "切换到托管 Runtime",
+  externalUnmanagedHint:
+    "当前使用的是你明确选择的非托管 checkout。只有你主动操作时才会运行它自己的本地更新命令；切换到托管 Runtime 后，AgentEra Studio 也不会修改或删除它。",
   currentVersion: "托管版本",
   sourceCommit: "源码提交",
   packagedSeedVersion: "安装包内置版本",
@@ -122,6 +128,9 @@ export const runtimeDistributionZhTw = {
   restart: "重新啟動並套用",
   retry: "重試修復",
   externalUpdate: "更新外部 Runtime",
+  switchToManaged: "切換到託管 Runtime",
+  externalUnmanagedHint:
+    "目前使用的是你明確選擇的非託管 checkout。只有你主動操作時才會執行它自己的本機更新命令；切換到託管 Runtime 後，AgentEra Studio 也不會修改或刪除它。",
   currentVersion: "託管版本",
   sourceCommit: "原始碼提交",
   packagedSeedVersion: "安裝包內建版本",

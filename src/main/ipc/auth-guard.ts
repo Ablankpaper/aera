@@ -146,7 +146,6 @@ const AUTHENTICATED_CHANNELS = [
   "check-openclaw",
   "copy-to-clipboard",
   "get-connection-config",
-  "inspect-install-target",
   "is-remote-mode",
   "is-remote-only-mode",
   "is-ssh-tunnel-active",

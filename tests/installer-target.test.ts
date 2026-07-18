@@ -1,41 +1,94 @@
-import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { classifyInstallTarget } from "../src/main/installer";
 
-// Pre-install inspection (issue #272): classify what the installer will do
-// to the target `hermes-agent` directory so the renderer can warn first.
-describe("classifyInstallTarget", () => {
-  it("reports a fresh install when nothing is at the target", () => {
-    expect(classifyInstallTarget(false, false)).toBe("fresh");
-    // repoIsGitRepo is meaningless when the directory doesn't exist.
-    expect(classifyInstallTarget(false, true)).toBe("fresh");
-  });
+import { afterEach, describe, expect, it } from "vitest";
 
-  it("reports an in-place update for an existing valid git checkout", () => {
-    expect(classifyInstallTarget(true, true)).toBe("update");
-  });
+import {
+  persistRuntimeSelection,
+  readRuntimeSelection,
+} from "../src/main/agentera-runtime-distribution/selection-store";
 
-  it("reports a destructive replace when the dir is not a git repo", () => {
-    // install.sh / install.ps1 delete-and-reclone a non-repo directory.
-    expect(classifyInstallTarget(true, false)).toBe("replace");
-  });
+const temporaryDirectories: string[] = [];
+
+function temporaryRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), "agentera-runtime-selection-"));
+  temporaryDirectories.push(root);
+  return root;
+}
+
+afterEach(() => {
+  while (temporaryDirectories.length > 0) {
+    rmSync(temporaryDirectories.pop()!, { recursive: true, force: true });
+  }
 });
 
-describe("authenticated local Runtime preparation", () => {
-  it("routes start-install only to the packaged Seed installer", () => {
-    const source = readFileSync(
-      join(process.cwd(), "src", "main", "ipc", "register.ts"),
-      "utf8",
-    );
-    const start = source.indexOf('ipcMain.handle("start-install"');
-    const end = source.indexOf("// Pre-install inspection", start);
-    const handler = source.slice(start, end);
+describe("explicit Runtime target selection", () => {
+  it("persists managed mode before a fresh Hermes data home exists", () => {
+    const root = temporaryRoot();
+    const hermesHome = join(root, "not-created-yet");
+    const selectionFile = join(root, "hermes-home.json");
 
-    expect(handler).toContain("runPackagedSeedInstall");
-    expect(handler).not.toMatch(/\bawait\s+runInstall\s*\(/);
-    expect(handler).not.toMatch(
-      /curl|Invoke-WebRequest|github\.com|git\s+clone/i,
-    );
+    persistRuntimeSelection(selectionFile, {
+      mode: "managed",
+      hermesHome,
+    });
+
+    expect(readRuntimeSelection(selectionFile)).toEqual({
+      mode: "managed",
+      hermesHome,
+    });
+  });
+
+  it("adopts an existing checkout only as an unmanaged external Runtime", () => {
+    const root = temporaryRoot();
+    const hermesHome = join(root, "hermes-home");
+    const checkout = join(hermesHome, "hermes-agent");
+    const selectionFile = join(root, "hermes-home.json");
+    mkdirSync(checkout, { recursive: true });
+    const marker = join(checkout, "local-learning.txt");
+    writeFileSync(marker, "external state\n");
+
+    persistRuntimeSelection(selectionFile, {
+      mode: "external",
+      hermesHome,
+    });
+
+    expect(readRuntimeSelection(selectionFile)).toEqual({
+      mode: "external",
+      hermesHome,
+    });
+    expect(readFileSync(marker, "utf8")).toBe("external state\n");
+  });
+
+  it("switches the selected mode without deleting the external checkout", () => {
+    const root = temporaryRoot();
+    const hermesHome = join(root, "hermes-home");
+    const checkout = join(hermesHome, "hermes-agent");
+    const selectionFile = join(root, "hermes-home.json");
+    mkdirSync(checkout, { recursive: true });
+    const marker = join(checkout, "MEMORY.md");
+    writeFileSync(marker, "self-learning state\n");
+
+    persistRuntimeSelection(selectionFile, {
+      mode: "external",
+      hermesHome,
+    });
+    persistRuntimeSelection(selectionFile, {
+      mode: "managed",
+      hermesHome,
+    });
+
+    expect(readRuntimeSelection(selectionFile)).toEqual({
+      mode: "managed",
+      hermesHome,
+    });
+    expect(readFileSync(marker, "utf8")).toBe("self-learning state\n");
   });
 });

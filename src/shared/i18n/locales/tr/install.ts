@@ -4,8 +4,6 @@ export default {
   installationComplete: "Kurulum Tamamlandı",
   installationFailed: "Kurulum Başarısız",
   installingHermes: "AgentEra Runtime Kuruluyor",
-  installationFailedHint:
-    "Kurulum başarısız oldu. Lütfen tekrar deneyin veya terminal üzerinden kurun.",
   retryInstallation: "Kurulumu Tekrar Dene",
   copied: "Kopyalandı!",
   copyLogs: "Günlükleri Kopyala",
@@ -23,12 +21,12 @@ export default {
   confirmNotInherited:
     "AgentEra'i başka bir yere veya komut satırından kurduysanız, buraya taşınmayacaktır.",
   confirmInstallBtn: "AgentEra'i Kur",
-  useExistingBtn: "Mevcut bir kurulumu kullan",
+  useExistingBtn: "Mevcut harici Runtime'ı kullan",
   useExistingHint:
-    "Mevcut AgentEra kurulumunuzu içeren klasörü seçin (hermes-agent klasörünü içeren).",
+    "hermes-agent klasörünü içeren Hermes ana klasörünü seçin. Bu Runtime harici ve yönetilmeyen olarak kalır; güncelleme yalnızca o checkout'ın yerel komutunu çalıştırır.",
   useExistingInvalid:
     "Bu klasörde kullanılabilir bir AgentEra kurulumu bulunamadı.",
   useExistingDone:
-    "Mevcut kurulum ayarlandı — uygulamak için AgentEra'i kapatıp yeniden açın.",
+    "Harici Runtime seçildi — uygulamak için AgentEra'i kapatıp yeniden açın. AgentEra Studio bu checkout'ı değiştirmez veya silmez.",
   useExistingQuitBtn: "AgentEra'ten Çık",
 } as const;

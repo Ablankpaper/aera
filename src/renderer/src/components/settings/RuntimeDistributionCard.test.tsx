@@ -202,5 +202,11 @@ describe("RuntimeDistributionCard", () => {
       }),
     );
     expect(onExternalUpdate).toHaveBeenCalledOnce();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "settings.runtimeDistribution.switchToManaged",
+      }),
+    );
+    expect(mocked.retryRepair).toHaveBeenCalledOnce();
   });
 });

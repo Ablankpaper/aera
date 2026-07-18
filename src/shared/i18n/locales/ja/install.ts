@@ -4,8 +4,6 @@ export default {
   installationComplete: "インストール完了",
   installationFailed: "インストール失敗",
   installingHermes: "AgentEra Runtime をインストール中",
-  installationFailedHint:
-    "インストールに失敗しました。再試行するか、ターミナル経由でインストールしてください。",
   retryInstallation: "再試行",
   copied: "コピーしました！",
   copyLogs: "ログをコピー",
@@ -23,12 +21,12 @@ export default {
   confirmNotInherited:
     "AgentEra を別の場所、またはコマンドラインでインストールした場合、それは引き継がれません。",
   confirmInstallBtn: "AgentEra をインストール",
-  useExistingBtn: "既存のインストールを使用",
+  useExistingBtn: "既存の外部 Runtime を使用",
   useExistingHint:
-    "既存の AgentEra インストールが含まれるフォルダ（hermes-agent フォルダを含むフォルダ）を選択してください。",
+    "hermes-agent を含む Hermes ホームを選択してください。この Runtime は外部・非管理のまま維持され、更新ではその checkout のローカルコマンドだけを実行します。",
   useExistingInvalid:
     "そのフォルダで使用可能な AgentEra インストールが見つかりませんでした。",
   useExistingDone:
-    "既存のインストールを設定しました。AgentEra を終了して再度開くと適用されます。",
+    "外部 Runtime を選択しました。AgentEra を終了して再度開くと適用されます。AgentEra Studio はその checkout を変更または削除しません。",
   useExistingQuitBtn: "AgentEra を終了",
 } as const;

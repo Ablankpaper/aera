@@ -32,7 +32,7 @@ Extraction occurs only below a fresh `userData/runtime/staging/seed-*` transacti
 
 [[src/main/agentera-runtime-distribution/health.ts#runIsolatedRuntimeHealthCheck]] runs version, server-help, and core-import probes with a disposable fake HOME and HERMES_HOME, an allowlisted environment, no inherited credentials, and offline package-manager flags. A corrupt same-version current Runtime is repaired into a new version directory, leaving the old directory and every Hermes-owned Profile, Memory, session, learned Skill, and Curator file untouched.
 
-The authenticated `start-install` IPC path calls only the packaged Seed installer. Missing or corrupt packaged resources return `repair-required` with a reinstall-desktop action; low disk returns a free-space action. Neither result can reach the retained migration-only online installer.
+The authenticated `start-install` IPC path calls only the packaged Seed installer. Missing or corrupt packaged resources return `repair-required` with a reinstall-desktop action; low disk returns a free-space action. No remote shell or PowerShell installer is shipped as a first-install fallback.
 
 ## Version state journal
 
@@ -60,6 +60,14 @@ Callers continue to supply the existing physical `HERMES_HOME` or Profile home. 
 
 Chat and Gateway, Dashboard, Skills, Profiles, Cron, model discovery, MCP, account authentication, Kanban, compatibility probing, and startup preflight all consume the live invocation rather than module-level executable paths. [[src/main/agentera-runtime-distribution/invocation.ts#refreshRuntimeInvocation]] re-resolves the selection after seed installation or activation.
 
+## Explicit external compatibility
+
+External Runtime use is an explicit, persisted compatibility mode; managed mode remains the default when no previous selection exists.
+
+[[src/main/agentera-runtime-distribution/selection-store.ts#readRuntimeSelection]] migrates only the exact legacy `{ hermesHome }` record to external mode. New records persist an exact schema, selection mode, and physical Hermes home. Switching between external and managed invocation changes only that selection record and never moves, rewrites, or deletes the external checkout or its adaptive data.
+
+[[src/main/installer.ts#runHermesUpdate]] rejects managed mode and, in explicit external mode, invokes only the selected checkout's interpreter with `python -m hermes_cli.main update` from that checkout. The Settings card labels this path unmanaged and offers a separate switch to the signed managed Runtime. The welcome and repair surfaces no longer expose upstream `curl`, PowerShell, Git clone, or remote-script commands.
+
 ## Update policy
 
 The desktop checks for stable Runtime updates automatically but downloads only after explicit user confirmation and switches only after the user restarts.
@@ -80,7 +88,7 @@ Connect, idle-read, overall, and redirect limits are bounded. Cancellation and t
 
 [[src/shared/agentera-runtime-distribution.ts#serializeRuntimeDistributionPublicState]] rebuilds every renderer-visible lifecycle state from an exact field allowlist and accepts only bounded Runtime error codes. The authenticated `window.agenteraRuntimeDistribution` preload namespace exposes state, check, explicit download, cancellation, restart, repair, and state-change events without URLs, paths, signatures, keys, tokens, or owner identifiers.
 
-[[src/renderer/src/components/settings/RuntimeDistributionCard.tsx#RuntimeDistributionCard]] gives Runtime updates their own About card, separate from the desktop app updater. It shows managed status, version, and short source commit; download requires a modal that names the version, trusted `bignormal/aera-runtime` source, and size. The legacy command updater appears only in explicit external mode.
+[[src/renderer/src/components/settings/RuntimeDistributionCard.tsx#RuntimeDistributionCard]] gives Runtime updates their own About card, separate from the desktop app updater. It shows managed status, version, and short source commit; download requires a modal that names the version, trusted `bignormal/aera-runtime` source, and size. The checkout-local unmanaged updater appears only in explicit external mode.
 
 [[src/main/agentera-runtime-distribution/bootstrap.ts#bootstrapRuntimeDistribution]] runs before `app/start` is dynamically imported. An approved candidate's signature, pointer binding, complete extracted inventory, and isolated offline health are checked again below `userData/runtime/health`; only then does the journal move current to previous and candidate to current. Failure keeps the existing current version, records only an error code, numeric exit code, version, short commit, and timestamp, and durably suppresses the failed candidate until a newer staging action replaces it. No path, credential, Profile, Memory, session, learned Skill, or raw exception enters the diagnostic.
 

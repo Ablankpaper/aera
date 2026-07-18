@@ -162,6 +162,12 @@ export default function RuntimeDistributionCard({
             </div>
           )}
 
+          {phase === "external" && (
+            <div className="settings-field-hint">
+              {t("settings.runtimeDistribution.externalUnmanagedHint")}
+            </div>
+          )}
+
           <div className="settings-card-actions">
             <RuntimeAction
               state={state}
@@ -307,26 +313,29 @@ function RuntimeAction({
       </button>
     );
   }
-  if (externalUpdating) {
-    return (
-      <button className="btn btn-secondary" disabled>
-        <Loader size={14} className="settings-spin" />
-        {t("settings.updating")}
-      </button>
-    );
-  }
-  if (!externalUpdateAvailable) {
-    return (
-      <button className="btn btn-secondary" disabled>
-        <CheckCircle2 size={14} />
-        {t("settings.latestVersion")}
-      </button>
-    );
-  }
-  return (
+  const externalUpdateAction = externalUpdating ? (
+    <button className="btn btn-secondary" disabled>
+      <Loader size={14} className="settings-spin" />
+      {t("settings.updating")}
+    </button>
+  ) : !externalUpdateAvailable ? (
+    <button className="btn btn-secondary" disabled>
+      <CheckCircle2 size={14} />
+      {t("settings.latestVersion")}
+    </button>
+  ) : (
     <button className="btn btn-secondary" onClick={onExternalUpdate}>
       <Download size={14} />
       {t("settings.runtimeDistribution.externalUpdate")}
     </button>
+  );
+  return (
+    <>
+      {externalUpdateAction}
+      <button className="btn btn-secondary" onClick={onRetry}>
+        <Wrench size={14} />
+        {t("settings.runtimeDistribution.switchToManaged")}
+      </button>
+    </>
   );
 }

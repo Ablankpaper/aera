@@ -290,11 +290,6 @@ interface HermesAPI {
     repairRequired?: boolean;
     action?: "reinstall-desktop" | "free-disk-space" | "retry";
   }>;
-  inspectInstallTarget: () => Promise<{
-    hermesHome: string;
-    repoPath: string;
-    state: "fresh" | "update" | "replace";
-  }>;
   validateHermesHome: (dir: string) => Promise<boolean>;
   adoptHermesHome: (dir: string) => Promise<boolean>;
   quitApp: () => Promise<void>;

@@ -66,7 +66,6 @@ import type { GpuPreferenceMode } from "../../shared/gpu";
 import {
   verifyInstall,
   runPackagedSeedInstall,
-  inspectInstallTarget,
   validateHermesHome,
   setHermesHomeOverride,
   getHermesVersion,
@@ -985,8 +984,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     }
   });
 
-  // Pre-install inspection + "use an existing installation" (issue #272).
-  ipcMain.handle("inspect-install-target", () => inspectInstallTarget());
+  // Explicit "use an existing external Runtime" compatibility path.
   ipcMain.handle("validate-hermes-home", (_event, dir: string) =>
     validateHermesHome(dir),
   );

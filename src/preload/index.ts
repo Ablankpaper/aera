@@ -121,13 +121,6 @@ const hermesAPI = {
     action?: "reinstall-desktop" | "free-disk-space" | "retry";
   }> => ipcRenderer.invoke("start-install"),
 
-  // Pre-install inspection + "use an existing installation" (issue #272)
-  inspectInstallTarget: (): Promise<{
-    hermesHome: string;
-    repoPath: string;
-    state: "fresh" | "update" | "replace";
-  }> => ipcRenderer.invoke("inspect-install-target"),
-
   validateHermesHome: (dir: string): Promise<boolean> =>
     ipcRenderer.invoke("validate-hermes-home", dir),
 

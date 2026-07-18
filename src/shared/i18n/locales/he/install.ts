@@ -4,7 +4,6 @@ export default {
   installationComplete: "ההתקנה הושלמה",
   installationFailed: "ההתקנה נכשלה",
   installingHermes: "מתקין את AgentEra Runtime",
-  installationFailedHint: "ההתקנה נכשלה. אנא נסו שוב או התקינו דרך הטרמינל.",
   retryInstallation: "נסה התקנה שוב",
   copied: "הועתק!",
   copyLogs: "העתקת היומנים",
@@ -20,11 +19,11 @@ export default {
   confirmNotInherited:
     "אם התקנתם את AgentEra במקום אחר, או דרך שורת הפקודה, ההתקנה הזו לא תועבר.",
   confirmInstallBtn: "התקנת AgentEra",
-  useExistingBtn: "שימוש בהתקנה קיימת",
+  useExistingBtn: "שימוש ב-Runtime חיצוני קיים",
   useExistingHint:
-    "בחרו את התיקייה שמכילה את התקנת AgentEra הקיימת שלכם (זו שמכילה את התיקייה hermes-agent).",
+    "בחרו את תיקיית הבית של Hermes שמכילה את hermes-agent. ה-Runtime יישאר חיצוני ולא מנוהל; עדכונים מפעילים רק את הפקודה המקומית של אותו checkout.",
   useExistingInvalid: "לא נמצאה התקנת AgentEra תקינה בתיקייה זו.",
   useExistingDone:
-    "ההתקנה הקיימת הוגדרה - צאו ופתחו מחדש את AgentEra כדי להחיל אותה.",
+    "ה-Runtime החיצוני נבחר - צאו ופתחו מחדש את AgentEra כדי להחיל אותו. AgentEra Studio לא ישנה או ימחק את ה-checkout.",
   useExistingQuitBtn: "יציאה מ-AgentEra",
 } as const;

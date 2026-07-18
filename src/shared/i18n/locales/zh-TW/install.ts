@@ -1,29 +1,32 @@
 export default {
   preparing: "準備中...",
-  startingInstall: "開始安裝",
-  installationComplete: "安裝完成",
-  installationFailed: "安裝失敗",
-  installingHermes: "正在安裝 AgentEra Runtime",
-  installationFailedHint: "安裝失敗，請重試或改用終端機安裝。",
-  retryInstallation: "重新安裝",
+  preparingRuntime: "正在準備 AgentEra Runtime",
+  verifyingPackagedRuntime: "正在驗證 AgentEra Studio 安裝包內的 Runtime",
+  installationComplete: "AgentEra Runtime 已就緒",
+  installationFailed: "Runtime 準備失敗",
+  preparationFailedHint: "無法從本機安裝資源準備 AgentEra Runtime。",
+  packagedRuntimeInvalid:
+    "AgentEra Studio 安裝包內的 Runtime 遺失或無效。請重新安裝 AgentEra Studio；本次未使用線上回退。",
+  insufficientDiskSpace:
+    "可用磁碟空間不足，無法準備 AgentEra Runtime。請清理空間後再試一次。",
+  retryPreparation: "重新準備",
+  reinstallDesktop: "重新安裝 AgentEra Studio",
   copied: "已複製！",
   copyLogs: "複製記錄",
   stepLabel: "步驟 {{step}}/{{total}}：{{title}}",
   waitingToStart: "等待開始...",
   continueToSetup: "繼續前往設定",
-  confirmTitle: "安裝前確認",
-  confirmLocationLabel: "AgentEra 將安裝到：",
-  confirmFresh: "此處未找到現有安裝 — 將進行全新安裝。",
-  confirmUpdate: "此處已有 AgentEra 安裝 — 將更新到最新版本。",
-  confirmReplace:
-    "此處存在一個資料夾，但不是有效的 AgentEra 安裝 — 安裝將刪除並取代它。",
-  confirmNotInherited:
-    "如果你在其他位置或透過命令列安裝過 AgentEra，那些安裝不會被沿用。",
-  confirmInstallBtn: "安裝 AgentEra",
-  useExistingBtn: "使用現有安裝",
+  confirmTitle: "準備 AgentEra Runtime",
+  confirmBundledRuntime:
+    "AgentEra Runtime 已內建於桌面應用，將直接在本機完成準備。",
+  confirmOfflinePreparation:
+    "首次準備不會從 GitHub 下載 Hermes，也不會修改你的 Profile、Memory、工作階段或已學習 Skills。",
+  confirmPrepareBtn: "準備 Runtime",
+  useExistingBtn: "使用現有外部 Runtime",
   useExistingHint:
-    "選擇包含你現有 AgentEra 安裝的資料夾（即包含 hermes-agent 資料夾的那個）。",
-  useExistingInvalid: "在該資料夾中未找到可用的 AgentEra 安裝。",
-  useExistingDone: "已設定現有安裝 — 結束並重新開啟 AgentEra 以套用。",
+    "選擇包含 hermes-agent 的 Hermes 主目錄。該 Runtime 會保持為不受託管的外部模式，更新只執行此 checkout 內建的本機命令。",
+  useExistingInvalid: "在該資料夾中找不到可用的外部 AgentEra Runtime。",
+  useExistingDone:
+    "已選擇外部 Runtime — 結束並重新開啟 AgentEra 以套用。AgentEra Studio 不會修改或刪除該 checkout。",
   useExistingQuitBtn: "結束 AgentEra",
 } as const;

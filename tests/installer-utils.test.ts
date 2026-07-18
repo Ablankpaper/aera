@@ -9,6 +9,11 @@ import { tmpdir } from "os";
 // which breaks every test that dynamically imports the installer module.
 // Provide a minimal stub so the import resolves.
 vi.mock("electron", () => ({
+  app: {
+    getPath: (): string => "",
+    getVersion: (): string => "0.7.3",
+    isPackaged: false,
+  },
   BrowserWindow: class {
     static getAllWindows(): unknown[] {
       return [];

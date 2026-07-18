@@ -42,7 +42,11 @@ import {
   createRuntimeDistributionManager,
   type RuntimeDistributionManager,
 } from "../agentera-runtime-distribution/manager";
-import { runPackagedSeedInstall } from "../installer";
+import {
+  activateManagedRuntimeMode,
+  isExternalRuntimeSelected,
+  runPackagedSeedInstall,
+} from "../installer";
 
 const APP_NAME =
   process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
@@ -146,12 +150,21 @@ export function startMainProcess(): void {
     runtimeDistribution = createRuntimeDistributionManager({
       ...runtimeOptions,
       activeRunCount: () => activeRuns.size,
+      isExternalRuntime: isExternalRuntimeSelected,
       stopRuntimeContext: stopActiveRuntimeContext,
       relaunch: () => {
         app.relaunch();
         app.exit(0);
       },
       repair: async () => {
+        const existingManaged = activateManagedRuntimeMode();
+        if (existingManaged !== null) {
+          return {
+            success: true,
+            runtimeVersion: existingManaged.version,
+            errorCode: null,
+          };
+        }
         const result = await runPackagedSeedInstall((progress) => {
           if (!mainWindow || mainWindow.isDestroyed()) return;
           mainWindow.webContents.send("install-progress", progress);

@@ -436,4 +436,37 @@ describe("AgentEra Runtime distribution manager", () => {
       lastErrorCode: null,
     });
   });
+
+  it("reports explicit external mode and switches to managed only after Seed repair succeeds", async () => {
+    let external = true;
+    const repair = vi.fn(async () => {
+      external = false;
+      return {
+        success: true,
+        runtimeVersion: "0.18.1-agentera.1",
+        errorCode: null,
+      };
+    });
+    const setup = await harness({
+      repair,
+      isExternalRuntime: () => external,
+    });
+    const manager = createRuntimeDistributionManager(setup.options);
+
+    expect(await manager.initialize()).toMatchObject({
+      phase: "external",
+      currentVersion: null,
+      canCheck: false,
+    });
+    expect((await manager.check()).phase).toBe("external");
+
+    const state = await manager.retryRepair();
+
+    expect(repair).toHaveBeenCalledOnce();
+    expect(state).toMatchObject({
+      phase: "current",
+      currentVersion: "0.18.1-agentera.1",
+      packagedSeedVersion: "0.18.1-agentera.1",
+    });
+  });
 });

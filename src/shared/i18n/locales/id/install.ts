@@ -4,8 +4,6 @@ export default {
   installationComplete: "Instalasi Selesai",
   installationFailed: "Instalasi Gagal",
   installingHermes: "Menginstal AgentEra Runtime",
-  installationFailedHint:
-    "Instalasi gagal. Coba lagi atau instal melalui terminal.",
   retryInstallation: "Ulangi Instalasi",
   copied: "Tersalin!",
   copyLogs: "Salin Log",
@@ -23,12 +21,12 @@ export default {
   confirmNotInherited:
     "Jika Anda memasang AgentEra di tempat lain, atau melalui baris perintah, itu tidak akan dibawa serta.",
   confirmInstallBtn: "Pasang AgentEra",
-  useExistingBtn: "Gunakan pemasangan yang sudah ada",
+  useExistingBtn: "Gunakan Runtime eksternal yang ada",
   useExistingHint:
-    "Pilih folder yang berisi pemasangan AgentEra Anda yang sudah ada (folder yang memuat folder hermes-agent).",
+    "Pilih folder utama Hermes yang memuat hermes-agent. Runtime ini tetap eksternal dan tidak dikelola; pembaruan hanya menjalankan perintah lokal checkout tersebut.",
   useExistingInvalid:
     "Tidak ada pemasangan AgentEra yang dapat digunakan di folder itu.",
   useExistingDone:
-    "Pemasangan yang ada telah diatur — tutup dan buka kembali AgentEra untuk menerapkannya.",
+    "Runtime eksternal dipilih — tutup dan buka kembali AgentEra untuk menerapkannya. AgentEra Studio tidak akan mengubah atau menghapus checkout tersebut.",
   useExistingQuitBtn: "Keluar dari AgentEra",
 } as const;
