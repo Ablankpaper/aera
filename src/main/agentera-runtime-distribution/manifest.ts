@@ -13,6 +13,9 @@ export type RuntimePlatform = "darwin" | "windows";
 export type RuntimeArchitecture = "arm64" | "x64";
 export type RuntimeInventoryKind = "file" | "directory" | "symlink";
 
+export const RUNTIME_MANIFEST_METADATA_NAME = ".agentera-runtime-manifest.json";
+export const RUNTIME_SIGNATURE_METADATA_NAME = ".agentera-runtime-manifest.sig";
+
 export interface RuntimeManifestEntrypoints extends Record<string, unknown> {
   python: string;
   hermes: string;

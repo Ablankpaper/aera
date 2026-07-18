@@ -120,6 +120,38 @@ describe("AgentEra Runtime pointer state store", () => {
     });
   });
 
+  it("does not follow a pre-created pointer temp symlink", async () => {
+    const { directory, paths, store } = makeStore();
+    await createVersion(paths, "v1");
+    const outside = join(directory, "outside-pointer.txt");
+    writeFileSync(outside, "keep outside");
+    symlinkSync(outside, `${paths.current}.tmp`);
+
+    await store.setCurrent(pointer("v1"));
+
+    expect(readFileSync(outside, "utf8")).toBe("keep outside");
+    expect(JSON.parse(readFileSync(paths.current, "utf8"))).toMatchObject({
+      versionDirectory: "v1",
+    });
+  });
+
+  it("rejects and removes a pointer symlink without changing its target", async () => {
+    const { directory, paths, store } = makeStore();
+    await createVersion(paths, "v1");
+    const outside = join(directory, "outside-current.json");
+    const outsideValue = `${JSON.stringify(pointer("v1"))}\n`;
+    writeFileSync(outside, outsideValue);
+    symlinkSync(outside, paths.current);
+
+    await expect(store.readState()).rejects.toThrow(/pointer|symlink|file/i);
+    await expect(store.recoverForBootstrap()).resolves.toMatchObject({
+      state: { current: null },
+      invalidPointers: ["current"],
+    });
+    expect(readFileSync(outside, "utf8")).toBe(outsideValue);
+    expect(existsSync(paths.current)).toBe(false);
+  });
+
   it("promotes current/previous/candidate pointers and rolls back safely", async () => {
     const { paths, store } = makeStore();
     await createVersion(paths, "v1");

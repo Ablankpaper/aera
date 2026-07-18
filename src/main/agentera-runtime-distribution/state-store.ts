@@ -42,6 +42,13 @@ export interface RuntimeDistributionState {
   candidate: CandidatePointer | null;
 }
 
+export type RuntimePointerName = "current" | "previous" | "candidate";
+
+export interface RuntimeBootstrapRecovery {
+  state: RuntimeDistributionState;
+  invalidPointers: RuntimePointerName[];
+}
+
 export interface RuntimeStateStoreOptions {
   now?: () => Date;
   staleTransactionAgeMs?: number;
@@ -199,6 +206,12 @@ async function readPointer(
 ): Promise<RuntimePointer | CandidatePointer | null> {
   let raw: Buffer;
   try {
+    const metadata = await lstat(path);
+    if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      throw new RuntimeStateError(
+        "Runtime pointer path must be a regular file",
+      );
+    }
     raw = await readFile(path);
   } catch (error) {
     if (isErrnoException(error) && error.code === "ENOENT") return null;
@@ -254,7 +267,8 @@ async function writePointerAtomic(
   );
   let handle;
   try {
-    handle = await open(temporaryPath, "w", 0o600);
+    await removeRuntimeOwnedPath(paths.root, temporaryPath);
+    handle = await open(temporaryPath, "wx", 0o600);
     await handle.writeFile(`${JSON.stringify(validated, null, 2)}\n`, "utf8");
     await handle.sync();
     await handle.close();
@@ -524,11 +538,71 @@ export class RuntimeStateStore {
     });
   }
 
+  recoverForBootstrap(): Promise<RuntimeBootstrapRecovery> {
+    return this.exclusive(async () => {
+      await ensureRuntimeDistributionDirectories(this.paths);
+      for (const pointerPath of [
+        this.paths.current,
+        this.paths.previous,
+        this.paths.candidate,
+      ]) {
+        await removeRuntimeOwnedPath(this.paths.root, `${pointerPath}.tmp`);
+      }
+      await removeStaleTransactions(
+        this.paths,
+        this.paths.staging,
+        this.now(),
+        this.staleTransactionAgeMs,
+      );
+      await removeStaleTransactions(
+        this.paths,
+        this.paths.downloads,
+        this.now(),
+        this.staleTransactionAgeMs,
+      );
+
+      const invalidPointers: RuntimePointerName[] = [];
+      let current: RuntimePointer | null = null;
+      let previous: RuntimePointer | null = null;
+      let candidate: CandidatePointer | null = null;
+      try {
+        current = await readPointer(this.paths.current, this.paths, false);
+      } catch {
+        invalidPointers.push("current");
+        await removePointer(this.paths.current, this.paths);
+      }
+      try {
+        previous = await readPointer(this.paths.previous, this.paths, false);
+      } catch {
+        invalidPointers.push("previous");
+        await removePointer(this.paths.previous, this.paths);
+      }
+      try {
+        candidate = await readPointer(this.paths.candidate, this.paths, true);
+      } catch {
+        invalidPointers.push("candidate");
+        await removePointer(this.paths.candidate, this.paths);
+      }
+      return {
+        state: { current, previous, candidate },
+        invalidPointers,
+      };
+    });
+  }
+
   setCurrent(pointer: RuntimePointer): Promise<void> {
     return this.exclusive(async () => {
       await ensureRuntimeDistributionDirectories(this.paths);
       await writePointerAtomic(this.paths.current, pointer, this.paths, false);
     });
+  }
+
+  clearCurrent(): Promise<void> {
+    return this.exclusive(() => removePointer(this.paths.current, this.paths));
+  }
+
+  clearPrevious(): Promise<void> {
+    return this.exclusive(() => removePointer(this.paths.previous, this.paths));
   }
 
   stageCandidate(pointer: CandidatePointer): Promise<void> {

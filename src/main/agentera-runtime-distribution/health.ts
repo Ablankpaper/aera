@@ -37,6 +37,7 @@ export type RuntimeHealthCommandRunner = (
 export interface RuntimeHealthCheckOptions {
   runtimeRoot: string;
   manifest: RuntimeManifest;
+  sandboxParent?: string;
   signal?: AbortSignal;
   runner?: RuntimeHealthCommandRunner;
   timeoutMs?: number;
@@ -171,6 +172,7 @@ function guardedImportScript(): string {
 export async function runIsolatedRuntimeHealthCheck({
   runtimeRoot,
   manifest,
+  sandboxParent,
   signal,
   runner = defaultRunner,
   timeoutMs = HEALTH_TIMEOUT_MS,
@@ -183,8 +185,19 @@ export async function runIsolatedRuntimeHealthCheck({
   await requireFile(python, "Runtime Python entrypoint");
   await requireFile(hermes, "Runtime Hermes entrypoint");
 
+  const healthParent = sandboxParent ?? dirname(runtimeRoot);
+  await mkdir(healthParent, { recursive: true, mode: 0o700 });
+  const healthParentMetadata = await lstat(healthParent);
+  if (
+    !healthParentMetadata.isDirectory() ||
+    healthParentMetadata.isSymbolicLink()
+  ) {
+    throw new RuntimeHealthError(
+      "Runtime health sandbox parent must be a real directory",
+    );
+  }
   const sandbox = await mkdtemp(
-    join(dirname(runtimeRoot), ".agentera-runtime-health-"),
+    join(healthParent, ".agentera-runtime-health-"),
   );
   try {
     const hermesHome = join(sandbox, "hermes-home");

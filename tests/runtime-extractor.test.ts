@@ -18,6 +18,7 @@ import { Header } from "tar";
 import {
   RuntimeExtractionError,
   extractRuntimeArchive,
+  verifyExtractedRuntimeInventory,
 } from "../src/main/agentera-runtime-distribution/extractor";
 import {
   type RuntimeManifest,
@@ -521,5 +522,35 @@ describe("Runtime Seed extractor", () => {
       }),
     ).rejects.toBeInstanceOf(RuntimeExtractionError);
     await expect(lstat(destination)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("re-verifies an installed candidate while allowing only signed metadata sidecars", async () => {
+    const root = await workspace();
+    const value = manifest();
+    const archivePath = await writeTarZstd(root, archiveEntries(value.files));
+    const destination = join(root, "payload");
+    await extractRuntimeArchive({
+      archivePath,
+      destination,
+      manifest: value,
+      maxExtractedBytes: 1024 * 1024,
+    });
+    await writeFile(
+      join(destination, ".agentera-runtime-manifest.json"),
+      "signed manifest",
+    );
+    await writeFile(
+      join(destination, ".agentera-runtime-manifest.sig"),
+      "signed envelope",
+    );
+
+    await expect(
+      verifyExtractedRuntimeInventory(destination, value, 1024 * 1024),
+    ).resolves.toEqual({ fileCount: 2, extractedBytes: 44 });
+
+    await writeFile(join(destination, "runtime", "hermes"), "tampered");
+    await expect(
+      verifyExtractedRuntimeInventory(destination, value, 1024 * 1024),
+    ).rejects.toThrow(/size|hash|manifest/i);
   });
 });

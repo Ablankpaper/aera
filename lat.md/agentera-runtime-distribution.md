@@ -28,7 +28,7 @@ Packaged Seed installation is verified, transactional, local-only, and isolated 
 
 Extraction occurs only below a fresh `userData/runtime/staging/seed-*` transaction. Failure or cancellation deletes the destination owned by that transaction; it cannot clean another staging child, a current version, or `HERMES_HOME`.
 
-[[src/main/agentera-runtime-distribution/seed-installer.ts#installPackagedSeed]] discovers exactly one packaged archive, canonical manifest, and signature, verifies them with the production trust set, and checks free space for archive bytes plus extracted bytes plus one rollback-version reserve plus a ten-percent margin. It health-checks the candidate in staging, renames the verified payload into `versions`, writes `current.json` atomically, selects managed mode, and refreshes the live invocation.
+[[src/main/agentera-runtime-distribution/seed-installer.ts#installPackagedSeed]] discovers exactly one packaged archive, canonical manifest, and signature, verifies them with the production trust set, and checks free space for archive bytes plus extracted bytes plus one rollback-version reserve plus a ten-percent margin. It health-checks the candidate in staging, stores the verified manifest and signature as managed sidecars, renames the verified payload into `versions`, writes `current.json` atomically, selects managed mode, and refreshes the live invocation. The sidecars let every later startup re-hash the full signed inventory before selecting that managed version.
 
 [[src/main/agentera-runtime-distribution/health.ts#runIsolatedRuntimeHealthCheck]] runs version, server-help, and core-import probes with a disposable fake HOME and HERMES_HOME, an allowlisted environment, no inherited credentials, and offline package-manager flags. A corrupt same-version current Runtime is repaired into a new version directory, leaving the old directory and every Hermes-owned Profile, Memory, session, learned Skill, and Curator file untouched.
 
@@ -39,6 +39,8 @@ The authenticated `start-install` IPC path calls only the packaged Seed installe
 Mutable Runtime versions and current, previous, and candidate pointers live only below Electron `userData/runtime`. Each pointer update fsyncs a temp file, renames it atomically, then fsyncs the parent directory where supported.
 
 Recovery removes only pointer temp files and stale transactions proven to be under Runtime staging or downloads. Version cleanup keeps every referenced directory and rejects lexical or real-path escape, including parent symlinks.
+
+Startup recovery reads current, previous, and candidate pointers independently. A malformed or missing-directory pointer is removed without exposing its contents; a valid previous Runtime becomes current when the current pointer or required program layout is unusable. If neither is usable, startup continues into the packaged-Seed repair state rather than selecting an online or system Runtime.
 
 ## Program and Profile isolation
 
@@ -71,6 +73,10 @@ Logical update URLs are restricted to the public `bignormal/aera-runtime` GitHub
 [[src/main/agentera-runtime-distribution/downloader.ts#downloadWithResume]] writes only to a destination `.part` plus `.part.json` below the caller-owned Runtime downloads directory. Resume requires the same URL, expected size, expected SHA-256, unexpired metadata, exact local byte count, valid `Content-Range`, and matching ETag and Last-Modified validators when present. A server that ignores Range safely restarts from byte zero.
 
 Connect, idle-read, overall, and redirect limits are bounded. Cancellation and transport interruption retain a verified-length partial for retry; stale or mismatched metadata and completed wrong-size or wrong-hash bytes are deleted. Only a complete streaming SHA-256 match is atomically renamed to the requested destination.
+
+[[src/main/agentera-runtime-distribution/manager.ts#createRuntimeDistributionManager]] is the only archive-download entrypoint. After explicit confirmation it independently re-verifies the downloaded artifact, extracts into a fresh Runtime-owned transaction, adds the signed manifest sidecars, publishes a version directory, and writes a non-active candidate pointer. Cancellation or any verification/extraction failure leaves `current.json` unchanged. Restart is refused while a chat task is active; otherwise Runtime-owned processes stop before the candidate is marked for next-launch activation and the app requests relaunch.
+
+[[src/main/agentera-runtime-distribution/bootstrap.ts#bootstrapRuntimeDistribution]] runs before `app/start` is dynamically imported. An approved candidate's signature, pointer binding, complete extracted inventory, and isolated offline health are checked again below `userData/runtime/health`; only then does the journal move current to previous and candidate to current. Failure keeps the existing current version, records only an error code, numeric exit code, version, short commit, and timestamp, and durably suppresses the failed candidate until a newer staging action replaces it. No path, credential, Profile, Memory, session, learned Skill, or raw exception enters the diagnostic.
 
 ## Release gate
 

@@ -1,0 +1,361 @@
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { ExtractRuntimeArchiveOptions } from "../src/main/agentera-runtime-distribution/extractor";
+import type { RuntimeManifestValidationContext } from "../src/main/agentera-runtime-distribution/manifest";
+import {
+  createRuntimeDistributionManager,
+  RUNTIME_LAST_FAILURE_NAME,
+  RUNTIME_MANIFEST_METADATA_NAME,
+  RUNTIME_SIGNATURE_METADATA_NAME,
+  type RuntimeDistributionManagerOptions,
+} from "../src/main/agentera-runtime-distribution/manager";
+import {
+  createRuntimeDistributionPaths,
+  ensureRuntimeDistributionDirectories,
+} from "../src/main/agentera-runtime-distribution/paths";
+import {
+  RuntimeStateStore,
+  type RuntimePointer,
+} from "../src/main/agentera-runtime-distribution/state-store";
+import type { RuntimeUpdateOffer } from "../src/main/agentera-runtime-distribution/update-client";
+import {
+  TEST_ARCHIVE_BYTES,
+  TEST_ARCHIVE_NAME,
+  TEST_KEY_ID,
+  TEST_PUBLIC_KEY,
+  TEST_RUNTIME_VERSION,
+  TEST_SOURCE_COMMIT,
+  createFixtureManifest,
+  createSignedFixture,
+} from "./fixtures/runtime-distribution/fixture";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await Promise.all(
+    temporaryDirectories
+      .splice(0)
+      .map((path) => rm(path, { recursive: true, force: true })),
+  );
+});
+
+const manifestContext: RuntimeManifestValidationContext = {
+  repository: "bignormal/aera-runtime",
+  platform: "darwin",
+  arch: "arm64",
+  desktopVersion: "0.7.3",
+  allowedChannels: new Set(["stable"]),
+};
+
+function pointer(versionDirectory: string): RuntimePointer {
+  return {
+    schemaVersion: 1,
+    runtimeVersion: "0.18.1-agentera.1",
+    sourceCommit: "a".repeat(40),
+    versionDirectory,
+    manifestSha256: "b".repeat(64),
+    installedAt: "2026-07-18T12:00:00.000Z",
+  };
+}
+
+async function createRuntimeLayout(destination: string): Promise<void> {
+  for (const directory of [
+    "python/bin",
+    "python/lib/python3.11/site-packages/hermes_cli/web_dist",
+    "python/skills",
+    "runtime",
+  ]) {
+    await mkdir(join(destination, ...directory.split("/")), {
+      recursive: true,
+    });
+  }
+  await writeFile(join(destination, "python", "bin", "python3"), "python");
+  await writeFile(join(destination, "runtime", "hermes"), "hermes");
+}
+
+async function harness(
+  overrides: Partial<RuntimeDistributionManagerOptions> = {},
+): Promise<{
+  paths: ReturnType<typeof createRuntimeDistributionPaths>;
+  store: RuntimeStateStore;
+  offer: RuntimeUpdateOffer;
+  options: RuntimeDistributionManagerOptions;
+  checkUpdate: ReturnType<typeof vi.fn>;
+  download: ReturnType<typeof vi.fn>;
+  extractor: ReturnType<typeof vi.fn>;
+  activeRuns: { count: number };
+  stopRuntimeContext: ReturnType<typeof vi.fn>;
+  relaunch: ReturnType<typeof vi.fn>;
+}> {
+  const root = await mkdtemp(join(tmpdir(), "agentera-runtime-manager-"));
+  temporaryDirectories.push(root);
+  const paths = createRuntimeDistributionPaths(
+    join(root, "user-data"),
+    join(root, "packaged-seed"),
+  );
+  await ensureRuntimeDistributionDirectories(paths);
+  await mkdir(join(paths.versions, "current-v1"));
+  const store = new RuntimeStateStore(paths);
+  await store.setCurrent(pointer("current-v1"));
+
+  const signed = createSignedFixture({ channel: "stable" });
+  const manifest = createFixtureManifest({ channel: "stable" });
+  const offer: RuntimeUpdateOffer = {
+    runtimeVersion: TEST_RUNTIME_VERSION,
+    sourceCommit: TEST_SOURCE_COMMIT,
+    releaseTag: `runtime-v${TEST_RUNTIME_VERSION}`,
+    archiveName: TEST_ARCHIVE_NAME,
+    archiveSize: TEST_ARCHIVE_BYTES.length,
+    archiveSha256: manifest.archive_sha256,
+    archiveUrl: new URL(
+      `https://github.com/bignormal/aera-runtime/releases/download/runtime-v${TEST_RUNTIME_VERSION}/${TEST_ARCHIVE_NAME}`,
+    ),
+    manifestUrl: new URL(
+      `https://github.com/bignormal/aera-runtime/releases/download/runtime-v${TEST_RUNTIME_VERSION}/${TEST_ARCHIVE_NAME}.manifest.json`,
+    ),
+    signatureUrl: new URL(
+      `https://github.com/bignormal/aera-runtime/releases/download/runtime-v${TEST_RUNTIME_VERSION}/${TEST_ARCHIVE_NAME}.manifest.sig`,
+    ),
+    manifestBytes: signed.manifestBytes,
+    signatureBytes: signed.signatureBytes,
+  };
+  const checkUpdate = vi.fn(async () => offer);
+  const download = vi.fn(async ({ destination }) => {
+    await writeFile(destination, TEST_ARCHIVE_BYTES);
+  });
+  const extractor = vi.fn(
+    async ({ destination }: ExtractRuntimeArchiveOptions) => {
+      await createRuntimeLayout(destination);
+      return { fileCount: 2, extractedBytes: 30 };
+    },
+  );
+  const activeRuns = { count: 0 };
+  const stopRuntimeContext = vi.fn();
+  const relaunch = vi.fn();
+  const options: RuntimeDistributionManagerOptions = {
+    paths,
+    trustedPublicKeys: new Map([[TEST_KEY_ID, TEST_PUBLIC_KEY]]),
+    manifestContext,
+    stateStore: store,
+    checkUpdate,
+    download,
+    extractor,
+    now: () => new Date("2026-07-18T13:00:00.000Z"),
+    randomId: () => "11111111-2222-4333-8444-555555555555",
+    activeRunCount: () => activeRuns.count,
+    stopRuntimeContext,
+    relaunch,
+    ...overrides,
+  };
+  return {
+    paths,
+    store,
+    offer,
+    options,
+    checkUpdate,
+    download,
+    extractor,
+    activeRuns,
+    stopRuntimeContext,
+    relaunch,
+  };
+}
+
+describe("AgentEra Runtime distribution manager", () => {
+  it("checks only signed metadata and performs zero archive downloads", async () => {
+    const setup = await harness();
+    const manager = createRuntimeDistributionManager(setup.options);
+
+    await manager.initialize();
+    const state = await manager.check();
+
+    expect(setup.checkUpdate).toHaveBeenCalledOnce();
+    expect(setup.download).not.toHaveBeenCalled();
+    expect(setup.extractor).not.toHaveBeenCalled();
+    expect(state).toMatchObject({
+      phase: "update-available",
+      currentVersion: "0.18.1-agentera.1",
+      availableVersion: TEST_RUNTIME_VERSION,
+      canDownload: true,
+    });
+  });
+
+  it("returns to the current Runtime when metadata checking throws", async () => {
+    const setup = await harness({
+      checkUpdate: vi.fn(async () => {
+        throw new Error("temporary metadata transport failure");
+      }),
+    });
+    const manager = createRuntimeDistributionManager(setup.options);
+    await manager.initialize();
+
+    const state = await manager.check();
+
+    expect(state).toMatchObject({
+      phase: "current",
+      currentVersion: "0.18.1-agentera.1",
+      lastErrorCode: "runtime_update_unavailable",
+      canCheck: true,
+    });
+    expect(setup.download).not.toHaveBeenCalled();
+  });
+
+  it("downloads only after confirmation, verifies, extracts, and stages without activating", async () => {
+    const setup = await harness();
+    const manager = createRuntimeDistributionManager(setup.options);
+    await manager.initialize();
+    await manager.check();
+
+    const state = await manager.downloadConfirmed();
+
+    expect(setup.download).toHaveBeenCalledOnce();
+    expect(setup.extractor).toHaveBeenCalledOnce();
+    expect(state).toMatchObject({
+      phase: "candidate-ready",
+      currentVersion: "0.18.1-agentera.1",
+      availableVersion: TEST_RUNTIME_VERSION,
+      canRestart: true,
+    });
+    const journal = await setup.store.readState();
+    expect(journal.current?.versionDirectory).toBe("current-v1");
+    expect(journal.candidate).toMatchObject({
+      runtimeVersion: TEST_RUNTIME_VERSION,
+      sourceCommit: TEST_SOURCE_COMMIT,
+      applyOnNextLaunch: false,
+    });
+    const candidateRoot = join(
+      setup.paths.versions,
+      journal.candidate!.versionDirectory,
+    );
+    expect(
+      createHash("sha256")
+        .update(
+          await readFile(join(candidateRoot, RUNTIME_MANIFEST_METADATA_NAME)),
+        )
+        .digest("hex"),
+    ).toBe(journal.candidate?.manifestSha256);
+    await expect(
+      readFile(join(candidateRoot, RUNTIME_SIGNATURE_METADATA_NAME)),
+    ).resolves.toEqual(setup.offer.signatureBytes);
+  });
+
+  it("cancels an active download without changing current or staging a candidate", async () => {
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const setup = await harness({
+      download: vi.fn(
+        ({ signal }) =>
+          new Promise<void>((_resolve, reject) => {
+            started();
+            signal.addEventListener(
+              "abort",
+              () =>
+                reject(
+                  Object.assign(new Error("cancelled"), { name: "AbortError" }),
+                ),
+              { once: true },
+            );
+          }),
+      ),
+    });
+    const manager = createRuntimeDistributionManager(setup.options);
+    await manager.initialize();
+    await manager.check();
+
+    const downloadPromise = manager.downloadConfirmed();
+    await didStart;
+    await manager.cancelDownload();
+    const state = await downloadPromise;
+
+    expect(state.phase).toBe("update-available");
+    expect(await setup.store.readState()).toMatchObject({
+      current: { versionDirectory: "current-v1" },
+      candidate: null,
+    });
+  });
+
+  it("keeps the current Runtime usable when a confirmed download fails", async () => {
+    const setup = await harness({
+      download: vi.fn(async () => {
+        throw new Error("network failed");
+      }),
+    });
+    const manager = createRuntimeDistributionManager(setup.options);
+    await manager.initialize();
+    await manager.check();
+
+    const state = await manager.downloadConfirmed();
+
+    expect(state).toMatchObject({
+      phase: "update-available",
+      currentVersion: "0.18.1-agentera.1",
+      lastErrorCode: "runtime_download_failed",
+    });
+    expect(await setup.store.readState()).toMatchObject({
+      current: { versionDirectory: "current-v1" },
+      candidate: null,
+    });
+  });
+
+  it("refuses restart while tasks are active and only then marks next-launch activation", async () => {
+    const setup = await harness();
+    const manager = createRuntimeDistributionManager(setup.options);
+    await manager.initialize();
+    await manager.check();
+    await manager.downloadConfirmed();
+    setup.activeRuns.count = 1;
+
+    const refused = await manager.restartToApply();
+
+    expect(refused.lastErrorCode).toBe("runtime_tasks_active");
+    expect(setup.stopRuntimeContext).not.toHaveBeenCalled();
+    expect(setup.relaunch).not.toHaveBeenCalled();
+    expect((await setup.store.readState()).candidate?.applyOnNextLaunch).toBe(
+      false,
+    );
+
+    setup.activeRuns.count = 0;
+    await manager.restartToApply();
+
+    expect(setup.stopRuntimeContext).toHaveBeenCalledOnce();
+    expect(setup.relaunch).toHaveBeenCalledOnce();
+    expect((await setup.store.readState()).candidate?.applyOnNextLaunch).toBe(
+      true,
+    );
+  });
+
+  it("does not present a durably failed candidate as restartable", async () => {
+    const setup = await harness();
+    const first = createRuntimeDistributionManager(setup.options);
+    await first.initialize();
+    await first.check();
+    await first.downloadConfirmed();
+    await writeFile(
+      join(setup.paths.failures, RUNTIME_LAST_FAILURE_NAME),
+      JSON.stringify({
+        schemaVersion: 1,
+        errorCode: "runtime_candidate_health_failed",
+        runtimeVersion: TEST_RUNTIME_VERSION,
+        sourceCommitShort: TEST_SOURCE_COMMIT.slice(0, 12),
+        recordedAt: "2026-07-18T14:00:00.000Z",
+      }),
+    );
+
+    const restarted = createRuntimeDistributionManager(setup.options);
+    const state = await restarted.initialize();
+
+    expect(state).toMatchObject({
+      phase: "rollback",
+      lastErrorCode: "runtime_candidate_health_failed",
+      canRestart: false,
+    });
+  });
+});

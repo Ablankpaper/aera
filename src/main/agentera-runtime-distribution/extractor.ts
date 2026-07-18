@@ -18,14 +18,20 @@ import { createZstdDecompress } from "node:zlib";
 import extractZip from "extract-zip";
 import { Parser, x as extractTar, type ReadEntry } from "tar";
 
-import type {
-  RuntimeInventoryKind,
-  RuntimeManifest,
-  RuntimeManifestFile,
+import {
+  RUNTIME_MANIFEST_METADATA_NAME,
+  RUNTIME_SIGNATURE_METADATA_NAME,
+  type RuntimeInventoryKind,
+  type RuntimeManifest,
+  type RuntimeManifestFile,
 } from "./manifest";
 
 const ARCHIVE_ROOT = "agentera-runtime";
 const MAX_SYMLINK_TARGET_BYTES = 16 * 1024;
+const INSTALLED_METADATA_FILES = new Set([
+  RUNTIME_MANIFEST_METADATA_NAME,
+  RUNTIME_SIGNATURE_METADATA_NAME,
+]);
 
 export interface ExtractRuntimeArchiveOptions {
   archivePath: string;
@@ -535,7 +541,7 @@ async function hashFile(path: string, signal?: AbortSignal): Promise<string> {
   return hash.digest("hex");
 }
 
-async function verifyExtractedInventory(
+export async function verifyExtractedRuntimeInventory(
   destination: string,
   manifest: RuntimeManifest,
   maxExtractedBytes: number,
@@ -558,6 +564,18 @@ async function verifyExtractedInventory(
     );
     for (const child of children) {
       throwIfAborted(signal);
+      if (
+        relativeDirectory.length === 0 &&
+        INSTALLED_METADATA_FILES.has(child.name)
+      ) {
+        const metadata = await lstat(join(directory, child.name));
+        if (!metadata.isFile() || metadata.isSymbolicLink()) {
+          throw new RuntimeExtractionError(
+            "installed Runtime metadata must be a regular file",
+          );
+        }
+        continue;
+      }
       const relativePath = relativeDirectory
         ? `${relativeDirectory}/${child.name}`
         : child.name;
@@ -718,7 +736,7 @@ export async function extractRuntimeArchive({
       );
     }
     throwIfAborted(signal);
-    return await verifyExtractedInventory(
+    return await verifyExtractedRuntimeInventory(
       target,
       manifest,
       maxExtractedBytes,

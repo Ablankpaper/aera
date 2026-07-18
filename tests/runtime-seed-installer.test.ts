@@ -19,7 +19,11 @@ import {
   runIsolatedRuntimeHealthCheck,
   type RuntimeHealthCheckOptions,
 } from "../src/main/agentera-runtime-distribution/health";
-import type { RuntimeManifestValidationContext } from "../src/main/agentera-runtime-distribution/manifest";
+import {
+  RUNTIME_MANIFEST_METADATA_NAME,
+  RUNTIME_SIGNATURE_METADATA_NAME,
+  type RuntimeManifestValidationContext,
+} from "../src/main/agentera-runtime-distribution/manifest";
 import { createRuntimeDistributionPaths } from "../src/main/agentera-runtime-distribution/paths";
 import {
   calculatePackagedSeedDiskBudget,
@@ -246,6 +250,24 @@ describe("packaged Runtime Seed discovery and installation", () => {
     await expect(
       lstat(join(setup.paths.versions, pointer.versionDirectory)),
     ).resolves.toBeDefined();
+    await expect(
+      readFile(
+        join(
+          setup.paths.versions,
+          pointer.versionDirectory,
+          RUNTIME_MANIFEST_METADATA_NAME,
+        ),
+      ),
+    ).resolves.toEqual(await readFile(setup.bundle.manifestPath));
+    await expect(
+      readFile(
+        join(
+          setup.paths.versions,
+          pointer.versionDirectory,
+          RUNTIME_SIGNATURE_METADATA_NAME,
+        ),
+      ),
+    ).resolves.toEqual(await readFile(setup.bundle.signaturePath));
     await expect(readdir(setup.paths.staging)).resolves.toEqual([]);
   });
 

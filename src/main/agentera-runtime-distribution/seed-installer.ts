@@ -6,6 +6,7 @@ import {
   readdir,
   rename,
   statfs,
+  writeFile,
 } from "node:fs/promises";
 import { basename, join } from "node:path";
 
@@ -20,6 +21,8 @@ import {
   type RuntimeHealthCheckResult,
 } from "./health";
 import {
+  RUNTIME_MANIFEST_METADATA_NAME,
+  RUNTIME_SIGNATURE_METADATA_NAME,
   type RuntimeManifest,
   type RuntimeManifestValidationContext,
   verifyRuntimeArtifact,
@@ -57,6 +60,7 @@ export type PackagedSeedInstallErrorCode =
 export interface VerifiedPackagedRuntimeSeed {
   manifest: RuntimeManifest;
   manifestBytes: Buffer;
+  signatureBytes: Buffer;
   manifestPath: string;
   signaturePath: string;
   archivePath: string;
@@ -245,6 +249,7 @@ export async function verifyPackagedRuntimeSeed({
   return {
     manifest,
     manifestBytes,
+    signatureBytes,
     manifestPath,
     signaturePath,
     archivePath,
@@ -508,6 +513,18 @@ export async function installPackagedSeed(
     }
 
     progress(options.onProgress, 4, "Publishing the verified Runtime version");
+    await Promise.all([
+      writeFile(
+        join(payload, RUNTIME_MANIFEST_METADATA_NAME),
+        seed.manifestBytes,
+        { flag: "wx", mode: 0o600 },
+      ),
+      writeFile(
+        join(payload, RUNTIME_SIGNATURE_METADATA_NAME),
+        seed.signatureBytes,
+        { flag: "wx", mode: 0o600 },
+      ),
+    ]);
     const manifestSha256 = createHash("sha256")
       .update(seed.manifestBytes)
       .digest("hex");

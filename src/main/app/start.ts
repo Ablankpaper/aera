@@ -217,7 +217,7 @@ export function startMainProcess(): void {
   });
 }
 
-function stopActiveRuntimeContext(): void {
+export function stopActiveRuntimeContext(): void {
   stopHealthPolling();
   for (const abort of activeRuns.values()) abort();
   activeRuns.clear();
