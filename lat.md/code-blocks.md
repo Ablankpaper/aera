@@ -16,6 +16,8 @@ Fenced blocks dominated by Unicode box-drawing characters (tree output like `├
 
 Prism fragments each glyph into nested token spans; in Electron renderers with imperfect Unicode metrics that fragmentation visually truncates or misaligns the diagram. Plain rendering also skips the lazy highlighter import and keeps the DOM to one text node. `fontVariantLigatures: "none"` and `unicodeBidi: "isolate"` guard glyph fidelity.
 
+Renderer tests first wait for the lazy Prism import with a bounded five-second readiness window. This keeps the control assertion meaningful on slower macOS CI runners without replacing the condition-based wait with a fixed delay.
+
 The gate is [[src/renderer/src/components/AgentMarkdown.tsx#isBoxDiagram]]: at least half of the block's non-empty lines must contain a character in U+2500–U+259F (Box Drawing + Block Elements). Density — not mere presence — is the discriminator, so one `│` in a string literal or comment does not demote a whole source file to plain text.
 
 Two precedence rules: `diff` blocks always keep the colored `DiffView` (it never uses Prism, so it has no fragmentation risk), and the header label keeps the fence's declared language — only an unlabeled box diagram is labeled `text`.

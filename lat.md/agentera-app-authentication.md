@@ -178,6 +178,8 @@ The desktop pins the reviewed cloud OpenAPI document, generates deterministic Ty
 
 `scripts/generate-agentera-cloud-types.mjs` derives the contract hash and formatted types, while `scripts/check-agentera-cloud-contract.mjs` validates critical endpoints, exact fields, documented errors, and the strict loopback redirect shape. The desktop client consumes those generated request and response types without permissive casts.
 
+Because the contract hash is byte-based, `.gitattributes` forces the pinned OpenAPI document and generated TypeScript to LF on every checkout. The contract regression suite verifies these Git attributes and gives deterministic generation enough time on slower CI runners.
+
 [[tests/e2e/agentera-auth.e2e.ts]] exercises the real browser, cloud, and Electron lifecycle only against isolated services and a synthetic Hermes boundary fixture. Hashes prove authentication never modifies the fixture, and the same suite can target the unpacked macOS application.
 
 Desktop CI compiles, type-checks, tests, and validates the contract on macOS, Windows, and Linux. CI success is not a substitute for physical Windows/Linux secure-storage, firewall, loopback-return, install, update, and uninstall evidence.

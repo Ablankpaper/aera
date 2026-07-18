@@ -13,6 +13,25 @@ const cloudClient = join(root, "src/main/agentera-auth/client.ts");
 const siblingContract = resolve(root, "../aera-cloud/api/openapi.yaml");
 
 describe("AgentEra cloud contract pin", () => {
+  it("forces byte-hashed contract artifacts to LF on every checkout", () => {
+    const attributes = execFileSync(
+      "git",
+      [
+        "check-attr",
+        "eol",
+        "--",
+        "contracts/agentera-cloud.openapi.yaml",
+        "src/shared/agentera-cloud-api.generated.ts",
+      ],
+      { cwd: root, encoding: "utf8" },
+    );
+
+    expect(attributes.trim().split(/\r?\n/)).toEqual([
+      "contracts/agentera-cloud.openapi.yaml: eol: lf",
+      "src/shared/agentera-cloud-api.generated.ts: eol: lf",
+    ]);
+  });
+
   it("pins the reviewed sibling cloud contract byte-for-byte when available", () => {
     expect(existsSync(pinnedContract)).toBe(true);
     if (existsSync(siblingContract)) {
@@ -47,7 +66,7 @@ describe("AgentEra cloud contract pin", () => {
         stdio: "pipe",
       },
     );
-  });
+  }, 20_000);
 
   it("uses the generated schemas at every desktop token endpoint", () => {
     const source = readFileSync(cloudClient, "utf8");
