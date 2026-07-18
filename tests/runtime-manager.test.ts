@@ -332,6 +332,55 @@ describe("AgentEra Runtime distribution manager", () => {
     );
   });
 
+  it("atomically reserves the Runtime transition before stopping the live context", async () => {
+    const beginRuntimeTransition = vi.fn(() => false);
+    const cancelRuntimeTransition = vi.fn();
+    const setup = await harness({
+      beginRuntimeTransition,
+      cancelRuntimeTransition,
+    });
+    const manager = createRuntimeDistributionManager(setup.options);
+    await manager.initialize();
+    await manager.check();
+    await manager.downloadConfirmed();
+
+    const refused = await manager.restartToApply();
+
+    expect(beginRuntimeTransition).toHaveBeenCalledOnce();
+    expect(refused.lastErrorCode).toBe("runtime_tasks_active");
+    expect(setup.stopRuntimeContext).not.toHaveBeenCalled();
+    expect(setup.relaunch).not.toHaveBeenCalled();
+    expect(cancelRuntimeTransition).not.toHaveBeenCalled();
+    expect((await setup.store.readState()).candidate?.applyOnNextLaunch).toBe(
+      false,
+    );
+  });
+
+  it("releases a reserved Runtime transition when restart preparation fails", async () => {
+    const beginRuntimeTransition = vi.fn(() => true);
+    const cancelRuntimeTransition = vi.fn();
+    const setup = await harness({
+      beginRuntimeTransition,
+      cancelRuntimeTransition,
+      stopRuntimeContext: vi.fn(() => {
+        throw new Error("stop failed");
+      }),
+    });
+    const manager = createRuntimeDistributionManager(setup.options);
+    await manager.initialize();
+    await manager.check();
+    await manager.downloadConfirmed();
+
+    const failed = await manager.restartToApply();
+
+    expect(failed.lastErrorCode).toBe("runtime_restart_failed");
+    expect(cancelRuntimeTransition).toHaveBeenCalledOnce();
+    expect(setup.relaunch).not.toHaveBeenCalled();
+    expect((await setup.store.readState()).candidate?.applyOnNextLaunch).toBe(
+      false,
+    );
+  });
+
   it("does not present a durably failed candidate as restartable", async () => {
     const setup = await harness();
     const first = createRuntimeDistributionManager(setup.options);

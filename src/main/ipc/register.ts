@@ -12,6 +12,7 @@ import { extname } from "path";
 import { randomUUID } from "crypto";
 import type { AgenteraAuthController } from "../agentera-auth/controller";
 import type { RuntimeDistributionManager } from "../agentera-runtime-distribution/manager";
+import type { RuntimeActivityCoordinator } from "../runtime-activity";
 import {
   serializeRuntimeDistributionPublicState,
   type RuntimeDistributionPublicState,
@@ -425,7 +426,7 @@ import {
 } from "../ssh-remote";
 
 export interface IpcContext {
-  activeRuns: Map<string, () => void>;
+  runtimeActivity: RuntimeActivityCoordinator;
   getMainWindow: () => BrowserWindow | null;
   notifyConnectionConfigChanged: () => void;
   notifyModelLibraryChanged: () => void;
@@ -698,7 +699,7 @@ function resolveLibraryModelEntry(
 
 export function registerIpcHandlers(context: IpcContext): void {
   const {
-    activeRuns,
+    runtimeActivity,
     getMainWindow,
     notifyConnectionConfigChanged,
     notifyModelLibraryChanged,
@@ -1715,153 +1716,154 @@ export function registerIpcHandlers(context: IpcContext): void {
       // Each conversation has a stable runId minted by the renderer. Fall back
       // to a generated id for legacy callers so the run is still tracked.
       const chatRunId = runId || `run-${randomUUID()}`;
-      if (!isRemoteMode() && !isGatewayRunning(profile)) {
-        startGateway(profile);
+      const runtimeRun = runtimeActivity.beginRun(chatRunId);
+      if (runtimeRun === null) {
+        throw new Error("AgentEra Runtime restart is pending.");
       }
-
-      const conn = getConnectionConfig();
-      if (conn.mode === "ssh" && conn.ssh) {
-        // Tunnel to the dashboard (/api/* + chat WS; NOT /v1) and cache its
-        // token, else the gateway api_server (/v1) — via the shared preparer
-        // so all SSH paths agree on one tunnel target.
-        await prepareSshTunnel(conn, profile);
-      }
-
-      // Abort only a prior run under the SAME runId (a re-send in the same
-      // conversation). Sibling runs — other background sessions / agents —
-      // keep streaming untouched.
-      const existing = activeRuns.get(chatRunId);
-      if (existing) existing();
-
-      let fullResponse = "";
-      const chatStartTime = Date.now();
-      let resolveChat: (v: { response: string; sessionId?: string }) => void;
-      let rejectChat: (reason?: unknown) => void;
-      const promise = new Promise<{ response: string; sessionId?: string }>(
-        (res, rej) => {
-          resolveChat = res;
-          rejectChat = rej;
-        },
-      );
-
-      // Streaming sends to `event.sender` will throw "Object has been
-      // destroyed" if the renderer WebContents goes away mid-response
-      // (window closed, reloaded, navigated away). Guard every send so a
-      // dead sender doesn't crash the IPC handler, and abort the in-flight
-      // chat the first time we see one — there's nobody listening anymore.
-      // Every event carries the runId as its first arg so the renderer can
-      // route it to the right conversation among several running at once.
-      const safeSend = (channel: string, payload: unknown): boolean => {
-        if (event.sender.isDestroyed()) return false;
-        try {
-          event.sender.send(channel, chatRunId, payload);
-          return true;
-        } catch {
-          return false;
+      try {
+        if (!isRemoteMode() && !isGatewayRunning(profile)) {
+          startGateway(profile);
         }
-      };
-      const abortThisRun = (): void => {
-        activeRuns.get(chatRunId)?.();
-      };
 
-      const handle = await sendMessage(
-        message,
-        {
-          onChunk: (chunk) => {
-            fullResponse += chunk;
-            if (!safeSend("chat-chunk", chunk)) {
-              // Renderer is gone — stop generating and resolve with what we
-              // have so the awaiting promise doesn't leak.
-              abortThisRun();
-            }
-          },
-          onReasoningChunk: (chunk) => {
-            // Forward reasoning/thinking tokens on a dedicated channel so
-            // the renderer can render the thinking bubble live during the
-            // stream rather than waiting for a focus-change refresh (#352).
-            // Same renderer-gone abort guard as the content channel.
-            if (!safeSend("chat-reasoning-chunk", chunk)) {
-              abortThisRun();
-            }
-          },
-          onDone: (sessionId) => {
-            activeRuns.delete(chatRunId);
-            try {
-              persistPromptImageAttachments(sessionId, message, attachments);
-            } catch (err) {
-              console.warn(
-                "[sessions] Failed to persist prompt image attachments:",
-                err,
-              );
-            }
-            safeSend("chat-done", sessionId || "");
-            resolveChat({ response: fullResponse, sessionId });
-            // Desktop notification when window is not focused and response took >10s
-            if (
-              mainWindow &&
-              !mainWindow.isFocused() &&
-              Date.now() - chatStartTime > 10000
-            ) {
-              const preview = fullResponse
-                .replace(/[#*_`~\n]+/g, " ")
-                .trim()
-                .slice(0, 80);
-              new Notification({
-                title: APP_NAME,
-                body: preview || "Response ready",
-              }).show();
-            }
-          },
-          onSessionStarted: (sessionId) => {
-            safeSend("chat-session-started", sessionId);
-          },
-          onError: (error) => {
-            activeRuns.delete(chatRunId);
-            safeSend("chat-error", error);
-            rejectChat(new Error(error));
-            // Notify on error too if window not focused
-            if (mainWindow && !mainWindow.isFocused()) {
-              new Notification({
-                title: `${APP_NAME} — Error`,
-                body: error.slice(0, 100),
-              }).show();
-            }
-          },
-          onToolProgress: (tool) => {
-            safeSend("chat-tool-progress", tool);
-          },
-          onToolEvent: (toolEvent) => {
-            safeSend("chat-tool-event", toolEvent);
-          },
-          onUsage: (usage) => {
-            safeSend("chat-usage", usage);
-          },
-          onClarify: (req) => {
-            safeSend("chat-clarify-request", req);
-          },
-        },
-        profile,
-        resumeSessionId,
-        history,
-        attachments,
-        contextFolder,
-        modelOverride,
-      );
+        const conn = getConnectionConfig();
+        if (conn.mode === "ssh" && conn.ssh) {
+          // Tunnel to the dashboard (/api/* + chat WS; NOT /v1) and cache its
+          // token, else the gateway api_server (/v1) — via the shared preparer
+          // so all SSH paths agree on one tunnel target.
+          await prepareSshTunnel(conn, profile);
+        }
 
-      activeRuns.set(chatRunId, handle.abort);
-      return promise;
+        let fullResponse = "";
+        const chatStartTime = Date.now();
+        let resolveChat: (v: { response: string; sessionId?: string }) => void;
+        let rejectChat: (reason?: unknown) => void;
+        const promise = new Promise<{ response: string; sessionId?: string }>(
+          (res, rej) => {
+            resolveChat = res;
+            rejectChat = rej;
+          },
+        );
+
+        // Streaming sends to `event.sender` will throw "Object has been
+        // destroyed" if the renderer WebContents goes away mid-response
+        // (window closed, reloaded, navigated away). Guard every send so a
+        // dead sender doesn't crash the IPC handler, and abort the in-flight
+        // chat the first time we see one — there's nobody listening anymore.
+        // Every event carries the runId as its first arg so the renderer can
+        // route it to the right conversation among several running at once.
+        const safeSend = (channel: string, payload: unknown): boolean => {
+          if (event.sender.isDestroyed()) return false;
+          try {
+            event.sender.send(channel, chatRunId, payload);
+            return true;
+          } catch {
+            return false;
+          }
+        };
+        const abortThisRun = (): void => {
+          runtimeActivity.abortRun(chatRunId);
+        };
+
+        const handle = await sendMessage(
+          message,
+          {
+            onChunk: (chunk) => {
+              fullResponse += chunk;
+              if (!safeSend("chat-chunk", chunk)) {
+                // Renderer is gone — stop generating and resolve with what we
+                // have so the awaiting promise doesn't leak.
+                abortThisRun();
+              }
+            },
+            onReasoningChunk: (chunk) => {
+              // Forward reasoning/thinking tokens on a dedicated channel so
+              // the renderer can render the thinking bubble live during the
+              // stream rather than waiting for a focus-change refresh (#352).
+              // Same renderer-gone abort guard as the content channel.
+              if (!safeSend("chat-reasoning-chunk", chunk)) {
+                abortThisRun();
+              }
+            },
+            onDone: (sessionId) => {
+              runtimeRun.finish();
+              try {
+                persistPromptImageAttachments(sessionId, message, attachments);
+              } catch (err) {
+                console.warn(
+                  "[sessions] Failed to persist prompt image attachments:",
+                  err,
+                );
+              }
+              safeSend("chat-done", sessionId || "");
+              resolveChat({ response: fullResponse, sessionId });
+              // Desktop notification when window is not focused and response took >10s
+              if (
+                mainWindow &&
+                !mainWindow.isFocused() &&
+                Date.now() - chatStartTime > 10000
+              ) {
+                const preview = fullResponse
+                  .replace(/[#*_`~\n]+/g, " ")
+                  .trim()
+                  .slice(0, 80);
+                new Notification({
+                  title: APP_NAME,
+                  body: preview || "Response ready",
+                }).show();
+              }
+            },
+            onSessionStarted: (sessionId) => {
+              safeSend("chat-session-started", sessionId);
+            },
+            onError: (error) => {
+              runtimeRun.finish();
+              safeSend("chat-error", error);
+              rejectChat(new Error(error));
+              // Notify on error too if window not focused
+              if (mainWindow && !mainWindow.isFocused()) {
+                new Notification({
+                  title: `${APP_NAME} — Error`,
+                  body: error.slice(0, 100),
+                }).show();
+              }
+            },
+            onToolProgress: (tool) => {
+              safeSend("chat-tool-progress", tool);
+            },
+            onToolEvent: (toolEvent) => {
+              safeSend("chat-tool-event", toolEvent);
+            },
+            onUsage: (usage) => {
+              safeSend("chat-usage", usage);
+            },
+            onClarify: (req) => {
+              safeSend("chat-clarify-request", req);
+            },
+          },
+          profile,
+          resumeSessionId,
+          history,
+          attachments,
+          contextFolder,
+          modelOverride,
+        );
+
+        runtimeRun.attachAbort(handle.abort);
+        return promise;
+      } catch (error) {
+        runtimeRun.finish();
+        throw error;
+      }
     },
   );
 
   ipcMain.handle("abort-chat", (_event, runId?: string) => {
     // Abort one run when given its id; with no id (legacy callers) abort all.
     if (runId) {
-      activeRuns.get(runId)?.();
-      activeRuns.delete(runId);
+      runtimeActivity.abortRun(runId);
       return;
     }
-    for (const abort of activeRuns.values()) abort();
-    activeRuns.clear();
+    runtimeActivity.abortAll();
   });
 
   // Renderer's answer to an inline clarify card. Resolves the pending gateway

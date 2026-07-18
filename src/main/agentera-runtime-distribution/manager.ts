@@ -70,6 +70,8 @@ export interface RuntimeDistributionManagerOptions {
   now?: () => Date;
   randomId?: () => string;
   activeRunCount?: () => number;
+  beginRuntimeTransition?: () => boolean;
+  cancelRuntimeTransition?: () => void;
   stopRuntimeContext?: () => void | Promise<void>;
   relaunch?: () => void | Promise<void>;
   isExternalRuntime?: () => boolean;
@@ -538,7 +540,10 @@ export function createRuntimeDistributionManager(
           lastErrorCode: "runtime_candidate_missing",
         });
       }
-      if ((options.activeRunCount?.() ?? 0) > 0) {
+      const transitionReserved =
+        options.beginRuntimeTransition?.() ??
+        (options.activeRunCount?.() ?? 0) === 0;
+      if (!transitionReserved) {
         return publish({
           ...currentState,
           lastErrorCode: "runtime_tasks_active",
@@ -553,6 +558,9 @@ export function createRuntimeDistributionManager(
         await options.relaunch?.();
         return publish({ ...currentState, lastErrorCode: null });
       } catch {
+        if (options.beginRuntimeTransition !== undefined) {
+          options.cancelRuntimeTransition?.();
+        }
         return publish({
           ...currentState,
           lastErrorCode: "runtime_restart_failed",

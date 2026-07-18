@@ -47,6 +47,7 @@ import {
   isExternalRuntimeSelected,
   runPackagedSeedInstall,
 } from "../installer";
+import { RuntimeActivityCoordinator } from "../runtime-activity";
 
 const APP_NAME =
   process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
@@ -55,7 +56,7 @@ const OPEN_DEVTOOLS_ON_START =
   process.env.HERMES_DESKTOP_OPEN_DEVTOOLS === "1";
 
 let mainWindow: BrowserWindow | null = null;
-const activeRuns = new Map<string, () => void>();
+const runtimeActivity = new RuntimeActivityCoordinator();
 
 export function startMainProcess(): void {
   process.on("uncaughtException", (err) => {
@@ -149,7 +150,9 @@ export function startMainProcess(): void {
     });
     runtimeDistribution = createRuntimeDistributionManager({
       ...runtimeOptions,
-      activeRunCount: () => activeRuns.size,
+      activeRunCount: () => runtimeActivity.activeRunCount,
+      beginRuntimeTransition: () => runtimeActivity.beginTransition(),
+      cancelRuntimeTransition: () => runtimeActivity.cancelTransition(),
       isExternalRuntime: isExternalRuntimeSelected,
       stopRuntimeContext: stopActiveRuntimeContext,
       relaunch: () => {
@@ -211,7 +214,7 @@ export function startMainProcess(): void {
   });
 
   registerIpcHandlers({
-    activeRuns,
+    runtimeActivity,
     getMainWindow: () => mainWindow,
     notifyConnectionConfigChanged,
     notifyModelLibraryChanged,
@@ -290,8 +293,7 @@ export function startMainProcess(): void {
 
 export function stopActiveRuntimeContext(): void {
   stopHealthPolling();
-  for (const abort of activeRuns.values()) abort();
-  activeRuns.clear();
+  runtimeActivity.abortAll();
   cleanupTempMediaFiles();
   stopAllDashboards();
   // A Profile or connection context must never remain mounted across an
