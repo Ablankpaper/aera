@@ -166,6 +166,19 @@ describe("packaged Runtime Seed discovery and installation", () => {
     expect(seed.signaturePath).toBe(setup.bundle.signaturePath);
   });
 
+  it("allows the tracked .gitkeep beside the exact signed Seed files", async () => {
+    const setup = await harness();
+    await writeFile(join(setup.paths.packagedSeed, ".gitkeep"), "", "utf8");
+
+    const seed = await verifyPackagedRuntimeSeed({
+      packagedSeedDirectory: setup.paths.packagedSeed,
+      trustedPublicKeys: setup.options.trustedPublicKeys,
+      manifestContext,
+    });
+
+    expect(seed.manifest.runtime_version).toBe(TEST_RUNTIME_VERSION);
+  });
+
   it("calculates archive + extraction + rollback reserve + 10%", async () => {
     const setup = await harness();
     const seed = await verifyPackagedRuntimeSeed({
@@ -397,8 +410,8 @@ describe("packaged Runtime Seed discovery and installation", () => {
           );
           expect(options.env.HERMES_HOME).not.toBe(process.env.HERMES_HOME);
           expect(options.env.AGENTERA_PRIVATE_TEST_TOKEN).toBeUndefined();
-          expect(args.slice(0, 2)).toEqual(["-I", "-c"]);
-          expect(args[2]).toContain("socket.socket.connect=blocked");
+          expect(args.slice(0, 3)).toEqual(["-I", "-B", "-c"]);
+          expect(args[3]).toContain("socket.socket.connect=blocked");
           return { stdout: TEST_RUNTIME_VERSION, stderr: "" };
         },
       });

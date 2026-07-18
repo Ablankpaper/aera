@@ -146,7 +146,9 @@ export function createRuntimeBootstrapOptions(
       platform: target.platform,
       arch: target.arch,
       desktopVersion: environment.desktopVersion,
-      allowedChannels: new Set(["stable"]),
+      // Candidate desktop builds embed a reviewed candidate Seed. Remote
+      // lifecycle updates remain stable-only in the manager/update client.
+      allowedChannels: new Set(["candidate", "stable"]),
     },
   };
 }
@@ -269,7 +271,7 @@ async function verifySignedInstalledRuntime(
     context: options.manifestContext,
   });
   if (
-    manifest.channel !== "stable" ||
+    !options.manifestContext.allowedChannels.has(manifest.channel) ||
     manifest.runtime_version !== pointer.runtimeVersion ||
     manifest.source_commit !== pointer.sourceCommit
   ) {

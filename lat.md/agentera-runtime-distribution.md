@@ -14,6 +14,8 @@ A seed contains runnable Python, locked core dependencies, AgentEra Runtime, CLI
 
 The seed excludes Git history, tests, caches, credentials, Profiles, Memory, sessions, Chromium, speech models, and local model weights. macOS ARM64 and Windows x64 are the first supported seed targets.
 
+The source-controlled staging directory may retain its regular-file `.gitkeep` sentinel. Runtime preparation and final-package verification ignore only that exact sentinel; every other extra entry still fails closed.
+
 ## Offline first installation
 
 After product authentication, the main process verifies the packaged seed, installs it into a versioned application-data directory, and atomically selects it without network access.
@@ -30,7 +32,7 @@ Extraction occurs only below a fresh `userData/runtime/staging/seed-*` transacti
 
 [[src/main/agentera-runtime-distribution/seed-installer.ts#installPackagedSeed]] discovers exactly one packaged archive, canonical manifest, and signature, verifies them with the production trust set, and checks free space for archive bytes plus extracted bytes plus one rollback-version reserve plus a ten-percent margin. It health-checks the candidate in staging, stores the verified manifest and signature as managed sidecars, renames the verified payload into `versions`, writes `current.json` atomically, selects managed mode, and refreshes the live invocation. The sidecars let every later startup re-hash the full signed inventory before selecting that managed version.
 
-[[src/main/agentera-runtime-distribution/health.ts#runIsolatedRuntimeHealthCheck]] runs version, server-help, and core-import probes with a disposable fake HOME and HERMES_HOME, an allowlisted environment, no inherited credentials, and offline package-manager flags. A corrupt same-version current Runtime is repaired into a new version directory, leaving the old directory and every Hermes-owned Profile, Memory, session, learned Skill, and Curator file untouched.
+[[src/main/agentera-runtime-distribution/health.ts#runIsolatedRuntimeHealthCheck]] runs version, server-help, and core-import probes with Python isolation plus `-B`, a disposable fake HOME and HERMES_HOME, an allowlisted environment, no inherited credentials, and offline package-manager flags. Disabling bytecode writes keeps the verified signed inventory immutable even when Python's isolated mode ignores environment configuration. A corrupt same-version current Runtime is repaired into a new version directory, leaving the old directory and every Hermes-owned Profile, Memory, session, learned Skill, and Curator file untouched.
 
 The authenticated `start-install` IPC path calls only the packaged Seed installer. Missing or corrupt packaged resources return `repair-required` with a reinstall-desktop action; low disk returns a free-space action. No remote shell or PowerShell installer is shipped as a first-install fallback.
 
@@ -54,7 +56,7 @@ Every local Runtime operation resolves the currently selected managed or explici
 
 [[src/main/agentera-runtime-distribution/invocation.ts#getRuntimeInvocation]] returns one immutable invocation snapshot containing the interpreter, working directory, bundled Skills, Dashboard assets, module CLI builder, and environment builder. A spawn uses that same snapshot throughout so a concurrent version switch cannot mix files from two Runtime versions.
 
-Both managed and external modes launch `python -m hermes_cli.main`. Managed mode points into the installed seed, removes inherited `PYTHONHOME` and `PYTHONPATH`, and sets `PYTHONNOUSERSITE=1`; explicit external mode keeps the existing `HERMES_HOME/hermes-agent` compatibility layout.
+Both managed and external modes launch `python -m hermes_cli.main`. Managed mode points into the installed seed, removes inherited `PYTHONHOME` and `PYTHONPATH`, and forces `PYTHONNOUSERSITE=1` plus `PYTHONDONTWRITEBYTECODE=1` so ordinary Runtime calls cannot mutate the signed program tree; explicit external mode keeps the existing `HERMES_HOME/hermes-agent` compatibility layout.
 
 Callers continue to supply the existing physical `HERMES_HOME` or Profile home. Runtime selection never redirects, migrates, copies, or deletes Memory, Profiles, sessions, learned Skills, credentials, or other adaptive state. Missing or stale selections return a bounded "Runtime is not prepared" result instead of invoking a fallback executable.
 
@@ -97,6 +99,8 @@ Connect, idle-read, overall, and redirect limits are bounded. Cancellation and t
 Every seed must pass the native Hermes compatibility gate and a clean extracted-artifact smoke test before publication or desktop packaging.
 
 The gate proves stable conversations, background learning, next-conversation recall, Curator behavior, Profile isolation, offline use, migration, update, and rollback without changing private adaptive state.
+
+[[tests/runtime-data-boundary.test.ts]] hashes realistic default and named Profiles, modes, symlink targets, sessions, Memory, learned Skills, Curator state, Gateway/Cron state, logs, attachments, and workspaces after every install/update/activation/rollback/cleanup/selection/repair transition. [[tests/e2e/agentera-runtime-seed.e2e.ts]] adds the product-level proof: authenticate online, stop the control plane, prepare and invoke the native packaged Seed with public HTTP blocked, restart offline, and confirm the same Runtime version plus every pre-existing Hermes-owned entry survives unchanged.
 
 ## Independent verification
 

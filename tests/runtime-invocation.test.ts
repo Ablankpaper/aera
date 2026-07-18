@@ -166,10 +166,12 @@ describe("Runtime invocation selection", () => {
       PATH: "base",
       PYTHONPATH: "untrusted",
       PYTHONHOME: "untrusted",
+      PYTHONDONTWRITEBYTECODE: "0",
       HERMES_HOME: hermesHome,
     });
     expect(environment).toMatchObject({
       HERMES_HOME: hermesHome,
+      PYTHONDONTWRITEBYTECODE: "1",
       PYTHONNOUSERSITE: "1",
     });
     expect(environment?.PYTHONPATH).toBeUndefined();

@@ -957,7 +957,29 @@ export function registerIpcHandlers(context: IpcContext): void {
           event.sender.send("install-progress", progress);
         },
       );
-      if (result.status === "installed") return { success: true };
+      if (result.status === "installed") {
+        // The Welcome flow installs through the local Seed installer so it can
+        // return detailed repair guidance. Synchronize the long-lived manager
+        // immediately; otherwise Settings keeps its startup-time `missing`
+        // snapshot until the entire desktop is restarted.
+        if (runtimeDistribution !== null) {
+          const synchronized = await runtimeDistribution.retryRepair();
+          if (
+            synchronized.phase !== "current" ||
+            synchronized.currentVersion !== result.runtimeVersion
+          ) {
+            return {
+              success: false,
+              error:
+                "AgentEra Runtime was prepared but could not be activated. Retry the local repair.",
+              errorCode: "runtime-activation-failed",
+              repairRequired: true,
+              action: "retry",
+            };
+          }
+        }
+        return { success: true };
+      }
       const error =
         result.errorCode === "packaged-seed-invalid"
           ? "The Runtime included with AgentEra Studio is missing or invalid. Reinstall AgentEra Studio."

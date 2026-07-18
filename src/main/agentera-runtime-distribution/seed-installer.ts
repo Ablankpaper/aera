@@ -180,7 +180,11 @@ export async function verifyPackagedRuntimeSeed({
       "packaged Runtime Seed may contain only regular files",
     );
   }
-  const manifestEntries = entries.filter((entry) =>
+  // The source directory keeps a regular `.gitkeep` so Git can retain the
+  // empty staging path before release assets are prepared. Packaging keeps
+  // that harmless placeholder; it is not part of the signed Seed contract.
+  const seedEntries = entries.filter((entry) => entry.name !== ".gitkeep");
+  const manifestEntries = seedEntries.filter((entry) =>
     entry.name.endsWith(".manifest.json"),
   );
   if (manifestEntries.length !== 1) {
@@ -237,8 +241,8 @@ export async function verifyPackagedRuntimeSeed({
     manifest.archive_name,
   ]);
   if (
-    entries.length !== expectedFiles.size ||
-    entries.some((entry) => !expectedFiles.has(entry.name))
+    seedEntries.length !== expectedFiles.size ||
+    seedEntries.some((entry) => !expectedFiles.has(entry.name))
   ) {
     throw new PackagedSeedInstallError(
       "packaged-seed-invalid",

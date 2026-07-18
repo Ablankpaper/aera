@@ -213,15 +213,17 @@ export async function runIsolatedRuntimeHealthCheck({
     const commands: readonly (readonly string[])[] = [
       [
         "-I",
+        "-B",
         "-c",
         guardedModuleScript(manifest.entrypoints.module, ["--version"]),
       ],
       [
         "-I",
+        "-B",
         "-c",
         guardedModuleScript(manifest.entrypoints.module, ["serve", "--help"]),
       ],
-      ["-I", "-c", guardedImportScript()],
+      ["-I", "-B", "-c", guardedImportScript()],
     ];
     let versionOutput = "";
     for (const [index, args] of commands.entries()) {

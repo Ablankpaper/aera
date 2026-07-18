@@ -104,6 +104,10 @@ function runtimeEnvironment(
   if (managed) {
     delete environment.PYTHONHOME;
     delete environment.PYTHONPATH;
+    // Managed versions are verified against their signed file inventory on
+    // every restart. Python bytecode caches would mutate that immutable tree
+    // and make a healthy Runtime fail closed on its next launch.
+    environment.PYTHONDONTWRITEBYTECODE = "1";
     environment.PYTHONNOUSERSITE = "1";
   }
   return environment;
