@@ -76,6 +76,16 @@ The main process verifies canonical manifest bytes, Ed25519 trust, signed contex
 
 A separate build-time MJS verifier repeats the checks without importing desktop TypeScript. Packaging reads an exact repository, tag, full commit, and target asset lock; it never resolves `latest`.
 
+## Native packaging gate
+
+Native packaging embeds one exact verified Seed and fails closed if any required artifact or proof is missing.
+
+`scripts/prepare-agentera-runtime-seed.mjs` selects exactly one locked native target, obtains only its archive, manifest, and signature, runs the independent verifier, compares the verified repository, Runtime version, and full source commit with the lock, then atomically replaces the ignored build-staging directory. An explicit `AGENTERA_RUNTIME_SEED_DIR` is development-only; CI rejects it, and failed verification leaves the previous stage unchanged.
+
+Electron Builder excludes the staging directory from `app.asar`, then copies only the three verified files from `resources/agentera-runtime-seed` into the application `Resources/agentera-runtime-seed` directory. `scripts/verify-packaged-runtime-seed.mjs` rejects partial, mixed-target, or extra contents and can prove every packaged byte matches the verified staging reference.
+
+Stable and beta release workflows currently build only macOS ARM64 and Windows x64. Each native job prepares the exact Seed before packaging and verifies the unpacked application plus final DMG, ZIP, NSIS, and portable artifacts. CI may use its workflow token while fetching the public locked Release, but no token enters the desktop package. Linux and macOS x64 publishing remain disabled until signed native Seed targets and the same final-artifact proof exist.
+
 ## Later delivery
 
 Cloud Agent definition and immutable-version sync starts only after Runtime distribution is stable, followed by a separate workspace and organization project.

@@ -6,6 +6,8 @@
   "author": "AgentEra",
   "homepage": "https://github.com/bignormal/aera",
   "scripts": {
+    "prepare:runtime-seed": "node scripts/prepare-agentera-runtime-seed.mjs",
+    "verify:packaged-runtime-seed": "node scripts/verify-packaged-runtime-seed.mjs",
     "generate:agentera-cloud": "node scripts/generate-agentera-cloud-types.mjs",
     "check:agentera-cloud-contract": "node scripts/check-agentera-cloud-contract.mjs",
     "smoke:agentera-auth": "node scripts/agentera-auth-smoke.mjs",
