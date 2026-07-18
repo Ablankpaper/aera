@@ -234,10 +234,22 @@ vi.mock("child_process", () => ({
 
 vi.mock("../src/main/installer", () => ({
   HERMES_HOME: TEST_HOME,
-  HERMES_PYTHON: process.execPath,
-  HERMES_REPO: TEST_REPO,
-  hermesCliArgs: (extra?: string[]) => ["/dev/null", ...(extra || [])],
   getEnhancedPath: () => process.env.PATH || "",
+}));
+
+vi.mock("../src/main/agentera-runtime-distribution/invocation", () => ({
+  getRuntimeInvocation: () => ({
+    source: "external",
+    version: null,
+    sourceCommit: null,
+    root: TEST_REPO,
+    python: process.execPath,
+    workingDirectory: TEST_REPO,
+    bundledSkillsDirectory: `${TEST_REPO}/skills`,
+    webDistDirectory: `${TEST_REPO}/hermes_cli/web_dist`,
+    cliArgs: (extra?: string[]) => ["/dev/null", ...(extra || [])],
+    environment: (base: Record<string, string> = {}) => ({ ...base }),
+  }),
 }));
 
 vi.mock("../src/main/config", () => ({
@@ -306,6 +318,7 @@ describe("CLI fallback session id propagation", () => {
   });
 
   it("captures the quiet CLI session id from stderr so the next desktop turn can resume it", async () => {
+    modelConfig.provider = "aimlapi";
     const done = new Promise<string | undefined>((resolve) => {
       sendMessage("hi", {
         onChunk: () => {},
@@ -360,6 +373,7 @@ describe("CLI fallback session id propagation", () => {
 
   it("continues a CLI-created timestamp session over the API instead of minting a desk id", async () => {
     const cliSessionId = "20260527_143413_10df4c";
+    modelConfig.provider = "aimlapi";
     const firstDone = new Promise<string | undefined>((resolve) => {
       sendMessage("hi", {
         onChunk: () => {},
@@ -378,6 +392,7 @@ describe("CLI fallback session id propagation", () => {
 
     await expect(firstDone).resolves.toBe(cliSessionId);
 
+    modelConfig.provider = "openrouter";
     healthStatuses.push(200);
     await expect(
       new Promise<string | undefined>((resolve, reject) => {

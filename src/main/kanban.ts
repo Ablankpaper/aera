@@ -1,11 +1,6 @@
 import { execFile, ExecFileOptions } from "child_process";
-import { join } from "path";
-import {
-  HERMES_HOME,
-  HERMES_PYTHON,
-  hermesCliArgs,
-  getEnhancedPath,
-} from "./installer";
+import { HERMES_HOME, getEnhancedPath } from "./installer";
+import { getRuntimeInvocation } from "./agentera-runtime-distribution/invocation";
 import { isRemoteOnlyMode } from "./hermes";
 import { getConnectionConfig } from "./config";
 import { sshRunKanban, sshListClaw3dHqTasks } from "./ssh-remote";
@@ -119,21 +114,29 @@ async function runKanban(
     });
   }
 
-  const cliArgs = hermesCliArgs();
+  const invocation = getRuntimeInvocation();
+  if (invocation === null) {
+    return { success: false, error: "AgentEra Runtime is not prepared." };
+  }
+  const cliArgs = invocation.cliArgs();
   if (opts.profile && opts.profile !== "default") {
     cliArgs.push("-p", opts.profile);
   }
   cliArgs.push("kanban", ...args);
 
   const execOpts: ExecFileOptions = {
-    cwd: join(HERMES_HOME, "hermes-agent"),
+    cwd: invocation.workingDirectory,
     timeout: opts.timeoutMs ?? KANBAN_TIMEOUT_MS,
-    env: { ...process.env, PATH: getEnhancedPath() },
+    env: invocation.environment({
+      ...process.env,
+      PATH: getEnhancedPath(),
+      HERMES_HOME,
+    }),
     maxBuffer: 16 * 1024 * 1024,
   };
 
   return new Promise((resolve) => {
-    execFile(HERMES_PYTHON, cliArgs, execOpts, (err, stdout, stderr) => {
+    execFile(invocation.python, cliArgs, execOpts, (err, stdout, stderr) => {
       const out = (stdout || "").toString();
       if (err) {
         resolve({

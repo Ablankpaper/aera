@@ -7,13 +7,11 @@ import net from "net";
 import { homedir } from "os";
 import { join } from "path";
 import { getConnectionConfig, type ConnectionConfig } from "./config";
+import { getEnhancedPath, HERMES_HOME } from "./installer";
 import {
-  getEnhancedPath,
-  hermesCliArgs,
-  HERMES_HOME,
-  HERMES_PYTHON,
-  HERMES_REPO,
-} from "./installer";
+  getRuntimeInvocation,
+  type RuntimeInvocation,
+} from "./agentera-runtime-distribution/invocation";
 import { buildLocalDashboardCliArgs } from "./dashboard-launch";
 import { dashboardWebSocketUrlForRenderer } from "./dashboard-websocket-relay";
 import { ensureLocalDashboardCompatibility } from "./hermes-agent-compat";
@@ -168,13 +166,9 @@ function getManagedDashboard(profile?: string): ManagedDashboard | undefined {
 }
 
 function unsupportedReasonForLocalSpawn(): string | undefined {
-  if (!existsSync(HERMES_REPO)) {
-    return `AgentEra Runtime repository not found at ${HERMES_REPO}.`;
-  }
-  if (!existsSync(HERMES_PYTHON)) {
-    return `AgentEra Runtime Python environment not found at ${HERMES_PYTHON}.`;
-  }
-  return undefined;
+  return getRuntimeInvocation()
+    ? undefined
+    : "AgentEra Runtime is not prepared.";
 }
 
 function dashboardLogPath(profile: string | undefined): string {
@@ -183,8 +177,8 @@ function dashboardLogPath(profile: string | undefined): string {
   return join(dir, "dashboard-stderr.log");
 }
 
-function dashboardHasPrebuiltWebDist(): boolean {
-  return existsSync(join(HERMES_REPO, "hermes_cli", "web_dist", "index.html"));
+function dashboardHasPrebuiltWebDist(invocation: RuntimeInvocation): boolean {
+  return existsSync(join(invocation.webDistDirectory, "index.html"));
 }
 
 async function getFreePort(): Promise<number> {
@@ -610,6 +604,14 @@ export async function startDashboard(
   if (unsupported) {
     return { supported: false, running: false, error: unsupported };
   }
+  const invocation = getRuntimeInvocation();
+  if (!invocation) {
+    return {
+      supported: false,
+      running: false,
+      error: "AgentEra Runtime is not prepared.",
+    };
+  }
 
   const compat = ensureLocalDashboardCompatibility();
   const compatWarning = compat.ok
@@ -625,16 +627,16 @@ export async function startDashboard(
   const baseUrl = `http://127.0.0.1:${port}`;
   const logPath = dashboardLogPath(resolvedProfile);
   const stderrFd = openSync(logPath, "a");
-  const hasPrebuiltWebDist = dashboardHasPrebuiltWebDist();
+  const hasPrebuiltWebDist = dashboardHasPrebuiltWebDist(invocation);
   const cliArgs = buildLocalDashboardCliArgs(resolvedProfile, port, {
     skipBuild: hasPrebuiltWebDist,
   });
 
   let proc: ChildProcess;
   try {
-    proc = spawn(HERMES_PYTHON, hermesCliArgs(cliArgs), {
-      cwd: HERMES_REPO,
-      env: {
+    proc = spawn(invocation.python, invocation.cliArgs(cliArgs), {
+      cwd: invocation.workingDirectory,
+      env: invocation.environment({
         ...process.env,
         PATH: getEnhancedPath(),
         HOME: process.env.HOME || homedir(),
@@ -642,9 +644,9 @@ export async function startDashboard(
         HERMES_DASHBOARD_SESSION_TOKEN: token,
         HERMES_DESKTOP: "1",
         ...(hasPrebuiltWebDist
-          ? { HERMES_WEB_DIST: join(HERMES_REPO, "hermes_cli", "web_dist") }
+          ? { HERMES_WEB_DIST: invocation.webDistDirectory }
           : {}),
-      },
+      }),
       stdio: ["ignore", "ignore", stderrFd],
       detached: false,
       ...HIDDEN_SUBPROCESS_OPTIONS,

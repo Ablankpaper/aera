@@ -3,7 +3,8 @@ import { existsSync, readFileSync } from "fs";
 import { profilePaths, safeWriteFile } from "./utils";
 import { getApiUrl, getRemoteAuthHeader, isRemoteMode } from "./hermes";
 import { getApiServerKey } from "./config";
-import { getEnhancedPath, HERMES_PYTHON, hermesCliArgs } from "./installer";
+import { getEnhancedPath } from "./installer";
+import { getRuntimeInvocation } from "./agentera-runtime-distribution/invocation";
 
 export type McpTransport = "http" | "stdio" | "unknown";
 
@@ -84,17 +85,21 @@ function runHermesMcpCli(
   args: string[],
   profile?: string,
 ): Promise<HermesCliResult> {
+  const invocation = getRuntimeInvocation();
+  if (invocation === null) {
+    return Promise.reject(new Error("AgentEra Runtime is not prepared."));
+  }
   return new Promise((resolve, reject) => {
     const child = execFile(
-      HERMES_PYTHON,
-      hermesCliArgs(["mcp", ...args]),
+      invocation.python,
+      invocation.cliArgs(["mcp", ...args]),
       {
-        cwd: profilePaths(profile).home,
-        env: {
+        cwd: invocation.workingDirectory,
+        env: invocation.environment({
           ...process.env,
           HERMES_HOME: profilePaths(profile).home,
           PATH: getEnhancedPath(),
-        },
+        }),
         timeout: 30000,
         windowsHide: true,
       },

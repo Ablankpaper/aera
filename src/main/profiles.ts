@@ -3,12 +3,8 @@ import { join } from "path";
 import { homedir } from "os";
 import { promises as fs } from "fs";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
-import {
-  HERMES_HOME,
-  HERMES_PYTHON,
-  hermesCliArgs,
-  getEnhancedPath,
-} from "./installer";
+import { HERMES_HOME, getEnhancedPath } from "./installer";
+import { getRuntimeInvocation } from "./agentera-runtime-distribution/invocation";
 import {
   getActiveProfileNameSync,
   isValidNamedProfileName,
@@ -336,16 +332,20 @@ export function createProfile(
   const args = cloneFrom
     ? ["profile", "create", id, "--clone-from", cloneFrom]
     : ["profile", "create", id];
+  const invocation = getRuntimeInvocation();
+  if (invocation === null) {
+    return { success: false, error: "AgentEra Runtime is not prepared." };
+  }
 
   try {
-    execFileSync(HERMES_PYTHON, hermesCliArgs(args), {
-      cwd: join(HERMES_HOME, "hermes-agent"),
-      env: {
+    execFileSync(invocation.python, invocation.cliArgs(args), {
+      cwd: invocation.workingDirectory,
+      env: invocation.environment({
         ...process.env,
         PATH: getEnhancedPath(),
         HOME: homedir(),
         HERMES_HOME,
-      },
+      }),
       stdio: "pipe",
       timeout: 30000,
       ...HIDDEN_SUBPROCESS_OPTIONS,
@@ -380,19 +380,23 @@ export function deleteProfile(name: string): {
   if (!isValidNamedProfileName(name)) {
     return { success: false, error: PROFILE_NAME_ERROR };
   }
+  const invocation = getRuntimeInvocation();
+  if (invocation === null) {
+    return { success: false, error: "AgentEra Runtime is not prepared." };
+  }
 
   try {
     execFileSync(
-      HERMES_PYTHON,
-      hermesCliArgs(["profile", "delete", name, "--yes"]),
+      invocation.python,
+      invocation.cliArgs(["profile", "delete", name, "--yes"]),
       {
-        cwd: join(HERMES_HOME, "hermes-agent"),
-        env: {
+        cwd: invocation.workingDirectory,
+        env: invocation.environment({
           ...process.env,
           PATH: getEnhancedPath(),
           HOME: homedir(),
           HERMES_HOME,
-        },
+        }),
         stdio: "pipe",
         timeout: 30000,
         ...HIDDEN_SUBPROCESS_OPTIONS,
@@ -409,19 +413,25 @@ export function setActiveProfile(name: string): void {
     throw new Error(PROFILE_NAME_ERROR);
   }
 
+  const invocation = getRuntimeInvocation();
   try {
-    execFileSync(HERMES_PYTHON, hermesCliArgs(["profile", "use", name]), {
-      cwd: join(HERMES_HOME, "hermes-agent"),
-      env: {
-        ...process.env,
-        PATH: getEnhancedPath(),
-        HOME: homedir(),
-        HERMES_HOME,
+    if (invocation === null) throw new Error("Runtime not prepared");
+    execFileSync(
+      invocation.python,
+      invocation.cliArgs(["profile", "use", name]),
+      {
+        cwd: invocation.workingDirectory,
+        env: invocation.environment({
+          ...process.env,
+          PATH: getEnhancedPath(),
+          HOME: homedir(),
+          HERMES_HOME,
+        }),
+        stdio: "pipe",
+        timeout: 10000,
+        ...HIDDEN_SUBPROCESS_OPTIONS,
       },
-      stdio: "pipe",
-      timeout: 10000,
-      ...HIDDEN_SUBPROCESS_OPTIONS,
-    });
+    );
   } catch {
     // ignore — verified and repaired below
   }

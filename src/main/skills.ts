@@ -9,13 +9,8 @@ import {
 } from "fs";
 import { isAbsolute, join, relative, resolve } from "path";
 import { homedir } from "os";
-import {
-  HERMES_HOME,
-  HERMES_PYTHON,
-  HERMES_REPO,
-  hermesCliArgs,
-  getEnhancedPath,
-} from "./installer";
+import { HERMES_HOME, getEnhancedPath } from "./installer";
+import { getRuntimeInvocation } from "./agentera-runtime-distribution/invocation";
 import { isValidNamedProfileName, profileHome } from "./utils";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 
@@ -150,9 +145,10 @@ function isProfileSkillFile(skillFile: string): boolean {
 }
 
 function isAllowedSkillFile(skillFile: string): boolean {
+  const invocation = getRuntimeInvocation();
   const allowedRoots = [
     join(HERMES_HOME, "skills"),
-    join(HERMES_REPO, "skills"),
+    ...(invocation ? [invocation.bundledSkillsDirectory] : []),
   ].map(realOrResolved);
 
   return (
@@ -183,18 +179,21 @@ export function getSkillContent(skillPath: string): string {
  * Search the skill registry via the hermes CLI.
  */
 export function searchSkills(query: string): SkillSearchResult[] {
+  const invocation = getRuntimeInvocation();
+  if (!invocation) return [];
+
   try {
     const output = execFileSync(
-      HERMES_PYTHON,
-      hermesCliArgs(["skills", "browse", "--query", query, "--json"]),
+      invocation.python,
+      invocation.cliArgs(["skills", "browse", "--query", query, "--json"]),
       {
-        cwd: HERMES_REPO,
-        env: {
+        cwd: invocation.workingDirectory,
+        env: invocation.environment({
           ...process.env,
           PATH: getEnhancedPath(),
           HOME: homedir(),
           HERMES_HOME,
-        },
+        }),
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 30000,
         ...HIDDEN_SUBPROCESS_OPTIONS,
@@ -231,7 +230,10 @@ export function searchSkills(query: string): SkillSearchResult[] {
  * List bundled skills from the hermes-agent repo.
  */
 export function listBundledSkills(): SkillSearchResult[] {
-  const bundledDir = join(HERMES_REPO, "skills");
+  const invocation = getRuntimeInvocation();
+  if (!invocation) return [];
+
+  const bundledDir = invocation.bundledSkillsDirectory;
   if (!existsSync(bundledDir)) return [];
 
   const skills: SkillSearchResult[] = [];
@@ -345,20 +347,25 @@ export function installSkill(
   identifier: string,
   profile?: string,
 ): SkillCliResult {
-  try {
-    const args = hermesCliArgs(["skills", "install", identifier, "--yes"]);
-    if (profile && profile !== "default") {
-      args.splice(process.platform === "win32" ? 2 : 1, 0, "-p", profile);
-    }
+  const invocation = getRuntimeInvocation();
+  if (!invocation) {
+    return { success: false, error: "AgentEra Runtime is not prepared." };
+  }
 
-    const stdout = execFileSync(HERMES_PYTHON, args, {
-      cwd: HERMES_REPO,
-      env: {
+  try {
+    const subArgs = ["skills", "install", identifier, "--yes"];
+    const args = invocation.cliArgs(
+      profile && profile !== "default" ? ["-p", profile, ...subArgs] : subArgs,
+    );
+
+    const stdout = execFileSync(invocation.python, args, {
+      cwd: invocation.workingDirectory,
+      env: invocation.environment({
         ...process.env,
         PATH: getEnhancedPath(),
         HOME: homedir(),
         HERMES_HOME,
-      },
+      }),
       stdio: "pipe",
       timeout: 60000,
       ...HIDDEN_SUBPROCESS_OPTIONS,
@@ -378,22 +385,27 @@ export function installSkill(
 }
 
 export function uninstallSkill(name: string, profile?: string): SkillCliResult {
+  const invocation = getRuntimeInvocation();
+  if (!invocation) {
+    return { success: false, error: "AgentEra Runtime is not prepared." };
+  }
+
   // Try the CLI first (updates hub lock files, handles complex cases).
   let cliResult: SkillCliResult | undefined;
   try {
-    const args = hermesCliArgs(["skills", "uninstall", name, "--yes"]);
-    if (profile && profile !== "default") {
-      args.splice(process.platform === "win32" ? 2 : 1, 0, "-p", profile);
-    }
+    const subArgs = ["skills", "uninstall", name, "--yes"];
+    const args = invocation.cliArgs(
+      profile && profile !== "default" ? ["-p", profile, ...subArgs] : subArgs,
+    );
 
-    const stdout = execFileSync(HERMES_PYTHON, args, {
-      cwd: HERMES_REPO,
-      env: {
+    const stdout = execFileSync(invocation.python, args, {
+      cwd: invocation.workingDirectory,
+      env: invocation.environment({
         ...process.env,
         PATH: getEnhancedPath(),
         HOME: homedir(),
         HERMES_HOME,
-      },
+      }),
       stdio: "pipe",
       timeout: 30000,
       ...HIDDEN_SUBPROCESS_OPTIONS,

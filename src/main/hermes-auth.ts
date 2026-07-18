@@ -1,12 +1,7 @@
 import { spawn, type ChildProcess } from "child_process";
 import { homedir } from "os";
-import {
-  HERMES_PYTHON,
-  HERMES_REPO,
-  HERMES_HOME,
-  hermesCliArgs,
-  getEnhancedPath,
-} from "./installer";
+import { HERMES_HOME, getEnhancedPath } from "./installer";
+import { getRuntimeInvocation } from "./agentera-runtime-distribution/invocation";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 import { stripAnsi } from "./utils";
 
@@ -103,6 +98,14 @@ export function runHermesAuthLogin(
       });
       return;
     }
+    const invocation = getRuntimeInvocation();
+    if (invocation === null) {
+      resolve({
+        success: false,
+        error: "AgentEra Runtime is not prepared.",
+      });
+      return;
+    }
 
     // `--type oauth` is explicit so the CLI never falls back to an
     // interactive "API key or OAuth?" prompt on a stdin we've closed.
@@ -113,16 +116,16 @@ export function runHermesAuthLogin(
 
     let proc: ChildProcess;
     try {
-      proc = spawn(HERMES_PYTHON, hermesCliArgs(subArgs), {
-        cwd: HERMES_REPO,
-        env: {
+      proc = spawn(invocation.python, invocation.cliArgs(subArgs), {
+        cwd: invocation.workingDirectory,
+        env: invocation.environment({
           ...process.env,
           PATH: getEnhancedPath(),
           HOME: homedir(),
           HERMES_HOME,
           PYTHONUNBUFFERED: "1",
           TERM: "dumb",
-        },
+        }),
         stdio: ["ignore", "pipe", "pipe"],
         ...HIDDEN_SUBPROCESS_OPTIONS,
       });

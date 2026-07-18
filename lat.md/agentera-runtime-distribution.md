@@ -32,6 +32,18 @@ Runtime program versions live below Electron `userData`, while Hermes-owned stat
 
 Installation, update, rollback, and cleanup never overwrite or traverse private Memory, USER data, sessions, learned Skills, Curator state, credentials, Gateway state, Cron state, logs, or workspace files. This is governed by [[agentera-self-evolution|AgentEra self-evolution compatibility]].
 
+## Live Runtime invocation
+
+Every local Runtime operation resolves the currently selected managed or explicit external installation at call time through one main-process abstraction.
+
+[[src/main/agentera-runtime-distribution/invocation.ts#getRuntimeInvocation]] returns one immutable invocation snapshot containing the interpreter, working directory, bundled Skills, Dashboard assets, module CLI builder, and environment builder. A spawn uses that same snapshot throughout so a concurrent version switch cannot mix files from two Runtime versions.
+
+Both managed and external modes launch `python -m hermes_cli.main`. Managed mode points into the installed seed, removes inherited `PYTHONHOME` and `PYTHONPATH`, and sets `PYTHONNOUSERSITE=1`; explicit external mode keeps the existing `HERMES_HOME/hermes-agent` compatibility layout.
+
+Callers continue to supply the existing physical `HERMES_HOME` or Profile home. Runtime selection never redirects, migrates, copies, or deletes Memory, Profiles, sessions, learned Skills, credentials, or other adaptive state. Missing or stale selections return a bounded "Runtime is not prepared" result instead of invoking a fallback executable.
+
+Chat and Gateway, Dashboard, Skills, Profiles, Cron, model discovery, MCP, account authentication, Kanban, compatibility probing, and startup preflight all consume the live invocation rather than module-level executable paths. [[src/main/agentera-runtime-distribution/invocation.ts#refreshRuntimeInvocation]] re-resolves the selection after seed installation or activation.
+
 ## Update policy
 
 The desktop checks for stable Runtime updates automatically but downloads only after explicit user confirmation and switches only after the user restarts.

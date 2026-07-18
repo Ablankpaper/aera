@@ -21,10 +21,22 @@ const { TEST_HOME } = vi.hoisted(() => {
 // profiles.ts evaluates the `PROFILES_DIR` constant from it.
 vi.mock("../src/main/installer", () => ({
   HERMES_HOME: TEST_HOME,
-  HERMES_PYTHON: "/usr/bin/python3",
-  HERMES_SCRIPT: "/dev/null",
-  hermesCliArgs: (args: string[] = []) => ["/dev/null", ...args],
   getEnhancedPath: () => process.env.PATH || "",
+}));
+
+vi.mock("../src/main/agentera-runtime-distribution/invocation", () => ({
+  getRuntimeInvocation: () => ({
+    source: "external",
+    version: null,
+    sourceCommit: null,
+    root: `${TEST_HOME}/hermes-agent`,
+    python: "/usr/bin/python3",
+    workingDirectory: `${TEST_HOME}/hermes-agent`,
+    bundledSkillsDirectory: `${TEST_HOME}/hermes-agent/skills`,
+    webDistDirectory: `${TEST_HOME}/hermes-agent/hermes_cli/web_dist`,
+    cliArgs: (args: string[] = []) => ["-m", "hermes_cli.main", ...args],
+    environment: (base: Record<string, string> = {}) => ({ ...base }),
+  }),
 }));
 
 vi.mock("child_process", () => ({
@@ -209,7 +221,7 @@ describe("listProfiles", () => {
     expect(result).toEqual({ success: true, id: "agent" });
     expect(execFileSyncMock).toHaveBeenCalledWith(
       "/usr/bin/python3",
-      ["/dev/null", "profile", "create", "agent"],
+      ["-m", "hermes_cli.main", "profile", "create", "agent"],
       expect.objectContaining({ timeout: 30000 }),
     );
     const profiles = await listProfiles();
@@ -288,7 +300,8 @@ describe("listProfiles", () => {
     expect(execFileSyncMock).toHaveBeenCalledWith(
       "/usr/bin/python3",
       [
-        "/dev/null",
+        "-m",
+        "hermes_cli.main",
         "profile",
         "create",
         "slow-clone",
@@ -306,7 +319,7 @@ describe("listProfiles", () => {
 
     expect(execFileSyncMock).toHaveBeenCalledWith(
       "/usr/bin/python3",
-      ["/dev/null", "profile", "delete", "slow-delete", "--yes"],
+      ["-m", "hermes_cli.main", "profile", "delete", "slow-delete", "--yes"],
       expect.objectContaining({ timeout: 30000 }),
     );
   });

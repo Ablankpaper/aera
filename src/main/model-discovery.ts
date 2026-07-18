@@ -21,11 +21,10 @@ import { readEnv, getModelContextLengthOverride } from "./config";
 import { profileHome } from "./utils";
 import {
   expectedEnvKeyForModel,
-  HERMES_PYTHON,
-  HERMES_REPO,
   HERMES_HOME,
   getEnhancedPath,
 } from "./installer";
+import { getRuntimeInvocation } from "./agentera-runtime-distribution/invocation";
 // PROVIDER_BASE_URLS lives in its own module so `config.ts` can use the
 // same lookup without pulling in this whole file (and triggering a
 // circular import via `model-discovery → config → ...`).
@@ -101,13 +100,19 @@ const PROVIDER_MODELS_SNIPPET =
  *  running a short Python snippet against the bundled venv. Returns the
  *  parsed list, or null on any failure (so the caller can fall back). */
 function runProviderModelIdsPython(provider: string): Promise<string[] | null> {
+  const invocation = getRuntimeInvocation();
+  if (invocation === null) return Promise.resolve(null);
   return new Promise((resolve) => {
     execFile(
-      HERMES_PYTHON,
+      invocation.python,
       ["-c", PROVIDER_MODELS_SNIPPET, provider],
       {
-        cwd: HERMES_REPO,
-        env: { ...process.env, PATH: getEnhancedPath(), HERMES_HOME },
+        cwd: invocation.workingDirectory,
+        env: invocation.environment({
+          ...process.env,
+          PATH: getEnhancedPath(),
+          HERMES_HOME,
+        }),
         timeout: 20_000,
         windowsHide: true,
       },

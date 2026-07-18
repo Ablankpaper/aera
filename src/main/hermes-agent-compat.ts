@@ -10,7 +10,8 @@ import {
 import { join } from "path";
 import { Buffer } from "buffer";
 import type { SshConfig } from "./ssh-tunnel";
-import { HERMES_HOME, HERMES_REPO } from "./installer";
+import { HERMES_HOME } from "./installer";
+import { getRuntimeInvocation } from "./agentera-runtime-distribution/invocation";
 import { sshExec } from "./ssh-remote";
 
 export const HERMES_AGENT_COMPAT_VERSION =
@@ -398,7 +399,21 @@ export function writeCompatFileAtomically(path: string, source: string): void {
 }
 
 export function ensureLocalDashboardCompatibility(): HermesAgentCompatResult {
-  const path = join(HERMES_REPO, "hermes_cli", "web_server.py");
+  const invocation = getRuntimeInvocation();
+  if (!invocation) {
+    const result: HermesAgentCompatResult = {
+      ok: false,
+      target: "local",
+      compatible: false,
+      applied: false,
+      version: HERMES_AGENT_COMPAT_VERSION,
+      detail: "AgentEra Runtime is not prepared.",
+    };
+    writeLocalMarker(result);
+    return result;
+  }
+
+  const path = join(invocation.workingDirectory, "hermes_cli", "web_server.py");
   try {
     const source = readFileSync(path, "utf-8");
     const patched = patchDashboardCompatibilitySource(source);

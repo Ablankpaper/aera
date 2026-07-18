@@ -18,8 +18,9 @@ describe("installer platform wiring", () => {
   it("builds platform-specific Hermes CLI invocation args", () => {
     const args = hermesCliArgs(["--version"]);
 
+    expect(args).toEqual(["-m", "hermes_cli.main", "--version"]);
+
     if (process.platform === "win32") {
-      expect(args).toEqual(["-m", "hermes_cli.main", "--version"]);
       // Use `pythonw.exe` (Windows-subsystem) instead of `python.exe` so
       // child spawns don't flash a blank console window before
       // `windowsHide`/CREATE_NO_WINDOW takes effect — see issue #342.
@@ -28,7 +29,6 @@ describe("installer platform wiring", () => {
       return;
     }
 
-    expect(args).toEqual([HERMES_SCRIPT, "--version"]);
     expect(HERMES_PYTHON).toMatch(/venv[\\/]bin[\\/]python$/);
   });
 });
