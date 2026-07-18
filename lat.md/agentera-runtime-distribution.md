@@ -64,6 +64,14 @@ The desktop checks for stable Runtime updates automatically but downloads only a
 
 Downloads are resumable and must pass repository, platform, architecture, compatibility, Ed25519 signature, and SHA-256 checks. A candidate is staged outside the current Runtime and failed health checks restore the previous version.
 
+[[src/main/agentera-runtime-distribution/update-client.ts#checkStableRuntimeUpdate]] obtains only the reviewed stable-index redirect, its signature, and the selected target's manifest and signature. It verifies both signed layers against the production trust set, cross-checks repository, full commit, version, target, names, and archive hash, and returns an offer without requesting archive bytes. Older, equal, or desktop-incompatible versions produce no offer; transport failure leaves the current Runtime usable with a bounded public error code.
+
+Logical update URLs are restricted to the public `bignormal/aera-runtime` GitHub stable-index redirect and immutable release-asset paths. Redirect hostnames are transport only: signatures and hashes remain the trust boundary, and no GitHub token is stored or exposed by the desktop.
+
+[[src/main/agentera-runtime-distribution/downloader.ts#downloadWithResume]] writes only to a destination `.part` plus `.part.json` below the caller-owned Runtime downloads directory. Resume requires the same URL, expected size, expected SHA-256, unexpired metadata, exact local byte count, valid `Content-Range`, and matching ETag and Last-Modified validators when present. A server that ignores Range safely restarts from byte zero.
+
+Connect, idle-read, overall, and redirect limits are bounded. Cancellation and transport interruption retain a verified-length partial for retry; stale or mismatched metadata and completed wrong-size or wrong-hash bytes are deleted. Only a complete streaming SHA-256 match is atomically renamed to the requested destination.
+
 ## Release gate
 
 Every seed must pass the native Hermes compatibility gate and a clean extracted-artifact smoke test before publication or desktop packaging.
