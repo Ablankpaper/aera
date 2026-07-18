@@ -546,6 +546,7 @@ export async function verifyExtractedRuntimeInventory(
   manifest: RuntimeManifest,
   maxExtractedBytes: number,
   signal?: AbortSignal,
+  hostPlatform: NodeJS.Platform = process.platform,
 ): Promise<RuntimeExtractionResult> {
   const root = await realpath(destination);
   const expected = new Map(manifest.files.map((entry) => [entry.path, entry]));
@@ -604,7 +605,11 @@ export async function verifyExtractedRuntimeInventory(
           `extracted Runtime kind differs from the manifest: ${relativePath}`,
         );
       }
-      if (kind !== "symlink" && manifest.platform !== "windows") {
+      if (
+        kind !== "symlink" &&
+        manifest.platform !== "windows" &&
+        hostPlatform !== "win32"
+      ) {
         await chmod(physicalPath, expectedEntry.mode);
         const normalizedMode = (await lstat(physicalPath)).mode & 0o777;
         if (normalizedMode !== expectedEntry.mode) {

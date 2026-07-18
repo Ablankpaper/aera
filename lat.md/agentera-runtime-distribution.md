@@ -26,7 +26,7 @@ A missing or invalid seed enters a repair state. The desktop never falls back to
 
 Packaged Seed installation is verified, transactional, local-only, and isolated from Hermes-owned adaptive state.
 
-[[src/main/agentera-runtime-distribution/extractor.ts#extractRuntimeArchive]] accepts only the signed platform format: TAR/Zstandard for macOS ARM64 and ZIP for Windows x64. Archive paths, normalized metadata, case-folded Windows duplicates, symlink targets, entry types, sizes, and the decompression budget are checked against the signed inventory before a version can be published. The extracted tree is then walked without following links, re-hashed, permission-normalized, and compared path-for-path with the manifest.
+[[src/main/agentera-runtime-distribution/extractor.ts#extractRuntimeArchive]] accepts only the signed platform format: TAR/Zstandard for macOS ARM64 and ZIP for Windows x64. Archive paths, normalized metadata, case-folded Windows duplicates, symlink targets, entry types, modes, sizes, and the decompression budget are checked against the signed inventory before a version can be published. The extracted tree is then walked without following links, re-hashed, and compared path-for-path with the manifest. POSIX hosts normalize and recheck non-Windows filesystem modes; Windows hosts skip that unrepresentable post-extraction check while retaining the signed archive-mode validation.
 
 Extraction occurs only below a fresh `userData/runtime/staging/seed-*` transaction. Failure or cancellation deletes the destination owned by that transaction; it cannot clean another staging child, a current version, or `HERMES_HOME`.
 
@@ -112,7 +112,7 @@ A separate build-time MJS verifier repeats the checks without importing desktop 
 
 Native packaging embeds one exact verified Seed and fails closed if any required artifact or proof is missing.
 
-`scripts/prepare-agentera-runtime-seed.mjs` selects exactly one locked native target, obtains only its archive, manifest, and signature, runs the independent verifier, compares the verified repository, Runtime version, and full source commit with the lock, then atomically replaces the ignored build-staging directory. An explicit `AGENTERA_RUNTIME_SEED_DIR` is development-only; CI rejects it, and failed verification leaves the previous stage unchanged.
+`scripts/prepare-agentera-runtime-seed.mjs` selects exactly one locked native target, obtains only its archive, manifest, and signature, runs the independent verifier, compares the verified repository, Runtime version, and full source commit with the lock, then atomically replaces the ignored build-staging directory. An explicit `AGENTERA_RUNTIME_SEED_DIR` is development-only; CI rejects it, and failed verification leaves the previous stage unchanged. Both importable Runtime packaging CLI modules are pinned to LF checkout bytes so their hashbang lines remain parseable under Windows Git configurations that otherwise convert text files to CRLF.
 
 Electron Builder excludes the staging directory from `app.asar`, then copies only the three verified files from `resources/agentera-runtime-seed` into the application `Resources/agentera-runtime-seed` directory. `scripts/verify-packaged-runtime-seed.mjs` rejects partial, mixed-target, or extra contents and can prove every packaged byte matches the verified staging reference.
 

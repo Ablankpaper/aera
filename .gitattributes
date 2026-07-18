@@ -10,3 +10,8 @@
 # identical on Windows, macOS, and Linux checkouts.
 contracts/agentera-cloud.openapi.yaml text eol=lf
 src/shared/agentera-cloud-api.generated.ts text eol=lf
+
+# Vitest imports these CLI modules directly; keep their hashbang lines parseable
+# when Windows Git is configured to convert text files to CRLF.
+scripts/prepare-agentera-runtime-seed.mjs text eol=lf
+scripts/verify-packaged-runtime-seed.mjs text eol=lf

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  chmod,
   lstat,
   mkdir,
   mkdtemp,
@@ -314,6 +315,33 @@ describe("Runtime Seed extractor", () => {
     expect(
       (await stat(join(destination, "python", "bin", "python3"))).mode & 0o777,
     ).toBe(0o755);
+  });
+
+  it("skips POSIX mode enforcement when verifying a macOS Seed on Windows", async () => {
+    const root = await workspace();
+    const value = manifest();
+    const archivePath = await writeTarZstd(root, archiveEntries(value.files));
+    const destination = join(root, "payload");
+
+    await extractRuntimeArchive({
+      archivePath,
+      destination,
+      manifest: value,
+      maxExtractedBytes: 1024 * 1024,
+    });
+    const executable = join(destination, "python", "bin", "python3");
+    await chmod(executable, 0o644);
+
+    await expect(
+      verifyExtractedRuntimeInventory(
+        destination,
+        value,
+        1024 * 1024,
+        undefined,
+        "win32",
+      ),
+    ).resolves.toEqual({ fileCount: 2, extractedBytes: 44 });
+    expect((await stat(executable)).mode & 0o777).toBe(0o644);
   });
 
   it("extracts the Windows ZIP layout into the same logical Runtime root", async () => {
