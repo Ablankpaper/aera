@@ -541,6 +541,13 @@ async function hashFile(path: string, signal?: AbortSignal): Promise<string> {
   return hash.digest("hex");
 }
 
+export function shouldEnforceExtractedRuntimeMode(
+  manifestPlatform: RuntimeManifest["platform"],
+  hostPlatform: NodeJS.Platform = process.platform,
+): boolean {
+  return manifestPlatform !== "windows" && hostPlatform !== "win32";
+}
+
 export async function verifyExtractedRuntimeInventory(
   destination: string,
   manifest: RuntimeManifest,
@@ -549,6 +556,10 @@ export async function verifyExtractedRuntimeInventory(
   hostPlatform: NodeJS.Platform = process.platform,
 ): Promise<RuntimeExtractionResult> {
   const root = await realpath(destination);
+  const enforceExtractedModes = shouldEnforceExtractedRuntimeMode(
+    manifest.platform,
+    hostPlatform,
+  );
   const expected = new Map(manifest.files.map((entry) => [entry.path, entry]));
   const seen = new Set<string>();
   let fileCount = 0;
@@ -605,11 +616,7 @@ export async function verifyExtractedRuntimeInventory(
           `extracted Runtime kind differs from the manifest: ${relativePath}`,
         );
       }
-      if (
-        kind !== "symlink" &&
-        manifest.platform !== "windows" &&
-        hostPlatform !== "win32"
-      ) {
+      if (kind !== "symlink" && enforceExtractedModes) {
         await chmod(physicalPath, expectedEntry.mode);
         const normalizedMode = (await lstat(physicalPath)).mode & 0o777;
         if (normalizedMode !== expectedEntry.mode) {

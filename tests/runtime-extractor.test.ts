@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import {
-  chmod,
   lstat,
   mkdir,
   mkdtemp,
@@ -19,6 +18,7 @@ import { Header } from "tar";
 import {
   RuntimeExtractionError,
   extractRuntimeArchive,
+  shouldEnforceExtractedRuntimeMode,
   verifyExtractedRuntimeInventory,
 } from "../src/main/agentera-runtime-distribution/extractor";
 import {
@@ -295,7 +295,7 @@ async function writeZip(
 }
 
 describe("Runtime Seed extractor", () => {
-  it("extracts TAR/Zstandard, verifies hashes, and preserves executable modes", async () => {
+  it("extracts TAR/Zstandard, verifies hashes, and preserves executable modes where supported", async () => {
     const root = await workspace();
     const value = manifest();
     const archivePath = await writeTarZstd(root, archiveEntries(value.files));
@@ -312,36 +312,20 @@ describe("Runtime Seed extractor", () => {
     expect(await readFile(join(destination, "runtime", "hermes"), "utf8")).toBe(
       hermesBody.toString("utf8"),
     );
-    expect(
-      (await stat(join(destination, "python", "bin", "python3"))).mode & 0o777,
-    ).toBe(0o755);
+    if (process.platform !== "win32") {
+      expect(
+        (await stat(join(destination, "python", "bin", "python3"))).mode &
+          0o777,
+      ).toBe(0o755);
+    }
   });
 
-  it("skips POSIX mode enforcement when verifying a macOS Seed on Windows", async () => {
-    const root = await workspace();
-    const value = manifest();
-    const archivePath = await writeTarZstd(root, archiveEntries(value.files));
-    const destination = join(root, "payload");
-
-    await extractRuntimeArchive({
-      archivePath,
-      destination,
-      manifest: value,
-      maxExtractedBytes: 1024 * 1024,
-    });
-    const executable = join(destination, "python", "bin", "python3");
-    await chmod(executable, 0o644);
-
-    await expect(
-      verifyExtractedRuntimeInventory(
-        destination,
-        value,
-        1024 * 1024,
-        undefined,
-        "win32",
-      ),
-    ).resolves.toEqual({ fileCount: 2, extractedBytes: 44 });
-    expect((await stat(executable)).mode & 0o777).toBe(0o644);
+  it("enforces POSIX modes only when both the Seed and host support them", () => {
+    expect(shouldEnforceExtractedRuntimeMode("darwin", "darwin")).toBe(true);
+    expect(shouldEnforceExtractedRuntimeMode("darwin", "linux")).toBe(true);
+    expect(shouldEnforceExtractedRuntimeMode("darwin", "win32")).toBe(false);
+    expect(shouldEnforceExtractedRuntimeMode("windows", "linux")).toBe(false);
+    expect(shouldEnforceExtractedRuntimeMode("windows", "win32")).toBe(false);
   });
 
   it("extracts the Windows ZIP layout into the same logical Runtime root", async () => {

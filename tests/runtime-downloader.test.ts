@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createServer, type Server } from "node:http";
+import { createServer, type Server, type ServerResponse } from "node:http";
 import {
   existsSync,
   mkdtempSync,
@@ -38,6 +38,26 @@ async function close(server: Server): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
   });
+}
+
+interface ProgressDropController {
+  capture: (response: ServerResponse) => void;
+  onProgress: (received: number) => void;
+}
+
+function progressDropController(expectedBytes: number): ProgressDropController {
+  let response: ServerResponse | null = null;
+  return {
+    capture: (value) => {
+      response = value;
+    },
+    onProgress: (received) => {
+      if (received < expectedBytes || response === null) return;
+      const interrupted = response;
+      response = null;
+      interrupted.destroy();
+    },
+  };
 }
 
 interface DownloadFixture {
@@ -103,6 +123,7 @@ describe("Runtime resumable downloader", () => {
     const ranges: Array<string | undefined> = [];
     let attempt = 0;
     const split = 12;
+    const drop = progressDropController(split);
     const server = createServer((incoming, response) => {
       attempt += 1;
       ranges.push(incoming.headers.range);
@@ -111,8 +132,8 @@ describe("Runtime resumable downloader", () => {
           "Content-Length": BODY.length,
           ETag: '"fixture-v1"',
         });
+        drop.capture(response);
         response.write(BODY.subarray(0, split));
-        setTimeout(() => response.destroy(), 20);
         return;
       }
       response.writeHead(206, {
@@ -125,9 +146,9 @@ describe("Runtime resumable downloader", () => {
     try {
       const port = await listen(server);
       const url = new URL(`http://127.0.0.1:${port}/runtime`);
-      await expect(request(url, fixture)).rejects.toThrow(
-        /aborted|closed|socket/i,
-      );
+      await expect(
+        request(url, fixture, { onProgress: drop.onProgress }),
+      ).rejects.toThrow(/aborted|closed|socket/i);
       const partial = runtimePartialPaths(fixture.destination);
       expect(readFileSync(partial.data)).toEqual(BODY.subarray(0, split));
       expect(existsSync(partial.metadata)).toBe(true);
@@ -146,6 +167,7 @@ describe("Runtime resumable downloader", () => {
     const ranges: Array<string | undefined> = [];
     let attempt = 0;
     const split = 9;
+    const drop = progressDropController(split);
     const server = createServer((incoming, response) => {
       attempt += 1;
       ranges.push(incoming.headers.range);
@@ -154,8 +176,8 @@ describe("Runtime resumable downloader", () => {
           "Content-Length": BODY.length,
           ETag: '"fixture-v1"',
         });
+        drop.capture(response);
         response.write(BODY.subarray(0, split));
-        setTimeout(() => response.destroy(), 20);
         return;
       }
       response.writeHead(200, {
@@ -167,7 +189,9 @@ describe("Runtime resumable downloader", () => {
     try {
       const port = await listen(server);
       const url = new URL(`http://127.0.0.1:${port}/runtime`);
-      await expect(request(url, fixture)).rejects.toThrow();
+      await expect(
+        request(url, fixture, { onProgress: drop.onProgress }),
+      ).rejects.toThrow();
       await request(url, fixture);
       expect(ranges).toEqual([undefined, `bytes=${split}-`]);
       expect(readFileSync(fixture.destination)).toEqual(BODY);
@@ -181,6 +205,7 @@ describe("Runtime resumable downloader", () => {
     const fixture = createDownloadFixture();
     let attempt = 0;
     const split = 8;
+    const drop = progressDropController(split);
     const server = createServer((_incoming, response) => {
       attempt += 1;
       if (attempt === 1) {
@@ -188,8 +213,8 @@ describe("Runtime resumable downloader", () => {
           "Content-Length": BODY.length,
           ETag: '"fixture-v1"',
         });
+        drop.capture(response);
         response.write(BODY.subarray(0, split));
-        setTimeout(() => response.destroy(), 20);
         return;
       }
       response.writeHead(206, {
@@ -201,7 +226,9 @@ describe("Runtime resumable downloader", () => {
     try {
       const port = await listen(server);
       const url = new URL(`http://127.0.0.1:${port}/runtime`);
-      await expect(request(url, fixture)).rejects.toThrow();
+      await expect(
+        request(url, fixture, { onProgress: drop.onProgress }),
+      ).rejects.toThrow();
       await expect(request(url, fixture)).rejects.toThrow(/content-range/i);
       expect(
         readFileSync(runtimePartialPaths(fixture.destination).data),
@@ -217,6 +244,7 @@ describe("Runtime resumable downloader", () => {
     let attempt = 0;
     const ranges: Array<string | undefined> = [];
     const split = 10;
+    const drop = progressDropController(split);
     const server = createServer((incoming, response) => {
       attempt += 1;
       ranges.push(incoming.headers.range);
@@ -225,8 +253,8 @@ describe("Runtime resumable downloader", () => {
           "Content-Length": BODY.length,
           ETag: '"fixture-v1"',
         });
+        drop.capture(response);
         response.write(BODY.subarray(0, split));
-        setTimeout(() => response.destroy(), 20);
         return;
       }
       if (attempt === 2) {
@@ -246,7 +274,9 @@ describe("Runtime resumable downloader", () => {
     try {
       const port = await listen(server);
       const url = new URL(`http://127.0.0.1:${port}/runtime`);
-      await expect(request(url, fixture)).rejects.toThrow();
+      await expect(
+        request(url, fixture, { onProgress: drop.onProgress }),
+      ).rejects.toThrow();
       await request(url, fixture);
       expect(ranges).toEqual([undefined, `bytes=${split}-`, undefined]);
       expect(readFileSync(fixture.destination)).toEqual(BODY);
@@ -392,6 +422,7 @@ describe("Runtime resumable downloader", () => {
     const fixture = createDownloadFixture();
     let attempt = 0;
     const ranges: Array<string | undefined> = [];
+    const drop = progressDropController(6);
     const server = createServer((incoming, response) => {
       attempt += 1;
       ranges.push(incoming.headers.range);
@@ -400,8 +431,8 @@ describe("Runtime resumable downloader", () => {
           "Content-Length": BODY.length,
           ETag: '"fixture-v1"',
         });
+        drop.capture(response);
         response.write(BODY.subarray(0, 6));
-        setTimeout(() => response.destroy(), 20);
         return;
       }
       response.writeHead(200, { "Content-Length": BODY.length }).end(BODY);
@@ -409,7 +440,9 @@ describe("Runtime resumable downloader", () => {
     try {
       const port = await listen(server);
       const url = new URL(`http://127.0.0.1:${port}/runtime`);
-      await expect(request(url, fixture)).rejects.toThrow();
+      await expect(
+        request(url, fixture, { onProgress: drop.onProgress }),
+      ).rejects.toThrow();
       const partial = runtimePartialPaths(fixture.destination);
       const metadata = JSON.parse(readFileSync(partial.metadata, "utf8"));
       metadata.updatedAt = "2000-01-01T00:00:00.000Z";
