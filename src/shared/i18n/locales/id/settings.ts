@@ -1,3 +1,5 @@
+import { runtimeDistributionEn } from "../runtime-distribution";
+
 export default {
   title: "Pengaturan",
   sections: {
@@ -21,6 +23,7 @@ export default {
     community: "Komunitas",
     logs: "Log & Diagnostik",
   },
+  runtimeDistribution: runtimeDistributionEn,
   analytics: {
     label: "Kirim analitik penggunaan anonim",
     hint: "Membantu meningkatkan AgentEra dengan mengirim data penggunaan anonim dan teragregasi ke layanan analitik proyek. Anda dapat menonaktifkannya kapan saja.",

@@ -1,3 +1,5 @@
+import { runtimeDistributionEn } from "../runtime-distribution";
+
 export default {
   title: "Ustawienia",
   sections: {
@@ -21,6 +23,7 @@ export default {
     community: "Społeczność",
     logs: "Dzienniki i diagnostyka",
   },
+  runtimeDistribution: runtimeDistributionEn,
   theme: {
     label: "Motyw",
     system: "Systemowy",

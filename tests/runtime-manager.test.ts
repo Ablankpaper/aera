@@ -358,4 +358,82 @@ describe("AgentEra Runtime distribution manager", () => {
       canRestart: false,
     });
   });
+
+  it("does not replace an already prepared candidate during automatic checks", async () => {
+    const setup = await harness();
+    const first = createRuntimeDistributionManager(setup.options);
+    await first.initialize();
+    await first.check();
+    await first.downloadConfirmed();
+    setup.checkUpdate.mockClear();
+
+    const restarted = createRuntimeDistributionManager(setup.options);
+    expect((await restarted.initialize()).phase).toBe("candidate-ready");
+    const state = await restarted.check();
+
+    expect(setup.checkUpdate).not.toHaveBeenCalled();
+    expect(state.phase).toBe("candidate-ready");
+    expect((await setup.store.readState()).candidate).not.toBeNull();
+  });
+
+  it("discards a failed candidate before returning to the healthy current Runtime", async () => {
+    const setup = await harness();
+    const first = createRuntimeDistributionManager(setup.options);
+    await first.initialize();
+    await first.check();
+    await first.downloadConfirmed();
+    await writeFile(
+      join(setup.paths.failures, RUNTIME_LAST_FAILURE_NAME),
+      JSON.stringify({
+        schemaVersion: 1,
+        errorCode: "runtime_candidate_health_failed",
+        runtimeVersion: TEST_RUNTIME_VERSION,
+        sourceCommitShort: TEST_SOURCE_COMMIT.slice(0, 12),
+        recordedAt: "2026-07-18T14:00:00.000Z",
+      }),
+    );
+    const manager = createRuntimeDistributionManager(setup.options);
+    await manager.initialize();
+
+    const state = await manager.retryRepair();
+
+    expect(state).toMatchObject({
+      phase: "current",
+      currentVersion: "0.18.1-agentera.1",
+      availableVersion: null,
+      lastErrorCode: null,
+      canCheck: true,
+    });
+    expect((await setup.store.readState()).candidate).toBeNull();
+    await expect(
+      readFile(join(setup.paths.failures, RUNTIME_LAST_FAILURE_NAME)),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("repairs a missing Runtime only through the supplied packaged Seed repair", async () => {
+    let repairedStore: RuntimeStateStore | null = null;
+    const repair = vi.fn(async () => {
+      await repairedStore!.setCurrent(pointer("current-v1"));
+      return {
+        success: true,
+        runtimeVersion: "0.18.1-agentera.1",
+        errorCode: null,
+      };
+    });
+    const setup = await harness({ repair });
+    repairedStore = setup.store;
+    await setup.store.clearCurrent();
+    const manager = createRuntimeDistributionManager(setup.options);
+    expect((await manager.initialize()).phase).toBe("missing");
+
+    const state = await manager.retryRepair();
+
+    expect(repair).toHaveBeenCalledOnce();
+    expect(state).toMatchObject({
+      phase: "current",
+      currentVersion: "0.18.1-agentera.1",
+      packagedSeedVersion: "0.18.1-agentera.1",
+      lastErrorCode: null,
+    });
+  });
 });

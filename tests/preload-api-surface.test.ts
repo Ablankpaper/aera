@@ -88,6 +88,26 @@ function extractAgenteraRuntimeAccessTypeMethods(src: string): string[] {
   );
 }
 
+function extractAgenteraRuntimeDistributionMethods(src: string): string[] {
+  const objectMatch = src.match(
+    /const\s+agenteraRuntimeDistributionAPI\s*=\s*\{([\s\S]*?)^\};/m,
+  );
+  if (!objectMatch) return [];
+  return [...objectMatch[1].matchAll(/^\s{2}(\w+)\s*:\s*\(/gm)].map(
+    (match) => match[1],
+  );
+}
+
+function extractAgenteraRuntimeDistributionTypeMethods(src: string): string[] {
+  const interfaceMatch = src.match(
+    /interface\s+AgenteraRuntimeDistributionAPI\s*\{([\s\S]*?)^\}/m,
+  );
+  if (!interfaceMatch) return [];
+  return [...interfaceMatch[1].matchAll(/^\s{2}(\w+)\s*[:(]/gm)].map(
+    (match) => match[1],
+  );
+}
+
 describe("Preload API Surface", () => {
   it("preload exposes methods", () => {
     expect(preloadMethods.length).toBeGreaterThan(30);
@@ -162,6 +182,37 @@ describe("AgentEra Runtime-access preload namespace", () => {
     expect(namespace).toBeDefined();
     expect(namespace).not.toMatch(
       /ownerId|tenantId|installationId|profilePath|remoteUrl|ssh|apiKey|accessToken|refreshToken|offlineEntitlement|privateKey/i,
+    );
+  });
+});
+
+describe("AgentEra Runtime-distribution preload namespace", () => {
+  const expected = [
+    "getState",
+    "checkForUpdate",
+    "downloadConfirmed",
+    "cancelDownload",
+    "restartToApply",
+    "retryRepair",
+    "onStateChanged",
+  ];
+
+  it("exposes only the reviewed lifecycle methods", () => {
+    expect(extractAgenteraRuntimeDistributionMethods(preloadSrc)).toEqual(
+      expected,
+    );
+    expect(extractAgenteraRuntimeDistributionTypeMethods(preloadTypes)).toEqual(
+      expected,
+    );
+  });
+
+  it("does not declare URLs, paths, signatures, keys, tokens, or owner identity", () => {
+    const namespace = preloadTypes.match(
+      /interface\s+AgenteraRuntimeDistributionAPI\s*\{([\s\S]*?)^\}/m,
+    )?.[1];
+    expect(namespace).toBeDefined();
+    expect(namespace).not.toMatch(
+      /url|path|signature|publicKey|privateKey|token|ownerId|tenantId|installationId/i,
     );
   });
 });

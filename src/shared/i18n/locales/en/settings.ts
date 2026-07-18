@@ -1,3 +1,5 @@
+import { runtimeDistributionEn } from "../runtime-distribution";
+
 export default {
   title: "Settings",
   sections: {
@@ -21,6 +23,7 @@ export default {
     community: "Community",
     logs: "Logs & Diagnostics",
   },
+  runtimeDistribution: runtimeDistributionEn,
   agentSubtitle: "The local AI engine",
   desktopTitle: "AgentEra Studio",
   desktopSubtitle: "This desktop app",

@@ -26,6 +26,8 @@ The result contains connection mode, the saved post-auth target, and a soft veri
 
 The separate `window.agenteraRuntimeAccess` preload namespace returns only sanitized preflight and claim states. Other owners' IDs, local Profile paths, remote URLs, SSH configuration, credentials, and product secrets never appear in those types.
 
+The separate `window.agenteraRuntimeDistribution` lifecycle namespace is authenticated rather than bound-Profile because it manages the product-owned executable capability layer, never Profile data. Its main-process handlers serialize an exact public state before every reply or event; archive locations, filesystem paths, signatures, keys, tokens, and ownership identifiers remain main-process-only.
+
 ### Renderer state machine
 
 [[src/renderer/src/App.tsx#App]] applies the sanitized startup target only after product authentication and Runtime ownership checks.

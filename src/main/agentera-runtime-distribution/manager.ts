@@ -72,6 +72,11 @@ export interface RuntimeDistributionManagerOptions {
   activeRunCount?: () => number;
   stopRuntimeContext?: () => void | Promise<void>;
   relaunch?: () => void | Promise<void>;
+  repair?: () => Promise<{
+    success: boolean;
+    runtimeVersion: string | null;
+    errorCode: string | null;
+  }>;
 }
 
 export interface RuntimeDistributionManager {
@@ -81,6 +86,7 @@ export interface RuntimeDistributionManager {
   downloadConfirmed(): Promise<RuntimeDistributionPublicState>;
   cancelDownload(): Promise<RuntimeDistributionPublicState>;
   restartToApply(): Promise<RuntimeDistributionPublicState>;
+  retryRepair(): Promise<RuntimeDistributionPublicState>;
   subscribe(
     listener: (state: RuntimeDistributionPublicState) => void,
   ): () => void;
@@ -213,6 +219,12 @@ function manifestMatchesOffer(
   );
 }
 
+function publicRepairErrorCode(value: string | null): string {
+  return value !== null && /^runtime_[a-z0-9_]+$/.test(value)
+    ? value
+    : "runtime_repair_required";
+}
+
 // @lat: [[agentera-runtime-distribution#Update policy]]
 export function createRuntimeDistributionManager(
   options: RuntimeDistributionManagerOptions,
@@ -273,7 +285,11 @@ export function createRuntimeDistributionManager(
   const check = (): Promise<RuntimeDistributionPublicState> =>
     exclusive(async () => {
       const currentState = await getState();
-      if (downloadController !== null || currentState.currentVersion === null) {
+      if (
+        downloadController !== null ||
+        currentState.currentVersion === null ||
+        !currentState.canCheck
+      ) {
         return currentState;
       }
       publish({
@@ -522,6 +538,85 @@ export function createRuntimeDistributionManager(
       }
     });
 
+  const retryRepair = (): Promise<RuntimeDistributionPublicState> =>
+    exclusive(async () => {
+      let currentState = await getState();
+      let journal = await store.readState();
+
+      if (currentState.phase === "rollback" && journal.candidate !== null) {
+        const failedCandidate = journal.candidate;
+        await store.clearCandidate();
+        await rm(join(options.paths.failures, RUNTIME_LAST_FAILURE_NAME), {
+          force: true,
+        });
+        const stillReferenced = [journal.current, journal.previous].some(
+          (pointer) =>
+            pointer?.versionDirectory === failedCandidate.versionDirectory,
+        );
+        if (!stillReferenced) {
+          await removeRuntimeOwnedPath(
+            options.paths.root,
+            resolveRuntimeVersionDirectory(
+              options.paths,
+              failedCandidate.versionDirectory,
+            ),
+          ).catch(() => undefined);
+        }
+        offer = null;
+        journal = await store.readState();
+        currentState = publish(createBaseState(journal, null));
+        if (journal.current !== null) return currentState;
+      }
+
+      if (
+        currentState.phase !== "missing" &&
+        currentState.phase !== "repair-required" &&
+        currentState.phase !== "rollback"
+      ) {
+        return currentState;
+      }
+
+      publish({
+        ...currentState,
+        phase: "installing",
+        lastErrorCode: null,
+      });
+      try {
+        const repaired = await options.repair?.();
+        if (!repaired?.success) {
+          return publish({
+            ...currentState,
+            phase: "repair-required",
+            lastErrorCode: publicRepairErrorCode(
+              repaired?.errorCode ?? "runtime_repair_required",
+            ),
+          });
+        }
+        const recovered = await store.recover();
+        if (recovered.current === null) {
+          return publish({
+            ...currentState,
+            phase: "repair-required",
+            lastErrorCode: "runtime_repair_required",
+          });
+        }
+        offer = null;
+        return publish({
+          ...createBaseState(
+            recovered,
+            await readCandidateFailureCode(options.paths, recovered.candidate),
+          ),
+          packagedSeedVersion: repaired.runtimeVersion,
+        });
+      } catch {
+        return publish({
+          ...currentState,
+          phase: "repair-required",
+          lastErrorCode: "runtime_repair_required",
+        });
+      }
+    });
+
   return {
     initialize,
     getState,
@@ -529,6 +624,7 @@ export function createRuntimeDistributionManager(
     downloadConfirmed,
     cancelDownload,
     restartToApply,
+    retryRepair,
     subscribe: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);

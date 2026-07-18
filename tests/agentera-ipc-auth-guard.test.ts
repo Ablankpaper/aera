@@ -11,6 +11,7 @@ import {
   createProductAccessGuard,
   type ProductAccessLevel,
 } from "../src/main/ipc/auth-guard";
+import { serializeRuntimeDistributionPublicState } from "../src/shared/agentera-runtime-distribution";
 
 function registeredChannels(): string[] {
   const filePath = join(__dirname, "../src/main/ipc/register.ts");
@@ -131,12 +132,83 @@ describe("AgentEra central IPC product-access guard", () => {
     expect(AGENTERA_IPC_CHANNEL_POLICY["agentera-auth-open-portal"]).toBe(
       "authenticated",
     );
+    for (const channel of [
+      "agentera-runtime-get-state",
+      "agentera-runtime-check-update",
+      "agentera-runtime-download-confirmed",
+      "agentera-runtime-cancel-download",
+      "agentera-runtime-restart-apply",
+      "agentera-runtime-retry-repair",
+    ]) {
+      expect(AGENTERA_IPC_CHANNEL_POLICY[channel]).toBe("authenticated");
+    }
     expect(AGENTERA_IPC_CHANNEL_POLICY["send-message"]).toBe("bound-profile");
     expect(AGENTERA_IPC_CHANNEL_POLICY["list-sessions"]).toBe("bound-profile");
     expect(AGENTERA_IPC_CHANNEL_POLICY["read-memory"]).toBe("bound-profile");
     expect(AGENTERA_IPC_CHANNEL_POLICY["list-installed-skills"]).toBe(
       "bound-profile",
     );
+  });
+
+  it("serializes Runtime state through an exact renderer-safe allowlist", () => {
+    const serialized = serializeRuntimeDistributionPublicState({
+      phase: "update-available",
+      currentVersion: "0.18.2-agentera.1",
+      currentSourceCommit: "a".repeat(40),
+      packagedSeedVersion: "0.18.2-agentera.1",
+      availableVersion: "0.19.0-agentera.1",
+      downloadSize: 1024,
+      downloadPercent: null,
+      lastCheckedAt: "2026-07-18T14:00:00.000Z",
+      lastErrorCode: null,
+      canCheck: false,
+      canDownload: true,
+      canCancel: false,
+      canRestart: false,
+      archiveUrl: "https://private.example/runtime.zip",
+      manifestPath: "/private/runtime.json",
+      signature: "secret",
+      ownerId: "private-owner",
+    } as never);
+
+    expect(serialized).toEqual({
+      phase: "update-available",
+      currentVersion: "0.18.2-agentera.1",
+      currentSourceCommit: "a".repeat(40),
+      packagedSeedVersion: "0.18.2-agentera.1",
+      availableVersion: "0.19.0-agentera.1",
+      downloadSize: 1024,
+      downloadPercent: null,
+      lastCheckedAt: "2026-07-18T14:00:00.000Z",
+      lastErrorCode: null,
+      canCheck: false,
+      canDownload: true,
+      canCancel: false,
+      canRestart: false,
+    });
+    expect(JSON.stringify(serialized)).not.toMatch(
+      /private\.example|private\/runtime|secret|private-owner/,
+    );
+  });
+
+  it("rejects a Runtime diagnostic that is not a bounded public error code", () => {
+    expect(() =>
+      serializeRuntimeDistributionPublicState({
+        phase: "repair-required",
+        currentVersion: null,
+        currentSourceCommit: null,
+        packagedSeedVersion: null,
+        availableVersion: null,
+        downloadSize: null,
+        downloadPercent: null,
+        lastCheckedAt: null,
+        lastErrorCode: "/private/runtime/path failed",
+        canCheck: false,
+        canDownload: false,
+        canCancel: false,
+        canRestart: false,
+      }),
+    ).toThrow(/lastErrorCode/);
   });
 
   it("asserts authorization before invoking a Runtime handler", async () => {

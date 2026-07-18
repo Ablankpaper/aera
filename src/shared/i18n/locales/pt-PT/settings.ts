@@ -1,3 +1,5 @@
+import { runtimeDistributionEn } from "../runtime-distribution";
+
 export default {
   title: "Definições",
   sections: {
@@ -21,6 +23,7 @@ export default {
     community: "Comunidade",
     logs: "Registos e diagnóstico",
   },
+  runtimeDistribution: runtimeDistributionEn,
   analytics: {
     label: "Enviar análises de utilização anónimas",
     hint: "Ajuda a melhorar o AgentEra ao enviar dados de utilização anónimos e agregados para o serviço de análise do projecto. Pode desactivar a qualquer momento.",

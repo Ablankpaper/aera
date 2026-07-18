@@ -1,3 +1,5 @@
+import { runtimeDistributionEn } from "../runtime-distribution";
+
 export default {
   title: "الإعدادات",
   sections: {
@@ -21,6 +23,7 @@ export default {
     community: "المجتمع",
     logs: "السجلات والتشخيص",
   },
+  runtimeDistribution: runtimeDistributionEn,
   agentSubtitle: "محرك الذكاء الاصطناعي المحلي",
   desktopTitle: "AgentEra Studio",
   desktopSubtitle: "تطبيق سطح المكتب هذا",

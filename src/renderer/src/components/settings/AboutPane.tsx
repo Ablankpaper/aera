@@ -16,6 +16,7 @@ import pythonLogo from "../../assets/logos/python.svg";
 import openaiLogo from "../../assets/logos/openai.svg";
 import { ConfigHealth } from "../../screens/Settings/ConfigHealth";
 import { useSettings } from "./SettingsDataContext";
+import RuntimeDistributionCard from "./RuntimeDistributionCard";
 
 /**
  * About & Updates. Two clearly-separated cards for the two distinct update
@@ -59,148 +60,97 @@ export default function AboutPane(): React.JSX.Element {
       <ConfigHealth />
 
       {/* ── AgentEra Runtime (engine) ─────────────────────────── */}
-      <section className="settings-card">
-        <header className="settings-card-head">
-          <span className="settings-card-icon">
-            <img
-              src={agentEraIcon}
-              width={20}
-              height={20}
-              className="brand-logo"
-              alt={t("settings.sections.hermesAgent")}
-            />
+      <RuntimeDistributionCard
+        onExternalUpdate={handleUpdateHermes}
+        externalUpdating={updating}
+        externalUpdateAvailable={engineHasUpdate}
+      >
+        <div className="settings-meta-grid settings-runtime-details">
+          <Meta
+            label={t("common.engine")}
+            loading={loading}
+            icon={<Cpu size={13} />}
+          >
+            {parsedVersion
+              ? `v${parsedVersion.version}`
+              : t("settings.notDetected")}
+          </Meta>
+          <Meta
+            label={t("common.released")}
+            loading={loading}
+            icon={<Calendar size={13} />}
+          >
+            {parsedVersion?.date || "—"}
+          </Meta>
+          <Meta
+            label="Python"
+            loading={loading}
+            icon={<MetaLogo src={pythonLogo} alt="Python" />}
+          >
+            {parsedVersion?.python || "—"}
+          </Meta>
+          <Meta
+            label="OpenAI SDK"
+            loading={loading}
+            icon={<MetaLogo src={openaiLogo} alt="OpenAI" />}
+          >
+            {parsedVersion?.sdk || "—"}
+          </Meta>
+        </div>
+
+        <div className="settings-meta-path">
+          <span className="settings-meta-label">
+            <FolderOpen size={13} />
+            {t("common.home")}
           </span>
-          <div className="settings-card-headtext">
-            <div className="settings-card-title">
-              {t("settings.sections.hermesAgent")}
-            </div>
-            <div className="settings-card-sub">
-              {t("settings.agentSubtitle")}
-            </div>
-          </div>
-          {!loading && (
-            <span
-              className={`settings-card-badge ${engineHasUpdate ? "is-update" : "is-ok"}`}
-            >
-              {engineHasUpdate
-                ? t("settings.statusUpdateAvailable")
-                : t("settings.statusUpToDate")}
-            </span>
-          )}
-        </header>
-
-        <div className="settings-card-body">
-          <div className="settings-meta-grid">
-            <Meta
-              label={t("common.engine")}
-              loading={loading}
-              icon={<Cpu size={13} />}
-            >
-              {parsedVersion
-                ? `v${parsedVersion.version}`
-                : t("settings.notDetected")}
-            </Meta>
-            <Meta
-              label={t("common.released")}
-              loading={loading}
-              icon={<Calendar size={13} />}
-            >
-              {parsedVersion?.date || "—"}
-            </Meta>
-            <Meta
-              label="Python"
-              loading={loading}
-              icon={<MetaLogo src={pythonLogo} alt="Python" />}
-            >
-              {parsedVersion?.python || "—"}
-            </Meta>
-            <Meta
-              label="OpenAI SDK"
-              loading={loading}
-              icon={<MetaLogo src={openaiLogo} alt="OpenAI" />}
-            >
-              {parsedVersion?.sdk || "—"}
-            </Meta>
-          </div>
-
-          <div className="settings-meta-path">
-            <span className="settings-meta-label">
-              <FolderOpen size={13} />
-              {t("common.home")}
-            </span>
-            {!hermesHome ? (
-              <span className="skeleton skeleton-md" />
-            ) : (
-              <code className="settings-meta-pathvalue">{hermesHome}</code>
-            )}
-          </div>
-
-          {engineHasUpdate && (
-            <div className="settings-hermes-update-badge">
-              {parsedVersion?.updateInfo}
-            </div>
-          )}
-
-          <div className="settings-card-actions">
-            {engineHasUpdate ? (
-              <button
-                className="btn btn-primary"
-                onClick={handleUpdateHermes}
-                disabled={updating}
-              >
-                {updating ? (
-                  <Loader size={14} className="settings-spin" />
-                ) : (
-                  <Download size={14} />
-                )}
-                {updating ? t("settings.updating") : t("settings.updateEngine")}
-              </button>
-            ) : (
-              <button className="btn btn-secondary" disabled>
-                {t("settings.latestVersion")}
-              </button>
-            )}
-            <button
-              className="btn btn-secondary"
-              onClick={handleDoctor}
-              disabled={doctorRunning}
-            >
-              <Stethoscope size={14} />
-              {doctorRunning
-                ? t("settings.runningDiagnosis")
-                : t("settings.runDiagnosis")}
-            </button>
-            <button
-              className="btn btn-secondary"
-              onClick={async () => {
-                setDumpRunning(true);
-                setDumpOutput(null);
-                const output = await window.hermesAPI.runHermesDump();
-                setDumpOutput(output);
-                setDumpRunning(false);
-              }}
-              disabled={dumpRunning}
-            >
-              <Bug size={14} />
-              {dumpRunning ? t("settings.running") : t("settings.debugDump")}
-            </button>
-          </div>
-
-          {updateResult && (
-            <div
-              className={`settings-hermes-result ${updateResultType || "error"}`}
-            >
-              {updateResult}
-            </div>
-          )}
-          {doctorOutput && (
-            <pre className="settings-hermes-doctor">{doctorOutput}</pre>
-          )}
-          {dumpOutput && (
-            <pre className="settings-hermes-doctor">{dumpOutput}</pre>
+          {!hermesHome ? (
+            <span className="skeleton skeleton-md" />
+          ) : (
+            <code className="settings-meta-pathvalue">{hermesHome}</code>
           )}
         </div>
-      </section>
+
+        <div className="settings-card-actions">
+          <button
+            className="btn btn-secondary"
+            onClick={handleDoctor}
+            disabled={doctorRunning}
+          >
+            <Stethoscope size={14} />
+            {doctorRunning
+              ? t("settings.runningDiagnosis")
+              : t("settings.runDiagnosis")}
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={async () => {
+              setDumpRunning(true);
+              setDumpOutput(null);
+              const output = await window.hermesAPI.runHermesDump();
+              setDumpOutput(output);
+              setDumpRunning(false);
+            }}
+            disabled={dumpRunning}
+          >
+            <Bug size={14} />
+            {dumpRunning ? t("settings.running") : t("settings.debugDump")}
+          </button>
+        </div>
+
+        {updateResult && (
+          <div
+            className={`settings-hermes-result ${updateResultType || "error"}`}
+          >
+            {updateResult}
+          </div>
+        )}
+        {doctorOutput && (
+          <pre className="settings-hermes-doctor">{doctorOutput}</pre>
+        )}
+        {dumpOutput && (
+          <pre className="settings-hermes-doctor">{dumpOutput}</pre>
+        )}
+      </RuntimeDistributionCard>
 
       {/* ── AgentEra Studio (this app) ────────────────────────── */}
       <section className="settings-card">

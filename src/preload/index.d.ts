@@ -47,6 +47,7 @@ import type {
   AgenteraStartupPreflightPublicResult,
   AgenteraUnboundProfilePublicState,
 } from "../shared/agentera-runtime-access";
+import type { RuntimeDistributionPublicState } from "../shared/agentera-runtime-distribution";
 
 interface ElectronAPI {
   process: {
@@ -83,6 +84,18 @@ interface AgenteraRuntimeAccessAPI {
   inspectCurrentConnection: () => Promise<AgenteraConnectionClaimPublicState>;
   bindCurrentConnection: () => Promise<AgenteraBoundConnectionPublicState>;
   switchToLocal: () => Promise<void>;
+}
+
+interface AgenteraRuntimeDistributionAPI {
+  getState: () => Promise<RuntimeDistributionPublicState>;
+  checkForUpdate: () => Promise<RuntimeDistributionPublicState>;
+  downloadConfirmed: () => Promise<RuntimeDistributionPublicState>;
+  cancelDownload: () => Promise<RuntimeDistributionPublicState>;
+  restartToApply: () => Promise<RuntimeDistributionPublicState>;
+  retryRepair: () => Promise<RuntimeDistributionPublicState>;
+  onStateChanged: (
+    callback: (state: RuntimeDistributionPublicState) => void,
+  ) => () => void;
 }
 
 interface InstallStatus {
@@ -1302,5 +1315,6 @@ declare global {
     hermesAPI: HermesAPI;
     agenteraAuth: AgenteraAuthAPI;
     agenteraRuntimeAccess: AgenteraRuntimeAccessAPI;
+    agenteraRuntimeDistribution: AgenteraRuntimeDistributionAPI;
   }
 }

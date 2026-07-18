@@ -11,6 +11,11 @@ import {
 import { extname } from "path";
 import { randomUUID } from "crypto";
 import type { AgenteraAuthController } from "../agentera-auth/controller";
+import type { RuntimeDistributionManager } from "../agentera-runtime-distribution/manager";
+import {
+  serializeRuntimeDistributionPublicState,
+  type RuntimeDistributionPublicState,
+} from "../../shared/agentera-runtime-distribution";
 import { readdir, readFile, stat } from "fs/promises";
 import {
   getActiveProfileNameSync,
@@ -432,7 +437,24 @@ export interface IpcContext {
   getAgenteraRuntimeOwner: () => AgenteraRuntimeOwner;
   agenteraProfileBindings: AgenteraProfileBindingStore;
   agenteraConnectionOwners: AgenteraConnectionOwnerStore;
+  runtimeDistribution: RuntimeDistributionManager | null;
 }
+
+const RUNTIME_DISTRIBUTION_UNAVAILABLE_STATE: RuntimeDistributionPublicState = {
+  phase: "repair-required",
+  currentVersion: null,
+  currentSourceCommit: null,
+  packagedSeedVersion: null,
+  availableVersion: null,
+  downloadSize: null,
+  downloadPercent: null,
+  lastCheckedAt: null,
+  lastErrorCode: "runtime_repair_required",
+  canCheck: false,
+  canDownload: false,
+  canCancel: false,
+  canRestart: false,
+};
 
 const APP_NAME =
   process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
@@ -688,6 +710,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     getAgenteraRuntimeOwner,
     agenteraProfileBindings,
     agenteraConnectionOwners,
+    runtimeDistribution,
   } = context;
   const directProfileTargetIndex: Readonly<Record<string, number>> = {
     "set-profile-avatar": 0,
@@ -763,6 +786,48 @@ export function registerIpcHandlers(context: IpcContext): void {
     }
     return agenteraAuth.openPortal(target);
   });
+
+  const runtimeState = async (
+    action?: (
+      manager: RuntimeDistributionManager,
+    ) =>
+      | RuntimeDistributionPublicState
+      | Promise<RuntimeDistributionPublicState>,
+  ): Promise<RuntimeDistributionPublicState> => {
+    if (runtimeDistribution === null) {
+      return serializeRuntimeDistributionPublicState(
+        RUNTIME_DISTRIBUTION_UNAVAILABLE_STATE,
+      );
+    }
+    const state = action
+      ? await action(runtimeDistribution)
+      : await runtimeDistribution.getState();
+    return serializeRuntimeDistributionPublicState(state);
+  };
+  runtimeDistribution?.subscribe((state) => {
+    const window = getMainWindow();
+    if (!window || window.isDestroyed()) return;
+    window.webContents.send(
+      "agentera-runtime-state-changed",
+      serializeRuntimeDistributionPublicState(state),
+    );
+  });
+  ipcMain.handle("agentera-runtime-get-state", () => runtimeState());
+  ipcMain.handle("agentera-runtime-check-update", () =>
+    runtimeState((manager) => manager.check()),
+  );
+  ipcMain.handle("agentera-runtime-download-confirmed", () =>
+    runtimeState((manager) => manager.downloadConfirmed()),
+  );
+  ipcMain.handle("agentera-runtime-cancel-download", () =>
+    runtimeState((manager) => manager.cancelDownload()),
+  );
+  ipcMain.handle("agentera-runtime-restart-apply", () =>
+    runtimeState((manager) => manager.restartToApply()),
+  );
+  ipcMain.handle("agentera-runtime-retry-repair", () =>
+    runtimeState((manager) => manager.retryRepair()),
+  );
 
   ipcMain.handle("agentera-install-file-probe", () => ({
     installed: probeAgenteraInstallFiles().installed,

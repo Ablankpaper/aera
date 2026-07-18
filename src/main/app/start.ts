@@ -37,6 +37,12 @@ import {
 } from "../agentera-connection-owner";
 import { createProductAccessGuard } from "../ipc/auth-guard";
 import { getActiveProfileNameSync, profileHome } from "../utils";
+import { createRuntimeBootstrapOptions } from "../agentera-runtime-distribution/bootstrap";
+import {
+  createRuntimeDistributionManager,
+  type RuntimeDistributionManager,
+} from "../agentera-runtime-distribution/manager";
+import { runPackagedSeedInstall } from "../installer";
 
 const APP_NAME =
   process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
@@ -127,15 +133,66 @@ export function startMainProcess(): void {
       }
     },
   });
+  let runtimeDistribution: RuntimeDistributionManager | null = null;
+  try {
+    const runtimeOptions = createRuntimeBootstrapOptions({
+      userDataPath: app.getPath("userData"),
+      resourcesPath: process.resourcesPath,
+      workingDirectory: process.cwd(),
+      desktopVersion: app.getVersion(),
+      platform: process.platform,
+      arch: process.arch,
+    });
+    runtimeDistribution = createRuntimeDistributionManager({
+      ...runtimeOptions,
+      activeRunCount: () => activeRuns.size,
+      stopRuntimeContext: stopActiveRuntimeContext,
+      relaunch: () => {
+        app.relaunch();
+        app.exit(0);
+      },
+      repair: async () => {
+        const result = await runPackagedSeedInstall((progress) => {
+          if (!mainWindow || mainWindow.isDestroyed()) return;
+          mainWindow.webContents.send("install-progress", progress);
+        });
+        return {
+          success: result.status === "installed",
+          runtimeVersion: result.runtimeVersion,
+          errorCode:
+            result.status === "installed" ? null : "runtime_install_failed",
+        };
+      },
+    });
+    void runtimeDistribution.initialize().catch(() => {
+      console.error("[AGENTERA_RUNTIME_MANAGER] initialization failed");
+    });
+  } catch {
+    console.error("[AGENTERA_RUNTIME_MANAGER] unavailable");
+  }
   const ownerSwitchCoordinator = createAgenteraOwnerSwitchCoordinator({
     stopRuntimeContext: stopActiveRuntimeContext,
   });
+  let runtimeUpdateCheckedUserId: string | null = null;
   const unsubscribeAgenteraAuth = agenteraAuth.subscribe((state) => {
     ownerSwitchCoordinator.transitionTo(
       state.status === "authenticated" || state.status === "offline"
         ? state.userId
         : null,
     );
+    if (
+      state.status === "authenticated" &&
+      state.cloudAvailable &&
+      runtimeDistribution !== null &&
+      runtimeUpdateCheckedUserId !== state.userId
+    ) {
+      runtimeUpdateCheckedUserId = state.userId;
+      void runtimeDistribution.check().catch(() => {
+        console.error("[AGENTERA_RUNTIME_UPDATE_CHECK] unavailable");
+      });
+    } else if (state.status !== "authenticated" && state.status !== "offline") {
+      runtimeUpdateCheckedUserId = null;
+    }
     if (!mainWindow || mainWindow.isDestroyed()) return;
     mainWindow.webContents.send("agentera-auth-state-changed", state);
   });
@@ -152,6 +209,7 @@ export function startMainProcess(): void {
     getAgenteraRuntimeOwner,
     agenteraProfileBindings,
     agenteraConnectionOwners,
+    runtimeDistribution,
   });
 
   setupUpdater({ getMainWindow: () => mainWindow });
