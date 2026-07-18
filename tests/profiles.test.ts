@@ -130,6 +130,22 @@ describe("listProfiles", () => {
     expect(profiles.find((p) => p.isDefault)).toBeDefined();
   });
 
+  it("filters unauthorized Profile ids before loading their rich metadata", async () => {
+    for (const id of ["allowed", "other-owner"]) {
+      const dir = join(PROFILES_DIR, id);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, "config.yaml"),
+        `models:\n  default: ${id}-model\n  provider: openai\n`,
+      );
+    }
+
+    const profiles = await listProfiles(new Set(["allowed"]));
+
+    expect(profiles.map((profile) => profile.id)).toEqual(["allowed"]);
+    expect(profiles[0].model).toBe("allowed-model");
+  });
+
   it("returns saved agent names while keeping profile ids internal", async () => {
     writeFileSync(
       join(TEST_HOME, "profile-meta.json"),

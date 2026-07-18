@@ -7,6 +7,7 @@ import {
   Palette,
   Plug,
   ShieldCheck,
+  UserRound,
   X,
 } from "lucide-react";
 import { useI18n } from "../useI18n";
@@ -20,8 +21,10 @@ import ConnectionPane from "./ConnectionPane";
 import DataPane from "./DataPane";
 import AboutPane from "./AboutPane";
 import LogsPane from "./LogsPane";
+import AgenteraAccountPane from "./AgenteraAccountPane";
 
 export type SettingsSection =
+  | "account"
   | "appearance"
   | "language"
   | "privacy"
@@ -39,6 +42,12 @@ const SETTINGS_NAV: ReadonlyArray<{
   labelKey: string;
   Icon: React.ComponentType<{ size?: number }>;
 }> = [
+  {
+    group: "general",
+    id: "account",
+    labelKey: "auth.account.settingsNav",
+    Icon: UserRound,
+  },
   {
     group: "general",
     id: "appearance",
@@ -90,7 +99,7 @@ function resolveSection(name?: string): SettingsSection {
   // Network merged into Connection — keep the old `/settings network` working.
   if (key === "network") return "connection";
   const match = SETTINGS_NAV.find((s) => s.id === key);
-  return match ? match.id : "appearance";
+  return match ? match.id : "account";
 }
 
 interface SettingsModalProps {
@@ -179,6 +188,7 @@ export default function SettingsModal({
 
         <div className="settings-modal-content">
           <SettingsDataContext.Provider value={data}>
+            {section === "account" && <AgenteraAccountPane />}
             {section === "appearance" && <AppearancePane />}
             {section === "language" && <LanguagePane />}
             {section === "privacy" && <PrivacyPane />}

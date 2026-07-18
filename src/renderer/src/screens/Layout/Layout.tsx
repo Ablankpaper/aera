@@ -32,6 +32,8 @@ import Schedules from "../Schedules/Schedules";
 import Kanban from "../Kanban/Kanban";
 import RemoteNotice from "../../components/RemoteNotice";
 import VerifyWarningBanner from "../../components/VerifyWarningBanner";
+import AgenteraAccountMenu from "../../components/AgenteraAccountMenu";
+import AgenteraOfflineBanner from "../../components/AgenteraOfflineBanner";
 import { useSettingsModal } from "../../components/settings/SettingsModalContext";
 import agentEraIcon from "../../assets/iconv2.png";
 import {
@@ -51,6 +53,7 @@ import {
 } from "../../assets/icons";
 import type { LucideIcon } from "lucide-react";
 import { useI18n } from "../../components/useI18n";
+import type { AgenteraAuthPublicState } from "../../../../shared/agentera-auth";
 
 type View =
   | "chat"
@@ -87,16 +90,21 @@ const SIDEBAR_COLLAPSED_KEY = "hermes.sidebar.collapsed";
 const SIDEBAR_SCROLLBAR_HIDE_MS = 700;
 
 interface LayoutProps {
+  authState: Extract<
+    AgenteraAuthPublicState,
+    { status: "authenticated" | "offline" }
+  >;
   verifyWarning?: boolean;
   onReinstall?: () => void;
   onDismissVerifyWarning?: () => void;
 }
 
 function Layout({
+  authState,
   verifyWarning,
   onReinstall,
   onDismissVerifyWarning,
-}: LayoutProps = {}): React.JSX.Element {
+}: LayoutProps): React.JSX.Element {
   const { t } = useI18n();
   const { openSettings } = useSettingsModal();
   const [view, setView] = useState<View>("chat");
@@ -823,6 +831,7 @@ function Layout({
               <SettingsIcon size={16} />
             </button>
           </div>
+          <AgenteraAccountMenu state={authState} />
           <ProfileSwitcher
             activeProfile={activeProfile}
             onSwitch={handleSelectProfile}
@@ -843,6 +852,7 @@ function Layout({
           onNew={handleNewChat}
           getAppearance={getAppearance}
         />
+        <AgenteraOfflineBanner state={authState} />
         {verifyWarning && onReinstall && onDismissVerifyWarning && (
           <VerifyWarningBanner
             onReinstall={onReinstall}

@@ -268,10 +268,23 @@ import installAr from "./locales/ar/install";
 import constantsAr from "./locales/ar/constants";
 import kanbanAr from "./locales/ar/kanban";
 import diagnoseAr from "./locales/ar/diagnose";
+import authEn from "./locales/en/auth";
+import authAr from "./locales/ar/auth";
+import authEs from "./locales/es/auth";
+import authHe from "./locales/he/auth";
+import authId from "./locales/id/auth";
+import authJa from "./locales/ja/auth";
+import authPl from "./locales/pl/auth";
+import authPt from "./locales/pt-BR/auth";
+import authPtPt from "./locales/pt-PT/auth";
+import authTr from "./locales/tr/auth";
+import authZh from "./locales/zh-CN/auth";
+import authZhTw from "./locales/zh-TW/auth";
 
 export const resources = {
   en: {
     translation: {
+      auth: authEn,
       common: commonEn,
       navigation: navigationEn,
       discover: discoverEn,
@@ -299,6 +312,7 @@ export const resources = {
   },
   he: {
     translation: {
+      auth: authHe,
       common: commonHe,
       navigation: navigationHe,
       discover: discoverHe,
@@ -326,6 +340,7 @@ export const resources = {
   },
   pl: {
     translation: {
+      auth: authPl,
       common: commonPl,
       navigation: navigationPl,
       welcome: welcomePl,
@@ -351,6 +366,7 @@ export const resources = {
   },
   es: {
     translation: {
+      auth: authEs,
       common: commonEs,
       navigation: navigationEs,
       welcome: welcomeEs,
@@ -377,6 +393,7 @@ export const resources = {
   },
   id: {
     translation: {
+      auth: authId,
       common: commonId,
       navigation: navigationId,
       welcome: welcomeId,
@@ -401,6 +418,7 @@ export const resources = {
   },
   "zh-CN": {
     translation: {
+      auth: authZh,
       common: commonZh,
       navigation: navigationZh,
       welcome: welcomeZh,
@@ -426,6 +444,7 @@ export const resources = {
   },
   "zh-TW": {
     translation: {
+      auth: authZhTw,
       common: commonZhTw,
       navigation: navigationZhTw,
       welcome: welcomeZhTw,
@@ -451,6 +470,7 @@ export const resources = {
   },
   "pt-BR": {
     translation: {
+      auth: authPt,
       common: commonPt,
       navigation: navigationPt,
       welcome: welcomePt,
@@ -475,6 +495,7 @@ export const resources = {
   },
   "pt-PT": {
     translation: {
+      auth: authPtPt,
       common: commonPtPt,
       navigation: navigationPtPt,
       welcome: welcomePtPt,
@@ -501,6 +522,7 @@ export const resources = {
   },
   ja: {
     translation: {
+      auth: authJa,
       common: commonJa,
       navigation: navigationJa,
       welcome: welcomeJa,
@@ -525,6 +547,7 @@ export const resources = {
   },
   tr: {
     translation: {
+      auth: authTr,
       common: commonTr,
       navigation: navigationTr,
       discover: discoverTr,
@@ -552,6 +575,7 @@ export const resources = {
   },
   ar: {
     translation: {
+      auth: authAr,
       common: commonAr,
       navigation: navigationAr,
       discover: discoverAr,

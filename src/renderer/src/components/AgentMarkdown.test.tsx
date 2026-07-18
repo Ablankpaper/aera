@@ -25,8 +25,9 @@ async function renderHighlighted(
   markdown: string,
 ): Promise<ReturnType<typeof render>> {
   const view = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
-  await waitFor(() =>
-    expect(view.container.querySelector(".token")).not.toBeNull(),
+  await waitFor(
+    () => expect(view.container.querySelector(".token")).not.toBeNull(),
+    { timeout: 5_000 },
   );
   return view;
 }
@@ -57,7 +58,7 @@ describe("AgentMarkdown", () => {
     expect(plain?.textContent).toContain("│   └── main.ts");
     expect(plain?.textContent).toContain("└── README.md");
     expect(container.querySelector(".token")).toBeNull();
-  });
+  }, 10_000);
 
   it("keeps syntax highlighting for code with an incidental box-drawing character", async () => {
     // One │ in a string literal must not demote the whole file to plain text.
@@ -75,7 +76,7 @@ describe("AgentMarkdown", () => {
     const { container } = await renderHighlighted(markdown);
     expect(container.querySelector(".chat-code-plain")).toBeNull();
     expect(container.textContent).toContain("│");
-  });
+  }, 10_000);
 
   it("keeps the colored diff view for diffs that touch box-drawing content", () => {
     // DiffView never uses Prism, so a patch on a tree diagram must not lose

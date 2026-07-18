@@ -3,4 +3,6 @@
 interface ImportMetaEnv {
   readonly MAIN_VITE_HERMES_API_URL?: string;
   readonly MAIN_VITE_HERMES_API_KEY?: string;
+  readonly MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL?: string;
+  readonly MAIN_VITE_AGENTERA_RECHARGE_PUBLIC_URL?: string;
 }

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const read = (path: string): string => readFileSync(path, "utf8");
@@ -59,8 +59,8 @@ describe("AgentEra Studio visible branding", () => {
 
   // @lat: [[agentera-branding#Localization#All supported locales]]
   it("uses AgentEra names in locale product copy", () => {
-    const commonFiles = localeFiles.filter((path) =>
-      path.endsWith("/common.ts"),
+    const commonFiles = localeFiles.filter(
+      (path) => basename(path) === "common.ts",
     );
     expect(commonFiles).toHaveLength(12);
     for (const path of commonFiles) {

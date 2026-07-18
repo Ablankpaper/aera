@@ -6,9 +6,13 @@
   "author": "AgentEra",
   "homepage": "https://github.com/bignormal/aera",
   "scripts": {
+    "generate:agentera-cloud": "node scripts/generate-agentera-cloud-types.mjs",
+    "check:agentera-cloud-contract": "node scripts/check-agentera-cloud-contract.mjs",
+    "smoke:agentera-auth": "node scripts/agentera-auth-smoke.mjs",
     "format": "prettier --write .",
     "lint": "eslint --cache .",
     "test": "vitest run",
+    "test:e2e:auth": "playwright test tests/e2e/agentera-auth.e2e.ts",
     "test:coverage": "vitest run --coverage",
     "test:sandbox": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/hermes-sandbox.ps1 test",
     "test:live-visual": "node scripts/drive-live-regression-suite.js",
@@ -38,7 +42,6 @@
     "@react-three/fiber": "^9.5.0",
     "@types/highlight.js": "^9.12.4",
     "@types/react-syntax-highlighter": "^15.5.13",
-    "@wesbos/code-icons": "^1.2.4",
     "better-sqlite3": "^12.8.0",
     "date-fns": "^4.4.0",
     "electron-updater": "^6.3.9",
@@ -72,6 +75,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.183.1",
+    "@wesbos/code-icons": "^1.2.4",
     "@vitejs/plugin-react": "^5.1.1",
     "@vitest/coverage-v8": "^4.1.8",
     "electron": "^39.2.6",
@@ -83,13 +87,15 @@
     "eslint-plugin-react-refresh": "^0.4.24",
     "fast-check": "^4.8.0",
     "jsdom": "^26.1.0",
+    "openapi-typescript": "^7.13.0",
     "playwright": "^1.60.0",
     "prettier": "^3.7.4",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "tailwindcss": "^4.2.2",
     "typescript": "^5.9.3",
-    "vite": "^7.2.6",
-    "vitest": "^4.1.4"
+    "vite": "7.3.6",
+    "vitest": "^4.1.4",
+    "yaml": "^2.9.0"
   }
 }

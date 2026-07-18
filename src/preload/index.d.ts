@@ -33,6 +33,20 @@ import type {
 } from "../shared/messaging-platforms";
 import type { ChatToolEvent } from "../shared/chat-stream";
 import type { GpuPreferenceMode, GpuStatus } from "../shared/gpu";
+import type {
+  AgenteraAuthPublicState,
+  AgenteraPortalTarget,
+} from "../shared/agentera-auth";
+import type {
+  AgenteraBoundConnectionPublicState,
+  AgenteraBoundProfilePublicState,
+  AgenteraConnectionClaimPublicState,
+  AgenteraFreshProfilePublicState,
+  AgenteraInstallFileProbe,
+  AgenteraProfileClaimPublicState,
+  AgenteraStartupPreflightPublicResult,
+  AgenteraUnboundProfilePublicState,
+} from "../shared/agentera-runtime-access";
 
 interface ElectronAPI {
   process: {
@@ -43,6 +57,32 @@ interface ElectronAPI {
       node: string;
     };
   };
+}
+
+interface AgenteraAuthAPI {
+  getState: () => Promise<AgenteraAuthPublicState>;
+  startLogin: (options?: { forceAccountSelection?: boolean }) => Promise<void>;
+  cancelLogin: () => Promise<void>;
+  retryOnline: () => Promise<AgenteraAuthPublicState>;
+  logout: () => Promise<void>;
+  openPortal: (target: AgenteraPortalTarget) => Promise<void>;
+  onStateChanged: (
+    callback: (state: AgenteraAuthPublicState) => void,
+  ) => () => void;
+}
+
+interface AgenteraRuntimeAccessAPI {
+  probeInstallFiles: () => Promise<AgenteraInstallFileProbe>;
+  runStartupPreflight: () => Promise<AgenteraStartupPreflightPublicResult>;
+  inspectActiveProfile: () => Promise<AgenteraProfileClaimPublicState>;
+  bindActiveProfile: () => Promise<AgenteraBoundProfilePublicState>;
+  createFreshProfile: (
+    name: string,
+  ) => Promise<AgenteraFreshProfilePublicState>;
+  listUnboundProfiles: () => Promise<AgenteraUnboundProfilePublicState[]>;
+  inspectCurrentConnection: () => Promise<AgenteraConnectionClaimPublicState>;
+  bindCurrentConnection: () => Promise<AgenteraBoundConnectionPublicState>;
+  switchToLocal: () => Promise<void>;
 }
 
 interface InstallStatus {
@@ -339,6 +379,7 @@ interface HermesAPI {
   isRemoteMode: () => Promise<boolean>;
   isRemoteOnlyMode: () => Promise<boolean>;
   getConnectionConfig: () => Promise<{
+    connectionContextId: string;
     mode: "local" | "remote" | "ssh";
     remoteUrl: string;
     remoteAuthMode: "auto" | "token" | "oauth";
@@ -1253,5 +1294,7 @@ declare global {
   interface Window {
     electron: ElectronAPI;
     hermesAPI: HermesAPI;
+    agenteraAuth: AgenteraAuthAPI;
+    agenteraRuntimeAccess: AgenteraRuntimeAccessAPI;
   }
 }

@@ -78,6 +78,7 @@ function testConnection(
   fields: Partial<ConnectionConfig> = {},
 ): ConnectionConfig {
   return {
+    connectionContextId: "11111111-1111-4111-8111-111111111111",
     mode: "local",
     remoteUrl: "",
     apiKey: "",

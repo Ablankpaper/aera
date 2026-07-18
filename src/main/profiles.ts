@@ -59,6 +59,12 @@ export interface CreateProfileResult {
   id?: string;
 }
 
+export interface LocalProfileLocation {
+  id: string;
+  path: string;
+  isActive: boolean;
+}
+
 const MAX_PROFILE_NAME_LENGTH = 80;
 
 function normalizeAgentName(name: string): string {
@@ -173,48 +179,53 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
-export async function listProfiles(): Promise<ProfileInfo[]> {
+export async function listProfiles(
+  allowedProfileIds?: ReadonlySet<string>,
+): Promise<ProfileInfo[]> {
   const activeName = await getActiveProfileName();
   const profiles: ProfileInfo[] = [];
 
   // Default profile is HERMES_HOME itself
-  const [
-    defaultConfig,
-    defaultHasEnv,
-    defaultHasSoul,
-    defaultSkills,
-    defaultGw,
-    defaultMeta,
-  ] = await Promise.all([
-    readProfileConfig(HERMES_HOME),
-    fileExists(join(HERMES_HOME, ".env")),
-    fileExists(join(HERMES_HOME, "SOUL.md")),
-    countSkills(HERMES_HOME),
-    isGatewayRunning(HERMES_HOME),
-    readProfileMeta("default"),
-  ]);
+  if (!allowedProfileIds || allowedProfileIds.has("default")) {
+    const [
+      defaultConfig,
+      defaultHasEnv,
+      defaultHasSoul,
+      defaultSkills,
+      defaultGw,
+      defaultMeta,
+    ] = await Promise.all([
+      readProfileConfig(HERMES_HOME),
+      fileExists(join(HERMES_HOME, ".env")),
+      fileExists(join(HERMES_HOME, "SOUL.md")),
+      countSkills(HERMES_HOME),
+      isGatewayRunning(HERMES_HOME),
+      readProfileMeta("default"),
+    ]);
 
-  profiles.push({
-    id: "default",
-    name: defaultMeta.name || "default",
-    path: HERMES_HOME,
-    isDefault: true,
-    isActive: activeName === "default",
-    model: defaultConfig.model,
-    provider: defaultConfig.provider,
-    hasEnv: defaultHasEnv,
-    hasSoul: defaultHasSoul,
-    skillCount: defaultSkills,
-    gatewayRunning: defaultGw,
-    color: defaultMeta.color || defaultColorForName("default"),
-    avatar: defaultMeta.avatar || null,
-  });
+    profiles.push({
+      id: "default",
+      name: defaultMeta.name || "default",
+      path: HERMES_HOME,
+      isDefault: true,
+      isActive: activeName === "default",
+      model: defaultConfig.model,
+      provider: defaultConfig.provider,
+      hasEnv: defaultHasEnv,
+      hasSoul: defaultHasSoul,
+      skillCount: defaultSkills,
+      gatewayRunning: defaultGw,
+      color: defaultMeta.color || defaultColorForName("default"),
+      avatar: defaultMeta.avatar || null,
+    });
+  }
 
   // Named profiles under ~/.hermes/profiles/
   if (existsSync(PROFILES_DIR)) {
     try {
       const dirs = await fs.readdir(PROFILES_DIR);
       const profilePromises = dirs.map(async (name) => {
+        if (allowedProfileIds && !allowedProfileIds.has(name)) return null;
         // Skip dotfiles like .DS_Store so they don't get mistaken for profiles.
         if (name.startsWith(".")) return null;
         if (!isValidNamedProfileName(name)) return null;
@@ -263,6 +274,41 @@ export async function listProfiles(): Promise<ProfileInfo[]> {
     }
   }
 
+  return profiles;
+}
+
+/**
+ * Metadata-only inventory for AgentEra ownership claims. It intentionally does
+ * not open Profile config, Memory, USER, sessions, skills, or Curator files.
+ */
+export async function listLocalProfileLocations(): Promise<
+  LocalProfileLocation[]
+> {
+  const activeName = await getActiveProfileName();
+  const profiles: LocalProfileLocation[] = [
+    {
+      id: "default",
+      path: HERMES_HOME,
+      isActive: activeName === "default",
+    },
+  ];
+  if (!existsSync(PROFILES_DIR)) return profiles;
+  let names: string[];
+  try {
+    names = await fs.readdir(PROFILES_DIR);
+  } catch {
+    return profiles;
+  }
+  for (const id of names.sort()) {
+    if (id.startsWith(".") || !isValidNamedProfileName(id)) continue;
+    const path = join(PROFILES_DIR, id);
+    try {
+      if (!(await fs.stat(path)).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    profiles.push({ id, path, isActive: activeName === id });
+  }
   return profiles;
 }
 

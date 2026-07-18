@@ -5,6 +5,7 @@ import { join } from "path";
 import {
   hardenAttachedWebContents,
   hardenWebviewPreferences,
+  isAllowedAgenteraAuthExternalUrl,
   isAllowedAppNavigationUrl,
   isAllowedExternalUrl,
   isAllowedWebviewUrl,
@@ -29,15 +30,13 @@ describe("Electron main process hardening", () => {
 
   it("keeps a production diagnostics path for renderer DevTools", () => {
     expect(mainSrc).toContain("HERMES_OPEN_DEVTOOLS");
-    expect(mainSrc).toContain("openDevTools({ mode: \"detach\" })");
+    expect(mainSrc).toContain('openDevTools({ mode: "detach" })');
     expect(menuSrc).toContain("Toggle Developer Tools");
     expect(menuSrc).toContain("toggleDevTools()");
   });
 
   it("loads the packaged renderer next to the bundled main output", () => {
-    expect(mainSrc).toContain(
-      'join(__dirname, "../renderer/index.html")',
-    );
+    expect(mainSrc).toContain('join(__dirname, "../renderer/index.html")');
     expect(mainSrc).not.toContain(
       'join(__dirname, "../../renderer/index.html")',
     );
@@ -112,6 +111,51 @@ describe("Electron external URL policy", () => {
     expect(isAllowedExternalUrl("file:///C:/Users/me/token.txt")).toBe(false);
     expect(isAllowedExternalUrl("/relative/path")).toBe(false);
     expect(isAllowedExternalUrl({ href: "https://example.com" })).toBe(false);
+  });
+
+  it("allows only the configured AgentEra OAuth endpoint for product sign-in", () => {
+    const origin = "https://accounts.agentera.example";
+    const allowed = new URL("/oauth/authorize", origin);
+    allowed.search = new URLSearchParams({
+      client_id: "agentera-studio",
+      redirect_uri: "http://127.0.0.1:43123/agentera/oauth/callback",
+      code_challenge: "a".repeat(43),
+      code_challenge_method: "S256",
+      state: "b".repeat(43),
+      installation_id: "11111111-1111-4111-8111-111111111111",
+      device_public_key: "c".repeat(43),
+      device_name: "AgentEra Test Mac",
+      platform: "darwin",
+      app_version: "0.7.3",
+      prompt: "select_account",
+    }).toString();
+
+    expect(isAllowedAgenteraAuthExternalUrl(allowed.href, origin)).toBe(true);
+    expect(
+      isAllowedAgenteraAuthExternalUrl(
+        allowed.href.replace(origin, "https://evil.example"),
+        origin,
+      ),
+    ).toBe(false);
+    expect(
+      isAllowedAgenteraAuthExternalUrl(
+        allowed.href.replace("/oauth/authorize", "/account"),
+        origin,
+      ),
+    ).toBe(false);
+    const withToken = new URL(allowed);
+    withToken.searchParams.set("access_token", "must-not-appear");
+    expect(isAllowedAgenteraAuthExternalUrl(withToken.href, origin)).toBe(
+      false,
+    );
+    const badRedirect = new URL(allowed);
+    badRedirect.searchParams.set(
+      "redirect_uri",
+      "http://localhost:43123/agentera/oauth/callback",
+    );
+    expect(isAllowedAgenteraAuthExternalUrl(badRedirect.href, origin)).toBe(
+      false,
+    );
   });
 });
 

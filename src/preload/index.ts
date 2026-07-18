@@ -27,6 +27,20 @@ import type {
 } from "../shared/account";
 import type { AgentSyncResult, AgentSyncStatus } from "../shared/agent-sync";
 import type { GpuPreferenceMode, GpuStatus } from "../shared/gpu";
+import type {
+  AgenteraAuthPublicState,
+  AgenteraPortalTarget,
+} from "../shared/agentera-auth";
+import type {
+  AgenteraBoundConnectionPublicState,
+  AgenteraBoundProfilePublicState,
+  AgenteraConnectionClaimPublicState,
+  AgenteraFreshProfilePublicState,
+  AgenteraInstallFileProbe,
+  AgenteraProfileClaimPublicState,
+  AgenteraStartupPreflightPublicResult,
+  AgenteraUnboundProfilePublicState,
+} from "../shared/agentera-runtime-access";
 
 /**
  * Mirror of the renderer-side `CredentialPoolEntry` ambient type
@@ -311,6 +325,7 @@ const hermesAPI = {
   isRemoteOnlyMode: (): Promise<boolean> =>
     ipcRenderer.invoke("is-remote-only-mode"),
   getConnectionConfig: (): Promise<{
+    connectionContextId: string;
     mode: "local" | "remote" | "ssh";
     remoteUrl: string;
     remoteAuthMode: "auto" | "token" | "oauth";
@@ -1628,10 +1643,63 @@ const hermesAPI = {
     ipcRenderer.invoke("read-logs", logFile, lines),
 };
 
+const agenteraAuthAPI = {
+  getState: (): Promise<AgenteraAuthPublicState> =>
+    ipcRenderer.invoke("agentera-auth-get-state"),
+  startLogin: (options?: { forceAccountSelection?: boolean }): Promise<void> =>
+    ipcRenderer.invoke("agentera-auth-start-login", options),
+  cancelLogin: (): Promise<void> =>
+    ipcRenderer.invoke("agentera-auth-cancel-login"),
+  retryOnline: (): Promise<AgenteraAuthPublicState> =>
+    ipcRenderer.invoke("agentera-auth-retry-online"),
+  logout: (): Promise<void> => ipcRenderer.invoke("agentera-auth-logout"),
+  openPortal: (target: AgenteraPortalTarget): Promise<void> =>
+    ipcRenderer.invoke("agentera-auth-open-portal", target),
+  onStateChanged: (
+    callback: (state: AgenteraAuthPublicState) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      state: AgenteraAuthPublicState,
+    ): void => callback(state);
+    ipcRenderer.on("agentera-auth-state-changed", handler);
+    return () =>
+      ipcRenderer.removeListener("agentera-auth-state-changed", handler);
+  },
+};
+
+const agenteraRuntimeAccessAPI = {
+  probeInstallFiles: (): Promise<AgenteraInstallFileProbe> =>
+    ipcRenderer.invoke("agentera-install-file-probe"),
+  runStartupPreflight: (): Promise<AgenteraStartupPreflightPublicResult> =>
+    ipcRenderer.invoke("agentera-startup-preflight"),
+  inspectActiveProfile: (): Promise<AgenteraProfileClaimPublicState> =>
+    ipcRenderer.invoke("agentera-profile-inspect-active"),
+  bindActiveProfile: (): Promise<AgenteraBoundProfilePublicState> =>
+    ipcRenderer.invoke("agentera-profile-bind-active"),
+  createFreshProfile: (
+    name: string,
+  ): Promise<AgenteraFreshProfilePublicState> =>
+    ipcRenderer.invoke("agentera-profile-create-fresh", name),
+  listUnboundProfiles: (): Promise<AgenteraUnboundProfilePublicState[]> =>
+    ipcRenderer.invoke("agentera-profile-list-unbound"),
+  inspectCurrentConnection: (): Promise<AgenteraConnectionClaimPublicState> =>
+    ipcRenderer.invoke("agentera-connection-inspect-current"),
+  bindCurrentConnection: (): Promise<AgenteraBoundConnectionPublicState> =>
+    ipcRenderer.invoke("agentera-connection-bind-current"),
+  switchToLocal: (): Promise<void> =>
+    ipcRenderer.invoke("agentera-switch-to-local"),
+};
+
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld("electron", electronAPI);
     contextBridge.exposeInMainWorld("hermesAPI", hermesAPI);
+    contextBridge.exposeInMainWorld("agenteraAuth", agenteraAuthAPI);
+    contextBridge.exposeInMainWorld(
+      "agenteraRuntimeAccess",
+      agenteraRuntimeAccessAPI,
+    );
   } catch (error) {
     console.error(error);
   }
@@ -1640,4 +1708,8 @@ if (process.contextIsolated) {
   window.electron = electronAPI;
   // @ts-ignore (define in dts)
   window.hermesAPI = hermesAPI;
+  // @ts-ignore (define in dts)
+  window.agenteraAuth = agenteraAuthAPI;
+  // @ts-ignore (define in dts)
+  window.agenteraRuntimeAccess = agenteraRuntimeAccessAPI;
 }

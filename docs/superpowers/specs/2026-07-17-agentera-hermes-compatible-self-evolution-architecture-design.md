@@ -252,6 +252,8 @@ A failed gate blocks packaging and release. AgentEra branding, account, policy, 
 
 This architecture is delivered through independently testable projects rather than one cross-repository rewrite.
 
+The project numbers below describe architecture boundaries, not an irreversible calendar order. After Project 1, the approved product roadmap advances Project 3 authentication before Project 2 Agent distribution. This is permitted only because the authentication delivery establishes identity, devices, personal space, offline entitlement, and local Profile binding without enabling official Agent installation, cloud Memory synchronization, or cross-owner publication. The authentication contract is specified in `docs/superpowers/specs/2026-07-17-agentera-app-authentication-design.md`.
+
 ### Project 1: compatibility foundation and legacy sync containment
 
 Create the compatibility test harness, record the Runtime/Profile mapping contract, disable legacy Memory synchronization, and ensure no current AgentEra surface overwrites Hermes adaptive state.
@@ -274,7 +276,7 @@ Add membership, role policy, read-only shared assets, organization audit, and cr
 
 Cross-device private adaptive-state migration, end-to-end encrypted backup, and automatic content donation remain later standalone projects.
 
-The implementation plan immediately following this design covers Project 1 only. Each later project requires its own scoped plan and review gate after the compatibility foundation is proven.
+The implementation plan immediately following this design covers Project 1 only. After that foundation is proven, authentication may be delivered next under its dedicated specification; every remaining project still requires its own scoped plan and review gate.
 
 ## Testing Strategy
 

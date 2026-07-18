@@ -1,22 +1,86 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster } from "react-hot-toast";
-import { ThemeProvider } from "./components/ThemeProvider";
+import type { AgenteraAuthPublicState } from "../../shared/agentera-auth";
+import type {
+  AgenteraConnectionClaimPublicState,
+  AgenteraPostAuthTarget,
+  AgenteraProfileClaimPublicState,
+  AgenteraStartupPreflightPublicResult,
+} from "../../shared/agentera-runtime-access";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { FontProvider } from "./components/FontProvider";
 import { ProfileModalProvider } from "./components/profile/ProfileModalProvider";
 import { SettingsModalProvider } from "./components/settings/SettingsModalProvider";
-import ErrorBoundary from "./components/ErrorBoundary";
-import Welcome from "./screens/Welcome/Welcome";
+import { ThemeProvider } from "./components/ThemeProvider";
+import AuthGate from "./screens/AuthGate/AuthGate";
 import Install from "./screens/Install/Install";
-import Setup from "./screens/Setup/Setup";
 import Layout from "./screens/Layout/Layout";
+import ProfileClaim from "./screens/ProfileClaim/ProfileClaim";
+import Setup from "./screens/Setup/Setup";
 import SplashScreen from "./screens/SplashScreen/SplashScreen";
+import Welcome from "./screens/Welcome/Welcome";
 import { captureScreenView } from "./utils/analytics";
 
-type Screen = "splash" | "welcome" | "installing" | "setup" | "main";
+type Screen =
+  | "splash"
+  | "auth"
+  | "profile-claim"
+  | "welcome"
+  | "installing"
+  | "setup"
+  | "main";
 
-// Minimum time the splash stays visible so the background video plays
-// through. Gateway / config checks happen during this window.
+type OwnershipClaim =
+  | AgenteraProfileClaimPublicState
+  | AgenteraConnectionClaimPublicState;
+type AuthorizedAuthState = Extract<
+  AgenteraAuthPublicState,
+  { status: "authenticated" | "offline" }
+>;
+
 const SPLASH_MIN_MS = 3000;
+
+function hasProductAccess(
+  state: AgenteraAuthPublicState,
+): state is AuthorizedAuthState {
+  return state.status === "authenticated" || state.status === "offline";
+}
+
+function isSameAuthorizedSession(
+  previous: AgenteraAuthPublicState,
+  next: AgenteraAuthPublicState,
+): boolean {
+  return (
+    hasProductAccess(previous) &&
+    hasProductAccess(next) &&
+    previous.userId === next.userId &&
+    previous.personalSpaceId === next.personalSpaceId &&
+    previous.deviceId === next.deviceId
+  );
+}
+
+function warmRuntimeAfterOwnership(
+  preflight: AgenteraStartupPreflightPublicResult,
+): void {
+  if (preflight.postAuthTarget !== "main") return;
+  if (preflight.connectionMode === "ssh") {
+    void window.hermesAPI.startSshTunnel().catch(() => {
+      console.warn("SSH tunnel did not start after ownership check.");
+    });
+    return;
+  }
+  if (preflight.connectionMode !== "local") return;
+
+  // These calls may read active Runtime configuration, so they are warmed only
+  // after the main process has confirmed the current owner's Profile binding.
+  void Promise.race([
+    Promise.all([
+      window.hermesAPI.getConfigHealth().catch(() => null),
+      window.hermesAPI.gatewayStatus().catch(() => null),
+    ]),
+    new Promise<void>((resolve) => setTimeout(resolve, 800)),
+  ]);
+}
 
 function App(): React.JSX.Element {
   const [screen, setScreen] = useState<Screen>("splash");
@@ -24,136 +88,294 @@ function App(): React.JSX.Element {
   const [connectionMode, setConnectionMode] = useState<
     "local" | "remote" | "ssh"
   >("local");
-  // Soft warning: install files exist but the deep `verifyInstall` probe
-  // failed (e.g. slow Python startup, restricted network). We surface this
-  // as a dismissible banner instead of bouncing the user back to Welcome,
-  // which previously trapped restricted-network users in a reinstall
-  // loop on every launch (#130).
-  const [verifyWarning, setVerifyWarning] = useState(false);
-  const [splashStatus, setSplashStatus] = useState<string | undefined>(
-    undefined,
+  const [postAuthTarget, setPostAuthTarget] =
+    useState<AgenteraPostAuthTarget>("welcome");
+  const [authState, setAuthState] = useState<AgenteraAuthPublicState>({
+    status: "checking",
+  });
+  const [ownershipClaim, setOwnershipClaim] = useState<OwnershipClaim | null>(
+    null,
   );
+  const [ownershipInspectionError, setOwnershipInspectionError] =
+    useState(false);
+  const [runtimeAccessReady, setRuntimeAccessReady] = useState(false);
+  const [verifyWarning, setVerifyWarning] = useState(false);
+  const [splashStatus, setSplashStatus] = useState<string | undefined>();
   const isMac = window.electron?.process?.platform === "darwin";
-  // Bumped on every runInstallCheck so a superseded run (e.g. the user hit
-  // "Switch to local mode" while an SSH tunnel attempt was still in flight)
-  // can't clobber the newer run's screen transition.
+
   const runIdRef = useRef(0);
+  const routeIdRef = useRef(0);
+  const preflightRef = useRef<AgenteraStartupPreflightPublicResult | null>(
+    null,
+  );
+  const authStateRef = useRef<AgenteraAuthPublicState>(authState);
+  const pendingSwitchToLocalRef = useRef(false);
+  const forceAccountSelectionRef = useRef(false);
+  const visibleScreen: Screen =
+    screen !== "splash" && !hasProductAccess(authState)
+      ? "auth"
+      : (screen === "setup" || screen === "main") && !runtimeAccessReady
+        ? "profile-claim"
+        : screen;
 
-  const runInstallCheck = useCallback(async () => {
-    const myRun = ++runIdRef.current;
-    const startedAt = Date.now();
-    let next: Screen = "welcome";
-    const error: string | null = null;
-    let isRemote = false;
+  const routeAfterAuthentication = useCallback(
+    async (
+      state: AgenteraAuthPublicState,
+      initialPreflight: AgenteraStartupPreflightPublicResult,
+    ): Promise<void> => {
+      const routeId = ++routeIdRef.current;
+      authStateRef.current = state;
+      setAuthState(state);
+      setOwnershipClaim(null);
+      setOwnershipInspectionError(false);
+      setRuntimeAccessReady(false);
 
-    try {
-      setSplashStatus("Checking connection…");
-      const conn = await window.hermesAPI.getConnectionConfig();
-      isRemote = conn.mode === "remote" || conn.mode === "ssh";
-      setConnectionMode(conn.mode);
+      if (!hasProductAccess(state)) {
+        setScreen("auth");
+        return;
+      }
 
-      if (conn.mode === "ssh" && conn.ssh) {
-        setSplashStatus("Starting SSH tunnel…");
-        try {
-          await window.hermesAPI.startSshTunnel();
-        } catch (tunnelErr) {
-          console.warn("SSH tunnel failed to start on launch:", tunnelErr);
-        }
-        next = "main";
-      } else if (conn.mode === "remote" && conn.remoteUrl) {
-        setSplashStatus("Testing remote connection…");
-        const ok = await window.hermesAPI.testRemoteConnection(conn.remoteUrl);
-        if (ok) {
-          next = "main";
-        } else {
-          console.warn(
-            `Cannot reach remote AgentEra Runtime at ${conn.remoteUrl}.`,
-          );
-          next = "main";
-        }
-      } else {
-        setSplashStatus("Checking local install…");
-        const status = await window.hermesAPI.checkInstall();
-        if (!status.installed) {
-          next = "welcome";
-        } else if (!status.hasApiKey) {
-          next = "setup";
-        } else {
-          next = "main";
-        }
-
-        // Warm config-health and gateway status in the background while the
-        // splash is still visible so the first render is snappy. Cap at 800ms
-        // so it never pushes us past the 3s minimum.
-        if (next === "main") {
-          setSplashStatus("Checking configuration…");
-          await Promise.race([
-            Promise.all([
-              window.hermesAPI
-                .getConfigHealth()
-                .catch(() => null)
-                .then(() => undefined),
-              window.hermesAPI
-                .gatewayStatus()
-                .catch(() => null)
-                .then(() => undefined),
-            ]),
-            new Promise<void>((r) => setTimeout(r, 800)),
-          ]);
+      let preflight = initialPreflight;
+      if (pendingSwitchToLocalRef.current) {
+        pendingSwitchToLocalRef.current = false;
+        if (preflight.connectionMode !== "local") {
+          try {
+            await window.agenteraRuntimeAccess.switchToLocal();
+            preflight =
+              await window.agenteraRuntimeAccess.runStartupPreflight();
+          } catch {
+            // Keep the authenticated user on the existing connection. The
+            // ownership gate below still prevents mounting somebody else's
+            // context, and the splash action can be retried on the next pass.
+          }
         }
       }
+      if (routeId !== routeIdRef.current) return;
+
+      preflightRef.current = preflight;
+      setConnectionMode(preflight.connectionMode);
+      setPostAuthTarget(preflight.postAuthTarget);
+      setVerifyWarning(preflight.verifyWarning);
+
+      if (preflight.postAuthTarget === "welcome") {
+        setScreen("welcome");
+        return;
+      }
+
+      setScreen("profile-claim");
+      try {
+        const claim =
+          preflight.connectionMode === "local"
+            ? await window.agenteraRuntimeAccess.inspectActiveProfile()
+            : await window.agenteraRuntimeAccess.inspectCurrentConnection();
+        if (routeId !== routeIdRef.current) return;
+        if (claim.status === "owned" && claim.isCurrentOwner) {
+          warmRuntimeAfterOwnership(preflight);
+          setRuntimeAccessReady(true);
+          setScreen(preflight.postAuthTarget);
+          return;
+        }
+        setOwnershipClaim(claim);
+      } catch {
+        if (routeId !== routeIdRef.current) return;
+        setOwnershipInspectionError(true);
+      }
+    },
+    [],
+  );
+
+  const runInstallCheck = useCallback(async (): Promise<void> => {
+    const myRun = ++runIdRef.current;
+    ++routeIdRef.current;
+    preflightRef.current = null;
+    const startedAt = Date.now();
+    setSplashStatus("Checking connection…");
+
+    let preflight: AgenteraStartupPreflightPublicResult = {
+      connectionMode: "local",
+      postAuthTarget: "welcome",
+      verifyWarning: false,
+    };
+    let nextAuthState: AgenteraAuthPublicState = {
+      status: "unauthenticated",
+      reason: "sign_in_required",
+    };
+
+    try {
+      preflight = await window.agenteraRuntimeAccess.runStartupPreflight();
+      if (myRun !== runIdRef.current) return;
+      setConnectionMode(preflight.connectionMode);
+      setSplashStatus(
+        preflight.connectionMode === "local"
+          ? "Checking local install…"
+          : preflight.connectionMode === "ssh"
+            ? "Checking SSH connection…"
+            : "Checking remote connection…",
+      );
     } catch {
-      next = "welcome";
+      // A failed readiness probe must not bypass product authentication. The
+      // safe fallback is the authenticated welcome/install path.
     }
 
-    // Abandoned by a newer run (the user switched modes mid-connect) — leave
-    // all screen/status state to that run.
+    try {
+      nextAuthState = await window.agenteraAuth.getState();
+    } catch {
+      nextAuthState = {
+        status: "blocked",
+        reason: "secure_storage_unavailable",
+      };
+    }
+
+    if (myRun !== runIdRef.current) return;
+    const wait = Math.max(0, SPLASH_MIN_MS - (Date.now() - startedAt));
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
     if (myRun !== runIdRef.current) return;
 
     setSplashStatus(undefined);
-    if (error) setInstallError(error);
-
-    const elapsed = Date.now() - startedAt;
-    const wait = Math.max(0, SPLASH_MIN_MS - elapsed);
-    if (wait > 0) {
-      await new Promise((r) => setTimeout(r, wait));
-    }
-    if (myRun !== runIdRef.current) return;
-    setScreen(next);
-
-    // Lazy deep-verify in the background after the UI is up. If the
-    // install is broken, surface the warning then — don't block startup.
-    //
-    // Skip for remote-mode connections: verifyInstall() probes the LOCAL
-    // Python + script paths (HERMES_PYTHON / HERMES_SCRIPT in installer.ts),
-    // which don't exist on machines that only use a remote backend. Without
-    // this guard the user is bounced back to Welcome with an "installBroken"
-    // error immediately after a successful remote connect. (#47, #41, #30)
-    if ((next === "main" || next === "setup") && !isRemote) {
-      window.hermesAPI.verifyInstall().then((ok) => {
-        // Files exist (checkInstall passed) but the probe failed. Surface
-        // a soft warning instead of bouncing to Welcome — see #130.
-        if (!ok) setVerifyWarning(true);
-      });
-    }
-  }, []);
+    preflightRef.current = preflight;
+    setPostAuthTarget(preflight.postAuthTarget);
+    setVerifyWarning(preflight.verifyWarning);
+    await routeAfterAuthentication(nextAuthState, preflight);
+  }, [routeAfterAuthentication]);
 
   useEffect(() => {
-    runInstallCheck();
+    return window.agenteraAuth.onStateChanged((state) => {
+      const previous = authStateRef.current;
+      authStateRef.current = state;
+      setAuthState(state);
+      const preflight = preflightRef.current;
+      if (preflight && !isSameAuthorizedSession(previous, state)) {
+        void routeAfterAuthentication(state, preflight);
+      }
+    });
+  }, [routeAfterAuthentication]);
+
+  useEffect(() => {
+    const startupRuns = runIdRef;
+    const ownershipRoutes = routeIdRef;
+    void runInstallCheck();
+    return () => {
+      ++startupRuns.current;
+      ++ownershipRoutes.current;
+    };
   }, [runInstallCheck]);
 
-  // Track screen views for analytics
   useEffect(() => {
-    captureScreenView(screen);
-  }, [screen]);
+    captureScreenView(visibleScreen);
+  }, [visibleScreen]);
 
   const handleSplashFinished = useCallback(() => {
-    /* splash transition is driven by the install check, not a timer */
+    // The preflight and three-second minimum drive the transition.
   }, []);
+
+  async function handleOpenBrowser(): Promise<void> {
+    const forceAccountSelection = forceAccountSelectionRef.current;
+    await window.agenteraAuth.startLogin(
+      forceAccountSelection ? { forceAccountSelection: true } : undefined,
+    );
+    forceAccountSelectionRef.current = false;
+  }
+
+  async function handleRetryAuth(): Promise<void> {
+    const state = await window.agenteraAuth.retryOnline();
+    authStateRef.current = state;
+    setAuthState(state);
+    const preflight = preflightRef.current;
+    if (preflight) await routeAfterAuthentication(state, preflight);
+  }
+
+  async function handleUseDifferentAccount(): Promise<void> {
+    forceAccountSelectionRef.current = true;
+    await window.agenteraAuth.logout();
+    const state: AgenteraAuthPublicState = {
+      status: "unauthenticated",
+      reason: "sign_in_required",
+    };
+    authStateRef.current = state;
+    setAuthState(state);
+    setOwnershipClaim(null);
+    setRuntimeAccessReady(false);
+    setScreen("auth");
+  }
+
+  async function operationSessionIsStillCurrent(
+    startedWith: AgenteraAuthPublicState,
+  ): Promise<boolean> {
+    const current = authStateRef.current;
+    if (isSameAuthorizedSession(startedWith, current)) return true;
+    const preflight = preflightRef.current;
+    if (preflight) {
+      await routeAfterAuthentication(current, preflight);
+    } else {
+      setScreen("auth");
+    }
+    return false;
+  }
+
+  async function handleUseExistingProfile(): Promise<void> {
+    const startedWith = authStateRef.current;
+    await window.agenteraRuntimeAccess.bindActiveProfile();
+    if (!(await operationSessionIsStillCurrent(startedWith))) return;
+    const preflight = preflightRef.current;
+    if (preflight) warmRuntimeAfterOwnership(preflight);
+    setOwnershipClaim(null);
+    setRuntimeAccessReady(true);
+    setScreen(postAuthTarget);
+  }
+
+  async function handleCreateFreshProfile(): Promise<void> {
+    const startedWith = authStateRef.current;
+    await window.agenteraRuntimeAccess.createFreshProfile(
+      `AgentEra Space ${Date.now().toString(36)}`,
+    );
+    if (!(await operationSessionIsStillCurrent(startedWith))) return;
+    const currentPreflight = preflightRef.current;
+    if (currentPreflight) {
+      preflightRef.current = {
+        ...currentPreflight,
+        connectionMode: "local",
+        postAuthTarget: "setup",
+      };
+    }
+    setConnectionMode("local");
+    setPostAuthTarget("setup");
+    setOwnershipClaim(null);
+    setRuntimeAccessReady(true);
+    setScreen("setup");
+  }
+
+  async function handleBindConnection(): Promise<void> {
+    const startedWith = authStateRef.current;
+    await window.agenteraRuntimeAccess.bindCurrentConnection();
+    if (!(await operationSessionIsStillCurrent(startedWith))) return;
+    const preflight = preflightRef.current;
+    if (preflight) warmRuntimeAfterOwnership(preflight);
+    setOwnershipClaim(null);
+    setRuntimeAccessReady(true);
+    setScreen(postAuthTarget);
+  }
+
+  async function handleRetryOwnership(): Promise<void> {
+    const preflight = preflightRef.current;
+    if (!preflight) {
+      setScreen("splash");
+      await runInstallCheck();
+      return;
+    }
+    await routeAfterAuthentication(authStateRef.current, preflight);
+  }
 
   function handleInstallComplete(): void {
     setInstallError(null);
-    setScreen("setup");
+    const nextPreflight: AgenteraStartupPreflightPublicResult = {
+      connectionMode: "local",
+      postAuthTarget: "setup",
+      verifyWarning: false,
+    };
+    preflightRef.current = nextPreflight;
+    setConnectionMode("local");
+    setPostAuthTarget("setup");
+    void routeAfterAuthentication(authStateRef.current, nextPreflight);
   }
 
   function handleInstallFailed(error: string): void {
@@ -163,27 +385,29 @@ function App(): React.JSX.Element {
 
   function handleRetryInstall(): void {
     setInstallError(null);
+    setRuntimeAccessReady(false);
     setScreen("installing");
   }
 
   function handleRecheck(): void {
     setInstallError(null);
     setScreen("splash");
-    runInstallCheck();
+    void runInstallCheck();
   }
 
-  async function handleSwitchToLocal(): Promise<void> {
-    // Tear down any in-flight SSH tunnel so a hung connect attempt doesn't keep
-    // running (or race the local recheck) after we switch.
-    await window.hermesAPI.stopSshTunnel().catch(() => undefined);
-    await window.hermesAPI.setConnectionConfig("local", "", "");
-    setConnectionMode("local");
-    handleRecheck();
+  function handleSwitchToLocal(): void {
+    pendingSwitchToLocalRef.current = true;
+    setSplashStatus("Local mode will open after sign-in…");
+    const preflight = preflightRef.current;
+    if (preflight && hasProductAccess(authStateRef.current)) {
+      void routeAfterAuthentication(authStateRef.current, preflight);
+    }
   }
 
   function handleVerifyReinstall(): void {
     setVerifyWarning(false);
     setInstallError(null);
+    setRuntimeAccessReady(false);
     setScreen("installing");
   }
 
@@ -192,7 +416,7 @@ function App(): React.JSX.Element {
   }
 
   function renderScreen(): React.JSX.Element {
-    switch (screen) {
+    switch (visibleScreen) {
       case "splash":
         return (
           <SplashScreen
@@ -201,6 +425,28 @@ function App(): React.JSX.Element {
             onSwitchToLocal={
               connectionMode !== "local" ? handleSwitchToLocal : undefined
             }
+          />
+        );
+      case "auth":
+        return (
+          <AuthGate
+            state={authState}
+            onOpenBrowser={handleOpenBrowser}
+            onCancel={() => window.agenteraAuth.cancelLogin()}
+            onRetry={handleRetryAuth}
+          />
+        );
+      case "profile-claim":
+        return (
+          <ProfileClaim
+            mode={connectionMode}
+            claim={ownershipClaim}
+            inspectionError={ownershipInspectionError}
+            onUseExisting={handleUseExistingProfile}
+            onCreateNew={handleCreateFreshProfile}
+            onBindConnection={handleBindConnection}
+            onUseDifferentAccount={handleUseDifferentAccount}
+            onRetry={handleRetryOwnership}
           />
         );
       case "welcome":
@@ -233,6 +479,7 @@ function App(): React.JSX.Element {
       case "main":
         return (
           <Layout
+            authState={authState as AuthorizedAuthState}
             verifyWarning={verifyWarning}
             onReinstall={handleVerifyReinstall}
             onDismissVerifyWarning={handleDismissVerifyWarning}

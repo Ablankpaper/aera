@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { randomBytes } from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import { join } from "path";
 import { HERMES_HOME, expectedEnvKeyForModel } from "./installer";
 import {
@@ -44,6 +44,7 @@ export type RemoteChatTransport = "auto" | "dashboard" | "legacy";
 export type RemoteAuthMode = "auto" | "token" | "oauth";
 
 export interface ConnectionConfig {
+  connectionContextId: string;
   mode: "local" | "remote" | "ssh";
   remoteUrl: string;
   apiKey: string;
@@ -54,6 +55,7 @@ export interface ConnectionConfig {
 }
 
 export interface PublicConnectionConfig {
+  connectionContextId: string;
   mode: "local" | "remote" | "ssh";
   remoteUrl: string;
   remoteAuthMode: RemoteAuthMode;
@@ -72,6 +74,9 @@ export interface PublicConnectionConfig {
 function desktopConfigFile(): string {
   return join(HERMES_HOME, "desktop.json");
 }
+
+const CONNECTION_CONTEXT_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function normalizeRemoteChatTransport(
   value: unknown,
@@ -100,10 +105,13 @@ export function writeDesktopConfig(data: Record<string, unknown>): void {
   writeFileSync(desktopConfigFile(), JSON.stringify(data, null, 2), "utf-8");
 }
 
-export function getConnectionConfig(): ConnectionConfig {
-  const data = readDesktopConfig();
+function connectionConfigFromData(
+  data: Record<string, unknown>,
+  connectionContextId: string,
+): ConnectionConfig {
   const ssh = (data.sshConfig as Partial<SshConnectionConfig>) ?? {};
   return {
+    connectionContextId,
     mode: (data.connectionMode as "local" | "remote" | "ssh") || "local",
     remoteUrl: (data.remoteUrl as string) || "",
     apiKey: (data.remoteApiKey as string) || "",
@@ -121,9 +129,46 @@ export function getConnectionConfig(): ConnectionConfig {
   };
 }
 
+function connectionMaterial(config: ConnectionConfig): string {
+  return JSON.stringify({
+    remoteUrl: config.remoteUrl.trim(),
+    apiKey: config.apiKey,
+    sshHost: config.ssh.host.trim(),
+    sshPort: config.ssh.port,
+    sshUsername: config.ssh.username.trim(),
+    sshKeyPath: config.ssh.keyPath.trim(),
+    sshRemotePort: config.ssh.remotePort,
+  });
+}
+
+export function getConnectionConfig(): ConnectionConfig {
+  const data = readDesktopConfig();
+  const storedContextId = data.connectionContextId;
+  const connectionContextId =
+    typeof storedContextId === "string" &&
+    CONNECTION_CONTEXT_ID_RE.test(storedContextId)
+      ? storedContextId
+      : randomUUID();
+  if (connectionContextId !== storedContextId) {
+    data.connectionContextId = connectionContextId;
+    writeDesktopConfig(data);
+  }
+  return connectionConfigFromData(data, connectionContextId);
+}
+
+/** Rotate after out-of-band credential changes such as Remote OAuth. */
+export function rotateConnectionContextId(): string {
+  const data = readDesktopConfig();
+  const connectionContextId = randomUUID();
+  data.connectionContextId = connectionContextId;
+  writeDesktopConfig(data);
+  return connectionContextId;
+}
+
 export function getPublicConnectionConfig(): PublicConnectionConfig {
   const config = getConnectionConfig();
   return {
+    connectionContextId: config.connectionContextId,
     mode: config.mode,
     remoteUrl: config.remoteUrl,
     remoteAuthMode: config.remoteAuthMode,
@@ -135,8 +180,21 @@ export function getPublicConnectionConfig(): PublicConnectionConfig {
   };
 }
 
-export function setConnectionConfig(config: ConnectionConfig): void {
+export type ConnectionConfigUpdate = Omit<
+  ConnectionConfig,
+  "connectionContextId"
+> & {
+  connectionContextId?: string;
+};
+
+export function setConnectionConfig(config: ConnectionConfigUpdate): void {
   const data = readDesktopConfig();
+  const existingContextId =
+    typeof data.connectionContextId === "string" &&
+    CONNECTION_CONTEXT_ID_RE.test(data.connectionContextId)
+      ? data.connectionContextId
+      : randomUUID();
+  const existing = connectionConfigFromData(data, existingContextId);
   data.connectionMode = config.mode;
   if (config.mode === "remote" || config.remoteUrl.trim()) {
     data.remoteUrl = config.remoteUrl;
@@ -152,6 +210,11 @@ export function setConnectionConfig(config: ConnectionConfig): void {
   if (config.mode === "ssh") {
     data.sshConfig = config.ssh;
   }
+  const updated = connectionConfigFromData(data, existingContextId);
+  data.connectionContextId =
+    connectionMaterial(existing) === connectionMaterial(updated)
+      ? existingContextId
+      : randomUUID();
   writeDesktopConfig(data);
 }
 
