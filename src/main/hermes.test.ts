@@ -71,6 +71,7 @@ import {
 import type { ConnectionConfig } from "./config";
 import { providerListSafe } from "./secrets";
 import {
+  conversationSystemMessage,
   getRemoteAuthHeader,
   sendMessage,
   shouldForceCliForSessionOverride,
@@ -85,6 +86,29 @@ const mockedGetConnectionConfig = vi.mocked(getConnectionConfig);
 const mockedReadEnv = vi.mocked(readEnv);
 const mockedProviderListSafe = vi.mocked(providerListSafe);
 const mockedSpawn = vi.mocked(spawn);
+
+describe("bound Hermes conversation instructions", () => {
+  it("keeps unbound context-folder behavior unchanged and combines bound instructions in a fixed order", () => {
+    expect(conversationSystemMessage(undefined, undefined)).toBeNull();
+    expect(conversationSystemMessage(" /work ", undefined)?.content).toContain(
+      "The working folder for this conversation is /work.",
+    );
+    expect(
+      conversationSystemMessage("/work", {
+        instructions: "PUBLISHED BASE",
+        requireBoundApiTransport: true,
+      }),
+    ).toEqual({
+      role: "system",
+      content:
+        "PUBLISHED BASE\n\n" +
+        "The working folder for this conversation is /work. " +
+        "When the user asks you to read, create, modify, or run project " +
+        "files, use the file, terminal, and code-execution tools with " +
+        "absolute paths under this folder.",
+    });
+  });
+});
 
 function testConnection(
   fields: Partial<ConnectionConfig> = {},

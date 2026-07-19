@@ -274,4 +274,45 @@ describe("sendMessageViaApi forwards resumeSessionId", () => {
     expect(ids[1]).toBeTruthy();
     expect(ids[0]).not.toBe(ids[1]);
   });
+
+  it("carries one deterministic bound conversation instruction together with the context folder", async () => {
+    await sendMessage(
+      "hello",
+      { onChunk: () => {}, onDone: () => {}, onError: () => {} },
+      "default",
+      "desk-bound-session",
+      undefined,
+      undefined,
+      "/workspace/project",
+      undefined,
+      {
+        instructions: "SIGNED AGENT BASE",
+        requireBoundApiTransport: true,
+      },
+    );
+
+    const chatRequest = capturedRequests.find((r) =>
+      r.url.includes("/v1/chat/completions"),
+    );
+    expect(chatRequest).toBeDefined();
+    const parsed = JSON.parse(chatRequest!.body) as {
+      messages: Array<{ role: string; content: string }>;
+      session_id: string;
+    };
+    expect(parsed.messages[0]).toEqual({
+      role: "system",
+      content:
+        "SIGNED AGENT BASE\n\n" +
+        "The working folder for this conversation is /workspace/project. " +
+        "When the user asks you to read, create, modify, or run project " +
+        "files, use the file, terminal, and code-execution tools with " +
+        "absolute paths under this folder.",
+    });
+    expect(parsed.session_id).toBe("desk-bound-session");
+    expect(
+      (chatRequest!.options.headers as Record<string, string>)[
+        "X-Hermes-Session-Id"
+      ],
+    ).toBe("desk-bound-session");
+  });
 });

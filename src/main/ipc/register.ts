@@ -267,6 +267,7 @@ import {
   type AgenteraRuntimeOwner,
 } from "../agentera-profile-binding";
 import type { AgenteraConnectionOwnerStore } from "../agentera-connection-owner";
+import type { AgenteraAgentControlManager } from "../agentera-agent-control/manager";
 import {
   probeAgenteraInstallFiles,
   runAgenteraStartupPreflight,
@@ -437,6 +438,7 @@ export interface IpcContext {
   getAgenteraRuntimeOwner: () => AgenteraRuntimeOwner;
   agenteraProfileBindings: AgenteraProfileBindingStore;
   agenteraConnectionOwners: AgenteraConnectionOwnerStore;
+  agenteraAgentControl?: AgenteraAgentControlManager | null;
   runtimeDistribution: RuntimeDistributionManager | null;
 }
 
@@ -710,6 +712,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     getAgenteraRuntimeOwner,
     agenteraProfileBindings,
     agenteraConnectionOwners,
+    agenteraAgentControl,
     runtimeDistribution,
   } = context;
   const directProfileTargetIndex: Readonly<Record<string, number>> = {
@@ -1721,6 +1724,14 @@ export function registerIpcHandlers(context: IpcContext): void {
         throw new Error("AgentEra Runtime restart is pending.");
       }
       try {
+        const preparedAgentTurn = agenteraAgentControl
+          ? await agenteraAgentControl.prepareHermesTurn({
+              conversationKey: chatRunId,
+              profilePath: profileHome(profile),
+              owner: getAgenteraRuntimeOwner(),
+              resumeSessionId: resumeSessionId || null,
+            })
+          : null;
         if (!isRemoteMode() && !isGatewayRunning(profile)) {
           startGateway(profile);
         }
@@ -1813,6 +1824,22 @@ export function registerIpcHandlers(context: IpcContext): void {
               }
             },
             onSessionStarted: (sessionId) => {
+              if (preparedAgentTurn) {
+                try {
+                  agenteraAgentControl?.attachHermesSession(
+                    preparedAgentTurn.binding.id,
+                    sessionId,
+                  );
+                } catch {
+                  runtimeRun.finish();
+                  abortThisRun();
+                  const message =
+                    "AgentEra RuntimeBinding session attachment failed.";
+                  safeSend("chat-error", message);
+                  rejectChat(new Error(message));
+                  return;
+                }
+              }
               safeSend("chat-session-started", sessionId);
             },
             onError: (error) => {
@@ -1841,11 +1868,12 @@ export function registerIpcHandlers(context: IpcContext): void {
             },
           },
           profile,
-          resumeSessionId,
+          preparedAgentTurn?.resumeSessionId ?? resumeSessionId,
           history,
           attachments,
           contextFolder,
           modelOverride,
+          preparedAgentTurn?.envelope,
         );
 
         runtimeRun.attachAbort(handle.abort);

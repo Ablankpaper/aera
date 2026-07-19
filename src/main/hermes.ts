@@ -1116,6 +1116,15 @@ export interface ChatCallbacks {
   }) => void;
 }
 
+/**
+ * Generic, caller-composed instructions that must stay attached to one Hermes
+ * conversation. Hermes does not know which product feature produced them.
+ */
+export interface HermesConversationEnvelope {
+  instructions: string;
+  requireBoundApiTransport: boolean;
+}
+
 type ChatContent =
   | string
   | Array<
@@ -1200,6 +1209,24 @@ export function contextFolderSystemMessage(
   };
 }
 
+/**
+ * Build the single system instruction sent to both supported HTTP transports.
+ * The caller envelope is always first and the local working-folder constraint
+ * is always second. Without an envelope this preserves the existing payload.
+ */
+export function conversationSystemMessage(
+  contextFolder?: string,
+  envelope?: HermesConversationEnvelope,
+): { role: "system"; content: string } | null {
+  const context = contextFolderSystemMessage(contextFolder);
+  const instructions = envelope?.instructions.trim() ?? "";
+  if (!instructions) return context;
+  return {
+    role: "system",
+    content: context ? `${instructions}\n\n${context.content}` : instructions,
+  };
+}
+
 function reasoningEffortForProfile(
   profile?: string,
 ): "minimal" | "low" | "medium" | "high" | "xhigh" | null {
@@ -1225,6 +1252,7 @@ function sendMessageViaApi(
   attachments?: Attachment[],
   contextFolder?: string,
   override?: SessionModelOverride,
+  envelope?: HermesConversationEnvelope,
 ): ChatHandle {
   const mc = effectiveModelConfig(profile, override);
   const controller = new AbortController();
@@ -1249,7 +1277,7 @@ function sendMessageViaApi(
   // there. Injected only at the request-build step — the renderer's visible
   // transcript stays clean, and getSessionMessages filters non-user/assistant
   // roles, so reloaded sessions stay clean too.
-  const ctxSystem = contextFolderSystemMessage(contextFolder);
+  const ctxSystem = conversationSystemMessage(contextFolder, envelope);
   if (ctxSystem) messages.unshift(ctxSystem);
 
   const reasoningEffort = reasoningEffortForProfile(profile);
@@ -1636,6 +1664,7 @@ function sendMessageViaRuns(
   attachments?: Attachment[],
   contextFolder?: string,
   override?: SessionModelOverride,
+  envelope?: HermesConversationEnvelope,
 ): ChatHandle {
   const mc = effectiveModelConfig(profile, override);
   const controller = new AbortController();
@@ -1644,7 +1673,7 @@ function sendMessageViaRuns(
   const sessionId =
     resumeSessionId ||
     (headersForAuth.Authorization ? `desk-${Date.now()}-${randomUUID()}` : "");
-  const ctxSystem = contextFolderSystemMessage(contextFolder);
+  const ctxSystem = conversationSystemMessage(contextFolder, envelope);
   const bodyObj: Record<string, unknown> = {
     model: mc.model || "hermes-agent",
     input: message,
@@ -1700,6 +1729,7 @@ function sendMessageViaRuns(
       attachments,
       contextFolder,
       override,
+      envelope,
     );
   }
 
@@ -2664,6 +2694,7 @@ async function sendMessageViaNonGatewayApi(
   attachments?: Attachment[],
   contextFolder?: string,
   override?: SessionModelOverride,
+  envelope?: HermesConversationEnvelope,
 ): Promise<ChatHandle> {
   const approvalCommand = /^\/(?:approve|deny)\b/i.test(message.trim());
   if (!attachments?.length && !approvalCommand) {
@@ -2678,6 +2709,7 @@ async function sendMessageViaNonGatewayApi(
         attachments,
         contextFolder,
         override,
+        envelope,
       );
     }
   }
@@ -2691,6 +2723,7 @@ async function sendMessageViaNonGatewayApi(
     attachments,
     contextFolder,
     override,
+    envelope,
   );
 }
 
@@ -2703,6 +2736,7 @@ async function sendMessageViaBestApi(
   attachments?: Attachment[],
   contextFolder?: string,
   override?: SessionModelOverride,
+  envelope?: HermesConversationEnvelope,
 ): Promise<ChatHandle> {
   const approvalCommand = /^\/(?:approve|deny)\b/i.test(message.trim());
   // Skip the TUI gateway when a session-scoped model override is active — the
@@ -2713,7 +2747,8 @@ async function sendMessageViaBestApi(
     !isRemoteMode() &&
     !attachments?.length &&
     !approvalCommand &&
-    !override
+    !override &&
+    !envelope?.requireBoundApiTransport
   ) {
     try {
       return await sendMessageViaTuiGateway(
@@ -2741,6 +2776,7 @@ async function sendMessageViaBestApi(
     attachments,
     contextFolder,
     override,
+    envelope,
   );
 }
 
@@ -2753,6 +2789,7 @@ async function sendMessageViaBestApiWithLocalRecovery(
   attachments?: Attachment[],
   contextFolder?: string,
   override?: SessionModelOverride,
+  envelope?: HermesConversationEnvelope,
 ): Promise<ChatHandle> {
   let aborted = false;
   let retrying = false;
@@ -2798,7 +2835,14 @@ async function sendMessageViaBestApiWithLocalRecovery(
         attachments,
         contextFolder,
         override,
+        envelope,
       );
+      return;
+    }
+
+    if (envelope?.requireBoundApiTransport) {
+      settled = true;
+      cb.onError("Bound Hermes API transport is unavailable.");
       return;
     }
 
@@ -2887,6 +2931,7 @@ async function sendMessageViaBestApiWithLocalRecovery(
     attachments,
     contextFolder,
     override,
+    envelope,
   );
 
   return handle;
@@ -2901,6 +2946,7 @@ export async function sendMessage(
   attachments?: Attachment[],
   contextFolder?: string,
   override?: SessionModelOverride,
+  envelope?: HermesConversationEnvelope,
 ): Promise<ChatHandle> {
   ensureInitialized();
 
@@ -2916,6 +2962,7 @@ export async function sendMessage(
       attachments,
       contextFolder,
       override,
+      envelope,
     );
   }
 
@@ -2925,7 +2972,10 @@ export async function sendMessage(
   // `/model ... --provider ...` before attaching media and submitting. Our
   // renderer dashboard transport follows that path. The legacy CLI fallback is
   // kept only for text-only turns; it cannot preserve image/path attachments.
-  if (shouldForceCliForSessionOverride(mc, eff, override, attachments)) {
+  if (
+    !envelope?.requireBoundApiTransport &&
+    shouldForceCliForSessionOverride(mc, eff, override, attachments)
+  ) {
     return sendMessageViaCli(
       message,
       cb,
@@ -2957,7 +3007,12 @@ export async function sendMessage(
       attachments,
       contextFolder,
       override,
+      envelope,
     );
+  }
+
+  if (envelope?.requireBoundApiTransport) {
+    throw new Error("Bound Hermes API transport is unavailable.");
   }
 
   // Fallback to CLI
