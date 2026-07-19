@@ -32,8 +32,11 @@ function Install({ onComplete }: InstallProps): React.JSX.Element {
   const logRef = useRef<HTMLDivElement>(null);
   const onCompleteRef = useRef(onComplete);
   const translationRef = useRef(t);
-  onCompleteRef.current = onComplete;
-  translationRef.current = t;
+
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+    translationRef.current = t;
+  }, [onComplete, t]);
 
   // The packaged Runtime is part of the product. Once authentication has
   // succeeded there is no source/path decision for the user: verify, prepare,
