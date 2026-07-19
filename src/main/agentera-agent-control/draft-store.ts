@@ -55,6 +55,9 @@ interface DraftRow {
   publication_attempted_at: unknown;
   publication_error_code: unknown;
   publication_error_summary: unknown;
+  published_definition_id: unknown;
+  published_version_id: unknown;
+  published_revision: unknown;
   created_at: unknown;
   updated_at: unknown;
 }
@@ -365,9 +368,21 @@ export class AgentDraftStore {
       canonicalTimestamp(existing.attempted_at) &&
       validUuid(existing.idempotency_key)
     ) {
+      const attemptedAt = nowTimestamp(this.now);
+      const refreshed = this.database.sqlite
+        .prepare(
+          `UPDATE agent_drafts
+           SET publication_attempted_at = ?, publication_error_code = NULL,
+               publication_error_summary = NULL
+           WHERE id = ? AND revision = ? AND publication_attempt_revision = ?`,
+        )
+        .run(attemptedAt, draft.id, revision, revision);
+      if (changes(refreshed) !== 1) {
+        throw new AgentDraftStoreError("draft_conflict");
+      }
       return {
         revision,
-        attemptedAt: existing.attempted_at,
+        attemptedAt,
         idempotencyKey: existing.idempotency_key,
       };
     }
@@ -417,6 +432,44 @@ export class AgentDraftStore {
     if (changes(result) !== 1) {
       throw new AgentDraftStoreError("draft_conflict");
     }
+  }
+
+  markPublished(
+    idInput: string,
+    revision: number,
+    definitionIdInput: string,
+    versionIdInput: string,
+  ): AgentDraft {
+    const id = requireUuid(idInput);
+    const definitionId = requireUuid(definitionIdInput);
+    const versionId = requireUuid(versionIdInput);
+    if (!Number.isSafeInteger(revision) || revision < 1) {
+      throw new AgentDraftStoreError("invalid_draft");
+    }
+    const updatedAt = nowTimestamp(this.now);
+    const result = this.database.sqlite
+      .prepare(
+        `UPDATE agent_drafts
+         SET source_agent_definition_id = ?, base_agent_version_id = ?,
+             published_definition_id = ?, published_version_id = ?,
+             published_revision = ?, publication_error_code = NULL,
+             publication_error_summary = NULL, updated_at = ?
+         WHERE id = ? AND revision = ?`,
+      )
+      .run(
+        definitionId,
+        versionId,
+        definitionId,
+        versionId,
+        revision,
+        updatedAt,
+        id,
+        revision,
+      );
+    if (changes(result) !== 1) {
+      throw new AgentDraftStoreError("draft_conflict");
+    }
+    return this.getDraft(id);
   }
 
   private revisionPath(id: string, revision: number): string {
@@ -513,6 +566,7 @@ export class AgentDraftStore {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       lastPublicationAttempt: this.readPublicationAttempt(row),
+      publishedRevision: this.readPublishedRevision(row),
     };
   }
 
@@ -598,6 +652,32 @@ export class AgentDraftStore {
       attemptedAt: row.publication_attempted_at,
       errorCode: row.publication_error_code,
       errorSummary: row.publication_error_summary,
+    };
+  }
+
+  private readPublishedRevision(
+    row: DraftRow,
+  ): AgentDraft["publishedRevision"] {
+    if (
+      row.published_revision === null &&
+      row.published_definition_id === null &&
+      row.published_version_id === null
+    ) {
+      return null;
+    }
+    const revision = Number(row.published_revision);
+    if (
+      !Number.isSafeInteger(revision) ||
+      revision < 1 ||
+      !validUuid(row.published_definition_id) ||
+      !validUuid(row.published_version_id)
+    ) {
+      throw new AgentDraftStoreError("invalid_draft");
+    }
+    return {
+      revision,
+      definitionId: row.published_definition_id,
+      versionId: row.published_version_id,
     };
   }
 }

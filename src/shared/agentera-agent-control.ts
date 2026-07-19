@@ -59,6 +59,12 @@ export interface AgentDraftPublicationAttempt {
   errorSummary: string | null;
 }
 
+export interface AgentDraftPublishedRevision {
+  revision: number;
+  definitionId: string;
+  versionId: string;
+}
+
 /**
  * Renderer-safe local draft. Ownership, device identity, paths, signing data,
  * credentials, raw server errors, and Runtime Profile content are absent by
@@ -76,6 +82,7 @@ export interface AgentDraft {
   createdAt: string;
   updatedAt: string;
   lastPublicationAttempt: AgentDraftPublicationAttempt | null;
+  publishedRevision: AgentDraftPublishedRevision | null;
 }
 
 export interface CreateAgentDraftInput {
@@ -100,4 +107,24 @@ export interface AgentDraftPublicationIdentity {
   revision: number;
   attemptedAt: string;
   idempotencyKey: string;
+}
+
+export interface PublicationPreview {
+  publicationHandle: string;
+  draftId: string;
+  revision: number;
+  targetScope: "USER";
+  assetCounts: Record<AgentDraftAssetKind, number>;
+  totalBytes: number;
+}
+
+export interface PublishedRevision {
+  draftId: string;
+  revision: number;
+  definitionId: string;
+  versionId: string;
+  versionNumber: number;
+  contentDigest: string;
+  publishedAt: string;
+  replayed: boolean;
 }

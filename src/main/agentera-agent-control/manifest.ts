@@ -366,13 +366,16 @@ function copyEditableManifest(value: unknown): AgentEditableManifest {
   };
 }
 
-export function decodeEditableAgentManifest(
+export function parseAgentControlJsonObject(
   raw: Buffer,
-): AgentEditableManifest {
+  maximumBytes: number,
+): Record<string, unknown> {
   if (
     !Buffer.isBuffer(raw) ||
     raw.length === 0 ||
-    raw.length > MAX_AGENT_MANIFEST_BYTES
+    !Number.isSafeInteger(maximumBytes) ||
+    maximumBytes < 1 ||
+    raw.length > maximumBytes
   ) {
     return invalidContent();
   }
@@ -382,7 +385,17 @@ export function decodeEditableAgentManifest(
   } catch {
     return invalidContent();
   }
-  return copyEditableManifest(new StrictJsonParser(text).parse());
+  const value = new StrictJsonParser(text).parse();
+  if (!isJsonObject(value)) return invalidContent();
+  return value;
+}
+
+export function decodeEditableAgentManifest(
+  raw: Buffer,
+): AgentEditableManifest {
+  return copyEditableManifest(
+    parseAgentControlJsonObject(raw, MAX_AGENT_MANIFEST_BYTES),
+  );
 }
 
 export function normalizeAgentAssetPath(raw: string): string {

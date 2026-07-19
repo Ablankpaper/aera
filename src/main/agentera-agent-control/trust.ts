@@ -70,6 +70,14 @@ export interface AgentVerificationResult {
   contentDigest: string;
 }
 
+export interface CanonicalAgentVersionContent {
+  manifestBytes: Buffer;
+  bundleBytes: Buffer;
+  manifestDigest: string;
+  bundleDigest: string;
+  contentDigest: string;
+}
+
 interface TrustedKey extends AgenteraAgentTrustCacheKey {
   raw: Buffer;
 }
@@ -158,6 +166,15 @@ function parseCacheKey(value: AgenteraAgentTrustCacheKey): TrustedKey {
 
 function digest(raw: Buffer): string {
   return createHash("sha256").update(raw).digest("hex");
+}
+
+function goCanonicalJsonBytes(value: unknown): Buffer {
+  return Buffer.from(
+    JSON.stringify(value)
+      .replace(/\u2028/g, "\\u2028")
+      .replace(/\u2029/g, "\\u2029"),
+    "utf8",
+  );
 }
 
 function requireString(value: unknown, maximum = 4096): string {
@@ -297,7 +314,7 @@ function canonicalManifestBytes(value: unknown): Buffer {
     schema_version: 1,
     tools: canonicalTools(value.tools),
   };
-  return Buffer.from(JSON.stringify(canonical), "utf8");
+  return goCanonicalJsonBytes(canonical);
 }
 
 function canonicalBundleBytes(value: unknown): {
@@ -328,7 +345,7 @@ function canonicalBundleBytes(value: unknown): {
     return { content: asset.content, path: asset.path };
   });
   return {
-    bytes: Buffer.from(JSON.stringify({ assets }), "utf8"),
+    bytes: goCanonicalJsonBytes({ assets }),
     assets: byPath,
   };
 }
@@ -385,7 +402,29 @@ function canonicalPolicyDocumentBytes(value: unknown): Buffer {
     publication_allowed: false,
     deny_rules: requireStringArray(value.deny_rules),
   };
-  return Buffer.from(JSON.stringify(canonical), "utf8");
+  return goCanonicalJsonBytes(canonical);
+}
+
+export function canonicalizeAgentVersionContent(
+  version: AgentVersion,
+): CanonicalAgentVersionContent {
+  const manifestBytes = canonicalManifestBytes(version.manifest);
+  const bundle = canonicalBundleBytes(version.bundle);
+  verifyManifestAssets(version.manifest, bundle.assets);
+  const manifestDigest = digest(manifestBytes);
+  const bundleDigest = digest(bundle.bytes);
+  const contentDigest = createHash("sha256")
+    .update(manifestBytes)
+    .update(Buffer.from([0]))
+    .update(bundle.bytes)
+    .digest("hex");
+  return {
+    manifestBytes,
+    bundleBytes: bundle.bytes,
+    manifestDigest,
+    bundleDigest,
+    contentDigest,
+  };
 }
 
 function parseSemanticVersion(raw: string): ParsedVersion {
@@ -594,16 +633,8 @@ export class AgenteraAgentTrustStore {
     ) {
       throw new AgenteraAgentTrustError("digest_mismatch");
     }
-    const manifestBytes = canonicalManifestBytes(version.manifest);
-    const bundle = canonicalBundleBytes(version.bundle);
-    verifyManifestAssets(version.manifest, bundle.assets);
-    const manifestDigest = digest(manifestBytes);
-    const bundleDigest = digest(bundle.bytes);
-    const contentDigest = createHash("sha256")
-      .update(manifestBytes)
-      .update(Buffer.from([0]))
-      .update(bundle.bytes)
-      .digest("hex");
+    const canonical = canonicalizeAgentVersionContent(version);
+    const { manifestDigest, bundleDigest, contentDigest } = canonical;
     if (contentDigest !== version.content_digest) {
       throw new AgenteraAgentTrustError("digest_mismatch");
     }
