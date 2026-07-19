@@ -40,6 +40,8 @@ A RuntimeBinding is immutable for one conversation or isolated job and records t
 
 Ordinary updates take effect in a new conversation. Emergency revocation may deny execution without rebuilding the active system prompt or advertised tool schema.
 
+The sanitized RuntimeBinding cloud record is a best-effort audit/control-plane projection of the already committed local binding. Upload failure never changes the Hermes session, Profile, Memory, learned Skills, or local adaptive-state revision.
+
 ## Cloud boundary
 
 Cloud state contains identity, ownership, immutable Agent versions, installations, binding metadata, policy snapshots, audit metadata, and explicitly promoted candidates.
@@ -61,6 +63,8 @@ Every bundled Runtime update must prove compatibility against a learned Profile 
 The gate covers stable conversation prompts and tools, local background learning, next-conversation recall, Curator behavior, physical Profile isolation, offline use, version updates, migrations, and negative cross-scope cases.
 
 The seed format, offline installation, user-confirmed update, signature verification, and rollback contract are defined by [[agentera-runtime-distribution|AgentEra Runtime distribution]].
+
+[[tests/e2e/agentera-agent-control.e2e.ts]] runs two independent devices with one account and hashes their private Profile markers across publish, install, update, archive, and injected cloud failures. Device A's native Memory and learned Skill remain absent from Device B and every captured cloud request, while an existing B conversation remains on v1 and a later conversation binds v2.
 
 ## First-release boundary
 

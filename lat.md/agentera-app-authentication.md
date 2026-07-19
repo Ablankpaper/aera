@@ -140,6 +140,8 @@ The sidebar account menu and Settings account pane expose only online/offline st
 
 Switching accounts completes safe sign-out first and then opens browser authorization with explicit account selection. The UI warns that a pending offline revocation may temporarily count toward the five-device limit and that cloud account deletion cannot erase local Hermes data.
 
+The Agent control plane applies the same switch at its own storage boundary. [[src/main/agentera-agent-control/db.ts#AGENTERA_CONTROL_PLANE_SCHEMA_VERSION]] schema v2 and [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] prevent the next account from listing or reopening another personal space's drafts, cached versions, installations, RuntimeBindings, or pending sanitized records.
+
 The cloud may transfer an installation to another AgentEra account only after the previous owner has revoked that device and the installation presents the identical public key. Active devices and changed keys remain owner-conflicted.
 
 ## Existing Profile migration
@@ -182,7 +184,7 @@ The desktop pins the reviewed cloud OpenAPI document, generates deterministic Ty
 
 `scripts/generate-agentera-cloud-types.mjs` derives the contract hash and formatted types, while `scripts/check-agentera-cloud-contract.mjs` validates critical endpoints, exact fields, documented errors, and the strict loopback redirect shape. The desktop client consumes those generated request and response types without permissive casts.
 
-Because the contract hash is byte-based, `.gitattributes` forces the pinned OpenAPI document and generated TypeScript to LF on every checkout. The contract regression suite verifies these Git attributes and gives deterministic generation enough time on slower CI runners.
+Because the contract hash is byte-based, `.gitattributes` forces the pinned OpenAPI document and generated TypeScript to LF on every checkout. The contract regression suite verifies these Git attributes and gives deterministic generation enough time on slower CI runners. The reviewed contract includes the owner-scoped policy snapshot read needed to verify a manually selected Agent version before local activation.
 
 [[tests/e2e/agentera-auth.e2e.ts]] exercises the real browser, cloud, and Electron lifecycle only against isolated services and a synthetic Hermes boundary fixture. Hashes prove authentication never modifies the fixture, and the same suite can target the unpacked macOS application.
 

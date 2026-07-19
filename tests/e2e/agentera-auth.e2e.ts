@@ -348,6 +348,10 @@ async function launchDesktop(current: Harness): Promise<{
       LC_ALL: "en_US.UTF-8",
     },
   });
+  // Electron can still be replacing its initial inspector context while the
+  // application module creates the first window. Wait for that stable context
+  // before installing the external-navigation capture hook.
+  const page = await app.firstWindow();
   await app.evaluate(({ shell }) => {
     const globalState = globalThis as typeof globalThis & {
       __agenteraE2EExternalUrls?: string[];
@@ -357,7 +361,6 @@ async function launchDesktop(current: Harness): Promise<{
       globalState.__agenteraE2EExternalUrls?.push(url);
     };
   });
-  const page = await app.firstWindow();
   return { app, page };
 }
 
