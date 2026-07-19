@@ -1,7 +1,9 @@
+import { app } from "electron";
 import {
   APP_LOCALES,
   DEFAULT_ACTIVE_LOCALE,
   getLocale as getSharedLocale,
+  resolveSystemLocale,
   setLocale as setSharedLocale,
   type AppLocale,
 } from "../shared/i18n";
@@ -24,10 +26,16 @@ function writeSavedLocale(locale: AppLocale): void {
   writeDesktopConfig(data);
 }
 
-const savedLocale = readSavedLocale();
-if (savedLocale) {
-  setSharedLocale(savedLocale);
+function readSystemLocale(): AppLocale {
+  try {
+    return resolveSystemLocale(app?.getLocale?.());
+  } catch {
+    return DEFAULT_ACTIVE_LOCALE;
+  }
 }
+
+const initialLocale = readSavedLocale() ?? readSystemLocale();
+setSharedLocale(initialLocale);
 
 export function getAppLocale(): AppLocale {
   return readSavedLocale() || getSharedLocale() || DEFAULT_ACTIVE_LOCALE;

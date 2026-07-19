@@ -6,6 +6,7 @@ import {
   SOURCE_LOCALE,
   RTL_LOCALES,
   getLocaleDirection,
+  resolveSystemLocale,
   type TextDirection,
 } from "./config";
 import type { AppLocale } from "./types";
@@ -662,5 +663,6 @@ export {
   SOURCE_LOCALE,
   RTL_LOCALES,
   getLocaleDirection,
+  resolveSystemLocale,
 };
 export type { AppLocale, TextDirection };

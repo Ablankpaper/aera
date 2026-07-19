@@ -30,6 +30,9 @@ pnpm-debug.log*
 # ESLint cache
 .eslintcache
 
+# Local LAT semantic index
+lat.md/.cache/
+
 # Local isolated Hermes homes for development/tests
 .sandbox/
 

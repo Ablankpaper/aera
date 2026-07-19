@@ -6,6 +6,13 @@ import { join } from "path";
 const persistedDesktopConfig = vi.hoisted(() => ({
   value: {} as Record<string, unknown>,
 }));
+const systemLocale = vi.hoisted(() => ({ value: "en-US" }));
+
+vi.mock("electron", () => ({
+  app: {
+    getLocale: () => systemLocale.value,
+  },
+}));
 
 vi.mock("../src/main/config", () => ({
   readDesktopConfig: () => ({ ...persistedDesktopConfig.value }),
@@ -28,6 +35,7 @@ describe("app locale persistence", () => {
   beforeEach(() => {
     testHome = mkdtempSync(join(tmpdir(), "hermes-locale-"));
     persistedDesktopConfig.value = {};
+    systemLocale.value = "en-US";
   });
 
   afterEach(() => {
@@ -44,4 +52,12 @@ describe("app locale persistence", () => {
 
     expect(secondRun.getAppLocale()).toBe("es");
   }, 30000);
+
+  it("uses the operating-system language until the user saves a preference", async () => {
+    systemLocale.value = "zh-CN";
+
+    const locale = await loadLocaleModule();
+
+    expect(locale.getAppLocale()).toBe("zh-CN");
+  });
 });
