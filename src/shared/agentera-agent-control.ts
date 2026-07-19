@@ -85,6 +85,14 @@ export interface AgentDraft {
   publishedRevision: AgentDraftPublishedRevision | null;
 }
 
+/**
+ * Renderer-safe editable detail for one explicitly opened local draft. These
+ * bytes belong to the draft itself; they are never read from a Hermes Profile.
+ */
+export interface AgentDraftDetail extends AgentDraft {
+  editableAssets: AgentDraftAssetInput[];
+}
+
 export interface CreateAgentDraftInput {
   sourceAgentDefinitionId: string | null;
   baseAgentVersionId: string | null;

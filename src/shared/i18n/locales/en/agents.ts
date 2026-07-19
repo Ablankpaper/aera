@@ -1,7 +1,12 @@
 export default {
   title: "Agents",
   subtitle:
-    "Each profile is an isolated AgentEra workspace with its own config, memory, and skills",
+    "Create, publish, and install versioned Agents while Hermes keeps private runtime learning local",
+  legacyTitle: "Local Runtime Profiles",
+  legacySubtitle:
+    "Physical Hermes Profiles and the older account-backup protocol stay separate from AgentEra personal-space Agents.",
+  legacyAccountSyncLabel: "legacy account sync",
+  legacyNewProfile: "New local Profile",
   newAgent: "New Agent",
   namePlaceholder: "Agent name (e.g. coder)",
   createTitle: "New profile",
@@ -127,4 +132,104 @@ export default {
     "Sign in to your AgentEra Studio account on the Providers page to see this agent's wallets.",
   walletForeignHint:
     "This agent is linked to a different AgentEra Studio account, so its wallets stay untouched here.",
+  control: {
+    personalSpace: "Personal space",
+    personalSpaceTitle: "Personal-space Agents",
+    personalSpaceSubtitle:
+      "Local drafts, immutable published versions, and isolated installations. Runtime data never becomes ordinary cloud sync.",
+    refresh: "Refresh Agent control plane",
+    newAgent: "New Agent",
+    offlineNotice:
+      "Offline access is active. Local drafts and installed Agents remain available; publication, discovery, installation, and reconciliation are paused.",
+    localDrafts: "Local drafts",
+    noDrafts: "No local drafts yet.",
+    revision: "Revision",
+    published: "Published",
+    localOnly: "Local only",
+    edit: "Edit",
+    publishedAgents: "Published Agents",
+    noPublishedAgents: "No published Agents yet.",
+    discoveryPaused: "Cloud discovery is paused while offline.",
+    immutableVersion: "Immutable signed version",
+    install: "Install",
+    installations: "Installations on this device",
+    noInstallations: "No Agent installations on this device.",
+    pendingInstallation: "Pending materialization — safe to retry",
+    installedLocally: "Installed locally",
+    retry: "Retry",
+    update: "Select version",
+    archive: "Archive",
+    close: "Close",
+    cancel: "Cancel",
+    newDraftTitle: "New local Agent draft",
+    editDraftTitle: "Edit local Agent draft",
+    localDraftStatus:
+      "Changes stay on this computer until you explicitly publish a revision.",
+    name: "Agent name",
+    systemPrompt: "Published base instructions",
+    allowedProviders: "Allowed providers (comma separated)",
+    allowedModels: "Allowed models (comma separated)",
+    versionAssets: "Version assets",
+    versionAssetsHint:
+      "Only the Skill, SOP, and knowledge text shown here can enter a published version.",
+    assetKind: "Asset category",
+    assetPath: "Asset path",
+    assetContent: "Asset content",
+    removeAsset: "Remove asset",
+    asset: {
+      skill: "Skill",
+      sop: "SOP",
+      knowledge: "Knowledge",
+    },
+    savedLocally: "Draft saved locally.",
+    saveLocal: "Save locally",
+    publish: "Publish only",
+    publishAndUse: "Publish and use",
+    publishAndUseSequence:
+      "Publish and use is two visible steps: first publish an immutable version, then create an isolated installation.",
+    publishPreviewTitle: "Review publication",
+    target: "Target",
+    totalBytes: "Total bytes",
+    privateDataExcluded:
+      "Excluded: Memory, USER, sessions, files, credentials, API keys, and unpromoted local learning.",
+    confirmPublish: "Confirm publication",
+    publishOnlySuccess:
+      "Version published. Nothing was installed or changed in a Runtime Profile.",
+    installTitle: "Install Agent version",
+    retryTitle: "Retry pending installation",
+    updateTitle: "Select a version for later conversations",
+    installIsolationHint:
+      "Every installation maps to one physically isolated writable Hermes Profile.",
+    freshProfile: "Create fresh isolated Profile",
+    claimProfile: "Claim existing same-owner Profile",
+    profileName: "New Profile name",
+    noCloneHint: "A fresh installation never clones another Profile.",
+    localProfile: "Local Profile",
+    claimConfirmation:
+      "I understand this binds the existing Profile without copying or rewriting it.",
+    version: "Published version",
+    selectVersion: "Use for new conversations",
+    updateNewConversationsOnly:
+      "Active conversations keep their immutable RuntimeBinding. Only a new conversation uses the selected version.",
+    archiveTitle: "Archive Agent installation",
+    archiveKeepsLocalData:
+      "Archiving stops cloud use of this installation. Its local Profile, Memory, sessions, files, and learned Skills remain on this computer.",
+    confirmArchive: "Archive installation",
+    errors: {
+      invalid_request: "The Agent request is invalid.",
+      sign_in_required: "Sign in to AgentEra Studio to continue.",
+      online_required: "A live AgentEra Cloud connection is required.",
+      entitlement_required:
+        "Your AgentEra access authorization must be renewed.",
+      not_found: "The Agent item no longer exists.",
+      conflict: "This draft or installation changed. Refresh before retrying.",
+      verification_failed: "The signed Agent version could not be verified.",
+      runtime_incompatible:
+        "This Agent version is incompatible with the installed Runtime.",
+      local_runtime_required:
+        "Switch to the local Runtime to install or update an Agent.",
+      cloud_unavailable: "AgentEra Cloud is temporarily unavailable.",
+      operation_failed: "The Agent operation could not be completed safely.",
+    },
+  },
 } as const;

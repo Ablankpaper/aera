@@ -44,6 +44,7 @@ import type {
 import type { RuntimeDistributionPublicState } from "../shared/agentera-runtime-distribution";
 import type {
   AgentDraft,
+  AgentDraftDetail,
   AgenteraAgentControlPublicState,
   AgenteraAgentControlResult,
   AgenteraAgentDefinitionSummary,
@@ -1738,15 +1739,17 @@ const agenteraAgentsAPI = {
   > => ipcRenderer.invoke("agentera-agents-get-state"),
   listDrafts: (): Promise<AgenteraAgentControlResult<AgentDraft[]>> =>
     ipcRenderer.invoke("agentera-agents-list-drafts"),
-  getDraft: (id: string): Promise<AgenteraAgentControlResult<AgentDraft>> =>
+  getDraft: (
+    id: string,
+  ): Promise<AgenteraAgentControlResult<AgentDraftDetail>> =>
     ipcRenderer.invoke("agentera-agents-get-draft", id),
   createDraft: (
     input: CreateAgentDraftInput,
-  ): Promise<AgenteraAgentControlResult<AgentDraft>> =>
+  ): Promise<AgenteraAgentControlResult<AgentDraftDetail>> =>
     ipcRenderer.invoke("agentera-agents-create-draft", input),
   updateDraft: (
     input: UpdateAgentDraftInput,
-  ): Promise<AgenteraAgentControlResult<AgentDraft>> =>
+  ): Promise<AgenteraAgentControlResult<AgentDraftDetail>> =>
     ipcRenderer.invoke("agentera-agents-update-draft", input),
   deleteDraft: (id: string): Promise<AgenteraAgentControlResult<true>> =>
     ipcRenderer.invoke("agentera-agents-delete-draft", id),

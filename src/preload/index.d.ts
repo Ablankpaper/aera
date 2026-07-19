@@ -50,6 +50,7 @@ import type {
 import type { RuntimeDistributionPublicState } from "../shared/agentera-runtime-distribution";
 import type {
   AgentDraft,
+  AgentDraftDetail,
   AgenteraAgentControlPublicState,
   AgenteraAgentControlResult,
   AgenteraAgentDefinitionSummary,
@@ -119,13 +120,15 @@ interface AgenteraAgentsAPI {
     AgenteraAgentControlResult<AgenteraAgentControlPublicState>
   >;
   listDrafts: () => Promise<AgenteraAgentControlResult<AgentDraft[]>>;
-  getDraft: (id: string) => Promise<AgenteraAgentControlResult<AgentDraft>>;
+  getDraft: (
+    id: string,
+  ) => Promise<AgenteraAgentControlResult<AgentDraftDetail>>;
   createDraft: (
     input: CreateAgentDraftInput,
-  ) => Promise<AgenteraAgentControlResult<AgentDraft>>;
+  ) => Promise<AgenteraAgentControlResult<AgentDraftDetail>>;
   updateDraft: (
     input: UpdateAgentDraftInput,
-  ) => Promise<AgenteraAgentControlResult<AgentDraft>>;
+  ) => Promise<AgenteraAgentControlResult<AgentDraftDetail>>;
   deleteDraft: (id: string) => Promise<AgenteraAgentControlResult<true>>;
   preparePublication: (
     id: string,

@@ -1,6 +1,7 @@
 import type { AgenteraAuthPublicState } from "../../shared/agentera-auth";
 import type {
   AgentDraft,
+  AgentDraftDetail,
   AgenteraAgentControlPublicState,
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
@@ -242,21 +243,23 @@ export class AgenteraAgentControlManager {
     return this.requireDrafts().listDrafts();
   }
 
-  getDraft(id: string): AgentDraft {
+  getDraft(id: string): AgentDraftDetail {
     this.assertLocalAccess();
-    return this.requireDrafts().getDraft(id);
+    return this.requireDrafts().getDraftDetail(id);
   }
 
-  createDraft(input: CreateAgentDraftInput): AgentDraft {
+  createDraft(input: CreateAgentDraftInput): AgentDraftDetail {
     this.assertLocalAccess();
-    const result = this.requireDrafts().createDraft(input);
+    const created = this.requireDrafts().createDraft(input);
+    const result = this.requireDrafts().getDraftDetail(created.id);
     this.emitState();
     return result;
   }
 
-  updateDraft(input: UpdateAgentDraftInput): AgentDraft {
+  updateDraft(input: UpdateAgentDraftInput): AgentDraftDetail {
     this.assertLocalAccess();
-    const result = this.requireDrafts().updateDraft(input);
+    const updated = this.requireDrafts().updateDraft(input);
+    const result = this.requireDrafts().getDraftDetail(updated.id);
     this.emitState();
     return result;
   }

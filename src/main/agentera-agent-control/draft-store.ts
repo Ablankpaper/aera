@@ -6,6 +6,7 @@ import type {
   AgentDraft,
   AgentDraftAssetInput,
   AgentDraftAssetMetadata,
+  AgentDraftDetail,
   AgentDraftIcon,
   AgentDraftPublicationIdentity,
   CreateAgentDraftInput,
@@ -304,6 +305,17 @@ export class AgentDraftStore {
       .get(id) as DraftRow | undefined;
     if (!row) throw new AgentDraftStoreError("draft_not_found");
     return this.toDraft(row);
+  }
+
+  getDraftDetail(idInput: string): AgentDraftDetail {
+    const draft = this.getDraft(idInput);
+    return {
+      ...draft,
+      editableAssets: draft.manifest.assets.map(({ path }) => ({
+        path,
+        content: this.readAsset(draft.id, path).toString("utf8"),
+      })),
+    };
   }
 
   deleteDraft(idInput: string): void {

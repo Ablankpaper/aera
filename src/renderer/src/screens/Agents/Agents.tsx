@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Plus, ChatBubble, Pencil, X } from "../../assets/icons";
 import ProfileAvatar from "../../components/common/ProfileAvatar";
 import { AppModal, AppModalTitle } from "../../components/modal/AppModal";
@@ -8,6 +8,7 @@ import type {
   AgentSyncResult,
   AgentSyncStatus,
 } from "../../../../shared/agent-sync";
+import AgentControlPanel from "./AgentControlPanel";
 
 interface ProfileInfo {
   id: string;
@@ -50,11 +51,22 @@ function Agents({
   // Profile whose gateway we're waiting on after a switch — drives the
   // "Starting…" status while it spins up.
   const [startingProfile, setStartingProfile] = useState<string | null>(null);
+  const installationProfiles = useMemo(
+    () =>
+      profiles.map((profile) => ({
+        id: profile.id,
+        name: profile.name,
+      })),
+    [profiles],
+  );
 
   const loadProfiles = useCallback(async (): Promise<void> => {
-    const list = await window.hermesAPI.listProfiles();
-    setProfiles(list);
-    setLoading(false);
+    try {
+      const list = await window.hermesAPI.listProfiles();
+      setProfiles(list);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   // A switched profile starts its gateway asynchronously, so the pid file the
@@ -242,16 +254,6 @@ function Agents({
     return provider.charAt(0).toUpperCase() + provider.slice(1);
   }
 
-  if (loading) {
-    return (
-      <div className="agents-container">
-        <div className="agents-loading">
-          <div className="loading-spinner" />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="agents-container">
       <div className="agents-header">
@@ -259,236 +261,262 @@ function Agents({
           <h2 className="agents-title">{t("agents.title")}</h2>
           <p className="agents-subtitle">{t("agents.subtitle")}</p>
         </div>
-        <div className="agents-header-actions">
-          {syncStatus && !syncStatus.signedIn && (
-            <span
-              className="agents-sync-hint"
-              title={t("agents.syncSignedOutHint")}
-            >
-              {t("agents.syncSignedOut")}
-            </span>
-          )}
-          {syncStatus?.signedIn && (
-            <span
-              className="agents-sync-hint"
-              title={
-                syncStatus.lastResult?.outcomes
-                  .flatMap((o) => o.warnings.map((w) => `${o.profile}: ${w}`))
-                  .join("\n") ||
-                (syncStatus.accountLabel ?? "")
-              }
-            >
-              {syncStatus.lastResult
-                ? syncSummary(syncStatus.lastResult)
-                : (syncStatus.accountLabel ?? "")}
-            </span>
-          )}
-          {syncStatus?.signedIn && (
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={() => void runSync()}
-              disabled={syncing}
-            >
-              {syncing ? t("agents.syncing") : t("agents.sync")}
-            </button>
-          )}
-          <button className="btn btn-primary btn-sm" onClick={openCreate}>
-            <Plus size={14} />
-            {t("agents.newAgent")}
-          </button>
-        </div>
       </div>
 
-      {!showCreate && error && (
-        <div className="agents-create-error">{error}</div>
-      )}
+      <AgentControlPanel profiles={installationProfiles} />
 
-      <AppModal
-        open={showCreate}
-        onOpenChange={(open) => {
-          if (!open) closeCreate();
-        }}
-        className="agents-create-modal"
-        labelledBy="agents-create-title"
-      >
-        <div className="agents-create-modal-header">
-          <AppModalTitle
-            id="agents-create-title"
-            className="agents-create-modal-title"
-          >
-            {t("agents.createTitle")}
-          </AppModalTitle>
-          <button
-            className="profile-modal-close"
-            onClick={closeCreate}
-            aria-label={t("common.close")}
-          >
-            <X size={18} />
-          </button>
-        </div>
-        <div className="agents-create-modal-body">
-          <label className="agents-create-field">
-            <span>{t("agents.nameLabel")}</span>
-            <input
-              className="input"
-              placeholder={t("agents.namePlaceholder")}
-              value={newName}
-              onChange={(e) => {
-                setNewName(e.target.value);
-                setError("");
-              }}
-              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-              autoFocus
-            />
-          </label>
-          <label className="agents-create-clone">
-            <input
-              type="checkbox"
-              checked={cloneConfig}
-              onChange={(e) => setCloneConfig(e.target.checked)}
-            />
-            <span>{t("agents.cloneConfig")}</span>
-          </label>
-          {cloneConfig && (
-            <label className="agents-create-field">
-              <span>{t("agents.cloneFromLabel")}</span>
-              <select
-                className="input"
-                value={cloneSource}
-                onChange={(e) => setCloneSource(e.target.value)}
+      <section className="agents-legacy-section">
+        <div className="agents-legacy-header">
+          <div>
+            <div className="agents-legacy-title-row">
+              <h2>{t("agents.legacyTitle")}</h2>
+              <span>{t("agents.legacyAccountSyncLabel")}</span>
+            </div>
+            <p>{t("agents.legacySubtitle")}</p>
+          </div>
+          <div className="agents-header-actions">
+            {syncStatus && !syncStatus.signedIn && (
+              <span
+                className="agents-sync-hint"
+                title={t("agents.syncSignedOutHint")}
               >
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          {error && <div className="agents-create-error">{error}</div>}
-          <div className="agents-create-modal-actions">
-            <button className="btn btn-secondary" onClick={closeCreate}>
-              {t("common.cancel")}
-            </button>
-            <button
-              className="btn btn-primary"
-              onClick={handleCreate}
-              disabled={creating || !newName.trim()}
-            >
-              {creating ? t("agents.creating") : t("agents.create")}
+                {t("agents.syncSignedOut")}
+              </span>
+            )}
+            {syncStatus?.signedIn && (
+              <span
+                className="agents-sync-hint"
+                title={
+                  syncStatus.lastResult?.outcomes
+                    .flatMap((o) => o.warnings.map((w) => `${o.profile}: ${w}`))
+                    .join("\n") ||
+                  (syncStatus.accountLabel ?? "")
+                }
+              >
+                {syncStatus.lastResult
+                  ? syncSummary(syncStatus.lastResult)
+                  : (syncStatus.accountLabel ?? "")}
+              </span>
+            )}
+            {syncStatus?.signedIn && (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => void runSync()}
+                disabled={syncing}
+              >
+                {syncing ? t("agents.syncing") : t("agents.sync")}
+              </button>
+            )}
+            <button className="btn btn-primary btn-sm" onClick={openCreate}>
+              <Plus size={14} />
+              {t("agents.legacyNewProfile")}
             </button>
           </div>
         </div>
-      </AppModal>
 
-      <div className="agents-table">
-        <div className="agents-table-head">
-          <span className="agents-cell-profile">{t("agents.colProfile")}</span>
-          <span className="agents-cell-model">{t("agents.colModel")}</span>
-          <span className="agents-cell-status">{t("agents.colStatus")}</span>
-          <span className="agents-cell-actions">{t("agents.colActions")}</span>
-        </div>
-        {profiles.map((p) => (
-          <div
-            key={p.id}
-            className={`agents-row ${activeProfile === p.id ? "active" : ""}`}
-            onClick={() => handleSelect(p.id)}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              // Only the row itself — not Enter bubbling up from the edit/chat
-              // buttons — should switch the profile.
-              if (e.key === "Enter" && e.target === e.currentTarget) {
-                handleSelect(p.id);
-              }
-            }}
-          >
-            <div className="agents-cell-profile">
-              <ProfileAvatar
-                name={p.id}
-                color={p.color}
-                avatar={p.avatar}
-                size={36}
+        {!showCreate && error && (
+          <div className="agents-create-error">{error}</div>
+        )}
+
+        <AppModal
+          open={showCreate}
+          onOpenChange={(open) => {
+            if (!open) closeCreate();
+          }}
+          className="agents-create-modal"
+          labelledBy="agents-create-title"
+        >
+          <div className="agents-create-modal-header">
+            <AppModalTitle
+              id="agents-create-title"
+              className="agents-create-modal-title"
+            >
+              {t("agents.createTitle")}
+            </AppModalTitle>
+            <button
+              className="profile-modal-close"
+              onClick={closeCreate}
+              aria-label={t("common.close")}
+            >
+              <X size={18} />
+            </button>
+          </div>
+          <div className="agents-create-modal-body">
+            <label className="agents-create-field">
+              <span>{t("agents.nameLabel")}</span>
+              <input
+                className="input"
+                placeholder={t("agents.namePlaceholder")}
+                value={newName}
+                onChange={(e) => {
+                  setNewName(e.target.value);
+                  setError("");
+                }}
+                onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+                autoFocus
               />
-              <div className="agents-row-info">
-                <div className="agents-row-name">{p.name}</div>
-                <div className="agents-row-sub">
-                  {p.id !== p.name ? `${p.id} · ` : ""}
-                  {providerLabel(p.provider)} ·{" "}
-                  {t("agents.skillsCount", { count: p.skillCount })}
+            </label>
+            <label className="agents-create-clone">
+              <input
+                type="checkbox"
+                checked={cloneConfig}
+                onChange={(e) => setCloneConfig(e.target.checked)}
+              />
+              <span>{t("agents.cloneConfig")}</span>
+            </label>
+            {cloneConfig && (
+              <label className="agents-create-field">
+                <span>{t("agents.cloneFromLabel")}</span>
+                <select
+                  className="input"
+                  value={cloneSource}
+                  onChange={(e) => setCloneSource(e.target.value)}
+                >
+                  {profiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {error && <div className="agents-create-error">{error}</div>}
+            <div className="agents-create-modal-actions">
+              <button className="btn btn-secondary" onClick={closeCreate}>
+                {t("common.cancel")}
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleCreate}
+                disabled={creating || !newName.trim()}
+              >
+                {creating ? t("agents.creating") : t("agents.create")}
+              </button>
+            </div>
+          </div>
+        </AppModal>
+
+        {loading ? (
+          <div className="agents-loading agents-legacy-loading">
+            <div className="loading-spinner" />
+          </div>
+        ) : (
+          <div className="agents-table">
+            <div className="agents-table-head">
+              <span className="agents-cell-profile">
+                {t("agents.colProfile")}
+              </span>
+              <span className="agents-cell-model">{t("agents.colModel")}</span>
+              <span className="agents-cell-status">
+                {t("agents.colStatus")}
+              </span>
+              <span className="agents-cell-actions">
+                {t("agents.colActions")}
+              </span>
+            </div>
+            {profiles.map((p) => (
+              <div
+                key={p.id}
+                className={`agents-row ${activeProfile === p.id ? "active" : ""}`}
+                onClick={() => handleSelect(p.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  // Only the row itself — not Enter bubbling up from the edit/chat
+                  // buttons — should switch the profile.
+                  if (e.key === "Enter" && e.target === e.currentTarget) {
+                    handleSelect(p.id);
+                  }
+                }}
+              >
+                <div className="agents-cell-profile">
+                  <ProfileAvatar
+                    name={p.id}
+                    color={p.color}
+                    avatar={p.avatar}
+                    size={36}
+                  />
+                  <div className="agents-row-info">
+                    <div className="agents-row-name">{p.name}</div>
+                    <div className="agents-row-sub">
+                      {p.id !== p.name ? `${p.id} · ` : ""}
+                      {providerLabel(p.provider)} ·{" "}
+                      {t("agents.skillsCount", { count: p.skillCount })}
+                    </div>
+                  </div>
+                </div>
+                <div className="agents-cell-model">
+                  {p.model ? (
+                    <code className="agents-model-chip">
+                      {p.model.split("/").pop()}
+                    </code>
+                  ) : (
+                    <span className="agents-model-empty">
+                      {t("agents.noModel")}
+                    </span>
+                  )}
+                </div>
+                <div className="agents-cell-status">
+                  {startingProfile === p.id && !p.gatewayRunning ? (
+                    <span className="agents-status-pill starting">
+                      <span className="agents-status-spinner" />
+                      {t("agents.starting")}
+                    </span>
+                  ) : (
+                    <span
+                      className={`agents-status-pill ${
+                        p.gatewayRunning ? "on" : "off"
+                      }`}
+                      title={
+                        p.gatewayRunning
+                          ? t("agents.gatewayRunning")
+                          : t("agents.gatewayOff")
+                      }
+                    >
+                      <span className="agents-status-dot" />
+                      {p.gatewayRunning ? t("agents.running") : t("agents.off")}
+                    </span>
+                  )}
+                </div>
+                <div className="agents-cell-actions">
+                  <button
+                    type="button"
+                    className="agents-row-edit"
+                    title={t("agents.editAppearanceFor", {
+                      name: p.name,
+                    })}
+                    aria-label={t("agents.editAppearanceFor", {
+                      name: p.name,
+                    })}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setError("");
+                      openProfile(p.id, {
+                        onChanged: loadProfiles,
+                        onDeleted: (n) => {
+                          if (activeProfile === n) onSelectProfile("default");
+                        },
+                      });
+                    }}
+                  >
+                    <Pencil size={14} />
+                  </button>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleChatWith(p.id);
+                    }}
+                  >
+                    <ChatBubble size={13} />
+                    {t("agents.chat")}
+                  </button>
                 </div>
               </div>
-            </div>
-            <div className="agents-cell-model">
-              {p.model ? (
-                <code className="agents-model-chip">
-                  {p.model.split("/").pop()}
-                </code>
-              ) : (
-                <span className="agents-model-empty">
-                  {t("agents.noModel")}
-                </span>
-              )}
-            </div>
-            <div className="agents-cell-status">
-              {startingProfile === p.id && !p.gatewayRunning ? (
-                <span className="agents-status-pill starting">
-                  <span className="agents-status-spinner" />
-                  {t("agents.starting")}
-                </span>
-              ) : (
-                <span
-                  className={`agents-status-pill ${
-                    p.gatewayRunning ? "on" : "off"
-                  }`}
-                  title={
-                    p.gatewayRunning
-                      ? t("agents.gatewayRunning")
-                      : t("agents.gatewayOff")
-                  }
-                >
-                  <span className="agents-status-dot" />
-                  {p.gatewayRunning ? t("agents.running") : t("agents.off")}
-                </span>
-              )}
-            </div>
-            <div className="agents-cell-actions">
-              <button
-                type="button"
-                className="agents-row-edit"
-                title={t("agents.editAppearanceFor", {
-                  name: p.name,
-                })}
-                aria-label={t("agents.editAppearanceFor", {
-                  name: p.name,
-                })}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setError("");
-                  openProfile(p.id, {
-                    onChanged: loadProfiles,
-                    onDeleted: (n) => {
-                      if (activeProfile === n) onSelectProfile("default");
-                    },
-                  });
-                }}
-              >
-                <Pencil size={14} />
-              </button>
-              <button
-                className="btn btn-primary btn-sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleChatWith(p.id);
-                }}
-              >
-                <ChatBubble size={13} />
-                {t("agents.chat")}
-              </button>
-            </div>
+            ))}
           </div>
-        ))}
-      </div>
+        )}
+      </section>
     </div>
   );
 }

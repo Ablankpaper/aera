@@ -108,6 +108,7 @@ describe("AgentEra desktop-local Agent drafts", () => {
     const reloaded = store.getDraft(DRAFT_ID);
     expect(reloaded).toEqual(created);
     expect(store.listDrafts()).toEqual([created]);
+    expect(store.getDraftDetail(DRAFT_ID).editableAssets).toEqual(assets());
 
     const serialized = JSON.stringify(reloaded);
     for (const forbidden of [
