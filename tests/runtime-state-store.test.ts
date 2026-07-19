@@ -1,6 +1,5 @@
 import {
   existsSync,
-  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -157,16 +156,20 @@ describe("AgentEra Runtime pointer state store", () => {
     const { paths, store } = makeStore();
     await createVersion(paths, "v1");
     await store.setCurrent(pointer("v1"));
-    chmodSync(paths.current, 0o000);
+    const readFailure = Object.assign(new Error("synthetic read failure"), {
+      code: "EACCES",
+    });
+    const failingStore = new RuntimeStateStore(paths, {
+      readPointerFile: async (path) => {
+        if (path === paths.current) throw readFailure;
+        return readFileSync(path);
+      },
+    });
 
-    try {
-      await expect(store.recoverForBootstrap()).rejects.toThrow(
-        /cannot read Runtime pointer/i,
-      );
-      expect(existsSync(paths.current)).toBe(true);
-    } finally {
-      chmodSync(paths.current, 0o600);
-    }
+    await expect(failingStore.recoverForBootstrap()).rejects.toThrow(
+      /cannot read Runtime pointer/i,
+    );
+    expect(existsSync(paths.current)).toBe(true);
   });
 
   it("promotes current/previous/candidate pointers and rolls back safely", async () => {

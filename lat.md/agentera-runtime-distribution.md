@@ -44,7 +44,7 @@ Mutable Runtime versions and current, previous, and candidate pointers live only
 
 Recovery removes only pointer temp files and stale transactions proven to be under Runtime staging or downloads. Version cleanup keeps every referenced directory and rejects lexical or real-path escape, including parent symlinks.
 
-Startup recovery reads current, previous, and candidate pointers independently. A malformed or missing-directory pointer is removed without exposing its contents; a valid previous Runtime becomes current when the current pointer or required program layout is unusable. If neither is usable, startup continues into the packaged-Seed repair state rather than selecting an online or system Runtime.
+Startup recovery reads current, previous, and candidate pointers independently. A malformed or missing-directory pointer is removed without exposing its contents, while an operational file-read failure stops recovery without deleting a pointer that could not be validated. A valid previous Runtime becomes current when the current pointer or required program layout is unusable. If neither is usable, startup continues into the packaged-Seed repair state rather than selecting an online or system Runtime.
 
 ## Program and Profile isolation
 

@@ -52,6 +52,7 @@ export interface RuntimeBootstrapRecovery {
 export interface RuntimeStateStoreOptions {
   now?: () => Date;
   staleTransactionAgeMs?: number;
+  readPointerFile?: (path: string) => Promise<Buffer>;
 }
 
 export class RuntimeStateError extends Error {
@@ -195,16 +196,19 @@ async function readPointer(
   path: string,
   paths: RuntimeDistributionPaths,
   candidate: false,
+  readPointerFile: (path: string) => Promise<Buffer>,
 ): Promise<RuntimePointer | null>;
 async function readPointer(
   path: string,
   paths: RuntimeDistributionPaths,
   candidate: true,
+  readPointerFile: (path: string) => Promise<Buffer>,
 ): Promise<CandidatePointer | null>;
 async function readPointer(
   path: string,
   paths: RuntimeDistributionPaths,
   candidate: boolean,
+  readPointerFile: (path: string) => Promise<Buffer>,
 ): Promise<RuntimePointer | CandidatePointer | null> {
   let metadata;
   try {
@@ -220,7 +224,7 @@ async function readPointer(
   }
   let raw: Buffer;
   try {
-    raw = await readFile(path);
+    raw = await readPointerFile(path);
   } catch (error) {
     throw new RuntimePointerReadError("cannot read Runtime pointer", {
       cause: error,
@@ -479,6 +483,7 @@ function samePointer(
 export class RuntimeStateStore {
   private readonly now: () => Date;
   private readonly staleTransactionAgeMs: number;
+  private readonly readPointerFile: (path: string) => Promise<Buffer>;
   private operation: Promise<void> = Promise.resolve();
 
   constructor(
@@ -486,6 +491,8 @@ export class RuntimeStateStore {
     options: RuntimeStateStoreOptions = {},
   ) {
     this.now = options.now ?? (() => new Date());
+    this.readPointerFile =
+      options.readPointerFile ?? ((path: string) => readFile(path));
     this.staleTransactionAgeMs =
       options.staleTransactionAgeMs ?? DEFAULT_STALE_TRANSACTION_AGE_MS;
     if (
@@ -508,9 +515,9 @@ export class RuntimeStateStore {
   private async readStateUnlocked(): Promise<RuntimeDistributionState> {
     await ensureRuntimeDistributionDirectories(this.paths);
     const [current, previous, candidate] = await Promise.all([
-      readPointer(this.paths.current, this.paths, false),
-      readPointer(this.paths.previous, this.paths, false),
-      readPointer(this.paths.candidate, this.paths, true),
+      readPointer(this.paths.current, this.paths, false, this.readPointerFile),
+      readPointer(this.paths.previous, this.paths, false, this.readPointerFile),
+      readPointer(this.paths.candidate, this.paths, true, this.readPointerFile),
     ]);
     return { current, previous, candidate };
   }
@@ -573,21 +580,36 @@ export class RuntimeStateStore {
       let previous: RuntimePointer | null = null;
       let candidate: CandidatePointer | null = null;
       try {
-        current = await readPointer(this.paths.current, this.paths, false);
+        current = await readPointer(
+          this.paths.current,
+          this.paths,
+          false,
+          this.readPointerFile,
+        );
       } catch (error) {
         if (error instanceof RuntimePointerReadError) throw error;
         invalidPointers.push("current");
         await removePointer(this.paths.current, this.paths);
       }
       try {
-        previous = await readPointer(this.paths.previous, this.paths, false);
+        previous = await readPointer(
+          this.paths.previous,
+          this.paths,
+          false,
+          this.readPointerFile,
+        );
       } catch (error) {
         if (error instanceof RuntimePointerReadError) throw error;
         invalidPointers.push("previous");
         await removePointer(this.paths.previous, this.paths);
       }
       try {
-        candidate = await readPointer(this.paths.candidate, this.paths, true);
+        candidate = await readPointer(
+          this.paths.candidate,
+          this.paths,
+          true,
+          this.readPointerFile,
+        );
       } catch (error) {
         if (error instanceof RuntimePointerReadError) throw error;
         invalidPointers.push("candidate");
