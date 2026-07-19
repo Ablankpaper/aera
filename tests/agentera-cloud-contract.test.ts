@@ -87,4 +87,21 @@ describe("AgentEra cloud contract pin", () => {
     );
     expect(source).not.toMatch(/interface\s+RawTokenResponse/);
   });
+
+  it("generates the reviewed Agent control schemas without a cloud draft", () => {
+    const source = readFileSync(generatedTypes, "utf8");
+    for (const schema of [
+      "AgentDefinition",
+      "AgentVersion",
+      "AgentPolicySnapshot",
+      "AgentInstallation",
+      "RuntimeBindingRecord",
+      "PublishInitialAgentRequest",
+      "PublishNextAgentVersionRequest",
+    ]) {
+      expect(source).toContain(`${schema}:`);
+    }
+    expect(source).not.toContain("AgentDraft");
+    expect(source).not.toContain("agent_draft");
+  });
 });

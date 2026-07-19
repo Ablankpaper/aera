@@ -44,6 +44,8 @@ const AGENTERA_OFFLINE_AUDIENCE = "agentera-studio";
 export interface AgenteraAuthController {
   initialize(): Promise<AgenteraAuthPublicState>;
   getPublicState(): AgenteraAuthPublicState;
+  /** Main-process-only bearer access; never expose this method through IPC. */
+  getAccessTokenForCloudRequest(): string | null;
   startBrowserLogin(options?: {
     forceAccountSelection?: boolean;
   }): Promise<void>;

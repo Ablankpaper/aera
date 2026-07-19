@@ -21,6 +21,15 @@ const REQUIRED_PATHS = [
   "/api/v1/accounts/password/change",
   "/api/v1/accounts/password/reset",
   "/api/v1/accounts/register",
+  "/api/v1/agent-definitions",
+  "/api/v1/agent-definitions/{definition_id}",
+  "/api/v1/agent-definitions/{definition_id}/versions",
+  "/api/v1/agent-installations",
+  "/api/v1/agent-installations/{installation_id}/activate",
+  "/api/v1/agent-installations/{installation_id}/archive",
+  "/api/v1/agent-installations/{installation_id}/select-version",
+  "/api/v1/agent-versions/{version_id}",
+  "/api/v1/agent-versions/{version_id}/revocations",
   "/api/v1/browser/login",
   "/api/v1/browser/logout",
   "/api/v1/devices",
@@ -32,6 +41,7 @@ const REQUIRED_PATHS = [
   "/api/v1/oauth/refresh",
   "/api/v1/oauth/revoke",
   "/api/v1/oauth/token",
+  "/api/v1/runtime-binding-records",
   "/api/v1/verification/challenges",
   "/api/v1/verification/challenges/verify",
   "/oauth/authorize",
@@ -53,19 +63,39 @@ const ERROR_CODES = [
   "account_disabled",
   "account_not_found",
   "account_pending_deletion",
+  "activation_conflict",
   "authorization_expired",
   "authorization_replayed",
+  "definition_archived",
   "deletion_window_expired",
   "device_limit_reached",
   "device_not_found",
+  "idempotency_conflict",
   "identity_conflict",
+  "installation_archived",
+  "invalid_agent_content",
   "invalid_credentials",
+  "invalid_device_proof",
   "invalid_request",
   "last_identity",
+  "not_found",
+  "runtime_incompatible",
   "self_revoke_replayed",
   "service_unavailable",
   "session_revoked",
   "verification_required",
+  "version_conflict",
+  "version_revoked",
+];
+
+const AGENT_SCHEMAS = [
+  "AgentDefinition",
+  "AgentInstallation",
+  "AgentPolicySnapshot",
+  "AgentVersion",
+  "PublishInitialAgentRequest",
+  "PublishNextAgentVersionRequest",
+  "RuntimeBindingRecord",
 ];
 
 const EXACT_LOOPBACK_REDIRECT =
@@ -93,6 +123,9 @@ function exactMembers(actual, expected, label) {
 }
 
 function validateCriticalContract(document) {
+  if (document.info?.version !== "0.2.0") {
+    fail(`OpenAPI version changed: ${String(document.info?.version)}`);
+  }
   const paths = object(document.paths, "paths");
   for (const path of REQUIRED_PATHS) {
     if (!Object.hasOwn(paths, path))
@@ -135,6 +168,25 @@ function validateCriticalContract(document) {
     object(schemas.ErrorCode, "ErrorCode").enum ?? [],
     ERROR_CODES,
     "ErrorCode.enum",
+  );
+
+  for (const schemaName of AGENT_SCHEMAS) {
+    const schema = object(schemas[schemaName], schemaName);
+    if (schema.type !== "object" || schema.additionalProperties !== false) {
+      fail(`${schemaName} is no longer a strict object`);
+    }
+  }
+  if (Object.hasOwn(schemas, "AgentDraft")) {
+    fail("AgentDraft must remain desktop-local");
+  }
+
+  exactMembers(
+    object(
+      object(schemas.SigningKey, "SigningKey").properties,
+      "SigningKey.properties",
+    ).purpose.enum ?? [],
+    ["access", "agent_policy", "agent_version", "offline_entitlement"],
+    "SigningKey.purpose.enum",
   );
 
   const refreshResponses = object(
