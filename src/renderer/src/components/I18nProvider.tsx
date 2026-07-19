@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import {
   APP_LOCALES,
-  DEFAULT_ACTIVE_LOCALE,
   getLocaleDirection,
+  resolveSystemLocale,
   setLocale as setSharedLocale,
   sharedI18n,
   type AppLocale,
@@ -32,7 +32,9 @@ function readStoredLocale(): AppLocale {
   } catch {
     /* ignore */
   }
-  return DEFAULT_ACTIVE_LOCALE;
+  return resolveSystemLocale(
+    typeof navigator === "undefined" ? undefined : navigator.language,
+  );
 }
 
 const initialLocale = readStoredLocale();

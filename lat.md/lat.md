@@ -11,6 +11,7 @@ This directory defines the high-level concepts, business logic, and architecture
 - [[window-chrome]] — the browser-style title bar where open-conversation tabs sit on top of the window drag region, clickable while empty space still drags.
 - [[desktop-updates]] — GitHub release checks, startup upgrade button behavior, and the Settings auto-upgrade preference.
 - [[agentera-branding]] — the AgentEra Studio product identity, visible naming rules, icon contract, and internal Hermes compatibility boundary.
+- [[system-locale]] — first-use operating-system language selection, locale normalization, and saved-preference precedence.
 - [[agentera-self-evolution]] — the release-blocking Hermes compatibility rule, local self-learning boundary, immutable Agent versions, and explicit candidate-promotion path.
 - [[agentera-runtime-distribution]] — the signed platform-specific Runtime seed, offline first installation, user-confirmed updates, rollback, and Profile-data isolation.
 - [[agentera-app-authentication]] — the independent AgentEra APP account gate, browser PKCE flow, device-bound offline entitlement, and existing-Profile ownership rules.
