@@ -1,4 +1,5 @@
 import { randomUUID as nodeRandomUUID } from "node:crypto";
+import type { AgenteraRuntimeOwner } from "../agentera-profile-binding";
 import type { CreateRuntimeBindingRecordRequest } from "./client";
 import type { AgenteraControlPlaneDatabase } from "./db";
 
@@ -91,6 +92,7 @@ export class RuntimeBindingStoreError extends Error {
 
 export interface RuntimeBindingStoreOptions {
   database: AgenteraControlPlaneDatabase;
+  owner: AgenteraRuntimeOwner;
   now?: () => Date;
   randomUUID?: () => string;
 }
@@ -349,9 +351,18 @@ export class RuntimeBindingStore {
   private readonly database: AgenteraControlPlaneDatabase;
   private readonly now: () => Date;
   private readonly randomUUID: () => string;
+  private readonly tenantId: string;
+  private readonly ownerId: string;
+  private readonly deviceInstallationId: string;
 
   constructor(options: RuntimeBindingStoreOptions) {
     this.database = options.database;
+    this.tenantId = uuid(options.owner.tenantId, "invalid_binding");
+    this.ownerId = uuid(options.owner.ownerId, "invalid_binding");
+    this.deviceInstallationId = uuid(
+      options.owner.deviceInstallationId,
+      "invalid_binding",
+    );
     this.now = options.now ?? (() => new Date());
     this.randomUUID = options.randomUUID ?? nodeRandomUUID;
   }
@@ -360,6 +371,13 @@ export class RuntimeBindingStore {
     inputValue: CreateLocalRuntimeBindingInput,
   ): LocalRuntimeBinding {
     const input = normalizeInput(inputValue);
+    if (
+      input.tenantId !== this.tenantId ||
+      input.ownerId !== this.ownerId ||
+      input.deviceId !== this.deviceInstallationId
+    ) {
+      throw new RuntimeBindingStoreError("binding_conflict");
+    }
     const existing = this.getByConversationKey(input.conversationKey);
     if (existing) {
       if (
@@ -383,11 +401,15 @@ export class RuntimeBindingStore {
       this.database.sqlite
         .prepare(
           `INSERT INTO runtime_bindings (
-             id, conversation_key, hermes_session_id, binding_json, created_at
-           ) VALUES (?, ?, NULL, ?, ?)`,
+             id, tenant_id, owner_id, device_installation_id,
+             conversation_key, hermes_session_id, binding_json, created_at
+           ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
         )
         .run(
           binding.id,
+          this.tenantId,
+          this.ownerId,
+          this.deviceInstallationId,
           binding.conversationKey,
           JSON.stringify(binding),
           binding.createdAt,
@@ -395,12 +417,16 @@ export class RuntimeBindingStore {
       this.database.sqlite
         .prepare(
           `INSERT INTO pending_sanitized_records (
-             id, record_type, payload_json, attempt_count, next_attempt_at,
+             id, tenant_id, owner_id, device_installation_id,
+             record_type, payload_json, attempt_count, next_attempt_at,
              created_at, updated_at
-           ) VALUES (?, 'runtime_binding', ?, 0, NULL, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, 'runtime_binding', ?, 0, NULL, ?, ?)`,
         )
         .run(
           binding.id,
+          this.tenantId,
+          this.ownerId,
+          this.deviceInstallationId,
           JSON.stringify(pendingBody),
           binding.createdAt,
           binding.createdAt,
@@ -436,9 +462,16 @@ export class RuntimeBindingStore {
       this.database.sqlite
         .prepare(
           `SELECT id, conversation_key, hermes_session_id, binding_json, created_at
-           FROM runtime_bindings WHERE conversation_key = ?`,
+           FROM runtime_bindings
+           WHERE conversation_key = ? AND tenant_id = ? AND owner_id = ?
+             AND device_installation_id = ?`,
         )
-        .get(conversationKey) as BindingRow | undefined,
+        .get(
+          conversationKey,
+          this.tenantId,
+          this.ownerId,
+          this.deviceInstallationId,
+        ) as BindingRow | undefined,
     );
   }
 
@@ -448,9 +481,16 @@ export class RuntimeBindingStore {
       this.database.sqlite
         .prepare(
           `SELECT id, conversation_key, hermes_session_id, binding_json, created_at
-           FROM runtime_bindings WHERE hermes_session_id = ?`,
+           FROM runtime_bindings
+           WHERE hermes_session_id = ? AND tenant_id = ? AND owner_id = ?
+             AND device_installation_id = ?`,
         )
-        .get(sessionId) as BindingRow | undefined,
+        .get(
+          sessionId,
+          this.tenantId,
+          this.ownerId,
+          this.deviceInstallationId,
+        ) as BindingRow | undefined,
     );
   }
 
@@ -460,9 +500,16 @@ export class RuntimeBindingStore {
       this.database.sqlite
         .prepare(
           `SELECT id, conversation_key, hermes_session_id, binding_json, created_at
-           FROM runtime_bindings WHERE id = ?`,
+           FROM runtime_bindings
+           WHERE id = ? AND tenant_id = ? AND owner_id = ?
+             AND device_installation_id = ?`,
         )
-        .get(bindingId) as BindingRow | undefined,
+        .get(
+          bindingId,
+          this.tenantId,
+          this.ownerId,
+          this.deviceInstallationId,
+        ) as BindingRow | undefined,
     );
   }
 
@@ -485,9 +532,17 @@ export class RuntimeBindingStore {
         .prepare(
           `UPDATE runtime_bindings
            SET hermes_session_id = ?, binding_json = ?
-           WHERE id = ? AND hermes_session_id IS NULL`,
+           WHERE id = ? AND tenant_id = ? AND owner_id = ?
+             AND device_installation_id = ? AND hermes_session_id IS NULL`,
         )
-        .run(sessionId, JSON.stringify(updated), bindingId);
+        .run(
+          sessionId,
+          JSON.stringify(updated),
+          bindingId,
+          this.tenantId,
+          this.ownerId,
+          this.deviceInstallationId,
+        );
     } catch {
       throw new RuntimeBindingStoreError("binding_conflict");
     }
@@ -524,10 +579,15 @@ export class RuntimeBindingStore {
       .prepare(
         `SELECT id, payload_json, attempt_count, next_attempt_at
          FROM pending_sanitized_records
-         WHERE record_type = 'runtime_binding'
+         WHERE record_type = 'runtime_binding' AND tenant_id = ? AND owner_id = ?
+           AND device_installation_id = ?
          ORDER BY created_at ASC`,
       )
-      .all() as PendingRow[];
+      .all(
+        this.tenantId,
+        this.ownerId,
+        this.deviceInstallationId,
+      ) as PendingRow[];
     return rows.map((row) => {
       if (
         typeof row.payload_json !== "string" ||
@@ -572,9 +632,15 @@ export class RuntimeBindingStore {
         const result = this.database.sqlite
           .prepare(
             `DELETE FROM pending_sanitized_records
-             WHERE id = ? AND record_type = 'runtime_binding'`,
+             WHERE id = ? AND tenant_id = ? AND owner_id = ?
+               AND device_installation_id = ? AND record_type = 'runtime_binding'`,
           )
-          .run(record.id);
+          .run(
+            record.id,
+            this.tenantId,
+            this.ownerId,
+            this.deviceInstallationId,
+          );
         if (Number(result.changes) !== 1) {
           throw new RuntimeBindingStoreError("binding_conflict");
         }
@@ -593,9 +659,17 @@ export class RuntimeBindingStore {
             `UPDATE pending_sanitized_records
              SET attempt_count = attempt_count + 1,
                  next_attempt_at = ?, updated_at = ?
-             WHERE id = ? AND record_type = 'runtime_binding'`,
+             WHERE id = ? AND tenant_id = ? AND owner_id = ?
+               AND device_installation_id = ? AND record_type = 'runtime_binding'`,
           )
-          .run(nextAttemptAt, updatedAt, record.id);
+          .run(
+            nextAttemptAt,
+            updatedAt,
+            record.id,
+            this.tenantId,
+            this.ownerId,
+            this.deviceInstallationId,
+          );
         failed += 1;
       }
     }

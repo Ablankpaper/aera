@@ -366,7 +366,7 @@ describe("Agent installation orchestration", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  function manager(): AgentInstallationManager {
+  function manager(ownerOverride = owner): AgentInstallationManager {
     return new AgentInstallationManager({
       database,
       client,
@@ -375,7 +375,7 @@ describe("Agent installation orchestration", () => {
       projection,
       profileBindings: bindings,
       profiles,
-      owner,
+      owner: ownerOverride,
       runtimeVersion: "v0.18.2-agentera.1",
       now: () => NOW,
       randomUUID: () => OPERATION_ID,
@@ -425,6 +425,24 @@ describe("Agent installation orchestration", () => {
       agentInstallationId: AGENT_INSTALLATION_ID,
       runtimeProfileId: RUNTIME_PROFILE_ID,
     });
+  });
+
+  it("does not expose one product account's installation to another", async () => {
+    await manager().install({
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      profile: { kind: "fresh", name: "Fresh Agent" },
+    });
+    const other = manager({
+      tenantId: "12121212-1212-4121-8121-121212121212",
+      ownerId: "13131313-1313-4131-8131-131313131313",
+      deviceInstallationId: "14141414-1414-4141-8141-141414141414",
+    });
+    expect(other.listLocalInstallations()).toEqual([]);
+    expect(() => other.getLocalInstallation(AGENT_INSTALLATION_ID)).toThrow(
+      expect.objectContaining({ code: "installation_not_found" }),
+    );
+    expect(manager().listLocalInstallations()).toHaveLength(1);
   });
 
   it("uses only an explicit same-owner claim for an existing Profile", async () => {
@@ -500,7 +518,7 @@ describe("Agent installation orchestration", () => {
     expect(manager().getLocalInstallation(AGENT_INSTALLATION_ID)).toMatchObject(
       {
         status: "pending",
-        retryCode: "materialization_failed",
+        retryCode: "materialization_version_failed",
         runtimeProfileId: null,
       },
     );

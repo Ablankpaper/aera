@@ -30,6 +30,7 @@ const REQUIRED_PATHS = [
   "/api/v1/agent-installations/{installation_id}/select-version",
   "/api/v1/agent-versions/{version_id}",
   "/api/v1/agent-versions/{version_id}/revocations",
+  "/api/v1/policy-snapshots/{policy_snapshot_id}",
   "/api/v1/browser/login",
   "/api/v1/browser/logout",
   "/api/v1/devices",

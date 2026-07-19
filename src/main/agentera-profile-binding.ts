@@ -110,6 +110,9 @@ const PRIVATE_PROFILE_MARKERS = [
   "curator",
   ".curator",
 ] as const;
+const FRESH_PROFILE_FORBIDDEN_MARKERS = PRIVATE_PROFILE_MARKERS.filter(
+  (marker) => marker !== ".env" && marker !== "sessions" && marker !== "skills",
+);
 
 function validUuid(value: unknown): value is string {
   return typeof value === "string" && UUID_PATTERN.test(value);
@@ -228,6 +231,13 @@ export function hasMeaningfulHermesProfileData(profilePath: string): boolean {
   );
 }
 
+function freshProfileHasPrivateData(profilePath: string): boolean {
+  const canonical = canonicalProfilePath(profilePath);
+  return FRESH_PROFILE_FORBIDDEN_MARKERS.some((marker) =>
+    markerHasData(join(canonical, marker)),
+  );
+}
+
 function sameOwner(
   binding: RuntimeOwnerBinding,
   owner: AgenteraRuntimeOwner,
@@ -332,7 +342,11 @@ export class AgenteraProfileBindingStore {
       );
     }
     const profilePath = request.resolveProfilePath(created.id);
-    if (hasMeaningfulHermesProfileData(profilePath)) {
+    // Hermes creates .env, sessions, and built-in Skill scaffolding even when
+    // cloneFrom is null. They belong to this newly-created physical Profile;
+    // none is read or copied here. Memory, USER, files, auth, and Curator
+    // markers remain forbidden before activation can start local adaptation.
+    if (freshProfileHasPrivateData(profilePath)) {
       throw new Error(
         "Fresh Runtime Profile creation unexpectedly produced private data.",
       );

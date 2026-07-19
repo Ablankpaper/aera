@@ -147,6 +147,11 @@ function publicFailureCode(error: unknown): string {
   return "publication_failed";
 }
 
+function localVerificationFailureCode(error: unknown): string {
+  if (error instanceof AgenteraAgentTrustError) return error.code;
+  return publicFailureCode(error);
+}
+
 export class AgentPublisher {
   private readonly drafts: AgentPublicationDraftStore;
   private readonly client: AgentPublicationClient;
@@ -284,7 +289,7 @@ export class AgentPublisher {
         publication.version.id,
       );
     } catch (error) {
-      this.recordFailure(prepared, "verification_failed");
+      this.recordFailure(prepared, localVerificationFailureCode(error));
       if (error instanceof AgentDraftStoreError) {
         throw new AgentPublisherError(error.code);
       }

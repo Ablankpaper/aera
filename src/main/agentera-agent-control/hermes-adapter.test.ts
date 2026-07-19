@@ -167,13 +167,17 @@ describe("AgentEra adapter around the real Hermes transport", () => {
     database.sqlite
       .prepare(
         `INSERT INTO local_agent_installations (
-           agent_installation_id, definition_id, selected_version_id,
+           agent_installation_id, tenant_id, owner_id, device_installation_id,
+           definition_id, selected_version_id,
            runtime_profile_id, policy_snapshot_id, status, retry_code,
            created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, 'active', NULL, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?, ?)`,
       )
       .run(
         INSTALLATION_ID,
+        TENANT_ID,
+        OWNER_ID,
+        DEVICE_ID,
         DEFINITION_ID,
         VERSION_ID,
         RUNTIME_PROFILE_ID,
@@ -184,6 +188,7 @@ describe("AgentEra adapter around the real Hermes transport", () => {
     const ids = [BINDING_ID, ADAPTIVE_ID];
     bindingStore = new RuntimeBindingStore({
       database,
+      owner,
       now: () => NOW,
       randomUUID: () => ids.shift() ?? ADAPTIVE_ID,
     });

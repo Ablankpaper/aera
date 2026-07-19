@@ -33,6 +33,15 @@ export type AgentInstallationManagerErrorCode =
   | "archive_failed"
   | "installation_not_found";
 
+type AgentInstallationRetryCode =
+  | AgentInstallationManagerErrorCode
+  | "materialization_version_failed"
+  | "materialization_policy_failed"
+  | "materialization_projection_failed"
+  | "profile_creation_failed"
+  | "profile_attachment_failed"
+  | "profile_projection_failed";
+
 export class AgentInstallationManagerError extends Error {
   readonly code: AgentInstallationManagerErrorCode;
 
@@ -212,6 +221,19 @@ function operationKey(kind: string, ...ids: string[]): string {
   return `agentera:${kind}:${ids.join(":")}`;
 }
 
+function reportStageFailure(stage: string, error: unknown): void {
+  const candidate = error as { code?: unknown; name?: unknown } | null;
+  const code =
+    candidate &&
+    typeof candidate.code === "string" &&
+    /^[a-z][a-z0-9_]{0,63}$/.test(candidate.code)
+      ? candidate.code
+      : candidate && typeof candidate.name === "string"
+        ? candidate.name
+        : "unknown";
+  console.error(`[AGENTERA_AGENT_INSTALLATION] ${stage} failed: ${code}`);
+}
+
 function assertPendingCreation(
   creation: AgentInstallationCreation,
   definitionId: string,
@@ -312,9 +334,6 @@ export class AgentInstallationManager {
     ) {
       throw new AgentInstallationManagerError("invalid_installation_request");
     }
-    uuid(options.owner.tenantId);
-    uuid(options.owner.ownerId);
-    uuid(options.owner.deviceInstallationId);
     this.database = options.database;
     this.client = options.client;
     this.trust = options.trust;
@@ -322,7 +341,11 @@ export class AgentInstallationManager {
     this.projection = options.projection;
     this.profileBindings = options.profileBindings;
     this.profiles = options.profiles;
-    this.owner = { ...options.owner };
+    this.owner = {
+      tenantId: uuid(options.owner.tenantId),
+      ownerId: uuid(options.owner.ownerId),
+      deviceInstallationId: uuid(options.owner.deviceInstallationId),
+    };
     this.runtimeVersion = options.runtimeVersion;
     this.now = options.now ?? (() => new Date());
     this.randomUUID = options.randomUUID ?? nodeRandomUUID;
@@ -334,9 +357,16 @@ export class AgentInstallationManager {
     const agentInstallationId = uuid(agentInstallationIdInput);
     const row = this.database.sqlite
       .prepare(
-        "SELECT * FROM local_agent_installations WHERE agent_installation_id = ?",
+        `SELECT * FROM local_agent_installations
+         WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
+           AND device_installation_id = ?`,
       )
-      .get(agentInstallationId) as LocalInstallationRow | undefined;
+      .get(
+        agentInstallationId,
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+      ) as LocalInstallationRow | undefined;
     if (!row) {
       throw new AgentInstallationManagerError("installation_not_found");
     }
@@ -347,9 +377,14 @@ export class AgentInstallationManager {
     const rows = this.database.sqlite
       .prepare(
         `SELECT * FROM local_agent_installations
+         WHERE tenant_id = ? AND owner_id = ? AND device_installation_id = ?
          ORDER BY created_at DESC, agent_installation_id ASC`,
       )
-      .all() as LocalInstallationRow[];
+      .all(
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+      ) as LocalInstallationRow[];
     return rows.map(parseLocalRow);
   }
 
@@ -384,9 +419,16 @@ export class AgentInstallationManager {
     try {
       const existing = this.database.sqlite
         .prepare(
-          "SELECT * FROM local_agent_installations WHERE agent_installation_id = ?",
+          `SELECT * FROM local_agent_installations
+           WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
+             AND device_installation_id = ?`,
         )
-        .get(installationId) as LocalInstallationRow | undefined;
+        .get(
+          installationId,
+          this.owner.tenantId,
+          this.owner.ownerId,
+          this.owner.deviceInstallationId,
+        ) as LocalInstallationRow | undefined;
       if (existing) {
         const parsed = parseLocalRow(existing);
         if (
@@ -401,13 +443,17 @@ export class AgentInstallationManager {
         this.database.sqlite
           .prepare(
             `INSERT INTO local_agent_installations (
-             agent_installation_id, definition_id, selected_version_id,
+             agent_installation_id, tenant_id, owner_id, device_installation_id,
+             definition_id, selected_version_id,
              runtime_profile_id, policy_snapshot_id, status, retry_code,
              created_at, updated_at
-           ) VALUES (?, ?, ?, NULL, ?, 'pending', NULL, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 'pending', NULL, ?, ?)`,
           )
           .run(
             installationId,
+            this.owner.tenantId,
+            this.owner.ownerId,
+            this.owner.deviceInstallationId,
             definitionId,
             versionId,
             policyId,
@@ -533,13 +579,17 @@ export class AgentInstallationManager {
         `UPDATE local_agent_installations
          SET selected_version_id = ?, policy_snapshot_id = ?, retry_code = NULL,
              updated_at = ?
-         WHERE agent_installation_id = ? AND status = 'active'`,
+         WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
+           AND device_installation_id = ? AND status = 'active'`,
       )
       .run(
         versionId,
         selected.policy_snapshot_id ?? local.policySnapshotId,
         timestamp(this.now),
         local.agentInstallationId,
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
       );
     return this.getLocalInstallation(local.agentInstallationId);
   }
@@ -569,9 +619,16 @@ export class AgentInstallationManager {
       .prepare(
         `UPDATE local_agent_installations
          SET status = 'archived', retry_code = NULL, updated_at = ?
-         WHERE agent_installation_id = ?`,
+         WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
+           AND device_installation_id = ?`,
       )
-      .run(timestamp(this.now), local.agentInstallationId);
+      .run(
+        timestamp(this.now),
+        local.agentInstallationId,
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+      );
     return this.getLocalInstallation(local.agentInstallationId);
   }
 
@@ -582,11 +639,14 @@ export class AgentInstallationManager {
   ): Promise<LocalAgentInstallation> {
     let version: AgentVersion;
     let projection: HermesVersionProjection;
+    let materializationStage: AgentInstallationRetryCode =
+      "materialization_version_failed";
     try {
       const downloaded = await this.client.getVersion(local.selectedVersionId);
       assertVersion(downloaded, local.definitionId, local.selectedVersionId);
       version = this.cache.cacheVerifiedVersion(downloaded);
       assertVersion(version, local.definitionId, local.selectedVersionId);
+      materializationStage = "materialization_policy_failed";
       assertPolicy(
         policy,
         local.agentInstallationId,
@@ -601,17 +661,20 @@ export class AgentInstallationManager {
         throw new AgentInstallationManagerError("installation_conflict");
       }
       this.cache.cacheVerifiedPolicySnapshot(version.id, policy);
+      materializationStage = "materialization_projection_failed";
       projection = this.projection.materializeVersion({
         agentInstallationId: local.agentInstallationId,
         version,
       });
-    } catch {
-      this.recordFailure(local.agentInstallationId, "materialization_failed");
+    } catch (error) {
+      reportStageFailure("materialization", error);
+      this.recordFailure(local.agentInstallationId, materializationStage);
       throw new AgentInstallationManagerError("materialization_failed");
     }
 
     let profilePath: string;
     let binding: RuntimeOwnerBinding;
+    let profileStage: AgentInstallationRetryCode = "profile_creation_failed";
     try {
       if (local.runtimeProfileId !== null && target.kind !== "claim") {
         throw new AgentInstallationManagerError("installation_conflict");
@@ -639,25 +702,31 @@ export class AgentInstallationManager {
       ) {
         throw new AgentInstallationManagerError("installation_conflict");
       }
+      profileStage = "profile_attachment_failed";
       this.database.sqlite
         .prepare(
           `UPDATE local_agent_installations
            SET runtime_profile_id = ?, updated_at = ?
-           WHERE agent_installation_id = ? AND status = 'pending'`,
+           WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
+             AND device_installation_id = ? AND status = 'pending'`,
         )
         .run(
           binding.runtimeProfileId,
           timestamp(this.now),
           local.agentInstallationId,
+          this.owner.tenantId,
+          this.owner.ownerId,
+          this.owner.deviceInstallationId,
         );
       binding = this.profileBindings.attachAgentInstallation(
         profilePath,
         this.owner,
         local.agentInstallationId,
       );
+      profileStage = "profile_projection_failed";
       this.projection.activateForProfile({ projection, profilePath });
     } catch {
-      this.recordFailure(local.agentInstallationId, "profile_binding_failed");
+      this.recordFailure(local.agentInstallationId, profileStage);
       throw new AgentInstallationManagerError("profile_binding_failed");
     }
 
@@ -687,13 +756,17 @@ export class AgentInstallationManager {
           `UPDATE local_agent_installations
            SET runtime_profile_id = ?, policy_snapshot_id = ?, status = 'active',
                retry_code = NULL, updated_at = ?
-           WHERE agent_installation_id = ? AND status = 'pending'`,
+           WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
+             AND device_installation_id = ? AND status = 'pending'`,
         )
         .run(
           binding.runtimeProfileId,
           activated.policy_snapshot_id,
           timestamp(this.now),
           local.agentInstallationId,
+          this.owner.tenantId,
+          this.owner.ownerId,
+          this.owner.deviceInstallationId,
         );
     } catch {
       this.recordFailure(local.agentInstallationId, "activation_failed");
@@ -704,15 +777,23 @@ export class AgentInstallationManager {
 
   private recordFailure(
     agentInstallationId: string,
-    code: AgentInstallationManagerErrorCode,
+    code: AgentInstallationRetryCode,
   ): void {
     this.database.sqlite
       .prepare(
         `UPDATE local_agent_installations
          SET retry_code = ?, updated_at = ?
-         WHERE agent_installation_id = ? AND status = 'pending'`,
+         WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
+           AND device_installation_id = ? AND status = 'pending'`,
       )
-      .run(code, timestamp(this.now), agentInstallationId);
+      .run(
+        code,
+        timestamp(this.now),
+        agentInstallationId,
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+      );
   }
 
   private beginCreationIntent(
@@ -723,10 +804,15 @@ export class AgentInstallationManager {
       .prepare(
         `SELECT id, payload_json
          FROM pending_sanitized_records
-         WHERE record_type = 'agent_installation_create'
+         WHERE record_type = 'agent_installation_create' AND tenant_id = ?
+           AND owner_id = ? AND device_installation_id = ?
          ORDER BY created_at ASC`,
       )
-      .all() as Array<{ id?: unknown; payload_json?: unknown }>;
+      .all(
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+      ) as Array<{ id?: unknown; payload_json?: unknown }>;
     const matches: InstallationCreationIntent[] = [];
     for (const row of rows) {
       if (typeof row.id !== "string" || typeof row.payload_json !== "string") {
@@ -778,11 +864,20 @@ export class AgentInstallationManager {
     this.database.sqlite
       .prepare(
         `INSERT INTO pending_sanitized_records (
-           id, record_type, payload_json, attempt_count, next_attempt_at,
+           id, tenant_id, owner_id, device_installation_id,
+           record_type, payload_json, attempt_count, next_attempt_at,
            created_at, updated_at
-         ) VALUES (?, 'agent_installation_create', ?, 0, NULL, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, 'agent_installation_create', ?, 0, NULL, ?, ?)`,
       )
-      .run(id, payload, createdAt, createdAt);
+      .run(
+        id,
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+        payload,
+        createdAt,
+        createdAt,
+      );
     return {
       id,
       definitionId,
@@ -795,9 +890,16 @@ export class AgentInstallationManager {
     const result = this.database.sqlite
       .prepare(
         `DELETE FROM pending_sanitized_records
-         WHERE id = ? AND record_type = 'agent_installation_create'`,
+         WHERE id = ? AND tenant_id = ? AND owner_id = ?
+           AND device_installation_id = ?
+           AND record_type = 'agent_installation_create'`,
       )
-      .run(id);
+      .run(
+        id,
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+      );
     if (Number(result.changes) !== 1) {
       throw new AgentInstallationManagerError("installation_conflict");
     }

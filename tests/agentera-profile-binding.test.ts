@@ -179,6 +179,48 @@ describe("AgentEra non-destructive Runtime Profile ownership", () => {
     expect(hashTree(profilePath)).toEqual(before);
   });
 
+  it("allows only the immediate Runtime scaffold on the fresh Profile path", () => {
+    const freshPath = join(root, "profiles", "runtime-scaffold");
+    const created = store.createAndBindFreshProfile({
+      name: "Runtime Scaffold",
+      owner,
+      createProfile: (_name, cloneFrom) => {
+        expect(cloneFrom).toBeNull();
+        mkdirSync(freshPath, { recursive: true });
+        writeFileSync(join(freshPath, ".env"), "# Runtime scaffold\n");
+        mkdirSync(join(freshPath, "sessions"), { recursive: true });
+        mkdirSync(join(freshPath, "skills", "runtime-core"), {
+          recursive: true,
+        });
+        writeFileSync(
+          join(freshPath, "skills", "runtime-core", "SKILL.md"),
+          "# Runtime core skill\n",
+        );
+        return { success: true, id: "runtime-scaffold" };
+      },
+      resolveProfilePath: () => freshPath,
+      activateProfile: vi.fn(),
+    });
+    expect(created.profileId).toBe("runtime-scaffold");
+    expect(hasMeaningfulHermesProfileData(freshPath)).toBe(true);
+
+    const unsafePath = join(root, "profiles", "unsafe-fresh");
+    expect(() =>
+      store.createAndBindFreshProfile({
+        name: "Unsafe Fresh",
+        owner,
+        createProfile: (_name, cloneFrom) => {
+          expect(cloneFrom).toBeNull();
+          mkdirSync(unsafePath, { recursive: true });
+          writeFileSync(join(unsafePath, "MEMORY.md"), "private memory\n");
+          return { success: true, id: "unsafe-fresh" };
+        },
+        resolveProfilePath: () => unsafePath,
+        activateProfile: vi.fn(),
+      }),
+    ).toThrow(/private data/i);
+  });
+
   it("never permits a physical Profile to be reassigned, including after cloud deletion", () => {
     const before = hashTree(profilePath);
     const first = store.bindExistingProfile(profilePath, owner);

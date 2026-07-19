@@ -69,6 +69,11 @@ describe("immutable local RuntimeBinding store", () => {
     const generated = [BINDING_ID, ADAPTIVE_REVISION];
     store = new RuntimeBindingStore({
       database,
+      owner: {
+        tenantId: TENANT_ID,
+        ownerId: OWNER_ID,
+        deviceInstallationId: DEVICE_ID,
+      },
       now: () => NOW,
       randomUUID: () => generated.shift() ?? ADAPTIVE_REVISION,
     });
@@ -135,6 +140,22 @@ describe("immutable local RuntimeBinding store", () => {
     ]) {
       expect(serialized).not.toContain(forbidden);
     }
+  });
+
+  it("keeps bindings and sanitized outbox records scoped to one product account", () => {
+    store.getOrCreateForConversation(bindingInput());
+    const other = new RuntimeBindingStore({
+      database,
+      owner: {
+        tenantId: "abababab-abab-4bab-8bab-abababababab",
+        ownerId: "bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc",
+        deviceInstallationId: "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd",
+      },
+    });
+    expect(other.getByConversationKey("run-conversation-1")).toBeNull();
+    expect(other.getById(BINDING_ID)).toBeNull();
+    expect(other.listPendingCloudRecords()).toEqual([]);
+    expect(store.getById(BINDING_ID)?.ownerId).toBe(OWNER_ID);
   });
 
   it("is idempotent by renderer runId and rejects any immutable-field drift", () => {

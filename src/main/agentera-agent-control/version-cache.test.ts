@@ -172,6 +172,7 @@ function policySnapshot(
 }
 
 describe("verified immutable Agent version cache", () => {
+  const owner = { tenantId: DEFINITION_ID, ownerId: INSTALLATION_ID } as const;
   let root = "";
   let database: AgenteraControlPlaneDatabase;
   let trust: AgenteraAgentTrustStore;
@@ -197,6 +198,7 @@ describe("verified immutable Agent version cache", () => {
   function cache(runtimeVersion = "v0.18.2-agentera.1"): AgentVersionCache {
     return new AgentVersionCache({
       database,
+      owner,
       trust,
       origin: ORIGIN,
       runtimeVersion,
@@ -226,6 +228,37 @@ describe("verified immutable Agent version cache", () => {
     expect(verify.mock.calls.length).toBeGreaterThan(callsAfterCache);
     expect(Object.keys(store.getVerifiedVersion(VERSION_ID))).not.toContain(
       "cachePath",
+    );
+  });
+
+  it("does not expose a verified USER version cache across account switches", () => {
+    cache().cacheVerifiedVersion(version);
+    const other = new AgentVersionCache({
+      database,
+      owner: {
+        tenantId: "12121212-1212-4121-8121-121212121212",
+        ownerId: "13131313-1313-4131-8131-131313131313",
+      },
+      trust,
+      origin: ORIGIN,
+      runtimeVersion: "v0.18.2-agentera.1",
+    });
+    expect(() => other.getVerifiedVersion(version.id)).toThrow(
+      expect.objectContaining({ code: "cache_not_found" }),
+    );
+    expect(cache().getVerifiedVersion(version.id)).toEqual(version);
+  });
+
+  it("normalizes a valid cloud RFC3339 timestamp before persisting the immutable version", () => {
+    const cloudVersion: AgentVersion = {
+      ...version,
+      published_at: "2026-07-20T03:24:18.287961+08:00",
+    };
+    const cached = cache().cacheVerifiedVersion(cloudVersion);
+
+    expect(cached.published_at).toBe("2026-07-19T19:24:18.287Z");
+    expect(cache().getVerifiedVersion(VERSION_ID).published_at).toBe(
+      "2026-07-19T19:24:18.287Z",
     );
   });
 
@@ -328,6 +361,7 @@ describe("verified immutable Agent version cache", () => {
   it("cleans staging and leaves no database row when atomic rename fails", () => {
     const store = new AgentVersionCache({
       database,
+      owner,
       trust,
       origin: ORIGIN,
       runtimeVersion: "v0.18.2-agentera.1",

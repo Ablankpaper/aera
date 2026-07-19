@@ -345,9 +345,15 @@ export class AgenteraHermesAdapter {
           `SELECT agent_installation_id, definition_id, selected_version_id,
                   runtime_profile_id, policy_snapshot_id, status
            FROM local_agent_installations
-           WHERE agent_installation_id = ?`,
+           WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
+             AND device_installation_id = ?`,
         )
-        .get(profile.agentInstallationId) as LocalInstallationRow | undefined,
+        .get(
+          profile.agentInstallationId,
+          input.owner.tenantId,
+          input.owner.ownerId,
+          input.owner.deviceInstallationId,
+        ) as LocalInstallationRow | undefined,
     );
     if (
       installation.agentInstallationId !== profile.agentInstallationId ||

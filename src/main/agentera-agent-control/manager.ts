@@ -63,6 +63,8 @@ export interface AgenteraAgentControlManagerOptions extends Partial<FullAgentCon
   profileBindings: AgenteraProfileBindingStore;
   /** Task-12 compatibility seam used by focused manager tests. */
   hermesAdapter?: AgenteraHermesAdapter;
+  /** Test seam for proving that cloud outbox delivery never blocks Hermes. */
+  retryPendingRuntimeBindings?: () => Promise<unknown>;
 }
 
 interface RuntimeComponents {
@@ -70,6 +72,7 @@ interface RuntimeComponents {
   publisher: AgentPublisher;
   installations: AgentInstallationManager;
   hermes: AgenteraHermesAdapter;
+  bindingStore: RuntimeBindingStore;
 }
 
 function codedError(code: string): Error {
@@ -174,22 +177,21 @@ export class AgenteraAgentControlManager {
   private readonly options: AgenteraAgentControlManagerOptions;
   private readonly profileBindings: AgenteraProfileBindingStore;
   private readonly runtimeOnlyHermes: AgenteraHermesAdapter | null;
-  private readonly drafts: AgentDraftStore | null;
   private readonly trust: AgenteraAgentTrustStore | null;
   private readonly projection: HermesProjectionManager | null;
-  private readonly bindingStore: RuntimeBindingStore | null;
   private runtime: RuntimeComponents | null = null;
   private readonly publicationOwners = new Map<string, string>();
   private readonly listeners = new Set<
     (state: AgenteraAgentControlPublicState) => void
   >();
+  private runtimeBindingDeliveryInFlight = false;
+  private runtimeBindingDeliveryRequested = false;
 
   constructor(options: AgenteraAgentControlManagerOptions) {
     this.options = options;
     this.profileBindings = options.profileBindings;
     this.runtimeOnlyHermes = options.hermesAdapter ?? null;
     if (options.database) {
-      this.drafts = new AgentDraftStore({ database: options.database });
       this.trust = new AgenteraAgentTrustStore({
         cache: loadTrustCache(options.database),
       });
@@ -197,26 +199,30 @@ export class AgenteraAgentControlManager {
       this.projection = new HermesProjectionManager({
         userDataPath: options.userDataPath,
       });
-      this.bindingStore = new RuntimeBindingStore({
-        database: options.database,
-      });
     } else {
-      this.drafts = null;
       this.trust = null;
       this.projection = null;
-      this.bindingStore = null;
     }
   }
 
   getState(): AgenteraAgentControlPublicState {
     this.assertLocalAccess();
     const state = this.requireFull().getAuthState();
+    const owner = this.owner();
     const draftCount = this.options.database?.sqlite
-      .prepare("SELECT COUNT(*) AS count FROM agent_drafts")
-      .get() as { count?: unknown } | undefined;
+      .prepare(
+        `SELECT COUNT(*) AS count FROM agent_drafts
+         WHERE tenant_id = ? AND owner_id = ?`,
+      )
+      .get(owner.tenantId, owner.ownerId) as { count?: unknown } | undefined;
     const installationCount = this.options.database?.sqlite
-      .prepare("SELECT COUNT(*) AS count FROM local_agent_installations")
-      .get() as { count?: unknown } | undefined;
+      .prepare(
+        `SELECT COUNT(*) AS count FROM local_agent_installations
+         WHERE tenant_id = ? AND owner_id = ? AND device_installation_id = ?`,
+      )
+      .get(owner.tenantId, owner.ownerId, owner.deviceInstallationId) as
+      | { count?: unknown }
+      | undefined;
     return {
       access: state.status === "offline" ? "offline" : "online",
       cloudAvailable:
@@ -236,6 +242,7 @@ export class AgenteraAgentControlManager {
 
   notifyAccessStateChanged(): void {
     this.emitState();
+    this.queueRuntimeBindingDelivery();
   }
 
   listDrafts(): AgentDraft[] {
@@ -420,13 +427,16 @@ export class AgenteraAgentControlManager {
     if (profile.agentInstallationId === null) return null;
     const adapter =
       this.runtimeOnlyHermes ?? (await this.ensureRuntimeComponents()).hermes;
-    return adapter.prepareInstalledTurn(input);
+    const prepared = await adapter.prepareInstalledTurn(input);
+    this.queueRuntimeBindingDelivery();
+    return prepared;
   }
 
   attachHermesSession(bindingId: string, sessionId: string): void {
     const adapter = this.runtimeOnlyHermes ?? this.runtime?.hermes;
     if (!adapter) throw codedError("binding_required");
     adapter.attachHermesSession(bindingId, sessionId);
+    this.queueRuntimeBindingDelivery();
   }
 
   private requireFull(): FullAgentControlOptions {
@@ -449,8 +459,11 @@ export class AgenteraAgentControlManager {
   }
 
   private requireDrafts(): AgentDraftStore {
-    if (!this.drafts) throw codedError("operation_failed");
-    return this.drafts;
+    const full = this.requireFull();
+    return new AgentDraftStore({
+      database: full.database,
+      owner: full.getOwner(),
+    });
   }
 
   private owner(): AgenteraRuntimeOwner {
@@ -495,7 +508,7 @@ export class AgenteraAgentControlManager {
 
   private async ensureRuntimeComponents(): Promise<RuntimeComponents> {
     const full = this.requireFull();
-    if (!this.trust || !this.projection || !this.bindingStore || !this.drafts) {
+    if (!this.trust || !this.projection) {
       throw codedError("operation_failed");
     }
     const owner = full.getOwner();
@@ -507,12 +520,13 @@ export class AgenteraAgentControlManager {
     this.publicationOwners.clear();
     const cache = new AgentVersionCache({
       database: full.database,
+      owner,
       trust: this.trust,
       origin: full.client.origin,
       runtimeVersion,
     });
     const publisher = new AgentPublisher({
-      drafts: this.drafts,
+      drafts: new AgentDraftStore({ database: full.database, owner }),
       client: full.client,
       trust: this.trust,
       cache,
@@ -529,9 +543,13 @@ export class AgenteraAgentControlManager {
       owner,
       runtimeVersion,
     });
+    const bindingStore = new RuntimeBindingStore({
+      database: full.database,
+      owner,
+    });
     const hermes = new AgenteraHermesAdapter({
       database: full.database,
-      bindingStore: this.bindingStore,
+      bindingStore,
       profileBindings: this.profileBindings,
       cache,
       projection: this.projection,
@@ -540,7 +558,7 @@ export class AgenteraAgentControlManager {
       isVersionRevoked: full.isVersionRevoked ?? (() => false),
       assertEntitled: full.assertEntitled,
     });
-    this.runtime = { key, publisher, installations, hermes };
+    this.runtime = { key, publisher, installations, hermes, bindingStore };
     return this.runtime;
   }
 
@@ -558,5 +576,45 @@ export class AgenteraAgentControlManager {
         // A renderer listener cannot change control-plane state.
       }
     }
+  }
+
+  /**
+   * RuntimeBinding upload is a best-effort sanitized outbox. Hermes receives
+   * the locally committed binding immediately; cloud availability can never
+   * delay, reject, or roll back the native turn.
+   */
+  private queueRuntimeBindingDelivery(): void {
+    if (!this.options.retryPendingRuntimeBindings && !this.options.client) {
+      return;
+    }
+    this.runtimeBindingDeliveryRequested = true;
+    if (this.runtimeBindingDeliveryInFlight) return;
+    this.runtimeBindingDeliveryInFlight = true;
+    void (async () => {
+      while (this.runtimeBindingDeliveryRequested) {
+        this.runtimeBindingDeliveryRequested = false;
+        try {
+          if (this.options.retryPendingRuntimeBindings) {
+            await this.options.retryPendingRuntimeBindings();
+            continue;
+          }
+          const full = this.requireFull();
+          const state = full.getAuthState();
+          if (state.status !== "authenticated" || !state.cloudAvailable) {
+            continue;
+          }
+          const components = await this.ensureRuntimeComponents();
+          await components.bindingStore.retryPendingCloudRecords(full.client);
+        } catch {
+          // The durable local record remains queued for a later auth change or
+          // installed conversation. Cloud failure cannot affect Hermes.
+        }
+      }
+    })().finally(() => {
+      this.runtimeBindingDeliveryInFlight = false;
+      if (this.runtimeBindingDeliveryRequested) {
+        this.queueRuntimeBindingDelivery();
+      }
+    });
   }
 }

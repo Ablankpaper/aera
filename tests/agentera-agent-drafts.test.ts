@@ -29,6 +29,11 @@ const DRAFT_ID = "11111111-1111-4111-8111-111111111111";
 const DEFINITION_ID = "22222222-2222-4222-8222-222222222222";
 const VERSION_ID = "33333333-3333-4333-8333-333333333333";
 const NOW = new Date("2026-07-19T17:00:00.000Z");
+const OWNER = { tenantId: DEFINITION_ID, ownerId: VERSION_ID } as const;
+const OTHER_OWNER = {
+  tenantId: "44444444-4444-4444-8444-444444444444",
+  ownerId: "55555555-5555-4555-8555-555555555555",
+} as const;
 
 function nodeSqliteFactory(path: string): AgenteraSqliteDatabase {
   return new DatabaseSync(path) as unknown as AgenteraSqliteDatabase;
@@ -76,6 +81,7 @@ describe("AgentEra desktop-local Agent drafts", () => {
     });
     store = new AgentDraftStore({
       database,
+      owner: OWNER,
       now: () => NOW,
       randomUUID: () => DRAFT_ID,
     });
@@ -104,7 +110,7 @@ describe("AgentEra desktop-local Agent drafts", () => {
     database = openAgenteraControlPlaneDatabase(userDataPath, {
       databaseFactory: nodeSqliteFactory,
     });
-    store = new AgentDraftStore({ database });
+    store = new AgentDraftStore({ database, owner: OWNER });
     const reloaded = store.getDraft(DRAFT_ID);
     expect(reloaded).toEqual(created);
     expect(store.listDrafts()).toEqual([created]);
@@ -187,6 +193,7 @@ describe("AgentEra desktop-local Agent drafts", () => {
     });
     const failingStore = new AgentDraftStore({
       database,
+      owner: OWNER,
       writeFile: () => {
         throw new Error("simulated disk failure");
       },
@@ -205,6 +212,23 @@ describe("AgentEra desktop-local Agent drafts", () => {
     expect(store.readAsset(DRAFT_ID, "knowledge/notes.md").toString()).toBe(
       "stable",
     );
+  });
+
+  it("keeps drafts hidden across product-account switches", () => {
+    store.createDraft({
+      sourceAgentDefinitionId: null,
+      baseAgentVersionId: null,
+      displayName: "Owner-only draft",
+      icon: null,
+      manifest: manifest(),
+      assets: assets(),
+    });
+    const other = new AgentDraftStore({ database, owner: OTHER_OWNER });
+    expect(other.listDrafts()).toEqual([]);
+    expect(() => other.getDraft(DRAFT_ID)).toThrow(
+      new AgentDraftStoreError("draft_not_found"),
+    );
+    expect(store.listDrafts()).toHaveLength(1);
   });
 
   it("rejects symlink substitution when reading a stored draft asset", () => {

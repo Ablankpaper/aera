@@ -192,6 +192,10 @@ describe("explicit Agent publication", () => {
     });
     drafts = new AgentDraftStore({
       database,
+      owner: {
+        tenantId: "77777777-7777-4777-8777-777777777777",
+        ownerId: "88888888-8888-4888-8888-888888888888",
+      },
       now: () => NOW,
       randomUUID: () => DRAFT_ID,
     });
@@ -330,6 +334,10 @@ describe("explicit Agent publication", () => {
 
     drafts = new AgentDraftStore({
       database,
+      owner: {
+        tenantId: "77777777-7777-4777-8777-777777777777",
+        ownerId: "88888888-8888-4888-8888-888888888888",
+      },
       now: () => NOW,
       randomUUID: () => DRAFT_ID,
     });
@@ -374,5 +382,29 @@ describe("explicit Agent publication", () => {
     ).rejects.toBeInstanceOf(AgentPublisherError);
     expect(cacheVersion).not.toHaveBeenCalled();
     expect(drafts.getDraft(DRAFT_ID).publishedRevision).toBeNull();
+  });
+
+  it("records the exact local trust failure while keeping publication closed", async () => {
+    publishInitial.mockResolvedValueOnce({
+      ...publication,
+      version: {
+        ...publication.version,
+        signature: `${publication.version.signature.slice(0, -1)}${
+          publication.version.signature.endsWith("A") ? "B" : "A"
+        }`,
+      },
+    });
+    const service = publisher();
+    const preview = service.preparePublication(DRAFT_ID);
+
+    await expect(
+      service.confirmPublication(preview.publicationHandle),
+    ).rejects.toMatchObject({ code: "published_content_mismatch" });
+    expect(cacheVersion).not.toHaveBeenCalled();
+    expect(drafts.getDraft(DRAFT_ID).publishedRevision).toBeNull();
+    expect(drafts.getDraft(DRAFT_ID).lastPublicationAttempt).toMatchObject({
+      errorCode: "signature_invalid",
+      errorSummary: "Publication failed.",
+    });
   });
 });

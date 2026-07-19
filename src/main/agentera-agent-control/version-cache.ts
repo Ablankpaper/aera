@@ -15,6 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import type { AgenteraRuntimeOwner } from "../agentera-profile-binding";
 import type { AgentPolicySnapshot, AgentVersion } from "./client";
 import type { AgenteraControlPlaneDatabase } from "./db";
 import { parseAgentControlJsonObject } from "./manifest";
@@ -41,6 +42,7 @@ export class AgentVersionCacheError extends Error {
 
 export interface AgentVersionCacheOptions {
   database: AgenteraControlPlaneDatabase;
+  owner: Pick<AgenteraRuntimeOwner, "tenantId" | "ownerId">;
   trust: AgentVersionCacheTrust;
   origin: string;
   runtimeVersion: string;
@@ -81,6 +83,8 @@ const UUID_PATTERN =
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const KEY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SIGNATURE_PATTERN = /^[A-Za-z0-9_-]{86}$/;
+const RFC3339_TIMESTAMP_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
 const MAX_VERSION_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_MANIFEST_FILE_BYTES = 256 * 1024;
 const MAX_BUNDLE_FILE_BYTES = 3 * 1024 * 1024;
@@ -90,10 +94,20 @@ function validUuid(value: unknown): value is string {
   return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
-function validTimestamp(value: unknown): value is string {
-  if (typeof value !== "string" || value.length > 64) return false;
+function normalizedTimestamp(value: unknown): string | null {
+  if (
+    typeof value !== "string" ||
+    value.length > 64 ||
+    !RFC3339_TIMESTAMP_PATTERN.test(value)
+  ) {
+    return null;
+  }
   const parsed = new Date(value);
-  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
+}
+
+function validTimestamp(value: unknown): value is string {
+  return typeof value === "string" && normalizedTimestamp(value) === value;
 }
 
 function exactKeys(
@@ -115,6 +129,7 @@ function parseStoredVersion(raw: Buffer): AgentVersion {
   } catch {
     throw new AgentVersionCacheError("cache_corrupt");
   }
+  const publishedAt = normalizedTimestamp(value.published_at);
   if (
     !exactKeys(
       value,
@@ -155,11 +170,13 @@ function parseStoredVersion(raw: Buffer): AgentVersion {
       (typeof value.runtime_maximum_version_exclusive !== "string" ||
         value.runtime_maximum_version_exclusive.length === 0 ||
         value.runtime_maximum_version_exclusive.length > 64)) ||
-    !validTimestamp(value.published_at)
+    publishedAt === null
   ) {
     throw new AgentVersionCacheError("cache_corrupt");
   }
-  return JSON.parse(JSON.stringify(value)) as AgentVersion;
+  return JSON.parse(
+    JSON.stringify({ ...value, published_at: publishedAt }),
+  ) as AgentVersion;
 }
 
 function readBounded(path: string, maximumBytes: number): Buffer {
@@ -313,6 +330,8 @@ export class AgentVersionCache {
   private readonly now: () => Date;
   private readonly randomUUID: () => string;
   private readonly rename: (source: string, destination: string) => void;
+  private readonly tenantId: string;
+  private readonly ownerId: string;
 
   constructor(options: AgentVersionCacheOptions) {
     if (
@@ -324,6 +343,14 @@ export class AgentVersionCache {
       throw new Error("AgentEra Agent version cache configuration is invalid.");
     }
     this.database = options.database;
+    if (
+      !validUuid(options.owner.tenantId) ||
+      !validUuid(options.owner.ownerId)
+    ) {
+      throw new Error("AgentEra Agent version cache owner is invalid.");
+    }
+    this.tenantId = options.owner.tenantId.toLowerCase();
+    this.ownerId = options.owner.ownerId.toLowerCase();
     this.trust = options.trust;
     this.origin = options.origin;
     this.runtimeVersion = options.runtimeVersion;
@@ -350,9 +377,12 @@ export class AgentVersionCache {
 
     const existing = this.database.sqlite
       .prepare(
-        "SELECT content_digest FROM cached_agent_versions WHERE version_id = ?",
+        `SELECT content_digest FROM cached_agent_versions
+         WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
       )
-      .get(version.id) as { content_digest?: unknown } | undefined;
+      .get(version.id, this.tenantId, this.ownerId) as
+      | { content_digest?: unknown }
+      | undefined;
     if (existing) {
       if (existing.content_digest !== version.content_digest) {
         throw new AgentVersionCacheError("cache_conflict");
@@ -400,13 +430,15 @@ export class AgentVersionCache {
         this.database.sqlite
           .prepare(
             `INSERT INTO cached_agent_versions (
-               version_id, definition_id, version_number, content_digest,
+               version_id, tenant_id, owner_id, definition_id, version_number, content_digest,
                version_json, policy_snapshot_json, cache_relative_path,
                verified_at
-             ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
           )
           .run(
             version.id,
+            this.tenantId,
+            this.ownerId,
             version.definition_id,
             version.version_number,
             version.content_digest,
@@ -436,8 +468,13 @@ export class AgentVersionCache {
     }
     const versionId = versionIdInput.toLowerCase();
     const row = this.database.sqlite
-      .prepare("SELECT * FROM cached_agent_versions WHERE version_id = ?")
-      .get(versionId) as CachedVersionRow | undefined;
+      .prepare(
+        `SELECT * FROM cached_agent_versions
+         WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
+      )
+      .get(versionId, this.tenantId, this.ownerId) as
+      | CachedVersionRow
+      | undefined;
     if (!row) throw new AgentVersionCacheError("cache_not_found");
     if (
       row.version_id !== versionId ||
@@ -493,9 +530,12 @@ export class AgentVersionCache {
     try {
       const row = this.database.sqlite
         .prepare(
-          "SELECT policy_snapshot_json FROM cached_agent_versions WHERE version_id = ?",
+          `SELECT policy_snapshot_json FROM cached_agent_versions
+           WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
         )
-        .get(versionId) as { policy_snapshot_json?: unknown } | undefined;
+        .get(versionId, this.tenantId, this.ownerId) as
+        | { policy_snapshot_json?: unknown }
+        | undefined;
       if (!row) throw new AgentVersionCacheError("cache_not_found");
       const collection = parsePolicyCollection(
         row.policy_snapshot_json === undefined
@@ -518,9 +558,14 @@ export class AgentVersionCache {
           .prepare(
             `UPDATE cached_agent_versions
              SET policy_snapshot_json = ?
-             WHERE version_id = ?`,
+             WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
           )
-          .run(JSON.stringify(collection), versionId);
+          .run(
+            JSON.stringify(collection),
+            versionId,
+            this.tenantId,
+            this.ownerId,
+          );
       }
       this.database.sqlite.exec("COMMIT");
     } catch (error) {
@@ -546,9 +591,12 @@ export class AgentVersionCache {
     const version = this.getVerifiedVersion(versionId);
     const row = this.database.sqlite
       .prepare(
-        "SELECT policy_snapshot_json FROM cached_agent_versions WHERE version_id = ?",
+        `SELECT policy_snapshot_json FROM cached_agent_versions
+         WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
       )
-      .get(versionId) as { policy_snapshot_json?: unknown } | undefined;
+      .get(versionId, this.tenantId, this.ownerId) as
+      | { policy_snapshot_json?: unknown }
+      | undefined;
     if (!row) throw new AgentVersionCacheError("cache_not_found");
     const collection = parsePolicyCollection(
       row.policy_snapshot_json === undefined ? null : row.policy_snapshot_json,

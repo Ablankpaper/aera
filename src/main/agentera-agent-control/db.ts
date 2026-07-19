@@ -9,7 +9,7 @@ import {
   resolve,
 } from "node:path";
 
-export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 1;
+export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 2;
 
 export interface AgenteraSqliteRunResult {
   changes: number | bigint;
@@ -128,9 +128,12 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
 
   sqlite.exec("BEGIN IMMEDIATE");
   try {
-    sqlite.exec(`
+    if (currentVersion === 0) {
+      sqlite.exec(`
       CREATE TABLE IF NOT EXISTS agent_drafts (
         id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
         source_agent_definition_id TEXT,
         base_agent_version_id TEXT,
         display_name TEXT NOT NULL,
@@ -166,6 +169,8 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
 
       CREATE TABLE IF NOT EXISTS cached_agent_versions (
         version_id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
         definition_id TEXT NOT NULL,
         version_number INTEGER NOT NULL CHECK (version_number >= 1),
         content_digest TEXT NOT NULL,
@@ -177,6 +182,9 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
 
       CREATE TABLE IF NOT EXISTS local_agent_installations (
         agent_installation_id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        device_installation_id TEXT NOT NULL,
         definition_id TEXT NOT NULL,
         selected_version_id TEXT NOT NULL,
         runtime_profile_id TEXT,
@@ -189,6 +197,9 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
 
       CREATE TABLE IF NOT EXISTS runtime_bindings (
         id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        device_installation_id TEXT NOT NULL,
         conversation_key TEXT NOT NULL UNIQUE,
         hermes_session_id TEXT UNIQUE,
         binding_json TEXT NOT NULL,
@@ -206,6 +217,9 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
 
       CREATE TABLE IF NOT EXISTS pending_sanitized_records (
         id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        device_installation_id TEXT NOT NULL,
         record_type TEXT NOT NULL,
         payload_json TEXT NOT NULL,
         attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
@@ -216,6 +230,33 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
 
       PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
     `);
+    } else if (currentVersion === 1) {
+      sqlite.exec(`
+        ALTER TABLE agent_drafts ADD COLUMN tenant_id TEXT;
+        ALTER TABLE agent_drafts ADD COLUMN owner_id TEXT;
+        ALTER TABLE cached_agent_versions ADD COLUMN tenant_id TEXT;
+        ALTER TABLE cached_agent_versions ADD COLUMN owner_id TEXT;
+        ALTER TABLE local_agent_installations ADD COLUMN tenant_id TEXT;
+        ALTER TABLE local_agent_installations ADD COLUMN owner_id TEXT;
+        ALTER TABLE local_agent_installations ADD COLUMN device_installation_id TEXT;
+        ALTER TABLE runtime_bindings ADD COLUMN tenant_id TEXT;
+        ALTER TABLE runtime_bindings ADD COLUMN owner_id TEXT;
+        ALTER TABLE runtime_bindings ADD COLUMN device_installation_id TEXT;
+        ALTER TABLE pending_sanitized_records ADD COLUMN tenant_id TEXT;
+        ALTER TABLE pending_sanitized_records ADD COLUMN owner_id TEXT;
+        ALTER TABLE pending_sanitized_records ADD COLUMN device_installation_id TEXT;
+        UPDATE runtime_bindings
+        SET tenant_id = json_extract(binding_json, '$.tenantId'),
+            owner_id = json_extract(binding_json, '$.ownerId'),
+            device_installation_id = json_extract(binding_json, '$.deviceId');
+        UPDATE pending_sanitized_records
+        SET tenant_id = (SELECT tenant_id FROM runtime_bindings WHERE runtime_bindings.id = pending_sanitized_records.id),
+            owner_id = (SELECT owner_id FROM runtime_bindings WHERE runtime_bindings.id = pending_sanitized_records.id),
+            device_installation_id = (SELECT device_installation_id FROM runtime_bindings WHERE runtime_bindings.id = pending_sanitized_records.id)
+        WHERE record_type = 'runtime_binding';
+        PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
+      `);
+    }
     sqlite.exec("COMMIT");
   } catch (error) {
     try {

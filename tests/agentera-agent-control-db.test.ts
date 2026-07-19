@@ -104,7 +104,56 @@ describe("AgentEra control-plane database", () => {
         "runtime_bindings",
         "signing_key_cache",
       ]);
+      for (const table of [
+        "agent_drafts",
+        "cached_agent_versions",
+        "local_agent_installations",
+        "runtime_bindings",
+        "pending_sanitized_records",
+      ]) {
+        const columns = database.sqlite
+          .prepare(`PRAGMA table_info(${table})`)
+          .all() as Array<{ name: string }>;
+        expect(columns.map(({ name }) => name)).toEqual(
+          expect.arrayContaining(["tenant_id", "owner_id"]),
+        );
+      }
       database.close();
     }
+  });
+
+  it("migrates schema v1 without assigning legacy rows to the next login", () => {
+    const userDataPath = join(temporaryRoot(), "user-data");
+    const paths = resolveAgenteraControlPlanePaths(userDataPath);
+    mkdirSync(paths.rootPath, { recursive: true });
+    const legacy = new DatabaseSync(paths.databasePath);
+    legacy.exec(`
+      CREATE TABLE agent_drafts (id TEXT PRIMARY KEY);
+      CREATE TABLE cached_agent_versions (version_id TEXT PRIMARY KEY);
+      CREATE TABLE local_agent_installations (agent_installation_id TEXT PRIMARY KEY);
+      CREATE TABLE runtime_bindings (id TEXT PRIMARY KEY, binding_json TEXT NOT NULL);
+      CREATE TABLE pending_sanitized_records (id TEXT PRIMARY KEY, record_type TEXT NOT NULL);
+      PRAGMA user_version = 1;
+    `);
+    legacy.close();
+
+    const database = openAgenteraControlPlaneDatabase(userDataPath, {
+      databaseFactory: nodeSqliteFactory,
+    });
+    expect(
+      Object.values(
+        database.sqlite.prepare("PRAGMA user_version").get() as Record<
+          string,
+          unknown
+        >,
+      ),
+    ).toEqual([AGENTERA_CONTROL_PLANE_SCHEMA_VERSION]);
+    const draftColumns = database.sqlite
+      .prepare("PRAGMA table_info(agent_drafts)")
+      .all() as Array<{ name: string }>;
+    expect(draftColumns.map(({ name }) => name)).toEqual(
+      expect.arrayContaining(["tenant_id", "owner_id"]),
+    );
+    database.close();
   });
 });

@@ -86,6 +86,45 @@ describe("RuntimeBinding integration at the main-process conversation boundary",
     expect(prepareInstalledTurn).toHaveBeenCalledWith(input);
   });
 
+  it("delivers only the sanitized RuntimeBinding outbox without blocking or failing the Hermes turn", async () => {
+    const installationId = "55555555-5555-4555-8555-555555555555";
+    const prepared = {
+      binding: { id: "66666666-6666-4666-8666-666666666666" },
+      profilePath: "/tmp/profile",
+      envelope: {
+        instructions: "fixed",
+        requireBoundApiTransport: true,
+      },
+    };
+    let rejectDelivery: ((error: Error) => void) | null = null;
+    const delivery = new Promise<void>((_resolve, reject) => {
+      rejectDelivery = reject;
+    });
+    const retryPendingRuntimeBindings = vi.fn(() => delivery);
+    const manager = new AgenteraAgentControlManager({
+      profileBindings: {
+        verifyProfileBinding: vi.fn(() => profileBinding(installationId)),
+      } as unknown as AgenteraProfileBindingStore,
+      hermesAdapter: {
+        prepareInstalledTurn: vi.fn(async () => prepared),
+      } as unknown as AgenteraHermesAdapter,
+      retryPendingRuntimeBindings,
+    });
+
+    await expect(
+      manager.prepareHermesTurn({
+        conversationKey: "run-installed-outbox",
+        profilePath: "/tmp/profile",
+        owner,
+        resumeSessionId: null,
+      }),
+    ).resolves.toBe(prepared);
+    expect(retryPendingRuntimeBindings).toHaveBeenCalledTimes(1);
+
+    rejectDelivery?.(new Error("cloud unavailable"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
   it("resolves and validates the installed binding before starting or invoking Hermes", () => {
     const source = readFileSync(
       join(__dirname, "../src/main/ipc/register.ts"),
