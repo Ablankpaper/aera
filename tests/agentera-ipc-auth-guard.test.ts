@@ -26,11 +26,13 @@ function registeredChannels(): string[] {
   const visit = (node: ts.Node): void => {
     if (
       ts.isCallExpression(node) &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      ts.isIdentifier(node.expression.expression) &&
-      node.expression.expression.text === "ipcMain" &&
-      (node.expression.name.text === "handle" ||
-        node.expression.name.text === "on")
+      ((ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression) &&
+        node.expression.expression.text === "ipcMain" &&
+        (node.expression.name.text === "handle" ||
+          node.expression.name.text === "on")) ||
+        (ts.isIdentifier(node.expression) &&
+          node.expression.text === "registerAgentControlHandler"))
     ) {
       const first = node.arguments[0];
       if (!first || !ts.isStringLiteralLike(first)) {
@@ -90,7 +92,12 @@ describe("AgentEra central IPC product-access guard", () => {
     expect(channels.length).toBeGreaterThan(100);
     expect(Object.keys(AGENTERA_IPC_CHANNEL_POLICY).sort()).toEqual(channels);
     for (const level of Object.values(AGENTERA_IPC_CHANNEL_POLICY)) {
-      expect(["preflight", "authenticated", "bound-profile"]).toContain(level);
+      expect([
+        "preflight",
+        "authenticated",
+        "online",
+        "bound-profile",
+      ]).toContain(level);
     }
   });
 
@@ -266,12 +273,13 @@ describe("AgentEra central IPC product-access guard", () => {
     expect(privateRead).not.toHaveBeenCalled();
   });
 
-  it("allows authenticated and bound levels only for the matching main-process state", () => {
-    let status: "unauthenticated" | "authenticated" = "unauthenticated";
+  it("allows local offline work but requires live cloud state for online Agent operations", () => {
+    let status: "unauthenticated" | "authenticated" | "offline" =
+      "unauthenticated";
     let bound = false;
     const guard = createProductAccessGuard({
       getAuthState: () =>
-        status === "authenticated"
+        status === "authenticated" || status === "offline"
           ? {
               status,
               userId: "11111111-1111-4111-8111-111111111111",
@@ -288,7 +296,12 @@ describe("AgentEra central IPC product-access guard", () => {
     expect(() => guard.assert("authenticated")).toThrow(/sign-in/i);
     status = "authenticated";
     expect(() => guard.assert("authenticated")).not.toThrow();
+    expect(() => guard.assert("online")).not.toThrow();
     expect(() => guard.assert("bound-profile")).toThrow(/binding/i);
+    status = "offline";
+    expect(() => guard.assert("authenticated")).not.toThrow();
+    expect(() => guard.assert("online")).toThrow(/online/i);
+    status = "authenticated";
     bound = true;
     expect(() => guard.assert("bound-profile")).not.toThrow();
   });

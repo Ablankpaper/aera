@@ -343,6 +343,16 @@ export class AgentInstallationManager {
     return parseLocalRow(row);
   }
 
+  listLocalInstallations(): LocalAgentInstallation[] {
+    const rows = this.database.sqlite
+      .prepare(
+        `SELECT * FROM local_agent_installations
+         ORDER BY created_at DESC, agent_installation_id ASC`,
+      )
+      .all() as LocalInstallationRow[];
+    return rows.map(parseLocalRow);
+  }
+
   async install(input: {
     definitionId: string;
     versionId: string;

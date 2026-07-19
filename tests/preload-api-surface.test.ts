@@ -108,6 +108,26 @@ function extractAgenteraRuntimeDistributionTypeMethods(src: string): string[] {
   );
 }
 
+function extractAgenteraAgentMethods(src: string): string[] {
+  const objectMatch = src.match(
+    /const\s+agenteraAgentsAPI\s*=\s*\{([\s\S]*?)^\};/m,
+  );
+  if (!objectMatch) return [];
+  return [...objectMatch[1].matchAll(/^\s{2}(\w+)\s*:\s*\(/gm)].map(
+    (match) => match[1],
+  );
+}
+
+function extractAgenteraAgentTypeMethods(src: string): string[] {
+  const interfaceMatch = src.match(
+    /interface\s+AgenteraAgentsAPI\s*\{([\s\S]*?)^\}/m,
+  );
+  if (!interfaceMatch) return [];
+  return [...interfaceMatch[1].matchAll(/^\s{2}(\w+)\s*[:(]/gm)].map(
+    (match) => match[1],
+  );
+}
+
 describe("Preload API Surface", () => {
   it("preload exposes methods", () => {
     expect(preloadMethods.length).toBeGreaterThan(30);
@@ -213,6 +233,46 @@ describe("AgentEra Runtime-distribution preload namespace", () => {
     expect(namespace).toBeDefined();
     expect(namespace).not.toMatch(
       /url|path|signature|publicKey|privateKey|token|ownerId|tenantId|installationId/i,
+    );
+  });
+});
+
+describe("AgentEra Agent-control preload namespace", () => {
+  const expected = [
+    "getState",
+    "listDrafts",
+    "getDraft",
+    "createDraft",
+    "updateDraft",
+    "deleteDraft",
+    "preparePublication",
+    "confirmPublication",
+    "listDefinitions",
+    "listVersions",
+    "listInstallations",
+    "installVersion",
+    "claimVersion",
+    "retryPendingInstallation",
+    "selectInstallationVersion",
+    "archiveInstallation",
+    "onStateChanged",
+  ];
+
+  it("exposes exactly one separately reviewed Agent control surface", () => {
+    expect(extractAgenteraAgentMethods(preloadSrc)).toEqual(expected);
+    expect(extractAgenteraAgentTypeMethods(preloadTypes)).toEqual(expected);
+    expect(preloadSrc).toContain(
+      'contextBridge.exposeInMainWorld("agenteraAgents", agenteraAgentsAPI)',
+    );
+  });
+
+  it("does not declare credentials, signing material, owner identity, paths, or raw cloud details", () => {
+    const namespace = preloadTypes.match(
+      /interface\s+AgenteraAgentsAPI\s*\{([\s\S]*?)^\}/m,
+    )?.[1];
+    expect(namespace).toBeDefined();
+    expect(namespace).not.toMatch(
+      /accessToken|refreshToken|offlineEntitlement|privateKey|publicKey|signature|ownerId|tenantId|deviceId|profilePath|filePath|remoteUrl|environment|rawResponse|responseText/i,
     );
   });
 });

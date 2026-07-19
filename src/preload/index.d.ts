@@ -48,6 +48,22 @@ import type {
   AgenteraUnboundProfilePublicState,
 } from "../shared/agentera-runtime-access";
 import type { RuntimeDistributionPublicState } from "../shared/agentera-runtime-distribution";
+import type {
+  AgentDraft,
+  AgenteraAgentControlPublicState,
+  AgenteraAgentControlResult,
+  AgenteraAgentDefinitionSummary,
+  AgenteraAgentInstallationSummary,
+  AgenteraAgentVersionSummary,
+  AgenteraClaimVersionInput,
+  AgenteraInstallVersionInput,
+  AgenteraRetryPendingInstallationInput,
+  AgenteraSelectInstallationVersionInput,
+  CreateAgentDraftInput,
+  PublicationPreview,
+  PublishedRevision,
+  UpdateAgentDraftInput,
+} from "../shared/agentera-agent-control";
 
 interface ElectronAPI {
   process: {
@@ -95,6 +111,54 @@ interface AgenteraRuntimeDistributionAPI {
   retryRepair: () => Promise<RuntimeDistributionPublicState>;
   onStateChanged: (
     callback: (state: RuntimeDistributionPublicState) => void,
+  ) => () => void;
+}
+
+interface AgenteraAgentsAPI {
+  getState: () => Promise<
+    AgenteraAgentControlResult<AgenteraAgentControlPublicState>
+  >;
+  listDrafts: () => Promise<AgenteraAgentControlResult<AgentDraft[]>>;
+  getDraft: (id: string) => Promise<AgenteraAgentControlResult<AgentDraft>>;
+  createDraft: (
+    input: CreateAgentDraftInput,
+  ) => Promise<AgenteraAgentControlResult<AgentDraft>>;
+  updateDraft: (
+    input: UpdateAgentDraftInput,
+  ) => Promise<AgenteraAgentControlResult<AgentDraft>>;
+  deleteDraft: (id: string) => Promise<AgenteraAgentControlResult<true>>;
+  preparePublication: (
+    id: string,
+  ) => Promise<AgenteraAgentControlResult<PublicationPreview>>;
+  confirmPublication: (
+    publicationHandle: string,
+  ) => Promise<AgenteraAgentControlResult<PublishedRevision>>;
+  listDefinitions: () => Promise<
+    AgenteraAgentControlResult<AgenteraAgentDefinitionSummary[]>
+  >;
+  listVersions: (
+    definitionId: string,
+  ) => Promise<AgenteraAgentControlResult<AgenteraAgentVersionSummary[]>>;
+  listInstallations: () => Promise<
+    AgenteraAgentControlResult<AgenteraAgentInstallationSummary[]>
+  >;
+  installVersion: (
+    input: AgenteraInstallVersionInput,
+  ) => Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>>;
+  claimVersion: (
+    input: AgenteraClaimVersionInput,
+  ) => Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>>;
+  retryPendingInstallation: (
+    input: AgenteraRetryPendingInstallationInput,
+  ) => Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>>;
+  selectInstallationVersion: (
+    input: AgenteraSelectInstallationVersionInput,
+  ) => Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>>;
+  archiveInstallation: (
+    id: string,
+  ) => Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>>;
+  onStateChanged: (
+    callback: (state: AgenteraAgentControlPublicState) => void,
   ) => () => void;
 }
 
@@ -1309,6 +1373,7 @@ declare global {
     electron: ElectronAPI;
     hermesAPI: HermesAPI;
     agenteraAuth: AgenteraAuthAPI;
+    agenteraAgents: AgenteraAgentsAPI;
     agenteraRuntimeAccess: AgenteraRuntimeAccessAPI;
     agenteraRuntimeDistribution: AgenteraRuntimeDistributionAPI;
   }

@@ -269,10 +269,21 @@ import {
 import type { AgenteraConnectionOwnerStore } from "../agentera-connection-owner";
 import type { AgenteraAgentControlManager } from "../agentera-agent-control/manager";
 import {
+  executeAgentControlIpc,
+  parseAgentControlId,
+  parseClaimVersionInput,
+  parseCreateDraftInput,
+  parseInstallVersionInput,
+  parseRetryPendingInstallationInput,
+  parseSelectInstallationVersionInput,
+  parseUpdateDraftInput,
+} from "../agentera-agent-control/ipc-contract";
+import {
   probeAgenteraInstallFiles,
   runAgenteraStartupPreflight,
 } from "../agentera-startup-preflight";
 import {
+  AGENTERA_IPC_CHANNEL_POLICY,
   AGENTERA_PROFILE_ARGUMENT_INDEX,
   createGuardedIpcMain,
   type ProductAccessGuard,
@@ -715,6 +726,22 @@ export function registerIpcHandlers(context: IpcContext): void {
     agenteraAgentControl,
     runtimeDistribution,
   } = context;
+  const requireAgentControl = (): AgenteraAgentControlManager => {
+    if (!agenteraAgentControl) {
+      throw Object.assign(new Error("Agent control is unavailable."), {
+        code: "operation_failed",
+      });
+    }
+    return agenteraAgentControl;
+  };
+  const agentControlStateChannel = "agentera-agents-state-changed";
+  agenteraAgentControl?.subscribe((state) => {
+    const window = getMainWindow();
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) {
+      return;
+    }
+    window.webContents.send(agentControlStateChannel, state);
+  });
   const directProfileTargetIndex: Readonly<Record<string, number>> = {
     "set-profile-avatar": 0,
     "set-profile-color": 0,
@@ -748,6 +775,96 @@ export function registerIpcHandlers(context: IpcContext): void {
     electronIpcMain,
     productAccessGuard,
     assertChannelProfileTarget,
+  );
+  const registerAgentControlHandler = (
+    channel: string,
+    listener: (...args: unknown[]) => unknown,
+  ): void => {
+    const level = AGENTERA_IPC_CHANNEL_POLICY[channel];
+    if (!level) throw new Error(`Missing AgentEra IPC policy for ${channel}.`);
+    electronIpcMain.handle(channel, (event, ...args: unknown[]) =>
+      executeAgentControlIpc(() => {
+        productAccessGuard.assert(level);
+        return listener(event, ...args);
+      }),
+    );
+  };
+
+  registerAgentControlHandler("agentera-agents-get-state", () =>
+    requireAgentControl().getState(),
+  );
+  registerAgentControlHandler("agentera-agents-list-drafts", () =>
+    requireAgentControl().listDrafts(),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-get-draft",
+    (_event, id: unknown) =>
+      requireAgentControl().getDraft(parseAgentControlId(id)),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-create-draft",
+    (_event, input: unknown) =>
+      requireAgentControl().createDraft(parseCreateDraftInput(input)),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-update-draft",
+    (_event, input: unknown) =>
+      requireAgentControl().updateDraft(parseUpdateDraftInput(input)),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-delete-draft",
+    (_event, id: unknown) =>
+      requireAgentControl().deleteDraft(parseAgentControlId(id)),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-prepare-publication",
+    (_event, id: unknown) =>
+      requireAgentControl().preparePublication(parseAgentControlId(id)),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-confirm-publication",
+    (_event, handle: unknown) =>
+      requireAgentControl().confirmPublication(parseAgentControlId(handle)),
+  );
+  registerAgentControlHandler("agentera-agents-list-definitions", () =>
+    requireAgentControl().listDefinitions(),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-list-versions",
+    (_event, definitionId: unknown) =>
+      requireAgentControl().listVersions(parseAgentControlId(definitionId)),
+  );
+  registerAgentControlHandler("agentera-agents-list-installations", () =>
+    requireAgentControl().listInstallations(),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-install-version",
+    (_event, input: unknown) =>
+      requireAgentControl().installVersion(parseInstallVersionInput(input)),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-claim-version",
+    (_event, input: unknown) =>
+      requireAgentControl().claimVersion(parseClaimVersionInput(input)),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-retry-installation",
+    (_event, input: unknown) =>
+      requireAgentControl().retryPendingInstallation(
+        parseRetryPendingInstallationInput(input),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-select-version",
+    (_event, input: unknown) =>
+      requireAgentControl().selectInstallationVersion(
+        parseSelectInstallationVersionInput(input),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-archive-installation",
+    (_event, id: unknown) =>
+      requireAgentControl().archiveInstallation(parseAgentControlId(id)),
   );
   const mainWindow = getMainWindow();
   // AgentEra product authentication is intentionally namespaced away from the

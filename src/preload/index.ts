@@ -42,6 +42,22 @@ import type {
   AgenteraUnboundProfilePublicState,
 } from "../shared/agentera-runtime-access";
 import type { RuntimeDistributionPublicState } from "../shared/agentera-runtime-distribution";
+import type {
+  AgentDraft,
+  AgenteraAgentControlPublicState,
+  AgenteraAgentControlResult,
+  AgenteraAgentDefinitionSummary,
+  AgenteraAgentInstallationSummary,
+  AgenteraAgentVersionSummary,
+  AgenteraClaimVersionInput,
+  AgenteraInstallVersionInput,
+  AgenteraRetryPendingInstallationInput,
+  AgenteraSelectInstallationVersionInput,
+  CreateAgentDraftInput,
+  PublicationPreview,
+  PublishedRevision,
+  UpdateAgentDraftInput,
+} from "../shared/agentera-agent-control";
 
 /**
  * Mirror of the renderer-side `CredentialPoolEntry` ambient type
@@ -1716,11 +1732,84 @@ const agenteraRuntimeDistributionAPI = {
   },
 };
 
+const agenteraAgentsAPI = {
+  getState: (): Promise<
+    AgenteraAgentControlResult<AgenteraAgentControlPublicState>
+  > => ipcRenderer.invoke("agentera-agents-get-state"),
+  listDrafts: (): Promise<AgenteraAgentControlResult<AgentDraft[]>> =>
+    ipcRenderer.invoke("agentera-agents-list-drafts"),
+  getDraft: (id: string): Promise<AgenteraAgentControlResult<AgentDraft>> =>
+    ipcRenderer.invoke("agentera-agents-get-draft", id),
+  createDraft: (
+    input: CreateAgentDraftInput,
+  ): Promise<AgenteraAgentControlResult<AgentDraft>> =>
+    ipcRenderer.invoke("agentera-agents-create-draft", input),
+  updateDraft: (
+    input: UpdateAgentDraftInput,
+  ): Promise<AgenteraAgentControlResult<AgentDraft>> =>
+    ipcRenderer.invoke("agentera-agents-update-draft", input),
+  deleteDraft: (id: string): Promise<AgenteraAgentControlResult<true>> =>
+    ipcRenderer.invoke("agentera-agents-delete-draft", id),
+  preparePublication: (
+    id: string,
+  ): Promise<AgenteraAgentControlResult<PublicationPreview>> =>
+    ipcRenderer.invoke("agentera-agents-prepare-publication", id),
+  confirmPublication: (
+    publicationHandle: string,
+  ): Promise<AgenteraAgentControlResult<PublishedRevision>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-confirm-publication",
+      publicationHandle,
+    ),
+  listDefinitions: (): Promise<
+    AgenteraAgentControlResult<AgenteraAgentDefinitionSummary[]>
+  > => ipcRenderer.invoke("agentera-agents-list-definitions"),
+  listVersions: (
+    definitionId: string,
+  ): Promise<AgenteraAgentControlResult<AgenteraAgentVersionSummary[]>> =>
+    ipcRenderer.invoke("agentera-agents-list-versions", definitionId),
+  listInstallations: (): Promise<
+    AgenteraAgentControlResult<AgenteraAgentInstallationSummary[]>
+  > => ipcRenderer.invoke("agentera-agents-list-installations"),
+  installVersion: (
+    input: AgenteraInstallVersionInput,
+  ): Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>> =>
+    ipcRenderer.invoke("agentera-agents-install-version", input),
+  claimVersion: (
+    input: AgenteraClaimVersionInput,
+  ): Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>> =>
+    ipcRenderer.invoke("agentera-agents-claim-version", input),
+  retryPendingInstallation: (
+    input: AgenteraRetryPendingInstallationInput,
+  ): Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>> =>
+    ipcRenderer.invoke("agentera-agents-retry-installation", input),
+  selectInstallationVersion: (
+    input: AgenteraSelectInstallationVersionInput,
+  ): Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>> =>
+    ipcRenderer.invoke("agentera-agents-select-version", input),
+  archiveInstallation: (
+    id: string,
+  ): Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>> =>
+    ipcRenderer.invoke("agentera-agents-archive-installation", id),
+  onStateChanged: (
+    callback: (state: AgenteraAgentControlPublicState) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      state: AgenteraAgentControlPublicState,
+    ): void => callback(state);
+    ipcRenderer.on("agentera-agents-state-changed", handler);
+    return () =>
+      ipcRenderer.removeListener("agentera-agents-state-changed", handler);
+  },
+};
+
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld("electron", electronAPI);
     contextBridge.exposeInMainWorld("hermesAPI", hermesAPI);
     contextBridge.exposeInMainWorld("agenteraAuth", agenteraAuthAPI);
+    contextBridge.exposeInMainWorld("agenteraAgents", agenteraAgentsAPI);
     contextBridge.exposeInMainWorld(
       "agenteraRuntimeAccess",
       agenteraRuntimeAccessAPI,
@@ -1739,6 +1828,8 @@ if (process.contextIsolated) {
   window.hermesAPI = hermesAPI;
   // @ts-ignore (define in dts)
   window.agenteraAuth = agenteraAuthAPI;
+  // @ts-ignore (define in dts)
+  window.agenteraAgents = agenteraAgentsAPI;
   // @ts-ignore (define in dts)
   window.agenteraRuntimeAccess = agenteraRuntimeAccessAPI;
   // @ts-ignore (define in dts)

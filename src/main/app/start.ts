@@ -48,6 +48,14 @@ import {
   runPackagedSeedInstall,
 } from "../installer";
 import { RuntimeActivityCoordinator } from "../runtime-activity";
+import { getRuntimeInvocation } from "../agentera-runtime-distribution/invocation";
+import {
+  openAgenteraControlPlaneDatabase,
+  type AgenteraControlPlaneDatabase,
+} from "../agentera-agent-control/db";
+import { AgenteraAgentControlClient } from "../agentera-agent-control/client";
+import { AgenteraAgentControlManager } from "../agentera-agent-control/manager";
+import { createProfile, setActiveProfile } from "../profiles";
 
 const APP_NAME =
   process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
@@ -188,11 +196,53 @@ export function startMainProcess(): void {
   } catch {
     console.error("[AGENTERA_RUNTIME_MANAGER] unavailable");
   }
+  let agenteraAgentControlDatabase: AgenteraControlPlaneDatabase | null = null;
+  let agenteraAgentControl: AgenteraAgentControlManager | null = null;
+  try {
+    agenteraAgentControlDatabase = openAgenteraControlPlaneDatabase(
+      app.getPath("userData"),
+    );
+    const agentControlClient = new AgenteraAgentControlClient({
+      origin: getAgenteraCloudOrigin(),
+      getAccessToken: () => agenteraAuth.getAccessTokenForCloudRequest(),
+      getInstallationIdentity: () => agenteraAuthStore.getInstallation(),
+    });
+    agenteraAgentControl = new AgenteraAgentControlManager({
+      database: agenteraAgentControlDatabase,
+      client: agentControlClient,
+      profileBindings: agenteraProfileBindings,
+      profiles: {
+        createProfile,
+        resolveProfilePath: (profileId) => profileHome(profileId),
+        activateProfile: setActiveProfile,
+      },
+      userDataPath: app.getPath("userData"),
+      getOwner: getAgenteraRuntimeOwner,
+      getAuthState: () => agenteraAuth.getPublicState(),
+      getRuntimeVersion: async () => {
+        const invocationVersion = getRuntimeInvocation()?.version;
+        if (invocationVersion) return invocationVersion;
+        const state = await runtimeDistribution?.getState();
+        if (!state?.currentVersion) {
+          throw new Error("AgentEra Runtime version is unavailable.");
+        }
+        return state.currentVersion;
+      },
+      getConnectionMode: () => getConnectionConfig().mode,
+      assertEntitled: () => agenteraAuth.assertCanStartNewTask(),
+    });
+  } catch {
+    agenteraAgentControlDatabase?.close();
+    agenteraAgentControlDatabase = null;
+    agenteraAgentControl = null;
+    console.error("[AGENTERA_AGENT_CONTROL] unavailable");
+  }
   const ownerSwitchCoordinator = createAgenteraOwnerSwitchCoordinator({
     stopRuntimeContext: stopActiveRuntimeContext,
   });
   let runtimeUpdateCheckedUserId: string | null = null;
   const unsubscribeAgenteraAuth = agenteraAuth.subscribe((state) => {
+    agenteraAgentControl?.notifyAccessStateChanged();
     ownerSwitchCoordinator.transitionTo(
       state.status === "authenticated" || state.status === "offline"
         ? state.userId
@@ -227,6 +277,7 @@ export function startMainProcess(): void {
     getAgenteraRuntimeOwner,
     agenteraProfileBindings,
     agenteraConnectionOwners,
+    agenteraAgentControl,
     runtimeDistribution,
   });
 
@@ -289,6 +340,7 @@ export function startMainProcess(): void {
   app.on("before-quit", () => {
     unsubscribeAgenteraAuth();
     agenteraAuth.dispose();
+    agenteraAgentControlDatabase?.close();
     stopActiveRuntimeContext();
   });
 }

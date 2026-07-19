@@ -128,3 +128,91 @@ export interface PublishedRevision {
   publishedAt: string;
   replayed: boolean;
 }
+
+export type AgenteraAgentControlErrorCode =
+  | "invalid_request"
+  | "sign_in_required"
+  | "online_required"
+  | "entitlement_required"
+  | "not_found"
+  | "conflict"
+  | "verification_failed"
+  | "runtime_incompatible"
+  | "local_runtime_required"
+  | "cloud_unavailable"
+  | "operation_failed";
+
+export type AgenteraAgentControlResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; errorCode: AgenteraAgentControlErrorCode };
+
+export interface AgenteraAgentControlPublicState {
+  access: "online" | "offline";
+  cloudAvailable: boolean;
+  draftCount: number;
+  installationCount: number;
+}
+
+export interface AgenteraAgentDefinitionSummary {
+  id: string;
+  displayName: string;
+  status: "active" | "archived";
+  latestVersionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgenteraAgentVersionSummary {
+  id: string;
+  definitionId: string;
+  versionNumber: number;
+  contentDigest: string;
+  publishedAt: string;
+  runtimeMinimumVersion: string;
+  runtimeMaximumVersionExclusive: string | null;
+  assetCounts: Record<AgentDraftAssetKind, number>;
+}
+
+export interface AgenteraAgentInstallationSummary {
+  id: string;
+  definitionId: string;
+  selectedVersionId: string;
+  runtimeProfileId: string | null;
+  policySnapshotId: string | null;
+  status: "pending" | "active" | "archived";
+  retryCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgenteraInstallVersionInput {
+  definitionId: string;
+  versionId: string;
+  profileName: string;
+}
+
+export interface AgenteraClaimVersionInput {
+  definitionId: string;
+  versionId: string;
+  localProfileId: string;
+  confirmation: "claim-existing-profile";
+}
+
+export type AgenteraPendingInstallationTarget =
+  | { kind: "fresh"; profileName: string }
+  | {
+      kind: "claim";
+      localProfileId: string;
+      confirmation: "claim-existing-profile";
+    };
+
+export interface AgenteraRetryPendingInstallationInput {
+  id: string;
+  target: AgenteraPendingInstallationTarget;
+}
+
+export interface AgenteraSelectInstallationVersionInput {
+  id: string;
+  versionId: string;
+  localProfileId: string;
+}

@@ -3,10 +3,15 @@ import type { AgenteraAuthPublicState } from "../../shared/agentera-auth";
 export type ProductAccessLevel =
   | "preflight"
   | "authenticated"
+  | "online"
   | "bound-profile";
 
 export interface ProductAccessGuard {
   assert(level: ProductAccessLevel): void;
+}
+
+function accessError(message: string, code: string): Error {
+  return Object.assign(new Error(message), { code });
 }
 
 /** Renderer argument indexes exclude Electron's leading event argument. */
@@ -129,6 +134,13 @@ const PREFLIGHT_CHANNELS = [
 const AUTHENTICATED_CHANNELS = [
   "adopt-hermes-home",
   "agentera-auth-open-portal",
+  "agentera-agents-create-draft",
+  "agentera-agents-delete-draft",
+  "agentera-agents-get-draft",
+  "agentera-agents-get-state",
+  "agentera-agents-list-drafts",
+  "agentera-agents-list-installations",
+  "agentera-agents-update-draft",
   "agentera-connection-bind-current",
   "agentera-connection-inspect-current",
   "agentera-profile-bind-active",
@@ -161,6 +173,18 @@ const AUTHENTICATED_CHANNELS = [
   "test-ssh-connection",
   "validate-hermes-home",
   "verify-install",
+] as const;
+
+const ONLINE_CHANNELS = [
+  "agentera-agents-archive-installation",
+  "agentera-agents-claim-version",
+  "agentera-agents-confirm-publication",
+  "agentera-agents-install-version",
+  "agentera-agents-list-definitions",
+  "agentera-agents-list-versions",
+  "agentera-agents-prepare-publication",
+  "agentera-agents-retry-installation",
+  "agentera-agents-select-version",
 ] as const;
 
 const BOUND_PROFILE_CHANNELS = [
@@ -366,6 +390,7 @@ function buildChannelPolicy(): Readonly<Record<string, ProductAccessLevel>> {
   };
   add(PREFLIGHT_CHANNELS, "preflight");
   add(AUTHENTICATED_CHANNELS, "authenticated");
+  add(ONLINE_CHANNELS, "online");
   add(BOUND_PROFILE_CHANNELS, "bound-profile");
   return Object.freeze(policy);
 }
@@ -382,11 +407,26 @@ export function createProductAccessGuard(options: {
       if (level === "preflight") return;
       const state = options.getAuthState();
       if (state.status !== "authenticated" && state.status !== "offline") {
-        throw new Error("AgentEra product sign-in is required.");
+        throw accessError(
+          "AgentEra product sign-in is required.",
+          "sign_in_required",
+        );
       }
       options.assertCurrentEntitlement?.();
+      if (
+        level === "online" &&
+        (state.status !== "authenticated" || !state.cloudAvailable)
+      ) {
+        throw accessError(
+          "AgentEra online access is required.",
+          "online_required",
+        );
+      }
       if (level === "bound-profile" && !options.isRuntimeContextBound()) {
-        throw new Error("AgentEra Runtime Profile binding is required.");
+        throw accessError(
+          "AgentEra Runtime Profile binding is required.",
+          "profile_binding_required",
+        );
       }
     },
   };
