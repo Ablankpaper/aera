@@ -17,7 +17,10 @@ const { TEST_HOME, runtimeRef } = vi.hoisted(() => {
   const os = require("os");
   return {
     TEST_HOME: path.join(os.tmpdir(), `hermes-compat-home-${Date.now()}`),
-    runtimeRef: { workingDirectory: "" },
+    runtimeRef: {
+      workingDirectory: "",
+      source: "external" as "external" | "managed",
+    },
   };
 });
 
@@ -27,7 +30,7 @@ vi.mock("../src/main/installer", () => ({
 
 vi.mock("../src/main/agentera-runtime-distribution/invocation", () => ({
   getRuntimeInvocation: () => ({
-    source: "managed",
+    source: runtimeRef.source,
     version: "test",
     sourceCommit: "0".repeat(40),
     root: runtimeRef.workingDirectory,
@@ -71,6 +74,33 @@ describe("Hermes Agent dashboard compatibility patcher", () => {
         "HERMES_ONE_MODEL_LIBRARY_COMPAT_V1",
       );
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(TEST_HOME, { recursive: true, force: true });
+    }
+  });
+
+  it("never modifies a signed managed Runtime when a compatibility patch is needed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agentera-managed-compat-"));
+    runtimeRef.workingDirectory = dir;
+    runtimeRef.source = "managed";
+    const moduleDir = join(dir, "hermes_cli");
+    const target = join(moduleDir, "web_server.py");
+    const source = `async def start_server(embedded_chat: bool = False):\n    pass\n\n@app.post("/api/model/set")\nasync def set_model_assignment(body):\n    return {"ok": True}\n\nmount_spa(app)\n`;
+    try {
+      mkdirSync(moduleDir, { recursive: true });
+      writeFileSync(target, source, "utf-8");
+
+      const result = ensureLocalDashboardCompatibility();
+
+      expect(result).toMatchObject({
+        ok: false,
+        compatible: false,
+        applied: false,
+      });
+      expect(readFileSync(target, "utf-8")).toBe(source);
+      expect(readdirSync(moduleDir)).toEqual(["web_server.py"]);
+    } finally {
+      runtimeRef.source = "external";
       rmSync(dir, { recursive: true, force: true });
       rmSync(TEST_HOME, { recursive: true, force: true });
     }

@@ -215,33 +215,23 @@ test("online auth followed by offline packaged Seed preparation survives restart
     runtimeSeedDirectory,
   ));
   await authenticateNewProductAccount(harness, desktopApp, desktopPage);
-  await expect(desktopPage.locator(".welcome-screen")).toBeVisible();
-  expect(await publicFetchAttempts(desktopApp)).toEqual([]);
-
-  // First boot and an actual Runtime invocation may create ordinary
-  // bookkeeping files. Neither may rewrite or remove any pre-existing
-  // user-owned Runtime data.
-  const afterInitialBoot = await boundarySnapshot(harness.hermesHome);
-  expectExistingBoundaryUnchanged(afterInitialBoot, expectedBoundary);
-
-  // Product login is complete. From this point forward the control plane and
+  // Product login is complete. The desktop must now prepare the packaged
+  // Runtime automatically. From this point forward the control plane and
   // every public Runtime source are unavailable; only packaged bytes may run.
   await stopProductAuthCloud(harness);
-  await desktopPage.locator(".welcome-button").click();
-  await expect(desktopPage.locator(".install-confirm")).toBeVisible();
-  await desktopPage
-    .getByRole("button", { name: "Prepare Runtime", exact: true })
-    .click();
-  const continueButton = desktopPage.getByRole("button", {
-    name: "Continue to Setup",
-    exact: true,
-  });
-  await expect(continueButton).toBeVisible({ timeout: 180_000 });
-  await continueButton.click();
 
   await expect(
     desktopPage.locator('[data-testid="screen-profile-claim"]'),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 180_000 });
+  await expect(
+    desktopPage.getByRole("button", { name: "Prepare Runtime" }),
+  ).toHaveCount(0);
+  await expect(
+    desktopPage.getByRole("button", { name: "Use existing external Runtime" }),
+  ).toHaveCount(0);
+  await expect(
+    desktopPage.getByRole("button", { name: "Continue to Setup" }),
+  ).toHaveCount(0);
   await desktopPage.locator(".agentera-profile-actions .btn-primary").click();
   await expect(desktopPage.locator(".setup-screen")).toBeVisible();
 

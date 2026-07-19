@@ -61,6 +61,8 @@ export class RuntimeStateError extends Error {
   }
 }
 
+class RuntimePointerReadError extends RuntimeStateError {}
+
 const POINTER_FIELDS = [
   "schemaVersion",
   "runtimeVersion",
@@ -204,18 +206,23 @@ async function readPointer(
   paths: RuntimeDistributionPaths,
   candidate: boolean,
 ): Promise<RuntimePointer | CandidatePointer | null> {
-  let raw: Buffer;
+  let metadata;
   try {
-    const metadata = await lstat(path);
-    if (!metadata.isFile() || metadata.isSymbolicLink()) {
-      throw new RuntimeStateError(
-        "Runtime pointer path must be a regular file",
-      );
-    }
-    raw = await readFile(path);
+    metadata = await lstat(path);
   } catch (error) {
     if (isErrnoException(error) && error.code === "ENOENT") return null;
-    throw new RuntimeStateError("cannot read Runtime pointer", {
+    throw new RuntimePointerReadError("cannot read Runtime pointer", {
+      cause: error,
+    });
+  }
+  if (!metadata.isFile() || metadata.isSymbolicLink()) {
+    throw new RuntimeStateError("Runtime pointer path must be a regular file");
+  }
+  let raw: Buffer;
+  try {
+    raw = await readFile(path);
+  } catch (error) {
+    throw new RuntimePointerReadError("cannot read Runtime pointer", {
       cause: error,
     });
   }
@@ -567,19 +574,22 @@ export class RuntimeStateStore {
       let candidate: CandidatePointer | null = null;
       try {
         current = await readPointer(this.paths.current, this.paths, false);
-      } catch {
+      } catch (error) {
+        if (error instanceof RuntimePointerReadError) throw error;
         invalidPointers.push("current");
         await removePointer(this.paths.current, this.paths);
       }
       try {
         previous = await readPointer(this.paths.previous, this.paths, false);
-      } catch {
+      } catch (error) {
+        if (error instanceof RuntimePointerReadError) throw error;
         invalidPointers.push("previous");
         await removePointer(this.paths.previous, this.paths);
       }
       try {
         candidate = await readPointer(this.paths.candidate, this.paths, true);
-      } catch {
+      } catch (error) {
+        if (error instanceof RuntimePointerReadError) throw error;
         invalidPointers.push("candidate");
         await removePointer(this.paths.candidate, this.paths);
       }

@@ -6,7 +6,7 @@ import {
   statSync,
   unlinkSync,
 } from "fs";
-import { join, delimiter, isAbsolute, resolve } from "path";
+import { join, delimiter, resolve } from "path";
 import { homedir } from "os";
 import { app } from "electron";
 import {
@@ -31,6 +31,7 @@ import {
   type RuntimeSelectionMode,
 } from "./agentera-runtime-distribution/selection-store";
 import { createRuntimeDistributionPaths } from "./agentera-runtime-distribution/paths";
+import { resolvePackagedRuntimeSeedDirectory } from "./agentera-runtime-distribution/seed-path";
 import {
   getAvailableRuntimeDiskBytes,
   installPackagedSeed,
@@ -822,14 +823,12 @@ export async function runHermesUpdate(
 }
 
 function packagedRuntimeSeedDirectory(): string {
-  const developmentOverride = process.env.AGENTERA_RUNTIME_SEED_DIR?.trim();
-  if (!app.isPackaged && developmentOverride) {
-    if (!isAbsolute(developmentOverride)) {
-      throw new Error("AGENTERA_RUNTIME_SEED_DIR must be an absolute path");
-    }
-    return resolve(developmentOverride);
-  }
-  return join(process.resourcesPath, "agentera-runtime-seed");
+  return resolvePackagedRuntimeSeedDirectory({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    workingDirectory: process.cwd(),
+    developmentOverride: process.env.AGENTERA_RUNTIME_SEED_DIR,
+  });
 }
 
 function runtimeTrustFile(): string {

@@ -486,6 +486,74 @@ describe("AgentEra Runtime distribution manager", () => {
     });
   });
 
+  it("reserves and releases a Runtime transition around packaged Seed repair", async () => {
+    let repairedStore: RuntimeStateStore | null = null;
+    const repair = vi.fn(async () => {
+      await repairedStore!.setCurrent(pointer("current-v1"));
+      return {
+        success: true,
+        runtimeVersion: "0.18.1-agentera.1",
+        errorCode: null,
+      };
+    });
+    const beginRuntimeTransition = vi.fn(() => true);
+    const cancelRuntimeTransition = vi.fn();
+    const stopRuntimeContext = vi.fn();
+    const setup = await harness({
+      repair,
+      beginRuntimeTransition,
+      cancelRuntimeTransition,
+      stopRuntimeContext,
+    });
+    repairedStore = setup.store;
+    await setup.store.clearCurrent();
+    const manager = createRuntimeDistributionManager(setup.options);
+    await manager.initialize();
+
+    const state = await manager.retryRepair();
+
+    expect(beginRuntimeTransition).toHaveBeenCalledOnce();
+    expect(stopRuntimeContext).toHaveBeenCalledOnce();
+    expect(repair).toHaveBeenCalledOnce();
+    expect(cancelRuntimeTransition).toHaveBeenCalledOnce();
+    expect(state.phase).toBe("current");
+  });
+
+  it("refuses packaged Seed repair while a Runtime task owns the transition", async () => {
+    const repair = vi.fn();
+    const setup = await harness({
+      repair,
+      beginRuntimeTransition: vi.fn(() => false),
+    });
+    await setup.store.clearCurrent();
+    const manager = createRuntimeDistributionManager(setup.options);
+    await manager.initialize();
+
+    const state = await manager.retryRepair();
+
+    expect(repair).not.toHaveBeenCalled();
+    expect(setup.stopRuntimeContext).not.toHaveBeenCalled();
+    expect(state).toMatchObject({
+      phase: "repair-required",
+      lastErrorCode: "runtime_tasks_active",
+    });
+  });
+
+  it("keeps a staged candidate when diagnostic cleanup fails", async () => {
+    const setup = await harness();
+    await mkdir(join(setup.paths.failures, RUNTIME_LAST_FAILURE_NAME));
+    const manager = createRuntimeDistributionManager(setup.options);
+    await manager.initialize();
+    await manager.check();
+
+    const state = await manager.downloadConfirmed();
+
+    expect(state.phase).toBe("candidate-ready");
+    await expect(setup.store.readState()).resolves.toMatchObject({
+      candidate: { runtimeVersion: TEST_RUNTIME_VERSION },
+    });
+  });
+
   it("reports explicit external mode and switches to managed only after Seed repair succeeds", async () => {
     let external = true;
     const repair = vi.fn(async () => {

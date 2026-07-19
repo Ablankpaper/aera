@@ -15,7 +15,7 @@
     "lint": "eslint --cache .",
     "test": "vitest run",
     "test:e2e:auth": "playwright test tests/e2e/agentera-auth.e2e.ts",
-    "test:e2e:runtime-seed": "playwright test tests/e2e/agentera-runtime-seed.e2e.ts",
+    "test:e2e:runtime-seed": "npm run build && playwright test tests/e2e/agentera-runtime-seed.e2e.ts",
     "test:coverage": "vitest run --coverage",
     "test:sandbox": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/hermes-sandbox.ps1 test",
     "test:live-visual": "node scripts/drive-live-regression-suite.js",

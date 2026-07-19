@@ -1,5 +1,6 @@
 import {
   existsSync,
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -150,6 +151,22 @@ describe("AgentEra Runtime pointer state store", () => {
     });
     expect(readFileSync(outside, "utf8")).toBe(outsideValue);
     expect(existsSync(paths.current)).toBe(false);
+  });
+
+  it("preserves a pointer when an operational read error prevents validation", async () => {
+    const { paths, store } = makeStore();
+    await createVersion(paths, "v1");
+    await store.setCurrent(pointer("v1"));
+    chmodSync(paths.current, 0o000);
+
+    try {
+      await expect(store.recoverForBootstrap()).rejects.toThrow(
+        /cannot read Runtime pointer/i,
+      );
+      expect(existsSync(paths.current)).toBe(true);
+    } finally {
+      chmodSync(paths.current, 0o600);
+    }
   });
 
   it("promotes current/previous/candidate pointers and rolls back safely", async () => {

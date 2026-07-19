@@ -9,24 +9,26 @@ interface RuntimeRunState {
 }
 
 export class RuntimeActivityCoordinator {
-  private readonly runs = new Map<string, RuntimeRunState>();
+  private readonly currentRuns = new Map<string, RuntimeRunState>();
+  private readonly activeRuns = new Set<RuntimeRunState>();
   private transitionPending = false;
 
   get activeRunCount(): number {
-    return this.runs.size;
+    return this.activeRuns.size;
   }
 
   beginRun(runId: string): RuntimeRunLease | null {
     if (this.transitionPending) return null;
 
-    const existing = this.runs.get(runId);
+    const existing = this.currentRuns.get(runId);
     if (existing !== undefined) this.requestAbort(existing);
 
     const state: RuntimeRunState = {
       abort: null,
       abortRequested: false,
     };
-    this.runs.set(runId, state);
+    this.currentRuns.set(runId, state);
+    this.activeRuns.add(state);
 
     return {
       attachAbort: (abort) => {
@@ -34,23 +36,25 @@ export class RuntimeActivityCoordinator {
         if (state.abortRequested) abort();
       },
       finish: () => {
-        if (this.runs.get(runId) === state) this.runs.delete(runId);
+        this.activeRuns.delete(state);
+        if (this.currentRuns.get(runId) === state) {
+          this.currentRuns.delete(runId);
+        }
       },
     };
   }
 
   abortRun(runId: string): void {
-    const state = this.runs.get(runId);
+    const state = this.currentRuns.get(runId);
     if (state !== undefined) this.requestAbort(state);
   }
 
   abortAll(): void {
-    for (const state of this.runs.values()) this.requestAbort(state);
-    this.runs.clear();
+    for (const state of this.activeRuns) this.requestAbort(state);
   }
 
   beginTransition(): boolean {
-    if (this.transitionPending || this.runs.size > 0) return false;
+    if (this.transitionPending || this.activeRuns.size > 0) return false;
     this.transitionPending = true;
     return true;
   }

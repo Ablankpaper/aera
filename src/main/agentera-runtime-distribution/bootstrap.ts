@@ -38,6 +38,7 @@ import {
   type RuntimeDistributionPaths,
 } from "./paths";
 import { selectManagedRuntime as selectManagedRuntimeDefault } from "./invocation";
+import { resolvePackagedRuntimeSeedDirectory } from "./seed-path";
 import { loadRuntimeTrustFile } from "./trust";
 import {
   RuntimeStateStore,
@@ -73,6 +74,8 @@ export interface RuntimeBootstrapEnvironment {
   userDataPath: string;
   resourcesPath: string;
   workingDirectory: string;
+  isPackaged: boolean;
+  developmentSeedDirectory?: string;
   desktopVersion: string;
   platform: NodeJS.Platform;
   arch: string;
@@ -138,7 +141,12 @@ export function createRuntimeBootstrapOptions(
   return {
     paths: createRuntimeDistributionPaths(
       environment.userDataPath,
-      join(environment.resourcesPath, "agentera-runtime-seed"),
+      resolvePackagedRuntimeSeedDirectory({
+        isPackaged: environment.isPackaged,
+        resourcesPath: environment.resourcesPath,
+        workingDirectory: environment.workingDirectory,
+        developmentOverride: environment.developmentSeedDirectory,
+      }),
     ),
     trustedPublicKeys: loadRuntimeTrustFile(runtimeTrustPath(environment)),
     manifestContext: {
@@ -369,16 +377,8 @@ async function pointerIsUsable(
       pathExists(join(root, RUNTIME_MANIFEST_METADATA_NAME)),
       pathExists(join(root, RUNTIME_SIGNATURE_METADATA_NAME)),
     ]);
-    if (hasManifest !== hasSignature) return false;
-    if (hasManifest) {
-      await verifySignedInstalledRuntime(options, pointer);
-    } else {
-      await verifyRuntimeLayout(
-        options.paths,
-        pointer,
-        options.manifestContext.platform,
-      );
-    }
+    if (!hasManifest || !hasSignature) return false;
+    await verifySignedInstalledRuntime(options, pointer);
     return true;
   } catch {
     return false;

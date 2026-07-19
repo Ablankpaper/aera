@@ -89,10 +89,18 @@ async function createRuntimeLayout(
   return root;
 }
 
-async function writeCandidateMetadata(root: string): Promise<{
+async function writeRuntimeMetadata(
+  root: string,
+  runtimeVersion = TEST_RUNTIME_VERSION,
+  sourceCommit = TEST_SOURCE_COMMIT,
+): Promise<{
   manifestSha256: string;
 }> {
-  const signed = createSignedFixture({ channel: "stable" });
+  const signed = createSignedFixture({
+    channel: "stable",
+    runtime_version: runtimeVersion,
+    source_commit: sourceCommit,
+  });
   await writeFile(
     join(root, RUNTIME_MANIFEST_METADATA_NAME),
     signed.manifestBytes,
@@ -106,6 +114,26 @@ async function writeCandidateMetadata(root: string): Promise<{
       .update(signed.manifestBytes)
       .digest("hex"),
   };
+}
+
+async function createSignedRuntimePointer(
+  versions: string,
+  versionDirectory: string,
+  runtimeVersion = "0.18.1-agentera.1",
+  sourceCommit = "a".repeat(40),
+): Promise<RuntimePointer> {
+  const root = await createRuntimeLayout(versions, versionDirectory);
+  const metadata = await writeRuntimeMetadata(
+    root,
+    runtimeVersion,
+    sourceCommit,
+  );
+  return pointer(
+    versionDirectory,
+    runtimeVersion,
+    sourceCommit,
+    metadata.manifestSha256,
+  );
 }
 
 async function harness(
@@ -159,7 +187,7 @@ async function stageCandidate(
     setup.paths.versions,
     versionDirectory,
   );
-  const metadata = await writeCandidateMetadata(root);
+  const metadata = await writeRuntimeMetadata(root);
   const candidate: CandidatePointer = {
     ...pointer(
       versionDirectory,
@@ -190,9 +218,8 @@ describe("AgentEra Runtime pre-import bootstrap", () => {
 
   it("health-checks and promotes an approved candidate before selecting managed mode", async () => {
     const setup = await harness();
-    await createRuntimeLayout(setup.paths.versions, "current-v1");
     await setup.store.setCurrent(
-      pointer("current-v1", "0.18.1-agentera.1", "a".repeat(40)),
+      await createSignedRuntimePointer(setup.paths.versions, "current-v1"),
     );
     await stageCandidate(setup);
 
@@ -223,9 +250,8 @@ describe("AgentEra Runtime pre-import bootstrap", () => {
         );
       }),
     });
-    await createRuntimeLayout(setup.paths.versions, "current-v1");
     await setup.store.setCurrent(
-      pointer("current-v1", "0.18.1-agentera.1", "a".repeat(40)),
+      await createSignedRuntimePointer(setup.paths.versions, "current-v1"),
     );
     await stageCandidate(setup);
 
@@ -255,8 +281,10 @@ describe("AgentEra Runtime pre-import bootstrap", () => {
 
   it("completes promotion after a crash between previous and current pointer writes", async () => {
     const setup = await harness();
-    await createRuntimeLayout(setup.paths.versions, "current-v1");
-    const current = pointer("current-v1", "0.18.1-agentera.1", "a".repeat(40));
+    const current = await createSignedRuntimePointer(
+      setup.paths.versions,
+      "current-v1",
+    );
     await setup.store.setCurrent(current);
     await writeFile(setup.paths.previous, `${JSON.stringify(current)}\n`);
     await stageCandidate(setup);
@@ -272,11 +300,9 @@ describe("AgentEra Runtime pre-import bootstrap", () => {
 
   it("recovers a corrupt current pointer from a valid previous Runtime", async () => {
     const setup = await harness();
-    await createRuntimeLayout(setup.paths.versions, "previous-v1");
-    const previous = pointer(
+    const previous = await createSignedRuntimePointer(
+      setup.paths.versions,
       "previous-v1",
-      "0.18.1-agentera.1",
-      "a".repeat(40),
     );
     await writeFile(setup.paths.current, "{private broken pointer");
     await writeFile(setup.paths.previous, `${JSON.stringify(previous)}\n`);
@@ -297,11 +323,12 @@ describe("AgentEra Runtime pre-import bootstrap", () => {
 
   it("rolls back when current program files are corrupt but previous is valid", async () => {
     const setup = await harness();
-    await createRuntimeLayout(setup.paths.versions, "previous-v1");
-    await createRuntimeLayout(setup.paths.versions, "current-v2", false);
-    await setup.store.setCurrent(
-      pointer("previous-v1", "0.18.1-agentera.1", "a".repeat(40)),
+    const previous = await createSignedRuntimePointer(
+      setup.paths.versions,
+      "previous-v1",
     );
+    await createRuntimeLayout(setup.paths.versions, "current-v2", false);
+    await setup.store.setCurrent(previous);
     await setup.store.stageCandidate({
       ...pointer("current-v2", "0.18.2-agentera.1", "b".repeat(40)),
       applyOnNextLaunch: true,
@@ -329,15 +356,16 @@ describe("AgentEra Runtime pre-import bootstrap", () => {
       return { fileCount: 2, extractedBytes: 30 };
     });
     const setup = await harness({ inventoryCheck });
-    await createRuntimeLayout(setup.paths.versions, "previous-v1");
+    const previous = await createSignedRuntimePointer(
+      setup.paths.versions,
+      "previous-v1",
+    );
     const currentRoot = await createRuntimeLayout(
       setup.paths.versions,
       "current-v2",
     );
-    const metadata = await writeCandidateMetadata(currentRoot);
-    await setup.store.setCurrent(
-      pointer("previous-v1", "0.18.1-agentera.1", "a".repeat(40)),
-    );
+    const metadata = await writeRuntimeMetadata(currentRoot);
+    await setup.store.setCurrent(previous);
     await setup.store.stageCandidate({
       ...pointer(
         "current-v2",
@@ -380,6 +408,23 @@ describe("AgentEra Runtime pre-import bootstrap", () => {
       stagedAt: "2026-07-18T13:00:00.000Z",
     });
     await setup.store.promoteCandidate();
+
+    const result = await bootstrapRuntimeDistribution(setup.options);
+
+    expect(result).toMatchObject({
+      phase: "repair-required",
+      currentVersion: null,
+      lastErrorCode: "runtime_repair_required",
+    });
+    expect(setup.selectManagedRuntime).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unsigned managed Runtime even when its legacy layout is complete", async () => {
+    const setup = await harness();
+    await createRuntimeLayout(setup.paths.versions, "unsigned-current");
+    await setup.store.setCurrent(
+      pointer("unsigned-current", "0.18.1-agentera.1", "a".repeat(40)),
+    );
 
     const result = await bootstrapRuntimeDistribution(setup.options);
 

@@ -20,7 +20,9 @@ The source-controlled staging directory may retain its regular-file `.gitkeep` s
 
 After product authentication, the main process verifies the packaged seed, installs it into a versioned application-data directory, and atomically selects it without network access.
 
-A missing or invalid seed enters a repair state. The desktop never falls back to cloning upstream `main`, executing a remote install script, or downloading an unsigned Runtime.
+When the local Runtime is missing, [[src/renderer/src/App.tsx#App]] routes straight to [[src/renderer/src/screens/Install/Install.tsx#Install]]. Preparation starts on mount and successful activation continues automatically into Profile ownership and setup; no welcome, source selection, path selection, prepare, cancel, or continue action is shown.
+
+A missing or invalid seed enters a repair state. Only then may the desktop show bounded repair guidance. It never falls back to cloning upstream `main`, executing a remote install script, choosing an external Runtime, or downloading an unsigned Runtime.
 
 ## Offline Seed installation and repair
 
@@ -34,7 +36,7 @@ Extraction occurs only below a fresh `userData/runtime/staging/seed-*` transacti
 
 [[src/main/agentera-runtime-distribution/health.ts#runIsolatedRuntimeHealthCheck]] runs version, server-help, and core-import probes with Python isolation plus `-B`, a disposable fake HOME and HERMES_HOME, an allowlisted environment, no inherited credentials, and offline package-manager flags. Disabling bytecode writes keeps the verified signed inventory immutable even when Python's isolated mode ignores environment configuration. A corrupt same-version current Runtime is repaired into a new version directory, leaving the old directory and every Hermes-owned Profile, Memory, session, learned Skill, and Curator file untouched.
 
-The authenticated `start-install` IPC path calls only the packaged Seed installer. Missing or corrupt packaged resources return `repair-required` with a reinstall-desktop action; low disk returns a free-space action. No remote shell or PowerShell installer is shipped as a first-install fallback.
+The authenticated `start-install` IPC path is invoked automatically and calls only the packaged Seed installer. Missing or corrupt packaged resources return `repair-required` with reinstall-desktop guidance; low disk returns a retryable free-space action. No remote shell or PowerShell installer is shipped as a first-install fallback.
 
 ## Version state journal
 
@@ -64,9 +66,9 @@ Chat and Gateway, Dashboard, Skills, Profiles, Cron, model discovery, MCP, accou
 
 ## Explicit external compatibility
 
-External Runtime use is an explicit, persisted compatibility mode; managed mode remains the default when no previous selection exists.
+External Runtime use is retained only as a legacy persisted compatibility mode for existing developer installations; packaged managed mode is the only first-install product path.
 
-[[src/main/agentera-runtime-distribution/selection-store.ts#readRuntimeSelection]] migrates only the exact legacy `{ hermesHome }` record to external mode. New records persist an exact schema, selection mode, and physical Hermes home. Switching between external and managed invocation changes only that selection record and never moves, rewrites, or deletes the external checkout or its adaptive data.
+[[src/main/agentera-runtime-distribution/selection-store.ts#readRuntimeSelection]] migrates only the exact legacy `{ hermesHome }` record to external mode. New product installations do not expose that selection in startup UI. Existing records retain an exact schema, selection mode, and physical Hermes home; compatibility never moves, rewrites, or deletes the external checkout or its adaptive data.
 
 [[src/main/installer.ts#runHermesUpdate]] rejects managed mode and, in explicit external mode, invokes only the selected checkout's interpreter with `python -m hermes_cli.main update` from that checkout. The Settings card labels this path unmanaged and offers a separate switch to the signed managed Runtime. The welcome and repair surfaces no longer expose upstream `curl`, PowerShell, Git clone, or remote-script commands.
 
@@ -100,7 +102,7 @@ Every seed must pass the native Hermes compatibility gate and a clean extracted-
 
 The gate proves stable conversations, background learning, next-conversation recall, Curator behavior, Profile isolation, offline use, migration, update, and rollback without changing private adaptive state.
 
-[[tests/runtime-data-boundary.test.ts]] hashes realistic default and named Profiles, modes, symlink targets, sessions, Memory, learned Skills, Curator state, Gateway/Cron state, logs, attachments, and workspaces after every install/update/activation/rollback/cleanup/selection/repair transition. [[tests/e2e/agentera-runtime-seed.e2e.ts]] adds the product-level proof: authenticate online, stop the control plane, prepare and invoke the native packaged Seed with public HTTP blocked, restart offline, and confirm the same Runtime version plus every pre-existing Hermes-owned entry survives unchanged.
+[[tests/runtime-data-boundary.test.ts]] hashes realistic default and named Profiles, modes, symlink targets, sessions, Memory, learned Skills, Curator state, Gateway/Cron state, logs, attachments, and workspaces after every install/update/activation/rollback/cleanup/selection/repair transition. [[tests/e2e/agentera-runtime-seed.e2e.ts]] adds the product-level proof: authenticate online, stop the control plane, automatically prepare and invoke the native packaged Seed with public HTTP blocked and no Runtime-choice controls, restart offline, and confirm the same Runtime version plus every pre-existing Hermes-owned entry survives unchanged. The E2E command rebuilds first so stale `out/` assets cannot reintroduce removed startup screens.
 
 ## Independent verification
 
@@ -116,10 +118,14 @@ Native packaging embeds one exact verified Seed and fails closed if any required
 
 Electron Builder excludes the staging directory from `app.asar`, then copies only the three verified files from `resources/agentera-runtime-seed` into the application `Resources/agentera-runtime-seed` directory. `scripts/verify-packaged-runtime-seed.mjs` rejects partial, mixed-target, or extra contents and can prove every packaged byte matches the verified staging reference.
 
+[[src/main/agentera-runtime-distribution/seed-path.ts#resolvePackagedRuntimeSeedDirectory]] resolves packaged resources from Electron `resourcesPath`. Development and native E2E resolve the same verified staging directory, with an absolute explicit override allowed only outside packaged builds, so source runs exercise the real local installer instead of reporting a false missing-Seed failure.
+
 Stable and beta release workflows currently build only macOS ARM64 and Windows x64. Each native job prepares the exact Seed before packaging and verifies the unpacked application plus final DMG, ZIP, NSIS, and portable artifacts. CI may use its workflow token while fetching the public locked Release, but no token enters the desktop package. Linux and macOS x64 publishing remain disabled until signed native Seed targets and the same final-artifact proof exist.
 
 ## Later delivery
 
-Cloud Agent definition and immutable-version sync starts only after Runtime distribution is stable, followed by a separate workspace and organization project.
+After Runtime distribution is stable, delivery continues with workspace cloud foundations and then desktop workspace adoption.
+
+The cloud phase adds membership, invitations, Owner/Admin/Member policy, and audit. The desktop then adds personal/workspace switching plus Agent definition, draft, immutable-version, and permission sync. Organization and official Agent management follow separately.
 
 Neither later project may reintroduce whole-file Memory sync or make local Hermes learning depend on the control plane.

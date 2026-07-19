@@ -18,14 +18,12 @@ import Layout from "./screens/Layout/Layout";
 import ProfileClaim from "./screens/ProfileClaim/ProfileClaim";
 import Setup from "./screens/Setup/Setup";
 import SplashScreen from "./screens/SplashScreen/SplashScreen";
-import Welcome from "./screens/Welcome/Welcome";
 import { captureScreenView } from "./utils/analytics";
 
 type Screen =
   | "splash"
   | "auth"
   | "profile-claim"
-  | "welcome"
   | "installing"
   | "setup"
   | "main";
@@ -84,7 +82,6 @@ function warmRuntimeAfterOwnership(
 
 function App(): React.JSX.Element {
   const [screen, setScreen] = useState<Screen>("splash");
-  const [installError, setInstallError] = useState<string | null>(null);
   const [connectionMode, setConnectionMode] = useState<
     "local" | "remote" | "ssh"
   >("local");
@@ -158,7 +155,9 @@ function App(): React.JSX.Element {
       setVerifyWarning(preflight.verifyWarning);
 
       if (preflight.postAuthTarget === "welcome") {
-        setScreen("welcome");
+        // A missing Runtime is not a user choice: authenticated users proceed
+        // directly to the signed Seed bundled with the desktop app.
+        setScreen("installing");
         return;
       }
 
@@ -320,7 +319,7 @@ function App(): React.JSX.Element {
     if (preflight) warmRuntimeAfterOwnership(preflight);
     setOwnershipClaim(null);
     setRuntimeAccessReady(true);
-    setScreen(postAuthTarget);
+    setScreen(postAuthTarget === "main" ? "main" : "setup");
   }
 
   async function handleCreateFreshProfile(): Promise<void> {
@@ -352,7 +351,7 @@ function App(): React.JSX.Element {
     if (preflight) warmRuntimeAfterOwnership(preflight);
     setOwnershipClaim(null);
     setRuntimeAccessReady(true);
-    setScreen(postAuthTarget);
+    setScreen(postAuthTarget === "main" ? "main" : "setup");
   }
 
   async function handleRetryOwnership(): Promise<void> {
@@ -365,8 +364,7 @@ function App(): React.JSX.Element {
     await routeAfterAuthentication(authStateRef.current, preflight);
   }
 
-  function handleInstallComplete(): void {
-    setInstallError(null);
+  const handleInstallComplete = useCallback((): void => {
     const nextPreflight: AgenteraStartupPreflightPublicResult = {
       connectionMode: "local",
       postAuthTarget: "setup",
@@ -376,24 +374,7 @@ function App(): React.JSX.Element {
     setConnectionMode("local");
     setPostAuthTarget("setup");
     void routeAfterAuthentication(authStateRef.current, nextPreflight);
-  }
-
-  function handleInstallFailed(error: string): void {
-    setInstallError(error);
-    setScreen("welcome");
-  }
-
-  function handleRetryInstall(): void {
-    setInstallError(null);
-    setRuntimeAccessReady(false);
-    setScreen("installing");
-  }
-
-  function handleRecheck(): void {
-    setInstallError(null);
-    setScreen("splash");
-    void runInstallCheck();
-  }
+  }, [routeAfterAuthentication]);
 
   function handleSwitchToLocal(): void {
     pendingSwitchToLocalRef.current = true;
@@ -406,7 +387,6 @@ function App(): React.JSX.Element {
 
   function handleVerifyReinstall(): void {
     setVerifyWarning(false);
-    setInstallError(null);
     setRuntimeAccessReady(false);
     setScreen("installing");
   }
@@ -449,24 +429,8 @@ function App(): React.JSX.Element {
             onRetry={handleRetryOwnership}
           />
         );
-      case "welcome":
-        return (
-          <Welcome
-            error={installError}
-            connectionMode={connectionMode}
-            onStart={handleRetryInstall}
-            onRecheck={handleRecheck}
-            onSwitchToLocal={handleSwitchToLocal}
-          />
-        );
       case "installing":
-        return (
-          <Install
-            onComplete={handleInstallComplete}
-            onFailed={handleInstallFailed}
-            onCancel={() => setScreen("welcome")}
-          />
-        );
+        return <Install onComplete={handleInstallComplete} />;
       case "setup":
         return (
           <Setup

@@ -30,6 +30,8 @@ async function bootstrapAndStartMainProcess(): Promise<void> {
         userDataPath: app.getPath("userData"),
         resourcesPath: process.resourcesPath,
         workingDirectory: process.cwd(),
+        isPackaged: app.isPackaged,
+        developmentSeedDirectory: process.env.AGENTERA_RUNTIME_SEED_DIR,
         desktopVersion: app.getVersion(),
         platform: process.platform,
         arch: process.arch,

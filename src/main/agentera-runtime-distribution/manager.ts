@@ -480,10 +480,10 @@ export function createRuntimeDistributionManager(
           stagedAt: timestamp,
         };
         await store.stageCandidate(candidate);
+        candidateWritten = true;
         await rm(join(options.paths.failures, RUNTIME_LAST_FAILURE_NAME), {
           force: true,
-        });
-        candidateWritten = true;
+        }).catch(() => undefined);
         return publish({
           ...(state ?? currentState),
           phase: "candidate-ready",
@@ -608,12 +608,23 @@ export function createRuntimeDistributionManager(
       }
 
       const startedInExternalMode = currentState.phase === "external";
+      const transitionReserved =
+        options.beginRuntimeTransition?.() ??
+        (options.activeRunCount?.() ?? 0) === 0;
+      if (!transitionReserved) {
+        return publish({
+          ...currentState,
+          phase: startedInExternalMode ? "external" : "repair-required",
+          lastErrorCode: "runtime_tasks_active",
+        });
+      }
       publish({
         ...currentState,
         phase: "installing",
         lastErrorCode: null,
       });
       try {
+        await options.stopRuntimeContext?.();
         const repaired = await options.repair?.();
         if (!repaired?.success || options.isExternalRuntime?.()) {
           return publish({
@@ -646,6 +657,10 @@ export function createRuntimeDistributionManager(
           phase: startedInExternalMode ? "external" : "repair-required",
           lastErrorCode: "runtime_repair_required",
         });
+      } finally {
+        if (options.beginRuntimeTransition !== undefined) {
+          options.cancelRuntimeTransition?.();
+        }
       }
     });
 

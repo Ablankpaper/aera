@@ -431,6 +431,21 @@ export function ensureLocalDashboardCompatibility(): HermesAgentCompatResult {
       return result;
     }
 
+    if (patched.changed && invocation.source === "managed") {
+      const result: HermesAgentCompatResult = {
+        ok: false,
+        target: "local",
+        compatible: false,
+        applied: false,
+        version: HERMES_AGENT_COMPAT_VERSION,
+        detail:
+          "The signed managed AgentEra Runtime needs a compatible published version.",
+        path,
+      };
+      writeLocalMarker(result);
+      return result;
+    }
+
     if (patched.changed) {
       writeCompatFileAtomically(path, patched.source);
     }
