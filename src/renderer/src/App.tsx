@@ -3,7 +3,6 @@ import { Toaster } from "react-hot-toast";
 import type { AgenteraAuthPublicState } from "../../shared/agentera-auth";
 import type {
   AgenteraConnectionClaimPublicState,
-  AgenteraPostAuthTarget,
   AgenteraProfileClaimPublicState,
   AgenteraStartupPreflightPublicResult,
 } from "../../shared/agentera-runtime-access";
@@ -16,17 +15,10 @@ import AuthGate from "./screens/AuthGate/AuthGate";
 import Install from "./screens/Install/Install";
 import Layout from "./screens/Layout/Layout";
 import ProfileClaim from "./screens/ProfileClaim/ProfileClaim";
-import Setup from "./screens/Setup/Setup";
 import SplashScreen from "./screens/SplashScreen/SplashScreen";
 import { captureScreenView } from "./utils/analytics";
 
-type Screen =
-  | "splash"
-  | "auth"
-  | "profile-claim"
-  | "installing"
-  | "setup"
-  | "main";
+type Screen = "splash" | "auth" | "profile-claim" | "installing" | "main";
 
 type OwnershipClaim =
   | AgenteraProfileClaimPublicState
@@ -85,8 +77,6 @@ function App(): React.JSX.Element {
   const [connectionMode, setConnectionMode] = useState<
     "local" | "remote" | "ssh"
   >("local");
-  const [postAuthTarget, setPostAuthTarget] =
-    useState<AgenteraPostAuthTarget>("welcome");
   const [authState, setAuthState] = useState<AgenteraAuthPublicState>({
     status: "checking",
   });
@@ -111,7 +101,7 @@ function App(): React.JSX.Element {
   const visibleScreen: Screen =
     screen !== "splash" && !hasProductAccess(authState)
       ? "auth"
-      : (screen === "setup" || screen === "main") && !runtimeAccessReady
+      : screen === "main" && !runtimeAccessReady
         ? "profile-claim"
         : screen;
 
@@ -151,7 +141,6 @@ function App(): React.JSX.Element {
 
       preflightRef.current = preflight;
       setConnectionMode(preflight.connectionMode);
-      setPostAuthTarget(preflight.postAuthTarget);
       setVerifyWarning(preflight.verifyWarning);
 
       if (preflight.postAuthTarget === "welcome") {
@@ -171,7 +160,9 @@ function App(): React.JSX.Element {
         if (claim.status === "owned" && claim.isCurrentOwner) {
           warmRuntimeAfterOwnership(preflight);
           setRuntimeAccessReady(true);
-          setScreen(preflight.postAuthTarget);
+          // Provider/model selection is an in-desktop choice. Normalize the
+          // retired `setup` target from older installs to the main desktop.
+          setScreen("main");
           return;
         }
         setOwnershipClaim(claim);
@@ -232,7 +223,6 @@ function App(): React.JSX.Element {
 
     setSplashStatus(undefined);
     preflightRef.current = preflight;
-    setPostAuthTarget(preflight.postAuthTarget);
     setVerifyWarning(preflight.verifyWarning);
     await routeAfterAuthentication(nextAuthState, preflight);
   }, [routeAfterAuthentication]);
@@ -319,7 +309,7 @@ function App(): React.JSX.Element {
     if (preflight) warmRuntimeAfterOwnership(preflight);
     setOwnershipClaim(null);
     setRuntimeAccessReady(true);
-    setScreen(postAuthTarget === "main" ? "main" : "setup");
+    setScreen("main");
   }
 
   async function handleCreateFreshProfile(): Promise<void> {
@@ -333,14 +323,13 @@ function App(): React.JSX.Element {
       preflightRef.current = {
         ...currentPreflight,
         connectionMode: "local",
-        postAuthTarget: "setup",
+        postAuthTarget: "main",
       };
     }
     setConnectionMode("local");
-    setPostAuthTarget("setup");
     setOwnershipClaim(null);
     setRuntimeAccessReady(true);
-    setScreen("setup");
+    setScreen("main");
   }
 
   async function handleBindConnection(): Promise<void> {
@@ -351,7 +340,7 @@ function App(): React.JSX.Element {
     if (preflight) warmRuntimeAfterOwnership(preflight);
     setOwnershipClaim(null);
     setRuntimeAccessReady(true);
-    setScreen(postAuthTarget === "main" ? "main" : "setup");
+    setScreen("main");
   }
 
   async function handleRetryOwnership(): Promise<void> {
@@ -367,12 +356,11 @@ function App(): React.JSX.Element {
   const handleInstallComplete = useCallback((): void => {
     const nextPreflight: AgenteraStartupPreflightPublicResult = {
       connectionMode: "local",
-      postAuthTarget: "setup",
+      postAuthTarget: "main",
       verifyWarning: false,
     };
     preflightRef.current = nextPreflight;
     setConnectionMode("local");
-    setPostAuthTarget("setup");
     void routeAfterAuthentication(authStateRef.current, nextPreflight);
   }, [routeAfterAuthentication]);
 
@@ -431,15 +419,6 @@ function App(): React.JSX.Element {
         );
       case "installing":
         return <Install onComplete={handleInstallComplete} />;
-      case "setup":
-        return (
-          <Setup
-            onComplete={() => setScreen("main")}
-            verifyWarning={verifyWarning}
-            onReinstall={handleVerifyReinstall}
-            onDismissVerifyWarning={handleDismissVerifyWarning}
-          />
-        );
       case "main":
         return (
           <Layout

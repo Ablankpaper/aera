@@ -283,6 +283,17 @@ describe("AgentEra startup gate", () => {
     expect(runtime.inspectActiveProfile).toHaveBeenCalledOnce();
   });
 
+  it("normalizes a legacy setup target to the main desktop", async () => {
+    const { runtime } = installWindowMocks({ target: "setup" });
+    render(<App />);
+
+    await finishSplash();
+
+    expect(screen.getByTestId("screen-main")).toBeInTheDocument();
+    expect(screen.queryByTestId("screen-setup")).toBeNull();
+    expect(runtime.inspectActiveProfile).toHaveBeenCalledOnce();
+  });
+
   it.each(["remote", "ssh"] as const)(
     "enters main only when the %s connection belongs to the current owner",
     async (mode) => {
@@ -322,7 +333,7 @@ describe("AgentEra startup gate", () => {
     },
   );
 
-  it("runs splash -> auth -> automatic install -> claim -> setup", async () => {
+  it("runs splash -> auth -> automatic install -> claim -> main", async () => {
     const { runtime, auth } = installWindowMocks({
       target: "welcome",
       authState: {
@@ -368,10 +379,11 @@ describe("AgentEra startup gate", () => {
     expect(runtime.bindActiveProfile).toHaveBeenCalledOnce();
 
     await act(async () => finishBinding?.());
-    expect(screen.getByTestId("screen-setup")).toBeInTheDocument();
+    expect(screen.getByTestId("screen-main")).toBeInTheDocument();
+    expect(screen.queryByTestId("screen-setup")).toBeNull();
   });
 
-  it("creates a fresh non-inherited space only after the explicit choice", async () => {
+  it("creates a fresh non-inherited space and opens the desktop", async () => {
     const { runtime } = installWindowMocks({ target: "main" });
     runtime.inspectActiveProfile.mockResolvedValue({
       status: "unbound",
@@ -392,8 +404,8 @@ describe("AgentEra startup gate", () => {
       /^AgentEra Space /,
     );
     expect(runtime.bindActiveProfile).not.toHaveBeenCalled();
-    expect(screen.getByTestId("screen-setup")).toBeInTheDocument();
-    expect(screen.queryByTestId("screen-main")).toBeNull();
+    expect(screen.getByTestId("screen-main")).toBeInTheDocument();
+    expect(screen.queryByTestId("screen-setup")).toBeNull();
   });
 
   it("defers the splash local-mode switch until product authentication", async () => {

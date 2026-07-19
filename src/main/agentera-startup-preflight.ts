@@ -34,8 +34,8 @@ export function probeAgenteraInstallFiles(): AgenteraInstallFileStatus {
   return {
     installed: getRuntimeInvocation() !== null,
     configured,
-    // Pre-auth needs only a post-auth route hint. Treat presence of approved
-    // configuration metadata as configured without reading any key value.
+    // Keep the metadata-only status for diagnostics without reading any key
+    // value. Model configuration is no longer a startup gate.
     hasApiKey: configured,
   };
 }
@@ -69,9 +69,7 @@ export async function runAgenteraStartupPreflight(
   const install = dependencies.checkInstallStatus();
   const postAuthTarget: AgenteraPostAuthTarget = !install.installed
     ? "welcome"
-    : install.hasApiKey
-      ? "main"
-      : "setup";
+    : "main";
   let verifyWarning = false;
   if (install.installed) {
     verifyWarning = !(await dependencies.verifyInstall().catch(() => false));

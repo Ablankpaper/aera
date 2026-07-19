@@ -10,15 +10,15 @@ The existing Hermes account client remains a separate compatibility feature. The
 
 ## Startup gate
 
-The splash may preflight Runtime and connection readiness without mounting user content, then every local, remote, SSH, setup, and install path passes through the AgentEra product gate.
+The splash may preflight Runtime and connection readiness without mounting user content, then every local, remote, SSH, and install path passes through the AgentEra product gate.
 
-An online session or valid signed offline entitlement selects the bound Runtime Profile before any runnable user screen opens. A fresh authenticated device may install Runtime first, but must create and bind its empty Profile before setup or main. Authentication never becomes a writer to [[agentera-self-evolution#AgentEra self-evolution compatibility#Local learning loop|Hermes local learning]].
+An online session or valid signed offline entitlement selects the bound Runtime Profile before any runnable user screen opens. A fresh authenticated device may install Runtime first, but must create and bind its empty Profile before main. Authentication never becomes a writer to [[agentera-self-evolution#AgentEra self-evolution compatibility#Local learning loop|Hermes local learning]].
 
 ### Sanitized preflight
 
 [[src/main/agentera-startup-preflight.ts#runAgenteraStartupPreflight]] keeps pre-auth connection and installation checks inside the main process and returns only three allowlisted fields.
 
-The result contains connection mode, the saved post-auth target, and a soft verification warning. [[src/main/agentera-startup-preflight.ts#probeAgenteraInstallFiles]] checks approved file existence without opening Profile config, credentials, Memory, sessions, or learning state.
+The result contains connection mode, an installation-derived post-auth target, and a soft verification warning. An absent Runtime targets bundled installation; every installed Runtime targets main regardless of model credentials. [[src/main/agentera-startup-preflight.ts#probeAgenteraInstallFiles]] checks approved file existence without opening Profile config, credentials, Memory, sessions, or learning state.
 
 ### IPC enforcement
 
@@ -32,11 +32,11 @@ The separate `window.agenteraRuntimeDistribution` lifecycle namespace is authent
 
 [[src/renderer/src/App.tsx#App]] applies the sanitized startup target only after product authentication and Runtime ownership checks.
 
-The three-second branded splash remains unchanged. `welcome` is reachable only for an authenticated fresh installation; `setup` and `main` additionally require the current local Profile or remote/SSH connection context to match the signed-in owner.
+The three-second branded splash remains unchanged. `welcome` is reachable only for an authenticated fresh installation; `main` additionally requires the current local Profile or remote/SSH connection context to match the signed-in owner. A legacy `setup` target is normalized to `main` after that ownership check.
 
 [[src/renderer/src/screens/AuthGate/AuthGate.tsx#AuthGate]] opens registration, sign-in, and recovery only in the system browser. It never renders password, email, phone, verification-code, WebView, or local-bypass inputs, and it explains fail-closed platform secure-storage errors.
 
-[[src/renderer/src/screens/ProfileClaim/ProfileClaim.tsx#ProfileClaim]] automatically binds an empty Profile, but meaningful existing data remains untouched until the user explicitly chooses to bind it in place or create a separate empty Profile. Fresh creation activates the new physical Profile and always continues to setup rather than inheriting the previous Profile's configured target.
+[[src/renderer/src/screens/ProfileClaim/ProfileClaim.tsx#ProfileClaim]] automatically binds an empty Profile, but meaningful existing data remains untouched until the user explicitly chooses to bind it in place or create a separate empty Profile. Fresh creation activates the new physical Profile and continues directly to main without inheriting the previous Profile's model configuration.
 
 The splash local-mode escape is retained, but its configuration mutation is queued until product authentication succeeds and then runs through the authenticated main-process `agentera-switch-to-local` channel. It cannot bypass the product gate.
 

@@ -27,7 +27,7 @@ function connection(mode: "local" | "remote" | "ssh"): ConnectionConfig {
 describe("AgentEra sanitized startup preflight", () => {
   it.each([
     [{ installed: false, hasApiKey: false }, "welcome"],
-    [{ installed: true, hasApiKey: false }, "setup"],
+    [{ installed: true, hasApiKey: false }, "main"],
     [{ installed: true, hasApiKey: true }, "main"],
   ] as const)("maps local install state to %s", async (install, target) => {
     const result = await runAgenteraStartupPreflight({

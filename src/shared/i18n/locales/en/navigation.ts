@@ -3,7 +3,7 @@ export default {
   newChat: "New Chat",
   sessions: "Sessions",
   discover: "Discover",
-  agents: "Profiles",
+  agents: "Agents",
   office: "Office",
   models: "Models",
   providers: "Providers",

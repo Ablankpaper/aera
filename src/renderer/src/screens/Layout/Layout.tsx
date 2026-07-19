@@ -50,6 +50,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
+  Bot,
 } from "../../assets/icons";
 import type { LucideIcon } from "lucide-react";
 import { useI18n } from "../../components/useI18n";
@@ -68,15 +69,18 @@ type View =
   | "kanban"
   | "gateway";
 
-const PINNED_NAV_ITEMS: { view: View; icon: LucideIcon; labelKey: string }[] = [
+export const PINNED_NAV_ITEMS: {
+  view: View;
+  icon: LucideIcon;
+  labelKey: string;
+}[] = [
   { view: "discover", icon: Compass, labelKey: "navigation.discover" },
-  // "agents" (Profiles) is reached from the sidebar-footer ProfileSwitcher's
-  // "Manage profiles" action rather than a top-level nav item.
   { view: "office", icon: Building, labelKey: "navigation.office" },
   { view: "kanban", icon: KanbanIcon, labelKey: "navigation.kanban" },
   // "skills" lives under the Discover tab (installed + community), so it's no
   // longer a top-level nav item.
   { view: "schedules", icon: Timer, labelKey: "navigation.schedules" },
+  { view: "agents", icon: Bot, labelKey: "navigation.agents" },
 ];
 
 const FOOTER_NAV_ITEMS: { view: View; icon: LucideIcon; labelKey: string }[] = [

@@ -7,7 +7,7 @@ export default {
   noChats: "暂无聊天",
   discover: "发现",
   pinned: "已固定",
-  agents: "档案",
+  agents: "智能体",
   office: "工作区",
   models: "模型",
   providers: "提供商",

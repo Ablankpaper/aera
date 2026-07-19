@@ -1,5 +1,5 @@
 export default {
-  title: "Profiles",
+  title: "Agents",
   subtitle:
     "Each profile is an isolated AgentEra workspace with its own config, memory, and skills",
   newAgent: "New Agent",
