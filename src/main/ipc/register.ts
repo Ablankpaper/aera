@@ -11,6 +11,12 @@ import {
 import { extname } from "path";
 import { randomUUID } from "crypto";
 import type { AgenteraAuthController } from "../agentera-auth/controller";
+import type { RuntimeDistributionManager } from "../agentera-runtime-distribution/manager";
+import type { RuntimeActivityCoordinator } from "../runtime-activity";
+import {
+  serializeRuntimeDistributionPublicState,
+  type RuntimeDistributionPublicState,
+} from "../../shared/agentera-runtime-distribution";
 import { readdir, readFile, stat } from "fs/promises";
 import {
   getActiveProfileNameSync,
@@ -60,8 +66,7 @@ import {
 import type { GpuPreferenceMode } from "../../shared/gpu";
 import {
   verifyInstall,
-  runInstall,
-  inspectInstallTarget,
+  runPackagedSeedInstall,
   validateHermesHome,
   setHermesHomeOverride,
   getHermesVersion,
@@ -421,7 +426,7 @@ import {
 } from "../ssh-remote";
 
 export interface IpcContext {
-  activeRuns: Map<string, () => void>;
+  runtimeActivity: RuntimeActivityCoordinator;
   getMainWindow: () => BrowserWindow | null;
   notifyConnectionConfigChanged: () => void;
   notifyModelLibraryChanged: () => void;
@@ -432,7 +437,24 @@ export interface IpcContext {
   getAgenteraRuntimeOwner: () => AgenteraRuntimeOwner;
   agenteraProfileBindings: AgenteraProfileBindingStore;
   agenteraConnectionOwners: AgenteraConnectionOwnerStore;
+  runtimeDistribution: RuntimeDistributionManager | null;
 }
+
+const RUNTIME_DISTRIBUTION_UNAVAILABLE_STATE: RuntimeDistributionPublicState = {
+  phase: "repair-required",
+  currentVersion: null,
+  currentSourceCommit: null,
+  packagedSeedVersion: null,
+  availableVersion: null,
+  downloadSize: null,
+  downloadPercent: null,
+  lastCheckedAt: null,
+  lastErrorCode: "runtime_repair_required",
+  canCheck: false,
+  canDownload: false,
+  canCancel: false,
+  canRestart: false,
+};
 
 const APP_NAME =
   process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
@@ -677,7 +699,7 @@ function resolveLibraryModelEntry(
 
 export function registerIpcHandlers(context: IpcContext): void {
   const {
-    activeRuns,
+    runtimeActivity,
     getMainWindow,
     notifyConnectionConfigChanged,
     notifyModelLibraryChanged,
@@ -688,6 +710,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     getAgenteraRuntimeOwner,
     agenteraProfileBindings,
     agenteraConnectionOwners,
+    runtimeDistribution,
   } = context;
   const directProfileTargetIndex: Readonly<Record<string, number>> = {
     "set-profile-avatar": 0,
@@ -763,6 +786,48 @@ export function registerIpcHandlers(context: IpcContext): void {
     }
     return agenteraAuth.openPortal(target);
   });
+
+  const runtimeState = async (
+    action?: (
+      manager: RuntimeDistributionManager,
+    ) =>
+      | RuntimeDistributionPublicState
+      | Promise<RuntimeDistributionPublicState>,
+  ): Promise<RuntimeDistributionPublicState> => {
+    if (runtimeDistribution === null) {
+      return serializeRuntimeDistributionPublicState(
+        RUNTIME_DISTRIBUTION_UNAVAILABLE_STATE,
+      );
+    }
+    const state = action
+      ? await action(runtimeDistribution)
+      : await runtimeDistribution.getState();
+    return serializeRuntimeDistributionPublicState(state);
+  };
+  runtimeDistribution?.subscribe((state) => {
+    const window = getMainWindow();
+    if (!window || window.isDestroyed()) return;
+    window.webContents.send(
+      "agentera-runtime-state-changed",
+      serializeRuntimeDistributionPublicState(state),
+    );
+  });
+  ipcMain.handle("agentera-runtime-get-state", () => runtimeState());
+  ipcMain.handle("agentera-runtime-check-update", () =>
+    runtimeState((manager) => manager.check()),
+  );
+  ipcMain.handle("agentera-runtime-download-confirmed", () =>
+    runtimeState((manager) => manager.downloadConfirmed()),
+  );
+  ipcMain.handle("agentera-runtime-cancel-download", () =>
+    runtimeState((manager) => manager.cancelDownload()),
+  );
+  ipcMain.handle("agentera-runtime-restart-apply", () =>
+    runtimeState((manager) => manager.restartToApply()),
+  );
+  ipcMain.handle("agentera-runtime-retry-repair", () =>
+    runtimeState((manager) => manager.retryRepair()),
+  );
 
   ipcMain.handle("agentera-install-file-probe", () => ({
     installed: probeAgenteraInstallFiles().installed,
@@ -888,17 +953,61 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   ipcMain.handle("start-install", async (event) => {
     try {
-      await runInstall((progress: InstallProgress) => {
-        event.sender.send("install-progress", progress);
-      }, mainWindow);
-      return { success: true };
+      const result = await runPackagedSeedInstall(
+        (progress: InstallProgress) => {
+          event.sender.send("install-progress", progress);
+        },
+      );
+      if (result.status === "installed") {
+        // The Welcome flow installs through the local Seed installer so it can
+        // return detailed repair guidance. Synchronize the long-lived manager
+        // immediately; otherwise Settings keeps its startup-time `missing`
+        // snapshot until the entire desktop is restarted.
+        if (runtimeDistribution !== null) {
+          const synchronized = await runtimeDistribution.retryRepair();
+          if (
+            synchronized.phase !== "current" ||
+            synchronized.currentVersion !== result.runtimeVersion
+          ) {
+            return {
+              success: false,
+              error:
+                "AgentEra Runtime was prepared but could not be activated. Retry the local repair.",
+              errorCode: "runtime-activation-failed",
+              repairRequired: true,
+              action: "retry",
+            };
+          }
+        }
+        return { success: true };
+      }
+      const error =
+        result.errorCode === "packaged-seed-invalid"
+          ? "The Runtime included with AgentEra Studio is missing or invalid. Reinstall AgentEra Studio."
+          : result.errorCode === "insufficient-disk-space"
+            ? "There is not enough free disk space to prepare AgentEra Runtime."
+            : result.errorCode === "runtime-health-failed"
+              ? "The included AgentEra Runtime did not pass its local health check."
+              : "AgentEra Runtime could not be prepared from the local installer resources.";
+      return {
+        success: false,
+        error,
+        errorCode: result.errorCode,
+        repairRequired: true,
+        action: result.action,
+      };
     } catch (err) {
-      return { success: false, error: (err as Error).message };
+      return {
+        success: false,
+        error: (err as Error).message,
+        errorCode: "runtime-install-failed",
+        repairRequired: true,
+        action: "retry",
+      };
     }
   });
 
-  // Pre-install inspection + "use an existing installation" (issue #272).
-  ipcMain.handle("inspect-install-target", () => inspectInstallTarget());
+  // Explicit "use an existing external Runtime" compatibility path.
   ipcMain.handle("validate-hermes-home", (_event, dir: string) =>
     validateHermesHome(dir),
   );
@@ -1607,153 +1716,154 @@ export function registerIpcHandlers(context: IpcContext): void {
       // Each conversation has a stable runId minted by the renderer. Fall back
       // to a generated id for legacy callers so the run is still tracked.
       const chatRunId = runId || `run-${randomUUID()}`;
-      if (!isRemoteMode() && !isGatewayRunning(profile)) {
-        startGateway(profile);
+      const runtimeRun = runtimeActivity.beginRun(chatRunId);
+      if (runtimeRun === null) {
+        throw new Error("AgentEra Runtime restart is pending.");
       }
-
-      const conn = getConnectionConfig();
-      if (conn.mode === "ssh" && conn.ssh) {
-        // Tunnel to the dashboard (/api/* + chat WS; NOT /v1) and cache its
-        // token, else the gateway api_server (/v1) — via the shared preparer
-        // so all SSH paths agree on one tunnel target.
-        await prepareSshTunnel(conn, profile);
-      }
-
-      // Abort only a prior run under the SAME runId (a re-send in the same
-      // conversation). Sibling runs — other background sessions / agents —
-      // keep streaming untouched.
-      const existing = activeRuns.get(chatRunId);
-      if (existing) existing();
-
-      let fullResponse = "";
-      const chatStartTime = Date.now();
-      let resolveChat: (v: { response: string; sessionId?: string }) => void;
-      let rejectChat: (reason?: unknown) => void;
-      const promise = new Promise<{ response: string; sessionId?: string }>(
-        (res, rej) => {
-          resolveChat = res;
-          rejectChat = rej;
-        },
-      );
-
-      // Streaming sends to `event.sender` will throw "Object has been
-      // destroyed" if the renderer WebContents goes away mid-response
-      // (window closed, reloaded, navigated away). Guard every send so a
-      // dead sender doesn't crash the IPC handler, and abort the in-flight
-      // chat the first time we see one — there's nobody listening anymore.
-      // Every event carries the runId as its first arg so the renderer can
-      // route it to the right conversation among several running at once.
-      const safeSend = (channel: string, payload: unknown): boolean => {
-        if (event.sender.isDestroyed()) return false;
-        try {
-          event.sender.send(channel, chatRunId, payload);
-          return true;
-        } catch {
-          return false;
+      try {
+        if (!isRemoteMode() && !isGatewayRunning(profile)) {
+          startGateway(profile);
         }
-      };
-      const abortThisRun = (): void => {
-        activeRuns.get(chatRunId)?.();
-      };
 
-      const handle = await sendMessage(
-        message,
-        {
-          onChunk: (chunk) => {
-            fullResponse += chunk;
-            if (!safeSend("chat-chunk", chunk)) {
-              // Renderer is gone — stop generating and resolve with what we
-              // have so the awaiting promise doesn't leak.
-              abortThisRun();
-            }
-          },
-          onReasoningChunk: (chunk) => {
-            // Forward reasoning/thinking tokens on a dedicated channel so
-            // the renderer can render the thinking bubble live during the
-            // stream rather than waiting for a focus-change refresh (#352).
-            // Same renderer-gone abort guard as the content channel.
-            if (!safeSend("chat-reasoning-chunk", chunk)) {
-              abortThisRun();
-            }
-          },
-          onDone: (sessionId) => {
-            activeRuns.delete(chatRunId);
-            try {
-              persistPromptImageAttachments(sessionId, message, attachments);
-            } catch (err) {
-              console.warn(
-                "[sessions] Failed to persist prompt image attachments:",
-                err,
-              );
-            }
-            safeSend("chat-done", sessionId || "");
-            resolveChat({ response: fullResponse, sessionId });
-            // Desktop notification when window is not focused and response took >10s
-            if (
-              mainWindow &&
-              !mainWindow.isFocused() &&
-              Date.now() - chatStartTime > 10000
-            ) {
-              const preview = fullResponse
-                .replace(/[#*_`~\n]+/g, " ")
-                .trim()
-                .slice(0, 80);
-              new Notification({
-                title: APP_NAME,
-                body: preview || "Response ready",
-              }).show();
-            }
-          },
-          onSessionStarted: (sessionId) => {
-            safeSend("chat-session-started", sessionId);
-          },
-          onError: (error) => {
-            activeRuns.delete(chatRunId);
-            safeSend("chat-error", error);
-            rejectChat(new Error(error));
-            // Notify on error too if window not focused
-            if (mainWindow && !mainWindow.isFocused()) {
-              new Notification({
-                title: `${APP_NAME} — Error`,
-                body: error.slice(0, 100),
-              }).show();
-            }
-          },
-          onToolProgress: (tool) => {
-            safeSend("chat-tool-progress", tool);
-          },
-          onToolEvent: (toolEvent) => {
-            safeSend("chat-tool-event", toolEvent);
-          },
-          onUsage: (usage) => {
-            safeSend("chat-usage", usage);
-          },
-          onClarify: (req) => {
-            safeSend("chat-clarify-request", req);
-          },
-        },
-        profile,
-        resumeSessionId,
-        history,
-        attachments,
-        contextFolder,
-        modelOverride,
-      );
+        const conn = getConnectionConfig();
+        if (conn.mode === "ssh" && conn.ssh) {
+          // Tunnel to the dashboard (/api/* + chat WS; NOT /v1) and cache its
+          // token, else the gateway api_server (/v1) — via the shared preparer
+          // so all SSH paths agree on one tunnel target.
+          await prepareSshTunnel(conn, profile);
+        }
 
-      activeRuns.set(chatRunId, handle.abort);
-      return promise;
+        let fullResponse = "";
+        const chatStartTime = Date.now();
+        let resolveChat: (v: { response: string; sessionId?: string }) => void;
+        let rejectChat: (reason?: unknown) => void;
+        const promise = new Promise<{ response: string; sessionId?: string }>(
+          (res, rej) => {
+            resolveChat = res;
+            rejectChat = rej;
+          },
+        );
+
+        // Streaming sends to `event.sender` will throw "Object has been
+        // destroyed" if the renderer WebContents goes away mid-response
+        // (window closed, reloaded, navigated away). Guard every send so a
+        // dead sender doesn't crash the IPC handler, and abort the in-flight
+        // chat the first time we see one — there's nobody listening anymore.
+        // Every event carries the runId as its first arg so the renderer can
+        // route it to the right conversation among several running at once.
+        const safeSend = (channel: string, payload: unknown): boolean => {
+          if (event.sender.isDestroyed()) return false;
+          try {
+            event.sender.send(channel, chatRunId, payload);
+            return true;
+          } catch {
+            return false;
+          }
+        };
+        const abortThisRun = (): void => {
+          runtimeActivity.abortRun(chatRunId);
+        };
+
+        const handle = await sendMessage(
+          message,
+          {
+            onChunk: (chunk) => {
+              fullResponse += chunk;
+              if (!safeSend("chat-chunk", chunk)) {
+                // Renderer is gone — stop generating and resolve with what we
+                // have so the awaiting promise doesn't leak.
+                abortThisRun();
+              }
+            },
+            onReasoningChunk: (chunk) => {
+              // Forward reasoning/thinking tokens on a dedicated channel so
+              // the renderer can render the thinking bubble live during the
+              // stream rather than waiting for a focus-change refresh (#352).
+              // Same renderer-gone abort guard as the content channel.
+              if (!safeSend("chat-reasoning-chunk", chunk)) {
+                abortThisRun();
+              }
+            },
+            onDone: (sessionId) => {
+              runtimeRun.finish();
+              try {
+                persistPromptImageAttachments(sessionId, message, attachments);
+              } catch (err) {
+                console.warn(
+                  "[sessions] Failed to persist prompt image attachments:",
+                  err,
+                );
+              }
+              safeSend("chat-done", sessionId || "");
+              resolveChat({ response: fullResponse, sessionId });
+              // Desktop notification when window is not focused and response took >10s
+              if (
+                mainWindow &&
+                !mainWindow.isFocused() &&
+                Date.now() - chatStartTime > 10000
+              ) {
+                const preview = fullResponse
+                  .replace(/[#*_`~\n]+/g, " ")
+                  .trim()
+                  .slice(0, 80);
+                new Notification({
+                  title: APP_NAME,
+                  body: preview || "Response ready",
+                }).show();
+              }
+            },
+            onSessionStarted: (sessionId) => {
+              safeSend("chat-session-started", sessionId);
+            },
+            onError: (error) => {
+              runtimeRun.finish();
+              safeSend("chat-error", error);
+              rejectChat(new Error(error));
+              // Notify on error too if window not focused
+              if (mainWindow && !mainWindow.isFocused()) {
+                new Notification({
+                  title: `${APP_NAME} — Error`,
+                  body: error.slice(0, 100),
+                }).show();
+              }
+            },
+            onToolProgress: (tool) => {
+              safeSend("chat-tool-progress", tool);
+            },
+            onToolEvent: (toolEvent) => {
+              safeSend("chat-tool-event", toolEvent);
+            },
+            onUsage: (usage) => {
+              safeSend("chat-usage", usage);
+            },
+            onClarify: (req) => {
+              safeSend("chat-clarify-request", req);
+            },
+          },
+          profile,
+          resumeSessionId,
+          history,
+          attachments,
+          contextFolder,
+          modelOverride,
+        );
+
+        runtimeRun.attachAbort(handle.abort);
+        return promise;
+      } catch (error) {
+        runtimeRun.finish();
+        throw error;
+      }
     },
   );
 
   ipcMain.handle("abort-chat", (_event, runId?: string) => {
     // Abort one run when given its id; with no id (legacy callers) abort all.
     if (runId) {
-      activeRuns.get(runId)?.();
-      activeRuns.delete(runId);
+      runtimeActivity.abortRun(runId);
       return;
     }
-    for (const abort of activeRuns.values()) abort();
-    activeRuns.clear();
+    runtimeActivity.abortAll();
   });
 
   // Renderer's answer to an inline clarify card. Resolves the pending gateway

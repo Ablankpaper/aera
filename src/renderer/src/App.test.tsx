@@ -45,13 +45,6 @@ vi.mock("./screens/SplashScreen/SplashScreen", () => ({
     </div>
   ),
 }));
-vi.mock("./screens/Welcome/Welcome", () => ({
-  default: ({ onStart }: { onStart: () => void }) => (
-    <button data-testid="screen-welcome" onClick={onStart}>
-      welcome
-    </button>
-  ),
-}));
 vi.mock("./screens/Install/Install", () => ({
   default: ({ onComplete }: { onComplete: () => void }) => (
     <button data-testid="screen-installing" onClick={onComplete}>
@@ -247,7 +240,7 @@ describe("AgentEra startup gate", () => {
   );
 
   it.each([authenticated, offline])(
-    "routes a valid $status session with a fresh installation to welcome",
+    "automatically prepares the bundled Runtime for a valid $status session",
     async (state) => {
       const { runtime } = installWindowMocks({
         target: "welcome",
@@ -257,7 +250,8 @@ describe("AgentEra startup gate", () => {
 
       await finishSplash();
 
-      expect(screen.getByTestId("screen-welcome")).toBeInTheDocument();
+      expect(screen.getByTestId("screen-installing")).toBeInTheDocument();
+      expect(screen.queryByTestId("screen-welcome")).toBeNull();
       expect(runtime.inspectActiveProfile).not.toHaveBeenCalled();
     },
   );
@@ -328,7 +322,7 @@ describe("AgentEra startup gate", () => {
     },
   );
 
-  it("runs splash -> auth -> welcome -> install -> claim -> setup", async () => {
+  it("runs splash -> auth -> automatic install -> claim -> setup", async () => {
     const { runtime, auth } = installWindowMocks({
       target: "welcome",
       authState: {
@@ -364,10 +358,8 @@ describe("AgentEra startup gate", () => {
       screen.getByRole("button", { name: "auth.gate.openBrowser" }),
     );
     await act(async () => undefined);
-    expect(screen.getByTestId("screen-welcome")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("screen-welcome"));
     expect(screen.getByTestId("screen-installing")).toBeInTheDocument();
+    expect(screen.queryByTestId("screen-welcome")).toBeNull();
 
     fireEvent.click(screen.getByTestId("screen-installing"));
     await act(async () => undefined);
@@ -441,7 +433,8 @@ describe("AgentEra startup gate", () => {
     await act(async () => undefined);
 
     expect(runtime.switchToLocal).toHaveBeenCalledOnce();
-    expect(screen.getByTestId("screen-welcome")).toBeInTheDocument();
+    expect(screen.getByTestId("screen-installing")).toBeInTheDocument();
+    expect(screen.queryByTestId("screen-welcome")).toBeNull();
   });
 
   it("does not interrupt an in-progress screen for a same-owner session refresh", async () => {
@@ -449,7 +442,6 @@ describe("AgentEra startup gate", () => {
     render(<App />);
     await finishSplash();
 
-    fireEvent.click(screen.getByTestId("screen-welcome"));
     expect(screen.getByTestId("screen-installing")).toBeInTheDocument();
 
     await act(async () => authListener?.({ ...authenticated }));

@@ -99,7 +99,7 @@ export function buildMenu({ getMainWindow, openExternalUrl }: MenuDeps): void {
         {
           label: "AgentEra Runtime on GitHub",
           click: () =>
-            openExternalUrl("https://github.com/NousResearch/hermes-agent/"),
+            openExternalUrl("https://github.com/bignormal/aera-runtime"),
         },
         {
           label: "Report an Issue",

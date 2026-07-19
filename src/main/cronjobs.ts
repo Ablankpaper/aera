@@ -2,7 +2,8 @@ import { existsSync } from "fs";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { execFile } from "child_process";
-import { HERMES_HOME, HERMES_PYTHON, hermesCliArgs } from "./installer";
+import { HERMES_HOME } from "./installer";
+import { getRuntimeInvocation } from "./agentera-runtime-distribution/invocation";
 import { profileHome } from "./utils";
 import {
   isRemoteMode,
@@ -327,7 +328,15 @@ function runCronCommand(
   args: string[],
   profile?: string,
 ): Promise<{ success: boolean; output: string; error?: string }> {
-  const cliArgs = hermesCliArgs();
+  const invocation = getRuntimeInvocation();
+  if (invocation === null) {
+    return Promise.resolve({
+      success: false,
+      output: "",
+      error: "AgentEra Runtime is not prepared.",
+    });
+  }
+  const cliArgs = invocation.cliArgs();
   if (profile && profile !== "default") {
     cliArgs.push("-p", profile);
   }
@@ -335,10 +344,11 @@ function runCronCommand(
 
   return new Promise((resolve) => {
     execFile(
-      HERMES_PYTHON,
+      invocation.python,
       cliArgs,
       {
-        cwd: join(HERMES_HOME, "hermes-agent"),
+        cwd: invocation.workingDirectory,
+        env: invocation.environment({ ...process.env, HERMES_HOME }),
         timeout: 15000,
         ...HIDDEN_SUBPROCESS_OPTIONS,
       },

@@ -41,6 +41,7 @@ import type {
   AgenteraStartupPreflightPublicResult,
   AgenteraUnboundProfilePublicState,
 } from "../shared/agentera-runtime-access";
+import type { RuntimeDistributionPublicState } from "../shared/agentera-runtime-distribution";
 
 /**
  * Mirror of the renderer-side `CredentialPoolEntry` ambient type
@@ -112,15 +113,13 @@ const hermesAPI = {
 
   verifyInstall: (): Promise<boolean> => ipcRenderer.invoke("verify-install"),
 
-  startInstall: (): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke("start-install"),
-
-  // Pre-install inspection + "use an existing installation" (issue #272)
-  inspectInstallTarget: (): Promise<{
-    hermesHome: string;
-    repoPath: string;
-    state: "fresh" | "update" | "replace";
-  }> => ipcRenderer.invoke("inspect-install-target"),
+  startInstall: (): Promise<{
+    success: boolean;
+    error?: string;
+    errorCode?: string;
+    repairRequired?: boolean;
+    action?: "reinstall-desktop" | "free-disk-space" | "retry";
+  }> => ipcRenderer.invoke("start-install"),
 
   validateHermesHome: (dir: string): Promise<boolean> =>
     ipcRenderer.invoke("validate-hermes-home", dir),
@@ -1691,6 +1690,32 @@ const agenteraRuntimeAccessAPI = {
     ipcRenderer.invoke("agentera-switch-to-local"),
 };
 
+const agenteraRuntimeDistributionAPI = {
+  getState: (): Promise<RuntimeDistributionPublicState> =>
+    ipcRenderer.invoke("agentera-runtime-get-state"),
+  checkForUpdate: (): Promise<RuntimeDistributionPublicState> =>
+    ipcRenderer.invoke("agentera-runtime-check-update"),
+  downloadConfirmed: (): Promise<RuntimeDistributionPublicState> =>
+    ipcRenderer.invoke("agentera-runtime-download-confirmed"),
+  cancelDownload: (): Promise<RuntimeDistributionPublicState> =>
+    ipcRenderer.invoke("agentera-runtime-cancel-download"),
+  restartToApply: (): Promise<RuntimeDistributionPublicState> =>
+    ipcRenderer.invoke("agentera-runtime-restart-apply"),
+  retryRepair: (): Promise<RuntimeDistributionPublicState> =>
+    ipcRenderer.invoke("agentera-runtime-retry-repair"),
+  onStateChanged: (
+    callback: (state: RuntimeDistributionPublicState) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      state: RuntimeDistributionPublicState,
+    ): void => callback(state);
+    ipcRenderer.on("agentera-runtime-state-changed", handler);
+    return () =>
+      ipcRenderer.removeListener("agentera-runtime-state-changed", handler);
+  },
+};
+
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld("electron", electronAPI);
@@ -1699,6 +1724,10 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld(
       "agenteraRuntimeAccess",
       agenteraRuntimeAccessAPI,
+    );
+    contextBridge.exposeInMainWorld(
+      "agenteraRuntimeDistribution",
+      agenteraRuntimeDistributionAPI,
     );
   } catch (error) {
     console.error(error);
@@ -1712,4 +1741,6 @@ if (process.contextIsolated) {
   window.agenteraAuth = agenteraAuthAPI;
   // @ts-ignore (define in dts)
   window.agenteraRuntimeAccess = agenteraRuntimeAccessAPI;
+  // @ts-ignore (define in dts)
+  window.agenteraRuntimeDistribution = agenteraRuntimeDistributionAPI;
 }

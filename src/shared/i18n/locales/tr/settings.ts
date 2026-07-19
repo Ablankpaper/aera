@@ -1,3 +1,5 @@
+import { runtimeDistributionEn } from "../runtime-distribution";
+
 export default {
   title: "Ayarlar",
   sections: {
@@ -21,6 +23,7 @@ export default {
     community: "Topluluk",
     logs: "Günlükler ve Tanılama",
   },
+  runtimeDistribution: runtimeDistributionEn,
   theme: {
     label: "Tema",
     system: "Sistem",

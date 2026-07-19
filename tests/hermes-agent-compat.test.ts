@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -8,7 +9,42 @@ import {
 } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+
+const { TEST_HOME, runtimeRef } = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const path = require("path");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const os = require("os");
+  return {
+    TEST_HOME: path.join(os.tmpdir(), `hermes-compat-home-${Date.now()}`),
+    runtimeRef: {
+      workingDirectory: "",
+      source: "external" as "external" | "managed",
+    },
+  };
+});
+
+vi.mock("../src/main/installer", () => ({
+  HERMES_HOME: TEST_HOME,
+}));
+
+vi.mock("../src/main/agentera-runtime-distribution/invocation", () => ({
+  getRuntimeInvocation: () => ({
+    source: runtimeRef.source,
+    version: "test",
+    sourceCommit: "0".repeat(40),
+    root: runtimeRef.workingDirectory,
+    python: `${runtimeRef.workingDirectory}/python3`,
+    workingDirectory: runtimeRef.workingDirectory,
+    bundledSkillsDirectory: `${runtimeRef.workingDirectory}/skills`,
+    webDistDirectory: `${runtimeRef.workingDirectory}/hermes_cli/web_dist`,
+    cliArgs: (args: string[] = []) => ["-m", "hermes_cli.main", ...args],
+    environment: (base: Record<string, string> = {}) => ({ ...base }),
+  }),
+}));
+
 import {
+  ensureLocalDashboardCompatibility,
   patchDashboardCompatibilitySource,
   patchDashboardEmbeddedChatSource,
   patchDashboardModelLibrarySource,
@@ -16,6 +52,60 @@ import {
 } from "../src/main/hermes-agent-compat";
 
 describe("Hermes Agent dashboard compatibility patcher", () => {
+  it("patches the dashboard source selected by the live Runtime invocation", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hermes-runtime-compat-"));
+    runtimeRef.workingDirectory = dir;
+    const moduleDir = join(dir, "hermes_cli");
+    const target = join(moduleDir, "web_server.py");
+    try {
+      // The temp tree keeps this probe away from every real Hermes install.
+      mkdirSync(moduleDir, { recursive: true });
+      writeFileSync(
+        target,
+        `async def start_server(embedded_chat: bool = True):\n    pass\n\n@app.post("/api/model/set")\nasync def set_model_assignment(body):\n    return {"ok": True}\n\nmount_spa(app)\n`,
+        "utf-8",
+      );
+
+      const result = ensureLocalDashboardCompatibility();
+
+      expect(result.ok).toBe(true);
+      expect(result.path).toBe(target);
+      expect(readFileSync(target, "utf-8")).toContain(
+        "HERMES_ONE_MODEL_LIBRARY_COMPAT_V1",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(TEST_HOME, { recursive: true, force: true });
+    }
+  });
+
+  it("never modifies a signed managed Runtime when a compatibility patch is needed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agentera-managed-compat-"));
+    runtimeRef.workingDirectory = dir;
+    runtimeRef.source = "managed";
+    const moduleDir = join(dir, "hermes_cli");
+    const target = join(moduleDir, "web_server.py");
+    const source = `async def start_server(embedded_chat: bool = False):\n    pass\n\n@app.post("/api/model/set")\nasync def set_model_assignment(body):\n    return {"ok": True}\n\nmount_spa(app)\n`;
+    try {
+      mkdirSync(moduleDir, { recursive: true });
+      writeFileSync(target, source, "utf-8");
+
+      const result = ensureLocalDashboardCompatibility();
+
+      expect(result).toMatchObject({
+        ok: false,
+        compatible: false,
+        applied: false,
+      });
+      expect(readFileSync(target, "utf-8")).toBe(source);
+      expect(readdirSync(moduleDir)).toEqual(["web_server.py"]);
+    } finally {
+      runtimeRef.source = "external";
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(TEST_HOME, { recursive: true, force: true });
+    }
+  });
+
   it("leaves already-compatible embedded chat defaults unchanged", () => {
     const source = `
 async def start_server(

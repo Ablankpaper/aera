@@ -1,3 +1,5 @@
+import { runtimeDistributionEn } from "../runtime-distribution";
+
 export default {
   title: "設定",
   sections: {
@@ -21,6 +23,7 @@ export default {
     community: "コミュニティ",
     logs: "ログと診断",
   },
+  runtimeDistribution: runtimeDistributionEn,
   analytics: {
     label: "匿名の利用状況分析を送信する",
     hint: "プロジェクトの分析サービスに匿名・集計済みの利用状況データを送信することで AgentEra の改善に役立てます。いつでもオフにできます。",

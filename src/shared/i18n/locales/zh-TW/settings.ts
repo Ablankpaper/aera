@@ -1,3 +1,5 @@
+import { runtimeDistributionZhTw } from "../runtime-distribution";
+
 export default {
   title: "設定",
   sections: {
@@ -21,6 +23,7 @@ export default {
     community: "社群",
     logs: "記錄與診斷",
   },
+  runtimeDistribution: runtimeDistributionZhTw,
   analytics: {
     label: "傳送匿名使用情況分析",
     hint: "透過向專案的分析服務傳送匿名、彙總的使用資料，協助改進 AgentEra。您隨時可以關閉此功能。",

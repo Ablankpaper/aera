@@ -4,13 +4,11 @@ import {
   readFileSync,
   readdirSync,
   statSync,
-  writeFileSync,
   unlinkSync,
 } from "fs";
 import { join, delimiter, resolve } from "path";
-import { homedir, tmpdir } from "os";
-import { randomBytes } from "crypto";
-import { app, type BrowserWindow } from "electron";
+import { homedir } from "os";
+import { app } from "electron";
 import {
   getConnectionConfig,
   getModelConfig,
@@ -18,22 +16,41 @@ import {
 } from "./config";
 import { providerDoesNotNeedApiKey } from "./providers";
 import { getActiveProfileNameSync, profileHome, stripAnsi } from "./utils";
-import { setupAskpass, AskpassHandle } from "./askpass";
-import { precacheSudoCredentials } from "./sudoCreds";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
+import {
+  configureRuntimeInvocationContext,
+  getRuntimeInvocation,
+  refreshRuntimeInvocation,
+  selectExternalRuntime,
+  selectManagedRuntime,
+  type RuntimeInvocation,
+} from "./agentera-runtime-distribution/invocation";
+import {
+  persistRuntimeSelection,
+  readRuntimeSelection,
+  type RuntimeSelectionMode,
+} from "./agentera-runtime-distribution/selection-store";
+import { createRuntimeDistributionPaths } from "./agentera-runtime-distribution/paths";
+import { resolvePackagedRuntimeSeedDirectory } from "./agentera-runtime-distribution/seed-path";
+import {
+  getAvailableRuntimeDiskBytes,
+  installPackagedSeed,
+  type PackagedSeedInstallResult,
+} from "./agentera-runtime-distribution/seed-installer";
+import { loadRuntimeTrustFile } from "./agentera-runtime-distribution/trust";
 
 const IS_WINDOWS = process.platform === "win32";
 
 // Resolve the Hermes data directory. Precedence:
-//   1. HERMES_HOME env var if set (install.ps1 sets it User-scope on
-//      Windows; users may also override manually for WSL/custom setups).
+//   1. HERMES_HOME env var if set (legacy Windows installs may set it at
+//      User scope; users may also override manually for WSL/custom setups).
 //   2. On Windows, probe both candidates and pick whichever already has
-//      data. install.ps1's default is %LOCALAPPDATA%\hermes, but some
+//      data. Legacy Windows installs defaulted to %LOCALAPPDATA%\hermes, but some
 //      setups put data at ~/.hermes (e.g. a junction into WSL, or a
 //      custom -HermesHome flag on install). Without probing we'd silently
 //      switch directories on users who had it working before.
-//   3. Fresh install fallback: %LOCALAPPDATA%\hermes on Windows (matches
-//      install.ps1's default), ~/.hermes elsewhere.
+//   3. Data-home fallback: %LOCALAPPDATA%\hermes on Windows, ~/.hermes
+//      elsewhere. Managed Runtime binaries are stored under Electron userData.
 //
 // Motivating bug: Electron launched from the Start Menu doesn't always
 // inherit shell-set env vars, so relying on HERMES_HOME alone left
@@ -62,8 +79,8 @@ function defaultHermesHome(): string {
   if (localApp && looksLikeHermesHome(localApp)) return localApp;
   if (looksLikeHermesHome(homeDot)) return homeDot;
 
-  // Neither populated yet — fall back to install.ps1's default so a
-  // fresh install lines up with where the installer will write.
+  // Neither populated yet — retain the legacy data-home default so existing
+  // Profiles continue to resolve consistently.
   return localApp ?? homeDot;
 }
 
@@ -80,20 +97,14 @@ function hermesHomeOverrideFile(): string {
   return userData ? join(userData, "hermes-home.json") : "";
 }
 
+const persistedRuntimeSelection = readRuntimeSelection(
+  hermesHomeOverrideFile(),
+);
+let selectedRuntimeMode: RuntimeSelectionMode =
+  persistedRuntimeSelection?.mode ?? "managed";
+
 function readHermesHomeOverride(): string {
-  try {
-    const file = hermesHomeOverrideFile();
-    if (!file || !existsSync(file)) return "";
-    const parsed = JSON.parse(readFileSync(file, "utf-8")) as {
-      hermesHome?: unknown;
-    };
-    const p =
-      typeof parsed.hermesHome === "string" ? parsed.hermesHome.trim() : "";
-    // Ignore a stale override whose directory no longer exists.
-    return p && existsSync(p) ? p : "";
-  } catch {
-    return "";
-  }
+  return persistedRuntimeSelection?.hermesHome ?? "";
 }
 
 /** Persist (when `home` is set) or clear (when "") the Hermes home override. */
@@ -103,16 +114,23 @@ export function setHermesHomeOverride(home: string): void {
     if (!file) return;
     if (!home.trim()) {
       if (existsSync(file)) unlinkSync(file);
+      selectedRuntimeMode = "managed";
+      selectManagedRuntime();
       return;
     }
-    writeFileSync(
-      file,
-      JSON.stringify({ hermesHome: home.trim() }, null, 2),
-      "utf-8",
-    );
+    persistRuntimeSelection(file, {
+      mode: "external",
+      hermesHome: resolve(home.trim()),
+    });
+    selectedRuntimeMode = "external";
+    selectExternalRuntime(home);
   } catch {
     /* best effort — a failed write just means no override next launch */
   }
+}
+
+export function isExternalRuntimeSelected(): boolean {
+  return selectedRuntimeMode === "external";
 }
 
 export const HERMES_HOME =
@@ -142,6 +160,54 @@ export const HERMES_ENV_FILE = join(HERMES_HOME, ".env");
 export const HERMES_CONFIG_FILE = join(HERMES_HOME, "config.yaml");
 export const HERMES_AUTH_FILE = join(HERMES_HOME, "auth.json");
 
+function currentUserDataPath(): string | null {
+  try {
+    return app?.getPath?.("userData") || null;
+  } catch {
+    return null;
+  }
+}
+
+configureRuntimeInvocationContext({
+  hermesHome: HERMES_HOME,
+  userDataPath: currentUserDataPath(),
+  platform: process.platform,
+});
+if (selectedRuntimeMode === "external") {
+  selectExternalRuntime(HERMES_HOME);
+} else {
+  selectManagedRuntime();
+}
+
+/** Switch to an already prepared managed Runtime without touching the legacy
+ * checkout. Returns null when a managed current version is not available. */
+export function activateManagedRuntimeMode(): RuntimeInvocation | null {
+  const wasExternal = selectedRuntimeMode === "external";
+  selectManagedRuntime();
+  const invocation = refreshRuntimeInvocation();
+  if (invocation?.source !== "managed") {
+    if (wasExternal) selectExternalRuntime(HERMES_HOME);
+    return null;
+  }
+  try {
+    const file = hermesHomeOverrideFile();
+    if (file) {
+      persistRuntimeSelection(file, {
+        mode: "managed",
+        hermesHome: HERMES_HOME,
+      });
+    }
+    selectedRuntimeMode = "managed";
+    return invocation;
+  } catch {
+    if (wasExternal) {
+      selectExternalRuntime(HERMES_HOME);
+      selectedRuntimeMode = "external";
+    }
+    return null;
+  }
+}
+
 /** The Python + hermes-script paths for a Hermes install rooted at `home`,
  *  in the layout the desktop's own installer produces. */
 function installBinariesFor(home: string): { python: string; script: string } {
@@ -156,18 +222,22 @@ function installBinariesFor(home: string): { python: string; script: string } {
 }
 
 export function hermesCliArgs(args: string[] = []): string[] {
-  if (process.platform === "win32") {
-    return ["-m", "hermes_cli.main", ...args];
-  }
-  return [HERMES_SCRIPT, ...args];
+  return (
+    getRuntimeInvocation()?.cliArgs(args) ?? ["-m", "hermes_cli.main", ...args]
+  );
 }
 
-function canInvokeHermesCli(): boolean {
-  if (!existsSync(HERMES_PYTHON)) return false;
-  if (IS_WINDOWS) {
-    return existsSync(join(HERMES_REPO, "hermes_cli", "main.py"));
-  }
-  return existsSync(HERMES_SCRIPT);
+function runtimeEnvironment(
+  invocation: RuntimeInvocation,
+  overrides: NodeJS.ProcessEnv = {},
+): NodeJS.ProcessEnv {
+  return invocation.environment({
+    ...process.env,
+    PATH: getEnhancedPath(),
+    HOME: homedir(),
+    HERMES_HOME,
+    ...overrides,
+  });
 }
 
 export interface InstallStatus {
@@ -191,8 +261,7 @@ export function getEnhancedPath(): string {
   const extra = (
     IS_WINDOWS
       ? [
-          // Bundled by install.ps1 inside HERMES_HOME — these matter when the
-          // user's system PATH doesn't include git or node yet.
+          // Legacy external installs may bundle these inside HERMES_HOME.
           join(HERMES_HOME, "git", "bin"),
           join(HERMES_HOME, "git", "cmd"),
           join(HERMES_HOME, "git", "usr", "bin"),
@@ -408,43 +477,6 @@ function envHasUsableValue(
   return false;
 }
 
-// ── Pre-install inspection (issue #272) ──────────────────────────────────────
-
-export type InstallTargetState = "fresh" | "update" | "replace";
-
-export interface InstallTargetInfo {
-  /** Where the desktop will install — shown to the user before they commit. */
-  hermesHome: string;
-  repoPath: string;
-  /** What the installer will do to `repoPath`:
-   *  - `fresh`   — nothing is there; a clean install.
-   *  - `update`  — a valid git checkout; install.sh/ps1 updates it in place.
-   *  - `replace` — a directory is there but not a valid checkout, so the
-   *                install script deletes and re-clones it. */
-  state: InstallTargetState;
-}
-
-/** Classify what the installer will do to the target directory. Pure — the
- *  filesystem probing lives in `inspectInstallTarget`. */
-export function classifyInstallTarget(
-  repoExists: boolean,
-  repoIsGitRepo: boolean,
-): InstallTargetState {
-  if (!repoExists) return "fresh";
-  return repoIsGitRepo ? "update" : "replace";
-}
-
-/** Inspect the install target so the renderer can warn before installing. */
-export function inspectInstallTarget(): InstallTargetInfo {
-  const repoExists = existsSync(HERMES_REPO);
-  const repoIsGitRepo = repoExists && existsSync(join(HERMES_REPO, ".git"));
-  return {
-    hermesHome: HERMES_HOME,
-    repoPath: HERMES_REPO,
-    state: classifyInstallTarget(repoExists, repoIsGitRepo),
-  };
-}
-
 /** True when `dir` is a Hermes home the desktop can drive as-is — it must
  *  contain a `hermes-agent` install with the venv binaries in the layout the
  *  desktop expects. A hand-rolled install with a different layout fails here
@@ -475,7 +507,7 @@ export function checkInstallStatus(): InstallStatus {
   // `python --version` check used to run here adds 1–10s of cold-start
   // latency, so it now lives in `verifyInstall()` and is invoked lazily
   // by the renderer after the main UI is mounted.
-  const installed = existsSync(HERMES_PYTHON) && existsSync(HERMES_SCRIPT);
+  const installed = getRuntimeInvocation() !== null;
   const envFile = activeEnvFile(activeProfile);
   const authFile = activeAuthFile(activeProfile);
   const configured = existsSync(envFile) || existsSync(authFile);
@@ -519,22 +551,18 @@ let _verifyCache: { ok: boolean; ts: number } | null = null;
 const VERIFY_TTL_MS = 5 * 60 * 1000;
 
 export async function verifyInstall(): Promise<boolean> {
-  if (!canInvokeHermesCli()) return false;
+  const invocation = getRuntimeInvocation();
+  if (invocation === null) return false;
   if (_verifyCache && Date.now() - _verifyCache.ts < VERIFY_TTL_MS) {
     return _verifyCache.ok;
   }
   return new Promise((resolve) => {
     execFile(
-      HERMES_PYTHON,
-      hermesCliArgs(["--version"]),
+      invocation.python,
+      invocation.cliArgs(["--version"]),
       {
-        cwd: HERMES_REPO,
-        env: {
-          ...process.env,
-          PATH: getEnhancedPath(),
-          HOME: homedir(),
-          HERMES_HOME,
-        },
+        cwd: invocation.workingDirectory,
+        env: runtimeEnvironment(invocation),
         timeout: 15000,
         ...HIDDEN_SUBPROCESS_OPTIONS,
       },
@@ -553,7 +581,8 @@ let _versionFetching = false;
 
 export async function getHermesVersion(): Promise<string | null> {
   if (_cachedVersion !== null) return _cachedVersion;
-  if (!canInvokeHermesCli()) return null;
+  const invocation = getRuntimeInvocation();
+  if (invocation === null) return null;
   if (_versionFetching) {
     // Wait for the in-flight fetch but cap the wait. The execFile below
     // has a 15s timeout and its callback unconditionally clears
@@ -577,16 +606,11 @@ export async function getHermesVersion(): Promise<string | null> {
   _versionFetching = true;
   return new Promise((resolve) => {
     execFile(
-      HERMES_PYTHON,
-      hermesCliArgs(["--version"]),
+      invocation.python,
+      invocation.cliArgs(["--version"]),
       {
-        cwd: HERMES_REPO,
-        env: {
-          ...process.env,
-          PATH: getEnhancedPath(),
-          HOME: homedir(),
-          HERMES_HOME,
-        },
+        cwd: invocation.workingDirectory,
+        env: runtimeEnvironment(invocation),
         timeout: 15000,
         ...HIDDEN_SUBPROCESS_OPTIONS,
       },
@@ -608,22 +632,22 @@ export function clearVersionCache(): void {
 }
 
 export function runHermesDoctor(): string {
-  if (!canInvokeHermesCli()) {
+  const invocation = getRuntimeInvocation();
+  if (invocation === null) {
     return "AgentEra Runtime is not installed.";
   }
   try {
-    const output = execFileSync(HERMES_PYTHON, hermesCliArgs(["doctor"]), {
-      cwd: HERMES_REPO,
-      env: {
-        ...process.env,
-        PATH: getEnhancedPath(),
-        HOME: homedir(),
-        HERMES_HOME,
+    const output = execFileSync(
+      invocation.python,
+      invocation.cliArgs(["doctor"]),
+      {
+        cwd: invocation.workingDirectory,
+        env: runtimeEnvironment(invocation),
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 30000,
+        ...HIDDEN_SUBPROCESS_OPTIONS,
       },
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 30000,
-      ...HIDDEN_SUBPROCESS_OPTIONS,
-    });
+    );
     return stripAnsi(output.toString());
   } catch (err) {
     const stderr = (err as { stderr?: Buffer }).stderr?.toString() || "";
@@ -671,7 +695,8 @@ export function checkOpenClawExists(home: string = homedir()): {
 export async function runClawMigrate(
   onProgress: (progress: InstallProgress) => void,
 ): Promise<void> {
-  if (!existsSync(HERMES_PYTHON) || !existsSync(HERMES_SCRIPT)) {
+  const invocation = getRuntimeInvocation();
+  if (invocation === null) {
     throw new Error("AgentEra Runtime is not installed.");
   }
 
@@ -695,17 +720,13 @@ export async function runClawMigrate(
   emit(`Migrating from ${openclaw.path}...\n`);
 
   return new Promise((resolve, reject) => {
-    const args = hermesCliArgs(["claw", "migrate", "--preset", "full"]);
+    const args = invocation.cliArgs(["claw", "migrate", "--preset", "full"]);
 
-    const proc = spawn(HERMES_PYTHON, args, {
-      cwd: HERMES_REPO,
-      env: {
-        ...process.env,
-        PATH: getEnhancedPath(),
-        HOME: homedir(),
-        HERMES_HOME,
+    const proc = spawn(invocation.python, args, {
+      cwd: invocation.workingDirectory,
+      env: runtimeEnvironment(invocation, {
         TERM: "dumb",
-      },
+      }),
       stdio: ["ignore", "pipe", "pipe"],
       ...HIDDEN_SUBPROCESS_OPTIONS,
     });
@@ -733,12 +754,20 @@ export async function runClawMigrate(
   });
 }
 
+// @lat: [[agentera-runtime-distribution#Explicit external compatibility]]
 export async function runHermesUpdate(
   onProgress: (progress: InstallProgress) => void,
+  spawnRuntime: typeof spawn = spawn,
 ): Promise<void> {
-  if (!existsSync(HERMES_PYTHON) || !existsSync(HERMES_SCRIPT)) {
+  const invocation = getRuntimeInvocation();
+  if (invocation === null) {
     throw new Error(
       "AgentEra Runtime is not installed. Please install it first.",
+    );
+  }
+  if (invocation.source === "managed") {
+    throw new Error(
+      "Managed AgentEra Runtime updates are installed through the signed desktop update flow.",
     );
   }
 
@@ -757,18 +786,18 @@ export async function runHermesUpdate(
   emit("Running hermes update...\n");
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(HERMES_PYTHON, hermesCliArgs(["update"]), {
-      cwd: HERMES_REPO,
-      env: {
-        ...process.env,
-        PATH: getEnhancedPath(),
-        HOME: homedir(),
-        HERMES_HOME,
-        TERM: "dumb",
+    const proc = spawnRuntime(
+      invocation.python,
+      invocation.cliArgs(["update"]),
+      {
+        cwd: invocation.workingDirectory,
+        env: runtimeEnvironment(invocation, {
+          TERM: "dumb",
+        }),
+        stdio: ["ignore", "pipe", "pipe"],
+        ...HIDDEN_SUBPROCESS_OPTIONS,
       },
-      stdio: ["ignore", "pipe", "pipe"],
-      ...HIDDEN_SUBPROCESS_OPTIONS,
-    });
+    );
 
     proc.stdout?.on("data", (data: Buffer) => {
       emit(stripAnsi(data.toString()));
@@ -793,367 +822,102 @@ export async function runHermesUpdate(
   });
 }
 
-function getShellProfile(home: string): string | null {
-  // Check for the user's shell profile to source their PATH
-  const candidates = [
-    join(home, ".zshrc"),
-    join(home, ".bashrc"),
-    join(home, ".bash_profile"),
-    join(home, ".profile"),
-  ];
-  for (const p of candidates) {
-    if (existsSync(p)) return p;
-  }
-  return null;
-}
-
-// Parse install.sh / install.ps1 output to detect progress stages.
-// Patterns are tuned to match both bash and PowerShell installer phrasing.
-const STAGE_MARKERS: { pattern: RegExp; step: number; title: string }[] = [
-  {
-    pattern: /Checking (for )?(git|uv|python|node|ripgrep|ffmpeg)/i,
-    step: 1,
-    title: "Checking prerequisites",
-  },
-  {
-    pattern: /Installing uv|uv found|uv installed/i,
-    step: 2,
-    title: "Setting up package manager",
-  },
-  {
-    pattern: /Installing Python|Python .* found|Python installed/i,
-    step: 3,
-    title: "Setting up Python",
-  },
-  {
-    pattern:
-      /Cloning|cloning|Updating.*repository|Repository|Installing to .*hermes-agent|Downloading PortableGit/i,
-    step: 4,
-    title: "Downloading AgentEra Runtime",
-  },
-  {
-    pattern: /Creating virtual|virtual environment|uv venv|\bvenv\b/i,
-    step: 5,
-    title: "Creating Python environment",
-  },
-  {
-    pattern:
-      /pip install|Installing.*packages|dependencies|Trying tier|Resolving|Main package installed/i,
-    step: 6,
-    title: "Installing dependencies",
-  },
-  {
-    // Only fire step 7 on the install script's actual final lines.
-    // Intermediate "Browser engine setup complete" / "All dependencies installed"
-    // used to match here and pinned the progress bar at 100% while Playwright
-    // and TUI deps were still running — see issue #104.
-    pattern:
-      /Installation complete|hermes command ready|Configuration directory ready|Hermes (installation )?(finished|is ready)/i,
-    step: 7,
-    title: "Finishing setup",
-  },
-];
-
-export async function runInstall(
-  onProgress: (progress: InstallProgress) => void,
-  parentWindow?: BrowserWindow | null,
-): Promise<void> {
-  const totalSteps = 7;
-  let log = "";
-  let currentStep = 1;
-  let currentTitle = "Starting installation...";
-
-  function emit(text: string): void {
-    log += text;
-    // Try to detect which stage we're in from the output
-    for (const marker of STAGE_MARKERS) {
-      if (marker.pattern.test(text)) {
-        if (marker.step >= currentStep) {
-          currentStep = marker.step;
-          currentTitle = marker.title;
-        }
-        break;
-      }
-    }
-    onProgress({
-      step: currentStep,
-      totalSteps,
-      title: currentTitle,
-      detail: text.trim().slice(0, 120),
-      log,
-    });
-  }
-
-  emit("Running the official AgentEra Runtime install script...\n");
-
-  if (IS_WINDOWS) {
-    return runInstallWindows(emit);
-  }
-
-  // Ask for the sudo password ONCE upfront and warm sudo's credential cache
-  // before install.sh runs. Playwright's `install --with-deps` later invokes
-  // `sudo apt-get` from a subprocess with no TTY — without a warm cache it
-  // hangs forever waiting on stdin. See issues #104 and #109.
-  emit("→ Checking administrator access...\n");
-  const sudoPrecache = await precacheSudoCredentials(parentWindow ?? null);
-  if (sudoPrecache.cancelled) {
-    throw new Error(
-      "Installation cancelled: administrator password is required to install browser libraries.",
-    );
-  }
-  if (!sudoPrecache.ok) {
-    emit(
-      "⚠ Administrator password was not accepted. Continuing without — install may stall at the browser dependency step.\n",
-    );
-  } else {
-    emit("✓ Administrator access granted\n");
-  }
-
-  // Keep the legacy askpass bridge as a fallback for any sudo call that
-  // somehow escapes the cred cache (e.g. install runs past sudo's 15min TTL
-  // and the keepalive failed).
-  let askpass: AskpassHandle | null = null;
-  try {
-    askpass = await setupAskpass(parentWindow ?? null);
-  } catch (err) {
-    emit(
-      `\n[askpass] Could not set up GUI password bridge: ${(err as Error).message}\n`,
-    );
-  }
-
-  try {
-    return await new Promise<void>((resolve, reject) => {
-      const home = homedir();
-
-      // Source the user's shell profile to get the same PATH as their terminal,
-      // then run the official install script. Electron apps launched from Finder
-      // don't inherit the terminal environment.
-      const shellProfile = getShellProfile(home);
-      const installCmd = [
-        shellProfile ? `source "${shellProfile}" 2>/dev/null;` : "",
-        "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup",
-      ].join(" ");
-
-      const basePath = getEnhancedPath();
-      const proc = spawn("bash", ["-c", installCmd], {
-        cwd: home,
-        env: {
-          ...process.env,
-          PATH: askpass ? `${askpass.pathPrepend}:${basePath}` : basePath,
-          HOME: home,
-          TERM: "dumb",
-          ...(askpass?.env ?? {}),
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-        ...HIDDEN_SUBPROCESS_OPTIONS,
-      });
-
-      proc.stdout?.on("data", (data: Buffer) => {
-        emit(stripAnsi(data.toString()));
-      });
-
-      proc.stderr?.on("data", (data: Buffer) => {
-        emit(stripAnsi(data.toString()));
-      });
-
-      proc.on("close", (code) => {
-        if (code === 0) {
-          emit("\nInstallation complete!\n");
-          resolve();
-        } else {
-          // The install script can exit non-zero due to benign issues
-          // (e.g. git stash pop failure on already-clean repo).
-          // If Hermes is actually installed and working, treat as success.
-          if (existsSync(HERMES_PYTHON) && existsSync(HERMES_SCRIPT)) {
-            emit(
-              "\nInstall script exited with warnings, but AgentEra Runtime is installed successfully.\n",
-            );
-            resolve();
-          } else {
-            reject(
-              new Error(
-                `Installation failed (exit code ${code}). You can try installing via terminal instead.`,
-              ),
-            );
-          }
-        }
-      });
-
-      proc.on("error", (err) => {
-        reject(new Error(`Failed to start installer: ${err.message}`));
-      });
-    });
-  } finally {
-    askpass?.cleanup();
-    sudoPrecache.stop();
-  }
-}
-
-// PS single-quoted string escape: ' → ''
-function psQuote(s: string): string {
-  return `'${s.replace(/'/g, "''")}'`;
-}
-
-// Resolve a powershell executable. Prefer PowerShell 7 (`pwsh`) when present,
-// fall back to Windows PowerShell 5.1 (`powershell.exe`). Both ship the same
-// flags we use; pwsh is faster and writes UTF-8 without a BOM by default.
-function resolvePowerShellExe(): string {
-  // Spawn will resolve from PATH; we test for pwsh.exe first.
-  const programFiles = process.env["ProgramFiles"];
-  const candidates = [
-    programFiles ? join(programFiles, "PowerShell", "7", "pwsh.exe") : null,
-    "pwsh.exe",
-    "powershell.exe",
-  ].filter((p): p is string => Boolean(p));
-  for (const c of candidates) {
-    if (c.includes("\\") && existsSync(c)) return c;
-  }
-  // Let spawn search PATH for the bare names; powershell.exe ships on every
-  // supported Windows version, so this is always resolvable.
-  return "powershell.exe";
-}
-
-async function runInstallWindows(emit: (t: string) => void): Promise<void> {
-  // We can't `irm | iex` and pass parameters, and we want to override the
-  // upstream defaults (which install to %LOCALAPPDATA%\hermes) so the
-  // desktop app's HERMES_HOME == ~\.hermes convention keeps working.
-  // Strategy: write a small wrapper .ps1 to %TEMP%, run it with -File.
-  const home = homedir();
-  const hermesHome = HERMES_HOME;
-  const installDir = HERMES_REPO;
-
-  const wrapperPath = join(
-    tmpdir(),
-    `hermes-install-${randomBytes(6).toString("hex")}.ps1`,
-  );
-
-  // The wrapper downloads install.ps1 to a sibling temp file and invokes it
-  // with our parameters. This sidesteps the `iex`-can't-pass-args limitation.
-  const wrapperScript = [
-    "$ErrorActionPreference = 'Stop'",
-    `$hermesHome = ${psQuote(hermesHome)}`,
-    `$installDir = ${psQuote(installDir)}`,
-    // Force TLS 1.2 for older Windows PowerShell 5.1 hosts that still default
-    // to TLS 1.0 — github raw refuses TLS < 1.2.
-    "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}",
-    "$url = 'https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.ps1'",
-    `$installer = Join-Path $env:TEMP ("hermes-install-script-" + [guid]::NewGuid().ToString() + ".ps1")`,
-    // Windows PowerShell 5.1 parses BOM-less files as the legacy ANSI codepage,
-    // which mangles the non-ASCII glyphs in install.ps1 and produces parse
-    // errors (see issue #149). Re-save with a UTF-8 BOM so PS 5.1 reads it as
-    // UTF-8. Idempotent if upstream later adds its own BOM or switches to ASCII.
-    "$resp = Invoke-WebRequest -Uri $url -UseBasicParsing",
-    "$text = if ($resp.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($resp.Content) } else { [string]$resp.Content }",
-    "if ($text.Length -gt 0 -and $text[0] -eq [char]0xFEFF) { $text = $text.Substring(1) }",
-    "[System.IO.File]::WriteAllText($installer, $text, (New-Object System.Text.UTF8Encoding $true))",
-    "$exit = 1",
-    "try {",
-    "  & $installer -SkipSetup -NonInteractive -HermesHome $hermesHome -InstallDir $installDir",
-    "  $exit = $LASTEXITCODE",
-    "} finally {",
-    "  if ($env:HERMES_DESKTOP_SANDBOX -eq '1') {",
-    "    $sandboxVenv = Join-Path $installDir 'venv\\Scripts'",
-    "    $userHermesHome = [Environment]::GetEnvironmentVariable('HERMES_HOME', 'User')",
-    "    if ($userHermesHome -and ($userHermesHome.TrimEnd('\\') -ieq $hermesHome.TrimEnd('\\'))) {",
-    "      [Environment]::SetEnvironmentVariable('HERMES_HOME', $null, 'User')",
-    "    }",
-    "    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')",
-    "    if ($userPath) {",
-    "      $parts = $userPath -split ';' | Where-Object { $_ -and ($_.TrimEnd('\\') -ine $sandboxVenv.TrimEnd('\\')) }",
-    "      [Environment]::SetEnvironmentVariable('Path', ($parts -join ';'), 'User')",
-    "    }",
-    "  }",
-    "}",
-    "Remove-Item -Force -ErrorAction SilentlyContinue $installer",
-    "exit $exit",
-    "",
-  ].join("\r\n");
-
-  try {
-    writeFileSync(wrapperPath, wrapperScript, { encoding: "utf8" });
-  } catch (err) {
-    throw new Error(
-      `Failed to stage Windows installer: ${(err as Error).message}`,
-    );
-  }
-
-  const psExe = resolvePowerShellExe();
-  const basePath = getEnhancedPath();
-
-  return new Promise<void>((resolve, reject) => {
-    const proc = spawn(
-      psExe,
-      [
-        "-ExecutionPolicy",
-        "Bypass",
-        "-NoProfile",
-        "-NonInteractive",
-        "-File",
-        wrapperPath,
-      ],
-      {
-        cwd: home,
-        env: {
-          ...process.env,
-          PATH: basePath,
-          HERMES_HOME: hermesHome,
-          // Hint that we're not interactive so install.ps1 doesn't `pause`
-          // (the .cmd wrapper does on failure, but -File on .ps1 won't).
-          NO_COLOR: "1",
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-        ...HIDDEN_SUBPROCESS_OPTIONS,
-      },
-    );
-
-    proc.stdout?.on("data", (data: Buffer) => {
-      emit(stripAnsi(data.toString()));
-    });
-
-    proc.stderr?.on("data", (data: Buffer) => {
-      emit(stripAnsi(data.toString()));
-    });
-
-    proc.on("close", (code) => {
-      try {
-        unlinkSync(wrapperPath);
-      } catch {
-        /* best-effort */
-      }
-      if (code === 0) {
-        emit("\nInstallation complete!\n");
-        resolve();
-        return;
-      }
-      // Same tolerance as the bash path: if the binary tree exists, count it.
-      if (existsSync(HERMES_PYTHON) && existsSync(HERMES_SCRIPT)) {
-        emit(
-          "\nInstall script exited with warnings, but AgentEra Runtime is installed successfully.\n",
-        );
-        resolve();
-      } else {
-        reject(
-          new Error(
-            `Installation failed (exit code ${code}). Open PowerShell and try: irm https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.ps1 | iex`,
-          ),
-        );
-      }
-    });
-
-    proc.on("error", (err) => {
-      try {
-        unlinkSync(wrapperPath);
-      } catch {
-        /* best-effort */
-      }
-      // Most common failure: PowerShell is missing or blocked by policy.
-      const hint =
-        (err as NodeJS.ErrnoException).code === "ENOENT"
-          ? " PowerShell was not found. Reinstall Windows PowerShell or run the installer manually from a terminal."
-          : "";
-      reject(new Error(`Failed to start installer: ${err.message}.${hint}`));
-    });
+function packagedRuntimeSeedDirectory(): string {
+  return resolvePackagedRuntimeSeedDirectory({
+    isPackaged: app?.isPackaged ?? false,
+    resourcesPath: process.resourcesPath,
+    workingDirectory: process.cwd(),
+    developmentOverride: process.env.AGENTERA_RUNTIME_SEED_DIR,
   });
+}
+
+function runtimeTrustFile(): string {
+  const candidates = [
+    join(
+      process.resourcesPath,
+      "app.asar.unpacked",
+      "resources",
+      "agentera-runtime-trust.json",
+    ),
+    join(
+      process.resourcesPath,
+      "app.asar",
+      "resources",
+      "agentera-runtime-trust.json",
+    ),
+    join(process.cwd(), "resources", "agentera-runtime-trust.json"),
+  ];
+  const path = candidates.find((candidate) => existsSync(candidate));
+  if (!path) throw new Error("AgentEra Runtime trust document is missing");
+  return path;
+}
+
+function nativeRuntimeTarget(): {
+  platform: "darwin" | "windows";
+  arch: "arm64" | "x64";
+} {
+  if (process.platform === "darwin" && process.arch === "arm64") {
+    return { platform: "darwin", arch: "arm64" };
+  }
+  if (process.platform === "win32" && process.arch === "x64") {
+    return { platform: "windows", arch: "x64" };
+  }
+  throw new Error(
+    `Bundled AgentEra Runtime is not available for ${process.platform}-${process.arch}`,
+  );
+}
+
+/** Prepare the signed Seed shipped inside the desktop package. This path is
+ * deliberately local-only: no Git, package manager, shell installer, or HTTP
+ * fallback is reachable from it. */
+export async function runPackagedSeedInstall(
+  onProgress: (progress: InstallProgress) => void,
+): Promise<PackagedSeedInstallResult> {
+  const restoreExternalOnFailure = selectedRuntimeMode === "external";
+  const target = nativeRuntimeTarget();
+  const userDataPath = app.getPath("userData");
+  configureRuntimeInvocationContext({
+    hermesHome: HERMES_HOME,
+    userDataPath,
+    platform: process.platform,
+  });
+  const paths = createRuntimeDistributionPaths(
+    userDataPath,
+    packagedRuntimeSeedDirectory(),
+  );
+  let log = "";
+  const result = await installPackagedSeed({
+    paths,
+    trustedPublicKeys: loadRuntimeTrustFile(runtimeTrustFile()),
+    manifestContext: {
+      repository: "bignormal/aera-runtime",
+      platform: target.platform,
+      arch: target.arch,
+      desktopVersion: app.getVersion(),
+      allowedChannels: new Set(["candidate", "stable"]),
+    },
+    availableDiskBytes: getAvailableRuntimeDiskBytes,
+    onProgress: (progress) => {
+      const line = `${progress.detail}\n`;
+      log += line;
+      onProgress({ ...progress, log });
+    },
+  });
+  if (result.status === "installed") {
+    clearVersionCache();
+    if (activateManagedRuntimeMode() === null) {
+      return {
+        ...result,
+        status: "repair-required",
+        errorCode: "runtime-activation-failed",
+        action: "retry",
+      };
+    }
+  } else if (restoreExternalOnFailure) {
+    selectExternalRuntime(HERMES_HOME);
+    selectedRuntimeMode = "external";
+  }
+  return result;
 }
 
 // ────────────────────────────────────────────────────
@@ -1163,26 +927,23 @@ async function runInstallWindows(emit: (t: string) => void): Promise<void> {
 export async function runHermesBackup(
   profile?: string,
 ): Promise<{ success: boolean; path?: string; error?: string }> {
-  if (!existsSync(HERMES_PYTHON) || !existsSync(HERMES_SCRIPT)) {
+  const invocation = getRuntimeInvocation();
+  if (invocation === null) {
     return { success: false, error: "AgentEra Runtime is not installed." };
   }
-  const args = hermesCliArgs();
+  const args = invocation.cliArgs();
   if (profile && profile !== "default") args.push("-p", profile);
   args.push("backup");
 
   return new Promise((resolve) => {
     execFile(
-      HERMES_PYTHON,
+      invocation.python,
       args,
       {
-        cwd: HERMES_REPO,
-        env: {
-          ...process.env,
-          PATH: getEnhancedPath(),
-          HOME: homedir(),
-          HERMES_HOME,
+        cwd: invocation.workingDirectory,
+        env: runtimeEnvironment(invocation, {
           TERM: "dumb",
-        },
+        }),
         timeout: 120000,
         ...HIDDEN_SUBPROCESS_OPTIONS,
       },
@@ -1217,26 +978,23 @@ export async function runHermesImport(
     return { success: false, error: archive.error };
   }
 
-  if (!existsSync(HERMES_PYTHON) || !existsSync(HERMES_SCRIPT)) {
+  const invocation = getRuntimeInvocation();
+  if (invocation === null) {
     return { success: false, error: "AgentEra Runtime is not installed." };
   }
-  const args = hermesCliArgs();
+  const args = invocation.cliArgs();
   if (profile && profile !== "default") args.push("-p", profile);
   args.push("import", archive.path);
 
   return new Promise((resolve) => {
     execFile(
-      HERMES_PYTHON,
+      invocation.python,
       args,
       {
-        cwd: HERMES_REPO,
-        env: {
-          ...process.env,
-          PATH: getEnhancedPath(),
-          HOME: homedir(),
-          HERMES_HOME,
+        cwd: invocation.workingDirectory,
+        env: runtimeEnvironment(invocation, {
           TERM: "dumb",
-        },
+        }),
         timeout: 120000,
         ...HIDDEN_SUBPROCESS_OPTIONS,
       },
@@ -1282,22 +1040,19 @@ export function validateImportArchivePath(
 // ────────────────────────────────────────────────────
 
 export function runHermesDump(): Promise<string> {
-  if (!existsSync(HERMES_PYTHON) || !existsSync(HERMES_SCRIPT)) {
+  const invocation = getRuntimeInvocation();
+  if (invocation === null) {
     return Promise.resolve("AgentEra Runtime is not installed.");
   }
   return new Promise((resolve) => {
     execFile(
-      HERMES_PYTHON,
-      hermesCliArgs(["dump"]),
+      invocation.python,
+      invocation.cliArgs(["dump"]),
       {
-        cwd: HERMES_REPO,
-        env: {
-          ...process.env,
-          PATH: getEnhancedPath(),
-          HOME: homedir(),
-          HERMES_HOME,
+        cwd: invocation.workingDirectory,
+        env: runtimeEnvironment(invocation, {
           TERM: "dumb",
-        },
+        }),
         timeout: 30000,
         ...HIDDEN_SUBPROCESS_OPTIONS,
       },
@@ -1331,7 +1086,9 @@ export interface MemoryProviderInfo {
 export function discoverMemoryProviders(
   profile?: string,
 ): MemoryProviderInfo[] {
-  const pluginsDir = join(HERMES_REPO, "plugins", "memory");
+  const invocation = getRuntimeInvocation();
+  if (invocation === null) return [];
+  const pluginsDir = join(invocation.workingDirectory, "plugins", "memory");
   if (!existsSync(pluginsDir)) return [];
 
   const activeProvider = getActiveMemoryProvider(profile);

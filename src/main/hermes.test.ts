@@ -6,10 +6,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // (run-stream, url-key-map, …) is pure and loads for real.
 vi.mock("./installer", () => ({
   HERMES_HOME: "/tmp/hermes-test-home",
-  HERMES_REPO: "/tmp/hermes-test-repo",
-  HERMES_PYTHON: "python3",
-  hermesCliArgs: vi.fn(() => []),
   getEnhancedPath: vi.fn(() => ""),
+}));
+vi.mock("./agentera-runtime-distribution/invocation", () => ({
+  getRuntimeInvocation: () => ({
+    source: "managed",
+    version: "test",
+    sourceCommit: "0".repeat(40),
+    root: "/tmp/runtime/test",
+    python: "python3",
+    workingDirectory: "/tmp/runtime/test/python/lib/python3.11/site-packages",
+    bundledSkillsDirectory: "/tmp/runtime/test/python/skills",
+    webDistDirectory:
+      "/tmp/runtime/test/python/lib/python3.11/site-packages/hermes_cli/web_dist",
+    cliArgs: (args: string[] = []) => ["-m", "hermes_cli.main", ...args],
+    environment: (base: Record<string, string> = {}) => ({ ...base }),
+  }),
 }));
 vi.mock("./config", () => ({
   getApiServerKey: vi.fn(() => ""),
@@ -283,7 +295,7 @@ describe("sendMessage session model override routing", () => {
 
     const args = cliArgs();
     expect(args).toContain("-m");
-    expect(args[args.indexOf("-m") + 1]).toBe("gemini-2.5-pro");
+    expect(args[args.lastIndexOf("-m") + 1]).toBe("gemini-2.5-pro");
     expect(args).toContain("--provider");
     expect(args[args.indexOf("--provider") + 1]).toBe("gemini");
   });

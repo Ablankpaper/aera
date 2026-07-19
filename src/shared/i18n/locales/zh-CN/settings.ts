@@ -1,3 +1,5 @@
+import { runtimeDistributionZhCn } from "../runtime-distribution";
+
 export default {
   title: "设置",
   sections: {
@@ -21,6 +23,7 @@ export default {
     community: "社区",
     logs: "日志与诊断",
   },
+  runtimeDistribution: runtimeDistributionZhCn,
   analytics: {
     label: "发送匿名使用情况分析",
     hint: "通过向项目的分析服务发送匿名、聚合的使用数据来帮助改进 AgentEra。您可以随时关闭。",

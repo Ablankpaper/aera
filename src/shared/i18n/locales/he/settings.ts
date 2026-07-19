@@ -1,3 +1,5 @@
+import { runtimeDistributionEn } from "../runtime-distribution";
+
 export default {
   title: "הגדרות",
   sections: {
@@ -21,6 +23,7 @@ export default {
     community: "קהילה",
     logs: "יומנים ואבחון",
   },
+  runtimeDistribution: runtimeDistributionEn,
   theme: {
     label: "ערכת נושא",
     system: "מערכת",

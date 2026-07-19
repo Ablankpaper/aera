@@ -61,13 +61,10 @@ jobs:
           fi
 
   release_mac:
-    name: Build macOS (${{ matrix.arch }})
+    name: Build macOS (arm64)
     needs: prepare
     if: needs.prepare.outputs.tag_exists == 'false'
     runs-on: macos-latest
-    strategy:
-      matrix:
-        arch: [x64, arm64]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -81,8 +78,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Prepare locked AgentEra Runtime Seed
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm run prepare:runtime-seed -- --platform darwin --arch arm64
+
       - name: Rebuild native dependencies for target arch
-        run: npx electron-builder install-app-deps --arch=${{ matrix.arch }}
+        run: npx electron-builder install-app-deps --arch=arm64
 
       - name: Build app
         env:
@@ -115,94 +117,63 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_API_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.ASC_ISSUER_ID }}
-        run: npx electron-builder --mac dmg zip --${{ matrix.arch }} --publish never
+        run: npx electron-builder --mac dmg zip --arm64 --publish never
+
+      - name: Verify Runtime Seed in unpacked app
+        run: |
+          set -euo pipefail
+          SEED="dist/mac-arm64/AgentEra Studio.app/Contents/Resources/agentera-runtime-seed"
+          if [ ! -d "$SEED" ]; then
+            SEED="dist/mac/AgentEra Studio.app/Contents/Resources/agentera-runtime-seed"
+          fi
+          npm run verify:packaged-runtime-seed -- "$SEED" \
+            --reference-dir resources/agentera-runtime-seed
+
+      - name: Verify Runtime Seed in final macOS artifacts
+        run: |
+          set -euo pipefail
+          REFERENCE="$PWD/resources/agentera-runtime-seed"
+          ZIP_PATH=$(find dist -maxdepth 1 -type f -name '*-arm64-mac.zip' -print -quit)
+          DMG_PATH=$(find dist -maxdepth 1 -type f -name '*-arm64.dmg' -print -quit)
+          test -n "$ZIP_PATH"
+          test -n "$DMG_PATH"
+
+          ZIP_ROOT=$(mktemp -d)
+          ditto -x -k "$ZIP_PATH" "$ZIP_ROOT"
+          ZIP_SEED=$(find "$ZIP_ROOT" -type d -path '*/Contents/Resources/agentera-runtime-seed' -print -quit)
+          test -n "$ZIP_SEED"
+          npm run verify:packaged-runtime-seed -- "$ZIP_SEED" \
+            --reference-dir "$REFERENCE"
+
+          MOUNT_ROOT=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT_ROOT" "$DMG_PATH"
+          trap 'hdiutil detach "$MOUNT_ROOT" || true; rm -rf "$ZIP_ROOT" "$MOUNT_ROOT"' EXIT
+          DMG_SEED=$(find "$MOUNT_ROOT" -type d -path '*/Contents/Resources/agentera-runtime-seed' -print -quit)
+          test -n "$DMG_SEED"
+          npm run verify:packaged-runtime-seed -- "$DMG_SEED" \
+            --reference-dir "$REFERENCE"
+          hdiutil detach "$MOUNT_ROOT"
+          trap - EXIT
+          rm -rf "$ZIP_ROOT" "$MOUNT_ROOT"
 
       - name: Verify native module architecture
         run: |
           set -euo pipefail
-          NODE_FILE="dist/mac-${{ matrix.arch }}/AgentEra Studio.app/Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+          NODE_FILE="dist/mac-arm64/AgentEra Studio.app/Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
           if [ ! -f "$NODE_FILE" ]; then
             NODE_FILE="dist/mac/AgentEra Studio.app/Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
           fi
           file "$NODE_FILE"
-          case "${{ matrix.arch }}" in
-            x64) file "$NODE_FILE" | grep -q "x86_64" ;;
-            arm64) file "$NODE_FILE" | grep -q "arm64" ;;
-          esac
+          file "$NODE_FILE" | grep -q "arm64"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mac-${{ matrix.arch }}-artifacts
+          name: mac-arm64-artifacts
           path: |
             dist/*.dmg
             dist/*.zip
             dist/*.blockmap
-
-  release_linux:
-    name: Build Linux (${{ matrix.arch }})
-    needs: prepare
-    if: needs.prepare.outputs.tag_exists == 'false'
-    runs-on: ${{ matrix.runs-on }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x64
-            runs-on: ubuntu-latest
-            targets: AppImage deb rpm
-          - arch: arm64
-            runs-on: ubuntu-24.04-arm
-            targets: AppImage
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Rebuild native dependencies for target arch
-        run: npx electron-builder install-app-deps --arch=${{ matrix.arch }}
-
-      - name: Build app
-        env:
-          VITE_ANALYTICS_BASE_URL: ${{ vars.VITE_ANALYTICS_BASE_URL }}
-          VITE_ANALYTICS_API_KEY: ${{ secrets.VITE_ANALYTICS_API_KEY }}
-          MAIN_VITE_HERMES_API_URL: ${{ vars.HERMES_API_URL }}
-          MAIN_VITE_HERMES_API_KEY: ${{ secrets.HERMES_API_KEY }}
-        run: npm run build
-
-      - name: Install rpmbuild
-        if: contains(matrix.targets, 'rpm')
-        run: sudo apt-get update && sudo apt-get install -y rpm
-
-      - name: Package Linux artifacts
-        run: npx electron-builder --linux ${{ matrix.targets }} --${{ matrix.arch }} --publish never
-
-      - name: Upload x64 artifacts
-        if: matrix.arch == 'x64'
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-x64-artifacts
-          path: |
-            dist/*.AppImage
-            dist/*.deb
-            dist/*.rpm
-            dist/latest-linux.yml
-
-      - name: Upload arm64 artifacts
-        if: matrix.arch == 'arm64'
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-arm64-artifacts
-          path: |
-            dist/*.AppImage
 
   release_windows:
     name: Build Windows
@@ -222,6 +193,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Prepare locked AgentEra Runtime Seed
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm run prepare:runtime-seed -- --platform windows --arch x64
+
       - name: Build app
         env:
           VITE_ANALYTICS_BASE_URL: ${{ vars.VITE_ANALYTICS_BASE_URL }}
@@ -232,6 +208,43 @@ jobs:
 
       - name: Package Windows artifacts
         run: npx electron-builder --win nsis portable --x64 --publish never
+
+      - name: Verify Runtime Seed in unpacked app
+        shell: pwsh
+        run: >-
+          npm run verify:packaged-runtime-seed --
+          "dist/win-unpacked/resources/agentera-runtime-seed"
+          --reference-dir "resources/agentera-runtime-seed"
+
+      - name: Verify Runtime Seed in final Windows artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $reference = (Resolve-Path "resources/agentera-runtime-seed").Path
+          $artifacts = @(Get-ChildItem "dist" -File -Filter "*.exe")
+          if ($artifacts.Count -ne 2) {
+            throw "Expected NSIS and portable executables, found $($artifacts.Count)"
+          }
+          foreach ($artifact in $artifacts) {
+            $root = Join-Path $env:RUNNER_TEMP ([guid]::NewGuid().ToString())
+            New-Item -ItemType Directory -Path $root | Out-Null
+            & 7z x -y "-o$root" $artifact.FullName | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "7z could not inspect $($artifact.Name)" }
+            $seed = Get-ChildItem $root -Directory -Recurse -Filter "agentera-runtime-seed" | Select-Object -First 1
+            if (-not $seed) {
+              foreach ($nested in @(Get-ChildItem $root -File -Recurse -Filter "*.7z")) {
+                $nestedRoot = "$($nested.FullName).unpacked"
+                New-Item -ItemType Directory -Path $nestedRoot | Out-Null
+                & 7z x -y "-o$nestedRoot" $nested.FullName | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "7z could not inspect $($nested.Name)" }
+              }
+              $seed = Get-ChildItem $root -Directory -Recurse -Filter "agentera-runtime-seed" | Select-Object -First 1
+            }
+            if (-not $seed) { throw "Runtime Seed missing from $($artifact.Name)" }
+            npm run verify:packaged-runtime-seed -- $seed.FullName --reference-dir $reference
+            if ($LASTEXITCODE -ne 0) { throw "Runtime Seed verification failed for $($artifact.Name)" }
+            Remove-Item $root -Recurse -Force
+          }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -276,8 +289,7 @@ jobs:
 
   publish:
     name: Publish Release
-    needs:
-      [prepare, release_mac, release_linux, release_windows, generate_winget]
+    needs: [prepare, release_mac, release_windows, generate_winget]
     if: needs.prepare.outputs.is_dry_run == 'false' && needs.prepare.outputs.tag_exists == 'false'
     runs-on: ubuntu-latest
     steps:
@@ -313,21 +325,15 @@ jobs:
             .filter(
               (name) =>
                 name.startsWith(`agentera-studio-${version}-`) &&
-                name.endsWith("-mac.zip"),
-            )
-            .sort((a, b) => {
-              if (a.includes("-x64-")) return -1;
-              if (b.includes("-x64-")) return 1;
-              return a.localeCompare(b);
-            });
+                name.endsWith("-arm64-mac.zip"),
+            );
 
           if (
-            zipNames.length < 2 ||
-            !zipNames.some((name) => name.includes("-x64-")) ||
-            !zipNames.some((name) => name.includes("-arm64-"))
+            zipNames.length !== 1 ||
+            !zipNames[0].includes("-arm64-")
           ) {
             throw new Error(
-              `Expected x64 and arm64 macOS zips, found: ${zipNames.join(", ")}`,
+              `Expected one arm64 macOS zip, found: ${zipNames.join(", ")}`,
             );
           }
 
@@ -342,7 +348,7 @@ jobs:
               size: fs.statSync(filePath).size,
             };
           });
-          const primary = files.find((file) => file.url.includes("-x64-")) || files[0];
+          const primary = files[0];
           const releaseDate = new Date().toISOString();
           const lines = [
             `version: ${version}`,
@@ -370,11 +376,7 @@ jobs:
           files: |
             artifacts/*.dmg
             artifacts/*.zip
-            artifacts/*.AppImage
-            artifacts/*.deb
-            artifacts/*.rpm
             artifacts/*.exe
             artifacts/*.blockmap
             artifacts/latest.yml
-            artifacts/latest-linux.yml
             artifacts/latest-mac.yml

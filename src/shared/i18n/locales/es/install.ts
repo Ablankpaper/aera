@@ -4,8 +4,6 @@ export default {
   installationComplete: "Instalación completada",
   installationFailed: "La instalación falló",
   installingHermes: "Instalando AgentEra Runtime",
-  installationFailedHint:
-    "La instalación falló. Inténtalo de nuevo o instala desde la terminal.",
   retryInstallation: "Reintentar la instalación",
   copied: "¡Copiado!",
   copyLogs: "Copiar registros",
@@ -23,12 +21,12 @@ export default {
   confirmNotInherited:
     "Si instalaste AgentEra en otro lugar, o mediante la línea de comandos, no se conservará.",
   confirmInstallBtn: "Instalar AgentEra",
-  useExistingBtn: "Usar una instalación existente",
+  useExistingBtn: "Usar un Runtime externo existente",
   useExistingHint:
-    "Selecciona la carpeta que contiene tu instalación de AgentEra existente (la que contiene la carpeta hermes-agent).",
+    "Selecciona la carpeta principal de Hermes que contiene hermes-agent. Este Runtime seguirá siendo externo y no administrado; las actualizaciones solo ejecutan el comando local de ese checkout.",
   useExistingInvalid:
     "No se encontró una instalación de AgentEra utilizable en esa carpeta.",
   useExistingDone:
-    "Instalación existente establecida — cierra y vuelve a abrir AgentEra para aplicarla.",
+    "Runtime externo seleccionado — cierra y vuelve a abrir AgentEra para aplicarlo. AgentEra Studio no modificará ni eliminará ese checkout.",
   useExistingQuitBtn: "Salir de AgentEra",
 } as const;

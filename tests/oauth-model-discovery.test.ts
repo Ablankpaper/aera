@@ -37,10 +37,24 @@ vi.mock("child_process", () => ({
 
 vi.mock("../src/main/installer", () => ({
   expectedEnvKeyForModel: () => "",
-  HERMES_PYTHON: "/usr/bin/python3",
-  HERMES_REPO: "/tmp/hermes-repo",
   HERMES_HOME: "/tmp/hermes-home",
   getEnhancedPath: () => process.env.PATH || "",
+}));
+
+vi.mock("../src/main/agentera-runtime-distribution/invocation", () => ({
+  getRuntimeInvocation: () => ({
+    source: "managed",
+    version: "test",
+    sourceCommit: "0".repeat(40),
+    root: "/tmp/runtime/test",
+    python: "/usr/bin/python3",
+    workingDirectory: "/tmp/runtime/test/python/lib/python3.11/site-packages",
+    bundledSkillsDirectory: "/tmp/runtime/test/python/skills",
+    webDistDirectory:
+      "/tmp/runtime/test/python/lib/python3.11/site-packages/hermes_cli/web_dist",
+    cliArgs: (args: string[] = []) => ["-m", "hermes_cli.main", ...args],
+    environment: (base: Record<string, string> = {}) => ({ ...base }),
+  }),
 }));
 
 vi.mock("../src/main/config", () => ({

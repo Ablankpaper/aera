@@ -18,13 +18,8 @@ import http from "http";
 import https from "https";
 import net from "net";
 import WebSocket from "ws";
-import {
-  HERMES_HOME,
-  HERMES_REPO,
-  HERMES_PYTHON,
-  hermesCliArgs,
-  getEnhancedPath,
-} from "./installer";
+import { HERMES_HOME, getEnhancedPath } from "./installer";
+import { getRuntimeInvocation } from "./agentera-runtime-distribution/invocation";
 import {
   getApiServerKey,
   getConnectionConfig,
@@ -309,7 +304,8 @@ function transcribeAudioViaLocalPython(
   mimeType: string,
   profile?: string,
 ): Promise<string> {
-  if (!existsSync(HERMES_PYTHON) || !existsSync(HERMES_REPO)) {
+  const invocation = getRuntimeInvocation();
+  if (!invocation) {
     throw new Error(
       "Voice input needs a local AgentEra Runtime install with speech-to-text support.",
     );
@@ -327,8 +323,8 @@ function transcribeAudioViaLocalPython(
   ].join("\n");
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(HERMES_PYTHON, ["-c", script, audioPath], {
-      cwd: HERMES_REPO,
+    const proc = spawn(invocation.python, ["-c", script, audioPath], {
+      cwd: invocation.workingDirectory,
       env: tuiGatewayEnv(profile),
       stdio: ["ignore", "pipe", "pipe"],
       ...HIDDEN_SUBPROCESS_OPTIONS,
@@ -649,27 +645,25 @@ class TuiGatewayClient {
   }
 
   private async startDashboardBackend(): Promise<void> {
-    if (!existsSync(HERMES_PYTHON)) {
-      throw new Error(`Python interpreter not found at ${HERMES_PYTHON}`);
-    }
-    if (!existsSync(HERMES_REPO)) {
-      throw new Error(`hermes-agent repo not found at ${HERMES_REPO}`);
+    const invocation = getRuntimeInvocation();
+    if (!invocation) {
+      throw new Error("AgentEra Runtime is not prepared.");
     }
 
     this.port = await pickDashboardPort();
     this.token = randomUUID();
-    const dashboardEnv = {
+    const dashboardEnv = invocation.environment({
       ...this.env,
       HERMES_DASHBOARD_SESSION_TOKEN: this.token,
       HERMES_DASHBOARD_TUI: "1",
-    };
+    });
     // NB: no `--tui` flag here. It's a *global* hermes option (valid only
     // before a subcommand), not a `dashboard` subcommand option, so passing
     // `dashboard --tui` makes argparse exit 2 ("unrecognized arguments:
     // --tui") and the warmup fails. The JSON-RPC gateway this client talks to
     // (`/api/ws`) is always served by a plain `hermes dashboard` and is gated
     // only by HERMES_DASHBOARD_SESSION_TOKEN (set in `dashboardEnv`).
-    const args = hermesCliArgs([
+    const args = invocation.cliArgs([
       "dashboard",
       "--no-open",
       "--host",
@@ -677,8 +671,8 @@ class TuiGatewayClient {
       "--port",
       String(this.port),
     ]);
-    const proc = spawn(HERMES_PYTHON, args, {
-      cwd: HERMES_REPO,
+    const proc = spawn(invocation.python, args, {
+      cwd: invocation.workingDirectory,
       env: dashboardEnv,
       stdio: ["ignore", "pipe", "pipe"],
       ...HIDDEN_SUBPROCESS_OPTIONS,
@@ -867,19 +861,26 @@ const tuiGatewayClients = new Map<string, TuiGatewayClient>();
 
 export function tuiGatewayEnv(profile?: string): Record<string, string> {
   const resolved = resolveProfile(profile);
-  const envPathDelimiter = process.platform === "win32" ? ";" : ":";
-  const env: Record<string, string> = {
+  const invocation = getRuntimeInvocation();
+  const base: Record<string, string> = {
     ...(process.env as Record<string, string>),
     PATH: getEnhancedPath(),
     HOME: homedir(),
     HERMES_HOME: profileHome(resolved),
-    HERMES_PYTHON_SRC_ROOT: HERMES_REPO,
     PYTHONUNBUFFERED: "1",
   };
-  const existingPythonPath = env.PYTHONPATH?.trim();
-  env.PYTHONPATH = existingPythonPath
-    ? `${HERMES_REPO}${envPathDelimiter}${existingPythonPath}`
-    : HERMES_REPO;
+  const env = (invocation ? invocation.environment(base) : base) as Record<
+    string,
+    string
+  >;
+  if (invocation?.source === "external") {
+    const envPathDelimiter = process.platform === "win32" ? ";" : ":";
+    env.HERMES_PYTHON_SRC_ROOT = invocation.workingDirectory;
+    const existingPythonPath = env.PYTHONPATH?.trim();
+    env.PYTHONPATH = existingPythonPath
+      ? `${invocation.workingDirectory}${envPathDelimiter}${existingPythonPath}`
+      : invocation.workingDirectory;
+  }
   if (resolved) env.HERMES_PROFILE = resolved;
   for (const [key, value] of Object.entries(readEnv(profile))) {
     if (value) env[key] = value;
@@ -2315,6 +2316,12 @@ function sendMessageViaCli(
   attachments?: Attachment[],
   override?: SessionModelOverride,
 ): ChatHandle {
+  const invocation = getRuntimeInvocation();
+  if (!invocation) {
+    cb.onError("AgentEra Runtime is not prepared.");
+    return { abort: () => undefined };
+  }
+
   // CLI fallback can't pipe multimodal content; inline text-file attachments
   // and ignore images.  The gateway is the supported attachment path; this
   // is only hit when the API server isn't reachable.
@@ -2343,37 +2350,38 @@ function sendMessageViaCli(
     (mc.provider !== baseMc.provider || mc.baseUrl !== baseMc.baseUrl);
   const profileEnv = readEnv(profile);
 
-  const args = hermesCliArgs();
+  const subArgs: string[] = [];
   if (profile && profile !== "default") {
-    args.push("-p", profile);
+    subArgs.push("-p", profile);
   }
-  args.push("chat", "-q", message, "-Q", "--source", "desktop");
+  subArgs.push("chat", "-q", message, "-Q", "--source", "desktop");
 
   if (resumeSessionId) {
-    args.push("--resume", resumeSessionId);
+    subArgs.push("--resume", resumeSessionId);
   }
 
   if (mc.model) {
-    args.push("-m", mc.model);
+    subArgs.push("-m", mc.model);
   }
 
   const cliProvider = CLI_COMPAT_PROVIDER_OVERRIDE[mc.provider];
   if (cliProvider) {
-    args.push("--provider", cliProvider);
+    subArgs.push("--provider", cliProvider);
   } else if (overrideChangesRouting && mc.provider && mc.provider !== "auto") {
     // A session override that switches to a named provider (e.g. gemini) must
     // select it explicitly — otherwise the CLI would infer the provider from
     // the now-stale config/env and route to the wrong host.
-    args.push("--provider", mc.provider);
+    subArgs.push("--provider", mc.provider);
   }
+  const args = invocation.cliArgs(subArgs);
 
-  const env: Record<string, string> = {
+  const env = invocation.environment({
     ...(process.env as Record<string, string>),
     PATH: getEnhancedPath(),
     HOME: homedir(),
     HERMES_HOME: HERMES_HOME,
     PYTHONUNBUFFERED: "1",
-  };
+  }) as Record<string, string>;
 
   // Inject all API keys from the profile .env so the CLI can access them.
   // The built-in remote OpenAI-compatible providers (DeepSeek, Together,
@@ -2534,8 +2542,8 @@ function sendMessageViaCli(
     delete env.OPENROUTER_BASE_URL;
   }
 
-  const proc = spawn(HERMES_PYTHON, args, {
-    cwd: HERMES_REPO,
+  const proc = spawn(invocation.python, args, {
+    cwd: invocation.workingDirectory,
     env,
     stdio: ["ignore", "pipe", "pipe"],
     ...HIDDEN_SUBPROCESS_OPTIONS,
@@ -3029,19 +3037,9 @@ function invalidateApiCacheFor(profile?: string): void {
 }
 
 function getGatewaySpawnError(): string | null {
-  if (!existsSync(HERMES_PYTHON)) {
-    return (
-      `Cannot start the gateway because the AgentEra Runtime Python interpreter was not found at ${HERMES_PYTHON}. ` +
-      "Install or repair AgentEra Runtime, then try again."
-    );
-  }
-  if (!existsSync(HERMES_REPO)) {
-    return (
-      `Cannot start the gateway because the hermes-agent repository was not found at ${HERMES_REPO}. ` +
-      "Install or repair AgentEra Runtime, then try again."
-    );
-  }
-  return null;
+  return getRuntimeInvocation()
+    ? null
+    : "Cannot start the gateway because AgentEra Runtime is not prepared. Install or repair AgentEra Runtime, then try again.";
 }
 
 function canSpawnGateway(): boolean {
@@ -3069,7 +3067,8 @@ export function buildGatewayEnv(profile?: string): Record<string, string> {
   ensureApiServerConfig(profile);
   const port = getProfilePort(profile);
 
-  const gatewayEnv: Record<string, string> = {
+  const invocation = getRuntimeInvocation();
+  const baseEnv: Record<string, string> = {
     ...(process.env as Record<string, string>),
     PATH: getEnhancedPath(),
     HOME: homedir(),
@@ -3080,6 +3079,9 @@ export function buildGatewayEnv(profile?: string): Record<string, string> {
     // the case where the block exists but omits an explicit port.
     API_SERVER_PORT: String(port),
   };
+  const gatewayEnv = (
+    invocation ? invocation.environment(baseEnv) : baseEnv
+  ) as Record<string, string>;
 
   // Inject ALL profile API keys so the gateway can authenticate with any provider.
   const profileEnv = readEnv(profile);
@@ -3147,8 +3149,8 @@ export function startGatewayDetailed(profile?: string): GatewayStartResult {
   // Defensive: the local gateway is never the right thing to spawn in
   // remote/SSH mode — the user is pointing at an off-machine server.
   // Callers should already gate, but several IPC handlers historically
-  // forgot to (issue #266), and reaching `spawn(HERMES_PYTHON, …)` when
-  // there's no local hermes-agent install produces an uncaught ENOENT
+  // forgot to (issue #266), and reaching the local Runtime spawn path when
+  // there is no prepared Runtime produces an uncaught ENOENT
   // that pops a generic error dialog.  Refuse cleanly here.
   if (isRemoteMode()) {
     const error =
@@ -3170,6 +3172,11 @@ export function startGatewayDetailed(profile?: string): GatewayStartResult {
   if (spawnError) {
     console.error(`[gateway] ${spawnError}`);
     return { success: false, running: false, error: spawnError };
+  }
+  const invocation = getRuntimeInvocation();
+  if (!invocation) {
+    const error = "AgentEra Runtime is not prepared.";
+    return { success: false, running: false, error };
   }
 
   const key = profileKey(profile);
@@ -3201,8 +3208,8 @@ export function startGatewayDetailed(profile?: string): GatewayStartResult {
   const cliArgs = gatewayCliCommandArgs(profile, ["gateway"]);
   let proc: ChildProcess;
   try {
-    proc = spawn(HERMES_PYTHON, hermesCliArgs(cliArgs), {
-      cwd: HERMES_REPO,
+    proc = spawn(invocation.python, invocation.cliArgs(cliArgs), {
+      cwd: invocation.workingDirectory,
       env: gatewayEnv,
       stdio: ["ignore", "ignore", stderrFd >= 0 ? stderrFd : "ignore"],
       detached: true,
@@ -3509,6 +3516,8 @@ async function restartGatewayLocallyOnce(
     if (isRemoteMode()) return false;
     ensureInitialized();
     if (!canSpawnGateway()) return false;
+    const invocation = getRuntimeInvocation();
+    if (!invocation) return false;
 
     const key = profileKey(profile);
     const previousProcess = gatewayProcesses.get(key) ?? null;
@@ -3687,6 +3696,8 @@ async function restartGatewayViaCliOnce(
     if (isRemoteMode()) return false;
     ensureInitialized();
     if (!canSpawnGateway()) return false;
+    const invocation = getRuntimeInvocation();
+    if (!invocation) return false;
 
     const key = profileKey(profile);
     const previousProcess = gatewayProcesses.get(key) ?? null;
@@ -3705,10 +3716,12 @@ async function restartGatewayViaCliOnce(
       try {
         stderrFd = openSync(logPath, "a");
         proc = spawn(
-          HERMES_PYTHON,
-          hermesCliArgs(gatewayCliCommandArgs(profile, ["gateway", "restart"])),
+          invocation.python,
+          invocation.cliArgs(
+            gatewayCliCommandArgs(profile, ["gateway", "restart"]),
+          ),
           {
-            cwd: HERMES_REPO,
+            cwd: invocation.workingDirectory,
             env: buildGatewayEnv(profile),
             stdio: ["ignore", "ignore", stderrFd >= 0 ? stderrFd : "ignore"],
             detached: true,

@@ -1,34 +1,35 @@
 export default {
   preparing: "Preparing...",
-  startingInstall: "Starting installation",
-  installationComplete: "Installation Complete",
-  installationFailed: "Installation Failed",
-  installingHermes: "Installing AgentEra Runtime",
-  installationFailedHint:
-    "Installation failed. Please try again or install via terminal.",
-  retryInstallation: "Retry Installation",
+  preparingRuntime: "Preparing AgentEra Runtime",
+  verifyingPackagedRuntime:
+    "Verifying the Runtime included with AgentEra Studio",
+  installationComplete: "AgentEra Runtime Is Ready",
+  installationFailed: "Runtime Preparation Failed",
+  preparationFailedHint:
+    "AgentEra Runtime could not be prepared from the local installer resources.",
+  packagedRuntimeInvalid:
+    "The Runtime included with AgentEra Studio is missing or invalid. Reinstall AgentEra Studio; no online fallback was used.",
+  insufficientDiskSpace:
+    "There is not enough free disk space to prepare AgentEra Runtime. Free some space and try again.",
+  retryPreparation: "Retry Preparation",
+  reinstallDesktop: "Reinstall AgentEra Studio",
   copied: "Copied!",
   copyLogs: "Copy Logs",
   stepLabel: "Step {{step}}/{{total}}: {{title}}",
   waitingToStart: "Waiting to start...",
   continueToSetup: "Continue to Setup",
-  confirmTitle: "Before installing",
-  confirmLocationLabel: "AgentEra will be installed at:",
-  confirmFresh:
-    "No existing installation was found here — a fresh copy will be set up.",
-  confirmUpdate:
-    "An existing AgentEra installation is here — it will be updated to the latest version.",
-  confirmReplace:
-    "A folder exists here but isn't a valid AgentEra installation — installing will delete and replace it.",
-  confirmNotInherited:
-    "If you installed AgentEra somewhere else, or via the command line, it won't be carried over.",
-  confirmInstallBtn: "Install AgentEra",
-  useExistingBtn: "Use an existing installation",
+  confirmTitle: "Prepare AgentEra Runtime",
+  confirmBundledRuntime:
+    "AgentEra Runtime is already included with this desktop app and will be prepared locally.",
+  confirmOfflinePreparation:
+    "This first preparation does not download Hermes from GitHub and does not change your Profile, Memory, sessions, or learned Skills.",
+  confirmPrepareBtn: "Prepare Runtime",
+  useExistingBtn: "Use existing external Runtime",
   useExistingHint:
-    "Select the folder that holds your existing AgentEra installation (the one containing the hermes-agent folder).",
+    "Select the Hermes home containing hermes-agent. This Runtime remains external and unmanaged; updates run only through that checkout's local command.",
   useExistingInvalid:
-    "No usable AgentEra installation was found in that folder.",
+    "No usable external AgentEra Runtime was found in that folder.",
   useExistingDone:
-    "Existing installation set — quit and reopen AgentEra to apply it.",
+    "External Runtime selected — quit and reopen AgentEra to apply it. AgentEra Studio will not modify or delete that checkout.",
   useExistingQuitBtn: "Quit AgentEra",
 } as const;

@@ -33,10 +33,22 @@ const {
 
 vi.mock("../src/main/installer", () => ({
   HERMES_HOME: TEST_HOME,
-  HERMES_PYTHON: process.execPath,
-  HERMES_REPO: TEST_REPO,
-  hermesCliArgs: hermesCliArgsSpy,
   getEnhancedPath: () => process.env.PATH || "",
+}));
+
+vi.mock("../src/main/agentera-runtime-distribution/invocation", () => ({
+  getRuntimeInvocation: () => ({
+    source: "external",
+    version: null,
+    sourceCommit: null,
+    root: TEST_REPO,
+    python: process.execPath,
+    workingDirectory: TEST_REPO,
+    bundledSkillsDirectory: `${TEST_REPO}/skills`,
+    webDistDirectory: `${TEST_REPO}/hermes_cli/web_dist`,
+    cliArgs: hermesCliArgsSpy,
+    environment: (base: Record<string, string> = {}) => ({ ...base }),
+  }),
 }));
 
 vi.mock("../src/main/config", () => ({

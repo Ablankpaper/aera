@@ -37,6 +37,17 @@ import {
 } from "../agentera-connection-owner";
 import { createProductAccessGuard } from "../ipc/auth-guard";
 import { getActiveProfileNameSync, profileHome } from "../utils";
+import { createRuntimeBootstrapOptions } from "../agentera-runtime-distribution/bootstrap";
+import {
+  createRuntimeDistributionManager,
+  type RuntimeDistributionManager,
+} from "../agentera-runtime-distribution/manager";
+import {
+  activateManagedRuntimeMode,
+  isExternalRuntimeSelected,
+  runPackagedSeedInstall,
+} from "../installer";
+import { RuntimeActivityCoordinator } from "../runtime-activity";
 
 const APP_NAME =
   process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
@@ -45,7 +56,7 @@ const OPEN_DEVTOOLS_ON_START =
   process.env.HERMES_DESKTOP_OPEN_DEVTOOLS === "1";
 
 let mainWindow: BrowserWindow | null = null;
-const activeRuns = new Map<string, () => void>();
+const runtimeActivity = new RuntimeActivityCoordinator();
 
 export function startMainProcess(): void {
   process.on("uncaughtException", (err) => {
@@ -127,21 +138,85 @@ export function startMainProcess(): void {
       }
     },
   });
+  let runtimeDistribution: RuntimeDistributionManager | null = null;
+  try {
+    const runtimeOptions = createRuntimeBootstrapOptions({
+      userDataPath: app.getPath("userData"),
+      resourcesPath: process.resourcesPath,
+      workingDirectory: process.cwd(),
+      isPackaged: app.isPackaged,
+      developmentSeedDirectory: process.env.AGENTERA_RUNTIME_SEED_DIR,
+      desktopVersion: app.getVersion(),
+      platform: process.platform,
+      arch: process.arch,
+    });
+    runtimeDistribution = createRuntimeDistributionManager({
+      ...runtimeOptions,
+      activeRunCount: () => runtimeActivity.activeRunCount,
+      beginRuntimeTransition: () => runtimeActivity.beginTransition(),
+      cancelRuntimeTransition: () => runtimeActivity.cancelTransition(),
+      isExternalRuntime: isExternalRuntimeSelected,
+      stopRuntimeContext: stopActiveRuntimeContext,
+      relaunch: () => {
+        app.relaunch();
+        app.exit(0);
+      },
+      repair: async () => {
+        const existingManaged = activateManagedRuntimeMode();
+        if (existingManaged !== null) {
+          return {
+            success: true,
+            runtimeVersion: existingManaged.version,
+            errorCode: null,
+          };
+        }
+        const result = await runPackagedSeedInstall((progress) => {
+          if (!mainWindow || mainWindow.isDestroyed()) return;
+          mainWindow.webContents.send("install-progress", progress);
+        });
+        return {
+          success: result.status === "installed",
+          runtimeVersion: result.runtimeVersion,
+          errorCode:
+            result.status === "installed" ? null : "runtime_install_failed",
+        };
+      },
+    });
+    void runtimeDistribution.initialize().catch(() => {
+      console.error("[AGENTERA_RUNTIME_MANAGER] initialization failed");
+    });
+  } catch {
+    console.error("[AGENTERA_RUNTIME_MANAGER] unavailable");
+  }
   const ownerSwitchCoordinator = createAgenteraOwnerSwitchCoordinator({
     stopRuntimeContext: stopActiveRuntimeContext,
   });
+  let runtimeUpdateCheckedUserId: string | null = null;
   const unsubscribeAgenteraAuth = agenteraAuth.subscribe((state) => {
     ownerSwitchCoordinator.transitionTo(
       state.status === "authenticated" || state.status === "offline"
         ? state.userId
         : null,
     );
+    if (
+      state.status === "authenticated" &&
+      state.cloudAvailable &&
+      runtimeDistribution !== null &&
+      runtimeUpdateCheckedUserId !== state.userId
+    ) {
+      runtimeUpdateCheckedUserId = state.userId;
+      void runtimeDistribution.check().catch(() => {
+        console.error("[AGENTERA_RUNTIME_UPDATE_CHECK] unavailable");
+      });
+    } else if (state.status !== "authenticated" && state.status !== "offline") {
+      runtimeUpdateCheckedUserId = null;
+    }
     if (!mainWindow || mainWindow.isDestroyed()) return;
     mainWindow.webContents.send("agentera-auth-state-changed", state);
   });
 
   registerIpcHandlers({
-    activeRuns,
+    runtimeActivity,
     getMainWindow: () => mainWindow,
     notifyConnectionConfigChanged,
     notifyModelLibraryChanged,
@@ -152,6 +227,7 @@ export function startMainProcess(): void {
     getAgenteraRuntimeOwner,
     agenteraProfileBindings,
     agenteraConnectionOwners,
+    runtimeDistribution,
   });
 
   setupUpdater({ getMainWindow: () => mainWindow });
@@ -217,10 +293,9 @@ export function startMainProcess(): void {
   });
 }
 
-function stopActiveRuntimeContext(): void {
+export function stopActiveRuntimeContext(): void {
   stopHealthPolling();
-  for (const abort of activeRuns.values()) abort();
-  activeRuns.clear();
+  runtimeActivity.abortAll();
   cleanupTempMediaFiles();
   stopAllDashboards();
   // A Profile or connection context must never remain mounted across an

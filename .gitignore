@@ -37,6 +37,10 @@ pnpm-debug.log*
 /release/
 .claude/worktrees
 
+# Verified Runtime Seed build staging (the signed assets are fetched per target)
+/resources/agentera-runtime-seed/*
+!/resources/agentera-runtime-seed/.gitkeep
+
 # Tauri
 **/src-tauri/target/
 **/src-tauri/gen/

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { ConnectionConfig } from "./config";
-import { HERMES_PYTHON, HERMES_SCRIPT } from "./installer";
+import { getRuntimeInvocation } from "./agentera-runtime-distribution/invocation";
 import { getActiveProfileNameSync, profileHome } from "./utils";
 
 export type AgenteraPostAuthTarget = "welcome" | "setup" | "main";
@@ -32,7 +32,7 @@ export function probeAgenteraInstallFiles(): AgenteraInstallFileStatus {
   const configured =
     existsSync(join(home, ".env")) || existsSync(join(home, "auth.json"));
   return {
-    installed: existsSync(HERMES_PYTHON) && existsSync(HERMES_SCRIPT),
+    installed: getRuntimeInvocation() !== null,
     configured,
     // Pre-auth needs only a post-auth route hint. Treat presence of approved
     // configuration metadata as configured without reading any key value.

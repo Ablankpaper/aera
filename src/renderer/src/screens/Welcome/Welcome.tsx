@@ -3,12 +3,10 @@ import HermesLogo from "../../components/common/HermesLogo";
 import {
   ArrowRight,
   Refresh,
-  Copy,
   Globe,
   KeyRound,
   Spinner,
 } from "../../assets/icons";
-import { getInstallCmd } from "../../constants";
 import { useI18n } from "../../components/useI18n";
 
 interface WelcomeProps {
@@ -333,24 +331,9 @@ function Welcome({
               {t("welcome.retryInstall")}
               <Refresh size={16} />
             </button>
-            <div className="welcome-divider">
-              <span>{t("welcome.dividerOr")}</span>
-            </div>
-            <div className="welcome-terminal-option">
-              <p className="welcome-terminal-label">
-                {t("welcome.terminalInstallHint")}
-              </p>
-              <div className="welcome-terminal-box">
-                <code>{getInstallCmd()}</code>
-                <button
-                  className="btn-ghost welcome-copy-btn"
-                  onClick={() => navigator.clipboard.writeText(getInstallCmd())}
-                  title={t("welcome.copyInstallCommand")}
-                >
-                  <Copy size={14} />
-                </button>
-              </div>
-            </div>
+            <p className="welcome-remote-hint">
+              {t("install.packagedRuntimeInvalid")}
+            </p>
             <button
               className="btn btn-secondary welcome-recheck-btn"
               onClick={onRecheck}

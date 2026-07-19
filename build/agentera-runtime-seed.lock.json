@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "repository": "bignormal/aera-runtime",
+  "release_tag": "runtime-v0.18.2-agentera.1-rc.1",
+  "source_commit": "c0439e1e3e5f35a91b658d57ddfc011e0d5ba1bb",
+  "runtime_version": "0.18.2-agentera.1",
+  "channel": "candidate",
+  "assets": {
+    "darwin-arm64": {
+      "platform": "darwin",
+      "arch": "arm64",
+      "archive": "agentera-runtime-0.18.2-agentera.1-darwin-arm64.tar.zst",
+      "manifest": "agentera-runtime-0.18.2-agentera.1-darwin-arm64.manifest.json",
+      "signature": "agentera-runtime-0.18.2-agentera.1-darwin-arm64.manifest.sig"
+    },
+    "windows-x64": {
+      "platform": "windows",
+      "arch": "x64",
+      "archive": "agentera-runtime-0.18.2-agentera.1-windows-x64.zip",
+      "manifest": "agentera-runtime-0.18.2-agentera.1-windows-x64.manifest.json",
+      "signature": "agentera-runtime-0.18.2-agentera.1-windows-x64.manifest.sig"
+    }
+  }
+}

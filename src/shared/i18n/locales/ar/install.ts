@@ -4,8 +4,6 @@ export default {
   installationComplete: "اكتمل التثبيت",
   installationFailed: "فشل التثبيت",
   installingHermes: "جارٍ تثبيت AgentEra Runtime",
-  installationFailedHint:
-    "فشل التثبيت. يرجى المحاولة مرة أخرى أو التثبيت عبر الطرفية.",
   retryInstallation: "إعادة محاولة التثبيت",
   copied: "تم النسخ!",
   copyLogs: "نسخ السجلات",
@@ -21,10 +19,11 @@ export default {
   confirmNotInherited:
     "إذا قمت بتثبيت AgentEra في مكان آخر، أو عبر سطر الأوامر، فلن يتم نقله.",
   confirmInstallBtn: "تثبيت AgentEra",
-  useExistingBtn: "استخدام تثبيت موجود",
+  useExistingBtn: "استخدام Runtime خارجي موجود",
   useExistingHint:
-    "اختر المجلد الذي يحتوي على تثبيت AgentEra الحالي (المجلد الذي يحتوي على مجلد hermes-agent).",
+    "اختر مجلد Hermes الرئيسي الذي يحتوي على hermes-agent. سيبقى Runtime خارجياً وغير مُدار، ولن تعمل التحديثات إلا عبر الأمر المحلي لهذا المستودع.",
   useExistingInvalid: "لم يتم العثور على تثبيت AgentEra صالح في هذا المجلد.",
-  useExistingDone: "تم تعيين التثبيت الحالي — أغلق AgentEra وأعد فتحه لتطبيقه.",
+  useExistingDone:
+    "تم اختيار Runtime الخارجي — أغلق AgentEra وأعد فتحه لتطبيقه. لن يعدّل AgentEra Studio هذا المستودع أو يحذفه.",
   useExistingQuitBtn: "إنهاء AgentEra",
 } as const;

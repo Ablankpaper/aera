@@ -58,6 +58,8 @@ Every bundled Runtime update must prove compatibility against a learned Profile 
 
 The gate covers stable conversation prompts and tools, local background learning, next-conversation recall, Curator behavior, physical Profile isolation, offline use, version updates, migrations, and negative cross-scope cases.
 
+The seed format, offline installation, user-confirmed update, signature verification, and rollback contract are defined by [[agentera-runtime-distribution|AgentEra Runtime distribution]].
+
 ## First-release boundary
 
 The first release guarantees self-evolution on the same device and in the same Profile.

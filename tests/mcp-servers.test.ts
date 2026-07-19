@@ -1,5 +1,32 @@
 import { describe, expect, it, vi } from "vitest";
 
+const { execFileSpy, stdinEndSpy } = vi.hoisted(() => {
+  const stdinEndSpy = vi.fn();
+  return {
+    stdinEndSpy,
+    execFileSpy: vi.fn(
+      (
+        _file: string,
+        _args: string[],
+        _options: Record<string, unknown>,
+        callback: (error: Error | null, stdout: string, stderr: string) => void,
+      ) => {
+        callback(
+          null,
+          "Name Status Description\nlinear available Linear integration\n",
+          "",
+        );
+        return { stdin: { end: stdinEndSpy } };
+      },
+    ),
+  };
+});
+
+vi.mock("child_process", () => ({
+  execFile: execFileSpy,
+  default: { execFile: execFileSpy },
+}));
+
 vi.mock("../src/main/hermes", () => ({
   getApiUrl: () => "http://127.0.0.1:8642",
   getRemoteAuthHeader: () => ({}),
@@ -7,19 +34,59 @@ vi.mock("../src/main/hermes", () => ({
 }));
 
 vi.mock("../src/main/utils", () => ({
-  profilePaths: () => ({ configFile: "config.yaml" }),
+  profilePaths: () => ({ configFile: "config.yaml", home: "/tmp/profile" }),
   safeWriteFile: vi.fn(),
+}));
+
+vi.mock("../src/main/installer", () => ({
+  HERMES_HOME: "/tmp/hermes-home",
+  getEnhancedPath: () => process.env.PATH || "",
+}));
+
+vi.mock("../src/main/agentera-runtime-distribution/invocation", () => ({
+  getRuntimeInvocation: () => ({
+    source: "managed",
+    version: "test",
+    sourceCommit: "0".repeat(40),
+    root: "/tmp/runtime/test",
+    python: "/tmp/runtime/test/python/bin/python3",
+    workingDirectory: "/tmp/runtime/test/python/lib/python3.11/site-packages",
+    bundledSkillsDirectory: "/tmp/runtime/test/python/skills",
+    webDistDirectory:
+      "/tmp/runtime/test/python/lib/python3.11/site-packages/hermes_cli/web_dist",
+    cliArgs: (args: string[] = []) => ["-m", "hermes_cli.main", ...args],
+    environment: (base: Record<string, string> = {}) => ({ ...base }),
+  }),
 }));
 
 import {
   parseCatalogOutput,
   parseMcpServersFromConfig,
+  listMcpCatalog,
   removeMcpServerFromConfig,
   setMcpServerEnabledInConfig,
   upsertMcpServerInConfig,
 } from "../src/main/mcp-servers";
 
 describe("MCP server config management", () => {
+  it("executes the local catalog through the live Runtime invocation", async () => {
+    execFileSpy.mockClear();
+    stdinEndSpy.mockClear();
+
+    const result = await listMcpCatalog("work");
+
+    expect(result.error).toBeUndefined();
+    expect(execFileSpy).toHaveBeenCalledWith(
+      "/tmp/runtime/test/python/bin/python3",
+      ["-m", "hermes_cli.main", "mcp", "catalog"],
+      expect.objectContaining({
+        cwd: "/tmp/runtime/test/python/lib/python3.11/site-packages",
+      }),
+      expect.any(Function),
+    );
+    expect(stdinEndSpy).toHaveBeenCalledOnce();
+  });
+
   it("parses the local hermes mcp catalog table output", () => {
     const entries = parseCatalogOutput(`
   MCP Catalog + configured servers:

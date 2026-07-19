@@ -28,8 +28,22 @@ vi.mock("../src/main/hermes", () => ({
 
 vi.mock("../src/main/installer", () => ({
   HERMES_HOME: "C:/hermes",
-  HERMES_PYTHON: "C:/hermes/hermes-agent/venv/Scripts/pythonw.exe",
-  hermesCliArgs: (args: string[] = []) => ["-m", "hermes_cli.main", ...args],
+}));
+
+vi.mock("../src/main/agentera-runtime-distribution/invocation", () => ({
+  getRuntimeInvocation: () => ({
+    source: "managed",
+    version: "test",
+    sourceCommit: "0".repeat(40),
+    root: "C:/runtime/test",
+    python: "C:/runtime/test/python/python.exe",
+    workingDirectory: "C:/runtime/test/python/Lib/site-packages",
+    bundledSkillsDirectory: "C:/runtime/test/python/skills",
+    webDistDirectory:
+      "C:/runtime/test/python/Lib/site-packages/hermes_cli/web_dist",
+    cliArgs: (args: string[] = []) => ["-m", "hermes_cli.main", ...args],
+    environment: (base: Record<string, string> = {}) => ({ ...base }),
+  }),
 }));
 
 describe("createCronJob", () => {
