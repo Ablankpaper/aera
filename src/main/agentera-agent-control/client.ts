@@ -690,6 +690,15 @@ export class AgenteraAgentControlClient {
     );
   }
 
+  getPolicySnapshot(snapshotId: string): Promise<AgentPolicySnapshot> {
+    requireUUID(snapshotId);
+    return this.requestJSON(
+      `/api/v1/policy-snapshots/${snapshotId}`,
+      { expectedStatus: 200 },
+      isPolicy,
+    );
+  }
+
   publishInitial(
     body: PublishInitialAgentRequest,
     idempotencyKey: string,

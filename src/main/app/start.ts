@@ -111,7 +111,7 @@ export function startMainProcess(): void {
     return {
       tenantId: state.personalSpaceId,
       ownerId: state.userId,
-      installationId: installation.installationId,
+      deviceInstallationId: installation.installationId,
     };
   };
   const productAccessGuard = createProductAccessGuard({

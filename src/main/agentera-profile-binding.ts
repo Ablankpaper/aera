@@ -13,17 +13,28 @@ import type { SecureStorageAdapter } from "./agentera-auth/store";
 import { safeWriteFile } from "./utils";
 
 const PROFILE_BINDING_SCHEMA = "agentera-runtime-profile-bindings" as const;
-const PROFILE_BINDING_VERSION = 1 as const;
+const PROFILE_BINDING_VERSION_V1 = 1 as const;
+const PROFILE_BINDING_VERSION = 2 as const;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export interface AgenteraRuntimeOwner {
   tenantId: string;
   ownerId: string;
-  installationId: string;
+  deviceInstallationId: string;
 }
 
 export interface RuntimeOwnerBinding {
+  tenantId: string;
+  ownerScope: "USER";
+  ownerId: string;
+  deviceInstallationId: string;
+  agentInstallationId: string | null;
+  runtimeProfileId: string;
+  boundAt: string;
+}
+
+interface RuntimeOwnerBindingV1 {
   tenantId: string;
   ownerScope: "USER";
   ownerId: string;
@@ -37,9 +48,20 @@ interface StoredProfileBinding {
   binding: RuntimeOwnerBinding;
 }
 
+interface StoredProfileBindingV1 {
+  profilePath: string;
+  binding: RuntimeOwnerBindingV1;
+}
+
 interface BindingEnvelope {
   schema: typeof PROFILE_BINDING_SCHEMA;
   version: typeof PROFILE_BINDING_VERSION;
+  encryptedBindings: string;
+}
+
+interface BindingEnvelopeV1 {
+  schema: typeof PROFILE_BINDING_SCHEMA;
+  version: typeof PROFILE_BINDING_VERSION_V1;
   encryptedBindings: string;
 }
 
@@ -93,11 +115,25 @@ function validUuid(value: unknown): value is string {
   return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
+function exactKeys(value: object, fields: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return (
+    keys.length === fields.length &&
+    fields.every((field) => Object.hasOwn(value, field))
+  );
+}
+
+function validBoundAt(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
+}
+
 function assertOwner(owner: AgenteraRuntimeOwner): void {
   if (
     !validUuid(owner.tenantId) ||
     !validUuid(owner.ownerId) ||
-    !validUuid(owner.installationId)
+    !validUuid(owner.deviceInstallationId)
   ) {
     throw new Error("AgentEra Runtime owner identity is invalid.");
   }
@@ -106,17 +142,45 @@ function assertOwner(owner: AgenteraRuntimeOwner): void {
 function validBinding(value: unknown): value is RuntimeOwnerBinding {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Partial<RuntimeOwnerBinding>;
-  const boundAt =
-    typeof record.boundAt === "string" ? new Date(record.boundAt) : null;
   return (
+    exactKeys(value, [
+      "tenantId",
+      "ownerScope",
+      "ownerId",
+      "deviceInstallationId",
+      "agentInstallationId",
+      "runtimeProfileId",
+      "boundAt",
+    ]) &&
+    validUuid(record.tenantId) &&
+    record.ownerScope === "USER" &&
+    validUuid(record.ownerId) &&
+    validUuid(record.deviceInstallationId) &&
+    (record.agentInstallationId === null ||
+      validUuid(record.agentInstallationId)) &&
+    validUuid(record.runtimeProfileId) &&
+    validBoundAt(record.boundAt)
+  );
+}
+
+function validBindingV1(value: unknown): value is RuntimeOwnerBindingV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Partial<RuntimeOwnerBindingV1>;
+  return (
+    exactKeys(value, [
+      "tenantId",
+      "ownerScope",
+      "ownerId",
+      "installationId",
+      "runtimeProfileId",
+      "boundAt",
+    ]) &&
     validUuid(record.tenantId) &&
     record.ownerScope === "USER" &&
     validUuid(record.ownerId) &&
     validUuid(record.installationId) &&
     validUuid(record.runtimeProfileId) &&
-    boundAt !== null &&
-    Number.isFinite(boundAt.getTime()) &&
-    boundAt.toISOString() === record.boundAt
+    validBoundAt(record.boundAt)
   );
 }
 
@@ -171,7 +235,7 @@ function sameOwner(
   return (
     binding.tenantId === owner.tenantId &&
     binding.ownerId === owner.ownerId &&
-    binding.installationId === owner.installationId
+    binding.deviceInstallationId === owner.deviceInstallationId
   );
 }
 
@@ -232,14 +296,20 @@ export class AgenteraProfileBindingStore {
     }
 
     const runtimeProfileId = this.randomUUID();
-    if (!validUuid(runtimeProfileId)) {
+    if (
+      !validUuid(runtimeProfileId) ||
+      bindings.some(
+        (entry) => entry.binding.runtimeProfileId === runtimeProfileId,
+      )
+    ) {
       throw new Error("AgentEra Runtime Profile ID generation failed.");
     }
     const binding: RuntimeOwnerBinding = {
       tenantId: owner.tenantId,
       ownerScope: "USER",
       ownerId: owner.ownerId,
-      installationId: owner.installationId,
+      deviceInstallationId: owner.deviceInstallationId,
+      agentInstallationId: null,
       runtimeProfileId,
       boundAt: this.now().toISOString(),
     };
@@ -308,6 +378,50 @@ export class AgenteraProfileBindingStore {
     return { ...stored.binding };
   }
 
+  attachAgentInstallation(
+    profilePath: string,
+    owner: AgenteraRuntimeOwner,
+    agentInstallationId: string,
+  ): RuntimeOwnerBinding {
+    assertOwner(owner);
+    if (!validUuid(agentInstallationId)) {
+      throw new Error("AgentEra Agent Installation ID is invalid.");
+    }
+    const canonical = canonicalProfilePath(profilePath);
+    const bindings = this.readBindings();
+    const stored = bindings.find((entry) => entry.profilePath === canonical);
+    if (!stored) {
+      throw new Error("AgentEra Runtime Profile binding is required.");
+    }
+    if (!sameOwner(stored.binding, owner)) {
+      throw new Error(
+        "This Runtime Profile belongs to another AgentEra owner.",
+      );
+    }
+    if (stored.binding.agentInstallationId === agentInstallationId) {
+      return { ...stored.binding };
+    }
+    if (stored.binding.agentInstallationId !== null) {
+      throw new Error(
+        "This Runtime Profile is already attached to an Agent Installation.",
+      );
+    }
+    if (
+      bindings.some(
+        (entry) =>
+          entry.profilePath !== canonical &&
+          entry.binding.agentInstallationId === agentInstallationId,
+      )
+    ) {
+      throw new Error(
+        "This Agent Installation is already attached to another Runtime Profile.",
+      );
+    }
+    stored.binding.agentInstallationId = agentInstallationId;
+    this.persistBindings(bindings);
+    return { ...stored.binding };
+  }
+
   private readBindings(): StoredProfileBinding[] {
     if (!existsSync(this.filePath)) return [];
     let envelope: unknown;
@@ -316,16 +430,16 @@ export class AgenteraProfileBindingStore {
     } catch {
       throw new Error("AgentEra Runtime Profile binding store is corrupt.");
     }
+    if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) {
+      throw new Error("AgentEra Runtime Profile binding store is corrupt.");
+    }
+    const candidate = envelope as Partial<BindingEnvelope | BindingEnvelopeV1>;
     if (
-      !envelope ||
-      typeof envelope !== "object" ||
-      Array.isArray(envelope) ||
-      (envelope as Partial<BindingEnvelope>).schema !==
-        PROFILE_BINDING_SCHEMA ||
-      (envelope as Partial<BindingEnvelope>).version !==
-        PROFILE_BINDING_VERSION ||
-      typeof (envelope as Partial<BindingEnvelope>).encryptedBindings !==
-        "string"
+      !exactKeys(envelope, ["schema", "version", "encryptedBindings"]) ||
+      candidate.schema !== PROFILE_BINDING_SCHEMA ||
+      (candidate.version !== PROFILE_BINDING_VERSION_V1 &&
+        candidate.version !== PROFILE_BINDING_VERSION) ||
+      typeof candidate.encryptedBindings !== "string"
     ) {
       throw new Error("AgentEra Runtime Profile binding store is corrupt.");
     }
@@ -333,39 +447,65 @@ export class AgenteraProfileBindingStore {
     let parsed: unknown;
     try {
       const plaintext = this.secureStorage.decryptString(
-        Buffer.from((envelope as BindingEnvelope).encryptedBindings, "base64"),
+        Buffer.from(candidate.encryptedBindings, "base64"),
       );
       parsed = JSON.parse(plaintext);
     } catch {
       throw new Error("AgentEra Runtime Profile binding store is corrupt.");
     }
-    if (
-      !Array.isArray(parsed) ||
-      parsed.some(
-        (entry) =>
-          !entry ||
-          typeof entry !== "object" ||
-          typeof (entry as Partial<StoredProfileBinding>).profilePath !==
-            "string" ||
-          !isAbsolute(
-            (entry as Partial<StoredProfileBinding>).profilePath as string,
-          ) ||
-          !validBinding((entry as Partial<StoredProfileBinding>).binding),
-      )
-    ) {
+    const isV1 = candidate.version === PROFILE_BINDING_VERSION_V1;
+    const validEntry = (entry: unknown): boolean => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        return false;
+      }
+      const stored = entry as Partial<
+        StoredProfileBinding | StoredProfileBindingV1
+      >;
+      return (
+        exactKeys(entry, ["profilePath", "binding"]) &&
+        typeof stored.profilePath === "string" &&
+        isAbsolute(stored.profilePath) &&
+        (isV1 ? validBindingV1(stored.binding) : validBinding(stored.binding))
+      );
+    };
+    if (!Array.isArray(parsed) || parsed.some((entry) => !validEntry(entry))) {
       throw new Error("AgentEra Runtime Profile binding store is corrupt.");
     }
-    const bindings = parsed as StoredProfileBinding[];
+    const bindings: StoredProfileBinding[] = isV1
+      ? (parsed as StoredProfileBindingV1[]).map((entry) => ({
+          profilePath: entry.profilePath,
+          binding: {
+            tenantId: entry.binding.tenantId,
+            ownerScope: "USER",
+            ownerId: entry.binding.ownerId,
+            deviceInstallationId: entry.binding.installationId,
+            agentInstallationId: null,
+            runtimeProfileId: entry.binding.runtimeProfileId,
+            boundAt: entry.binding.boundAt,
+          },
+        }))
+      : (parsed as StoredProfileBinding[]);
     if (
       new Set(bindings.map((entry) => entry.profilePath)).size !==
-      bindings.length
+        bindings.length ||
+      new Set(bindings.map((entry) => entry.binding.runtimeProfileId)).size !==
+        bindings.length ||
+      new Set(
+        bindings
+          .map((entry) => entry.binding.agentInstallationId)
+          .filter((value): value is string => value !== null),
+      ).size !==
+        bindings.filter((entry) => entry.binding.agentInstallationId !== null)
+          .length
     ) {
       throw new Error("AgentEra Runtime Profile binding store is corrupt.");
     }
-    return bindings.map((entry) => ({
+    const result = bindings.map((entry) => ({
       profilePath: entry.profilePath,
       binding: { ...entry.binding },
     }));
+    if (isV1) this.persistBindings(result);
+    return result;
   }
 
   private persistBindings(bindings: StoredProfileBinding[]): void {

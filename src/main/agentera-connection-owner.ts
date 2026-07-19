@@ -5,7 +5,8 @@ import type { AgenteraRuntimeOwner } from "./agentera-profile-binding";
 import { safeWriteFile } from "./utils";
 
 const CONNECTION_OWNER_SCHEMA = "agentera-connection-owners" as const;
-const CONNECTION_OWNER_VERSION = 1 as const;
+const CONNECTION_OWNER_VERSION_V1 = 1 as const;
+const CONNECTION_OWNER_VERSION = 2 as const;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -19,6 +20,21 @@ interface ConnectionOwnerEnvelope {
   schema: typeof CONNECTION_OWNER_SCHEMA;
   version: typeof CONNECTION_OWNER_VERSION;
   encryptedBindings: string;
+}
+
+interface ConnectionOwnerEnvelopeV1 {
+  schema: typeof CONNECTION_OWNER_SCHEMA;
+  version: typeof CONNECTION_OWNER_VERSION_V1;
+  encryptedBindings: string;
+}
+
+interface ConnectionOwnerBindingV1 {
+  connectionContextId: string;
+  tenantId: string;
+  ownerScope: "USER";
+  ownerId: string;
+  installationId: string;
+  boundAt: string;
 }
 
 export interface ConnectionOwnerStoreOptions {
@@ -38,11 +54,19 @@ function validIsoDate(value: unknown): value is string {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
 }
 
+function exactKeys(value: object, fields: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return (
+    keys.length === fields.length &&
+    fields.every((field) => Object.hasOwn(value, field))
+  );
+}
+
 function assertOwner(owner: AgenteraRuntimeOwner): void {
   if (
     !validUuid(owner.tenantId) ||
     !validUuid(owner.ownerId) ||
-    !validUuid(owner.installationId)
+    !validUuid(owner.deviceInstallationId)
   ) {
     throw new Error("AgentEra connection owner identity is invalid.");
   }
@@ -52,6 +76,35 @@ function validBinding(value: unknown): value is ConnectionOwnerBinding {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Partial<ConnectionOwnerBinding>;
   return (
+    exactKeys(value, [
+      "connectionContextId",
+      "tenantId",
+      "ownerScope",
+      "ownerId",
+      "deviceInstallationId",
+      "boundAt",
+    ]) &&
+    validUuid(record.connectionContextId) &&
+    validUuid(record.tenantId) &&
+    record.ownerScope === "USER" &&
+    validUuid(record.ownerId) &&
+    validUuid(record.deviceInstallationId) &&
+    validIsoDate(record.boundAt)
+  );
+}
+
+function validBindingV1(value: unknown): value is ConnectionOwnerBindingV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Partial<ConnectionOwnerBindingV1>;
+  return (
+    exactKeys(value, [
+      "connectionContextId",
+      "tenantId",
+      "ownerScope",
+      "ownerId",
+      "installationId",
+      "boundAt",
+    ]) &&
     validUuid(record.connectionContextId) &&
     validUuid(record.tenantId) &&
     record.ownerScope === "USER" &&
@@ -68,7 +121,7 @@ function sameOwner(
   return (
     binding.tenantId === owner.tenantId &&
     binding.ownerId === owner.ownerId &&
-    binding.installationId === owner.installationId
+    binding.deviceInstallationId === owner.deviceInstallationId
   );
 }
 
@@ -136,7 +189,7 @@ export class AgenteraConnectionOwnerStore {
       tenantId: owner.tenantId,
       ownerScope: "USER",
       ownerId: owner.ownerId,
-      installationId: owner.installationId,
+      deviceInstallationId: owner.deviceInstallationId,
       boundAt: this.now().toISOString(),
     };
     bindings.push(binding);
@@ -178,16 +231,18 @@ export class AgenteraConnectionOwnerStore {
     } catch {
       throw new Error("AgentEra connection ownership store is corrupt.");
     }
+    if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) {
+      throw new Error("AgentEra connection ownership store is corrupt.");
+    }
+    const candidate = envelope as Partial<
+      ConnectionOwnerEnvelope | ConnectionOwnerEnvelopeV1
+    >;
     if (
-      !envelope ||
-      typeof envelope !== "object" ||
-      Array.isArray(envelope) ||
-      (envelope as Partial<ConnectionOwnerEnvelope>).schema !==
-        CONNECTION_OWNER_SCHEMA ||
-      (envelope as Partial<ConnectionOwnerEnvelope>).version !==
-        CONNECTION_OWNER_VERSION ||
-      typeof (envelope as Partial<ConnectionOwnerEnvelope>)
-        .encryptedBindings !== "string"
+      !exactKeys(envelope, ["schema", "version", "encryptedBindings"]) ||
+      candidate.schema !== CONNECTION_OWNER_SCHEMA ||
+      (candidate.version !== CONNECTION_OWNER_VERSION_V1 &&
+        candidate.version !== CONNECTION_OWNER_VERSION) ||
+      typeof candidate.encryptedBindings !== "string"
     ) {
       throw new Error("AgentEra connection ownership store is corrupt.");
     }
@@ -195,29 +250,40 @@ export class AgenteraConnectionOwnerStore {
     let parsed: unknown;
     try {
       const decrypted = this.secureStorage.decryptString(
-        Buffer.from(
-          (envelope as ConnectionOwnerEnvelope).encryptedBindings,
-          "base64",
-        ),
+        Buffer.from(candidate.encryptedBindings, "base64"),
       );
       parsed = JSON.parse(decrypted);
     } catch {
       throw new Error("AgentEra connection ownership store is corrupt.");
     }
+    const isV1 = candidate.version === CONNECTION_OWNER_VERSION_V1;
     if (
       !Array.isArray(parsed) ||
-      parsed.some((binding) => !validBinding(binding))
+      parsed.some((binding) =>
+        isV1 ? !validBindingV1(binding) : !validBinding(binding),
+      )
     ) {
       throw new Error("AgentEra connection ownership store is corrupt.");
     }
-    const bindings = parsed as ConnectionOwnerBinding[];
+    const bindings: ConnectionOwnerBinding[] = isV1
+      ? (parsed as ConnectionOwnerBindingV1[]).map((binding) => ({
+          connectionContextId: binding.connectionContextId,
+          tenantId: binding.tenantId,
+          ownerScope: "USER",
+          ownerId: binding.ownerId,
+          deviceInstallationId: binding.installationId,
+          boundAt: binding.boundAt,
+        }))
+      : (parsed as ConnectionOwnerBinding[]);
     if (
       new Set(bindings.map((binding) => binding.connectionContextId)).size !==
       bindings.length
     ) {
       throw new Error("AgentEra connection ownership store is corrupt.");
     }
-    return bindings.map((binding) => ({ ...binding }));
+    const result = bindings.map((binding) => ({ ...binding }));
+    if (isV1) this.persistBindings(result);
+    return result;
   }
 
   private persistBindings(bindings: ConnectionOwnerBinding[]): void {

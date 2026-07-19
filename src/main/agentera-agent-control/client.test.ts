@@ -15,6 +15,7 @@ import {
   AgenteraAgentControlClientError,
   type AgentDefinition,
   type AgentInstallation,
+  type AgentPolicySnapshot,
 } from "./client";
 
 const DEFINITION_ID = "11111111-1111-4111-8111-111111111111";
@@ -56,6 +57,37 @@ function installation(): AgentInstallation {
     created_at: NOW.toISOString(),
     updated_at: NOW.toISOString(),
     activated_at: NOW.toISOString(),
+  };
+}
+
+function policySnapshot(): AgentPolicySnapshot {
+  return {
+    id: POLICY_ID,
+    installation_id: INSTALLATION_ID,
+    agent_version_id: VERSION_ID,
+    issuer: "http://127.0.0.1:8086",
+    policy_version: 1,
+    document: {
+      schema_version: 1,
+      agent_definition_id: DEFINITION_ID,
+      agent_version_id: VERSION_ID,
+      version_digest: VERSION_DIGEST,
+      model_constraints: {
+        allowed_providers: ["openai"],
+        allowed_models: ["gpt-5.6"],
+      },
+      runtime_compatibility: {
+        minimum_version: "v0.18.2-agentera.1",
+        maximum_version_exclusive: "v0.19.0",
+      },
+      tools: { allowed: ["files.read"], denied: [] },
+      deny_rules: [],
+      publication_allowed: false,
+    },
+    content_digest: "cd".repeat(32),
+    signing_key_id: "policy-test-key",
+    signature: "A".repeat(86),
+    created_at: NOW.toISOString(),
   };
 }
 
@@ -129,6 +161,34 @@ describe("AgenteraAgentControlClient", () => {
       client.archiveInstallation(INSTALLATION_ID, "bad\nkey"),
     ).rejects.toMatchObject({ code: "invalid_request" });
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("fetches a policy snapshot through the strict AgentEra contract", async () => {
+    const fetcher = vi.fn(
+      async (_url: URL | RequestInfo, _init?: RequestInit) =>
+        jsonResponse(policySnapshot()),
+    );
+    const client = new AgenteraAgentControlClient({
+      origin: "http://127.0.0.1:8086",
+      getAccessToken: () => "agentera-product-access",
+      getInstallationIdentity: () => deviceIdentity(),
+      fetch: fetcher as typeof fetch,
+      now: () => NOW,
+    });
+
+    await expect(client.getPolicySnapshot(POLICY_ID)).resolves.toEqual(
+      policySnapshot(),
+    );
+    expect(String(fetcher.mock.calls[0][0])).toBe(
+      `http://127.0.0.1:8086/api/v1/policy-snapshots/${POLICY_ID}`,
+    );
+
+    fetcher.mockResolvedValueOnce(
+      jsonResponse({ ...policySnapshot(), physical_profile_path: "/private" }),
+    );
+    await expect(client.getPolicySnapshot(POLICY_ID)).rejects.toMatchObject({
+      code: "invalid_response",
+    });
   });
 
   it("applies one timeout and enforces declared and streamed response bounds", async () => {

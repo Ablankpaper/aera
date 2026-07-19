@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import type { AgentVersion } from "./client";
+import type { AgentPolicySnapshot, AgentVersion } from "./client";
 import type { AgenteraControlPlaneDatabase } from "./db";
 import { parseAgentControlJsonObject } from "./manifest";
 import {
@@ -54,6 +54,10 @@ export interface AgentVersionCacheTrust {
     version: AgentVersion,
     context: { issuer: string; runtimeVersion: string },
   ): { contentDigest: string };
+  verifyPolicy(
+    policy: AgentPolicySnapshot,
+    context: { runtimeVersion: string },
+  ): { contentDigest: string };
 }
 
 interface CachedVersionRow {
@@ -62,8 +66,14 @@ interface CachedVersionRow {
   version_number: unknown;
   content_digest: unknown;
   version_json: unknown;
+  policy_snapshot_json: unknown;
   cache_relative_path: unknown;
   verified_at: unknown;
+}
+
+interface CachedPolicyCollection {
+  schema_version: 1;
+  snapshots: AgentPolicySnapshot[];
 }
 
 const UUID_PATTERN =
@@ -74,6 +84,7 @@ const SIGNATURE_PATTERN = /^[A-Za-z0-9_-]{86}$/;
 const MAX_VERSION_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_MANIFEST_FILE_BYTES = 256 * 1024;
 const MAX_BUNDLE_FILE_BYTES = 3 * 1024 * 1024;
+const MAX_POLICY_CACHE_BYTES = 4 * 1024 * 1024;
 
 function validUuid(value: unknown): value is string {
   return typeof value === "string" && UUID_PATTERN.test(value);
@@ -226,6 +237,72 @@ function nowTimestamp(now: () => Date): string {
     throw new AgentVersionCacheError("cache_corrupt");
   }
   return value.toISOString();
+}
+
+function parsePolicyCollection(value: unknown): CachedPolicyCollection {
+  if (value === null) return { schema_version: 1, snapshots: [] };
+  if (
+    typeof value !== "string" ||
+    Buffer.byteLength(value, "utf8") > MAX_POLICY_CACHE_BYTES
+  ) {
+    throw new AgentVersionCacheError("cache_corrupt");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new AgentVersionCacheError("cache_corrupt");
+  }
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed) ||
+    !exactKeys(parsed as Record<string, unknown>, [
+      "schema_version",
+      "snapshots",
+    ]) ||
+    (parsed as { schema_version?: unknown }).schema_version !== 1 ||
+    !Array.isArray((parsed as { snapshots?: unknown }).snapshots) ||
+    (parsed as { snapshots: unknown[] }).snapshots.length > 256
+  ) {
+    throw new AgentVersionCacheError("cache_corrupt");
+  }
+  const snapshots = (parsed as { snapshots: unknown[] }).snapshots;
+  if (
+    snapshots.some(
+      (snapshot) =>
+        !snapshot ||
+        typeof snapshot !== "object" ||
+        Array.isArray(snapshot) ||
+        !validUuid((snapshot as { id?: unknown }).id),
+    ) ||
+    new Set(snapshots.map((snapshot) => (snapshot as { id: string }).id))
+      .size !== snapshots.length
+  ) {
+    throw new AgentVersionCacheError("cache_corrupt");
+  }
+  return {
+    schema_version: 1,
+    snapshots: JSON.parse(JSON.stringify(snapshots)) as AgentPolicySnapshot[],
+  };
+}
+
+function stableJson(value: unknown): string {
+  const normalize = (candidate: unknown): unknown => {
+    if (Array.isArray(candidate)) return candidate.map(normalize);
+    if (candidate && typeof candidate === "object") {
+      return Object.fromEntries(
+        Object.keys(candidate)
+          .sort()
+          .map((key) => [
+            key,
+            normalize((candidate as Record<string, unknown>)[key]),
+          ]),
+      );
+    }
+    return candidate;
+  };
+  return JSON.stringify(normalize(value));
 }
 
 export class AgentVersionCache {
@@ -397,6 +474,127 @@ export class AgentVersionCache {
       throw new AgentVersionCacheError("cache_corrupt");
     }
     return version;
+  }
+
+  cacheVerifiedPolicySnapshot(
+    versionIdInput: string,
+    policyInput: AgentPolicySnapshot,
+  ): AgentPolicySnapshot {
+    const versionId = validUuid(versionIdInput)
+      ? versionIdInput.toLowerCase()
+      : "";
+    if (versionId.length === 0) {
+      throw new AgentVersionCacheError("cache_not_found");
+    }
+    const version = this.getVerifiedVersion(versionId);
+    const policy = this.verifyPolicyForVersion(policyInput, version, false);
+
+    this.database.sqlite.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.database.sqlite
+        .prepare(
+          "SELECT policy_snapshot_json FROM cached_agent_versions WHERE version_id = ?",
+        )
+        .get(versionId) as { policy_snapshot_json?: unknown } | undefined;
+      if (!row) throw new AgentVersionCacheError("cache_not_found");
+      const collection = parsePolicyCollection(
+        row.policy_snapshot_json === undefined
+          ? null
+          : row.policy_snapshot_json,
+      );
+      const existing = collection.snapshots.find(
+        (candidate) => candidate.id === policy.id,
+      );
+      if (existing) {
+        if (stableJson(existing) !== stableJson(policy)) {
+          throw new AgentVersionCacheError("cache_conflict");
+        }
+      } else {
+        collection.snapshots.push(policy);
+        collection.snapshots.sort((left, right) =>
+          Buffer.compare(Buffer.from(left.id), Buffer.from(right.id)),
+        );
+        this.database.sqlite
+          .prepare(
+            `UPDATE cached_agent_versions
+             SET policy_snapshot_json = ?
+             WHERE version_id = ?`,
+          )
+          .run(JSON.stringify(collection), versionId);
+      }
+      this.database.sqlite.exec("COMMIT");
+    } catch (error) {
+      try {
+        this.database.sqlite.exec("ROLLBACK");
+      } catch {
+        // Preserve the policy-cache failure.
+      }
+      throw error;
+    }
+    return this.getVerifiedPolicySnapshot(versionId, policy.id);
+  }
+
+  getVerifiedPolicySnapshot(
+    versionIdInput: string,
+    policyIdInput: string,
+  ): AgentPolicySnapshot {
+    if (!validUuid(versionIdInput) || !validUuid(policyIdInput)) {
+      throw new AgentVersionCacheError("cache_not_found");
+    }
+    const versionId = versionIdInput.toLowerCase();
+    const policyId = policyIdInput.toLowerCase();
+    const version = this.getVerifiedVersion(versionId);
+    const row = this.database.sqlite
+      .prepare(
+        "SELECT policy_snapshot_json FROM cached_agent_versions WHERE version_id = ?",
+      )
+      .get(versionId) as { policy_snapshot_json?: unknown } | undefined;
+    if (!row) throw new AgentVersionCacheError("cache_not_found");
+    const collection = parsePolicyCollection(
+      row.policy_snapshot_json === undefined ? null : row.policy_snapshot_json,
+    );
+    const policy = collection.snapshots.find(
+      (candidate) => candidate.id === policyId,
+    );
+    if (!policy) throw new AgentVersionCacheError("cache_not_found");
+    return this.verifyPolicyForVersion(policy, version, true);
+  }
+
+  private verifyPolicyForVersion(
+    policyInput: AgentPolicySnapshot,
+    version: AgentVersion,
+    stored: boolean,
+  ): AgentPolicySnapshot {
+    try {
+      const policy = JSON.parse(
+        JSON.stringify(policyInput),
+      ) as AgentPolicySnapshot;
+      if (
+        !validUuid(policy.id) ||
+        !validUuid(policy.installation_id) ||
+        !validUuid(policy.agent_version_id) ||
+        policy.id !== policy.id.toLowerCase() ||
+        policy.agent_version_id !== version.id ||
+        policy.issuer !== this.origin ||
+        !DIGEST_PATTERN.test(policy.content_digest) ||
+        !policy.document ||
+        policy.document.agent_definition_id !== version.definition_id ||
+        policy.document.agent_version_id !== version.id ||
+        policy.document.version_digest !== version.content_digest
+      ) {
+        throw new AgentVersionCacheError("cache_corrupt");
+      }
+      const verified = this.trust.verifyPolicy(policy, {
+        runtimeVersion: this.runtimeVersion,
+      });
+      if (verified.contentDigest !== policy.content_digest) {
+        throw new AgentVersionCacheError("cache_corrupt");
+      }
+      return policy;
+    } catch (error) {
+      if (!stored) throw error;
+      throw new AgentVersionCacheError("cache_corrupt");
+    }
   }
 
   private verifyDirectory(

@@ -20,7 +20,7 @@ import type {
   AgentEditableManifest,
 } from "../../shared/agentera-agent-control";
 import type { components } from "../../shared/agentera-cloud-api.generated";
-import type { AgentVersion } from "./client";
+import type { AgentPolicySnapshot, AgentVersion } from "./client";
 import {
   openAgenteraControlPlaneDatabase,
   type AgenteraControlPlaneDatabase,
@@ -35,6 +35,10 @@ const DEFINITION_ID = "11111111-1111-4111-8111-111111111111";
 const VERSION_ID = "22222222-2222-4222-8222-222222222222";
 const OTHER_VERSION_ID = "33333333-3333-4333-8333-333333333333";
 const STAGING_ID = "44444444-4444-4444-8444-444444444444";
+const INSTALLATION_ID = "55555555-5555-4555-8555-555555555555";
+const OTHER_INSTALLATION_ID = "66666666-6666-4666-8666-666666666666";
+const POLICY_ID = "77777777-7777-4777-8777-777777777777";
+const OTHER_POLICY_ID = "88888888-8888-4888-8888-888888888888";
 const NOW = new Date("2026-07-19T18:30:00.000Z");
 const KEY_ID = "agent-cache-test-v1";
 const SPKI_PREFIX_LENGTH = 12;
@@ -138,6 +142,35 @@ function signedFixture(): {
   };
 }
 
+function policySnapshot(
+  version: AgentVersion,
+  id = POLICY_ID,
+  installationId = INSTALLATION_ID,
+): AgentPolicySnapshot {
+  return {
+    id,
+    installation_id: installationId,
+    agent_version_id: version.id,
+    issuer: ORIGIN,
+    policy_version: 1,
+    document: {
+      schema_version: 1,
+      agent_definition_id: version.definition_id,
+      agent_version_id: version.id,
+      version_digest: version.content_digest,
+      model_constraints: version.manifest.model_constraints,
+      runtime_compatibility: version.manifest.runtime_compatibility,
+      tools: version.manifest.tools,
+      deny_rules: [],
+      publication_allowed: false,
+    },
+    content_digest: "cd".repeat(32),
+    signing_key_id: "policy-cache-test-key",
+    signature: "A".repeat(86),
+    created_at: NOW.toISOString(),
+  };
+}
+
 describe("verified immutable Agent version cache", () => {
   let root = "";
   let database: AgenteraControlPlaneDatabase;
@@ -235,6 +268,60 @@ describe("verified immutable Agent version cache", () => {
     );
     expect(existsSync(join(database.paths.versionsPath, VERSION_ID))).toBe(
       false,
+    );
+  });
+
+  it("retains multiple installation-scoped policies and re-verifies each cached read", () => {
+    const store = cache();
+    store.cacheVerifiedVersion(version);
+    const verifyPolicy = vi
+      .spyOn(trust, "verifyPolicy")
+      .mockImplementation((policy) => ({
+        contentDigest: policy.content_digest,
+      }));
+    const first = policySnapshot(version);
+    const second = policySnapshot(
+      version,
+      OTHER_POLICY_ID,
+      OTHER_INSTALLATION_ID,
+    );
+
+    expect(store.cacheVerifiedPolicySnapshot(version.id, first)).toEqual(first);
+    expect(store.cacheVerifiedPolicySnapshot(version.id, second)).toEqual(
+      second,
+    );
+    const callsAfterWrites = verifyPolicy.mock.calls.length;
+    expect(store.getVerifiedPolicySnapshot(version.id, first.id)).toEqual(
+      first,
+    );
+    expect(store.getVerifiedPolicySnapshot(version.id, second.id)).toEqual(
+      second,
+    );
+    expect(verifyPolicy.mock.calls.length).toBeGreaterThan(callsAfterWrites);
+    const row = database.sqlite
+      .prepare(
+        "SELECT policy_snapshot_json FROM cached_agent_versions WHERE version_id = ?",
+      )
+      .get(version.id) as { policy_snapshot_json: string };
+    const stored = JSON.parse(row.policy_snapshot_json) as {
+      snapshots: AgentPolicySnapshot[];
+    };
+    expect(stored.snapshots.map(({ id }) => id)).toEqual([
+      POLICY_ID,
+      OTHER_POLICY_ID,
+    ]);
+
+    database.sqlite
+      .prepare(
+        "UPDATE cached_agent_versions SET policy_snapshot_json = '{}' WHERE version_id = ?",
+      )
+      .run(version.id);
+    expect(() =>
+      store.getVerifiedPolicySnapshot(version.id, first.id),
+    ).toThrowError(
+      expect.objectContaining<Partial<AgentVersionCacheError>>({
+        code: "cache_corrupt",
+      }),
     );
   });
 

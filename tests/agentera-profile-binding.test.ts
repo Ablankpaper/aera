@@ -7,11 +7,13 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AgenteraProfileBindingStore,
@@ -36,13 +38,15 @@ class FakeSecureStorage implements SecureStorageAdapter {
 const owner: AgenteraRuntimeOwner = {
   tenantId: "11111111-1111-4111-8111-111111111111",
   ownerId: "22222222-2222-4222-8222-222222222222",
-  installationId: "33333333-3333-4333-8333-333333333333",
+  deviceInstallationId: "33333333-3333-4333-8333-333333333333",
 };
 const otherOwner: AgenteraRuntimeOwner = {
   tenantId: "44444444-4444-4444-8444-444444444444",
   ownerId: "55555555-5555-4555-8555-555555555555",
-  installationId: owner.installationId,
+  deviceInstallationId: owner.deviceInstallationId,
 };
+const AGENT_INSTALLATION_ID = "77777777-7777-4777-8777-777777777777";
+const OTHER_AGENT_INSTALLATION_ID = "88888888-8888-4888-8888-888888888888";
 
 function hashTree(root: string): Record<string, string> {
   const result: Record<string, string> = {};
@@ -101,14 +105,16 @@ describe("AgentEra non-destructive Runtime Profile ownership", () => {
       tenantId: owner.tenantId,
       ownerScope: "USER",
       ownerId: owner.ownerId,
-      installationId: owner.installationId,
+      deviceInstallationId: owner.deviceInstallationId,
+      agentInstallationId: null,
       runtimeProfileId: "66666666-6666-4666-8666-666666666666",
       boundAt: "2026-07-18T02:00:00.000Z",
     });
     expect(Object.keys(binding).sort()).toEqual(
       [
         "boundAt",
-        "installationId",
+        "deviceInstallationId",
+        "agentInstallationId",
         "ownerId",
         "ownerScope",
         "runtimeProfileId",
@@ -186,5 +192,152 @@ describe("AgentEra non-destructive Runtime Profile ownership", () => {
     expect(raw).not.toContain(owner.tenantId);
     expect(raw).not.toContain(profilePath);
     expect(hashTree(profilePath)).toEqual(before);
+  });
+
+  it("losslessly migrates a real encrypted V1 envelope to V2 without touching the Profile", () => {
+    const before = hashTree(profilePath);
+    const secureStorage = new FakeSecureStorage();
+    const legacyPlaintext = JSON.stringify([
+      {
+        profilePath: realpathSync.native(profilePath),
+        binding: {
+          tenantId: owner.tenantId,
+          ownerScope: "USER",
+          ownerId: owner.ownerId,
+          installationId: owner.deviceInstallationId,
+          runtimeProfileId: "66666666-6666-4666-8666-666666666666",
+          boundAt: "2026-07-18T02:00:00.000Z",
+        },
+      },
+    ]);
+    mkdirSync(dirname(store.filePath), { recursive: true });
+    writeFileSync(
+      store.filePath,
+      `${JSON.stringify({
+        schema: "agentera-runtime-profile-bindings",
+        version: 1,
+        encryptedBindings: secureStorage
+          .encryptString(legacyPlaintext)
+          .toString("base64"),
+      })}\n`,
+    );
+
+    const migrated = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage,
+    }).verifyProfileBinding(profilePath, owner);
+
+    expect(migrated).toEqual<RuntimeOwnerBinding>({
+      tenantId: owner.tenantId,
+      ownerScope: "USER",
+      ownerId: owner.ownerId,
+      deviceInstallationId: owner.deviceInstallationId,
+      agentInstallationId: null,
+      runtimeProfileId: "66666666-6666-4666-8666-666666666666",
+      boundAt: "2026-07-18T02:00:00.000Z",
+    });
+    const migratedEnvelope = JSON.parse(
+      readFileSync(store.filePath, "utf8"),
+    ) as { version: number; encryptedBindings: string };
+    expect(migratedEnvelope.version).toBe(2);
+    expect(readFileSync(store.filePath, "utf8")).not.toContain(profilePath);
+    const migratedPlaintext = JSON.parse(
+      secureStorage.decryptString(
+        Buffer.from(migratedEnvelope.encryptedBindings, "base64"),
+      ),
+    ) as Array<{ binding: Record<string, unknown> }>;
+    expect(migratedPlaintext[0].binding).not.toHaveProperty("installationId");
+    expect(migratedPlaintext[0].binding).toMatchObject({
+      deviceInstallationId: owner.deviceInstallationId,
+      agentInstallationId: null,
+    });
+    expect(hashTree(profilePath)).toEqual(before);
+  });
+
+  it("does not rewrite an encrypted V1 envelope unless decryption and validation finish", () => {
+    const beforeProfile = hashTree(profilePath);
+    const secureStorage = new FakeSecureStorage();
+    const invalidPlaintext = JSON.stringify([
+      {
+        profilePath: realpathSync.native(profilePath),
+        binding: {
+          tenantId: owner.tenantId,
+          ownerScope: "USER",
+          ownerId: owner.ownerId,
+          installationId: "not-a-device-uuid",
+          runtimeProfileId: "66666666-6666-4666-8666-666666666666",
+          boundAt: "2026-07-18T02:00:00.000Z",
+        },
+      },
+    ]);
+    mkdirSync(dirname(store.filePath), { recursive: true });
+    const envelope = `${JSON.stringify({
+      schema: "agentera-runtime-profile-bindings",
+      version: 1,
+      encryptedBindings: secureStorage
+        .encryptString(invalidPlaintext)
+        .toString("base64"),
+    })}\n`;
+    writeFileSync(store.filePath, envelope);
+
+    const reloaded = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage,
+    });
+    expect(() => reloaded.inspectProfile(profilePath, owner)).toThrow(
+      /binding store is corrupt/i,
+    );
+    expect(readFileSync(store.filePath, "utf8")).toBe(envelope);
+    expect(hashTree(profilePath)).toEqual(beforeProfile);
+  });
+
+  it("attaches at most one Agent Installation to a same-owner Profile", () => {
+    store.bindExistingProfile(profilePath, owner);
+    const attached = store.attachAgentInstallation(
+      profilePath,
+      owner,
+      AGENT_INSTALLATION_ID,
+    );
+    expect(attached.agentInstallationId).toBe(AGENT_INSTALLATION_ID);
+    expect(
+      store.attachAgentInstallation(profilePath, owner, AGENT_INSTALLATION_ID),
+    ).toEqual(attached);
+    expect(() =>
+      store.attachAgentInstallation(
+        profilePath,
+        owner,
+        OTHER_AGENT_INSTALLATION_ID,
+      ),
+    ).toThrow(/already attached/i);
+    expect(() =>
+      store.attachAgentInstallation(
+        profilePath,
+        otherOwner,
+        AGENT_INSTALLATION_ID,
+      ),
+    ).toThrow(/another AgentEra owner/i);
+
+    const missingPath = join(root, "missing-base-binding");
+    mkdirSync(missingPath);
+    expect(() =>
+      store.attachAgentInstallation(missingPath, owner, AGENT_INSTALLATION_ID),
+    ).toThrow(/binding is required/i);
+
+    const secondProfilePath = join(root, "second-bound-profile");
+    mkdirSync(secondProfilePath);
+    const secondStore = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage: new FakeSecureStorage(),
+      now: () => new Date("2026-07-18T02:00:00.000Z"),
+      randomUUID: () => "99999999-9999-4999-8999-999999999999",
+    });
+    secondStore.bindExistingProfile(secondProfilePath, owner);
+    expect(() =>
+      secondStore.attachAgentInstallation(
+        secondProfilePath,
+        owner,
+        AGENT_INSTALLATION_ID,
+      ),
+    ).toThrow(/another Runtime Profile/i);
   });
 });
