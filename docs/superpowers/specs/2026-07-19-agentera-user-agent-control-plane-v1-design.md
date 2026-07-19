@@ -2,7 +2,7 @@
 
 ## Status
 
-This specification records the approved first vertical slice of the AgentEra Agent control plane. The written specification is awaiting final user review before implementation planning begins.
+Approved by the user on 2026-07-19. This specification is the implementation source of truth for the first vertical slice of the AgentEra Agent control plane.
 
 ## Goal
 
