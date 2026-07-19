@@ -824,7 +824,7 @@ export async function runHermesUpdate(
 
 function packagedRuntimeSeedDirectory(): string {
   return resolvePackagedRuntimeSeedDirectory({
-    isPackaged: app.isPackaged,
+    isPackaged: app?.isPackaged ?? false,
     resourcesPath: process.resourcesPath,
     workingDirectory: process.cwd(),
     developmentOverride: process.env.AGENTERA_RUNTIME_SEED_DIR,

@@ -20,7 +20,7 @@ The source-controlled staging directory may retain its regular-file `.gitkeep` s
 
 After product authentication, the main process verifies the packaged seed, installs it into a versioned application-data directory, and atomically selects it without network access.
 
-When the local Runtime is missing, [[src/renderer/src/App.tsx#App]] routes straight to [[src/renderer/src/screens/Install/Install.tsx#Install]]. Preparation starts on mount and successful activation continues automatically into Profile ownership and setup; no welcome, source selection, path selection, prepare, cancel, or continue action is shown.
+When the local Runtime is missing, [[src/renderer/src/App.tsx#App]] routes straight to [[src/renderer/src/screens/Install/Install.tsx#Install]]. Preparation starts once per attempt, does not restart on locale or callback rerenders, and successful activation continues automatically into Profile ownership and setup; no welcome, source selection, path selection, prepare, cancel, or continue action is shown.
 
 A missing or invalid seed enters a repair state. Only then may the desktop show bounded repair guidance. It never falls back to cloning upstream `main`, executing a remote install script, choosing an external Runtime, or downloading an unsigned Runtime.
 

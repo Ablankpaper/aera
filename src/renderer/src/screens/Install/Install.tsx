@@ -30,6 +30,10 @@ function Install({ onComplete }: InstallProps): React.JSX.Element {
   >(null);
   const [copied, setCopied] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+  const onCompleteRef = useRef(onComplete);
+  const translationRef = useRef(t);
+  onCompleteRef.current = onComplete;
+  translationRef.current = t;
 
   // The packaged Runtime is part of the product. Once authentication has
   // succeeded there is no source/path decision for the user: verify, prepare,
@@ -45,29 +49,38 @@ function Install({ onComplete }: InstallProps): React.JSX.Element {
       .then((result) => {
         if (!isMounted) return;
         if (result.success) {
-          onComplete();
+          onCompleteRef.current();
         } else {
           setRepairAction(result.action ?? "retry");
           setFailed(
             result.action === "reinstall-desktop"
-              ? t("install.packagedRuntimeInvalid")
+              ? translationRef.current("install.packagedRuntimeInvalid")
               : result.action === "free-disk-space"
-                ? t("install.insufficientDiskSpace")
-                : result.error || t("install.preparationFailedHint"),
+                ? translationRef.current("install.insufficientDiskSpace")
+                : result.error ||
+                  translationRef.current("install.preparationFailedHint"),
           );
         }
       })
       .catch((err) => {
         if (!isMounted) return;
         setRepairAction("retry");
-        setFailed(err.message || t("install.preparationFailedHint"));
+        const message =
+          typeof err === "object" &&
+          err !== null &&
+          "message" in err &&
+          typeof err.message === "string" &&
+          err.message.trim()
+            ? err.message
+            : translationRef.current("install.preparationFailedHint");
+        setFailed(message);
       });
 
     return () => {
       isMounted = false;
       cleanup();
     };
-  }, [attempt, onComplete, t]);
+  }, [attempt]);
 
   useEffect(() => {
     if (logRef.current) {
