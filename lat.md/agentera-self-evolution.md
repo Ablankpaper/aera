@@ -46,6 +46,8 @@ Cloud state contains identity, ownership, immutable Agent versions, installation
 
 Raw conversations, local files, credentials, `MEMORY.md`, `USER.md`, and unpromoted learned skills remain local by default. This replaces the private-data behavior described by the imported [[agent-sync|legacy cloud agent sync]].
 
+The USER-owned stable-version implementation is defined by [[agentera-agent-control-plane|AgentEra Agent control plane V1]], which keeps personal drafts local and separates the new product protocol from the legacy reconciler.
+
 ## Legacy sync containment
 
 The imported profile reconciler excludes `MEMORY.md` from upload, download, conflict hashes, and cloud-only profile creation, and no longer exposes a whole-file Memory replacement helper.
