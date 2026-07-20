@@ -278,6 +278,28 @@ import {
   parseSelectInstallationVersionInput,
   parseUpdateDraftInput,
 } from "../agentera-agent-control/ipc-contract";
+import type { AgenteraWorkspaceManager } from "../agentera-workspace/manager";
+import type { WorkspaceInvitationInbox } from "../agentera-workspace/deep-link";
+import {
+  createWorkspaceIdempotencyKey,
+  executeWorkspaceIpc,
+  parseAcceptWorkspaceInvitationInput,
+  parseChangeWorkspaceMemberRoleInput,
+  parseCreateWorkspaceInput,
+  parseDismissWorkspaceInvitationInput,
+  parseRemoveWorkspaceMemberInput,
+  parseRenameWorkspaceInput,
+  parseRevokeWorkspaceInvitationInput,
+  parseSelectWorkspaceInput,
+  parseWorkspaceIDInput,
+  parseWorkspaceRevisionInput,
+  serializeWorkspaceInvitation,
+  serializeWorkspaceInvitationAcceptance,
+  serializeWorkspaceInvitationCreation,
+  serializeWorkspaceMember,
+  serializeWorkspacePublicState,
+  serializeWorkspaceSummary,
+} from "../agentera-workspace/ipc-contract";
 import {
   probeAgenteraInstallFiles,
   runAgenteraStartupPreflight,
@@ -450,6 +472,8 @@ export interface IpcContext {
   agenteraProfileBindings: AgenteraProfileBindingStore;
   agenteraConnectionOwners: AgenteraConnectionOwnerStore;
   agenteraAgentControl?: AgenteraAgentControlManager | null;
+  agenteraWorkspace?: AgenteraWorkspaceManager | null;
+  workspaceInvitationInbox: WorkspaceInvitationInbox;
   runtimeDistribution: RuntimeDistributionManager | null;
 }
 
@@ -724,6 +748,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     agenteraProfileBindings,
     agenteraConnectionOwners,
     agenteraAgentControl,
+    agenteraWorkspace,
+    workspaceInvitationInbox,
     runtimeDistribution,
   } = context;
   const requireAgentControl = (): AgenteraAgentControlManager => {
@@ -741,6 +767,35 @@ export function registerIpcHandlers(context: IpcContext): void {
       return;
     }
     window.webContents.send(agentControlStateChannel, state);
+  });
+  const requireWorkspace = (): AgenteraWorkspaceManager => {
+    if (!agenteraWorkspace) {
+      throw Object.assign(new Error("Workspace control is unavailable."), {
+        code: "service_unavailable",
+      });
+    }
+    return agenteraWorkspace;
+  };
+  const workspaceStateChannel = "agentera-workspace-state-changed";
+  const workspaceInvitationChannel = "agentera-workspace-invitation-received";
+  agenteraWorkspace?.subscribe((state) => {
+    const window = getMainWindow();
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) {
+      return;
+    }
+    window.webContents.send(
+      workspaceStateChannel,
+      serializeWorkspacePublicState(state),
+    );
+  });
+  workspaceInvitationInbox.subscribe((invitation) => {
+    const window = getMainWindow();
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) {
+      return;
+    }
+    window.webContents.send(workspaceInvitationChannel, {
+      token: invitation.token,
+    });
   });
   const directProfileTargetIndex: Readonly<Record<string, number>> = {
     "set-profile-avatar": 0,
@@ -789,6 +844,146 @@ export function registerIpcHandlers(context: IpcContext): void {
       }),
     );
   };
+  const registerWorkspaceHandler = (
+    channel: string,
+    listener: (...args: unknown[]) => unknown,
+  ): void => {
+    const level = AGENTERA_IPC_CHANNEL_POLICY[channel];
+    if (!level) throw new Error(`Missing AgentEra IPC policy for ${channel}.`);
+    electronIpcMain.handle(channel, (event, ...args: unknown[]) =>
+      executeWorkspaceIpc(() => {
+        productAccessGuard.assert(level);
+        return listener(event, ...args);
+      }),
+    );
+  };
+
+  registerWorkspaceHandler("agentera-workspace-get-state", () =>
+    requireWorkspace().getState().then(serializeWorkspacePublicState),
+  );
+  registerWorkspaceHandler("agentera-workspace-refresh", () =>
+    requireWorkspace().refresh().then(serializeWorkspacePublicState),
+  );
+  registerWorkspaceHandler(
+    "agentera-workspace-select",
+    (_event, input: unknown) =>
+      requireWorkspace()
+        .select(parseSelectWorkspaceInput(input))
+        .then(serializeWorkspacePublicState),
+  );
+  registerWorkspaceHandler(
+    "agentera-workspace-create",
+    (_event, input: unknown) => {
+      const parsed = parseCreateWorkspaceInput(input);
+      return requireWorkspace()
+        .create({
+          ...parsed,
+          idempotencyKey: createWorkspaceIdempotencyKey(),
+        })
+        .then(serializeWorkspaceSummary);
+    },
+  );
+  registerWorkspaceHandler(
+    "agentera-workspace-rename",
+    (_event, input: unknown) =>
+      requireWorkspace()
+        .rename(parseRenameWorkspaceInput(input))
+        .then(serializeWorkspaceSummary),
+  );
+  registerWorkspaceHandler(
+    "agentera-workspace-archive",
+    (_event, input: unknown) =>
+      requireWorkspace()
+        .archive(parseWorkspaceRevisionInput(input))
+        .then(serializeWorkspaceSummary),
+  );
+  registerWorkspaceHandler(
+    "agentera-workspace-restore",
+    (_event, input: unknown) =>
+      requireWorkspace()
+        .restore(parseWorkspaceRevisionInput(input))
+        .then(serializeWorkspaceSummary),
+  );
+  registerWorkspaceHandler(
+    "agentera-workspace-list-members",
+    (_event, input: unknown) =>
+      requireWorkspace()
+        .listMembers(parseWorkspaceIDInput(input))
+        .then((members) => members.map(serializeWorkspaceMember)),
+  );
+  registerWorkspaceHandler(
+    "agentera-workspace-change-member-role",
+    (_event, input: unknown) =>
+      requireWorkspace()
+        .changeMemberRole(parseChangeWorkspaceMemberRoleInput(input))
+        .then(serializeWorkspaceMember),
+  );
+  registerWorkspaceHandler(
+    "agentera-workspace-remove-member",
+    async (_event, input: unknown) => {
+      await requireWorkspace().removeMember(
+        parseRemoveWorkspaceMemberInput(input),
+      );
+      return true;
+    },
+  );
+  registerWorkspaceHandler(
+    "agentera-workspace-leave",
+    async (_event, input: unknown) => {
+      await requireWorkspace().leave(parseWorkspaceIDInput(input));
+      return true;
+    },
+  );
+  registerWorkspaceHandler(
+    "agentera-workspace-list-invitations",
+    (_event, input: unknown) =>
+      requireWorkspace()
+        .listInvitations(parseWorkspaceIDInput(input))
+        .then((invitations) => invitations.map(serializeWorkspaceInvitation)),
+  );
+  registerWorkspaceHandler(
+    "agentera-workspace-create-invitation",
+    (_event, input: unknown) => {
+      const parsed = parseWorkspaceIDInput(input);
+      return requireWorkspace()
+        .createInvitation({
+          ...parsed,
+          idempotencyKey: createWorkspaceIdempotencyKey(),
+        })
+        .then(serializeWorkspaceInvitationCreation);
+    },
+  );
+  registerWorkspaceHandler(
+    "agentera-workspace-revoke-invitation",
+    async (_event, input: unknown) => {
+      await requireWorkspace().revokeInvitation(
+        parseRevokeWorkspaceInvitationInput(input),
+      );
+      return true;
+    },
+  );
+  registerWorkspaceHandler(
+    "agentera-workspace-accept-invitation",
+    async (_event, input: unknown) => {
+      const parsed = parseAcceptWorkspaceInvitationInput(input);
+      const accepted = await requireWorkspace().acceptInvitation({
+        ...parsed,
+        idempotencyKey: createWorkspaceIdempotencyKey(),
+      });
+      workspaceInvitationInbox.clearAccepted(parsed.token);
+      return serializeWorkspaceInvitationAcceptance(accepted);
+    },
+  );
+  registerWorkspaceHandler("agentera-workspace-get-pending-invitation", () =>
+    workspaceInvitationInbox.peek(),
+  );
+  registerWorkspaceHandler(
+    "agentera-workspace-dismiss-pending-invitation",
+    (_event, input: unknown) => {
+      const parsed = parseDismissWorkspaceInvitationInput(input);
+      return workspaceInvitationInbox.dismiss(parsed.token);
+    },
+  );
 
   registerAgentControlHandler("agentera-agents-get-state", () =>
     requireAgentControl().getState(),

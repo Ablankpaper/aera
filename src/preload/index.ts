@@ -59,6 +59,16 @@ import type {
   PublishedRevision,
   UpdateAgentDraftInput,
 } from "../shared/agentera-agent-control";
+import type {
+  AgenteraWorkspaceResult,
+  WorkspaceInvitation,
+  WorkspaceInvitationAcceptance,
+  WorkspaceInvitationCreation,
+  WorkspaceMember,
+  WorkspacePendingInvitation,
+  WorkspacePublicState,
+  WorkspaceSummary,
+} from "../shared/agentera-workspace";
 
 /**
  * Mirror of the renderer-side `CredentialPoolEntry` ambient type
@@ -1733,6 +1743,107 @@ const agenteraRuntimeDistributionAPI = {
   },
 };
 
+const agenteraWorkspaceAPI = {
+  getState: (): Promise<AgenteraWorkspaceResult<WorkspacePublicState>> =>
+    ipcRenderer.invoke("agentera-workspace-get-state"),
+  refresh: (): Promise<AgenteraWorkspaceResult<WorkspacePublicState>> =>
+    ipcRenderer.invoke("agentera-workspace-refresh"),
+  select: (input: {
+    workspaceId: string | null;
+  }): Promise<AgenteraWorkspaceResult<WorkspacePublicState>> =>
+    ipcRenderer.invoke("agentera-workspace-select", input),
+  create: (input: {
+    displayName: string;
+  }): Promise<AgenteraWorkspaceResult<WorkspaceSummary>> =>
+    ipcRenderer.invoke("agentera-workspace-create", input),
+  rename: (input: {
+    workspaceId: string;
+    displayName: string;
+    expectedRevision: number;
+  }): Promise<AgenteraWorkspaceResult<WorkspaceSummary>> =>
+    ipcRenderer.invoke("agentera-workspace-rename", input),
+  archive: (input: {
+    workspaceId: string;
+    expectedRevision: number;
+  }): Promise<AgenteraWorkspaceResult<WorkspaceSummary>> =>
+    ipcRenderer.invoke("agentera-workspace-archive", input),
+  restore: (input: {
+    workspaceId: string;
+    expectedRevision: number;
+  }): Promise<AgenteraWorkspaceResult<WorkspaceSummary>> =>
+    ipcRenderer.invoke("agentera-workspace-restore", input),
+  listMembers: (input: {
+    workspaceId: string;
+  }): Promise<AgenteraWorkspaceResult<readonly WorkspaceMember[]>> =>
+    ipcRenderer.invoke("agentera-workspace-list-members", input),
+  changeMemberRole: (input: {
+    workspaceId: string;
+    userId: string;
+    role: "admin" | "member";
+    expectedRevision: number;
+  }): Promise<AgenteraWorkspaceResult<WorkspaceMember>> =>
+    ipcRenderer.invoke("agentera-workspace-change-member-role", input),
+  removeMember: (input: {
+    workspaceId: string;
+    userId: string;
+    expectedRevision: number;
+  }): Promise<AgenteraWorkspaceResult<true>> =>
+    ipcRenderer.invoke("agentera-workspace-remove-member", input),
+  leave: (input: {
+    workspaceId: string;
+  }): Promise<AgenteraWorkspaceResult<true>> =>
+    ipcRenderer.invoke("agentera-workspace-leave", input),
+  listInvitations: (input: {
+    workspaceId: string;
+  }): Promise<AgenteraWorkspaceResult<readonly WorkspaceInvitation[]>> =>
+    ipcRenderer.invoke("agentera-workspace-list-invitations", input),
+  createInvitation: (input: {
+    workspaceId: string;
+  }): Promise<AgenteraWorkspaceResult<WorkspaceInvitationCreation>> =>
+    ipcRenderer.invoke("agentera-workspace-create-invitation", input),
+  revokeInvitation: (input: {
+    workspaceId: string;
+    invitationId: string;
+  }): Promise<AgenteraWorkspaceResult<true>> =>
+    ipcRenderer.invoke("agentera-workspace-revoke-invitation", input),
+  acceptInvitation: (input: {
+    token: string;
+  }): Promise<AgenteraWorkspaceResult<WorkspaceInvitationAcceptance>> =>
+    ipcRenderer.invoke("agentera-workspace-accept-invitation", input),
+  getPendingInvitation: (): Promise<
+    AgenteraWorkspaceResult<WorkspacePendingInvitation | null>
+  > => ipcRenderer.invoke("agentera-workspace-get-pending-invitation"),
+  dismissPendingInvitation: (input: {
+    token: string;
+  }): Promise<AgenteraWorkspaceResult<boolean>> =>
+    ipcRenderer.invoke("agentera-workspace-dismiss-pending-invitation", input),
+  onStateChanged: (
+    callback: (state: WorkspacePublicState) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      state: WorkspacePublicState,
+    ): void => callback(state);
+    ipcRenderer.on("agentera-workspace-state-changed", handler);
+    return () =>
+      ipcRenderer.removeListener("agentera-workspace-state-changed", handler);
+  },
+  onInvitationReceived: (
+    callback: (invitation: WorkspacePendingInvitation) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      invitation: WorkspacePendingInvitation,
+    ): void => callback(invitation);
+    ipcRenderer.on("agentera-workspace-invitation-received", handler);
+    return () =>
+      ipcRenderer.removeListener(
+        "agentera-workspace-invitation-received",
+        handler,
+      );
+  },
+};
+
 const agenteraAgentsAPI = {
   getState: (): Promise<
     AgenteraAgentControlResult<AgenteraAgentControlPublicState>
@@ -1812,6 +1923,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld("electron", electronAPI);
     contextBridge.exposeInMainWorld("hermesAPI", hermesAPI);
     contextBridge.exposeInMainWorld("agenteraAuth", agenteraAuthAPI);
+    contextBridge.exposeInMainWorld("agenteraWorkspace", agenteraWorkspaceAPI);
     contextBridge.exposeInMainWorld("agenteraAgents", agenteraAgentsAPI);
     contextBridge.exposeInMainWorld(
       "agenteraRuntimeAccess",
@@ -1831,6 +1943,8 @@ if (process.contextIsolated) {
   window.hermesAPI = hermesAPI;
   // @ts-ignore (define in dts)
   window.agenteraAuth = agenteraAuthAPI;
+  // @ts-ignore (define in dts)
+  window.agenteraWorkspace = agenteraWorkspaceAPI;
   // @ts-ignore (define in dts)
   window.agenteraAgents = agenteraAgentsAPI;
   // @ts-ignore (define in dts)

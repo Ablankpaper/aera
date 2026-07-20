@@ -1,5 +1,9 @@
 appId: com.bignormal.agentera.studio
 productName: AgentEra Studio
+protocols:
+  - name: AgentEra Workspace Invitation
+    schemes:
+      - agentera
 directories:
   buildResources: build
 files:

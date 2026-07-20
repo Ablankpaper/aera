@@ -1,4 +1,5 @@
-import { app } from "electron";
+import { app, BrowserWindow } from "electron";
+import { resolve } from "node:path";
 import { applyGpuPreferences, installGpuCrashGuard } from "./gpu-fallback";
 import { configureDesktopIdentity } from "./app/identity";
 import { loadDotEnvForDev } from "./load-env";
@@ -6,6 +7,7 @@ import {
   bootstrapRuntimeDistribution,
   createRuntimeBootstrapOptions,
 } from "./agentera-runtime-distribution/bootstrap";
+import { WorkspaceInvitationInbox } from "./agentera-workspace/deep-link";
 
 // Dev only: make process.env reflect the project `.env` so runtime env reads
 // (e.g. the Hermes One API endpoint) pick up edits on relaunch without a
@@ -43,7 +45,46 @@ async function bootstrapAndStartMainProcess(): Promise<void> {
     console.error("[AGENTERA_RUNTIME_BOOTSTRAP] repair required");
   }
   const { startMainProcess } = await import("./app/start");
-  startMainProcess();
+  startMainProcess({ workspaceInvitationInbox });
 }
 
-void bootstrapAndStartMainProcess();
+const workspaceInvitationInbox = new WorkspaceInvitationInbox();
+
+function registerWorkspaceInvitationProtocol(): void {
+  if (app.isPackaged) {
+    app.setAsDefaultProtocolClient("agentera");
+    return;
+  }
+  const developmentEntry = process.argv[1];
+  if (typeof developmentEntry === "string" && developmentEntry.length > 0) {
+    app.setAsDefaultProtocolClient("agentera", process.execPath, [
+      resolve(developmentEntry),
+    ]);
+  }
+}
+
+function focusPrimaryWindow(): void {
+  const window = BrowserWindow.getAllWindows()[0];
+  if (!window || window.isDestroyed()) return;
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  registerWorkspaceInvitationProtocol();
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    workspaceInvitationInbox.receiveDeepLink(url);
+    focusPrimaryWindow();
+  });
+  app.on("second-instance", (_event, commandLine) => {
+    workspaceInvitationInbox.receiveArguments(commandLine);
+    focusPrimaryWindow();
+  });
+  workspaceInvitationInbox.receiveArguments(process.argv);
+  void bootstrapAndStartMainProcess();
+}

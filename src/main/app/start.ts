@@ -55,6 +55,13 @@ import {
 } from "../agentera-agent-control/db";
 import { AgenteraAgentControlClient } from "../agentera-agent-control/client";
 import { AgenteraAgentControlManager } from "../agentera-agent-control/manager";
+import {
+  openAgenteraWorkspaceDatabase,
+  type AgenteraWorkspaceDatabase,
+} from "../agentera-workspace/db";
+import { AgenteraWorkspaceClient } from "../agentera-workspace/client";
+import { AgenteraWorkspaceManager } from "../agentera-workspace/manager";
+import { WorkspaceInvitationInbox } from "../agentera-workspace/deep-link";
 import { createProfile, setActiveProfile } from "../profiles";
 
 const APP_NAME =
@@ -66,7 +73,13 @@ const OPEN_DEVTOOLS_ON_START =
 let mainWindow: BrowserWindow | null = null;
 const runtimeActivity = new RuntimeActivityCoordinator();
 
-export function startMainProcess(): void {
+export interface StartMainProcessOptions {
+  workspaceInvitationInbox?: WorkspaceInvitationInbox;
+}
+
+export function startMainProcess(options: StartMainProcessOptions = {}): void {
+  const workspaceInvitationInbox =
+    options.workspaceInvitationInbox ?? new WorkspaceInvitationInbox();
   process.on("uncaughtException", (err) => {
     console.error("[MAIN UNCAUGHT]", err);
   });
@@ -237,12 +250,34 @@ export function startMainProcess(): void {
     agenteraAgentControl = null;
     console.error("[AGENTERA_AGENT_CONTROL] unavailable");
   }
+  let agenteraWorkspaceDatabase: AgenteraWorkspaceDatabase | null = null;
+  let agenteraWorkspace: AgenteraWorkspaceManager | null = null;
+  try {
+    agenteraWorkspaceDatabase = openAgenteraWorkspaceDatabase(
+      app.getPath("userData"),
+    );
+    const workspaceClient = new AgenteraWorkspaceClient({
+      origin: getAgenteraCloudOrigin(),
+      getAccessToken: () => agenteraAuth.getAccessTokenForCloudRequest(),
+    });
+    agenteraWorkspace = new AgenteraWorkspaceManager({
+      database: agenteraWorkspaceDatabase,
+      client: workspaceClient,
+      getAuthState: () => agenteraAuth.getPublicState(),
+    });
+  } catch {
+    agenteraWorkspaceDatabase?.close();
+    agenteraWorkspaceDatabase = null;
+    agenteraWorkspace = null;
+    console.error("[AGENTERA_WORKSPACE] unavailable");
+  }
   const ownerSwitchCoordinator = createAgenteraOwnerSwitchCoordinator({
     stopRuntimeContext: stopActiveRuntimeContext,
   });
   let runtimeUpdateCheckedUserId: string | null = null;
   const unsubscribeAgenteraAuth = agenteraAuth.subscribe((state) => {
     agenteraAgentControl?.notifyAccessStateChanged();
+    void agenteraWorkspace?.notifyAccessStateChanged();
     ownerSwitchCoordinator.transitionTo(
       state.status === "authenticated" || state.status === "offline"
         ? state.userId
@@ -278,6 +313,8 @@ export function startMainProcess(): void {
     agenteraProfileBindings,
     agenteraConnectionOwners,
     agenteraAgentControl,
+    agenteraWorkspace,
+    workspaceInvitationInbox,
     runtimeDistribution,
   });
 
@@ -340,6 +377,7 @@ export function startMainProcess(): void {
   app.on("before-quit", () => {
     unsubscribeAgenteraAuth();
     agenteraAuth.dispose();
+    agenteraWorkspace?.close();
     agenteraAgentControlDatabase?.close();
     stopActiveRuntimeContext();
   });

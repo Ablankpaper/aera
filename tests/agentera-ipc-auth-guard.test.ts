@@ -32,7 +32,8 @@ function registeredChannels(): string[] {
         (node.expression.name.text === "handle" ||
           node.expression.name.text === "on")) ||
         (ts.isIdentifier(node.expression) &&
-          node.expression.text === "registerAgentControlHandler"))
+          (node.expression.text === "registerAgentControlHandler" ||
+            node.expression.text === "registerWorkspaceHandler")))
     ) {
       const first = node.arguments[0];
       if (!first || !ts.isStringLiteralLike(first)) {
@@ -121,6 +122,8 @@ describe("AgentEra central IPC product-access guard", () => {
         "agentera-auth-start-login",
         "agentera-install-file-probe",
         "agentera-startup-preflight",
+        "agentera-workspace-dismiss-pending-invitation",
+        "agentera-workspace-get-pending-invitation",
         "get-gpu-status",
         "get-locale",
         "quit-app",

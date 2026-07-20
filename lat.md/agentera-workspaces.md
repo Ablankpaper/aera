@@ -26,11 +26,27 @@ The global switcher below the AgentEra brand combines the existing personal-spac
 
 Selection is account-scoped product navigation state. It does not switch a Hermes Profile, move sessions or files, rewrite a RuntimeBinding, or activate a workspace Agent. Archived workspaces are managed separately and are not selectable as an active context.
 
+The trusted main process now separates this context into three layers:
+
+- a strict generated-contract cloud client for the 13 Workspace routes;
+- `userData/agentera-workspace/workspace.db`, whose summaries, members, invitations, and selected context are partitioned by authenticated `user_id`;
+- one Workspace manager that coalesces online refreshes, rejects late results after an account transition, and serves only stale read-only metadata while offline.
+
+The renderer can reach the manager only through the exact `window.agenteraWorkspace` preload namespace. Every request passes the existing product-access guard and returns a stable success or sanitized error envelope. Renderer requests never supply actor identity, authorization headers, cloud URLs, database paths, or idempotency keys.
+
 ## Offline behavior
 
 A valid product offline entitlement exposes last-known active workspace metadata as stale and read-only while every workspace mutation pauses.
 
 No offline mutation queue is created. Local installed Agents and [[agentera-self-evolution#AgentEra self-evolution compatibility#Local learning loop|Hermes local learning]] continue independently, and a removed or archived selection falls back to personal space after authoritative refresh.
+
+## Invitation handoff and single instance
+
+The desktop accepts only the exact fragment link `agentera://workspace-invitation#TOKEN`. It rejects credentials, ports, paths, queries, percent-encoded variants, non-canonical tokens, and every other scheme or host.
+
+Only one pending token exists in volatile main-process memory. A newer valid link replaces the previous unaccepted link; exact dismissal or successful acceptance clears it. It is never written to SQLite, local/session storage, logs, telemetry, or OAuth state.
+
+The app acquires Electron's single-instance lock before Runtime bootstrap. A second launch forwards only a valid invitation to the existing process and cannot start a second desktop or Runtime bootstrap. Packaged and development protocol registration use their respective Electron executable forms.
 
 ## Control-plane separation
 

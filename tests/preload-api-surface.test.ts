@@ -128,6 +128,26 @@ function extractAgenteraAgentTypeMethods(src: string): string[] {
   );
 }
 
+function extractAgenteraWorkspaceMethods(src: string): string[] {
+  const objectMatch = src.match(
+    /const\s+agenteraWorkspaceAPI\s*=\s*\{([\s\S]*?)^\};/m,
+  );
+  if (!objectMatch) return [];
+  return [...objectMatch[1].matchAll(/^\s{2}(\w+)\s*:\s*\(/gm)].map(
+    (match) => match[1],
+  );
+}
+
+function extractAgenteraWorkspaceTypeMethods(src: string): string[] {
+  const interfaceMatch = src.match(
+    /interface\s+AgenteraWorkspaceAPI\s*\{([\s\S]*?)^\}/m,
+  );
+  if (!interfaceMatch) return [];
+  return [...interfaceMatch[1].matchAll(/^\s{2}(\w+)\s*[:(]/gm)].map(
+    (match) => match[1],
+  );
+}
+
 describe("Preload API Surface", () => {
   it("preload exposes methods", () => {
     expect(preloadMethods.length).toBeGreaterThan(30);
@@ -273,6 +293,48 @@ describe("AgentEra Agent-control preload namespace", () => {
     expect(namespace).toBeDefined();
     expect(namespace).not.toMatch(
       /accessToken|refreshToken|offlineEntitlement|privateKey|publicKey|signature|ownerId|tenantId|deviceId|profilePath|filePath|remoteUrl|environment|rawResponse|responseText/i,
+    );
+  });
+});
+
+describe("AgentEra Workspace preload namespace", () => {
+  const expected = [
+    "getState",
+    "refresh",
+    "select",
+    "create",
+    "rename",
+    "archive",
+    "restore",
+    "listMembers",
+    "changeMemberRole",
+    "removeMember",
+    "leave",
+    "listInvitations",
+    "createInvitation",
+    "revokeInvitation",
+    "acceptInvitation",
+    "getPendingInvitation",
+    "dismissPendingInvitation",
+    "onStateChanged",
+    "onInvitationReceived",
+  ];
+
+  it("exposes exactly one separately reviewed Workspace control surface", () => {
+    expect(extractAgenteraWorkspaceMethods(preloadSrc)).toEqual(expected);
+    expect(extractAgenteraWorkspaceTypeMethods(preloadTypes)).toEqual(expected);
+    expect(preloadSrc).toMatch(
+      /contextBridge\.exposeInMainWorld\(\s*"agenteraWorkspace",\s*agenteraWorkspaceAPI,?\s*\)/,
+    );
+  });
+
+  it("does not expose credentials, generic transport, database, Profile, or Runtime controls", () => {
+    const namespace = preloadTypes.match(
+      /interface\s+AgenteraWorkspaceAPI\s*\{([\s\S]*?)^\}/m,
+    )?.[1];
+    expect(namespace).toBeDefined();
+    expect(namespace).not.toMatch(
+      /accessToken|refreshToken|offlineEntitlement|headers|authorization|databasePath|profilePath|sessionId|runtimeBinding|genericUrl/i,
     );
   });
 });

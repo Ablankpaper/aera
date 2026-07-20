@@ -65,6 +65,16 @@ import type {
   PublishedRevision,
   UpdateAgentDraftInput,
 } from "../shared/agentera-agent-control";
+import type {
+  AgenteraWorkspaceResult,
+  WorkspaceInvitation,
+  WorkspaceInvitationAcceptance,
+  WorkspaceInvitationCreation,
+  WorkspaceMember,
+  WorkspacePendingInvitation,
+  WorkspacePublicState,
+  WorkspaceSummary,
+} from "../shared/agentera-workspace";
 
 interface ElectronAPI {
   process: {
@@ -112,6 +122,72 @@ interface AgenteraRuntimeDistributionAPI {
   retryRepair: () => Promise<RuntimeDistributionPublicState>;
   onStateChanged: (
     callback: (state: RuntimeDistributionPublicState) => void,
+  ) => () => void;
+}
+
+interface AgenteraWorkspaceAPI {
+  getState: () => Promise<AgenteraWorkspaceResult<WorkspacePublicState>>;
+  refresh: () => Promise<AgenteraWorkspaceResult<WorkspacePublicState>>;
+  select: (input: {
+    workspaceId: string | null;
+  }) => Promise<AgenteraWorkspaceResult<WorkspacePublicState>>;
+  create: (input: {
+    displayName: string;
+  }) => Promise<AgenteraWorkspaceResult<WorkspaceSummary>>;
+  rename: (input: {
+    workspaceId: string;
+    displayName: string;
+    expectedRevision: number;
+  }) => Promise<AgenteraWorkspaceResult<WorkspaceSummary>>;
+  archive: (input: {
+    workspaceId: string;
+    expectedRevision: number;
+  }) => Promise<AgenteraWorkspaceResult<WorkspaceSummary>>;
+  restore: (input: {
+    workspaceId: string;
+    expectedRevision: number;
+  }) => Promise<AgenteraWorkspaceResult<WorkspaceSummary>>;
+  listMembers: (input: {
+    workspaceId: string;
+  }) => Promise<AgenteraWorkspaceResult<readonly WorkspaceMember[]>>;
+  changeMemberRole: (input: {
+    workspaceId: string;
+    userId: string;
+    role: "admin" | "member";
+    expectedRevision: number;
+  }) => Promise<AgenteraWorkspaceResult<WorkspaceMember>>;
+  removeMember: (input: {
+    workspaceId: string;
+    userId: string;
+    expectedRevision: number;
+  }) => Promise<AgenteraWorkspaceResult<true>>;
+  leave: (input: {
+    workspaceId: string;
+  }) => Promise<AgenteraWorkspaceResult<true>>;
+  listInvitations: (input: {
+    workspaceId: string;
+  }) => Promise<AgenteraWorkspaceResult<readonly WorkspaceInvitation[]>>;
+  createInvitation: (input: {
+    workspaceId: string;
+  }) => Promise<AgenteraWorkspaceResult<WorkspaceInvitationCreation>>;
+  revokeInvitation: (input: {
+    workspaceId: string;
+    invitationId: string;
+  }) => Promise<AgenteraWorkspaceResult<true>>;
+  acceptInvitation: (input: {
+    token: string;
+  }) => Promise<AgenteraWorkspaceResult<WorkspaceInvitationAcceptance>>;
+  getPendingInvitation: () => Promise<
+    AgenteraWorkspaceResult<WorkspacePendingInvitation | null>
+  >;
+  dismissPendingInvitation: (input: {
+    token: string;
+  }) => Promise<AgenteraWorkspaceResult<boolean>>;
+  onStateChanged: (
+    callback: (state: WorkspacePublicState) => void,
+  ) => () => void;
+  onInvitationReceived: (
+    callback: (invitation: WorkspacePendingInvitation) => void,
   ) => () => void;
 }
 
@@ -1376,6 +1452,7 @@ declare global {
     electron: ElectronAPI;
     hermesAPI: HermesAPI;
     agenteraAuth: AgenteraAuthAPI;
+    agenteraWorkspace: AgenteraWorkspaceAPI;
     agenteraAgents: AgenteraAgentsAPI;
     agenteraRuntimeAccess: AgenteraRuntimeAccessAPI;
     agenteraRuntimeDistribution: AgenteraRuntimeDistributionAPI;

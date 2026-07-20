@@ -74,3 +74,24 @@ export interface WorkspacePublicState {
   selected: AgenteraSpaceContext;
   workspaces: readonly WorkspaceSummary[];
 }
+
+export type AgenteraWorkspaceErrorCode =
+  | "unauthenticated"
+  | "online_required"
+  | "forbidden"
+  | "not_found"
+  | "conflict"
+  | "archived"
+  | "owner_unavailable"
+  | "limit_reached"
+  | "rate_limited"
+  | "cloud_unavailable"
+  | "invalid_request";
+
+export type AgenteraWorkspaceResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; errorCode: AgenteraWorkspaceErrorCode };
+
+export interface WorkspacePendingInvitation {
+  token: string;
+}
