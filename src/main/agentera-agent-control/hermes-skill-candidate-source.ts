@@ -1,6 +1,10 @@
 import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { isAbsolute, join, sep } from "node:path";
-import type { ExperienceCandidateBundleV1 } from "../../shared/agentera-agent-control";
+import type {
+  EligibleExperienceSkill,
+  ExperienceCandidateBundleV1,
+} from "../../shared/agentera-agent-control";
+export type { EligibleExperienceSkill } from "../../shared/agentera-agent-control";
 import {
   canonicalizeExperienceCandidate,
   MAX_EXPERIENCE_CANDIDATE_BYTES,
@@ -35,11 +39,6 @@ const FORBIDDEN_ENTRY_NAMES = new Set([
   "coverage",
   "target",
 ]);
-
-export interface EligibleExperienceSkill {
-  skillName: string;
-  description: string;
-}
 
 export interface HermesSkillCandidateRead {
   sourceRelativePath: string;

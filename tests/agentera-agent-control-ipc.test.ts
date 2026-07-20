@@ -12,6 +12,9 @@ import {
   parseClaimVersionInput,
   parseCreateDraftInput,
   parseInstallVersionInput,
+  parsePrepareExperienceCandidateInput,
+  parseReviewExperienceCandidateInput,
+  parseSubmitExperienceCandidateInput,
   parseUpdateDraftInput,
 } from "../src/main/agentera-agent-control/ipc-contract";
 import { AgenteraAgentControlManager } from "../src/main/agentera-agent-control/manager";
@@ -52,6 +55,9 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-update-draft",
       "agentera-agents-delete-draft",
       "agentera-agents-list-installations",
+      "agentera-agents-list-eligible-experience-skills",
+      "agentera-agents-prepare-experience-candidate",
+      "agentera-agents-list-my-experience-candidates",
     ]) {
       expect(AGENTERA_IPC_CHANNEL_POLICY[channel]).toBe("authenticated");
     }
@@ -65,6 +71,10 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-retry-installation",
       "agentera-agents-select-version",
       "agentera-agents-archive-installation",
+      "agentera-agents-submit-experience-candidate",
+      "agentera-agents-list-experience-review-queue",
+      "agentera-agents-get-experience-candidate",
+      "agentera-agents-review-experience-candidate",
     ]) {
       expect(AGENTERA_IPC_CHANNEL_POLICY[channel]).toBe("online");
     }
@@ -153,6 +163,88 @@ describe("Agent control IPC contract", () => {
     ).toThrow();
   });
 
+  it("accepts only the reviewed ExperienceCandidate IPC fields", () => {
+    expect(
+      parsePrepareExperienceCandidateInput({
+        installationId: UUID,
+        skillName: "weekly-summary",
+      }),
+    ).toEqual({ installationId: UUID, skillName: "weekly-summary" });
+    expect(
+      parseSubmitExperienceCandidateInput({
+        candidateId: UUID,
+        confirmation: "submit-selected-skill",
+      }),
+    ).toEqual({
+      candidateId: UUID,
+      confirmation: "submit-selected-skill",
+    });
+    expect(
+      parseReviewExperienceCandidateInput({
+        candidateId: UUID,
+        decision: "REJECTED",
+        reasonCode: "not_reusable",
+        safeNote: "Needs a reusable template.",
+      }),
+    ).toEqual({
+      candidateId: UUID,
+      decision: "REJECTED",
+      reasonCode: "not_reusable",
+      safeNote: "Needs a reusable template.",
+    });
+    expect(
+      parseReviewExperienceCandidateInput({
+        candidateId: UUID,
+        decision: "APPROVED",
+        reasonCode: null,
+        safeNote: null,
+      }),
+    ).toEqual({
+      candidateId: UUID,
+      decision: "APPROVED",
+      reasonCode: null,
+      safeNote: null,
+    });
+    for (const privateField of [
+      "workspaceId",
+      "ownerId",
+      "deviceId",
+      "profilePath",
+      "runtimeProfileId",
+      "sourceRelativePath",
+    ]) {
+      expect(() =>
+        parsePrepareExperienceCandidateInput({
+          installationId: UUID,
+          skillName: "weekly-summary",
+          [privateField]: "private",
+        }),
+      ).toThrow();
+    }
+    expect(() =>
+      parseSubmitExperienceCandidateInput({
+        candidateId: UUID,
+        confirmation: "yes",
+      }),
+    ).toThrow();
+    expect(() =>
+      parseReviewExperienceCandidateInput({
+        candidateId: UUID,
+        decision: "APPROVED",
+        reasonCode: "unexpected",
+        safeNote: null,
+      }),
+    ).toThrow();
+    expect(() =>
+      parseReviewExperienceCandidateInput({
+        candidateId: UUID,
+        decision: "REJECTED",
+        reasonCode: "not_reusable",
+        safeNote: "private\nsecond line",
+      }),
+    ).toThrow();
+  });
+
   it("maps failures to stable codes without returning cloud bodies, paths, or private messages", async () => {
     const error = Object.assign(
       new Error(
@@ -165,6 +257,41 @@ describe("Agent control IPC contract", () => {
         throw error;
       }),
     ).resolves.toEqual({ ok: false, errorCode: "cloud_unavailable" });
+  });
+
+  it("returns only bounded ExperienceCandidate DLP finding metadata", async () => {
+    const secret = "sk-proj-ipc-secret-must-not-leak-123456789";
+    const result = await executeAgentControlIpc(async () => {
+      throw Object.assign(new Error(secret), {
+        code: "candidate_dlp_blocked",
+        findings: [
+          {
+            code: "credential_api_key",
+            path: "skills/weekly-summary/SKILL.md",
+            line: 4,
+            evidence: secret,
+          },
+          {
+            code: "private_absolute_path",
+            path: "C:/Users/Alice/private-profile/SKILL.md",
+            line: 1,
+            evidence: secret,
+          },
+        ],
+      });
+    });
+    expect(result).toEqual({
+      ok: false,
+      errorCode: "candidate_dlp_blocked",
+      findings: [
+        {
+          code: "credential_api_key",
+          path: "skills/weekly-summary/SKILL.md",
+          line: 4,
+        },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toContain(secret);
   });
 
   it.each([
@@ -316,5 +443,16 @@ describe("Agent control IPC contract", () => {
     );
     expect(registrations).toContain("registerAgentControlHandler");
     expect(registrations).not.toContain("ipcMain.handle");
+    for (const channel of [
+      "agentera-agents-list-eligible-experience-skills",
+      "agentera-agents-prepare-experience-candidate",
+      "agentera-agents-submit-experience-candidate",
+      "agentera-agents-list-my-experience-candidates",
+      "agentera-agents-list-experience-review-queue",
+      "agentera-agents-get-experience-candidate",
+      "agentera-agents-review-experience-candidate",
+    ]) {
+      expect(register.match(new RegExp(`"${channel}"`, "g"))).toHaveLength(1);
+    }
   });
 });

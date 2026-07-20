@@ -5,11 +5,13 @@ import {
   verify as verifySignature,
 } from "node:crypto";
 import type { components } from "../../shared/agentera-cloud-api.generated";
+import type { ExperienceCandidateBundleV1 } from "../../shared/agentera-agent-control";
 import {
   agenteraCloudUrl,
   parseAgenteraCloudOrigin,
 } from "../agentera-auth/config";
 import type { InstallationIdentity } from "../agentera-auth/store";
+import { canonicalizeExperienceCandidate } from "./experience-candidate-contract";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const RESPONSE_LIMIT = 4 * 1024 * 1024;
@@ -42,10 +44,26 @@ export type CreateAgentInstallationRequest =
   components["schemas"]["CreateAgentInstallationRequest"];
 export type CreateRuntimeBindingRecordRequest =
   components["schemas"]["CreateRuntimeBindingRecordRequest"];
+export type CloudExperienceCandidateBundle =
+  components["schemas"]["ExperienceCandidateBundle"];
+export type CloudExperienceCandidateSummary =
+  components["schemas"]["ExperienceCandidateSummary"];
+export type CloudExperienceCandidateDetail =
+  components["schemas"]["ExperienceCandidateDetail"];
+export type CloudExperienceCandidateReview =
+  components["schemas"]["ExperienceCandidateReview"];
+export type CloudExperienceCandidateFinding =
+  components["schemas"]["ExperienceCandidateFinding"];
+export type SubmitExperienceCandidateRequest =
+  components["schemas"]["SubmitExperienceCandidateRequest"];
+export type ReviewExperienceCandidateRequest =
+  components["schemas"]["ReviewExperienceCandidateRequest"];
 
-type StableErrorCode = components["schemas"]["ErrorCode"];
+type StableErrorCode =
+  | components["schemas"]["ErrorCode"]
+  | components["schemas"]["ExperienceCandidateErrorCode"];
 
-const STABLE_ERROR_CODES: ReadonlySet<StableErrorCode> = new Set([
+const STABLE_ERROR_CODES: ReadonlySet<string> = new Set<StableErrorCode>([
   "invalid_request",
   "verification_required",
   "identity_conflict",
@@ -82,6 +100,9 @@ const STABLE_ERROR_CODES: ReadonlySet<StableErrorCode> = new Set([
   "workspace_limit_reached",
   "workspace_not_found",
   "workspace_owner_unavailable",
+  "invalid_experience_candidate",
+  "candidate_dlp_blocked",
+  "candidate_already_reviewed",
 ]);
 
 export interface AgenteraAgentControlClientOptions {
@@ -96,12 +117,22 @@ export interface AgenteraAgentControlClientOptions {
 export class AgenteraAgentControlClientError extends Error {
   readonly status: number;
   readonly code: string;
+  readonly findings: readonly CloudExperienceCandidateFinding[];
 
-  constructor(status: number, code: string) {
+  constructor(
+    status: number,
+    code: string,
+    findings: readonly CloudExperienceCandidateFinding[] = [],
+  ) {
     super(`AgentEra Agent control request failed: ${code}.`);
     this.name = "AgenteraAgentControlClientError";
     this.status = status;
     this.code = code;
+    this.findings = findings.map((finding) => ({
+      code: finding.code,
+      path: finding.path,
+      ...(finding.line === undefined ? {} : { line: finding.line }),
+    }));
   }
 }
 
@@ -167,6 +198,270 @@ function isStringArray(value: unknown): value is readonly string[] {
     value.length <= 512 &&
     value.every((item) => isBoundedString(item, 1, 512))
   );
+}
+
+function isExperienceCandidatePath(value: unknown): value is string {
+  if (
+    !isBoundedString(value, 1, 512) ||
+    value !== value.trim() ||
+    value !== value.normalize("NFC") ||
+    value.startsWith("/") ||
+    value.includes("\\") ||
+    value.includes("\0") ||
+    value.includes("://") ||
+    (value.length >= 2 && value[1] === ":") ||
+    Buffer.byteLength(value, "utf8") > 512
+  ) {
+    return false;
+  }
+  const segments = value.split("/");
+  return segments.every(
+    (segment) =>
+      segment.length > 0 &&
+      segment !== "." &&
+      segment !== ".." &&
+      !segment.startsWith("."),
+  );
+}
+
+function isExperienceCandidateBundle(
+  value: unknown,
+): value is CloudExperienceCandidateBundle {
+  if (
+    !hasExactFields(value, ["assets", "schema_version", "skill_name"]) ||
+    value.schema_version !== 1 ||
+    !isBoundedString(value.skill_name, 1, 100) ||
+    !/^[a-z0-9](?:[a-z0-9_-]{0,98}[a-z0-9])?$/.test(value.skill_name) ||
+    !Array.isArray(value.assets) ||
+    value.assets.length < 1 ||
+    value.assets.length > 32
+  ) {
+    return false;
+  }
+  let totalBytes = 0;
+  const assets: ExperienceCandidateBundleV1["assets"] = [];
+  for (const asset of value.assets) {
+    if (
+      !hasExactFields(asset, ["content", "media_type", "path"]) ||
+      !isExperienceCandidatePath(asset.path) ||
+      (asset.media_type !== "text/markdown" &&
+        asset.media_type !== "text/plain") ||
+      typeof asset.content !== "string"
+    ) {
+      return false;
+    }
+    const bytes = Buffer.byteLength(asset.content, "utf8");
+    if (bytes > 262_144) return false;
+    totalBytes += bytes;
+    if (totalBytes > 1024 * 1024) return false;
+    assets.push({
+      path: asset.path,
+      mediaType: asset.media_type,
+      content: asset.content,
+    });
+  }
+  const candidate: ExperienceCandidateBundleV1 = {
+    schemaVersion: 1,
+    skillName: value.skill_name,
+    assets,
+  };
+  try {
+    const canonical = canonicalizeExperienceCandidate(candidate);
+    return JSON.stringify(canonical.bundle) === JSON.stringify(candidate);
+  } catch {
+    return false;
+  }
+}
+
+function isExperienceCandidateReview(
+  value: unknown,
+): value is CloudExperienceCandidateReview {
+  if (
+    !hasExactFields(
+      value,
+      ["decision", "id", "reviewed_at", "reviewed_by_user_id"],
+      ["reason_code", "safe_note"],
+    ) ||
+    !isUUID(value.id) ||
+    (value.reviewed_by_user_id !== null &&
+      !isUUID(value.reviewed_by_user_id)) ||
+    (value.decision !== "APPROVED" && value.decision !== "REJECTED") ||
+    !isTimestamp(value.reviewed_at)
+  ) {
+    return false;
+  }
+  if (value.decision === "APPROVED") {
+    return value.reason_code === undefined && value.safe_note === undefined;
+  }
+  return (
+    typeof value.reason_code === "string" &&
+    /^[a-z][a-z0-9_]{0,63}$/.test(value.reason_code) &&
+    (value.safe_note === undefined ||
+      (isBoundedString(value.safe_note, 1, 240) &&
+        !/[\r\n\0]/.test(value.safe_note)))
+  );
+}
+
+function isExperienceCandidateCore(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    isUUID(value.id) &&
+    isUUID(value.workspace_id) &&
+    isUUID(value.agent_definition_id) &&
+    isUUID(value.source_agent_version_id) &&
+    (value.submitted_by_user_id === null ||
+      isUUID(value.submitted_by_user_id)) &&
+    isBoundedString(value.skill_name, 1, 100) &&
+    /^[a-z0-9](?:[a-z0-9_-]{0,98}[a-z0-9])?$/.test(value.skill_name) &&
+    value.dlp_contract_version === "experience-candidate-dlp-v1" &&
+    isDigest(value.content_digest) &&
+    isTimestamp(value.created_at) &&
+    (value.review === undefined || isExperienceCandidateReview(value.review))
+  );
+}
+
+function isExperienceCandidateSummary(
+  value: unknown,
+): value is CloudExperienceCandidateSummary {
+  return (
+    hasExactFields(
+      value,
+      [
+        "agent_definition_id",
+        "content_digest",
+        "created_at",
+        "dlp_contract_version",
+        "id",
+        "skill_name",
+        "source_agent_version_id",
+        "submitted_by_user_id",
+        "workspace_id",
+      ],
+      ["review"],
+    ) && isExperienceCandidateCore(value)
+  );
+}
+
+function isExperienceCandidateDetail(
+  value: unknown,
+): value is CloudExperienceCandidateDetail {
+  return (
+    hasExactFields(
+      value,
+      [
+        "agent_definition_id",
+        "bundle",
+        "content_digest",
+        "created_at",
+        "dlp_contract_version",
+        "id",
+        "skill_name",
+        "source_agent_version_id",
+        "submitted_by_user_id",
+        "workspace_id",
+      ],
+      ["review"],
+    ) &&
+    isExperienceCandidateCore(value) &&
+    isExperienceCandidateBundle(value.bundle) &&
+    value.bundle.skill_name === value.skill_name
+  );
+}
+
+function isExperienceCandidateFinding(
+  value: unknown,
+): value is CloudExperienceCandidateFinding {
+  return (
+    hasExactFields(value, ["code", "path"], ["line"]) &&
+    typeof value.code === "string" &&
+    /^[a-z][a-z0-9_]{0,63}$/.test(value.code) &&
+    isExperienceCandidatePath(value.path) &&
+    (value.line === undefined ||
+      (Number.isSafeInteger(value.line) && Number(value.line) >= 1))
+  );
+}
+
+function isSubmitExperienceCandidateRequest(
+  value: unknown,
+): value is SubmitExperienceCandidateRequest {
+  return (
+    hasExactFields(value, ["bundle", "content_digest", "source_version_id"]) &&
+    isUUID(value.source_version_id) &&
+    isDigest(value.content_digest) &&
+    isExperienceCandidateBundle(value.bundle)
+  );
+}
+
+function isReviewExperienceCandidateRequest(
+  value: unknown,
+): value is ReviewExperienceCandidateRequest {
+  if (
+    !hasExactFields(value, ["decision"], ["reason_code", "safe_note"]) ||
+    (value.decision !== "APPROVED" && value.decision !== "REJECTED")
+  ) {
+    return false;
+  }
+  if (value.decision === "APPROVED") {
+    return value.reason_code === undefined && value.safe_note === undefined;
+  }
+  return (
+    typeof value.reason_code === "string" &&
+    /^[a-z][a-z0-9_]{0,63}$/.test(value.reason_code) &&
+    (value.safe_note === undefined ||
+      (isBoundedString(value.safe_note, 1, 240) &&
+        !/[\r\n\0]/.test(value.safe_note)))
+  );
+}
+
+function detachExperienceCandidateReview(
+  value: CloudExperienceCandidateReview,
+): CloudExperienceCandidateReview {
+  return {
+    id: value.id,
+    reviewed_by_user_id: value.reviewed_by_user_id,
+    decision: value.decision,
+    ...(value.reason_code === undefined
+      ? {}
+      : { reason_code: value.reason_code }),
+    ...(value.safe_note === undefined ? {} : { safe_note: value.safe_note }),
+    reviewed_at: value.reviewed_at,
+  };
+}
+
+function detachExperienceCandidateSummary(
+  value: CloudExperienceCandidateSummary,
+): CloudExperienceCandidateSummary {
+  return {
+    id: value.id,
+    workspace_id: value.workspace_id,
+    agent_definition_id: value.agent_definition_id,
+    source_agent_version_id: value.source_agent_version_id,
+    submitted_by_user_id: value.submitted_by_user_id,
+    skill_name: value.skill_name,
+    dlp_contract_version: value.dlp_contract_version,
+    content_digest: value.content_digest,
+    created_at: value.created_at,
+    ...(value.review === undefined
+      ? {}
+      : { review: detachExperienceCandidateReview(value.review) }),
+  };
+}
+
+function detachExperienceCandidateDetail(
+  value: CloudExperienceCandidateDetail,
+): CloudExperienceCandidateDetail {
+  return {
+    ...detachExperienceCandidateSummary(value),
+    bundle: {
+      schema_version: value.bundle.schema_version,
+      skill_name: value.bundle.skill_name,
+      assets: value.bundle.assets.map((asset) => ({
+        path: asset.path,
+        media_type: asset.media_type,
+        content: asset.content,
+      })),
+    },
+  };
 }
 
 function isRuntimeCompatibility(value: unknown): boolean {
@@ -532,21 +827,48 @@ function requireIdempotencyKey(value: string): void {
   }
 }
 
-function safeServerErrorCode(raw: string): string {
+function safeServerError(raw: string): {
+  code: string;
+  findings: CloudExperienceCandidateFinding[];
+} {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (
       hasExactFields(parsed, ["error"]) &&
       isObject(parsed.error) &&
       typeof parsed.error.code === "string" &&
-      STABLE_ERROR_CODES.has(parsed.error.code as StableErrorCode)
+      STABLE_ERROR_CODES.has(parsed.error.code)
     ) {
-      return parsed.error.code;
+      if (parsed.error.code !== "candidate_dlp_blocked") {
+        return { code: parsed.error.code, findings: [] };
+      }
+      if (
+        parsed.error.findings !== undefined &&
+        (!Array.isArray(parsed.error.findings) ||
+          parsed.error.findings.length > 128 ||
+          !parsed.error.findings.every(isExperienceCandidateFinding))
+      ) {
+        return { code: "request_failed", findings: [] };
+      }
+      const findings = (parsed.error.findings ?? [])
+        .map((finding) => ({
+          code: finding.code,
+          path: finding.path,
+          ...(finding.line === undefined ? {} : { line: finding.line }),
+        }))
+        .sort((left, right) => {
+          const code = left.code.localeCompare(right.code);
+          if (code !== 0) return code;
+          const path = left.path.localeCompare(right.path);
+          if (path !== 0) return path;
+          return (left.line ?? 0) - (right.line ?? 0);
+        });
+      return { code: parsed.error.code, findings };
     }
   } catch {
     // A bounded generic error avoids exposing response bodies or parser detail.
   }
-  return "request_failed";
+  return { code: "request_failed", findings: [] };
 }
 
 async function readBoundedText(
@@ -917,6 +1239,98 @@ export class AgenteraAgentControlClient {
     );
   }
 
+  async submitExperienceCandidate(
+    workspaceId: string,
+    definitionId: string,
+    body: SubmitExperienceCandidateRequest,
+    idempotencyKey: string,
+  ): Promise<CloudExperienceCandidateDetail> {
+    requireUUID(workspaceId);
+    requireUUID(definitionId);
+    requireIdempotencyKey(idempotencyKey);
+    if (!isSubmitExperienceCandidateRequest(body)) {
+      throw new AgenteraAgentControlClientError(0, "invalid_request");
+    }
+    const value = await this.requestJSON(
+      `/api/v1/workspaces/${workspaceId}/agent-definitions/${definitionId}/experience-candidates`,
+      { method: "POST", body, idempotencyKey, expectedStatus: 201 },
+      isExperienceCandidateDetail,
+    );
+    return detachExperienceCandidateDetail(value);
+  }
+
+  async listOwnExperienceCandidates(
+    workspaceId: string,
+  ): Promise<CloudExperienceCandidateSummary[]> {
+    requireUUID(workspaceId);
+    const value = await this.requestJSON(
+      `/api/v1/workspaces/${workspaceId}/experience-candidates/mine`,
+      { expectedStatus: 200 },
+      (
+        candidate,
+      ): candidate is {
+        candidates: readonly CloudExperienceCandidateSummary[];
+      } =>
+        hasExactFields(candidate, ["candidates"]) &&
+        Array.isArray(candidate.candidates) &&
+        candidate.candidates.every(isExperienceCandidateSummary),
+    );
+    return value.candidates.map(detachExperienceCandidateSummary);
+  }
+
+  async listWorkspaceExperienceCandidates(
+    workspaceId: string,
+  ): Promise<CloudExperienceCandidateSummary[]> {
+    requireUUID(workspaceId);
+    const value = await this.requestJSON(
+      `/api/v1/workspaces/${workspaceId}/experience-candidates`,
+      { expectedStatus: 200 },
+      (
+        candidate,
+      ): candidate is {
+        candidates: readonly CloudExperienceCandidateSummary[];
+      } =>
+        hasExactFields(candidate, ["candidates"]) &&
+        Array.isArray(candidate.candidates) &&
+        candidate.candidates.every(isExperienceCandidateSummary),
+    );
+    return value.candidates.map(detachExperienceCandidateSummary);
+  }
+
+  async getExperienceCandidate(
+    workspaceId: string,
+    candidateId: string,
+  ): Promise<CloudExperienceCandidateDetail> {
+    requireUUID(workspaceId);
+    requireUUID(candidateId);
+    const value = await this.requestJSON(
+      `/api/v1/workspaces/${workspaceId}/experience-candidates/${candidateId}`,
+      { expectedStatus: 200 },
+      isExperienceCandidateDetail,
+    );
+    return detachExperienceCandidateDetail(value);
+  }
+
+  async reviewExperienceCandidate(
+    workspaceId: string,
+    candidateId: string,
+    body: ReviewExperienceCandidateRequest,
+    idempotencyKey: string,
+  ): Promise<CloudExperienceCandidateDetail> {
+    requireUUID(workspaceId);
+    requireUUID(candidateId);
+    requireIdempotencyKey(idempotencyKey);
+    if (!isReviewExperienceCandidateRequest(body)) {
+      throw new AgenteraAgentControlClientError(0, "invalid_request");
+    }
+    const value = await this.requestJSON(
+      `/api/v1/workspaces/${workspaceId}/experience-candidates/${candidateId}/review`,
+      { method: "POST", body, idempotencyKey, expectedStatus: 200 },
+      isExperienceCandidateDetail,
+    );
+    return detachExperienceCandidateDetail(value);
+  }
+
   getSigningKeys(): Promise<AgentSigningKeySet> {
     return this.requestJSON(
       "/.well-known/agentera-signing-keys.json",
@@ -940,9 +1354,11 @@ export class AgenteraAgentControlClient {
       options.responseLimit ?? RESPONSE_LIMIT,
     );
     if (response.status !== options.expectedStatus) {
+      const serverError = safeServerError(raw);
       throw new AgenteraAgentControlClientError(
         response.status,
-        safeServerErrorCode(raw),
+        serverError.code,
+        serverError.findings,
       );
     }
     const contentType = response.headers

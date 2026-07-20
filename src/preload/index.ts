@@ -55,8 +55,15 @@ import type {
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   CreateAgentDraftInput,
+  EligibleExperienceSkill,
+  ExperienceCandidateDetail,
+  ExperienceCandidatePreview,
+  ExperienceCandidateSummary,
+  PrepareExperienceCandidateInput,
   PublicationPreview,
   PublishedRevision,
+  ReviewExperienceCandidateInput,
+  SubmitExperienceCandidateInput,
   UpdateAgentDraftInput,
 } from "../shared/agentera-agent-control";
 import type {
@@ -1905,6 +1912,35 @@ const agenteraAgentsAPI = {
     id: string,
   ): Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>> =>
     ipcRenderer.invoke("agentera-agents-archive-installation", id),
+  listEligibleExperienceSkills: (
+    installationId: string,
+  ): Promise<AgenteraAgentControlResult<EligibleExperienceSkill[]>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-list-eligible-experience-skills",
+      installationId,
+    ),
+  prepareExperienceCandidate: (
+    input: PrepareExperienceCandidateInput,
+  ): Promise<AgenteraAgentControlResult<ExperienceCandidatePreview>> =>
+    ipcRenderer.invoke("agentera-agents-prepare-experience-candidate", input),
+  submitExperienceCandidate: (
+    input: SubmitExperienceCandidateInput,
+  ): Promise<AgenteraAgentControlResult<ExperienceCandidateSummary>> =>
+    ipcRenderer.invoke("agentera-agents-submit-experience-candidate", input),
+  listMyExperienceCandidates: (): Promise<
+    AgenteraAgentControlResult<ExperienceCandidateSummary[]>
+  > => ipcRenderer.invoke("agentera-agents-list-my-experience-candidates"),
+  listExperienceReviewQueue: (): Promise<
+    AgenteraAgentControlResult<ExperienceCandidateSummary[]>
+  > => ipcRenderer.invoke("agentera-agents-list-experience-review-queue"),
+  getExperienceCandidate: (
+    candidateId: string,
+  ): Promise<AgenteraAgentControlResult<ExperienceCandidateDetail>> =>
+    ipcRenderer.invoke("agentera-agents-get-experience-candidate", candidateId),
+  reviewExperienceCandidate: (
+    input: ReviewExperienceCandidateInput,
+  ): Promise<AgenteraAgentControlResult<ExperienceCandidateDetail>> =>
+    ipcRenderer.invoke("agentera-agents-review-experience-candidate", input),
   onStateChanged: (
     callback: (state: AgenteraAgentControlPublicState) => void,
   ): (() => void) => {

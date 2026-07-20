@@ -159,11 +159,18 @@ export type AgenteraAgentControlErrorCode =
   | "workspace_forbidden"
   | "workspace_archived"
   | "workspace_owner_unavailable"
+  | "candidate_source_ineligible"
+  | "candidate_dlp_blocked"
+  | "candidate_already_reviewed"
   | "operation_failed";
 
 export type AgenteraAgentControlResult<T> =
   | { ok: true; data: T }
-  | { ok: false; errorCode: AgenteraAgentControlErrorCode };
+  | {
+      ok: false;
+      errorCode: AgenteraAgentControlErrorCode;
+      findings?: ExperienceCandidateFinding[];
+    };
 
 export interface AgenteraAgentControlPublicState {
   access: "online" | "offline";
@@ -235,6 +242,28 @@ export interface AgenteraSelectInstallationVersionInput {
   id: string;
   versionId: string;
   localProfileId: string;
+}
+
+export interface EligibleExperienceSkill {
+  skillName: string;
+  description: string;
+}
+
+export interface PrepareExperienceCandidateInput {
+  installationId: string;
+  skillName: string;
+}
+
+export interface SubmitExperienceCandidateInput {
+  candidateId: string;
+  confirmation: "submit-selected-skill";
+}
+
+export interface ReviewExperienceCandidateInput {
+  candidateId: string;
+  decision: "APPROVED" | "REJECTED";
+  reasonCode: string | null;
+  safeNote: string | null;
 }
 
 export type ExperienceCandidateLocalStatus =

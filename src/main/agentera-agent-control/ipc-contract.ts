@@ -11,6 +11,10 @@ import type {
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   CreateAgentDraftInput,
+  ExperienceCandidateFinding,
+  PrepareExperienceCandidateInput,
+  ReviewExperienceCandidateInput,
+  SubmitExperienceCandidateInput,
   UpdateAgentDraftInput,
 } from "../../shared/agentera-agent-control";
 import type { AgentDefinition, AgentVersion } from "./client";
@@ -19,7 +23,13 @@ import type { LocalAgentInstallation } from "./installation-manager";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PROFILE_ID_PATTERN = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
+const SKILL_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,98}[a-z0-9])?$/;
+const REASON_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+const FINDING_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const MAX_DRAFT_IPC_BYTES = 3 * 1024 * 1024;
+const MAX_SAFE_NOTE_LENGTH = 240;
+const MAX_FINDING_PATH_BYTES = 512;
+const MAX_IPC_FINDINGS = 128;
 
 function invalidRequest(): never {
   const error = new Error("AgentEra Agent control request is invalid.");
@@ -193,6 +203,142 @@ export function parseSelectInstallationVersionInput(
   };
 }
 
+export function parsePrepareExperienceCandidateInput(
+  value: unknown,
+): PrepareExperienceCandidateInput {
+  if (!exactObject(value, ["installationId", "skillName"])) {
+    return invalidRequest();
+  }
+  if (
+    typeof value.skillName !== "string" ||
+    !SKILL_NAME_PATTERN.test(value.skillName)
+  ) {
+    return invalidRequest();
+  }
+  return {
+    installationId: parseAgentControlId(value.installationId),
+    skillName: value.skillName,
+  };
+}
+
+export function parseSubmitExperienceCandidateInput(
+  value: unknown,
+): SubmitExperienceCandidateInput {
+  if (
+    !exactObject(value, ["candidateId", "confirmation"]) ||
+    value.confirmation !== "submit-selected-skill"
+  ) {
+    return invalidRequest();
+  }
+  return {
+    candidateId: parseAgentControlId(value.candidateId),
+    confirmation: "submit-selected-skill",
+  };
+}
+
+export function parseReviewExperienceCandidateInput(
+  value: unknown,
+): ReviewExperienceCandidateInput {
+  if (
+    !exactObject(value, ["candidateId", "decision", "reasonCode", "safeNote"])
+  ) {
+    return invalidRequest();
+  }
+  const candidateId = parseAgentControlId(value.candidateId);
+  if (value.decision === "APPROVED") {
+    if (value.reasonCode !== null || value.safeNote !== null) {
+      return invalidRequest();
+    }
+    return {
+      candidateId,
+      decision: "APPROVED",
+      reasonCode: null,
+      safeNote: null,
+    };
+  }
+  if (
+    value.decision !== "REJECTED" ||
+    typeof value.reasonCode !== "string" ||
+    !REASON_CODE_PATTERN.test(value.reasonCode) ||
+    (value.safeNote !== null &&
+      (typeof value.safeNote !== "string" ||
+        value.safeNote.length < 1 ||
+        value.safeNote.length > MAX_SAFE_NOTE_LENGTH ||
+        /[\r\n\0]/.test(value.safeNote)))
+  ) {
+    return invalidRequest();
+  }
+  return {
+    candidateId,
+    decision: "REJECTED",
+    reasonCode: value.reasonCode,
+    safeNote: value.safeNote,
+  };
+}
+
+function safeFindingPath(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value !== value.trim() ||
+    value !== value.normalize("NFC") ||
+    value.startsWith("/") ||
+    value.includes("\\") ||
+    value.includes("\0") ||
+    value.includes("://") ||
+    (value.length >= 2 && value[1] === ":") ||
+    Buffer.byteLength(value, "utf8") > MAX_FINDING_PATH_BYTES
+  ) {
+    return false;
+  }
+  const segments = value.split("/");
+  return (
+    segments.length >= 3 &&
+    segments[0] === "skills" &&
+    segments.every(
+      (segment) =>
+        segment.length > 0 &&
+        segment !== "." &&
+        segment !== ".." &&
+        !segment.startsWith("."),
+    )
+  );
+}
+
+function sanitizeExperienceCandidateFindings(
+  error: unknown,
+): ExperienceCandidateFinding[] {
+  if (error === null || typeof error !== "object") return [];
+  const raw = (error as { findings?: unknown }).findings;
+  if (!Array.isArray(raw)) return [];
+  const findings: ExperienceCandidateFinding[] = [];
+  for (const candidate of raw.slice(0, MAX_IPC_FINDINGS)) {
+    if (candidate === null || typeof candidate !== "object") continue;
+    const finding = candidate as {
+      code?: unknown;
+      path?: unknown;
+      line?: unknown;
+    };
+    if (
+      typeof finding.code !== "string" ||
+      !FINDING_CODE_PATTERN.test(finding.code) ||
+      !safeFindingPath(finding.path) ||
+      !(
+        finding.line === null ||
+        (Number.isSafeInteger(finding.line) && (finding.line as number) >= 1)
+      )
+    ) {
+      continue;
+    }
+    findings.push({
+      code: finding.code,
+      path: finding.path,
+      line: finding.line as number | null,
+    });
+  }
+  return findings;
+}
+
 function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
   const code =
     error !== null &&
@@ -211,6 +357,7 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
   if (
     code === "draft_not_found" ||
     code === "installation_not_found" ||
+    code === "candidate_not_found" ||
     code === "not_found" ||
     code === "cache_not_found"
   ) {
@@ -252,6 +399,13 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
   if (code === "workspace_owner_unavailable") {
     return "workspace_owner_unavailable";
   }
+  if (code === "candidate_source_ineligible") {
+    return "candidate_source_ineligible";
+  }
+  if (code === "candidate_dlp_blocked") return "candidate_dlp_blocked";
+  if (code === "candidate_already_reviewed") {
+    return "candidate_already_reviewed";
+  }
   if (code.startsWith("invalid_")) return "invalid_request";
   return "operation_failed";
 }
@@ -262,7 +416,14 @@ export async function executeAgentControlIpc<T>(
   try {
     return { ok: true, data: await task() };
   } catch (error) {
-    return { ok: false, errorCode: mappedCode(error) };
+    const errorCode = mappedCode(error);
+    if (errorCode === "candidate_dlp_blocked") {
+      const findings = sanitizeExperienceCandidateFindings(error);
+      if (findings.length > 0) {
+        return { ok: false, errorCode, findings };
+      }
+    }
+    return { ok: false, errorCode };
   }
 }
 

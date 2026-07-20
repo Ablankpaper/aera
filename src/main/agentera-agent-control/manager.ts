@@ -11,8 +11,15 @@ import type {
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   CreateAgentDraftInput,
+  ExperienceCandidateDetail,
+  ExperienceCandidatePreview,
+  ExperienceCandidateSummary,
+  EligibleExperienceSkill,
+  PrepareExperienceCandidateInput,
   PublicationPreview,
   PublishedRevision,
+  ReviewExperienceCandidateInput,
+  SubmitExperienceCandidateInput,
   UpdateAgentDraftInput,
 } from "../../shared/agentera-agent-control";
 import type {
@@ -36,6 +43,9 @@ import {
   type PreparedInstalledHermesTurn,
 } from "./hermes-adapter";
 import { RuntimeBindingStore } from "./runtime-binding-store";
+import { ExperienceCandidateService } from "./experience-candidate-service";
+import { ExperienceCandidateStore } from "./experience-candidate-store";
+import { ReadOnlyHermesSkillCandidateSource } from "./hermes-skill-candidate-source";
 import {
   serializeDefinition,
   serializeInstallation,
@@ -61,6 +71,8 @@ interface FullAgentControlOptions {
   getConnectionMode: () => "local" | "remote" | "ssh";
   assertEntitled: () => void;
   isVersionRevoked?: (versionId: string) => boolean | Promise<boolean>;
+  now?: () => Date;
+  randomUUID?: () => string;
 }
 
 export interface AgenteraAgentControlManagerOptions extends Partial<FullAgentControlOptions> {
@@ -83,6 +95,11 @@ interface RuntimeComponents {
 interface ContextComponents {
   key: string;
   publisher: AgentPublisher;
+}
+
+interface ExperienceCandidateComponents {
+  key: string;
+  service: ExperienceCandidateService;
 }
 
 const UUID_PATTERN =
@@ -233,6 +250,8 @@ export class AgenteraAgentControlManager {
   private readonly projection: HermesProjectionManager | null;
   private runtime: RuntimeComponents | null = null;
   private contextComponents: ContextComponents | null = null;
+  private experienceCandidateComponents: ExperienceCandidateComponents | null =
+    null;
   private readonly publicationOwners = new Map<string, string>();
   private readonly listeners = new Set<
     (state: AgenteraAgentControlPublicState) => void
@@ -314,6 +333,7 @@ export class AgenteraAgentControlManager {
 
   notifyAccessStateChanged(): void {
     this.contextComponents = null;
+    this.experienceCandidateComponents = null;
     this.publicationOwners.clear();
     this.emitState();
     this.queueRuntimeBindingDelivery();
@@ -321,6 +341,7 @@ export class AgenteraAgentControlManager {
 
   notifyAgentContextChanged(): void {
     this.contextComponents = null;
+    this.experienceCandidateComponents = null;
     this.publicationOwners.clear();
     this.emitState();
   }
@@ -520,6 +541,58 @@ export class AgenteraAgentControlManager {
     return serializeInstallation(result);
   }
 
+  async listEligibleExperienceSkills(
+    installationId: string,
+  ): Promise<EligibleExperienceSkill[]> {
+    return (
+      await this.ensureExperienceCandidateComponents()
+    ).service.listEligibleSkills(installationId);
+  }
+
+  async prepareExperienceCandidate(
+    input: PrepareExperienceCandidateInput,
+  ): Promise<ExperienceCandidatePreview> {
+    return (await this.ensureExperienceCandidateComponents()).service.prepare(
+      input,
+    );
+  }
+
+  async submitExperienceCandidate(
+    input: SubmitExperienceCandidateInput,
+  ): Promise<ExperienceCandidateSummary> {
+    return (await this.ensureExperienceCandidateComponents()).service.submit(
+      input,
+    );
+  }
+
+  async listMyExperienceCandidates(): Promise<ExperienceCandidateSummary[]> {
+    return (
+      await this.ensureExperienceCandidateComponents()
+    ).service.listMine();
+  }
+
+  async listExperienceReviewQueue(): Promise<ExperienceCandidateSummary[]> {
+    return (
+      await this.ensureExperienceCandidateComponents()
+    ).service.listReviewQueue();
+  }
+
+  async getExperienceCandidate(
+    candidateId: string,
+  ): Promise<ExperienceCandidateDetail> {
+    return (await this.ensureExperienceCandidateComponents()).service.get(
+      candidateId,
+    );
+  }
+
+  async reviewExperienceCandidate(
+    input: ReviewExperienceCandidateInput,
+  ): Promise<ExperienceCandidateDetail> {
+    return (await this.ensureExperienceCandidateComponents()).service.review(
+      input,
+    );
+  }
+
   async prepareHermesTurn(
     input: PrepareAgenteraHermesTurnInput,
   ): Promise<PreparedInstalledHermesTurn | null> {
@@ -657,6 +730,7 @@ export class AgenteraAgentControlManager {
     if (this.runtime?.key === key) return this.runtime;
     this.publicationOwners.clear();
     this.contextComponents = null;
+    this.experienceCandidateComponents = null;
     const cache = new AgentVersionCache({
       database: full.database,
       owner,
@@ -724,6 +798,44 @@ export class AgenteraAgentControlManager {
     });
     this.contextComponents = { key, publisher };
     return this.contextComponents;
+  }
+
+  private async ensureExperienceCandidateComponents(): Promise<ExperienceCandidateComponents> {
+    const full = this.requireFull();
+    const runtime = await this.ensureRuntimeComponents();
+    const owner = full.getOwner();
+    const context = this.context();
+    const key = `${runtime.key}\0${contextKey(context)}`;
+    if (this.experienceCandidateComponents?.key === key) {
+      return this.experienceCandidateComponents;
+    }
+    const service = new ExperienceCandidateService({
+      client: full.client,
+      store: new ExperienceCandidateStore({
+        database: full.database,
+        owner,
+        now: full.now,
+        randomUUID: full.randomUUID,
+      }),
+      source: new ReadOnlyHermesSkillCandidateSource(),
+      getInstallation: (id) => runtime.installations.getLocalInstallation(id),
+      resolveProfilePath: full.profiles.resolveProfilePath,
+      getContext: () => {
+        const current = this.context();
+        return current.scope === "USER"
+          ? { scope: "USER" }
+          : {
+              scope: "WORKSPACE",
+              workspaceId: current.workspaceId,
+              role: current.role,
+            };
+      },
+      getAuthState: full.getAuthState,
+      now: full.now,
+      randomUUID: full.randomUUID,
+    });
+    this.experienceCandidateComponents = { key, service };
+    return this.experienceCandidateComponents;
   }
 
   private emitState(): void {

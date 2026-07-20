@@ -1,10 +1,17 @@
 // @vitest-environment node
 
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { CreateAgentDraftInput } from "../src/shared/agentera-agent-control";
 import type { AgenteraAgentControlClient } from "../src/main/agentera-agent-control/client";
 import {
   openAgenteraControlPlaneDatabase,
@@ -27,8 +34,13 @@ const OWNER_B: AgenteraRuntimeOwner = {
 const WORKSPACE_ID = "77777777-7777-4777-8777-777777777777";
 const USER_INSTALLATION_ID = "88888888-8888-4888-8888-888888888888";
 const WORKSPACE_INSTALLATION_ID = "99999999-9999-4999-8999-999999999999";
+const OWNER_B_INSTALLATION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const PROFILE_A_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const PROFILE_B_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const DEFINITION_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const VERSION_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 
-function draftInput(displayName: string) {
+function draftInput(displayName: string): CreateAgentDraftInput {
   return {
     sourceAgentDefinitionId: null,
     baseAgentVersionId: null,
@@ -309,6 +321,164 @@ describe("Agent control local USER ownership", () => {
       manager.preparePublication("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
     ).rejects.toMatchObject({ code: "workspace_forbidden" });
     expect(getSigningKeys).not.toHaveBeenCalled();
+    database.close();
+  });
+
+  // @lat: [[agentera-self-evolution#Candidate promotion loop#Candidate failure isolation]]
+  it("invalidates ExperienceCandidate access across context, logout, account, and device partitions", async () => {
+    const root = mkdtempSync(join(tmpdir(), "agentera-candidate-isolation-"));
+    roots.push(root);
+    const userDataPath = join(root, "user-data");
+    const profileA = join(root, "profile-a");
+    const profileB = join(root, "profile-b");
+    for (const [profile, skill] of [
+      [profileA, "account-a-skill"],
+      [profileB, "account-b-skill"],
+    ] as const) {
+      mkdirSync(join(profile, "skills", skill), { recursive: true });
+      writeFileSync(
+        join(profile, "skills", skill, "SKILL.md"),
+        `---\nname: ${skill}\ndescription: Learned locally\n---\n\n# ${skill}\n`,
+      );
+      writeFileSync(
+        join(profile, "skills", ".usage.json"),
+        JSON.stringify({ [skill]: { created_by: "agent", state: "active" } }),
+      );
+    }
+    const sourceA = readFileSync(
+      join(profileA, "skills", "account-a-skill", "SKILL.md"),
+    );
+    const database = openAgenteraControlPlaneDatabase(userDataPath, {
+      databaseFactory: nodeSqliteFactory,
+    });
+    for (const [owner, installationId, profileId] of [
+      [OWNER_A, WORKSPACE_INSTALLATION_ID, PROFILE_A_ID],
+      [OWNER_B, OWNER_B_INSTALLATION_ID, PROFILE_B_ID],
+    ] as const) {
+      database.sqlite
+        .prepare(
+          `INSERT INTO local_agent_installations (
+             agent_installation_id, tenant_id, owner_id, device_installation_id,
+             source_scope, source_workspace_id, definition_id,
+             selected_version_id, runtime_profile_id, status,
+             created_at, updated_at
+           ) VALUES (?, ?, ?, ?, 'WORKSPACE', ?, ?, ?, ?, 'active', ?, ?)`,
+        )
+        .run(
+          installationId,
+          owner.tenantId,
+          owner.ownerId,
+          owner.deviceInstallationId,
+          WORKSPACE_ID,
+          DEFINITION_ID,
+          VERSION_ID,
+          profileId,
+          "2026-07-20T00:00:00.000Z",
+          "2026-07-20T00:00:00.000Z",
+        );
+    }
+    let owner = OWNER_A;
+    let signedIn = true;
+    let context: AgentAssetContext = {
+      scope: "WORKSPACE",
+      workspaceId: WORKSPACE_ID,
+      role: "member",
+    };
+    const listOwnExperienceCandidates = vi.fn(async () => {
+      throw new Error("offline candidate list must remain local");
+    });
+    const resolveProfilePath = vi.fn((profileId: string) => {
+      if (profileId === PROFILE_A_ID) return profileA;
+      if (profileId === PROFILE_B_ID) return profileB;
+      throw new Error("unknown profile");
+    });
+    const manager = new AgenteraAgentControlManager({
+      database,
+      client: {
+        origin: "https://cloud.agentera.test",
+        listOwnExperienceCandidates,
+      } as unknown as AgenteraAgentControlClient,
+      profileBindings: {} as never,
+      profiles: {
+        resolveProfilePath,
+      } as never,
+      userDataPath,
+      getOwner: () => owner,
+      getAgentContext: () => context,
+      getAuthState: () =>
+        signedIn
+          ? {
+              status: "offline" as const,
+              userId: owner.ownerId,
+              personalSpaceId: owner.tenantId,
+              deviceId: owner.deviceInstallationId,
+              offlineExpiresAt: "2026-07-26T00:00:00.000Z",
+              cloudAvailable: false,
+            }
+          : { status: "unauthenticated" as const },
+      getRuntimeVersion: () => "v0.18.2-agentera.1",
+      getConnectionMode: () => "local",
+      assertEntitled: () => undefined,
+    });
+
+    await expect(
+      manager.listEligibleExperienceSkills(WORKSPACE_INSTALLATION_ID),
+    ).resolves.toEqual([
+      { skillName: "account-a-skill", description: "Learned locally" },
+    ]);
+    const prepared = await manager.prepareExperienceCandidate({
+      installationId: WORKSPACE_INSTALLATION_ID,
+      skillName: "account-a-skill",
+    });
+    expect(prepared.localCandidateId).toMatch(/^[0-9a-f]{8}-[0-9a-f-]{27}$/);
+    expect(await manager.listMyExperienceCandidates()).toEqual([
+      expect.objectContaining({
+        localCandidateId: prepared.localCandidateId,
+        skillName: "account-a-skill",
+      }),
+    ]);
+
+    context = {
+      scope: "WORKSPACE",
+      workspaceId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      role: "member",
+    };
+    manager.notifyAgentContextChanged();
+    expect(await manager.listMyExperienceCandidates()).toEqual([]);
+
+    context = {
+      scope: "WORKSPACE",
+      workspaceId: WORKSPACE_ID,
+      role: "member",
+    };
+    owner = OWNER_B;
+    manager.notifyAccessStateChanged();
+    expect(await manager.listMyExperienceCandidates()).toEqual([]);
+    await expect(
+      manager.prepareExperienceCandidate({
+        installationId: WORKSPACE_INSTALLATION_ID,
+        skillName: "account-a-skill",
+      }),
+    ).rejects.toMatchObject({ code: "candidate_source_ineligible" });
+
+    signedIn = false;
+    manager.notifyAccessStateChanged();
+    await expect(manager.listMyExperienceCandidates()).rejects.toMatchObject({
+      code: "sign_in_required",
+    });
+    signedIn = true;
+    owner = OWNER_A;
+    manager.notifyAccessStateChanged();
+    expect(await manager.listMyExperienceCandidates()).toEqual([
+      expect.objectContaining({
+        localCandidateId: prepared.localCandidateId,
+        skillName: "account-a-skill",
+      }),
+    ]);
+    expect(listOwnExperienceCandidates).not.toHaveBeenCalled();
+    expect(
+      readFileSync(join(profileA, "skills", "account-a-skill", "SKILL.md")),
+    ).toEqual(sourceA);
     database.close();
   });
 });

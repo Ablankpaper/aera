@@ -275,6 +275,13 @@ describe("AgentEra Agent-control preload namespace", () => {
     "retryPendingInstallation",
     "selectInstallationVersion",
     "archiveInstallation",
+    "listEligibleExperienceSkills",
+    "prepareExperienceCandidate",
+    "submitExperienceCandidate",
+    "listMyExperienceCandidates",
+    "listExperienceReviewQueue",
+    "getExperienceCandidate",
+    "reviewExperienceCandidate",
     "onStateChanged",
   ];
 
@@ -292,7 +299,7 @@ describe("AgentEra Agent-control preload namespace", () => {
     )?.[1];
     expect(namespace).toBeDefined();
     expect(namespace).not.toMatch(
-      /accessToken|refreshToken|offlineEntitlement|privateKey|publicKey|signature|ownerId|tenantId|deviceId|profilePath|filePath|remoteUrl|environment|rawResponse|responseText/i,
+      /accessToken|refreshToken|offlineEntitlement|privateKey|publicKey|signature|ownerId|tenantId|deviceId|workspaceId|profilePath|runtimeProfileId|sourceRelativePath|snapshot|filePath|remoteUrl|environment|rawResponse|responseText/i,
     );
   });
 });

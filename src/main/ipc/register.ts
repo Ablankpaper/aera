@@ -274,8 +274,11 @@ import {
   parseClaimVersionInput,
   parseCreateDraftInput,
   parseInstallVersionInput,
+  parsePrepareExperienceCandidateInput,
   parseRetryPendingInstallationInput,
+  parseReviewExperienceCandidateInput,
   parseSelectInstallationVersionInput,
+  parseSubmitExperienceCandidateInput,
   parseUpdateDraftInput,
 } from "../agentera-agent-control/ipc-contract";
 import type { AgenteraWorkspaceManager } from "../agentera-workspace/manager";
@@ -1060,6 +1063,49 @@ export function registerIpcHandlers(context: IpcContext): void {
     "agentera-agents-archive-installation",
     (_event, id: unknown) =>
       requireAgentControl().archiveInstallation(parseAgentControlId(id)),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-list-eligible-experience-skills",
+    (_event, installationId: unknown) =>
+      requireAgentControl().listEligibleExperienceSkills(
+        parseAgentControlId(installationId),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-prepare-experience-candidate",
+    (_event, input: unknown) =>
+      requireAgentControl().prepareExperienceCandidate(
+        parsePrepareExperienceCandidateInput(input),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-submit-experience-candidate",
+    (_event, input: unknown) =>
+      requireAgentControl().submitExperienceCandidate(
+        parseSubmitExperienceCandidateInput(input),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-list-my-experience-candidates",
+    () => requireAgentControl().listMyExperienceCandidates(),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-list-experience-review-queue",
+    () => requireAgentControl().listExperienceReviewQueue(),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-get-experience-candidate",
+    (_event, candidateId: unknown) =>
+      requireAgentControl().getExperienceCandidate(
+        parseAgentControlId(candidateId),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-review-experience-candidate",
+    (_event, input: unknown) =>
+      requireAgentControl().reviewExperienceCandidate(
+        parseReviewExperienceCandidateInput(input),
+      ),
   );
   const mainWindow = getMainWindow();
   // AgentEra product authentication is intentionally namespaced away from the

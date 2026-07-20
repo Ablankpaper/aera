@@ -16,6 +16,9 @@ import {
   type AgentDefinition,
   type AgentInstallation,
   type AgentPolicySnapshot,
+  type CloudExperienceCandidateBundle,
+  type CloudExperienceCandidateDetail,
+  type CloudExperienceCandidateSummary,
 } from "./client";
 
 const DEFINITION_ID = "11111111-1111-4111-8111-111111111111";
@@ -24,6 +27,9 @@ const INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
 const PROFILE_ID = "44444444-4444-4444-8444-444444444444";
 const POLICY_ID = "55555555-5555-4555-8555-555555555555";
 const WORKSPACE_ID = "77777777-7777-4777-8777-777777777777";
+const CANDIDATE_ID = "88888888-8888-4888-8888-888888888888";
+const REVIEW_ID = "99999999-9999-4999-8999-999999999999";
+const USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const VERSION_DIGEST = "ab".repeat(32);
 const NOW = new Date("2026-07-19T16:00:00.000Z");
 const SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
@@ -103,6 +109,50 @@ function deviceIdentity(): InstallationIdentity {
       .toString("base64url"),
     devicePrivateKey: Buffer.from(privateDer).toString("base64"),
   };
+}
+
+function experienceBundle(): CloudExperienceCandidateBundle {
+  return {
+    schema_version: 1 as const,
+    skill_name: "weekly-summary",
+    assets: [
+      {
+        path: "skills/weekly-summary/SKILL.md",
+        media_type: "text/markdown" as const,
+        content: "# Weekly summary\n",
+      },
+    ],
+  };
+}
+
+function experienceSummary(reviewed = false): CloudExperienceCandidateSummary {
+  return {
+    id: CANDIDATE_ID,
+    workspace_id: WORKSPACE_ID,
+    agent_definition_id: DEFINITION_ID,
+    source_agent_version_id: VERSION_ID,
+    submitted_by_user_id: USER_ID,
+    skill_name: "weekly-summary",
+    dlp_contract_version: "experience-candidate-dlp-v1" as const,
+    content_digest: VERSION_DIGEST,
+    created_at: NOW.toISOString(),
+    ...(reviewed
+      ? {
+          review: {
+            id: REVIEW_ID,
+            reviewed_by_user_id: USER_ID,
+            decision: "REJECTED" as const,
+            reason_code: "not_reusable",
+            safe_note: "Needs a reusable template.",
+            reviewed_at: NOW.toISOString(),
+          },
+        }
+      : {}),
+  };
+}
+
+function experienceDetail(reviewed = false): CloudExperienceCandidateDetail {
+  return { ...experienceSummary(reviewed), bundle: experienceBundle() };
 }
 
 describe("AgenteraAgentControlClient", () => {
@@ -369,6 +419,232 @@ describe("AgenteraAgentControlClient", () => {
         Buffer.from(String(payload.device_proof), "base64url"),
       ),
     ).toBe(true);
+  });
+
+  describe("ExperienceCandidate cloud contract", () => {
+    it("uses exact nested routes, idempotency keys, and canonical snake-case bodies", async () => {
+      const fetcher = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(experienceDetail(), 201))
+        .mockResolvedValueOnce(
+          jsonResponse({ candidates: [experienceSummary()] }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({ candidates: [experienceSummary()] }),
+        )
+        .mockResolvedValueOnce(jsonResponse(experienceDetail()))
+        .mockResolvedValueOnce(jsonResponse(experienceDetail(true)));
+      const client = new AgenteraAgentControlClient({
+        origin: "http://127.0.0.1:8086",
+        getAccessToken: () => "agentera-product-access",
+        getInstallationIdentity: () => deviceIdentity(),
+        fetch: fetcher as typeof fetch,
+        now: () => NOW,
+      });
+
+      await expect(
+        client.submitExperienceCandidate(
+          WORKSPACE_ID,
+          DEFINITION_ID,
+          {
+            source_version_id: VERSION_ID,
+            bundle: experienceBundle(),
+            content_digest: VERSION_DIGEST,
+          },
+          "candidate-submit-once",
+        ),
+      ).resolves.toEqual(experienceDetail());
+      await expect(
+        client.listOwnExperienceCandidates(WORKSPACE_ID),
+      ).resolves.toEqual([experienceSummary()]);
+      await expect(
+        client.listWorkspaceExperienceCandidates(WORKSPACE_ID),
+      ).resolves.toEqual([experienceSummary()]);
+      await expect(
+        client.getExperienceCandidate(WORKSPACE_ID, CANDIDATE_ID),
+      ).resolves.toEqual(experienceDetail());
+      await expect(
+        client.reviewExperienceCandidate(
+          WORKSPACE_ID,
+          CANDIDATE_ID,
+          {
+            decision: "REJECTED",
+            reason_code: "not_reusable",
+            safe_note: "Needs a reusable template.",
+          },
+          "candidate-review-once",
+        ),
+      ).resolves.toEqual(experienceDetail(true));
+
+      expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual([
+        `http://127.0.0.1:8086/api/v1/workspaces/${WORKSPACE_ID}/agent-definitions/${DEFINITION_ID}/experience-candidates`,
+        `http://127.0.0.1:8086/api/v1/workspaces/${WORKSPACE_ID}/experience-candidates/mine`,
+        `http://127.0.0.1:8086/api/v1/workspaces/${WORKSPACE_ID}/experience-candidates`,
+        `http://127.0.0.1:8086/api/v1/workspaces/${WORKSPACE_ID}/experience-candidates/${CANDIDATE_ID}`,
+        `http://127.0.0.1:8086/api/v1/workspaces/${WORKSPACE_ID}/experience-candidates/${CANDIDATE_ID}/review`,
+      ]);
+      const submit = fetcher.mock.calls[0][1];
+      expect(submit?.headers).toMatchObject({
+        "idempotency-key": "candidate-submit-once",
+      });
+      expect(JSON.parse(String(submit?.body))).toEqual({
+        source_version_id: VERSION_ID,
+        bundle: experienceBundle(),
+        content_digest: VERSION_DIGEST,
+      });
+      expect(JSON.stringify(submit?.body)).not.toContain("sourceVersionId");
+      const review = fetcher.mock.calls[4][1];
+      expect(review?.headers).toMatchObject({
+        "idempotency-key": "candidate-review-once",
+      });
+      expect(JSON.parse(String(review?.body))).toEqual({
+        decision: "REJECTED",
+        reason_code: "not_reusable",
+        safe_note: "Needs a reusable template.",
+      });
+    });
+
+    it("strictly rejects malformed ExperienceCandidate DTOs", async () => {
+      const fetcher = vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse({
+            ...experienceDetail(),
+            runtime_profile_path: "/private",
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            candidates: [
+              {
+                ...experienceSummary(),
+                review: null,
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            ...experienceDetail(),
+            bundle: {
+              ...experienceBundle(),
+              assets: [
+                {
+                  ...experienceBundle().assets[0],
+                  path: "skills/another-skill/SKILL.md",
+                },
+              ],
+            },
+          }),
+        );
+      const client = new AgenteraAgentControlClient({
+        origin: "http://127.0.0.1:8086",
+        getAccessToken: () => "agentera-product-access",
+        getInstallationIdentity: () => deviceIdentity(),
+        fetch: fetcher as typeof fetch,
+      });
+
+      await expect(
+        client.getExperienceCandidate(WORKSPACE_ID, CANDIDATE_ID),
+      ).rejects.toMatchObject({ code: "invalid_response" });
+      await expect(
+        client.listOwnExperienceCandidates(WORKSPACE_ID),
+      ).rejects.toMatchObject({ code: "invalid_response" });
+      await expect(
+        client.getExperienceCandidate(WORKSPACE_ID, CANDIDATE_ID),
+      ).rejects.toMatchObject({ code: "invalid_response" });
+    });
+
+    it("parses DLP findings without retaining or echoing raw response evidence", async () => {
+      const secret = "sk-proj-client-error-must-never-leak-123456789";
+      const fetcher = vi.fn(async () =>
+        jsonResponse(
+          {
+            error: {
+              code: "candidate_dlp_blocked",
+              message: secret,
+              request_id: "request-1",
+              findings: [
+                {
+                  code: "credential_api_key",
+                  path: "skills/weekly-summary/SKILL.md",
+                  line: 4,
+                },
+              ],
+            },
+          },
+          400,
+        ),
+      );
+      const client = new AgenteraAgentControlClient({
+        origin: "http://127.0.0.1:8086",
+        getAccessToken: () => "agentera-product-access",
+        getInstallationIdentity: () => deviceIdentity(),
+        fetch: fetcher as typeof fetch,
+      });
+
+      const error = await client
+        .submitExperienceCandidate(
+          WORKSPACE_ID,
+          DEFINITION_ID,
+          {
+            source_version_id: VERSION_ID,
+            bundle: experienceBundle(),
+            content_digest: VERSION_DIGEST,
+          },
+          "candidate-submit-once",
+        )
+        .catch((failure) => failure);
+      expect(error).toBeInstanceOf(AgenteraAgentControlClientError);
+      expect(error).toMatchObject({
+        status: 400,
+        code: "candidate_dlp_blocked",
+        findings: [
+          {
+            code: "credential_api_key",
+            path: "skills/weekly-summary/SKILL.md",
+            line: 4,
+          },
+        ],
+      });
+      expect(`${String(error)}${JSON.stringify(error)}`).not.toContain(secret);
+      expect(error).not.toHaveProperty("requestId");
+      expect(error).not.toHaveProperty("body");
+    });
+
+    it.each([
+      [409, "candidate_already_reviewed"],
+      [403, "workspace_forbidden"],
+      [404, "not_found"],
+      [409, "workspace_archived"],
+      [409, "workspace_owner_unavailable"],
+      [503, "service_unavailable"],
+    ])(
+      "preserves stable ExperienceCandidate error %s/%s",
+      async (status, code) => {
+        const fetcher = vi.fn(async () =>
+          jsonResponse(
+            {
+              error: {
+                code,
+                message: "localized by the client",
+                request_id: "request-2",
+              },
+            },
+            status,
+          ),
+        );
+        const client = new AgenteraAgentControlClient({
+          origin: "http://127.0.0.1:8086",
+          getAccessToken: () => "agentera-product-access",
+          getInstallationIdentity: () => deviceIdentity(),
+          fetch: fetcher as typeof fetch,
+        });
+        await expect(
+          client.getExperienceCandidate(WORKSPACE_ID, CANDIDATE_ID),
+        ).rejects.toMatchObject({ status, code });
+      },
+    );
   });
 
   it("is structurally separate from Hermes One Agent sync", () => {

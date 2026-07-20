@@ -61,8 +61,15 @@ import type {
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   CreateAgentDraftInput,
+  EligibleExperienceSkill,
+  ExperienceCandidateDetail,
+  ExperienceCandidatePreview,
+  ExperienceCandidateSummary,
+  PrepareExperienceCandidateInput,
   PublicationPreview,
   PublishedRevision,
+  ReviewExperienceCandidateInput,
+  SubmitExperienceCandidateInput,
   UpdateAgentDraftInput,
 } from "../shared/agentera-agent-control";
 import type {
@@ -236,6 +243,27 @@ interface AgenteraAgentsAPI {
   archiveInstallation: (
     id: string,
   ) => Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>>;
+  listEligibleExperienceSkills: (
+    installationId: string,
+  ) => Promise<AgenteraAgentControlResult<EligibleExperienceSkill[]>>;
+  prepareExperienceCandidate: (
+    input: PrepareExperienceCandidateInput,
+  ) => Promise<AgenteraAgentControlResult<ExperienceCandidatePreview>>;
+  submitExperienceCandidate: (
+    input: SubmitExperienceCandidateInput,
+  ) => Promise<AgenteraAgentControlResult<ExperienceCandidateSummary>>;
+  listMyExperienceCandidates: () => Promise<
+    AgenteraAgentControlResult<ExperienceCandidateSummary[]>
+  >;
+  listExperienceReviewQueue: () => Promise<
+    AgenteraAgentControlResult<ExperienceCandidateSummary[]>
+  >;
+  getExperienceCandidate: (
+    candidateId: string,
+  ) => Promise<AgenteraAgentControlResult<ExperienceCandidateDetail>>;
+  reviewExperienceCandidate: (
+    input: ReviewExperienceCandidateInput,
+  ) => Promise<AgenteraAgentControlResult<ExperienceCandidateDetail>>;
   onStateChanged: (
     callback: (state: AgenteraAgentControlPublicState) => void,
   ) => () => void;
