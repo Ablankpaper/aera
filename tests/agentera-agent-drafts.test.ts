@@ -217,6 +217,39 @@ describe("AgentEra desktop-local Agent drafts", () => {
     );
   });
 
+  it("lets one trusted caller own the SQLite transaction and clean rolled-back materialization", () => {
+    database.sqlite.exec("BEGIN IMMEDIATE");
+    const created = store.createDraftRowsInCurrentTransaction({
+      sourceAgentDefinitionId: DEFINITION_ID,
+      baseAgentVersionId: VERSION_ID,
+      displayName: "Transactional draft",
+      icon: null,
+      manifest: manifest(),
+      assets: assets(),
+    });
+    expect(store.getDraft(created.id)).toEqual(created);
+    database.sqlite.exec("ROLLBACK");
+    store.discardDraftMaterialization(created.id);
+
+    expect(store.listDrafts()).toEqual([]);
+    expect(() => store.getDraft(created.id)).toThrowError(
+      new AgentDraftStoreError("draft_not_found"),
+    );
+    expect(() =>
+      readFileSync(
+        join(
+          database.paths.draftsPath,
+          created.id,
+          "revisions",
+          "1",
+          "knowledge",
+          "notes.md",
+        ),
+        "utf8",
+      ),
+    ).toThrow();
+  });
+
   it("keeps drafts hidden across product-account switches", () => {
     store.createDraft({
       sourceAgentDefinitionId: null,

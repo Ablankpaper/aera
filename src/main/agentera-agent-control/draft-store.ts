@@ -216,6 +216,27 @@ export class AgentDraftStore {
   }
 
   createDraft(input: CreateAgentDraftInput): AgentDraft {
+    let created: AgentDraft | null = null;
+    try {
+      this.database.sqlite.exec("BEGIN IMMEDIATE");
+      created = this.createDraftRowsInCurrentTransaction(input);
+      this.database.sqlite.exec("COMMIT");
+      return created;
+    } catch (error) {
+      rollback(this.database);
+      if (created !== null) this.discardDraftMaterialization(created.id);
+      throw error;
+    }
+  }
+
+  /**
+   * Writes one draft inside a transaction already owned by a trusted
+   * main-process orchestrator. The caller must COMMIT or ROLLBACK and remove
+   * materialized files with discardDraftMaterialization after a later failure.
+   */
+  createDraftRowsInCurrentTransaction(
+    input: CreateAgentDraftInput,
+  ): AgentDraft {
     const id = requireUuid(this.randomUUID());
     const displayName = validateDisplayName(input.displayName);
     const sourceDefinitionId = nullableUuid(input.sourceAgentDefinitionId);
@@ -231,7 +252,6 @@ export class AgentDraftStore {
       assetContentByNormalizedPath(input.assets),
     );
     try {
-      this.database.sqlite.exec("BEGIN IMMEDIATE");
       this.database.sqlite
         .prepare(
           `INSERT INTO agent_drafts (
@@ -258,13 +278,19 @@ export class AgentDraftStore {
           timestamp,
         );
       this.insertAssetRows(id, revision, canonical.assets);
-      this.database.sqlite.exec("COMMIT");
     } catch (error) {
-      rollback(this.database);
       rmSync(materialized, { recursive: true, force: true });
       throw error;
     }
     return this.getDraft(id);
+  }
+
+  discardDraftMaterialization(idInput: string): void {
+    const id = requireUuid(idInput);
+    rmSync(join(this.database.paths.draftsPath, id), {
+      recursive: true,
+      force: true,
+    });
   }
 
   updateDraft(input: UpdateAgentDraftInput): AgentDraft {

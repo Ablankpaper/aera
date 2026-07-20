@@ -10,8 +10,10 @@ import type {
   AgenteraInstallVersionInput,
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
+  ConfirmExperienceCandidateImportInput,
   CreateAgentDraftInput,
   ExperienceCandidateDetail,
+  ExperienceCandidateImportPreview,
   ExperienceCandidatePreview,
   ExperienceCandidateSummary,
   EligibleExperienceSkill,
@@ -44,6 +46,7 @@ import {
 } from "./hermes-adapter";
 import { RuntimeBindingStore } from "./runtime-binding-store";
 import { ExperienceCandidateService } from "./experience-candidate-service";
+import { ExperienceCandidateImporter } from "./experience-candidate-importer";
 import { ExperienceCandidateStore } from "./experience-candidate-store";
 import { ReadOnlyHermesSkillCandidateSource } from "./hermes-skill-candidate-source";
 import {
@@ -333,6 +336,7 @@ export class AgenteraAgentControlManager {
 
   notifyAccessStateChanged(): void {
     this.contextComponents = null;
+    this.experienceCandidateComponents?.service.clearPreparedImports();
     this.experienceCandidateComponents = null;
     this.publicationOwners.clear();
     this.emitState();
@@ -341,6 +345,7 @@ export class AgenteraAgentControlManager {
 
   notifyAgentContextChanged(): void {
     this.contextComponents = null;
+    this.experienceCandidateComponents?.service.clearPreparedImports();
     this.experienceCandidateComponents = null;
     this.publicationOwners.clear();
     this.emitState();
@@ -593,6 +598,28 @@ export class AgenteraAgentControlManager {
     );
   }
 
+  async prepareExperienceCandidateImport(
+    candidateId: string,
+  ): Promise<ExperienceCandidateImportPreview> {
+    this.assertWorkspaceReviewRole();
+    await this.assertOnlineAccess(true);
+    return (
+      await this.ensureExperienceCandidateComponents()
+    ).service.prepareImport(candidateId);
+  }
+
+  async confirmExperienceCandidateImport(
+    input: ConfirmExperienceCandidateImportInput,
+  ): Promise<AgentDraftDetail> {
+    this.assertWorkspaceReviewRole();
+    await this.assertOnlineAccess(false);
+    const draft = await (
+      await this.ensureExperienceCandidateComponents()
+    ).service.confirmImport(input);
+    this.emitState();
+    return draft;
+  }
+
   async prepareHermesTurn(
     input: PrepareAgenteraHermesTurnInput,
   ): Promise<PreparedInstalledHermesTurn | null> {
@@ -659,6 +686,14 @@ export class AgenteraAgentControlManager {
     this.assertLocalAccess();
     const context = this.context();
     if (context.scope === "WORKSPACE" && context.role === "member") {
+      throw codedError("workspace_forbidden");
+    }
+  }
+
+  private assertWorkspaceReviewRole(): void {
+    this.assertLocalAccess();
+    const context = this.context();
+    if (context.scope !== "WORKSPACE" || context.role === "member") {
       throw codedError("workspace_forbidden");
     }
   }
@@ -730,6 +765,7 @@ export class AgenteraAgentControlManager {
     if (this.runtime?.key === key) return this.runtime;
     this.publicationOwners.clear();
     this.contextComponents = null;
+    this.experienceCandidateComponents?.service.clearPreparedImports();
     this.experienceCandidateComponents = null;
     const cache = new AgentVersionCache({
       database: full.database,
@@ -809,14 +845,32 @@ export class AgenteraAgentControlManager {
     if (this.experienceCandidateComponents?.key === key) {
       return this.experienceCandidateComponents;
     }
+    const candidates = new ExperienceCandidateStore({
+      database: full.database,
+      owner,
+      now: full.now,
+      randomUUID: full.randomUUID,
+    });
+    const drafts = new AgentDraftStore({
+      database: full.database,
+      owner,
+      context,
+      now: full.now,
+      randomUUID: full.randomUUID,
+    });
+    const importer = new ExperienceCandidateImporter({
+      database: full.database,
+      client: full.client,
+      candidates,
+      drafts,
+      cache: runtime.cache,
+      owner,
+      now: full.now,
+      randomUUID: full.randomUUID,
+    });
     const service = new ExperienceCandidateService({
       client: full.client,
-      store: new ExperienceCandidateStore({
-        database: full.database,
-        owner,
-        now: full.now,
-        randomUUID: full.randomUUID,
-      }),
+      store: candidates,
       source: new ReadOnlyHermesSkillCandidateSource(),
       getInstallation: (id) => runtime.installations.getLocalInstallation(id),
       resolveProfilePath: full.profiles.resolveProfilePath,
@@ -831,6 +885,7 @@ export class AgenteraAgentControlManager {
             };
       },
       getAuthState: full.getAuthState,
+      importer,
       now: full.now,
       randomUUID: full.randomUUID,
     });

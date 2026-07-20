@@ -46,6 +46,11 @@ export interface LocalExperienceCandidateImport {
   importedAt: string;
 }
 
+export type RecordLocalExperienceCandidateImport = Omit<
+  LocalExperienceCandidateImport,
+  "importedAt"
+>;
+
 export interface LocalExperienceCandidate {
   id: string;
   agentInstallationId: string;
@@ -587,6 +592,78 @@ export class ExperienceCandidateStore {
       draftId: uuid(row.draft_id),
       importedAt: timestamp(row.imported_at),
     };
+  }
+
+  recordImportInCurrentTransaction(
+    input: RecordLocalExperienceCandidateImport,
+  ): LocalExperienceCandidateImport {
+    const candidateId = uuid(input.candidateId);
+    const workspaceId = uuid(input.workspaceId);
+    const definitionId = uuid(input.agentDefinitionId);
+    const baseVersionId = uuid(input.baseAgentVersionId);
+    const candidateContentDigest = digest(input.candidateContentDigest);
+    const draftId = uuid(input.draftId);
+    const draft = this.database.sqlite
+      .prepare(
+        `SELECT id FROM agent_drafts
+         WHERE id = ? AND tenant_id = ? AND owner_id = ?
+           AND target_scope = 'WORKSPACE' AND workspace_id = ?
+           AND source_agent_definition_id = ? AND base_agent_version_id = ?`,
+      )
+      .get(
+        draftId,
+        this.tenantId,
+        this.ownerId,
+        workspaceId,
+        definitionId,
+        baseVersionId,
+      );
+    if (!draft) return storeError("candidate_conflict");
+
+    const existing = this.findImport(candidateId);
+    if (existing !== null) {
+      if (
+        existing.workspaceId === workspaceId &&
+        existing.agentDefinitionId === definitionId &&
+        existing.baseAgentVersionId === baseVersionId &&
+        existing.candidateContentDigest === candidateContentDigest &&
+        existing.draftId === draftId
+      ) {
+        return existing;
+      }
+      return storeError("candidate_conflict");
+    }
+
+    const importedAt = nowTimestamp(this.now);
+    try {
+      const inserted = this.database.sqlite
+        .prepare(
+          `INSERT INTO local_experience_candidate_imports (
+             tenant_id, owner_id, device_installation_id, workspace_id,
+             candidate_id, agent_definition_id, base_agent_version_id,
+             candidate_content_digest, draft_id, imported_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          this.tenantId,
+          this.ownerId,
+          this.deviceInstallationId,
+          workspaceId,
+          candidateId,
+          definitionId,
+          baseVersionId,
+          candidateContentDigest,
+          draftId,
+          importedAt,
+        );
+      if (changes(inserted) !== 1) return storeError("candidate_conflict");
+    } catch (error) {
+      if (error instanceof ExperienceCandidateStoreError) throw error;
+      return storeError("candidate_conflict");
+    }
+    const recorded = this.findImport(candidateId);
+    if (recorded === null) return storeError("candidate_conflict");
+    return recorded;
   }
 
   getOrCreateMutationIntent(

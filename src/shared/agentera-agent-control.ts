@@ -162,6 +162,9 @@ export type AgenteraAgentControlErrorCode =
   | "candidate_source_ineligible"
   | "candidate_dlp_blocked"
   | "candidate_already_reviewed"
+  | "candidate_not_approved"
+  | "candidate_base_advanced"
+  | "candidate_import_failed"
   | "operation_failed";
 
 export type AgenteraAgentControlResult<T> =
@@ -264,6 +267,24 @@ export interface ReviewExperienceCandidateInput {
   decision: "APPROVED" | "REJECTED";
   reasonCode: string | null;
   safeNote: string | null;
+}
+
+export interface ExperienceCandidateImportPreview {
+  importHandle: string;
+  candidateId: string;
+  sourceVersionId: string;
+  latestVersionId: string;
+  latestVersionNumber: number;
+  skillName: string;
+  replacesExistingSkill: boolean;
+  addedPaths: string[];
+  replacedPaths: string[];
+  removedPaths: string[];
+}
+
+export interface ConfirmExperienceCandidateImportInput {
+  importHandle: string;
+  confirmation: "apply-approved-skill-to-latest";
 }
 
 export type ExperienceCandidateLocalStatus =

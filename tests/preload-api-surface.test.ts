@@ -282,6 +282,8 @@ describe("AgentEra Agent-control preload namespace", () => {
     "listExperienceReviewQueue",
     "getExperienceCandidate",
     "reviewExperienceCandidate",
+    "prepareExperienceCandidateImport",
+    "confirmExperienceCandidateImport",
     "onStateChanged",
   ];
 
@@ -290,6 +292,21 @@ describe("AgentEra Agent-control preload namespace", () => {
     expect(extractAgenteraAgentTypeMethods(preloadTypes)).toEqual(expected);
     expect(preloadSrc).toContain(
       'contextBridge.exposeInMainWorld("agenteraAgents", agenteraAgentsAPI)',
+    );
+  });
+
+  it("exposes the experience candidate import methods only through Agent control", () => {
+    expect(extractAgenteraAgentMethods(preloadSrc)).toEqual(
+      expect.arrayContaining([
+        "prepareExperienceCandidateImport",
+        "confirmExperienceCandidateImport",
+      ]),
+    );
+    expect(extractAgenteraAgentTypeMethods(preloadTypes)).toEqual(
+      expect.arrayContaining([
+        "prepareExperienceCandidateImport",
+        "confirmExperienceCandidateImport",
+      ]),
     );
   });
 

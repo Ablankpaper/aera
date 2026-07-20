@@ -54,9 +54,11 @@ import type {
   AgenteraInstallVersionInput,
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
+  ConfirmExperienceCandidateImportInput,
   CreateAgentDraftInput,
   EligibleExperienceSkill,
   ExperienceCandidateDetail,
+  ExperienceCandidateImportPreview,
   ExperienceCandidatePreview,
   ExperienceCandidateSummary,
   PrepareExperienceCandidateInput,
@@ -1941,6 +1943,20 @@ const agenteraAgentsAPI = {
     input: ReviewExperienceCandidateInput,
   ): Promise<AgenteraAgentControlResult<ExperienceCandidateDetail>> =>
     ipcRenderer.invoke("agentera-agents-review-experience-candidate", input),
+  prepareExperienceCandidateImport: (
+    candidateId: string,
+  ): Promise<AgenteraAgentControlResult<ExperienceCandidateImportPreview>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-prepare-experience-candidate-import",
+      candidateId,
+    ),
+  confirmExperienceCandidateImport: (
+    input: ConfirmExperienceCandidateImportInput,
+  ): Promise<AgenteraAgentControlResult<AgentDraftDetail>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-confirm-experience-candidate-import",
+      input,
+    ),
   onStateChanged: (
     callback: (state: AgenteraAgentControlPublicState) => void,
   ): (() => void) => {

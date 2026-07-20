@@ -401,4 +401,48 @@ describe("ExperienceCandidateStore", () => {
     });
     expect(other.findImport(CLOUD_CANDIDATE_ID)).toBeNull();
   });
+
+  it("records an import receipt only inside its caller-owned transaction", () => {
+    const draftId = "13131313-1313-4313-8313-131313131313";
+    database.sqlite
+      .prepare(
+        `INSERT INTO agent_drafts (
+           id, tenant_id, owner_id, target_scope, workspace_id,
+           source_agent_definition_id, base_agent_version_id,
+           display_name, manifest_json, revision, created_at, updated_at
+         ) VALUES (?, ?, ?, 'WORKSPACE', ?, ?, ?, ?, '{}', 1, ?, ?)`,
+      )
+      .run(
+        draftId,
+        OWNER.tenantId,
+        OWNER.ownerId,
+        WORKSPACE_ID,
+        DEFINITION_ID,
+        VERSION_ID,
+        "Imported candidate",
+        NOW.toISOString(),
+        NOW.toISOString(),
+      );
+    const receipt = {
+      candidateId: CLOUD_CANDIDATE_ID,
+      workspaceId: WORKSPACE_ID,
+      agentDefinitionId: DEFINITION_ID,
+      baseAgentVersionId: VERSION_ID,
+      candidateContentDigest: "ab".repeat(32),
+      draftId,
+    };
+
+    database.sqlite.exec("BEGIN IMMEDIATE");
+    expect(store.recordImportInCurrentTransaction(receipt)).toMatchObject(
+      receipt,
+    );
+    database.sqlite.exec("ROLLBACK");
+    expect(store.findImport(CLOUD_CANDIDATE_ID)).toBeNull();
+
+    database.sqlite.exec("BEGIN IMMEDIATE");
+    const committed = store.recordImportInCurrentTransaction(receipt);
+    database.sqlite.exec("COMMIT");
+    expect(store.findImport(CLOUD_CANDIDATE_ID)).toEqual(committed);
+    expect(committed.importedAt).toBe(NOW.toISOString());
+  });
 });

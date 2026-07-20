@@ -320,6 +320,11 @@ describe("Agent control local USER ownership", () => {
     await expect(
       manager.preparePublication("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
     ).rejects.toMatchObject({ code: "workspace_forbidden" });
+    await expect(
+      manager.prepareExperienceCandidateImport(
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      ),
+    ).rejects.toMatchObject({ code: "workspace_forbidden" });
     expect(getSigningKeys).not.toHaveBeenCalled();
     database.close();
   });

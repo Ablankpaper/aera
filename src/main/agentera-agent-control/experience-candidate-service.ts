@@ -1,10 +1,13 @@
 import { createHash, randomUUID as nodeRandomUUID } from "node:crypto";
 import type { AgenteraAuthPublicState } from "../../shared/agentera-auth";
 import type {
+  AgentDraftDetail,
   AgenteraAgentControlContext,
+  ConfirmExperienceCandidateImportInput,
   ExperienceCandidateBundleV1,
   ExperienceCandidateDetail,
   ExperienceCandidateFinding,
+  ExperienceCandidateImportPreview,
   ExperienceCandidatePreview,
   ExperienceCandidateSummary,
   PrepareExperienceCandidateInput,
@@ -77,8 +80,21 @@ export interface ExperienceCandidateServiceOptions {
   resolveProfilePath: (profileId: string) => string;
   getContext: () => AgenteraAgentControlContext;
   getAuthState: () => AgenteraAuthPublicState;
+  importer: ExperienceCandidateImportOrchestrator;
   now?: () => Date;
   randomUUID?: () => string;
+}
+
+export interface ExperienceCandidateImportOrchestrator {
+  prepare(
+    workspaceId: string,
+    candidateId: string,
+  ): Promise<ExperienceCandidateImportPreview>;
+  confirm(
+    workspaceId: string,
+    input: ConfirmExperienceCandidateImportInput,
+  ): Promise<AgentDraftDetail>;
+  clearPreparedImports(): void;
 }
 
 export type ExperienceCandidateServiceErrorCode =
@@ -576,6 +592,27 @@ export class ExperienceCandidateService {
       }
       return serviceError("cloud_unavailable");
     }
+  }
+
+  async prepareImport(
+    candidateIdInput: string,
+  ): Promise<ExperienceCandidateImportPreview> {
+    const context = this.requireReviewer();
+    return this.options.importer.prepare(
+      context.workspaceId,
+      requireUuid(candidateIdInput),
+    );
+  }
+
+  async confirmImport(
+    input: ConfirmExperienceCandidateImportInput,
+  ): Promise<AgentDraftDetail> {
+    const context = this.requireReviewer();
+    return this.options.importer.confirm(context.workspaceId, input);
+  }
+
+  clearPreparedImports(): void {
+    this.options.importer.clearPreparedImports();
   }
 
   private assertLocalAccess(): void {

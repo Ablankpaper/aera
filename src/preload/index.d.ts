@@ -60,9 +60,11 @@ import type {
   AgenteraInstallVersionInput,
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
+  ConfirmExperienceCandidateImportInput,
   CreateAgentDraftInput,
   EligibleExperienceSkill,
   ExperienceCandidateDetail,
+  ExperienceCandidateImportPreview,
   ExperienceCandidatePreview,
   ExperienceCandidateSummary,
   PrepareExperienceCandidateInput,
@@ -264,6 +266,12 @@ interface AgenteraAgentsAPI {
   reviewExperienceCandidate: (
     input: ReviewExperienceCandidateInput,
   ) => Promise<AgenteraAgentControlResult<ExperienceCandidateDetail>>;
+  prepareExperienceCandidateImport: (
+    candidateId: string,
+  ) => Promise<AgenteraAgentControlResult<ExperienceCandidateImportPreview>>;
+  confirmExperienceCandidateImport: (
+    input: ConfirmExperienceCandidateImportInput,
+  ) => Promise<AgenteraAgentControlResult<AgentDraftDetail>>;
   onStateChanged: (
     callback: (state: AgenteraAgentControlPublicState) => void,
   ) => () => void;

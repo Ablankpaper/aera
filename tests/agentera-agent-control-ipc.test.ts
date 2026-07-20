@@ -10,6 +10,7 @@ import {
   executeAgentControlIpc,
   parseAgentControlId,
   parseClaimVersionInput,
+  parseConfirmExperienceCandidateImportInput,
   parseCreateDraftInput,
   parseInstallVersionInput,
   parsePrepareExperienceCandidateInput,
@@ -75,6 +76,8 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-list-experience-review-queue",
       "agentera-agents-get-experience-candidate",
       "agentera-agents-review-experience-candidate",
+      "agentera-agents-prepare-experience-candidate-import",
+      "agentera-agents-confirm-experience-candidate-import",
     ]) {
       expect(AGENTERA_IPC_CHANNEL_POLICY[channel]).toBe("online");
     }
@@ -243,6 +246,39 @@ describe("Agent control IPC contract", () => {
         safeNote: "private\nsecond line",
       }),
     ).toThrow();
+  });
+
+  it("accepts only the experience candidate import handle and exact confirmation", () => {
+    expect(
+      parseConfirmExperienceCandidateImportInput({
+        importHandle: UUID,
+        confirmation: "apply-approved-skill-to-latest",
+      }),
+    ).toEqual({
+      importHandle: UUID,
+      confirmation: "apply-approved-skill-to-latest",
+    });
+    expect(() =>
+      parseConfirmExperienceCandidateImportInput({
+        importHandle: UUID,
+        confirmation: "yes",
+      }),
+    ).toThrow();
+    for (const privateField of [
+      "workspaceId",
+      "ownerScope",
+      "profilePath",
+      "sourceRelativePath",
+      "candidateSnapshot",
+    ]) {
+      expect(() =>
+        parseConfirmExperienceCandidateImportInput({
+          importHandle: UUID,
+          confirmation: "apply-approved-skill-to-latest",
+          [privateField]: "private",
+        }),
+      ).toThrow();
+    }
   });
 
   it("maps failures to stable codes without returning cloud bodies, paths, or private messages", async () => {
@@ -451,6 +487,8 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-list-experience-review-queue",
       "agentera-agents-get-experience-candidate",
       "agentera-agents-review-experience-candidate",
+      "agentera-agents-prepare-experience-candidate-import",
+      "agentera-agents-confirm-experience-candidate-import",
     ]) {
       expect(register.match(new RegExp(`"${channel}"`, "g"))).toHaveLength(1);
     }

@@ -10,6 +10,7 @@ import type {
   AgenteraInstallVersionInput,
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
+  ConfirmExperienceCandidateImportInput,
   CreateAgentDraftInput,
   ExperienceCandidateFinding,
   PrepareExperienceCandidateInput,
@@ -276,6 +277,21 @@ export function parseReviewExperienceCandidateInput(
   };
 }
 
+export function parseConfirmExperienceCandidateImportInput(
+  value: unknown,
+): ConfirmExperienceCandidateImportInput {
+  if (
+    !exactObject(value, ["importHandle", "confirmation"]) ||
+    value.confirmation !== "apply-approved-skill-to-latest"
+  ) {
+    return invalidRequest();
+  }
+  return {
+    importHandle: parseAgentControlId(value.importHandle),
+    confirmation: "apply-approved-skill-to-latest",
+  };
+}
+
 function safeFindingPath(value: unknown): value is string {
   if (
     typeof value !== "string" ||
@@ -406,6 +422,9 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
   if (code === "candidate_already_reviewed") {
     return "candidate_already_reviewed";
   }
+  if (code === "candidate_not_approved") return "candidate_not_approved";
+  if (code === "candidate_base_advanced") return "candidate_base_advanced";
+  if (code === "candidate_import_failed") return "candidate_import_failed";
   if (code.startsWith("invalid_")) return "invalid_request";
   return "operation_failed";
 }

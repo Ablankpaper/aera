@@ -272,6 +272,7 @@ import {
   executeAgentControlIpc,
   parseAgentControlId,
   parseClaimVersionInput,
+  parseConfirmExperienceCandidateImportInput,
   parseCreateDraftInput,
   parseInstallVersionInput,
   parsePrepareExperienceCandidateInput,
@@ -1105,6 +1106,20 @@ export function registerIpcHandlers(context: IpcContext): void {
     (_event, input: unknown) =>
       requireAgentControl().reviewExperienceCandidate(
         parseReviewExperienceCandidateInput(input),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-prepare-experience-candidate-import",
+    (_event, candidateId: unknown) =>
+      requireAgentControl().prepareExperienceCandidateImport(
+        parseAgentControlId(candidateId),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-confirm-experience-candidate-import",
+    (_event, input: unknown) =>
+      requireAgentControl().confirmExperienceCandidateImport(
+        parseConfirmExperienceCandidateImportInput(input),
       ),
   );
   const mainWindow = getMainWindow();

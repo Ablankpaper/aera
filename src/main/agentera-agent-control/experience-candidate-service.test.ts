@@ -8,8 +8,11 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgenteraAuthPublicState } from "../../shared/agentera-auth";
 import type {
+  AgentDraftDetail,
   AgenteraAgentControlContext,
+  ConfirmExperienceCandidateImportInput,
   ExperienceCandidateBundleV1,
+  ExperienceCandidateImportPreview,
 } from "../../shared/agentera-agent-control";
 import type { AgenteraRuntimeOwner } from "../agentera-profile-binding";
 import {
@@ -27,6 +30,7 @@ import {
 import {
   ExperienceCandidateService,
   ExperienceCandidateServiceError,
+  type ExperienceCandidateImportOrchestrator,
 } from "./experience-candidate-service";
 import { ExperienceCandidateStore } from "./experience-candidate-store";
 import type {
@@ -63,6 +67,7 @@ let candidateIds: string[];
 let source: HermesSkillCandidateSource;
 let client: AgenteraAgentControlClient;
 let resolveProfilePath: ReturnType<typeof vi.fn<(profileId: string) => string>>;
+let candidateImporter: ExperienceCandidateImportOrchestrator;
 
 function nodeSqliteFactory(path: string): AgenteraSqliteDatabase {
   return new DatabaseSync(path) as unknown as AgenteraSqliteDatabase;
@@ -88,7 +93,10 @@ function cloudBundle(
   return request.bundle;
 }
 
-function onlineAuthState(): AgenteraAuthPublicState {
+function onlineAuthState(): Extract<
+  AgenteraAuthPublicState,
+  { cloudAvailable: boolean }
+> {
   return {
     status: "authenticated",
     userId: OWNER.ownerId,
@@ -205,6 +213,7 @@ function createService(): ExperienceCandidateService {
     resolveProfilePath,
     getContext: () => context,
     getAuthState: () => authState,
+    importer: candidateImporter,
     now: () => NOW,
     randomUUID: () => candidateIds.shift() ?? randomUUID(),
   });
@@ -280,6 +289,15 @@ beforeEach(() => {
     }),
   } as unknown as AgenteraAgentControlClient;
   resolveProfilePath = vi.fn<(profileId: string) => string>(() => PROFILE_PATH);
+  candidateImporter = {
+    prepare: vi.fn(async () => {
+      throw new Error("not configured");
+    }),
+    confirm: vi.fn(async () => {
+      throw new Error("not configured");
+    }),
+    clearPreparedImports: vi.fn(),
+  };
 });
 
 afterEach(() => {
@@ -610,5 +628,57 @@ describe("ExperienceCandidateService", () => {
       { decision: "APPROVED" },
       expect.any(String),
     );
+  });
+
+  it("routes approved import only through online Owner/Admin context and clears handles", async () => {
+    authState = onlineAuthState();
+    const preview: ExperienceCandidateImportPreview = {
+      importHandle: CANDIDATE_ID,
+      candidateId: CLOUD_CANDIDATE_ID,
+      sourceVersionId: VERSION_ID,
+      latestVersionId: VERSION_ID,
+      latestVersionNumber: 1,
+      skillName: "weekly-summary",
+      replacesExistingSkill: true,
+      addedPaths: [],
+      replacedPaths: ["skills/weekly-summary/SKILL.md"],
+      removedPaths: [],
+    };
+    const imported = {
+      id: CANDIDATE_ID,
+    } as AgentDraftDetail;
+    vi.mocked(candidateImporter.prepare).mockResolvedValue(preview);
+    vi.mocked(candidateImporter.confirm).mockResolvedValue(imported);
+    const service = createService();
+
+    await expect(
+      service.prepareImport(CLOUD_CANDIDATE_ID),
+    ).rejects.toMatchObject({ code: "workspace_forbidden" });
+    expect(candidateImporter.prepare).not.toHaveBeenCalled();
+
+    context = { scope: "WORKSPACE", workspaceId: WORKSPACE_ID, role: "admin" };
+    await expect(service.prepareImport(CLOUD_CANDIDATE_ID)).resolves.toEqual(
+      preview,
+    );
+    expect(candidateImporter.prepare).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      CLOUD_CANDIDATE_ID,
+    );
+    const confirmation: ConfirmExperienceCandidateImportInput = {
+      importHandle: CANDIDATE_ID,
+      confirmation: "apply-approved-skill-to-latest",
+    };
+    await expect(service.confirmImport(confirmation)).resolves.toBe(imported);
+    expect(candidateImporter.confirm).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      confirmation,
+    );
+
+    service.clearPreparedImports();
+    expect(candidateImporter.clearPreparedImports).toHaveBeenCalledOnce();
+    authState = { ...onlineAuthState(), cloudAvailable: false };
+    await expect(
+      service.prepareImport(CLOUD_CANDIDATE_ID),
+    ).rejects.toMatchObject({ code: "online_required" });
   });
 });
