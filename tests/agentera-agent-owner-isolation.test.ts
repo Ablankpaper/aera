@@ -397,13 +397,36 @@ describe("Agent control local USER ownership", () => {
       if (profileId === PROFILE_B_ID) return profileB;
       throw new Error("unknown profile");
     });
+    const resolveAttachedProfilePath = vi.fn(
+      (
+        runtimeProfileId: string,
+        agentInstallationId: string,
+        requestedOwner: AgenteraRuntimeOwner,
+      ) => {
+        if (
+          runtimeProfileId === PROFILE_A_ID &&
+          agentInstallationId === WORKSPACE_INSTALLATION_ID &&
+          requestedOwner === OWNER_A
+        ) {
+          return profileA;
+        }
+        if (
+          runtimeProfileId === PROFILE_B_ID &&
+          agentInstallationId === OWNER_B_INSTALLATION_ID &&
+          requestedOwner === OWNER_B
+        ) {
+          return profileB;
+        }
+        throw new Error("unknown attached profile");
+      },
+    );
     const manager = new AgenteraAgentControlManager({
       database,
       client: {
         origin: "https://cloud.agentera.test",
         listOwnExperienceCandidates,
       } as unknown as AgenteraAgentControlClient,
-      profileBindings: {} as never,
+      profileBindings: { resolveAttachedProfilePath } as never,
       profiles: {
         resolveProfilePath,
       } as never,
@@ -431,6 +454,12 @@ describe("Agent control local USER ownership", () => {
     ).resolves.toEqual([
       { skillName: "account-a-skill", description: "Learned locally" },
     ]);
+    expect(resolveAttachedProfilePath).toHaveBeenCalledWith(
+      PROFILE_A_ID,
+      WORKSPACE_INSTALLATION_ID,
+      OWNER_A,
+    );
+    expect(resolveProfilePath).not.toHaveBeenCalled();
     const prepared = await manager.prepareExperienceCandidate({
       installationId: WORKSPACE_INSTALLATION_ID,
       skillName: "account-a-skill",
