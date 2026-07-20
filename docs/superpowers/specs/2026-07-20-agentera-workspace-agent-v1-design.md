@@ -61,12 +61,13 @@ Migration `000010_workspace_agent_scope.sql` evolves only the tables that can ho
 
 - `agent_definitions`;
 - `agent_versions`;
-- `agent_version_revocations`;
 - `agent_control_idempotency_keys`.
 
 USER rows retain `tenant_id=personal_space_id`, `owner_id=user_id`, and no `workspace_id`. WORKSPACE rows store `workspace_id` and leave USER-only ownership columns null. Database checks require exactly one valid variant, and the Workspace foreign key prevents orphaned published assets.
 
 USER installations, policy snapshots, runtime binding records, and their owner columns remain unchanged. A Workspace version can be referenced by a USER installation, but the installation and policy rows continue to use the authenticated member's USER tuple.
+
+Workspace-wide emergency revocation is deferred until a Workspace policy can issue and propagate a scope-level deny independently of one member's USER policy snapshot. The existing USER revocation route and table remain USER-only in this slice; ordinary Workspace corrections publish a new immutable version and require explicit member selection.
 
 Scope-specific partial unique indexes preserve idempotency for both owner kinds even though nullable ownership columns are used. Existing USER rows and account-deletion foreign-key behavior remain intact.
 
