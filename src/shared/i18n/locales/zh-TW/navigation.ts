@@ -1,4 +1,5 @@
 import { workspaceZhTW } from "../workspace";
+import { organizationZhTW } from "../organization";
 
 export default {
   chat: "聊天",
@@ -24,4 +25,5 @@ export default {
   collapseSidebar: "收合側邊欄",
   expandSidebar: "展開側邊欄",
   workspace: workspaceZhTW,
+  organization: organizationZhTW,
 } as const;

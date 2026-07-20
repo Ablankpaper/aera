@@ -1,4 +1,5 @@
 import { workspaceEn } from "../workspace";
+import { organizationEn } from "../organization";
 
 export default {
   chat: "Czat",
@@ -24,4 +25,5 @@ export default {
   collapseSidebar: "Zwin pasek boczny",
   expandSidebar: "Rozwiń pasek boczny",
   workspace: workspaceEn,
+  organization: organizationEn,
 } as const;

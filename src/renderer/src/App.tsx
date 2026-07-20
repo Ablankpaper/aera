@@ -9,6 +9,7 @@ import type {
 import ErrorBoundary from "./components/ErrorBoundary";
 import { FontProvider } from "./components/FontProvider";
 import WorkspaceInvitationGate from "./components/WorkspaceInvitationGate";
+import OrganizationInvitationGate from "./components/OrganizationInvitationGate";
 import { ProfileModalProvider } from "./components/profile/ProfileModalProvider";
 import { SettingsModalProvider } from "./components/settings/SettingsModalProvider";
 import { ThemeProvider } from "./components/ThemeProvider";
@@ -443,6 +444,7 @@ function App(): React.JSX.Element {
                 <div className="app-content">{renderScreen()}</div>
               </div>
               <WorkspaceInvitationGate authState={authState} />
+              <OrganizationInvitationGate authState={authState} />
               <Toaster
                 position="bottom-right"
                 reverseOrder={false}

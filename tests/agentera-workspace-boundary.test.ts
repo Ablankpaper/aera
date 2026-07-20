@@ -16,7 +16,7 @@ function workspaceDomainFiles(): string[] {
   return [
     ...mainFiles,
     "src/shared/agentera-workspace.ts",
-    "src/renderer/src/screens/Layout/WorkspaceSwitcher.tsx",
+    "src/renderer/src/screens/Layout/ProductSpaceSwitcher.tsx",
     "src/renderer/src/screens/Layout/WorkspaceManagementDialog.tsx",
     "src/renderer/src/components/WorkspaceInvitationGate.tsx",
   ];
@@ -73,14 +73,14 @@ describe("AgentEra Workspace remains outside the Hermes adaptive core", () => {
 
   it("routes Workspace compatibility selection through the dedicated product-space coordinator", () => {
     const switcher = source(
-      "src/renderer/src/screens/Layout/WorkspaceSwitcher.tsx",
+      "src/renderer/src/screens/Layout/ProductSpaceSwitcher.tsx",
     );
     const selection = switcher.slice(
       switcher.indexOf("const handleSelect"),
       switcher.indexOf("return (", switcher.indexOf("const handleSelect")),
     );
-    expect(selection).toContain("window.agenteraWorkspace.select");
-    expect(selection.match(/agenteraWorkspace\.select/g)).toHaveLength(1);
+    expect(selection).toContain("window.agenteraProductSpace.select");
+    expect(selection.match(/agenteraProductSpace\.select/g)).toHaveLength(1);
     expect(selection).not.toMatch(
       /(?:setActiveProfile|createProfile|deleteProfile|sendMessage|RuntimeBinding|agenteraAgentControl|agentSync|localStorage|sessionStorage)/,
     );

@@ -21,8 +21,9 @@ import Sessions from "../Sessions/Sessions";
 import Agents from "../Agents/Agents";
 import Discover from "../Discover/Discover";
 import ProfileSwitcher from "./ProfileSwitcher";
-import WorkspaceSwitcher from "./WorkspaceSwitcher";
+import ProductSpaceSwitcher from "./ProductSpaceSwitcher";
 import WorkspaceManagementDialog from "./WorkspaceManagementDialog";
+import OrganizationManagementDialog from "./OrganizationManagementDialog";
 import SidebarRecentSessions from "./SidebarRecentSessions";
 import Skills from "../Skills/Skills";
 import Memory from "../Memory/Memory";
@@ -270,6 +271,8 @@ function Layout({
     }
   });
   const [workspaceManagementOpen, setWorkspaceManagementOpen] = useState(false);
+  const [organizationManagementOpen, setOrganizationManagementOpen] =
+    useState(false);
   // Full-list sessions modal (opened from the sidebar "Show more" affordance or
   // the Cmd/Ctrl+K menu action). Reuses the Sessions screen inside a modal —
   // there is no longer a top-level Sessions view.
@@ -716,10 +719,11 @@ function Layout({
           </button>
         </div>
 
-        <WorkspaceSwitcher
+        <ProductSpaceSwitcher
           authState={authState}
           compact={sidebarCollapsed}
-          onManage={() => setWorkspaceManagementOpen(true)}
+          onManageWorkspaces={() => setWorkspaceManagementOpen(true)}
+          onManageOrganizations={() => setOrganizationManagementOpen(true)}
         />
 
         <nav className="sidebar-nav sidebar-nav-pinned">
@@ -1040,6 +1044,11 @@ function Layout({
         open={workspaceManagementOpen}
         authState={authState}
         onClose={() => setWorkspaceManagementOpen(false)}
+      />
+      <OrganizationManagementDialog
+        open={organizationManagementOpen}
+        authState={authState}
+        onClose={() => setOrganizationManagementOpen(false)}
       />
     </div>
   );

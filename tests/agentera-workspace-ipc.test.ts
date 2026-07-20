@@ -399,7 +399,7 @@ describe("Workspace IPC and startup wiring", () => {
   it("keeps the global switcher below the brand and before pinned navigation without moving ProfileSwitcher", () => {
     const layout = source("src/renderer/src/screens/Layout/Layout.tsx");
     const brandAt = layout.indexOf('<div className="sidebar-brand">');
-    const workspaceAt = layout.indexOf("<WorkspaceSwitcher");
+    const workspaceAt = layout.indexOf("<ProductSpaceSwitcher");
     const pinnedAt = layout.indexOf(
       '<nav className="sidebar-nav sidebar-nav-pinned">',
     );

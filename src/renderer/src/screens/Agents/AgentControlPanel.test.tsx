@@ -28,6 +28,7 @@ const DEFINITION_ID = "11111111-1111-4111-8111-111111111111";
 const VERSION_ID = "22222222-2222-4222-8222-222222222222";
 const INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
 const WORKSPACE_ID = "66666666-6666-4666-8666-666666666666";
+const ORGANIZATION_ID = "99999999-9999-4999-8999-999999999999";
 
 function success<T>(data: T): AgenteraAgentControlResult<T> {
   return { ok: true, data };
@@ -301,6 +302,39 @@ describe("AgentControlPanel", () => {
     expect(
       screen.getByRole("button", { name: "agents.control.install" }),
     ).toBeEnabled();
+  });
+
+  it("explains organization_agent_not_enabled without exposing personal or Workspace Agent controls", async () => {
+    const api = installAPI({
+      getState: vi.fn(async () =>
+        success(
+          controlState({
+            scope: "ORGANIZATION_UNAVAILABLE",
+            organizationId: ORGANIZATION_ID,
+            role: "admin",
+          }),
+        ),
+      ),
+    });
+    render(<AgentControlPanel profiles={[]} />);
+
+    expect(
+      await screen.findByText("navigation.organization.agentUnavailable.title"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("navigation.organization.agentUnavailable.description"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("navigation.organization.agentUnavailable.boundary"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("agents.control.localDrafts")).toBeNull();
+    expect(screen.queryByText("agents.control.installations")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "agents.control.newAgent" }),
+    ).toBeNull();
+    expect(api.listInstallations).not.toHaveBeenCalled();
+    expect(api.listDrafts).not.toHaveBeenCalled();
+    expect(api.listDefinitions).not.toHaveBeenCalled();
   });
 
   it("offers explicit local experience promotion only for an active selected-Workspace installation", async () => {
