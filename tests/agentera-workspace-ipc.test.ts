@@ -393,4 +393,20 @@ describe("Workspace IPC and startup wiring", () => {
       /switchProfile|createProfile|createRuntimeBinding|RuntimeBinding|Curator|HERMES_HOME/,
     );
   });
+
+  it("keeps the global switcher below the brand and before pinned navigation without moving ProfileSwitcher", () => {
+    const layout = source("src/renderer/src/screens/Layout/Layout.tsx");
+    const brandAt = layout.indexOf('<div className="sidebar-brand">');
+    const workspaceAt = layout.indexOf("<WorkspaceSwitcher");
+    const pinnedAt = layout.indexOf(
+      '<nav className="sidebar-nav sidebar-nav-pinned">',
+    );
+    const footerAt = layout.indexOf('<div className="sidebar-footer">');
+    const profileAt = layout.indexOf("<ProfileSwitcher");
+
+    expect(brandAt).toBeGreaterThan(-1);
+    expect(brandAt).toBeLessThan(workspaceAt);
+    expect(workspaceAt).toBeLessThan(pinnedAt);
+    expect(footerAt).toBeLessThan(profileAt);
+  });
 });

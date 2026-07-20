@@ -21,6 +21,7 @@ import Sessions from "../Sessions/Sessions";
 import Agents from "../Agents/Agents";
 import Discover from "../Discover/Discover";
 import ProfileSwitcher from "./ProfileSwitcher";
+import WorkspaceSwitcher from "./WorkspaceSwitcher";
 import SidebarRecentSessions from "./SidebarRecentSessions";
 import Skills from "../Skills/Skills";
 import Memory from "../Memory/Memory";
@@ -712,6 +713,8 @@ function Layout({
             )}
           </button>
         </div>
+
+        <WorkspaceSwitcher authState={authState} compact={sidebarCollapsed} />
 
         <nav className="sidebar-nav sidebar-nav-pinned">
           <button
