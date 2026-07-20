@@ -34,6 +34,10 @@ V1 rejects links, path escape, binary or oversized files, credentials, Profile p
 
 The desktop pins the reviewed cloud OpenAPI and shared vector file byte-for-byte. Its main-process canonicalizer applies the same NFC paths, UTF-8 byte limits, deterministic JSON/SHA-256 encoding, sorted findings, and `experience-candidate-dlp-v1` rules as the cloud before later snapshot work can proceed.
 
+Local control-plane schema v4 stores a prepared candidate as an immutable canonical snapshot below Electron `userData/agentera-control-plane/candidates/<tenant>/<owner>/<device>/<candidate>/candidate.json`, never below `HERMES_HOME`. The metadata row is bound to the exact active USER-owned Workspace Installation, source AgentVersion, Runtime Profile, account, and device; renderer-safe rows omit every Profile and snapshot path.
+
+The read-only Hermes source adapter accepts only a persisted `.usage.json` record marked `created_by: "agent"` or legacy `agent_created: true`. It resolves only flat `skills/<skill>` or category `skills/<category>/<skill>` layouts in the selected physical Profile, excludes archived, bundled, Hub, external-link, projected, duplicate, and missing Skills, and rejects links, path escape, special files, hidden/dependency/cache trees, binary or invalid UTF-8 data, and package limits before snapshot creation. `.usage.json`, counters, absolute paths, and unrelated Skills never enter the detached candidate bundle, and neither successful nor failed reads mutate Hermes files.
+
 ### Candidate review and draft import
 
 Workspace Members may submit from their own matching Installation, while Owner and Admin review terminal candidate decisions and import approved content into a local draft.
