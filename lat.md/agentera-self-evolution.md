@@ -40,6 +40,10 @@ Cloud migration 11 stores an immutable candidate core plus at most one terminal 
 
 Submission and review idempotency stay scoped to the authenticated USER actor. Account finalization detaches only submitter, device, and reviewer identifiers; the candidate digest, canonical bundle, destination, and terminal decision remain unchanged.
 
+The cloud candidate API exposes separate own-status and Owner/Admin review queues. Lists omit bundle content; detail reads authorize the active submitter or Workspace reviewer, audit reviewer access, and never return the submitting device identity.
+
+Submission accepts only the path-derived Workspace and definition plus a canonical Skill bundle, source version, and digest. The service repeats canonicalization and DLP before persistence, while rejection notes are bounded and secret-scanned and every review remains terminal.
+
 Approval overlays only the selected Skill directory onto a new draft based on the latest immutable Workspace Agent version. It never publishes automatically or modifies an existing Hermes Profile or running RuntimeBinding.
 
 ### Candidate failure isolation

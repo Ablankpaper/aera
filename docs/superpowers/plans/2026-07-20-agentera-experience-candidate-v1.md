@@ -418,6 +418,7 @@ git commit -m "feat: persist reviewed experience candidates"
 - Create: `internal/agentcontrol/experience_candidate_http.go`
 - Create: `internal/agentcontrol/experience_candidate_http_test.go`
 - Modify: `internal/agentcontrol/service.go`
+- Modify: `internal/agentcontrol/service_test.go`
 - Modify: `internal/agentcontrol/http.go`
 - Modify: `internal/agentcontrol/http_test.go`
 - Modify: `api/openapi.yaml`
@@ -447,7 +448,7 @@ type ReviewExperienceCandidateRequest struct {
 func (s *Service) SubmitExperienceCandidate(context.Context, Principal, uuid.UUID, SubmitExperienceCandidateRequest) (ExperienceCandidate, error)
 func (s *Service) ListOwnExperienceCandidates(context.Context, Principal, uuid.UUID) ([]ExperienceCandidate, error)
 func (s *Service) ListWorkspaceExperienceCandidates(context.Context, Principal, uuid.UUID) ([]ExperienceCandidate, error)
-func (s *Service) GetExperienceCandidate(context.Context, Principal, uuid.UUID, uuid.UUID) (ExperienceCandidate, error)
+func (s *Service) GetExperienceCandidate(context.Context, Principal, uuid.UUID, uuid.UUID, string) (ExperienceCandidate, error)
 func (s *Service) ReviewExperienceCandidate(context.Context, Principal, uuid.UUID, ReviewExperienceCandidateRequest) (ExperienceCandidate, error)
 ```
 
@@ -552,7 +553,7 @@ Expected: PASS with existing API behavior unchanged.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add internal/agentcontrol/experience_candidate_service.go internal/agentcontrol/experience_candidate_service_test.go internal/agentcontrol/experience_candidate_http.go internal/agentcontrol/experience_candidate_http_test.go internal/agentcontrol/service.go internal/agentcontrol/http.go internal/agentcontrol/http_test.go api/openapi.yaml api/openapi_test.go
+git add internal/agentcontrol/experience_candidate_service.go internal/agentcontrol/experience_candidate_service_test.go internal/agentcontrol/experience_candidate_http.go internal/agentcontrol/experience_candidate_http_test.go internal/agentcontrol/service.go internal/agentcontrol/service_test.go internal/agentcontrol/http.go internal/agentcontrol/http_test.go api/openapi.yaml api/openapi_test.go
 git commit -m "feat: expose ExperienceCandidate review API"
 ```
 
