@@ -20,6 +20,30 @@ AgentEra owns an optional publication path that starts only after local learning
 
 Selected learning becomes a minimal candidate, passes owner-scope authorization and DLP, receives destination-owner review, and may enter a new immutable Agent version. Candidate failure never rolls back local learning.
 
+### ExperienceCandidate V1
+
+The first promotion slice treats one explicitly selected Hermes agent-created Skill as a reviewable Workspace Agent contribution.
+
+The desktop reads the Skill through a trusted read-only adapter, snapshots it outside `HERMES_HOME`, and requires explicit user consent before submission. The locked design is `docs/superpowers/specs/2026-07-20-agentera-experience-candidate-v1-design.md`.
+
+### Candidate privacy gate
+
+Local and cloud scanners enforce the same versioned canonical-package and DLP contract before candidate content becomes cloud state.
+
+V1 rejects links, path escape, binary or oversized files, credentials, Profile paths, and Memory, USER, session, conversation, or Curator payloads. Findings expose only codes and candidate-relative locations, never matched secrets.
+
+### Candidate review and draft import
+
+Workspace Members may submit from their own matching Installation, while Owner and Admin review terminal candidate decisions and import approved content into a local draft.
+
+Approval overlays only the selected Skill directory onto a new draft based on the latest immutable Workspace Agent version. It never publishes automatically or modifies an existing Hermes Profile or running RuntimeBinding.
+
+### Candidate failure isolation
+
+Preparation, upload, review, import, and publication failures are isolated from the source Profile and local learning loop.
+
+The immutable local source Skill survives rejection and every failure. Offline preparation is allowed, submission retry is explicit, and an approved candidate remains importable when one reviewer's local draft creation fails.
+
 ## Version and adaptive-state layers
 
 An installed Agent combines an immutable published version, an installation-policy overlay, and private local adaptive state.
