@@ -39,6 +39,7 @@ lat.md/.cache/
 # Electron packaging artifacts
 /release/
 .claude/worktrees
+.worktrees/
 
 # Verified Runtime Seed build staging (the signed assets are fetched per target)
 /resources/agentera-runtime-seed/*
