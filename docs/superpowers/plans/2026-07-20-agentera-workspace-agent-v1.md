@@ -34,7 +34,7 @@
 - Create: `migrations/000010_workspace_agent_scope.sql`
 - Modify: `internal/store/migrate_test.go`
 - Modify: `internal/agentcontrol/model.go`
-- Modify: `internal/agentcontrol/model_test.go`
+- Create: `internal/agentcontrol/model_test.go`
 
 **Interfaces:**
 
