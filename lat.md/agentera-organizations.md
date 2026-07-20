@@ -20,6 +20,8 @@ The first implemented slice is the cloud persistence and configuration foundatio
 
 The second implemented slice is `aera-cloud/internal/organization/model.go`, `token.go`, and `limiter.go`. It defines strict Owner/Admin/Auditor/Member and lifecycle values, NFC-normalized Organization and Department names, stable Unicode case-folded Department keys, positive quotas/revisions, renderer-safe summary shapes, canonical 256-bit invitation secrets whose formatting is always redacted, and five independently hashed Redis rate-limit scopes. The focused tests prove malformed or non-canonical tokens are rejected, raw account/device/Organization identifiers never enter Redis keys, backend failure is fail-closed, and each action retains its own counter and window.
 
+The third implemented slice is `aera-cloud/internal/organization/policy.go` and `signing.go`. Policy V1 uses strict duplicate-key and unknown-key rejection, deterministic canonical JSON, stable SHA-256 content digests, explicit null-inherit versus empty-deny semantics, and intersections that can only narrow model or tool access. Immutable policy attestations use the independent `agentera-organization-policy-v1` Ed25519 signature domain and bind Organization ID, snapshot ID, policy version, and content digest. Signing keys are validated and copied, published keys expose only public material, and focused regression tests keep the existing Agent-control signing path green. This is Organization control-plane metadata only; it creates no Agent, Installation, RuntimeBinding, Profile, Memory, session, or learning state.
+
 ## Ownership and roles
 
 Every active or archived Organization has exactly one transferable Owner plus optional Admin, Auditor, and Member Memberships.
