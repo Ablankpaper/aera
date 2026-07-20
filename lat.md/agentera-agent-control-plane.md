@@ -14,6 +14,12 @@ The next approved slice adds Workspace ownership only to published AgentDefiniti
 
 Owner and Admin may publish immutable Workspace versions, and active Members may discover and install them. The desktop derives the target from the trusted global Workspace context rather than renderer-supplied ownership fields. Shared Knowledge, Skill, and SOP assets enter Hermes only through the existing verified read-only projection. The locked design is `docs/superpowers/specs/2026-07-20-agentera-workspace-agent-v1-design.md`.
 
+## Approved Organization foundation boundary
+
+The approved enterprise foundation adds Organization identity, transferable ownership, roles, Departments, signed policy, audit, lifecycle, and trusted product context before Agent control accepts Organization-owned assets.
+
+[[agentera-organizations|Organization Foundation V1]] deliberately exposes an explicit unavailable Agent state while an Organization is selected. It does not map Organization navigation to USER ownership, add `owner_scope=ORGANIZATION`, create an Installation, or touch a Hermes Profile. The next separate Agent slice consumes the foundation's authorization and policy contracts.
+
 ## Trusted Workspace Agent context
 
 The main process derives one exact USER or WORKSPACE asset context from product navigation and never accepts ownership fields through Agent IPC.

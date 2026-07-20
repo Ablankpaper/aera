@@ -6,7 +6,7 @@ Workspace Foundation V1 adds collaborative identity and authorization around Age
 
 The Workspace Foundation slice delivers workspace lifecycle, fixed ownership, membership roles, one-time invitations, audit, desktop context switching, and offline read-only metadata.
 
-Foundation does not itself own Agent assets. The approved Workspace Agent extension builds `owner_scope=WORKSPACE`, immutable publication, discovery, and installation on this authorization boundary; organizations, official Agents, and ExperienceCandidate promotion remain later slices.
+Foundation does not itself own Agent assets. The approved Workspace Agent extension builds `owner_scope=WORKSPACE`, immutable publication, discovery, and installation on this authorization boundary. [[agentera-organizations|Organization Foundation]] is now a separate approved enterprise slice; official Agents remain later work.
 
 ## Ownership and roles
 
