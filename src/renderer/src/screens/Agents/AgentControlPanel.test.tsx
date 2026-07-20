@@ -14,6 +14,9 @@ import type {
   AgenteraAgentControlResult,
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
+  ExperienceCandidateDetail,
+  ExperienceCandidateImportPreview,
+  ExperienceCandidateSummary,
 } from "../../../../shared/agentera-agent-control";
 import AgentControlPanel from "./AgentControlPanel";
 
@@ -104,6 +107,56 @@ function installation(
   };
 }
 
+function approvedCandidate(): ExperienceCandidateSummary {
+  return {
+    localCandidateId: "88888888-8888-4888-8888-888888888888",
+    cloudCandidateId: "88888888-8888-4888-8888-888888888888",
+    agentDefinitionId: DEFINITION_ID,
+    sourceAgentVersionId: VERSION_ID,
+    skillName: "research-notes",
+    contentDigest: `sha256:${"a".repeat(64)}`,
+    localStatus: "SUBMITTED",
+    reviewStatus: "APPROVED",
+    lastErrorCode: "candidate_import_failed",
+    createdAt: "2026-07-20T00:00:00.000Z",
+    reviewedAt: "2026-07-20T01:00:00.000Z",
+  };
+}
+
+function approvedCandidateDetail(): ExperienceCandidateDetail {
+  return {
+    ...approvedCandidate(),
+    bundle: {
+      schemaVersion: 1,
+      skillName: "research-notes",
+      assets: [
+        {
+          path: "skills/research-notes/SKILL.md",
+          mediaType: "text/markdown",
+          content: "Reusable research procedure",
+        },
+      ],
+    },
+    decisionReasonCode: null,
+    safeNote: null,
+  };
+}
+
+function candidateImportPreview(): ExperienceCandidateImportPreview {
+  return {
+    importHandle: "99999999-9999-4999-8999-999999999999",
+    candidateId: approvedCandidate().cloudCandidateId!,
+    sourceVersionId: VERSION_ID,
+    latestVersionId: VERSION_ID,
+    latestVersionNumber: 3,
+    skillName: "research-notes",
+    replacesExistingSkill: false,
+    addedPaths: ["skills/research-notes/SKILL.md"],
+    replacedPaths: [],
+    removedPaths: [],
+  };
+}
+
 type MockedPanelAgenteraAPI = Window["agenteraAgents"] & {
   listDefinitions: ReturnType<typeof vi.fn>;
   archiveInstallation: ReturnType<typeof vi.fn>;
@@ -129,6 +182,15 @@ function installAPI(
     retryPendingInstallation: vi.fn(),
     selectInstallationVersion: vi.fn(),
     archiveInstallation: vi.fn(),
+    listEligibleExperienceSkills: vi.fn(async () => success([])),
+    prepareExperienceCandidate: vi.fn(),
+    submitExperienceCandidate: vi.fn(),
+    listMyExperienceCandidates: vi.fn(async () => success([])),
+    listExperienceReviewQueue: vi.fn(async () => success([])),
+    getExperienceCandidate: vi.fn(),
+    reviewExperienceCandidate: vi.fn(),
+    prepareExperienceCandidateImport: vi.fn(),
+    confirmExperienceCandidateImport: vi.fn(),
     onStateChanged: vi.fn(() => () => undefined),
     ...overrides,
   } as unknown as MockedPanelAgenteraAPI;
@@ -173,6 +235,11 @@ describe("AgentControlPanel", () => {
       screen.getByRole("button", { name: "agents.control.newAgent" }),
     ).toBeEnabled();
     expect(screen.getByText("agents.control.personalSpaceTitle")).toBeTruthy();
+    expect(
+      screen.queryByRole("button", {
+        name: "agents.control.experience.promoteLocalExperience",
+      }),
+    ).toBeNull();
   });
 
   // @lat: [[agentera-agent-control-plane#Trusted Workspace Agent context#Role-aware presentation]]
@@ -234,6 +301,136 @@ describe("AgentControlPanel", () => {
     expect(
       screen.getByRole("button", { name: "agents.control.install" }),
     ).toBeEnabled();
+  });
+
+  it("offers explicit local experience promotion only for an active selected-Workspace installation", async () => {
+    const api = installAPI({
+      getState: vi.fn(async () =>
+        success(
+          controlState({
+            scope: "WORKSPACE",
+            workspaceId: WORKSPACE_ID,
+            role: "member",
+          }),
+        ),
+      ),
+      listInstallations: vi.fn(async () =>
+        success([installation("pending"), installation("active")]),
+      ),
+    });
+    render(<AgentControlPanel profiles={[]} />);
+
+    const promote = await screen.findByRole("button", {
+      name: "agents.control.experience.promoteLocalExperience",
+    });
+    expect(
+      screen.getAllByRole("button", {
+        name: "agents.control.experience.promoteLocalExperience",
+      }),
+    ).toHaveLength(1);
+    expect(api.listEligibleExperienceSkills).not.toHaveBeenCalled();
+    fireEvent.click(promote);
+
+    expect(
+      await screen.findByRole("dialog", {
+        name: "agents.control.experience.promotionTitle",
+      }),
+    ).toBeTruthy();
+    expect(api.listEligibleExperienceSkills).toHaveBeenCalledWith(
+      INSTALLATION_ID,
+    );
+  });
+
+  it("opens the imported approved candidate in the existing draft editor without publishing", async () => {
+    const approved = approvedCandidate();
+    const importedDraft = draft();
+    const api = installAPI({
+      getState: vi.fn(async () =>
+        success(
+          controlState({
+            scope: "WORKSPACE",
+            workspaceId: WORKSPACE_ID,
+            role: "owner",
+          }),
+        ),
+      ),
+      listMyExperienceCandidates: vi.fn(async () => success([approved])),
+      listExperienceReviewQueue: vi.fn(async () => success([])),
+      getExperienceCandidate: vi.fn(async () =>
+        success(approvedCandidateDetail()),
+      ),
+      prepareExperienceCandidateImport: vi.fn(async () =>
+        success(candidateImportPreview()),
+      ),
+      confirmExperienceCandidateImport: vi.fn(async () =>
+        success(importedDraft),
+      ),
+    });
+    render(<AgentControlPanel profiles={[]} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "agents.control.experience.createDraftRetry",
+      }),
+    );
+    fireEvent.click(
+      await screen.findByRole("checkbox", {
+        name: "agents.control.experience.importConfirmation",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.control.experience.createDraft",
+      }),
+    );
+
+    expect(
+      await screen.findByDisplayValue("Workspace Research Agent"),
+    ).toBeTruthy();
+    expect(api.confirmExperienceCandidateImport).toHaveBeenCalledWith({
+      importHandle: candidateImportPreview().importHandle,
+      confirmation: "apply-approved-skill-to-latest",
+    });
+    expect(api.preparePublication).not.toHaveBeenCalled();
+    expect(api.confirmPublication).not.toHaveBeenCalled();
+  });
+
+  it("closes one-use experience dialogs on a control-state invalidation even when the visible scope key is unchanged", async () => {
+    const current = controlState({
+      scope: "WORKSPACE",
+      workspaceId: WORKSPACE_ID,
+      role: "member",
+    });
+    let notify: (() => void) | null = null;
+    installAPI({
+      getState: vi.fn(async () => success(current)),
+      listInstallations: vi.fn(async () => success([installation("active")])),
+      onStateChanged: vi.fn((listener) => {
+        notify = () => listener(current);
+        return () => undefined;
+      }),
+    });
+    render(<AgentControlPanel profiles={[]} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "agents.control.experience.promoteLocalExperience",
+      }),
+    );
+    expect(
+      screen.getByRole("dialog", {
+        name: "agents.control.experience.promotionTitle",
+      }),
+    ).toBeTruthy();
+
+    await act(async () => notify?.());
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", {
+          name: "agents.control.experience.promotionTitle",
+        }),
+      ).toBeNull(),
+    );
   });
 
   it("keeps Workspace drafts visible but read-only while offline", async () => {

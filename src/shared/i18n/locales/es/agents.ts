@@ -1,3 +1,5 @@
+import enAgents from "../en/agents";
+
 export default {
   title: "Perfiles",
   subtitle:
@@ -66,6 +68,7 @@ export default {
     "This will permanently remove this wallet from AgentEra. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
   walletDeleteConfirmLabel: "Remove wallet",
   control: {
+    experience: enAgents.control.experience,
     workspaceSpace: "Espacio de trabajo",
     workspaceSpaceTitle: "Agentes del espacio de trabajo",
     workspaceAuthorSubtitle:

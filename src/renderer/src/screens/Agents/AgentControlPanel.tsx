@@ -11,6 +11,8 @@ import type {
 import { Plus, Refresh } from "../../assets/icons";
 import { useI18n } from "../../components/useI18n";
 import AgentDraftEditor from "./AgentDraftEditor";
+import ExperienceCandidatePanel from "./ExperienceCandidatePanel";
+import ExperiencePromotionDialog from "./ExperiencePromotionDialog";
 import AgentInstallDialog, {
   type AgentInstallProfileOption,
 } from "./AgentInstallDialog";
@@ -59,6 +61,9 @@ export default function AgentControlPanel({
   );
   const [archiveTarget, setArchiveTarget] =
     useState<AgenteraAgentInstallationSummary | null>(null);
+  const [promotionTarget, setPromotionTarget] =
+    useState<AgenteraAgentInstallationSummary | null>(null);
+  const [candidateRefreshToken, setCandidateRefreshToken] = useState(0);
   const [archiving, setArchiving] = useState(false);
   const loadEpoch = useRef(0);
   const selectedContextKey = useRef<string | null>(null);
@@ -118,6 +123,7 @@ export default function AgentControlPanel({
         setEditor(null);
         setInstallDialog(null);
         setArchiveTarget(null);
+        setPromotionTarget(null);
       }
       selectedContextKey.current = nextContextKey;
       setState(nextState);
@@ -137,6 +143,11 @@ export default function AgentControlPanel({
   useEffect(() => {
     void load();
     return window.agenteraAgents.onStateChanged(() => {
+      setEditor(null);
+      setInstallDialog(null);
+      setArchiveTarget(null);
+      setPromotionTarget(null);
+      setCandidateRefreshToken((value) => value + 1);
       void load();
     });
   }, [load]);
@@ -416,6 +427,17 @@ export default function AgentControlPanel({
                   )}
                   {installation.status === "active" && (
                     <>
+                      {isWorkspace ? (
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => setPromotionTarget(installation)}
+                        >
+                          {t(
+                            "agents.control.experience.promoteLocalExperience",
+                          )}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
@@ -441,6 +463,20 @@ export default function AgentControlPanel({
         </section>
       )}
 
+      {!loading && isWorkspace && state ? (
+        <ExperienceCandidatePanel
+          online={state.access === "online" && state.cloudAvailable}
+          canReview={!isWorkspaceMember}
+          contextKey={contextKey(state)}
+          refreshToken={candidateRefreshToken}
+          onDraftReady={(draft) => {
+            setEditor(draft);
+            setCandidateRefreshToken((value) => value + 1);
+            void load();
+          }}
+        />
+      ) : null}
+
       <AgentDraftEditor
         open={editor !== null}
         draft={editor === "new" ? null : editor}
@@ -459,6 +495,20 @@ export default function AgentControlPanel({
           onCompleted={() => void load()}
         />
       )}
+
+      {promotionTarget ? (
+        <ExperiencePromotionDialog
+          open
+          installation={promotionTarget}
+          agentName={definitionName(promotionTarget.definitionId)}
+          online={state?.access === "online" && state.cloudAvailable === true}
+          onClose={() => setPromotionTarget(null)}
+          onSubmitted={() => {
+            setPromotionTarget(null);
+            setCandidateRefreshToken((value) => value + 1);
+          }}
+        />
+      ) : null}
 
       {archiveTarget && (
         <div className="agent-control-dialog-backdrop">

@@ -111,6 +111,22 @@ describe("shared i18n", () => {
     }
   });
 
+  it("provides the complete ExperienceCandidate UI copy in every locale", () => {
+    const expected = leafKeys(
+      resources.en.translation.agents.control.experience,
+    ).sort();
+    expect(expected.length).toBeGreaterThan(40);
+
+    for (const locale of APP_LOCALES) {
+      const experience = (
+        resources[locale].translation.agents.control as {
+          experience?: unknown;
+        }
+      ).experience;
+      expect(leafKeys(experience).sort()).toEqual(expected);
+    }
+  });
+
   it("keeps Arabic and Hebrew authentication screens right-to-left", () => {
     expect(getLocaleDirection("ar")).toBe("rtl");
     expect(getLocaleDirection("he")).toBe("rtl");

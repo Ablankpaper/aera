@@ -231,6 +231,87 @@ export default {
     archiveKeepsLocalData:
       "Archiving stops cloud use of this installation. Its local Profile, Memory, sessions, files, and learned Skills remain on this computer.",
     confirmArchive: "Archive installation",
+    experience: {
+      promoteLocalExperience: "Promote local experience",
+      promotionTitle: "Promote local experience",
+      promotionSubtitle:
+        "Select one learned Skill, inspect the local privacy scan, then explicitly submit it for Workspace review.",
+      privateBoundary:
+        "Only the selected Skill files are prepared. Memory, USER, conversations, sessions, credentials, Profile paths, and every unselected local learning result stay on this computer.",
+      skill: "Learned Skill",
+      chooseSkill: "Choose one eligible Skill",
+      preparePreview: "Prepare local preview",
+      previewTitle: "Promotion preview",
+      sourceAgent: "Source Agent",
+      sourceVersion: "Source version",
+      fileCount: "Files",
+      digest: "Content digest",
+      dlpPassed: "Local privacy scan passed.",
+      dlpBlocked:
+        "Submission is blocked until these local privacy findings are resolved.",
+      dlp: {
+        credential_private_key: "Private key material",
+        credential_bearer_token: "Bearer token",
+        credential_jwt: "JSON Web Token",
+        credential_url: "Credential-bearing URL",
+        credential_api_key: "API key",
+        credential_environment_secret: "Environment secret",
+        private_absolute_path: "Private absolute path",
+        private_memory_payload: "Hermes Memory payload",
+        private_user_payload: "Hermes USER payload",
+        private_session_payload: "Session payload",
+        private_conversation_payload: "Conversation payload",
+        private_credential_store_payload: "Credential-store payload",
+        private_curator_payload: "Curator payload",
+      },
+      onlineToSubmit:
+        "This preview is safely stored locally. Reconnect before submitting it for review.",
+      submitConfirmation:
+        "I explicitly choose this Skill for Workspace review and understand that submission does not publish an Agent version.",
+      submitForReview: "Submit for review",
+      retryUpload: "Retry upload manually",
+      myCandidates: "My candidates",
+      noCandidates: "No promoted experience candidates yet.",
+      reviewQueue: "Experience review",
+      noReviewItems: "No candidates are waiting for review.",
+      review: "Review",
+      createDraftRetry: "Create draft",
+      status: {
+        PREPARED: "Prepared locally",
+        UPLOAD_FAILED: "Upload failed — local result preserved",
+        SUBMITTED: "Submitted",
+        PENDING_REVIEW: "Waiting for review",
+        APPROVED: "Approved",
+        REJECTED: "Rejected",
+      },
+      reviewTitle: "Review promoted experience",
+      reviewBoundary:
+        "Review this selected Skill only. Approval does not publish a version or modify any Hermes Profile.",
+      onlineToReview: "Reconnect to review or import experience candidates.",
+      approve: "Approve",
+      reject: "Reject",
+      rejectionReason: "Rejection reason",
+      chooseReason: "Choose a reason",
+      reason: {
+        not_reusable: "Not reusable across the Workspace",
+        insufficient_quality: "Needs more quality work",
+        wrong_scope: "Belongs to a different Agent or scope",
+        policy_blocked: "Blocked by Workspace policy",
+      },
+      safeNote: "Optional safe note",
+      commitReview: "Commit review",
+      importTitle: "Create a draft from the approved Skill",
+      replacementWarning:
+        "The latest published version already contains this Skill name. Confirming creates a new draft that replaces only that Skill directory.",
+      baseRefreshed:
+        "The published base advanced. The diff was refreshed before any draft was written; review it again.",
+      addedPaths: "Added files",
+      replacedPaths: "Replaced files",
+      removedPaths: "Removed files",
+      importConfirmation:
+        "Apply this approved Skill to the verified latest version as a new local draft.",
+      createDraft: "Create draft",
+    },
     errors: {
       invalid_request: "The Agent request is invalid.",
       sign_in_required: "Sign in to AgentEra Studio to continue.",
@@ -251,6 +332,16 @@ export default {
         "This Workspace is archived. Its Agent assets are read-only.",
       workspace_owner_unavailable:
         "This Workspace is read-only until its Owner account is available.",
+      candidate_source_ineligible:
+        "This installation or Skill is not eligible for promotion.",
+      candidate_dlp_blocked: "The local privacy scan blocked this candidate.",
+      candidate_already_reviewed:
+        "This candidate already has a final review decision.",
+      candidate_not_approved: "Only an approved candidate can create a draft.",
+      candidate_base_advanced:
+        "The published Agent advanced. Refresh the import preview.",
+      candidate_import_failed:
+        "The approved Skill could not be written into a local draft. The approval and local Hermes learning remain unchanged.",
       operation_failed: "The Agent operation could not be completed safely.",
     },
   },

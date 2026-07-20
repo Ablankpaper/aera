@@ -1,3 +1,5 @@
+import enAgents from "../en/agents";
+
 export default {
   title: "الملفات الشخصية",
   subtitle:
@@ -76,6 +78,7 @@ export default {
     "سيؤدي هذا إلى إزالة هذه المحفظة من AgentEra بشكل دائم. تأكد من نسخ عبارة الاستعادة احتياطياً — فلن تتمكن من استعادة المحفظة بدونها.",
   walletDeleteConfirmLabel: "إزالة المحفظة",
   control: {
+    experience: enAgents.control.experience,
     workspaceSpace: "مساحة العمل",
     workspaceSpaceTitle: "وكلاء مساحة العمل",
     workspaceAuthorSubtitle:
