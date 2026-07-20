@@ -36,6 +36,10 @@ V1 rejects links, path escape, binary or oversized files, credentials, Profile p
 
 Workspace Members may submit from their own matching Installation, while Owner and Admin review terminal candidate decisions and import approved content into a local draft.
 
+Cloud migration 11 stores an immutable candidate core plus at most one terminal review. Repository transactions recheck active Workspace membership, lifecycle, current device, and the exact active USER Installation before accepting a contribution.
+
+Submission and review idempotency stay scoped to the authenticated USER actor. Account finalization detaches only submitter, device, and reviewer identifiers; the candidate digest, canonical bundle, destination, and terminal decision remain unchanged.
+
 Approval overlays only the selected Skill directory onto a new draft based on the latest immutable Workspace Agent version. It never publishes automatically or modifies an existing Hermes Profile or running RuntimeBinding.
 
 ### Candidate failure isolation

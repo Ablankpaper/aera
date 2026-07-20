@@ -215,6 +215,9 @@ git commit -m "feat: define ExperienceCandidate contract"
 - Create: `internal/agentcontrol/experience_candidate_repository_test.go`
 - Modify: `internal/agentcontrol/repository.go`
 - Modify: `internal/agentcontrol/workspace_access_test.go`
+- Modify: `internal/audit/service.go`
+- Modify: `internal/audit/service_test.go`
+- Modify: `internal/account/lifecycle_repository.go`
 
 **Interfaces:**
 
@@ -249,7 +252,7 @@ var ErrExperienceCandidateAlreadyReviewed = errors.New("ExperienceCandidate revi
 func (r *Repository) SubmitExperienceCandidate(context.Context, Principal, SubmitExperienceCandidateCommand) (ExperienceCandidate, bool, error)
 func (r *Repository) ListOwnExperienceCandidates(context.Context, Principal, uuid.UUID) ([]ExperienceCandidate, error)
 func (r *Repository) ListWorkspaceExperienceCandidates(context.Context, Principal, uuid.UUID) ([]ExperienceCandidate, error)
-func (r *Repository) FindExperienceCandidate(context.Context, Principal, uuid.UUID, uuid.UUID) (ExperienceCandidate, bool, error)
+func (r *Repository) FindExperienceCandidate(context.Context, Principal, uuid.UUID, uuid.UUID, AuditEvidence, time.Time) (ExperienceCandidate, bool, error)
 func (r *Repository) ReviewExperienceCandidate(context.Context, Principal, ReviewExperienceCandidateCommand) (ExperienceCandidate, bool, error)
 ```
 
@@ -304,7 +307,10 @@ Add indexes for Workspace/time, submitter/time, definition/time, and pending rev
 Run:
 
 ```bash
-go test -count=1 ./internal/store -run '^TestApplyMigrationsCreatesAuthSchemaAndIsIdempotent$'
+set -a
+source .env.example
+set +a
+AERA_INTEGRATION_TESTS=1 go test -p 1 -count=1 ./internal/store -run '^TestApplyMigrationsCreatesAuthSchemaAndIsIdempotent$'
 ```
 
 Expected: FAIL because migration 11 and candidate tables are absent.
@@ -397,7 +403,7 @@ Expected: PASS without changing USER Agent or Workspace Agent ownership behavior
 Commit:
 
 ```bash
-git add migrations/000011_experience_candidates.sql internal/store/migrate_test.go internal/agentcontrol/experience_candidate_repository.go internal/agentcontrol/experience_candidate_repository_test.go internal/agentcontrol/repository.go internal/agentcontrol/workspace_access_test.go
+git add migrations/000011_experience_candidates.sql internal/store/migrate_test.go internal/agentcontrol/experience_candidate_repository.go internal/agentcontrol/experience_candidate_repository_test.go internal/agentcontrol/repository.go internal/agentcontrol/workspace_access_test.go internal/audit/service.go internal/audit/service_test.go internal/account/lifecycle_repository.go
 git commit -m "feat: persist reviewed experience candidates"
 ```
 
