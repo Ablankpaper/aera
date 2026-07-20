@@ -390,7 +390,11 @@ export class AgentVersionCache {
       return this.getVerifiedVersion(version.id);
     }
 
-    const versionRoot = join(this.database.paths.versionsPath, version.id);
+    const relativeVersionRoot = `accounts/${this.tenantId}/${this.ownerId}/${version.id}`;
+    const versionRoot = join(
+      this.database.paths.versionsPath,
+      ...relativeVersionRoot.split("/"),
+    );
     const destination = join(versionRoot, version.content_digest);
     if (existsSync(destination)) {
       throw new AgentVersionCacheError("cache_conflict");
@@ -424,7 +428,7 @@ export class AgentVersionCache {
         true,
       );
 
-      const relativePath = `${version.id}/${version.content_digest}`;
+      const relativePath = `${relativeVersionRoot}/${version.content_digest}`;
       this.database.sqlite.exec("BEGIN IMMEDIATE");
       try {
         this.database.sqlite
@@ -476,6 +480,8 @@ export class AgentVersionCache {
       | CachedVersionRow
       | undefined;
     if (!row) throw new AgentVersionCacheError("cache_not_found");
+    const accountRelativePath = `accounts/${this.tenantId}/${this.ownerId}/${versionId}/${row.content_digest}`;
+    const legacyRelativePath = `${versionId}/${row.content_digest}`;
     if (
       row.version_id !== versionId ||
       !validUuid(row.definition_id) ||
@@ -485,15 +491,15 @@ export class AgentVersionCache {
       !DIGEST_PATTERN.test(row.content_digest) ||
       typeof row.version_json !== "string" ||
       typeof row.cache_relative_path !== "string" ||
-      row.cache_relative_path !== `${versionId}/${row.content_digest}` ||
+      (row.cache_relative_path !== accountRelativePath &&
+        row.cache_relative_path !== legacyRelativePath) ||
       !validTimestamp(row.verified_at)
     ) {
       throw new AgentVersionCacheError("cache_corrupt");
     }
     const directory = join(
       this.database.paths.versionsPath,
-      versionId,
-      row.content_digest,
+      ...row.cache_relative_path.split("/"),
     );
     let version: AgentVersion;
     try {

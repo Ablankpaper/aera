@@ -65,6 +65,7 @@ const VERSION_2_ID = "77777777-7777-4777-8777-777777777777";
 const POLICY_2_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const NOW = new Date("2026-07-19T19:30:00.000Z");
 const ORIGIN = "http://127.0.0.1:8086";
+const WORKSPACE_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 class FakeSecureStorage implements SecureStorageAdapter {
   isEncryptionAvailable(): boolean {
@@ -424,6 +425,50 @@ describe("Agent installation orchestration", () => {
     ).toMatchObject({
       agentInstallationId: AGENT_INSTALLATION_ID,
       runtimeProfileId: RUNTIME_PROFILE_ID,
+    });
+  });
+
+  it("binds a Workspace source while keeping the local Installation USER-owned", async () => {
+    const installed = await manager().install({
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      source: { scope: "WORKSPACE", workspaceId: WORKSPACE_ID, role: "member" },
+      profile: { kind: "fresh", name: "Fresh Agent" },
+    });
+
+    expect(createInstallation).toHaveBeenCalledWith(
+      {
+        definition_id: DEFINITION_ID,
+        version_id: VERSION_ID,
+        workspace_id: WORKSPACE_ID,
+      } satisfies CreateAgentInstallationRequest,
+      OPERATION_ID,
+    );
+    expect(installed).toMatchObject({
+      sourceScope: "WORKSPACE",
+      sourceWorkspaceId: WORKSPACE_ID,
+      agentInstallationId: AGENT_INSTALLATION_ID,
+      status: "active",
+    });
+    expect(manager().listLocalInstallations()).toEqual([]);
+    expect(
+      manager().listLocalInstallations({
+        scope: "WORKSPACE",
+        workspaceId: WORKSPACE_ID,
+        role: "member",
+      }),
+    ).toEqual([installed]);
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT tenant_id, owner_id, source_scope, source_workspace_id FROM local_agent_installations WHERE agent_installation_id = ?",
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({
+      tenant_id: owner.tenantId,
+      owner_id: owner.ownerId,
+      source_scope: "WORKSPACE",
+      source_workspace_id: WORKSPACE_ID,
     });
   });
 

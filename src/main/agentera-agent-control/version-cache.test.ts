@@ -214,12 +214,23 @@ describe("verified immutable Agent version cache", () => {
     const callsAfterCache = verify.mock.calls.length;
     const destination = join(
       database.paths.versionsPath,
+      "accounts",
+      owner.tenantId,
+      owner.ownerId,
       VERSION_ID,
       version.content_digest,
     );
-    expect(readdirSync(join(database.paths.versionsPath, VERSION_ID))).toEqual([
-      version.content_digest,
-    ]);
+    expect(
+      readdirSync(
+        join(
+          database.paths.versionsPath,
+          "accounts",
+          owner.tenantId,
+          owner.ownerId,
+          VERSION_ID,
+        ),
+      ),
+    ).toEqual([version.content_digest]);
     for (const name of ["version.json", "manifest.json", "bundle.json"]) {
       const mode = statSync(join(destination, name)).mode & 0o777;
       expect(mode & 0o222).toBe(0);
@@ -249,6 +260,49 @@ describe("verified immutable Agent version cache", () => {
     expect(cache().getVerifiedVersion(version.id)).toEqual(version);
   });
 
+  it("stores the same immutable version in distinct account paths and rows", () => {
+    const first = cache();
+    const secondOwner = {
+      tenantId: "12121212-1212-4121-8121-121212121212",
+      ownerId: "13131313-1313-4131-8131-131313131313",
+    } as const;
+    const second = new AgentVersionCache({
+      database,
+      owner: secondOwner,
+      trust,
+      origin: ORIGIN,
+      runtimeVersion: "v0.18.2-agentera.1",
+      now: () => NOW,
+      randomUUID: () => STAGING_ID,
+    });
+
+    expect(first.cacheVerifiedVersion(version)).toEqual(version);
+    expect(second.cacheVerifiedVersion(version)).toEqual(version);
+    expect(first.getVerifiedVersion(version.id)).toEqual(version);
+    expect(second.getVerifiedVersion(version.id)).toEqual(version);
+    const rows = database.sqlite
+      .prepare(
+        "SELECT tenant_id, owner_id, cache_relative_path FROM cached_agent_versions WHERE version_id = ? ORDER BY tenant_id, owner_id",
+      )
+      .all(version.id) as Array<{
+      tenant_id: string;
+      owner_id: string;
+      cache_relative_path: string;
+    }>;
+    expect(rows).toEqual([
+      {
+        tenant_id: owner.tenantId,
+        owner_id: owner.ownerId,
+        cache_relative_path: `accounts/${owner.tenantId}/${owner.ownerId}/${VERSION_ID}/${version.content_digest}`,
+      },
+      {
+        tenant_id: secondOwner.tenantId,
+        owner_id: secondOwner.ownerId,
+        cache_relative_path: `accounts/${secondOwner.tenantId}/${secondOwner.ownerId}/${VERSION_ID}/${version.content_digest}`,
+      },
+    ]);
+  });
+
   it("normalizes a valid cloud RFC3339 timestamp before persisting the immutable version", () => {
     const cloudVersion: AgentVersion = {
       ...version,
@@ -267,6 +321,9 @@ describe("verified immutable Agent version cache", () => {
     store.cacheVerifiedVersion(version);
     const versionFile = join(
       database.paths.versionsPath,
+      "accounts",
+      owner.tenantId,
+      owner.ownerId,
       VERSION_ID,
       version.content_digest,
       "version.json",
@@ -299,9 +356,17 @@ describe("verified immutable Agent version cache", () => {
     expect(() => cache("v0.19.0").cacheVerifiedVersion(version)).toThrow(
       /runtime_incompatible/,
     );
-    expect(existsSync(join(database.paths.versionsPath, VERSION_ID))).toBe(
-      false,
-    );
+    expect(
+      existsSync(
+        join(
+          database.paths.versionsPath,
+          "accounts",
+          owner.tenantId,
+          owner.ownerId,
+          VERSION_ID,
+        ),
+      ),
+    ).toBe(false);
   });
 
   it("retains multiple installation-scoped policies and re-verifies each cached read", () => {
@@ -372,7 +437,13 @@ describe("verified immutable Agent version cache", () => {
       },
     });
     expect(() => store.cacheVerifiedVersion(version)).toThrow(/rename failure/);
-    const parent = join(database.paths.versionsPath, VERSION_ID);
+    const parent = join(
+      database.paths.versionsPath,
+      "accounts",
+      owner.tenantId,
+      owner.ownerId,
+      VERSION_ID,
+    );
     expect(existsSync(parent) ? readdirSync(parent) : []).toEqual([]);
     const row = database.sqlite
       .prepare("SELECT version_id FROM cached_agent_versions")
@@ -391,7 +462,15 @@ describe("verified immutable Agent version cache", () => {
     expect(() => store.cacheVerifiedVersion(badLaterVersion)).toThrow();
     expect(store.getVerifiedVersion(VERSION_ID)).toEqual(version);
     expect(
-      existsSync(join(database.paths.versionsPath, OTHER_VERSION_ID)),
+      existsSync(
+        join(
+          database.paths.versionsPath,
+          "accounts",
+          owner.tenantId,
+          owner.ownerId,
+          OTHER_VERSION_ID,
+        ),
+      ),
     ).toBe(false);
   });
 });

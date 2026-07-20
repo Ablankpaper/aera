@@ -13,7 +13,7 @@ import type {
   UpdateAgentDraftInput,
 } from "../../shared/agentera-agent-control";
 import type { AgenteraRuntimeOwner } from "../agentera-profile-binding";
-import type { AgenteraControlPlaneDatabase } from "./db";
+import type { AgentAssetContext, AgenteraControlPlaneDatabase } from "./db";
 import {
   canonicalizeEditableAgent,
   decodeEditableAgentManifest,
@@ -40,6 +40,7 @@ export class AgentDraftStoreError extends Error {
 export interface AgentDraftStoreOptions {
   database: AgenteraControlPlaneDatabase;
   owner: Pick<AgenteraRuntimeOwner, "tenantId" | "ownerId">;
+  context?: AgentAssetContext;
   now?: () => Date;
   randomUUID?: () => string;
   writeFile?: (path: string, content: Buffer) => void;
@@ -91,6 +92,27 @@ function requireUuid(value: unknown): string {
 function nullableUuid(value: unknown): string | null {
   if (value === null) return null;
   return requireUuid(value);
+}
+
+function normalizeContext(context: AgentAssetContext | undefined): {
+  scope: "USER" | "WORKSPACE";
+  workspaceId: string | null;
+} {
+  if (context === undefined || context.scope === "USER") {
+    return { scope: "USER", workspaceId: null };
+  }
+  if (
+    context.scope !== "WORKSPACE" ||
+    (context.role !== "owner" &&
+      context.role !== "admin" &&
+      context.role !== "member")
+  ) {
+    throw new AgentDraftStoreError("invalid_draft");
+  }
+  return {
+    scope: "WORKSPACE",
+    workspaceId: requireUuid(context.workspaceId),
+  };
 }
 
 function canonicalTimestamp(value: unknown): value is string {
@@ -174,11 +196,16 @@ export class AgentDraftStore {
   private readonly writeFile: (path: string, content: Buffer) => void;
   private readonly tenantId: string;
   private readonly ownerId: string;
+  private readonly targetScope: "USER" | "WORKSPACE";
+  private readonly workspaceId: string | null;
 
   constructor(options: AgentDraftStoreOptions) {
     this.database = options.database;
     this.tenantId = requireUuid(options.owner.tenantId);
     this.ownerId = requireUuid(options.owner.ownerId);
+    const context = normalizeContext(options.context);
+    this.targetScope = context.scope;
+    this.workspaceId = context.workspaceId;
     this.now = options.now ?? (() => new Date());
     this.randomUUID = options.randomUUID ?? nodeRandomUUID;
     this.writeFile =
@@ -208,15 +235,18 @@ export class AgentDraftStore {
       this.database.sqlite
         .prepare(
           `INSERT INTO agent_drafts (
-             id, tenant_id, owner_id, source_agent_definition_id, base_agent_version_id,
+			 id, tenant_id, owner_id, target_scope, workspace_id,
+			 source_agent_definition_id, base_agent_version_id,
              display_name, icon_media_type, icon_data_base64, manifest_json,
              revision, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
           this.tenantId,
           this.ownerId,
+          this.targetScope,
+          this.workspaceId,
           sourceDefinitionId,
           baseVersionId,
           displayName,
@@ -272,7 +302,8 @@ export class AgentDraftStore {
                publication_idempotency_key = NULL,
                publication_error_code = NULL,
                publication_error_summary = NULL
-           WHERE id = ? AND tenant_id = ? AND owner_id = ? AND revision = ?`,
+		   WHERE id = ? AND tenant_id = ? AND owner_id = ?
+		     AND target_scope = ? AND workspace_id IS ? AND revision = ?`,
         )
         .run(
           displayName,
@@ -283,6 +314,8 @@ export class AgentDraftStore {
           id,
           this.tenantId,
           this.ownerId,
+          this.targetScope,
+          this.workspaceId,
           current.revision,
         );
       if (changes(updated) !== 1) {
@@ -305,10 +338,16 @@ export class AgentDraftStore {
     const rows = this.database.sqlite
       .prepare(
         `SELECT id FROM agent_drafts
-         WHERE tenant_id = ? AND owner_id = ?
+		 WHERE tenant_id = ? AND owner_id = ?
+		   AND target_scope = ? AND workspace_id IS ?
          ORDER BY updated_at DESC, id ASC`,
       )
-      .all(this.tenantId, this.ownerId) as Array<{ id?: unknown }>;
+      .all(
+        this.tenantId,
+        this.ownerId,
+        this.targetScope,
+        this.workspaceId,
+      ) as Array<{ id?: unknown }>;
     return rows.map((row) => this.getDraft(requireUuid(row.id)));
   }
 
@@ -317,9 +356,16 @@ export class AgentDraftStore {
     const row = this.database.sqlite
       .prepare(
         `SELECT * FROM agent_drafts
-         WHERE id = ? AND tenant_id = ? AND owner_id = ?`,
+		 WHERE id = ? AND tenant_id = ? AND owner_id = ?
+		   AND target_scope = ? AND workspace_id IS ?`,
       )
-      .get(id, this.tenantId, this.ownerId) as DraftRow | undefined;
+      .get(
+        id,
+        this.tenantId,
+        this.ownerId,
+        this.targetScope,
+        this.workspaceId,
+      ) as DraftRow | undefined;
     if (!row) throw new AgentDraftStoreError("draft_not_found");
     return this.toDraft(row);
   }
@@ -340,9 +386,10 @@ export class AgentDraftStore {
     const result = this.database.sqlite
       .prepare(
         `DELETE FROM agent_drafts
-         WHERE id = ? AND tenant_id = ? AND owner_id = ?`,
+		 WHERE id = ? AND tenant_id = ? AND owner_id = ?
+		   AND target_scope = ? AND workspace_id IS ?`,
       )
-      .run(id, this.tenantId, this.ownerId);
+      .run(id, this.tenantId, this.ownerId, this.targetScope, this.workspaceId);
     if (changes(result) !== 1) {
       throw new AgentDraftStoreError("draft_not_found");
     }
@@ -387,9 +434,16 @@ export class AgentDraftStore {
                 publication_attempted_at AS attempted_at,
                 publication_idempotency_key AS idempotency_key
          FROM agent_drafts
-         WHERE id = ? AND tenant_id = ? AND owner_id = ?`,
+		 WHERE id = ? AND tenant_id = ? AND owner_id = ?
+		   AND target_scope = ? AND workspace_id IS ?`,
       )
-      .get(draft.id, this.tenantId, this.ownerId) as
+      .get(
+        draft.id,
+        this.tenantId,
+        this.ownerId,
+        this.targetScope,
+        this.workspaceId,
+      ) as
       | {
           revision?: unknown;
           attempted_at?: unknown;
@@ -407,7 +461,8 @@ export class AgentDraftStore {
           `UPDATE agent_drafts
            SET publication_attempted_at = ?, publication_error_code = NULL,
                publication_error_summary = NULL
-           WHERE id = ? AND tenant_id = ? AND owner_id = ?
+		   WHERE id = ? AND tenant_id = ? AND owner_id = ?
+		     AND target_scope = ? AND workspace_id IS ?
              AND revision = ? AND publication_attempt_revision = ?`,
         )
         .run(
@@ -415,6 +470,8 @@ export class AgentDraftStore {
           draft.id,
           this.tenantId,
           this.ownerId,
+          this.targetScope,
+          this.workspaceId,
           revision,
           revision,
         );
@@ -436,7 +493,8 @@ export class AgentDraftStore {
          SET publication_attempt_revision = ?, publication_attempted_at = ?,
              publication_idempotency_key = ?, publication_error_code = NULL,
              publication_error_summary = NULL
-         WHERE id = ? AND tenant_id = ? AND owner_id = ? AND revision = ?`,
+		 WHERE id = ? AND tenant_id = ? AND owner_id = ?
+		   AND target_scope = ? AND workspace_id IS ? AND revision = ?`,
       )
       .run(
         revision,
@@ -445,6 +503,8 @@ export class AgentDraftStore {
         draft.id,
         this.tenantId,
         this.ownerId,
+        this.targetScope,
+        this.workspaceId,
         revision,
       );
     if (changes(result) !== 1) {
@@ -475,7 +535,8 @@ export class AgentDraftStore {
       .prepare(
         `UPDATE agent_drafts
          SET publication_error_code = ?, publication_error_summary = ?
-         WHERE id = ? AND tenant_id = ? AND owner_id = ?
+		 WHERE id = ? AND tenant_id = ? AND owner_id = ?
+		   AND target_scope = ? AND workspace_id IS ?
            AND revision = ? AND publication_attempt_revision = ?`,
       )
       .run(
@@ -484,6 +545,8 @@ export class AgentDraftStore {
         id,
         this.tenantId,
         this.ownerId,
+        this.targetScope,
+        this.workspaceId,
         revision,
         revision,
       );
@@ -512,7 +575,8 @@ export class AgentDraftStore {
              published_definition_id = ?, published_version_id = ?,
              published_revision = ?, publication_error_code = NULL,
              publication_error_summary = NULL, updated_at = ?
-         WHERE id = ? AND tenant_id = ? AND owner_id = ? AND revision = ?`,
+		 WHERE id = ? AND tenant_id = ? AND owner_id = ?
+		   AND target_scope = ? AND workspace_id IS ? AND revision = ?`,
       )
       .run(
         definitionId,
@@ -524,6 +588,8 @@ export class AgentDraftStore {
         id,
         this.tenantId,
         this.ownerId,
+        this.targetScope,
+        this.workspaceId,
         revision,
       );
     if (changes(result) !== 1) {

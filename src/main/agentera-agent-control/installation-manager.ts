@@ -6,7 +6,7 @@ import type {
   AgentVersion,
   CreateAgentInstallationRequest,
 } from "./client";
-import type { AgenteraControlPlaneDatabase } from "./db";
+import type { AgentAssetContext, AgenteraControlPlaneDatabase } from "./db";
 import type {
   ActivatedHermesProjection,
   HermesVersionProjection,
@@ -120,6 +120,8 @@ export type AgentInstallationProfileTarget =
 
 export interface LocalAgentInstallation {
   agentInstallationId: string;
+  sourceScope: "USER" | "WORKSPACE";
+  sourceWorkspaceId: string | null;
   definitionId: string;
   selectedVersionId: string;
   runtimeProfileId: string | null;
@@ -146,6 +148,8 @@ export interface AgentInstallationManagerOptions {
 
 interface LocalInstallationRow {
   agent_installation_id: unknown;
+  source_scope: unknown;
+  source_workspace_id: unknown;
   definition_id: unknown;
   selected_version_id: unknown;
   runtime_profile_id: unknown;
@@ -161,6 +165,8 @@ interface InstallationCreationIntent {
   definitionId: string;
   versionId: string;
   idempotencyKey: string;
+  sourceScope: "USER" | "WORKSPACE";
+  sourceWorkspaceId: string | null;
 }
 
 function uuid(value: unknown): string {
@@ -182,7 +188,46 @@ function nullableUuid(value: unknown): string | null {
   return value === null ? null : uuid(value);
 }
 
+function normalizeAssetContext(context: AgentAssetContext | undefined): {
+  scope: "USER" | "WORKSPACE";
+  workspaceId: string | null;
+} {
+  if (context === undefined || context.scope === "USER") {
+    return { scope: "USER", workspaceId: null };
+  }
+  if (
+    context.scope !== "WORKSPACE" ||
+    (context.role !== "owner" &&
+      context.role !== "admin" &&
+      context.role !== "member")
+  ) {
+    throw new AgentInstallationManagerError("invalid_installation_request");
+  }
+  return { scope: "WORKSPACE", workspaceId: uuid(context.workspaceId) };
+}
+
+function parseStoredSource(row: LocalInstallationRow): {
+  scope: "USER" | "WORKSPACE";
+  workspaceId: string | null;
+} {
+  if (row.source_scope === "USER" && row.source_workspace_id === null) {
+    return { scope: "USER", workspaceId: null };
+  }
+  if (row.source_scope === "WORKSPACE" && row.source_workspace_id !== null) {
+    try {
+      return {
+        scope: "WORKSPACE",
+        workspaceId: uuid(row.source_workspace_id),
+      };
+    } catch {
+      // Stored rows must fail closed as conflicts, not as user input errors.
+    }
+  }
+  throw new AgentInstallationManagerError("installation_conflict");
+}
+
 function parseLocalRow(row: LocalInstallationRow): LocalAgentInstallation {
+  const source = parseStoredSource(row);
   const status = row.status;
   if (status !== "pending" && status !== "active" && status !== "archived") {
     throw new AgentInstallationManagerError("installation_conflict");
@@ -206,6 +251,8 @@ function parseLocalRow(row: LocalInstallationRow): LocalAgentInstallation {
   }
   return {
     agentInstallationId: uuid(row.agent_installation_id),
+    sourceScope: source.scope,
+    sourceWorkspaceId: source.workspaceId,
     definitionId: uuid(row.definition_id),
     selectedVersionId: uuid(row.selected_version_id),
     runtimeProfileId: nullableUuid(row.runtime_profile_id),
@@ -373,17 +420,23 @@ export class AgentInstallationManager {
     return parseLocalRow(row);
   }
 
-  listLocalInstallations(): LocalAgentInstallation[] {
+  listLocalInstallations(
+    context: AgentAssetContext = { scope: "USER" },
+  ): LocalAgentInstallation[] {
+    const source = normalizeAssetContext(context);
     const rows = this.database.sqlite
       .prepare(
         `SELECT * FROM local_agent_installations
          WHERE tenant_id = ? AND owner_id = ? AND device_installation_id = ?
+           AND source_scope = ? AND source_workspace_id IS ?
          ORDER BY created_at DESC, agent_installation_id ASC`,
       )
       .all(
         this.owner.tenantId,
         this.owner.ownerId,
         this.owner.deviceInstallationId,
+        source.scope,
+        source.workspaceId,
       ) as LocalInstallationRow[];
     return rows.map(parseLocalRow);
   }
@@ -392,14 +445,23 @@ export class AgentInstallationManager {
     definitionId: string;
     versionId: string;
     profile: AgentInstallationProfileTarget;
+    source?: AgentAssetContext;
   }): Promise<LocalAgentInstallation> {
     const definitionId = uuid(input.definitionId);
     const versionId = uuid(input.versionId);
-    const intent = this.beginCreationIntent(definitionId, versionId);
+    const source = normalizeAssetContext(input.source);
+    const intent = this.beginCreationIntent(definitionId, versionId, source);
     let creation: AgentInstallationCreation;
     try {
+      const request: CreateAgentInstallationRequest = {
+        definition_id: definitionId,
+        version_id: versionId,
+        ...(source.scope === "WORKSPACE"
+          ? { workspace_id: source.workspaceId as string }
+          : {}),
+      };
       creation = await this.client.createInstallation(
-        { definition_id: definitionId, version_id: versionId },
+        request,
         intent.idempotencyKey,
       );
       assertPendingCreation(
@@ -435,6 +497,8 @@ export class AgentInstallationManager {
           parsed.definitionId !== definitionId ||
           parsed.selectedVersionId !== versionId ||
           parsed.policySnapshotId !== policyId ||
+          parsed.sourceScope !== source.scope ||
+          parsed.sourceWorkspaceId !== source.workspaceId ||
           parsed.status !== "pending"
         ) {
           throw new AgentInstallationManagerError("installation_conflict");
@@ -444,16 +508,19 @@ export class AgentInstallationManager {
           .prepare(
             `INSERT INTO local_agent_installations (
              agent_installation_id, tenant_id, owner_id, device_installation_id,
+             source_scope, source_workspace_id,
              definition_id, selected_version_id,
              runtime_profile_id, policy_snapshot_id, status, retry_code,
              created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 'pending', NULL, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'pending', NULL, ?, ?)`,
           )
           .run(
             installationId,
             this.owner.tenantId,
             this.owner.ownerId,
             this.owner.deviceInstallationId,
+            source.scope,
+            source.workspaceId,
             definitionId,
             versionId,
             policyId,
@@ -799,6 +866,7 @@ export class AgentInstallationManager {
   private beginCreationIntent(
     definitionId: string,
     versionId: string,
+    source: { scope: "USER" | "WORKSPACE"; workspaceId: string | null },
   ): InstallationCreationIntent {
     const rows = this.database.sqlite
       .prepare(
@@ -828,24 +896,60 @@ export class AgentInstallationManager {
         throw new AgentInstallationManagerError("installation_conflict");
       }
       const record = payload as Record<string, unknown>;
+      const keys = Object.keys(record).sort().join("\0");
+      const legacyKeys = ["definition_id", "idempotency_key", "version_id"]
+        .sort()
+        .join("\0");
+      const scopedKeys = [
+        "definition_id",
+        "idempotency_key",
+        "source_scope",
+        "source_workspace_id",
+        "version_id",
+      ]
+        .sort()
+        .join("\0");
       if (
-        Object.keys(record).sort().join("\0") !==
-          ["definition_id", "idempotency_key", "version_id"]
-            .sort()
-            .join("\0") ||
+        (keys !== legacyKeys && keys !== scopedKeys) ||
         uuid(row.id) !== uuid(record.idempotency_key)
       ) {
         throw new AgentInstallationManagerError("installation_conflict");
       }
+      let storedSource: {
+        scope: "USER" | "WORKSPACE";
+        workspaceId: string | null;
+      };
+      if (keys === legacyKeys) {
+        storedSource = { scope: "USER", workspaceId: null };
+      } else if (
+        record.source_scope === "USER" &&
+        record.source_workspace_id === null
+      ) {
+        storedSource = { scope: "USER", workspaceId: null };
+      } else if (
+        record.source_scope === "WORKSPACE" &&
+        record.source_workspace_id !== null
+      ) {
+        storedSource = {
+          scope: "WORKSPACE",
+          workspaceId: uuid(record.source_workspace_id),
+        };
+      } else {
+        throw new AgentInstallationManagerError("installation_conflict");
+      }
       if (
         uuid(record.definition_id) === definitionId &&
-        uuid(record.version_id) === versionId
+        uuid(record.version_id) === versionId &&
+        storedSource.scope === source.scope &&
+        storedSource.workspaceId === source.workspaceId
       ) {
         matches.push({
           id: row.id,
           definitionId,
           versionId,
           idempotencyKey: row.id,
+          sourceScope: storedSource.scope,
+          sourceWorkspaceId: storedSource.workspaceId,
         });
       }
     }
@@ -860,6 +964,8 @@ export class AgentInstallationManager {
       definition_id: definitionId,
       version_id: versionId,
       idempotency_key: id,
+      source_scope: source.scope,
+      source_workspace_id: source.workspaceId,
     });
     this.database.sqlite
       .prepare(
@@ -883,6 +989,8 @@ export class AgentInstallationManager {
       definitionId,
       versionId,
       idempotencyKey: id,
+      sourceScope: source.scope,
+      sourceWorkspaceId: source.workspaceId,
     };
   }
 

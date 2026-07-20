@@ -34,6 +34,9 @@ const OTHER_OWNER = {
   tenantId: "44444444-4444-4444-8444-444444444444",
   ownerId: "55555555-5555-4555-8555-555555555555",
 } as const;
+const WORKSPACE_ID = "66666666-6666-4666-8666-666666666666";
+const OTHER_WORKSPACE_ID = "77777777-7777-4777-8777-777777777777";
+const WORKSPACE_DRAFT_ID = "88888888-8888-4888-8888-888888888888";
 
 function nodeSqliteFactory(path: string): AgenteraSqliteDatabase {
   return new DatabaseSync(path) as unknown as AgenteraSqliteDatabase;
@@ -229,6 +232,47 @@ describe("AgentEra desktop-local Agent drafts", () => {
       new AgentDraftStoreError("draft_not_found"),
     );
     expect(store.listDrafts()).toHaveLength(1);
+  });
+
+  it("partitions one account's drafts by exact USER or Workspace target", () => {
+    const workspace = new AgentDraftStore({
+      database,
+      owner: OWNER,
+      context: { scope: "WORKSPACE", workspaceId: WORKSPACE_ID, role: "admin" },
+      now: () => NOW,
+      randomUUID: () => WORKSPACE_DRAFT_ID,
+    });
+    const created = workspace.createDraft({
+      sourceAgentDefinitionId: null,
+      baseAgentVersionId: null,
+      displayName: "Workspace Research Agent",
+      icon: null,
+      manifest: manifest(),
+      assets: assets(),
+    });
+    const otherWorkspace = new AgentDraftStore({
+      database,
+      owner: OWNER,
+      context: {
+        scope: "WORKSPACE",
+        workspaceId: OTHER_WORKSPACE_ID,
+        role: "owner",
+      },
+    });
+
+    expect(workspace.listDrafts()).toEqual([created]);
+    expect(store.listDrafts()).toEqual([]);
+    expect(otherWorkspace.listDrafts()).toEqual([]);
+    expect(() => store.getDraft(WORKSPACE_DRAFT_ID)).toThrow(
+      new AgentDraftStoreError("draft_not_found"),
+    );
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT target_scope, workspace_id FROM agent_drafts WHERE id = ?",
+        )
+        .get(WORKSPACE_DRAFT_ID),
+    ).toEqual({ target_scope: "WORKSPACE", workspace_id: WORKSPACE_ID });
   });
 
   it("rejects symlink substitution when reading a stored draft asset", () => {

@@ -49,6 +49,9 @@ const REQUIRED_PATHS = [
   "/api/v1/workspaces",
   "/api/v1/workspaces/{workspace_id}",
   "/api/v1/workspaces/{workspace_id}/archive",
+  "/api/v1/workspaces/{workspace_id}/agent-definitions",
+  "/api/v1/workspaces/{workspace_id}/agent-definitions/{definition_id}",
+  "/api/v1/workspaces/{workspace_id}/agent-definitions/{definition_id}/versions",
   "/api/v1/workspaces/{workspace_id}/invitations",
   "/api/v1/workspaces/{workspace_id}/invitations/{invitation_id}",
   "/api/v1/workspaces/{workspace_id}/leave",
@@ -115,6 +118,7 @@ const AGENT_SCHEMAS = [
   "AgentInstallation",
   "AgentPolicySnapshot",
   "AgentVersion",
+  "CreateAgentInstallationRequest",
   "PublishInitialAgentRequest",
   "PublishNextAgentVersionRequest",
   "RuntimeBindingRecord",
@@ -232,6 +236,34 @@ const WORKSPACE_OPERATIONS = [
   ],
 ];
 
+const WORKSPACE_AGENT_OPERATIONS = [
+  [
+    "/api/v1/workspaces/{workspace_id}/agent-definitions",
+    "get",
+    ["200", "400", "401", "404", "409", "503"],
+  ],
+  [
+    "/api/v1/workspaces/{workspace_id}/agent-definitions",
+    "post",
+    ["201", "400", "401", "403", "404", "409", "413", "503"],
+  ],
+  [
+    "/api/v1/workspaces/{workspace_id}/agent-definitions/{definition_id}",
+    "get",
+    ["200", "400", "401", "404", "409", "503"],
+  ],
+  [
+    "/api/v1/workspaces/{workspace_id}/agent-definitions/{definition_id}/versions",
+    "get",
+    ["200", "400", "401", "404", "409", "503"],
+  ],
+  [
+    "/api/v1/workspaces/{workspace_id}/agent-definitions/{definition_id}/versions",
+    "post",
+    ["201", "400", "401", "403", "404", "409", "413", "503"],
+  ],
+];
+
 const EXACT_LOOPBACK_REDIRECT =
   "^http://127\\.0\\.0\\.1:[1-9][0-9]{0,4}/agentera/oauth/callback$";
 const LOOPBACK_CALLBACK_RESPONSE =
@@ -257,7 +289,7 @@ function exactMembers(actual, expected, label) {
 }
 
 function validateCriticalContract(document) {
-  if (document.info?.version !== "0.3.0") {
+  if (document.info?.version !== "0.4.0") {
     fail(`OpenAPI version changed: ${String(document.info?.version)}`);
   }
   const paths = object(document.paths, "paths");
@@ -312,6 +344,31 @@ function validateCriticalContract(document) {
   }
   if (Object.hasOwn(schemas, "AgentDraft")) {
     fail("AgentDraft must remain desktop-local");
+  }
+  const installationRequest = object(
+    schemas.CreateAgentInstallationRequest,
+    "CreateAgentInstallationRequest",
+  );
+  exactMembers(
+    installationRequest.required ?? [],
+    ["definition_id", "version_id"],
+    "CreateAgentInstallationRequest.required",
+  );
+  exactMembers(
+    Object.keys(
+      object(
+        installationRequest.properties,
+        "CreateAgentInstallationRequest.properties",
+      ),
+    ),
+    ["definition_id", "version_id", "workspace_id"],
+    "CreateAgentInstallationRequest.properties",
+  );
+  if (
+    installationRequest.properties.workspace_id?.type !== "string" ||
+    installationRequest.properties.workspace_id?.format !== "uuid"
+  ) {
+    fail("CreateAgentInstallationRequest.workspace_id changed");
   }
 
   for (const [schemaName, expectedProperties] of Object.entries(
@@ -420,6 +477,23 @@ function validateCriticalContract(document) {
     fail("Workspace Idempotency-Key boundary changed");
   }
   for (const [path, method, statuses] of WORKSPACE_OPERATIONS) {
+    const operation = object(
+      object(paths[path], path)[method],
+      `${path}.${method}`,
+    );
+    exactMembers(
+      Object.keys(object(operation.responses, `${path}.${method}.responses`)),
+      statuses,
+      `${path}.${method}.responses`,
+    );
+    if (
+      JSON.stringify(operation.security) !==
+      JSON.stringify([{ desktopAccessToken: [] }])
+    ) {
+      fail(`${path}.${method} no longer uses only the desktop access token`);
+    }
+  }
+  for (const [path, method, statuses] of WORKSPACE_AGENT_OPERATIONS) {
     const operation = object(
       object(paths[path], path)[method],
       `${path}.${method}`,
