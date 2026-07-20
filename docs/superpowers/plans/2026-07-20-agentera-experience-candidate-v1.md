@@ -563,6 +563,7 @@ git commit -m "feat: expose ExperienceCandidate review API"
 
 **Files:**
 
+- Modify: `.gitattributes`
 - Modify: `contracts/agentera-cloud.openapi.yaml`
 - Create: `contracts/experience-candidate-v1-vectors.json`
 - Modify: `scripts/check-agentera-cloud-contract.mjs`
@@ -570,6 +571,7 @@ git commit -m "feat: expose ExperienceCandidate review API"
 - Modify: `src/shared/agentera-agent-control.ts`
 - Create: `src/main/agentera-agent-control/experience-candidate-contract.ts`
 - Create: `src/main/agentera-agent-control/experience-candidate-contract.test.ts`
+- Modify: `tests/agentera-cloud-contract.test.ts`
 
 **Interfaces:**
 
@@ -652,6 +654,8 @@ export function scanExperienceCandidate(candidate: CanonicalExperienceCandidate)
 
 Copy `aera-cloud/api/openapi.yaml` and `aera-cloud/api/experience-candidate-v1-vectors.json` byte-for-byte into the desktop contract paths. Extend the contract checker to require all five routes, candidate schemas/error codes, and exact fixture contract version.
 
+When the reviewed cloud branch is isolated in a worktree rather than checked out at `../aera-cloud`, set `AGENTERA_CLOUD_CONTRACT_SOURCE` to that worktree's `api/openapi.yaml`; the checker derives and byte-compares the vector file from the same directory. The default remains the ordinary sibling checkout.
+
 Run:
 
 ```bash
@@ -712,7 +716,7 @@ Expected: PASS; the fixture digest is `6fa5c97e58ee22e623505c2c80c7d1b0dd998c81a
 - [ ] **Step 5: Commit**
 
 ```bash
-git add contracts/agentera-cloud.openapi.yaml contracts/experience-candidate-v1-vectors.json scripts/check-agentera-cloud-contract.mjs src/shared/agentera-cloud-api.generated.ts src/shared/agentera-agent-control.ts src/main/agentera-agent-control/experience-candidate-contract.ts src/main/agentera-agent-control/experience-candidate-contract.test.ts
+git add .gitattributes contracts/agentera-cloud.openapi.yaml contracts/experience-candidate-v1-vectors.json scripts/check-agentera-cloud-contract.mjs src/shared/agentera-cloud-api.generated.ts src/shared/agentera-agent-control.ts src/main/agentera-agent-control/experience-candidate-contract.ts src/main/agentera-agent-control/experience-candidate-contract.test.ts tests/agentera-cloud-contract.test.ts
 git commit -m "feat: pin ExperienceCandidate contract"
 ```
 

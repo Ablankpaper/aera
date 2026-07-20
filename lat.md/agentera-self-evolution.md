@@ -32,6 +32,8 @@ Local and cloud scanners enforce the same versioned canonical-package and DLP co
 
 V1 rejects links, path escape, binary or oversized files, credentials, Profile paths, and Memory, USER, session, conversation, or Curator payloads. Findings expose only codes and candidate-relative locations, never matched secrets.
 
+The desktop pins the reviewed cloud OpenAPI and shared vector file byte-for-byte. Its main-process canonicalizer applies the same NFC paths, UTF-8 byte limits, deterministic JSON/SHA-256 encoding, sorted findings, and `experience-candidate-dlp-v1` rules as the cloud before later snapshot work can proceed.
+
 ### Candidate review and draft import
 
 Workspace Members may submit from their own matching Installation, while Owner and Admin review terminal candidate decisions and import approved content into a local draft.
