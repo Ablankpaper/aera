@@ -34,9 +34,14 @@ function errorKey(code: AgenteraAgentControlErrorCode): string {
 }
 
 function contextKey(state: AgenteraAgentControlPublicState): string {
-  return state.context.scope === "USER"
-    ? "USER"
-    : `WORKSPACE\0${state.context.workspaceId}\0${state.context.role}`;
+  switch (state.context.scope) {
+    case "USER":
+      return "USER";
+    case "WORKSPACE":
+      return `WORKSPACE\0${state.context.workspaceId}\0${state.context.role}`;
+    case "ORGANIZATION_UNAVAILABLE":
+      return `ORGANIZATION_UNAVAILABLE\0${state.context.organizationId}\0${state.context.role}`;
+  }
 }
 
 export default function AgentControlPanel({

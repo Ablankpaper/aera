@@ -143,6 +143,11 @@ export type AgenteraAgentControlContext =
       scope: "WORKSPACE";
       workspaceId: string;
       role: "owner" | "admin" | "member";
+    }
+  | {
+      scope: "ORGANIZATION_UNAVAILABLE";
+      organizationId: string;
+      role: "owner" | "admin" | "auditor" | "member";
     };
 
 export type AgenteraAgentControlErrorCode =
@@ -159,6 +164,7 @@ export type AgenteraAgentControlErrorCode =
   | "workspace_forbidden"
   | "workspace_archived"
   | "workspace_owner_unavailable"
+  | "organization_agent_not_enabled"
   | "candidate_source_ineligible"
   | "candidate_dlp_blocked"
   | "candidate_already_reviewed"

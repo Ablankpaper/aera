@@ -342,6 +342,19 @@ describe("Agent control IPC contract", () => {
     ).resolves.toEqual({ ok: false, errorCode: code });
   });
 
+  it("preserves the explicit Organization Agent unavailable state", async () => {
+    await expect(
+      executeAgentControlIpc(async () => {
+        throw Object.assign(new Error("private Organization failure"), {
+          code: "organization_agent_not_enabled",
+        });
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      errorCode: "organization_agent_not_enabled",
+    });
+  });
+
   it("maps central online-access denial inside the safe Agent result envelope", async () => {
     const guard = createProductAccessGuard({
       getAuthState: () => ({

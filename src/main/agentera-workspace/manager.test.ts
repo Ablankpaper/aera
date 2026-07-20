@@ -7,6 +7,10 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgenteraAuthPublicState } from "../../shared/agentera-auth";
 import type {
+  ProductSpacePublicState,
+  ProductSpaceSelection,
+} from "../../shared/agentera-product-space";
+import type {
   WorkspaceInvitation,
   WorkspaceInvitationCreation,
   WorkspaceMember,
@@ -20,6 +24,7 @@ import {
 import {
   AgenteraWorkspaceManager,
   type AgenteraWorkspaceCloudClient,
+  type AgenteraWorkspaceSelectionCoordinator,
 } from "./manager";
 
 const ACCOUNT_A = "10000000-0000-4000-8000-000000000001";
@@ -155,15 +160,108 @@ function cloudClient(): AgenteraWorkspaceCloudClient {
   };
 }
 
+function selectionCoordinatorFor(
+  database: AgenteraWorkspaceDatabase,
+  getAuthState: () => AgenteraAuthPublicState,
+): AgenteraWorkspaceSelectionCoordinator {
+  const selected = new Map<string, string | null>();
+  const listeners = new Set<(state: ProductSpacePublicState) => void>();
+  const currentAccess = (): Extract<
+    AgenteraAuthPublicState,
+    { status: "authenticated" | "offline" }
+  > => {
+    const access = getAuthState();
+    if (access.status !== "authenticated" && access.status !== "offline") {
+      throw new Error("unauthenticated");
+    }
+    return access;
+  };
+  const selectedWorkspace = (accountUserId: string): string | null => {
+    if (!selected.has(accountUserId)) {
+      selected.set(
+        accountUserId,
+        database.readSelectedWorkspace(accountUserId),
+      );
+    }
+    return selected.get(accountUserId) ?? null;
+  };
+  const publicSelection = (): ProductSpaceSelection => {
+    const access = currentAccess();
+    const workspaceId = selectedWorkspace(access.userId);
+    const workspace = database
+      .readWorkspaces(access.userId)
+      .workspaces.find(
+        ({ id, status }) => id === workspaceId && status === "active",
+      );
+    return workspace
+      ? {
+          kind: "WORKSPACE",
+          workspaceId: workspace.id,
+          role: workspace.role,
+        }
+      : { kind: "PERSONAL" };
+  };
+  const state = (): ProductSpacePublicState => {
+    const access = currentAccess();
+    const workspaceOptions = database
+      .readWorkspaces(access.userId)
+      .workspaces.filter(({ status }) => status === "active")
+      .map((workspace) => ({
+        kind: "WORKSPACE" as const,
+        workspaceId: workspace.id,
+        displayName: workspace.displayName,
+        role: workspace.role,
+      }));
+    return {
+      access: access.status === "offline" ? "offline" : "online",
+      stale: access.status === "offline",
+      selected: publicSelection(),
+      options: [{ kind: "PERSONAL" }, ...workspaceOptions],
+    };
+  };
+  return {
+    readSelectedWorkspaceId: selectedWorkspace,
+    getAgentContext() {
+      const value = publicSelection();
+      return value.kind === "WORKSPACE"
+        ? {
+            scope: "WORKSPACE",
+            workspaceId: value.workspaceId,
+            role: value.role,
+          }
+        : { scope: "USER" };
+    },
+    select: vi.fn(async (input) => {
+      const access = currentAccess();
+      selected.set(
+        access.userId,
+        input.kind === "WORKSPACE" ? input.workspaceId : null,
+      );
+      const next = state();
+      for (const listener of listeners) listener(next);
+      return next;
+    }),
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
 function managerFor(options: {
   database?: AgenteraWorkspaceDatabase;
   client?: AgenteraWorkspaceCloudClient;
+  selectionCoordinator?: AgenteraWorkspaceSelectionCoordinator;
   getAuthState: () => AgenteraAuthPublicState;
 }): AgenteraWorkspaceManager {
+  const database = options.database ?? databaseFor(temporaryUserData());
   const manager = new AgenteraWorkspaceManager({
-    database: options.database ?? databaseFor(temporaryUserData()),
+    database,
     client: options.client ?? cloudClient(),
     getAuthState: options.getAuthState,
+    selectionCoordinator:
+      options.selectionCoordinator ??
+      selectionCoordinatorFor(database, options.getAuthState),
     now: () => NOW,
   });
   managers.push(manager);
@@ -220,7 +318,7 @@ describe("AgenteraWorkspaceManager", () => {
     });
   });
 
-  it("atomically refreshes, selects only active cached membership, and persists selection", async () => {
+  it("atomically refreshes and delegates only active cached membership selection", async () => {
     const userDataPath = temporaryUserData();
     const client = cloudClient();
     vi.mocked(client.listWorkspaces).mockResolvedValueOnce([
@@ -267,7 +365,7 @@ describe("AgenteraWorkspaceManager", () => {
     });
     await expect(second.getState()).resolves.toMatchObject({
       stale: true,
-      selected: { kind: "workspace", workspaceId: WORKSPACE_A },
+      selected: { kind: "personal" },
     });
   });
 
@@ -605,21 +703,29 @@ describe("AgenteraWorkspaceManager", () => {
     ]);
   });
 
-  it("select touches only Workspace persistence and state listeners", async () => {
+  it("forwards selection to the sole product-space coordinator without writing the legacy Workspace selection", async () => {
     const client = cloudClient();
     const database = databaseFor(temporaryUserData());
     database.replaceWorkspaces(ACCOUNT_A, [summary(WORKSPACE_A)], NOW);
     const writeSelection = vi.spyOn(database, "writeSelectedWorkspace");
+    const selectionCoordinator = selectionCoordinatorFor(database, () =>
+      authState(),
+    );
     const manager = managerFor({
       database,
       client,
+      selectionCoordinator,
       getAuthState: () => authState(),
     });
     const listener = vi.fn();
     manager.subscribe(listener);
 
     await manager.select({ workspaceId: WORKSPACE_A });
-    expect(writeSelection).toHaveBeenCalledWith(ACCOUNT_A, WORKSPACE_A, NOW);
+    expect(selectionCoordinator.select).toHaveBeenCalledWith({
+      kind: "WORKSPACE",
+      workspaceId: WORKSPACE_A,
+    });
+    expect(writeSelection).not.toHaveBeenCalled();
     expect(listener).toHaveBeenCalledTimes(1);
     for (const method of Object.values(client))
       expect(method).not.toHaveBeenCalled();

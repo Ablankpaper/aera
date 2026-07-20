@@ -219,7 +219,7 @@ describe("AgentEra Workspace database", () => {
     }
   });
 
-  it("atomically replaces Workspace summaries per account and cleans invalid selections", () => {
+  it("atomically replaces Workspace summaries without mutating the legacy migration source", () => {
     const database = openAgenteraWorkspaceDatabase(
       join(temporaryRoot(), "user-data"),
       { databaseFactory: nodeSqliteFactory },
@@ -250,7 +250,7 @@ describe("AgentEra Workspace database", () => {
       [summary(WORKSPACE_B)],
       "2026-07-20T13:00:00Z",
     );
-    expect(database.readSelectedWorkspace(ACCOUNT_A)).toBeNull();
+    expect(database.readSelectedWorkspace(ACCOUNT_A)).toBe(WORKSPACE_A);
     expect(database.readSelectedWorkspace(ACCOUNT_B)).toBe(WORKSPACE_A);
 
     expect(() =>
@@ -277,7 +277,7 @@ describe("AgentEra Workspace database", () => {
       ],
       "2026-07-20T15:00:00Z",
     );
-    expect(database.readSelectedWorkspace(ACCOUNT_A)).toBeNull();
+    expect(database.readSelectedWorkspace(ACCOUNT_A)).toBe(WORKSPACE_B);
     expect(() =>
       database.writeSelectedWorkspace(ACCOUNT_A, WORKSPACE_B, UPDATED_AT),
     ).toThrow(/active|selection/i);
