@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  executeProductSpaceIpc,
   parseProductSpaceSelectionInput,
   serializeProductSpacePublicState,
 } from "./ipc-contract";
@@ -145,5 +146,23 @@ describe("AgentEra product-space IPC contract", () => {
     expect(() => serializeProductSpacePublicState(value as never)).toThrowError(
       expect.objectContaining({ code: "invalid_request" }),
     );
+  });
+
+  it("maps failures to a bounded envelope without leaking internal state", async () => {
+    await expect(
+      executeProductSpaceIpc(async () => {
+        throw Object.assign(new Error("/private/profile secret"), {
+          code: "selection_unavailable",
+          responseText: "cloud body",
+        });
+      }),
+    ).resolves.toEqual({ ok: false, errorCode: "selection_unavailable" });
+    await expect(
+      executeProductSpaceIpc(async () => {
+        throw Object.assign(new Error("offline"), {
+          code: "online_required",
+        });
+      }),
+    ).resolves.toEqual({ ok: false, errorCode: "online_required" });
   });
 });

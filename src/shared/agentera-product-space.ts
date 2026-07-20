@@ -54,4 +54,10 @@ export type ProductSpaceErrorCode =
   | "unauthenticated"
   | "invalid_request"
   | "selection_unavailable"
-  | "closed";
+  | "closed"
+  | "online_required"
+  | "service_unavailable";
+
+export type ProductSpaceResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; errorCode: ProductSpaceErrorCode };

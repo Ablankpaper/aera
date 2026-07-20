@@ -71,7 +71,7 @@ describe("AgentEra Workspace remains outside the Hermes adaptive core", () => {
     );
   });
 
-  it("limits product-space selection to the dedicated Workspace namespace", () => {
+  it("routes Workspace compatibility selection through the dedicated product-space coordinator", () => {
     const switcher = source(
       "src/renderer/src/screens/Layout/WorkspaceSwitcher.tsx",
     );
@@ -90,17 +90,34 @@ describe("AgentEra Workspace remains outside the Hermes adaptive core", () => {
       startup.indexOf(
         "agenteraWorkspaceDatabase = openAgenteraWorkspaceDatabase",
       ),
-      startup.indexOf("const unsubscribeSelectedAgentContext"),
+      startup.indexOf(
+        "agenteraOrganizationDatabase = openAgenteraOrganizationDatabase",
+      ),
     );
     expect(workspaceComposition).toContain("new AgenteraWorkspaceManager");
     expect(workspaceComposition).not.toMatch(
       /(?:ProfileBinding|agenteraAgentControl|runtimeDistribution|stopActiveRuntimeContext|sendMessage)/,
     );
+    const productSpaceComposition = startup.slice(
+      startup.indexOf("if (agenteraWorkspace && agenteraOrganization)"),
+      startup.indexOf(
+        "agenteraAgentControlDatabase = openAgenteraControlPlaneDatabase",
+      ),
+    );
+    expect(productSpaceComposition).toContain(
+      "new AgenteraProductSpaceManager",
+    );
+    expect(productSpaceComposition).toContain(
+      "attachProductSpaceCoordinator(agenteraProductSpace)",
+    );
+    expect(productSpaceComposition).not.toMatch(
+      /(?:ProfileBinding|runtimeDistribution|stopActiveRuntimeContext|sendMessage|RuntimeBinding)/,
+    );
     const agentContextBridge = startup.slice(
-      startup.indexOf("const unsubscribeSelectedAgentContext"),
+      startup.indexOf("const unsubscribeProductSpace"),
       startup.indexOf("const ownerSwitchCoordinator"),
     );
-    expect(agentContextBridge).toContain("subscribeSelectedAgentContext");
+    expect(agentContextBridge).toContain("agenteraProductSpace?.subscribe");
     expect(agentContextBridge).toContain("notifyAgentContextChanged");
     expect(agentContextBridge).not.toMatch(
       /(?:ProfileBinding|runtimeDistribution|stopActiveRuntimeContext|sendMessage|RuntimeBinding)/,

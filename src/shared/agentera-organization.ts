@@ -175,4 +175,10 @@ export type AgenteraOrganizationErrorCode =
   | "idempotency_conflict"
   | "dissolution_blocked"
   | "rate_limited"
+  | "online_required"
+  | "policy_verification_failed"
   | "service_unavailable";
+
+export type AgenteraOrganizationResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; errorCode: AgenteraOrganizationErrorCode };

@@ -1,6 +1,5 @@
 import type { components } from "../../shared/agentera-cloud-api.generated";
 import type {
-  AgenteraOrganizationErrorCode,
   OrganizationAssignableRole,
   OrganizationAuditEvent,
   OrganizationDepartment,
@@ -945,7 +944,7 @@ function isErrorEnvelope(
     hasExactFields(value, ["error"]) &&
     hasExactFields(value.error, ["code", "request_id"]) &&
     typeof value.error.code === "string" &&
-    STABLE_ERROR_CODES.has(value.error.code as AgenteraOrganizationErrorCode) &&
+    STABLE_ERROR_CODES.has(value.error.code as RawOrganizationErrorCode) &&
     typeof value.error.request_id === "string" &&
     value.error.request_id.length >= 1 &&
     value.error.request_id.length <= 128

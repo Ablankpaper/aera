@@ -342,6 +342,8 @@ describe("Workspace IPC and startup wiring", () => {
     expect(start).toContain("getAccessTokenForCloudRequest");
     expect(start).toContain("agenteraWorkspace?.notifyAccessStateChanged()");
     expect(start).toContain("agenteraWorkspace?.close()");
+    expect(start).toContain("attachProductSpaceCoordinator");
+    expect(start).not.toContain("subscribeSelectedAgentContext");
   });
 
   it("acquires the single-instance lock and registers protocol handling before Runtime bootstrap", () => {

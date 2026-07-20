@@ -305,14 +305,14 @@ export class AgenteraProductSpaceManager {
 
   getAgentContext(): ProductSpaceAgentContext {
     this.assertOpen();
-    if (this.lastState)
-      return this.contextFromSelection(this.lastState.selected);
     let access: ProductAccess;
     try {
       access = this.readAccess();
     } catch {
       return { scope: "USER" };
     }
+    if (this.lastState)
+      return this.contextFromSelection(this.lastState.selected);
     const stored = this.database.readSelection(access.userId);
     if (stored?.kind === "WORKSPACE") {
       return {

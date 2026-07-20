@@ -84,6 +84,30 @@ import type {
   WorkspacePublicState,
   WorkspaceSummary,
 } from "../shared/agentera-workspace";
+import type {
+  ProductSpacePublicState,
+  ProductSpaceResult,
+  StoredProductSpaceSelection,
+} from "../shared/agentera-product-space";
+import type {
+  AgenteraOrganizationResult,
+  OrganizationAuditEvent,
+  OrganizationCachedCollection,
+  OrganizationCurrentPolicyState,
+  OrganizationDepartment,
+  OrganizationInvitation,
+  OrganizationInvitationAcceptance,
+  OrganizationInvitationCreation,
+  OrganizationMember,
+  OrganizationMemberPatch,
+  OrganizationPage,
+  OrganizationPendingInvitation,
+  OrganizationPolicyDocument,
+  OrganizationPolicySnapshot,
+  OrganizationPolicySummary,
+  OrganizationPublicState,
+  OrganizationSummary,
+} from "../shared/agentera-organization";
 
 interface ElectronAPI {
   process: {
@@ -131,6 +155,151 @@ interface AgenteraRuntimeDistributionAPI {
   retryRepair: () => Promise<RuntimeDistributionPublicState>;
   onStateChanged: (
     callback: (state: RuntimeDistributionPublicState) => void,
+  ) => () => void;
+}
+
+interface AgenteraProductSpaceAPI {
+  getState: () => Promise<ProductSpaceResult<ProductSpacePublicState>>;
+  refresh: () => Promise<ProductSpaceResult<ProductSpacePublicState>>;
+  select: (
+    input: StoredProductSpaceSelection,
+  ) => Promise<ProductSpaceResult<ProductSpacePublicState>>;
+  onStateChanged: (
+    callback: (state: ProductSpacePublicState) => void,
+  ) => () => void;
+}
+
+interface AgenteraOrganizationAPI {
+  getState: () => Promise<AgenteraOrganizationResult<OrganizationPublicState>>;
+  refresh: () => Promise<AgenteraOrganizationResult<OrganizationPublicState>>;
+  create: (input: {
+    displayName: string;
+  }) => Promise<AgenteraOrganizationResult<OrganizationSummary>>;
+  rename: (input: {
+    organizationId: string;
+    displayName: string;
+    expectedRevision: number;
+  }) => Promise<AgenteraOrganizationResult<OrganizationSummary>>;
+  archive: (input: {
+    organizationId: string;
+    expectedRevision: number;
+  }) => Promise<AgenteraOrganizationResult<OrganizationSummary>>;
+  restore: (input: {
+    organizationId: string;
+    expectedRevision: number;
+  }) => Promise<AgenteraOrganizationResult<OrganizationSummary>>;
+  transferOwner: (input: {
+    organizationId: string;
+    targetUserId: string;
+    expectedOrganizationRevision: number;
+    expectedOwnerRevision: number;
+    expectedTargetRevision: number;
+    confirmation: "transfer-organization-owner";
+  }) => Promise<AgenteraOrganizationResult<OrganizationSummary>>;
+  dissolve: (input: {
+    organizationId: string;
+    displayName: string;
+    expectedRevision: number;
+    confirmation: "dissolve-organization";
+  }) => Promise<AgenteraOrganizationResult<OrganizationSummary>>;
+  listMembers: (input: {
+    organizationId: string;
+  }) => Promise<
+    AgenteraOrganizationResult<OrganizationCachedCollection<OrganizationMember>>
+  >;
+  patchMember: (input: {
+    organizationId: string;
+    userId: string;
+    patch: OrganizationMemberPatch;
+  }) => Promise<AgenteraOrganizationResult<OrganizationMember>>;
+  removeMember: (input: {
+    organizationId: string;
+    userId: string;
+    expectedRevision: number;
+  }) => Promise<AgenteraOrganizationResult<true>>;
+  leave: (input: {
+    organizationId: string;
+  }) => Promise<AgenteraOrganizationResult<true>>;
+  listDepartments: (input: {
+    organizationId: string;
+  }) => Promise<
+    AgenteraOrganizationResult<
+      OrganizationCachedCollection<OrganizationDepartment>
+    >
+  >;
+  createDepartment: (input: {
+    organizationId: string;
+    displayName: string;
+  }) => Promise<AgenteraOrganizationResult<OrganizationDepartment>>;
+  renameDepartment: (input: {
+    organizationId: string;
+    departmentId: string;
+    displayName: string;
+    expectedRevision: number;
+  }) => Promise<AgenteraOrganizationResult<OrganizationDepartment>>;
+  archiveDepartment: (input: {
+    organizationId: string;
+    departmentId: string;
+    expectedRevision: number;
+  }) => Promise<AgenteraOrganizationResult<OrganizationDepartment>>;
+  restoreDepartment: (input: {
+    organizationId: string;
+    departmentId: string;
+    expectedRevision: number;
+  }) => Promise<AgenteraOrganizationResult<OrganizationDepartment>>;
+  listInvitations: (input: {
+    organizationId: string;
+  }) => Promise<
+    AgenteraOrganizationResult<
+      OrganizationCachedCollection<OrganizationInvitation>
+    >
+  >;
+  createInvitation: (input: {
+    organizationId: string;
+  }) => Promise<AgenteraOrganizationResult<OrganizationInvitationCreation>>;
+  revokeInvitation: (input: {
+    organizationId: string;
+    invitationId: string;
+  }) => Promise<AgenteraOrganizationResult<true>>;
+  acceptInvitation: (input: {
+    token: string;
+  }) => Promise<AgenteraOrganizationResult<OrganizationInvitationAcceptance>>;
+  getPendingInvitation: () => Promise<
+    AgenteraOrganizationResult<OrganizationPendingInvitation | null>
+  >;
+  dismissPendingInvitation: (input: {
+    token: string;
+  }) => Promise<AgenteraOrganizationResult<boolean>>;
+  getCurrentPolicy: (input: {
+    organizationId: string;
+  }) => Promise<AgenteraOrganizationResult<OrganizationCurrentPolicyState>>;
+  listPolicySnapshots: (input: {
+    organizationId: string;
+  }) => Promise<
+    AgenteraOrganizationResult<readonly OrganizationPolicySummary[]>
+  >;
+  publishPolicy: (input: {
+    organizationId: string;
+    document: OrganizationPolicyDocument;
+    expectedOrganizationRevision: number;
+    expectedPolicyVersion: number;
+  }) => Promise<AgenteraOrganizationResult<OrganizationPolicySnapshot>>;
+  getPolicySnapshot: (input: {
+    organizationId: string;
+    policySnapshotId: string;
+  }) => Promise<AgenteraOrganizationResult<OrganizationPolicySnapshot>>;
+  listAuditEvents: (input: {
+    organizationId: string;
+    limit?: number;
+    cursor?: string;
+  }) => Promise<
+    AgenteraOrganizationResult<OrganizationPage<OrganizationAuditEvent>>
+  >;
+  onStateChanged: (
+    callback: (state: OrganizationPublicState) => void,
+  ) => () => void;
+  onInvitationReceived: (
+    callback: (invitation: OrganizationPendingInvitation) => void,
   ) => () => void;
 }
 
@@ -1488,6 +1657,8 @@ declare global {
     electron: ElectronAPI;
     hermesAPI: HermesAPI;
     agenteraAuth: AgenteraAuthAPI;
+    agenteraProductSpace: AgenteraProductSpaceAPI;
+    agenteraOrganization: AgenteraOrganizationAPI;
     agenteraWorkspace: AgenteraWorkspaceAPI;
     agenteraAgents: AgenteraAgentsAPI;
     agenteraRuntimeAccess: AgenteraRuntimeAccessAPI;

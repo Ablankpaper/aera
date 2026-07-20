@@ -375,6 +375,32 @@ describe("AgenteraProductSpaceManager", () => {
     });
   });
 
+  it("never returns the previous account Agent context before async reconciliation", async () => {
+    let auth = authState("A");
+    const manager = managerFor({
+      workspaceSource: mutableSource(
+        workspaceState([workspace(WORKSPACE_A, "Workspace")]),
+      ),
+      organizationSource: mutableSource(
+        organizationState([organization(ORGANIZATION_A, "Organization")]),
+      ),
+      getAuthState: () => auth,
+    });
+    await manager.getState();
+    await manager.select({
+      kind: "ORGANIZATION",
+      organizationId: ORGANIZATION_A,
+    });
+    expect(manager.getAgentContext()).toMatchObject({
+      scope: "ORGANIZATION_UNAVAILABLE",
+      organizationId: ORGANIZATION_A,
+    });
+
+    auth = authState("B");
+
+    expect(manager.getAgentContext()).toEqual({ scope: "USER" });
+  });
+
   it("rejects stale asynchronous source results after an account switch", async () => {
     const workspacePending = deferred<WorkspacePublicState>();
     const organizationPending = deferred<OrganizationPublicState>();

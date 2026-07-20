@@ -1,6 +1,8 @@
 import type {
+  ProductSpaceErrorCode,
   ProductSpaceOption,
   ProductSpacePublicState,
+  ProductSpaceResult,
   ProductSpaceSelection,
 } from "../../shared/agentera-product-space";
 import type { ProductSpaceSelectionInput } from "./manager";
@@ -220,4 +222,50 @@ export function serializeProductSpacePublicState(
     selected,
     options,
   };
+}
+
+const STABLE_CODES = new Set<ProductSpaceErrorCode>([
+  "unauthenticated",
+  "invalid_request",
+  "selection_unavailable",
+  "closed",
+  "online_required",
+  "service_unavailable",
+]);
+
+function mapProductSpaceError(error: unknown): ProductSpaceErrorCode {
+  let code = "";
+  try {
+    if (
+      error !== null &&
+      typeof error === "object" &&
+      typeof (error as { code?: unknown }).code === "string"
+    ) {
+      code = (error as { code: string }).code;
+    }
+  } catch {
+    return "service_unavailable";
+  }
+  if (STABLE_CODES.has(code as ProductSpaceErrorCode)) {
+    return code as ProductSpaceErrorCode;
+  }
+  if (
+    code === "sign_in_required" ||
+    code === "authentication_required" ||
+    code === "invalid_credentials"
+  ) {
+    return "unauthenticated";
+  }
+  if (code.startsWith("invalid_")) return "invalid_request";
+  return "service_unavailable";
+}
+
+export async function executeProductSpaceIpc<T>(
+  task: () => T | Promise<T>,
+): Promise<ProductSpaceResult<T>> {
+  try {
+    return { ok: true, data: await task() };
+  } catch (error) {
+    return { ok: false, errorCode: mapProductSpaceError(error) };
+  }
 }

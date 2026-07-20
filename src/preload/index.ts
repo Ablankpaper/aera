@@ -78,6 +78,30 @@ import type {
   WorkspacePublicState,
   WorkspaceSummary,
 } from "../shared/agentera-workspace";
+import type {
+  ProductSpacePublicState,
+  ProductSpaceResult,
+  StoredProductSpaceSelection,
+} from "../shared/agentera-product-space";
+import type {
+  AgenteraOrganizationResult,
+  OrganizationAuditEvent,
+  OrganizationCachedCollection,
+  OrganizationCurrentPolicyState,
+  OrganizationDepartment,
+  OrganizationInvitation,
+  OrganizationInvitationAcceptance,
+  OrganizationInvitationCreation,
+  OrganizationMember,
+  OrganizationMemberPatch,
+  OrganizationPage,
+  OrganizationPendingInvitation,
+  OrganizationPolicyDocument,
+  OrganizationPolicySnapshot,
+  OrganizationPolicySummary,
+  OrganizationPublicState,
+  OrganizationSummary,
+} from "../shared/agentera-organization";
 
 /**
  * Mirror of the renderer-side `CredentialPoolEntry` ambient type
@@ -1752,6 +1776,212 @@ const agenteraRuntimeDistributionAPI = {
   },
 };
 
+const agenteraProductSpaceAPI = {
+  getState: (): Promise<ProductSpaceResult<ProductSpacePublicState>> =>
+    ipcRenderer.invoke("agentera-product-space-get-state"),
+  refresh: (): Promise<ProductSpaceResult<ProductSpacePublicState>> =>
+    ipcRenderer.invoke("agentera-product-space-refresh"),
+  select: (
+    input: StoredProductSpaceSelection,
+  ): Promise<ProductSpaceResult<ProductSpacePublicState>> =>
+    ipcRenderer.invoke("agentera-product-space-select", input),
+  onStateChanged: (
+    callback: (state: ProductSpacePublicState) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      state: ProductSpacePublicState,
+    ): void => callback(state);
+    ipcRenderer.on("agentera-product-space-state-changed", handler);
+    return () =>
+      ipcRenderer.removeListener(
+        "agentera-product-space-state-changed",
+        handler,
+      );
+  },
+};
+
+const agenteraOrganizationAPI = {
+  getState: (): Promise<AgenteraOrganizationResult<OrganizationPublicState>> =>
+    ipcRenderer.invoke("agentera-organization-get-state"),
+  refresh: (): Promise<AgenteraOrganizationResult<OrganizationPublicState>> =>
+    ipcRenderer.invoke("agentera-organization-refresh"),
+  create: (input: {
+    displayName: string;
+  }): Promise<AgenteraOrganizationResult<OrganizationSummary>> =>
+    ipcRenderer.invoke("agentera-organization-create", input),
+  rename: (input: {
+    organizationId: string;
+    displayName: string;
+    expectedRevision: number;
+  }): Promise<AgenteraOrganizationResult<OrganizationSummary>> =>
+    ipcRenderer.invoke("agentera-organization-rename", input),
+  archive: (input: {
+    organizationId: string;
+    expectedRevision: number;
+  }): Promise<AgenteraOrganizationResult<OrganizationSummary>> =>
+    ipcRenderer.invoke("agentera-organization-archive", input),
+  restore: (input: {
+    organizationId: string;
+    expectedRevision: number;
+  }): Promise<AgenteraOrganizationResult<OrganizationSummary>> =>
+    ipcRenderer.invoke("agentera-organization-restore", input),
+  transferOwner: (input: {
+    organizationId: string;
+    targetUserId: string;
+    expectedOrganizationRevision: number;
+    expectedOwnerRevision: number;
+    expectedTargetRevision: number;
+    confirmation: "transfer-organization-owner";
+  }): Promise<AgenteraOrganizationResult<OrganizationSummary>> =>
+    ipcRenderer.invoke("agentera-organization-transfer-owner", input),
+  dissolve: (input: {
+    organizationId: string;
+    displayName: string;
+    expectedRevision: number;
+    confirmation: "dissolve-organization";
+  }): Promise<AgenteraOrganizationResult<OrganizationSummary>> =>
+    ipcRenderer.invoke("agentera-organization-dissolve", input),
+  listMembers: (input: {
+    organizationId: string;
+  }): Promise<
+    AgenteraOrganizationResult<OrganizationCachedCollection<OrganizationMember>>
+  > => ipcRenderer.invoke("agentera-organization-list-members", input),
+  patchMember: (input: {
+    organizationId: string;
+    userId: string;
+    patch: OrganizationMemberPatch;
+  }): Promise<AgenteraOrganizationResult<OrganizationMember>> =>
+    ipcRenderer.invoke("agentera-organization-patch-member", input),
+  removeMember: (input: {
+    organizationId: string;
+    userId: string;
+    expectedRevision: number;
+  }): Promise<AgenteraOrganizationResult<true>> =>
+    ipcRenderer.invoke("agentera-organization-remove-member", input),
+  leave: (input: {
+    organizationId: string;
+  }): Promise<AgenteraOrganizationResult<true>> =>
+    ipcRenderer.invoke("agentera-organization-leave", input),
+  listDepartments: (input: {
+    organizationId: string;
+  }): Promise<
+    AgenteraOrganizationResult<
+      OrganizationCachedCollection<OrganizationDepartment>
+    >
+  > => ipcRenderer.invoke("agentera-organization-list-departments", input),
+  createDepartment: (input: {
+    organizationId: string;
+    displayName: string;
+  }): Promise<AgenteraOrganizationResult<OrganizationDepartment>> =>
+    ipcRenderer.invoke("agentera-organization-create-department", input),
+  renameDepartment: (input: {
+    organizationId: string;
+    departmentId: string;
+    displayName: string;
+    expectedRevision: number;
+  }): Promise<AgenteraOrganizationResult<OrganizationDepartment>> =>
+    ipcRenderer.invoke("agentera-organization-rename-department", input),
+  archiveDepartment: (input: {
+    organizationId: string;
+    departmentId: string;
+    expectedRevision: number;
+  }): Promise<AgenteraOrganizationResult<OrganizationDepartment>> =>
+    ipcRenderer.invoke("agentera-organization-archive-department", input),
+  restoreDepartment: (input: {
+    organizationId: string;
+    departmentId: string;
+    expectedRevision: number;
+  }): Promise<AgenteraOrganizationResult<OrganizationDepartment>> =>
+    ipcRenderer.invoke("agentera-organization-restore-department", input),
+  listInvitations: (input: {
+    organizationId: string;
+  }): Promise<
+    AgenteraOrganizationResult<
+      OrganizationCachedCollection<OrganizationInvitation>
+    >
+  > => ipcRenderer.invoke("agentera-organization-list-invitations", input),
+  createInvitation: (input: {
+    organizationId: string;
+  }): Promise<AgenteraOrganizationResult<OrganizationInvitationCreation>> =>
+    ipcRenderer.invoke("agentera-organization-create-invitation", input),
+  revokeInvitation: (input: {
+    organizationId: string;
+    invitationId: string;
+  }): Promise<AgenteraOrganizationResult<true>> =>
+    ipcRenderer.invoke("agentera-organization-revoke-invitation", input),
+  acceptInvitation: (input: {
+    token: string;
+  }): Promise<AgenteraOrganizationResult<OrganizationInvitationAcceptance>> =>
+    ipcRenderer.invoke("agentera-organization-accept-invitation", input),
+  getPendingInvitation: (): Promise<
+    AgenteraOrganizationResult<OrganizationPendingInvitation | null>
+  > => ipcRenderer.invoke("agentera-organization-get-pending-invitation"),
+  dismissPendingInvitation: (input: {
+    token: string;
+  }): Promise<AgenteraOrganizationResult<boolean>> =>
+    ipcRenderer.invoke(
+      "agentera-organization-dismiss-pending-invitation",
+      input,
+    ),
+  getCurrentPolicy: (input: {
+    organizationId: string;
+  }): Promise<AgenteraOrganizationResult<OrganizationCurrentPolicyState>> =>
+    ipcRenderer.invoke("agentera-organization-get-current-policy", input),
+  listPolicySnapshots: (input: {
+    organizationId: string;
+  }): Promise<
+    AgenteraOrganizationResult<readonly OrganizationPolicySummary[]>
+  > => ipcRenderer.invoke("agentera-organization-list-policy-snapshots", input),
+  publishPolicy: (input: {
+    organizationId: string;
+    document: OrganizationPolicyDocument;
+    expectedOrganizationRevision: number;
+    expectedPolicyVersion: number;
+  }): Promise<AgenteraOrganizationResult<OrganizationPolicySnapshot>> =>
+    ipcRenderer.invoke("agentera-organization-publish-policy", input),
+  getPolicySnapshot: (input: {
+    organizationId: string;
+    policySnapshotId: string;
+  }): Promise<AgenteraOrganizationResult<OrganizationPolicySnapshot>> =>
+    ipcRenderer.invoke("agentera-organization-get-policy-snapshot", input),
+  listAuditEvents: (input: {
+    organizationId: string;
+    limit?: number;
+    cursor?: string;
+  }): Promise<
+    AgenteraOrganizationResult<OrganizationPage<OrganizationAuditEvent>>
+  > => ipcRenderer.invoke("agentera-organization-list-audit-events", input),
+  onStateChanged: (
+    callback: (state: OrganizationPublicState) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      state: OrganizationPublicState,
+    ): void => callback(state);
+    ipcRenderer.on("agentera-organization-state-changed", handler);
+    return () =>
+      ipcRenderer.removeListener(
+        "agentera-organization-state-changed",
+        handler,
+      );
+  },
+  onInvitationReceived: (
+    callback: (invitation: OrganizationPendingInvitation) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      invitation: OrganizationPendingInvitation,
+    ): void => callback(invitation);
+    ipcRenderer.on("agentera-organization-invitation-received", handler);
+    return () =>
+      ipcRenderer.removeListener(
+        "agentera-organization-invitation-received",
+        handler,
+      );
+  },
+};
+
 const agenteraWorkspaceAPI = {
   getState: (): Promise<AgenteraWorkspaceResult<WorkspacePublicState>> =>
     ipcRenderer.invoke("agentera-workspace-get-state"),
@@ -1975,6 +2205,14 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld("electron", electronAPI);
     contextBridge.exposeInMainWorld("hermesAPI", hermesAPI);
     contextBridge.exposeInMainWorld("agenteraAuth", agenteraAuthAPI);
+    contextBridge.exposeInMainWorld(
+      "agenteraProductSpace",
+      agenteraProductSpaceAPI,
+    );
+    contextBridge.exposeInMainWorld(
+      "agenteraOrganization",
+      agenteraOrganizationAPI,
+    );
     contextBridge.exposeInMainWorld("agenteraWorkspace", agenteraWorkspaceAPI);
     contextBridge.exposeInMainWorld("agenteraAgents", agenteraAgentsAPI);
     contextBridge.exposeInMainWorld(
@@ -1995,6 +2233,10 @@ if (process.contextIsolated) {
   window.hermesAPI = hermesAPI;
   // @ts-ignore (define in dts)
   window.agenteraAuth = agenteraAuthAPI;
+  // @ts-ignore (define in dts)
+  window.agenteraProductSpace = agenteraProductSpaceAPI;
+  // @ts-ignore (define in dts)
+  window.agenteraOrganization = agenteraOrganizationAPI;
   // @ts-ignore (define in dts)
   window.agenteraWorkspace = agenteraWorkspaceAPI;
   // @ts-ignore (define in dts)
