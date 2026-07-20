@@ -23,7 +23,7 @@ const siblingCandidateVectors = join(
 );
 
 function generatedSchemaBlock(source: string, schema: string): string {
-  const start = source.indexOf(`    readonly ${schema}: {`);
+  const start = source.indexOf(`    readonly ${schema}:`);
   expect(start).toBeGreaterThanOrEqual(0);
   const end = source.indexOf("\n    readonly ", start + 1);
   return source.slice(start, end < 0 ? undefined : end);
@@ -191,6 +191,65 @@ describe("AgentEra cloud contract pin", () => {
       expect(candidateSource).not.toMatch(
         new RegExp(`readonly\\s+(?:"${forbidden}"|${forbidden})\\??:`),
       );
+    }
+  });
+
+  it("generates strict Organization Foundation schemas without Hermes private state", () => {
+    const source = readFileSync(generatedTypes, "utf8");
+    const organizationSchemas = [
+      "OrganizationSummary",
+      "OrganizationMember",
+      "OrganizationDepartment",
+      "OrganizationInvitation",
+      "OrganizationInvitationCreation",
+      "OrganizationInvitationAcceptance",
+      "OrganizationPolicySummary",
+      "OrganizationPolicySnapshot",
+      "OrganizationAuditEvent",
+      "OrganizationListResponse",
+      "OrganizationMemberListResponse",
+      "OrganizationDepartmentListResponse",
+      "OrganizationInvitationListResponse",
+      "OrganizationPolicyListResponse",
+      "OrganizationAuditListResponse",
+      "CreateOrganizationRequest",
+      "RenameOrganizationRequest",
+      "OrganizationRevisionRequest",
+      "TransferOrganizationOwnerRequest",
+      "DissolveOrganizationRequest",
+      "PatchOrganizationMemberRequest",
+      "CreateOrganizationDepartmentRequest",
+      "RenameOrganizationDepartmentRequest",
+      "OrganizationDepartmentRevisionRequest",
+      "AcceptOrganizationInvitationRequest",
+      "PublishOrganizationPolicyRequest",
+      "OrganizationPolicyDocument",
+      "OrganizationErrorEnvelope",
+      "AccountDeletionOwnershipErrorEnvelope",
+    ];
+    for (const schema of organizationSchemas) {
+      expect(source).toContain(`${schema}:`);
+    }
+    const organizationSource = organizationSchemas
+      .map((schema) => generatedSchemaBlock(source, schema))
+      .join("\n")
+      .toLowerCase();
+    for (const forbidden of [
+      "owner_scope",
+      "runtimebinding",
+      "runtime_binding",
+      "profile",
+      "memory",
+      "session",
+      "credential",
+      "api_key",
+      "private_skill",
+      "curator",
+      "token_digest",
+      "email",
+      "phone",
+    ]) {
+      expect(organizationSource).not.toContain(forbidden);
     }
   });
 });

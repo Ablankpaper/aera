@@ -42,6 +42,26 @@ const REQUIRED_PATHS = [
   "/api/v1/oauth/refresh",
   "/api/v1/oauth/revoke",
   "/api/v1/oauth/token",
+  "/api/v1/organization-invitations/accept",
+  "/api/v1/organization-policy-snapshots/{policy_snapshot_id}",
+  "/api/v1/organizations",
+  "/api/v1/organizations/{organization_id}",
+  "/api/v1/organizations/{organization_id}/archive",
+  "/api/v1/organizations/{organization_id}/audit-events",
+  "/api/v1/organizations/{organization_id}/departments",
+  "/api/v1/organizations/{organization_id}/departments/{department_id}",
+  "/api/v1/organizations/{organization_id}/departments/{department_id}/archive",
+  "/api/v1/organizations/{organization_id}/departments/{department_id}/restore",
+  "/api/v1/organizations/{organization_id}/dissolve",
+  "/api/v1/organizations/{organization_id}/invitations",
+  "/api/v1/organizations/{organization_id}/invitations/{invitation_id}",
+  "/api/v1/organizations/{organization_id}/leave",
+  "/api/v1/organizations/{organization_id}/members",
+  "/api/v1/organizations/{organization_id}/members/{user_id}",
+  "/api/v1/organizations/{organization_id}/owner-transfer",
+  "/api/v1/organizations/{organization_id}/policy",
+  "/api/v1/organizations/{organization_id}/policy-snapshots",
+  "/api/v1/organizations/{organization_id}/restore",
   "/api/v1/runtime-binding-records",
   "/api/v1/verification/challenges",
   "/api/v1/verification/challenges/verify",
@@ -101,6 +121,7 @@ const ERROR_CODES = [
   "invalid_request",
   "last_identity",
   "not_found",
+  "organization_owner_transfer_required",
   "invitation_limit_reached",
   "invitation_unavailable",
   "member_limit_reached",
@@ -130,6 +151,268 @@ const AGENT_SCHEMAS = [
   "PublishInitialAgentRequest",
   "PublishNextAgentVersionRequest",
   "RuntimeBindingRecord",
+];
+
+const ORGANIZATION_ERROR_CODES = [
+  "authentication_required",
+  "department_limit_reached",
+  "department_not_empty",
+  "dissolution_blocked",
+  "idempotency_conflict",
+  "invalid_request",
+  "invitation_limit_reached",
+  "invitation_unavailable",
+  "member_limit_reached",
+  "membership_conflict",
+  "organization_archived",
+  "organization_conflict",
+  "organization_forbidden",
+  "organization_limit_reached",
+  "organization_not_found",
+  "organization_owner_transfer_required",
+  "owner_transfer_target_invalid",
+  "policy_version_conflict",
+  "rate_limited",
+  "service_unavailable",
+];
+
+const ORGANIZATION_SCHEMA_PROPERTIES = {
+  AccountDeletionOwnershipErrorEnvelope: ["error"],
+  OrganizationSummary: [
+    "archived_at",
+    "created_at",
+    "current_policy_digest",
+    "current_policy_version",
+    "department_count",
+    "display_name",
+    "id",
+    "member_count",
+    "mutation_state",
+    "revision",
+    "role",
+    "status",
+    "updated_at",
+  ],
+  OrganizationMember: [
+    "department_id",
+    "joined_at",
+    "nickname",
+    "revision",
+    "role",
+    "updated_at",
+    "user_id",
+  ],
+  OrganizationDepartment: [
+    "archived_at",
+    "created_at",
+    "display_name",
+    "id",
+    "member_count",
+    "revision",
+    "status",
+    "updated_at",
+  ],
+  OrganizationInvitation: [
+    "accepted_at",
+    "accepted_by_user_id",
+    "created_at",
+    "created_by_user_id",
+    "expires_at",
+    "id",
+    "revoked_at",
+    "status",
+  ],
+  OrganizationInvitationCreation: [
+    "invitation",
+    "invite_url",
+    "secret_replayable",
+    "token",
+  ],
+  OrganizationInvitationAcceptance: ["member", "organization"],
+  OrganizationPolicySummary: [
+    "content_digest",
+    "created_at",
+    "id",
+    "issuer",
+    "policy_version",
+    "schema_version",
+    "signing_key_id",
+  ],
+  OrganizationPolicySnapshot: [
+    "content_digest",
+    "created_at",
+    "id",
+    "issuer",
+    "policy_document",
+    "policy_version",
+    "schema_version",
+    "signature",
+    "signing_key_id",
+  ],
+  OrganizationAuditEvent: [
+    "actor_display",
+    "created_at",
+    "event_type",
+    "id",
+    "object_id",
+    "object_type",
+    "outcome",
+    "reason_code",
+    "request_id",
+    "subject_display",
+  ],
+  OrganizationListResponse: ["items", "next_cursor"],
+  OrganizationMemberListResponse: ["items", "next_cursor"],
+  OrganizationDepartmentListResponse: ["items", "next_cursor"],
+  OrganizationInvitationListResponse: ["items", "next_cursor"],
+  OrganizationPolicyListResponse: ["items", "next_cursor"],
+  OrganizationAuditListResponse: ["items", "next_cursor"],
+  CreateOrganizationRequest: ["display_name"],
+  RenameOrganizationRequest: ["display_name", "expected_revision"],
+  OrganizationRevisionRequest: ["expected_revision"],
+  TransferOrganizationOwnerRequest: [
+    "confirmation",
+    "expected_organization_revision",
+    "expected_owner_revision",
+    "expected_target_revision",
+    "target_user_id",
+  ],
+  DissolveOrganizationRequest: [
+    "confirmation",
+    "display_name",
+    "expected_revision",
+  ],
+  PatchOrganizationMemberRequest: [
+    "department_id",
+    "expected_revision",
+    "role",
+  ],
+  CreateOrganizationDepartmentRequest: ["display_name"],
+  RenameOrganizationDepartmentRequest: ["display_name", "expected_revision"],
+  OrganizationDepartmentRevisionRequest: ["expected_revision"],
+  AcceptOrganizationInvitationRequest: ["token"],
+  PublishOrganizationPolicyRequest: [
+    "expected_organization_revision",
+    "expected_policy_version",
+    "policy_document",
+  ],
+  OrganizationPolicyDocument: [
+    "experience_candidates",
+    "models",
+    "official_agents",
+    "schema_version",
+    "tools",
+  ],
+  OrganizationErrorEnvelope: ["error"],
+};
+
+const ORGANIZATION_OPERATIONS = [
+  ["/api/v1/organizations", "get", ["200", "400", "401", "503"]],
+  [
+    "/api/v1/organizations",
+    "post",
+    ["200", "201", "400", "401", "409", "413", "429", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}",
+    "get",
+    ["200", "400", "401", "404", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}",
+    "patch",
+    ["200", "400", "401", "403", "404", "409", "413", "429", "503"],
+  ],
+  ...["archive", "restore", "owner-transfer", "dissolve"].map((action) => [
+    `/api/v1/organizations/{organization_id}/${action}`,
+    "post",
+    ["200", "400", "401", "403", "404", "409", "413", "429", "503"],
+  ]),
+  [
+    "/api/v1/organizations/{organization_id}/members",
+    "get",
+    ["200", "400", "401", "404", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/members/{user_id}",
+    "patch",
+    ["200", "400", "401", "403", "404", "409", "413", "429", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/members/{user_id}",
+    "delete",
+    ["204", "400", "401", "403", "404", "409", "429", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/leave",
+    "post",
+    ["204", "400", "401", "403", "404", "409", "413", "429", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/departments",
+    "get",
+    ["200", "400", "401", "404", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/departments",
+    "post",
+    ["201", "400", "401", "403", "404", "409", "413", "429", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/departments/{department_id}",
+    "patch",
+    ["200", "400", "401", "403", "404", "409", "413", "429", "503"],
+  ],
+  ...["archive", "restore"].map((action) => [
+    `/api/v1/organizations/{organization_id}/departments/{department_id}/${action}`,
+    "post",
+    ["200", "400", "401", "403", "404", "409", "413", "429", "503"],
+  ]),
+  [
+    "/api/v1/organizations/{organization_id}/invitations",
+    "get",
+    ["200", "400", "401", "403", "404", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/invitations",
+    "post",
+    ["200", "201", "400", "401", "403", "404", "409", "413", "429", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/invitations/{invitation_id}",
+    "delete",
+    ["204", "400", "401", "403", "404", "409", "429", "503"],
+  ],
+  [
+    "/api/v1/organization-invitations/accept",
+    "post",
+    ["200", "400", "401", "404", "409", "413", "429", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/policy",
+    "get",
+    ["200", "400", "401", "404", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/policy-snapshots",
+    "get",
+    ["200", "400", "401", "403", "404", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/policy-snapshots",
+    "post",
+    ["201", "400", "401", "403", "404", "409", "413", "429", "503"],
+  ],
+  [
+    "/api/v1/organization-policy-snapshots/{policy_snapshot_id}",
+    "get",
+    ["200", "400", "401", "403", "404", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/audit-events",
+    "get",
+    ["200", "400", "401", "403", "404", "503"],
+  ],
 ];
 
 const WORKSPACE_SCHEMA_PROPERTIES = {
@@ -376,7 +659,10 @@ function exactMembers(actual, expected, label) {
 }
 
 function validateCriticalContract(document) {
-  if (document.info?.version !== "0.5.0") {
+  if (document.openapi !== "3.0.3") {
+    fail(`OpenAPI dialect changed: ${String(document.openapi)}`);
+  }
+  if (document.info?.version !== "0.6.0") {
     fail(`OpenAPI version changed: ${String(document.info?.version)}`);
   }
   const paths = object(document.paths, "paths");
@@ -484,6 +770,19 @@ function validateCriticalContract(document) {
       `${schemaName}.properties`,
     );
   }
+  for (const [schemaName, expectedProperties] of Object.entries(
+    ORGANIZATION_SCHEMA_PROPERTIES,
+  )) {
+    const schema = object(schemas[schemaName], schemaName);
+    if (schema.type !== "object" || schema.additionalProperties !== false) {
+      fail(`${schemaName} is no longer a strict object`);
+    }
+    exactMembers(
+      Object.keys(object(schema.properties, `${schemaName}.properties`)),
+      expectedProperties,
+      `${schemaName}.properties`,
+    );
+  }
   exactMembers(
     object(schemas.ExperienceCandidateErrorCode, "ExperienceCandidateErrorCode")
       .enum ?? [],
@@ -514,9 +813,9 @@ function validateCriticalContract(document) {
   );
   if (
     schemas.ExperienceCandidateSummary.properties?.dlp_contract_version
-      ?.const !== EXPERIENCE_CANDIDATE_DLP_VERSION ||
+      ?.enum?.[0] !== EXPERIENCE_CANDIDATE_DLP_VERSION ||
     schemas.ExperienceCandidateDetail.properties?.dlp_contract_version
-      ?.const !== EXPERIENCE_CANDIDATE_DLP_VERSION
+      ?.enum?.[0] !== EXPERIENCE_CANDIDATE_DLP_VERSION
   ) {
     fail("ExperienceCandidate DLP contract version changed");
   }
@@ -569,6 +868,39 @@ function validateCriticalContract(document) {
       .enum ?? [],
     ["pending", "accepted", "revoked", "expired"],
     "WorkspaceInvitationStatus.enum",
+  );
+  exactMembers(
+    object(schemas.OrganizationRole, "OrganizationRole").enum ?? [],
+    ["owner", "admin", "auditor", "member"],
+    "OrganizationRole.enum",
+  );
+  exactMembers(
+    object(schemas.OrganizationStatus, "OrganizationStatus").enum ?? [],
+    ["active", "archived", "dissolved"],
+    "OrganizationStatus.enum",
+  );
+  exactMembers(
+    object(schemas.OrganizationMutationState, "OrganizationMutationState")
+      .enum ?? [],
+    ["writable", "archived", "dissolved"],
+    "OrganizationMutationState.enum",
+  );
+  exactMembers(
+    object(schemas.OrganizationDepartmentStatus, "OrganizationDepartmentStatus")
+      .enum ?? [],
+    ["active", "archived"],
+    "OrganizationDepartmentStatus.enum",
+  );
+  exactMembers(
+    object(schemas.OrganizationInvitationStatus, "OrganizationInvitationStatus")
+      .enum ?? [],
+    ["pending", "accepted", "revoked", "expired"],
+    "OrganizationInvitationStatus.enum",
+  );
+  exactMembers(
+    object(schemas.OrganizationErrorCode, "OrganizationErrorCode").enum ?? [],
+    ORGANIZATION_ERROR_CODES,
+    "OrganizationErrorCode.enum",
   );
 
   const accountProfile = object(schemas.AccountProfile, "AccountProfile");
@@ -624,6 +956,85 @@ function validateCriticalContract(document) {
     if (workspaceSchemas.includes(`"${field}"`)) {
       fail(`Workspace schemas exposed private field ${field}`);
     }
+  }
+
+  const organizationSchemas = JSON.stringify(
+    Object.fromEntries(
+      Object.keys(ORGANIZATION_SCHEMA_PROPERTIES).map((name) => [
+        name,
+        schemas[name],
+      ]),
+    ),
+  ).toLowerCase();
+  for (const field of [
+    "owner_scope",
+    "runtimebinding",
+    "runtime_binding",
+    "profile",
+    "memory",
+    "session",
+    "credential",
+    "api_key",
+    "private_skill",
+    "curator",
+    "token_digest",
+    "email",
+    "phone",
+  ]) {
+    if (organizationSchemas.includes(field)) {
+      fail(`Organization schemas exposed private field ${field}`);
+    }
+  }
+
+  const invitation = object(
+    schemas.OrganizationInvitationCreation,
+    "OrganizationInvitationCreation",
+  ).properties;
+  if (
+    invitation.token?.minLength !== 43 ||
+    invitation.token?.maxLength !== 43 ||
+    invitation.token?.pattern !== "^[A-Za-z0-9_-]{43}$" ||
+    invitation.invite_url?.pattern !==
+      "^agentera://organization-invitation#[A-Za-z0-9_-]{43}$" ||
+    invitation.secret_replayable?.enum?.[0] !== false
+  ) {
+    fail("Organization invitation one-time secret boundary changed");
+  }
+  const policySnapshot = object(
+    schemas.OrganizationPolicySnapshot,
+    "OrganizationPolicySnapshot",
+  ).properties;
+  if (
+    policySnapshot.content_digest?.pattern !== "^[0-9a-f]{64}$" ||
+    policySnapshot.signature?.pattern !== "^[A-Za-z0-9_-]{86}$"
+  ) {
+    fail("Organization policy digest or signature boundary changed");
+  }
+  const accountDeletionOwnershipError = object(
+    object(
+      object(
+        schemas.AccountDeletionOwnershipErrorEnvelope,
+        "AccountDeletionOwnershipErrorEnvelope",
+      ).properties,
+      "AccountDeletionOwnershipErrorEnvelope.properties",
+    ).error,
+    "AccountDeletionOwnershipErrorEnvelope.error",
+  );
+  exactMembers(
+    Object.keys(
+      object(
+        accountDeletionOwnershipError.properties,
+        "AccountDeletionOwnershipErrorEnvelope.error.properties",
+      ),
+    ),
+    ["code", "message", "owned_organization_count", "request_id"],
+    "AccountDeletionOwnershipErrorEnvelope.error.properties",
+  );
+  if (
+    accountDeletionOwnershipError.properties.owned_organization_count
+      ?.minimum !== 1
+  ) {
+    fail("Account deletion no longer returns only a positive safe owned count");
   }
 
   const workspaceIdempotency = object(
@@ -692,6 +1103,23 @@ function validateCriticalContract(document) {
       fail(`${path}.${method} no longer uses only the desktop access token`);
     }
   }
+  for (const [path, method, statuses] of ORGANIZATION_OPERATIONS) {
+    const operation = object(
+      object(paths[path], path)[method],
+      `${path}.${method}`,
+    );
+    exactMembers(
+      Object.keys(object(operation.responses, `${path}.${method}.responses`)),
+      statuses,
+      `${path}.${method}.responses`,
+    );
+    if (
+      JSON.stringify(operation.security) !==
+      JSON.stringify([{ desktopAccessToken: [] }])
+    ) {
+      fail(`${path}.${method} no longer uses only the desktop access token`);
+    }
+  }
   for (const path of [
     "/api/v1/workspaces/{workspace_id}/agent-definitions/{definition_id}/experience-candidates",
     "/api/v1/workspaces/{workspace_id}/experience-candidates/{candidate_id}/review",
@@ -729,14 +1157,97 @@ function validateCriticalContract(document) {
     }
   }
 
+  const organizationParameters = object(
+    object(document.components, "components").parameters,
+    "components.parameters",
+  );
+  const organizationIdempotency = object(
+    organizationParameters.OrganizationIdempotencyKey,
+    "OrganizationIdempotencyKey",
+  );
+  if (
+    organizationIdempotency.name !== "Idempotency-Key" ||
+    organizationIdempotency.in !== "header" ||
+    organizationIdempotency.required !== true ||
+    organizationIdempotency.schema?.maxLength !== 128
+  ) {
+    fail("Organization Idempotency-Key boundary changed");
+  }
+  if (
+    organizationParameters.OrganizationPageLimit?.schema?.minimum !== 1 ||
+    organizationParameters.OrganizationPageLimit?.schema?.maximum !== 100 ||
+    organizationParameters.OrganizationPageLimit?.schema?.default !== 50 ||
+    organizationParameters.OrganizationCursor?.schema?.maxLength !== 684 ||
+    organizationParameters.OrganizationCursor?.schema?.pattern !==
+      "^[A-Za-z0-9_-]+$"
+  ) {
+    fail("Organization pagination boundary changed");
+  }
+  for (const [path, method] of [
+    ["/api/v1/organizations", "post"],
+    ["/api/v1/organizations/{organization_id}/archive", "post"],
+    ["/api/v1/organizations/{organization_id}/restore", "post"],
+    ["/api/v1/organizations/{organization_id}/owner-transfer", "post"],
+    ["/api/v1/organizations/{organization_id}/dissolve", "post"],
+    ["/api/v1/organizations/{organization_id}/invitations", "post"],
+    ["/api/v1/organization-invitations/accept", "post"],
+    ["/api/v1/organizations/{organization_id}/policy-snapshots", "post"],
+  ]) {
+    const parameters =
+      object(object(paths[path], path)[method], `${path}.${method}`)
+        .parameters ?? [];
+    if (
+      !Array.isArray(parameters) ||
+      !parameters.some(
+        (parameter) =>
+          parameter?.$ref ===
+          "#/components/parameters/OrganizationIdempotencyKey",
+      )
+    ) {
+      fail(`${path}.${method} is missing Organization Idempotency-Key`);
+    }
+  }
+
+  const deletionResponses = object(
+    object(
+      object(paths["/api/v1/accounts/deletion"], "/api/v1/accounts/deletion")
+        .post,
+      "/api/v1/accounts/deletion.post",
+    ).responses,
+    "/api/v1/accounts/deletion.post.responses",
+  );
+  if (
+    deletionResponses["409"]?.content?.["application/json"]?.schema?.$ref !==
+    "#/components/schemas/AccountDeletionOwnershipErrorEnvelope"
+  ) {
+    fail("Account deletion ownership conflict contract changed");
+  }
+
   exactMembers(
     object(
       object(schemas.SigningKey, "SigningKey").properties,
       "SigningKey.properties",
     ).purpose.enum ?? [],
-    ["access", "agent_policy", "agent_version", "offline_entitlement"],
+    [
+      "access",
+      "agent_policy",
+      "agent_version",
+      "offline_entitlement",
+      "organization_policy",
+    ],
     "SigningKey.purpose.enum",
   );
+  const signingKeySetKeys = object(
+    object(schemas.SigningKeySet, "SigningKeySet").properties,
+    "SigningKeySet.properties",
+  ).keys;
+  if (
+    signingKeySetKeys?.minItems !== 5 ||
+    signingKeySetKeys?.maxItems !== 64 ||
+    signingKeySetKeys?.uniqueItems !== true
+  ) {
+    fail("SigningKeySet rotation boundary changed");
+  }
 
   const refreshResponses = object(
     object(
