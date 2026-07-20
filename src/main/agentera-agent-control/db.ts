@@ -9,7 +9,7 @@ import {
   resolve,
 } from "node:path";
 
-export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 3;
+export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 4;
 
 export type AgentAssetContext =
   | { scope: "USER" }
@@ -40,6 +40,7 @@ export interface AgenteraControlPlanePaths {
   rootPath: string;
   databasePath: string;
   draftsPath: string;
+  candidatesPath: string;
   versionsPath: string;
   projectionsPath: string;
 }
@@ -116,6 +117,7 @@ export function resolveAgenteraControlPlanePaths(
     rootPath,
     databasePath: join(rootPath, "control-plane.db"),
     draftsPath: join(rootPath, "drafts"),
+    candidatesPath: join(rootPath, "candidates"),
     versionsPath: join(rootPath, "versions"),
     projectionsPath: join(rootPath, "projections"),
   };
@@ -243,6 +245,54 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
         next_attempt_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS local_experience_candidates (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        device_installation_id TEXT NOT NULL,
+        agent_installation_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        agent_definition_id TEXT NOT NULL,
+        source_agent_version_id TEXT NOT NULL,
+        runtime_profile_id TEXT NOT NULL,
+        skill_name TEXT NOT NULL,
+        source_relative_path TEXT NOT NULL,
+        content_digest TEXT NOT NULL,
+        dlp_contract_version TEXT NOT NULL,
+        snapshot_relative_path TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('PREPARED', 'UPLOAD_FAILED', 'SUBMITTED')),
+        cloud_candidate_id TEXT,
+        last_error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        submitted_at TEXT,
+        UNIQUE (
+          tenant_id, owner_id, device_installation_id,
+          workspace_id, agent_definition_id, content_digest
+        ),
+        CHECK (
+          (status IN ('PREPARED', 'UPLOAD_FAILED')
+            AND cloud_candidate_id IS NULL AND submitted_at IS NULL)
+          OR
+          (status = 'SUBMITTED'
+            AND cloud_candidate_id IS NOT NULL AND submitted_at IS NOT NULL)
+        )
+      );
+
+      CREATE TABLE IF NOT EXISTS local_experience_candidate_imports (
+        tenant_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        device_installation_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        candidate_id TEXT NOT NULL,
+        agent_definition_id TEXT NOT NULL,
+        base_agent_version_id TEXT NOT NULL,
+        candidate_content_digest TEXT NOT NULL,
+        draft_id TEXT NOT NULL REFERENCES agent_drafts(id) ON DELETE CASCADE,
+        imported_at TEXT NOT NULL,
+        PRIMARY KEY (tenant_id, owner_id, device_installation_id, candidate_id)
       );
 
       PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
@@ -401,8 +451,61 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
 		ALTER TABLE cached_agent_versions_v3 RENAME TO cached_agent_versions;
 		DROP TABLE local_agent_installations;
 		ALTER TABLE local_agent_installations_v3 RENAME TO local_agent_installations;
-		PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
+		PRAGMA user_version = 3;
 	  `);
+    }
+    if (currentVersion >= 1 && currentVersion <= 3) {
+      sqlite.exec(`
+        CREATE TABLE local_experience_candidates (
+          id TEXT PRIMARY KEY,
+          tenant_id TEXT NOT NULL,
+          owner_id TEXT NOT NULL,
+          device_installation_id TEXT NOT NULL,
+          agent_installation_id TEXT NOT NULL,
+          workspace_id TEXT NOT NULL,
+          agent_definition_id TEXT NOT NULL,
+          source_agent_version_id TEXT NOT NULL,
+          runtime_profile_id TEXT NOT NULL,
+          skill_name TEXT NOT NULL,
+          source_relative_path TEXT NOT NULL,
+          content_digest TEXT NOT NULL,
+          dlp_contract_version TEXT NOT NULL,
+          snapshot_relative_path TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('PREPARED', 'UPLOAD_FAILED', 'SUBMITTED')),
+          cloud_candidate_id TEXT,
+          last_error_code TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          submitted_at TEXT,
+          UNIQUE (
+            tenant_id, owner_id, device_installation_id,
+            workspace_id, agent_definition_id, content_digest
+          ),
+          CHECK (
+            (status IN ('PREPARED', 'UPLOAD_FAILED')
+              AND cloud_candidate_id IS NULL AND submitted_at IS NULL)
+            OR
+            (status = 'SUBMITTED'
+              AND cloud_candidate_id IS NOT NULL AND submitted_at IS NOT NULL)
+          )
+        );
+
+        CREATE TABLE local_experience_candidate_imports (
+          tenant_id TEXT NOT NULL,
+          owner_id TEXT NOT NULL,
+          device_installation_id TEXT NOT NULL,
+          workspace_id TEXT NOT NULL,
+          candidate_id TEXT NOT NULL,
+          agent_definition_id TEXT NOT NULL,
+          base_agent_version_id TEXT NOT NULL,
+          candidate_content_digest TEXT NOT NULL,
+          draft_id TEXT NOT NULL REFERENCES agent_drafts(id) ON DELETE CASCADE,
+          imported_at TEXT NOT NULL,
+          PRIMARY KEY (tenant_id, owner_id, device_installation_id, candidate_id)
+        );
+
+        PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
+      `);
     }
     sqlite.exec("COMMIT");
   } catch (error) {
@@ -446,6 +549,8 @@ export function openAgenteraControlPlaneDatabase(
   chmodSync(paths.rootPath, 0o700);
   assertOutsideHermesHome(realpathSync.native(paths.rootPath));
   mkdirSync(paths.draftsPath, { recursive: true, mode: 0o700 });
+  mkdirSync(paths.candidatesPath, { recursive: true, mode: 0o700 });
+  chmodSync(paths.candidatesPath, 0o700);
   mkdirSync(paths.versionsPath, { recursive: true, mode: 0o700 });
   mkdirSync(paths.projectionsPath, { recursive: true, mode: 0o700 });
 

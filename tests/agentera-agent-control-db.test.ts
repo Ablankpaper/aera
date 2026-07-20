@@ -1,6 +1,13 @@
 // @vitest-environment node
 
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -32,8 +39,8 @@ afterEach(() => {
 });
 
 describe("AgentEra control-plane database", () => {
-  it("pins the Workspace Agent local schema at version 3", () => {
-    expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(3);
+  it("pins the ExperienceCandidate local schema at version 4", () => {
+    expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(4);
   });
 
   it("opens exactly below Electron userData and never below HERMES_HOME", () => {
@@ -48,6 +55,9 @@ describe("AgentEra control-plane database", () => {
       const paths = resolveAgenteraControlPlanePaths(userDataPath);
       expect(paths.databasePath).toBe(
         join(userDataPath, "agentera-control-plane", "control-plane.db"),
+      );
+      expect(paths.candidatesPath).toBe(
+        join(userDataPath, "agentera-control-plane", "candidates"),
       );
       const database = openAgenteraControlPlaneDatabase(userDataPath, {
         databaseFactory: (path) => {
@@ -104,6 +114,8 @@ describe("AgentEra control-plane database", () => {
         "cached_agent_versions",
         "draft_assets",
         "local_agent_installations",
+        "local_experience_candidate_imports",
+        "local_experience_candidates",
         "pending_sanitized_records",
         "runtime_bindings",
         "signing_key_cache",
@@ -145,6 +157,43 @@ describe("AgentEra control-plane database", () => {
           .map(({ name }) => name),
       ).toEqual(["tenant_id", "owner_id", "version_id"]);
 
+      const candidateSchema = database.sqlite
+        .prepare(
+          "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'local_experience_candidates'",
+        )
+        .get() as { sql: string };
+      const normalizedCandidateSchema = candidateSchema.sql.replace(
+        /\s+/g,
+        " ",
+      );
+      expect(normalizedCandidateSchema).toContain(
+        "status IN ('PREPARED', 'UPLOAD_FAILED', 'SUBMITTED')",
+      );
+      expect(normalizedCandidateSchema).toContain(
+        "tenant_id, owner_id, device_installation_id, workspace_id, agent_definition_id, content_digest",
+      );
+      expect(normalizedCandidateSchema).toContain(
+        "status = 'SUBMITTED' AND cloud_candidate_id IS NOT NULL AND submitted_at IS NOT NULL",
+      );
+      const importForeignKeys = database.sqlite
+        .prepare("PRAGMA foreign_key_list(local_experience_candidate_imports)")
+        .all() as Array<{
+        table: string;
+        from: string;
+        to: string;
+        on_delete: string;
+      }>;
+      expect(importForeignKeys).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            table: "agent_drafts",
+            from: "draft_id",
+            to: "id",
+            on_delete: "CASCADE",
+          }),
+        ]),
+      );
+
       const schemaRows = database.sqlite
         .prepare(
           "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name IN ('agent_drafts', 'local_agent_installations') ORDER BY name",
@@ -167,6 +216,51 @@ describe("AgentEra control-plane database", () => {
       );
       database.close();
     }
+  });
+
+  it("migrates schema v3 without changing existing draft rows or files", () => {
+    const userDataPath = join(temporaryRoot(), "user-data");
+    const paths = resolveAgenteraControlPlanePaths(userDataPath);
+    mkdirSync(paths.draftsPath, { recursive: true });
+    const draftPath = join(paths.draftsPath, "legacy-v3.txt");
+    writeFileSync(draftPath, "legacy-v3-bytes", { mode: 0o600 });
+    mkdirSync(paths.rootPath, { recursive: true });
+    const legacy = new DatabaseSync(paths.databasePath);
+    legacy.exec(`
+      CREATE TABLE agent_drafts (
+        id TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL
+      );
+      INSERT INTO agent_drafts (id, display_name)
+      VALUES ('33333333-3333-4333-8333-333333333333', 'Legacy v3 draft');
+      PRAGMA user_version = 3;
+    `);
+    legacy.close();
+
+    const database = openAgenteraControlPlaneDatabase(userDataPath, {
+      databaseFactory: nodeSqliteFactory,
+    });
+    expect(
+      database.sqlite
+        .prepare("SELECT id, display_name FROM agent_drafts")
+        .get(),
+    ).toEqual({
+      id: "33333333-3333-4333-8333-333333333333",
+      display_name: "Legacy v3 draft",
+    });
+    expect(existsSync(draftPath)).toBe(true);
+    expect(readFileSync(draftPath, "utf8")).toBe("legacy-v3-bytes");
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'local_experience_candidate%' ORDER BY name",
+        )
+        .all(),
+    ).toEqual([
+      { name: "local_experience_candidate_imports" },
+      { name: "local_experience_candidates" },
+    ]);
+    database.close();
   });
 
   it("migrates owned schema v2 rows to USER context without changing legacy cache paths", () => {
