@@ -38,6 +38,16 @@ Local control-plane schema v4 stores a prepared candidate as an immutable canoni
 
 The read-only Hermes source adapter accepts only a persisted `.usage.json` record marked `created_by: "agent"` or legacy `agent_created: true`. It resolves only flat `skills/<skill>` or category `skills/<category>/<skill>` layouts in the selected physical Profile, excludes archived, bundled, Hub, external-link, projected, duplicate, and missing Skills, and rejects links, path escape, special files, hidden/dependency/cache trees, binary or invalid UTF-8 data, and package limits before snapshot creation. `.usage.json`, counters, absolute paths, and unrelated Skills never enter the detached candidate bundle, and neither successful nor failed reads mutate Hermes files.
 
+### Trusted candidate control flow
+
+Candidate preparation and submission are separate explicit operations so local learning never depends on cloud availability.
+
+The main process resolves the active Workspace Installation and physical Profile from trusted local state. The renderer can provide only an Installation ID plus selected Skill name for preparation, or a prepared candidate ID plus an exact confirmation for submission; it cannot provide Workspace ownership, device identity, Profile paths, source paths, snapshot bytes, or DLP overrides.
+
+Preparation performs the local provenance, canonicalization, and DLP checks before writing an immutable snapshot outside Hermes. Submission uses a durable idempotency intent and only removes the detached local snapshot after a verified cloud acceptance. Offline use preserves `PREPARED`; ambiguous transport failures preserve the same intent and snapshot as `UPLOAD_FAILED` for manual retry, with no timer, watcher, startup upload, or automatic retry.
+
+Candidate IPC errors are bounded codes. A DLP denial may additionally expose only validated `{code,path,line}` findings; raw server bodies, matched evidence, source content, and exception messages never cross the preload bridge.
+
 ### Candidate review and draft import
 
 Workspace Members may submit from their own matching Installation, while Owner and Admin review terminal candidate decisions and import approved content into a local draft.

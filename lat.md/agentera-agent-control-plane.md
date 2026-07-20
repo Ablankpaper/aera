@@ -52,6 +52,16 @@ Personal behavior remains unchanged. Workspace Owner and Admin can view and auth
 
 Lifecycle denials preserve the stable `workspace_forbidden`, `workspace_archived`, and `workspace_owner_unavailable` codes while discarding raw cloud bodies and private error details.
 
+### ExperienceCandidate authorization surface
+
+The Workspace promotion surface keeps local preparation available with authenticated or valid offline access while requiring online access for every cloud submission, review-queue read, detail read, and terminal review.
+
+Active Workspace Members may list eligible Skills, prepare one detached snapshot, submit it explicitly, and read their own candidate status. Owner and Admin additionally receive the review queue and may approve or reject once; Member review calls fail locally before cloud access.
+
+The Agent-control preload exposes only candidate and Installation identifiers, the selected Skill name, the exact submit confirmation, and bounded review fields. Trusted Workspace context, account/device ownership, role, Profile resolution, candidate source path, mutation intent, and cloud credentials remain main-process state.
+
+Account, device, or selected-space changes discard the cached candidate service before later reads. The local store and cloud requests remain partitioned by the newly derived owner/context, preventing a long-lived desktop manager from carrying candidate handles across sessions.
+
 ## Owner identity
 
 The USER owner tuple is derived from the authenticated product session and cannot be selected by request payloads.
