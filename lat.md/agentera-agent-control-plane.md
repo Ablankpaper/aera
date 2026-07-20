@@ -62,6 +62,16 @@ The Agent-control preload exposes only candidate and Installation identifiers, t
 
 Account, device, or selected-space changes discard the cached candidate service before later reads. The local store and cloud requests remain partitioned by the newly derived owner/context, preventing a long-lived desktop manager from carrying candidate handles across sessions.
 
+### Approved candidate draft import
+
+Owner and Admin can turn one terminally approved candidate into a new local Workspace Agent draft without granting the renderer ownership or filesystem control.
+
+The renderer first requests a preview by candidate ID, then confirms only a one-use import handle with the exact `apply-approved-skill-to-latest` phrase. Workspace ID, role, account/device identity, cloud origin, Profile paths, source paths, version bytes, and draft contents remain derived in the main process.
+
+Import always starts from the currently published, signature- and digest-verified Workspace version. If the definition advances between preview and confirmation, `candidate_base_advanced` is returned before SQLite mutation so the UI can request a fresh diff.
+
+The local draft and import receipt commit together. Approval itself remains cloud state, import remains device-local and idempotent per account/device, and publication remains the existing separate explicit action.
+
 ## Owner identity
 
 The USER owner tuple is derived from the authenticated product session and cannot be selected by request payloads.

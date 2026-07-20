@@ -62,6 +62,12 @@ Submission accepts only the path-derived Workspace and definition plus a canonic
 
 Approval overlays only the selected Skill directory onto a new draft based on the latest immutable Workspace Agent version. It never publishes automatically or modifies an existing Hermes Profile or running RuntimeBinding.
 
+The desktop downloads and verifies the latest immutable Workspace Agent version before showing an import diff. A one-use handle binds the approved candidate digest, account, device, Workspace, definition, and verified base version; confirmation rechecks the latest base before any local write.
+
+Only files below the selected `skills/<skill-name>/` prefix are added, replaced, or removed. Identity, model constraints, tool policy, dependencies, Runtime compatibility, icon, display name, and every unrelated asset are carried from the verified base into a new editable local draft.
+
+Draft rows and the device-local candidate import receipt commit in one SQLite transaction. Repeating the import on the same account/device reopens the recorded draft, while another authorized device may create its own draft. A stale base, verification failure, transaction rollback, or disk failure leaves the terminal cloud approval and Hermes source Skill unchanged and removes any partial draft materialization.
+
 ### Candidate failure isolation
 
 Preparation, upload, review, import, and publication failures are isolated from the source Profile and local learning loop.
