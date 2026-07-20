@@ -17,6 +17,12 @@ const DEFINITION_ID = "22222222-2222-4222-8222-222222222222";
 const VERSION_ID = "33333333-3333-4333-8333-333333333333";
 const HANDLE_ID = "44444444-4444-4444-8444-444444444444";
 
+function expectNoRendererOwnershipInput(mock: ReturnType<typeof vi.fn>): void {
+  expect(JSON.stringify(mock.mock.calls)).not.toMatch(
+    /workspaceId|workspace_id|ownerScope|owner_scope|role/i,
+  );
+}
+
 function detail(revision = 1): AgentDraftDetail {
   return {
     id: DRAFT_ID,
@@ -140,6 +146,7 @@ describe("AgentDraftEditor", () => {
     expect(api.confirmPublication).not.toHaveBeenCalled();
     expect(api.installVersion).not.toHaveBeenCalled();
     expect(onSaved).toHaveBeenCalledWith(created);
+    expectNoRendererOwnershipInput(api.createDraft);
   });
 
   it("shows a stable conflict message for a stale local revision", async () => {
@@ -169,6 +176,7 @@ describe("AgentDraftEditor", () => {
     expect(api.updateDraft).toHaveBeenCalledWith(
       expect.objectContaining({ id: DRAFT_ID, expectedRevision: 2 }),
     );
+    expectNoRendererOwnershipInput(api.updateDraft);
   });
 
   it("previews exact publication categories and excludes private Hermes data", async () => {
@@ -228,6 +236,77 @@ describe("AgentDraftEditor", () => {
       expect(api.confirmPublication).toHaveBeenCalledWith(HANDLE_ID),
     );
     expect(screen.getByText("agents.control.publishOnlySuccess")).toBeTruthy();
+    expectNoRendererOwnershipInput(api.updateDraft);
+    expectNoRendererOwnershipInput(api.preparePublication);
+    expectNoRendererOwnershipInput(api.confirmPublication);
+  });
+
+  // @lat: [[agentera-agent-control-plane#Trusted Workspace Agent context#Role-aware presentation]]
+  it("shows the trusted Workspace target returned by the publication preview", async () => {
+    const saved = detail(2);
+    installAPI({
+      updateDraft: vi.fn(async () => success(saved)),
+      preparePublication: vi.fn(async () =>
+        success({
+          publicationHandle: HANDLE_ID,
+          draftId: DRAFT_ID,
+          revision: 2,
+          targetScope: "WORKSPACE" as const,
+          assetCounts: { skill: 0, sop: 0, knowledge: 1 },
+          totalBytes: 8,
+        }),
+      ),
+    });
+    render(
+      <AgentDraftEditor
+        open
+        draft={detail()}
+        onClose={() => undefined}
+        onSaved={() => undefined}
+        onPublished={() => undefined}
+        onRequestInstall={() => undefined}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.control.publish" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "agents.control.publishPreviewTitle",
+    });
+    expect(dialog).toHaveTextContent("agents.control.workspaceSpace");
+    expect(dialog).not.toHaveTextContent("agents.control.personalSpace");
+  });
+
+  // @lat: [[agentera-agent-control-plane#Trusted Workspace Agent context#Role-aware presentation]]
+  it("renders an offline Workspace draft as read-only and makes no mutation call", () => {
+    const api = installAPI();
+    render(
+      <AgentDraftEditor
+        open
+        readOnly
+        draft={detail()}
+        onClose={() => undefined}
+        onSaved={() => undefined}
+        onPublished={() => undefined}
+        onRequestInstall={() => undefined}
+      />,
+    );
+
+    expect(screen.getByLabelText("agents.control.name")).toBeDisabled();
+    expect(screen.getByLabelText("agents.control.systemPrompt")).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "agents.control.saveLocal" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "agents.control.publish" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText("agents.control.workspaceDraftReadOnly"),
+    ).toBeTruthy();
+    expect(api.createDraft).not.toHaveBeenCalled();
+    expect(api.updateDraft).not.toHaveBeenCalled();
+    expect(api.preparePublication).not.toHaveBeenCalled();
   });
 
   it("keeps publish-and-use visibly sequential and requests install only after publish", async () => {

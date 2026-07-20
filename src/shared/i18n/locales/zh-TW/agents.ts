@@ -62,4 +62,24 @@ export default {
   walletDeleteWarning:
     "This will permanently remove this wallet from AgentEra. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
   walletDeleteConfirmLabel: "Remove wallet",
+  control: {
+    workspaceSpace: "工作空間",
+    workspaceSpaceTitle: "工作空間 Agent",
+    workspaceAuthorSubtitle:
+      "建立本機草稿、發布不可變的工作空間版本，並安裝到隔離的本機 Profile。",
+    workspaceMemberSubtitle:
+      "將核准的工作空間 Agent 版本安裝到隔離的本機 Profile；Member 無法編輯或發布草稿。",
+    role: { owner: "Owner", admin: "Admin", member: "Member" },
+    workspaceOfflineNotice:
+      "工作空間目前離線。已驗證的安裝仍可在本機使用；草稿唯讀，發布、探索、安裝與更新均已暫停。",
+    view: "檢視",
+    workspaceDraftReadOnly:
+      "離線期間此工作空間草稿唯讀；重新連線後才能修改或發布。",
+    errors: {
+      workspace_forbidden: "目前的工作空間角色不允許執行此 Agent 操作。",
+      workspace_archived: "此工作空間已封存，Agent 資產為唯讀。",
+      workspace_owner_unavailable:
+        "Owner 帳戶恢復可用前，此工作空間的 Agent 資產保持唯讀。",
+    },
+  },
 } as const;

@@ -292,6 +292,14 @@ export class AgenteraAgentControlManager {
       cloudAvailable:
         (state.status === "authenticated" || state.status === "offline") &&
         state.cloudAvailable,
+      context:
+        context.scope === "USER"
+          ? { scope: "USER" }
+          : {
+              scope: "WORKSPACE",
+              workspaceId: context.workspaceId,
+              role: context.role,
+            },
       draftCount: publicCount(draftCount?.count ?? 0),
       installationCount: publicCount(installationCount?.count ?? 0),
     };

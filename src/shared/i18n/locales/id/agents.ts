@@ -62,4 +62,26 @@ export default {
   walletDeleteWarning:
     "This will permanently remove this wallet from AgentEra. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
   walletDeleteConfirmLabel: "Remove wallet",
+  control: {
+    workspaceSpace: "Workspace",
+    workspaceSpaceTitle: "Agent Workspace",
+    workspaceAuthorSubtitle:
+      "Buat draf lokal, publikasikan versi Workspace yang tidak dapat diubah, lalu instal ke Profil lokal yang terisolasi.",
+    workspaceMemberSubtitle:
+      "Instal versi Agent Workspace yang disetujui ke Profil lokal terisolasi. Member tidak dapat menulis atau menerbitkan.",
+    role: { owner: "Owner", admin: "Admin", member: "Member" },
+    workspaceOfflineNotice:
+      "Workspace sedang offline. Instalasi terverifikasi tetap dapat dipakai secara lokal; draf hanya-baca dan publikasi, penemuan, instalasi, serta pembaruan dijeda.",
+    view: "Lihat",
+    workspaceDraftReadOnly:
+      "Draf Workspace ini hanya-baca saat offline. Sambungkan kembali untuk mengubah atau menerbitkannya.",
+    errors: {
+      workspace_forbidden:
+        "Peran Workspace Anda tidak mengizinkan operasi Agent ini.",
+      workspace_archived:
+        "Workspace ini telah diarsipkan; aset Agent hanya-baca.",
+      workspace_owner_unavailable:
+        "Workspace ini hanya-baca sampai akun Owner tersedia kembali.",
+    },
+  },
 } as const;

@@ -42,6 +42,16 @@ Changing the selected product space invalidates publication handles and refreshe
 
 The startup composition subscribes the Agent manager only to [[src/main/agentera-workspace/manager.ts#AgenteraWorkspaceManager#subscribeSelectedAgentContext]] and calls its context refresh hook. Runtime lifecycle remains outside that bridge.
 
+### Role-aware presentation
+
+The main process returns the trusted USER or WORKSPACE context with Agent control state. The Agent screen follows that state instead of reading Workspace authorization independently or accepting scope fields in mutation calls.
+
+Personal behavior remains unchanged. Workspace Owner and Admin can view and author their account-local Workspace drafts while online; Member receives an install-only view and the renderer does not enumerate drafts. Offline Workspace drafts remain visible to their Owner or Admin but every field and author action is read-only.
+
+[[src/renderer/src/screens/Agents/AgentControlPanel.tsx#AgentControlPanel]] closes context-bound dialogs when the selected scope, Workspace, or role changes and pauses Workspace discovery, installation, publication, and updates offline. [[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] renders the publication target from the one-use preview returned by main and never submits a Workspace ID, owner scope, or role.
+
+Lifecycle denials preserve the stable `workspace_forbidden`, `workspace_archived`, and `workspace_owner_unavailable` codes while discarding raw cloud bodies and private error details.
+
 ## Owner identity
 
 The USER owner tuple is derived from the authenticated product session and cannot be selected by request payloads.

@@ -65,4 +65,26 @@ export default {
   walletDeleteWarning:
     "This will permanently remove this wallet from AgentEra. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
   walletDeleteConfirmLabel: "Remove wallet",
+  control: {
+    workspaceSpace: "Espacio de trabajo",
+    workspaceSpaceTitle: "Agentes del espacio de trabajo",
+    workspaceAuthorSubtitle:
+      "Crea borradores locales, publica versiones inmutables del espacio e instálalas en perfiles locales aislados.",
+    workspaceMemberSubtitle:
+      "Instala versiones aprobadas en perfiles locales aislados. Los miembros no pueden crear ni publicar borradores.",
+    role: { owner: "Propietario", admin: "Administrador", member: "Miembro" },
+    workspaceOfflineNotice:
+      "El espacio está sin conexión. Las instalaciones verificadas siguen disponibles localmente; los borradores son de solo lectura y se pausan la publicación, detección, instalación y actualización.",
+    view: "Ver",
+    workspaceDraftReadOnly:
+      "Este borrador es de solo lectura sin conexión. Vuelve a conectarte para modificarlo o publicarlo.",
+    errors: {
+      workspace_forbidden:
+        "Tu rol actual no permite esta operación del agente.",
+      workspace_archived:
+        "Este espacio está archivado; sus agentes son de solo lectura.",
+      workspace_owner_unavailable:
+        "Este espacio será de solo lectura hasta que su propietario vuelva a estar disponible.",
+    },
+  },
 } as const;

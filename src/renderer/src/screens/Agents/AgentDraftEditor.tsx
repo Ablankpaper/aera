@@ -21,6 +21,7 @@ interface EditableAssetRow {
 export interface AgentDraftEditorProps {
   open: boolean;
   draft: AgentDraftDetail | null;
+  readOnly?: boolean;
   onClose: () => void;
   onSaved: (draft: AgentDraftDetail) => void;
   onPublished: (revision: PublishedRevision) => void;
@@ -76,6 +77,7 @@ function errorKey(code: AgenteraAgentControlErrorCode): string {
 export default function AgentDraftEditor({
   open,
   draft,
+  readOnly = false,
   onClose,
   onSaved,
   onPublished,
@@ -120,6 +122,7 @@ export default function AgentDraftEditor({
   }, [draft, open]);
 
   const canSave =
+    !readOnly &&
     name.trim().length > 0 &&
     systemPrompt.trim().length > 0 &&
     splitList(providers).length > 0 &&
@@ -144,7 +147,7 @@ export default function AgentDraftEditor({
   }, [assets, current?.manifest, models, providers, systemPrompt]);
 
   const persist = async (): Promise<AgentDraftDetail | null> => {
-    if (!canSave || busy) return null;
+    if (readOnly || !canSave || busy) return null;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -181,6 +184,7 @@ export default function AgentDraftEditor({
   };
 
   const prepare = async (andUse: boolean): Promise<void> => {
+    if (readOnly) return;
     const saved = await persist();
     if (!saved) return;
     setBusy(true);
@@ -196,7 +200,7 @@ export default function AgentDraftEditor({
   };
 
   const confirm = async (): Promise<void> => {
-    if (!preview || busy) return;
+    if (readOnly || !preview || busy) return;
     setBusy(true);
     setError(null);
     const result = await window.agenteraAgents.confirmPublication(
@@ -251,7 +255,13 @@ export default function AgentDraftEditor({
                   : "agents.control.newDraftTitle",
               )}
             </AppModalTitle>
-            <p>{t("agents.control.localDraftStatus")}</p>
+            <p>
+              {t(
+                readOnly
+                  ? "agents.control.workspaceDraftReadOnly"
+                  : "agents.control.localDraftStatus",
+              )}
+            </p>
           </div>
           <button
             type="button"
@@ -271,6 +281,7 @@ export default function AgentDraftEditor({
               className="input"
               aria-label={t("agents.control.name")}
               value={name}
+              disabled={readOnly}
               onChange={(event) => setName(event.target.value)}
             />
           </label>
@@ -280,6 +291,7 @@ export default function AgentDraftEditor({
               className="input agent-control-textarea"
               aria-label={t("agents.control.systemPrompt")}
               value={systemPrompt}
+              disabled={readOnly}
               onChange={(event) => setSystemPrompt(event.target.value)}
             />
           </label>
@@ -288,6 +300,7 @@ export default function AgentDraftEditor({
             <input
               className="input"
               value={providers}
+              disabled={readOnly}
               onChange={(event) => setProviders(event.target.value)}
             />
           </label>
@@ -296,6 +309,7 @@ export default function AgentDraftEditor({
             <input
               className="input"
               value={models}
+              disabled={readOnly}
               onChange={(event) => setModels(event.target.value)}
             />
           </label>
@@ -312,6 +326,7 @@ export default function AgentDraftEditor({
                     key={kind}
                     type="button"
                     className="btn btn-secondary btn-sm"
+                    disabled={readOnly}
                     onClick={() => addAsset(kind)}
                   >
                     <Plus size={13} />
@@ -326,6 +341,7 @@ export default function AgentDraftEditor({
                   className="input"
                   value={asset.kind}
                   aria-label={t("agents.control.assetKind")}
+                  disabled={readOnly}
                   onChange={(event) =>
                     setAssets((currentAssets) =>
                       currentAssets.map((item) =>
@@ -351,6 +367,7 @@ export default function AgentDraftEditor({
                   className="input"
                   aria-label={t("agents.control.assetPath")}
                   value={asset.path}
+                  disabled={readOnly}
                   onChange={(event) =>
                     setAssets((currentAssets) =>
                       currentAssets.map((item) =>
@@ -365,6 +382,7 @@ export default function AgentDraftEditor({
                   className="input agent-control-textarea"
                   aria-label={t("agents.control.assetContent")}
                   value={asset.content}
+                  disabled={readOnly}
                   onChange={(event) =>
                     setAssets((currentAssets) =>
                       currentAssets.map((item) =>
@@ -379,6 +397,7 @@ export default function AgentDraftEditor({
                   type="button"
                   className="agents-row-edit"
                   aria-label={t("agents.control.removeAsset")}
+                  disabled={readOnly}
                   onClick={() =>
                     setAssets((currentAssets) =>
                       currentAssets.filter((item) => item.key !== asset.key),
@@ -393,9 +412,11 @@ export default function AgentDraftEditor({
 
           {error && <div className="agents-create-error">{t(error)}</div>}
           {notice && <div className="agent-control-success">{t(notice)}</div>}
-          <p className="agent-control-sequence agent-control-wide-field">
-            {t("agents.control.publishAndUseSequence")}
-          </p>
+          {!readOnly ? (
+            <p className="agent-control-sequence agent-control-wide-field">
+              {t("agents.control.publishAndUseSequence")}
+            </p>
+          ) : null}
         </div>
 
         <footer className="agent-control-modal-actions">
@@ -441,7 +462,13 @@ export default function AgentDraftEditor({
               </h3>
               <dl className="agent-control-preview-grid">
                 <dt>{t("agents.control.target")}</dt>
-                <dd>{t("agents.control.personalSpace")}</dd>
+                <dd>
+                  {t(
+                    preview.targetScope === "WORKSPACE"
+                      ? "agents.control.workspaceSpace"
+                      : "agents.control.personalSpace",
+                  )}
+                </dd>
                 <dt>{t("agents.control.revision")}</dt>
                 <dd>{preview.revision}</dd>
                 <dt>{t("agents.control.asset.skill")}</dt>
@@ -469,7 +496,7 @@ export default function AgentDraftEditor({
                   type="button"
                   className="btn btn-primary"
                   onClick={() => void confirm()}
-                  disabled={busy}
+                  disabled={busy || readOnly}
                 >
                   {t("agents.control.confirmPublish")}
                 </button>

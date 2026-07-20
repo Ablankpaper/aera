@@ -77,6 +77,40 @@ describe("shared i18n", () => {
     }
   });
 
+  it("provides explicit role-aware Workspace Agent copy in every locale", () => {
+    for (const locale of APP_LOCALES) {
+      const control = resources[locale].translation.agents.control as {
+        workspaceSpace?: string;
+        workspaceSpaceTitle?: string;
+        workspaceAuthorSubtitle?: string;
+        workspaceMemberSubtitle?: string;
+        workspaceOfflineNotice?: string;
+        workspaceDraftReadOnly?: string;
+        view?: string;
+        role?: Record<string, string>;
+        errors?: Record<string, string>;
+      };
+      for (const value of [
+        control.workspaceSpace,
+        control.workspaceSpaceTitle,
+        control.workspaceAuthorSubtitle,
+        control.workspaceMemberSubtitle,
+        control.workspaceOfflineNotice,
+        control.workspaceDraftReadOnly,
+        control.view,
+        control.role?.owner,
+        control.role?.admin,
+        control.role?.member,
+        control.errors?.workspace_forbidden,
+        control.errors?.workspace_archived,
+        control.errors?.workspace_owner_unavailable,
+      ]) {
+        expect(value).toEqual(expect.any(String));
+        expect(value?.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
   it("keeps Arabic and Hebrew authentication screens right-to-left", () => {
     expect(getLocaleDirection("ar")).toBe("rtl");
     expect(getLocaleDirection("he")).toBe("rtl");

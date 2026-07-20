@@ -247,6 +247,11 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
     return "sign_in_required";
   }
   if (code === "online_required") return "online_required";
+  if (code === "workspace_forbidden") return "workspace_forbidden";
+  if (code === "workspace_archived") return "workspace_archived";
+  if (code === "workspace_owner_unavailable") {
+    return "workspace_owner_unavailable";
+  }
   if (code.startsWith("invalid_")) return "invalid_request";
   return "operation_failed";
 }

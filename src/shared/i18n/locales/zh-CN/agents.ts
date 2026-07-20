@@ -72,16 +72,30 @@ export default {
     personalSpaceTitle: "个人空间智能体",
     personalSpaceSubtitle:
       "本地草稿、不可变发布版本与隔离安装。运行数据不会被混成普通云同步。",
+    workspaceSpace: "工作空间",
+    workspaceSpaceTitle: "工作空间智能体",
+    workspaceAuthorSubtitle:
+      "创建本地草稿、发布不可变的工作空间版本，并将其安装到隔离的本地 Profile。",
+    workspaceMemberSubtitle:
+      "将已批准的工作空间智能体版本安装到隔离的本地 Profile；Member 不具备草稿与发布权限。",
+    role: {
+      owner: "Owner",
+      admin: "Admin",
+      member: "Member",
+    },
     refresh: "刷新智能体控制面",
     newAgent: "新建智能体",
     offlineNotice:
       "当前使用离线授权。本地草稿和已安装智能体仍可使用；发布、发现、安装与对账已暂停。",
+    workspaceOfflineNotice:
+      "工作空间当前离线。已验证安装仍可在本地使用；草稿只读，发布、发现、安装与更新均已暂停。",
     localDrafts: "本地草稿",
     noDrafts: "暂无本地草稿。",
     revision: "修订",
     published: "已发布",
     localOnly: "仅本地",
     edit: "编辑",
+    view: "查看",
     publishedAgents: "已发布智能体",
     noPublishedAgents: "暂无已发布智能体。",
     discoveryPaused: "离线期间云端发现已暂停。",
@@ -99,6 +113,8 @@ export default {
     newDraftTitle: "新建本地智能体草稿",
     editDraftTitle: "编辑本地智能体草稿",
     localDraftStatus: "除非你明确发布修订，否则更改只保存在这台电脑。",
+    workspaceDraftReadOnly:
+      "离线期间此工作空间草稿只读；重新连接后才能修改或发布。",
     name: "智能体名称",
     systemPrompt: "发布基础指令",
     allowedProviders: "允许的 Provider（逗号分隔）",
@@ -157,6 +173,10 @@ export default {
       runtime_incompatible: "该智能体版本与已安装 Runtime 不兼容。",
       local_runtime_required: "请切换到本地 Runtime 后再安装或更新智能体。",
       cloud_unavailable: "AgentEra Cloud 暂时不可用。",
+      workspace_forbidden: "当前工作空间角色不允许执行此智能体操作。",
+      workspace_archived: "该工作空间已归档，智能体资产处于只读状态。",
+      workspace_owner_unavailable:
+        "工作空间 Owner 账户恢复可用前，智能体资产保持只读。",
       operation_failed: "无法安全完成该智能体操作。",
     },
   },

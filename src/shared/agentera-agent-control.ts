@@ -137,6 +137,14 @@ export interface PublishedRevision {
   replayed: boolean;
 }
 
+export type AgenteraAgentControlContext =
+  | { scope: "USER" }
+  | {
+      scope: "WORKSPACE";
+      workspaceId: string;
+      role: "owner" | "admin" | "member";
+    };
+
 export type AgenteraAgentControlErrorCode =
   | "invalid_request"
   | "sign_in_required"
@@ -148,6 +156,9 @@ export type AgenteraAgentControlErrorCode =
   | "runtime_incompatible"
   | "local_runtime_required"
   | "cloud_unavailable"
+  | "workspace_forbidden"
+  | "workspace_archived"
+  | "workspace_owner_unavailable"
   | "operation_failed";
 
 export type AgenteraAgentControlResult<T> =
@@ -157,6 +168,7 @@ export type AgenteraAgentControlResult<T> =
 export interface AgenteraAgentControlPublicState {
   access: "online" | "offline";
   cloudAvailable: boolean;
+  context: AgenteraAgentControlContext;
   draftCount: number;
   installationCount: number;
 }

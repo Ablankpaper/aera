@@ -65,4 +65,26 @@ export default {
   walletDeleteWarning:
     "This will permanently remove this wallet from AgentEra. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
   walletDeleteConfirmLabel: "Remove wallet",
+  control: {
+    workspaceSpace: "Çalışma alanı",
+    workspaceSpaceTitle: "Çalışma alanı Ajanları",
+    workspaceAuthorSubtitle:
+      "Yerel taslaklar oluşturun, değişmez çalışma alanı sürümleri yayımlayın ve bunları yalıtılmış yerel Profillere kurun.",
+    workspaceMemberSubtitle:
+      "Onaylı sürümleri yalıtılmış yerel Profillere kurun. Üyeler taslak düzenleyemez veya yayımlayamaz.",
+    role: { owner: "Sahip", admin: "Yönetici", member: "Üye" },
+    workspaceOfflineNotice:
+      "Çalışma alanı çevrimdışı. Doğrulanmış kurulumlar yerelde kullanılabilir; taslaklar salt okunur ve yayımlama, keşif, kurulum ile güncellemeler duraklatılır.",
+    view: "Görüntüle",
+    workspaceDraftReadOnly:
+      "Bu taslak çevrimdışıyken salt okunurdur. Değiştirmek veya yayımlamak için yeniden bağlanın.",
+    errors: {
+      workspace_forbidden:
+        "Mevcut rolünüz bu Ajan işlemini yapmanıza izin vermiyor.",
+      workspace_archived:
+        "Bu çalışma alanı arşivlenmiş; Ajan varlıkları salt okunurdur.",
+      workspace_owner_unavailable:
+        "Sahip hesabı kullanılabilir olana kadar çalışma alanı salt okunurdur.",
+    },
+  },
 } as const;

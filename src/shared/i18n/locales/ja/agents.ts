@@ -62,4 +62,26 @@ export default {
   walletDeleteWarning:
     "This will permanently remove this wallet from AgentEra. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
   walletDeleteConfirmLabel: "Remove wallet",
+  control: {
+    workspaceSpace: "ワークスペース",
+    workspaceSpaceTitle: "ワークスペース Agent",
+    workspaceAuthorSubtitle:
+      "ローカル下書きを作成し、不変のワークスペース版を公開して、分離されたローカル Profile にインストールします。",
+    workspaceMemberSubtitle:
+      "承認済みのワークスペース版を分離されたローカル Profile にインストールできます。Member は編集・公開できません。",
+    role: { owner: "Owner", admin: "Admin", member: "Member" },
+    workspaceOfflineNotice:
+      "ワークスペースはオフラインです。検証済みインストールはローカルで利用できますが、下書きは読み取り専用となり、公開・検索・インストール・更新は停止します。",
+    view: "表示",
+    workspaceDraftReadOnly:
+      "オフライン中、この下書きは読み取り専用です。変更または公開するには再接続してください。",
+    errors: {
+      workspace_forbidden:
+        "現在のワークスペース役割ではこの Agent 操作を実行できません。",
+      workspace_archived:
+        "このワークスペースはアーカイブ済みで、Agent 資産は読み取り専用です。",
+      workspace_owner_unavailable:
+        "Owner アカウントが利用可能になるまで、このワークスペースは読み取り専用です。",
+    },
+  },
 } as const;

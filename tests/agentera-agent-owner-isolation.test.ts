@@ -219,6 +219,7 @@ describe("Agent control local USER ownership", () => {
       );
 
     expect(manager.getState()).toMatchObject({
+      context: { scope: "USER" },
       draftCount: 1,
       installationCount: 1,
     });
@@ -238,6 +239,11 @@ describe("Agent control local USER ownership", () => {
     manager.notifyAgentContextChanged();
     expect(listener).toHaveBeenCalledOnce();
     expect(manager.getState()).toMatchObject({
+      context: {
+        scope: "WORKSPACE",
+        workspaceId: WORKSPACE_ID,
+        role: "admin",
+      },
       draftCount: 0,
       installationCount: 1,
     });

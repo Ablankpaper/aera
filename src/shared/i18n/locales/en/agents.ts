@@ -137,16 +137,30 @@ export default {
     personalSpaceTitle: "Personal-space Agents",
     personalSpaceSubtitle:
       "Local drafts, immutable published versions, and isolated installations. Runtime data never becomes ordinary cloud sync.",
+    workspaceSpace: "Workspace",
+    workspaceSpaceTitle: "Workspace Agents",
+    workspaceAuthorSubtitle:
+      "Create local drafts, publish immutable Workspace versions, and install them into isolated local Profiles.",
+    workspaceMemberSubtitle:
+      "Install approved Workspace Agent versions into isolated local Profiles. Workspace authoring is unavailable for Members.",
+    role: {
+      owner: "Owner",
+      admin: "Admin",
+      member: "Member",
+    },
     refresh: "Refresh Agent control plane",
     newAgent: "New Agent",
     offlineNotice:
       "Offline access is active. Local drafts and installed Agents remain available; publication, discovery, installation, and reconciliation are paused.",
+    workspaceOfflineNotice:
+      "Workspace access is offline. Verified installations remain usable locally; drafts are read-only and cloud publication, discovery, installation, and updates are paused.",
     localDrafts: "Local drafts",
     noDrafts: "No local drafts yet.",
     revision: "Revision",
     published: "Published",
     localOnly: "Local only",
     edit: "Edit",
+    view: "View",
     publishedAgents: "Published Agents",
     noPublishedAgents: "No published Agents yet.",
     discoveryPaused: "Cloud discovery is paused while offline.",
@@ -165,6 +179,8 @@ export default {
     editDraftTitle: "Edit local Agent draft",
     localDraftStatus:
       "Changes stay on this computer until you explicitly publish a revision.",
+    workspaceDraftReadOnly:
+      "This Workspace draft is read-only while offline. Reconnect before changing or publishing it.",
     name: "Agent name",
     systemPrompt: "Published base instructions",
     allowedProviders: "Allowed providers (comma separated)",
@@ -229,6 +245,12 @@ export default {
       local_runtime_required:
         "Switch to the local Runtime to install or update an Agent.",
       cloud_unavailable: "AgentEra Cloud is temporarily unavailable.",
+      workspace_forbidden:
+        "Your current Workspace role does not allow this Agent operation.",
+      workspace_archived:
+        "This Workspace is archived. Its Agent assets are read-only.",
+      workspace_owner_unavailable:
+        "This Workspace is read-only until its Owner account is available.",
       operation_failed: "The Agent operation could not be completed safely.",
     },
   },

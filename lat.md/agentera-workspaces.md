@@ -44,6 +44,8 @@ The Workspace manager exposes the selected space as a minimal USER or WORKSPACE 
 
 The projection contains only scope, Workspace ID, and role. It carries no Profile, RuntimeBinding, session, file, Memory, credential, or actor-supplied authorization data, and the Agent manager remains responsible for all Agent operations.
 
+The Agent manager publishes that already-trusted projection in its renderer-safe state so the Agent screen can present Owner/Admin authoring, Member install-only access, and offline read-only drafts. The renderer never sends the Workspace ID, scope, role, or actor back with an Agent mutation; cloud transactions remain the final authorization authority.
+
 ## Offline behavior
 
 A valid product offline entitlement exposes last-known active workspace metadata as stale and read-only while every workspace mutation pauses.

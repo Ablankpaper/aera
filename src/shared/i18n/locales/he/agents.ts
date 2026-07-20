@@ -65,4 +65,25 @@ export default {
   walletDeleteWarning:
     "This will permanently remove this wallet from AgentEra. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
   walletDeleteConfirmLabel: "Remove wallet",
+  control: {
+    workspaceSpace: "סביבת עבודה",
+    workspaceSpaceTitle: "סוכני סביבת העבודה",
+    workspaceAuthorSubtitle:
+      "צרו טיוטות מקומיות, פרסמו גרסאות קבועות והתקינו אותן בפרופילים מקומיים מבודדים.",
+    workspaceMemberSubtitle:
+      "התקינו גרסאות מאושרות בפרופילים מקומיים מבודדים. לחברים אין הרשאת עריכה או פרסום.",
+    role: { owner: "בעלים", admin: "מנהל", member: "חבר" },
+    workspaceOfflineNotice:
+      "סביבת העבודה אינה מקוונת. התקנות מאומתות נשארות זמינות מקומית; טיוטות הן לקריאה בלבד ופרסום, גילוי, התקנה ועדכון מושהים.",
+    view: "הצגה",
+    workspaceDraftReadOnly:
+      "הטיוטה היא לקריאה בלבד במצב לא מקוון. התחברו מחדש כדי לשנות או לפרסם אותה.",
+    errors: {
+      workspace_forbidden: "התפקיד הנוכחי שלך אינו מאפשר פעולה זו.",
+      workspace_archived:
+        "סביבת העבודה הועברה לארכיון ונכסי הסוכן הם לקריאה בלבד.",
+      workspace_owner_unavailable:
+        "סביבת העבודה לקריאה בלבד עד שחשבון הבעלים יהיה זמין.",
+    },
+  },
 } as const;

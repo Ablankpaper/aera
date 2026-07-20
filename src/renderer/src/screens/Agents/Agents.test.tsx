@@ -124,6 +124,7 @@ function installAgenteraAPI(): {
       data: {
         access: "online" as const,
         cloudAvailable: true,
+        context: { scope: "USER" as const },
         draftCount: 0,
         installationCount: 0,
       },

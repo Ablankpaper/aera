@@ -167,6 +167,18 @@ describe("Agent control IPC contract", () => {
     ).resolves.toEqual({ ok: false, errorCode: "cloud_unavailable" });
   });
 
+  it.each([
+    "workspace_forbidden",
+    "workspace_archived",
+    "workspace_owner_unavailable",
+  ] as const)("preserves the stable %s Workspace error", async (code) => {
+    await expect(
+      executeAgentControlIpc(async () => {
+        throw Object.assign(new Error("private Workspace failure"), { code });
+      }),
+    ).resolves.toEqual({ ok: false, errorCode: code });
+  });
+
   it("maps central online-access denial inside the safe Agent result envelope", async () => {
     const guard = createProductAccessGuard({
       getAuthState: () => ({

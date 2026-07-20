@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   AgentDraft,
   AgentDraftDetail,
@@ -31,6 +31,12 @@ function errorKey(code: AgenteraAgentControlErrorCode): string {
   return `agents.control.errors.${code}`;
 }
 
+function contextKey(state: AgenteraAgentControlPublicState): string {
+  return state.context.scope === "USER"
+    ? "USER"
+    : `WORKSPACE\0${state.context.workspaceId}\0${state.context.role}`;
+}
+
 export default function AgentControlPanel({
   profiles,
 }: AgentControlPanelProps): React.JSX.Element {
@@ -54,45 +60,77 @@ export default function AgentControlPanel({
   const [archiveTarget, setArchiveTarget] =
     useState<AgenteraAgentInstallationSummary | null>(null);
   const [archiving, setArchiving] = useState(false);
+  const loadEpoch = useRef(0);
+  const selectedContextKey = useRef<string | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
+    const epoch = ++loadEpoch.current;
     setLoading(true);
     setError(null);
     try {
-      const [stateResult, draftResult, installationResult] = await Promise.all([
+      const [stateResult, installationResult] = await Promise.all([
         window.agenteraAgents.getState(),
-        window.agenteraAgents.listDrafts(),
         window.agenteraAgents.listInstallations(),
       ]);
-      const failed = [stateResult, draftResult, installationResult].find(
+      if (epoch !== loadEpoch.current) return;
+      const failed = [stateResult, installationResult].find(
         (result) => !result.ok,
       );
       if (failed && !failed.ok) {
         setError(errorKey(failed.errorCode));
         return;
       }
-      if (!stateResult.ok || !draftResult.ok || !installationResult.ok) return;
-      setState(stateResult.data);
-      setDrafts(draftResult.data);
-      setInstallations(installationResult.data);
-      if (
-        stateResult.data.access === "online" &&
-        stateResult.data.cloudAvailable
-      ) {
-        const definitionResult = await window.agenteraAgents.listDefinitions();
-        if (!definitionResult.ok) {
-          setError(errorKey(definitionResult.errorCode));
-          setDefinitions([]);
-        } else {
-          setDefinitions(definitionResult.data);
+      if (!stateResult.ok || !installationResult.ok) return;
+
+      const nextState = stateResult.data;
+      const memberInstallOnly =
+        nextState.context.scope === "WORKSPACE" &&
+        nextState.context.role === "member";
+      let nextDrafts: AgentDraft[] = [];
+      if (!memberInstallOnly) {
+        const draftResult = await window.agenteraAgents.listDrafts();
+        if (epoch !== loadEpoch.current) return;
+        if (!draftResult.ok) {
+          setError(errorKey(draftResult.errorCode));
+          return;
         }
-      } else {
-        setDefinitions([]);
+        nextDrafts = draftResult.data;
       }
+
+      let nextDefinitions: AgenteraAgentDefinitionSummary[] = [];
+      let nextError: string | null = null;
+      if (nextState.access === "online" && nextState.cloudAvailable) {
+        const definitionResult = await window.agenteraAgents.listDefinitions();
+        if (epoch !== loadEpoch.current) return;
+        if (!definitionResult.ok) {
+          nextError = errorKey(definitionResult.errorCode);
+        } else {
+          nextDefinitions = definitionResult.data;
+        }
+      }
+      if (epoch !== loadEpoch.current) return;
+
+      const nextContextKey = contextKey(nextState);
+      if (
+        selectedContextKey.current !== null &&
+        selectedContextKey.current !== nextContextKey
+      ) {
+        setEditor(null);
+        setInstallDialog(null);
+        setArchiveTarget(null);
+      }
+      selectedContextKey.current = nextContextKey;
+      setState(nextState);
+      setDrafts(nextDrafts);
+      setInstallations(installationResult.data);
+      setDefinitions(nextDefinitions);
+      setError(nextError);
     } catch {
-      setError("agents.control.errors.operation_failed");
+      if (epoch === loadEpoch.current) {
+        setError("agents.control.errors.operation_failed");
+      }
     } finally {
-      setLoading(false);
+      if (epoch === loadEpoch.current) setLoading(false);
     }
   }, []);
 
@@ -169,6 +207,15 @@ export default function AgentControlPanel({
     definitions.find((item) => item.id === definitionId)?.displayName ??
     t("agents.control.installedLocally");
 
+  const context = state?.context ?? ({ scope: "USER" } as const);
+  const isWorkspace = context.scope === "WORKSPACE";
+  const isWorkspaceMember = isWorkspace && context.role === "member";
+  const workspaceReadOnly =
+    isWorkspace &&
+    (state?.access !== "online" || state.cloudAvailable === false);
+  const canViewDrafts = !isWorkspaceMember;
+  const canAuthor = !isWorkspace || (!isWorkspaceMember && !workspaceReadOnly);
+
   return (
     <section
       className="agent-control-panel"
@@ -177,12 +224,33 @@ export default function AgentControlPanel({
       <div className="agent-control-section-header">
         <div>
           <span className="agent-control-eyebrow">
-            {t("agents.control.personalSpace")}
+            {t(
+              isWorkspace
+                ? "agents.control.workspaceSpace"
+                : "agents.control.personalSpace",
+            )}
           </span>
           <h2 id="agent-control-title">
-            {t("agents.control.personalSpaceTitle")}
+            {t(
+              isWorkspace
+                ? "agents.control.workspaceSpaceTitle"
+                : "agents.control.personalSpaceTitle",
+            )}
           </h2>
-          <p>{t("agents.control.personalSpaceSubtitle")}</p>
+          <p>
+            {t(
+              isWorkspace
+                ? isWorkspaceMember
+                  ? "agents.control.workspaceMemberSubtitle"
+                  : "agents.control.workspaceAuthorSubtitle"
+                : "agents.control.personalSpaceSubtitle",
+            )}
+          </p>
+          {isWorkspace ? (
+            <span className="agent-control-eyebrow">
+              {t(`agents.control.role.${context.role}`)}
+            </span>
+          ) : null}
         </div>
         <div className="agent-control-inline-actions">
           <button
@@ -194,20 +262,27 @@ export default function AgentControlPanel({
           >
             <Refresh size={14} />
           </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={() => setEditor("new")}
-          >
-            <Plus size={14} />
-            {t("agents.control.newAgent")}
-          </button>
+          {!isWorkspaceMember ? (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setEditor("new")}
+              disabled={!canAuthor}
+            >
+              <Plus size={14} />
+              {t("agents.control.newAgent")}
+            </button>
+          ) : null}
         </div>
       </div>
 
       {state?.access === "offline" || state?.cloudAvailable === false ? (
         <div className="agent-control-notice">
-          {t("agents.control.offlineNotice")}
+          {t(
+            isWorkspace
+              ? "agents.control.workspaceOfflineNotice"
+              : "agents.control.offlineNotice",
+          )}
         </div>
       ) : null}
       {error && <div className="agents-create-error">{t(error)}</div>}
@@ -218,38 +293,44 @@ export default function AgentControlPanel({
         </div>
       ) : (
         <div className="agent-control-columns">
-          <section className="agent-control-group">
-            <div className="agent-control-group-title">
-              <h3>{t("agents.control.localDrafts")}</h3>
-              <span>{drafts.length}</span>
-            </div>
-            {drafts.length === 0 ? (
-              <p className="agent-control-empty">
-                {t("agents.control.noDrafts")}
-              </p>
-            ) : (
-              drafts.map((draft) => (
-                <article key={draft.id} className="agent-control-card">
-                  <div>
-                    <strong>{draft.displayName}</strong>
-                    <p>
-                      {t("agents.control.revision")} {draft.revision} ·{" "}
-                      {draft.publishedRevision
-                        ? t("agents.control.published")
-                        : t("agents.control.localOnly")}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => void editDraft(draft.id)}
-                  >
-                    {t("agents.control.edit")}
-                  </button>
-                </article>
-              ))
-            )}
-          </section>
+          {canViewDrafts ? (
+            <section className="agent-control-group">
+              <div className="agent-control-group-title">
+                <h3>{t("agents.control.localDrafts")}</h3>
+                <span>{drafts.length}</span>
+              </div>
+              {drafts.length === 0 ? (
+                <p className="agent-control-empty">
+                  {t("agents.control.noDrafts")}
+                </p>
+              ) : (
+                drafts.map((draft) => (
+                  <article key={draft.id} className="agent-control-card">
+                    <div>
+                      <strong>{draft.displayName}</strong>
+                      <p>
+                        {t("agents.control.revision")} {draft.revision} ·{" "}
+                        {draft.publishedRevision
+                          ? t("agents.control.published")
+                          : t("agents.control.localOnly")}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => void editDraft(draft.id)}
+                    >
+                      {t(
+                        workspaceReadOnly
+                          ? "agents.control.view"
+                          : "agents.control.edit",
+                      )}
+                    </button>
+                  </article>
+                ))
+              )}
+            </section>
+          ) : null}
 
           <section className="agent-control-group">
             <div className="agent-control-group-title">
@@ -319,6 +400,7 @@ export default function AgentControlPanel({
                     <button
                       type="button"
                       className="btn btn-primary btn-sm"
+                      disabled={!state?.cloudAvailable}
                       onClick={() =>
                         setInstallDialog({
                           mode: "retry",
@@ -362,6 +444,7 @@ export default function AgentControlPanel({
       <AgentDraftEditor
         open={editor !== null}
         draft={editor === "new" ? null : editor}
+        readOnly={workspaceReadOnly}
         onClose={() => setEditor(null)}
         onSaved={() => void load()}
         onPublished={() => void load()}

@@ -1,6 +1,16 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  AgentDraft,
+  AgentDraftDetail,
+  AgenteraAgentControlContext,
+  AgenteraAgentControlPublicState,
   AgenteraAgentControlResult,
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
@@ -14,9 +24,56 @@ vi.mock("../../components/useI18n", () => ({
 const DEFINITION_ID = "11111111-1111-4111-8111-111111111111";
 const VERSION_ID = "22222222-2222-4222-8222-222222222222";
 const INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
+const WORKSPACE_ID = "66666666-6666-4666-8666-666666666666";
 
 function success<T>(data: T): AgenteraAgentControlResult<T> {
   return { ok: true, data };
+}
+
+function controlState(
+  context: AgenteraAgentControlContext = { scope: "USER" },
+  overrides: Partial<AgenteraAgentControlPublicState> = {},
+): AgenteraAgentControlPublicState {
+  return {
+    access: "online",
+    cloudAvailable: true,
+    draftCount: 0,
+    installationCount: 0,
+    context,
+    ...overrides,
+  };
+}
+
+function draft(): AgentDraftDetail {
+  return {
+    id: "77777777-7777-4777-8777-777777777777",
+    sourceAgentDefinitionId: null,
+    baseAgentVersionId: null,
+    displayName: "Workspace Research Agent",
+    icon: null,
+    manifest: {
+      schemaVersion: 1,
+      identity: { systemPrompt: "Research carefully" },
+      assets: [],
+      modelConstraints: {
+        allowedProviders: ["openai"],
+        allowedModels: ["gpt-5.6"],
+      },
+      tools: { allowed: [], denied: [] },
+      dependencies: [],
+      runtimeCompatibility: {
+        minimumVersion: "v0.18.2-agentera.1",
+        maximumVersionExclusive: null,
+      },
+    },
+    assets: [],
+    editableAssets: [],
+    revision: 1,
+    createdAt: "2026-07-20T00:00:00.000Z",
+    updatedAt: "2026-07-20T00:00:00.000Z",
+    lastPublicationAttempt: null,
+    publishedRevision: null,
+  };
 }
 
 function definition(): AgenteraAgentDefinitionSummary {
@@ -56,14 +113,7 @@ function installAPI(
   overrides: Partial<Window["agenteraAgents"]> = {},
 ): MockedPanelAgenteraAPI {
   const api = {
-    getState: vi.fn(async () =>
-      success({
-        access: "online" as const,
-        cloudAvailable: true,
-        draftCount: 0,
-        installationCount: 0,
-      }),
-    ),
+    getState: vi.fn(async () => success(controlState())),
     listDrafts: vi.fn(async () => success([])),
     getDraft: vi.fn(),
     createDraft: vi.fn(),
@@ -95,12 +145,16 @@ describe("AgentControlPanel", () => {
   it("keeps local drafts/installations available offline and pauses cloud discovery", async () => {
     const api = installAPI({
       getState: vi.fn(async () =>
-        success({
-          access: "offline" as const,
-          cloudAvailable: false,
-          draftCount: 0,
-          installationCount: 1,
-        }),
+        success(
+          controlState(
+            { scope: "USER" },
+            {
+              access: "offline",
+              cloudAvailable: false,
+              installationCount: 1,
+            },
+          ),
+        ),
       ),
       listInstallations: vi.fn(async () => success([installation("active")])),
     });
@@ -118,7 +172,164 @@ describe("AgentControlPanel", () => {
     expect(
       screen.getByRole("button", { name: "agents.control.newAgent" }),
     ).toBeEnabled();
+    expect(screen.getByText("agents.control.personalSpaceTitle")).toBeTruthy();
   });
+
+  // @lat: [[agentera-agent-control-plane#Trusted Workspace Agent context#Role-aware presentation]]
+  it.each(["owner", "admin"] as const)(
+    "shows Workspace author controls for an online %s",
+    async (role) => {
+      installAPI({
+        getState: vi.fn(async () =>
+          success(
+            controlState({
+              scope: "WORKSPACE",
+              workspaceId: WORKSPACE_ID,
+              role,
+            }),
+          ),
+        ),
+        listDrafts: vi.fn(async () => success([draft() as AgentDraft])),
+      });
+      render(<AgentControlPanel profiles={[]} />);
+
+      expect(
+        await screen.findByText("agents.control.workspaceSpaceTitle"),
+      ).toBeTruthy();
+      expect(screen.getByText(`agents.control.role.${role}`)).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "agents.control.newAgent" }),
+      ).toBeEnabled();
+      expect(
+        screen.getByRole("button", { name: "agents.control.edit" }),
+      ).toBeEnabled();
+    },
+  );
+
+  it("renders a Workspace Member as install-only without reading local drafts", async () => {
+    const api = installAPI({
+      getState: vi.fn(async () =>
+        success(
+          controlState({
+            scope: "WORKSPACE",
+            workspaceId: WORKSPACE_ID,
+            role: "member",
+          }),
+        ),
+      ),
+      listDrafts: vi.fn(async () => success([draft() as AgentDraft])),
+    });
+    render(
+      <AgentControlPanel profiles={[{ id: "default", name: "Default" }]} />,
+    );
+
+    expect(
+      await screen.findByText("agents.control.workspaceMemberSubtitle"),
+    ).toBeTruthy();
+    expect(screen.queryByText("agents.control.localDrafts")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "agents.control.newAgent" }),
+    ).toBeNull();
+    expect(api.listDrafts).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "agents.control.install" }),
+    ).toBeEnabled();
+  });
+
+  it("keeps Workspace drafts visible but read-only while offline", async () => {
+    const workspaceDraft = draft();
+    const api = installAPI({
+      getState: vi.fn(async () =>
+        success(
+          controlState(
+            {
+              scope: "WORKSPACE",
+              workspaceId: WORKSPACE_ID,
+              role: "owner",
+            },
+            { access: "offline", cloudAvailable: false, draftCount: 1 },
+          ),
+        ),
+      ),
+      listDrafts: vi.fn(async () => success([workspaceDraft as AgentDraft])),
+      getDraft: vi.fn(async () => success(workspaceDraft)),
+    });
+    render(<AgentControlPanel profiles={[]} />);
+
+    expect(
+      await screen.findByText("agents.control.workspaceOfflineNotice"),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "agents.control.newAgent" }),
+    ).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.control.view" }),
+    );
+    expect(
+      await screen.findByDisplayValue("Workspace Research Agent"),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "agents.control.saveLocal" }),
+    ).toBeDisabled();
+    expect(api.listDefinitions).not.toHaveBeenCalled();
+  });
+
+  it("follows Agent control state when the selected space changes", async () => {
+    let current = controlState();
+    let notify: (() => void) | null = null;
+    const api = installAPI({
+      getState: vi.fn(async () => success(current)),
+      onStateChanged: vi.fn((listener) => {
+        notify = () => listener(current);
+        return () => undefined;
+      }),
+    });
+    render(<AgentControlPanel profiles={[]} />);
+    expect(
+      await screen.findByText("agents.control.personalSpaceTitle"),
+    ).toBeTruthy();
+
+    current = controlState({
+      scope: "WORKSPACE",
+      workspaceId: WORKSPACE_ID,
+      role: "member",
+    });
+    await act(async () => notify?.());
+
+    expect(
+      await screen.findByText("agents.control.workspaceSpaceTitle"),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "agents.control.newAgent" }),
+    ).toBeNull();
+    expect(api.getState).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["workspace_archived", "workspace_owner_unavailable"] as const)(
+    "renders the stable %s lifecycle error",
+    async (errorCode) => {
+      installAPI({
+        getState: vi.fn(async () =>
+          success(
+            controlState({
+              scope: "WORKSPACE",
+              workspaceId: WORKSPACE_ID,
+              role: "owner",
+            }),
+          ),
+        ),
+        listDefinitions: vi.fn(async () => ({ ok: false as const, errorCode })),
+      });
+      render(<AgentControlPanel profiles={[]} />);
+
+      expect(
+        await screen.findByText(`agents.control.errors.${errorCode}`),
+      ).toBeTruthy();
+      expect(document.body.textContent).not.toMatch(
+        /token|response body|stack/i,
+      );
+    },
+  );
 
   it("shows pending retry and archives without deleting local Profile data", async () => {
     const api = installAPI({
