@@ -289,6 +289,8 @@ The fixed replay window is 24 hours. Same key plus same canonical request return
 
 Secret-once invitation creation never replays a raw token. If the initial secret response is lost, the caller revokes the safe invitation summary and creates a new invitation.
 
+A dissolution replay by the same actor, operation, key, and request digest is resolved from the retained idempotency record before current-Membership authorization. It returns only the dissolved tombstone summary. A different actor, key, or request receives the ordinary non-enumerating result.
+
 ### Organization-scoped audit
 
 `audit_events` gains nullable `organization_id UUID REFERENCES organizations(id)` and an index on `(organization_id, created_at DESC, id DESC)`.
@@ -358,7 +360,7 @@ Owner or Admin may rename an active Organization using the current Organization 
 
 ### Owner transfer
 
-Only the current Owner may transfer to an existing active Admin. The request includes the Organization revision, target Membership revision, and exact transfer confirmation.
+Only the current Owner may transfer to an existing active Admin. The request includes the Organization revision, target Membership revision, and the exact confirmation string `transfer-organization-owner`.
 
 One transaction locks the Organization and both Memberships, promotes the target to Owner, demotes the prior Owner to Admin, increments affected revisions, writes idempotency evidence, and records audit. Deferred constraints reject zero or two Owners at commit.
 
@@ -374,7 +376,7 @@ Only Owner may restore an archived Organization. Restore rechecks Organization q
 
 ### Dissolve
 
-Only Owner may dissolve an archived Organization. The request must include the exact current display name, current revision, and explicit dissolution confirmation.
+Only Owner may dissolve an archived Organization. The request must include the exact current display name, current revision, and the exact confirmation string `dissolve-organization`.
 
 The transaction requires:
 
@@ -383,7 +385,7 @@ The transaction requires:
 - no assigned Department member;
 - no blocker returned by the Organization asset guard.
 
-It then records the final audit, removes Membership, Department, invitation, and live idempotency rows, marks the Organization `dissolved`, redacts its display name to a non-identifying tombstone label, retains immutable policy and audit evidence, and clears selection on authoritative desktop refresh.
+It then records the final audit, removes Membership, Department, and invitation rows, marks the Organization `dissolved`, redacts its display name to a non-identifying tombstone label, retains immutable policy and audit evidence, and clears selection on authoritative desktop refresh. The dissolution idempotency record remains replayable for its fixed 24-hour window; other Organization idempotency rows age out through ordinary cleanup.
 
 Dissolution is terminal and never deletes, edits, or claims a local Hermes Profile. Organization Agent V1 will register enterprise definitions, versions, and protected installation relationships with the asset guard before those assets exist.
 
@@ -405,6 +407,14 @@ Departments are Organization-internal member groups, not product spaces and not 
 - assigning or removing a Department never selects or mutates a Hermes Profile;
 - archiving a Department requires it to be empty;
 - future policy targeting may reference Department IDs, but `owner_scope=DEPARTMENT` is explicitly unsupported.
+
+## Invitation Acceptance Semantics
+
+An authenticated active account submits the raw Organization invitation token with an idempotency key.
+
+One transaction locks the invitation and Organization, verifies the exact seven-day deadline and active lifecycle, consumes the token, inserts a default Member Membership, writes idempotency evidence, and records audit. A concurrent loser receives `invitation_unavailable`.
+
+If the accepting account is already a Member, the invitation is still consumed and the existing Membership is returned without changing its role or Department. A replay by the original actor and matching idempotency request returns that same safe Membership result; no other actor can reuse the consumed token.
 
 ## Organization Policy V1
 
@@ -438,6 +448,8 @@ Semantics:
 - `official_agents.installation` is `allowed` or `blocked`;
 - unknown keys, duplicate logical entries, secrets, credentials, Profile paths, or private Hermes content are rejected;
 - enterprise Agent publication review by Owner/Admin is a mandatory product invariant and cannot be disabled by policy.
+
+Model and tool allowlists contain at most 128 entries each. Canonical provider, model, and tool identifiers are 1 through 128 ASCII characters from `[A-Za-z0-9._:/-]`; duplicate logical entries are rejected before signing.
 
 The default V1 snapshot inherits platform model/tool allowance, requires manual ExperienceCandidate review, and permits future official Agent installation.
 
@@ -556,6 +568,16 @@ Audit uses an opaque keyset cursor and `limit` from 1 through 100. It is online-
 - create, invitation creation/acceptance, policy publication, Owner transfer, archive/restore, and dissolution require `Idempotency-Key`;
 - every mutable route uses expected revision or expected version compare-and-swap semantics.
 
+Exact public shapes are bounded as follows:
+
+- Organization summary: `id`, `display_name`, `status`, `revision`, actor `role`, `member_count`, `department_count`, `current_policy_version`, `current_policy_digest`, `mutation_state`, `created_at`, `updated_at`, optional `archived_at`;
+- Member summary: `user_id`, optional `nickname`, `role`, optional `department_id`, `revision`, `joined_at`, `updated_at`;
+- Department summary: `id`, `display_name`, `status`, `member_count`, `revision`, `created_at`, `updated_at`, optional `archived_at`;
+- invitation summary for Owner/Admin: `id`, `status`, optional creator/acceptor user IDs, lifecycle timestamps, and no token or digest;
+- current policy summary for every Member: `id`, `policy_version`, `schema_version`, `content_digest`, `issuer`, `signing_key_id`, `created_at`, and no policy document;
+- full policy response for Owner/Admin/Auditor: the current-policy summary plus the validated typed `policy_document` and signature;
+- audit summary for Owner/Admin/Auditor: event ID/type, object type/ID, outcome, bounded reason code, request ID, redacted actor/subject display metadata, and timestamp.
+
 ## Error Semantics
 
 The API returns the existing bounded error envelope with stable codes:
@@ -566,7 +588,6 @@ The API returns the existing bounded error envelope with stable codes:
 - `403 organization_forbidden` for a known Member lacking role;
 - `409 organization_conflict` for stale revision or competing mutation;
 - `409 organization_archived` for a mutation unavailable while archived;
-- `409 organization_dissolved` for a terminal lifecycle target known to an authorized tombstone lookup;
 - `409 organization_limit_reached` for ownership quota;
 - `409 organization_owner_transfer_required` when account deletion still owns an Organization;
 - `409 owner_transfer_target_invalid` unless the target is a current Admin;
@@ -766,7 +787,9 @@ Owner creates Organization
 → Member accepts under another account
 → Owner assigns Department
 → Owner promotes Member to Admin
-→ Admin creates Auditor
+→ Admin creates a second invitation
+→ a third account accepts as Member
+→ Admin changes the third account to Auditor
 → Admin publishes policy V2
 → Auditor reads policy history and audit
 → Owner transfers ownership to Admin

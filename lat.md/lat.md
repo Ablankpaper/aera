@@ -17,6 +17,7 @@ This directory defines the high-level concepts, business logic, and architecture
 - [[agentera-app-authentication]] — the independent AgentEra APP account gate, browser PKCE flow, device-bound offline entitlement, and existing-Profile ownership rules.
 - [[agentera-agent-control-plane]] — USER-owned local Agent drafts, immutable stable-version publication, per-device Agent installation, and conversation-scoped RuntimeBinding rules.
 - [[agentera-workspaces]] — fixed-owner Workspace lifecycle, memberships, one-time invitations, desktop context switching, and offline read-only boundaries.
+- [[agentera-organizations]] — transferable enterprise ownership, Organization roles and Departments, signed policy snapshots, audit, product-context switching, and Hermes isolation.
 - [[sidebar-navigation]] — the recent-sessions list under the Chat nav item, capped at five with a "Show more" button that opens the full session list in a modal.
 - [[context-folder]] — the per-session linked working folder, persisted in a desktop-owned state.db table so a re-opened conversation restores its folder.
 - [[main-process]] — the Electron main-process entrypoint, app lifecycle modules, and centralized IPC registry.
