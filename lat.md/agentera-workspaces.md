@@ -87,3 +87,11 @@ The compatibility gate prevents workspace navigation and collaboration metadata 
 `tests/agentera-workspace-boundary.test.ts` rejects Workspace-domain imports into Hermes execution, Profile mutation, sessions, Skills, Curator, Runtime distribution or binding, and legacy `agent-sync.ts`. It permits only the startup-level selected-context signal into Agent control and proves RuntimeBinding ownership remains USER-only.
 
 The deterministic E2E additionally hashes a populated Hermes Profile tree and snapshots the selected Profile marker plus active USER RuntimeBinding before and after every workspace operation. All bytes and identities must remain unchanged. Existing Hermes compatibility suites remain part of the focused and complete desktop gates.
+
+### Workspace Agent runtime boundary
+
+Workspace Agent publication shares immutable capability assets without creating a shared writable runtime.
+
+[[tests/agentera-workspace-agent-boundary.test.ts]] statically prevents WORKSPACE ownership from reaching Hermes execution, Profile state, RuntimeBindings, sessions, Skills, Curator, Runtime distribution, or legacy sync.
+
+[[tests/e2e/agentera-workspace-agent.e2e.ts]] proves the complete Owner-to-Member flow with distinct accounts and physical Profiles. Member Memory and learned Skills remain byte-identical through Owner publication and Member update, published Skill, SOP, and Knowledge projections remain read-only outside `HERMES_HOME`, and old/new conversations retain their independently frozen USER RuntimeBindings.

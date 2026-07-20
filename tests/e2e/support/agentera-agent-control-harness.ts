@@ -868,6 +868,9 @@ export function agentControlRequests(
     .filter(
       (request) =>
         request.path.startsWith("/api/v1/agent-") ||
+        /^\/api\/v1\/workspaces\/[^/]+\/agent-definitions(?:\/|$)/.test(
+          request.path,
+        ) ||
         request.path.startsWith("/api/v1/runtime-binding") ||
         request.path.startsWith("/api/agents"),
     )
@@ -881,6 +884,9 @@ export function agentControlExchangeDiagnostics(
     .filter(
       (request) =>
         request.path.startsWith("/api/v1/agent-") ||
+        /^\/api\/v1\/workspaces\/[^/]+\/agent-definitions(?:\/|$)/.test(
+          request.path,
+        ) ||
         request.path.startsWith("/api/v1/policy-snapshots/") ||
         request.path.startsWith("/.well-known/agentera-signing-keys"),
     )

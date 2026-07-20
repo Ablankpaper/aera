@@ -118,6 +118,16 @@ The feature cannot begin from or ship with a falsely green authentication or com
 
 Cloud tests run without cache, version immutability and owner isolation are proven, private Profile fixtures remain byte-identical through install/update failures, and active conversations keep a stable binding. The detailed approved design is `docs/superpowers/specs/2026-07-19-agentera-user-agent-control-plane-v1-design.md`.
 
+### Workspace Agent isolation
+
+The Workspace Agent gate extends the release proof from USER assets to WORKSPACE-owned definitions and versions without changing USER ownership of installations, Profiles, RuntimeBindings, or adaptive data.
+
+[[tests/agentera-workspace-agent-boundary.test.ts]] allowlists Workspace ownership vocabulary only in Agent asset/context modules and rejects it from Hermes, RuntimeBinding, Profile binding, sessions, Skills, Curator, Runtime distribution, and legacy sync. It also locks the exact renderer mutation boundary and read-only projection path.
+
+[[tests/e2e/agentera-workspace-agent.e2e.ts]] runs two real product accounts against the local cloud and desktop: Owner publishes v1, Member installs into a separate Profile and learns privately, Owner publishes v2, and Member selects it manually. The v1 conversation remains bound to v1, the new conversation binds v2, both bindings remain USER-owned, account caches remain distinct, published assets are read-only, and captured cloud requests contain no private learning data.
+
+Run the executable proof with `npm run test:e2e:workspace-agent`.
+
 ### Two-device boundary
 
 The end-to-end gate exercises one USER account through two physically isolated local device contexts.

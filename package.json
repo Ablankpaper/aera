@@ -17,6 +17,7 @@
     "test:e2e:auth": "playwright test tests/e2e/agentera-auth.e2e.ts",
     "test:e2e:agent-control": "playwright test tests/e2e/agentera-agent-control.e2e.ts",
     "test:e2e:workspace": "playwright test tests/e2e/agentera-workspace.e2e.ts",
+    "test:e2e:workspace-agent": "npm run build && playwright test tests/e2e/agentera-workspace-agent.e2e.ts",
     "test:e2e:runtime-seed": "npm run build && playwright test tests/e2e/agentera-runtime-seed.e2e.ts",
     "test:coverage": "vitest run --coverage",
     "test:sandbox": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/hermes-sandbox.ps1 test",
