@@ -72,6 +72,16 @@ Import always starts from the currently published, signature- and digest-verifie
 
 The local draft and import receipt commit together. Approval itself remains cloud state, import remains device-local and idempotent per account/device, and publication remains the existing separate explicit action.
 
+### Role-aware experience presentation
+
+The renderer keeps promotion, review, draft import, and publication as separate visible actions without accepting ownership or Profile data.
+
+[[src/renderer/src/screens/Agents/ExperiencePromotionDialog.tsx#ExperiencePromotionDialog]] exposes preparation and upload as separate user actions. It renders eligible names and safe preview metadata but never receives a Profile path, source path, Workspace ID, owner tuple, bundle bytes, DLP override, or cloud origin. Offline preparation remains available; upload failure remains an explicit manual retry with no background timer.
+
+[[src/renderer/src/screens/Agents/ExperienceCandidatePanel.tsx#ExperienceCandidatePanel]] calls the own-status list for every Workspace role and does not call review-list or review-detail methods for Member. [[src/renderer/src/screens/Agents/ExperienceReviewDialog.tsx#ExperienceReviewDialog]] commits a bounded terminal decision before requesting an approved import preview, confirms same-name replacement, refreshes a stale base without a draft mutation, and passes only the returned draft to the existing editor.
+
+Agent-control state invalidation closes promotion, review, installation, publication, and archive dialogs and refreshes the candidate panel even when the visible Workspace scope key is unchanged. This fail-closed renderer rule complements the main process clearing one-use handles on account, device, and selected-context changes.
+
 ## Owner identity
 
 The USER owner tuple is derived from the authenticated product session and cannot be selected by request payloads.

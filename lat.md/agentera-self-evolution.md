@@ -68,6 +68,10 @@ Only files below the selected `skills/<skill-name>/` prefix are added, replaced,
 
 Draft rows and the device-local candidate import receipt commit in one SQLite transaction. Repeating the import on the same account/device reopens the recorded draft, while another authorized device may create its own draft. A stale base, verification failure, transaction rollback, or disk failure leaves the terminal cloud approval and Hermes source Skill unchanged and removes any partial draft materialization.
 
+The desktop presentation keeps every transition visible and manual. An active Workspace Installation exposes one promotion dialog that lists eligible Skill names, performs the detached local preview even with valid offline access, displays only safe DLP codes and candidate-relative locations, and never starts submission on open or through a timer. Every role can see only its own returned candidate status; only Owner and Admin receive review controls.
+
+Approval is committed before the latest-base import preview is requested. Same-name replacement paths are shown explicitly, `candidate_base_advanced` refreshes the diff before any draft write, and a successful import opens the existing local draft editor. Publication remains a later, separate action and no renderer transition writes to a Hermes Profile.
+
 ### Candidate failure isolation
 
 Preparation, upload, review, import, and publication failures are isolated from the source Profile and local learning loop.
