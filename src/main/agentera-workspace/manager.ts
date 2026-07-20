@@ -5,9 +5,14 @@ import type {
   WorkspaceInvitationCreation,
   WorkspaceMember,
   WorkspacePublicState,
+  WorkspaceRole,
   WorkspaceSummary,
 } from "../../shared/agentera-workspace";
 import type { AgenteraWorkspaceDatabase } from "./db";
+
+export type SelectedAgentContext =
+  | { scope: "USER" }
+  | { scope: "WORKSPACE"; workspaceId: string; role: WorkspaceRole };
 
 export interface AgenteraWorkspaceCloudClient {
   listWorkspaces(): Promise<WorkspaceSummary[]>;
@@ -95,6 +100,8 @@ export interface AcceptWorkspaceInvitationInput {
 
 export interface AgenteraWorkspaceManagerSurface {
   getState(): Promise<WorkspacePublicState>;
+  getSelectedAgentContext(): SelectedAgentContext;
+  subscribeSelectedAgentContext(listener: () => void): () => void;
   refresh(): Promise<WorkspacePublicState>;
   select(input: { workspaceId: string | null }): Promise<WorkspacePublicState>;
   create(input: CreateWorkspaceInput): Promise<WorkspaceSummary>;
@@ -260,9 +267,11 @@ export class AgenteraWorkspaceManager implements AgenteraWorkspaceManagerSurface
   private readonly getAuthState: () => AgenteraAuthPublicState;
   private readonly now: () => string;
   private readonly listeners = new Set<(state: WorkspacePublicState) => void>();
+  private readonly selectedAgentContextListeners = new Set<() => void>();
   private fingerprint: string | null = null;
   private epoch = 0;
   private currentUserIsFresh = false;
+  private lastEmittedAgentContextKey: string | null = null;
   private refreshInFlight: RefreshInFlight | null = null;
   private closed = false;
 
@@ -282,6 +291,23 @@ export class AgenteraWorkspaceManager implements AgenteraWorkspaceManagerSurface
   async getState(): Promise<WorkspacePublicState> {
     const access = this.readAccess();
     return this.buildState(access);
+  }
+
+  getSelectedAgentContext(): SelectedAgentContext {
+    const selected = this.buildState(this.readAccess()).selected;
+    return selected.kind === "personal"
+      ? { scope: "USER" }
+      : {
+          scope: "WORKSPACE",
+          workspaceId: selected.workspaceId,
+          role: selected.role,
+        };
+  }
+
+  subscribeSelectedAgentContext(listener: () => void): () => void {
+    this.assertOpen();
+    this.selectedAgentContextListeners.add(listener);
+    return () => this.selectedAgentContextListeners.delete(listener);
   }
 
   refresh(): Promise<WorkspacePublicState> {
@@ -551,6 +577,7 @@ export class AgenteraWorkspaceManager implements AgenteraWorkspaceManagerSurface
     this.epoch += 1;
     this.refreshInFlight = null;
     this.listeners.clear();
+    this.selectedAgentContextListeners.clear();
     this.database.close();
   }
 
@@ -723,11 +750,26 @@ export class AgenteraWorkspaceManager implements AgenteraWorkspaceManagerSurface
   }
 
   private emit(state: WorkspacePublicState): void {
+    const selectedAgentContextKey =
+      state.selected.kind === "personal"
+        ? "USER"
+        : `WORKSPACE\0${state.selected.workspaceId}\0${state.selected.role}`;
+    const selectedAgentContextChanged =
+      selectedAgentContextKey !== this.lastEmittedAgentContextKey;
+    this.lastEmittedAgentContextKey = selectedAgentContextKey;
     for (const listener of this.listeners) {
       try {
         listener(cloneState(state));
       } catch {
         // A renderer listener cannot change trusted Workspace state.
+      }
+    }
+    if (!selectedAgentContextChanged) return;
+    for (const listener of this.selectedAgentContextListeners) {
+      try {
+        listener();
+      } catch {
+        // A context observer cannot change trusted Workspace state.
       }
     }
   }

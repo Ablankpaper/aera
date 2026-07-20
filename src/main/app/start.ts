@@ -209,6 +209,8 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
   } catch {
     console.error("[AGENTERA_RUNTIME_MANAGER] unavailable");
   }
+  let agenteraWorkspaceDatabase: AgenteraWorkspaceDatabase | null = null;
+  let agenteraWorkspace: AgenteraWorkspaceManager | null = null;
   let agenteraAgentControlDatabase: AgenteraControlPlaneDatabase | null = null;
   let agenteraAgentControl: AgenteraAgentControlManager | null = null;
   try {
@@ -231,6 +233,8 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
       },
       userDataPath: app.getPath("userData"),
       getOwner: getAgenteraRuntimeOwner,
+      getAgentContext: () =>
+        agenteraWorkspace?.getSelectedAgentContext() ?? { scope: "USER" },
       getAuthState: () => agenteraAuth.getPublicState(),
       getRuntimeVersion: async () => {
         const invocationVersion = getRuntimeInvocation()?.version;
@@ -250,8 +254,6 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     agenteraAgentControl = null;
     console.error("[AGENTERA_AGENT_CONTROL] unavailable");
   }
-  let agenteraWorkspaceDatabase: AgenteraWorkspaceDatabase | null = null;
-  let agenteraWorkspace: AgenteraWorkspaceManager | null = null;
   try {
     agenteraWorkspaceDatabase = openAgenteraWorkspaceDatabase(
       app.getPath("userData"),
@@ -271,6 +273,10 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     agenteraWorkspace = null;
     console.error("[AGENTERA_WORKSPACE] unavailable");
   }
+  const unsubscribeSelectedAgentContext =
+    agenteraWorkspace?.subscribeSelectedAgentContext(() => {
+      agenteraAgentControl?.notifyAgentContextChanged();
+    }) ?? (() => undefined);
   const ownerSwitchCoordinator = createAgenteraOwnerSwitchCoordinator({
     stopRuntimeContext: stopActiveRuntimeContext,
   });
@@ -376,6 +382,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
 
   app.on("before-quit", () => {
     unsubscribeAgenteraAuth();
+    unsubscribeSelectedAgentContext();
     agenteraAuth.dispose();
     agenteraWorkspace?.close();
     agenteraAgentControlDatabase?.close();

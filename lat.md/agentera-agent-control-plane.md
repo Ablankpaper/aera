@@ -4,7 +4,7 @@ The first AgentEra control-plane slice publishes USER-owned stable Agent version
 
 ## First-release boundary
 
-V1 implements only `owner_scope=USER`; workspace, organization, official Agent, ExperienceCandidate, and encrypted-backup behavior remain later projects.
+The original V1 slice implements `owner_scope=USER`; the approved Workspace Agent extension now adds WORKSPACE-owned definitions and versions without expanding runtime-data ownership.
 
 The cloud is an identity, version, policy, installation, binding-metadata, and audit control plane. Agent execution and model access stay on the user's computer.
 
@@ -13,6 +13,34 @@ The cloud is an identity, version, policy, installation, binding-metadata, and a
 The next approved slice adds Workspace ownership only to published AgentDefinition and AgentVersion assets while keeping each member's Installation, RuntimeBinding, physical Hermes Profile, and adaptive state USER-owned.
 
 Owner and Admin may publish immutable Workspace versions, and active Members may discover and install them. The desktop derives the target from the trusted global Workspace context rather than renderer-supplied ownership fields. Shared Knowledge, Skill, and SOP assets enter Hermes only through the existing verified read-only projection. The locked design is `docs/superpowers/specs/2026-07-20-agentera-workspace-agent-v1-design.md`.
+
+## Trusted Workspace Agent context
+
+The main process derives one exact USER or WORKSPACE asset context from product navigation and never accepts ownership fields through Agent IPC.
+
+### Nested Workspace routes
+
+Workspace discovery and immutable publication use the exact nested Workspace API paths while USER requests retain their existing routes.
+
+[[src/main/agentera-agent-control/client.ts#AgenteraAgentControlClient#listWorkspaceDefinitions]] validates Workspace identifiers, strict response DTOs, bearer authentication, and stable authorization errors without exposing response bodies.
+
+### Role-gated publication
+
+Owner and Admin can prepare and confirm Workspace publication, while Member is rejected locally before signing-key refresh or upload.
+
+[[src/main/agentera-agent-control/publisher.ts#AgentPublisher]] binds each one-use preview to its target scope and dispatches initial and next immutable versions through the corresponding USER or Workspace client method.
+
+### Local context partitions
+
+Draft and Installation presentation is filtered by the exact selected context while the underlying Installation owner and device tuple remain USER-owned.
+
+[[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] supplies the trusted context to draft, discovery, publication, and install-source operations. Version cache, Profile binding, Hermes adapter, and RuntimeBinding components remain keyed only by USER, device, and Runtime version.
+
+### Context-only refresh
+
+Changing the selected product space invalidates publication handles and refreshes Agent control state without selecting, reading, creating, or mutating a Profile or RuntimeBinding.
+
+The startup composition subscribes the Agent manager only to [[src/main/agentera-workspace/manager.ts#AgenteraWorkspaceManager#subscribeSelectedAgentContext]] and calls its context refresh hook. Runtime lifecycle remains outside that bridge.
 
 ## Owner identity
 
@@ -30,7 +58,7 @@ Draft editing does not mutate a running Profile. Importing selected Persona or S
 
 One Electron userData root may outlive several product logins, so every local Agent record is scoped again inside the main process.
 
-[[src/main/agentera-agent-control/db.ts#AGENTERA_CONTROL_PLANE_SCHEMA_VERSION]] schema v2 adds personal-space, user, and where required device ownership to drafts, verified version caches, installations, RuntimeBindings, and sanitized outbox records. Legacy records with no provable owner remain preserved but unavailable rather than being assigned to the next login.
+[[src/main/agentera-agent-control/db.ts#AGENTERA_CONTROL_PLANE_SCHEMA_VERSION]] schema v3 adds account ownership plus exact draft target and installation source variants. Verified versions use account-partitioned rows and paths, while migrated v2 USER rows retain their legacy cache paths.
 
 [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] resolves the current owner for each local operation and rebuilds Runtime components after an owner change. [[tests/agentera-agent-owner-isolation.test.ts]] proves that one long-lived manager cannot list, count, or open the previous account's draft; store-level tests cover versions, installations, bindings, and pending delivery.
 
@@ -70,7 +98,7 @@ AgentEra uses a separate product account, cloud API, main-process module, local 
 
 ## Offline and failure behavior
 
-A valid offline entitlement allows cached installed versions, local RuntimeBindings, local drafts, and native Hermes learning whenever the configured model endpoint remains reachable.
+A valid offline entitlement allows cached installed versions, local RuntimeBindings, personal drafts, read-only Workspace drafts, and native Hermes learning whenever the configured model endpoint remains reachable.
 
 Publication and discovery pause offline. Cloud, publication, installation, and audit failures never delete or roll back a draft, installed version, completed turn, Profile binding, or private adaptive state.
 

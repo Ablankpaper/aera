@@ -23,6 +23,7 @@ const VERSION_ID = "22222222-2222-4222-8222-222222222222";
 const INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
 const PROFILE_ID = "44444444-4444-4444-8444-444444444444";
 const POLICY_ID = "55555555-5555-4555-8555-555555555555";
+const WORKSPACE_ID = "77777777-7777-4777-8777-777777777777";
 const VERSION_DIGEST = "ab".repeat(32);
 const NOW = new Date("2026-07-19T16:00:00.000Z");
 const SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
@@ -133,6 +134,45 @@ describe("AgenteraAgentControlClient", () => {
     await expect(client.listDefinitions()).rejects.toMatchObject({
       code: "invalid_response",
     });
+  });
+
+  // @lat: [[agentera-agent-control-plane#Trusted Workspace Agent context#Nested Workspace routes]]
+  it("uses exact nested Workspace Agent paths and preserves stable authorization errors", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ definitions: [definition()] }))
+      .mockResolvedValueOnce(jsonResponse(definition()))
+      .mockResolvedValueOnce(jsonResponse({ versions: [] }))
+      .mockResolvedValueOnce(
+        jsonResponse({ error: { code: "workspace_forbidden" } }, 403),
+      );
+    const client = new AgenteraAgentControlClient({
+      origin: "http://127.0.0.1:8086",
+      getAccessToken: () => "agentera-product-access",
+      getInstallationIdentity: () => deviceIdentity(),
+      fetch: fetcher as typeof fetch,
+      now: () => NOW,
+    });
+
+    await expect(
+      client.listWorkspaceDefinitions(WORKSPACE_ID),
+    ).resolves.toEqual([definition()]);
+    await expect(
+      client.getWorkspaceDefinition(WORKSPACE_ID, DEFINITION_ID),
+    ).resolves.toEqual(definition());
+    await expect(
+      client.listWorkspaceVersions(WORKSPACE_ID, DEFINITION_ID),
+    ).resolves.toEqual([]);
+    await expect(
+      client.listWorkspaceDefinitions(WORKSPACE_ID),
+    ).rejects.toMatchObject({ status: 403, code: "workspace_forbidden" });
+
+    expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual([
+      `http://127.0.0.1:8086/api/v1/workspaces/${WORKSPACE_ID}/agent-definitions`,
+      `http://127.0.0.1:8086/api/v1/workspaces/${WORKSPACE_ID}/agent-definitions/${DEFINITION_ID}`,
+      `http://127.0.0.1:8086/api/v1/workspaces/${WORKSPACE_ID}/agent-definitions/${DEFINITION_ID}/versions`,
+      `http://127.0.0.1:8086/api/v1/workspaces/${WORKSPACE_ID}/agent-definitions`,
+    ]);
   });
 
   it("requires bounded idempotency keys on metadata mutations", async () => {

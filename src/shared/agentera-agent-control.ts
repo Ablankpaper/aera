@@ -121,7 +121,7 @@ export interface PublicationPreview {
   publicationHandle: string;
   draftId: string;
   revision: number;
-  targetScope: "USER";
+  targetScope: "USER" | "WORKSPACE";
   assetCounts: Record<AgentDraftAssetKind, number>;
   totalBytes: number;
 }

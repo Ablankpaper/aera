@@ -32,6 +32,7 @@ import {
 } from "./client";
 import {
   openAgenteraControlPlaneDatabase,
+  type AgentAssetContext,
   type AgenteraControlPlaneDatabase,
   type AgenteraSqliteDatabase,
 } from "./db";
@@ -51,6 +52,7 @@ const DEFINITION_ID = "22222222-2222-4222-8222-222222222222";
 const VERSION_ID = "33333333-3333-4333-8333-333333333333";
 const HANDLE_ID = "44444444-4444-4444-8444-444444444444";
 const BASE_VERSION_ID = "55555555-5555-4555-8555-555555555555";
+const WORKSPACE_ID = "66666666-6666-4666-8666-666666666666";
 const NOW = new Date("2026-07-19T18:00:00.000Z");
 const KEY_ID = "agent-publisher-test-v1";
 const SPKI_PREFIX_LENGTH = 12;
@@ -182,6 +184,12 @@ describe("explicit Agent publication", () => {
   let client: AgentPublicationClient;
   let publishInitial: Mock<AgentPublicationClient["publishInitial"]>;
   let publishNext: Mock<AgentPublicationClient["publishNext"]>;
+  let publishWorkspaceInitial: Mock<
+    AgentPublicationClient["publishWorkspaceInitial"]
+  >;
+  let publishWorkspaceNext: Mock<
+    AgentPublicationClient["publishWorkspaceNext"]
+  >;
   let cache: VerifiedAgentVersionCache;
   let cacheVersion: Mock<VerifiedAgentVersionCache["cacheVerifiedVersion"]>;
 
@@ -217,7 +225,19 @@ describe("explicit Agent publication", () => {
     publishNext = vi
       .fn<AgentPublicationClient["publishNext"]>()
       .mockResolvedValue(publication);
-    client = { origin: ORIGIN, publishInitial, publishNext };
+    publishWorkspaceInitial = vi
+      .fn<AgentPublicationClient["publishWorkspaceInitial"]>()
+      .mockResolvedValue(publication);
+    publishWorkspaceNext = vi
+      .fn<AgentPublicationClient["publishWorkspaceNext"]>()
+      .mockResolvedValue(publication);
+    client = {
+      origin: ORIGIN,
+      publishInitial,
+      publishNext,
+      publishWorkspaceInitial,
+      publishWorkspaceNext,
+    };
     cacheVersion = vi
       .fn<VerifiedAgentVersionCache["cacheVerifiedVersion"]>()
       .mockReturnValue(publication.version);
@@ -229,12 +249,15 @@ describe("explicit Agent publication", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  function publisher(): AgentPublisher {
+  function publisher(
+    context: AgentAssetContext = { scope: "USER" },
+  ): AgentPublisher {
     return new AgentPublisher({
       drafts,
       client,
       trust,
       cache,
+      context,
       runtimeVersion: "v0.18.2-agentera.1",
       randomUUID: () => HANDLE_ID,
     });
@@ -313,6 +336,76 @@ describe("explicit Agent publication", () => {
     expect(publishNext.mock.calls[0][1]).toMatchObject({
       base_version_id: BASE_VERSION_ID,
     });
+  });
+
+  it.each(["owner", "admin"] as const)(
+    "routes %s publication through the exact Workspace target",
+    async (role) => {
+      drafts.deleteDraft(DRAFT_ID);
+      const context = {
+        scope: "WORKSPACE",
+        workspaceId: WORKSPACE_ID,
+        role,
+      } as const;
+      drafts = new AgentDraftStore({
+        database,
+        owner: {
+          tenantId: "77777777-7777-4777-8777-777777777777",
+          ownerId: "88888888-8888-4888-8888-888888888888",
+        },
+        context,
+        now: () => NOW,
+        randomUUID: () => DRAFT_ID,
+      });
+      drafts.createDraft({
+        sourceAgentDefinitionId: null,
+        baseAgentVersionId: null,
+        displayName: "Research Agent",
+        icon: null,
+        manifest: manifest(),
+        assets: assets(),
+      });
+
+      const service = publisher(context);
+      const preview = service.preparePublication(DRAFT_ID);
+      expect(preview.targetScope).toBe("WORKSPACE");
+      await service.confirmPublication(preview.publicationHandle);
+      expect(publishWorkspaceInitial).toHaveBeenCalledWith(
+        WORKSPACE_ID,
+        expect.objectContaining({ display_name: "Research Agent" }),
+        expect.any(String),
+      );
+      expect(publishInitial).not.toHaveBeenCalled();
+
+      const next = publisher(context);
+      await next.confirmPublication(
+        next.preparePublication(DRAFT_ID).publicationHandle,
+      );
+      expect(publishWorkspaceNext).toHaveBeenCalledWith(
+        WORKSPACE_ID,
+        DEFINITION_ID,
+        expect.objectContaining({ base_version_id: VERSION_ID }),
+        expect.any(String),
+      );
+      expect(publishNext).not.toHaveBeenCalled();
+    },
+  );
+
+  // @lat: [[agentera-agent-control-plane#Trusted Workspace Agent context#Role-gated publication]]
+  it("rejects Member publication locally before any upload", () => {
+    const member = publisher({
+      scope: "WORKSPACE",
+      workspaceId: WORKSPACE_ID,
+      role: "member",
+    });
+
+    expect(() => member.preparePublication(DRAFT_ID)).toThrow(
+      expect.objectContaining({ code: "workspace_forbidden" }),
+    );
+    expect(publishInitial).not.toHaveBeenCalled();
+    expect(publishNext).not.toHaveBeenCalled();
+    expect(publishWorkspaceInitial).not.toHaveBeenCalled();
+    expect(publishWorkspaceNext).not.toHaveBeenCalled();
   });
 
   it("reuses the persisted idempotency key after restart and preserves draft assets on failure", async () => {

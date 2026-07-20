@@ -11,6 +11,7 @@ import {
   parseAgentControlId,
   parseClaimVersionInput,
   parseCreateDraftInput,
+  parseInstallVersionInput,
   parseUpdateDraftInput,
 } from "../src/main/agentera-agent-control/ipc-contract";
 import { AgenteraAgentControlManager } from "../src/main/agentera-agent-control/manager";
@@ -142,6 +143,14 @@ describe("Agent control IPC contract", () => {
         confirmation: "claim-existing-profile",
       }),
     ).toThrow();
+    expect(() =>
+      parseInstallVersionInput({
+        definitionId: UUID,
+        versionId: VERSION_ID,
+        profileName: "research-profile",
+        workspaceId: "33333333-3333-4333-8333-333333333333",
+      }),
+    ).toThrow();
   });
 
   it("maps failures to stable codes without returning cloud bodies, paths, or private messages", async () => {
@@ -244,6 +253,7 @@ describe("Agent control IPC contract", () => {
     }
   });
 
+  // @lat: [[agentera-agent-control-plane#Trusted Workspace Agent context#Context-only refresh]]
   it("consumes publication confirmation handles before the cloud action and constructs one app-level manager", () => {
     const manager = readFileSync(
       join(__dirname, "../src/main/agentera-agent-control/manager.ts"),
@@ -263,6 +273,9 @@ describe("Agent control IPC contract", () => {
     );
     expect(start.match(/new AgenteraAgentControlManager\(/g)).toHaveLength(1);
     expect(start).toContain("agenteraAgentControl,");
+    expect(start).toContain("getSelectedAgentContext");
+    expect(start).toContain("subscribeSelectedAgentContext");
+    expect(start).toContain("notifyAgentContextChanged");
   });
 
   it("uses a removable event listener and suppresses delivery to destroyed renderers", () => {

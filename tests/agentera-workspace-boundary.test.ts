@@ -87,12 +87,23 @@ describe("AgentEra Workspace remains outside the Hermes adaptive core", () => {
 
     const startup = source("src/main/app/start.ts");
     const workspaceComposition = startup.slice(
-      startup.indexOf("let agenteraWorkspaceDatabase"),
-      startup.indexOf("const ownerSwitchCoordinator"),
+      startup.indexOf(
+        "agenteraWorkspaceDatabase = openAgenteraWorkspaceDatabase",
+      ),
+      startup.indexOf("const unsubscribeSelectedAgentContext"),
     );
     expect(workspaceComposition).toContain("new AgenteraWorkspaceManager");
     expect(workspaceComposition).not.toMatch(
       /(?:ProfileBinding|agenteraAgentControl|runtimeDistribution|stopActiveRuntimeContext|sendMessage)/,
+    );
+    const agentContextBridge = startup.slice(
+      startup.indexOf("const unsubscribeSelectedAgentContext"),
+      startup.indexOf("const ownerSwitchCoordinator"),
+    );
+    expect(agentContextBridge).toContain("subscribeSelectedAgentContext");
+    expect(agentContextBridge).toContain("notifyAgentContextChanged");
+    expect(agentContextBridge).not.toMatch(
+      /(?:ProfileBinding|runtimeDistribution|stopActiveRuntimeContext|sendMessage|RuntimeBinding)/,
     );
   });
 
@@ -108,25 +119,22 @@ describe("AgentEra Workspace remains outside the Hermes adaptive core", () => {
     expect(workspaceSources).not.toContain("/api/agents");
   });
 
-  it("leaves Agent control and RuntimeBinding V1 strictly USER-owned", () => {
+  it("allows Workspace asset targets while keeping RuntimeBinding strictly USER-owned", () => {
     const sharedControl = source("src/shared/agentera-agent-control.ts");
     const publisher = source("src/main/agentera-agent-control/publisher.ts");
     const bindings = source(
       "src/main/agentera-agent-control/runtime-binding-store.ts",
     );
     const adapter = source("src/main/agentera-agent-control/hermes-adapter.ts");
-    const controlPlane = [sharedControl, publisher, bindings, adapter].join(
-      "\n",
-    );
+    const runtimePlane = [bindings, adapter].join("\n");
 
-    expect(sharedControl).toContain('targetScope: "USER"');
-    expect(publisher).toContain('targetScope: "USER"');
+    expect(sharedControl).toContain('targetScope: "USER" | "WORKSPACE"');
+    expect(publisher).toContain("publishWorkspaceInitial");
+    expect(publisher).toContain("publishWorkspaceNext");
     expect(bindings).toContain('ownerScope: "USER"');
     expect(bindings).toContain('input.ownerScope !== "USER"');
     expect(adapter).toContain('binding.ownerScope !== "USER"');
-    expect(controlPlane).not.toMatch(
-      /(?:ownerScope|targetScope)\s*:\s*["']WORKSPACE["']/,
-    );
+    expect(runtimePlane).not.toMatch(/ownerScope\s*:\s*["']WORKSPACE["']/);
   });
 
   it("keeps the pre-existing RuntimeBinding compatibility test unchanged", () => {

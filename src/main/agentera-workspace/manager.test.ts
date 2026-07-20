@@ -271,6 +271,37 @@ describe("AgenteraWorkspaceManager", () => {
     });
   });
 
+  // @lat: [[agentera-workspaces#Desktop context#Trusted Agent context projection]]
+  it("exposes only the trusted selected Agent context and notifies context subscribers", async () => {
+    const client = cloudClient();
+    vi.mocked(client.listWorkspaces).mockResolvedValueOnce([
+      summary(WORKSPACE_A, { role: "admin" }),
+    ]);
+    const manager = managerFor({ client, getAuthState: () => authState() });
+
+    expect(manager.getSelectedAgentContext()).toEqual({ scope: "USER" });
+    const listener = vi.fn();
+    const unsubscribe = manager.subscribeSelectedAgentContext(listener);
+    await manager.refresh();
+    listener.mockClear();
+
+    await manager.select({ workspaceId: WORKSPACE_A });
+    expect(manager.getSelectedAgentContext()).toEqual({
+      scope: "WORKSPACE",
+      workspaceId: WORKSPACE_A,
+      role: "admin",
+    });
+    expect(listener).toHaveBeenCalledOnce();
+
+    await manager.select({ workspaceId: null });
+    expect(manager.getSelectedAgentContext()).toEqual({ scope: "USER" });
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    unsubscribe();
+    await manager.select({ workspaceId: WORKSPACE_A });
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
   it("serves stale cached summaries, members, and invitations while offline", async () => {
     let auth: AgenteraAuthPublicState = authState();
     const client = cloudClient();

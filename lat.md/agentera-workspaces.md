@@ -4,9 +4,9 @@ Workspace Foundation V1 adds collaborative identity and authorization around Age
 
 ## Release boundary
 
-The first workspace slice delivers workspace lifecycle, fixed ownership, membership roles, one-time invitations, audit, desktop context switching, and offline read-only metadata.
+The Workspace Foundation slice delivers workspace lifecycle, fixed ownership, membership roles, one-time invitations, audit, desktop context switching, and offline read-only metadata.
 
-It does not enable `owner_scope=WORKSPACE`, workspace Agent publication, shared Knowledge or Skills, organizations, official Agents, or ExperienceCandidate promotion. Those remain later slices built on this authorization boundary.
+Foundation does not itself own Agent assets. The approved Workspace Agent extension builds `owner_scope=WORKSPACE`, immutable publication, discovery, and installation on this authorization boundary; organizations, official Agents, and ExperienceCandidate promotion remain later slices.
 
 ## Ownership and roles
 
@@ -38,6 +38,12 @@ The switcher's management dialog renders lifecycle, membership, role, and invita
 
 A fresh invitation link is held only in the creation dialog state and is cleared on close, account change, workspace change, or an obsolete in-flight response. Invitation lists never contain the raw secret. The App-root invitation gate keeps a protocol token only in a React ref until authentication and explicit user confirmation, then accepts, dismisses the volatile inbox entry, and selects the joined workspace without touching Hermes execution state.
 
+### Trusted Agent context projection
+
+The Workspace manager exposes the selected space as a minimal USER or WORKSPACE Agent context and emits a signal when selection, membership role, or lifecycle refresh may change it.
+
+The projection contains only scope, Workspace ID, and role. It carries no Profile, RuntimeBinding, session, file, Memory, credential, or actor-supplied authorization data, and the Agent manager remains responsible for all Agent operations.
+
 ## Offline behavior
 
 A valid product offline entitlement exposes last-known active workspace metadata as stale and read-only while every workspace mutation pauses.
@@ -56,7 +62,7 @@ The app acquires Electron's single-instance lock before Runtime bootstrap. A sec
 
 Workspace is an independent cloud and desktop domain rather than an extension of personal-space registration or the USER Agent protocol.
 
-The existing [[agentera-agent-control-plane|AgentEra Agent control plane V1]] remains `owner_scope=USER`. Workspace code cannot read or store Memory, USER, conversations, files, credentials, Profile paths, Curator state, or unpublished local Skills. The approved detailed design is `docs/superpowers/specs/2026-07-20-agentera-workspace-foundation-v1-design.md`.
+The [[agentera-agent-control-plane|AgentEra Agent control plane V1]] may consume the selected Workspace asset context, but Workspace code still cannot read or store Memory, USER, conversations, files, credentials, Profile paths, Curator state, RuntimeBindings, or unpublished local Skills. The approved Foundation design is `docs/superpowers/specs/2026-07-20-agentera-workspace-foundation-v1-design.md`.
 
 ## Release gate
 
@@ -76,6 +82,6 @@ Run it with `npm run test:e2e:workspace`.
 
 The compatibility gate prevents workspace navigation and collaboration metadata from entering or mutating the Hermes execution and adaptive-learning domain.
 
-`tests/agentera-workspace-boundary.test.ts` statically rejects Workspace-domain imports into Hermes execution, Profile mutation, sessions, Skills, Curator, Runtime distribution or binding, the Agent control plane, and legacy `agent-sync.ts`. It also proves the Workspace cache/public state allowlists, the switcher's single-purpose selection call, and the unchanged USER-only Agent/RuntimeBinding contract.
+`tests/agentera-workspace-boundary.test.ts` rejects Workspace-domain imports into Hermes execution, Profile mutation, sessions, Skills, Curator, Runtime distribution or binding, and legacy `agent-sync.ts`. It permits only the startup-level selected-context signal into Agent control and proves RuntimeBinding ownership remains USER-only.
 
 The deterministic E2E additionally hashes a populated Hermes Profile tree and snapshots the selected Profile marker plus active USER RuntimeBinding before and after every workspace operation. All bytes and identities must remain unchanged. Existing Hermes compatibility suites remain part of the focused and complete desktop gates.

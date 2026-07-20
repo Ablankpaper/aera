@@ -71,7 +71,17 @@ const STABLE_ERROR_CODES: ReadonlySet<StableErrorCode> = new Set([
   "version_revoked",
   "activation_conflict",
   "installation_archived",
+  "invitation_limit_reached",
+  "invitation_unavailable",
+  "member_limit_reached",
+  "membership_conflict",
   "service_unavailable",
+  "workspace_archived",
+  "workspace_conflict",
+  "workspace_forbidden",
+  "workspace_limit_reached",
+  "workspace_not_found",
+  "workspace_owner_unavailable",
 ]);
 
 export interface AgenteraAgentControlClientOptions {
@@ -659,6 +669,21 @@ export class AgenteraAgentControlClient {
     return [...value.definitions];
   }
 
+  async listWorkspaceDefinitions(
+    workspaceId: string,
+  ): Promise<AgentDefinition[]> {
+    requireUUID(workspaceId);
+    const value = await this.requestJSON(
+      `/api/v1/workspaces/${workspaceId}/agent-definitions`,
+      { expectedStatus: 200 },
+      (candidate): candidate is { definitions: readonly AgentDefinition[] } =>
+        hasExactFields(candidate, ["definitions"]) &&
+        Array.isArray(candidate.definitions) &&
+        candidate.definitions.every(isDefinition),
+    );
+    return [...value.definitions];
+  }
+
   getDefinition(definitionId: string): Promise<AgentDefinition> {
     requireUUID(definitionId);
     return this.requestJSON(
@@ -668,10 +693,40 @@ export class AgenteraAgentControlClient {
     );
   }
 
+  getWorkspaceDefinition(
+    workspaceId: string,
+    definitionId: string,
+  ): Promise<AgentDefinition> {
+    requireUUID(workspaceId);
+    requireUUID(definitionId);
+    return this.requestJSON(
+      `/api/v1/workspaces/${workspaceId}/agent-definitions/${definitionId}`,
+      { expectedStatus: 200 },
+      isDefinition,
+    );
+  }
+
   async listVersions(definitionId: string): Promise<AgentVersion[]> {
     requireUUID(definitionId);
     const value = await this.requestJSON(
       `/api/v1/agent-definitions/${definitionId}/versions`,
+      { expectedStatus: 200 },
+      (candidate): candidate is { versions: readonly AgentVersion[] } =>
+        hasExactFields(candidate, ["versions"]) &&
+        Array.isArray(candidate.versions) &&
+        candidate.versions.every(isVersion),
+    );
+    return [...value.versions];
+  }
+
+  async listWorkspaceVersions(
+    workspaceId: string,
+    definitionId: string,
+  ): Promise<AgentVersion[]> {
+    requireUUID(workspaceId);
+    requireUUID(definitionId);
+    const value = await this.requestJSON(
+      `/api/v1/workspaces/${workspaceId}/agent-definitions/${definitionId}/versions`,
       { expectedStatus: 200 },
       (candidate): candidate is { versions: readonly AgentVersion[] } =>
         hasExactFields(candidate, ["versions"]) &&
@@ -711,6 +766,20 @@ export class AgenteraAgentControlClient {
     );
   }
 
+  publishWorkspaceInitial(
+    workspaceId: string,
+    body: PublishInitialAgentRequest,
+    idempotencyKey: string,
+  ): Promise<AgentPublication> {
+    requireUUID(workspaceId);
+    requireIdempotencyKey(idempotencyKey);
+    return this.requestJSON(
+      `/api/v1/workspaces/${workspaceId}/agent-definitions`,
+      { method: "POST", body, idempotencyKey, expectedStatus: 201 },
+      isPublication,
+    );
+  }
+
   publishNext(
     definitionId: string,
     body: PublishNextAgentVersionRequest,
@@ -720,6 +789,22 @@ export class AgenteraAgentControlClient {
     requireIdempotencyKey(idempotencyKey);
     return this.requestJSON(
       `/api/v1/agent-definitions/${definitionId}/versions`,
+      { method: "POST", body, idempotencyKey, expectedStatus: 201 },
+      isPublication,
+    );
+  }
+
+  publishWorkspaceNext(
+    workspaceId: string,
+    definitionId: string,
+    body: PublishNextAgentVersionRequest,
+    idempotencyKey: string,
+  ): Promise<AgentPublication> {
+    requireUUID(workspaceId);
+    requireUUID(definitionId);
+    requireIdempotencyKey(idempotencyKey);
+    return this.requestJSON(
+      `/api/v1/workspaces/${workspaceId}/agent-definitions/${definitionId}/versions`,
       { method: "POST", body, idempotencyKey, expectedStatus: 201 },
       isPublication,
     );

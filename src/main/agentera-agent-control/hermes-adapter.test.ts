@@ -168,10 +168,11 @@ describe("AgentEra adapter around the real Hermes transport", () => {
       .prepare(
         `INSERT INTO local_agent_installations (
            agent_installation_id, tenant_id, owner_id, device_installation_id,
+           source_scope, source_workspace_id,
            definition_id, selected_version_id,
            runtime_profile_id, policy_snapshot_id, status, retry_code,
            created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, 'USER', NULL, ?, ?, ?, ?, 'active', NULL, ?, ?)`,
       )
       .run(
         INSTALLATION_ID,

@@ -6,6 +6,7 @@ import type {
   PublicationPreview,
   PublishedRevision,
 } from "../../shared/agentera-agent-control";
+import type { AgentAssetContext } from "./db";
 import type {
   AgentPublication,
   AgentVersion,
@@ -55,6 +56,17 @@ export interface AgentPublicationClient {
     body: PublishNextAgentVersionRequest,
     idempotencyKey: string,
   ): Promise<AgentPublication>;
+  publishWorkspaceInitial(
+    workspaceId: string,
+    body: PublishInitialAgentRequest,
+    idempotencyKey: string,
+  ): Promise<AgentPublication>;
+  publishWorkspaceNext(
+    workspaceId: string,
+    definitionId: string,
+    body: PublishNextAgentVersionRequest,
+    idempotencyKey: string,
+  ): Promise<AgentPublication>;
 }
 
 export interface AgentPublicationTrust {
@@ -73,6 +85,7 @@ export interface AgentPublisherOptions {
   client: AgentPublicationClient;
   trust: AgentPublicationTrust;
   cache: VerifiedAgentVersionCache;
+  context?: AgentAssetContext;
   runtimeVersion: string;
   randomUUID?: () => string;
 }
@@ -109,6 +122,31 @@ function requireUuid(value: unknown): string {
     throw new AgentPublisherError("invalid_publication_state");
   }
   return value.toLowerCase();
+}
+
+type NormalizedPublicationContext =
+  | { scope: "USER"; workspaceId: null; canPublish: true }
+  | { scope: "WORKSPACE"; workspaceId: string; canPublish: boolean };
+
+function normalizeContext(
+  context: AgentAssetContext | undefined,
+): NormalizedPublicationContext {
+  if (context === undefined || context.scope === "USER") {
+    return { scope: "USER", workspaceId: null, canPublish: true };
+  }
+  if (
+    context.scope !== "WORKSPACE" ||
+    (context.role !== "owner" &&
+      context.role !== "admin" &&
+      context.role !== "member")
+  ) {
+    throw new AgentPublisherError("invalid_publication_state");
+  }
+  return {
+    scope: "WORKSPACE",
+    workspaceId: requireUuid(context.workspaceId),
+    canPublish: context.role === "owner" || context.role === "admin",
+  };
 }
 
 function decodeUtf8(value: Buffer): string {
@@ -159,6 +197,7 @@ export class AgentPublisher {
   private readonly cache: VerifiedAgentVersionCache;
   private readonly runtimeVersion: string;
   private readonly randomUUID: () => string;
+  private readonly context: NormalizedPublicationContext;
   private readonly handles = new Map<string, PreparedPublication>();
 
   constructor(options: AgentPublisherOptions) {
@@ -173,11 +212,15 @@ export class AgentPublisher {
     this.client = options.client;
     this.trust = options.trust;
     this.cache = options.cache;
+    this.context = normalizeContext(options.context);
     this.runtimeVersion = options.runtimeVersion;
     this.randomUUID = options.randomUUID ?? nodeRandomUUID;
   }
 
   preparePublication(draftId: string): PublicationPreview {
+    if (!this.context.canPublish) {
+      throw new AgentPublisherError("workspace_forbidden");
+    }
     const draft = this.drafts.getDraft(requireUuid(draftId));
     if (
       (draft.sourceAgentDefinitionId === null) !==
@@ -205,7 +248,7 @@ export class AgentPublisher {
       publicationHandle: handle,
       draftId: draft.id,
       revision: draft.revision,
-      targetScope: "USER",
+      targetScope: this.context.scope,
       assetCounts,
       totalBytes: canonical.assets.reduce(
         (total, asset) => total + asset.sizeBytes,
@@ -323,36 +366,48 @@ export class AgentPublisher {
       prepared.baseAgentVersionId === null
     ) {
       const icon = prepared.icon;
-      return this.client.publishInitial(
-        {
-          display_name: prepared.displayName,
-          manifest,
-          bundle,
-          ...(icon === null
-            ? {}
-            : {
-                icon_media_type: icon.mediaType,
-                icon_data: Buffer.from(icon.dataBase64, "base64").toString(
-                  "base64url",
-                ),
-              }),
-        },
-        attempt.idempotencyKey,
-      );
+      const body: PublishInitialAgentRequest = {
+        display_name: prepared.displayName,
+        manifest,
+        bundle,
+        ...(icon === null
+          ? {}
+          : {
+              icon_media_type: icon.mediaType,
+              icon_data: Buffer.from(icon.dataBase64, "base64").toString(
+                "base64url",
+              ),
+            }),
+      };
+      return this.context.scope === "USER"
+        ? this.client.publishInitial(body, attempt.idempotencyKey)
+        : this.client.publishWorkspaceInitial(
+            this.context.workspaceId,
+            body,
+            attempt.idempotencyKey,
+          );
     }
     if (
       prepared.sourceAgentDefinitionId !== null &&
       prepared.baseAgentVersionId !== null
     ) {
-      return this.client.publishNext(
-        prepared.sourceAgentDefinitionId,
-        {
-          base_version_id: prepared.baseAgentVersionId,
-          manifest,
-          bundle,
-        },
-        attempt.idempotencyKey,
-      );
+      const body: PublishNextAgentVersionRequest = {
+        base_version_id: prepared.baseAgentVersionId,
+        manifest,
+        bundle,
+      };
+      return this.context.scope === "USER"
+        ? this.client.publishNext(
+            prepared.sourceAgentDefinitionId,
+            body,
+            attempt.idempotencyKey,
+          )
+        : this.client.publishWorkspaceNext(
+            this.context.workspaceId,
+            prepared.sourceAgentDefinitionId,
+            body,
+            attempt.idempotencyKey,
+          );
     }
     throw new AgentPublisherError("invalid_publication_state");
   }
