@@ -14,7 +14,10 @@ import {
 } from "playwright/test";
 
 const desktopRoot = resolve(process.cwd());
-const cloudRoot = resolve(desktopRoot, "../aera-cloud");
+const cloudRoot = resolve(
+  process.env.AGENTERA_E2E_CLOUD_ROOT?.trim() ||
+    resolve(desktopRoot, "../aera-cloud"),
+);
 export const productAuthCloudOrigin = "http://127.0.0.1:8086";
 const password = "AgentEra Runtime E2E battery staple 2026";
 
