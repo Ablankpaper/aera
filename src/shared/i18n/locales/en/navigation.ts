@@ -1,3 +1,5 @@
+import { workspaceEn } from "../workspace";
+
 export default {
   chat: "Chat",
   newChat: "New Chat",
@@ -42,4 +44,5 @@ export default {
     deleteConfirmAction: "Delete",
     deleting: "Deleting…",
   },
+  workspace: workspaceEn,
 } as const;

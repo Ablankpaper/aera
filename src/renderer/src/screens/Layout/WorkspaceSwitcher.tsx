@@ -3,10 +3,10 @@ import type { AgenteraAuthPublicState } from "../../../../shared/agentera-auth";
 import type {
   AgenteraWorkspaceErrorCode,
   WorkspacePublicState,
-  WorkspaceRole,
   WorkspaceSummary,
 } from "../../../../shared/agentera-workspace";
 import { Alert, ChevronDown, Settings, User, Users } from "../../assets/icons";
+import { useI18n } from "../../components/useI18n";
 
 type AuthorizedState = Extract<
   AgenteraAuthPublicState,
@@ -21,12 +21,6 @@ interface WorkspaceSwitcherProps {
 
 type FocusTarget = "selected" | "first" | "last";
 type LoadStatus = "loading" | "ready" | "error";
-
-const ROLE_LABEL: Readonly<Record<WorkspaceRole, string>> = {
-  owner: "Owner",
-  admin: "Admin",
-  member: "Member",
-};
 
 function compareWorkspaces(
   left: WorkspaceSummary,
@@ -54,6 +48,7 @@ export default function WorkspaceSwitcher({
   compact = false,
   onManage,
 }: WorkspaceSwitcherProps): React.JSX.Element {
+  const { t } = useI18n();
   const [workspaceState, setWorkspaceState] =
     useState<WorkspacePublicState | null>(null);
   const [loadStatus, setLoadStatus] = useState<LoadStatus>("loading");
@@ -128,7 +123,11 @@ export default function WorkspaceSwitcher({
   const isPersonal = workspaceState?.selected.kind !== "workspace";
   const currentName =
     activeWorkspace?.displayName ??
-    (isPersonal ? "Personal space" : "Workspace");
+    t(
+      isPersonal
+        ? "navigation.workspace.personal"
+        : "navigation.workspace.workspaceFallback",
+    );
   const currentRole =
     activeWorkspace?.role ??
     (workspaceState?.selected.kind === "workspace"
@@ -248,18 +247,19 @@ export default function WorkspaceSwitcher({
   };
 
   if (loadStatus === "loading") {
+    const label = t("navigation.workspace.loading");
     return (
       <div className="workspace-switcher workspace-switcher-loading">
         <button
           type="button"
           className={`workspace-switcher-trigger ${compact ? "compact" : ""}`}
-          aria-label="Loading spaces"
-          title="Loading spaces"
+          aria-label={label}
+          title={label}
           disabled
         >
           <Users size={compact ? 18 : 16} aria-hidden="true" />
           {!compact && (
-            <span className="workspace-switcher-name">Loading spaces…</span>
+            <span className="workspace-switcher-name">{label}…</span>
           )}
         </button>
       </div>
@@ -267,32 +267,33 @@ export default function WorkspaceSwitcher({
   }
 
   if (loadStatus === "error" || !workspaceState) {
+    const label = t("navigation.workspace.unavailable");
     return (
       <div className="workspace-switcher workspace-switcher-error">
         <button
           type="button"
           className={`workspace-switcher-trigger ${compact ? "compact" : ""}`}
-          aria-label="Spaces unavailable"
-          title="Spaces unavailable"
+          aria-label={label}
+          title={label}
         >
           <Alert size={compact ? 18 : 16} aria-hidden="true" />
-          {!compact && (
-            <span className="workspace-switcher-name">Spaces unavailable</span>
-          )}
+          {!compact && <span className="workspace-switcher-name">{label}</span>}
         </button>
       </div>
     );
   }
 
   const statusLabels = [
-    currentRole ? ROLE_LABEL[currentRole] : null,
-    offline ? "Offline" : null,
-    stale ? "Stale" : null,
-    ownerUnavailable ? "Owner unavailable" : null,
+    currentRole ? t(`navigation.workspace.roles.${currentRole}`) : null,
+    offline ? t("navigation.workspace.offline") : null,
+    stale ? t("navigation.workspace.stale") : null,
+    ownerUnavailable ? t("navigation.workspace.ownerUnavailable") : null,
   ].filter((value): value is string => value !== null);
-  const triggerLabel = ["Space switcher", currentName, ...statusLabels].join(
-    ", ",
-  );
+  const triggerLabel = [
+    t("navigation.workspace.switcherLabel"),
+    currentName,
+    ...statusLabels,
+  ].join(", ");
 
   return (
     <div
@@ -303,11 +304,13 @@ export default function WorkspaceSwitcher({
         <div
           className="workspace-switcher-menu"
           role="menu"
-          aria-label="Spaces"
+          aria-label={t("navigation.workspace.spaces")}
           ref={menuRef}
           onKeyDown={handleMenuKeyDown}
         >
-          <div className="workspace-switcher-menu-heading">Run in</div>
+          <div className="workspace-switcher-menu-heading">
+            {t("navigation.workspace.runIn")}
+          </div>
           <button
             type="button"
             className="workspace-switcher-choice"
@@ -318,9 +321,11 @@ export default function WorkspaceSwitcher({
           >
             <User size={16} aria-hidden="true" />
             <span className="workspace-switcher-choice-name">
-              Personal space
+              {t("navigation.workspace.personal")}
             </span>
-            <span className="workspace-switcher-badge">Personal</span>
+            <span className="workspace-switcher-badge">
+              {t("navigation.workspace.personalBadge")}
+            </span>
           </button>
           {activeWorkspaces.map((workspace) => {
             const selected =
@@ -341,13 +346,13 @@ export default function WorkspaceSwitcher({
                   {workspace.displayName}
                 </span>
                 <span className="workspace-switcher-badge">
-                  {ROLE_LABEL[workspace.role]}
+                  {t(`navigation.workspace.roles.${workspace.role}`)}
                 </span>
                 {workspace.mutationState === "owner_unavailable" && (
                   <Alert
                     className="workspace-switcher-choice-warning"
                     size={14}
-                    aria-label="Owner unavailable"
+                    aria-label={t("navigation.workspace.ownerUnavailable")}
                   />
                 )}
               </button>
@@ -358,19 +363,27 @@ export default function WorkspaceSwitcher({
             type="button"
             className="workspace-switcher-manage"
             role="menuitem"
-            aria-label="Manage workspaces"
+            aria-label={t("navigation.workspace.manage")}
             onClick={() => {
               closeMenu(true);
               onManage?.();
             }}
           >
             <Settings size={15} aria-hidden="true" />
-            <span>Manage workspaces</span>
-            {archivedCount > 0 && <small>{archivedCount} archived</small>}
+            <span>{t("navigation.workspace.manage")}</span>
+            {archivedCount > 0 && (
+              <small>
+                {t("navigation.workspace.archivedCount", {
+                  count: archivedCount,
+                })}
+              </small>
+            )}
           </button>
           {selectionError && (
             <div className="workspace-switcher-selection-error" role="alert">
-              Could not switch space ({selectionError.replaceAll("_", " ")}).
+              {t("navigation.workspace.couldNotSwitch", {
+                error: t(`navigation.workspace.errors.${selectionError}`),
+              })}
             </div>
           )}
         </div>
@@ -404,16 +417,22 @@ export default function WorkspaceSwitcher({
             <span className="workspace-switcher-name">{currentName}</span>
             {currentRole && (
               <span className="workspace-switcher-badge">
-                {ROLE_LABEL[currentRole]}
+                {t(`navigation.workspace.roles.${currentRole}`)}
               </span>
             )}
             {offline && (
-              <span className="workspace-switcher-status">Offline</span>
+              <span className="workspace-switcher-status">
+                {t("navigation.workspace.offline")}
+              </span>
             )}
-            {stale && <span className="workspace-switcher-status">Stale</span>}
+            {stale && (
+              <span className="workspace-switcher-status">
+                {t("navigation.workspace.stale")}
+              </span>
+            )}
             {ownerUnavailable && (
               <span className="workspace-switcher-warning">
-                Owner unavailable
+                {t("navigation.workspace.ownerUnavailable")}
               </span>
             )}
             <ChevronDown

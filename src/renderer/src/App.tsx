@@ -8,6 +8,7 @@ import type {
 } from "../../shared/agentera-runtime-access";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { FontProvider } from "./components/FontProvider";
+import WorkspaceInvitationGate from "./components/WorkspaceInvitationGate";
 import { ProfileModalProvider } from "./components/profile/ProfileModalProvider";
 import { SettingsModalProvider } from "./components/settings/SettingsModalProvider";
 import { ThemeProvider } from "./components/ThemeProvider";
@@ -441,6 +442,7 @@ function App(): React.JSX.Element {
                 {isMac && <div className="drag-region" />}
                 <div className="app-content">{renderScreen()}</div>
               </div>
+              <WorkspaceInvitationGate authState={authState} />
               <Toaster
                 position="bottom-right"
                 reverseOrder={false}

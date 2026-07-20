@@ -1,3 +1,5 @@
+import { workspaceEn } from "../workspace";
+
 export default {
   chat: "Chat",
   newChat: "Novo chat",
@@ -21,4 +23,5 @@ export default {
   settings: "Definições",
   collapseSidebar: "Recolher barra lateral",
   expandSidebar: "Expandir barra lateral",
+  workspace: workspaceEn,
 } as const;

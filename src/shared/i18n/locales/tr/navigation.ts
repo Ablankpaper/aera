@@ -1,3 +1,5 @@
+import { workspaceEn } from "../workspace";
+
 export default {
   chat: "Sohbet",
   newChat: "Yeni Sohbet",
@@ -21,4 +23,5 @@ export default {
   settings: "Ayarlar",
   collapseSidebar: "Kenar çubuğunu daralt",
   expandSidebar: "Kenar çubuğunu genişlet",
+  workspace: workspaceEn,
 } as const;

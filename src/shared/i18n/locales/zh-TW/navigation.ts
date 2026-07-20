@@ -1,3 +1,5 @@
+import { workspaceZhTW } from "../workspace";
+
 export default {
   chat: "聊天",
   newChat: "新增聊天",
@@ -21,4 +23,5 @@ export default {
   settings: "設定",
   collapseSidebar: "收合側邊欄",
   expandSidebar: "展開側邊欄",
+  workspace: workspaceZhTW,
 } as const;

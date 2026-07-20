@@ -34,6 +34,10 @@ The trusted main process now separates this context into three layers:
 
 The renderer can reach the manager only through the exact `window.agenteraWorkspace` preload namespace. Every request passes the existing product-access guard and returns a stable success or sanitized error envelope. Renderer requests never supply actor identity, authorization headers, cloud URLs, database paths, or idempotency keys.
 
+The switcher's management dialog renders lifecycle, membership, role, and invitation controls from the current actor role and server mutation state while treating the cloud as the final authorization authority. Offline, archived, and `owner_unavailable` states disable their corresponding mutations; no renderer-side action is queued for later.
+
+A fresh invitation link is held only in the creation dialog state and is cleared on close, account change, workspace change, or an obsolete in-flight response. Invitation lists never contain the raw secret. The App-root invitation gate keeps a protocol token only in a React ref until authentication and explicit user confirmation, then accepts, dismisses the volatile inbox entry, and selects the joined workspace without touching Hermes execution state.
+
 ## Offline behavior
 
 A valid product offline entitlement exposes last-known active workspace metadata as stale and read-only while every workspace mutation pauses.

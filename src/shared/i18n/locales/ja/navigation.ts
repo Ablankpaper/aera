@@ -1,3 +1,5 @@
+import { workspaceEn } from "../workspace";
+
 export default {
   chat: "チャット",
   newChat: "新しいチャット",
@@ -21,4 +23,5 @@ export default {
   settings: "設定",
   collapseSidebar: "サイドバーを折りたたむ",
   expandSidebar: "サイドバーを展開",
+  workspace: workspaceEn,
 } as const;

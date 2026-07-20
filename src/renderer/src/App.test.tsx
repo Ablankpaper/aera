@@ -35,6 +35,11 @@ vi.mock("./utils/analytics", () => ({ captureScreenView: vi.fn() }));
 vi.mock("./components/common/HermesLogo", () => ({
   default: () => <span aria-label="AgentEra logo" />,
 }));
+vi.mock("./components/WorkspaceInvitationGate", () => ({
+  default: ({ authState }: { authState: AgenteraAuthPublicState }) => (
+    <div data-testid="workspace-invitation-gate">{authState.status}</div>
+  ),
+}));
 vi.mock("./screens/SplashScreen/SplashScreen", () => ({
   default: ({ onSwitchToLocal }: { onSwitchToLocal?: () => void }) => (
     <div data-testid="screen-splash">
@@ -280,6 +285,9 @@ describe("AgentEra startup gate", () => {
     await finishSplash();
 
     expect(screen.getByTestId("screen-main")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-invitation-gate")).toHaveTextContent(
+      "authenticated",
+    );
     expect(runtime.inspectActiveProfile).toHaveBeenCalledOnce();
   });
 

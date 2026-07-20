@@ -14,6 +14,40 @@ import type {
 } from "../../../../shared/agentera-workspace";
 import WorkspaceSwitcher from "./WorkspaceSwitcher";
 
+vi.mock("../../components/useI18n", () => ({
+  useI18n: () => ({
+    locale: "en",
+    setLocale: vi.fn(),
+    t: (key: string, options?: Record<string, unknown>): string => {
+      const values: Record<string, string> = {
+        "navigation.workspace.switcherLabel": "Space switcher",
+        "navigation.workspace.spaces": "Spaces",
+        "navigation.workspace.loading": "Loading spaces",
+        "navigation.workspace.unavailable": "Spaces unavailable",
+        "navigation.workspace.personal": "Personal space",
+        "navigation.workspace.personalBadge": "Personal",
+        "navigation.workspace.workspaceFallback": "Workspace",
+        "navigation.workspace.offline": "Offline",
+        "navigation.workspace.stale": "Stale",
+        "navigation.workspace.ownerUnavailable": "Owner unavailable",
+        "navigation.workspace.runIn": "Run in",
+        "navigation.workspace.manage": "Manage workspaces",
+        "navigation.workspace.roles.owner": "Owner",
+        "navigation.workspace.roles.admin": "Admin",
+        "navigation.workspace.roles.member": "Member",
+        "navigation.workspace.errors.online_required": "online required",
+      };
+      if (key === "navigation.workspace.archivedCount") {
+        return `${String(options?.count)} archived`;
+      }
+      if (key === "navigation.workspace.couldNotSwitch") {
+        return `Could not switch space (${String(options?.error)}).`;
+      }
+      return values[key] ?? key;
+    },
+  }),
+}));
+
 const USER_ID = "10000000-0000-4000-8000-000000000001";
 const PERSONAL_SPACE_ID = "20000000-0000-4000-8000-000000000002";
 const ALPHA_A = "30000000-0000-4000-8000-000000000003";

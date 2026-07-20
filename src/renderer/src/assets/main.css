@@ -15812,3 +15812,405 @@ body {
   background: color-mix(in srgb, var(--accent) 25%, transparent) !important;
   color: var(--accent) !important;
 }
+
+/* ── Workspace control-plane management ─────────────────────────── */
+.workspace-management-overlay,
+.workspace-invitation-gate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgba(5, 8, 14, 0.62);
+  backdrop-filter: blur(8px);
+}
+
+.workspace-management-dialog {
+  width: min(980px, 94vw);
+  height: min(760px, 88vh);
+  min-height: 480px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-xl);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.48);
+}
+
+.workspace-management-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.workspace-management-header h2,
+.workspace-management-header p,
+.workspace-management-section h3,
+.workspace-management-title-row h3 {
+  margin: 0;
+}
+
+.workspace-management-header h2 {
+  font-size: 18px;
+}
+
+.workspace-management-header p {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.workspace-management-close {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.workspace-management-close:hover,
+.workspace-management-close:focus-visible {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.workspace-management-readonly,
+.workspace-management-stale,
+.workspace-management-error {
+  padding: 8px 22px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.workspace-management-readonly,
+.workspace-management-stale {
+  background: color-mix(in srgb, var(--warning, #d97706) 10%, transparent);
+  color: var(--warning, #d97706);
+}
+
+.workspace-management-error {
+  background: color-mix(in srgb, var(--error, #dc2626) 10%, transparent);
+  color: var(--error, #dc2626);
+}
+
+.workspace-management-body {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+}
+
+.workspace-management-list,
+.workspace-management-detail {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.workspace-management-list {
+  padding: 14px;
+  border-inline-end: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-primary) 36%, transparent);
+}
+
+.workspace-management-create,
+.workspace-management-rename {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.workspace-management-create {
+  flex-direction: column;
+  align-items: stretch;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.workspace-management-create label,
+.workspace-management-rename label {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.workspace-management-create input,
+.workspace-management-rename input {
+  min-width: 0;
+  width: 100%;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.workspace-management-create input:focus,
+.workspace-management-rename input:focus {
+  border-color: var(--accent);
+}
+
+.workspace-management-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.workspace-management-list-items > button {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.workspace-management-list-items > button:hover,
+.workspace-management-list-items > button.active {
+  border-color: var(--border-bright);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.workspace-management-list-items > button span {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.workspace-management-list-items > button small {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.workspace-management-detail {
+  padding: 16px 18px 28px;
+}
+
+.workspace-management-section {
+  padding: 14px 0 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.workspace-management-section:first-child {
+  padding-top: 0;
+}
+
+.workspace-management-section:last-child {
+  border-bottom: 0;
+}
+
+.workspace-management-title-row,
+.workspace-management-section-heading,
+.workspace-member-row,
+.workspace-invitation-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workspace-management-title-row > div,
+.workspace-member-row > div:first-child,
+.workspace-invitation-row > div:first-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.workspace-management-title-row span,
+.workspace-member-row span,
+.workspace-invitation-row span {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.workspace-management-owner-warning {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--error, #dc2626) 10%, transparent);
+  color: var(--error, #dc2626);
+  font-size: 10px;
+}
+
+.workspace-management-rename {
+  margin-top: 14px;
+}
+
+.workspace-management-lifecycle {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.workspace-member-list,
+.workspace-invitation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.workspace-member-row,
+.workspace-invitation-row {
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-tertiary) 45%, transparent);
+}
+
+.workspace-member-row strong,
+.workspace-invitation-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.workspace-member-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.workspace-invitation-secret,
+.workspace-invitation-replay-note {
+  margin: 10px 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.workspace-invitation-secret p,
+.workspace-invitation-replay-note {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.workspace-invitation-secret code {
+  display: block;
+  overflow-wrap: anywhere;
+  margin: 8px 0;
+  color: var(--text-primary);
+  font-size: 10px;
+  user-select: text;
+}
+
+.workspace-management-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 18px;
+  border-top: 1px solid var(--border);
+}
+
+/* Volatile invitation handoff is outside AuthGate so a protocol link can be
+   retained while the user signs in, without placing its token in the DOM. */
+.workspace-invitation-handoff {
+  position: fixed;
+  z-index: 1450;
+  inset-inline: 18px;
+  bottom: 18px;
+  width: min(520px, calc(100vw - 36px));
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.38);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.workspace-invitation-handoff button {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.workspace-invitation-gate-overlay {
+  z-index: 1500;
+}
+
+.workspace-invitation-gate-dialog {
+  width: min(440px, 92vw);
+  padding: 22px;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-xl);
+  background: var(--bg-secondary);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.48);
+}
+
+.workspace-invitation-gate-dialog h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 18px;
+}
+
+.workspace-invitation-gate-dialog p {
+  margin: 10px 0 18px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.workspace-invitation-gate-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .workspace-management-dialog {
+    width: 96vw;
+    height: 92vh;
+  }
+
+  .workspace-management-body {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-management-list {
+    max-height: 210px;
+    border-inline-end: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}

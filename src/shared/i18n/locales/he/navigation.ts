@@ -1,3 +1,5 @@
+import { workspaceEn } from "../workspace";
+
 export default {
   chat: "צ'אט",
   newChat: "צ'אט חדש",
@@ -21,4 +23,5 @@ export default {
   settings: "הגדרות",
   collapseSidebar: "כווץ סרגל צד",
   expandSidebar: "הרחב סרגל צד",
+  workspace: workspaceEn,
 } as const;

@@ -1,3 +1,5 @@
+import { workspaceEn } from "../workspace";
+
 export default {
   chat: "Chat",
   newChat: "Obrolan Baru",
@@ -21,4 +23,5 @@ export default {
   settings: "Pengaturan",
   collapseSidebar: "Ciutkan sidebar",
   expandSidebar: "Perluas sidebar",
+  workspace: workspaceEn,
 } as const;
