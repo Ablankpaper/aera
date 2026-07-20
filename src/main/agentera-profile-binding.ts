@@ -436,6 +436,27 @@ export class AgenteraProfileBindingStore {
     return { ...stored.binding };
   }
 
+  resolveAttachedProfilePath(
+    runtimeProfileId: string,
+    agentInstallationId: string,
+    owner: AgenteraRuntimeOwner,
+  ): string {
+    assertOwner(owner);
+    if (!validUuid(runtimeProfileId) || !validUuid(agentInstallationId)) {
+      throw new Error("Attached Runtime Profile identity is invalid.");
+    }
+    const stored = this.readBindings().find(
+      (entry) =>
+        entry.binding.runtimeProfileId === runtimeProfileId &&
+        entry.binding.agentInstallationId === agentInstallationId &&
+        sameOwner(entry.binding, owner),
+    );
+    if (!stored) {
+      throw new Error("Attached Runtime Profile is unavailable.");
+    }
+    return canonicalProfilePath(stored.profilePath);
+  }
+
   private readBindings(): StoredProfileBinding[] {
     if (!existsSync(this.filePath)) return [];
     let envelope: unknown;

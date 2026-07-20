@@ -873,7 +873,12 @@ export class AgenteraAgentControlManager {
       store: candidates,
       source: new ReadOnlyHermesSkillCandidateSource(),
       getInstallation: (id) => runtime.installations.getLocalInstallation(id),
-      resolveProfilePath: full.profiles.resolveProfilePath,
+      resolveProfilePath: (runtimeProfileId, agentInstallationId) =>
+        this.profileBindings.resolveAttachedProfilePath(
+          runtimeProfileId,
+          agentInstallationId,
+          owner,
+        ),
       getContext: () => {
         const current = this.context();
         return current.scope === "USER"

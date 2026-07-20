@@ -77,7 +77,10 @@ export interface ExperienceCandidateServiceOptions {
   store: ExperienceCandidateStore;
   source: HermesSkillCandidateSource;
   getInstallation: (id: string) => LocalAgentInstallation;
-  resolveProfilePath: (profileId: string) => string;
+  resolveProfilePath: (
+    runtimeProfileId: string,
+    agentInstallationId: string,
+  ) => string;
   getContext: () => AgenteraAgentControlContext;
   getAuthState: () => AgenteraAuthPublicState;
   importer: ExperienceCandidateImportOrchestrator;
@@ -692,6 +695,7 @@ export class ExperienceCandidateService {
     try {
       profilePath = this.options.resolveProfilePath(
         installation.runtimeProfileId,
+        installation.agentInstallationId,
       );
     } catch {
       return serviceError("candidate_source_ineligible");

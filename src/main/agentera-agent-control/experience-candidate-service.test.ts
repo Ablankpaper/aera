@@ -66,7 +66,11 @@ let installation: LocalAgentInstallation;
 let candidateIds: string[];
 let source: HermesSkillCandidateSource;
 let client: AgenteraAgentControlClient;
-let resolveProfilePath: ReturnType<typeof vi.fn<(profileId: string) => string>>;
+let resolveProfilePath: ReturnType<
+  typeof vi.fn<
+    (runtimeProfileId: string, agentInstallationId: string) => string
+  >
+>;
 let candidateImporter: ExperienceCandidateImportOrchestrator;
 
 function nodeSqliteFactory(path: string): AgenteraSqliteDatabase {
@@ -288,7 +292,9 @@ beforeEach(() => {
       throw new Error("not configured");
     }),
   } as unknown as AgenteraAgentControlClient;
-  resolveProfilePath = vi.fn<(profileId: string) => string>(() => PROFILE_PATH);
+  resolveProfilePath = vi.fn<
+    (runtimeProfileId: string, agentInstallationId: string) => string
+  >(() => PROFILE_PATH);
   candidateImporter = {
     prepare: vi.fn(async () => {
       throw new Error("not configured");
@@ -311,7 +317,10 @@ describe("ExperienceCandidateService", () => {
     expect(service.listEligibleSkills(INSTALLATION_ID)).toEqual([
       { skillName: "weekly-summary", description: "Weekly summary" },
     ]);
-    expect(resolveProfilePath).toHaveBeenCalledWith(PROFILE_ID);
+    expect(resolveProfilePath).toHaveBeenCalledWith(
+      PROFILE_ID,
+      INSTALLATION_ID,
+    );
     expect(source.listEligible).toHaveBeenCalledWith(PROFILE_PATH);
 
     for (const invalid of [

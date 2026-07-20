@@ -382,4 +382,40 @@ describe("AgentEra non-destructive Runtime Profile ownership", () => {
       ),
     ).toThrow(/another Runtime Profile/i);
   });
+
+  it("resolves an attached physical Profile only from its trusted owner and installation IDs", () => {
+    const before = hashTree(profilePath);
+    const binding = store.bindExistingProfile(profilePath, owner);
+    store.attachAgentInstallation(profilePath, owner, AGENT_INSTALLATION_ID);
+
+    expect(
+      store.resolveAttachedProfilePath(
+        binding.runtimeProfileId,
+        AGENT_INSTALLATION_ID,
+        owner,
+      ),
+    ).toBe(realpathSync(profilePath));
+    expect(() =>
+      store.resolveAttachedProfilePath(
+        binding.runtimeProfileId,
+        OTHER_AGENT_INSTALLATION_ID,
+        owner,
+      ),
+    ).toThrow(/attached Runtime Profile/i);
+    expect(() =>
+      store.resolveAttachedProfilePath(
+        "99999999-9999-4999-8999-999999999999",
+        AGENT_INSTALLATION_ID,
+        owner,
+      ),
+    ).toThrow(/attached Runtime Profile/i);
+    expect(() =>
+      store.resolveAttachedProfilePath(
+        binding.runtimeProfileId,
+        AGENT_INSTALLATION_ID,
+        otherOwner,
+      ),
+    ).toThrow(/attached Runtime Profile/i);
+    expect(hashTree(profilePath)).toEqual(before);
+  });
 });
