@@ -148,6 +148,18 @@ The feature cannot begin from or ship with a falsely green authentication or com
 
 Cloud tests run without cache, version immutability and owner isolation are proven, private Profile fixtures remain byte-identical through install/update failures, and active conversations keep a stable binding. The detailed approved design is `docs/superpowers/specs/2026-07-19-agentera-user-agent-control-plane-v1-design.md`.
 
+### ExperienceCandidate boundary
+
+The candidate gate exercises the complete selected-Skill promotion path while keeping every Installation, physical Profile, and RuntimeBinding USER-owned.
+
+[[src/main/agentera-profile-binding.ts#AgenteraProfileBindingStore#resolveAttachedProfilePath]] resolves the candidate source only from the trusted runtime Profile ID, Agent Installation ID, and current owner. A renderer-provided Profile name or path cannot select the source.
+
+[[tests/agentera-experience-candidate-boundary.test.ts]] locks exact renderer mutation fields and forbids candidate coupling to Hermes private-state mutation, Runtime distribution, legacy sync, or Workspace-owned runtime state.
+
+[[tests/e2e/agentera-experience-candidate.e2e.ts]] proves Owner v1 publication, distinct Member installation, selected and unselected private learning, local secret blocking with no POST, manual retry, own-status isolation, Admin terminal review, atomic draft import, explicit v2 publication, and old/new conversation version pinning.
+
+The harness also injects upload, review, and SQLite import failures and verifies every private fixture hash afterward. Run the executable proof with `npm run test:e2e:experience-candidate`.
+
 ### Workspace Agent isolation
 
 The Workspace Agent gate extends the release proof from USER assets to WORKSPACE-owned definitions and versions without changing USER ownership of installations, Profiles, RuntimeBindings, or adaptive data.

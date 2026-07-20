@@ -41,7 +41,10 @@ import {
 } from "./agentera-product-auth-harness";
 
 const desktopRoot = resolve(process.cwd());
-const cloudRoot = resolve(desktopRoot, "../aera-cloud");
+const cloudRoot = resolve(
+  process.env.AGENTERA_E2E_CLOUD_ROOT?.trim() ||
+    resolve(desktopRoot, "../aera-cloud"),
+);
 const cloudPublicOrigin = "http://127.0.0.1:8086";
 const password = "AgentEra Runtime E2E battery staple 2026";
 const REQUEST_BODY_LIMIT = 8 * 1024 * 1024;
@@ -103,6 +106,21 @@ export interface CloudAgentControlCounts {
   runtimeBindings: number;
 }
 
+export interface CloudExperienceCandidateCounts {
+  candidates: number;
+  reviews: number;
+}
+
+export interface ExperienceCandidateProfileFixture {
+  selectedSkillName: string;
+  unsafeSkillName: string;
+  unselectedSkillName: string;
+  selectedMarker: string;
+  unsafeSecret: string;
+  unselectedSecret: string;
+  privateMarkers: readonly string[];
+}
+
 export interface LocalRuntimeBindingState {
   id: string;
   conversationKey: string;
@@ -134,7 +152,16 @@ type AgenteraMethod =
   | "claimVersion"
   | "retryPendingInstallation"
   | "selectInstallationVersion"
-  | "archiveInstallation";
+  | "archiveInstallation"
+  | "listEligibleExperienceSkills"
+  | "prepareExperienceCandidate"
+  | "submitExperienceCandidate"
+  | "listMyExperienceCandidates"
+  | "listExperienceReviewQueue"
+  | "getExperienceCandidate"
+  | "reviewExperienceCandidate"
+  | "prepareExperienceCandidateImport"
+  | "confirmExperienceCandidateImport";
 
 function command(
   executable: string,
@@ -795,8 +822,15 @@ export async function authenticateExistingAgentControlDevice(
   const page = harness.browserPage;
   await page.goto(authorizationURL);
   await page.waitForURL(/\/(?:authorize|login)(?:\?|$)/);
-  if (await page.locator('input[autocomplete="username"]').isVisible()) {
-    await page.locator('input[autocomplete="username"]').fill(harness.phone);
+  const loginLink = page.locator('a[href^="/login?next="]');
+  if (await loginLink.isVisible()) {
+    await loginLink.click();
+    await page.waitForURL(/\/login(?:\?|$)/);
+  }
+  const username = page.locator('input[autocomplete="username"]');
+  if (/\/login(?:\?|$)/.test(page.url()) || (await username.isVisible())) {
+    await expect(username).toBeVisible();
+    await username.fill(harness.phone);
     await page.locator('input[autocomplete="current-password"]').fill(password);
     await page.locator('button[type="submit"].primary-button').click();
     await page.waitForURL(/\/authorize\?request_id=/);
@@ -871,6 +905,9 @@ export function agentControlRequests(
         /^\/api\/v1\/workspaces\/[^/]+\/agent-definitions(?:\/|$)/.test(
           request.path,
         ) ||
+        /^\/api\/v1\/workspaces\/[^/]+\/experience-candidates(?:\/|$)/.test(
+          request.path,
+        ) ||
         request.path.startsWith("/api/v1/runtime-binding") ||
         request.path.startsWith("/api/agents"),
     )
@@ -885,6 +922,9 @@ export function agentControlExchangeDiagnostics(
       (request) =>
         request.path.startsWith("/api/v1/agent-") ||
         /^\/api\/v1\/workspaces\/[^/]+\/agent-definitions(?:\/|$)/.test(
+          request.path,
+        ) ||
+        /^\/api\/v1\/workspaces\/[^/]+\/experience-candidates(?:\/|$)/.test(
           request.path,
         ) ||
         request.path.startsWith("/api/v1/policy-snapshots/") ||
@@ -937,6 +977,39 @@ export async function cloudAgentControlCounts(
   };
 }
 
+export async function cloudExperienceCandidateCounts(
+  harness: AgentControlHarness,
+): Promise<CloudExperienceCandidateCounts> {
+  const query = `SELECT json_build_object(
+    'candidates', (SELECT count(*) FROM experience_candidates),
+    'reviews', (SELECT count(*) FROM experience_candidate_reviews)
+  );`;
+  const output = command(
+    "docker",
+    [
+      "compose",
+      "-p",
+      harness.composeProject,
+      "exec",
+      "-T",
+      "postgres",
+      "psql",
+      "-U",
+      "aera_cloud",
+      "-d",
+      "aera_cloud",
+      "-Atc",
+      query,
+    ],
+    { cwd: cloudRoot, env: composeEnvironment(harness) },
+  );
+  const parsed = JSON.parse(output.trim()) as Record<string, unknown>;
+  return {
+    candidates: Number(parsed.candidates),
+    reviews: Number(parsed.reviews),
+  };
+}
+
 export function deviceProfilePath(
   device: AgentControlDevice,
   profileId: string,
@@ -944,6 +1017,100 @@ export function deviceProfilePath(
   return profileId === "default"
     ? device.hermesHome
     : join(device.hermesHome, "profiles", profileId);
+}
+
+export async function seedExperienceCandidateProfile(
+  profilePath: string,
+): Promise<ExperienceCandidateProfileFixture> {
+  const selectedSkillName = "learned-research";
+  const unsafeSkillName = "unsafe-private";
+  const unselectedSkillName = "unselected-private";
+  const selectedMarker = "SELECTED_AGENT_CREATED_SKILL_2026_07_20";
+  const unsafeSecret = "sk-agentera-e2e-private-token-20260720";
+  const unselectedSecret = "UNSELECTED_PRIVATE_SKILL_2026_07_20";
+  const skillsRoot = join(profilePath, "skills");
+  const files: Record<string, string> = {
+    [`skills/${selectedSkillName}/SKILL.md`]: [
+      "---",
+      `name: ${selectedSkillName}`,
+      "description: Safe agent-created research workflow",
+      "---",
+      "",
+      "# Learned research",
+      selectedMarker,
+      "",
+    ].join("\n"),
+    [`skills/${selectedSkillName}/references/checklist.md`]: [
+      "# Research checklist",
+      "Use verified sources and record uncertainty.",
+      "",
+    ].join("\n"),
+    [`skills/${unsafeSkillName}/SKILL.md`]: [
+      "---",
+      `name: ${unsafeSkillName}`,
+      "description: Secret-bearing local fixture",
+      "---",
+      "",
+      `Never upload ${unsafeSecret}`,
+      "",
+    ].join("\n"),
+    [`skills/${unselectedSkillName}/SKILL.md`]: [
+      "---",
+      `name: ${unselectedSkillName}`,
+      "description: Unselected private learning fixture",
+      "---",
+      "",
+      unselectedSecret,
+      "",
+    ].join("\n"),
+    "MEMORY.md": "# Member private Memory\nMEMBER_MEMORY_PRIVATE_2026_07_20\n",
+    "USER.md": "# Member private USER\nMEMBER_USER_PRIVATE_2026_07_20\n",
+    "sessions/experience.json":
+      '{"session_id":"private","messages":["MEMBER_SESSION_PRIVATE_2026_07_20"]}\n',
+    "curator/experience.json":
+      '{"curator_state":"MEMBER_CURATOR_PRIVATE_2026_07_20"}\n',
+    ".env": "MEMBER_PRIVATE_TOKEN=never-upload-this-value\n",
+    "files/experience-private.txt": "MEMBER_LOCAL_FILE_PRIVATE_2026_07_20\n",
+  };
+  for (const [relativePath, contents] of Object.entries(files)) {
+    const target = join(profilePath, relativePath);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, contents, "utf8");
+  }
+  await mkdir(skillsRoot, { recursive: true });
+  await writeFile(
+    join(skillsRoot, ".usage.json"),
+    JSON.stringify(
+      {
+        [selectedSkillName]: { created_by: "agent", state: "active" },
+        [unsafeSkillName]: { created_by: "agent", state: "active" },
+        [unselectedSkillName]: { created_by: "agent", state: "active" },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+  return {
+    selectedSkillName,
+    unsafeSkillName,
+    unselectedSkillName,
+    selectedMarker,
+    unsafeSecret,
+    unselectedSecret,
+    privateMarkers: [
+      ".env",
+      "MEMORY.md",
+      "USER.md",
+      "sessions/experience.json",
+      "curator/experience.json",
+      "files/experience-private.txt",
+      "skills/.usage.json",
+      `skills/${selectedSkillName}`,
+      `skills/${unsafeSkillName}`,
+      `skills/${unselectedSkillName}`,
+    ],
+  };
 }
 
 async function hashPath(path: string): Promise<string | null> {

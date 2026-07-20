@@ -122,6 +122,16 @@ The gate covers stable conversation prompts and tools, local background learning
 
 The seed format, offline installation, user-confirmed update, signature verification, and rollback contract are defined by [[agentera-runtime-distribution|AgentEra Runtime distribution]].
 
+### Controlled promotion boundary
+
+The promotion gate proves that one reviewed Skill can reach a later immutable version without moving or changing any other local learning state.
+
+[[tests/agentera-experience-candidate-boundary.test.ts]] permits physical Profile reads only through [[src/main/agentera-agent-control/hermes-skill-candidate-source.ts#ReadOnlyHermesSkillCandidateSource]] and rejects candidate dependencies on Memory or Skill mutation, sessions, Curator, legacy sync, Runtime distribution, Workspace-owned Profiles, and RuntimeBinding ownership changes.
+
+[[tests/e2e/agentera-experience-candidate.e2e.ts]] uses isolated Electron devices and a real local cloud to prove local DLP blocking, explicit retry after upload and review failure, transactional import rollback, Member status isolation, Admin approval, v2 publication, v1 conversation stability, and unchanged private Profile hashes.
+
+The E2E request capture contains only the selected canonical Skill package and allowlisted control metadata. Unselected Skill content, Memory, USER, session, Curator, credentials, local files, Profile paths, and `/api/agents` remain absent.
+
 [[tests/e2e/agentera-agent-control.e2e.ts]] runs two independent devices with one account and hashes their private Profile markers across publish, install, update, archive, and injected cloud failures. Device A's native Memory and learned Skill remain absent from Device B and every captured cloud request, while an existing B conversation remains on v1 and a later conversation binds v2.
 
 ## First-release boundary
