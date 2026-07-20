@@ -57,3 +57,25 @@ The app acquires Electron's single-instance lock before Runtime bootstrap. A sec
 Workspace is an independent cloud and desktop domain rather than an extension of personal-space registration or the USER Agent protocol.
 
 The existing [[agentera-agent-control-plane|AgentEra Agent control plane V1]] remains `owner_scope=USER`. Workspace code cannot read or store Memory, USER, conversations, files, credentials, Profile paths, Curator state, or unpublished local Skills. The approved detailed design is `docs/superpowers/specs/2026-07-20-agentera-workspace-foundation-v1-design.md`.
+
+## Release gate
+
+Workspace Foundation V1 ships only after its multi-account product flow and its separation from Hermes execution and adaptive learning pass together.
+
+### Deterministic multi-account flow
+
+The Playwright gate runs the real desktop Workspace client, manager, account-partitioned SQLite cache, and volatile invitation inbox through a deterministic two-account lifecycle.
+
+`tests/e2e/agentera-workspace.e2e.ts` uses a strict in-process implementation of all 13 locked Workspace routes. The fixture rejects unexpected routes, bodies, headers, query fields, or renderer-supplied actor identity.
+
+The scenario proves Personal-first startup, Owner creation, rename and selection, one-time fragment invitation handoff before sign-in, Member acceptance by a second account, Owner promotion to Admin, Admin restrictions around Owner and peer Admin roles, same-account reload persistence, cross-account cache isolation, offline stale read-only behavior, archive fallback to Personal, and restored selection. It also checks that the raw invitation token occurs only in the first creation response, custom-protocol handoff, and acceptance request, and never in the desktop cache.
+
+Run it with `npm run test:e2e:workspace`.
+
+### Hermes compatibility boundary
+
+The compatibility gate prevents workspace navigation and collaboration metadata from entering or mutating the Hermes execution and adaptive-learning domain.
+
+`tests/agentera-workspace-boundary.test.ts` statically rejects Workspace-domain imports into Hermes execution, Profile mutation, sessions, Skills, Curator, Runtime distribution or binding, the Agent control plane, and legacy `agent-sync.ts`. It also proves the Workspace cache/public state allowlists, the switcher's single-purpose selection call, and the unchanged USER-only Agent/RuntimeBinding contract.
+
+The deterministic E2E additionally hashes a populated Hermes Profile tree and snapshots the selected Profile marker plus active USER RuntimeBinding before and after every workspace operation. All bytes and identities must remain unchanged. Existing Hermes compatibility suites remain part of the focused and complete desktop gates.

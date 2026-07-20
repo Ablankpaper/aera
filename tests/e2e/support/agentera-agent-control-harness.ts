@@ -597,6 +597,17 @@ export async function closeAgentControlHarness(
 ): Promise<void> {
   if (!harness) return;
   for (const device of harness.devices.splice(0).reverse()) {
+    await device.page
+      .evaluate(async () => {
+        const profiles = await window.hermesAPI.listProfiles();
+        await Promise.all(
+          profiles.map(({ id }) =>
+            window.hermesAPI.stopDashboard(id).catch(() => false),
+          ),
+        );
+        await window.hermesAPI.stopGateway().catch(() => false);
+      })
+      .catch(() => undefined);
     await device.app.close().catch(() => undefined);
   }
   await stopCloud(harness).catch(() => undefined);
@@ -619,7 +630,12 @@ export async function closeAgentControlHarness(
     harness.composeStarted = false;
   }
   await makeTreeWritable(harness.root).catch(() => undefined);
-  await rm(harness.root, { recursive: true, force: true });
+  await rm(harness.root, {
+    recursive: true,
+    force: true,
+    maxRetries: 20,
+    retryDelay: 100,
+  });
 }
 
 async function makeTreeWritable(path: string): Promise<void> {

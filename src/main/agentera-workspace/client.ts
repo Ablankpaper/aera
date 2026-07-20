@@ -13,7 +13,7 @@ import type {
 import {
   agenteraCloudUrl,
   parseAgenteraCloudOrigin,
-} from "../agentera-auth/config";
+} from "../agentera-auth/origin";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const RESPONSE_LIMIT = 256 * 1024;
