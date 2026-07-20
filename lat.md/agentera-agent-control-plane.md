@@ -8,6 +8,12 @@ V1 implements only `owner_scope=USER`; workspace, organization, official Agent, 
 
 The cloud is an identity, version, policy, installation, binding-metadata, and audit control plane. Agent execution and model access stay on the user's computer.
 
+## Approved Workspace Agent extension
+
+The next approved slice adds Workspace ownership only to published AgentDefinition and AgentVersion assets while keeping each member's Installation, RuntimeBinding, physical Hermes Profile, and adaptive state USER-owned.
+
+Owner and Admin may publish immutable Workspace versions, and active Members may discover and install them. The desktop derives the target from the trusted global Workspace context rather than renderer-supplied ownership fields. Shared Knowledge, Skill, and SOP assets enter Hermes only through the existing verified read-only projection. The locked design is `docs/superpowers/specs/2026-07-20-agentera-workspace-agent-v1-design.md`.
+
 ## Owner identity
 
 The USER owner tuple is derived from the authenticated product session and cannot be selected by request payloads.
