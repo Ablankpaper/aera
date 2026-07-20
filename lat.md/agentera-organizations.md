@@ -18,6 +18,8 @@ The first implemented slice is the cloud persistence and configuration foundatio
 
 `aera-cloud/internal/store/migrate_test.go` verifies the embedded migration, exact schema objects, real PostgreSQL commit-time invariants, cross-boundary foreign keys, invitation terminal behavior, and policy immutability. `aera-cloud/internal/config/config_test.go` verifies all Organization quota and rate settings, including missing and invalid values. Later sections remain architectural requirements until their corresponding implementation tasks land.
 
+The second implemented slice is `aera-cloud/internal/organization/model.go`, `token.go`, and `limiter.go`. It defines strict Owner/Admin/Auditor/Member and lifecycle values, NFC-normalized Organization and Department names, stable Unicode case-folded Department keys, positive quotas/revisions, renderer-safe summary shapes, canonical 256-bit invitation secrets whose formatting is always redacted, and five independently hashed Redis rate-limit scopes. The focused tests prove malformed or non-canonical tokens are rejected, raw account/device/Organization identifiers never enter Redis keys, backend failure is fail-closed, and each action retains its own counter and window.
+
 ## Ownership and roles
 
 Every active or archived Organization has exactly one transferable Owner plus optional Admin, Auditor, and Member Memberships.
