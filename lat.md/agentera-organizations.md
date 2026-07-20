@@ -10,6 +10,14 @@ It supports Organization lifecycle, one transferable Owner, Admin/Auditor/Member
 
 `owner_scope=ORGANIZATION`, enterprise Agent publication, and member installation remain the next independently gated slice. `owner_scope=PLATFORM` and official managed Agents remain the slice after that.
 
+## Implementation progress
+
+Organization Foundation is being delivered as independently verified control-plane slices; it is not yet a complete or deployed product feature.
+
+The first implemented slice is the cloud persistence and configuration foundation in `aera-cloud/migrations/000012_organization_foundation.sql` and `aera-cloud/internal/config/config.go`. It adds six Organization-owned tables, an Organization scope on audit, deferred exactly-one-Owner enforcement, cross-Organization Department and policy-pointer protection, immutable policy snapshots, terminal invitation transitions, and explicit quota/rate-limit configuration.
+
+`aera-cloud/internal/store/migrate_test.go` verifies the embedded migration, exact schema objects, real PostgreSQL commit-time invariants, cross-boundary foreign keys, invitation terminal behavior, and policy immutability. `aera-cloud/internal/config/config_test.go` verifies all Organization quota and rate settings, including missing and invalid values. Later sections remain architectural requirements until their corresponding implementation tasks land.
+
 ## Ownership and roles
 
 Every active or archived Organization has exactly one transferable Owner plus optional Admin, Auditor, and Member Memberships.
