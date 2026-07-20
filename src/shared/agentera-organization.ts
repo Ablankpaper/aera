@@ -73,6 +73,10 @@ export interface OrganizationInvitationAcceptance {
   member: OrganizationMember;
 }
 
+export interface OrganizationPendingInvitation {
+  token: string;
+}
+
 export interface OrganizationModelIdentifier {
   provider: string;
   model: string;
@@ -122,6 +126,27 @@ export interface OrganizationPage<T> {
 export interface OrganizationPageRequest {
   limit?: number;
   cursor?: string;
+}
+
+export interface OrganizationPublicState {
+  access: "online" | "offline";
+  cloudAvailable: boolean;
+  stale: boolean;
+  refreshedAt: string | null;
+  organizations: readonly OrganizationSummary[];
+}
+
+export interface OrganizationCachedCollection<T> {
+  items: readonly T[];
+  stale: boolean;
+  refreshedAt: string | null;
+}
+
+export interface OrganizationCurrentPolicyState {
+  policy: OrganizationPolicySnapshot | null;
+  stale: boolean;
+  verifiedAt: string | null;
+  errorCode: "policy_verification_failed" | null;
 }
 
 export interface OrganizationMemberPatch {
