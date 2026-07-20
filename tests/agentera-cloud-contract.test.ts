@@ -104,4 +104,36 @@ describe("AgentEra cloud contract pin", () => {
     expect(source).not.toContain("AgentDraft");
     expect(source).not.toContain("agent_draft");
   });
+
+  it("generates strict Workspace control schemas without Hermes private state", () => {
+    const source = readFileSync(generatedTypes, "utf8");
+    for (const schema of [
+      "WorkspaceSummary",
+      "WorkspaceMember",
+      "WorkspaceInvitation",
+      "WorkspaceInvitationCreation",
+      "WorkspaceInvitationAcceptance",
+      "WorkspaceListResponse",
+      "WorkspaceMemberListResponse",
+      "WorkspaceInvitationListResponse",
+      "CreateWorkspaceRequest",
+      "RenameWorkspaceRequest",
+      "WorkspaceRevisionRequest",
+      "ChangeWorkspaceMemberRoleRequest",
+      "AcceptWorkspaceInvitationRequest",
+    ]) {
+      expect(source).toContain(`${schema}:`);
+    }
+    for (const forbidden of [
+      "owner_scope",
+      "profile_path",
+      "credential",
+      "api_key",
+      "raw_token",
+    ]) {
+      expect(source).not.toMatch(
+        new RegExp(`readonly\\s+(?:\"${forbidden}\"|${forbidden})\\??:`),
+      );
+    }
+  });
 });

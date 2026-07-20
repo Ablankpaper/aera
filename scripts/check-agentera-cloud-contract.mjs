@@ -45,6 +45,16 @@ const REQUIRED_PATHS = [
   "/api/v1/runtime-binding-records",
   "/api/v1/verification/challenges",
   "/api/v1/verification/challenges/verify",
+  "/api/v1/workspace-invitations/accept",
+  "/api/v1/workspaces",
+  "/api/v1/workspaces/{workspace_id}",
+  "/api/v1/workspaces/{workspace_id}/archive",
+  "/api/v1/workspaces/{workspace_id}/invitations",
+  "/api/v1/workspaces/{workspace_id}/invitations/{invitation_id}",
+  "/api/v1/workspaces/{workspace_id}/leave",
+  "/api/v1/workspaces/{workspace_id}/members",
+  "/api/v1/workspaces/{workspace_id}/members/{user_id}",
+  "/api/v1/workspaces/{workspace_id}/restore",
   "/oauth/authorize",
 ];
 
@@ -80,6 +90,11 @@ const ERROR_CODES = [
   "invalid_request",
   "last_identity",
   "not_found",
+  "invitation_limit_reached",
+  "invitation_unavailable",
+  "member_limit_reached",
+  "membership_conflict",
+  "rate_limited",
   "runtime_incompatible",
   "self_revoke_replayed",
   "service_unavailable",
@@ -87,6 +102,12 @@ const ERROR_CODES = [
   "verification_required",
   "version_conflict",
   "version_revoked",
+  "workspace_archived",
+  "workspace_conflict",
+  "workspace_forbidden",
+  "workspace_limit_reached",
+  "workspace_not_found",
+  "workspace_owner_unavailable",
 ];
 
 const AGENT_SCHEMAS = [
@@ -97,6 +118,118 @@ const AGENT_SCHEMAS = [
   "PublishInitialAgentRequest",
   "PublishNextAgentVersionRequest",
   "RuntimeBindingRecord",
+];
+
+const WORKSPACE_SCHEMA_PROPERTIES = {
+  WorkspaceSummary: [
+    "archived_at",
+    "created_at",
+    "display_name",
+    "id",
+    "member_count",
+    "mutation_state",
+    "revision",
+    "role",
+    "status",
+    "updated_at",
+  ],
+  WorkspaceMember: ["joined_at", "nickname", "revision", "role", "user_id"],
+  WorkspaceInvitation: [
+    "accepted_at",
+    "accepted_by_user_id",
+    "created_at",
+    "created_by_user_id",
+    "expires_at",
+    "id",
+    "revoked_at",
+    "status",
+  ],
+  WorkspaceInvitationCreation: [
+    "accepted_at",
+    "accepted_by_user_id",
+    "created_at",
+    "created_by_user_id",
+    "expires_at",
+    "id",
+    "invite_url",
+    "revoked_at",
+    "secret_replayable",
+    "status",
+    "token",
+  ],
+  WorkspaceInvitationAcceptance: ["member", "workspace"],
+  WorkspaceListResponse: ["workspaces"],
+  WorkspaceMemberListResponse: ["members"],
+  WorkspaceInvitationListResponse: ["invitations"],
+  CreateWorkspaceRequest: ["display_name"],
+  RenameWorkspaceRequest: ["display_name", "expected_revision"],
+  WorkspaceRevisionRequest: ["expected_revision"],
+  ChangeWorkspaceMemberRoleRequest: ["expected_revision", "role"],
+  AcceptWorkspaceInvitationRequest: ["token"],
+};
+
+const WORKSPACE_OPERATIONS = [
+  ["/api/v1/workspaces", "get", ["200", "401", "503"]],
+  [
+    "/api/v1/workspaces",
+    "post",
+    ["200", "201", "400", "401", "409", "413", "429", "503"],
+  ],
+  [
+    "/api/v1/workspaces/{workspace_id}",
+    "patch",
+    ["200", "400", "401", "403", "404", "409", "413", "503"],
+  ],
+  [
+    "/api/v1/workspaces/{workspace_id}/archive",
+    "post",
+    ["200", "400", "401", "403", "404", "409", "413", "503"],
+  ],
+  [
+    "/api/v1/workspaces/{workspace_id}/restore",
+    "post",
+    ["200", "400", "401", "403", "404", "409", "413", "503"],
+  ],
+  [
+    "/api/v1/workspaces/{workspace_id}/members",
+    "get",
+    ["200", "400", "401", "404", "503"],
+  ],
+  [
+    "/api/v1/workspaces/{workspace_id}/members/{user_id}",
+    "patch",
+    ["200", "400", "401", "403", "404", "409", "413", "503"],
+  ],
+  [
+    "/api/v1/workspaces/{workspace_id}/members/{user_id}",
+    "delete",
+    ["204", "400", "401", "403", "404", "409", "503"],
+  ],
+  [
+    "/api/v1/workspaces/{workspace_id}/leave",
+    "post",
+    ["204", "400", "401", "403", "404", "409", "413", "503"],
+  ],
+  [
+    "/api/v1/workspaces/{workspace_id}/invitations",
+    "get",
+    ["200", "400", "401", "403", "404", "503"],
+  ],
+  [
+    "/api/v1/workspaces/{workspace_id}/invitations",
+    "post",
+    ["200", "201", "400", "401", "403", "404", "409", "413", "429", "503"],
+  ],
+  [
+    "/api/v1/workspaces/{workspace_id}/invitations/{invitation_id}",
+    "delete",
+    ["204", "400", "401", "403", "404", "409", "503"],
+  ],
+  [
+    "/api/v1/workspace-invitations/accept",
+    "post",
+    ["200", "400", "401", "404", "409", "413", "429", "503"],
+  ],
 ];
 
 const EXACT_LOOPBACK_REDIRECT =
@@ -124,7 +257,7 @@ function exactMembers(actual, expected, label) {
 }
 
 function validateCriticalContract(document) {
-  if (document.info?.version !== "0.2.0") {
+  if (document.info?.version !== "0.3.0") {
     fail(`OpenAPI version changed: ${String(document.info?.version)}`);
   }
   const paths = object(document.paths, "paths");
@@ -179,6 +312,147 @@ function validateCriticalContract(document) {
   }
   if (Object.hasOwn(schemas, "AgentDraft")) {
     fail("AgentDraft must remain desktop-local");
+  }
+
+  for (const [schemaName, expectedProperties] of Object.entries(
+    WORKSPACE_SCHEMA_PROPERTIES,
+  )) {
+    const schema = object(schemas[schemaName], schemaName);
+    if (schema.type !== "object" || schema.additionalProperties !== false) {
+      fail(`${schemaName} is no longer a strict object`);
+    }
+    exactMembers(
+      Object.keys(object(schema.properties, `${schemaName}.properties`)),
+      expectedProperties,
+      `${schemaName}.properties`,
+    );
+  }
+  exactMembers(
+    object(schemas.WorkspaceRole, "WorkspaceRole").enum ?? [],
+    ["owner", "admin", "member"],
+    "WorkspaceRole.enum",
+  );
+  exactMembers(
+    object(schemas.WorkspaceStatus, "WorkspaceStatus").enum ?? [],
+    ["active", "archived"],
+    "WorkspaceStatus.enum",
+  );
+  exactMembers(
+    object(schemas.WorkspaceMutationState, "WorkspaceMutationState").enum ?? [],
+    ["writable", "archived", "owner_unavailable"],
+    "WorkspaceMutationState.enum",
+  );
+  exactMembers(
+    object(schemas.WorkspaceInvitationStatus, "WorkspaceInvitationStatus")
+      .enum ?? [],
+    ["pending", "accepted", "revoked", "expired"],
+    "WorkspaceInvitationStatus.enum",
+  );
+
+  const accountProfile = object(schemas.AccountProfile, "AccountProfile");
+  if (
+    !Object.hasOwn(
+      object(accountProfile.properties, "AccountProfile.properties"),
+      "owned_workspace_count",
+    ) ||
+    !(accountProfile.required ?? []).includes("owned_workspace_count")
+  ) {
+    fail("AccountProfile no longer discloses owned_workspace_count");
+  }
+  const invitationCreation = object(
+    schemas.WorkspaceInvitationCreation,
+    "WorkspaceInvitationCreation",
+  );
+  const invitationCreationProperties = object(
+    invitationCreation.properties,
+    "WorkspaceInvitationCreation.properties",
+  );
+  if (
+    invitationCreationProperties.token?.minLength !== 43 ||
+    invitationCreationProperties.token?.maxLength !== 43 ||
+    invitationCreationProperties.token?.pattern !== "^[A-Za-z0-9_-]{43}$"
+  ) {
+    fail("Workspace invitation token constraint changed");
+  }
+  if (
+    invitationCreationProperties.invite_url?.pattern !==
+    "^agentera://workspace-invitation#[A-Za-z0-9_-]{43}$"
+  ) {
+    fail("Workspace invitation URL is no longer fragment-only");
+  }
+  const forbiddenWorkspaceFields = [
+    "owner_scope",
+    "MEMORY",
+    "USER",
+    "profile_path",
+    "session",
+    "credential",
+    "api_key",
+    "raw_token",
+  ];
+  const workspaceSchemas = JSON.stringify(
+    Object.fromEntries(
+      Object.keys(WORKSPACE_SCHEMA_PROPERTIES).map((name) => [
+        name,
+        schemas[name],
+      ]),
+    ),
+  );
+  for (const field of forbiddenWorkspaceFields) {
+    if (workspaceSchemas.includes(`\"${field}\"`)) {
+      fail(`Workspace schemas exposed private field ${field}`);
+    }
+  }
+
+  const workspaceIdempotency = object(
+    object(
+      object(document.components, "components").parameters,
+      "components.parameters",
+    ).WorkspaceIdempotencyKey,
+    "WorkspaceIdempotencyKey",
+  );
+  if (
+    workspaceIdempotency.name !== "Idempotency-Key" ||
+    workspaceIdempotency.in !== "header" ||
+    workspaceIdempotency.required !== true ||
+    workspaceIdempotency.schema?.maxLength !== 128
+  ) {
+    fail("Workspace Idempotency-Key boundary changed");
+  }
+  for (const [path, method, statuses] of WORKSPACE_OPERATIONS) {
+    const operation = object(
+      object(paths[path], path)[method],
+      `${path}.${method}`,
+    );
+    exactMembers(
+      Object.keys(object(operation.responses, `${path}.${method}.responses`)),
+      statuses,
+      `${path}.${method}.responses`,
+    );
+    if (
+      JSON.stringify(operation.security) !==
+      JSON.stringify([{ desktopAccessToken: [] }])
+    ) {
+      fail(`${path}.${method} no longer uses only the desktop access token`);
+    }
+  }
+  for (const [path, method] of [
+    ["/api/v1/workspaces", "post"],
+    ["/api/v1/workspaces/{workspace_id}/invitations", "post"],
+    ["/api/v1/workspace-invitations/accept", "post"],
+  ]) {
+    const parameters =
+      object(object(paths[path], path)[method], `${path}.${method}`)
+        .parameters ?? [];
+    if (
+      !Array.isArray(parameters) ||
+      !parameters.some(
+        (parameter) =>
+          parameter?.$ref === "#/components/parameters/WorkspaceIdempotencyKey",
+      )
+    ) {
+      fail(`${path}.${method} is missing Workspace Idempotency-Key`);
+    }
   }
 
   exactMembers(
