@@ -217,6 +217,7 @@ The same migration creates `workspace_invitations` and `workspace_idempotency_re
 - deferred constraint triggers on both `workspaces` and `workspace_memberships` that require exactly one matching Owner at commit;
 - lookup indexes for member listing, pending invitations, owned active quota, token digest, and idempotency expiry;
 - invitation state checks requiring exactly seven-day expiry and consistent acceptance/revocation timestamps;
+- an invitation lifecycle trigger permitting only `pending` to `accepted|revoked|expired` and rejecting every transition from a terminal state;
 - 32-byte checks for token, key, and request digests.
 
 The configuration additions are exact:
@@ -253,7 +254,7 @@ AGENTERA_CLOUD_WORKSPACE_ACCEPT_RATE_WINDOW=10m
 
 - [ ] Extend `TestApplyMigrationsCreatesAuthSchemaAndIsIdempotent` to expect nine applied migrations and assert all four tables, exact columns, check constraints, indexes, foreign-key actions, and both deferred Owner-invariant triggers. Add an integration test that attempts to commit a workspace with no Owner membership and a workspace with a mismatched Owner; both commits must fail.
 
-- [ ] Extend config tests for all eight exact environment variables, zero/negative rejection, invalid durations, and the expected typed values.
+- [ ] Extend config tests for all nine exact environment variables, zero/negative rejection, invalid durations, and the expected typed values.
 
 - [ ] Run the red tests:
 
