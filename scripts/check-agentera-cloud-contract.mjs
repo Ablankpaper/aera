@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { parse } from "yaml";
 import {
   generatedPath,
@@ -51,7 +51,12 @@ const REQUIRED_PATHS = [
   "/api/v1/workspaces/{workspace_id}/archive",
   "/api/v1/workspaces/{workspace_id}/agent-definitions",
   "/api/v1/workspaces/{workspace_id}/agent-definitions/{definition_id}",
+  "/api/v1/workspaces/{workspace_id}/agent-definitions/{definition_id}/experience-candidates",
   "/api/v1/workspaces/{workspace_id}/agent-definitions/{definition_id}/versions",
+  "/api/v1/workspaces/{workspace_id}/experience-candidates",
+  "/api/v1/workspaces/{workspace_id}/experience-candidates/mine",
+  "/api/v1/workspaces/{workspace_id}/experience-candidates/{candidate_id}",
+  "/api/v1/workspaces/{workspace_id}/experience-candidates/{candidate_id}/review",
   "/api/v1/workspaces/{workspace_id}/invitations",
   "/api/v1/workspaces/{workspace_id}/invitations/{invitation_id}",
   "/api/v1/workspaces/{workspace_id}/leave",
@@ -80,6 +85,8 @@ const ERROR_CODES = [
   "activation_conflict",
   "authorization_expired",
   "authorization_replayed",
+  "candidate_already_reviewed",
+  "candidate_dlp_blocked",
   "definition_archived",
   "deletion_window_expired",
   "device_limit_reached",
@@ -90,6 +97,7 @@ const ERROR_CODES = [
   "invalid_agent_content",
   "invalid_credentials",
   "invalid_device_proof",
+  "invalid_experience_candidate",
   "invalid_request",
   "last_identity",
   "not_found",
@@ -264,6 +272,85 @@ const WORKSPACE_AGENT_OPERATIONS = [
   ],
 ];
 
+const EXPERIENCE_CANDIDATE_DLP_VERSION = "experience-candidate-dlp-v1";
+const EXPERIENCE_CANDIDATE_VECTOR_DIGEST =
+  "6fa5c97e58ee22e623505c2c80c7d1b0dd998c81a87bdadc317275e8165f91a2";
+
+const EXPERIENCE_CANDIDATE_SCHEMA_PROPERTIES = {
+  ExperienceCandidateAsset: ["content", "media_type", "path"],
+  ExperienceCandidateBundle: ["assets", "schema_version", "skill_name"],
+  SubmitExperienceCandidateRequest: [
+    "bundle",
+    "content_digest",
+    "source_version_id",
+  ],
+  ReviewExperienceCandidateRequest: ["decision", "reason_code", "safe_note"],
+  ExperienceCandidateReview: [
+    "decision",
+    "id",
+    "reason_code",
+    "reviewed_at",
+    "reviewed_by_user_id",
+    "safe_note",
+  ],
+  ExperienceCandidateSummary: [
+    "agent_definition_id",
+    "content_digest",
+    "created_at",
+    "dlp_contract_version",
+    "id",
+    "review",
+    "skill_name",
+    "source_agent_version_id",
+    "submitted_by_user_id",
+    "workspace_id",
+  ],
+  ExperienceCandidateDetail: [
+    "agent_definition_id",
+    "bundle",
+    "content_digest",
+    "created_at",
+    "dlp_contract_version",
+    "id",
+    "review",
+    "skill_name",
+    "source_agent_version_id",
+    "submitted_by_user_id",
+    "workspace_id",
+  ],
+  ExperienceCandidateListResponse: ["candidates"],
+  ExperienceCandidateFinding: ["code", "line", "path"],
+  ExperienceCandidateErrorEnvelope: ["error"],
+};
+
+const EXPERIENCE_CANDIDATE_OPERATIONS = [
+  [
+    "/api/v1/workspaces/{workspace_id}/agent-definitions/{definition_id}/experience-candidates",
+    "post",
+    ["201", "400", "401", "403", "404", "409", "413", "503"],
+  ],
+  [
+    "/api/v1/workspaces/{workspace_id}/experience-candidates/mine",
+    "get",
+    ["200", "400", "401", "404", "409", "503"],
+  ],
+  [
+    "/api/v1/workspaces/{workspace_id}/experience-candidates",
+    "get",
+    ["200", "400", "401", "403", "404", "409", "503"],
+  ],
+  [
+    "/api/v1/workspaces/{workspace_id}/experience-candidates/{candidate_id}",
+    "get",
+    ["200", "400", "401", "403", "404", "409", "503"],
+  ],
+  [
+    "/api/v1/workspaces/{workspace_id}/experience-candidates/{candidate_id}/review",
+    "post",
+    ["200", "400", "401", "403", "404", "409", "413", "503"],
+  ],
+];
+
 const EXACT_LOOPBACK_REDIRECT =
   "^http://127\\.0\\.0\\.1:[1-9][0-9]{0,4}/agentera/oauth/callback$";
 const LOOPBACK_CALLBACK_RESPONSE =
@@ -289,7 +376,7 @@ function exactMembers(actual, expected, label) {
 }
 
 function validateCriticalContract(document) {
-  if (document.info?.version !== "0.4.0") {
+  if (document.info?.version !== "0.5.0") {
     fail(`OpenAPI version changed: ${String(document.info?.version)}`);
   }
   const paths = object(document.paths, "paths");
@@ -384,6 +471,84 @@ function validateCriticalContract(document) {
       `${schemaName}.properties`,
     );
   }
+  for (const [schemaName, expectedProperties] of Object.entries(
+    EXPERIENCE_CANDIDATE_SCHEMA_PROPERTIES,
+  )) {
+    const schema = object(schemas[schemaName], schemaName);
+    if (schema.type !== "object" || schema.additionalProperties !== false) {
+      fail(`${schemaName} is no longer a strict object`);
+    }
+    exactMembers(
+      Object.keys(object(schema.properties, `${schemaName}.properties`)),
+      expectedProperties,
+      `${schemaName}.properties`,
+    );
+  }
+  exactMembers(
+    object(schemas.ExperienceCandidateErrorCode, "ExperienceCandidateErrorCode")
+      .enum ?? [],
+    [
+      "candidate_already_reviewed",
+      "candidate_dlp_blocked",
+      "definition_archived",
+      "idempotency_conflict",
+      "invalid_experience_candidate",
+      "invalid_request",
+      "not_found",
+      "service_unavailable",
+      "workspace_archived",
+      "workspace_forbidden",
+      "workspace_owner_unavailable",
+    ],
+    "ExperienceCandidateErrorCode.enum",
+  );
+  exactMembers(
+    schemas.SubmitExperienceCandidateRequest.required ?? [],
+    ["bundle", "content_digest", "source_version_id"],
+    "SubmitExperienceCandidateRequest.required",
+  );
+  exactMembers(
+    schemas.ReviewExperienceCandidateRequest.required ?? [],
+    ["decision"],
+    "ReviewExperienceCandidateRequest.required",
+  );
+  if (
+    schemas.ExperienceCandidateSummary.properties?.dlp_contract_version
+      ?.const !== EXPERIENCE_CANDIDATE_DLP_VERSION ||
+    schemas.ExperienceCandidateDetail.properties?.dlp_contract_version
+      ?.const !== EXPERIENCE_CANDIDATE_DLP_VERSION
+  ) {
+    fail("ExperienceCandidate DLP contract version changed");
+  }
+  if (
+    schemas.ExperienceCandidateBundle.properties?.assets?.maxItems !== 32 ||
+    schemas.ExperienceCandidateAsset.properties?.content?.maxLength !==
+      256 * 1024
+  ) {
+    fail("ExperienceCandidate package limits changed");
+  }
+  const candidateRequestSchemas = JSON.stringify({
+    submit: schemas.SubmitExperienceCandidateRequest,
+    review: schemas.ReviewExperienceCandidateRequest,
+  });
+  for (const field of [
+    "agent_installation_id",
+    "definition_id",
+    "device_id",
+    "dlp_override",
+    "installation_id",
+    "owner_id",
+    "owner_scope",
+    "profile_path",
+    "reviewed_by_user_id",
+    "runtime_profile_id",
+    "source_path",
+    "workspace_id",
+  ]) {
+    if (candidateRequestSchemas.includes(`"${field}"`)) {
+      fail(`ExperienceCandidate request schemas exposed ${field}`);
+    }
+  }
   exactMembers(
     object(schemas.WorkspaceRole, "WorkspaceRole").enum ?? [],
     ["owner", "admin", "member"],
@@ -456,7 +621,7 @@ function validateCriticalContract(document) {
     ),
   );
   for (const field of forbiddenWorkspaceFields) {
-    if (workspaceSchemas.includes(`\"${field}\"`)) {
+    if (workspaceSchemas.includes(`"${field}"`)) {
       fail(`Workspace schemas exposed private field ${field}`);
     }
   }
@@ -508,6 +673,41 @@ function validateCriticalContract(document) {
       JSON.stringify([{ desktopAccessToken: [] }])
     ) {
       fail(`${path}.${method} no longer uses only the desktop access token`);
+    }
+  }
+  for (const [path, method, statuses] of EXPERIENCE_CANDIDATE_OPERATIONS) {
+    const operation = object(
+      object(paths[path], path)[method],
+      `${path}.${method}`,
+    );
+    exactMembers(
+      Object.keys(object(operation.responses, `${path}.${method}.responses`)),
+      statuses,
+      `${path}.${method}.responses`,
+    );
+    if (
+      JSON.stringify(operation.security) !==
+      JSON.stringify([{ desktopAccessToken: [] }])
+    ) {
+      fail(`${path}.${method} no longer uses only the desktop access token`);
+    }
+  }
+  for (const path of [
+    "/api/v1/workspaces/{workspace_id}/agent-definitions/{definition_id}/experience-candidates",
+    "/api/v1/workspaces/{workspace_id}/experience-candidates/{candidate_id}/review",
+  ]) {
+    const parameters = object(
+      object(paths[path], path).post,
+      `${path}.post`,
+    ).parameters;
+    if (
+      !Array.isArray(parameters) ||
+      !parameters.some(
+        (parameter) =>
+          parameter?.$ref === "#/components/parameters/IdempotencyKey",
+      )
+    ) {
+      fail(`${path}.post is missing Idempotency-Key`);
     }
   }
   for (const [path, method] of [
@@ -583,6 +783,41 @@ try {
 }
 validateCriticalContract(object(parsed, "OpenAPI document"));
 
+const candidateVectorPath = resolve(
+  projectRoot,
+  "contracts/experience-candidate-v1-vectors.json",
+);
+let candidateVectorText;
+let candidateVectors;
+try {
+  candidateVectorText = await readFile(candidateVectorPath, "utf8");
+  candidateVectors = JSON.parse(candidateVectorText);
+} catch (error) {
+  fail(`candidate vectors are missing or invalid: ${error.message}`);
+}
+const candidateVectorDocument = object(
+  candidateVectors,
+  "ExperienceCandidate vectors",
+);
+if (
+  candidateVectorDocument.contract_version !== EXPERIENCE_CANDIDATE_DLP_VERSION
+) {
+  fail(
+    `candidate vector contract changed: ${String(candidateVectorDocument.contract_version)}`,
+  );
+}
+if (
+  !Array.isArray(candidateVectorDocument.canonical_cases) ||
+  candidateVectorDocument.canonical_cases[0]?.content_digest !==
+    EXPERIENCE_CANDIDATE_VECTOR_DIGEST ||
+  !Array.isArray(candidateVectorDocument.canonical_rejections) ||
+  !Array.isArray(candidateVectorDocument.dlp_cases)
+) {
+  fail(
+    "candidate vectors no longer contain the locked canonical and DLP cases",
+  );
+}
+
 let generated;
 try {
   generated = await readFile(generatedPath, "utf8");
@@ -593,7 +828,9 @@ if (generated !== output) {
   fail("generated TypeScript is stale; run npm run generate:agentera-cloud");
 }
 
-const sibling = resolve(projectRoot, "../aera-cloud/api/openapi.yaml");
+const sibling = process.env.AGENTERA_CLOUD_CONTRACT_SOURCE
+  ? resolve(projectRoot, process.env.AGENTERA_CLOUD_CONTRACT_SOURCE)
+  : resolve(projectRoot, "../aera-cloud/api/openapi.yaml");
 if (process.env.AGENTERA_SKIP_SIBLING_CONTRACT !== "1" && existsSync(sibling)) {
   const siblingBytes = await readFile(sibling);
   const siblingSha256 = createHash("sha256").update(siblingBytes).digest("hex");
@@ -604,6 +841,20 @@ if (process.env.AGENTERA_SKIP_SIBLING_CONTRACT !== "1" && existsSync(sibling)) {
     fail(
       `pinned SHA-256 ${contractSha256} differs from sibling ${siblingSha256}`,
     );
+  }
+  const siblingCandidateVectors = resolve(
+    dirname(sibling),
+    "experience-candidate-v1-vectors.json",
+  );
+  if (!existsSync(siblingCandidateVectors)) {
+    fail("sibling ExperienceCandidate vectors are missing");
+  }
+  const siblingCandidateVectorText = await readFile(
+    siblingCandidateVectors,
+    "utf8",
+  );
+  if (siblingCandidateVectorText !== candidateVectorText) {
+    fail("pinned ExperienceCandidate vectors differ from sibling");
   }
 }
 

@@ -8,9 +8,26 @@ import { describe, expect, it } from "vitest";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pinnedContract = join(root, "contracts/agentera-cloud.openapi.yaml");
+const pinnedCandidateVectors = join(
+  root,
+  "contracts/experience-candidate-v1-vectors.json",
+);
 const generatedTypes = join(root, "src/shared/agentera-cloud-api.generated.ts");
 const cloudClient = join(root, "src/main/agentera-auth/client.ts");
-const siblingContract = resolve(root, "../aera-cloud/api/openapi.yaml");
+const siblingContract = process.env.AGENTERA_CLOUD_CONTRACT_SOURCE
+  ? resolve(root, process.env.AGENTERA_CLOUD_CONTRACT_SOURCE)
+  : resolve(root, "../aera-cloud/api/openapi.yaml");
+const siblingCandidateVectors = join(
+  dirname(siblingContract),
+  "experience-candidate-v1-vectors.json",
+);
+
+function generatedSchemaBlock(source: string, schema: string): string {
+  const start = source.indexOf(`    readonly ${schema}: {`);
+  expect(start).toBeGreaterThanOrEqual(0);
+  const end = source.indexOf("\n    readonly ", start + 1);
+  return source.slice(start, end < 0 ? undefined : end);
+}
 
 describe("AgentEra cloud contract pin", () => {
   it("forces byte-hashed contract artifacts to LF on every checkout", () => {
@@ -21,6 +38,7 @@ describe("AgentEra cloud contract pin", () => {
         "eol",
         "--",
         "contracts/agentera-cloud.openapi.yaml",
+        "contracts/experience-candidate-v1-vectors.json",
         "src/shared/agentera-cloud-api.generated.ts",
       ],
       { cwd: root, encoding: "utf8" },
@@ -28,6 +46,7 @@ describe("AgentEra cloud contract pin", () => {
 
     expect(attributes.trim().split(/\r?\n/)).toEqual([
       "contracts/agentera-cloud.openapi.yaml: eol: lf",
+      "contracts/experience-candidate-v1-vectors.json: eol: lf",
       "src/shared/agentera-cloud-api.generated.ts: eol: lf",
     ]);
   });
@@ -37,6 +56,11 @@ describe("AgentEra cloud contract pin", () => {
     if (existsSync(siblingContract)) {
       expect(readFileSync(pinnedContract)).toEqual(
         readFileSync(siblingContract),
+      );
+      expect(existsSync(pinnedCandidateVectors)).toBe(true);
+      expect(existsSync(siblingCandidateVectors)).toBe(true);
+      expect(readFileSync(pinnedCandidateVectors)).toEqual(
+        readFileSync(siblingCandidateVectors),
       );
     }
   });
@@ -132,7 +156,40 @@ describe("AgentEra cloud contract pin", () => {
       "raw_token",
     ]) {
       expect(source).not.toMatch(
-        new RegExp(`readonly\\s+(?:\"${forbidden}\"|${forbidden})\\??:`),
+        new RegExp(`readonly\\s+(?:"${forbidden}"|${forbidden})\\??:`),
+      );
+    }
+  });
+
+  it("generates the reviewed ExperienceCandidate schemas without local identity or paths", () => {
+    const source = readFileSync(generatedTypes, "utf8");
+    const candidateSchemas = [
+      "ExperienceCandidateAsset",
+      "ExperienceCandidateBundle",
+      "ExperienceCandidateSummary",
+      "ExperienceCandidateDetail",
+      "ExperienceCandidateListResponse",
+      "ExperienceCandidateFinding",
+      "ExperienceCandidateErrorEnvelope",
+      "SubmitExperienceCandidateRequest",
+      "ReviewExperienceCandidateRequest",
+    ];
+    for (const schema of candidateSchemas) {
+      expect(source).toContain(`${schema}:`);
+    }
+    const candidateSource = candidateSchemas
+      .map((schema) => generatedSchemaBlock(source, schema))
+      .join("\n");
+    for (const forbidden of [
+      "owner_scope",
+      "profile_path",
+      "runtime_profile_id",
+      "source_path",
+      "submitted_from_device_id",
+      "dlp_override",
+    ]) {
+      expect(candidateSource).not.toMatch(
+        new RegExp(`readonly\\s+(?:"${forbidden}"|${forbidden})\\??:`),
       );
     }
   });

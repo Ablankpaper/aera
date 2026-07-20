@@ -236,3 +236,73 @@ export interface AgenteraSelectInstallationVersionInput {
   versionId: string;
   localProfileId: string;
 }
+
+export type ExperienceCandidateLocalStatus =
+  | "PREPARED"
+  | "UPLOAD_FAILED"
+  | "SUBMITTED";
+
+export interface ExperienceCandidateAssetV1 {
+  path: string;
+  mediaType: "text/markdown" | "text/plain";
+  content: string;
+}
+
+export interface ExperienceCandidateBundleV1 {
+  schemaVersion: 1;
+  skillName: string;
+  assets: ExperienceCandidateAssetV1[];
+}
+
+export interface CanonicalExperienceCandidate {
+  bundle: ExperienceCandidateBundleV1;
+  canonicalJson: string;
+  contentDigest: string;
+}
+
+export interface ExperienceCandidateFinding {
+  code: string;
+  path: string;
+  line: number | null;
+}
+
+export type ExperienceCandidateReviewStatus =
+  | "PENDING_REVIEW"
+  | "APPROVED"
+  | "REJECTED";
+
+export interface ExperienceCandidatePreview {
+  localCandidateId: string;
+  installationId: string;
+  sourceAgentVersionId: string;
+  skillName: string;
+  assets: Array<{
+    path: string;
+    mediaType: "text/markdown" | "text/plain";
+    sizeBytes: number;
+  }>;
+  fileCount: number;
+  totalBytes: number;
+  contentDigest: string;
+  findings: ExperienceCandidateFinding[];
+}
+
+export interface ExperienceCandidateSummary {
+  localCandidateId: string | null;
+  cloudCandidateId: string | null;
+  agentDefinitionId: string;
+  sourceAgentVersionId: string;
+  skillName: string;
+  contentDigest: string;
+  localStatus: ExperienceCandidateLocalStatus | null;
+  reviewStatus: ExperienceCandidateReviewStatus | null;
+  lastErrorCode: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
+}
+
+export interface ExperienceCandidateDetail extends ExperienceCandidateSummary {
+  bundle: ExperienceCandidateBundleV1;
+  decisionReasonCode: string | null;
+  safeNote: string | null;
+}
