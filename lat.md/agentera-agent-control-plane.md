@@ -18,7 +18,21 @@ Owner and Admin may publish immutable Workspace versions, and active Members may
 
 The approved enterprise foundation adds Organization identity, transferable ownership, roles, Departments, signed policy, audit, lifecycle, and trusted product context before Agent control accepts Organization-owned assets.
 
-[[agentera-organizations|Organization Foundation V1]] deliberately exposes an explicit unavailable Agent state while an Organization is selected. It does not map Organization navigation to USER ownership, add `owner_scope=ORGANIZATION`, create an Installation, or touch a Hermes Profile. The next separate Agent slice consumes the foundation's authorization and policy contracts.
+[[agentera-organizations|Organization Foundation V1]] deliberately exposes an explicit unavailable Agent state while an Organization is selected. It does not map Organization navigation to USER ownership, create an Installation, or touch a Hermes Profile. The section-approved Organization Agent V1 design now defines the separate gate that will replace this stop.
+
+## Organization Agent V1 design checkpoint
+
+The approved direction extends published assets to `owner_scope=ORGANIZATION` while every employee Installation, policy overlay, RuntimeBinding, physical Hermes Profile, and adaptive state remains USER-owned.
+
+Editable drafts remain local to an Owner/Admin device. Submission creates one immutable cloud review package, and a different current Owner/Admin must approve it before the cloud signs and inserts an immutable AgentVersion. No direct Organization publish route exists.
+
+Owner/Admin/Auditor may inspect review history, while active Owner/Admin/Member may discover and install approved versions. Organization policy and DLP run at submission and approval, and every protected cloud transaction rechecks lifecycle, Membership, role, and current policy.
+
+The desktop derives Organization ID and role from the trusted product-space coordinator. Renderer calls never provide scope, owner, Organization, role, actor, cloud origin, Profile path, or private Hermes content.
+
+Read-only Knowledge, Skill, and SOP projection reuses the verified path outside `HERMES_HOME`. Manual version selection affects new conversations only, and local Memory, USER, sessions, learned Skills, Curator, credentials, and private learning remain unchanged and unsynchronized.
+
+The written design is `docs/superpowers/specs/2026-07-21-agentera-organization-agent-v1-design.md`; no Organization Agent implementation exists at this checkpoint.
 
 ## Trusted Workspace Agent context
 

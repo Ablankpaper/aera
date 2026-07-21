@@ -8,11 +8,13 @@ The first enterprise slice establishes Organization authorization and desktop pr
 
 It supports Organization lifecycle, one transferable Owner, Admin/Auditor/Member roles, single-level Departments, one-time invitations, immutable signed policy snapshots, audit, and offline read-only metadata. The locked design is `docs/superpowers/specs/2026-07-21-agentera-organization-foundation-v1-design.md`.
 
-`owner_scope=ORGANIZATION`, enterprise Agent publication, and member installation remain the next independently gated slice. `owner_scope=PLATFORM` and official managed Agents remain the slice after that.
+The section-approved Organization Agent V1 design is the next independent gate. It adds `owner_scope=ORGANIZATION`, mandatory two-person publication review, and USER-owned member installation without changing Hermes runtime ownership. The written specification awaits review at `docs/superpowers/specs/2026-07-21-agentera-organization-agent-v1-design.md`.
+
+`owner_scope=PLATFORM` and official managed Agents remain the slice after Organization Agent V1.
 
 ## Implementation progress
 
-Organization Foundation is being delivered as independently verified control-plane slices; it is not yet a complete or deployed product feature.
+Organization Foundation is locally implemented and merged to local `main`. It remains unpushed and undeployed; Organization Agent V1 is design-only at this checkpoint.
 
 The first implemented slice is the cloud persistence and configuration foundation in `aera-cloud/migrations/000012_organization_foundation.sql` and `aera-cloud/internal/config/config.go`. It adds six Organization-owned tables, an Organization scope on audit, deferred exactly-one-Owner enforcement, cross-Organization Department and policy-pointer protection, immutable policy snapshots, terminal invitation transitions, and explicit quota/rate-limit configuration.
 
@@ -47,6 +49,18 @@ The fourteenth implemented slice exposes [[src/main/agentera-organization/ipc-co
 The fifteenth implemented slice replaces the legacy Workspace-only renderer selector with [[src/renderer/src/screens/Layout/ProductSpaceSwitcher.tsx#ProductSpaceSwitcher|one global Personal, Workspace, and Organization product-space switcher]] directly below the desktop brand. It groups and sorts Workspace and Organization choices independently, never lists Departments, displays cached offline state, and sends selection only through the product-space bridge without invoking any Hermes Profile method. [[src/renderer/src/screens/Layout/OrganizationManagementDialog.tsx#OrganizationManagementDialog|Organization management]] presents role-aware lifecycle, Membership, Department, invitation, signed policy, and audit controls while treating renderer role checks only as presentation; every mutation still crosses the strict main-process and cloud authorization layers. Owner transfer and dissolution require exact confirmation material, invitation links remain volatile and visible once, and account, selection, role, close, and late-result changes invalidate sensitive dialog state. [[src/renderer/src/components/OrganizationInvitationGate.tsx#OrganizationInvitationGate|The Organization invitation gate]] retains tokens only in memory across sign-in or offline handoff and selects the accepted Organization through the product-space coordinator. Foundation deliberately renders an explicit `organization_agent_not_enabled` experience: it offers no personal or Workspace draft, publication, or installation controls and states that local Hermes Profiles, Memory, conversations, and private learning remain unchanged.
 
 The sixteenth implemented slice closes Foundation with deterministic multi-account and isolation evidence. [[tests/e2e/agentera-organization.e2e.ts]] runs the real strict Organization client, account-generation-aware manager, signed-policy verifier, SQLite cache, and volatile invitation inbox against an in-process cloud fixture. The fixture derives authority only from three bearer identities, rejects unknown routes, headers, queries, bodies, private-runtime fields, idempotency conflicts, unauthorized calls, and token persistence, and stores invitation digests rather than raw secrets. The scenario covers Organization and Department creation, two one-time invitations, Member-to-Admin and Member-to-Auditor transitions, signed policy V2, Auditor policy and audit reads, atomic Owner transfer, archive/restore, leave/removal, empty Department archive, and confirmed dissolution. Before and after every action it hashes the complete populated Hermes tree and separately snapshots selected Profile, active conversation/session, USER RuntimeBinding, Memory, USER, learned Skill, Curator, and Runtime/Gateway identity. [[tests/agentera-organization-boundary.test.ts]] and [[tests/agentera-product-space-boundary.test.ts]] statically prevent Organization or product-space metadata from entering those runtime paths and lock the explicit Organization-Agent-unavailable stop. Run the focused proof with `npm test -- tests/agentera-organization-boundary.test.ts tests/agentera-product-space-boundary.test.ts` and `npm run test:e2e:organization`.
+
+## Organization Agent V1 design checkpoint
+
+Organization Agent V1 extends the existing Agent control plane instead of creating a duplicate enterprise Agent service or a generic tenant rewrite.
+
+Owner and Admin keep editable drafts on their own device. Explicit submission uploads one immutable, digest-bound publication package; another current Owner/Admin must approve it before the cloud signs and inserts an immutable Version. Self-review and direct Organization publication are unavailable.
+
+Owner, Admin, and Auditor may inspect submissions and reviews. Active Owner, Admin, and Member may discover and install approved versions; Auditor remains read-only. Every employee Installation, policy overlay, RuntimeBinding, physical Profile, and adaptive state remains USER-owned.
+
+Organization policy and DLP run at submission and again at approval. An archived Organization is read-only, membership changes fail closed, and the real Agent asset guard blocks dissolution while enterprise submissions, published assets, or referencing Installations exist.
+
+The desktop replaces `ORGANIZATION_UNAVAILABLE` only from the trusted product-space context. Renderer payloads never assert Organization ownership or role, and selecting an Organization never selects a Hermes Profile.
 
 ## Ownership and roles
 
