@@ -1,18 +1,35 @@
 import type { AgenteraAuthPublicState } from "../../shared/agentera-auth";
 import type {
+  ProductSpaceAgentContext,
+  ProductSpacePublicState,
+} from "../../shared/agentera-product-space";
+import type {
   WorkspaceInvitation,
   WorkspaceInvitationAcceptance,
   WorkspaceInvitationCreation,
   WorkspaceMember,
   WorkspacePublicState,
-  WorkspaceRole,
   WorkspaceSummary,
 } from "../../shared/agentera-workspace";
 import type { AgenteraWorkspaceDatabase } from "./db";
 
-export type SelectedAgentContext =
-  | { scope: "USER" }
-  | { scope: "WORKSPACE"; workspaceId: string; role: WorkspaceRole };
+export type SelectedAgentContext = ProductSpaceAgentContext;
+
+export interface AgenteraWorkspaceSelectionCoordinator {
+  readSelectedWorkspaceId(accountUserId: string): string | null;
+  getAgentContext(): ProductSpaceAgentContext;
+  select(
+    input:
+      | {
+          kind: "PERSONAL";
+        }
+      | {
+          kind: "WORKSPACE";
+          workspaceId: string;
+        },
+  ): Promise<ProductSpacePublicState>;
+  subscribe(listener: (state: ProductSpacePublicState) => void): () => void;
+}
 
 export interface AgenteraWorkspaceCloudClient {
   listWorkspaces(): Promise<WorkspaceSummary[]>;
@@ -125,6 +142,9 @@ export interface AgenteraWorkspaceManagerSurface {
     input: AcceptWorkspaceInvitationInput,
   ): Promise<WorkspaceInvitationAcceptance>;
   notifyAccessStateChanged(): Promise<void>;
+  attachProductSpaceCoordinator(
+    coordinator: AgenteraWorkspaceSelectionCoordinator,
+  ): void;
   close(): void;
 }
 
@@ -132,6 +152,7 @@ export interface AgenteraWorkspaceManagerOptions {
   database: AgenteraWorkspaceDatabase;
   client: AgenteraWorkspaceCloudClient;
   getAuthState: () => AgenteraAuthPublicState;
+  selectionCoordinator?: AgenteraWorkspaceSelectionCoordinator;
   now?: () => string;
 }
 
@@ -268,6 +289,9 @@ export class AgenteraWorkspaceManager implements AgenteraWorkspaceManagerSurface
   private readonly now: () => string;
   private readonly listeners = new Set<(state: WorkspacePublicState) => void>();
   private readonly selectedAgentContextListeners = new Set<() => void>();
+  private selectionCoordinator: AgenteraWorkspaceSelectionCoordinator | null =
+    null;
+  private unsubscribeSelectionCoordinator: (() => void) | null = null;
   private fingerprint: string | null = null;
   private epoch = 0;
   private currentUserIsFresh = false;
@@ -280,6 +304,9 @@ export class AgenteraWorkspaceManager implements AgenteraWorkspaceManagerSurface
     this.client = options.client;
     this.getAuthState = options.getAuthState;
     this.now = options.now ?? (() => new Date().toISOString());
+    if (options.selectionCoordinator) {
+      this.attachProductSpaceCoordinator(options.selectionCoordinator);
+    }
   }
 
   subscribe(listener: (state: WorkspacePublicState) => void): () => void {
@@ -294,6 +321,9 @@ export class AgenteraWorkspaceManager implements AgenteraWorkspaceManagerSurface
   }
 
   getSelectedAgentContext(): SelectedAgentContext {
+    if (this.selectionCoordinator) {
+      return this.selectionCoordinator.getAgentContext();
+    }
     const selected = this.buildState(this.readAccess()).selected;
     return selected.kind === "personal"
       ? { scope: "USER" }
@@ -340,6 +370,7 @@ export class AgenteraWorkspaceManager implements AgenteraWorkspaceManagerSurface
     workspaceId: string | null;
   }): Promise<WorkspacePublicState> {
     const access = this.readAccess();
+    const selectionEpoch = this.epoch;
     if (
       typeof input !== "object" ||
       input === null ||
@@ -356,14 +387,40 @@ export class AgenteraWorkspaceManager implements AgenteraWorkspaceManagerSurface
         throw codedError("invalid_request");
       }
     }
-    this.database.writeSelectedWorkspace(
-      access.userId,
-      input.workspaceId,
-      this.now(),
+    if (!this.selectionCoordinator) {
+      throw codedError("selection_coordinator_required");
+    }
+    await this.selectionCoordinator.select(
+      input.workspaceId === null
+        ? { kind: "PERSONAL" }
+        : { kind: "WORKSPACE", workspaceId: input.workspaceId },
     );
-    const state = this.buildState(access);
-    this.emit(state);
-    return state;
+    const current = this.readAccess();
+    if (
+      current.userId !== access.userId ||
+      current.personalSpaceId !== access.personalSpaceId ||
+      this.epoch !== selectionEpoch
+    ) {
+      throw codedError("unauthenticated");
+    }
+    return this.buildState(current);
+  }
+
+  attachProductSpaceCoordinator(
+    coordinator: AgenteraWorkspaceSelectionCoordinator,
+  ): void {
+    this.assertOpen();
+    if (this.selectionCoordinator !== null) {
+      throw codedError("selection_coordinator_already_attached");
+    }
+    this.selectionCoordinator = coordinator;
+    this.unsubscribeSelectionCoordinator = coordinator.subscribe(() => {
+      try {
+        this.emit(this.buildState(this.readAccess()));
+      } catch {
+        // No product-space state is exposed while the account is unavailable.
+      }
+    });
   }
 
   async create(input: CreateWorkspaceInput): Promise<WorkspaceSummary> {
@@ -578,6 +635,9 @@ export class AgenteraWorkspaceManager implements AgenteraWorkspaceManagerSurface
     this.refreshInFlight = null;
     this.listeners.clear();
     this.selectedAgentContextListeners.clear();
+    this.unsubscribeSelectionCoordinator?.();
+    this.unsubscribeSelectionCoordinator = null;
+    this.selectionCoordinator = null;
     this.database.close();
   }
 
@@ -630,15 +690,12 @@ export class AgenteraWorkspaceManager implements AgenteraWorkspaceManagerSurface
     const workspaces = this.database
       .readWorkspaces(access.userId)
       .workspaces.map(cloneWorkspace);
-    const selectedWorkspaceId = this.database.readSelectedWorkspace(
-      access.userId,
-    );
+    const selectedWorkspaceId = this.selectionCoordinator
+      ? this.selectionCoordinator.readSelectedWorkspaceId(access.userId)
+      : this.database.readSelectedWorkspace(access.userId);
     const selectedWorkspace = workspaces.find(
       ({ id, status }) => id === selectedWorkspaceId && status === "active",
     );
-    if (selectedWorkspaceId !== null && !selectedWorkspace) {
-      this.database.writeSelectedWorkspace(access.userId, null, this.now());
-    }
     return {
       access: access.status === "offline" ? "offline" : "online",
       cloudAvailable: isOnline(access),

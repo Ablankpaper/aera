@@ -342,6 +342,19 @@ describe("Agent control IPC contract", () => {
     ).resolves.toEqual({ ok: false, errorCode: code });
   });
 
+  it("preserves the explicit Organization Agent unavailable state", async () => {
+    await expect(
+      executeAgentControlIpc(async () => {
+        throw Object.assign(new Error("private Organization failure"), {
+          code: "organization_agent_not_enabled",
+        });
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      errorCode: "organization_agent_not_enabled",
+    });
+  });
+
   it("maps central online-access denial inside the safe Agent result envelope", async () => {
     const guard = createProductAccessGuard({
       getAuthState: () => ({
@@ -448,8 +461,10 @@ describe("Agent control IPC contract", () => {
     );
     expect(start.match(/new AgenteraAgentControlManager\(/g)).toHaveLength(1);
     expect(start).toContain("agenteraAgentControl,");
-    expect(start).toContain("getSelectedAgentContext");
-    expect(start).toContain("subscribeSelectedAgentContext");
+    expect(start).toContain("agenteraProductSpace?.getAgentContext()");
+    expect(start).toContain("agenteraProductSpace?.subscribe");
+    expect(start).not.toContain("getSelectedAgentContext");
+    expect(start).not.toContain("subscribeSelectedAgentContext");
     expect(start).toContain("notifyAgentContextChanged");
   });
 

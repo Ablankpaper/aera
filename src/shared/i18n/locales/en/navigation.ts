@@ -1,4 +1,5 @@
 import { workspaceEn } from "../workspace";
+import { organizationEn } from "../organization";
 
 export default {
   chat: "Chat",
@@ -45,4 +46,5 @@ export default {
     deleting: "Deleting…",
   },
   workspace: workspaceEn,
+  organization: organizationEn,
 } as const;

@@ -148,6 +148,46 @@ function extractAgenteraWorkspaceTypeMethods(src: string): string[] {
   );
 }
 
+function extractAgenteraProductSpaceMethods(src: string): string[] {
+  const objectMatch = src.match(
+    /const\s+agenteraProductSpaceAPI\s*=\s*\{([\s\S]*?)^\};/m,
+  );
+  if (!objectMatch) return [];
+  return [...objectMatch[1].matchAll(/^\s{2}(\w+)\s*:\s*\(/gm)].map(
+    (match) => match[1],
+  );
+}
+
+function extractAgenteraProductSpaceTypeMethods(src: string): string[] {
+  const interfaceMatch = src.match(
+    /interface\s+AgenteraProductSpaceAPI\s*\{([\s\S]*?)^\}/m,
+  );
+  if (!interfaceMatch) return [];
+  return [...interfaceMatch[1].matchAll(/^\s{2}(\w+)\s*[:(]/gm)].map(
+    (match) => match[1],
+  );
+}
+
+function extractAgenteraOrganizationMethods(src: string): string[] {
+  const objectMatch = src.match(
+    /const\s+agenteraOrganizationAPI\s*=\s*\{([\s\S]*?)^\};/m,
+  );
+  if (!objectMatch) return [];
+  return [...objectMatch[1].matchAll(/^\s{2}(\w+)\s*:\s*\(/gm)].map(
+    (match) => match[1],
+  );
+}
+
+function extractAgenteraOrganizationTypeMethods(src: string): string[] {
+  const interfaceMatch = src.match(
+    /interface\s+AgenteraOrganizationAPI\s*\{([\s\S]*?)^\}/m,
+  );
+  if (!interfaceMatch) return [];
+  return [...interfaceMatch[1].matchAll(/^\s{2}(\w+)\s*[:(]/gm)].map(
+    (match) => match[1],
+  );
+}
+
 describe("Preload API Surface", () => {
   it("preload exposes methods", () => {
     expect(preloadMethods.length).toBeGreaterThan(30);
@@ -359,6 +399,100 @@ describe("AgentEra Workspace preload namespace", () => {
     expect(namespace).toBeDefined();
     expect(namespace).not.toMatch(
       /accessToken|refreshToken|offlineEntitlement|headers|authorization|databasePath|profilePath|sessionId|runtimeBinding|genericUrl/i,
+    );
+  });
+});
+
+describe("AgentEra Product Space preload namespace", () => {
+  const expected = ["getState", "refresh", "select", "onStateChanged"];
+
+  it("exposes exactly the global selection surface", () => {
+    expect(extractAgenteraProductSpaceMethods(preloadSrc)).toEqual(expected);
+    expect(extractAgenteraProductSpaceTypeMethods(preloadTypes)).toEqual(
+      expected,
+    );
+    expect(preloadSrc).toMatch(
+      /contextBridge\.exposeInMainWorld\(\s*"agenteraProductSpace",\s*agenteraProductSpaceAPI,?\s*\)/,
+    );
+  });
+
+  it("does not expose Profile, Runtime, account, credentials, or generic transport", () => {
+    const namespace = preloadTypes.match(
+      /interface\s+AgenteraProductSpaceAPI\s*\{([\s\S]*?)^\}/m,
+    )?.[1];
+    expect(namespace).toBeDefined();
+    expect(namespace).not.toMatch(
+      /profile|runtime|ownerId|userId|token|headers|authorization|url|database/i,
+    );
+  });
+
+  it("returns a removable state listener", () => {
+    expect(preloadSrc).toContain(
+      'ipcRenderer.removeListener(\n        "agentera-product-space-state-changed",',
+    );
+  });
+});
+
+describe("AgentEra Organization preload namespace", () => {
+  const expected = [
+    "getState",
+    "refresh",
+    "create",
+    "rename",
+    "archive",
+    "restore",
+    "transferOwner",
+    "dissolve",
+    "listMembers",
+    "patchMember",
+    "removeMember",
+    "leave",
+    "listDepartments",
+    "createDepartment",
+    "renameDepartment",
+    "archiveDepartment",
+    "restoreDepartment",
+    "listInvitations",
+    "createInvitation",
+    "revokeInvitation",
+    "acceptInvitation",
+    "getPendingInvitation",
+    "dismissPendingInvitation",
+    "getCurrentPolicy",
+    "listPolicySnapshots",
+    "publishPolicy",
+    "getPolicySnapshot",
+    "listAuditEvents",
+    "onStateChanged",
+    "onInvitationReceived",
+  ];
+
+  it("exposes exactly the reviewed enterprise control surface", () => {
+    expect(extractAgenteraOrganizationMethods(preloadSrc)).toEqual(expected);
+    expect(extractAgenteraOrganizationTypeMethods(preloadTypes)).toEqual(
+      expected,
+    );
+    expect(preloadSrc).toMatch(
+      /contextBridge\.exposeInMainWorld\(\s*"agenteraOrganization",\s*agenteraOrganizationAPI,?\s*\)/,
+    );
+  });
+
+  it("does not expose Profile, Runtime, credentials, transport, or server authority", () => {
+    const namespace = preloadTypes.match(
+      /interface\s+AgenteraOrganizationAPI\s*\{([\s\S]*?)^\}/m,
+    )?.[1];
+    expect(namespace).toBeDefined();
+    expect(namespace).not.toMatch(
+      /profilePath|runtimeBinding|sessionId|memory|accessToken|refreshToken|headers|authorization|cloudOrigin|databasePath|actorId/i,
+    );
+  });
+
+  it("returns removable state and invitation listeners", () => {
+    expect(preloadSrc).toContain(
+      'ipcRenderer.removeListener(\n        "agentera-organization-state-changed",',
+    );
+    expect(preloadSrc).toContain(
+      'ipcRenderer.removeListener(\n        "agentera-organization-invitation-received",',
     );
   });
 });

@@ -50,7 +50,7 @@ async function bootstrapAndStartMainProcess(): Promise<void> {
 
 const workspaceInvitationInbox = new WorkspaceInvitationInbox();
 
-function registerWorkspaceInvitationProtocol(): void {
+function registerAgenteraInvitationProtocol(): void {
   if (app.isPackaged) {
     app.setAsDefaultProtocolClient("agentera");
     return;
@@ -75,7 +75,7 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
-  registerWorkspaceInvitationProtocol();
+  registerAgenteraInvitationProtocol();
   app.on("open-url", (event, url) => {
     event.preventDefault();
     workspaceInvitationInbox.receiveDeepLink(url);

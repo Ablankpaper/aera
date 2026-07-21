@@ -33,7 +33,9 @@ function registeredChannels(): string[] {
           node.expression.name.text === "on")) ||
         (ts.isIdentifier(node.expression) &&
           (node.expression.text === "registerAgentControlHandler" ||
-            node.expression.text === "registerWorkspaceHandler")))
+            node.expression.text === "registerWorkspaceHandler" ||
+            node.expression.text === "registerOrganizationHandler" ||
+            node.expression.text === "registerProductSpaceHandler")))
     ) {
       const first = node.arguments[0];
       if (!first || !ts.isStringLiteralLike(first)) {
@@ -121,6 +123,8 @@ describe("AgentEra central IPC product-access guard", () => {
         "agentera-auth-retry-online",
         "agentera-auth-start-login",
         "agentera-install-file-probe",
+        "agentera-organization-dismiss-pending-invitation",
+        "agentera-organization-get-pending-invitation",
         "agentera-startup-preflight",
         "agentera-workspace-dismiss-pending-invitation",
         "agentera-workspace-get-pending-invitation",

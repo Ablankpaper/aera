@@ -40,6 +40,11 @@ vi.mock("./components/WorkspaceInvitationGate", () => ({
     <div data-testid="workspace-invitation-gate">{authState.status}</div>
   ),
 }));
+vi.mock("./components/OrganizationInvitationGate", () => ({
+  default: ({ authState }: { authState: AgenteraAuthPublicState }) => (
+    <div data-testid="organization-invitation-gate">{authState.status}</div>
+  ),
+}));
 vi.mock("./screens/SplashScreen/SplashScreen", () => ({
   default: ({ onSwitchToLocal }: { onSwitchToLocal?: () => void }) => (
     <div data-testid="screen-splash">
@@ -288,6 +293,9 @@ describe("AgentEra startup gate", () => {
     expect(screen.getByTestId("workspace-invitation-gate")).toHaveTextContent(
       "authenticated",
     );
+    expect(
+      screen.getByTestId("organization-invitation-gate"),
+    ).toHaveTextContent("authenticated");
     expect(runtime.inspectActiveProfile).toHaveBeenCalledOnce();
   });
 

@@ -463,26 +463,6 @@ export class AgenteraWorkspaceDatabase {
              )`,
         )
         .run(account, account);
-      const activeIDs = new Set(
-        normalized
-          .filter(({ status }) => status === "active")
-          .map(({ id }) => id),
-      );
-      const selected = this.sqlite
-        .prepare(
-          "SELECT selected_workspace_id FROM workspace_selection WHERE account_user_id = ?",
-        )
-        .get(account) as { selected_workspace_id?: unknown } | undefined;
-      if (
-        typeof selected?.selected_workspace_id === "string" &&
-        !activeIDs.has(selected.selected_workspace_id)
-      ) {
-        this.sqlite
-          .prepare(
-            "UPDATE workspace_selection SET selected_workspace_id = NULL, updated_at = ? WHERE account_user_id = ?",
-          )
-          .run(refreshed, account);
-      }
     });
   }
 

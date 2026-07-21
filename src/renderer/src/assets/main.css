@@ -1675,6 +1675,21 @@ body {
   text-transform: uppercase;
 }
 
+.product-space-switcher-group + .product-space-switcher-group {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+}
+
+.product-space-switcher-group-label {
+  padding: 3px 8px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .workspace-switcher-choice,
 .workspace-switcher-manage {
   position: relative;
@@ -16136,6 +16151,91 @@ body {
   border-top: 1px solid var(--border);
 }
 
+.organization-management-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 14px 0 2px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.organization-management-tabs button {
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.organization-management-tabs button:hover,
+.organization-management-tabs button:focus-visible,
+.organization-management-tabs button[aria-selected="true"] {
+  border-color: var(--border-bright);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.organization-management-detail select,
+.organization-management-detail input {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 11px;
+}
+
+.organization-management-detail select:focus,
+.organization-management-detail input:focus {
+  border-color: var(--accent);
+}
+
+.organization-management-danger-zone {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid
+    color-mix(in srgb, var(--error, #dc2626) 30%, var(--border));
+}
+
+.organization-management-danger-zone form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--error, #dc2626) 28%, var(--border));
+  border-radius: var(--radius-md);
+}
+
+.organization-management-danger-zone label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.agent-control-organization-unavailable .agent-control-section-header {
+  align-items: flex-start;
+}
+
+.agent-control-organization-unavailable .agent-control-notice {
+  max-width: 720px;
+  margin-top: 12px;
+}
+
 /* Volatile invitation handoff is outside AuthGate so a protocol link can be
    retained while the user signs in, without placing its token in the DOM. */
 .workspace-invitation-handoff {
@@ -16212,5 +16312,9 @@ body {
     max-height: 210px;
     border-inline-end: 0;
     border-bottom: 1px solid var(--border);
+  }
+
+  .organization-management-danger-zone {
+    grid-template-columns: 1fr;
   }
 }

@@ -26,6 +26,8 @@ The global switcher below the AgentEra brand combines the existing personal-spac
 
 Selection is account-scoped product navigation state. It does not switch a Hermes Profile, move sessions or files, rewrite a RuntimeBinding, or activate a workspace Agent. Archived workspaces are managed separately and are not selectable as an active context.
 
+The global selector is now backed by one trusted product-space coordinator shared with [[agentera-organizations|Organization Foundation]]. Existing Workspace selection compatibility delegates to that coordinator, so Personal, Workspace, and Organization cannot become competing writable selection stores. This changes navigation metadata only: it neither changes Workspace Agent ownership nor switches the active Hermes Profile, and Departments never become global choices.
+
 The trusted main process now separates this context into three layers:
 
 - a strict generated-contract cloud client for the 13 Workspace routes;
@@ -87,6 +89,8 @@ The compatibility gate prevents workspace navigation and collaboration metadata 
 `tests/agentera-workspace-boundary.test.ts` rejects Workspace-domain imports into Hermes execution, Profile mutation, sessions, Skills, Curator, Runtime distribution or binding, and legacy `agent-sync.ts`. It permits only the startup-level selected-context signal into Agent control and proves RuntimeBinding ownership remains USER-only.
 
 The deterministic E2E additionally hashes a populated Hermes Profile tree and snapshots the selected Profile marker plus active USER RuntimeBinding before and after every workspace operation. All bytes and identities must remain unchanged. Existing Hermes compatibility suites remain part of the focused and complete desktop gates.
+
+`tests/agentera-product-space-boundary.test.ts` additionally locks the shared coordinator: Organization selection must stop at `ORGANIZATION_UNAVAILABLE`, Workspace compatibility must remain delegated, and neither path may call Profile, RuntimeBinding, Runtime distribution, browser persistence, or Hermes adaptive-state APIs.
 
 ### Workspace Agent runtime boundary
 

@@ -304,6 +304,46 @@ import {
   serializeWorkspacePublicState,
   serializeWorkspaceSummary,
 } from "../agentera-workspace/ipc-contract";
+import type { AgenteraOrganizationManager } from "../agentera-organization/manager";
+import {
+  executeOrganizationIpc,
+  parseAcceptOrganizationInvitationInput,
+  parseCreateOrganizationDepartmentInput,
+  parseCreateOrganizationInput,
+  parseDismissOrganizationInvitationInput,
+  parseDissolveOrganizationInput,
+  parseGetOrganizationPolicySnapshotInput,
+  parseOrganizationAuditPageInput,
+  parseOrganizationIDInput,
+  parseOrganizationRevisionInput,
+  parsePatchOrganizationMemberInput,
+  parsePublishOrganizationPolicyInput,
+  parseRemoveOrganizationMemberInput,
+  parseRenameOrganizationDepartmentInput,
+  parseRenameOrganizationInput,
+  parseReviseOrganizationDepartmentInput,
+  parseRevokeOrganizationInvitationInput,
+  parseTransferOrganizationOwnerInput,
+  serializeOrganizationAuditPage,
+  serializeOrganizationCurrentPolicyState,
+  serializeOrganizationDepartment,
+  serializeOrganizationDepartmentCollection,
+  serializeOrganizationInvitationAcceptance,
+  serializeOrganizationInvitationCollection,
+  serializeOrganizationInvitationCreation,
+  serializeOrganizationMember,
+  serializeOrganizationMemberCollection,
+  serializeOrganizationPolicySnapshot,
+  serializeOrganizationPolicySummaries,
+  serializeOrganizationPublicState,
+  serializeOrganizationSummary,
+} from "../agentera-organization/ipc-contract";
+import type { AgenteraProductSpaceManager } from "../agentera-product-space/manager";
+import {
+  executeProductSpaceIpc,
+  parseProductSpaceSelectionInput,
+  serializeProductSpacePublicState,
+} from "../agentera-product-space/ipc-contract";
 import {
   probeAgenteraInstallFiles,
   runAgenteraStartupPreflight,
@@ -477,6 +517,8 @@ export interface IpcContext {
   agenteraConnectionOwners: AgenteraConnectionOwnerStore;
   agenteraAgentControl?: AgenteraAgentControlManager | null;
   agenteraWorkspace?: AgenteraWorkspaceManager | null;
+  agenteraOrganization?: AgenteraOrganizationManager | null;
+  agenteraProductSpace?: AgenteraProductSpaceManager | null;
   workspaceInvitationInbox: WorkspaceInvitationInbox;
   runtimeDistribution: RuntimeDistributionManager | null;
 }
@@ -753,6 +795,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     agenteraConnectionOwners,
     agenteraAgentControl,
     agenteraWorkspace,
+    agenteraOrganization,
+    agenteraProductSpace,
     workspaceInvitationInbox,
     runtimeDistribution,
   } = context;
@@ -800,6 +844,55 @@ export function registerIpcHandlers(context: IpcContext): void {
     window.webContents.send(workspaceInvitationChannel, {
       token: invitation.token,
     });
+  });
+  const requireOrganization = (): AgenteraOrganizationManager => {
+    if (!agenteraOrganization) {
+      throw Object.assign(new Error("Organization control is unavailable."), {
+        code: "service_unavailable",
+      });
+    }
+    return agenteraOrganization;
+  };
+  const organizationStateChannel = "agentera-organization-state-changed";
+  const organizationInvitationChannel =
+    "agentera-organization-invitation-received";
+  agenteraOrganization?.subscribe((state) => {
+    const window = getMainWindow();
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) {
+      return;
+    }
+    window.webContents.send(
+      organizationStateChannel,
+      serializeOrganizationPublicState(state),
+    );
+  });
+  workspaceInvitationInbox.subscribeOrganization((invitation) => {
+    const window = getMainWindow();
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) {
+      return;
+    }
+    window.webContents.send(organizationInvitationChannel, {
+      token: invitation.token,
+    });
+  });
+  const requireProductSpace = (): AgenteraProductSpaceManager => {
+    if (!agenteraProductSpace) {
+      throw Object.assign(new Error("Product Space is unavailable."), {
+        code: "service_unavailable",
+      });
+    }
+    return agenteraProductSpace;
+  };
+  const productSpaceStateChannel = "agentera-product-space-state-changed";
+  agenteraProductSpace?.subscribe((state) => {
+    const window = getMainWindow();
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) {
+      return;
+    }
+    window.webContents.send(
+      productSpaceStateChannel,
+      serializeProductSpacePublicState(state),
+    );
   });
   const directProfileTargetIndex: Readonly<Record<string, number>> = {
     "set-profile-avatar": 0,
@@ -861,6 +954,240 @@ export function registerIpcHandlers(context: IpcContext): void {
       }),
     );
   };
+  const registerOrganizationHandler = (
+    channel: string,
+    listener: (...args: unknown[]) => unknown,
+  ): void => {
+    const level = AGENTERA_IPC_CHANNEL_POLICY[channel];
+    if (!level) throw new Error(`Missing AgentEra IPC policy for ${channel}.`);
+    electronIpcMain.handle(channel, (event, ...args: unknown[]) =>
+      executeOrganizationIpc(() => {
+        productAccessGuard.assert(level);
+        return listener(event, ...args);
+      }),
+    );
+  };
+  const registerProductSpaceHandler = (
+    channel: string,
+    listener: (...args: unknown[]) => unknown,
+  ): void => {
+    const level = AGENTERA_IPC_CHANNEL_POLICY[channel];
+    if (!level) throw new Error(`Missing AgentEra IPC policy for ${channel}.`);
+    electronIpcMain.handle(channel, (event, ...args: unknown[]) =>
+      executeProductSpaceIpc(() => {
+        productAccessGuard.assert(level);
+        return listener(event, ...args);
+      }),
+    );
+  };
+
+  registerProductSpaceHandler("agentera-product-space-get-state", () =>
+    requireProductSpace().getState().then(serializeProductSpacePublicState),
+  );
+  registerProductSpaceHandler("agentera-product-space-refresh", () =>
+    requireProductSpace().refresh().then(serializeProductSpacePublicState),
+  );
+  registerProductSpaceHandler(
+    "agentera-product-space-select",
+    (_event, input: unknown) =>
+      requireProductSpace()
+        .select(parseProductSpaceSelectionInput(input))
+        .then(serializeProductSpacePublicState),
+  );
+
+  registerOrganizationHandler("agentera-organization-get-state", () =>
+    requireOrganization().getState().then(serializeOrganizationPublicState),
+  );
+  registerOrganizationHandler("agentera-organization-refresh", () =>
+    requireOrganization().refresh().then(serializeOrganizationPublicState),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-create",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .create(parseCreateOrganizationInput(input))
+        .then(serializeOrganizationSummary),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-rename",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .rename(parseRenameOrganizationInput(input))
+        .then(serializeOrganizationSummary),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-archive",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .archive(parseOrganizationRevisionInput(input))
+        .then(serializeOrganizationSummary),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-restore",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .restore(parseOrganizationRevisionInput(input))
+        .then(serializeOrganizationSummary),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-transfer-owner",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .transferOwner(parseTransferOrganizationOwnerInput(input))
+        .then(serializeOrganizationSummary),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-dissolve",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .dissolve(parseDissolveOrganizationInput(input))
+        .then(serializeOrganizationSummary),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-list-members",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .listMembers(parseOrganizationIDInput(input))
+        .then(serializeOrganizationMemberCollection),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-patch-member",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .patchMember(parsePatchOrganizationMemberInput(input))
+        .then(serializeOrganizationMember),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-remove-member",
+    async (_event, input: unknown) => {
+      await requireOrganization().removeMember(
+        parseRemoveOrganizationMemberInput(input),
+      );
+      return true;
+    },
+  );
+  registerOrganizationHandler(
+    "agentera-organization-leave",
+    async (_event, input: unknown) => {
+      await requireOrganization().leave(parseOrganizationIDInput(input));
+      return true;
+    },
+  );
+  registerOrganizationHandler(
+    "agentera-organization-list-departments",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .listDepartments(parseOrganizationIDInput(input))
+        .then(serializeOrganizationDepartmentCollection),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-create-department",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .createDepartment(parseCreateOrganizationDepartmentInput(input))
+        .then(serializeOrganizationDepartment),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-rename-department",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .renameDepartment(parseRenameOrganizationDepartmentInput(input))
+        .then(serializeOrganizationDepartment),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-archive-department",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .archiveDepartment(parseReviseOrganizationDepartmentInput(input))
+        .then(serializeOrganizationDepartment),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-restore-department",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .restoreDepartment(parseReviseOrganizationDepartmentInput(input))
+        .then(serializeOrganizationDepartment),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-list-invitations",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .listInvitations(parseOrganizationIDInput(input))
+        .then(serializeOrganizationInvitationCollection),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-create-invitation",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .createInvitation(parseOrganizationIDInput(input))
+        .then(serializeOrganizationInvitationCreation),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-revoke-invitation",
+    async (_event, input: unknown) => {
+      await requireOrganization().revokeInvitation(
+        parseRevokeOrganizationInvitationInput(input),
+      );
+      return true;
+    },
+  );
+  registerOrganizationHandler(
+    "agentera-organization-accept-invitation",
+    async (_event, input: unknown) => {
+      const parsed = parseAcceptOrganizationInvitationInput(input);
+      const accepted = await requireOrganization().acceptInvitation(parsed);
+      workspaceInvitationInbox.clearAcceptedOrganization(parsed.token);
+      return serializeOrganizationInvitationAcceptance(accepted);
+    },
+  );
+  registerOrganizationHandler(
+    "agentera-organization-get-pending-invitation",
+    () => workspaceInvitationInbox.peekOrganization(),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-dismiss-pending-invitation",
+    (_event, input: unknown) => {
+      const parsed = parseDismissOrganizationInvitationInput(input);
+      return workspaceInvitationInbox.dismissOrganization(parsed.token);
+    },
+  );
+  registerOrganizationHandler(
+    "agentera-organization-get-current-policy",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .getCurrentPolicy(parseOrganizationIDInput(input))
+        .then(serializeOrganizationCurrentPolicyState),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-list-policy-snapshots",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .listPolicySnapshots(parseOrganizationIDInput(input))
+        .then(serializeOrganizationPolicySummaries),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-publish-policy",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .publishPolicy(parsePublishOrganizationPolicyInput(input))
+        .then(serializeOrganizationPolicySnapshot),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-get-policy-snapshot",
+    (_event, input: unknown) =>
+      requireOrganization()
+        .getPolicySnapshot(parseGetOrganizationPolicySnapshotInput(input))
+        .then(serializeOrganizationPolicySnapshot),
+  );
+  registerOrganizationHandler(
+    "agentera-organization-list-audit-events",
+    (_event, input: unknown) => {
+      const parsed = parseOrganizationAuditPageInput(input);
+      return requireOrganization()
+        .listAuditEvents({ organizationId: parsed.organizationId }, parsed.page)
+        .then(serializeOrganizationAuditPage);
+    },
+  );
 
   registerWorkspaceHandler("agentera-workspace-get-state", () =>
     requireWorkspace().getState().then(serializeWorkspacePublicState),

@@ -415,6 +415,9 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
   if (code === "workspace_owner_unavailable") {
     return "workspace_owner_unavailable";
   }
+  if (code === "organization_agent_not_enabled") {
+    return "organization_agent_not_enabled";
+  }
   if (code === "candidate_source_ineligible") {
     return "candidate_source_ineligible";
   }

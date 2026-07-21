@@ -17,7 +17,7 @@ const preloadSrc = readFileSync(join(ROOT, "src/preload/index.ts"), "utf-8");
 function extractIpcHandleChannels(src: string): string[] {
   const channels: string[] = [];
   const re =
-    /(?:ipcMain\.handle|registerAgentControlHandler|registerWorkspaceHandler)\(\s*["']([^"']+)["']/g;
+    /(?:ipcMain\.handle|registerAgentControlHandler|registerWorkspaceHandler|registerOrganizationHandler|registerProductSpaceHandler)\(\s*["']([^"']+)["']/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(src)) !== null) {
     channels.push(m[1]);

@@ -34,9 +34,14 @@ function errorKey(code: AgenteraAgentControlErrorCode): string {
 }
 
 function contextKey(state: AgenteraAgentControlPublicState): string {
-  return state.context.scope === "USER"
-    ? "USER"
-    : `WORKSPACE\0${state.context.workspaceId}\0${state.context.role}`;
+  switch (state.context.scope) {
+    case "USER":
+      return "USER";
+    case "WORKSPACE":
+      return `WORKSPACE\0${state.context.workspaceId}\0${state.context.role}`;
+    case "ORGANIZATION_UNAVAILABLE":
+      return `ORGANIZATION_UNAVAILABLE\0${state.context.organizationId}\0${state.context.role}`;
+  }
 }
 
 export default function AgentControlPanel({
@@ -73,21 +78,34 @@ export default function AgentControlPanel({
     setLoading(true);
     setError(null);
     try {
-      const [stateResult, installationResult] = await Promise.all([
-        window.agenteraAgents.getState(),
-        window.agenteraAgents.listInstallations(),
-      ]);
+      const stateResult = await window.agenteraAgents.getState();
       if (epoch !== loadEpoch.current) return;
-      const failed = [stateResult, installationResult].find(
-        (result) => !result.ok,
-      );
-      if (failed && !failed.ok) {
-        setError(errorKey(failed.errorCode));
+      if (!stateResult.ok) {
+        setError(errorKey(stateResult.errorCode));
         return;
       }
-      if (!stateResult.ok || !installationResult.ok) return;
-
       const nextState = stateResult.data;
+      const nextContextKey = contextKey(nextState);
+      if (nextState.context.scope === "ORGANIZATION_UNAVAILABLE") {
+        selectedContextKey.current = nextContextKey;
+        setState(nextState);
+        setDrafts([]);
+        setDefinitions([]);
+        setInstallations([]);
+        setEditor(null);
+        setInstallDialog(null);
+        setArchiveTarget(null);
+        setPromotionTarget(null);
+        return;
+      }
+
+      const installationResult =
+        await window.agenteraAgents.listInstallations();
+      if (epoch !== loadEpoch.current) return;
+      if (!installationResult.ok) {
+        setError(errorKey(installationResult.errorCode));
+        return;
+      }
       const memberInstallOnly =
         nextState.context.scope === "WORKSPACE" &&
         nextState.context.role === "member";
@@ -115,7 +133,6 @@ export default function AgentControlPanel({
       }
       if (epoch !== loadEpoch.current) return;
 
-      const nextContextKey = contextKey(nextState);
       if (
         selectedContextKey.current !== null &&
         selectedContextKey.current !== nextContextKey
@@ -219,6 +236,7 @@ export default function AgentControlPanel({
     t("agents.control.installedLocally");
 
   const context = state?.context ?? ({ scope: "USER" } as const);
+  const organizationUnavailable = context.scope === "ORGANIZATION_UNAVAILABLE";
   const isWorkspace = context.scope === "WORKSPACE";
   const isWorkspaceMember = isWorkspace && context.role === "member";
   const workspaceReadOnly =
@@ -226,6 +244,41 @@ export default function AgentControlPanel({
     (state?.access !== "online" || state.cloudAvailable === false);
   const canViewDrafts = !isWorkspaceMember;
   const canAuthor = !isWorkspace || (!isWorkspaceMember && !workspaceReadOnly);
+
+  if (!loading && organizationUnavailable) {
+    return (
+      <section
+        className="agent-control-panel agent-control-organization-unavailable"
+        aria-labelledby="agent-control-title"
+      >
+        <div className="agent-control-section-header">
+          <div>
+            <span className="agent-control-eyebrow">
+              {t("navigation.organization.agentUnavailable.eyebrow")}
+            </span>
+            <h2 id="agent-control-title">
+              {t("navigation.organization.agentUnavailable.title")}
+            </h2>
+            <p>{t("navigation.organization.agentUnavailable.description")}</p>
+            <p className="agent-control-notice">
+              {t("navigation.organization.agentUnavailable.boundary")}
+            </p>
+            <span className="agent-control-eyebrow">
+              {t(`navigation.organization.roles.${context.role}`)}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => void load()}
+            aria-label={t("agents.control.refresh")}
+          >
+            <Refresh size={14} />
+          </button>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section

@@ -1,4 +1,5 @@
 import { workspaceEn } from "../workspace";
+import { organizationEn } from "../organization";
 
 export default {
   chat: "チャット",
@@ -24,4 +25,5 @@ export default {
   collapseSidebar: "サイドバーを折りたたむ",
   expandSidebar: "サイドバーを展開",
   workspace: workspaceEn,
+  organization: organizationEn,
 } as const;

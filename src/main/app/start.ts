@@ -62,6 +62,18 @@ import {
 import { AgenteraWorkspaceClient } from "../agentera-workspace/client";
 import { AgenteraWorkspaceManager } from "../agentera-workspace/manager";
 import { WorkspaceInvitationInbox } from "../agentera-workspace/deep-link";
+import {
+  openAgenteraOrganizationDatabase,
+  type AgenteraOrganizationDatabase,
+} from "../agentera-organization/db";
+import { AgenteraOrganizationClient } from "../agentera-organization/client";
+import { AgenteraOrganizationPolicyVerifier } from "../agentera-organization/policy-verifier";
+import { AgenteraOrganizationManager } from "../agentera-organization/manager";
+import {
+  openAgenteraProductSpaceDatabase,
+  type AgenteraProductSpaceDatabase,
+} from "../agentera-product-space/db";
+import { AgenteraProductSpaceManager } from "../agentera-product-space/manager";
 import { createProfile, setActiveProfile } from "../profiles";
 
 const APP_NAME =
@@ -211,8 +223,77 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
   }
   let agenteraWorkspaceDatabase: AgenteraWorkspaceDatabase | null = null;
   let agenteraWorkspace: AgenteraWorkspaceManager | null = null;
+  let agenteraOrganizationDatabase: AgenteraOrganizationDatabase | null = null;
+  let agenteraOrganization: AgenteraOrganizationManager | null = null;
+  let agenteraProductSpaceDatabase: AgenteraProductSpaceDatabase | null = null;
+  let agenteraProductSpace: AgenteraProductSpaceManager | null = null;
   let agenteraAgentControlDatabase: AgenteraControlPlaneDatabase | null = null;
   let agenteraAgentControl: AgenteraAgentControlManager | null = null;
+  try {
+    agenteraWorkspaceDatabase = openAgenteraWorkspaceDatabase(
+      app.getPath("userData"),
+    );
+    const workspaceClient = new AgenteraWorkspaceClient({
+      origin: getAgenteraCloudOrigin(),
+      getAccessToken: () => agenteraAuth.getAccessTokenForCloudRequest(),
+    });
+    agenteraWorkspace = new AgenteraWorkspaceManager({
+      database: agenteraWorkspaceDatabase,
+      client: workspaceClient,
+      getAuthState: () => agenteraAuth.getPublicState(),
+    });
+  } catch {
+    agenteraWorkspaceDatabase?.close();
+    agenteraWorkspaceDatabase = null;
+    agenteraWorkspace = null;
+    console.error("[AGENTERA_WORKSPACE] unavailable");
+  }
+  try {
+    agenteraOrganizationDatabase = openAgenteraOrganizationDatabase(
+      app.getPath("userData"),
+    );
+    const organizationClient = new AgenteraOrganizationClient({
+      origin: getAgenteraCloudOrigin(),
+      getAccessToken: () => agenteraAuth.getAccessTokenForCloudRequest(),
+    });
+    const organizationPolicyVerifier = new AgenteraOrganizationPolicyVerifier({
+      origin: getAgenteraCloudOrigin(),
+    });
+    agenteraOrganization = new AgenteraOrganizationManager({
+      database: agenteraOrganizationDatabase,
+      client: organizationClient,
+      policyVerifier: organizationPolicyVerifier,
+      getAuthState: () => agenteraAuth.getPublicState(),
+    });
+  } catch {
+    agenteraOrganizationDatabase?.close();
+    agenteraOrganizationDatabase = null;
+    agenteraOrganization = null;
+    console.error("[AGENTERA_ORGANIZATION] unavailable");
+  }
+  if (agenteraWorkspace && agenteraOrganization) {
+    try {
+      agenteraProductSpaceDatabase = openAgenteraProductSpaceDatabase(
+        app.getPath("userData"),
+      );
+      agenteraProductSpace = new AgenteraProductSpaceManager({
+        database: agenteraProductSpaceDatabase,
+        workspaceSource: agenteraWorkspace,
+        organizationSource: agenteraOrganization,
+        getLegacyWorkspaceSelection: (accountUserId) =>
+          agenteraWorkspaceDatabase?.readSelectedWorkspace(accountUserId) ??
+          null,
+        getAuthState: () => agenteraAuth.getPublicState(),
+      });
+      agenteraWorkspace.attachProductSpaceCoordinator(agenteraProductSpace);
+    } catch {
+      agenteraProductSpace?.close();
+      if (!agenteraProductSpace) agenteraProductSpaceDatabase?.close();
+      agenteraProductSpaceDatabase = null;
+      agenteraProductSpace = null;
+      console.error("[AGENTERA_PRODUCT_SPACE] unavailable");
+    }
+  }
   try {
     agenteraAgentControlDatabase = openAgenteraControlPlaneDatabase(
       app.getPath("userData"),
@@ -234,7 +315,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
       userDataPath: app.getPath("userData"),
       getOwner: getAgenteraRuntimeOwner,
       getAgentContext: () =>
-        agenteraWorkspace?.getSelectedAgentContext() ?? { scope: "USER" },
+        agenteraProductSpace?.getAgentContext() ?? { scope: "USER" },
       getAuthState: () => agenteraAuth.getPublicState(),
       getRuntimeVersion: async () => {
         const invocationVersion = getRuntimeInvocation()?.version;
@@ -254,27 +335,8 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     agenteraAgentControl = null;
     console.error("[AGENTERA_AGENT_CONTROL] unavailable");
   }
-  try {
-    agenteraWorkspaceDatabase = openAgenteraWorkspaceDatabase(
-      app.getPath("userData"),
-    );
-    const workspaceClient = new AgenteraWorkspaceClient({
-      origin: getAgenteraCloudOrigin(),
-      getAccessToken: () => agenteraAuth.getAccessTokenForCloudRequest(),
-    });
-    agenteraWorkspace = new AgenteraWorkspaceManager({
-      database: agenteraWorkspaceDatabase,
-      client: workspaceClient,
-      getAuthState: () => agenteraAuth.getPublicState(),
-    });
-  } catch {
-    agenteraWorkspaceDatabase?.close();
-    agenteraWorkspaceDatabase = null;
-    agenteraWorkspace = null;
-    console.error("[AGENTERA_WORKSPACE] unavailable");
-  }
-  const unsubscribeSelectedAgentContext =
-    agenteraWorkspace?.subscribeSelectedAgentContext(() => {
+  const unsubscribeProductSpace =
+    agenteraProductSpace?.subscribe(() => {
       agenteraAgentControl?.notifyAgentContextChanged();
     }) ?? (() => undefined);
   const ownerSwitchCoordinator = createAgenteraOwnerSwitchCoordinator({
@@ -284,6 +346,8 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
   const unsubscribeAgenteraAuth = agenteraAuth.subscribe((state) => {
     agenteraAgentControl?.notifyAccessStateChanged();
     void agenteraWorkspace?.notifyAccessStateChanged();
+    void agenteraOrganization?.notifyAccessStateChanged();
+    void agenteraProductSpace?.notifyAccessStateChanged();
     ownerSwitchCoordinator.transitionTo(
       state.status === "authenticated" || state.status === "offline"
         ? state.userId
@@ -320,6 +384,8 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     agenteraConnectionOwners,
     agenteraAgentControl,
     agenteraWorkspace,
+    agenteraOrganization,
+    agenteraProductSpace,
     workspaceInvitationInbox,
     runtimeDistribution,
   });
@@ -382,8 +448,10 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
 
   app.on("before-quit", () => {
     unsubscribeAgenteraAuth();
-    unsubscribeSelectedAgentContext();
+    unsubscribeProductSpace();
     agenteraAuth.dispose();
+    agenteraProductSpace?.close();
+    agenteraOrganization?.close();
     agenteraWorkspace?.close();
     agenteraAgentControlDatabase?.close();
     stopActiveRuntimeContext();

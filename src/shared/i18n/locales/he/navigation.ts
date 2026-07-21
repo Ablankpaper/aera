@@ -1,4 +1,5 @@
 import { workspaceEn } from "../workspace";
+import { organizationEn } from "../organization";
 
 export default {
   chat: "צ'אט",
@@ -24,4 +25,5 @@ export default {
   collapseSidebar: "כווץ סרגל צד",
   expandSidebar: "הרחב סרגל צד",
   workspace: workspaceEn,
+  organization: organizationEn,
 } as const;

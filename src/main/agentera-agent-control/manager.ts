@@ -3,6 +3,7 @@ import type {
   AgentDraft,
   AgentDraftDetail,
   AgenteraAgentControlPublicState,
+  AgenteraAgentControlContext,
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
   AgenteraAgentVersionSummary,
@@ -68,7 +69,7 @@ interface FullAgentControlOptions {
   profiles: AgentInstallationProfileAdapter;
   userDataPath: string;
   getOwner: () => AgenteraRuntimeOwner;
-  getAgentContext?: () => AgentAssetContext;
+  getAgentContext?: () => AgenteraAgentControlContext;
   getAuthState: () => AgenteraAuthPublicState;
   getRuntimeVersion: () => string | Promise<string>;
   getConnectionMode: () => "local" | "remote" | "ssh";
@@ -119,10 +120,26 @@ function ownerKey(owner: AgenteraRuntimeOwner): string {
 }
 
 function normalizeAgentContext(
-  context: AgentAssetContext | undefined,
-): AgentAssetContext {
+  context: AgenteraAgentControlContext | undefined,
+): AgenteraAgentControlContext {
   if (context === undefined || context.scope === "USER") {
     return { scope: "USER" };
+  }
+  if (context.scope === "ORGANIZATION_UNAVAILABLE") {
+    if (
+      !UUID_PATTERN.test(context.organizationId) ||
+      (context.role !== "owner" &&
+        context.role !== "admin" &&
+        context.role !== "auditor" &&
+        context.role !== "member")
+    ) {
+      throw codedError("invalid_request");
+    }
+    return {
+      scope: "ORGANIZATION_UNAVAILABLE",
+      organizationId: context.organizationId.toLowerCase(),
+      role: context.role,
+    };
   }
   if (
     context.scope !== "WORKSPACE" ||
@@ -140,10 +157,15 @@ function normalizeAgentContext(
   };
 }
 
-function contextKey(context: AgentAssetContext): string {
-  return context.scope === "USER"
-    ? "USER"
-    : `WORKSPACE\0${context.workspaceId}\0${context.role}`;
+function contextKey(context: AgenteraAgentControlContext): string {
+  switch (context.scope) {
+    case "USER":
+      return "USER";
+    case "WORKSPACE":
+      return `WORKSPACE\0${context.workspaceId}\0${context.role}`;
+    case "ORGANIZATION_UNAVAILABLE":
+      return `ORGANIZATION_UNAVAILABLE\0${context.organizationId}\0${context.role}`;
+  }
 }
 
 function installationMatchesContext(
@@ -281,10 +303,29 @@ export class AgenteraAgentControlManager {
   }
 
   getState(): AgenteraAgentControlPublicState {
-    this.assertLocalAccess();
+    this.assertProductAccess();
     const state = this.requireFull().getAuthState();
-    const owner = this.owner();
     const context = this.context();
+    const common = {
+      access:
+        state.status === "offline" ? ("offline" as const) : ("online" as const),
+      cloudAvailable:
+        (state.status === "authenticated" || state.status === "offline") &&
+        state.cloudAvailable,
+    };
+    if (context.scope === "ORGANIZATION_UNAVAILABLE") {
+      return {
+        ...common,
+        context: {
+          scope: "ORGANIZATION_UNAVAILABLE",
+          organizationId: context.organizationId,
+          role: context.role,
+        },
+        draftCount: 0,
+        installationCount: 0,
+      };
+    }
+    const owner = this.owner();
     const workspaceId =
       context.scope === "WORKSPACE" ? context.workspaceId : null;
     const draftCount = this.options.database?.sqlite
@@ -310,10 +351,7 @@ export class AgenteraAgentControlManager {
         workspaceId,
       ) as { count?: unknown } | undefined;
     return {
-      access: state.status === "offline" ? "offline" : "online",
-      cloudAvailable:
-        (state.status === "authenticated" || state.status === "offline") &&
-        state.cloudAvailable,
+      ...common,
       context:
         context.scope === "USER"
           ? { scope: "USER" }
@@ -413,7 +451,7 @@ export class AgenteraAgentControlManager {
 
   async listDefinitions(): Promise<AgenteraAgentDefinitionSummary[]> {
     await this.assertOnlineAccess(false);
-    const context = this.context();
+    const context = this.assetContext();
     const definitions =
       context.scope === "USER"
         ? await this.requireFull().client.listDefinitions()
@@ -427,7 +465,7 @@ export class AgenteraAgentControlManager {
     definitionId: string,
   ): Promise<AgenteraAgentVersionSummary[]> {
     await this.assertOnlineAccess(false);
-    const context = this.context();
+    const context = this.assetContext();
     const versions =
       context.scope === "USER"
         ? await this.requireFull().client.listVersions(definitionId)
@@ -441,7 +479,7 @@ export class AgenteraAgentControlManager {
   async listInstallations(): Promise<AgenteraAgentInstallationSummary[]> {
     this.assertLocalAccess();
     return (await this.ensureRuntimeComponents()).installations
-      .listLocalInstallations(this.context())
+      .listLocalInstallations(this.assetContext())
       .map(serializeInstallation);
   }
 
@@ -449,7 +487,7 @@ export class AgenteraAgentControlManager {
     input: AgenteraInstallVersionInput,
   ): Promise<AgenteraAgentInstallationSummary> {
     await this.assertOnlineLocalRuntimeAccess();
-    const source = this.context();
+    const source = this.assetContext();
     const result = await (
       await this.ensureRuntimeComponents()
     ).installations.install({
@@ -469,7 +507,7 @@ export class AgenteraAgentControlManager {
     if (input.confirmation !== "claim-existing-profile") {
       throw codedError("invalid_request");
     }
-    const source = this.context();
+    const source = this.assetContext();
     const profiles = this.requireFull().profiles;
     const result = await (
       await this.ensureRuntimeComponents()
@@ -666,7 +704,7 @@ export class AgenteraAgentControlManager {
     return new AgentDraftStore({
       database: full.database,
       owner: full.getOwner(),
-      context: this.context(),
+      context: this.assetContext(),
     });
   }
 
@@ -674,17 +712,25 @@ export class AgenteraAgentControlManager {
     return this.requireFull().getOwner();
   }
 
-  private context(): AgentAssetContext {
+  private context(): AgenteraAgentControlContext {
     return normalizeAgentContext(this.options.getAgentContext?.());
   }
 
+  private assetContext(): AgentAssetContext {
+    const context = this.context();
+    if (context.scope === "ORGANIZATION_UNAVAILABLE") {
+      throw codedError("organization_agent_not_enabled");
+    }
+    return context;
+  }
+
   private operationContextKey(): string {
-    return `${ownerKey(this.owner())}\0${contextKey(this.context())}`;
+    return `${ownerKey(this.owner())}\0${contextKey(this.assetContext())}`;
   }
 
   private assertWorkspacePublicationRole(): void {
     this.assertLocalAccess();
-    const context = this.context();
+    const context = this.assetContext();
     if (context.scope === "WORKSPACE" && context.role === "member") {
       throw codedError("workspace_forbidden");
     }
@@ -692,7 +738,7 @@ export class AgenteraAgentControlManager {
 
   private assertWorkspaceReviewRole(): void {
     this.assertLocalAccess();
-    const context = this.context();
+    const context = this.assetContext();
     if (context.scope !== "WORKSPACE" || context.role === "member") {
       throw codedError("workspace_forbidden");
     }
@@ -700,7 +746,7 @@ export class AgenteraAgentControlManager {
 
   private assertAuthoringAccess(): void {
     this.assertWorkspacePublicationRole();
-    const context = this.context();
+    const context = this.assetContext();
     if (context.scope !== "WORKSPACE") return;
     const state = this.requireFull().getAuthState();
     if (state.status !== "authenticated" || !state.cloudAvailable) {
@@ -711,12 +757,17 @@ export class AgenteraAgentControlManager {
   private assertInstallationInContext(
     installation: LocalAgentInstallation,
   ): void {
-    if (!installationMatchesContext(installation, this.context())) {
+    if (!installationMatchesContext(installation, this.assetContext())) {
       throw codedError("installation_not_found");
     }
   }
 
   private assertLocalAccess(): void {
+    this.assertOrganizationAgentAvailable();
+    this.assertProductAccess();
+  }
+
+  private assertProductAccess(): void {
     const full = this.requireFull();
     const state = full.getAuthState();
     if (state.status !== "authenticated" && state.status !== "offline") {
@@ -726,6 +777,7 @@ export class AgenteraAgentControlManager {
   }
 
   private async assertOnlineAccess(refreshKeys: boolean): Promise<void> {
+    this.assertOrganizationAgentAvailable();
     const full = this.requireFull();
     const state = full.getAuthState();
     if (state.status !== "authenticated" || !state.cloudAvailable) {
@@ -741,6 +793,12 @@ export class AgenteraAgentControlManager {
       throw codedError("local_runtime_required");
     }
     await this.refreshSigningKeys();
+  }
+
+  private assertOrganizationAgentAvailable(): void {
+    if (this.context().scope === "ORGANIZATION_UNAVAILABLE") {
+      throw codedError("organization_agent_not_enabled");
+    }
   }
 
   private async refreshSigningKeys(): Promise<void> {
@@ -816,7 +874,7 @@ export class AgenteraAgentControlManager {
     if (!this.trust) throw codedError("operation_failed");
     const runtime = await this.ensureRuntimeComponents();
     const owner = full.getOwner();
-    const context = this.context();
+    const context = this.assetContext();
     const key = `${runtime.key}\0${contextKey(context)}`;
     if (this.contextComponents?.key === key) return this.contextComponents;
     this.publicationOwners.clear();
@@ -837,10 +895,11 @@ export class AgenteraAgentControlManager {
   }
 
   private async ensureExperienceCandidateComponents(): Promise<ExperienceCandidateComponents> {
+    this.assertOrganizationAgentAvailable();
     const full = this.requireFull();
     const runtime = await this.ensureRuntimeComponents();
     const owner = full.getOwner();
-    const context = this.context();
+    const context = this.assetContext();
     const key = `${runtime.key}\0${contextKey(context)}`;
     if (this.experienceCandidateComponents?.key === key) {
       return this.experienceCandidateComponents;
@@ -880,7 +939,7 @@ export class AgenteraAgentControlManager {
           owner,
         ),
       getContext: () => {
-        const current = this.context();
+        const current = this.assetContext();
         return current.scope === "USER"
           ? { scope: "USER" }
           : {
