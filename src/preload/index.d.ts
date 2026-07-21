@@ -61,13 +61,22 @@ import type {
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
+  ConfirmOrganizationReviewInput,
+  ConfirmOrganizationSubmissionInput,
+  ConfirmOrganizationWithdrawalInput,
   CreateAgentDraftInput,
   EligibleExperienceSkill,
   ExperienceCandidateDetail,
   ExperienceCandidateImportPreview,
   ExperienceCandidatePreview,
   ExperienceCandidateSummary,
+  OrganizationAgentSubmissionDetail,
+  OrganizationAgentSubmissionSummary,
+  OrganizationReviewPreview,
+  OrganizationSubmissionPreview,
+  OrganizationWithdrawalPreview,
   PrepareExperienceCandidateInput,
+  PrepareOrganizationReviewInput,
   PublicationPreview,
   PublishedRevision,
   ReviewExperienceCandidateInput,
@@ -390,6 +399,30 @@ interface AgenteraAgentsAPI {
   confirmPublication: (
     publicationHandle: string,
   ) => Promise<AgenteraAgentControlResult<PublishedRevision>>;
+  prepareOrganizationSubmission: (
+    draftId: string,
+  ) => Promise<AgenteraAgentControlResult<OrganizationSubmissionPreview>>;
+  confirmOrganizationSubmission: (
+    input: ConfirmOrganizationSubmissionInput,
+  ) => Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionSummary>>;
+  listOrganizationSubmissions: () => Promise<
+    AgenteraAgentControlResult<OrganizationAgentSubmissionSummary[]>
+  >;
+  getOrganizationSubmission: (
+    submissionId: string,
+  ) => Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionDetail>>;
+  prepareOrganizationReview: (
+    input: PrepareOrganizationReviewInput,
+  ) => Promise<AgenteraAgentControlResult<OrganizationReviewPreview>>;
+  confirmOrganizationReview: (
+    input: ConfirmOrganizationReviewInput,
+  ) => Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionSummary>>;
+  prepareOrganizationWithdrawal: (
+    submissionId: string,
+  ) => Promise<AgenteraAgentControlResult<OrganizationWithdrawalPreview>>;
+  confirmOrganizationWithdrawal: (
+    input: ConfirmOrganizationWithdrawalInput,
+  ) => Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionSummary>>;
   listDefinitions: () => Promise<
     AgenteraAgentControlResult<AgenteraAgentDefinitionSummary[]>
   >;

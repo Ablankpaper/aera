@@ -273,14 +273,23 @@ import {
   parseAgentControlId,
   parseClaimVersionInput,
   parseConfirmExperienceCandidateImportInput,
+  parseConfirmOrganizationReviewInput,
+  parseConfirmOrganizationSubmissionInput,
+  parseConfirmOrganizationWithdrawalInput,
   parseCreateDraftInput,
   parseInstallVersionInput,
   parsePrepareExperienceCandidateInput,
+  parsePrepareOrganizationReviewInput,
   parseRetryPendingInstallationInput,
   parseReviewExperienceCandidateInput,
   parseSelectInstallationVersionInput,
   parseSubmitExperienceCandidateInput,
   parseUpdateDraftInput,
+  serializeOrganizationAgentSubmission,
+  serializeOrganizationReviewPreview,
+  serializeOrganizationSubmissionDetail,
+  serializeOrganizationSubmissionPreview,
+  serializeOrganizationWithdrawalPreview,
 } from "../agentera-agent-control/ipc-contract";
 import type { AgenteraWorkspaceManager } from "../agentera-workspace/manager";
 import type { WorkspaceInvitationInbox } from "../agentera-workspace/deep-link";
@@ -1351,6 +1360,76 @@ export function registerIpcHandlers(context: IpcContext): void {
     "agentera-agents-confirm-publication",
     (_event, handle: unknown) =>
       requireAgentControl().confirmPublication(parseAgentControlId(handle)),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-prepare-organization-submission",
+    async (_event, draftId: unknown) =>
+      serializeOrganizationSubmissionPreview(
+        await requireAgentControl().prepareOrganizationSubmission(
+          parseAgentControlId(draftId),
+        ),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-confirm-organization-submission",
+    async (_event, input: unknown) =>
+      serializeOrganizationAgentSubmission(
+        await requireAgentControl().confirmOrganizationSubmission(
+          parseConfirmOrganizationSubmissionInput(input),
+        ),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-list-organization-submissions",
+    async () =>
+      (await requireAgentControl().listOrganizationSubmissions()).map(
+        serializeOrganizationAgentSubmission,
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-get-organization-submission",
+    async (_event, submissionId: unknown) =>
+      serializeOrganizationSubmissionDetail(
+        await requireAgentControl().getOrganizationSubmission(
+          parseAgentControlId(submissionId),
+        ),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-prepare-organization-review",
+    async (_event, input: unknown) =>
+      serializeOrganizationReviewPreview(
+        await requireAgentControl().prepareOrganizationReview(
+          parsePrepareOrganizationReviewInput(input),
+        ),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-confirm-organization-review",
+    async (_event, input: unknown) =>
+      serializeOrganizationAgentSubmission(
+        await requireAgentControl().confirmOrganizationReview(
+          parseConfirmOrganizationReviewInput(input),
+        ),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-prepare-organization-withdrawal",
+    async (_event, submissionId: unknown) =>
+      serializeOrganizationWithdrawalPreview(
+        await requireAgentControl().prepareOrganizationWithdrawal(
+          parseAgentControlId(submissionId),
+        ),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-confirm-organization-withdrawal",
+    async (_event, input: unknown) =>
+      serializeOrganizationAgentSubmission(
+        await requireAgentControl().confirmOrganizationWithdrawal(
+          parseConfirmOrganizationWithdrawalInput(input),
+        ),
+      ),
   );
   registerAgentControlHandler("agentera-agents-list-definitions", () =>
     requireAgentControl().listDefinitions(),

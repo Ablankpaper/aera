@@ -11,24 +11,41 @@ import type {
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
+  ConfirmOrganizationReviewInput,
+  ConfirmOrganizationSubmissionInput,
+  ConfirmOrganizationWithdrawalInput,
   CreateAgentDraftInput,
   ExperienceCandidateFinding,
+  OrganizationAgentSubmissionDetail,
+  OrganizationAgentSubmissionSummary,
+  OrganizationReviewPreview,
+  OrganizationSubmissionPreview,
+  OrganizationWithdrawalPreview,
   PrepareExperienceCandidateInput,
+  PrepareOrganizationReviewInput,
   ReviewExperienceCandidateInput,
   SubmitExperienceCandidateInput,
   UpdateAgentDraftInput,
 } from "../../shared/agentera-agent-control";
 import type { AgentDefinition, AgentVersion } from "./client";
 import type { LocalAgentInstallation } from "./installation-manager";
+import type {
+  OrganizationAgentSubmissionDetail as MainOrganizationAgentSubmissionDetail,
+  OrganizationReviewPreview as MainOrganizationReviewPreview,
+  OrganizationSubmissionPreview as MainOrganizationSubmissionPreview,
+  OrganizationWithdrawalPreview as MainOrganizationWithdrawalPreview,
+} from "./organization-publication-service";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const PROFILE_ID_PATTERN = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
 const SKILL_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,98}[a-z0-9])?$/;
 const REASON_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const FINDING_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const MAX_DRAFT_IPC_BYTES = 3 * 1024 * 1024;
 const MAX_SAFE_NOTE_LENGTH = 240;
+const MAX_ORGANIZATION_SAFE_NOTE_LENGTH = 500;
 const MAX_FINDING_PATH_BYTES = 512;
 const MAX_IPC_FINDINGS = 128;
 
@@ -292,6 +309,92 @@ export function parseConfirmExperienceCandidateImportInput(
   };
 }
 
+export function parseConfirmOrganizationSubmissionInput(
+  value: unknown,
+): ConfirmOrganizationSubmissionInput {
+  if (
+    !exactObject(value, ["publicationHandle", "confirmation"]) ||
+    value.confirmation !== "submit-organization-agent"
+  ) {
+    return invalidRequest();
+  }
+  return {
+    publicationHandle: parseAgentControlId(value.publicationHandle),
+    confirmation: "submit-organization-agent",
+  };
+}
+
+export function parsePrepareOrganizationReviewInput(
+  value: unknown,
+): PrepareOrganizationReviewInput {
+  if (
+    !exactObject(value, ["submissionId", "decision", "reasonCode", "safeNote"])
+  ) {
+    return invalidRequest();
+  }
+  const submissionId = parseAgentControlId(value.submissionId);
+  if (value.decision === "approve") {
+    if (value.reasonCode !== null || value.safeNote !== null) {
+      return invalidRequest();
+    }
+    return {
+      submissionId,
+      decision: "approve",
+      reasonCode: null,
+      safeNote: null,
+    };
+  }
+  if (
+    value.decision !== "reject" ||
+    typeof value.reasonCode !== "string" ||
+    !REASON_CODE_PATTERN.test(value.reasonCode) ||
+    (value.safeNote !== null &&
+      (typeof value.safeNote !== "string" ||
+        value.safeNote.length < 1 ||
+        value.safeNote.length > MAX_ORGANIZATION_SAFE_NOTE_LENGTH ||
+        /[\r\n\0]/.test(value.safeNote)))
+  ) {
+    return invalidRequest();
+  }
+  return {
+    submissionId,
+    decision: "reject",
+    reasonCode: value.reasonCode,
+    safeNote: value.safeNote,
+  };
+}
+
+export function parseConfirmOrganizationReviewInput(
+  value: unknown,
+): ConfirmOrganizationReviewInput {
+  if (
+    !exactObject(value, ["reviewHandle", "confirmation"]) ||
+    (value.confirmation !== "approve-organization-agent" &&
+      value.confirmation !== "reject-organization-agent")
+  ) {
+    return invalidRequest();
+  }
+  return {
+    reviewHandle: parseAgentControlId(value.reviewHandle),
+    confirmation: value.confirmation,
+  };
+}
+
+export function parseConfirmOrganizationWithdrawalInput(
+  value: unknown,
+): ConfirmOrganizationWithdrawalInput {
+  if (
+    !exactObject(value, ["withdrawalHandle", "confirmation"]) ||
+    value.confirmation !== "withdraw-organization-agent"
+  ) {
+    return invalidRequest();
+  }
+  return {
+    withdrawalHandle: parseAgentControlId(value.withdrawalHandle),
+    confirmation: "withdraw-organization-agent",
+  };
+}
+
 function safeFindingPath(value: unknown): value is string {
   if (
     typeof value !== "string" ||
@@ -321,8 +424,35 @@ function safeFindingPath(value: unknown): value is string {
   );
 }
 
+function safeOrganizationFindingPath(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value !== value.trim() ||
+    value !== value.normalize("NFC") ||
+    value.startsWith("/") ||
+    value.includes("\\") ||
+    value.includes("\0") ||
+    value.includes("://") ||
+    (value.length >= 2 && value[1] === ":") ||
+    Buffer.byteLength(value, "utf8") > MAX_FINDING_PATH_BYTES
+  ) {
+    return false;
+  }
+  return value
+    .split("/")
+    .every(
+      (segment) =>
+        segment.length > 0 &&
+        segment !== "." &&
+        segment !== ".." &&
+        !segment.startsWith("."),
+    );
+}
+
 function sanitizeExperienceCandidateFindings(
   error: unknown,
+  pathValidator: (value: unknown) => value is string = safeFindingPath,
 ): ExperienceCandidateFinding[] {
   if (error === null || typeof error !== "object") return [];
   const raw = (error as { findings?: unknown }).findings;
@@ -338,7 +468,7 @@ function sanitizeExperienceCandidateFindings(
     if (
       typeof finding.code !== "string" ||
       !FINDING_CODE_PATTERN.test(finding.code) ||
-      !safeFindingPath(finding.path) ||
+      !pathValidator(finding.path) ||
       !(
         finding.line === null ||
         (Number.isSafeInteger(finding.line) && (finding.line as number) >= 1)
@@ -380,6 +510,18 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
     return "not_found";
   }
   if (
+    code === "organization_agent_not_found" ||
+    code === "organization_agent_forbidden" ||
+    code === "organization_archived" ||
+    code === "organization_submission_self_review" ||
+    code === "organization_submission_conflict" ||
+    code === "organization_submission_superseded" ||
+    code === "organization_publication_policy_blocked" ||
+    code === "organization_publication_dlp_blocked"
+  ) {
+    return code;
+  }
+  if (
     code.includes("conflict") ||
     code === "draft_conflict" ||
     code === "version_revoked" ||
@@ -415,9 +557,6 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
   if (code === "workspace_owner_unavailable") {
     return "workspace_owner_unavailable";
   }
-  if (code === "organization_agent_not_enabled") {
-    return "organization_agent_not_enabled";
-  }
   if (code === "candidate_source_ineligible") {
     return "candidate_source_ineligible";
   }
@@ -445,8 +584,196 @@ export async function executeAgentControlIpc<T>(
         return { ok: false, errorCode, findings };
       }
     }
+    if (errorCode === "organization_publication_dlp_blocked") {
+      const findings = sanitizeExperienceCandidateFindings(
+        error,
+        safeOrganizationFindingPath,
+      );
+      if (findings.length > 0) {
+        return { ok: false, errorCode, findings };
+      }
+    }
     return { ok: false, errorCode };
   }
+}
+
+function safeDigest(value: unknown): string {
+  if (typeof value !== "string" || !SHA256_PATTERN.test(value)) {
+    return invalidRequest();
+  }
+  return value;
+}
+
+function safeAssetCounts(
+  value: Record<AgentDraftAssetKind, number>,
+): Record<AgentDraftAssetKind, number> {
+  const result = {
+    skill: value.skill,
+    sop: value.sop,
+    knowledge: value.knowledge,
+  };
+  if (
+    !Object.values(result).every(
+      (count) => Number.isSafeInteger(count) && count >= 0,
+    )
+  ) {
+    return invalidRequest();
+  }
+  return result;
+}
+
+export function serializeOrganizationAgentSubmission(
+  value: OrganizationAgentSubmissionSummary,
+): OrganizationAgentSubmissionSummary {
+  return {
+    id: parseAgentControlId(value.id),
+    organizationId: parseAgentControlId(value.organizationId),
+    kind: value.kind,
+    definitionId: parseAgentControlId(value.definitionId),
+    baseVersionId:
+      value.baseVersionId === null
+        ? null
+        : parseAgentControlId(value.baseVersionId),
+    submittedByUserId: parseAgentControlId(value.submittedByUserId),
+    contentDigest: safeDigest(value.contentDigest),
+    status: value.status,
+    revision: value.revision,
+    submittedAt: value.submittedAt,
+    terminalAt: value.terminalAt,
+    review:
+      value.review === null
+        ? null
+        : {
+            id: parseAgentControlId(value.review.id),
+            reviewerUserId: parseAgentControlId(value.review.reviewerUserId),
+            decision: value.review.decision,
+            reasonCode: value.review.reasonCode,
+            safeNote: value.review.safeNote,
+            organizationPolicySnapshotId: parseAgentControlId(
+              value.review.organizationPolicySnapshotId,
+            ),
+            organizationPolicyVersion: value.review.organizationPolicyVersion,
+            reviewedContentDigest: safeDigest(
+              value.review.reviewedContentDigest,
+            ),
+            reviewedAt: value.review.reviewedAt,
+          },
+  };
+}
+
+export function serializeOrganizationSubmissionPreview(
+  value: MainOrganizationSubmissionPreview,
+): OrganizationSubmissionPreview {
+  return {
+    publicationHandle: parseAgentControlId(value.publicationHandle),
+    draftId: parseAgentControlId(value.draftId),
+    revision: value.revision,
+    kind: value.kind,
+    definitionId:
+      value.definitionId === null
+        ? null
+        : parseAgentControlId(value.definitionId),
+    baseVersionId:
+      value.baseVersionId === null
+        ? null
+        : parseAgentControlId(value.baseVersionId),
+    contentDigest: safeDigest(value.contentDigest),
+    assetCounts: safeAssetCounts(value.assetCounts),
+    totalBytes: value.totalBytes,
+    expiresAt: value.expiresAt,
+  };
+}
+
+export function serializeOrganizationSubmissionDetail(
+  value: MainOrganizationAgentSubmissionDetail,
+): OrganizationAgentSubmissionDetail {
+  const bundle = new Map(
+    value.bundle.assets.map((asset) => [asset.path, asset.content] as const),
+  );
+  const assets = value.manifest.assets.map((asset) => {
+    const content = bundle.get(asset.path);
+    if (content === undefined) return invalidRequest();
+    bundle.delete(asset.path);
+    return {
+      path: asset.path,
+      kind: asset.kind,
+      mediaType: asset.media_type,
+      sha256: safeDigest(asset.sha256),
+      content,
+      sizeBytes: Buffer.byteLength(content, "utf8"),
+    };
+  });
+  if (bundle.size !== 0) return invalidRequest();
+  const assetCounts = { skill: 0, sop: 0, knowledge: 0 };
+  for (const asset of assets) assetCounts[asset.kind] += 1;
+  const totalBytes = assets.reduce(
+    (total, asset) => total + asset.sizeBytes,
+    0,
+  );
+  if (totalBytes !== value.totalBytes) return invalidRequest();
+  return {
+    summary: serializeOrganizationAgentSubmission(value.summary),
+    displayName: value.displayName,
+    icon:
+      value.icon === null
+        ? null
+        : {
+            mediaType: value.icon.mediaType,
+            dataBase64Url: value.icon.dataBase64Url,
+          },
+    systemPrompt: value.manifest.identity.system_prompt,
+    assets,
+    modelConstraints: {
+      allowedProviders: [...value.manifest.model_constraints.allowed_providers],
+      allowedModels: [...value.manifest.model_constraints.allowed_models],
+    },
+    tools: {
+      allowed: [...value.manifest.tools.allowed],
+      denied: [...value.manifest.tools.denied],
+    },
+    dependencies: value.manifest.dependencies.map((dependency) => ({
+      agentDefinitionId: parseAgentControlId(dependency.agent_definition_id),
+      agentVersionId: parseAgentControlId(dependency.agent_version_id),
+    })),
+    runtimeCompatibility: {
+      minimumVersion: value.manifest.runtime_compatibility.minimum_version,
+      maximumVersionExclusive:
+        value.manifest.runtime_compatibility.maximum_version_exclusive ?? null,
+    },
+    manifestDigest: safeDigest(value.manifestDigest),
+    bundleDigest: safeDigest(value.bundleDigest),
+    assetCounts,
+    totalBytes,
+  };
+}
+
+export function serializeOrganizationReviewPreview(
+  value: MainOrganizationReviewPreview,
+): OrganizationReviewPreview {
+  return {
+    reviewHandle:
+      value.reviewHandle === null
+        ? null
+        : parseAgentControlId(value.reviewHandle),
+    selfReview: value.selfReview,
+    decision: value.decision,
+    reasonCode: value.reasonCode,
+    safeNote: value.safeNote,
+    detail: serializeOrganizationSubmissionDetail(value.detail),
+    expiresAt: value.expiresAt,
+  };
+}
+
+export function serializeOrganizationWithdrawalPreview(
+  value: MainOrganizationWithdrawalPreview,
+): OrganizationWithdrawalPreview {
+  return {
+    withdrawalHandle: parseAgentControlId(value.withdrawalHandle),
+    submission: serializeOrganizationAgentSubmission(value.submission),
+    revision: value.revision,
+    contentDigest: safeDigest(value.contentDigest),
+    expiresAt: value.expiresAt,
+  };
 }
 
 export function serializeDefinition(

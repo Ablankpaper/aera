@@ -55,13 +55,22 @@ import type {
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
+  ConfirmOrganizationReviewInput,
+  ConfirmOrganizationSubmissionInput,
+  ConfirmOrganizationWithdrawalInput,
   CreateAgentDraftInput,
   EligibleExperienceSkill,
   ExperienceCandidateDetail,
   ExperienceCandidateImportPreview,
   ExperienceCandidatePreview,
   ExperienceCandidateSummary,
+  OrganizationAgentSubmissionDetail,
+  OrganizationAgentSubmissionSummary,
+  OrganizationReviewPreview,
+  OrganizationSubmissionPreview,
+  OrganizationWithdrawalPreview,
   PrepareExperienceCandidateInput,
+  PrepareOrganizationReviewInput,
   PublicationPreview,
   PublishedRevision,
   ReviewExperienceCandidateInput,
@@ -2113,6 +2122,52 @@ const agenteraAgentsAPI = {
     ipcRenderer.invoke(
       "agentera-agents-confirm-publication",
       publicationHandle,
+    ),
+  prepareOrganizationSubmission: (
+    draftId: string,
+  ): Promise<AgenteraAgentControlResult<OrganizationSubmissionPreview>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-prepare-organization-submission",
+      draftId,
+    ),
+  confirmOrganizationSubmission: (
+    input: ConfirmOrganizationSubmissionInput,
+  ): Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionSummary>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-confirm-organization-submission",
+      input,
+    ),
+  listOrganizationSubmissions: (): Promise<
+    AgenteraAgentControlResult<OrganizationAgentSubmissionSummary[]>
+  > => ipcRenderer.invoke("agentera-agents-list-organization-submissions"),
+  getOrganizationSubmission: (
+    submissionId: string,
+  ): Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionDetail>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-get-organization-submission",
+      submissionId,
+    ),
+  prepareOrganizationReview: (
+    input: PrepareOrganizationReviewInput,
+  ): Promise<AgenteraAgentControlResult<OrganizationReviewPreview>> =>
+    ipcRenderer.invoke("agentera-agents-prepare-organization-review", input),
+  confirmOrganizationReview: (
+    input: ConfirmOrganizationReviewInput,
+  ): Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionSummary>> =>
+    ipcRenderer.invoke("agentera-agents-confirm-organization-review", input),
+  prepareOrganizationWithdrawal: (
+    submissionId: string,
+  ): Promise<AgenteraAgentControlResult<OrganizationWithdrawalPreview>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-prepare-organization-withdrawal",
+      submissionId,
+    ),
+  confirmOrganizationWithdrawal: (
+    input: ConfirmOrganizationWithdrawalInput,
+  ): Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionSummary>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-confirm-organization-withdrawal",
+      input,
     ),
   listDefinitions: (): Promise<
     AgenteraAgentControlResult<AgenteraAgentDefinitionSummary[]>

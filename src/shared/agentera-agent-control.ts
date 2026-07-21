@@ -189,6 +189,82 @@ export interface OrganizationAgentSubmissionSummary {
   review: OrganizationAgentReview | null;
 }
 
+export interface OrganizationSubmissionPreview {
+  publicationHandle: string;
+  draftId: string;
+  revision: number;
+  kind: "initial" | "next";
+  definitionId: string | null;
+  baseVersionId: string | null;
+  contentDigest: string;
+  assetCounts: Record<AgentDraftAssetKind, number>;
+  totalBytes: number;
+  expiresAt: string;
+}
+
+export interface OrganizationAgentSubmissionAsset {
+  path: string;
+  kind: AgentDraftAssetKind;
+  mediaType: AgentDraftAssetMediaType;
+  sha256: string;
+  content: string;
+  sizeBytes: number;
+}
+
+/**
+ * Renderer-safe immutable review package. It contains only the explicitly
+ * submitted Agent product asset; Organization policy bytes, credentials,
+ * Profile paths, Memory, sessions, and private learned Skills are absent.
+ */
+export interface OrganizationAgentSubmissionDetail {
+  summary: OrganizationAgentSubmissionSummary;
+  displayName: string | null;
+  icon: {
+    mediaType: AgentDraftIconMediaType;
+    dataBase64Url: string;
+  } | null;
+  systemPrompt: string;
+  assets: OrganizationAgentSubmissionAsset[];
+  modelConstraints: {
+    allowedProviders: string[];
+    allowedModels: string[];
+  };
+  tools: {
+    allowed: string[];
+    denied: string[];
+  };
+  dependencies: Array<{
+    agentDefinitionId: string;
+    agentVersionId: string;
+  }>;
+  runtimeCompatibility: {
+    minimumVersion: string;
+    maximumVersionExclusive: string | null;
+  };
+  manifestDigest: string;
+  bundleDigest: string;
+  assetCounts: Record<AgentDraftAssetKind, number>;
+  totalBytes: number;
+}
+
+export interface OrganizationReviewPreview {
+  reviewHandle: string | null;
+  selfReview: boolean;
+  decision: "approve" | "reject";
+  reasonCode: string | null;
+  safeNote: string | null;
+  detail: OrganizationAgentSubmissionDetail;
+  expiresAt: string | null;
+}
+
+export interface OrganizationWithdrawalPreview {
+  withdrawalHandle: string;
+  submission: OrganizationAgentSubmissionSummary;
+  revision: number;
+  contentDigest: string;
+  expiresAt: string;
+}
+
 /**
  * Mutation confirmation types deliberately carry only a one-use opaque handle
  * and an exact phrase. Trusted Organization identity and role stay in main.

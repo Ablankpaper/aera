@@ -11,12 +11,17 @@ import {
   parseAgentControlId,
   parseClaimVersionInput,
   parseConfirmExperienceCandidateImportInput,
+  parseConfirmOrganizationReviewInput,
+  parseConfirmOrganizationSubmissionInput,
+  parseConfirmOrganizationWithdrawalInput,
   parseCreateDraftInput,
   parseInstallVersionInput,
   parsePrepareExperienceCandidateInput,
+  parsePrepareOrganizationReviewInput,
   parseReviewExperienceCandidateInput,
   parseSubmitExperienceCandidateInput,
   parseUpdateDraftInput,
+  serializeOrganizationSubmissionDetail,
 } from "../src/main/agentera-agent-control/ipc-contract";
 import { AgenteraAgentControlManager } from "../src/main/agentera-agent-control/manager";
 import {
@@ -78,6 +83,14 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-review-experience-candidate",
       "agentera-agents-prepare-experience-candidate-import",
       "agentera-agents-confirm-experience-candidate-import",
+      "agentera-agents-prepare-organization-submission",
+      "agentera-agents-confirm-organization-submission",
+      "agentera-agents-list-organization-submissions",
+      "agentera-agents-get-organization-submission",
+      "agentera-agents-prepare-organization-review",
+      "agentera-agents-confirm-organization-review",
+      "agentera-agents-prepare-organization-withdrawal",
+      "agentera-agents-confirm-organization-withdrawal",
     ]) {
       expect(AGENTERA_IPC_CHANNEL_POLICY[channel]).toBe("online");
     }
@@ -281,6 +294,155 @@ describe("Agent control IPC contract", () => {
     }
   });
 
+  it("accepts only handle-based Organization submission mutations", () => {
+    expect(
+      parseConfirmOrganizationSubmissionInput({
+        publicationHandle: UUID,
+        confirmation: "submit-organization-agent",
+      }),
+    ).toEqual({
+      publicationHandle: UUID,
+      confirmation: "submit-organization-agent",
+    });
+    expect(
+      parsePrepareOrganizationReviewInput({
+        submissionId: UUID,
+        decision: "reject",
+        reasonCode: "needs_revision",
+        safeNote: "Remove the unsupported tool.",
+      }),
+    ).toEqual({
+      submissionId: UUID,
+      decision: "reject",
+      reasonCode: "needs_revision",
+      safeNote: "Remove the unsupported tool.",
+    });
+    expect(
+      parseConfirmOrganizationReviewInput({
+        reviewHandle: UUID,
+        confirmation: "approve-organization-agent",
+      }),
+    ).toEqual({
+      reviewHandle: UUID,
+      confirmation: "approve-organization-agent",
+    });
+    expect(
+      parseConfirmOrganizationWithdrawalInput({
+        withdrawalHandle: UUID,
+        confirmation: "withdraw-organization-agent",
+      }),
+    ).toEqual({
+      withdrawalHandle: UUID,
+      confirmation: "withdraw-organization-agent",
+    });
+
+    for (const privateField of [
+      "organizationId",
+      "role",
+      "ownerScope",
+      "actorUserId",
+      "expectedRevision",
+      "profilePath",
+      "runtimeProfileId",
+      "accessToken",
+    ]) {
+      expect(() =>
+        parseConfirmOrganizationSubmissionInput({
+          publicationHandle: UUID,
+          confirmation: "submit-organization-agent",
+          [privateField]: "forged",
+        }),
+      ).toThrow();
+      expect(() =>
+        parseConfirmOrganizationReviewInput({
+          reviewHandle: UUID,
+          confirmation: "approve-organization-agent",
+          [privateField]: "forged",
+        }),
+      ).toThrow();
+      expect(() =>
+        parseConfirmOrganizationWithdrawalInput({
+          withdrawalHandle: UUID,
+          confirmation: "withdraw-organization-agent",
+          [privateField]: "forged",
+        }),
+      ).toThrow();
+    }
+  });
+
+  it("serializes an Organization review package field by field", () => {
+    const secret = "must-not-cross-organization-ipc";
+    const detail = {
+      summary: {
+        id: UUID,
+        organizationId: VERSION_ID,
+        kind: "initial",
+        definitionId: "33333333-3333-4333-8333-333333333333",
+        baseVersionId: null,
+        submittedByUserId: "44444444-4444-4444-8444-444444444444",
+        contentDigest: "ab".repeat(32),
+        status: "pending",
+        revision: 1,
+        submittedAt: "2026-07-21T00:00:00.000Z",
+        terminalAt: null,
+        review: null,
+      },
+      displayName: "Organization Research Agent",
+      icon: null,
+      manifest: {
+        schema_version: 1,
+        identity: { system_prompt: "Research safely." },
+        assets: [
+          {
+            path: "knowledge/notes.md",
+            kind: "knowledge",
+            media_type: "text/markdown",
+            sha256: "cd".repeat(32),
+          },
+        ],
+        model_constraints: {
+          allowed_providers: ["openai"],
+          allowed_models: ["gpt-5.6"],
+        },
+        tools: { allowed: ["files.read"], denied: [] },
+        dependencies: [],
+        runtime_compatibility: {
+          minimum_version: "v0.18.2-agentera.1",
+          maximum_version_exclusive: null,
+        },
+      },
+      bundle: {
+        assets: [{ path: "knowledge/notes.md", content: "# Notes\n" }],
+      },
+      manifestDigest: "ef".repeat(32),
+      bundleDigest: "12".repeat(32),
+      assetCounts: { skill: 0, sop: 0, knowledge: 1 },
+      totalBytes: 8,
+      accessToken: secret,
+      profilePath: `/private/${secret}`,
+      organizationPolicyBytes: secret,
+    } as unknown as Parameters<typeof serializeOrganizationSubmissionDetail>[0];
+
+    const serialized = serializeOrganizationSubmissionDetail(detail);
+    expect(serialized).toMatchObject({
+      displayName: "Organization Research Agent",
+      systemPrompt: "Research safely.",
+      assets: [
+        {
+          path: "knowledge/notes.md",
+          kind: "knowledge",
+          mediaType: "text/markdown",
+          content: "# Notes\n",
+          sizeBytes: 8,
+        },
+      ],
+    });
+    expect(JSON.stringify(serialized)).not.toContain(secret);
+    expect(serialized).not.toHaveProperty("accessToken");
+    expect(serialized).not.toHaveProperty("profilePath");
+    expect(serialized).not.toHaveProperty("organizationPolicyBytes");
+  });
+
   it("maps failures to stable codes without returning cloud bodies, paths, or private messages", async () => {
     const error = Object.assign(
       new Error(
@@ -342,17 +504,57 @@ describe("Agent control IPC contract", () => {
     ).resolves.toEqual({ ok: false, errorCode: code });
   });
 
-  it("preserves the explicit Organization Agent unavailable state", async () => {
+  it.each([
+    "organization_agent_not_found",
+    "organization_agent_forbidden",
+    "organization_archived",
+    "organization_submission_self_review",
+    "organization_submission_conflict",
+    "organization_submission_superseded",
+    "organization_publication_policy_blocked",
+  ] as const)("preserves stable Organization error %s", async (code) => {
     await expect(
       executeAgentControlIpc(async () => {
         throw Object.assign(new Error("private Organization failure"), {
-          code: "organization_agent_not_enabled",
+          code,
         });
       }),
-    ).resolves.toEqual({
-      ok: false,
-      errorCode: "organization_agent_not_enabled",
+    ).resolves.toEqual({ ok: false, errorCode: code });
+  });
+
+  it("returns bounded Organization DLP findings for non-private asset paths", async () => {
+    const secret = "organization-dlp-evidence-must-not-leak";
+    const result = await executeAgentControlIpc(async () => {
+      throw Object.assign(new Error(secret), {
+        code: "organization_publication_dlp_blocked",
+        findings: [
+          {
+            code: "credential_api_key",
+            path: "knowledge/notes.md",
+            line: 2,
+            evidence: secret,
+          },
+          {
+            code: "private_absolute_path",
+            path: "/Users/private/Profile/MEMORY.md",
+            line: 1,
+            evidence: secret,
+          },
+        ],
+      });
     });
+    expect(result).toEqual({
+      ok: false,
+      errorCode: "organization_publication_dlp_blocked",
+      findings: [
+        {
+          code: "credential_api_key",
+          path: "knowledge/notes.md",
+          line: 2,
+        },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toContain(secret);
   });
 
   it("maps central online-access denial inside the safe Agent result envelope", async () => {
@@ -504,6 +706,14 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-review-experience-candidate",
       "agentera-agents-prepare-experience-candidate-import",
       "agentera-agents-confirm-experience-candidate-import",
+      "agentera-agents-prepare-organization-submission",
+      "agentera-agents-confirm-organization-submission",
+      "agentera-agents-list-organization-submissions",
+      "agentera-agents-get-organization-submission",
+      "agentera-agents-prepare-organization-review",
+      "agentera-agents-confirm-organization-review",
+      "agentera-agents-prepare-organization-withdrawal",
+      "agentera-agents-confirm-organization-withdrawal",
     ]) {
       expect(register.match(new RegExp(`"${channel}"`, "g"))).toHaveLength(1);
     }
