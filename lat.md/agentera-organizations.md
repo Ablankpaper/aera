@@ -46,6 +46,8 @@ The fourteenth implemented slice exposes [[src/main/agentera-organization/ipc-co
 
 The fifteenth implemented slice replaces the legacy Workspace-only renderer selector with [[src/renderer/src/screens/Layout/ProductSpaceSwitcher.tsx#ProductSpaceSwitcher|one global Personal, Workspace, and Organization product-space switcher]] directly below the desktop brand. It groups and sorts Workspace and Organization choices independently, never lists Departments, displays cached offline state, and sends selection only through the product-space bridge without invoking any Hermes Profile method. [[src/renderer/src/screens/Layout/OrganizationManagementDialog.tsx#OrganizationManagementDialog|Organization management]] presents role-aware lifecycle, Membership, Department, invitation, signed policy, and audit controls while treating renderer role checks only as presentation; every mutation still crosses the strict main-process and cloud authorization layers. Owner transfer and dissolution require exact confirmation material, invitation links remain volatile and visible once, and account, selection, role, close, and late-result changes invalidate sensitive dialog state. [[src/renderer/src/components/OrganizationInvitationGate.tsx#OrganizationInvitationGate|The Organization invitation gate]] retains tokens only in memory across sign-in or offline handoff and selects the accepted Organization through the product-space coordinator. Foundation deliberately renders an explicit `organization_agent_not_enabled` experience: it offers no personal or Workspace draft, publication, or installation controls and states that local Hermes Profiles, Memory, conversations, and private learning remain unchanged.
 
+The sixteenth implemented slice closes Foundation with deterministic multi-account and isolation evidence. [[tests/e2e/agentera-organization.e2e.ts]] runs the real strict Organization client, account-generation-aware manager, signed-policy verifier, SQLite cache, and volatile invitation inbox against an in-process cloud fixture. The fixture derives authority only from three bearer identities, rejects unknown routes, headers, queries, bodies, private-runtime fields, idempotency conflicts, unauthorized calls, and token persistence, and stores invitation digests rather than raw secrets. The scenario covers Organization and Department creation, two one-time invitations, Member-to-Admin and Member-to-Auditor transitions, signed policy V2, Auditor policy and audit reads, atomic Owner transfer, archive/restore, leave/removal, empty Department archive, and confirmed dissolution. Before and after every action it hashes the complete populated Hermes tree and separately snapshots selected Profile, active conversation/session, USER RuntimeBinding, Memory, USER, learned Skill, Curator, and Runtime/Gateway identity. [[tests/agentera-organization-boundary.test.ts]] and [[tests/agentera-product-space-boundary.test.ts]] statically prevent Organization or product-space metadata from entering those runtime paths and lock the explicit Organization-Agent-unavailable stop. Run the focused proof with `npm test -- tests/agentera-organization-boundary.test.ts tests/agentera-product-space-boundary.test.ts` and `npm run test:e2e:organization`.
+
 ## Ownership and roles
 
 Every active or archived Organization has exactly one transferable Owner plus optional Admin, Auditor, and Member Memberships.
@@ -90,4 +92,20 @@ Organization reuses security primitives without becoming a Workspace type or ext
 
 The Organization slice ships only after multi-account enterprise flow, policy verification, permission, concurrency, audit, and Hermes compatibility pass together.
 
-The deterministic flow covers creation, Department grouping, invitation, role changes, policy publication, audit, Owner transfer, archive/restore, and safe dissolution. Static and runtime gates prove every Organization operation leaves Profile bytes, Memory, USER, learned Skills, Curator, active RuntimeBinding, and Gateway process identity unchanged.
+### Deterministic multi-account flow
+
+The deterministic flow covers creation through confirmed dissolution across three authenticated accounts.
+
+It includes Department grouping, invitation, role changes, policy publication, audit, Owner transfer, archive/restore, member cleanup, and Department archive. Static and runtime gates prove every action leaves Profile bytes, Memory, USER, learned Skills, Curator, active RuntimeBinding, and Gateway process identity unchanged.
+
+### Hermes compatibility boundary
+
+Every Organization operation is control-plane-only. The static boundary test and the per-action runtime snapshots must both pass; neither a successful mutation nor a rejected authorization attempt may alter Hermes private or adaptive state.
+
+### Product-space isolation
+
+Personal, Workspace, and Organization selection is account-scoped navigation metadata.
+
+Organization Foundation must return `ORGANIZATION_UNAVAILABLE` before Agent stores or Profile/runtime operations, and Workspace compatibility must continue through the single product-space coordinator.
+
+Foundation completion does not authorize `owner_scope=ORGANIZATION`. Organization Agent V1 remains a separate design, implementation, and release gate.
