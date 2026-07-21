@@ -314,7 +314,7 @@ END;
 $$;
 
 CREATE CONSTRAINT TRIGGER organization_agent_submission_variant_trigger
-    AFTER INSERT OR UPDATE ON organization_agent_submissions
+    AFTER INSERT ON organization_agent_submissions
     DEFERRABLE INITIALLY IMMEDIATE
     FOR EACH ROW EXECUTE FUNCTION enforce_organization_agent_submission_variant();
 
