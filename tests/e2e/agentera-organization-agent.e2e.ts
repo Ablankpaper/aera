@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 
 import { expect, test } from "playwright/test";
 
-import type { AgenteraAuthPublicState } from "../../src/shared/agentera-auth";
 import type {
   AgentDraftDetail,
   AgenteraAgentControlPublicState,
@@ -166,7 +165,9 @@ async function invokeOrganization<T>(
   );
 }
 
-async function resetBrowserIdentity(harnessValue: AgentControlHarness) {
+async function resetBrowserIdentity(
+  harnessValue: AgentControlHarness,
+): Promise<void> {
   await harnessValue.browserPage.context().close();
   harnessValue.browserPage = await (
     await harnessValue.browser.newContext({ locale: "en-US" })

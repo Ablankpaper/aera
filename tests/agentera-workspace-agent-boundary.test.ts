@@ -33,6 +33,7 @@ describe("Workspace Agent assets remain outside Hermes private runtime state", (
       "src/main/agentera-agent-control/experience-candidate-importer.ts",
       "src/main/agentera-agent-control/experience-candidate-service.ts",
       "src/main/agentera-agent-control/experience-candidate-store.ts",
+      "src/main/agentera-agent-control/hermes-adapter.ts",
       "src/main/agentera-agent-control/installation-manager.ts",
       "src/main/agentera-agent-control/ipc-contract.ts",
       "src/main/agentera-agent-control/manager.ts",
@@ -53,8 +54,8 @@ describe("Workspace Agent assets remain outside Hermes private runtime state", (
   });
 
   it("rejects Workspace ownership from Hermes, RuntimeBinding, Profile, sessions, Skills, Curator, and Runtime distribution", () => {
+    const adapter = source("src/main/agentera-agent-control/hermes-adapter.ts");
     const isolatedFiles = [
-      "src/main/agentera-agent-control/hermes-adapter.ts",
       "src/main/agentera-agent-control/hermes-projection.ts",
       "src/main/agentera-agent-control/runtime-binding-store.ts",
       "src/main/agentera-profile-binding.ts",
@@ -65,6 +66,10 @@ describe("Workspace Agent assets remain outside Hermes private runtime state", (
     ];
     const forbidden =
       /agentera-workspace|\bAgentAssetContext\b|\bsourceWorkspaceId\b|\bworkspaceId\b|ownerScope\s*:\s*["']WORKSPACE["']|\/api\/v1\/workspaces\/.+agent-definitions/;
+
+    expect(adapter).not.toMatch(
+      /agentera-workspace|\bAgentAssetContext\b|ownerScope\s*:\s*["']WORKSPACE["']|\/api\/v1\/workspaces\/.+agent-definitions/,
+    );
 
     for (const file of isolatedFiles) {
       expect(

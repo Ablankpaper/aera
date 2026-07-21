@@ -64,15 +64,18 @@ describe("Organization Agent renderer boundary", () => {
   });
 
   it("leaves Hermes execution and private learning outside Organization IPC", () => {
-    const runtime = [
-      "src/main/agentera-agent-control/hermes-adapter.ts",
+    const adapter = source("src/main/agentera-agent-control/hermes-adapter.ts");
+    const isolatedRuntime = [
       "src/main/agentera-agent-control/hermes-projection.ts",
       "src/main/agentera-agent-control/runtime-binding-store.ts",
       "src/main/agentera-profile-binding.ts",
     ]
       .map(source)
       .join("\n");
-    expect(runtime).not.toMatch(
+    expect(adapter).not.toMatch(
+      /organization-publication-service|prepareOrganizationReview|confirmOrganizationSubmission|ownerScope\s*:\s*["']ORGANIZATION["']/,
+    );
+    expect(isolatedRuntime).not.toMatch(
       /organization-publication-service|prepareOrganizationReview|confirmOrganizationSubmission|\bsourceOrganizationId\b|\borganizationId\b|ownerScope\s*:\s*["']ORGANIZATION["']/,
     );
   });
@@ -96,9 +99,11 @@ describe("Organization Agent renderer boundary", () => {
     expect(bindings).toContain('ownerScope: "USER"');
     expect(bindings).toContain('input.ownerScope !== "USER"');
     expect(profiles).toContain('ownerScope: "USER"');
-    expect([adapter, bindings, profiles].join("\n")).not.toMatch(
+    expect([bindings, profiles].join("\n")).not.toMatch(
       /\bsourceOrganizationId\b|\borganizationId\b|ownerScope\s*:\s*["']ORGANIZATION["']/,
     );
+    expect(adapter).toContain("sourceOrganizationId");
+    expect(adapter).not.toMatch(/ownerScope\s*:\s*["']ORGANIZATION["']/);
   });
 
   it("stages immutable Organization assets outside HERMES_HOME without touching private learning", () => {

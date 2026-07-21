@@ -100,8 +100,8 @@ describe("Organization Foundation stays outside Hermes private runtime state", (
   });
 
   it("does not add Organization ownership to isolated Hermes and Runtime files", () => {
+    const adapter = source("src/main/agentera-agent-control/hermes-adapter.ts");
     const isolatedFiles = [
-      "src/main/agentera-agent-control/hermes-adapter.ts",
       "src/main/agentera-agent-control/hermes-projection.ts",
       "src/main/agentera-agent-control/runtime-binding-store.ts",
       "src/main/agentera-profile-binding.ts",
@@ -112,6 +112,10 @@ describe("Organization Foundation stays outside Hermes private runtime state", (
     ];
     const forbidden =
       /agentera-organization|\bsourceOrganizationId\b|\borganizationId\b|ownerScope\s*:\s*["']ORGANIZATION["']|\/api\/v1\/organizations\/.+agent-definitions/;
+
+    expect(adapter).not.toMatch(
+      /agentera-organization|ownerScope\s*:\s*["']ORGANIZATION["']|\/api\/v1\/organizations\/.+agent-definitions/,
+    );
 
     for (const file of isolatedFiles) {
       expect(
