@@ -67,8 +67,10 @@ interface CapturedRequest extends CapturedAgentControlRequest {
   responseBody?: unknown;
 }
 
+export type AgentControlDeviceName = "A" | "B" | "C" | "D";
+
 export interface AgentControlDevice {
-  name: "A" | "B";
+  name: AgentControlDeviceName;
   userData: string;
   hermesHome: string;
   app: ElectronApplication;
@@ -93,7 +95,10 @@ export interface AgentControlHarness {
   browserPage: Page;
   composeStarted: boolean;
   runtimeSeedDirectory: string;
-  deviceRoots: Record<"A" | "B", { userData: string; hermesHome: string }>;
+  deviceRoots: Record<
+    AgentControlDeviceName,
+    { userData: string; hermesHome: string }
+  >;
   devices: AgentControlDevice[];
   requests: CapturedRequest[];
   failures: string[];
@@ -136,6 +141,15 @@ export interface LocalAgentControlState {
   projectionRoots: string[];
 }
 
+export interface LocalInstallationOwnerRow {
+  tenantId: string;
+  ownerId: string;
+  deviceInstallationId: string;
+  sourceScope: "USER" | "WORKSPACE" | "ORGANIZATION";
+  sourceWorkspaceId: string | null;
+  sourceOrganizationId: string | null;
+}
+
 type AgenteraMethod =
   | "getState"
   | "listDrafts"
@@ -145,6 +159,14 @@ type AgenteraMethod =
   | "deleteDraft"
   | "preparePublication"
   | "confirmPublication"
+  | "prepareOrganizationSubmission"
+  | "confirmOrganizationSubmission"
+  | "listOrganizationSubmissions"
+  | "getOrganizationSubmission"
+  | "prepareOrganizationReview"
+  | "confirmOrganizationReview"
+  | "prepareOrganizationWithdrawal"
+  | "confirmOrganizationWithdrawal"
   | "listDefinitions"
   | "listVersions"
   | "listInstallations"
@@ -507,9 +529,22 @@ async function stopCloud(harness: AgentControlHarness): Promise<void> {
   ]);
 }
 
+export async function stopAgentControlCloud(
+  harness: AgentControlHarness,
+): Promise<void> {
+  await stopCloud(harness);
+}
+
+export async function startAgentControlCloud(
+  harness: AgentControlHarness,
+): Promise<void> {
+  if (harness.cloudProcess?.exitCode === null) return;
+  await startCloud(harness);
+}
+
 async function writePrivateFixture(
   root: string,
-  device: "A" | "B",
+  device: AgentControlDeviceName,
 ): Promise<void> {
   const files: Record<string, string> = {
     ".env": `AGENTERA_E2E_PRIVATE_MARKER=DEVICE_${device}_ENV\n`,
@@ -528,6 +563,27 @@ async function writePrivateFixture(
   }
 }
 
+function createDeviceRoots(root: string): AgentControlHarness["deviceRoots"] {
+  return {
+    A: {
+      userData: join(root, "device-a", "electron-user-data"),
+      hermesHome: join(root, "device-a", "hermes-home"),
+    },
+    B: {
+      userData: join(root, "device-b", "electron-user-data"),
+      hermesHome: join(root, "device-b", "hermes-home"),
+    },
+    C: {
+      userData: join(root, "device-c", "electron-user-data"),
+      hermesHome: join(root, "device-c", "hermes-home"),
+    },
+    D: {
+      userData: join(root, "device-d", "electron-user-data"),
+      hermesHome: join(root, "device-d", "hermes-home"),
+    },
+  };
+}
+
 export async function createAgentControlHarness(): Promise<AgentControlHarness> {
   await assertPublicPortAvailable();
   const runtimeSeedDirectory = resolve(
@@ -544,17 +600,8 @@ export async function createAgentControlHarness(): Promise<AgentControlHarness> 
   }
 
   const root = await mkdtemp(join(tmpdir(), "agentera-agent-control-e2e-"));
-  const deviceRoots = {
-    A: {
-      userData: join(root, "device-a", "electron-user-data"),
-      hermesHome: join(root, "device-a", "hermes-home"),
-    },
-    B: {
-      userData: join(root, "device-b", "electron-user-data"),
-      hermesHome: join(root, "device-b", "hermes-home"),
-    },
-  };
-  for (const name of ["A", "B"] as const) {
+  const deviceRoots = createDeviceRoots(root);
+  for (const name of ["A", "B", "C", "D"] as const) {
     await mkdir(deviceRoots[name].userData, { recursive: true });
     await mkdir(deviceRoots[name].hermesHome, { recursive: true });
     await writePrivateFixture(deviceRoots[name].hermesHome, name);
@@ -685,7 +732,7 @@ async function makeTreeWritable(path: string): Promise<void> {
 
 export async function launchAgentControlDevice(
   harness: AgentControlHarness,
-  name: "A" | "B",
+  name: AgentControlDeviceName,
 ): Promise<AgentControlDevice> {
   const roots = harness.deviceRoots[name];
   const executablePath = process.env.AGENTERA_E2E_EXECUTABLE_PATH?.trim();
@@ -908,6 +955,9 @@ export function agentControlRequests(
         /^\/api\/v1\/workspaces\/[^/]+\/experience-candidates(?:\/|$)/.test(
           request.path,
         ) ||
+        /^\/api\/v1\/organizations\/[^/]+\/agent-(?:definitions|publication-submissions)(?:\/|$)/.test(
+          request.path,
+        ) ||
         request.path.startsWith("/api/v1/runtime-binding") ||
         request.path.startsWith("/api/agents"),
     )
@@ -925,6 +975,9 @@ export function agentControlExchangeDiagnostics(
           request.path,
         ) ||
         /^\/api\/v1\/workspaces\/[^/]+\/experience-candidates(?:\/|$)/.test(
+          request.path,
+        ) ||
+        /^\/api\/v1\/organizations\/[^/]+\/agent-(?:definitions|publication-submissions)(?:\/|$)/.test(
           request.path,
         ) ||
         request.path.startsWith("/api/v1/policy-snapshots/") ||
@@ -1017,6 +1070,44 @@ export function deviceProfilePath(
   return profileId === "default"
     ? device.hermesHome
     : join(device.hermesHome, "profiles", profileId);
+}
+
+export function localInstallationOwner(
+  device: AgentControlDevice,
+  installationId: string,
+): LocalInstallationOwnerRow {
+  const database = new DatabaseSync(
+    join(device.userData, "agentera-control-plane", "control-plane.db"),
+    { readOnly: true },
+  );
+  try {
+    const row = database
+      .prepare(
+        `SELECT tenant_id, owner_id, device_installation_id, source_scope,
+                source_workspace_id, source_organization_id
+         FROM local_agent_installations
+         WHERE agent_installation_id = ?`,
+      )
+      .get(installationId) as Record<string, string | null> | undefined;
+    if (!row) throw new Error("Organization Agent installation is missing.");
+    if (
+      row.source_scope !== "USER" &&
+      row.source_scope !== "WORKSPACE" &&
+      row.source_scope !== "ORGANIZATION"
+    ) {
+      throw new Error("Organization Agent installation source is invalid.");
+    }
+    return {
+      tenantId: String(row.tenant_id),
+      ownerId: String(row.owner_id),
+      deviceInstallationId: String(row.device_installation_id),
+      sourceScope: row.source_scope,
+      sourceWorkspaceId: row.source_workspace_id,
+      sourceOrganizationId: row.source_organization_id,
+    };
+  } finally {
+    database.close();
+  }
 }
 
 export async function seedExperienceCandidateProfile(

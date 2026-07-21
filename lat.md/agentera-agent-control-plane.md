@@ -180,6 +180,18 @@ The candidate gate exercises the complete selected-Skill promotion path while ke
 
 The harness also injects upload, review, and SQLite import failures and verifies every private fixture hash afterward. Run the executable proof with `npm run test:e2e:experience-candidate`.
 
+### Organization Agent isolation
+
+Organization definitions and versions are shared control-plane assets, but every installed runtime remains bound to the employee's USER owner tuple and one physical Profile.
+
+[[src/main/agentera-agent-control/organization-publication-service.ts#OrganizationPublicationService]] keeps editable drafts local and uses one-use handles for immutable submission, review, and withdrawal. Renderer calls never supply Organization role, account authority, Profile paths, or cloud credentials.
+
+[[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager]] records `sourceScope=ORGANIZATION` only as catalog provenance while retaining USER tenant, owner, device, policy overlay, and Runtime Profile ownership. [[src/main/agentera-agent-control/hermes-projection.ts#HermesProjectionManager]] materializes signed Knowledge, Skill, and SOP bytes read-only outside `HERMES_HOME`.
+
+[[src/main/agentera-agent-control/hermes-adapter.ts#AgenteraHermesAdapter#prepareInstalledTurn]] freezes Version, policy, Runtime, Profile, and tool digest per conversation. [[src/main/agentera-agent-control/hermes-adapter.ts#assertNewConversationContext]] rejects only a new Organization conversation after trusted context removal; an existing RuntimeBinding remains stable.
+
+[[tests/e2e/agentera-organization-agent.e2e.ts]] proves the four-role approval and installation flow, v1/v2 binding stability, offline verified use, reconnect removal gate, read-only projection, and byte-identical employee-private Memory and Skills. Run it with `npm run test:e2e:organization-agent`.
+
 ### Workspace Agent isolation
 
 The Workspace Agent gate extends the release proof from USER assets to WORKSPACE-owned definitions and versions without changing USER ownership of installations, Profiles, RuntimeBindings, or adaptive data.

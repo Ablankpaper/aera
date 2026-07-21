@@ -1,6 +1,6 @@
-# AgentEra Organization Foundation V1
+# AgentEra Organization and Organization Agent V1
 
-Organization Foundation V1 adds enterprise identity, membership, departments, signed policy, audit, and lifecycle without moving Hermes runtime or private learning into the cloud.
+Organization V1 adds enterprise identity, governance, immutable Agent assets, and reviewed publication without moving Hermes runtime or private learning into the cloud.
 
 ## Release boundary
 
@@ -8,7 +8,7 @@ The first enterprise slice establishes Organization authorization and desktop pr
 
 It supports Organization lifecycle, one transferable Owner, Admin/Auditor/Member roles, single-level Departments, one-time invitations, immutable signed policy snapshots, audit, and offline read-only metadata. The locked design is `docs/superpowers/specs/2026-07-21-agentera-organization-foundation-v1-design.md`.
 
-The written Organization Agent V1 specification is approved for implementation planning. It adds `owner_scope=ORGANIZATION`, mandatory two-person publication review, and USER-owned member installation without changing Hermes runtime ownership.
+Organization Agent V1 adds `owner_scope=ORGANIZATION`, mandatory two-person publication review, and USER-owned member installation without changing Hermes runtime ownership.
 
 The approved specification is `docs/superpowers/specs/2026-07-21-agentera-organization-agent-v1-design.md`.
 
@@ -16,11 +16,11 @@ The approved specification is `docs/superpowers/specs/2026-07-21-agentera-organi
 
 ## Implementation progress
 
-Organization Foundation is locally implemented and merged to local `main`. It remains unpushed and undeployed; Organization Agent V1 is design-only at this checkpoint.
+Organization Foundation is merged to local `main`. Organization Agent V1 is locally implemented on paired feature branches and remains unmerged, unpushed, and undeployed at this checkpoint.
 
 The first implemented slice is the cloud persistence and configuration foundation in `aera-cloud/migrations/000012_organization_foundation.sql` and `aera-cloud/internal/config/config.go`. It adds six Organization-owned tables, an Organization scope on audit, deferred exactly-one-Owner enforcement, cross-Organization Department and policy-pointer protection, immutable policy snapshots, terminal invitation transitions, and explicit quota/rate-limit configuration.
 
-`aera-cloud/internal/store/migrate_test.go` verifies the embedded migration, exact schema objects, real PostgreSQL commit-time invariants, cross-boundary foreign keys, invitation terminal behavior, and policy immutability. `aera-cloud/internal/config/config_test.go` verifies all Organization quota and rate settings, including missing and invalid values. Later sections remain architectural requirements until their corresponding implementation tasks land.
+`aera-cloud/internal/store/migrate_test.go` verifies the embedded migration, exact schema objects, real PostgreSQL commit-time invariants, cross-boundary foreign keys, invitation terminal behavior, and policy immutability. `aera-cloud/internal/config/config_test.go` verifies all Organization quota and rate settings, including missing and invalid values.
 
 The second implemented slice is `aera-cloud/internal/organization/model.go`, `token.go`, and `limiter.go`. It defines strict Owner/Admin/Auditor/Member and lifecycle values, NFC-normalized Organization and Department names, stable Unicode case-folded Department keys, positive quotas/revisions, renderer-safe summary shapes, canonical 256-bit invitation secrets whose formatting is always redacted, and five independently hashed Redis rate-limit scopes. The focused tests prove malformed or non-canonical tokens are rejected, raw account/device/Organization identifiers never enter Redis keys, backend failure is fail-closed, and each action retains its own counter and window.
 
@@ -52,11 +52,35 @@ The fifteenth implemented slice replaces the legacy Workspace-only renderer sele
 
 The sixteenth implemented slice closes Foundation with deterministic multi-account and isolation evidence. [[tests/e2e/agentera-organization.e2e.ts]] runs the real strict Organization client, account-generation-aware manager, signed-policy verifier, SQLite cache, and volatile invitation inbox against an in-process cloud fixture. The fixture derives authority only from three bearer identities, rejects unknown routes, headers, queries, bodies, private-runtime fields, idempotency conflicts, unauthorized calls, and token persistence, and stores invitation digests rather than raw secrets. The scenario covers Organization and Department creation, two one-time invitations, Member-to-Admin and Member-to-Auditor transitions, signed policy V2, Auditor policy and audit reads, atomic Owner transfer, archive/restore, leave/removal, empty Department archive, and confirmed dissolution. Before and after every action it hashes the complete populated Hermes tree and separately snapshots selected Profile, active conversation/session, USER RuntimeBinding, Memory, USER, learned Skill, Curator, and Runtime/Gateway identity. [[tests/agentera-organization-boundary.test.ts]] and [[tests/agentera-product-space-boundary.test.ts]] statically prevent Organization or product-space metadata from entering those runtime paths and lock the explicit Organization-Agent-unavailable stop. Run the focused proof with `npm test -- tests/agentera-organization-boundary.test.ts tests/agentera-product-space-boundary.test.ts` and `npm run test:e2e:organization`.
 
-## Organization Agent V1 design checkpoint
+## Organization Agent approval
 
-Organization Agent V1 extends the existing Agent control plane instead of creating a duplicate enterprise Agent service or a generic tenant rewrite.
+Organization publication uses immutable cloud submissions and a different current Owner/Admin reviewer; approval alone can create a signed Version.
 
-Owner and Admin keep editable drafts on their own device. Explicit submission uploads one immutable, digest-bound publication package; another current Owner/Admin must approve it before the cloud signs and inserts an immutable Version. Self-review and direct Organization publication are unavailable.
+`aera-cloud/internal/agentcontrol/organization_submission_repository.go:PostgresRepository.ReviewOrganizationAgentSubmission` performs the transactional approval, and `organization_submission_repository_test.go:TestOrganizationApprovalRaceCreatesAtMostOneVersionAndReview` proves concurrent approvals create at most one Version and review.
+
+### Submission state machine
+
+Pending submissions terminate as approved, rejected, withdrawn, or superseded; a stale next-version approval commits superseded state without inserting another Version.
+
+`aera-cloud/internal/agentcontrol/organization_submission_repository.go:markOrganizationSubmissionSuperseded` implements the terminal transition, proven by `organization_submission_repository_test.go:TestOrganizationNextApprovalCommitsSupersededWithoutVersion`.
+
+### Role, policy, and DLP recheck
+
+Owner/Admin may submit, a different current Owner/Admin may review, Auditor is read-only, and Member may discover and install; policy and DLP are rechecked at review time.
+
+`aera-cloud/internal/agentcontrol/organization_access.go:requireOrganizationAgentAccess` derives current lifecycle and role authority. `organization_submission_repository.go:validateAgainstCurrentOrganizationPolicy` narrows policy again, with coverage in `organization_access_test.go:TestIntersectOrganizationAgentPolicyOnlyNarrows`.
+
+### Organization asset guard
+
+Organization dissolution fails closed while a submission, published definition/version, or USER Installation still references the Organization.
+
+`aera-cloud/internal/agentcontrol/organization_asset_guard.go:OrganizationAssetGuard.DissolutionBlockers` reads the protected categories, and `organization_asset_guard_test.go:TestOrganizationAgentAssetGuardReadsRealProtectedCategories` proves the real PostgreSQL blockers.
+
+### Multi-account executable proof
+
+Four real local accounts prove review separation, role races, immutable versions, USER installations, offline use, removal gates, and private-runtime isolation.
+
+[[tests/e2e/agentera-organization-agent.e2e.ts]] is the deterministic Owner/Admin/Auditor/Member flow. It snapshots every Profile-private fixture and captures cloud requests to prove Memory, USER, sessions, credentials, local Skills, Curator, files, and private learning never cross the boundary.
 
 Owner, Admin, and Auditor may inspect submissions and reviews. Active Owner, Admin, and Member may discover and install approved versions; Auditor remains read-only. Every employee Installation, policy overlay, RuntimeBinding, physical Profile, and adaptive state remains USER-owned.
 
@@ -82,27 +106,27 @@ A Membership may belong to zero or one Department. Roles remain Organization-wid
 
 Organization policy is immutable, versioned, digest-bound, signed, cached only after verification, and composable only as a restriction on platform and local safety policy.
 
-V1 expresses model/tool allowlists, manual-or-disabled ExperienceCandidate promotion, and whether future official Agent installation is allowed. Automatic experience publication has no policy value. Runtime enforcement starts in the later Organization Agent slice.
+V1 expresses model/tool allowlists, manual-or-disabled ExperienceCandidate promotion, and whether future official Agent installation is allowed. Organization Agent installation and manual version selection intersect the current Organization policy with the immutable version; automatic experience publication has no policy value.
 
 ## Desktop product context
 
 One trusted main-process coordinator owns Personal, Workspace, or Organization product selection for each authenticated account.
 
-The global top switcher displays all three scopes side by side. Workspace and Organization remain independent management domains, while a dedicated product-space store prevents two writable selection sources. An Organization selection in Foundation shows an explicit enterprise-Agent-unavailable state rather than falling back to personal Agent ownership.
+The global top switcher displays all three scopes side by side. Workspace and Organization remain independent management domains, while a dedicated product-space store prevents two writable selection sources. An active Organization selection exposes its governed Agent catalog, review history, drafts, and role-appropriate installation actions.
 
 Offline Organization metadata is stale and read-only. No offline mutation queue exists, and invalid policy cannot replace a previously verified snapshot.
 
 ## Hermes boundary
 
-Organization owns only control-plane metadata now and future immutable enterprise Agent assets later; employees retain USER-owned local runtime state.
+Organization owns control-plane metadata plus immutable enterprise Agent definitions and versions; employees retain USER-owned local runtime state.
 
-Switching Organization context does not select, create, clone, move, merge, or delete a Profile or RuntimeBinding. [[agentera-self-evolution#AgentEra self-evolution compatibility#Runtime isolation|Every later Installation still maps to an independent writable Profile]], and Memory, USER, sessions, files, credentials, learned Skills, Curator, and private learning remain local.
+Switching Organization context does not select, create, clone, move, merge, or delete a Profile or RuntimeBinding. [[agentera-self-evolution#AgentEra self-evolution compatibility#Runtime isolation|Every Installation maps to an independent writable Profile]], and Memory, USER, sessions, files, credentials, learned Skills, Curator, and private learning remain local.
 
 ## Relationship to Workspace and Agent control
 
 Organization reuses security primitives without becoming a Workspace type or extending legacy sync.
 
-[[agentera-workspaces|Workspace Foundation]] retains its existing tables, fixed-owner lifecycle, invitation protocol, and WORKSPACE asset boundary. [[agentera-agent-control-plane|The Agent control plane]] receives no ORGANIZATION asset context until the next slice; Foundation only exposes trusted Membership, policy, lifecycle, asset-guard, and selected-context contracts.
+[[agentera-workspaces|Workspace Foundation]] retains its existing tables, fixed-owner lifecycle, invitation protocol, and WORKSPACE asset boundary. [[agentera-agent-control-plane|The Agent control plane]] consumes Organization context only from the trusted product-space coordinator and keeps all runtime ownership USER-scoped.
 
 ## Release gate
 
@@ -122,6 +146,6 @@ Every Organization operation is control-plane-only. The static boundary test and
 
 Personal, Workspace, and Organization selection is account-scoped navigation metadata.
 
-Organization Foundation must return `ORGANIZATION_UNAVAILABLE` before Agent stores or Profile/runtime operations, and Workspace compatibility must continue through the single product-space coordinator.
+Organization context invalidation must stop new Organization Agent mutation and new conversations before a cloud or RuntimeBinding write, while existing immutable bindings remain usable.
 
-Foundation completion does not authorize `owner_scope=ORGANIZATION`. Organization Agent V1 remains a separate design, implementation, and release gate.
+Organization Agent V1 remains local implementation and validation evidence only until separate merge, push, deployment, and release gates are completed. `owner_scope=PLATFORM` remains a later slice.
