@@ -78,6 +78,8 @@ type MockedEditorAgenteraAPI = Window["agenteraAgents"] & {
   updateDraft: ReturnType<typeof vi.fn>;
   preparePublication: ReturnType<typeof vi.fn>;
   confirmPublication: ReturnType<typeof vi.fn>;
+  prepareOrganizationSubmission: ReturnType<typeof vi.fn>;
+  confirmOrganizationSubmission: ReturnType<typeof vi.fn>;
   installVersion: ReturnType<typeof vi.fn>;
 };
 
@@ -93,6 +95,14 @@ function installAPI(
     deleteDraft: vi.fn(),
     preparePublication: vi.fn(),
     confirmPublication: vi.fn(),
+    prepareOrganizationSubmission: vi.fn(),
+    confirmOrganizationSubmission: vi.fn(),
+    listOrganizationSubmissions: vi.fn(),
+    getOrganizationSubmission: vi.fn(),
+    prepareOrganizationReview: vi.fn(),
+    confirmOrganizationReview: vi.fn(),
+    prepareOrganizationWithdrawal: vi.fn(),
+    confirmOrganizationWithdrawal: vi.fn(),
     listDefinitions: vi.fn(),
     listVersions: vi.fn(),
     listInstallations: vi.fn(),
@@ -276,6 +286,92 @@ describe("AgentDraftEditor", () => {
     });
     expect(dialog).toHaveTextContent("agents.control.workspaceSpace");
     expect(dialog).not.toHaveTextContent("agents.control.personalSpace");
+  });
+
+  it("submits an Organization draft for review without publishing or installing it", async () => {
+    const saved = detail(2);
+    const api = installAPI({
+      updateDraft: vi.fn(async () => success(saved)),
+      prepareOrganizationSubmission: vi.fn(async () =>
+        success({
+          publicationHandle: HANDLE_ID,
+          draftId: DRAFT_ID,
+          revision: 2,
+          kind: "initial" as const,
+          definitionId: null,
+          baseVersionId: null,
+          contentDigest: `sha256:${"b".repeat(64)}`,
+          assetCounts: { skill: 0, sop: 0, knowledge: 1 },
+          totalBytes: 8,
+          expiresAt: "2026-07-21T02:00:00.000Z",
+        }),
+      ),
+      confirmOrganizationSubmission: vi.fn(async () =>
+        success({
+          id: "55555555-5555-4555-8555-555555555555",
+          organizationId: "66666666-6666-4666-8666-666666666666",
+          kind: "initial" as const,
+          definitionId: DEFINITION_ID,
+          baseVersionId: null,
+          submittedByUserId: "77777777-7777-4777-8777-777777777777",
+          contentDigest: `sha256:${"b".repeat(64)}`,
+          status: "pending" as const,
+          revision: 1,
+          submittedAt: "2026-07-21T01:00:00.000Z",
+          terminalAt: null,
+          review: null,
+        }),
+      ),
+    });
+    render(
+      <AgentDraftEditor
+        open
+        draft={detail()}
+        publicationTarget="ORGANIZATION"
+        onClose={() => undefined}
+        onSaved={() => undefined}
+        onPublished={() => undefined}
+        onOrganizationSubmitted={() => undefined}
+        onRequestInstall={() => undefined}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "agents.control.publish" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "agents.control.publishAndUse" }),
+    ).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.control.organization.prepareSubmission",
+      }),
+    );
+    expect(
+      await screen.findByRole("dialog", {
+        name: "agents.control.organization.submissionPreviewTitle",
+      }),
+    ).toHaveTextContent("agents.control.privateDataExcluded");
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.control.organization.submitForReview",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(api.confirmOrganizationSubmission).toHaveBeenCalledWith({
+        publicationHandle: HANDLE_ID,
+        confirmation: "submit-organization-agent",
+      }),
+    );
+    expect(api.preparePublication).not.toHaveBeenCalled();
+    expect(api.confirmPublication).not.toHaveBeenCalled();
+    expect(api.installVersion).not.toHaveBeenCalled();
+    expect(
+      screen.getByText("agents.control.organization.submittedNotPublished"),
+    ).toBeVisible();
+    expectNoRendererOwnershipInput(api.prepareOrganizationSubmission);
+    expectNoRendererOwnershipInput(api.confirmOrganizationSubmission);
   });
 
   // @lat: [[agentera-agent-control-plane#Trusted Workspace Agent context#Role-aware presentation]]

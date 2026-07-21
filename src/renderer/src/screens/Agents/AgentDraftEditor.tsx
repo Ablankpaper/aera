@@ -4,6 +4,8 @@ import type {
   AgentDraftDetail,
   AgentEditableManifest,
   AgenteraAgentControlErrorCode,
+  OrganizationAgentSubmissionSummary,
+  OrganizationSubmissionPreview,
   PublicationPreview,
   PublishedRevision,
 } from "../../../../shared/agentera-agent-control";
@@ -22,9 +24,13 @@ export interface AgentDraftEditorProps {
   open: boolean;
   draft: AgentDraftDetail | null;
   readOnly?: boolean;
+  publicationTarget?: "DIRECT" | "ORGANIZATION";
   onClose: () => void;
   onSaved: (draft: AgentDraftDetail) => void;
   onPublished: (revision: PublishedRevision) => void;
+  onOrganizationSubmitted?: (
+    submission: OrganizationAgentSubmissionSummary,
+  ) => void;
   onRequestInstall: (target: {
     definitionId: string;
     versionId: string;
@@ -78,9 +84,11 @@ export default function AgentDraftEditor({
   open,
   draft,
   readOnly = false,
+  publicationTarget = "DIRECT",
   onClose,
   onSaved,
   onPublished,
+  onOrganizationSubmitted = () => undefined,
   onRequestInstall,
 }: AgentDraftEditorProps): React.JSX.Element {
   const { t } = useI18n();
@@ -100,6 +108,8 @@ export default function AgentDraftEditor({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [preview, setPreview] = useState<PublicationPreview | null>(null);
+  const [organizationPreview, setOrganizationPreview] =
+    useState<OrganizationSubmissionPreview | null>(null);
   const [publishAndUse, setPublishAndUse] = useState(false);
 
   useEffect(() => {
@@ -118,6 +128,7 @@ export default function AgentDraftEditor({
     setError(null);
     setNotice(null);
     setPreview(null);
+    setOrganizationPreview(null);
     setPublishAndUse(false);
   }, [draft, open]);
 
@@ -189,6 +200,19 @@ export default function AgentDraftEditor({
     if (!saved) return;
     setBusy(true);
     setError(null);
+    if (publicationTarget === "ORGANIZATION") {
+      const result = await window.agenteraAgents.prepareOrganizationSubmission(
+        saved.id,
+      );
+      setBusy(false);
+      if (!result.ok) {
+        setError(errorKey(result.errorCode));
+        return;
+      }
+      setPublishAndUse(false);
+      setOrganizationPreview(result.data);
+      return;
+    }
     const result = await window.agenteraAgents.preparePublication(saved.id);
     setBusy(false);
     if (!result.ok) {
@@ -197,6 +221,24 @@ export default function AgentDraftEditor({
     }
     setPublishAndUse(andUse);
     setPreview(result.data);
+  };
+
+  const confirmOrganizationSubmission = async (): Promise<void> => {
+    if (readOnly || !organizationPreview || busy) return;
+    setBusy(true);
+    setError(null);
+    const result = await window.agenteraAgents.confirmOrganizationSubmission({
+      publicationHandle: organizationPreview.publicationHandle,
+      confirmation: "submit-organization-agent",
+    });
+    setBusy(false);
+    setOrganizationPreview(null);
+    if (!result.ok) {
+      setError(errorKey(result.errorCode));
+      return;
+    }
+    setNotice("agents.control.organization.submittedNotPublished");
+    onOrganizationSubmitted(result.data);
   };
 
   const confirm = async (): Promise<void> => {
@@ -258,7 +300,9 @@ export default function AgentDraftEditor({
             <p>
               {t(
                 readOnly
-                  ? "agents.control.workspaceDraftReadOnly"
+                  ? publicationTarget === "ORGANIZATION"
+                    ? "agents.control.organization.draftReadOnly"
+                    : "agents.control.workspaceDraftReadOnly"
                   : "agents.control.localDraftStatus",
               )}
             </p>
@@ -412,7 +456,7 @@ export default function AgentDraftEditor({
 
           {error && <div className="agents-create-error">{t(error)}</div>}
           {notice && <div className="agent-control-success">{t(notice)}</div>}
-          {!readOnly ? (
+          {!readOnly && publicationTarget !== "ORGANIZATION" ? (
             <p className="agent-control-sequence agent-control-wide-field">
               {t("agents.control.publishAndUseSequence")}
             </p>
@@ -431,22 +475,35 @@ export default function AgentDraftEditor({
           >
             {t("agents.control.saveLocal")}
           </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={!canSave || busy}
-            onClick={() => void prepare(false)}
-          >
-            {t("agents.control.publish")}
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={!canSave || busy}
-            onClick={() => void prepare(true)}
-          >
-            {t("agents.control.publishAndUse")}
-          </button>
+          {publicationTarget === "ORGANIZATION" ? (
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!canSave || busy}
+              onClick={() => void prepare(false)}
+            >
+              {t("agents.control.organization.prepareSubmission")}
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={!canSave || busy}
+                onClick={() => void prepare(false)}
+              >
+                {t("agents.control.publish")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!canSave || busy}
+                onClick={() => void prepare(true)}
+              >
+                {t("agents.control.publishAndUse")}
+              </button>
+            </>
+          )}
         </footer>
 
         {preview && (
@@ -499,6 +556,58 @@ export default function AgentDraftEditor({
                   disabled={busy || readOnly}
                 >
                   {t("agents.control.confirmPublish")}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {organizationPreview && (
+          <div className="agent-control-dialog-backdrop">
+            <div
+              className="agent-control-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="organization-submission-preview-title"
+            >
+              <h3 id="organization-submission-preview-title">
+                {t("agents.control.organization.submissionPreviewTitle")}
+              </h3>
+              <dl className="agent-control-preview-grid">
+                <dt>{t("agents.control.revision")}</dt>
+                <dd>{organizationPreview.revision}</dd>
+                <dt>{t("agents.control.organization.contentDigest")}</dt>
+                <dd>{organizationPreview.contentDigest}</dd>
+                <dt>{t("agents.control.asset.skill")}</dt>
+                <dd>{organizationPreview.assetCounts.skill}</dd>
+                <dt>{t("agents.control.asset.sop")}</dt>
+                <dd>{organizationPreview.assetCounts.sop}</dd>
+                <dt>{t("agents.control.asset.knowledge")}</dt>
+                <dd>{organizationPreview.assetCounts.knowledge}</dd>
+                <dt>{t("agents.control.totalBytes")}</dt>
+                <dd>{organizationPreview.totalBytes}</dd>
+              </dl>
+              <p className="agent-control-private-boundary">
+                {t("agents.control.privateDataExcluded")}
+              </p>
+              <p className="agent-control-private-boundary">
+                {t("agents.control.organization.submissionBoundary")}
+              </p>
+              <div className="agent-control-dialog-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setOrganizationPreview(null)}
+                  disabled={busy}
+                >
+                  {t("agents.control.cancel")}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => void confirmOrganizationSubmission()}
+                  disabled={busy || readOnly}
+                >
+                  {t("agents.control.organization.submitForReview")}
                 </button>
               </div>
             </div>

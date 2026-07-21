@@ -160,6 +160,8 @@ function candidateImportPreview(): ExperienceCandidateImportPreview {
 
 type MockedPanelAgenteraAPI = Window["agenteraAgents"] & {
   listDefinitions: ReturnType<typeof vi.fn>;
+  listDrafts: ReturnType<typeof vi.fn>;
+  listOrganizationSubmissions: ReturnType<typeof vi.fn>;
   archiveInstallation: ReturnType<typeof vi.fn>;
 };
 
@@ -175,6 +177,14 @@ function installAPI(
     deleteDraft: vi.fn(),
     preparePublication: vi.fn(),
     confirmPublication: vi.fn(),
+    prepareOrganizationSubmission: vi.fn(),
+    confirmOrganizationSubmission: vi.fn(),
+    listOrganizationSubmissions: vi.fn(async () => success([])),
+    getOrganizationSubmission: vi.fn(),
+    prepareOrganizationReview: vi.fn(),
+    confirmOrganizationReview: vi.fn(),
+    prepareOrganizationWithdrawal: vi.fn(),
+    confirmOrganizationWithdrawal: vi.fn(),
     listDefinitions: vi.fn(async () => success([definition()])),
     listVersions: vi.fn(async () => success([])),
     listInstallations: vi.fn(async () => success([])),
@@ -304,37 +314,88 @@ describe("AgentControlPanel", () => {
     ).toBeEnabled();
   });
 
-  it("explains organization_agent_not_enabled without exposing personal or Workspace Agent controls", async () => {
+  it.each([
+    ["owner", true, true, true],
+    ["admin", true, true, true],
+    ["auditor", false, true, false],
+    ["member", false, false, true],
+  ] as const)(
+    "renders Organization role %s with author=%s history=%s install=%s",
+    async (role, author, history, install) => {
+      const api = installAPI({
+        getState: vi.fn(async () =>
+          success(
+            controlState({
+              scope: "ORGANIZATION",
+              organizationId: ORGANIZATION_ID,
+              role,
+            }),
+          ),
+        ),
+      });
+      render(<AgentControlPanel profiles={[]} />);
+
+      expect(
+        await screen.findByRole("heading", {
+          name: "agents.control.organization.title",
+        }),
+      ).toBeVisible();
+      expect(
+        screen.queryByRole("button", {
+          name: "agents.control.organization.newDraft",
+        }) !== null,
+      ).toBe(author);
+      expect(
+        screen.queryByText("agents.control.organization.reviewTitle") !== null,
+      ).toBe(history);
+      expect(
+        screen.queryAllByRole("button", {
+          name: "agents.control.install",
+        }).length > 0,
+      ).toBe(install);
+      expect(api.listDrafts.mock.calls.length > 0).toBe(author);
+      expect(api.listOrganizationSubmissions.mock.calls.length > 0).toBe(
+        history,
+      );
+    },
+  );
+
+  it("shows cached Organization content read-only while offline", async () => {
     const api = installAPI({
       getState: vi.fn(async () =>
         success(
-          controlState({
-            scope: "ORGANIZATION_UNAVAILABLE",
-            organizationId: ORGANIZATION_ID,
-            role: "admin",
-          }),
+          controlState(
+            {
+              scope: "ORGANIZATION",
+              organizationId: ORGANIZATION_ID,
+              role: "owner",
+            },
+            { access: "offline", cloudAvailable: false },
+          ),
         ),
       ),
     });
     render(<AgentControlPanel profiles={[]} />);
 
     expect(
-      await screen.findByText("navigation.organization.agentUnavailable.title"),
-    ).toBeInTheDocument();
+      (await screen.findAllByText("agents.control.organization.cachedReadOnly"))
+        .length,
+    ).toBeGreaterThan(0);
     expect(
-      screen.getByText("navigation.organization.agentUnavailable.description"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("navigation.organization.agentUnavailable.boundary"),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("agents.control.localDrafts")).toBeNull();
-    expect(screen.queryByText("agents.control.installations")).toBeNull();
-    expect(
-      screen.queryByRole("button", { name: "agents.control.newAgent" }),
+      screen.queryByRole("button", {
+        name: "agents.control.organization.newDraft",
+      }),
     ).toBeNull();
-    expect(api.listInstallations).not.toHaveBeenCalled();
-    expect(api.listDrafts).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", {
+        name: "agents.control.organization.submitForReview",
+      }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "agents.control.install" }),
+    ).toBeNull();
     expect(api.listDefinitions).not.toHaveBeenCalled();
+    expect(api.listOrganizationSubmissions).not.toHaveBeenCalled();
   });
 
   it("offers explicit local experience promotion only for an active selected-Workspace installation", async () => {

@@ -16,6 +16,7 @@ import ExperiencePromotionDialog from "./ExperiencePromotionDialog";
 import AgentInstallDialog, {
   type AgentInstallProfileOption,
 } from "./AgentInstallDialog";
+import OrganizationSubmissionPanel from "./OrganizationSubmissionPanel";
 
 export interface AgentControlPanelProps {
   profiles: AgentInstallProfileOption[];
@@ -41,8 +42,6 @@ function contextKey(state: AgenteraAgentControlPublicState): string {
       return `WORKSPACE\0${state.context.workspaceId}\0${state.context.role}`;
     case "ORGANIZATION":
       return `ORGANIZATION\0${state.context.organizationId}\0${state.context.role}`;
-    case "ORGANIZATION_UNAVAILABLE":
-      return `ORGANIZATION_UNAVAILABLE\0${state.context.organizationId}\0${state.context.role}`;
   }
 }
 
@@ -71,6 +70,7 @@ export default function AgentControlPanel({
   const [promotionTarget, setPromotionTarget] =
     useState<AgenteraAgentInstallationSummary | null>(null);
   const [candidateRefreshToken, setCandidateRefreshToken] = useState(0);
+  const [organizationRefreshToken, setOrganizationRefreshToken] = useState(0);
   const [archiving, setArchiving] = useState(false);
   const loadEpoch = useRef(0);
   const selectedContextKey = useRef<string | null>(null);
@@ -88,31 +88,33 @@ export default function AgentControlPanel({
       }
       const nextState = stateResult.data;
       const nextContextKey = contextKey(nextState);
-      if (nextState.context.scope === "ORGANIZATION_UNAVAILABLE") {
-        selectedContextKey.current = nextContextKey;
-        setState(nextState);
-        setDrafts([]);
-        setDefinitions([]);
-        setInstallations([]);
-        setEditor(null);
-        setInstallDialog(null);
-        setArchiveTarget(null);
-        setPromotionTarget(null);
-        return;
+      const canListInstallations =
+        nextState.context.scope !== "ORGANIZATION" ||
+        nextState.context.role !== "auditor";
+      let nextInstallations: AgenteraAgentInstallationSummary[] = [];
+      if (canListInstallations) {
+        const installationResult =
+          await window.agenteraAgents.listInstallations();
+        if (epoch !== loadEpoch.current) return;
+        if (!installationResult.ok) {
+          setError(errorKey(installationResult.errorCode));
+          return;
+        }
+        nextInstallations = installationResult.data;
       }
-
-      const installationResult =
-        await window.agenteraAgents.listInstallations();
-      if (epoch !== loadEpoch.current) return;
-      if (!installationResult.ok) {
-        setError(errorKey(installationResult.errorCode));
-        return;
-      }
-      const memberInstallOnly =
+      const workspaceMemberInstallOnly =
         nextState.context.scope === "WORKSPACE" &&
         nextState.context.role === "member";
+      const organizationCanReadDrafts =
+        nextState.context.scope === "ORGANIZATION" &&
+        (nextState.context.role === "owner" ||
+          nextState.context.role === "admin");
+      const canReadDrafts =
+        nextState.context.scope === "ORGANIZATION"
+          ? organizationCanReadDrafts
+          : !workspaceMemberInstallOnly;
       let nextDrafts: AgentDraft[] = [];
-      if (!memberInstallOnly) {
+      if (canReadDrafts) {
         const draftResult = await window.agenteraAgents.listDrafts();
         if (epoch !== loadEpoch.current) return;
         if (!draftResult.ok) {
@@ -147,7 +149,7 @@ export default function AgentControlPanel({
       selectedContextKey.current = nextContextKey;
       setState(nextState);
       setDrafts(nextDrafts);
-      setInstallations(installationResult.data);
+      setInstallations(nextInstallations);
       setDefinitions(nextDefinitions);
       setError(nextError);
     } catch {
@@ -167,6 +169,7 @@ export default function AgentControlPanel({
       setArchiveTarget(null);
       setPromotionTarget(null);
       setCandidateRefreshToken((value) => value + 1);
+      setOrganizationRefreshToken((value) => value + 1);
       void load();
     });
   }, [load]);
@@ -238,49 +241,38 @@ export default function AgentControlPanel({
     t("agents.control.installedLocally");
 
   const context = state?.context ?? ({ scope: "USER" } as const);
-  const organizationUnavailable = context.scope === "ORGANIZATION_UNAVAILABLE";
   const isWorkspace = context.scope === "WORKSPACE";
+  const isOrganization = context.scope === "ORGANIZATION";
   const isWorkspaceMember = isWorkspace && context.role === "member";
   const workspaceReadOnly =
     isWorkspace &&
     (state?.access !== "online" || state.cloudAvailable === false);
-  const canViewDrafts = !isWorkspaceMember;
-  const canAuthor = !isWorkspace || (!isWorkspaceMember && !workspaceReadOnly);
-
-  if (!loading && organizationUnavailable) {
-    return (
-      <section
-        className="agent-control-panel agent-control-organization-unavailable"
-        aria-labelledby="agent-control-title"
-      >
-        <div className="agent-control-section-header">
-          <div>
-            <span className="agent-control-eyebrow">
-              {t("navigation.organization.agentUnavailable.eyebrow")}
-            </span>
-            <h2 id="agent-control-title">
-              {t("navigation.organization.agentUnavailable.title")}
-            </h2>
-            <p>{t("navigation.organization.agentUnavailable.description")}</p>
-            <p className="agent-control-notice">
-              {t("navigation.organization.agentUnavailable.boundary")}
-            </p>
-            <span className="agent-control-eyebrow">
-              {t(`navigation.organization.roles.${context.role}`)}
-            </span>
-          </div>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => void load()}
-            aria-label={t("agents.control.refresh")}
-          >
-            <Refresh size={14} />
-          </button>
-        </div>
-      </section>
-    );
-  }
+  const organizationOnline =
+    isOrganization &&
+    state?.access === "online" &&
+    state.cloudAvailable === true;
+  const organizationCanAuthor =
+    organizationOnline &&
+    (context.role === "owner" || context.role === "admin");
+  const organizationCanReadReview = isOrganization && context.role !== "member";
+  const organizationCanReview = organizationCanAuthor;
+  const organizationCanInstall =
+    organizationOnline && context.role !== "auditor";
+  const organizationCanSeeInstallations =
+    !isOrganization || context.role !== "auditor";
+  const organizationCanViewDrafts =
+    isOrganization && (context.role === "owner" || context.role === "admin");
+  const organizationReadOnly = isOrganization && !organizationCanAuthor;
+  const canViewDrafts = isOrganization
+    ? organizationCanViewDrafts
+    : !isWorkspaceMember;
+  const canAuthor = isOrganization
+    ? organizationCanAuthor
+    : !isWorkspace || (!isWorkspaceMember && !workspaceReadOnly);
+  const showNewDraft = isOrganization
+    ? organizationCanAuthor
+    : !isWorkspaceMember;
+  const draftReadOnly = workspaceReadOnly || organizationReadOnly;
 
   return (
     <section
@@ -291,28 +283,34 @@ export default function AgentControlPanel({
         <div>
           <span className="agent-control-eyebrow">
             {t(
-              isWorkspace
-                ? "agents.control.workspaceSpace"
-                : "agents.control.personalSpace",
+              isOrganization
+                ? "agents.control.organization.title"
+                : isWorkspace
+                  ? "agents.control.workspaceSpace"
+                  : "agents.control.personalSpace",
             )}
           </span>
           <h2 id="agent-control-title">
             {t(
-              isWorkspace
-                ? "agents.control.workspaceSpaceTitle"
-                : "agents.control.personalSpaceTitle",
+              isOrganization
+                ? "agents.control.organization.title"
+                : isWorkspace
+                  ? "agents.control.workspaceSpaceTitle"
+                  : "agents.control.personalSpaceTitle",
             )}
           </h2>
           <p>
             {t(
-              isWorkspace
-                ? isWorkspaceMember
-                  ? "agents.control.workspaceMemberSubtitle"
-                  : "agents.control.workspaceAuthorSubtitle"
-                : "agents.control.personalSpaceSubtitle",
+              isOrganization
+                ? "agents.control.organization.runtimeBoundary"
+                : isWorkspace
+                  ? isWorkspaceMember
+                    ? "agents.control.workspaceMemberSubtitle"
+                    : "agents.control.workspaceAuthorSubtitle"
+                  : "agents.control.personalSpaceSubtitle",
             )}
           </p>
-          {isWorkspace ? (
+          {isWorkspace || isOrganization ? (
             <span className="agent-control-eyebrow">
               {t(`agents.control.role.${context.role}`)}
             </span>
@@ -328,7 +326,7 @@ export default function AgentControlPanel({
           >
             <Refresh size={14} />
           </button>
-          {!isWorkspaceMember ? (
+          {showNewDraft ? (
             <button
               type="button"
               className="btn btn-primary btn-sm"
@@ -336,7 +334,11 @@ export default function AgentControlPanel({
               disabled={!canAuthor}
             >
               <Plus size={14} />
-              {t("agents.control.newAgent")}
+              {t(
+                isOrganization
+                  ? "agents.control.organization.newDraft"
+                  : "agents.control.newAgent",
+              )}
             </button>
           ) : null}
         </div>
@@ -345,9 +347,11 @@ export default function AgentControlPanel({
       {state?.access === "offline" || state?.cloudAvailable === false ? (
         <div className="agent-control-notice">
           {t(
-            isWorkspace
-              ? "agents.control.workspaceOfflineNotice"
-              : "agents.control.offlineNotice",
+            isOrganization
+              ? "agents.control.organization.cachedReadOnly"
+              : isWorkspace
+                ? "agents.control.workspaceOfflineNotice"
+                : "agents.control.offlineNotice",
           )}
         </div>
       ) : null}
@@ -387,7 +391,7 @@ export default function AgentControlPanel({
                       onClick={() => void editDraft(draft.id)}
                     >
                       {t(
-                        workspaceReadOnly
+                        draftReadOnly
                           ? "agents.control.view"
                           : "agents.control.edit",
                       )}
@@ -416,20 +420,21 @@ export default function AgentControlPanel({
                     <strong>{definition.displayName}</strong>
                     <p>{t("agents.control.immutableVersion")}</p>
                   </div>
-                  {definition.latestVersionId && (
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      onClick={() =>
-                        requestInstall({
-                          definitionId: definition.id,
-                          versionId: definition.latestVersionId!,
-                        })
-                      }
-                    >
-                      {t("agents.control.install")}
-                    </button>
-                  )}
+                  {definition.latestVersionId &&
+                    (!isOrganization || organizationCanInstall) && (
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() =>
+                          requestInstall({
+                            definitionId: definition.id,
+                            versionId: definition.latestVersionId!,
+                          })
+                        }
+                      >
+                        {t("agents.control.install")}
+                      </button>
+                    )}
                 </article>
               ))
             )}
@@ -437,7 +442,7 @@ export default function AgentControlPanel({
         </div>
       )}
 
-      {!loading && (
+      {!loading && organizationCanSeeInstallations && (
         <section className="agent-control-group agent-control-installations">
           <div className="agent-control-group-title">
             <h3>{t("agents.control.installations")}</h3>
@@ -462,55 +467,59 @@ export default function AgentControlPanel({
                   </p>
                 </div>
                 <div className="agent-control-inline-actions">
-                  {installation.status === "pending" && (
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      disabled={!state?.cloudAvailable}
-                      onClick={() =>
-                        setInstallDialog({
-                          mode: "retry",
-                          definitionId: installation.definitionId,
-                          versionId: installation.selectedVersionId,
-                          installation,
-                          versions: [],
-                        })
-                      }
-                    >
-                      {t("agents.control.retry")}
-                    </button>
-                  )}
-                  {installation.status === "active" && (
+                  {!isOrganization || organizationOnline ? (
                     <>
-                      {isWorkspace ? (
+                      {installation.status === "pending" ? (
                         <button
                           type="button"
                           className="btn btn-primary btn-sm"
-                          onClick={() => setPromotionTarget(installation)}
+                          disabled={!state?.cloudAvailable}
+                          onClick={() =>
+                            setInstallDialog({
+                              mode: "retry",
+                              definitionId: installation.definitionId,
+                              versionId: installation.selectedVersionId,
+                              installation,
+                              versions: [],
+                            })
+                          }
                         >
-                          {t(
-                            "agents.control.experience.promoteLocalExperience",
-                          )}
+                          {t("agents.control.retry")}
                         </button>
                       ) : null}
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        disabled={!state?.cloudAvailable}
-                        onClick={() => void requestUpdate(installation)}
-                      >
-                        {t("agents.control.update")}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        disabled={!state?.cloudAvailable}
-                        onClick={() => setArchiveTarget(installation)}
-                      >
-                        {t("agents.control.archive")}
-                      </button>
+                      {installation.status === "active" ? (
+                        <>
+                          {isWorkspace ? (
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              onClick={() => setPromotionTarget(installation)}
+                            >
+                              {t(
+                                "agents.control.experience.promoteLocalExperience",
+                              )}
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            disabled={!state?.cloudAvailable}
+                            onClick={() => void requestUpdate(installation)}
+                          >
+                            {t("agents.control.update")}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            disabled={!state?.cloudAvailable}
+                            onClick={() => setArchiveTarget(installation)}
+                          >
+                            {t("agents.control.archive")}
+                          </button>
+                        </>
+                      ) : null}
                     </>
-                  )}
+                  ) : null}
                 </div>
               </article>
             ))
@@ -532,13 +541,29 @@ export default function AgentControlPanel({
         />
       ) : null}
 
+      {!loading && isOrganization && organizationCanReadReview && state ? (
+        <OrganizationSubmissionPanel
+          online={organizationOnline}
+          canAuthor={organizationCanAuthor}
+          canReview={organizationCanReview}
+          contextKey={contextKey(state)}
+          refreshToken={organizationRefreshToken}
+          onChanged={() => void load()}
+        />
+      ) : null}
+
       <AgentDraftEditor
         open={editor !== null}
         draft={editor === "new" ? null : editor}
-        readOnly={workspaceReadOnly}
+        readOnly={draftReadOnly}
+        publicationTarget={isOrganization ? "ORGANIZATION" : "DIRECT"}
         onClose={() => setEditor(null)}
         onSaved={() => void load()}
         onPublished={() => void load()}
+        onOrganizationSubmitted={() => {
+          setOrganizationRefreshToken((value) => value + 1);
+          void load();
+        }}
         onRequestInstall={requestInstall}
       />
       {installDialog && (

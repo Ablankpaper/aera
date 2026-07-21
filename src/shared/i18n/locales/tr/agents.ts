@@ -75,7 +75,63 @@ export default {
       "Yerel taslaklar oluşturun, değişmez çalışma alanı sürümleri yayımlayın ve bunları yalıtılmış yerel Profillere kurun.",
     workspaceMemberSubtitle:
       "Onaylı sürümleri yalıtılmış yerel Profillere kurun. Üyeler taslak düzenleyemez veya yayımlayamaz.",
-    role: { owner: "Sahip", admin: "Yönetici", member: "Üye" },
+    role: {
+      owner: "Sahip",
+      admin: "Yönetici",
+      auditor: "Denetçi",
+      member: "Üye",
+    },
+    organization: {
+      title: "Kurumsal Agent'lar",
+      cachedReadOnly: "Önbelleğe alınmış kurumsal veri (salt okunur)",
+      newDraft: "Yeni kurumsal taslak",
+      prepareSubmission: "Gönderimi hazırla",
+      submitForReview: "İncelemeye gönder",
+      submissionPreviewTitle: "Kurumsal gönderimi incele",
+      submissionBoundary:
+        "Gönderim iki kişilik incelemeyi başlatır; bir sürümü yayımlamaz veya kurmaz.",
+      reviewTitle: "Yayın incelemesi",
+      review: "İncele",
+      approve: "Sürümü onayla",
+      reject: "Gönderimi reddet",
+      confirmApproval: "Onayı doğrula",
+      confirmRejection: "Reddi doğrula",
+      differentReviewerRequired:
+        "Bu gönderimi farklı bir Sahip veya Yönetici incelemelidir.",
+      submittedNotPublished:
+        "İncelemeye gönderildi. Hiçbir sürüm yayımlanmadı veya kurulmadı.",
+      approvedNotInstalled:
+        "Sürüm onaylandı. Hiçbir çalışan Profile veya Memory verisi değiştirilmedi.",
+      rejectedNotPublished:
+        "Gönderim reddedildi. Hiçbir sürüm yayımlanmadı veya kurulmadı.",
+      runtimeBoundary:
+        "Kurumsal varlıklar salt okunurdur; Agent yerelde çalışmaya ve öğrenmeye devam eder.",
+      immutableReviewPackage:
+        "Gönderilen değişmez paketin tam hâlini inceleyin.",
+      policyAndDlpPassed:
+        "Gönderim gerekli kurumsal politika ve gizlilik kontrollerini geçti.",
+      status: "Durum",
+      statusValue: {
+        pending: "İnceleme bekliyor",
+        approved: "Onaylandı",
+        rejected: "Reddedildi",
+        withdrawn: "Geri çekildi",
+        superseded: "Yerine yenisi geçti",
+      },
+      contentDigest: "İçerik özeti",
+      baseVersion: "Temel sürüm",
+      initialVersion: "İlk sürüm",
+      author: "Gönderen",
+      reviewedBy: "İnceleyen",
+      policyVersion: "Politika sürümü",
+      noSubmissions: "Henüz kurumsal gönderim yok.",
+      withdraw: "Gönderimi geri çek",
+      confirmWithdrawal: "Geri çekmeyi doğrula",
+      withdrawalBoundary:
+        "Geri çekme yalnızca bu bekleyen gönderimi kapatır; yerel taslaklar ve Hermes verileri değişmez.",
+      draftReadOnly:
+        "Bu kurumsal taslak salt okunurdur. Değiştirmek için Sahip veya Yönetici olarak yeniden bağlanın.",
+    },
     workspaceOfflineNotice:
       "Çalışma alanı çevrimdışı. Doğrulanmış kurulumlar yerelde kullanılabilir; taslaklar salt okunur ve yayımlama, keşif, kurulum ile güncellemeler duraklatılır.",
     view: "Görüntüle",

@@ -100,6 +100,7 @@ describe("shared i18n", () => {
         control.view,
         control.role?.owner,
         control.role?.admin,
+        control.role?.auditor,
         control.role?.member,
         control.errors?.workspace_forbidden,
         control.errors?.workspace_archived,
@@ -124,6 +125,22 @@ describe("shared i18n", () => {
         }
       ).experience;
       expect(leafKeys(experience).sort()).toEqual(expected);
+    }
+  });
+
+  it("provides the complete Organization Agent UI copy in every locale", () => {
+    const expected = leafKeys(
+      resources.en.translation.agents.control.organization,
+    ).sort();
+    expect(expected.length).toBeGreaterThan(30);
+
+    for (const locale of APP_LOCALES) {
+      const organization = (
+        resources[locale].translation.agents.control as {
+          organization?: unknown;
+        }
+      ).organization;
+      expect(leafKeys(organization).sort()).toEqual(expected);
     }
   });
 

@@ -852,9 +852,6 @@ export class OrganizationPublicationService {
 
   private organizationContext(): OrganizationContext {
     const context = this.getContext();
-    if (context.scope === "ORGANIZATION_UNAVAILABLE") {
-      throw codedError("organization_agent_not_enabled");
-    }
     if (
       context.scope !== "ORGANIZATION" ||
       (context.role !== "owner" &&

@@ -146,7 +146,58 @@ export default {
     role: {
       owner: "Owner",
       admin: "Admin",
+      auditor: "Auditor",
       member: "Member",
+    },
+    organization: {
+      title: "Enterprise Agents",
+      cachedReadOnly: "Cached enterprise data",
+      newDraft: "New enterprise draft",
+      prepareSubmission: "Prepare submission",
+      submitForReview: "Submit for review",
+      submissionPreviewTitle: "Review enterprise submission",
+      submissionBoundary:
+        "Submission starts a two-person review. It does not publish or install an Agent version.",
+      reviewTitle: "Publication review",
+      review: "Review",
+      approve: "Approve version",
+      reject: "Reject submission",
+      confirmApproval: "Confirm approval",
+      confirmRejection: "Confirm rejection",
+      differentReviewerRequired:
+        "A different Owner or Admin must review this submission.",
+      submittedNotPublished:
+        "Submitted for review. No Agent version was published or installed.",
+      approvedNotInstalled:
+        "Version approved. No employee Profile or Memory was changed.",
+      rejectedNotPublished:
+        "Submission rejected. No Agent version was published or installed.",
+      runtimeBoundary:
+        "Enterprise assets are read-only; your Agent still runs and learns locally.",
+      immutableReviewPackage: "Review the exact immutable submitted package.",
+      policyAndDlpPassed:
+        "The submission passed the Organization policy and privacy checks required to reach review.",
+      status: "Status",
+      statusValue: {
+        pending: "Pending review",
+        approved: "Approved",
+        rejected: "Rejected",
+        withdrawn: "Withdrawn",
+        superseded: "Superseded",
+      },
+      contentDigest: "Content digest",
+      baseVersion: "Base version",
+      initialVersion: "Initial version",
+      author: "Submitted by",
+      reviewedBy: "Reviewed by",
+      policyVersion: "Policy version",
+      noSubmissions: "No enterprise submissions yet.",
+      withdraw: "Withdraw submission",
+      confirmWithdrawal: "Confirm withdrawal",
+      withdrawalBoundary:
+        "Withdrawal only closes this pending submission. Local drafts and Hermes data stay unchanged.",
+      draftReadOnly:
+        "This enterprise draft is read-only. Reconnect with an Owner or Admin role before changing or submitting it.",
     },
     refresh: "Refresh Agent control plane",
     newAgent: "New Agent",
@@ -332,6 +383,22 @@ export default {
         "This Workspace is archived. Its Agent assets are read-only.",
       workspace_owner_unavailable:
         "This Workspace is read-only until its Owner account is available.",
+      organization_agent_not_found:
+        "This enterprise Agent item no longer exists.",
+      organization_agent_forbidden:
+        "Your current Organization role does not allow this Agent operation.",
+      organization_archived:
+        "This Organization is archived. Its Agent assets are read-only.",
+      organization_submission_self_review:
+        "A different Owner or Admin must review this submission.",
+      organization_submission_conflict:
+        "This enterprise submission changed. Refresh before retrying.",
+      organization_submission_superseded:
+        "A newer enterprise submission replaced this one.",
+      organization_publication_policy_blocked:
+        "Organization policy blocked this Agent submission.",
+      organization_publication_dlp_blocked:
+        "The enterprise privacy scan blocked this Agent submission.",
       candidate_source_ineligible:
         "This installation or Skill is not eligible for promotion.",
       candidate_dlp_blocked: "The local privacy scan blocked this candidate.",

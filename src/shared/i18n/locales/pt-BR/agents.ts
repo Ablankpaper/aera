@@ -72,7 +72,62 @@ export default {
       "Crie rascunhos locais, publique versões imutáveis e instale-as em Perfis locais isolados.",
     workspaceMemberSubtitle:
       "Instale versões aprovadas em Perfis locais isolados. Membros não podem editar nem publicar rascunhos.",
-    role: { owner: "Proprietário", admin: "Administrador", member: "Membro" },
+    role: {
+      owner: "Proprietário",
+      admin: "Administrador",
+      auditor: "Auditor",
+      member: "Membro",
+    },
+    organization: {
+      title: "Agentes empresariais",
+      cachedReadOnly: "Dados empresariais em cache (somente leitura)",
+      newDraft: "Novo rascunho empresarial",
+      prepareSubmission: "Preparar envio",
+      submitForReview: "Enviar para revisão",
+      submissionPreviewTitle: "Revisar envio empresarial",
+      submissionBoundary:
+        "O envio inicia uma revisão por duas pessoas; não publica nem instala uma versão.",
+      reviewTitle: "Revisão de publicação",
+      review: "Revisar",
+      approve: "Aprovar versão",
+      reject: "Rejeitar envio",
+      confirmApproval: "Confirmar aprovação",
+      confirmRejection: "Confirmar rejeição",
+      differentReviewerRequired:
+        "Outro Proprietário ou Administrador deve revisar este envio.",
+      submittedNotPublished:
+        "Enviado para revisão. Nenhuma versão foi publicada ou instalada.",
+      approvedNotInstalled:
+        "Versão aprovada. Nenhum Perfil ou Memory de funcionário foi alterado.",
+      rejectedNotPublished:
+        "Envio rejeitado. Nenhuma versão foi publicada ou instalada.",
+      runtimeBoundary:
+        "Os ativos empresariais são somente leitura; o Agente continua executando e aprendendo localmente.",
+      immutableReviewPackage: "Revise o pacote imutável exato enviado.",
+      policyAndDlpPassed:
+        "O envio passou pelas verificações empresariais de política e privacidade.",
+      status: "Status",
+      statusValue: {
+        pending: "Aguardando revisão",
+        approved: "Aprovado",
+        rejected: "Rejeitado",
+        withdrawn: "Retirado",
+        superseded: "Substituído",
+      },
+      contentDigest: "Resumo do conteúdo",
+      baseVersion: "Versão base",
+      initialVersion: "Versão inicial",
+      author: "Enviado por",
+      reviewedBy: "Revisado por",
+      policyVersion: "Versão da política",
+      noSubmissions: "Ainda não há envios empresariais.",
+      withdraw: "Retirar envio",
+      confirmWithdrawal: "Confirmar retirada",
+      withdrawalBoundary:
+        "A retirada só encerra este envio pendente; rascunhos locais e dados do Hermes não mudam.",
+      draftReadOnly:
+        "Este rascunho empresarial é somente leitura. Reconecte-se como Proprietário ou Administrador para alterá-lo.",
+    },
     workspaceOfflineNotice:
       "O espaço está offline. Instalações verificadas continuam disponíveis localmente; rascunhos ficam somente leitura e publicação, descoberta, instalação e atualização são pausadas.",
     view: "Ver",

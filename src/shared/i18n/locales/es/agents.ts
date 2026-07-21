@@ -75,7 +75,62 @@ export default {
       "Crea borradores locales, publica versiones inmutables del espacio e instálalas en perfiles locales aislados.",
     workspaceMemberSubtitle:
       "Instala versiones aprobadas en perfiles locales aislados. Los miembros no pueden crear ni publicar borradores.",
-    role: { owner: "Propietario", admin: "Administrador", member: "Miembro" },
+    role: {
+      owner: "Propietario",
+      admin: "Administrador",
+      auditor: "Auditor",
+      member: "Miembro",
+    },
+    organization: {
+      title: "Agentes empresariales",
+      cachedReadOnly: "Datos empresariales en caché (solo lectura)",
+      newDraft: "Nuevo borrador empresarial",
+      prepareSubmission: "Preparar envío",
+      submitForReview: "Enviar a revisión",
+      submissionPreviewTitle: "Revisar el envío empresarial",
+      submissionBoundary:
+        "El envío inicia una revisión por dos personas; no publica ni instala una versión.",
+      reviewTitle: "Revisión de publicación",
+      review: "Revisar",
+      approve: "Aprobar versión",
+      reject: "Rechazar envío",
+      confirmApproval: "Confirmar aprobación",
+      confirmRejection: "Confirmar rechazo",
+      differentReviewerRequired:
+        "Otro Propietario o Administrador debe revisar este envío.",
+      submittedNotPublished:
+        "Enviado a revisión. No se publicó ni instaló ninguna versión.",
+      approvedNotInstalled:
+        "Versión aprobada. No se modificó ningún Perfil ni Memory de empleados.",
+      rejectedNotPublished:
+        "Envío rechazado. No se publicó ni instaló ninguna versión.",
+      runtimeBoundary:
+        "Los activos empresariales son de solo lectura; el Agente sigue ejecutándose y aprendiendo localmente.",
+      immutableReviewPackage: "Revisa el paquete inmutable exacto enviado.",
+      policyAndDlpPassed:
+        "El envío superó las comprobaciones empresariales de política y privacidad.",
+      status: "Estado",
+      statusValue: {
+        pending: "Pendiente de revisión",
+        approved: "Aprobado",
+        rejected: "Rechazado",
+        withdrawn: "Retirado",
+        superseded: "Sustituido",
+      },
+      contentDigest: "Resumen de contenido",
+      baseVersion: "Versión base",
+      initialVersion: "Versión inicial",
+      author: "Enviado por",
+      reviewedBy: "Revisado por",
+      policyVersion: "Versión de la política",
+      noSubmissions: "Aún no hay envíos empresariales.",
+      withdraw: "Retirar envío",
+      confirmWithdrawal: "Confirmar retirada",
+      withdrawalBoundary:
+        "La retirada solo cierra este envío pendiente; los borradores locales y los datos de Hermes no cambian.",
+      draftReadOnly:
+        "Este borrador empresarial es de solo lectura. Vuelve a conectarte como Propietario o Administrador para modificarlo.",
+    },
     workspaceOfflineNotice:
       "El espacio está sin conexión. Las instalaciones verificadas siguen disponibles localmente; los borradores son de solo lectura y se pausan la publicación, detección, instalación y actualización.",
     view: "Ver",

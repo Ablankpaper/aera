@@ -85,7 +85,59 @@ export default {
       "أنشئ مسودات محلية وانشر إصدارات ثابتة لمساحة العمل وثبّتها في ملفات شخصية محلية معزولة.",
     workspaceMemberSubtitle:
       "ثبّت إصدارات وكلاء مساحة العمل المعتمدة في ملفات شخصية محلية معزولة. التأليف غير متاح للأعضاء.",
-    role: { owner: "المالك", admin: "المسؤول", member: "عضو" },
+    role: {
+      owner: "المالك",
+      admin: "المسؤول",
+      auditor: "المدقق",
+      member: "عضو",
+    },
+    organization: {
+      title: "وكلاء المؤسسة",
+      cachedReadOnly: "بيانات المؤسسة المخزنة مؤقتًا (للقراءة فقط)",
+      newDraft: "مسودة مؤسسة جديدة",
+      prepareSubmission: "تحضير الإرسال",
+      submitForReview: "إرسال للمراجعة",
+      submissionPreviewTitle: "مراجعة إرسال المؤسسة",
+      submissionBoundary:
+        "يبدأ الإرسال مراجعة من شخصين، ولا ينشر أو يثبت إصدارًا.",
+      reviewTitle: "مراجعة النشر",
+      review: "مراجعة",
+      approve: "اعتماد الإصدار",
+      reject: "رفض الإرسال",
+      confirmApproval: "تأكيد الاعتماد",
+      confirmRejection: "تأكيد الرفض",
+      differentReviewerRequired: "يجب أن يراجع هذا الإرسال مالك أو مسؤول آخر.",
+      submittedNotPublished: "أُرسل للمراجعة. لم يُنشر أو يُثبت أي إصدار.",
+      approvedNotInstalled:
+        "تم اعتماد الإصدار. لم يتغير أي Profile أو Memory للموظفين.",
+      rejectedNotPublished: "رُفض الإرسال. لم يُنشر أو يُثبت أي إصدار.",
+      runtimeBoundary:
+        "أصول المؤسسة للقراءة فقط؛ يستمر الوكيل في العمل والتعلم محليًا.",
+      immutableReviewPackage: "راجع الحزمة الثابتة المطابقة لما تم إرساله.",
+      policyAndDlpPassed:
+        "اجتاز الإرسال فحوصات سياسة المؤسسة والخصوصية اللازمة للمراجعة.",
+      status: "الحالة",
+      statusValue: {
+        pending: "بانتظار المراجعة",
+        approved: "معتمد",
+        rejected: "مرفوض",
+        withdrawn: "مسحوب",
+        superseded: "مستبدل",
+      },
+      contentDigest: "بصمة المحتوى",
+      baseVersion: "الإصدار الأساسي",
+      initialVersion: "الإصدار الأول",
+      author: "أرسله",
+      reviewedBy: "راجعه",
+      policyVersion: "إصدار السياسة",
+      noSubmissions: "لا توجد إرسالات مؤسسة بعد.",
+      withdraw: "سحب الإرسال",
+      confirmWithdrawal: "تأكيد السحب",
+      withdrawalBoundary:
+        "يغلق السحب هذا الإرسال المعلق فقط؛ لا تتغير المسودات المحلية أو بيانات Hermes.",
+      draftReadOnly:
+        "مسودة المؤسسة للقراءة فقط. أعد الاتصال كمالك أو مسؤول قبل تعديلها أو إرسالها.",
+    },
     workspaceOfflineNotice:
       "مساحة العمل غير متصلة. تظل التثبيتات الموثقة متاحة محلياً؛ المسودات للقراءة فقط وتم إيقاف النشر والاكتشاف والتثبيت والتحديث.",
     view: "عرض",

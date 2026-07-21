@@ -72,7 +72,62 @@ export default {
       "Buat draf lokal, publikasikan versi Workspace yang tidak dapat diubah, lalu instal ke Profil lokal yang terisolasi.",
     workspaceMemberSubtitle:
       "Instal versi Agent Workspace yang disetujui ke Profil lokal terisolasi. Member tidak dapat menulis atau menerbitkan.",
-    role: { owner: "Owner", admin: "Admin", member: "Member" },
+    role: {
+      owner: "Pemilik",
+      admin: "Admin",
+      auditor: "Auditor",
+      member: "Anggota",
+    },
+    organization: {
+      title: "Agen perusahaan",
+      cachedReadOnly: "Data perusahaan tersimpan (hanya baca)",
+      newDraft: "Draf perusahaan baru",
+      prepareSubmission: "Siapkan pengajuan",
+      submitForReview: "Ajukan untuk ditinjau",
+      submissionPreviewTitle: "Tinjau pengajuan perusahaan",
+      submissionBoundary:
+        "Pengajuan memulai tinjauan dua orang; tidak menerbitkan atau memasang versi.",
+      reviewTitle: "Tinjauan penerbitan",
+      review: "Tinjau",
+      approve: "Setujui versi",
+      reject: "Tolak pengajuan",
+      confirmApproval: "Konfirmasi persetujuan",
+      confirmRejection: "Konfirmasi penolakan",
+      differentReviewerRequired:
+        "Pemilik atau Admin lain harus meninjau pengajuan ini.",
+      submittedNotPublished:
+        "Diajukan untuk ditinjau. Tidak ada versi yang diterbitkan atau dipasang.",
+      approvedNotInstalled:
+        "Versi disetujui. Tidak ada Profile atau Memory karyawan yang diubah.",
+      rejectedNotPublished:
+        "Pengajuan ditolak. Tidak ada versi yang diterbitkan atau dipasang.",
+      runtimeBoundary:
+        "Aset perusahaan hanya baca; Agen tetap berjalan dan belajar secara lokal.",
+      immutableReviewPackage: "Tinjau paket tetap yang tepat seperti diajukan.",
+      policyAndDlpPassed:
+        "Pengajuan lolos pemeriksaan kebijakan dan privasi perusahaan.",
+      status: "Status",
+      statusValue: {
+        pending: "Menunggu tinjauan",
+        approved: "Disetujui",
+        rejected: "Ditolak",
+        withdrawn: "Ditarik",
+        superseded: "Digantikan",
+      },
+      contentDigest: "Ringkasan konten",
+      baseVersion: "Versi dasar",
+      initialVersion: "Versi awal",
+      author: "Diajukan oleh",
+      reviewedBy: "Ditinjau oleh",
+      policyVersion: "Versi kebijakan",
+      noSubmissions: "Belum ada pengajuan perusahaan.",
+      withdraw: "Tarik pengajuan",
+      confirmWithdrawal: "Konfirmasi penarikan",
+      withdrawalBoundary:
+        "Penarikan hanya menutup pengajuan tertunda ini; draf lokal dan data Hermes tetap sama.",
+      draftReadOnly:
+        "Draf perusahaan ini hanya baca. Sambungkan kembali sebagai Pemilik atau Admin untuk mengubahnya.",
+    },
     workspaceOfflineNotice:
       "Workspace sedang offline. Instalasi terverifikasi tetap dapat dipakai secara lokal; draf hanya-baca dan publikasi, penemuan, instalasi, serta pembaruan dijeda.",
     view: "Lihat",

@@ -71,7 +71,63 @@ export default {
       "Twórz lokalne szkice, publikuj niezmienne wersje obszaru i instaluj je w odizolowanych lokalnych profilach.",
     workspaceMemberSubtitle:
       "Instaluj zatwierdzone wersje w odizolowanych lokalnych profilach. Członkowie nie mogą tworzyć ani publikować szkiców.",
-    role: { owner: "Właściciel", admin: "Administrator", member: "Członek" },
+    role: {
+      owner: "Właściciel",
+      admin: "Administrator",
+      auditor: "Audytor",
+      member: "Członek",
+    },
+    organization: {
+      title: "Agenci firmowi",
+      cachedReadOnly: "Dane firmowe z pamięci podręcznej (tylko do odczytu)",
+      newDraft: "Nowy szkic firmowy",
+      prepareSubmission: "Przygotuj zgłoszenie",
+      submitForReview: "Wyślij do przeglądu",
+      submissionPreviewTitle: "Przejrzyj zgłoszenie firmowe",
+      submissionBoundary:
+        "Zgłoszenie rozpoczyna przegląd dwuosobowy; nie publikuje ani nie instaluje wersji.",
+      reviewTitle: "Przegląd publikacji",
+      review: "Przejrzyj",
+      approve: "Zatwierdź wersję",
+      reject: "Odrzuć zgłoszenie",
+      confirmApproval: "Potwierdź zatwierdzenie",
+      confirmRejection: "Potwierdź odrzucenie",
+      differentReviewerRequired:
+        "Inny Właściciel lub Administrator musi przejrzeć to zgłoszenie.",
+      submittedNotPublished:
+        "Wysłano do przeglądu. Żadna wersja nie została opublikowana ani zainstalowana.",
+      approvedNotInstalled:
+        "Wersja zatwierdzona. Nie zmieniono żadnego Profile ani Memory pracownika.",
+      rejectedNotPublished:
+        "Zgłoszenie odrzucone. Żadna wersja nie została opublikowana ani zainstalowana.",
+      runtimeBoundary:
+        "Zasoby firmowe są tylko do odczytu; Agent nadal działa i uczy się lokalnie.",
+      immutableReviewPackage:
+        "Przejrzyj dokładny, niezmienny przesłany pakiet.",
+      policyAndDlpPassed:
+        "Zgłoszenie przeszło wymagane firmowe kontrole zasad i prywatności.",
+      status: "Stan",
+      statusValue: {
+        pending: "Oczekuje na przegląd",
+        approved: "Zatwierdzone",
+        rejected: "Odrzucone",
+        withdrawn: "Wycofane",
+        superseded: "Zastąpione",
+      },
+      contentDigest: "Skrót treści",
+      baseVersion: "Wersja bazowa",
+      initialVersion: "Wersja początkowa",
+      author: "Zgłaszający",
+      reviewedBy: "Recenzent",
+      policyVersion: "Wersja zasad",
+      noSubmissions: "Brak zgłoszeń firmowych.",
+      withdraw: "Wycofaj zgłoszenie",
+      confirmWithdrawal: "Potwierdź wycofanie",
+      withdrawalBoundary:
+        "Wycofanie zamyka tylko to oczekujące zgłoszenie; lokalne szkice i dane Hermes pozostają bez zmian.",
+      draftReadOnly:
+        "Ten szkic firmowy jest tylko do odczytu. Połącz się ponownie jako Właściciel lub Administrator, aby go zmienić.",
+    },
     workspaceOfflineNotice:
       "Obszar roboczy jest offline. Zweryfikowane instalacje nadal działają lokalnie; szkice są tylko do odczytu, a publikowanie, wykrywanie, instalowanie i aktualizacje są wstrzymane.",
     view: "Wyświetl",

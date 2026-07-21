@@ -75,7 +75,59 @@ export default {
       "צרו טיוטות מקומיות, פרסמו גרסאות קבועות והתקינו אותן בפרופילים מקומיים מבודדים.",
     workspaceMemberSubtitle:
       "התקינו גרסאות מאושרות בפרופילים מקומיים מבודדים. לחברים אין הרשאת עריכה או פרסום.",
-    role: { owner: "בעלים", admin: "מנהל", member: "חבר" },
+    role: {
+      owner: "בעלים",
+      admin: "מנהל",
+      auditor: "מבקר",
+      member: "חבר",
+    },
+    organization: {
+      title: "סוכנים ארגוניים",
+      cachedReadOnly: "נתוני ארגון שמורים (לקריאה בלבד)",
+      newDraft: "טיוטה ארגונית חדשה",
+      prepareSubmission: "הכנת הגשה",
+      submitForReview: "שליחה לבדיקה",
+      submissionPreviewTitle: "בדיקת ההגשה הארגונית",
+      submissionBoundary:
+        "ההגשה מתחילה בדיקה של שני אנשים; היא אינה מפרסמת או מתקינה גרסה.",
+      reviewTitle: "בדיקת פרסום",
+      review: "בדיקה",
+      approve: "אישור גרסה",
+      reject: "דחיית הגשה",
+      confirmApproval: "אישור סופי",
+      confirmRejection: "אישור הדחייה",
+      differentReviewerRequired: "בעלים או מנהל אחר חייב לבדוק את ההגשה הזו.",
+      submittedNotPublished: "נשלח לבדיקה. אף גרסה לא פורסמה או הותקנה.",
+      approvedNotInstalled:
+        "הגרסה אושרה. שום Profile או Memory של עובד לא השתנו.",
+      rejectedNotPublished: "ההגשה נדחתה. אף גרסה לא פורסמה או הותקנה.",
+      runtimeBoundary:
+        "נכסי הארגון הם לקריאה בלבד; הסוכן ממשיך לפעול וללמוד מקומית.",
+      immutableReviewPackage: "בדקו את החבילה הבלתי־משתנה שהוגשה בדיוק.",
+      policyAndDlpPassed:
+        "ההגשה עברה את בדיקות המדיניות והפרטיות הארגוניות הנדרשות.",
+      status: "מצב",
+      statusValue: {
+        pending: "ממתין לבדיקה",
+        approved: "אושר",
+        rejected: "נדחה",
+        withdrawn: "נמשך",
+        superseded: "הוחלף",
+      },
+      contentDigest: "תקציר תוכן",
+      baseVersion: "גרסת בסיס",
+      initialVersion: "גרסה ראשונה",
+      author: "הוגש על ידי",
+      reviewedBy: "נבדק על ידי",
+      policyVersion: "גרסת מדיניות",
+      noSubmissions: "אין עדיין הגשות ארגוניות.",
+      withdraw: "משיכת הגשה",
+      confirmWithdrawal: "אישור משיכה",
+      withdrawalBoundary:
+        "המשיכה סוגרת רק את ההגשה הממתינה; טיוטות מקומיות ונתוני Hermes אינם משתנים.",
+      draftReadOnly:
+        "הטיוטה הארגונית היא לקריאה בלבד. התחברו מחדש כבעלים או מנהל כדי לשנותה.",
+    },
     workspaceOfflineNotice:
       "סביבת העבודה אינה מקוונת. התקנות מאומתות נשארות זמינות מקומית; טיוטות הן לקריאה בלבד ופרסום, גילוי, התקנה ועדכון מושהים.",
     view: "הצגה",

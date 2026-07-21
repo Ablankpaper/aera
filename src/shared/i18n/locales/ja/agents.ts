@@ -72,7 +72,62 @@ export default {
       "ローカル下書きを作成し、不変のワークスペース版を公開して、分離されたローカル Profile にインストールします。",
     workspaceMemberSubtitle:
       "承認済みのワークスペース版を分離されたローカル Profile にインストールできます。Member は編集・公開できません。",
-    role: { owner: "Owner", admin: "Admin", member: "Member" },
+    role: {
+      owner: "オーナー",
+      admin: "管理者",
+      auditor: "監査担当",
+      member: "メンバー",
+    },
+    organization: {
+      title: "企業エージェント",
+      cachedReadOnly: "キャッシュ済み企業データ（読み取り専用）",
+      newDraft: "企業ドラフトを新規作成",
+      prepareSubmission: "提出を準備",
+      submitForReview: "レビューに提出",
+      submissionPreviewTitle: "企業提出内容を確認",
+      submissionBoundary:
+        "提出後は二者レビューに進みます。バージョンの公開やインストールは行いません。",
+      reviewTitle: "公開レビュー",
+      review: "レビュー",
+      approve: "バージョンを承認",
+      reject: "提出を却下",
+      confirmApproval: "承認を確定",
+      confirmRejection: "却下を確定",
+      differentReviewerRequired:
+        "別のオーナーまたは管理者がこの提出をレビューする必要があります。",
+      submittedNotPublished:
+        "レビューに提出しました。バージョンは公開もインストールもされていません。",
+      approvedNotInstalled:
+        "バージョンを承認しました。従業員の Profile や Memory は変更されていません。",
+      rejectedNotPublished:
+        "提出を却下しました。バージョンは公開もインストールもされていません。",
+      runtimeBoundary:
+        "企業資産は読み取り専用です。エージェントの実行と学習は引き続きローカルで行われます。",
+      immutableReviewPackage: "提出された正確な不変パッケージを確認します。",
+      policyAndDlpPassed:
+        "提出内容はレビューに必要な企業ポリシーとプライバシー検査を通過しました。",
+      status: "状態",
+      statusValue: {
+        pending: "レビュー待ち",
+        approved: "承認済み",
+        rejected: "却下済み",
+        withdrawn: "取り下げ済み",
+        superseded: "新しい提出に置換済み",
+      },
+      contentDigest: "コンテンツダイジェスト",
+      baseVersion: "基準バージョン",
+      initialVersion: "初回バージョン",
+      author: "提出者",
+      reviewedBy: "レビュー担当",
+      policyVersion: "ポリシーバージョン",
+      noSubmissions: "企業提出はまだありません。",
+      withdraw: "提出を取り下げ",
+      confirmWithdrawal: "取り下げを確定",
+      withdrawalBoundary:
+        "取り下げはこの保留中の提出だけを閉じます。ローカルドラフトと Hermes データは変更されません。",
+      draftReadOnly:
+        "この企業ドラフトは読み取り専用です。オーナーまたは管理者として再接続してから変更してください。",
+    },
     workspaceOfflineNotice:
       "ワークスペースはオフラインです。検証済みインストールはローカルで利用できますが、下書きは読み取り専用となり、公開・検索・インストール・更新は停止します。",
     view: "表示",

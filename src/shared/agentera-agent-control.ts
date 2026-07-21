@@ -148,11 +148,6 @@ export type AgenteraAgentControlContext =
       scope: "ORGANIZATION";
       organizationId: string;
       role: "owner" | "admin" | "auditor" | "member";
-    }
-  | {
-      scope: "ORGANIZATION_UNAVAILABLE";
-      organizationId: string;
-      role: "owner" | "admin" | "auditor" | "member";
     };
 
 export type OrganizationAgentSubmissionStatus =
@@ -305,7 +300,6 @@ export type AgenteraAgentControlErrorCode =
   | "workspace_forbidden"
   | "workspace_archived"
   | "workspace_owner_unavailable"
-  | "organization_agent_not_enabled"
   | "organization_agent_not_found"
   | "organization_agent_forbidden"
   | "organization_archived"

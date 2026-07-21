@@ -136,10 +136,7 @@ export function runtimeComponentKey(owner: AgenteraRuntimeOwner): string {
   return `${owner.tenantId}\0${owner.ownerId}\0${owner.deviceInstallationId}`;
 }
 
-type NormalizedAgentContext = Exclude<
-  AgenteraAgentControlContext,
-  { scope: "ORGANIZATION_UNAVAILABLE" }
->;
+type NormalizedAgentContext = AgenteraAgentControlContext;
 
 function normalizeAgentContext(
   context: AgenteraAgentControlContext | undefined,
