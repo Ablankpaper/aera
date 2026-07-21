@@ -94,24 +94,35 @@ function nullableUuid(value: unknown): string | null {
   return requireUuid(value);
 }
 
-function normalizeContext(context: AgentAssetContext | undefined): {
-  scope: "USER" | "WORKSPACE";
+function normalizeDraftContext(context: AgentAssetContext | undefined): {
+  scope: "USER" | "WORKSPACE" | "ORGANIZATION";
   workspaceId: string | null;
+  organizationId: string | null;
 } {
   if (context === undefined || context.scope === "USER") {
-    return { scope: "USER", workspaceId: null };
+    return { scope: "USER", workspaceId: null, organizationId: null };
   }
-  if (
-    context.scope !== "WORKSPACE" ||
-    (context.role !== "owner" &&
+  if (context.scope === "WORKSPACE") {
+    if (
+      context.role !== "owner" &&
       context.role !== "admin" &&
-      context.role !== "member")
-  ) {
+      context.role !== "member"
+    ) {
+      throw new AgentDraftStoreError("invalid_draft");
+    }
+    return {
+      scope: "WORKSPACE",
+      workspaceId: requireUuid(context.workspaceId),
+      organizationId: null,
+    };
+  }
+  if (context.role !== "owner" && context.role !== "admin") {
     throw new AgentDraftStoreError("invalid_draft");
   }
   return {
-    scope: "WORKSPACE",
-    workspaceId: requireUuid(context.workspaceId),
+    scope: "ORGANIZATION",
+    workspaceId: null,
+    organizationId: requireUuid(context.organizationId),
   };
 }
 
@@ -196,16 +207,18 @@ export class AgentDraftStore {
   private readonly writeFile: (path: string, content: Buffer) => void;
   private readonly tenantId: string;
   private readonly ownerId: string;
-  private readonly targetScope: "USER" | "WORKSPACE";
+  private readonly targetScope: "USER" | "WORKSPACE" | "ORGANIZATION";
   private readonly workspaceId: string | null;
+  private readonly organizationId: string | null;
 
   constructor(options: AgentDraftStoreOptions) {
     this.database = options.database;
     this.tenantId = requireUuid(options.owner.tenantId);
     this.ownerId = requireUuid(options.owner.ownerId);
-    const context = normalizeContext(options.context);
+    const context = normalizeDraftContext(options.context);
     this.targetScope = context.scope;
     this.workspaceId = context.workspaceId;
+    this.organizationId = context.organizationId;
     this.now = options.now ?? (() => new Date());
     this.randomUUID = options.randomUUID ?? nodeRandomUUID;
     this.writeFile =
@@ -255,11 +268,11 @@ export class AgentDraftStore {
       this.database.sqlite
         .prepare(
           `INSERT INTO agent_drafts (
-			 id, tenant_id, owner_id, target_scope, workspace_id,
+			 id, tenant_id, owner_id, target_scope, workspace_id, organization_id,
 			 source_agent_definition_id, base_agent_version_id,
              display_name, icon_media_type, icon_data_base64, manifest_json,
              revision, created_at, updated_at
-		   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -267,6 +280,7 @@ export class AgentDraftStore {
           this.ownerId,
           this.targetScope,
           this.workspaceId,
+          this.organizationId,
           sourceDefinitionId,
           baseVersionId,
           displayName,
@@ -329,7 +343,8 @@ export class AgentDraftStore {
                publication_error_code = NULL,
                publication_error_summary = NULL
 		   WHERE id = ? AND tenant_id = ? AND owner_id = ?
-		     AND target_scope = ? AND workspace_id IS ? AND revision = ?`,
+		     AND target_scope = ? AND workspace_id IS ?
+             AND organization_id IS ? AND revision = ?`,
         )
         .run(
           displayName,
@@ -342,6 +357,7 @@ export class AgentDraftStore {
           this.ownerId,
           this.targetScope,
           this.workspaceId,
+          this.organizationId,
           current.revision,
         );
       if (changes(updated) !== 1) {
@@ -365,7 +381,7 @@ export class AgentDraftStore {
       .prepare(
         `SELECT id FROM agent_drafts
 		 WHERE tenant_id = ? AND owner_id = ?
-		   AND target_scope = ? AND workspace_id IS ?
+		   AND target_scope = ? AND workspace_id IS ? AND organization_id IS ?
          ORDER BY updated_at DESC, id ASC`,
       )
       .all(
@@ -373,6 +389,7 @@ export class AgentDraftStore {
         this.ownerId,
         this.targetScope,
         this.workspaceId,
+        this.organizationId,
       ) as Array<{ id?: unknown }>;
     return rows.map((row) => this.getDraft(requireUuid(row.id)));
   }
@@ -383,7 +400,7 @@ export class AgentDraftStore {
       .prepare(
         `SELECT * FROM agent_drafts
 		 WHERE id = ? AND tenant_id = ? AND owner_id = ?
-		   AND target_scope = ? AND workspace_id IS ?`,
+		   AND target_scope = ? AND workspace_id IS ? AND organization_id IS ?`,
       )
       .get(
         id,
@@ -391,6 +408,7 @@ export class AgentDraftStore {
         this.ownerId,
         this.targetScope,
         this.workspaceId,
+        this.organizationId,
       ) as DraftRow | undefined;
     if (!row) throw new AgentDraftStoreError("draft_not_found");
     return this.toDraft(row);
@@ -413,9 +431,16 @@ export class AgentDraftStore {
       .prepare(
         `DELETE FROM agent_drafts
 		 WHERE id = ? AND tenant_id = ? AND owner_id = ?
-		   AND target_scope = ? AND workspace_id IS ?`,
+		   AND target_scope = ? AND workspace_id IS ? AND organization_id IS ?`,
       )
-      .run(id, this.tenantId, this.ownerId, this.targetScope, this.workspaceId);
+      .run(
+        id,
+        this.tenantId,
+        this.ownerId,
+        this.targetScope,
+        this.workspaceId,
+        this.organizationId,
+      );
     if (changes(result) !== 1) {
       throw new AgentDraftStoreError("draft_not_found");
     }
@@ -461,7 +486,7 @@ export class AgentDraftStore {
                 publication_idempotency_key AS idempotency_key
          FROM agent_drafts
 		 WHERE id = ? AND tenant_id = ? AND owner_id = ?
-		   AND target_scope = ? AND workspace_id IS ?`,
+		   AND target_scope = ? AND workspace_id IS ? AND organization_id IS ?`,
       )
       .get(
         draft.id,
@@ -469,6 +494,7 @@ export class AgentDraftStore {
         this.ownerId,
         this.targetScope,
         this.workspaceId,
+        this.organizationId,
       ) as
       | {
           revision?: unknown;
@@ -488,7 +514,7 @@ export class AgentDraftStore {
            SET publication_attempted_at = ?, publication_error_code = NULL,
                publication_error_summary = NULL
 		   WHERE id = ? AND tenant_id = ? AND owner_id = ?
-		     AND target_scope = ? AND workspace_id IS ?
+		     AND target_scope = ? AND workspace_id IS ? AND organization_id IS ?
              AND revision = ? AND publication_attempt_revision = ?`,
         )
         .run(
@@ -498,6 +524,7 @@ export class AgentDraftStore {
           this.ownerId,
           this.targetScope,
           this.workspaceId,
+          this.organizationId,
           revision,
           revision,
         );
@@ -520,7 +547,8 @@ export class AgentDraftStore {
              publication_idempotency_key = ?, publication_error_code = NULL,
              publication_error_summary = NULL
 		 WHERE id = ? AND tenant_id = ? AND owner_id = ?
-		   AND target_scope = ? AND workspace_id IS ? AND revision = ?`,
+		   AND target_scope = ? AND workspace_id IS ?
+           AND organization_id IS ? AND revision = ?`,
       )
       .run(
         revision,
@@ -531,6 +559,7 @@ export class AgentDraftStore {
         this.ownerId,
         this.targetScope,
         this.workspaceId,
+        this.organizationId,
         revision,
       );
     if (changes(result) !== 1) {
@@ -562,7 +591,7 @@ export class AgentDraftStore {
         `UPDATE agent_drafts
          SET publication_error_code = ?, publication_error_summary = ?
 		 WHERE id = ? AND tenant_id = ? AND owner_id = ?
-		   AND target_scope = ? AND workspace_id IS ?
+		   AND target_scope = ? AND workspace_id IS ? AND organization_id IS ?
            AND revision = ? AND publication_attempt_revision = ?`,
       )
       .run(
@@ -573,6 +602,7 @@ export class AgentDraftStore {
         this.ownerId,
         this.targetScope,
         this.workspaceId,
+        this.organizationId,
         revision,
         revision,
       );
@@ -602,7 +632,8 @@ export class AgentDraftStore {
              published_revision = ?, publication_error_code = NULL,
              publication_error_summary = NULL, updated_at = ?
 		 WHERE id = ? AND tenant_id = ? AND owner_id = ?
-		   AND target_scope = ? AND workspace_id IS ? AND revision = ?`,
+		   AND target_scope = ? AND workspace_id IS ?
+           AND organization_id IS ? AND revision = ?`,
       )
       .run(
         definitionId,
@@ -616,6 +647,7 @@ export class AgentDraftStore {
         this.ownerId,
         this.targetScope,
         this.workspaceId,
+        this.organizationId,
         revision,
       );
     if (changes(result) !== 1) {

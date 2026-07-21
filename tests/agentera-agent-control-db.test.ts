@@ -39,8 +39,8 @@ afterEach(() => {
 });
 
 describe("AgentEra control-plane database", () => {
-  it("pins the ExperienceCandidate local schema at version 4", () => {
-    expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(4);
+  it("pins the Organization Agent local schema at version 5", () => {
+    expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(5);
   });
 
   it("opens exactly below Electron userData and never below HERMES_HOME", () => {
@@ -116,6 +116,7 @@ describe("AgentEra control-plane database", () => {
         "local_agent_installations",
         "local_experience_candidate_imports",
         "local_experience_candidates",
+        "organization_agent_submission_refs",
         "pending_sanitized_records",
         "runtime_bindings",
         "signing_key_cache",
@@ -139,13 +140,21 @@ describe("AgentEra control-plane database", () => {
         .prepare("PRAGMA table_info(agent_drafts)")
         .all() as Array<{ name: string }>;
       expect(draftColumns.map(({ name }) => name)).toEqual(
-        expect.arrayContaining(["target_scope", "workspace_id"]),
+        expect.arrayContaining([
+          "target_scope",
+          "workspace_id",
+          "organization_id",
+        ]),
       );
       const installationColumns = database.sqlite
         .prepare("PRAGMA table_info(local_agent_installations)")
         .all() as Array<{ name: string }>;
       expect(installationColumns.map(({ name }) => name)).toEqual(
-        expect.arrayContaining(["source_scope", "source_workspace_id"]),
+        expect.arrayContaining([
+          "source_scope",
+          "source_workspace_id",
+          "source_organization_id",
+        ]),
       );
       const cachedColumns = database.sqlite
         .prepare("PRAGMA table_info(cached_agent_versions)")
@@ -209,11 +218,252 @@ describe("AgentEra control-plane database", () => {
         "target_scope = 'WORKSPACE' AND workspace_id IS NOT NULL",
       );
       expect(schemaSql).toContain(
+        "target_scope = 'ORGANIZATION' AND workspace_id IS NULL AND organization_id IS NOT NULL",
+      );
+      expect(schemaSql).toContain(
         "source_scope = 'USER' AND source_workspace_id IS NULL",
       );
       expect(schemaSql).toContain(
         "source_scope = 'WORKSPACE' AND source_workspace_id IS NOT NULL",
       );
+      expect(schemaSql).toContain(
+        "source_scope = 'ORGANIZATION' AND source_workspace_id IS NULL AND source_organization_id IS NOT NULL",
+      );
+      const submissionReferenceColumns = database.sqlite
+        .prepare("PRAGMA table_info(organization_agent_submission_refs)")
+        .all() as Array<{ name: string }>;
+      expect(submissionReferenceColumns.map(({ name }) => name)).toEqual([
+        "local_draft_id",
+        "local_draft_revision",
+        "organization_id",
+        "cloud_submission_id",
+        "content_digest",
+        "cloud_status",
+        "cloud_revision",
+        "submitted_at",
+        "last_verified_at",
+      ]);
+      database.close();
+    }
+  });
+
+  it("migrates v4 rows unchanged and enforces exact v5 Organization variants", () => {
+    const userDataPath = join(temporaryRoot(), "user-data");
+    const paths = resolveAgenteraControlPlanePaths(userDataPath);
+    mkdirSync(paths.rootPath, { recursive: true });
+    mkdirSync(paths.draftsPath, { recursive: true });
+    const draftFile = join(paths.draftsPath, "legacy-v4.txt");
+    writeFileSync(draftFile, "legacy-v4-bytes", { mode: 0o600 });
+    const legacy = new DatabaseSync(paths.databasePath);
+    legacy.exec(`
+      CREATE TABLE agent_drafts (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        target_scope TEXT NOT NULL,
+        workspace_id TEXT,
+        source_agent_definition_id TEXT,
+        base_agent_version_id TEXT,
+        display_name TEXT NOT NULL,
+        icon_media_type TEXT,
+        icon_data_base64 TEXT,
+        manifest_json TEXT NOT NULL,
+        revision INTEGER NOT NULL CHECK (revision >= 1),
+        publication_attempt_revision INTEGER,
+        publication_attempted_at TEXT,
+        publication_idempotency_key TEXT,
+        publication_error_code TEXT,
+        publication_error_summary TEXT,
+        published_definition_id TEXT,
+        published_version_id TEXT,
+        published_revision INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CHECK ((target_scope = 'USER' AND workspace_id IS NULL)
+          OR (target_scope = 'WORKSPACE' AND workspace_id IS NOT NULL))
+      );
+      CREATE TABLE draft_assets (
+        draft_id TEXT NOT NULL REFERENCES agent_drafts(id) ON DELETE CASCADE,
+        path TEXT NOT NULL,
+        revision INTEGER NOT NULL CHECK (revision >= 1),
+        kind TEXT NOT NULL,
+        media_type TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+        sha256 TEXT NOT NULL,
+        PRIMARY KEY (draft_id, path)
+      );
+      CREATE TABLE local_agent_installations (
+        agent_installation_id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        device_installation_id TEXT NOT NULL,
+        source_scope TEXT NOT NULL,
+        source_workspace_id TEXT,
+        definition_id TEXT NOT NULL,
+        selected_version_id TEXT NOT NULL,
+        runtime_profile_id TEXT,
+        policy_snapshot_id TEXT,
+        status TEXT NOT NULL,
+        retry_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CHECK ((source_scope = 'USER' AND source_workspace_id IS NULL)
+          OR (source_scope = 'WORKSPACE' AND source_workspace_id IS NOT NULL))
+      );
+      CREATE TABLE local_experience_candidate_imports (
+        tenant_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        device_installation_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        candidate_id TEXT NOT NULL,
+        agent_definition_id TEXT NOT NULL,
+        base_agent_version_id TEXT NOT NULL,
+        candidate_content_digest TEXT NOT NULL,
+        draft_id TEXT NOT NULL REFERENCES agent_drafts(id) ON DELETE CASCADE,
+        imported_at TEXT NOT NULL,
+        PRIMARY KEY (tenant_id, owner_id, device_installation_id, candidate_id)
+      );
+      PRAGMA user_version = 4;
+    `);
+    const tenantId = "11111111-1111-4111-8111-111111111111";
+    const ownerId = "22222222-2222-4222-8222-222222222222";
+    const draftId = "33333333-3333-4333-8333-333333333333";
+    const workspaceId = "44444444-4444-4444-8444-444444444444";
+    const installationId = "55555555-5555-4555-8555-555555555555";
+    const deviceId = "66666666-6666-4666-8666-666666666666";
+    const definitionId = "77777777-7777-4777-8777-777777777777";
+    const versionId = "88888888-8888-4888-8888-888888888888";
+    const candidateId = "99999999-9999-4999-8999-999999999999";
+    const timestamp = "2026-07-20T00:00:00.000Z";
+    legacy
+      .prepare(
+        `INSERT INTO agent_drafts (
+          id, tenant_id, owner_id, target_scope, workspace_id,
+          display_name, manifest_json, revision, created_at, updated_at
+        ) VALUES (?, ?, ?, 'WORKSPACE', ?, ?, ?, 1, ?, ?)`,
+      )
+      .run(
+        draftId,
+        tenantId,
+        ownerId,
+        workspaceId,
+        "Legacy workspace draft",
+        "{}",
+        timestamp,
+        timestamp,
+      );
+    legacy
+      .prepare(
+        `INSERT INTO draft_assets (
+          draft_id, path, revision, kind, media_type, size_bytes, sha256
+        ) VALUES (?, 'knowledge/legacy.md', 1, 'knowledge', 'text/markdown', 4, ?)`,
+      )
+      .run(draftId, "a".repeat(64));
+    legacy
+      .prepare(
+        `INSERT INTO local_agent_installations (
+          agent_installation_id, tenant_id, owner_id, device_installation_id,
+          source_scope, source_workspace_id, definition_id,
+          selected_version_id, status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'WORKSPACE', ?, ?, ?, 'pending', ?, ?)`,
+      )
+      .run(
+        installationId,
+        tenantId,
+        ownerId,
+        deviceId,
+        workspaceId,
+        definitionId,
+        versionId,
+        timestamp,
+        timestamp,
+      );
+    legacy
+      .prepare(
+        `INSERT INTO local_experience_candidate_imports (
+          tenant_id, owner_id, device_installation_id, workspace_id,
+          candidate_id, agent_definition_id, base_agent_version_id,
+          candidate_content_digest, draft_id, imported_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        tenantId,
+        ownerId,
+        deviceId,
+        workspaceId,
+        candidateId,
+        definitionId,
+        versionId,
+        "b".repeat(64),
+        draftId,
+        timestamp,
+      );
+    legacy.close();
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const database = openAgenteraControlPlaneDatabase(userDataPath, {
+        databaseFactory: nodeSqliteFactory,
+      });
+      expect(
+        Object.values(
+          database.sqlite.prepare("PRAGMA user_version").get() as Record<
+            string,
+            unknown
+          >,
+        ),
+      ).toEqual([5]);
+      expect(
+        database.sqlite
+          .prepare(
+            "SELECT id, tenant_id, owner_id, target_scope, workspace_id, organization_id, display_name, revision FROM agent_drafts WHERE id = ?",
+          )
+          .get(draftId),
+      ).toEqual({
+        id: draftId,
+        tenant_id: tenantId,
+        owner_id: ownerId,
+        target_scope: "WORKSPACE",
+        workspace_id: workspaceId,
+        organization_id: null,
+        display_name: "Legacy workspace draft",
+        revision: 1,
+      });
+      expect(
+        database.sqlite
+          .prepare(
+            "SELECT source_scope, source_workspace_id, source_organization_id, definition_id, selected_version_id FROM local_agent_installations WHERE agent_installation_id = ?",
+          )
+          .get(installationId),
+      ).toEqual({
+        source_scope: "WORKSPACE",
+        source_workspace_id: workspaceId,
+        source_organization_id: null,
+        definition_id: definitionId,
+        selected_version_id: versionId,
+      });
+      expect(database.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual(
+        [],
+      );
+      expect(() =>
+        database.sqlite
+          .prepare(
+            `INSERT INTO agent_drafts (
+              id, tenant_id, owner_id, target_scope, workspace_id,
+              organization_id, display_name, manifest_json, revision,
+              created_at, updated_at
+            ) VALUES (?, ?, ?, 'ORGANIZATION', ?, ?, 'ambiguous', '{}', 1, ?, ?)`,
+          )
+          .run(
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            tenantId,
+            ownerId,
+            workspaceId,
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            timestamp,
+            timestamp,
+          ),
+      ).toThrow();
+      expect(readFileSync(draftFile, "utf8")).toBe("legacy-v4-bytes");
       database.close();
     }
   });

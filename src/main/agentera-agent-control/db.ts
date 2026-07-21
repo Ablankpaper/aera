@@ -9,7 +9,7 @@ import {
   resolve,
 } from "node:path";
 
-export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 4;
+export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 5;
 
 export type AgentAssetContext =
   | { scope: "USER" }
@@ -17,6 +17,11 @@ export type AgentAssetContext =
       scope: "WORKSPACE";
       workspaceId: string;
       role: "owner" | "admin" | "member";
+    }
+  | {
+      scope: "ORGANIZATION";
+      organizationId: string;
+      role: "owner" | "admin" | "auditor" | "member";
     };
 
 export interface AgenteraSqliteRunResult {
@@ -138,6 +143,83 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
 
   sqlite.exec("BEGIN IMMEDIATE");
   try {
+    if (currentVersion === 3) {
+      const draftColumns = sqlite
+        .prepare("PRAGMA table_info(agent_drafts)")
+        .all() as Array<{ name?: unknown }>;
+      const sparseLegacyDrafts = !draftColumns.some(
+        ({ name }) => name === "tenant_id",
+      );
+      if (sparseLegacyDrafts) {
+        sqlite.exec(`
+          CREATE TABLE agent_drafts_v3_compat (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            owner_id TEXT NOT NULL,
+            target_scope TEXT NOT NULL,
+            workspace_id TEXT,
+            source_agent_definition_id TEXT,
+            base_agent_version_id TEXT,
+            display_name TEXT NOT NULL,
+            icon_media_type TEXT,
+            icon_data_base64 TEXT,
+            manifest_json TEXT NOT NULL,
+            revision INTEGER NOT NULL CHECK (revision >= 1),
+            publication_attempt_revision INTEGER,
+            publication_attempted_at TEXT,
+            publication_idempotency_key TEXT,
+            publication_error_code TEXT,
+            publication_error_summary TEXT,
+            published_definition_id TEXT,
+            published_version_id TEXT,
+            published_revision INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK ((target_scope = 'USER' AND workspace_id IS NULL)
+                OR (target_scope = 'WORKSPACE' AND workspace_id IS NOT NULL))
+          );
+          INSERT INTO agent_drafts_v3_compat (
+            id, tenant_id, owner_id, target_scope, workspace_id,
+            display_name, manifest_json, revision, created_at, updated_at
+          )
+          SELECT id, '__legacy_unowned__', '__legacy_unowned__', 'USER', NULL,
+            display_name, '{}', 1,
+            '1970-01-01T00:00:00.000Z', '1970-01-01T00:00:00.000Z'
+          FROM agent_drafts;
+          DROP TABLE agent_drafts;
+          ALTER TABLE agent_drafts_v3_compat RENAME TO agent_drafts;
+
+          CREATE TABLE IF NOT EXISTS draft_assets (
+            draft_id TEXT NOT NULL REFERENCES agent_drafts(id) ON DELETE CASCADE,
+            path TEXT NOT NULL,
+            revision INTEGER NOT NULL CHECK (revision >= 1),
+            kind TEXT NOT NULL,
+            media_type TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+            sha256 TEXT NOT NULL,
+            PRIMARY KEY (draft_id, path)
+          );
+          CREATE TABLE IF NOT EXISTS local_agent_installations (
+            agent_installation_id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            owner_id TEXT NOT NULL,
+            device_installation_id TEXT NOT NULL,
+            source_scope TEXT NOT NULL,
+            source_workspace_id TEXT,
+            definition_id TEXT NOT NULL,
+            selected_version_id TEXT NOT NULL,
+            runtime_profile_id TEXT,
+            policy_snapshot_id TEXT,
+            status TEXT NOT NULL,
+            retry_code TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK ((source_scope = 'USER' AND source_workspace_id IS NULL)
+                OR (source_scope = 'WORKSPACE' AND source_workspace_id IS NOT NULL))
+          );
+        `);
+      }
+    }
     if (currentVersion === 0) {
       sqlite.exec(`
       CREATE TABLE IF NOT EXISTS agent_drafts (
@@ -146,6 +228,7 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
         owner_id TEXT NOT NULL,
 		target_scope TEXT NOT NULL,
 		workspace_id TEXT,
+        organization_id TEXT,
         source_agent_definition_id TEXT,
         base_agent_version_id TEXT,
         display_name TEXT NOT NULL,
@@ -166,8 +249,9 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
         CHECK ((icon_media_type IS NULL) = (icon_data_base64 IS NULL)),
         CHECK ((publication_attempt_revision IS NULL) = (publication_attempted_at IS NULL)),
 		CHECK ((publication_attempt_revision IS NULL) = (publication_idempotency_key IS NULL)),
-		CHECK ((target_scope = 'USER' AND workspace_id IS NULL)
-		    OR (target_scope = 'WORKSPACE' AND workspace_id IS NOT NULL))
+		CHECK ((target_scope = 'USER' AND workspace_id IS NULL AND organization_id IS NULL)
+		    OR (target_scope = 'WORKSPACE' AND workspace_id IS NOT NULL AND organization_id IS NULL)
+		    OR (target_scope = 'ORGANIZATION' AND workspace_id IS NULL AND organization_id IS NOT NULL))
       );
 
       CREATE TABLE IF NOT EXISTS draft_assets (
@@ -202,6 +286,7 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
         device_installation_id TEXT NOT NULL,
 		source_scope TEXT NOT NULL,
 		source_workspace_id TEXT,
+        source_organization_id TEXT,
         definition_id TEXT NOT NULL,
         selected_version_id TEXT NOT NULL,
         runtime_profile_id TEXT,
@@ -210,8 +295,9 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
         retry_code TEXT,
         created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL,
-		CHECK ((source_scope = 'USER' AND source_workspace_id IS NULL)
-		    OR (source_scope = 'WORKSPACE' AND source_workspace_id IS NOT NULL))
+		CHECK ((source_scope = 'USER' AND source_workspace_id IS NULL AND source_organization_id IS NULL)
+		    OR (source_scope = 'WORKSPACE' AND source_workspace_id IS NOT NULL AND source_organization_id IS NULL)
+		    OR (source_scope = 'ORGANIZATION' AND source_workspace_id IS NULL AND source_organization_id IS NOT NULL))
       );
 
       CREATE TABLE IF NOT EXISTS runtime_bindings (
@@ -293,6 +379,21 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
         draft_id TEXT NOT NULL REFERENCES agent_drafts(id) ON DELETE CASCADE,
         imported_at TEXT NOT NULL,
         PRIMARY KEY (tenant_id, owner_id, device_installation_id, candidate_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS organization_agent_submission_refs (
+        local_draft_id TEXT NOT NULL,
+        local_draft_revision INTEGER NOT NULL CHECK (local_draft_revision > 0),
+        organization_id TEXT NOT NULL,
+        cloud_submission_id TEXT NOT NULL UNIQUE,
+        content_digest TEXT NOT NULL CHECK (length(content_digest) = 64),
+        cloud_status TEXT NOT NULL CHECK (
+          cloud_status IN ('pending','approved','rejected','withdrawn','superseded')
+        ),
+        cloud_revision INTEGER NOT NULL CHECK (cloud_revision > 0),
+        submitted_at TEXT NOT NULL,
+        last_verified_at TEXT NOT NULL,
+        PRIMARY KEY (local_draft_id, local_draft_revision, organization_id)
       );
 
       PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
@@ -502,6 +603,161 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
           draft_id TEXT NOT NULL REFERENCES agent_drafts(id) ON DELETE CASCADE,
           imported_at TEXT NOT NULL,
           PRIMARY KEY (tenant_id, owner_id, device_installation_id, candidate_id)
+        );
+
+        PRAGMA user_version = 4;
+      `);
+    }
+    if (currentVersion >= 1 && currentVersion <= 4) {
+      sqlite.exec(`
+        CREATE TABLE agent_drafts_v5 (
+          id TEXT PRIMARY KEY,
+          tenant_id TEXT NOT NULL,
+          owner_id TEXT NOT NULL,
+          target_scope TEXT NOT NULL,
+          workspace_id TEXT,
+          organization_id TEXT,
+          source_agent_definition_id TEXT,
+          base_agent_version_id TEXT,
+          display_name TEXT NOT NULL,
+          icon_media_type TEXT,
+          icon_data_base64 TEXT,
+          manifest_json TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK (revision >= 1),
+          publication_attempt_revision INTEGER,
+          publication_attempted_at TEXT,
+          publication_idempotency_key TEXT,
+          publication_error_code TEXT,
+          publication_error_summary TEXT,
+          published_definition_id TEXT,
+          published_version_id TEXT,
+          published_revision INTEGER,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK ((icon_media_type IS NULL) = (icon_data_base64 IS NULL)),
+          CHECK ((publication_attempt_revision IS NULL) = (publication_attempted_at IS NULL)),
+          CHECK ((publication_attempt_revision IS NULL) = (publication_idempotency_key IS NULL)),
+          CHECK (
+            (target_scope = 'USER' AND workspace_id IS NULL AND organization_id IS NULL)
+            OR (target_scope = 'WORKSPACE' AND workspace_id IS NOT NULL AND organization_id IS NULL)
+            OR (target_scope = 'ORGANIZATION' AND workspace_id IS NULL AND organization_id IS NOT NULL)
+          )
+        );
+        INSERT INTO agent_drafts_v5 (
+          id, tenant_id, owner_id, target_scope, workspace_id, organization_id,
+          source_agent_definition_id, base_agent_version_id, display_name,
+          icon_media_type, icon_data_base64, manifest_json, revision,
+          publication_attempt_revision, publication_attempted_at,
+          publication_idempotency_key, publication_error_code,
+          publication_error_summary, published_definition_id,
+          published_version_id, published_revision, created_at, updated_at
+        )
+        SELECT id, tenant_id, owner_id, target_scope, workspace_id, NULL,
+          source_agent_definition_id, base_agent_version_id, display_name,
+          icon_media_type, icon_data_base64, manifest_json, revision,
+          publication_attempt_revision, publication_attempted_at,
+          publication_idempotency_key, publication_error_code,
+          publication_error_summary, published_definition_id,
+          published_version_id, published_revision, created_at, updated_at
+        FROM agent_drafts;
+
+        CREATE TABLE draft_assets_v5 (
+          draft_id TEXT NOT NULL REFERENCES agent_drafts_v5(id) ON DELETE CASCADE,
+          path TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK (revision >= 1),
+          kind TEXT NOT NULL,
+          media_type TEXT NOT NULL,
+          size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+          sha256 TEXT NOT NULL,
+          PRIMARY KEY (draft_id, path)
+        );
+        INSERT INTO draft_assets_v5 (
+          draft_id, path, revision, kind, media_type, size_bytes, sha256
+        )
+        SELECT draft_id, path, revision, kind, media_type, size_bytes, sha256
+        FROM draft_assets;
+
+        CREATE TABLE local_experience_candidate_imports_v5 (
+          tenant_id TEXT NOT NULL,
+          owner_id TEXT NOT NULL,
+          device_installation_id TEXT NOT NULL,
+          workspace_id TEXT NOT NULL,
+          candidate_id TEXT NOT NULL,
+          agent_definition_id TEXT NOT NULL,
+          base_agent_version_id TEXT NOT NULL,
+          candidate_content_digest TEXT NOT NULL,
+          draft_id TEXT NOT NULL REFERENCES agent_drafts_v5(id) ON DELETE CASCADE,
+          imported_at TEXT NOT NULL,
+          PRIMARY KEY (tenant_id, owner_id, device_installation_id, candidate_id)
+        );
+        INSERT INTO local_experience_candidate_imports_v5 (
+          tenant_id, owner_id, device_installation_id, workspace_id,
+          candidate_id, agent_definition_id, base_agent_version_id,
+          candidate_content_digest, draft_id, imported_at
+        )
+        SELECT tenant_id, owner_id, device_installation_id, workspace_id,
+          candidate_id, agent_definition_id, base_agent_version_id,
+          candidate_content_digest, draft_id, imported_at
+        FROM local_experience_candidate_imports;
+
+        CREATE TABLE local_agent_installations_v5 (
+          agent_installation_id TEXT PRIMARY KEY,
+          tenant_id TEXT NOT NULL,
+          owner_id TEXT NOT NULL,
+          device_installation_id TEXT NOT NULL,
+          source_scope TEXT NOT NULL,
+          source_workspace_id TEXT,
+          source_organization_id TEXT,
+          definition_id TEXT NOT NULL,
+          selected_version_id TEXT NOT NULL,
+          runtime_profile_id TEXT,
+          policy_snapshot_id TEXT,
+          status TEXT NOT NULL,
+          retry_code TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK (
+            (source_scope = 'USER' AND source_workspace_id IS NULL AND source_organization_id IS NULL)
+            OR (source_scope = 'WORKSPACE' AND source_workspace_id IS NOT NULL AND source_organization_id IS NULL)
+            OR (source_scope = 'ORGANIZATION' AND source_workspace_id IS NULL AND source_organization_id IS NOT NULL)
+          )
+        );
+        INSERT INTO local_agent_installations_v5 (
+          agent_installation_id, tenant_id, owner_id, device_installation_id,
+          source_scope, source_workspace_id, source_organization_id,
+          definition_id, selected_version_id, runtime_profile_id,
+          policy_snapshot_id, status, retry_code, created_at, updated_at
+        )
+        SELECT agent_installation_id, tenant_id, owner_id, device_installation_id,
+          source_scope, source_workspace_id, NULL, definition_id,
+          selected_version_id, runtime_profile_id, policy_snapshot_id,
+          status, retry_code, created_at, updated_at
+        FROM local_agent_installations;
+
+        DROP TABLE local_experience_candidate_imports;
+        DROP TABLE draft_assets;
+        DROP TABLE agent_drafts;
+        ALTER TABLE agent_drafts_v5 RENAME TO agent_drafts;
+        ALTER TABLE draft_assets_v5 RENAME TO draft_assets;
+        ALTER TABLE local_experience_candidate_imports_v5
+          RENAME TO local_experience_candidate_imports;
+        DROP TABLE local_agent_installations;
+        ALTER TABLE local_agent_installations_v5
+          RENAME TO local_agent_installations;
+
+        CREATE TABLE organization_agent_submission_refs (
+          local_draft_id TEXT NOT NULL,
+          local_draft_revision INTEGER NOT NULL CHECK (local_draft_revision > 0),
+          organization_id TEXT NOT NULL,
+          cloud_submission_id TEXT NOT NULL UNIQUE,
+          content_digest TEXT NOT NULL CHECK (length(content_digest) = 64),
+          cloud_status TEXT NOT NULL CHECK (
+            cloud_status IN ('pending','approved','rejected','withdrawn','superseded')
+          ),
+          cloud_revision INTEGER NOT NULL CHECK (cloud_revision > 0),
+          submitted_at TEXT NOT NULL,
+          last_verified_at TEXT NOT NULL,
+          PRIMARY KEY (local_draft_id, local_draft_revision, organization_id)
         );
 
         PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};

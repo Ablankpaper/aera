@@ -37,6 +37,9 @@ const OTHER_OWNER = {
 const WORKSPACE_ID = "66666666-6666-4666-8666-666666666666";
 const OTHER_WORKSPACE_ID = "77777777-7777-4777-8777-777777777777";
 const WORKSPACE_DRAFT_ID = "88888888-8888-4888-8888-888888888888";
+const ORGANIZATION_ID = "99999999-9999-4999-8999-999999999999";
+const OTHER_ORGANIZATION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const ORGANIZATION_DRAFT_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 function nodeSqliteFactory(path: string): AgenteraSqliteDatabase {
   return new DatabaseSync(path) as unknown as AgenteraSqliteDatabase;
@@ -306,6 +309,68 @@ describe("AgentEra desktop-local Agent drafts", () => {
         )
         .get(WORKSPACE_DRAFT_ID),
     ).toEqual({ target_scope: "WORKSPACE", workspace_id: WORKSPACE_ID });
+  });
+
+  it("stores an exact Organization draft target only for Owner or Admin", () => {
+    const organization = new AgentDraftStore({
+      database,
+      owner: OWNER,
+      context: {
+        scope: "ORGANIZATION",
+        organizationId: ORGANIZATION_ID,
+        role: "admin",
+      },
+      now: () => NOW,
+      randomUUID: () => ORGANIZATION_DRAFT_ID,
+    });
+    const created = organization.createDraft({
+      sourceAgentDefinitionId: null,
+      baseAgentVersionId: null,
+      displayName: "Organization Research Agent",
+      icon: null,
+      manifest: manifest(),
+      assets: assets(),
+    });
+    const otherOrganization = new AgentDraftStore({
+      database,
+      owner: OWNER,
+      context: {
+        scope: "ORGANIZATION",
+        organizationId: OTHER_ORGANIZATION_ID,
+        role: "owner",
+      },
+    });
+
+    expect(organization.listDrafts()).toEqual([created]);
+    expect(store.listDrafts()).toEqual([]);
+    expect(otherOrganization.listDrafts()).toEqual([]);
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT target_scope, workspace_id, organization_id FROM agent_drafts WHERE id = ?",
+        )
+        .get(ORGANIZATION_DRAFT_ID),
+    ).toEqual({
+      target_scope: "ORGANIZATION",
+      workspace_id: null,
+      organization_id: ORGANIZATION_ID,
+    });
+    expect(
+      () =>
+        new AgentDraftStore({
+          database,
+          owner: OWNER,
+          context: {
+            scope: "ORGANIZATION",
+            organizationId: ORGANIZATION_ID,
+            role: "member",
+          },
+        }),
+    ).toThrowError(
+      expect.objectContaining<Partial<AgentDraftStoreError>>({
+        code: "invalid_draft",
+      }),
+    );
   });
 
   it("rejects symlink substitution when reading a stored draft asset", () => {

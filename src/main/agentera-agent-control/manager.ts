@@ -177,12 +177,32 @@ function installationMatchesContext(
   installation: LocalAgentInstallation,
   context: AgentAssetContext,
 ): boolean {
-  return context.scope === "USER"
-    ? installation.sourceScope === "USER" &&
-        installation.sourceWorkspaceId === null
-    : installation.sourceScope === "WORKSPACE" &&
-        installation.sourceWorkspaceId === context.workspaceId;
+  switch (context.scope) {
+    case "USER":
+      return (
+        installation.sourceScope === "USER" &&
+        installation.sourceWorkspaceId === null &&
+        installation.sourceOrganizationId === null
+      );
+    case "WORKSPACE":
+      return (
+        installation.sourceScope === "WORKSPACE" &&
+        installation.sourceWorkspaceId === context.workspaceId &&
+        installation.sourceOrganizationId === null
+      );
+    case "ORGANIZATION":
+      return (
+        installation.sourceScope === "ORGANIZATION" &&
+        installation.sourceWorkspaceId === null &&
+        installation.sourceOrganizationId === context.organizationId
+      );
+  }
 }
+
+type EnabledAgentAssetContext = Exclude<
+  AgentAssetContext,
+  { scope: "ORGANIZATION" }
+>;
 
 function requireRuntimeVersion(value: unknown): string {
   if (
@@ -724,7 +744,7 @@ export class AgenteraAgentControlManager {
     return normalizeAgentContext(this.options.getAgentContext?.());
   }
 
-  private assetContext(): AgentAssetContext {
+  private assetContext(): EnabledAgentAssetContext {
     const context = this.context();
     if (
       context.scope === "ORGANIZATION" ||

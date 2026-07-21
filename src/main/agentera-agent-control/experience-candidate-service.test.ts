@@ -260,6 +260,7 @@ beforeEach(() => {
     agentInstallationId: INSTALLATION_ID,
     sourceScope: "WORKSPACE",
     sourceWorkspaceId: WORKSPACE_ID,
+    sourceOrganizationId: null,
     definitionId: DEFINITION_ID,
     selectedVersionId: VERSION_ID,
     runtimeProfileId: PROFILE_ID,
