@@ -125,7 +125,10 @@ function normalizeAgentContext(
   if (context === undefined || context.scope === "USER") {
     return { scope: "USER" };
   }
-  if (context.scope === "ORGANIZATION_UNAVAILABLE") {
+  if (
+    context.scope === "ORGANIZATION" ||
+    context.scope === "ORGANIZATION_UNAVAILABLE"
+  ) {
     if (
       !UUID_PATTERN.test(context.organizationId) ||
       (context.role !== "owner" &&
@@ -163,6 +166,8 @@ function contextKey(context: AgenteraAgentControlContext): string {
       return "USER";
     case "WORKSPACE":
       return `WORKSPACE\0${context.workspaceId}\0${context.role}`;
+    case "ORGANIZATION":
+      return `ORGANIZATION\0${context.organizationId}\0${context.role}`;
     case "ORGANIZATION_UNAVAILABLE":
       return `ORGANIZATION_UNAVAILABLE\0${context.organizationId}\0${context.role}`;
   }
@@ -313,7 +318,10 @@ export class AgenteraAgentControlManager {
         (state.status === "authenticated" || state.status === "offline") &&
         state.cloudAvailable,
     };
-    if (context.scope === "ORGANIZATION_UNAVAILABLE") {
+    if (
+      context.scope === "ORGANIZATION" ||
+      context.scope === "ORGANIZATION_UNAVAILABLE"
+    ) {
       return {
         ...common,
         context: {
@@ -718,7 +726,10 @@ export class AgenteraAgentControlManager {
 
   private assetContext(): AgentAssetContext {
     const context = this.context();
-    if (context.scope === "ORGANIZATION_UNAVAILABLE") {
+    if (
+      context.scope === "ORGANIZATION" ||
+      context.scope === "ORGANIZATION_UNAVAILABLE"
+    ) {
       throw codedError("organization_agent_not_enabled");
     }
     return context;
@@ -796,7 +807,8 @@ export class AgenteraAgentControlManager {
   }
 
   private assertOrganizationAgentAvailable(): void {
-    if (this.context().scope === "ORGANIZATION_UNAVAILABLE") {
+    const scope = this.context().scope;
+    if (scope === "ORGANIZATION" || scope === "ORGANIZATION_UNAVAILABLE") {
       throw codedError("organization_agent_not_enabled");
     }
   }

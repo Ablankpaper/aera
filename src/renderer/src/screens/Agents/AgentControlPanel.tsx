@@ -39,6 +39,8 @@ function contextKey(state: AgenteraAgentControlPublicState): string {
       return "USER";
     case "WORKSPACE":
       return `WORKSPACE\0${state.context.workspaceId}\0${state.context.role}`;
+    case "ORGANIZATION":
+      return `ORGANIZATION\0${state.context.organizationId}\0${state.context.role}`;
     case "ORGANIZATION_UNAVAILABLE":
       return `ORGANIZATION_UNAVAILABLE\0${state.context.organizationId}\0${state.context.role}`;
   }

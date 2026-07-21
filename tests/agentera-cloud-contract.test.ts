@@ -4,7 +4,19 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import type {
+  components,
+  paths,
+} from "../src/shared/agentera-cloud-api.generated";
+import type {
+  AgenteraAgentControlContext,
+  ConfirmOrganizationReviewInput,
+  ConfirmOrganizationSubmissionInput,
+  ConfirmOrganizationWithdrawalInput,
+  OrganizationAgentSubmissionSummary,
+  PrepareOrganizationReviewInput,
+} from "../src/shared/agentera-agent-control";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pinnedContract = join(root, "contracts/agentera-cloud.openapi.yaml");
@@ -251,5 +263,60 @@ describe("AgentEra cloud contract pin", () => {
     ]) {
       expect(organizationSource).not.toContain(forbidden);
     }
+  });
+
+  it("generates the reviewed Organization Agent operations and exact installation source", () => {
+    type ReviewPath =
+      paths["/api/v1/organizations/{organization_id}/agent-publication-submissions/{submission_id}/reviews"];
+    type InstallationRequest =
+      components["schemas"]["CreateAgentInstallationRequest"];
+
+    expectTypeOf<ReviewPath["post"]>().not.toEqualTypeOf<never>();
+    expectTypeOf<InstallationRequest["organization_id"]>().toEqualTypeOf<
+      string | undefined
+    >();
+
+    const source = readFileSync(generatedTypes, "utf8");
+    for (const schema of [
+      "OrganizationAgentSubmission",
+      "OrganizationAgentSubmissionDetail",
+      "OrganizationAgentReview",
+      "SubmitInitialOrganizationAgentRequest",
+      "SubmitNextOrganizationAgentRequest",
+      "ReviewOrganizationAgentRequest",
+    ]) {
+      expect(source).toContain(`${schema}:`);
+    }
+    expect(source).toContain(
+      'readonly "/api/v1/organizations/{organization_id}/agent-publication-submissions/{submission_id}/reviews"',
+    );
+  });
+
+  it("keeps Organization Agent renderer inputs handle-only and context trusted", () => {
+    type OrganizationContext = Extract<
+      AgenteraAgentControlContext,
+      { scope: "ORGANIZATION" }
+    >;
+
+    expectTypeOf<OrganizationContext>().toEqualTypeOf<{
+      scope: "ORGANIZATION";
+      organizationId: string;
+      role: "owner" | "admin" | "auditor" | "member";
+    }>();
+    expectTypeOf<keyof ConfirmOrganizationSubmissionInput>().toEqualTypeOf<
+      "publicationHandle" | "confirmation"
+    >();
+    expectTypeOf<keyof ConfirmOrganizationReviewInput>().toEqualTypeOf<
+      "reviewHandle" | "confirmation"
+    >();
+    expectTypeOf<keyof ConfirmOrganizationWithdrawalInput>().toEqualTypeOf<
+      "withdrawalHandle" | "confirmation"
+    >();
+    expectTypeOf<keyof PrepareOrganizationReviewInput>().toEqualTypeOf<
+      "submissionId" | "decision" | "reasonCode" | "safeNote"
+    >();
+    expectTypeOf<OrganizationAgentSubmissionSummary["status"]>().toEqualTypeOf<
+      "pending" | "approved" | "rejected" | "withdrawn" | "superseded"
+    >();
   });
 });

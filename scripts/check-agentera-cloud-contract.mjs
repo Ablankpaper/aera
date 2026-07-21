@@ -47,6 +47,13 @@ const REQUIRED_PATHS = [
   "/api/v1/organizations",
   "/api/v1/organizations/{organization_id}",
   "/api/v1/organizations/{organization_id}/archive",
+  "/api/v1/organizations/{organization_id}/agent-definitions",
+  "/api/v1/organizations/{organization_id}/agent-definitions/{definition_id}",
+  "/api/v1/organizations/{organization_id}/agent-definitions/{definition_id}/versions",
+  "/api/v1/organizations/{organization_id}/agent-publication-submissions",
+  "/api/v1/organizations/{organization_id}/agent-publication-submissions/{submission_id}",
+  "/api/v1/organizations/{organization_id}/agent-publication-submissions/{submission_id}/withdraw",
+  "/api/v1/organizations/{organization_id}/agent-publication-submissions/{submission_id}/reviews",
   "/api/v1/organizations/{organization_id}/audit-events",
   "/api/v1/organizations/{organization_id}/departments",
   "/api/v1/organizations/{organization_id}/departments/{department_id}",
@@ -121,7 +128,15 @@ const ERROR_CODES = [
   "invalid_request",
   "last_identity",
   "not_found",
+  "organization_agent_forbidden",
+  "organization_agent_not_found",
+  "organization_archived",
   "organization_owner_transfer_required",
+  "organization_publication_dlp_blocked",
+  "organization_publication_policy_blocked",
+  "organization_submission_conflict",
+  "organization_submission_self_review",
+  "organization_submission_superseded",
   "invitation_limit_reached",
   "invitation_unavailable",
   "member_limit_reached",
@@ -151,6 +166,127 @@ const AGENT_SCHEMAS = [
   "PublishInitialAgentRequest",
   "PublishNextAgentVersionRequest",
   "RuntimeBindingRecord",
+];
+
+const ORGANIZATION_AGENT_SCHEMAS = [
+  "OrganizationAgentSubmission",
+  "OrganizationAgentSubmissionDetail",
+  "OrganizationAgentReview",
+  "SubmitInitialOrganizationAgentRequest",
+  "SubmitNextOrganizationAgentRequest",
+  "ReviewOrganizationAgentRequest",
+];
+
+const ORGANIZATION_AGENT_ERROR_CODES = [
+  "idempotency_conflict",
+  "invalid_agent_content",
+  "invalid_request",
+  "organization_agent_forbidden",
+  "organization_agent_not_found",
+  "organization_archived",
+  "organization_publication_dlp_blocked",
+  "organization_publication_policy_blocked",
+  "organization_submission_conflict",
+  "organization_submission_self_review",
+  "organization_submission_superseded",
+  "service_unavailable",
+  "session_revoked",
+];
+
+const ORGANIZATION_AGENT_SCHEMA_PROPERTIES = {
+  OrganizationAgentReview: [
+    "decision",
+    "id",
+    "organization_policy_snapshot_id",
+    "organization_policy_version",
+    "reason_code",
+    "reviewed_at",
+    "reviewed_content_digest",
+    "reviewer_user_id",
+    "safe_note",
+  ],
+  OrganizationAgentSubmission: [
+    "base_version_id",
+    "content_digest",
+    "definition_id",
+    "id",
+    "kind",
+    "organization_id",
+    "review",
+    "revision",
+    "status",
+    "submitted_at",
+    "submitted_by_user_id",
+    "terminal_at",
+    "updated_at",
+  ],
+  ReviewOrganizationAgentRequest: [
+    "decision",
+    "expected_revision",
+    "reason_code",
+    "safe_note",
+  ],
+  SubmitInitialOrganizationAgentRequest: [
+    "bundle",
+    "display_name",
+    "icon_data",
+    "icon_media_type",
+    "kind",
+    "manifest",
+  ],
+  SubmitNextOrganizationAgentRequest: [
+    "base_version_id",
+    "bundle",
+    "definition_id",
+    "kind",
+    "manifest",
+  ],
+  WithdrawOrganizationAgentRequest: ["expected_revision"],
+  OrganizationAgentErrorEnvelope: ["error"],
+  OrganizationAgentSupersededEnvelope: ["error", "submission"],
+};
+
+const ORGANIZATION_AGENT_OPERATIONS = [
+  [
+    "/api/v1/organizations/{organization_id}/agent-definitions",
+    "get",
+    ["200", "400", "401", "404", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/agent-definitions/{definition_id}",
+    "get",
+    ["200", "400", "401", "404", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/agent-definitions/{definition_id}/versions",
+    "get",
+    ["200", "400", "401", "404", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/agent-publication-submissions",
+    "get",
+    ["200", "400", "401", "403", "404", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/agent-publication-submissions",
+    "post",
+    ["201", "400", "401", "403", "404", "409", "413", "422", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/agent-publication-submissions/{submission_id}",
+    "get",
+    ["200", "400", "401", "403", "404", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/agent-publication-submissions/{submission_id}/withdraw",
+    "post",
+    ["200", "400", "401", "403", "404", "409", "503"],
+  ],
+  [
+    "/api/v1/organizations/{organization_id}/agent-publication-submissions/{submission_id}/reviews",
+    "post",
+    ["200", "400", "401", "403", "404", "409", "422", "503"],
+  ],
 ];
 
 const ORGANIZATION_ERROR_CODES = [
@@ -662,7 +798,7 @@ function validateCriticalContract(document) {
   if (document.openapi !== "3.0.3") {
     fail(`OpenAPI dialect changed: ${String(document.openapi)}`);
   }
-  if (document.info?.version !== "0.6.0") {
+  if (document.info?.version !== "0.7.0") {
     fail(`OpenAPI version changed: ${String(document.info?.version)}`);
   }
   const paths = object(document.paths, "paths");
@@ -715,6 +851,9 @@ function validateCriticalContract(document) {
       fail(`${schemaName} is no longer a strict object`);
     }
   }
+  for (const schemaName of ORGANIZATION_AGENT_SCHEMAS) {
+    object(schemas[schemaName], schemaName);
+  }
   if (Object.hasOwn(schemas, "AgentDraft")) {
     fail("AgentDraft must remain desktop-local");
   }
@@ -734,14 +873,125 @@ function validateCriticalContract(document) {
         "CreateAgentInstallationRequest.properties",
       ),
     ),
-    ["definition_id", "version_id", "workspace_id"],
+    ["definition_id", "organization_id", "version_id", "workspace_id"],
     "CreateAgentInstallationRequest.properties",
   );
+  for (const sourceField of ["workspace_id", "organization_id"]) {
+    if (
+      installationRequest.properties[sourceField]?.type !== "string" ||
+      installationRequest.properties[sourceField]?.format !== "uuid"
+    ) {
+      fail(`CreateAgentInstallationRequest.${sourceField} changed`);
+    }
+  }
+  const expectedInstallationSourceUnion = [
+    {
+      required: ["workspace_id"],
+      not: { required: ["organization_id"] },
+    },
+    {
+      required: ["organization_id"],
+      not: { required: ["workspace_id"] },
+    },
+    {
+      not: {
+        anyOf: [
+          { required: ["workspace_id"] },
+          { required: ["organization_id"] },
+        ],
+      },
+    },
+  ];
   if (
-    installationRequest.properties.workspace_id?.type !== "string" ||
-    installationRequest.properties.workspace_id?.format !== "uuid"
+    JSON.stringify(installationRequest.oneOf) !==
+    JSON.stringify(expectedInstallationSourceUnion)
   ) {
-    fail("CreateAgentInstallationRequest.workspace_id changed");
+    fail("CreateAgentInstallationRequest source union changed");
+  }
+
+  for (const [schemaName, expectedProperties] of Object.entries(
+    ORGANIZATION_AGENT_SCHEMA_PROPERTIES,
+  )) {
+    const schema = object(schemas[schemaName], schemaName);
+    if (schema.type !== "object" || schema.additionalProperties !== false) {
+      fail(`${schemaName} is no longer a strict object`);
+    }
+    exactMembers(
+      Object.keys(object(schema.properties, `${schemaName}.properties`)),
+      expectedProperties,
+      `${schemaName}.properties`,
+    );
+  }
+  const organizationSubmissionDetail = object(
+    schemas.OrganizationAgentSubmissionDetail,
+    "OrganizationAgentSubmissionDetail",
+  );
+  if (
+    organizationSubmissionDetail.allOf?.[0]?.$ref !==
+      "#/components/schemas/OrganizationAgentSubmission" ||
+    organizationSubmissionDetail.allOf?.[1]?.type !== "object"
+  ) {
+    fail("OrganizationAgentSubmissionDetail composition changed");
+  }
+  exactMembers(
+    organizationSubmissionDetail.allOf[1].required ?? [],
+    ["bundle", "bundle_digest", "manifest", "manifest_digest"],
+    "OrganizationAgentSubmissionDetail.required",
+  );
+  exactMembers(
+    Object.keys(
+      object(
+        organizationSubmissionDetail.allOf[1].properties,
+        "OrganizationAgentSubmissionDetail.properties",
+      ),
+    ),
+    [
+      "bundle",
+      "bundle_digest",
+      "display_name",
+      "icon_data",
+      "icon_media_type",
+      "manifest",
+      "manifest_digest",
+    ],
+    "OrganizationAgentSubmissionDetail.properties",
+  );
+  exactMembers(
+    object(
+      schemas.OrganizationAgentSubmissionStatus,
+      "OrganizationAgentSubmissionStatus",
+    ).enum ?? [],
+    ["approved", "pending", "rejected", "superseded", "withdrawn"],
+    "OrganizationAgentSubmissionStatus.enum",
+  );
+  exactMembers(
+    object(schemas.OrganizationAgentErrorCode, "OrganizationAgentErrorCode")
+      .enum ?? [],
+    ORGANIZATION_AGENT_ERROR_CODES,
+    "OrganizationAgentErrorCode.enum",
+  );
+  const organizationMutationRequests = JSON.stringify({
+    initial: schemas.SubmitInitialOrganizationAgentRequest,
+    next: schemas.SubmitNextOrganizationAgentRequest,
+    review: schemas.ReviewOrganizationAgentRequest,
+    withdraw: schemas.WithdrawOrganizationAgentRequest,
+  });
+  for (const field of [
+    "actor_id",
+    "api_key",
+    "credential",
+    "memory",
+    "organization_id",
+    "owner_scope",
+    "profile_path",
+    "reviewer_user_id",
+    "role",
+    "runtime_profile_id",
+    "session",
+  ]) {
+    if (organizationMutationRequests.includes(`"${field}"`)) {
+      fail(`Organization Agent request schemas exposed ${field}`);
+    }
   }
 
   for (const [schemaName, expectedProperties] of Object.entries(
@@ -1118,6 +1368,52 @@ function validateCriticalContract(document) {
       JSON.stringify([{ desktopAccessToken: [] }])
     ) {
       fail(`${path}.${method} no longer uses only the desktop access token`);
+    }
+  }
+  for (const [path, method, statuses] of ORGANIZATION_AGENT_OPERATIONS) {
+    const operation = object(
+      object(paths[path], path)[method],
+      `${path}.${method}`,
+    );
+    exactMembers(
+      Object.keys(object(operation.responses, `${path}.${method}.responses`)),
+      statuses,
+      `${path}.${method}.responses`,
+    );
+    if (
+      JSON.stringify(operation.security) !==
+      JSON.stringify([{ desktopAccessToken: [] }])
+    ) {
+      fail(`${path}.${method} no longer uses only the desktop access token`);
+    }
+  }
+  for (const path of [
+    "/api/v1/organizations/{organization_id}/agent-definitions",
+    "/api/v1/organizations/{organization_id}/agent-definitions/{definition_id}/versions",
+  ]) {
+    if (object(paths[path], path).post !== undefined) {
+      fail(
+        `${path}.post must remain unavailable; Organization publication requires review`,
+      );
+    }
+  }
+  for (const path of [
+    "/api/v1/organizations/{organization_id}/agent-publication-submissions",
+    "/api/v1/organizations/{organization_id}/agent-publication-submissions/{submission_id}/withdraw",
+    "/api/v1/organizations/{organization_id}/agent-publication-submissions/{submission_id}/reviews",
+  ]) {
+    const parameters = object(
+      object(paths[path], path).post,
+      `${path}.post`,
+    ).parameters;
+    if (
+      !Array.isArray(parameters) ||
+      !parameters.some(
+        (parameter) =>
+          parameter?.$ref === "#/components/parameters/IdempotencyKey",
+      )
+    ) {
+      fail(`${path}.post is missing Idempotency-Key`);
     }
   }
   for (const path of [

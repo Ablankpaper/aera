@@ -145,10 +145,75 @@ export type AgenteraAgentControlContext =
       role: "owner" | "admin" | "member";
     }
   | {
+      scope: "ORGANIZATION";
+      organizationId: string;
+      role: "owner" | "admin" | "auditor" | "member";
+    }
+  | {
       scope: "ORGANIZATION_UNAVAILABLE";
       organizationId: string;
       role: "owner" | "admin" | "auditor" | "member";
     };
+
+export type OrganizationAgentSubmissionStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "withdrawn"
+  | "superseded";
+
+export interface OrganizationAgentReview {
+  id: string;
+  reviewerUserId: string;
+  decision: "approve" | "reject";
+  reasonCode: string | null;
+  safeNote: string | null;
+  organizationPolicySnapshotId: string;
+  organizationPolicyVersion: number;
+  reviewedContentDigest: string;
+  reviewedAt: string;
+}
+
+export interface OrganizationAgentSubmissionSummary {
+  id: string;
+  organizationId: string;
+  kind: "initial" | "next";
+  definitionId: string;
+  baseVersionId: string | null;
+  submittedByUserId: string;
+  contentDigest: string;
+  status: OrganizationAgentSubmissionStatus;
+  revision: number;
+  submittedAt: string;
+  terminalAt: string | null;
+  review: OrganizationAgentReview | null;
+}
+
+/**
+ * Mutation confirmation types deliberately carry only a one-use opaque handle
+ * and an exact phrase. Trusted Organization identity and role stay in main.
+ */
+export interface ConfirmOrganizationSubmissionInput {
+  publicationHandle: string;
+  confirmation: "submit-organization-agent";
+}
+
+export interface PrepareOrganizationReviewInput {
+  submissionId: string;
+  decision: "approve" | "reject";
+  reasonCode: string | null;
+  safeNote: string | null;
+}
+
+export interface ConfirmOrganizationReviewInput {
+  reviewHandle: string;
+  confirmation: "approve-organization-agent" | "reject-organization-agent";
+}
+
+export interface ConfirmOrganizationWithdrawalInput {
+  withdrawalHandle: string;
+  confirmation: "withdraw-organization-agent";
+}
 
 export type AgenteraAgentControlErrorCode =
   | "invalid_request"
@@ -165,6 +230,14 @@ export type AgenteraAgentControlErrorCode =
   | "workspace_archived"
   | "workspace_owner_unavailable"
   | "organization_agent_not_enabled"
+  | "organization_agent_not_found"
+  | "organization_agent_forbidden"
+  | "organization_archived"
+  | "organization_submission_self_review"
+  | "organization_submission_conflict"
+  | "organization_submission_superseded"
+  | "organization_publication_policy_blocked"
+  | "organization_publication_dlp_blocked"
   | "candidate_source_ineligible"
   | "candidate_dlp_blocked"
   | "candidate_already_reviewed"
