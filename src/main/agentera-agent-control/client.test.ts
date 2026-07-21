@@ -19,6 +19,9 @@ import {
   type CloudExperienceCandidateBundle,
   type CloudExperienceCandidateDetail,
   type CloudExperienceCandidateSummary,
+  type OrganizationAgentSubmissionDetailRecord,
+  type OrganizationAgentSubmissionRecord,
+  type SubmitOrganizationAgentRequest,
 } from "./client";
 
 const DEFINITION_ID = "11111111-1111-4111-8111-111111111111";
@@ -30,6 +33,9 @@ const WORKSPACE_ID = "77777777-7777-4777-8777-777777777777";
 const CANDIDATE_ID = "88888888-8888-4888-8888-888888888888";
 const REVIEW_ID = "99999999-9999-4999-8999-999999999999";
 const USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const ORGANIZATION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const SUBMISSION_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const ORGANIZATION_POLICY_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const VERSION_DIGEST = "ab".repeat(32);
 const NOW = new Date("2026-07-19T16:00:00.000Z");
 const SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
@@ -155,6 +161,97 @@ function experienceDetail(reviewed = false): CloudExperienceCandidateDetail {
   return { ...experienceSummary(reviewed), bundle: experienceBundle() };
 }
 
+function organizationAgentPackage(): Pick<
+  Extract<SubmitOrganizationAgentRequest, { kind: "initial" }>,
+  "manifest" | "bundle"
+> {
+  return {
+    manifest: {
+      schema_version: 1 as const,
+      identity: { system_prompt: "Research with care." },
+      assets: [
+        {
+          path: "knowledge/notes.md",
+          kind: "knowledge" as const,
+          media_type: "text/markdown" as const,
+          sha256: "12".repeat(32),
+        },
+      ],
+      model_constraints: {
+        allowed_providers: ["openai"],
+        allowed_models: ["gpt-5.6"],
+      },
+      tools: { allowed: ["files.read"], denied: [] },
+      dependencies: [],
+      runtime_compatibility: {
+        minimum_version: "v0.18.2-agentera.1",
+        maximum_version_exclusive: null,
+      },
+    },
+    bundle: {
+      assets: [{ path: "knowledge/notes.md", content: "# Notes\n" }],
+    },
+  };
+}
+
+function organizationSubmissionDetail(
+  reviewed = false,
+): OrganizationAgentSubmissionDetailRecord {
+  const pkg = organizationAgentPackage();
+  return {
+    id: SUBMISSION_ID,
+    organization_id: ORGANIZATION_ID,
+    kind: "initial" as const,
+    definition_id: DEFINITION_ID,
+    base_version_id: null,
+    submitted_by_user_id: USER_ID,
+    content_digest: VERSION_DIGEST,
+    status: reviewed ? ("approved" as const) : ("pending" as const),
+    revision: reviewed ? 2 : 1,
+    submitted_at: NOW.toISOString(),
+    terminal_at: reviewed ? NOW.toISOString() : null,
+    updated_at: NOW.toISOString(),
+    review: reviewed
+      ? {
+          id: REVIEW_ID,
+          reviewer_user_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+          decision: "approve" as const,
+          reason_code: null,
+          safe_note: null,
+          organization_policy_snapshot_id: ORGANIZATION_POLICY_ID,
+          organization_policy_version: 3,
+          reviewed_content_digest: VERSION_DIGEST,
+          reviewed_at: NOW.toISOString(),
+        }
+      : null,
+    display_name: "Organization Research Agent",
+    ...pkg,
+    manifest_digest: "cd".repeat(32),
+    bundle_digest: "ef".repeat(32),
+  };
+}
+
+function organizationSubmissionSummary(
+  reviewed = false,
+): OrganizationAgentSubmissionRecord {
+  const detail = organizationSubmissionDetail(reviewed);
+  return {
+    id: detail.id,
+    organization_id: detail.organization_id,
+    kind: detail.kind,
+    definition_id: detail.definition_id,
+    base_version_id: detail.base_version_id,
+    submitted_by_user_id: detail.submitted_by_user_id,
+    content_digest: detail.content_digest,
+    status: detail.status,
+    revision: detail.revision,
+    submitted_at: detail.submitted_at,
+    terminal_at: detail.terminal_at,
+    updated_at: detail.updated_at,
+    review: detail.review,
+  };
+}
+
 describe("AgenteraAgentControlClient", () => {
   it("uses only the product access bearer and validates exact response keys", async () => {
     const fetcher = vi.fn(
@@ -223,6 +320,205 @@ describe("AgenteraAgentControlClient", () => {
       `http://127.0.0.1:8086/api/v1/workspaces/${WORKSPACE_ID}/agent-definitions/${DEFINITION_ID}/versions`,
       `http://127.0.0.1:8086/api/v1/workspaces/${WORKSPACE_ID}/agent-definitions`,
     ]);
+  });
+
+  it("uses exact Organization Agent paths and rejects extra response fields", async () => {
+    const fetcher = vi.fn(
+      async (_url: URL | RequestInfo, _init?: RequestInit) =>
+        jsonResponse(
+          {
+            ...organizationSubmissionDetail(),
+            access_token: "must-not-cross",
+          },
+          201,
+        ),
+    );
+    const client = new AgenteraAgentControlClient({
+      origin: "http://127.0.0.1:8086",
+      getAccessToken: () => "agentera-product-access",
+      getInstallationIdentity: () => deviceIdentity(),
+      fetch: fetcher as typeof fetch,
+      now: () => NOW,
+    });
+    const pkg = organizationAgentPackage();
+
+    await expect(
+      client.submitOrganizationAgent(
+        ORGANIZATION_ID,
+        {
+          kind: "initial",
+          display_name: "Organization Research Agent",
+          ...pkg,
+        },
+        "organization-submission-once",
+      ),
+    ).rejects.toMatchObject({ code: "invalid_response" });
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe(
+      `http://127.0.0.1:8086/api/v1/organizations/${ORGANIZATION_ID}/agent-publication-submissions`,
+    );
+    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ method: "POST" });
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({
+      kind: "initial",
+      display_name: "Organization Research Agent",
+      ...pkg,
+    });
+  });
+
+  it("validates canonical Organization identifiers before dispatch", async () => {
+    const fetcher = vi.fn(async () =>
+      jsonResponse({ definitions: [definition()] }),
+    );
+    const client = new AgenteraAgentControlClient({
+      origin: "http://127.0.0.1:8086",
+      getAccessToken: () => "agentera-product-access",
+      getInstallationIdentity: () => deviceIdentity(),
+      fetch: fetcher as typeof fetch,
+    });
+
+    await expect(
+      client.listOrganizationDefinitions(ORGANIZATION_ID.toUpperCase()),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("uses every Organization discovery and approval route with exact revisions", async () => {
+    const withdrawn = {
+      ...organizationSubmissionDetail(),
+      status: "withdrawn" as const,
+      revision: 2,
+      terminal_at: NOW.toISOString(),
+    };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ definitions: [definition()] }))
+      .mockResolvedValueOnce(jsonResponse(definition()))
+      .mockResolvedValueOnce(jsonResponse({ versions: [] }))
+      .mockResolvedValueOnce(
+        jsonResponse({ submissions: [organizationSubmissionSummary()] }),
+      )
+      .mockResolvedValueOnce(jsonResponse(organizationSubmissionDetail()))
+      .mockResolvedValueOnce(jsonResponse(withdrawn))
+      .mockResolvedValueOnce(jsonResponse(organizationSubmissionDetail(true)));
+    const client = new AgenteraAgentControlClient({
+      origin: "http://127.0.0.1:8086",
+      getAccessToken: () => "agentera-product-access",
+      getInstallationIdentity: () => deviceIdentity(),
+      fetch: fetcher as typeof fetch,
+      now: () => NOW,
+    });
+
+    await expect(
+      client.listOrganizationDefinitions(ORGANIZATION_ID),
+    ).resolves.toEqual([definition()]);
+    await expect(
+      client.getOrganizationDefinition(ORGANIZATION_ID, DEFINITION_ID),
+    ).resolves.toEqual(definition());
+    await expect(
+      client.listOrganizationVersions(ORGANIZATION_ID, DEFINITION_ID),
+    ).resolves.toEqual([]);
+    await expect(
+      client.listOrganizationAgentSubmissions(ORGANIZATION_ID),
+    ).resolves.toEqual([organizationSubmissionSummary()]);
+    await expect(
+      client.getOrganizationAgentSubmission(ORGANIZATION_ID, SUBMISSION_ID),
+    ).resolves.toEqual(organizationSubmissionDetail());
+    await expect(
+      client.withdrawOrganizationAgentSubmission(
+        ORGANIZATION_ID,
+        SUBMISSION_ID,
+        1,
+        "withdraw-once",
+      ),
+    ).resolves.toEqual(withdrawn);
+    await expect(
+      client.reviewOrganizationAgentSubmission(
+        ORGANIZATION_ID,
+        SUBMISSION_ID,
+        { expected_revision: 1, decision: "approve" },
+        "review-once",
+      ),
+    ).resolves.toEqual(organizationSubmissionDetail(true));
+
+    const root = `http://127.0.0.1:8086/api/v1/organizations/${ORGANIZATION_ID}`;
+    expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual([
+      `${root}/agent-definitions`,
+      `${root}/agent-definitions/${DEFINITION_ID}`,
+      `${root}/agent-definitions/${DEFINITION_ID}/versions`,
+      `${root}/agent-publication-submissions`,
+      `${root}/agent-publication-submissions/${SUBMISSION_ID}`,
+      `${root}/agent-publication-submissions/${SUBMISSION_ID}/withdraw`,
+      `${root}/agent-publication-submissions/${SUBMISSION_ID}/reviews`,
+    ]);
+    expect(fetcher.mock.calls[5]?.[1]).toMatchObject({
+      method: "POST",
+      headers: expect.objectContaining({ "idempotency-key": "withdraw-once" }),
+    });
+    expect(JSON.parse(String(fetcher.mock.calls[5]?.[1]?.body))).toEqual({
+      expected_revision: 1,
+    });
+    expect(fetcher.mock.calls[6]?.[1]).toMatchObject({
+      method: "POST",
+      headers: expect.objectContaining({ "idempotency-key": "review-once" }),
+    });
+    expect(JSON.parse(String(fetcher.mock.calls[6]?.[1]?.body))).toEqual({
+      expected_revision: 1,
+      decision: "approve",
+    });
+  });
+
+  it("retains only bounded Organization publication DLP findings", async () => {
+    const secret = "sk-proj-organization-client-secret-must-not-leak";
+    const fetcher = vi.fn(async () =>
+      jsonResponse(
+        {
+          error: {
+            code: "organization_publication_dlp_blocked",
+            message: secret,
+            request_id: "organization-request",
+            findings: [
+              {
+                code: "credential_api_key",
+                path: "knowledge/notes.md",
+                line: 2,
+              },
+            ],
+          },
+        },
+        400,
+      ),
+    );
+    const client = new AgenteraAgentControlClient({
+      origin: "http://127.0.0.1:8086",
+      getAccessToken: () => "agentera-product-access",
+      getInstallationIdentity: () => deviceIdentity(),
+      fetch: fetcher as typeof fetch,
+    });
+    const pkg = organizationAgentPackage();
+
+    const error = await client
+      .submitOrganizationAgent(
+        ORGANIZATION_ID,
+        {
+          kind: "initial",
+          display_name: "Organization Research Agent",
+          ...pkg,
+        },
+        "organization-dlp-once",
+      )
+      .catch((failure) => failure);
+    expect(error).toMatchObject({
+      status: 400,
+      code: "organization_publication_dlp_blocked",
+      findings: [
+        {
+          code: "credential_api_key",
+          path: "knowledge/notes.md",
+          line: 2,
+        },
+      ],
+    });
+    expect(`${String(error)}${JSON.stringify(error)}`).not.toContain(secret);
+    expect(error.findings[0]).not.toHaveProperty("evidence");
   });
 
   it("requires bounded idempotency keys on metadata mutations", async () => {

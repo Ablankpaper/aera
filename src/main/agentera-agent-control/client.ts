@@ -58,10 +58,21 @@ export type SubmitExperienceCandidateRequest =
   components["schemas"]["SubmitExperienceCandidateRequest"];
 export type ReviewExperienceCandidateRequest =
   components["schemas"]["ReviewExperienceCandidateRequest"];
+export type SubmitOrganizationAgentRequest =
+  components["schemas"]["SubmitOrganizationAgentRequest"];
+export type ReviewOrganizationAgentRequest =
+  components["schemas"]["ReviewOrganizationAgentRequest"];
+export type OrganizationAgentReviewRecord =
+  components["schemas"]["OrganizationAgentReview"];
+export type OrganizationAgentSubmissionRecord =
+  components["schemas"]["OrganizationAgentSubmission"];
+export type OrganizationAgentSubmissionDetailRecord =
+  components["schemas"]["OrganizationAgentSubmissionDetail"];
 
 type StableErrorCode =
   | components["schemas"]["ErrorCode"]
-  | components["schemas"]["ExperienceCandidateErrorCode"];
+  | components["schemas"]["ExperienceCandidateErrorCode"]
+  | components["schemas"]["OrganizationAgentErrorCode"];
 
 const STABLE_ERROR_CODES: ReadonlySet<string> = new Set<StableErrorCode>([
   "invalid_request",
@@ -103,6 +114,14 @@ const STABLE_ERROR_CODES: ReadonlySet<string> = new Set<StableErrorCode>([
   "invalid_experience_candidate",
   "candidate_dlp_blocked",
   "candidate_already_reviewed",
+  "organization_agent_not_found",
+  "organization_agent_forbidden",
+  "organization_archived",
+  "organization_submission_self_review",
+  "organization_submission_conflict",
+  "organization_submission_superseded",
+  "organization_publication_policy_blocked",
+  "organization_publication_dlp_blocked",
 ]);
 
 export interface AgenteraAgentControlClientOptions {
@@ -167,6 +186,10 @@ function isUUID(value: unknown): value is string {
   return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
+function isCanonicalUUID(value: unknown): value is string {
+  return isUUID(value) && value === value.toLowerCase();
+}
+
 function isDigest(value: unknown): value is string {
   return typeof value === "string" && DIGEST_PATTERN.test(value);
 }
@@ -177,6 +200,13 @@ function isTimestamp(value: unknown): value is string {
     value.length > 0 &&
     value.length <= 64 &&
     Number.isFinite(new Date(value).getTime())
+  );
+}
+
+function isCanonicalTimestamp(value: unknown): value is string {
+  return (
+    isTimestamp(value) &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value)
   );
 }
 
@@ -718,6 +748,305 @@ function isPublication(value: unknown): value is AgentPublication {
   );
 }
 
+function isOrganizationDefinition(value: unknown): value is AgentDefinition {
+  return (
+    isDefinition(value) &&
+    isCanonicalUUID(value.id) &&
+    (value.latest_version_id === undefined ||
+      isCanonicalUUID(value.latest_version_id))
+  );
+}
+
+function isOrganizationVersion(value: unknown): value is AgentVersion {
+  return (
+    isVersion(value) &&
+    isCanonicalUUID(value.id) &&
+    isCanonicalUUID(value.definition_id) &&
+    isCanonicalTimestamp(value.published_at)
+  );
+}
+
+function isOrganizationReview(
+  value: unknown,
+): value is OrganizationAgentReviewRecord {
+  return (
+    hasExactFields(value, [
+      "decision",
+      "id",
+      "organization_policy_snapshot_id",
+      "organization_policy_version",
+      "reason_code",
+      "reviewed_at",
+      "reviewed_content_digest",
+      "reviewer_user_id",
+      "safe_note",
+    ]) &&
+    isCanonicalUUID(value.id) &&
+    isCanonicalUUID(value.reviewer_user_id) &&
+    (value.decision === "approve" || value.decision === "reject") &&
+    (value.reason_code === null ||
+      (typeof value.reason_code === "string" &&
+        /^[a-z][a-z0-9_]{0,63}$/.test(value.reason_code))) &&
+    (value.safe_note === null ||
+      (isBoundedString(value.safe_note, 1, 500) &&
+        !/[\r\n\0]/.test(value.safe_note))) &&
+    isCanonicalUUID(value.organization_policy_snapshot_id) &&
+    Number.isSafeInteger(value.organization_policy_version) &&
+    Number(value.organization_policy_version) > 0 &&
+    isDigest(value.reviewed_content_digest) &&
+    isCanonicalTimestamp(value.reviewed_at) &&
+    (value.decision === "approve"
+      ? value.reason_code === null && value.safe_note === null
+      : value.reason_code !== null)
+  );
+}
+
+function isOrganizationSubmissionCore(value: unknown): boolean {
+  if (
+    !isObject(value) ||
+    !isCanonicalUUID(value.id) ||
+    !isCanonicalUUID(value.organization_id) ||
+    (value.kind !== "initial" && value.kind !== "next") ||
+    !isCanonicalUUID(value.definition_id) ||
+    (value.base_version_id !== null &&
+      !isCanonicalUUID(value.base_version_id)) ||
+    !isCanonicalUUID(value.submitted_by_user_id) ||
+    !isDigest(value.content_digest) ||
+    (value.status !== "pending" &&
+      value.status !== "approved" &&
+      value.status !== "rejected" &&
+      value.status !== "withdrawn" &&
+      value.status !== "superseded") ||
+    !Number.isSafeInteger(value.revision) ||
+    Number(value.revision) < 1 ||
+    !isCanonicalTimestamp(value.submitted_at) ||
+    (value.terminal_at !== null && !isCanonicalTimestamp(value.terminal_at)) ||
+    !isCanonicalTimestamp(value.updated_at) ||
+    (value.review !== null && !isOrganizationReview(value.review))
+  ) {
+    return false;
+  }
+  if (
+    (value.kind === "initial" && value.base_version_id !== null) ||
+    (value.kind === "next" && value.base_version_id === null)
+  ) {
+    return false;
+  }
+  if (value.status === "pending") {
+    return value.terminal_at === null && value.review === null;
+  }
+  if (value.terminal_at === null) return false;
+  if (value.status === "approved" || value.status === "rejected") {
+    return (
+      value.review !== null &&
+      value.review.reviewed_content_digest === value.content_digest &&
+      ((value.status === "approved" && value.review.decision === "approve") ||
+        (value.status === "rejected" && value.review.decision === "reject"))
+    );
+  }
+  return value.review === null;
+}
+
+function isOrganizationSubmission(
+  value: unknown,
+): value is OrganizationAgentSubmissionRecord {
+  return (
+    hasExactFields(value, [
+      "base_version_id",
+      "content_digest",
+      "definition_id",
+      "id",
+      "kind",
+      "organization_id",
+      "review",
+      "revision",
+      "status",
+      "submitted_at",
+      "submitted_by_user_id",
+      "terminal_at",
+      "updated_at",
+    ]) && isOrganizationSubmissionCore(value)
+  );
+}
+
+function isOrganizationSubmissionDetail(
+  value: unknown,
+): value is OrganizationAgentSubmissionDetailRecord {
+  if (
+    !hasExactFields(
+      value,
+      [
+        "base_version_id",
+        "bundle",
+        "bundle_digest",
+        "content_digest",
+        "definition_id",
+        "id",
+        "kind",
+        "manifest",
+        "manifest_digest",
+        "organization_id",
+        "review",
+        "revision",
+        "status",
+        "submitted_at",
+        "submitted_by_user_id",
+        "terminal_at",
+        "updated_at",
+      ],
+      ["display_name", "icon_data", "icon_media_type"],
+    ) ||
+    !isOrganizationSubmissionCore(value) ||
+    !isManifest(value.manifest) ||
+    !isBundle(value.bundle) ||
+    !isDigest(value.manifest_digest) ||
+    !isDigest(value.bundle_digest) ||
+    (value.display_name !== undefined &&
+      !isBoundedString(value.display_name, 1, 100))
+  ) {
+    return false;
+  }
+  const hasIconType = value.icon_media_type !== undefined;
+  const hasIconData = value.icon_data !== undefined;
+  return (
+    hasIconType === hasIconData &&
+    (!hasIconType ||
+      ((value.icon_media_type === "image/png" ||
+        value.icon_media_type === "image/webp") &&
+        isBoundedString(value.icon_data, 1, 699_051) &&
+        /^[A-Za-z0-9_-]+$/.test(value.icon_data)))
+  );
+}
+
+function isSubmitOrganizationAgentRequest(
+  value: unknown,
+): value is SubmitOrganizationAgentRequest {
+  if (!isObject(value)) return false;
+  if (value.kind === "initial") {
+    if (
+      !hasExactFields(
+        value,
+        ["bundle", "display_name", "kind", "manifest"],
+        ["icon_data", "icon_media_type"],
+      ) ||
+      !isBoundedString(value.display_name, 1, 100) ||
+      !isManifest(value.manifest) ||
+      !isBundle(value.bundle)
+    ) {
+      return false;
+    }
+    const hasIconType = value.icon_media_type !== undefined;
+    const hasIconData = value.icon_data !== undefined;
+    return (
+      hasIconType === hasIconData &&
+      (!hasIconType ||
+        ((value.icon_media_type === "image/png" ||
+          value.icon_media_type === "image/webp") &&
+          isBoundedString(value.icon_data, 1, 699_051) &&
+          /^[A-Za-z0-9_-]+$/.test(value.icon_data)))
+    );
+  }
+  return (
+    value.kind === "next" &&
+    hasExactFields(value, [
+      "base_version_id",
+      "bundle",
+      "definition_id",
+      "kind",
+      "manifest",
+    ]) &&
+    isCanonicalUUID(value.definition_id) &&
+    isCanonicalUUID(value.base_version_id) &&
+    isManifest(value.manifest) &&
+    isBundle(value.bundle)
+  );
+}
+
+function isReviewOrganizationAgentRequest(
+  value: unknown,
+): value is ReviewOrganizationAgentRequest {
+  if (
+    !hasExactFields(
+      value,
+      ["decision", "expected_revision"],
+      ["reason_code", "safe_note"],
+    ) ||
+    !Number.isSafeInteger(value.expected_revision) ||
+    Number(value.expected_revision) < 1
+  ) {
+    return false;
+  }
+  if (value.decision === "approve") {
+    return value.reason_code === undefined && value.safe_note === undefined;
+  }
+  return (
+    value.decision === "reject" &&
+    typeof value.reason_code === "string" &&
+    /^[a-z][a-z0-9_]{0,63}$/.test(value.reason_code) &&
+    (value.safe_note === undefined ||
+      (isBoundedString(value.safe_note, 1, 500) &&
+        !/[\r\n\0]/.test(value.safe_note)))
+  );
+}
+
+function detachOrganizationReview(
+  value: OrganizationAgentReviewRecord,
+): OrganizationAgentReviewRecord {
+  return {
+    id: value.id,
+    reviewer_user_id: value.reviewer_user_id,
+    decision: value.decision,
+    reason_code: value.reason_code,
+    safe_note: value.safe_note,
+    organization_policy_snapshot_id: value.organization_policy_snapshot_id,
+    organization_policy_version: value.organization_policy_version,
+    reviewed_content_digest: value.reviewed_content_digest,
+    reviewed_at: value.reviewed_at,
+  };
+}
+
+function detachOrganizationSubmission(
+  value: OrganizationAgentSubmissionRecord,
+): OrganizationAgentSubmissionRecord {
+  return {
+    id: value.id,
+    organization_id: value.organization_id,
+    kind: value.kind,
+    definition_id: value.definition_id,
+    base_version_id: value.base_version_id,
+    submitted_by_user_id: value.submitted_by_user_id,
+    content_digest: value.content_digest,
+    status: value.status,
+    revision: value.revision,
+    submitted_at: value.submitted_at,
+    terminal_at: value.terminal_at,
+    updated_at: value.updated_at,
+    review:
+      value.review === null ? null : detachOrganizationReview(value.review),
+  };
+}
+
+function detachOrganizationSubmissionDetail(
+  value: OrganizationAgentSubmissionDetailRecord,
+): OrganizationAgentSubmissionDetailRecord {
+  return {
+    ...detachOrganizationSubmission(value),
+    ...(value.display_name === undefined
+      ? {}
+      : { display_name: value.display_name }),
+    ...(value.icon_media_type === undefined
+      ? {}
+      : {
+          icon_media_type: value.icon_media_type,
+          icon_data: value.icon_data as string,
+        }),
+    manifest: value.manifest,
+    bundle: value.bundle,
+    manifest_digest: value.manifest_digest,
+    bundle_digest: value.bundle_digest,
+  };
+}
+
 function isInstallationCreation(
   value: unknown,
 ): value is AgentInstallationCreation {
@@ -816,6 +1145,12 @@ function requireUUID(value: string): void {
   }
 }
 
+function requireCanonicalUUID(value: string): void {
+  if (!isCanonicalUUID(value)) {
+    throw new AgenteraAgentControlClientError(0, "invalid_request");
+  }
+}
+
 function requireIdempotencyKey(value: string): void {
   if (
     value.length === 0 ||
@@ -839,7 +1174,10 @@ function safeServerError(raw: string): {
       typeof parsed.error.code === "string" &&
       STABLE_ERROR_CODES.has(parsed.error.code)
     ) {
-      if (parsed.error.code !== "candidate_dlp_blocked") {
+      if (
+        parsed.error.code !== "candidate_dlp_blocked" &&
+        parsed.error.code !== "organization_publication_dlp_blocked"
+      ) {
         return { code: parsed.error.code, findings: [] };
       }
       if (
@@ -1006,6 +1344,21 @@ export class AgenteraAgentControlClient {
     return [...value.definitions];
   }
 
+  async listOrganizationDefinitions(
+    organizationId: string,
+  ): Promise<AgentDefinition[]> {
+    requireCanonicalUUID(organizationId);
+    const value = await this.requestJSON(
+      `/api/v1/organizations/${organizationId}/agent-definitions`,
+      { expectedStatus: 200 },
+      (candidate): candidate is { definitions: readonly AgentDefinition[] } =>
+        hasExactFields(candidate, ["definitions"]) &&
+        Array.isArray(candidate.definitions) &&
+        candidate.definitions.every(isOrganizationDefinition),
+    );
+    return [...value.definitions];
+  }
+
   getDefinition(definitionId: string): Promise<AgentDefinition> {
     requireUUID(definitionId);
     return this.requestJSON(
@@ -1026,6 +1379,23 @@ export class AgenteraAgentControlClient {
       { expectedStatus: 200 },
       isDefinition,
     );
+  }
+
+  async getOrganizationDefinition(
+    organizationId: string,
+    definitionId: string,
+  ): Promise<AgentDefinition> {
+    requireCanonicalUUID(organizationId);
+    requireCanonicalUUID(definitionId);
+    const value = await this.requestJSON(
+      `/api/v1/organizations/${organizationId}/agent-definitions/${definitionId}`,
+      { expectedStatus: 200 },
+      isOrganizationDefinition,
+    );
+    if (value.id !== definitionId) {
+      throw new AgenteraAgentControlClientError(0, "invalid_response");
+    }
+    return value;
   }
 
   async listVersions(definitionId: string): Promise<AgentVersion[]> {
@@ -1056,6 +1426,137 @@ export class AgenteraAgentControlClient {
         candidate.versions.every(isVersion),
     );
     return [...value.versions];
+  }
+
+  async listOrganizationVersions(
+    organizationId: string,
+    definitionId: string,
+  ): Promise<AgentVersion[]> {
+    requireCanonicalUUID(organizationId);
+    requireCanonicalUUID(definitionId);
+    const value = await this.requestJSON(
+      `/api/v1/organizations/${organizationId}/agent-definitions/${definitionId}/versions`,
+      { expectedStatus: 200 },
+      (candidate): candidate is { versions: readonly AgentVersion[] } =>
+        hasExactFields(candidate, ["versions"]) &&
+        Array.isArray(candidate.versions) &&
+        candidate.versions.every(
+          (version) =>
+            isOrganizationVersion(version) &&
+            version.definition_id === definitionId,
+        ),
+    );
+    return [...value.versions];
+  }
+
+  async submitOrganizationAgent(
+    organizationId: string,
+    body: SubmitOrganizationAgentRequest,
+    idempotencyKey: string,
+  ): Promise<OrganizationAgentSubmissionDetailRecord> {
+    requireCanonicalUUID(organizationId);
+    requireIdempotencyKey(idempotencyKey);
+    if (!isSubmitOrganizationAgentRequest(body)) {
+      throw new AgenteraAgentControlClientError(0, "invalid_request");
+    }
+    const value = await this.requestJSON(
+      `/api/v1/organizations/${organizationId}/agent-publication-submissions`,
+      { method: "POST", body, idempotencyKey, expectedStatus: 201 },
+      isOrganizationSubmissionDetail,
+    );
+    if (value.organization_id !== organizationId) {
+      throw new AgenteraAgentControlClientError(0, "invalid_response");
+    }
+    return detachOrganizationSubmissionDetail(value);
+  }
+
+  async listOrganizationAgentSubmissions(
+    organizationId: string,
+  ): Promise<OrganizationAgentSubmissionRecord[]> {
+    requireCanonicalUUID(organizationId);
+    const value = await this.requestJSON(
+      `/api/v1/organizations/${organizationId}/agent-publication-submissions`,
+      { expectedStatus: 200 },
+      (
+        candidate,
+      ): candidate is {
+        submissions: readonly OrganizationAgentSubmissionRecord[];
+      } =>
+        hasExactFields(candidate, ["submissions"]) &&
+        Array.isArray(candidate.submissions) &&
+        candidate.submissions.every(
+          (submission) =>
+            isOrganizationSubmission(submission) &&
+            submission.organization_id === organizationId,
+        ),
+    );
+    return value.submissions.map(detachOrganizationSubmission);
+  }
+
+  async getOrganizationAgentSubmission(
+    organizationId: string,
+    submissionId: string,
+  ): Promise<OrganizationAgentSubmissionDetailRecord> {
+    requireCanonicalUUID(organizationId);
+    requireCanonicalUUID(submissionId);
+    const value = await this.requestJSON(
+      `/api/v1/organizations/${organizationId}/agent-publication-submissions/${submissionId}`,
+      { expectedStatus: 200 },
+      isOrganizationSubmissionDetail,
+    );
+    if (value.organization_id !== organizationId || value.id !== submissionId) {
+      throw new AgenteraAgentControlClientError(0, "invalid_response");
+    }
+    return detachOrganizationSubmissionDetail(value);
+  }
+
+  async withdrawOrganizationAgentSubmission(
+    organizationId: string,
+    submissionId: string,
+    expectedRevision: number,
+    idempotencyKey: string,
+  ): Promise<OrganizationAgentSubmissionDetailRecord> {
+    requireCanonicalUUID(organizationId);
+    requireCanonicalUUID(submissionId);
+    requireIdempotencyKey(idempotencyKey);
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      throw new AgenteraAgentControlClientError(0, "invalid_request");
+    }
+    const body: components["schemas"]["WithdrawOrganizationAgentRequest"] = {
+      expected_revision: expectedRevision,
+    };
+    const value = await this.requestJSON(
+      `/api/v1/organizations/${organizationId}/agent-publication-submissions/${submissionId}/withdraw`,
+      { method: "POST", body, idempotencyKey, expectedStatus: 200 },
+      isOrganizationSubmissionDetail,
+    );
+    if (value.organization_id !== organizationId || value.id !== submissionId) {
+      throw new AgenteraAgentControlClientError(0, "invalid_response");
+    }
+    return detachOrganizationSubmissionDetail(value);
+  }
+
+  async reviewOrganizationAgentSubmission(
+    organizationId: string,
+    submissionId: string,
+    body: ReviewOrganizationAgentRequest,
+    idempotencyKey: string,
+  ): Promise<OrganizationAgentSubmissionDetailRecord> {
+    requireCanonicalUUID(organizationId);
+    requireCanonicalUUID(submissionId);
+    requireIdempotencyKey(idempotencyKey);
+    if (!isReviewOrganizationAgentRequest(body)) {
+      throw new AgenteraAgentControlClientError(0, "invalid_request");
+    }
+    const value = await this.requestJSON(
+      `/api/v1/organizations/${organizationId}/agent-publication-submissions/${submissionId}/reviews`,
+      { method: "POST", body, idempotencyKey, expectedStatus: 200 },
+      isOrganizationSubmissionDetail,
+    );
+    if (value.organization_id !== organizationId || value.id !== submissionId) {
+      throw new AgenteraAgentControlClientError(0, "invalid_response");
+    }
+    return detachOrganizationSubmissionDetail(value);
   }
 
   getVersion(versionId: string): Promise<AgentVersion> {
