@@ -18,7 +18,7 @@ Owner and Admin may publish immutable Workspace versions, and active Members may
 
 The approved enterprise foundation adds Organization identity, transferable ownership, roles, Departments, signed policy, audit, lifecycle, and trusted product context before Agent control accepts Organization-owned assets.
 
-[[agentera-organizations|Organization Foundation V1]] deliberately exposes an explicit unavailable Agent state while an Organization is selected. It does not map Organization navigation to USER ownership, create an Installation, or touch a Hermes Profile. The section-approved Organization Agent V1 design now defines the separate gate that will replace this stop.
+[[agentera-organizations|Organization Foundation V1]] deliberately exposes an explicit unavailable Agent state while an Organization is selected. It does not map Organization navigation to USER ownership, create an Installation, or touch a Hermes Profile. The approved written Organization Agent V1 specification defines the separate gate that will replace this stop.
 
 ## Organization Agent V1 design checkpoint
 
@@ -32,7 +32,7 @@ The desktop derives Organization ID and role from the trusted product-space coor
 
 Read-only Knowledge, Skill, and SOP projection reuses the verified path outside `HERMES_HOME`. Manual version selection affects new conversations only, and local Memory, USER, sessions, learned Skills, Curator, credentials, and private learning remain unchanged and unsynchronized.
 
-The written design is `docs/superpowers/specs/2026-07-21-agentera-organization-agent-v1-design.md`; no Organization Agent implementation exists at this checkpoint.
+The approved written specification is `docs/superpowers/specs/2026-07-21-agentera-organization-agent-v1-design.md`; no Organization Agent implementation exists at this checkpoint.
 
 ## Trusted Workspace Agent context
 

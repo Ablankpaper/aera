@@ -8,7 +8,9 @@ The first enterprise slice establishes Organization authorization and desktop pr
 
 It supports Organization lifecycle, one transferable Owner, Admin/Auditor/Member roles, single-level Departments, one-time invitations, immutable signed policy snapshots, audit, and offline read-only metadata. The locked design is `docs/superpowers/specs/2026-07-21-agentera-organization-foundation-v1-design.md`.
 
-The section-approved Organization Agent V1 design is the next independent gate. It adds `owner_scope=ORGANIZATION`, mandatory two-person publication review, and USER-owned member installation without changing Hermes runtime ownership. The written specification awaits review at `docs/superpowers/specs/2026-07-21-agentera-organization-agent-v1-design.md`.
+The written Organization Agent V1 specification is approved for implementation planning. It adds `owner_scope=ORGANIZATION`, mandatory two-person publication review, and USER-owned member installation without changing Hermes runtime ownership.
+
+The approved specification is `docs/superpowers/specs/2026-07-21-agentera-organization-agent-v1-design.md`.
 
 `owner_scope=PLATFORM` and official managed Agents remain the slice after Organization Agent V1.
 

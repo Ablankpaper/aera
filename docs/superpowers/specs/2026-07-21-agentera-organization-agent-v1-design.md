@@ -1,6 +1,6 @@
 # AgentEra Organization Agent V1 Design
 
-**Status:** Section design approved; written specification awaiting review on 2026-07-21
+**Status:** Written specification approved for implementation planning on 2026-07-21
 
 **Repositories:** `aera-cloud` and `aera`
 
@@ -20,7 +20,7 @@ The approved enterprise sequence remains:
 2. **Organization Agent V1** — this design;
 3. **Official Managed Agent V1** — `owner_scope=PLATFORM`, platform review, staged release, rollback, and desktop installation.
 
-This document authorizes implementation planning only after written review. It is not product implementation, GitHub publication, production deployment, or release evidence.
+This document is approved for implementation planning. It is not product implementation, GitHub publication, production deployment, or release evidence.
 
 ## Existing Baseline
 
