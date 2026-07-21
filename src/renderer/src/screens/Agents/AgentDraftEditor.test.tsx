@@ -367,9 +367,11 @@ describe("AgentDraftEditor", () => {
     expect(api.preparePublication).not.toHaveBeenCalled();
     expect(api.confirmPublication).not.toHaveBeenCalled();
     expect(api.installVersion).not.toHaveBeenCalled();
-    expect(
-      screen.getByText("agents.control.organization.submittedNotPublished"),
-    ).toBeVisible();
+    await waitFor(() =>
+      expect(
+        screen.getByText("agents.control.organization.submittedNotPublished"),
+      ).toBeVisible(),
+    );
     expectNoRendererOwnershipInput(api.prepareOrganizationSubmission);
     expectNoRendererOwnershipInput(api.confirmOrganizationSubmission);
   });
