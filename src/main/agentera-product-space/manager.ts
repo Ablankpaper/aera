@@ -321,13 +321,10 @@ export class AgenteraProductSpaceManager {
         role: "member",
       };
     }
-    if (stored?.kind === "ORGANIZATION") {
-      return {
-        scope: "ORGANIZATION_UNAVAILABLE",
-        organizationId: stored.organizationId,
-        role: "member",
-      };
-    }
+    // An Organization ID persisted on disk is not proof of current membership
+    // or role. Reconciliation with the verified Organization source must run
+    // before Organization Agent capabilities can be exposed.
+    if (stored?.kind === "ORGANIZATION") return { scope: "USER" };
     return { scope: "USER" };
   }
 
@@ -488,7 +485,7 @@ export class AgenteraProductSpaceManager {
         };
       case "ORGANIZATION":
         return {
-          scope: "ORGANIZATION_UNAVAILABLE",
+          scope: "ORGANIZATION",
           organizationId: selected.organizationId,
           role: selected.role,
         };

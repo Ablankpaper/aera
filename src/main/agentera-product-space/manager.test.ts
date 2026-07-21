@@ -322,7 +322,7 @@ describe("AgenteraProductSpaceManager", () => {
       organizationId: ORGANIZATION_A,
     });
     expect(manager.getAgentContext()).toEqual({
-      scope: "ORGANIZATION_UNAVAILABLE",
+      scope: "ORGANIZATION",
       organizationId: ORGANIZATION_A,
       role: "auditor",
     });
@@ -392,13 +392,39 @@ describe("AgenteraProductSpaceManager", () => {
       organizationId: ORGANIZATION_A,
     });
     expect(manager.getAgentContext()).toMatchObject({
-      scope: "ORGANIZATION_UNAVAILABLE",
+      scope: "ORGANIZATION",
       organizationId: ORGANIZATION_A,
     });
 
     auth = authState("B");
 
     expect(manager.getAgentContext()).toEqual({ scope: "USER" });
+  });
+
+  it("fails closed until a stored Organization selection has a verified role", async () => {
+    const database = databaseFor();
+    database.writeSelection(
+      ACCOUNT_A,
+      { kind: "ORGANIZATION", organizationId: ORGANIZATION_A },
+      NOW,
+    );
+    const manager = managerFor({
+      database,
+      organizationSource: mutableSource(
+        organizationState([
+          organization(ORGANIZATION_A, "Organization", { role: "owner" }),
+        ]),
+      ),
+      getAuthState: () => authState(),
+    });
+
+    expect(manager.getAgentContext()).toEqual({ scope: "USER" });
+    await manager.getState();
+    expect(manager.getAgentContext()).toEqual({
+      scope: "ORGANIZATION",
+      organizationId: ORGANIZATION_A,
+      role: "owner",
+    });
   });
 
   it("rejects stale asynchronous source results after an account switch", async () => {

@@ -58,28 +58,21 @@ describe("Product Space selection is metadata, never a Hermes Profile switch", (
     );
   });
 
-  it("maps Organization to an explicit unavailable Agent context before stores or Profiles", () => {
+  it("maps only a verified Organization role without switching Profiles", () => {
     const productManager = source("src/main/agentera-product-space/manager.ts");
     const contextMapping = productManager.slice(
       productManager.indexOf("private contextFromSelection"),
       productManager.indexOf("private rememberAndEmit"),
     );
-    expect(contextMapping).toContain('scope: "ORGANIZATION_UNAVAILABLE"');
+    expect(contextMapping).toContain('scope: "ORGANIZATION"');
+    expect(contextMapping).not.toContain("ORGANIZATION_UNAVAILABLE");
     expect(contextMapping).not.toMatch(
       /Profile|RuntimeBinding|draft|installation|publish|install/,
     );
 
     const agentManager = source("src/main/agentera-agent-control/manager.ts");
-    const availabilityGuard = agentManager.slice(
-      agentManager.indexOf("private assetContext"),
-      agentManager.indexOf("private operationContextKey"),
-    );
-    expect(availabilityGuard).toContain(
-      'throw codedError("organization_agent_not_enabled")',
-    );
-    expect(
-      availabilityGuard.indexOf("organization_agent_not_enabled"),
-    ).toBeLessThan(availabilityGuard.indexOf("return context"));
+    expect(agentManager).toContain("export function runtimeComponentKey");
+    expect(agentManager).not.toContain("organization_agent_not_enabled");
   });
 
   it("keeps Product Space production code free of runtime mutation dependencies", () => {

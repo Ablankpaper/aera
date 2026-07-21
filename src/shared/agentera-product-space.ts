@@ -45,7 +45,7 @@ export type ProductSpaceAgentContext =
       role: WorkspaceRole;
     }
   | {
-      scope: "ORGANIZATION_UNAVAILABLE";
+      scope: "ORGANIZATION";
       organizationId: string;
       role: OrganizationRole;
     };

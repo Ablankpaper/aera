@@ -5,13 +5,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type {
+  AgenteraAgentControlContext,
+  CreateAgentDraftInput,
+} from "../../shared/agentera-agent-control";
 import type { AgenteraAgentControlClient } from "./client";
 import type { AgenteraHermesAdapter } from "./hermes-adapter";
 import {
   openAgenteraControlPlaneDatabase,
+  type AgenteraControlPlaneDatabase,
   type AgenteraSqliteDatabase,
 } from "./db";
-import { AgenteraAgentControlManager } from "./manager";
+import { AgenteraAgentControlManager, runtimeComponentKey } from "./manager";
 
 const OWNER = {
   tenantId: "10000000-0000-4000-8000-000000000001",
@@ -19,18 +24,50 @@ const OWNER = {
   deviceInstallationId: "10000000-0000-4000-8000-000000000003",
 };
 const ORGANIZATION_ID = "20000000-0000-4000-8000-000000000001";
+const OTHER_ORGANIZATION_ID = "20000000-0000-4000-8000-000000000002";
+
+function draftInput(): CreateAgentDraftInput {
+  return {
+    sourceAgentDefinitionId: null,
+    baseAgentVersionId: null,
+    displayName: "Organization Research Agent",
+    icon: null,
+    manifest: {
+      schemaVersion: 1,
+      identity: { systemPrompt: "Research safely." },
+      assets: [
+        {
+          path: "knowledge/notes.md",
+          kind: "knowledge",
+          mediaType: "text/markdown",
+        },
+      ],
+      modelConstraints: {
+        allowedProviders: ["openai"],
+        allowedModels: ["gpt-5.6"],
+      },
+      tools: { allowed: ["files.read"], denied: [] },
+      dependencies: [],
+      runtimeCompatibility: {
+        minimumVersion: "v0.18.2-agentera.1",
+        maximumVersionExclusive: null,
+      },
+    },
+    assets: [{ path: "knowledge/notes.md", content: "# Notes\n" }],
+  };
+}
 
 describe("Agent control Organization Foundation context", () => {
   const roots: string[] = [];
+  const databases: AgenteraControlPlaneDatabase[] = [];
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-    for (const root of roots.splice(0)) {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it("shows no personal or Workspace assets and blocks every Agent control operation before local or runtime stores", async () => {
+  function fullManager(
+    getContext: () => AgenteraAgentControlContext,
+    clientOverrides: Record<string, unknown> = {},
+  ): {
+    manager: AgenteraAgentControlManager;
+    database: AgenteraControlPlaneDatabase;
+  } {
     const root = mkdtempSync(join(tmpdir(), "agentera-organization-agent-"));
     roots.push(root);
     const userDataPath = join(root, "user-data");
@@ -38,107 +75,190 @@ describe("Agent control Organization Foundation context", () => {
       databaseFactory: (path) =>
         new DatabaseSync(path) as unknown as AgenteraSqliteDatabase,
     });
-    const clientCall = vi.fn();
-    const profileCall = vi.fn();
-    const bindingCall = vi.fn();
-    const runtimeVersion = vi.fn(() => "v0.18.2-agentera.1");
-    const manager = new AgenteraAgentControlManager({
+    databases.push(database);
+    return {
       database,
-      client: new Proxy(
-        { origin: "https://cloud.agentera.test" },
-        {
-          get(target, property, receiver) {
-            if (Reflect.has(target, property)) {
-              return Reflect.get(target, property, receiver);
-            }
-            return clientCall;
-          },
+      manager: new AgenteraAgentControlManager({
+        database,
+        client: {
+          origin: "https://cloud.agentera.test",
+          listOrganizationDefinitions: vi.fn(async () => []),
+          listOrganizationVersions: vi.fn(async () => []),
+          ...clientOverrides,
+        } as unknown as AgenteraAgentControlClient,
+        profileBindings: {
+          verifyProfileBinding: vi.fn(),
+          bindFreshProfile: vi.fn(),
+          claimProfile: vi.fn(),
+        } as never,
+        profiles: {
+          createProfile: vi.fn(),
+          resolveProfilePath: vi.fn(),
+          activateProfile: vi.fn(),
         },
-      ) as unknown as AgenteraAgentControlClient,
-      profileBindings: {
-        verifyProfileBinding: bindingCall,
-        bindFreshProfile: bindingCall,
-        claimProfile: bindingCall,
-      } as never,
-      profiles: {
-        createProfile: profileCall,
-        resolveProfilePath: profileCall,
-        activateProfile: profileCall,
-      },
-      userDataPath,
-      getOwner: () => OWNER,
-      getAgentContext: () =>
-        ({
-          scope: "ORGANIZATION_UNAVAILABLE",
-          organizationId: ORGANIZATION_ID,
-          role: "auditor",
-        }) as never,
-      getAuthState: () => ({
-        status: "authenticated",
-        userId: OWNER.ownerId,
-        personalSpaceId: OWNER.tenantId,
-        deviceId: OWNER.deviceInstallationId,
-        offlineExpiresAt: "2026-07-28T00:00:00.000Z",
-        cloudAvailable: true,
+        userDataPath,
+        getOwner: () => OWNER,
+        getAgentContext: getContext,
+        getAuthState: () => ({
+          status: "authenticated",
+          userId: OWNER.ownerId,
+          personalSpaceId: OWNER.tenantId,
+          deviceId: OWNER.deviceInstallationId,
+          offlineExpiresAt: "2026-07-28T00:00:00.000Z",
+          cloudAvailable: true,
+        }),
+        getRuntimeVersion: () => "v0.18.2-agentera.1",
+        getConnectionMode: () => "local",
+        assertEntitled: () => undefined,
       }),
-      getRuntimeVersion: runtimeVersion,
-      getConnectionMode: () => "local",
-      assertEntitled: () => undefined,
-    });
-    const prepare = vi.spyOn(database.sqlite, "prepare");
+    };
+  }
 
-    expect(manager.getState()).toEqual({
-      access: "online",
-      cloudAvailable: true,
-      context: {
-        scope: "ORGANIZATION_UNAVAILABLE",
-        organizationId: ORGANIZATION_ID,
-        role: "auditor",
-      },
-      draftCount: 0,
-      installationCount: 0,
-    });
-    expect(prepare).not.toHaveBeenCalled();
-
-    const operations: Array<() => unknown> = [
-      () => manager.listDrafts(),
-      () => manager.getDraft("draft"),
-      () => manager.createDraft({} as never),
-      () => manager.updateDraft({} as never),
-      () => manager.deleteDraft("draft"),
-      () => manager.preparePublication("draft"),
-      () => manager.confirmPublication("handle"),
-      () => manager.listDefinitions(),
-      () => manager.listVersions("definition"),
-      () => manager.listInstallations(),
-      () => manager.installVersion({} as never),
-      () => manager.claimVersion({} as never),
-      () => manager.retryPendingInstallation({} as never),
-      () => manager.selectInstallationVersion({} as never),
-      () => manager.archiveInstallation("installation"),
-      () => manager.listEligibleExperienceSkills("installation"),
-      () => manager.prepareExperienceCandidate({} as never),
-      () => manager.submitExperienceCandidate({} as never),
-      () => manager.listMyExperienceCandidates(),
-      () => manager.listExperienceReviewQueue(),
-      () => manager.getExperienceCandidate("candidate"),
-      () => manager.reviewExperienceCandidate({} as never),
-      () => manager.prepareExperienceCandidateImport("candidate"),
-      () => manager.confirmExperienceCandidateImport({} as never),
-    ];
-
-    for (const operation of operations) {
-      await expect(Promise.resolve().then(operation)).rejects.toMatchObject({
-        code: "organization_agent_not_enabled",
-      });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    for (const database of databases.splice(0)) database.close();
+    for (const root of roots.splice(0)) {
+      rmSync(root, { recursive: true, force: true });
     }
-    expect(prepare).not.toHaveBeenCalled();
-    expect(clientCall).not.toHaveBeenCalled();
-    expect(profileCall).not.toHaveBeenCalled();
-    expect(bindingCall).not.toHaveBeenCalled();
-    expect(runtimeVersion).not.toHaveBeenCalled();
+  });
 
-    database.close();
+  it("derives Organization catalog access from the trusted coordinator only", async () => {
+    const listOrganizationDefinitions = vi.fn(async () => []);
+    const listDefinitions = vi.fn(async () => []);
+    const listWorkspaceDefinitions = vi.fn(async () => []);
+    const { manager } = fullManager(
+      () => ({
+        scope: "ORGANIZATION",
+        organizationId: ORGANIZATION_ID,
+        role: "admin",
+      }),
+      {
+        listOrganizationDefinitions,
+        listDefinitions,
+        listWorkspaceDefinitions,
+      },
+    );
+
+    expect(manager.getState()).toMatchObject({
+      context: {
+        scope: "ORGANIZATION",
+        organizationId: ORGANIZATION_ID,
+        role: "admin",
+      },
+    });
+    await expect(manager.listDefinitions()).resolves.toEqual([]);
+    expect(listOrganizationDefinitions).toHaveBeenCalledWith(ORGANIZATION_ID);
+    expect(listDefinitions).not.toHaveBeenCalled();
+    expect(listWorkspaceDefinitions).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["owner", true],
+    ["admin", true],
+    ["auditor", false],
+    ["member", false],
+  ] as const)("gates Organization draft authoring for %s", (role, allowed) => {
+    const { manager } = fullManager(() => ({
+      scope: "ORGANIZATION",
+      organizationId: ORGANIZATION_ID,
+      role,
+    }));
+    const operation = Promise.resolve().then(() =>
+      manager.createDraft(draftInput()),
+    );
+    return allowed
+      ? expect(operation).resolves.toMatchObject({ revision: 1 })
+      : expect(operation).rejects.toMatchObject({
+          code: "organization_agent_forbidden",
+        });
+  });
+
+  it.each([
+    ["owner", true, true, true],
+    ["admin", true, true, true],
+    ["auditor", false, true, false],
+    ["member", false, false, true],
+  ] as const)(
+    "enforces Organization role %s for submit=%s history=%s install=%s",
+    async (role, canSubmit, canReadHistory, canUseInstallations) => {
+      const listOrganizationAgentSubmissions = vi.fn(async () => []);
+      const { manager } = fullManager(
+        () => ({
+          scope: "ORGANIZATION",
+          organizationId: ORGANIZATION_ID,
+          role,
+        }),
+        { listOrganizationAgentSubmissions },
+      );
+
+      if (canSubmit) {
+        const draft = manager.createDraft(draftInput());
+        await expect(
+          manager.prepareOrganizationSubmission(draft.id),
+        ).resolves.toMatchObject({ draftId: draft.id, revision: 1 });
+      } else {
+        await expect(
+          manager.prepareOrganizationSubmission(
+            "30000000-0000-4000-8000-000000000001",
+          ),
+        ).rejects.toMatchObject({ code: "organization_agent_forbidden" });
+      }
+
+      const history = manager.listOrganizationSubmissions();
+      if (canReadHistory) {
+        await expect(history).resolves.toEqual([]);
+        expect(listOrganizationAgentSubmissions).toHaveBeenCalledWith(
+          ORGANIZATION_ID,
+        );
+      } else {
+        await expect(history).rejects.toMatchObject({
+          code: "organization_agent_forbidden",
+        });
+      }
+
+      const installations = manager.listInstallations();
+      if (canUseInstallations) {
+        await expect(installations).resolves.toEqual([]);
+      } else {
+        await expect(installations).rejects.toMatchObject({
+          code: "organization_agent_forbidden",
+        });
+      }
+    },
+  );
+
+  it("invalidates Organization submission handles on trusted context changes", async () => {
+    let context: AgenteraAgentControlContext = {
+      scope: "ORGANIZATION",
+      organizationId: ORGANIZATION_ID,
+      role: "owner",
+    };
+    const submitOrganizationAgent = vi.fn();
+    const { manager } = fullManager(() => context, {
+      submitOrganizationAgent,
+    });
+    const draft = manager.createDraft(draftInput());
+    const preview = await manager.prepareOrganizationSubmission(draft.id);
+
+    context = {
+      scope: "ORGANIZATION",
+      organizationId: OTHER_ORGANIZATION_ID,
+      role: "owner",
+    };
+    manager.notifyAgentContextChanged();
+    await expect(
+      manager.confirmOrganizationSubmission({
+        publicationHandle: preview.publicationHandle,
+        confirmation: "submit-organization-agent",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(submitOrganizationAgent).not.toHaveBeenCalled();
+  });
+
+  it("keeps the runtime component identity independent of Product Space", () => {
+    expect(runtimeComponentKey(OWNER)).toBe(
+      [OWNER.tenantId, OWNER.ownerId, OWNER.deviceInstallationId].join("\0"),
+    );
   });
 
   it("does not interrupt an already installed Hermes Profile turn", async () => {
@@ -168,7 +288,7 @@ describe("Agent control Organization Foundation context", () => {
         prepareInstalledTurn,
       } as unknown as AgenteraHermesAdapter,
       getAgentContext: () => ({
-        scope: "ORGANIZATION_UNAVAILABLE",
+        scope: "ORGANIZATION",
         organizationId: ORGANIZATION_ID,
         role: "member",
       }),

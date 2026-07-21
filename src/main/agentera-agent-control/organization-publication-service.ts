@@ -75,7 +75,7 @@ export interface OrganizationPublicationClient {
 
 export interface OrganizationPublicationServiceOptions {
   database: AgenteraControlPlaneDatabase;
-  drafts: OrganizationPublicationDraftStore;
+  drafts?: OrganizationPublicationDraftStore;
   client: OrganizationPublicationClient;
   getContext: () => AgenteraAgentControlContext;
   getActorUserId: () => string;
@@ -452,7 +452,7 @@ function terminalConflict(
 
 export class OrganizationPublicationService {
   private readonly database: AgenteraControlPlaneDatabase;
-  private readonly drafts: OrganizationPublicationDraftStore;
+  private readonly drafts: OrganizationPublicationDraftStore | null;
   private readonly client: OrganizationPublicationClient;
   private readonly getContext: () => AgenteraAgentControlContext;
   private readonly getActorUserId: () => string;
@@ -477,7 +477,7 @@ export class OrganizationPublicationService {
       throw new Error("Organization publication handle TTL is invalid.");
     }
     this.database = options.database;
-    this.drafts = options.drafts;
+    this.drafts = options.drafts ?? null;
     this.client = options.client;
     this.getContext = options.getContext;
     this.getActorUserId = options.getActorUserId;
@@ -543,7 +543,7 @@ export class OrganizationPublicationService {
       if (!this.samePreparedSubmission(prepared, current)) {
         throw codedError("draft_conflict");
       }
-      const attempt = this.drafts.beginPublicationAttempt(
+      const attempt = this.requireDrafts().beginPublicationAttempt(
         prepared.draftId,
         prepared.draftRevision,
       );
@@ -937,7 +937,8 @@ export class OrganizationPublicationService {
   private readPreparedDraft(
     draftId: string,
   ): Omit<PreparedSubmission, "contextKey" | "expiresAt"> {
-    const draft = this.drafts.getDraft(draftId);
+    const drafts = this.requireDrafts();
+    const draft = drafts.getDraft(draftId);
     if (
       (draft.sourceAgentDefinitionId === null) !==
       (draft.baseAgentVersionId === null)
@@ -963,7 +964,7 @@ export class OrganizationPublicationService {
       draft.manifest,
       draft.manifest.assets.map(({ path }) => ({
         path,
-        content: this.drafts.readAsset(draft.id, path).toString("utf8"),
+        content: drafts.readAsset(draft.id, path).toString("utf8"),
       })),
     );
     const manifest = JSON.parse(
@@ -1025,6 +1026,13 @@ export class OrganizationPublicationService {
       left.canonical.manifestBytes.equals(right.canonical.manifestBytes) &&
       left.canonical.bundleBytes.equals(right.canonical.bundleBytes)
     );
+  }
+
+  private requireDrafts(): OrganizationPublicationDraftStore {
+    if (this.drafts === null) {
+      throw codedError("organization_agent_forbidden");
+    }
+    return this.drafts;
   }
 
   private assertSubmittedResponse(
