@@ -1130,7 +1130,8 @@ function isSigningKeySet(value: unknown): value is AgentSigningKeySet {
         (key.purpose === "access" ||
           key.purpose === "offline_entitlement" ||
           key.purpose === "agent_version" ||
-          key.purpose === "agent_policy") &&
+          key.purpose === "agent_policy" ||
+          key.purpose === "organization_policy") &&
         isBoundedString(key.kid, 1, 128) &&
         typeof key.x === "string" &&
         /^[A-Za-z0-9_-]{43}$/.test(key.x) &&
@@ -1168,8 +1169,15 @@ function safeServerError(raw: string): {
 } {
   try {
     const parsed = JSON.parse(raw) as unknown;
+    const exactErrorEnvelope = hasExactFields(parsed, ["error"]);
+    const exactSupersededEnvelope =
+      hasExactFields(parsed, ["error", "submission"]) &&
+      isObject(parsed.error) &&
+      parsed.error.code === "organization_submission_superseded" &&
+      isOrganizationSubmission(parsed.submission) &&
+      parsed.submission.status === "superseded";
     if (
-      hasExactFields(parsed, ["error"]) &&
+      (exactErrorEnvelope || exactSupersededEnvelope) &&
       isObject(parsed.error) &&
       typeof parsed.error.code === "string" &&
       STABLE_ERROR_CODES.has(parsed.error.code)

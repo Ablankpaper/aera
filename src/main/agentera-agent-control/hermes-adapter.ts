@@ -13,6 +13,7 @@ import type {
   RuntimeOwnerBinding,
 } from "../agentera-profile-binding";
 import type { HermesConversationEnvelope } from "../hermes";
+import type { AgenteraAgentControlContext } from "../../shared/agentera-agent-control";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -23,6 +24,7 @@ export type AgenteraHermesAdapterErrorCode =
   | "entitlement_required"
   | "profile_binding_invalid"
   | "installation_invalid"
+  | "organization_agent_forbidden"
   | "binding_required"
   | "binding_conflict"
   | "version_invalid"
@@ -78,6 +80,7 @@ export interface AgenteraHermesAdapterOptions {
   ) => string | Promise<string>;
   isVersionRevoked: (versionId: string) => boolean | Promise<boolean>;
   assertEntitled: () => void | Promise<void>;
+  getAgentContext: () => AgenteraAgentControlContext;
 }
 
 export interface PrepareInstalledHermesTurnInput {
@@ -96,6 +99,9 @@ export interface PreparedInstalledHermesTurn {
 
 interface LocalInstallationRow {
   agent_installation_id?: unknown;
+  source_scope?: unknown;
+  source_workspace_id?: unknown;
+  source_organization_id?: unknown;
   definition_id?: unknown;
   selected_version_id?: unknown;
   runtime_profile_id?: unknown;
@@ -105,6 +111,9 @@ interface LocalInstallationRow {
 
 interface LocalInstallation {
   agentInstallationId: string;
+  sourceScope: "USER" | "WORKSPACE" | "ORGANIZATION";
+  sourceWorkspaceId: string | null;
+  sourceOrganizationId: string | null;
   definitionId: string;
   selectedVersionId: string;
   runtimeProfileId: string;
@@ -171,17 +180,58 @@ function parseInstallation(
   ) {
     throw new AgenteraHermesAdapterError("installation_invalid");
   }
+  const sourceWorkspaceId =
+    row.source_workspace_id === null
+      ? null
+      : uuid(row.source_workspace_id, "installation_invalid");
+  const sourceOrganizationId =
+    row.source_organization_id === null
+      ? null
+      : uuid(row.source_organization_id, "installation_invalid");
+  if (
+    (row.source_scope === "USER" &&
+      (sourceWorkspaceId !== null || sourceOrganizationId !== null)) ||
+    (row.source_scope === "WORKSPACE" &&
+      (sourceWorkspaceId === null || sourceOrganizationId !== null)) ||
+    (row.source_scope === "ORGANIZATION" &&
+      (sourceWorkspaceId !== null || sourceOrganizationId === null)) ||
+    (row.source_scope !== "USER" &&
+      row.source_scope !== "WORKSPACE" &&
+      row.source_scope !== "ORGANIZATION")
+  ) {
+    throw new AgenteraHermesAdapterError("installation_invalid");
+  }
   return {
     agentInstallationId: uuid(
       row.agent_installation_id,
       "installation_invalid",
     ),
+    sourceScope: row.source_scope,
+    sourceWorkspaceId,
+    sourceOrganizationId,
     definitionId: uuid(row.definition_id, "installation_invalid"),
     selectedVersionId: uuid(row.selected_version_id, "installation_invalid"),
     runtimeProfileId: uuid(row.runtime_profile_id, "installation_invalid"),
     policySnapshotId: uuid(row.policy_snapshot_id, "installation_invalid"),
     status: "active",
   };
+}
+
+function assertNewConversationContext(
+  installation: LocalInstallation,
+  context: AgenteraAgentControlContext,
+): void {
+  if (installation.sourceScope !== "ORGANIZATION") return;
+  if (
+    context.scope !== "ORGANIZATION" ||
+    context.organizationId.toLowerCase() !==
+      installation.sourceOrganizationId ||
+    (context.role !== "owner" &&
+      context.role !== "admin" &&
+      context.role !== "member")
+  ) {
+    throw new AgenteraHermesAdapterError("organization_agent_forbidden");
+  }
 }
 
 function assertOwnerAndProfileBinding(
@@ -343,6 +393,7 @@ export class AgenteraHermesAdapter {
       this.options.database.sqlite
         .prepare(
           `SELECT agent_installation_id, definition_id, selected_version_id,
+                  source_scope, source_workspace_id, source_organization_id,
                   runtime_profile_id, policy_snapshot_id, status
            FROM local_agent_installations
            WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
@@ -380,6 +431,12 @@ export class AgenteraHermesAdapter {
       throw new AgenteraHermesAdapterError("binding_conflict");
     }
     if (existing) assertExistingBinding(existing, input.owner, profile);
+    if (!existing) {
+      assertNewConversationContext(
+        installation,
+        this.options.getAgentContext(),
+      );
+    }
 
     const definitionId =
       existing?.agentDefinitionId ?? installation.definitionId;

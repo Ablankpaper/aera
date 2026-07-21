@@ -1045,6 +1045,7 @@ export class AgenteraAgentControlManager {
       getRuntimeVersion: full.getRuntimeVersion,
       isVersionRevoked: full.isVersionRevoked ?? (() => false),
       assertEntitled: full.assertEntitled,
+      getAgentContext: () => this.context(),
     });
     this.runtime = {
       key,

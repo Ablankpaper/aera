@@ -253,6 +253,40 @@ function organizationSubmissionSummary(
 }
 
 describe("AgenteraAgentControlClient", () => {
+  it("accepts Organization policy keys without loading them as Agent control keys", async () => {
+    const publicKey = Buffer.alloc(32, 7).toString("base64url");
+    const keySet = {
+      keys: [
+        {
+          kid: "agent-control-v1",
+          kty: "OKP" as const,
+          crv: "Ed25519" as const,
+          alg: "EdDSA" as const,
+          use: "sig" as const,
+          purpose: "agent_version" as const,
+          x: publicKey,
+        },
+        {
+          kid: "organization-policy-v1",
+          kty: "OKP" as const,
+          crv: "Ed25519" as const,
+          alg: "EdDSA" as const,
+          use: "sig" as const,
+          purpose: "organization_policy" as const,
+          x: publicKey,
+        },
+      ],
+    };
+    const client = new AgenteraAgentControlClient({
+      origin: "http://127.0.0.1:8086",
+      getAccessToken: () => "agentera-product-access",
+      getInstallationIdentity: () => deviceIdentity(),
+      fetch: vi.fn(async () => jsonResponse(keySet)) as typeof fetch,
+    });
+
+    await expect(client.getSigningKeys()).resolves.toEqual(keySet);
+  });
+
   it("uses only the product access bearer and validates exact response keys", async () => {
     const fetcher = vi.fn(
       async (_url: URL | RequestInfo, _init?: RequestInit) =>
@@ -463,6 +497,47 @@ describe("AgenteraAgentControlClient", () => {
     expect(JSON.parse(String(fetcher.mock.calls[6]?.[1]?.body))).toEqual({
       expected_revision: 1,
       decision: "approve",
+    });
+  });
+
+  it("preserves the committed Organization superseded error contract", async () => {
+    const superseded = {
+      ...organizationSubmissionSummary(),
+      status: "superseded" as const,
+      revision: 2,
+      terminal_at: NOW.toISOString(),
+      updated_at: NOW.toISOString(),
+    };
+    const fetcher = vi.fn(async () =>
+      jsonResponse(
+        {
+          error: {
+            code: "organization_submission_superseded",
+            message: "localized by the client",
+            request_id: "organization-review-request",
+          },
+          submission: superseded,
+        },
+        409,
+      ),
+    );
+    const client = new AgenteraAgentControlClient({
+      origin: "http://127.0.0.1:8086",
+      getAccessToken: () => "agentera-product-access",
+      getInstallationIdentity: () => deviceIdentity(),
+      fetch: fetcher as typeof fetch,
+    });
+
+    await expect(
+      client.reviewOrganizationAgentSubmission(
+        ORGANIZATION_ID,
+        SUBMISSION_ID,
+        { expected_revision: 1, decision: "approve" },
+        "superseded-review-once",
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "organization_submission_superseded",
     });
   });
 

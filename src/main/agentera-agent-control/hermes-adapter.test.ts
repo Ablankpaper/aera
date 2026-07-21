@@ -21,6 +21,7 @@ import {
 } from "./hermes-adapter";
 import { RuntimeBindingStore } from "./runtime-binding-store";
 import type { AgenteraRuntimeOwner } from "../agentera-profile-binding";
+import type { AgenteraAgentControlContext } from "../../shared/agentera-agent-control";
 
 const TENANT_ID = "11111111-1111-4111-8111-111111111111";
 const OWNER_ID = "22222222-2222-4222-8222-222222222222";
@@ -158,6 +159,7 @@ describe("AgentEra adapter around the real Hermes transport", () => {
     typeof vi.fn<(versionId: string) => boolean>
   >;
   let assertEntitled: ReturnType<typeof vi.fn<() => void>>;
+  let agentContext: AgenteraAgentControlContext;
   let materializeVersion: ReturnType<
     typeof vi.fn<
       (input: {
@@ -226,6 +228,7 @@ describe("AgentEra adapter around the real Hermes transport", () => {
     );
     isVersionRevoked = vi.fn(() => false);
     assertEntitled = vi.fn();
+    agentContext = { scope: "USER" };
     materializeVersion = vi.fn(() => projection(agentVersion));
   });
 
@@ -248,6 +251,7 @@ describe("AgentEra adapter around the real Hermes transport", () => {
       getCurrentToolPermissionDigest,
       isVersionRevoked,
       assertEntitled,
+      getAgentContext: () => agentContext,
     });
   }
 
@@ -316,6 +320,11 @@ describe("AgentEra adapter around the real Hermes transport", () => {
          WHERE agent_installation_id = ?`,
       )
       .run(ORGANIZATION_ID, INSTALLATION_ID);
+    agentContext = {
+      scope: "ORGANIZATION",
+      organizationId: ORGANIZATION_ID,
+      role: "member",
+    };
     const firstVersion = version();
     const nextVersion: AgentVersion = {
       ...firstVersion,
@@ -356,6 +365,18 @@ describe("AgentEra adapter around the real Hermes transport", () => {
       owner,
       resumeSessionId: null,
     });
+    agentContext = { scope: "USER" };
+    const resumedAfterRemoval = await subject.prepareInstalledTurn({
+      conversationKey: "organization-conversation-a",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+    });
+    agentContext = {
+      scope: "ORGANIZATION",
+      organizationId: ORGANIZATION_ID,
+      role: "member",
+    };
     const second = await subject.prepareInstalledTurn({
       conversationKey: "organization-conversation-b",
       profilePath: PROFILE_PATH,
@@ -368,6 +389,7 @@ describe("AgentEra adapter around the real Hermes transport", () => {
     expect(resumed.binding.policySnapshotId).toBe(
       first.binding.policySnapshotId,
     );
+    expect(resumedAfterRemoval.binding.id).toBe(first.binding.id);
     expect(second.binding).toMatchObject({
       ownerScope: "USER",
       agentVersionId: VERSION_2_ID,
@@ -377,6 +399,36 @@ describe("AgentEra adapter around the real Hermes transport", () => {
     const cloudOutbox = JSON.stringify(bindingStore.listPendingCloudRecords());
     expect(cloudOutbox).not.toContain(ORGANIZATION_ID);
     expect(cloudOutbox).not.toMatch(/organization|owner_scope|conversation/i);
+  });
+
+  it("blocks a new Organization-sourced conversation after trusted membership context is removed", async () => {
+    database.sqlite
+      .prepare(
+        `UPDATE local_agent_installations
+         SET source_scope = 'ORGANIZATION', source_workspace_id = NULL,
+             source_organization_id = ?
+         WHERE agent_installation_id = ?`,
+      )
+      .run(ORGANIZATION_ID, INSTALLATION_ID);
+    agentContext = { scope: "USER" };
+    const subject = adapter();
+
+    await expect(
+      subject.prepareInstalledTurn({
+        conversationKey: "organization-after-removal",
+        profilePath: PROFILE_PATH,
+        owner,
+        resumeSessionId: null,
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<AgenteraHermesAdapterError>>({
+        code: "organization_agent_forbidden",
+      }),
+    );
+    expect(
+      bindingStore.getByConversationKey("organization-after-removal"),
+    ).toBeNull();
+    expect(cache.getVerifiedVersion).not.toHaveBeenCalled();
   });
 
   it("rechecks immutable cached bytes on every turn and fails before Hermes when they become invalid", async () => {
