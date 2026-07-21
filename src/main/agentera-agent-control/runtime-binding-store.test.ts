@@ -27,6 +27,7 @@ const VERSION_ID = "77777777-7777-4777-8777-777777777777";
 const INSTALLATION_ID = "88888888-8888-4888-8888-888888888888";
 const RUNTIME_PROFILE_ID = "99999999-9999-4999-8999-999999999999";
 const POLICY_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const ORGANIZATION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const TOOL_DIGEST = "ab".repeat(32);
 const BASE_DIGEST = "cd".repeat(32);
 const NOW = new Date("2026-07-19T20:30:00.000Z");
@@ -156,6 +157,49 @@ describe("immutable local RuntimeBinding store", () => {
     expect(other.getById(BINDING_ID)).toBeNull();
     expect(other.listPendingCloudRecords()).toEqual([]);
     expect(store.getById(BINDING_ID)?.ownerId).toBe(OWNER_ID);
+  });
+
+  it("keeps an Organization-sourced installation USER-owned and strips Organization context from cloud delivery", () => {
+    const forgedOrganizationBinding = {
+      ...bindingInput({ conversationKey: "organization-conversation-forged" }),
+      ownerScope: "ORGANIZATION",
+      organizationId: ORGANIZATION_ID,
+    } as unknown as CreateLocalRuntimeBindingInput;
+
+    expect(() =>
+      store.getOrCreateForConversation(forgedOrganizationBinding),
+    ).toThrowError(
+      expect.objectContaining<Partial<RuntimeBindingStoreError>>({
+        code: "invalid_binding",
+      }),
+    );
+
+    const binding = store.getOrCreateForConversation(
+      bindingInput({ conversationKey: "organization-conversation" }),
+    );
+    expect(binding.ownerScope).toBe("USER");
+    expect(store.listPendingCloudRecords()).toEqual([
+      {
+        id: BINDING_ID,
+        body: {
+          binding_id: BINDING_ID,
+          agent_installation_id: INSTALLATION_ID,
+          agent_version_id: VERSION_ID,
+          runtime_profile_id: RUNTIME_PROFILE_ID,
+          runtime_version: "v0.18.2-agentera.1",
+          policy_snapshot_id: POLICY_ID,
+          tool_permission_digest: TOOL_DIGEST,
+        },
+        attemptCount: 0,
+        nextAttemptAt: null,
+      },
+    ]);
+    expect(JSON.stringify(store.listPendingCloudRecords())).not.toMatch(
+      new RegExp(
+        `${ORGANIZATION_ID}|organization|ownerScope|owner_scope|conversation|profilePath|instructions`,
+        "i",
+      ),
+    );
   });
 
   it("is idempotent by renderer runId and rejects any immutable-field drift", () => {

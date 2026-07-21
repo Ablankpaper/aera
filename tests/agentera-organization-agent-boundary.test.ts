@@ -73,7 +73,45 @@ describe("Organization Agent renderer boundary", () => {
       .map(source)
       .join("\n");
     expect(runtime).not.toMatch(
-      /organization-publication-service|prepareOrganizationReview|confirmOrganizationSubmission|ownerScope\s*:\s*["']ORGANIZATION["']/,
+      /organization-publication-service|prepareOrganizationReview|confirmOrganizationSubmission|\bsourceOrganizationId\b|\borganizationId\b|ownerScope\s*:\s*["']ORGANIZATION["']/,
+    );
+  });
+
+  it("stops Organization ownership at installation while keeping runtime and Profile USER-scoped", () => {
+    const installation = source(
+      "src/main/agentera-agent-control/installation-manager.ts",
+    );
+    const adapter = source("src/main/agentera-agent-control/hermes-adapter.ts");
+    const bindings = source(
+      "src/main/agentera-agent-control/runtime-binding-store.ts",
+    );
+    const profiles = source("src/main/agentera-profile-binding.ts");
+
+    expect(installation).toContain(
+      'sourceScope: "USER" | "WORKSPACE" | "ORGANIZATION"',
+    );
+    expect(installation).toContain("sourceOrganizationId");
+    expect(adapter).toContain('ownerScope: "USER"');
+    expect(adapter).toContain('binding.ownerScope !== "USER"');
+    expect(bindings).toContain('ownerScope: "USER"');
+    expect(bindings).toContain('input.ownerScope !== "USER"');
+    expect(profiles).toContain('ownerScope: "USER"');
+    expect([adapter, bindings, profiles].join("\n")).not.toMatch(
+      /\bsourceOrganizationId\b|\borganizationId\b|ownerScope\s*:\s*["']ORGANIZATION["']/,
+    );
+  });
+
+  it("stages immutable Organization assets outside HERMES_HOME without touching private learning", () => {
+    const database = source("src/main/agentera-agent-control/db.ts");
+    const projection = source(
+      "src/main/agentera-agent-control/hermes-projection.ts",
+    );
+
+    expect(database).toContain("assertOutsideHermesHome(rootPath)");
+    expect(projection).toContain("canonicalizeAgentVersionContent");
+    expect(projection).toContain("makeReadOnly(staging)");
+    expect(projection).not.toMatch(
+      /MEMORY\.md|USER\.md|sessions\/|credentials|curator\/|\.curator/,
     );
   });
 });

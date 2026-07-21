@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
   afterEach,
@@ -474,6 +474,19 @@ describe("Agent installation orchestration", () => {
   });
 
   it("binds an Organization source while keeping the local Installation USER-owned", async () => {
+    const organizationProfilePath = join(profilesRoot, "organization-existing");
+    const memoryPath = join(organizationProfilePath, "MEMORY.md");
+    const privateSkillPath = join(
+      organizationProfilePath,
+      "skills",
+      "local-only",
+      "SKILL.md",
+    );
+    mkdirSync(join(organizationProfilePath, "skills", "local-only"), {
+      recursive: true,
+    });
+    writeFileSync(memoryPath, "organization install private memory\n");
+    writeFileSync(privateSkillPath, "organization install private skill\n");
     const installed = await manager().install({
       definitionId: DEFINITION_ID,
       versionId: VERSION_ID,
@@ -482,7 +495,11 @@ describe("Agent installation orchestration", () => {
         organizationId: ORGANIZATION_ID,
         role: "member",
       },
-      profile: { kind: "fresh", name: "Fresh Agent" },
+      profile: {
+        kind: "claim",
+        profileId: "organization-existing",
+        profilePath: organizationProfilePath,
+      },
     });
 
     expect(createInstallation).toHaveBeenCalledWith(
@@ -521,6 +538,26 @@ describe("Agent installation orchestration", () => {
       source_workspace_id: null,
       source_organization_id: ORGANIZATION_ID,
     });
+    const projected = materializeVersion.mock.results.at(-1)?.value;
+    expect(projected).toBeDefined();
+    expect(
+      relative(
+        organizationProfilePath,
+        projected?.versionRoot ?? "",
+      ).startsWith(".."),
+    ).toBe(true);
+    expect(
+      relative(
+        organizationProfilePath,
+        projected?.externalSkillsDirectory ?? "",
+      ).startsWith(".."),
+    ).toBe(true);
+    expect(readFileSync(memoryPath, "utf8")).toBe(
+      "organization install private memory\n",
+    );
+    expect(readFileSync(privateSkillPath, "utf8")).toBe(
+      "organization install private skill\n",
+    );
 
     createInstallation.mockClear();
     await expect(
@@ -770,6 +807,96 @@ describe("Agent installation orchestration", () => {
       activationCallsBeforeUpdate,
     );
   });
+
+  it.each([
+    "partial_download",
+    "signature_mismatch",
+    "digest_mismatch",
+    "runtime_incompatible",
+    "policy_denied",
+    "membership_removed",
+    "organization_archived",
+  ] as const)(
+    "preserves an Organization Profile and private learning when update fails with %s",
+    async (failure) => {
+      await manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        source: {
+          scope: "ORGANIZATION",
+          organizationId: ORGANIZATION_ID,
+          role: "member",
+        },
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      });
+      const privateSkillPath = join(
+        freshProfilePath,
+        "skills",
+        "locally-learned",
+        "SKILL.md",
+      );
+      mkdirSync(join(freshProfilePath, "skills", "locally-learned"), {
+        recursive: true,
+      });
+      writeFileSync(privateSkillPath, `private before ${failure}\n`);
+      const activationCalls = activateForProfile.mock.calls.length;
+      const v2 = makeVersion(VERSION_2_ID, 2);
+      const nextPolicy = makePolicy(v2, POLICY_2_ID);
+
+      getVersion.mockResolvedValueOnce(v2);
+      selectInstallationVersion.mockResolvedValueOnce({
+        ...pendingInstallation(VERSION_2_ID),
+        policy_snapshot_id: POLICY_2_ID,
+        runtime_profile_id: RUNTIME_PROFILE_ID,
+        status: "active",
+        activated_at: NOW.toISOString(),
+      });
+      getPolicySnapshot.mockResolvedValueOnce(nextPolicy);
+      if (failure === "partial_download") {
+        getVersion.mockReset().mockRejectedValueOnce(new Error(failure));
+      } else if (
+        failure === "signature_mismatch" ||
+        failure === "digest_mismatch"
+      ) {
+        cache.cacheVerifiedVersion = vi.fn(() => {
+          throw new Error(failure);
+        });
+      } else if (
+        failure === "runtime_incompatible" ||
+        failure === "policy_denied"
+      ) {
+        trust.verifyPolicy = vi.fn(() => {
+          throw new Error(failure);
+        });
+      } else {
+        selectInstallationVersion
+          .mockReset()
+          .mockRejectedValueOnce(new Error(failure));
+      }
+
+      await expect(
+        manager().selectInstallationVersion({
+          agentInstallationId: AGENT_INSTALLATION_ID,
+          versionId: VERSION_2_ID,
+          profilePath: freshProfilePath,
+        }),
+      ).rejects.toMatchObject({ code: "update_failed" });
+      expect(
+        manager().getLocalInstallation(AGENT_INSTALLATION_ID),
+      ).toMatchObject({
+        sourceScope: "ORGANIZATION",
+        sourceOrganizationId: ORGANIZATION_ID,
+        selectedVersionId: VERSION_ID,
+        policySnapshotId: POLICY_ID,
+        runtimeProfileId: RUNTIME_PROFILE_ID,
+      });
+      expect(activateForProfile).toHaveBeenCalledTimes(activationCalls);
+      expect(readFileSync(privateSkillPath, "utf8")).toBe(
+        `private before ${failure}\n`,
+      );
+      expect(existsSync(freshProfilePath)).toBe(true);
+    },
+  );
 
   it("archives metadata only and never deletes the Profile or local learning", async () => {
     await manager().install({

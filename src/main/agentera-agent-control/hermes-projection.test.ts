@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type {
   AgentDraftAssetInput,
@@ -259,6 +259,46 @@ describe("deterministic read-only Hermes Agent projection", () => {
     expect(readFileSync(join(profilePath, "config.yaml"), "utf8")).toBe(
       expectedConfig,
     );
+  });
+
+  it("keeps an Organization version projection outside the writable Profile and preserves private learning bytes", () => {
+    writeFileSync(join(profilePath, "config.yaml"), "tools:\n  allowed: []\n");
+    writeFileSync(join(profilePath, "MEMORY.md"), "private memory\n");
+    writeFileSync(join(profilePath, "USER.md"), "private user\n");
+    mkdirSync(join(profilePath, "skills", "local-only"), { recursive: true });
+    mkdirSync(join(profilePath, "sessions"), { recursive: true });
+    mkdirSync(join(profilePath, ".curator"), { recursive: true });
+    const privateFiles = [
+      ["MEMORY.md", "private memory\n"],
+      ["USER.md", "private user\n"],
+      ["skills/local-only/SKILL.md", "local-only learned skill\n"],
+      ["sessions/completed.json", '{"completed":true}\n'],
+      [".curator/state.json", '{"private":true}\n'],
+    ] as const;
+    for (const [path, content] of privateFiles.slice(2)) {
+      writeFileSync(join(profilePath, path), content);
+    }
+
+    const built = manager.materializeVersion({
+      agentInstallationId: AGENT_INSTALLATION_ID,
+      version: version(),
+    });
+    const activated = manager.activateForProfile({
+      projection: built,
+      profilePath,
+    });
+
+    expect(relative(profilePath, built.versionRoot).startsWith("..")).toBe(
+      true,
+    );
+    expect(
+      relative(profilePath, activated.externalSkillsDirectory).startsWith(".."),
+    ).toBe(true);
+    expect(statSync(built.versionRoot).mode & 0o222).toBe(0);
+    expect(statSync(activated.externalSkillsDirectory).mode & 0o222).toBe(0);
+    for (const [path, content] of privateFiles) {
+      expect(readFileSync(join(profilePath, path), "utf8")).toBe(content);
+    }
   });
 
   it("lets a same-name Profile-local Skill win without changing it", () => {

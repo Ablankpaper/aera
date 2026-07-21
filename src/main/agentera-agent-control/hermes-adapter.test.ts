@@ -27,11 +27,16 @@ const OWNER_ID = "22222222-2222-4222-8222-222222222222";
 const DEVICE_ID = "33333333-3333-4333-8333-333333333333";
 const DEFINITION_ID = "44444444-4444-4444-8444-444444444444";
 const VERSION_ID = "55555555-5555-4555-8555-555555555555";
+const VERSION_2_ID = "56565656-5656-4565-8565-565656565656";
 const INSTALLATION_ID = "66666666-6666-4666-8666-666666666666";
 const RUNTIME_PROFILE_ID = "77777777-7777-4777-8777-777777777777";
 const POLICY_ID = "88888888-8888-4888-8888-888888888888";
+const POLICY_2_ID = "89898989-8989-4898-8989-898989898989";
 const BINDING_ID = "99999999-9999-4999-8999-999999999999";
 const ADAPTIVE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const BINDING_2_ID = "abababab-abab-4bab-8bab-abababababab";
+const ADAPTIVE_2_ID = "acacacac-acac-4cac-8cac-acacacacacac";
+const ORGANIZATION_ID = "adadadad-adad-4dad-8dad-adadadadadad";
 const NOW = new Date("2026-07-19T21:00:00.000Z");
 const RUNTIME_VERSION = "v0.18.2-agentera.1";
 const PROFILE_PATH = "/tmp/hermes-installed-agent-profile";
@@ -91,9 +96,12 @@ function version(): AgentVersion {
   };
 }
 
-function policy(agentVersion = version()): AgentPolicySnapshot {
+function policy(
+  agentVersion = version(),
+  policyId = POLICY_ID,
+): AgentPolicySnapshot {
   return {
-    id: POLICY_ID,
+    id: policyId,
     installation_id: INSTALLATION_ID,
     agent_version_id: agentVersion.id,
     issuer: "http://127.0.0.1:8086",
@@ -120,10 +128,10 @@ function projection(agentVersion = version()): HermesVersionProjection {
   return {
     agentInstallationId: INSTALLATION_ID,
     definitionId: DEFINITION_ID,
-    versionId: VERSION_ID,
-    versionNumber: 3,
+    versionId: agentVersion.id,
+    versionNumber: agentVersion.version_number,
     contentDigest: agentVersion.content_digest,
-    versionRoot: VERSION_ROOT,
+    versionRoot: `/tmp/agentera-control/versions/${agentVersion.id}`,
     externalSkillsDirectory: `/tmp/agentera-control/${INSTALLATION_ID}/active/skills`,
     skills: [
       {
@@ -186,7 +194,7 @@ describe("AgentEra adapter around the real Hermes transport", () => {
         NOW.toISOString(),
         NOW.toISOString(),
       );
-    const ids = [BINDING_ID, ADAPTIVE_ID];
+    const ids = [BINDING_ID, ADAPTIVE_ID, BINDING_2_ID, ADAPTIVE_2_ID];
     bindingStore = new RuntimeBindingStore({
       database,
       owner,
@@ -297,6 +305,78 @@ describe("AgentEra adapter around the real Hermes transport", () => {
     expect(cache.getVerifiedVersion).toHaveBeenCalledTimes(2);
     expect(cache.getVerifiedPolicySnapshot).toHaveBeenCalledTimes(2);
     expect(assertEntitled).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps Organization-sourced conversations USER-owned and freezes an active conversation across version selection", async () => {
+    database.sqlite
+      .prepare(
+        `UPDATE local_agent_installations
+         SET source_scope = 'ORGANIZATION', source_workspace_id = NULL,
+             source_organization_id = ?
+         WHERE agent_installation_id = ?`,
+      )
+      .run(ORGANIZATION_ID, INSTALLATION_ID);
+    const firstVersion = version();
+    const nextVersion: AgentVersion = {
+      ...firstVersion,
+      id: VERSION_2_ID,
+      version_number: 4,
+      content_digest: "ef".repeat(32),
+    };
+    const firstPolicy = policy(firstVersion);
+    const nextPolicy = policy(nextVersion, POLICY_2_ID);
+    vi.mocked(cache.getVerifiedVersion).mockImplementation((versionId) =>
+      versionId === VERSION_2_ID ? nextVersion : firstVersion,
+    );
+    vi.mocked(cache.getVerifiedPolicySnapshot).mockImplementation(
+      (versionId) => (versionId === VERSION_2_ID ? nextPolicy : firstPolicy),
+    );
+    materializeVersion.mockImplementation(({ version: candidate }) =>
+      projection(candidate),
+    );
+    const subject = adapter();
+
+    const first = await subject.prepareInstalledTurn({
+      conversationKey: "organization-conversation-a",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+    });
+    database.sqlite
+      .prepare(
+        `UPDATE local_agent_installations
+         SET selected_version_id = ?, policy_snapshot_id = ?
+         WHERE agent_installation_id = ?`,
+      )
+      .run(VERSION_2_ID, POLICY_2_ID, INSTALLATION_ID);
+
+    const resumed = await subject.prepareInstalledTurn({
+      conversationKey: "organization-conversation-a",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+    });
+    const second = await subject.prepareInstalledTurn({
+      conversationKey: "organization-conversation-b",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+    });
+
+    expect(first.binding.ownerScope).toBe("USER");
+    expect(resumed.binding.agentVersionId).toBe(first.binding.agentVersionId);
+    expect(resumed.binding.policySnapshotId).toBe(
+      first.binding.policySnapshotId,
+    );
+    expect(second.binding).toMatchObject({
+      ownerScope: "USER",
+      agentVersionId: VERSION_2_ID,
+      policySnapshotId: POLICY_2_ID,
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+    });
+    const cloudOutbox = JSON.stringify(bindingStore.listPendingCloudRecords());
+    expect(cloudOutbox).not.toContain(ORGANIZATION_ID);
+    expect(cloudOutbox).not.toMatch(/organization|owner_scope|conversation/i);
   });
 
   it("rechecks immutable cached bytes on every turn and fails before Hermes when they become invalid", async () => {
