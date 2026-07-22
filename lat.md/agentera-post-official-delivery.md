@@ -1,0 +1,39 @@
+# AgentEra post-official delivery program
+
+The approved follow-on program adds content-free official quality feedback, client-encrypted Profile snapshots, and production release gates without changing Hermes core ownership.
+
+The canonical umbrella design is `docs/superpowers/specs/2026-07-23-agentera-post-official-v1-delivery-program-design.md`. Quality, backup, and release use separate payloads, storage, keys, permissions, and failure domains.
+
+## Official quality feedback V1
+
+Official quality feedback is an opt-in PLATFORM-only pipeline for fixed result codes, timing and token buckets, whitelisted crash codes, and explicit fixed-code user feedback.
+
+The desktop derives provenance from a trusted USER-owned official Installation and fixed RuntimeBinding, then discards raw runtime objects before creating an event. Cloud stores no user, device, Installation, Profile, Session, or RuntimeBinding identifier in the event row and exposes aggregates only at ten or more rotating anonymous subjects.
+
+Admin may create a DLP-scanned QualityProposal from thresholded aggregates. A different employee approves it before a Developer can clone the verified immutable base into a human-editable platform draft. No event trains a model, generates Agent content, publishes a version, changes rollout, or enters Hermes learning automatically.
+
+The complete contract is `docs/superpowers/specs/2026-07-23-agentera-official-agent-privacy-quality-feedback-v1-design.md`.
+
+## End-to-end encrypted backup V1
+
+Encrypted backup stores immutable ciphertext snapshots for one USER-owned Installation and physical Profile; it is not Agent sync or live multi-device state replication.
+
+One user-held 24-word recovery phrase and separately authorized X25519 devices wrap a client-only Backup Root Key. Every backup has its own Data Encryption Key, encrypted manifest, authenticated chunks, and random object identifiers. Cloud stores public keys, encrypted envelopes, hashes, sizes, quotas, and object references but cannot decrypt filenames, Agent/Profile metadata, conversations, Memory, USER, Skills, Sessions, or Curator state.
+
+Restore verifies and decrypts into a transaction-owned staging directory, installs the exact immutable Agent base, and creates a new USER-owned Installation and fresh Profile. Different device histories remain explicit branches; no last-writer-wins or automatic merge path exists.
+
+The complete contract is `docs/superpowers/specs/2026-07-23-agentera-end-to-end-encrypted-backup-migration-v1-design.md`.
+
+## Production readiness and release
+
+Production delivery progresses through local verification, remote CI, private staging, signed candidates, real devices, restore and rollback rehearsal, disabled production deployment, bounded rollout, and separately approved public release.
+
+Cloud and Admin images are built once from exact commits and promoted by digest. Desktop macOS Apple Silicon and Windows 11 x64 artifacts are signed once, verified on real devices, and published without rebuilding. Missing GitHub billing, production credentials, domains, providers, signing certificates, devices, or final authority remains an external gate rather than a code fallback.
+
+The complete contract is `docs/superpowers/specs/2026-07-23-agentera-production-readiness-and-release-design.md`.
+
+## Hermes and data boundary
+
+Quality, backup, and release failures cannot delay a conversation, revert local learning, mutate an active RuntimeBinding, overwrite a running Profile, or change `aera-runtime`.
+
+Quality receives no private runtime content. Backup may contain explicitly allowlisted private Profile state only after client-side encryption and never exposes plaintext to Cloud or Admin. Production rollback preserves immutable versions, proposals, audit, ciphertext, key references, and existing Profile bytes.

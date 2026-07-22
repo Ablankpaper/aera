@@ -148,4 +148,6 @@ The first release guarantees self-evolution on the same device and in the same P
 
 Cross-device adaptive-state sync, encrypted backup, automatic personal-to-organization sharing, raw-conversation upload, and model-weight training are separate later projects.
 
+The user has now approved [[agentera-post-official-delivery|a later standalone encrypted-backup project]] that preserves this boundary by keeping plaintext and recovery keys on authorized user devices. It remains an immutable snapshot and restore path, not live sync, automatic merge, or Cloud-owned learning.
+
 The product gate, device session, seven-day offline entitlement, and existing-Profile claim rules are defined separately in [[agentera-app-authentication|AgentEra application authentication]]. Authentication selects an owner and Profile but never owns the Profile's adaptive state.
