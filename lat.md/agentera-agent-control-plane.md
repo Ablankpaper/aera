@@ -42,7 +42,7 @@ Platform employees use the separate Aera Admin application: Developer authors an
 
 Official releases use append-only revisions for activation, percentage and allowlist changes, minimum desktop versions, pause, resume, and rollback. Pause stops new discovery and installation but does not remotely disable an installed Agent. Update and rollback replace only the verified immutable base for later conversations; active RuntimeBindings and Hermes private learning remain unchanged.
 
-The written specification is `docs/superpowers/specs/2026-07-22-agentera-official-managed-agent-v1-design.md`. It is awaiting final user review and is design evidence only; no Official Managed Agent implementation, deployment, or release is established by this checkpoint.
+The user approved `docs/superpowers/specs/2026-07-22-agentera-official-managed-agent-v1-design.md` on 2026-07-22. The document remains design evidence only; no Official Managed Agent implementation, deployment, or release is established by this checkpoint.
 
 ## Trusted Workspace Agent context
 

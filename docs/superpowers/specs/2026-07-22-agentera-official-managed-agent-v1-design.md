@@ -1,6 +1,6 @@
 # AgentEra Official Managed Agent V1 Design
 
-**Status:** Written specification awaiting final user review on 2026-07-22
+**Status:** Approved by the user on 2026-07-22
 
 **Repositories:** `aera-admin`, `aera-cloud`, and `aera`
 
