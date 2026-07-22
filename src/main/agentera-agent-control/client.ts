@@ -5,13 +5,19 @@ import {
   verify as verifySignature,
 } from "node:crypto";
 import type { components } from "../../shared/agentera-cloud-api.generated";
-import type { ExperienceCandidateBundleV1 } from "../../shared/agentera-agent-control";
+import type {
+  AgenteraAgentControlContext,
+  ExperienceCandidateBundleV1,
+  OfficialAgentSummary,
+  OfficialManagedUpdate,
+} from "../../shared/agentera-agent-control";
 import {
   agenteraCloudUrl,
   parseAgenteraCloudOrigin,
 } from "../agentera-auth/config";
 import type { InstallationIdentity } from "../agentera-auth/store";
 import { canonicalizeExperienceCandidate } from "./experience-candidate-contract";
+import type { OfficialAgentChannel } from "./official-channel";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const RESPONSE_LIMIT = 4 * 1024 * 1024;
@@ -68,6 +74,10 @@ export type OrganizationAgentSubmissionRecord =
   components["schemas"]["OrganizationAgentSubmission"];
 export type OrganizationAgentSubmissionDetailRecord =
   components["schemas"]["OrganizationAgentSubmissionDetail"];
+type WireOfficialAgentSummary = components["schemas"]["OfficialAgentSummary"];
+type WireOfficialAgentDetail = components["schemas"]["OfficialAgentDetail"];
+type WireOfficialManagedUpdateResponse =
+  components["schemas"]["OfficialManagedUpdateResponse"];
 
 type StableErrorCode =
   | components["schemas"]["ErrorCode"]
@@ -122,6 +132,14 @@ const STABLE_ERROR_CODES: ReadonlySet<string> = new Set<StableErrorCode>([
   "organization_submission_superseded",
   "organization_publication_policy_blocked",
   "organization_publication_dlp_blocked",
+  "official_agent_not_eligible",
+  "official_release_paused",
+  "official_release_revision_conflict",
+  "official_client_version_unsupported",
+  "official_installation_policy_blocked",
+  "official_managed_update_conflict",
+  "cloud_unavailable",
+  "rate_limited",
 ]);
 
 export interface AgenteraAgentControlClientOptions {
@@ -131,6 +149,9 @@ export interface AgenteraAgentControlClientOptions {
   fetch?: typeof fetch;
   timeoutMs?: number;
   now?: () => Date;
+  officialAgentChannel?: OfficialAgentChannel;
+  desktopVersion?: string;
+  getAgentContext?: () => AgenteraAgentControlContext;
 }
 
 export class AgenteraAgentControlClientError extends Error {
@@ -161,6 +182,7 @@ interface RequestOptions {
   idempotencyKey?: string;
   authenticated?: boolean;
   responseLimit?: number;
+  official?: boolean;
   expectedStatus: number;
 }
 
@@ -188,6 +210,15 @@ function isUUID(value: unknown): value is string {
 
 function isCanonicalUUID(value: unknown): value is string {
   return isUUID(value) && value === value.toLowerCase();
+}
+
+function isDesktopVersion(value: unknown): value is string {
+  return (
+    isBoundedString(value, 5, 128) &&
+    /^v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(
+      value,
+    )
+  );
 }
 
 function isDigest(value: unknown): value is string {
@@ -647,19 +678,173 @@ function isVersion(value: unknown): value is AgentVersion {
   );
 }
 
-function isPolicyDocument(value: unknown): boolean {
+function isOfficialAgentSummary(
+  value: unknown,
+): value is WireOfficialAgentSummary {
+  if (
+    !hasExactFields(
+      value,
+      [
+        "channel",
+        "definition_id",
+        "display_name",
+        "installation_state",
+        "official",
+        "release_id",
+        "release_revision_id",
+        "runtime_minimum_version",
+        "update_state",
+        "version_id",
+        "version_number",
+      ],
+      ["icon_data", "icon_media_type", "runtime_maximum_version_exclusive"],
+    ) ||
+    !isCanonicalUUID(value.definition_id) ||
+    !isBoundedString(value.display_name, 1, 80) ||
+    value.official !== true ||
+    !isCanonicalUUID(value.version_id) ||
+    !Number.isSafeInteger(value.version_number) ||
+    Number(value.version_number) < 1 ||
+    !isCanonicalUUID(value.release_id) ||
+    !isCanonicalUUID(value.release_revision_id) ||
+    (value.channel !== "internal" && value.channel !== "stable") ||
+    !isBoundedString(value.runtime_minimum_version, 1, 128) ||
+    (value.runtime_maximum_version_exclusive !== undefined &&
+      !isBoundedString(value.runtime_maximum_version_exclusive, 1, 128)) ||
+    (value.installation_state !== "not_installed" &&
+      value.installation_state !== "installed") ||
+    (value.update_state !== "current" &&
+      value.update_state !== "update_available")
+  ) {
+    return false;
+  }
+  const hasIconType = value.icon_media_type !== undefined;
+  const hasIconData = value.icon_data !== undefined;
+  return (
+    hasIconType === hasIconData &&
+    (!hasIconType ||
+      ((value.icon_media_type === "image/png" ||
+        value.icon_media_type === "image/webp") &&
+        isBoundedString(value.icon_data, 1, 699_051) &&
+        /^[A-Za-z0-9_-]+$/.test(value.icon_data) &&
+        Buffer.from(value.icon_data, "base64url").toString("base64url") ===
+          value.icon_data))
+  );
+}
+
+function detachOfficialAgentSummary(
+  value: WireOfficialAgentSummary,
+): OfficialAgentSummary {
+  return {
+    definitionId: value.definition_id,
+    displayName: value.display_name,
+    iconMediaType: value.icon_media_type ?? null,
+    iconDataBase64Url: value.icon_data ?? null,
+    versionId: value.version_id,
+    versionNumber: value.version_number,
+    releaseId: value.release_id,
+    releaseRevisionId: value.release_revision_id,
+    channel: value.channel,
+    runtimeMinimumVersion: value.runtime_minimum_version,
+    runtimeMaximumVersionExclusive:
+      value.runtime_maximum_version_exclusive ?? null,
+    installationState: value.installation_state,
+    updateState: value.update_state,
+  };
+}
+
+function isOfficialAgentDetail(
+  value: unknown,
+): value is WireOfficialAgentDetail {
+  return (
+    hasExactFields(value, ["agent", "version"]) &&
+    isOfficialAgentSummary(value.agent) &&
+    isVersion(value.version) &&
+    isCanonicalUUID(value.version.id) &&
+    isCanonicalUUID(value.version.definition_id) &&
+    value.agent.definition_id === value.version.definition_id &&
+    value.agent.version_id === value.version.id &&
+    value.agent.version_number === value.version.version_number &&
+    value.agent.runtime_minimum_version ===
+      value.version.runtime_minimum_version &&
+    (value.agent.runtime_maximum_version_exclusive ?? null) ===
+      (value.version.runtime_maximum_version_exclusive ?? null)
+  );
+}
+
+function isOfficialManagedUpdateResponse(
+  value: unknown,
+): value is WireOfficialManagedUpdateResponse {
+  if (!isObject(value)) return false;
+  if (value.update_available === false) {
+    return hasExactFields(value, ["update_available"]);
+  }
+  return (
+    value.update_available === true &&
+    hasExactFields(
+      value,
+      [
+        "expected_selected_release_revision_id",
+        "installation_id",
+        "runtime_minimum_version",
+        "target_release_revision_id",
+        "target_version_id",
+        "update_available",
+      ],
+      ["runtime_maximum_version_exclusive"],
+    ) &&
+    isCanonicalUUID(value.installation_id) &&
+    isCanonicalUUID(value.expected_selected_release_revision_id) &&
+    isCanonicalUUID(value.target_release_revision_id) &&
+    isCanonicalUUID(value.target_version_id) &&
+    isBoundedString(value.runtime_minimum_version, 1, 128) &&
+    (value.runtime_maximum_version_exclusive === undefined ||
+      isBoundedString(value.runtime_maximum_version_exclusive, 1, 128))
+  );
+}
+
+function isOfficialPolicyContext(value: unknown): boolean {
   return (
     hasExactFields(value, [
-      "agent_definition_id",
-      "agent_version_id",
-      "deny_rules",
-      "model_constraints",
-      "publication_allowed",
-      "runtime_compatibility",
-      "schema_version",
-      "tools",
-      "version_digest",
+      "device_id",
+      "installation_id",
+      "platform_id",
+      "product_context_id",
+      "product_scope",
+      "release_id",
+      "release_revision_id",
+      "user_id",
     ]) &&
+    isCanonicalUUID(value.device_id) &&
+    isCanonicalUUID(value.installation_id) &&
+    isCanonicalUUID(value.platform_id) &&
+    isCanonicalUUID(value.product_context_id) &&
+    (value.product_scope === "USER" ||
+      value.product_scope === "WORKSPACE" ||
+      value.product_scope === "ORGANIZATION") &&
+    isCanonicalUUID(value.release_id) &&
+    isCanonicalUUID(value.release_revision_id) &&
+    isCanonicalUUID(value.user_id)
+  );
+}
+
+function isPolicyDocument(value: unknown): boolean {
+  return (
+    hasExactFields(
+      value,
+      [
+        "agent_definition_id",
+        "agent_version_id",
+        "deny_rules",
+        "model_constraints",
+        "publication_allowed",
+        "runtime_compatibility",
+        "schema_version",
+        "tools",
+        "version_digest",
+      ],
+      ["official_context"],
+    ) &&
     value.schema_version === 1 &&
     isUUID(value.agent_definition_id) &&
     isUUID(value.agent_version_id) &&
@@ -668,7 +853,9 @@ function isPolicyDocument(value: unknown): boolean {
     isToolPolicy(value.tools) &&
     isRuntimeCompatibility(value.runtime_compatibility) &&
     value.publication_allowed === false &&
-    isStringArray(value.deny_rules)
+    isStringArray(value.deny_rules) &&
+    (value.official_context === undefined ||
+      isOfficialPolicyContext(value.official_context))
   );
 }
 
@@ -717,8 +904,10 @@ function isInstallation(value: unknown): value is AgentInstallation {
       [
         "activated_at",
         "archived_at",
+        "official_release_id",
         "policy_snapshot_id",
         "runtime_profile_id",
+        "selected_release_revision_id",
       ],
     ) &&
     isUUID(value.id) &&
@@ -728,7 +917,16 @@ function isInstallation(value: unknown): value is AgentInstallation {
       isUUID(value.runtime_profile_id)) &&
     (value.policy_snapshot_id === undefined ||
       isUUID(value.policy_snapshot_id)) &&
-    value.update_policy === "manual" &&
+    (value.official_release_id === undefined ||
+      isCanonicalUUID(value.official_release_id)) &&
+    (value.selected_release_revision_id === undefined ||
+      isCanonicalUUID(value.selected_release_revision_id)) &&
+    ((value.update_policy === "manual" &&
+      value.official_release_id === undefined &&
+      value.selected_release_revision_id === undefined) ||
+      (value.update_policy === "managed" &&
+        value.official_release_id !== undefined &&
+        value.selected_release_revision_id !== undefined)) &&
     (value.status === "pending" ||
       value.status === "active" ||
       value.status === "archived") &&
@@ -1058,6 +1256,38 @@ function isInstallationCreation(
   );
 }
 
+function isCreateInstallationRequest(
+  value: unknown,
+): value is CreateAgentInstallationRequest {
+  if (!isObject(value)) return false;
+  if (Object.hasOwn(value, "official_release_revision_id")) {
+    return (
+      hasExactFields(value, [
+        "definition_id",
+        "official_release_revision_id",
+      ]) &&
+      isCanonicalUUID(value.definition_id) &&
+      isCanonicalUUID(value.official_release_revision_id)
+    );
+  }
+  if (
+    !hasExactFields(
+      value,
+      ["definition_id", "version_id"],
+      ["organization_id", "workspace_id"],
+    ) ||
+    !isUUID(value.definition_id) ||
+    !isUUID(value.version_id) ||
+    (value.workspace_id !== undefined && !isUUID(value.workspace_id)) ||
+    (value.organization_id !== undefined && !isUUID(value.organization_id))
+  ) {
+    return false;
+  }
+  return !(
+    value.workspace_id !== undefined && value.organization_id !== undefined
+  );
+}
+
 function isRevocation(value: unknown): value is AgentVersionRevocation {
   return (
     hasExactFields(
@@ -1085,21 +1315,27 @@ function isRevocation(value: unknown): value is AgentVersionRevocation {
 
 function isRuntimeBinding(value: unknown): value is RuntimeBindingRecord {
   return (
-    hasExactFields(value, [
-      "agent_installation_id",
-      "agent_version_id",
-      "created_at",
-      "id",
-      "policy_snapshot_id",
-      "runtime_profile_id",
-      "runtime_version",
-      "tool_permission_digest",
-    ]) &&
+    hasExactFields(
+      value,
+      [
+        "agent_installation_id",
+        "agent_version_id",
+        "created_at",
+        "id",
+        "policy_snapshot_id",
+        "runtime_profile_id",
+        "runtime_version",
+        "tool_permission_digest",
+      ],
+      ["official_release_revision_id"],
+    ) &&
     isUUID(value.id) &&
     isUUID(value.agent_installation_id) &&
     isUUID(value.agent_version_id) &&
     isUUID(value.runtime_profile_id) &&
     isUUID(value.policy_snapshot_id) &&
+    (value.official_release_revision_id === undefined ||
+      isCanonicalUUID(value.official_release_revision_id)) &&
     isBoundedString(value.runtime_version, 1, 64) &&
     isDigest(value.tool_permission_digest) &&
     isTimestamp(value.created_at)
@@ -1303,6 +1539,9 @@ export class AgenteraAgentControlClient {
   private readonly fetcher: typeof fetch;
   private readonly timeoutMs: number;
   private readonly now: () => Date;
+  private readonly officialAgentChannel: OfficialAgentChannel | null;
+  private readonly desktopVersion: string | null;
+  private readonly getAgentContext: (() => AgenteraAgentControlContext) | null;
 
   constructor(options: AgenteraAgentControlClientOptions) {
     this.origin = parseAgenteraCloudOrigin(options.origin);
@@ -1311,13 +1550,32 @@ export class AgenteraAgentControlClient {
     this.fetcher = options.fetch ?? globalThis.fetch;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.now = options.now ?? (() => new Date());
+    const hasOfficialConfiguration =
+      options.officialAgentChannel !== undefined ||
+      options.desktopVersion !== undefined ||
+      options.getAgentContext !== undefined;
+    const hasCompleteOfficialConfiguration =
+      (options.officialAgentChannel === "internal" ||
+        options.officialAgentChannel === "stable") &&
+      isDesktopVersion(options.desktopVersion) &&
+      typeof options.getAgentContext === "function";
+    this.officialAgentChannel = hasCompleteOfficialConfiguration
+      ? (options.officialAgentChannel as OfficialAgentChannel)
+      : null;
+    this.desktopVersion = hasCompleteOfficialConfiguration
+      ? (options.desktopVersion as string)
+      : null;
+    this.getAgentContext = hasCompleteOfficialConfiguration
+      ? (options.getAgentContext as () => AgenteraAgentControlContext)
+      : null;
     if (
       typeof this.getAccessToken !== "function" ||
       typeof this.getInstallationIdentity !== "function" ||
       typeof this.fetcher !== "function" ||
       !Number.isInteger(this.timeoutMs) ||
       this.timeoutMs < 1 ||
-      this.timeoutMs > 120_000
+      this.timeoutMs > 120_000 ||
+      (hasOfficialConfiguration && !hasCompleteOfficialConfiguration)
     ) {
       throw new Error(
         "AgentEra Agent control client configuration is invalid.",
@@ -1585,6 +1843,123 @@ export class AgenteraAgentControlClient {
     );
   }
 
+  async listOfficialAgents(): Promise<OfficialAgentSummary[]> {
+    const channel = this.requireOfficialConfiguration().channel;
+    const value = await this.requestJSON(
+      "/api/v1/official-agents",
+      { expectedStatus: 200, official: true },
+      (
+        candidate,
+      ): candidate is {
+        official_agents: readonly WireOfficialAgentSummary[];
+      } =>
+        hasExactFields(candidate, ["official_agents"]) &&
+        Array.isArray(candidate.official_agents) &&
+        candidate.official_agents.length <= 100 &&
+        candidate.official_agents.every(isOfficialAgentSummary),
+    );
+    if (value.official_agents.some((agent) => agent.channel !== channel)) {
+      throw new AgenteraAgentControlClientError(0, "invalid_response");
+    }
+    return value.official_agents.map(detachOfficialAgentSummary);
+  }
+
+  async getOfficialAgent(definitionId: string): Promise<{
+    agent: OfficialAgentSummary;
+    version: AgentVersion;
+  }> {
+    requireCanonicalUUID(definitionId);
+    const channel = this.requireOfficialConfiguration().channel;
+    const value = await this.requestJSON(
+      `/api/v1/official-agents/${definitionId}`,
+      { expectedStatus: 200, official: true },
+      isOfficialAgentDetail,
+    );
+    if (
+      value.agent.definition_id !== definitionId ||
+      value.agent.channel !== channel
+    ) {
+      throw new AgenteraAgentControlClientError(0, "invalid_response");
+    }
+    return {
+      agent: detachOfficialAgentSummary(value.agent),
+      version: structuredClone(value.version),
+    };
+  }
+
+  async getOfficialRelease(
+    definitionId: string,
+  ): Promise<OfficialAgentSummary> {
+    requireCanonicalUUID(definitionId);
+    const channel = this.requireOfficialConfiguration().channel;
+    const value = await this.requestJSON(
+      `/api/v1/official-agents/${definitionId}/release`,
+      { expectedStatus: 200, official: true },
+      isOfficialAgentSummary,
+    );
+    if (value.definition_id !== definitionId || value.channel !== channel) {
+      throw new AgenteraAgentControlClientError(0, "invalid_response");
+    }
+    return detachOfficialAgentSummary(value);
+  }
+
+  async getManagedUpdate(
+    installationId: string,
+  ): Promise<OfficialManagedUpdate | null> {
+    requireCanonicalUUID(installationId);
+    const value = await this.requestJSON(
+      `/api/v1/agent-installations/${installationId}/managed-update`,
+      { expectedStatus: 200, official: true },
+      isOfficialManagedUpdateResponse,
+    );
+    if (!value.update_available) return null;
+    if (value.installation_id !== installationId) {
+      throw new AgenteraAgentControlClientError(0, "invalid_response");
+    }
+    return {
+      installationId: value.installation_id,
+      expectedSelectedReleaseRevisionId:
+        value.expected_selected_release_revision_id,
+      targetReleaseRevisionId: value.target_release_revision_id,
+      targetVersionId: value.target_version_id,
+    };
+  }
+
+  async applyManagedUpdate(
+    installationId: string,
+    expectedSelectedReleaseRevisionId: string,
+    targetReleaseRevisionId: string,
+    idempotencyKey: string,
+  ): Promise<AgentInstallation> {
+    requireCanonicalUUID(installationId);
+    requireCanonicalUUID(expectedSelectedReleaseRevisionId);
+    requireCanonicalUUID(targetReleaseRevisionId);
+    requireIdempotencyKey(idempotencyKey);
+    const body: components["schemas"]["ApplyManagedOfficialUpdateRequest"] = {
+      expected_selected_release_revision_id: expectedSelectedReleaseRevisionId,
+      target_release_revision_id: targetReleaseRevisionId,
+    };
+    const value = await this.requestJSON(
+      `/api/v1/agent-installations/${installationId}/apply-managed-update`,
+      {
+        method: "POST",
+        body,
+        idempotencyKey,
+        expectedStatus: 200,
+        official: true,
+      },
+      isInstallation,
+    );
+    if (
+      value.id !== installationId ||
+      value.update_policy !== "managed" ||
+      value.selected_release_revision_id !== targetReleaseRevisionId
+    ) {
+      throw new AgenteraAgentControlClientError(0, "invalid_response");
+    }
+    return value;
+  }
+
   publishInitial(
     body: PublishInitialAgentRequest,
     idempotencyKey: string,
@@ -1655,14 +2030,24 @@ export class AgenteraAgentControlClient {
     );
   }
 
-  createInstallation(
+  async createInstallation(
     body: CreateAgentInstallationRequest,
     idempotencyKey: string,
   ): Promise<AgentInstallationCreation> {
     requireIdempotencyKey(idempotencyKey);
+    if (!isCreateInstallationRequest(body)) {
+      throw new AgenteraAgentControlClientError(0, "invalid_request");
+    }
+    const official = Object.hasOwn(body, "official_release_revision_id");
     return this.requestJSON(
       "/api/v1/agent-installations",
-      { method: "POST", body, idempotencyKey, expectedStatus: 201 },
+      {
+        method: "POST",
+        body,
+        idempotencyKey,
+        expectedStatus: 201,
+        official,
+      },
       isInstallationCreation,
     );
   }
@@ -1915,6 +2300,9 @@ export class AgenteraAgentControlClient {
     if (options.idempotencyKey !== undefined) {
       headers["idempotency-key"] = options.idempotencyKey;
     }
+    if (options.official === true) {
+      Object.assign(headers, this.officialRequestHeaders());
+    }
 
     const controller = new AbortController();
     let timedOut = false;
@@ -1941,5 +2329,63 @@ export class AgenteraAgentControlClient {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  private requireOfficialConfiguration(): {
+    channel: OfficialAgentChannel;
+    desktopVersion: string;
+    getContext: () => AgenteraAgentControlContext;
+  } {
+    if (
+      this.officialAgentChannel === null ||
+      this.desktopVersion === null ||
+      this.getAgentContext === null
+    ) {
+      throw new AgenteraAgentControlClientError(0, "invalid_request");
+    }
+    return {
+      channel: this.officialAgentChannel,
+      desktopVersion: this.desktopVersion,
+      getContext: this.getAgentContext,
+    };
+  }
+
+  private officialRequestHeaders(): Record<string, string> {
+    const configuration = this.requireOfficialConfiguration();
+    const context = configuration.getContext();
+    const headers: Record<string, string> = {
+      "x-agentera-official-channel": configuration.channel,
+      "x-agentera-desktop-version": configuration.desktopVersion,
+    };
+    if (hasExactFields(context, ["scope"]) && context.scope === "USER") {
+      headers["x-agentera-product-context"] = "USER";
+      return headers;
+    }
+    if (
+      hasExactFields(context, ["role", "scope", "workspaceId"]) &&
+      context.scope === "WORKSPACE" &&
+      isCanonicalUUID(context.workspaceId) &&
+      (context.role === "owner" ||
+        context.role === "admin" ||
+        context.role === "member")
+    ) {
+      headers["x-agentera-product-context"] = "WORKSPACE";
+      headers["x-agentera-product-context-id"] = context.workspaceId;
+      return headers;
+    }
+    if (
+      hasExactFields(context, ["organizationId", "role", "scope"]) &&
+      context.scope === "ORGANIZATION" &&
+      isCanonicalUUID(context.organizationId) &&
+      (context.role === "owner" ||
+        context.role === "admin" ||
+        context.role === "auditor" ||
+        context.role === "member")
+    ) {
+      headers["x-agentera-product-context"] = "ORGANIZATION";
+      headers["x-agentera-product-context-id"] = context.organizationId;
+      return headers;
+    }
+    throw new AgenteraAgentControlClientError(0, "invalid_request");
   }
 }

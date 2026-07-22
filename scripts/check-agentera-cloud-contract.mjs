@@ -25,8 +25,10 @@ const REQUIRED_PATHS = [
   "/api/v1/agent-definitions/{definition_id}",
   "/api/v1/agent-definitions/{definition_id}/versions",
   "/api/v1/agent-installations",
+  "/api/v1/agent-installations/{installation_id}/apply-managed-update",
   "/api/v1/agent-installations/{installation_id}/activate",
   "/api/v1/agent-installations/{installation_id}/archive",
+  "/api/v1/agent-installations/{installation_id}/managed-update",
   "/api/v1/agent-installations/{installation_id}/select-version",
   "/api/v1/agent-versions/{version_id}",
   "/api/v1/agent-versions/{version_id}/revocations",
@@ -69,6 +71,9 @@ const REQUIRED_PATHS = [
   "/api/v1/organizations/{organization_id}/policy",
   "/api/v1/organizations/{organization_id}/policy-snapshots",
   "/api/v1/organizations/{organization_id}/restore",
+  "/api/v1/official-agents",
+  "/api/v1/official-agents/{definition_id}",
+  "/api/v1/official-agents/{definition_id}/release",
   "/api/v1/runtime-binding-records",
   "/api/v1/verification/challenges",
   "/api/v1/verification/challenges/verify",
@@ -114,6 +119,7 @@ const ERROR_CODES = [
   "authorization_replayed",
   "candidate_already_reviewed",
   "candidate_dlp_blocked",
+  "cloud_unavailable",
   "definition_archived",
   "deletion_window_expired",
   "device_limit_reached",
@@ -137,6 +143,12 @@ const ERROR_CODES = [
   "organization_submission_conflict",
   "organization_submission_self_review",
   "organization_submission_superseded",
+  "official_agent_not_eligible",
+  "official_client_version_unsupported",
+  "official_installation_policy_blocked",
+  "official_managed_update_conflict",
+  "official_release_paused",
+  "official_release_revision_conflict",
   "invitation_limit_reached",
   "invitation_unavailable",
   "member_limit_reached",
@@ -162,7 +174,6 @@ const AGENT_SCHEMAS = [
   "AgentInstallation",
   "AgentPolicySnapshot",
   "AgentVersion",
-  "CreateAgentInstallationRequest",
   "PublishInitialAgentRequest",
   "PublishNextAgentVersionRequest",
   "RuntimeBindingRecord",
@@ -287,6 +298,76 @@ const ORGANIZATION_AGENT_OPERATIONS = [
     "post",
     ["200", "400", "401", "403", "404", "409", "422", "503"],
   ],
+];
+
+const OFFICIAL_AGENT_SCHEMA_PROPERTIES = {
+  OfficialAgentSummary: [
+    "channel",
+    "definition_id",
+    "display_name",
+    "icon_data",
+    "icon_media_type",
+    "installation_state",
+    "official",
+    "release_id",
+    "release_revision_id",
+    "runtime_maximum_version_exclusive",
+    "runtime_minimum_version",
+    "update_state",
+    "version_id",
+    "version_number",
+  ],
+  OfficialAgentListResponse: ["official_agents"],
+  OfficialAgentDetail: ["agent", "version"],
+  ApplyManagedOfficialUpdateRequest: [
+    "expected_selected_release_revision_id",
+    "target_release_revision_id",
+  ],
+  OfficialAgentInstallationSource: [
+    "definition_id",
+    "official_release_revision_id",
+  ],
+  NormalAgentInstallationSource: [
+    "definition_id",
+    "organization_id",
+    "version_id",
+    "workspace_id",
+  ],
+};
+
+const OFFICIAL_AGENT_OPERATIONS = [
+  [
+    "/api/v1/official-agents",
+    "get",
+    ["200", "400", "401", "403", "409", "422", "503"],
+  ],
+  [
+    "/api/v1/official-agents/{definition_id}",
+    "get",
+    ["200", "400", "401", "403", "409", "422", "503"],
+  ],
+  [
+    "/api/v1/official-agents/{definition_id}/release",
+    "get",
+    ["200", "400", "401", "403", "409", "422", "503"],
+  ],
+  [
+    "/api/v1/agent-installations/{installation_id}/managed-update",
+    "get",
+    ["200", "400", "401", "403", "404", "409", "422", "503"],
+  ],
+  [
+    "/api/v1/agent-installations/{installation_id}/apply-managed-update",
+    "post",
+    ["200", "400", "401", "403", "404", "409", "413", "422", "503"],
+  ],
+];
+
+const OFFICIAL_HEADER_REFS = [
+  "#/components/parameters/OfficialAgentChannel",
+  "#/components/parameters/OfficialDesktopVersion",
+  "#/components/parameters/OfficialProductContext",
+  "#/components/parameters/OfficialProductContextID",
 ];
 
 const ORGANIZATION_ERROR_CODES = [
@@ -798,7 +879,7 @@ function validateCriticalContract(document) {
   if (document.openapi !== "3.0.3") {
     fail(`OpenAPI dialect changed: ${String(document.openapi)}`);
   }
-  if (document.info?.version !== "0.7.0") {
+  if (document.info?.version !== "0.8.0") {
     fail(`OpenAPI version changed: ${String(document.info?.version)}`);
   }
   const paths = object(document.paths, "paths");
@@ -862,26 +943,32 @@ function validateCriticalContract(document) {
     "CreateAgentInstallationRequest",
   );
   exactMembers(
-    installationRequest.required ?? [],
-    ["definition_id", "version_id"],
-    "CreateAgentInstallationRequest.required",
+    (installationRequest.oneOf ?? []).map((arm) => arm?.$ref),
+    [
+      "#/components/schemas/NormalAgentInstallationSource",
+      "#/components/schemas/OfficialAgentInstallationSource",
+    ],
+    "CreateAgentInstallationRequest.oneOf",
+  );
+  const normalInstallationSource = object(
+    schemas.NormalAgentInstallationSource,
+    "NormalAgentInstallationSource",
   );
   exactMembers(
-    Object.keys(
-      object(
-        installationRequest.properties,
-        "CreateAgentInstallationRequest.properties",
-      ),
-    ),
-    ["definition_id", "organization_id", "version_id", "workspace_id"],
-    "CreateAgentInstallationRequest.properties",
+    normalInstallationSource.required ?? [],
+    ["definition_id", "version_id"],
+    "NormalAgentInstallationSource.required",
+  );
+  const normalInstallationProperties = object(
+    normalInstallationSource.properties,
+    "NormalAgentInstallationSource.properties",
   );
   for (const sourceField of ["workspace_id", "organization_id"]) {
     if (
-      installationRequest.properties[sourceField]?.type !== "string" ||
-      installationRequest.properties[sourceField]?.format !== "uuid"
+      normalInstallationProperties[sourceField]?.type !== "string" ||
+      normalInstallationProperties[sourceField]?.format !== "uuid"
     ) {
-      fail(`CreateAgentInstallationRequest.${sourceField} changed`);
+      fail(`NormalAgentInstallationSource.${sourceField} changed`);
     }
   }
   const expectedInstallationSourceUnion = [
@@ -903,10 +990,83 @@ function validateCriticalContract(document) {
     },
   ];
   if (
-    JSON.stringify(installationRequest.oneOf) !==
+    JSON.stringify(normalInstallationSource.oneOf) !==
     JSON.stringify(expectedInstallationSourceUnion)
   ) {
-    fail("CreateAgentInstallationRequest source union changed");
+    fail("NormalAgentInstallationSource source union changed");
+  }
+
+  for (const [schemaName, expectedProperties] of Object.entries(
+    OFFICIAL_AGENT_SCHEMA_PROPERTIES,
+  )) {
+    const schema = object(schemas[schemaName], schemaName);
+    if (schema.type !== "object" || schema.additionalProperties !== false) {
+      fail(`${schemaName} is no longer a strict object`);
+    }
+    exactMembers(
+      Object.keys(object(schema.properties, `${schemaName}.properties`)),
+      expectedProperties,
+      `${schemaName}.properties`,
+    );
+  }
+  exactMembers(
+    schemas.OfficialAgentInstallationSource.required ?? [],
+    ["definition_id", "official_release_revision_id"],
+    "OfficialAgentInstallationSource.required",
+  );
+  exactMembers(
+    schemas.ApplyManagedOfficialUpdateRequest.required ?? [],
+    ["expected_selected_release_revision_id", "target_release_revision_id"],
+    "ApplyManagedOfficialUpdateRequest.required",
+  );
+  const managedUpdate = object(
+    schemas.OfficialManagedUpdateResponse,
+    "OfficialManagedUpdateResponse",
+  );
+  if (!Array.isArray(managedUpdate.oneOf) || managedUpdate.oneOf.length !== 2) {
+    fail("OfficialManagedUpdateResponse union changed");
+  }
+  for (const [index, arm] of managedUpdate.oneOf.entries()) {
+    if (arm?.type !== "object" || arm?.additionalProperties !== false) {
+      fail(`OfficialManagedUpdateResponse.oneOf[${index}] is not strict`);
+    }
+  }
+  exactMembers(
+    managedUpdate.oneOf[0].required ?? [],
+    ["update_available"],
+    "OfficialManagedUpdateResponse.no-update.required",
+  );
+  exactMembers(
+    managedUpdate.oneOf[1].required ?? [],
+    [
+      "expected_selected_release_revision_id",
+      "installation_id",
+      "runtime_minimum_version",
+      "target_release_revision_id",
+      "target_version_id",
+      "update_available",
+    ],
+    "OfficialManagedUpdateResponse.update.required",
+  );
+  const officialPublicSchemas = JSON.stringify({
+    detail: schemas.OfficialAgentDetail,
+    list: schemas.OfficialAgentListResponse,
+    managedUpdate: schemas.OfficialManagedUpdateResponse,
+    summary: schemas.OfficialAgentSummary,
+  }).toLowerCase();
+  for (const field of [
+    "allowlist",
+    "bucket",
+    "device_id",
+    "platform_id",
+    "profile",
+    "rollout_key",
+    "session",
+    "user_id",
+  ]) {
+    if (officialPublicSchemas.includes(`"${field}"`)) {
+      fail(`Official catalog schemas exposed private field ${field}`);
+    }
   }
 
   for (const [schemaName, expectedProperties] of Object.entries(
@@ -1386,6 +1546,64 @@ function validateCriticalContract(document) {
     ) {
       fail(`${path}.${method} no longer uses only the desktop access token`);
     }
+  }
+  for (const [path, method, statuses] of OFFICIAL_AGENT_OPERATIONS) {
+    const operation = object(
+      object(paths[path], path)[method],
+      `${path}.${method}`,
+    );
+    exactMembers(
+      Object.keys(object(operation.responses, `${path}.${method}.responses`)),
+      statuses,
+      `${path}.${method}.responses`,
+    );
+    if (
+      JSON.stringify(operation.security) !==
+      JSON.stringify([{ desktopAccessToken: [] }])
+    ) {
+      fail(`${path}.${method} no longer uses only the desktop access token`);
+    }
+    const headerRefs = (operation.parameters ?? [])
+      .map((parameter) => parameter?.$ref)
+      .filter((reference) => OFFICIAL_HEADER_REFS.includes(reference));
+    exactMembers(headerRefs, OFFICIAL_HEADER_REFS, `${path}.${method}.headers`);
+  }
+  const createInstallationParameterRefs = object(
+    object(paths["/api/v1/agent-installations"], "/api/v1/agent-installations")
+      .post,
+    "/api/v1/agent-installations.post",
+  ).parameters.map((parameter) => parameter?.$ref);
+  exactMembers(
+    createInstallationParameterRefs,
+    [
+      "#/components/parameters/IdempotencyKey",
+      "#/components/parameters/OfficialProductContextID",
+      "#/components/parameters/OptionalOfficialAgentChannel",
+      "#/components/parameters/OptionalOfficialDesktopVersion",
+      "#/components/parameters/OptionalOfficialProductContext",
+    ],
+    "/api/v1/agent-installations.post.parameters",
+  );
+  const applyManagedUpdateParameters = object(
+    object(
+      paths[
+        "/api/v1/agent-installations/{installation_id}/apply-managed-update"
+      ],
+      "/api/v1/agent-installations/{installation_id}/apply-managed-update",
+    ).post,
+    "/api/v1/agent-installations/{installation_id}/apply-managed-update.post",
+  ).parameters;
+  if (
+    !Array.isArray(applyManagedUpdateParameters) ||
+    !applyManagedUpdateParameters.some(
+      (parameter) =>
+        parameter?.$ref === "#/components/parameters/IdempotencyKey",
+    )
+  ) {
+    fail("apply managed update is missing Idempotency-Key");
+  }
+  if (Object.keys(paths).some((path) => path.startsWith("/internal/"))) {
+    fail("public contract exposed an Internal Admin endpoint");
   }
   for (const path of [
     "/api/v1/organizations/{organization_id}/agent-definitions",

@@ -55,6 +55,7 @@ import {
 } from "../agentera-agent-control/db";
 import { AgenteraAgentControlClient } from "../agentera-agent-control/client";
 import { AgenteraAgentControlManager } from "../agentera-agent-control/manager";
+import { resolveOfficialAgentChannel } from "../agentera-agent-control/official-channel";
 import {
   openAgenteraWorkspaceDatabase,
   type AgenteraWorkspaceDatabase,
@@ -302,6 +303,13 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
       origin: getAgenteraCloudOrigin(),
       getAccessToken: () => agenteraAuth.getAccessTokenForCloudRequest(),
       getInstallationIdentity: () => agenteraAuthStore.getInstallation(),
+      officialAgentChannel: resolveOfficialAgentChannel({
+        isPackaged: app.isPackaged,
+        environment: process.env,
+      }),
+      desktopVersion: app.getVersion(),
+      getAgentContext: () =>
+        agenteraProductSpace?.getAgentContext() ?? { scope: "USER" },
     });
     agenteraAgentControl = new AgenteraAgentControlManager({
       database: agenteraAgentControlDatabase,

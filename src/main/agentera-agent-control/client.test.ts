@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import type { components } from "../../shared/agentera-cloud-api.generated";
 import type { InstallationIdentity } from "../agentera-auth/store";
 import {
   AgenteraAgentControlClient,
@@ -16,6 +17,7 @@ import {
   type AgentDefinition,
   type AgentInstallation,
   type AgentPolicySnapshot,
+  type AgentVersion,
   type CloudExperienceCandidateBundle,
   type CloudExperienceCandidateDetail,
   type CloudExperienceCandidateSummary,
@@ -36,6 +38,10 @@ const USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const ORGANIZATION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const SUBMISSION_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const ORGANIZATION_POLICY_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const RELEASE_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+const RELEASE_REVISION_ID = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+const TARGET_RELEASE_REVISION_ID = "12121212-1212-4212-8212-121212121212";
+const TARGET_VERSION_ID = "13131313-1313-4313-8313-131313131313";
 const VERSION_DIGEST = "ab".repeat(32);
 const NOW = new Date("2026-07-19T16:00:00.000Z");
 const SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
@@ -70,6 +76,61 @@ function installation(): AgentInstallation {
     created_at: NOW.toISOString(),
     updated_at: NOW.toISOString(),
     activated_at: NOW.toISOString(),
+  };
+}
+
+function officialSummary(): components["schemas"]["OfficialAgentSummary"] {
+  return {
+    definition_id: DEFINITION_ID,
+    display_name: "Official Research Agent",
+    official: true as const,
+    version_id: VERSION_ID,
+    version_number: 1,
+    release_id: RELEASE_ID,
+    release_revision_id: RELEASE_REVISION_ID,
+    channel: "internal" as const,
+    runtime_minimum_version: "v0.18.2-agentera.1",
+    installation_state: "not_installed" as const,
+    update_state: "current" as const,
+  };
+}
+
+function agentVersion(): AgentVersion {
+  return {
+    id: VERSION_ID,
+    definition_id: DEFINITION_ID,
+    version_number: 1,
+    manifest: {
+      schema_version: 1,
+      identity: { system_prompt: "Official research only." },
+      assets: [],
+      model_constraints: {
+        allowed_providers: ["openai"],
+        allowed_models: ["gpt-5.6"],
+      },
+      tools: { allowed: [], denied: [] },
+      dependencies: [],
+      runtime_compatibility: {
+        minimum_version: "v0.18.2-agentera.1",
+        maximum_version_exclusive: null,
+      },
+    },
+    bundle: { assets: [] },
+    content_digest: VERSION_DIGEST,
+    signing_key_id: "official-agent-version-v1",
+    signature: "A".repeat(86),
+    runtime_minimum_version: "v0.18.2-agentera.1",
+    published_at: NOW.toISOString(),
+  };
+}
+
+function managedInstallation(): AgentInstallation {
+  return {
+    ...installation(),
+    selected_version_id: TARGET_VERSION_ID,
+    official_release_id: RELEASE_ID,
+    selected_release_revision_id: TARGET_RELEASE_REVISION_ID,
+    update_policy: "managed",
   };
 }
 
@@ -1016,6 +1077,192 @@ describe("AgenteraAgentControlClient", () => {
         ).rejects.toMatchObject({ status, code });
       },
     );
+  });
+
+  it("uses only trusted main-process headers for the official catalog", async () => {
+    const fetcher = vi.fn(async () =>
+      jsonResponse({ official_agents: [officialSummary()] }),
+    );
+    const client = new AgenteraAgentControlClient({
+      origin: "http://127.0.0.1:8086",
+      getAccessToken: () => "agentera-product-access",
+      getInstallationIdentity: () => deviceIdentity(),
+      officialAgentChannel: "internal",
+      desktopVersion: "0.7.3",
+      getAgentContext: () => ({ scope: "USER" }),
+      fetch: fetcher as typeof fetch,
+    });
+
+    await expect(client.listOfficialAgents()).resolves.toEqual([
+      {
+        definitionId: DEFINITION_ID,
+        displayName: "Official Research Agent",
+        iconMediaType: null,
+        iconDataBase64Url: null,
+        versionId: VERSION_ID,
+        versionNumber: 1,
+        releaseId: RELEASE_ID,
+        releaseRevisionId: RELEASE_REVISION_ID,
+        channel: "internal",
+        runtimeMinimumVersion: "v0.18.2-agentera.1",
+        runtimeMaximumVersionExclusive: null,
+        installationState: "not_installed",
+        updateState: "current",
+      },
+    ]);
+    const [url, init] = fetcher.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    const headers = new Headers(init?.headers);
+    expect(String(url)).toBe("http://127.0.0.1:8086/api/v1/official-agents");
+    expect(headers.get("x-agentera-official-channel")).toBe("internal");
+    expect(headers.get("x-agentera-desktop-version")).toBe("0.7.3");
+    expect(headers.get("x-agentera-product-context")).toBe("USER");
+    expect(headers.has("x-agentera-product-context-id")).toBe(false);
+  });
+
+  it("binds official requests to the selected shared context and rejects private response fields", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ official_agents: [] }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          official_agents: [
+            { ...officialSummary(), platform_id: "must-not-cross" },
+          ],
+        }),
+      );
+    const client = new AgenteraAgentControlClient({
+      origin: "http://127.0.0.1:8086",
+      getAccessToken: () => "agentera-product-access",
+      getInstallationIdentity: () => deviceIdentity(),
+      officialAgentChannel: "stable",
+      desktopVersion: "v0.7.3",
+      getAgentContext: () => ({
+        scope: "WORKSPACE",
+        workspaceId: WORKSPACE_ID,
+        role: "member",
+      }),
+      fetch: fetcher as typeof fetch,
+    });
+
+    await expect(client.listOfficialAgents()).resolves.toEqual([]);
+    const headers = new Headers(fetcher.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("x-agentera-product-context")).toBe("WORKSPACE");
+    expect(headers.get("x-agentera-product-context-id")).toBe(WORKSPACE_ID);
+    await expect(client.listOfficialAgents()).rejects.toMatchObject({
+      code: "invalid_response",
+    });
+  });
+
+  it("parses exact official detail, release, managed target, and apply responses", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ agent: officialSummary(), version: agentVersion() }),
+      )
+      .mockResolvedValueOnce(jsonResponse(officialSummary()))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          update_available: true,
+          installation_id: INSTALLATION_ID,
+          expected_selected_release_revision_id: RELEASE_REVISION_ID,
+          target_release_revision_id: TARGET_RELEASE_REVISION_ID,
+          target_version_id: TARGET_VERSION_ID,
+          runtime_minimum_version: "v0.18.2-agentera.1",
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(managedInstallation()));
+    const client = new AgenteraAgentControlClient({
+      origin: "http://127.0.0.1:8086",
+      getAccessToken: () => "agentera-product-access",
+      getInstallationIdentity: () => deviceIdentity(),
+      officialAgentChannel: "internal",
+      desktopVersion: "0.7.3",
+      getAgentContext: () => ({ scope: "USER" }),
+      fetch: fetcher as typeof fetch,
+    });
+
+    await expect(client.getOfficialAgent(DEFINITION_ID)).resolves.toEqual({
+      agent: expect.objectContaining({ definitionId: DEFINITION_ID }),
+      version: agentVersion(),
+    });
+    await expect(client.getOfficialRelease(DEFINITION_ID)).resolves.toEqual(
+      expect.objectContaining({ releaseRevisionId: RELEASE_REVISION_ID }),
+    );
+    await expect(client.getManagedUpdate(INSTALLATION_ID)).resolves.toEqual({
+      installationId: INSTALLATION_ID,
+      expectedSelectedReleaseRevisionId: RELEASE_REVISION_ID,
+      targetReleaseRevisionId: TARGET_RELEASE_REVISION_ID,
+      targetVersionId: TARGET_VERSION_ID,
+    });
+    await expect(
+      client.applyManagedUpdate(
+        INSTALLATION_ID,
+        RELEASE_REVISION_ID,
+        TARGET_RELEASE_REVISION_ID,
+        "official-managed-update-once",
+      ),
+    ).resolves.toEqual(managedInstallation());
+    expect(JSON.parse(String(fetcher.mock.calls[3]?.[1]?.body))).toEqual({
+      expected_selected_release_revision_id: RELEASE_REVISION_ID,
+      target_release_revision_id: TARGET_RELEASE_REVISION_ID,
+    });
+  });
+
+  it("adds official headers only for the strict official Installation source", async () => {
+    const fetcher = vi.fn(async () =>
+      jsonResponse(
+        {
+          error: {
+            code: "official_agent_not_eligible",
+            message: "localized by the client",
+            request_id: PROFILE_ID,
+          },
+        },
+        403,
+      ),
+    );
+    const client = new AgenteraAgentControlClient({
+      origin: "http://127.0.0.1:8086",
+      getAccessToken: () => "agentera-product-access",
+      getInstallationIdentity: () => deviceIdentity(),
+      officialAgentChannel: "stable",
+      desktopVersion: "0.7.3",
+      getAgentContext: () => ({ scope: "USER" }),
+      fetch: fetcher as typeof fetch,
+    });
+
+    await expect(
+      client.createInstallation(
+        {
+          definition_id: DEFINITION_ID,
+          official_release_revision_id: RELEASE_REVISION_ID,
+        },
+        "official-install-once",
+      ),
+    ).rejects.toMatchObject({
+      status: 403,
+      code: "official_agent_not_eligible",
+    });
+    expect(
+      new Headers(
+        (fetcher.mock.calls[0] as unknown as [string, RequestInit])[1].headers,
+      ).get("x-agentera-official-channel"),
+    ).toBe("stable");
+
+    await expect(
+      client.createInstallation(
+        {
+          definition_id: DEFINITION_ID,
+          official_release_revision_id: RELEASE_REVISION_ID,
+          version_id: VERSION_ID,
+        } as never,
+        "official-install-mixed",
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   it("is structurally separate from Hermes One Agent sync", () => {

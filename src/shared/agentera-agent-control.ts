@@ -1,6 +1,30 @@
 export type AgentDraftAssetKind = "skill" | "sop" | "knowledge";
 export type AgentDraftAssetMediaType = "text/markdown" | "text/plain";
 export type AgentDraftIconMediaType = "image/png" | "image/webp";
+export type OfficialAgentChannel = "internal" | "stable";
+
+export interface OfficialAgentSummary {
+  definitionId: string;
+  displayName: string;
+  iconMediaType: "image/png" | "image/webp" | null;
+  iconDataBase64Url: string | null;
+  versionId: string;
+  versionNumber: number;
+  releaseId: string;
+  releaseRevisionId: string;
+  channel: OfficialAgentChannel;
+  runtimeMinimumVersion: string;
+  runtimeMaximumVersionExclusive: string | null;
+  installationState: "not_installed" | "installed";
+  updateState: "current" | "update_available";
+}
+
+export interface OfficialManagedUpdate {
+  installationId: string;
+  expectedSelectedReleaseRevisionId: string;
+  targetReleaseRevisionId: string;
+  targetVersionId: string;
+}
 
 export interface AgentEditableManifestAsset {
   path: string;
