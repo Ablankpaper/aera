@@ -34,6 +34,16 @@ Consent defaults off independently for passive quality and explicit feedback. An
 
 Task 6 local evidence is `src/main/agentera-official-quality/{db,model,minimizer}.test.ts`: 31 focused tests cover path isolation, permissions, schema shape, default-off consent, strict canonical serialization, bucket boundaries, replay safety, expiry, and future-schema refusal. This is local feature-branch evidence only; it is not a push, deployment, collection rollout, or production consent grant.
 
+### Trusted terminal collection
+
+Quality observation attaches after the installed Agent turn has already fixed its local RuntimeBinding and never changes the prompt, tool schema, Profile, session, or learning path.
+
+[[src/main/agentera-official-quality/collector.ts#createOfficialQualityBindingResolver]] accepts provenance only when the USER-owned local Installation is active, managed, PLATFORM-sourced, and matches the fixed binding plus verified policy snapshot. The content-discarding [[src/main/agentera-official-quality/collector.ts#createOfficialQualityChatObserver]] retains only bounded total tokens and one closed terminal classification; raw response, error, history, attachments, tool payloads, session identity, and paths never reach the collector or manager.
+
+[[src/main/agentera-official-quality/manager.ts#AgenteraOfficialQualityManager]] synchronizes purpose-specific consent before delivery, uploads only account/device-scoped due rows, retries transient failures with bounded exponential jitter, drops terminal privacy rejections, and purges old-account pending rows on logout. Collection and upload failures are swallowed at the quality boundary and cannot reject or delay the chat promise.
+
+The outbox remains capped at 1,000 events and drops the oldest passive metrics before explicit feedback. Expired rows are removed after thirty days, revocation immediately removes unsent rows for that purpose, and every Cloud request uses the product bearer token without placing it in IPC or logs.
+
 ## End-to-end encrypted backup V1
 
 Encrypted backup stores immutable ciphertext snapshots for one USER-owned Installation and physical Profile; it is not Agent sync or live multi-device state replication.

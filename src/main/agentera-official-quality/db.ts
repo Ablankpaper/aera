@@ -25,6 +25,7 @@ export const AGENTERA_OFFICIAL_QUALITY_SCHEMA_VERSION = 1;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const OUTBOX_RETENTION_MILLISECONDS = 30 * 24 * 60 * 60 * 1_000;
+const MAXIMUM_OUTBOX_EVENTS = 1_000;
 
 export interface AgenteraOfficialQualitySqliteRunResult {
   changes: number | bigint;
@@ -60,6 +61,15 @@ export interface EnqueueOfficialQualityInput {
   now?: Date;
 }
 
+export interface OfficialQualityOutboxEntry {
+  eventId: string;
+  purpose: OfficialQualityPurpose;
+  envelopeJson: string;
+  attemptCount: number;
+  createdAt: string;
+  expiresAt: string;
+}
+
 interface ConsentRow {
   enabled?: unknown;
   consent_version?: unknown;
@@ -72,6 +82,15 @@ interface ExistingOutboxRow {
   purpose?: unknown;
   consent_version?: unknown;
   envelope_json?: unknown;
+}
+
+interface OutboxRow {
+  event_id?: unknown;
+  purpose?: unknown;
+  envelope_json?: unknown;
+  attempt_count?: unknown;
+  created_at?: unknown;
+  expires_at?: unknown;
 }
 
 const localRequire = createRequire(
@@ -398,6 +417,8 @@ export class AgenteraOfficialQualityDatabase {
       }
       throw new Error("Official quality outbox event conflicts.");
     }
+    this.purgeExpired(now);
+    this.reserveOutboxCapacity(accountId, deviceId, qualityPurpose);
     const expiresAt = new Date(
       now.getTime() + OUTBOX_RETENTION_MILLISECONDS,
     ).toISOString();
@@ -422,6 +443,200 @@ export class AgenteraOfficialQualityDatabase {
         expiresAt,
       );
     return envelope;
+  }
+
+  countOutbox(accountIdValue: string, deviceIdValue: string): number {
+    const accountId = identifier(accountIdValue, "account ID");
+    const deviceId = identifier(deviceIdValue, "device ID");
+    const row = this.sqlite
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM official_quality_outbox
+         WHERE account_id = ? AND device_id = ?`,
+      )
+      .get(accountId, deviceId) as { count?: unknown } | undefined;
+    const count = Number(row?.count);
+    if (!Number.isSafeInteger(count) || count < 0) {
+      throw new Error("AgentEra official quality outbox is corrupt.");
+    }
+    return count;
+  }
+
+  listDue(
+    accountIdValue: string,
+    deviceIdValue: string,
+    nowValue = new Date(),
+    limitValue = 25,
+  ): OfficialQualityOutboxEntry[] {
+    const accountId = identifier(accountIdValue, "account ID");
+    const deviceId = identifier(deviceIdValue, "device ID");
+    const now = timestamp(nowValue);
+    if (
+      !Number.isSafeInteger(limitValue) ||
+      limitValue < 1 ||
+      limitValue > 100
+    ) {
+      throw new Error("Invalid official quality outbox limit.");
+    }
+    this.purgeExpired(nowValue);
+    return this.sqlite
+      .prepare(
+        `SELECT event_id, purpose, envelope_json, attempt_count,
+                created_at, expires_at
+         FROM official_quality_outbox
+         WHERE account_id = ? AND device_id = ? AND next_attempt_at <= ?
+         ORDER BY next_attempt_at ASC, created_at ASC, event_id ASC
+         LIMIT ?`,
+      )
+      .all(accountId, deviceId, now, limitValue)
+      .map((row) => this.parseOutboxRow(row as OutboxRow, nowValue));
+  }
+
+  acknowledge(
+    accountIdValue: string,
+    deviceIdValue: string,
+    eventIdValue: string,
+  ): void {
+    const accountId = identifier(accountIdValue, "account ID");
+    const deviceId = identifier(deviceIdValue, "device ID");
+    const eventId = identifier(eventIdValue, "event ID");
+    this.sqlite
+      .prepare(
+        `DELETE FROM official_quality_outbox
+         WHERE event_id = ? AND account_id = ? AND device_id = ?`,
+      )
+      .run(eventId, accountId, deviceId);
+  }
+
+  recordRetry(
+    accountIdValue: string,
+    deviceIdValue: string,
+    eventIdValue: string,
+    nextAttemptAtValue: Date,
+  ): void {
+    const accountId = identifier(accountIdValue, "account ID");
+    const deviceId = identifier(deviceIdValue, "device ID");
+    const eventId = identifier(eventIdValue, "event ID");
+    const nextAttemptAt = timestamp(nextAttemptAtValue);
+    this.sqlite
+      .prepare(
+        `UPDATE official_quality_outbox
+         SET attempt_count = attempt_count + 1, next_attempt_at = ?
+         WHERE event_id = ? AND account_id = ? AND device_id = ?`,
+      )
+      .run(nextAttemptAt, eventId, accountId, deviceId);
+  }
+
+  purgePurpose(
+    accountIdValue: string,
+    deviceIdValue: string,
+    purposeValue: OfficialQualityPurpose,
+  ): void {
+    const accountId = identifier(accountIdValue, "account ID");
+    const deviceId = identifier(deviceIdValue, "device ID");
+    const qualityPurpose = purpose(purposeValue);
+    this.sqlite
+      .prepare(
+        `DELETE FROM official_quality_outbox
+         WHERE account_id = ? AND device_id = ? AND purpose = ?`,
+      )
+      .run(accountId, deviceId, qualityPurpose);
+  }
+
+  purgeAccount(accountIdValue: string): void {
+    const accountId = identifier(accountIdValue, "account ID");
+    this.sqlite
+      .prepare("DELETE FROM official_quality_outbox WHERE account_id = ?")
+      .run(accountId);
+  }
+
+  purgeExpired(nowValue = new Date()): number {
+    const now = timestamp(nowValue);
+    const result = this.sqlite
+      .prepare("DELETE FROM official_quality_outbox WHERE expires_at <= ?")
+      .run(now);
+    return Number(result.changes);
+  }
+
+  private reserveOutboxCapacity(
+    accountId: string,
+    deviceId: string,
+    incomingPurpose: OfficialQualityPurpose,
+  ): void {
+    const count = this.countOutbox(accountId, deviceId);
+    if (count < MAXIMUM_OUTBOX_EVENTS) return;
+    const required = count - MAXIMUM_OUTBOX_EVENTS + 1;
+    const passive = this.sqlite
+      .prepare(
+        `DELETE FROM official_quality_outbox
+         WHERE event_id IN (
+           SELECT event_id FROM official_quality_outbox
+           WHERE account_id = ? AND device_id = ?
+             AND purpose = 'official_quality_metrics'
+           ORDER BY created_at ASC, event_id ASC
+           LIMIT ?
+         )`,
+      )
+      .run(accountId, deviceId, required);
+    const passiveRemoved = Number(passive.changes);
+    if (passiveRemoved >= required) return;
+    if (incomingPurpose === "official_quality_metrics") {
+      throw new Error("Official quality outbox is full.");
+    }
+    this.sqlite
+      .prepare(
+        `DELETE FROM official_quality_outbox
+         WHERE event_id IN (
+           SELECT event_id FROM official_quality_outbox
+           WHERE account_id = ? AND device_id = ?
+           ORDER BY created_at ASC, event_id ASC
+           LIMIT ?
+         )`,
+      )
+      .run(accountId, deviceId, required - passiveRemoved);
+  }
+
+  private parseOutboxRow(
+    row: OutboxRow,
+    now: Date,
+  ): OfficialQualityOutboxEntry {
+    const eventId = identifier(row.event_id, "event ID");
+    const qualityPurpose = purpose(row.purpose);
+    const attemptCount = Number(row.attempt_count);
+    if (
+      typeof row.envelope_json !== "string" ||
+      !Number.isSafeInteger(attemptCount) ||
+      attemptCount < 0 ||
+      typeof row.created_at !== "string" ||
+      typeof row.expires_at !== "string"
+    ) {
+      throw new Error("AgentEra official quality outbox is corrupt.");
+    }
+    let envelope: OfficialQualityEnvelope;
+    try {
+      envelope = parseOfficialQualityEnvelope(
+        JSON.parse(row.envelope_json),
+        now,
+      );
+    } catch {
+      throw new Error("AgentEra official quality outbox is corrupt.");
+    }
+    if (
+      envelope.event_id !== eventId ||
+      (envelope.kind === "metric"
+        ? "official_quality_metrics"
+        : "official_explicit_feedback") !== qualityPurpose
+    ) {
+      throw new Error("AgentEra official quality outbox is corrupt.");
+    }
+    return {
+      eventId,
+      purpose: qualityPurpose,
+      envelopeJson: serializeOfficialQualityEnvelope(envelope, now),
+      attemptCount,
+      createdAt: row.created_at,
+      expiresAt: row.expires_at,
+    };
   }
 
   close(): void {

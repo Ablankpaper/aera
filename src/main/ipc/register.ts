@@ -268,6 +268,8 @@ import {
 } from "../agentera-profile-binding";
 import type { AgenteraConnectionOwnerStore } from "../agentera-connection-owner";
 import type { AgenteraAgentControlManager } from "../agentera-agent-control/manager";
+import type { AgenteraOfficialQualityManager } from "../agentera-official-quality/manager";
+import { createOfficialQualityChatObserver } from "../agentera-official-quality/collector";
 import {
   executeAgentControlIpc,
   parseAgentControlId,
@@ -531,6 +533,7 @@ export interface IpcContext {
   agenteraProductSpace?: AgenteraProductSpaceManager | null;
   workspaceInvitationInbox: WorkspaceInvitationInbox;
   runtimeDistribution: RuntimeDistributionManager | null;
+  agenteraOfficialQuality?: AgenteraOfficialQualityManager | null;
 }
 
 const RUNTIME_DISTRIBUTION_UNAVAILABLE_STATE: RuntimeDistributionPublicState = {
@@ -809,6 +812,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     agenteraProductSpace,
     workspaceInvitationInbox,
     runtimeDistribution,
+    agenteraOfficialQuality,
   } = context;
   const requireAgentControl = (): AgenteraAgentControlManager => {
     if (!agenteraAgentControl) {
@@ -2553,6 +2557,11 @@ export function registerIpcHandlers(context: IpcContext): void {
 
         let fullResponse = "";
         const chatStartTime = Date.now();
+        const officialQualityObserver = createOfficialQualityChatObserver({
+          binding: preparedAgentTurn?.binding ?? null,
+          startedAt: chatStartTime,
+          recordMetric: (input) => agenteraOfficialQuality?.recordMetric(input),
+        });
         let resolveChat: (v: { response: string; sessionId?: string }) => void;
         let rejectChat: (reason?: unknown) => void;
         const promise = new Promise<{ response: string; sessionId?: string }>(
@@ -2604,6 +2613,7 @@ export function registerIpcHandlers(context: IpcContext): void {
             },
             onDone: (sessionId) => {
               runtimeRun.finish();
+              officialQualityObserver.onDone();
               try {
                 persistPromptImageAttachments(sessionId, message, attachments);
               } catch (err) {
@@ -2651,6 +2661,7 @@ export function registerIpcHandlers(context: IpcContext): void {
             },
             onError: (error) => {
               runtimeRun.finish();
+              officialQualityObserver.onError(error);
               safeSend("chat-error", error);
               rejectChat(new Error(error));
               // Notify on error too if window not focused
@@ -2668,6 +2679,7 @@ export function registerIpcHandlers(context: IpcContext): void {
               safeSend("chat-tool-event", toolEvent);
             },
             onUsage: (usage) => {
+              officialQualityObserver.onUsage(usage);
               safeSend("chat-usage", usage);
             },
             onClarify: (req) => {

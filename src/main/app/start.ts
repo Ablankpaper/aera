@@ -76,6 +76,18 @@ import {
 } from "../agentera-product-space/db";
 import { AgenteraProductSpaceManager } from "../agentera-product-space/manager";
 import { createProfile, setActiveProfile } from "../profiles";
+import {
+  openAgenteraOfficialQualityDatabase,
+  type AgenteraOfficialQualityDatabase,
+} from "../agentera-official-quality/db";
+import { AgenteraOfficialQualityClient } from "../agentera-official-quality/client";
+import {
+  OfficialQualityCollector,
+  createOfficialQualityBindingResolver,
+  type OfficialQualityPrincipal,
+  type OfficialQualitySigningPrincipal,
+} from "../agentera-official-quality/collector";
+import { AgenteraOfficialQualityManager } from "../agentera-official-quality/manager";
 
 const APP_NAME =
   process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
@@ -230,6 +242,9 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
   let agenteraProductSpace: AgenteraProductSpaceManager | null = null;
   let agenteraAgentControlDatabase: AgenteraControlPlaneDatabase | null = null;
   let agenteraAgentControl: AgenteraAgentControlManager | null = null;
+  let agenteraOfficialQualityDatabase: AgenteraOfficialQualityDatabase | null =
+    null;
+  let agenteraOfficialQuality: AgenteraOfficialQualityManager | null = null;
   try {
     agenteraWorkspaceDatabase = openAgenteraWorkspaceDatabase(
       app.getPath("userData"),
@@ -343,6 +358,58 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     agenteraAgentControl = null;
     console.error("[AGENTERA_AGENT_CONTROL] unavailable");
   }
+  const getOfficialQualitySigningPrincipal =
+    (): OfficialQualitySigningPrincipal | null => {
+      const state = agenteraAuth.getPublicState();
+      const identity = agenteraAuthStore.getInstallation();
+      if (
+        (state.status !== "authenticated" && state.status !== "offline") ||
+        identity === null
+      ) {
+        return null;
+      }
+      return {
+        accountId: state.userId,
+        deviceId: identity.installationId,
+        devicePrivateKey: identity.devicePrivateKey,
+      };
+    };
+  const getOfficialQualityPrincipal = (): OfficialQualityPrincipal | null => {
+    const principal = getOfficialQualitySigningPrincipal();
+    return principal === null
+      ? null
+      : { accountId: principal.accountId, deviceId: principal.deviceId };
+  };
+  if (agenteraAgentControlDatabase !== null) {
+    try {
+      agenteraOfficialQualityDatabase = openAgenteraOfficialQualityDatabase(
+        app.getPath("userData"),
+      );
+      const qualityClient = new AgenteraOfficialQualityClient({
+        origin: getAgenteraCloudOrigin(),
+        getAccessToken: () => agenteraAuth.getAccessTokenForCloudRequest(),
+      });
+      const qualityCollector = new OfficialQualityCollector({
+        database: agenteraOfficialQualityDatabase,
+        desktopVersion: app.getVersion(),
+        getPrincipal: getOfficialQualitySigningPrincipal,
+        resolveBinding: createOfficialQualityBindingResolver(
+          agenteraAgentControlDatabase,
+        ),
+      });
+      agenteraOfficialQuality = new AgenteraOfficialQualityManager({
+        database: agenteraOfficialQualityDatabase,
+        client: qualityClient,
+        collector: qualityCollector,
+        getPrincipal: getOfficialQualityPrincipal,
+      });
+    } catch {
+      agenteraOfficialQualityDatabase?.close();
+      agenteraOfficialQualityDatabase = null;
+      agenteraOfficialQuality = null;
+      console.error("[AGENTERA_OFFICIAL_QUALITY] unavailable");
+    }
+  }
   const unsubscribeProductSpace =
     agenteraProductSpace?.subscribe(() => {
       agenteraAgentControl?.notifyAgentContextChanged();
@@ -356,6 +423,11 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     void agenteraWorkspace?.notifyAccessStateChanged();
     void agenteraOrganization?.notifyAccessStateChanged();
     void agenteraProductSpace?.notifyAccessStateChanged();
+    const qualityPrincipal = getOfficialQualityPrincipal();
+    agenteraOfficialQuality?.notifyPrincipalChanged(qualityPrincipal);
+    if (state.status === "authenticated" && state.cloudAvailable) {
+      void agenteraOfficialQuality?.uploadPending();
+    }
     ownerSwitchCoordinator.transitionTo(
       state.status === "authenticated" || state.status === "offline"
         ? state.userId
@@ -396,6 +468,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     agenteraProductSpace,
     workspaceInvitationInbox,
     runtimeDistribution,
+    agenteraOfficialQuality,
   });
 
   setupUpdater({ getMainWindow: () => mainWindow });
@@ -461,6 +534,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     agenteraProductSpace?.close();
     agenteraOrganization?.close();
     agenteraWorkspace?.close();
+    agenteraOfficialQualityDatabase?.close();
     agenteraAgentControlDatabase?.close();
     stopActiveRuntimeContext();
   });
