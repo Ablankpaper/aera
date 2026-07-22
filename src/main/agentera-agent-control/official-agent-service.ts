@@ -4,6 +4,7 @@ import type {
   ConfirmOfficialAgentInstallInput,
   OfficialAgentInstallPreview,
   OfficialAgentSummary,
+  OfficialManagedUpdate,
 } from "../../shared/agentera-agent-control";
 import type { AgenteraRuntimeOwner } from "../agentera-profile-binding";
 import { AgenteraAgentControlClientError } from "./client";
@@ -21,6 +22,9 @@ const DEFAULT_HANDLE_TTL_MS = 5 * 60 * 1000;
 export interface OfficialAgentServiceClient {
   listOfficialAgents(): Promise<OfficialAgentSummary[]>;
   getOfficialRelease(definitionId: string): Promise<OfficialAgentSummary>;
+  getManagedUpdate(
+    installationId: string,
+  ): Promise<OfficialManagedUpdate | null>;
   getOfficialAgentChannel(): OfficialAgentChannel;
 }
 
@@ -31,6 +35,10 @@ export interface OfficialAgentServiceInstaller {
     source: Extract<AgentInstallationSource, { scope: "PLATFORM" }>;
     profile: { kind: "fresh"; name: string };
   }): Promise<LocalAgentInstallation>;
+  listManagedInstallations(): LocalAgentInstallation[];
+  applyManagedOfficialUpdate(
+    installationId: string,
+  ): Promise<LocalAgentInstallation>;
 }
 
 export interface OfficialAgentServiceOptions {
@@ -229,6 +237,73 @@ export class OfficialAgentService {
         throw codedError("installation_conflict");
       }
       return installed;
+    } catch (error) {
+      throw serviceError(error);
+    }
+  }
+
+  async refreshManagedUpdates(): Promise<OfficialManagedUpdate[]> {
+    try {
+      this.assertOnline();
+      const updates: OfficialManagedUpdate[] = [];
+      for (const installation of this.installer.listManagedInstallations()) {
+        if (
+          installation.sourceScope !== "PLATFORM" ||
+          installation.updatePolicy !== "managed" ||
+          installation.selectedReleaseRevisionId === null ||
+          installation.status !== "active"
+        ) {
+          continue;
+        }
+        const update = await this.client.getManagedUpdate(
+          requireUuid(installation.agentInstallationId),
+        );
+        if (update === null) continue;
+        if (
+          requireUuid(update.installationId) !==
+            installation.agentInstallationId ||
+          requireUuid(update.expectedSelectedReleaseRevisionId) !==
+            installation.selectedReleaseRevisionId ||
+          requireUuid(update.targetReleaseRevisionId) ===
+            installation.selectedReleaseRevisionId
+        ) {
+          throw codedError("verification_failed");
+        }
+        updates.push({
+          installationId: update.installationId,
+          expectedSelectedReleaseRevisionId:
+            update.expectedSelectedReleaseRevisionId,
+          targetReleaseRevisionId: update.targetReleaseRevisionId,
+          targetVersionId: requireUuid(update.targetVersionId),
+        });
+      }
+      return updates;
+    } catch (error) {
+      throw serviceError(error);
+    }
+  }
+
+  async applyManagedUpdate(
+    installationIdInput: string,
+  ): Promise<LocalAgentInstallation> {
+    try {
+      this.assertOnline();
+      const installationId = requireUuid(installationIdInput);
+      const updated =
+        await this.installer.applyManagedOfficialUpdate(installationId);
+      if (
+        updated.agentInstallationId !== installationId ||
+        updated.sourceScope !== "PLATFORM" ||
+        updated.updatePolicy !== "managed" ||
+        updated.officialReleaseId === null ||
+        updated.selectedReleaseRevisionId === null ||
+        updated.runtimeProfileId === null ||
+        updated.policySnapshotId === null ||
+        updated.status !== "active"
+      ) {
+        throw codedError("installation_conflict");
+      }
+      return updated;
     } catch (error) {
       throw serviceError(error);
     }

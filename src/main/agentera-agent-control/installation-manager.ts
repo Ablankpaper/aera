@@ -1,4 +1,5 @@
 import { randomUUID as nodeRandomUUID } from "node:crypto";
+import type { OfficialManagedUpdate } from "../../shared/agentera-agent-control";
 import type {
   AgentInstallation,
   AgentInstallationCreation,
@@ -40,7 +41,13 @@ type AgentInstallationRetryCode =
   | "materialization_projection_failed"
   | "profile_creation_failed"
   | "profile_attachment_failed"
-  | "profile_projection_failed";
+  | "profile_projection_failed"
+  | "managed_update_target_failed"
+  | "managed_update_version_failed"
+  | "managed_update_projection_failed"
+  | "managed_update_cloud_failed"
+  | "managed_update_policy_failed"
+  | "managed_update_activation_failed";
 
 export class AgentInstallationManagerError extends Error {
   readonly code: AgentInstallationManagerErrorCode;
@@ -69,6 +76,15 @@ export interface AgentInstallationClient {
   selectInstallationVersion(
     installationId: string,
     versionId: string,
+    idempotencyKey: string,
+  ): Promise<AgentInstallation>;
+  getManagedUpdate(
+    installationId: string,
+  ): Promise<OfficialManagedUpdate | null>;
+  applyManagedUpdate(
+    installationId: string,
+    expectedSelectedReleaseRevisionId: string,
+    targetReleaseRevisionId: string,
     idempotencyKey: string,
   ): Promise<AgentInstallation>;
   archiveInstallation(
@@ -190,6 +206,15 @@ interface InstallationCreationIntent {
   officialReleaseId: string | null;
   selectedReleaseRevisionId: string | null;
   updatePolicy: "manual" | "managed";
+}
+
+interface ManagedUpdateIntent {
+  id: string;
+  installationId: string;
+  expectedSelectedReleaseRevisionId: string;
+  targetReleaseRevisionId: string;
+  targetVersionId: string;
+  idempotencyKey: string;
 }
 
 interface NormalizedInstallationSource {
@@ -562,6 +587,34 @@ function assertCloudState(
   }
 }
 
+function assertManagedCloudState(
+  installation: AgentInstallation,
+  local: LocalAgentInstallation,
+  intent: ManagedUpdateIntent,
+): void {
+  if (
+    local.sourceScope !== "PLATFORM" ||
+    local.officialReleaseId === null ||
+    local.runtimeProfileId === null ||
+    uuid(installation.id) !== local.agentInstallationId ||
+    uuid(installation.definition_id) !== local.definitionId ||
+    uuid(installation.selected_version_id) !== intent.targetVersionId ||
+    installation.status !== "active" ||
+    installation.update_policy !== "managed" ||
+    installation.official_release_id === undefined ||
+    uuid(installation.official_release_id) !== local.officialReleaseId ||
+    installation.selected_release_revision_id === undefined ||
+    uuid(installation.selected_release_revision_id) !==
+      intent.targetReleaseRevisionId ||
+    installation.runtime_profile_id === undefined ||
+    uuid(installation.runtime_profile_id) !== local.runtimeProfileId ||
+    installation.policy_snapshot_id === undefined
+  ) {
+    throw new AgentInstallationManagerError("installation_conflict");
+  }
+  uuid(installation.policy_snapshot_id);
+}
+
 export class AgentInstallationManager {
   private readonly database: AgenteraControlPlaneDatabase;
   private readonly client: AgentInstallationClient;
@@ -643,6 +696,22 @@ export class AgentInstallationManager {
         source.scope,
         source.workspaceId,
         source.organizationId,
+      ) as LocalInstallationRow[];
+    return rows.map(parseLocalRow);
+  }
+
+  listManagedInstallations(): LocalAgentInstallation[] {
+    const rows = this.database.sqlite
+      .prepare(
+        `SELECT * FROM local_agent_installations
+         WHERE tenant_id = ? AND owner_id = ? AND device_installation_id = ?
+           AND source_scope = 'PLATFORM' AND update_policy = 'managed'
+         ORDER BY created_at DESC, agent_installation_id ASC`,
+      )
+      .all(
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
       ) as LocalInstallationRow[];
     return rows.map(parseLocalRow);
   }
@@ -903,6 +972,248 @@ export class AgentInstallationManager {
     return this.getLocalInstallation(local.agentInstallationId);
   }
 
+  async applyManagedOfficialUpdate(
+    agentInstallationIdInput: string,
+  ): Promise<LocalAgentInstallation> {
+    let local = this.getLocalInstallation(agentInstallationIdInput);
+    if (
+      local.sourceScope !== "PLATFORM" ||
+      local.updatePolicy !== "managed" ||
+      local.officialReleaseId === null ||
+      local.selectedReleaseRevisionId === null ||
+      local.runtimeProfileId === null ||
+      local.policySnapshotId === null ||
+      local.status !== "active"
+    ) {
+      throw new AgentInstallationManagerError("invalid_installation_request");
+    }
+
+    let intent = this.getManagedUpdateIntent(local.agentInstallationId);
+    if (!intent) {
+      let update: OfficialManagedUpdate | null;
+      try {
+        update = await this.client.getManagedUpdate(local.agentInstallationId);
+      } catch (error) {
+        reportStageFailure("managed-update-target", error);
+        this.recordManagedUpdateFailure(
+          local.agentInstallationId,
+          "managed_update_target_failed",
+        );
+        throw new AgentInstallationManagerError("update_failed");
+      }
+      if (update === null) {
+        this.clearManagedUpdateFailure(local.agentInstallationId);
+        return this.getLocalInstallation(local.agentInstallationId);
+      }
+      let normalized: Omit<ManagedUpdateIntent, "id" | "idempotencyKey">;
+      try {
+        normalized = {
+          installationId: uuid(update.installationId),
+          expectedSelectedReleaseRevisionId: uuid(
+            update.expectedSelectedReleaseRevisionId,
+          ),
+          targetReleaseRevisionId: uuid(update.targetReleaseRevisionId),
+          targetVersionId: uuid(update.targetVersionId),
+        };
+      } catch {
+        this.recordManagedUpdateFailure(
+          local.agentInstallationId,
+          "managed_update_target_failed",
+        );
+        throw new AgentInstallationManagerError("update_failed");
+      }
+      if (
+        normalized.installationId !== local.agentInstallationId ||
+        normalized.expectedSelectedReleaseRevisionId !==
+          local.selectedReleaseRevisionId ||
+        normalized.targetReleaseRevisionId ===
+          normalized.expectedSelectedReleaseRevisionId
+      ) {
+        this.recordManagedUpdateFailure(
+          local.agentInstallationId,
+          "managed_update_target_failed",
+        );
+        throw new AgentInstallationManagerError("update_failed");
+      }
+      intent = this.beginManagedUpdateIntent(normalized);
+    }
+
+    if (
+      local.selectedVersionId === intent.targetVersionId &&
+      local.selectedReleaseRevisionId === intent.targetReleaseRevisionId
+    ) {
+      this.completeManagedUpdateIntent(intent.id);
+      this.clearManagedUpdateFailure(local.agentInstallationId);
+      return this.getLocalInstallation(local.agentInstallationId);
+    }
+    if (
+      local.selectedReleaseRevisionId !==
+      intent.expectedSelectedReleaseRevisionId
+    ) {
+      throw new AgentInstallationManagerError("installation_conflict");
+    }
+
+    let version: AgentVersion;
+    let projection: HermesVersionProjection;
+    try {
+      const downloaded = await this.client.getVersion(intent.targetVersionId);
+      assertVersion(downloaded, local.definitionId, intent.targetVersionId);
+      version = this.cache.cacheVerifiedVersion(downloaded);
+      assertVersion(version, local.definitionId, intent.targetVersionId);
+    } catch (error) {
+      reportStageFailure("managed-update-version", error);
+      this.recordManagedUpdateFailure(
+        local.agentInstallationId,
+        "managed_update_version_failed",
+      );
+      throw new AgentInstallationManagerError("update_failed");
+    }
+    try {
+      projection = this.projection.materializeVersion({
+        agentInstallationId: local.agentInstallationId,
+        version,
+      });
+    } catch (error) {
+      reportStageFailure("managed-update-projection", error);
+      this.recordManagedUpdateFailure(
+        local.agentInstallationId,
+        "managed_update_projection_failed",
+      );
+      throw new AgentInstallationManagerError("update_failed");
+    }
+
+    let selected: AgentInstallation;
+    try {
+      selected = await this.client.applyManagedUpdate(
+        local.agentInstallationId,
+        intent.expectedSelectedReleaseRevisionId,
+        intent.targetReleaseRevisionId,
+        intent.idempotencyKey,
+      );
+      assertManagedCloudState(selected, local, intent);
+    } catch (error) {
+      reportStageFailure("managed-update-cloud", error);
+      this.recordManagedUpdateFailure(
+        local.agentInstallationId,
+        "managed_update_cloud_failed",
+      );
+      throw new AgentInstallationManagerError("update_failed");
+    }
+
+    const targetLocal: LocalAgentInstallation = {
+      ...local,
+      selectedVersionId: intent.targetVersionId,
+      selectedReleaseRevisionId: intent.targetReleaseRevisionId,
+    };
+    let selectedPolicy: AgentPolicySnapshot;
+    try {
+      selectedPolicy = await this.client.getPolicySnapshot(
+        selected.policy_snapshot_id as string,
+      );
+      assertPolicy(
+        selectedPolicy,
+        local.agentInstallationId,
+        local.definitionId,
+        version,
+        this.client.origin,
+        targetLocal,
+        this.owner,
+      );
+      const verifiedPolicy = this.trust.verifyPolicy(selectedPolicy, {
+        runtimeVersion: this.runtimeVersion,
+      });
+      if (verifiedPolicy.contentDigest !== selectedPolicy.content_digest) {
+        throw new AgentInstallationManagerError("installation_conflict");
+      }
+      this.cache.cacheVerifiedPolicySnapshot(version.id, selectedPolicy);
+    } catch (error) {
+      reportStageFailure("managed-update-policy", error);
+      this.recordManagedUpdateFailure(
+        local.agentInstallationId,
+        "managed_update_policy_failed",
+      );
+      throw new AgentInstallationManagerError("update_failed");
+    }
+
+    let profilePath: string;
+    try {
+      profilePath = this.profileBindings.resolveAttachedProfilePath(
+        local.runtimeProfileId,
+        local.agentInstallationId,
+        this.owner,
+      );
+      this.projection.activateForProfile({ projection, profilePath });
+    } catch (error) {
+      reportStageFailure("managed-update-activation", error);
+      this.recordManagedUpdateFailure(
+        local.agentInstallationId,
+        "managed_update_activation_failed",
+      );
+      throw new AgentInstallationManagerError("update_failed");
+    }
+
+    try {
+      const result = this.database.sqlite
+        .prepare(
+          `UPDATE local_agent_installations
+           SET selected_version_id = ?, selected_release_revision_id = ?,
+               policy_snapshot_id = ?, retry_code = NULL, updated_at = ?
+           WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
+             AND device_installation_id = ? AND source_scope = 'PLATFORM'
+             AND update_policy = 'managed' AND status = 'active'
+             AND selected_version_id = ?
+             AND selected_release_revision_id = ?
+             AND policy_snapshot_id = ?`,
+        )
+        .run(
+          intent.targetVersionId,
+          intent.targetReleaseRevisionId,
+          selectedPolicy.id,
+          timestamp(this.now),
+          local.agentInstallationId,
+          this.owner.tenantId,
+          this.owner.ownerId,
+          this.owner.deviceInstallationId,
+          local.selectedVersionId,
+          intent.expectedSelectedReleaseRevisionId,
+          local.policySnapshotId,
+        );
+      if (Number(result.changes) !== 1) {
+        throw new AgentInstallationManagerError("installation_conflict");
+      }
+    } catch (error) {
+      try {
+        const previousVersion = this.cache.getVerifiedVersion(
+          local.selectedVersionId,
+        );
+        assertVersion(
+          previousVersion,
+          local.definitionId,
+          local.selectedVersionId,
+        );
+        this.projection.activateForProfile({
+          projection: this.projection.materializeVersion({
+            agentInstallationId: local.agentInstallationId,
+            version: previousVersion,
+          }),
+          profilePath,
+        });
+      } catch (restoreError) {
+        reportStageFailure("managed-update-restore", restoreError);
+      }
+      reportStageFailure("managed-update-commit", error);
+      this.recordManagedUpdateFailure(
+        local.agentInstallationId,
+        "managed_update_activation_failed",
+      );
+      throw new AgentInstallationManagerError("update_failed");
+    }
+
+    local = this.getLocalInstallation(local.agentInstallationId);
+    this.completeManagedUpdateIntent(intent.id);
+    return local;
+  }
+
   async archiveInstallation(
     agentInstallationIdInput: string,
   ): Promise<LocalAgentInstallation> {
@@ -1105,6 +1416,180 @@ export class AgentInstallationManager {
         this.owner.ownerId,
         this.owner.deviceInstallationId,
       );
+  }
+
+  private recordManagedUpdateFailure(
+    agentInstallationId: string,
+    code: Extract<AgentInstallationRetryCode, `managed_update_${string}`>,
+  ): void {
+    this.database.sqlite
+      .prepare(
+        `UPDATE local_agent_installations
+         SET retry_code = ?, updated_at = ?
+         WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
+           AND device_installation_id = ? AND source_scope = 'PLATFORM'
+           AND update_policy = 'managed' AND status = 'active'`,
+      )
+      .run(
+        code,
+        timestamp(this.now),
+        agentInstallationId,
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+      );
+  }
+
+  private clearManagedUpdateFailure(agentInstallationId: string): void {
+    this.database.sqlite
+      .prepare(
+        `UPDATE local_agent_installations
+         SET retry_code = NULL, updated_at = ?
+         WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
+           AND device_installation_id = ? AND source_scope = 'PLATFORM'
+           AND update_policy = 'managed' AND status = 'active'`,
+      )
+      .run(
+        timestamp(this.now),
+        agentInstallationId,
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+      );
+  }
+
+  private getManagedUpdateIntent(
+    agentInstallationId: string,
+  ): ManagedUpdateIntent | null {
+    const rows = this.database.sqlite
+      .prepare(
+        `SELECT id, payload_json
+         FROM pending_sanitized_records
+         WHERE record_type = 'official_managed_update' AND tenant_id = ?
+           AND owner_id = ? AND device_installation_id = ?
+         ORDER BY created_at ASC`,
+      )
+      .all(
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+      ) as Array<{ id?: unknown; payload_json?: unknown }>;
+    const matches: ManagedUpdateIntent[] = [];
+    for (const row of rows) {
+      if (typeof row.id !== "string" || typeof row.payload_json !== "string") {
+        throw new AgentInstallationManagerError("installation_conflict");
+      }
+      let value: unknown;
+      try {
+        value = JSON.parse(row.payload_json);
+      } catch {
+        throw new AgentInstallationManagerError("installation_conflict");
+      }
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new AgentInstallationManagerError("installation_conflict");
+      }
+      const record = value as Record<string, unknown>;
+      if (
+        Object.keys(record).sort().join("\0") !==
+        [
+          "agent_installation_id",
+          "expected_selected_release_revision_id",
+          "idempotency_key",
+          "target_release_revision_id",
+          "target_version_id",
+        ]
+          .sort()
+          .join("\0")
+      ) {
+        throw new AgentInstallationManagerError("installation_conflict");
+      }
+      const parsed: ManagedUpdateIntent = {
+        id: uuid(row.id),
+        installationId: uuid(record.agent_installation_id),
+        expectedSelectedReleaseRevisionId: uuid(
+          record.expected_selected_release_revision_id,
+        ),
+        targetReleaseRevisionId: uuid(record.target_release_revision_id),
+        targetVersionId: uuid(record.target_version_id),
+        idempotencyKey:
+          typeof record.idempotency_key === "string"
+            ? record.idempotency_key
+            : "",
+      };
+      if (
+        parsed.idempotencyKey !==
+        operationKey(
+          "managed-update",
+          parsed.installationId,
+          parsed.expectedSelectedReleaseRevisionId,
+          parsed.targetReleaseRevisionId,
+        )
+      ) {
+        throw new AgentInstallationManagerError("installation_conflict");
+      }
+      if (parsed.installationId === agentInstallationId) matches.push(parsed);
+    }
+    if (matches.length > 1) {
+      throw new AgentInstallationManagerError("installation_conflict");
+    }
+    return matches[0] ?? null;
+  }
+
+  private beginManagedUpdateIntent(
+    input: Omit<ManagedUpdateIntent, "id" | "idempotencyKey">,
+  ): ManagedUpdateIntent {
+    const id = uuid(this.randomUUID());
+    const idempotencyKey = operationKey(
+      "managed-update",
+      input.installationId,
+      input.expectedSelectedReleaseRevisionId,
+      input.targetReleaseRevisionId,
+    );
+    const createdAt = timestamp(this.now);
+    this.database.sqlite
+      .prepare(
+        `INSERT INTO pending_sanitized_records (
+           id, tenant_id, owner_id, device_installation_id,
+           record_type, payload_json, attempt_count, next_attempt_at,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 'official_managed_update', ?, 0, NULL, ?, ?)`,
+      )
+      .run(
+        id,
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+        JSON.stringify({
+          agent_installation_id: input.installationId,
+          expected_selected_release_revision_id:
+            input.expectedSelectedReleaseRevisionId,
+          target_release_revision_id: input.targetReleaseRevisionId,
+          target_version_id: input.targetVersionId,
+          idempotency_key: idempotencyKey,
+        }),
+        createdAt,
+        createdAt,
+      );
+    return { id, idempotencyKey, ...input };
+  }
+
+  private completeManagedUpdateIntent(id: string): void {
+    const result = this.database.sqlite
+      .prepare(
+        `DELETE FROM pending_sanitized_records
+         WHERE id = ? AND tenant_id = ? AND owner_id = ?
+           AND device_installation_id = ?
+           AND record_type = 'official_managed_update'`,
+      )
+      .run(
+        id,
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+      );
+    if (Number(result.changes) !== 1) {
+      throw new AgentInstallationManagerError("installation_conflict");
+    }
   }
 
   private beginCreationIntent(

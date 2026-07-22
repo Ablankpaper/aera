@@ -23,6 +23,7 @@ import {
 import type {
   AgentDraftAssetInput,
   AgentEditableManifest,
+  OfficialManagedUpdate,
 } from "../../shared/agentera-agent-control";
 import type { SecureStorageAdapter } from "../agentera-auth/store";
 import {
@@ -63,12 +64,15 @@ const RUNTIME_PROFILE_ID = "55555555-5555-4555-8555-555555555555";
 const OPERATION_ID = "66666666-6666-4666-8666-666666666666";
 const VERSION_2_ID = "77777777-7777-4777-8777-777777777777";
 const POLICY_2_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const POLICY_3_ID = "15151515-1515-4515-8515-151515151515";
 const NOW = new Date("2026-07-19T19:30:00.000Z");
 const ORIGIN = "http://127.0.0.1:8086";
 const WORKSPACE_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const ORGANIZATION_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const OFFICIAL_RELEASE_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const OFFICIAL_RELEASE_REVISION_ID = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+const OFFICIAL_RELEASE_REVISION_2_ID = "13131313-1313-4313-8313-131313131313";
+const OFFICIAL_RELEASE_REVISION_3_ID = "14141414-1414-4414-8414-141414141414";
 const PLATFORM_ID = "12121212-1212-4212-8212-121212121212";
 
 class FakeSecureStorage implements SecureStorageAdapter {
@@ -179,14 +183,20 @@ function pendingInstallation(versionId = VERSION_ID): AgentInstallation {
 
 function pendingOfficialInstallation(
   status: "pending" | "active" = "pending",
+  overrides: {
+    versionId?: string;
+    policyId?: string;
+    releaseRevisionId?: string;
+  } = {},
 ): AgentInstallation {
   return {
     id: AGENT_INSTALLATION_ID,
     definition_id: DEFINITION_ID,
-    selected_version_id: VERSION_ID,
-    policy_snapshot_id: POLICY_ID,
+    selected_version_id: overrides.versionId ?? VERSION_ID,
+    policy_snapshot_id: overrides.policyId ?? POLICY_ID,
     official_release_id: OFFICIAL_RELEASE_ID,
-    selected_release_revision_id: OFFICIAL_RELEASE_REVISION_ID,
+    selected_release_revision_id:
+      overrides.releaseRevisionId ?? OFFICIAL_RELEASE_REVISION_ID,
     status,
     update_policy: "managed",
     created_at: NOW.toISOString(),
@@ -200,8 +210,12 @@ function pendingOfficialInstallation(
   };
 }
 
-function makeOfficialPolicy(version: AgentVersion): AgentPolicySnapshot {
-  const value = makePolicy(version);
+function makeOfficialPolicy(
+  version: AgentVersion,
+  releaseRevisionId = OFFICIAL_RELEASE_REVISION_ID,
+  policyId = POLICY_ID,
+): AgentPolicySnapshot {
+  const value = makePolicy(version, policyId);
   return {
     ...value,
     document: {
@@ -209,7 +223,7 @@ function makeOfficialPolicy(version: AgentVersion): AgentPolicySnapshot {
       official_context: {
         platform_id: PLATFORM_ID,
         release_id: OFFICIAL_RELEASE_ID,
-        release_revision_id: OFFICIAL_RELEASE_REVISION_ID,
+        release_revision_id: releaseRevisionId,
         user_id: owner.ownerId,
         device_id: owner.deviceInstallationId,
         installation_id: AGENT_INSTALLATION_ID,
@@ -248,6 +262,8 @@ describe("Agent installation orchestration", () => {
     AgentInstallationClient["selectInstallationVersion"]
   >;
   let archiveInstallation: Mock<AgentInstallationClient["archiveInstallation"]>;
+  let getManagedUpdate: Mock<AgentInstallationClient["getManagedUpdate"]>;
+  let applyManagedUpdate: Mock<AgentInstallationClient["applyManagedUpdate"]>;
   let materializeVersion: Mock<
     AgentInstallationProjection["materializeVersion"]
   >;
@@ -337,6 +353,10 @@ describe("Agent installation orchestration", () => {
           archived_at: NOW.toISOString(),
         };
       });
+    getManagedUpdate = vi
+      .fn<AgentInstallationClient["getManagedUpdate"]>()
+      .mockResolvedValue(null);
+    applyManagedUpdate = vi.fn<AgentInstallationClient["applyManagedUpdate"]>();
     client = {
       origin: ORIGIN,
       createInstallation,
@@ -345,6 +365,8 @@ describe("Agent installation orchestration", () => {
       activateInstallation,
       selectInstallationVersion,
       archiveInstallation,
+      getManagedUpdate,
+      applyManagedUpdate,
     };
     trust = {
       verifyPolicy: vi.fn(() => {
@@ -427,6 +449,30 @@ describe("Agent installation orchestration", () => {
       runtimeVersion: "v0.18.2-agentera.1",
       now: () => NOW,
       randomUUID: () => OPERATION_ID,
+    });
+  }
+
+  async function installOfficialV1(): Promise<void> {
+    policy = makeOfficialPolicy(v1);
+    getPolicySnapshot.mockResolvedValue(policy);
+    createInstallation.mockResolvedValueOnce({
+      installation: pendingOfficialInstallation(),
+      policy_snapshot: policy,
+      replayed: false,
+    });
+    activateInstallation.mockResolvedValueOnce(
+      pendingOfficialInstallation("active"),
+    );
+    await manager().install({
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      source: {
+        scope: "PLATFORM",
+        officialReleaseId: OFFICIAL_RELEASE_ID,
+        selectedReleaseRevisionId: OFFICIAL_RELEASE_REVISION_ID,
+        updatePolicy: "managed",
+      },
+      profile: { kind: "fresh", name: "Fresh Agent" },
     });
   }
 
@@ -782,6 +828,296 @@ describe("Agent installation orchestration", () => {
     expect(createInstallation).toHaveBeenCalledOnce();
     expect(readFileSync(join(freshProfilePath, "MEMORY.md"), "utf8")).toBe(
       "official local memory\n",
+    );
+  });
+
+  it("applies v2 and rollback in order while preserving every private Hermes fixture", async () => {
+    await installOfficialV1();
+    const privateFixtures = new Map([
+      ["MEMORY.md", "private memory\n"],
+      ["USER.md", "private user profile\n"],
+      ["sessions/session.json", '{"private":"session"}\n'],
+      ["files/private.txt", "private file\n"],
+      ["skills/learned/SKILL.md", "private learned skill\n"],
+      [".curator/state.json", '{"private":"curator"}\n'],
+      ["credentials.json", '{"private":"credential"}\n'],
+    ]);
+    for (const [relativePath, content] of privateFixtures) {
+      const path = join(freshProfilePath, relativePath);
+      mkdirSync(join(path, ".."), { recursive: true });
+      writeFileSync(path, content);
+    }
+
+    const v2 = makeVersion(VERSION_2_ID, 2);
+    const policy2 = makeOfficialPolicy(
+      v2,
+      OFFICIAL_RELEASE_REVISION_2_ID,
+      POLICY_2_ID,
+    );
+    const update: OfficialManagedUpdate = {
+      installationId: AGENT_INSTALLATION_ID,
+      expectedSelectedReleaseRevisionId: OFFICIAL_RELEASE_REVISION_ID,
+      targetReleaseRevisionId: OFFICIAL_RELEASE_REVISION_2_ID,
+      targetVersionId: VERSION_2_ID,
+    };
+    events.length = 0;
+    getManagedUpdate.mockResolvedValueOnce(update);
+    getVersion.mockImplementationOnce(async () => {
+      events.push("cloud:get-version-v2");
+      return v2;
+    });
+    applyManagedUpdate.mockImplementationOnce(async () => {
+      events.push("cloud:apply-managed-v2");
+      return pendingOfficialInstallation("active", {
+        versionId: VERSION_2_ID,
+        policyId: POLICY_2_ID,
+        releaseRevisionId: OFFICIAL_RELEASE_REVISION_2_ID,
+      });
+    });
+    getPolicySnapshot.mockImplementationOnce(async () => {
+      events.push("cloud:get-policy-v2");
+      return policy2;
+    });
+    policy = policy2;
+
+    const updated = await manager().applyManagedOfficialUpdate(
+      AGENT_INSTALLATION_ID,
+    );
+
+    expect(updated).toMatchObject({
+      selectedVersionId: VERSION_2_ID,
+      selectedReleaseRevisionId: OFFICIAL_RELEASE_REVISION_2_ID,
+      policySnapshotId: POLICY_2_ID,
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+      retryCode: null,
+    });
+    expect(events).toEqual([
+      "cloud:get-version-v2",
+      "verify-cache:version",
+      `project:${VERSION_2_ID}`,
+      "cloud:apply-managed-v2",
+      "cloud:get-policy-v2",
+      "verify:policy",
+      `profile:project:${VERSION_2_ID}`,
+    ]);
+    expect(applyManagedUpdate).toHaveBeenLastCalledWith(
+      AGENT_INSTALLATION_ID,
+      OFFICIAL_RELEASE_REVISION_ID,
+      OFFICIAL_RELEASE_REVISION_2_ID,
+      `agentera:managed-update:${AGENT_INSTALLATION_ID}:${OFFICIAL_RELEASE_REVISION_ID}:${OFFICIAL_RELEASE_REVISION_2_ID}`,
+    );
+
+    const rollbackPolicy = makeOfficialPolicy(
+      v1,
+      OFFICIAL_RELEASE_REVISION_3_ID,
+      POLICY_3_ID,
+    );
+    getManagedUpdate.mockResolvedValueOnce({
+      installationId: AGENT_INSTALLATION_ID,
+      expectedSelectedReleaseRevisionId: OFFICIAL_RELEASE_REVISION_2_ID,
+      targetReleaseRevisionId: OFFICIAL_RELEASE_REVISION_3_ID,
+      targetVersionId: VERSION_ID,
+    });
+    getVersion.mockResolvedValueOnce(v1);
+    applyManagedUpdate.mockResolvedValueOnce(
+      pendingOfficialInstallation("active", {
+        versionId: VERSION_ID,
+        policyId: POLICY_3_ID,
+        releaseRevisionId: OFFICIAL_RELEASE_REVISION_3_ID,
+      }),
+    );
+    getPolicySnapshot.mockResolvedValueOnce(rollbackPolicy);
+    policy = rollbackPolicy;
+
+    const rolledBack = await manager().applyManagedOfficialUpdate(
+      AGENT_INSTALLATION_ID,
+    );
+    expect(rolledBack).toMatchObject({
+      selectedVersionId: VERSION_ID,
+      selectedReleaseRevisionId: OFFICIAL_RELEASE_REVISION_3_ID,
+      policySnapshotId: POLICY_3_ID,
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+      retryCode: null,
+    });
+    for (const [relativePath, content] of privateFixtures) {
+      expect(readFileSync(join(freshProfilePath, relativePath), "utf8")).toBe(
+        content,
+      );
+    }
+  });
+
+  it("keeps v1 active across every failure before managed local activation", async () => {
+    await installOfficialV1();
+    const v2 = makeVersion(VERSION_2_ID, 2);
+    const policy2 = makeOfficialPolicy(
+      v2,
+      OFFICIAL_RELEASE_REVISION_2_ID,
+      POLICY_2_ID,
+    );
+    const update: OfficialManagedUpdate = {
+      installationId: AGENT_INSTALLATION_ID,
+      expectedSelectedReleaseRevisionId: OFFICIAL_RELEASE_REVISION_ID,
+      targetReleaseRevisionId: OFFICIAL_RELEASE_REVISION_2_ID,
+      targetVersionId: VERSION_2_ID,
+    };
+    getManagedUpdate.mockRejectedValueOnce(new Error("target unavailable"));
+    await expect(
+      manager().applyManagedOfficialUpdate(AGENT_INSTALLATION_ID),
+    ).rejects.toMatchObject({ code: "update_failed" });
+    expect(manager().getLocalInstallation(AGENT_INSTALLATION_ID)).toMatchObject(
+      {
+        selectedVersionId: VERSION_ID,
+        retryCode: "managed_update_target_failed",
+      },
+    );
+
+    getManagedUpdate.mockResolvedValueOnce(update);
+    getVersion.mockRejectedValueOnce(new Error("version unavailable"));
+    await expect(
+      manager().applyManagedOfficialUpdate(AGENT_INSTALLATION_ID),
+    ).rejects.toMatchObject({ code: "update_failed" });
+    expect(manager().getLocalInstallation(AGENT_INSTALLATION_ID)).toMatchObject(
+      {
+        selectedVersionId: VERSION_ID,
+        retryCode: "managed_update_version_failed",
+      },
+    );
+    expect(applyManagedUpdate).not.toHaveBeenCalled();
+
+    getVersion.mockResolvedValueOnce(v2);
+    materializeVersion.mockImplementationOnce(() => {
+      throw new Error("projection failed");
+    });
+    await expect(
+      manager().applyManagedOfficialUpdate(AGENT_INSTALLATION_ID),
+    ).rejects.toMatchObject({ code: "update_failed" });
+    expect(manager().getLocalInstallation(AGENT_INSTALLATION_ID)).toMatchObject(
+      {
+        selectedVersionId: VERSION_ID,
+        retryCode: "managed_update_projection_failed",
+      },
+    );
+    expect(applyManagedUpdate).not.toHaveBeenCalled();
+
+    getVersion.mockResolvedValueOnce(v2);
+    applyManagedUpdate.mockRejectedValueOnce(new Error("cloud unavailable"));
+    await expect(
+      manager().applyManagedOfficialUpdate(AGENT_INSTALLATION_ID),
+    ).rejects.toMatchObject({ code: "update_failed" });
+    expect(manager().getLocalInstallation(AGENT_INSTALLATION_ID)).toMatchObject(
+      {
+        selectedVersionId: VERSION_ID,
+        retryCode: "managed_update_cloud_failed",
+      },
+    );
+
+    getVersion.mockResolvedValueOnce(v2);
+    applyManagedUpdate.mockResolvedValueOnce(
+      pendingOfficialInstallation("active", {
+        versionId: VERSION_2_ID,
+        policyId: POLICY_2_ID,
+        releaseRevisionId: OFFICIAL_RELEASE_REVISION_2_ID,
+      }),
+    );
+    getPolicySnapshot.mockRejectedValueOnce(new Error("policy unavailable"));
+    await expect(
+      manager().applyManagedOfficialUpdate(AGENT_INSTALLATION_ID),
+    ).rejects.toMatchObject({ code: "update_failed" });
+    expect(manager().getLocalInstallation(AGENT_INSTALLATION_ID)).toMatchObject(
+      {
+        selectedVersionId: VERSION_ID,
+        selectedReleaseRevisionId: OFFICIAL_RELEASE_REVISION_ID,
+        retryCode: "managed_update_policy_failed",
+      },
+    );
+    expect(activateForProfile).toHaveBeenCalledTimes(1);
+    expect(policy2.document.official_context?.release_revision_id).toBe(
+      OFFICIAL_RELEASE_REVISION_2_ID,
+    );
+  });
+
+  it("reconciles Cloud success with the same idempotency key after local activation fails", async () => {
+    await installOfficialV1();
+    writeFileSync(join(freshProfilePath, "MEMORY.md"), "private memory\n");
+    const v2 = makeVersion(VERSION_2_ID, 2);
+    const policy2 = makeOfficialPolicy(
+      v2,
+      OFFICIAL_RELEASE_REVISION_2_ID,
+      POLICY_2_ID,
+    );
+    getManagedUpdate.mockResolvedValueOnce({
+      installationId: AGENT_INSTALLATION_ID,
+      expectedSelectedReleaseRevisionId: OFFICIAL_RELEASE_REVISION_ID,
+      targetReleaseRevisionId: OFFICIAL_RELEASE_REVISION_2_ID,
+      targetVersionId: VERSION_2_ID,
+    });
+    getVersion.mockResolvedValue(v2);
+    applyManagedUpdate.mockResolvedValue(
+      pendingOfficialInstallation("active", {
+        versionId: VERSION_2_ID,
+        policyId: POLICY_2_ID,
+        releaseRevisionId: OFFICIAL_RELEASE_REVISION_2_ID,
+      }),
+    );
+    getPolicySnapshot.mockResolvedValue(policy2);
+    policy = policy2;
+    activateForProfile
+      .mockImplementationOnce(() => {
+        throw new Error("local activation failed");
+      })
+      .mockImplementationOnce(({ projection }) => ({
+        externalSkillsDirectory: projection.externalSkillsDirectory,
+        diagnostics: [],
+      }));
+
+    await expect(
+      manager().applyManagedOfficialUpdate(AGENT_INSTALLATION_ID),
+    ).rejects.toMatchObject({ code: "update_failed" });
+    expect(manager().getLocalInstallation(AGENT_INSTALLATION_ID)).toMatchObject(
+      {
+        selectedVersionId: VERSION_ID,
+        selectedReleaseRevisionId: OFFICIAL_RELEASE_REVISION_ID,
+        policySnapshotId: POLICY_ID,
+        retryCode: "managed_update_activation_failed",
+      },
+    );
+    const pending = database.sqlite
+      .prepare(
+        `SELECT payload_json FROM pending_sanitized_records
+         WHERE record_type = 'official_managed_update'`,
+      )
+      .get() as { payload_json: string };
+    expect(JSON.parse(pending.payload_json)).toEqual({
+      agent_installation_id: AGENT_INSTALLATION_ID,
+      expected_selected_release_revision_id: OFFICIAL_RELEASE_REVISION_ID,
+      target_release_revision_id: OFFICIAL_RELEASE_REVISION_2_ID,
+      target_version_id: VERSION_2_ID,
+      idempotency_key: `agentera:managed-update:${AGENT_INSTALLATION_ID}:${OFFICIAL_RELEASE_REVISION_ID}:${OFFICIAL_RELEASE_REVISION_2_ID}`,
+    });
+
+    await expect(
+      manager().applyManagedOfficialUpdate(AGENT_INSTALLATION_ID),
+    ).resolves.toMatchObject({
+      selectedVersionId: VERSION_2_ID,
+      selectedReleaseRevisionId: OFFICIAL_RELEASE_REVISION_2_ID,
+      policySnapshotId: POLICY_2_ID,
+      retryCode: null,
+    });
+    expect(getManagedUpdate).toHaveBeenCalledOnce();
+    expect(applyManagedUpdate).toHaveBeenCalledTimes(2);
+    expect(applyManagedUpdate.mock.calls[0][3]).toBe(
+      applyManagedUpdate.mock.calls[1][3],
+    );
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT COUNT(*) AS count FROM pending_sanitized_records
+           WHERE record_type = 'official_managed_update'`,
+        )
+        .get(),
+    ).toEqual({ count: 0 });
+    expect(readFileSync(join(freshProfilePath, "MEMORY.md"), "utf8")).toBe(
+      "private memory\n",
     );
   });
 

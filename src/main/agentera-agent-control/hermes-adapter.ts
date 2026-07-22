@@ -102,6 +102,9 @@ interface LocalInstallationRow {
   source_scope?: unknown;
   source_workspace_id?: unknown;
   source_organization_id?: unknown;
+  official_release_id?: unknown;
+  selected_release_revision_id?: unknown;
+  update_policy?: unknown;
   definition_id?: unknown;
   selected_version_id?: unknown;
   runtime_profile_id?: unknown;
@@ -111,9 +114,11 @@ interface LocalInstallationRow {
 
 interface LocalInstallation {
   agentInstallationId: string;
-  sourceScope: "USER" | "WORKSPACE" | "ORGANIZATION";
+  sourceScope: "USER" | "WORKSPACE" | "ORGANIZATION" | "PLATFORM";
   sourceWorkspaceId: string | null;
   sourceOrganizationId: string | null;
+  officialReleaseId: string | null;
+  selectedReleaseRevisionId: string | null;
   definitionId: string;
   selectedVersionId: string;
   runtimeProfileId: string;
@@ -188,16 +193,43 @@ function parseInstallation(
     row.source_organization_id === null
       ? null
       : uuid(row.source_organization_id, "installation_invalid");
+  const officialReleaseId =
+    row.official_release_id === null
+      ? null
+      : uuid(row.official_release_id, "installation_invalid");
+  const selectedReleaseRevisionId =
+    row.selected_release_revision_id === null
+      ? null
+      : uuid(row.selected_release_revision_id, "installation_invalid");
   if (
     (row.source_scope === "USER" &&
-      (sourceWorkspaceId !== null || sourceOrganizationId !== null)) ||
+      (sourceWorkspaceId !== null ||
+        sourceOrganizationId !== null ||
+        officialReleaseId !== null ||
+        selectedReleaseRevisionId !== null ||
+        row.update_policy !== "manual")) ||
     (row.source_scope === "WORKSPACE" &&
-      (sourceWorkspaceId === null || sourceOrganizationId !== null)) ||
+      (sourceWorkspaceId === null ||
+        sourceOrganizationId !== null ||
+        officialReleaseId !== null ||
+        selectedReleaseRevisionId !== null ||
+        row.update_policy !== "manual")) ||
     (row.source_scope === "ORGANIZATION" &&
-      (sourceWorkspaceId !== null || sourceOrganizationId === null)) ||
+      (sourceWorkspaceId !== null ||
+        sourceOrganizationId === null ||
+        officialReleaseId !== null ||
+        selectedReleaseRevisionId !== null ||
+        row.update_policy !== "manual")) ||
+    (row.source_scope === "PLATFORM" &&
+      (sourceWorkspaceId !== null ||
+        sourceOrganizationId !== null ||
+        officialReleaseId === null ||
+        selectedReleaseRevisionId === null ||
+        row.update_policy !== "managed")) ||
     (row.source_scope !== "USER" &&
       row.source_scope !== "WORKSPACE" &&
-      row.source_scope !== "ORGANIZATION")
+      row.source_scope !== "ORGANIZATION" &&
+      row.source_scope !== "PLATFORM")
   ) {
     throw new AgenteraHermesAdapterError("installation_invalid");
   }
@@ -209,6 +241,8 @@ function parseInstallation(
     sourceScope: row.source_scope,
     sourceWorkspaceId,
     sourceOrganizationId,
+    officialReleaseId,
+    selectedReleaseRevisionId,
     definitionId: uuid(row.definition_id, "installation_invalid"),
     selectedVersionId: uuid(row.selected_version_id, "installation_invalid"),
     runtimeProfileId: uuid(row.runtime_profile_id, "installation_invalid"),
@@ -292,8 +326,12 @@ function assertPolicy(
     versionId: string;
     definitionId: string;
     versionDigest: string;
+    officialReleaseId: string | null;
+    officialReleaseRevisionId: string | null;
+    owner: AgenteraRuntimeOwner;
   },
 ): void {
+  const official = policy.document.official_context;
   if (
     uuid(policy.id, "policy_invalid") !== input.policyId ||
     uuid(policy.installation_id, "policy_invalid") !== input.installationId ||
@@ -303,7 +341,24 @@ function assertPolicy(
     uuid(policy.document.agent_version_id, "policy_invalid") !==
       input.versionId ||
     digest(policy.document.version_digest, "policy_invalid") !==
-      input.versionDigest
+      input.versionDigest ||
+    (input.officialReleaseRevisionId === null
+      ? official !== undefined || input.officialReleaseId !== null
+      : official === undefined ||
+        input.officialReleaseId === null ||
+        uuid(official.release_id, "policy_invalid") !==
+          input.officialReleaseId ||
+        uuid(official.release_revision_id, "policy_invalid") !==
+          input.officialReleaseRevisionId ||
+        uuid(official.user_id, "policy_invalid") !==
+          input.owner.ownerId.toLowerCase() ||
+        uuid(official.device_id, "policy_invalid") !==
+          input.owner.deviceInstallationId.toLowerCase() ||
+        uuid(official.installation_id, "policy_invalid") !==
+          input.installationId ||
+        official.product_scope !== "USER" ||
+        uuid(official.product_context_id, "policy_invalid") !==
+          input.owner.tenantId.toLowerCase())
   ) {
     throw new AgenteraHermesAdapterError("policy_invalid");
   }
@@ -394,7 +449,8 @@ export class AgenteraHermesAdapter {
         .prepare(
           `SELECT agent_installation_id, definition_id, selected_version_id,
                   source_scope, source_workspace_id, source_organization_id,
-                  runtime_profile_id, policy_snapshot_id, status
+                  official_release_id, selected_release_revision_id,
+                  update_policy, runtime_profile_id, policy_snapshot_id, status
            FROM local_agent_installations
            WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
              AND device_installation_id = ?`,
@@ -431,6 +487,15 @@ export class AgenteraHermesAdapter {
       throw new AgenteraHermesAdapterError("binding_conflict");
     }
     if (existing) assertExistingBinding(existing, input.owner, profile);
+    if (
+      existing &&
+      ((installation.sourceScope === "PLATFORM" &&
+        existing.officialReleaseRevisionId === null) ||
+        (installation.sourceScope !== "PLATFORM" &&
+          existing.officialReleaseRevisionId !== null))
+    ) {
+      throw new AgenteraHermesAdapterError("binding_conflict");
+    }
     if (!existing) {
       assertNewConversationContext(
         installation,
@@ -469,6 +534,11 @@ export class AgenteraHermesAdapter {
         versionId,
         definitionId,
         versionDigest: version.content_digest,
+        officialReleaseId: installation.officialReleaseId,
+        officialReleaseRevisionId:
+          existing?.officialReleaseRevisionId ??
+          installation.selectedReleaseRevisionId,
+        owner: input.owner,
       });
     } catch (error) {
       if (error instanceof AgenteraHermesAdapterError) throw error;
@@ -524,6 +594,7 @@ export class AgenteraHermesAdapter {
         runtimeProfileId: installation.runtimeProfileId,
         runtimeVersion,
         policySnapshotId: policyId,
+        officialReleaseRevisionId: installation.selectedReleaseRevisionId,
         toolPermissionDigest: currentToolDigest,
         publishedBaseDigest: version.content_digest,
       });

@@ -33,11 +33,18 @@ const INSTALLATION_ID = "66666666-6666-4666-8666-666666666666";
 const RUNTIME_PROFILE_ID = "77777777-7777-4777-8777-777777777777";
 const POLICY_ID = "88888888-8888-4888-8888-888888888888";
 const POLICY_2_ID = "89898989-8989-4898-8989-898989898989";
+const POLICY_3_ID = "8a8a8a8a-8a8a-4a8a-8a8a-8a8a8a8a8a8a";
 const BINDING_ID = "99999999-9999-4999-8999-999999999999";
 const ADAPTIVE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const BINDING_2_ID = "abababab-abab-4bab-8bab-abababababab";
 const ADAPTIVE_2_ID = "acacacac-acac-4cac-8cac-acacacacacac";
+const BINDING_3_ID = "adadadad-adad-4dad-8dad-adadadadadae";
+const ADAPTIVE_3_ID = "adadadad-adad-4dad-8dad-adadadadadaf";
 const ORGANIZATION_ID = "adadadad-adad-4dad-8dad-adadadadadad";
+const OFFICIAL_RELEASE_ID = "aeaeaeae-aeae-4eae-8eae-aeaeaeaeaeae";
+const RELEASE_REVISION_1_ID = "afafafaf-afaf-4faf-8faf-afafafafafaf";
+const RELEASE_REVISION_2_ID = "b0b0b0b0-b0b0-40b0-80b0-b0b0b0b0b0b0";
+const RELEASE_REVISION_3_ID = "b2b2b2b2-b2b2-42b2-82b2-b2b2b2b2b2b2";
 const NOW = new Date("2026-07-19T21:00:00.000Z");
 const RUNTIME_VERSION = "v0.18.2-agentera.1";
 const PROFILE_PATH = "/tmp/hermes-installed-agent-profile";
@@ -125,6 +132,30 @@ function policy(
   };
 }
 
+function officialPolicy(
+  agentVersion: AgentVersion,
+  policyId: string,
+  releaseRevisionId: string,
+): AgentPolicySnapshot {
+  const value = policy(agentVersion, policyId);
+  return {
+    ...value,
+    document: {
+      ...value.document,
+      official_context: {
+        platform_id: "b1b1b1b1-b1b1-41b1-81b1-b1b1b1b1b1b1",
+        release_id: OFFICIAL_RELEASE_ID,
+        release_revision_id: releaseRevisionId,
+        user_id: OWNER_ID,
+        device_id: DEVICE_ID,
+        installation_id: INSTALLATION_ID,
+        product_scope: "USER",
+        product_context_id: TENANT_ID,
+      },
+    },
+  };
+}
+
 function projection(agentVersion = version()): HermesVersionProjection {
   return {
     agentInstallationId: INSTALLATION_ID,
@@ -197,7 +228,14 @@ describe("AgentEra adapter around the real Hermes transport", () => {
         NOW.toISOString(),
         NOW.toISOString(),
       );
-    const ids = [BINDING_ID, ADAPTIVE_ID, BINDING_2_ID, ADAPTIVE_2_ID];
+    const ids = [
+      BINDING_ID,
+      ADAPTIVE_ID,
+      BINDING_2_ID,
+      ADAPTIVE_2_ID,
+      BINDING_3_ID,
+      ADAPTIVE_3_ID,
+    ];
     bindingStore = new RuntimeBindingStore({
       database,
       owner,
@@ -272,6 +310,7 @@ describe("AgentEra adapter around the real Hermes transport", () => {
       id: BINDING_ID,
       agentVersionId: VERSION_ID,
       policySnapshotId: POLICY_ID,
+      officialReleaseRevisionId: null,
       runtimeProfileId: RUNTIME_PROFILE_ID,
       runtimeVersion: RUNTIME_VERSION,
       toolPermissionDigest: digestToolPermissionDeclaration(
@@ -310,6 +349,134 @@ describe("AgentEra adapter around the real Hermes transport", () => {
     expect(cache.getVerifiedVersion).toHaveBeenCalledTimes(2);
     expect(cache.getVerifiedPolicySnapshot).toHaveBeenCalledTimes(2);
     expect(assertEntitled).toHaveBeenCalledTimes(2);
+  });
+
+  it("pins each official release revision so v1, v2, and rollback conversations remain immutable", async () => {
+    database.sqlite
+      .prepare(
+        `UPDATE local_agent_installations
+         SET source_scope = 'PLATFORM', source_workspace_id = NULL,
+             source_organization_id = NULL, official_release_id = ?,
+             selected_release_revision_id = ?, update_policy = 'managed'
+         WHERE agent_installation_id = ?`,
+      )
+      .run(OFFICIAL_RELEASE_ID, RELEASE_REVISION_1_ID, INSTALLATION_ID);
+    const firstVersion = version();
+    const nextVersion: AgentVersion = {
+      ...firstVersion,
+      id: VERSION_2_ID,
+      version_number: 4,
+      content_digest: "ef".repeat(32),
+    };
+    const firstPolicy = officialPolicy(
+      firstVersion,
+      POLICY_ID,
+      RELEASE_REVISION_1_ID,
+    );
+    const nextPolicy = officialPolicy(
+      nextVersion,
+      POLICY_2_ID,
+      RELEASE_REVISION_2_ID,
+    );
+    const rollbackPolicy = officialPolicy(
+      firstVersion,
+      POLICY_3_ID,
+      RELEASE_REVISION_3_ID,
+    );
+    vi.mocked(cache.getVerifiedVersion).mockImplementation((versionId) =>
+      versionId === VERSION_2_ID ? nextVersion : firstVersion,
+    );
+    vi.mocked(cache.getVerifiedPolicySnapshot).mockImplementation(
+      (versionId, policyId) =>
+        policyId === POLICY_3_ID
+          ? rollbackPolicy
+          : versionId === VERSION_2_ID
+            ? nextPolicy
+            : firstPolicy,
+    );
+    materializeVersion.mockImplementation(({ version: candidate }) =>
+      projection(candidate),
+    );
+    const subject = adapter();
+
+    const v1Turn = await subject.prepareInstalledTurn({
+      conversationKey: "official-v1",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+    });
+    database.sqlite
+      .prepare(
+        `UPDATE local_agent_installations
+         SET selected_version_id = ?, policy_snapshot_id = ?,
+             selected_release_revision_id = ?
+         WHERE agent_installation_id = ?`,
+      )
+      .run(VERSION_2_ID, POLICY_2_ID, RELEASE_REVISION_2_ID, INSTALLATION_ID);
+    const v2Turn = await subject.prepareInstalledTurn({
+      conversationKey: "official-v2",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+    });
+    const resumedV1 = await subject.prepareInstalledTurn({
+      conversationKey: "official-v1",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+    });
+    database.sqlite
+      .prepare(
+        `UPDATE local_agent_installations
+         SET selected_version_id = ?, policy_snapshot_id = ?,
+             selected_release_revision_id = ?
+         WHERE agent_installation_id = ?`,
+      )
+      .run(VERSION_ID, POLICY_3_ID, RELEASE_REVISION_3_ID, INSTALLATION_ID);
+    const rollbackTurn = await subject.prepareInstalledTurn({
+      conversationKey: "official-rollback-v1",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+    });
+    const resumedV2 = await subject.prepareInstalledTurn({
+      conversationKey: "official-v2",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+    });
+
+    expect(v1Turn.binding).toMatchObject({
+      agentVersionId: VERSION_ID,
+      officialReleaseRevisionId: RELEASE_REVISION_1_ID,
+    });
+    expect(v2Turn.binding).toMatchObject({
+      agentVersionId: VERSION_2_ID,
+      officialReleaseRevisionId: RELEASE_REVISION_2_ID,
+    });
+    expect(resumedV1.binding).toEqual(v1Turn.binding);
+    expect(rollbackTurn.binding).toMatchObject({
+      agentVersionId: VERSION_ID,
+      policySnapshotId: POLICY_3_ID,
+      officialReleaseRevisionId: RELEASE_REVISION_3_ID,
+    });
+    expect(resumedV2.binding).toEqual(v2Turn.binding);
+    expect(
+      bindingStore.listPendingCloudRecords().map((record) => record.body),
+    ).toEqual([
+      expect.objectContaining({
+        agent_version_id: VERSION_ID,
+        official_release_revision_id: RELEASE_REVISION_1_ID,
+      }),
+      expect.objectContaining({
+        agent_version_id: VERSION_2_ID,
+        official_release_revision_id: RELEASE_REVISION_2_ID,
+      }),
+      expect.objectContaining({
+        agent_version_id: VERSION_ID,
+        official_release_revision_id: RELEASE_REVISION_3_ID,
+      }),
+    ]);
   });
 
   it("keeps Organization-sourced conversations USER-owned and freezes an active conversation across version selection", async () => {

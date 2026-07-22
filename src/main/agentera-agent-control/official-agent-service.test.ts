@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type {
   AgenteraAgentControlContext,
+  OfficialManagedUpdate,
   OfficialAgentSummary,
 } from "../../shared/agentera-agent-control";
 import type { AgenteraRuntimeOwner } from "../agentera-profile-binding";
@@ -18,6 +19,8 @@ const VERSION_ID = "22222222-2222-4222-8222-222222222222";
 const INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
 const RELEASE_ID = "44444444-4444-4444-8444-444444444444";
 const RELEASE_REVISION_ID = "55555555-5555-4555-8555-555555555555";
+const VERSION_2_ID = "56565656-5656-4565-8565-565656565656";
+const RELEASE_REVISION_2_ID = "57575757-5757-4575-8575-575757575757";
 const HANDLE_ID = "66666666-6666-4666-8666-666666666666";
 const WORKSPACE_ID = "77777777-7777-4777-8777-777777777777";
 const NOW = new Date("2026-07-22T00:00:00.000Z");
@@ -77,6 +80,13 @@ describe("OfficialAgentService", () => {
     OfficialAgentServiceClient["getOfficialRelease"]
   >;
   let install: Mock<OfficialAgentServiceInstaller["install"]>;
+  let getManagedUpdate: Mock<OfficialAgentServiceClient["getManagedUpdate"]>;
+  let listManagedInstallations: Mock<
+    OfficialAgentServiceInstaller["listManagedInstallations"]
+  >;
+  let applyManagedOfficialUpdate: Mock<
+    OfficialAgentServiceInstaller["applyManagedOfficialUpdate"]
+  >;
 
   beforeEach(() => {
     online = true;
@@ -96,12 +106,26 @@ describe("OfficialAgentService", () => {
     install = vi
       .fn<OfficialAgentServiceInstaller["install"]>()
       .mockResolvedValue(installed());
+    getManagedUpdate = vi
+      .fn<OfficialAgentServiceClient["getManagedUpdate"]>()
+      .mockResolvedValue(null);
+    listManagedInstallations = vi
+      .fn<OfficialAgentServiceInstaller["listManagedInstallations"]>()
+      .mockReturnValue([installed()]);
+    applyManagedOfficialUpdate = vi
+      .fn<OfficialAgentServiceInstaller["applyManagedOfficialUpdate"]>()
+      .mockResolvedValue(installed());
     client = {
       listOfficialAgents,
       getOfficialRelease,
+      getManagedUpdate,
       getOfficialAgentChannel: () => channel,
     };
-    installer = { install };
+    installer = {
+      install,
+      listManagedInstallations,
+      applyManagedOfficialUpdate,
+    };
   });
 
   function service(): OfficialAgentService {
@@ -217,5 +241,38 @@ describe("OfficialAgentService", () => {
     await expect(subject.prepareInstall(DEFINITION_ID)).rejects.toMatchObject({
       code: "online_required",
     });
+  });
+
+  it("refreshes authoritative managed targets and applies only a matching local official installation", async () => {
+    const update: OfficialManagedUpdate = {
+      installationId: INSTALLATION_ID,
+      expectedSelectedReleaseRevisionId: RELEASE_REVISION_ID,
+      targetReleaseRevisionId: RELEASE_REVISION_2_ID,
+      targetVersionId: VERSION_2_ID,
+    };
+    getManagedUpdate.mockResolvedValueOnce(update);
+    applyManagedOfficialUpdate.mockResolvedValueOnce({
+      ...installed(),
+      selectedVersionId: VERSION_2_ID,
+      selectedReleaseRevisionId: RELEASE_REVISION_2_ID,
+    });
+    const subject = service();
+
+    await expect(subject.refreshManagedUpdates()).resolves.toEqual([update]);
+    await expect(subject.applyManagedUpdate(INSTALLATION_ID)).resolves.toEqual({
+      ...installed(),
+      selectedVersionId: VERSION_2_ID,
+      selectedReleaseRevisionId: RELEASE_REVISION_2_ID,
+    });
+    expect(getManagedUpdate).toHaveBeenCalledWith(INSTALLATION_ID);
+    expect(applyManagedOfficialUpdate).toHaveBeenCalledWith(INSTALLATION_ID);
+
+    online = false;
+    await expect(subject.refreshManagedUpdates()).rejects.toMatchObject({
+      code: "online_required",
+    });
+    await expect(
+      subject.applyManagedUpdate(INSTALLATION_ID),
+    ).rejects.toMatchObject({ code: "online_required" });
   });
 });

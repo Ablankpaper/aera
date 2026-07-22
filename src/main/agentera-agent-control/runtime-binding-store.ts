@@ -20,11 +20,15 @@ const BINDING_FIELDS = [
   "runtimeProfileId",
   "runtimeVersion",
   "policySnapshotId",
+  "officialReleaseRevisionId",
   "toolPermissionDigest",
   "publishedBaseDigest",
   "localAdaptiveStateRevision",
   "createdAt",
 ] as const;
+const LEGACY_BINDING_FIELDS = BINDING_FIELDS.filter(
+  (field) => field !== "officialReleaseRevisionId",
+);
 const CLOUD_FIELDS = [
   "binding_id",
   "agent_installation_id",
@@ -33,6 +37,10 @@ const CLOUD_FIELDS = [
   "runtime_version",
   "policy_snapshot_id",
   "tool_permission_digest",
+] as const;
+const OFFICIAL_CLOUD_FIELDS = [
+  ...CLOUD_FIELDS,
+  "official_release_revision_id",
 ] as const;
 
 export interface LocalRuntimeBinding {
@@ -49,6 +57,7 @@ export interface LocalRuntimeBinding {
   runtimeProfileId: string;
   runtimeVersion: string;
   policySnapshotId: string;
+  officialReleaseRevisionId: string | null;
   toolPermissionDigest: string;
   publishedBaseDigest: string;
   localAdaptiveStateRevision: string;
@@ -188,6 +197,7 @@ function normalizeInput(
       "runtimeProfileId",
       "runtimeVersion",
       "policySnapshotId",
+      "officialReleaseRevisionId",
       "toolPermissionDigest",
       "publishedBaseDigest",
     ]) ||
@@ -207,6 +217,10 @@ function normalizeInput(
     runtimeProfileId: uuid(input.runtimeProfileId, "invalid_binding"),
     runtimeVersion: boundedText(input.runtimeVersion, 128, "invalid_binding"),
     policySnapshotId: uuid(input.policySnapshotId, "invalid_binding"),
+    officialReleaseRevisionId:
+      input.officialReleaseRevisionId === null
+        ? null
+        : uuid(input.officialReleaseRevisionId, "invalid_binding"),
     toolPermissionDigest: digest(input.toolPermissionDigest, "invalid_binding"),
     publishedBaseDigest: digest(input.publishedBaseDigest, "invalid_binding"),
   };
@@ -217,7 +231,8 @@ function parseBinding(value: unknown): LocalRuntimeBinding {
     value === null ||
     typeof value !== "object" ||
     Array.isArray(value) ||
-    !exactKeys(value, BINDING_FIELDS)
+    (!exactKeys(value, BINDING_FIELDS) &&
+      !exactKeys(value, LEGACY_BINDING_FIELDS))
   ) {
     throw new RuntimeBindingStoreError("binding_corrupt");
   }
@@ -246,6 +261,14 @@ function parseBinding(value: unknown): LocalRuntimeBinding {
     runtimeProfileId: uuid(record.runtimeProfileId, "binding_corrupt"),
     runtimeVersion: boundedText(record.runtimeVersion, 128, "binding_corrupt"),
     policySnapshotId: uuid(record.policySnapshotId, "binding_corrupt"),
+    officialReleaseRevisionId: Object.hasOwn(
+      record,
+      "officialReleaseRevisionId",
+    )
+      ? record.officialReleaseRevisionId === null
+        ? null
+        : uuid(record.officialReleaseRevisionId, "binding_corrupt")
+      : null,
     toolPermissionDigest: digest(
       record.toolPermissionDigest,
       "binding_corrupt",
@@ -293,6 +316,11 @@ function cloudBody(
     runtime_version: binding.runtimeVersion,
     policy_snapshot_id: binding.policySnapshotId,
     tool_permission_digest: binding.toolPermissionDigest,
+    ...(binding.officialReleaseRevisionId === null
+      ? {}
+      : {
+          official_release_revision_id: binding.officialReleaseRevisionId,
+        }),
   };
 }
 
@@ -301,7 +329,8 @@ function parseCloudBody(value: unknown): CreateRuntimeBindingRecordRequest {
     value === null ||
     typeof value !== "object" ||
     Array.isArray(value) ||
-    !exactKeys(value, CLOUD_FIELDS)
+    (!exactKeys(value, CLOUD_FIELDS) &&
+      !exactKeys(value, OFFICIAL_CLOUD_FIELDS))
   ) {
     throw new RuntimeBindingStoreError("binding_corrupt");
   }
@@ -324,6 +353,14 @@ function parseCloudBody(value: unknown): CreateRuntimeBindingRecordRequest {
       record.tool_permission_digest,
       "binding_corrupt",
     ),
+    ...(Object.hasOwn(record, "official_release_revision_id")
+      ? {
+          official_release_revision_id: uuid(
+            record.official_release_revision_id,
+            "binding_corrupt",
+          ),
+        }
+      : {}),
   };
 }
 
@@ -342,6 +379,7 @@ function immutableInputOf(
     runtimeProfileId: binding.runtimeProfileId,
     runtimeVersion: binding.runtimeVersion,
     policySnapshotId: binding.policySnapshotId,
+    officialReleaseRevisionId: binding.officialReleaseRevisionId,
     toolPermissionDigest: binding.toolPermissionDigest,
     publishedBaseDigest: binding.publishedBaseDigest,
   };

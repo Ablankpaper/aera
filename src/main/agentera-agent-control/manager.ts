@@ -32,6 +32,7 @@ import type {
   OrganizationAgentSubmissionSummary,
   OfficialAgentInstallPreview,
   OfficialAgentSummary,
+  OfficialManagedUpdate,
 } from "../../shared/agentera-agent-control";
 import type {
   AgenteraProfileBindingStore,
@@ -639,6 +640,27 @@ export class AgenteraAgentControlManager {
     return serializeInstallation(result);
   }
 
+  async refreshOfficialUpdates(): Promise<OfficialManagedUpdate[]> {
+    this.assertInstallationRole();
+    await this.assertOnlineLocalRuntimeAccess();
+    await this.ensureRuntimeComponents();
+    return this.ensureOfficialAgentComponents().service.refreshManagedUpdates();
+  }
+
+  async applyOfficialUpdate(
+    installationId: string,
+  ): Promise<AgenteraAgentInstallationSummary> {
+    this.assertInstallationRole();
+    await this.assertOnlineLocalRuntimeAccess();
+    await this.ensureRuntimeComponents();
+    const result =
+      await this.ensureOfficialAgentComponents().service.applyManagedUpdate(
+        installationId,
+      );
+    this.emitState();
+    return serializeInstallation(result);
+  }
+
   async listVersions(
     definitionId: string,
   ): Promise<AgenteraAgentVersionSummary[]> {
@@ -1176,6 +1198,14 @@ export class AgenteraAgentControlManager {
       installer: {
         install: async (input) =>
           (await this.ensureRuntimeComponents()).installations.install(input),
+        listManagedInstallations: () => {
+          if (!this.runtime) throw codedError("local_runtime_required");
+          return this.runtime.installations.listManagedInstallations();
+        },
+        applyManagedOfficialUpdate: async (installationId) =>
+          (
+            await this.ensureRuntimeComponents()
+          ).installations.applyManagedOfficialUpdate(installationId),
       },
       getOwner: full.getOwner,
       getContext: () => this.context(),

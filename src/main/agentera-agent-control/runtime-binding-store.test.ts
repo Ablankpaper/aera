@@ -28,6 +28,7 @@ const INSTALLATION_ID = "88888888-8888-4888-8888-888888888888";
 const RUNTIME_PROFILE_ID = "99999999-9999-4999-8999-999999999999";
 const POLICY_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const ORGANIZATION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const OFFICIAL_RELEASE_REVISION_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const TOOL_DIGEST = "ab".repeat(32);
 const BASE_DIGEST = "cd".repeat(32);
 const NOW = new Date("2026-07-19T20:30:00.000Z");
@@ -51,6 +52,7 @@ function bindingInput(
     runtimeProfileId: RUNTIME_PROFILE_ID,
     runtimeVersion: "v0.18.2-agentera.1",
     policySnapshotId: POLICY_ID,
+    officialReleaseRevisionId: null,
     toolPermissionDigest: TOOL_DIGEST,
     publishedBaseDigest: BASE_DIGEST,
     ...overrides,
@@ -102,6 +104,7 @@ describe("immutable local RuntimeBinding store", () => {
       runtimeProfileId: RUNTIME_PROFILE_ID,
       runtimeVersion: "v0.18.2-agentera.1",
       policySnapshotId: POLICY_ID,
+      officialReleaseRevisionId: null,
       toolPermissionDigest: TOOL_DIGEST,
       publishedBaseDigest: BASE_DIGEST,
       localAdaptiveStateRevision: ADAPTIVE_REVISION,
@@ -141,6 +144,79 @@ describe("immutable local RuntimeBinding store", () => {
     ]) {
       expect(serialized).not.toContain(forbidden);
     }
+  });
+
+  it("pins official release provenance locally and in the sanitized cloud record", () => {
+    const binding = store.getOrCreateForConversation(
+      bindingInput({
+        conversationKey: "official-conversation",
+        officialReleaseRevisionId: OFFICIAL_RELEASE_REVISION_ID,
+      }),
+    );
+
+    expect(binding.officialReleaseRevisionId).toBe(
+      OFFICIAL_RELEASE_REVISION_ID,
+    );
+    expect(store.listPendingCloudRecords()).toEqual([
+      {
+        id: BINDING_ID,
+        body: {
+          binding_id: BINDING_ID,
+          agent_installation_id: INSTALLATION_ID,
+          agent_version_id: VERSION_ID,
+          official_release_revision_id: OFFICIAL_RELEASE_REVISION_ID,
+          runtime_profile_id: RUNTIME_PROFILE_ID,
+          runtime_version: "v0.18.2-agentera.1",
+          policy_snapshot_id: POLICY_ID,
+          tool_permission_digest: TOOL_DIGEST,
+        },
+        attemptCount: 0,
+        nextAttemptAt: null,
+      },
+    ]);
+  });
+
+  it("reads legacy binding JSON as non-official without rewriting it", () => {
+    const legacy = {
+      id: BINDING_ID,
+      conversationKey: "legacy-conversation",
+      hermesSessionId: null,
+      tenantId: TENANT_ID,
+      ownerScope: "USER",
+      ownerId: OWNER_ID,
+      deviceId: DEVICE_ID,
+      agentDefinitionId: DEFINITION_ID,
+      agentVersionId: VERSION_ID,
+      agentInstallationId: INSTALLATION_ID,
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+      runtimeVersion: "v0.18.2-agentera.1",
+      policySnapshotId: POLICY_ID,
+      toolPermissionDigest: TOOL_DIGEST,
+      publishedBaseDigest: BASE_DIGEST,
+      localAdaptiveStateRevision: ADAPTIVE_REVISION,
+      createdAt: NOW.toISOString(),
+    };
+    database.sqlite
+      .prepare(
+        `INSERT INTO runtime_bindings (
+           id, tenant_id, owner_id, device_installation_id,
+           conversation_key, hermes_session_id, binding_json, created_at
+         ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
+      )
+      .run(
+        BINDING_ID,
+        TENANT_ID,
+        OWNER_ID,
+        DEVICE_ID,
+        legacy.conversationKey,
+        JSON.stringify(legacy),
+        NOW.toISOString(),
+      );
+
+    expect(store.getByConversationKey(legacy.conversationKey)).toEqual({
+      ...legacy,
+      officialReleaseRevisionId: null,
+    });
   });
 
   it("keeps bindings and sanitized outbox records scoped to one product account", () => {
