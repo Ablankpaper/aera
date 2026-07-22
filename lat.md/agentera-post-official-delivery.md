@@ -14,6 +14,8 @@ Admin may create a DLP-scanned QualityProposal from thresholded aggregates. A di
 
 The complete contract is `docs/superpowers/specs/2026-07-23-agentera-official-agent-privacy-quality-feedback-v1-design.md`.
 
+The executable cross-repository task sequence is `docs/superpowers/plans/2026-07-23-agentera-official-agent-privacy-quality-feedback-v1.md`.
+
 ## End-to-end encrypted backup V1
 
 Encrypted backup stores immutable ciphertext snapshots for one USER-owned Installation and physical Profile; it is not Agent sync or live multi-device state replication.
@@ -24,6 +26,8 @@ Restore verifies and decrypts into a transaction-owned staging directory, instal
 
 The complete contract is `docs/superpowers/specs/2026-07-23-agentera-end-to-end-encrypted-backup-migration-v1-design.md`.
 
+The executable Cloud/Desktop implementation sequence is `docs/superpowers/plans/2026-07-23-agentera-end-to-end-encrypted-backup-migration-v1.md`.
+
 ## Production readiness and release
 
 Production delivery progresses through local verification, remote CI, private staging, signed candidates, real devices, restore and rollback rehearsal, disabled production deployment, bounded rollout, and separately approved public release.
@@ -31,6 +35,8 @@ Production delivery progresses through local verification, remote CI, private st
 Cloud and Admin images are built once from exact commits and promoted by digest. Desktop macOS Apple Silicon and Windows 11 x64 artifacts are signed once, verified on real devices, and published without rebuilding. Missing GitHub billing, production credentials, domains, providers, signing certificates, devices, or final authority remains an external gate rather than a code fallback.
 
 The complete contract is `docs/superpowers/specs/2026-07-23-agentera-production-readiness-and-release-design.md`.
+
+The executable CI, staging, signing, promotion, device-evidence, and rollback sequence is `docs/superpowers/plans/2026-07-23-agentera-production-readiness-and-release.md`.
 
 ## Hermes and data boundary
 
