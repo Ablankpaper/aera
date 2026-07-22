@@ -23,7 +23,7 @@
 
 ### Cloud: `/Users/zizimutou/Desktop/aera/aera-cloud`
 
-- Create `migrations/000017_official_quality_feedback_v1.sql` for raw events, aggregates, proposals, reviews, and retention constraints.
+- Create `migrations/000017_official_quality_feedback_v1.sql` for consent receipts, purge requests, raw events, aggregates, proposals, reviews, and retention constraints.
 - Create `internal/officialquality/model.go`, `repository.go`, `service.go`, `http.go`, `pseudonym.go`, and focused tests.
 - Modify `internal/config/config.go` and add `internal/config/official_quality.go` for independent HMAC key rings and retention settings.
 - Modify `internal/httpapi/server.go` and `cmd/aera-cloud/main.go` to mount the public ingestion handler.
@@ -62,11 +62,11 @@
 - Modify: `/Users/zizimutou/Desktop/aera/aera-cloud/internal/store/migrate_test.go`
 - Test: `/Users/zizimutou/Desktop/aera/aera-cloud/internal/officialquality/repository_test.go`
 
-- [ ] Write a failing migration test expecting migration 17 and these tables: `official_quality_events`, `official_quality_daily_aggregates`, `official_quality_proposals`, `official_quality_proposal_reviews`.
+- [ ] Write a failing migration test expecting migration 17 and these tables: `official_quality_consent_receipts`, `official_quality_purge_requests`, `official_quality_events`, `official_quality_daily_aggregates`, `official_quality_proposals`, `official_quality_proposal_aggregates`, `official_quality_proposal_reviews`.
 - [ ] Run `go test ./internal/store -run 'TestEmbeddedMigrations|TestApplyMigrations' -count=1`; expect the migration-count/table assertions to fail.
-- [ ] Add migration 17. `official_quality_events` contains only event UUID, platform/definition/version/release-revision foreign keys, UTC event day, 32-byte daily subject pseudonym, event kind, result class, latency bucket, total-token bucket, whitelisted crash code, helpful value, fixed feedback reason code, and timestamps. It has no columns named or semantically equivalent to user, account, device, installation, Profile, session, conversation, RuntimeBinding, IP, user agent, or request body.
-- [ ] Add check constraints for exact enums, mutual exclusivity of passive versus explicit fields, UTC-day retention indexes, and an immutable trigger on raw events.
-- [ ] Add aggregate rows keyed by platform/definition/version/release revision/day/result/latency/token/crash/helpful/reason with `event_count` and `distinct_subject_count`; add proposal and proposal-review rows with immutable source filters and a reviewer-not-creator constraint.
+- [ ] Add migration 17. `official_quality_events` contains only protocol/consent versions, canonical event UUID, platform/definition/version/release/release-revision foreign keys, bounded Desktop/Runtime versions, UTC event day, 32-byte daily subject pseudonym, 32-byte rotating binding-proof digest, event kind, terminal result code, latency bucket, total-token bucket, optional whitelisted crash code, optional explicit rating/fixed reason-code array, 64-byte device signature, and server timestamp. It has no columns named or semantically equivalent to user, account, device, installation, Profile, session, conversation, raw RuntimeBinding, IP, user agent, or request body.
+- [ ] Add user-scoped purpose-specific consent receipts and purge requests in separate tables; event rows never reference those rows or a user/device identifier. Add check constraints for exact enums, metric-versus-explicit rating rules, UTC-day retention indexes, and an immutable trigger on raw events.
+- [ ] Add aggregate rows keyed by platform/definition/version/release revision/day/result/latency/token/crash/rating/reason with `event_count`, `distinct_subject_count`, and explicit suppression state/threshold; add proposal, normalized immutable proposal-to-aggregate references, and proposal-review rows with immutable source filters and a reviewer-not-creator constraint.
 - [ ] Add a repository privacy test that inspects `information_schema.columns`, fails on forbidden names, rejects invalid enum values, and proves event update/delete is blocked except through the retention function executed by the maintenance role.
 - [ ] Run `AERA_INTEGRATION_TESTS=1 go test ./internal/store ./internal/officialquality -count=1`; expect pass.
 - [ ] Commit in Cloud: `git add migrations/000017_official_quality_feedback_v1.sql internal/store/migrate_test.go internal/officialquality/repository_test.go && git commit -m "feat: add official quality privacy schema"`.
@@ -90,12 +90,12 @@
 - Modify: `/Users/zizimutou/Desktop/aera/aera-cloud/internal/httpapi/server.go`
 - Modify: `/Users/zizimutou/Desktop/aera/aera-cloud/cmd/aera-cloud/main.go`
 
-- [ ] Write model tests for the exact accepted public envelope: `event_id`, official definition/version/release revision IDs, `kind`, result class, latency bucket, total-token bucket, whitelisted crash code, helpful value, fixed reason code, and client event time rounded to a UTC day.
+- [ ] Write model tests for the exact accepted public envelope: protocol/consent versions, canonical UUIDv7 `event_id`, official platform/definition/version/release/release-revision IDs, bounded Desktop/Runtime versions, UTC day, `kind`, terminal result code, latency bucket, total-token bucket, optional whitelisted crash code, optional `helpful|not_helpful` rating and fixed reason-code array, rotating binding proof, and device signature.
 - [ ] Add negative tests containing each forbidden field name and oversize/unknown keys; expect `invalid_request` before repository invocation.
 - [ ] Write pseudonym tests proving `HMAC-SHA256(key, "official-quality-v1\x00" || user_id || "\x00" || YYYY-MM-DD)` is stable within one UTC day, changes across days, changes when the purpose label changes, and supports active/previous key verification without exposing the key ID to Admin.
 - [ ] Run `go test ./internal/officialquality -count=1`; expect compile or assertion failure.
 - [ ] Implement strict JSON decoding with a 16 KiB body limit, canonical enum validation, access-token authentication, release/version consistency lookup, daily HMAC derivation, and repository insertion. Do not persist request headers, remote address, access claims, or raw payload bytes.
-- [ ] Add `OfficialQuality http.Handler` to `httpapi.Dependencies`, mount only `POST /api/v1/official-agent-quality/events`, and compose it in `cmd/aera-cloud/main.go` with an independent configured HMAC key ring.
+- [ ] Add `OfficialQuality http.Handler` to `httpapi.Dependencies`; mount purpose-specific consent grant/revoke plus `POST /api/v1/official-agent-quality/events`, and compose it in `cmd/aera-cloud/main.go` with an independent configured HMAC key ring.
 - [ ] Configure defaults `enabled=false`, raw retention 30 days, aggregate retention 180 days, minimum subjects 10, and fail startup if enabled without a 32-byte active key.
 - [ ] Run `go test ./internal/officialquality ./internal/httpapi ./internal/config ./cmd/aera-cloud -count=1`; expect pass.
 - [ ] Commit in Cloud: `git add internal/officialquality internal/config internal/httpapi/server.go cmd/aera-cloud/main.go && git commit -m "feat: ingest minimized official quality events"`.
@@ -179,9 +179,9 @@
 - Create: `/Users/zizimutou/Desktop/aera/aera/src/main/agentera-official-quality/minimizer.ts`
 - Test: corresponding `*.test.ts` files
 
-- [ ] Write tests that resolve an absolute `userData/agentera-official-quality/quality.db` outside `HERMES_HOME`, mode-restrict the directory, and initialize consent as `{passive:false, explicitFeedback:false}`.
+- [ ] Write tests that resolve an absolute `userData/agentera-official-quality/quality.db` outside `HERMES_HOME`, mode-restrict the directory, and initialize versioned consent as `{passive:false, explicitFeedback:false}`.
 - [ ] Write table-shape tests proving the local outbox contains no prompt/response/error text/path/session/conversation/Profile/installation fields.
-- [ ] Write minimizer table tests for latency buckets (`lt_1s`, `1_3s`, `3_10s`, `10_30s`, `gte_30s`) and total-token buckets (`0`, `1_512`, `513_2048`, `2049_8192`, `gte_8193`), fixed result classes, and crash-code allowlist.
+- [ ] Write minimizer table tests for latency buckets (`lt_1s`, `1s_5s`, `5s_15s`, `15s_60s`, `60s_180s`, `gte_180s`) and total-token buckets (`0`, `1_1k`, `1k_4k`, `4k_16k`, `16k_64k`, `gte_64k`), the exact terminal result codes, and the crash-code allowlist.
 - [ ] Run `npm test -- src/main/agentera-official-quality`; expect failure.
 - [ ] Implement schema version 1, strict exact-object parsers, bounded timestamps, and an outbox that stores only the public quality envelope. Reject unknown fields before serialization.
 - [ ] Run focused tests; expect pass.
@@ -204,7 +204,7 @@
 
 - [ ] Write collector tests proving non-official bindings, disabled consent, missing release provenance, and malformed usage produce no row.
 - [ ] Write tests proving `onUsage` retains only total tokens, `onDone` records success and latency, `onError` maps only whitelisted local codes, and full response/error strings never reach the manager mock.
-- [ ] Write uploader tests for authenticated POST, exponential retry, 30-day local expiry, logout isolation, and server rejection without chat failure.
+- [ ] Write uploader tests for authenticated POST, exponential retry with jitter, 1,000-event capacity that drops oldest passive metrics before explicit feedback, 30-day local expiry, logout isolation, consent revocation/purge, and server rejection without chat failure.
 - [ ] Run `npm test -- src/main/agentera-official-quality src/main/ipc/register.official-quality.test.ts`; expect failure.
 - [ ] Compose the manager in `app/start.ts` from auth access-token getter and separate DB. Pass it into `registerIpcHandlers`.
 - [ ] In `ipc/register.ts`, capture `chatStartTime`, bounded usage total, and the trusted `preparedAgentTurn.binding` already fixed before execution. On terminal callback, enqueue an event only when `officialReleaseRevisionId` is present. Never pass `fullResponse`, raw `error`, attachments, history, or tool data.
@@ -231,7 +231,7 @@
 
 - [ ] Write IPC tests rejecting extra properties, free-text notes, raw error, response, session ID, and arbitrary reason codes.
 - [ ] Write PrivacyPane tests for default-off rendering, separate confirmation copy, persistence, and disabled feedback when not authenticated.
-- [ ] Write chat hook tests showing controls only for a completed official-bound turn and sending only `{eventId, helpful, reasonCode}` where reason is one of `incorrect`, `incomplete`, `slow`, `tool_failure`, `unsafe`, `other_fixed`.
+- [ ] Write chat hook tests showing controls only for a completed official-bound turn and sending only `{eventId, rating, reasonCodes}` where rating is `helpful|not_helpful` and every reason is one of `incorrect`, `incomplete`, `tool_failed`, `too_slow`, `unsafe_or_inappropriate`, `other_without_text`.
 - [ ] Run focused Vitest files; expect failure.
 - [ ] Implement `agenteraOfficialQuality` preload API with `getConsent`, `setPassiveConsent`, `setExplicitFeedbackConsent`, and `submitFeedback`. Keep the API absent from generic chat message payloads.
 - [ ] Add auth-guard classifications so reads are local and mutations require an authenticated/offline owner but queue without cloud availability.
