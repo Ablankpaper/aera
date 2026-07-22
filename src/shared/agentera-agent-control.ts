@@ -26,6 +26,17 @@ export interface OfficialManagedUpdate {
   targetVersionId: string;
 }
 
+export interface OfficialAgentInstallPreview {
+  installHandle: string;
+  agent: OfficialAgentSummary;
+  expiresAt: string;
+}
+
+export interface ConfirmOfficialAgentInstallInput {
+  installHandle: string;
+  confirmation: "install-official-agent";
+}
+
 export interface AgentEditableManifestAsset {
   path: string;
   kind: AgentDraftAssetKind;

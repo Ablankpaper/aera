@@ -9,7 +9,7 @@ import {
   resolve,
 } from "node:path";
 
-export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 5;
+export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 6;
 
 export type AgentAssetContext =
   | { scope: "USER" }
@@ -284,9 +284,12 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
         tenant_id TEXT NOT NULL,
         owner_id TEXT NOT NULL,
         device_installation_id TEXT NOT NULL,
-		source_scope TEXT NOT NULL,
-		source_workspace_id TEXT,
+		 source_scope TEXT NOT NULL,
+		 source_workspace_id TEXT,
         source_organization_id TEXT,
+        official_release_id TEXT,
+        selected_release_revision_id TEXT,
+        update_policy TEXT NOT NULL,
         definition_id TEXT NOT NULL,
         selected_version_id TEXT NOT NULL,
         runtime_profile_id TEXT,
@@ -295,9 +298,16 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
         retry_code TEXT,
         created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL,
-		CHECK ((source_scope = 'USER' AND source_workspace_id IS NULL AND source_organization_id IS NULL)
-		    OR (source_scope = 'WORKSPACE' AND source_workspace_id IS NOT NULL AND source_organization_id IS NULL)
-		    OR (source_scope = 'ORGANIZATION' AND source_workspace_id IS NULL AND source_organization_id IS NOT NULL))
+		CHECK (
+          (source_scope = 'USER' AND source_workspace_id IS NULL AND source_organization_id IS NULL
+            AND official_release_id IS NULL AND selected_release_revision_id IS NULL AND update_policy = 'manual')
+		    OR (source_scope = 'WORKSPACE' AND source_workspace_id IS NOT NULL AND source_organization_id IS NULL
+            AND official_release_id IS NULL AND selected_release_revision_id IS NULL AND update_policy = 'manual')
+		    OR (source_scope = 'ORGANIZATION' AND source_workspace_id IS NULL AND source_organization_id IS NOT NULL
+            AND official_release_id IS NULL AND selected_release_revision_id IS NULL AND update_policy = 'manual')
+          OR (source_scope = 'PLATFORM' AND source_workspace_id IS NULL AND source_organization_id IS NULL
+            AND official_release_id IS NOT NULL AND selected_release_revision_id IS NOT NULL AND update_policy = 'managed')
+        )
       );
 
       CREATE TABLE IF NOT EXISTS runtime_bindings (
@@ -708,6 +718,9 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
           source_scope TEXT NOT NULL,
           source_workspace_id TEXT,
           source_organization_id TEXT,
+          official_release_id TEXT,
+          selected_release_revision_id TEXT,
+          update_policy TEXT NOT NULL,
           definition_id TEXT NOT NULL,
           selected_version_id TEXT NOT NULL,
           runtime_profile_id TEXT,
@@ -717,19 +730,25 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           CHECK (
-            (source_scope = 'USER' AND source_workspace_id IS NULL AND source_organization_id IS NULL)
-            OR (source_scope = 'WORKSPACE' AND source_workspace_id IS NOT NULL AND source_organization_id IS NULL)
-            OR (source_scope = 'ORGANIZATION' AND source_workspace_id IS NULL AND source_organization_id IS NOT NULL)
+            (source_scope = 'USER' AND source_workspace_id IS NULL AND source_organization_id IS NULL
+              AND official_release_id IS NULL AND selected_release_revision_id IS NULL AND update_policy = 'manual')
+            OR (source_scope = 'WORKSPACE' AND source_workspace_id IS NOT NULL AND source_organization_id IS NULL
+              AND official_release_id IS NULL AND selected_release_revision_id IS NULL AND update_policy = 'manual')
+            OR (source_scope = 'ORGANIZATION' AND source_workspace_id IS NULL AND source_organization_id IS NOT NULL
+              AND official_release_id IS NULL AND selected_release_revision_id IS NULL AND update_policy = 'manual')
+            OR (source_scope = 'PLATFORM' AND source_workspace_id IS NULL AND source_organization_id IS NULL
+              AND official_release_id IS NOT NULL AND selected_release_revision_id IS NOT NULL AND update_policy = 'managed')
           )
         );
         INSERT INTO local_agent_installations_v5 (
           agent_installation_id, tenant_id, owner_id, device_installation_id,
           source_scope, source_workspace_id, source_organization_id,
+          official_release_id, selected_release_revision_id, update_policy,
           definition_id, selected_version_id, runtime_profile_id,
           policy_snapshot_id, status, retry_code, created_at, updated_at
         )
         SELECT agent_installation_id, tenant_id, owner_id, device_installation_id,
-          source_scope, source_workspace_id, NULL, definition_id,
+          source_scope, source_workspace_id, NULL, NULL, NULL, 'manual', definition_id,
           selected_version_id, runtime_profile_id, policy_snapshot_id,
           status, retry_code, created_at, updated_at
         FROM local_agent_installations;
@@ -760,6 +779,57 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
           PRIMARY KEY (local_draft_id, local_draft_revision, organization_id)
         );
 
+        PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
+      `);
+    }
+    if (currentVersion === 5) {
+      sqlite.exec(`
+        CREATE TABLE local_agent_installations_v6 (
+          agent_installation_id TEXT PRIMARY KEY,
+          tenant_id TEXT NOT NULL,
+          owner_id TEXT NOT NULL,
+          device_installation_id TEXT NOT NULL,
+          source_scope TEXT NOT NULL,
+          source_workspace_id TEXT,
+          source_organization_id TEXT,
+          official_release_id TEXT,
+          selected_release_revision_id TEXT,
+          update_policy TEXT NOT NULL,
+          definition_id TEXT NOT NULL,
+          selected_version_id TEXT NOT NULL,
+          runtime_profile_id TEXT,
+          policy_snapshot_id TEXT,
+          status TEXT NOT NULL,
+          retry_code TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK (
+            (source_scope = 'USER' AND source_workspace_id IS NULL AND source_organization_id IS NULL
+              AND official_release_id IS NULL AND selected_release_revision_id IS NULL AND update_policy = 'manual')
+            OR (source_scope = 'WORKSPACE' AND source_workspace_id IS NOT NULL AND source_organization_id IS NULL
+              AND official_release_id IS NULL AND selected_release_revision_id IS NULL AND update_policy = 'manual')
+            OR (source_scope = 'ORGANIZATION' AND source_workspace_id IS NULL AND source_organization_id IS NOT NULL
+              AND official_release_id IS NULL AND selected_release_revision_id IS NULL AND update_policy = 'manual')
+            OR (source_scope = 'PLATFORM' AND source_workspace_id IS NULL AND source_organization_id IS NULL
+              AND official_release_id IS NOT NULL AND selected_release_revision_id IS NOT NULL AND update_policy = 'managed')
+          )
+        );
+        INSERT INTO local_agent_installations_v6 (
+          agent_installation_id, tenant_id, owner_id, device_installation_id,
+          source_scope, source_workspace_id, source_organization_id,
+          official_release_id, selected_release_revision_id, update_policy,
+          definition_id, selected_version_id, runtime_profile_id,
+          policy_snapshot_id, status, retry_code, created_at, updated_at
+        )
+        SELECT agent_installation_id, tenant_id, owner_id, device_installation_id,
+          source_scope, source_workspace_id, source_organization_id,
+          NULL, NULL, 'manual', definition_id, selected_version_id,
+          runtime_profile_id, policy_snapshot_id, status, retry_code,
+          created_at, updated_at
+        FROM local_agent_installations;
+        DROP TABLE local_agent_installations;
+        ALTER TABLE local_agent_installations_v6
+          RENAME TO local_agent_installations;
         PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
       `);
     }

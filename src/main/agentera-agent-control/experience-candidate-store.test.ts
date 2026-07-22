@@ -71,9 +71,10 @@ function insertInstallation(
     .prepare(
       `INSERT INTO local_agent_installations (
          agent_installation_id, tenant_id, owner_id, device_installation_id,
-         source_scope, source_workspace_id, definition_id, selected_version_id,
+         source_scope, source_workspace_id, update_policy,
+         definition_id, selected_version_id,
          runtime_profile_id, status, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, 'WORKSPACE', ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, 'WORKSPACE', ?, 'manual', ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       overrides.installationId ?? INSTALLATION_ID,

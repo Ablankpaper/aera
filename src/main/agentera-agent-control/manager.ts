@@ -12,6 +12,7 @@ import type {
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
+  ConfirmOfficialAgentInstallInput,
   ConfirmOrganizationReviewInput,
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
@@ -29,6 +30,8 @@ import type {
   SubmitExperienceCandidateInput,
   UpdateAgentDraftInput,
   OrganizationAgentSubmissionSummary,
+  OfficialAgentInstallPreview,
+  OfficialAgentSummary,
 } from "../../shared/agentera-agent-control";
 import type {
   AgenteraProfileBindingStore,
@@ -62,6 +65,7 @@ import {
   type OrganizationSubmissionPreview,
   type OrganizationWithdrawalPreview,
 } from "./organization-publication-service";
+import { OfficialAgentService } from "./official-agent-service";
 import {
   serializeDefinition,
   serializeInstallation,
@@ -121,6 +125,11 @@ interface OrganizationPublicationComponents {
 interface ExperienceCandidateComponents {
   key: string;
   service: ExperienceCandidateService;
+}
+
+interface OfficialAgentComponents {
+  key: string;
+  service: OfficialAgentService;
 }
 
 const UUID_PATTERN =
@@ -313,6 +322,7 @@ export class AgenteraAgentControlManager {
     null;
   private experienceCandidateComponents: ExperienceCandidateComponents | null =
     null;
+  private officialAgentComponents: OfficialAgentComponents | null = null;
   private readonly publicationOwners = new Map<string, string>();
   private readonly listeners = new Set<
     (state: AgenteraAgentControlPublicState) => void
@@ -427,6 +437,8 @@ export class AgenteraAgentControlManager {
     this.organizationPublicationComponents = null;
     this.experienceCandidateComponents?.service.clearPreparedImports();
     this.experienceCandidateComponents = null;
+    this.officialAgentComponents?.service.invalidate();
+    this.officialAgentComponents = null;
     this.publicationOwners.clear();
     this.emitState();
     this.queueRuntimeBindingDelivery();
@@ -438,6 +450,8 @@ export class AgenteraAgentControlManager {
     this.organizationPublicationComponents = null;
     this.experienceCandidateComponents?.service.clearPreparedImports();
     this.experienceCandidateComponents = null;
+    this.officialAgentComponents?.service.invalidate();
+    this.officialAgentComponents = null;
     this.publicationOwners.clear();
     this.emitState();
   }
@@ -597,6 +611,32 @@ export class AgenteraAgentControlManager {
               context.organizationId,
             );
     return definitions.map(serializeDefinition);
+  }
+
+  async listOfficialAgents(): Promise<OfficialAgentSummary[]> {
+    await this.assertOnlineAccess(false);
+    return this.ensureOfficialAgentComponents().service.list();
+  }
+
+  async prepareOfficialInstall(
+    definitionId: string,
+  ): Promise<OfficialAgentInstallPreview> {
+    this.assertInstallationRole();
+    await this.assertOnlineAccess(false);
+    return this.ensureOfficialAgentComponents().service.prepareInstall(
+      definitionId,
+    );
+  }
+
+  async confirmOfficialInstall(
+    input: ConfirmOfficialAgentInstallInput,
+  ): Promise<AgenteraAgentInstallationSummary> {
+    this.assertInstallationRole();
+    await this.assertOnlineLocalRuntimeAccess();
+    const result =
+      await this.ensureOfficialAgentComponents().service.confirmInstall(input);
+    this.emitState();
+    return serializeInstallation(result);
   }
 
   async listVersions(
@@ -1013,6 +1053,8 @@ export class AgenteraAgentControlManager {
     this.contextComponents = null;
     this.experienceCandidateComponents?.service.clearPreparedImports();
     this.experienceCandidateComponents = null;
+    this.officialAgentComponents?.service.invalidate();
+    this.officialAgentComponents = null;
     const cache = new AgentVersionCache({
       database: full.database,
       owner,
@@ -1120,6 +1162,32 @@ export class AgenteraAgentControlManager {
     });
     this.organizationPublicationComponents = { key, service };
     return this.organizationPublicationComponents;
+  }
+
+  private ensureOfficialAgentComponents(): OfficialAgentComponents {
+    const full = this.requireFull();
+    const key = `${this.operationContextKey()}\0${full.client.getOfficialAgentChannel()}`;
+    if (this.officialAgentComponents?.key === key) {
+      return this.officialAgentComponents;
+    }
+    this.officialAgentComponents?.service.invalidate();
+    const service = new OfficialAgentService({
+      client: full.client,
+      installer: {
+        install: async (input) =>
+          (await this.ensureRuntimeComponents()).installations.install(input),
+      },
+      getOwner: full.getOwner,
+      getContext: () => this.context(),
+      isOnline: () => {
+        const state = full.getAuthState();
+        return state.status === "authenticated" && state.cloudAvailable;
+      },
+      now: full.now,
+      randomUUID: full.randomUUID,
+    });
+    this.officialAgentComponents = { key, service };
+    return this.officialAgentComponents;
   }
 
   private async ensureExperienceCandidateComponents(): Promise<ExperienceCandidateComponents> {

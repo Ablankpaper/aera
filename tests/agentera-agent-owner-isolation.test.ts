@@ -193,9 +193,9 @@ describe("Agent control local USER ownership", () => {
       .prepare(
         `INSERT INTO local_agent_installations (
            agent_installation_id, tenant_id, owner_id, device_installation_id,
-           source_scope, source_workspace_id, definition_id,
+           source_scope, source_workspace_id, update_policy, definition_id,
            selected_version_id, status, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, 'manual', ?, ?, 'pending', ?, ?)`,
       )
       .run(
         USER_INSTALLATION_ID,
@@ -213,9 +213,9 @@ describe("Agent control local USER ownership", () => {
       .prepare(
         `INSERT INTO local_agent_installations (
            agent_installation_id, tenant_id, owner_id, device_installation_id,
-           source_scope, source_workspace_id, definition_id,
+           source_scope, source_workspace_id, update_policy, definition_id,
            selected_version_id, status, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, 'manual', ?, ?, 'pending', ?, ?)`,
       )
       .run(
         WORKSPACE_INSTALLATION_ID,
@@ -364,10 +364,10 @@ describe("Agent control local USER ownership", () => {
         .prepare(
           `INSERT INTO local_agent_installations (
              agent_installation_id, tenant_id, owner_id, device_installation_id,
-             source_scope, source_workspace_id, definition_id,
+             source_scope, source_workspace_id, update_policy, definition_id,
              selected_version_id, runtime_profile_id, status,
              created_at, updated_at
-           ) VALUES (?, ?, ?, ?, 'WORKSPACE', ?, ?, ?, ?, 'active', ?, ?)`,
+           ) VALUES (?, ?, ?, ?, 'WORKSPACE', ?, 'manual', ?, ?, ?, 'active', ?, ?)`,
         )
         .run(
           installationId,

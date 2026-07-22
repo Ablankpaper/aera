@@ -67,6 +67,9 @@ const NOW = new Date("2026-07-19T19:30:00.000Z");
 const ORIGIN = "http://127.0.0.1:8086";
 const WORKSPACE_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const ORGANIZATION_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const OFFICIAL_RELEASE_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+const OFFICIAL_RELEASE_REVISION_ID = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+const PLATFORM_ID = "12121212-1212-4212-8212-121212121212";
 
 class FakeSecureStorage implements SecureStorageAdapter {
   isEncryptionAvailable(): boolean {
@@ -171,6 +174,49 @@ function pendingInstallation(versionId = VERSION_ID): AgentInstallation {
     update_policy: "manual",
     created_at: NOW.toISOString(),
     updated_at: NOW.toISOString(),
+  };
+}
+
+function pendingOfficialInstallation(
+  status: "pending" | "active" = "pending",
+): AgentInstallation {
+  return {
+    id: AGENT_INSTALLATION_ID,
+    definition_id: DEFINITION_ID,
+    selected_version_id: VERSION_ID,
+    policy_snapshot_id: POLICY_ID,
+    official_release_id: OFFICIAL_RELEASE_ID,
+    selected_release_revision_id: OFFICIAL_RELEASE_REVISION_ID,
+    status,
+    update_policy: "managed",
+    created_at: NOW.toISOString(),
+    updated_at: NOW.toISOString(),
+    ...(status === "active"
+      ? {
+          runtime_profile_id: RUNTIME_PROFILE_ID,
+          activated_at: NOW.toISOString(),
+        }
+      : {}),
+  };
+}
+
+function makeOfficialPolicy(version: AgentVersion): AgentPolicySnapshot {
+  const value = makePolicy(version);
+  return {
+    ...value,
+    document: {
+      ...value.document,
+      official_context: {
+        platform_id: PLATFORM_ID,
+        release_id: OFFICIAL_RELEASE_ID,
+        release_revision_id: OFFICIAL_RELEASE_REVISION_ID,
+        user_id: owner.ownerId,
+        device_id: owner.deviceInstallationId,
+        installation_id: AGENT_INSTALLATION_ID,
+        product_scope: "USER",
+        product_context_id: owner.tenantId,
+      },
+    },
   };
 }
 
@@ -573,6 +619,170 @@ describe("Agent installation orchestration", () => {
       }),
     ).rejects.toMatchObject({ code: "invalid_installation_request" });
     expect(createInstallation).not.toHaveBeenCalled();
+  });
+
+  it("installs an exact PLATFORM release into a fresh non-cloned Profile", async () => {
+    policy = makeOfficialPolicy(v1);
+    createInstallation.mockResolvedValueOnce({
+      installation: pendingOfficialInstallation(),
+      policy_snapshot: policy,
+      replayed: false,
+    });
+    activateInstallation.mockResolvedValueOnce(
+      pendingOfficialInstallation("active"),
+    );
+
+    const installed = await manager().install({
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      source: {
+        scope: "PLATFORM",
+        officialReleaseId: OFFICIAL_RELEASE_ID,
+        selectedReleaseRevisionId: OFFICIAL_RELEASE_REVISION_ID,
+        updatePolicy: "managed",
+      },
+      profile: { kind: "fresh", name: "Fresh Agent" },
+    });
+
+    expect(createInstallation).toHaveBeenCalledWith(
+      {
+        definition_id: DEFINITION_ID,
+        official_release_revision_id: OFFICIAL_RELEASE_REVISION_ID,
+      } satisfies CreateAgentInstallationRequest,
+      OPERATION_ID,
+    );
+    expect(createProfile).toHaveBeenCalledWith("Fresh Agent", null);
+    expect(installed).toMatchObject({
+      sourceScope: "PLATFORM",
+      sourceWorkspaceId: null,
+      sourceOrganizationId: null,
+      officialReleaseId: OFFICIAL_RELEASE_ID,
+      selectedReleaseRevisionId: OFFICIAL_RELEASE_REVISION_ID,
+      updatePolicy: "managed",
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+      status: "active",
+    });
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT source_scope, source_workspace_id, source_organization_id,
+             official_release_id, selected_release_revision_id, update_policy
+           FROM local_agent_installations WHERE agent_installation_id = ?`,
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({
+      source_scope: "PLATFORM",
+      source_workspace_id: null,
+      source_organization_id: null,
+      official_release_id: OFFICIAL_RELEASE_ID,
+      selected_release_revision_id: OFFICIAL_RELEASE_REVISION_ID,
+      update_policy: "managed",
+    });
+  });
+
+  it("rejects claiming an existing Profile for a PLATFORM source before Cloud mutation", async () => {
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        source: {
+          scope: "PLATFORM",
+          officialReleaseId: OFFICIAL_RELEASE_ID,
+          selectedReleaseRevisionId: OFFICIAL_RELEASE_REVISION_ID,
+          updatePolicy: "managed",
+        },
+        profile: {
+          kind: "claim",
+          profileId: "existing",
+          profilePath: join(profilesRoot, "existing"),
+        },
+      }),
+    ).rejects.toMatchObject({ code: "invalid_installation_request" });
+    expect(createInstallation).not.toHaveBeenCalled();
+  });
+
+  it("rejects a mismatched official release before local persistence or Profile creation", async () => {
+    policy = makeOfficialPolicy(v1);
+    createInstallation.mockResolvedValueOnce({
+      installation: {
+        ...pendingOfficialInstallation(),
+        selected_release_revision_id: "12121212-1212-4212-8212-121212121212",
+      },
+      policy_snapshot: policy,
+      replayed: false,
+    });
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        source: {
+          scope: "PLATFORM",
+          officialReleaseId: OFFICIAL_RELEASE_ID,
+          selectedReleaseRevisionId: OFFICIAL_RELEASE_REVISION_ID,
+          updatePolicy: "managed",
+        },
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "installation_conflict" });
+    expect(createProfile).not.toHaveBeenCalled();
+    expect(
+      database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM local_agent_installations")
+        .get(),
+    ).toEqual({ count: 0 });
+  });
+
+  it("retries official activation with the same created Profile and preserves local Memory", async () => {
+    policy = makeOfficialPolicy(v1);
+    getPolicySnapshot.mockResolvedValue(policy);
+    createInstallation.mockResolvedValueOnce({
+      installation: pendingOfficialInstallation(),
+      policy_snapshot: policy,
+      replayed: false,
+    });
+    activateInstallation
+      .mockRejectedValueOnce(new Error("activation unavailable"))
+      .mockResolvedValueOnce(pendingOfficialInstallation("active"));
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        source: {
+          scope: "PLATFORM",
+          officialReleaseId: OFFICIAL_RELEASE_ID,
+          selectedReleaseRevisionId: OFFICIAL_RELEASE_REVISION_ID,
+          updatePolicy: "managed",
+        },
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "activation_failed" });
+    writeFileSync(
+      join(freshProfilePath, "MEMORY.md"),
+      "official local memory\n",
+    );
+
+    const retried = await manager().retryPendingInstallation({
+      agentInstallationId: AGENT_INSTALLATION_ID,
+      profile: {
+        kind: "claim",
+        profileId: "fresh-agent",
+        profilePath: freshProfilePath,
+      },
+    });
+
+    expect(retried).toMatchObject({
+      sourceScope: "PLATFORM",
+      officialReleaseId: OFFICIAL_RELEASE_ID,
+      selectedReleaseRevisionId: OFFICIAL_RELEASE_REVISION_ID,
+      status: "active",
+    });
+    expect(createProfile).toHaveBeenCalledOnce();
+    expect(createInstallation).toHaveBeenCalledOnce();
+    expect(readFileSync(join(freshProfilePath, "MEMORY.md"), "utf8")).toBe(
+      "official local memory\n",
+    );
   });
 
   it("does not expose one product account's installation to another", async () => {

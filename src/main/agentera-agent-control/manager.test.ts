@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   AgenteraAgentControlContext,
   CreateAgentDraftInput,
+  OfficialAgentSummary,
 } from "../../shared/agentera-agent-control";
 import type { AgenteraAgentControlClient } from "./client";
 import type { AgenteraHermesAdapter } from "./hermes-adapter";
@@ -25,6 +26,25 @@ const OWNER = {
 };
 const ORGANIZATION_ID = "20000000-0000-4000-8000-000000000001";
 const OTHER_ORGANIZATION_ID = "20000000-0000-4000-8000-000000000002";
+const OFFICIAL_DEFINITION_ID = "30000000-0000-4000-8000-000000000001";
+
+function officialSummary(): OfficialAgentSummary {
+  return {
+    definitionId: OFFICIAL_DEFINITION_ID,
+    displayName: "Official Research Agent",
+    iconMediaType: null,
+    iconDataBase64Url: null,
+    versionId: "30000000-0000-4000-8000-000000000002",
+    versionNumber: 1,
+    releaseId: "30000000-0000-4000-8000-000000000003",
+    releaseRevisionId: "30000000-0000-4000-8000-000000000004",
+    channel: "internal",
+    runtimeMinimumVersion: "v0.18.2-agentera.1",
+    runtimeMaximumVersionExclusive: null,
+    installationState: "not_installed",
+    updateState: "current",
+  };
+}
 
 function draftInput(): CreateAgentDraftInput {
   return {
@@ -82,6 +102,7 @@ describe("Agent control Organization Foundation context", () => {
         database,
         client: {
           origin: "https://cloud.agentera.test",
+          getOfficialAgentChannel: () => "internal",
           listOrganizationDefinitions: vi.fn(async () => []),
           listOrganizationVersions: vi.fn(async () => []),
           ...clientOverrides,
@@ -253,6 +274,29 @@ describe("Agent control Organization Foundation context", () => {
       }),
     ).rejects.toMatchObject({ code: "conflict" });
     expect(submitOrganizationAgent).not.toHaveBeenCalled();
+  });
+
+  it("routes official catalog and install preparation through trusted main-process context", async () => {
+    const listOfficialAgents = vi.fn(async () => [officialSummary()]);
+    const getOfficialRelease = vi.fn(async () => officialSummary());
+    const { manager } = fullManager(() => ({ scope: "USER" }), {
+      listOfficialAgents,
+      getOfficialRelease,
+      getOfficialAgentChannel: () => "internal",
+    });
+
+    await expect(manager.listOfficialAgents()).resolves.toEqual([
+      officialSummary(),
+    ]);
+    await expect(
+      manager.prepareOfficialInstall(OFFICIAL_DEFINITION_ID),
+    ).resolves.toMatchObject({
+      agent: officialSummary(),
+      expiresAt: expect.any(String),
+      installHandle: expect.any(String),
+    });
+    expect(listOfficialAgents).toHaveBeenCalledOnce();
+    expect(getOfficialRelease).toHaveBeenCalledWith(OFFICIAL_DEFINITION_ID);
   });
 
   it("keeps the runtime component identity independent of Product Space", () => {

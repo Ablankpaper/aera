@@ -37,6 +37,7 @@ describe("Workspace Agent assets remain outside Hermes private runtime state", (
       "src/main/agentera-agent-control/installation-manager.ts",
       "src/main/agentera-agent-control/ipc-contract.ts",
       "src/main/agentera-agent-control/manager.ts",
+      "src/main/agentera-agent-control/official-agent-service.ts",
       "src/main/agentera-agent-control/publisher.ts",
     ]);
     const ownershipVocabulary =

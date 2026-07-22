@@ -1864,6 +1864,10 @@ export class AgenteraAgentControlClient {
     return value.official_agents.map(detachOfficialAgentSummary);
   }
 
+  getOfficialAgentChannel(): OfficialAgentChannel {
+    return this.requireOfficialConfiguration().channel;
+  }
+
   async getOfficialAgent(definitionId: string): Promise<{
     agent: OfficialAgentSummary;
     version: AgentVersion;

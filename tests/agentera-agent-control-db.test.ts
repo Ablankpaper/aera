@@ -39,8 +39,8 @@ afterEach(() => {
 });
 
 describe("AgentEra control-plane database", () => {
-  it("pins the Organization Agent local schema at version 5", () => {
-    expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(5);
+  it("pins the Official Agent local schema at version 6", () => {
+    expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(6);
   });
 
   it("opens exactly below Electron userData and never below HERMES_HOME", () => {
@@ -154,6 +154,9 @@ describe("AgentEra control-plane database", () => {
           "source_scope",
           "source_workspace_id",
           "source_organization_id",
+          "official_release_id",
+          "selected_release_revision_id",
+          "update_policy",
         ]),
       );
       const cachedColumns = database.sqlite
@@ -229,6 +232,9 @@ describe("AgentEra control-plane database", () => {
       expect(schemaSql).toContain(
         "source_scope = 'ORGANIZATION' AND source_workspace_id IS NULL AND source_organization_id IS NOT NULL",
       );
+      expect(schemaSql).toContain(
+        "source_scope = 'PLATFORM' AND source_workspace_id IS NULL AND source_organization_id IS NULL AND official_release_id IS NOT NULL AND selected_release_revision_id IS NOT NULL AND update_policy = 'managed'",
+      );
       const submissionReferenceColumns = database.sqlite
         .prepare("PRAGMA table_info(organization_agent_submission_refs)")
         .all() as Array<{ name: string }>;
@@ -247,7 +253,139 @@ describe("AgentEra control-plane database", () => {
     }
   });
 
-  it("migrates v4 rows unchanged and enforces exact v5 Organization variants", () => {
+  it("migrates v5 installations without changing ownership, Profile, policy, retry, or timestamps", () => {
+    const userDataPath = join(temporaryRoot(), "user-data");
+    const paths = resolveAgenteraControlPlanePaths(userDataPath);
+    mkdirSync(paths.rootPath, { recursive: true });
+    const legacy = new DatabaseSync(paths.databasePath);
+    legacy.exec(`
+      CREATE TABLE local_agent_installations (
+        agent_installation_id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        device_installation_id TEXT NOT NULL,
+        source_scope TEXT NOT NULL,
+        source_workspace_id TEXT,
+        source_organization_id TEXT,
+        definition_id TEXT NOT NULL,
+        selected_version_id TEXT NOT NULL,
+        runtime_profile_id TEXT,
+        policy_snapshot_id TEXT,
+        status TEXT NOT NULL,
+        retry_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CHECK (
+          (source_scope = 'USER' AND source_workspace_id IS NULL AND source_organization_id IS NULL)
+          OR (source_scope = 'WORKSPACE' AND source_workspace_id IS NOT NULL AND source_organization_id IS NULL)
+          OR (source_scope = 'ORGANIZATION' AND source_workspace_id IS NULL AND source_organization_id IS NOT NULL)
+        )
+      );
+      PRAGMA user_version = 5;
+    `);
+    const values = {
+      installation: "11111111-1111-4111-8111-111111111111",
+      tenant: "22222222-2222-4222-8222-222222222222",
+      owner: "33333333-3333-4333-8333-333333333333",
+      device: "44444444-4444-4444-8444-444444444444",
+      organization: "55555555-5555-4555-8555-555555555555",
+      definition: "66666666-6666-4666-8666-666666666666",
+      version: "77777777-7777-4777-8777-777777777777",
+      profile: "88888888-8888-4888-8888-888888888888",
+      policy: "99999999-9999-4999-8999-999999999999",
+      created: "2026-07-21T00:00:00.000Z",
+      updated: "2026-07-21T00:01:00.000Z",
+    };
+    legacy
+      .prepare(
+        `INSERT INTO local_agent_installations (
+          agent_installation_id, tenant_id, owner_id, device_installation_id,
+          source_scope, source_workspace_id, source_organization_id,
+          definition_id, selected_version_id, runtime_profile_id,
+          policy_snapshot_id, status, retry_code, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'ORGANIZATION', NULL, ?, ?, ?, ?, ?,
+          'pending', 'materialization_policy_failed', ?, ?)`,
+      )
+      .run(
+        values.installation,
+        values.tenant,
+        values.owner,
+        values.device,
+        values.organization,
+        values.definition,
+        values.version,
+        values.profile,
+        values.policy,
+        values.created,
+        values.updated,
+      );
+    legacy.close();
+
+    const database = openAgenteraControlPlaneDatabase(userDataPath, {
+      databaseFactory: nodeSqliteFactory,
+    });
+    expect(database.sqlite.prepare("PRAGMA user_version").get()).toEqual({
+      user_version: 6,
+    });
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT agent_installation_id, tenant_id, owner_id,
+            device_installation_id, source_scope, source_workspace_id,
+            source_organization_id, official_release_id,
+            selected_release_revision_id, update_policy, definition_id,
+            selected_version_id, runtime_profile_id, policy_snapshot_id,
+            status, retry_code, created_at, updated_at
+           FROM local_agent_installations`,
+        )
+        .get(),
+    ).toEqual({
+      agent_installation_id: values.installation,
+      tenant_id: values.tenant,
+      owner_id: values.owner,
+      device_installation_id: values.device,
+      source_scope: "ORGANIZATION",
+      source_workspace_id: null,
+      source_organization_id: values.organization,
+      official_release_id: null,
+      selected_release_revision_id: null,
+      update_policy: "manual",
+      definition_id: values.definition,
+      selected_version_id: values.version,
+      runtime_profile_id: values.profile,
+      policy_snapshot_id: values.policy,
+      status: "pending",
+      retry_code: "materialization_policy_failed",
+      created_at: values.created,
+      updated_at: values.updated,
+    });
+    expect(() =>
+      database.sqlite
+        .prepare(
+          `INSERT INTO local_agent_installations (
+            agent_installation_id, tenant_id, owner_id, device_installation_id,
+            source_scope, source_workspace_id, source_organization_id,
+            official_release_id, selected_release_revision_id, update_policy,
+            definition_id, selected_version_id, status, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, 'PLATFORM', NULL, NULL, ?, NULL, 'managed',
+            ?, ?, 'pending', ?, ?)`,
+        )
+        .run(
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          values.tenant,
+          values.owner,
+          values.device,
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          values.definition,
+          values.version,
+          values.created,
+          values.updated,
+        ),
+    ).toThrow();
+    database.close();
+  });
+
+  it("migrates v4 rows unchanged and enforces exact v6 Organization variants", () => {
     const userDataPath = join(temporaryRoot(), "user-data");
     const paths = resolveAgenteraControlPlanePaths(userDataPath);
     mkdirSync(paths.rootPath, { recursive: true });
@@ -411,7 +549,7 @@ describe("AgentEra control-plane database", () => {
             unknown
           >,
         ),
-      ).toEqual([5]);
+      ).toEqual([6]);
       expect(
         database.sqlite
           .prepare(

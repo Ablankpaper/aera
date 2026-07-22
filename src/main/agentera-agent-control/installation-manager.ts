@@ -118,11 +118,25 @@ export type AgentInstallationProfileTarget =
   | { kind: "fresh"; name: string }
   | { kind: "claim"; profileId: string; profilePath: string };
 
+export type AgentInstallationSource =
+  | { scope: "USER" }
+  | { scope: "WORKSPACE"; workspaceId: string }
+  | { scope: "ORGANIZATION"; organizationId: string }
+  | {
+      scope: "PLATFORM";
+      officialReleaseId: string;
+      selectedReleaseRevisionId: string;
+      updatePolicy: "managed";
+    };
+
 export interface LocalAgentInstallation {
   agentInstallationId: string;
-  sourceScope: "USER" | "WORKSPACE" | "ORGANIZATION";
+  sourceScope: "USER" | "WORKSPACE" | "ORGANIZATION" | "PLATFORM";
   sourceWorkspaceId: string | null;
   sourceOrganizationId: string | null;
+  officialReleaseId: string | null;
+  selectedReleaseRevisionId: string | null;
+  updatePolicy: "manual" | "managed";
   definitionId: string;
   selectedVersionId: string;
   runtimeProfileId: string | null;
@@ -152,6 +166,9 @@ interface LocalInstallationRow {
   source_scope: unknown;
   source_workspace_id: unknown;
   source_organization_id: unknown;
+  official_release_id: unknown;
+  selected_release_revision_id: unknown;
+  update_policy: unknown;
   definition_id: unknown;
   selected_version_id: unknown;
   runtime_profile_id: unknown;
@@ -167,9 +184,21 @@ interface InstallationCreationIntent {
   definitionId: string;
   versionId: string;
   idempotencyKey: string;
-  sourceScope: "USER" | "WORKSPACE" | "ORGANIZATION";
+  sourceScope: "USER" | "WORKSPACE" | "ORGANIZATION" | "PLATFORM";
   sourceWorkspaceId: string | null;
   sourceOrganizationId: string | null;
+  officialReleaseId: string | null;
+  selectedReleaseRevisionId: string | null;
+  updatePolicy: "manual" | "managed";
+}
+
+interface NormalizedInstallationSource {
+  scope: "USER" | "WORKSPACE" | "ORGANIZATION" | "PLATFORM";
+  workspaceId: string | null;
+  organizationId: string | null;
+  officialReleaseId: string | null;
+  selectedReleaseRevisionId: string | null;
+  updatePolicy: "manual" | "managed";
 }
 
 function uuid(value: unknown): string {
@@ -191,64 +220,96 @@ function nullableUuid(value: unknown): string | null {
   return value === null ? null : uuid(value);
 }
 
-function normalizeInstallationSource(context: AgentAssetContext | undefined): {
-  scope: "USER" | "WORKSPACE" | "ORGANIZATION";
-  workspaceId: string | null;
-  organizationId: string | null;
-} {
+function normalizeInstallationSource(
+  context: AgentAssetContext | AgentInstallationSource | undefined,
+): NormalizedInstallationSource {
   if (context === undefined || context.scope === "USER") {
-    return { scope: "USER", workspaceId: null, organizationId: null };
+    return {
+      scope: "USER",
+      workspaceId: null,
+      organizationId: null,
+      officialReleaseId: null,
+      selectedReleaseRevisionId: null,
+      updatePolicy: "manual",
+    };
   }
   if (context.scope === "WORKSPACE") {
-    if (
-      context.role !== "owner" &&
-      context.role !== "admin" &&
-      context.role !== "member"
-    ) {
+    const role = "role" in context ? context.role : "member";
+    if (role !== "owner" && role !== "admin" && role !== "member") {
       throw new AgentInstallationManagerError("invalid_installation_request");
     }
     return {
       scope: "WORKSPACE",
       workspaceId: uuid(context.workspaceId),
       organizationId: null,
+      officialReleaseId: null,
+      selectedReleaseRevisionId: null,
+      updatePolicy: "manual",
     };
   }
-  if (
-    context.role !== "owner" &&
-    context.role !== "admin" &&
-    context.role !== "member"
-  ) {
+  if (context.scope === "PLATFORM") {
+    if (context.updatePolicy !== "managed") {
+      throw new AgentInstallationManagerError("invalid_installation_request");
+    }
+    return {
+      scope: "PLATFORM",
+      workspaceId: null,
+      organizationId: null,
+      officialReleaseId: uuid(context.officialReleaseId),
+      selectedReleaseRevisionId: uuid(context.selectedReleaseRevisionId),
+      updatePolicy: "managed",
+    };
+  }
+  const role = "role" in context ? context.role : "member";
+  if (role !== "owner" && role !== "admin" && role !== "member") {
     throw new AgentInstallationManagerError("invalid_installation_request");
   }
   return {
     scope: "ORGANIZATION",
     workspaceId: null,
     organizationId: uuid(context.organizationId),
+    officialReleaseId: null,
+    selectedReleaseRevisionId: null,
+    updatePolicy: "manual",
   };
 }
 
-function parseStoredSource(row: LocalInstallationRow): {
-  scope: "USER" | "WORKSPACE" | "ORGANIZATION";
-  workspaceId: string | null;
-  organizationId: string | null;
-} {
+function parseStoredSource(
+  row: LocalInstallationRow,
+): NormalizedInstallationSource {
   if (
     row.source_scope === "USER" &&
     row.source_workspace_id === null &&
-    row.source_organization_id === null
+    row.source_organization_id === null &&
+    row.official_release_id === null &&
+    row.selected_release_revision_id === null &&
+    row.update_policy === "manual"
   ) {
-    return { scope: "USER", workspaceId: null, organizationId: null };
+    return {
+      scope: "USER",
+      workspaceId: null,
+      organizationId: null,
+      officialReleaseId: null,
+      selectedReleaseRevisionId: null,
+      updatePolicy: "manual",
+    };
   }
   if (
     row.source_scope === "WORKSPACE" &&
     row.source_workspace_id !== null &&
-    row.source_organization_id === null
+    row.source_organization_id === null &&
+    row.official_release_id === null &&
+    row.selected_release_revision_id === null &&
+    row.update_policy === "manual"
   ) {
     try {
       return {
         scope: "WORKSPACE",
         workspaceId: uuid(row.source_workspace_id),
         organizationId: null,
+        officialReleaseId: null,
+        selectedReleaseRevisionId: null,
+        updatePolicy: "manual",
       };
     } catch {
       // Stored rows must fail closed as conflicts, not as user input errors.
@@ -257,13 +318,40 @@ function parseStoredSource(row: LocalInstallationRow): {
   if (
     row.source_scope === "ORGANIZATION" &&
     row.source_workspace_id === null &&
-    row.source_organization_id !== null
+    row.source_organization_id !== null &&
+    row.official_release_id === null &&
+    row.selected_release_revision_id === null &&
+    row.update_policy === "manual"
   ) {
     try {
       return {
         scope: "ORGANIZATION",
         workspaceId: null,
         organizationId: uuid(row.source_organization_id),
+        officialReleaseId: null,
+        selectedReleaseRevisionId: null,
+        updatePolicy: "manual",
+      };
+    } catch {
+      // Stored rows must fail closed as conflicts, not as user input errors.
+    }
+  }
+  if (
+    row.source_scope === "PLATFORM" &&
+    row.source_workspace_id === null &&
+    row.source_organization_id === null &&
+    row.official_release_id !== null &&
+    row.selected_release_revision_id !== null &&
+    row.update_policy === "managed"
+  ) {
+    try {
+      return {
+        scope: "PLATFORM",
+        workspaceId: null,
+        organizationId: null,
+        officialReleaseId: uuid(row.official_release_id),
+        selectedReleaseRevisionId: uuid(row.selected_release_revision_id),
+        updatePolicy: "managed",
       };
     } catch {
       // Stored rows must fail closed as conflicts, not as user input errors.
@@ -300,6 +388,9 @@ function parseLocalRow(row: LocalInstallationRow): LocalAgentInstallation {
     sourceScope: source.scope,
     sourceWorkspaceId: source.workspaceId,
     sourceOrganizationId: source.organizationId,
+    officialReleaseId: source.officialReleaseId,
+    selectedReleaseRevisionId: source.selectedReleaseRevisionId,
+    updatePolicy: source.updatePolicy,
     definitionId: uuid(row.definition_id),
     selectedVersionId: uuid(row.selected_version_id),
     runtimeProfileId: nullableUuid(row.runtime_profile_id),
@@ -333,6 +424,8 @@ function assertPendingCreation(
   definitionId: string,
   versionId: string,
   expectedOrigin: string,
+  source: NormalizedInstallationSource,
+  owner: AgenteraRuntimeOwner,
 ): void {
   const installation = creation.installation;
   const policy = creation.policy_snapshot;
@@ -345,10 +438,51 @@ function assertPendingCreation(
     uuid(installation.policy_snapshot_id) !== uuid(policy.id) ||
     uuid(policy.installation_id) !== uuid(installation.id) ||
     uuid(policy.agent_version_id) !== versionId ||
-    policy.issuer !== expectedOrigin
+    policy.issuer !== expectedOrigin ||
+    !cloudSourceMatches(installation, source) ||
+    !policySourceMatches(policy, source, owner, uuid(installation.id))
   ) {
     throw new AgentInstallationManagerError("installation_conflict");
   }
+}
+
+function cloudSourceMatches(
+  installation: AgentInstallation,
+  source: NormalizedInstallationSource,
+): boolean {
+  if (source.scope === "PLATFORM") {
+    return (
+      installation.update_policy === "managed" &&
+      installation.official_release_id !== undefined &&
+      uuid(installation.official_release_id) === source.officialReleaseId &&
+      installation.selected_release_revision_id !== undefined &&
+      uuid(installation.selected_release_revision_id) ===
+        source.selectedReleaseRevisionId
+    );
+  }
+  return (
+    installation.update_policy === "manual" &&
+    installation.official_release_id === undefined &&
+    installation.selected_release_revision_id === undefined
+  );
+}
+
+function policySourceMatches(
+  policy: AgentPolicySnapshot,
+  source: NormalizedInstallationSource,
+  owner: AgenteraRuntimeOwner,
+  installationId: string,
+): boolean {
+  const context = policy.document.official_context;
+  if (source.scope !== "PLATFORM") return context === undefined;
+  return (
+    context !== undefined &&
+    uuid(context.release_id) === source.officialReleaseId &&
+    uuid(context.release_revision_id) === source.selectedReleaseRevisionId &&
+    uuid(context.user_id) === owner.ownerId &&
+    uuid(context.device_id) === owner.deviceInstallationId &&
+    uuid(context.installation_id) === installationId
+  );
 }
 
 function assertVersion(
@@ -371,6 +505,8 @@ function assertPolicy(
   definitionId: string,
   version: AgentVersion,
   expectedOrigin: string,
+  local: LocalAgentInstallation,
+  owner: AgenteraRuntimeOwner,
 ): void {
   if (
     uuid(policy.installation_id) !== installationId ||
@@ -379,7 +515,20 @@ function assertPolicy(
     uuid(policy.document.agent_definition_id) !== definitionId ||
     uuid(policy.document.agent_version_id) !== uuid(version.id) ||
     policy.document.version_digest !== version.content_digest ||
-    !DIGEST_PATTERN.test(policy.content_digest)
+    !DIGEST_PATTERN.test(policy.content_digest) ||
+    !policySourceMatches(
+      policy,
+      {
+        scope: local.sourceScope,
+        workspaceId: local.sourceWorkspaceId,
+        organizationId: local.sourceOrganizationId,
+        officialReleaseId: local.officialReleaseId,
+        selectedReleaseRevisionId: local.selectedReleaseRevisionId,
+        updatePolicy: local.updatePolicy,
+      },
+      owner,
+      installationId,
+    )
   ) {
     throw new AgentInstallationManagerError("installation_conflict");
   }
@@ -397,6 +546,14 @@ function assertCloudState(
     uuid(installation.definition_id) !== local.definitionId ||
     uuid(installation.selected_version_id) !== expectedVersionId ||
     installation.status !== expectedStatus ||
+    !cloudSourceMatches(installation, {
+      scope: local.sourceScope,
+      workspaceId: local.sourceWorkspaceId,
+      organizationId: local.sourceOrganizationId,
+      officialReleaseId: local.officialReleaseId,
+      selectedReleaseRevisionId: local.selectedReleaseRevisionId,
+      updatePolicy: local.updatePolicy,
+    }) ||
     (expectedRuntimeProfileId === null
       ? installation.runtime_profile_id !== undefined
       : uuid(installation.runtime_profile_id) !== expectedRuntimeProfileId)
@@ -494,22 +651,32 @@ export class AgentInstallationManager {
     definitionId: string;
     versionId: string;
     profile: AgentInstallationProfileTarget;
-    source?: AgentAssetContext;
+    source?: AgentAssetContext | AgentInstallationSource;
   }): Promise<LocalAgentInstallation> {
     const definitionId = uuid(input.definitionId);
     const versionId = uuid(input.versionId);
     const source = normalizeInstallationSource(input.source);
+    if (source.scope === "PLATFORM" && input.profile.kind !== "fresh") {
+      throw new AgentInstallationManagerError("invalid_installation_request");
+    }
     const intent = this.beginCreationIntent(definitionId, versionId, source);
     let creation: AgentInstallationCreation;
     try {
       const request: CreateAgentInstallationRequest = {
         definition_id: definitionId,
-        version_id: versionId,
-        ...(source.scope === "WORKSPACE"
-          ? { workspace_id: source.workspaceId as string }
-          : source.scope === "ORGANIZATION"
-            ? { organization_id: source.organizationId as string }
-            : {}),
+        ...(source.scope === "PLATFORM"
+          ? {
+              official_release_revision_id:
+                source.selectedReleaseRevisionId as string,
+            }
+          : {
+              version_id: versionId,
+              ...(source.scope === "WORKSPACE"
+                ? { workspace_id: source.workspaceId as string }
+                : source.scope === "ORGANIZATION"
+                  ? { organization_id: source.organizationId as string }
+                  : {}),
+            }),
       };
       creation = await this.client.createInstallation(
         request,
@@ -520,6 +687,8 @@ export class AgentInstallationManager {
         definitionId,
         versionId,
         this.client.origin,
+        source,
+        this.owner,
       );
     } catch (error) {
       if (error instanceof AgentInstallationManagerError) throw error;
@@ -551,6 +720,10 @@ export class AgentInstallationManager {
           parsed.sourceScope !== source.scope ||
           parsed.sourceWorkspaceId !== source.workspaceId ||
           parsed.sourceOrganizationId !== source.organizationId ||
+          parsed.officialReleaseId !== source.officialReleaseId ||
+          parsed.selectedReleaseRevisionId !==
+            source.selectedReleaseRevisionId ||
+          parsed.updatePolicy !== source.updatePolicy ||
           parsed.status !== "pending"
         ) {
           throw new AgentInstallationManagerError("installation_conflict");
@@ -561,10 +734,11 @@ export class AgentInstallationManager {
             `INSERT INTO local_agent_installations (
              agent_installation_id, tenant_id, owner_id, device_installation_id,
              source_scope, source_workspace_id, source_organization_id,
+             official_release_id, selected_release_revision_id, update_policy,
              definition_id, selected_version_id,
              runtime_profile_id, policy_snapshot_id, status, retry_code,
              created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'pending', NULL, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'pending', NULL, ?, ?)`,
           )
           .run(
             installationId,
@@ -574,6 +748,9 @@ export class AgentInstallationManager {
             source.scope,
             source.workspaceId,
             source.organizationId,
+            source.officialReleaseId,
+            source.selectedReleaseRevisionId,
+            source.updatePolicy,
             definitionId,
             versionId,
             policyId,
@@ -602,6 +779,13 @@ export class AgentInstallationManager {
     if (local.status !== "pending") {
       throw new AgentInstallationManagerError("installation_conflict");
     }
+    if (
+      local.sourceScope === "PLATFORM" &&
+      local.runtimeProfileId === null &&
+      input.profile.kind !== "fresh"
+    ) {
+      throw new AgentInstallationManagerError("invalid_installation_request");
+    }
     let policy: AgentPolicySnapshot;
     try {
       if (local.policySnapshotId === null) {
@@ -623,6 +807,9 @@ export class AgentInstallationManager {
   }): Promise<LocalAgentInstallation> {
     const local = this.getLocalInstallation(input.agentInstallationId);
     const versionId = uuid(input.versionId);
+    if (local.sourceScope === "PLATFORM") {
+      throw new AgentInstallationManagerError("invalid_installation_request");
+    }
     if (local.status !== "active" || local.runtimeProfileId === null) {
       throw new AgentInstallationManagerError("installation_conflict");
     }
@@ -678,6 +865,8 @@ export class AgentInstallationManager {
         local.definitionId,
         version,
         this.client.origin,
+        local,
+        this.owner,
       );
       const verifiedPolicy = this.trust.verifyPolicy(selectedPolicy, {
         runtimeVersion: this.runtimeVersion,
@@ -773,6 +962,8 @@ export class AgentInstallationManager {
         local.definitionId,
         version,
         this.client.origin,
+        local,
+        this.owner,
       );
       const verifiedPolicy = this.trust.verifyPolicy(policy, {
         runtimeVersion: this.runtimeVersion,
@@ -919,11 +1110,7 @@ export class AgentInstallationManager {
   private beginCreationIntent(
     definitionId: string,
     versionId: string,
-    source: {
-      scope: "USER" | "WORKSPACE" | "ORGANIZATION";
-      workspaceId: string | null;
-      organizationId: string | null;
-    },
+    source: NormalizedInstallationSource,
   ): InstallationCreationIntent {
     const rows = this.database.sqlite
       .prepare(
@@ -976,24 +1163,37 @@ export class AgentInstallationManager {
       ]
         .sort()
         .join("\0");
+      const platformKeys = [
+        "definition_id",
+        "idempotency_key",
+        "official_release_id",
+        "selected_release_revision_id",
+        "source_organization_id",
+        "source_scope",
+        "source_workspace_id",
+        "update_policy",
+        "version_id",
+      ]
+        .sort()
+        .join("\0");
       if (
         (keys !== legacyKeys &&
           keys !== legacyScopedKeys &&
-          keys !== scopedKeys) ||
+          keys !== scopedKeys &&
+          keys !== platformKeys) ||
         uuid(row.id) !== uuid(record.idempotency_key)
       ) {
         throw new AgentInstallationManagerError("installation_conflict");
       }
-      let storedSource: {
-        scope: "USER" | "WORKSPACE" | "ORGANIZATION";
-        workspaceId: string | null;
-        organizationId: string | null;
-      };
+      let storedSource: NormalizedInstallationSource;
       if (keys === legacyKeys) {
         storedSource = {
           scope: "USER",
           workspaceId: null,
           organizationId: null,
+          officialReleaseId: null,
+          selectedReleaseRevisionId: null,
+          updatePolicy: "manual",
         };
       } else if (
         record.source_scope === "USER" &&
@@ -1004,6 +1204,9 @@ export class AgentInstallationManager {
           scope: "USER",
           workspaceId: null,
           organizationId: null,
+          officialReleaseId: null,
+          selectedReleaseRevisionId: null,
+          updatePolicy: "manual",
         };
       } else if (
         record.source_scope === "WORKSPACE" &&
@@ -1014,6 +1217,9 @@ export class AgentInstallationManager {
           scope: "WORKSPACE",
           workspaceId: uuid(record.source_workspace_id),
           organizationId: null,
+          officialReleaseId: null,
+          selectedReleaseRevisionId: null,
+          updatePolicy: "manual",
         };
       } else if (
         keys === scopedKeys &&
@@ -1025,6 +1231,24 @@ export class AgentInstallationManager {
           scope: "ORGANIZATION",
           workspaceId: null,
           organizationId: uuid(record.source_organization_id),
+          officialReleaseId: null,
+          selectedReleaseRevisionId: null,
+          updatePolicy: "manual",
+        };
+      } else if (
+        keys === platformKeys &&
+        record.source_scope === "PLATFORM" &&
+        record.source_workspace_id === null &&
+        record.source_organization_id === null &&
+        record.update_policy === "managed"
+      ) {
+        storedSource = {
+          scope: "PLATFORM",
+          workspaceId: null,
+          organizationId: null,
+          officialReleaseId: uuid(record.official_release_id),
+          selectedReleaseRevisionId: uuid(record.selected_release_revision_id),
+          updatePolicy: "managed",
         };
       } else {
         throw new AgentInstallationManagerError("installation_conflict");
@@ -1034,7 +1258,11 @@ export class AgentInstallationManager {
         uuid(record.version_id) === versionId &&
         storedSource.scope === source.scope &&
         storedSource.workspaceId === source.workspaceId &&
-        storedSource.organizationId === source.organizationId
+        storedSource.organizationId === source.organizationId &&
+        storedSource.officialReleaseId === source.officialReleaseId &&
+        storedSource.selectedReleaseRevisionId ===
+          source.selectedReleaseRevisionId &&
+        storedSource.updatePolicy === source.updatePolicy
       ) {
         matches.push({
           id: row.id,
@@ -1044,6 +1272,9 @@ export class AgentInstallationManager {
           sourceScope: storedSource.scope,
           sourceWorkspaceId: storedSource.workspaceId,
           sourceOrganizationId: storedSource.organizationId,
+          officialReleaseId: storedSource.officialReleaseId,
+          selectedReleaseRevisionId: storedSource.selectedReleaseRevisionId,
+          updatePolicy: storedSource.updatePolicy,
         });
       }
     }
@@ -1054,14 +1285,28 @@ export class AgentInstallationManager {
 
     const id = uuid(this.randomUUID());
     const createdAt = timestamp(this.now);
-    const payload = JSON.stringify({
-      definition_id: definitionId,
-      version_id: versionId,
-      idempotency_key: id,
-      source_scope: source.scope,
-      source_workspace_id: source.workspaceId,
-      source_organization_id: source.organizationId,
-    });
+    const payload = JSON.stringify(
+      source.scope === "PLATFORM"
+        ? {
+            definition_id: definitionId,
+            version_id: versionId,
+            idempotency_key: id,
+            source_scope: source.scope,
+            source_workspace_id: null,
+            source_organization_id: null,
+            official_release_id: source.officialReleaseId,
+            selected_release_revision_id: source.selectedReleaseRevisionId,
+            update_policy: "managed",
+          }
+        : {
+            definition_id: definitionId,
+            version_id: versionId,
+            idempotency_key: id,
+            source_scope: source.scope,
+            source_workspace_id: source.workspaceId,
+            source_organization_id: source.organizationId,
+          },
+    );
     this.database.sqlite
       .prepare(
         `INSERT INTO pending_sanitized_records (
@@ -1087,6 +1332,9 @@ export class AgentInstallationManager {
       sourceScope: source.scope,
       sourceWorkspaceId: source.workspaceId,
       sourceOrganizationId: source.organizationId,
+      officialReleaseId: source.officialReleaseId,
+      selectedReleaseRevisionId: source.selectedReleaseRevisionId,
+      updatePolicy: source.updatePolicy,
     };
   }
 
