@@ -34,6 +34,16 @@ Read-only Knowledge, Skill, and SOP projection reuses the verified path outside 
 
 The approved written specification is `docs/superpowers/specs/2026-07-21-agentera-organization-agent-v1-design.md`; no Organization Agent implementation exists at this checkpoint.
 
+## Official Managed Agent V1 design checkpoint
+
+The approved direction extends immutable Agent assets to `owner_scope=PLATFORM` while every desktop Installation, physical Hermes Profile, policy overlay, RuntimeBinding, and adaptive state remains USER-owned.
+
+Platform employees use the separate Aera Admin application: Developer authors and submits, a different Super Admin approves immutable publication, Operator manages deterministic rollout and requests rollback, and Auditor remains read-only. Internal operations cross the fail-closed mTLS plus service-JWT Cloud listener; ordinary desktop users only browse and install eligible official Agents.
+
+Official releases use append-only revisions for activation, percentage and allowlist changes, minimum desktop versions, pause, resume, and rollback. Pause stops new discovery and installation but does not remotely disable an installed Agent. Update and rollback replace only the verified immutable base for later conversations; active RuntimeBindings and Hermes private learning remain unchanged.
+
+The written specification is `docs/superpowers/specs/2026-07-22-agentera-official-managed-agent-v1-design.md`. It is awaiting final user review and is design evidence only; no Official Managed Agent implementation, deployment, or release is established by this checkpoint.
+
 ## Trusted Workspace Agent context
 
 The main process derives one exact USER or WORKSPACE asset context from product navigation and never accepts ownership fields through Agent IPC.
