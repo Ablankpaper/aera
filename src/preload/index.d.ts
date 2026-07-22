@@ -38,6 +38,13 @@ import type {
   AgenteraPortalTarget,
 } from "../shared/agentera-auth";
 import type {
+  OfficialQualityConsentReceipt,
+  OfficialQualityConsentSettings,
+  OfficialQualityFeedbackEligibility,
+  OfficialQualityFeedbackSubmission,
+  OfficialQualityFeedbackSubmissionResult,
+} from "../shared/agentera-official-quality";
+import type {
   AgenteraBoundConnectionPublicState,
   AgenteraBoundProfilePublicState,
   AgenteraConnectionClaimPublicState,
@@ -142,6 +149,25 @@ interface AgenteraAuthAPI {
   openPortal: (target: AgenteraPortalTarget) => Promise<void>;
   onStateChanged: (
     callback: (state: AgenteraAuthPublicState) => void,
+  ) => () => void;
+}
+
+interface AgenteraOfficialQualityAPI {
+  getConsent: () => Promise<OfficialQualityConsentSettings>;
+  setPassiveConsent: (
+    enabled: boolean,
+  ) => Promise<OfficialQualityConsentReceipt>;
+  setExplicitFeedbackConsent: (
+    enabled: boolean,
+  ) => Promise<OfficialQualityConsentReceipt>;
+  submitFeedback: (
+    input: OfficialQualityFeedbackSubmission,
+  ) => Promise<OfficialQualityFeedbackSubmissionResult>;
+  onEligible: (
+    callback: (
+      runId: string,
+      eligibility: OfficialQualityFeedbackEligibility,
+    ) => void,
   ) => () => void;
 }
 
@@ -1709,6 +1735,7 @@ declare global {
     electron: ElectronAPI;
     hermesAPI: HermesAPI;
     agenteraAuth: AgenteraAuthAPI;
+    agenteraOfficialQuality: AgenteraOfficialQualityAPI;
     agenteraProductSpace: AgenteraProductSpaceAPI;
     agenteraOrganization: AgenteraOrganizationAPI;
     agenteraWorkspace: AgenteraWorkspaceAPI;

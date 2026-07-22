@@ -4405,6 +4405,82 @@ body {
   opacity: 1;
 }
 
+.official-quality-feedback {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.official-quality-feedback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.official-quality-feedback button {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text-primary);
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.official-quality-feedback button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.official-quality-feedback-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.official-quality-feedback-disclosure {
+  line-height: 1.45;
+}
+
+.official-quality-feedback-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.official-quality-feedback-preview div {
+  display: flex;
+  gap: 4px;
+}
+
+.official-quality-feedback-preview dd {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.official-quality-feedback-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.official-quality-feedback-reasons label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.official-quality-feedback-submit {
+  justify-self: start;
+}
+
 /* Hover timestamp — sits just below the bubble, revealed on row hover.
    Anchored inside .chat-message's bottom padding (not overflowing it): the
    `content-visibility` on .chat-message implies paint containment, which would

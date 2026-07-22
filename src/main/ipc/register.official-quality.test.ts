@@ -10,6 +10,31 @@ const binding = {
 } as LocalRuntimeBinding;
 
 describe("register IPC official quality terminal bridge", () => {
+  it("emits only a sanitized eligibility token after a successful terminal event", () => {
+    const eligibility = {
+      eventId: "019f0000-0000-7000-8000-000000000001",
+      result: "success" as const,
+      latencyBucket: "1s_5s" as const,
+      totalTokenBucket: "1_1k" as const,
+      crashCode: null,
+    };
+    const onEligible = vi.fn();
+    const observer = createOfficialQualityChatObserver({
+      binding,
+      startedAt: 1_000,
+      now: () => 2_000,
+      recordMetric: vi.fn(() => eligibility),
+      onEligible,
+    });
+    observer.onUsage({ totalTokens: 10, response: "private-canary" });
+    observer.onDone();
+
+    expect(onEligible).toHaveBeenCalledWith(eligibility);
+    expect(JSON.stringify(onEligible.mock.calls)).not.toContain(
+      "private-canary",
+    );
+  });
+
   it("retains only bounded total tokens and never gives response or raw error strings to the manager", () => {
     const recordMetric = vi.fn();
     const observer = createOfficialQualityChatObserver({

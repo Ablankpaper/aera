@@ -6,7 +6,12 @@ import {
   AGENTERA_OFFICIAL_QUALITY_PROTOCOL_VERSION,
   type OfficialQualityCrashCode,
   type OfficialQualityEnvelope,
+  type OfficialQualityFeedbackEligibility,
+  type OfficialQualityFeedbackRating,
+  type OfficialQualityFeedbackReasonCode,
+  type OfficialQualityLatencyBucket,
   type OfficialQualityResult,
+  type OfficialQualityTokenBucket,
 } from "../../shared/agentera-official-quality";
 import type { AgenteraOfficialQualityDatabase } from "./db";
 import {
@@ -53,6 +58,40 @@ export interface OfficialQualityMetricCollector {
   collectMetric(
     input: CollectOfficialQualityMetricInput,
   ): OfficialQualityEnvelope | null;
+  prepareFeedbackCandidate(
+    input: CollectOfficialQualityMetricInput,
+  ): OfficialQualityFeedbackCandidate | null;
+  collectFeedback(
+    candidate: OfficialQualityFeedbackCandidate,
+    input: CollectOfficialQualityFeedbackInput,
+  ): OfficialQualityEnvelope | null;
+}
+
+export interface CollectOfficialQualityFeedbackInput {
+  rating: OfficialQualityFeedbackRating;
+  reasonCodes: OfficialQualityFeedbackReasonCode[];
+}
+
+/** Main-process-only content-free terminal snapshot. Never persisted as-is. */
+export interface OfficialQualityFeedbackCandidate {
+  candidateId: string;
+  accountId: string;
+  deviceId: string;
+  consentVersion: number;
+  preparedAt: string;
+  platformId: string;
+  definitionId: string;
+  versionId: string;
+  releaseId: string;
+  releaseRevisionId: string;
+  desktopVersion: string;
+  runtimeVersion: string;
+  eventDay: string;
+  result: OfficialQualityResult;
+  latencyBucket: OfficialQualityLatencyBucket;
+  totalTokenBucket: OfficialQualityTokenBucket;
+  crashCode: OfficialQualityCrashCode | null;
+  bindingProof: string;
 }
 
 export interface OfficialQualityCollectorOptions {
@@ -303,48 +342,16 @@ export class OfficialQualityCollector implements OfficialQualityMetricCollector 
   ): OfficialQualityEnvelope | null {
     try {
       const principal = this.options.getPrincipal();
-      if (
-        principal === null ||
-        input.binding.ownerScope !== "USER" ||
-        input.binding.ownerId !== principal.accountId ||
-        input.binding.deviceId !== principal.deviceId ||
-        input.binding.officialReleaseRevisionId === null
-      ) {
-        return null;
-      }
+      if (!principal) return null;
       const consent = this.options.database.readConsentReceipt(
         principal.accountId,
         principal.deviceId,
         "official_quality_metrics",
       );
       if (!consent.enabled || consent.version < 1) return null;
-      const provenance = this.options.resolveBinding(input.binding);
-      if (
-        provenance === null ||
-        provenance.definitionId !== input.binding.agentDefinitionId ||
-        provenance.versionId !== input.binding.agentVersionId ||
-        provenance.releaseRevisionId !==
-          input.binding.officialReleaseRevisionId ||
-        provenance.runtimeVersion !== input.binding.runtimeVersion ||
-        provenance.bindingProof !== input.binding.id
-      ) {
-        return null;
-      }
-      if (
-        typeof input.startedAt !== "number" ||
-        typeof input.endedAt !== "number" ||
-        !Number.isSafeInteger(input.startedAt) ||
-        !Number.isSafeInteger(input.endedAt) ||
-        input.startedAt < 0 ||
-        input.endedAt < input.startedAt
-      ) {
-        return null;
-      }
-      const now = this.options.now?.() ?? new Date();
-      const result = parseOfficialQualityResult(input.result);
-      if ((result === "runtime_crash") !== (input.crashCode !== null)) {
-        return null;
-      }
+      const prepared = this.prepareTerminal(input, principal);
+      if (!prepared) return null;
+      const { provenance, now, result } = prepared;
       const unsigned: Omit<OfficialQualityEnvelope, "device_signature"> = {
         protocol_version: AGENTERA_OFFICIAL_QUALITY_PROTOCOL_VERSION,
         consent_version: consent.version,
@@ -359,10 +366,8 @@ export class OfficialQualityCollector implements OfficialQualityMetricCollector 
         event_day: now.toISOString().slice(0, 10),
         kind: "metric",
         result,
-        latency_bucket: bucketOfficialQualityLatency(
-          input.endedAt - input.startedAt,
-        ),
-        total_token_bucket: bucketOfficialQualityTotalTokens(input.totalTokens),
+        latency_bucket: prepared.latencyBucket,
+        total_token_bucket: prepared.totalTokenBucket,
         crash_code: input.crashCode,
         feedback_rating: null,
         feedback_reason_codes: [],
@@ -389,13 +394,188 @@ export class OfficialQualityCollector implements OfficialQualityMetricCollector 
       return null;
     }
   }
+
+  prepareFeedbackCandidate(
+    input: CollectOfficialQualityMetricInput,
+  ): OfficialQualityFeedbackCandidate | null {
+    try {
+      const principal = this.options.getPrincipal();
+      if (!principal) return null;
+      const consent = this.options.database.readConsentReceipt(
+        principal.accountId,
+        principal.deviceId,
+        "official_explicit_feedback",
+      );
+      if (!consent.enabled || consent.version < 1) return null;
+      const prepared = this.prepareTerminal(input, principal);
+      if (!prepared || prepared.result !== "success") return null;
+      return Object.freeze({
+        candidateId:
+          this.options.randomUUIDv7?.() ?? officialQualityUUIDv7(prepared.now),
+        accountId: prepared.principal.accountId,
+        deviceId: prepared.principal.deviceId,
+        consentVersion: consent.version,
+        preparedAt: prepared.now.toISOString(),
+        platformId: prepared.provenance.platformId,
+        definitionId: prepared.provenance.definitionId,
+        versionId: prepared.provenance.versionId,
+        releaseId: prepared.provenance.releaseId,
+        releaseRevisionId: prepared.provenance.releaseRevisionId,
+        desktopVersion: this.options.desktopVersion,
+        runtimeVersion: prepared.provenance.runtimeVersion,
+        eventDay: prepared.now.toISOString().slice(0, 10),
+        result: prepared.result,
+        latencyBucket: prepared.latencyBucket,
+        totalTokenBucket: prepared.totalTokenBucket,
+        crashCode: prepared.crashCode,
+        bindingProof: prepared.provenance.bindingProof,
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  collectFeedback(
+    candidate: OfficialQualityFeedbackCandidate,
+    input: CollectOfficialQualityFeedbackInput,
+  ): OfficialQualityEnvelope | null {
+    try {
+      const principal = this.options.getPrincipal();
+      const now = this.options.now?.() ?? new Date();
+      const preparedAt = new Date(candidate.preparedAt).getTime();
+      if (
+        !principal ||
+        candidate.accountId !== principal.accountId ||
+        candidate.deviceId !== principal.deviceId ||
+        !Number.isFinite(preparedAt) ||
+        preparedAt > now.getTime() ||
+        now.getTime() - preparedAt > 30 * 60 * 1_000
+      ) {
+        return null;
+      }
+      const consent = this.options.database.readConsentReceipt(
+        principal.accountId,
+        principal.deviceId,
+        "official_explicit_feedback",
+      );
+      if (
+        !consent.enabled ||
+        consent.version < 1 ||
+        consent.version !== candidate.consentVersion
+      ) {
+        return null;
+      }
+      const unsigned: Omit<OfficialQualityEnvelope, "device_signature"> = {
+        protocol_version: AGENTERA_OFFICIAL_QUALITY_PROTOCOL_VERSION,
+        consent_version: consent.version,
+        event_id: candidate.candidateId,
+        platform_id: candidate.platformId,
+        definition_id: candidate.definitionId,
+        version_id: candidate.versionId,
+        release_id: candidate.releaseId,
+        release_revision_id: candidate.releaseRevisionId,
+        desktop_version: candidate.desktopVersion,
+        runtime_version: candidate.runtimeVersion,
+        event_day: candidate.eventDay,
+        kind: "explicit_feedback",
+        result: candidate.result,
+        latency_bucket: candidate.latencyBucket,
+        total_token_bucket: candidate.totalTokenBucket,
+        crash_code: candidate.crashCode,
+        feedback_rating: input.rating,
+        feedback_reason_codes: [...input.reasonCodes],
+        binding_proof: candidate.bindingProof,
+      };
+      const envelope = parseOfficialQualityEnvelope(
+        {
+          ...unsigned,
+          device_signature: deviceSignature(
+            principal.devicePrivateKey,
+            signingBytes(unsigned),
+          ),
+        },
+        now,
+      );
+      return this.options.database.enqueue({
+        accountId: principal.accountId,
+        deviceId: principal.deviceId,
+        purpose: "official_explicit_feedback",
+        envelope,
+        now,
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  private prepareTerminal(
+    input: CollectOfficialQualityMetricInput,
+    principal: OfficialQualitySigningPrincipal,
+  ): {
+    principal: OfficialQualitySigningPrincipal;
+    provenance: OfficialQualityBindingProvenance;
+    now: Date;
+    result: OfficialQualityResult;
+    latencyBucket: OfficialQualityLatencyBucket;
+    totalTokenBucket: OfficialQualityTokenBucket;
+    crashCode: OfficialQualityCrashCode | null;
+  } | null {
+    if (
+      input.binding.ownerScope !== "USER" ||
+      input.binding.ownerId !== principal.accountId ||
+      input.binding.deviceId !== principal.deviceId ||
+      input.binding.officialReleaseRevisionId === null
+    ) {
+      return null;
+    }
+    const provenance = this.options.resolveBinding(input.binding);
+    if (
+      provenance === null ||
+      provenance.definitionId !== input.binding.agentDefinitionId ||
+      provenance.versionId !== input.binding.agentVersionId ||
+      provenance.releaseRevisionId !==
+        input.binding.officialReleaseRevisionId ||
+      provenance.runtimeVersion !== input.binding.runtimeVersion ||
+      provenance.bindingProof !== input.binding.id
+    ) {
+      return null;
+    }
+    if (
+      typeof input.startedAt !== "number" ||
+      typeof input.endedAt !== "number" ||
+      !Number.isSafeInteger(input.startedAt) ||
+      !Number.isSafeInteger(input.endedAt) ||
+      input.startedAt < 0 ||
+      input.endedAt < input.startedAt
+    ) {
+      return null;
+    }
+    const result = parseOfficialQualityResult(input.result);
+    if ((result === "runtime_crash") !== (input.crashCode !== null)) {
+      return null;
+    }
+    return {
+      principal,
+      provenance,
+      now: this.options.now?.() ?? new Date(),
+      result,
+      latencyBucket: bucketOfficialQualityLatency(
+        input.endedAt - input.startedAt,
+      ),
+      totalTokenBucket: bucketOfficialQualityTotalTokens(input.totalTokens),
+      crashCode: input.crashCode,
+    };
+  }
 }
 
 export interface OfficialQualityChatObserverOptions {
   binding: LocalRuntimeBinding | null;
   startedAt: number;
   now?: () => number;
-  recordMetric: (input: CollectOfficialQualityMetricInput) => unknown;
+  recordMetric: (
+    input: CollectOfficialQualityMetricInput,
+  ) => OfficialQualityFeedbackEligibility | null;
+  onEligible?: (eligibility: OfficialQualityFeedbackEligibility) => void;
 }
 
 export interface OfficialQualityChatObserver {
@@ -453,7 +633,7 @@ export function createOfficialQualityChatObserver(
     terminal = true;
     if (!options.binding) return;
     try {
-      options.recordMetric({
+      const eligibility = options.recordMetric({
         binding: options.binding,
         startedAt: options.startedAt,
         endedAt: (options.now ?? Date.now)(),
@@ -461,6 +641,9 @@ export function createOfficialQualityChatObserver(
         result,
         crashCode,
       });
+      if (result === "success" && eligibility) {
+        options.onEligible?.(eligibility);
+      }
     } catch {
       // Quality collection is best effort and never changes chat completion.
     }

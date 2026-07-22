@@ -85,6 +85,29 @@ export interface OfficialQualityConsentReceipt {
   updatedAt: string | null;
 }
 
+/**
+ * Renderer-safe proof that a trusted main-process observer completed one
+ * eligible PLATFORM Agent turn. It intentionally contains no conversation,
+ * Session, Profile, Installation, or RuntimeBinding identifier.
+ */
+export interface OfficialQualityFeedbackEligibility {
+  eventId: string;
+  result: OfficialQualityResult;
+  latencyBucket: OfficialQualityLatencyBucket;
+  totalTokenBucket: OfficialQualityTokenBucket;
+  crashCode: OfficialQualityCrashCode | null;
+}
+
+export interface OfficialQualityFeedbackSubmission {
+  eventId: string;
+  rating: OfficialQualityFeedbackRating;
+  reasonCodes: OfficialQualityFeedbackReasonCode[];
+}
+
+export interface OfficialQualityFeedbackSubmissionResult {
+  accepted: true;
+}
+
 export interface OfficialQualityEnvelope {
   protocol_version: typeof AGENTERA_OFFICIAL_QUALITY_PROTOCOL_VERSION;
   consent_version: number;

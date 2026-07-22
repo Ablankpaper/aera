@@ -32,6 +32,13 @@ import type {
   AgenteraPortalTarget,
 } from "../shared/agentera-auth";
 import type {
+  OfficialQualityConsentReceipt,
+  OfficialQualityConsentSettings,
+  OfficialQualityFeedbackEligibility,
+  OfficialQualityFeedbackSubmission,
+  OfficialQualityFeedbackSubmissionResult,
+} from "../shared/agentera-official-quality";
+import type {
   AgenteraBoundConnectionPublicState,
   AgenteraBoundProfilePublicState,
   AgenteraConnectionClaimPublicState,
@@ -1740,6 +1747,43 @@ const agenteraAuthAPI = {
   },
 };
 
+const agenteraOfficialQualityAPI = {
+  getConsent: (): Promise<OfficialQualityConsentSettings> =>
+    ipcRenderer.invoke("agentera-official-quality-get-consent"),
+  setPassiveConsent: (
+    enabled: boolean,
+  ): Promise<OfficialQualityConsentReceipt> =>
+    ipcRenderer.invoke("agentera-official-quality-set-passive-consent", {
+      enabled,
+    }),
+  setExplicitFeedbackConsent: (
+    enabled: boolean,
+  ): Promise<OfficialQualityConsentReceipt> =>
+    ipcRenderer.invoke(
+      "agentera-official-quality-set-explicit-feedback-consent",
+      { enabled },
+    ),
+  submitFeedback: (
+    input: OfficialQualityFeedbackSubmission,
+  ): Promise<OfficialQualityFeedbackSubmissionResult> =>
+    ipcRenderer.invoke("agentera-official-quality-submit-feedback", input),
+  onEligible: (
+    callback: (
+      runId: string,
+      eligibility: OfficialQualityFeedbackEligibility,
+    ) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      runId: string,
+      eligibility: OfficialQualityFeedbackEligibility,
+    ): void => callback(runId, eligibility);
+    ipcRenderer.on("agentera-official-quality-eligible", handler);
+    return () =>
+      ipcRenderer.removeListener("agentera-official-quality-eligible", handler);
+  },
+};
+
 const agenteraRuntimeAccessAPI = {
   probeInstallFiles: (): Promise<AgenteraInstallFileProbe> =>
     ipcRenderer.invoke("agentera-install-file-probe"),
@@ -2286,6 +2330,10 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld("hermesAPI", hermesAPI);
     contextBridge.exposeInMainWorld("agenteraAuth", agenteraAuthAPI);
     contextBridge.exposeInMainWorld(
+      "agenteraOfficialQuality",
+      agenteraOfficialQualityAPI,
+    );
+    contextBridge.exposeInMainWorld(
       "agenteraProductSpace",
       agenteraProductSpaceAPI,
     );
@@ -2313,6 +2361,8 @@ if (process.contextIsolated) {
   window.hermesAPI = hermesAPI;
   // @ts-ignore (define in dts)
   window.agenteraAuth = agenteraAuthAPI;
+  // @ts-ignore (define in dts)
+  window.agenteraOfficialQuality = agenteraOfficialQualityAPI;
   // @ts-ignore (define in dts)
   window.agenteraProductSpace = agenteraProductSpaceAPI;
   // @ts-ignore (define in dts)

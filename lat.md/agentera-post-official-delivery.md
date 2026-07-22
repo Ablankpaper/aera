@@ -44,6 +44,20 @@ Quality observation attaches after the installed Agent turn has already fixed it
 
 The outbox remains capped at 1,000 events and drops the oldest passive metrics before explicit feedback. Expired rows are removed after thirty days, revocation immediately removes unsent rows for that purpose, and every Cloud request uses the product bearer token without placing it in IPC or logs.
 
+### Consent and fixed-code feedback surface
+
+[[src/renderer/src/components/settings/PrivacyPane.tsx#PrivacyPane]] presents passive metrics and explicit feedback as independent, default-off choices with no-content disclosure.
+
+Disabling either purpose deletes its unsent local outbox rows. Signed-out users can read the fail-closed state but cannot mutate consent.
+
+[[src/main/agentera-official-quality/ipc-contract.ts#parseOfficialQualityFeedbackInput]] accepts exactly `eventId`, `rating`, and `reasonCodes`. It rejects extra properties, free text, raw errors or responses, Session, conversation, Profile, RuntimeBinding identifiers, non-UUIDv7 handles, unknown ratings, unknown reasons, and duplicate reasons before the manager runs.
+
+Explicit feedback remains independent from passive collection. [[src/main/agentera-official-quality/collector.ts#OfficialQualityCollector]] may hold one content-free successful-turn candidate in bounded main-process memory when explicit feedback is enabled even if passive metrics are disabled. Nothing is persisted until the user affirmatively submits a fixed rating. Revocation, account change, a thirty-minute timeout, or one submission invalidates the candidate.
+
+The main process emits [[src/shared/agentera-official-quality.ts#OfficialQualityFeedbackEligibility]] only after an eligible PLATFORM-bound turn succeeds. [[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts#attachOfficialQualityEligibility]] never derives eligibility from a Dashboard event; without the trusted main-process token the renderer shows no controls. [[src/renderer/src/screens/Chat/MessageRow.tsx#MessageRow]] submits only the opaque event handle, `helpful|not_helpful`, and the closed reason catalog. Conversation text and renderer turn identity never enter that call.
+
+Task 8 local evidence covers strict IPC, independent consent, candidate expiry and revocation, renderer event scoping, default-off settings, fixed-code submission, and no-content canaries. This remains local feature-branch evidence only; it is not a push, deployment, production opt-in, or release.
+
 ## End-to-end encrypted backup V1
 
 Encrypted backup stores immutable ciphertext snapshots for one USER-owned Installation and physical Profile; it is not Agent sync or live multi-device state replication.

@@ -78,6 +78,25 @@ export default {
     label: "Send anonymous usage analytics",
     hint: "Collected anonymously and used only to improve AgentEra Studio — never your chats, files, prompts, or any personal data.",
   },
+  officialQuality: {
+    title: "Official Agent quality feedback",
+    noContent:
+      "No conversation content, prompts, responses, files, paths, Memory, private Skills, or raw errors are sent.",
+    purge:
+      "Turning either choice off immediately stops new matching events and removes unsent matching events from this device.",
+    passive: {
+      label: "Share content-free Official Agent quality metrics",
+      confirmation:
+        "This separately authorizes fixed result, latency, token, and approved crash-code buckets after an eligible Official Agent turn completes.",
+    },
+    feedback: {
+      label: "Allow helpful / not helpful feedback",
+      confirmation:
+        "This separately enables an affirmative rating with fixed reason codes only. No free-text feedback is accepted.",
+    },
+    signInRequired: "Sign in to manage Official Agent quality choices.",
+    saveFailed: "The quality preference could not be saved.",
+  },
   notDetected: "Not detected",
   updatedSuccessfully: "Updated successfully!",
   updateSuccess: "AgentEra updated successfully.",

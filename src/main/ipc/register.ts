@@ -271,6 +271,10 @@ import type { AgenteraAgentControlManager } from "../agentera-agent-control/mana
 import type { AgenteraOfficialQualityManager } from "../agentera-official-quality/manager";
 import { createOfficialQualityChatObserver } from "../agentera-official-quality/collector";
 import {
+  parseOfficialQualityConsentInput,
+  parseOfficialQualityFeedbackInput,
+} from "../agentera-official-quality/ipc-contract";
+import {
   executeAgentControlIpc,
   parseAgentControlId,
   parseClaimVersionInput,
@@ -822,6 +826,14 @@ export function registerIpcHandlers(context: IpcContext): void {
     }
     return agenteraAgentControl;
   };
+  const requireOfficialQuality = (): AgenteraOfficialQualityManager => {
+    if (!agenteraOfficialQuality) {
+      throw Object.assign(new Error("Official quality is unavailable."), {
+        code: "service_unavailable",
+      });
+    }
+    return agenteraOfficialQuality;
+  };
   const agentControlStateChannel = "agentera-agents-state-changed";
   agenteraAgentControl?.subscribe((state) => {
     const window = getMainWindow();
@@ -941,6 +953,32 @@ export function registerIpcHandlers(context: IpcContext): void {
     electronIpcMain,
     productAccessGuard,
     assertChannelProfileTarget,
+  );
+  ipcMain.handle("agentera-official-quality-get-consent", () =>
+    requireOfficialQuality().getConsent(),
+  );
+  ipcMain.handle(
+    "agentera-official-quality-set-passive-consent",
+    (_event, input: unknown) =>
+      requireOfficialQuality().setConsent(
+        "official_quality_metrics",
+        parseOfficialQualityConsentInput(input).enabled,
+      ),
+  );
+  ipcMain.handle(
+    "agentera-official-quality-set-explicit-feedback-consent",
+    (_event, input: unknown) =>
+      requireOfficialQuality().setConsent(
+        "official_explicit_feedback",
+        parseOfficialQualityConsentInput(input).enabled,
+      ),
+  );
+  ipcMain.handle(
+    "agentera-official-quality-submit-feedback",
+    (_event, input: unknown) =>
+      requireOfficialQuality().submitFeedback(
+        parseOfficialQualityFeedbackInput(input),
+      ),
   );
   const registerAgentControlHandler = (
     channel: string,
@@ -2557,11 +2595,6 @@ export function registerIpcHandlers(context: IpcContext): void {
 
         let fullResponse = "";
         const chatStartTime = Date.now();
-        const officialQualityObserver = createOfficialQualityChatObserver({
-          binding: preparedAgentTurn?.binding ?? null,
-          startedAt: chatStartTime,
-          recordMetric: (input) => agenteraOfficialQuality?.recordMetric(input),
-        });
         let resolveChat: (v: { response: string; sessionId?: string }) => void;
         let rejectChat: (reason?: unknown) => void;
         const promise = new Promise<{ response: string; sessionId?: string }>(
@@ -2587,6 +2620,15 @@ export function registerIpcHandlers(context: IpcContext): void {
             return false;
           }
         };
+        const officialQualityObserver = createOfficialQualityChatObserver({
+          binding: preparedAgentTurn?.binding ?? null,
+          startedAt: chatStartTime,
+          recordMetric: (input) =>
+            agenteraOfficialQuality?.recordMetric(input) ?? null,
+          onEligible: (eligibility) => {
+            safeSend("agentera-official-quality-eligible", eligibility);
+          },
+        });
         const abortThisRun = (): void => {
           runtimeActivity.abortRun(chatRunId);
         };

@@ -14,6 +14,7 @@ import { executeSlash, type SlashExecOutcome } from "../slashExec";
 import type { AgentCommandsCatalogResponse } from "../slash/types";
 import type { ActiveTurn, Attachment, ChatMessage, UsageState } from "../types";
 import type { DesktopSessionContinuationItem } from "../../../../../shared/session-continuation";
+import type { OfficialQualityFeedbackEligibility } from "../../../../../shared/agentera-official-quality";
 
 interface SessionResponse {
   info?: unknown;
@@ -135,6 +136,42 @@ interface DashboardSeedOptions {
 }
 
 type DashboardConnectionMode = "local" | "remote" | "ssh";
+
+/**
+ * Attach only a trusted main-process eligibility token to the successful
+ * assistant bubble for a completed turn. Dashboard payloads never create this
+ * token themselves, so a renderer-only `message.complete` cannot impersonate
+ * a verified PLATFORM RuntimeBinding.
+ */
+export function attachOfficialQualityEligibility(
+  messages: ChatMessage[],
+  activeTurn: ActiveTurn,
+  eligibility: OfficialQualityFeedbackEligibility | null,
+): ChatMessage[] {
+  if (activeTurn.status !== "completed" || !eligibility) return messages;
+  for (
+    let index = messages.length - 1;
+    index >= Math.max(activeTurn.startIndex, 0);
+    index -= 1
+  ) {
+    const message = messages[index];
+    if (
+      !isBubbleMessage(message) ||
+      message.role !== "agent" ||
+      message.turnId !== activeTurn.turnId ||
+      message.error ||
+      message.pending
+    ) {
+      continue;
+    }
+    return [
+      ...messages.slice(0, index),
+      { ...message, officialQualityEligibility: eligibility },
+      ...messages.slice(index + 1),
+    ];
+  }
+  return messages;
+}
 
 export function dashboardChatEnabledFromEnv(
   value: string | undefined,

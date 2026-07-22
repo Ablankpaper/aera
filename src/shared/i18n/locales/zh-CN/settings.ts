@@ -38,6 +38,24 @@ export default {
         "永不收集：聊天消息、文件路径、API 密钥、模型配置、账户凭据。",
     },
   },
+  officialQuality: {
+    title: "官方 Agent 隐私质量反馈",
+    noContent:
+      "不会发送对话正文、提示词、回复、文件、路径、Memory、私有 Skill 或原始错误信息。",
+    purge: "关闭任一选项会立即停止生成对应事件，并删除本机尚未发送的对应事件。",
+    passive: {
+      label: "分享不含正文的官方 Agent 质量指标",
+      confirmation:
+        "此选项单独授权：仅在符合条件的官方 Agent 回合结束后，发送固定的结果、延迟、Token 和受控崩溃代码分桶。",
+    },
+    feedback: {
+      label: "允许“有帮助 / 没帮助”反馈",
+      confirmation:
+        "此选项单独授权用户主动评分，并且只能选择固定原因；不接受任何自由文本反馈。",
+    },
+    signInRequired: "登录后才能管理官方 Agent 质量反馈选项。",
+    saveFailed: "质量反馈偏好保存失败。",
+  },
   theme: {
     label: "主题",
     system: "跟随系统",

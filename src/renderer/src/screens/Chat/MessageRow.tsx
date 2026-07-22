@@ -10,6 +10,11 @@ import { MediaSegmentView } from "../../components/MediaImage";
 import { useI18n } from "../../components/useI18n";
 import { parseMediaTokens, cleanLeakedToolTags } from "./mediaUtils";
 import type { ChatBubbleMessage, ChatMessage } from "./types";
+import {
+  OFFICIAL_QUALITY_FEEDBACK_REASON_CODES,
+  type OfficialQualityFeedbackRating,
+  type OfficialQualityFeedbackReasonCode,
+} from "../../../../shared/agentera-official-quality";
 
 export const APPROVAL_RE =
   /⚠️.*dangerous|requires? (your )?approval|\/approve.*\/deny|do you want (me )?to (proceed|continue|run|execute)/i;
@@ -214,6 +219,14 @@ export const MessageRow = memo(function MessageRow({
 }: MessageRowProps): React.JSX.Element {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
+  const [qualityRating, setQualityRating] =
+    useState<OfficialQualityFeedbackRating | null>(null);
+  const [qualityReasons, setQualityReasons] = useState<
+    OfficialQualityFeedbackReasonCode[]
+  >([]);
+  const [qualitySubmitting, setQualitySubmitting] = useState(false);
+  const [qualitySubmitted, setQualitySubmitted] = useState(false);
+  const [qualityFailed, setQualityFailed] = useState(false);
 
   // MessageRow is wrapped in memo() but still re-renders on any prop change
   // (e.g. isLoading toggling at the end of a stream), and `parseMediaTokens`
@@ -246,6 +259,17 @@ export const MessageRow = memo(function MessageRow({
     }
   }, [bubbleContent]);
 
+  const toggleQualityReason = useCallback(
+    (reason: OfficialQualityFeedbackReasonCode): void => {
+      setQualityReasons((current) =>
+        current.includes(reason)
+          ? current.filter((item) => item !== reason)
+          : [...current, reason],
+      );
+    },
+    [],
+  );
+
   // Only chat bubble messages have content/attachments
   if (!isChatBubbleMessage(msg)) {
     return (
@@ -272,6 +296,31 @@ export const MessageRow = memo(function MessageRow({
   const epochMs = coerceToEpochMs(msg.timestamp);
   const isTimeValid = isValidEpochMs(epochMs);
   const bubbleTime = isTimeValid ? formatBubbleTime(epochMs) : null;
+  const qualityEligibility = msg.officialQualityEligibility;
+  const showQualityFeedback =
+    msg.role === "agent" &&
+    !msg.error &&
+    !msg.pending &&
+    !isLoading &&
+    qualityEligibility?.result === "success";
+
+  const submitQualityFeedback = async (): Promise<void> => {
+    if (!qualityEligibility || !qualityRating || qualitySubmitting) return;
+    setQualitySubmitting(true);
+    setQualityFailed(false);
+    try {
+      await window.agenteraOfficialQuality.submitFeedback({
+        eventId: qualityEligibility.eventId,
+        rating: qualityRating,
+        reasonCodes: [...qualityReasons],
+      });
+      setQualitySubmitted(true);
+    } catch {
+      setQualityFailed(true);
+    } finally {
+      setQualitySubmitting(false);
+    }
+  };
 
   return (
     <div
@@ -352,6 +401,82 @@ export const MessageRow = memo(function MessageRow({
         {msg.error && (
           <div className="chat-error-message" role="alert">
             {msg.error}
+          </div>
+        )}
+        {showQualityFeedback && (
+          <div className="official-quality-feedback">
+            {qualitySubmitted ? (
+              <span className="official-quality-feedback-thanks" role="status">
+                {t("chat.officialQuality.thanks")}
+              </span>
+            ) : (
+              <>
+                <div className="official-quality-feedback-actions">
+                  <span>{t("chat.officialQuality.prompt")}</span>
+                  <button
+                    type="button"
+                    aria-pressed={qualityRating === "helpful"}
+                    onClick={() => setQualityRating("helpful")}
+                  >
+                    {t("chat.officialQuality.helpful")}
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={qualityRating === "not_helpful"}
+                    onClick={() => setQualityRating("not_helpful")}
+                  >
+                    {t("chat.officialQuality.notHelpful")}
+                  </button>
+                </div>
+                {qualityRating && (
+                  <div className="official-quality-feedback-panel">
+                    <div className="official-quality-feedback-disclosure">
+                      {t("chat.officialQuality.noContent")}
+                    </div>
+                    <dl className="official-quality-feedback-preview">
+                      <div>
+                        <dt>{t("chat.officialQuality.result")}</dt>
+                        <dd>{qualityEligibility.result}</dd>
+                      </div>
+                      <div>
+                        <dt>{t("chat.officialQuality.latency")}</dt>
+                        <dd>{qualityEligibility.latencyBucket}</dd>
+                      </div>
+                      <div>
+                        <dt>{t("chat.officialQuality.tokens")}</dt>
+                        <dd>{qualityEligibility.totalTokenBucket}</dd>
+                      </div>
+                    </dl>
+                    <fieldset className="official-quality-feedback-reasons">
+                      <legend>{t("chat.officialQuality.reasons")}</legend>
+                      {OFFICIAL_QUALITY_FEEDBACK_REASON_CODES.map((reason) => (
+                        <label key={reason}>
+                          <input
+                            type="checkbox"
+                            checked={qualityReasons.includes(reason)}
+                            onChange={() => toggleQualityReason(reason)}
+                          />
+                          {t(`chat.officialQuality.${reason}`)}
+                        </label>
+                      ))}
+                    </fieldset>
+                    <button
+                      type="button"
+                      className="official-quality-feedback-submit"
+                      disabled={qualitySubmitting}
+                      onClick={() => void submitQualityFeedback()}
+                    >
+                      {qualitySubmitting
+                        ? t("chat.officialQuality.submitting")
+                        : t("chat.officialQuality.submit")}
+                    </button>
+                    {qualityFailed && (
+                      <div role="alert">{t("chat.officialQuality.failed")}</div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>

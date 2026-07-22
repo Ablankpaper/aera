@@ -250,6 +250,125 @@ describe("OfficialQualityCollector", () => {
     }
   });
 
+  it("prepares explicit feedback independently of passive metrics and queues only after affirmation", () => {
+    const explicit = database.setConsent(
+      ACCOUNT_ID,
+      DEVICE_ID,
+      "official_explicit_feedback",
+      true,
+      NOW,
+    );
+    const ids = [
+      "019f0000-0000-7000-8000-000000000010",
+      "019f0000-0000-7000-8000-000000000011",
+    ];
+    const feedbackCollector = new OfficialQualityCollector({
+      database,
+      desktopVersion: "0.7.3",
+      getPrincipal: () => ({
+        accountId: ACCOUNT_ID,
+        deviceId: DEVICE_ID,
+        devicePrivateKey: devicePrivateKey(),
+      }),
+      resolveBinding,
+      now: () => NOW,
+      randomUUIDv7: () => ids.shift() ?? "019f0000-0000-7000-8000-000000000012",
+    });
+
+    const input = {
+      binding: binding(),
+      startedAt: NOW.getTime() - 6_000,
+      endedAt: NOW.getTime(),
+      totalTokens: 4_500,
+      result: "success" as const,
+      crashCode: null,
+    };
+    expect(feedbackCollector.collectMetric(input)).toBeNull();
+    const candidate = feedbackCollector.prepareFeedbackCandidate(input);
+    expect(candidate).toMatchObject({
+      candidateId: "019f0000-0000-7000-8000-000000000010",
+      accountId: ACCOUNT_ID,
+      deviceId: DEVICE_ID,
+      consentVersion: explicit.version,
+      result: "success",
+      latencyBucket: "5s_15s",
+      totalTokenBucket: "4k_16k",
+      crashCode: null,
+    });
+    expect(count()).toBe(0);
+
+    const event = feedbackCollector.collectFeedback(candidate!, {
+      rating: "not_helpful",
+      reasonCodes: ["incorrect", "too_slow"],
+    });
+    expect(event).toMatchObject({
+      event_id: candidate?.candidateId,
+      consent_version: explicit.version,
+      kind: "explicit_feedback",
+      result: "success",
+      latency_bucket: "5s_15s",
+      total_token_bucket: "4k_16k",
+      feedback_rating: "not_helpful",
+      feedback_reason_codes: ["incorrect", "too_slow"],
+    });
+    expect(count()).toBe(1);
+  });
+
+  it("refuses stale, revoked, failed, or cross-principal feedback candidates", () => {
+    database.setConsent(
+      ACCOUNT_ID,
+      DEVICE_ID,
+      "official_explicit_feedback",
+      true,
+      NOW,
+    );
+    const feedbackCollector = new OfficialQualityCollector({
+      database,
+      desktopVersion: "0.7.3",
+      getPrincipal: () => ({
+        accountId: ACCOUNT_ID,
+        deviceId: DEVICE_ID,
+        devicePrivateKey: devicePrivateKey(),
+      }),
+      resolveBinding,
+      now: () => NOW,
+      randomUUIDv7: () => "019f0000-0000-7000-8000-000000000020",
+    });
+    expect(
+      feedbackCollector.prepareFeedbackCandidate({
+        binding: binding(),
+        startedAt: NOW.getTime() - 1_000,
+        endedAt: NOW.getTime(),
+        totalTokens: 1,
+        result: "model_error",
+        crashCode: null,
+      }),
+    ).toBeNull();
+
+    const candidate = feedbackCollector.prepareFeedbackCandidate({
+      binding: binding(),
+      startedAt: NOW.getTime() - 1_000,
+      endedAt: NOW.getTime(),
+      totalTokens: 1,
+      result: "success",
+      crashCode: null,
+    });
+    database.setConsent(
+      ACCOUNT_ID,
+      DEVICE_ID,
+      "official_explicit_feedback",
+      false,
+      new Date(NOW.getTime() + 1),
+    );
+    expect(
+      feedbackCollector.collectFeedback(candidate!, {
+        rating: "helpful",
+        reasonCodes: [],
+      }),
+    ).toBeNull();
+    expect(count()).toBe(0);
+  });
+
   it("resolves platform and release identity only from matching verified local policy state", () => {
     const row = {
       source_scope: "PLATFORM",

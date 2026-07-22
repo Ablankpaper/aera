@@ -1,10 +1,14 @@
 import type {
   OfficialQualityConsentReceipt,
+  OfficialQualityConsentSettings,
+  OfficialQualityFeedbackEligibility,
+  OfficialQualityFeedbackSubmission,
+  OfficialQualityFeedbackSubmissionResult,
   OfficialQualityPurpose,
-  OfficialQualityEnvelope,
 } from "../../shared/agentera-official-quality";
 import type {
   CollectOfficialQualityMetricInput,
+  OfficialQualityFeedbackCandidate,
   OfficialQualityMetricCollector,
   OfficialQualityPrincipal,
 } from "./collector";
@@ -16,6 +20,8 @@ import type { AgenteraOfficialQualityDatabase } from "./db";
 
 const MAXIMUM_RETRY_MILLISECONDS = 6 * 60 * 60 * 1_000;
 const UPLOAD_BATCH_SIZE = 25;
+const MAXIMUM_FEEDBACK_CANDIDATES = 128;
+const FEEDBACK_CANDIDATE_TTL_MILLISECONDS = 30 * 60 * 1_000;
 
 export interface AgenteraOfficialQualityManagerOptions {
   database: AgenteraOfficialQualityDatabase;
@@ -57,12 +63,19 @@ export class AgenteraOfficialQualityManager {
   private readonly random: () => number;
   private activeUpload: Promise<void> | null = null;
   private previousPrincipal: OfficialQualityPrincipal | null;
+  private readonly feedbackCandidates = new Map<
+    string,
+    OfficialQualityFeedbackCandidate
+  >();
 
   constructor(options: AgenteraOfficialQualityManagerOptions) {
     if (
       !options?.database ||
       !options.client ||
       !options.collector ||
+      typeof options.collector.collectMetric !== "function" ||
+      typeof options.collector.prepareFeedbackCandidate !== "function" ||
+      typeof options.collector.collectFeedback !== "function" ||
       typeof options.getPrincipal !== "function"
     ) {
       throw new Error(
@@ -80,12 +93,61 @@ export class AgenteraOfficialQualityManager {
 
   recordMetric(
     input: CollectOfficialQualityMetricInput,
-  ): OfficialQualityEnvelope | null {
-    const event = this.collector.collectMetric(input);
-    if (event) {
+  ): OfficialQualityFeedbackEligibility | null {
+    const metric = this.collector.collectMetric(input);
+    const candidate = this.collector.prepareFeedbackCandidate(input);
+    if (metric) {
       void this.uploadPending();
     }
-    return event;
+    if (!candidate) return null;
+    this.purgeExpiredFeedbackCandidates();
+    this.feedbackCandidates.set(candidate.candidateId, candidate);
+    while (this.feedbackCandidates.size > MAXIMUM_FEEDBACK_CANDIDATES) {
+      const oldest = this.feedbackCandidates.keys().next().value as
+        | string
+        | undefined;
+      if (!oldest) break;
+      this.feedbackCandidates.delete(oldest);
+    }
+    return {
+      eventId: candidate.candidateId,
+      result: candidate.result,
+      latencyBucket: candidate.latencyBucket,
+      totalTokenBucket: candidate.totalTokenBucket,
+      crashCode: candidate.crashCode,
+    };
+  }
+
+  getConsent(): OfficialQualityConsentSettings {
+    const principal = this.getPrincipal();
+    if (!principal) return { passive: false, explicitFeedback: false };
+    return this.database.readConsent(principal.accountId, principal.deviceId);
+  }
+
+  async submitFeedback(
+    input: OfficialQualityFeedbackSubmission,
+  ): Promise<OfficialQualityFeedbackSubmissionResult> {
+    const principal = this.getPrincipal();
+    if (!principal) throw new Error("AgentEra product sign-in is required.");
+    this.purgeExpiredFeedbackCandidates();
+    const candidate = this.feedbackCandidates.get(input.eventId);
+    if (
+      !candidate ||
+      candidate.accountId !== principal.accountId ||
+      candidate.deviceId !== principal.deviceId
+    ) {
+      throw new Error("Official quality feedback is no longer eligible.");
+    }
+    const event = this.collector.collectFeedback(candidate, {
+      rating: input.rating,
+      reasonCodes: [...input.reasonCodes],
+    });
+    this.feedbackCandidates.delete(input.eventId);
+    if (!event) {
+      throw new Error("Official quality feedback is no longer eligible.");
+    }
+    void this.uploadPending();
+    return { accepted: true };
   }
 
   async setConsent(
@@ -109,6 +171,9 @@ export class AgenteraOfficialQualityManager {
         principal.deviceId,
         purpose,
       );
+      if (purpose === "official_explicit_feedback") {
+        this.purgeFeedbackCandidates(principal);
+      }
     }
     try {
       await this.client.setConsent(purpose, enabled, receipt.version);
@@ -126,6 +191,7 @@ export class AgenteraOfficialQualityManager {
       (next === null || previous.accountId !== next.accountId)
     ) {
       this.database.purgeAccount(previous.accountId);
+      this.purgeFeedbackCandidates(previous);
     }
     this.previousPrincipal = next;
     if (next !== null && !samePrincipal(previous, next)) {
@@ -139,6 +205,31 @@ export class AgenteraOfficialQualityManager {
       this.activeUpload = null;
     });
     return this.activeUpload;
+  }
+
+  private purgeFeedbackCandidates(principal: OfficialQualityPrincipal): void {
+    for (const [eventId, candidate] of this.feedbackCandidates) {
+      if (
+        candidate.accountId === principal.accountId &&
+        candidate.deviceId === principal.deviceId
+      ) {
+        this.feedbackCandidates.delete(eventId);
+      }
+    }
+  }
+
+  private purgeExpiredFeedbackCandidates(): void {
+    const now = this.now().getTime();
+    for (const [eventId, candidate] of this.feedbackCandidates) {
+      const preparedAt = new Date(candidate.preparedAt).getTime();
+      if (
+        !Number.isFinite(preparedAt) ||
+        preparedAt > now ||
+        now - preparedAt > FEEDBACK_CANDIDATE_TTL_MILLISECONDS
+      ) {
+        this.feedbackCandidates.delete(eventId);
+      }
+    }
   }
 
   private async performUpload(): Promise<void> {

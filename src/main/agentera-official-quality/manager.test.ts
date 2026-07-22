@@ -101,7 +101,11 @@ describe("AgenteraOfficialQualityManager", () => {
     return new AgenteraOfficialQualityManager({
       database,
       client,
-      collector: { collectMetric: vi.fn(() => null) },
+      collector: {
+        collectMetric: vi.fn(() => null),
+        prepareFeedbackCandidate: vi.fn(() => null),
+        collectFeedback: vi.fn(() => null),
+      },
       getPrincipal: () => principal,
       now: () => now,
       random: () => random,
@@ -194,5 +198,93 @@ describe("AgenteraOfficialQualityManager", () => {
     principal = { accountId: OTHER_ACCOUNT_ID, deviceId: DEVICE_ID };
     await quality.uploadPending();
     expect(uploadEvent).toHaveBeenCalledTimes(0);
+  });
+
+  it("returns local consent and keeps explicit eligibility independent from passive upload", async () => {
+    const candidate = {
+      candidateId: "019f0000-0000-7000-8000-000000000010",
+      accountId: ACCOUNT_ID,
+      deviceId: DEVICE_ID,
+      consentVersion: 1,
+      preparedAt: NOW.toISOString(),
+      platformId: "30000000-0000-4000-8000-000000000001",
+      definitionId: "40000000-0000-4000-8000-000000000001",
+      versionId: "50000000-0000-4000-8000-000000000001",
+      releaseId: "60000000-0000-4000-8000-000000000001",
+      releaseRevisionId: "70000000-0000-4000-8000-000000000001",
+      desktopVersion: "0.7.3",
+      runtimeVersion: "v0.18.2-agentera.1",
+      eventDay: "2026-07-23",
+      result: "success" as const,
+      latencyBucket: "1s_5s" as const,
+      totalTokenBucket: "1_1k" as const,
+      crashCode: null,
+      bindingProof: "90000000-0000-4000-8000-000000000001",
+    };
+    const explicitEnvelope = {
+      ...envelope(),
+      event_id: candidate.candidateId,
+      kind: "explicit_feedback" as const,
+      feedback_rating: "helpful" as const,
+    };
+    const collector = {
+      collectMetric: vi.fn(() => null),
+      prepareFeedbackCandidate: vi.fn(() => candidate),
+      collectFeedback: vi.fn(() => explicitEnvelope),
+    };
+    database.setConsent(
+      ACCOUNT_ID,
+      DEVICE_ID,
+      "official_explicit_feedback",
+      true,
+      NOW,
+    );
+    const quality = new AgenteraOfficialQualityManager({
+      database,
+      client,
+      collector,
+      getPrincipal: () => principal,
+      now: () => now,
+      random: () => 0,
+    });
+
+    expect(quality.getConsent()).toEqual({
+      passive: false,
+      explicitFeedback: true,
+    });
+    const eligibility = quality.recordMetric({} as never);
+    expect(eligibility).toEqual({
+      eventId: candidate.candidateId,
+      result: "success",
+      latencyBucket: "1s_5s",
+      totalTokenBucket: "1_1k",
+      crashCode: null,
+    });
+    await expect(
+      quality.submitFeedback({
+        eventId: candidate.candidateId,
+        rating: "helpful",
+        reasonCodes: [],
+      }),
+    ).resolves.toEqual({ accepted: true });
+    expect(collector.collectFeedback).toHaveBeenCalledWith(candidate, {
+      rating: "helpful",
+      reasonCodes: [],
+    });
+    await expect(
+      quality.submitFeedback({
+        eventId: candidate.candidateId,
+        rating: "helpful",
+        reasonCodes: [],
+      }),
+    ).rejects.toThrow(/eligible/i);
+  });
+
+  it("returns default-off consent without an owner", () => {
+    principal = null;
+    expect(manager().getConsent()).toEqual({
+      passive: false,
+      explicitFeedback: false,
+    });
   });
 });
