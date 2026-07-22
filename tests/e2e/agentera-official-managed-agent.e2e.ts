@@ -154,6 +154,29 @@ interface OfficialAuditEvent {
   event_type: string;
 }
 
+interface DraftPackagePayload {
+  bundle: {
+    assets: Array<{ content: string; path: string }>;
+  };
+  manifest: {
+    assets: Array<{
+      kind: "knowledge" | "skill" | "sop";
+      media_type: string;
+      path: string;
+      sha256: string;
+    }>;
+    dependencies: unknown[];
+    identity: { system_prompt: string };
+    model_constraints: {
+      allowed_models: string[];
+      allowed_providers: string[];
+    };
+    runtime_compatibility: { minimum_version: string };
+    schema_version: number;
+    tools: { allowed: string[]; denied: string[] };
+  };
+}
+
 interface AccountIdentity {
   userId: string;
   personalSpaceId: string;
@@ -179,7 +202,6 @@ const PRIVATE_MARKERS = [
 
 let harness: AgentControlHarness | null = null;
 let eligibleDevice: AgentControlDevice | null = null;
-let ineligibleDevice: AgentControlDevice | null = null;
 
 test.setTimeout(900_000);
 
@@ -404,7 +426,10 @@ async function list<T>(
   return response.body.items;
 }
 
-function reason(code: string, ticket: string) {
+function reason(
+  code: string,
+  ticket: string,
+): { note: string; reason_code: string; ticket_reference: string } {
   return { reason_code: code, ticket_reference: ticket, note: "" };
 }
 
@@ -412,7 +437,10 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function packagePayload(systemPrompt: string, version: number) {
+function packagePayload(
+  systemPrompt: string,
+  version: number,
+): DraftPackagePayload {
   const assets = [
     {
       path: "skills/official-research/SKILL.md",
@@ -697,7 +725,9 @@ test.afterAll(async () => {
   harness = null;
 });
 
-test("failure injection matrix remains fail-closed at every owned boundary", async ({}, testInfo) => {
+test("failure injection matrix remains fail-closed at every owned boundary", async ({
+  browserName: _browserName,
+}, testInfo) => {
   test.setTimeout(360_000);
   const cloudRoot = process.env.AERA_OFFICIAL_AGENT_E2E_CLOUD_REPO?.trim();
   const adminRoot = process.env.AERA_OFFICIAL_AGENT_E2E_ADMIN_REPO?.trim();
@@ -776,7 +806,9 @@ test("failure injection matrix remains fail-closed at every owned boundary", asy
 });
 
 // @lat: [[agentera-agent-control-plane#Official Managed Agent V1#Executable lifecycle gate]]
-test("real Admin, Cloud, and two desktops preserve v1 v2 rollback pause offline and privacy boundaries", async ({}, testInfo) => {
+test("real Admin, Cloud, and two desktops preserve v1 v2 rollback pause offline and privacy boundaries", async ({
+  browserName: _browserName,
+}, testInfo) => {
   harness = await createOfficialManagedAgentHarness();
   const official = harness.official;
   if (!official)
@@ -801,8 +833,6 @@ test("real Admin, Cloud, and two desktops preserve v1 v2 rollback pause offline 
     "Ineligible Official E2E User",
     true,
   );
-  ineligibleDevice = ineligible.device;
-
   const developer = await loginWithRecovery(
     baseURL,
     fixtures.roles.developer[0],
