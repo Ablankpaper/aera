@@ -16,6 +16,24 @@ The complete contract is `docs/superpowers/specs/2026-07-23-agentera-official-ag
 
 The executable cross-repository task sequence is `docs/superpowers/plans/2026-07-23-agentera-official-agent-privacy-quality-feedback-v1.md`.
 
+### Local minimization boundary
+
+The main process converts runtime observations into closed result, latency, token, and crash buckets before any durable quality object exists.
+
+[[src/main/agentera-official-quality/minimizer.ts#bucketOfficialQualityLatency]] and [[src/main/agentera-official-quality/minimizer.ts#bucketOfficialQualityTotalTokens]] accept only bounded numeric counters, while [[src/main/agentera-official-quality/model.ts#parseOfficialQualityEnvelope]] rejects unknown fields, raw text, malformed provenance, and non-canonical signatures.
+
+This domain never accepts prompts, responses, error messages, paths, conversation or session identifiers, Profile or RuntimeBinding identifiers, Memory, Skills, Curator state, or attachments. Official release provenance is the minimum gate; later collection must fail closed when the binding is not an eligible PLATFORM release.
+
+### Consent and private outbox
+
+The quality outbox is a separate private SQLite domain below Electron `userData` and outside `HERMES_HOME`.
+
+[[src/main/agentera-official-quality/db.ts#openAgenteraOfficialQualityDatabase]] creates private directory and file permissions. The database stores only purpose-scoped consent receipts and canonical minimized envelopes; its schema deliberately has no column for runtime content or Hermes-owned identity.
+
+Consent defaults off independently for passive quality and explicit feedback. An enqueue requires the currently active purpose and exact consent version, expires after thirty days, and treats exact event replay as idempotent while rejecting conflicting reuse. A future schema version is rejected without modification.
+
+Task 6 local evidence is `src/main/agentera-official-quality/{db,model,minimizer}.test.ts`: 31 focused tests cover path isolation, permissions, schema shape, default-off consent, strict canonical serialization, bucket boundaries, replay safety, expiry, and future-schema refusal. This is local feature-branch evidence only; it is not a push, deployment, collection rollout, or production consent grant.
+
 ## End-to-end encrypted backup V1
 
 Encrypted backup stores immutable ciphertext snapshots for one USER-owned Installation and physical Profile; it is not Agent sync or live multi-device state replication.
