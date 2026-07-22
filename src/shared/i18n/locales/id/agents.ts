@@ -66,6 +66,7 @@ export default {
   walletDeleteConfirmLabel: "Remove wallet",
   control: {
     experience: enAgents.control.experience,
+    official: enAgents.control.official,
     workspaceSpace: "Workspace",
     workspaceSpaceTitle: "Agent Workspace",
     workspaceAuthorSubtitle:

@@ -11,6 +11,7 @@ import {
   parseAgentControlId,
   parseClaimVersionInput,
   parseConfirmExperienceCandidateImportInput,
+  parseConfirmOfficialAgentInstallInput,
   parseConfirmOrganizationReviewInput,
   parseConfirmOrganizationSubmissionInput,
   parseConfirmOrganizationWithdrawalInput,
@@ -91,8 +92,63 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-confirm-organization-review",
       "agentera-agents-prepare-organization-withdrawal",
       "agentera-agents-confirm-organization-withdrawal",
+      "agentera-agents-list-official",
+      "agentera-agents-prepare-official-install",
+      "agentera-agents-confirm-official-install",
+      "agentera-agents-refresh-official-updates",
+      "agentera-agents-apply-official-update",
     ]) {
       expect(AGENTERA_IPC_CHANNEL_POLICY[channel]).toBe("online");
+    }
+  });
+
+  it("accepts only bounded official Agent identifiers and the exact install handle confirmation", () => {
+    expect(
+      parseConfirmOfficialAgentInstallInput({
+        installHandle: UUID,
+        confirmation: "install-official-agent",
+      }),
+    ).toEqual({
+      installHandle: UUID,
+      confirmation: "install-official-agent",
+    });
+    expect(() =>
+      parseConfirmOfficialAgentInstallInput({
+        installHandle: UUID,
+        confirmation: "yes",
+      }),
+    ).toThrow();
+
+    for (const forbidden of [
+      "ownerScope",
+      "platformId",
+      "userId",
+      "deviceId",
+      "role",
+      "channel",
+      "versionId",
+      "releaseId",
+      "releaseRevisionId",
+      "profileName",
+      "profilePath",
+      "cloudOrigin",
+      "accessToken",
+      "signingKey",
+      "policy",
+      "manifest",
+      "bundle",
+      "memory",
+      "session",
+      "privateSkill",
+      "localLearning",
+    ]) {
+      expect(() =>
+        parseConfirmOfficialAgentInstallInput({
+          installHandle: UUID,
+          confirmation: "install-official-agent",
+          [forbidden]: "forged",
+        }),
+      ).toThrow();
     }
   });
 
@@ -522,6 +578,32 @@ describe("Agent control IPC contract", () => {
     ).resolves.toEqual({ ok: false, errorCode: code });
   });
 
+  it.each([
+    "official_agent_not_eligible",
+    "official_release_paused",
+    "official_client_version_unsupported",
+    "official_installation_policy_blocked",
+  ] as const)("preserves stable Official Agent error %s", async (code) => {
+    await expect(
+      executeAgentControlIpc(async () => {
+        throw Object.assign(new Error("private official release failure"), {
+          code,
+        });
+      }),
+    ).resolves.toEqual({ ok: false, errorCode: code });
+  });
+
+  it.each([
+    ["official_install_handle_invalid", "invalid_request"],
+    ["official_release_changed", "conflict"],
+  ] as const)("maps %s to bounded error %s", async (code, expected) => {
+    await expect(
+      executeAgentControlIpc(async () => {
+        throw Object.assign(new Error("private official state"), { code });
+      }),
+    ).resolves.toEqual({ ok: false, errorCode: expected });
+  });
+
   it("returns bounded Organization DLP findings for non-private asset paths", async () => {
     const secret = "organization-dlp-evidence-must-not-leak";
     const result = await executeAgentControlIpc(async () => {
@@ -714,6 +796,11 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-confirm-organization-review",
       "agentera-agents-prepare-organization-withdrawal",
       "agentera-agents-confirm-organization-withdrawal",
+      "agentera-agents-list-official",
+      "agentera-agents-prepare-official-install",
+      "agentera-agents-confirm-official-install",
+      "agentera-agents-refresh-official-updates",
+      "agentera-agents-apply-official-update",
     ]) {
       expect(register.match(new RegExp(`"${channel}"`, "g"))).toHaveLength(1);
     }

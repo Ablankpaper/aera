@@ -24,6 +24,10 @@ function success<T>(data: T): AgenteraAgentControlResult<T> {
 function installation(): AgenteraAgentInstallationSummary {
   return {
     id: INSTALLATION_ID,
+    sourceScope: "WORKSPACE",
+    officialReleaseId: null,
+    selectedReleaseRevisionId: null,
+    updatePolicy: "manual",
     definitionId: DEFINITION_ID,
     selectedVersionId: VERSION_ID,
     runtimeProfileId: "55555555-5555-4555-8555-555555555555",

@@ -61,6 +61,7 @@ import type {
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
+  ConfirmOfficialAgentInstallInput,
   ConfirmOrganizationReviewInput,
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
@@ -75,6 +76,9 @@ import type {
   OrganizationReviewPreview,
   OrganizationSubmissionPreview,
   OrganizationWithdrawalPreview,
+  OfficialAgentInstallPreview,
+  OfficialAgentSummary,
+  OfficialManagedUpdate,
   PrepareExperienceCandidateInput,
   PrepareOrganizationReviewInput,
   PublicationPreview,
@@ -426,6 +430,21 @@ interface AgenteraAgentsAPI {
   listDefinitions: () => Promise<
     AgenteraAgentControlResult<AgenteraAgentDefinitionSummary[]>
   >;
+  listOfficialAgents: () => Promise<
+    AgenteraAgentControlResult<OfficialAgentSummary[]>
+  >;
+  prepareOfficialInstall: (
+    definitionId: string,
+  ) => Promise<AgenteraAgentControlResult<OfficialAgentInstallPreview>>;
+  confirmOfficialInstall: (
+    input: ConfirmOfficialAgentInstallInput,
+  ) => Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>>;
+  refreshOfficialUpdates: () => Promise<
+    AgenteraAgentControlResult<OfficialManagedUpdate[]>
+  >;
+  applyOfficialUpdate: (
+    installationId: string,
+  ) => Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>>;
   listVersions: (
     definitionId: string,
   ) => Promise<AgenteraAgentControlResult<AgenteraAgentVersionSummary[]>>;

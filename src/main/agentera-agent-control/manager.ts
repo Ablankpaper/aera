@@ -392,8 +392,12 @@ export class AgenteraAgentControlManager {
           .prepare(
             `SELECT COUNT(*) AS count FROM local_agent_installations
              WHERE tenant_id = ? AND owner_id = ?
-               AND device_installation_id = ? AND source_scope = ?
-               AND source_workspace_id IS ? AND source_organization_id IS ?`,
+               AND device_installation_id = ?
+               AND (
+                 (source_scope = ? AND source_workspace_id IS ?
+                   AND source_organization_id IS ?)
+                 OR (source_scope = 'PLATFORM' AND update_policy = 'managed')
+               )`,
           )
           .get(
             owner.tenantId,
@@ -683,9 +687,12 @@ export class AgenteraAgentControlManager {
 
   async listInstallations(): Promise<AgenteraAgentInstallationSummary[]> {
     this.assertInstallationRole();
-    return (await this.ensureRuntimeComponents()).installations
-      .listLocalInstallations(this.assetContext())
-      .map(serializeInstallation);
+    const installationManager = (await this.ensureRuntimeComponents())
+      .installations;
+    return [
+      ...installationManager.listLocalInstallations(this.assetContext()),
+      ...installationManager.listManagedInstallations(),
+    ].map(serializeInstallation);
   }
 
   async installVersion(

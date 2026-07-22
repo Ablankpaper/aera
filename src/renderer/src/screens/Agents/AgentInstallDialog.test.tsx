@@ -21,6 +21,10 @@ function installation(
 ): AgenteraAgentInstallationSummary {
   return {
     id: INSTALLATION_ID,
+    sourceScope: "USER",
+    officialReleaseId: null,
+    selectedReleaseRevisionId: null,
+    updatePolicy: "manual",
     definitionId: DEFINITION_ID,
     selectedVersionId: VERSION_ID,
     runtimeProfileId:

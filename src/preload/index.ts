@@ -55,6 +55,7 @@ import type {
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
+  ConfirmOfficialAgentInstallInput,
   ConfirmOrganizationReviewInput,
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
@@ -69,6 +70,9 @@ import type {
   OrganizationReviewPreview,
   OrganizationSubmissionPreview,
   OrganizationWithdrawalPreview,
+  OfficialAgentInstallPreview,
+  OfficialAgentSummary,
+  OfficialManagedUpdate,
   PrepareExperienceCandidateInput,
   PrepareOrganizationReviewInput,
   PublicationPreview,
@@ -2172,6 +2176,27 @@ const agenteraAgentsAPI = {
   listDefinitions: (): Promise<
     AgenteraAgentControlResult<AgenteraAgentDefinitionSummary[]>
   > => ipcRenderer.invoke("agentera-agents-list-definitions"),
+  listOfficialAgents: (): Promise<
+    AgenteraAgentControlResult<OfficialAgentSummary[]>
+  > => ipcRenderer.invoke("agentera-agents-list-official"),
+  prepareOfficialInstall: (
+    definitionId: string,
+  ): Promise<AgenteraAgentControlResult<OfficialAgentInstallPreview>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-prepare-official-install",
+      definitionId,
+    ),
+  confirmOfficialInstall: (
+    input: ConfirmOfficialAgentInstallInput,
+  ): Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>> =>
+    ipcRenderer.invoke("agentera-agents-confirm-official-install", input),
+  refreshOfficialUpdates: (): Promise<
+    AgenteraAgentControlResult<OfficialManagedUpdate[]>
+  > => ipcRenderer.invoke("agentera-agents-refresh-official-updates"),
+  applyOfficialUpdate: (
+    installationId: string,
+  ): Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>> =>
+    ipcRenderer.invoke("agentera-agents-apply-official-update", installationId),
   listVersions: (
     definitionId: string,
   ): Promise<AgenteraAgentControlResult<AgenteraAgentVersionSummary[]>> =>

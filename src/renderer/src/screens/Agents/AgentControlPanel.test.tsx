@@ -17,6 +17,8 @@ import type {
   ExperienceCandidateDetail,
   ExperienceCandidateImportPreview,
   ExperienceCandidateSummary,
+  OfficialAgentSummary,
+  OfficialManagedUpdate,
 } from "../../../../shared/agentera-agent-control";
 import AgentControlPanel from "./AgentControlPanel";
 
@@ -29,6 +31,8 @@ const VERSION_ID = "22222222-2222-4222-8222-222222222222";
 const INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
 const WORKSPACE_ID = "66666666-6666-4666-8666-666666666666";
 const ORGANIZATION_ID = "99999999-9999-4999-8999-999999999999";
+const OFFICIAL_RELEASE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const OFFICIAL_REVISION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 function success<T>(data: T): AgenteraAgentControlResult<T> {
   return { ok: true, data };
@@ -96,6 +100,10 @@ function installation(
 ): AgenteraAgentInstallationSummary {
   return {
     id: INSTALLATION_ID,
+    sourceScope: "USER",
+    officialReleaseId: null,
+    selectedReleaseRevisionId: null,
+    updatePolicy: "manual",
     definitionId: DEFINITION_ID,
     selectedVersionId: VERSION_ID,
     runtimeProfileId:
@@ -105,6 +113,34 @@ function installation(
     retryCode: status === "pending" ? "materialization_failed" : null,
     createdAt: "2026-07-19T00:00:00.000Z",
     updatedAt: "2026-07-19T00:00:00.000Z",
+  };
+}
+
+function officialAgent(): OfficialAgentSummary {
+  return {
+    definitionId: DEFINITION_ID,
+    displayName: "Official Research Agent",
+    iconMediaType: null,
+    iconDataBase64Url: null,
+    versionId: VERSION_ID,
+    versionNumber: 2,
+    releaseId: OFFICIAL_RELEASE_ID,
+    releaseRevisionId: OFFICIAL_REVISION_ID,
+    channel: "stable",
+    runtimeMinimumVersion: "v0.18.2-agentera.1",
+    runtimeMaximumVersionExclusive: null,
+    installationState: "installed",
+    updateState: "update_available",
+  };
+}
+
+function officialInstallation(): AgenteraAgentInstallationSummary {
+  return {
+    ...installation("active"),
+    sourceScope: "PLATFORM",
+    officialReleaseId: OFFICIAL_RELEASE_ID,
+    selectedReleaseRevisionId: OFFICIAL_REVISION_ID,
+    updatePolicy: "managed",
   };
 }
 
@@ -186,6 +222,11 @@ function installAPI(
     prepareOrganizationWithdrawal: vi.fn(),
     confirmOrganizationWithdrawal: vi.fn(),
     listDefinitions: vi.fn(async () => success([definition()])),
+    listOfficialAgents: vi.fn(async () => success([])),
+    prepareOfficialInstall: vi.fn(),
+    confirmOfficialInstall: vi.fn(),
+    refreshOfficialUpdates: vi.fn(async () => success([])),
+    applyOfficialUpdate: vi.fn(),
     listVersions: vi.fn(async () => success([])),
     listInstallations: vi.fn(async () => success([])),
     installVersion: vi.fn(),
@@ -251,6 +292,63 @@ describe("AgentControlPanel", () => {
         name: "agents.control.experience.promoteLocalExperience",
       }),
     ).toBeNull();
+  });
+
+  it("loads and applies a managed official update only through the official API", async () => {
+    const update: OfficialManagedUpdate = {
+      installationId: INSTALLATION_ID,
+      expectedSelectedReleaseRevisionId: OFFICIAL_REVISION_ID,
+      targetReleaseRevisionId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      targetVersionId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    };
+    const api = installAPI({
+      listInstallations: vi.fn(async () => success([officialInstallation()])),
+      listOfficialAgents: vi.fn(async () => success([officialAgent()])),
+      refreshOfficialUpdates: vi.fn(async () => success([update])),
+      applyOfficialUpdate: vi.fn(async () => success(officialInstallation())),
+    });
+
+    render(<AgentControlPanel profiles={[]} />);
+
+    expect(await screen.findByText("Official Research Agent")).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.control.official.applyUpdate",
+      }),
+    );
+    await waitFor(() =>
+      expect(api.applyOfficialUpdate).toHaveBeenCalledWith(INSTALLATION_ID),
+    );
+    expect(api.selectInstallationVersion).not.toHaveBeenCalled();
+    expect(api.archiveInstallation).not.toHaveBeenCalled();
+  });
+
+  it("keeps a verified official installation visible offline without remote calls", async () => {
+    const api = installAPI({
+      getState: vi.fn(async () =>
+        success(
+          controlState(
+            { scope: "USER" },
+            { access: "offline", cloudAvailable: false },
+          ),
+        ),
+      ),
+      listInstallations: vi.fn(async () => success([officialInstallation()])),
+    });
+
+    render(<AgentControlPanel profiles={[]} />);
+
+    expect(
+      await screen.findByText("agents.control.official.offlineLocalVersion"),
+    ).toBeTruthy();
+    expect(api.listOfficialAgents).not.toHaveBeenCalled();
+    expect(api.refreshOfficialUpdates).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", {
+        name: "agents.control.official.applyUpdate",
+      }),
+    ).toBeNull();
+    expect(screen.queryByText("agents.control.installedLocally")).toBeNull();
   });
 
   // @lat: [[agentera-agent-control-plane#Trusted Workspace Agent context#Role-aware presentation]]

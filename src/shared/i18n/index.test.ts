@@ -144,6 +144,22 @@ describe("shared i18n", () => {
     }
   });
 
+  it("provides the complete Official Agent UI copy in every locale", () => {
+    const expected = leafKeys(
+      resources.en.translation.agents.control.official,
+    ).sort();
+    expect(expected.length).toBeGreaterThan(20);
+
+    for (const locale of APP_LOCALES) {
+      const official = (
+        resources[locale].translation.agents.control as {
+          official?: unknown;
+        }
+      ).official;
+      expect(leafKeys(official).sort()).toEqual(expected);
+    }
+  });
+
   it("keeps Arabic and Hebrew authentication screens right-to-left", () => {
     expect(getLocaleDirection("ar")).toBe("rtl");
     expect(getLocaleDirection("he")).toBe("rtl");

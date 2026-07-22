@@ -273,6 +273,7 @@ import {
   parseAgentControlId,
   parseClaimVersionInput,
   parseConfirmExperienceCandidateImportInput,
+  parseConfirmOfficialAgentInstallInput,
   parseConfirmOrganizationReviewInput,
   parseConfirmOrganizationSubmissionInput,
   parseConfirmOrganizationWithdrawalInput,
@@ -1433,6 +1434,33 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
   registerAgentControlHandler("agentera-agents-list-definitions", () =>
     requireAgentControl().listDefinitions(),
+  );
+  registerAgentControlHandler("agentera-agents-list-official", () =>
+    requireAgentControl().listOfficialAgents(),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-prepare-official-install",
+    (_event, definitionId: unknown) =>
+      requireAgentControl().prepareOfficialInstall(
+        parseAgentControlId(definitionId),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-confirm-official-install",
+    (_event, input: unknown) =>
+      requireAgentControl().confirmOfficialInstall(
+        parseConfirmOfficialAgentInstallInput(input),
+      ),
+  );
+  registerAgentControlHandler("agentera-agents-refresh-official-updates", () =>
+    requireAgentControl().refreshOfficialUpdates(),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-apply-official-update",
+    (_event, installationId: unknown) =>
+      requireAgentControl().applyOfficialUpdate(
+        parseAgentControlId(installationId),
+      ),
   );
   registerAgentControlHandler(
     "agentera-agents-list-versions",

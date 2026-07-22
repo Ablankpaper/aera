@@ -7,6 +7,9 @@ import type {
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
   AgenteraAgentVersionSummary,
+  OfficialAgentInstallPreview,
+  OfficialAgentSummary,
+  OfficialManagedUpdate,
 } from "../../../../shared/agentera-agent-control";
 import { Plus, Refresh } from "../../assets/icons";
 import { useI18n } from "../../components/useI18n";
@@ -17,6 +20,8 @@ import AgentInstallDialog, {
   type AgentInstallProfileOption,
 } from "./AgentInstallDialog";
 import OrganizationSubmissionPanel from "./OrganizationSubmissionPanel";
+import OfficialAgentInstallDialog from "./OfficialAgentInstallDialog";
+import OfficialAgentSection from "./OfficialAgentSection";
 
 export interface AgentControlPanelProps {
   profiles: AgentInstallProfileOption[];
@@ -59,6 +64,17 @@ export default function AgentControlPanel({
   const [installations, setInstallations] = useState<
     AgenteraAgentInstallationSummary[]
   >([]);
+  const [officialAgents, setOfficialAgents] = useState<OfficialAgentSummary[]>(
+    [],
+  );
+  const [officialUpdates, setOfficialUpdates] = useState<
+    OfficialManagedUpdate[]
+  >([]);
+  const [officialInstallPreview, setOfficialInstallPreview] =
+    useState<OfficialAgentInstallPreview | null>(null);
+  const [busyOfficialInstallationId, setBusyOfficialInstallationId] = useState<
+    string | null
+  >(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<AgentDraftDetail | "new" | null>(null);
@@ -125,6 +141,8 @@ export default function AgentControlPanel({
       }
 
       let nextDefinitions: AgenteraAgentDefinitionSummary[] = [];
+      let nextOfficialAgents: OfficialAgentSummary[] = [];
+      let nextOfficialUpdates: OfficialManagedUpdate[] = [];
       let nextError: string | null = null;
       if (nextState.access === "online" && nextState.cloudAvailable) {
         const definitionResult = await window.agenteraAgents.listDefinitions();
@@ -133,6 +151,24 @@ export default function AgentControlPanel({
           nextError = errorKey(definitionResult.errorCode);
         } else {
           nextDefinitions = definitionResult.data;
+        }
+        if (canListInstallations) {
+          const officialResult =
+            await window.agenteraAgents.listOfficialAgents();
+          if (epoch !== loadEpoch.current) return;
+          if (!officialResult.ok) {
+            nextError = errorKey(officialResult.errorCode);
+          } else {
+            nextOfficialAgents = officialResult.data;
+          }
+          const updateResult =
+            await window.agenteraAgents.refreshOfficialUpdates();
+          if (epoch !== loadEpoch.current) return;
+          if (!updateResult.ok) {
+            nextError = errorKey(updateResult.errorCode);
+          } else {
+            nextOfficialUpdates = updateResult.data;
+          }
         }
       }
       if (epoch !== loadEpoch.current) return;
@@ -145,12 +181,16 @@ export default function AgentControlPanel({
         setInstallDialog(null);
         setArchiveTarget(null);
         setPromotionTarget(null);
+        setOfficialInstallPreview(null);
+        setBusyOfficialInstallationId(null);
       }
       selectedContextKey.current = nextContextKey;
       setState(nextState);
       setDrafts(nextDrafts);
       setInstallations(nextInstallations);
       setDefinitions(nextDefinitions);
+      setOfficialAgents(nextOfficialAgents);
+      setOfficialUpdates(nextOfficialUpdates);
       setError(nextError);
     } catch {
       if (epoch === loadEpoch.current) {
@@ -168,6 +208,8 @@ export default function AgentControlPanel({
       setInstallDialog(null);
       setArchiveTarget(null);
       setPromotionTarget(null);
+      setOfficialInstallPreview(null);
+      setBusyOfficialInstallationId(null);
       setCandidateRefreshToken((value) => value + 1);
       setOrganizationRefreshToken((value) => value + 1);
       void load();
@@ -236,6 +278,33 @@ export default function AgentControlPanel({
     await load();
   };
 
+  const requestOfficialInstall = async (
+    definitionId: string,
+  ): Promise<void> => {
+    setError(null);
+    const result =
+      await window.agenteraAgents.prepareOfficialInstall(definitionId);
+    if (!result.ok) {
+      setError(errorKey(result.errorCode));
+      return;
+    }
+    setOfficialInstallPreview(result.data);
+  };
+
+  const applyOfficialUpdate = async (installationId: string): Promise<void> => {
+    if (busyOfficialInstallationId) return;
+    setBusyOfficialInstallationId(installationId);
+    setError(null);
+    const result =
+      await window.agenteraAgents.applyOfficialUpdate(installationId);
+    setBusyOfficialInstallationId(null);
+    if (!result.ok) {
+      setError(errorKey(result.errorCode));
+      return;
+    }
+    await load();
+  };
+
   const definitionName = (definitionId: string): string =>
     definitions.find((item) => item.id === definitionId)?.displayName ??
     t("agents.control.installedLocally");
@@ -273,6 +342,16 @@ export default function AgentControlPanel({
     ? organizationCanAuthor
     : !isWorkspaceMember;
   const draftReadOnly = workspaceReadOnly || organizationReadOnly;
+  const officialInstallations = installations.filter(
+    (installation) => installation.sourceScope === "PLATFORM",
+  );
+  const scopedInstallations = installations.filter(
+    (installation) => installation.sourceScope !== "PLATFORM",
+  );
+  const officialOnline =
+    state?.access === "online" &&
+    state.cloudAvailable === true &&
+    organizationCanSeeInstallations;
 
   return (
     <section
@@ -442,18 +521,34 @@ export default function AgentControlPanel({
         </div>
       )}
 
+      {!loading && organizationCanSeeInstallations ? (
+        <OfficialAgentSection
+          online={officialOnline}
+          agents={officialAgents}
+          installations={officialInstallations}
+          updates={officialUpdates}
+          busyInstallationId={busyOfficialInstallationId}
+          onInstall={(definitionId) =>
+            void requestOfficialInstall(definitionId)
+          }
+          onApplyUpdate={(installationId) =>
+            void applyOfficialUpdate(installationId)
+          }
+        />
+      ) : null}
+
       {!loading && organizationCanSeeInstallations && (
         <section className="agent-control-group agent-control-installations">
           <div className="agent-control-group-title">
             <h3>{t("agents.control.installations")}</h3>
-            <span>{installations.length}</span>
+            <span>{scopedInstallations.length}</span>
           </div>
-          {installations.length === 0 ? (
+          {scopedInstallations.length === 0 ? (
             <p className="agent-control-empty">
               {t("agents.control.noInstallations")}
             </p>
           ) : (
-            installations.map((installation, index) => (
+            scopedInstallations.map((installation, index) => (
               <article
                 key={`${installation.id}-${index}`}
                 className="agent-control-card agent-control-installation-card"
@@ -575,6 +670,17 @@ export default function AgentControlPanel({
           onCompleted={() => void load()}
         />
       )}
+      {officialInstallPreview ? (
+        <OfficialAgentInstallDialog
+          open
+          preview={officialInstallPreview}
+          onClose={() => setOfficialInstallPreview(null)}
+          onCompleted={() => {
+            setOfficialInstallPreview(null);
+            void load();
+          }}
+        />
+      ) : null}
 
       {promotionTarget ? (
         <ExperiencePromotionDialog

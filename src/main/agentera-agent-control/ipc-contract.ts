@@ -11,6 +11,7 @@ import type {
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
+  ConfirmOfficialAgentInstallInput,
   ConfirmOrganizationReviewInput,
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
@@ -173,6 +174,21 @@ export function parseClaimVersionInput(
     versionId: parseAgentControlId(value.versionId),
     localProfileId: parseProfileId(value.localProfileId),
     confirmation: "claim-existing-profile",
+  };
+}
+
+export function parseConfirmOfficialAgentInstallInput(
+  value: unknown,
+): ConfirmOfficialAgentInstallInput {
+  if (
+    !exactObject(value, ["installHandle", "confirmation"]) ||
+    value.confirmation !== "install-official-agent"
+  ) {
+    return invalidRequest();
+  }
+  return {
+    installHandle: parseAgentControlId(value.installHandle),
+    confirmation: "install-official-agent",
   };
 }
 
@@ -522,6 +538,16 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
     return code;
   }
   if (
+    code === "official_agent_not_eligible" ||
+    code === "official_release_paused" ||
+    code === "official_client_version_unsupported" ||
+    code === "official_installation_policy_blocked"
+  ) {
+    return code;
+  }
+  if (code === "official_install_handle_invalid") return "invalid_request";
+  if (code === "official_release_changed") return "conflict";
+  if (
     code.includes("conflict") ||
     code === "draft_conflict" ||
     code === "version_revoked" ||
@@ -816,6 +842,10 @@ export function serializeInstallation(
 ): AgenteraAgentInstallationSummary {
   return {
     id: installation.agentInstallationId,
+    sourceScope: installation.sourceScope,
+    officialReleaseId: installation.officialReleaseId,
+    selectedReleaseRevisionId: installation.selectedReleaseRevisionId,
+    updatePolicy: installation.updatePolicy,
     definitionId: installation.definitionId,
     selectedVersionId: installation.selectedVersionId,
     runtimeProfileId: installation.runtimeProfileId,

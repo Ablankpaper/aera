@@ -343,6 +343,10 @@ export type AgenteraAgentControlErrorCode =
   | "organization_submission_superseded"
   | "organization_publication_policy_blocked"
   | "organization_publication_dlp_blocked"
+  | "official_agent_not_eligible"
+  | "official_release_paused"
+  | "official_client_version_unsupported"
+  | "official_installation_policy_blocked"
   | "candidate_source_ineligible"
   | "candidate_dlp_blocked"
   | "candidate_already_reviewed"
@@ -389,6 +393,10 @@ export interface AgenteraAgentVersionSummary {
 
 export interface AgenteraAgentInstallationSummary {
   id: string;
+  sourceScope: "USER" | "WORKSPACE" | "ORGANIZATION" | "PLATFORM";
+  officialReleaseId: string | null;
+  selectedReleaseRevisionId: string | null;
+  updatePolicy: "manual" | "managed";
   definitionId: string;
   selectedVersionId: string;
   runtimeProfileId: string | null;

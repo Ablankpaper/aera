@@ -128,6 +128,34 @@ export default {
       draftReadOnly:
         "此企业草稿当前只读；请重新联网并使用 Owner 或 Admin 角色后再修改或提交。",
     },
+    official: {
+      title: "官方智能体",
+      badge: "官方托管",
+      internalChannel: "内部通道",
+      stableChannel: "稳定通道",
+      version: "版本",
+      install: "安装官方智能体",
+      confirmInstall: "创建隔离安装",
+      installTitle: "安装官方智能体",
+      freshProfileBoundary:
+        "本次安装始终创建一个全新、物理隔离的 Hermes Profile。",
+      privateDataBoundary:
+        "Memory、会话、文件、凭据、私有 Skill 与本地学习成果留在本机，本流程不会上传这些数据。",
+      installedLocally: "已在本机验证并安装官方智能体",
+      updateReady: "有可用的托管更新",
+      applyUpdate: "应用到新会话",
+      applyingUpdate: "正在应用更新…",
+      existingConversationsUnchanged:
+        "现有会话保持固定 RuntimeBinding；只有新会话使用更新后的发布版本。",
+      offlineLocalVersion: "已验证的本地官方版本",
+      offlineMayBeStale:
+        "离线时目录状态可能不是最新；已安装的本地智能体仍可继续使用。",
+      noAgents: "当前设备暂无可用的官方智能体。",
+      noInstalledOffline: "本机尚未安装经过验证的官方智能体。",
+      pausedForNewInstalls: "此官方发布已暂停新安装。",
+      installedSource: "已安装的官方智能体",
+      refresh: "刷新官方智能体",
+    },
     refresh: "刷新智能体控制面",
     newAgent: "新建智能体",
     offlineNotice:
@@ -310,6 +338,12 @@ export default {
       organization_submission_superseded: "此提交已被更新的企业提交替代。",
       organization_publication_policy_blocked: "企业策略阻止了此智能体提交。",
       organization_publication_dlp_blocked: "企业隐私扫描阻止了此智能体提交。",
+      official_agent_not_eligible:
+        "当前账户和设备不在此官方智能体的可用范围内。",
+      official_release_paused: "此官方发布已暂停新安装。",
+      official_client_version_unsupported:
+        "请先更新 AgentEra Studio，再安装此官方智能体。",
+      official_installation_policy_blocked: "平台策略不允许安装此官方智能体。",
       candidate_source_ineligible: "该安装或 Skill 不符合经验提升条件。",
       candidate_dlp_blocked: "本地隐私扫描阻止了该候选。",
       candidate_already_reviewed: "该候选已经有最终审核结果。",

@@ -199,6 +199,35 @@ export default {
       draftReadOnly:
         "This enterprise draft is read-only. Reconnect with an Owner or Admin role before changing or submitting it.",
     },
+    official: {
+      title: "Official Agents",
+      badge: "Official",
+      internalChannel: "Internal channel",
+      stableChannel: "Stable channel",
+      version: "Version",
+      install: "Install official Agent",
+      confirmInstall: "Create isolated installation",
+      installTitle: "Install official Agent",
+      freshProfileBoundary:
+        "This installation always creates a fresh, physically isolated Hermes Profile.",
+      privateDataBoundary:
+        "Memory, conversations, files, credentials, private Skills, and local learning stay on this computer and are never uploaded by this flow.",
+      installedLocally: "Verified official Agent installed locally",
+      updateReady: "A managed update is ready",
+      applyUpdate: "Apply for new conversations",
+      applyingUpdate: "Applying update…",
+      existingConversationsUnchanged:
+        "Existing conversations keep their fixed RuntimeBinding; only new conversations use the updated release.",
+      offlineLocalVersion: "Verified local official version",
+      offlineMayBeStale:
+        "Offline catalog status may be stale. The installed local Agent remains available.",
+      noAgents: "No official Agents are available for this device.",
+      noInstalledOffline: "No verified official Agents are installed locally.",
+      pausedForNewInstalls:
+        "This official release is paused for new installations.",
+      installedSource: "Installed official Agent",
+      refresh: "Refresh official Agents",
+    },
     refresh: "Refresh Agent control plane",
     newAgent: "New Agent",
     offlineNotice:
@@ -399,6 +428,14 @@ export default {
         "Organization policy blocked this Agent submission.",
       organization_publication_dlp_blocked:
         "The enterprise privacy scan blocked this Agent submission.",
+      official_agent_not_eligible:
+        "This official Agent is not available for the current account and device.",
+      official_release_paused:
+        "This official release is paused for new installations.",
+      official_client_version_unsupported:
+        "Update AgentEra Studio before installing this official Agent.",
+      official_installation_policy_blocked:
+        "Platform policy does not allow this official Agent installation.",
       candidate_source_ineligible:
         "This installation or Skill is not eligible for promotion.",
       candidate_dlp_blocked: "The local privacy scan blocked this candidate.",
