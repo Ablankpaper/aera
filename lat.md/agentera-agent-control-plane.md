@@ -62,13 +62,15 @@ Run `AERA_OFFICIAL_AGENT_E2E_CLOUD_REPO=/Users/zizimutou/Desktop/aera/aera-cloud
 
 ### Local verification evidence (2026-07-23)
 
-The verified executable source tips were Cloud `16ee99a`, Admin `b184e25`, and Desktop `ed6685a`. The Desktop evidence commit follows the implementation commits that add [[src/main/agentera-agent-control/official-agent-service.ts]], [[src/main/agentera-agent-control/installation-manager.ts]], [[src/main/agentera-agent-control/trust.ts]], the bounded preload/IPC surface, and the official catalog and confirmation UI.
+The locally verified executable tips were Cloud `16ee99a`, Admin `b184e25`, and Desktop `ed6685a`; each preserves the documented PLATFORM control-plane and USER-owned runtime boundary.
+
+The Desktop evidence commit follows the implementation commits that add [[src/main/agentera-agent-control/official-agent-service.ts]], [[src/main/agentera-agent-control/installation-manager.ts]], [[src/main/agentera-agent-control/trust.ts]], the bounded preload/IPC surface, and the official catalog and confirmation UI.
 
 Cloud passed `go test ./... -count=1`, `go vet ./...`, and `AERA_INTEGRATION_TESTS=1 go test -p 1 ./... -count=1` against an isolated disposable PostgreSQL and Redis stack. Admin passed `make verify`, including Go unit/integration/race checks, 21 Web test files with 71 tests, typecheck, production build, and OpenAPI validation. Its real-Cloud `make e2e` passed 15 of 15 browser and service acceptance cases, including the official immutable-publication, bounded-rollout, dual-control, and fail-closed case.
 
 Desktop passed typecheck, lint with zero errors, all 275 Vitest files with 2,620 passed and 3 conditionally skipped tests, and the pinned Cloud contract hash `c7546fee82b3cc7b2872580bc45367cc4f47d6d1e06d3ed5c035224677609b37`. The final cross-repository gate passed both the failure-injection matrix and the real Admin, Cloud, and two-Electron-desktop lifecycle scenario.
 
-`aera-runtime` remained clean at `c0439e1e3e`, equal to its `origin/main`. The privacy scan found secret and `HERMES_HOME` markers only in Cloud rejection-test fixtures and no Admin official-agent match. `lat check` could not run because the `lat` executable is unavailable in this environment, so the documentation-link gate remains explicitly unverified. All three feature branches and commits described here are local only: they have not been merged to `main`, pushed, deployed, or released.
+`aera-runtime` remained clean at `c0439e1e3e`, equal to its `origin/main`. The privacy scan found secret and `HERMES_HOME` markers only in Cloud rejection-test fixtures and no Admin official-agent match. `npm exec --yes --package=lat.md@0.12.1 -- lat check` passed on 2026-07-23. Cloud `16ee99a`, Admin `b184e25`, and Desktop `f5cd58c` were then fast-forwarded into their respective local `main` branches and the merged core suites were reverified; they have not been pushed, deployed, or released.
 
 ## Trusted Workspace Agent context
 
