@@ -27,7 +27,7 @@
 - Create `internal/officialquality/model.go`, `repository.go`, `service.go`, `http.go`, `pseudonym.go`, and focused tests.
 - Modify `internal/config/config.go` and add `internal/config/official_quality.go` for independent HMAC key rings and retention settings.
 - Modify `internal/httpapi/server.go` and `cmd/aera-cloud/main.go` to mount the public ingestion handler.
-- Modify `internal/adminapi/http.go`, `internal/adminapi/official_agent.go`, and tests to expose internal aggregate/proposal operations.
+- Modify `internal/adminapi/handler.go`, `internal/adminapi/official_agent.go`, and tests to expose internal aggregate/proposal operations.
 - Modify `internal/jobs/postgres.go` and tests for aggregation and retention.
 - Modify `api/openapi.yaml`, `api/openapi/internal-admin.yaml`, generated/contract tests, and `internal/store/migrate_test.go`.
 
@@ -36,7 +36,7 @@
 - Create `src/shared/agentera-official-quality.ts` for renderer-safe consent and feedback contracts.
 - Create `src/main/agentera-official-quality/{db,model,minimizer,collector,client,manager,ipc-contract}.ts` and focused tests.
 - Modify `src/main/app/start.ts`, `src/main/ipc/register.ts`, `src/main/ipc/auth-guard.ts`, `src/preload/index.ts`, and `src/preload/index.d.ts`.
-- Modify `src/renderer/src/screens/Settings/PrivacyPane.tsx` and add tests for the two independent consent controls.
+- Modify `src/renderer/src/components/settings/PrivacyPane.tsx` and add tests for the two independent consent controls.
 - Modify `src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts` only for the fixed-code helpful/not-helpful control; no chat body crosses the quality IPC.
 - Add `tests/e2e/agentera-official-quality.e2e.ts` and package script `test:e2e:official-quality`.
 
