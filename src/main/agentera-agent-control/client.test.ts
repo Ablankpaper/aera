@@ -1265,6 +1265,70 @@ describe("AgenteraAgentControlClient", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it("accepts the platform UUIDv7 in a strict official policy response", async () => {
+    const createdInstallation: AgentInstallation = {
+      id: INSTALLATION_ID,
+      definition_id: DEFINITION_ID,
+      selected_version_id: VERSION_ID,
+      policy_snapshot_id: POLICY_ID,
+      official_release_id: RELEASE_ID,
+      selected_release_revision_id: RELEASE_REVISION_ID,
+      update_policy: "managed",
+      status: "pending",
+      created_at: NOW.toISOString(),
+      updated_at: NOW.toISOString(),
+    };
+    const policy: AgentPolicySnapshot = {
+      ...policySnapshot(),
+      document: {
+        ...policySnapshot().document,
+        official_context: {
+          platform_id: "019f0000-0000-7000-8000-000000000999",
+          release_id: RELEASE_ID,
+          release_revision_id: RELEASE_REVISION_ID,
+          user_id: USER_ID,
+          device_installation_id: deviceIdentity().installationId,
+          installation_id: INSTALLATION_ID,
+          product_scope: "USER",
+          product_context_id: USER_ID,
+        },
+      },
+    };
+    const fetcher = vi.fn(async () =>
+      jsonResponse(
+        {
+          installation: createdInstallation,
+          policy_snapshot: policy,
+          replayed: false,
+        },
+        201,
+      ),
+    );
+    const client = new AgenteraAgentControlClient({
+      origin: "http://127.0.0.1:8086",
+      getAccessToken: () => "agentera-product-access",
+      getInstallationIdentity: () => deviceIdentity(),
+      officialAgentChannel: "internal",
+      desktopVersion: "0.7.3",
+      getAgentContext: () => ({ scope: "USER" }),
+      fetch: fetcher as typeof fetch,
+    });
+
+    await expect(
+      client.createInstallation(
+        {
+          definition_id: DEFINITION_ID,
+          official_release_revision_id: RELEASE_REVISION_ID,
+        },
+        "official-install-uuidv7",
+      ),
+    ).resolves.toEqual({
+      installation: createdInstallation,
+      policy_snapshot: policy,
+      replayed: false,
+    });
+  });
+
   it("is structurally separate from Hermes One Agent sync", () => {
     const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
     const source = readFileSync(

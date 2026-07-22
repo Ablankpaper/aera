@@ -1,5 +1,8 @@
 import { randomUUID as nodeRandomUUID } from "node:crypto";
-import type { OfficialManagedUpdate } from "../../shared/agentera-agent-control";
+import type {
+  OfficialAgentSummary,
+  OfficialManagedUpdate,
+} from "../../shared/agentera-agent-control";
 import type {
   AgentInstallation,
   AgentInstallationCreation,
@@ -66,6 +69,10 @@ export interface AgentInstallationClient {
     idempotencyKey: string,
   ): Promise<AgentInstallationCreation>;
   getVersion(versionId: string): Promise<AgentVersion>;
+  getOfficialAgent(definitionId: string): Promise<{
+    agent: OfficialAgentSummary;
+    version: AgentVersion;
+  }>;
   getPolicySnapshot(snapshotId: string): Promise<AgentPolicySnapshot>;
   activateInstallation(
     installationId: string,
@@ -505,7 +512,7 @@ function policySourceMatches(
     uuid(context.release_id) === source.officialReleaseId &&
     uuid(context.release_revision_id) === source.selectedReleaseRevisionId &&
     uuid(context.user_id) === owner.ownerId &&
-    uuid(context.device_id) === owner.deviceInstallationId &&
+    uuid(context.device_installation_id) === owner.deviceInstallationId &&
     uuid(context.installation_id) === installationId
   );
 }
@@ -521,6 +528,40 @@ function assertVersion(
     !DIGEST_PATTERN.test(version.content_digest)
   ) {
     throw new AgentInstallationManagerError("installation_conflict");
+  }
+}
+
+async function downloadManagedOfficialTarget(
+  client: AgentInstallationClient,
+  local: LocalAgentInstallation,
+  intent: ManagedUpdateIntent,
+): Promise<AgentVersion> {
+  if (local.sourceScope !== "PLATFORM" || local.officialReleaseId === null) {
+    throw new AgentInstallationManagerError("installation_conflict");
+  }
+  let officialDetailError: unknown;
+  try {
+    const detail = await client.getOfficialAgent(local.definitionId);
+    if (
+      detail.agent.definitionId !== local.definitionId ||
+      detail.agent.releaseId !== local.officialReleaseId ||
+      detail.agent.releaseRevisionId !== intent.targetReleaseRevisionId ||
+      detail.agent.versionId !== intent.targetVersionId
+    ) {
+      throw new AgentInstallationManagerError("installation_conflict");
+    }
+    return detail.version;
+  } catch (error) {
+    officialDetailError = error;
+  }
+
+  // An earlier idempotent apply may already have advanced Cloud while local
+  // activation failed. In that case the installation-bound version endpoint
+  // remains the only authorized way to recover the exact selected bytes.
+  try {
+    return await client.getVersion(intent.targetVersionId);
+  } catch {
+    throw officialDetailError;
   }
 }
 
@@ -760,6 +801,7 @@ export class AgentInstallationManager {
         this.owner,
       );
     } catch (error) {
+      reportStageFailure("creation", error);
       if (error instanceof AgentInstallationManagerError) throw error;
       throw new AgentInstallationManagerError("creation_failed");
     }
@@ -1056,7 +1098,11 @@ export class AgentInstallationManager {
     let version: AgentVersion;
     let projection: HermesVersionProjection;
     try {
-      const downloaded = await this.client.getVersion(intent.targetVersionId);
+      const downloaded = await downloadManagedOfficialTarget(
+        this.client,
+        local,
+        intent,
+      );
       assertVersion(downloaded, local.definitionId, intent.targetVersionId);
       version = this.cache.cacheVerifiedVersion(downloaded);
       assertVersion(version, local.definitionId, intent.targetVersionId);

@@ -21,6 +21,7 @@
     "test:e2e:organization-agent": "npm run build && playwright test tests/e2e/agentera-organization-agent.e2e.ts",
     "test:e2e:workspace-agent": "npm run build && playwright test tests/e2e/agentera-workspace-agent.e2e.ts",
     "test:e2e:experience-candidate": "npm run build && playwright test tests/e2e/agentera-experience-candidate.e2e.ts",
+    "test:e2e:official-managed-agent": "npm run build && playwright test tests/e2e/agentera-official-managed-agent.e2e.ts",
     "test:e2e:runtime-seed": "npm run build && playwright test tests/e2e/agentera-runtime-seed.e2e.ts",
     "test:coverage": "vitest run --coverage",
     "test:sandbox": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/hermes-sandbox.ps1 test",

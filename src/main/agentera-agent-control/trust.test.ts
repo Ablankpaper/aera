@@ -13,6 +13,7 @@ interface TrustFixture {
   keys: SigningKeySet;
   version: AgentVersion;
   policy: AgentPolicySnapshot;
+  officialPolicy: AgentPolicySnapshot;
 }
 
 const ORIGIN = "http://127.0.0.1:8086";
@@ -21,6 +22,7 @@ const DEFINITION_ID = "11111111-1111-4111-8111-111111111111";
 const VERSION_ID = "22222222-2222-4222-8222-222222222222";
 const INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
 const POLICY_ID = "44444444-4444-4444-8444-444444444444";
+const OFFICIAL_POLICY_ID = "55555555-5555-4555-8555-555555555555";
 const KEY_ID = "agent-control-test-v1";
 const FETCHED_AT = "2026-07-19T16:00:00.000Z";
 const SPKI_PREFIX_LENGTH = 12;
@@ -129,7 +131,35 @@ function fixture(): TrustFixture {
     signature: sign(null, policyPayload, pair.privateKey).toString("base64url"),
     created_at: FETCHED_AT,
   };
-  return { keys, version, policy };
+  const officialDocument: AgentPolicySnapshot["document"] = {
+    ...document,
+    official_context: {
+      platform_id: "019f0000-0000-7000-8000-000000000999",
+      release_id: "66666666-6666-4666-8666-666666666666",
+      release_revision_id: "77777777-7777-4777-8777-777777777777",
+      user_id: "88888888-8888-4888-8888-888888888888",
+      device_installation_id: "99999999-9999-4999-8999-999999999999",
+      installation_id: INSTALLATION_ID,
+      product_scope: "USER",
+      product_context_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    },
+  };
+  const officialDocumentDigest = createHash("sha256")
+    .update(JSON.stringify(officialDocument))
+    .digest("hex");
+  const officialPolicyPayload = Buffer.from(
+    `agentera-agent-policy-v1\u0000${OFFICIAL_POLICY_ID}\u00001\u0000${officialDocumentDigest}`,
+  );
+  const officialPolicy: AgentPolicySnapshot = {
+    ...policy,
+    id: OFFICIAL_POLICY_ID,
+    document: officialDocument,
+    content_digest: officialDocumentDigest,
+    signature: sign(null, officialPolicyPayload, pair.privateKey).toString(
+      "base64url",
+    ),
+  };
+  return { keys, version, policy, officialPolicy };
 }
 
 function expectTrustCode(operation: () => unknown, code: string): void {
@@ -157,6 +187,18 @@ describe("AgenteraAgentTrustStore", () => {
     expect(trust.verifyPolicy(policy, { runtimeVersion: "v0.18.9" })).toEqual({
       contentDigest: policy.content_digest,
     });
+  });
+
+  it("verifies a signed official policy with a canonical UUIDv7 platform context", () => {
+    const { keys, officialPolicy } = fixture();
+    const trust = new AgenteraAgentTrustStore();
+    trust.replaceKeys(ORIGIN, keys, FETCHED_AT);
+
+    expect(
+      trust.verifyPolicy(officialPolicy, {
+        runtimeVersion: "v0.18.9",
+      }),
+    ).toEqual({ contentDigest: officialPolicy.content_digest });
   });
 
   it("fails closed across issuer, purpose, key id, digest, and signature", () => {

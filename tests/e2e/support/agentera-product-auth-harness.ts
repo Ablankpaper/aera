@@ -1,4 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { readFileSync, realpathSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -43,6 +44,53 @@ export interface ProductAuthHarness {
   browser: Browser;
   browserPage: Page;
   composeStarted: boolean;
+}
+
+export interface E2ERepositoryRequirement {
+  environmentName: string;
+  markerPath: string;
+  expectedMarker: string;
+}
+
+export function requireCleanE2ERepository(
+  requirement: E2ERepositoryRequirement,
+): string {
+  const configured = process.env[requirement.environmentName]?.trim();
+  if (!configured) {
+    throw new Error(`${requirement.environmentName} is required.`);
+  }
+  const repository = realpathSync(resolve(configured));
+  const topLevel = spawnSync(
+    "git",
+    ["-C", repository, "rev-parse", "--show-toplevel"],
+    {
+      encoding: "utf8",
+      stdio: "pipe",
+    },
+  );
+  if (topLevel.status !== 0) {
+    throw new Error(`${requirement.environmentName} is not a Git checkout.`);
+  }
+  const resolvedTopLevel = realpathSync(topLevel.stdout.trim());
+  if (resolvedTopLevel !== repository) {
+    throw new Error(
+      `${requirement.environmentName} must name the checkout root.`,
+    );
+  }
+  const status = spawnSync("git", ["-C", repository, "status", "--porcelain"], {
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+  if (status.status !== 0 || status.stdout.trim() !== "") {
+    throw new Error(`${requirement.environmentName} checkout must be clean.`);
+  }
+  const marker = readFileSync(join(repository, requirement.markerPath), "utf8");
+  if (!marker.includes(requirement.expectedMarker)) {
+    throw new Error(
+      `${requirement.environmentName} has an unexpected repository identity.`,
+    );
+  }
+  return repository;
 }
 
 function command(
@@ -441,18 +489,18 @@ async function captureExternalURL(
 async function waitForCode(
   harness: ProductAuthHarness,
   purpose: string,
+  phone = harness.phone,
 ): Promise<string> {
   await expect
     .poll(
       () =>
         harness.deliveries.findLast(
-          (delivery) =>
-            delivery.to === harness.phone && delivery.purpose === purpose,
+          (delivery) => delivery.to === phone && delivery.purpose === purpose,
         )?.code ?? "",
     )
     .toMatch(/^\d{6}$/);
   return harness.deliveries.findLast(
-    (delivery) => delivery.to === harness.phone && delivery.purpose === purpose,
+    (delivery) => delivery.to === phone && delivery.purpose === purpose,
   )?.code as string;
 }
 
@@ -460,7 +508,13 @@ export async function authenticateNewProductAccount(
   harness: ProductAuthHarness,
   app: ElectronApplication,
   desktopPage: Page,
+  options: { displayName?: string; phone?: string } = {},
 ): Promise<void> {
+  const accountPhone = options.phone?.trim() || harness.phone;
+  const displayName = options.displayName?.trim() || "Runtime E2E User";
+  if (!/^\+[1-9][0-9]{7,14}$/u.test(accountPhone)) {
+    throw new Error("AgentEra E2E account phone is invalid.");
+  }
   await expect(
     desktopPage.locator('[data-testid="screen-auth"]'),
   ).toBeVisible();
@@ -476,22 +530,22 @@ export async function authenticateNewProductAccount(
   await page.locator('a[href^="/login?next="]').click();
   await page.locator('a[href="/register"]').click();
   await page.locator('input[name="kind"]').nth(1).check();
-  await page.locator('input[type="tel"]').fill(harness.phone);
+  await page.locator('input[type="tel"]').fill(accountPhone);
   await page.locator("button.secondary-button").first().click();
   await page
     .locator('input[inputmode="numeric"]')
-    .fill(await waitForCode(harness, "registration"));
+    .fill(await waitForCode(harness, "registration", accountPhone));
   await page.locator(".inline-form button.secondary-button").click();
   const passwords = page.locator('input[type="password"]');
   await expect(passwords).toHaveCount(2);
-  await page.locator('input[autocomplete="nickname"]').fill("Runtime E2E User");
+  await page.locator('input[autocomplete="nickname"]').fill(displayName);
   await passwords.nth(0).fill(password);
   await passwords.nth(1).fill(password);
   await page.locator('input[type="checkbox"]').check();
   await page.locator('button[type="submit"].primary-button').click();
   await expect(page.locator(".completion-card")).toBeVisible();
   await page.locator("button.primary-button").click();
-  await page.locator('input[autocomplete="username"]').fill(harness.phone);
+  await page.locator('input[autocomplete="username"]').fill(accountPhone);
   await page.locator('input[autocomplete="current-password"]').fill(password);
   await page.locator('button[type="submit"].primary-button').click();
   await page.waitForURL(/\/account$/);

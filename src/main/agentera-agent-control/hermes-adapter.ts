@@ -352,7 +352,7 @@ function assertPolicy(
           input.officialReleaseRevisionId ||
         uuid(official.user_id, "policy_invalid") !==
           input.owner.ownerId.toLowerCase() ||
-        uuid(official.device_id, "policy_invalid") !==
+        uuid(official.device_installation_id, "policy_invalid") !==
           input.owner.deviceInstallationId.toLowerCase() ||
         uuid(official.installation_id, "policy_invalid") !==
           input.installationId ||

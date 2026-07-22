@@ -84,6 +84,12 @@ An installed Agent combines an immutable published version, an installation-poli
 
 Official updates replace only the immutable base for a new conversation. They do not overwrite local Memory, USER data, sessions, files, learned skills, or Curator state.
 
+### Official managed privacy gate
+
+Official release provenance is allowed only in the AgentEra control plane, verified cache, read-only projection, and sanitized RuntimeBinding metadata; it never becomes Hermes private-state ownership or learning input.
+
+[[tests/agentera-official-agent-boundary.test.ts]] rejects PLATFORM and official-release vocabulary from Memory, sessions, Skills, Curator, Profile ownership, Runtime distribution, and legacy Hermes One sync. The real-process proof in [[tests/e2e/agentera-official-managed-agent.e2e.ts]] keeps private Profile hashes identical through v2, rollback, pause, offline use, and reconnect while each new conversation receives only its fixed immutable base.
+
 ## Runtime isolation
 
 Every installation maps to a distinct writable `HERMES_HOME`; a database `owner_scope` value is not sufficient isolation by itself.

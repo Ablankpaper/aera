@@ -47,6 +47,7 @@ Key tests can be described as sections in `lat.md/` files (e.g. `tests.md`). Add
 lat:
   require-code-mention: true
 ---
+
 # Tests
 
 Authentication and authorization test specifications.
@@ -56,9 +57,11 @@ Authentication and authorization test specifications.
 Verify credential validation and error handling for the login endpoint.
 
 ### Rejects expired tokens
+
 Tokens past their expiry timestamp are rejected with 401, even if otherwise valid.
 
 ### Handles missing password
+
 Login request without a password field returns 400 with a descriptive error.
 ```
 
@@ -103,3 +106,19 @@ Details about this child topic.
 ```
 
 The second example is invalid because `Bad Section` has no leading paragraph. `lat check` validates this rule and reports errors for missing or overly long leading paragraphs.
+
+# Official Managed Agent E2E
+
+The Official Managed Agent acceptance gate owns only temporary services, containers, certificates, keys, Electron data, and Hermes homes created for that run.
+
+Run it only with explicit clean checkout roots:
+
+```bash
+AERA_OFFICIAL_AGENT_E2E_CLOUD_REPO=/Users/zizimutou/Desktop/aera/aera-cloud \
+AERA_OFFICIAL_AGENT_E2E_ADMIN_REPO=/Users/zizimutou/Desktop/aera/aera-admin \
+npm run test:e2e:official-managed-agent
+```
+
+The gate starts isolated Cloud and Admin PostgreSQL/Redis services, a Cloud public listener, an mTLS Internal Admin listener, Aera Admin, and two isolated Electron users. It must not use an existing developer database, `HERMES_HOME`, Profile, credential, or Compose project. A failure must remain fail-closed and cleanup must target only the run-specific temporary root and Compose projects.
+
+Passing this local gate proves the reviewed v1/v2/rollback/pause/offline flow. It does not authorize a Git push, merge, deployment, production release, telemetry upload, Memory/session synchronization, or private Skill upload.

@@ -1,5 +1,6 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { appendFileSync, writeFileSync } from "node:fs";
 import {
   createServer,
   type IncomingHttpHeaders,
@@ -37,11 +38,12 @@ import type {
 } from "../../../src/shared/agentera-agent-control";
 import {
   authenticateNewProductAccount,
+  requireCleanE2ERepository,
   type ProductAuthHarness,
 } from "./agentera-product-auth-harness";
 
 const desktopRoot = resolve(process.cwd());
-const cloudRoot = resolve(
+const defaultCloudRoot = resolve(
   process.env.AGENTERA_E2E_CLOUD_ROOT?.trim() ||
     resolve(desktopRoot, "../aera-cloud"),
 );
@@ -80,6 +82,7 @@ export interface AgentControlDevice {
 
 export interface AgentControlHarness {
   root: string;
+  cloudRoot: string;
   cloudBinary: string;
   cloudBackendOrigin: string;
   postgresPort: number;
@@ -102,6 +105,28 @@ export interface AgentControlHarness {
   devices: AgentControlDevice[];
   requests: CapturedRequest[];
   failures: string[];
+  official: OfficialManagedAgentHarnessState | null;
+}
+
+export interface OfficialManagedAgentHarnessState {
+  adminRoot: string;
+  adminBinary: string;
+  adminBootstrapBinary: string;
+  cloudE2EBinary: string;
+  adminBaseURL: string;
+  cloudInternalOrigin: string;
+  adminPostgresPort: number;
+  adminRedisPort: number;
+  adminComposeProject: string;
+  adminComposeStarted: boolean;
+  adminProcess: ChildProcess | null;
+  adminFixtureFile: string;
+  cloudFixtureFile: string;
+  cloudLogFile: string;
+  adminLogFile: string;
+  cloudPIDFile: string;
+  pkiDirectory: string;
+  environment: NodeJS.ProcessEnv;
 }
 
 export interface CloudAgentControlCounts {
@@ -133,6 +158,7 @@ export interface LocalRuntimeBindingState {
   agentInstallationId: string;
   runtimeProfileId: string;
   localAdaptiveStateRevision: string;
+  officialReleaseRevisionId: string | null;
 }
 
 export interface LocalAgentControlState {
@@ -145,9 +171,12 @@ export interface LocalInstallationOwnerRow {
   tenantId: string;
   ownerId: string;
   deviceInstallationId: string;
-  sourceScope: "USER" | "WORKSPACE" | "ORGANIZATION";
+  sourceScope: "USER" | "WORKSPACE" | "ORGANIZATION" | "PLATFORM";
   sourceWorkspaceId: string | null;
   sourceOrganizationId: string | null;
+  officialReleaseId: string | null;
+  selectedReleaseRevisionId: string | null;
+  updatePolicy: "manual" | "managed";
 }
 
 type AgenteraMethod =
@@ -168,6 +197,11 @@ type AgenteraMethod =
   | "prepareOrganizationWithdrawal"
   | "confirmOrganizationWithdrawal"
   | "listDefinitions"
+  | "listOfficialAgents"
+  | "prepareOfficialInstall"
+  | "confirmOfficialInstall"
+  | "refreshOfficialUpdates"
+  | "applyOfficialUpdate"
   | "listVersions"
   | "listInstallations"
   | "installVersion"
@@ -485,13 +519,14 @@ async function waitForCloud(
 
 async function startCloud(harness: AgentControlHarness): Promise<void> {
   const base = parseDevelopmentEnvironment(
-    await readFile(join(cloudRoot, ".env.example"), "utf8"),
+    await readFile(join(harness.cloudRoot, ".env.example"), "utf8"),
   );
   const child = spawn(harness.cloudBinary, [], {
-    cwd: cloudRoot,
+    cwd: harness.cloudRoot,
     env: {
       ...process.env,
       ...base,
+      ...(harness.official?.environment ?? {}),
       AGENTERA_CLOUD_LISTEN_ADDR: new URL(harness.cloudBackendOrigin).host,
       AGENTERA_CLOUD_PUBLIC_URL: cloudPublicOrigin,
       AGENTERA_CLOUD_DATABASE_URL: `postgres://aera_cloud:aera-cloud-dev-only@127.0.0.1:${harness.postgresPort}/aera_cloud?sslmode=disable`,
@@ -506,11 +541,20 @@ async function startCloud(harness: AgentControlHarness): Promise<void> {
   let output = "";
   const append = (chunk: Buffer): void => {
     output = `${output}${chunk.toString("utf8")}`.slice(-128 * 1024);
+    if (harness.official) {
+      appendFileSync(harness.official.cloudLogFile, chunk);
+    }
   };
   child.stdout?.on("data", append);
   child.stderr?.on("data", append);
   await waitForCloud(child, harness.cloudBackendOrigin, () => output);
   harness.cloudProcess = child;
+  if (harness.official && child.pid) {
+    writeFileSync(harness.official.cloudPIDFile, `${child.pid}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+  }
 }
 
 async function stopCloud(harness: AgentControlHarness): Promise<void> {
@@ -584,8 +628,458 @@ function createDeviceRoots(root: string): AgentControlHarness["deviceRoots"] {
   };
 }
 
-export async function createAgentControlHarness(): Promise<AgentControlHarness> {
+function randomKey(): string {
+  return randomBytes(32).toString("base64");
+}
+
+function adminComposeEnvironment(
+  official: OfficialManagedAgentHarnessState,
+): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    AERA_ADMIN_POSTGRES_BIND: `127.0.0.1:${official.adminPostgresPort}`,
+    AERA_ADMIN_REDIS_BIND: `127.0.0.1:${official.adminRedisPort}`,
+  };
+}
+
+async function generateOfficialPKI(
+  official: OfficialManagedAgentHarnessState,
+): Promise<void> {
+  await mkdir(official.pkiDirectory, { recursive: true, mode: 0o700 });
+  const caKey = join(official.pkiDirectory, "ca-key.pem");
+  const caCertificate = join(official.pkiDirectory, "ca.pem");
+  const cloudKey = join(official.pkiDirectory, "cloud-key.pem");
+  const cloudRequest = join(official.pkiDirectory, "cloud.csr");
+  const cloudExtensions = join(official.pkiDirectory, "cloud.ext");
+  const cloudCertificate = join(official.pkiDirectory, "cloud.pem");
+  const clientKey = join(official.pkiDirectory, "client-key.pem");
+  const clientRequest = join(official.pkiDirectory, "client.csr");
+  const clientExtensions = join(official.pkiDirectory, "client.ext");
+  const clientCertificate = join(official.pkiDirectory, "client.pem");
+  const serviceKey = join(official.pkiDirectory, "service-key.pem");
+  const servicePublic = join(official.pkiDirectory, "service-public.pem");
+
+  command(
+    "openssl",
+    [
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:3072",
+      "-nodes",
+      "-days",
+      "1",
+      "-subj",
+      "/CN=AgentEra Official E2E CA",
+      "-addext",
+      "basicConstraints=critical,CA:TRUE",
+      "-addext",
+      "keyUsage=critical,keyCertSign,cRLSign",
+      "-keyout",
+      caKey,
+      "-out",
+      caCertificate,
+    ],
+    { cwd: official.pkiDirectory },
+  );
+  command(
+    "openssl",
+    [
+      "req",
+      "-newkey",
+      "rsa:3072",
+      "-nodes",
+      "-subj",
+      "/CN=127.0.0.1",
+      "-keyout",
+      cloudKey,
+      "-out",
+      cloudRequest,
+    ],
+    { cwd: official.pkiDirectory },
+  );
+  await writeFile(
+    cloudExtensions,
+    "subjectAltName=IP:127.0.0.1\nextendedKeyUsage=serverAuth\n",
+    { encoding: "utf8", mode: 0o600 },
+  );
+  command(
+    "openssl",
+    [
+      "x509",
+      "-req",
+      "-days",
+      "1",
+      "-in",
+      cloudRequest,
+      "-CA",
+      caCertificate,
+      "-CAkey",
+      caKey,
+      "-CAcreateserial",
+      "-extfile",
+      cloudExtensions,
+      "-out",
+      cloudCertificate,
+    ],
+    { cwd: official.pkiDirectory },
+  );
+  command(
+    "openssl",
+    [
+      "req",
+      "-newkey",
+      "rsa:3072",
+      "-nodes",
+      "-subj",
+      "/CN=aera-admin-official-e2e",
+      "-keyout",
+      clientKey,
+      "-out",
+      clientRequest,
+    ],
+    { cwd: official.pkiDirectory },
+  );
+  await writeFile(clientExtensions, "extendedKeyUsage=clientAuth\n", {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  command(
+    "openssl",
+    [
+      "x509",
+      "-req",
+      "-days",
+      "1",
+      "-in",
+      clientRequest,
+      "-CA",
+      caCertificate,
+      "-CAkey",
+      caKey,
+      "-CAcreateserial",
+      "-extfile",
+      clientExtensions,
+      "-out",
+      clientCertificate,
+    ],
+    { cwd: official.pkiDirectory },
+  );
+  command("openssl", ["genpkey", "-algorithm", "ED25519", "-out", serviceKey], {
+    cwd: official.pkiDirectory,
+  });
+  command(
+    "openssl",
+    ["pkey", "-in", serviceKey, "-pubout", "-out", servicePublic],
+    { cwd: official.pkiDirectory },
+  );
+}
+
+function officialEnvironment(
+  harness: AgentControlHarness,
+  official: OfficialManagedAgentHarnessState,
+): NodeJS.ProcessEnv {
+  const keyRing = (key: string): string =>
+    JSON.stringify({
+      active_key_id: "official-e2e-v1",
+      keys: { "official-e2e-v1": key },
+    });
+  const cloudKeyRing = (key: string): string =>
+    JSON.stringify({ "official-e2e-v1": key });
+  const caCertificate = join(official.pkiDirectory, "ca.pem");
+  const cloudCertificate = join(official.pkiDirectory, "cloud.pem");
+  const cloudKey = join(official.pkiDirectory, "cloud-key.pem");
+  const clientCertificate = join(official.pkiDirectory, "client.pem");
+  const clientKey = join(official.pkiDirectory, "client-key.pem");
+  const serviceKey = join(official.pkiDirectory, "service-key.pem");
+  const servicePublic = join(official.pkiDirectory, "service-public.pem");
+  const adminDatabase = `postgres://aera_admin:aera-admin-dev-only@127.0.0.1:${official.adminPostgresPort}/aera_admin?sslmode=disable`;
+
+  return {
+    ...process.env,
+    AGENTERA_CLOUD_ENVIRONMENT: "test",
+    AGENTERA_CLOUD_LISTEN_ADDR: new URL(harness.cloudBackendOrigin).host,
+    AGENTERA_CLOUD_PUBLIC_URL: cloudPublicOrigin,
+    AGENTERA_CLOUD_DATABASE_URL: `postgres://aera_cloud:aera-cloud-dev-only@127.0.0.1:${harness.postgresPort}/aera_cloud?sslmode=disable`,
+    AGENTERA_CLOUD_REDIS_ADDR: `127.0.0.1:${harness.redisPort}`,
+    AGENTERA_CLOUD_REDIS_USERNAME: "aera_cloud",
+    AGENTERA_CLOUD_REDIS_PASSWORD: "aera-cloud-dev-only",
+    AGENTERA_CLOUD_REDIS_DB: "9",
+    AGENTERA_CLOUD_SMS_ENDPOINT: `${harness.captureOrigin}/sms`,
+    AGENTERA_CLOUD_SMS_API_KEY: "e2e-sms-secret",
+    AGENTERA_CLOUD_CAPTCHA_ENDPOINT: `${harness.captureOrigin}/captcha`,
+    AGENTERA_CLOUD_CAPTCHA_SECRET: "e2e-captcha-secret",
+    AGENTERA_CLOUD_IDENTITY_ENCRYPTION_ACTIVE_KEY_ID: "official-e2e-v1",
+    AGENTERA_CLOUD_IDENTITY_ENCRYPTION_KEYS: cloudKeyRing(randomKey()),
+    AGENTERA_CLOUD_IDENTITY_LOOKUP_ACTIVE_KEY_ID: "official-e2e-v1",
+    AGENTERA_CLOUD_IDENTITY_LOOKUP_KEYS: cloudKeyRing(randomKey()),
+    AGENTERA_CLOUD_VERIFICATION_CODE_ACTIVE_KEY_ID: "official-e2e-v1",
+    AGENTERA_CLOUD_VERIFICATION_CODE_KEYS: cloudKeyRing(randomKey()),
+    AGENTERA_CLOUD_VERIFICATION_RECEIPT_ACTIVE_KEY_ID: "official-e2e-v1",
+    AGENTERA_CLOUD_VERIFICATION_RECEIPT_KEYS: cloudKeyRing(randomKey()),
+    AGENTERA_CLOUD_VERIFICATION_REQUEST_HMAC_KEY: randomKey(),
+    AGENTERA_CLOUD_BROWSER_SESSION_HMAC_KEY: randomKey(),
+    AGENTERA_CLOUD_LOGIN_RATE_HMAC_KEY: randomKey(),
+    AGENTERA_CLOUD_OAUTH_STATE_ENCRYPTION_ACTIVE_KEY_ID: "official-e2e-v1",
+    AGENTERA_CLOUD_OAUTH_STATE_ENCRYPTION_KEYS: cloudKeyRing(randomKey()),
+    AGENTERA_CLOUD_OAUTH_STATE_HMAC_KEY: randomKey(),
+    AGENTERA_CLOUD_REFRESH_TOKEN_HMAC_KEY: randomKey(),
+    AGENTERA_CLOUD_INTERNAL_ADMIN_ENABLED: "true",
+    AGENTERA_CLOUD_INTERNAL_ADMIN_LISTEN_ADDR: new URL(
+      official.cloudInternalOrigin,
+    ).host,
+    AGENTERA_CLOUD_INTERNAL_ADMIN_SERVER_CERT_FILE: cloudCertificate,
+    AGENTERA_CLOUD_INTERNAL_ADMIN_SERVER_KEY_FILE: cloudKey,
+    AGENTERA_CLOUD_INTERNAL_ADMIN_CLIENT_CA_FILE: caCertificate,
+    AGENTERA_CLOUD_INTERNAL_ADMIN_JWT_PUBLIC_KEY_FILE: servicePublic,
+    AGENTERA_CLOUD_INTERNAL_ADMIN_JWT_ISSUER: "aera-admin",
+    AGENTERA_CLOUD_INTERNAL_ADMIN_JWT_SUBJECT: "aera-admin-official-e2e",
+    AGENTERA_CLOUD_INTERNAL_ADMIN_HMAC_ACTIVE_KEY_ID: "official-e2e-v1",
+    AGENTERA_CLOUD_INTERNAL_ADMIN_HMAC_KEYS: cloudKeyRing(randomKey()),
+    AGENTERA_CLOUD_OFFICIAL_AGENTS_ENABLED: "true",
+    AGENTERA_CLOUD_PLATFORM_ID: "019f0000-0000-7000-8000-000000000999",
+    AGENTERA_CLOUD_PLATFORM_KEY: `agentera_official_e2e_${process.pid}`,
+    AGENTERA_CLOUD_PLATFORM_DISPLAY_NAME: "AgentEra Official E2E",
+    AGENTERA_CLOUD_OFFICIAL_ROLLOUT_HMAC_ACTIVE_KEY_ID: "official-e2e-v1",
+    AGENTERA_CLOUD_OFFICIAL_ROLLOUT_HMAC_KEYS: cloudKeyRing(randomKey()),
+    AERA_ADMIN_ENVIRONMENT: "test",
+    AERA_ADMIN_LISTEN_ADDR: new URL(official.adminBaseURL).host,
+    AERA_ADMIN_PUBLIC_URL: official.adminBaseURL,
+    AERA_ADMIN_DATABASE_URL: adminDatabase,
+    AERA_ADMIN_REDIS_ADDR: `127.0.0.1:${official.adminRedisPort}`,
+    AERA_ADMIN_TRUSTED_PROXY_CIDRS: "[]",
+    AERA_ADMIN_IDENTITY_ENCRYPTION_KEYS: keyRing(randomKey()),
+    AERA_ADMIN_IDENTITY_LOOKUP_KEYS: keyRing(randomKey()),
+    AERA_ADMIN_TOTP_ENCRYPTION_KEYS: keyRing(randomKey()),
+    AERA_ADMIN_SESSION_HMAC_KEY: randomKey(),
+    AERA_ADMIN_CSRF_HMAC_KEY: randomKey(),
+    AERA_ADMIN_OPERATION_HMAC_KEY: randomKey(),
+    AERA_ADMIN_CLOUD_ENABLED: "true",
+    AERA_ADMIN_CLOUD_BASE_URL: official.cloudInternalOrigin,
+    AERA_ADMIN_CLOUD_CA_FILE: caCertificate,
+    AERA_ADMIN_CLOUD_CLIENT_CERT_FILE: clientCertificate,
+    AERA_ADMIN_CLOUD_CLIENT_KEY_FILE: clientKey,
+    AERA_ADMIN_CLOUD_JWT_SIGNING_KEY_FILE: serviceKey,
+    AERA_ADMIN_CLOUD_JWT_ISSUER: "aera-admin",
+    AERA_ADMIN_CLOUD_JWT_SUBJECT: "aera-admin-official-e2e",
+    AERA_ADMIN_CLOUD_SCOPES:
+      '["users:read","devices:write","sessions:write","accounts:write","operations:read","official_agents:read","official_agent_drafts:write","official_agent_reviews:write","official_agent_releases:write","official_agent_audit:read"]',
+    AERA_ADMIN_E2E_ARTIFACT_DIR: join(harness.root, "admin-test-results"),
+    AERA_ADMIN_E2E_BASE_URL: official.adminBaseURL,
+    AERA_ADMIN_E2E_BOOTSTRAP_BINARY: official.adminBootstrapBinary,
+    AERA_ADMIN_E2E_DATABASE_URL: adminDatabase,
+    AERA_ADMIN_E2E_FIXTURE_FILE: official.adminFixtureFile,
+    AERA_ADMIN_E2E_REPO_ROOT: official.adminRoot,
+    AERA_ADMIN_E2E_SERVER_LOG: official.adminLogFile,
+    AERA_ADMIN_E2E_CLOUD_LOG: official.cloudLogFile,
+    AERA_ADMIN_E2E_CLOUD_FIXTURE_FILE: official.cloudFixtureFile,
+    AERA_ADMIN_E2E_CLOUD_VERIFY_BINARY: official.cloudE2EBinary,
+    AERA_ADMIN_E2E_CLOUD_BINARY: harness.cloudBinary,
+    AERA_ADMIN_E2E_CLOUD_PID_FILE: official.cloudPIDFile,
+  };
+}
+
+async function createOfficialState(
+  harness: AgentControlHarness,
+  adminRoot: string,
+): Promise<OfficialManagedAgentHarnessState> {
+  const internalPort = await freePort();
+  const adminPort = await freePort();
+  const official: OfficialManagedAgentHarnessState = {
+    adminRoot,
+    adminBinary: join(harness.root, "aera-admin"),
+    adminBootstrapBinary: join(harness.root, "aera-admin-bootstrap"),
+    cloudE2EBinary: join(harness.root, "aera-cloud-e2e"),
+    adminBaseURL: `http://localhost:${adminPort}`,
+    cloudInternalOrigin: `https://127.0.0.1:${internalPort}`,
+    adminPostgresPort: await freePort(),
+    adminRedisPort: await freePort(),
+    adminComposeProject: `agentera-official-admin-e2e-${process.pid}`,
+    adminComposeStarted: false,
+    adminProcess: null,
+    adminFixtureFile: join(harness.root, "admin-fixtures.json"),
+    cloudFixtureFile: join(harness.root, "cloud-fixture.json"),
+    cloudLogFile: join(harness.root, "cloud.log"),
+    adminLogFile: join(harness.root, "admin.log"),
+    cloudPIDFile: join(harness.root, "cloud.pid"),
+    pkiDirectory: join(harness.root, "pki"),
+    environment: {},
+  };
+  await generateOfficialPKI(official);
+  await writeFile(official.cloudLogFile, "", { encoding: "utf8", mode: 0o600 });
+  await writeFile(official.adminLogFile, "", { encoding: "utf8", mode: 0o600 });
+  official.environment = {
+    ...parseDevelopmentEnvironment(
+      await readFile(join(harness.cloudRoot, ".env.example"), "utf8"),
+    ),
+    ...officialEnvironment(harness, official),
+  };
+  return official;
+}
+
+async function waitForInternalCloud(
+  harness: AgentControlHarness,
+): Promise<void> {
+  const official = harness.official;
+  if (!official) return;
+  const endpoint = new URL(official.cloudInternalOrigin).host;
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (harness.cloudProcess?.exitCode !== null) {
+      throw new Error(
+        "Official Cloud stopped before its Internal Admin listener became ready.",
+      );
+    }
+    const probe = spawnSync(
+      "openssl",
+      [
+        "s_client",
+        "-tls1_3",
+        "-connect",
+        endpoint,
+        "-verify_return_error",
+        "-verify_ip",
+        "127.0.0.1",
+        "-CAfile",
+        join(official.pkiDirectory, "ca.pem"),
+        "-cert",
+        join(official.pkiDirectory, "client.pem"),
+        "-key",
+        join(official.pkiDirectory, "client-key.pem"),
+      ],
+      { encoding: "utf8", input: "", stdio: ["pipe", "pipe", "pipe"] },
+    );
+    if (
+      probe.status === 0 &&
+      `${probe.stdout}${probe.stderr}`.includes("Verify return code: 0 (ok)")
+    ) {
+      return;
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+  }
+  throw new Error(
+    "Official Cloud Internal Admin listener did not become ready.",
+  );
+}
+
+async function startOfficialAdmin(harness: AgentControlHarness): Promise<void> {
+  const official = harness.official;
+  if (!official) return;
+  const child = spawn(official.adminBinary, [], {
+    cwd: official.adminRoot,
+    env: official.environment,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  official.adminProcess = child;
+  let output = "";
+  const append = (chunk: Buffer): void => {
+    output = `${output}${chunk.toString("utf8")}`.slice(-128 * 1024);
+    appendFileSync(official.adminLogFile, chunk);
+  };
+  child.stdout?.on("data", append);
+  child.stderr?.on("data", append);
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      throw new Error(`Aera Admin stopped before readiness.\n${output}`);
+    }
+    try {
+      const response = await fetch(`${official.adminBaseURL}/health/ready`);
+      if (response.ok) {
+        return;
+      }
+    } catch {
+      // The Admin listener is still starting.
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+  }
+  child.kill("SIGTERM");
+  throw new Error(`Aera Admin did not become ready.\n${output}`);
+}
+
+async function stopOfficialAdmin(harness: AgentControlHarness): Promise<void> {
+  const child = harness.official?.adminProcess;
+  if (harness.official) harness.official.adminProcess = null;
+  if (!child || child.exitCode !== null) return;
+  child.kill("SIGTERM");
+  await Promise.race([
+    new Promise<void>((resolveExit) => child.once("exit", () => resolveExit())),
+    new Promise<void>((resolveTimeout) =>
+      setTimeout(() => {
+        if (child.exitCode === null) child.kill("SIGKILL");
+        resolveTimeout();
+      }, 10_000),
+    ),
+  ]);
+}
+
+async function bootstrapOfficialAdminFixtures(
+  harness: AgentControlHarness,
+): Promise<void> {
+  const official = harness.official;
+  if (!official) return;
+  const configPath = join(
+    harness.root,
+    "admin-bootstrap.playwright.config.mjs",
+  );
+  await writeFile(
+    configPath,
+    `export default ${JSON.stringify(
+      {
+        globalSetup: join(official.adminRoot, "e2e", "global-setup.ts"),
+        outputDir: join(harness.root, "admin-bootstrap-results"),
+        reporter: [["list"]],
+        testDir: join(official.adminRoot, "e2e"),
+        testMatch: "auth.spec.ts",
+        timeout: 45_000,
+        use: { baseURL: official.adminBaseURL },
+        workers: 1,
+      },
+      null,
+      2,
+    )};\n`,
+    { encoding: "utf8", mode: 0o600 },
+  );
+  command(
+    "pnpm",
+    [
+      "exec",
+      "playwright",
+      "test",
+      "--config",
+      configPath,
+      "--grep",
+      "password-only authentication never creates an administrator session",
+    ],
+    { cwd: official.adminRoot, env: official.environment },
+  );
+}
+
+export async function createAgentControlHarness(
+  options: { officialManagedAgent?: boolean } = {},
+): Promise<AgentControlHarness> {
   await assertPublicPortAvailable();
+  let selectedCloudRoot = defaultCloudRoot;
+  let selectedAdminRoot: string | null = null;
+  if (options.officialManagedAgent) {
+    selectedCloudRoot = requireCleanE2ERepository({
+      environmentName: "AERA_OFFICIAL_AGENT_E2E_CLOUD_REPO",
+      markerPath: "go.mod",
+      expectedMarker: "module github.com/bignormal/aera-cloud",
+    });
+    selectedAdminRoot = requireCleanE2ERepository({
+      environmentName: "AERA_OFFICIAL_AGENT_E2E_ADMIN_REPO",
+      markerPath: "go.mod",
+      expectedMarker: "module github.com/bignormal/aera-admin",
+    });
+    const [adminContract, cloudContract] = await Promise.all([
+      readFile(join(selectedAdminRoot, "api/openapi/cloud-admin-client.yaml")),
+      readFile(join(selectedCloudRoot, "api/openapi/internal-admin.yaml")),
+    ]);
+    if (!adminContract.equals(cloudContract)) {
+      throw new Error("Aera Admin and Cloud Internal Admin contracts differ.");
+    }
+  }
   const runtimeSeedDirectory = resolve(
     process.env.AGENTERA_RUNTIME_SEED_DIR?.trim() ||
       join(desktopRoot, "resources", "agentera-runtime-seed"),
@@ -621,13 +1115,33 @@ export async function createAgentControlHarness(): Promise<AgentControlHarness> 
       failures,
     );
   });
-  await listen(proxyServer, 8086);
-  const browser = await chromium.launch({ headless: true });
-  const browserPage = await (
-    await browser.newContext({ locale: "en-US" })
-  ).newPage();
+  let browser: Browser | undefined;
+  let browserPage: Page | undefined;
+  try {
+    await listen(proxyServer, 8086);
+    browser = await chromium.launch({ headless: true });
+    browserPage = await (
+      await browser.newContext({ locale: "en-US" })
+    ).newPage();
+  } catch (error) {
+    await browser?.close().catch(() => undefined);
+    await closeServer(proxyServer).catch(() => undefined);
+    await closeServer(capture.server).catch(() => undefined);
+    await makeTreeWritable(root).catch(() => undefined);
+    await rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 20,
+      retryDelay: 100,
+    }).catch(() => undefined);
+    throw error;
+  }
+  if (!browser || !browserPage) {
+    throw new Error("Agent control E2E browser initialization was incomplete.");
+  }
   const harness: AgentControlHarness = {
     root,
+    cloudRoot: selectedCloudRoot,
     cloudBinary: join(root, "aera-cloud"),
     cloudBackendOrigin,
     postgresPort: await freePort(),
@@ -647,23 +1161,104 @@ export async function createAgentControlHarness(): Promise<AgentControlHarness> 
     devices: [],
     requests,
     failures,
+    official: null,
   };
   try {
+    if (selectedAdminRoot) {
+      harness.official = await createOfficialState(harness, selectedAdminRoot);
+    }
     command(
       "docker",
       ["compose", "-p", harness.composeProject, "up", "-d", "--wait"],
-      { cwd: cloudRoot, env: composeEnvironment(harness) },
+      { cwd: harness.cloudRoot, env: composeEnvironment(harness) },
     );
     harness.composeStarted = true;
+    if (harness.official) {
+      command(
+        "docker",
+        [
+          "compose",
+          "-p",
+          harness.official.adminComposeProject,
+          "up",
+          "-d",
+          "--wait",
+          "postgres",
+          "redis",
+        ],
+        {
+          cwd: harness.official.adminRoot,
+          env: adminComposeEnvironment(harness.official),
+        },
+      );
+      harness.official.adminComposeStarted = true;
+    }
     command("go", ["build", "-o", harness.cloudBinary, "./cmd/aera-cloud"], {
-      cwd: cloudRoot,
+      cwd: harness.cloudRoot,
     });
+    if (harness.official) {
+      command(
+        "go",
+        [
+          "build",
+          "-tags",
+          "e2e",
+          "-trimpath",
+          "-o",
+          harness.official.cloudE2EBinary,
+          "./cmd/aera-cloud-e2e",
+        ],
+        { cwd: harness.cloudRoot },
+      );
+      command("pnpm", ["--filter", "@aera/admin-web", "build"], {
+        cwd: harness.official.adminRoot,
+        env: harness.official.environment,
+      });
+      command(
+        "go",
+        [
+          "build",
+          "-tags",
+          "release",
+          "-trimpath",
+          "-o",
+          harness.official.adminBinary,
+          "./cmd/aera-admin",
+        ],
+        { cwd: harness.official.adminRoot },
+      );
+      command(
+        "go",
+        [
+          "build",
+          "-trimpath",
+          "-o",
+          harness.official.adminBootstrapBinary,
+          "./cmd/aera-admin-bootstrap",
+        ],
+        { cwd: harness.official.adminRoot },
+      );
+      command(
+        harness.official.cloudE2EBinary,
+        ["seed", "--output", harness.official.cloudFixtureFile],
+        { cwd: harness.cloudRoot, env: harness.official.environment },
+      );
+    }
     await startCloud(harness);
+    if (harness.official) {
+      await waitForInternalCloud(harness);
+      await startOfficialAdmin(harness);
+      await bootstrapOfficialAdminFixtures(harness);
+    }
     return harness;
   } catch (error) {
     await closeAgentControlHarness(harness).catch(() => undefined);
     throw error;
   }
+}
+
+export async function createOfficialManagedAgentHarness(): Promise<AgentControlHarness> {
+  return createAgentControlHarness({ officialManagedAgent: true });
 }
 
 export async function closeAgentControlHarness(
@@ -684,10 +1279,29 @@ export async function closeAgentControlHarness(
       .catch(() => undefined);
     await device.app.close().catch(() => undefined);
   }
+  await stopOfficialAdmin(harness).catch(() => undefined);
   await stopCloud(harness).catch(() => undefined);
   await harness.browser.close().catch(() => undefined);
   await closeServer(harness.proxyServer).catch(() => undefined);
   await closeServer(harness.captureServer).catch(() => undefined);
+  if (harness.official?.adminComposeStarted) {
+    command(
+      "docker",
+      [
+        "compose",
+        "-p",
+        harness.official.adminComposeProject,
+        "down",
+        "-v",
+        "--remove-orphans",
+      ],
+      {
+        cwd: harness.official.adminRoot,
+        env: adminComposeEnvironment(harness.official),
+      },
+    );
+    harness.official.adminComposeStarted = false;
+  }
   if (harness.composeStarted) {
     command(
       "docker",
@@ -699,7 +1313,7 @@ export async function closeAgentControlHarness(
         "-v",
         "--remove-orphans",
       ],
-      { cwd: cloudRoot, env: composeEnvironment(harness) },
+      { cwd: harness.cloudRoot, env: composeEnvironment(harness) },
     );
     harness.composeStarted = false;
   }
@@ -745,6 +1359,7 @@ export async function launchAgentControlDevice(
     env: {
       ...process.env,
       AGENTERA_CLOUD_PUBLIC_URL: cloudPublicOrigin,
+      AGENTERA_OFFICIAL_AGENT_CHANNEL: "internal",
       AGENTERA_RUNTIME_SEED_DIR: harness.runtimeSeedDirectory,
       HERMES_DESKTOP_USER_DATA_DIR: roots.userData,
       HERMES_HOME: roots.hermesHome,
@@ -848,12 +1463,43 @@ async function captureExternalURL(
 export async function authenticateFirstAgentControlDevice(
   harness: AgentControlHarness,
   device: AgentControlDevice,
+  options: { displayName?: string; phone?: string } = {},
 ): Promise<void> {
-  await authenticateNewProductAccount(
-    harness as unknown as ProductAuthHarness,
-    device.app,
-    device.page,
-  );
+  try {
+    await authenticateNewProductAccount(
+      harness as unknown as ProductAuthHarness,
+      device.app,
+      device.page,
+      options,
+    );
+  } catch (error) {
+    const exchanges = harness.requests
+      .filter((request) => request.path.startsWith("/api/v1/oauth/"))
+      .slice(-6)
+      .map((request) => {
+        const response =
+          request.responseBody && typeof request.responseBody === "object"
+            ? (request.responseBody as {
+                error?: { code?: unknown };
+                code?: unknown;
+              })
+            : null;
+        const code = response?.error?.code ?? response?.code;
+        return {
+          method: request.method,
+          path: request.path,
+          responseStatus: request.responseStatus,
+          ...(typeof code === "string" ? { errorCode: code } : {}),
+        };
+      });
+    const browserLocation = new URL(harness.browserPage.url());
+    throw new Error(
+      `${String(error)}\nAgentEra OAuth diagnostics: ${JSON.stringify({
+        browserLocation: `${browserLocation.origin}${browserLocation.pathname}`,
+        exchanges,
+      })}`,
+    );
+  }
 }
 
 export async function authenticateExistingAgentControlDevice(
@@ -949,6 +1595,7 @@ export function agentControlRequests(
     .filter(
       (request) =>
         request.path.startsWith("/api/v1/agent-") ||
+        request.path.startsWith("/api/v1/official-agents") ||
         /^\/api\/v1\/workspaces\/[^/]+\/agent-definitions(?:\/|$)/.test(
           request.path,
         ) ||
@@ -971,6 +1618,7 @@ export function agentControlExchangeDiagnostics(
     .filter(
       (request) =>
         request.path.startsWith("/api/v1/agent-") ||
+        request.path.startsWith("/api/v1/official-agents") ||
         /^\/api\/v1\/workspaces\/[^/]+\/agent-definitions(?:\/|$)/.test(
           request.path,
         ) ||
@@ -1019,7 +1667,7 @@ export async function cloudAgentControlCounts(
       "-Atc",
       query,
     ],
-    { cwd: cloudRoot, env: composeEnvironment(harness) },
+    { cwd: harness.cloudRoot, env: composeEnvironment(harness) },
   );
   const parsed = JSON.parse(output.trim()) as Record<string, unknown>;
   return {
@@ -1054,7 +1702,7 @@ export async function cloudExperienceCandidateCounts(
       "-Atc",
       query,
     ],
-    { cwd: cloudRoot, env: composeEnvironment(harness) },
+    { cwd: harness.cloudRoot, env: composeEnvironment(harness) },
   );
   const parsed = JSON.parse(output.trim()) as Record<string, unknown>;
   return {
@@ -1084,18 +1732,23 @@ export function localInstallationOwner(
     const row = database
       .prepare(
         `SELECT tenant_id, owner_id, device_installation_id, source_scope,
-                source_workspace_id, source_organization_id
+                source_workspace_id, source_organization_id,
+                official_release_id, selected_release_revision_id, update_policy
          FROM local_agent_installations
          WHERE agent_installation_id = ?`,
       )
       .get(installationId) as Record<string, string | null> | undefined;
-    if (!row) throw new Error("Organization Agent installation is missing.");
+    if (!row) throw new Error("Agent installation is missing.");
     if (
       row.source_scope !== "USER" &&
       row.source_scope !== "WORKSPACE" &&
-      row.source_scope !== "ORGANIZATION"
+      row.source_scope !== "ORGANIZATION" &&
+      row.source_scope !== "PLATFORM"
     ) {
-      throw new Error("Organization Agent installation source is invalid.");
+      throw new Error("Agent installation source is invalid.");
+    }
+    if (row.update_policy !== "manual" && row.update_policy !== "managed") {
+      throw new Error("Agent installation update policy is invalid.");
     }
     return {
       tenantId: String(row.tenant_id),
@@ -1104,6 +1757,9 @@ export function localInstallationOwner(
       sourceScope: row.source_scope,
       sourceWorkspaceId: row.source_workspace_id,
       sourceOrganizationId: row.source_organization_id,
+      officialReleaseId: row.official_release_id,
+      selectedReleaseRevisionId: row.selected_release_revision_id,
+      updatePolicy: row.update_policy,
     };
   } finally {
     database.close();
@@ -1279,7 +1935,8 @@ export async function localAgentControlState(
     const installationRows = database
       .prepare(
         `SELECT agent_installation_id, definition_id, selected_version_id,
-                runtime_profile_id, policy_snapshot_id, status, retry_code,
+                source_scope, official_release_id, selected_release_revision_id,
+                update_policy, runtime_profile_id, policy_snapshot_id, status, retry_code,
                 created_at, updated_at
          FROM local_agent_installations
          ORDER BY created_at ASC`,
@@ -1288,6 +1945,18 @@ export async function localAgentControlState(
     const installations: AgenteraAgentInstallationSummary[] =
       installationRows.map((row) => ({
         id: String(row.agent_installation_id),
+        sourceScope:
+          row.source_scope as AgenteraAgentInstallationSummary["sourceScope"],
+        officialReleaseId:
+          row.official_release_id === null
+            ? null
+            : String(row.official_release_id),
+        selectedReleaseRevisionId:
+          row.selected_release_revision_id === null
+            ? null
+            : String(row.selected_release_revision_id),
+        updatePolicy:
+          row.update_policy as AgenteraAgentInstallationSummary["updatePolicy"],
         definitionId: String(row.definition_id),
         selectedVersionId: String(row.selected_version_id),
         runtimeProfileId:
@@ -1321,6 +1990,7 @@ export async function localAgentControlState(
         agentInstallationId: parsed.agentInstallationId,
         runtimeProfileId: parsed.runtimeProfileId,
         localAdaptiveStateRevision: parsed.localAdaptiveStateRevision,
+        officialReleaseRevisionId: parsed.officialReleaseRevisionId ?? null,
       };
     });
     let projectionRoots: string[] = [];

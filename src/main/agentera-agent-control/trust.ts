@@ -12,7 +12,7 @@ export type AgentPolicySnapshot = components["schemas"]["AgentPolicySnapshot"];
 export type AgentSigningKeySet = components["schemas"]["SigningKeySet"];
 
 const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const KEY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SIGNATURE_PATTERN = /^[A-Za-z0-9_-]{86}$/;
@@ -350,6 +350,64 @@ function canonicalBundleBytes(value: unknown): {
   };
 }
 
+function canonicalOfficialPolicyContext(value: unknown): {
+  platform_id: string;
+  release_id: string;
+  release_revision_id: string;
+  user_id: string;
+  device_installation_id: string;
+  installation_id: string;
+  product_scope: "USER" | "WORKSPACE" | "ORGANIZATION";
+  product_context_id: string;
+} {
+  if (
+    !exactObject(value, [
+      "device_installation_id",
+      "installation_id",
+      "platform_id",
+      "product_context_id",
+      "product_scope",
+      "release_id",
+      "release_revision_id",
+      "user_id",
+    ])
+  ) {
+    throw new AgenteraAgentTrustError("digest_mismatch");
+  }
+  const identifiers = [
+    value.platform_id,
+    value.release_id,
+    value.release_revision_id,
+    value.user_id,
+    value.device_installation_id,
+    value.installation_id,
+    value.product_context_id,
+  ];
+  if (
+    identifiers.some(
+      (identifier) =>
+        typeof identifier !== "string" ||
+        !UUID_PATTERN.test(identifier) ||
+        identifier !== identifier.toLowerCase(),
+    ) ||
+    (value.product_scope !== "USER" &&
+      value.product_scope !== "WORKSPACE" &&
+      value.product_scope !== "ORGANIZATION")
+  ) {
+    throw new AgenteraAgentTrustError("digest_mismatch");
+  }
+  return {
+    platform_id: value.platform_id as string,
+    release_id: value.release_id as string,
+    release_revision_id: value.release_revision_id as string,
+    user_id: value.user_id as string,
+    device_installation_id: value.device_installation_id as string,
+    installation_id: value.installation_id as string,
+    product_scope: value.product_scope,
+    product_context_id: value.product_context_id as string,
+  };
+}
+
 function verifyManifestAssets(
   manifest: AgentVersion["manifest"],
   bundleAssets: ReadonlyMap<string, string>,
@@ -370,17 +428,21 @@ function verifyManifestAssets(
 
 function canonicalPolicyDocumentBytes(value: unknown): Buffer {
   if (
-    !exactObject(value, [
-      "agent_definition_id",
-      "agent_version_id",
-      "deny_rules",
-      "model_constraints",
-      "publication_allowed",
-      "runtime_compatibility",
-      "schema_version",
-      "tools",
-      "version_digest",
-    ]) ||
+    !exactObject(
+      value,
+      [
+        "agent_definition_id",
+        "agent_version_id",
+        "deny_rules",
+        "model_constraints",
+        "publication_allowed",
+        "runtime_compatibility",
+        "schema_version",
+        "tools",
+        "version_digest",
+      ],
+      ["official_context"],
+    ) ||
     value.schema_version !== 1 ||
     !UUID_PATTERN.test(String(value.agent_definition_id)) ||
     !UUID_PATTERN.test(String(value.agent_version_id)) ||
@@ -401,6 +463,13 @@ function canonicalPolicyDocumentBytes(value: unknown): Buffer {
     ),
     publication_allowed: false,
     deny_rules: requireStringArray(value.deny_rules),
+    ...(value.official_context === undefined
+      ? {}
+      : {
+          official_context: canonicalOfficialPolicyContext(
+            value.official_context,
+          ),
+        }),
   };
   return goCanonicalJsonBytes(canonical);
 }

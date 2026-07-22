@@ -147,7 +147,7 @@ function officialPolicy(
         release_id: OFFICIAL_RELEASE_ID,
         release_revision_id: releaseRevisionId,
         user_id: OWNER_ID,
-        device_id: DEVICE_ID,
+        device_installation_id: DEVICE_ID,
         installation_id: INSTALLATION_ID,
         product_scope: "USER",
         product_context_id: TENANT_ID,

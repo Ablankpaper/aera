@@ -225,12 +225,37 @@ function makeOfficialPolicy(
         release_id: OFFICIAL_RELEASE_ID,
         release_revision_id: releaseRevisionId,
         user_id: owner.ownerId,
-        device_id: owner.deviceInstallationId,
+        device_installation_id: owner.deviceInstallationId,
         installation_id: AGENT_INSTALLATION_ID,
         product_scope: "USER",
         product_context_id: owner.tenantId,
       },
     },
+  };
+}
+
+function officialDetail(
+  version: AgentVersion,
+  releaseRevisionId: string,
+): Awaited<ReturnType<AgentInstallationClient["getOfficialAgent"]>> {
+  return {
+    agent: {
+      definitionId: DEFINITION_ID,
+      displayName: "Official Research Agent",
+      iconMediaType: null,
+      iconDataBase64Url: null,
+      versionId: version.id,
+      versionNumber: version.version_number,
+      releaseId: OFFICIAL_RELEASE_ID,
+      releaseRevisionId,
+      channel: "stable",
+      runtimeMinimumVersion: version.runtime_minimum_version,
+      runtimeMaximumVersionExclusive:
+        version.runtime_maximum_version_exclusive ?? null,
+      installationState: "installed",
+      updateState: "update_available",
+    },
+    version,
   };
 }
 
@@ -254,6 +279,7 @@ describe("Agent installation orchestration", () => {
   let profiles: AgentInstallationProfileAdapter;
   let createInstallation: Mock<AgentInstallationClient["createInstallation"]>;
   let getVersion: Mock<AgentInstallationClient["getVersion"]>;
+  let getOfficialAgent: Mock<AgentInstallationClient["getOfficialAgent"]>;
   let getPolicySnapshot: Mock<AgentInstallationClient["getPolicySnapshot"]>;
   let activateInstallation: Mock<
     AgentInstallationClient["activateInstallation"]
@@ -316,6 +342,9 @@ describe("Agent installation orchestration", () => {
         events.push("cloud:get-version");
         return v1;
       });
+    getOfficialAgent = vi
+      .fn<AgentInstallationClient["getOfficialAgent"]>()
+      .mockRejectedValue(new Error("official detail unavailable"));
     getPolicySnapshot = vi
       .fn<AgentInstallationClient["getPolicySnapshot"]>()
       .mockResolvedValue(policy);
@@ -361,6 +390,7 @@ describe("Agent installation orchestration", () => {
       origin: ORIGIN,
       createInstallation,
       getVersion,
+      getOfficialAgent,
       getPolicySnapshot,
       activateInstallation,
       selectInstallationVersion,
@@ -862,9 +892,9 @@ describe("Agent installation orchestration", () => {
     };
     events.length = 0;
     getManagedUpdate.mockResolvedValueOnce(update);
-    getVersion.mockImplementationOnce(async () => {
-      events.push("cloud:get-version-v2");
-      return v2;
+    getOfficialAgent.mockImplementationOnce(async () => {
+      events.push("cloud:get-official-v2");
+      return officialDetail(v2, OFFICIAL_RELEASE_REVISION_2_ID);
     });
     applyManagedUpdate.mockImplementationOnce(async () => {
       events.push("cloud:apply-managed-v2");
@@ -892,7 +922,7 @@ describe("Agent installation orchestration", () => {
       retryCode: null,
     });
     expect(events).toEqual([
-      "cloud:get-version-v2",
+      "cloud:get-official-v2",
       "verify-cache:version",
       `project:${VERSION_2_ID}`,
       "cloud:apply-managed-v2",
@@ -918,7 +948,9 @@ describe("Agent installation orchestration", () => {
       targetReleaseRevisionId: OFFICIAL_RELEASE_REVISION_3_ID,
       targetVersionId: VERSION_ID,
     });
-    getVersion.mockResolvedValueOnce(v1);
+    getOfficialAgent.mockResolvedValueOnce(
+      officialDetail(v1, OFFICIAL_RELEASE_REVISION_3_ID),
+    );
     applyManagedUpdate.mockResolvedValueOnce(
       pendingOfficialInstallation("active", {
         versionId: VERSION_ID,

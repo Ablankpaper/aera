@@ -34,7 +34,7 @@ Read-only Knowledge, Skill, and SOP projection reuses the verified path outside 
 
 The approved written specification is `docs/superpowers/specs/2026-07-21-agentera-organization-agent-v1-design.md`; no Organization Agent implementation exists at this checkpoint.
 
-## Official Managed Agent V1 design checkpoint
+## Official Managed Agent V1
 
 The approved direction extends immutable Agent assets to `owner_scope=PLATFORM` while every desktop Installation, physical Hermes Profile, policy overlay, RuntimeBinding, and adaptive state remains USER-owned.
 
@@ -42,7 +42,23 @@ Platform employees use the separate Aera Admin application: Developer authors an
 
 Official releases use append-only revisions for activation, percentage and allowlist changes, minimum desktop versions, pause, resume, and rollback. Pause stops new discovery and installation but does not remotely disable an installed Agent. Update and rollback replace only the verified immutable base for later conversations; active RuntimeBindings and Hermes private learning remain unchanged.
 
-The user approved `docs/superpowers/specs/2026-07-22-agentera-official-managed-agent-v1-design.md` on 2026-07-22. The document remains design evidence only; no Official Managed Agent implementation, deployment, or release is established by this checkpoint.
+The user approved `docs/superpowers/specs/2026-07-22-agentera-official-managed-agent-v1-design.md` on 2026-07-22. Cloud, Admin, and Desktop now implement this slice on local feature branches; this is verified local development evidence, not a push, deployment, production release, or user rollout.
+
+### Installation-bound version access
+
+An authenticated device may read a PLATFORM version through the existing version endpoint only when its own USER-owned pending or active managed Installation currently selects that exact immutable version.
+
+This rule keeps failed installation and ambiguous managed-update retries recoverable after a release head changes. A new v2 or rollback target is prepared from the current eligible official detail and must match the exact release, revision, Definition, and Version before local verification; arbitrary PLATFORM version enumeration remains unavailable.
+
+The signed official policy binds platform, release, immutable release revision, user, device-installation identity, Agent Installation, and selected product context. Desktop verification reconstructs the same canonical policy bytes, accepts canonical UUIDv7 platform IDs, and still enforces digest, signature, issuer, Runtime compatibility, and exact-field checks.
+
+### Executable lifecycle gate
+
+The executable gate proves employee governance, user eligibility, local installation, immutable update and rollback, pause behavior, offline continuation, and private Hermes-state isolation across real local Admin, Cloud, and Electron processes.
+
+[[tests/e2e/agentera-official-managed-agent.e2e.ts]] runs distinct Developer, Super Admin, and Operator actions; two product accounts; one fresh physical Hermes Profile; v1 and v2 RuntimeBindings; dual-control rollback; pause; offline restart; and reconnect. It distinguishes the physical Hermes Profile ID from the opaque Runtime Profile binding ID and hashes private Memory, Skill, and session fixtures throughout.
+
+Run `AERA_OFFICIAL_AGENT_E2E_CLOUD_REPO=/Users/zizimutou/Desktop/aera/aera-cloud AERA_OFFICIAL_AGENT_E2E_ADMIN_REPO=/Users/zizimutou/Desktop/aera/aera-admin npm run test:e2e:official-managed-agent`. The harness requires explicit clean sibling repositories, creates isolated temporary databases and process roots, and never authorizes a push, merge, deploy, or release.
 
 ## Trusted Workspace Agent context
 

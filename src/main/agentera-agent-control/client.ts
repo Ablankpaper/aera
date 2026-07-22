@@ -23,7 +23,7 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const RESPONSE_LIMIT = 4 * 1024 * 1024;
 const KEY_RESPONSE_LIMIT = 256 * 1024;
 const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const BASE64URL_SIGNATURE_PATTERN = /^[A-Za-z0-9_-]{86}$/;
 const SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
@@ -806,7 +806,7 @@ function isOfficialManagedUpdateResponse(
 function isOfficialPolicyContext(value: unknown): boolean {
   return (
     hasExactFields(value, [
-      "device_id",
+      "device_installation_id",
       "installation_id",
       "platform_id",
       "product_context_id",
@@ -815,7 +815,7 @@ function isOfficialPolicyContext(value: unknown): boolean {
       "release_revision_id",
       "user_id",
     ]) &&
-    isCanonicalUUID(value.device_id) &&
+    isCanonicalUUID(value.device_installation_id) &&
     isCanonicalUUID(value.installation_id) &&
     isCanonicalUUID(value.platform_id) &&
     isCanonicalUUID(value.product_context_id) &&
