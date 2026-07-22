@@ -83,6 +83,34 @@ npm run typecheck
 npm run build
 ```
 
+### Official Managed Agent V1 development gate
+
+The local `aera/official-managed-agent-v1` feature branches implement the PLATFORM-owned official Agent control plane across Cloud, Aera Admin, and Desktop. The desktop still creates one fresh physical Hermes Profile per Installation; immutable version updates and rollback affect only later RuntimeBindings. Memory, conversations, files, credentials, Curator state, and private learned Skills remain local and are not part of the managed Agent protocol.
+
+The complete local gate is:
+
+```bash
+# aera-cloud, with disposable PostgreSQL and Redis
+go test ./... -count=1
+go vet ./...
+AERA_INTEGRATION_TESTS=1 go test -p 1 ./... -count=1
+
+# aera-admin
+make verify
+AERA_ADMIN_E2E_CLOUD_REPO=/Users/zizimutou/Desktop/aera/aera-cloud make e2e
+
+# desktop
+npm run typecheck
+npm run lint
+npm test
+npm run check:agentera-cloud-contract
+AERA_OFFICIAL_AGENT_E2E_CLOUD_REPO=/Users/zizimutou/Desktop/aera/aera-cloud \
+AERA_OFFICIAL_AGENT_E2E_ADMIN_REPO=/Users/zizimutou/Desktop/aera/aera-admin \
+npm run test:e2e:official-managed-agent
+```
+
+On 2026-07-23 these gates passed locally at Cloud `16ee99a`, Admin `b184e25`, and Desktop `ed6685a`. The acceptance run proved v1 publication and installation, deterministic eligibility, v2 update for new conversations, stable existing bindings, dual-control rollback, pause, offline continuation, reconnect, read-only assets, and unchanged private-state hashes. This is local development evidence only; it is not merge, remote push, deployment, production-key readiness, or release evidence.
+
 ## Project structure
 
 ```text

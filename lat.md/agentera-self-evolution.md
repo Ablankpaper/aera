@@ -88,7 +88,9 @@ Official updates replace only the immutable base for a new conversation. They do
 
 Official release provenance is allowed only in the AgentEra control plane, verified cache, read-only projection, and sanitized RuntimeBinding metadata; it never becomes Hermes private-state ownership or learning input.
 
-[[tests/agentera-official-agent-boundary.test.ts]] rejects PLATFORM and official-release vocabulary from Memory, sessions, Skills, Curator, Profile ownership, Runtime distribution, and legacy Hermes One sync. The real-process proof in [[tests/e2e/agentera-official-managed-agent.e2e.ts]] keeps private Profile hashes identical through v2, rollback, pause, offline use, and reconnect while each new conversation receives only its fixed immutable base.
+[[tests/agentera-official-agent-boundary.test.ts]] statically rejects official ownership from Hermes Profile binding, sessions, Skills, legacy Hermes One sync, Runtime distribution, and private-state paths. [[tests/e2e/agentera-official-managed-agent.e2e.ts]] adds executable proof: it writes private Memory, an agent-created Skill, and a session fixture into the one newly created physical Hermes Profile, hashes them before managed lifecycle changes, and verifies the same hashes after v2 activation, rollback, pause, offline restart, and reconnect.
+
+The E2E request capture also rejects every private marker and legacy `/api/agents` request. It treats the physical Hermes Profile ID and the opaque Runtime Profile binding ID as separate identities, verifies read-only official Knowledge/Skill/SOP projection, and proves that an existing RuntimeBinding stays on its selected immutable version while only a later conversation receives an eligible update or rollback. Failed download, signature, digest, policy, compatibility, projection, activation, and persistence paths preserve the previously working version and private adaptive state.
 
 ## Runtime isolation
 
