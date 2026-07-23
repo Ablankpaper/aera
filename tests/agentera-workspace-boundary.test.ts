@@ -156,7 +156,7 @@ describe("AgentEra Workspace remains outside the Hermes adaptive core", () => {
 
   it("keeps the pre-existing RuntimeBinding compatibility test unchanged", () => {
     const path = "tests/agentera-runtime-binding.test.ts";
-    const baseline = execFileSync("git", ["show", `main:${path}`], {
+    const baseline = execFileSync("git", ["show", `origin/main:${path}`], {
       cwd: root,
       encoding: "utf8",
     });

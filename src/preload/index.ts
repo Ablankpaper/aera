@@ -32,6 +32,23 @@ import type {
   AgenteraPortalTarget,
 } from "../shared/agentera-auth";
 import type {
+  OfficialQualityConsentReceipt,
+  OfficialQualityConsentSettings,
+  OfficialQualityFeedbackEligibility,
+  OfficialQualityFeedbackSubmission,
+  OfficialQualityFeedbackSubmissionResult,
+} from "../shared/agentera-official-quality";
+import type {
+  AgenteraEncryptedBackupConfirmedRestore,
+  AgenteraEncryptedBackupCreationResult,
+  AgenteraEncryptedBackupPreparedRestore,
+  AgenteraEncryptedBackupProgress,
+  AgenteraEncryptedBackupPublicDevice,
+  AgenteraEncryptedBackupPublicEnrollment,
+  AgenteraEncryptedBackupPublicState,
+  AgenteraEncryptedBackupPublicSummary,
+} from "../shared/agentera-encrypted-backup";
+import type {
   AgenteraBoundConnectionPublicState,
   AgenteraBoundProfilePublicState,
   AgenteraConnectionClaimPublicState,
@@ -1740,6 +1757,133 @@ const agenteraAuthAPI = {
   },
 };
 
+const agenteraOfficialQualityAPI = {
+  getConsent: (): Promise<OfficialQualityConsentSettings> =>
+    ipcRenderer.invoke("agentera-official-quality-get-consent"),
+  setPassiveConsent: (
+    enabled: boolean,
+  ): Promise<OfficialQualityConsentReceipt> =>
+    ipcRenderer.invoke("agentera-official-quality-set-passive-consent", {
+      enabled,
+    }),
+  setExplicitFeedbackConsent: (
+    enabled: boolean,
+  ): Promise<OfficialQualityConsentReceipt> =>
+    ipcRenderer.invoke(
+      "agentera-official-quality-set-explicit-feedback-consent",
+      { enabled },
+    ),
+  submitFeedback: (
+    input: OfficialQualityFeedbackSubmission,
+  ): Promise<OfficialQualityFeedbackSubmissionResult> =>
+    ipcRenderer.invoke("agentera-official-quality-submit-feedback", input),
+  onEligible: (
+    callback: (
+      runId: string,
+      eligibility: OfficialQualityFeedbackEligibility,
+    ) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      runId: string,
+      eligibility: OfficialQualityFeedbackEligibility,
+    ): void => callback(runId, eligibility);
+    ipcRenderer.on("agentera-official-quality-eligible", handler);
+    return () =>
+      ipcRenderer.removeListener("agentera-official-quality-eligible", handler);
+  },
+};
+
+const agenteraEncryptedBackupAPI = {
+  getState: (): Promise<AgenteraEncryptedBackupPublicState> =>
+    ipcRenderer.invoke("agentera-encrypted-backup-get-state"),
+  initializeRecovery: (): Promise<AgenteraEncryptedBackupPublicEnrollment> =>
+    ipcRenderer.invoke("agentera-encrypted-backup-initialize-recovery", {
+      confirmation: "initialize-recovery",
+    }),
+  confirmRecoverySaved: (): Promise<AgenteraEncryptedBackupPublicState> =>
+    ipcRenderer.invoke("agentera-encrypted-backup-confirm-recovery", {
+      confirmation: "recovery-written-down",
+    }),
+  registerCurrentDevice: (): Promise<AgenteraEncryptedBackupPublicDevice[]> =>
+    ipcRenderer.invoke("agentera-encrypted-backup-register-current-device", {
+      confirmation: "register-current-device",
+    }),
+  authorizeDevice: (
+    deviceId: string,
+  ): Promise<AgenteraEncryptedBackupPublicDevice[]> =>
+    ipcRenderer.invoke("agentera-encrypted-backup-authorize-device", {
+      deviceId,
+      confirmation: "authorize-device",
+    }),
+  createBackup: (
+    installationId: string,
+  ): Promise<AgenteraEncryptedBackupCreationResult> =>
+    ipcRenderer.invoke("agentera-encrypted-backup-create", {
+      installationId,
+    }),
+  cancelBackup: (installationId: string): Promise<boolean> =>
+    ipcRenderer.invoke("agentera-encrypted-backup-cancel", {
+      installationId,
+    }),
+  listBackups: (): Promise<AgenteraEncryptedBackupPublicSummary[]> =>
+    ipcRenderer.invoke("agentera-encrypted-backup-list"),
+  deleteBackup: (backupId: string): Promise<void> =>
+    ipcRenderer.invoke("agentera-encrypted-backup-delete", {
+      backupId,
+      confirmation: "delete-backup",
+    }),
+  setDailySchedule: (
+    installationId: string,
+    enabled: boolean,
+  ): Promise<AgenteraEncryptedBackupPublicState> =>
+    ipcRenderer.invoke("agentera-encrypted-backup-set-daily-schedule", {
+      installationId,
+      enabled,
+    }),
+  listDevices: (): Promise<AgenteraEncryptedBackupPublicDevice[]> =>
+    ipcRenderer.invoke("agentera-encrypted-backup-list-devices"),
+  revokeDevice: (
+    deviceId: string,
+  ): Promise<AgenteraEncryptedBackupPublicDevice[]> =>
+    ipcRenderer.invoke("agentera-encrypted-backup-revoke-device", {
+      deviceId,
+      confirmation: "revoke-device",
+    }),
+  prepareRestore: (
+    backupId: string,
+    recoveryPhrase?: string,
+  ): Promise<AgenteraEncryptedBackupPreparedRestore> =>
+    ipcRenderer.invoke("agentera-encrypted-backup-prepare-restore", {
+      backupId,
+      ...(recoveryPhrase === undefined ? {} : { recoveryPhrase }),
+    }),
+  confirmRestore: (
+    preparationId: string,
+    name: string,
+  ): Promise<AgenteraEncryptedBackupConfirmedRestore> =>
+    ipcRenderer.invoke("agentera-encrypted-backup-confirm-restore", {
+      preparationId,
+      name,
+      confirmation: "restore-into-new-profile",
+    }),
+  cancelRestore: (preparationId: string): Promise<boolean> =>
+    ipcRenderer.invoke("agentera-encrypted-backup-cancel-restore", {
+      preparationId,
+    }),
+  onProgress: (
+    callback: (progress: AgenteraEncryptedBackupProgress[]) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      progress: AgenteraEncryptedBackupProgress[],
+    ): void => callback(progress);
+    ipcRenderer.on("agentera-encrypted-backup-progress", handler);
+    return () =>
+      ipcRenderer.removeListener("agentera-encrypted-backup-progress", handler);
+  },
+};
+
 const agenteraRuntimeAccessAPI = {
   probeInstallFiles: (): Promise<AgenteraInstallFileProbe> =>
     ipcRenderer.invoke("agentera-install-file-probe"),
@@ -2286,6 +2430,14 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld("hermesAPI", hermesAPI);
     contextBridge.exposeInMainWorld("agenteraAuth", agenteraAuthAPI);
     contextBridge.exposeInMainWorld(
+      "agenteraOfficialQuality",
+      agenteraOfficialQualityAPI,
+    );
+    contextBridge.exposeInMainWorld(
+      "agenteraEncryptedBackup",
+      agenteraEncryptedBackupAPI,
+    );
+    contextBridge.exposeInMainWorld(
       "agenteraProductSpace",
       agenteraProductSpaceAPI,
     );
@@ -2313,6 +2465,10 @@ if (process.contextIsolated) {
   window.hermesAPI = hermesAPI;
   // @ts-ignore (define in dts)
   window.agenteraAuth = agenteraAuthAPI;
+  // @ts-ignore (define in dts)
+  window.agenteraOfficialQuality = agenteraOfficialQualityAPI;
+  // @ts-ignore (define in dts)
+  window.agenteraEncryptedBackup = agenteraEncryptedBackupAPI;
   // @ts-ignore (define in dts)
   window.agenteraProductSpace = agenteraProductSpaceAPI;
   // @ts-ignore (define in dts)

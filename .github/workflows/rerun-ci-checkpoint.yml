@@ -1,0 +1,201 @@
+name: Re-run CI safety checkpoint
+
+on:
+  workflow_dispatch:
+    inputs:
+      desktop_ref:
+        description: Exact Desktop branch containing desktop_sha
+        required: true
+        default: main
+      desktop_sha:
+        description: Exact 40-character Desktop commit SHA
+        required: true
+      cloud_ref:
+        description: Exact Cloud branch containing cloud_sha
+        required: true
+        default: main
+      cloud_sha:
+        description: Exact 40-character Cloud commit SHA
+        required: true
+      admin_ref:
+        description: Exact Admin branch containing admin_sha
+        required: true
+        default: main
+      admin_sha:
+        description: Exact 40-character Admin commit SHA
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: ci-safety-checkpoint
+  cancel-in-progress: false
+
+jobs:
+  checkpoint:
+    name: Dispatch and verify existing CI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout verifier
+        uses: actions/checkout@v4
+
+      - name: Require purpose-scoped cross-repository workflow token
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.AERA_CROSS_REPO_WORKFLOW_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN:-}"
+          gh auth status
+
+      - name: Dispatch exact-ref CI runs
+        id: dispatch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.AERA_CROSS_REPO_WORKFLOW_TOKEN }}
+          DESKTOP_REF: ${{ inputs.desktop_ref }}
+          DESKTOP_SHA: ${{ inputs.desktop_sha }}
+          CLOUD_REF: ${{ inputs.cloud_ref }}
+          CLOUD_SHA: ${{ inputs.cloud_sha }}
+          ADMIN_REF: ${{ inputs.admin_ref }}
+          ADMIN_SHA: ${{ inputs.admin_sha }}
+        run: |
+          set -euo pipefail
+          require_sha() {
+            case "$2" in
+              *[!0-9a-f]*|"") echo "$1 SHA is not lowercase hexadecimal" >&2; exit 1 ;;
+            esac
+            test "${#2}" -eq 40
+          }
+          dispatch() {
+            repository="$1"
+            workflow="$2"
+            ref="$3"
+            expected_sha="$4"
+            require_sha "$repository" "$expected_sha"
+            actual_sha=$(gh api "repos/$repository/git/ref/heads/$ref" --jq '.object.sha')
+            test "$actual_sha" = "$expected_sha"
+            gh workflow run "$workflow" --repo "$repository" --ref "$ref"
+          }
+          dispatch bignormal/aera ci.yml "$DESKTOP_REF" "$DESKTOP_SHA"
+          dispatch bignormal/aera-cloud ci.yml "$CLOUD_REF" "$CLOUD_SHA"
+          dispatch bignormal/aera-admin ci.yml "$ADMIN_REF" "$ADMIN_SHA"
+
+      - name: Wait for real jobs and capture run metadata
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.AERA_CROSS_REPO_WORKFLOW_TOKEN }}
+          DESKTOP_REF: ${{ inputs.desktop_ref }}
+          DESKTOP_SHA: ${{ inputs.desktop_sha }}
+          CLOUD_REF: ${{ inputs.cloud_ref }}
+          CLOUD_SHA: ${{ inputs.cloud_sha }}
+          ADMIN_REF: ${{ inputs.admin_ref }}
+          ADMIN_SHA: ${{ inputs.admin_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ci-checkpoint"
+          capture() {
+            repository="$1"
+            workflow="$2"
+            ref="$3"
+            expected_sha="$4"
+            output="$5"
+            run_id=""
+            for _ in $(seq 1 30); do
+              run_id=$(gh run list --repo "$repository" --workflow "$workflow" \
+                --branch "$ref" --event workflow_dispatch --limit 20 \
+                --json databaseId,headSha \
+                --jq "map(select(.headSha == \"$expected_sha\"))[0].databaseId // empty")
+              if [ -n "$run_id" ]; then break; fi
+              sleep 10
+            done
+            test -n "$run_id"
+            gh run watch "$run_id" --repo "$repository" --exit-status
+            gh run view "$run_id" --repo "$repository" \
+              --json conclusion,headSha,jobs,url,workflowName,updatedAt > "$output"
+          }
+          capture bignormal/aera ci.yml "$DESKTOP_REF" "$DESKTOP_SHA" \
+            "$RUNNER_TEMP/ci-checkpoint/desktop.json"
+          capture bignormal/aera-cloud ci.yml "$CLOUD_REF" "$CLOUD_SHA" \
+            "$RUNNER_TEMP/ci-checkpoint/cloud.json"
+          capture bignormal/aera-admin ci.yml "$ADMIN_REF" "$ADMIN_SHA" \
+            "$RUNNER_TEMP/ci-checkpoint/admin.json"
+
+      - name: Build and verify checkpoint manifest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.AERA_CROSS_REPO_WORKFLOW_TOKEN }}
+          DESKTOP_SHA: ${{ inputs.desktop_sha }}
+          CLOUD_SHA: ${{ inputs.cloud_sha }}
+          ADMIN_SHA: ${{ inputs.admin_sha }}
+        run: |
+          set -euo pipefail
+          export CHECKPOINT_ROOT="$RUNNER_TEMP/ci-checkpoint"
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from "node:fs/promises";
+          import { execFileSync } from "node:child_process";
+
+          const specs = [
+            ["desktop", "bignormal/aera", process.env.DESKTOP_SHA],
+            ["cloud", "bignormal/aera-cloud", process.env.CLOUD_SHA],
+            ["admin", "bignormal/aera-admin", process.env.ADMIN_SHA],
+          ];
+          const repositories = [];
+          for (const [name, repository, expectedSha] of specs) {
+            const run = JSON.parse(
+              await readFile(`${process.env.CHECKPOINT_ROOT}/${name}.json`, "utf8"),
+            );
+            if (run.headSha !== expectedSha) throw new Error(`${repository} SHA changed`);
+            const commit = JSON.parse(
+              execFileSync(
+                "gh",
+                ["api", `repos/${repository}/commits/${expectedSha}`],
+                { encoding: "utf8" },
+              ),
+            );
+            repositories.push({
+              repository,
+              commitSha: expectedSha,
+              commitCommittedAt: commit.commit.committer.date,
+              workflowName: run.workflowName,
+              runUrl: run.url,
+              conclusion: run.conclusion,
+              completedAt: new Date(run.updatedAt).toISOString(),
+              jobs: run.jobs.map((job) => ({
+                name: job.name,
+                platform:
+                  job.name.match(/\(([^)]+)\)$/u)?.[1] ??
+                  (repository === "bignormal/aera" ? "" : "ubuntu-24.04"),
+                conclusion: job.conclusion,
+                stepsExecuted: job.steps.filter(
+                  (step) => step.conclusion !== "skipped",
+                ).length,
+              })),
+            });
+          }
+          const manifest = {
+            schemaVersion: 1,
+            generatedAt: new Date().toISOString(),
+            repositories,
+          };
+          await writeFile(
+            `${process.env.CHECKPOINT_ROOT}/checkpoint.json`,
+            `${JSON.stringify(manifest, null, 2)}\n`,
+          );
+          NODE
+          node scripts/verify-ci-checkpoint.mjs \
+            "$RUNNER_TEMP/ci-checkpoint/checkpoint.json" \
+            --expect "bignormal/aera=$DESKTOP_SHA" \
+            --expect "bignormal/aera-cloud=$CLOUD_SHA" \
+            --expect "bignormal/aera-admin=$ADMIN_SHA"
+
+      - name: Upload exact-SHA checkpoint evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-safety-checkpoint-${{ github.run_id }}
+          path: ${{ runner.temp }}/ci-checkpoint
+          if-no-files-found: error
+          retention-days: 30

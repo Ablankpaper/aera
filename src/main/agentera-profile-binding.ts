@@ -436,6 +436,43 @@ export class AgenteraProfileBindingStore {
     return { ...stored.binding };
   }
 
+  removeProfileBinding(
+    profilePath: string,
+    owner: AgenteraRuntimeOwner,
+    expected: {
+      runtimeProfileId: string;
+      agentInstallationId: string | null;
+    },
+  ): boolean {
+    assertOwner(owner);
+    if (
+      !validUuid(expected.runtimeProfileId) ||
+      (expected.agentInstallationId !== null &&
+        !validUuid(expected.agentInstallationId))
+    ) {
+      throw new Error("AgentEra Runtime Profile binding identity is invalid.");
+    }
+    const canonical = canonicalProfilePath(profilePath);
+    const bindings = this.readBindings();
+    const index = bindings.findIndex(
+      (entry) => entry.profilePath === canonical,
+    );
+    if (index < 0) return false;
+    const stored = bindings[index];
+    if (
+      !sameOwner(stored.binding, owner) ||
+      stored.binding.runtimeProfileId !== expected.runtimeProfileId ||
+      stored.binding.agentInstallationId !== expected.agentInstallationId
+    ) {
+      throw new Error(
+        "AgentEra Runtime Profile binding cannot be removed by this restore transaction.",
+      );
+    }
+    bindings.splice(index, 1);
+    this.persistBindings(bindings);
+    return true;
+  }
+
   resolveAttachedProfilePath(
     runtimeProfileId: string,
     agentInstallationId: string,

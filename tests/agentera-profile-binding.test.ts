@@ -394,7 +394,7 @@ describe("AgentEra non-destructive Runtime Profile ownership", () => {
         AGENT_INSTALLATION_ID,
         owner,
       ),
-    ).toBe(realpathSync(profilePath));
+    ).toBe(realpathSync.native(profilePath));
     expect(() =>
       store.resolveAttachedProfilePath(
         binding.runtimeProfileId,

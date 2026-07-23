@@ -11,6 +11,8 @@ import {
   upsertLiveToolEvent,
 } from "../liveToolEvents";
 import { upsertLiveReasoningChunk } from "../liveReasoningEvents";
+import { attachOfficialQualityEligibility } from "./useDashboardChatTransport";
+import type { OfficialQualityFeedbackEligibility } from "../../../../../shared/agentera-official-quality";
 
 interface UseChatIPCArgs {
   /** This conversation's run id. Events tagged with a different runId belong
@@ -56,6 +58,8 @@ export function useChatIPC({
   const dbPollRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
   const dbPollInFlightRef = useRef(false);
   const acceptedSessionIdRef = useRef<string | null>(sessionScopeId);
+  const qualityEligibilityRef =
+    useRef<OfficialQualityFeedbackEligibility | null>(null);
 
   const stopDbPolling = useCallback((): void => {
     if (dbPollRef.current !== null) {
@@ -194,25 +198,52 @@ export function useChatIPC({
           setHermesSessionId(sessionId);
         }
         if (!sessionId || activeTurn?.status === "failed") {
+          qualityEligibilityRef.current = null;
           activeTurnRef.current = null;
           setToolProgress(null);
           setIsLoading(false);
           return;
         }
+        if (activeTurn) activeTurn.status = "completed";
+        const qualityEligibility = qualityEligibilityRef.current;
+        qualityEligibilityRef.current = null;
+        let refreshedMessages = false;
         try {
           const items = (await window.hermesAPI.getSessionMessages(
             sessionId,
           )) as DbHistoryItem[];
           const dbMessages = dbItemsToChatMessages(items);
           if (dbMessages.length > 0) {
+            refreshedMessages = true;
             setMessages((prev) =>
-              reconcileAfterDbRefresh(prev, dbMessages, { activeTurn }),
+              activeTurn
+                ? attachOfficialQualityEligibility(
+                    reconcileAfterDbRefresh(prev, dbMessages, { activeTurn }),
+                    activeTurn,
+                    qualityEligibility,
+                  )
+                : reconcileAfterDbRefresh(prev, dbMessages, { activeTurn }),
             );
           }
-          if (activeTurn) activeTurn.status = "completed";
         } catch {
           // Merge is a UX nicety; do not break chat completion on failure.
         } finally {
+          if (activeTurn && !refreshedMessages) {
+            setMessages((prev) => {
+              const completed = prev.map((message) =>
+                isBubbleMessage(message) &&
+                message.turnId === activeTurn.turnId &&
+                message.pending
+                  ? { ...message, pending: false }
+                  : message,
+              );
+              return attachOfficialQualityEligibility(
+                completed,
+                activeTurn,
+                qualityEligibility,
+              );
+            });
+          }
           setToolProgress(null);
           setIsLoading(false);
           if (activeTurnRef.current === activeTurn) {
@@ -228,6 +259,7 @@ export function useChatIPC({
       stopDbPolling();
       const activeTurn = activeTurnRef.current;
       if (!activeTurn) return;
+      qualityEligibilityRef.current = null;
       activeTurn.status = "failed";
       setMessages((prev) => markActiveTurnFailed(prev, error, activeTurn));
       setToolProgress(null);
@@ -344,6 +376,14 @@ export function useChatIPC({
       }));
     });
 
+    const cleanupOfficialQuality =
+      window.agenteraOfficialQuality?.onEligible?.(
+        (eventRunId, eligibility) => {
+          if (!eventMatchesRun(eventRunId, runId)) return;
+          qualityEligibilityRef.current = eligibility;
+        },
+      ) ?? (() => undefined);
+
     return () => {
       disposed = true;
       stopDbPolling();
@@ -356,6 +396,7 @@ export function useChatIPC({
       cleanupToolProgress();
       cleanupToolEvent();
       cleanupUsage();
+      cleanupOfficialQuality();
     };
   }, [
     runId,

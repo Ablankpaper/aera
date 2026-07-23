@@ -3,6 +3,10 @@ export interface RuntimeRunLease {
   finish(): void;
 }
 
+export interface RuntimeSnapshotLease {
+  finish(): void;
+}
+
 interface RuntimeRunState {
   abort: (() => void) | null;
   abortRequested: boolean;
@@ -12,13 +16,18 @@ export class RuntimeActivityCoordinator {
   private readonly currentRuns = new Map<string, RuntimeRunState>();
   private readonly activeRuns = new Set<RuntimeRunState>();
   private transitionPending = false;
+  private snapshotPending = false;
 
   get activeRunCount(): number {
     return this.activeRuns.size;
   }
 
+  get snapshotActive(): boolean {
+    return this.snapshotPending;
+  }
+
   beginRun(runId: string): RuntimeRunLease | null {
-    if (this.transitionPending) return null;
+    if (this.transitionPending || this.snapshotPending) return null;
 
     const existing = this.currentRuns.get(runId);
     if (existing !== undefined) this.requestAbort(existing);
@@ -54,13 +63,50 @@ export class RuntimeActivityCoordinator {
   }
 
   beginTransition(): boolean {
-    if (this.transitionPending || this.activeRuns.size > 0) return false;
+    if (
+      this.transitionPending ||
+      this.snapshotPending ||
+      this.activeRuns.size > 0
+    ) {
+      return false;
+    }
     this.transitionPending = true;
     return true;
   }
 
   cancelTransition(): void {
     this.transitionPending = false;
+  }
+
+  beginSnapshot(): RuntimeSnapshotLease | null {
+    if (
+      this.snapshotPending ||
+      this.transitionPending ||
+      this.activeRuns.size > 0
+    ) {
+      return null;
+    }
+    this.snapshotPending = true;
+    let finished = false;
+    return {
+      finish: () => {
+        if (finished) return;
+        finished = true;
+        this.snapshotPending = false;
+      },
+    };
+  }
+
+  async withSnapshot<T>(operation: () => Promise<T> | T): Promise<T> {
+    const lease = this.beginSnapshot();
+    if (!lease) {
+      throw new Error("AgentEra Runtime is busy.");
+    }
+    try {
+      return await operation();
+    } finally {
+      lease.finish();
+    }
   }
 
   private requestAbort(state: RuntimeRunState): void {

@@ -233,7 +233,7 @@ test("online auth followed by offline packaged Seed preparation survives restart
     desktopPage.getByRole("button", { name: "Continue to Setup" }),
   ).toHaveCount(0);
   await desktopPage.locator(".agentera-profile-actions .btn-primary").click();
-  await expect(desktopPage.locator(".setup-screen")).toBeVisible();
+  await expect(desktopPage.locator(".layout")).toBeVisible();
 
   const firstState = await runtimeState(desktopPage);
   expect(firstState).toMatchObject({

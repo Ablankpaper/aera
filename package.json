@@ -10,6 +10,8 @@
     "verify:packaged-runtime-seed": "node scripts/verify-packaged-runtime-seed.mjs",
     "generate:agentera-cloud": "node scripts/generate-agentera-cloud-types.mjs",
     "check:agentera-cloud-contract": "node scripts/check-agentera-cloud-contract.mjs",
+    "check:official-quality-boundary": "node scripts/check-official-quality-boundary.mjs",
+    "check:encrypted-backup-boundary": "node scripts/check-encrypted-backup-boundary.mjs",
     "smoke:agentera-auth": "node scripts/agentera-auth-smoke.mjs",
     "format": "prettier --write .",
     "lint": "eslint --cache .",
@@ -22,6 +24,8 @@
     "test:e2e:workspace-agent": "npm run build && playwright test tests/e2e/agentera-workspace-agent.e2e.ts",
     "test:e2e:experience-candidate": "npm run build && playwright test tests/e2e/agentera-experience-candidate.e2e.ts",
     "test:e2e:official-managed-agent": "npm run build && playwright test tests/e2e/agentera-official-managed-agent.e2e.ts",
+    "test:e2e:official-quality": "playwright test tests/e2e/agentera-official-quality.e2e.ts",
+    "test:e2e:encrypted-backup": "npm run build && playwright test tests/e2e/agentera-encrypted-backup.e2e.ts",
     "test:e2e:runtime-seed": "npm run build && playwright test tests/e2e/agentera-runtime-seed.e2e.ts",
     "test:coverage": "vitest run --coverage",
     "test:sandbox": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/hermes-sandbox.ps1 test",
@@ -47,9 +51,13 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "@hpke/core": "1.9.0",
+    "@hpke/dhkem-x25519": "1.8.0",
+    "@noble/hashes": "2.2.0",
     "@radix-ui/react-dialog": "^1.1.17",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
+    "@scure/bip39": "2.2.0",
     "@types/highlight.js": "^9.12.4",
     "@types/react-syntax-highlighter": "^15.5.13",
     "better-sqlite3": "^12.8.0",
@@ -87,9 +95,9 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.183.1",
-    "@wesbos/code-icons": "^1.2.4",
     "@vitejs/plugin-react": "^5.1.1",
     "@vitest/coverage-v8": "^4.1.8",
+    "@wesbos/code-icons": "^1.2.4",
     "electron": "^39.2.6",
     "electron-builder": "^26.0.12",
     "electron-vite": "^5.0.0",
@@ -109,5 +117,8 @@
     "vite": "7.3.6",
     "vitest": "^4.1.4",
     "yaml": "^2.9.0"
+  },
+  "overrides": {
+    "js-yaml": "4.3.0"
   }
 }

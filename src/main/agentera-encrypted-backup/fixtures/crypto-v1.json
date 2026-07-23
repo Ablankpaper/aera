@@ -1,0 +1,22 @@
+{
+  "formatVersion": 1,
+  "cipherSuite": "HPKE-X25519-HKDF-SHA256-AES256GCM+ARGON2ID+AES256GCM",
+  "entropyHex": "0000000000000000000000000000000000000000000000000000000000000000",
+  "phrase": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art",
+  "argonSaltHex": "000102030405060708090a0b0c0d0e0f",
+  "argonRawHex": "1636048233e77e4e910cf2138c0f41918839449cd50aa04256896b589caabe96",
+  "recoveryKekHex": "57e8112bac71d8e9b7eba0437906118fcec8483a4d736f4d39237cf2bb8d82f1",
+  "rootKeyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "hkdfSaltHex": "f0e0d0c0b0a090807060504030201000f1e1d1c1b1a191817161514131211100",
+  "manifestKeyHex": "5d29eb2739a38f6263fee56bb8b9bf305a58771af3cf316f367061f2dbffffaf",
+  "chunk7KeyHex": "7fd21a7e7b5db8e7f79ff306d1edd0a159583487e2fe05d438519ed8e3570e7f",
+  "nonceHex": "000102030405060708090a0b",
+  "lineageId": "11111111-1111-4111-8111-111111111111",
+  "aesAad": "agentera-backup-v1|format=1|lineage=11111111-1111-4111-8111-111111111111",
+  "aesPlaintext": "AgentEra encrypted backup vector v1",
+  "aesCiphertextHex": "cec96fcca7de0a4a03bba7ba52f13a74fe864d293ccf0ac7cbf65f6c1988b9dc0439110952cd9745e00b76e2fa83e382ec7af2",
+  "recoveryCiphertextHex": "f8698e8294fd9f49ce91d76f7d14c54b1c58be87f3ff7d316e65657a9376e6800ce947586df6792f7ecaf3d119238912",
+  "hpkeRecipientIkmHex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+  "hpkePublicKeyHex": "693658254630f73ad8da78fb331bf976cd42f90e0e9c9e83f40c51072a6f7417",
+  "hpkePrivateKeyHex": "3caa61bc13e56473e913a85c33cf4d603ac99a517eea95ed4573e772b64435f7"
+}

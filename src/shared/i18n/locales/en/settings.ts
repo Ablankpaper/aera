@@ -78,6 +78,25 @@ export default {
     label: "Send anonymous usage analytics",
     hint: "Collected anonymously and used only to improve AgentEra Studio — never your chats, files, prompts, or any personal data.",
   },
+  officialQuality: {
+    title: "Official Agent quality feedback",
+    noContent:
+      "No conversation content, prompts, responses, files, paths, Memory, private Skills, or raw errors are sent.",
+    purge:
+      "Turning either choice off immediately stops new matching events and removes unsent matching events from this device.",
+    passive: {
+      label: "Share content-free Official Agent quality metrics",
+      confirmation:
+        "This separately authorizes fixed result, latency, token, and approved crash-code buckets after an eligible Official Agent turn completes.",
+    },
+    feedback: {
+      label: "Allow helpful / not helpful feedback",
+      confirmation:
+        "This separately enables an affirmative rating with fixed reason codes only. No free-text feedback is accepted.",
+    },
+    signInRequired: "Sign in to manage Official Agent quality choices.",
+    saveFailed: "The quality preference could not be saved.",
+  },
   notDetected: "Not detected",
   updatedSuccessfully: "Updated successfully!",
   updateSuccess: "AgentEra updated successfully.",
@@ -117,6 +136,98 @@ export default {
   dataSection: "Data",
   dataHint:
     "Export or import your AgentEra configuration, sessions, skills, and memory.",
+  encryptedBackup: {
+    title: "End-to-end encrypted cloud backup",
+    privacy:
+      "AgentEra encrypts approved Profile data on this device. The Cloud stores ciphertext and public device metadata only.",
+    refresh: "Refresh encrypted backup state",
+    loading: "Loading encrypted backup state…",
+    signInRequired:
+      "Sign in and connect to the Cloud to manage encrypted backups.",
+    recoverySetup: "Recovery setup",
+    recoverySetupHint:
+      "Create a device-owned encryption root and a one-time 24-word recovery phrase. AgentEra cannot recover this phrase for you.",
+    setup: "Set up encrypted backup",
+    registerThisDevice: "Register this device for migration",
+    manualTitle: "Backup an active user Profile",
+    profile: "Agent installation",
+    progress: "Encrypted upload {{percent}}%",
+    cancelBackup: "Cancel backup",
+    dailySchedule: "Back up daily when online and idle",
+    backupNow: "Back up now",
+    backupsTitle: "Encrypted backups",
+    noBackups: "No sealed backups are available.",
+    restore: "Restore",
+    deleteBackup: "Delete backup {{id}}",
+    devicesTitle: "Authorized devices",
+    noDevices: "No Cloud device registrations are available.",
+    currentDevice: "Current device",
+    authorizationPending: "Waiting for authorization",
+    revoked: "Revoked",
+    authorized: "Authorized",
+    authorize: "Authorize",
+    revoke: "Revoke",
+    authorizeDevice: "Authorize device {{id}}",
+    revokeDevice: "Revoke device {{id}}",
+    quotaExceeded:
+      "Cloud backup quota exceeded. Delete an older backup or try again after capacity is available.",
+    recoveryTitle: "Write down your recovery phrase",
+    recoveryWarning:
+      "This is the only time the phrase is shown. Store all 24 words offline, in order. It is deliberately not copied to the clipboard.",
+    confirmWritten: "I wrote down all 24 words in order",
+    confirmRecovery: "I stored the phrase safely",
+    authorizeConfirmTitle: "Authorize this device?",
+    authorizeWarning:
+      "This device will be able to decrypt every compatible backup in the current key epoch.",
+    confirmAuthorize: "Authorize device",
+    revokeConfirmTitle: "Revoke this device?",
+    revokeWarning:
+      "Revocation blocks future authorization and envelopes. Already downloaded plaintext cannot be recalled.",
+    confirmRevoke: "Revoke device",
+    deleteConfirmTitle: "Delete this encrypted backup?",
+    deleteWarning:
+      "The Cloud removes recovery envelopes first, then permanently deletes ciphertext objects. This cannot be undone.",
+    confirmDelete: "Delete backup",
+    cancel: "Cancel",
+    restoreTitle: "Restore into a fresh Profile",
+    restoreFreshWarning:
+      "Restore always creates a new Profile and Installation. It never overwrites existing Profile data, sessions, Memory, Skills, or RuntimeBindings.",
+    recoveryPhrase: "24-word recovery phrase",
+    recoveryPhraseOptional:
+      "Optional on an authorized device; required for phrase-only recovery",
+    prepareRestore: "Verify backup",
+    restorePreview: "Verified source installation {{id}}",
+    restoreName: "New Profile name",
+    confirmFreshProfile: "I understand this creates a separate fresh Profile",
+    confirmRestore: "Create restored Profile",
+    notices: {
+      recoveryConfirmed: "Recovery phrase confirmation saved.",
+      deviceRegistered:
+        "This device is registered and can now be authorized from an existing device.",
+      backupCreated: "Encrypted backup sealed successfully.",
+      backupCreatedEnvelopePending:
+        "Backup sealed, but one or more device envelopes still need to synchronize.",
+      deviceAuthorized: "Device authorized.",
+      deviceRevoked: "Device revoked.",
+      backupDeleted: "Backup deletion started.",
+      restoreComplete: "Restore completed in a fresh Profile.",
+    },
+    errors: {
+      authentication_required: "Sign in to continue.",
+      online_required: "A live Cloud connection is required.",
+      cloud_unavailable: "Encrypted backup Cloud service is unavailable.",
+      service_unavailable: "Encrypted backup is unavailable.",
+      existing_backup_recovery_required:
+        "This account already has encrypted backup state. Register this device and restore with authorization or the 24-word phrase.",
+      recovery_phrase_unavailable:
+        "The one-time recovery phrase is no longer available.",
+      recovery_setup_required: "Complete recovery setup before backing up.",
+      invalid_request: "The encrypted backup request was rejected.",
+      backup_not_found: "The selected backup is no longer available.",
+      backup_failed: "Encrypted backup failed without changing local data.",
+      generic: "Encrypted backup operation failed ({{code}}).",
+    },
+  },
   backingUp: "Backing up...",
   exportBackup: "Export Backup",
   importing: "Importing...",

@@ -879,7 +879,7 @@ function validateCriticalContract(document) {
   if (document.openapi !== "3.0.3") {
     fail(`OpenAPI dialect changed: ${String(document.openapi)}`);
   }
-  if (document.info?.version !== "0.8.0") {
+  if (document.info?.version !== "0.9.0") {
     fail(`OpenAPI version changed: ${String(document.info?.version)}`);
   }
   const paths = object(document.paths, "paths");

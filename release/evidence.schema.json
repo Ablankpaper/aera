@@ -1,0 +1,386 @@
+{
+  "$defs": {
+    "candidate": {
+      "additionalProperties": false,
+      "properties": {
+        "manifestSha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "repository": {
+          "const": "bignormal/aera"
+        },
+        "sourceSha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        },
+        "version": {
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$",
+          "type": "string"
+        }
+      },
+      "required": ["repository", "sourceSha", "version", "manifestSha256"],
+      "type": "object"
+    },
+    "coverage": {
+      "additionalProperties": false,
+      "properties": {
+        "accountIdentityRefs": {
+          "items": {
+            "pattern": "^qa-account:[A-Za-z0-9][A-Za-z0-9._-]{1,99}$",
+            "type": "string"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "backupDeviceIdentityRefs": {
+          "items": {
+            "pattern": "^backup-device:[A-Za-z0-9][A-Za-z0-9._-]{1,99}$",
+            "type": "string"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": ["accountIdentityRefs", "backupDeviceIdentityRefs"],
+      "type": "object"
+    },
+    "entry": {
+      "additionalProperties": false,
+      "properties": {
+        "arch": {
+          "enum": ["arm64", "x64"]
+        },
+        "backupAuthorizedDeviceIdentityRefs": {
+          "items": {
+            "pattern": "^backup-device:[A-Za-z0-9][A-Za-z0-9._-]{1,99}$",
+            "type": "string"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "candidateManifestSha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "deviceClass": {
+          "enum": ["physical", "trusted_vm"]
+        },
+        "deviceFingerprint": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "evidenceId": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "evidenceLinks": {
+          "items": {
+            "format": "uri",
+            "maxLength": 512,
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "type": "array"
+        },
+        "installedArtifact": {
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": ["name", "sha256"],
+          "type": "object"
+        },
+        "os": {
+          "additionalProperties": false,
+          "properties": {
+            "build": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "major": {
+              "maximum": 99,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "name": {
+              "enum": ["macOS", "Windows 11"]
+            },
+            "version": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": ["name", "major", "version", "build"],
+          "type": "object"
+        },
+        "role": {
+          "enum": [
+            "macos_current",
+            "macos_previous",
+            "windows_physical",
+            "windows_second"
+          ]
+        },
+        "scenarioResults": {
+          "$ref": "#/$defs/scenarioResults"
+        },
+        "signatureVerification": {
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "enum": ["codesign_spctl_stapler", "authenticode_signtool"]
+            },
+            "signerIdentityRef": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "timestampVerified": {
+              "const": true
+            },
+            "verificationLogSha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "verified": {
+              "const": true
+            }
+          },
+          "required": [
+            "verified",
+            "method",
+            "signerIdentityRef",
+            "timestampVerified",
+            "verificationLogSha256"
+          ],
+          "type": "object"
+        },
+        "testedAccountIdentityRefs": {
+          "items": {
+            "pattern": "^qa-account:[A-Za-z0-9][A-Za-z0-9._-]{1,99}$",
+            "type": "string"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "testedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "testerIdentityRef": {
+          "pattern": "^(?:employee|contractor):[A-Za-z0-9][A-Za-z0-9._-]{1,99}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "evidenceId",
+        "role",
+        "deviceFingerprint",
+        "deviceClass",
+        "os",
+        "arch",
+        "installedArtifact",
+        "candidateManifestSha256",
+        "signatureVerification",
+        "scenarioResults",
+        "testedAccountIdentityRefs",
+        "backupAuthorizedDeviceIdentityRefs",
+        "testedAt",
+        "testerIdentityRef",
+        "evidenceLinks"
+      ],
+      "type": "object"
+    },
+    "scenarioResults": {
+      "additionalProperties": false,
+      "properties": {
+        "appRestart": {
+          "const": true
+        },
+        "authorizedDeviceRestore": {
+          "const": true
+        },
+        "backupCiphertextCorruptionRejected": {
+          "const": true
+        },
+        "backupDiskExhaustionFailsClosed": {
+          "const": true
+        },
+        "backupInterruptedResume": {
+          "const": true
+        },
+        "backupRevokedDeviceRejected": {
+          "const": true
+        },
+        "backupWrongPhraseRejected": {
+          "const": true
+        },
+        "cleanInstall": {
+          "const": true
+        },
+        "encryptedBackupCreate": {
+          "const": true
+        },
+        "existingRuntimeBindingStable": {
+          "const": true
+        },
+        "loginOnline": {
+          "const": true
+        },
+        "newRuntimeBindingUsesSelectedRelease": {
+          "const": true
+        },
+        "noPrivateDataUploadCanary": {
+          "const": true
+        },
+        "officialAgentInstall": {
+          "const": true
+        },
+        "officialAgentRollback": {
+          "const": true
+        },
+        "officialAgentRun": {
+          "const": true
+        },
+        "officialAgentUpdate": {
+          "const": true
+        },
+        "osRestart": {
+          "const": true
+        },
+        "qualityConsentOffNoUpload": {
+          "const": true
+        },
+        "qualityConsentOnFixedCodeOnly": {
+          "const": true
+        },
+        "qualityConsentRevocationStopsUpload": {
+          "const": true
+        },
+        "recoveryPhraseRestore": {
+          "const": true
+        },
+        "restoredSessionRules": {
+          "const": true
+        },
+        "uninstallReinstallPreservesProfile": {
+          "const": true
+        },
+        "upgradeFromPriorStable": {
+          "const": true
+        },
+        "validOfflineEntitlement": {
+          "const": true
+        }
+      },
+      "required": [
+        "cleanInstall",
+        "upgradeFromPriorStable",
+        "loginOnline",
+        "validOfflineEntitlement",
+        "officialAgentInstall",
+        "officialAgentRun",
+        "officialAgentUpdate",
+        "officialAgentRollback",
+        "existingRuntimeBindingStable",
+        "newRuntimeBindingUsesSelectedRelease",
+        "qualityConsentOffNoUpload",
+        "qualityConsentOnFixedCodeOnly",
+        "qualityConsentRevocationStopsUpload",
+        "encryptedBackupCreate",
+        "backupInterruptedResume",
+        "backupDiskExhaustionFailsClosed",
+        "backupCiphertextCorruptionRejected",
+        "backupWrongPhraseRejected",
+        "backupRevokedDeviceRejected",
+        "authorizedDeviceRestore",
+        "recoveryPhraseRestore",
+        "restoredSessionRules",
+        "appRestart",
+        "osRestart",
+        "uninstallReinstallPreservesProfile",
+        "noPrivateDataUploadCanary"
+      ],
+      "type": "object"
+    },
+    "supportPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "currentMacosMajor": {
+          "maximum": 99,
+          "minimum": 12,
+          "type": "integer"
+        },
+        "previousMacosMajor": {
+          "maximum": 98,
+          "minimum": 12,
+          "type": "integer"
+        },
+        "windowsMajor": {
+          "const": 11
+        }
+      },
+      "required": ["currentMacosMajor", "previousMacosMajor", "windowsMajor"],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/bignormal/aera/release/evidence.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "candidate": {
+      "$ref": "#/$defs/candidate"
+    },
+    "completedAt": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "coverage": {
+      "$ref": "#/$defs/coverage"
+    },
+    "entries": {
+      "items": {
+        "$ref": "#/$defs/entry"
+      },
+      "maxItems": 4,
+      "minItems": 4,
+      "type": "array"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "supportPolicy": {
+      "$ref": "#/$defs/supportPolicy"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "candidate",
+    "supportPolicy",
+    "coverage",
+    "entries",
+    "completedAt"
+  ],
+  "title": "Aera Desktop real-device acceptance evidence",
+  "type": "object"
+}

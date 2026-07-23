@@ -16,6 +16,7 @@ This directory defines the high-level concepts, business logic, and architecture
 - [[agentera-runtime-distribution]] — the signed platform-specific Runtime seed, offline first installation, user-confirmed updates, rollback, and Profile-data isolation.
 - [[agentera-app-authentication]] — the independent AgentEra APP account gate, browser PKCE flow, device-bound offline entitlement, and existing-Profile ownership rules.
 - [[agentera-agent-control-plane]] — USER-owned local Agent drafts, immutable stable-version publication, per-device Agent installation, and conversation-scoped RuntimeBinding rules.
+- [[agentera-post-official-delivery]] — the approved content-free official quality pipeline, client-encrypted Profile backup, cross-device restore, and production release gates.
 - [[agentera-workspaces]] — fixed-owner Workspace lifecycle, memberships, one-time invitations, desktop context switching, and offline read-only boundaries.
 - [[agentera-organizations]] — transferable enterprise ownership, Organization roles and Departments, signed policy snapshots, audit, product-context switching, and Hermes isolation.
 - [[sidebar-navigation]] — the recent-sessions list under the Chat nav item, capped at five with a "Show more" button that opens the full session list in a modal.

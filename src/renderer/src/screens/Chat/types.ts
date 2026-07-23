@@ -4,6 +4,7 @@ export type {
 } from "../../../../shared/attachments";
 
 import type { Attachment } from "../../../../shared/attachments";
+import type { OfficialQualityFeedbackEligibility } from "../../../../shared/agentera-official-quality";
 
 /**
  * Visible chat bubble (user or assistant). Used for live streaming and as
@@ -27,6 +28,8 @@ export interface ChatBubbleMessage {
   timestamp?: number;
   /** Renderer-only progress row while a slash command is executing. */
   isSlashLoader?: boolean;
+  /** Trusted, renderer-local eligibility emitted by the main process only. */
+  officialQualityEligibility?: OfficialQualityFeedbackEligibility;
 }
 
 /**

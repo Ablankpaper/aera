@@ -7,7 +7,14 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, "aera/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AERA_ENCRYPTED_BACKUP_CLOUD_SHA: 92632048a5261f02d06f132d22854dda1b513345
 
 # A newer commit on the same ref supersedes an in-flight run.
 concurrency:
@@ -24,6 +31,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -37,6 +46,38 @@ jobs:
       - name: Verify pinned AgentEra cloud contract
         run: npm run check:agentera-cloud-contract
 
+      - name: Verify official quality privacy boundary
+        run: npm run check:official-quality-boundary
+
+      - name: Checkout Cloud privacy boundary
+        if: matrix.os == 'ubuntu-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: actions/checkout@v4
+        with:
+          repository: bignormal/aera-cloud
+          ref: ${{ env.AERA_ENCRYPTED_BACKUP_CLOUD_SHA }}
+          path: .ci/aera-cloud
+          token: ${{ secrets.AERA_CROSS_REPO_READ_TOKEN || github.token }}
+
+      - name: Verify exact Cloud privacy boundary source
+        if: matrix.os == 'ubuntu-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .ci/aera-cloud rev-parse HEAD)" = \
+            "$AERA_ENCRYPTED_BACKUP_CLOUD_SHA"
+
+      - name: Verify exact Cloud public contract bytes
+        if: matrix.os == 'ubuntu-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        env:
+          AGENTERA_CLOUD_CONTRACT_SOURCE: ${{ github.workspace }}/.ci/aera-cloud/api/openapi.yaml
+        run: npm run check:agentera-cloud-contract
+
+      - name: Verify encrypted backup privacy boundary
+        if: matrix.os == 'ubuntu-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        env:
+          AERA_ENCRYPTED_BACKUP_CLOUD_REPO: ${{ github.workspace }}/.ci/aera-cloud
+        run: npm run check:encrypted-backup-boundary
+
       - name: Audit production dependency tree
         if: matrix.os == 'ubuntu-latest'
         run: npm audit --omit=dev --audit-level=high
@@ -45,7 +86,10 @@ jobs:
         run: npm run typecheck
 
       - name: Test
-        run: npm test
+        run: npm test -- --maxWorkers=2
+
+      - name: Test official quality privacy flow
+        run: npm run test:e2e:official-quality
 
       - name: Build
         run: npm run build

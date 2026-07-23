@@ -110,7 +110,7 @@ describe("AgentEra central IPC product-access guard", () => {
     );
   });
 
-  it("keeps preflight limited to sanitized bootstrap, install probes, app metadata, locale, and product auth", () => {
+  it("keeps preflight limited to sanitized bootstrap, local consent reads, install probes, app metadata, locale, and product auth", () => {
     const preflight = Object.entries(AGENTERA_IPC_CHANNEL_POLICY)
       .filter(([, level]) => level === "preflight")
       .map(([channel]) => channel)
@@ -123,6 +123,7 @@ describe("AgentEra central IPC product-access guard", () => {
         "agentera-auth-retry-online",
         "agentera-auth-start-login",
         "agentera-install-file-probe",
+        "agentera-official-quality-get-consent",
         "agentera-organization-dismiss-pending-invitation",
         "agentera-organization-get-pending-invitation",
         "agentera-startup-preflight",

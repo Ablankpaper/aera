@@ -87,6 +87,7 @@ export interface AgentControlHarness {
   cloudBackendOrigin: string;
   postgresPort: number;
   redisPort: number;
+  minioPort: number;
   composeProject: string;
   captureServer: Server;
   captureOrigin: string;
@@ -105,6 +106,7 @@ export interface AgentControlHarness {
   devices: AgentControlDevice[];
   requests: CapturedRequest[];
   failures: string[];
+  encryptedBackupEnabled: boolean;
   official: OfficialManagedAgentHarnessState | null;
 }
 
@@ -230,8 +232,12 @@ function command(
     stdio: "pipe",
   });
   if (result.status !== 0) {
+    const spawnError =
+      result.error instanceof Error
+        ? `${result.error.name}: ${result.error.message}`
+        : "no spawn error was reported";
     throw new Error(
-      `${executable} ${args.join(" ")} failed\n${result.stdout}\n${result.stderr}`,
+      `${executable} ${args.join(" ")} failed\n${spawnError}\n${result.stdout ?? ""}\n${result.stderr ?? ""}`,
     );
   }
   return result.stdout;
@@ -397,7 +403,15 @@ async function forwardPublicRequest(
     };
     requests.push(captured);
 
-    const failureIndex = failures.findIndex((candidate) => candidate === path);
+    const failureIndex = failures.findIndex(
+      (candidate) =>
+        candidate === path ||
+        (candidate === "__encrypted_backup_chunk_upload__" &&
+          request.method === "PUT" &&
+          /^\/api\/v1\/encrypted-profile-backups\/[0-9a-f-]{36}\/chunks\/0$/u.test(
+            path,
+          )),
+    );
     if (failureIndex >= 0) {
       failures.splice(failureIndex, 1);
       captured.responseStatus = 503;
@@ -493,6 +507,7 @@ function composeEnvironment(harness: AgentControlHarness): NodeJS.ProcessEnv {
     ...process.env,
     AERA_CLOUD_POSTGRES_BIND: `127.0.0.1:${harness.postgresPort}`,
     AERA_CLOUD_REDIS_BIND: `127.0.0.1:${harness.redisPort}`,
+    AERA_CLOUD_MINIO_BIND: `127.0.0.1:${harness.minioPort}`,
   };
 }
 
@@ -535,6 +550,17 @@ async function startCloud(harness: AgentControlHarness): Promise<void> {
       AGENTERA_CLOUD_SMS_API_KEY: "e2e-sms-secret",
       AGENTERA_CLOUD_CAPTCHA_ENDPOINT: `${harness.captureOrigin}/captcha`,
       AGENTERA_CLOUD_CAPTCHA_SECRET: "e2e-captcha-secret",
+      ...(harness.encryptedBackupEnabled
+        ? {
+            AGENTERA_CLOUD_ENCRYPTED_BACKUP_ENABLED: "true",
+            AGENTERA_CLOUD_ENCRYPTED_BACKUP_ENDPOINT: `127.0.0.1:${harness.minioPort}`,
+            AGENTERA_CLOUD_ENCRYPTED_BACKUP_BUCKET: "aera-encrypted-backups",
+            AGENTERA_CLOUD_ENCRYPTED_BACKUP_REGION: "us-east-1",
+            AGENTERA_CLOUD_ENCRYPTED_BACKUP_ACCESS_KEY: "aera-backup-dev",
+            AGENTERA_CLOUD_ENCRYPTED_BACKUP_SECRET_KEY: "aera-backup-dev-only",
+            AGENTERA_CLOUD_ENCRYPTED_BACKUP_USE_TLS: "false",
+          }
+        : {}),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -1056,7 +1082,7 @@ async function bootstrapOfficialAdminFixtures(
 }
 
 export async function createAgentControlHarness(
-  options: { officialManagedAgent?: boolean } = {},
+  options: { officialManagedAgent?: boolean; encryptedBackup?: boolean } = {},
 ): Promise<AgentControlHarness> {
   await assertPublicPortAvailable();
   let selectedCloudRoot = defaultCloudRoot;
@@ -1146,6 +1172,7 @@ export async function createAgentControlHarness(
     cloudBackendOrigin,
     postgresPort: await freePort(),
     redisPort: await freePort(),
+    minioPort: await freePort(),
     composeProject: `agentera-agent-control-e2e-${process.pid}`,
     captureServer: capture.server,
     captureOrigin: capture.origin,
@@ -1161,18 +1188,46 @@ export async function createAgentControlHarness(
     devices: [],
     requests,
     failures,
+    encryptedBackupEnabled: options.encryptedBackup === true,
     official: null,
   };
   try {
     if (selectedAdminRoot) {
       harness.official = await createOfficialState(harness, selectedAdminRoot);
     }
+    const cloudDependencies = ["postgres", "redis"];
+    if (harness.encryptedBackupEnabled) {
+      cloudDependencies.push("encrypted-backup-minio");
+    }
     command(
       "docker",
-      ["compose", "-p", harness.composeProject, "up", "-d", "--wait"],
+      [
+        "compose",
+        "-p",
+        harness.composeProject,
+        "up",
+        "-d",
+        "--wait",
+        ...cloudDependencies,
+      ],
       { cwd: harness.cloudRoot, env: composeEnvironment(harness) },
     );
     harness.composeStarted = true;
+    if (harness.encryptedBackupEnabled) {
+      command(
+        "docker",
+        [
+          "compose",
+          "-p",
+          harness.composeProject,
+          "run",
+          "--rm",
+          "--no-deps",
+          "encrypted-backup-minio-init",
+        ],
+        { cwd: harness.cloudRoot, env: composeEnvironment(harness) },
+      );
+    }
     if (harness.official) {
       command(
         "docker",
@@ -1586,6 +1641,12 @@ export function failNextAgentControlRequest(
   path: string,
 ): void {
   harness.failures.push(path);
+}
+
+export function failNextEncryptedBackupChunkUpload(
+  harness: AgentControlHarness,
+): void {
+  harness.failures.push("__encrypted_backup_chunk_upload__");
 }
 
 export function agentControlRequests(

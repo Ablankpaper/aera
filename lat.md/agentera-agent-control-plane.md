@@ -42,6 +42,8 @@ Platform employees use the separate Aera Admin application: Developer authors an
 
 Official releases use append-only revisions for activation, percentage and allowlist changes, minimum desktop versions, pause, resume, and rollback. Pause stops new discovery and installation but does not remotely disable an installed Agent. Update and rollback replace only the verified immutable base for later conversations; active RuntimeBindings and Hermes private learning remain unchanged.
 
+The approved follow-on work is [[agentera-post-official-delivery|the post-official delivery program]]. It adds a separate opt-in content-free quality plane, client-encrypted backup plane, and production release gates without expanding PLATFORM ownership into USER Installations, Profiles, RuntimeBindings, or adaptive state.
+
 The user approved `docs/superpowers/specs/2026-07-22-agentera-official-managed-agent-v1-design.md` on 2026-07-22. Cloud, Admin, and Desktop now implement this slice on local feature branches; this is verified local development evidence, not a push, deployment, production release, or user rollout.
 
 ### Installation-bound version access

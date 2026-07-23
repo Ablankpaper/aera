@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useRef, useState } from "react";
 import { useChatIPC } from "./useChatIPC";
 import type { ActiveTurn, ChatMessage, UsageState } from "../types";
+import type { OfficialQualityFeedbackEligibility } from "../../../../../shared/agentera-official-quality";
 
 type Callback<T extends unknown[]> = (...args: T) => void;
 
@@ -15,6 +16,7 @@ interface ChatIpcCallbacks {
   toolProgress?: Callback<[string, string]>;
   toolEvent?: Callback<[string, unknown]>;
   usage?: Callback<[string, UsageState]>;
+  quality?: Callback<[string, OfficialQualityFeedbackEligibility]>;
 }
 
 function installHermesApi(callbacks: ChatIpcCallbacks): {
@@ -69,8 +71,60 @@ function installHermesApi(callbacks: ChatIpcCallbacks): {
       },
     },
   });
+  Object.defineProperty(window, "agenteraOfficialQuality", {
+    configurable: true,
+    value: {
+      onEligible: (
+        cb: Callback<[string, OfficialQualityFeedbackEligibility]>,
+      ) => {
+        callbacks.quality = cb;
+        return vi.fn();
+      },
+    },
+  });
 
   return { getSessionMessages };
+}
+
+function QualityHarness(): React.JSX.Element {
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: "user-live",
+      role: "user",
+      content: "private prompt",
+      turnId: "turn-live",
+    },
+    {
+      id: "agent-live",
+      role: "agent",
+      content: "private answer",
+      turnId: "turn-live",
+      pending: true,
+    },
+  ]);
+  const [, setHermesSessionId] = useState<string | null>("new-session");
+  const [, setToolProgress] = useState<string | null>(null);
+  const [, setIsLoading] = useState(true);
+  const [, setUsage] = useState<UsageState | null>(null);
+  const activeTurnRef = useRef<ActiveTurn | null>({
+    startIndex: 0,
+    status: "running",
+    turnId: "turn-live",
+    userId: "user-live",
+  });
+
+  useChatIPC({
+    runId: "run-1",
+    sessionScopeId: "new-session",
+    setMessages,
+    setHermesSessionId,
+    setToolProgress,
+    setIsLoading,
+    setUsage,
+    activeTurnRef,
+  });
+
+  return <output data-testid="quality">{JSON.stringify(messages)}</output>;
 }
 
 function Harness({
@@ -106,6 +160,7 @@ function Harness({
 afterEach(() => {
   cleanup();
   Reflect.deleteProperty(window, "hermesAPI");
+  Reflect.deleteProperty(window, "agenteraOfficialQuality");
 });
 
 describe("useChatIPC session scoping", () => {
@@ -137,5 +192,30 @@ describe("useChatIPC session scoping", () => {
     expect(screen.getByTestId("ids")).toHaveTextContent(
       JSON.stringify(["db-1", "db-2"]),
     );
+  });
+});
+
+describe("useChatIPC official quality eligibility", () => {
+  it("attaches only the trusted main-process event after the matching turn completes", async () => {
+    const callbacks: ChatIpcCallbacks = {};
+    installHermesApi(callbacks);
+    render(<QualityHarness />);
+    const eligibility = {
+      eventId: "019f0000-0000-7000-8000-000000000001",
+      result: "success" as const,
+      latencyBucket: "1s_5s" as const,
+      totalTokenBucket: "1_1k" as const,
+      crashCode: null,
+    };
+
+    await act(async () => {
+      callbacks.quality?.("other-run", eligibility);
+      callbacks.quality?.("run-1", eligibility);
+      callbacks.done?.("run-1", "new-session");
+    });
+
+    const rendered = screen.getByTestId("quality").textContent ?? "";
+    expect(rendered).toContain(eligibility.eventId);
+    expect(rendered).not.toContain("runtimeBindingId");
   });
 });

@@ -15,18 +15,21 @@ import { DatabaseSync } from "node:sqlite";
 import { expect, test } from "playwright/test";
 
 import type { AgenteraAuthPublicState } from "../../src/shared/agentera-auth";
+import type { ProductSpacePublicState } from "../../src/shared/agentera-product-space";
 import {
   AgenteraWorkspaceClient,
   type AgenteraWorkspaceClientError,
 } from "../../src/main/agentera-workspace/client";
 import {
   openAgenteraWorkspaceDatabase,
+  type AgenteraWorkspaceDatabase,
   type AgenteraWorkspaceSqliteDatabase,
 } from "../../src/main/agentera-workspace/db";
 import { WorkspaceInvitationInbox } from "../../src/main/agentera-workspace/deep-link";
 import {
   AgenteraWorkspaceManager,
   type AgenteraWorkspaceManagerError,
+  type AgenteraWorkspaceSelectionCoordinator,
 } from "../../src/main/agentera-workspace/manager";
 
 const ORIGIN = "https://workspace.fixture.invalid";
@@ -708,12 +711,90 @@ function openWorkspaceManager(
     getAccessToken: () => session.accessToken,
     fetch: fixture.fetch,
   });
+  const selectionCoordinator = workspaceSelectionCoordinator(database, session);
   return new AgenteraWorkspaceManager({
     database,
     client,
     getAuthState: () => session.auth,
+    selectionCoordinator,
     now: () => "2026-07-20T13:00:00Z",
   });
+}
+
+function workspaceSelectionCoordinator(
+  database: AgenteraWorkspaceDatabase,
+  session: MutableSession,
+): AgenteraWorkspaceSelectionCoordinator {
+  const listeners = new Set<(state: ProductSpacePublicState) => void>();
+  const currentAccess = (): Extract<
+    AgenteraAuthPublicState,
+    { status: "authenticated" | "offline" }
+  > => {
+    const access = session.auth;
+    if (access.status !== "authenticated" && access.status !== "offline") {
+      throw new Error("unauthenticated");
+    }
+    return access;
+  };
+  const state = (): ProductSpacePublicState => {
+    const access = currentAccess();
+    const workspaces = database
+      .readWorkspaces(access.userId)
+      .workspaces.filter(({ status }) => status === "active");
+    const selectedWorkspaceId = database.readSelectedWorkspace(access.userId);
+    const selectedWorkspace = workspaces.find(
+      ({ id }) => id === selectedWorkspaceId,
+    );
+    return {
+      access: access.status === "offline" ? "offline" : "online",
+      stale: access.status === "offline",
+      selected: selectedWorkspace
+        ? {
+            kind: "WORKSPACE",
+            workspaceId: selectedWorkspace.id,
+            role: selectedWorkspace.role,
+          }
+        : { kind: "PERSONAL" },
+      options: [
+        { kind: "PERSONAL" },
+        ...workspaces.map((workspace) => ({
+          kind: "WORKSPACE" as const,
+          workspaceId: workspace.id,
+          displayName: workspace.displayName,
+          role: workspace.role,
+        })),
+      ],
+    };
+  };
+  return {
+    readSelectedWorkspaceId: (accountUserId) =>
+      database.readSelectedWorkspace(accountUserId),
+    getAgentContext: () => {
+      const selection = state().selected;
+      return selection.kind === "WORKSPACE"
+        ? {
+            scope: "WORKSPACE",
+            workspaceId: selection.workspaceId,
+            role: selection.role,
+          }
+        : { scope: "USER" };
+    },
+    select: async (input) => {
+      const access = currentAccess();
+      database.writeSelectedWorkspace(
+        access.userId,
+        input.kind === "WORKSPACE" ? input.workspaceId : null,
+        "2026-07-20T13:00:00Z",
+      );
+      const next = state();
+      for (const listener of listeners) listener(next);
+      return next;
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
 }
 
 function filesBelow(rootPath: string): string[] {

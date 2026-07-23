@@ -10,7 +10,10 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
 import type { DashboardRpcEvent } from "../dashboardGatewayClient";
-import { useDashboardChatTransport } from "./useDashboardChatTransport";
+import {
+  attachOfficialQualityEligibility,
+  useDashboardChatTransport,
+} from "./useDashboardChatTransport";
 import type { ActiveTurn, ChatMessage, UsageState } from "../types";
 
 type SetUsageMock = Mock<(value: SetStateAction<UsageState | null>) => void>;
@@ -418,6 +421,77 @@ describe("useDashboardChatTransport recovery", () => {
     expect(requests.map((request) => request.method)).toContain(
       "prompt.submit",
     );
+  });
+});
+
+describe("official quality feedback eligibility", () => {
+  const eligibility = {
+    eventId: "019f0000-0000-7000-8000-000000000001",
+    result: "success" as const,
+    latencyBucket: "1s_5s" as const,
+    totalTokenBucket: "1_1k" as const,
+    crashCode: null,
+  };
+  const messages: ChatMessage[] = [
+    {
+      id: "user-1",
+      role: "user",
+      content: "private prompt",
+      turnId: "turn-1",
+    },
+    {
+      id: "agent-1",
+      role: "agent",
+      content: "private response",
+      turnId: "turn-1",
+      pending: false,
+    },
+  ];
+
+  it("attaches trusted eligibility only to a completed successful agent turn", () => {
+    expect(
+      attachOfficialQualityEligibility(
+        messages,
+        {
+          startIndex: 0,
+          status: "running",
+          turnId: "turn-1",
+          userId: "user-1",
+        },
+        eligibility,
+      ),
+    ).toBe(messages);
+
+    const attached = attachOfficialQualityEligibility(
+      messages,
+      {
+        startIndex: 0,
+        status: "completed",
+        turnId: "turn-1",
+        userId: "user-1",
+      },
+      eligibility,
+    );
+    expect(attached).not.toBe(messages);
+    expect(attached[1]).toMatchObject({
+      officialQualityEligibility: eligibility,
+    });
+    expect(JSON.stringify(attached[1])).not.toContain("runtimeBindingId");
+  });
+
+  it("does not fabricate controls without a trusted main-process eligibility event", () => {
+    expect(
+      attachOfficialQualityEligibility(
+        messages,
+        {
+          startIndex: 0,
+          status: "completed",
+          turnId: "turn-1",
+          userId: "user-1",
+        },
+        null,
+      ),
+    ).toBe(messages);
   });
 });
 

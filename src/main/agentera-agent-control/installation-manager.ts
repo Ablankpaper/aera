@@ -1,4 +1,29 @@
 import { randomUUID as nodeRandomUUID } from "node:crypto";
+import {
+  chmodSync,
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  renameSync,
+  unlinkSync,
+  writeSync,
+} from "node:fs";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 import type {
   OfficialAgentSummary,
   OfficialManagedUpdate,
@@ -25,6 +50,11 @@ import type {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
+const PROFILE_ID_PATTERN = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
+const RESTORE_MAXIMUM_FILES = 100_000;
+const RESTORE_MAXIMUM_BYTES = 1024 * 1024 * 1024;
+const RESTORE_PROVENANCE_MAXIMUM_BYTES = 1024 * 1024;
+const RESTORE_COPY_BUFFER_BYTES = 256 * 1024;
 
 export type AgentInstallationManagerErrorCode =
   | "invalid_installation_request"
@@ -133,6 +163,7 @@ export interface AgentInstallationProjection {
 
 export interface AgentInstallationProfileAdapter {
   createProfile(name: string, cloneFrom: string | null): ProfileCreationResult;
+  deleteProfile(profileId: string): { success: boolean; error?: string };
   resolveProfilePath(profileId: string): string;
   activateProfile(profileId: string): void;
 }
@@ -182,6 +213,24 @@ export interface AgentInstallationManagerOptions {
   runtimeVersion: string;
   now?: () => Date;
   randomUUID?: () => string;
+}
+
+export interface ActivateVerifiedRestoreInput {
+  backupId: string;
+  sourceInstallationId: string;
+  definitionId: string;
+  versionId: string;
+  profileLineageId: string;
+  name: string;
+  stagedProfilePath: string;
+  encryptedRuntimeBindingProvenancePath: string;
+}
+
+export interface ActivatedVerifiedRestore {
+  agentInstallationId: string;
+  profileId: string;
+  runtimeProfileId: string;
+  sourceScope: "USER";
 }
 
 interface LocalInstallationRow {
@@ -656,6 +705,257 @@ function assertManagedCloudState(
   uuid(installation.policy_snapshot_id);
 }
 
+function restoreFailure(
+  code: "destination_exists" | "activation_failed",
+): Error {
+  return Object.assign(
+    new Error(`AgentEra encrypted backup restore failed: ${code}.`),
+    { code },
+  );
+}
+
+function insidePath(parent: string, child: string): boolean {
+  const value = relative(resolve(parent), resolve(child));
+  return value === "" || (!value.startsWith("..") && !isAbsolute(value));
+}
+
+function allowedRestoredProfilePath(path: string): boolean {
+  if (
+    path.length < 1 ||
+    path.length > 1024 ||
+    path !== path.normalize("NFC") ||
+    path.includes("\\") ||
+    path.includes("\0") ||
+    path.startsWith("/") ||
+    path.includes("//")
+  ) {
+    return false;
+  }
+  const segments = path.split("/");
+  if (
+    segments.some(
+      (segment) =>
+        segment.length < 1 ||
+        segment === "." ||
+        segment === ".." ||
+        segment.toLocaleLowerCase("en-US").endsWith(".pem") ||
+        segment.toLocaleLowerCase("en-US").endsWith(".key"),
+    )
+  ) {
+    return false;
+  }
+  return (
+    path === "memories/MEMORY.md" ||
+    path === "memories/USER.md" ||
+    path === "config.yaml" ||
+    path === "state.db" ||
+    path.startsWith("skills/") ||
+    path.startsWith("curator/") ||
+    path.startsWith(".curator/") ||
+    path.startsWith("files/")
+  );
+}
+
+interface RestoreSourceFile {
+  path: string;
+  relativePath: string;
+  size: number;
+}
+
+function listRestoredProfileFiles(
+  stagedProfilePath: string,
+): RestoreSourceFile[] {
+  if (!isAbsolute(stagedProfilePath)) {
+    throw restoreFailure("activation_failed");
+  }
+  const root = resolve(stagedProfilePath);
+  const rootStats = lstatSync(root);
+  if (rootStats.isSymbolicLink() || !rootStats.isDirectory()) {
+    throw restoreFailure("activation_failed");
+  }
+  const files: RestoreSourceFile[] = [];
+  let totalBytes = 0;
+  const visit = (directory: string, prefix: string): void => {
+    const entries = readdirSync(directory, { withFileTypes: true }).sort(
+      (left, right) => left.name.localeCompare(right.name),
+    );
+    for (const entry of entries) {
+      const relativePath =
+        prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
+      const path = join(directory, entry.name);
+      const stats = lstatSync(path);
+      if (stats.isSymbolicLink()) {
+        throw restoreFailure("activation_failed");
+      }
+      if (stats.isDirectory()) {
+        visit(path, relativePath);
+        continue;
+      }
+      if (!stats.isFile() || !allowedRestoredProfilePath(relativePath)) {
+        throw restoreFailure("activation_failed");
+      }
+      files.push({ path, relativePath, size: stats.size });
+      totalBytes += stats.size;
+      if (
+        files.length > RESTORE_MAXIMUM_FILES ||
+        !Number.isSafeInteger(totalBytes) ||
+        totalBytes > RESTORE_MAXIMUM_BYTES
+      ) {
+        throw restoreFailure("activation_failed");
+      }
+    }
+  };
+  visit(root, "");
+  return files;
+}
+
+function ensureRestoreParent(profilePath: string, destination: string): void {
+  if (!insidePath(profilePath, destination) || destination === profilePath) {
+    throw restoreFailure("activation_failed");
+  }
+  const relativeParent = relative(profilePath, dirname(destination));
+  let current = profilePath;
+  if (relativeParent.length === 0) return;
+  for (const segment of relativeParent.split(/[\\/]/)) {
+    current = join(current, segment);
+    if (!existsSync(current)) {
+      mkdirSync(current, { mode: 0o700 });
+    }
+    const stats = lstatSync(current);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      throw restoreFailure("activation_failed");
+    }
+    chmodSync(current, 0o700);
+  }
+}
+
+function copyRestoreFile(
+  source: RestoreSourceFile,
+  profilePath: string,
+  temporaryId: string,
+): void {
+  const destination = join(profilePath, ...source.relativePath.split("/"));
+  ensureRestoreParent(profilePath, destination);
+  if (existsSync(destination)) {
+    const destinationStats = lstatSync(destination);
+    if (destinationStats.isSymbolicLink() || !destinationStats.isFile()) {
+      throw restoreFailure("activation_failed");
+    }
+  }
+  const temporary = join(
+    dirname(destination),
+    `.agentera-restore-${temporaryId}`,
+  );
+  let sourceDescriptor: number | null = null;
+  let destinationDescriptor: number | null = null;
+  const buffer = Buffer.allocUnsafe(RESTORE_COPY_BUFFER_BYTES);
+  try {
+    sourceDescriptor = openSync(
+      source.path,
+      constants.O_RDONLY | constants.O_NOFOLLOW,
+    );
+    const sourceStats = fstatSync(sourceDescriptor);
+    if (!sourceStats.isFile() || sourceStats.size !== source.size) {
+      throw restoreFailure("activation_failed");
+    }
+    destinationDescriptor = openSync(
+      temporary,
+      constants.O_WRONLY |
+        constants.O_CREAT |
+        constants.O_EXCL |
+        constants.O_NOFOLLOW,
+      0o600,
+    );
+    let copied = 0;
+    while (copied < source.size) {
+      const count = readSync(
+        sourceDescriptor,
+        buffer,
+        0,
+        Math.min(buffer.byteLength, source.size - copied),
+        null,
+      );
+      if (count < 1) throw restoreFailure("activation_failed");
+      let offset = 0;
+      while (offset < count) {
+        offset += writeSync(
+          destinationDescriptor,
+          buffer,
+          offset,
+          count - offset,
+        );
+      }
+      copied += count;
+    }
+    if (readSync(sourceDescriptor, buffer, 0, 1, null) !== 0) {
+      throw restoreFailure("activation_failed");
+    }
+    fsyncSync(destinationDescriptor);
+    closeSync(destinationDescriptor);
+    destinationDescriptor = null;
+    chmodSync(temporary, 0o600);
+    if (existsSync(destination)) unlinkSync(destination);
+    renameSync(temporary, destination);
+  } finally {
+    buffer.fill(0);
+    if (sourceDescriptor !== null) closeSync(sourceDescriptor);
+    if (destinationDescriptor !== null) closeSync(destinationDescriptor);
+    if (existsSync(temporary)) unlinkSync(temporary);
+  }
+}
+
+function materializeRestoredProfile(
+  stagedProfilePath: string,
+  profilePathValue: string,
+  randomUUID: () => string,
+): void {
+  if (!isAbsolute(profilePathValue)) {
+    throw restoreFailure("activation_failed");
+  }
+  const profilePath = resolve(profilePathValue);
+  const stats = lstatSync(profilePath);
+  if (stats.isSymbolicLink() || !stats.isDirectory()) {
+    throw restoreFailure("activation_failed");
+  }
+  chmodSync(profilePath, 0o700);
+  const files = listRestoredProfileFiles(stagedProfilePath);
+  for (const source of files) {
+    copyRestoreFile(source, profilePath, uuid(randomUUID()));
+  }
+}
+
+function readEncryptedRestoreProvenance(pathValue: string): Buffer {
+  if (!isAbsolute(pathValue)) {
+    throw restoreFailure("activation_failed");
+  }
+  const path = resolve(pathValue);
+  const stats = lstatSync(path);
+  if (
+    stats.isSymbolicLink() ||
+    !stats.isFile() ||
+    stats.size < 1 ||
+    stats.size > RESTORE_PROVENANCE_MAXIMUM_BYTES
+  ) {
+    throw restoreFailure("activation_failed");
+  }
+  let descriptor: number | null = null;
+  try {
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const current = fstatSync(descriptor);
+    if (!current.isFile() || current.size !== stats.size) {
+      throw restoreFailure("activation_failed");
+    }
+    const bytes = readFileSync(descriptor);
+    if (bytes.byteLength !== stats.size) {
+      bytes.fill(0);
+      throw restoreFailure("activation_failed");
+    }
+    return bytes;
+  } finally {
+    if (descriptor !== null) closeSync(descriptor);
+  }
+}
+
 export class AgentInstallationManager {
   private readonly database: AgenteraControlPlaneDatabase;
   private readonly client: AgentInstallationClient;
@@ -755,6 +1055,182 @@ export class AgentInstallationManager {
         this.owner.deviceInstallationId,
       ) as LocalInstallationRow[];
     return rows.map(parseLocalRow);
+  }
+
+  async verifyImmutableUserBase(input: {
+    definitionId: string;
+    versionId: string;
+    ownerScope: "USER";
+  }): Promise<void> {
+    if (input.ownerScope !== "USER") {
+      throw new AgentInstallationManagerError("invalid_installation_request");
+    }
+    const definitionId = uuid(input.definitionId);
+    const versionId = uuid(input.versionId);
+    try {
+      const downloaded = await this.client.getVersion(versionId);
+      assertVersion(downloaded, definitionId, versionId);
+      const verified = this.cache.cacheVerifiedVersion(downloaded);
+      assertVersion(verified, definitionId, versionId);
+    } catch (error) {
+      reportStageFailure("restore-base-verification", error);
+      throw new AgentInstallationManagerError("materialization_failed");
+    }
+  }
+
+  async activateVerifiedRestore(
+    input: ActivateVerifiedRestoreInput,
+  ): Promise<ActivatedVerifiedRestore> {
+    const backupId = uuid(input.backupId);
+    const sourceInstallationId = uuid(input.sourceInstallationId);
+    const definitionId = uuid(input.definitionId);
+    const versionId = uuid(input.versionId);
+    const profileLineageId = uuid(input.profileLineageId);
+    await this.verifyImmutableUserBase({
+      definitionId,
+      versionId,
+      ownerScope: "USER",
+    });
+
+    let profileId: string | null = null;
+    let profilePath: string | null = null;
+    let installed: LocalAgentInstallation | null = null;
+    let binding: RuntimeOwnerBinding | null = null;
+    let provenance: Buffer | null = null;
+    try {
+      const created = this.profiles.createProfile(input.name, null);
+      if (
+        !created.success ||
+        typeof created.id !== "string" ||
+        !PROFILE_ID_PATTERN.test(created.id)
+      ) {
+        if (
+          typeof created.error === "string" &&
+          /exist|already|duplicate/i.test(created.error)
+        ) {
+          throw restoreFailure("destination_exists");
+        }
+        throw restoreFailure("activation_failed");
+      }
+      profileId = created.id;
+      profilePath = this.profiles.resolveProfilePath(profileId);
+      if (
+        !isAbsolute(profilePath) ||
+        basename(resolve(profilePath)) !== profileId
+      ) {
+        throw restoreFailure("activation_failed");
+      }
+      materializeRestoredProfile(
+        input.stagedProfilePath,
+        profilePath,
+        this.randomUUID,
+      );
+      provenance = readEncryptedRestoreProvenance(
+        input.encryptedRuntimeBindingProvenancePath,
+      );
+      installed = await this.install({
+        definitionId,
+        versionId,
+        source: { scope: "USER" },
+        profile: {
+          kind: "claim",
+          profileId,
+          profilePath,
+        },
+      });
+      if (
+        installed.sourceScope !== "USER" ||
+        installed.sourceWorkspaceId !== null ||
+        installed.sourceOrganizationId !== null ||
+        installed.selectedVersionId !== versionId ||
+        installed.definitionId !== definitionId ||
+        installed.runtimeProfileId === null ||
+        installed.agentInstallationId === sourceInstallationId
+      ) {
+        throw restoreFailure("activation_failed");
+      }
+      binding = this.profileBindings.verifyProfileBinding(
+        profilePath,
+        this.owner,
+      );
+      if (
+        binding.agentInstallationId !== installed.agentInstallationId ||
+        binding.runtimeProfileId !== installed.runtimeProfileId
+      ) {
+        throw restoreFailure("activation_failed");
+      }
+
+      this.database.sqlite.exec("BEGIN IMMEDIATE");
+      try {
+        this.database.sqlite
+          .prepare(
+            `INSERT INTO encrypted_backup_restores (
+               backup_id, tenant_id, owner_id, device_installation_id,
+               source_installation_id, agent_installation_id,
+               runtime_profile_id, profile_lineage_id,
+               encrypted_runtime_binding_provenance,
+               historical_sessions_read_only, restored_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+          )
+          .run(
+            backupId,
+            this.owner.tenantId,
+            this.owner.ownerId,
+            this.owner.deviceInstallationId,
+            sourceInstallationId,
+            installed.agentInstallationId,
+            installed.runtimeProfileId,
+            profileLineageId,
+            provenance,
+            timestamp(this.now),
+          );
+        this.database.sqlite.exec("COMMIT");
+      } catch (error) {
+        try {
+          this.database.sqlite.exec("ROLLBACK");
+        } catch {
+          // Preserve the restore provenance persistence failure.
+        }
+        throw error;
+      }
+      this.profiles.activateProfile(profileId);
+      return {
+        agentInstallationId: installed.agentInstallationId,
+        profileId,
+        runtimeProfileId: installed.runtimeProfileId,
+        sourceScope: "USER",
+      };
+    } catch (error) {
+      if (profilePath !== null && binding === null) {
+        try {
+          binding = this.profileBindings.verifyProfileBinding(
+            profilePath,
+            this.owner,
+          );
+        } catch {
+          // The failure may have happened before local binding.
+        }
+      }
+      await this.rollbackVerifiedRestore({
+        backupId,
+        profileId,
+        profilePath,
+        installed,
+        binding,
+      });
+      if (
+        (error as { code?: unknown })?.code === "destination_exists" ||
+        error instanceof AgentInstallationManagerError
+      ) {
+        throw error;
+      }
+      if ((error as { code?: unknown })?.code === "ENOSPC") {
+        throw error;
+      }
+      throw restoreFailure("activation_failed");
+    } finally {
+      provenance?.fill(0);
+    }
   }
 
   async install(input: {
@@ -1441,6 +1917,103 @@ export class AgentInstallationManager {
       throw new AgentInstallationManagerError("activation_failed");
     }
     return this.getLocalInstallation(local.agentInstallationId);
+  }
+
+  private async rollbackVerifiedRestore(input: {
+    backupId: string;
+    profileId: string | null;
+    profilePath: string | null;
+    installed: LocalAgentInstallation | null;
+    binding: RuntimeOwnerBinding | null;
+  }): Promise<void> {
+    const installationId =
+      input.installed?.agentInstallationId ??
+      input.binding?.agentInstallationId ??
+      null;
+    let archived = installationId === null;
+    if (installationId !== null) {
+      try {
+        const local = this.getLocalInstallation(installationId);
+        const cloud = await this.client.archiveInstallation(
+          installationId,
+          operationKey("restore-archive", installationId, input.backupId),
+        );
+        assertCloudState(
+          cloud,
+          local,
+          "archived",
+          local.selectedVersionId,
+          local.runtimeProfileId,
+        );
+        archived = true;
+      } catch (error) {
+        reportStageFailure("restore-archive", error);
+      }
+    }
+
+    if (input.profilePath !== null && input.binding !== null) {
+      try {
+        this.profileBindings.removeProfileBinding(
+          input.profilePath,
+          this.owner,
+          {
+            runtimeProfileId: input.binding.runtimeProfileId,
+            agentInstallationId: input.binding.agentInstallationId,
+          },
+        );
+      } catch (error) {
+        reportStageFailure("restore-binding-cleanup", error);
+      }
+    }
+    if (input.profileId !== null) {
+      try {
+        const deleted = this.profiles.deleteProfile(input.profileId);
+        if (!deleted.success) {
+          throw new Error(deleted?.error ?? "Profile deletion is unavailable.");
+        }
+      } catch (error) {
+        reportStageFailure("restore-profile-cleanup", error);
+      }
+    }
+    if (!archived || installationId === null) return;
+
+    this.database.sqlite.exec("BEGIN IMMEDIATE");
+    try {
+      this.database.sqlite
+        .prepare(
+          `DELETE FROM encrypted_backup_restores
+           WHERE tenant_id = ? AND owner_id = ?
+             AND device_installation_id = ?
+             AND agent_installation_id = ?`,
+        )
+        .run(
+          this.owner.tenantId,
+          this.owner.ownerId,
+          this.owner.deviceInstallationId,
+          installationId,
+        );
+      this.database.sqlite
+        .prepare(
+          `DELETE FROM local_agent_installations
+           WHERE tenant_id = ? AND owner_id = ?
+             AND device_installation_id = ?
+             AND agent_installation_id = ?`,
+        )
+        .run(
+          this.owner.tenantId,
+          this.owner.ownerId,
+          this.owner.deviceInstallationId,
+          installationId,
+        );
+      this.database.sqlite.exec("COMMIT");
+    } catch (error) {
+      try {
+        this.database.sqlite.exec("ROLLBACK");
+      } catch {
+        // Preserve the cleanup failure.
+      }
+      reportStageFailure("restore-local-cleanup", error);
+    }
   }
 
   private recordFailure(

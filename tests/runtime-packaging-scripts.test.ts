@@ -395,28 +395,41 @@ describe("Runtime Seed packaging scripts", () => {
     });
   });
 
+  it("builds and verifies the Runtime Seed only in the signed candidate workflow", () => {
+    const workflow = readFileSync(
+      join(process.cwd(), ".github", "workflows", "release-candidate.yml"),
+      "utf8",
+    );
+    expect(workflow).toContain(
+      "npm run prepare:runtime-seed -- --platform darwin --arch arm64",
+    );
+    expect(workflow).toContain(
+      "npm run prepare:runtime-seed -- --platform windows --arch x64",
+    );
+    expect(workflow).toContain("Verify signed macOS candidate");
+    expect(workflow).toContain("Verify signed Windows candidate");
+    expect(workflow).not.toMatch(/(?:release|beta)_linux:/);
+    expect(workflow).not.toMatch(/arch:\s*\[x64,\s*arm64\]/);
+    expect(workflow).not.toMatch(/electron-builder --mac[^\n]*--x64/);
+    expect(workflow).not.toMatch(
+      /action-gh-release|gh release create|git tag/u,
+    );
+  });
+
   it.each(["release.yml", "beta-release.yml"])(
-    "gates %s on macOS arm64 and Windows x64 packaged Seed proofs",
+    "uses the immutable candidate workflow from %s without rebuilding or publishing",
     (workflowName) => {
       const workflow = readFileSync(
         join(process.cwd(), ".github", "workflows", workflowName),
         "utf8",
       );
       expect(workflow).toContain(
-        "npm run prepare:runtime-seed -- --platform darwin --arch arm64",
+        "uses: ./.github/workflows/release-candidate.yml",
       );
-      expect(workflow).toContain(
-        "npm run prepare:runtime-seed -- --platform windows --arch x64",
+      expect(workflow).not.toMatch(
+        /electron-builder|prepare:runtime-seed|action-gh-release|gh release create|git tag/u,
       );
-      expect(workflow).toContain(
-        "Verify Runtime Seed in final macOS artifacts",
-      );
-      expect(workflow).toContain(
-        "Verify Runtime Seed in final Windows artifacts",
-      );
-      expect(workflow).not.toMatch(/(?:release|beta)_linux:/);
-      expect(workflow).not.toMatch(/arch:\s*\[x64,\s*arm64\]/);
-      expect(workflow).not.toMatch(/electron-builder --mac[^\n]*--x64/);
+      expect(workflow).not.toMatch(/contents:\s*write/u);
     },
   );
 });

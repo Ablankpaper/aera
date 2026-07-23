@@ -38,7 +38,11 @@ import type {
   AgenteraProfileBindingStore,
   AgenteraRuntimeOwner,
 } from "../agentera-profile-binding";
-import type { AgentInstallationProfileAdapter } from "./installation-manager";
+import type {
+  ActivateVerifiedRestoreInput,
+  ActivatedVerifiedRestore,
+  AgentInstallationProfileAdapter,
+} from "./installation-manager";
 import {
   AgentInstallationManager,
   type LocalAgentInstallation,
@@ -102,6 +106,18 @@ export interface AgenteraAgentControlManagerOptions extends Partial<FullAgentCon
   hermesAdapter?: AgenteraHermesAdapter;
   /** Test seam for proving that cloud outbox delivery never blocks Hermes. */
   retryPendingRuntimeBindings?: () => Promise<unknown>;
+}
+
+export interface AgenteraEncryptedBackupUserSource {
+  installationId: string;
+  profilePath: string;
+  provenance: {
+    sourceInstallationId: string;
+    sourceDefinitionId: string;
+    sourceVersionId: string;
+    baseOwnerScope: "USER";
+  };
+  runtimeBindingProvenance: Uint8Array;
 }
 
 interface RuntimeComponents {
@@ -695,6 +711,64 @@ export class AgenteraAgentControlManager {
     ].map(serializeInstallation);
   }
 
+  async resolveEncryptedBackupUserSource(
+    installationId: string,
+  ): Promise<AgenteraEncryptedBackupUserSource> {
+    this.assertInstallationRole();
+    if (this.assetContext().scope !== "USER") {
+      throw codedError("operation_failed");
+    }
+    const runtime = await this.ensureRuntimeComponents();
+    const installation =
+      runtime.installations.getLocalInstallation(installationId);
+    if (
+      installation.sourceScope !== "USER" ||
+      installation.sourceWorkspaceId !== null ||
+      installation.sourceOrganizationId !== null ||
+      installation.status !== "active" ||
+      installation.runtimeProfileId === null
+    ) {
+      throw codedError("operation_failed");
+    }
+    const full = this.requireFull();
+    const profilePath = this.profileBindings.resolveAttachedProfilePath(
+      installation.runtimeProfileId,
+      installation.agentInstallationId,
+      full.getOwner(),
+    );
+    const runtimeBindingProvenance = Buffer.from(
+      JSON.stringify({
+        formatVersion: 1,
+        sourceInstallationId: installation.agentInstallationId,
+        sourceDefinitionId: installation.definitionId,
+        sourceVersionId: installation.selectedVersionId,
+        runtimeProfileId: installation.runtimeProfileId,
+        bindings: runtime.bindingStore.listForInstallation(
+          installation.agentInstallationId,
+        ),
+      }),
+      "utf8",
+    );
+    if (
+      runtimeBindingProvenance.byteLength < 1 ||
+      runtimeBindingProvenance.byteLength > 1024 * 1024
+    ) {
+      runtimeBindingProvenance.fill(0);
+      throw codedError("operation_failed");
+    }
+    return {
+      installationId: installation.agentInstallationId,
+      profilePath,
+      provenance: {
+        sourceInstallationId: installation.agentInstallationId,
+        sourceDefinitionId: installation.definitionId,
+        sourceVersionId: installation.selectedVersionId,
+        baseOwnerScope: "USER",
+      },
+      runtimeBindingProvenance,
+    };
+  }
+
   async installVersion(
     input: AgenteraInstallVersionInput,
   ): Promise<AgenteraAgentInstallationSummary> {
@@ -711,6 +785,28 @@ export class AgenteraAgentControlManager {
     });
     this.emitState();
     return serializeInstallation(result);
+  }
+
+  async verifyImmutableUserBase(input: {
+    definitionId: string;
+    versionId: string;
+    ownerScope: "USER";
+  }): Promise<void> {
+    await this.assertOnlineLocalRuntimeAccess();
+    await (
+      await this.ensureRuntimeComponents()
+    ).installations.verifyImmutableUserBase(input);
+  }
+
+  async activateVerifiedRestore(
+    input: ActivateVerifiedRestoreInput,
+  ): Promise<ActivatedVerifiedRestore> {
+    await this.assertOnlineLocalRuntimeAccess();
+    const restored = await (
+      await this.ensureRuntimeComponents()
+    ).installations.activateVerifiedRestore(input);
+    this.emitState();
+    return restored;
   }
 
   async claimVersion(
