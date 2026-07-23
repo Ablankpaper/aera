@@ -74,7 +74,7 @@ The desktop foundation keeps product authentication in the main process and expo
 
 [[src/main/agentera-auth/config.ts#parseAgenteraCloudOrigin]] accepts trusted HTTPS and loopback development HTTP only, requires an exact credential-free Origin, and refuses the separately configured recharge-site Origin.
 
-[[src/main/agentera-auth/config.ts#agenteraCloudUrl]] rejects absolute and host-relative paths that could escape that Origin. Runtime configuration precedes build-time configuration, and no production domain or server IP is hard-coded.
+[[src/main/agentera-auth/config.ts#agenteraCloudUrl]] rejects absolute and host-relative paths that could escape that Origin. Runtime configuration precedes build-time configuration, and no production domain or server IP is hard-coded. Runtime redirection cannot add entitlement trust: only `MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON` baked by the reviewed build may add a release issuer or public key.
 
 ### App-level secure store
 
@@ -90,7 +90,7 @@ Secure-store boundary tests construct expected descendants through Node path API
 
 [[src/main/agentera-auth/device-key.ts#getOrCreateAgenteraDeviceIdentity]] creates one installation-scoped Ed25519 key pair, stores its private key only through the app-level encrypted store, and reuses the same identity after logout.
 
-[[src/main/agentera-auth/device-key.ts#signAgenteraDeviceDigest]] signs only SHA-256-sized protocol digests. The only bundled development trust root is issuer-scoped to `http://127.0.0.1:8086`; every production issuer remains fail-closed until a reviewed release adds its public key ID.
+[[src/main/agentera-auth/device-key.ts#signAgenteraDeviceDigest]] signs only SHA-256-sized protocol digests. The bundled development root remains issuer-scoped to `http://127.0.0.1:8086`. [[src/main/agentera-auth/config.ts#parseAgenteraOfflinePublicKeysBuildConfig]] accepts release roots only from strict build-time JSON containing one canonical HTTPS IP issuer and canonical 32-byte Ed25519 public keys with unique stable IDs. The baked Cloud Origin must equal that sole issuer.
 
 ## Sessions and offline use
 
@@ -102,7 +102,7 @@ A valid offline entitlement allows local use and native Hermes learning when the
 
 Offline access accepts only an exact cloud-issued Ed25519 entitlement bound to the current user, device, installation, personal space, issuer, audience, policy, issue time, and seven-day expiry.
 
-[[src/main/agentera-auth/entitlement.ts#verifyAgenteraOfflineEntitlement]] rejects unknown keys, extra or malformed claims, non-canonical encodings, altered signatures, copied-device credentials, future issue times, and expired credentials. [[src/main/agentera-auth/config.ts#getBundledAgenteraOfflinePublicKeys]] selects trust roots only for their approved issuer.
+[[src/main/agentera-auth/entitlement.ts#verifyAgenteraOfflineEntitlement]] rejects unknown keys, extra or malformed claims, non-canonical encodings, altered signatures, copied-device credentials, future issue times, and expired credentials. [[src/main/agentera-auth/config.ts#getBundledAgenteraOfflinePublicKeys]] selects trust roots only for their approved issuer. The controller validates issuer, key ID, signature, user/device/installation/space binding, and expiry before persisting any product session.
 
 ### Trusted time and rolling validation
 
@@ -192,4 +192,4 @@ Desktop CI compiles, type-checks, tests, and validates the contract on macOS, Wi
 
 Agent sync, client-side encrypted backup, workspace/organization scopes, and official Agent evolution pipelines remain later independently designed projects. Every authentication release remains blocked by the Hermes compatibility gate.
 
-The loopback development key proves local integration only. A production build cannot grant offline access until a reviewed key ceremony places the matching public key and exact production issuer in the desktop trust map; private signing material never enters this repository.
+The loopback development key proves local integration only. A Beta build cannot grant offline access until its reviewed workflow bakes the matching public key and exact HTTPS IP issuer into the main-process bundle. Malformed JSON, unknown fields, duplicate IDs, remote HTTP, issuer paths, DNS issuers, non-canonical encodings, wrong Ed25519 lengths, and a differing Cloud Origin all fail the build. Setting the similarly named runtime environment variable cannot expand trust, and private signing material never enters this repository.
