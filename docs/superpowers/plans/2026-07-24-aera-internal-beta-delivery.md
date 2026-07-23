@@ -59,17 +59,17 @@ SMTP and SMS values are intentionally absent in this delivery. Do not configure 
 - Existing: `/Users/zizimutou/Desktop/aera/aera/.worktrees/internal-beta-delivery/docs/superpowers/plans/2026-07-24-aera-internal-beta-delivery.md`
 - Create outside Git: `/Users/zizimutou/Desktop/aera/.internal-beta-operator/baseline.json`
 
-- [ ] Run `git -C /Users/zizimutou/Desktop/aera/aera fetch origin main`, `git -C /Users/zizimutou/Desktop/aera/aera-cloud fetch origin main`, and `git -C /Users/zizimutou/Desktop/aera/aera-admin fetch origin main`.
-- [ ] Assert the three `origin/main` SHAs equal the approved Desktop, Cloud, and Admin checkpoints. If any differs, inspect ancestry and stop rather than silently rebasing the approved start.
-- [ ] Create Cloud worktree with `git -C /Users/zizimutou/Desktop/aera/aera-cloud worktree add /Users/zizimutou/Desktop/aera/aera-cloud/.worktrees/internal-beta-delivery -b aera/internal-beta-delivery origin/main`.
-- [ ] Create Admin worktree with `git -C /Users/zizimutou/Desktop/aera/aera-admin worktree add /Users/zizimutou/Desktop/aera/aera-admin/.worktrees/internal-beta-delivery -b aera/internal-beta-delivery origin/main`.
-- [ ] Assert Desktop is on `aera/internal-beta-delivery`, contains only the approved spec/plan commit ahead of `origin/main`, and has no uncommitted change.
-- [ ] Assert `git -C /Users/zizimutou/Desktop/aera/aera-runtime rev-parse HEAD` is `c0439e1e3e5f35a91b658d57ddfc011e0d5ba1bb` and `git status --porcelain=v1` is empty.
-- [ ] Create `/Users/zizimutou/Desktop/aera/.internal-beta-operator` with mode `0700`; write only repository names, baseline SHAs, and UTC timestamps to `baseline.json`.
-- [ ] Run Desktop focused baseline `npx vitest run tests/agentera-auth-config.test.ts tests/agentera-auth-controller.test.ts tests/runtime-packaging-scripts.test.ts`.
-- [ ] Run Cloud baseline `go test ./internal/config ./internal/httpapi ./internal/notification ./internal/verification ./cmd/aera-cloud`.
-- [ ] Run Admin baseline `go test ./internal/config ./cmd/aera-admin ./cmd/aera-admin-bootstrap`.
-- [ ] Record command, exit status, and exact SHA in the external baseline document. Do not commit generated logs.
+- [x] Run `git -C /Users/zizimutou/Desktop/aera/aera fetch origin main`, `git -C /Users/zizimutou/Desktop/aera/aera-cloud fetch origin main`, and `git -C /Users/zizimutou/Desktop/aera/aera-admin fetch origin main`.
+- [x] Assert the three `origin/main` SHAs equal the approved Desktop, Cloud, and Admin checkpoints. If any differs, inspect ancestry and stop rather than silently rebasing the approved start.
+- [x] Create Cloud worktree with `git -C /Users/zizimutou/Desktop/aera/aera-cloud worktree add /Users/zizimutou/Desktop/aera/aera-cloud/.worktrees/internal-beta-delivery -b aera/internal-beta-delivery origin/main`.
+- [x] Create Admin worktree with `git -C /Users/zizimutou/Desktop/aera/aera-admin worktree add /Users/zizimutou/Desktop/aera/aera-admin/.worktrees/internal-beta-delivery -b aera/internal-beta-delivery origin/main`.
+- [x] Assert Desktop is on `aera/internal-beta-delivery`, contains only the approved spec/plan commits ahead of `origin/main`, and has no unrelated uncommitted change.
+- [x] Assert `git -C /Users/zizimutou/Desktop/aera/aera-runtime rev-parse HEAD` is `c0439e1e3e5f35a91b658d57ddfc011e0d5ba1bb` and `git status --porcelain=v1` is empty.
+- [x] Create `/Users/zizimutou/Desktop/aera/.internal-beta-operator` with mode `0700`; write only repository names, baseline SHAs, and UTC timestamps to `baseline.json`.
+- [x] Run Desktop focused baseline `npx vitest run tests/agentera-auth-config.test.ts tests/agentera-auth-controller.test.ts tests/runtime-packaging-scripts.test.ts`.
+- [x] Run Cloud baseline `go test ./internal/config ./internal/httpapi ./internal/notification ./internal/verification ./cmd/aera-cloud`.
+- [x] Run Admin baseline `go test ./internal/config ./cmd/aera-admin ./cmd/aera-admin-bootstrap`.
+- [x] Record command, exit status, and exact SHA in the external baseline document. Do not commit generated logs.
 
 ### Task 2: Add a fail-closed Cloud `internal_beta` environment
 
