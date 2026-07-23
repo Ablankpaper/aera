@@ -140,23 +140,23 @@ SMTP and SMS values are intentionally absent in this delivery. Do not configure 
 - Create: `/Users/zizimutou/Desktop/aera/aera-cloud/.worktrees/internal-beta-delivery/web/src/public-config.test.tsx`
 - Modify: `/Users/zizimutou/Desktop/aera/aera-cloud/.worktrees/internal-beta-delivery/web/src/main.tsx`
 
-- [ ] Add account-service and repository tests proving direct registration normalizes an email-shaped identifier, stores `verified_at` as `NULL`, preserves unique-identity locking, never consumes a verification receipt, and is impossible unless injected explicitly by deployed configuration.
-- [ ] Add migration tests proving only `identities.verified_at` nullability changes and migration 19 remains forward-only and idempotently recorded.
-- [ ] Add HTTP tests proving direct mode requires the raw `identity`, rejects a supplied receipt/phone/malformed identity, applies the normal body limit, and returns the existing bounded error family.
-- [ ] Add limiter tests proving direct registrations are bounded per remote IP, Redis errors fail closed, and no raw IP or identity is stored.
-- [ ] Add tests proving verified registration remains byte-for-byte compatible and production service construction never enables direct mode.
-- [ ] Add public-config handler tests for exact JSON keys: `environment`, `public_registration_enabled`, `registration_mode`, `registration_identity_kinds`, and `identity_verification_available`; reject non-GET methods and set `Cache-Control: no-store`.
-- [ ] Add RegisterPage tests proving direct mode renders no phone/code/verification controls, submits the normalized login identifier, labels it unverified, and cannot submit before both legal and capability requests succeed.
-- [ ] Add LoginPage/router tests proving password reset, identity binding, and deletion-recovery entry points are hidden or unavailable when verification capability is false.
-- [ ] Run `go test ./internal/config ./internal/store ./internal/account ./internal/httpapi ./cmd/aera-cloud -count=1` and `npm --prefix web test -- --run src/public-config.test.tsx src/pages/RegisterPage.test.tsx src/pages/LoginPage.test.tsx`; expect RED.
-- [ ] Implement a separate direct-registration record path and Redis-backed request limiter; never fabricate a verification challenge/receipt or populate `verified_at`.
-- [ ] Make SMTP/SMS verification handler construction optional only when direct `internal_beta` mode is active; disabled verification endpoints return a bounded unavailable response.
-- [ ] Mount `GET /api/v1/public/config` before the SPA fallback and include only non-secret capability values.
-- [ ] Load legal and public configuration together in RegisterPage, render only the email-shaped internal-Beta login identifier, and explain that mailbox recovery is unavailable.
-- [ ] Keep registration and login rate limits fail closed and do not print identities, passwords, or verification material.
-- [ ] Rerun focused Go/Web tests, Web typecheck, and Web build; expect pass.
-- [ ] Run `gofmt -w internal cmd/aera-cloud` and Prettier only on changed Web files.
-- [ ] Commit: `git add internal cmd/aera-cloud web .env.example migrations && git commit -m "feat: add isolated internal beta registration"`.
+- [x] Add account-service and repository tests proving direct registration normalizes an email-shaped identifier, stores `verified_at` as `NULL`, preserves unique-identity locking, never consumes a verification receipt, and is impossible unless injected explicitly by deployed configuration.
+- [x] Add migration tests proving only `identities.verified_at` nullability changes and migration 19 remains forward-only and idempotently recorded.
+- [x] Add HTTP tests proving direct mode requires the raw `identity`, rejects a supplied receipt/phone/malformed identity, applies the normal body limit, and returns the existing bounded error family.
+- [x] Add limiter tests proving direct registrations are bounded per remote IP, Redis errors fail closed, and no raw IP or identity is stored.
+- [x] Add tests proving verified registration remains byte-for-byte compatible and production service construction never enables direct mode.
+- [x] Add public-config handler tests for exact JSON keys: `environment`, `public_registration_enabled`, `registration_mode`, `registration_identity_kinds`, and `identity_verification_available`; reject non-GET methods and set `Cache-Control: no-store`.
+- [x] Add RegisterPage tests proving direct mode renders no phone/code/verification controls, submits the normalized login identifier, labels it unverified, and cannot submit before both legal and capability requests succeed.
+- [x] Add LoginPage/router tests proving password reset, identity binding, and deletion-recovery entry points are hidden or unavailable when verification capability is false.
+- [x] Run `go test ./internal/config ./internal/store ./internal/account ./internal/httpapi ./cmd/aera-cloud -count=1` and `npm --prefix web test -- --run src/public-config.test.tsx src/pages/RegisterPage.test.tsx src/pages/LoginPage.test.tsx`; expect RED.
+- [x] Implement a separate direct-registration record path and Redis-backed request limiter; never fabricate a verification challenge/receipt or populate `verified_at`.
+- [x] Make SMTP/SMS verification handler construction optional only when direct `internal_beta` mode is active; disabled verification endpoints return a bounded unavailable response.
+- [x] Mount `GET /api/v1/public/config` before the SPA fallback and include only non-secret capability values.
+- [x] Load legal and public configuration together in RegisterPage, render only the email-shaped internal-Beta login identifier, and explain that mailbox recovery is unavailable.
+- [x] Keep registration and login rate limits fail closed and do not print identities, passwords, or verification material.
+- [x] Rerun focused Go/Web tests, Web typecheck, and Web build; expect pass.
+- [x] Run `gofmt -w internal cmd/aera-cloud` and Prettier only on changed Web files.
+- [x] Commit: `git add internal cmd/aera-cloud web .env.example migrations && git commit -m "feat: add isolated internal beta registration"`.
 
 ### Task 4: Add a hardened Admin `internal_beta` loopback mode
 
