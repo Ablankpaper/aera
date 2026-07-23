@@ -94,6 +94,8 @@ The proof refused backup while a Profile had a running chat, then created and se
 
 The same flow rejected a wrong phrase, resumed after a forced first-chunk upload failure, rejected a revoked device, and detected tampered ciphertext without changing the restored Profile. Deletion destroyed recovery material, wrapped keys, and device envelopes before retrying unavailable object-store cleanup to zero remaining objects. The source Profile's Memory, USER state, private Skills, environment file bytes, session rows, and RuntimeBindings remained unchanged throughout.
 
+Key-store regression tests retain the production Argon2id parameters and give KDF-bearing cases explicit runtime budgets. Slower CI runners must not weaken the KDF or bypass fail-closed secure-storage assertions.
+
 `scripts/check-encrypted-backup-boundary.mjs` independently locks the cross-repository privacy boundary: Cloud tables and object metadata may contain only opaque ciphertext or public protocol metadata, while the Desktop allowlist excludes credentials and environment files and cannot call the Hermes backup mechanism.
 
 The implementation checkpoints are:

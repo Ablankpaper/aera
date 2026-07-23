@@ -547,7 +547,7 @@ describe("AgenteraEncryptedBackupKeyStore", () => {
         publicKey: Buffer.alloc(32, 0x41).toString("base64url"),
       }),
     ).rejects.toThrow(/could not be opened|corrupt/i);
-  });
+  }, 20_000);
 
   it("generates distinct valid X25519 backup keys", async () => {
     const one = await generateBackupDeviceKeyPair();
