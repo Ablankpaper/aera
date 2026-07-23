@@ -1,17 +1,10 @@
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes,
-} from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { Aes256Gcm, CipherSuite, HkdfSha256 } from "@hpke/core";
 import { DhkemX25519HkdfSha256 } from "@hpke/dhkem-x25519";
 import { argon2idAsync } from "@noble/hashes/argon2.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import {
-  entropyToMnemonic,
-  mnemonicToEntropy,
-} from "@scure/bip39";
+import { entropyToMnemonic, mnemonicToEntropy } from "@scure/bip39";
 import { wordlist as englishWordlist } from "@scure/bip39/wordlists/english.js";
 
 export const AGENTERA_BACKUP_FORMAT_VERSION = 1 as const;
@@ -53,7 +46,16 @@ export interface DeviceRootKeyEnvelopeV1 {
   ciphertext: string;
 }
 
-function copyBytes(value: Uint8Array, length: number, label: string): Uint8Array {
+export interface BackupDeviceKeyPair {
+  publicKey: string;
+  privateKey: string;
+}
+
+function copyBytes(
+  value: Uint8Array,
+  length: number,
+  label: string,
+): Uint8Array {
   if (!(value instanceof Uint8Array) || value.byteLength !== length) {
     throw new Error(`Invalid encrypted backup ${label}.`);
   }
@@ -420,10 +422,7 @@ export async function wrapRootKeyForDevice(
   rootKeyValue: Uint8Array,
   aadValue: Uint8Array,
 ): Promise<DeviceRootKeyEnvelopeV1> {
-  const publicKeyBytes = base64urlDecode(
-    recipientPublicKey,
-    X25519_KEY_BYTES,
-  );
+  const publicKeyBytes = base64urlDecode(recipientPublicKey, X25519_KEY_BYTES);
   const rootKey = copyBytes(rootKeyValue, 32, "root key");
   const aad = boundedBytes(aadValue, 1, 64 * 1024, "associated data");
   try {
@@ -448,6 +447,29 @@ export async function wrapRootKeyForDevice(
     publicKeyBytes.fill(0);
     rootKey.fill(0);
     aad.fill(0);
+  }
+}
+
+export async function generateBackupDeviceKeyPair(): Promise<BackupDeviceKeyPair> {
+  let publicKeyBytes: Uint8Array | null = null;
+  let privateKeyBytes: Uint8Array | null = null;
+  try {
+    const keyPair = await hpkeSuite.kem.generateKeyPair();
+    publicKeyBytes = new Uint8Array(
+      await hpkeSuite.kem.serializePublicKey(keyPair.publicKey),
+    );
+    privateKeyBytes = new Uint8Array(
+      await hpkeSuite.kem.serializePrivateKey(keyPair.privateKey),
+    );
+    return Object.freeze({
+      publicKey: base64urlEncode(publicKeyBytes, X25519_KEY_BYTES),
+      privateKey: base64urlEncode(privateKeyBytes, X25519_KEY_BYTES),
+    });
+  } catch {
+    throw new Error("Encrypted backup device key generation failed.");
+  } finally {
+    publicKeyBytes?.fill(0);
+    privateKeyBytes?.fill(0);
   }
 }
 
