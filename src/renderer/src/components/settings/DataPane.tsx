@@ -61,8 +61,11 @@ function failureCode(error: unknown): string {
     return error.code;
   }
   if (error instanceof Error) {
-    const match = error.message.match(/[a-z][a-z0-9_]{2,63}/g);
-    if (match?.includes("quota_exceeded")) return "quota_exceeded";
+    const codes = error.message.match(/[a-z][a-z0-9_]{2,63}/g);
+    const known = codes?.find(
+      (code) => code === "quota_exceeded" || DISPLAYABLE_ERROR_CODES.has(code),
+    );
+    if (known) return known;
   }
   return "backup_failed";
 }

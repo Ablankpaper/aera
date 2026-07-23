@@ -438,7 +438,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
           }
           return {
             accountId: state.userId,
-            deviceId: identity.installationId,
+            deviceId: state.deviceId,
             online: state.status === "authenticated" && state.cloudAvailable,
             signDigest: (digest) =>
               signAgenteraDeviceDigest(identity.devicePrivateKey, digest),

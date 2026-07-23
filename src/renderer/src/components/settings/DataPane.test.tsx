@@ -290,6 +290,24 @@ describe("DataPane encrypted backup", () => {
     );
   });
 
+  it("recovers known backup errors from Electron IPC messages", async () => {
+    createBackup.mockRejectedValueOnce(
+      new Error(
+        "Error invoking remote method 'agentera-encrypted-backup-create': online_required",
+      ),
+    );
+    render(<DataPane />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "settings.encryptedBackup.backupNow",
+      }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "settings.encryptedBackup.errors.online_required",
+    );
+  });
+
   it("requires warnings before device authorization, revocation, and backup deletion", async () => {
     listBackups.mockResolvedValue([backup()]);
     const deviceList = [
