@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-24
 
-**Status:** Approved design, pending written-spec review
+**Status:** Approved design, amended to defer SMTP
 
 **Coordinator repository:** `bignormal/aera`
 
@@ -47,7 +47,8 @@ The delivery has four user-visible outcomes:
 Three P0 closure items are part of those outcomes rather than separate projects:
 
 - complete the Beta issuer and offline-entitlement trust chain;
-- make registration verification delivery operational;
+- make the explicitly isolated internal-Beta direct-registration path
+  operational while SMTP is unavailable;
 - explicitly approve and verify the pinned Runtime Seed candidate for internal
   Beta use.
 
@@ -86,8 +87,8 @@ The authorized ECS host runs one isolated internal-Beta stack:
 Registration has no application account-count cap, IP allowlist, invitation
 code, or VPN requirement. The endpoint is labelled and operated as an internal
 Beta and is not advertised as a public service. Existing password policy,
-verification-code controls, session revocation, rate limits, audit redaction,
-and fail-closed authorization remain enabled.
+session revocation, rate limits, audit redaction, and fail-closed authorization
+remain enabled.
 
 The exact host address and all secret values stay in the external deployment
 record, never in Git or workflow artifacts.
@@ -126,26 +127,32 @@ and key ID for the IP-based Beta issuer:
 
 The Beta private key is not reused for the final domain or production.
 
-## Registration verification
+## Registration while SMTP is deferred
 
-Email registration is the required internal-Beta acceptance path. A working SMTP
-account with TLS, sender address, and credentials must be supplied through the
-server secret store. Repository placeholder providers are never treated as a
-successful delivery.
+The first internal Beta uses email-shaped login identifiers and passwords
+without claiming that mailbox ownership was verified. This direct-registration
+mode is an explicit, fail-closed `internal_beta` capability:
 
-Phone/SMS registration is not an acceptance requirement unless real SMS
-provider credentials are supplied. The UI and API must accurately represent
-the enabled identity methods; they must not offer a path that is guaranteed to
-fail.
+- it is disabled unless both public registration and direct registration are
+  explicitly enabled;
+- it cannot start in `production`;
+- the identity is stored as unverified and the account center explains that
+  password reset, identity binding, deletion recovery, and other
+  verification-dependent flows are unavailable until a real provider exists;
+- the UI sends the entered normalized identity only to the registration API and
+  never offers a verification-code control;
+- registration and login rate limits remain active;
+- no code, magic link, provider placeholder, log output, or Admin backdoor is
+  used to simulate verification.
 
-The existing rate limits remain fail closed. If a real CAPTCHA provider is
-unavailable, an explicit non-production Beta mode rejects requests once they
-escalate to CAPTCHA instead of manufacturing a successful proof. It never
-bypasses an escalation, prints a challenge answer, or starts when
-`AGENTERA_CLOUD_ENVIRONMENT=production`.
+Phone/SMS registration is disabled. When a real SMTP service is added later,
+the deployment switches back to verified registration and requires the
+unverified Beta identity to be verified or replaced before recovery-dependent
+features are enabled.
 
-Missing SMTP credentials leave registration smoke `external_blocked`; no
-verification code is printed to logs or exposed through Admin as a workaround.
+Direct registration uses a bounded Redis-backed request limit per pseudonymous
+remote-IP key. Redis failure rejects the registration, and neither the raw IP
+nor the login identifier is stored in the limiter.
 
 ## Supply-chain evidence and deployment identity
 
@@ -191,8 +198,9 @@ The handoff gate requires successful observations against the deployed HTTPS IP
 origin, not local mocks:
 
 1. health and version checks identify the exact Cloud and Admin digests;
-2. email verification reaches a tester, registration completes, and login
-   returns an offline entitlement accepted by Desktop;
+2. a tester creates an explicitly unverified internal-Beta login identifier,
+   registration completes, and login returns an offline entitlement accepted by
+   Desktop;
 3. one Apple Silicon Mac and one Windows 11 x64 device install the exact Beta
    packages and launch successfully;
 4. a real Agent turn succeeds without changing USER-owned Profile or
@@ -247,7 +255,7 @@ The internal Beta is complete only when all of the following exist:
 - exact Cloud, Admin, Desktop, and Runtime identities;
 - verified Cloud/Admin candidate manifests and deployed digests;
 - healthy HTTPS IP endpoint with automated certificate renewal;
-- functioning email registration and Desktop login trust chain;
+- functioning direct internal-Beta registration and Desktop login trust chain;
 - installable, checksummed macOS and Windows internal-Beta packages;
 - successful live Mac/Windows smoke for Agent, quality feedback, encrypted
   backup, and cross-device restore or migration;
