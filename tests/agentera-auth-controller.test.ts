@@ -301,7 +301,7 @@ describe("AgentEra authentication controller", () => {
   });
 
   it.each<[string, SignedTokenSetOptions]>([
-    ["issuer", { claims: { iss: "https://47.100.169.193" } }],
+    ["issuer", { claims: { iss: "https://203.0.113.10" } }],
     ["key ID", { header: { kid: "offline-unknown-v1" } }],
     ["signature", { tamperSignature: true }],
     [

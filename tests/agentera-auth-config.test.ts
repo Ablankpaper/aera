@@ -12,7 +12,7 @@ import {
 } from "../src/main/agentera-auth/config";
 
 describe("AgentEra cloud endpoint configuration", () => {
-  const betaIssuer = "https://47.100.169.193";
+  const betaIssuer = "https://203.0.113.10";
   const betaPublicKey = Buffer.alloc(32, 73).toString("base64url");
 
   function betaTrustJson(input: Record<string, unknown> = {}): string {
@@ -180,8 +180,8 @@ describe("AgentEra cloud endpoint configuration", () => {
     ],
     [
       "remote HTTP",
-      betaTrustJson({ issuer: "http://47.100.169.193" }),
-      "http://47.100.169.193",
+      betaTrustJson({ issuer: "http://203.0.113.10" }),
+      "http://203.0.113.10",
     ],
     [
       "an issuer path",
@@ -220,7 +220,7 @@ describe("AgentEra cloud endpoint configuration", () => {
     [
       "a build Cloud origin different from the issuer",
       betaTrustJson(),
-      "https://47.100.169.194",
+      "https://203.0.113.11",
     ],
   ])(
     "rejects %s in the baked Beta trust configuration",
