@@ -150,6 +150,18 @@ The same manifest binds an encrypted database backup, disposable restore, object
 
 Official Agent, quality, and encrypted-backup E2Es now attach content-free `isolated_*_preflight` coverage summaries. Those attachments prove executable local coverage but cannot claim a deployed private-staging run. Actual staging acceptance remains `external_blocked` pending exact remote candidates, protected infrastructure, final DNS HTTPS, isolated secrets/providers/data, and signed protected run evidence.
 
+### Exact-byte production promotion boundary
+
+`.github/workflows/promote-release.yml` promotes immutable release identities only after protected production approval and four ordered production runs.
+
+The required order is Cloud disabled, Admin disabled, Cloud enabled, then Admin enabled. `scripts/release/publish.mjs` downloads the Desktop candidate by its source workflow run ID, verifies canonical manifest and checksum closure, GitHub attestations, signed-device evidence, signed private-staging evidence, exact image/manifests, legal/provider/domain gates, and an annotated tag at the exact source SHA before creating a draft Release. The protected workflow also downloads the disabled and enabled Cloud/Admin state artifacts and refuses publication unless their environment, source, image digest, manifest hash, and actual feature/mutation values match the production gate exactly.
+
+Cloud and Admin enablement is fail-closed: a failed enabled health/smoke check restores disabled flags and repeats the disabled proof; a failed recovery stops the service instead of reporting unknown state as success.
+
+The publisher uploads only the six candidate artifacts plus their manifest, checksums, SBOM, and provenance; it has no build, packaging, Runtime Seed preparation, signing, notarization, or metadata-generation path.
+
+The production runbook distinguishes the controlled 5% Desktop candidate cohort from public updater availability because the current exact update metadata has no public staged percentage. Local publication tests pass with a fake GitHub API, including tampered-byte and mismatched-tag rejection. Production authorization, four deployment runs, monitoring, protected evidence, tag creation, and public release remain `external_blocked`; no remote write is inferred from the local implementation.
+
 ## Hermes and data boundary
 
 Quality, backup, and release failures cannot delay a conversation, revert local learning, mutate an active RuntimeBinding, overwrite a running Profile, or change `aera-runtime`.

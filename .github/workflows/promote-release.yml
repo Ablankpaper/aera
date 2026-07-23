@@ -1,0 +1,573 @@
+name: Promote verified release bytes
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Successful Desktop signed-candidate workflow run ID
+        required: true
+        type: string
+      source_sha:
+        description: Exact 40-character Desktop candidate source SHA
+        required: true
+        type: string
+      candidate_manifest_sha256:
+        description: SHA-256 of the canonical Desktop candidate manifest
+        required: true
+        type: string
+      cloud_promotion_json:
+        description: Exact Cloud candidate and disabled/enabled production run identities
+        required: true
+        type: string
+      admin_promotion_json:
+        description: Exact Admin candidate and disabled/enabled production run identities
+        required: true
+        type: string
+      evidence_run_id:
+        description: Successful protected run containing the approved evidence bundle
+        required: true
+        type: string
+      evidence_artifact_name:
+        description: Exact protected Actions artifact name
+        required: true
+        type: string
+      production_gate_sha256:
+        description: SHA-256 of canonical production-gate.json
+        required: true
+        type: string
+      release_tag:
+        description: Exact v-prefixed candidate version
+        required: true
+        type: string
+      confirm_publication:
+        description: Publish exact candidate bytes after every protected gate passes
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  attestations: read
+  contents: write
+
+concurrency:
+  group: desktop-production-release
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Verify production sequence and publish existing bytes
+    if: inputs.confirm_publication
+    environment: production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out the exact Desktop candidate source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+
+      - name: Require exact source and protected cross-repository token
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_MANIFEST_SHA256: ${{ inputs.candidate_manifest_sha256 }}
+          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+          EVIDENCE_ARTIFACT_NAME: ${{ inputs.evidence_artifact_name }}
+          PRODUCTION_GATE_SHA256: ${{ inputs.production_gate_sha256 }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_TOKEN: ${{ secrets.AERA_RELEASE_ORCHESTRATOR_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1)"
+          test -n "$RELEASE_TOKEN"
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$EVIDENCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PRODUCTION_GATE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$EVIDENCE_ARTIFACT_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$ ]]
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+
+      - name: Parse closed Cloud and Admin promotion descriptors
+        id: descriptors
+        shell: bash
+        env:
+          CLOUD_JSON: ${{ inputs.cloud_promotion_json }}
+          ADMIN_JSON: ${{ inputs.admin_promotion_json }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { appendFile } from "node:fs/promises";
+
+          const exactFields = (value, expected, label) => {
+            if (value === null || typeof value !== "object" || Array.isArray(value)) {
+              throw new Error(`${label} descriptor must be an object`);
+            }
+            if (
+              Object.keys(value).sort().join("\n") !==
+              [...expected].sort().join("\n")
+            ) {
+              throw new Error(`${label} descriptor fields differ`);
+            }
+          };
+          const validate = (raw, label, repository) => {
+            const value = JSON.parse(raw);
+            exactFields(
+              value,
+              [
+                "candidateRunId",
+                "disabledRunId",
+                "enabledRunId",
+                "sourceSha",
+                "imageDigest",
+                "manifestSha256",
+              ],
+              label,
+            );
+            if (
+              !/^[1-9][0-9]*$/u.test(value.candidateRunId) ||
+              !/^[1-9][0-9]*$/u.test(value.disabledRunId) ||
+              !/^[1-9][0-9]*$/u.test(value.enabledRunId) ||
+              value.disabledRunId === value.enabledRunId ||
+              !/^[0-9a-f]{40}$/u.test(value.sourceSha) ||
+              !/^sha256:[0-9a-f]{64}$/u.test(value.imageDigest) ||
+              !/^[0-9a-f]{64}$/u.test(value.manifestSha256)
+            ) {
+              throw new Error(`${label} descriptor identity is invalid`);
+            }
+            return { ...value, repository };
+          };
+          const descriptors = {
+            cloud: validate(
+              process.env.CLOUD_JSON,
+              "Cloud",
+              "bignormal/aera-cloud",
+            ),
+            admin: validate(
+              process.env.ADMIN_JSON,
+              "Admin",
+              "bignormal/aera-admin",
+            ),
+          };
+          const lines = [];
+          for (const [prefix, descriptor] of Object.entries(descriptors)) {
+            for (const [key, value] of Object.entries(descriptor)) {
+              const name = `${prefix}_${key}`
+                .replaceAll(/[A-Z]/gu, (character) => `_${character.toLowerCase()}`);
+              lines.push(`${name}=${value}`);
+            }
+          }
+          await appendFile(process.env.GITHUB_OUTPUT, `${lines.join("\n")}\n`);
+          NODE
+
+      - name: Verify and download the protected evidence run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.AERA_RELEASE_ORCHESTRATOR_TOKEN }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+          EVIDENCE_ARTIFACT_NAME: ${{ inputs.evidence_artifact_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release-evidence"
+          gh run view "$EVIDENCE_RUN_ID" --repo bignormal/aera \
+            --json conclusion,headSha,jobs,url,workflowName \
+            > "$RUNNER_TEMP/evidence-run.json"
+          EVIDENCE_RUN_JSON="$RUNNER_TEMP/evidence-run.json" \
+          node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+
+          const run = JSON.parse(
+            await readFile(process.env.EVIDENCE_RUN_JSON, "utf8"),
+          );
+          if (
+            run.headSha !== process.env.SOURCE_SHA ||
+            run.conclusion !== "success" ||
+            !Array.isArray(run.jobs) ||
+            run.jobs.length === 0
+          ) {
+            throw new Error("Protected evidence run identity is invalid");
+          }
+          for (const job of run.jobs) {
+            const executed =
+              job.steps?.filter((step) => step.conclusion !== "skipped") ?? [];
+            if (job.conclusion !== "success" || executed.length === 0) {
+              throw new Error("Protected evidence run did not execute");
+            }
+          }
+          NODE
+          gh run download "$EVIDENCE_RUN_ID" --repo bignormal/aera \
+            --name "$EVIDENCE_ARTIFACT_NAME" \
+            --dir "$RUNNER_TEMP/release-evidence"
+          for file in \
+            device-evidence.json \
+            staging-acceptance.json \
+            staging-acceptance.sig \
+            staging-acceptance-ed25519.pub.pem \
+            production-gate.json
+          do
+            test -s "$RUNNER_TEMP/release-evidence/$file"
+          done
+
+      - name: Install the exact image and manifest verifier
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.5"
+          cache: false
+
+      - name: Install Cosign 2.5.3
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release-tools"
+          GOBIN="$RUNNER_TEMP/release-tools" \
+            go install github.com/sigstore/cosign/v2/cmd/cosign@v2.5.3
+          echo "$RUNNER_TEMP/release-tools" >> "$GITHUB_PATH"
+
+      - name: Verify exact Cloud and Admin candidate manifests and images
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.AERA_RELEASE_ORCHESTRATOR_TOKEN }}
+          CLOUD_CANDIDATE_RUN_ID: ${{ steps.descriptors.outputs.cloud_candidate_run_id }}
+          CLOUD_SOURCE_SHA: ${{ steps.descriptors.outputs.cloud_source_sha }}
+          CLOUD_IMAGE_DIGEST: ${{ steps.descriptors.outputs.cloud_image_digest }}
+          CLOUD_MANIFEST_SHA256: ${{ steps.descriptors.outputs.cloud_manifest_sha256 }}
+          ADMIN_CANDIDATE_RUN_ID: ${{ steps.descriptors.outputs.admin_candidate_run_id }}
+          ADMIN_SOURCE_SHA: ${{ steps.descriptors.outputs.admin_source_sha }}
+          ADMIN_IMAGE_DIGEST: ${{ steps.descriptors.outputs.admin_image_digest }}
+          ADMIN_MANIFEST_SHA256: ${{ steps.descriptors.outputs.admin_manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          verify_candidate() {
+            repository="$1"
+            label="$2"
+            workflow="$3"
+            run_id="$4"
+            source_sha="$5"
+            image_digest="$6"
+            manifest_sha256="$7"
+            destination="$RUNNER_TEMP/${label}-candidate"
+            run_json="$RUNNER_TEMP/${label}-candidate-run.json"
+
+            gh run view "$run_id" --repo "$repository" \
+              --json conclusion,headSha,jobs,url,workflowName > "$run_json"
+            RUN_JSON="$run_json" EXPECTED_WORKFLOW="$workflow" \
+            EXPECTED_SHA="$source_sha" EXPECTED_RUN_ID="$run_id" \
+            EXPECTED_REPOSITORY="$repository" node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+
+          const run = JSON.parse(await readFile(process.env.RUN_JSON, "utf8"));
+          if (
+            run.workflowName !== process.env.EXPECTED_WORKFLOW ||
+            run.headSha !== process.env.EXPECTED_SHA ||
+            run.conclusion !== "success" ||
+            run.url !==
+              `https://github.com/${process.env.EXPECTED_REPOSITORY}/actions/runs/${process.env.EXPECTED_RUN_ID}` ||
+            !Array.isArray(run.jobs) ||
+            run.jobs.length === 0
+          ) {
+            throw new Error("Image candidate workflow identity is invalid");
+          }
+          for (const job of run.jobs) {
+            const executed =
+              job.steps?.filter((step) => step.conclusion !== "skipped") ?? [];
+            if (job.conclusion !== "success" || executed.length === 0) {
+              throw new Error("Image candidate workflow did not execute");
+            }
+          }
+          NODE
+            mkdir -p "$destination"
+            gh run download "$run_id" --repo "$repository" \
+              --name "${label}-candidate-${source_sha}" --dir "$destination"
+            test -s "$destination/manifest.json"
+            test -s "$destination/manifest.sigstore.json"
+            test -s "$destination/sbom.spdx.json"
+            test -s "$destination/provenance.json"
+            test "$(sha256sum "$destination/manifest.json" | cut -d' ' -f1)" = \
+              "$manifest_sha256"
+
+            MANIFEST="$destination/manifest.json" \
+            EXPECTED_REPOSITORY="$repository" EXPECTED_SHA="$source_sha" \
+            EXPECTED_DIGEST="$image_digest" EXPECTED_WORKFLOW="$workflow" \
+            EXPECTED_RUN_ID="$run_id" node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
+          import { readFile } from "node:fs/promises";
+          import { dirname, join } from "node:path";
+
+          const raw = await readFile(process.env.MANIFEST, "utf8");
+          const manifest = JSON.parse(raw);
+          const hash = async (path) =>
+            createHash("sha256").update(await readFile(path)).digest("hex");
+          if (
+            manifest.schemaVersion !== 1 ||
+            manifest.repository !== process.env.EXPECTED_REPOSITORY ||
+            manifest.commitSha !== process.env.EXPECTED_SHA ||
+            manifest.image?.digest !== process.env.EXPECTED_DIGEST ||
+            manifest.image?.reference !==
+              `ghcr.io/${process.env.EXPECTED_REPOSITORY}@${process.env.EXPECTED_DIGEST}` ||
+            manifest.build?.workflow !== process.env.EXPECTED_WORKFLOW ||
+            manifest.build?.runUrl !==
+              `https://github.com/${process.env.EXPECTED_REPOSITORY}/actions/runs/${process.env.EXPECTED_RUN_ID}`
+          ) {
+            throw new Error("Image candidate manifest identity differs");
+          }
+          const root = dirname(process.env.MANIFEST);
+          if (
+            manifest.supplyChain?.sbomDigest !==
+              `sha256:${await hash(join(root, "sbom.spdx.json"))}` ||
+            manifest.supplyChain?.provenanceDigest !==
+              `sha256:${await hash(join(root, "provenance.json"))}`
+          ) {
+            throw new Error("Image candidate supply-chain bytes differ");
+          }
+          if (
+            process.env.EXPECTED_REPOSITORY === "bignormal/aera-cloud" &&
+            (manifest.features?.officialQualityEnabledByDefault !== false ||
+              manifest.features?.encryptedBackupEnabledByDefault !== false)
+          ) {
+            throw new Error("Cloud candidate enables new features by default");
+          }
+          if (
+            process.env.EXPECTED_REPOSITORY === "bignormal/aera-admin" &&
+            manifest.mutationsEnabledByDefault !== false
+          ) {
+            throw new Error("Admin candidate enables mutations by default");
+          }
+          if (
+            raw.trimEnd() !== JSON.stringify(sortRecursively(manifest))
+          ) {
+            throw new Error("Image candidate manifest is not canonical JSON");
+          }
+          function sortRecursively(value) {
+            if (Array.isArray(value)) return value.map(sortRecursively);
+            if (value === null || typeof value !== "object") return value;
+            return Object.fromEntries(
+              Object.keys(value)
+                .sort()
+                .map((key) => [key, sortRecursively(value[key])]),
+            );
+          }
+          NODE
+
+            identity="^https://github.com/${repository}/.github/workflows/candidate.yml@"
+            issuer="https://token.actions.githubusercontent.com"
+            image="ghcr.io/${repository}@${image_digest}"
+            cosign verify-blob \
+              --bundle "$destination/manifest.sigstore.json" \
+              --certificate-identity-regexp "$identity" \
+              --certificate-oidc-issuer "$issuer" \
+              "$destination/manifest.json"
+            cosign verify \
+              --certificate-identity-regexp "$identity" \
+              --certificate-oidc-issuer "$issuer" "$image"
+            cosign verify-attestation --type slsaprovenance \
+              --certificate-identity-regexp "$identity" \
+              --certificate-oidc-issuer "$issuer" "$image"
+          }
+
+          verify_candidate \
+            bignormal/aera-cloud cloud "Cloud candidate" \
+            "$CLOUD_CANDIDATE_RUN_ID" "$CLOUD_SOURCE_SHA" \
+            "$CLOUD_IMAGE_DIGEST" "$CLOUD_MANIFEST_SHA256"
+          verify_candidate \
+            bignormal/aera-admin admin "Admin candidate" \
+            "$ADMIN_CANDIDATE_RUN_ID" "$ADMIN_SOURCE_SHA" \
+            "$ADMIN_IMAGE_DIGEST" "$ADMIN_MANIFEST_SHA256"
+
+      - name: Verify disabled and enabled production run order
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.AERA_RELEASE_ORCHESTRATOR_TOKEN }}
+          CLOUD_SOURCE_SHA: ${{ steps.descriptors.outputs.cloud_source_sha }}
+          CLOUD_DISABLED_RUN_ID: ${{ steps.descriptors.outputs.cloud_disabled_run_id }}
+          CLOUD_ENABLED_RUN_ID: ${{ steps.descriptors.outputs.cloud_enabled_run_id }}
+          ADMIN_SOURCE_SHA: ${{ steps.descriptors.outputs.admin_source_sha }}
+          ADMIN_DISABLED_RUN_ID: ${{ steps.descriptors.outputs.admin_disabled_run_id }}
+          ADMIN_ENABLED_RUN_ID: ${{ steps.descriptors.outputs.admin_enabled_run_id }}
+        run: |
+          set -euo pipefail
+          fetch_run() {
+            repository="$1"
+            run_id="$2"
+            destination="$3"
+            gh run view "$run_id" --repo "$repository" \
+              --json conclusion,headSha,jobs,startedTime,updatedAt,url,workflowName \
+              > "$destination"
+          }
+          fetch_run bignormal/aera-cloud "$CLOUD_DISABLED_RUN_ID" \
+            "$RUNNER_TEMP/cloud-disabled.json"
+          fetch_run bignormal/aera-admin "$ADMIN_DISABLED_RUN_ID" \
+            "$RUNNER_TEMP/admin-disabled.json"
+          fetch_run bignormal/aera-cloud "$CLOUD_ENABLED_RUN_ID" \
+            "$RUNNER_TEMP/cloud-enabled.json"
+          fetch_run bignormal/aera-admin "$ADMIN_ENABLED_RUN_ID" \
+            "$RUNNER_TEMP/admin-enabled.json"
+
+          node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+          import { validateProductionRunSequence } from "./scripts/release/publish.mjs";
+
+          const read = async (name) =>
+            JSON.parse(await readFile(`${process.env.RUNNER_TEMP}/${name}.json`, "utf8"));
+          validateProductionRunSequence(
+            {
+              cloudDisabled: await read("cloud-disabled"),
+              adminDisabled: await read("admin-disabled"),
+              cloudEnabled: await read("cloud-enabled"),
+              adminEnabled: await read("admin-enabled"),
+            },
+            {
+              cloudSourceSha: process.env.CLOUD_SOURCE_SHA,
+              adminSourceSha: process.env.ADMIN_SOURCE_SHA,
+              cloudDisabledRunId: process.env.CLOUD_DISABLED_RUN_ID,
+              adminDisabledRunId: process.env.ADMIN_DISABLED_RUN_ID,
+              cloudEnabledRunId: process.env.CLOUD_ENABLED_RUN_ID,
+              adminEnabledRunId: process.env.ADMIN_ENABLED_RUN_ID,
+            },
+          );
+          NODE
+
+      - name: Extract exact evidence digests from the approved gate
+        id: evidence
+        shell: bash
+        env:
+          GATE_PATH: ${{ runner.temp }}/release-evidence/production-gate.json
+          EXPECTED_GATE_SHA256: ${{ inputs.production_gate_sha256 }}
+        run: |
+          set -euo pipefail
+          test "$(sha256sum "$GATE_PATH" | cut -d' ' -f1)" = \
+            "$EXPECTED_GATE_SHA256"
+          node --input-type=module <<'NODE'
+          import { appendFile, readFile } from "node:fs/promises";
+
+          const gate = JSON.parse(await readFile(process.env.GATE_PATH, "utf8"));
+          const values = {
+            device_evidence_sha256: gate.evidence?.deviceEvidenceSha256,
+            staging_evidence_sha256: gate.evidence?.stagingEvidenceSha256,
+            staging_signature_sha256: gate.evidence?.stagingSignatureSha256,
+          };
+          if (
+            Object.values(values).some(
+              (value) => !/^[0-9a-f]{64}$/u.test(value ?? ""),
+            )
+          ) {
+            throw new Error("Production gate evidence digests are invalid");
+          }
+          await appendFile(
+            process.env.GITHUB_OUTPUT,
+            `${Object.entries(values)
+              .map(([key, value]) => `${key}=${value}`)
+              .join("\n")}\n`,
+          );
+          NODE
+
+      - name: Verify exact disabled and enabled deployment states
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.AERA_RELEASE_ORCHESTRATOR_TOKEN }}
+          CLOUD_SOURCE_SHA: ${{ steps.descriptors.outputs.cloud_source_sha }}
+          CLOUD_IMAGE_DIGEST: ${{ steps.descriptors.outputs.cloud_image_digest }}
+          CLOUD_MANIFEST_SHA256: ${{ steps.descriptors.outputs.cloud_manifest_sha256 }}
+          CLOUD_DISABLED_RUN_ID: ${{ steps.descriptors.outputs.cloud_disabled_run_id }}
+          CLOUD_ENABLED_RUN_ID: ${{ steps.descriptors.outputs.cloud_enabled_run_id }}
+          ADMIN_SOURCE_SHA: ${{ steps.descriptors.outputs.admin_source_sha }}
+          ADMIN_IMAGE_DIGEST: ${{ steps.descriptors.outputs.admin_image_digest }}
+          ADMIN_MANIFEST_SHA256: ${{ steps.descriptors.outputs.admin_manifest_sha256 }}
+          ADMIN_DISABLED_RUN_ID: ${{ steps.descriptors.outputs.admin_disabled_run_id }}
+          ADMIN_ENABLED_RUN_ID: ${{ steps.descriptors.outputs.admin_enabled_run_id }}
+          GATE_PATH: ${{ runner.temp }}/release-evidence/production-gate.json
+        run: |
+          set -euo pipefail
+          download_state() {
+            repository="$1"
+            run_id="$2"
+            artifact="$3"
+            destination="$4"
+            mkdir -p "$destination"
+            gh run download "$run_id" --repo "$repository" \
+              --name "$artifact" --dir "$destination"
+            test -s "$destination/deployment-state.json"
+            test -s "$destination/current-manifest.json"
+          }
+          root="$RUNNER_TEMP/production-deployment-evidence"
+          download_state bignormal/aera-cloud "$CLOUD_DISABLED_RUN_ID" \
+            "cloud-production-disabled-$CLOUD_SOURCE_SHA" "$root/cloud-disabled"
+          download_state bignormal/aera-admin "$ADMIN_DISABLED_RUN_ID" \
+            "admin-production-disabled-$ADMIN_SOURCE_SHA" "$root/admin-disabled"
+          download_state bignormal/aera-cloud "$CLOUD_ENABLED_RUN_ID" \
+            "cloud-production-enabled-$CLOUD_SOURCE_SHA" "$root/cloud-enabled"
+          download_state bignormal/aera-admin "$ADMIN_ENABLED_RUN_ID" \
+            "admin-production-enabled-$ADMIN_SOURCE_SHA" "$root/admin-enabled"
+
+          EVIDENCE_ROOT="$root" node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+          import { validateProductionDeploymentEvidence } from "./scripts/release/publish.mjs";
+
+          const readPair = async (name) => ({
+            stateRaw: await readFile(
+              `${process.env.EVIDENCE_ROOT}/${name}/deployment-state.json`,
+              "utf8",
+            ),
+            manifestRaw: await readFile(
+              `${process.env.EVIDENCE_ROOT}/${name}/current-manifest.json`,
+              "utf8",
+            ),
+          });
+          const gate = JSON.parse(await readFile(process.env.GATE_PATH, "utf8"));
+          validateProductionDeploymentEvidence(
+            {
+              cloudDisabled: await readPair("cloud-disabled"),
+              adminDisabled: await readPair("admin-disabled"),
+              cloudEnabled: await readPair("cloud-enabled"),
+              adminEnabled: await readPair("admin-enabled"),
+            },
+            {
+              cloudSourceSha: process.env.CLOUD_SOURCE_SHA,
+              cloudImageDigest: process.env.CLOUD_IMAGE_DIGEST,
+              cloudCandidateManifestSha256:
+                process.env.CLOUD_MANIFEST_SHA256,
+              adminSourceSha: process.env.ADMIN_SOURCE_SHA,
+              adminImageDigest: process.env.ADMIN_IMAGE_DIGEST,
+              adminCandidateManifestSha256:
+                process.env.ADMIN_MANIFEST_SHA256,
+              rollout: gate.rollout,
+            },
+          );
+          NODE
+
+      - name: Publish exact Desktop candidate bytes without rebuilding
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.AERA_RELEASE_ORCHESTRATOR_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/release/publish.mjs \
+            --candidate-run-id "${{ inputs.candidate_run_id }}" \
+            --source-sha "${{ inputs.source_sha }}" \
+            --candidate-manifest-sha256 "${{ inputs.candidate_manifest_sha256 }}" \
+            --cloud-source-sha "${{ steps.descriptors.outputs.cloud_source_sha }}" \
+            --cloud-image-digest "${{ steps.descriptors.outputs.cloud_image_digest }}" \
+            --cloud-candidate-manifest-sha256 "${{ steps.descriptors.outputs.cloud_manifest_sha256 }}" \
+            --cloud-disabled-run-id "${{ steps.descriptors.outputs.cloud_disabled_run_id }}" \
+            --cloud-enabled-run-id "${{ steps.descriptors.outputs.cloud_enabled_run_id }}" \
+            --admin-source-sha "${{ steps.descriptors.outputs.admin_source_sha }}" \
+            --admin-image-digest "${{ steps.descriptors.outputs.admin_image_digest }}" \
+            --admin-candidate-manifest-sha256 "${{ steps.descriptors.outputs.admin_manifest_sha256 }}" \
+            --admin-disabled-run-id "${{ steps.descriptors.outputs.admin_disabled_run_id }}" \
+            --admin-enabled-run-id "${{ steps.descriptors.outputs.admin_enabled_run_id }}" \
+            --device-evidence "$RUNNER_TEMP/release-evidence/device-evidence.json" \
+            --device-evidence-sha256 "${{ steps.evidence.outputs.device_evidence_sha256 }}" \
+            --staging-evidence "$RUNNER_TEMP/release-evidence/staging-acceptance.json" \
+            --staging-evidence-sha256 "${{ steps.evidence.outputs.staging_evidence_sha256 }}" \
+            --staging-signature "$RUNNER_TEMP/release-evidence/staging-acceptance.sig" \
+            --staging-signature-sha256 "${{ steps.evidence.outputs.staging_signature_sha256 }}" \
+            --staging-public-key "$RUNNER_TEMP/release-evidence/staging-acceptance-ed25519.pub.pem" \
+            --production-gate "$RUNNER_TEMP/release-evidence/production-gate.json" \
+            --production-gate-sha256 "${{ inputs.production_gate_sha256 }}" \
+            --release-tag "${{ inputs.release_tag }}" \
+            --workspace "$RUNNER_TEMP/desktop-publication" \
+            --confirm-production-publication EXACT_BYTES_APPROVED_FOR_PUBLICATION
