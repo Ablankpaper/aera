@@ -53,6 +53,13 @@ export interface WrappedBackupDataKeyEnvelopeV1 {
   ciphertext: string;
 }
 
+export interface EncryptedRuntimeBindingProvenanceV1 {
+  formatVersion: typeof AGENTERA_BACKUP_FORMAT_VERSION;
+  cipher: "AES-256-GCM";
+  nonce: string;
+  ciphertext: string;
+}
+
 export interface BackupDeviceKeyPair {
   publicKey: string;
   privateKey: string;
@@ -193,11 +200,110 @@ export function backupKdfLabel(
     scope !== "root-recovery" &&
     scope !== "data-key" &&
     scope !== "manifest" &&
+    scope !== "runtime-binding-provenance" &&
     !/^chunk\/(?:0|[1-9][0-9]{0,9})$/.test(scope)
   ) {
     throw new Error("Invalid encrypted backup HKDF label.");
   }
   return `agentera-backup-v1/${scope}`;
+}
+
+function runtimeBindingProvenanceAad(profileLineageId: string): Uint8Array {
+  return textEncoder.encode(
+    `agentera-backup-v1/runtime-binding-provenance\0format=${AGENTERA_BACKUP_FORMAT_VERSION}\0lineage=${lineage(profileLineageId)}`,
+  );
+}
+
+export function encryptRuntimeBindingProvenance(input: {
+  rootKey: Uint8Array;
+  profileLineageId: string;
+  plaintext: Uint8Array;
+  nonce?: Uint8Array;
+}): EncryptedRuntimeBindingProvenanceV1 {
+  const rootKey = copyBytes(input.rootKey, 32, "root key");
+  const salt = uuidBytes(input.profileLineageId);
+  const plaintext = boundedBytes(
+    input.plaintext,
+    1,
+    1024 * 1024,
+    "RuntimeBinding provenance",
+  );
+  const nonce = input.nonce
+    ? copyBytes(input.nonce, AES_NONCE_BYTES, "AES nonce")
+    : new Uint8Array(randomBytes(AES_NONCE_BYTES));
+  let key: Uint8Array | null = null;
+  try {
+    key = deriveBackupSubkey(rootKey, salt, "runtime-binding-provenance");
+    const ciphertext = encryptBackupAesGcm(
+      key,
+      nonce,
+      plaintext,
+      runtimeBindingProvenanceAad(input.profileLineageId),
+    );
+    return Object.freeze({
+      formatVersion: AGENTERA_BACKUP_FORMAT_VERSION,
+      cipher: "AES-256-GCM",
+      nonce: base64urlEncode(nonce, AES_NONCE_BYTES),
+      ciphertext: base64urlEncode(ciphertext),
+    });
+  } finally {
+    rootKey.fill(0);
+    salt.fill(0);
+    plaintext.fill(0);
+    nonce.fill(0);
+    key?.fill(0);
+  }
+}
+
+export function decryptRuntimeBindingProvenance(input: {
+  rootKey: Uint8Array;
+  profileLineageId: string;
+  envelope: EncryptedRuntimeBindingProvenanceV1;
+}): Uint8Array {
+  const envelope = exactObject(
+    input.envelope,
+    ["formatVersion", "cipher", "nonce", "ciphertext"],
+    "RuntimeBinding provenance envelope",
+  );
+  if (
+    envelope.formatVersion !== AGENTERA_BACKUP_FORMAT_VERSION ||
+    envelope.cipher !== "AES-256-GCM" ||
+    typeof envelope.ciphertext !== "string" ||
+    !BASE64URL_PATTERN.test(envelope.ciphertext)
+  ) {
+    throw new Error(
+      "Invalid encrypted backup RuntimeBinding provenance envelope.",
+    );
+  }
+  const rootKey = copyBytes(input.rootKey, 32, "root key");
+  const salt = uuidBytes(input.profileLineageId);
+  const nonce = base64urlDecode(String(envelope.nonce), AES_NONCE_BYTES);
+  const ciphertext = Buffer.from(envelope.ciphertext, "base64url");
+  let key: Uint8Array | null = null;
+  try {
+    if (
+      ciphertext.byteLength < AES_TAG_BYTES + 1 ||
+      ciphertext.byteLength > 1024 * 1024 + AES_TAG_BYTES ||
+      ciphertext.toString("base64url") !== envelope.ciphertext
+    ) {
+      throw new Error(
+        "Invalid encrypted backup RuntimeBinding provenance envelope.",
+      );
+    }
+    key = deriveBackupSubkey(rootKey, salt, "runtime-binding-provenance");
+    return decryptBackupAesGcm(
+      key,
+      nonce,
+      ciphertext,
+      runtimeBindingProvenanceAad(input.profileLineageId),
+    );
+  } finally {
+    rootKey.fill(0);
+    salt.fill(0);
+    nonce.fill(0);
+    ciphertext.fill(0);
+    key?.fill(0);
+  }
 }
 
 function uuidBytes(value: string): Uint8Array {

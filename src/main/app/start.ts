@@ -88,6 +88,9 @@ import {
   type OfficialQualitySigningPrincipal,
 } from "../agentera-official-quality/collector";
 import { AgenteraOfficialQualityManager } from "../agentera-official-quality/manager";
+import { signAgenteraDeviceDigest } from "../agentera-auth/device-key";
+import { AgenteraEncryptedBackupClient } from "../agentera-encrypted-backup/client";
+import { AgenteraEncryptedBackupController } from "../agentera-encrypted-backup/controller";
 
 const APP_NAME =
   process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
@@ -245,6 +248,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
   let agenteraOfficialQualityDatabase: AgenteraOfficialQualityDatabase | null =
     null;
   let agenteraOfficialQuality: AgenteraOfficialQualityManager | null = null;
+  let agenteraEncryptedBackup: AgenteraEncryptedBackupController | null = null;
   try {
     agenteraWorkspaceDatabase = openAgenteraWorkspaceDatabase(
       app.getPath("userData"),
@@ -411,6 +415,42 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
       console.error("[AGENTERA_OFFICIAL_QUALITY] unavailable");
     }
   }
+  if (agenteraAgentControl !== null) {
+    try {
+      const encryptedBackupClient = new AgenteraEncryptedBackupClient({
+        origin: getAgenteraCloudOrigin(),
+        getAccessToken: () => agenteraAuth.getAccessTokenForCloudRequest(),
+      });
+      agenteraEncryptedBackup = new AgenteraEncryptedBackupController({
+        userDataPath: app.getPath("userData"),
+        secureStorage: safeStorage,
+        activity: runtimeActivity,
+        client: encryptedBackupClient,
+        agentControl: agenteraAgentControl,
+        getPrincipal: () => {
+          const state = agenteraAuth.getPublicState();
+          const identity = agenteraAuthStore.getInstallation();
+          if (
+            (state.status !== "authenticated" && state.status !== "offline") ||
+            identity === null
+          ) {
+            return null;
+          }
+          return {
+            accountId: state.userId,
+            deviceId: identity.installationId,
+            online: state.status === "authenticated" && state.cloudAvailable,
+            signDigest: (digest) =>
+              signAgenteraDeviceDigest(identity.devicePrivateKey, digest),
+          };
+        },
+      });
+    } catch {
+      agenteraEncryptedBackup?.close();
+      agenteraEncryptedBackup = null;
+      console.error("[AGENTERA_ENCRYPTED_BACKUP] unavailable");
+    }
+  }
   const unsubscribeProductSpace =
     agenteraProductSpace?.subscribe(() => {
       agenteraAgentControl?.notifyAgentContextChanged();
@@ -426,6 +466,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     void agenteraProductSpace?.notifyAccessStateChanged();
     const qualityPrincipal = getOfficialQualityPrincipal();
     agenteraOfficialQuality?.notifyPrincipalChanged(qualityPrincipal);
+    agenteraEncryptedBackup?.notifyPrincipalChanged();
     if (state.status === "authenticated" && state.cloudAvailable) {
       void agenteraOfficialQuality?.uploadPending();
     }
@@ -470,6 +511,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     workspaceInvitationInbox,
     runtimeDistribution,
     agenteraOfficialQuality,
+    agenteraEncryptedBackup,
   });
 
   setupUpdater({ getMainWindow: () => mainWindow });
@@ -536,6 +578,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     agenteraOrganization?.close();
     agenteraWorkspace?.close();
     agenteraOfficialQualityDatabase?.close();
+    agenteraEncryptedBackup?.close();
     agenteraAgentControlDatabase?.close();
     stopActiveRuntimeContext();
   });

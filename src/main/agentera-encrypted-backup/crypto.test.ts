@@ -11,9 +11,11 @@ import {
   base64urlDecode,
   base64urlEncode,
   decryptBackupAesGcm,
+  decryptRuntimeBindingProvenance,
   deriveBackupSubkey,
   deriveRecoveryWrappingKey,
   encryptBackupAesGcm,
+  encryptRuntimeBindingProvenance,
   recoveryEntropyFromPhrase,
   recoveryPhraseFromEntropy,
   unwrapRootKeyForDevice,
@@ -94,12 +96,8 @@ describe("AgentEra encrypted backup crypto v1", () => {
       expect(hex(manifest)).toBe(vector.manifestKeyHex);
       expect(hex(chunk)).toBe(vector.chunk7KeyHex);
       expect(hex(manifest)).not.toBe(hex(chunk));
-      expect(backupKdfLabel("manifest")).toBe(
-        "agentera-backup-v1/manifest",
-      );
-      expect(backupKdfLabel("chunk/7")).toBe(
-        "agentera-backup-v1/chunk/7",
-      );
+      expect(backupKdfLabel("manifest")).toBe("agentera-backup-v1/manifest");
+      expect(backupKdfLabel("chunk/7")).toBe("agentera-backup-v1/chunk/7");
       expect(() => backupKdfLabel("chunk/-1")).toThrow(/label/i);
     } finally {
       manifest.fill(0);
@@ -131,41 +129,75 @@ describe("AgentEra encrypted backup crypto v1", () => {
     ).toThrow(/authentication/i);
   });
 
-  it(
-    "wraps the root key for phrase recovery with lineage-bound AAD",
-    async () => {
-      const rootKey = bytes(vector.rootKeyHex);
-      const envelope = await wrapRootKeyForRecovery({
-        rootKey,
-        phrase: vector.phrase,
-        salt: bytes(vector.argonSaltHex),
-        nonce: bytes(vector.nonceHex),
-        lineageId: vector.lineageId,
-      });
-      expect(hex(base64urlDecode(envelope.ciphertext, 48))).toBe(
-        vector.recoveryCiphertextHex,
-      );
-      const unwrapped = await unwrapRootKeyFromRecovery({
+  it("encrypts RuntimeBinding provenance under a lineage-separated root-key domain", () => {
+    const rootKey = bytes(vector.rootKeyHex);
+    const plaintext = utf8(
+      '{"sourceInstallationId":"private-canary","bindings":[]}',
+    );
+    const envelope = encryptRuntimeBindingProvenance({
+      rootKey,
+      profileLineageId: vector.lineageId,
+      plaintext,
+      nonce: bytes(vector.nonceHex),
+    });
+    const serialized = Buffer.from(JSON.stringify(envelope), "utf8");
+    expect(serialized.includes(Buffer.from("private-canary"))).toBe(false);
+    expect(backupKdfLabel("runtime-binding-provenance")).toBe(
+      "agentera-backup-v1/runtime-binding-provenance",
+    );
+    const opened = decryptRuntimeBindingProvenance({
+      rootKey,
+      profileLineageId: vector.lineageId,
+      envelope,
+    });
+    try {
+      expect(new TextDecoder().decode(opened)).toContain("private-canary");
+      expect(() =>
+        decryptRuntimeBindingProvenance({
+          rootKey,
+          profileLineageId: "11111111-1111-4111-8111-111111111112",
+          envelope,
+        }),
+      ).toThrow(/authentication/i);
+    } finally {
+      rootKey.fill(0);
+      plaintext.fill(0);
+      opened.fill(0);
+      serialized.fill(0);
+    }
+  });
+
+  it("wraps the root key for phrase recovery with lineage-bound AAD", async () => {
+    const rootKey = bytes(vector.rootKeyHex);
+    const envelope = await wrapRootKeyForRecovery({
+      rootKey,
+      phrase: vector.phrase,
+      salt: bytes(vector.argonSaltHex),
+      nonce: bytes(vector.nonceHex),
+      lineageId: vector.lineageId,
+    });
+    expect(hex(base64urlDecode(envelope.ciphertext, 48))).toBe(
+      vector.recoveryCiphertextHex,
+    );
+    const unwrapped = await unwrapRootKeyFromRecovery({
+      envelope,
+      phrase: vector.phrase,
+      lineageId: vector.lineageId,
+    });
+    try {
+      expect(hex(unwrapped)).toBe(vector.rootKeyHex);
+    } finally {
+      unwrapped.fill(0);
+      rootKey.fill(0);
+    }
+    await expect(
+      unwrapRootKeyFromRecovery({
         envelope,
         phrase: vector.phrase,
-        lineageId: vector.lineageId,
-      });
-      try {
-        expect(hex(unwrapped)).toBe(vector.rootKeyHex);
-      } finally {
-        unwrapped.fill(0);
-        rootKey.fill(0);
-      }
-      await expect(
-        unwrapRootKeyFromRecovery({
-          envelope,
-          phrase: vector.phrase,
-          lineageId: "11111111-1111-4111-8111-111111111112",
-        }),
-      ).rejects.toThrow(/authentication/i);
-    },
-    20_000,
-  );
+        lineageId: "11111111-1111-4111-8111-111111111112",
+      }),
+    ).rejects.toThrow(/authentication/i);
+  }, 20_000);
 
   it("uses RFC 9180 X25519, HKDF-SHA256, and AES-256-GCM device envelopes", async () => {
     const publicKey = base64urlEncode(bytes(vector.hpkePublicKeyHex), 32);
@@ -175,11 +207,7 @@ describe("AgentEra encrypted backup crypto v1", () => {
     const envelope = await wrapRootKeyForDevice(publicKey, rootKey, aad);
     expect(base64urlDecode(envelope.enc, 32)).toHaveLength(32);
     expect(base64urlDecode(envelope.ciphertext, 48)).toHaveLength(48);
-    const unwrapped = await unwrapRootKeyForDevice(
-      privateKey,
-      envelope,
-      aad,
-    );
+    const unwrapped = await unwrapRootKeyForDevice(privateKey, envelope, aad);
     try {
       expect(hex(unwrapped)).toBe(vector.rootKeyHex);
     } finally {

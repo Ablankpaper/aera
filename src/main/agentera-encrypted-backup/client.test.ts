@@ -123,6 +123,89 @@ afterEach(() => {
 });
 
 describe("AgenteraEncryptedBackupClient", () => {
+  it("lists public backup devices, adds one opaque root-key envelope, and revokes by canonical ID", async () => {
+    const deviceId = "20000000-0000-4000-8000-000000000002";
+    const requests: Array<{ url: string; method: string; body: unknown }> = [];
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      requests.push({
+        url,
+        method,
+        body:
+          typeof init?.body === "string" ? JSON.parse(init.body) : init?.body,
+      });
+      if (method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      if (url.endsWith("/device-envelopes")) {
+        return Response.json({
+          backup_id: BACKUP_ID,
+          device_id: deviceId,
+          key_epoch: 2,
+          replayed: false,
+        });
+      }
+      return Response.json({
+        devices: [
+          {
+            device_id: deviceId,
+            key_epoch: 2,
+            revision: 1,
+            status: "active",
+            public_key: Buffer.alloc(32, 0x45).toString("base64url"),
+            registered_at: "2026-07-23T12:00:00Z",
+            updated_at: "2026-07-23T12:00:00Z",
+            revoked_at: null,
+          },
+        ],
+      });
+    });
+    const client = new AgenteraEncryptedBackupClient({
+      origin: "https://cloud.example.com",
+      getAccessToken: () => "access-token",
+      fetch: fetcher,
+    });
+
+    await expect(client.listDevices()).resolves.toEqual([
+      {
+        deviceId,
+        keyEpoch: 2,
+        revision: 1,
+        status: "active",
+        publicKey: Buffer.alloc(32, 0x45).toString("base64url"),
+        registeredAt: "2026-07-23T12:00:00.000Z",
+        updatedAt: "2026-07-23T12:00:00.000Z",
+        revokedAt: null,
+      },
+    ]);
+    await expect(
+      client.addDeviceEnvelope(BACKUP_ID, {
+        deviceId,
+        keyEpoch: 2,
+        rootKeyEnvelope: {
+          formatVersion: 1,
+          cipherSuite: "HPKE-X25519-HKDF-SHA256-AES256GCM+ARGON2ID+AES256GCM",
+          enc: Buffer.alloc(32, 0x46).toString("base64url"),
+          ciphertext: Buffer.alloc(48, 0x47).toString("base64url"),
+        },
+      }),
+    ).resolves.toMatchObject({ backupId: BACKUP_ID, deviceId, keyEpoch: 2 });
+    await expect(client.revokeDevice(deviceId)).resolves.toBeUndefined();
+
+    const envelopeRequest = requests.find((request) =>
+      request.url.endsWith("/device-envelopes"),
+    );
+    expect(envelopeRequest?.method).toBe("POST");
+    expect(envelopeRequest?.body).toEqual({
+      device_id: deviceId,
+      key_epoch: 2,
+      root_key_envelope: expect.any(String),
+      root_key_envelope_digest: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+    });
+    expect(JSON.stringify(requests)).not.toMatch(/private|phrase|root_key":/);
+  });
+
   it("initiates, resumes only missing ciphertext, and sends exact binary headers", async () => {
     const requests: Array<{
       url: string;

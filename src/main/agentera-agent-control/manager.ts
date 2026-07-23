@@ -108,6 +108,18 @@ export interface AgenteraAgentControlManagerOptions extends Partial<FullAgentCon
   retryPendingRuntimeBindings?: () => Promise<unknown>;
 }
 
+export interface AgenteraEncryptedBackupUserSource {
+  installationId: string;
+  profilePath: string;
+  provenance: {
+    sourceInstallationId: string;
+    sourceDefinitionId: string;
+    sourceVersionId: string;
+    baseOwnerScope: "USER";
+  };
+  runtimeBindingProvenance: Uint8Array;
+}
+
 interface RuntimeComponents {
   key: string;
   runtimeVersion: string;
@@ -697,6 +709,64 @@ export class AgenteraAgentControlManager {
       ...installationManager.listLocalInstallations(this.assetContext()),
       ...installationManager.listManagedInstallations(),
     ].map(serializeInstallation);
+  }
+
+  async resolveEncryptedBackupUserSource(
+    installationId: string,
+  ): Promise<AgenteraEncryptedBackupUserSource> {
+    this.assertInstallationRole();
+    if (this.assetContext().scope !== "USER") {
+      throw codedError("operation_failed");
+    }
+    const runtime = await this.ensureRuntimeComponents();
+    const installation =
+      runtime.installations.getLocalInstallation(installationId);
+    if (
+      installation.sourceScope !== "USER" ||
+      installation.sourceWorkspaceId !== null ||
+      installation.sourceOrganizationId !== null ||
+      installation.status !== "active" ||
+      installation.runtimeProfileId === null
+    ) {
+      throw codedError("operation_failed");
+    }
+    const full = this.requireFull();
+    const profilePath = this.profileBindings.resolveAttachedProfilePath(
+      installation.runtimeProfileId,
+      installation.agentInstallationId,
+      full.getOwner(),
+    );
+    const runtimeBindingProvenance = Buffer.from(
+      JSON.stringify({
+        formatVersion: 1,
+        sourceInstallationId: installation.agentInstallationId,
+        sourceDefinitionId: installation.definitionId,
+        sourceVersionId: installation.selectedVersionId,
+        runtimeProfileId: installation.runtimeProfileId,
+        bindings: runtime.bindingStore.listForInstallation(
+          installation.agentInstallationId,
+        ),
+      }),
+      "utf8",
+    );
+    if (
+      runtimeBindingProvenance.byteLength < 1 ||
+      runtimeBindingProvenance.byteLength > 1024 * 1024
+    ) {
+      runtimeBindingProvenance.fill(0);
+      throw codedError("operation_failed");
+    }
+    return {
+      installationId: installation.agentInstallationId,
+      profilePath,
+      provenance: {
+        sourceInstallationId: installation.agentInstallationId,
+        sourceDefinitionId: installation.definitionId,
+        sourceVersionId: installation.selectedVersionId,
+        baseOwnerScope: "USER",
+      },
+      runtimeBindingProvenance,
+    };
   }
 
   async installVersion(

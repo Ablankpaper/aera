@@ -139,6 +139,11 @@ const PREFLIGHT_CHANNELS = [
 const AUTHENTICATED_CHANNELS = [
   "adopt-hermes-home",
   "agentera-auth-open-portal",
+  "agentera-encrypted-backup-cancel",
+  "agentera-encrypted-backup-cancel-restore",
+  "agentera-encrypted-backup-confirm-recovery",
+  "agentera-encrypted-backup-get-state",
+  "agentera-encrypted-backup-set-daily-schedule",
   "agentera-agents-create-draft",
   "agentera-agents-delete-draft",
   "agentera-agents-get-draft",
@@ -197,6 +202,16 @@ const AUTHENTICATED_CHANNELS = [
 ] as const;
 
 const ONLINE_CHANNELS = [
+  "agentera-encrypted-backup-authorize-device",
+  "agentera-encrypted-backup-confirm-restore",
+  "agentera-encrypted-backup-create",
+  "agentera-encrypted-backup-delete",
+  "agentera-encrypted-backup-list",
+  "agentera-encrypted-backup-list-devices",
+  "agentera-encrypted-backup-initialize-recovery",
+  "agentera-encrypted-backup-prepare-restore",
+  "agentera-encrypted-backup-register-current-device",
+  "agentera-encrypted-backup-revoke-device",
   "agentera-agents-archive-installation",
   "agentera-agents-claim-version",
   "agentera-agents-confirm-publication",

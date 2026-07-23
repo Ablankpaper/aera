@@ -7,6 +7,7 @@ import {
 import { readFileSync } from "node:fs";
 import { parseAgenteraCloudOrigin } from "../agentera-auth/origin";
 import type { AgenteraEncryptedBackupDeviceRegistration } from "../../shared/agentera-encrypted-backup";
+import type { DeviceRootKeyEnvelopeV1 } from "./crypto";
 import type {
   EncryptedBackupArchive,
   EncryptedBackupArchiveObject,
@@ -26,6 +27,7 @@ const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 const MAXIMUM_OPAQUE_ENVELOPE_BYTES = 16 * 1024;
 const MAXIMUM_BACKUP_COUNT = 10_000;
+const MAXIMUM_DEVICE_COUNT = 1_000;
 const ALLOWED_ERROR_CODES = new Set([
   "invalid_request",
   "invalid_signature",
@@ -58,6 +60,24 @@ export interface EncryptedBackupDeviceRegistrationReceipt {
   keyEpoch: number;
   revision: number;
   status: "active" | "revoked";
+  replayed: boolean;
+}
+
+export interface EncryptedBackupCloudDevice {
+  deviceId: string;
+  keyEpoch: number;
+  revision: number;
+  status: "active" | "revoked";
+  publicKey: string;
+  registeredAt: string;
+  updatedAt: string;
+  revokedAt: string | null;
+}
+
+export interface EncryptedBackupDeviceEnvelopeReceipt {
+  backupId: string;
+  deviceId: string;
+  keyEpoch: number;
   replayed: boolean;
 }
 
@@ -431,6 +451,41 @@ function envelopeDigest(value: string): string {
   }
 }
 
+function serializedDeviceRootKeyEnvelope(
+  value: DeviceRootKeyEnvelopeV1,
+): string {
+  if (
+    !isObject(value) ||
+    !exactKeys(value, ["formatVersion", "cipherSuite", "enc", "ciphertext"]) ||
+    value.formatVersion !== 1 ||
+    value.cipherSuite !== "HPKE-X25519-HKDF-SHA256-AES256GCM+ARGON2ID+AES256GCM"
+  ) {
+    throw new AgenteraEncryptedBackupClientError(0, "invalid_request", false);
+  }
+  const enc = fixedBase64url(value.enc, 32);
+  const ciphertext = fixedBase64url(value.ciphertext, 48);
+  const bytes = Buffer.from(
+    JSON.stringify({
+      formatVersion: 1,
+      cipherSuite: "HPKE-X25519-HKDF-SHA256-AES256GCM+ARGON2ID+AES256GCM",
+      enc,
+      ciphertext,
+    }),
+    "utf8",
+  );
+  try {
+    if (
+      bytes.byteLength < 48 ||
+      bytes.byteLength > MAXIMUM_OPAQUE_ENVELOPE_BYTES
+    ) {
+      throw new AgenteraEncryptedBackupClientError(0, "invalid_request", false);
+    }
+    return bytes.toString("base64url");
+  } finally {
+    bytes.fill(0);
+  }
+}
+
 function parseBackupDetail(
   value: unknown,
   expectedBackupId: string,
@@ -678,6 +733,146 @@ export class AgenteraEncryptedBackupClient implements EncryptedBackupCloudClient
       invalidResponse();
     }
     return response.backups.map((backup) => parseSummary(backup));
+  }
+
+  async listDevices(
+    signal?: AbortSignal,
+  ): Promise<EncryptedBackupCloudDevice[]> {
+    const token = this.requireToken();
+    const response = await this.requestJson(
+      "/api/v1/encrypted-profile-backups/devices",
+      { method: "GET" },
+      [200],
+      token,
+      signal,
+    );
+    if (
+      !isObject(response) ||
+      !exactKeys(response, ["devices"]) ||
+      !Array.isArray(response.devices) ||
+      response.devices.length > MAXIMUM_DEVICE_COUNT
+    ) {
+      invalidResponse();
+    }
+    const identities = new Set<string>();
+    return response.devices.map((value) => {
+      if (
+        !isObject(value) ||
+        !exactKeys(value, [
+          "device_id",
+          "key_epoch",
+          "revision",
+          "status",
+          "public_key",
+          "registered_at",
+          "updated_at",
+          "revoked_at",
+        ]) ||
+        typeof value.device_id !== "string" ||
+        !UUID_PATTERN.test(value.device_id) ||
+        positiveInteger(value.key_epoch) === null ||
+        positiveInteger(value.revision) === null ||
+        (value.status !== "active" && value.status !== "revoked") ||
+        canonicalTimestamp(value.registered_at) === null ||
+        canonicalTimestamp(value.updated_at) === null ||
+        (value.revoked_at !== null &&
+          canonicalTimestamp(value.revoked_at) === null) ||
+        (value.status === "active" && value.revoked_at !== null) ||
+        (value.status === "revoked" && value.revoked_at === null)
+      ) {
+        invalidResponse();
+      }
+      const identity = `${value.device_id}\0${value.key_epoch}`;
+      if (identities.has(identity)) invalidResponse();
+      identities.add(identity);
+      return {
+        deviceId: value.device_id,
+        keyEpoch: Number(value.key_epoch),
+        revision: Number(value.revision),
+        status: value.status,
+        publicKey: fixedBase64url(value.public_key, 32),
+        registeredAt: canonicalTimestamp(value.registered_at)!,
+        updatedAt: canonicalTimestamp(value.updated_at)!,
+        revokedAt:
+          value.revoked_at === null
+            ? null
+            : canonicalTimestamp(value.revoked_at)!,
+      };
+    });
+  }
+
+  async revokeDevice(deviceId: string, signal?: AbortSignal): Promise<void> {
+    if (!UUID_PATTERN.test(deviceId)) {
+      throw new AgenteraEncryptedBackupClientError(0, "invalid_request", false);
+    }
+    const token = this.requireToken();
+    await this.request(
+      `/api/v1/encrypted-profile-backups/devices/${deviceId}`,
+      { method: "DELETE" },
+      [204],
+      token,
+      signal,
+    );
+  }
+
+  async addDeviceEnvelope(
+    backupId: string,
+    input: {
+      deviceId: string;
+      keyEpoch: number;
+      rootKeyEnvelope: DeviceRootKeyEnvelopeV1;
+    },
+    signal?: AbortSignal,
+  ): Promise<EncryptedBackupDeviceEnvelopeReceipt> {
+    if (
+      !UUID_PATTERN.test(backupId) ||
+      !UUID_PATTERN.test(input.deviceId) ||
+      !Number.isSafeInteger(input.keyEpoch) ||
+      input.keyEpoch < 1
+    ) {
+      throw new AgenteraEncryptedBackupClientError(0, "invalid_request", false);
+    }
+    const rootKeyEnvelope = serializedDeviceRootKeyEnvelope(
+      input.rootKeyEnvelope,
+    );
+    const token = this.requireToken();
+    const response = await this.requestJson(
+      `/api/v1/encrypted-profile-backups/${backupId}/device-envelopes`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          device_id: input.deviceId,
+          key_epoch: input.keyEpoch,
+          root_key_envelope: rootKeyEnvelope,
+          root_key_envelope_digest: envelopeDigest(rootKeyEnvelope),
+        }),
+      },
+      [200],
+      token,
+      signal,
+    );
+    if (
+      !isObject(response) ||
+      !exactKeys(response, [
+        "backup_id",
+        "device_id",
+        "key_epoch",
+        "replayed",
+      ]) ||
+      response.backup_id !== backupId ||
+      response.device_id !== input.deviceId ||
+      response.key_epoch !== input.keyEpoch ||
+      typeof response.replayed !== "boolean"
+    ) {
+      invalidResponse();
+    }
+    return {
+      backupId,
+      deviceId: input.deviceId,
+      keyEpoch: input.keyEpoch,
+      replayed: response.replayed,
+    };
   }
 
   async getBackup(

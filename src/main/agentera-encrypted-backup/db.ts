@@ -17,7 +17,7 @@ import {
   type RecoveryRootKeyEnvelopeV1,
 } from "./crypto";
 
-export const AGENTERA_ENCRYPTED_BACKUP_SCHEMA_VERSION = 1;
+export const AGENTERA_ENCRYPTED_BACKUP_SCHEMA_VERSION = 2;
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -83,6 +83,16 @@ export interface EncryptedBackupDeviceRecord {
   revokedAt: string | null;
 }
 
+export interface EncryptedBackupPendingDeviceRecord {
+  accountId: string;
+  deviceId: string;
+  publicKey: string;
+  encryptedPrivateKey: Buffer;
+  keyEpoch: number;
+  revision: number;
+  createdAt: string;
+}
+
 export interface CreateEncryptedBackupAccountInput {
   accountId: string;
   profileLineageId: string;
@@ -107,6 +117,16 @@ export interface AuthorizeEncryptedBackupDeviceInput {
   authorizedAt: Date;
 }
 
+export interface SaveEncryptedBackupPendingDeviceInput {
+  accountId: string;
+  deviceId: string;
+  publicKey: string;
+  encryptedPrivateKey: Uint8Array;
+  keyEpoch: number;
+  revision: number;
+  createdAt: Date;
+}
+
 interface AccountRow {
   account_id?: unknown;
   profile_lineage_id?: unknown;
@@ -129,6 +149,16 @@ interface DeviceRow {
   is_local?: unknown;
   authorized_at?: unknown;
   revoked_at?: unknown;
+}
+
+interface PendingDeviceRow {
+  account_id?: unknown;
+  device_id?: unknown;
+  public_key?: unknown;
+  encrypted_private_key?: unknown;
+  key_epoch?: unknown;
+  revision?: unknown;
+  created_at?: unknown;
 }
 
 const localRequire = createRequire(
@@ -233,44 +263,62 @@ function initializeSchema(sqlite: AgenteraEncryptedBackupSqliteDatabase): void {
 
   sqlite.exec("BEGIN IMMEDIATE");
   try {
-    sqlite.exec(`
-      CREATE TABLE encrypted_backup_accounts (
-        account_id TEXT PRIMARY KEY,
-        profile_lineage_id TEXT NOT NULL UNIQUE,
-        key_epoch INTEGER NOT NULL CHECK (key_epoch >= 1),
-        encrypted_root_key BLOB NOT NULL CHECK (length(encrypted_root_key) >= 1),
-        recovery_envelope_json TEXT NOT NULL,
-        recovery_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (recovery_confirmed IN (0, 1)),
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
+    if (currentVersion < 1) {
+      sqlite.exec(`
+        CREATE TABLE encrypted_backup_accounts (
+          account_id TEXT PRIMARY KEY,
+          profile_lineage_id TEXT NOT NULL UNIQUE,
+          key_epoch INTEGER NOT NULL CHECK (key_epoch >= 1),
+          encrypted_root_key BLOB NOT NULL CHECK (length(encrypted_root_key) >= 1),
+          recovery_envelope_json TEXT NOT NULL,
+          recovery_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (recovery_confirmed IN (0, 1)),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
 
-      CREATE TABLE encrypted_backup_devices (
-        account_id TEXT NOT NULL REFERENCES encrypted_backup_accounts(account_id) ON DELETE CASCADE,
-        device_id TEXT NOT NULL,
-        public_key TEXT NOT NULL,
-        encrypted_private_key BLOB,
-        key_epoch INTEGER NOT NULL CHECK (key_epoch >= 1),
-        revision INTEGER NOT NULL CHECK (revision >= 1),
-        status TEXT NOT NULL CHECK (status IN ('active', 'revoked')),
-        is_local INTEGER NOT NULL CHECK (is_local IN (0, 1)),
-        authorized_at TEXT NOT NULL,
-        revoked_at TEXT,
-        PRIMARY KEY (account_id, device_id),
-        CHECK (
-          (status = 'active' AND revoked_at IS NULL) OR
-          (status = 'revoked' AND revoked_at IS NOT NULL)
-        ),
-        CHECK (
-          (is_local = 1) OR encrypted_private_key IS NULL
-        )
-      );
+        CREATE TABLE encrypted_backup_devices (
+          account_id TEXT NOT NULL REFERENCES encrypted_backup_accounts(account_id) ON DELETE CASCADE,
+          device_id TEXT NOT NULL,
+          public_key TEXT NOT NULL,
+          encrypted_private_key BLOB,
+          key_epoch INTEGER NOT NULL CHECK (key_epoch >= 1),
+          revision INTEGER NOT NULL CHECK (revision >= 1),
+          status TEXT NOT NULL CHECK (status IN ('active', 'revoked')),
+          is_local INTEGER NOT NULL CHECK (is_local IN (0, 1)),
+          authorized_at TEXT NOT NULL,
+          revoked_at TEXT,
+          PRIMARY KEY (account_id, device_id),
+          CHECK (
+            (status = 'active' AND revoked_at IS NULL) OR
+            (status = 'revoked' AND revoked_at IS NOT NULL)
+          ),
+          CHECK (
+            (is_local = 1) OR encrypted_private_key IS NULL
+          )
+        );
 
-      CREATE INDEX encrypted_backup_devices_account_status_idx
-        ON encrypted_backup_devices (account_id, status, device_id);
+        CREATE INDEX encrypted_backup_devices_account_status_idx
+          ON encrypted_backup_devices (account_id, status, device_id);
 
-      PRAGMA user_version = 1;
-    `);
+        PRAGMA user_version = 1;
+      `);
+    }
+    if (currentVersion < 2) {
+      sqlite.exec(`
+        CREATE TABLE encrypted_backup_pending_devices (
+          account_id TEXT NOT NULL,
+          device_id TEXT NOT NULL,
+          public_key TEXT NOT NULL,
+          encrypted_private_key BLOB NOT NULL CHECK (length(encrypted_private_key) >= 1),
+          key_epoch INTEGER NOT NULL CHECK (key_epoch >= 1),
+          revision INTEGER NOT NULL CHECK (revision >= 1),
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (account_id, device_id)
+        );
+
+        PRAGMA user_version = 2;
+      `);
+    }
     sqlite.exec("COMMIT");
   } catch (error) {
     try {
@@ -553,6 +601,98 @@ export class AgenteraEncryptedBackupDatabase {
       )
       .all(accountId)
       .map((row) => this.parseDevice(row as DeviceRow));
+  }
+
+  savePendingDevice(input: SaveEncryptedBackupPendingDeviceInput): void {
+    const accountId = identifier(input.accountId, "account ID");
+    const deviceId = identifier(input.deviceId, "device ID");
+    const devicePublicKey = publicKey(input.publicKey);
+    const encryptedPrivateKey = encryptedBytes(
+      input.encryptedPrivateKey,
+      "pending device-key record",
+    );
+    const keyEpoch = positiveInteger(input.keyEpoch, "key epoch");
+    const revision = positiveInteger(input.revision, "device revision");
+    const createdAt = inputTimestamp(input.createdAt, "creation time");
+    try {
+      const existing = this.readPendingDevice(accountId, deviceId);
+      if (existing) {
+        if (
+          existing.publicKey === devicePublicKey &&
+          existing.keyEpoch === keyEpoch &&
+          existing.revision === revision &&
+          existing.encryptedPrivateKey.equals(encryptedPrivateKey)
+        ) {
+          return;
+        }
+        throw new Error("Encrypted backup pending device conflicts.");
+      }
+      this.sqlite
+        .prepare(
+          `INSERT INTO encrypted_backup_pending_devices (
+             account_id, device_id, public_key, encrypted_private_key,
+             key_epoch, revision, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          accountId,
+          deviceId,
+          devicePublicKey,
+          encryptedPrivateKey,
+          keyEpoch,
+          revision,
+          createdAt,
+        );
+    } finally {
+      encryptedPrivateKey.fill(0);
+    }
+  }
+
+  readPendingDevice(
+    accountIdValue: string,
+    deviceIdValue: string,
+  ): EncryptedBackupPendingDeviceRecord | null {
+    const accountId = identifier(accountIdValue, "account ID");
+    const deviceId = identifier(deviceIdValue, "device ID");
+    const row = this.sqlite
+      .prepare(
+        `SELECT account_id, device_id, public_key, encrypted_private_key,
+                key_epoch, revision, created_at
+         FROM encrypted_backup_pending_devices
+         WHERE account_id = ? AND device_id = ?`,
+      )
+      .get(accountId, deviceId) as PendingDeviceRow | undefined;
+    if (!row) return null;
+    try {
+      return {
+        accountId: identifier(row.account_id, "account ID"),
+        deviceId: identifier(row.device_id, "device ID"),
+        publicKey: publicKey(row.public_key),
+        encryptedPrivateKey: encryptedBytes(
+          row.encrypted_private_key,
+          "pending device-key record",
+        ),
+        keyEpoch: positiveInteger(row.key_epoch, "key epoch"),
+        revision: positiveInteger(row.revision, "device revision"),
+        createdAt: canonicalTimestamp(row.created_at, "creation time"),
+      };
+    } catch {
+      throw new Error(
+        "AgentEra encrypted backup pending device record is corrupt.",
+      );
+    }
+  }
+
+  deletePendingDevice(accountIdValue: string, deviceIdValue: string): boolean {
+    const accountId = identifier(accountIdValue, "account ID");
+    const deviceId = identifier(deviceIdValue, "device ID");
+    const result = this.sqlite
+      .prepare(
+        `DELETE FROM encrypted_backup_pending_devices
+         WHERE account_id = ? AND device_id = ?`,
+      )
+      .run(accountId, deviceId);
+    return Number(result.changes) === 1;
   }
 
   authorizeDevice(input: AuthorizeEncryptedBackupDeviceInput): void {

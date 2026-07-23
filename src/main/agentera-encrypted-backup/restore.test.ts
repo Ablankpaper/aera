@@ -37,7 +37,10 @@ import {
   wrapRootKeyForDevice,
   wrapRootKeyForRecovery,
 } from "./crypto";
-import { backupDeviceRootKeyAad } from "./key-store";
+import {
+  backupDeviceRootKeyAad,
+  type AdoptRestoredEncryptedBackupAccountInput,
+} from "./key-store";
 import {
   createEncryptedBackupSnapshotManifest,
   serializeEncryptedBackupSnapshotManifest,
@@ -344,6 +347,9 @@ function serviceFor(
   input: {
     accountId?: string;
     beforeFileWrite?: (relativePath: string) => void;
+    adoptRestoredAccount?: (
+      input: AdoptRestoredEncryptedBackupAccountInput,
+    ) => Promise<unknown>;
   } = {},
 ): AgenteraEncryptedBackupRestoreService {
   const transactionsRoot = join(fixture.root, "restore-transactions");
@@ -367,6 +373,9 @@ function serviceFor(
           phrase,
           lineageId: LINEAGE_ID,
         }),
+      ...(input.adoptRestoredAccount
+        ? { adoptRestoredAccount: input.adoptRestoredAccount }
+        : {}),
     },
     getPrincipal: () => ({
       accountId: input.accountId ?? ACCOUNT_ID,
@@ -391,7 +400,10 @@ describe("AgenteraEncryptedBackupRestoreService", () => {
   it("uses the authorized device envelope, verifies all bytes, and activates only a fresh USER branch", async () => {
     const fixture = await restoreFixture();
     const control = agentControlFixture();
-    const service = serviceFor(fixture, control.adapter);
+    const adoptRestoredAccount = vi.fn(async () => undefined);
+    const service = serviceFor(fixture, control.adapter, {
+      adoptRestoredAccount,
+    });
     const prepared = await service.prepareRestore({
       backupId: BACKUP_ID,
     });
@@ -406,6 +418,16 @@ describe("AgenteraEncryptedBackupRestoreService", () => {
       totalPlaintextSize: expect.any(Number),
     });
     expect(control.activated).not.toHaveBeenCalled();
+    expect(adoptRestoredAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: ACCOUNT_ID,
+        deviceId: DEVICE_ID,
+        keyEpoch: 1,
+        profileLineageId: LINEAGE_ID,
+        recoveryEnvelope: fixture.recoveryEnvelope,
+        rootKey: expect.any(Uint8Array),
+      }),
+    );
 
     const restored = await service.confirmRestore({
       preparationId: PREPARATION_ID,
@@ -479,6 +501,7 @@ describe("AgenteraEncryptedBackupRestoreService", () => {
     ).rejects.toMatchObject({ code: "device_authorization_required" });
 
     const tampered = await restoreFixture();
+    const adoptRestoredAccount = vi.fn(async () => undefined);
     tampered.client.downloadObject = async (_backupId, object) => {
       const source =
         object.object_id === tampered.archive.manifest.object.object_id
@@ -489,10 +512,11 @@ describe("AgenteraEncryptedBackupRestoreService", () => {
       return bytes;
     };
     await expect(
-      serviceFor(tampered, agentControlFixture().adapter).prepareRestore({
-        backupId: BACKUP_ID,
-      }),
+      serviceFor(tampered, agentControlFixture().adapter, {
+        adoptRestoredAccount,
+      }).prepareRestore({ backupId: BACKUP_ID }),
     ).rejects.toMatchObject({ code: "ciphertext_invalid" });
+    expect(adoptRestoredAccount).not.toHaveBeenCalled();
   }, 30_000);
 
   it("rejects duplicate paths and an unavailable immutable base before activation", async () => {

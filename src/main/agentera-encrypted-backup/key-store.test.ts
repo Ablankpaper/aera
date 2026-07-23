@@ -13,6 +13,7 @@ import {
   unwrapBackupDataKey,
   unwrapRootKeyForDevice,
   wrapRootKeyForRecovery,
+  wrapRootKeyForDevice as hpkeWrapRootKeyForDevice,
 } from "./crypto";
 import {
   openAgenteraEncryptedBackupDatabase,
@@ -322,6 +323,20 @@ describe("AgenteraEncryptedBackupKeyStore", () => {
       "profileLineageId",
       "recoveryRootKeyEnvelope",
     ]);
+    const provenance = store.encryptRuntimeBindingProvenance({
+      accountId: ACCOUNT_ID,
+      deviceId: DEVICE_ID,
+      plaintext: Buffer.from('{"conversationKey":"private-provenance-canary"}'),
+    });
+    expect(
+      Buffer.from(provenance).includes(
+        Buffer.from("private-provenance-canary"),
+      ),
+    ).toBe(false);
+    expect(
+      Object.keys(JSON.parse(Buffer.from(provenance).toString("utf8"))),
+    ).toEqual(["formatVersion", "cipher", "nonce", "ciphertext"]);
+    provenance.fill(0);
 
     const backupId = "70000000-0000-4000-8000-000000000001";
     const dataKey = Buffer.alloc(32, 0x77);
@@ -404,6 +419,96 @@ describe("AgenteraEncryptedBackupKeyStore", () => {
       recovered.fill(0);
     }
   }, 20_000);
+
+  it("registers a pending second-device key and adopts the verified remote root without inventing a new phrase", async () => {
+    const { database, secureStorage, store } = storeFor();
+    const rootKey = Buffer.alloc(32, 0x71);
+    const phrase = recoveryPhraseFromEntropy(Buffer.alloc(32, 0x72));
+    const profileLineageId = "30000000-0000-4000-8000-000000000001";
+    const recoveryEnvelope = await wrapRootKeyForRecovery({
+      rootKey,
+      phrase,
+      salt: Buffer.alloc(16, 0x73),
+      lineageId: profileLineageId,
+    });
+
+    const pending = await store.prepareCurrentDeviceRegistration({
+      accountId: ACCOUNT_ID,
+      deviceId: DEVICE_ID,
+      keyEpoch: 4,
+      now: NOW,
+    });
+    expect(pending).toMatchObject({
+      accountId: ACCOUNT_ID,
+      deviceId: DEVICE_ID,
+      keyEpoch: 4,
+      revision: 1,
+    });
+    expect(
+      store.getState({ accountId: ACCOUNT_ID, deviceId: DEVICE_ID }),
+    ).toMatchObject({ initialized: false, keyEpoch: null });
+
+    const registration = await store.getDevicePublicRegistration({
+      accountId: ACCOUNT_ID,
+      deviceId: DEVICE_ID,
+      signDigest: () => Buffer.alloc(64, 0x74).toString("base64url"),
+    });
+    expect(registration).toMatchObject({
+      key_epoch: 4,
+      revision: 1,
+      public_key: pending.publicKey,
+    });
+
+    const aad = backupDeviceRootKeyAad({
+      accountId: ACCOUNT_ID,
+      deviceId: DEVICE_ID,
+      keyEpoch: 4,
+    });
+    const envelope = await hpkeWrapRootKeyForDevice(
+      pending.publicKey,
+      rootKey,
+      aad,
+    );
+    const openedByPendingDevice = await store.unwrapRootKeyForCurrentDevice({
+      accountId: ACCOUNT_ID,
+      deviceId: DEVICE_ID,
+      keyEpoch: 4,
+      envelope,
+    });
+    try {
+      expect(Buffer.from(openedByPendingDevice)).toEqual(rootKey);
+    } finally {
+      openedByPendingDevice.fill(0);
+      aad.fill(0);
+    }
+
+    await store.adoptRestoredAccount({
+      accountId: ACCOUNT_ID,
+      deviceId: DEVICE_ID,
+      keyEpoch: 4,
+      profileLineageId,
+      rootKey,
+      recoveryEnvelope,
+      now: NOW,
+    });
+    expect(
+      store.getState({ accountId: ACCOUNT_ID, deviceId: DEVICE_ID }),
+    ).toMatchObject({
+      initialized: true,
+      keyEpoch: 4,
+      profileLineageId,
+      recoveryConfirmed: true,
+    });
+    expect(database.readPendingDevice(ACCOUNT_ID, DEVICE_ID)).toBeNull();
+    expect(secureStorage.plaintexts).not.toContain(phrase);
+
+    const material = store.getArchivePublicMaterial({
+      accountId: ACCOUNT_ID,
+      deviceId: DEVICE_ID,
+    });
+    expect(material.recoveryRootKeyEnvelope).toEqual(recoveryEnvelope);
+    rootKey.fill(0);
+  }, 30_000);
 
   it("fails closed when secure storage is unavailable, weak, or corrupt", async () => {
     const unavailable = new OpaqueSecureStorage();

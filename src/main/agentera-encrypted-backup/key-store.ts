@@ -8,6 +8,7 @@ import type {
 import {
   base64urlDecode,
   base64urlEncode,
+  encryptRuntimeBindingProvenance as encryptProvenance,
   generateBackupDeviceKeyPair,
   recoveryPhraseFromEntropy,
   unwrapRootKeyForDevice as hpkeUnwrapRootKeyForDevice,
@@ -23,6 +24,7 @@ import type {
   AgenteraEncryptedBackupDatabase,
   EncryptedBackupAccountRecord,
   EncryptedBackupDeviceRecord,
+  EncryptedBackupPendingDeviceRecord,
 } from "./db";
 
 const DEVICE_REGISTRATION_DOMAIN =
@@ -60,6 +62,31 @@ export interface GetEncryptedBackupRegistrationInput {
   accountId: string;
   deviceId: string;
   signDigest: (digest: Uint8Array) => string;
+}
+
+export interface PrepareEncryptedBackupDeviceRegistrationInput {
+  accountId: string;
+  deviceId: string;
+  keyEpoch: number;
+  now?: Date;
+}
+
+export interface PreparedEncryptedBackupDeviceRegistration {
+  accountId: string;
+  deviceId: string;
+  publicKey: string;
+  keyEpoch: number;
+  revision: number;
+}
+
+export interface AdoptRestoredEncryptedBackupAccountInput {
+  accountId: string;
+  deviceId: string;
+  keyEpoch: number;
+  profileLineageId: string;
+  rootKey: Uint8Array;
+  recoveryEnvelope: RecoveryRootKeyEnvelopeV1;
+  now?: Date;
 }
 
 export interface WrapEncryptedBackupRootKeyInput {
@@ -235,13 +262,12 @@ export class AgenteraEncryptedBackupKeyStore {
   async getDevicePublicRegistration(
     input: GetEncryptedBackupRegistrationInput,
   ): Promise<AgenteraEncryptedBackupDeviceRegistration> {
-    const account = this.requireAccount(input.accountId);
-    const device = this.requireActiveLocalDevice(
-      input.accountId,
-      input.deviceId,
-    );
+    const account = this.database.readAccount(input.accountId);
+    const device = account
+      ? this.requireActiveLocalDevice(input.accountId, input.deviceId)
+      : this.requirePendingDevice(input.accountId, input.deviceId);
     const digest = signingDigest({
-      accountId: account.accountId,
+      accountId: input.accountId,
       deviceId: device.deviceId,
       keyEpoch: device.keyEpoch,
       revision: device.revision,
@@ -264,6 +290,68 @@ export class AgenteraEncryptedBackupKeyStore {
     };
   }
 
+  async prepareCurrentDeviceRegistration(
+    input: PrepareEncryptedBackupDeviceRegistrationInput,
+  ): Promise<PreparedEncryptedBackupDeviceRegistration> {
+    if (
+      !UUID_PATTERN.test(input.accountId) ||
+      !UUID_PATTERN.test(input.deviceId) ||
+      !Number.isSafeInteger(input.keyEpoch) ||
+      input.keyEpoch < 1
+    ) {
+      throw new Error("Encrypted backup device registration is invalid.");
+    }
+    const account = this.database.readAccount(input.accountId);
+    if (account) {
+      const device = this.requireActiveLocalDevice(
+        input.accountId,
+        input.deviceId,
+      );
+      if (
+        account.keyEpoch !== input.keyEpoch ||
+        device.keyEpoch !== input.keyEpoch
+      ) {
+        throw new Error("Encrypted backup local device key epoch is stale.");
+      }
+      return {
+        accountId: input.accountId,
+        deviceId: device.deviceId,
+        publicKey: device.publicKey,
+        keyEpoch: device.keyEpoch,
+        revision: device.revision,
+      };
+    }
+    const existing = this.database.readPendingDevice(
+      input.accountId,
+      input.deviceId,
+    );
+    if (existing) {
+      if (existing.keyEpoch !== input.keyEpoch) {
+        throw new Error("Encrypted backup pending device key epoch conflicts.");
+      }
+      return this.publicPendingDevice(existing);
+    }
+    this.assertSecureStorage();
+    const deviceKeys = await generateBackupDeviceKeyPair();
+    const encryptedPrivateKey = this.encryptSecret(deviceKeys.privateKey);
+    try {
+      this.database.savePendingDevice({
+        accountId: input.accountId,
+        deviceId: input.deviceId,
+        publicKey: deviceKeys.publicKey,
+        encryptedPrivateKey,
+        keyEpoch: input.keyEpoch,
+        revision: 1,
+        createdAt: input.now ?? new Date(),
+      });
+    } finally {
+      encryptedPrivateKey.fill(0);
+    }
+    return this.publicPendingDevice(
+      this.requirePendingDevice(input.accountId, input.deviceId),
+    );
+  }
+
   getArchivePublicMaterial(input: {
     accountId: string;
     deviceId: string;
@@ -282,6 +370,39 @@ export class AgenteraEncryptedBackupKeyStore {
       recoveryRootKeyEnvelope: { ...account.recoveryEnvelope },
       devicePublicKey: device.publicKey,
     };
+  }
+
+  encryptRuntimeBindingProvenance(input: {
+    accountId: string;
+    deviceId: string;
+    plaintext: Uint8Array;
+  }): Uint8Array {
+    const account = this.requireAccount(input.accountId);
+    const device = this.requireActiveLocalDevice(
+      input.accountId,
+      input.deviceId,
+    );
+    if (device.keyEpoch !== account.keyEpoch) {
+      throw new Error("Encrypted backup local device key epoch is stale.");
+    }
+    const rootKey = this.decryptRootKey(account.encryptedRootKey);
+    try {
+      const envelope = encryptProvenance({
+        rootKey,
+        profileLineageId: account.profileLineageId,
+        plaintext: input.plaintext,
+      });
+      const serialized = Buffer.from(JSON.stringify(envelope), "utf8");
+      if (serialized.byteLength > 1024 * 1024 + 4096) {
+        serialized.fill(0);
+        throw new Error(
+          "Encrypted backup RuntimeBinding provenance is too large.",
+        );
+      }
+      return new Uint8Array(serialized);
+    } finally {
+      rootKey.fill(0);
+    }
   }
 
   wrapBackupDataKey(input: {
@@ -339,13 +460,12 @@ export class AgenteraEncryptedBackupKeyStore {
     keyEpoch: number;
     envelope: DeviceRootKeyEnvelopeV1;
   }): Promise<Uint8Array> {
-    const account = this.requireAccount(input.accountId);
-    const device = this.requireActiveLocalDevice(
-      input.accountId,
-      input.deviceId,
-    );
+    const account = this.database.readAccount(input.accountId);
+    const device = account
+      ? this.requireActiveLocalDevice(input.accountId, input.deviceId)
+      : this.requirePendingDevice(input.accountId, input.deviceId);
     if (
-      input.keyEpoch !== account.keyEpoch ||
+      (account !== null && input.keyEpoch !== account.keyEpoch) ||
       device.keyEpoch !== input.keyEpoch ||
       !device.encryptedPrivateKey
     ) {
@@ -366,6 +486,75 @@ export class AgenteraEncryptedBackupKeyStore {
     } finally {
       privateKey.fill(0);
       aad.fill(0);
+    }
+  }
+
+  async adoptRestoredAccount(
+    input: AdoptRestoredEncryptedBackupAccountInput,
+  ): Promise<AgenteraEncryptedBackupState> {
+    if (
+      !UUID_PATTERN.test(input.accountId) ||
+      !UUID_PATTERN.test(input.deviceId) ||
+      !UUID_PATTERN.test(input.profileLineageId) ||
+      !Number.isSafeInteger(input.keyEpoch) ||
+      input.keyEpoch < 1 ||
+      !(input.rootKey instanceof Uint8Array) ||
+      input.rootKey.byteLength !== 32
+    ) {
+      throw new Error("Encrypted backup restored account is invalid.");
+    }
+    const existing = this.database.readAccount(input.accountId);
+    if (existing) {
+      const local = this.requireActiveLocalDevice(
+        input.accountId,
+        input.deviceId,
+      );
+      if (
+        existing.profileLineageId !== input.profileLineageId ||
+        existing.keyEpoch !== input.keyEpoch ||
+        local.keyEpoch !== input.keyEpoch
+      ) {
+        throw new Error("Encrypted backup restored account conflicts.");
+      }
+      this.database.deletePendingDevice(input.accountId, input.deviceId);
+      if (!existing.recoveryConfirmed) {
+        this.database.confirmRecoverySaved(
+          input.accountId,
+          input.now ?? new Date(),
+        );
+      }
+      return this.getState(input);
+    }
+    const pending = this.requirePendingDevice(input.accountId, input.deviceId);
+    if (pending.keyEpoch !== input.keyEpoch) {
+      pending.encryptedPrivateKey.fill(0);
+      throw new Error("Encrypted backup pending device key epoch conflicts.");
+    }
+    const encryptedRootKey = this.encryptSecret(
+      base64urlEncode(input.rootKey, 32),
+    );
+    const now = input.now ?? new Date();
+    try {
+      this.database.createAccount({
+        accountId: input.accountId,
+        profileLineageId: input.profileLineageId,
+        keyEpoch: input.keyEpoch,
+        encryptedRootKey,
+        recoveryEnvelope: input.recoveryEnvelope,
+        localDevice: {
+          deviceId: input.deviceId,
+          publicKey: pending.publicKey,
+          encryptedPrivateKey: pending.encryptedPrivateKey,
+          revision: pending.revision,
+        },
+        createdAt: now,
+      });
+      this.database.confirmRecoverySaved(input.accountId, now);
+      this.database.deletePendingDevice(input.accountId, input.deviceId);
+      return this.getState(input);
+    } finally {
+      encryptedRootKey.fill(0);
+      pending.encryptedPrivateKey.fill(0);
     }
   }
 
@@ -470,6 +659,29 @@ export class AgenteraEncryptedBackupKeyStore {
       throw new Error("Encrypted backup local device key is unavailable.");
     }
     return device;
+  }
+
+  private requirePendingDevice(
+    accountId: string,
+    deviceId: string,
+  ): EncryptedBackupPendingDeviceRecord {
+    const device = this.database.readPendingDevice(accountId, deviceId);
+    if (!device) {
+      throw new Error("Encrypted backup pending local device is unavailable.");
+    }
+    return device;
+  }
+
+  private publicPendingDevice(
+    device: EncryptedBackupPendingDeviceRecord,
+  ): PreparedEncryptedBackupDeviceRegistration {
+    return {
+      accountId: device.accountId,
+      deviceId: device.deviceId,
+      publicKey: device.publicKey,
+      keyEpoch: device.keyEpoch,
+      revision: device.revision,
+    };
   }
 
   private publicDevice(

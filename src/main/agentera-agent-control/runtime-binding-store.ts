@@ -551,6 +551,34 @@ export class RuntimeBindingStore {
     );
   }
 
+  listForInstallation(agentInstallationIdValue: string): LocalRuntimeBinding[] {
+    const agentInstallationId = uuid(
+      agentInstallationIdValue,
+      "invalid_binding",
+    );
+    return (
+      this.database.sqlite
+        .prepare(
+          `SELECT id, conversation_key, hermes_session_id, binding_json, created_at
+           FROM runtime_bindings
+           WHERE tenant_id = ? AND owner_id = ?
+             AND device_installation_id = ?
+           ORDER BY created_at ASC, id ASC`,
+        )
+        .all(
+          this.tenantId,
+          this.ownerId,
+          this.deviceInstallationId,
+        ) as BindingRow[]
+    )
+      .map((row) => parseRow(row))
+      .filter(
+        (binding): binding is LocalRuntimeBinding =>
+          binding !== null &&
+          binding.agentInstallationId === agentInstallationId,
+      );
+  }
+
   attachHermesSession(
     bindingIdValue: string,
     sessionIdValue: string,

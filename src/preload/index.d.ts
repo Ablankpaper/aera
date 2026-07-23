@@ -45,6 +45,16 @@ import type {
   OfficialQualityFeedbackSubmissionResult,
 } from "../shared/agentera-official-quality";
 import type {
+  AgenteraEncryptedBackupConfirmedRestore,
+  AgenteraEncryptedBackupCreationResult,
+  AgenteraEncryptedBackupPreparedRestore,
+  AgenteraEncryptedBackupProgress,
+  AgenteraEncryptedBackupPublicDevice,
+  AgenteraEncryptedBackupPublicEnrollment,
+  AgenteraEncryptedBackupPublicState,
+  AgenteraEncryptedBackupPublicSummary,
+} from "../shared/agentera-encrypted-backup";
+import type {
   AgenteraBoundConnectionPublicState,
   AgenteraBoundProfilePublicState,
   AgenteraConnectionClaimPublicState,
@@ -168,6 +178,42 @@ interface AgenteraOfficialQualityAPI {
       runId: string,
       eligibility: OfficialQualityFeedbackEligibility,
     ) => void,
+  ) => () => void;
+}
+
+interface AgenteraEncryptedBackupAPI {
+  getState: () => Promise<AgenteraEncryptedBackupPublicState>;
+  initializeRecovery: () => Promise<AgenteraEncryptedBackupPublicEnrollment>;
+  confirmRecoverySaved: () => Promise<AgenteraEncryptedBackupPublicState>;
+  registerCurrentDevice: () => Promise<AgenteraEncryptedBackupPublicDevice[]>;
+  authorizeDevice: (
+    deviceId: string,
+  ) => Promise<AgenteraEncryptedBackupPublicDevice[]>;
+  createBackup: (
+    installationId: string,
+  ) => Promise<AgenteraEncryptedBackupCreationResult>;
+  cancelBackup: (installationId: string) => Promise<boolean>;
+  listBackups: () => Promise<AgenteraEncryptedBackupPublicSummary[]>;
+  deleteBackup: (backupId: string) => Promise<void>;
+  setDailySchedule: (
+    installationId: string,
+    enabled: boolean,
+  ) => Promise<AgenteraEncryptedBackupPublicState>;
+  listDevices: () => Promise<AgenteraEncryptedBackupPublicDevice[]>;
+  revokeDevice: (
+    deviceId: string,
+  ) => Promise<AgenteraEncryptedBackupPublicDevice[]>;
+  prepareRestore: (
+    backupId: string,
+    recoveryPhrase?: string,
+  ) => Promise<AgenteraEncryptedBackupPreparedRestore>;
+  confirmRestore: (
+    preparationId: string,
+    name: string,
+  ) => Promise<AgenteraEncryptedBackupConfirmedRestore>;
+  cancelRestore: (preparationId: string) => Promise<boolean>;
+  onProgress: (
+    callback: (progress: AgenteraEncryptedBackupProgress[]) => void,
   ) => () => void;
 }
 
@@ -1736,6 +1782,7 @@ declare global {
     hermesAPI: HermesAPI;
     agenteraAuth: AgenteraAuthAPI;
     agenteraOfficialQuality: AgenteraOfficialQualityAPI;
+    agenteraEncryptedBackup: AgenteraEncryptedBackupAPI;
     agenteraProductSpace: AgenteraProductSpaceAPI;
     agenteraOrganization: AgenteraOrganizationAPI;
     agenteraWorkspace: AgenteraWorkspaceAPI;

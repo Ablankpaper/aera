@@ -194,6 +194,38 @@ describe("AgenteraEncryptedBackupDatabase", () => {
     expect(database.readDevice(OTHER_ACCOUNT_ID, OTHER_DEVICE_ID)).toBeNull();
   });
 
+  it("persists an account-scoped pending device key before cross-device authorization", () => {
+    const database = databaseFor();
+    const publicKey = Buffer.alloc(32, 0x41).toString("base64url");
+    database.savePendingDevice({
+      accountId: ACCOUNT_ID,
+      deviceId: DEVICE_ID,
+      publicKey,
+      encryptedPrivateKey: Buffer.from("sealed-pending-private"),
+      keyEpoch: 3,
+      revision: 1,
+      createdAt: NOW,
+    });
+
+    expect(database.readPendingDevice(ACCOUNT_ID, DEVICE_ID)).toMatchObject({
+      accountId: ACCOUNT_ID,
+      deviceId: DEVICE_ID,
+      publicKey,
+      keyEpoch: 3,
+      revision: 1,
+      createdAt: NOW.toISOString(),
+    });
+    expect(database.readPendingDevice(OTHER_ACCOUNT_ID, DEVICE_ID)).toBeNull();
+    expect(
+      persistedBytes(database.paths.databasePath).includes(
+        Buffer.from("sealed-pending-private"),
+      ),
+    ).toBe(true);
+
+    database.deletePendingDevice(ACCOUNT_ID, DEVICE_ID);
+    expect(database.readPendingDevice(ACCOUNT_ID, DEVICE_ID)).toBeNull();
+  });
+
   it("fails closed for corrupt records and unsupported schemas", () => {
     const userDataPath = temporaryUserData();
     const database = databaseFor(userDataPath);

@@ -39,7 +39,10 @@ import {
   type RecoveryRootKeyEnvelopeV1,
   type WrappedBackupDataKeyEnvelopeV1,
 } from "./crypto";
-import type { AgenteraEncryptedBackupKeyStore } from "./key-store";
+import type {
+  AdoptRestoredEncryptedBackupAccountInput,
+  AgenteraEncryptedBackupKeyStore,
+} from "./key-store";
 import {
   parseEncryptedBackupSnapshotManifest,
   type EncryptedBackupSnapshotFile,
@@ -113,7 +116,11 @@ export interface AgenteraEncryptedBackupRestoreServiceOptions {
   keyStore: Pick<
     AgenteraEncryptedBackupKeyStore,
     "unwrapRootKeyForCurrentDevice" | "recoverRestoreRootKeyFromPhrase"
-  >;
+  > & {
+    adoptRestoredAccount?: (
+      input: AdoptRestoredEncryptedBackupAccountInput,
+    ) => Promise<unknown>;
+  };
   getPrincipal: () => EncryptedBackupRestorePrincipal | null;
   agentControl: EncryptedBackupRestoreAgentControl;
   transactionsRoot: string;
@@ -153,6 +160,11 @@ interface PreparedRestoreState {
 
 interface MaterializationResult {
   provenancePath: string;
+}
+
+interface OpenedEncryptedBackupRootKey {
+  rootKey: Uint8Array;
+  recoveryEnvelope: RecoveryRootKeyEnvelopeV1;
 }
 
 function fail(code: EncryptedBackupRestoreErrorCode): never {
@@ -633,12 +645,13 @@ export class AgenteraEncryptedBackupRestoreService {
       privateDirectory(provenanceRoot);
       const detail = await this.client.getBackup(backupId, input.signal);
       verifyDetail(detail, backupId);
-      const rootKey = await this.openRootKey({
+      const openedRoot = await this.openRootKey({
         detail,
         accountId,
         deviceId,
         recoveryPhrase: input.recoveryPhrase,
       });
+      const rootKey = openedRoot.rootKey;
       let dataKey: Uint8Array | null = null;
       try {
         const wrappedDataKey =
@@ -777,6 +790,15 @@ export class AgenteraEncryptedBackupRestoreService {
           fail("ciphertext_invalid");
         }
         rmSync(ciphertextPath, { recursive: true, force: true });
+        await this.keyStore.adoptRestoredAccount?.({
+          accountId,
+          deviceId,
+          keyEpoch: detail.envelope.key_epoch,
+          profileLineageId: manifest.profileLineageId,
+          rootKey,
+          recoveryEnvelope: openedRoot.recoveryEnvelope,
+          now: this.now(),
+        });
         const prepared: PreparedEncryptedBackupRestore = {
           preparationId,
           backupId,
@@ -901,29 +923,7 @@ export class AgenteraEncryptedBackupRestoreService {
     accountId: string;
     deviceId: string;
     recoveryPhrase?: string;
-  }): Promise<Uint8Array> {
-    const current = input.detail.currentDeviceEnvelope;
-    if (
-      current &&
-      current.deviceId === input.deviceId &&
-      current.keyEpoch === input.detail.envelope.key_epoch
-    ) {
-      try {
-        return await this.keyStore.unwrapRootKeyForCurrentDevice({
-          accountId: input.accountId,
-          deviceId: input.deviceId,
-          keyEpoch: current.keyEpoch,
-          envelope: parseOpaqueEnvelope<DeviceRootKeyEnvelopeV1>(
-            current.rootKeyEnvelope,
-          ),
-        });
-      } catch {
-        // A valid phrase may recover after a lost or stale local device key.
-      }
-    }
-    if (input.recoveryPhrase === undefined) {
-      fail("device_authorization_required");
-    }
+  }): Promise<OpenedEncryptedBackupRootKey> {
     const recoveryEnvelope = parseOpaqueEnvelope<RecoveryRootKeyEnvelopeV1>(
       input.detail.recoveryRootKeyEnvelope,
     );
@@ -935,13 +935,41 @@ export class AgenteraEncryptedBackupRestoreService {
     ) {
       fail("metadata_invalid");
     }
+    const current = input.detail.currentDeviceEnvelope;
+    if (
+      current &&
+      current.deviceId === input.deviceId &&
+      current.keyEpoch === input.detail.envelope.key_epoch
+    ) {
+      try {
+        return {
+          rootKey: await this.keyStore.unwrapRootKeyForCurrentDevice({
+            accountId: input.accountId,
+            deviceId: input.deviceId,
+            keyEpoch: current.keyEpoch,
+            envelope: parseOpaqueEnvelope<DeviceRootKeyEnvelopeV1>(
+              current.rootKeyEnvelope,
+            ),
+          }),
+          recoveryEnvelope,
+        };
+      } catch {
+        // A valid phrase may recover after a lost or stale local device key.
+      }
+    }
+    if (input.recoveryPhrase === undefined) {
+      fail("device_authorization_required");
+    }
     try {
-      return await this.keyStore.recoverRestoreRootKeyFromPhrase({
-        accountId: input.accountId,
-        phrase: input.recoveryPhrase,
-        envelope: recoveryEnvelope,
-        profileLineageId: input.detail.envelope.profile_lineage_id,
-      });
+      return {
+        rootKey: await this.keyStore.recoverRestoreRootKeyFromPhrase({
+          accountId: input.accountId,
+          phrase: input.recoveryPhrase,
+          envelope: recoveryEnvelope,
+          profileLineageId: input.detail.envelope.profile_lineage_id,
+        }),
+        recoveryEnvelope,
+      };
     } catch {
       fail("recovery_failed");
     }
