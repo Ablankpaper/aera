@@ -236,6 +236,31 @@ They do not claim that the real host was changed, a certificate was issued,
 secrets were generated, a candidate was deployed, packages were built, or
 physical-device acceptance passed. Each remains a separate later proof.
 
+### Internal-Beta live acceptance boundary
+
+Internal-Beta acceptance is one canonical, content-free record bound to exact
+Cloud/Admin digests and the installed Mac/Windows package bytes.
+
+`validateLiveEvidence` in
+`scripts/internal-beta/verify-live-evidence.mjs` requires the exact Desktop,
+Cloud, Admin, and unchanged Runtime identities; candidate manifest hashes and
+Actions runs; direct-registration deployment state; short-lived certificate
+expiry; four package hashes; both platform roles; and the complete fixed
+success/rejection matrix. `parseAndValidateLiveEvidence` also rejects
+noncanonical JSON, while package verification rehashes each local artifact and
+refuses a symlink, changed size, or changed digest.
+
+The schema and semantic validator cannot store credentials, emails, recovery
+phrases, raw account/device identifiers, prompts/responses, Profile paths,
+arbitrary notes, or logs. Unsigned Gatekeeper and SmartScreen overrides remain
+one-time internal-only actions after exact checksum verification and never
+become signing claims.
+
+The release status remains `NOT_ACCEPTED` until the validator passes the
+complete record against real candidates and bytes. Local tests define this gate
+but do not claim a deployed host, built packages, physical Mac/Windows results,
+backup migration, rollback, or acceptance.
+
 ## Hermes and data boundary
 
 Quality, backup, and release failures cannot delay a conversation, revert local learning, mutate an active RuntimeBinding, overwrite a running Profile, or change `aera-runtime`.

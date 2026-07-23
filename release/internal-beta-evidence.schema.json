@@ -1,0 +1,387 @@
+{
+  "$defs": {
+    "adminSource": {
+      "additionalProperties": false,
+      "properties": {
+        "candidateManifestSha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "candidateRunUrl": {
+          "pattern": "^https://github\\.com/bignormal/aera-admin/actions/runs/[1-9][0-9]*$",
+          "type": "string"
+        },
+        "ciRunUrl": {
+          "pattern": "^https://github\\.com/bignormal/aera-admin/actions/runs/[1-9][0-9]*$",
+          "type": "string"
+        },
+        "imageDigest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha",
+        "ciRunUrl",
+        "candidateRunUrl",
+        "candidateManifestSha256",
+        "imageDigest"
+      ],
+      "type": "object"
+    },
+    "cloudSource": {
+      "additionalProperties": false,
+      "properties": {
+        "candidateManifestSha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "candidateRunUrl": {
+          "pattern": "^https://github\\.com/bignormal/aera-cloud/actions/runs/[1-9][0-9]*$",
+          "type": "string"
+        },
+        "ciRunUrl": {
+          "pattern": "^https://github\\.com/bignormal/aera-cloud/actions/runs/[1-9][0-9]*$",
+          "type": "string"
+        },
+        "imageDigest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha",
+        "ciRunUrl",
+        "candidateRunUrl",
+        "candidateManifestSha256",
+        "imageDigest"
+      ],
+      "type": "object"
+    },
+    "desktopSource": {
+      "additionalProperties": false,
+      "properties": {
+        "candidateManifestSha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "candidateRunUrl": {
+          "pattern": "^https://github\\.com/bignormal/aera/actions/runs/[1-9][0-9]*$",
+          "type": "string"
+        },
+        "ciRunUrl": {
+          "pattern": "^https://github\\.com/bignormal/aera/actions/runs/[1-9][0-9]*$",
+          "type": "string"
+        },
+        "sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha",
+        "ciRunUrl",
+        "candidateRunUrl",
+        "candidateManifestSha256"
+      ],
+      "type": "object"
+    },
+    "package": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "macos_arm64_dmg",
+            "macos_arm64_zip",
+            "windows_x64_setup",
+            "windows_x64_portable"
+          ]
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": ["role", "name", "sha256"],
+      "type": "object"
+    },
+    "platform": {
+      "additionalProperties": false,
+      "properties": {
+        "installedPackageRole": {
+          "enum": ["macos_arm64_dmg", "windows_x64_setup"]
+        },
+        "installedPackageSha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "platformVersion": {
+          "pattern": "^(macOS|Windows) [0-9]{1,2}$",
+          "type": "string"
+        },
+        "role": {
+          "enum": ["macos_arm64", "windows_x64"]
+        }
+      },
+      "required": [
+        "role",
+        "platformVersion",
+        "installedPackageRole",
+        "installedPackageSha256"
+      ],
+      "type": "object"
+    },
+    "runtimeSource": {
+      "additionalProperties": false,
+      "properties": {
+        "lockSha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        }
+      },
+      "required": ["sha", "lockSha256"],
+      "type": "object"
+    }
+  },
+  "$id": "https://aera.invalid/schemas/internal-beta-evidence.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "completedAt": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "deployment": {
+      "additionalProperties": false,
+      "properties": {
+        "adminImageDigest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "adminMutationsEnabled": {
+          "const": false
+        },
+        "certificateExpiresAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "cloudImageDigest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "encryptedBackupEnabled": {
+          "const": true
+        },
+        "officialAgentsEnabled": {
+          "const": true
+        },
+        "officialQualityEnabled": {
+          "const": true
+        },
+        "publicRegistrationEnabled": {
+          "const": true
+        },
+        "registrationMode": {
+          "const": "direct"
+        }
+      },
+      "required": [
+        "cloudImageDigest",
+        "adminImageDigest",
+        "certificateExpiresAt",
+        "registrationMode",
+        "publicRegistrationEnabled",
+        "officialAgentsEnabled",
+        "officialQualityEnabled",
+        "encryptedBackupEnabled",
+        "adminMutationsEnabled"
+      ],
+      "type": "object"
+    },
+    "outcomes": {
+      "additionalProperties": false,
+      "properties": {
+        "adminPrivateHealth": {
+          "const": "passed"
+        },
+        "appRestart": {
+          "const": "passed"
+        },
+        "backupInterruptedResume": {
+          "const": "passed"
+        },
+        "backupRevokedDeviceRejected": {
+          "const": "passed"
+        },
+        "backupTamperRejected": {
+          "const": "passed"
+        },
+        "backupWrongPhraseRejected": {
+          "const": "passed"
+        },
+        "cloudHealth": {
+          "const": "passed"
+        },
+        "directRegistration": {
+          "const": "passed"
+        },
+        "encryptedBackupCreate": {
+          "const": "passed"
+        },
+        "httpsHealth": {
+          "const": "passed"
+        },
+        "invalidOfflineBindingRejected": {
+          "const": "passed"
+        },
+        "invalidOfflineIssuerRejected": {
+          "const": "passed"
+        },
+        "invalidOfflineKeyRejected": {
+          "const": "passed"
+        },
+        "invalidOfflineSignatureRejected": {
+          "const": "passed"
+        },
+        "login": {
+          "const": "passed"
+        },
+        "macosInstall": {
+          "const": "passed"
+        },
+        "offlineBoundedUse": {
+          "const": "passed"
+        },
+        "offlineEntitlement": {
+          "const": "passed"
+        },
+        "officialAgentInstall": {
+          "const": "passed"
+        },
+        "officialAgentTurn": {
+          "const": "passed"
+        },
+        "qualityOffNoUpload": {
+          "const": "passed"
+        },
+        "qualityOnFixedCodeOnly": {
+          "const": "passed"
+        },
+        "registrationRecoveryUnavailable": {
+          "const": "passed"
+        },
+        "secondDeviceRestore": {
+          "const": "passed"
+        },
+        "signOutSignIn": {
+          "const": "passed"
+        },
+        "uninstallReinstall": {
+          "const": "passed"
+        },
+        "windowsInstall": {
+          "const": "passed"
+        }
+      },
+      "required": [
+        "httpsHealth",
+        "cloudHealth",
+        "adminPrivateHealth",
+        "directRegistration",
+        "registrationRecoveryUnavailable",
+        "login",
+        "offlineEntitlement",
+        "offlineBoundedUse",
+        "invalidOfflineIssuerRejected",
+        "invalidOfflineKeyRejected",
+        "invalidOfflineSignatureRejected",
+        "invalidOfflineBindingRejected",
+        "macosInstall",
+        "windowsInstall",
+        "officialAgentInstall",
+        "officialAgentTurn",
+        "qualityOffNoUpload",
+        "qualityOnFixedCodeOnly",
+        "encryptedBackupCreate",
+        "backupInterruptedResume",
+        "secondDeviceRestore",
+        "backupTamperRejected",
+        "backupWrongPhraseRejected",
+        "backupRevokedDeviceRejected",
+        "appRestart",
+        "signOutSignIn",
+        "uninstallReinstall"
+      ],
+      "type": "object"
+    },
+    "packages": {
+      "items": {
+        "$ref": "#/$defs/package"
+      },
+      "maxItems": 4,
+      "minItems": 4,
+      "type": "array"
+    },
+    "platforms": {
+      "items": {
+        "$ref": "#/$defs/platform"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "sources": {
+      "additionalProperties": false,
+      "properties": {
+        "admin": {
+          "$ref": "#/$defs/adminSource"
+        },
+        "cloud": {
+          "$ref": "#/$defs/cloudSource"
+        },
+        "desktop": {
+          "$ref": "#/$defs/desktopSource"
+        },
+        "runtime": {
+          "$ref": "#/$defs/runtimeSource"
+        }
+      },
+      "required": ["desktop", "cloud", "admin", "runtime"],
+      "type": "object"
+    },
+    "status": {
+      "const": "INTERNAL_BETA_ACCEPTED"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "status",
+    "completedAt",
+    "sources",
+    "deployment",
+    "packages",
+    "platforms",
+    "outcomes"
+  ],
+  "title": "Aera internal Beta live acceptance evidence",
+  "type": "object"
+}

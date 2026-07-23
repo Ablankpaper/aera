@@ -362,15 +362,15 @@ SMTP and SMS values are intentionally absent in this delivery. Do not configure 
 - Modify: `/Users/zizimutou/Desktop/aera/aera/.worktrees/internal-beta-delivery/docs/runbooks/release-status-template.md`
 - Modify: `/Users/zizimutou/Desktop/aera/aera/.worktrees/internal-beta-delivery/lat.md/agentera-post-official-delivery.md`
 
-- [ ] Write evidence tests requiring exact Cloud/Admin/Desktop/Runtime identities, candidate run URLs, deployed digests, package hashes, certificate expiry, direct-registration mode, Mac/Windows platform roles, and fixed outcomes for registration/login/Agent/quality/backup/restore/rejection/restart/sign-out/uninstall.
-- [ ] Add tests rejecting secrets, emails, recovery phrases, raw identifiers, prompts/responses, file paths, arbitrary notes, missing rejection scenarios, or evidence from package bytes that differ from the manifest.
-- [ ] Run `node --test scripts/internal-beta/verify-live-evidence.test.mjs`; expect RED.
-- [ ] Implement strict JSON-schema and semantic validation with canonical JSON enforcement.
-- [ ] Document exact checksum verification plus Gatekeeper and SmartScreen internal-only override steps without claiming signatures.
-- [ ] Document the live order: HTTPS/health, direct registration, Desktop OAuth/offline entitlement, Mac install, Windows install, Agent turn, quality off/on, backup interruption/resume, second-device restore, tamper/wrong-phrase/revocation failures, restart, sign-out/in, uninstall/reinstall.
-- [ ] Update release status so partial execution cannot be reported as internal-Beta acceptance.
-- [ ] Run validator tests, Prettier, focused release-policy tests, and Lat validation.
-- [ ] Commit: `git add release scripts/internal-beta docs/runbooks lat.md && git commit -m "test: define internal beta live acceptance"`.
+- [x] Write evidence tests requiring exact Cloud/Admin/Desktop/Runtime identities, candidate run URLs, deployed digests, package hashes, certificate expiry, direct-registration mode, Mac/Windows platform roles, and fixed outcomes for registration/login/Agent/quality/backup/restore/rejection/restart/sign-out/uninstall.
+- [x] Add tests rejecting secrets, emails, recovery phrases, raw identifiers, prompts/responses, file paths, arbitrary notes, missing rejection scenarios, or evidence from package bytes that differ from the manifest.
+- [x] Run `node --test scripts/internal-beta/verify-live-evidence.test.mjs`; expect RED.
+- [x] Implement strict JSON-schema and semantic validation with canonical JSON enforcement.
+- [x] Document exact checksum verification plus Gatekeeper and SmartScreen internal-only override steps without claiming signatures.
+- [x] Document the live order: HTTPS/health, direct registration, Desktop OAuth/offline entitlement, Mac install, Windows install, Agent turn, quality off/on, backup interruption/resume, second-device restore, tamper/wrong-phrase/revocation failures, restart, sign-out/in, uninstall/reinstall.
+- [x] Update release status so partial execution cannot be reported as internal-Beta acceptance.
+- [x] Run validator tests, Prettier, focused release-policy tests, and Lat validation.
+- [x] Commit: `git add release scripts/internal-beta docs/runbooks lat.md && git commit -m "test: define internal beta live acceptance"`.
 
 ### Task 13: Run exhaustive local verification and integrate the three repositories
 
