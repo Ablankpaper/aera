@@ -20,11 +20,11 @@ Snapshot date: `2026-07-23`
 | Approved design | `passed` | Production-readiness design and executable plan are committed in Desktop. |
 | Implemented on feature branches | `passed` | Separate Desktop, Cloud, and Admin `aera/official-quality-v1` worktrees; `aera-runtime` excluded. |
 | Local unit/contract verification | `passed` | Desktop, Cloud, and Admin exhaustive local matrices below passed on 2026-07-23. |
-| Local commits | `passed` | Exact final repository SHAs are recorded in the external handoff after the status-record commit. |
+| Local commits | `passed` | Verified code checkpoints: Desktop `e4ba6bbd98ac2ab5484e2e213645368c079ecd97`, Cloud `92632048a5261f02d06f132d22854dda1b513345`, Admin `57d637412470fc5c86524e40bd717399a9936162`. |
 | Merged to local `main` | `not_requested` | Requires explicit merge authorization. |
-| Pushed to origin | `not_requested` | Requires explicit push authorization. |
-| Remote CI for exact final SHAs | `external_blocked` | None of the three feature branches exists on origin. The latest unrelated Desktop and Cloud `main` runs contain zero executed steps and GitHub reports failed payments or an insufficient Actions spending limit; Admin has no CI run for this branch. |
-| Cloud/Admin signed candidate images | `external_blocked` | Requires successful remote CI, GHCR/OIDC signing, attestations, and protected Actions execution. |
+| Pushed to origin | `passed` | All three `aera/official-quality-v1` branches were pushed with explicit authorization. |
+| Remote CI for exact verified code SHAs | `passed` | Desktop run `30011233373`, Cloud run `30006310907`, and Admin run `30010245066` completed successfully for the exact checkpoints above. |
+| Cloud/Admin signed candidate images | `external_blocked` | CI built local verification images, not signed immutable candidates. GHCR/OIDC signing, attestations, protected candidate execution, and digest records are still required. |
 | Desktop signed candidate | `external_blocked` | Requires protected Apple/Windows signing credentials and native Actions runners. |
 | Real-device acceptance | `external_blocked` | Requires exact remotely signed bytes and the four-device physical/trusted matrix. |
 | Private staging deployed | `external_blocked` | Requires protected staging hosts, final staging DNS HTTPS, isolated providers/keys/data, and exact remote candidates. |
@@ -42,13 +42,13 @@ Snapshot date: `2026-07-23`
 The exact local verification checkpoints before this self-report are:
 
 ```text
-desktop_local_verification_sha=6d713a8f02829604e731ea63c4b80670183d8acd
+desktop_local_verification_sha=e4ba6bbd98ac2ab5484e2e213645368c079ecd97
 cloud_local_verification_sha=92632048a5261f02d06f132d22854dda1b513345
-admin_local_verification_sha=d2a755ec6fbf395de815f162e62915766a6a90d6
+admin_local_verification_sha=57d637412470fc5c86524e40bd717399a9936162
 runtime_unchanged_sha=c0439e1e3e5f35a91b658d57ddfc011e0d5ba1bb
 ```
 
-The final Desktop documentation commit is intentionally recorded in the external handoff because a commit cannot contain its own Git object ID. These local checkpoint SHAs are not signed candidate identities.
+The status-only Desktop successor commit is intentionally recorded in the external handoff because a commit cannot contain its own Git object ID. These verified source checkpoints and CI runs are not signed candidate identities.
 
 ## Exact release identities
 
@@ -113,11 +113,12 @@ A command that did not execute, a job with zero steps, a cached design result, o
 remote_ci_manifest_url=
 remote_ci_manifest_sha256=
 
-last_desktop_remote_observation_url=https://github.com/bignormal/aera/actions/runs/29951208500
-last_desktop_remote_observation=unrelated main SHA; three failed jobs; zero executed steps; GitHub billing/spending annotation
-last_cloud_remote_observation_url=https://github.com/bignormal/aera-cloud/actions/runs/29951171087
-last_cloud_remote_observation=unrelated main SHA; one failed job; zero executed steps; GitHub billing/spending annotation
-last_admin_remote_observation=no CI run for exact local branch SHA
+last_desktop_remote_observation_url=https://github.com/bignormal/aera/actions/runs/30011233373
+last_desktop_remote_observation=success at e4ba6bbd98ac2ab5484e2e213645368c079ecd97; Ubuntu, Windows, and macOS jobs executed typecheck, tests, official-quality E2E, and build; Ubuntu also executed exact Cloud contract, privacy, production dependency audit, and informational lint gates
+last_cloud_remote_observation_url=https://github.com/bignormal/aera-cloud/actions/runs/30006310907
+last_cloud_remote_observation=success at 92632048a5261f02d06f132d22854dda1b513345; delivery/secret boundaries, Go and Web verification, service integration/auth smoke, encrypted backup/disposable restore, and application image build executed
+last_admin_remote_observation_url=https://github.com/bignormal/aera-admin/actions/runs/30010245066
+last_admin_remote_observation=success at 57d637412470fc5c86524e40bd717399a9936162; exact Cloud contract, full verify, release image build, and real Cloud mTLS/service-JWT E2E executed
 
 device_evidence_url=
 device_evidence_sha256=

@@ -32,7 +32,7 @@ The quality outbox is a separate private SQLite domain below Electron `userData`
 
 Consent defaults off independently for passive quality and explicit feedback. An enqueue requires the currently active purpose and exact consent version, expires after thirty days, and treats exact event replay as idempotent while rejecting conflicting reuse. A future schema version is rejected without modification.
 
-Task 6 local evidence is `src/main/agentera-official-quality/{db,model,minimizer}.test.ts`: 31 focused tests cover path isolation, permissions, schema shape, default-off consent, strict canonical serialization, bucket boundaries, replay safety, expiry, and future-schema refusal. This is local feature-branch evidence only; it is not a push, deployment, collection rollout, or production consent grant.
+Task 6 focused evidence is `src/main/agentera-official-quality/{db,model,minimizer}.test.ts`: 31 tests cover path isolation, permissions, schema shape, default-off consent, strict canonical serialization, bucket boundaries, replay safety, expiry, and future-schema refusal. Feature-branch push and exact-SHA CI are recorded separately below; none of this is a deployment, collection rollout, or production consent grant.
 
 ### Trusted terminal collection
 
@@ -56,7 +56,7 @@ Explicit feedback remains independent from passive collection. [[src/main/agente
 
 The main process emits [[src/shared/agentera-official-quality.ts#OfficialQualityFeedbackEligibility]] only after an eligible PLATFORM-bound turn succeeds. [[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts#attachOfficialQualityEligibility]] never derives eligibility from a Dashboard event; without the trusted main-process token the renderer shows no controls. [[src/renderer/src/screens/Chat/MessageRow.tsx#MessageRow]] submits only the opaque event handle, `helpful|not_helpful`, and the closed reason catalog. Conversation text and renderer turn identity never enter that call.
 
-Task 8 local evidence covers strict IPC, independent consent, candidate expiry and revocation, renderer event scoping, default-off settings, fixed-code submission, and no-content canaries. This remains local feature-branch evidence only; it is not a push, deployment, production opt-in, or release.
+Task 8 focused evidence covers strict IPC, independent consent, candidate expiry and revocation, renderer event scoping, default-off settings, fixed-code submission, and no-content canaries. The feature branch has since passed exact-SHA remote CI; it is not a deployment, production opt-in, or release.
 
 ### Quality privacy and regression evidence
 
@@ -72,7 +72,7 @@ The 2026-07-23 local quality gate completed with these results:
 - Cloud: `go test -count=1 ./...` plus isolated PostgreSQL and Redis integration tests for `officialquality`, `adminapi`, and `jobs`.
 - Admin: `make verify`, including 22 web files and 78 web tests, Go unit/integration/race checks, OpenAPI, E2E typecheck, and release builds. The real Admin-to-Cloud run passed 15 of 15 scenarios, including nine-subject suppression, ten-subject visibility, Developer proposal, different-Super-Admin approval, Developer clone to a normal draft, unchanged immutable versions/releases, unauthorized-role denial, and privacy-safe audit.
 
-These are local feature-branch results. They do not mean local main merge, GitHub push, remote CI, staging deployment, production consent enablement, or public release. The Cloud HMAC feature remains disabled by default and no quality event is authorized to train, publish, alter rollout, mutate a RuntimeBinding, or enter Hermes learning.
+These results were first established locally and were later covered by the exact-SHA branch CI recorded below. They do not mean local main merge, staging deployment, production consent enablement, or public release. The Cloud HMAC feature remains disabled by default and no quality event is authorized to train, publish, alter rollout, mutate a RuntimeBinding, or enter Hermes learning.
 
 ## End-to-end encrypted backup V1
 
@@ -104,13 +104,13 @@ The implementation checkpoints are:
 - Cloud gate: `go test -count=1 ./...` plus isolated PostgreSQL, Redis, and MinIO execution of `AERA_INTEGRATION_TESTS=1 go test -count=1 -p 1 ./internal/encryptedbackup ./internal/jobs`.
 - Runtime boundary: `/Users/zizimutou/Desktop/aera/aera-runtime` remained clean on `c0439e1e3e5f35a91b658d57ddfc011e0d5ba1bb`.
 
-This is local feature-branch evidence only. Desktop and Cloud have not thereby been merged to local `main`, pushed, accepted by remote CI, deployed to staging or production, enabled for production accounts, or publicly released. The separate `aera-runtime` checkout was not changed.
+This acceptance was first established locally. Desktop and Cloud feature branches have since been pushed and accepted by exact-SHA remote CI, but they have not been merged to local `main`, deployed to staging or production, enabled for production accounts, or publicly released. The separate `aera-runtime` checkout was not changed.
 
 ## Production readiness and release
 
 Production delivery progresses through local verification, remote CI, private staging, signed candidates, real devices, restore and rollback rehearsal, disabled production deployment, bounded rollout, and separately approved public release.
 
-Cloud and Admin images are built once from exact commits and promoted by digest. Desktop macOS Apple Silicon and Windows 11 x64 artifacts are signed once, verified on real devices, and published without rebuilding. Missing GitHub billing, production credentials, domains, providers, signing certificates, devices, or final authority remains an external gate rather than a code fallback.
+Cloud and Admin images are built once from exact commits and promoted by digest. Desktop macOS Apple Silicon and Windows 11 x64 artifacts are signed once, verified on real devices, and published without rebuilding. Missing production credentials, domains, providers, signing certificates, devices, or final authority remains an external gate rather than a code fallback.
 
 The complete contract is `docs/superpowers/specs/2026-07-23-agentera-production-readiness-and-release-design.md`.
 
@@ -120,7 +120,15 @@ The executable CI, staging, signing, promotion, device-evidence, and rollback se
 
 `scripts/verify-ci-checkpoint.mjs` accepts only exact expected repository SHAs whose required platform jobs completed successfully after the commit and executed real steps.
 
-The manual `rerun-ci-checkpoint.yml` workflow dispatches the existing repository CI workflows and records their GitHub URLs and job facts without carrying production secrets or changing a failed result. The latest Desktop and Cloud runs remain `external_blocked`: GitHub reported zero executed steps because recent account payments failed or the Actions spending limit must be increased.
+The manual `rerun-ci-checkpoint.yml` workflow dispatches the existing repository CI workflows and records their GitHub URLs and job facts without carrying production secrets or changing a failed result.
+
+On 2026-07-23 the three pushed feature-branch checkpoints completed exact-SHA CI successfully:
+
+- Desktop `e4ba6bbd98ac2ab5484e2e213645368c079ecd97`: run `30011233373`; Ubuntu, Windows, and macOS typecheck, full tests, Official Quality E2E, and production build passed. Ubuntu also verified the pinned Cloud SHA and bytes, both privacy boundaries, and the production dependency tree.
+- Cloud `92632048a5261f02d06f132d22854dda1b513345`: run `30006310907`; delivery/secret contracts, Go and Web gates, service integration/auth smoke, encrypted backup/disposable restore, and application image build passed.
+- Admin `57d637412470fc5c86524e40bd717399a9936162`: run `30010245066`; exact Cloud contract verification, full unit/integration/race/Web/OpenAPI/build gates, release image build, and real Cloud mTLS/service-JWT E2E passed.
+
+These CI image builds are verification artifacts, not signed immutable release candidates.
 
 ### Signed Desktop candidate boundary
 
@@ -128,7 +136,7 @@ The Desktop candidate workflow builds signed distributable bytes once and cannot
 
 It requires exact-SHA successful CI, protected signing credentials, native macOS arm64 and Windows x64 runners, the exact locked Runtime Seed, Developer ID plus notarization and stapling evidence, Authenticode plus trusted timestamps, canonical updater metadata, an SPDX SBOM, provenance, checksums, and GitHub artifact attestation.
 
-`release.yml` and `beta-release.yml` no longer contain build or publication paths; they can only invoke the candidate workflow. Local policy and workflow tests pass, but no remotely signed candidate exists while GitHub Actions is billing-blocked and protected Apple/Windows credentials have not executed. Local verification therefore proves the fail-closed pipeline contract, not signed bytes, device acceptance, staging deployment, or release.
+`release.yml` and `beta-release.yml` no longer contain build or publication paths; they can only invoke the candidate workflow. Local policy and workflow tests pass, but no remotely signed candidate exists because the protected Apple/Windows signing path was not authorized or executed. Local and branch-CI verification therefore prove the fail-closed pipeline contract, not signed bytes, device acceptance, staging deployment, or release.
 
 ### Real-device evidence boundary
 
@@ -148,7 +156,7 @@ Private-staging acceptance is one canonical Ed25519-signed manifest bound to exa
 
 The same manifest binds an encrypted database backup, disposable restore, object inventory with zero missing/orphan objects, and a feature-control rollback drill. Raw-IP issuers, public services, production credentials, skipped runs, failed scenarios, missing recovery, unknown fields, noncanonical JSON, wrong Ed25519 key IDs, or invalid detached signatures fail closed.
 
-Official Agent, quality, and encrypted-backup E2Es now attach content-free `isolated_*_preflight` coverage summaries. Those attachments prove executable local coverage but cannot claim a deployed private-staging run. Actual staging acceptance remains `external_blocked` pending exact remote candidates, protected infrastructure, final DNS HTTPS, isolated secrets/providers/data, and signed protected run evidence.
+Official Agent, quality, and encrypted-backup E2Es now attach content-free `isolated_*_preflight` coverage summaries. Those attachments prove executable local/CI coverage but cannot claim a deployed private-staging run. Actual staging acceptance remains `external_blocked` pending exact remote candidates, protected infrastructure, final DNS HTTPS, isolated secrets/providers/data, and signed protected run evidence.
 
 ### Exact-byte production promotion boundary
 
@@ -160,7 +168,7 @@ Cloud and Admin enablement is fail-closed: a failed enabled health/smoke check r
 
 The publisher uploads only the six candidate artifacts plus their manifest, checksums, SBOM, and provenance; it has no build, packaging, Runtime Seed preparation, signing, notarization, or metadata-generation path.
 
-The production runbook distinguishes the controlled 5% Desktop candidate cohort from public updater availability because the current exact update metadata has no public staged percentage. Local publication tests pass with a fake GitHub API, including tampered-byte and mismatched-tag rejection. Production authorization, four deployment runs, monitoring, protected evidence, tag creation, and public release remain `external_blocked`; no remote write is inferred from the local implementation.
+The production runbook distinguishes the controlled 5% Desktop candidate cohort from public updater availability because the current exact update metadata has no public staged percentage. Local publication tests pass with a fake GitHub API, including tampered-byte and mismatched-tag rejection. Production authorization, four deployment runs, monitoring, protected evidence, tag creation, and public release remain `external_blocked`; the authorized feature-branch pushes and CI runs do not imply any production write.
 
 ### Rollback rehearsal boundary
 
@@ -176,14 +184,14 @@ Local verifier and fake-command workflow tests do not establish a real rehearsal
 
 The 2026-07-23 exhaustive local matrix passed from the isolated feature worktrees.
 
-- Desktop at verified code checkpoint `6d713a8f02829604e731ea63c4b80670183d8acd`: 299 Vitest files with 2,751 passing and 3 explicitly skipped tests; Node and renderer typechecks; production Electron build; 49 release-policy tests; official-quality and encrypted-backup boundary checks; Lat validation; and all 17 AgentEra Playwright scenarios in one single-worker run.
+- Desktop at verified code checkpoint `e4ba6bbd98ac2ab5484e2e213645368c079ecd97`: 299 Vitest files with 2,751 passing and 3 explicitly skipped tests; Node and renderer typechecks; production Electron build; 49 release-policy tests; official-quality and encrypted-backup boundary checks; Lat validation; and all 17 AgentEra Playwright scenarios in one single-worker run.
 - Cloud at `92632048a5261f02d06f132d22854dda1b513345`: secret/delivery/digest/manifest contracts; all default Go packages; security/control-plane/encrypted-backup race tests; vet and release builds; Web unit, type, build, and eight browser checks; PostgreSQL/Redis/MinIO integration; tagged E2E; auth smoke; encrypted backup and disposable restore; and local image build.
-- Admin at `d2a755ec6fbf395de815f162e62915766a6a90d6`: `make verify`; all release/deploy/Cloud-material contracts; local image build; 15 real-Cloud browser scenarios; and the backend E2E acceptance test.
+- Admin at `57d637412470fc5c86524e40bd717399a9936162`: `make verify`; all release/deploy/Cloud-material contracts; local image build; 15 real-Cloud browser scenarios; and the backend E2E acceptance test.
 - Runtime remained clean at `c0439e1e3e5f35a91b658d57ddfc011e0d5ba1bb`.
 
-The Desktop final documentation commit is recorded in the external handoff because a Git commit cannot contain its own object ID. No `aera/official-quality-v1` feature branch exists on origin. The latest unrelated Desktop and Cloud `main` Actions runs executed zero steps and carry GitHub's failed-payment or spending-limit annotation; Admin has no exact-branch CI run. Exact-SHA remote CI, signed candidates, physical-device evidence, private-staging acceptance, rollback rehearsal, production deployment, rollout, and public publication therefore remain `external_blocked` or not authorized as recorded in `docs/runbooks/release-status-template.md`.
+The Desktop status-only successor commit is recorded in the external handoff because a Git commit cannot contain its own object ID. All three `aera/official-quality-v1` branches exist on origin, and the exact verified code checkpoints passed the CI runs recorded above. Signed candidates, physical-device evidence, private-staging acceptance, rollback rehearsal, production deployment, rollout, and public publication remain `external_blocked` or not authorized as recorded in `docs/runbooks/release-status-template.md`.
 
-No local merge, push, workflow dispatch, deployment, DNS change, production feature enablement, tag, GitHub Release, or secret rotation occurred.
+Authorized feature-branch pushes and their CI runs occurred. No local `main` merge, pull request, deployment, DNS change, production feature enablement, tag, GitHub Release, or secret rotation occurred.
 
 ## Hermes and data boundary
 
