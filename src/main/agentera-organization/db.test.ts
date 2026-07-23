@@ -210,8 +210,11 @@ describe("AgenteraOrganizationDatabase", () => {
     delete process.env.HERMES_HOME;
 
     const database = databaseFor(userDataPath);
-    expect(statSync(database.paths.rootPath).mode & 0o777).toBe(0o700);
-    expect(statSync(database.databasePath).mode & 0o777).toBe(0o600);
+    // Node's POSIX mode projection is not Windows DACL evidence.
+    if (process.platform !== "win32") {
+      expect(statSync(database.paths.rootPath).mode & 0o777).toBe(0o700);
+      expect(statSync(database.databasePath).mode & 0o777).toBe(0o600);
+    }
   });
 
   it("creates only the exact account-partitioned schema", () => {
@@ -675,7 +678,9 @@ describe("AgenteraOrganizationDatabase", () => {
     chmodSync(databasePath, 0o666);
 
     const reopened = databaseFor(userDataPath);
-    expect(statSync(reopened.databasePath).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(reopened.databasePath).mode & 0o777).toBe(0o600);
+    }
     reopened.close();
 
     const raw = new DatabaseSync(databasePath);

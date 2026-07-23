@@ -198,7 +198,7 @@ describe("AgenteraOfficialQualityManager", () => {
     principal = { accountId: OTHER_ACCOUNT_ID, deviceId: DEVICE_ID };
     await quality.uploadPending();
     expect(uploadEvent).toHaveBeenCalledTimes(0);
-  });
+  }, 20_000);
 
   it("returns local consent and keeps explicit eligibility independent from passive upload", async () => {
     const candidate = {

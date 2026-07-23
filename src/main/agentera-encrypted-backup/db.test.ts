@@ -127,8 +127,12 @@ describe("AgenteraEncryptedBackupDatabase", () => {
     delete process.env.HERMES_HOME;
 
     const database = databaseFor(userDataPath);
-    expect(statSync(database.paths.rootPath).mode & 0o777).toBe(0o700);
-    expect(statSync(database.paths.databasePath).mode & 0o777).toBe(0o600);
+    // Node's POSIX mode projection is not Windows DACL evidence; the DACL
+    // remains part of the physical-Windows release gate.
+    if (process.platform !== "win32") {
+      expect(statSync(database.paths.rootPath).mode & 0o777).toBe(0o700);
+      expect(statSync(database.paths.databasePath).mode & 0o777).toBe(0o600);
+    }
   });
 
   it("stores versioned account-bound key records without secret plaintext", () => {

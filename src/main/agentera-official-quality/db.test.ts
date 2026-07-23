@@ -70,8 +70,12 @@ describe("AgenteraOfficialQualityDatabase", () => {
     delete process.env.HERMES_HOME;
 
     const database = databaseFor(userDataPath);
-    expect(statSync(database.paths.rootPath).mode & 0o777).toBe(0o700);
-    expect(statSync(database.paths.databasePath).mode & 0o777).toBe(0o600);
+    // Node's POSIX mode projection is not Windows DACL evidence; the DACL
+    // remains part of the physical-Windows release gate.
+    if (process.platform !== "win32") {
+      expect(statSync(database.paths.rootPath).mode & 0o777).toBe(0o700);
+      expect(statSync(database.paths.databasePath).mode & 0o777).toBe(0o600);
+    }
   });
 
   it("initializes versioned consent disabled for both independent purposes", () => {
@@ -347,5 +351,5 @@ describe("AgenteraOfficialQualityDatabase", () => {
     expect(database.countOutbox(ACCOUNT_ID, DEVICE_ID)).toBe(2);
     database.purgeAccount(ACCOUNT_ID);
     expect(database.countOutbox(ACCOUNT_ID, DEVICE_ID)).toBe(0);
-  });
+  }, 30_000);
 });

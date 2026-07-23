@@ -92,7 +92,10 @@ describe("AgenteraEncryptedBackupScheduler", () => {
           lastAttemptDay: null,
         }),
       ]);
-      expect(statSync(path).mode & 0o777).toBe(0o600);
+      // Node's POSIX mode projection is not Windows DACL evidence.
+      if (process.platform !== "win32") {
+        expect(statSync(path).mode & 0o777).toBe(0o600);
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

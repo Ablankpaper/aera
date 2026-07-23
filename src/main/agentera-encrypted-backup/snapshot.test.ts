@@ -168,84 +168,93 @@ describe("allowlisted encrypted-backup snapshot", () => {
     const beforeMemory = fileDigest(join(profilePath, "memories", "MEMORY.md"));
 
     let captured: EncryptedBackupSnapshot | null = null;
-    await withEncryptedBackupSnapshot(
-      snapshotInput(profilePath, transactionsRoot),
-      async (snapshot) => {
-        captured = snapshot;
-        expect(statSync(snapshot.transactionPath).mode & 0o777).toBe(0o700);
-        expect(statSync(snapshot.filesPath).mode & 0o777).toBe(0o700);
-        expect(statSync(snapshot.manifestPath).mode & 0o777).toBe(0o600);
-        const paths = snapshot.manifest.files.map((file) => file.path);
-        expect(paths).toEqual([
-          ".curator/state.json",
-          "config.yaml",
-          "curator/archives/one.json",
-          "files/image.bin",
-          "memories/MEMORY.md",
-          "memories/USER.md",
-          "provenance/runtime-bindings.enc",
-          "skills/learned/SKILL.md",
-          "skills/learned/references/notes.md",
-          "state.db",
-        ]);
-        const serialized = readFileSync(snapshot.manifestPath, "utf8");
-        for (const canary of [
-          "secret-config-canary",
-          "secret-token-canary",
-          "secret-env-canary",
-          "secret-auth-canary",
-          "secret-log-canary",
-          "secret-cache-canary",
-          "secret-runtime-canary",
-          "skill-secret-canary",
-          "attachment-secret-canary",
-          profilePath,
-        ]) {
-          expect(serialized).not.toContain(canary);
-        }
-        const safeConfig = readFileSync(
-          join(snapshot.filesPath, "config.yaml"),
-          "utf8",
-        );
-        expect(safeConfig).toContain("model: hermes-3");
-        expect(safeConfig).toContain("provider: local");
-        expect(safeConfig).not.toMatch(/api_key|token|external_dirs|secret/i);
+    try {
+      await withEncryptedBackupSnapshot(
+        snapshotInput(profilePath, transactionsRoot),
+        async (snapshot) => {
+          captured = snapshot;
+          // Node's POSIX mode projection is not Windows DACL evidence; the
+          // DACL remains part of the physical-Windows release gate.
+          if (process.platform !== "win32") {
+            expect(statSync(snapshot.transactionPath).mode & 0o777).toBe(0o700);
+            expect(statSync(snapshot.filesPath).mode & 0o777).toBe(0o700);
+            expect(statSync(snapshot.manifestPath).mode & 0o777).toBe(0o600);
+          }
+          const paths = snapshot.manifest.files.map((file) => file.path);
+          expect(paths).toEqual([
+            ".curator/state.json",
+            "config.yaml",
+            "curator/archives/one.json",
+            "files/image.bin",
+            "memories/MEMORY.md",
+            "memories/USER.md",
+            "provenance/runtime-bindings.enc",
+            "skills/learned/SKILL.md",
+            "skills/learned/references/notes.md",
+            "state.db",
+          ]);
+          const serialized = readFileSync(snapshot.manifestPath, "utf8");
+          for (const canary of [
+            "secret-config-canary",
+            "secret-token-canary",
+            "secret-env-canary",
+            "secret-auth-canary",
+            "secret-log-canary",
+            "secret-cache-canary",
+            "secret-runtime-canary",
+            "skill-secret-canary",
+            "attachment-secret-canary",
+            profilePath,
+          ]) {
+            expect(serialized).not.toContain(canary);
+          }
+          const safeConfig = readFileSync(
+            join(snapshot.filesPath, "config.yaml"),
+            "utf8",
+          );
+          expect(safeConfig).toContain("model: hermes-3");
+          expect(safeConfig).toContain("provider: local");
+          expect(safeConfig).not.toMatch(/api_key|token|external_dirs|secret/i);
 
-        const copiedDatabase = new DatabaseSync(
-          join(snapshot.filesPath, "state.db"),
-          { readOnly: true },
-        );
-        try {
-          expect(
-            copiedDatabase
-              .prepare("SELECT content FROM sessions WHERE id = ?")
-              .get("session-1"),
-          ).toEqual({ content: "private session" });
-          expect(
-            (
-              copiedDatabase.prepare("PRAGMA quick_check").get() as {
-                quick_check: string;
-              }
-            ).quick_check,
-          ).toBe("ok");
-        } finally {
-          copiedDatabase.close();
-        }
-        expect(existsSync(join(snapshot.filesPath, "state.db-wal"))).toBe(
-          false,
-        );
-        expect(existsSync(join(snapshot.filesPath, "state.db-shm"))).toBe(
-          false,
-        );
-        for (const file of snapshot.manifest.files) {
-          expect(
-            statSync(join(snapshot.filesPath, ...file.path.split("/"))).mode &
-              0o777,
-          ).toBe(0o600);
-        }
-      },
-    );
-    sourceDatabase.close();
+          const copiedDatabase = new DatabaseSync(
+            join(snapshot.filesPath, "state.db"),
+            { readOnly: true },
+          );
+          try {
+            expect(
+              copiedDatabase
+                .prepare("SELECT content FROM sessions WHERE id = ?")
+                .get("session-1"),
+            ).toEqual({ content: "private session" });
+            expect(
+              (
+                copiedDatabase.prepare("PRAGMA quick_check").get() as {
+                  quick_check: string;
+                }
+              ).quick_check,
+            ).toBe("ok");
+          } finally {
+            copiedDatabase.close();
+          }
+          expect(existsSync(join(snapshot.filesPath, "state.db-wal"))).toBe(
+            false,
+          );
+          expect(existsSync(join(snapshot.filesPath, "state.db-shm"))).toBe(
+            false,
+          );
+          if (process.platform !== "win32") {
+            for (const file of snapshot.manifest.files) {
+              expect(
+                statSync(join(snapshot.filesPath, ...file.path.split("/")))
+                  .mode & 0o777,
+              ).toBe(0o600);
+            }
+          }
+        },
+      );
+    } finally {
+      sourceDatabase.close();
+    }
 
     expect(captured).not.toBeNull();
     expect(existsSync(captured!.transactionPath)).toBe(false);

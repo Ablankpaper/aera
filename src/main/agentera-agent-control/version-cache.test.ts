@@ -328,12 +328,16 @@ describe("verified immutable Agent version cache", () => {
       version.content_digest,
       "version.json",
     );
-    chmodSync(versionFile, 0o600);
-    expect(() => store.getVerifiedVersion(VERSION_ID)).toThrowError(
-      expect.objectContaining<Partial<AgentVersionCacheError>>({
-        code: "cache_permissions_invalid",
-      }),
-    );
+    // Windows cache integrity is still enforced by signatures and digests;
+    // writable POSIX mode rejection is meaningful only on POSIX hosts.
+    if (process.platform !== "win32") {
+      chmodSync(versionFile, 0o600);
+      expect(() => store.getVerifiedVersion(VERSION_ID)).toThrowError(
+        expect.objectContaining<Partial<AgentVersionCacheError>>({
+          code: "cache_permissions_invalid",
+        }),
+      );
+    }
 
     chmodSync(versionFile, 0o600);
     writeFileSync(versionFile, "{}", { mode: 0o400 });

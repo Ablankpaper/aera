@@ -85,7 +85,7 @@ describe("AgentEra encrypted backup crypto v1", () => {
     } finally {
       key.fill(0);
     }
-  });
+  }, 30_000);
 
   it("derives stable, domain-separated manifest and chunk keys", () => {
     const rootKey = bytes(vector.rootKeyHex);

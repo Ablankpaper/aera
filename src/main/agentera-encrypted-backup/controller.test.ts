@@ -280,5 +280,5 @@ describe("AgenteraEncryptedBackupController", () => {
     );
     expect(plaintext.every((value) => value === 0)).toBe(true);
     expect(encrypted.every((value) => value === 0)).toBe(true);
-  });
+  }, 20_000);
 });

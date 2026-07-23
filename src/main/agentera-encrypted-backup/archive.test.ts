@@ -214,7 +214,10 @@ describe("AgentEra encrypted backup archive", () => {
         ),
       ),
     );
-    expect(brotliDecompressSync(compressed)).toEqual(fixture.concatenated);
+    const restored = brotliDecompressSync(compressed);
+    expect(restored.byteLength).toBe(fixture.concatenated.byteLength);
+    expect(sha256(restored)).toBe(sha256(fixture.concatenated));
+    restored.fill(0);
     compressed.fill(0);
     if (capturedDataKey !== null) {
       (capturedDataKey as Buffer).fill(0);
