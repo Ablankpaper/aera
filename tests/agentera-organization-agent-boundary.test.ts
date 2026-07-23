@@ -50,7 +50,7 @@ describe("Organization Agent renderer boundary", () => {
         "CREATE TABLE IF NOT EXISTS organization_agent_submission_refs",
       ),
       database.indexOf(
-        "PRAGMA user_version",
+        "CREATE TABLE IF NOT EXISTS encrypted_backup_restores",
         database.indexOf(
           "CREATE TABLE IF NOT EXISTS organization_agent_submission_refs",
         ),

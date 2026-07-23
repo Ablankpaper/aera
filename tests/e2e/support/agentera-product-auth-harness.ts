@@ -345,7 +345,17 @@ export async function createProductAuthHarness(): Promise<ProductAuthHarness> {
     };
     command(
       "docker",
-      ["compose", "-p", harness.composeProject, "up", "-d", "--wait"],
+      [
+        "compose",
+        "-p",
+        harness.composeProject,
+        "up",
+        "-d",
+        "--wait",
+        "postgres",
+        "redis",
+        "encrypted-backup-minio",
+      ],
       { cwd: cloudRoot, env: composeEnvironment(harness) },
     );
     harness.composeStarted = true;

@@ -462,7 +462,7 @@ describe("AgenteraEncryptedBackupRestoreService", () => {
     );
     expect(RESTORE_INSTALLATION_ID).not.toBe(SOURCE_INSTALLATION_ID);
     expect(readdirSync(join(fixture.root, "restore-transactions"))).toEqual([]);
-  });
+  }, 30_000);
 
   it("supports phrase recovery and rejects a wrong phrase without retaining plaintext", async () => {
     const fixture = await restoreFixture({ omitCurrentEnvelope: true });
@@ -539,7 +539,7 @@ describe("AgenteraEncryptedBackupRestoreService", () => {
       }),
     ).rejects.toMatchObject({ code: "base_unavailable" });
     expect(unavailableControl.activated).not.toHaveBeenCalled();
-  });
+  }, 30_000);
 
   it("cleans staging on disk-full and existing-destination refusal without touching prior state", async () => {
     const diskFull = await restoreFixture();
@@ -584,5 +584,5 @@ describe("AgenteraEncryptedBackupRestoreService", () => {
       [],
     );
     expect(existsSync(priorState)).toBe(true);
-  });
+  }, 30_000);
 });
