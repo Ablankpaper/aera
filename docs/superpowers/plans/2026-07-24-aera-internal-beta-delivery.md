@@ -234,16 +234,16 @@ SMTP and SMS values are intentionally absent in this delivery. Do not configure 
 - Modify: `/Users/zizimutou/Desktop/aera/aera/.worktrees/internal-beta-delivery/tests/agentera-auth-controller.test.ts`
 - Modify: `/Users/zizimutou/Desktop/aera/aera/.worktrees/internal-beta-delivery/lat.md/agentera-app-authentication.md`
 
-- [ ] Add tests for a build-time `MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON` containing one canonical HTTPS IP issuer, Ed25519 public key, and stable key ID.
-- [ ] Add rejection tests for malformed JSON, unknown fields, duplicate key IDs, remote HTTP, issuer paths, noncanonical base64url, wrong key length, and a configured issuer that differs from the Cloud origin.
-- [ ] Add a test proving `process.env.MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON` cannot add trust to a packaged build.
-- [ ] Add controller coverage proving online tokens are not persisted when the returned offline entitlement has a wrong issuer, key ID, signature, device binding, installation binding, or expiry.
-- [ ] Run `npx vitest run tests/agentera-auth-config.test.ts tests/agentera-auth-controller.test.ts`; expect RED.
-- [ ] Parse only the Vite-baked value, merge it with the loopback development root, freeze the result, and select keys only by exact canonical issuer.
-- [ ] Keep `MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL` as the build-time origin and require the workflow to prove its equality with the sole Beta issuer.
-- [ ] Update authentication Lat sections and their test references.
-- [ ] Run focused tests, Node typecheck, and `npm exec --yes --package=lat.md@0.12.1 -- lat check`; expect pass.
-- [ ] Commit: `git add src/main tests lat.md/agentera-app-authentication.md && git commit -m "feat: bind desktop beta to reviewed issuer keys"`.
+- [x] Add tests for a build-time `MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON` containing one canonical HTTPS IP issuer, Ed25519 public key, and stable key ID.
+- [x] Add rejection tests for malformed JSON, unknown fields, duplicate key IDs, remote HTTP, issuer paths, noncanonical base64url, wrong key length, and a configured issuer that differs from the Cloud origin.
+- [x] Add a test proving `process.env.MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON` cannot add trust to a packaged build.
+- [x] Add controller coverage proving online tokens are not persisted when the returned offline entitlement has a wrong issuer, key ID, signature, device binding, installation binding, or expiry.
+- [x] Run `npx vitest run tests/agentera-auth-config.test.ts tests/agentera-auth-controller.test.ts`; expect RED.
+- [x] Parse only the Vite-baked value, merge it with the loopback development root, freeze the result, and select keys only by exact canonical issuer.
+- [x] Keep `MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL` as the build-time origin and require the workflow to prove its equality with the sole Beta issuer.
+- [x] Update authentication Lat sections and their test references.
+- [x] Run focused tests, Node typecheck, and `npm exec --yes --package=lat.md@0.12.1 -- lat check`; expect pass.
+- [x] Commit: `git add src/main tests lat.md/agentera-app-authentication.md && git commit -m "feat: bind desktop beta to reviewed issuer keys"`.
 
 ### Task 8: Build an unsigned internal-Beta Desktop candidate workflow
 
