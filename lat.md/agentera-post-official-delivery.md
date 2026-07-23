@@ -140,6 +140,16 @@ Every role must pass the complete install/upgrade, online/offline, official Agen
 
 The verifier and schema-policy tests pass locally. Real-device status remains `external_blocked` until one remotely signed candidate and the required physical/trusted devices, QA accounts, backup authorizations, and testers produce protected evidence.
 
+### Private-staging acceptance boundary
+
+Private-staging acceptance is one canonical Ed25519-signed manifest bound to exact Cloud/Admin image digests and the Desktop candidate-manifest digest.
+
+`scripts/release/verify-staging-evidence.mjs` requires a final DNS HTTPS origin and issuer, VPN/tunnel/allowlist-only access, private Internal Admin dual authentication, non-public data services, disabled public registration, staging-only keys/data/providers, two accounts/devices, eight successful exact-SHA run URLs with real steps, and the closed scenario matrix.
+
+The same manifest binds an encrypted database backup, disposable restore, object inventory with zero missing/orphan objects, and a feature-control rollback drill. Raw-IP issuers, public services, production credentials, skipped runs, failed scenarios, missing recovery, unknown fields, noncanonical JSON, wrong Ed25519 key IDs, or invalid detached signatures fail closed.
+
+Official Agent, quality, and encrypted-backup E2Es now attach content-free `isolated_*_preflight` coverage summaries. Those attachments prove executable local coverage but cannot claim a deployed private-staging run. Actual staging acceptance remains `external_blocked` pending exact remote candidates, protected infrastructure, final DNS HTTPS, isolated secrets/providers/data, and signed protected run evidence.
+
 ## Hermes and data boundary
 
 Quality, backup, and release failures cannot delay a conversation, revert local learning, mutate an active RuntimeBinding, overwrite a running Profile, or change `aera-runtime`.

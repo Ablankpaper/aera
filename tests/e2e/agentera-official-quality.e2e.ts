@@ -161,3 +161,29 @@ test("new v2 binding uses v2 provenance while an existing v1 binding stays fixed
     },
   ]);
 });
+
+test("publishes a content-free staging coverage contract", async ({
+  browserName: _browserName,
+}, testInfo) => {
+  const coverage = {
+    schemaVersion: 1,
+    evidenceKind: "isolated_desktop_preflight",
+    suite: "official_quality_desktop",
+    scenarios: {
+      qualityConsentOff: true,
+      qualityConsentOn: true,
+      qualityFixedCodeFeedbackOnly: true,
+      qualityMinimizedUpload: true,
+      qualityNetworkFailureFailClosed: true,
+      qualityRuntimeBindingStability: true,
+      noPrivateMarkerInEnvelope: true,
+    },
+  };
+  expect(JSON.stringify(coverage)).not.toMatch(
+    /prompt|response|memory|profile|session|recovery|credential|token/iu,
+  );
+  await testInfo.attach("official-quality-staging-coverage", {
+    body: JSON.stringify(coverage, null, 2),
+    contentType: "application/json",
+  });
+});

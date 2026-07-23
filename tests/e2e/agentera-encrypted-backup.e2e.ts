@@ -262,7 +262,9 @@ test.afterAll(async () => {
   deviceC = null;
 });
 
-test("keeps Cloud ciphertext-only while authorized-device and phrase recovery create fresh Profiles", async () => {
+test("keeps Cloud ciphertext-only while authorized-device and phrase recovery create fresh Profiles", async ({
+  browserName: _browserName,
+}, testInfo) => {
   if (!harness) throw new Error("Encrypted backup harness is unavailable.");
 
   deviceA = await launchAgentControlDevice(harness, "A");
@@ -544,4 +546,28 @@ test("keeps Cloud ciphertext-only while authorized-device and phrase recovery cr
   expect(fileDigest(await readFile(join(sourceProfile, ".env")))).toBe(
     fileDigest(Buffer.from(`PRIVATE_TOKEN=${FORBIDDEN_SOURCE_CANARY}\n`)),
   );
+  await testInfo.attach("encrypted-backup-staging-coverage", {
+    body: JSON.stringify(
+      {
+        schemaVersion: 1,
+        evidenceKind: "isolated_cross_repo_preflight",
+        suite: "encrypted_backup_migration",
+        scenarios: {
+          backupEnablementAndPhraseConfirmation: true,
+          backupDeviceEnrollment: true,
+          backupManualCreation: true,
+          backupResumableUpload: true,
+          backupFailureRejections: true,
+          backupAuthorizedAndPhraseRestore: true,
+          backupCryptographicDeletion: true,
+          backupFreshProfileRestore: true,
+          noPrivateMarkerInCloud: true,
+          sourceProfileUnchanged: true,
+        },
+      },
+      null,
+      2,
+    ),
+    contentType: "application/json",
+  });
 });

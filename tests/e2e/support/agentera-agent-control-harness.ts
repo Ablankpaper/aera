@@ -232,8 +232,12 @@ function command(
     stdio: "pipe",
   });
   if (result.status !== 0) {
+    const spawnError =
+      result.error instanceof Error
+        ? `${result.error.name}: ${result.error.message}`
+        : "no spawn error was reported";
     throw new Error(
-      `${executable} ${args.join(" ")} failed\n${result.stdout}\n${result.stderr}`,
+      `${executable} ${args.join(" ")} failed\n${spawnError}\n${result.stdout ?? ""}\n${result.stderr ?? ""}`,
     );
   }
   return result.stdout;

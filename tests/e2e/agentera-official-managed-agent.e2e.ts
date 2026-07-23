@@ -1402,26 +1402,24 @@ test("real Admin, Cloud, and two desktops preserve v1 v2 rollback pause offline 
   await testInfo.attach("official-managed-agent-evidence", {
     body: JSON.stringify(
       {
-        definitionId: definition.definition_id,
-        installationId: installation.id,
-        runtimeProfileId: officialRuntimeProfileID,
-        hermesProfileId: officialHermesProfileID,
-        versions: { v1: v1.version_id, v2: v2.version_id },
-        releaseRevisions: {
-          v1: v1ReleaseRevisionID,
-          v2: v2ReleaseRevisionID,
-          rollback: rollbackReleaseRevisionID,
+        schemaVersion: 1,
+        evidenceKind: "isolated_cross_repo_preflight",
+        suite: "official_managed_agent",
+        scenarios: {
+          officialDraftSeparateApproval: true,
+          officialImmutableRelease: true,
+          officialDeterministicRollout: true,
+          officialPauseResumeRollback: true,
+          officialRuntimeBindingStability: true,
+          dependenciesFailClosed: true,
+          featureShutdownPreservesProfiles: true,
+          noPrivateMarkerInRequests: true,
         },
-        bindings: local.bindings.map((binding) => ({
-          id: binding.id,
-          conversationKey: binding.conversationKey,
-          versionId: binding.agentVersionId,
-          releaseRevisionId: binding.officialReleaseRevisionId,
-        })),
-        privateHashes,
-        requestPaths: captured.map(
-          (request) => `${request.method} ${request.path}`,
-        ),
+        counts: {
+          immutableVersions: 2,
+          releaseRevisions: 3,
+          runtimeBindings: local.bindings.length,
+        },
       },
       null,
       2,
