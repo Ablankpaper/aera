@@ -214,13 +214,13 @@ SMTP and SMS values are intentionally absent in this delivery. Do not configure 
 - Modify: `/Users/zizimutou/Desktop/aera/aera-admin/.worktrees/internal-beta-delivery/scripts/tests/release-manifest.test.sh`
 - Modify: `/Users/zizimutou/Desktop/aera/aera-admin/.worktrees/internal-beta-delivery/scripts/tests/ci-contract.test.sh`
 
-- [ ] Add the same SLSA v1, manifest-bundle, OIDC issuer, and workflow-identity failure tests, plus exact `cloudSha` and Cloud migration/API compatibility checks.
-- [ ] Run `bash scripts/tests/provenance.test.sh`, `bash scripts/tests/release-manifest.test.sh`, and `bash scripts/tests/ci-contract.test.sh`; expect RED.
-- [ ] Implement the Admin provenance predicate and keyless image/attestation/manifest signing path.
-- [ ] Remove the GitHub artifact-attestation action and permission.
-- [ ] Verify the signed candidate locally through fake-Cosign tests and retain the real verification in deployment scripts.
-- [ ] Run `make verify` and `AERA_ADMIN_E2E_CLOUD_REPO=/Users/zizimutou/Desktop/aera/aera-cloud/.worktrees/internal-beta-delivery make e2e`.
-- [ ] Commit: `git add .github/workflows/candidate.yml scripts/release scripts/tests && git commit -m "ci: attest private admin candidates with sigstore"`.
+- [x] Add the same SLSA v1, manifest-bundle, OIDC issuer, and workflow-identity failure tests, plus exact `cloudSha` and Cloud migration/API compatibility checks.
+- [x] Run `bash scripts/tests/provenance.test.sh`, `bash scripts/tests/release-manifest.test.sh`, and `bash scripts/tests/ci-contract.test.sh`; expect RED.
+- [x] Implement the Admin provenance predicate and keyless image/attestation/manifest signing path.
+- [x] Remove the GitHub artifact-attestation action and permission.
+- [x] Verify the signed candidate locally through fake-Cosign tests and retain the real verification in deployment scripts.
+- [x] Run `make verify` and `AERA_ADMIN_E2E_CLOUD_REPO=/Users/zizimutou/Desktop/aera/aera-cloud/.worktrees/internal-beta-delivery make e2e`.
+- [x] Commit: `git add .github/workflows/candidate.yml scripts/release scripts/tests && git commit -m "ci: attest private admin candidates with sigstore"`.
 
 ### Task 7: Add build-time Desktop Beta trust roots
 
