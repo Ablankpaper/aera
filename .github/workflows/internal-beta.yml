@@ -1,0 +1,511 @@
+name: Desktop internal Beta candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact successful-CI Desktop commit SHA
+        required: true
+        type: string
+      ci_run_id:
+        description: Successful Desktop CI run ID for source_sha
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: desktop-internal-beta-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate exact source, CI, and public Beta trust
+    runs-on: ubuntu-24.04
+    environment: internal-beta
+    timeout-minutes: 20
+    outputs:
+      ci_run_url: ${{ steps.ci.outputs.run_url }}
+      version: ${{ steps.identity.outputs.version }}
+    steps:
+      - name: Check out exact Desktop source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Validate source and workflow identity
+        id: identity
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_WORKFLOW_REF" = \
+            "$GITHUB_REPOSITORY/.github/workflows/internal-beta.yml@refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1)"
+          VERSION=$(node -p "require('./package.json').version")
+          test "$VERSION" = "0.7.4-internal-beta.1"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify successful CI belongs to the exact source
+        id: ci
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+        run: |
+          set -euo pipefail
+          gh run view "$CI_RUN_ID" --repo bignormal/aera \
+            --json conclusion,headSha,jobs,url,workflowName \
+            > "$RUNNER_TEMP/ci-run.json"
+          CI_RUN_JSON="$RUNNER_TEMP/ci-run.json" node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+
+          const run = JSON.parse(await readFile(process.env.CI_RUN_JSON, "utf8"));
+          if (run.workflowName !== "CI") throw new Error("Supplied run is not Desktop CI");
+          if (run.headSha !== process.env.SOURCE_SHA) throw new Error("CI source SHA differs");
+          if (run.conclusion !== "success") throw new Error("CI did not succeed");
+          if (!Array.isArray(run.jobs) || run.jobs.length < 3) {
+            throw new Error("CI platform matrix is incomplete");
+          }
+          for (const job of run.jobs) {
+            const executed = job.steps?.filter((step) => step.conclusion !== "skipped") ?? [];
+            if (job.conclusion !== "success" || executed.length === 0) {
+              throw new Error(`CI job did not execute successfully: ${job.name}`);
+            }
+          }
+          NODE
+          echo "run_url=$(node -p "require('$RUNNER_TEMP/ci-run.json').url")" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Install manifest validator dependencies
+        run: npm ci
+
+      - name: Validate protected public Beta trust inputs
+        shell: bash
+        env:
+          BETA_ORIGIN: ${{ vars.AERA_INTERNAL_BETA_ORIGIN }}
+          BETA_OFFLINE_KEY_ID: ${{ vars.AERA_INTERNAL_BETA_OFFLINE_KEY_ID }}
+          BETA_OFFLINE_PUBLIC_KEY: ${{ vars.AERA_INTERNAL_BETA_OFFLINE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          node scripts/internal-beta/manifest.mjs trust \
+            --origin "$BETA_ORIGIN" \
+            --trust-issuer "$BETA_ORIGIN" \
+            --offline-key-id "$BETA_OFFLINE_KEY_ID" \
+            --offline-public-key "$BETA_OFFLINE_PUBLIC_KEY"
+          node --test scripts/internal-beta/*.test.mjs
+
+  macos:
+    name: Build unsigned macOS arm64 internal Beta
+    needs: validate
+    runs-on: macos-15
+    environment: internal-beta
+    timeout-minutes: 90
+    steps:
+      - name: Check out exact Desktop source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+
+      - name: Require native Apple Silicon runner
+        shell: bash
+        run: test "$(uname -m)" = "arm64"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare and verify locked Runtime Seed
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.AERA_CROSS_REPO_READ_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          npm run prepare:runtime-seed -- --platform darwin --arch arm64
+          npm run verify:packaged-runtime-seed -- \
+            resources/agentera-runtime-seed \
+            --desktop-version "${{ needs.validate.outputs.version }}"
+
+      - name: Rebuild native dependencies for arm64
+        run: npx electron-builder install-app-deps --arch=arm64
+
+      - name: Build Desktop with exact Beta origin and trust root
+        env:
+          VITE_ANALYTICS_BASE_URL: ${{ vars.VITE_ANALYTICS_BASE_URL }}
+          VITE_ANALYTICS_API_KEY: ${{ secrets.VITE_ANALYTICS_API_KEY }}
+          MAIN_VITE_HERMES_API_URL: ${{ vars.HERMES_API_URL }}
+          MAIN_VITE_HERMES_API_KEY: ${{ secrets.HERMES_API_KEY }}
+          MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL: ${{ vars.AERA_INTERNAL_BETA_ORIGIN }}
+          MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON: >-
+            {"issuer":"${{ vars.AERA_INTERNAL_BETA_ORIGIN }}","keys":[{"keyId":"${{ vars.AERA_INTERNAL_BETA_OFFLINE_KEY_ID }}","publicKey":"${{ vars.AERA_INTERNAL_BETA_OFFLINE_PUBLIC_KEY }}"}]}
+        run: npm run build
+
+      - name: Package unsigned macOS DMG and ZIP
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: >-
+          npx electron-builder
+          --config build/electron-builder.internal-beta.yml
+          --mac dmg zip --arm64 --publish never
+
+      - name: Verify packaged Runtime Seed and stage immutable bytes
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          APP_PATH=$(find dist -maxdepth 3 -type d -name '*.app' -print)
+          test -n "$APP_PATH"
+          test "$(printf '%s\n' "$APP_PATH" | wc -l | tr -d ' ')" -eq 1
+          npm run verify:packaged-runtime-seed -- \
+            "$APP_PATH/Contents/Resources/agentera-runtime-seed" \
+            --reference-dir resources/agentera-runtime-seed \
+            --desktop-version "$VERSION"
+          destination="$RUNNER_TEMP/internal-beta-macos"
+          mkdir -p "$destination/artifacts" "$destination/runtime-seed"
+          for name in \
+            "Aera-Internal-Beta-$VERSION-macos-arm64.dmg" \
+            "Aera-Internal-Beta-$VERSION-macos-arm64.zip"
+          do
+            test -f "dist/$name"
+            cp "dist/$name" "$destination/artifacts/$name"
+          done
+          manifests=(resources/agentera-runtime-seed/*.manifest.json)
+          test "${#manifests[@]}" -eq 1
+          cp "${manifests[0]}" "$destination/runtime-seed/"
+
+      - name: Upload macOS internal-Beta bytes
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-internal-beta-macos-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/internal-beta-macos
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  windows:
+    name: Build unsigned Windows x64 internal Beta
+    needs: validate
+    runs-on: windows-2025
+    environment: internal-beta
+    timeout-minutes: 90
+    steps:
+      - name: Check out exact Desktop source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+
+      - name: Require native Windows x64 runner
+        shell: pwsh
+        run: |
+          if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
+            throw "Windows internal-Beta runner is not native x64"
+          }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare and verify locked Runtime Seed
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.AERA_CROSS_REPO_READ_TOKEN || github.token }}
+        run: |
+          npm run prepare:runtime-seed -- --platform windows --arch x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run verify:packaged-runtime-seed -- `
+            resources/agentera-runtime-seed `
+            --desktop-version "${{ needs.validate.outputs.version }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Rebuild native dependencies for x64
+        run: npx electron-builder install-app-deps --arch=x64
+
+      - name: Build Desktop with exact Beta origin and trust root
+        env:
+          VITE_ANALYTICS_BASE_URL: ${{ vars.VITE_ANALYTICS_BASE_URL }}
+          VITE_ANALYTICS_API_KEY: ${{ secrets.VITE_ANALYTICS_API_KEY }}
+          MAIN_VITE_HERMES_API_URL: ${{ vars.HERMES_API_URL }}
+          MAIN_VITE_HERMES_API_KEY: ${{ secrets.HERMES_API_KEY }}
+          MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL: ${{ vars.AERA_INTERNAL_BETA_ORIGIN }}
+          MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON: >-
+            {"issuer":"${{ vars.AERA_INTERNAL_BETA_ORIGIN }}","keys":[{"keyId":"${{ vars.AERA_INTERNAL_BETA_OFFLINE_KEY_ID }}","publicKey":"${{ vars.AERA_INTERNAL_BETA_OFFLINE_PUBLIC_KEY }}"}]}
+        run: npm run build
+
+      - name: Package unsigned Windows setup and portable executables
+        shell: pwsh
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          npx electron-builder `
+            --config build/electron-builder.internal-beta.yml `
+            --win nsis portable --x64 --publish never
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify packaged Runtime Seed and stage immutable bytes
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          $unpacked = @(Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*unpacked" })
+          if ($unpacked.Count -ne 1) { throw "Expected exactly one unpacked Windows app" }
+          $packagedSeed = Join-Path $unpacked[0].FullName "resources/agentera-runtime-seed"
+          npm run verify:packaged-runtime-seed -- `
+            $packagedSeed `
+            --reference-dir resources/agentera-runtime-seed `
+            --desktop-version $env:VERSION
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $destination = Join-Path $env:RUNNER_TEMP "internal-beta-windows"
+          New-Item -ItemType Directory -Force -Path `
+            (Join-Path $destination "artifacts"), `
+            (Join-Path $destination "runtime-seed") | Out-Null
+          $names = @(
+            "Aera-Internal-Beta-$env:VERSION-windows-x64-setup.exe",
+            "Aera-Internal-Beta-$env:VERSION-windows-x64-portable.exe"
+          )
+          foreach ($name in $names) {
+            $source = Join-Path "dist" $name
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+              throw "Missing expected internal-Beta artifact: $name"
+            }
+            Copy-Item -LiteralPath $source -Destination (Join-Path $destination "artifacts")
+          }
+          $manifests = @(Get-ChildItem resources/agentera-runtime-seed -File -Filter "*.manifest.json")
+          if ($manifests.Count -ne 1) { throw "Expected one Runtime Seed manifest" }
+          Copy-Item $manifests[0].FullName -Destination (Join-Path $destination "runtime-seed")
+
+      - name: Upload Windows internal-Beta bytes
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-internal-beta-windows-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/internal-beta-windows
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  assemble:
+    name: Assemble and Sigstore-sign internal Beta evidence
+    needs: [validate, macos, windows]
+    runs-on: ubuntu-24.04
+    environment: internal-beta
+    timeout-minutes: 40
+    steps:
+      - name: Check out exact Desktop source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Go for exact supply-chain tools
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download macOS internal-Beta bytes
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-internal-beta-macos-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/internal-beta-macos
+
+      - name: Download Windows internal-Beta bytes
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-internal-beta-windows-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/internal-beta-windows
+
+      - name: Assemble exact package and Runtime evidence
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p candidate/artifacts candidate/evidence candidate/runtime-seed
+          for name in \
+            "Aera-Internal-Beta-$VERSION-macos-arm64.dmg" \
+            "Aera-Internal-Beta-$VERSION-macos-arm64.zip"
+          do
+            source="$RUNNER_TEMP/internal-beta-macos/artifacts/$name"
+            test -f "$source"
+            cp "$source" "candidate/artifacts/$name"
+          done
+          for name in \
+            "Aera-Internal-Beta-$VERSION-windows-x64-setup.exe" \
+            "Aera-Internal-Beta-$VERSION-windows-x64-portable.exe"
+          do
+            source="$RUNNER_TEMP/internal-beta-windows/artifacts/$name"
+            test -f "$source"
+            cp "$source" "candidate/artifacts/$name"
+          done
+          mac_manifests=("$RUNNER_TEMP"/internal-beta-macos/runtime-seed/*.manifest.json)
+          windows_manifests=("$RUNNER_TEMP"/internal-beta-windows/runtime-seed/*.manifest.json)
+          test "${#mac_manifests[@]}" -eq 1
+          test "${#windows_manifests[@]}" -eq 1
+          cp "${mac_manifests[0]}" "${windows_manifests[0]}" candidate/runtime-seed/
+          cp build/agentera-runtime-seed.lock.json \
+            candidate/evidence/agentera-runtime-seed.lock.json
+
+      - name: Install exact Cosign and Syft versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          tool_bin="$RUNNER_TEMP/internal-beta-tools"
+          mkdir -p "$tool_bin"
+          GOBIN="$tool_bin" \
+            go install github.com/sigstore/cosign/v3/cmd/cosign@v3.0.6
+          GOBIN="$tool_bin" \
+            go install github.com/anchore/syft/cmd/syft@v1.44.0
+          echo "$tool_bin" >> "$GITHUB_PATH"
+
+      - name: Generate SPDX SBOM and SLSA v1 provenance
+        shell: bash
+        env:
+          BETA_ORIGIN: ${{ vars.AERA_INTERNAL_BETA_ORIGIN }}
+          BETA_OFFLINE_KEY_ID: ${{ vars.AERA_INTERNAL_BETA_OFFLINE_KEY_ID }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          BUILD_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          CREATED_AT=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          echo "CREATED_AT=$CREATED_AT" >> "$GITHUB_ENV"
+          syft dir:. \
+            --exclude './candidate/**' \
+            --exclude './.git/**' \
+            -o spdx-json=candidate/evidence/internal-beta.spdx.json
+          node scripts/internal-beta/manifest.mjs provenance \
+            --artifacts-dir candidate/artifacts \
+            --runtime-lock build/agentera-runtime-seed.lock.json \
+            --source-sha "$SOURCE_SHA" \
+            --version "$VERSION" \
+            --origin "$BETA_ORIGIN" \
+            --offline-key-id "$BETA_OFFLINE_KEY_ID" \
+            --build-run-url "$BUILD_RUN_URL" \
+            --created-at "$CREATED_AT" \
+            --output candidate/evidence/internal-beta.provenance.json
+
+      - name: Build and byte-verify canonical internal-Beta manifest
+        shell: bash
+        env:
+          BETA_ORIGIN: ${{ vars.AERA_INTERNAL_BETA_ORIGIN }}
+          BETA_OFFLINE_KEY_ID: ${{ vars.AERA_INTERNAL_BETA_OFFLINE_KEY_ID }}
+          BETA_OFFLINE_PUBLIC_KEY: ${{ vars.AERA_INTERNAL_BETA_OFFLINE_PUBLIC_KEY }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          CI_RUN_URL: ${{ needs.validate.outputs.ci_run_url }}
+          BUILD_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          common_args=(
+            --artifacts-dir candidate/artifacts
+            --build-run-url "$BUILD_RUN_URL"
+            --ci-run-url "$CI_RUN_URL"
+            --created-at "$CREATED_AT"
+            --offline-key-id "$BETA_OFFLINE_KEY_ID"
+            --offline-public-key "$BETA_OFFLINE_PUBLIC_KEY"
+            --origin "$BETA_ORIGIN"
+            --package-json package.json
+            --provenance candidate/evidence/internal-beta.provenance.json
+            --repository bignormal/aera
+            --runtime-lock build/agentera-runtime-seed.lock.json
+            --runtime-manifests-dir candidate/runtime-seed
+            --sbom candidate/evidence/internal-beta.spdx.json
+            --source-sha "$SOURCE_SHA"
+            --trust-issuer "$BETA_ORIGIN"
+            --version "$VERSION"
+          )
+          node scripts/internal-beta/manifest.mjs build \
+            "${common_args[@]}" \
+            --output candidate/internal-beta-manifest.json
+          node scripts/internal-beta/manifest.mjs verify \
+            "${common_args[@]}" \
+            --manifest candidate/internal-beta-manifest.json
+
+      - name: Keyless-sign and verify manifest and provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_WORKFLOW_REF" = \
+            "$GITHUB_REPOSITORY/.github/workflows/internal-beta.yml@refs/heads/main"
+          cosign sign-blob --yes \
+            --bundle candidate/evidence/internal-beta-provenance.cosign.bundle.json \
+            candidate/evidence/internal-beta.provenance.json
+          cosign sign-blob --yes \
+            --bundle candidate/evidence/internal-beta-manifest.cosign.bundle.json \
+            candidate/internal-beta-manifest.json
+
+          identity="^https://github\\.com/bignormal/aera/\\.github/workflows/internal-beta\\.yml@refs/heads/main$"
+          issuer="https://token.actions.githubusercontent.com"
+          cosign verify-blob \
+            --bundle candidate/evidence/internal-beta-provenance.cosign.bundle.json \
+            --certificate-identity-regexp "$identity" \
+            --certificate-oidc-issuer "$issuer" \
+            candidate/evidence/internal-beta.provenance.json
+          cosign verify-blob \
+            --bundle candidate/evidence/internal-beta-manifest.cosign.bundle.json \
+            --certificate-identity-regexp "$identity" \
+            --certificate-oidc-issuer "$issuer" \
+            candidate/internal-beta-manifest.json
+
+      - name: Record immutable SHA-256 checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd candidate
+            find artifacts evidence runtime-seed -type f -print0 \
+              | LC_ALL=C sort -z \
+              | xargs -0 sha256sum
+            sha256sum internal-beta-manifest.json
+          ) > candidate/SHA256SUMS
+          test "$(wc -l < candidate/SHA256SUMS | tr -d ' ')" -ge 11
+
+      - name: Upload one immutable 30-day internal-Beta candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-internal-beta-${{ inputs.source_sha }}
+          path: candidate
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

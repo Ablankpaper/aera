@@ -140,6 +140,16 @@ It requires exact-SHA successful CI, protected signing credentials, native macOS
 
 `release.yml` and `beta-release.yml` no longer contain build or publication paths; they can only invoke the candidate workflow. Local policy and workflow tests pass, but no remotely signed candidate exists because the protected Apple/Windows signing path was not authorized or executed. Local and branch-CI verification therefore prove the fail-closed pipeline contract, not signed bytes, device acceptance, staging deployment, or release.
 
+### Unsigned internal-Beta candidate boundary
+
+The internal-Beta path produces checksummed macOS arm64 and Windows x64 packages for trusted company testers while preserving a clear distinction from a signed production candidate.
+
+`.github/workflows/internal-beta.yml` requires one exact successful-CI Desktop SHA on `main`, prepares and verifies the locked Runtime Seed without checking out Runtime source, and bakes one reviewed HTTPS IP Origin plus its issuer-scoped Ed25519 public key. The Electron Builder overlay explicitly disables identity discovery, notarization, Windows executable signing, publication, tags, Releases, and updater delivery while retaining macOS Hardened Runtime.
+
+`scripts/internal-beta/manifest.mjs` binds version `0.7.4-internal-beta.1`, both workflow run identities, the Origin and public trust root, Runtime lock and Darwin/Windows manifests, four fixed package names and hashes, SPDX SBOM, SLSA v1 provenance, and `internal_only_unsigned`. Its strict parser rejects unknown fields and noncanonical JSON, while byte verification rejects changed packages or evidence.
+
+The workflow keyless-signs the canonical manifest and provenance with Cosign and immediately verifies the exact GitHub OIDC issuer plus `internal-beta.yml@refs/heads/main` identity. Its final artifact lasts thirty days and creates no public release surface. Local manifest/policy tests prove the pipeline contract only; no remote internal-Beta package or physical-device acceptance is claimed until the later live execution records it.
+
 ### Real-device evidence boundary
 
 Real-device approval is one canonical record bound to the exact candidate manifest and installed artifact hashes.
