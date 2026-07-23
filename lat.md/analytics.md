@@ -28,6 +28,8 @@ Screen navigation is tracked via `captureScreenView` from [[src/renderer/src/App
 
 ## Build & CSP
 
-The `VITE_ANALYTICS_BASE_URL` and `VITE_ANALYTICS_API_KEY` secrets are injected into every `npm run build` step of the release workflow (`.github/workflows/release.yml`).
+Analytics build values enter only the two protected platform jobs in the immutable Desktop candidate workflow.
+
+`VITE_ANALYTICS_BASE_URL` and `VITE_ANALYTICS_API_KEY` are injected in `.github/workflows/release-candidate.yml`. The manual beta/stable compatibility entrypoints do not build and receive no analytics secret directly.
 
 The Content-Security-Policy in [[src/main/app/start.ts]] and `src/renderer/index.html` allows `connect-src` to reach the analytics host (`https://*.hermesone.org`); the former PostHog `script-src`/`connect-src` allowances were removed.

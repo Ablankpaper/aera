@@ -122,6 +122,14 @@ The executable CI, staging, signing, promotion, device-evidence, and rollback se
 
 The manual `rerun-ci-checkpoint.yml` workflow dispatches the existing repository CI workflows and records their GitHub URLs and job facts without carrying production secrets or changing a failed result. The latest Desktop and Cloud runs remain `external_blocked`: GitHub reported zero executed steps because recent account payments failed or the Actions spending limit must be increased.
 
+### Signed Desktop candidate boundary
+
+The Desktop candidate workflow builds signed distributable bytes once and cannot tag or publish them.
+
+It requires exact-SHA successful CI, protected signing credentials, native macOS arm64 and Windows x64 runners, the exact locked Runtime Seed, Developer ID plus notarization and stapling evidence, Authenticode plus trusted timestamps, canonical updater metadata, an SPDX SBOM, provenance, checksums, and GitHub artifact attestation.
+
+`release.yml` and `beta-release.yml` no longer contain build or publication paths; they can only invoke the candidate workflow. Local policy and workflow tests pass, but no remotely signed candidate exists while GitHub Actions is billing-blocked and protected Apple/Windows credentials have not executed. Local verification therefore proves the fail-closed pipeline contract, not signed bytes, device acceptance, staging deployment, or release.
+
 ## Hermes and data boundary
 
 Quality, backup, and release failures cannot delay a conversation, revert local learning, mutate an active RuntimeBinding, overwrite a running Profile, or change `aera-runtime`.
