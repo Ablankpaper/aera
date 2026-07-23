@@ -162,6 +162,16 @@ The publisher uploads only the six candidate artifacts plus their manifest, chec
 
 The production runbook distinguishes the controlled 5% Desktop candidate cohort from public updater availability because the current exact update metadata has no public staged percentage. Local publication tests pass with a fake GitHub API, including tampered-byte and mismatched-tag rejection. Production authorization, four deployment runs, monitoring, protected evidence, tag creation, and public release remain `external_blocked`; no remote write is inferred from the local implementation.
 
+### Rollback rehearsal boundary
+
+Rollback acceptance requires signed private-staging proof that exact compatible Cloud/Admin images move B → A → B without a down migration or preserved-state change.
+
+`scripts/release/verify-rollback-evidence.mjs` binds encrypted backup/disposable restore, object reconciliation and client decryption, image signatures/schema compatibility, health/read checks, append-only Official Agent rollback, fixed existing RuntimeBindings, safe Desktop withdrawal/correction, five fail-closed injections, and before/after hashes for Profile and Hermes learning state.
+
+The protected Cloud/Admin rollback workflows can target staging only when the exact current candidate is supplied and automatic restoration is enabled. They record B → A, re-verify and restore B disabled, and upload separate rollback/restoration artifacts. Production rollback never auto-restores and still requires its own protected approval.
+
+Local verifier and fake-command workflow tests do not establish a real rehearsal. Exact signed candidates, staging infrastructure, executed runs, protected evidence, and independent approval remain `external_blocked`.
+
 ## Hermes and data boundary
 
 Quality, backup, and release failures cannot delay a conversation, revert local learning, mutate an active RuntimeBinding, overwrite a running Profile, or change `aera-runtime`.
