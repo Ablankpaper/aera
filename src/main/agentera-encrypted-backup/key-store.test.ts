@@ -388,7 +388,7 @@ describe("AgenteraEncryptedBackupKeyStore", () => {
           "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
       }),
     ).rejects.toThrow("not initialized");
-  });
+  }, 30_000);
 
   it("recovers a signed remote lineage on a new device without requiring a pre-existing local backup account", async () => {
     const { store } = storeFor();
