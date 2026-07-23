@@ -189,17 +189,17 @@ SMTP and SMS values are intentionally absent in this delivery. Do not configure 
 - Modify: `/Users/zizimutou/Desktop/aera/aera-cloud/.worktrees/internal-beta-delivery/scripts/tests/release-manifest.test.sh`
 - Modify: `/Users/zizimutou/Desktop/aera/aera-cloud/.worktrees/internal-beta-delivery/scripts/tests/delivery-contract.test.sh`
 
-- [ ] Write provenance tests requiring canonical SLSA v1 predicate fields for exact repository, source SHA, workflow path, workflow ref, run URL, builder identity, and immutable image digest.
-- [ ] Extend manifest tests to reject a missing/tampered `manifest.sigstore.json`, absent SLSA attestation, wrong certificate identity, wrong OIDC issuer, or mismatched provenance digest.
-- [ ] Change delivery-contract expectations to require `cosign attest --type slsaprovenance1` and forbid `actions/attest-build-provenance`.
-- [ ] Run the three shell suites; expect RED.
-- [ ] Implement canonical provenance predicate generation with no secret/environment dump.
-- [ ] In candidate workflow, generate the predicate, run `cosign sign --yes IMAGE@DIGEST`, and run `cosign attest --yes --type slsaprovenance1 --predicate provenance.json IMAGE@DIGEST`.
-- [ ] Build the candidate manifest, sign it with `cosign sign-blob --yes --bundle manifest.sigstore.json manifest.json`, then run manifest verification after the bundle exists.
-- [ ] Verify image, SLSA v1 attestation, manifest bundle, source SHA, workflow identity, issuer, and local SBOM/provenance digests.
-- [ ] Remove `attestations: write`; retain `id-token: write`, `contents: read`, `actions: read`, and `packages: write`.
-- [ ] Run shell suites, `go test ./...`, `go vet ./...`, Web test/typecheck/build, and secret scan.
-- [ ] Commit: `git add .github/workflows/candidate.yml scripts/release scripts/tests && git commit -m "ci: attest private cloud candidates with sigstore"`.
+- [x] Write provenance tests requiring canonical SLSA v1 predicate fields for exact repository, source SHA, workflow path, workflow ref, run URL, builder identity, and immutable image digest.
+- [x] Extend manifest tests to reject a missing/tampered `manifest.sigstore.json`, absent SLSA attestation, wrong certificate identity, wrong OIDC issuer, or mismatched provenance digest.
+- [x] Change delivery-contract expectations to require `cosign attest --type slsaprovenance1` and forbid `actions/attest-build-provenance`.
+- [x] Run the three shell suites; expect RED.
+- [x] Implement canonical provenance predicate generation with no secret/environment dump.
+- [x] In candidate workflow, generate the predicate, run `cosign sign --yes IMAGE@DIGEST`, and run `cosign attest --yes --type slsaprovenance1 --predicate provenance.json IMAGE@DIGEST`.
+- [x] Build the candidate manifest, sign it with `cosign sign-blob --yes --bundle manifest.sigstore.json manifest.json`, then run manifest verification after the bundle exists.
+- [x] Verify image, SLSA v1 attestation, manifest bundle, source SHA, workflow identity, issuer, and local SBOM/provenance digests.
+- [x] Remove `attestations: write`; retain `id-token: write`, `contents: read`, `actions: read`, and `packages: write`.
+- [x] Run shell suites, `go test ./...`, `go vet ./...`, Web test/typecheck/build, and secret scan.
+- [x] Commit: `git add .github/workflows/candidate.yml scripts/release scripts/tests && git commit -m "ci: attest private cloud candidates with sigstore"`.
 
 ### Task 6: Replace unavailable private-repository attestations in Admin
 
