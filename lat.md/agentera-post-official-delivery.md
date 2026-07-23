@@ -58,6 +58,22 @@ The main process emits [[src/shared/agentera-official-quality.ts#OfficialQuality
 
 Task 8 local evidence covers strict IPC, independent consent, candidate expiry and revocation, renderer event scoping, default-off settings, fixed-code submission, and no-content canaries. This remains local feature-branch evidence only; it is not a push, deployment, production opt-in, or release.
 
+### Quality privacy and regression evidence
+
+The quality privacy gate locks the public envelope, private outbox, and production import boundary before every Desktop CI build.
+
+`scripts/check-official-quality-boundary.mjs` verifies the exact 20-field public envelope, the exact 11-column private outbox, and every production import in the quality domain. It rejects content or identity fields and imports from Hermes Memory, private Skill, Curator, session-content, or attachment modules. The gate runs on every Desktop CI operating-system matrix entry.
+
+[[tests/e2e/agentera-official-quality.e2e.ts]] composes the production SQLite privacy store, minimizer, collector, manager, Cloud client, and content-discarding chat observer around fixed local RuntimeBindings. Its deterministic Cloud fixture captures only protocol requests and cannot change product execution. The five acceptance cases prove default-off emits nothing, passive consent emits one minimized terminal envelope, explicit feedback is separately gated and fixed-code-only, network failure leaves chat successful with a retryable outbox row, and a new v2 RuntimeBinding does not mutate an existing v1 binding.
+
+The 2026-07-23 local quality gate completed with these results:
+
+- Desktop: 71 focused quality, IPC, settings, and chat tests; 5 Playwright protocol tests; Node and renderer typechecks; production Electron build; privacy boundary of 20 public fields, 11 outbox columns, and 7 production modules.
+- Cloud: `go test -count=1 ./...` plus isolated PostgreSQL and Redis integration tests for `officialquality`, `adminapi`, and `jobs`.
+- Admin: `make verify`, including 22 web files and 78 web tests, Go unit/integration/race checks, OpenAPI, E2E typecheck, and release builds. The real Admin-to-Cloud run passed 15 of 15 scenarios, including nine-subject suppression, ten-subject visibility, Developer proposal, different-Super-Admin approval, Developer clone to a normal draft, unchanged immutable versions/releases, unauthorized-role denial, and privacy-safe audit.
+
+These are local feature-branch results. They do not mean local main merge, GitHub push, remote CI, staging deployment, production consent enablement, or public release. The Cloud HMAC feature remains disabled by default and no quality event is authorized to train, publish, alter rollout, mutate a RuntimeBinding, or enter Hermes learning.
+
 ## End-to-end encrypted backup V1
 
 Encrypted backup stores immutable ciphertext snapshots for one USER-owned Installation and physical Profile; it is not Agent sync or live multi-device state replication.

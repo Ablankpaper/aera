@@ -37,6 +37,9 @@ jobs:
       - name: Verify pinned AgentEra cloud contract
         run: npm run check:agentera-cloud-contract
 
+      - name: Verify official quality privacy boundary
+        run: npm run check:official-quality-boundary
+
       - name: Audit production dependency tree
         if: matrix.os == 'ubuntu-latest'
         run: npm audit --omit=dev --audit-level=high
@@ -46,6 +49,9 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Test official quality privacy flow
+        run: npm run test:e2e:official-quality
 
       - name: Build
         run: npm run build

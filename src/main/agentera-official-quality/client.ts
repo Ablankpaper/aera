@@ -1,4 +1,4 @@
-import { parseAgenteraCloudOrigin } from "../agentera-auth/config";
+import { parseAgenteraCloudOrigin } from "../agentera-auth/origin";
 import {
   OFFICIAL_QUALITY_PURPOSES,
   type OfficialQualityPurpose,
