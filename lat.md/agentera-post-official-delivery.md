@@ -86,6 +86,26 @@ The complete contract is `docs/superpowers/specs/2026-07-23-agentera-end-to-end-
 
 The executable Cloud/Desktop implementation sequence is `docs/superpowers/plans/2026-07-23-agentera-end-to-end-encrypted-backup-migration-v1.md`.
 
+### Local encrypted-backup acceptance evidence
+
+The production Desktop application, a real Cloud process, PostgreSQL, Redis, MinIO, and three isolated Electron device homes completed the encrypted-backup acceptance flow on 2026-07-23.
+
+The proof refused backup while a Profile had a running chat, then created and sealed a manual backup after the runtime became idle. PostgreSQL and MinIO inspection found none of the plaintext canaries in object bytes, object metadata, public backup metadata, device envelopes, or wrapped-key rows. A separately registered and authorized second device restored into a new USER-owned Installation and fresh Profile. A third device recovered the same backup with only the 24-word phrase.
+
+The same flow rejected a wrong phrase, resumed after a forced first-chunk upload failure, rejected a revoked device, and detected tampered ciphertext without changing the restored Profile. Deletion destroyed recovery material, wrapped keys, and device envelopes before retrying unavailable object-store cleanup to zero remaining objects. The source Profile's Memory, USER state, private Skills, environment file bytes, session rows, and RuntimeBindings remained unchanged throughout.
+
+`scripts/check-encrypted-backup-boundary.mjs` independently locks the cross-repository privacy boundary: Cloud tables and object metadata may contain only opaque ciphertext or public protocol metadata, while the Desktop allowlist excludes credentials and environment files and cannot call the Hermes backup mechanism.
+
+The implementation checkpoints are:
+
+- Desktop: `5440a7e`, `0d29df6`, `cdf37d4`, `e910bb5`, `d0c1d36`, `09e00bf`, the real-E2E device-identity fix `cfbe1f3`, and acceptance/CI commit `decc9c0`.
+- Cloud: `acaead9`, `8b2d07a`, `a36542b`, `fddf990`, `d4a3807`, `e550d55`, the signed-time round-trip fix `8621c07`, and operations runbook `09c3d89`.
+- Desktop gate: 31 focused files and 241 tests, Node and renderer typechecks, production Electron build, one full three-device Playwright scenario, the five-table/67-column cross-repository boundary, and `lat check`.
+- Cloud gate: `go test -count=1 ./...` plus isolated PostgreSQL, Redis, and MinIO execution of `AERA_INTEGRATION_TESTS=1 go test -count=1 -p 1 ./internal/encryptedbackup ./internal/jobs`.
+- Runtime boundary: `/Users/zizimutou/Desktop/aera/aera-runtime` remained clean on `c0439e1e3e5f35a91b658d57ddfc011e0d5ba1bb`.
+
+This is local feature-branch evidence only. Desktop and Cloud have not thereby been merged to local `main`, pushed, accepted by remote CI, deployed to staging or production, enabled for production accounts, or publicly released. The separate `aera-runtime` checkout was not changed.
+
 ## Production readiness and release
 
 Production delivery progresses through local verification, remote CI, private staging, signed candidates, real devices, restore and rollback rehearsal, disabled production deployment, bounded rollout, and separately approved public release.
