@@ -328,7 +328,9 @@ describe("AgentEra adapter around the real Hermes transport", () => {
     expect(first.envelope.instructions).toContain(VERSION_ID);
     expect(first.envelope.instructions).toContain(POLICY_ID);
     expect(first.envelope.instructions).toContain(
-      join(VERSION_ROOT, "assets", "knowledge", "base.md"),
+      JSON.stringify(
+        join(VERSION_ROOT, "assets", "knowledge", "base.md"),
+      ).slice(1, -1),
     );
     expect(first.envelope.instructions).toContain(
       "Profile-local SOUL and Skills take precedence",
