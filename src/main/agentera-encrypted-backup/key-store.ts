@@ -11,9 +11,12 @@ import {
   generateBackupDeviceKeyPair,
   recoveryPhraseFromEntropy,
   unwrapRootKeyFromRecovery,
+  wrapBackupDataKey as aesWrapBackupDataKey,
   wrapRootKeyForDevice as hpkeWrapRootKeyForDevice,
   wrapRootKeyForRecovery,
   type DeviceRootKeyEnvelopeV1,
+  type RecoveryRootKeyEnvelopeV1,
+  type WrappedBackupDataKeyEnvelopeV1,
 } from "./crypto";
 import type {
   AgenteraEncryptedBackupDatabase,
@@ -83,6 +86,13 @@ export interface RevokeEncryptedBackupDeviceInput {
 export interface EncryptedBackupDeviceAuthorization {
   device: AgenteraEncryptedBackupDevice;
   rootKeyEnvelope: DeviceRootKeyEnvelopeV1;
+}
+
+export interface EncryptedBackupArchivePublicMaterial {
+  profileLineageId: string;
+  keyEpoch: number;
+  recoveryRootKeyEnvelope: RecoveryRootKeyEnvelopeV1;
+  devicePublicKey: string;
 }
 
 export function backupDeviceRootKeyAad(input: {
@@ -244,6 +254,48 @@ export class AgenteraEncryptedBackupKeyStore {
       public_key: device.publicKey,
       signature,
     };
+  }
+
+  getArchivePublicMaterial(input: {
+    accountId: string;
+    deviceId: string;
+  }): EncryptedBackupArchivePublicMaterial {
+    const account = this.requireAccount(input.accountId);
+    const device = this.requireActiveLocalDevice(
+      input.accountId,
+      input.deviceId,
+    );
+    if (device.keyEpoch !== account.keyEpoch) {
+      throw new Error("Encrypted backup local device key epoch is stale.");
+    }
+    return {
+      profileLineageId: account.profileLineageId,
+      keyEpoch: account.keyEpoch,
+      recoveryRootKeyEnvelope: { ...account.recoveryEnvelope },
+      devicePublicKey: device.publicKey,
+    };
+  }
+
+  wrapBackupDataKey(input: {
+    accountId: string;
+    deviceId: string;
+    backupId: string;
+    dataKey: Uint8Array;
+  }): WrappedBackupDataKeyEnvelopeV1 {
+    const account = this.requireAccount(input.accountId);
+    const device = this.requireActiveLocalDevice(
+      input.accountId,
+      input.deviceId,
+    );
+    if (device.keyEpoch !== account.keyEpoch) {
+      throw new Error("Encrypted backup local device key epoch is stale.");
+    }
+    const rootKey = this.decryptRootKey(account.encryptedRootKey);
+    try {
+      return aesWrapBackupDataKey(rootKey, input.dataKey, input.backupId);
+    } finally {
+      rootKey.fill(0);
+    }
   }
 
   async wrapRootKeyForDevice(

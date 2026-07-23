@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   base64urlDecode,
   generateBackupDeviceKeyPair,
+  unwrapBackupDataKey,
   unwrapRootKeyForDevice,
 } from "./crypto";
 import {
@@ -267,6 +268,53 @@ describe("AgenteraEncryptedBackupKeyStore", () => {
         publicKey: target.publicKey,
       }),
     ).rejects.toThrow("revoked");
+  }, 30_000);
+
+  it("exposes only public archive material and wraps each backup data key", async () => {
+    const { store } = storeFor();
+    const enrollment = await store.initializeAccount({
+      accountId: ACCOUNT_ID,
+      deviceId: DEVICE_ID,
+      now: NOW,
+    });
+    if (!enrollment.recoveryPhrase) {
+      throw new Error("missing recovery phrase");
+    }
+    const material = store.getArchivePublicMaterial({
+      accountId: ACCOUNT_ID,
+      deviceId: DEVICE_ID,
+    });
+    expect(material).toMatchObject({
+      profileLineageId: enrollment.state.profileLineageId,
+      keyEpoch: 1,
+    });
+    expect(Object.keys(material).sort()).toEqual([
+      "devicePublicKey",
+      "keyEpoch",
+      "profileLineageId",
+      "recoveryRootKeyEnvelope",
+    ]);
+
+    const backupId = "70000000-0000-4000-8000-000000000001";
+    const dataKey = Buffer.alloc(32, 0x77);
+    const wrapped = store.wrapBackupDataKey({
+      accountId: ACCOUNT_ID,
+      deviceId: DEVICE_ID,
+      backupId,
+      dataKey,
+    });
+    const rootKey = await store.recoverRootKeyFromPhrase({
+      accountId: ACCOUNT_ID,
+      phrase: enrollment.recoveryPhrase,
+    });
+    const opened = unwrapBackupDataKey(rootKey, wrapped, backupId);
+    try {
+      expect(Buffer.from(opened)).toEqual(dataKey);
+    } finally {
+      rootKey.fill(0);
+      opened.fill(0);
+      dataKey.fill(0);
+    }
   }, 30_000);
 
   it("isolates accounts across logout-style owner switches", async () => {

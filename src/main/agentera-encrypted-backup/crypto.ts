@@ -46,6 +46,13 @@ export interface DeviceRootKeyEnvelopeV1 {
   ciphertext: string;
 }
 
+export interface WrappedBackupDataKeyEnvelopeV1 {
+  formatVersion: typeof AGENTERA_BACKUP_FORMAT_VERSION;
+  cipher: "AES-256-GCM";
+  nonce: string;
+  ciphertext: string;
+}
+
 export interface BackupDeviceKeyPair {
   publicKey: string;
   privateKey: string;
@@ -180,16 +187,22 @@ export function recoveryEntropyFromPhrase(phrase: string): Uint8Array {
 }
 
 export function backupKdfLabel(
-  scope: "root-recovery" | "manifest" | `chunk/${number}` | string,
+  scope: "root-recovery" | "data-key" | "manifest" | `chunk/${number}` | string,
 ): string {
   if (
     scope !== "root-recovery" &&
+    scope !== "data-key" &&
     scope !== "manifest" &&
     !/^chunk\/(?:0|[1-9][0-9]{0,9})$/.test(scope)
   ) {
     throw new Error("Invalid encrypted backup HKDF label.");
   }
   return `agentera-backup-v1/${scope}`;
+}
+
+function uuidBytes(value: string): Uint8Array {
+  const canonical = lineage(value);
+  return new Uint8Array(Buffer.from(canonical.replaceAll("-", ""), "hex"));
 }
 
 export function deriveBackupSubkey(
@@ -470,6 +483,91 @@ export async function generateBackupDeviceKeyPair(): Promise<BackupDeviceKeyPair
   } finally {
     publicKeyBytes?.fill(0);
     privateKeyBytes?.fill(0);
+  }
+}
+
+function dataKeyAad(backupId: string): Uint8Array {
+  return textEncoder.encode(
+    `agentera-backup-v1/data-key\0format=${AGENTERA_BACKUP_FORMAT_VERSION}\0backup=${lineage(backupId)}`,
+  );
+}
+
+export function wrapBackupDataKey(
+  rootKeyValue: Uint8Array,
+  dataKeyValue: Uint8Array,
+  backupId: string,
+  options: { nonce?: Uint8Array } = {},
+): WrappedBackupDataKeyEnvelopeV1 {
+  const rootKey = copyBytes(rootKeyValue, 32, "root key");
+  const dataKey = copyBytes(dataKeyValue, 32, "data key");
+  const salt = uuidBytes(backupId);
+  const nonce = options.nonce
+    ? copyBytes(options.nonce, AES_NONCE_BYTES, "AES nonce")
+    : new Uint8Array(randomBytes(AES_NONCE_BYTES));
+  let wrappingKey: Uint8Array | null = null;
+  try {
+    wrappingKey = deriveBackupSubkey(rootKey, salt, "data-key");
+    const ciphertext = encryptBackupAesGcm(
+      wrappingKey,
+      nonce,
+      dataKey,
+      dataKeyAad(backupId),
+    );
+    return Object.freeze({
+      formatVersion: AGENTERA_BACKUP_FORMAT_VERSION,
+      cipher: "AES-256-GCM",
+      nonce: base64urlEncode(nonce, AES_NONCE_BYTES),
+      ciphertext: base64urlEncode(ciphertext, 32 + AES_TAG_BYTES),
+    });
+  } finally {
+    rootKey.fill(0);
+    dataKey.fill(0);
+    salt.fill(0);
+    nonce.fill(0);
+    wrappingKey?.fill(0);
+  }
+}
+
+export function unwrapBackupDataKey(
+  rootKeyValue: Uint8Array,
+  envelopeValue: WrappedBackupDataKeyEnvelopeV1,
+  backupId: string,
+): Uint8Array {
+  const envelope = exactObject(
+    envelopeValue,
+    ["formatVersion", "cipher", "nonce", "ciphertext"],
+    "wrapped data-key envelope",
+  );
+  if (
+    envelope.formatVersion !== AGENTERA_BACKUP_FORMAT_VERSION ||
+    envelope.cipher !== "AES-256-GCM"
+  ) {
+    throw new Error("Invalid encrypted backup wrapped data-key envelope.");
+  }
+  const rootKey = copyBytes(rootKeyValue, 32, "root key");
+  const salt = uuidBytes(backupId);
+  const nonce = base64urlDecode(String(envelope.nonce), AES_NONCE_BYTES);
+  const ciphertext = base64urlDecode(
+    String(envelope.ciphertext),
+    32 + AES_TAG_BYTES,
+  );
+  let wrappingKey: Uint8Array | null = null;
+  try {
+    wrappingKey = deriveBackupSubkey(rootKey, salt, "data-key");
+    return decryptBackupAesGcm(
+      wrappingKey,
+      nonce,
+      ciphertext,
+      dataKeyAad(backupId),
+    );
+  } catch {
+    throw new Error("Encrypted backup authentication failed.");
+  } finally {
+    rootKey.fill(0);
+    salt.fill(0);
+    nonce.fill(0);
+    ciphertext.fill(0);
+    wrappingKey?.fill(0);
   }
 }
 
