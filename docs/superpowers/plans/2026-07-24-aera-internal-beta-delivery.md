@@ -168,13 +168,13 @@ SMTP and SMS values are intentionally absent in this delivery. Do not configure 
 - Modify: `/Users/zizimutou/Desktop/aera/aera-admin/.worktrees/internal-beta-delivery/internal/config/config_test.go`
 - Modify: `/Users/zizimutou/Desktop/aera/aera-admin/.worktrees/internal-beta-delivery/.env.example`
 
-- [ ] Add tests that accept `internal_beta`, require dedicated Redis username/password and non-zero DB, default mutations to false, and allow only loopback HTTP for `AERA_ADMIN_PUBLIC_URL`.
-- [ ] Add tests that reject a remote HTTP Admin public URL, an empty Redis password, DB 0, or implicit mutation enablement.
-- [ ] Run `go test ./internal/config -run InternalBeta -count=1`; expect RED.
-- [ ] Implement deployed-security helpers so `internal_beta` gets production Redis/key checks while retaining loopback-only HTTP and an empty trusted-proxy set.
-- [ ] Update `.env.example` comments without adding real identities or secrets.
-- [ ] Run `gofmt -w internal/config` and `go test ./internal/config -count=1`; expect pass.
-- [ ] Commit: `git add internal/config .env.example && git commit -m "feat: harden admin internal beta mode"`.
+- [x] Add tests that accept `internal_beta`, require dedicated Redis username/password and non-zero DB, default mutations to false, and allow only loopback HTTP for `AERA_ADMIN_PUBLIC_URL`.
+- [x] Add tests that reject a remote HTTP Admin public URL, an empty Redis password, DB 0, or implicit mutation enablement.
+- [x] Run `go test ./internal/config -run InternalBeta -count=1`; expect RED.
+- [x] Implement deployed-security helpers so `internal_beta` gets production Redis/key checks while retaining loopback-only HTTP and an empty trusted-proxy set.
+- [x] Update `.env.example` comments without adding real identities or secrets.
+- [x] Run `gofmt -w internal/config` and `go test ./internal/config -count=1`; expect pass.
+- [x] Commit: `git add internal/config .env.example && git commit -m "feat: harden admin internal beta mode"`.
 
 ### Task 5: Replace unavailable private-repository attestations in Cloud
 
