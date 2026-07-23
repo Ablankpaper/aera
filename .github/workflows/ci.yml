@@ -8,6 +8,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 # A newer commit on the same ref supersedes an in-flight run.
 concurrency:

@@ -116,6 +116,12 @@ The complete contract is `docs/superpowers/specs/2026-07-23-agentera-production-
 
 The executable CI, staging, signing, promotion, device-evidence, and rollback sequence is `docs/superpowers/plans/2026-07-23-agentera-production-readiness-and-release.md`.
 
+### Remote CI safety checkpoint
+
+`scripts/verify-ci-checkpoint.mjs` accepts only exact expected repository SHAs whose required platform jobs completed successfully after the commit and executed real steps.
+
+The manual `rerun-ci-checkpoint.yml` workflow dispatches the existing repository CI workflows and records their GitHub URLs and job facts without carrying production secrets or changing a failed result. The latest Desktop and Cloud runs remain `external_blocked`: GitHub reported zero executed steps because recent account payments failed or the Actions spending limit must be increased.
+
 ## Hermes and data boundary
 
 Quality, backup, and release failures cannot delay a conversation, revert local learning, mutate an active RuntimeBinding, overwrite a running Profile, or change `aera-runtime`.
