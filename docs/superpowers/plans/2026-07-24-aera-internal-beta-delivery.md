@@ -376,12 +376,12 @@ SMTP and SMS values are intentionally absent in this delivery. Do not configure 
 
 **Produces:** Reviewable commits, pull requests, merged exact SHAs, and fresh successful CI before candidate creation.
 
-- [ ] In Cloud run secret scan, delivery/release/deploy tests, `go test -count=1 ./...`, race tests for secure/account/oauth/device/session/jobs/encrypted-backup, `go vet ./...`, Web test/typecheck/build, and PostgreSQL/Redis/MinIO integration.
-- [ ] In Admin run candidate/deploy tests, `make verify`, and `AERA_ADMIN_E2E_CLOUD_REPO=/Users/zizimutou/Desktop/aera/aera-cloud/.worktrees/internal-beta-delivery make e2e`.
-- [ ] In Desktop run internal-Beta/release policy tests, authentication tests, Runtime packaging/verification tests, official-quality boundary, encrypted-backup boundary, Node/Web typechecks, production build, and Lat validation.
-- [ ] Review `git diff origin/main...HEAD` separately in each repository for secret material, accidental Runtime edits, unrelated files, weakened failures, and generated artifacts.
+- [x] In Cloud run secret scan, delivery/release/deploy tests, `go test -count=1 ./...`, race tests for secure/account/oauth/device/session/jobs/encrypted-backup, `go vet ./...`, Web test/typecheck/build, and PostgreSQL/Redis/MinIO integration.
+- [x] In Admin run candidate/deploy tests, `make verify`, and `AERA_ADMIN_E2E_CLOUD_REPO=/Users/zizimutou/Desktop/aera/aera-cloud/.worktrees/internal-beta-delivery make e2e`.
+- [x] In Desktop run internal-Beta/release policy tests, authentication tests, Runtime packaging/verification tests, official-quality boundary, encrypted-backup boundary, Node/Web typechecks, production build, and Lat validation.
+- [x] Review `git diff origin/main...HEAD` separately in each repository for secret material, accidental Runtime edits, unrelated files, weakened failures, and generated artifacts.
 - [ ] Push each `aera/internal-beta-delivery` branch, open one scoped pull request per repository, and wait for all exact-SHA CI jobs.
-- [ ] Fix only evidence-backed failures in the owning repository; rerun the failed focused gate and the repository’s complete gate.
+- [x] Fix only evidence-backed failures in the owning repository; rerun the failed focused gate and the repository’s complete gate.
 - [ ] Merge Cloud first, Admin second, Desktop third after each PR is green. Record merge SHAs and main CI URLs separately.
 - [ ] Assert all repositories remain private and Runtime HEAD/working tree are unchanged.
 
