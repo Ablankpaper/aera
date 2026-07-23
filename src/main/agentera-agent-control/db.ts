@@ -9,7 +9,7 @@ import {
   resolve,
 } from "node:path";
 
-export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 6;
+export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 7;
 
 export type AgentAssetContext =
   | { scope: "USER" }
@@ -404,6 +404,28 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
         submitted_at TEXT NOT NULL,
         last_verified_at TEXT NOT NULL,
         PRIMARY KEY (local_draft_id, local_draft_revision, organization_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS encrypted_backup_restores (
+        backup_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        device_installation_id TEXT NOT NULL,
+        source_installation_id TEXT NOT NULL,
+        agent_installation_id TEXT NOT NULL UNIQUE,
+        runtime_profile_id TEXT NOT NULL UNIQUE,
+        profile_lineage_id TEXT NOT NULL,
+        encrypted_runtime_binding_provenance BLOB NOT NULL
+          CHECK (
+            length(encrypted_runtime_binding_provenance) > 0
+            AND length(encrypted_runtime_binding_provenance) <= 1048576
+          ),
+        historical_sessions_read_only INTEGER NOT NULL DEFAULT 1
+          CHECK (historical_sessions_read_only = 1),
+        restored_at TEXT NOT NULL,
+        PRIMARY KEY (
+          tenant_id, owner_id, device_installation_id, backup_id
+        )
       );
 
       PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
@@ -830,6 +852,32 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
         DROP TABLE local_agent_installations;
         ALTER TABLE local_agent_installations_v6
           RENAME TO local_agent_installations;
+        PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
+      `);
+    }
+    if (currentVersion >= 1 && currentVersion <= 6) {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS encrypted_backup_restores (
+          backup_id TEXT NOT NULL,
+          tenant_id TEXT NOT NULL,
+          owner_id TEXT NOT NULL,
+          device_installation_id TEXT NOT NULL,
+          source_installation_id TEXT NOT NULL,
+          agent_installation_id TEXT NOT NULL UNIQUE,
+          runtime_profile_id TEXT NOT NULL UNIQUE,
+          profile_lineage_id TEXT NOT NULL,
+          encrypted_runtime_binding_provenance BLOB NOT NULL
+            CHECK (
+              length(encrypted_runtime_binding_provenance) > 0
+              AND length(encrypted_runtime_binding_provenance) <= 1048576
+            ),
+          historical_sessions_read_only INTEGER NOT NULL DEFAULT 1
+            CHECK (historical_sessions_read_only = 1),
+          restored_at TEXT NOT NULL,
+          PRIMARY KEY (
+            tenant_id, owner_id, device_installation_id, backup_id
+          )
+        );
         PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
       `);
     }

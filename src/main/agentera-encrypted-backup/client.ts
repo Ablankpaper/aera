@@ -1,4 +1,9 @@
-import { createHash } from "node:crypto";
+import {
+  createHash,
+  createPublicKey,
+  timingSafeEqual,
+  verify as verifySignature,
+} from "node:crypto";
 import { readFileSync } from "node:fs";
 import { parseAgenteraCloudOrigin } from "../agentera-auth/origin";
 import type { AgenteraEncryptedBackupDeviceRegistration } from "../../shared/agentera-encrypted-backup";
@@ -6,12 +11,21 @@ import type {
   EncryptedBackupArchive,
   EncryptedBackupArchiveObject,
   EncryptedBackupInitiateRequest,
+  EncryptedBackupObjectSpec,
+  EncryptedBackupPublicEnvelope,
 } from "./archive";
+import { encryptedBackupPublicEnvelopeSigningDigest } from "./archive";
 
 const DEFAULT_TIMEOUT_MILLISECONDS = 30_000;
 const MAXIMUM_JSON_RESPONSE_BYTES = 1024 * 1024;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const DIGEST_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const OBJECT_ID_PATTERN = /^[0-9a-f]{64}$/;
+const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
+const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
+const MAXIMUM_OPAQUE_ENVELOPE_BYTES = 16 * 1024;
+const MAXIMUM_BACKUP_COUNT = 10_000;
 const ALLOWED_ERROR_CODES = new Set([
   "invalid_request",
   "invalid_signature",
@@ -45,6 +59,55 @@ export interface EncryptedBackupDeviceRegistrationReceipt {
   revision: number;
   status: "active" | "revoked";
   replayed: boolean;
+}
+
+export interface EncryptedBackupSummary {
+  backupId: string;
+  profileLineageId: string;
+  parentBackupId: string | null;
+  sourceDeviceId: string;
+  sourceInstallationId: string;
+  sourceDefinitionId: string;
+  sourceVersionId: string;
+  state: "sealed";
+  keyEpoch: number;
+  chunkCount: number;
+  totalCiphertextSize: number;
+  createdAt: string;
+  sealedAt: string;
+}
+
+export interface EncryptedBackupCurrentDeviceEnvelope {
+  deviceId: string;
+  keyEpoch: number;
+  rootKeyEnvelope: string;
+  rootKeyEnvelopeDigest: string;
+}
+
+export interface EncryptedBackupDetail {
+  envelope: EncryptedBackupPublicEnvelope;
+  publicEnvelopeDigest: string;
+  publicSignature: string;
+  sourceDevicePublicKey: string;
+  recovery: EncryptedBackupInitiateRequest["recovery"];
+  recoveryRootKeyEnvelope: string;
+  wrappedDataKey: string;
+  currentDeviceEnvelope: EncryptedBackupCurrentDeviceEnvelope | null;
+  sealedAt: string;
+}
+
+export interface EncryptedBackupRestoreCloudClient {
+  listBackups(signal?: AbortSignal): Promise<EncryptedBackupSummary[]>;
+  getBackup(
+    backupId: string,
+    signal?: AbortSignal,
+  ): Promise<EncryptedBackupDetail>;
+  downloadObject(
+    backupId: string,
+    object: EncryptedBackupObjectSpec,
+    signal?: AbortSignal,
+  ): Promise<Uint8Array>;
+  deleteBackup(backupId: string, signal?: AbortSignal): Promise<void>;
 }
 
 export interface EncryptedBackupUploadResume {
@@ -127,15 +190,12 @@ async function boundedJson(response: Response): Promise<unknown> {
       false,
     );
   }
-  const body = await response.text();
-  if (Buffer.byteLength(body, "utf8") > MAXIMUM_JSON_RESPONSE_BYTES) {
-    throw new AgenteraEncryptedBackupClientError(
-      response.status,
-      "invalid_response",
-      false,
-    );
-  }
+  const bytes = await boundedResponseBytes(
+    response,
+    MAXIMUM_JSON_RESPONSE_BYTES,
+  );
   try {
+    const body = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     return JSON.parse(body);
   } catch {
     throw new AgenteraEncryptedBackupClientError(
@@ -143,6 +203,52 @@ async function boundedJson(response: Response): Promise<unknown> {
       "invalid_response",
       false,
     );
+  } finally {
+    bytes.fill(0);
+  }
+}
+
+async function boundedResponseBytes(
+  response: Response,
+  maximumBytes: number,
+): Promise<Uint8Array> {
+  if (
+    !Number.isSafeInteger(maximumBytes) ||
+    maximumBytes < 1 ||
+    response.body === null
+  ) {
+    invalidResponse();
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      const chunk = next.value;
+      total += chunk.byteLength;
+      if (!Number.isSafeInteger(total) || total > maximumBytes) {
+        await reader.cancel();
+        invalidResponse();
+      }
+      chunks.push(chunk);
+    }
+    const result = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      result.set(chunk, offset);
+      offset += chunk.byteLength;
+      chunk.fill(0);
+    }
+    chunks.length = 0;
+    return result;
+  } catch (error) {
+    for (const chunk of chunks) chunk.fill(0);
+    if (error instanceof AgenteraEncryptedBackupClientError) throw error;
+    invalidResponse();
+  } finally {
+    reader.releaseLock();
   }
 }
 
@@ -175,6 +281,339 @@ function exactKeys(
     keys.length === expected.length &&
     keys.every((field, index) => field === expected[index])
   );
+}
+
+const SUMMARY_FIELDS = [
+  "backup_id",
+  "profile_lineage_id",
+  "parent_backup_id",
+  "source_device_id",
+  "source_installation_id",
+  "source_definition_id",
+  "source_version_id",
+  "format_version",
+  "cipher_suite",
+  "state",
+  "key_epoch",
+  "chunk_count",
+  "total_ciphertext_size",
+  "created_at",
+  "sealed_at",
+] as const;
+
+function positiveInteger(value: unknown): number | null {
+  return Number.isSafeInteger(value) && Number(value) >= 1
+    ? Number(value)
+    : null;
+}
+
+function invalidResponse(): never {
+  throw new AgenteraEncryptedBackupClientError(200, "invalid_response", false);
+}
+
+function canonicalBase64url(
+  value: unknown,
+  minimumBytes: number,
+  maximumBytes: number,
+): Buffer {
+  if (
+    typeof value !== "string" ||
+    !BASE64URL_PATTERN.test(value) ||
+    minimumBytes < 1 ||
+    maximumBytes < minimumBytes
+  ) {
+    invalidResponse();
+  }
+  const bytes = Buffer.from(value, "base64url");
+  if (
+    bytes.byteLength < minimumBytes ||
+    bytes.byteLength > maximumBytes ||
+    bytes.toString("base64url") !== value
+  ) {
+    bytes.fill(0);
+    invalidResponse();
+  }
+  return bytes;
+}
+
+function fixedBase64url(value: unknown, length: number): string {
+  const bytes = canonicalBase64url(value, length, length);
+  try {
+    return bytes.toString("base64url");
+  } finally {
+    bytes.fill(0);
+  }
+}
+
+function parseObjectSpec(
+  value: unknown,
+  maximumSize: number,
+): EncryptedBackupObjectSpec {
+  if (
+    !isObject(value) ||
+    !exactKeys(value, ["object_id", "ciphertext_digest", "ciphertext_size"]) ||
+    typeof value.object_id !== "string" ||
+    !OBJECT_ID_PATTERN.test(value.object_id) ||
+    typeof value.ciphertext_digest !== "string" ||
+    !DIGEST_PATTERN.test(value.ciphertext_digest) ||
+    !Number.isSafeInteger(value.ciphertext_size) ||
+    Number(value.ciphertext_size) < 17 ||
+    Number(value.ciphertext_size) > maximumSize
+  ) {
+    invalidResponse();
+  }
+  return {
+    object_id: value.object_id,
+    ciphertext_digest: value.ciphertext_digest,
+    ciphertext_size: Number(value.ciphertext_size),
+  };
+}
+
+function parseSummary(
+  value: unknown,
+  requireExact = true,
+): EncryptedBackupSummary {
+  if (
+    !isObject(value) ||
+    (requireExact && !exactKeys(value, SUMMARY_FIELDS)) ||
+    value.format_version !== 1 ||
+    value.cipher_suite !==
+      "HPKE-X25519-HKDF-SHA256-AES256GCM+ARGON2ID+AES256GCM" ||
+    value.state !== "sealed" ||
+    typeof value.backup_id !== "string" ||
+    !UUID_PATTERN.test(value.backup_id) ||
+    typeof value.profile_lineage_id !== "string" ||
+    !UUID_PATTERN.test(value.profile_lineage_id) ||
+    (value.parent_backup_id !== null &&
+      (typeof value.parent_backup_id !== "string" ||
+        !UUID_PATTERN.test(value.parent_backup_id))) ||
+    typeof value.source_device_id !== "string" ||
+    !UUID_PATTERN.test(value.source_device_id) ||
+    typeof value.source_installation_id !== "string" ||
+    !UUID_PATTERN.test(value.source_installation_id) ||
+    typeof value.source_definition_id !== "string" ||
+    !UUID_PATTERN.test(value.source_definition_id) ||
+    typeof value.source_version_id !== "string" ||
+    !UUID_PATTERN.test(value.source_version_id) ||
+    positiveInteger(value.key_epoch) === null ||
+    positiveInteger(value.chunk_count) === null ||
+    Number(value.chunk_count) > 131_072 ||
+    positiveInteger(value.total_ciphertext_size) === null ||
+    Number(value.total_ciphertext_size) > 1024 * 1024 * 1024 ||
+    canonicalTimestamp(value.created_at) === null ||
+    canonicalTimestamp(value.sealed_at) === null
+  ) {
+    invalidResponse();
+  }
+  return {
+    backupId: value.backup_id,
+    profileLineageId: value.profile_lineage_id,
+    parentBackupId: value.parent_backup_id as string | null,
+    sourceDeviceId: value.source_device_id,
+    sourceInstallationId: value.source_installation_id,
+    sourceDefinitionId: value.source_definition_id,
+    sourceVersionId: value.source_version_id,
+    state: "sealed",
+    keyEpoch: Number(value.key_epoch),
+    chunkCount: Number(value.chunk_count),
+    totalCiphertextSize: Number(value.total_ciphertext_size),
+    createdAt: canonicalTimestamp(value.created_at)!,
+    sealedAt: canonicalTimestamp(value.sealed_at)!,
+  };
+}
+
+function envelopeDigest(value: string): string {
+  const bytes = canonicalBase64url(value, 17, MAXIMUM_OPAQUE_ENVELOPE_BYTES);
+  try {
+    return createHash("sha256").update(bytes).digest("base64url");
+  } finally {
+    bytes.fill(0);
+  }
+}
+
+function parseBackupDetail(
+  value: unknown,
+  expectedBackupId: string,
+): EncryptedBackupDetail {
+  const detailFields = [
+    ...SUMMARY_FIELDS,
+    "manifest",
+    "chunks",
+    "public_envelope_digest",
+    "public_signature",
+    "source_device_public_key",
+    "source_device_envelope_digest",
+    "recovery",
+    "recovery_root_key_envelope",
+    "wrapped_data_key",
+    "current_device_envelope",
+  ] as const;
+  if (!isObject(value) || !exactKeys(value, detailFields)) {
+    invalidResponse();
+  }
+  const summary = parseSummary(value, false);
+  if (
+    summary.backupId !== expectedBackupId ||
+    !Array.isArray(value.chunks) ||
+    value.chunks.length !== summary.chunkCount
+  ) {
+    invalidResponse();
+  }
+  const manifest = parseObjectSpec(value.manifest, 16 * 1024 * 1024);
+  const chunks = value.chunks.map((entry, index) => {
+    if (
+      !isObject(entry) ||
+      !exactKeys(entry, [
+        "index",
+        "object_id",
+        "ciphertext_digest",
+        "ciphertext_size",
+      ]) ||
+      entry.index !== index
+    ) {
+      invalidResponse();
+    }
+    return {
+      index,
+      ...parseObjectSpec(
+        {
+          object_id: entry.object_id,
+          ciphertext_digest: entry.ciphertext_digest,
+          ciphertext_size: entry.ciphertext_size,
+        },
+        9_437_200,
+      ),
+    };
+  });
+  const total = chunks.reduce((sum, chunk) => sum + chunk.ciphertext_size, 0);
+  if (total !== summary.totalCiphertextSize) invalidResponse();
+  if (
+    !isObject(value.recovery) ||
+    !exactKeys(value.recovery, [
+      "salt",
+      "memory_kib",
+      "iterations",
+      "parallelism",
+    ]) ||
+    value.recovery.memory_kib !== 65536 ||
+    value.recovery.iterations !== 3 ||
+    value.recovery.parallelism !== 1
+  ) {
+    invalidResponse();
+  }
+  fixedBase64url(value.recovery.salt, 16);
+  const recoveryRootKeyEnvelope =
+    typeof value.recovery_root_key_envelope === "string"
+      ? value.recovery_root_key_envelope
+      : "";
+  const wrappedDataKey =
+    typeof value.wrapped_data_key === "string" ? value.wrapped_data_key : "";
+  const sourceDeviceEnvelopeDigest = fixedBase64url(
+    value.source_device_envelope_digest,
+    32,
+  );
+  const envelope: EncryptedBackupPublicEnvelope = {
+    format_version: 1,
+    cipher_suite: "HPKE-X25519-HKDF-SHA256-AES256GCM+ARGON2ID+AES256GCM",
+    backup_id: summary.backupId,
+    profile_lineage_id: summary.profileLineageId,
+    parent_backup_id: summary.parentBackupId,
+    source_device_id: summary.sourceDeviceId,
+    source_installation_id: summary.sourceInstallationId,
+    source_definition_id: summary.sourceDefinitionId,
+    source_version_id: summary.sourceVersionId,
+    base_owner_scope: "USER",
+    key_epoch: summary.keyEpoch,
+    created_at: summary.createdAt,
+    manifest,
+    chunks,
+    total_ciphertext_size: summary.totalCiphertextSize,
+    recovery_envelope_digest: envelopeDigest(recoveryRootKeyEnvelope),
+    wrapped_data_key_digest: envelopeDigest(wrappedDataKey),
+    source_device_envelope_digest: sourceDeviceEnvelopeDigest,
+  };
+  const expectedDigest = encryptedBackupPublicEnvelopeSigningDigest(envelope);
+  const receivedDigest = canonicalBase64url(
+    value.public_envelope_digest,
+    32,
+    32,
+  );
+  const signature = canonicalBase64url(value.public_signature, 64, 64);
+  const publicKey = canonicalBase64url(value.source_device_public_key, 32, 32);
+  try {
+    const verificationKey = createPublicKey({
+      key: Buffer.concat([ED25519_SPKI_PREFIX, publicKey]),
+      format: "der",
+      type: "spki",
+    });
+    if (
+      !timingSafeEqual(Buffer.from(expectedDigest), receivedDigest) ||
+      !verifySignature(
+        null,
+        Buffer.from(expectedDigest),
+        verificationKey,
+        signature,
+      )
+    ) {
+      invalidResponse();
+    }
+  } catch (error) {
+    if (error instanceof AgenteraEncryptedBackupClientError) throw error;
+    invalidResponse();
+  } finally {
+    expectedDigest.fill(0);
+    receivedDigest.fill(0);
+    signature.fill(0);
+    publicKey.fill(0);
+  }
+  let currentDeviceEnvelope: EncryptedBackupCurrentDeviceEnvelope | null = null;
+  if (value.current_device_envelope !== null) {
+    if (
+      !isObject(value.current_device_envelope) ||
+      !exactKeys(value.current_device_envelope, [
+        "device_id",
+        "key_epoch",
+        "root_key_envelope",
+        "root_key_envelope_digest",
+      ]) ||
+      typeof value.current_device_envelope.device_id !== "string" ||
+      !UUID_PATTERN.test(value.current_device_envelope.device_id) ||
+      positiveInteger(value.current_device_envelope.key_epoch) === null ||
+      typeof value.current_device_envelope.root_key_envelope !== "string"
+    ) {
+      invalidResponse();
+    }
+    const rootKeyEnvelope = value.current_device_envelope.root_key_envelope;
+    const rootKeyEnvelopeDigest = fixedBase64url(
+      value.current_device_envelope.root_key_envelope_digest,
+      32,
+    );
+    if (envelopeDigest(rootKeyEnvelope) !== rootKeyEnvelopeDigest) {
+      invalidResponse();
+    }
+    currentDeviceEnvelope = {
+      deviceId: value.current_device_envelope.device_id,
+      keyEpoch: Number(value.current_device_envelope.key_epoch),
+      rootKeyEnvelope,
+      rootKeyEnvelopeDigest,
+    };
+  }
+  return {
+    envelope,
+    publicEnvelopeDigest: String(value.public_envelope_digest),
+    publicSignature: String(value.public_signature),
+    sourceDevicePublicKey: String(value.source_device_public_key),
+    recovery: {
+      salt: String(value.recovery.salt),
+      memory_kib: 65536,
+      iterations: 3,
+      parallelism: 1,
+    },
+    recoveryRootKeyEnvelope,
+    wrappedDataKey,
+    currentDeviceEnvelope,
+    sealedAt: summary.sealedAt,
+  };
 }
 
 function verifiedCiphertext(object: EncryptedBackupArchiveObject): Uint8Array {
@@ -219,6 +658,105 @@ export class AgenteraEncryptedBackupClient implements EncryptedBackupCloudClient
         "Invalid AgentEra encrypted backup client configuration.",
       );
     }
+  }
+
+  async listBackups(signal?: AbortSignal): Promise<EncryptedBackupSummary[]> {
+    const token = this.requireToken();
+    const response = await this.requestJson(
+      "/api/v1/encrypted-profile-backups",
+      { method: "GET" },
+      [200],
+      token,
+      signal,
+    );
+    if (
+      !isObject(response) ||
+      !exactKeys(response, ["backups"]) ||
+      !Array.isArray(response.backups) ||
+      response.backups.length > MAXIMUM_BACKUP_COUNT
+    ) {
+      invalidResponse();
+    }
+    return response.backups.map((backup) => parseSummary(backup));
+  }
+
+  async getBackup(
+    backupId: string,
+    signal?: AbortSignal,
+  ): Promise<EncryptedBackupDetail> {
+    if (!UUID_PATTERN.test(backupId)) {
+      throw new AgenteraEncryptedBackupClientError(0, "invalid_request", false);
+    }
+    const token = this.requireToken();
+    const response = await this.requestJson(
+      `/api/v1/encrypted-profile-backups/${backupId}`,
+      { method: "GET" },
+      [200],
+      token,
+      signal,
+    );
+    return parseBackupDetail(response, backupId);
+  }
+
+  async downloadObject(
+    backupId: string,
+    object: EncryptedBackupObjectSpec,
+    signal?: AbortSignal,
+  ): Promise<Uint8Array> {
+    if (
+      !UUID_PATTERN.test(backupId) ||
+      !OBJECT_ID_PATTERN.test(object.object_id) ||
+      !DIGEST_PATTERN.test(object.ciphertext_digest) ||
+      !Number.isSafeInteger(object.ciphertext_size) ||
+      object.ciphertext_size < 17 ||
+      object.ciphertext_size > 16 * 1024 * 1024
+    ) {
+      throw new AgenteraEncryptedBackupClientError(0, "invalid_request", false);
+    }
+    const token = this.requireToken();
+    const response = await this.request(
+      `/api/v1/encrypted-profile-backups/${backupId}/objects/${object.object_id}`,
+      { method: "GET" },
+      [200],
+      token,
+      signal,
+    );
+    if (
+      response.headers.get("content-type") !== "application/octet-stream" ||
+      response.headers.get("content-length") !==
+        object.ciphertext_size.toString() ||
+      response.headers.get("x-agentera-ciphertext-sha256") !==
+        object.ciphertext_digest
+    ) {
+      invalidResponse();
+    }
+    const bytes = await boundedResponseBytes(response, object.ciphertext_size);
+    const digest = createHash("sha256").update(bytes).digest();
+    if (
+      bytes.byteLength !== object.ciphertext_size ||
+      digest.toString("hex") !== object.object_id ||
+      digest.toString("base64url") !== object.ciphertext_digest
+    ) {
+      bytes.fill(0);
+      digest.fill(0);
+      invalidResponse();
+    }
+    digest.fill(0);
+    return bytes;
+  }
+
+  async deleteBackup(backupId: string, signal?: AbortSignal): Promise<void> {
+    if (!UUID_PATTERN.test(backupId)) {
+      throw new AgenteraEncryptedBackupClientError(0, "invalid_request", false);
+    }
+    const token = this.requireToken();
+    await this.request(
+      `/api/v1/encrypted-profile-backups/${backupId}`,
+      { method: "DELETE" },
+      [204],
+      token,
+      signal,
+    );
   }
 
   async registerCurrentDevice(
@@ -494,7 +1032,9 @@ export class AgenteraEncryptedBackupClient implements EncryptedBackupCloudClient
         headers,
         signal: controller.signal,
       });
-    } catch {
+      this.requireToken(token);
+    } catch (error) {
+      if (error instanceof AgenteraEncryptedBackupClientError) throw error;
       throw new AgenteraEncryptedBackupClientError(
         0,
         signal?.aborted ? "cancelled" : "service_unavailable",

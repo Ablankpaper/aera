@@ -1,14 +1,16 @@
 // @vitest-environment node
 
-import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  createHash,
+  generateKeyPairSync,
+  sign as signBytes,
+} from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  AgenteraEncryptedBackupClient,
-  AgenteraEncryptedBackupClientError,
-} from "./client";
+import { AgenteraEncryptedBackupClient } from "./client";
+import { encryptedBackupPublicEnvelopeSigningDigest } from "./archive";
 import type {
   EncryptedBackupArchive,
   EncryptedBackupInitiateRequest,
@@ -16,6 +18,7 @@ import type {
 } from "./archive";
 
 const BACKUP_ID = "70000000-0000-4000-8000-000000000001";
+const VERSION_ID = "60000000-0000-4000-8000-000000000001";
 const roots: string[] = [];
 
 function requestFixture(): EncryptedBackupInitiateRequest {
@@ -250,9 +253,214 @@ describe("AgenteraEncryptedBackupClient", () => {
       getAccessToken: () => token,
       fetch: fetcher,
     });
-    await expect(client.uploadArchive(archiveFixture())).rejects.toBeInstanceOf(
-      AgenteraEncryptedBackupClientError,
-    );
+    await expect(client.uploadArchive(archiveFixture())).rejects.toMatchObject({
+      code: "authentication_required",
+      retryable: false,
+    });
     expect(calls).toBe(1);
+  });
+
+  it("bounds streaming JSON and ciphertext bodies even when transport headers lie", async () => {
+    const oversizedJson = new Response(
+      `{"backups":[],"padding":"${"x".repeat(1024 * 1024)}"}`,
+      { status: 200 },
+    );
+    const jsonClient = new AgenteraEncryptedBackupClient({
+      origin: "https://cloud.example.com",
+      getAccessToken: () => "access-token",
+      fetch: async () => oversizedJson,
+    });
+    await expect(jsonClient.listBackups()).rejects.toMatchObject({
+      code: "invalid_response",
+    });
+
+    const objectBytes = Buffer.alloc(64, 0x31);
+    const objectDigest = createHash("sha256").update(objectBytes).digest();
+    const object: EncryptedBackupObjectSpec = {
+      object_id: objectDigest.toString("hex"),
+      ciphertext_digest: objectDigest.toString("base64url"),
+      ciphertext_size: objectBytes.byteLength,
+    };
+    const binaryClient = new AgenteraEncryptedBackupClient({
+      origin: "https://cloud.example.com",
+      getAccessToken: () => "access-token",
+      fetch: async () =>
+        new Response(Buffer.concat([objectBytes, Buffer.from([0x32])]), {
+          status: 200,
+          headers: {
+            "content-type": "application/octet-stream",
+            "content-length": "64",
+            "x-agentera-ciphertext-sha256": object.ciphertext_digest,
+          },
+        }),
+    });
+    await expect(
+      binaryClient.downloadObject(BACKUP_ID, object),
+    ).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
+  it("verifies signed restore metadata and exact downloaded ciphertext before returning bytes", async () => {
+    const archive = archiveFixture();
+    archive.initiateRequest.envelope.recovery_envelope_digest = createHash(
+      "sha256",
+    )
+      .update(
+        Buffer.from(
+          archive.initiateRequest.recovery_root_key_envelope,
+          "base64url",
+        ),
+      )
+      .digest("base64url");
+    archive.initiateRequest.envelope.wrapped_data_key_digest = createHash(
+      "sha256",
+    )
+      .update(
+        Buffer.from(archive.initiateRequest.wrapped_data_key, "base64url"),
+      )
+      .digest("base64url");
+    archive.initiateRequest.envelope.source_device_envelope_digest = createHash(
+      "sha256",
+    )
+      .update(
+        Buffer.from(
+          archive.initiateRequest.source_device_root_key_envelope,
+          "base64url",
+        ),
+      )
+      .digest("base64url");
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const sourceDevicePublicKey = publicKey
+      .export({ format: "der", type: "spki" })
+      .subarray(-32)
+      .toString("base64url");
+    const digest = Buffer.from(
+      encryptedBackupPublicEnvelopeSigningDigest(
+        archive.initiateRequest.envelope,
+      ),
+    );
+    const detail = {
+      backup_id: BACKUP_ID,
+      profile_lineage_id: archive.initiateRequest.envelope.profile_lineage_id,
+      parent_backup_id: null,
+      source_device_id: archive.initiateRequest.envelope.source_device_id,
+      source_installation_id:
+        archive.initiateRequest.envelope.source_installation_id,
+      source_definition_id:
+        archive.initiateRequest.envelope.source_definition_id,
+      source_version_id: archive.initiateRequest.envelope.source_version_id,
+      format_version: 1,
+      cipher_suite: archive.initiateRequest.envelope.cipher_suite,
+      state: "sealed",
+      key_epoch: 1,
+      chunk_count: archive.chunks.length,
+      total_ciphertext_size:
+        archive.initiateRequest.envelope.total_ciphertext_size,
+      created_at: archive.initiateRequest.envelope.created_at,
+      sealed_at: "2026-07-23T12:01:00Z",
+      manifest: archive.initiateRequest.envelope.manifest,
+      chunks: archive.initiateRequest.envelope.chunks,
+      public_envelope_digest: digest.toString("base64url"),
+      public_signature: signBytes(null, digest, privateKey).toString(
+        "base64url",
+      ),
+      source_device_public_key: sourceDevicePublicKey,
+      source_device_envelope_digest:
+        archive.initiateRequest.envelope.source_device_envelope_digest,
+      recovery: archive.initiateRequest.recovery,
+      recovery_root_key_envelope:
+        archive.initiateRequest.recovery_root_key_envelope,
+      wrapped_data_key: archive.initiateRequest.wrapped_data_key,
+      current_device_envelope: {
+        device_id: archive.initiateRequest.envelope.source_device_id,
+        key_epoch: 1,
+        root_key_envelope:
+          archive.initiateRequest.source_device_root_key_envelope,
+        root_key_envelope_digest: createHash("sha256")
+          .update(
+            Buffer.from(
+              archive.initiateRequest.source_device_root_key_envelope,
+              "base64url",
+            ),
+          )
+          .digest("base64url"),
+      },
+    };
+    const summary = Object.fromEntries(
+      Object.entries(detail).filter(([key]) =>
+        [
+          "backup_id",
+          "profile_lineage_id",
+          "parent_backup_id",
+          "source_device_id",
+          "source_installation_id",
+          "source_definition_id",
+          "source_version_id",
+          "format_version",
+          "cipher_suite",
+          "state",
+          "key_epoch",
+          "chunk_count",
+          "total_ciphertext_size",
+          "created_at",
+          "sealed_at",
+        ].includes(key),
+      ),
+    );
+    const downloaded = readFileSync(archive.chunks[0].path);
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (init?.method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      if (url.includes("/objects/")) {
+        return new Response(downloaded, {
+          status: 200,
+          headers: {
+            "content-type": "application/octet-stream",
+            "content-length": downloaded.byteLength.toString(),
+            "x-agentera-ciphertext-sha256":
+              archive.chunks[0].object.ciphertext_digest,
+          },
+        });
+      }
+      if (url.endsWith(BACKUP_ID)) return Response.json(detail);
+      return Response.json({ backups: [summary] });
+    });
+    const client = new AgenteraEncryptedBackupClient({
+      origin: "https://cloud.example.com",
+      getAccessToken: () => "access-token",
+      fetch: fetcher,
+    });
+
+    await expect(client.listBackups()).resolves.toEqual([
+      expect.objectContaining({
+        backupId: BACKUP_ID,
+        state: "sealed",
+      }),
+    ]);
+    await expect(client.getBackup(BACKUP_ID)).resolves.toMatchObject({
+      envelope: { backup_id: BACKUP_ID },
+      sourceDevicePublicKey,
+    });
+    const received = await client.downloadObject(
+      BACKUP_ID,
+      archive.chunks[0].object,
+    );
+    expect(Buffer.from(received)).toEqual(downloaded);
+    received.fill(0);
+    await expect(client.deleteBackup(BACKUP_ID)).resolves.toBeUndefined();
+
+    const tampered = {
+      ...detail,
+      source_version_id: VERSION_ID.replace(/1$/, "2"),
+    };
+    const rejecting = new AgenteraEncryptedBackupClient({
+      origin: "https://cloud.example.com",
+      getAccessToken: () => "access-token",
+      fetch: async () => Response.json(tampered),
+    });
+    await expect(rejecting.getBackup(BACKUP_ID)).rejects.toMatchObject({
+      code: "invalid_response",
+    });
   });
 });

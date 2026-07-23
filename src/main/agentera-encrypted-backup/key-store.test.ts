@@ -9,8 +9,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   base64urlDecode,
   generateBackupDeviceKeyPair,
+  recoveryPhraseFromEntropy,
   unwrapBackupDataKey,
   unwrapRootKeyForDevice,
+  wrapRootKeyForRecovery,
 } from "./crypto";
 import {
   openAgenteraEncryptedBackupDatabase,
@@ -245,6 +247,32 @@ describe("AgenteraEncryptedBackupKeyStore", () => {
       recovered.fill(0);
       unwrapped.fill(0);
     }
+    const currentMaterial = store.getArchivePublicMaterial({
+      accountId: ACCOUNT_ID,
+      deviceId: DEVICE_ID,
+    });
+    const currentEnvelope = await store.wrapRootKeyForDevice({
+      accountId: ACCOUNT_ID,
+      sourceDeviceId: DEVICE_ID,
+      deviceId: DEVICE_ID,
+      publicKey: currentMaterial.devicePublicKey,
+    });
+    const currentRoot = await store.unwrapRootKeyForCurrentDevice({
+      accountId: ACCOUNT_ID,
+      deviceId: DEVICE_ID,
+      keyEpoch: 1,
+      envelope: currentEnvelope,
+    });
+    const phraseRoot = await store.recoverRootKeyFromPhrase({
+      accountId: ACCOUNT_ID,
+      phrase: enrollment.recoveryPhrase,
+    });
+    try {
+      expect(Buffer.from(currentRoot)).toEqual(Buffer.from(phraseRoot));
+    } finally {
+      currentRoot.fill(0);
+      phraseRoot.fill(0);
+    }
 
     const state = store.revokeDevice({
       accountId: ACCOUNT_ID,
@@ -346,6 +374,36 @@ describe("AgenteraEncryptedBackupKeyStore", () => {
       }),
     ).rejects.toThrow("not initialized");
   });
+
+  it("recovers a signed remote lineage on a new device without requiring a pre-existing local backup account", async () => {
+    const { store } = storeFor();
+    const rootKey = Buffer.alloc(32, 0x61);
+    const phrase = recoveryPhraseFromEntropy(Buffer.alloc(32, 0x62));
+    const profileLineageId = "30000000-0000-4000-8000-000000000001";
+    const envelope = await wrapRootKeyForRecovery({
+      rootKey,
+      phrase,
+      salt: Buffer.alloc(16, 0x63),
+      lineageId: profileLineageId,
+    });
+
+    const recovered = await store.recoverRestoreRootKeyFromPhrase({
+      accountId: ACCOUNT_ID,
+      phrase,
+      envelope,
+      profileLineageId,
+    });
+    try {
+      expect(Buffer.from(recovered)).toEqual(rootKey);
+      expect(
+        store.getState({ accountId: ACCOUNT_ID, deviceId: DEVICE_ID })
+          .initialized,
+      ).toBe(false);
+    } finally {
+      rootKey.fill(0);
+      recovered.fill(0);
+    }
+  }, 20_000);
 
   it("fails closed when secure storage is unavailable, weak, or corrupt", async () => {
     const unavailable = new OpaqueSecureStorage();

@@ -14,6 +14,25 @@ const FILE_KINDS = new Set<EncryptedBackupSnapshotFileKind>([
   "managed_attachment",
   "runtime_binding_provenance",
 ]);
+const FORBIDDEN_RESTORE_SEGMENTS = new Set([
+  ".env",
+  "auth.json",
+  "credentials",
+  "credentials.json",
+  ".ssh",
+  ".usage.json",
+  "cache",
+  ".cache",
+  "logs",
+  "log",
+  "tmp",
+  "temp",
+  "runtime",
+  "projections",
+  "gateway.pid",
+  "gateway.log",
+  "dashboard.log",
+]);
 
 export type EncryptedBackupSnapshotFileKind =
   | "memory"
@@ -159,4 +178,183 @@ export function serializeEncryptedBackupSnapshotManifest(
     totalPlaintextSize: manifest.totalPlaintextSize,
   };
   return Buffer.from(JSON.stringify(canonical), "utf8");
+}
+
+function exactObject(
+  value: unknown,
+  fields: readonly string[],
+): Record<string, unknown> {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  ) {
+    throw new Error("Invalid encrypted backup snapshot manifest.");
+  }
+  const object = value as Record<string, unknown>;
+  const keys = Object.keys(object).sort();
+  const expected = [...fields].sort();
+  if (
+    keys.length !== expected.length ||
+    keys.some((field, index) => field !== expected[index])
+  ) {
+    throw new Error("Invalid encrypted backup snapshot manifest.");
+  }
+  return object;
+}
+
+function validRestoredPath(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > 1024 ||
+    Buffer.byteLength(value, "utf8") > 4096 ||
+    value !== value.normalize("NFC") ||
+    value.includes("\0") ||
+    value.includes("\\") ||
+    value.startsWith("/") ||
+    value.endsWith("/") ||
+    value.includes("//") ||
+    /^[A-Za-z]:/.test(value)
+  ) {
+    return false;
+  }
+  return value.split("/").every((segment) => {
+    const folded = segment.toLocaleLowerCase("en-US");
+    return (
+      segment.length > 0 &&
+      segment !== "." &&
+      segment !== ".." &&
+      !FORBIDDEN_RESTORE_SEGMENTS.has(folded) &&
+      !folded.endsWith(".pem") &&
+      !folded.endsWith(".key")
+    );
+  });
+}
+
+function pathMatchesKind(
+  path: string,
+  kind: EncryptedBackupSnapshotFileKind,
+): boolean {
+  switch (kind) {
+    case "memory":
+      return path === "memories/MEMORY.md";
+    case "user":
+      return path === "memories/USER.md";
+    case "session_database":
+      return path === "state.db";
+    case "profile_configuration":
+      return path === "config.yaml";
+    case "runtime_binding_provenance":
+      return path === "provenance/runtime-bindings.enc";
+    case "private_skill":
+      return path.startsWith("skills/");
+    case "curator":
+      return path.startsWith("curator/") || path.startsWith(".curator/");
+    case "managed_attachment":
+      return path.startsWith("files/");
+  }
+}
+
+export function parseEncryptedBackupSnapshotManifest(
+  bytesValue: Uint8Array,
+): EncryptedBackupSnapshotManifest {
+  if (
+    !(bytesValue instanceof Uint8Array) ||
+    bytesValue.byteLength < 2 ||
+    bytesValue.byteLength > 16 * 1024 * 1024
+  ) {
+    throw new Error("Invalid encrypted backup snapshot manifest.");
+  }
+  const bytes = Buffer.from(bytesValue);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    bytes.fill(0);
+    throw new Error("Invalid encrypted backup snapshot manifest.");
+  }
+  try {
+    const manifest = exactObject(parsed, [
+      "formatVersion",
+      "profileLineageId",
+      "createdAt",
+      "provenance",
+      "files",
+      "totalPlaintextSize",
+    ]);
+    const provenance = exactObject(manifest.provenance, [
+      "sourceInstallationId",
+      "sourceDefinitionId",
+      "sourceVersionId",
+      "baseOwnerScope",
+    ]);
+    if (
+      manifest.formatVersion !== AGENTERA_ENCRYPTED_BACKUP_SNAPSHOT_VERSION ||
+      typeof manifest.createdAt !== "string" ||
+      new Date(manifest.createdAt).toISOString() !== manifest.createdAt ||
+      !Array.isArray(manifest.files)
+    ) {
+      throw new Error("Invalid encrypted backup snapshot manifest.");
+    }
+    const files = manifest.files.map((value) => {
+      const file = exactObject(value, [
+        "path",
+        "kind",
+        "modeClass",
+        "size",
+        "sha256",
+      ]);
+      if (
+        !validRestoredPath(file.path) ||
+        !FILE_KINDS.has(file.kind as EncryptedBackupSnapshotFileKind) ||
+        !pathMatchesKind(
+          file.path,
+          file.kind as EncryptedBackupSnapshotFileKind,
+        )
+      ) {
+        throw new Error("Invalid encrypted backup snapshot file.");
+      }
+      return {
+        path: file.path,
+        kind: file.kind as EncryptedBackupSnapshotFileKind,
+        modeClass: file.modeClass as "owner-read-write",
+        size: Number(file.size),
+        sha256: String(file.sha256),
+      };
+    });
+    const exactPaths = new Set<string>();
+    const foldedPaths = new Set<string>();
+    for (const file of files) {
+      const folded = file.path.toLocaleLowerCase("en-US");
+      if (exactPaths.has(file.path) || foldedPaths.has(folded)) {
+        throw new Error("Invalid encrypted backup snapshot path collision.");
+      }
+      exactPaths.add(file.path);
+      foldedPaths.add(folded);
+    }
+    const restored = createEncryptedBackupSnapshotManifest({
+      profileLineageId: String(manifest.profileLineageId),
+      createdAt: new Date(manifest.createdAt),
+      provenance: {
+        sourceInstallationId: String(provenance.sourceInstallationId),
+        sourceDefinitionId: String(provenance.sourceDefinitionId),
+        sourceVersionId: String(provenance.sourceVersionId),
+        baseOwnerScope: provenance.baseOwnerScope as "USER",
+      },
+      files,
+    });
+    if (
+      manifest.totalPlaintextSize !== restored.totalPlaintextSize ||
+      !serializeEncryptedBackupSnapshotManifest(restored).equals(bytes)
+    ) {
+      throw new Error("Invalid encrypted backup snapshot manifest.");
+    }
+    return restored;
+  } catch {
+    throw new Error("Invalid encrypted backup snapshot manifest.");
+  } finally {
+    bytes.fill(0);
+  }
 }

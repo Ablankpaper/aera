@@ -75,7 +75,7 @@ import {
   type AgenteraProductSpaceDatabase,
 } from "../agentera-product-space/db";
 import { AgenteraProductSpaceManager } from "../agentera-product-space/manager";
-import { createProfile, setActiveProfile } from "../profiles";
+import { createProfile, deleteProfile, setActiveProfile } from "../profiles";
 import {
   openAgenteraOfficialQualityDatabase,
   type AgenteraOfficialQualityDatabase,
@@ -332,6 +332,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
       profileBindings: agenteraProfileBindings,
       profiles: {
         createProfile,
+        deleteProfile,
         resolveProfilePath: (profileId) => profileHome(profileId),
         activateProfile: setActiveProfile,
       },

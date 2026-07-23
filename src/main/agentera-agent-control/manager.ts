@@ -38,7 +38,11 @@ import type {
   AgenteraProfileBindingStore,
   AgenteraRuntimeOwner,
 } from "../agentera-profile-binding";
-import type { AgentInstallationProfileAdapter } from "./installation-manager";
+import type {
+  ActivateVerifiedRestoreInput,
+  ActivatedVerifiedRestore,
+  AgentInstallationProfileAdapter,
+} from "./installation-manager";
 import {
   AgentInstallationManager,
   type LocalAgentInstallation,
@@ -711,6 +715,28 @@ export class AgenteraAgentControlManager {
     });
     this.emitState();
     return serializeInstallation(result);
+  }
+
+  async verifyImmutableUserBase(input: {
+    definitionId: string;
+    versionId: string;
+    ownerScope: "USER";
+  }): Promise<void> {
+    await this.assertOnlineLocalRuntimeAccess();
+    await (
+      await this.ensureRuntimeComponents()
+    ).installations.verifyImmutableUserBase(input);
+  }
+
+  async activateVerifiedRestore(
+    input: ActivateVerifiedRestoreInput,
+  ): Promise<ActivatedVerifiedRestore> {
+    await this.assertOnlineLocalRuntimeAccess();
+    const restored = await (
+      await this.ensureRuntimeComponents()
+    ).installations.activateVerifiedRestore(input);
+    this.emitState();
+    return restored;
   }
 
   async claimVersion(

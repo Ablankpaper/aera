@@ -10,6 +10,7 @@ import {
   base64urlEncode,
   generateBackupDeviceKeyPair,
   recoveryPhraseFromEntropy,
+  unwrapRootKeyForDevice as hpkeUnwrapRootKeyForDevice,
   unwrapRootKeyFromRecovery,
   wrapBackupDataKey as aesWrapBackupDataKey,
   wrapRootKeyForDevice as hpkeWrapRootKeyForDevice,
@@ -26,6 +27,8 @@ import type {
 
 const DEVICE_REGISTRATION_DOMAIN =
   "agentera-encrypted-profile-backup-device-registration.v1\0";
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const textEncoder = new TextEncoder();
 
 export interface EncryptedBackupSecureStorage {
@@ -69,6 +72,11 @@ export interface WrapEncryptedBackupRootKeyInput {
 export interface RecoverEncryptedBackupRootKeyInput {
   accountId: string;
   phrase: string;
+}
+
+export interface RecoverEncryptedBackupRestoreRootKeyInput extends RecoverEncryptedBackupRootKeyInput {
+  envelope: RecoveryRootKeyEnvelopeV1;
+  profileLineageId: string;
 }
 
 export interface AuthorizeEncryptedBackupDeviceInput extends WrapEncryptedBackupRootKeyInput {
@@ -325,14 +333,66 @@ export class AgenteraEncryptedBackupKeyStore {
     }
   }
 
+  async unwrapRootKeyForCurrentDevice(input: {
+    accountId: string;
+    deviceId: string;
+    keyEpoch: number;
+    envelope: DeviceRootKeyEnvelopeV1;
+  }): Promise<Uint8Array> {
+    const account = this.requireAccount(input.accountId);
+    const device = this.requireActiveLocalDevice(
+      input.accountId,
+      input.deviceId,
+    );
+    if (
+      input.keyEpoch !== account.keyEpoch ||
+      device.keyEpoch !== input.keyEpoch ||
+      !device.encryptedPrivateKey
+    ) {
+      throw new Error("Encrypted backup device key epoch is unavailable.");
+    }
+    const privateKey = this.decryptDevicePrivateKey(device.encryptedPrivateKey);
+    const aad = backupDeviceRootKeyAad({
+      accountId: input.accountId,
+      deviceId: input.deviceId,
+      keyEpoch: input.keyEpoch,
+    });
+    try {
+      return await hpkeUnwrapRootKeyForDevice(
+        base64urlEncode(privateKey, 32),
+        input.envelope,
+        aad,
+      );
+    } finally {
+      privateKey.fill(0);
+      aad.fill(0);
+    }
+  }
+
   async recoverRootKeyFromPhrase(
     input: RecoverEncryptedBackupRootKeyInput,
   ): Promise<Uint8Array> {
     const account = this.requireAccount(input.accountId);
-    return unwrapRootKeyFromRecovery({
+    return this.recoverRestoreRootKeyFromPhrase({
+      ...input,
       envelope: account.recoveryEnvelope,
+      profileLineageId: account.profileLineageId,
+    });
+  }
+
+  async recoverRestoreRootKeyFromPhrase(
+    input: RecoverEncryptedBackupRestoreRootKeyInput,
+  ): Promise<Uint8Array> {
+    if (
+      !UUID_PATTERN.test(input.accountId) ||
+      !UUID_PATTERN.test(input.profileLineageId)
+    ) {
+      throw new Error("Encrypted backup restore identity is invalid.");
+    }
+    return unwrapRootKeyFromRecovery({
+      envelope: input.envelope,
       phrase: input.phrase,
-      lineageId: account.profileLineageId,
+      lineageId: input.profileLineageId,
     });
   }
 
@@ -474,6 +534,23 @@ export class AgenteraEncryptedBackupKeyStore {
       return base64urlDecode(plaintext, 32);
     } catch {
       throw new Error("AgentEra encrypted backup root key is corrupt.");
+    }
+  }
+
+  private decryptDevicePrivateKey(encrypted: Uint8Array): Uint8Array {
+    this.assertSecureStorage();
+    let plaintext: string;
+    try {
+      plaintext = this.secureStorage.decryptString(Buffer.from(encrypted));
+    } catch {
+      throw new Error(
+        "AgentEra encrypted backup device key could not be opened.",
+      );
+    }
+    try {
+      return base64urlDecode(plaintext, 32);
+    } catch {
+      throw new Error("AgentEra encrypted backup device key is corrupt.");
     }
   }
 }

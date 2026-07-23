@@ -49,6 +49,9 @@ const NOW = new Date("2026-07-19T21:00:00.000Z");
 const RUNTIME_VERSION = "v0.18.2-agentera.1";
 const PROFILE_PATH = "/tmp/hermes-installed-agent-profile";
 const VERSION_ROOT = `/tmp/agentera-control/versions/${VERSION_ID}`;
+const BACKUP_ID = "b3b3b3b3-b3b3-43b3-83b3-b3b3b3b3b3b3";
+const SOURCE_INSTALLATION_ID = "b4b4b4b4-b4b4-44b4-84b4-b4b4b4b4b4b4";
+const PROFILE_LINEAGE_ID = "b5b5b5b5-b5b5-45b5-85b5-b5b5b5b5b5b5";
 
 const owner: AgenteraRuntimeOwner = {
   tenantId: TENANT_ID,
@@ -623,6 +626,57 @@ describe("AgentEra adapter around the real Hermes transport", () => {
         code: "version_invalid",
       }),
     );
+  });
+
+  it("keeps restored historical sessions read-only when no verified RuntimeBinding was imported", async () => {
+    database.sqlite
+      .prepare(
+        `INSERT INTO encrypted_backup_restores (
+           backup_id, tenant_id, owner_id, device_installation_id,
+           source_installation_id, agent_installation_id,
+           runtime_profile_id, profile_lineage_id,
+           encrypted_runtime_binding_provenance,
+           historical_sessions_read_only, restored_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+      )
+      .run(
+        BACKUP_ID,
+        TENANT_ID,
+        OWNER_ID,
+        DEVICE_ID,
+        SOURCE_INSTALLATION_ID,
+        INSTALLATION_ID,
+        RUNTIME_PROFILE_ID,
+        PROFILE_LINEAGE_ID,
+        Buffer.from("encrypted unavailable historical binding"),
+        NOW.toISOString(),
+      );
+
+    await expect(
+      adapter().prepareInstalledTurn({
+        conversationKey: "restored-history",
+        profilePath: PROFILE_PATH,
+        owner,
+        resumeSessionId: "historical-session-without-runtime",
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<AgenteraHermesAdapterError>>({
+        code: "binding_required",
+      }),
+    );
+    expect(
+      database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM runtime_bindings")
+        .get(),
+    ).toEqual({ count: 0 });
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT historical_sessions_read_only
+           FROM encrypted_backup_restores WHERE backup_id = ?`,
+        )
+        .get(BACKUP_ID),
+    ).toEqual({ historical_sessions_read_only: 1 });
   });
 
   it.each([
