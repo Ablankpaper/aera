@@ -130,6 +130,16 @@ It requires exact-SHA successful CI, protected signing credentials, native macOS
 
 `release.yml` and `beta-release.yml` no longer contain build or publication paths; they can only invoke the candidate workflow. Local policy and workflow tests pass, but no remotely signed candidate exists while GitHub Actions is billing-blocked and protected Apple/Windows credentials have not executed. Local verification therefore proves the fail-closed pipeline contract, not signed bytes, device acceptance, staging deployment, or release.
 
+### Real-device evidence boundary
+
+Real-device approval is one canonical record bound to the exact candidate manifest and installed artifact hashes.
+
+`release/evidence.schema.json` and `scripts/release/verify-device-evidence.mjs` require two different physical Apple Silicon Macs on consecutive supported macOS majors, one physical Windows 11 x64 machine, and a different physical or trusted-VM Windows 11 x64 environment. Duplicate device fingerprints, missing roles, unsigned bytes, wrong signer or timestamp, and evidence from another candidate fail closed.
+
+Every role must pass the complete install/upgrade, online/offline, official Agent update/rollback and RuntimeBinding, quality privacy, encrypted-backup failure/restore, restart, and uninstall/reinstall matrix with two opaque QA account references and two opaque backup-device references. The exact-field schema excludes Profile paths, prompts, Memory, recovery words, secrets, raw device identifiers, and free-form notes.
+
+The verifier and schema-policy tests pass locally. Real-device status remains `external_blocked` until one remotely signed candidate and the required physical/trusted devices, QA accounts, backup authorizations, and testers produce protected evidence.
+
 ## Hermes and data boundary
 
 Quality, backup, and release failures cannot delay a conversation, revert local learning, mutate an active RuntimeBinding, overwrite a running Profile, or change `aera-runtime`.
