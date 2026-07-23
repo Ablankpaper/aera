@@ -261,17 +261,17 @@ SMTP and SMS values are intentionally absent in this delivery. Do not configure 
 - Create: `/Users/zizimutou/Desktop/aera/aera/.worktrees/internal-beta-delivery/docs/runbooks/internal-beta-packaging.md`
 - Modify: `/Users/zizimutou/Desktop/aera/aera/.worktrees/internal-beta-delivery/lat.md/agentera-post-official-delivery.md`
 
-- [ ] Add manifest tests requiring exact source SHA, successful CI run URL, version `0.7.4-internal-beta.1`, HTTPS IP origin, offline key ID/public key, Runtime lock SHA, both Runtime platform identities, four package hashes, SBOM/provenance hashes, and `signingStatus=internal_only_unsigned`.
-- [ ] Add failure tests for mutable filenames, duplicate artifacts, missing platform, wrong Runtime commit/channel, mismatched origin/trust issuer, noncanonical JSON, changed bytes, or unknown fields.
-- [ ] Add workflow-policy tests that forbid tags, Releases, updater publication, Apple/Windows signing claims, GitHub artifact-attestation actions, and runtime source checkout.
-- [ ] Run `node --test scripts/internal-beta/*.test.mjs`; expect RED.
-- [ ] Set package/lock version to `0.7.4-internal-beta.1`.
-- [ ] Add an Electron Builder overlay that disables code-sign discovery/notarization, retains hardened runtime settings where applicable, publishes never, and produces deterministically named internal-Beta artifacts.
-- [ ] Implement `internal-beta.yml` with exact `source_sha` and `ci_run_id` inputs plus protected `internal-beta` environment variables for origin, key ID, and public key.
-- [ ] On macOS arm64 and Windows x64 jobs: `npm ci`, prepare the locked Runtime Seed, verify it, rebuild native modules for the target architecture, inject origin/trust values, build, package unsigned bytes, and stage the Runtime manifest.
-- [ ] On the assembly job: verify the exact CI belongs to the source SHA, build SBOM/provenance/manifest/checksums, keyless-sign the manifest and provenance with Cosign bundles, verify both bundles with the expected workflow identity/OIDC issuer, and upload one 30-day Actions artifact.
-- [ ] Run manifest/policy tests, Runtime packaging tests, typechecks, production build, and Lat validation.
-- [ ] Commit: `git add .github/workflows/internal-beta.yml build/electron-builder.internal-beta.yml scripts/internal-beta package.json package-lock.json docs/runbooks/internal-beta-packaging.md lat.md && git commit -m "ci: build internal beta desktop packages"`.
+- [x] Add manifest tests requiring exact source SHA, successful CI run URL, version `0.7.4-internal-beta.1`, HTTPS IP origin, offline key ID/public key, Runtime lock SHA, both Runtime platform identities, four package hashes, SBOM/provenance hashes, and `signingStatus=internal_only_unsigned`.
+- [x] Add failure tests for mutable filenames, duplicate artifacts, missing platform, wrong Runtime commit/channel, mismatched origin/trust issuer, noncanonical JSON, changed bytes, or unknown fields.
+- [x] Add workflow-policy tests that forbid tags, Releases, updater publication, Apple/Windows signing claims, GitHub artifact-attestation actions, and runtime source checkout.
+- [x] Run `node --test scripts/internal-beta/*.test.mjs`; expect RED.
+- [x] Set package/lock version to `0.7.4-internal-beta.1`.
+- [x] Add an Electron Builder overlay that disables code-sign discovery/notarization, retains hardened runtime settings where applicable, publishes never, and produces deterministically named internal-Beta artifacts.
+- [x] Implement `internal-beta.yml` with exact `source_sha` and `ci_run_id` inputs plus protected `internal-beta` environment variables for origin, key ID, and public key.
+- [x] On macOS arm64 and Windows x64 jobs: `npm ci`, prepare the locked Runtime Seed, verify it, rebuild native modules for the target architecture, inject origin/trust values, build, package unsigned bytes, and stage the Runtime manifest.
+- [x] On the assembly job: verify the exact CI belongs to the source SHA, build SBOM/provenance/manifest/checksums, keyless-sign the manifest and provenance with Cosign bundles, verify both bundles with the expected workflow identity/OIDC issuer, and upload one 30-day Actions artifact.
+- [x] Run manifest/policy tests, Runtime packaging tests, typechecks, production build, and Lat validation.
+- [x] Commit: `git add .github/workflows/internal-beta.yml build/electron-builder.internal-beta.yml scripts/internal-beta package.json package-lock.json docs/runbooks/internal-beta-packaging.md lat.md && git commit -m "ci: build internal beta desktop packages"`.
 
 ### Task 9: Add the Cloud internal-Beta deployment stack
 
