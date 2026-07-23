@@ -89,21 +89,21 @@ SMTP and SMS values are intentionally absent in this delivery. Do not configure 
 - Modify: `/Users/zizimutou/Desktop/aera/aera-cloud/.worktrees/internal-beta-delivery/internal/config/encrypted_backup_test.go`
 - Modify: `/Users/zizimutou/Desktop/aera/aera-cloud/.worktrees/internal-beta-delivery/.env.example`
 
-- [ ] Add tests that accept exactly `development`, `test`, `internal_beta`, and `production`, while rejecting all other environment strings.
-- [ ] Add tests that require an explicit `AGENTERA_CLOUD_PUBLIC_REGISTRATION_ENABLED=true` in `internal_beta`; omission must default to disabled.
-- [ ] Add tests that accept `AGENTERA_CLOUD_REGISTRATION_MODE=verified|direct`, require an explicit direct mode in `internal_beta`, and reject direct mode in every other environment.
-- [ ] Add tests that let direct mode omit SMTP/SMS configuration while verified mode retains existing provider requirements.
-- [ ] Add tests for bounded `AGENTERA_CLOUD_DIRECT_REGISTRATION_IP_LIMIT` and `AGENTERA_CLOUD_DIRECT_REGISTRATION_WINDOW`; require them only in direct mode.
-- [ ] Add tests that require an HTTPS public origin for a remote `internal_beta` host and still reject path, query, fragment, credentials, or remote HTTP.
-- [ ] Add tests that allow plaintext MinIO only for an unexposed service-network endpoint in `internal_beta`, while production continues to require TLS for non-loopback object storage.
-- [ ] Run `go test ./internal/config -run 'InternalBeta|PublicRegistration|RegistrationMode|EncryptedBackup' -count=1`; expect RED failures.
-- [ ] Implement `IsInternalBeta` and `IsDeployedEnvironment` helpers and use them instead of scattered string comparisons.
-- [ ] Change public-registration defaulting so both `internal_beta` and `production` default closed.
-- [ ] Keep secure browser cookies enabled whenever the public origin is HTTPS.
-- [ ] Document `AGENTERA_CLOUD_ENVIRONMENT=internal_beta`, explicit public registration, and explicit direct-registration mode in `.env.example` without adding a real host or secret.
-- [ ] Rerun the focused config tests; expect pass.
-- [ ] Run `gofmt -w internal/config` and `go test ./internal/config -count=1`.
-- [ ] Commit: `git add internal/config .env.example && git commit -m "feat: add fail-closed internal beta mode"`.
+- [x] Add tests that accept exactly `development`, `test`, `internal_beta`, and `production`, while rejecting all other environment strings.
+- [x] Add tests that require an explicit `AGENTERA_CLOUD_PUBLIC_REGISTRATION_ENABLED=true` in `internal_beta`; omission must default to disabled.
+- [x] Add tests that accept `AGENTERA_CLOUD_REGISTRATION_MODE=verified|direct`, require an explicit direct mode in `internal_beta`, and reject direct mode in every other environment.
+- [x] Add tests that let direct mode omit SMTP/SMS configuration while verified mode retains existing provider requirements.
+- [x] Add tests for bounded `AGENTERA_CLOUD_DIRECT_REGISTRATION_IP_LIMIT` and `AGENTERA_CLOUD_DIRECT_REGISTRATION_WINDOW`; require them only in direct mode.
+- [x] Add tests that require an HTTPS public origin for a remote `internal_beta` host and still reject path, query, fragment, credentials, or remote HTTP.
+- [x] Add tests that allow plaintext MinIO only for an unexposed service-network endpoint in `internal_beta`, while production continues to require TLS for non-loopback object storage.
+- [x] Run `go test ./internal/config -run 'InternalBeta|PublicRegistration|RegistrationMode|EncryptedBackup' -count=1`; expect RED failures.
+- [x] Implement `IsInternalBeta` and `IsDeployedEnvironment` helpers and use them instead of scattered string comparisons.
+- [x] Change public-registration defaulting so both `internal_beta` and `production` default closed.
+- [x] Keep secure browser cookies enabled whenever the public origin is HTTPS.
+- [x] Document `AGENTERA_CLOUD_ENVIRONMENT=internal_beta`, explicit public registration, and explicit direct-registration mode in `.env.example` without adding a real host or secret.
+- [x] Rerun the focused config tests; expect pass.
+- [x] Run `gofmt -w internal/config` and `go test ./internal/config -count=1`.
+- [x] Commit: `git add internal/config .env.example && git commit -m "feat: add fail-closed internal beta mode"`.
 
 ### Task 3: Add isolated direct registration and accurate capabilities
 
