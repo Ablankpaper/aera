@@ -205,6 +205,37 @@ The Desktop status-only successor commit is recorded in the external handoff bec
 
 Authorized feature-branch pushes and their CI runs occurred. No local `main` merge, pull request, deployment, DNS change, production feature enablement, tag, GitHub Release, or secret rotation occurred.
 
+### Internal-Beta host ceremony boundary
+
+The temporary company-internal Beta host now has a fail-closed, repository-owned
+ceremony contract without committing its address or credentials.
+
+`ops/internal-beta/bootstrap-host.sh` creates the dedicated deployment account,
+installs reviewed Docker/Compose and certificate prerequisites, narrows the host
+firewall, proves strict host-key and Ed25519 key access before it permits
+password/root SSH hardening, and leaves cloud-console recovery intact.
+`generate-secrets.sh` refuses overwrite and produces independent Cloud/Admin
+datastore, key-ring, HMAC, OAuth/signing, Official Agent, quality, MinIO,
+encrypted-backup, mTLS, and service-JWT material. Only the offline-entitlement
+key ID and 32-byte public key leave the host-secret boundary.
+
+`install-ip-certificate.sh` requires Certbot 5.4 or newer, proves staging IP
+issuance before trusted short-lived issuance, then installs automatic renewal
+and fail-closed Caddy reload. SMTP/SMS remain intentionally absent; enabled
+registration is the isolated internal-Beta direct mode and does not assert
+mailbox ownership.
+
+The external operator record has a strict canonical schema. It can record exact
+source SHAs, signed candidate digests and run URLs, package hashes, fixed
+statuses/timestamps, certificate expiry, and coarse Mac/Windows versions. It
+cannot record infrastructure addresses, credentials, identities, codes,
+recovery phrases, prompts/responses, Profile paths, or logs.
+
+Local policy and renderer tests establish the ceremony implementation only.
+They do not claim that the real host was changed, a certificate was issued,
+secrets were generated, a candidate was deployed, packages were built, or
+physical-device acceptance passed. Each remains a separate later proof.
+
 ## Hermes and data boundary
 
 Quality, backup, and release failures cannot delay a conversation, revert local learning, mutate an active RuntimeBinding, overwrite a running Profile, or change `aera-runtime`.

@@ -288,17 +288,17 @@ SMTP and SMS values are intentionally absent in this delivery. Do not configure 
 - Create: `/Users/zizimutou/Desktop/aera/aera-cloud/.worktrees/internal-beta-delivery/docs/runbooks/internal-beta.md`
 - Modify: `/Users/zizimutou/Desktop/aera/aera-cloud/.worktrees/internal-beta-delivery/scripts/tests/delivery-contract.test.sh`
 
-- [ ] Write static/fixture tests requiring exact image-by-digest input, app port bound only to `127.0.0.1`, no host ports for PostgreSQL/Redis/MinIO/Internal Admin, read-only app root, resource limits, MinIO persistence, private Admin network, and a health check.
-- [ ] Add deploy-script tests with fake Docker/Cosign/curl proving manifest verification occurs before pull/start, first deployment is recorded, flags remain disabled on failed smoke, and later rollback uses only the recorded prior digest.
-- [ ] Add exposure-check tests that fail if host listeners other than SSH/80/443 are public or if a container publishes data-service ports.
-- [ ] Run `bash scripts/tests/internal-beta-deploy.test.sh`; expect RED.
-- [ ] Implement the Compose stack using separate Cloud Postgres/Redis/MinIO volumes and the existing external `aera-cloud-admin-private` network.
-- [ ] Mount Cloud Internal Admin server cert/key, client CA, and service-JWT public key read-only.
-- [ ] Set `AGENTERA_CLOUD_ENVIRONMENT=internal_beta`; keep public registration, Official Agent, quality, and encrypted backup controlled by a generated feature env file.
-- [ ] Implement first-deploy and update paths with exact manifest verification, schema-forward startup, health, redacted state recording, and failure rollback.
-- [ ] Configure Caddy to serve `/.well-known/acme-challenge/` from `/var/lib/aera-certbot`, redirect port 80 otherwise, terminate with the Certbot IP certificate files, omit request access logs, and proxy only to `127.0.0.1:18086`.
-- [ ] Run Compose config validation, shell syntax tests, delivery contract, Go tests, and secret scan.
-- [ ] Commit: `git add deploy scripts/tests docs/runbooks/internal-beta.md && git commit -m "ops: add cloud internal beta stack"`.
+- [x] Write static/fixture tests requiring exact image-by-digest input, app port bound only to `127.0.0.1`, no host ports for PostgreSQL/Redis/MinIO/Internal Admin, read-only app root, resource limits, MinIO persistence, private Admin network, and a health check.
+- [x] Add deploy-script tests with fake Docker/Cosign/curl proving manifest verification occurs before pull/start, first deployment is recorded, flags remain disabled on failed smoke, and later rollback uses only the recorded prior digest.
+- [x] Add exposure-check tests that fail if host listeners other than SSH/80/443 are public or if a container publishes data-service ports.
+- [x] Run `bash scripts/tests/internal-beta-deploy.test.sh`; expect RED.
+- [x] Implement the Compose stack using separate Cloud Postgres/Redis/MinIO volumes and the existing external `aera-cloud-admin-private` network.
+- [x] Mount Cloud Internal Admin server cert/key, client CA, and service-JWT public key read-only.
+- [x] Set `AGENTERA_CLOUD_ENVIRONMENT=internal_beta`; keep public registration, Official Agent, quality, and encrypted backup controlled by a generated feature env file.
+- [x] Implement first-deploy and update paths with exact manifest verification, schema-forward startup, health, redacted state recording, and failure rollback.
+- [x] Configure Caddy to serve `/.well-known/acme-challenge/` from `/var/lib/aera-certbot`, redirect port 80 otherwise, terminate with the Certbot IP certificate files, omit request access logs, and proxy only to `127.0.0.1:18086`.
+- [x] Run Compose config validation, shell syntax tests, delivery contract, Go tests, and secret scan.
+- [x] Commit: `git add deploy scripts/tests docs/runbooks/internal-beta.md && git commit -m "ops: add cloud internal beta stack"`.
 
 ### Task 10: Add the Admin internal-Beta deployment stack
 
@@ -312,14 +312,14 @@ SMTP and SMS values are intentionally absent in this delivery. Do not configure 
 - Create: `/Users/zizimutou/Desktop/aera/aera-admin/.worktrees/internal-beta-delivery/scripts/tests/internal-beta-deploy.test.sh`
 - Create: `/Users/zizimutou/Desktop/aera/aera-admin/.worktrees/internal-beta-delivery/docs/runbooks/internal-beta.md`
 
-- [ ] Write tests requiring loopback-only Admin HTTP, separate Postgres/Redis volumes and credentials, private Cloud network, read-only mTLS/JWT mounts, mutations disabled by default, and no public ports.
-- [ ] Add fake-command tests proving exact manifest/Cloud compatibility/mTLS material checks run before Admin starts and any unknown Cloud state remains unavailable.
-- [ ] Run `bash scripts/tests/internal-beta-deploy.test.sh`; expect RED.
-- [ ] Implement Admin Compose with `AERA_ADMIN_ENVIRONMENT=internal_beta`, `AERA_ADMIN_PUBLIC_URL=http://127.0.0.1:18080`, dedicated Redis DB 10, and `AERA_ADMIN_CLOUD_BASE_URL=https://aera-cloud-internal-admin:8443`.
-- [ ] Keep Admin browser access through `ssh -L 18080:127.0.0.1:18080 AERA_INTERNAL_BETA_HOST`; do not expose it through Caddy.
-- [ ] Implement deploy/health scripts that verify the Admin candidate, pinned Cloud contract, key file modes, TLS 1.3 dual authentication, read-only queries, and disabled mutations before optional enablement.
-- [ ] Run Compose config validation, shell tests, `make verify`, and real cross-repository E2E.
-- [ ] Commit: `git add deploy scripts/tests docs/runbooks/internal-beta.md && git commit -m "ops: add admin internal beta stack"`.
+- [x] Write tests requiring loopback-only Admin HTTP, separate Postgres/Redis volumes and credentials, private Cloud network, read-only mTLS/JWT mounts, mutations disabled by default, and no public ports.
+- [x] Add fake-command tests proving exact manifest/Cloud compatibility/mTLS material checks run before Admin starts and any unknown Cloud state remains unavailable.
+- [x] Run `bash scripts/tests/internal-beta-deploy.test.sh`; expect RED.
+- [x] Implement Admin Compose with `AERA_ADMIN_ENVIRONMENT=internal_beta`, `AERA_ADMIN_PUBLIC_URL=http://127.0.0.1:18080`, dedicated Redis DB 10, and `AERA_ADMIN_CLOUD_BASE_URL=https://aera-cloud-internal-admin:8443`.
+- [x] Keep Admin browser access through `ssh -L 18080:127.0.0.1:18080 AERA_INTERNAL_BETA_HOST`; do not expose it through Caddy.
+- [x] Implement deploy/health scripts that verify the Admin candidate, pinned Cloud contract, key file modes, TLS 1.3 dual authentication, read-only queries, and disabled mutations before optional enablement.
+- [x] Run Compose config validation, shell tests, `make verify`, and real cross-repository E2E.
+- [x] Commit: `git add deploy scripts/tests docs/runbooks/internal-beta.md && git commit -m "ops: add admin internal beta stack"`.
 
 ### Task 11: Add host bootstrap, key ceremony, and operator tooling
 
@@ -336,17 +336,17 @@ SMTP and SMS values are intentionally absent in this delivery. Do not configure 
 - Create: `/Users/zizimutou/Desktop/aera/aera/.worktrees/internal-beta-delivery/docs/runbooks/internal-beta-host.md`
 - Modify: `/Users/zizimutou/Desktop/aera/aera/.worktrees/internal-beta-delivery/lat.md/agentera-post-official-delivery.md`
 
-- [ ] Add policy tests forbidding literal IPv4 addresses, passwords, tokens, private-key markers, unsafe broad deletes, SSH `StrictHostKeyChecking=no`, secret echoing, and password persistence in tracked files.
-- [ ] Add operator-record tests allowing only exact SHAs/digests/run URLs/package hashes/statuses/timestamps/coarse platform versions and rejecting credentials, emails, codes, recovery words, prompts, content, Profile paths, and free-form logs.
-- [ ] Run `node --test ops/internal-beta/*.test.mjs`; expect RED.
-- [ ] Implement host bootstrap: create a non-root `aera-deploy` account, install its authorized key, verify key login, install Docker/Compose/OpenSSL/Caddy/Python venv, install Certbot 5.4+, create `/opt/aera/internal-beta` mode `0700`, configure UFW for SSH/80/443 only, and enable unattended security updates.
-- [ ] Implement secret generation with independent random material for Cloud/Admin databases, Redis, key rings, HMACs, OAuth/access/offline/agent-control signing, quality pseudonyms, MinIO, backup encryption, Internal Admin CA/server/client certificates, and service JWT.
-- [ ] Generate offline-entitlement key ID/public key as a separate public output; keep its private 64-byte Ed25519 material only in the Cloud env file.
-- [ ] Implement IP certificate staging issuance first, then trusted issuance using Certbot `--preferred-profile shortlived --webroot --ip-address`; install an automated renew timer and Caddy reload deploy hook.
-- [ ] Implement password rotation without command-line or log exposure, verify `aera-deploy` key access, then disable `PasswordAuthentication` and direct root SSH while retaining cloud-console recovery.
-- [ ] Render a redacted operator record in `/Users/zizimutou/Desktop/aera/.internal-beta-operator`; never copy the host secret directory into Actions artifacts.
-- [ ] Run policy tests, `bash -n` on scripts, ShellCheck when installed, focused Desktop tests, and Lat validation.
-- [ ] Commit: `git add ops/internal-beta docs/runbooks/internal-beta-host.md lat.md && git commit -m "ops: automate internal beta host ceremony"`.
+- [x] Add policy tests forbidding literal IPv4 addresses, passwords, tokens, private-key markers, unsafe broad deletes, SSH `StrictHostKeyChecking=no`, secret echoing, and password persistence in tracked files.
+- [x] Add operator-record tests allowing only exact SHAs/digests/run URLs/package hashes/statuses/timestamps/coarse platform versions and rejecting credentials, emails, codes, recovery words, prompts, content, Profile paths, and free-form logs.
+- [x] Run `node --test ops/internal-beta/*.test.mjs`; expect RED.
+- [x] Implement host bootstrap: create a non-root `aera-deploy` account, install its authorized key, verify key login, install Docker/Compose/OpenSSL/Caddy/Python venv, install Certbot 5.4+, create `/opt/aera/internal-beta` mode `0700`, configure UFW for SSH/80/443 only, and enable unattended security updates.
+- [x] Implement secret generation with independent random material for Cloud/Admin databases, Redis, key rings, HMACs, OAuth/access/offline/agent-control signing, quality pseudonyms, MinIO, backup encryption, Internal Admin CA/server/client certificates, and service JWT.
+- [x] Generate offline-entitlement key ID/public key as a separate public output; keep its private 64-byte Ed25519 material only in the Cloud env file.
+- [x] Implement IP certificate staging issuance first, then trusted issuance using Certbot `--preferred-profile shortlived --webroot --ip-address`; install an automated renew timer and Caddy reload deploy hook.
+- [x] Implement password rotation without command-line or log exposure, verify `aera-deploy` key access, then disable `PasswordAuthentication` and direct root SSH while retaining cloud-console recovery.
+- [x] Render a redacted operator record in `/Users/zizimutou/Desktop/aera/.internal-beta-operator`; never copy the host secret directory into Actions artifacts.
+- [x] Run policy tests, `bash -n` on scripts, ShellCheck when installed, focused Desktop tests, and Lat validation.
+- [x] Commit: `git add ops/internal-beta docs/runbooks/internal-beta-host.md lat.md && git commit -m "ops: automate internal beta host ceremony"`.
 
 ### Task 12: Add redacted live-acceptance evidence and tester handoff
 
