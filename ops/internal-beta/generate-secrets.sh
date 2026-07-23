@@ -43,10 +43,10 @@ generate_ed25519_raw() {
   local private_pem="$work_dir/$label.pem"
   local private_der="$work_dir/$label-private.der"
   local public_der="$work_dir/$label-public.der"
-  openssl genpkey -algorithm ED25519 -out "$private_pem" 2>/dev/null
-  openssl pkey -in "$private_pem" -outform DER -out "$private_der" 2>/dev/null
+  openssl genpkey -algorithm ED25519 -out "$private_pem"
+  openssl pkey -in "$private_pem" -outform DER -out "$private_der"
   openssl pkey -in "$private_pem" -pubout -outform DER \
-    -out "$public_der" 2>/dev/null
+    -out "$public_der"
   [[ $(wc -c <"$private_der") -ge 32 && $(wc -c <"$public_der") -ge 32 ]] ||
     fail 'generated Ed25519 DER is too short'
 
@@ -88,19 +88,19 @@ write_internal_admin_pki() {
   local serial_file="$work_dir/internal-admin-ca.srl"
 
   openssl genpkey -algorithm EC \
-    -pkeyopt ec_paramgen_curve:P-256 -out "$ca_key" 2>/dev/null
+    -pkeyopt ec_paramgen_curve:P-256 -out "$ca_key"
   openssl req -x509 -new -sha256 -days 90 \
     -key "$ca_key" \
     -subj '/CN=Aera Internal Beta Private CA' \
     -addext 'basicConstraints=critical,CA:TRUE,pathlen:0' \
     -addext 'keyUsage=critical,keyCertSign,cRLSign' \
-    -out "$ca_cert" 2>/dev/null
+    -out "$ca_cert"
 
   openssl genpkey -algorithm EC \
-    -pkeyopt ec_paramgen_curve:P-256 -out "$server_key" 2>/dev/null
+    -pkeyopt ec_paramgen_curve:P-256 -out "$server_key"
   openssl req -new -sha256 -key "$server_key" \
     -subj '/CN=aera-cloud-internal-admin' \
-    -out "$server_csr" 2>/dev/null
+    -out "$server_csr"
   {
     printf 'basicConstraints=critical,CA:FALSE\n'
     printf 'keyUsage=critical,digitalSignature,keyEncipherment\n'
@@ -112,13 +112,13 @@ write_internal_admin_pki() {
     -CA "$ca_cert" -CAkey "$ca_key" -CAcreateserial \
     -CAserial "$serial_file" \
     -extfile "$work_dir/server.ext" \
-    -out "$server_cert" 2>/dev/null
+    -out "$server_cert"
 
   openssl genpkey -algorithm EC \
-    -pkeyopt ec_paramgen_curve:P-256 -out "$client_key" 2>/dev/null
+    -pkeyopt ec_paramgen_curve:P-256 -out "$client_key"
   openssl req -new -sha256 -key "$client_key" \
     -subj '/CN=aera-admin-internal-beta' \
-    -out "$client_csr" 2>/dev/null
+    -out "$client_csr"
   {
     printf 'basicConstraints=critical,CA:FALSE\n'
     printf 'keyUsage=critical,digitalSignature\n'
@@ -129,7 +129,7 @@ write_internal_admin_pki() {
     -CA "$ca_cert" -CAkey "$ca_key" \
     -CAserial "$serial_file" \
     -extfile "$work_dir/client.ext" \
-    -out "$client_cert" 2>/dev/null
+    -out "$client_cert"
 
   openssl verify -purpose sslserver -CAfile "$ca_cert" "$server_cert" >/dev/null
   openssl verify -purpose sslclient -CAfile "$ca_cert" "$client_cert" >/dev/null
@@ -140,9 +140,9 @@ write_internal_admin_pki() {
 write_service_jwt_keys() {
   local pki_dir=$1
   openssl genpkey -algorithm ED25519 \
-    -out "$pki_dir/internal-admin-jwt-private.pem" 2>/dev/null
+    -out "$pki_dir/internal-admin-jwt-private.pem"
   openssl pkey -in "$pki_dir/internal-admin-jwt-private.pem" \
-    -pubout -out "$pki_dir/internal-admin-jwt-public.pem" 2>/dev/null
+    -pubout -out "$pki_dir/internal-admin-jwt-public.pem"
   chmod 0600 "$pki_dir/internal-admin-jwt-private.pem"
   chmod 0644 "$pki_dir/internal-admin-jwt-public.pem"
 }

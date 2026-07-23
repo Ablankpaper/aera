@@ -300,6 +300,7 @@ describe("AgentEra authentication controller", () => {
     unsubscribe();
   });
 
+  // @lat: [[agentera-app-authentication#Sessions and offline use#Signed entitlement validation]]
   it.each<[string, SignedTokenSetOptions]>([
     ["issuer", { claims: { iss: "https://203.0.113.10" } }],
     ["key ID", { header: { kid: "offline-unknown-v1" } }],

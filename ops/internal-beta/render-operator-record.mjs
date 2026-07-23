@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable @typescript-eslint/explicit-function-return-type */
 
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename, stat } from "node:fs/promises";
@@ -147,15 +148,21 @@ function validateRunUrl(value, role, label) {
 
 function validateRepository(entry, index) {
   const label = `repositories[${index}]`;
-  exactKeys(entry, ["role", "sha", "status", "verifiedAt"], ["runUrl"], label);
   enumString(entry.role, REPOSITORY_ROLES, `${label}.role`);
+  if (entry.role === "runtime") {
+    exactKeys(entry, ["role", "sha", "status", "verifiedAt"], [], label);
+  } else {
+    exactKeys(
+      entry,
+      ["role", "sha", "status", "verifiedAt", "runUrl"],
+      [],
+      label,
+    );
+  }
   exactString(entry.sha, SHA, `${label}.sha`);
   enumString(entry.status, REPOSITORY_STATUS, `${label}.status`);
   timestamp(entry.verifiedAt, `${label}.verifiedAt`);
-  if (entry.runUrl !== undefined) {
-    if (entry.role === "runtime") {
-      fail(`${label}.runUrl is not allowed for the locked Runtime`);
-    }
+  if (entry.role !== "runtime") {
     validateRunUrl(entry.runUrl, entry.role, `${label}.runUrl`);
   }
 }

@@ -109,6 +109,31 @@ configure_unattended_updates() {
   systemctl enable --now unattended-upgrades
 }
 
+reload_ssh_service() {
+  if systemctl cat ssh.service >/dev/null 2>&1; then
+    systemctl reload ssh
+  else
+    systemctl reload sshd
+  fi
+}
+
+configure_ssh_port() {
+  local ssh_port=$1 configured_port matched=false
+  install -d -m 0755 /etc/ssh/sshd_config.d
+  printf 'Port %s\n' "$ssh_port" \
+    >/etc/ssh/sshd_config.d/98-aera-internal-beta-port.conf
+  chmod 0644 /etc/ssh/sshd_config.d/98-aera-internal-beta-port.conf
+  /usr/sbin/sshd -t
+  while read -r configured_port; do
+    if [[ $configured_port == "$ssh_port" ]]; then
+      matched=true
+      break
+    fi
+  done < <(/usr/sbin/sshd -T | awk '$1 == "port" {print $2}')
+  [[ $matched == true ]] ||
+    fail 'requested SSH port is absent from the effective sshd configuration'
+}
+
 configure_firewall() {
   local ssh_port=$1
   ufw --force reset >/dev/null
@@ -189,7 +214,9 @@ prepare_host() {
   configure_deploy_user "$authorized_key_file"
   configure_directories
   configure_unattended_updates
+  configure_ssh_port "$ssh_port"
   configure_firewall "$ssh_port"
+  reload_ssh_service
 
   printf 'Aera host preparation completed; verify key login before SSH hardening.\n'
 }
@@ -275,11 +302,7 @@ harden_ssh() {
   } >/etc/ssh/sshd_config.d/99-aera-internal-beta.conf
   chmod 0644 /etc/ssh/sshd_config.d/99-aera-internal-beta.conf
   /usr/sbin/sshd -t
-  if systemctl list-unit-files ssh.service >/dev/null 2>&1; then
-    systemctl reload ssh
-  else
-    systemctl reload sshd
-  fi
+  reload_ssh_service
   unlink "$marker"
   printf 'Password SSH and direct root SSH are disabled; cloud console recovery remains available.\n'
 }

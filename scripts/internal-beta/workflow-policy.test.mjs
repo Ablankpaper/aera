@@ -24,8 +24,23 @@ test("internal-Beta workflow is exact-SHA, unsigned, nonpublishing, and Sigstore
   ]);
   assert.equal(workflow.permissions.actions, "read");
   assert.equal(workflow.permissions.contents, "read");
-  assert.equal(workflow.permissions["id-token"], "write");
+  assert.equal(workflow.permissions["id-token"], undefined);
   assert.equal(workflow.permissions.attestations, undefined);
+  assert.deepEqual(workflow.jobs.assemble.permissions, {
+    actions: "read",
+    contents: "read",
+    "id-token": "write",
+  });
+  for (const jobName of ["validate", "macos", "windows"]) {
+    assert.equal(workflow.jobs[jobName].permissions, undefined);
+  }
+  for (const jobName of ["validate", "macos", "windows", "assemble"]) {
+    const checkout = workflow.jobs[jobName].steps.find(
+      (step) => step.uses === "actions/checkout@v4",
+    );
+    assert.ok(checkout, `${jobName} must check out exact source`);
+    assert.equal(checkout.with["persist-credentials"], false);
+  }
   assert.match(raw, /environment:\s*internal-beta/u);
   for (const variable of [
     "AERA_INTERNAL_BETA_ORIGIN",

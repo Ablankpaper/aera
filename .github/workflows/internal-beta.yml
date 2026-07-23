@@ -15,7 +15,6 @@ on:
 permissions:
   actions: read
   contents: read
-  id-token: write
 
 concurrency:
   group: desktop-internal-beta-${{ inputs.source_sha }}
@@ -36,6 +35,7 @@ jobs:
         with:
           ref: ${{ inputs.source_sha }}
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -124,6 +124,7 @@ jobs:
         with:
           ref: ${{ inputs.source_sha }}
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Require native Apple Silicon runner
         shell: bash
@@ -219,6 +220,7 @@ jobs:
         with:
           ref: ${{ inputs.source_sha }}
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Require native Windows x64 runner
         shell: pwsh
@@ -320,12 +322,17 @@ jobs:
     runs-on: ubuntu-24.04
     environment: internal-beta
     timeout-minutes: 40
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
     steps:
       - name: Check out exact Desktop source
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.source_sha }}
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4

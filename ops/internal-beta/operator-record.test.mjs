@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/explicit-function-return-type */
+
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, stat } from "node:fs/promises";
 import os from "node:os";
@@ -120,6 +122,18 @@ test("accepts only the bounded redacted operator record", () => {
   const second = canonicalOperatorRecord(JSON.parse(first));
   assert.equal(first, second);
   assert.ok(first.endsWith("\n"));
+});
+
+test("requires an exact successful CI run for every mutable repository", () => {
+  for (const role of ["desktop", "cloud", "admin"]) {
+    const record = validRecord();
+    const repository = record.repositories.find((entry) => entry.role === role);
+    delete repository.runUrl;
+    assert.throws(
+      () => validateOperatorRecord(record),
+      new RegExp(`repositories.*runUrl`, "iu"),
+    );
+  }
 });
 
 test("renders owner-only canonical JSON", async () => {

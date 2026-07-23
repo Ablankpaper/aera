@@ -473,7 +473,7 @@ cd /Users/zizimutou/Desktop/aera/aera/.worktrees/internal-beta-delivery
 node --test scripts/internal-beta/*.test.mjs ops/internal-beta/*.test.mjs
 npx vitest run tests/agentera-auth-config.test.ts tests/agentera-auth-controller.test.ts tests/runtime-packaging-scripts.test.ts
 npm run check:official-quality-boundary
-npm run check:encrypted-backup-boundary
+AERA_ENCRYPTED_BACKUP_CLOUD_REPO=/Users/zizimutou/Desktop/aera/aera-cloud/.worktrees/internal-beta-delivery npm run check:encrypted-backup-boundary
 npm run typecheck
 npm run build
 npm exec --yes --package=lat.md@0.12.1 -- lat check

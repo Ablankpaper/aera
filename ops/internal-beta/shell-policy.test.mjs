@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/explicit-function-return-type */
+
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -87,4 +89,32 @@ test("tracked internal-beta operator implementations contain no prohibited mater
     const source = await readFile(path.join(directory, file), "utf8");
     assertPolicySafe(source, file);
   }
+});
+
+test("host preparation persists and validates the requested SSH port before firewall reload", async () => {
+  const source = await readFile(
+    path.join(directory, "bootstrap-host.sh"),
+    "utf8",
+  );
+  assert.match(source, /configure_ssh_port\(\)/u);
+  assert.match(source, /printf 'Port %s\\n' "\$ssh_port"/u);
+  assert.match(source, /\/usr\/sbin\/sshd -T/u);
+
+  const configure = source.indexOf('configure_ssh_port "$ssh_port"');
+  const firewall = source.indexOf('configure_firewall "$ssh_port"');
+  const reload = source.indexOf("reload_ssh_service", firewall);
+  assert.ok(configure >= 0, "prepare must configure the requested SSH port");
+  assert.ok(firewall > configure, "firewall must follow validated SSH config");
+  assert.ok(reload > firewall, "SSH reload must follow the firewall update");
+});
+
+test("secret generation does not hide OpenSSL diagnostics", async () => {
+  const source = await readFile(
+    path.join(directory, "generate-secrets.sh"),
+    "utf8",
+  );
+  assert.doesNotMatch(
+    source,
+    /openssl (?:genpkey|pkey|req|x509)[\s\S]{0,240}2>\/dev\/null/u,
+  );
 });

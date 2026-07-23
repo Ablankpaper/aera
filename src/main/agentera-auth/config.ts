@@ -159,6 +159,13 @@ export function resolveBundledAgenteraOfflinePublicKeys(
         sources.buildPublicUrl,
       )
     : {};
+  for (const keyId of Object.keys(buildRoots)) {
+    if (Object.hasOwn(DEVELOPMENT_OFFLINE_PUBLIC_KEYS, keyId)) {
+      throw new Error(
+        "AgentEra offline build key ID collides with development trust.",
+      );
+    }
+  }
   return Object.freeze({
     ...DEVELOPMENT_OFFLINE_PUBLIC_KEYS,
     ...buildRoots,

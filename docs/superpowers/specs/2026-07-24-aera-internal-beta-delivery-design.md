@@ -97,9 +97,10 @@ record, never in Git or workflow artifacts.
 
 The external deployment record defines `AERA_INTERNAL_BETA_ORIGIN` as the exact
 canonical HTTPS origin for the authorized public IP. A publicly-trusted,
-short-lived IP certificate is requested and renewed automatically. Renewal
-failure alerts before expiry and prevents an expired certificate from being
-treated as healthy.
+short-lived IP certificate is requested and renewed automatically. The
+operator must run the documented certificate verification after renewal and
+during the pre-expiry check; an expired certificate must not be treated as
+healthy.
 
 Port 80 is used only for ACME validation and redirects ordinary traffic to
 HTTPS. Port 443 terminates TLS. The application listener remains bound to
@@ -254,7 +255,8 @@ The internal Beta is complete only when all of the following exist:
 
 - exact Cloud, Admin, Desktop, and Runtime identities;
 - verified Cloud/Admin candidate manifests and deployed digests;
-- healthy HTTPS IP endpoint with automated certificate renewal;
+- healthy HTTPS IP endpoint with automated renewal and explicit operator
+  pre-expiry verification;
 - functioning direct internal-Beta registration and Desktop login trust chain;
 - installable, checksummed macOS and Windows internal-Beta packages;
 - successful live Mac/Windows smoke for Agent, quality feedback, encrypted

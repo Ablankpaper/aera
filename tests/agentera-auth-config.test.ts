@@ -121,6 +121,7 @@ describe("AgentEra cloud endpoint configuration", () => {
     ).toEqual({});
   });
 
+  // @lat: [[agentera-app-authentication#Desktop authentication foundation#Installation device identity]]
   it("accepts reviewed build-time Ed25519 keys for one canonical HTTPS IP issuer", () => {
     const roots = parseAgenteraOfflinePublicKeysBuildConfig(
       betaTrustJson(),
@@ -140,6 +141,7 @@ describe("AgentEra cloud endpoint configuration", () => {
     );
   });
 
+  // @lat: [[agentera-app-authentication#Desktop authentication foundation#Installation device identity]]
   it.each([
     ["malformed JSON", "{", betaIssuer],
     [
@@ -230,6 +232,23 @@ describe("AgentEra cloud endpoint configuration", () => {
       ).toThrow(/offline|issuer|key|json|field|https|origin/i);
     },
   );
+
+  // @lat: [[agentera-app-authentication#Desktop authentication foundation#Installation device identity]]
+  it("rejects a build key ID that collides with development trust", () => {
+    expect(() =>
+      resolveBundledAgenteraOfflinePublicKeys({
+        buildOfflinePublicKeysJson: betaTrustJson({
+          keys: [
+            {
+              keyId: "offline-dev-v1",
+              publicKey: betaPublicKey,
+            },
+          ],
+        }),
+        buildPublicUrl: betaIssuer,
+      }),
+    ).toThrow(/collides.*development|development.*collides/i);
+  });
 
   it("does not read runtime process variables as offline trust roots", () => {
     const previous = process.env.MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON;

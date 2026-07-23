@@ -8,7 +8,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { hashArtifact } from "../release/candidate-manifest.mjs";
 import {
-  INTERNAL_BETA_ARTIFACTS,
   INTERNAL_BETA_RUNTIME_SOURCE_SHA,
   canonicalJSONStringify,
   parseAndValidateInternalBetaManifest,
