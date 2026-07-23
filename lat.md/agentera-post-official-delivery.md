@@ -172,6 +172,19 @@ The protected Cloud/Admin rollback workflows can target staging only when the ex
 
 Local verifier and fake-command workflow tests do not establish a real rehearsal. Exact signed candidates, staging infrastructure, executed runs, protected evidence, and independent approval remain `external_blocked`.
 
+### Final local verification and frozen handoff
+
+The 2026-07-23 exhaustive local matrix passed from the isolated feature worktrees.
+
+- Desktop at verified code checkpoint `6d713a8f02829604e731ea63c4b80670183d8acd`: 299 Vitest files with 2,751 passing and 3 explicitly skipped tests; Node and renderer typechecks; production Electron build; 49 release-policy tests; official-quality and encrypted-backup boundary checks; Lat validation; and all 17 AgentEra Playwright scenarios in one single-worker run.
+- Cloud at `92632048a5261f02d06f132d22854dda1b513345`: secret/delivery/digest/manifest contracts; all default Go packages; security/control-plane/encrypted-backup race tests; vet and release builds; Web unit, type, build, and eight browser checks; PostgreSQL/Redis/MinIO integration; tagged E2E; auth smoke; encrypted backup and disposable restore; and local image build.
+- Admin at `d2a755ec6fbf395de815f162e62915766a6a90d6`: `make verify`; all release/deploy/Cloud-material contracts; local image build; 15 real-Cloud browser scenarios; and the backend E2E acceptance test.
+- Runtime remained clean at `c0439e1e3e5f35a91b658d57ddfc011e0d5ba1bb`.
+
+The Desktop final documentation commit is recorded in the external handoff because a Git commit cannot contain its own object ID. No `aera/official-quality-v1` feature branch exists on origin. The latest unrelated Desktop and Cloud `main` Actions runs executed zero steps and carry GitHub's failed-payment or spending-limit annotation; Admin has no exact-branch CI run. Exact-SHA remote CI, signed candidates, physical-device evidence, private-staging acceptance, rollback rehearsal, production deployment, rollout, and public publication therefore remain `external_blocked` or not authorized as recorded in `docs/runbooks/release-status-template.md`.
+
+No local merge, push, workflow dispatch, deployment, DNS change, production feature enablement, tag, GitHub Release, or secret rotation occurred.
+
 ## Hermes and data boundary
 
 Quality, backup, and release failures cannot delay a conversation, revert local learning, mutate an active RuntimeBinding, overwrite a running Profile, or change `aera-runtime`.
