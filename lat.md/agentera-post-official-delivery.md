@@ -140,6 +140,16 @@ It requires exact-SHA successful CI, protected signing credentials, native macOS
 
 `release.yml` and `beta-release.yml` no longer contain build or publication paths; they can only invoke the candidate workflow. Local policy and workflow tests pass, but no remotely signed candidate exists because the protected Apple/Windows signing path was not authorized or executed. Local and branch-CI verification therefore prove the fail-closed pipeline contract, not signed bytes, device acceptance, staging deployment, or release.
 
+### Unsigned internal-Beta candidate boundary
+
+The internal-Beta path produces checksummed macOS arm64 and Windows x64 packages for trusted company testers while preserving a clear distinction from a signed production candidate.
+
+`.github/workflows/internal-beta.yml` requires one exact successful-CI Desktop SHA on `main`, prepares and verifies the locked Runtime Seed without checking out Runtime source, and bakes one reviewed HTTPS IP Origin plus its issuer-scoped Ed25519 public key. The Electron Builder overlay explicitly disables identity discovery, notarization, Windows executable signing, publication, tags, Releases, and updater delivery while retaining macOS Hardened Runtime.
+
+`scripts/internal-beta/manifest.mjs` binds version `0.7.4-internal-beta.1`, both workflow run identities, the Origin and public trust root, Runtime lock and Darwin/Windows manifests, four fixed package names and hashes, SPDX SBOM, SLSA v1 provenance, and `internal_only_unsigned`. Its strict parser rejects unknown fields and noncanonical JSON, while byte verification rejects changed packages or evidence.
+
+The workflow keyless-signs the canonical manifest and provenance with Cosign and immediately verifies the exact GitHub OIDC issuer plus `internal-beta.yml@refs/heads/main` identity. Its final artifact lasts thirty days and creates no public release surface. Local manifest/policy tests prove the pipeline contract only; no remote internal-Beta package or physical-device acceptance is claimed until the later live execution records it.
+
 ### Real-device evidence boundary
 
 Real-device approval is one canonical record bound to the exact candidate manifest and installed artifact hashes.
@@ -194,6 +204,62 @@ The 2026-07-23 exhaustive local matrix passed from the isolated feature worktree
 The Desktop status-only successor commit is recorded in the external handoff because a Git commit cannot contain its own object ID. All three `aera/official-quality-v1` branches exist on origin, and the exact verified code checkpoints passed the CI runs recorded above. Signed candidates, physical-device evidence, private-staging acceptance, rollback rehearsal, production deployment, rollout, and public publication remain `external_blocked` or not authorized as recorded in `docs/runbooks/release-status-template.md`.
 
 Authorized feature-branch pushes and their CI runs occurred. No local `main` merge, pull request, deployment, DNS change, production feature enablement, tag, GitHub Release, or secret rotation occurred.
+
+### Internal-Beta host ceremony boundary
+
+The temporary company-internal Beta host now has a fail-closed, repository-owned
+ceremony contract without committing its address or credentials.
+
+`ops/internal-beta/bootstrap-host.sh` creates the dedicated deployment account,
+installs reviewed Docker/Compose and certificate prerequisites, narrows the host
+firewall, proves strict host-key and Ed25519 key access before it permits
+password/root SSH hardening, and leaves cloud-console recovery intact.
+`generate-secrets.sh` refuses overwrite and produces independent Cloud/Admin
+datastore, key-ring, HMAC, OAuth/signing, Official Agent, quality, MinIO,
+encrypted-backup, mTLS, and service-JWT material. Only the offline-entitlement
+key ID and 32-byte public key leave the host-secret boundary.
+
+`install-ip-certificate.sh` requires Certbot 5.4 or newer, proves staging IP
+issuance before trusted short-lived issuance, then installs automatic renewal
+and fail-closed Caddy reload. SMTP/SMS remain intentionally absent; enabled
+registration is the isolated internal-Beta direct mode and does not assert
+mailbox ownership.
+
+The external operator record has a strict canonical schema. It can record exact
+source SHAs, signed candidate digests and run URLs, package hashes, fixed
+statuses/timestamps, certificate expiry, and coarse Mac/Windows versions. It
+cannot record infrastructure addresses, credentials, identities, codes,
+recovery phrases, prompts/responses, Profile paths, or logs.
+
+Local policy and renderer tests establish the ceremony implementation only.
+They do not claim that the real host was changed, a certificate was issued,
+secrets were generated, a candidate was deployed, packages were built, or
+physical-device acceptance passed. Each remains a separate later proof.
+
+### Internal-Beta live acceptance boundary
+
+Internal-Beta acceptance is one canonical, content-free record bound to exact
+Cloud/Admin digests and the installed Mac/Windows package bytes.
+
+`validateLiveEvidence` in
+`scripts/internal-beta/verify-live-evidence.mjs` requires the exact Desktop,
+Cloud, Admin, and unchanged Runtime identities; candidate manifest hashes and
+Actions runs; direct-registration deployment state; short-lived certificate
+expiry; four package hashes; both platform roles; and the complete fixed
+success/rejection matrix. `parseAndValidateLiveEvidence` also rejects
+noncanonical JSON, while package verification rehashes each local artifact and
+refuses a symlink, changed size, or changed digest.
+
+The schema and semantic validator cannot store credentials, emails, recovery
+phrases, raw account/device identifiers, prompts/responses, Profile paths,
+arbitrary notes, or logs. Unsigned Gatekeeper and SmartScreen overrides remain
+one-time internal-only actions after exact checksum verification and never
+become signing claims.
+
+The release status remains `NOT_ACCEPTED` until the validator passes the
+complete record against real candidates and bytes. Local tests define this gate
+but do not claim a deployed host, built packages, physical Mac/Windows results,
+backup migration, rollback, or acceptance.
 
 ## Hermes and data boundary
 

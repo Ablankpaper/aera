@@ -15,29 +15,29 @@ Allowed values are:
 
 Snapshot date: `2026-07-23`
 
-| State | Status | Evidence or blocker |
-| --- | --- | --- |
-| Approved design | `passed` | Production-readiness design and executable plan are committed in Desktop. |
-| Implemented on feature branches | `passed` | Separate Desktop, Cloud, and Admin `aera/official-quality-v1` worktrees; `aera-runtime` excluded. |
-| Local unit/contract verification | `passed` | Desktop, Cloud, and Admin exhaustive local matrices below passed on 2026-07-23. |
-| Local commits | `passed` | Verified code checkpoints: Desktop `e4ba6bbd98ac2ab5484e2e213645368c079ecd97`, Cloud `92632048a5261f02d06f132d22854dda1b513345`, Admin `57d637412470fc5c86524e40bd717399a9936162`. |
-| Merged to local `main` | `not_requested` | Requires explicit merge authorization. |
-| Pushed to origin | `passed` | All three `aera/official-quality-v1` branches were pushed with explicit authorization. |
-| Remote CI for exact verified code SHAs | `passed` | Desktop run `30011233373`, Cloud run `30006310907`, and Admin run `30010245066` completed successfully for the exact checkpoints above. |
-| Cloud/Admin signed candidate images | `external_blocked` | CI built local verification images, not signed immutable candidates. GHCR/OIDC signing, attestations, protected candidate execution, and digest records are still required. |
-| Desktop signed candidate | `external_blocked` | Requires protected Apple/Windows signing credentials and native Actions runners. |
-| Real-device acceptance | `external_blocked` | Requires exact remotely signed bytes and the four-device physical/trusted matrix. |
-| Private staging deployed | `external_blocked` | Requires protected staging hosts, final staging DNS HTTPS, isolated providers/keys/data, and exact remote candidates. |
-| Private staging accepted | `external_blocked` | Requires executed, signed staging evidence; local E2E attachments are coverage only. |
-| Rollback rehearsal accepted | `external_blocked` | Requires executed B → A → B staging runs and signed cross-repository evidence. |
-| Production authorized | `not_requested` | Requires separate production authority plus legal/provider/domain/backup evidence. |
-| Cloud production deployed disabled | `not_started` | No production deployment was authorized or run. |
-| Admin production deployed disabled | `not_started` | No production deployment was authorized or run. |
-| Cloud feature rollout | `not_started` | No production cohort was authorized or enabled. |
-| Admin mutation enablement | `not_started` | No production mutation enablement was authorized or run. |
-| Desktop public publication | `not_started` | No release tag, GitHub Release, or updater publication was authorized. |
-| Production monitoring complete | `not_started` | Depends on separately authorized deployment/rollout. |
-| Runtime unchanged | `passed` | `/Users/zizimutou/Desktop/aera/aera-runtime` is clean at `c0439e1e3e5f35a91b658d57ddfc011e0d5ba1bb`. |
+| State                                  | Status             | Evidence or blocker                                                                                                                                                                |
+| -------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Approved design                        | `passed`           | Production-readiness design and executable plan are committed in Desktop.                                                                                                          |
+| Implemented on feature branches        | `passed`           | Separate Desktop, Cloud, and Admin `aera/official-quality-v1` worktrees; `aera-runtime` excluded.                                                                                  |
+| Local unit/contract verification       | `passed`           | Desktop, Cloud, and Admin exhaustive local matrices below passed on 2026-07-23.                                                                                                    |
+| Local commits                          | `passed`           | Verified code checkpoints: Desktop `e4ba6bbd98ac2ab5484e2e213645368c079ecd97`, Cloud `92632048a5261f02d06f132d22854dda1b513345`, Admin `57d637412470fc5c86524e40bd717399a9936162`. |
+| Merged to local `main`                 | `not_requested`    | Requires explicit merge authorization.                                                                                                                                             |
+| Pushed to origin                       | `passed`           | All three `aera/official-quality-v1` branches were pushed with explicit authorization.                                                                                             |
+| Remote CI for exact verified code SHAs | `passed`           | Desktop run `30011233373`, Cloud run `30006310907`, and Admin run `30010245066` completed successfully for the exact checkpoints above.                                            |
+| Cloud/Admin signed candidate images    | `external_blocked` | CI built local verification images, not signed immutable candidates. GHCR/OIDC signing, attestations, protected candidate execution, and digest records are still required.        |
+| Desktop signed candidate               | `external_blocked` | Requires protected Apple/Windows signing credentials and native Actions runners.                                                                                                   |
+| Real-device acceptance                 | `external_blocked` | Requires exact remotely signed bytes and the four-device physical/trusted matrix.                                                                                                  |
+| Private staging deployed               | `external_blocked` | Requires protected staging hosts, final staging DNS HTTPS, isolated providers/keys/data, and exact remote candidates.                                                              |
+| Private staging accepted               | `external_blocked` | Requires executed, signed staging evidence; local E2E attachments are coverage only.                                                                                               |
+| Rollback rehearsal accepted            | `external_blocked` | Requires executed B → A → B staging runs and signed cross-repository evidence.                                                                                                     |
+| Production authorized                  | `not_requested`    | Requires separate production authority plus legal/provider/domain/backup evidence.                                                                                                 |
+| Cloud production deployed disabled     | `not_started`      | No production deployment was authorized or run.                                                                                                                                    |
+| Admin production deployed disabled     | `not_started`      | No production deployment was authorized or run.                                                                                                                                    |
+| Cloud feature rollout                  | `not_started`      | No production cohort was authorized or enabled.                                                                                                                                    |
+| Admin mutation enablement              | `not_started`      | No production mutation enablement was authorized or run.                                                                                                                           |
+| Desktop public publication             | `not_started`      | No release tag, GitHub Release, or updater publication was authorized.                                                                                                             |
+| Production monitoring complete         | `not_started`      | Depends on separately authorized deployment/rollout.                                                                                                                               |
+| Runtime unchanged                      | `passed`           | `/Users/zizimutou/Desktop/aera/aera-runtime` is clean at `c0439e1e3e5f35a91b658d57ddfc011e0d5ba1bb`.                                                                               |
 
 The exact local verification checkpoints before this self-report are:
 
@@ -49,6 +49,36 @@ runtime_unchanged_sha=c0439e1e3e5f35a91b658d57ddfc011e0d5ba1bb
 ```
 
 The status-only Desktop successor commit is intentionally recorded in the external handoff because a commit cannot contain its own Git object ID. These verified source checkpoints and CI runs are not signed candidate identities.
+
+## Company internal-Beta decision
+
+The company internal-Beta is atomic. Local implementation, a healthy server,
+one platform, or a subset of scenarios cannot independently produce
+`INTERNAL_BETA_ACCEPTED`.
+
+```text
+internal_beta_decision=NOT_ACCEPTED
+internal_beta_operator_record_status=prepared
+internal_beta_cloud_candidate=not_started
+internal_beta_admin_candidate=not_started
+internal_beta_host_bootstrap=not_started
+internal_beta_ip_certificate=not_started
+internal_beta_cloud_deployment=not_started
+internal_beta_admin_deployment=not_started
+internal_beta_desktop_packages=not_started
+internal_beta_macos_acceptance=not_started
+internal_beta_windows_acceptance=not_started
+internal_beta_backup_migration_acceptance=not_started
+internal_beta_rollback_rehearsal=not_started
+internal_beta_live_evidence=not_started
+internal_beta_live_evidence_sha256=
+```
+
+`internal_beta_decision` may change to `INTERNAL_BETA_ACCEPTED` only when
+`scripts/internal-beta/verify-live-evidence.mjs` succeeds against the canonical
+evidence, the exact three candidate manifests, and the four local package
+files. Until then, use only `NOT_ACCEPTED`; the individual status lines preserve
+precise progress without overstating the whole result.
 
 ## Exact release identities
 

@@ -58,7 +58,32 @@ const tokenSet: AgenteraTokenSet = {
   trustedServerTime: "2026-07-18T01:00:00.000Z",
 };
 
-function signedTokenSet(installationId: string): AgenteraTokenSet {
+interface SignedTokenSetOptions {
+  header?: Partial<{
+    alg: string;
+    kid: string;
+    typ: string;
+  }>;
+  claims?: Partial<{
+    iss: string;
+    aud: string;
+    jti: string;
+    sub: string;
+    device_id: string;
+    installation_id: string;
+    personal_space_id: string;
+    policy_version: number;
+    iat: number;
+    exp: number;
+  }>;
+  token?: Partial<AgenteraTokenSet>;
+  tamperSignature?: boolean;
+}
+
+function signedTokenSet(
+  installationId: string,
+  options: SignedTokenSetOptions = {},
+): AgenteraTokenSet {
   const issuedAt = Math.floor(
     new Date(tokenSet.trustedServerTime).getTime() / 1000,
   );
@@ -67,6 +92,7 @@ function signedTokenSet(installationId: string): AgenteraTokenSet {
       alg: "EdDSA",
       kid: "offline-test-v1",
       typ: "agentera-offline-entitlement+jwt",
+      ...options.header,
     }),
   ).toString("base64url");
   const payload = Buffer.from(
@@ -81,12 +107,22 @@ function signedTokenSet(installationId: string): AgenteraTokenSet {
       policy_version: 1,
       iat: issuedAt,
       exp: issuedAt + 7 * 24 * 60 * 60,
+      ...options.claims,
     }),
   ).toString("base64url");
   const signingInput = `${header}.${payload}`;
+  const signature = sign(
+    null,
+    Buffer.from(signingInput),
+    offlineSigningKeys.privateKey,
+  );
+  if (options.tamperSignature) {
+    signature[0] ^= 1;
+  }
   return {
     ...tokenSet,
-    offlineEntitlement: `${signingInput}.${sign(null, Buffer.from(signingInput), offlineSigningKeys.privateKey).toString("base64url")}`,
+    offlineEntitlement: `${signingInput}.${signature.toString("base64url")}`,
+    ...options.token,
   };
 }
 
@@ -263,6 +299,59 @@ describe("AgentEra authentication controller", () => {
     expect(raw).not.toContain(tokenSet.offlineEntitlement);
     unsubscribe();
   });
+
+  // @lat: [[agentera-app-authentication#Sessions and offline use#Signed entitlement validation]]
+  it.each<[string, SignedTokenSetOptions]>([
+    ["issuer", { claims: { iss: "https://203.0.113.10" } }],
+    ["key ID", { header: { kid: "offline-unknown-v1" } }],
+    ["signature", { tamperSignature: true }],
+    [
+      "device binding",
+      {
+        claims: {
+          device_id: "44444444-4444-4444-8444-444444444444",
+        },
+      },
+    ],
+    [
+      "installation binding",
+      {
+        claims: {
+          installation_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        },
+      },
+    ],
+    [
+      "expiry",
+      {
+        token: {
+          offlineExpiresAt: "2026-07-25T01:00:01.000Z",
+        },
+      },
+    ],
+  ])(
+    "rejects online tokens with the wrong %s before any product session is persisted",
+    async (_name, invalidOptions) => {
+      const persist = vi.spyOn(store, "replaceProductSession");
+      vi.spyOn(cloud, "exchangeAuthorizationCode").mockImplementation(
+        async (input) =>
+          signedTokenSet(input.identity.installationId, invalidOptions),
+      );
+      const controller = createAgenteraAuthController(runtime());
+
+      await expect(controller.startBrowserLogin()).rejects.toThrow(
+        /entitlement is invalid/i,
+      );
+
+      expect(persist).not.toHaveBeenCalled();
+      expect(store.getProductSession()).toBeNull();
+      expect(controller.getAccessTokenForCloudRequest()).toBeNull();
+      expect(controller.getPublicState()).toEqual({
+        status: "unauthenticated",
+        reason: "sign_in_required",
+      });
+    },
+  );
 
   it("creates fresh state/listener material and requests account selection on retry", async () => {
     const controller = createAgenteraAuthController(runtime());

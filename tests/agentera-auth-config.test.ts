@@ -5,11 +5,29 @@ import {
   agenteraCloudUrl,
   getBundledAgenteraOfflinePublicKeys,
   parseAgenteraCloudOrigin,
+  parseAgenteraOfflinePublicKeysBuildConfig,
   parseAgenteraRechargePublicUrl,
   resolveAgenteraCloudOrigin,
+  resolveBundledAgenteraOfflinePublicKeys,
 } from "../src/main/agentera-auth/config";
 
 describe("AgentEra cloud endpoint configuration", () => {
+  const betaIssuer = "https://203.0.113.10";
+  const betaPublicKey = Buffer.alloc(32, 73).toString("base64url");
+
+  function betaTrustJson(input: Record<string, unknown> = {}): string {
+    return JSON.stringify({
+      issuer: betaIssuer,
+      keys: [
+        {
+          keyId: "offline-beta-2026-07",
+          publicKey: betaPublicKey,
+        },
+      ],
+      ...input,
+    });
+  }
+
   // @lat: [[agentera-app-authentication#Desktop authentication foundation#Cloud origin boundary]]
   it("accepts trusted HTTPS and loopback-only development HTTP", () => {
     expect(parseAgenteraCloudOrigin("https://accounts.agentera.example/")).toBe(
@@ -101,6 +119,151 @@ describe("AgentEra cloud endpoint configuration", () => {
     expect(
       getBundledAgenteraOfflinePublicKeys("http://localhost:8086"),
     ).toEqual({});
+  });
+
+  // @lat: [[agentera-app-authentication#Desktop authentication foundation#Installation device identity]]
+  it("accepts reviewed build-time Ed25519 keys for one canonical HTTPS IP issuer", () => {
+    const roots = parseAgenteraOfflinePublicKeysBuildConfig(
+      betaTrustJson(),
+      betaIssuer,
+    );
+
+    expect(roots).toEqual({
+      "offline-beta-2026-07": {
+        publicKey: betaPublicKey,
+        allowedIssuers: [betaIssuer],
+      },
+    });
+    expect(Object.isFrozen(roots)).toBe(true);
+    expect(Object.isFrozen(roots["offline-beta-2026-07"])).toBe(true);
+    expect(Object.isFrozen(roots["offline-beta-2026-07"].allowedIssuers)).toBe(
+      true,
+    );
+  });
+
+  // @lat: [[agentera-app-authentication#Desktop authentication foundation#Installation device identity]]
+  it.each([
+    ["malformed JSON", "{", betaIssuer],
+    [
+      "an unknown top-level field",
+      betaTrustJson({ unexpected: true }),
+      betaIssuer,
+    ],
+    [
+      "an unknown key field",
+      JSON.stringify({
+        issuer: betaIssuer,
+        keys: [
+          {
+            keyId: "offline-beta-2026-07",
+            publicKey: betaPublicKey,
+            algorithm: "Ed25519",
+          },
+        ],
+      }),
+      betaIssuer,
+    ],
+    [
+      "duplicate key IDs",
+      JSON.stringify({
+        issuer: betaIssuer,
+        keys: [
+          {
+            keyId: "offline-beta-2026-07",
+            publicKey: betaPublicKey,
+          },
+          {
+            keyId: "offline-beta-2026-07",
+            publicKey: Buffer.alloc(32, 74).toString("base64url"),
+          },
+        ],
+      }),
+      betaIssuer,
+    ],
+    [
+      "remote HTTP",
+      betaTrustJson({ issuer: "http://203.0.113.10" }),
+      "http://203.0.113.10",
+    ],
+    [
+      "an issuer path",
+      betaTrustJson({ issuer: `${betaIssuer}/oauth` }),
+      betaIssuer,
+    ],
+    [
+      "a DNS issuer",
+      betaTrustJson({ issuer: "https://beta.agentera.example" }),
+      "https://beta.agentera.example",
+    ],
+    [
+      "noncanonical base64url",
+      betaTrustJson({
+        keys: [
+          {
+            keyId: "offline-beta-2026-07",
+            publicKey: `${betaPublicKey}=`,
+          },
+        ],
+      }),
+      betaIssuer,
+    ],
+    [
+      "the wrong Ed25519 key length",
+      betaTrustJson({
+        keys: [
+          {
+            keyId: "offline-beta-2026-07",
+            publicKey: Buffer.alloc(31, 73).toString("base64url"),
+          },
+        ],
+      }),
+      betaIssuer,
+    ],
+    [
+      "a build Cloud origin different from the issuer",
+      betaTrustJson(),
+      "https://203.0.113.11",
+    ],
+  ])(
+    "rejects %s in the baked Beta trust configuration",
+    (_name, raw, origin) => {
+      expect(() =>
+        parseAgenteraOfflinePublicKeysBuildConfig(raw, origin),
+      ).toThrow(/offline|issuer|key|json|field|https|origin/i);
+    },
+  );
+
+  // @lat: [[agentera-app-authentication#Desktop authentication foundation#Installation device identity]]
+  it("rejects a build key ID that collides with development trust", () => {
+    expect(() =>
+      resolveBundledAgenteraOfflinePublicKeys({
+        buildOfflinePublicKeysJson: betaTrustJson({
+          keys: [
+            {
+              keyId: "offline-dev-v1",
+              publicKey: betaPublicKey,
+            },
+          ],
+        }),
+        buildPublicUrl: betaIssuer,
+      }),
+    ).toThrow(/collides.*development|development.*collides/i);
+  });
+
+  it("does not read runtime process variables as offline trust roots", () => {
+    const previous = process.env.MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON;
+    process.env.MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON = betaTrustJson();
+    try {
+      const roots = resolveBundledAgenteraOfflinePublicKeys({});
+      expect(roots).toHaveProperty("offline-dev-v1");
+      expect(roots).not.toHaveProperty("offline-beta-2026-07");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON;
+      } else {
+        process.env.MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON = previous;
+      }
+    }
   });
 
   it("accepts a separate HTTPS recharge page and loopback development URL", () => {
