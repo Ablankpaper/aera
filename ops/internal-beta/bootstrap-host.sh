@@ -7,6 +7,8 @@ install_root=/opt/aera/internal-beta
 secret_root=/etc/aera/internal-beta
 state_root=/var/lib/aera/internal-beta
 certbot_venv=/opt/aera/certbot-venv
+cosign_version=3.0.6
+cosign_install=/usr/local/bin/cosign
 verification_marker=.aera-key-login-verified
 
 fail() {
@@ -52,6 +54,44 @@ install_docker_repository() {
     printf 'Signed-By: /etc/apt/keyrings/docker.asc\n'
   } >/etc/apt/sources.list.d/docker.sources
   chmod 0644 /etc/apt/sources.list.d/docker.sources
+}
+
+install_cosign() {
+  local architecture digest download temporary actual_version
+  architecture=$(dpkg --print-architecture)
+  case "$architecture" in
+    amd64)
+      digest=c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74
+      ;;
+    arm64)
+      digest=bedac92e8c3729864e13d4a17048007cfafa79d5deca993a43a90ffe018ef2b8
+      ;;
+    *) fail "Cosign does not support host architecture $architecture" ;;
+  esac
+  download="https://github.com/sigstore/cosign/releases/download/v${cosign_version}/cosign-linux-${architecture}"
+  temporary=$(mktemp "${TMPDIR:-/tmp}/aera-cosign.XXXXXX")
+
+  if ! curl --fail --silent --show-error --location --ipv4 \
+    --retry 5 --retry-all-errors --retry-delay 1 \
+    --connect-timeout 10 --max-time 300 \
+    "$download" --output "$temporary"; then
+    unlink "$temporary"
+    fail 'Cosign download failed'
+  fi
+  if ! printf '%s  %s\n' "$digest" "$temporary" |
+    sha256sum --check --status; then
+    unlink "$temporary"
+    fail 'Cosign checksum verification failed'
+  fi
+  install -m 0755 -o root -g root "$temporary" "$cosign_install"
+  unlink "$temporary"
+
+  actual_version=$(
+    "$cosign_install" version |
+      awk '$1 == "GitVersion:" {print $2; exit}'
+  )
+  [[ $actual_version == "v$cosign_version" ]] ||
+    fail 'installed Cosign version does not match candidate CI'
 }
 
 install_certbot() {
@@ -215,6 +255,7 @@ prepare_host() {
   systemctl enable --now caddy
   docker version >/dev/null
   docker compose version >/dev/null
+  install_cosign
   install_certbot
   configure_deploy_user "$authorized_key_file"
   configure_directories
