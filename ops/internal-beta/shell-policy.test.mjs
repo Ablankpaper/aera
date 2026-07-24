@@ -108,6 +108,65 @@ test("host preparation persists and validates the requested SSH port before fire
   assert.ok(reload > firewall, "SSH reload must follow the firewall update");
 });
 
+test("Docker repository downloads tolerate unreachable CDN edges", async () => {
+  const source = await readFile(
+    path.join(directory, "bootstrap-host.sh"),
+    "utf8",
+  );
+  const repositoryInstaller = source.slice(
+    source.indexOf("install_docker_repository()"),
+    source.indexOf("install_certbot()"),
+  );
+
+  assert.match(repositoryInstaller, /curl[\s\S]*--ipv4/u);
+  assert.match(repositoryInstaller, /curl[\s\S]*--retry 5/u);
+  assert.match(repositoryInstaller, /curl[\s\S]*--retry-all-errors/u);
+  assert.match(repositoryInstaller, /curl[\s\S]*--connect-timeout 10/u);
+  assert.match(repositoryInstaller, /curl[\s\S]*--max-time 60/u);
+});
+
+test("deployment account can traverse the root-owned application directory", async () => {
+  const source = await readFile(
+    path.join(directory, "bootstrap-host.sh"),
+    "utf8",
+  );
+  const directoryConfiguration = source.slice(
+    source.indexOf("configure_directories()"),
+    source.indexOf("configure_unattended_updates()"),
+  );
+
+  assert.match(
+    directoryConfiguration,
+    /install -d -m 0755 -o root -g root \/opt\/aera/u,
+  );
+  assert.ok(
+    directoryConfiguration.indexOf(
+      "install -d -m 0755 -o root -g root /opt/aera",
+    ) < directoryConfiguration.indexOf('"$install_root"'),
+    "the traversable application parent must exist before the deploy-owned root",
+  );
+  assert.match(
+    directoryConfiguration,
+    /install -d -m 0755 -o root -g root \/etc\/aera/u,
+  );
+  assert.match(
+    directoryConfiguration,
+    /install -d -m 0755 -o root -g root \/var\/lib\/aera/u,
+  );
+  assert.ok(
+    directoryConfiguration.indexOf(
+      "install -d -m 0755 -o root -g root /etc/aera",
+    ) < directoryConfiguration.indexOf('"$secret_root"'),
+    "the traversable secret parent must exist before the restricted secret root",
+  );
+  assert.ok(
+    directoryConfiguration.indexOf(
+      "install -d -m 0755 -o root -g root /var/lib/aera",
+    ) < directoryConfiguration.indexOf('"$state_root"'),
+    "the traversable state parent must exist before the deploy-owned state root",
+  );
+});
+
 test("secret generation does not hide OpenSSL diagnostics", async () => {
   const source = await readFile(
     path.join(directory, "generate-secrets.sh"),
