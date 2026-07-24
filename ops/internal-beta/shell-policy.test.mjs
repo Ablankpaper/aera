@@ -187,6 +187,19 @@ test("Caddy configuration changes restart the service instead of reloading throu
   );
 });
 
+test("ACME webroot path segments are all created world-traversable despite the restrictive umask", async () => {
+  const source = await readFile(
+    path.join(directory, "install-ip-certificate.sh"),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /install -d -m 0755 "\$webroot" "\$webroot\/\.well-known" \\\n\s*"\$webroot\/\.well-known\/acme-challenge"/u,
+    "install -d applies the mode only to the final segment, so every parent must be listed explicitly",
+  );
+});
+
 test("secret generation does not hide OpenSSL diagnostics", async () => {
   const source = await readFile(
     path.join(directory, "generate-secrets.sh"),

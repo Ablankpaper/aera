@@ -107,7 +107,8 @@ with_caddy_environment() {
 prepare_challenge_server() {
   local ip=$1
   local certificate_name=$2
-  install -d -m 0755 "$webroot/.well-known/acme-challenge"
+  install -d -m 0755 "$webroot" "$webroot/.well-known" \
+    "$webroot/.well-known/acme-challenge"
   write_caddy_environment "$ip" "$certificate_name"
   write_challenge_caddyfile
   with_caddy_environment caddy validate --config "$caddy_config" >/dev/null
