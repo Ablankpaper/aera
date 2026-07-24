@@ -125,6 +125,43 @@ test("Docker repository downloads tolerate unreachable CDN edges", async () => {
   assert.match(repositoryInstaller, /curl[\s\S]*--max-time 60/u);
 });
 
+test("host preparation installs the exact Cosign verifier used by candidate CI", async () => {
+  const source = await readFile(
+    path.join(directory, "bootstrap-host.sh"),
+    "utf8",
+  );
+  const installer = source.slice(
+    source.indexOf("install_cosign()"),
+    source.indexOf("install_certbot()"),
+  );
+
+  assert.match(source, /cosign_version=3\.0\.6/u);
+  assert.match(source, /cosign_install=\/usr\/local\/bin\/cosign/u);
+  assert.match(
+    installer,
+    /c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74/u,
+  );
+  assert.match(
+    installer,
+    /bedac92e8c3729864e13d4a17048007cfafa79d5deca993a43a90ffe018ef2b8/u,
+  );
+  assert.match(
+    installer,
+    /github\.com\/sigstore\/cosign\/releases\/download\/v\$\{cosign_version\}\/cosign-linux-\$\{architecture\}/u,
+  );
+  assert.match(installer, /sha256sum --check --status/u);
+  assert.match(installer, /GitVersion:/u);
+
+  const preparation = source.slice(source.indexOf("prepare_host()"));
+  const installCosign = preparation.indexOf("install_cosign");
+  const installCertbot = preparation.indexOf("install_certbot");
+  assert.ok(installCosign >= 0, "host preparation must install Cosign");
+  assert.ok(
+    installCertbot > installCosign,
+    "Cosign must be verified before certificate and deployment preparation",
+  );
+});
+
 test("deployment account can traverse the root-owned application directory", async () => {
   const source = await readFile(
     path.join(directory, "bootstrap-host.sh"),
@@ -164,6 +201,39 @@ test("deployment account can traverse the root-owned application directory", asy
       "install -d -m 0755 -o root -g root /var/lib/aera",
     ) < directoryConfiguration.indexOf('"$state_root"'),
     "the traversable state parent must exist before the deploy-owned state root",
+  );
+});
+
+test("Caddy configuration changes restart the service instead of reloading through the disabled admin API", async () => {
+  const source = await readFile(
+    path.join(directory, "install-ip-certificate.sh"),
+    "utf8",
+  );
+
+  assert.doesNotMatch(
+    source,
+    /systemctl reload caddy/u,
+    "caddy reload requires the admin API, which the reviewed Caddyfile disables",
+  );
+  assert.match(source, /systemctl restart caddy/u);
+  const validations = source.match(/caddy validate --config/gu) ?? [];
+  const restarts = source.match(/systemctl restart caddy/gu) ?? [];
+  assert.ok(
+    validations.length >= restarts.length,
+    "every caddy restart must be preceded by a configuration validation",
+  );
+});
+
+test("ACME webroot path segments are all created world-traversable despite the restrictive umask", async () => {
+  const source = await readFile(
+    path.join(directory, "install-ip-certificate.sh"),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /install -d -m 0755 "\$webroot" "\$webroot\/\.well-known" \\\n\s*"\$webroot\/\.well-known\/acme-challenge"/u,
+    "install -d applies the mode only to the final segment, so every parent must be listed explicitly",
   );
 });
 

@@ -107,12 +107,13 @@ with_caddy_environment() {
 prepare_challenge_server() {
   local ip=$1
   local certificate_name=$2
-  install -d -m 0755 "$webroot/.well-known/acme-challenge"
+  install -d -m 0755 "$webroot" "$webroot/.well-known" \
+    "$webroot/.well-known/acme-challenge"
   write_caddy_environment "$ip" "$certificate_name"
   write_challenge_caddyfile
   with_caddy_environment caddy validate --config "$caddy_config" >/dev/null
   systemctl enable --now caddy
-  systemctl reload caddy
+  systemctl restart caddy
 
   local probe
   probe=$(openssl rand -hex 12)
@@ -157,7 +158,7 @@ write_reload_hook() {
     printf '. /etc/aera/internal-beta/caddy.env\n'
     printf 'set +a\n'
     printf 'caddy validate --config /etc/caddy/Caddyfile >/dev/null\n'
-    printf 'systemctl reload caddy\n'
+    printf 'systemctl restart caddy\n'
   } >"$renew_hook"
   chmod 0755 "$renew_hook"
 }
@@ -253,7 +254,7 @@ issue_certificate() {
   write_reload_hook
   grant_caddy_certificate_access "$production_lineage"
   with_caddy_environment caddy validate --config "$caddy_config" >/dev/null
-  systemctl reload caddy
+  systemctl restart caddy
   install_renew_timer
 
   "$certbot" delete --non-interactive --cert-name "$staging_name" >/dev/null
