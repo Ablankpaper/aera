@@ -24,6 +24,7 @@ describe("hostDerivedEnvKeyForUrl", () => {
     ["https://api.cerebras.ai/v1", "CEREBRAS_API_KEY"],
     ["https://api.aimlapi.com/v1", "AIMLAPI_API_KEY"],
     ["https://api.perplexity.ai/v1", "PERPLEXITY_API_KEY"],
+    ["https://api.petoi.cn/v1", "PETOI_API_KEY"],
     ["https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"],
     ["https://api.anthropic.com/v1", "ANTHROPIC_API_KEY"],
     ["https://api.openai.com/v1", "OPENAI_API_KEY"],
