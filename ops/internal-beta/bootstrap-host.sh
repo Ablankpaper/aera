@@ -29,7 +29,9 @@ validate_port() {
 
 install_docker_repository() {
   install -d -m 0755 /etc/apt/keyrings
-  curl --fail --silent --show-error --location \
+  curl --fail --silent --show-error --location --ipv4 \
+    --retry 5 --retry-all-errors --retry-delay 1 \
+    --connect-timeout 10 --max-time 60 \
     https://download.docker.com/linux/ubuntu/gpg \
     --output /etc/apt/keyrings/docker.asc
   chmod 0644 /etc/apt/keyrings/docker.asc
@@ -91,6 +93,9 @@ configure_deploy_user() {
 }
 
 configure_directories() {
+  install -d -m 0755 -o root -g root /opt/aera
+  install -d -m 0755 -o root -g root /etc/aera
+  install -d -m 0755 -o root -g root /var/lib/aera
   install -d -m 0700 -o "$deploy_user" -g "$deploy_user" "$install_root"
   install -d -m 0700 -o "$deploy_user" -g "$deploy_user" \
     "$install_root/cloud" "$install_root/admin" "$install_root/desktop"
