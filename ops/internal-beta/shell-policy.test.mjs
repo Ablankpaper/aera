@@ -167,6 +167,26 @@ test("deployment account can traverse the root-owned application directory", asy
   );
 });
 
+test("Caddy configuration changes restart the service instead of reloading through the disabled admin API", async () => {
+  const source = await readFile(
+    path.join(directory, "install-ip-certificate.sh"),
+    "utf8",
+  );
+
+  assert.doesNotMatch(
+    source,
+    /systemctl reload caddy/u,
+    "caddy reload requires the admin API, which the reviewed Caddyfile disables",
+  );
+  assert.match(source, /systemctl restart caddy/u);
+  const validations = source.match(/caddy validate --config/gu) ?? [];
+  const restarts = source.match(/systemctl restart caddy/gu) ?? [];
+  assert.ok(
+    validations.length >= restarts.length,
+    "every caddy restart must be preceded by a configuration validation",
+  );
+});
+
 test("secret generation does not hide OpenSSL diagnostics", async () => {
   const source = await readFile(
     path.join(directory, "generate-secrets.sh"),
