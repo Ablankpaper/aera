@@ -72,7 +72,9 @@ describe("AgenteraGlobalProfileManager", () => {
       "global-profile.json",
     );
     expect(existsSync(profilePath)).toBe(true);
-    expect(statSync(profilePath).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(profilePath).mode & 0o777).toBe(0o600);
+    }
     expect(
       JSON.parse(readFileSync(profilePath, "utf8")).entries[0].content,
     ).toBe("Use the user's explicitly chosen form of address.");

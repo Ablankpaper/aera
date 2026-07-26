@@ -122,7 +122,9 @@ describe("AgentUserMemoryRepairService", () => {
       "repair-operation.json",
     );
     expect(existsSync(backupPath)).toBe(true);
-    expect(statSync(backupPath).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(backupPath).mode & 0o777).toBe(0o600);
+    }
   });
 
   it("undoes only an unchanged repair and restores the exact original bytes", () => {

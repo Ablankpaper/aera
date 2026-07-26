@@ -38,7 +38,9 @@ describe("AgenteraMemoryCandidateManager", () => {
       ],
     });
     expect(writes).toHaveLength(1);
-    expect(writes[0].path).toContain(`${USER_ONE}/candidates/${BATCH_ID}.json`);
+    expect(writes[0].path).toContain(
+      join(USER_ONE, "candidates", `${BATCH_ID}.json`),
+    );
     expect(writes[0].mode).toBe(0o600);
     expect(writes[0].content).not.toContain(raw);
     expect(writes[0].content).not.toContain("rawText");
