@@ -19,6 +19,20 @@ export interface OfficialAgentSummary {
   updateState: "current" | "update_available";
 }
 
+/**
+ * Renderer-safe presentation metadata for one eligible official Agent.
+ * Signed bytes, bundle contents, keys, rollout inputs, owner identity, and
+ * Runtime Profile paths deliberately stay in the main process.
+ */
+export interface OfficialAgentDetail {
+  agent: OfficialAgentSummary;
+  capabilitySummary: string;
+  assetCounts: Record<AgentDraftAssetKind, number>;
+  allowedProviders: string[];
+  allowedModels: string[];
+  allowedToolCount: number;
+}
+
 export interface OfficialManagedUpdate {
   installationId: string;
   expectedSelectedReleaseRevisionId: string;

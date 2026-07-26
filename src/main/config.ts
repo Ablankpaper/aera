@@ -5,6 +5,7 @@ import { HERMES_HOME, expectedEnvKeyForModel } from "./installer";
 import {
   escapeRegex,
   getActiveProfileNameSync,
+  normalizeProfileName,
   profileHome,
   profilePaths,
   safeWriteFile,
@@ -318,7 +319,7 @@ export function setEnvValue(
   if (key === "API_SERVER_KEY") invalidateCache("apiServerKey:");
 
   if (!existsSync(envFile)) {
-    safeWriteFile(envFile, `${key}=${value}\n`);
+    safeWriteFile(envFile, `${key}=${value}\n`, 0o600);
     return;
   }
 
@@ -339,7 +340,10 @@ export function setEnvValue(
     lines.push(`${key}=${value}`);
   }
 
-  safeWriteFile(envFile, lines.join("\n"));
+  // `.env` contains provider credentials as well as the local gateway token.
+  // Keep the rewritten file private to the current OS user, matching the
+  // internal-token storage boundary used by Hermes Studio.
+  safeWriteFile(envFile, lines.join("\n"), 0o600);
 }
 
 export function validateEnvEntry(key: string, value: string): void {
@@ -1058,6 +1062,8 @@ export function setModelConfig(
   const effectiveBaseUrl = baseUrl || canonicalProviderBaseUrl(provider) || "";
   if (effectiveBaseUrl) {
     content = upsertBlockChild(content, "model", "base_url", effectiveBaseUrl);
+  } else {
+    content = removeBlockChild(content, "model", "base_url");
   }
 
   // Workaround for upstream gateway bug — see pickAutoApiKeyForCustomProvider.
@@ -1336,6 +1342,68 @@ export function getApiServerKey(profile?: string): string {
 
   setCache(cacheKey, value);
   return value;
+}
+
+export interface EnsureLocalApiServerKeyResult {
+  generated: boolean;
+  key: string;
+}
+
+/**
+ * Ensure the active local Runtime gateway has a strong shared credential.
+ *
+ * This belongs in the Main Process startup path rather than the Renderer:
+ * every local gateway spawn must be safe even when no configuration screen is
+ * ever mounted. Existing credentials are preserved, command-backed secret
+ * stores are never overwritten, and only env-backed profiles receive a newly
+ * generated value.
+ *
+ * The key is returned only to Main Process callers so the exact same value can
+ * be injected into the child process environment. IPC handlers must reduce
+ * this result to non-secret status such as `{ generated }`.
+ */
+export function ensureLocalApiServerKey(
+  profile?: string,
+): EnsureLocalApiServerKeyResult {
+  if (getConnectionConfig().mode !== "local") {
+    throw new Error(
+      "Local gateway credentials can only be prepared in local mode.",
+    );
+  }
+
+  const resolvedProfile = normalizeProfileName(
+    profile ?? getActiveProfileNameSync(),
+  );
+  const providerId = getSecretsProvider(resolvedProfile).id;
+
+  // A command provider may have rotated since its last cached read. Refresh
+  // before deciding it is missing, but never write a replacement into .env.
+  if (providerId === "command") {
+    invalidateSecretsCache();
+  }
+
+  const current = getApiServerKey(resolvedProfile).trim();
+  if (current) {
+    return { generated: false, key: current };
+  }
+
+  if (providerId === "command") {
+    throw new Error(
+      "The configured secrets provider must supply the local gateway credential.",
+    );
+  }
+
+  const key = randomBytes(32).toString("hex");
+  setEnvValue("API_SERVER_KEY", key, resolvedProfile);
+
+  // Read back through the same resolver used by authenticated requests. This
+  // catches a failed or mis-scoped write before a gateway is spawned.
+  const persisted = getApiServerKey(resolvedProfile).trim();
+  if (persisted !== key) {
+    throw new Error("The local gateway credential could not be persisted.");
+  }
+
+  return { generated: true, key };
 }
 
 /**

@@ -46,6 +46,14 @@ The approved follow-on work is [[agentera-post-official-delivery|the post-offici
 
 The user approved `docs/superpowers/specs/2026-07-22-agentera-official-managed-agent-v1-design.md` on 2026-07-22. Cloud, Admin, and Desktop now implement this slice on local feature branches; this is verified local development evidence, not a push, deployment, production release, or user rollout.
 
+### Catalog and detail presentation
+
+The Desktop presents official Agents as a catalog first, while keeping every install, update, Profile, and RuntimeBinding action on the existing verified control-plane path.
+
+[[src/renderer/src/screens/Agents/OfficialAgentSection.tsx#OfficialAgentSection]] renders eligible or verified-offline official Agents as compact cards. Opening a card loads presentation-only detail through `getOfficialAgentDetail`; [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#getOfficialAgentDetail]] returns a sanitized capability summary, aggregate asset counts, allowed model/provider names, and an allowed-tool count. It never returns signed bundle bytes, release inputs, credentials, owner identity, Profile paths, Memory, sessions, or private learned Skills.
+
+[[src/renderer/src/screens/Agents/AgentHubDetailDialog.tsx#AgentHubDetailDialog]] keeps one primary action visible. Uninstalled official Agents continue into the one-use install preview and confirmation flow, installed Agents with a linked local Profile enter chat through that Profile id, and managed updates still call the dedicated official-update API. An offline installation remains visible but cannot browse detail from Cloud, install, or update.
+
 ### Installation-bound version access
 
 An authenticated device may read a PLATFORM version through the existing version endpoint only when its own USER-owned pending or active managed Installation currently selects that exact immutable version.

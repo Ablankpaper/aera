@@ -8,6 +8,10 @@ import {
   gatewayUsage,
 } from "./tui-gateway-stream";
 
+const { activeProfileRef } = vi.hoisted(() => ({
+  activeProfileRef: { value: undefined as string | undefined },
+}));
+
 // Mocks so hermes.ts (which transitively reaches electron via ./installer) can
 // be imported under vitest for the gateway-env regression tests below. Only
 // the names hermes.ts imports from each module need to exist.
@@ -19,10 +23,18 @@ vi.mock("./installer", () => ({
   getEnhancedPath: vi.fn(() => "/usr/bin"),
 }));
 vi.mock("./config", () => ({
+  ensureLocalApiServerKey: vi.fn(() => ({
+    generated: true,
+    key: "generated-internal-token",
+  })),
   getApiServerKey: vi.fn(() => null),
   getConnectionConfig: vi.fn(() => ({})),
   getConfigValue: vi.fn(() => null),
-  getModelConfig: vi.fn(() => ({})),
+  getModelConfig: vi.fn(() => ({
+    provider: "auto",
+    model: "",
+    baseUrl: "",
+  })),
   readEnv: vi.fn(() => ({})),
 }));
 vi.mock("./ssh-tunnel", () => ({
@@ -40,13 +52,14 @@ vi.mock("./utils", () => ({
     configFile: "/nonexistent/hermes-test/config.yaml",
   })),
   normalizeProfileName: (p?: string) => p,
-  getActiveProfileNameSync: vi.fn(() => undefined),
+  getActiveProfileNameSync: vi.fn(() => activeProfileRef.value),
 }));
 vi.mock("./gateway-ports", () => ({ getProfilePort: vi.fn(() => 8642) }));
 vi.mock("./models", () => ({ readModels: vi.fn(() => []) }));
 vi.mock("./secrets", () => ({ providerListSafe: vi.fn(() => ({})) }));
 
-import { readEnv } from "./config";
+import { ensureLocalApiServerKey, getModelConfig, readEnv } from "./config";
+import { readModels } from "./models";
 import { providerListSafe } from "./secrets";
 import { buildGatewayEnv, tuiGatewayEnv } from "./hermes";
 
@@ -177,16 +190,45 @@ describe("gateway env builders consult the secrets provider", () => {
   // fallback path; buildGatewayEnv/tuiGatewayEnv read only readEnv(), so a
   // command-provider user got a gateway with silently missing API keys.
   const savedKey = process.env.ANTHROPIC_API_KEY;
+  const savedRuntimeCustomKey = process.env.ANHEPRO_API_KEY;
 
   beforeEach(() => {
+    activeProfileRef.value = undefined;
+    vi.mocked(ensureLocalApiServerKey).mockClear();
+    vi.mocked(getModelConfig)
+      .mockReset()
+      .mockReturnValue({ provider: "auto", model: "", baseUrl: "" });
     vi.mocked(readEnv).mockReset().mockReturnValue({});
+    vi.mocked(readModels).mockReset().mockReturnValue([]);
     vi.mocked(providerListSafe).mockReset().mockReturnValue({});
     delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANHEPRO_API_KEY;
   });
   afterEach(() => {
     if (savedKey === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = savedKey;
+    if (savedRuntimeCustomKey === undefined) delete process.env.ANHEPRO_API_KEY;
+    else process.env.ANHEPRO_API_KEY = savedRuntimeCustomKey;
   });
+
+  function configureActiveNamedCustomProvider(): void {
+    vi.mocked(getModelConfig).mockReturnValue({
+      provider: "custom",
+      model: "gpt-5.6-sol",
+      baseUrl: "https://api.anhepro.com/v1",
+    });
+    vi.mocked(readModels).mockReturnValue([
+      {
+        id: "anhepro-gpt-5.6-sol",
+        name: "gpt-5.6-sol",
+        provider: "custom",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://api.anhepro.com/v1",
+        providerLabel: "anhepro.com",
+        createdAt: 1,
+      },
+    ]);
+  }
 
   it("buildGatewayEnv injects a provider-resolved key absent from process.env and .env", () => {
     vi.mocked(providerListSafe).mockReturnValue({
@@ -211,6 +253,17 @@ describe("gateway env builders consult the secrets provider", () => {
     expect(buildGatewayEnv().ANTHROPIC_API_KEY).toBe("from-process-env");
   });
 
+  it("buildGatewayEnv resolves the active named profile and injects its ensured gateway credential", () => {
+    activeProfileRef.value = "work";
+
+    const env = buildGatewayEnv();
+
+    expect(ensureLocalApiServerKey).toHaveBeenCalledWith("work");
+    expect(readEnv).toHaveBeenCalledWith("work");
+    expect(providerListSafe).toHaveBeenCalledWith("work");
+    expect(env.API_SERVER_KEY).toBe("generated-internal-token");
+  });
+
   it("tuiGatewayEnv injects a provider-resolved key absent from process.env and .env", () => {
     vi.mocked(providerListSafe).mockReturnValue({
       ANTHROPIC_API_KEY: "from-provider",
@@ -224,5 +277,62 @@ describe("gateway env builders consult the secrets provider", () => {
       ANTHROPIC_API_KEY: "from-provider",
     });
     expect(tuiGatewayEnv().ANTHROPIC_API_KEY).toBe("from-dotenv");
+  });
+
+  it("buildGatewayEnv bridges the active named custom-provider key into the Runtime host slot", () => {
+    configureActiveNamedCustomProvider();
+    vi.mocked(readEnv).mockReturnValue({
+      CUSTOM_PROVIDER_ANHEPRO_COM_KEY: "from-named-provider",
+    });
+
+    expect(buildGatewayEnv().ANHEPRO_API_KEY).toBe("from-named-provider");
+  });
+
+  it("tuiGatewayEnv bridges the active named custom-provider key into the Runtime host slot", () => {
+    configureActiveNamedCustomProvider();
+    vi.mocked(readEnv).mockReturnValue({
+      CUSTOM_PROVIDER_ANHEPRO_COM_KEY: "from-named-provider",
+    });
+
+    expect(tuiGatewayEnv().ANHEPRO_API_KEY).toBe("from-named-provider");
+  });
+
+  it("bridges a named custom-provider key resolved by the secrets provider", () => {
+    configureActiveNamedCustomProvider();
+    vi.mocked(providerListSafe).mockReturnValue({
+      CUSTOM_PROVIDER_ANHEPRO_COM_KEY: "from-secrets-provider",
+    });
+
+    expect(buildGatewayEnv().ANHEPRO_API_KEY).toBe("from-secrets-provider");
+  });
+
+  it("does not bridge a key from a non-matching model or endpoint", () => {
+    configureActiveNamedCustomProvider();
+    vi.mocked(readModels).mockReturnValue([
+      {
+        id: "other-model",
+        name: "other-model",
+        provider: "custom",
+        model: "other-model",
+        baseUrl: "https://api.anhepro.com/v1",
+        providerLabel: "anhepro.com",
+        createdAt: 1,
+      },
+    ]);
+    vi.mocked(readEnv).mockReturnValue({
+      CUSTOM_PROVIDER_ANHEPRO_COM_KEY: "must-not-be-forwarded",
+    });
+
+    expect(buildGatewayEnv().ANHEPRO_API_KEY).toBeUndefined();
+  });
+
+  it("tuiGatewayEnv resolves the active named profile before reading credentials", () => {
+    activeProfileRef.value = "work";
+
+    tuiGatewayEnv();
+
+    expect(getModelConfig).toHaveBeenCalledWith("work");
+    expect(readEnv).toHaveBeenCalledWith("work");
+    expect(providerListSafe).toHaveBeenCalledWith("work");
   });
 });

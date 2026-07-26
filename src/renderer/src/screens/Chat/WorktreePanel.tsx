@@ -222,7 +222,7 @@ export const WorktreePanel = memo(function WorktreePanel({
     return () => {
       cancelled = true;
     };
-  }, [folderPath]);
+  }, [folderPath, t]);
 
   // Get the folder name from the path
   const folderName =
@@ -241,7 +241,7 @@ export const WorktreePanel = memo(function WorktreePanel({
           isResizing ? "worktree-resize-handle-active" : ""
         }`}
         onPointerDown={startResize}
-        title="Drag to resize"
+        title={t("chat.worktree.resize")}
       />
       <div className="worktree-header">
         <Folder size={16} className="worktree-header-icon" />

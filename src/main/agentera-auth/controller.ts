@@ -49,6 +49,11 @@ export interface AgenteraAuthController {
   startBrowserLogin(options?: {
     forceAccountSelection?: boolean;
   }): Promise<void>;
+  restartBrowserLogin(options?: {
+    forceAccountSelection?: boolean;
+  }): Promise<void>;
+  /** Copies the active authorization URL without exposing it to the renderer. */
+  copyBrowserLoginLink(): Promise<void>;
   cancelBrowserLogin(): Promise<void>;
   refreshOnline(): Promise<AgenteraAuthPublicState>;
   assertCanStartNewTask(): void;
@@ -65,6 +70,7 @@ export interface AgenteraAuthControllerRuntime {
     options: AgenteraLoopbackOptions,
   ) => Promise<AgenteraLoopbackListener>;
   openExternal: (url: string, expectedOrigin: string) => void | Promise<void>;
+  writeClipboard?: (text: string) => void | Promise<void>;
   bringMainWindowToFront: () => void;
   getDeviceMetadata: () => AgenteraDeviceMetadata;
   offlinePublicKeys?: Readonly<Record<string, string>>;
@@ -79,6 +85,9 @@ export interface AgenteraAuthControllerRuntime {
 interface ActiveAttempt {
   cancelled: boolean;
   listener: AgenteraLoopbackListener | null;
+  authorizationUrl: string | null;
+  done: Promise<void>;
+  resolveDone: () => void;
 }
 
 type PendingDelivery = "none" | "delivered" | "pending";
@@ -122,6 +131,7 @@ export class AgenteraAuthControllerImpl implements AgenteraAuthController {
   private timeAnchor: AgenteraTrustedTimeAnchor | null = null;
   private refreshInFlight: Promise<AgenteraAuthPublicState> | null = null;
   private sessionRevision = 0;
+  private restartSequence = 0;
 
   constructor(runtime: AgenteraAuthControllerRuntime) {
     this.runtime = {
@@ -162,24 +172,37 @@ export class AgenteraAuthControllerImpl implements AgenteraAuthController {
     } = {},
   ): Promise<void> {
     if (this.activeAttempt) {
-      throw new Error("AgentEra browser authorization is already in progress.");
-    }
-    if (
-      this.runtime.store.getPendingRevocation() &&
-      (await this.deliverPendingRevocation()) === "pending"
-    ) {
-      throw new Error(
-        "AgentEra must finish the previous device sign-out before signing in again.",
-      );
+      throw new Error("AgentEra browser sign-in is already in progress.");
     }
 
-    const attempt: ActiveAttempt = { cancelled: false, listener: null };
+    let resolveDone!: () => void;
+    const done = new Promise<void>((resolve) => {
+      resolveDone = resolve;
+    });
+    const attempt: ActiveAttempt = {
+      cancelled: false,
+      listener: null,
+      authorizationUrl: null,
+      done,
+      resolveDone,
+    };
     this.activeAttempt = attempt;
     this.sessionRevision += 1;
     this.lifecycle.cancel();
     this.publish({ status: "checking" });
 
     try {
+      if (
+        this.runtime.store.getPendingRevocation() &&
+        (await this.deliverPendingRevocation()) === "pending"
+      ) {
+        throw new Error(
+          "AgentEra must finish the previous device sign-out before signing in again.",
+        );
+      }
+      if (attempt.cancelled) {
+        throw new Error("AgentEra browser sign-in was cancelled.");
+      }
       const identity = getOrCreateAgenteraDeviceIdentity(this.runtime.store);
       const pkce = this.runtime.createPkce();
       const listener = await this.runtime.startLoopback({
@@ -189,7 +212,7 @@ export class AgenteraAuthControllerImpl implements AgenteraAuthController {
       if (attempt.cancelled) {
         void listener.callback.catch(() => undefined);
         listener.cancel();
-        throw new Error("AgentEra browser authorization was cancelled.");
+        throw new Error("AgentEra browser sign-in was cancelled.");
       }
 
       const client = this.runtime.getCloudClient();
@@ -200,23 +223,30 @@ export class AgenteraAuthControllerImpl implements AgenteraAuthController {
         ...this.runtime.getDeviceMetadata(),
         forceAccountSelection: options.forceAccountSelection === true,
       });
+      // Keep this URL in the main process only. The renderer can request a
+      // clipboard write through copyBrowserLoginLink(), but never receives
+      // the PKCE state-bearing URL itself.
+      attempt.authorizationUrl = authorizationUrl.href;
       await this.runtime.openExternal(authorizationUrl.href, client.origin);
       const callback = await listener.callback;
       if (attempt.cancelled) {
-        throw new Error("AgentEra browser authorization was cancelled.");
+        throw new Error("AgentEra browser sign-in was cancelled.");
       }
-      this.runtime.bringMainWindowToFront();
       const tokens = await client.exchangeAuthorizationCode({
         authorizationCode: callback.authorizationCode,
         codeVerifier: pkce.verifier,
         identity,
       });
       if (attempt.cancelled) {
-        throw new Error("AgentEra browser authorization was cancelled.");
+        throw new Error("AgentEra browser sign-in was cancelled.");
       }
       this.acceptOnlineTokens(tokens, client);
       this.lifecycle.noteOnlineValidationSucceeded();
       this.publish(this.authenticatedState(tokens));
+      // Only return focus after the code has been exchanged and the
+      // authenticated state is published, so the user never sees a stale
+      // login gate after the browser says it has returned.
+      this.runtime.bringMainWindowToFront();
     } catch (error) {
       this.clearInMemoryAuthorization();
       if (/secure storage/i.test(String(error))) {
@@ -232,12 +262,48 @@ export class AgenteraAuthControllerImpl implements AgenteraAuthController {
       }
       throw error;
     } finally {
+      attempt.authorizationUrl = null;
       attempt.listener?.close();
       if (this.activeAttempt === attempt) this.activeAttempt = null;
+      attempt.resolveDone();
     }
   }
 
+  async restartBrowserLogin(
+    options: {
+      forceAccountSelection?: boolean;
+    } = {},
+  ): Promise<void> {
+    const sequence = ++this.restartSequence;
+    const active = this.activeAttempt;
+    if (active) {
+      active.cancelled = true;
+      active.listener?.cancel();
+      // Wait until the old attempt has closed its loopback listener and
+      // settled its renderer-facing promise before creating fresh PKCE
+      // material. This makes restart atomic from the UI's perspective.
+      await active.done;
+    }
+    // If the user clicked restart again while cancellation was settling, only
+    // the newest request may create the next listener and PKCE attempt.
+    if (sequence !== this.restartSequence) return;
+    return this.startBrowserLogin(options);
+  }
+
+  async copyBrowserLoginLink(): Promise<void> {
+    const active = this.activeAttempt;
+    const authorizationUrl = active?.authorizationUrl;
+    if (!authorizationUrl || active.cancelled) {
+      throw new Error("No active AgentEra browser login is available.");
+    }
+    if (!this.runtime.writeClipboard) {
+      throw new Error("AgentEra clipboard access is unavailable.");
+    }
+    await this.runtime.writeClipboard(authorizationUrl);
+  }
+
   async cancelBrowserLogin(): Promise<void> {
+    this.restartSequence += 1;
     const attempt = this.activeAttempt;
     if (!attempt) return;
     attempt.cancelled = true;
@@ -378,6 +444,7 @@ export class AgenteraAuthControllerImpl implements AgenteraAuthController {
 
   async logout(): Promise<void> {
     this.sessionRevision += 1;
+    this.restartSequence += 1;
     const attempt = this.activeAttempt;
     if (attempt) {
       attempt.cancelled = true;
@@ -425,6 +492,7 @@ export class AgenteraAuthControllerImpl implements AgenteraAuthController {
 
   dispose(): void {
     this.sessionRevision += 1;
+    this.restartSequence += 1;
     const attempt = this.activeAttempt;
     if (attempt) {
       attempt.cancelled = true;

@@ -16,6 +16,7 @@ import { buildLocalDashboardCliArgs } from "./dashboard-launch";
 import { dashboardWebSocketUrlForRenderer } from "./dashboard-websocket-relay";
 import { ensureLocalDashboardCompatibility } from "./hermes-agent-compat";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
+import { hydrateProfileRuntimeEnv } from "./profile-runtime-env";
 import {
   buildRemoteOAuthWsUrl,
   mintRemoteOAuthWsTicket,
@@ -634,19 +635,21 @@ export async function startDashboard(
 
   let proc: ChildProcess;
   try {
+    const dashboardEnv = invocation.environment({
+      ...process.env,
+      PATH: getEnhancedPath(),
+      HOME: process.env.HOME || homedir(),
+      HERMES_HOME,
+      ...(hasPrebuiltWebDist
+        ? { HERMES_WEB_DIST: invocation.webDistDirectory }
+        : {}),
+    }) as Record<string, string>;
+    hydrateProfileRuntimeEnv(dashboardEnv, resolvedProfile);
+    dashboardEnv.HERMES_DASHBOARD_SESSION_TOKEN = token;
+    dashboardEnv.HERMES_DESKTOP = "1";
     proc = spawn(invocation.python, invocation.cliArgs(cliArgs), {
       cwd: invocation.workingDirectory,
-      env: invocation.environment({
-        ...process.env,
-        PATH: getEnhancedPath(),
-        HOME: process.env.HOME || homedir(),
-        HERMES_HOME,
-        HERMES_DASHBOARD_SESSION_TOKEN: token,
-        HERMES_DESKTOP: "1",
-        ...(hasPrebuiltWebDist
-          ? { HERMES_WEB_DIST: invocation.webDistDirectory }
-          : {}),
-      }),
+      env: dashboardEnv,
       stdio: ["ignore", "ignore", stderrFd],
       detached: false,
       ...HIDDEN_SUBPROCESS_OPTIONS,

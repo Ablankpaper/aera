@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "./useI18n";
 import { X } from "lucide-react";
 
@@ -24,6 +24,12 @@ interface Report {
   issues: { code: string; severity: "error" | "warning" | "info" }[];
   summary: { errors: number; warnings: number; infos: number };
 }
+
+type LocalConnectionRepairState =
+  | "idle"
+  | "repairing"
+  | "failed"
+  | "not-applicable";
 
 const DISMISS_STORAGE_KEY = "hermes-config-health-dismissed";
 export const CONFIG_HEALTH_UPDATED_EVENT = "hermes-config-health-updated";
@@ -54,18 +60,6 @@ function isReportForProfile(
   return !report.profile || report.profile === expected;
 }
 
-function generateUUID(): string {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  // Fallback for environments without crypto.randomUUID
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
-
 export function ConfigHealthBanner({
   profile,
   onOpenDiagnose,
@@ -74,9 +68,9 @@ export function ConfigHealthBanner({
   const [report, setReport] = useState<(Report & { ranAt: number }) | null>(
     null,
   );
-  const [showModal, setShowModal] = useState(false);
-  const [apiKeyValue, setApiKeyValue] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [localConnectionRepair, setLocalConnectionRepair] =
+    useState<LocalConnectionRepairState>("idle");
+  const attemptedProfiles = useRef(new Set<string>());
 
   useEffect(() => {
     let cancelled = false;
@@ -112,202 +106,151 @@ export function ConfigHealthBanner({
     };
   }, [profile]);
 
+  const hasEmptyApiKey =
+    report?.issues.some((issue) => issue.code === "EMPTY_API_SERVER_KEY") ??
+    false;
+
+  const repairLocalConnection = useCallback(async (): Promise<void> => {
+    setLocalConnectionRepair("repairing");
+    try {
+      const connection = await window.hermesAPI.getConnectionConfig();
+      if (connection.mode !== "local") {
+        // Remote and SSH connections own their authentication elsewhere.
+        // A missing local gateway key is irrelevant in those modes.
+        setLocalConnectionRepair("not-applicable");
+        return;
+      }
+
+      let status = await window.hermesAPI.getApiServerKeyStatus(profile);
+      if (!status.hasKey && status.providerId === "command") {
+        // Advanced vault-backed profiles keep internal credentials outside
+        // .env. Refresh the provider once, but never overwrite it.
+        await window.hermesAPI.invalidateSecretsCache();
+        status = await window.hermesAPI.getApiServerKeyStatus(profile);
+      }
+
+      if (!status.hasKey) {
+        if (status.providerId === "command") {
+          throw new Error(
+            "The configured secrets provider has no gateway key.",
+          );
+        }
+        await window.hermesAPI.generateApiServerKey(profile);
+      }
+
+      const next = (await window.hermesAPI.rerunConfigHealth(profile)) as
+        | (Report & { ranAt: number })
+        | null;
+      if (
+        !next ||
+        next.issues.some((issue) => issue.code === "EMPTY_API_SERVER_KEY")
+      ) {
+        throw new Error("The local gateway key was not applied.");
+      }
+
+      setReport(next);
+      setLocalConnectionRepair("idle");
+    } catch {
+      setLocalConnectionRepair("failed");
+    }
+  }, [profile]);
+
+  useEffect(() => {
+    if (!hasEmptyApiKey) return;
+    const profileKey = profile || "default";
+    if (attemptedProfiles.current.has(profileKey)) return;
+    attemptedProfiles.current.add(profileKey);
+    void repairLocalConnection();
+  }, [hasEmptyApiKey, profile, repairLocalConnection]);
+
   if (!report || report.issues.length === 0) return null;
+
+  const visibleIssues =
+    localConnectionRepair === "not-applicable"
+      ? report.issues.filter((issue) => issue.code !== "EMPTY_API_SERVER_KEY")
+      : report.issues;
+  if (visibleIssues.length === 0) return null;
+
+  const visibleSummary = {
+    errors: visibleIssues.filter((issue) => issue.severity === "error").length,
+    warnings: visibleIssues.filter((issue) => issue.severity === "warning")
+      .length,
+    infos: visibleIssues.filter((issue) => issue.severity === "info").length,
+  };
 
   // Only surface the banner for errors/warnings. Info-level issues are
   // visible in Settings → Diagnose but don't demand attention in the
-  // chat header (avoids "Configuration issues detected: 1 note(s)" noise
-  // when the user is running without API_SERVER_KEY or has harmless drift).
-  if (report.summary.errors === 0 && report.summary.warnings === 0) {
-    return null;
-  }
+  // chat header.
+  if (visibleSummary.errors === 0 && visibleSummary.warnings === 0) return null;
 
   const dismissedAt = readDismissedReportStamp();
   if (dismissedAt >= report.ranAt) return null;
 
-  // Severity → CSS class. The banner takes on the worst severity's
-  // colour so the user sees error-level issues at a glance.
-  const worstSeverity = report.summary.errors
-    ? "error"
-    : report.summary.warnings
-      ? "warning"
-      : "info";
-
+  const worstSeverity = visibleSummary.errors ? "error" : "warning";
   const summaryParts: string[] = [];
-  if (report.summary.errors) {
+  if (visibleSummary.errors) {
     summaryParts.push(
-      t("diagnose.banner.errors", { count: report.summary.errors }),
+      t("diagnose.banner.errors", { count: visibleSummary.errors }),
     );
   }
-  if (report.summary.warnings) {
+  if (visibleSummary.warnings) {
     summaryParts.push(
-      t("diagnose.banner.warnings", { count: report.summary.warnings }),
+      t("diagnose.banner.warnings", { count: visibleSummary.warnings }),
     );
   }
-  if (report.summary.infos && summaryParts.length === 0) {
+  if (visibleSummary.infos && summaryParts.length === 0) {
     summaryParts.push(
-      t("diagnose.banner.infos", { count: report.summary.infos }),
+      t("diagnose.banner.infos", { count: visibleSummary.infos }),
     );
   }
-  const hasEmptyApiKey = report.issues.some(
-    (i) => i.code === "EMPTY_API_SERVER_KEY",
-  );
-  const onlyEmptyApiKey =
-    hasEmptyApiKey &&
-    report.issues.length === 1 &&
-    report.summary.errors === 0 &&
-    report.summary.warnings === 1;
-
   const summary = summaryParts.join(", ");
 
-  async function handleSaveApiKey(): Promise<void> {
-    if (!apiKeyValue.trim()) return;
-    setSaving(true);
-    try {
-      await window.hermesAPI.setEnv(
-        "API_SERVER_KEY",
-        apiKeyValue.trim(),
-        profile,
-      );
-      // Re-run the health check so the banner disappears.
-      const r = (await window.hermesAPI.rerunConfigHealth(profile)) as
-        | (Report & { ranAt: number })
-        | null;
-      setReport(r);
-      setShowModal(false);
-      setApiKeyValue("");
-    } catch {
-      // Silently fail; the user can retry.
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
-    <>
-      <div
-        className={`config-health-banner config-health-banner-${worstSeverity}`}
-        role="status"
-        data-testid="config-health-banner"
-      >
-        <span className="config-health-banner-text">
-          {onlyEmptyApiKey
-            ? t("diagnose.apiKeyBanner.lead")
-            : `${t("diagnose.banner.lead")} ${summary}.`}
-        </span>
-        <div className="config-health-banner-actions">
-          {hasEmptyApiKey && (
-            <button
-              className="config-health-banner-link"
-              type="button"
-              onClick={() => setShowModal(true)}
-            >
-              {t("diagnose.apiKeyBanner.setNow")}
-            </button>
-          )}
-          {onOpenDiagnose && (
-            <button
-              className="config-health-banner-link"
-              type="button"
-              onClick={onOpenDiagnose}
-            >
-              {t("diagnose.banner.showDetails")}
-            </button>
-          )}
+    <div
+      className={`config-health-banner config-health-banner-${worstSeverity}`}
+      role="status"
+      aria-live="polite"
+      data-testid="config-health-banner"
+    >
+      <span className="config-health-banner-text">
+        {hasEmptyApiKey
+          ? localConnectionRepair === "failed"
+            ? t("diagnose.localConnection.notReady")
+            : t("diagnose.localConnection.preparing")
+          : `${t("diagnose.banner.lead")} ${summary}.`}
+      </span>
+      <div className="config-health-banner-actions">
+        {hasEmptyApiKey && localConnectionRepair === "failed" && (
           <button
-            className="config-health-banner-dismiss"
+            className="config-health-banner-link"
             type="button"
-            aria-label={t("common.dismiss")}
-            onClick={() => {
-              rememberDismiss(report.ranAt);
-              setReport(null);
-            }}
+            onClick={() => void repairLocalConnection()}
           >
-            <X size={14} />
+            {t("diagnose.localConnection.autoFix")}
           </button>
-        </div>
-      </div>
-
-      {showModal && (
-        <div
-          className="models-modal-overlay"
-          onClick={() => setShowModal(false)}
+        )}
+        {onOpenDiagnose && (
+          <button
+            className="config-health-banner-link"
+            type="button"
+            onClick={onOpenDiagnose}
+          >
+            {t("diagnose.banner.showDetails")}
+          </button>
+        )}
+        <button
+          className="config-health-banner-dismiss"
+          type="button"
+          aria-label={t("common.dismiss")}
+          onClick={() => {
+            rememberDismiss(report.ranAt);
+            setReport(null);
+          }}
         >
-          <div className="models-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="models-modal-header">
-              <h2 className="models-modal-title">
-                {t("diagnose.apiKeyModal.title")}
-              </h2>
-              <button
-                className="btn-ghost"
-                type="button"
-                onClick={() => setShowModal(false)}
-                aria-label={t("common.close")}
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="models-modal-body">
-              <p
-                style={{
-                  fontSize: 13,
-                  color: "var(--text-secondary)",
-                  margin: 0,
-                }}
-              >
-                {t("diagnose.apiKeyModal.description")}
-              </p>
-              <div className="models-modal-field">
-                <label className="models-modal-label">
-                  {t("diagnose.apiKeyModal.label")}
-                </label>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input
-                    type="text"
-                    className="input"
-                    value={apiKeyValue}
-                    onChange={(e) => setApiKeyValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void handleSaveApiKey();
-                    }}
-                    placeholder={t("diagnose.apiKeyModal.placeholder")}
-                    style={{ flex: 1 }}
-                    autoFocus
-                  />
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    type="button"
-                    onClick={() => setApiKeyValue(generateUUID())}
-                  >
-                    {t("diagnose.apiKeyModal.autoGenerate")}
-                  </button>
-                </div>
-                <span className="models-modal-hint">
-                  {t("diagnose.apiKeyModal.hint")}
-                </span>
-              </div>
-            </div>
-            <div className="models-modal-footer">
-              <button
-                className="btn btn-secondary btn-sm"
-                type="button"
-                onClick={() => setShowModal(false)}
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                className="btn btn-primary btn-sm"
-                type="button"
-                disabled={!apiKeyValue.trim() || saving}
-                onClick={() => void handleSaveApiKey()}
-              >
-                {saving ? t("common.saving") : t("common.save")}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+          <X size={14} />
+        </button>
+      </div>
+    </div>
   );
 }
 

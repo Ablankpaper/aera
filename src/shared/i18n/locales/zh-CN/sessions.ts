@@ -6,6 +6,7 @@ export default {
   empty: "还没有会话",
   newConversation: "新对话",
   newChat: "新建聊天",
+  closeTab: "关闭标签页",
   today: "今天",
   yesterday: "昨天",
   thisWeek: "本周",
@@ -21,4 +22,15 @@ export default {
   deleteCancel: "取消",
   deleteConfirmAction: "删除",
   deleteDeleting: "正在删除...",
+  selectMode: "选择",
+  cancelSelect: "取消",
+  selectedCount: "已选择 {{count}} 项",
+  selectVisible: "选择当前可见项",
+  clearVisible: "清除当前可见项",
+  deleteSelected: "删除所选会话",
+  selectSession: "选择会话",
+  deleteSelectedConfirmTitle: "删除所选会话",
+  deleteSelectedConfirm:
+    "删除选中的 {{count}} 个会话？此操作无法撤销，消息和会话记录都将被永久删除。",
+  deleteSelectedClose: "关闭批量删除确认",
 } as const;

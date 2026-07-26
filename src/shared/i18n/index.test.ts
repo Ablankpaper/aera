@@ -10,6 +10,54 @@ function leafKeys(value: unknown, prefix = ""): string[] {
   );
 }
 
+function leafEntries(value: unknown, prefix = ""): Array<[string, string]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return typeof value === "string" && prefix ? [[prefix, value]] : [];
+  }
+  return Object.entries(value as Record<string, unknown>).flatMap(
+    ([key, child]) => leafEntries(child, prefix ? `${prefix}.${key}` : key),
+  );
+}
+
+function interpolationTokens(value: string): string[] {
+  return [...value.matchAll(/{{\s*([^},\s]+)[^}]*}}/g)]
+    .map((match) => match[1])
+    .sort();
+}
+
+const ALLOWED_SIMPLIFIED_CHINESE_TECHNICAL_KEYS = new Set([
+  "common.appName",
+  "setup.modelBaseUrlPlaceholder",
+  "settings.sections.hermesAgent",
+  "settings.nav.groups.hermes",
+  "settings.desktopTitle",
+  "settings.font.manrope",
+  "settings.version",
+  "settings.modelBaseUrlPlaceholder",
+  "settings.linkDiscord",
+  "settings.linkTelegram",
+  "settings.sshUsernamePlaceholder",
+  "tools.http",
+  "tools.mcpUrl",
+  "models.baseUrlPlaceholder",
+  "office.ceo",
+  "agents.control.asset.sop",
+  "kanban.displayNamePlaceholder",
+]);
+
+function isAllowedTechnicalLiteral(key: string): boolean {
+  return (
+    ALLOWED_SIMPLIFIED_CHINESE_TECHNICAL_KEYS.has(key) ||
+    key.startsWith("constants.") ||
+    /^setup\.providerCards\.[^.]+\.name$/.test(key) ||
+    key.startsWith("setup.localPresets.") ||
+    /^settings\.language\.(english|spanish|turkish)$/.test(key) ||
+    /^schedules\.deliverTargets\.(telegram|discord|slack|whatsapp|signal|matrix|mattermost|webhook|homeassistant)$/.test(
+      key,
+    )
+  );
+}
+
 describe("shared i18n", () => {
   it("returns English text by default", () => {
     expect(t("welcome.title")).toBe("Welcome to AgentEra Studio");
@@ -21,6 +69,45 @@ describe("shared i18n", () => {
 
   it("returns zh-CN text when available", () => {
     expect(t("welcome.title", "zh-CN")).toBe("欢迎使用 AgentEra Studio");
+  });
+
+  it("provides complete Simplified Chinese copy for every source key", () => {
+    const source = new Map(leafEntries(resources.en.translation));
+    const simplifiedChinese = new Map(
+      leafEntries(resources["zh-CN"].translation),
+    );
+    const missing = [...source].filter(([key]) => !simplifiedChinese.has(key));
+    expect(missing).toEqual([]);
+  });
+
+  it("preserves every source interpolation token in Simplified Chinese", () => {
+    const simplifiedChinese = new Map(
+      leafEntries(resources["zh-CN"].translation),
+    );
+    const mismatches = leafEntries(resources.en.translation).flatMap(
+      ([key, source]) => {
+        const translated = simplifiedChinese.get(key);
+        return translated !== undefined &&
+          interpolationTokens(translated).join("\0") ===
+            interpolationTokens(source).join("\0")
+          ? []
+          : [key];
+      },
+    );
+    expect(mismatches).toEqual([]);
+  });
+
+  it("does not silently reuse English interface copy in Simplified Chinese", () => {
+    const simplifiedChinese = new Map(
+      leafEntries(resources["zh-CN"].translation),
+    );
+    const untranslated = leafEntries(resources.en.translation).filter(
+      ([key, source]) =>
+        /[A-Za-z]{2}/.test(source) &&
+        simplifiedChinese.get(key) === source &&
+        !isAllowedTechnicalLiteral(key),
+    );
+    expect(untranslated).toEqual([]);
   });
 
   it("returns zh-TW text when available", () => {

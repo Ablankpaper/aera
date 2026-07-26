@@ -56,6 +56,12 @@ export default {
     "Hardware acceleration is turned off in Settings → Appearance, so the 3D office is using slow software rendering.",
   reenableGpu: "Re-enable GPU & restart",
   dismissNotice: "Dismiss",
+  developerMoveHint:
+    "Developer: select a building, then select the ground to move it (coordinates are logged to the console)",
+  moveBuildings: "Move buildings",
+  movingBuildings: "Moving buildings",
+  agentGreeting: "Hi, I'm {{name}}",
+  openFullChat: "Select for full chat",
   // Enterable building interiors
   enter_office: "Enter Office",
   enter_bank: "Enter Bank",
@@ -90,4 +96,16 @@ export default {
   repCreateExists: "This agent already has a bank account.",
   repStatusForeign:
     "This agent is linked to a different AgentEra Studio account.",
+  oneChat: {
+    agents: "Agents",
+    close: "Close agent chat",
+    offline: "Offline — start the gateway to chat",
+    selectAgent: "Select an agent to chat",
+    startConversation: "Start a conversation with {{name}}",
+    selectAgentPlaceholder: "Select an agent…",
+    messagePlaceholder: "Message {{name}}…",
+    gatewayOffline: "Gateway offline",
+    send: "Send message",
+    error: "Error: {{message}}",
+  },
 } as const;

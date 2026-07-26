@@ -1,4 +1,11 @@
-import { app, BrowserWindow, safeStorage, session, shell } from "electron";
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  safeStorage,
+  session,
+  shell,
+} from "electron";
 import { join } from "path";
 import { hostname } from "node:os";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
@@ -27,6 +34,7 @@ import { getAgenteraCloudOrigin } from "../agentera-auth/config";
 import { AgenteraCloudClient } from "../agentera-auth/client";
 import { createAgenteraAuthController } from "../agentera-auth/controller";
 import { createAgenteraAuthStoreForApp } from "../agentera-auth/store";
+import { AgenteraUserProfileStore } from "../agentera-user-profile-store";
 import {
   AgenteraProfileBindingStore,
   type AgenteraRuntimeOwner,
@@ -76,6 +84,11 @@ import {
 } from "../agentera-product-space/db";
 import { AgenteraProductSpaceManager } from "../agentera-product-space/manager";
 import { createProfile, setActiveProfile } from "../profiles";
+import { AgentIdentityService } from "../agent-identity";
+import { AgentUserMemoryRepairService } from "../agent-user-memory-repair";
+import { AgenteraGlobalProfileManager } from "../agentera-global-profile/manager";
+import { AgenteraMemoryCandidateManager } from "../agentera-global-profile/candidate-manager";
+import { AgenteraMemoryCandidateConfirmationCoordinator } from "../agentera-global-profile/candidate-confirmation";
 
 const APP_NAME =
   process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
@@ -102,6 +115,27 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
   });
 
   const agenteraAuthStore = createAgenteraAuthStoreForApp(app, safeStorage);
+  const agenteraUserProfiles = new AgenteraUserProfileStore({
+    userDataPath: app.getPath("userData"),
+  });
+  const agentIdentity = new AgentIdentityService({
+    resolveProfilePath: (profileId) => profileHome(profileId),
+  });
+  const agentUserMemoryRepair = new AgentUserMemoryRepairService({
+    resolveProfilePath: (profileId) => profileHome(profileId),
+  });
+  const agenteraGlobalProfiles = new AgenteraGlobalProfileManager({
+    userDataPath: app.getPath("userData"),
+  });
+  const agenteraMemoryCandidates = new AgenteraMemoryCandidateManager({
+    userDataPath: app.getPath("userData"),
+  });
+  const agenteraMemoryCandidateConfirmation =
+    new AgenteraMemoryCandidateConfirmationCoordinator({
+      candidates: agenteraMemoryCandidates,
+      identities: agentIdentity,
+      globalProfiles: agenteraGlobalProfiles,
+    });
   const agenteraProfileBindings = new AgenteraProfileBindingStore({
     userDataPath: app.getPath("userData"),
     secureStorage: safeStorage,
@@ -115,6 +149,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     getCloudClient: () =>
       new AgenteraCloudClient({ origin: getAgenteraCloudOrigin() }),
     openExternal: openAgenteraAuthUrl,
+    writeClipboard: (text) => clipboard.writeText(text),
     openTrustedExternal: openExternalUrl,
     bringMainWindowToFront: () => {
       if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -386,6 +421,12 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     notifyCustomProvidersChanged,
     openExternalUrl,
     agenteraAuth,
+    agenteraUserProfiles,
+    agentIdentity,
+    agentUserMemoryRepair,
+    agenteraGlobalProfiles,
+    agenteraMemoryCandidates,
+    agenteraMemoryCandidateConfirmation,
     productAccessGuard,
     getAgenteraRuntimeOwner,
     agenteraProfileBindings,

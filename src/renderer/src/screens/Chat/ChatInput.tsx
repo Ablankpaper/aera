@@ -593,16 +593,18 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
               </div>
               <div className="slash-menu-footer">
                 <span>
-                  <kbd>↑↓</kbd> navigate
+                  <kbd>↑↓</kbd> {t("chat.slashNavigate")}
                 </span>
                 <span>
-                  <kbd>↵</kbd> select
+                  <kbd>↵</kbd> {t("chat.slashSelect")}
                 </span>
                 <span>
-                  <kbd>tab</kbd> complete
+                  <kbd>tab</kbd> {t("chat.slashComplete")}
                 </span>
                 <span className="slash-menu-count">
-                  {filteredSlashCommands.length} commands
+                  {t("chat.slashCommandCount", {
+                    count: filteredSlashCommands.length,
+                  })}
                 </span>
               </div>
             </div>

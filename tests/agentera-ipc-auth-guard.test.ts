@@ -118,8 +118,10 @@ describe("AgentEra central IPC product-access guard", () => {
     expect(preflight).toEqual(
       [
         "agentera-auth-cancel-login",
+        "agentera-auth-copy-login-link",
         "agentera-auth-get-state",
         "agentera-auth-logout",
+        "agentera-auth-restart-login",
         "agentera-auth-retry-online",
         "agentera-auth-start-login",
         "agentera-install-file-probe",
@@ -146,6 +148,25 @@ describe("AgentEra central IPC product-access guard", () => {
     expect(AGENTERA_IPC_CHANNEL_POLICY["agentera-auth-open-portal"]).toBe(
       "authenticated",
     );
+    expect(AGENTERA_IPC_CHANNEL_POLICY["agentera-user-profile-get"]).toBe(
+      "authenticated",
+    );
+    expect(AGENTERA_IPC_CHANNEL_POLICY["agentera-user-profile-update"]).toBe(
+      "authenticated",
+    );
+    expect(
+      AGENTERA_IPC_CHANNEL_POLICY[
+        "agentera-global-profile-conversation-context"
+      ],
+    ).toBe("bound-profile");
+    for (const channel of [
+      "agentera-memory-candidates-extract",
+      "agentera-memory-candidates-confirm",
+      "agentera-memory-candidates-reject",
+    ]) {
+      expect(AGENTERA_IPC_CHANNEL_POLICY[channel]).toBe("bound-profile");
+      expect(AGENTERA_PROFILE_ARGUMENT_INDEX[channel]).toBe(1);
+    }
     for (const channel of [
       "agentera-runtime-get-state",
       "agentera-runtime-check-update",

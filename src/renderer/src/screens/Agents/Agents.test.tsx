@@ -177,6 +177,17 @@ describe("Agents profile creation", () => {
       />,
     );
 
+    fireEvent.click(
+      await screen.findByRole("tab", { name: "agents.hub.mineTab" }),
+    );
+    expect(
+      await screen.findByText("agents.control.personalSpaceTitle"),
+    ).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /agents\.hub\.advancedTitle/,
+      }),
+    );
     await waitFor(() => {
       expect(screen.getByText("default")).toBeTruthy();
     });
@@ -212,9 +223,17 @@ describe("Agents profile creation", () => {
       />,
     );
 
+    fireEvent.click(
+      await screen.findByRole("tab", { name: "agents.hub.mineTab" }),
+    );
     expect(
       await screen.findByText("agents.control.personalSpaceTitle"),
     ).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /agents\.hub\.advancedTitle/,
+      }),
+    );
     expect(screen.getByText("agents.legacyTitle")).toBeTruthy();
     expect(screen.getByText("agents.legacyAccountSyncLabel")).toBeTruthy();
     const syncStatusCalls = hermes.getAgentSyncStatus.mock.calls.length;

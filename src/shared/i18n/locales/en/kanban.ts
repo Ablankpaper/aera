@@ -107,6 +107,16 @@ export default {
 
   // Tooltips & buttons
   hqBoardTooltip: "Claw3D headquarters board (read-only mirror)",
+  hqBoardName: "HQ (Claw3D)",
+  hqMirrorDescription:
+    "Read-only mirror of Claw3D's headquarters board. Edits made here would not sync — use the Office screen to manage HQ tasks.",
+  skillCount_one: "{{count}} skill",
+  skillCount_other: "{{count}} skills",
+  readOnly: "read-only",
+  ageSeconds: "{{count}}s",
+  ageMinutes: "{{count}}m",
+  ageHours: "{{count}}h",
+  ageDays: "{{count}}d",
   dismissError: "Dismiss error",
   closeTaskDetails: "Close task details",
 } as const;

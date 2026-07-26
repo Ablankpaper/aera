@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { X, Send, Bot } from "lucide-react";
 import type { OfficeAgent } from "./office3d/core/types";
+import { useI18n } from "../../components/useI18n";
 
 interface OneChatModalProps {
   open: boolean;
@@ -20,6 +21,7 @@ export default function OneChatModal({
   onClose,
   agents,
 }: OneChatModalProps): React.JSX.Element | null {
+  const { t } = useI18n();
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Record<string, ChatMessage[]>>({});
@@ -195,7 +197,9 @@ export default function OneChatModal({
             {
               id: `err-${Date.now()}`,
               role: "agent",
-              text: `Error: ${(err as Error).message}`,
+              text: t("office.oneChat.error", {
+                message: (err as Error).message,
+              }),
               timestamp: Date.now(),
             },
           ],
@@ -250,10 +254,13 @@ export default function OneChatModal({
               borderBottom: "1px solid rgba(255,255,255,0.06)",
             }}
           >
-            <span className="text-sm font-semibold text-white">Agents</span>
+            <span className="text-sm font-semibold text-white">
+              {t("office.oneChat.agents")}
+            </span>
             <button
               type="button"
               onClick={onClose}
+              aria-label={t("office.oneChat.close")}
               className="flex items-center justify-center rounded-md hover:bg-white/10 transition-colors"
               style={{ width: 28, height: 28 }}
             >
@@ -293,7 +300,7 @@ export default function OneChatModal({
                       {agent.name}
                     </div>
                     <div className="text-xs text-white/40 truncate">
-                      {agent.status}
+                      {t(`office.status_${agent.status}`)}
                     </div>
                   </div>
                   {msgCount > 0 && (
@@ -341,14 +348,14 @@ export default function OneChatModal({
                   </div>
                   <div className="text-xs text-white/40">
                     {selectedAgent.gatewayRunning
-                      ? selectedAgent.status
-                      : "Offline — start gateway to chat"}
+                      ? t(`office.status_${selectedAgent.status}`)
+                      : t("office.oneChat.offline")}
                   </div>
                 </div>
               </>
             ) : (
               <span className="text-sm text-white/40">
-                Select an agent to chat
+                {t("office.oneChat.selectAgent")}
               </span>
             )}
           </div>
@@ -363,7 +370,9 @@ export default function OneChatModal({
               <div className="flex flex-col items-center justify-center h-full gap-3 text-white/30">
                 <Bot size={40} />
                 <span className="text-sm">
-                  Start a conversation with {selectedAgent.name}
+                  {t("office.oneChat.startConversation", {
+                    name: selectedAgent.name,
+                  })}
                 </span>
               </div>
             )}
@@ -461,10 +470,12 @@ export default function OneChatModal({
               }}
               placeholder={
                 !selectedAgent
-                  ? "Select an agent..."
+                  ? t("office.oneChat.selectAgentPlaceholder")
                   : selectedAgent.gatewayRunning
-                    ? `Message ${selectedAgent.name}...`
-                    : "Gateway offline"
+                    ? t("office.oneChat.messagePlaceholder", {
+                        name: selectedAgent.name,
+                      })
+                    : t("office.oneChat.gatewayOffline")
               }
               disabled={
                 !selectedAgent ||
@@ -481,6 +492,7 @@ export default function OneChatModal({
             <button
               type="button"
               onClick={() => void handleSend()}
+              aria-label={t("office.oneChat.send")}
               disabled={
                 !input.trim() ||
                 !selectedAgent ||

@@ -45,6 +45,7 @@ export const PROVIDERS = {
     // Aggregators
     { value: "openrouter", label: "constants.openrouterName" },
     { value: "aimlapi", label: "constants.aimlapiName" },
+    { value: "petoi", label: "constants.petoiName" },
     // First-party API providers
     { value: "anthropic", label: "constants.anthropicName" },
     { value: "openai", label: "constants.openaiName" },
@@ -91,6 +92,7 @@ export const PROVIDERS = {
     atlascloud: "AtlasCloud",
     openrouter: "constants.openrouterName",
     aimlapi: "constants.aimlapiName",
+    petoi: "constants.petoiName",
     anthropic: "constants.anthropicName",
     openai: "constants.openaiName",
     "openai-codex": "constants.openaiCodexName",
@@ -150,6 +152,18 @@ export const PROVIDERS = {
       placeholder: "sk-or-v1-...",
       configProvider: "openrouter",
       baseUrl: "https://openrouter.ai/api/v1",
+      needsKey: true,
+    },
+    {
+      id: "petoi",
+      name: "constants.petoiName",
+      desc: "constants.petoiDesc",
+      tag: "",
+      envKey: "PETOI_API_KEY",
+      url: "https://api.petoi.cn",
+      placeholder: "sk-...",
+      configProvider: "custom",
+      baseUrl: "https://api.petoi.cn/v1",
       needsKey: true,
     },
     {
@@ -339,6 +353,7 @@ export interface LocalPreset {
 // curated first-run set.
 export const PROVIDER_CARDS: { id: string; name: string }[] = [
   { id: "hermesone", name: "Hermes One" },
+  { id: "petoi", name: "constants.petoiName" },
   { id: "openrouter", name: "constants.openrouterName" },
   { id: "anthropic", name: "constants.anthropicName" },
   { id: "openai", name: "constants.openaiName" },
@@ -374,6 +389,7 @@ export const PROVIDER_CARDS: { id: string; name: string }[] = [
 // Keep this in sync with LOCAL_PRESETS below.
 export const OPENAI_COMPATIBLE_BASE_URLS: Record<string, string> = {
   hermesone: "https://inference.hermesone.org/v1",
+  petoi: "https://api.petoi.cn/v1",
   openai: "https://api.openai.com/v1",
   aimlapi: "https://api.aimlapi.com/v1",
   mistral: "https://api.mistral.ai/v1",
@@ -526,6 +542,55 @@ export function providerRouteForEnvKey(envKey: string): {
   provider: string;
   baseUrl: string;
 } {
+  const explicitRoutes: Record<string, { provider: string; baseUrl: string }> =
+    {
+      PETOI_API_KEY: {
+        provider: "custom",
+        baseUrl: "https://api.petoi.cn/v1",
+      },
+      GLM_API_KEY: {
+        provider: "zai",
+        baseUrl: "https://api.z.ai/api/paas/v4",
+      },
+      KIMI_API_KEY: {
+        provider: "kimi-coding",
+        baseUrl: "https://api.moonshot.ai/v1",
+      },
+      MINIMAX_API_KEY: {
+        provider: "minimax",
+        baseUrl: "https://api.minimax.io/anthropic",
+      },
+      MINIMAX_CN_API_KEY: {
+        provider: "minimax-cn",
+        baseUrl: "https://api.minimaxi.com/anthropic",
+      },
+      NOUS_API_KEY: {
+        provider: "nous",
+        baseUrl: "https://inference-api.nousresearch.com/v1",
+      },
+      OPENCODE_ZEN_API_KEY: {
+        provider: "opencode-zen",
+        baseUrl: "https://opencode.ai/zen/v1",
+      },
+      OPENCODE_GO_API_KEY: {
+        provider: "opencode-go",
+        baseUrl: "https://opencode.ai/zen/go/v1",
+      },
+      HF_TOKEN: {
+        provider: "huggingface",
+        baseUrl: "https://router.huggingface.co/v1",
+      },
+      PERPLEXITY_API_KEY: {
+        provider: "custom",
+        baseUrl: "https://api.perplexity.ai",
+      },
+      NVIDIA_API_KEY: {
+        provider: "nvidia",
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+      },
+    };
+  if (explicitRoutes[envKey]) return explicitRoutes[envKey];
+
   // The setup array is a heterogeneous literal (not every entry carries
   // configProvider/baseUrl), so read it through a partial shape.
   type SetupRoute = {
@@ -647,6 +712,12 @@ export const SETTINGS_SECTIONS: SectionDef[] = [
         label: "constants.openrouterApiKey",
         type: "password",
         hint: "constants.openrouterHint",
+      },
+      {
+        key: "PETOI_API_KEY",
+        label: "constants.petoiApiKey",
+        type: "password",
+        hint: "constants.petoiHint",
       },
       {
         key: "OPENAI_API_KEY",

@@ -250,7 +250,32 @@ function composeEnvironment(current: Harness): NodeJS.ProcessEnv {
 function startCompose(current: Harness): void {
   command(
     "docker",
-    ["compose", "-p", current.composeProject, "up", "-d", "--wait"],
+    [
+      "compose",
+      "-p",
+      current.composeProject,
+      "up",
+      "-d",
+      "--wait",
+      "postgres",
+      "redis",
+      "encrypted-backup-minio",
+    ],
+    { cwd: cloudRoot, env: composeEnvironment(current) },
+  );
+  // `encrypted-backup-minio-init` is a successful one-shot job, not a
+  // long-lived healthy service. Run it after the health-gated services so
+  // Docker Compose `up --wait` does not treat its exit(0) as a failure.
+  command(
+    "docker",
+    [
+      "compose",
+      "-p",
+      current.composeProject,
+      "run",
+      "--rm",
+      "encrypted-backup-minio-init",
+    ],
     { cwd: cloudRoot, env: composeEnvironment(current) },
   );
 }
@@ -459,19 +484,15 @@ async function registerPhoneAccount(
   await passwords.nth(1).fill(password);
   await page.locator('input[type="checkbox"]').check();
   await page.locator('button[type="submit"].primary-button').click();
-  await expect(page.locator(".completion-card")).toBeVisible();
+  await expect
+    .poll(() => new URL(page.url()).pathname)
+    .toMatch(/^(?:\/account|\/agentera\/oauth\/callback)$/);
 }
 
 async function loginBrowser(page: Page, phone: string): Promise<void> {
   await page.locator('input[autocomplete="username"]').fill(phone);
   await page.locator('input[autocomplete="current-password"]').fill(password);
   await page.locator('button[type="submit"].primary-button').click();
-}
-
-async function approveAuthorization(page: Page): Promise<void> {
-  const approve = page.locator("button.primary-button");
-  await expect(approve).toBeVisible();
-  await approve.click({ noWaitAfter: true });
 }
 
 test.beforeAll(async () => {
@@ -551,24 +572,37 @@ test("browser registration, offline renewal, ownership isolation, revoke, and de
   await browserPage.waitForURL(/\/authorize\?request_id=/);
   const firstApprovalURL = browserPage.url();
   await browserPage.locator('a[href^="/login?next="]').click();
-  await browserPage.locator('a[href="/register"]').click();
+  const registrationLink = browserPage.locator('a[href^="/register?next="]');
+  await expect(registrationLink).toHaveCount(1);
+  const registrationHref = await registrationLink.getAttribute("href");
+  expect(
+    new URL(registrationHref ?? "", cloudOrigin).searchParams.get("next"),
+  ).toBe(
+    `/authorize?request_id=${new URL(firstApprovalURL).searchParams.get("request_id")}`,
+  );
+  await registrationLink.click();
   await registerPhoneAccount(
     browserPage,
     harness,
     firstPhone,
     "First E2E User",
   );
-  await browserPage.locator("button.primary-button").click();
-  await loginBrowser(browserPage, firstPhone);
-  await browserPage.waitForURL(/\/account$/);
-  await browserPage.goto(firstApprovalURL);
-  await approveAuthorization(browserPage);
+  // Registration signs the browser in and preserves the desktop continuation,
+  // so the callback is completed without a second login or consent click.
+  expect(new URL(browserPage.url()).pathname).toBe("/agentera/oauth/callback");
 
+  await expect(desktopPage.locator(".layout")).toBeVisible();
   await expect(
     desktopPage.locator('[data-testid="screen-profile-claim"]'),
-  ).toBeVisible();
-  await desktopPage.locator(".agentera-profile-actions .btn-primary").click();
-  await expect(desktopPage.locator(".layout")).toBeVisible();
+  ).toHaveCount(0);
+  const firstAccountProfiles = await desktopPage.evaluate(() =>
+    window.hermesAPI.listProfiles(),
+  );
+  expect(firstAccountProfiles).toHaveLength(1);
+  expect(firstAccountProfiles[0]).toMatchObject({
+    isActive: true,
+    isDefault: false,
+  });
   const firstOnline = await authState(desktopPage);
   expect(firstOnline.status).toBe("authenticated");
   expect(firstOnline.offlineExpiresAt).toBeTruthy();
@@ -627,8 +661,6 @@ test("browser registration, offline renewal, ownership isolation, revoke, and de
       Promise.resolve(),
   );
   await browserPage.goto(sameAccountAuthorizationURL);
-  await browserPage.waitForURL(/\/authorize\?request_id=/);
-  await approveAuthorization(browserPage);
   await expect(desktopPage.locator(".layout")).toBeVisible();
   expect(
     await boundaryHashes(harness.hermesHome, harness.boundaryFiles),
@@ -651,12 +683,18 @@ test("browser registration, offline renewal, ownership isolation, revoke, and de
   await browserPage.goto(secondAccountAuthorizationURL);
   await browserPage.waitForURL(/\/login\?next=/);
   await loginBrowser(browserPage, secondPhone);
-  await browserPage.waitForURL(/\/authorize\?request_id=/);
-  await approveAuthorization(browserPage);
+  await expect(desktopPage.locator(".layout")).toBeVisible();
   await expect(
     desktopPage.locator('[data-testid="screen-profile-claim"]'),
-  ).toBeVisible();
-  await expect(desktopPage.locator(".layout")).toHaveCount(0);
+  ).toHaveCount(0);
+  const secondAccountProfiles = await desktopPage.evaluate(() =>
+    window.hermesAPI.listProfiles(),
+  );
+  expect(secondAccountProfiles).toHaveLength(1);
+  expect(secondAccountProfiles[0]).toMatchObject({
+    isActive: true,
+    isDefault: false,
+  });
 
   await browserPage.goto(`${cloudOrigin}/delete-account`);
   await browserPage.locator("form input").first().fill(secondPhone);

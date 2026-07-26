@@ -34,6 +34,7 @@ const REQUIRED_PATHS = [
   "/api/v1/agent-versions/{version_id}/revocations",
   "/api/v1/policy-snapshots/{policy_snapshot_id}",
   "/api/v1/browser/login",
+  "/api/v1/browser/login/code",
   "/api/v1/browser/logout",
   "/api/v1/devices",
   "/api/v1/devices/current/logout",
@@ -879,7 +880,7 @@ function validateCriticalContract(document) {
   if (document.openapi !== "3.0.3") {
     fail(`OpenAPI dialect changed: ${String(document.openapi)}`);
   }
-  if (document.info?.version !== "0.8.0") {
+  if (document.info?.version !== "0.9.0") {
     fail(`OpenAPI version changed: ${String(document.info?.version)}`);
   }
   const paths = object(document.paths, "paths");
@@ -899,6 +900,63 @@ function validateCriticalContract(document) {
     TOKEN_FIELDS,
     "TokenResponse.properties",
   );
+
+  const codeLoginRequest = object(
+    schemas.BrowserCodeLoginRequest,
+    "BrowserCodeLoginRequest",
+  );
+  if (
+    codeLoginRequest.type !== "object" ||
+    codeLoginRequest.additionalProperties !== false
+  ) {
+    fail("BrowserCodeLoginRequest is no longer a strict object");
+  }
+  exactMembers(
+    codeLoginRequest.required ?? [],
+    ["verification_receipt"],
+    "BrowserCodeLoginRequest.required",
+  );
+  const codeLoginProperties = object(
+    codeLoginRequest.properties,
+    "BrowserCodeLoginRequest.properties",
+  );
+  exactMembers(
+    Object.keys(codeLoginProperties),
+    ["verification_receipt"],
+    "BrowserCodeLoginRequest.properties",
+  );
+  if (
+    codeLoginProperties.verification_receipt?.type !== "string" ||
+    codeLoginProperties.verification_receipt?.maxLength !== 8192
+  ) {
+    fail("BrowserCodeLoginRequest.verification_receipt changed");
+  }
+  exactMembers(
+    object(
+      object(paths["/api/v1/browser/login/code"], "/api/v1/browser/login/code")
+        .post,
+      "/api/v1/browser/login/code.post",
+    ).responses
+      ? Object.keys(
+          object(
+            object(
+              paths["/api/v1/browser/login/code"],
+              "/api/v1/browser/login/code",
+            ).post.responses,
+            "/api/v1/browser/login/code.post.responses",
+          ),
+        )
+      : [],
+    ["200", "400", "401", "403", "503"],
+    "/api/v1/browser/login/code.post.responses",
+  );
+  if (
+    !(
+      object(schemas.VerificationPurpose, "VerificationPurpose").enum ?? []
+    ).includes("login")
+  ) {
+    fail("VerificationPurpose no longer includes login");
+  }
 
   const exchange = object(
     schemas.AuthorizationCodeExchangeRequest,

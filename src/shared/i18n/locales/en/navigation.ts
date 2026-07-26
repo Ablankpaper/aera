@@ -9,7 +9,7 @@ export default {
   agents: "Agents",
   office: "Office",
   models: "Models",
-  providers: "Providers",
+  providers: "Models",
   projects: "Projects",
   skills: "Skills",
   chats: "Chats",

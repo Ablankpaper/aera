@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   hostDerivedEnvKeyForUrl,
+  runtimeHostDerivedEnvKeyForUrl,
   shouldPruneOpenRouterApiKey,
 } from "../src/main/host-derived-env";
 
@@ -50,5 +51,56 @@ describe("hostDerivedEnvKeyForUrl", () => {
     expect(shouldPruneOpenRouterApiKey("OPENROUTER_API_KEY")).toBe(false);
     expect(shouldPruneOpenRouterApiKey("DEEPSEEK_API_KEY")).toBe(true);
     expect(shouldPruneOpenRouterApiKey(null)).toBe(true);
+  });
+});
+
+describe("runtimeHostDerivedEnvKeyForUrl", () => {
+  it("mirrors the Runtime host-derived slot for an unknown custom endpoint", () => {
+    expect(runtimeHostDerivedEnvKeyForUrl("https://api.anhepro.com/v1")).toBe(
+      "ANHEPRO_API_KEY",
+    );
+  });
+
+  it("does not derive a provider slot for local or LAN endpoints", () => {
+    expect(
+      runtimeHostDerivedEnvKeyForUrl("http://localhost:11434/v1"),
+    ).toBeNull();
+    expect(
+      runtimeHostDerivedEnvKeyForUrl("http://127.0.0.1:1234/v1"),
+    ).toBeNull();
+    expect(
+      runtimeHostDerivedEnvKeyForUrl("http://192.168.1.42:8080/v1"),
+    ).toBeNull();
+    expect(
+      runtimeHostDerivedEnvKeyForUrl("http://10.0.0.8:8000/v1"),
+    ).toBeNull();
+  });
+
+  it("derives from the registrable-looking host label instead of a spoofed vendor substring", () => {
+    expect(
+      runtimeHostDerivedEnvKeyForUrl(
+        "https://api.deepseek.com.attacker.test/v1",
+      ),
+    ).toBe("ATTACKER_API_KEY");
+  });
+
+  it("leaves vendors with explicit Runtime host gates to those gates", () => {
+    expect(
+      runtimeHostDerivedEnvKeyForUrl("https://api.openai.com/v1"),
+    ).toBeNull();
+    expect(
+      runtimeHostDerivedEnvKeyForUrl("https://openrouter.ai/api/v1"),
+    ).toBeNull();
+    expect(
+      runtimeHostDerivedEnvKeyForUrl("https://api.ollama.com/v1"),
+    ).toBeNull();
+  });
+
+  it("rejects malformed and non-provider hosts", () => {
+    expect(runtimeHostDerivedEnvKeyForUrl("")).toBeNull();
+    expect(runtimeHostDerivedEnvKeyForUrl("not a url")).toBeNull();
+    expect(
+      runtimeHostDerivedEnvKeyForUrl("https://single-label/v1"),
+    ).toBeNull();
   });
 });

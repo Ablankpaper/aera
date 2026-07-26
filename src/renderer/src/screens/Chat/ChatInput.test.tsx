@@ -6,7 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // irrelevant to keyboard behavior.
 vi.mock("../../components/useI18n", () => ({
   useI18n: () => ({
-    t: (key: string) => key,
+    t: (key: string, options?: Record<string, unknown>) =>
+      key === "chat.slashCommandCount"
+        ? `${String(options?.count)} commands`
+        : key,
     locale: "en",
     setLocale: vi.fn(),
   }),

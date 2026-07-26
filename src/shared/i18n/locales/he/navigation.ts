@@ -13,7 +13,7 @@ export default {
   agents: "פרופילים",
   office: "אופיס",
   models: "מודלים",
-  providers: "ספקים",
+  providers: "מודלים",
   skills: "מיומנויות",
   soul: "פרסונה",
   memory: "זיכרון",

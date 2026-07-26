@@ -13,7 +13,7 @@ export default {
   agents: "プロファイル",
   office: "オフィス",
   models: "モデル",
-  providers: "プロバイダ",
+  providers: "モデル",
   skills: "スキル",
   soul: "ペルソナ",
   memory: "メモリ",

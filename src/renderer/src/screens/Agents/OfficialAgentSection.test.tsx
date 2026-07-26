@@ -1,7 +1,8 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AgenteraAgentInstallationSummary,
+  OfficialAgentDetail,
   OfficialAgentSummary,
   OfficialManagedUpdate,
 } from "../../../../shared/agentera-agent-control";
@@ -56,8 +57,32 @@ function installation(): AgenteraAgentInstallationSummary {
   };
 }
 
+function detail(): OfficialAgentDetail {
+  return {
+    agent: agent(),
+    capabilitySummary: "Official capability summary",
+    assetCounts: { skill: 2, sop: 1, knowledge: 3 },
+    allowedProviders: ["openai"],
+    allowedModels: ["openai/gpt-5.6"],
+    allowedToolCount: 4,
+  };
+}
+
+let getOfficialAgentDetail: ReturnType<typeof vi.fn>;
+
 describe("OfficialAgentSection", () => {
-  it("shows an online official source and requests a fresh isolated install", () => {
+  beforeEach(() => {
+    getOfficialAgentDetail = vi.fn(async () => ({
+      ok: true as const,
+      data: detail(),
+    }));
+    Object.defineProperty(window, "agenteraAgents", {
+      configurable: true,
+      value: { getOfficialAgentDetail },
+    });
+  });
+
+  it("opens an official detail and requests a fresh isolated install", async () => {
     const onInstall = vi.fn();
     render(
       <OfficialAgentSection
@@ -73,18 +98,23 @@ describe("OfficialAgentSection", () => {
 
     expect(screen.getByText("Official Research Agent")).toBeTruthy();
     expect(screen.getByText("agents.control.official.badge")).toBeTruthy();
+    fireEvent.click(
+      screen.getByText("Official Research Agent").closest("button")!,
+    );
     expect(
-      screen.getByText("agents.control.official.freshProfileBoundary"),
+      await screen.findByRole("dialog", { name: "Official Research Agent" }),
     ).toBeTruthy();
+    expect(await screen.findByText("Official capability summary")).toBeTruthy();
+    expect(getOfficialAgentDetail).toHaveBeenCalledWith(DEFINITION_ID);
     fireEvent.click(
       screen.getByRole("button", {
-        name: "agents.control.official.install",
+        name: "agents.hub.installAgent",
       }),
     );
     expect(onInstall).toHaveBeenCalledWith(DEFINITION_ID);
   });
 
-  it("shows a managed update for new conversations without changing existing ones", () => {
+  it("offers a managed update from the Agent detail", async () => {
     const update: OfficialManagedUpdate = {
       installationId: INSTALLATION_ID,
       expectedSelectedReleaseRevisionId: REVISION_ID,
@@ -109,23 +139,24 @@ describe("OfficialAgentSection", () => {
       />,
     );
 
+    expect(screen.getByText("agents.hub.updateAvailable")).toBeTruthy();
+    fireEvent.click(
+      screen.getByText("Official Research Agent").closest("button")!,
+    );
     expect(
-      screen.getByText("agents.control.official.updateReady"),
-    ).toBeTruthy();
-    expect(
-      screen.getByText(
-        "agents.control.official.existingConversationsUnchanged",
-      ),
+      await screen.findByRole("dialog", { name: "Official Research Agent" }),
     ).toBeTruthy();
     fireEvent.click(
       screen.getByRole("button", {
         name: "agents.control.official.applyUpdate",
       }),
     );
-    expect(onApplyUpdate).toHaveBeenCalledWith(INSTALLATION_ID);
+    await waitFor(() =>
+      expect(onApplyUpdate).toHaveBeenCalledWith(INSTALLATION_ID),
+    );
   });
 
-  it("shows only verified local official installations offline and disables remote actions", () => {
+  it("keeps a verified local official Agent usable as a card offline without remote actions", async () => {
     render(
       <OfficialAgentSection
         online={false}
@@ -138,15 +169,26 @@ describe("OfficialAgentSection", () => {
       />,
     );
 
+    const offlineCard = screen
+      .getByText("agents.control.official.installedSource")
+      .closest("button");
+    expect(offlineCard).toBeTruthy();
+    expect(screen.getByText("agents.hub.installed")).toBeTruthy();
+    fireEvent.click(offlineCard!);
     expect(
-      screen.getByText("agents.control.official.offlineLocalVersion"),
+      await screen.findByRole("dialog", {
+        name: "agents.control.official.installedSource",
+      }),
     ).toBeTruthy();
     expect(
-      screen.getByText("agents.control.official.offlineMayBeStale"),
-    ).toBeTruthy();
+      screen.getByRole("button", {
+        name: "agents.hub.localProfileUnavailable",
+      }),
+    ).toBeDisabled();
+    expect(getOfficialAgentDetail).not.toHaveBeenCalled();
     expect(
       screen.queryByRole("button", {
-        name: "agents.control.official.install",
+        name: "agents.hub.installAgent",
       }),
     ).toBeNull();
     expect(

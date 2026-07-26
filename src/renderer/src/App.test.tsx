@@ -8,13 +8,16 @@ import type {
 } from "../../shared/agentera-runtime-access";
 import App from "./App";
 
-vi.mock("./components/useI18n", () => ({
-  useI18n: () => ({
-    locale: "en",
-    setLocale: vi.fn(),
-    t: (key: string): string => key,
-  }),
-}));
+vi.mock("./components/useI18n", () => {
+  const t = (key: string): string => key;
+  return {
+    useI18n: () => ({
+      locale: "en",
+      setLocale: vi.fn(),
+      t,
+    }),
+  };
+});
 vi.mock("./components/ThemeProvider", () => ({
   ThemeProvider: ({ children }: { children: ReactNode }) => children,
 }));
@@ -89,6 +92,7 @@ type TestMock = ReturnType<typeof vi.fn>;
 type RuntimeMockName =
   | "probeInstallFiles"
   | "runStartupPreflight"
+  | "resolveAccountProfile"
   | "inspectActiveProfile"
   | "bindActiveProfile"
   | "createFreshProfile"
@@ -99,7 +103,9 @@ type RuntimeMockName =
 type AuthMockName =
   | "getState"
   | "startLogin"
+  | "restartLogin"
   | "cancelLogin"
+  | "copyLoginLink"
   | "retryOnline"
   | "logout"
   | "onStateChanged";
@@ -124,6 +130,11 @@ function installWindowMocks({
       connectionMode: mode,
       postAuthTarget: target,
       verifyWarning: false,
+    }),
+    resolveAccountProfile: vi.fn().mockResolvedValue({
+      status: "bound",
+      profileId: "agentera-space",
+      runtimeProfileId: "44444444-4444-4444-8444-444444444444",
     }),
     inspectActiveProfile: vi.fn().mockResolvedValue({
       status: "owned",
@@ -150,7 +161,9 @@ function installWindowMocks({
   const auth = {
     getState: vi.fn().mockResolvedValue(authState),
     startLogin: vi.fn().mockResolvedValue(undefined),
+    restartLogin: vi.fn().mockResolvedValue(undefined),
     cancelLogin: vi.fn().mockResolvedValue(undefined),
+    copyLoginLink: vi.fn().mockResolvedValue(undefined),
     retryOnline: vi.fn().mockResolvedValue(authState),
     logout: vi.fn().mockResolvedValue(undefined),
     onStateChanged: vi.fn((listener: AuthListener) => {
@@ -245,7 +258,7 @@ describe("AgentEra startup gate", () => {
       await finishSplash();
 
       expect(screen.getByTestId("screen-auth")).toBeInTheDocument();
-      expect(runtime.inspectActiveProfile).not.toHaveBeenCalled();
+      expect(runtime.resolveAccountProfile).not.toHaveBeenCalled();
     },
   );
 
@@ -262,16 +275,16 @@ describe("AgentEra startup gate", () => {
 
       expect(screen.getByTestId("screen-installing")).toBeInTheDocument();
       expect(screen.queryByTestId("screen-welcome")).toBeNull();
-      expect(runtime.inspectActiveProfile).not.toHaveBeenCalled();
+      expect(runtime.resolveAccountProfile).not.toHaveBeenCalled();
     },
   );
 
-  it("stops at Profile claim for meaningful unbound local data", async () => {
+  it("fails closed if main-process account-space resolution remains unresolved", async () => {
     const { runtime } = installWindowMocks({
       target: "setup",
       authState: offline,
     });
-    runtime.inspectActiveProfile.mockResolvedValue({
+    runtime.resolveAccountProfile.mockResolvedValue({
       status: "unbound",
       meaningfulData: true,
     });
@@ -296,7 +309,7 @@ describe("AgentEra startup gate", () => {
     expect(
       screen.getByTestId("organization-invitation-gate"),
     ).toHaveTextContent("authenticated");
-    expect(runtime.inspectActiveProfile).toHaveBeenCalledOnce();
+    expect(runtime.resolveAccountProfile).toHaveBeenCalledOnce();
   });
 
   it("normalizes a legacy setup target to the main desktop", async () => {
@@ -307,7 +320,7 @@ describe("AgentEra startup gate", () => {
 
     expect(screen.getByTestId("screen-main")).toBeInTheDocument();
     expect(screen.queryByTestId("screen-setup")).toBeNull();
-    expect(runtime.inspectActiveProfile).toHaveBeenCalledOnce();
+    expect(runtime.resolveAccountProfile).toHaveBeenCalledOnce();
   });
 
   it.each(["remote", "ssh"] as const)(
@@ -324,28 +337,21 @@ describe("AgentEra startup gate", () => {
 
       expect(screen.getByTestId("screen-main")).toBeInTheDocument();
       expect(runtime.inspectCurrentConnection).toHaveBeenCalledOnce();
-      expect(runtime.inspectActiveProfile).not.toHaveBeenCalled();
+      expect(runtime.resolveAccountProfile).not.toHaveBeenCalled();
     },
   );
 
   it.each(["setup", "main"] as const)(
-    "rejects a local %s target owned by another user",
+    "automatically resolves an isolated account space for a local %s target",
     async (target) => {
       const { runtime } = installWindowMocks({ target });
-      runtime.inspectActiveProfile.mockResolvedValue({
-        status: "owned",
-        meaningfulData: true,
-        isCurrentOwner: false,
-      });
       render(<App />);
 
       await finishSplash();
 
-      expect(screen.getByTestId("screen-profile-claim")).toBeInTheDocument();
-      expect(
-        screen.getByText("auth.profile.otherOwnerTitle"),
-      ).toBeInTheDocument();
-      expect(screen.queryByTestId(`screen-${target}`)).toBeNull();
+      expect(runtime.resolveAccountProfile).toHaveBeenCalledOnce();
+      expect(screen.getByTestId("screen-main")).toBeInTheDocument();
+      expect(screen.queryByTestId("screen-profile-claim")).toBeNull();
     },
   );
 
@@ -357,7 +363,7 @@ describe("AgentEra startup gate", () => {
         reason: "sign_in_required",
       },
     });
-    runtime.inspectActiveProfile.mockResolvedValue({
+    runtime.resolveAccountProfile.mockResolvedValue({
       status: "unbound",
       meaningfulData: false,
     });
@@ -401,7 +407,7 @@ describe("AgentEra startup gate", () => {
 
   it("creates a fresh non-inherited space and opens the desktop", async () => {
     const { runtime } = installWindowMocks({ target: "main" });
-    runtime.inspectActiveProfile.mockResolvedValue({
+    runtime.resolveAccountProfile.mockResolvedValue({
       status: "unbound",
       meaningfulData: true,
     });
@@ -478,7 +484,7 @@ describe("AgentEra startup gate", () => {
 
   it("does not enter a Runtime screen when authorization is revoked during Profile creation", async () => {
     const { runtime } = installWindowMocks({ target: "main" });
-    runtime.inspectActiveProfile.mockResolvedValue({
+    runtime.resolveAccountProfile.mockResolvedValue({
       status: "unbound",
       meaningfulData: true,
     });
@@ -511,11 +517,13 @@ describe("AgentEra startup gate", () => {
     expect(screen.queryByTestId("screen-main")).toBeNull();
   });
 
-  it("forces browser account selection when recovering from another owner's Profile", async () => {
-    const { runtime, auth } = installWindowMocks({ target: "main" });
-    runtime.inspectActiveProfile.mockResolvedValue({
+  it("forces browser account selection for another owner's remote connection", async () => {
+    const { runtime, auth } = installWindowMocks({
+      target: "main",
+      mode: "remote",
+    });
+    runtime.inspectCurrentConnection.mockResolvedValue({
       status: "owned",
-      meaningfulData: true,
       isCurrentOwner: false,
     });
     render(<App />);

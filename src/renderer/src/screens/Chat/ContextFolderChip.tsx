@@ -58,7 +58,10 @@ export const ContextFolderChip = memo(function ContextFolderChip({
   useEffect(() => {
     if (!isOpen) return;
     function handleClickOutside(e: MouseEvent): void {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
         setIsOpen(false);
       }
     }
@@ -80,10 +83,14 @@ export const ContextFolderChip = memo(function ContextFolderChip({
 
   const renderDropdown = (): React.JSX.Element => (
     <div className="chat-ctxfolder-dropdown">
-      <div className="chat-ctxfolder-dropdown-header">Recent</div>
+      <div className="chat-ctxfolder-dropdown-header">
+        {t("chat.recentFolders")}
+      </div>
       <div className="chat-ctxfolder-dropdown-list">
         {recentFolders.length === 0 ? (
-          <div className="chat-ctxfolder-dropdown-empty">No recent folders</div>
+          <div className="chat-ctxfolder-dropdown-empty">
+            {t("chat.noRecentFolders")}
+          </div>
         ) : (
           recentFolders.map((path) => {
             const isSelected = path === contextFolder;
@@ -100,9 +107,14 @@ export const ContextFolderChip = memo(function ContextFolderChip({
                 }}
                 title={path}
               >
-                <span className="chat-ctxfolder-dropdown-item-name">{folderName(path)}</span>
+                <span className="chat-ctxfolder-dropdown-item-name">
+                  {folderName(path)}
+                </span>
                 {isSelected && (
-                  <Check size={14} className="chat-ctxfolder-dropdown-item-check" />
+                  <Check
+                    size={14}
+                    className="chat-ctxfolder-dropdown-item-check"
+                  />
                 )}
               </button>
             );
@@ -118,7 +130,7 @@ export const ContextFolderChip = memo(function ContextFolderChip({
           onPickFolder();
         }}
       >
-        <span>Open folder...</span>
+        <span>{t("chat.openFolder")}</span>
       </button>
     </div>
   );

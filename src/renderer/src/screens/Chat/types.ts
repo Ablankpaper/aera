@@ -4,6 +4,7 @@ export type {
 } from "../../../../shared/attachments";
 
 import type { Attachment } from "../../../../shared/attachments";
+import type { AgenteraMemoryCandidateBatch } from "../../../../shared/agentera-memory-candidate";
 
 /**
  * Visible chat bubble (user or assistant). Used for live streaming and as
@@ -80,12 +81,26 @@ export interface ClarifyMessage {
   resolved?: boolean;
 }
 
+/**
+ * Renderer-only review card derived from one explicit user message. It is
+ * deliberately a non-bubble history variant so it never enters Hermes input,
+ * persisted session rows, transcript export, or Background Review.
+ */
+export interface MemoryCandidateMessage {
+  id: string;
+  kind: "memory_candidate";
+  role: "agent";
+  batch: AgenteraMemoryCandidateBatch;
+  status: "pending" | "saving" | "confirmed" | "rejected" | "error";
+}
+
 export type ChatMessage =
   | ChatBubbleMessage
   | ReasoningMessage
   | ToolCallMessage
   | ToolResultMessage
-  | ClarifyMessage;
+  | ClarifyMessage
+  | MemoryCandidateMessage;
 
 export interface ActiveTurn {
   turnId: string;

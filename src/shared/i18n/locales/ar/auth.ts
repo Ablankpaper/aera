@@ -80,7 +80,7 @@ const auth = {
     signOut: "تسجيل الخروج",
     actionFailed: "تعذر إكمال إجراء الحساب.",
     unavailable: "معلومات حساب AgentEra غير متاحة.",
-    userId: "المستخدم",
+    userId: "معرّف الحساب",
     deviceId: "الجهاز",
     offlineUntil: "الوصول الموقّع دون اتصال صالح حتى {{date}}.",
     localDataWarning:

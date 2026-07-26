@@ -30,6 +30,7 @@ import type {
   SubmitExperienceCandidateInput,
   UpdateAgentDraftInput,
   OrganizationAgentSubmissionSummary,
+  OfficialAgentDetail,
   OfficialAgentInstallPreview,
   OfficialAgentSummary,
   OfficialManagedUpdate,
@@ -241,6 +242,16 @@ function publicCount(value: unknown): number {
     throw codedError("operation_failed");
   }
   return count;
+}
+
+function publicCapabilitySummary(value: unknown): string {
+  if (typeof value !== "string") throw codedError("operation_failed");
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) throw codedError("operation_failed");
+  const characters = Array.from(normalized);
+  return characters.length > 1200
+    ? `${characters.slice(0, 1199).join("")}…`
+    : normalized;
 }
 
 function loadTrustCache(
@@ -621,6 +632,38 @@ export class AgenteraAgentControlManager {
   async listOfficialAgents(): Promise<OfficialAgentSummary[]> {
     await this.assertOnlineAccess(false);
     return this.ensureOfficialAgentComponents().service.list();
+  }
+
+  async getOfficialAgentDetail(
+    definitionId: string,
+  ): Promise<OfficialAgentDetail> {
+    await this.assertOnlineAccess(false);
+    const detail =
+      await this.requireFull().client.getOfficialAgent(definitionId);
+    if (
+      detail.agent.definitionId !== definitionId ||
+      detail.version.definition_id !== definitionId ||
+      detail.version.id !== detail.agent.versionId
+    ) {
+      throw codedError("verification_failed");
+    }
+    const version = serializeVersion(detail.version);
+    return {
+      agent: { ...detail.agent },
+      capabilitySummary: publicCapabilitySummary(
+        detail.version.manifest.identity.system_prompt,
+      ),
+      assetCounts: { ...version.assetCounts },
+      allowedProviders: [
+        ...detail.version.manifest.model_constraints.allowed_providers,
+      ],
+      allowedModels: [
+        ...detail.version.manifest.model_constraints.allowed_models,
+      ],
+      allowedToolCount: publicCount(
+        detail.version.manifest.tools.allowed.length,
+      ),
+    };
   }
 
   async prepareOfficialInstall(

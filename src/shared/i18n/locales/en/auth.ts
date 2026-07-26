@@ -1,17 +1,31 @@
 const auth = {
   gate: {
     title: "Sign in to AgentEra",
+    productCaption: "Your intelligent workspace",
+    slogan: "Aila turns every idea into possibility.",
     checking: "Checking your AgentEra session…",
     browserNote:
-      "Registration, sign-in, and password recovery open securely in your browser. AgentEra Studio never collects your password or verification code.",
-    openBrowser: "Open browser to sign in or register",
-    waitingForBrowser: "Waiting for browser authorization…",
+      "Select sign in to finish in your browser. You will return to the desktop app automatically.",
+    openBrowser: "Sign in / Register",
+    waitingForBrowser: "Opening the sign-in page…",
+    loggingIn: "Signing in…",
+    browserNotOpened: "Browser did not open automatically?",
+    copyLoginHint: "Copy the sign-in link and open it manually in your browser",
+    copyLoginLink: "Copy sign-in link",
+    copyingLoginLink: "Copying…",
+    copiedLoginLink: "Sign-in link copied",
+    restartLogin: "Restart sign-in",
+    copyFailed: "The sign-in link could not be copied. Please try again.",
+    restartFailed: "Sign-in could not restart. Select sign in again.",
     cancel: "Cancel",
     retry: "Retry",
     retrying: "Checking again…",
-    loginFailed: "Browser authorization did not finish. Please try again.",
+    loginFailed: "Browser sign-in did not finish. Please try again.",
     retryFailed: "AgentEra could not verify your session. Please try again.",
-    cancelled: "Browser authorization was cancelled.",
+    cancelled: "Sign-in was cancelled.",
+    legalPrefix: "By continuing, you agree to the",
+    privacy: "Privacy Policy",
+    terms: "Terms of Service",
     secureStorageTitle: "Secure storage is unavailable",
     secureStorageDescription:
       "AgentEra cannot safely store this device session. Enable your system keychain or credential service, then retry. Plaintext storage is never used.",
@@ -23,11 +37,11 @@ const auth = {
       clock_rollback:
         "The system clock changed unexpectedly. Connect to the internet to verify this device.",
       device_revoked:
-        "This device is no longer authorized. Sign in to authorize it again.",
+        "This device's sign-in has expired. Sign in again to continue.",
       account_disabled:
         "This AgentEra account is currently disabled. Use the browser account page for help.",
       account_pending_deletion:
-        "This account is pending deletion and cannot authorize AgentEra Studio.",
+        "This account is pending deletion and cannot sign in to AgentEra Studio.",
       secure_storage_unavailable:
         "Secure system storage is required for AgentEra sessions.",
     },
@@ -71,6 +85,7 @@ const auth = {
   account: {
     settingsNav: "AgentEra account",
     title: "AgentEra account",
+    defaultDisplayName: "User",
     openMenu: "Open AgentEra account menu",
     online: "Online · verified",
     offline: "Offline · local access",
@@ -81,7 +96,7 @@ const auth = {
     signOut: "Sign out",
     actionFailed: "This account action could not be completed.",
     unavailable: "AgentEra account information is unavailable.",
-    userId: "User",
+    userId: "Account ID",
     deviceId: "Device",
     offlineUntil: "Signed offline access is valid until {{date}}.",
     localDataWarning:
@@ -90,6 +105,30 @@ const auth = {
       "Recharge opens the independent model API website. Its accounts, balances, API keys, cookies, and tokens are separate from this AgentEra account.",
     pendingRevocationWarning:
       "If you sign out while the control plane is unreachable, this device may still count toward the five-device limit until the signed self-revocation is delivered automatically.",
+    profile: {
+      title: "Personal profile",
+      description:
+        "Choose the name and personal details shown in AgentEra Studio.",
+      loading: "Loading profile…",
+      displayName: "Username",
+      displayNamePlaceholder: "For example: Aera user",
+      occupation: "Role / occupation",
+      occupationPlaceholder: "For example: Independent developer",
+      bio: "About you",
+      bioPlaceholder: "Write a short introduction",
+      uploadAvatar: "Change avatar",
+      processingAvatar: "Processing…",
+      removeAvatar: "Remove avatar",
+      avatarHint: "JPG, PNG, or WebP. Images are cropped to a square.",
+      localOnly:
+        "Stored only on this device and kept separate for each signed-in account.",
+      save: "Save profile",
+      saving: "Saving…",
+      saved: "Profile saved",
+      nameRequired: "Enter a username.",
+      uploadFailed: "This image could not be read. Try another one.",
+      saveFailed: "The profile could not be saved. Try again.",
+    },
   },
 };
 

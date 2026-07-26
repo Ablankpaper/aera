@@ -7,6 +7,8 @@ const {
   connModeRef,
   healthStatuses,
   aliveGatewayPids,
+  ensureLocalApiServerKeySpy,
+  healthRequests,
   restartScript,
   hermesCliArgsSpy,
 } = vi.hoisted(() => {
@@ -26,6 +28,14 @@ const {
     connModeRef: { mode: "local" as "local" | "remote" | "ssh" },
     healthStatuses: [] as number[],
     aliveGatewayPids: new Set<number>(),
+    ensureLocalApiServerKeySpy: vi.fn(() => ({
+      generated: false,
+      key: "unit-test-internal-token",
+    })),
+    healthRequests: [] as Array<{
+      headers?: Record<string, string>;
+      url: string;
+    }>,
     restartScript: script,
     hermesCliArgsSpy: vi.fn(),
   };
@@ -52,8 +62,9 @@ vi.mock("../src/main/agentera-runtime-distribution/invocation", () => ({
 }));
 
 vi.mock("../src/main/config", () => ({
+  ensureLocalApiServerKey: ensureLocalApiServerKeySpy,
   getModelConfig: () => ({ model: "test-model", provider: "openrouter" }),
-  getApiServerKey: () => "",
+  getApiServerKey: () => "unit-test-internal-token",
   readEnv: (profile?: string) => ({ TEST_PROFILE_KEY: profile || "default" }),
   getConnectionConfig: () => ({ mode: connModeRef.mode }),
   getConfigValue: () => "",
@@ -103,6 +114,10 @@ vi.mock("http", () => {
       _options: Record<string, unknown>,
       callback: (res: { statusCode: number; resume: () => void }) => void,
     ) => {
+      healthRequests.push({
+        headers: _options.headers as Record<string, string> | undefined,
+        url: String(_url),
+      });
       const req = new EventEmitter() as InstanceType<typeof EventEmitter> & {
         destroy: () => void;
         end: () => void;
@@ -177,7 +192,9 @@ describe("restartGatewayViaCli", () => {
     mkdirSync(TEST_REPO, { recursive: true });
     connModeRef.mode = "local";
     healthStatuses.length = 0;
+    healthRequests.length = 0;
     aliveGatewayPids.clear();
+    ensureLocalApiServerKeySpy.mockClear();
     hermesCliArgsSpy.mockReset();
     hermesCliArgsSpy.mockImplementation(() => ["-e", restartScript]);
   });
@@ -209,6 +226,32 @@ describe("restartGatewayViaCli", () => {
     ).toEqual({
       api: "true",
       key: "work",
+    });
+  });
+
+  it("injects the exact ensured credential into the spawned gateway process", async () => {
+    const authProofFile = join(TEST_HOME, "spawn-auth-proof.txt");
+    hermesCliArgsSpy.mockImplementation(() => [
+      "-e",
+      `require("fs").writeFileSync(${JSON.stringify(authProofFile)}, process.env.API_SERVER_KEY || "")`,
+    ]);
+
+    expect(startGateway("work")).toBe(true);
+    expect(await waitForFile(authProofFile)).toBe(true);
+    expect(readFileSync(authProofFile, "utf-8")).toBe(
+      "unit-test-internal-token",
+    );
+    expect(ensureLocalApiServerKeySpy).toHaveBeenCalledWith("work");
+  });
+
+  it("uses a bearer-authenticated endpoint for local gateway readiness", async () => {
+    healthStatuses.push(200);
+
+    await expect(isGatewayHealthy("work")).resolves.toBe(true);
+
+    expect(healthRequests.at(-1)).toEqual({
+      headers: { Authorization: "Bearer unit-test-internal-token" },
+      url: expect.stringMatching(/\/v1\/capabilities$/),
     });
   });
 

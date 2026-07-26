@@ -294,7 +294,7 @@ function Office({ visible }: OfficeProps): React.JSX.Element {
                   return next;
                 })
               }
-              title="Developer: click a building then click the ground to move it (logs coordinates to the console)"
+              title={t("office.developerMoveHint")}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -311,7 +311,7 @@ function Office({ visible }: OfficeProps): React.JSX.Element {
               }}
             >
               <Move size={14} />
-              {devMode ? "Moving buildings" : "Move buildings"}
+              {t(devMode ? "office.movingBuildings" : "office.moveBuildings")}
             </button>
           )}
           <button

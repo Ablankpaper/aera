@@ -8,7 +8,10 @@ import { timingSafeEqual } from "node:crypto";
 
 const CALLBACK_PATH = "/agentera/oauth/callback";
 const MAX_REQUEST_TARGET_LENGTH = 4096;
-const DEFAULT_TIMEOUT_MS = 120_000;
+// Cloud keeps an OAuth request alive for ten minutes. Give the user enough
+// time to switch browser profiles and complete sign-in while still bounding a
+// forgotten local listener.
+const DEFAULT_TIMEOUT_MS = 300_000;
 
 export interface AgenteraLoopbackCallback {
   authorizationCode: string;
@@ -59,7 +62,7 @@ const SUCCESS_PAGE = `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
 <title>AgentEra Studio</title><style>body{font-family:system-ui,sans-serif;margin:4rem;color:#111}main{max-width:34rem;margin:auto}</style></head>
-<body><main><h1>已返回 AgentEra Studio</h1><p>授权信息已安全接收，现在可以关闭此页面。</p></main></body></html>`;
+<body><main><h1>登录已完成</h1><p>正在返回 AgentEra Studio，现在可以关闭此页面。</p></main></body></html>`;
 
 export async function startAgenteraLoopbackListener(
   options: AgenteraLoopbackOptions,
@@ -211,7 +214,7 @@ export async function startAgenteraLoopbackListener(
   });
 
   timer = setTimeout(
-    () => fail("AgentEra browser authorization timed out."),
+    () => fail("AgentEra browser sign-in timed out."),
     timeoutMs,
   );
   timer.unref?.();
@@ -219,11 +222,11 @@ export async function startAgenteraLoopbackListener(
   return {
     redirectUri,
     callback,
-    cancel: () => fail("AgentEra browser authorization was cancelled."),
+    cancel: () => fail("AgentEra browser sign-in was cancelled."),
     close: () => {
       if (!settled) {
         settled = true;
-        rejectCallback(new Error("AgentEra browser authorization was closed."));
+        rejectCallback(new Error("AgentEra browser sign-in was closed."));
       }
       closeTransport();
     },

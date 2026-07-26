@@ -33,6 +33,7 @@ import {
   type TripRoute,
 } from "../trips";
 import type { AgentPlace, OfficeAgent, RenderAgent } from "../core/types";
+import { useI18n } from "../../../../components/useI18n";
 
 // Walking speed (canvas units / second) and arrival threshold.
 const WALK_UNITS_PER_SEC = 130;
@@ -144,6 +145,7 @@ export const AgentsLayer = memo(function AgentsLayer({
   /** null = show everyone (city view); otherwise only agents in that place. */
   visiblePlace?: AgentPlace | null;
 }): React.JSX.Element {
+  const { t } = useI18n();
   const agentsRef = useRef<RenderAgent[]>([]) as React.MutableRefObject<
     RenderAgent[]
   >;
@@ -561,7 +563,9 @@ export const AgentsLayer = memo(function AgentsLayer({
             onClick={onSelect}
             showSpeech={selectedId === agent.id}
             speechText={
-              selectedId === agent.id ? `Hi, I'm ${agent.name}` : null
+              selectedId === agent.id
+                ? t("office.agentGreeting", { name: agent.name })
+                : null
             }
             riggedModelUrl={
               agent.position === "ceo" ? RIGGED_EMPLOYEE_URL : RIGGED_MAN_URL

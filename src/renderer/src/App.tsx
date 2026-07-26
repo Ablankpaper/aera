@@ -13,6 +13,7 @@ import OrganizationInvitationGate from "./components/OrganizationInvitationGate"
 import { ProfileModalProvider } from "./components/profile/ProfileModalProvider";
 import { SettingsModalProvider } from "./components/settings/SettingsModalProvider";
 import { ThemeProvider } from "./components/ThemeProvider";
+import { useI18n } from "./components/useI18n";
 import AuthGate from "./screens/AuthGate/AuthGate";
 import Install from "./screens/Install/Install";
 import Layout from "./screens/Layout/Layout";
@@ -75,6 +76,7 @@ function warmRuntimeAfterOwnership(
 }
 
 function App(): React.JSX.Element {
+  const { t } = useI18n();
   const [screen, setScreen] = useState<Screen>("splash");
   const [connectionMode, setConnectionMode] = useState<
     "local" | "remote" | "ssh"
@@ -154,20 +156,31 @@ function App(): React.JSX.Element {
 
       setScreen("profile-claim");
       try {
-        const claim =
-          preflight.connectionMode === "local"
-            ? await window.agenteraRuntimeAccess.inspectActiveProfile()
-            : await window.agenteraRuntimeAccess.inspectCurrentConnection();
-        if (routeId !== routeIdRef.current) return;
-        if (claim.status === "owned" && claim.isCurrentOwner) {
-          warmRuntimeAfterOwnership(preflight);
-          setRuntimeAccessReady(true);
-          // Provider/model selection is an in-desktop choice. Normalize the
-          // retired `setup` target from older installs to the main desktop.
-          setScreen("main");
-          return;
+        if (preflight.connectionMode === "local") {
+          const resolution =
+            await window.agenteraRuntimeAccess.resolveAccountProfile();
+          if (routeId !== routeIdRef.current) return;
+          if (resolution.status === "bound") {
+            warmRuntimeAfterOwnership(preflight);
+            setRuntimeAccessReady(true);
+            setScreen("main");
+            return;
+          }
+          setOwnershipClaim(resolution);
+        } else {
+          const claim =
+            await window.agenteraRuntimeAccess.inspectCurrentConnection();
+          if (routeId !== routeIdRef.current) return;
+          if (claim.status === "owned" && claim.isCurrentOwner) {
+            warmRuntimeAfterOwnership(preflight);
+            setRuntimeAccessReady(true);
+            // Provider/model selection is an in-desktop choice. Normalize the
+            // retired `setup` target from older installs to the main desktop.
+            setScreen("main");
+            return;
+          }
+          setOwnershipClaim(claim);
         }
-        setOwnershipClaim(claim);
       } catch {
         if (routeId !== routeIdRef.current) return;
         setOwnershipInspectionError(true);
@@ -181,7 +194,7 @@ function App(): React.JSX.Element {
     ++routeIdRef.current;
     preflightRef.current = null;
     const startedAt = Date.now();
-    setSplashStatus("Checking connection…");
+    setSplashStatus(t("common.splashCheckingConnection"));
 
     let preflight: AgenteraStartupPreflightPublicResult = {
       connectionMode: "local",
@@ -199,10 +212,10 @@ function App(): React.JSX.Element {
       setConnectionMode(preflight.connectionMode);
       setSplashStatus(
         preflight.connectionMode === "local"
-          ? "Checking local install…"
+          ? t("common.splashCheckingLocal")
           : preflight.connectionMode === "ssh"
-            ? "Checking SSH connection…"
-            : "Checking remote connection…",
+            ? t("common.splashCheckingSsh")
+            : t("common.splashCheckingRemote"),
       );
     } catch {
       // A failed readiness probe must not bypass product authentication. The
@@ -227,7 +240,7 @@ function App(): React.JSX.Element {
     preflightRef.current = preflight;
     setVerifyWarning(preflight.verifyWarning);
     await routeAfterAuthentication(nextAuthState, preflight);
-  }, [routeAfterAuthentication]);
+  }, [routeAfterAuthentication, t]);
 
   useEffect(() => {
     return window.agenteraAuth.onStateChanged((state) => {
@@ -262,6 +275,14 @@ function App(): React.JSX.Element {
   async function handleOpenBrowser(): Promise<void> {
     const forceAccountSelection = forceAccountSelectionRef.current;
     await window.agenteraAuth.startLogin(
+      forceAccountSelection ? { forceAccountSelection: true } : undefined,
+    );
+    forceAccountSelectionRef.current = false;
+  }
+
+  async function handleRestartBrowserLogin(): Promise<void> {
+    const forceAccountSelection = forceAccountSelectionRef.current;
+    await window.agenteraAuth.restartLogin(
       forceAccountSelection ? { forceAccountSelection: true } : undefined,
     );
     forceAccountSelectionRef.current = false;
@@ -368,7 +389,7 @@ function App(): React.JSX.Element {
 
   function handleSwitchToLocal(): void {
     pendingSwitchToLocalRef.current = true;
-    setSplashStatus("Local mode will open after sign-in…");
+    setSplashStatus(t("common.splashLocalAfterSignIn"));
     const preflight = preflightRef.current;
     if (preflight && hasProductAccess(authStateRef.current)) {
       void routeAfterAuthentication(authStateRef.current, preflight);
@@ -402,7 +423,8 @@ function App(): React.JSX.Element {
           <AuthGate
             state={authState}
             onOpenBrowser={handleOpenBrowser}
-            onCancel={() => window.agenteraAuth.cancelLogin()}
+            onCopyLoginLink={() => window.agenteraAuth.copyLoginLink()}
+            onRestartLogin={handleRestartBrowserLogin}
             onRetry={handleRetryAuth}
           />
         );

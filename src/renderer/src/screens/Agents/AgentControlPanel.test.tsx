@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -17,6 +18,7 @@ import type {
   ExperienceCandidateDetail,
   ExperienceCandidateImportPreview,
   ExperienceCandidateSummary,
+  OfficialAgentDetail,
   OfficialAgentSummary,
   OfficialManagedUpdate,
 } from "../../../../shared/agentera-agent-control";
@@ -144,6 +146,17 @@ function officialInstallation(): AgenteraAgentInstallationSummary {
   };
 }
 
+function officialDetail(): OfficialAgentDetail {
+  return {
+    agent: officialAgent(),
+    capabilitySummary: "Official capability summary",
+    assetCounts: { skill: 2, sop: 1, knowledge: 1 },
+    allowedProviders: ["openai"],
+    allowedModels: ["openai/gpt-5.6"],
+    allowedToolCount: 3,
+  };
+}
+
 function approvedCandidate(): ExperienceCandidateSummary {
   return {
     localCandidateId: "88888888-8888-4888-8888-888888888888",
@@ -223,6 +236,7 @@ function installAPI(
     confirmOrganizationWithdrawal: vi.fn(),
     listDefinitions: vi.fn(async () => success([definition()])),
     listOfficialAgents: vi.fn(async () => success([])),
+    getOfficialAgentDetail: vi.fn(async () => success(officialDetail())),
     prepareOfficialInstall: vi.fn(),
     confirmOfficialInstall: vi.fn(),
     refreshOfficialUpdates: vi.fn(async () => success([])),
@@ -294,6 +308,93 @@ describe("AgentControlPanel", () => {
     ).toBeNull();
   });
 
+  it("shows a true My Agents empty state while retaining legacy Profiles in advanced management", async () => {
+    installAPI({
+      listDefinitions: vi.fn(async () => success([])),
+    });
+    const onEditProfile = vi.fn();
+    const onChatWithProfile = vi.fn();
+    render(
+      <AgentControlPanel
+        profiles={[{ id: "default", name: "Default" }]}
+        advancedOpenByDefault={false}
+        onEditProfile={onEditProfile}
+        onChatWithProfile={onChatWithProfile}
+      />,
+    );
+
+    expect(await screen.findByText("agents.hub.noPersonalAgents")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "agents.hub.createAgent" }),
+    ).toBeEnabled();
+    expect(screen.queryByTestId("personal-agent-grid")).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /agents.hub.advancedTitle/ }),
+    );
+    const profileList = await screen.findByTestId("local-runtime-profiles");
+    expect(within(profileList).getByText("Default")).toBeTruthy();
+    fireEvent.click(
+      within(profileList).getByRole("button", {
+        name: "agents.hub.editAppearance",
+      }),
+    );
+    fireEvent.click(
+      within(profileList).getByRole("button", {
+        name: "agents.hub.useAgent",
+      }),
+    );
+    expect(onEditProfile).toHaveBeenCalledWith("default");
+    expect(onChatWithProfile).toHaveBeenCalledWith("default");
+  });
+
+  it("distinguishes an empty filter from a truly empty My Agents catalog", async () => {
+    installAPI({
+      listDrafts: vi.fn(async () => success([draft() as AgentDraft])),
+      listDefinitions: vi.fn(async () => success([])),
+    });
+    render(<AgentControlPanel profiles={[]} advancedOpenByDefault={false} />);
+
+    expect(
+      within(await screen.findByTestId("personal-agent-grid")).getByText(
+        "Workspace Research Agent",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.hub.mineFilter.ready" }),
+    );
+
+    expect(screen.getByText("agents.hub.noFilteredResults")).toBeTruthy();
+    expect(screen.getByText("agents.hub.noFilteredResultsHint")).toBeTruthy();
+    expect(screen.queryByText("agents.hub.noPersonalAgents")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "agents.hub.createAgent" }),
+    ).toBeNull();
+  });
+
+  it("gives a search-specific empty result without suggesting the catalog is empty", async () => {
+    installAPI({
+      listDrafts: vi.fn(async () => success([draft() as AgentDraft])),
+      listDefinitions: vi.fn(async () => success([])),
+    });
+    render(<AgentControlPanel profiles={[]} advancedOpenByDefault={false} />);
+
+    await screen.findByTestId("personal-agent-grid");
+    fireEvent.change(
+      screen.getByRole("textbox", {
+        name: "agents.hub.searchPlaceholder",
+      }),
+      { target: { value: "missing" } },
+    );
+
+    expect(screen.getByText("agents.hub.noSearchResults")).toBeTruthy();
+    expect(screen.getByText("agents.hub.noSearchResultsHint")).toBeTruthy();
+    expect(screen.queryByText("agents.hub.noPersonalAgentsHint")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "agents.hub.createAgent" }),
+    ).toBeNull();
+  });
+
   it("loads and applies a managed official update only through the official API", async () => {
     const update: OfficialManagedUpdate = {
       installationId: INSTALLATION_ID,
@@ -308,9 +409,14 @@ describe("AgentControlPanel", () => {
       applyOfficialUpdate: vi.fn(async () => success(officialInstallation())),
     });
 
-    render(<AgentControlPanel profiles={[]} />);
+    render(<AgentControlPanel profiles={[]} initialTab="official" />);
 
-    expect(await screen.findByText("Official Research Agent")).toBeTruthy();
+    fireEvent.click(
+      (await screen.findByText("Official Research Agent")).closest("button")!,
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "Official Research Agent" }),
+    ).toBeTruthy();
     fireEvent.click(
       screen.getByRole("button", {
         name: "agents.control.official.applyUpdate",
@@ -336,11 +442,24 @@ describe("AgentControlPanel", () => {
       listInstallations: vi.fn(async () => success([officialInstallation()])),
     });
 
-    render(<AgentControlPanel profiles={[]} />);
+    render(<AgentControlPanel profiles={[]} initialTab="official" />);
 
+    const offlineCard = (
+      await screen.findByText("agents.control.official.installedSource")
+    ).closest("button");
+    expect(offlineCard).toBeTruthy();
+    expect(screen.getByText("agents.hub.installed")).toBeTruthy();
+    fireEvent.click(offlineCard!);
     expect(
-      await screen.findByText("agents.control.official.offlineLocalVersion"),
+      await screen.findByRole("dialog", {
+        name: "agents.control.official.installedSource",
+      }),
     ).toBeTruthy();
+    expect(
+      screen.getByRole("button", {
+        name: "agents.hub.localProfileUnavailable",
+      }),
+    ).toBeDisabled();
     expect(api.listOfficialAgents).not.toHaveBeenCalled();
     expect(api.refreshOfficialUpdates).not.toHaveBeenCalled();
     expect(
@@ -400,15 +519,19 @@ describe("AgentControlPanel", () => {
     );
 
     expect(
-      await screen.findByText("agents.control.workspaceMemberSubtitle"),
+      await screen.findByText("agents.hub.workspaceSubtitle"),
     ).toBeTruthy();
     expect(screen.queryByText("agents.control.localDrafts")).toBeNull();
     expect(
       screen.queryByRole("button", { name: "agents.control.newAgent" }),
     ).toBeNull();
     expect(api.listDrafts).not.toHaveBeenCalled();
+    const personalGrid = await screen.findByTestId("personal-agent-grid");
+    fireEvent.click(
+      within(personalGrid).getByText("Research Agent").closest("button")!,
+    );
     expect(
-      screen.getByRole("button", { name: "agents.control.install" }),
+      screen.getByRole("button", { name: "agents.hub.installAgent" }),
     ).toBeEnabled();
   });
 

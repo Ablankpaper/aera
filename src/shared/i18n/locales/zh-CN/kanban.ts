@@ -3,10 +3,16 @@ export default {
   subtitle: "持久化多代理任务面板，代理可自行领取并完成任务。",
 
   refresh: "刷新",
+  refreshTooltip: "从智能体重新加载看板和任务",
   dispatch: "派发",
   dispatchTooltip: "执行一轮派发 — 将就绪任务升级并启动工作代理",
   newTask: "新建任务",
+  newTaskTooltip: "在当前看板中新建任务",
   newBoard: "新建看板",
+  newBoardTooltip: "新建一个看板",
+  showArchived: "显示已归档",
+  hideArchived: "隐藏已归档",
+  archivedTooltip: "显示或隐藏归档列",
 
   remoteUnsupportedTitle: "看板需要本地安装 AgentEra 或 SSH 隧道模式。",
   remoteUnsupportedHint:
@@ -15,10 +21,13 @@ export default {
   status: {
     triage: "分类",
     todo: "待办",
+    scheduled: "已计划",
     ready: "就绪",
     running: "执行中",
     blocked: "已阻塞",
+    review: "审核",
     done: "完成",
+    archived: "已归档",
   },
 
   cardSpecify: "细化（展开规格 → 待办）",
@@ -81,4 +90,18 @@ export default {
   errArchive: "归档任务失败",
   errReclaim: "回收失败",
   errDispatch: "派发失败",
+
+  hqBoardTooltip: "Claw3D 总部看板（只读镜像）",
+  hqBoardName: "总部（Claw3D）",
+  hqMirrorDescription:
+    "这里是 Claw3D 总部看板的只读镜像。在此处修改不会同步，请前往工作区页面管理总部任务。",
+  skillCount_one: "{{count}} 个技能",
+  skillCount_other: "{{count}} 个技能",
+  readOnly: "只读",
+  ageSeconds: "{{count}} 秒",
+  ageMinutes: "{{count}} 分钟",
+  ageHours: "{{count}} 小时",
+  ageDays: "{{count}} 天",
+  dismissError: "忽略错误",
+  closeTaskDetails: "关闭任务详情",
 } as const;

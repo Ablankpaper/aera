@@ -21,6 +21,7 @@ import WebSocket from "ws";
 import { HERMES_HOME, getEnhancedPath } from "./installer";
 import { getRuntimeInvocation } from "./agentera-runtime-distribution/invocation";
 import {
+  ensureLocalApiServerKey,
   getApiServerKey,
   getConnectionConfig,
   getConfigValue,
@@ -77,8 +78,10 @@ import {
 } from "./tui-gateway-stream";
 import {
   hostDerivedEnvKeyForUrl,
+  runtimeHostDerivedEnvKeyForUrl,
   shouldPruneOpenRouterApiKey,
 } from "./host-derived-env";
+import { hydrateProfileRuntimeEnv } from "./profile-runtime-env";
 
 /**
  * Resolve which profile a gateway call targets. An explicit profile always
@@ -882,15 +885,7 @@ export function tuiGatewayEnv(profile?: string): Record<string, string> {
       : invocation.workingDirectory;
   }
   if (resolved) env.HERMES_PROFILE = resolved;
-  for (const [key, value] of Object.entries(readEnv(profile))) {
-    if (value) env[key] = value;
-  }
-  // Overlay provider-enumerated secrets BENEATH the values above (fill only
-  // keys still absent), so a `command`-provider user gets the same resolved
-  // key set here as on the CLI fallback path: process.env > .env > provider.
-  for (const [key, value] of Object.entries(providerListSafe(profile))) {
-    if (value && !env[key]) env[key] = value;
-  }
+  hydrateProfileRuntimeEnv(env, resolved);
   return env;
 }
 
@@ -948,11 +943,22 @@ const capabilitiesCache = new Map<
 function isApiServerReady(profile?: string): Promise<boolean> {
   return new Promise((resolve) => {
     try {
-      const url = `${getApiUrl(profile)}/health`;
+      const resolved = resolveProfile(profile);
+      const local = !isRemoteMode();
+      // `/health` is intentionally public and proves only that a listener is
+      // alive. Local readiness must exercise a Bearer-protected route so a
+      // mismatched desktop/gateway key is detected before the first chat.
+      const url = `${getApiUrl(resolved)}${
+        local ? "/v1/capabilities" : "/health"
+      }`;
       const mod = url.startsWith("https") ? https : http;
       const req = mod.request(
         url,
-        { method: "GET", timeout: 1500, headers: getRemoteAuthHeader() },
+        {
+          method: "GET",
+          timeout: 1500,
+          headers: local ? getApiAuthHeaders(resolved) : getRemoteAuthHeader(),
+        },
         (res) => {
           resolve(res.statusCode === 200);
           res.resume();
@@ -2506,6 +2512,7 @@ function sendMessageViaCli(
     // Writing both env-var forms is the additive compat strategy — each
     // engine reads the form it knows; the unused one is dead weight.
     const hostDerivedEnvKey = hostDerivedEnvKeyForUrl(mc.baseUrl);
+    const runtimeHostDerivedEnvKey = runtimeHostDerivedEnvKeyForUrl(mc.baseUrl);
 
     // Resolve the right API key: host-derived first, then custom provider
     // entry from models.json, then CUSTOM_API_KEY / OPENAI_API_KEY fallback.
@@ -2555,14 +2562,15 @@ function sendMessageViaCli(
     // when we have a real key — never propagate "no-key-required" to
     // a vendor-scoped slot, and never overwrite OPENAI_API_KEY /
     // ANTHROPIC_API_KEY through this path (they're handled above).
+    const forwardedHostEnvKey = runtimeHostDerivedEnvKey || hostDerivedEnvKey;
     if (
-      hostDerivedEnvKey &&
-      hostDerivedEnvKey !== "OPENAI_API_KEY" &&
-      hostDerivedEnvKey !== "ANTHROPIC_API_KEY" &&
+      forwardedHostEnvKey &&
+      forwardedHostEnvKey !== "OPENAI_API_KEY" &&
+      forwardedHostEnvKey !== "ANTHROPIC_API_KEY" &&
       resolvedKey &&
       resolvedKey !== "no-key-required"
     ) {
-      env[hostDerivedEnvKey] = resolvedKey;
+      env[forwardedHostEnvKey] = resolvedKey;
     }
 
     if (shouldPruneOpenRouterApiKey(hostDerivedEnvKey)) {
@@ -3117,10 +3125,12 @@ function gatewayLogPath(profile?: string): string {
 }
 
 export function buildGatewayEnv(profile?: string): Record<string, string> {
+  const resolved = resolveProfile(profile);
   // Make sure this profile's config.yaml enables the api_server and binds the
   // profile's own port before we spawn.
-  ensureApiServerConfig(profile);
-  const port = getProfilePort(profile);
+  ensureApiServerConfig(resolved);
+  const ensuredApiServerKey = ensureLocalApiServerKey(resolved);
+  const port = getProfilePort(resolved);
 
   const invocation = getRuntimeInvocation();
   const baseEnv: Record<string, string> = {
@@ -3138,23 +3148,7 @@ export function buildGatewayEnv(profile?: string): Record<string, string> {
     invocation ? invocation.environment(baseEnv) : baseEnv
   ) as Record<string, string>;
 
-  // Inject ALL profile API keys so the gateway can authenticate with any provider.
-  const profileEnv = readEnv(profile);
-  for (const [k, value] of Object.entries(profileEnv)) {
-    if (value) {
-      gatewayEnv[k] = value;
-    }
-  }
-
-  // Overlay provider-enumerated secrets BENEATH the values above (fill only
-  // keys still absent), so a `command`-provider user gets the same resolved
-  // key set on the gateway-spawn path as on the CLI fallback path:
-  // process.env > .env > provider.
-  for (const [k, value] of Object.entries(providerListSafe(profile))) {
-    if (value && !gatewayEnv[k]) {
-      gatewayEnv[k] = value;
-    }
-  }
+  hydrateProfileRuntimeEnv(gatewayEnv, resolved);
 
   // Inject the resolved API_SERVER_KEY into the gateway's env.
   //
@@ -3184,10 +3178,7 @@ export function buildGatewayEnv(profile?: string): Record<string, string> {
   // gateway's `os.getenv("API_SERVER_KEY")` fallback see whatever the
   // desktop sees, regardless of source. This is the canonical fix until
   // upstream learns to read `api_server.token` directly.
-  const resolvedApiServerKey = getApiServerKey(profile);
-  if (resolvedApiServerKey) {
-    gatewayEnv.API_SERVER_KEY = resolvedApiServerKey;
-  }
+  gatewayEnv.API_SERVER_KEY = ensuredApiServerKey.key;
 
   return gatewayEnv;
 }
@@ -3235,7 +3226,15 @@ export function startGatewayDetailed(profile?: string): GatewayStartResult {
   }
 
   const key = profileKey(profile);
-  const gatewayEnv = buildGatewayEnv(profile);
+  let gatewayEnv: Record<string, string>;
+  try {
+    gatewayEnv = buildGatewayEnv(profile);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const error = `Cannot start the local gateway: ${message}`;
+    console.error(`[gateway:${key}] ${error}`);
+    return { success: false, running: false, error };
+  }
 
   // Route stderr to a log file so startup errors are visible for debugging.
   // Per-profile log dir so a named profile's failures (e.g. a duplicate bot

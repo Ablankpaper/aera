@@ -1,18 +1,5 @@
-import {
-  ChevronLeft,
-  ChevronRight,
-  Folder,
-  Loader,
-  X,
-} from "lucide-react";
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { ChevronLeft, ChevronRight, Folder, Loader, X } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../components/useI18n";
 
 interface FileEntry {
@@ -74,23 +61,26 @@ export const RemoteFolderPicker = memo(function RemoteFolderPicker({
     [entries],
   );
 
-  const loadPath = useCallback(async (path: string) => {
-    const nextPath = path.trim() || "/";
-    setCurrentPath(nextPath);
-    setPathInput(nextPath);
-    setActiveIndex(0);
-    setLoading(true);
-    setError(null);
+  const loadPath = useCallback(
+    async (path: string) => {
+      const nextPath = path.trim() || "/";
+      setCurrentPath(nextPath);
+      setPathInput(nextPath);
+      setActiveIndex(0);
+      setLoading(true);
+      setError(null);
 
-    const result = await window.hermesAPI.readDirectory(nextPath);
-    if (result === null) {
-      setEntries([]);
-      setError(t("chat.folderPicker.unavailable"));
-    } else {
-      setEntries(result);
-    }
-    setLoading(false);
-  }, [t]);
+      const result = await window.hermesAPI.readDirectory(nextPath);
+      if (result === null) {
+        setEntries([]);
+        setError(t("chat.folderPicker.unavailable"));
+      } else {
+        setEntries(result);
+      }
+      setLoading(false);
+    },
+    [t],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -194,7 +184,10 @@ export const RemoteFolderPicker = memo(function RemoteFolderPicker({
           </button>
         </form>
 
-        <div className="folder-picker-breadcrumbs" aria-label="Breadcrumb">
+        <div
+          className="folder-picker-breadcrumbs"
+          aria-label={t("chat.folderPicker.breadcrumb")}
+        >
           {pathParts(currentPath).map((part, index) => (
             <button
               className="folder-picker-crumb"

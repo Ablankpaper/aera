@@ -262,7 +262,10 @@ function ProviderModelsManager({
                   className="provider-model-chip"
                   title={
                     m.contextLength
-                      ? `${m.model} · ${m.contextLength.toLocaleString()} ctx`
+                      ? t("providers.center.contextLengthValue", {
+                          model: m.model,
+                          count: m.contextLength.toLocaleString(),
+                        })
                       : m.model
                   }
                 >
@@ -561,7 +564,7 @@ export function ProviderKeysSection({
               <span className="provider-config-card-sub">
                 {visibleKeys.has(field.key)
                   ? env[field.key]
-                  : "•••••••• key set"}
+                  : `•••••••• ${t("providers.keySet")}`}
               </span>
             </span>
             <Pencil

@@ -12,23 +12,23 @@ import {
 import { useI18n } from "../../components/useI18n";
 
 const DELIVER_TARGETS = [
-  { value: "local", label: "Local" },
-  { value: "origin", label: "Origin" },
-  { value: "telegram", label: "Telegram" },
-  { value: "discord", label: "Discord" },
-  { value: "slack", label: "Slack" },
-  { value: "whatsapp", label: "WhatsApp" },
-  { value: "signal", label: "Signal" },
-  { value: "matrix", label: "Matrix" },
-  { value: "mattermost", label: "Mattermost" },
-  { value: "email", label: "Email" },
-  { value: "webhook", label: "Webhook" },
-  { value: "sms", label: "SMS" },
-  { value: "homeassistant", label: "Home Assistant" },
-  { value: "dingtalk", label: "DingTalk" },
-  { value: "feishu", label: "Feishu" },
-  { value: "wecom", label: "WeCom" },
-];
+  "local",
+  "origin",
+  "telegram",
+  "discord",
+  "slack",
+  "whatsapp",
+  "signal",
+  "matrix",
+  "mattermost",
+  "email",
+  "webhook",
+  "sms",
+  "homeassistant",
+  "dingtalk",
+  "feishu",
+  "wecom",
+] as const;
 
 interface CronJob {
   id: string;
@@ -85,7 +85,7 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
     } finally {
       setLoading(false);
     }
-  }, [profile]);
+  }, [profile, t]);
 
   useEffect(() => {
     loadJobs();
@@ -164,10 +164,10 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
         closeCreateModal();
         await loadJobs();
       } else {
-        setError(result.error || "Failed to create job");
+        setError(result.error || t("schedules.createFailed"));
       }
     } catch {
-      setError("Failed to create job");
+      setError(t("schedules.createFailed"));
     } finally {
       setActionInProgress(null);
     }
@@ -182,10 +182,10 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
       if (result.success) {
         await loadJobs();
       } else {
-        setError(result.error || "Failed to remove job");
+        setError(result.error || t("schedules.removeFailed"));
       }
     } catch {
-      setError("Failed to remove job");
+      setError(t("schedules.removeFailed"));
     } finally {
       setActionInProgress(null);
     }
@@ -202,10 +202,10 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
       if (result.success) {
         await loadJobs();
       } else {
-        setError(result.error || "Failed to update job");
+        setError(result.error || t("schedules.updateFailed"));
       }
     } catch {
-      setError("Failed to update job");
+      setError(t("schedules.updateFailed"));
     } finally {
       setActionInProgress(null);
     }
@@ -219,10 +219,10 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
       if (result.success) {
         await loadJobs();
       } else {
-        setError(result.error || "Failed to trigger job");
+        setError(result.error || t("schedules.triggerFailed"));
       }
     } catch {
-      setError("Failed to trigger job");
+      setError(t("schedules.triggerFailed"));
     } finally {
       setActionInProgress(null);
     }
@@ -262,7 +262,11 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
           <div className="schedules-modal" onClick={(e) => e.stopPropagation()}>
             <div className="schedules-modal-header">
               <h3>{t("schedules.newTask")}</h3>
-              <button className="btn-ghost" onClick={closeCreateModal}>
+              <button
+                className="btn-ghost"
+                onClick={closeCreateModal}
+                aria-label={t("schedules.closeCreate")}
+              >
                 <X size={18} />
               </button>
             </div>
@@ -436,9 +440,9 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
                   value={newDeliver}
                   onChange={(e) => setNewDeliver(e.target.value)}
                 >
-                  {DELIVER_TARGETS.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
+                  {DELIVER_TARGETS.map((target) => (
+                    <option key={target} value={target}>
+                      {t(`schedules.deliverTargets.${target}`)}
                     </option>
                   ))}
                 </select>
@@ -480,6 +484,7 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
               <button
                 className="btn-ghost"
                 onClick={() => setConfirmDelete(null)}
+                aria-label={t("schedules.closeDelete")}
               >
                 <X size={18} />
               </button>
@@ -533,7 +538,11 @@ function Schedules({ profile }: SchedulesProps): React.JSX.Element {
       {error && (
         <div className="skills-error">
           {error}
-          <button className="btn-ghost" onClick={() => setError("")}>
+          <button
+            className="btn-ghost"
+            onClick={() => setError("")}
+            aria-label={t("schedules.dismissError")}
+          >
             <X size={14} />
           </button>
         </div>

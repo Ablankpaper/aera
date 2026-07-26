@@ -93,7 +93,9 @@ export function MemoryEntries({
             autoFocus
           />
           <div className="memory-entry-form-actions">
-            <span className="memory-entry-chars">{newEntry.length} chars</span>
+            <span className="memory-entry-chars">
+              {t("memory.chars", { count: newEntry.length })}
+            </span>
             <button
               className="btn btn-secondary btn-sm"
               onClick={() => {
@@ -101,14 +103,14 @@ export function MemoryEntries({
                 setNewEntry("");
               }}
             >
-              Cancel
+              {t("memory.cancel")}
             </button>
             <button
               className="btn btn-primary btn-sm"
               onClick={handleAddEntry}
               disabled={!newEntry.trim()}
             >
-              Save
+              {t("memory.save")}
             </button>
           </div>
         </div>

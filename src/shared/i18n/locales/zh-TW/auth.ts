@@ -74,7 +74,7 @@ const auth = {
     signOut: "登出",
     actionFailed: "暫時無法完成此帳戶操作。",
     unavailable: "AgentEra 帳戶資訊暫時不可用。",
-    userId: "使用者",
+    userId: "帳戶 ID",
     deviceId: "裝置",
     offlineUntil: "簽章離線授權有效至 {{date}}。",
     localDataWarning:

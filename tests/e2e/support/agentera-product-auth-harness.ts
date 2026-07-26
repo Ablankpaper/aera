@@ -526,9 +526,8 @@ export async function authenticateNewProductAccount(
   const page = harness.browserPage;
   await page.goto(authorizationURL);
   await page.waitForURL(/\/authorize\?request_id=/);
-  const approvalURL = page.url();
   await page.locator('a[href^="/login?next="]').click();
-  await page.locator('a[href="/register"]').click();
+  await page.locator('a[href^="/register?next="]').click();
   await page.locator('input[name="kind"]').nth(1).check();
   await page.locator('input[type="tel"]').fill(accountPhone);
   await page.locator("button.secondary-button").first().click();
@@ -543,16 +542,6 @@ export async function authenticateNewProductAccount(
   await passwords.nth(1).fill(password);
   await page.locator('input[type="checkbox"]').check();
   await page.locator('button[type="submit"].primary-button').click();
-  await expect(page.locator(".completion-card")).toBeVisible();
-  await page.locator("button.primary-button").click();
-  await page.locator('input[autocomplete="username"]').fill(accountPhone);
-  await page.locator('input[autocomplete="current-password"]').fill(password);
-  await page.locator('button[type="submit"].primary-button').click();
-  await page.waitForURL(/\/account$/);
-  await page.goto(approvalURL);
-  const approve = page.locator("button.primary-button");
-  await expect(approve).toBeVisible();
-  await approve.click({ noWaitAfter: true });
 
   await expect
     .poll(async () =>

@@ -131,6 +131,34 @@ describe("setModelConfig — base_url substitution", () => {
     expect(content).not.toMatch(/^\s+base_url:/m);
   });
 
+  it("clears a stale custom base_url when the active model is reset", async () => {
+    const configFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(
+      configFile,
+      [
+        "model:",
+        '  provider: "custom"',
+        '  default: "old-model"',
+        '  base_url: "https://api.deleted.example/v1"',
+        '  api_key: "old-key"',
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+    const { setModelConfig, getModelConfig } =
+      await importConfigWithHome(TEST_DIR);
+
+    setModelConfig("auto", "", "");
+
+    const mc = getModelConfig();
+    expect(mc.provider).toBe("auto");
+    expect(mc.model).toBe("");
+    expect(mc.baseUrl).toBe("");
+    const content = readFileSync(configFile, "utf-8");
+    expect(content).not.toMatch(/^\s+base_url:/m);
+    expect(content).not.toMatch(/^\s+api_key:/m);
+  });
+
   it("covers every built-in remote provider — the full coverage check", async () => {
     // If this test starts failing because a built-in remote provider
     // got added to constants.ts:LOCAL_PRESETS without a corresponding

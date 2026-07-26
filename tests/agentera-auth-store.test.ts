@@ -1,11 +1,13 @@
 // @vitest-environment node
 
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -138,6 +140,23 @@ describe("AgentEra app-level authentication store", () => {
     expect(store.getProductSession()).toEqual(session);
     expect(store.getPendingRevocation()).toEqual(pendingRevocation);
   });
+
+  it.runIf(process.platform !== "win32")(
+    "writes the authentication envelope with owner-only permissions",
+    () => {
+      const store = createStore();
+      store.saveInstallation({
+        installationId: "installation-01",
+        devicePublicKey: "device-public-key",
+        devicePrivateKey: "device-private-key-secret",
+      });
+      expect(statSync(store.filePath).mode & 0o777).toBe(0o600);
+
+      chmodSync(store.filePath, 0o644);
+      store.replaceProductSession(session, null);
+      expect(statSync(store.filePath).mode & 0o777).toBe(0o600);
+    },
+  );
 
   it("logout clears only product session material and preserves installation and Profile data", () => {
     const profileSentinel = join(hermesHome, "MEMORY.md");

@@ -1,3 +1,5 @@
+import { useI18n } from "../../components/useI18n";
+
 interface CapacityBarProps {
   used: number;
   limit: number;
@@ -9,6 +11,7 @@ export function CapacityBar({
   limit,
   label,
 }: CapacityBarProps): React.JSX.Element {
+  const { t } = useI18n();
   const pct = Math.min(100, Math.round((used / limit) * 100));
   const color =
     pct > 90 ? "var(--error)" : pct > 70 ? "var(--warning)" : "var(--success)";
@@ -17,7 +20,11 @@ export function CapacityBar({
       <div className="memory-capacity-header">
         {label && <span className="memory-capacity-label">{label}</span>}
         <span className="memory-capacity-value">
-          {used.toLocaleString()} / {limit.toLocaleString()} chars ({pct}%)
+          {t("memory.capacity", {
+            used: used.toLocaleString(),
+            limit: limit.toLocaleString(),
+            percent: pct,
+          })}
         </span>
       </div>
       <div className="memory-capacity-track">

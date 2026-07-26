@@ -82,7 +82,7 @@ const auth = {
     signOut: "Keluar",
     actionFailed: "Tindakan akun ini tidak dapat diselesaikan.",
     unavailable: "Informasi akun AgentEra tidak tersedia.",
-    userId: "Pengguna",
+    userId: "ID akun",
     deviceId: "Perangkat",
     offlineUntil: "Akses offline bertanda tangan berlaku hingga {{date}}.",
     localDataWarning:

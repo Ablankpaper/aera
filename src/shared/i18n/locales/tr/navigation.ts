@@ -13,7 +13,7 @@ export default {
   agents: "Profiller",
   office: "Ofis",
   models: "Modeller",
-  providers: "Sağlayıcılar",
+  providers: "Modeller",
   skills: "Yetenekler",
   soul: "Persona",
   memory: "Bellek",

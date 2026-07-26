@@ -65,3 +65,33 @@ describe("models.json — contextLength override", () => {
     expect(after.contextLength).toBe(65536);
   });
 });
+
+describe("models.json — apiMode override", () => {
+  it("persists and replaces the transport mode on an existing attachment", async () => {
+    const { addModel, readModels } = await loadModels();
+    const first = addModel(
+      "Relay model",
+      "custom",
+      "relay-model",
+      "https://relay.example.com/v1",
+      undefined,
+      "Relay",
+      "anthropic_messages",
+    );
+    expect(first.apiMode).toBe("anthropic_messages");
+
+    const updated = addModel(
+      "Relay model",
+      "custom",
+      "relay-model",
+      "https://relay.example.com/v1",
+      undefined,
+      "Relay",
+      "chat_completions",
+    );
+    expect(updated.id).toBe(first.id);
+    expect(readModels().find((model) => model.id === first.id)?.apiMode).toBe(
+      "chat_completions",
+    );
+  });
+});

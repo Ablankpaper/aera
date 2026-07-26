@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgenteraAuthPublicState } from "../../../../shared/agentera-auth";
-import HermesLogo from "../../components/common/HermesLogo";
+import Aila3DModel from "./Aila3DModel";
 import { useI18n } from "../../components/useI18n";
 
 interface AuthGateProps {
   state: AgenteraAuthPublicState;
   onOpenBrowser: () => Promise<void>;
-  onCancel: () => Promise<void>;
+  onCopyLoginLink: () => Promise<void>;
+  onRestartLogin: () => Promise<void>;
   onRetry: () => Promise<void>;
 }
 
@@ -27,56 +28,91 @@ function stateMessageKey(state: AgenteraAuthPublicState): string {
 function AuthGate({
   state,
   onOpenBrowser,
-  onCancel,
+  onCopyLoginLink,
+  onRestartLogin,
   onRetry,
 }: AuthGateProps): React.JSX.Element {
   const { t } = useI18n();
   const [pending, setPending] = useState<PendingAction>(null);
+  const [copying, setCopying] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [errorKey, setErrorKey] = useState<string | null>(null);
-  const cancelRequested = useRef(false);
+  const loginRequestRef = useRef(0);
   const openBrowserRef = useRef<HTMLButtonElement>(null);
-  const cancelRef = useRef<HTMLButtonElement>(null);
   const retryRef = useRef<HTMLButtonElement>(null);
   const secureStorageUnavailable =
     state.status === "blocked" && state.reason === "secure_storage_unavailable";
+  const waitingForBrowser = pending === "browser";
+  const showStateMessage =
+    secureStorageUnavailable ||
+    state.status === "blocked" ||
+    (state.status === "unauthenticated" &&
+      state.reason !== undefined &&
+      state.reason !== "sign_in_required");
 
   useEffect(() => {
-    if (pending === "browser") {
-      cancelRef.current?.focus();
+    if (waitingForBrowser) return;
+    if (secureStorageUnavailable) {
+      retryRef.current?.focus({ preventScroll: true });
       return;
     }
-    if (secureStorageUnavailable || errorKey) {
-      retryRef.current?.focus();
-      return;
+    if (state.status !== "checking") {
+      openBrowserRef.current?.focus({ preventScroll: true });
     }
-    if (state.status !== "checking") openBrowserRef.current?.focus();
-  }, [errorKey, pending, secureStorageUnavailable, state.status]);
+  }, [errorKey, secureStorageUnavailable, state.status, waitingForBrowser]);
 
   async function handleOpenBrowser(): Promise<void> {
     if (pending) return;
-    cancelRequested.current = false;
+    const requestId = ++loginRequestRef.current;
     setErrorKey(null);
+    setCopied(false);
     setPending("browser");
     try {
       await onOpenBrowser();
     } catch {
-      setErrorKey(
-        cancelRequested.current
-          ? "auth.gate.cancelled"
-          : "auth.gate.loginFailed",
-      );
+      if (requestId !== loginRequestRef.current) return;
+      setErrorKey("auth.gate.loginFailed");
     } finally {
-      setPending(null);
+      if (requestId === loginRequestRef.current) setPending(null);
     }
   }
 
-  async function handleCancel(): Promise<void> {
-    cancelRequested.current = true;
-    await onCancel().catch(() => undefined);
+  async function handleCopyLoginLink(): Promise<void> {
+    if (!waitingForBrowser || copying) return;
+    setCopying(true);
+    setErrorKey(null);
+    try {
+      await onCopyLoginLink();
+      setCopied(true);
+    } catch {
+      setCopied(false);
+      setErrorKey("auth.gate.copyFailed");
+    } finally {
+      setCopying(false);
+    }
+  }
+
+  async function handleRestartLogin(): Promise<void> {
+    if (!waitingForBrowser) return;
+    // Invalidate the original startLogin() handler before the main process
+    // cancels it. Its expected rejection must not clear this fresh waiting
+    // state or show a stale cancellation error.
+    const requestId = ++loginRequestRef.current;
+    setErrorKey(null);
+    setCopied(false);
+    try {
+      await onRestartLogin();
+    } catch {
+      if (requestId !== loginRequestRef.current) return;
+      setErrorKey("auth.gate.restartFailed");
+    } finally {
+      if (requestId === loginRequestRef.current) setPending(null);
+    }
   }
 
   async function handleRetry(): Promise<void> {
     if (pending) return;
+    ++loginRequestRef.current;
     setErrorKey(null);
     setPending("retry");
     try {
@@ -90,76 +126,124 @@ function AuthGate({
 
   return (
     <main
-      className="screen agentera-gate-screen"
+      className="screen agentera-login-screen"
       data-testid="screen-auth"
       aria-labelledby="agentera-auth-title"
     >
-      <section className="agentera-gate-card">
-        <div className="agentera-gate-brand" aria-label="AgentEra">
-          <HermesLogo size={52} />
-          <span>AgentEra</span>
+      <section className="agentera-login-card">
+        <div className="agentera-login-model">
+          <Aila3DModel />
         </div>
-        <h1 id="agentera-auth-title" className="agentera-gate-title">
-          {secureStorageUnavailable
-            ? t("auth.gate.secureStorageTitle")
-            : t("auth.gate.title")}
-        </h1>
-        <p className="agentera-gate-description">
-          {secureStorageUnavailable
-            ? t("auth.gate.secureStorageDescription")
-            : t(stateMessageKey(state))}
-        </p>
-        <p className="agentera-gate-privacy">{t("auth.gate.browserNote")}</p>
-
-        <div className="agentera-gate-actions" aria-live="polite">
-          {!secureStorageUnavailable && (
-            <button
-              ref={openBrowserRef}
-              type="button"
-              className="btn btn-primary agentera-gate-primary"
-              onClick={() => void handleOpenBrowser()}
-              disabled={pending !== null || state.status === "checking"}
-              autoFocus={state.status !== "checking"}
-            >
-              {pending === "browser"
-                ? t("auth.gate.waitingForBrowser")
-                : t("auth.gate.openBrowser")}
-            </button>
+        <div className="agentera-login-copy">
+          <h1 id="agentera-auth-title" className="agentera-login-title">
+            {secureStorageUnavailable
+              ? t("auth.gate.secureStorageTitle")
+              : t("auth.gate.slogan")}
+          </h1>
+          {showStateMessage ? (
+            <p className="agentera-login-description">
+              {secureStorageUnavailable
+                ? t("auth.gate.secureStorageDescription")
+                : t(stateMessageKey(state))}
+            </p>
+          ) : (
+            <p className="sr-only">
+              {t(stateMessageKey(state))} {t("auth.gate.browserNote")}
+            </p>
           )}
 
-          {pending === "browser" && (
-            <button
-              ref={cancelRef}
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => void handleCancel()}
+          <div className="agentera-login-actions" aria-live="polite">
+            {!secureStorageUnavailable && (
+              <button
+                ref={openBrowserRef}
+                type="button"
+                className="btn agentera-login-primary agentera-gate-primary"
+                onClick={() => void handleOpenBrowser()}
+                disabled={pending !== null || state.status === "checking"}
+                aria-busy={waitingForBrowser}
+              >
+                {waitingForBrowser ? (
+                  <>
+                    <span
+                      className="agentera-login-spinner"
+                      aria-hidden="true"
+                    />
+                    {t("auth.gate.loggingIn")}
+                  </>
+                ) : state.status === "checking" ? (
+                  t("auth.gate.checking")
+                ) : (
+                  t("auth.gate.openBrowser")
+                )}
+              </button>
+            )}
+
+            {secureStorageUnavailable && !waitingForBrowser && (
+              <button
+                ref={retryRef}
+                type="button"
+                className="btn agentera-login-secondary"
+                onClick={() => void handleRetry()}
+                disabled={pending !== null}
+              >
+                {pending === "retry"
+                  ? t("auth.gate.retrying")
+                  : t("auth.gate.retry")}
+              </button>
+            )}
+          </div>
+
+          {waitingForBrowser && (
+            <div
+              className="agentera-login-browser-help"
+              data-testid="browser-login-waiting"
             >
-              {t("auth.gate.cancel")}
-            </button>
+              <p className="agentera-login-browser-help-title">
+                {t("auth.gate.browserNotOpened")}
+              </p>
+              <p className="agentera-login-browser-help-description">
+                {t("auth.gate.copyLoginHint")}
+              </p>
+              <div className="agentera-login-browser-help-actions">
+                <button
+                  type="button"
+                  className="btn agentera-login-browser-help-button"
+                  onClick={() => void handleCopyLoginLink()}
+                  disabled={copying}
+                >
+                  {copying
+                    ? t("auth.gate.copyingLoginLink")
+                    : copied
+                      ? t("auth.gate.copiedLoginLink")
+                      : t("auth.gate.copyLoginLink")}
+                </button>
+                <button
+                  type="button"
+                  className="btn agentera-login-browser-help-button"
+                  onClick={() => void handleRestartLogin()}
+                >
+                  {t("auth.gate.restartLogin")}
+                </button>
+              </div>
+            </div>
           )}
 
-          {(secureStorageUnavailable || errorKey) && pending !== "browser" && (
-            <button
-              ref={retryRef}
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => void handleRetry()}
-              disabled={pending !== null}
-              autoFocus={secureStorageUnavailable}
-            >
-              {pending === "retry"
-                ? t("auth.gate.retrying")
-                : t("auth.gate.retry")}
-            </button>
+          {errorKey && (
+            <p className="agentera-login-error" role="alert">
+              {t(errorKey)}
+            </p>
           )}
         </div>
-
-        {errorKey && (
-          <p className="agentera-gate-error" role="alert">
-            {t(errorKey)}
-          </p>
-        )}
       </section>
+
+      <footer className="agentera-login-footer">
+        <span className="agentera-login-footer-link">
+          {t("auth.gate.privacy")}
+        </span>
+        <span className="agentera-login-footer-link">
+          {t("auth.gate.terms")}
+        </span>
+      </footer>
     </main>
   );
 }

@@ -34,17 +34,21 @@ The separate `window.agenteraRuntimeDistribution` lifecycle namespace is authent
 
 The three-second branded splash remains unchanged. `welcome` is reachable only for an authenticated fresh installation; `main` additionally requires the current local Profile or remote/SSH connection context to match the signed-in owner. A legacy `setup` target is normalized to `main` after that ownership check.
 
-[[src/renderer/src/screens/AuthGate/AuthGate.tsx#AuthGate]] opens registration, sign-in, and recovery only in the system browser. It never renders password, email, phone, verification-code, WebView, or local-bypass inputs, and it explains fail-closed platform secure-storage errors.
+[[src/renderer/src/screens/AuthGate/AuthGate.tsx#AuthGate]] presents the product-owned `src/renderer/src/assets/aila.glb` as Aila's native Three.js 3D character and opens registration, sign-in, and recovery only in the system browser. It never renders password, email, phone, verification-code, WebView, or local-bypass inputs, and it explains fail-closed platform secure-storage errors.
 
-[[src/renderer/src/screens/ProfileClaim/ProfileClaim.tsx#ProfileClaim]] automatically binds an empty Profile, but meaningful existing data remains untouched until the user explicitly chooses to bind it in place or create a separate empty Profile. Fresh creation activates the new physical Profile and continues directly to main without inheriting the previous Profile's model configuration.
+Before the renderer can show any runnable screen, the authenticated local route resolves the account's own physical space in the main process. It keeps an already-active owned Profile, otherwise reactivates that account's earliest still-present binding. If the account has no binding, it binds an empty active Profile or creates a fresh non-cloned Profile beside meaningful unowned or foreign data. Returning accounts therefore reuse their original local space, while every new account proceeds automatically with a blank isolated space and never sees or inherits another account's Runtime data.
+
+[[src/renderer/src/screens/ProfileClaim/ProfileClaim.tsx#ProfileClaim]] remains the fail-closed retry surface when ownership resolution itself fails, but normal local account login no longer asks the user to choose a space. Meaningful unbound legacy data remains untouched; fresh creation activates a separate physical Profile and continues directly to main without inheriting the previous Profile's model configuration.
 
 The splash local-mode escape is retained, but its configuration mutation is queued until product authentication succeeds and then runs through the authenticated main-process `agentera-switch-to-local` channel. It cannot bypass the product gate.
 
-## Browser authorization
+## Browser sign-in
 
-The system browser handles registration, login, recovery, identity binding, and device management through Authorization Code with PKCE and a one-use loopback callback.
+The user-facing path is one sign-in flow: the desktop opens the system browser, the user signs in or registers, and the one-use loopback callback returns automatically. No separate consent or "allow and return" step appears.
 
-Only a two-minute authorization code and state return through `127.0.0.1`; access, refresh, and offline tokens never appear in the callback URL. Passwords and verification codes never enter the Electron renderer or main process.
+The underlying transport still uses Authorization Code with PKCE. Only a two-minute authorization code and state return through `127.0.0.1`; access, refresh, and offline tokens never appear in the callback URL. Passwords and verification codes never enter the Electron renderer or main process.
+
+Successful registration creates the browser session immediately and continues the same pending desktop sign-in request. The Cloud account center keeps a short browser session for active requests and a separate 30-day HttpOnly persistent credential for app relaunches. When the short session expires, the persistent credential restores account and desktop sign-in access; signing out revokes both credentials.
 
 ### Loopback callback
 
@@ -146,13 +150,17 @@ The cloud may transfer an installation to another AgentEra account only after th
 
 ## Existing Profile migration
 
-The first authenticated launch binds an empty Profile automatically or asks whether an existing learned Profile should be bound in place or left untouched while a new isolated Profile is created.
+The first authenticated launch binds an empty Profile automatically.
+
+If the active Profile already contains meaningful unowned data, that data remains untouched and the account receives a separate fresh Profile automatically. Later account switches follow the same deterministic rule: the main process reactivates the signed-in account's existing bound Profile, or creates one isolated fresh Profile when that account is new on the device.
 
 Binding never copies, uploads, or rewrites Memory, USER, skills, sessions, files, or Curator state. One physical Profile belongs to one AgentEra owner, consistent with [[agentera-self-evolution#AgentEra self-evolution compatibility#Runtime isolation|Runtime isolation]].
 
 ### Physical Profile ownership
 
-[[src/main/agentera-profile-binding.ts#AgenteraProfileBindingStore]] stores encrypted, versioned ownership metadata under Electron `userData`, keyed by the canonical physical Profile path and a stable random Runtime Profile ID. There is no ordinary unbind or reassignment operation.
+[[src/main/agentera-profile-binding.ts#AgenteraProfileBindingStore]] stores encrypted, versioned ownership metadata under Electron `userData`, keyed by the canonical physical Profile path and a stable random Runtime Profile ID.
+
+Account-space resolution considers only still-present Profiles matching the exact tenant, user, and installation; it keeps the active match or deterministically selects the earliest binding. There is no ordinary unbind or reassignment operation.
 
 [[src/main/agentera-profile-binding.ts#hasMeaningfulHermesProfileData]] uses only approved filenames, file types, sizes, and directory entry presence. Existing data is bound in place, while fresh creation always calls the Hermes Profile API with `cloneFrom` set to `null` and refuses unexpectedly copied private markers.
 

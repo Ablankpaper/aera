@@ -3,7 +3,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 
-const { TEST_HOME, TEST_RUNTIME, httpRequestSpy, spawnSpy } = vi.hoisted(() => {
+const {
+  TEST_HOME,
+  TEST_RUNTIME,
+  httpRequestSpy,
+  spawnSpy,
+  modelConfig,
+  profileEnv,
+  modelRows,
+  providerSecrets,
+} = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const path = require("path");
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -57,7 +66,28 @@ const { TEST_HOME, TEST_RUNTIME, httpRequestSpy, spawnSpy } = vi.hoisted(() => {
     return req;
   });
 
-  return { TEST_HOME: home, TEST_RUNTIME: runtime, httpRequestSpy, spawnSpy };
+  return {
+    TEST_HOME: home,
+    TEST_RUNTIME: runtime,
+    httpRequestSpy,
+    spawnSpy,
+    modelConfig: {
+      provider: "auto",
+      model: "",
+      baseUrl: "",
+    },
+    profileEnv: {} as Record<string, string>,
+    modelRows: [] as Array<{
+      id: string;
+      name: string;
+      provider: string;
+      model: string;
+      baseUrl: string;
+      providerLabel?: string;
+      createdAt: number;
+    }>,
+    providerSecrets: {} as Record<string, string>,
+  };
 });
 
 vi.mock("child_process", () => ({
@@ -77,6 +107,16 @@ vi.mock("https", () => ({
 
 vi.mock("../src/main/config", () => ({
   getConnectionConfig: () => ({ mode: "local" }),
+  getModelConfig: () => modelConfig,
+  readEnv: () => profileEnv,
+}));
+
+vi.mock("../src/main/models", () => ({
+  readModels: () => modelRows,
+}));
+
+vi.mock("../src/main/secrets", () => ({
+  providerListSafe: () => providerSecrets,
 }));
 
 vi.mock("../src/main/installer", () => ({
@@ -143,6 +183,12 @@ describe("Dashboard Runtime invocation", () => {
   beforeEach(() => {
     spawnSpy.mockClear();
     httpRequestSpy.mockClear();
+    modelConfig.provider = "auto";
+    modelConfig.model = "";
+    modelConfig.baseUrl = "";
+    for (const key of Object.keys(profileEnv)) delete profileEnv[key];
+    for (const key of Object.keys(providerSecrets)) delete providerSecrets[key];
+    modelRows.length = 0;
     mkdirSync(
       `${TEST_RUNTIME}/python/lib/python3.11/site-packages/hermes_cli/web_dist`,
       { recursive: true },
@@ -172,6 +218,33 @@ describe("Dashboard Runtime invocation", () => {
           HERMES_HOME: TEST_HOME,
           HERMES_WEB_DIST: `${TEST_RUNTIME}/python/lib/python3.11/site-packages/hermes_cli/web_dist`,
           PYTHONNOUSERSITE: "1",
+        }),
+      }),
+    );
+  });
+
+  it("bridges the active named custom-provider key into the Dashboard Runtime host slot", async () => {
+    modelConfig.provider = "custom";
+    modelConfig.model = "gpt-5.6-sol";
+    modelConfig.baseUrl = "https://api.anhepro.com/v1";
+    profileEnv.CUSTOM_PROVIDER_ANHEPRO_COM_KEY = "named-provider-secret";
+    modelRows.push({
+      id: "anhepro-gpt-5.6-sol",
+      name: "gpt-5.6-sol",
+      provider: "custom",
+      model: "gpt-5.6-sol",
+      baseUrl: "https://api.anhepro.com/v1",
+      providerLabel: "anhepro.com",
+      createdAt: 1,
+    });
+
+    const result = await startDashboard("work");
+
+    expect(result.running).toBe(true);
+    expect(spawnSpy.mock.calls[0]?.[2]).toEqual(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          ANHEPRO_API_KEY: "named-provider-secret",
         }),
       }),
     );

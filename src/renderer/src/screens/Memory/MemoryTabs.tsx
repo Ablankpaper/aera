@@ -1,4 +1,4 @@
-import { Database, User, Cloud, Sparkles } from "lucide-react";
+import { Database, User, Cloud, Sparkles, Globe } from "lucide-react";
 import { useI18n } from "../../components/useI18n";
 import type { MemoryTab } from "./types";
 
@@ -16,6 +16,7 @@ export function MemoryTabs({
   const tabs: { id: MemoryTab; icon: typeof Database; label: string }[] = [
     { id: "entries", icon: Database, label: t("memory.agentMemory") },
     { id: "profile", icon: User, label: t("memory.userProfile") },
+    { id: "global", icon: Globe, label: t("memory.globalProfileTab") },
     { id: "providers", icon: Cloud, label: t("memory.providersTitle") },
     { id: "soul", icon: Sparkles, label: t("soul.title") },
   ];

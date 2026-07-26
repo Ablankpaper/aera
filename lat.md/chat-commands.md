@@ -30,7 +30,6 @@ Because no global loading state is set, the slash branch shows its own feedback:
 
 ## Transport connection lifecycle
 
-
 Every dashboard turn first connects a JSON-RPC WebSocket to the gateway; that handshake must be time-bounded or a stalled socket wedges the whole transport with no error and no fallback (issue #718).
 
 [[src/renderer/src/screens/Chat/dashboardGatewayClient.ts#DashboardGatewayClient#connect]] resolves on `open`, rejects on `error` or an early `close`, **and** rejects on a connect-timeout (default 10s). A WebSocket stuck in `CONNECTING` — TCP accepted but the upgrade never completing, e.g. when a busy renderer starves the handshake — fires none of those events on its own, so without the timer the connect promise never settles. When it never settles, `ensureClient` in [[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts#useDashboardChatTransport]] never resolves, its cached `connectingRef` promise poisons every later send, `setIsLoading(false)` never runs, and the user sees a permanent loading spinner. The timeout makes the promise reject so auto mode falls back to the legacy HTTP transport (and explicit-dashboard mode surfaces a real error) instead of hanging. Per-request calls are separately bounded by their own 30s timeout.
@@ -95,9 +94,15 @@ The command palette and executor share a catalog built by [[src/renderer/src/scr
 
 Desktop commands in [[src/renderer/src/screens/Chat/slash/desktopCommands.ts#DESKTOP_SLASH_COMMANDS]] handle local Electron/renderer UI operations such as opening settings, triggering the active chat's model picker, and switching navigation views without sending prompts.
 
+`/agent name <name>` performs an explicit Profile-scoped identity revision through [[multi-agent-memory#Agent identity]]; the name is arbitrary input rather than a recognized example or keyword. `/global show|set|remove|history|rollback` edits the separate account-wide behavior profile described by [[multi-agent-memory#Account-wide behavior profile]].
+
 Pure UI desktop actions are flagged `uiAction: true` (settings, model picker, navigation, `/new`, `/clear`, `/fast`). [[src/renderer/src/screens/Chat/hooks/useChatActions.ts#useChatActions]] reads that flag to suppress the echoed `/command` user bubble for them — their effect is the UI change itself, so a bubble would be a dangling artifact. Output-producing desktop commands (`/help`, `/memory`, `/usage`, …) are not flagged and still echo, so their output reads as a reply.
 
-`/settings <section>` forwards the section name through `openSettings` to [[src/renderer/src/screens/Layout/Layout.tsx]], which opens the global settings modal on the matching nav item (see [[sidebar-navigation#Settings modal]]). [[src/renderer/src/components/settings/SettingsModal.tsx#resolveSection]] maps the argument to a nav id (`appearance`, `privacy`, `connection`, …, plus the legacy alias `hermesagent` → About); an unknown or omitted name lands on the first item.
+Identity and global-profile commands are also local UI actions. Their command input is not pushed as a user turn, and any displayed result is marked `localOnly`, so neither the raw command nor its value enters the next Hermes history payload.
+
+The same two operations are available through explicit ordinary language without teaching users slash syntax. [[multi-agent-memory#Natural-language confirmation loop]] sends the sentence to Hermes first, recognizes only a high-confidence current-Agent name or account-wide address in parallel, and shows one confirmation card after the reply. Confirming the card performs the same scoped identity and global-profile writes; dismissing it changes neither store.
+
+`/settings <section>` forwards the section name through `openSettings` to [[src/renderer/src/screens/Layout/Layout.tsx]], which opens the full-window settings page on the matching nav item (see [[sidebar-navigation#Settings page]]). [[src/renderer/src/components/settings/SettingsModal.tsx#resolveSection]] maps the argument to a nav id (`appearance`, `privacy`, `connection`, …, plus the legacy alias `hermesagent` → About); an unknown or omitted name lands on the first item.
 
 Asynchronous Agent commands render a temporary slash-loader bubble without transcript actions such as Copy; the bubble is replaced by the command output or error when execution finishes.
 

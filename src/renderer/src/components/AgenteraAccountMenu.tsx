@@ -7,9 +7,11 @@ import {
   Laptop,
   LogOut,
   RefreshCw,
-  UserRound,
+  Settings,
 } from "lucide-react";
 import { useI18n } from "./useI18n";
+import ProfileAvatar from "./common/ProfileAvatar";
+import { useAgenteraUserProfile } from "./useAgenteraUserProfile";
 
 type AuthorizedState = Extract<
   AgenteraAuthPublicState,
@@ -24,7 +26,11 @@ export interface AgenteraAccountActions {
   onSignOut?: () => Promise<void>;
 }
 
-function defaultActions(): Required<AgenteraAccountActions> {
+interface AgenteraAccountMenuActions extends AgenteraAccountActions {
+  onOpenSettings?: () => void | Promise<void>;
+}
+
+function defaultActions(): Required<AgenteraAccountMenuActions> {
   return {
     onManageAccount: () => window.agenteraAuth.openPortal("account"),
     onManageDevices: () => window.agenteraAuth.openPortal("devices"),
@@ -33,6 +39,7 @@ function defaultActions(): Required<AgenteraAccountActions> {
       await window.agenteraAuth.logout();
       await window.agenteraAuth.startLogin({ forceAccountSelection: true });
     },
+    onOpenSettings: () => undefined,
     onSignOut: () => window.agenteraAuth.logout(),
   };
 }
@@ -40,18 +47,25 @@ function defaultActions(): Required<AgenteraAccountActions> {
 export default function AgenteraAccountMenu({
   state,
   ...providedActions
-}: { state: AuthorizedState } & AgenteraAccountActions): React.JSX.Element {
+}: {
+  state: AuthorizedState;
+} & AgenteraAccountMenuActions): React.JSX.Element {
   const { t } = useI18n();
+  const { profile } = useAgenteraUserProfile(state.userId);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
   const actions = { ...defaultActions(), ...providedActions };
+  const displayName =
+    profile.displayName ||
+    `${t("auth.account.defaultDisplayName")} ${state.userId.slice(0, 8)}`;
 
-  const run = (action: () => Promise<void>): void => {
+  const run = (action: () => void | Promise<void>): void => {
     setOpen(false);
     setBusy(true);
     setError(false);
-    void action()
+    void Promise.resolve()
+      .then(action)
       .catch(() => setError(true))
       .finally(() => setBusy(false));
   };
@@ -62,30 +76,42 @@ export default function AgenteraAccountMenu({
       icon: ExternalLink,
       action: actions.onManageAccount,
       danger: false,
+      dividerBefore: false,
     },
     {
       label: "auth.account.devices",
       icon: Laptop,
       action: actions.onManageDevices,
       danger: false,
+      dividerBefore: false,
     },
     {
       label: "auth.account.recharge",
       icon: CircleDollarSign,
       action: actions.onRecharge,
       danger: false,
+      dividerBefore: false,
     },
     {
       label: "auth.account.switch",
       icon: RefreshCw,
       action: actions.onSwitchAccount,
       danger: false,
+      dividerBefore: false,
+    },
+    {
+      label: "navigation.settings",
+      icon: Settings,
+      action: actions.onOpenSettings,
+      danger: false,
+      dividerBefore: false,
     },
     {
       label: "auth.account.signOut",
       icon: LogOut,
       action: actions.onSignOut,
       danger: true,
+      dividerBefore: true,
     },
   ] as const;
 
@@ -94,7 +120,7 @@ export default function AgenteraAccountMenu({
       {open && (
         <div className="agentera-account-menu" role="menu">
           <div className="agentera-account-menu-summary">
-            <strong>{t("auth.account.title")}</strong>
+            <strong>{displayName}</strong>
             <span>
               {state.status === "offline"
                 ? t("auth.account.offline")
@@ -107,7 +133,12 @@ export default function AgenteraAccountMenu({
               key={label}
               type="button"
               role="menuitem"
-              className={item.danger ? "is-danger" : undefined}
+              className={[
+                item.danger ? "is-danger" : "",
+                item.dividerBefore ? "has-divider" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
               onClick={() => run(action)}
               disabled={busy}
             >
@@ -130,11 +161,15 @@ export default function AgenteraAccountMenu({
         onClick={() => setOpen((value) => !value)}
         disabled={busy}
       >
-        <span className="agentera-account-avatar">
-          <UserRound size={15} aria-hidden="true" />
-        </span>
+        <ProfileAvatar
+          name={displayName}
+          avatar={profile.avatarDataUrl}
+          size={28}
+          defaultLogo={false}
+          className="agentera-account-avatar"
+        />
         <span className="agentera-account-trigger-copy">
-          <strong>{t("auth.account.title")}</strong>
+          <strong title={displayName}>{displayName}</strong>
           <small>
             {state.status === "offline"
               ? t("auth.account.offline")

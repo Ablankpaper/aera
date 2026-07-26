@@ -37,7 +37,7 @@ export function CapacityCards({ data }: CapacityCardsProps): React.JSX.Element {
           label=""
         />
         <div className="memory-capacity-card-footer">
-          {data.stats.totalSessions} {t("memory.sessions")}
+          {t("memory.privateToCurrentAgent")}
         </div>
       </div>
     </div>

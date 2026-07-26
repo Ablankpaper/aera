@@ -396,7 +396,7 @@ describe("Workspace IPC and startup wiring", () => {
     );
   });
 
-  it("keeps the global switcher below the brand and before pinned navigation without moving ProfileSwitcher", () => {
+  it("keeps the global switcher below the brand and the account menu in the footer", () => {
     const layout = source("src/renderer/src/screens/Layout/Layout.tsx");
     const brandAt = layout.indexOf('<div className="sidebar-brand">');
     const workspaceAt = layout.indexOf("<ProductSpaceSwitcher");
@@ -404,11 +404,11 @@ describe("Workspace IPC and startup wiring", () => {
       '<nav className="sidebar-nav sidebar-nav-pinned">',
     );
     const footerAt = layout.indexOf('<div className="sidebar-footer">');
-    const profileAt = layout.indexOf("<ProfileSwitcher");
+    const accountMenuAt = layout.indexOf("<AgenteraAccountMenu");
 
     expect(brandAt).toBeGreaterThan(-1);
     expect(brandAt).toBeLessThan(workspaceAt);
     expect(workspaceAt).toBeLessThan(pinnedAt);
-    expect(footerAt).toBeLessThan(profileAt);
+    expect(footerAt).toBeLessThan(accountMenuAt);
   });
 });

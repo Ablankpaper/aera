@@ -103,7 +103,7 @@ export const workspaceZhCN = {
   manage: "管理工作空间",
   archivedCount: "已归档 {{count}} 个",
   couldNotSwitch: "无法切换空间（{{error}}）。",
-  roles: { owner: "Owner", admin: "Admin", member: "Member" },
+  roles: { owner: "所有者", admin: "管理员", member: "成员" },
   errors: {
     unauthenticated: "需要先登录。",
     online_required: "此操作需要联网。",

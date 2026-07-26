@@ -68,12 +68,18 @@ export function MediaImage({
 
   if (failed) {
     return (
-      <span className="chat-media-error">⚠ Could not load {token.name}</span>
+      <span className="chat-media-error">
+        ⚠ {t("chat.media.loadFailed", { name: token.name })}
+      </span>
     );
   }
 
   if (!resolved) {
-    return <span className="chat-media-loading">Loading {token.name}…</span>;
+    return (
+      <span className="chat-media-loading">
+        {t("chat.media.loading", { name: token.name })}
+      </span>
+    );
   }
 
   return (
@@ -125,7 +131,7 @@ export function MediaImage({
               <button
                 className="chat-image-preview-btn"
                 onClick={() => setZoomed(false)}
-                aria-label="Close"
+                aria-label={t("common.close")}
               >
                 <X size={14} />
               </button>

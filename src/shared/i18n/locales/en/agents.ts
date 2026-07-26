@@ -91,6 +91,94 @@ export default {
   walletDeleteWarning:
     "This will permanently remove this wallet from AgentEra. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
   walletDeleteConfirmLabel: "Remove wallet",
+  hub: {
+    officialTab: "Official Agents",
+    mineTab: "My Agents",
+    searchPlaceholder: "Search Agents by name or capability",
+    filters: "Filter Agents",
+    officialTitle: "Official Agents",
+    officialSubtitle:
+      "Reviewed and published by AgentEra, then installed into an isolated local space.",
+    mineSubtitle:
+      "Create and manage your Agents. Open a card to review its abilities and start a conversation.",
+    workspaceSubtitle:
+      "Browse Agents in this Workspace or manage the ones your role can maintain.",
+    organizationSubtitle:
+      "Browse enterprise Agents and create, review, or install them when your role allows it.",
+    officialFilter: {
+      all: "All",
+      installed: "Installed",
+      updates: "Updates",
+    },
+    mineFilter: {
+      all: "All",
+      ready: "Ready",
+      drafts: "Drafts",
+    },
+    offlineTitle: "You are offline",
+    officialUnavailable:
+      "Your current role cannot browse or install official Agents.",
+    noSearchResults: "No matching Agents found",
+    noSearchResultsHint: "Try another keyword or clear the search.",
+    noFilteredResults: "No Agents match this filter",
+    noFilteredResultsHint:
+      "Choose another filter to see the rest of your Agents.",
+    noPersonalAgents: "You have not created any Agents yet",
+    noPersonalAgentsHint:
+      "Create an Agent of your own and give it a job tailored to you.",
+    createAgent: "Create Agent",
+    officialEmptyHint: "Official Agents will appear here when published.",
+    officialOfflineHint:
+      "Reconnect to browse the catalog. Installed Agents remain available locally.",
+    officialPublisher: "AgentEra Official",
+    officialCardDescription:
+      "{{name}} has been reviewed by AgentEra and can be installed into an isolated local space.",
+    officialDetailFallback:
+      "{{name}} is an official AgentEra Agent that runs independently on this device to help complete tasks.",
+    personalCardFallback:
+      "This Agent is ready to help with work tailored to your instructions.",
+    publishedCardDescription:
+      "Published as an immutable version and ready for installation into an isolated local space.",
+    installedCardDescription:
+      "Installed in an isolated local space. Open the details to start using it.",
+    pendingCardDescription:
+      "Installation is incomplete. Retry from the details without deleting local data.",
+    localProfileDescription:
+      "Uses {{model}} with {{count}} configured Skills and is ready for conversation.",
+    localProfileNoModel:
+      "This local Agent does not have a model configured yet.",
+    personalAgent: "Personal Agent",
+    workspaceAgent: "Workspace Agent",
+    organizationAgent: "Enterprise Agent",
+    localAgent: "Local Agent",
+    published: "Published",
+    installed: "Installed",
+    pending: "Needs attention",
+    localDraft: "Local draft",
+    ready: "Ready",
+    readyToInstall: "Ready to install",
+    running: "Running",
+    updateAvailable: "Update available",
+    skillTag: "{{count}} Skills",
+    sopTag: "{{count}} SOPs",
+    knowledgeTag: "{{count}} knowledge items",
+    toolTag: "{{count}} tools",
+    localMemoryTag: "Memory stays local",
+    isolatedProfileTag: "Isolated runtime space",
+    capabilityTitle: "Capabilities",
+    expertiseTitle: "Areas of expertise",
+    examplesTitle: "Try asking",
+    exampleIntroduce: "Show me what {{name}} can do",
+    examplePlan: "Turn my goal into an actionable plan",
+    exampleExecute: "Help me complete this task from the first step",
+    installAgent: "Install Agent",
+    useAgent: "Start using",
+    editAppearance: "Edit appearance",
+    localProfileUnavailable: "Local runtime space unavailable",
+    advancedTitle: "Advanced management",
+    advancedSubtitle:
+      "Drafts, published versions, installations, and local Runtime Profiles",
+  },
   sync: "Sync",
   syncing: "Syncing…",
   syncSignedOut: "Not synced",

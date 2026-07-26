@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import SettingsModal from "./SettingsModal";
+import SettingsPage from "./SettingsModal";
 import {
   SettingsModalContext,
   type OpenSettingsOptions,
@@ -12,9 +12,12 @@ interface OpenState {
 }
 
 /**
- * Mounts the single global settings modal at the app root and exposes
+ * Mounts the single global settings page at the app root and exposes
  * `openSettings` / `closeSettings` via context (see `useSettingsModal`). Only
- * one settings modal is open at a time; opening again replaces the target.
+ * one settings page is open at a time; opening again replaces the target.
+ *
+ * The main app remains mounted while hidden so chat/session state survives the
+ * round trip, but the settings page is the only visible app surface.
  */
 export function SettingsModalProvider({
   children,
@@ -22,19 +25,14 @@ export function SettingsModalProvider({
   children: React.ReactNode;
 }): React.JSX.Element {
   const [open, setOpen] = useState<OpenState | null>(null);
-  const [visible, setVisible] = useState(false);
 
   const openSettings = useCallback(
     (section?: string, opts?: OpenSettingsOptions) => {
       setOpen({ section, profile: opts?.profile });
-      setVisible(true);
     },
     [],
   );
-  const closeSettings = useCallback(() => setVisible(false), []);
-  const clearSettings = useCallback(() => {
-    if (!visible) setOpen(null);
-  }, [visible]);
+  const closeSettings = useCallback(() => setOpen(null), []);
 
   const value = useMemo(
     () => ({ openSettings, closeSettings }),
@@ -43,14 +41,17 @@ export function SettingsModalProvider({
 
   return (
     <SettingsModalContext.Provider value={value}>
-      {children}
+      <div
+        className={`settings-page-background${open ? " is-hidden" : ""}`}
+        aria-hidden={open ? "true" : undefined}
+      >
+        {children}
+      </div>
       {open && (
-        <SettingsModal
+        <SettingsPage
           profile={open.profile}
           initialSection={open.section}
-          open={visible}
-          onClose={closeSettings}
-          onExited={clearSettings}
+          onBack={closeSettings}
         />
       )}
     </SettingsModalContext.Provider>

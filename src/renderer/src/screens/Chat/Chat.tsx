@@ -20,6 +20,7 @@ import {
 import { useFastMode } from "./hooks/useFastMode";
 import { useReasoningEffort } from "./hooks/useReasoningEffort";
 import { useLocalCommands } from "./hooks/useLocalCommands";
+import { useMemoryCandidates } from "./hooks/useMemoryCandidates";
 import {
   dashboardChatEnabledForConnection,
   useDashboardChatTransport,
@@ -140,6 +141,15 @@ function Chat({
     initialMessages ?? [],
   );
   const [isLoading, setIsLoading] = useState(false);
+  const memoryCandidates = useMemoryCandidates({
+    profile,
+    isAgentBusy: isLoading,
+    messages,
+  });
+  const visibleMessages = useMemo<ChatMessage[]>(
+    () => [...messages, ...memoryCandidates.candidateMessages],
+    [messages, memoryCandidates.candidateMessages],
+  );
   useEffect(() => {
     onLoadingChange?.(runId, isLoading);
   }, [runId, isLoading, onLoadingChange]);
@@ -251,12 +261,68 @@ function Chat({
   const queueRef = useRef<QueuedMessage[]>([]);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const activeTurnRef = useRef<ActiveTurn | null>(null);
-  const dashboardChatEnabled = dashboardChatEnabledForConnection(
-    import.meta.env.VITE_HERMES_DESKTOP_DASHBOARD_CHAT,
-    connectionModeLoaded,
-    connectionMode,
-    chatTransportPreference,
+  const [
+    globalProfileRequiresBoundTransport,
+    setGlobalProfileRequiresBoundTransport,
+  ] = useState(true);
+  const globalProfileContextRequestRef = useRef(0);
+  const prepareGlobalProfileConversationContext = useCallback(
+    async (resumeSessionId: string | null): Promise<void> => {
+      const requestId = ++globalProfileContextRequestRef.current;
+      setGlobalProfileRequiresBoundTransport(true);
+      const api = window.agenteraGlobalProfile;
+      if (!api?.prepareConversationContext) {
+        if (requestId === globalProfileContextRequestRef.current) {
+          setGlobalProfileRequiresBoundTransport(false);
+        }
+        return;
+      }
+      try {
+        const context = await api.prepareConversationContext({
+          runId,
+          profile,
+          resumeSessionId,
+        });
+        if (requestId === globalProfileContextRequestRef.current) {
+          setGlobalProfileRequiresBoundTransport(
+            context.requiresBoundApiTransport,
+          );
+        }
+      } catch {
+        // Context preparation is additive. If the Aera-owned snapshot cannot be
+        // prepared, keep native Hermes chat available without injecting it.
+        if (requestId === globalProfileContextRequestRef.current) {
+          setGlobalProfileRequiresBoundTransport(false);
+        }
+      }
+    },
+    [profile, runId],
   );
+  useEffect(() => {
+    void prepareGlobalProfileConversationContext(initialSessionId ?? null);
+    return (): void => {
+      globalProfileContextRequestRef.current += 1;
+    };
+  }, [initialSessionId, prepareGlobalProfileConversationContext]);
+  useEffect(
+    () =>
+      window.hermesAPI.onAgentIdentityChanged?.((identity) => {
+        if (identity.profileId !== (profile?.trim() || "default")) return;
+        // Keep the visible transcript, but force the next turn onto a fresh
+        // Hermes session and a new identity-revision-scoped global snapshot.
+        setHermesSessionId(null);
+        void prepareGlobalProfileConversationContext(null);
+      }),
+    [profile, prepareGlobalProfileConversationContext],
+  );
+  const dashboardChatEnabled =
+    !globalProfileRequiresBoundTransport &&
+    dashboardChatEnabledForConnection(
+      import.meta.env.VITE_HERMES_DESKTOP_DASHBOARD_CHAT,
+      connectionModeLoaded,
+      connectionMode,
+      chatTransportPreference,
+    );
 
   useEffect(() => {
     let cancelled = false;
@@ -317,7 +383,7 @@ function Chat({
     };
   }, []);
 
-  const { containerRef, bottomRef } = useChatScroll(messages);
+  const { containerRef, bottomRef } = useChatScroll(visibleMessages);
   const modelConfig = useModelConfig(profile);
   const chatCurrentModel =
     sessionModelOverride?.model ?? modelConfig.currentModel;
@@ -535,7 +601,12 @@ function Chat({
     (content: string) => {
       setMessages((prev) => [
         ...prev,
-        { id: `agent-local-${Date.now()}`, role: "agent", content },
+        {
+          id: `agent-local-${Date.now()}`,
+          role: "agent",
+          content,
+          localOnly: true,
+        },
       ]);
     },
     [setMessages],
@@ -732,6 +803,8 @@ function Chat({
     abortDashboard: dashboardTransport.enabled
       ? dashboardTransport.abort
       : undefined,
+    onNaturalLanguageMessageStarted:
+      memoryCandidates.onNaturalLanguageMessageStarted,
   });
 
   // Stable ref to handleSend so the drain effect doesn't re-trigger on
@@ -1004,16 +1077,22 @@ function Chat({
 
       <div className="chat-body">
         <div className="chat-messages" ref={containerRef}>
-          {messages.length === 0 ? (
+          {visibleMessages.length === 0 ? (
             <ChatEmptyState onSelectSuggestion={handleSuggestion} />
           ) : (
             <MessageList
-              messages={messages}
+              messages={visibleMessages}
               isLoading={isLoading}
               toolProgress={toolProgress}
               onApprove={actions.handleApprove}
               onDeny={actions.handleDeny}
               onClarifyResolved={handleClarifyResolved}
+              onMemoryCandidateConfirm={(batchId) =>
+                void memoryCandidates.confirm(batchId)
+              }
+              onMemoryCandidateReject={(batchId) =>
+                void memoryCandidates.reject(batchId)
+              }
               agentAvatar={agentAvatar}
             />
           )}
@@ -1099,9 +1178,11 @@ function Chat({
                 type="button"
                 className={`btn-ghost chat-tool-btn ${webPreviewVisible ? "chat-tool-btn-active" : ""}`}
                 onClick={() => setWebPreviewVisible((v) => !v)}
-                title={
-                  webPreviewVisible ? "Hide web preview" : "Show web preview"
-                }
+                title={t(
+                  webPreviewVisible
+                    ? "chat.webPreview.hide"
+                    : "chat.webPreview.show",
+                )}
                 style={{
                   display: "inline-flex",
                   alignItems: "center",

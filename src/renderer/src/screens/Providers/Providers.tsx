@@ -13,9 +13,10 @@ import HermesAccountModal from "../../components/HermesAccountModal";
 import ProviderKeysSection from "../../components/ProviderKeysSection";
 import RegistryBrowserModal from "../../components/RegistryBrowserModal";
 import AuxiliaryTasksSection from "../../components/AuxiliaryTasksSection";
+import ModelCenter from "./ModelCenter";
 import { useDiscoveredModels } from "../../hooks/useDiscoveredModels";
 import { KeyRound, Workflow, User, Sparkles } from "../../assets/icons";
-import { ChevronDown, X } from "lucide-react";
+import { ChevronDown, Settings2, X } from "lucide-react";
 import { customProviderEnvKey } from "../../../../shared/url-key-map";
 import type { HermesAccount } from "../../../../shared/account";
 
@@ -140,9 +141,9 @@ function Providers({
   visible?: boolean;
 }): React.JSX.Element {
   const { t } = useI18n();
-  const [activeTab, setActiveTab] = useState<"providers" | "auxiliary">(
-    "providers",
-  );
+  const [activeTab, setActiveTab] = useState<
+    "general" | "auxiliary" | "advanced"
+  >("general");
   // Curated-registry browser (relocated from the removed Models screen).
   const [registryOpen, setRegistryOpen] = useState(false);
 
@@ -361,6 +362,18 @@ function Providers({
       void window.hermesAPI.setEnv(key, value, profile);
     }, 400);
     envSaveTimers.current.set(key, timer);
+  }
+
+  async function saveEnvValue(key: string, value: string): Promise<void> {
+    const pending = envSaveTimers.current.get(key);
+    if (pending) {
+      clearTimeout(pending);
+      envSaveTimers.current.delete(key);
+    }
+    setEnv((previous) => ({ ...previous, [key]: value }));
+    await window.hermesAPI.setEnv(key, value, profile);
+    setSavedKey(key);
+    setTimeout(() => setSavedKey(null), 2000);
   }
 
   // Clear a provider's key entirely (removes it from the configured list).
@@ -620,22 +633,53 @@ function Providers({
     <div className="settings-container">
       <div className="models-tabs">
         <button
-          className={`models-tab ${activeTab === "providers" ? "active" : ""}`}
-          onClick={() => setActiveTab("providers")}
+          className={`models-tab ${activeTab === "general" ? "active" : ""}`}
+          onClick={() => setActiveTab("general")}
         >
-          <KeyRound size={16} />
-          {t("navigation.providers")}
+          <Sparkles size={16} />
+          {t("providers.center.generalTab")}
         </button>
         <button
           className={`models-tab ${activeTab === "auxiliary" ? "active" : ""}`}
           onClick={() => setActiveTab("auxiliary")}
         >
           <Workflow size={16} />
-          {t("constants.auxiliaryTitle")}
+          {t("providers.center.auxiliaryTab")}
+        </button>
+        <button
+          className={`models-tab ${activeTab === "advanced" ? "active" : ""}`}
+          onClick={() => setActiveTab("advanced")}
+        >
+          <Settings2 size={16} />
+          {t("providers.center.advancedTab")}
         </button>
       </div>
 
-      {activeTab === "providers" && (
+      {activeTab === "general" && (
+        <ModelCenter
+          profile={profile}
+          env={env}
+          activeModel={{
+            provider: modelProvider,
+            model: modelName,
+            baseUrl: modelBaseUrl,
+          }}
+          onSaveKey={saveEnvValue}
+          onActivated={(nextModel) => {
+            setModelProvider(
+              displayProviderFromConfig(nextModel.provider, nextModel.baseUrl),
+            );
+            setModelName(nextModel.model);
+            setModelBaseUrl(nextModel.baseUrl);
+            setModelSaved(true);
+            setTimeout(() => setModelSaved(false), 2000);
+          }}
+          onOpenModelPicker={openModelPicker}
+          onBrowseRegistry={() => setRegistryOpen(true)}
+        />
+      )}
+
+      {activeTab === "advanced" && (
         <>
           <div className="settings-section">
             <div className="settings-section-title">
@@ -985,95 +1029,95 @@ function Providers({
               }}
             />
           )}
-
-          {/* Active-model picker: choose a configured provider → one of its
-              configured models. The key is resolved automatically at runtime. */}
-          {modelPickerOpen && (
-            <div
-              className="models-modal-overlay"
-              onClick={() => setModelPickerOpen(false)}
-            >
-              <div
-                className="models-modal provider-modal"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="models-modal-header">
-                  <h2 className="models-modal-title provider-modal-title">
-                    {t("providers.model.pickerTitle")}
-                  </h2>
-                  <button
-                    className="btn-ghost"
-                    onClick={() => setModelPickerOpen(false)}
-                    aria-label={t("common.close")}
-                  >
-                    <X size={18} />
-                  </button>
-                </div>
-                <div className="models-modal-body">
-                  {pickerProviders.length === 0 ? (
-                    <p className="settings-field-hint">
-                      {t("providers.model.noModels")}
-                    </p>
-                  ) : (
-                    <>
-                      <div className="settings-field">
-                        <label className="settings-field-label">
-                          {t("common.provider")}
-                        </label>
-                        <LogoSelect
-                          options={pickerProviders}
-                          value={pickGroupKey}
-                          onChange={selectPickGroup}
-                          brandOf={(p) => p.brand}
-                          labelOf={(p) => p.label}
-                        />
-                      </div>
-
-                      <div className="settings-field">
-                        <label className="settings-field-label">
-                          {t("common.model")}
-                        </label>
-                        <select
-                          className="input"
-                          value={pickModel}
-                          onChange={(e) => setPickModel(e.target.value)}
-                        >
-                          {pickModelOptions.map((id) => (
-                            <option key={id} value={id}>
-                              {id}
-                            </option>
-                          ))}
-                        </select>
-                        <div className="settings-field-hint">
-                          {pickDiscovery.status === "loading"
-                            ? t("settings.discoveringModels")
-                            : pickModelOptions.length === 0
-                              ? t("providers.model.noProviderModels")
-                              : ""}
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-                <div className="models-modal-footer">
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => setModelPickerOpen(false)}
-                  >
-                    {t("common.cancel")}
-                  </button>
-                  <button
-                    className="btn btn-primary"
-                    disabled={!pickModel}
-                    onClick={() => void confirmModelPick()}
-                  >
-                    {t("providers.model.use")}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
         </>
+      )}
+
+      {/* Active-model picker: choose a configured provider → one of its
+          configured models. The key is resolved automatically at runtime. */}
+      {modelPickerOpen && (
+        <div
+          className="models-modal-overlay"
+          onClick={() => setModelPickerOpen(false)}
+        >
+          <div
+            className="models-modal provider-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="models-modal-header">
+              <h2 className="models-modal-title provider-modal-title">
+                {t("providers.model.pickerTitle")}
+              </h2>
+              <button
+                className="btn-ghost"
+                onClick={() => setModelPickerOpen(false)}
+                aria-label={t("common.close")}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="models-modal-body">
+              {pickerProviders.length === 0 ? (
+                <p className="settings-field-hint">
+                  {t("providers.model.noModels")}
+                </p>
+              ) : (
+                <>
+                  <div className="settings-field">
+                    <label className="settings-field-label">
+                      {t("common.provider")}
+                    </label>
+                    <LogoSelect
+                      options={pickerProviders}
+                      value={pickGroupKey}
+                      onChange={selectPickGroup}
+                      brandOf={(p) => p.brand}
+                      labelOf={(p) => p.label}
+                    />
+                  </div>
+
+                  <div className="settings-field">
+                    <label className="settings-field-label">
+                      {t("common.model")}
+                    </label>
+                    <select
+                      className="input"
+                      value={pickModel}
+                      onChange={(e) => setPickModel(e.target.value)}
+                    >
+                      {pickModelOptions.map((id) => (
+                        <option key={id} value={id}>
+                          {id}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="settings-field-hint">
+                      {pickDiscovery.status === "loading"
+                        ? t("settings.discoveringModels")
+                        : pickModelOptions.length === 0
+                          ? t("providers.model.noProviderModels")
+                          : ""}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="models-modal-footer">
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setModelPickerOpen(false)}
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                className="btn btn-primary"
+                disabled={!pickModel}
+                onClick={() => void confirmModelPick()}
+              >
+                {t("providers.model.use")}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {activeTab === "auxiliary" && <AuxiliaryTasksSection visible={visible} />}

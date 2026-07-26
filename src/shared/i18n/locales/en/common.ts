@@ -23,6 +23,8 @@ export default {
   confirm: "Confirm",
   reset: "Reset",
   back: "Back",
+  forward: "Forward",
+  reload: "Reload",
   open: "Open",
   install: "Install",
   start: "Start",
@@ -52,4 +54,14 @@ export default {
   copied: "Copied!",
   showMore: "Show more",
   showLess: "Show less",
+  splashDelayHint: "Taking longer than usual?",
+  switchToLocalMode: "Switch to local mode",
+  splashCheckingConnection: "Checking connection…",
+  splashCheckingLocal: "Checking local install…",
+  splashCheckingSsh: "Checking SSH connection…",
+  splashCheckingRemote: "Checking remote connection…",
+  splashLocalAfterSignIn: "Local mode will open after sign-in…",
+  remoteNoticeTitle: "Connected to remote AgentEra Runtime",
+  remoteNoticeDescription:
+    "{{feature}} is not available in remote mode. This data lives on the server and is not accessible through the API yet.",
 } as const;

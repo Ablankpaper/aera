@@ -3,9 +3,11 @@ import { HermesAvatar, MessageRow } from "./MessageRow";
 import type { AgentAvatarInfo } from "./MessageRow";
 import { ReasoningRow, ToolActivityGroup } from "./HistoryRow";
 import { ClarifyCard } from "./ClarifyCard";
+import { MemoryCandidateCard } from "./MemoryCandidateCard";
 import type {
   ChatMessage,
   ClarifyMessage,
+  MemoryCandidateMessage,
   ToolCallMessage,
   ToolResultMessage,
 } from "./types";
@@ -23,6 +25,8 @@ interface MessageListProps {
   onDeny: () => void;
   /** Mark an inline clarify card resolved once the user answers/skips. */
   onClarifyResolved: (requestId: string, answer: string) => void;
+  onMemoryCandidateConfirm: (batchId: string) => void;
+  onMemoryCandidateReject: (batchId: string) => void;
   /** Appearance of the agent this conversation is with, so idle avatars show
    *  the agent's profile picture instead of the loading gif. */
   agentAvatar?: AgentAvatarInfo;
@@ -72,6 +76,8 @@ export const MessageList = memo(function MessageList({
   onApprove,
   onDeny,
   onClarifyResolved,
+  onMemoryCandidateConfirm,
+  onMemoryCandidateReject,
   agentAvatar,
 }: MessageListProps): React.JSX.Element {
   // Bubbles with empty content are still hidden (live-stream placeholders).
@@ -148,6 +154,19 @@ export const MessageList = memo(function MessageList({
           key={msg.id}
           msg={msg as ClarifyMessage}
           onResolved={onClarifyResolved}
+        />,
+      );
+      continue;
+    }
+
+    if (k === "memory_candidate") {
+      rows.push(
+        <MemoryCandidateCard
+          key={msg.id}
+          message={msg as MemoryCandidateMessage}
+          isAgentBusy={isLoading}
+          onConfirm={onMemoryCandidateConfirm}
+          onReject={onMemoryCandidateReject}
         />,
       );
       continue;

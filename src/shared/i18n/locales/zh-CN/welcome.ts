@@ -13,7 +13,7 @@ export default {
   connectRemoteSubtitle: "输入运行中的 AgentEra API 服务器的 URL。",
   remoteServerUrl: "服务器 URL",
   remoteApiKey: "API 密钥（可选）",
-  remoteApiKeyPlaceholder: "Bearer token (API_SERVER_KEY)",
+  remoteApiKeyPlaceholder: "Bearer 令牌（API_SERVER_KEY）",
   testingConnection: "测试连接中...",
   connect: "连接",
   remoteHint:

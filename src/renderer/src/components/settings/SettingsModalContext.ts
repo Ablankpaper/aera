@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 
-/** Optional arguments supplied when opening the settings modal. */
+/** Optional arguments supplied when opening the settings page. */
 export interface OpenSettingsOptions {
   /** Active profile whose config the modal reads/writes. Defaults to "default". */
   profile?: string;
@@ -8,12 +8,12 @@ export interface OpenSettingsOptions {
 
 export interface SettingsModalContextValue {
   /**
-   * Open the global settings modal. `section` jumps to a nav item
+   * Open the global settings page. `section` jumps to a nav item
    * (e.g. `appearance`, `privacy`, `connection`); an unknown/omitted name
    * lands on the first item.
    */
   openSettings: (section?: string, opts?: OpenSettingsOptions) => void;
-  /** Close the modal if open. */
+  /** Return from the settings page if open. */
   closeSettings: () => void;
 }
 
@@ -21,7 +21,7 @@ export const SettingsModalContext =
   createContext<SettingsModalContextValue | null>(null);
 
 /**
- * Access the global settings modal. Call `openSettings()` from anywhere under
+ * Access the global settings page. Call `openSettings()` from anywhere under
  * the SettingsModalProvider (the sidebar gear, the `/settings` command, the
  * Cmd/Ctrl+, shortcut).
  */

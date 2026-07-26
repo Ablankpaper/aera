@@ -20,17 +20,13 @@ import { ActiveSessionsBar } from "./ActiveSessionsBar";
 import Sessions from "../Sessions/Sessions";
 import Agents from "../Agents/Agents";
 import Discover from "../Discover/Discover";
-import ProfileSwitcher from "./ProfileSwitcher";
 import ProductSpaceSwitcher from "./ProductSpaceSwitcher";
 import WorkspaceManagementDialog from "./WorkspaceManagementDialog";
 import OrganizationManagementDialog from "./OrganizationManagementDialog";
 import SidebarRecentSessions from "./SidebarRecentSessions";
+import StartupModelSetupPrompt from "./StartupModelSetupPrompt";
 import Skills from "../Skills/Skills";
-import Memory from "../Memory/Memory";
-import Tools from "../Tools/Tools";
-import Gateway from "../Gateway/Gateway";
 import Office from "../Office/Office";
-import Providers from "../Providers/Providers";
 import Schedules from "../Schedules/Schedules";
 import Kanban from "../Kanban/Kanban";
 import RemoteNotice from "../../components/RemoteNotice";
@@ -41,12 +37,7 @@ import { useSettingsModal } from "../../components/settings/SettingsModalContext
 import agentEraIcon from "../../assets/iconv2.png";
 import {
   Compass,
-  Settings as SettingsIcon,
-  Brain,
-  Workflow,
-  Signal,
   Building,
-  KeyRound,
   Timer,
   Kanban as KanbanIcon,
   Download,
@@ -64,13 +55,19 @@ type View =
   | "discover"
   | "agents"
   | "office"
-  | "providers"
   | "skills"
-  | "memory"
-  | "tools"
   | "schedules"
-  | "kanban"
-  | "gateway";
+  | "kanban";
+
+export const SETTINGS_MANAGED_VIEWS = [
+  "providers",
+  "gateway",
+  "tools",
+  "memory",
+] as const;
+
+type SettingsManagedView = (typeof SETTINGS_MANAGED_VIEWS)[number];
+type NavigationTarget = View | SettingsManagedView;
 
 export const PINNED_NAV_ITEMS: {
   view: View;
@@ -84,13 +81,6 @@ export const PINNED_NAV_ITEMS: {
   // longer a top-level nav item.
   { view: "schedules", icon: Timer, labelKey: "navigation.schedules" },
   { view: "agents", icon: Bot, labelKey: "navigation.agents" },
-];
-
-const FOOTER_NAV_ITEMS: { view: View; icon: LucideIcon; labelKey: string }[] = [
-  { view: "providers", icon: KeyRound, labelKey: "navigation.providers" },
-  { view: "gateway", icon: Signal, labelKey: "navigation.gateway" },
-  { view: "tools", icon: Workflow, labelKey: "navigation.tools" },
-  { view: "memory", icon: Brain, labelKey: "navigation.memory" },
 ];
 
 const SIDEBAR_COLLAPSED_KEY = "hermes.sidebar.collapsed";
@@ -120,6 +110,7 @@ function Layout({
   // preserve existing conversations and activate a scratch run for the selected
   // agent so `activeProfile` stays aligned with the visible chat transport.
   const [activeProfile, setActiveProfile] = useState("default");
+  const [startupProfile, setStartupProfile] = useState<string | null>(null);
   const [runs, setRuns] = useState<ChatRun[]>(() => [mintRun("default")]);
   const [activeRunId, setActiveRunId] = useState<string>(() => runs[0].runId);
   // While a resume's history is loading, show its spinner immediately.
@@ -305,15 +296,20 @@ function Layout({
 
   useEffect(() => {
     const handleNavigation = (e: Event): void => {
-      const targetView = (e as CustomEvent<View>).detail;
-      if (targetView) goTo(targetView);
+      const targetView = (e as CustomEvent<NavigationTarget>).detail;
+      if (!targetView) return;
+      if (SETTINGS_MANAGED_VIEWS.includes(targetView as SettingsManagedView)) {
+        openSettings(targetView, { profile: activeProfile });
+        return;
+      }
+      goTo(targetView as View);
     };
     window.addEventListener("navigation:goto", handleNavigation);
     return () =>
       window.removeEventListener("navigation:goto", handleNavigation);
-  }, [goTo]);
+  }, [activeProfile, goTo, openSettings]);
 
-  // Cmd/Ctrl+, opens the settings modal from anywhere (the conventional
+  // Cmd/Ctrl+, opens the settings page from anywhere (the conventional
   // "preferences" shortcut).
   useEffect(() => {
     const handleKey = (e: KeyboardEvent): void => {
@@ -334,6 +330,19 @@ function Layout({
     [goTo],
   );
 
+  useEffect(() => {
+    const handleDiscoverFocus = (event: Event): void => {
+      const kind = (event as CustomEvent<"skills" | "mcps">).detail;
+      if (kind === "skills" || kind === "mcps") focusDiscover(kind);
+    };
+    window.addEventListener("navigation:focus-discover", handleDiscoverFocus);
+    return () =>
+      window.removeEventListener(
+        "navigation:focus-discover",
+        handleDiscoverFocus,
+      );
+  }, [focusDiscover]);
+
   // Re-check remote mode on tab switch (picks up Settings changes)
   useEffect(() => {
     window.hermesAPI.isRemoteOnlyMode().then(setRemoteMode);
@@ -349,6 +358,7 @@ function Layout({
       .then((profiles) => {
         if (cancelled) return;
         const active = profiles.find((p) => p.isActive);
+        setStartupProfile(active?.id || "default");
         if (active && active.id !== "default") {
           setActiveProfile(active.id);
           // Re-home the initial pristine run onto the restored profile so the
@@ -361,7 +371,7 @@ function Layout({
         }
       })
       .catch(() => {
-        /* fall back to the default profile */
+        if (!cancelled) setStartupProfile("default");
       });
     return () => {
       cancelled = true;
@@ -677,6 +687,11 @@ function Layout({
     ? t("navigation.expandSidebar")
     : t("navigation.collapseSidebar");
 
+  const handleConfigureStartupModel = useCallback(() => {
+    if (!startupProfile) return;
+    openSettings("providers", { profile: startupProfile });
+  }, [openSettings, startupProfile]);
+
   return (
     <div className={`layout ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
@@ -825,35 +840,11 @@ function Layout({
               )}
             </button>
           )}
-          <div className="sidebar-footer-actions" aria-label="Workspace tools">
-            {FOOTER_NAV_ITEMS.map(({ view: v, icon: Icon, labelKey }) => (
-              <button
-                key={v}
-                className={`sidebar-footer-action ${view === v ? "active" : ""}`}
-                onClick={() => goTo(v)}
-                aria-label={t(labelKey)}
-                data-tooltip={t(labelKey)}
-              >
-                <Icon size={16} />
-              </button>
-            ))}
-            <button
-              className="sidebar-footer-action"
-              onClick={() =>
-                openSettings(undefined, { profile: activeProfile })
-              }
-              aria-label={t("navigation.settings")}
-              data-tooltip={t("navigation.settings")}
-            >
-              <SettingsIcon size={16} />
-            </button>
-          </div>
-          <AgenteraAccountMenu state={authState} />
-          <ProfileSwitcher
-            activeProfile={activeProfile}
-            onSwitch={handleSelectProfile}
-            onManage={() => goTo("agents")}
-            compact={sidebarCollapsed}
+          <AgenteraAccountMenu
+            state={authState}
+            onOpenSettings={() =>
+              openSettings(undefined, { profile: activeProfile })
+            }
           />
         </div>
       </aside>
@@ -937,7 +928,7 @@ function Layout({
         {visitedViews.has("discover") && (
           <div style={paneStyle("discover")}>
             {remoteMode ? (
-              <RemoteNotice feature="Discover" />
+              <RemoteNotice feature={t("navigation.discover")} />
             ) : (
               <Discover
                 profile={activeProfile}
@@ -951,7 +942,7 @@ function Layout({
         {visitedViews.has("agents") && (
           <div style={paneStyle("agents")}>
             {remoteMode ? (
-              <RemoteNotice feature="Profiles" />
+              <RemoteNotice feature={t("navigation.agents")} />
             ) : (
               <Agents
                 activeProfile={activeProfile}
@@ -968,49 +959,13 @@ function Layout({
           </div>
         )}
 
-        {visitedViews.has("providers") && (
-          <div style={paneStyle("providers")}>
-            {remoteMode ? (
-              <RemoteNotice feature="Providers" />
-            ) : (
-              <Providers
-                profile={activeProfile}
-                visible={view === "providers"}
-              />
-            )}
-          </div>
-        )}
-
         {visitedViews.has("skills") && (
           <div style={paneStyle("skills")}>
             {remoteMode ? (
-              <RemoteNotice feature="Skills" />
+              <RemoteNotice feature={t("navigation.skills")} />
             ) : (
               <Skills profile={activeProfile} />
             )}
-          </div>
-        )}
-
-        {visitedViews.has("memory") && (
-          <div style={paneStyle("memory")}>
-            {remoteMode ? (
-              <RemoteNotice feature="Memory" />
-            ) : (
-              <Memory profile={activeProfile} />
-            )}
-          </div>
-        )}
-
-        {visitedViews.has("tools") && (
-          <div style={paneStyle("tools")}>
-            <Tools
-              profile={activeProfile}
-              showPlatformToolsets={!remoteMode}
-              remoteMode={remoteMode}
-              visible={view === "tools"}
-              onBrowseSkills={() => focusDiscover("skills")}
-              onBrowseMcps={() => focusDiscover("mcps")}
-            />
           </div>
         )}
 
@@ -1023,19 +978,9 @@ function Layout({
         {visitedViews.has("kanban") && (
           <div style={paneStyle("kanban")}>
             {remoteMode ? (
-              <RemoteNotice feature="Kanban" />
+              <RemoteNotice feature={t("navigation.kanban")} />
             ) : (
               <Kanban profile={activeProfile} visible={view === "kanban"} />
-            )}
-          </div>
-        )}
-
-        {visitedViews.has("gateway") && (
-          <div style={paneStyle("gateway")}>
-            {remoteMode ? (
-              <RemoteNotice feature="Gateway" />
-            ) : (
-              <Gateway profile={activeProfile} />
             )}
           </div>
         )}
@@ -1050,6 +995,13 @@ function Layout({
         authState={authState}
         onClose={() => setOrganizationManagementOpen(false)}
       />
+      {startupProfile && (
+        <StartupModelSetupPrompt
+          ownerId={authState.userId}
+          profile={startupProfile}
+          onConfigure={handleConfigureStartupModel}
+        />
+      )}
     </div>
   );
 }

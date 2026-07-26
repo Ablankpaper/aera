@@ -47,6 +47,10 @@ export interface ProfileInfo {
   color: string;
   /** Avatar image as a data URL, or null when none is set. */
   avatar: string | null;
+  /** Safe local link to an Agent installation; paths and owner data stay hidden. */
+  agentInstallationId?: string | null;
+  /** Opaque Runtime Profile identity used only to correlate local state. */
+  runtimeProfileId?: string | null;
 }
 
 export interface CreateProfileResult {

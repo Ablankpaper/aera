@@ -215,13 +215,26 @@ function initials(name: string): string {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
-function ageLabel(createdAt: number | null): string {
+function ageLabel(
+  createdAt: number | null,
+  translate: (key: string, options?: Record<string, unknown>) => string,
+): string {
   if (!createdAt) return "";
   const seconds = Math.max(0, Math.floor(Date.now() / 1000 - createdAt));
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
-  return `${Math.floor(seconds / 86400)}d`;
+  if (seconds < 60) return translate("kanban.ageSeconds", { count: seconds });
+  if (seconds < 3600) {
+    return translate("kanban.ageMinutes", {
+      count: Math.floor(seconds / 60),
+    });
+  }
+  if (seconds < 86400) {
+    return translate("kanban.ageHours", {
+      count: Math.floor(seconds / 3600),
+    });
+  }
+  return translate("kanban.ageDays", {
+    count: Math.floor(seconds / 86400),
+  });
 }
 
 function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
@@ -769,7 +782,7 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
               title={t("kanban.hqBoardTooltip")}
             >
               {isHqActive && <span className="kanban-board-dot" />}
-              <span>HQ (Claw3D)</span>
+              <span>{t("kanban.hqBoardName")}</span>
               <span className="kanban-board-count">
                 {isHqActive ? tasks.length : ""}
               </span>
@@ -803,8 +816,7 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
 
       {isHqActive && (
         <div className="kanban-hq-banner">
-          Read-only mirror of Claw3D&apos;s headquarters board. Edits made here
-          would not sync — use the Office screen to manage HQ tasks.
+          {t("kanban.hqMirrorDescription")}
         </div>
       )}
 
@@ -856,7 +868,7 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
                 )}
                 {colTasks.map((task) => {
                   const prio = priorityLabel(task.priority);
-                  const age = ageLabel(task.created_at);
+                  const age = ageLabel(task.created_at, t);
                   const skillCount = task.skills?.length || 0;
                   return (
                     <div
@@ -930,14 +942,14 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
                             className="kanban-pill kanban-pill-skills"
                             title={task.skills.join(", ")}
                           >
-                            {skillCount} {skillCount === 1 ? "skill" : "skills"}
+                            {t("kanban.skillCount", { count: skillCount })}
                           </span>
                         )}
                       </div>
                       <div className="kanban-card-actions">
                         {isHqActive && (
                           <span className="kanban-pill kanban-pill-readonly">
-                            read-only
+                            {t("kanban.readOnly")}
                           </span>
                         )}
                         {!isHqActive && task.status === "triage" && (
@@ -1083,7 +1095,7 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
                 </label>
                 <select
                   className="input"
-                  aria-label="Assignee profile"
+                  aria-label={t("kanban.fieldAssignee")}
                   value={newAssignee}
                   onChange={(e) => setNewAssignee(e.target.value)}
                 >
@@ -1134,7 +1146,7 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
                 </label>
                 <select
                   className="input"
-                  aria-label="Workspace"
+                  aria-label={t("kanban.fieldWorkspace")}
                   value={newWorkspace}
                   onChange={(e) => setNewWorkspace(e.target.value)}
                 >
@@ -1362,7 +1374,7 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
                             <div key={ev.id} className="kanban-event">
                               <span className="kanban-pill">{ev.kind}</span>
                               <span className="kanban-event-time">
-                                {ageLabel(ev.created_at)}
+                                {ageLabel(ev.created_at, t)}
                               </span>
                             </div>
                           ))}

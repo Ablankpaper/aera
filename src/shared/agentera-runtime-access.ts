@@ -25,9 +25,16 @@ export interface AgenteraBoundProfilePublicState {
   runtimeProfileId: string;
 }
 
-export interface AgenteraFreshProfilePublicState extends AgenteraBoundProfilePublicState {
+export interface AgenteraResolvedProfilePublicState extends AgenteraBoundProfilePublicState {
   profileId: string;
 }
+
+export type AgenteraFreshProfilePublicState =
+  AgenteraResolvedProfilePublicState;
+
+export type AgenteraAccountProfileResolutionPublicState =
+  | Extract<AgenteraProfileClaimPublicState, { status: "unbound" }>
+  | AgenteraResolvedProfilePublicState;
 
 export interface AgenteraUnboundProfilePublicState {
   id: string;

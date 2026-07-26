@@ -14,6 +14,10 @@ Hermes owns immediate private learning inside one physically isolated Profile an
 
 A completed conversation may lead Hermes background review to update local `MEMORY.md`, `USER.md`, or agent-created skills. The active conversation remains stable, and a later conversation observes the durable learning.
 
+The account-wide behavior profile is a separate Aera-owned read-only context described by [[multi-agent-memory]]. It does not replace Hermes `USER.md`, intercept `target=user`, register as a MemoryProvider, or grant one Agent access to another Agent's private Profile.
+
+The natural-language confirmation loop is also outside Hermes. Candidate recognition starts after the normal request, is never awaited, and cannot write Memory, USER, Skills, or Curator. Executable Runtime provenance coverage verifies the read-only snapshot is excluded from persisted transcript and Background Review input while normal private memory writes, review triggers, prompt caching, Skills, Curator, and Profile isolation continue; Runtime production code remains unchanged.
+
 ## Candidate promotion loop
 
 AgentEra owns an optional publication path that starts only after local learning has succeeded.

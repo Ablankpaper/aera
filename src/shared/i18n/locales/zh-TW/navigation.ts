@@ -13,7 +13,7 @@ export default {
   agents: "檔案",
   office: "工作區",
   models: "模型",
-  providers: "供應商",
+  providers: "模型",
   skills: "技能",
   soul: "人格",
   memory: "記憶",

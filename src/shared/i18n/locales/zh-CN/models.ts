@@ -1,5 +1,6 @@
 export default {
   title: "模型",
+  freeBadge: "（免费）",
   searchPlaceholder: "搜索模型...",
   empty: "还没有模型",
   noMatch: "没有匹配的模型",
@@ -20,7 +21,20 @@ export default {
   no: "否",
   nameRequired: "名称和模型 ID 为必填项",
   customProviderHint: "仅在自定义或本地提供商时需要填写",
-  apiKeyLabel: "API Key",
+  contextWindowLabel: "上下文窗口（Token）",
+  contextWindowPlaceholder: "例如：65536",
+  contextWindowHint:
+    "当提供商未返回上下文大小时可在此覆盖，以修正上下文用量并启用自动压缩。留空则自动检测。",
+  apiKeyLabel: "API 密钥",
   apiKeyHint:
     "保存为环境变量。会按 URL 匹配对应的环境变量名,否则使用 CUSTOM_API_KEY。",
+  allProviders: "全部",
+  browseRegistry: "浏览模型",
+  registryTitle: "模型目录",
+  registrySearchPlaceholder: "搜索提供商和模型...",
+  registryAddButton: "添加",
+  registryAddedLabel: "已添加",
+  registryCustomBadge: "通过 Base URL",
+  registryAdded: "已将 {{name}} 添加到你的模型",
+  registryLoadError: "加载模型目录失败",
 } as const;

@@ -13,7 +13,7 @@ export default {
   agents: "Perfiles",
   office: "Office",
   models: "Modelos",
-  providers: "Proveedores",
+  providers: "Modelos",
   skills: "Habilidades",
   soul: "Persona",
   memory: "Memoria",

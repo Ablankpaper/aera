@@ -403,6 +403,7 @@ export function addModel(
   baseUrl: string,
   contextLength?: number,
   providerLabel?: string,
+  apiMode?: string | null,
 ): SavedModel {
   const models = readModelsRaw();
 
@@ -416,17 +417,24 @@ export function addModel(
   // the same model id can live under two different custom endpoints.
   const norm = (u: string): string =>
     (u || "").trim().replace(/\/+$/, "").toLowerCase();
-  const existing = models.find(
+  const existingIndex = models.findIndex(
     (m) =>
       m.model === model &&
       m.provider === provider &&
       norm(m.baseUrl) === norm(baseUrl),
   );
-  if (existing)
+  if (existingIndex !== -1) {
+    const existing = models[existingIndex];
+    if (apiMode !== undefined) {
+      const normalizedApiMode = (apiMode || "").trim() || null;
+      models[existingIndex] = { ...existing, apiMode: normalizedApiMode };
+      writeModels(models);
+    }
     return {
-      ...existing,
+      ...models[existingIndex],
       ...(ctx !== undefined ? { contextLength: ctx } : {}),
     };
+  }
 
   const entry: SavedModelRow = {
     id: randomUUID(),
@@ -434,6 +442,9 @@ export function addModel(
     provider,
     model,
     baseUrl: baseUrl || "",
+    ...(apiMode !== undefined
+      ? { apiMode: (apiMode || "").trim() || null }
+      : {}),
     ...(providerLabel ? { providerLabel } : {}),
     createdAt: Date.now(),
   };
@@ -453,7 +464,10 @@ export function removeModel(id: string): boolean {
 export function updateModel(
   id: string,
   fields: Partial<
-    Pick<SavedModelRow, "name" | "provider" | "model" | "baseUrl">
+    Pick<
+      SavedModelRow,
+      "name" | "provider" | "model" | "baseUrl" | "apiMode" | "providerLabel"
+    >
   > & { contextLength?: number | null },
 ): boolean {
   const models = readModelsRaw();

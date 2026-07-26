@@ -170,6 +170,7 @@ describe("AgentEra authentication controller", () => {
   let store: AgenteraAuthStore;
   let cloud: FakeCloudClient;
   let opened: string[];
+  let clipboardWrites: string[];
   let focused: number;
   let attempts: AgenteraPkceAttempt[];
   let callbacks: string[];
@@ -182,6 +183,7 @@ describe("AgentEra authentication controller", () => {
     });
     cloud = new FakeCloudClient();
     opened = [];
+    clipboardWrites = [];
     focused = 0;
     attempts = [pkce(31), pkce(41), pkce(51)];
     callbacks = [
@@ -221,6 +223,9 @@ describe("AgentEra authentication controller", () => {
         expect(new URL(url).origin).toBe(expectedOrigin);
         opened.push(url);
       },
+      writeClipboard: (text) => {
+        clipboardWrites.push(text);
+      },
       bringMainWindowToFront: () => {
         focused += 1;
       },
@@ -233,7 +238,7 @@ describe("AgentEra authentication controller", () => {
     };
   }
 
-  // @lat: [[agentera-app-authentication#Browser authorization#Main-process controller]]
+  // @lat: [[agentera-app-authentication#Browser sign-in#Main-process controller]]
   it("completes browser login, persists only protected long-lived material, and publishes an allowlisted state", async () => {
     const controller = createAgenteraAuthController(runtime());
     const observed: unknown[] = [];
@@ -261,6 +266,33 @@ describe("AgentEra authentication controller", () => {
     expect(raw).not.toContain(tokenSet.accessToken);
     expect(raw).not.toContain(tokenSet.refreshToken);
     expect(raw).not.toContain(tokenSet.offlineEntitlement);
+    unsubscribe();
+  });
+
+  it("returns focus only after exchanging the callback and publishing authenticated state", async () => {
+    const events: string[] = [];
+    const exchange = cloud.exchangeAuthorizationCode.bind(cloud);
+    cloud.exchangeAuthorizationCode = async (input) => {
+      events.push("exchange-start");
+      const result = await exchange(input);
+      events.push("exchange-complete");
+      return result;
+    };
+    const runtimeWithEvents = runtime();
+    runtimeWithEvents.bringMainWindowToFront = () => events.push("focus");
+    const controller = createAgenteraAuthController(runtimeWithEvents);
+    const unsubscribe = controller.subscribe((state) => {
+      if (state.status === "authenticated") events.push("published");
+    });
+
+    await controller.startBrowserLogin();
+
+    expect(events).toEqual([
+      "exchange-start",
+      "exchange-complete",
+      "published",
+      "focus",
+    ]);
     unsubscribe();
   });
 
@@ -310,6 +342,80 @@ describe("AgentEra authentication controller", () => {
       status: "unauthenticated",
       reason: "sign_in_required",
     });
+  });
+
+  it("copies only the active browser login URL through the main-process clipboard port", async () => {
+    let rejectCallback: (error: Error) => void = () => undefined;
+    const listener: AgenteraLoopbackListener = {
+      redirectUri: "http://127.0.0.1:43123/agentera/oauth/callback",
+      callback: new Promise((_resolve, reject) => {
+        rejectCallback = reject;
+      }),
+      cancel: vi.fn(() => rejectCallback(new Error("cancelled"))),
+      close: vi.fn(),
+    };
+    const controller = createAgenteraAuthController(
+      runtime(async () => listener),
+    );
+
+    const login = controller.startBrowserLogin();
+    const loginResult = login.catch((error: unknown) => error);
+    await vi.waitFor(() => expect(opened).toHaveLength(1));
+
+    await controller.copyBrowserLoginLink();
+    expect(clipboardWrites).toEqual([opened[0]]);
+
+    await controller.cancelBrowserLogin();
+    expect(await loginResult).toBeInstanceOf(Error);
+    await expect(controller.copyBrowserLoginLink()).rejects.toThrow(
+      /no active/i,
+    );
+  });
+
+  it("atomically replaces a cancelled attempt with fresh PKCE material", async () => {
+    let rejectFirstCallback: (error: Error) => void = () => undefined;
+    const firstListener: AgenteraLoopbackListener = {
+      redirectUri: "http://127.0.0.1:43123/agentera/oauth/callback",
+      callback: new Promise((_resolve, reject) => {
+        rejectFirstCallback = reject;
+      }),
+      cancel: vi.fn(() => rejectFirstCallback(new Error("cancelled"))),
+      close: vi.fn(),
+    };
+    let listenerCount = 0;
+    const controller = createAgenteraAuthController(
+      runtime(async () => {
+        listenerCount += 1;
+        if (listenerCount === 1) return firstListener;
+        const code = callbacks.shift();
+        if (!code) throw new Error("no callback code");
+        return {
+          redirectUri: "http://127.0.0.1:43124/agentera/oauth/callback",
+          callback: Promise.resolve({ authorizationCode: code }),
+          cancel: vi.fn(),
+          close: vi.fn(),
+        };
+      }),
+    );
+
+    const firstLogin = controller.startBrowserLogin();
+    const firstResult = firstLogin.catch((error: unknown) => error);
+    await vi.waitFor(() => expect(opened).toHaveLength(1));
+
+    await controller.restartBrowserLogin({ forceAccountSelection: true });
+
+    expect(await firstResult).toBeInstanceOf(Error);
+    expect(firstListener.cancel).toHaveBeenCalledOnce();
+    expect(firstListener.close).toHaveBeenCalledOnce();
+    expect(opened).toHaveLength(2);
+    expect(cloud.authorizationRequests).toHaveLength(2);
+    expect(cloud.authorizationRequests[0].pkce.state).not.toBe(
+      cloud.authorizationRequests[1].pkce.state,
+    );
+    expect(new URL(opened[1]).searchParams.get("prompt")).toBe(
+      "select_account",
+    );
+    expect(controller.getPublicState().status).toBe("authenticated");
   });
 
   it("does not open the browser when cancellation wins the listener-start race", async () => {

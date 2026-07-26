@@ -78,6 +78,26 @@ function extractAgenteraRuntimeAccessMethods(src: string): string[] {
   );
 }
 
+function extractAgenteraGlobalProfileMethods(src: string): string[] {
+  const objectMatch = src.match(
+    /const\s+agenteraGlobalProfileAPI\s*=\s*\{([\s\S]*?)^\};/m,
+  );
+  if (!objectMatch) return [];
+  return [...objectMatch[1].matchAll(/^\s{2}(\w+)\s*:\s*\(/gm)].map(
+    (match) => match[1],
+  );
+}
+
+function extractAgenteraGlobalProfileTypeMethods(src: string): string[] {
+  const interfaceMatch = src.match(
+    /interface\s+AgenteraGlobalProfileAPI\s*\{([\s\S]*?)^\}/m,
+  );
+  if (!interfaceMatch) return [];
+  return [...interfaceMatch[1].matchAll(/^\s{2}(\w+)\s*[:(]/gm)].map(
+    (match) => match[1],
+  );
+}
+
 function extractAgenteraRuntimeAccessTypeMethods(src: string): string[] {
   const interfaceMatch = src.match(
     /interface\s+AgenteraRuntimeAccessAPI\s*\{([\s\S]*?)^\}/m,
@@ -212,10 +232,15 @@ describe("AgentEra product-auth preload namespace", () => {
   const expected = [
     "getState",
     "startLogin",
+    "restartLogin",
     "cancelLogin",
+    "copyLoginLink",
     "retryOnline",
     "logout",
     "openPortal",
+    "getUserProfile",
+    "updateUserProfile",
+    "onUserProfileChanged",
     "onStateChanged",
   ];
 
@@ -239,6 +264,7 @@ describe("AgentEra Runtime-access preload namespace", () => {
   const expected = [
     "probeInstallFiles",
     "runStartupPreflight",
+    "resolveAccountProfile",
     "inspectActiveProfile",
     "bindActiveProfile",
     "createFreshProfile",
@@ -263,6 +289,33 @@ describe("AgentEra Runtime-access preload namespace", () => {
     expect(namespace).not.toMatch(
       /ownerId|tenantId|installationId|profilePath|remoteUrl|ssh|apiKey|accessToken|refreshToken|offlineEntitlement|privateKey/i,
     );
+  });
+});
+
+describe("AgentEra global-profile preload namespace", () => {
+  const expected = [
+    "get",
+    "setEntry",
+    "removeEntry",
+    "listHistory",
+    "rollback",
+    "prepareConversationContext",
+    "extractCandidates",
+    "confirmCandidates",
+    "rejectCandidates",
+    "onChanged",
+  ];
+
+  it("exposes one conversation-scoped context preparer without profile bytes", () => {
+    expect(extractAgenteraGlobalProfileMethods(preloadSrc)).toEqual(expected);
+    expect(extractAgenteraGlobalProfileTypeMethods(preloadTypes)).toEqual(
+      expected,
+    );
+    const namespace = preloadTypes.match(
+      /interface\s+AgenteraGlobalProfileAPI\s*\{([\s\S]*?)^\}/m,
+    )?.[1];
+    expect(namespace).toBeDefined();
+    expect(namespace).not.toMatch(/renderedSnapshot|snapshotSha256|userId/i);
   });
 });
 
@@ -317,6 +370,7 @@ describe("AgentEra Agent-control preload namespace", () => {
     "confirmOrganizationWithdrawal",
     "listDefinitions",
     "listOfficialAgents",
+    "getOfficialAgentDetail",
     "prepareOfficialInstall",
     "confirmOfficialInstall",
     "refreshOfficialUpdates",

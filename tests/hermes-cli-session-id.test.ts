@@ -12,6 +12,7 @@ const {
   requestEvents,
   modelConfig,
   profileEnv,
+  modelRows,
 } = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const path = require("path");
@@ -44,6 +45,15 @@ const {
       baseUrl: "",
     },
     profileEnv: {} as Record<string, string>,
+    modelRows: [] as Array<{
+      id: string;
+      name: string;
+      provider: string;
+      model: string;
+      baseUrl: string;
+      providerLabel?: string;
+      createdAt: number;
+    }>,
   };
 });
 
@@ -66,11 +76,22 @@ vi.mock("http", () => ({
           body += chunk.toString();
         },
         end: () => {
-          if (_url.endsWith("/health")) {
-            requestEvents.push("health");
-            cb?.({
-              statusCode: healthStatuses.shift() ?? 503,
+          if (_url.endsWith("/health") || _url.endsWith("/v1/capabilities")) {
+            const isReadinessProbe =
+              _url.endsWith("/health") || _options.timeout === 1500;
+            if (isReadinessProbe) requestEvents.push("health");
+            const statusCode = isReadinessProbe
+              ? (healthStatuses.shift() ?? 503)
+              : 200;
+            const res = Object.assign(new EventEmitter(), {
+              statusCode,
+              headers: {},
               resume: () => {},
+            });
+            cb?.(res);
+            queueMicrotask(() => {
+              res.emit("data", Buffer.from("{}"));
+              res.emit("end");
             });
             return;
           }
@@ -253,6 +274,10 @@ vi.mock("../src/main/agentera-runtime-distribution/invocation", () => ({
 }));
 
 vi.mock("../src/main/config", () => ({
+  ensureLocalApiServerKey: () => ({
+    generated: false,
+    key: "internal-test-token",
+  }),
   getModelConfig: () => modelConfig,
   getConfigValue: () => "",
   readEnv: () => profileEnv,
@@ -282,7 +307,7 @@ vi.mock("../src/main/utils", () => ({
 }));
 
 vi.mock("../src/main/models", () => ({
-  readModels: () => [],
+  readModels: () => modelRows,
 }));
 
 vi.mock("../src/main/process-options", () => ({
@@ -308,6 +333,7 @@ describe("CLI fallback session id propagation", () => {
     for (const key of Object.keys(profileEnv)) {
       delete profileEnv[key];
     }
+    modelRows.length = 0;
     rmSync(TEST_REPO, { recursive: true, force: true });
   });
 
@@ -369,6 +395,49 @@ describe("CLI fallback session id propagation", () => {
       CUSTOM_BASE_URL: "https://api.aimlapi.com/v1",
       HERMES_INFERENCE_PROVIDER: "custom",
     });
+  });
+
+  it("bridges a named custom-provider key into the Runtime host slot on CLI fallback", async () => {
+    profileEnv.CUSTOM_PROVIDER_ANHEPRO_COM_KEY = "named-provider-secret";
+    modelRows.push({
+      id: "anhepro-gpt-5.6-sol",
+      name: "gpt-5.6-sol",
+      provider: "custom",
+      model: "gpt-5.6-sol",
+      baseUrl: "https://api.anhepro.com/v1",
+      providerLabel: "anhepro.com",
+      createdAt: 1,
+    });
+
+    const done = new Promise<string | undefined>((resolve) => {
+      sendMessage(
+        "hi",
+        {
+          onChunk: () => {},
+          onDone: resolve,
+          onError: () => {},
+        },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          provider: "custom",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://api.anhepro.com/v1",
+        },
+      ).then(() => {
+        const proc = spawned[0];
+        proc.stdout.emit("data", Buffer.from("Hi there"));
+        proc.emit("close", 0);
+      });
+    });
+
+    await expect(done).resolves.toBeUndefined();
+    expect(spawned[0].spawnOptions?.env?.ANHEPRO_API_KEY).toBe(
+      "named-provider-secret",
+    );
   });
 
   it("continues a CLI-created timestamp session over the API instead of minting a desk id", async () => {

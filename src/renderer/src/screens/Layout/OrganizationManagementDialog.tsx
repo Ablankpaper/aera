@@ -14,6 +14,7 @@ import type {
 } from "../../../../shared/agentera-organization";
 import { Copy, Plus, Refresh, Trash, X } from "../../assets/icons";
 import { useI18n } from "../../components/useI18n";
+import OrganizationPolicyPanel from "./OrganizationPolicyPanel";
 
 type AuthorizedState = Extract<
   AgenteraAuthPublicState,
@@ -1177,134 +1178,34 @@ export default function OrganizationManagementDialog({
                 )}
 
                 {tab === "policy" && (
-                  <section className="workspace-management-section">
-                    <h3>
-                      {t("navigation.organization.management.currentPolicy")}
-                    </h3>
-                    <p>
-                      {t("navigation.organization.management.policyVersion", {
-                        version:
-                          currentPolicy?.policyVersion ??
-                          selectedOrganization.currentPolicyVersion,
-                      })}
-                    </p>
-                    <p>
-                      {t("navigation.organization.management.experienceMode")}:{" "}
-                      {t(
-                        `navigation.organization.management.${
-                          policyDraft.experienceCandidates.mode ===
-                          "manual_review"
-                            ? "manualReview"
-                            : "disabled"
-                        }`,
-                      )}
-                    </p>
-                    <p>
-                      {t("navigation.organization.management.officialAgents")}:{" "}
-                      {t(
-                        `navigation.organization.management.${policyDraft.officialAgents.installation}`,
-                      )}
-                    </p>
-                    {canAdminister && (
-                      <div className="workspace-management-rename">
-                        <select
-                          aria-label={t(
-                            "navigation.organization.management.experienceMode",
-                          )}
-                          value={policyDraft.experienceCandidates.mode}
-                          disabled={!writable}
-                          data-testid="organization-mutation"
-                          onChange={(event) =>
-                            setPolicyDraft((current) => ({
-                              ...current,
-                              experienceCandidates: {
-                                mode: event.target.value as
-                                  | "disabled"
-                                  | "manual_review",
-                              },
-                            }))
-                          }
-                        >
-                          <option value="manual_review">
-                            {t(
-                              "navigation.organization.management.manualReview",
-                            )}
-                          </option>
-                          <option value="disabled">
-                            {t("navigation.organization.management.disabled")}
-                          </option>
-                        </select>
-                        <select
-                          aria-label={t(
-                            "navigation.organization.management.officialAgents",
-                          )}
-                          value={policyDraft.officialAgents.installation}
-                          disabled={!writable}
-                          data-testid="organization-mutation"
-                          onChange={(event) =>
-                            setPolicyDraft((current) => ({
-                              ...current,
-                              officialAgents: {
-                                installation: event.target.value as
-                                  | "allowed"
-                                  | "blocked",
-                              },
-                            }))
-                          }
-                        >
-                          <option value="allowed">
-                            {t("navigation.organization.management.allowed")}
-                          </option>
-                          <option value="blocked">
-                            {t("navigation.organization.management.blocked")}
-                          </option>
-                        </select>
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm"
-                          disabled={!writable}
-                          data-testid="organization-mutation"
-                          onClick={() =>
-                            void run(
-                              () =>
-                                window.agenteraOrganization.publishPolicy({
-                                  organizationId: selectedOrganization.id,
-                                  document: policyDraft,
-                                  expectedOrganizationRevision:
-                                    selectedOrganization.revision,
-                                  expectedPolicyVersion:
-                                    selectedOrganization.currentPolicyVersion,
-                                }),
-                              async () => refreshState(selectedOrganization.id),
-                            )
-                          }
-                        >
-                          {t(
-                            "navigation.organization.management.publishPolicy",
-                          )}
-                        </button>
-                      </div>
-                    )}
-                    {canAudit && (
-                      <div>
-                        <h4>
-                          {t(
-                            "navigation.organization.management.policyHistory",
-                          )}
-                        </h4>
-                        {policyHistory.map((policy) => (
-                          <p key={policy.id}>
-                            {t(
-                              "navigation.organization.management.policyVersion",
-                              {
-                                version: policy.policyVersion,
-                              },
-                            )}
-                          </p>
-                        ))}
-                      </div>
-                    )}
-                  </section>
+                  <OrganizationPolicyPanel
+                    currentPolicy={currentPolicy}
+                    currentPolicyVersion={
+                      selectedOrganization.currentPolicyVersion
+                    }
+                    policyHistory={policyHistory}
+                    policyDraft={policyDraft}
+                    canAdminister={canAdminister}
+                    canAudit={canAudit}
+                    writable={writable}
+                    online={Boolean(online)}
+                    detailsLoading={detailsLoading}
+                    onDraftChange={setPolicyDraft}
+                    onPublish={() =>
+                      void run(
+                        () =>
+                          window.agenteraOrganization.publishPolicy({
+                            organizationId: selectedOrganization.id,
+                            document: policyDraft,
+                            expectedOrganizationRevision:
+                              selectedOrganization.revision,
+                            expectedPolicyVersion:
+                              selectedOrganization.currentPolicyVersion + 1,
+                          }),
+                        async () => refreshState(selectedOrganization.id),
+                      )
+                    }
+                  />
                 )}
 
                 {tab === "audit" && canAudit && (

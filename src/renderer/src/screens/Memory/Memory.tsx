@@ -7,6 +7,7 @@ import { MemoryTabs } from "./MemoryTabs";
 import { MemoryEntries } from "./MemoryEntries";
 import { MemoryProfile } from "./MemoryProfile";
 import { MemoryProviders } from "./MemoryProviders";
+import { GlobalBehaviorProfile } from "./GlobalBehaviorProfile";
 import type { MemoryData, MemoryProviderInfo, MemoryTab } from "./types";
 
 function Memory({ profile }: { profile?: string }): React.JSX.Element {
@@ -53,7 +54,11 @@ function Memory({ profile }: { profile?: string }): React.JSX.Element {
           <h1 className="settings-header" style={{ marginBottom: 4 }}>
             {t("memory.title")}
           </h1>
-          <p className="memory-subtitle">{t("memory.subtitle")}</p>
+          <p className="memory-subtitle">
+            {t("memory.subtitle", {
+              agent: profile?.trim() || "default",
+            })}
+          </p>
         </div>
         <button className="btn btn-secondary btn-sm" onClick={loadData}>
           <Refresh size={13} />
@@ -81,6 +86,8 @@ function Memory({ profile }: { profile?: string }): React.JSX.Element {
           onRefresh={loadData}
         />
       )}
+
+      {tab === "global" && <GlobalBehaviorProfile />}
 
       {tab === "providers" && (
         <MemoryProviders

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import startVid from "../../assets/startvid.mp4";
+import { useI18n } from "../../components/useI18n";
 
 interface SplashScreenProps {
   onFinished: () => void;
@@ -20,6 +21,7 @@ function SplashScreen({
   status,
   onSwitchToLocal,
 }: SplashScreenProps): React.JSX.Element {
+  const { t } = useI18n();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [showEscape, setShowEscape] = useState(false);
   // Stable boolean so the timer below isn't reset every time the parent
@@ -61,9 +63,11 @@ function SplashScreen({
       <div className="splash-wordmark">AgentEra Studio</div>
       {onSwitchToLocal && showEscape && (
         <div className="splash-escape">
-          <span className="splash-escape-hint">Taking longer than usual?</span>
+          <span className="splash-escape-hint">
+            {t("common.splashDelayHint")}
+          </span>
           <button type="button" onClick={onSwitchToLocal}>
-            Switch to local mode
+            {t("common.switchToLocalMode")}
           </button>
         </div>
       )}

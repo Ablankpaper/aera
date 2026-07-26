@@ -335,6 +335,27 @@ describe("AgentEra Organization IPC contract", () => {
     expect(JSON.stringify(audit)).not.toContain("rawMetadata");
   });
 
+  it("serializes loopback HTTP Organization policy issuers for local development", () => {
+    const serialized = serializeOrganizationCurrentPolicyState({
+      policy: {
+        id: POLICY_ID,
+        policyVersion: 1,
+        schemaVersion: 1,
+        contentDigest: DIGEST,
+        issuer: "http://127.0.0.1:8086",
+        signingKeyId: "organization-key-1",
+        createdAt: CREATED_AT,
+        document: policyDocument,
+        signature: SIGNATURE,
+      },
+      stale: false,
+      verifiedAt: CREATED_AT,
+      errorCode: null,
+    });
+
+    expect(serialized.policy?.issuer).toBe("http://127.0.0.1:8086");
+  });
+
   it("maps failures to a bounded result without leaking messages or tokens", async () => {
     await expect(
       executeOrganizationIpc(async () => {

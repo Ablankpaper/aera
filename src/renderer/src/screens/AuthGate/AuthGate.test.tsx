@@ -1,4 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { AgenteraAuthPublicState } from "../../../../shared/agentera-auth";
 import AuthGate from "./AuthGate";
@@ -17,17 +23,21 @@ const unauthenticated: AgenteraAuthPublicState = {
 };
 
 describe("AuthGate", () => {
-  it("offers one browser authorization action without collecting credentials", () => {
+  it("presents Aila in 3D and offers one browser sign-in action without collecting credentials", () => {
     render(
       <AuthGate
         state={unauthenticated}
         onOpenBrowser={vi.fn().mockResolvedValue(undefined)}
-        onCancel={vi.fn().mockResolvedValue(undefined)}
+        onCopyLoginLink={vi.fn().mockResolvedValue(undefined)}
+        onRestartLogin={vi.fn().mockResolvedValue(undefined)}
         onRetry={vi.fn().mockResolvedValue(undefined)}
       />,
     );
 
-    expect(screen.getByText("AgentEra")).toBeInTheDocument();
+    expect(screen.getByText("auth.gate.slogan")).toBeInTheDocument();
+    expect(screen.getByTestId("aila-3d-model")).toBeInTheDocument();
+    expect(screen.getByText("auth.gate.privacy")).toBeInTheDocument();
+    expect(screen.getByText("auth.gate.terms")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "auth.gate.openBrowser" }),
     ).toHaveFocus();
@@ -36,21 +46,29 @@ describe("AuthGate", () => {
     expect(document.querySelector("webview")).toBeNull();
   });
 
-  it("keeps the gate visible while browser authorization can be cancelled", async () => {
-    let finishLogin: (() => void) | undefined;
+  it("shows the browser waiting surface and keeps a restart isolated from the cancelled attempt", async () => {
+    let rejectLogin: ((error: Error) => void) | undefined;
+    let finishRestart: (() => void) | undefined;
     const onOpenBrowser = vi.fn(
       () =>
-        new Promise<void>((resolve) => {
-          finishLogin = resolve;
+        new Promise<void>((_resolve, reject) => {
+          rejectLogin = reject;
         }),
     );
-    const onCancel = vi.fn().mockResolvedValue(undefined);
+    const onCopyLoginLink = vi.fn().mockResolvedValue(undefined);
+    const onRestartLogin = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRestart = resolve;
+        }),
+    );
 
     render(
       <AuthGate
         state={unauthenticated}
         onOpenBrowser={onOpenBrowser}
-        onCancel={onCancel}
+        onCopyLoginLink={onCopyLoginLink}
+        onRestartLogin={onRestartLogin}
         onRetry={vi.fn().mockResolvedValue(undefined)}
       />,
     );
@@ -60,14 +78,41 @@ describe("AuthGate", () => {
     );
     expect(onOpenBrowser).toHaveBeenCalledOnce();
 
-    const cancel = await screen.findByRole("button", {
-      name: "auth.gate.cancel",
-    });
-    expect(cancel).toHaveFocus();
-    fireEvent.click(cancel);
-    expect(onCancel).toHaveBeenCalledOnce();
+    expect(
+      await screen.findByTestId("browser-login-waiting"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "auth.gate.loggingIn" }),
+    ).toBeDisabled();
+    expect(screen.getByText("auth.gate.browserNotOpened")).toBeInTheDocument();
+    expect(screen.getByText("auth.gate.copyLoginHint")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "auth.gate.restartLogin" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "auth.gate.cancel" }),
+    ).toBeNull();
 
-    finishLogin?.();
+    fireEvent.click(
+      screen.getByRole("button", { name: "auth.gate.copyLoginLink" }),
+    );
+    await waitFor(() => expect(onCopyLoginLink).toHaveBeenCalledOnce());
+    expect(
+      screen.getByRole("button", { name: "auth.gate.copiedLoginLink" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "auth.gate.restartLogin" }),
+    );
+    expect(onRestartLogin).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      rejectLogin?.(new Error("cancelled"));
+    });
+    expect(screen.getByTestId("browser-login-waiting")).toBeInTheDocument();
+    expect(screen.queryByText("auth.gate.loginFailed")).toBeNull();
+
+    await act(async () => finishRestart?.());
   });
 
   it("explains secure-storage failure and supports an explicit retry", () => {
@@ -80,7 +125,8 @@ describe("AuthGate", () => {
           reason: "secure_storage_unavailable",
         }}
         onOpenBrowser={vi.fn().mockResolvedValue(undefined)}
-        onCancel={vi.fn().mockResolvedValue(undefined)}
+        onCopyLoginLink={vi.fn().mockResolvedValue(undefined)}
+        onRestartLogin={vi.fn().mockResolvedValue(undefined)}
         onRetry={onRetry}
       />,
     );

@@ -79,7 +79,7 @@ const auth = {
     signOut: "יציאה",
     actionFailed: "לא ניתן להשלים את פעולת החשבון.",
     unavailable: "פרטי חשבון AgentEra אינם זמינים.",
-    userId: "משתמש",
+    userId: "מזהה חשבון",
     deviceId: "מכשיר",
     offlineUntil: "הגישה החתומה הלא מקוונת תקפה עד {{date}}.",
     localDataWarning:

@@ -35,4 +35,6 @@ export default {
   uninstallConfirm: "Uninstall {{name}}?",
   localEmptyTitle: "No skills installed",
   localEmptyText: "Skills you install will appear here.",
+  openRegistry: "Open Registry",
+  openRegistryOnGithub: "Open Registry on GitHub",
 } as const;

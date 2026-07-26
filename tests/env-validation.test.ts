@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -20,6 +29,7 @@ function readEnvFile(): string {
 describe("environment variable write validation", () => {
   beforeEach(() => {
     testHome = mkdtempSync(join(tmpdir(), "hermes-env-validation-"));
+    vi.stubEnv("API_SERVER_KEY", "");
   });
 
   afterEach(() => {
@@ -83,5 +93,65 @@ describe("environment variable write validation", () => {
     expect(env.EMPTY_FLAG).toBe("");
     expect(env.WITH_VALUE).toBe("present");
     expect(readEnvFile()).toContain("EMPTY_FLAG=\n");
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "keeps new and rewritten credential files private to the current user",
+    async () => {
+      const { setEnvValue } = await loadConfigModule();
+      const envFile = join(testHome, ".env");
+
+      setEnvValue("API_SERVER_KEY", "internal-token");
+      expect(statSync(envFile).mode & 0o777).toBe(0o600);
+
+      chmodSync(envFile, 0o644);
+      setEnvValue("OPENAI_API_KEY", "provider-token");
+      expect(statSync(envFile).mode & 0o777).toBe(0o600);
+    },
+  );
+
+  it("creates a strong local gateway credential in the active named profile", async () => {
+    writeFileSync(join(testHome, "active_profile"), "work\n", "utf-8");
+    const { ensureLocalApiServerKey, readEnv } = await loadConfigModule();
+
+    const result = ensureLocalApiServerKey();
+
+    expect(result.generated).toBe(true);
+    expect(result.key).toMatch(/^[a-f0-9]{64}$/);
+    expect(readEnv("work").API_SERVER_KEY).toBe(result.key);
+    expect(existsSync(join(testHome, ".env"))).toBe(false);
+  });
+
+  it("reuses the active named profile credential instead of the default profile credential", async () => {
+    writeFileSync(join(testHome, "active_profile"), "work\n", "utf-8");
+    const { ensureLocalApiServerKey, setEnvValue } = await loadConfigModule();
+    const defaultKey = "default-profile-internal-token";
+    const namedKey = "named-profile-internal-token";
+    setEnvValue("API_SERVER_KEY", defaultKey);
+    setEnvValue("API_SERVER_KEY", namedKey, "work");
+
+    const result = ensureLocalApiServerKey();
+
+    expect(result).toEqual({ generated: false, key: namedKey });
+  });
+
+  it("never overwrites a command-backed secrets provider when its gateway credential is missing", async () => {
+    const profileHome = join(testHome, "profiles", "vault");
+    mkdirSync(profileHome, { recursive: true });
+    writeFileSync(
+      join(profileHome, "config.yaml"),
+      `secrets:
+  provider: command
+  command: "printf ''"
+`,
+      "utf-8",
+    );
+    const { ensureLocalApiServerKey } = await loadConfigModule();
+
+    expect(() => ensureLocalApiServerKey("vault")).toThrow(
+      /secrets provider must supply/i,
+    );
+    expect(existsSync(join(profileHome, ".env"))).toBe(false);
+    expect(existsSync(join(testHome, ".env"))).toBe(false);
   });
 });

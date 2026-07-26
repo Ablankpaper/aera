@@ -290,6 +290,60 @@ export class AgenteraProfileBindingStore {
     };
   }
 
+  /**
+   * Resolve the account's primary local Profile without exposing any Profile
+   * path or owner metadata to the renderer. The active owned Profile wins;
+   * otherwise the earliest binding is the stable account home across logins.
+   */
+  findPreferredOwnedProfile<T extends { path: string; isActive: boolean }>(
+    profiles: readonly T[],
+    owner: AgenteraRuntimeOwner,
+  ): { profile: T; binding: RuntimeOwnerBinding } | null {
+    assertOwner(owner);
+    const bindings = this.readBindings();
+    const candidates: Array<{
+      profile: T;
+      binding: RuntimeOwnerBinding;
+      bindingOrder: number;
+      canonicalPath: string;
+    }> = [];
+
+    for (const profile of profiles) {
+      let canonicalPath: string;
+      try {
+        canonicalPath = canonicalProfilePath(profile.path);
+      } catch {
+        continue;
+      }
+      const bindingOrder = bindings.findIndex(
+        (entry) =>
+          entry.profilePath === canonicalPath &&
+          sameOwner(entry.binding, owner),
+      );
+      if (bindingOrder < 0) continue;
+      candidates.push({
+        profile,
+        binding: bindings[bindingOrder].binding,
+        bindingOrder,
+        canonicalPath,
+      });
+    }
+
+    candidates.sort(
+      (left, right) =>
+        Number(right.profile.isActive) - Number(left.profile.isActive) ||
+        left.bindingOrder - right.bindingOrder ||
+        left.canonicalPath.localeCompare(right.canonicalPath),
+    );
+    const selected = candidates[0];
+    return selected
+      ? {
+          profile: selected.profile,
+          binding: { ...selected.binding },
+        }
+      : null;
+  }
+
   bindExistingProfile(
     profilePath: string,
     owner: AgenteraRuntimeOwner,

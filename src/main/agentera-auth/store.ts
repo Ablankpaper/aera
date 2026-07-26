@@ -152,7 +152,11 @@ export class AgenteraAuthStore {
     const userDataPath = resolve(options.userDataPath);
     this.filePath = join(userDataPath, "agentera-auth", "state.json");
     this.secureStorage = options.secureStorage;
-    this.writeFile = options.writeFile ?? safeWriteFile;
+    this.writeFile =
+      options.writeFile ??
+      ((path, content) => {
+        safeWriteFile(path, content, 0o600);
+      });
   }
 
   getInstallation(): InstallationIdentity | null {

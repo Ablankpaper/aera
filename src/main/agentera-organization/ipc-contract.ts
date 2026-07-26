@@ -17,6 +17,7 @@ import type {
   OrganizationPublicState,
   OrganizationSummary,
 } from "../../shared/agentera-organization";
+import { parseAgenteraCloudOrigin } from "../agentera-auth/origin";
 import {
   AgenteraOrganizationPolicyVerificationError,
   canonicalizeOrganizationPolicyDocument,
@@ -638,14 +639,9 @@ export function serializeOrganizationPolicySummary(
     invalidRequest();
   }
   try {
-    const issuer = new URL(value.issuer);
-    if (
-      issuer.protocol !== "https:" ||
-      issuer.origin !== value.issuer ||
-      issuer.username ||
-      issuer.password
-    )
+    if (parseAgenteraCloudOrigin(value.issuer) !== value.issuer) {
       invalidRequest();
+    }
   } catch {
     invalidRequest();
   }

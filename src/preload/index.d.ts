@@ -38,6 +38,24 @@ import type {
   AgenteraPortalTarget,
 } from "../shared/agentera-auth";
 import type {
+  AgenteraUserProfile,
+  AgenteraUserProfileInput,
+} from "../shared/agentera-user-profile";
+import type {
+  AgenteraGlobalProfile,
+  AgenteraGlobalProfileConversationContext,
+  AgenteraGlobalProfileHistoryItem,
+  AgenteraGlobalProfileResult,
+  PrepareAgenteraGlobalProfileConversationContextInput,
+  SetAgenteraGlobalProfileEntryInput,
+} from "../shared/agentera-global-profile";
+import type {
+  AgenteraMemoryCandidateBatch,
+  AgenteraMemoryCandidateConfirmation,
+  AgenteraMemoryCandidateResult,
+} from "../shared/agentera-memory-candidate";
+import type {
+  AgenteraAccountProfileResolutionPublicState,
   AgenteraBoundConnectionPublicState,
   AgenteraBoundProfilePublicState,
   AgenteraConnectionClaimPublicState,
@@ -76,6 +94,7 @@ import type {
   OrganizationReviewPreview,
   OrganizationSubmissionPreview,
   OrganizationWithdrawalPreview,
+  OfficialAgentDetail,
   OfficialAgentInstallPreview,
   OfficialAgentSummary,
   OfficialManagedUpdate,
@@ -136,10 +155,21 @@ interface ElectronAPI {
 interface AgenteraAuthAPI {
   getState: () => Promise<AgenteraAuthPublicState>;
   startLogin: (options?: { forceAccountSelection?: boolean }) => Promise<void>;
+  restartLogin: (options?: {
+    forceAccountSelection?: boolean;
+  }) => Promise<void>;
   cancelLogin: () => Promise<void>;
+  copyLoginLink: () => Promise<void>;
   retryOnline: () => Promise<AgenteraAuthPublicState>;
   logout: () => Promise<void>;
   openPortal: (target: AgenteraPortalTarget) => Promise<void>;
+  getUserProfile: () => Promise<AgenteraUserProfile>;
+  updateUserProfile: (
+    input: AgenteraUserProfileInput,
+  ) => Promise<AgenteraUserProfile>;
+  onUserProfileChanged: (
+    callback: (profile: AgenteraUserProfile) => void,
+  ) => () => void;
   onStateChanged: (
     callback: (state: AgenteraAuthPublicState) => void,
   ) => () => void;
@@ -148,6 +178,7 @@ interface AgenteraAuthAPI {
 interface AgenteraRuntimeAccessAPI {
   probeInstallFiles: () => Promise<AgenteraInstallFileProbe>;
   runStartupPreflight: () => Promise<AgenteraStartupPreflightPublicResult>;
+  resolveAccountProfile: () => Promise<AgenteraAccountProfileResolutionPublicState>;
   inspectActiveProfile: () => Promise<AgenteraProfileClaimPublicState>;
   bindActiveProfile: () => Promise<AgenteraBoundProfilePublicState>;
   createFreshProfile: (
@@ -433,6 +464,9 @@ interface AgenteraAgentsAPI {
   listOfficialAgents: () => Promise<
     AgenteraAgentControlResult<OfficialAgentSummary[]>
   >;
+  getOfficialAgentDetail: (
+    definitionId: string,
+  ) => Promise<AgenteraAgentControlResult<OfficialAgentDetail>>;
   prepareOfficialInstall: (
     definitionId: string,
   ) => Promise<AgenteraAgentControlResult<OfficialAgentInstallPreview>>;
@@ -885,7 +919,7 @@ interface HermesAPI {
     profile?: string,
   ) => Promise<{ hasKey: boolean; providerId?: string; checkedAt?: number }>;
   invalidateSecretsCache: () => Promise<void>;
-  generateApiServerKey: (profile?: string) => Promise<{ key: string }>;
+  generateApiServerKey: (profile?: string) => Promise<{ generated: boolean }>;
   copyToClipboard: (text: string) => Promise<void>;
   onContextMenuCopyChat: (
     callback: (format: "text" | "markdown") => void,
@@ -1102,6 +1136,10 @@ interface HermesAPI {
       color?: string;
       /** Avatar data URL, or null/absent when none is set. */
       avatar?: string | null;
+      /** Agent installation attached to this local Profile, when any. */
+      agentInstallationId?: string | null;
+      /** Opaque local Runtime Profile identity, never a filesystem path. */
+      runtimeProfileId?: string | null;
     }>
   >;
   createProfile: (
@@ -1119,7 +1157,25 @@ interface HermesAPI {
   setProfileName: (
     id: string,
     name: string,
-  ) => Promise<{ success: boolean; error?: string }>;
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+    operationId?: string;
+    identity?: {
+      profileId: string;
+      displayName: string;
+      revision: number;
+      updatedAt: string;
+    };
+  }>;
+  onAgentIdentityChanged: (
+    callback: (identity: {
+      profileId: string;
+      displayName: string;
+      revision: number;
+      updatedAt: string;
+    }) => void,
+  ) => () => void;
   setProfileAvatar: (
     name: string,
     dataUrl: string,
@@ -1180,6 +1236,32 @@ interface HermesAPI {
     content: string,
     profile?: string,
   ) => Promise<{ success: boolean; error?: string }>;
+  previewUserMemoryRepair: (profile?: string) => Promise<{
+    success: boolean;
+    error?: string;
+    preview?: {
+      profileId: string;
+      exists: boolean;
+      content: string;
+      charCount: number;
+      currentSha256: string;
+    };
+  }>;
+  applyUserMemoryRepair: (
+    profile: string | undefined,
+    expectedSha256: string,
+    replacementContent: string,
+    confirmed: boolean,
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+    operationId?: string;
+    profileId?: string;
+  }>;
+  undoUserMemoryRepair: (
+    profile: string | undefined,
+    operationId: string,
+  ) => Promise<{ success: boolean; error?: string; profileId?: string }>;
 
   // Soul
   readSoul: (profile?: string) => Promise<string>;
@@ -1297,6 +1379,7 @@ interface HermesAPI {
       provider: string;
       model: string;
       baseUrl: string;
+      apiMode?: string | null;
       providerLabel?: string;
       contextLength?: number;
       capabilities?: string[];
@@ -1311,12 +1394,14 @@ interface HermesAPI {
     baseUrl: string,
     contextLength?: number,
     providerLabel?: string,
+    apiMode?: string | null,
   ) => Promise<{
     id: string;
     name: string;
     provider: string;
     model: string;
     baseUrl: string;
+    apiMode?: string | null;
     contextLength?: number;
     providerLabel?: string;
     createdAt: number;
@@ -1704,11 +1789,48 @@ interface HermesAPI {
   ) => Promise<{ content: string; path: string }>;
 }
 
+interface AgenteraGlobalProfileAPI {
+  get: () => Promise<AgenteraGlobalProfileResult<AgenteraGlobalProfile>>;
+  setEntry: (
+    input: SetAgenteraGlobalProfileEntryInput,
+  ) => Promise<AgenteraGlobalProfileResult<AgenteraGlobalProfile>>;
+  removeEntry: (
+    entryId: string,
+  ) => Promise<AgenteraGlobalProfileResult<AgenteraGlobalProfile>>;
+  listHistory: () => Promise<
+    AgenteraGlobalProfileResult<AgenteraGlobalProfileHistoryItem[]>
+  >;
+  rollback: (
+    targetVersion: number,
+  ) => Promise<AgenteraGlobalProfileResult<AgenteraGlobalProfile>>;
+  prepareConversationContext: (
+    input: PrepareAgenteraGlobalProfileConversationContextInput,
+  ) => Promise<AgenteraGlobalProfileConversationContext>;
+  extractCandidates: (
+    rawText: string,
+    profile: string,
+  ) => Promise<
+    AgenteraMemoryCandidateResult<AgenteraMemoryCandidateBatch | null>
+  >;
+  confirmCandidates: (
+    batchId: string,
+    profile: string,
+  ) => Promise<
+    AgenteraMemoryCandidateResult<AgenteraMemoryCandidateConfirmation>
+  >;
+  rejectCandidates: (
+    batchId: string,
+    profile: string,
+  ) => Promise<AgenteraMemoryCandidateResult<AgenteraMemoryCandidateBatch>>;
+  onChanged: (callback: (profile: AgenteraGlobalProfile) => void) => () => void;
+}
+
 declare global {
   interface Window {
     electron: ElectronAPI;
     hermesAPI: HermesAPI;
     agenteraAuth: AgenteraAuthAPI;
+    agenteraGlobalProfile: AgenteraGlobalProfileAPI;
     agenteraProductSpace: AgenteraProductSpaceAPI;
     agenteraOrganization: AgenteraOrganizationAPI;
     agenteraWorkspace: AgenteraWorkspaceAPI;

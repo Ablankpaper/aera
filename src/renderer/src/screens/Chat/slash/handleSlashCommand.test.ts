@@ -20,6 +20,28 @@ function createMockContext(
     openDialog: vi.fn(),
     startNewChat: vi.fn(),
     clearTranscript: vi.fn(),
+    renameAgent: vi.fn().mockResolvedValue({ success: true }),
+    getGlobalProfile: vi.fn().mockResolvedValue({
+      success: true,
+      value: {
+        schemaVersion: 1,
+        profileVersion: 0,
+        updatedAt: null,
+        entries: [],
+      },
+    }),
+    setGlobalProfileEntry: vi.fn().mockResolvedValue({
+      success: true,
+      value: {
+        schemaVersion: 1,
+        profileVersion: 1,
+        updatedAt: null,
+        entries: [],
+      },
+    }),
+    removeGlobalProfileEntry: vi.fn(),
+    listGlobalProfileHistory: vi.fn(),
+    rollbackGlobalProfile: vi.fn(),
     ...overrides,
   };
 }
@@ -48,6 +70,37 @@ describe("handleSlashCommand", () => {
     expect(res).toEqual({ type: "handled", output: undefined });
     expect(ctx.openSettings).toHaveBeenCalledWith("appearance");
     expect(ctx.submitPrompt).not.toHaveBeenCalled();
+  });
+
+  it("renames the current Agent locally without submitting command text", async () => {
+    const ctx = createMockContext({ profile: "agent-one" });
+    const res = await handleSlashCommand("/agent name 小乌龟", catalog, ctx);
+
+    expect(res).toEqual({
+      type: "handled",
+      output: "Agent renamed to “小乌龟”. The new identity is active now.",
+    });
+    expect(ctx.renameAgent).toHaveBeenCalledWith("agent-one", "小乌龟");
+    expect(ctx.submitPrompt).not.toHaveBeenCalled();
+    expect(ctx.executeAgentSlash).not.toHaveBeenCalled();
+  });
+
+  it("writes an explicit global behavior entry locally without sending its value", async () => {
+    const ctx = createMockContext();
+    const res = await handleSlashCommand(
+      "/global set communication_style.preferred_address Use the chosen account-wide form of address",
+      catalog,
+      ctx,
+    );
+
+    expect(res).toMatchObject({ type: "handled" });
+    expect(ctx.setGlobalProfileEntry).toHaveBeenCalledWith({
+      id: "communication_style.preferred_address",
+      category: "communication_style",
+      content: "Use the chosen account-wide form of address",
+    });
+    expect(ctx.submitPrompt).not.toHaveBeenCalled();
+    expect(ctx.executeAgentSlash).not.toHaveBeenCalled();
   });
 
   it("runs desktop (uiAction) commands even when attachments are staged", async () => {

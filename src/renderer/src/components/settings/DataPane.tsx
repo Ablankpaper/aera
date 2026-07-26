@@ -12,8 +12,10 @@ export default function DataPane(): React.JSX.Element {
   const {
     backingUp,
     backupResult,
+    backupResultType,
     importing,
     importResult,
+    importResultType,
     handleBackup,
     handleImport,
     openclawFound,
@@ -54,7 +56,7 @@ export default function DataPane(): React.JSX.Element {
         </div>
         {backupResult && (
           <div
-            className={`settings-hermes-result ${backupResult.includes("created") || backupResult.includes("success") ? "success" : "error"}`}
+            className={`settings-hermes-result ${backupResultType || "error"}`}
             style={{ marginTop: 8 }}
           >
             {backupResult}
@@ -62,7 +64,7 @@ export default function DataPane(): React.JSX.Element {
         )}
         {importResult && (
           <div
-            className={`settings-hermes-result ${importResult.includes("complete") ? "success" : "error"}`}
+            className={`settings-hermes-result ${importResultType || "error"}`}
             style={{ marginTop: 8 }}
           >
             {importResult}

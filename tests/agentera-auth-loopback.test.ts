@@ -28,7 +28,7 @@ async function start(
 }
 
 describe("AgentEra OAuth loopback listener", () => {
-  // @lat: [[agentera-app-authentication#Browser authorization#Loopback callback]]
+  // @lat: [[agentera-app-authentication#Browser sign-in#Loopback callback]]
   it("binds an ephemeral IPv4 loopback port and consumes one exact callback", async () => {
     const state = Buffer.alloc(32, 2).toString("base64url");
     const code = Buffer.alloc(32, 3).toString("base64url");

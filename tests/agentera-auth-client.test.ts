@@ -96,7 +96,7 @@ describe("AgentEra cloud desktop client", () => {
     return `http://127.0.0.1:${address.port}`;
   }
 
-  // @lat: [[agentera-app-authentication#Browser authorization#Cloud token exchange]]
+  // @lat: [[agentera-app-authentication#Browser sign-in#Cloud token exchange]]
   it("builds the fixed authorization request without putting any secret in its URL", async () => {
     const origin = await listen((_request, response) => response.end());
     const client = new AgenteraCloudClient({ origin });

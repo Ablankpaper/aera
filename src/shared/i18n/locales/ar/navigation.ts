@@ -9,7 +9,7 @@ export default {
   agents: "الملفات الشخصية",
   office: "المكتب",
   models: "النماذج",
-  providers: "المزوّدون",
+  providers: "النماذج",
   projects: "المشاريع",
   skills: "المهارات",
   chats: "المحادثات",

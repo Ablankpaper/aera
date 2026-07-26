@@ -82,7 +82,7 @@ const auth = {
     signOut: "Wyloguj",
     actionFailed: "Nie udało się wykonać operacji na koncie.",
     unavailable: "Informacje o koncie AgentEra są niedostępne.",
-    userId: "Użytkownik",
+    userId: "Identyfikator konta",
     deviceId: "Urządzenie",
     offlineUntil: "Podpisany dostęp offline jest ważny do {{date}}.",
     localDataWarning:

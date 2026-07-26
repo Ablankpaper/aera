@@ -121,6 +121,7 @@ import installId from "./locales/id/install";
 import constantsId from "./locales/id/constants";
 import commonZh from "./locales/zh-CN/common";
 import navigationZh from "./locales/zh-CN/navigation";
+import discoverZh from "./locales/zh-CN/discover";
 import welcomeZh from "./locales/zh-CN/welcome";
 import setupZh from "./locales/zh-CN/setup";
 import chatZh from "./locales/zh-CN/chat";
@@ -140,6 +141,7 @@ import memoryZh from "./locales/zh-CN/memory";
 import installZh from "./locales/zh-CN/install";
 import constantsZh from "./locales/zh-CN/constants";
 import kanbanZh from "./locales/zh-CN/kanban";
+import diagnoseZh from "./locales/zh-CN/diagnose";
 import commonZhTw from "./locales/zh-TW/common";
 import navigationZhTw from "./locales/zh-TW/navigation";
 import welcomeZhTw from "./locales/zh-TW/welcome";
@@ -282,6 +284,36 @@ import authTr from "./locales/tr/auth";
 import authZh from "./locales/zh-CN/auth";
 import authZhTw from "./locales/zh-TW/auth";
 
+function isTranslationBranch(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Materialize the English fallback for newly added authentication copy while
+ * preserving every translated value already supplied by a locale. Keeping the
+ * complete tree in `resources` also makes renderer and test lookups behave the
+ * same before i18next has initialized its runtime fallback chain.
+ */
+function mergeTranslationFallback<T>(fallback: T, localized: unknown): T {
+  if (!isTranslationBranch(fallback) || !isTranslationBranch(localized)) {
+    return (localized ?? fallback) as T;
+  }
+
+  const merged: Record<string, unknown> = { ...fallback };
+  for (const [key, value] of Object.entries(localized)) {
+    const fallbackValue = fallback[key];
+    merged[key] =
+      isTranslationBranch(fallbackValue) && isTranslationBranch(value)
+        ? mergeTranslationFallback(fallbackValue, value)
+        : value;
+  }
+  return merged as T;
+}
+
+function completeAuth(localized: unknown): typeof authEn {
+  return mergeTranslationFallback(authEn, localized);
+}
+
 export const resources = {
   en: {
     translation: {
@@ -313,7 +345,7 @@ export const resources = {
   },
   he: {
     translation: {
-      auth: authHe,
+      auth: completeAuth(authHe),
       common: commonHe,
       navigation: navigationHe,
       discover: discoverHe,
@@ -341,7 +373,7 @@ export const resources = {
   },
   pl: {
     translation: {
-      auth: authPl,
+      auth: completeAuth(authPl),
       common: commonPl,
       navigation: navigationPl,
       welcome: welcomePl,
@@ -367,7 +399,7 @@ export const resources = {
   },
   es: {
     translation: {
-      auth: authEs,
+      auth: completeAuth(authEs),
       common: commonEs,
       navigation: navigationEs,
       welcome: welcomeEs,
@@ -394,7 +426,7 @@ export const resources = {
   },
   id: {
     translation: {
-      auth: authId,
+      auth: completeAuth(authId),
       common: commonId,
       navigation: navigationId,
       welcome: welcomeId,
@@ -419,9 +451,10 @@ export const resources = {
   },
   "zh-CN": {
     translation: {
-      auth: authZh,
+      auth: completeAuth(authZh),
       common: commonZh,
       navigation: navigationZh,
+      discover: discoverZh,
       welcome: welcomeZh,
       setup: setupZh,
       chat: chatZh,
@@ -441,11 +474,12 @@ export const resources = {
       install: installZh,
       constants: constantsZh,
       kanban: kanbanZh,
+      diagnose: diagnoseZh,
     },
   },
   "zh-TW": {
     translation: {
-      auth: authZhTw,
+      auth: completeAuth(authZhTw),
       common: commonZhTw,
       navigation: navigationZhTw,
       welcome: welcomeZhTw,
@@ -471,7 +505,7 @@ export const resources = {
   },
   "pt-BR": {
     translation: {
-      auth: authPt,
+      auth: completeAuth(authPt),
       common: commonPt,
       navigation: navigationPt,
       welcome: welcomePt,
@@ -496,7 +530,7 @@ export const resources = {
   },
   "pt-PT": {
     translation: {
-      auth: authPtPt,
+      auth: completeAuth(authPtPt),
       common: commonPtPt,
       navigation: navigationPtPt,
       welcome: welcomePtPt,
@@ -523,7 +557,7 @@ export const resources = {
   },
   ja: {
     translation: {
-      auth: authJa,
+      auth: completeAuth(authJa),
       common: commonJa,
       navigation: navigationJa,
       welcome: welcomeJa,
@@ -548,7 +582,7 @@ export const resources = {
   },
   tr: {
     translation: {
-      auth: authTr,
+      auth: completeAuth(authTr),
       common: commonTr,
       navigation: navigationTr,
       discover: discoverTr,
@@ -576,7 +610,7 @@ export const resources = {
   },
   ar: {
     translation: {
-      auth: authAr,
+      auth: completeAuth(authAr),
       common: commonAr,
       navigation: navigationAr,
       discover: discoverAr,

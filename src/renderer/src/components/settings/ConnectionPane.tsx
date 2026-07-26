@@ -228,7 +228,9 @@ export default function ConnectionPane(): React.JSX.Element {
             </div>
           )}
           <div className="settings-field">
-            <label className="settings-field-label">Chat transport</label>
+            <label className="settings-field-label">
+              {t("settings.chatTransport")}
+            </label>
             <div className="settings-theme-options">
               {CHAT_TRANSPORT_OPTIONS.filter(
                 (option) => remoteAuthMode !== "oauth" || option !== "legacy",
@@ -243,7 +245,9 @@ export default function ConnectionPane(): React.JSX.Element {
                     void handleChatTransportChange("remote", option)
                   }
                 >
-                  {option[0].toUpperCase() + option.slice(1)}
+                  {t(
+                    `settings.chatTransport${option[0].toUpperCase()}${option.slice(1)}`,
+                  )}
                 </button>
               ))}
             </div>
@@ -255,7 +259,9 @@ export default function ConnectionPane(): React.JSX.Element {
                 className={`settings-transport-status settings-transport-status--${transportProbe.kind}`}
               >
                 <span>{transportProbe.label}</span>
-                {transportProbe.loading && <span>Checking…</span>}
+                {transportProbe.loading && (
+                  <span>{t("settings.transportCheckingShort")}</span>
+                )}
                 {transportProbe.detail && <code>{transportProbe.detail}</code>}
               </div>
             )}
@@ -351,7 +357,9 @@ export default function ConnectionPane(): React.JSX.Element {
             </div>
           </div>
           <div className="settings-field">
-            <label className="settings-field-label">Chat transport</label>
+            <label className="settings-field-label">
+              {t("settings.chatTransport")}
+            </label>
             <div className="settings-theme-options">
               {CHAT_TRANSPORT_OPTIONS.map((option) => (
                 <button
@@ -362,22 +370,23 @@ export default function ConnectionPane(): React.JSX.Element {
                   }`}
                   onClick={() => void handleChatTransportChange("ssh", option)}
                 >
-                  {option[0].toUpperCase() + option.slice(1)}
+                  {t(
+                    `settings.chatTransport${option[0].toUpperCase()}${option.slice(1)}`,
+                  )}
                 </button>
               ))}
             </div>
             <div className="settings-field-hint">
-              Auto tries the AgentEra Runtime dashboard WebSocket through the
-              SSH tunnel first, then falls back to legacy SSH chat. Dashboard
-              forces the upstream dashboard path; Legacy keeps the older SSH
-              transport.
+              {t("settings.sshChatTransportHint")}
             </div>
             {transportProbe && (
               <div
                 className={`settings-transport-status settings-transport-status--${transportProbe.kind}`}
               >
                 <span>{transportProbe.label}</span>
-                {transportProbe.loading && <span>Checking…</span>}
+                {transportProbe.loading && (
+                  <span>{t("settings.transportCheckingShort")}</span>
+                )}
                 {transportProbe.detail && <code>{transportProbe.detail}</code>}
               </div>
             )}

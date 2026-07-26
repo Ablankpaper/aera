@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useI18n } from "../../../components/useI18n";
 
 /**
  * Voice input for the chat box.
@@ -60,6 +61,7 @@ export function useVoiceInput(
   onResult: (text: string, isFinal: boolean) => void,
   profile?: string,
 ): UseVoiceInput {
+  const { t } = useI18n();
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -108,20 +110,22 @@ export function useVoiceInput(
         // A late interim must not overwrite the final transcript.
         if (!isFinal && finalizingRef.current) return;
         if (text) onResultRef.current(text, isFinal);
-        else if (isFinal) setError("No speech detected.");
+        else if (isFinal) setError(t("chat.voiceNoSpeech"));
       } catch (e) {
         // Interim failures are transient — only surface the final one.
-        if (isFinal) setError((e as Error).message || "Transcription failed.");
+        if (isFinal) {
+          setError((e as Error).message || t("chat.voiceTranscriptionFailed"));
+        }
       } finally {
         inFlightRef.current = false;
       }
     },
-    [profile],
+    [profile, t],
   );
 
   const startMediaRecorder = useCallback(async () => {
     if (!canRecord) {
-      setError("Voice input isn't available here.");
+      setError(t("chat.voiceUnavailable"));
       return;
     }
     try {
@@ -157,10 +161,10 @@ export function useVoiceInput(
       setRecording(true);
       setError(null);
     } catch {
-      setError("Microphone access was denied or is unavailable.");
+      setError(t("chat.voiceMicrophoneUnavailable"));
       setRecording(false);
     }
-  }, [canRecord, stopStream, transcribeAccumulated]);
+  }, [canRecord, stopStream, t, transcribeAccumulated]);
 
   const startSpeechRecognition = useCallback(() => {
     if (!SpeechCtor) {

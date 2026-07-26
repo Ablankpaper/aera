@@ -32,6 +32,24 @@ import type {
   AgenteraPortalTarget,
 } from "../shared/agentera-auth";
 import type {
+  AgenteraUserProfile,
+  AgenteraUserProfileInput,
+} from "../shared/agentera-user-profile";
+import type {
+  AgenteraGlobalProfile,
+  AgenteraGlobalProfileConversationContext,
+  AgenteraGlobalProfileHistoryItem,
+  AgenteraGlobalProfileResult,
+  PrepareAgenteraGlobalProfileConversationContextInput,
+  SetAgenteraGlobalProfileEntryInput,
+} from "../shared/agentera-global-profile";
+import type {
+  AgenteraMemoryCandidateBatch,
+  AgenteraMemoryCandidateConfirmation,
+  AgenteraMemoryCandidateResult,
+} from "../shared/agentera-memory-candidate";
+import type {
+  AgenteraAccountProfileResolutionPublicState,
   AgenteraBoundConnectionPublicState,
   AgenteraBoundProfilePublicState,
   AgenteraConnectionClaimPublicState,
@@ -70,6 +88,7 @@ import type {
   OrganizationReviewPreview,
   OrganizationSubmissionPreview,
   OrganizationWithdrawalPreview,
+  OfficialAgentDetail,
   OfficialAgentInstallPreview,
   OfficialAgentSummary,
   OfficialManagedUpdate,
@@ -579,7 +598,7 @@ const hermesAPI = {
   invalidateSecretsCache: (): Promise<void> =>
     ipcRenderer.invoke("invalidate-secrets-cache"),
 
-  generateApiServerKey: (profile?: string): Promise<{ key: string }> =>
+  generateApiServerKey: (profile?: string): Promise<{ generated: boolean }> =>
     ipcRenderer.invoke("generate-api-server-key", profile),
 
   copyToClipboard: (text: string): Promise<void> =>
@@ -938,6 +957,8 @@ const hermesAPI = {
       gatewayRunning: boolean;
       color?: string;
       avatar?: string | null;
+      agentInstallationId?: string | null;
+      runtimeProfileId?: string | null;
     }>
   > => ipcRenderer.invoke("list-profiles"),
 
@@ -964,8 +985,38 @@ const hermesAPI = {
   setProfileName: (
     id: string,
     name: string,
-  ): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke("set-profile-name", id, name),
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    operationId?: string;
+    identity?: {
+      profileId: string;
+      displayName: string;
+      revision: number;
+      updatedAt: string;
+    };
+  }> => ipcRenderer.invoke("set-profile-name", id, name),
+
+  onAgentIdentityChanged: (
+    callback: (identity: {
+      profileId: string;
+      displayName: string;
+      revision: number;
+      updatedAt: string;
+    }) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      identity: {
+        profileId: string;
+        displayName: string;
+        revision: number;
+        updatedAt: string;
+      },
+    ): void => callback(identity);
+    ipcRenderer.on("agent-identity-changed", handler);
+    return () => ipcRenderer.removeListener("agent-identity-changed", handler);
+  },
 
   setProfileAvatar: (
     name: string,
@@ -1062,6 +1113,42 @@ const hermesAPI = {
     profile?: string,
   ): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke("write-user-profile", content, profile),
+  previewUserMemoryRepair: (
+    profile?: string,
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    preview?: {
+      profileId: string;
+      exists: boolean;
+      content: string;
+      charCount: number;
+      currentSha256: string;
+    };
+  }> => ipcRenderer.invoke("preview-user-memory-repair", profile),
+  applyUserMemoryRepair: (
+    profile: string | undefined,
+    expectedSha256: string,
+    replacementContent: string,
+    confirmed: boolean,
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    operationId?: string;
+    profileId?: string;
+  }> =>
+    ipcRenderer.invoke(
+      "apply-user-memory-repair",
+      profile,
+      expectedSha256,
+      replacementContent,
+      confirmed,
+    ),
+  undoUserMemoryRepair: (
+    profile: string | undefined,
+    operationId: string,
+  ): Promise<{ success: boolean; error?: string; profileId?: string }> =>
+    ipcRenderer.invoke("undo-user-memory-repair", profile, operationId),
 
   // Soul
   readSoul: (profile?: string): Promise<string> =>
@@ -1220,6 +1307,7 @@ const hermesAPI = {
     baseUrl: string,
     contextLength?: number,
     providerLabel?: string,
+    apiMode?: string | null,
   ): Promise<{
     id: string;
     name: string;
@@ -1228,6 +1316,7 @@ const hermesAPI = {
     baseUrl: string;
     contextLength?: number;
     providerLabel?: string;
+    apiMode?: string | null;
     createdAt: number;
   }> =>
     ipcRenderer.invoke(
@@ -1238,6 +1327,7 @@ const hermesAPI = {
       baseUrl,
       contextLength,
       providerLabel,
+      apiMode,
     ),
 
   removeModel: (id: string): Promise<boolean> =>
@@ -1720,13 +1810,36 @@ const agenteraAuthAPI = {
     ipcRenderer.invoke("agentera-auth-get-state"),
   startLogin: (options?: { forceAccountSelection?: boolean }): Promise<void> =>
     ipcRenderer.invoke("agentera-auth-start-login", options),
+  restartLogin: (options?: {
+    forceAccountSelection?: boolean;
+  }): Promise<void> =>
+    ipcRenderer.invoke("agentera-auth-restart-login", options),
   cancelLogin: (): Promise<void> =>
     ipcRenderer.invoke("agentera-auth-cancel-login"),
+  copyLoginLink: (): Promise<void> =>
+    ipcRenderer.invoke("agentera-auth-copy-login-link"),
   retryOnline: (): Promise<AgenteraAuthPublicState> =>
     ipcRenderer.invoke("agentera-auth-retry-online"),
   logout: (): Promise<void> => ipcRenderer.invoke("agentera-auth-logout"),
   openPortal: (target: AgenteraPortalTarget): Promise<void> =>
     ipcRenderer.invoke("agentera-auth-open-portal", target),
+  getUserProfile: (): Promise<AgenteraUserProfile> =>
+    ipcRenderer.invoke("agentera-user-profile-get"),
+  updateUserProfile: (
+    input: AgenteraUserProfileInput,
+  ): Promise<AgenteraUserProfile> =>
+    ipcRenderer.invoke("agentera-user-profile-update", input),
+  onUserProfileChanged: (
+    callback: (profile: AgenteraUserProfile) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      profile: AgenteraUserProfile,
+    ): void => callback(profile);
+    ipcRenderer.on("agentera-user-profile-changed", handler);
+    return () =>
+      ipcRenderer.removeListener("agentera-user-profile-changed", handler);
+  },
   onStateChanged: (
     callback: (state: AgenteraAuthPublicState) => void,
   ): (() => void) => {
@@ -1740,11 +1853,73 @@ const agenteraAuthAPI = {
   },
 };
 
+const agenteraGlobalProfileAPI = {
+  get: (): Promise<AgenteraGlobalProfileResult<AgenteraGlobalProfile>> =>
+    ipcRenderer.invoke("agentera-global-profile-get"),
+  setEntry: (
+    input: SetAgenteraGlobalProfileEntryInput,
+  ): Promise<AgenteraGlobalProfileResult<AgenteraGlobalProfile>> =>
+    ipcRenderer.invoke("agentera-global-profile-set", input),
+  removeEntry: (
+    entryId: string,
+  ): Promise<AgenteraGlobalProfileResult<AgenteraGlobalProfile>> =>
+    ipcRenderer.invoke("agentera-global-profile-remove", entryId),
+  listHistory: (): Promise<
+    AgenteraGlobalProfileResult<AgenteraGlobalProfileHistoryItem[]>
+  > => ipcRenderer.invoke("agentera-global-profile-history"),
+  rollback: (
+    targetVersion: number,
+  ): Promise<AgenteraGlobalProfileResult<AgenteraGlobalProfile>> =>
+    ipcRenderer.invoke("agentera-global-profile-rollback", targetVersion),
+  prepareConversationContext: (
+    input: PrepareAgenteraGlobalProfileConversationContextInput,
+  ): Promise<AgenteraGlobalProfileConversationContext> =>
+    ipcRenderer.invoke(
+      "agentera-global-profile-conversation-context",
+      input.runId,
+      input.profile,
+      input.resumeSessionId,
+    ),
+  extractCandidates: (
+    rawText: string,
+    profile: string,
+  ): Promise<
+    AgenteraMemoryCandidateResult<AgenteraMemoryCandidateBatch | null>
+  > =>
+    ipcRenderer.invoke("agentera-memory-candidates-extract", rawText, profile),
+  confirmCandidates: (
+    batchId: string,
+    profile: string,
+  ): Promise<
+    AgenteraMemoryCandidateResult<AgenteraMemoryCandidateConfirmation>
+  > =>
+    ipcRenderer.invoke("agentera-memory-candidates-confirm", batchId, profile),
+  rejectCandidates: (
+    batchId: string,
+    profile: string,
+  ): Promise<AgenteraMemoryCandidateResult<AgenteraMemoryCandidateBatch>> =>
+    ipcRenderer.invoke("agentera-memory-candidates-reject", batchId, profile),
+  onChanged: (
+    callback: (profile: AgenteraGlobalProfile) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      profile: AgenteraGlobalProfile,
+    ): void => callback(profile);
+    ipcRenderer.on("agentera-global-profile-changed", handler);
+    return () =>
+      ipcRenderer.removeListener("agentera-global-profile-changed", handler);
+  },
+};
+
 const agenteraRuntimeAccessAPI = {
   probeInstallFiles: (): Promise<AgenteraInstallFileProbe> =>
     ipcRenderer.invoke("agentera-install-file-probe"),
   runStartupPreflight: (): Promise<AgenteraStartupPreflightPublicResult> =>
     ipcRenderer.invoke("agentera-startup-preflight"),
+  resolveAccountProfile:
+    (): Promise<AgenteraAccountProfileResolutionPublicState> =>
+      ipcRenderer.invoke("agentera-profile-resolve-account-space"),
   inspectActiveProfile: (): Promise<AgenteraProfileClaimPublicState> =>
     ipcRenderer.invoke("agentera-profile-inspect-active"),
   bindActiveProfile: (): Promise<AgenteraBoundProfilePublicState> =>
@@ -2179,6 +2354,10 @@ const agenteraAgentsAPI = {
   listOfficialAgents: (): Promise<
     AgenteraAgentControlResult<OfficialAgentSummary[]>
   > => ipcRenderer.invoke("agentera-agents-list-official"),
+  getOfficialAgentDetail: (
+    definitionId: string,
+  ): Promise<AgenteraAgentControlResult<OfficialAgentDetail>> =>
+    ipcRenderer.invoke("agentera-agents-get-official-detail", definitionId),
   prepareOfficialInstall: (
     definitionId: string,
   ): Promise<AgenteraAgentControlResult<OfficialAgentInstallPreview>> =>
@@ -2286,6 +2465,10 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld("hermesAPI", hermesAPI);
     contextBridge.exposeInMainWorld("agenteraAuth", agenteraAuthAPI);
     contextBridge.exposeInMainWorld(
+      "agenteraGlobalProfile",
+      agenteraGlobalProfileAPI,
+    );
+    contextBridge.exposeInMainWorld(
       "agenteraProductSpace",
       agenteraProductSpaceAPI,
     );
@@ -2313,6 +2496,8 @@ if (process.contextIsolated) {
   window.hermesAPI = hermesAPI;
   // @ts-ignore (define in dts)
   window.agenteraAuth = agenteraAuthAPI;
+  // @ts-ignore (define in dts)
+  window.agenteraGlobalProfile = agenteraGlobalProfileAPI;
   // @ts-ignore (define in dts)
   window.agenteraProductSpace = agenteraProductSpaceAPI;
   // @ts-ignore (define in dts)

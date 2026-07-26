@@ -214,7 +214,7 @@ function Tools({
     } finally {
       setLoading(false);
     }
-  }, [profile, showPlatformToolsets]);
+  }, [profile, showPlatformToolsets, t]);
 
   useEffect(() => {
     if (visible) loadToolsets();
@@ -394,7 +394,7 @@ function Tools({
       {activeTab === "skills" ? (
         <div className="tools-skills-pane">
           {remoteMode ? (
-            <RemoteNotice feature="Skills" />
+            <RemoteNotice feature={t("navigation.skills")} />
           ) : (
             <Skills profile={profile} embedded onBrowse={onBrowseSkills} />
           )}

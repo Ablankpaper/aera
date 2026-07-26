@@ -11,6 +11,7 @@ import {
 import { extname } from "path";
 import { randomUUID } from "crypto";
 import type { AgenteraAuthController } from "../agentera-auth/controller";
+import { AgenteraUserProfileStore } from "../agentera-user-profile-store";
 import type { RuntimeDistributionManager } from "../agentera-runtime-distribution/manager";
 import type { RuntimeActivityCoordinator } from "../runtime-activity";
 import {
@@ -185,6 +186,7 @@ import {
   setConnectionConfig,
   getPlatformEnabled,
   setPlatformEnabled,
+  ensureLocalApiServerKey,
   getApiServerKeyStatus,
   invalidateSecretsCache,
   type ConnectionConfig,
@@ -368,8 +370,20 @@ import {
   setProfileColor,
   setProfileAvatar,
   removeProfileAvatar,
-  setProfileName,
 } from "../profile-meta";
+import type { AgentIdentityService } from "../agent-identity";
+import type { AgentUserMemoryRepairService } from "../agent-user-memory-repair";
+import {
+  composeGlobalProfileEnvelope,
+  summarizeGlobalProfileConversationSnapshot,
+  type AgenteraGlobalProfileManager,
+} from "../agentera-global-profile/manager";
+import type { AgenteraMemoryCandidateManager } from "../agentera-global-profile/candidate-manager";
+import type { AgenteraMemoryCandidateConfirmationCoordinator } from "../agentera-global-profile/candidate-confirmation";
+import type {
+  AgenteraGlobalProfileConversationContext,
+  SetAgenteraGlobalProfileEntryInput,
+} from "../../shared/agentera-global-profile";
 import {
   createWallet,
   deleteWallet,
@@ -521,6 +535,12 @@ export interface IpcContext {
   notifyCustomProvidersChanged: () => void;
   openExternalUrl: (rawUrl: unknown) => void;
   agenteraAuth: AgenteraAuthController;
+  agenteraUserProfiles: AgenteraUserProfileStore;
+  agentIdentity: AgentIdentityService;
+  agentUserMemoryRepair: AgentUserMemoryRepairService;
+  agenteraGlobalProfiles: AgenteraGlobalProfileManager;
+  agenteraMemoryCandidates: AgenteraMemoryCandidateManager;
+  agenteraMemoryCandidateConfirmation: AgenteraMemoryCandidateConfirmationCoordinator;
   productAccessGuard: ProductAccessGuard;
   getAgenteraRuntimeOwner: () => AgenteraRuntimeOwner;
   agenteraProfileBindings: AgenteraProfileBindingStore;
@@ -799,6 +819,12 @@ export function registerIpcHandlers(context: IpcContext): void {
     notifyCustomProvidersChanged,
     openExternalUrl,
     agenteraAuth,
+    agenteraUserProfiles,
+    agentIdentity,
+    agentUserMemoryRepair,
+    agenteraGlobalProfiles,
+    agenteraMemoryCandidates,
+    agenteraMemoryCandidateConfirmation,
     productAccessGuard,
     getAgenteraRuntimeOwner,
     agenteraProfileBindings,
@@ -810,6 +836,27 @@ export function registerIpcHandlers(context: IpcContext): void {
     workspaceInvitationInbox,
     runtimeDistribution,
   } = context;
+  const globalProfileChangedChannel = "agentera-global-profile-changed";
+  const notifyGlobalProfileChanged = (profile: unknown): void => {
+    const window = getMainWindow();
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) {
+      return;
+    }
+    window.webContents.send(globalProfileChangedChannel, profile);
+  };
+  const agentIdentityChangedChannel = "agent-identity-changed";
+  const notifyAgentIdentityChanged = (payload: {
+    profileId: string;
+    displayName: string;
+    revision: number;
+    updatedAt: string;
+  }): void => {
+    const window = getMainWindow();
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) {
+      return;
+    }
+    window.webContents.send(agentIdentityChangedChannel, payload);
+  };
   const requireAgentControl = (): AgenteraAgentControlManager => {
     if (!agenteraAgentControl) {
       throw Object.assign(new Error("Agent control is unavailable."), {
@@ -1439,6 +1486,13 @@ export function registerIpcHandlers(context: IpcContext): void {
     requireAgentControl().listOfficialAgents(),
   );
   registerAgentControlHandler(
+    "agentera-agents-get-official-detail",
+    (_event, definitionId: unknown) =>
+      requireAgentControl().getOfficialAgentDetail(
+        parseAgentControlId(definitionId),
+      ),
+  );
+  registerAgentControlHandler(
     "agentera-agents-prepare-official-install",
     (_event, definitionId: unknown) =>
       requireAgentControl().prepareOfficialInstall(
@@ -1562,8 +1616,10 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle("agentera-auth-get-state", () =>
     agenteraAuth.getPublicState(),
   );
-  ipcMain.handle("agentera-auth-start-login", (_event, rawOptions: unknown) => {
-    if (rawOptions === undefined) return agenteraAuth.startBrowserLogin();
+  const parseAgenteraLoginOptions = (
+    rawOptions: unknown,
+  ): { forceAccountSelection?: boolean } => {
+    if (rawOptions === undefined) return {};
     if (
       !rawOptions ||
       typeof rawOptions !== "object" ||
@@ -1579,9 +1635,27 @@ export function registerIpcHandlers(context: IpcContext): void {
     ) {
       throw new Error("AgentEra login options are invalid.");
     }
-    return agenteraAuth.startBrowserLogin({
+    return {
       forceAccountSelection: options.forceAccountSelection === true,
-    });
+    };
+  };
+  ipcMain.handle("agentera-auth-start-login", (_event, rawOptions: unknown) => {
+    if (rawOptions === undefined) return agenteraAuth.startBrowserLogin();
+    return agenteraAuth.startBrowserLogin(
+      parseAgenteraLoginOptions(rawOptions),
+    );
+  });
+  ipcMain.handle(
+    "agentera-auth-restart-login",
+    (_event, rawOptions: unknown) => {
+      if (rawOptions === undefined) return agenteraAuth.restartBrowserLogin();
+      return agenteraAuth.restartBrowserLogin(
+        parseAgenteraLoginOptions(rawOptions),
+      );
+    },
+  );
+  ipcMain.handle("agentera-auth-copy-login-link", () => {
+    return agenteraAuth.copyBrowserLoginLink();
   });
   ipcMain.handle("agentera-auth-cancel-login", () =>
     agenteraAuth.cancelBrowserLogin(),
@@ -1596,6 +1670,206 @@ export function registerIpcHandlers(context: IpcContext): void {
     }
     return agenteraAuth.openPortal(target);
   });
+
+  const currentAgenteraUserId = (): string => {
+    const state = agenteraAuth.getPublicState();
+    if (state.status !== "authenticated" && state.status !== "offline") {
+      throw new Error("AgentEra product sign-in is required.");
+    }
+    return state.userId;
+  };
+
+  ipcMain.handle("agentera-user-profile-get", () => {
+    return agenteraUserProfiles.getOrCreate(currentAgenteraUserId());
+  });
+  ipcMain.handle(
+    "agentera-user-profile-update",
+    (_event, rawInput: unknown) => {
+      if (
+        !rawInput ||
+        typeof rawInput !== "object" ||
+        Array.isArray(rawInput)
+      ) {
+        throw new Error("AgentEra user profile input is invalid.");
+      }
+      const input = rawInput as Record<string, unknown>;
+      const expectedKeys = [
+        "avatarDataUrl",
+        "bio",
+        "displayName",
+        "occupation",
+      ];
+      if (
+        Object.keys(input).length !== expectedKeys.length ||
+        expectedKeys.some(
+          (key) => !Object.prototype.hasOwnProperty.call(input, key),
+        )
+      ) {
+        throw new Error("AgentEra user profile input is invalid.");
+      }
+      const profile = agenteraUserProfiles.save(currentAgenteraUserId(), {
+        displayName: input.displayName as string,
+        occupation: input.occupation as string,
+        bio: input.bio as string,
+        avatarDataUrl: input.avatarDataUrl as string | null,
+      });
+      const window = getMainWindow();
+      if (
+        window &&
+        !window.isDestroyed() &&
+        !window.webContents.isDestroyed()
+      ) {
+        window.webContents.send("agentera-user-profile-changed", profile);
+      }
+      return profile;
+    },
+  );
+  ipcMain.handle("agentera-global-profile-get", () =>
+    agenteraGlobalProfiles.get(currentAgenteraUserId()),
+  );
+  ipcMain.handle(
+    "agentera-global-profile-set",
+    (_event, input: SetAgenteraGlobalProfileEntryInput) => {
+      const result = agenteraGlobalProfiles.setEntry(
+        currentAgenteraUserId(),
+        input,
+      );
+      if (result.success) notifyGlobalProfileChanged(result.value);
+      return result;
+    },
+  );
+  ipcMain.handle(
+    "agentera-global-profile-remove",
+    (_event, entryId: string) => {
+      const result = agenteraGlobalProfiles.removeEntry(
+        currentAgenteraUserId(),
+        entryId,
+      );
+      if (result.success) notifyGlobalProfileChanged(result.value);
+      return result;
+    },
+  );
+  ipcMain.handle("agentera-global-profile-history", () =>
+    agenteraGlobalProfiles.listHistory(currentAgenteraUserId()),
+  );
+  ipcMain.handle(
+    "agentera-global-profile-rollback",
+    (_event, targetVersion: number) => {
+      const result = agenteraGlobalProfiles.rollback(
+        currentAgenteraUserId(),
+        targetVersion,
+      );
+      if (result.success) notifyGlobalProfileChanged(result.value);
+      return result;
+    },
+  );
+  ipcMain.handle(
+    "agentera-global-profile-conversation-context",
+    (
+      _event,
+      runId: string,
+      profile?: string,
+      resumeSessionId?: string | null,
+    ): AgenteraGlobalProfileConversationContext => {
+      if (
+        typeof runId !== "string" ||
+        !runId ||
+        runId.length > 256 ||
+        /\p{Cc}/u.test(runId)
+      ) {
+        throw new Error("AgentEra conversation identity is invalid.");
+      }
+      const identityProfileId = profile?.trim() || "default";
+      if (!isValidProfileName(identityProfileId)) {
+        throw new Error("AgentEra Runtime Profile target is invalid.");
+      }
+      if (
+        resumeSessionId !== undefined &&
+        resumeSessionId !== null &&
+        typeof resumeSessionId !== "string"
+      ) {
+        throw new Error("AgentEra Hermes session identity is invalid.");
+      }
+      const identityResumeSessionId = agentIdentity.resolveResumeSessionId(
+        identityProfileId,
+        resumeSessionId ?? undefined,
+      );
+      const identityConversationKey = agentIdentity.scopeConversationKey(
+        identityProfileId,
+        runId,
+      );
+      const binding = agenteraProfileBindings.verifyProfileBinding(
+        profileHome(identityProfileId),
+        getAgenteraRuntimeOwner(),
+      );
+      const result = agenteraGlobalProfiles.prepareConversationSnapshot(
+        currentAgenteraUserId(),
+        identityConversationKey,
+        {
+          existingSession: Boolean(identityResumeSessionId),
+          ...(identityResumeSessionId
+            ? {
+                resumeSession: {
+                  profileId: identityProfileId,
+                  sessionId: identityResumeSessionId,
+                },
+              }
+            : {}),
+        },
+      );
+      if (!result.success) {
+        console.warn(
+          "[agentera-global-profile] Conversation context degraded:",
+          result.error,
+        );
+      }
+      const context = summarizeGlobalProfileConversationSnapshot(result);
+      return {
+        ...context,
+        requiresBoundApiTransport:
+          context.requiresBoundApiTransport ||
+          binding.agentInstallationId !== null ||
+          identityConversationKey !== runId,
+      };
+    },
+  );
+  ipcMain.handle(
+    "agentera-memory-candidates-extract",
+    (_event, rawText: unknown, profile: unknown) =>
+      agenteraMemoryCandidates.extract(
+        currentAgenteraUserId(),
+        rawText,
+        profile,
+      ),
+  );
+  ipcMain.handle(
+    "agentera-memory-candidates-confirm",
+    (_event, batchId: string, profile: string) => {
+      const result = agenteraMemoryCandidateConfirmation.confirm(
+        currentAgenteraUserId(),
+        batchId,
+        profile,
+      );
+      if (result.success) {
+        if (result.value.identity) {
+          notifyAgentIdentityChanged(result.value.identity);
+        }
+        if (result.value.globalProfile) {
+          notifyGlobalProfileChanged(result.value.globalProfile);
+        }
+      }
+      return result;
+    },
+  );
+  ipcMain.handle(
+    "agentera-memory-candidates-reject",
+    (_event, batchId: string, profile: string) =>
+      agenteraMemoryCandidateConfirmation.reject(
+        currentAgenteraUserId(),
+        batchId,
+        profile,
+      ),
+  );
 
   const runtimeState = async (
     action?: (
@@ -1651,6 +1925,79 @@ export function registerIpcHandlers(context: IpcContext): void {
       probeSsh: (config) => testSshConnection(config.ssh),
     }),
   );
+
+  ipcMain.handle("agentera-profile-resolve-account-space", async () => {
+    const config = getConnectionConfig();
+    if (config.mode !== "local") {
+      throw new Error("Account spaces require local Runtime mode.");
+    }
+    const owner = getAgenteraRuntimeOwner();
+    const locations = await listLocalProfileLocations();
+    const preferred = agenteraProfileBindings.findPreferredOwnedProfile(
+      locations,
+      owner,
+    );
+    if (preferred) {
+      if (!preferred.profile.isActive) {
+        setActiveProfile(preferred.profile.id);
+        if (getActiveProfileNameSync() !== preferred.profile.id) {
+          throw new Error("The account's local space could not be activated.");
+        }
+        notifyProfileSwitched();
+      }
+      return {
+        status: "bound",
+        profileId: preferred.profile.id,
+        runtimeProfileId: preferred.binding.runtimeProfileId,
+      };
+    }
+
+    const active = locations.find((profile) => profile.isActive);
+    if (!active) {
+      throw new Error("The active local Profile is unavailable.");
+    }
+    const inspection = agenteraProfileBindings.inspectProfile(
+      active.path,
+      owner,
+    );
+    if (inspection.status === "unbound" && !inspection.meaningfulData) {
+      const binding = agenteraProfileBindings.bindExistingProfile(
+        active.path,
+        owner,
+      );
+      return {
+        status: "bound",
+        profileId: active.id,
+        runtimeProfileId: binding.runtimeProfileId,
+      };
+    }
+    if (inspection.status === "owned" && inspection.isCurrentOwner) {
+      return {
+        status: "bound",
+        profileId: active.id,
+        runtimeProfileId: inspection.binding.runtimeProfileId,
+      };
+    }
+
+    const created = agenteraProfileBindings.createAndBindFreshProfile({
+      name: `AgentEra Space ${Date.now().toString(36)}`,
+      owner,
+      createProfile,
+      resolveProfilePath: (profileId) => profileHome(profileId),
+      activateProfile: (profileId) => {
+        setActiveProfile(profileId);
+        if (getActiveProfileNameSync() !== profileId) {
+          throw new Error("The new account space could not be activated.");
+        }
+        notifyProfileSwitched();
+      },
+    });
+    return {
+      status: "bound",
+      profileId: created.profileId,
+      runtimeProfileId: created.binding.runtimeProfileId,
+    };
+  });
 
   ipcMain.handle("agentera-profile-inspect-active", () => {
     const config = getConnectionConfig();
@@ -2296,8 +2643,9 @@ export function registerIpcHandlers(context: IpcContext): void {
     return true;
   });
 
-  // API_SERVER_KEY management — lets the renderer detect a missing key and
-  // generate one with a button click (local mode) or show instructions (remote/SSH).
+  // API_SERVER_KEY management — this is an internal local-gateway credential,
+  // not a model-provider key. The renderer can ask Main to ensure it exists,
+  // but never receives the generated secret itself.
   // Additive shape: `hasKey` stays the required primary field; `providerId` /
   // `checkedAt` are optional extras for a follow-up Settings/Gateway UI.
   ipcMain.handle("get-api-server-key-status", (_event, profile?: string) =>
@@ -2314,22 +2662,17 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle(
     "generate-api-server-key",
     async (_event, profile?: string) => {
-      const { randomUUID } = await import("crypto");
-      const key = `desk-${randomUUID()}`;
-      // Write to both the active profile .env and the default .env so the
-      // gateway (which reads the profile .env) and the desktop (which reads
-      // the default .env as fallback) both see the same key.
-      setEnvValue("API_SERVER_KEY", key, profile);
-      if (profile && profile !== "default") {
-        setEnvValue("API_SERVER_KEY", key);
-      }
+      const result = ensureLocalApiServerKey(profile);
       // Restart gateway so it picks up the new key immediately.
-      if (isGatewayRunning(profile)) {
-        stopGateway(profile, true);
-        await new Promise<void>((r) => setTimeout(r, 800));
-        startGateway(profile);
+      if (result.generated && isGatewayRunning(profile)) {
+        const restarted = await restartGateway(profile);
+        if (!restarted) {
+          throw new Error(
+            "The local gateway credential was created, but the gateway could not restart with it.",
+          );
+        }
       }
-      return { key };
+      return { generated: result.generated };
     },
   );
 
@@ -2526,6 +2869,16 @@ export function registerIpcHandlers(context: IpcContext): void {
       // Each conversation has a stable runId minted by the renderer. Fall back
       // to a generated id for legacy callers so the run is still tracked.
       const chatRunId = runId || `run-${randomUUID()}`;
+      const identityProfileId = profile?.trim() || "default";
+      const identityResumeSessionId = agentIdentity.resolveResumeSessionId(
+        identityProfileId,
+        resumeSessionId,
+      );
+      const identityConversationKey = agentIdentity.scopeConversationKey(
+        identityProfileId,
+        chatRunId,
+      );
+      const globalProfileUserId = currentAgenteraUserId();
       const runtimeRun = runtimeActivity.beginRun(chatRunId);
       if (runtimeRun === null) {
         throw new Error("AgentEra Runtime restart is pending.");
@@ -2533,12 +2886,49 @@ export function registerIpcHandlers(context: IpcContext): void {
       try {
         const preparedAgentTurn = agenteraAgentControl
           ? await agenteraAgentControl.prepareHermesTurn({
-              conversationKey: chatRunId,
+              conversationKey: identityConversationKey,
               profilePath: profileHome(profile),
               owner: getAgenteraRuntimeOwner(),
-              resumeSessionId: resumeSessionId || null,
+              resumeSessionId: identityResumeSessionId || null,
             })
           : null;
+        let conversationEnvelope = preparedAgentTurn?.envelope;
+        try {
+          const globalSnapshot =
+            agenteraGlobalProfiles.prepareConversationSnapshot(
+              globalProfileUserId,
+              identityConversationKey,
+              {
+                existingSession: Boolean(identityResumeSessionId),
+                ...(identityResumeSessionId
+                  ? {
+                      resumeSession: {
+                        profileId: identityProfileId,
+                        sessionId: identityResumeSessionId,
+                      },
+                    }
+                  : {}),
+              },
+            );
+          if (globalSnapshot.success) {
+            conversationEnvelope = composeGlobalProfileEnvelope(
+              conversationEnvelope,
+              globalSnapshot.value?.renderedSnapshot,
+            );
+          } else {
+            console.warn(
+              "[agentera-global-profile] Continuing without global profile:",
+              globalSnapshot.error,
+            );
+          }
+        } catch (error) {
+          // The global profile is additive context. Corruption or local I/O
+          // failure must never block the native Hermes conversation.
+          console.warn(
+            "[agentera-global-profile] Continuing without global profile:",
+            error instanceof Error ? error.message : String(error),
+          );
+        }
         if (!isRemoteMode() && !isGatewayRunning(profile)) {
           startGateway(profile);
         }
@@ -2581,6 +2971,27 @@ export function registerIpcHandlers(context: IpcContext): void {
         const abortThisRun = (): void => {
           runtimeActivity.abortRun(chatRunId);
         };
+        let boundGlobalProfileSessionId: string | null = null;
+        const bindGlobalProfileSnapshotToSession = (
+          sessionId: string,
+        ): void => {
+          if (boundGlobalProfileSessionId === sessionId) return;
+          const bound =
+            agenteraGlobalProfiles.bindConversationSnapshotToSession(
+              globalProfileUserId,
+              identityConversationKey,
+              identityProfileId,
+              sessionId,
+            );
+          if (bound.success) {
+            boundGlobalProfileSessionId = sessionId;
+          } else {
+            console.warn(
+              "[agentera-global-profile] Failed to bind Hermes session snapshot:",
+              bound.error,
+            );
+          }
+        };
 
         const handle = await sendMessage(
           message,
@@ -2604,6 +3015,19 @@ export function registerIpcHandlers(context: IpcContext): void {
             },
             onDone: (sessionId) => {
               runtimeRun.finish();
+              if (sessionId) {
+                bindGlobalProfileSnapshotToSession(sessionId);
+                const recorded = agentIdentity.recordSessionRevision(
+                  identityProfileId,
+                  sessionId,
+                );
+                if (!recorded.success) {
+                  console.warn(
+                    "[agent-identity] Failed to record completed session:",
+                    recorded.error,
+                  );
+                }
+              }
               try {
                 persistPromptImageAttachments(sessionId, message, attachments);
               } catch (err) {
@@ -2647,6 +3071,17 @@ export function registerIpcHandlers(context: IpcContext): void {
                   return;
                 }
               }
+              bindGlobalProfileSnapshotToSession(sessionId);
+              const recorded = agentIdentity.recordSessionRevision(
+                identityProfileId,
+                sessionId,
+              );
+              if (!recorded.success) {
+                console.warn(
+                  "[agent-identity] Failed to record new session:",
+                  recorded.error,
+                );
+              }
               safeSend("chat-session-started", sessionId);
             },
             onError: (error) => {
@@ -2675,12 +3110,12 @@ export function registerIpcHandlers(context: IpcContext): void {
             },
           },
           profile,
-          preparedAgentTurn?.resumeSessionId ?? resumeSessionId,
+          preparedAgentTurn?.resumeSessionId ?? identityResumeSessionId,
           history,
           attachments,
           contextFolder,
           modelOverride,
-          preparedAgentTurn?.envelope,
+          conversationEnvelope,
         );
 
         runtimeRun.attachAbort(handle.abort);
@@ -3176,11 +3611,17 @@ export function registerIpcHandlers(context: IpcContext): void {
         ...p,
         id: p.name,
         isActive: p.name === active,
+        agentInstallationId: null,
+        runtimeProfileId: null,
       }));
     }
     const owner = getAgenteraRuntimeOwner();
     const locations = await listLocalProfileLocations();
     const allowedProfileIds = new Set<string>();
+    const safeBindingByProfileId = new Map<
+      string,
+      { agentInstallationId: string | null; runtimeProfileId: string }
+    >();
     for (const profile of locations) {
       try {
         const inspection = agenteraProfileBindings.inspectProfile(
@@ -3189,12 +3630,23 @@ export function registerIpcHandlers(context: IpcContext): void {
         );
         if (inspection.status === "owned" && inspection.isCurrentOwner) {
           allowedProfileIds.add(profile.id);
+          safeBindingByProfileId.set(profile.id, {
+            agentInstallationId: inspection.binding.agentInstallationId,
+            runtimeProfileId: inspection.binding.runtimeProfileId,
+          });
         }
       } catch {
         // A missing/corrupt/unowned Profile is not opened for rich metadata.
       }
     }
-    return listProfiles(allowedProfileIds);
+    const profiles = await listProfiles(allowedProfileIds);
+    return profiles.map((profile) => ({
+      ...profile,
+      agentInstallationId:
+        safeBindingByProfileId.get(profile.id)?.agentInstallationId ?? null,
+      runtimeProfileId:
+        safeBindingByProfileId.get(profile.id)?.runtimeProfileId ?? null,
+    }));
   });
   ipcMain.handle(
     "create-profile",
@@ -3272,7 +3724,9 @@ export function registerIpcHandlers(context: IpcContext): void {
         error: "Agent renaming is only supported for local profiles",
       };
     }
-    return setProfileName(id, name);
+    const result = agentIdentity.setDisplayName(id, name);
+    if (result.success) notifyAgentIdentityChanged(result.identity);
+    return result;
   });
   ipcMain.handle(
     "set-profile-avatar",
@@ -3357,6 +3811,53 @@ export function registerIpcHandlers(context: IpcContext): void {
       return sshReadMemory(conn.ssh, profile);
     return readMemory(profile);
   });
+  ipcMain.handle("preview-user-memory-repair", (_event, profile?: string) => {
+    if (getConnectionConfig().mode !== "local") {
+      return {
+        success: false,
+        error: "USER.md repair is only supported for local Agent profiles.",
+      };
+    }
+    return agentUserMemoryRepair.preview(profile?.trim() || "default");
+  });
+  ipcMain.handle(
+    "apply-user-memory-repair",
+    (
+      _event,
+      profile: string | undefined,
+      expectedSha256: string,
+      replacementContent: string,
+      confirmed: boolean,
+    ) => {
+      if (getConnectionConfig().mode !== "local") {
+        return {
+          success: false,
+          error: "USER.md repair is only supported for local Agent profiles.",
+        };
+      }
+      return agentUserMemoryRepair.apply({
+        profileId: profile?.trim() || "default",
+        expectedSha256,
+        replacementContent,
+        confirmed,
+      });
+    },
+  );
+  ipcMain.handle(
+    "undo-user-memory-repair",
+    (_event, profile: string | undefined, operationId: string) => {
+      if (getConnectionConfig().mode !== "local") {
+        return {
+          success: false,
+          error: "USER.md repair is only supported for local Agent profiles.",
+        };
+      }
+      return agentUserMemoryRepair.undo(
+        profile?.trim() || "default",
+        operationId,
+      );
+    },
+  );
   ipcMain.handle(
     "add-memory-entry",
     (_event, content: string, profile?: string) => {
@@ -3614,6 +4115,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       baseUrl: string,
       contextLength?: number,
       providerLabel?: string,
+      apiMode?: string | null,
     ) => {
       const conn = getConnectionConfig();
       let addedModel: Awaited<ReturnType<typeof addModel>>;
@@ -3641,6 +4143,7 @@ export function registerIpcHandlers(context: IpcContext): void {
           baseUrl,
           contextLength,
           providerLabel,
+          apiMode,
         );
       }
       notifyModelLibraryChanged();

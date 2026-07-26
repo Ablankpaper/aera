@@ -28,6 +28,8 @@ Selection is account-scoped product navigation state. It does not switch a Herme
 
 The global selector is now backed by one trusted product-space coordinator shared with [[agentera-organizations|Organization Foundation]]. Existing Workspace selection compatibility delegates to that coordinator, so Personal, Workspace, and Organization cannot become competing writable selection stores. This changes navigation metadata only: it neither changes Workspace Agent ownership nor switches the active Hermes Profile, and Departments never become global choices.
 
+The desktop sidebar keeps Agent/profile selection in the dedicated 智能体 view. The profile switcher is not rendered as a second footer navigation entry, so removing that visual affordance does not remove Profiles, sessions, files, or their local data.
+
 The trusted main process now separates this context into three layers:
 
 - a strict generated-contract cloud client for the 13 Workspace routes;

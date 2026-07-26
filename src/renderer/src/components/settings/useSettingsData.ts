@@ -96,8 +96,14 @@ export function useSettingsData(profile?: string) {
   // Backup / Import state
   const [backingUp, setBackingUp] = useState(false);
   const [backupResult, setBackupResult] = useState<string | null>(null);
+  const [backupResultType, setBackupResultType] = useState<
+    "success" | "error" | null
+  >(null);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
+  const [importResultType, setImportResultType] = useState<
+    "success" | "error" | null
+  >(null);
 
   // Log viewer state
   const [logContent, setLogContent] = useState("");
@@ -423,11 +429,11 @@ export function useSettingsData(profile?: string) {
       connMode === "ssh" ? sshChatTransport : remoteChatTransport;
     if (preference === "legacy") {
       setTransportProbe({
-        label: "Active: Legacy",
+        label: t("settings.transportActiveLegacy"),
         detail:
           connMode === "ssh"
-            ? "Dashboard over SSH is disabled."
-            : "Dashboard WebSocket is disabled.",
+            ? t("settings.transportDashboardSshDisabled")
+            : t("settings.transportDashboardRemoteDisabled"),
         kind: "muted",
         loading: false,
       });
@@ -435,7 +441,7 @@ export function useSettingsData(profile?: string) {
     }
 
     setTransportProbe((prev) => ({
-      label: prev?.label || "Checking transport…",
+      label: prev?.label || t("settings.transportChecking"),
       detail: prev?.detail || "",
       kind: prev?.kind || "muted",
       loading: true,
@@ -447,8 +453,8 @@ export function useSettingsData(profile?: string) {
         setTransportProbe({
           label:
             preference === "dashboard"
-              ? "Active: Dashboard"
-              : "Auto active: Dashboard",
+              ? t("settings.transportActiveDashboard")
+              : t("settings.transportAutoDashboard"),
           detail: status.connection.baseUrl,
           kind: "ok",
           loading: false,
@@ -457,8 +463,8 @@ export function useSettingsData(profile?: string) {
       }
       if (status.needsOAuthLogin) {
         setTransportProbe({
-          label: "Sign in required",
-          detail: status.error || "Browser authentication is required.",
+          label: t("settings.transportSignInRequired"),
+          detail: status.error || t("settings.transportBrowserAuthRequired"),
           kind: "warn",
           loading: false,
         });
@@ -467,9 +473,9 @@ export function useSettingsData(profile?: string) {
       setTransportProbe({
         label:
           preference === "dashboard"
-            ? "Dashboard unavailable"
-            : "Auto active: Legacy fallback",
-        detail: status.error || "Dashboard transport is not available.",
+            ? t("settings.transportDashboardUnavailable")
+            : t("settings.transportAutoLegacyFallback"),
+        detail: status.error || t("settings.transportNotAvailable"),
         kind: "warn",
         loading: false,
       });
@@ -477,14 +483,14 @@ export function useSettingsData(profile?: string) {
       setTransportProbe({
         label:
           preference === "dashboard"
-            ? "Dashboard unavailable"
-            : "Auto active: Legacy fallback",
+            ? t("settings.transportDashboardUnavailable")
+            : t("settings.transportAutoLegacyFallback"),
         detail: err instanceof Error ? err.message : String(err),
         kind: "warn",
         loading: false,
       });
     }
-  }, [connMode, profile, remoteChatTransport, sshChatTransport]);
+  }, [connMode, profile, remoteChatTransport, sshChatTransport, t]);
 
   useEffect(() => {
     void refreshTransportProbe();
@@ -517,7 +523,7 @@ export function useSettingsData(profile?: string) {
       sshChatTransport,
     );
     await loadConfig();
-    setConnStatus("Saved");
+    setConnStatus(t("settings.saved"));
     setTimeout(() => setConnStatus(null), 2000);
     void refreshTransportProbe();
   }
@@ -534,7 +540,7 @@ export function useSettingsData(profile?: string) {
       setSshChatTransport(transport);
     }
     await window.hermesAPI.setConnectionChatTransports(nextRemote, nextSsh);
-    setConnStatus("Saved");
+    setConnStatus(t("settings.saved"));
     setTimeout(() => setConnStatus(null), 2000);
     void refreshTransportProbe();
   }
@@ -680,7 +686,7 @@ export function useSettingsData(profile?: string) {
       }
     }
     await loadConfig();
-    setConnStatus("Saved");
+    setConnStatus(t("settings.saved"));
     setTimeout(() => setConnStatus(null), 2000);
     void refreshTransportProbe();
   }
@@ -694,7 +700,7 @@ export function useSettingsData(profile?: string) {
       sshChatTransport,
     );
     await loadConfig();
-    setConnStatus("Saved");
+    setConnStatus(t("settings.saved"));
     setTimeout(() => setConnStatus(null), 2000);
     void refreshTransportProbe();
   }
@@ -702,12 +708,19 @@ export function useSettingsData(profile?: string) {
   async function handleBackup(): Promise<void> {
     setBackingUp(true);
     setBackupResult(null);
+    setBackupResultType(null);
     const result = await window.hermesAPI.runHermesBackup(profile);
     setBackingUp(false);
     if (result.success) {
-      setBackupResult(`Backup created: ${result.path || "success"}`);
+      setBackupResult(
+        t("settings.backupCreated", {
+          path: result.path || t("settings.backupSuccess"),
+        }),
+      );
+      setBackupResultType("success");
     } else {
-      setBackupResult(result.error || "Backup failed.");
+      setBackupResult(result.error || t("settings.backupFailed"));
+      setBackupResultType("error");
     }
   }
 
@@ -720,13 +733,16 @@ export function useSettingsData(profile?: string) {
       if (!file) return;
       setImporting(true);
       setImportResult(null);
+      setImportResultType(null);
       const filePath = window.hermesAPI.getPathForFile(file);
       const result = await window.hermesAPI.runHermesImport(filePath, profile);
       setImporting(false);
       if (result.success) {
         setImportResult(t("settings.migrationComplete"));
+        setImportResultType("success");
       } else {
         setImportResult(result.error || t("settings.migrationFailed"));
+        setImportResultType("error");
       }
     };
     input.click();
@@ -885,8 +901,10 @@ export function useSettingsData(profile?: string) {
     // backup / data
     backingUp,
     backupResult,
+    backupResultType,
     importing,
     importResult,
+    importResultType,
     handleBackup,
     handleImport,
     // logs

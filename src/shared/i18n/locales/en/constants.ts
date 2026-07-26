@@ -6,6 +6,7 @@ export default {
   openrouterDesc: "200+ models",
   openrouterTag: "",
   aimlapiName: "AIML API",
+  petoiName: "Petoi",
   aimlapiDesc: "OpenAI-compatible multi-model gateway",
   anthropicName: "Anthropic",
   anthropicDesc: "Claude models",
@@ -54,6 +55,9 @@ export default {
   sectionResearchTraining: "Research & Training",
   // Settings field labels
   aimlapiApiKey: "AIML API Key",
+  petoiApiKey: "Petoi API Key",
+  petoiDesc: "OpenAI-compatible Petoi relay",
+  petoiHint: "API key for https://api.petoi.cn/v1",
   aimlapiHint: "API key for AIML API",
   hermesoneApiKey: "Hermes One API Key",
   hermesoneHint: "Hermes One Inference — fast, credit-based gateway",

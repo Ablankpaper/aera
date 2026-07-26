@@ -2,7 +2,10 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSettingsData } from "./useSettingsData";
 
-vi.mock("../useI18n", () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock("../useI18n", () => {
+  const t = (key: string): string => key;
+  return { useI18n: () => ({ t }) };
+});
 
 type PublicConnectionConfig = Awaited<
   ReturnType<typeof window.hermesAPI.getConnectionConfig>

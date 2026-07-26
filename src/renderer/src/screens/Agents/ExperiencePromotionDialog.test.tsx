@@ -122,6 +122,17 @@ function renderDialog(online = true, onSubmitted = vi.fn()): void {
   );
 }
 
+async function selectEligibleSkill(
+  skillName = "research-notes",
+): Promise<void> {
+  const select = await screen.findByRole("combobox", {
+    name: "agents.control.experience.skill",
+  });
+  await screen.findByRole("option", { name: skillName });
+  await waitFor(() => expect(select).toBeEnabled());
+  fireEvent.change(select, { target: { value: skillName } });
+}
+
 describe("ExperiencePromotionDialog", () => {
   beforeEach(() => vi.restoreAllMocks());
 
@@ -179,12 +190,7 @@ describe("ExperiencePromotionDialog", () => {
     const api = installAPI();
     renderDialog(false);
 
-    fireEvent.change(
-      await screen.findByRole("combobox", {
-        name: "agents.control.experience.skill",
-      }),
-      { target: { value: "research-notes" } },
-    );
+    await selectEligibleSkill();
     fireEvent.click(
       screen.getByRole("button", {
         name: "agents.control.experience.preparePreview",
@@ -207,12 +213,7 @@ describe("ExperiencePromotionDialog", () => {
     const onSubmitted = vi.fn();
     renderDialog(true, onSubmitted);
 
-    fireEvent.change(
-      await screen.findByRole("combobox", {
-        name: "agents.control.experience.skill",
-      }),
-      { target: { value: "research-notes" } },
-    );
+    await selectEligibleSkill();
     fireEvent.click(
       screen.getByRole("button", {
         name: "agents.control.experience.preparePreview",
@@ -256,12 +257,7 @@ describe("ExperiencePromotionDialog", () => {
     });
     renderDialog();
 
-    fireEvent.change(
-      await screen.findByRole("combobox", {
-        name: "agents.control.experience.skill",
-      }),
-      { target: { value: "research-notes" } },
-    );
+    await selectEligibleSkill();
     fireEvent.click(
       screen.getByRole("button", {
         name: "agents.control.experience.preparePreview",
@@ -293,12 +289,7 @@ describe("ExperiencePromotionDialog", () => {
     const api = installAPI({ submitExperienceCandidate });
     renderDialog();
 
-    fireEvent.change(
-      await screen.findByRole("combobox", {
-        name: "agents.control.experience.skill",
-      }),
-      { target: { value: "research-notes" } },
-    );
+    await selectEligibleSkill();
     fireEvent.click(
       screen.getByRole("button", {
         name: "agents.control.experience.preparePreview",

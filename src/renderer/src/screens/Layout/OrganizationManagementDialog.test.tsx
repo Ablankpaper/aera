@@ -194,13 +194,16 @@ function installAPIs(
           issuer: "agentera-cloud",
           signingKeyId: "organization-policy-v1",
           createdAt: "2026-07-21T00:00:00Z",
-          document: {
-            schemaVersion: 1 as const,
-            models: { allowlist: null },
-            tools: { allowlist: null },
-            experienceCandidates: { mode: "manual_review" as const },
-            officialAgents: { installation: "allowed" as const },
-          },
+          document:
+            role === "member"
+              ? null
+              : {
+                  schemaVersion: 1 as const,
+                  models: { allowlist: null },
+                  tools: { allowlist: null },
+                  experienceCandidates: { mode: "manual_review" as const },
+                  officialAgents: { installation: "allowed" as const },
+                },
           signature: "signature",
         },
         stale: Boolean(overrides.offline),
@@ -208,7 +211,19 @@ function installAPIs(
         errorCode: null,
       }),
     ),
-    listPolicySnapshots: vi.fn(() => success([])),
+    listPolicySnapshots: vi.fn(() =>
+      success([
+        {
+          id: "policy-v1",
+          policyVersion: 1,
+          schemaVersion: 1 as const,
+          contentDigest: `sha256:${"b".repeat(64)}`,
+          issuer: "agentera-cloud",
+          signingKeyId: "organization-policy-v1",
+          createdAt: "2026-07-21T00:00:00Z",
+        },
+      ]),
+    ),
     publishPolicy: vi.fn(() => success({ id: "policy-v2" })),
     listAuditEvents: vi.fn(() =>
       success({
@@ -379,6 +394,110 @@ describe("OrganizationManagementDialog", () => {
       ).toBeNull();
     },
   );
+
+  it("separates the active policy from the editable draft, publish action, and signed history", async () => {
+    const { organizationAPI } = renderDialog("owner");
+    await screen.findByText("Acme Enterprise");
+    fireEvent.click(
+      screen.getByRole("tab", {
+        name: "navigation.organization.management.policy",
+      }),
+    );
+
+    const activePolicy = await screen.findByTestId(
+      "organization-policy-overview",
+    );
+    expect(activePolicy).toHaveTextContent(
+      "navigation.organization.management.policyVersion:1",
+    );
+    expect(activePolicy).toHaveTextContent(
+      "navigation.organization.management.manualReview",
+    );
+    expect(
+      screen.getByRole("heading", {
+        name: "navigation.organization.management.policySettings",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("organization-policy-publish-bar"),
+    ).toHaveTextContent(
+      "navigation.organization.management.nextPolicyVersion:2",
+    );
+    expect(
+      screen.getByTestId("organization-policy-history-list"),
+    ).toHaveTextContent("navigation.organization.management.policyVersion:1");
+
+    fireEvent.change(
+      screen.getByLabelText(
+        "navigation.organization.management.experienceMode",
+      ),
+      { target: { value: "disabled" } },
+    );
+    expect(activePolicy).toHaveTextContent(
+      "navigation.organization.management.manualReview",
+    );
+    expect(activePolicy).not.toHaveTextContent(
+      "navigation.organization.management.disabled",
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "navigation.organization.management.publishPolicy",
+      }),
+    );
+    await waitFor(() =>
+      expect(organizationAPI.publishPolicy).toHaveBeenCalledWith({
+        organizationId: ORGANIZATION_A,
+        document: {
+          schemaVersion: 1,
+          models: { allowlist: null },
+          tools: { allowlist: null },
+          experienceCandidates: { mode: "disabled" },
+          officialAgents: { installation: "allowed" },
+        },
+        expectedOrganizationRevision: 7,
+        expectedPolicyVersion: 2,
+      }),
+    );
+  });
+
+  it("keeps Auditor policy access read-only and Member access summary-only", async () => {
+    const auditor = renderDialog("auditor");
+    await screen.findByText("Acme Enterprise");
+    fireEvent.click(
+      screen.getByRole("tab", {
+        name: "navigation.organization.management.policy",
+      }),
+    );
+    expect(
+      await screen.findByTestId("organization-policy-history-list"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", {
+        name: "navigation.organization.management.policySettings",
+      }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", {
+        name: "navigation.organization.management.publishPolicy",
+      }),
+    ).toBeNull();
+
+    auditor.unmount();
+    renderDialog("member");
+    await screen.findByText("Acme Enterprise");
+    fireEvent.click(
+      screen.getByRole("tab", {
+        name: "navigation.organization.management.policy",
+      }),
+    );
+    expect(
+      await screen.findByText(
+        "navigation.organization.management.policySummaryOnly",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("organization-policy-history-list")).toBeNull();
+  });
 
   it("requires both exact high-risk confirmations before owner transfer or dissolution", async () => {
     const first = renderDialog("owner");

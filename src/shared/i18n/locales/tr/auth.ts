@@ -82,7 +82,7 @@ const auth = {
     signOut: "Çıkış yap",
     actionFailed: "Bu hesap işlemi tamamlanamadı.",
     unavailable: "AgentEra hesap bilgileri kullanılamıyor.",
-    userId: "Kullanıcı",
+    userId: "Hesap kimliği",
     deviceId: "Cihaz",
     offlineUntil:
       "İmzalı çevrimdışı erişim {{date}} tarihine kadar geçerlidir.",

@@ -1,5 +1,12 @@
 export default {
   title: "工作区",
+  subtitle: "在 3D 场景中实时查看你的智能体工作",
+  loadingAgents: "正在加载智能体...",
+  noAgents: "未找到智能体。",
+  refresh: "刷新",
+  agentCount_one: "{{count}} 个智能体",
+  agentCount_other: "{{count}} 个智能体",
+  selectAgentHint: "点击智能体以聚焦查看",
   checkingStatus: "正在检查 Claw3D 状态...",
   setupTitle: "设置 Claw3D",
   installTitle: "正在配置 Claw3D",
@@ -25,6 +32,33 @@ export default {
   setupDesc1:
     "Claw3D 是你的 AgentEra 代理的 3D 可视化环境。它让你可以看到代理在交互式办公空间中工作。",
   setupDesc2: "点击下方自动下载并设置 Claw3D。这将克隆仓库并安装所有依赖。",
+  statusLabel: "状态",
+  modelLabel: "模型",
+  providerLabel: "提供商",
+  gatewayLabel: "网关",
+  gatewayRunning: "运行中",
+  gatewayStopped: "已停止",
+  status_working: "工作中",
+  status_idle: "空闲",
+  status_error: "错误",
+  employee: "员工",
+  ceo: "CEO",
+  makeCeo: "设为 CEO",
+  removeCeo: "取消 CEO",
+  softwareRenderingNotice:
+    "GPU 崩溃后硬件加速已关闭，3D 工作区正在使用较慢的软件渲染。",
+  softwareRenderingEnvNotice:
+    "HERMES_DISABLE_GPU 已禁用硬件加速，3D 工作区正在使用较慢的软件渲染。",
+  softwareRenderingPrefNotice:
+    "已在“设置 → 外观”中关闭硬件加速，3D 工作区正在使用较慢的软件渲染。",
+  reenableGpu: "重新启用 GPU 并重启",
+  dismissNotice: "忽略",
+  developerMoveHint:
+    "开发者功能：先选择建筑，再选择地面即可移动建筑（坐标会输出到控制台）",
+  moveBuildings: "移动建筑",
+  movingBuildings: "正在移动建筑",
+  agentGreeting: "你好，我是 {{name}}",
+  openFullChat: "点击打开完整聊天",
   // Enterable building interiors
   enter_office: "进入办公室",
   enter_bank: "进入银行",
@@ -55,4 +89,16 @@ export default {
   repCreateSuccess: "账户已开设",
   repCreateExists: "该智能体已有银行账户。",
   repStatusForeign: "该智能体已关联到另一个 AgentEra Studio 账户。",
+  oneChat: {
+    agents: "智能体",
+    close: "关闭智能体聊天",
+    offline: "离线 — 请先启动网关再聊天",
+    selectAgent: "选择一个智能体开始聊天",
+    startConversation: "开始与 {{name}} 对话",
+    selectAgentPlaceholder: "选择智能体…",
+    messagePlaceholder: "给 {{name}} 发消息…",
+    gatewayOffline: "网关离线",
+    send: "发送消息",
+    error: "错误：{{message}}",
+  },
 } as const;

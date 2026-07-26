@@ -142,14 +142,14 @@ export default function Discover({
           })),
         );
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to load");
+        setError(e instanceof Error ? e.message : t("discover.loadError"));
         setCatalog(EMPTY);
       } finally {
         setLoading(false);
       }
       loadInstalled();
     },
-    [loadInstalled],
+    [loadInstalled, t],
   );
 
   // Load once on first mount, and refresh the installed-set whenever the
@@ -516,10 +516,10 @@ export default function Discover({
           target="_blank"
           rel="noreferrer"
           className="btn btn-secondary btn-sm"
-          title="Open Registry on GitHub"
+          title={t("discover.openRegistryOnGithub")}
         >
           <ExternalLink size={14} />
-          Open Registry
+          {t("discover.openRegistry")}
         </a>
       </div>
 

@@ -179,6 +179,53 @@ describe("AgentEra non-destructive Runtime Profile ownership", () => {
     expect(hashTree(profilePath)).toEqual(before);
   });
 
+  it("reuses one stable account Profile and prefers its currently active Profile", () => {
+    const secondaryPath = join(root, "profiles", "secondary");
+    const foreignPath = join(root, "profiles", "foreign");
+    mkdirSync(secondaryPath, { recursive: true });
+    mkdirSync(foreignPath, { recursive: true });
+    const runtimeProfileIds = [
+      "66666666-6666-4666-8666-666666666666",
+      "99999999-9999-4999-8999-999999999999",
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    ];
+    store = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage: new FakeSecureStorage(),
+      now: () => new Date("2026-07-18T02:00:00.000Z"),
+      randomUUID: () => {
+        const id = runtimeProfileIds.shift();
+        if (!id) throw new Error("Test Runtime Profile IDs exhausted.");
+        return id;
+      },
+    });
+
+    const primaryBinding = store.bindExistingProfile(profilePath, owner);
+    const secondaryBinding = store.bindExistingProfile(secondaryPath, owner);
+    store.bindExistingProfile(foreignPath, otherOwner);
+
+    const locations = [
+      { id: "foreign", path: foreignPath, isActive: true },
+      { id: "secondary", path: secondaryPath, isActive: false },
+      { id: "primary", path: profilePath, isActive: false },
+    ];
+    expect(store.findPreferredOwnedProfile(locations, owner)).toEqual({
+      profile: locations[2],
+      binding: primaryBinding,
+    });
+
+    const withSecondaryActive = locations.map((profile) => ({
+      ...profile,
+      isActive: profile.id === "secondary",
+    }));
+    expect(store.findPreferredOwnedProfile(withSecondaryActive, owner)).toEqual(
+      {
+        profile: withSecondaryActive[1],
+        binding: secondaryBinding,
+      },
+    );
+  });
+
   it("allows only the immediate Runtime scaffold on the fresh Profile path", () => {
     const freshPath = join(root, "profiles", "runtime-scaffold");
     const created = store.createAndBindFreshProfile({

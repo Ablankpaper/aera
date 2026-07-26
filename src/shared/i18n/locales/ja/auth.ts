@@ -82,7 +82,7 @@ const auth = {
     signOut: "サインアウト",
     actionFailed: "アカウント操作を完了できませんでした。",
     unavailable: "AgentEra アカウント情報を利用できません。",
-    userId: "ユーザー",
+    userId: "アカウント ID",
     deviceId: "デバイス",
     offlineUntil: "署名済みオフラインアクセスは {{date}} まで有効です。",
     localDataWarning:

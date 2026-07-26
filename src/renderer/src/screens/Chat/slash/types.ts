@@ -1,5 +1,11 @@
 import type { Attachment } from "../../../../../shared/attachments";
 import type { SlashExecOutcome } from "../slashExec";
+import type {
+  AgenteraGlobalProfile,
+  AgenteraGlobalProfileHistoryItem,
+  AgenteraGlobalProfileResult,
+  SetAgenteraGlobalProfileEntryInput,
+} from "../../../../../shared/agentera-global-profile";
 
 export type SlashCommandTarget = "desktop" | "agent" | "model";
 
@@ -67,6 +73,25 @@ export interface SlashCommandContext {
   openDialog: (dialog: DesktopDialog) => void;
   startNewChat: () => void;
   clearTranscript: () => void;
+  renameAgent: (
+    profileId: string,
+    displayName: string,
+  ) => Promise<{ success: boolean; error?: string }>;
+  getGlobalProfile: () => Promise<
+    AgenteraGlobalProfileResult<AgenteraGlobalProfile>
+  >;
+  setGlobalProfileEntry: (
+    input: SetAgenteraGlobalProfileEntryInput,
+  ) => Promise<AgenteraGlobalProfileResult<AgenteraGlobalProfile>>;
+  removeGlobalProfileEntry: (
+    entryId: string,
+  ) => Promise<AgenteraGlobalProfileResult<AgenteraGlobalProfile>>;
+  listGlobalProfileHistory: () => Promise<
+    AgenteraGlobalProfileResult<AgenteraGlobalProfileHistoryItem[]>
+  >;
+  rollbackGlobalProfile: (
+    targetVersion: number,
+  ) => Promise<AgenteraGlobalProfileResult<AgenteraGlobalProfile>>;
 }
 
 export type DesktopCommandResult =

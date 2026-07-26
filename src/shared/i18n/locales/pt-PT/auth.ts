@@ -83,7 +83,7 @@ const auth = {
     signOut: "Terminar sessão",
     actionFailed: "Não foi possível concluir esta ação da conta.",
     unavailable: "As informações da conta AgentEra não estão disponíveis.",
-    userId: "Utilizador",
+    userId: "ID da conta",
     deviceId: "Dispositivo",
     offlineUntil: "O acesso offline assinado é válido até {{date}}.",
     localDataWarning:

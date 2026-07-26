@@ -79,6 +79,9 @@ interface UseChatActionsArgs {
    *  an agent prompt while a turn is already in flight. */
   enqueueMessage?: (text: string, attachments?: Attachment[]) => void;
   abortDashboard?: () => void;
+  /** Starts additive, renderer-local candidate recognition only after the
+   * Hermes request has already been dispatched. */
+  onNaturalLanguageMessageStarted?: (text: string, turnId: string) => void;
 }
 
 interface UseChatActionsResult {
@@ -128,6 +131,7 @@ export function useChatActions({
   addAgentMessage,
   enqueueMessage,
   abortDashboard,
+  onNaturalLanguageMessageStarted,
 }: UseChatActionsArgs): UseChatActionsResult {
   const messagesRef = useRef(messages);
   const isLoadingRef = useRef(isLoading);
@@ -342,6 +346,17 @@ export function useChatActions({
           openDialog: () => undefined,
           startNewChat: () => onSessionStarted?.(),
           clearTranscript: () => undefined,
+          renameAgent: (profileId, displayName) =>
+            window.hermesAPI.setProfileName(profileId, displayName),
+          getGlobalProfile: () => window.agenteraGlobalProfile.get(),
+          setGlobalProfileEntry: (input) =>
+            window.agenteraGlobalProfile.setEntry(input),
+          removeGlobalProfileEntry: (entryId) =>
+            window.agenteraGlobalProfile.removeEntry(entryId),
+          listGlobalProfileHistory: () =>
+            window.agenteraGlobalProfile.listHistory(),
+          rollbackGlobalProfile: (targetVersion) =>
+            window.agenteraGlobalProfile.rollback(targetVersion),
         });
 
         if (result.type === "error") {
@@ -370,7 +385,15 @@ export function useChatActions({
         status: "running",
       };
       onSessionStarted?.();
-      await sendToAgent(text, attachments);
+      const hermesRequest = sendToAgent(text, attachments);
+      queueMicrotask(() => {
+        try {
+          onNaturalLanguageMessageStarted?.(text, turn.turnId);
+        } catch {
+          // This optional Aera layer must never interrupt Hermes execution.
+        }
+      });
+      await hermesRequest;
     },
     [
       activeTurnRef,
@@ -385,6 +408,7 @@ export function useChatActions({
       runBackground,
       pushUser,
       onSessionStarted,
+      onNaturalLanguageMessageStarted,
       sendToAgent,
       setIsLoading,
       setMessages,

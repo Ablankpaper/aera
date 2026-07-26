@@ -11,18 +11,11 @@ export default {
     infos: "{{count}} note(s)",
     showDetails: "Show details",
   },
-  apiKeyBanner: {
-    lead: "API Server Key not set — chat will fail.",
-    setNow: "SET NOW",
-  },
-  apiKeyModal: {
-    title: "Set API Server Key",
-    description:
-      "API_SERVER_KEY is required for the AgentEra gateway to authenticate requests. Set it now to enable chat. If you keep secrets in a vault (KeePassXC, Bitwarden, etc.) and your AgentEra `secrets.provider` is already pointing at it, this warning can be ignored — the provider serves the key directly.",
-    label: "API Server Key",
-    placeholder: "sk-… or any secret",
-    autoGenerate: "Auto-generate",
-    hint: "You can paste your own key or generate a random UUID.",
+  localConnection: {
+    preparing: "Finishing the secure local connection automatically…",
+    notReady:
+      "Your model is configured, but the local connection is not ready.",
+    autoFix: "Fix automatically",
   },
   fix: {
     apply: "Apply fix",

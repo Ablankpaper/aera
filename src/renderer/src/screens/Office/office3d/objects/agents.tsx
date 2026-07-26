@@ -9,6 +9,7 @@ import { DIVIDER_X } from "../layout";
 import type { JanitorActor, RenderAgent } from "../core/types";
 import { AgentModelProps } from "./types";
 import { RiggedCharacter } from "./RiggedCharacter";
+import { useI18n } from "../../../../components/useI18n";
 
 const MAX_NAMEPLATE_TEXT_LENGTH = 22;
 const MAX_SPEECH_BUBBLE_TEXT_LENGTH = 180;
@@ -63,6 +64,7 @@ export const AgentModel = memo(function AgentModel({
   riggedModelUrl,
   riggedModelTint = null,
 }: AgentModelProps) {
+  const { t } = useI18n();
   const groupRef = useRef<THREE.Group>(null);
   const leftArmRef = useRef<THREE.Group>(null);
   const rightArmRef = useRef<THREE.Group>(null);
@@ -1343,7 +1345,7 @@ export const AgentModel = memo(function AgentModel({
               material-depthTest={false}
               material-depthWrite={false}
             >
-              click for full chat
+              {t("office.openFullChat")}
             </Text>
           ) : null}
         </Billboard>
