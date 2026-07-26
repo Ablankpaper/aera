@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgenteraAuthPublicState } from "../../../../shared/agentera-auth";
 import type {
@@ -503,12 +509,11 @@ describe("OrganizationManagementDialog", () => {
     const first = renderDialog("owner");
     const { organizationAPI } = first;
     await screen.findByText("Acme Enterprise");
-    fireEvent.change(
-      screen.getByLabelText(
-        "navigation.organization.management.transferTarget",
-      ),
-      { target: { value: TARGET_ID } },
+    const transferTarget = screen.getByLabelText(
+      "navigation.organization.management.transferTarget",
     );
+    await waitFor(() => expect(transferTarget).toBeEnabled());
+    fireEvent.change(transferTarget, { target: { value: TARGET_ID } });
     fireEvent.change(
       screen.getByLabelText(
         "navigation.organization.management.transferConfirmation",
@@ -547,12 +552,13 @@ describe("OrganizationManagementDialog", () => {
     );
     await screen.findByText("Acme Enterprise");
 
-    fireEvent.change(
-      screen.getByLabelText("navigation.organization.management.dissolveName"),
-      {
-        target: { value: "Acme Enterprise" },
-      },
+    const dissolveName = screen.getByLabelText(
+      "navigation.organization.management.dissolveName",
     );
+    await waitFor(() => expect(dissolveName).toBeEnabled());
+    fireEvent.change(dissolveName, {
+      target: { value: "Acme Enterprise" },
+    });
     fireEvent.change(
       screen.getByLabelText(
         "navigation.organization.management.dissolveConfirmation",
@@ -648,20 +654,25 @@ describe("OrganizationManagementDialog", () => {
       />,
     );
     await screen.findByText("Alpha Enterprise");
-    emitProduct(ORGANIZATION_B);
+    await act(async () => {
+      emitProduct(ORGANIZATION_B);
+    });
     fireEvent.click(
       screen.getByRole("tab", {
         name: "navigation.organization.management.members",
       }),
     );
     expect(await screen.findByText("Beta Owner")).toBeInTheDocument();
-    resolveFirst?.({
-      ok: true,
-      data: {
-        items: [member(USER_ID, "owner", "Late Alpha Owner")],
-        stale: false,
-        refreshedAt: "late",
-      },
+    await act(async () => {
+      resolveFirst?.({
+        ok: true,
+        data: {
+          items: [member(USER_ID, "owner", "Late Alpha Owner")],
+          stale: false,
+          refreshedAt: "late",
+        },
+      });
+      await pending;
     });
     await waitFor(() =>
       expect(screen.queryByText("Late Alpha Owner")).toBeNull(),
