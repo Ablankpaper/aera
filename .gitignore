@@ -36,8 +36,10 @@ lat.md/.cache/
 # Local isolated Hermes homes for development/tests
 .sandbox/
 
-# Electron packaging artifacts
-/release/
+# Electron packaging artifacts; keep the release evidence contract in source.
+/release/*
+!/release/evidence.schema.json
+!/release/internal-beta-evidence.schema.json
 .claude/worktrees
 .worktrees/
 

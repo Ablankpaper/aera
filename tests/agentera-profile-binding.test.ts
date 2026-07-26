@@ -17,6 +17,7 @@ import { basename, dirname, join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AgenteraProfileBindingStore,
+  createAgenteraGuestRuntimeOwner,
   hasMeaningfulHermesProfileData,
   type AgenteraRuntimeOwner,
   type RuntimeOwnerBinding,
@@ -93,6 +94,28 @@ describe("AgentEra non-destructive Runtime Profile ownership", () => {
 
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
+  });
+
+  // @lat: [[agentera-app-authentication#Startup gate#Guest Profile isolation]]
+  it("derives a stable installation-scoped guest owner distinct from cloud owners", () => {
+    const first = createAgenteraGuestRuntimeOwner(owner.deviceInstallationId);
+    const repeated = createAgenteraGuestRuntimeOwner(
+      owner.deviceInstallationId,
+    );
+    const otherDevice = createAgenteraGuestRuntimeOwner(
+      "99999999-9999-4999-8999-999999999999",
+    );
+
+    expect(first).toEqual(repeated);
+    expect(first.deviceInstallationId).toBe(owner.deviceInstallationId);
+    expect(first.tenantId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(first.ownerId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(first.tenantId).not.toBe(first.ownerId);
+    expect(otherDevice.ownerId).not.toBe(first.ownerId);
   });
 
   // @lat: [[agentera-app-authentication#Existing Profile migration]]
@@ -441,7 +464,7 @@ describe("AgentEra non-destructive Runtime Profile ownership", () => {
         AGENT_INSTALLATION_ID,
         owner,
       ),
-    ).toBe(realpathSync(profilePath));
+    ).toBe(realpathSync.native(profilePath));
     expect(() =>
       store.resolveAttachedProfilePath(
         binding.runtimeProfileId,

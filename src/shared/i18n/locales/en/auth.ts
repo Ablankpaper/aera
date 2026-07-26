@@ -61,7 +61,7 @@ const auth = {
     creating: "Creating an empty space…",
     emptyBindingTitle: "Preparing your personal space",
     emptyBindingDescription:
-      "This empty local Profile is being bound to your AgentEra account.",
+      "This empty local Profile is being bound to your current local space.",
     connectionBindingTitle: "Securing this Runtime connection",
     connectionBindingDescription:
       "The remote or SSH connection is being bound to the signed-in AgentEra owner. Product tokens are not sent to the Runtime.",
@@ -87,6 +87,9 @@ const auth = {
     title: "AgentEra account",
     defaultDisplayName: "User",
     openMenu: "Open AgentEra account menu",
+    signIn: "Sign in",
+    signingIn: "Opening browser…",
+    guestLocal: "Guest mode · local only",
     online: "Online · verified",
     offline: "Offline · local access",
     manage: "Manage account",

@@ -1,4 +1,4 @@
-import { randomUUID as nodeRandomUUID } from "node:crypto";
+import { createHash, randomUUID as nodeRandomUUID } from "node:crypto";
 import {
   existsSync,
   lstatSync,
@@ -116,6 +116,44 @@ const FRESH_PROFILE_FORBIDDEN_MARKERS = PRIVATE_PROFILE_MARKERS.filter(
 
 function validUuid(value: unknown): value is string {
   return typeof value === "string" && UUID_PATTERN.test(value);
+}
+
+function deterministicGuestUuid(
+  scope: "tenant" | "owner",
+  deviceInstallationId: string,
+): string {
+  const bytes = createHash("sha256")
+    .update(`agentera-local-guest:${scope}:${deviceInstallationId}`, "utf8")
+    .digest()
+    .subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20),
+  ].join("-");
+}
+
+/**
+ * Derive a stable, device-local owner for guest Profiles without minting a
+ * cloud identity. The installation ID keeps guest data isolated per device;
+ * domain-separated hashes avoid colliding with either real account field.
+ */
+export function createAgenteraGuestRuntimeOwner(
+  deviceInstallationId: string,
+): AgenteraRuntimeOwner {
+  if (!validUuid(deviceInstallationId)) {
+    throw new Error("AgentEra guest installation identity is invalid.");
+  }
+  return {
+    tenantId: deterministicGuestUuid("tenant", deviceInstallationId),
+    ownerId: deterministicGuestUuid("owner", deviceInstallationId),
+    deviceInstallationId,
+  };
 }
 
 function exactKeys(value: object, fields: readonly string[]): boolean {
@@ -488,6 +526,43 @@ export class AgenteraProfileBindingStore {
     stored.binding.agentInstallationId = agentInstallationId;
     this.persistBindings(bindings);
     return { ...stored.binding };
+  }
+
+  removeProfileBinding(
+    profilePath: string,
+    owner: AgenteraRuntimeOwner,
+    expected: {
+      runtimeProfileId: string;
+      agentInstallationId: string | null;
+    },
+  ): boolean {
+    assertOwner(owner);
+    if (
+      !validUuid(expected.runtimeProfileId) ||
+      (expected.agentInstallationId !== null &&
+        !validUuid(expected.agentInstallationId))
+    ) {
+      throw new Error("AgentEra Runtime Profile binding identity is invalid.");
+    }
+    const canonical = canonicalProfilePath(profilePath);
+    const bindings = this.readBindings();
+    const index = bindings.findIndex(
+      (entry) => entry.profilePath === canonical,
+    );
+    if (index < 0) return false;
+    const stored = bindings[index];
+    if (
+      !sameOwner(stored.binding, owner) ||
+      stored.binding.runtimeProfileId !== expected.runtimeProfileId ||
+      stored.binding.agentInstallationId !== expected.agentInstallationId
+    ) {
+      throw new Error(
+        "AgentEra Runtime Profile binding cannot be removed by this restore transaction.",
+      );
+    }
+    bindings.splice(index, 1);
+    this.persistBindings(bindings);
+    return true;
   }
 
   resolveAttachedProfilePath(

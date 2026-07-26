@@ -41,6 +41,27 @@ describe("AgenteraAccountMenu", () => {
     });
   });
 
+  // @lat: [[agentera-app-authentication#Startup gate#Guest-first routing]]
+  it("shows a bottom-left sign-in control and opens browser login only after activation", async () => {
+    const onSignIn = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AgenteraAccountMenu
+        state={{ status: "unauthenticated", reason: "sign_in_required" }}
+        onSignIn={onSignIn}
+      />,
+    );
+
+    expect(onSignIn).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "auth.account.signIn" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "auth.account.signIn" }),
+    );
+    await waitFor(() => expect(onSignIn).toHaveBeenCalledOnce());
+  });
+
   it("shows account actions with Settings between switch account and sign out", async () => {
     const actions = {
       onManageAccount: vi.fn().mockResolvedValue(undefined),

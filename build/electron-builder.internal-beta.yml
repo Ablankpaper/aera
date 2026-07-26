@@ -1,0 +1,26 @@
+extends: electron-builder.yml
+
+# Internal-only packages are intentionally unsigned. The workflow additionally
+# sets CSC_IDENTITY_AUTO_DISCOVERY=false so no runner keychain identity can be
+# selected implicitly.
+forceCodeSigning: false
+publish: []
+
+mac:
+  identity: null
+  notarize: false
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  artifactName: Aera-Internal-Beta-${version}-macos-${arch}.${ext}
+
+dmg:
+  artifactName: Aera-Internal-Beta-${version}-macos-${arch}.${ext}
+
+win:
+  signAndEditExecutable: false
+
+nsis:
+  artifactName: Aera-Internal-Beta-${version}-windows-${arch}-setup.${ext}
+
+portable:
+  artifactName: Aera-Internal-Beta-${version}-windows-${arch}-portable.${ext}

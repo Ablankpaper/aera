@@ -1,10 +1,15 @@
 import { useState } from "react";
-import type { AgenteraAuthPublicState } from "../../../shared/agentera-auth";
+import {
+  hasAgenteraSignedInAccess,
+  type AgenteraDesktopAccessState,
+  type AgenteraSignedInAuthState,
+} from "../../../shared/agentera-auth";
 import {
   ChevronUp,
   CircleDollarSign,
   ExternalLink,
   Laptop,
+  LogIn,
   LogOut,
   RefreshCw,
   Settings,
@@ -12,11 +17,6 @@ import {
 import { useI18n } from "./useI18n";
 import ProfileAvatar from "./common/ProfileAvatar";
 import { useAgenteraUserProfile } from "./useAgenteraUserProfile";
-
-type AuthorizedState = Extract<
-  AgenteraAuthPublicState,
-  { status: "authenticated" | "offline" }
->;
 
 export interface AgenteraAccountActions {
   onManageAccount?: () => Promise<void>;
@@ -28,6 +28,11 @@ export interface AgenteraAccountActions {
 
 interface AgenteraAccountMenuActions extends AgenteraAccountActions {
   onOpenSettings?: () => void | Promise<void>;
+}
+
+interface AgenteraAccountMenuProps extends AgenteraAccountMenuActions {
+  state: AgenteraDesktopAccessState;
+  onSignIn?: () => void | Promise<void>;
 }
 
 function defaultActions(): Required<AgenteraAccountMenuActions> {
@@ -44,11 +49,58 @@ function defaultActions(): Required<AgenteraAccountMenuActions> {
   };
 }
 
-export default function AgenteraAccountMenu({
+function AgenteraGuestLogin({
+  onSignIn,
+}: {
+  onSignIn?: () => void | Promise<void>;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
+
+  const signIn = (): void => {
+    if (busy) return;
+    setBusy(true);
+    setError(false);
+    void Promise.resolve()
+      .then(onSignIn ?? (() => window.agenteraAuth.startLogin()))
+      .catch(() => setError(true))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <div className="agentera-account-menu-root">
+      <button
+        type="button"
+        className="agentera-account-trigger agentera-guest-login"
+        aria-label={t("auth.account.signIn")}
+        onClick={signIn}
+        disabled={busy}
+      >
+        <span className="agentera-account-avatar" aria-hidden="true">
+          <LogIn size={15} />
+        </span>
+        <span className="agentera-account-trigger-copy">
+          <strong>{t("auth.account.signIn")}</strong>
+          <small>
+            {busy ? t("auth.account.signingIn") : t("auth.account.guestLocal")}
+          </small>
+        </span>
+      </button>
+      {error && (
+        <p className="agentera-account-menu-error" role="alert">
+          {t("auth.account.actionFailed")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function SignedInAgenteraAccountMenu({
   state,
   ...providedActions
 }: {
-  state: AuthorizedState;
+  state: AgenteraSignedInAuthState;
 } & AgenteraAccountMenuActions): React.JSX.Element {
   const { t } = useI18n();
   const { profile } = useAgenteraUserProfile(state.userId);
@@ -180,4 +232,15 @@ export default function AgenteraAccountMenu({
       </button>
     </div>
   );
+}
+
+export default function AgenteraAccountMenu({
+  state,
+  onSignIn,
+  ...providedActions
+}: AgenteraAccountMenuProps): React.JSX.Element {
+  if (!hasAgenteraSignedInAccess(state)) {
+    return <AgenteraGuestLogin onSignIn={onSignIn} />;
+  }
+  return <SignedInAgenteraAccountMenu state={state} {...providedActions} />;
 }

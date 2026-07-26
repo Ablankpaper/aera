@@ -42,7 +42,7 @@ interface StartupModelSetupPromptProps {
 }
 
 /**
- * One gentle model-setup reminder per signed-in owner/profile and app launch.
+ * One gentle model-setup reminder per desktop owner/Profile and app launch.
  * `sessionStorage` deliberately resets with the renderer on a fresh launch;
  * unlike localStorage, it does not suppress the reminder across restarts.
  */

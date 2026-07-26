@@ -22,6 +22,38 @@ export type AgenteraAuthPublicState =
     }
   | { status: "blocked"; reason: AgenteraAuthBlockReason };
 
+export type AgenteraSignedInAuthState = Extract<
+  AgenteraAuthPublicState,
+  { status: "authenticated" | "offline" }
+>;
+
+export type AgenteraGuestAuthState = Extract<
+  AgenteraAuthPublicState,
+  { status: "unauthenticated" }
+>;
+
+export type AgenteraDesktopAccessState =
+  | AgenteraSignedInAuthState
+  | AgenteraGuestAuthState;
+
+export function hasAgenteraSignedInAccess(
+  state: AgenteraAuthPublicState,
+): state is AgenteraSignedInAuthState {
+  return state.status === "authenticated" || state.status === "offline";
+}
+
+export function hasAgenteraGuestAccess(
+  state: AgenteraAuthPublicState,
+): state is AgenteraGuestAuthState {
+  return state.status === "unauthenticated";
+}
+
+export function hasAgenteraDesktopAccess(
+  state: AgenteraAuthPublicState,
+): state is AgenteraDesktopAccessState {
+  return hasAgenteraSignedInAccess(state) || hasAgenteraGuestAccess(state);
+}
+
 const BLOCK_REASONS = new Set<AgenteraAuthBlockReason>([
   "sign_in_required",
   "offline_expired",

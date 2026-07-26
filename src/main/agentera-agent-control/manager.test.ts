@@ -114,6 +114,7 @@ describe("Agent control Organization Foundation context", () => {
         } as never,
         profiles: {
           createProfile: vi.fn(),
+          deleteProfile: vi.fn(() => ({ success: true })),
           resolveProfilePath: vi.fn(),
           activateProfile: vi.fn(),
         },

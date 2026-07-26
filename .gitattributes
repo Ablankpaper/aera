@@ -1,6 +1,12 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
+# Source-inspection tests compare reviewed TypeScript bytes and markers across
+# platforms. Keep them deterministic instead of accepting Git's Windows CRLF
+# checkout conversion.
+*.ts text eol=lf
+*.tsx text eol=lf
+
 # Shell scripts must always be LF — CRLF breaks the shebang line on
 # Linux ("bad interpreter: /bin/bash\r: No such file or directory"),
 # which silently fails the .deb / .rpm postinst hook (#395).

@@ -60,7 +60,7 @@ export default {
   splashCheckingLocal: "Checking local install…",
   splashCheckingSsh: "Checking SSH connection…",
   splashCheckingRemote: "Checking remote connection…",
-  splashLocalAfterSignIn: "Local mode will open after sign-in…",
+  splashLocalAfterSignIn: "Switching to local mode…",
   remoteNoticeTitle: "Connected to remote AgentEra Runtime",
   remoteNoticeDescription:
     "{{feature}} is not available in remote mode. This data lives on the server and is not accessible through the API yet.",

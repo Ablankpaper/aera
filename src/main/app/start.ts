@@ -34,9 +34,14 @@ import { getAgenteraCloudOrigin } from "../agentera-auth/config";
 import { AgenteraCloudClient } from "../agentera-auth/client";
 import { createAgenteraAuthController } from "../agentera-auth/controller";
 import { createAgenteraAuthStoreForApp } from "../agentera-auth/store";
+import {
+  hasAgenteraGuestAccess,
+  hasAgenteraSignedInAccess,
+} from "../../shared/agentera-auth";
 import { AgenteraUserProfileStore } from "../agentera-user-profile-store";
 import {
   AgenteraProfileBindingStore,
+  createAgenteraGuestRuntimeOwner,
   type AgenteraRuntimeOwner,
 } from "../agentera-profile-binding";
 import {
@@ -83,12 +88,30 @@ import {
   type AgenteraProductSpaceDatabase,
 } from "../agentera-product-space/db";
 import { AgenteraProductSpaceManager } from "../agentera-product-space/manager";
-import { createProfile, setActiveProfile } from "../profiles";
+import { createProfile, deleteProfile, setActiveProfile } from "../profiles";
 import { AgentIdentityService } from "../agent-identity";
 import { AgentUserMemoryRepairService } from "../agent-user-memory-repair";
 import { AgenteraGlobalProfileManager } from "../agentera-global-profile/manager";
 import { AgenteraMemoryCandidateManager } from "../agentera-global-profile/candidate-manager";
 import { AgenteraMemoryCandidateConfirmationCoordinator } from "../agentera-global-profile/candidate-confirmation";
+import {
+  openAgenteraOfficialQualityDatabase,
+  type AgenteraOfficialQualityDatabase,
+} from "../agentera-official-quality/db";
+import { AgenteraOfficialQualityClient } from "../agentera-official-quality/client";
+import {
+  OfficialQualityCollector,
+  createOfficialQualityBindingResolver,
+  type OfficialQualityPrincipal,
+  type OfficialQualitySigningPrincipal,
+} from "../agentera-official-quality/collector";
+import { AgenteraOfficialQualityManager } from "../agentera-official-quality/manager";
+import {
+  getOrCreateAgenteraDeviceIdentity,
+  signAgenteraDeviceDigest,
+} from "../agentera-auth/device-key";
+import { AgenteraEncryptedBackupClient } from "../agentera-encrypted-backup/client";
+import { AgenteraEncryptedBackupController } from "../agentera-encrypted-backup/controller";
 
 const APP_NAME =
   process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
@@ -170,12 +193,19 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
   });
   const getAgenteraRuntimeOwner = (): AgenteraRuntimeOwner => {
     const state = agenteraAuth.getPublicState();
-    const installation = agenteraAuthStore.getInstallation();
-    if (
-      (state.status !== "authenticated" && state.status !== "offline") ||
-      !installation
-    ) {
+    if (!hasAgenteraSignedInAccess(state) && !hasAgenteraGuestAccess(state)) {
       throw new Error("AgentEra product sign-in is required.");
+    }
+    const installation =
+      agenteraAuthStore.getInstallation() ??
+      (hasAgenteraGuestAccess(state)
+        ? getOrCreateAgenteraDeviceIdentity(agenteraAuthStore)
+        : null);
+    if (!installation) {
+      throw new Error("AgentEra installation identity is unavailable.");
+    }
+    if (hasAgenteraGuestAccess(state)) {
+      return createAgenteraGuestRuntimeOwner(installation.installationId);
     }
     return {
       tenantId: state.personalSpaceId,
@@ -265,6 +295,10 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
   let agenteraProductSpace: AgenteraProductSpaceManager | null = null;
   let agenteraAgentControlDatabase: AgenteraControlPlaneDatabase | null = null;
   let agenteraAgentControl: AgenteraAgentControlManager | null = null;
+  let agenteraOfficialQualityDatabase: AgenteraOfficialQualityDatabase | null =
+    null;
+  let agenteraOfficialQuality: AgenteraOfficialQualityManager | null = null;
+  let agenteraEncryptedBackup: AgenteraEncryptedBackupController | null = null;
   try {
     agenteraWorkspaceDatabase = openAgenteraWorkspaceDatabase(
       app.getPath("userData"),
@@ -352,6 +386,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
       profileBindings: agenteraProfileBindings,
       profiles: {
         createProfile,
+        deleteProfile,
         resolveProfilePath: (profileId) => profileHome(profileId),
         activateProfile: setActiveProfile,
       },
@@ -378,6 +413,94 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     agenteraAgentControl = null;
     console.error("[AGENTERA_AGENT_CONTROL] unavailable");
   }
+  const getOfficialQualitySigningPrincipal =
+    (): OfficialQualitySigningPrincipal | null => {
+      const state = agenteraAuth.getPublicState();
+      const identity = agenteraAuthStore.getInstallation();
+      if (
+        (state.status !== "authenticated" && state.status !== "offline") ||
+        identity === null
+      ) {
+        return null;
+      }
+      return {
+        accountId: state.userId,
+        deviceId: identity.installationId,
+        devicePrivateKey: identity.devicePrivateKey,
+      };
+    };
+  const getOfficialQualityPrincipal = (): OfficialQualityPrincipal | null => {
+    const principal = getOfficialQualitySigningPrincipal();
+    return principal === null
+      ? null
+      : { accountId: principal.accountId, deviceId: principal.deviceId };
+  };
+  if (agenteraAgentControlDatabase !== null) {
+    try {
+      agenteraOfficialQualityDatabase = openAgenteraOfficialQualityDatabase(
+        app.getPath("userData"),
+      );
+      const qualityClient = new AgenteraOfficialQualityClient({
+        origin: getAgenteraCloudOrigin(),
+        getAccessToken: () => agenteraAuth.getAccessTokenForCloudRequest(),
+      });
+      const qualityCollector = new OfficialQualityCollector({
+        database: agenteraOfficialQualityDatabase,
+        desktopVersion: app.getVersion(),
+        getPrincipal: getOfficialQualitySigningPrincipal,
+        resolveBinding: createOfficialQualityBindingResolver(
+          agenteraAgentControlDatabase,
+        ),
+      });
+      agenteraOfficialQuality = new AgenteraOfficialQualityManager({
+        database: agenteraOfficialQualityDatabase,
+        client: qualityClient,
+        collector: qualityCollector,
+        getPrincipal: getOfficialQualityPrincipal,
+      });
+    } catch {
+      agenteraOfficialQualityDatabase?.close();
+      agenteraOfficialQualityDatabase = null;
+      agenteraOfficialQuality = null;
+      console.error("[AGENTERA_OFFICIAL_QUALITY] unavailable");
+    }
+  }
+  if (agenteraAgentControl !== null) {
+    try {
+      const encryptedBackupClient = new AgenteraEncryptedBackupClient({
+        origin: getAgenteraCloudOrigin(),
+        getAccessToken: () => agenteraAuth.getAccessTokenForCloudRequest(),
+      });
+      agenteraEncryptedBackup = new AgenteraEncryptedBackupController({
+        userDataPath: app.getPath("userData"),
+        secureStorage: safeStorage,
+        activity: runtimeActivity,
+        client: encryptedBackupClient,
+        agentControl: agenteraAgentControl,
+        getPrincipal: () => {
+          const state = agenteraAuth.getPublicState();
+          const identity = agenteraAuthStore.getInstallation();
+          if (
+            (state.status !== "authenticated" && state.status !== "offline") ||
+            identity === null
+          ) {
+            return null;
+          }
+          return {
+            accountId: state.userId,
+            deviceId: state.deviceId,
+            online: state.status === "authenticated" && state.cloudAvailable,
+            signDigest: (digest) =>
+              signAgenteraDeviceDigest(identity.devicePrivateKey, digest),
+          };
+        },
+      });
+    } catch {
+      agenteraEncryptedBackup?.close();
+      agenteraEncryptedBackup = null;
+      console.error("[AGENTERA_ENCRYPTED_BACKUP] unavailable");
+    }
+  }
   const unsubscribeProductSpace =
     agenteraProductSpace?.subscribe(() => {
       agenteraAgentControl?.notifyAgentContextChanged();
@@ -391,11 +514,23 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     void agenteraWorkspace?.notifyAccessStateChanged();
     void agenteraOrganization?.notifyAccessStateChanged();
     void agenteraProductSpace?.notifyAccessStateChanged();
-    ownerSwitchCoordinator.transitionTo(
-      state.status === "authenticated" || state.status === "offline"
-        ? state.userId
-        : null,
-    );
+    const qualityPrincipal = getOfficialQualityPrincipal();
+    agenteraOfficialQuality?.notifyPrincipalChanged(qualityPrincipal);
+    agenteraEncryptedBackup?.notifyPrincipalChanged();
+    if (state.status === "authenticated" && state.cloudAvailable) {
+      void agenteraOfficialQuality?.uploadPending();
+    }
+    let runtimeOwnerId: string | null = null;
+    if (hasAgenteraSignedInAccess(state)) {
+      runtimeOwnerId = state.userId;
+    } else if (hasAgenteraGuestAccess(state)) {
+      try {
+        runtimeOwnerId = getAgenteraRuntimeOwner().ownerId;
+      } catch {
+        // Secure-storage failure stays unmounted and is surfaced by AuthGate.
+      }
+    }
+    ownerSwitchCoordinator.transitionTo(runtimeOwnerId);
     if (
       state.status === "authenticated" &&
       state.cloudAvailable &&
@@ -437,6 +572,8 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     agenteraProductSpace,
     workspaceInvitationInbox,
     runtimeDistribution,
+    agenteraOfficialQuality,
+    agenteraEncryptedBackup,
   });
 
   setupUpdater({ getMainWindow: () => mainWindow });
@@ -502,6 +639,8 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     agenteraProductSpace?.close();
     agenteraOrganization?.close();
     agenteraWorkspace?.close();
+    agenteraOfficialQualityDatabase?.close();
+    agenteraEncryptedBackup?.close();
     agenteraAgentControlDatabase?.close();
     stopActiveRuntimeContext();
   });

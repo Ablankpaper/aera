@@ -179,7 +179,11 @@ describe("ExperienceCandidateStore", () => {
 
     const path = snapshotPath();
     expect(readFileSync(path, "utf8")).toBe(canonical.canonicalJson);
-    expect(statSync(path).mode & 0o777).toBe(0o600);
+    // POSIX mode bits are not Windows DACL evidence; that remains a
+    // physical-Windows release gate.
+    if (process.platform !== "win32") {
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+    }
     expect(store.get(CANDIDATE_ID)).toEqual(created);
     expect(store.listForContext(WORKSPACE_ID)).toEqual([created]);
     expect(store.readSnapshot(CANDIDATE_ID)).toEqual(canonical);

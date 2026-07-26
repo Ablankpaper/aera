@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster } from "react-hot-toast";
-import type { AgenteraAuthPublicState } from "../../shared/agentera-auth";
+import {
+  hasAgenteraDesktopAccess,
+  hasAgenteraGuestAccess,
+  hasAgenteraSignedInAccess,
+  type AgenteraAuthPublicState,
+  type AgenteraDesktopAccessState,
+} from "../../shared/agentera-auth";
 import type {
   AgenteraConnectionClaimPublicState,
   AgenteraProfileClaimPublicState,
@@ -26,26 +32,23 @@ type Screen = "splash" | "auth" | "profile-claim" | "installing" | "main";
 type OwnershipClaim =
   | AgenteraProfileClaimPublicState
   | AgenteraConnectionClaimPublicState;
-type AuthorizedAuthState = Extract<
-  AgenteraAuthPublicState,
-  { status: "authenticated" | "offline" }
->;
 
 const SPLASH_MIN_MS = 3000;
 
-function hasProductAccess(
-  state: AgenteraAuthPublicState,
-): state is AuthorizedAuthState {
-  return state.status === "authenticated" || state.status === "offline";
-}
-
-function isSameAuthorizedSession(
+function isSameDesktopSession(
   previous: AgenteraAuthPublicState,
   next: AgenteraAuthPublicState,
 ): boolean {
+  if (hasAgenteraGuestAccess(previous) && hasAgenteraGuestAccess(next)) {
+    return true;
+  }
+  if (
+    !hasAgenteraSignedInAccess(previous) ||
+    !hasAgenteraSignedInAccess(next)
+  ) {
+    return false;
+  }
   return (
-    hasProductAccess(previous) &&
-    hasProductAccess(next) &&
     previous.userId === next.userId &&
     previous.personalSpaceId === next.personalSpaceId &&
     previous.deviceId === next.deviceId
@@ -103,7 +106,7 @@ function App(): React.JSX.Element {
   const pendingSwitchToLocalRef = useRef(false);
   const forceAccountSelectionRef = useRef(false);
   const visibleScreen: Screen =
-    screen !== "splash" && !hasProductAccess(authState)
+    screen !== "splash" && !hasAgenteraDesktopAccess(authState)
       ? "auth"
       : screen === "main" && !runtimeAccessReady
         ? "profile-claim"
@@ -121,12 +124,27 @@ function App(): React.JSX.Element {
       setOwnershipInspectionError(false);
       setRuntimeAccessReady(false);
 
-      if (!hasProductAccess(state)) {
+      if (!hasAgenteraDesktopAccess(state)) {
         setScreen("auth");
         return;
       }
 
       let preflight = initialPreflight;
+      if (
+        hasAgenteraGuestAccess(state) &&
+        preflight.connectionMode !== "local"
+      ) {
+        pendingSwitchToLocalRef.current = false;
+        try {
+          await window.agenteraRuntimeAccess.switchToLocal();
+          preflight = await window.agenteraRuntimeAccess.runStartupPreflight();
+        } catch {
+          if (routeId !== routeIdRef.current) return;
+          setOwnershipInspectionError(true);
+          setScreen("profile-claim");
+          return;
+        }
+      }
       if (pendingSwitchToLocalRef.current) {
         pendingSwitchToLocalRef.current = false;
         if (preflight.connectionMode !== "local") {
@@ -148,8 +166,8 @@ function App(): React.JSX.Element {
       setVerifyWarning(preflight.verifyWarning);
 
       if (preflight.postAuthTarget === "welcome") {
-        // A missing Runtime is not a user choice: authenticated users proceed
-        // directly to the signed Seed bundled with the desktop app.
+        // A missing Runtime is not a user choice: guest and account sessions
+        // proceed directly to the signed Seed bundled with the desktop app.
         setScreen("installing");
         return;
       }
@@ -218,8 +236,9 @@ function App(): React.JSX.Element {
             : t("common.splashCheckingRemote"),
       );
     } catch {
-      // A failed readiness probe must not bypass product authentication. The
-      // safe fallback is the authenticated welcome/install path.
+      // A failed readiness probe must not expose an unresolved Runtime
+      // context. The safe fallback is bundled installation followed by the
+      // guest/account Profile ownership check.
     }
 
     try {
@@ -248,7 +267,7 @@ function App(): React.JSX.Element {
       authStateRef.current = state;
       setAuthState(state);
       const preflight = preflightRef.current;
-      if (preflight && !isSameAuthorizedSession(previous, state)) {
+      if (preflight && !isSameDesktopSession(previous, state)) {
         void routeAfterAuthentication(state, preflight);
       }
     });
@@ -314,7 +333,7 @@ function App(): React.JSX.Element {
     startedWith: AgenteraAuthPublicState,
   ): Promise<boolean> {
     const current = authStateRef.current;
-    if (isSameAuthorizedSession(startedWith, current)) return true;
+    if (isSameDesktopSession(startedWith, current)) return true;
     const preflight = preflightRef.current;
     if (preflight) {
       await routeAfterAuthentication(current, preflight);
@@ -391,7 +410,7 @@ function App(): React.JSX.Element {
     pendingSwitchToLocalRef.current = true;
     setSplashStatus(t("common.splashLocalAfterSignIn"));
     const preflight = preflightRef.current;
-    if (preflight && hasProductAccess(authStateRef.current)) {
+    if (preflight && hasAgenteraDesktopAccess(authStateRef.current)) {
       void routeAfterAuthentication(authStateRef.current, preflight);
     }
   }
@@ -446,7 +465,7 @@ function App(): React.JSX.Element {
       case "main":
         return (
           <Layout
-            authState={authState as AuthorizedAuthState}
+            authState={authState as AgenteraDesktopAccessState}
             verifyWarning={verifyWarning}
             onReinstall={handleVerifyReinstall}
             onDismissVerifyWarning={handleDismissVerifyWarning}

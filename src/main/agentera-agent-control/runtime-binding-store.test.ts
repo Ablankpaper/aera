@@ -146,6 +146,14 @@ describe("immutable local RuntimeBinding store", () => {
     }
   });
 
+  it("exports only owner-scoped immutable provenance for one Installation", () => {
+    const binding = store.getOrCreateForConversation(bindingInput());
+    expect(store.listForInstallation(INSTALLATION_ID)).toEqual([binding]);
+    expect(
+      store.listForInstallation("89898989-8989-4989-8989-898989898989"),
+    ).toEqual([]);
+  });
+
   it("pins official release provenance locally and in the sanitized cloud record", () => {
     const binding = store.getOrCreateForConversation(
       bindingInput({

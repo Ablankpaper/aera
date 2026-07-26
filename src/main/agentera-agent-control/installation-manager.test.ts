@@ -74,6 +74,9 @@ const OFFICIAL_RELEASE_REVISION_ID = "ffffffff-ffff-4fff-8fff-ffffffffffff";
 const OFFICIAL_RELEASE_REVISION_2_ID = "13131313-1313-4313-8313-131313131313";
 const OFFICIAL_RELEASE_REVISION_3_ID = "14141414-1414-4414-8414-141414141414";
 const PLATFORM_ID = "12121212-1212-4212-8212-121212121212";
+const BACKUP_ID = "16161616-1616-4616-8616-161616161616";
+const SOURCE_INSTALLATION_ID = "17171717-1717-4717-8717-171717171717";
+const PROFILE_LINEAGE_ID = "18181818-1818-4818-8818-181818181818";
 
 class FakeSecureStorage implements SecureStorageAdapter {
   isEncryptionAvailable(): boolean {
@@ -297,6 +300,9 @@ describe("Agent installation orchestration", () => {
     AgentInstallationProjection["activateForProfile"]
   >;
   let createProfile: Mock<AgentInstallationProfileAdapter["createProfile"]>;
+  let deleteProfile: Mock<
+    NonNullable<AgentInstallationProfileAdapter["deleteProfile"]>
+  >;
   let events: string[];
   let v1: AgentVersion;
   let policy: AgentPolicySnapshot;
@@ -451,8 +457,14 @@ describe("Agent installation orchestration", () => {
         mkdirSync(freshProfilePath, { recursive: true });
         return { success: true, id: "fresh-agent" };
       });
+    deleteProfile = vi.fn((id: string) => {
+      events.push(`profile:delete:${id}`);
+      rmSync(freshProfilePath, { recursive: true, force: true });
+      return { success: true };
+    });
     profiles = {
       createProfile,
+      deleteProfile,
       resolveProfilePath: (id) => {
         expect(id).toBe("fresh-agent");
         return freshProfilePath;
@@ -549,6 +561,132 @@ describe("Agent installation orchestration", () => {
       agentInstallationId: AGENT_INSTALLATION_ID,
       runtimeProfileId: RUNTIME_PROFILE_ID,
     });
+  });
+
+  it("restores verified private state into a fresh USER installation without importing historical RuntimeBindings", async () => {
+    const stagingPath = join(root, "restore-staging");
+    const provenancePath = join(root, "runtime-bindings.enc");
+    mkdirSync(join(stagingPath, "memories"), { recursive: true });
+    mkdirSync(join(stagingPath, "skills", "private"), {
+      recursive: true,
+    });
+    writeFileSync(
+      join(stagingPath, "memories", "MEMORY.md"),
+      "restored memory\n",
+    );
+    writeFileSync(
+      join(stagingPath, "skills", "private", "SKILL.md"),
+      "restored private skill\n",
+    );
+    writeFileSync(provenancePath, "encrypted historical bindings");
+    getVersion.mockImplementationOnce(async () => v1);
+
+    const restored = await manager().activateVerifiedRestore({
+      backupId: BACKUP_ID,
+      sourceInstallationId: SOURCE_INSTALLATION_ID,
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      profileLineageId: PROFILE_LINEAGE_ID,
+      name: "Fresh Agent",
+      stagedProfilePath: stagingPath,
+      encryptedRuntimeBindingProvenancePath: provenancePath,
+    });
+
+    expect(restored).toEqual({
+      agentInstallationId: AGENT_INSTALLATION_ID,
+      profileId: "fresh-agent",
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+      sourceScope: "USER",
+    });
+    expect(
+      readFileSync(join(freshProfilePath, "memories", "MEMORY.md"), "utf8"),
+    ).toBe("restored memory\n");
+    expect(
+      readFileSync(
+        join(freshProfilePath, "skills", "private", "SKILL.md"),
+        "utf8",
+      ),
+    ).toBe("restored private skill\n");
+    const restoreRecord = database.sqlite
+      .prepare(
+        `SELECT backup_id, source_installation_id, agent_installation_id,
+                runtime_profile_id, profile_lineage_id,
+                encrypted_runtime_binding_provenance,
+                historical_sessions_read_only
+         FROM encrypted_backup_restores`,
+      )
+      .get() as {
+      encrypted_runtime_binding_provenance: Uint8Array;
+    } & Record<string, unknown>;
+    expect({
+      ...restoreRecord,
+      encrypted_runtime_binding_provenance: Buffer.from(
+        restoreRecord.encrypted_runtime_binding_provenance,
+      ),
+    }).toEqual({
+      backup_id: BACKUP_ID,
+      source_installation_id: SOURCE_INSTALLATION_ID,
+      agent_installation_id: AGENT_INSTALLATION_ID,
+      runtime_profile_id: RUNTIME_PROFILE_ID,
+      profile_lineage_id: PROFILE_LINEAGE_ID,
+      encrypted_runtime_binding_provenance: Buffer.from(
+        "encrypted historical bindings",
+      ),
+      historical_sessions_read_only: 1,
+    });
+    expect(
+      database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM runtime_bindings")
+        .get(),
+    ).toEqual({ count: 0 });
+    expect(events.at(-1)).toBe("profile:activate:fresh-agent");
+    expect(deleteProfile).not.toHaveBeenCalled();
+  });
+
+  it("removes the transaction-owned Profile and binding when restore activation fails", async () => {
+    const stagingPath = join(root, "restore-staging-failure");
+    const provenancePath = join(root, "runtime-bindings-failure.enc");
+    mkdirSync(join(stagingPath, "memories"), { recursive: true });
+    writeFileSync(
+      join(stagingPath, "memories", "MEMORY.md"),
+      "must be deleted\n",
+    );
+    writeFileSync(provenancePath, "encrypted historical bindings");
+    getVersion.mockImplementationOnce(async () => v1);
+    activateInstallation.mockRejectedValueOnce(new Error("offline"));
+
+    await expect(
+      manager().activateVerifiedRestore({
+        backupId: BACKUP_ID,
+        sourceInstallationId: SOURCE_INSTALLATION_ID,
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profileLineageId: PROFILE_LINEAGE_ID,
+        name: "Fresh Agent",
+        stagedProfilePath: stagingPath,
+        encryptedRuntimeBindingProvenancePath: provenancePath,
+      }),
+    ).rejects.toMatchObject({ code: "activation_failed" });
+
+    expect(archiveInstallation).toHaveBeenCalledWith(
+      AGENT_INSTALLATION_ID,
+      `agentera:restore-archive:${AGENT_INSTALLATION_ID}:${BACKUP_ID}`,
+    );
+    expect(deleteProfile).toHaveBeenCalledWith("fresh-agent");
+    expect(existsSync(freshProfilePath)).toBe(false);
+    expect(
+      database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM encrypted_backup_restores")
+        .get(),
+    ).toEqual({ count: 0 });
+    expect(
+      database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM local_agent_installations")
+        .get(),
+    ).toEqual({ count: 0 });
+    expect(() =>
+      bindings.verifyProfileBinding(freshProfilePath, owner),
+    ).toThrow();
   });
 
   it("binds a Workspace source while keeping the local Installation USER-owned", async () => {

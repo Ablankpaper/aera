@@ -1,7 +1,12 @@
-import type { AgenteraAuthPublicState } from "../../shared/agentera-auth";
+import {
+  hasAgenteraGuestAccess,
+  hasAgenteraSignedInAccess,
+  type AgenteraAuthPublicState,
+} from "../../shared/agentera-auth";
 
 export type ProductAccessLevel =
   | "preflight"
+  | "guest"
   | "authenticated"
   | "online"
   | "bound-profile";
@@ -131,6 +136,7 @@ const PREFLIGHT_CHANNELS = [
   "agentera-auth-restart-login",
   "agentera-auth-retry-online",
   "agentera-auth-start-login",
+  "agentera-official-quality-get-consent",
   "agentera-install-file-probe",
   "agentera-organization-dismiss-pending-invitation",
   "agentera-organization-get-pending-invitation",
@@ -144,6 +150,29 @@ const PREFLIGHT_CHANNELS = [
   "set-locale",
 ] as const;
 
+const GUEST_CHANNELS = [
+  "agentera-profile-bind-active",
+  "agentera-profile-create-fresh",
+  "agentera-profile-inspect-active",
+  "agentera-profile-list-unbound",
+  "agentera-profile-resolve-account-space",
+  "agentera-runtime-cancel-download",
+  "agentera-runtime-check-update",
+  "agentera-runtime-download-confirmed",
+  "agentera-runtime-get-state",
+  "agentera-runtime-restart-apply",
+  "agentera-runtime-retry-repair",
+  "agentera-switch-to-local",
+  "check-install",
+  "check-openclaw",
+  "copy-to-clipboard",
+  "open-external",
+  "reenable-gpu",
+  "set-gpu-preference",
+  "start-install",
+  "verify-install",
+] as const;
+
 const AUTHENTICATED_CHANNELS = [
   "adopt-hermes-home",
   "agentera-auth-open-portal",
@@ -154,6 +183,11 @@ const AUTHENTICATED_CHANNELS = [
   "agentera-global-profile-remove",
   "agentera-global-profile-rollback",
   "agentera-global-profile-set",
+  "agentera-encrypted-backup-cancel",
+  "agentera-encrypted-backup-cancel-restore",
+  "agentera-encrypted-backup-confirm-recovery",
+  "agentera-encrypted-backup-get-state",
+  "agentera-encrypted-backup-set-daily-schedule",
   "agentera-agents-create-draft",
   "agentera-agents-delete-draft",
   "agentera-agents-get-draft",
@@ -166,50 +200,43 @@ const AUTHENTICATED_CHANNELS = [
   "agentera-agents-update-draft",
   "agentera-connection-bind-current",
   "agentera-connection-inspect-current",
-  "agentera-profile-bind-active",
-  "agentera-profile-create-fresh",
-  "agentera-profile-inspect-active",
-  "agentera-profile-list-unbound",
-  "agentera-profile-resolve-account-space",
   "agentera-organization-get-current-policy",
   "agentera-organization-get-state",
   "agentera-organization-list-departments",
   "agentera-organization-list-members",
+  "agentera-official-quality-set-explicit-feedback-consent",
+  "agentera-official-quality-set-passive-consent",
+  "agentera-official-quality-submit-feedback",
   "agentera-product-space-get-state",
   "agentera-product-space-select",
-  "agentera-runtime-cancel-download",
-  "agentera-runtime-check-update",
-  "agentera-runtime-download-confirmed",
-  "agentera-runtime-get-state",
-  "agentera-runtime-restart-apply",
-  "agentera-runtime-retry-repair",
-  "agentera-switch-to-local",
   "agentera-workspace-get-state",
   "agentera-workspace-list-invitations",
   "agentera-workspace-list-members",
   "agentera-workspace-select",
-  "check-install",
-  "check-openclaw",
-  "copy-to-clipboard",
   "get-connection-config",
   "is-remote-mode",
   "is-remote-only-mode",
   "is-ssh-tunnel-active",
-  "open-external",
   "probe-remote-auth-mode",
-  "reenable-gpu",
   "set-connection-chat-transports",
   "set-connection-config",
-  "set-gpu-preference",
   "set-ssh-config",
-  "start-install",
   "test-remote-connection",
   "test-ssh-connection",
   "validate-hermes-home",
-  "verify-install",
 ] as const;
 
 const ONLINE_CHANNELS = [
+  "agentera-encrypted-backup-authorize-device",
+  "agentera-encrypted-backup-confirm-restore",
+  "agentera-encrypted-backup-create",
+  "agentera-encrypted-backup-delete",
+  "agentera-encrypted-backup-list",
+  "agentera-encrypted-backup-list-devices",
+  "agentera-encrypted-backup-initialize-recovery",
+  "agentera-encrypted-backup-prepare-restore",
+  "agentera-encrypted-backup-register-current-device",
+  "agentera-encrypted-backup-revoke-device",
   "agentera-agents-archive-installation",
   "agentera-agents-claim-version",
   "agentera-agents-confirm-publication",
@@ -484,6 +511,7 @@ function buildChannelPolicy(): Readonly<Record<string, ProductAccessLevel>> {
     }
   };
   add(PREFLIGHT_CHANNELS, "preflight");
+  add(GUEST_CHANNELS, "guest");
   add(AUTHENTICATED_CHANNELS, "authenticated");
   add(ONLINE_CHANNELS, "online");
   add(BOUND_PROFILE_CHANNELS, "bound-profile");
@@ -501,13 +529,30 @@ export function createProductAccessGuard(options: {
     assert(level: ProductAccessLevel): void {
       if (level === "preflight") return;
       const state = options.getAuthState();
-      if (state.status !== "authenticated" && state.status !== "offline") {
+      if (hasAgenteraGuestAccess(state)) {
+        if (level === "guest") return;
+        if (level === "bound-profile") {
+          if (!options.isRuntimeContextBound()) {
+            throw accessError(
+              "AgentEra guest Runtime Profile binding is required.",
+              "profile_binding_required",
+            );
+          }
+          return;
+        }
+        throw accessError(
+          "AgentEra product sign-in is required.",
+          "sign_in_required",
+        );
+      }
+      if (!hasAgenteraSignedInAccess(state)) {
         throw accessError(
           "AgentEra product sign-in is required.",
           "sign_in_required",
         );
       }
       options.assertCurrentEntitlement?.();
+      if (level === "guest") return;
       if (
         level === "online" &&
         (state.status !== "authenticated" || !state.cloudAvailable)

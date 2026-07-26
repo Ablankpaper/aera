@@ -1,0 +1,618 @@
+name: Desktop signed candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact 40-character Desktop commit SHA
+        required: true
+        type: string
+      ci_run_id:
+        description: Successful CI run ID for the exact source SHA
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Exact 40-character Desktop commit SHA
+        required: true
+        type: string
+      ci_run_id:
+        description: Successful CI run ID for the exact source SHA
+        required: true
+        type: string
+    outputs:
+      candidate_artifact_name:
+        description: Immutable Actions artifact containing the candidate
+        value: ${{ jobs.assemble.outputs.artifact_name }}
+      candidate_manifest_sha256:
+        description: SHA-256 of the canonical candidate manifest
+        value: ${{ jobs.assemble.outputs.manifest_sha256 }}
+
+permissions:
+  actions: read
+  attestations: write
+  contents: read
+  id-token: write
+
+concurrency:
+  group: desktop-candidate-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate exact source and CI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      ci_run_url: ${{ steps.ci.outputs.run_url }}
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Validate source identity
+        id: identity
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          VERSION=$(node -p "require('./package.json').version")
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify successful CI belongs to the exact source
+        id: ci
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+        run: |
+          set -euo pipefail
+          gh run view "$CI_RUN_ID" --repo bignormal/aera \
+            --json conclusion,headSha,jobs,url,workflowName \
+            > "$RUNNER_TEMP/ci-run.json"
+          CI_RUN_JSON="$RUNNER_TEMP/ci-run.json" node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+
+          const run = JSON.parse(await readFile(process.env.CI_RUN_JSON, "utf8"));
+          if (run.workflowName !== "CI") throw new Error("The supplied run is not Desktop CI");
+          if (run.headSha !== process.env.SOURCE_SHA) throw new Error("CI source SHA differs");
+          if (run.conclusion !== "success") throw new Error("CI did not succeed");
+          if (!Array.isArray(run.jobs) || run.jobs.length < 3) {
+            throw new Error("CI platform matrix is incomplete");
+          }
+          for (const job of run.jobs) {
+            const executed = job.steps?.filter((step) => step.conclusion !== "skipped") ?? [];
+            if (job.conclusion !== "success" || executed.length === 0) {
+              throw new Error(`CI job did not execute successfully: ${job.name}`);
+            }
+          }
+          NODE
+          echo "run_url=$(node -p "require('$RUNNER_TEMP/ci-run.json').url")" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify candidate policy tests
+        run: node --test scripts/release/candidate-manifest.test.mjs
+
+  macos:
+    name: Build, sign, and notarize macOS arm64
+    needs: validate
+    runs-on: macos-14
+    environment: staging
+    timeout-minutes: 90
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+
+      - name: Require native Apple Silicon runner
+        shell: bash
+        run: test "$(uname -m)" = "arm64"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare locked AgentEra Runtime Seed
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm run prepare:runtime-seed -- --platform darwin --arch arm64
+
+      - name: Rebuild native dependencies for arm64
+        run: npx electron-builder install-app-deps --arch=arm64
+
+      - name: Build Desktop
+        env:
+          VITE_ANALYTICS_BASE_URL: ${{ vars.VITE_ANALYTICS_BASE_URL }}
+          VITE_ANALYTICS_API_KEY: ${{ secrets.VITE_ANALYTICS_API_KEY }}
+          MAIN_VITE_HERMES_API_URL: ${{ vars.HERMES_API_URL }}
+          MAIN_VITE_HERMES_API_KEY: ${{ secrets.HERMES_API_KEY }}
+        run: npm run build
+
+      - name: Require signing and notarization credentials
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CSC_LINK"
+          test -n "$CSC_KEY_PASSWORD"
+          test -n "$ASC_API_KEY_BASE64"
+          test -n "$ASC_KEY_ID"
+          test -n "$ASC_ISSUER_ID"
+          KEY_DIR="$RUNNER_TEMP/appstore"
+          KEY_PATH="$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8"
+          mkdir -p "$KEY_DIR"
+          APPLE_API_KEY_PATH="$KEY_PATH" node --input-type=module <<'NODE'
+          import { writeFile } from "node:fs/promises";
+
+          const bytes = Buffer.from(process.env.ASC_API_KEY_BASE64, "base64");
+          if (!bytes.toString("utf8").includes("BEGIN PRIVATE KEY")) {
+            throw new Error("App Store Connect API key is invalid");
+          }
+          await writeFile(process.env.APPLE_API_KEY_PATH, bytes, {
+            flag: "wx",
+            mode: 0o600,
+          });
+          NODE
+          echo "APPLE_API_KEY=$KEY_PATH" >> "$GITHUB_ENV"
+          echo "APPLE_API_KEY_ID=$ASC_KEY_ID" >> "$GITHUB_ENV"
+          echo "APPLE_API_ISSUER=$ASC_ISSUER_ID" >> "$GITHUB_ENV"
+
+      - name: Package signed and notarized macOS artifacts
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: >-
+          npx electron-builder --mac dmg zip --arm64 --publish never
+          -c.forceCodeSigning=true -c.mac.notarize=true
+
+      - name: Bind notarization IDs to final artifact bytes
+        id: mac_paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find dist -maxdepth 1 -type f -name '*-arm64.dmg' | wc -l | tr -d ' ')" -eq 1
+          test "$(find dist -maxdepth 1 -type f -name '*-arm64-mac.zip' | wc -l | tr -d ' ')" -eq 1
+          test "$(find dist -maxdepth 2 -type d -name '*.app' | wc -l | tr -d ' ')" -eq 1
+          test "$(find resources/agentera-runtime-seed -maxdepth 1 \
+            -type f -name '*.manifest.json' | wc -l | tr -d ' ')" -eq 1
+          DMG_PATH=$(find dist -maxdepth 1 -type f -name '*-arm64.dmg' -print)
+          ZIP_PATH=$(find dist -maxdepth 1 -type f -name '*-arm64-mac.zip' -print)
+          APP_PATH=$(find dist -maxdepth 2 -type d -name '*.app' -print)
+          RUNTIME_MANIFEST=$(find resources/agentera-runtime-seed -maxdepth 1 \
+            -type f -name '*.manifest.json' -print)
+
+          xcrun notarytool submit "$DMG_PATH" \
+            --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" --wait --output-format json \
+            > "$RUNNER_TEMP/dmg-notarization.json"
+          xcrun notarytool submit "$ZIP_PATH" \
+            --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" --wait --output-format json \
+            > "$RUNNER_TEMP/zip-notarization.json"
+          xcrun stapler staple "$DMG_PATH"
+          xcrun stapler validate "$DMG_PATH"
+
+          DMG_PATH="$DMG_PATH" ZIP_PATH="$ZIP_PATH" \
+          DMG_RESULT="$RUNNER_TEMP/dmg-notarization.json" \
+          ZIP_RESULT="$RUNNER_TEMP/zip-notarization.json" \
+          NOTARIZATION_OUTPUT="$RUNNER_TEMP/notarizations.json" \
+            node --input-type=module <<'NODE'
+          import { basename } from "node:path";
+          import { readFile, writeFile } from "node:fs/promises";
+          import { canonicalJSONStringify } from "./scripts/release/candidate-manifest.mjs";
+
+          const read = async (path) => JSON.parse(await readFile(path, "utf8"));
+          const dmg = await read(process.env.DMG_RESULT);
+          const zip = await read(process.env.ZIP_RESULT);
+          for (const result of [dmg, zip]) {
+            if (result.status !== "Accepted" || typeof result.id !== "string") {
+              throw new Error("Apple notarization was not accepted");
+            }
+          }
+          const document = {
+            notarizations: [
+              { artifact: basename(process.env.DMG_PATH), id: dmg.id, status: dmg.status },
+              { artifact: basename(process.env.ZIP_PATH), id: zip.id, status: zip.status },
+            ],
+          };
+          await writeFile(
+            process.env.NOTARIZATION_OUTPUT,
+            canonicalJSONStringify(document),
+            { flag: "wx", mode: 0o600 },
+          );
+          NODE
+          echo "app=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "dmg=$DMG_PATH" >> "$GITHUB_OUTPUT"
+          echo "zip=$ZIP_PATH" >> "$GITHUB_OUTPUT"
+          echo "runtime_manifest=$RUNTIME_MANIFEST" >> "$GITHUB_OUTPUT"
+
+      - name: Verify signed macOS candidate
+        shell: bash
+        env:
+          DESKTOP_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          node scripts/release/verify-macos.mjs \
+            --app "${{ steps.mac_paths.outputs.app }}" \
+            --dmg "${{ steps.mac_paths.outputs.dmg }}" \
+            --zip "${{ steps.mac_paths.outputs.zip }}" \
+            --runtime-seed-reference resources/agentera-runtime-seed \
+            --runtime-seed-manifest "${{ steps.mac_paths.outputs.runtime_manifest }}" \
+            --desktop-version "$DESKTOP_VERSION" \
+            --notarization-evidence "$RUNNER_TEMP/notarizations.json" \
+            --output "$RUNNER_TEMP/macos-evidence.json"
+
+      - name: Stage macOS candidate bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/macos-candidate/runtime-seed"
+          cp "${{ steps.mac_paths.outputs.dmg }}" "$RUNNER_TEMP/macos-candidate/"
+          cp "${{ steps.mac_paths.outputs.zip }}" "$RUNNER_TEMP/macos-candidate/"
+          cp "$RUNNER_TEMP/macos-evidence.json" "$RUNNER_TEMP/macos-candidate/"
+          cp "${{ steps.mac_paths.outputs.runtime_manifest }}" \
+            "$RUNNER_TEMP/macos-candidate/runtime-seed/"
+
+      - name: Upload macOS candidate bytes
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-candidate-macos-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/macos-candidate
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  windows:
+    name: Build and Authenticode-sign Windows x64
+    needs: validate
+    runs-on: windows-latest
+    environment: staging
+    timeout-minutes: 90
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+
+      - name: Require native Windows x64 runner
+        shell: pwsh
+        run: |
+          if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
+            throw "Windows candidate runner is not native x64"
+          }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare locked AgentEra Runtime Seed
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm run prepare:runtime-seed -- --platform windows --arch x64
+
+      - name: Rebuild native dependencies for x64
+        run: npx electron-builder install-app-deps --arch=x64
+
+      - name: Build Desktop
+        env:
+          VITE_ANALYTICS_BASE_URL: ${{ vars.VITE_ANALYTICS_BASE_URL }}
+          VITE_ANALYTICS_API_KEY: ${{ secrets.VITE_ANALYTICS_API_KEY }}
+          MAIN_VITE_HERMES_API_URL: ${{ vars.HERMES_API_URL }}
+          MAIN_VITE_HERMES_API_KEY: ${{ secrets.HERMES_API_KEY }}
+        run: npm run build
+
+      - name: Require Authenticode credentials
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK)) {
+            throw "WIN_CSC_LINK is missing"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_KEY_PASSWORD)) {
+            throw "WIN_CSC_KEY_PASSWORD is missing"
+          }
+
+      - name: Package Authenticode-signed Windows artifacts
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: >-
+          npx electron-builder --win nsis portable --x64 --publish never
+          -c.forceCodeSigning=true
+
+      - name: Verify signed Windows candidate
+        shell: pwsh
+        env:
+          DESKTOP_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          $manifests = @(Get-ChildItem "resources/agentera-runtime-seed" -File -Filter "*.manifest.json")
+          if ($manifests.Count -ne 1) { throw "Expected one Windows Runtime Seed manifest" }
+          ./scripts/release/verify-windows.ps1 `
+            -DistDirectory "dist" `
+            -RuntimeSeedReference "resources/agentera-runtime-seed" `
+            -RuntimeSeedManifest $manifests[0].FullName `
+            -DesktopVersion $env:DESKTOP_VERSION `
+            -Output "$env:RUNNER_TEMP/windows-evidence.json"
+          "RUNTIME_MANIFEST=$($manifests[0].FullName)" >> $env:GITHUB_ENV
+
+      - name: Stage Windows candidate bytes
+        shell: pwsh
+        env:
+          DESKTOP_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          $destination = Join-Path $env:RUNNER_TEMP "windows-candidate"
+          New-Item -ItemType Directory -Path (Join-Path $destination "runtime-seed") | Out-Null
+          $setup = @(Get-ChildItem "dist" -File -Filter "agentera-studio-$env:DESKTOP_VERSION-setup.exe")
+          $portable = @(Get-ChildItem "dist" -File -Filter "agentera-studio-$env:DESKTOP_VERSION-portable.exe")
+          if ($setup.Count -ne 1 -or $portable.Count -ne 1) {
+            throw "Expected exactly one setup and one portable executable"
+          }
+          Copy-Item $setup[0].FullName, $portable[0].FullName -Destination $destination
+          Copy-Item "$env:RUNNER_TEMP/windows-evidence.json" -Destination $destination
+          Copy-Item $env:RUNTIME_MANIFEST -Destination (Join-Path $destination "runtime-seed")
+
+      - name: Upload Windows candidate bytes
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-candidate-windows-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/windows-candidate
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  assemble:
+    name: Assemble and attest immutable candidate
+    needs: [validate, macos, windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      artifact_name: ${{ steps.result.outputs.artifact_name }}
+      manifest_sha256: ${{ steps.result.outputs.manifest_sha256 }}
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download macOS candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-candidate-macos-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/macos-candidate
+
+      - name: Download Windows candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-candidate-windows-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/windows-candidate
+
+      - name: Assemble candidate inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p candidate/artifacts candidate/evidence/runtime-seed
+          copy_one() {
+            local root="$1"
+            local pattern="$2"
+            local destination="$3"
+            mapfile -d '' -t matches < <(find "$root" -type f -name "$pattern" -print0)
+            test "${#matches[@]}" -eq 1
+            cp "${matches[0]}" "$destination"
+          }
+          copy_one "$RUNNER_TEMP/macos-candidate" '*.dmg' candidate/artifacts/
+          copy_one "$RUNNER_TEMP/macos-candidate" '*.zip' candidate/artifacts/
+          copy_one "$RUNNER_TEMP/macos-candidate" 'macos-evidence.json' \
+            candidate/evidence/macos.json
+          copy_one "$RUNNER_TEMP/macos-candidate" '*.manifest.json' \
+            candidate/evidence/runtime-seed/
+          copy_one "$RUNNER_TEMP/windows-candidate" '*-setup.exe' candidate/artifacts/
+          copy_one "$RUNNER_TEMP/windows-candidate" '*-portable.exe' candidate/artifacts/
+          copy_one "$RUNNER_TEMP/windows-candidate" 'windows-evidence.json' \
+            candidate/evidence/windows.json
+          copy_one "$RUNNER_TEMP/windows-candidate" '*.manifest.json' \
+            candidate/evidence/runtime-seed/
+          cp build/agentera-runtime-seed.lock.json \
+            candidate/evidence/agentera-runtime-seed.lock.json
+
+      - name: Generate SPDX SBOM and canonical provenance
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          CI_RUN_URL: ${{ needs.validate.outputs.ci_run_url }}
+          CANDIDATE_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          CREATED_AT=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          export CREATED_AT
+          echo "CREATED_AT=$CREATED_AT" >> "$GITHUB_ENV"
+          node scripts/release/candidate-manifest.mjs sbom \
+            --package-lock package-lock.json \
+            --runtime-lock build/agentera-runtime-seed.lock.json \
+            --source-sha "$SOURCE_SHA" \
+            --created-at "$CREATED_AT" \
+            --output candidate/evidence/sbom.spdx.json
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from "node:fs/promises";
+          import {
+            canonicalJSONStringify,
+            hashArtifact,
+          } from "./scripts/release/candidate-manifest.mjs";
+
+          const [macos, windows, runtimeLock] = await Promise.all([
+            hashArtifact("candidate/evidence/macos.json"),
+            hashArtifact("candidate/evidence/windows.json"),
+            hashArtifact("build/agentera-runtime-seed.lock.json"),
+          ]);
+          const document = {
+            schemaVersion: 1,
+            repository: "bignormal/aera",
+            sourceSha: process.env.SOURCE_SHA,
+            version: process.env.VERSION,
+            builder: "github.com/bignormal/aera/.github/workflows/release-candidate.yml",
+            buildRunUrl: process.env.CANDIDATE_RUN_URL,
+            ciRunUrl: process.env.CI_RUN_URL,
+            createdAt: process.env.CREATED_AT,
+            materials: {
+              git: { algorithm: "sha1", digest: process.env.SOURCE_SHA },
+              runtimeSeedLock: { algorithm: "sha256", digest: runtimeLock.sha256 },
+            },
+            platformEvidence: {
+              macosSha256: macos.sha256,
+              windowsSha256: windows.sha256,
+            },
+          };
+          await writeFile(
+            "candidate/evidence/provenance.json",
+            canonicalJSONStringify(document),
+            { flag: "wx", mode: 0o600 },
+          );
+          NODE
+
+      - name: Build and verify canonical candidate manifest
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          CI_RUN_URL: ${{ needs.validate.outputs.ci_run_url }}
+          CANDIDATE_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          node scripts/release/candidate-manifest.mjs build \
+            --artifacts-dir candidate/artifacts \
+            --mac-evidence candidate/evidence/macos.json \
+            --windows-evidence candidate/evidence/windows.json \
+            --runtime-lock build/agentera-runtime-seed.lock.json \
+            --package-json package.json \
+            --sbom candidate/evidence/sbom.spdx.json \
+            --provenance candidate/evidence/provenance.json \
+            --source-sha "$SOURCE_SHA" \
+            --version "$VERSION" \
+            --repository bignormal/aera \
+            --workflow "Desktop signed candidate" \
+            --run-url "$CANDIDATE_RUN_URL" \
+            --ci-run-url "$CI_RUN_URL" \
+            --created-at "$CREATED_AT" \
+            --output candidate/candidate-manifest.json
+          node scripts/release/verify-candidate.mjs \
+            candidate/candidate-manifest.json \
+            --artifacts-dir candidate/artifacts \
+            --runtime-lock build/agentera-runtime-seed.lock.json \
+            --sbom candidate/evidence/sbom.spdx.json \
+            --provenance candidate/evidence/provenance.json \
+            --expected-source-sha "$SOURCE_SHA" \
+            --expected-version "$VERSION"
+          CHECKSUMS="$RUNNER_TEMP/desktop-candidate-SHA256SUMS"
+          (
+            cd candidate
+            find artifacts evidence -type f ! -name SHA256SUMS -print0 \
+              | LC_ALL=C sort -z \
+              | xargs -0 sha256sum
+            sha256sum candidate-manifest.json
+          ) > "$CHECKSUMS"
+          mv "$CHECKSUMS" candidate/evidence/SHA256SUMS
+
+      - name: Attest candidate bytes
+        id: attest
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            candidate/artifacts/*
+            candidate/candidate-manifest.json
+            candidate/evidence/SHA256SUMS
+            candidate/evidence/agentera-runtime-seed.lock.json
+            candidate/evidence/macos.json
+            candidate/evidence/provenance.json
+            candidate/evidence/runtime-seed/*
+            candidate/evidence/sbom.spdx.json
+            candidate/evidence/windows.json
+
+      - name: Verify GitHub attestation and preserve bundle
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          test -f "$ATTESTATION_BUNDLE"
+          cp "$ATTESTATION_BUNDLE" candidate/evidence/github-attestation.json
+          while IFS= read -r -d '' file; do
+            gh attestation verify "$file" --repo bignormal/aera \
+              --signer-workflow \
+              github.com/bignormal/aera/.github/workflows/release-candidate.yml
+          done < <(
+            find candidate/artifacts -type f -print0
+            printf '%s\0' candidate/candidate-manifest.json
+            find candidate/evidence -type f \
+              ! -name github-attestation.json -print0
+          )
+
+      - name: Record candidate result
+        id: result
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "artifact_name=desktop-candidate-${{ inputs.source_sha }}" \
+            >> "$GITHUB_OUTPUT"
+          echo "manifest_sha256=$(sha256sum candidate/candidate-manifest.json | cut -d' ' -f1)" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Upload immutable candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-candidate-${{ inputs.source_sha }}
+          path: candidate
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

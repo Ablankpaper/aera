@@ -48,7 +48,10 @@ import {
 } from "../../assets/icons";
 import type { LucideIcon } from "lucide-react";
 import { useI18n } from "../../components/useI18n";
-import type { AgenteraAuthPublicState } from "../../../../shared/agentera-auth";
+import {
+  hasAgenteraSignedInAccess,
+  type AgenteraDesktopAccessState,
+} from "../../../../shared/agentera-auth";
 
 type View =
   | "chat"
@@ -87,10 +90,7 @@ const SIDEBAR_COLLAPSED_KEY = "hermes.sidebar.collapsed";
 const SIDEBAR_SCROLLBAR_HIDE_MS = 700;
 
 interface LayoutProps {
-  authState: Extract<
-    AgenteraAuthPublicState,
-    { status: "authenticated" | "offline" }
-  >;
+  authState: AgenteraDesktopAccessState;
   verifyWarning?: boolean;
   onReinstall?: () => void;
   onDismissVerifyWarning?: () => void;
@@ -104,6 +104,7 @@ function Layout({
 }: LayoutProps): React.JSX.Element {
   const { t } = useI18n();
   const { openSettings } = useSettingsModal();
+  const signedInState = hasAgenteraSignedInAccess(authState) ? authState : null;
   const [view, setView] = useState<View>("chat");
   // Multiple conversations coexist (background sessions + multi-agent). Each is
   // a ChatRun; all are mounted, only the active one is shown. Profile switches
@@ -734,12 +735,14 @@ function Layout({
           </button>
         </div>
 
-        <ProductSpaceSwitcher
-          authState={authState}
-          compact={sidebarCollapsed}
-          onManageWorkspaces={() => setWorkspaceManagementOpen(true)}
-          onManageOrganizations={() => setOrganizationManagementOpen(true)}
-        />
+        {signedInState && (
+          <ProductSpaceSwitcher
+            authState={signedInState}
+            compact={sidebarCollapsed}
+            onManageWorkspaces={() => setWorkspaceManagementOpen(true)}
+            onManageOrganizations={() => setOrganizationManagementOpen(true)}
+          />
+        )}
 
         <nav className="sidebar-nav sidebar-nav-pinned">
           <button
@@ -860,7 +863,7 @@ function Layout({
           onNew={handleNewChat}
           getAppearance={getAppearance}
         />
-        <AgenteraOfflineBanner state={authState} />
+        {signedInState && <AgenteraOfflineBanner state={signedInState} />}
         {verifyWarning && onReinstall && onDismissVerifyWarning && (
           <VerifyWarningBanner
             onReinstall={onReinstall}
@@ -985,19 +988,23 @@ function Layout({
           </div>
         )}
       </main>
-      <WorkspaceManagementDialog
-        open={workspaceManagementOpen}
-        authState={authState}
-        onClose={() => setWorkspaceManagementOpen(false)}
-      />
-      <OrganizationManagementDialog
-        open={organizationManagementOpen}
-        authState={authState}
-        onClose={() => setOrganizationManagementOpen(false)}
-      />
+      {signedInState && (
+        <WorkspaceManagementDialog
+          open={workspaceManagementOpen}
+          authState={signedInState}
+          onClose={() => setWorkspaceManagementOpen(false)}
+        />
+      )}
+      {signedInState && (
+        <OrganizationManagementDialog
+          open={organizationManagementOpen}
+          authState={signedInState}
+          onClose={() => setOrganizationManagementOpen(false)}
+        />
+      )}
       {startupProfile && (
         <StartupModelSetupPrompt
-          ownerId={authState.userId}
+          ownerId={signedInState?.userId ?? "local-guest"}
           profile={startupProfile}
           onConfigure={handleConfigureStartupModel}
         />

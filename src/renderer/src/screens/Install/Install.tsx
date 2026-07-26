@@ -38,8 +38,8 @@ function Install({ onComplete }: InstallProps): React.JSX.Element {
     translationRef.current = t;
   }, [onComplete, t]);
 
-  // The packaged Runtime is part of the product. Once authentication has
-  // succeeded there is no source/path decision for the user: verify, prepare,
+  // The packaged Runtime is part of the product. Once guest/account access is
+  // selected there is no source/path decision for the user: verify, prepare,
   // and continue automatically from local installer bytes.
   useEffect(() => {
     let isMounted = true;

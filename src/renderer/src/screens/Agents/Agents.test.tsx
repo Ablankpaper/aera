@@ -208,6 +208,13 @@ describe("Agents profile creation", () => {
     });
     expect(screen.getByText(/already exists/)).toBeTruthy();
     expect(api.listProfiles).toHaveBeenCalledTimes(2);
+
+    // Close the Radix modal while this jsdom environment is still alive so
+    // its deferred focus-restoration event cannot escape into another worker.
+    fireEvent.click(screen.getByRole("button", { name: "common.close" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
   });
 
   it("keeps AgentEra actions on the new namespace and legacy Hermes One controls separate", async () => {

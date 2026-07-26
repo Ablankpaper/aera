@@ -42,6 +42,7 @@ export default {
   downloading: "下載中 {{percent}}%",
   restartToUpdate: "重新啟動以更新",
   updateFailed: "更新失敗",
+  splashLocalAfterSignIn: "正在切換到本機模式…",
   errorTitle: "發生錯誤",
   errorMessage: "發生未預期的錯誤。",
   tryAgain: "重試",

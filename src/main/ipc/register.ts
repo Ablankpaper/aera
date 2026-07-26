@@ -25,6 +25,7 @@ import {
   profileHome,
 } from "../utils";
 import type { Attachment } from "../../shared/attachments";
+import { hasAgenteraSignedInAccess } from "../../shared/agentera-auth";
 import type { SessionModelOverride } from "../../shared/model-override";
 import type { AppLocale } from "../../shared/i18n/types";
 import { DESKTOP_PRODUCT_NAME } from "../../shared/branding";
@@ -270,6 +271,27 @@ import {
 } from "../agentera-profile-binding";
 import type { AgenteraConnectionOwnerStore } from "../agentera-connection-owner";
 import type { AgenteraAgentControlManager } from "../agentera-agent-control/manager";
+import type { AgenteraOfficialQualityManager } from "../agentera-official-quality/manager";
+import { createOfficialQualityChatObserver } from "../agentera-official-quality/collector";
+import {
+  parseOfficialQualityConsentInput,
+  parseOfficialQualityFeedbackInput,
+} from "../agentera-official-quality/ipc-contract";
+import type { AgenteraEncryptedBackupController } from "../agentera-encrypted-backup/controller";
+import {
+  parseAuthorizeEncryptedBackupDeviceInput,
+  parseCancelEncryptedBackupInput,
+  parseCancelEncryptedBackupRestoreInput,
+  parseConfirmEncryptedBackupRecoveryInput,
+  parseConfirmEncryptedBackupRestoreInput,
+  parseCreateEncryptedBackupInput,
+  parseDeleteEncryptedBackupInput,
+  parseInitializeEncryptedBackupRecoveryInput,
+  parsePrepareEncryptedBackupRestoreInput,
+  parseRegisterEncryptedBackupDeviceInput,
+  parseRevokeEncryptedBackupDeviceInput,
+  parseSetEncryptedBackupScheduleInput,
+} from "../agentera-encrypted-backup/ipc-contract";
 import {
   executeAgentControlIpc,
   parseAgentControlId,
@@ -551,6 +573,8 @@ export interface IpcContext {
   agenteraProductSpace?: AgenteraProductSpaceManager | null;
   workspaceInvitationInbox: WorkspaceInvitationInbox;
   runtimeDistribution: RuntimeDistributionManager | null;
+  agenteraOfficialQuality?: AgenteraOfficialQualityManager | null;
+  agenteraEncryptedBackup?: AgenteraEncryptedBackupController | null;
 }
 
 const RUNTIME_DISTRIBUTION_UNAVAILABLE_STATE: RuntimeDistributionPublicState = {
@@ -835,6 +859,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     agenteraProductSpace,
     workspaceInvitationInbox,
     runtimeDistribution,
+    agenteraOfficialQuality,
+    agenteraEncryptedBackup,
   } = context;
   const globalProfileChangedChannel = "agentera-global-profile-changed";
   const notifyGlobalProfileChanged = (profile: unknown): void => {
@@ -865,6 +891,30 @@ export function registerIpcHandlers(context: IpcContext): void {
     }
     return agenteraAgentControl;
   };
+  const requireOfficialQuality = (): AgenteraOfficialQualityManager => {
+    if (!agenteraOfficialQuality) {
+      throw Object.assign(new Error("Official quality is unavailable."), {
+        code: "service_unavailable",
+      });
+    }
+    return agenteraOfficialQuality;
+  };
+  const requireEncryptedBackup = (): AgenteraEncryptedBackupController => {
+    if (!agenteraEncryptedBackup) {
+      throw Object.assign(new Error("Encrypted backup is unavailable."), {
+        code: "service_unavailable",
+      });
+    }
+    return agenteraEncryptedBackup;
+  };
+  const encryptedBackupProgressChannel = "agentera-encrypted-backup-progress";
+  agenteraEncryptedBackup?.subscribe((progress) => {
+    const window = getMainWindow();
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) {
+      return;
+    }
+    window.webContents.send(encryptedBackupProgressChannel, progress);
+  });
   const agentControlStateChannel = "agentera-agents-state-changed";
   agenteraAgentControl?.subscribe((state) => {
     const window = getMainWindow();
@@ -984,6 +1034,146 @@ export function registerIpcHandlers(context: IpcContext): void {
     electronIpcMain,
     productAccessGuard,
     assertChannelProfileTarget,
+  );
+  ipcMain.handle("agentera-official-quality-get-consent", () =>
+    requireOfficialQuality().getConsent(),
+  );
+  ipcMain.handle(
+    "agentera-official-quality-set-passive-consent",
+    (_event, input: unknown) =>
+      requireOfficialQuality().setConsent(
+        "official_quality_metrics",
+        parseOfficialQualityConsentInput(input).enabled,
+      ),
+  );
+  ipcMain.handle(
+    "agentera-official-quality-set-explicit-feedback-consent",
+    (_event, input: unknown) =>
+      requireOfficialQuality().setConsent(
+        "official_explicit_feedback",
+        parseOfficialQualityConsentInput(input).enabled,
+      ),
+  );
+  ipcMain.handle(
+    "agentera-official-quality-submit-feedback",
+    (_event, input: unknown) =>
+      requireOfficialQuality().submitFeedback(
+        parseOfficialQualityFeedbackInput(input),
+      ),
+  );
+  const noEncryptedBackupArguments = (values: unknown[]): void => {
+    if (values.length !== 0) {
+      throw Object.assign(new Error("Invalid encrypted backup request."), {
+        code: "invalid_request",
+      });
+    }
+  };
+  ipcMain.handle(
+    "agentera-encrypted-backup-get-state",
+    (_event, ...values: unknown[]) => {
+      noEncryptedBackupArguments(values);
+      return requireEncryptedBackup().getState();
+    },
+  );
+  ipcMain.handle(
+    "agentera-encrypted-backup-initialize-recovery",
+    (_event, input: unknown) => {
+      parseInitializeEncryptedBackupRecoveryInput(input);
+      return requireEncryptedBackup().initializeRecovery();
+    },
+  );
+  ipcMain.handle(
+    "agentera-encrypted-backup-confirm-recovery",
+    (_event, input: unknown) => {
+      parseConfirmEncryptedBackupRecoveryInput(input);
+      return requireEncryptedBackup().confirmRecoverySaved();
+    },
+  );
+  ipcMain.handle(
+    "agentera-encrypted-backup-register-current-device",
+    (_event, input: unknown) => {
+      parseRegisterEncryptedBackupDeviceInput(input);
+      return requireEncryptedBackup().registerCurrentDevice();
+    },
+  );
+  ipcMain.handle(
+    "agentera-encrypted-backup-authorize-device",
+    (_event, input: unknown) => {
+      const parsed = parseAuthorizeEncryptedBackupDeviceInput(input);
+      return requireEncryptedBackup().authorizeDevice(parsed.deviceId);
+    },
+  );
+  ipcMain.handle("agentera-encrypted-backup-create", (_event, input: unknown) =>
+    requireEncryptedBackup().createBackup(
+      parseCreateEncryptedBackupInput(input).installationId,
+    ),
+  );
+  ipcMain.handle("agentera-encrypted-backup-cancel", (_event, input: unknown) =>
+    requireEncryptedBackup().cancelBackup(
+      parseCancelEncryptedBackupInput(input).installationId,
+    ),
+  );
+  ipcMain.handle(
+    "agentera-encrypted-backup-list",
+    (_event, ...values: unknown[]) => {
+      noEncryptedBackupArguments(values);
+      return requireEncryptedBackup().listBackups();
+    },
+  );
+  ipcMain.handle(
+    "agentera-encrypted-backup-delete",
+    (_event, input: unknown) => {
+      const parsed = parseDeleteEncryptedBackupInput(input);
+      return requireEncryptedBackup().deleteBackup(parsed.backupId);
+    },
+  );
+  ipcMain.handle(
+    "agentera-encrypted-backup-set-daily-schedule",
+    (_event, input: unknown) => {
+      const parsed = parseSetEncryptedBackupScheduleInput(input);
+      return requireEncryptedBackup().setDailySchedule(
+        parsed.installationId,
+        parsed.enabled,
+      );
+    },
+  );
+  ipcMain.handle(
+    "agentera-encrypted-backup-list-devices",
+    (_event, ...values: unknown[]) => {
+      noEncryptedBackupArguments(values);
+      return requireEncryptedBackup().listDevices();
+    },
+  );
+  ipcMain.handle(
+    "agentera-encrypted-backup-revoke-device",
+    (_event, input: unknown) => {
+      const parsed = parseRevokeEncryptedBackupDeviceInput(input);
+      return requireEncryptedBackup().revokeDevice(parsed.deviceId);
+    },
+  );
+  ipcMain.handle(
+    "agentera-encrypted-backup-prepare-restore",
+    (_event, input: unknown) =>
+      requireEncryptedBackup().prepareRestore(
+        parsePrepareEncryptedBackupRestoreInput(input),
+      ),
+  );
+  ipcMain.handle(
+    "agentera-encrypted-backup-confirm-restore",
+    (_event, input: unknown) => {
+      const parsed = parseConfirmEncryptedBackupRestoreInput(input);
+      return requireEncryptedBackup().confirmRestore({
+        preparationId: parsed.preparationId,
+        name: parsed.name,
+      });
+    },
+  );
+  ipcMain.handle(
+    "agentera-encrypted-backup-cancel-restore",
+    (_event, input: unknown) =>
+      requireEncryptedBackup().cancelRestore(
+        parseCancelEncryptedBackupRestoreInput(input).preparationId,
+      ),
   );
   const registerAgentControlHandler = (
     channel: string,
@@ -1672,11 +1862,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
 
   const currentAgenteraUserId = (): string => {
-    const state = agenteraAuth.getPublicState();
-    if (state.status !== "authenticated" && state.status !== "offline") {
-      throw new Error("AgentEra product sign-in is required.");
-    }
-    return state.userId;
+    return getAgenteraRuntimeOwner().ownerId;
   };
 
   ipcMain.handle("agentera-user-profile-get", () => {
@@ -2884,14 +3070,16 @@ export function registerIpcHandlers(context: IpcContext): void {
         throw new Error("AgentEra Runtime restart is pending.");
       }
       try {
-        const preparedAgentTurn = agenteraAgentControl
-          ? await agenteraAgentControl.prepareHermesTurn({
-              conversationKey: identityConversationKey,
-              profilePath: profileHome(profile),
-              owner: getAgenteraRuntimeOwner(),
-              resumeSessionId: identityResumeSessionId || null,
-            })
-          : null;
+        const preparedAgentTurn =
+          agenteraAgentControl &&
+          hasAgenteraSignedInAccess(agenteraAuth.getPublicState())
+            ? await agenteraAgentControl.prepareHermesTurn({
+                conversationKey: identityConversationKey,
+                profilePath: profileHome(profile),
+                owner: getAgenteraRuntimeOwner(),
+                resumeSessionId: identityResumeSessionId || null,
+              })
+            : null;
         let conversationEnvelope = preparedAgentTurn?.envelope;
         try {
           const globalSnapshot =
@@ -2968,6 +3156,15 @@ export function registerIpcHandlers(context: IpcContext): void {
             return false;
           }
         };
+        const officialQualityObserver = createOfficialQualityChatObserver({
+          binding: preparedAgentTurn?.binding ?? null,
+          startedAt: chatStartTime,
+          recordMetric: (input) =>
+            agenteraOfficialQuality?.recordMetric(input) ?? null,
+          onEligible: (eligibility) => {
+            safeSend("agentera-official-quality-eligible", eligibility);
+          },
+        });
         const abortThisRun = (): void => {
           runtimeActivity.abortRun(chatRunId);
         };
@@ -3015,6 +3212,7 @@ export function registerIpcHandlers(context: IpcContext): void {
             },
             onDone: (sessionId) => {
               runtimeRun.finish();
+              officialQualityObserver.onDone();
               if (sessionId) {
                 bindGlobalProfileSnapshotToSession(sessionId);
                 const recorded = agentIdentity.recordSessionRevision(
@@ -3086,6 +3284,7 @@ export function registerIpcHandlers(context: IpcContext): void {
             },
             onError: (error) => {
               runtimeRun.finish();
+              officialQualityObserver.onError(error);
               safeSend("chat-error", error);
               rejectChat(new Error(error));
               // Notify on error too if window not focused
@@ -3103,6 +3302,7 @@ export function registerIpcHandlers(context: IpcContext): void {
               safeSend("chat-tool-event", toolEvent);
             },
             onUsage: (usage) => {
+              officialQualityObserver.onUsage(usage);
               safeSend("chat-usage", usage);
             },
             onClarify: (req) => {

@@ -112,6 +112,24 @@ describe("custom-provider env persistence — dual-engine compat", () => {
     expect(envContent).toMatch(/^MISTRAL_API_KEY=mk-mistral-test$/m);
   });
 
+  it("writes PETOI_API_KEY for the approved internal-Beta relay", async () => {
+    writeCustomProviders([
+      {
+        name: "InternalBetaRelay",
+        provider: "custom",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://api.petoi.cn/v1",
+        apiKey: "sk-petoi-test",
+      },
+    ]);
+
+    const { listModels } = await freshModels();
+    listModels();
+
+    const envContent = readFileSync(join(testHome, ".env"), "utf-8");
+    expect(envContent).toMatch(/^PETOI_API_KEY=sk-petoi-test$/m);
+  });
+
   it("does NOT write a host-derived form for unknown hosts (no false-positive vendor binding)", async () => {
     writeCustomProviders([
       {

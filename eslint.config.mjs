@@ -11,6 +11,7 @@ export default defineConfig(
       "**/node_modules",
       "**/dist",
       "**/out",
+      ".ci/**",
       ".claude/**",
       ".agents/**",
       "build/**",

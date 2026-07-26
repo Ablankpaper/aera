@@ -97,6 +97,7 @@ describe("AgentEra central IPC product-access guard", () => {
     for (const level of Object.values(AGENTERA_IPC_CHANNEL_POLICY)) {
       expect([
         "preflight",
+        "guest",
         "authenticated",
         "online",
         "bound-profile",
@@ -110,7 +111,7 @@ describe("AgentEra central IPC product-access guard", () => {
     );
   });
 
-  it("keeps preflight limited to sanitized bootstrap, install probes, app metadata, locale, and product auth", () => {
+  it("keeps preflight sanitized and exposes only explicit local bootstrap actions to guests", () => {
     const preflight = Object.entries(AGENTERA_IPC_CHANNEL_POLICY)
       .filter(([, level]) => level === "preflight")
       .map(([channel]) => channel)
@@ -125,6 +126,7 @@ describe("AgentEra central IPC product-access guard", () => {
         "agentera-auth-retry-online",
         "agentera-auth-start-login",
         "agentera-install-file-probe",
+        "agentera-official-quality-get-consent",
         "agentera-organization-dismiss-pending-invitation",
         "agentera-organization-get-pending-invitation",
         "agentera-startup-preflight",
@@ -137,13 +139,16 @@ describe("AgentEra central IPC product-access guard", () => {
         "set-locale",
       ].sort(),
     );
-    expect(AGENTERA_IPC_CHANNEL_POLICY["start-install"]).toBe("authenticated");
-    expect(AGENTERA_IPC_CHANNEL_POLICY["check-install"]).toBe("authenticated");
+    expect(AGENTERA_IPC_CHANNEL_POLICY["start-install"]).toBe("guest");
+    expect(AGENTERA_IPC_CHANNEL_POLICY["check-install"]).toBe("guest");
+    expect(
+      AGENTERA_IPC_CHANNEL_POLICY["agentera-profile-resolve-account-space"],
+    ).toBe("guest");
     expect(AGENTERA_IPC_CHANNEL_POLICY["get-connection-config"]).toBe(
       "authenticated",
     );
     expect(AGENTERA_IPC_CHANNEL_POLICY["agentera-switch-to-local"]).toBe(
-      "authenticated",
+      "guest",
     );
     expect(AGENTERA_IPC_CHANNEL_POLICY["agentera-auth-open-portal"]).toBe(
       "authenticated",
@@ -175,7 +180,7 @@ describe("AgentEra central IPC product-access guard", () => {
       "agentera-runtime-restart-apply",
       "agentera-runtime-retry-repair",
     ]) {
-      expect(AGENTERA_IPC_CHANNEL_POLICY[channel]).toBe("authenticated");
+      expect(AGENTERA_IPC_CHANNEL_POLICY[channel]).toBe("guest");
     }
     expect(AGENTERA_IPC_CHANNEL_POLICY["send-message"]).toBe("bound-profile");
     expect(AGENTERA_IPC_CHANNEL_POLICY["list-sessions"]).toBe("bound-profile");
@@ -301,7 +306,7 @@ describe("AgentEra central IPC product-access guard", () => {
     expect(privateRead).not.toHaveBeenCalled();
   });
 
-  it("allows local offline work but requires live cloud state for online Agent operations", () => {
+  it("allows isolated guest Profiles and local offline work but requires sign-in for account operations", () => {
     let status: "unauthenticated" | "authenticated" | "offline" =
       "unauthenticated";
     let bound = false;
@@ -321,8 +326,14 @@ describe("AgentEra central IPC product-access guard", () => {
     });
 
     expect(() => guard.assert("preflight")).not.toThrow();
+    expect(() => guard.assert("guest")).not.toThrow();
     expect(() => guard.assert("authenticated")).toThrow(/sign-in/i);
+    expect(() => guard.assert("bound-profile")).toThrow(/binding/i);
+    bound = true;
+    expect(() => guard.assert("bound-profile")).not.toThrow();
+    bound = false;
     status = "authenticated";
+    expect(() => guard.assert("guest")).not.toThrow();
     expect(() => guard.assert("authenticated")).not.toThrow();
     expect(() => guard.assert("online")).not.toThrow();
     expect(() => guard.assert("bound-profile")).toThrow(/binding/i);

@@ -10,9 +10,25 @@ The existing Hermes account client remains a separate compatibility feature. The
 
 ## Startup gate
 
-The splash may preflight Runtime and connection readiness without mounting user content, then every local, remote, SSH, and install path passes through the AgentEra product gate.
+The splash preflights Runtime and connection readiness without mounting user content, restores a valid account session when one exists, and otherwise enters an isolated local guest space without opening a browser.
 
-An online session or valid signed offline entitlement selects the bound Runtime Profile before any runnable user screen opens. A fresh authenticated device may install Runtime first, but must create and bind its empty Profile before main. Authentication never becomes a writer to [[agentera-self-evolution#AgentEra self-evolution compatibility#Local learning loop|Hermes local learning]].
+An online session or valid signed offline entitlement selects the account-bound Runtime Profile before any runnable user screen opens. A fresh guest or authenticated device may install Runtime first, but must resolve its own physical Profile before main. Authentication never becomes a writer to [[agentera-self-evolution#AgentEra self-evolution compatibility#Local learning loop|Hermes local learning]].
+
+### Guest-first routing
+
+An absent account session is a usable local guest state, not a full-screen login gate.
+
+[[src/renderer/src/App.tsx#App]] routes the guest through signed Runtime preparation and local Profile resolution, forces stale Remote or SSH configuration back to local mode, and never calls browser login during startup. [[src/renderer/src/components/AgenteraAccountMenu.tsx#AgenteraAccountMenu]] shows a bottom-left “登录” control; only that explicit action opens browser registration or sign-in. A valid encrypted account session still restores automatically across launches.
+
+Blocked account states remain on the recovery gate, and unavailable secure storage stays fail closed. Guest mode cannot use account portals, Cloud control-plane operations, workspaces, organizations, encrypted backup, or official quality submission.
+
+### Guest Profile isolation
+
+Guest Runtime access uses an installation-scoped local owner that is never a Cloud user or bearer identity.
+
+[[src/main/agentera-profile-binding.ts#createAgenteraGuestRuntimeOwner]] derives domain-separated guest owner identifiers from the protected installation identity. The normal binding store then resolves or creates a guest-owned physical Profile. Signing in switches to the account’s own binding or a fresh Profile; signing out returns to the guest binding. Neither transition opens, reassigns, copies, or merges the other owner’s Hermes data.
+
+The central IPC guard grants pre-account access only to explicit bootstrap operations and an already bound guest Profile. Account and online channels still require signed product access, while every Profile-targeted guest call is checked against the guest binding before its handler runs.
 
 ### Sanitized preflight
 
@@ -30,11 +46,11 @@ The separate `window.agenteraRuntimeDistribution` lifecycle namespace is authent
 
 ### Renderer state machine
 
-[[src/renderer/src/App.tsx#App]] applies the sanitized startup target only after product authentication and Runtime ownership checks.
+[[src/renderer/src/App.tsx#App]] applies the sanitized startup target only after guest or account Runtime ownership checks.
 
-The three-second branded splash remains unchanged. `welcome` is reachable only for an authenticated fresh installation; `main` additionally requires the current local Profile or remote/SSH connection context to match the signed-in owner. A legacy `setup` target is normalized to `main` after that ownership check.
+The three-second branded splash remains unchanged. A missing Runtime proceeds to bundled installation for either guest or account access. `main` additionally requires the current local Profile to match the guest/account owner; remote and SSH contexts remain account-only. A legacy `setup` target is normalized to `main` after that ownership check.
 
-[[src/renderer/src/screens/AuthGate/AuthGate.tsx#AuthGate]] presents the product-owned `src/renderer/src/assets/aila.glb` as Aila's native Three.js 3D character and opens registration, sign-in, and recovery only in the system browser. It never renders password, email, phone, verification-code, WebView, or local-bypass inputs, and it explains fail-closed platform secure-storage errors.
+[[src/renderer/src/screens/AuthGate/AuthGate.tsx#AuthGate]] remains the explicit sign-in/recovery surface and presents the product-owned `src/renderer/src/assets/aila.glb` as Aila's native Three.js 3D character. It opens registration, sign-in, and recovery only in the system browser, never renders password, email, phone, verification-code, WebView, or local-bypass inputs, and explains fail-closed platform secure-storage errors.
 
 Before the renderer can show any runnable screen, the authenticated local route resolves the account's own physical space in the main process. It keeps an already-active owned Profile, otherwise reactivates that account's earliest still-present binding. If the account has no binding, it binds an empty active Profile or creates a fresh non-cloned Profile beside meaningful unowned or foreign data. Returning accounts therefore reuse their original local space, while every new account proceeds automatically with a blank isolated space and never sees or inherits another account's Runtime data.
 
@@ -78,7 +94,7 @@ The desktop foundation keeps product authentication in the main process and expo
 
 [[src/main/agentera-auth/config.ts#parseAgenteraCloudOrigin]] accepts trusted HTTPS and loopback development HTTP only, requires an exact credential-free Origin, and refuses the separately configured recharge-site Origin.
 
-[[src/main/agentera-auth/config.ts#agenteraCloudUrl]] rejects absolute and host-relative paths that could escape that Origin. Runtime configuration precedes build-time configuration, and no production domain or server IP is hard-coded.
+[[src/main/agentera-auth/config.ts#agenteraCloudUrl]] rejects absolute and host-relative paths that could escape that Origin. Runtime configuration precedes build-time configuration, and no production domain or server IP is hard-coded. Runtime redirection cannot add entitlement trust: only `MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON` baked by the reviewed build may add a release issuer or public key.
 
 ### App-level secure store
 
@@ -94,7 +110,7 @@ Secure-store boundary tests construct expected descendants through Node path API
 
 [[src/main/agentera-auth/device-key.ts#getOrCreateAgenteraDeviceIdentity]] creates one installation-scoped Ed25519 key pair, stores its private key only through the app-level encrypted store, and reuses the same identity after logout.
 
-[[src/main/agentera-auth/device-key.ts#signAgenteraDeviceDigest]] signs only SHA-256-sized protocol digests. The only bundled development trust root is issuer-scoped to `http://127.0.0.1:8086`; every production issuer remains fail-closed until a reviewed release adds its public key ID.
+[[src/main/agentera-auth/device-key.ts#signAgenteraDeviceDigest]] signs only SHA-256-sized protocol digests. The bundled development root remains issuer-scoped to `http://127.0.0.1:8086`. [[src/main/agentera-auth/config.ts#parseAgenteraOfflinePublicKeysBuildConfig]] accepts release roots only from strict build-time JSON containing one canonical HTTPS IP issuer and canonical 32-byte Ed25519 public keys with unique stable IDs. The baked Cloud Origin must equal that sole issuer.
 
 ## Sessions and offline use
 
@@ -106,7 +122,7 @@ A valid offline entitlement allows local use and native Hermes learning when the
 
 Offline access accepts only an exact cloud-issued Ed25519 entitlement bound to the current user, device, installation, personal space, issuer, audience, policy, issue time, and seven-day expiry.
 
-[[src/main/agentera-auth/entitlement.ts#verifyAgenteraOfflineEntitlement]] rejects unknown keys, extra or malformed claims, non-canonical encodings, altered signatures, copied-device credentials, future issue times, and expired credentials. [[src/main/agentera-auth/config.ts#getBundledAgenteraOfflinePublicKeys]] selects trust roots only for their approved issuer.
+[[src/main/agentera-auth/entitlement.ts#verifyAgenteraOfflineEntitlement]] rejects unknown keys, extra or malformed claims, non-canonical encodings, altered signatures, copied-device credentials, future issue times, and expired credentials. [[src/main/agentera-auth/config.ts#getBundledAgenteraOfflinePublicKeys]] selects trust roots only for their approved issuer. The controller validates issuer, key ID, signature, user/device/installation/space binding, and expiry before persisting any product session.
 
 ### Trusted time and rolling validation
 
@@ -118,7 +134,7 @@ The controller serializes refreshes so a rotating Refresh Token is never replaye
 
 ### Runtime edge enforcement
 
-Every authenticated Runtime IPC edge rechecks the current trusted deadline before its handler can start new work.
+Every account Runtime IPC edge rechecks the current trusted deadline before its handler can start new work. A guest edge instead requires the explicit guest-capable policy level and the installation-scoped guest Profile binding.
 
 [[src/main/ipc/auth-guard.ts#createProductAccessGuard]] calls the controller's synchronous entitlement assertion before Profile ownership checks. Expiry, rollback, revocation, account disablement, or deletion publishes a blocked state; the existing owner-switch coordinator then aborts active runs and closes Gateway, SSH, dashboard, and SQLite state without editing Hermes files.
 
@@ -142,6 +158,8 @@ The sidebar account menu and Settings account pane expose only online/offline st
 
 [[src/renderer/src/components/AgenteraAccountMenu.tsx#AgenteraAccountMenu]] and [[src/renderer/src/components/settings/AgenteraAccountPane.tsx#AgenteraAccountPane]] open account and device management on the configured cloud Origin. Recharge opens the separately configured URL validated by [[src/main/agentera-auth/config.ts#parseAgenteraRechargePublicUrl]] and shares no AgentEra APP credential.
 
+When no account session exists, the sidebar renders only the guest-local status and the explicit “登录” action. It does not probe account profile data or open a browser until the user activates that control.
+
 Switching accounts completes safe sign-out first and then opens browser authorization with explicit account selection. The UI warns that a pending offline revocation may temporarily count toward the five-device limit and that cloud account deletion cannot erase local Hermes data.
 
 The Agent control plane applies the same switch at its own storage boundary. [[src/main/agentera-agent-control/db.ts#AGENTERA_CONTROL_PLANE_SCHEMA_VERSION]] schema v2 and [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] prevent the next account from listing or reopening another personal space's drafts, cached versions, installations, RuntimeBindings, or pending sanitized records.
@@ -150,9 +168,9 @@ The cloud may transfer an installation to another AgentEra account only after th
 
 ## Existing Profile migration
 
-The first authenticated launch binds an empty Profile automatically.
+The first guest or authenticated launch binds an empty owner-specific Profile automatically.
 
-If the active Profile already contains meaningful unowned data, that data remains untouched and the account receives a separate fresh Profile automatically. Later account switches follow the same deterministic rule: the main process reactivates the signed-in account's existing bound Profile, or creates one isolated fresh Profile when that account is new on the device.
+If the active Profile already contains meaningful unowned or differently owned data, that data remains untouched and the current guest/account owner receives a separate fresh Profile automatically. Later sign-in, sign-out, and account switches follow the same deterministic rule: the main process reactivates that owner’s existing bound Profile, or creates one isolated fresh Profile when the owner is new on the device.
 
 Binding never copies, uploads, or rewrites Memory, USER, skills, sessions, files, or Curator state. One physical Profile belongs to one AgentEra owner, consistent with [[agentera-self-evolution#AgentEra self-evolution compatibility#Runtime isolation|Runtime isolation]].
 
@@ -200,4 +218,4 @@ Desktop CI compiles, type-checks, tests, and validates the contract on macOS, Wi
 
 Agent sync, client-side encrypted backup, workspace/organization scopes, and official Agent evolution pipelines remain later independently designed projects. Every authentication release remains blocked by the Hermes compatibility gate.
 
-The loopback development key proves local integration only. A production build cannot grant offline access until a reviewed key ceremony places the matching public key and exact production issuer in the desktop trust map; private signing material never enters this repository.
+The loopback development key proves local integration only. A Beta build cannot grant offline access until its reviewed workflow bakes the matching public key and exact HTTPS IP issuer into the main-process bundle. Malformed JSON, unknown fields, duplicate IDs, remote HTTP, issuer paths, DNS issuers, non-canonical encodings, wrong Ed25519 lengths, and a differing Cloud Origin all fail the build. Setting the similarly named runtime environment variable cannot expand trust, and private signing material never enters this repository.

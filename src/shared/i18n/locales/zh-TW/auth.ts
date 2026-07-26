@@ -39,8 +39,7 @@ const auth = {
     binding: "正在安全綁定…",
     creating: "正在建立空白空間…",
     emptyBindingTitle: "正在準備個人空間",
-    emptyBindingDescription:
-      "正在將此空白本機 Profile 綁定到你的 AgentEra 帳戶。",
+    emptyBindingDescription: "正在將此空白本機 Profile 綁定到目前本機空間。",
     connectionBindingTitle: "正在保護此 Runtime 連線",
     connectionBindingDescription:
       "正在把遠端或 SSH 連線綁定到目前 AgentEra 擁有者，產品 Token 不會傳送給 Runtime。",
@@ -65,6 +64,9 @@ const auth = {
     settingsNav: "AgentEra 帳戶",
     title: "AgentEra 帳戶",
     openMenu: "開啟 AgentEra 帳戶選單",
+    signIn: "登入",
+    signingIn: "正在開啟瀏覽器…",
+    guestLocal: "訪客模式 · 僅限本機",
     online: "線上 · 已驗證",
     offline: "離線 · 本機可用",
     manage: "管理帳戶",
