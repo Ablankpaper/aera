@@ -15,9 +15,9 @@ import {
   verifyInternalBetaManifestFiles,
 } from "./manifest.mjs";
 
-const VERSION = "0.7.4-internal-beta.1";
+const VERSION = "0.7.4-internal-beta.2";
 const SOURCE_SHA = "a".repeat(40);
-const RUNTIME_SHA = "c0439e1e3e5f35a91b658d57ddfc011e0d5ba1bb";
+const RUNTIME_SHA = "cb6908026befd99f1f79a516d3c3e6267c9657ac";
 const ORIGIN = "https://203.0.113.10";
 const KEY_ID = "offline-beta-2026-07";
 const PUBLIC_KEY = Buffer.alloc(32, 73).toString("base64url");
@@ -56,7 +56,7 @@ async function createFixture(runtimePatch = {}) {
   const runtimeDocument = {
     schema_version: 1,
     repository: "bignormal/aera-runtime",
-    release_tag: "runtime-v0.18.2-agentera.1-rc.1",
+    release_tag: "runtime-v0.18.2-agentera.1-rc.2",
     source_commit: RUNTIME_SHA,
     runtime_version: "0.18.2-agentera.1",
     channel: "candidate",

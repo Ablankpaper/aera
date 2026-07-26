@@ -96,7 +96,7 @@ async function fixture() {
       repository: "bignormal/aera-runtime",
       sourceCommit: INTERNAL_BETA_RUNTIME_SOURCE_SHA,
       runtimeVersion: "0.18.2-agentera.1",
-      releaseTag: "runtime-v0.18.2-agentera.1-rc.1",
+      releaseTag: "runtime-v0.18.2-agentera.1-rc.2",
       channel: "candidate",
       lockSha256: "3".repeat(64),
       targets: [
@@ -153,7 +153,7 @@ async function fixture() {
       workflow: "Cloud candidate",
       runUrl: CLOUD_CANDIDATE,
     },
-    schema: { minimum: 17, maximum: 19, highestMigration: 19 },
+    schema: { minimum: 17, maximum: 20, highestMigration: 20 },
     supplyChain: {
       sbomDigest: `sha256:${"8".repeat(64)}`,
       provenanceDigest: `sha256:${"9".repeat(64)}`,
@@ -176,12 +176,12 @@ async function fixture() {
       workflow: "Admin candidate",
       runUrl: ADMIN_CANDIDATE,
     },
-    adminSchema: { minimum: 10, maximum: 12, highestMigration: 12 },
+    adminSchema: { minimum: 1, maximum: 1, highestMigration: 1 },
     compatibility: {
       cloudCommitSha: CLOUD_SHA,
       cloudInternalApiVersion: "v1",
       cloudSchemaMinimum: 17,
-      cloudSchemaMaximum: 19,
+      cloudSchemaMaximum: 20,
     },
     supplyChain: {
       sbomDigest: `sha256:${"d".repeat(64)}`,
