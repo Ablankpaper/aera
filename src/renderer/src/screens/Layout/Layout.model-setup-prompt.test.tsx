@@ -11,10 +11,18 @@ import Layout from "./Layout";
 
 const testState = vi.hoisted(() => ({
   openSettings: vi.fn(),
+  chatConnectionAccess: [] as boolean[],
 }));
 
 vi.mock("../Chat/Chat", () => ({
-  default: () => <div data-testid="chat-surface" />,
+  default: ({
+    allowAccountConnection,
+  }: {
+    allowAccountConnection?: boolean;
+  }) => {
+    testState.chatConnectionAccess.push(allowAccountConnection ?? true);
+    return <div data-testid="chat-surface" />;
+  },
 }));
 vi.mock("./ActiveSessionsBar", () => ({
   ActiveSessionsBar: () => <div data-testid="active-sessions" />,
@@ -59,6 +67,11 @@ const authenticated: AgenteraAuthPublicState = {
   deviceId: "30000000-0000-4000-8000-000000000003",
   offlineExpiresAt: "2026-07-28T00:00:00.000Z",
   cloudAvailable: true,
+};
+
+const guest: AgenteraAuthPublicState = {
+  status: "unauthenticated",
+  reason: "sign_in_required",
 };
 
 type HermesAPIMockName =
@@ -114,6 +127,7 @@ describe("startup model setup prompt", () => {
     sessionStorage.clear();
     localStorage.clear();
     testState.openSettings.mockReset();
+    testState.chatConnectionAccess.length = 0;
     vi.stubGlobal(
       "ResizeObserver",
       class {
@@ -236,5 +250,29 @@ describe("startup model setup prompt", () => {
 
     await waitFor(() => expect(api.getModelConfig).toHaveBeenCalled());
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Guest-first routing#Layout connection privacy]]
+  it("keeps guest startup local without reading account connection state", async () => {
+    const api = installHermesAPI();
+
+    render(<Layout authState={guest} />);
+
+    expect(await screen.findByTestId("chat-surface")).toBeInTheDocument();
+    await waitFor(() => expect(api.listProfiles).toHaveBeenCalled());
+    expect(api.isRemoteOnlyMode).not.toHaveBeenCalled();
+    expect(testState.chatConnectionAccess).toContain(false);
+  });
+
+  it("falls back to local presentation when account connection state is unavailable", async () => {
+    const api = installHermesAPI();
+    api.isRemoteOnlyMode.mockRejectedValue(
+      new Error("temporarily unavailable"),
+    );
+
+    render(<Layout authState={authenticated} />);
+
+    expect(await screen.findByTestId("chat-surface")).toBeInTheDocument();
+    await waitFor(() => expect(api.isRemoteOnlyMode).toHaveBeenCalled());
   });
 });

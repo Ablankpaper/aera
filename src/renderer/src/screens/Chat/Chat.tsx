@@ -109,6 +109,9 @@ interface ChatProps {
   /** Resolved avatar/colour of `profile`, so idle agent avatars in the
    *  transcript show the agent's profile picture instead of the loading gif. */
   agentAppearance?: { color?: string | null; avatar?: string | null };
+  /** Guest sessions stay local and must not read account-owned Remote/SSH
+   *  connection configuration. */
+  allowAccountConnection?: boolean;
 }
 
 function Chat({
@@ -124,6 +127,7 @@ function Chat({
   onSessionIdChange,
   onTitleChange,
   agentAppearance,
+  allowAccountConnection = true,
 }: ChatProps): React.JSX.Element {
   const { t } = useI18n();
   // Identity + appearance of the agent this conversation is with. Passed to the
@@ -326,6 +330,16 @@ function Chat({
 
   useEffect(() => {
     let cancelled = false;
+    if (!allowAccountConnection) {
+      setConnectionMode("local");
+      setRemoteMode(false);
+      setChatTransportPreference("auto");
+      setConnectionModeLoaded(true);
+      return (): void => {
+        cancelled = true;
+      };
+    }
+
     const loadConnectionConfig = async (): Promise<void> => {
       try {
         const conn = await window.hermesAPI.getConnectionConfig();
@@ -381,7 +395,7 @@ function Chat({
       cancelled = true;
       unsubscribe();
     };
-  }, []);
+  }, [allowAccountConnection]);
 
   const { containerRef, bottomRef } = useChatScroll(visibleMessages);
   const modelConfig = useModelConfig(profile);

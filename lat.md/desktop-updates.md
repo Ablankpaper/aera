@@ -2,7 +2,7 @@
 
 Desktop updates use GitHub releases and expose both a startup upgrade action and a Settings auto-upgrade preference.
 
-The Electron main process configures `electron-updater` against the repository publisher metadata from `electron-builder.yml`, which points at `bignormal/aera`. [[src/main/app/updater.ts#setupUpdater]] registers update IPC handlers, persists the auto-upgrade preference under Electron `userData`, and applies that preference to `autoUpdater.autoDownload`.
+The Electron main process configures `electron-updater` against the repository publisher metadata from `electron-builder.yml`, which points at `bignormal/aera`. [[src/main/app/updater.ts#setupUpdater]] registers update IPC handlers, persists the auto-upgrade preference under Electron `userData`, and applies that preference to `autoUpdater.autoDownload`. Versions matching `-internal-beta.N` expose safe no-op update handlers and never contact the private GitHub Releases feed; public update checks begin only after promotion to a supported release channel.
 
 The production dependency gate runs `npm audit --omit=dev --audit-level=high`. The shipped update path therefore stays on `electron-updater` 6.8.9 or newer (including the redirect-credential fix from its runtime utility), and shipped archive handling stays on `tar` 7.5.22 or newer (including the recursion-denial-of-service fix). Candidate packaging and exact-byte verification remain unchanged by these minimum dependency floors.
 
