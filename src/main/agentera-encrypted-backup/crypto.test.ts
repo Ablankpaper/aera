@@ -167,6 +167,7 @@ describe("AgentEra encrypted backup crypto v1", () => {
     }
   });
 
+  // @lat: [[lat.md/agentera-post-official-delivery#AgentEra post-official delivery program#End-to-end encrypted backup V1#Local encrypted-backup acceptance evidence]]
   it("wraps the root key for phrase recovery with lineage-bound AAD", async () => {
     const rootKey = bytes(vector.rootKeyHex);
     const envelope = await wrapRootKeyForRecovery({
