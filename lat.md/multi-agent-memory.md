@@ -26,7 +26,7 @@ Both Profile UI rename and `/agent name <arbitrary name>` use this same service.
 
 Hermes `memories/USER.md` means the current Agent's private understanding of the user, not the account-wide global profile.
 
-The Memory UI labels this scope explicitly. A user-requested repair uses preview, exact editable replacement, confirmation, a content hash, a private backup, and guarded undo; it never automatically classifies text or migrates identity text into `SOUL.md`.
+The Memory UI labels this scope explicitly. A user-requested repair uses preview, exact editable replacement, confirmation, a content hash, a private backup, and guarded undo; it never automatically classifies text or migrates identity text into `SOUL.md`. Renderer coverage waits for the confirmation state update before applying the exact reviewed replacement, so the contract is stable across slower CI event loops.
 
 ## Account-wide behavior profile
 

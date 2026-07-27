@@ -73,7 +73,7 @@ describe("MemoryProfile USER.md repair", () => {
     expect(applyButton).toBeDisabled();
 
     fireEvent.click(screen.getByRole("checkbox"));
-    expect(applyButton).toBeEnabled();
+    await waitFor(() => expect(applyButton).toBeEnabled());
     fireEvent.click(applyButton);
 
     await waitFor(() =>
