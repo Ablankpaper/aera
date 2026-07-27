@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AgenteraProfileBindingStore,
   createAgenteraGuestRuntimeOwner,
+  discoverProfilesForCurrentOwner,
   hasMeaningfulHermesProfileData,
   type AgenteraRuntimeOwner,
   type RuntimeOwnerBinding,
@@ -116,6 +117,35 @@ describe("AgentEra non-destructive Runtime Profile ownership", () => {
     );
     expect(first.tenantId).not.toBe(first.ownerId);
     expect(otherDevice.ownerId).not.toBe(first.ownerId);
+  });
+
+  // @lat: [[agentera-app-authentication#Startup gate#Guest Profile isolation#Profile discovery owner freshness]]
+  it("resolves the owner after asynchronous Profile discovery", async () => {
+    let finishDiscovery:
+      | ((profiles: Array<{ id: string }>) => void)
+      | undefined;
+    const discoverProfiles = vi.fn(
+      () =>
+        new Promise<Array<{ id: string }>>((resolve) => {
+          finishDiscovery = resolve;
+        }),
+    );
+    let currentOwner = owner;
+    const getCurrentOwner = vi.fn(() => currentOwner);
+    const pending = discoverProfilesForCurrentOwner({
+      discoverProfiles,
+      getCurrentOwner,
+    });
+
+    expect(getCurrentOwner).not.toHaveBeenCalled();
+    currentOwner = otherOwner;
+    finishDiscovery?.([{ id: "profile-after-auth-transition" }]);
+
+    await expect(pending).resolves.toEqual({
+      profiles: [{ id: "profile-after-auth-transition" }],
+      owner: otherOwner,
+    });
+    expect(getCurrentOwner).toHaveBeenCalledOnce();
   });
 
   // @lat: [[agentera-app-authentication#Existing Profile migration]]

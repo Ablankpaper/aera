@@ -42,6 +42,12 @@ Guest Runtime access uses an installation-scoped local owner that is never a Clo
 
 The central IPC guard grants pre-account access only to explicit bootstrap operations and an already bound guest Profile. Account and online channels still require signed product access, while every Profile-targeted guest call is checked against the guest binding before its handler runs.
 
+#### Profile discovery owner freshness
+
+Local Profile discovery may await filesystem work while a guest signs in or an account switches, so ownership is resolved only after discovery returns and immediately before synchronous bind, activation, or creation.
+
+[[src/main/agentera-profile-binding.ts#discoverProfilesForCurrentOwner]] returns discovered locations with the then-current validated owner. The local account-space IPC handler uses that pair without another asynchronous boundary, preventing a stale guest or account principal from binding the Profile.
+
 ### Sanitized preflight
 
 [[src/main/agentera-startup-preflight.ts#runAgenteraStartupPreflight]] keeps pre-auth connection and installation checks inside the main process and returns only three allowlisted fields.

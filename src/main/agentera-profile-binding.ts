@@ -156,6 +156,21 @@ export function createAgenteraGuestRuntimeOwner(
   };
 }
 
+/**
+ * Profile discovery crosses an asynchronous filesystem boundary. Resolve the
+ * owner only after that boundary so a guest sign-in, sign-out, or account
+ * switch cannot bind the discovered Profile with a stale principal.
+ */
+export async function discoverProfilesForCurrentOwner<T>(options: {
+  discoverProfiles: () => Promise<T>;
+  getCurrentOwner: () => AgenteraRuntimeOwner;
+}): Promise<{ profiles: T; owner: AgenteraRuntimeOwner }> {
+  const profiles = await options.discoverProfiles();
+  const owner = options.getCurrentOwner();
+  assertOwner(owner);
+  return { profiles, owner };
+}
+
 function exactKeys(value: object, fields: readonly string[]): boolean {
   const keys = Object.keys(value);
   return (

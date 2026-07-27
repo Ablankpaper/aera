@@ -265,6 +265,7 @@ import {
   setActiveProfile,
 } from "../profiles";
 import {
+  discoverProfilesForCurrentOwner,
   hasMeaningfulHermesProfileData,
   type AgenteraProfileBindingStore,
   type AgenteraRuntimeOwner,
@@ -2117,8 +2118,11 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (config.mode !== "local") {
       throw new Error("Account spaces require local Runtime mode.");
     }
-    const owner = getAgenteraRuntimeOwner();
-    const locations = await listLocalProfileLocations();
+    const { profiles: locations, owner } =
+      await discoverProfilesForCurrentOwner({
+        discoverProfiles: listLocalProfileLocations,
+        getCurrentOwner: getAgenteraRuntimeOwner,
+      });
     const preferred = agenteraProfileBindings.findPreferredOwnedProfile(
       locations,
       owner,
