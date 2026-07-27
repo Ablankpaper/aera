@@ -197,7 +197,7 @@ describe("AgentEra encrypted backup crypto v1", () => {
         lineageId: "11111111-1111-4111-8111-111111111112",
       }),
     ).rejects.toThrow(/authentication/i);
-  }, 20_000);
+  }, 90_000);
 
   it("uses RFC 9180 X25519, HKDF-SHA256, and AES-256-GCM device envelopes", async () => {
     const publicKey = base64urlEncode(bytes(vector.hpkePublicKeyHex), 32);

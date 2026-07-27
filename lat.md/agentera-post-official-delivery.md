@@ -96,6 +96,8 @@ The same flow rejected a wrong phrase, resumed after a forced first-chunk upload
 
 Key-store regression tests retain the production Argon2id parameters and give KDF-bearing cases explicit runtime budgets. Slower CI runners must not weaken the KDF or bypass fail-closed secure-storage assertions.
 
+The recovery-envelope regression performs one wrap and two unwrap operations, so its case budget covers three full production-cost Argon2id derivations without changing the cryptographic parameters.
+
 `scripts/check-encrypted-backup-boundary.mjs` independently locks the cross-repository privacy boundary: Cloud tables and object metadata may contain only opaque ciphertext or public protocol metadata, while the Desktop allowlist excludes credentials and environment files and cannot call the Hermes backup mechanism.
 
 The implementation checkpoints are:
