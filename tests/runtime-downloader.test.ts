@@ -374,9 +374,13 @@ describe("Runtime resumable downloader", () => {
       const promise = request(
         new URL(`http://127.0.0.1:${port}/runtime`),
         fixture,
-        { signal: controller.signal },
+        {
+          signal: controller.signal,
+          onProgress: (received: number) => {
+            if (received >= 7) controller.abort();
+          },
+        },
       );
-      setTimeout(() => controller.abort(), 30);
       await expect(promise).rejects.toBeInstanceOf(
         RuntimeDownloadCancelledError,
       );

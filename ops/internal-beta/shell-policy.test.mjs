@@ -1,8 +1,17 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import {
+  access,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -151,6 +160,11 @@ test("host preparation installs the exact Cosign verifier used by candidate CI",
   );
   assert.match(installer, /sha256sum --check --status/u);
   assert.match(installer, /GitVersion:/u);
+  assert.ok(
+    installer.indexOf("[[ -x $cosign_install ]]") <
+      installer.indexOf('download="https://github.com/'),
+    "an already verified exact Cosign binary must avoid a network download",
+  );
 
   const preparation = source.slice(source.indexOf("prepare_host()"));
   const installCosign = preparation.indexOf("install_cosign");
@@ -160,6 +174,72 @@ test("host preparation installs the exact Cosign verifier used by candidate CI",
     installCertbot > installCosign,
     "Cosign must be verified before certificate and deployment preparation",
   );
+});
+
+test("host preparation can restart after a removed Caddy configuration", async () => {
+  const source = await readFile(
+    path.join(directory, "bootstrap-host.sh"),
+    "utf8",
+  );
+  const preparation = source.slice(source.indexOf("prepare_host()"));
+  const ensureConfig = preparation.indexOf("ensure_caddy_bootstrap_config");
+  const startCaddy = preparation.indexOf("systemctl enable --now caddy");
+
+  assert.match(source, /ensure_caddy_bootstrap_config\(\)/u);
+  assert.match(source, /\[\[ -e \$caddy_config \|\| -L \$caddy_config \]\]/u);
+  assert.match(source, /http:\/\/localhost/u);
+  assert.match(source, /caddy validate --config "\$caddy_config"/u);
+  assert.ok(ensureConfig >= 0, "host preparation must ensure a Caddy config");
+  assert.ok(
+    startCaddy > ensureConfig,
+    "Caddy must start only after its bootstrap configuration exists",
+  );
+});
+
+test("host preparation rejects a dangling Caddy configuration symlink", async () => {
+  const source = await readFile(
+    path.join(directory, "bootstrap-host.sh"),
+    "utf8",
+  );
+  const functionStart = source.indexOf("ensure_caddy_bootstrap_config()");
+  const functionEnd = source.indexOf(
+    "\nconfigure_deploy_user()",
+    functionStart,
+  );
+  assert.ok(functionStart >= 0 && functionEnd > functionStart);
+
+  const temporary = await mkdtemp(
+    path.join(os.tmpdir(), "aera-caddy-bootstrap-"),
+  );
+  try {
+    const target = path.join(temporary, "missing-target");
+    const config = path.join(temporary, "Caddyfile");
+    const harness = path.join(temporary, "harness.sh");
+    await symlink(target, config);
+    await writeFile(
+      harness,
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "caddy_config=$1",
+        'fail() { printf "%s\\n" "$1" >&2; exit 1; }',
+        source.slice(functionStart, functionEnd),
+        "ensure_caddy_bootstrap_config",
+        "",
+      ].join("\n"),
+      { mode: 0o700 },
+    );
+
+    const result = await new Promise((resolve, reject) => {
+      const child = spawn(harness, [config], { stdio: "ignore" });
+      child.once("error", reject);
+      child.once("close", (code, signal) => resolve({ code, signal }));
+    });
+    assert.deepEqual(result, { code: 1, signal: null });
+    await assert.rejects(access(target));
+  } finally {
+    await rm(temporary, { force: true, recursive: true });
+  }
 });
 
 test("deployment account can traverse the root-owned application directory", async () => {
@@ -246,4 +326,41 @@ test("secret generation does not hide OpenSSL diagnostics", async () => {
     source,
     /openssl (?:genpkey|pkey|req|x509)[\s\S]{0,240}2>\/dev\/null/u,
   );
+});
+
+test("secret generation prepares the live Admin-to-Cloud trust view", async () => {
+  const source = await readFile(
+    path.join(directory, "generate-secrets.sh"),
+    "utf8",
+  );
+
+  assert.match(source, /write_admin_pki_view\(\)/u);
+  for (const file of [
+    "ca.pem",
+    "client.pem",
+    "client-key.pem",
+    "service-key.pem",
+  ]) {
+    assert.match(
+      source,
+      new RegExp(`admin_pki_dir/${file.replace(".", "\\.")}`, "u"),
+    );
+  }
+  assert.match(
+    source,
+    /AGENTERA_CLOUD_ADMIN_BASE_URL=https:\/\/aera-cloud-internal-admin:8443/u,
+  );
+  assert.match(source, /AGENTERA_CLOUD_ADMIN_JWT_ISSUER=aera-admin/u);
+  assert.match(
+    source,
+    /AGENTERA_CLOUD_ADMIN_JWT_SUBJECT=aera-admin-internal-beta/u,
+  );
+  assert.match(source, /printf 'PAYLOAD_SECRET=%s\\n' "\$admin_payload"/u);
+  assert.match(
+    source,
+    /"\$admin_operation_hmac" "\$admin_payload" "\$cloud_access_private"/u,
+    "Payload secret must be independently generated and collision checked",
+  );
+  assert.match(source, /setfacl -m u:1001:--x "\$output_dir\/admin-pki"/u);
+  assert.match(source, /setfacl -m u:1001:r--/u);
 });

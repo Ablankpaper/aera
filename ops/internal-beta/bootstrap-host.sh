@@ -9,6 +9,7 @@ state_root=/var/lib/aera/internal-beta
 certbot_venv=/opt/aera/certbot-venv
 cosign_version=3.0.6
 cosign_install=/usr/local/bin/cosign
+caddy_config=/etc/caddy/Caddyfile
 verification_marker=.aera-key-login-verified
 
 fail() {
@@ -68,6 +69,16 @@ install_cosign() {
       ;;
     *) fail "Cosign does not support host architecture $architecture" ;;
   esac
+  if [[ -x $cosign_install ]] &&
+    printf '%s  %s\n' "$digest" "$cosign_install" |
+      sha256sum --check --status &&
+    [[ $(
+      "$cosign_install" version |
+        awk '$1 == "GitVersion:" {print $2; exit}'
+    ) == "v$cosign_version" ]]; then
+    return
+  fi
+
   download="https://github.com/sigstore/cosign/releases/download/v${cosign_version}/cosign-linux-${architecture}"
   temporary=$(mktemp "${TMPDIR:-/tmp}/aera-cosign.XXXXXX")
 
@@ -113,6 +124,27 @@ except ValueError as exc:
 if version < (5, 4):
     raise SystemExit("Certbot 5.4 or newer is required")
 PY
+}
+
+ensure_caddy_bootstrap_config() {
+  if [[ -e $caddy_config || -L $caddy_config ]]; then
+    [[ -f $caddy_config && ! -L $caddy_config ]] ||
+      fail 'existing Caddy configuration must be one regular file'
+    return
+  fi
+
+  install -d -m 0755 "$(dirname "$caddy_config")"
+  {
+    printf '{\n'
+    printf '\tauto_https off\n'
+    printf '\tadmin off\n'
+    printf '}\n\n'
+    printf 'http://localhost {\n'
+    printf '\trespond "Aera host preparation is waiting for certificate configuration" 503\n'
+    printf '}\n'
+  } >"$caddy_config"
+  chmod 0644 "$caddy_config"
+  caddy validate --config "$caddy_config" >/dev/null
 }
 
 configure_deploy_user() {
@@ -252,6 +284,7 @@ prepare_host() {
     docker-compose-plugin
 
   systemctl enable --now docker
+  ensure_caddy_bootstrap_config
   systemctl enable --now caddy
   docker version >/dev/null
   docker compose version >/dev/null

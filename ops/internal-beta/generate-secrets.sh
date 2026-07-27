@@ -147,6 +147,20 @@ write_service_jwt_keys() {
   chmod 0644 "$pki_dir/internal-admin-jwt-public.pem"
 }
 
+write_admin_pki_view() {
+  local pki_dir=$1
+  local admin_pki_dir=$2
+  install -d -m 0750 "$admin_pki_dir"
+  install -m 0644 "$pki_dir/internal-admin-ca.pem" \
+    "$admin_pki_dir/ca.pem"
+  install -m 0644 "$pki_dir/internal-admin-client.pem" \
+    "$admin_pki_dir/client.pem"
+  install -m 0600 "$pki_dir/internal-admin-client-key.pem" \
+    "$admin_pki_dir/client-key.pem"
+  install -m 0600 "$pki_dir/internal-admin-jwt-private.pem" \
+    "$admin_pki_dir/service-key.pem"
+}
+
 output_dir=/etc/aera/internal-beta
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -214,6 +228,7 @@ admin_totp_encryption=$(random_base64)
 admin_session_hmac=$(random_base64)
 admin_csrf_hmac=$(random_base64)
 admin_operation_hmac=$(random_base64)
+admin_payload=$(random_base64)
 
 IFS='|' read -r cloud_access_private cloud_access_public < <(
   generate_ed25519_raw access-signing
@@ -237,8 +252,8 @@ for material in \
   "$cloud_internal_admin_hmac" "$cloud_rollout_hmac" "$cloud_quality_hmac" \
   "$admin_identity_encryption" "$admin_identity_lookup" \
   "$admin_totp_encryption" "$admin_session_hmac" "$admin_csrf_hmac" \
-  "$admin_operation_hmac" "$cloud_access_private" "$cloud_offline_private" \
-  "$cloud_agent_private"
+  "$admin_operation_hmac" "$admin_payload" "$cloud_access_private" \
+  "$cloud_offline_private" "$cloud_agent_private"
 do
   record_material "$material" >>"$material_ledger"
 done
@@ -300,6 +315,7 @@ admin_totp_ring=$(
 
 write_internal_admin_pki "$output_dir/pki"
 write_service_jwt_keys "$output_dir/pki"
+write_admin_pki_view "$output_dir/pki" "$output_dir/admin-pki"
 "$age_keygen_command" -o "$output_dir/backup-age-identity.txt" >/dev/null 2>&1
 backup_recipient=$(
   "$age_keygen_command" -y "$output_dir/backup-age-identity.txt"
@@ -394,6 +410,7 @@ cloud_env="$output_dir/cloud.env"
 } >"$cloud_env"
 chmod 0600 "$cloud_env"
 
+admin_cloud_scopes='["users:read","devices:write","sessions:write","accounts:write","operations:read","official_agents:read","official_agent_drafts:write","official_agent_reviews:write","official_agent_releases:write","official_agent_audit:read","official_quality:read","official_quality:propose","official_quality:review","official_quality:clone"]'
 admin_env="$output_dir/admin.env"
 {
   printf 'AERA_ADMIN_POSTGRES_PASSWORD=%s\n' "$admin_postgres"
@@ -405,6 +422,7 @@ admin_env="$output_dir/admin.env"
   printf 'AERA_ADMIN_SESSION_HMAC_KEY=%s\n' "$admin_session_hmac"
   printf 'AERA_ADMIN_CSRF_HMAC_KEY=%s\n' "$admin_csrf_hmac"
   printf 'AERA_ADMIN_OPERATION_HMAC_KEY=%s\n' "$admin_operation_hmac"
+  printf 'PAYLOAD_SECRET=%s\n' "$admin_payload"
   printf 'AERA_ADMIN_CLOUD_CA_FILE_HOST=%s\n' \
     "$output_dir/pki/internal-admin-ca.pem"
   printf 'AERA_ADMIN_CLOUD_CLIENT_CERT_FILE_HOST=%s\n' \
@@ -415,8 +433,11 @@ admin_env="$output_dir/admin.env"
     "$output_dir/pki/internal-admin-jwt-private.pem"
   printf 'AERA_ADMIN_CLOUD_JWT_ISSUER=aera-admin\n'
   printf 'AERA_ADMIN_CLOUD_JWT_SUBJECT=aera-admin-internal-beta\n'
-  printf 'AERA_ADMIN_CLOUD_SCOPES=%s\n' \
-    '["users:read","devices:write","sessions:write","accounts:write","operations:read","official_agents:read","official_agent_drafts:write","official_agent_reviews:write","official_agent_releases:write","official_agent_audit:read","official_quality:read","official_quality:propose","official_quality:review","official_quality:clone"]'
+  printf 'AERA_ADMIN_CLOUD_SCOPES=%s\n' "$admin_cloud_scopes"
+  printf 'AGENTERA_CLOUD_ADMIN_BASE_URL=https://aera-cloud-internal-admin:8443\n'
+  printf 'AGENTERA_CLOUD_ADMIN_JWT_ISSUER=aera-admin\n'
+  printf 'AGENTERA_CLOUD_ADMIN_JWT_SUBJECT=aera-admin-internal-beta\n'
+  printf 'AGENTERA_CLOUD_ADMIN_SCOPES=%s\n' "$admin_cloud_scopes"
   printf 'AERA_BACKUP_AGE_RECIPIENT=%s\n' "$backup_recipient"
 } >"$admin_env"
 chmod 0600 "$admin_env"
@@ -431,14 +452,26 @@ chmod 0644 "$output_dir/public/offline-entitlement-public.json"
 if [[ $(id -u) -eq 0 ]] && getent group aera-deploy >/dev/null; then
   require_command setfacl
   chown -R root:aera-deploy "$output_dir"
-  chmod 0750 "$output_dir" "$output_dir/pki" "$output_dir/public"
+  chmod 0750 \
+    "$output_dir" \
+    "$output_dir/pki" \
+    "$output_dir/public" \
+    "$output_dir/admin-pki"
   find "$output_dir" -type f -name '*-key.pem' -exec chmod 0640 {} +
   chmod 0640 \
     "$output_dir/cloud.env" \
     "$output_dir/admin.env" \
     "$output_dir/backup-age-identity.txt" \
+    "$output_dir/admin-pki/client-key.pem" \
+    "$output_dir/admin-pki/service-key.pem" \
     "$output_dir/pki/internal-admin-ca-key.pem" \
     "$output_dir/pki/internal-admin-jwt-private.pem"
+  setfacl -m u:1001:--x "$output_dir/admin-pki"
+  setfacl -m u:1001:r-- \
+    "$output_dir/admin-pki/ca.pem" \
+    "$output_dir/admin-pki/client.pem" \
+    "$output_dir/admin-pki/client-key.pem" \
+    "$output_dir/admin-pki/service-key.pem"
   setfacl -m u:65532:r-- \
     "$output_dir/pki/internal-admin-ca.pem" \
     "$output_dir/pki/internal-admin-server.pem" \

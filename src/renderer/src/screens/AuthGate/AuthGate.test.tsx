@@ -98,7 +98,9 @@ describe("AuthGate", () => {
     );
     await waitFor(() => expect(onCopyLoginLink).toHaveBeenCalledOnce());
     expect(
-      screen.getByRole("button", { name: "auth.gate.copiedLoginLink" }),
+      await screen.findByRole("button", {
+        name: "auth.gate.copiedLoginLink",
+      }),
     ).toBeInTheDocument();
 
     fireEvent.click(

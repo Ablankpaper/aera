@@ -220,12 +220,13 @@ describe("restartGatewayViaCli", () => {
       "gateway",
       "restart",
     ]);
-    expect(await waitForFile(join(TEST_HOME, "restart-env.json"))).toBe(true);
-    expect(
-      JSON.parse(readFileSync(join(TEST_HOME, "restart-env.json"), "utf-8")),
-    ).toEqual({
-      api: "true",
-      key: "work",
+    await vi.waitFor(() => {
+      expect(
+        JSON.parse(readFileSync(join(TEST_HOME, "restart-env.json"), "utf-8")),
+      ).toEqual({
+        api: "true",
+        key: "work",
+      });
     });
   });
 
