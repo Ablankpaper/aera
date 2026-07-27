@@ -26,6 +26,10 @@ Blocked account states remain on the recovery gate, and unavailable secure stora
 
 The guest layout presents local mode directly and does not invoke account-only Remote/SSH mode inspection. A rejected account-mode check also falls back to local presentation without an unhandled renderer rejection.
 
+##### Account connection lookup fallback
+
+An authenticated layout whose Remote/SSH mode lookup rejects presents local mode and absorbs the rejection, so a transient account-connection failure cannot become an unhandled renderer error.
+
 #### Chat transport privacy
 
 Guest chat initializes the local transport without reading or subscribing to account-owned Remote/SSH connection configuration. Signing in remounts that transport boundary with account access.

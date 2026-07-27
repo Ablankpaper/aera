@@ -264,6 +264,7 @@ describe("startup model setup prompt", () => {
     expect(testState.chatConnectionAccess).toContain(false);
   });
 
+  // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Guest-first routing#Layout connection privacy#Account connection lookup fallback]]
   it("falls back to local presentation when account connection state is unavailable", async () => {
     const api = installHermesAPI();
     api.isRemoteOnlyMode.mockRejectedValue(
