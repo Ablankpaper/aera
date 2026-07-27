@@ -215,4 +215,26 @@ describe("Chat global-profile transport freeze", () => {
       expect(dashboard.enabledValues.at(-1)).toBe(false);
     });
   });
+
+  // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Guest-first routing#Chat transport privacy]]
+  it("does not read account-owned connection configuration for a guest chat", async () => {
+    const getConnectionConfig = window.hermesAPI
+      .getConnectionConfig as ReturnType<typeof vi.fn>;
+    const onConnectionConfigChanged = window.hermesAPI
+      .onConnectionConfigChanged as ReturnType<typeof vi.fn>;
+
+    render(
+      <Chat
+        runId="guest-conversation"
+        profile="guest-profile"
+        allowAccountConnection={false}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(prepareConversationContext).toHaveBeenCalled();
+      expect(getConnectionConfig).not.toHaveBeenCalled();
+      expect(onConnectionConfigChanged).not.toHaveBeenCalled();
+    });
+  });
 });

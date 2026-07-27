@@ -346,8 +346,26 @@ function Layout({
 
   // Re-check remote mode on tab switch (picks up Settings changes)
   useEffect(() => {
-    window.hermesAPI.isRemoteOnlyMode().then(setRemoteMode);
-  }, [view]);
+    let cancelled = false;
+    if (!signedInState) {
+      setRemoteMode(false);
+      return (): void => {
+        cancelled = true;
+      };
+    }
+
+    void window.hermesAPI
+      .isRemoteOnlyMode()
+      .then((isRemote) => {
+        if (!cancelled) setRemoteMode(isRemote);
+      })
+      .catch(() => {
+        if (!cancelled) setRemoteMode(false);
+      });
+    return (): void => {
+      cancelled = true;
+    };
+  }, [signedInState, view]);
 
   // Restore the last-activated profile on launch. The main process persists it
   // in ~/.hermes/active_profile (via `hermes profile use`), so the desktop
@@ -898,6 +916,7 @@ function Layout({
                 onSessionIdChange={handleRunSessionId}
                 onTitleChange={handleRunTitle}
                 agentAppearance={getAppearance(run.profile)}
+                allowAccountConnection={signedInState !== null}
               />
             </div>
           ))}

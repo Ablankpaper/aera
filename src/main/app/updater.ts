@@ -1,13 +1,9 @@
 import { app, ipcMain, type BrowserWindow } from "electron";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import type { AppUpdater } from "electron-updater";
 import { dirname, join } from "path";
 import { updaterLogger } from "../updater-log";
+import { isInternalBetaDesktopVersion } from "./update-channel";
 
 interface UpdaterDeps {
   getMainWindow: () => BrowserWindow | null;
@@ -53,7 +49,8 @@ export function setupUpdater({ getMainWindow }: UpdaterDeps): void {
   });
 
   const isPortableBuild = !!process.env.PORTABLE_EXECUTABLE_DIR;
-  if (!app.isPackaged || isPortableBuild) {
+  const isInternalBetaBuild = isInternalBetaDesktopVersion(app.getVersion());
+  if (!app.isPackaged || isPortableBuild || isInternalBetaBuild) {
     autoUpdaterInstance = null;
     ipcMain.handle("check-for-updates", async () => null);
     ipcMain.handle("download-update", () => true);
