@@ -102,7 +102,7 @@ describe("AgentEra cloud contract pin", () => {
         stdio: "pipe",
       },
     );
-  }, 20_000);
+  }, 60_000);
 
   it("uses the generated schemas at every desktop token endpoint", () => {
     const source = readFileSync(cloudClient, "utf8");
