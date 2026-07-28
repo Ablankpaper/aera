@@ -181,6 +181,110 @@ describe("useDashboardChatTransport recovery", () => {
     expect(dashboardMock.connect).toHaveBeenCalledWith("ws://fresh-dashboard");
   });
 
+  it("reconnects once when model setup times out before prompt submission", async () => {
+    const requests: Array<{ method: string; params: unknown }> = [];
+    let modelOptionsCalls = 0;
+    dashboardMock.request.mockImplementation(async (method, params) => {
+      requests.push({ method, params });
+      if (method === "session.create") {
+        return { session_id: "live-first", stored_session_id: "stored-chat" };
+      }
+      if (method === "session.resume") {
+        return { session_id: "live-recovered", resumed: "stored-chat" };
+      }
+      if (method === "model.options") {
+        modelOptionsCalls += 1;
+        if (modelOptionsCalls === 1) {
+          throw new Error(
+            "AgentEra Runtime dashboard request timed out: model.options",
+          );
+        }
+        return {
+          model: "bad-model",
+          provider: "bad-provider",
+          providers: [],
+        };
+      }
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+
+    let handled: boolean | undefined;
+    await act(async () => {
+      handled = await api.send?.("hello after a stalled picker");
+    });
+
+    expect(handled).toBe(true);
+    expect(window.hermesAPI.startDashboard).toHaveBeenCalledTimes(2);
+    expect(dashboardMock.connect).toHaveBeenCalledTimes(2);
+    expect(dashboardMock.close).toHaveBeenCalledTimes(1);
+    expect(
+      requests.filter((request) => request.method === "model.options"),
+    ).toHaveLength(3);
+    expect(requests).toContainEqual({
+      method: "session.resume",
+      params: { session_id: "stored-chat", cols: 96 },
+    });
+    expect(requests).toContainEqual({
+      method: "prompt.submit",
+      params: {
+        session_id: "live-recovered",
+        text: "hello after a stalled picker",
+      },
+    });
+  });
+
+  it("reconnects once when the initial session.create request times out", async () => {
+    const requests: Array<{ method: string; params: unknown }> = [];
+    let createCalls = 0;
+    dashboardMock.request.mockImplementation(async (method, params) => {
+      requests.push({ method, params });
+      if (method === "session.create") {
+        createCalls += 1;
+        if (createCalls === 1) {
+          throw new Error(
+            "AgentEra Runtime dashboard request timed out: session.create",
+          );
+        }
+        return {
+          session_id: "live-recovered",
+          stored_session_id: "stored-new",
+        };
+      }
+      if (method === "model.options") {
+        return {
+          model: "bad-model",
+          provider: "bad-provider",
+          providers: [],
+        };
+      }
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+
+    let handled: boolean | undefined;
+    await act(async () => {
+      handled = await api.send?.("hello after a stalled create");
+    });
+
+    expect(handled).toBe(true);
+    expect(window.hermesAPI.startDashboard).toHaveBeenCalledTimes(2);
+    expect(dashboardMock.connect).toHaveBeenCalledTimes(2);
+    expect(dashboardMock.close).toHaveBeenCalledTimes(1);
+    expect(
+      requests.filter((request) => request.method === "session.create"),
+    ).toHaveLength(2);
+    expect(requests).toContainEqual({
+      method: "prompt.submit",
+      params: {
+        session_id: "live-recovered",
+        text: "hello after a stalled create",
+      },
+    });
+  });
+
   it("surfaces OAuth login requirements without legacy fallback", async () => {
     // @lat: [[remote-dashboard-oauth#Test specifications#OAuth no-fallback]]
     const onUnavailable = vi.fn();

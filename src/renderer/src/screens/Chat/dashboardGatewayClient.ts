@@ -194,10 +194,15 @@ export class DashboardGatewayClient {
 
     return new Promise<T>((resolve, reject) => {
       const timeout = window.setTimeout(() => {
-        this.pending.delete(id);
+        if (!this.pending.delete(id)) return;
         reject(
           new Error(`AgentEra Runtime dashboard request timed out: ${method}`),
         );
+        // An OPEN WebSocket can still be a dead RPC channel (sleep/wake,
+        // stalled dashboard reader, half-open tunnel). Reusing it poisons every
+        // later request: model.options times out first, then session.create.
+        // Retire it immediately so the transport can reconnect on the same turn.
+        this.close();
       }, this.requestTimeoutMs);
       this.pending.set(id, {
         resolve: (value: unknown) => resolve(value as T),

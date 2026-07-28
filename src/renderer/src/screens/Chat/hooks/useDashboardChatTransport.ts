@@ -210,6 +210,20 @@ export function isDashboardSlashWorkerExitError(err: unknown): boolean {
   return /slash worker exited/i.test(message);
 }
 
+const RECONNECT_SAFE_TIMEOUT_METHODS = new Set([
+  "model.options",
+  "session.create",
+  "session.resume",
+]);
+
+function isReconnectSafeDashboardTimeout(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  const match = message.match(/request timed out:\s*([a-z.]+)/i);
+  return (
+    match !== null && RECONNECT_SAFE_TIMEOUT_METHODS.has(match[1].toLowerCase())
+  );
+}
+
 export async function submitDashboardPromptWithRecovery(
   client: DashboardPromptClient,
   params: {
@@ -1604,7 +1618,9 @@ export function useDashboardChatTransport({
         return failActiveTurn(message);
       }
 
-      try {
+      const submitPreparedTurn = async (
+        activeClient: DashboardGatewayClient,
+      ): Promise<boolean> => {
         let continuationItems: DesktopSessionContinuationItem[] = [];
         const forceCreateRuntime = recreateRuntimeSessionRef.current;
         if (recreateRuntimeSessionRef.current) {
@@ -1614,7 +1630,7 @@ export function useDashboardChatTransport({
           );
           const staleRuntimeSessionId = runtimeSessionIdRef.current;
           if (staleRuntimeSessionId) {
-            await client
+            await activeClient
               .request("session.close", { session_id: staleRuntimeSessionId })
               .catch(() => undefined);
           }
@@ -1622,7 +1638,7 @@ export function useDashboardChatTransport({
           reasoningSegmentClosedRef.current = false;
           appliedModelRef.current = null;
         }
-        const runtimeSessionId = await ensureRuntimeSession(client, {
+        const runtimeSessionId = await ensureRuntimeSession(activeClient, {
           forceCreate: forceCreateRuntime,
         });
         if (
@@ -1636,12 +1652,12 @@ export function useDashboardChatTransport({
         }
         await recordContinuationItems(continuationItems);
         const selectedSessionId = await ensureSelectedModel(
-          client,
+          activeClient,
           runtimeSessionId,
         );
         await recordContinuationItems(mergePendingRecoveredContinuation([]));
         const syncedAttachments = await syncDashboardAttachments(
-          client,
+          activeClient,
           selectedSessionId,
           attachments,
         );
@@ -1655,7 +1671,7 @@ export function useDashboardChatTransport({
           dashboardText,
           syncedAttachments.refs,
         );
-        await submitDashboardPromptWithRecovery(client, {
+        await submitDashboardPromptWithRecovery(activeClient, {
           sessionId: selectedSessionId,
           storedSessionId: storedSessionIdRef.current,
           text: submitText,
@@ -1665,6 +1681,34 @@ export function useDashboardChatTransport({
           },
         });
         return true;
+      };
+
+      try {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            return await submitPreparedTurn(client);
+          } catch (err) {
+            if (attempt > 0 || !isReconnectSafeDashboardTimeout(err)) {
+              throw err;
+            }
+
+            // Only setup RPCs are replayed. prompt.submit is deliberately not
+            // on the allow-list because retrying an accepted prompt could
+            // duplicate a model turn. Rebind the stored session on a fresh
+            // socket; a timed-out create with no stored id simply creates anew.
+            if (clientRef.current === client) {
+              clientRef.current = null;
+            }
+            client.close();
+            runtimeSessionIdRef.current = null;
+            reasoningSegmentClosedRef.current = false;
+            appliedModelRef.current = null;
+            lastRuntimeSessionWasCreatedRef.current = false;
+            lastSyncedCwdRef.current = null;
+            client = await ensureClient();
+          }
+        }
+        throw new Error("AgentEra Runtime dashboard recovery exhausted");
       } catch (err) {
         appliedModelRef.current = null;
         recreateRuntimeSessionRef.current = true;

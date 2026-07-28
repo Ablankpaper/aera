@@ -13,6 +13,7 @@ import { isImeComposing } from "./keyboard";
 import { useI18n } from "../../components/useI18n";
 import { SLASH_COMMANDS, type SlashCommand } from "./slashCommands";
 import { SlashCommandIcon } from "./slash/SlashCommandIcon";
+import { isSlashCommandInput } from "./slash/parseSlashCommand";
 import {
   createSlashCommandVirtualLayout,
   getSlashCommandScrollTop,
@@ -394,7 +395,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
       setInput(value);
       // Height is handled by the useLayoutEffect on `input` above.
 
-      if (value.startsWith("/") && !value.includes(" ")) {
+      if (isSlashCommandInput(value) && !value.includes(" ")) {
         // No space yet, so the whole value is the command query.
         setSlashMenuOpen(true);
         setSlashFilter(value);

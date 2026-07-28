@@ -5,6 +5,19 @@ export type ParseSlashCommandResult =
   | { ok: false; error: string };
 
 /**
+ * Distinguishes slash commands from POSIX absolute paths pasted into a prompt.
+ * Command names never contain "/", while paths such as
+ * `/Volumes/work/project` do. Unknown one-segment commands still route through
+ * the command error path so typos remain visible instead of reaching the model.
+ */
+export function isSlashCommandInput(rawInput: string): boolean {
+  const trimmedStart = rawInput.trimStart();
+  if (!trimmedStart.startsWith("/")) return false;
+  const firstToken = trimmedStart.split(/\s+/, 1)[0];
+  return !firstToken.slice(1).includes("/");
+}
+
+/**
  * Normalizes and splits raw input into command name and argument payload.
  */
 export function parseSlashCommand(rawInput: string): ParseSlashCommandResult {

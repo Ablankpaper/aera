@@ -15,6 +15,7 @@ class FakeWebSocket {
 
   readyState = FakeWebSocket.CONNECTING;
   closeCalls = 0;
+  sent: string[] = [];
   private listeners: Record<string, ((event: unknown) => void)[]> = {};
 
   constructor(public url: string) {
@@ -34,6 +35,10 @@ class FakeWebSocket {
   close(): void {
     this.closeCalls += 1;
     this.readyState = FakeWebSocket.CLOSED;
+  }
+
+  send(message: string): void {
+    this.sent.push(message);
   }
 
   emit(type: string, event: unknown = {}): void {
@@ -90,5 +95,31 @@ describe("DashboardGatewayClient.connect", () => {
 
     FakeWebSocket.last?.emit("close", {});
     await assertion;
+  });
+});
+
+describe("DashboardGatewayClient.request", () => {
+  it("retires the socket when a request times out", async () => {
+    const client = new DashboardGatewayClient({
+      connectTimeoutMs: 1_000,
+      requestTimeoutMs: 1_000,
+    });
+    const connecting = client.connect("ws://localhost/api/ws");
+    const socket = FakeWebSocket.last;
+    if (!socket) throw new Error("socket not created");
+    socket.readyState = FakeWebSocket.OPEN;
+    socket.emit("open");
+    await connecting;
+
+    const request = client.request("model.options");
+    const assertion = expect(request).rejects.toThrow(
+      "AgentEra Runtime dashboard request timed out: model.options",
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    await assertion;
+
+    expect(socket.sent).toHaveLength(1);
+    expect(socket.closeCalls).toBe(1);
+    expect(client.connected).toBe(false);
   });
 });
