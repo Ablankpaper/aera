@@ -194,6 +194,41 @@ describe("ConfigHealthBanner", () => {
     });
   });
 
+  it("clears a stale warning when the credential persisted before a gateway restart failure", async () => {
+    const missing = report([
+      { code: "EMPTY_API_SERVER_KEY", severity: "warning" },
+    ]);
+    const api = {
+      getConfigHealth: vi.fn().mockResolvedValue(missing),
+      getConnectionConfig: vi.fn().mockResolvedValue({ mode: "local" }),
+      getApiServerKeyStatus: vi
+        .fn()
+        .mockResolvedValueOnce({ hasKey: false, providerId: "env" })
+        .mockResolvedValueOnce({ hasKey: true, providerId: "env" }),
+      invalidateSecretsCache: vi.fn().mockResolvedValue(undefined),
+      generateApiServerKey: vi
+        .fn()
+        .mockRejectedValue(new Error("gateway restart raced with startup")),
+      rerunConfigHealth: vi.fn().mockResolvedValue(report([])),
+    };
+    Object.defineProperty(window, "hermesAPI", {
+      configurable: true,
+      value: api,
+    });
+
+    render(<ConfigHealthBanner profile="default" />);
+
+    expect(
+      await screen.findByText("diagnose.localConnection.preparing"),
+    ).toBeTruthy();
+    await waitFor(() => {
+      expect(api.generateApiServerKey).toHaveBeenCalledTimes(1);
+      expect(api.getApiServerKeyStatus).toHaveBeenCalledTimes(2);
+      expect(api.rerunConfigHealth).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId("config-health-banner")).toBeNull();
+    });
+  });
+
   it("does not write a local credential for Remote mode", async () => {
     const missing = report([
       { code: "EMPTY_API_SERVER_KEY", severity: "warning" },
