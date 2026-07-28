@@ -38,6 +38,7 @@ type RuntimeState = {
   currentSourceCommit: string | null;
 };
 
+const existingAgentLog = "private log\n";
 const desktopRoot = resolve(process.cwd());
 const runtimeSeedDirectory = resolve(
   process.env.AGENTERA_RUNTIME_SEED_DIR?.trim() ||
@@ -114,7 +115,7 @@ async function writeBoundaryFixture(root: string): Promise<void> {
   );
   await writeBoundaryFile(root, "cron/jobs.json", '{"jobs":[]}\n');
   await writeBoundaryFile(root, "gateway/state.json", '{"port":8642}\n');
-  await writeBoundaryFile(root, "logs/agent.log", "private log\n", 0o640);
+  await writeBoundaryFile(root, "logs/agent.log", existingAgentLog, 0o640);
   await writeBoundaryFile(
     root,
     "workspace/project/notes.md",
@@ -164,10 +165,28 @@ function expectExistingBoundaryUnchanged(
   expected: Record<string, BoundaryEntry>,
 ): void {
   for (const [path, entry] of Object.entries(expected)) {
+    if (path === "logs/agent.log" && entry.kind === "file") {
+      expect(actual[path], `existing HERMES_HOME log removed: ${path}`).toEqual(
+        expect.objectContaining({
+          kind: "file",
+          mode: entry.mode,
+        }),
+      );
+      expect(
+        actual[path].kind === "file" ? actual[path].size : -1,
+        `existing HERMES_HOME log truncated: ${path}`,
+      ).toBeGreaterThanOrEqual(entry.size);
+      continue;
+    }
     expect(actual[path], `existing HERMES_HOME entry changed: ${path}`).toEqual(
       entry,
     );
   }
+}
+
+async function expectExistingLogPrefixPreserved(root: string): Promise<void> {
+  const contents = await readFile(join(root, "logs", "agent.log"), "utf8");
+  expect(contents.slice(0, existingAgentLog.length)).toBe(existingAgentLog);
 }
 
 async function runtimeState(page: Page): Promise<RuntimeState> {
@@ -220,9 +239,11 @@ test("online auth followed by offline packaged Seed preparation survives restart
   // every public Runtime source are unavailable; only packaged bytes may run.
   await stopProductAuthCloud(harness);
 
-  await expect(
-    desktopPage.locator('[data-testid="screen-profile-claim"]'),
-  ).toBeVisible({ timeout: 180_000 });
+  const profileClaim = desktopPage.locator(
+    '[data-testid="screen-profile-claim"]',
+  );
+  const mainLayout = desktopPage.locator(".layout");
+  await expect(profileClaim.or(mainLayout)).toBeVisible({ timeout: 180_000 });
   await expect(
     desktopPage.getByRole("button", { name: "Prepare Runtime" }),
   ).toHaveCount(0);
@@ -232,8 +253,10 @@ test("online auth followed by offline packaged Seed preparation survives restart
   await expect(
     desktopPage.getByRole("button", { name: "Continue to Setup" }),
   ).toHaveCount(0);
-  await desktopPage.locator(".agentera-profile-actions .btn-primary").click();
-  await expect(desktopPage.locator(".layout")).toBeVisible();
+  if (await profileClaim.isVisible()) {
+    await desktopPage.locator(".agentera-profile-actions .btn-primary").click();
+  }
+  await expect(mainLayout).toBeVisible();
 
   const firstState = await runtimeState(desktopPage);
   expect(firstState).toMatchObject({
@@ -248,6 +271,7 @@ test("online auth followed by offline packaged Seed preparation survives restart
     await boundarySnapshot(harness.hermesHome),
     expectedBoundary,
   );
+  await expectExistingLogPrefixPreserved(harness.hermesHome);
   expect(await publicFetchAttempts(desktopApp)).toEqual([]);
 
   await desktopApp.close();
@@ -277,5 +301,6 @@ test("online auth followed by offline packaged Seed preparation survives restart
     await boundarySnapshot(harness.hermesHome),
     expectedBoundary,
   );
+  await expectExistingLogPrefixPreserved(harness.hermesHome);
   expect(await publicFetchAttempts(desktopApp)).toEqual([]);
 });

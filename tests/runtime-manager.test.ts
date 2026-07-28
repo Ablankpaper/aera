@@ -482,7 +482,21 @@ describe("AgentEra Runtime distribution manager", () => {
       phase: "current",
       currentVersion: "0.18.1-agentera.1",
       packagedSeedVersion: "0.18.1-agentera.1",
+      canCheck: false,
       lastErrorCode: null,
+    });
+    await expect(manager.check()).resolves.toMatchObject({
+      phase: "current",
+      packagedSeedVersion: "0.18.1-agentera.1",
+      canCheck: false,
+    });
+    expect(setup.checkUpdate).not.toHaveBeenCalled();
+
+    const nextLaunch = createRuntimeDistributionManager(setup.options);
+    await expect(nextLaunch.initialize()).resolves.toMatchObject({
+      phase: "current",
+      packagedSeedVersion: null,
+      canCheck: true,
     });
   });
 

@@ -219,7 +219,12 @@ function withCapabilities(
   const phase = state.phase;
   return {
     ...state,
-    canCheck: phase === "current",
+    // A Runtime installed from this desktop's packaged Seed is already the
+    // exact reviewed candidate for this launch. Do not immediately contact
+    // the public stable channel after the guest-first installer finishes;
+    // the next app launch reconstructs state from disk with
+    // packagedSeedVersion=null and resumes normal update checks.
+    canCheck: phase === "current" && state.packagedSeedVersion === null,
     canDownload: phase === "update-available",
     canCancel: phase === "downloading",
     canRestart: phase === "candidate-ready",

@@ -525,11 +525,26 @@ export async function authenticateNewProductAccount(
   if (!/^\+[1-9][0-9]{7,14}$/u.test(accountPhone)) {
     throw new Error("AgentEra E2E account phone is invalid.");
   }
-  await expect(
-    desktopPage.locator('[data-testid="screen-auth"]'),
-  ).toBeVisible();
+  const authGate = desktopPage.locator('[data-testid="screen-auth"]');
+  const guestLogin = desktopPage.locator(".agentera-guest-login");
+  await expect(authGate.or(guestLogin)).toBeVisible();
+  if (await guestLogin.isVisible()) {
+    const startupModelPrompt = desktopPage.locator(".startup-model-prompt");
+    await startupModelPrompt
+      .waitFor({ state: "visible", timeout: 2_000 })
+      .catch(() => undefined);
+    if (await startupModelPrompt.isVisible()) {
+      await startupModelPrompt.locator(".btn-secondary").click();
+    }
+  }
   const authorizationURL = await captureExternalURL(app, () =>
-    desktopPage.locator(".agentera-gate-primary").click(),
+    authGate
+      .isVisible()
+      .then((visible) =>
+        visible
+          ? desktopPage.locator(".agentera-gate-primary").click()
+          : guestLogin.click(),
+      ),
   );
   expect(new URL(authorizationURL).origin).toBe(productAuthCloudOrigin);
 
