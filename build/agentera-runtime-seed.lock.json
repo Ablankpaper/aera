@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "repository": "bignormal/aera-runtime",
-  "release_tag": "runtime-v0.18.2-agentera.1-rc.3",
-  "source_commit": "06c5e8e76cad15b773f32a2543ddd95bbf2388a6",
+  "release_tag": "runtime-v0.18.2-agentera.1-rc.4",
+  "source_commit": "dcb0f0bc6a0e2d18c55beedc6517dbc41d8b01e0",
   "runtime_version": "0.18.2-agentera.1",
   "channel": "candidate",
   "assets": {

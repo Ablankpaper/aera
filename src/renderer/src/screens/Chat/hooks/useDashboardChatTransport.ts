@@ -69,7 +69,10 @@ interface EnsureDashboardRuntimeSessionParams {
   excludeSeedUserId?: string | null;
   forceCreate?: boolean;
   messages: ReadonlyArray<ChatMessage>;
+  model?: string;
+  modelBaseUrl?: string;
   profile?: string;
+  provider?: string;
   storedSessionId?: string | null;
 }
 
@@ -129,6 +132,22 @@ interface UseDashboardChatTransportResult {
 interface DashboardSeedMessage {
   content: string;
   role: "assistant" | "user";
+}
+
+function dashboardRuntimeModelSelectionKey(
+  sessionId: string,
+  provider: string | undefined,
+  model: string | undefined,
+  baseUrl: string | undefined,
+): string | null {
+  const selectedModel = model?.trim();
+  if (!selectedModel) return null;
+  return JSON.stringify([
+    sessionId,
+    provider?.trim().toLowerCase() ?? "",
+    selectedModel,
+    baseUrl?.trim() ?? "",
+  ]);
 }
 
 interface DashboardSeedOptions {
@@ -307,6 +326,9 @@ export async function ensureDashboardRuntimeSession(
   const seedMessages = dashboardSeedMessagesFromTranscript(params.messages, {
     excludeUserId: params.excludeSeedUserId ?? null,
   });
+  const selectedModel = params.model?.trim();
+  const selectedProvider = params.provider?.trim();
+  const selectedBaseUrl = params.modelBaseUrl?.trim();
   const created = await params.client.request<SessionResponse>(
     "session.create",
     {
@@ -314,6 +336,13 @@ export async function ensureDashboardRuntimeSession(
       ...(seedMessages.length > 0 ? { messages: seedMessages } : {}),
       ...(params.contextFolder ? { cwd: params.contextFolder } : {}),
       ...(params.profile ? { profile: params.profile } : {}),
+      ...(selectedModel ? { model: selectedModel } : {}),
+      ...(selectedModel && selectedProvider
+        ? { provider: selectedProvider }
+        : {}),
+      ...(selectedModel && selectedBaseUrl
+        ? { base_url: selectedBaseUrl }
+        : {}),
     },
   );
 
@@ -969,6 +998,7 @@ export function useDashboardChatTransport({
   const messagesRef = useRef<ChatMessage[]>(messages);
   const reasoningSegmentClosedRef = useRef(false);
   const appliedModelRef = useRef<string | null>(null);
+  const runtimeModelSelectionRef = useRef<string | null>(null);
   const recreateRuntimeSessionRef = useRef(false);
   const lastRuntimeSessionWasCreatedRef = useRef(false);
   const pendingClarifyRequestIdRef = useRef<string | null>(null);
@@ -1000,6 +1030,7 @@ export function useDashboardChatTransport({
     runtimeSessionIdRef.current = null;
     reasoningSegmentClosedRef.current = false;
     appliedModelRef.current = null;
+    runtimeModelSelectionRef.current = null;
     recreateRuntimeSessionRef.current = false;
     lastRuntimeSessionWasCreatedRef.current = false;
     pendingClarifyRequestIdRef.current = null;
@@ -1008,7 +1039,8 @@ export function useDashboardChatTransport({
 
   useEffect(() => {
     appliedModelRef.current = null;
-  }, [model, provider]);
+    runtimeModelSelectionRef.current = null;
+  }, [model, modelBaseUrl, provider]);
 
   useEffect(() => {
     clientGenerationRef.current += 1;
@@ -1019,6 +1051,7 @@ export function useDashboardChatTransport({
     runtimeSessionIdRef.current = null;
     reasoningSegmentClosedRef.current = false;
     appliedModelRef.current = null;
+    runtimeModelSelectionRef.current = null;
     recreateRuntimeSessionRef.current = false;
     lastRuntimeSessionWasCreatedRef.current = false;
     pendingClarifyRequestIdRef.current = null;
@@ -1090,6 +1123,7 @@ export function useDashboardChatTransport({
       if (event.type === "message.complete") {
         if (failed) {
           appliedModelRef.current = null;
+          runtimeModelSelectionRef.current = null;
           recreateRuntimeSessionRef.current = true;
           const storedSessionId = storedSessionIdRef.current;
           const userContent = userContentById(
@@ -1313,7 +1347,10 @@ export function useDashboardChatTransport({
           excludeSeedUserId,
           forceCreate: options.forceCreate ?? false,
           messages: messagesRef.current,
+          model,
+          modelBaseUrl,
           profile,
+          provider,
           storedSessionId: stored,
         });
 
@@ -1328,6 +1365,14 @@ export function useDashboardChatTransport({
         runtimeSessionIdRef.current = targetSessionId;
         lastRuntimeSessionWasCreatedRef.current = response.created;
         justCreated = response.created;
+        runtimeModelSelectionRef.current = response.created
+          ? dashboardRuntimeModelSelectionKey(
+              targetSessionId,
+              provider,
+              model,
+              modelBaseUrl,
+            )
+          : null;
         if (justCreated && contextFolder) {
           lastSyncedCwdRef.current = contextFolder;
         }
@@ -1356,7 +1401,15 @@ export function useDashboardChatTransport({
 
       return targetSessionId;
     },
-    [activeTurnRef, contextFolder, profile, setHermesSessionId],
+    [
+      activeTurnRef,
+      contextFolder,
+      model,
+      modelBaseUrl,
+      profile,
+      provider,
+      setHermesSessionId,
+    ],
   );
 
   const ensureSelectedModel = useCallback(
@@ -1366,6 +1419,18 @@ export function useDashboardChatTransport({
     ): Promise<string> => {
       const command = dashboardModelCommand(provider, model);
       if (!command) return sessionId;
+      const requestedSelectionKey = dashboardRuntimeModelSelectionKey(
+        sessionId,
+        provider,
+        model,
+        modelBaseUrl,
+      );
+      if (
+        requestedSelectionKey &&
+        runtimeModelSelectionRef.current === requestedSelectionKey
+      ) {
+        return sessionId;
+      }
       const resetRuntimeSession = async (
         targetSessionId: string,
       ): Promise<string> => {
@@ -1377,6 +1442,7 @@ export function useDashboardChatTransport({
         storedSessionIdRef.current = storedSessionId;
         reasoningSegmentClosedRef.current = false;
         appliedModelRef.current = null;
+        runtimeModelSelectionRef.current = null;
         return ensureRuntimeSession(client);
       };
 
@@ -1414,6 +1480,13 @@ export function useDashboardChatTransport({
           );
           if (dashboardModelMatches(dashboardProvider, model, before)) {
             appliedModelRef.current = `${targetSessionId}\n${dashboardProvider}\n${model}`;
+            runtimeModelSelectionRef.current =
+              dashboardRuntimeModelSelectionKey(
+                targetSessionId,
+                provider,
+                model,
+                modelBaseUrl,
+              );
             return targetSessionId;
           }
         }
@@ -1433,6 +1506,13 @@ export function useDashboardChatTransport({
           );
           if (dashboardModelMatches("custom", model, rebuilt)) {
             appliedModelRef.current = `${targetSessionId}\ncustom\n${model}`;
+            runtimeModelSelectionRef.current =
+              dashboardRuntimeModelSelectionKey(
+                targetSessionId,
+                provider,
+                model,
+                modelBaseUrl,
+              );
             return targetSessionId;
           }
         }
@@ -1470,6 +1550,12 @@ export function useDashboardChatTransport({
           );
         }
         appliedModelRef.current = key;
+        runtimeModelSelectionRef.current = dashboardRuntimeModelSelectionKey(
+          targetSessionId,
+          provider,
+          model,
+          modelBaseUrl,
+        );
         return targetSessionId;
       };
 
@@ -1478,6 +1564,7 @@ export function useDashboardChatTransport({
       } catch (err) {
         if (!isDashboardSlashWorkerExitError(err)) throw err;
         appliedModelRef.current = null;
+        runtimeModelSelectionRef.current = null;
         const freshSessionId = await resetRuntimeSession(sessionId);
         return switchAndValidate(freshSessionId);
       }
@@ -1637,6 +1724,7 @@ export function useDashboardChatTransport({
           runtimeSessionIdRef.current = null;
           reasoningSegmentClosedRef.current = false;
           appliedModelRef.current = null;
+          runtimeModelSelectionRef.current = null;
         }
         const runtimeSessionId = await ensureRuntimeSession(activeClient, {
           forceCreate: forceCreateRuntime,
@@ -1703,6 +1791,7 @@ export function useDashboardChatTransport({
             runtimeSessionIdRef.current = null;
             reasoningSegmentClosedRef.current = false;
             appliedModelRef.current = null;
+            runtimeModelSelectionRef.current = null;
             lastRuntimeSessionWasCreatedRef.current = false;
             lastSyncedCwdRef.current = null;
             client = await ensureClient();
@@ -1711,6 +1800,7 @@ export function useDashboardChatTransport({
         throw new Error("AgentEra Runtime dashboard recovery exhausted");
       } catch (err) {
         appliedModelRef.current = null;
+        runtimeModelSelectionRef.current = null;
         recreateRuntimeSessionRef.current = true;
         const message = err instanceof Error ? err.message : String(err);
         return failActiveTurn(message);

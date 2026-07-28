@@ -530,6 +530,41 @@ describe("ensureDashboardRuntimeSession", () => {
     ]);
   });
 
+  it("passes the selected model runtime into a newly created session", async () => {
+    const calls: Array<{ method: string; params: unknown }> = [];
+    const client = {
+      async request(method: string, params?: unknown): Promise<unknown> {
+        calls.push({ method, params });
+        return { session_id: "live-created", stored_session_id: "stored-new" };
+      },
+    };
+
+    await expect(
+      ensureDashboardRuntimeSession({
+        client,
+        messages: [],
+        model: "gpt-5.6-sol",
+        modelBaseUrl: "https://custom.example/v1",
+        provider: "custom",
+      }),
+    ).resolves.toEqual({
+      created: true,
+      runtimeSessionId: "live-created",
+      storedSessionId: "stored-new",
+    });
+    expect(calls).toEqual([
+      {
+        method: "session.create",
+        params: {
+          cols: 96,
+          model: "gpt-5.6-sol",
+          provider: "custom",
+          base_url: "https://custom.example/v1",
+        },
+      },
+    ]);
+  });
+
   it("throws a clear error when resume returns no runtime session id", async () => {
     const client = {
       async request(): Promise<unknown> {

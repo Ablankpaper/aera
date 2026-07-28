@@ -74,13 +74,21 @@ const activeRecoveryTurn: ActiveTurn = {
 function Harness({
   api,
   fallbackOnUnavailable = false,
+  hermesSessionId = null,
   initialConnectionMode = "local",
+  initialModel = "bad-model",
+  initialProvider = "bad-provider",
+  modelBaseUrl,
   onDashboardUnavailable,
   setUsage = vi.fn() as SetUsageMock,
 }: {
   api: HarnessApi;
   fallbackOnUnavailable?: boolean;
+  hermesSessionId?: string | null;
   initialConnectionMode?: "local" | "remote" | "ssh";
+  initialModel?: string;
+  initialProvider?: string;
+  modelBaseUrl?: string;
   onDashboardUnavailable?: (reason: string) => void;
   setUsage?: SetUsageMock;
 }): null {
@@ -92,8 +100,8 @@ function Harness({
       turnId: "turn-bad",
     },
   ]);
-  const [model, setModel] = useState("bad-model");
-  const [provider, setProvider] = useState("bad-provider");
+  const [model, setModel] = useState(initialModel);
+  const [provider, setProvider] = useState(initialProvider);
   const [connectionMode, setConnectionMode] = useState<
     "local" | "remote" | "ssh"
   >(initialConnectionMode);
@@ -104,9 +112,10 @@ function Harness({
     connectionMode,
     enabled: true,
     fallbackOnUnavailable,
-    hermesSessionId: null,
+    hermesSessionId,
     messages,
     model,
+    modelBaseUrl,
     profile: undefined,
     provider,
     setHermesSessionId: vi.fn(),
@@ -181,16 +190,67 @@ describe("useDashboardChatTransport recovery", () => {
     expect(dashboardMock.connect).toHaveBeenCalledWith("ws://fresh-dashboard");
   });
 
+  it("submits the first prompt without loading the remote model inventory", async () => {
+    const requests: Array<{ method: string; params: unknown }> = [];
+    dashboardMock.request.mockImplementation(async (method, params) => {
+      requests.push({ method, params });
+      if (method === "session.create") {
+        return { session_id: "live", stored_session_id: "stored" };
+      }
+      if (method === "model.options") {
+        throw new Error(
+          "cold model inventory must not block first prompt submission",
+        );
+      }
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(
+      <Harness
+        api={api}
+        initialModel="gpt-5.6-sol"
+        initialProvider="custom"
+        modelBaseUrl="https://custom.example/v1"
+      />,
+    );
+
+    let handled: boolean | undefined;
+    await act(async () => {
+      handled = await api.send?.("hello from a clean install");
+    });
+
+    expect(handled).toBe(true);
+    expect(requests).toContainEqual({
+      method: "session.create",
+      params: {
+        cols: 96,
+        model: "gpt-5.6-sol",
+        provider: "custom",
+        base_url: "https://custom.example/v1",
+      },
+    });
+    expect(
+      requests.filter((request) => request.method === "model.options"),
+    ).toHaveLength(0);
+    expect(requests).toContainEqual({
+      method: "prompt.submit",
+      params: {
+        session_id: "live",
+        text: "hello from a clean install",
+      },
+    });
+  });
+
   it("reconnects once when model setup times out before prompt submission", async () => {
     const requests: Array<{ method: string; params: unknown }> = [];
     let modelOptionsCalls = 0;
     dashboardMock.request.mockImplementation(async (method, params) => {
       requests.push({ method, params });
-      if (method === "session.create") {
-        return { session_id: "live-first", stored_session_id: "stored-chat" };
-      }
       if (method === "session.resume") {
-        return { session_id: "live-recovered", resumed: "stored-chat" };
+        return {
+          session_id: modelOptionsCalls === 0 ? "live-first" : "live-recovered",
+          resumed: "stored-chat",
+        };
       }
       if (method === "model.options") {
         modelOptionsCalls += 1;
@@ -208,7 +268,7 @@ describe("useDashboardChatTransport recovery", () => {
       return {};
     });
     const api: HarnessApi = {};
-    render(<Harness api={api} />);
+    render(<Harness api={api} hermesSessionId="stored-chat" />);
 
     let handled: boolean | undefined;
     await act(async () => {
@@ -222,6 +282,9 @@ describe("useDashboardChatTransport recovery", () => {
     expect(
       requests.filter((request) => request.method === "model.options"),
     ).toHaveLength(3);
+    expect(
+      requests.filter((request) => request.method === "session.resume"),
+    ).toHaveLength(2);
     expect(requests).toContainEqual({
       method: "session.resume",
       params: { session_id: "stored-chat", cols: 96 },
@@ -400,8 +463,22 @@ describe("useDashboardChatTransport recovery", () => {
     expect(
       requests.filter((request) => request.method === "session.create"),
     ).toEqual([
-      { method: "session.create", params: { cols: 96 } },
-      { method: "session.create", params: { cols: 96 } },
+      {
+        method: "session.create",
+        params: {
+          cols: 96,
+          model: "bad-model",
+          provider: "bad-provider",
+        },
+      },
+      {
+        method: "session.create",
+        params: {
+          cols: 96,
+          model: "good-model",
+          provider: "good-provider",
+        },
+      },
     ]);
     expect(requests).not.toContainEqual({
       method: "session.create",
