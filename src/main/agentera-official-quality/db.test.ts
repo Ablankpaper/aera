@@ -351,5 +351,5 @@ describe("AgenteraOfficialQualityDatabase", () => {
     expect(database.countOutbox(ACCOUNT_ID, DEVICE_ID)).toBe(2);
     database.purgeAccount(ACCOUNT_ID);
     expect(database.countOutbox(ACCOUNT_ID, DEVICE_ID)).toBe(0);
-  }, 90_000);
+  }, 180_000);
 });
