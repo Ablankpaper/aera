@@ -44,6 +44,7 @@ import type {
   AgentCommandsCatalogResponse,
   AgentSlashCommand,
 } from "./slash/types";
+import { isSlashCommandInput } from "./slash/parseSlashCommand";
 
 interface QueuedMessage {
   text: string;
@@ -864,7 +865,7 @@ function Chat({
       // command immediately so Desktop commands can run, Agent commands can use
       // the concurrent worker, and model-bound commands can format once before
       // they are queued.
-      if (text.startsWith("/")) {
+      if (isSlashCommandInput(text)) {
         void handleSendRef.current(text, attachments, true);
         return;
       }

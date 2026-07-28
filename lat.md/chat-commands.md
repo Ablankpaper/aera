@@ -34,6 +34,8 @@ Every dashboard turn first connects a JSON-RPC WebSocket to the gateway; that ha
 
 [[src/renderer/src/screens/Chat/dashboardGatewayClient.ts#DashboardGatewayClient#connect]] resolves on `open`, rejects on `error` or an early `close`, **and** rejects on a connect-timeout (default 10s). A WebSocket stuck in `CONNECTING` — TCP accepted but the upgrade never completing, e.g. when a busy renderer starves the handshake — fires none of those events on its own, so without the timer the connect promise never settles. When it never settles, `ensureClient` in [[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts#useDashboardChatTransport]] never resolves, its cached `connectingRef` promise poisons every later send, `setIsLoading(false)` never runs, and the user sees a permanent loading spinner. The timeout makes the promise reject so auto mode falls back to the legacy HTTP transport (and explicit-dashboard mode surfaces a real error) instead of hanging. Per-request calls are separately bounded by their own 30s timeout.
 
+A per-request timeout also retires the apparently-open socket: an OPEN WebSocket can still be a dead RPC channel after sleep/wake, a stalled dashboard reader, or a half-open tunnel. Reusing it made `model.options` time out first and every later `session.create` fail on the same channel. Before `prompt.submit`, [[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts#useDashboardChatTransport]] safely reconnects once for timed-out `model.options`, `session.create`, or `session.resume`, reattaches the stored session, and continues the same user turn. It never automatically replays `prompt.submit`, because a timed-out submit may already have reached the model and replaying it could duplicate a turn.
+
 ## Dashboard up ⇒ /api/ws only (never /v1 fallback)
 
 When a dashboard is available, chat goes through `/api/ws` **only** — never the `/v1` fallback, which 405s over the dashboard tunnel.
@@ -83,6 +85,8 @@ It maps to the gateway's `prompt.background` RPC, which spawns a separate agent 
 The central slash command architecture in [[src/renderer/src/screens/Chat/slash/handleSlashCommand.ts#handleSlashCommand]] classifies every slash command into a discriminated union (`target: "desktop" | "agent" | "model"`). Unrecognized commands return an error instead of reaching the model as prose.
 
 The router's attachment guard rejects a command run with staged attachments unless it declares `supportsAttachments`, but `target: "desktop"` commands are exempt — they are local UI actions / info displays that never consume attachments (the files stay in the composer for the next message), matching the pre-router behavior where local commands ran unconditionally. Only `agent`/`model` commands, which route content upstream, are gated.
+
+[[src/renderer/src/screens/Chat/slash/parseSlashCommand.ts#isSlashCommandInput]] keeps POSIX absolute paths out of the slash router when the first token contains another `/` (for example `/Volumes/work/project`). Known commands and one-token command typos still use the slash path, so typo protection is preserved while pasted filesystem context reaches the model as ordinary prompt text.
 
 The command palette and executor share a catalog built by [[src/renderer/src/screens/Chat/slash/commandCatalog.ts#createSlashCatalog]]. Hermes Agent metadata comes from `commands.catalog`; Desktop commands are merged after collision validation, and upstream names/aliases are normalized from `/name` to the router's canonical `name`.
 

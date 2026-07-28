@@ -3,7 +3,10 @@ import type { ChatInputHandle } from "../ChatInput";
 import { createTurn, shouldSendToAgent } from "../chatMessages";
 import type { SlashExecOutcome } from "../slashExec";
 import { handleSlashCommand } from "../slash/handleSlashCommand";
-import { parseSlashCommand } from "../slash/parseSlashCommand";
+import {
+  isSlashCommandInput,
+  parseSlashCommand,
+} from "../slash/parseSlashCommand";
 import type {
   PreparedModelSubmission,
   SlashCommandCatalog,
@@ -240,7 +243,8 @@ export function useChatActions({
       if (!hasPayload) return;
       if (!skipLoadingCheck && isLoadingRef.current) return;
 
-      const cmdName = text.startsWith("/")
+      const slashCommandInput = isSlashCommandInput(text);
+      const cmdName = slashCommandInput
         ? text.split(/\s+/)[0].toLowerCase()
         : "";
 
@@ -254,7 +258,7 @@ export function useChatActions({
         return;
       }
 
-      if (text.startsWith("/") && !RENDERER_NATIVE_SLASH.has(cmdName)) {
+      if (slashCommandInput && !RENDERER_NATIVE_SLASH.has(cmdName)) {
         const parsed = parseSlashCommand(text);
         const definition = parsed.ok
           ? slashCatalog.resolve(parsed.command.normalizedName)

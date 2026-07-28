@@ -1,11 +1,12 @@
 import {
+  cleanup,
   fireEvent,
   render,
   screen,
   waitFor,
   within,
 } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgenteraAuthPublicState } from "../../../../shared/agentera-auth";
 import Layout from "./Layout";
 
@@ -123,6 +124,16 @@ function installHermesAPI(model = "", provider = "auto"): InstalledHermesAPI {
 }
 
 describe("startup model setup prompt", () => {
+  afterEach(async () => {
+    // Radix FocusScope defers its unmount autofocus event with setTimeout(0).
+    // Drain it before Vitest tears down this jsdom realm; otherwise a later
+    // worker environment can supply the CustomEvent for an element created by
+    // this realm and jsdom rejects it as the wrong Event type.
+    cleanup();
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     sessionStorage.clear();
     localStorage.clear();
