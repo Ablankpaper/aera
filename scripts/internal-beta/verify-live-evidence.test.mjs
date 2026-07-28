@@ -96,7 +96,7 @@ async function fixture() {
       repository: "bignormal/aera-runtime",
       sourceCommit: INTERNAL_BETA_RUNTIME_SOURCE_SHA,
       runtimeVersion: "0.18.2-agentera.1",
-      releaseTag: "runtime-v0.18.2-agentera.1-rc.2",
+      releaseTag: "runtime-v0.18.2-agentera.1-rc.3",
       channel: "candidate",
       lockSha256: "3".repeat(64),
       targets: [

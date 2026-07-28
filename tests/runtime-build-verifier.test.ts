@@ -111,8 +111,8 @@ describe("independent Runtime build verifier", () => {
     expect(lock).toMatchObject({
       schema_version: 1,
       repository: "bignormal/aera-runtime",
-      release_tag: "runtime-v0.18.2-agentera.1-rc.2",
-      source_commit: "cb6908026befd99f1f79a516d3c3e6267c9657ac",
+      release_tag: "runtime-v0.18.2-agentera.1-rc.3",
+      source_commit: "06c5e8e76cad15b773f32a2543ddd95bbf2388a6",
       runtime_version: "0.18.2-agentera.1",
       channel: "candidate",
     });
