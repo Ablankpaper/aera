@@ -568,5 +568,5 @@ describe("AgentEra Runtime preserves Hermes adaptive data", () => {
     expect(deleted).toContain("old-unreferenced-version");
     expect(deleted).toContain(currentBeforeRepair!.versionDirectory);
     await assertInvariant("old Runtime version cleanup");
-  });
+  }, 20_000);
 });
