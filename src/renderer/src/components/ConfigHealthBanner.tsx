@@ -135,7 +135,17 @@ export function ConfigHealthBanner({
             "The configured secrets provider has no gateway key.",
           );
         }
-        await window.hermesAPI.generateApiServerKey(profile);
+        try {
+          await window.hermesAPI.generateApiServerKey(profile);
+        } catch (error) {
+          // Main persists the credential before restarting an already-running
+          // gateway. A transient restart failure must not leave a stale
+          // "missing credential" banner behind when the durable write itself
+          // succeeded; confirm through the same resolver before treating the
+          // repair as failed.
+          status = await window.hermesAPI.getApiServerKeyStatus(profile);
+          if (!status.hasKey) throw error;
+        }
       }
 
       const next = (await window.hermesAPI.rerunConfigHealth(profile)) as
