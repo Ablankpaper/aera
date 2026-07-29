@@ -1493,6 +1493,20 @@ const hermesAPI = {
   // Updates
   checkForUpdates: (): Promise<string | null> =>
     ipcRenderer.invoke("check-for-updates"),
+  getDesktopUpdateState: (): Promise<{
+    state:
+      | "available"
+      | "downloading"
+      | "ready"
+      | "error"
+      | "checking"
+      | "uptodate"
+      | null;
+    version: string | null;
+    releaseNotes: string | null;
+    percent: number | null;
+    error: string | null;
+  }> => ipcRenderer.invoke("get-desktop-update-state"),
   downloadUpdate: (): Promise<boolean> => ipcRenderer.invoke("download-update"),
   installUpdate: (): Promise<void> => ipcRenderer.invoke("install-update"),
   getAppVersion: (): Promise<string> => ipcRenderer.invoke("get-app-version"),
