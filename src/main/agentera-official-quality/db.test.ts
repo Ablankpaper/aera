@@ -286,29 +286,36 @@ describe("AgenteraOfficialQualityDatabase", () => {
       device_signature: "A".repeat(86),
     });
 
-    database.enqueue({
-      accountId: ACCOUNT_ID,
-      deviceId: DEVICE_ID,
-      purpose: "official_explicit_feedback",
-      envelope: makeEnvelope("1", "explicit_feedback"),
-      now: UPDATED_AT,
-    });
-    for (let index = 2; index <= 1_000; index += 1) {
+    database.sqlite.exec("BEGIN IMMEDIATE");
+    try {
       database.enqueue({
         accountId: ACCOUNT_ID,
         deviceId: DEVICE_ID,
-        purpose: "official_quality_metrics",
-        envelope: makeEnvelope(index.toString(16), "metric"),
-        now: new Date(UPDATED_AT.getTime() + index),
+        purpose: "official_explicit_feedback",
+        envelope: makeEnvelope("1", "explicit_feedback"),
+        now: UPDATED_AT,
       });
+      for (let index = 2; index <= 1_000; index += 1) {
+        database.enqueue({
+          accountId: ACCOUNT_ID,
+          deviceId: DEVICE_ID,
+          purpose: "official_quality_metrics",
+          envelope: makeEnvelope(index.toString(16), "metric"),
+          now: new Date(UPDATED_AT.getTime() + index),
+        });
+      }
+      database.enqueue({
+        accountId: ACCOUNT_ID,
+        deviceId: DEVICE_ID,
+        purpose: "official_explicit_feedback",
+        envelope: makeEnvelope("fff", "explicit_feedback"),
+        now: new Date(UPDATED_AT.getTime() + 2_000),
+      });
+      database.sqlite.exec("COMMIT");
+    } catch (error) {
+      database.sqlite.exec("ROLLBACK");
+      throw error;
     }
-    database.enqueue({
-      accountId: ACCOUNT_ID,
-      deviceId: DEVICE_ID,
-      purpose: "official_explicit_feedback",
-      envelope: makeEnvelope("fff", "explicit_feedback"),
-      now: new Date(UPDATED_AT.getTime() + 2_000),
-    });
     expect(database.countOutbox(ACCOUNT_ID, DEVICE_ID)).toBe(1_000);
     expect(
       database.sqlite
