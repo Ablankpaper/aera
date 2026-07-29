@@ -20,7 +20,7 @@ Internal Beta update trust is independent from GitHub and offline entitlements. 
 
 [[src/main/app/internal-beta-updater.ts#verifyDesktopUpdateMetadata]] accepts only canonical JSON with the exact channel, key ID, monotonically increasing `X.Y.Z-internal-beta.N` version, HTTPS Origin, immutable versioned artifact URLs, and the complete Darwin arm64 ZIP plus Windows x64 NSIS pair. It verifies the detached Ed25519 signature before selecting an artifact. Downloads do not follow redirects and must match the signed byte size, SHA-256, and SHA-512 values before becoming pending.
 
-On macOS, the verified ZIP must contain exactly one app with bundle ID `com.bignormal.agentera.studio`, the signed manifest version, and an arm64 executable. Restart launches a detached helper that moves the current app to a version-specific backup, swaps in the staged app, opens it, and retains the backup until the new app writes the private healthy-start marker. On Windows, restart launches only the verified NSIS setup. Pending metadata and bytes survive an ordinary application restart; stale or invalid pending state is discarded.
+On macOS, the verified ZIP must contain exactly one app with bundle ID `com.bignormal.agentera.studio`, the signed manifest version, and an arm64 executable. Restart launches a detached helper that moves the current app to a version-specific backup, swaps in the staged app, and opens it. The helper deletes the backup only after the new app writes a private healthy-start marker; an open failure or health timeout restores the previous app. On Windows, restart launches only the verified NSIS setup. Pending metadata and bytes survive an ordinary application restart; stale or invalid pending state is discarded.
 
 The unsigned `0.7.4-internal-beta.6` packages predate this client and therefore require one final manual installation of the first update-capable bridge (`0.7.4-internal-beta.7`). Every later reviewed Internal Beta can use the online channel. OS-level Developer ID/notarization and Authenticode remain separate production gates; the channel signature authenticates exact update bytes but does not claim platform signing.
 
@@ -34,6 +34,7 @@ The release contract covers signed metadata, exact artifact bytes, persisted sta
 
 - Metadata changed after signing and artifacts changed after manifest creation are rejected.
 - A completed download restores to `ready` after process restart and invokes only the reviewed platform installer.
+- A macOS swap without a healthy-start marker restores the previous application.
 - Script and application trust roots must remain byte-identical.
 - Server publication is atomic and idempotent only for the exact same signed bytes.
 - Login/render timing cannot hide an already available or downloaded update.
