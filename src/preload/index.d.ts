@@ -1566,6 +1566,20 @@ interface HermesAPI {
 
   // Updates
   checkForUpdates: () => Promise<string | null>;
+  getDesktopUpdateState: () => Promise<{
+    state:
+      | "available"
+      | "downloading"
+      | "ready"
+      | "error"
+      | "checking"
+      | "uptodate"
+      | null;
+    version: string | null;
+    releaseNotes: string | null;
+    percent: number | null;
+    error: string | null;
+  }>;
   downloadUpdate: () => Promise<boolean>;
   installUpdate: () => Promise<void>;
   getAppVersion: () => Promise<string>;

@@ -1,6 +1,6 @@
 # Internal Beta Desktop packaging
 
-This runbook creates one checksummed, internal-only Desktop candidate for trusted company testers without creating a tag, GitHub Release, updater publication, or production-readiness claim.
+This runbook creates one checksummed, internal-only Desktop candidate for trusted company testers, signs its dedicated update metadata, and publishes the verified update bytes without creating a tag, GitHub Release, or production-readiness claim.
 
 ## Boundary
 
@@ -8,7 +8,7 @@ The dedicated `internal-beta.yml` workflow builds Apple Silicon macOS and Window
 
 The packages are deliberately unsigned when Apple Developer ID/notarization and Windows Authenticode credentials are unavailable. Their manifest and provenance are still keyless-signed by the GitHub Actions workflow through Sigstore. Those evidence signatures do not turn the applications themselves into platform-signed packages.
 
-SMTP is not a packaging dependency. The deployed Cloud must instead be in the separately implemented `internal_beta` direct-registration mode.
+The separate Desktop update manifest is signed with an offline Ed25519 key whose public half is pinned in the app. This authenticates the exact ZIP/NSIS bytes but likewise does not turn them into platform-signed packages.
 
 ## Required protected environment
 
@@ -17,6 +17,13 @@ Create a GitHub environment named `internal-beta`. It contains only these review
 - `AERA_INTERNAL_BETA_ORIGIN`: the exact canonical HTTPS IP Origin, with no path or trailing slash;
 - `AERA_INTERNAL_BETA_OFFLINE_KEY_ID`: the stable Beta offline-entitlement key ID;
 - `AERA_INTERNAL_BETA_OFFLINE_PUBLIC_KEY`: the canonical unpadded base64url 32-byte Ed25519 public key.
+- `AERA_DESKTOP_UPDATE_PUBLISH_HOST`: the exact internal-Beta server IPv4 address.
+
+It also contains these protected secrets:
+
+- `AERA_DESKTOP_UPDATE_SIGNING_PRIVATE_KEY`: the PEM Ed25519 key matching `build/desktop-update-signing-public.pem`;
+- `AERA_DESKTOP_UPDATE_PUBLISH_SSH_PRIVATE_KEY`: the key for the forced-command-only `aera-updates` host principal;
+- `AERA_DESKTOP_UPDATE_PUBLISH_SSH_KNOWN_HOSTS`: the pinned SSH host key line.
 
 The Origin is injected as `MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL`. The workflow constructs `MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON` from the same Origin and public key. [[src/main/agentera-auth/config.ts#parseAgenteraOfflinePublicKeysBuildConfig]] rejects any difference.
 
@@ -34,18 +41,18 @@ gh workflow run internal-beta.yml \
   -f ci_run_id=30100000001
 ```
 
-The workflow refuses a non-`main` workflow identity, a source mismatch, a failed or incomplete CI matrix, a version other than `0.7.4-internal-beta.6`, malformed public trust, or an unapproved Runtime Seed lock.
+The workflow refuses a non-`main` workflow identity, a source mismatch, a failed or incomplete CI matrix, a version other than `0.7.4-internal-beta.7`, malformed public trust, or an unapproved Runtime Seed lock.
 
 ## Built bytes
 
 The platform jobs prepare and independently verify Runtime Seed candidate `dcb0f0bc6a0e2d18c55beedc6517dbc41d8b01e0` (`runtime-v0.18.2-agentera.1-rc.4`), rebuild native modules for the target architecture, compile the baked Beta trust, and package:
 
-- `Aera-Internal-Beta-0.7.4-internal-beta.6-macos-arm64.dmg`
-- `Aera-Internal-Beta-0.7.4-internal-beta.6-macos-arm64.zip`
-- `Aera-Internal-Beta-0.7.4-internal-beta.6-windows-x64-setup.exe`
-- `Aera-Internal-Beta-0.7.4-internal-beta.6-windows-x64-portable.exe`
+- `Aera-Internal-Beta-0.7.4-internal-beta.7-macos-arm64.dmg`
+- `Aera-Internal-Beta-0.7.4-internal-beta.7-macos-arm64.zip`
+- `Aera-Internal-Beta-0.7.4-internal-beta.7-windows-x64-setup.exe`
+- `Aera-Internal-Beta-0.7.4-internal-beta.7-windows-x64-portable.exe`
 
-The Electron Builder overlay sets `identity: null`, `notarize: false`, `signAndEditExecutable: false`, and `forceCodeSigning: false`; the jobs also set `CSC_IDENTITY_AUTO_DISCOVERY=false` and always pass `--publish never`. Hardened Runtime remains enabled in the macOS application.
+The Electron Builder overlay sets `identity: null`, `notarize: false`, and `forceCodeSigning: false`; the jobs also set `CSC_IDENTITY_AUTO_DISCOVERY=false` and always pass `--publish never`. Hardened Runtime remains enabled in the macOS application, and normal Windows resource metadata remains embedded.
 
 ## Evidence layout
 
@@ -54,6 +61,9 @@ The final 30-day Actions artifact is named `desktop-internal-beta-SOURCE_SHA` an
 ```text
 artifacts/
   four immutable packages
+desktop-update/
+  manifest.json
+  manifest.sig
 evidence/
   agentera-runtime-seed.lock.json
   internal-beta.spdx.json
@@ -69,6 +79,12 @@ SHA256SUMS
 [[scripts/internal-beta/manifest.mjs#buildInternalBetaManifest]] binds the exact source and CI run, version, HTTPS IP Origin, offline public trust, Runtime lock and both target identities, all four package sizes and SHA-256 values, SBOM/provenance hashes, unsigned status, and expected Sigstore identity. [[scripts/internal-beta/manifest.mjs#verifyInternalBetaManifestFiles]] re-hashes every referenced byte before signing.
 
 Cosign `v3.0.6` signs the canonical manifest and SLSA v1 provenance as blobs. Verification requires the GitHub OIDC issuer and exact `internal-beta.yml@refs/heads/main` workflow identity. Syft `v1.44.0` creates the SPDX document. GitHub Artifact Attestations are not used.
+
+## Online publication
+
+The assembly job verifies the detached update signature locally, uploads the complete 30-day evidence artifact, and only then streams a four-file tar archive to `aera-updates@AERA_DESKTOP_UPDATE_PUBLISH_HOST`. The host key is pinned and the authorized key must force `scripts/internal-beta/publish-desktop-update.sh`, disable PTY/forwarding, and grant no shell.
+
+The server command verifies canonical metadata, the pinned key ID and Ed25519 signature, both artifact digests and sizes, version monotonicity, and immutable version bytes. A channel-wide file lock serializes the monotonicity check and publish operation. It stores artifacts under `/var/lib/aera/desktop-updates/internal-beta/releases/VERSION`, metadata under `versions/VERSION`, and atomically replaces only the relative `current` symlink. Caddy serves the reviewed path. The workflow fails unless live metadata equals the locally signed bytes and both versioned artifacts answer an HTTPS range probe.
 
 ## Operator verification
 
@@ -108,3 +124,5 @@ Windows testers may verify `SHA256SUMS` with `Get-FileHash -Algorithm SHA256`; t
 Do not distribute a package until its workflow completed every real step and the live operator record binds the same manifest hash, source SHA, CI/build run URLs, Origin, deployed Cloud/Admin digests, and package hashes.
 
 Trusted testers should expect Gatekeeper or SmartScreen warnings. Use only the documented per-package override after checksum verification; never disable Gatekeeper, SmartScreen, antivirus, or system-wide security controls. A failed or replaced package receives a higher reviewed Beta version and new hashes rather than swapped bytes under the same filename.
+
+`0.7.4-internal-beta.6` does not contain the online-update client. Testers must install `0.7.4-internal-beta.7` once through the existing manual handoff; subsequent Internal Beta versions use the signed online channel.

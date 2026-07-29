@@ -127,9 +127,8 @@ export function useSettingsData(profile?: string) {
     getAnalyticsConsent(),
   );
 
-  // Desktop app (Electron) auto-update — a *separate* update channel from the
-  // Hermes Agent engine update above: this ships the desktop shell itself via
-  // electron-updater / GitHub releases. Mirrors the sidebar-footer updater so
+  // Desktop app auto-update — a separate, signed update channel from the
+  // Hermes Agent engine update above. Mirrors the sidebar-footer updater so
   // the About pane can check/download/restart on its own.
   const [desktopUpdateState, setDesktopUpdateState] = useState<
     | "available"
@@ -270,6 +269,7 @@ export function useSettingsData(profile?: string) {
   // Track desktop-app update lifecycle events (the same ones the sidebar-footer
   // upgrade button listens to) so the About pane reflects live progress.
   useEffect(() => {
+    let cancelled = false;
     const cleanupAvailable = window.hermesAPI.onUpdateAvailable((info) => {
       setDesktopUpdateState("available");
       setDesktopUpdateVersion(info.version);
@@ -291,7 +291,18 @@ export function useSettingsData(profile?: string) {
       setDesktopUpdateState("error");
       setDesktopUpdateError(message);
     });
+    const getSnapshot = window.hermesAPI.getDesktopUpdateState;
+    if (typeof getSnapshot === "function") {
+      void getSnapshot().then((snapshot) => {
+        if (cancelled) return;
+        setDesktopUpdateState(snapshot.state);
+        setDesktopUpdateVersion(snapshot.version);
+        setDesktopUpdatePercent(snapshot.percent);
+        setDesktopUpdateError(snapshot.error);
+      });
+    }
     return () => {
+      cancelled = true;
       cleanupAvailable();
       cleanupProgress();
       cleanupDownloaded();

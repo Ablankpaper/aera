@@ -14,7 +14,7 @@ const builderPath = new URL(
 );
 const baseBuilderPath = new URL("../../electron-builder.yml", import.meta.url);
 
-test("internal-Beta workflow is exact-SHA, unsigned, nonpublishing, and Sigstore-bound", async () => {
+test("internal-Beta workflow is exact-SHA, OS-unsigned, update-signed, published, and Sigstore-bound", async () => {
   const raw = await readFile(workflowPath, "utf8");
   const workflow = parseYAML(raw);
 
@@ -72,6 +72,15 @@ test("internal-Beta workflow is exact-SHA, unsigned, nonpublishing, and Sigstore
   assert.match(raw, /--certificate-oidc-issuer "\$issuer"/u);
   assert.match(raw, /retention-days:\s*30/u);
   assert.match(raw, /--publish never/u);
+  assert.match(raw, /AERA_DESKTOP_UPDATE_SIGNING_PRIVATE_KEY/u);
+  assert.match(raw, /AERA_DESKTOP_UPDATE_PUBLISH_SSH_PRIVATE_KEY/u);
+  assert.match(raw, /AERA_DESKTOP_UPDATE_PUBLISH_SSH_KNOWN_HOSTS/u);
+  assert.match(raw, /node scripts\/internal-beta\/desktop-update\.mjs build/iu);
+  assert.match(raw, /"aera-updates@\$PUBLISH_HOST" publish/u);
+  assert.match(
+    raw,
+    /curl[\s\S]*\/desktop-updates\/internal-beta|base_url=.*\/desktop-updates\/internal-beta/iu,
+  );
 
   assert.doesNotMatch(raw, /actions\/attest/iu);
   assert.doesNotMatch(raw, /attestations:\s*write/iu);

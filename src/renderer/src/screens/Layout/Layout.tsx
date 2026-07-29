@@ -405,9 +405,7 @@ function Layout({
   const [updateError, setUpdateError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Surface a startup upgrade button as soon as GitHub reports a newer
-    // release. If auto-upgrade is enabled, electron-updater also downloads in
-    // the background and this state advances to downloading/ready.
+    let cancelled = false;
     const cleanupAvailable = window.hermesAPI.onUpdateAvailable((info) => {
       setUpdateState("available");
       setUpdateVersion(info.version);
@@ -429,7 +427,25 @@ function Layout({
       setUpdateState("error");
       setUpdateError(message);
     });
+    const getSnapshot = window.hermesAPI.getDesktopUpdateState;
+    if (typeof getSnapshot === "function") {
+      void getSnapshot().then((snapshot) => {
+        if (cancelled) return;
+        if (
+          snapshot.state === "available" ||
+          snapshot.state === "downloading" ||
+          snapshot.state === "ready" ||
+          snapshot.state === "error"
+        ) {
+          setUpdateState(snapshot.state);
+          setUpdateVersion(snapshot.version);
+          setUpdatePercent(snapshot.percent);
+          setUpdateError(snapshot.error);
+        }
+      });
+    }
     return () => {
+      cancelled = true;
       cleanupAvailable();
       cleanupProgress();
       cleanupDownloaded();
