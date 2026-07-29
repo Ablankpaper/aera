@@ -20,7 +20,7 @@ const cloudRoot = resolve(
     resolve(desktopRoot, "../aera-cloud"),
 );
 export const productAuthCloudOrigin = "http://127.0.0.1:8086";
-const password = "AgentEra Runtime E2E battery staple 2026";
+const password = "Aera Runtime E2E battery staple 2026";
 
 type SMSDelivery = {
   to: string;
@@ -134,7 +134,7 @@ async function assertIssuerPortAvailable(): Promise<void> {
     server.once("error", () =>
       reject(
         new Error(
-          "AgentEra Runtime E2E requires loopback issuer port 8086 to be free.",
+          "Aera Runtime E2E requires loopback issuer port 8086 to be free.",
         ),
       ),
     );
@@ -246,7 +246,7 @@ async function waitForReady(
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (process.exitCode !== null) {
-      throw new Error(`AgentEra cloud exited before readiness.\n${logs()}`);
+      throw new Error(`Aera cloud exited before readiness.\n${logs()}`);
     }
     try {
       const response = await fetch(`${productAuthCloudOrigin}/health/ready`);
@@ -256,7 +256,7 @@ async function waitForReady(
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 200));
   }
-  throw new Error(`AgentEra cloud did not become ready.\n${logs()}`);
+  throw new Error(`Aera cloud did not become ready.\n${logs()}`);
 }
 
 export async function startProductAuthCloud(
@@ -469,7 +469,7 @@ export async function launchRuntimeDesktop(
         return originalFetch(input, init);
       }
       state.__agenteraE2EPublicFetchAttempts?.push(url.href);
-      throw new TypeError("Public HTTP is blocked by AgentEra Runtime E2E");
+      throw new TypeError("Public HTTP is blocked by Aera Runtime E2E");
     };
   });
   return { app, page };
@@ -523,7 +523,7 @@ export async function authenticateNewProductAccount(
   const accountPhone = options.phone?.trim() || harness.phone;
   const displayName = options.displayName?.trim() || "Runtime E2E User";
   if (!/^\+[1-9][0-9]{7,14}$/u.test(accountPhone)) {
-    throw new Error("AgentEra E2E account phone is invalid.");
+    throw new Error("Aera E2E account phone is invalid.");
   }
   const authGate = desktopPage.locator('[data-testid="screen-auth"]');
   await expect(authGate).toBeVisible();

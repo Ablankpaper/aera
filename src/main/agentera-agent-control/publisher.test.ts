@@ -181,6 +181,7 @@ describe("explicit Agent publication", () => {
   let drafts: AgentDraftStore;
   let trust: AgenteraAgentTrustStore;
   let publication: AgentPublication;
+  let signingKeys: components["schemas"]["SigningKeySet"];
   let client: AgentPublicationClient;
   let publishInitial: Mock<AgentPublicationClient["publishInitial"]>;
   let publishNext: Mock<AgentPublicationClient["publishNext"]>;
@@ -217,6 +218,7 @@ describe("explicit Agent publication", () => {
     });
     const fixture = signedPublication();
     publication = fixture.publication;
+    signingKeys = fixture.signingKeys;
     trust = new AgenteraAgentTrustStore();
     trust.replaceKeys(ORIGIN, fixture.signingKeys, NOW.toISOString());
     publishInitial = vi
@@ -298,6 +300,30 @@ describe("explicit Agent publication", () => {
       code: "publication_confirmation_invalid",
     });
     expect(publishInitial).toHaveBeenCalledOnce();
+  });
+
+  it("refreshes signing keys once when a newly published version uses a rotated key", async () => {
+    const staleTrust = new AgenteraAgentTrustStore();
+    const refreshTrust = vi.fn(async () => {
+      staleTrust.replaceKeys(ORIGIN, signingKeys, NOW.toISOString());
+    });
+    const service = new AgentPublisher({
+      drafts,
+      client,
+      trust: staleTrust,
+      cache,
+      runtimeVersion: "v0.18.2-agentera.1",
+      refreshTrust,
+      randomUUID: () => HANDLE_ID,
+    });
+
+    await expect(
+      service.confirmPublication(
+        service.preparePublication(DRAFT_ID).publicationHandle,
+      ),
+    ).resolves.toMatchObject({ versionId: VERSION_ID });
+    expect(refreshTrust).toHaveBeenCalledOnce();
+    expect(cacheVersion).toHaveBeenCalledWith(publication.version);
   });
 
   it("binds a preview to the exact draft revision", async () => {

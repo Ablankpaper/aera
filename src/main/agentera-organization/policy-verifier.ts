@@ -39,7 +39,7 @@ export class AgenteraOrganizationPolicyVerificationError extends Error {
   readonly code: AgenteraOrganizationPolicyVerificationErrorCode;
 
   constructor(code: AgenteraOrganizationPolicyVerificationErrorCode) {
-    super(`AgentEra Organization policy verification failed: ${code}.`);
+    super(`Aera Organization policy verification failed: ${code}.`);
     this.name = "AgenteraOrganizationPolicyVerificationError";
     this.code = code;
   }
@@ -357,7 +357,7 @@ export class AgenteraOrganizationPolicyVerifier {
     try {
       this.origin = parseAgenteraCloudOrigin(options.origin);
     } catch {
-      throw new Error("AgentEra Organization policy verifier is invalid.");
+      throw new Error("Aera Organization policy verifier is invalid.");
     }
   }
 

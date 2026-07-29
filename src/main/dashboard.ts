@@ -190,7 +190,7 @@ function getManagedDashboard(profile?: string): ManagedDashboard | undefined {
 function unsupportedReasonForLocalSpawn(): string | undefined {
   return getRuntimeInvocation()
     ? undefined
-    : "AgentEra Runtime is not prepared.";
+    : "Aera Runtime is not prepared.";
 }
 
 function dashboardLogPath(profile: string | undefined): string {
@@ -283,7 +283,7 @@ function requestJson(
     req.setTimeout(timeoutMs, () => {
       req.destroy(
         new Error(
-          `Timed out connecting to the AgentEra Runtime dashboard after ${timeoutMs}ms`,
+          `Timed out connecting to the Aera Runtime dashboard after ${timeoutMs}ms`,
         ),
       );
     });
@@ -329,7 +329,7 @@ export function probeDashboardWebSocket(
         const body = Buffer.concat(chunks).toString("utf8").trim();
         finish(
           new Error(
-            `AgentEra Runtime dashboard chat WebSocket is unavailable (${res.statusCode}${
+            `Aera Runtime dashboard chat WebSocket is unavailable (${res.statusCode}${
               body ? `: ${body.slice(0, 160)}` : ""
             })`,
           ),
@@ -340,7 +340,7 @@ export function probeDashboardWebSocket(
     req.setTimeout(timeoutMs, () => {
       finish(
         new Error(
-          `Timed out connecting to the AgentEra Runtime dashboard chat WebSocket after ${timeoutMs}ms`,
+          `Timed out connecting to the Aera Runtime dashboard chat WebSocket after ${timeoutMs}ms`,
         ),
       );
     });
@@ -368,7 +368,7 @@ async function waitForDashboardReady(
       ? lastError.message
       : "dashboard did not respond";
   throw new Error(
-    `Timed out waiting for the AgentEra Runtime dashboard: ${message}`,
+    `Timed out waiting for the Aera Runtime dashboard: ${message}`,
   );
 }
 
@@ -503,7 +503,7 @@ async function getSshDashboardStatusForConfig(
       supported: true,
       running: false,
       error:
-        "SSH dashboard transport needs an active tunnel and API_SERVER_KEY on the remote AgentEra Runtime host.",
+        "SSH dashboard transport needs an active tunnel and API_SERVER_KEY on the remote Aera Runtime host.",
     };
   }
 
@@ -518,7 +518,7 @@ async function getSshDashboardStatusForConfig(
         running: false,
         connection,
         error:
-          "SSH dashboard requires OAuth browser authentication. Token-based dashboard over SSH is supported now; OAuth ticket flow is not wired in AgentEra Studio yet.",
+          "SSH dashboard requires OAuth browser authentication. Token-based dashboard over SSH is supported now; OAuth ticket flow is not wired in Aera yet.",
       };
     }
 
@@ -662,7 +662,7 @@ async function startLocalDashboard(
     return {
       supported: false,
       running: false,
-      error: "AgentEra Runtime is not prepared.",
+      error: "Aera Runtime is not prepared.",
     };
   }
 

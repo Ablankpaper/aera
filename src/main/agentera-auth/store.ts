@@ -143,7 +143,7 @@ export class AgenteraAuthStore {
   constructor(options: AgenteraAuthStoreOptions) {
     if (!nonEmpty(options.userDataPath)) {
       throw new Error(
-        "Electron userData path is required for AgentEra auth storage.",
+        "Electron userData path is required for Aera auth storage.",
       );
     }
     if (!isAbsolute(options.userDataPath)) {
@@ -175,7 +175,7 @@ export class AgenteraAuthStore {
       !nonEmpty(identity.devicePublicKey) ||
       !nonEmpty(identity.devicePrivateKey)
     ) {
-      throw new Error("AgentEra installation identity is incomplete.");
+      throw new Error("Aera installation identity is incomplete.");
     }
     const envelope = this.readEnvelope();
     envelope.installation = {
@@ -207,10 +207,10 @@ export class AgenteraAuthStore {
     try {
       parsed = JSON.parse(this.decrypt(encrypted));
     } catch {
-      throw new Error("AgentEra pending revocation record is corrupt.");
+      throw new Error("Aera pending revocation record is corrupt.");
     }
     if (!validPendingSelfRevocation(parsed)) {
-      throw new Error("AgentEra pending revocation record is corrupt.");
+      throw new Error("Aera pending revocation record is corrupt.");
     }
     return {
       deviceId: parsed.deviceId,
@@ -255,7 +255,7 @@ export class AgenteraAuthStore {
       !nonEmpty(session.offlineExpiresAt) ||
       !nonEmpty(session.lastTrustedServerTime)
     ) {
-      throw new Error("AgentEra product session is incomplete.");
+      throw new Error("Aera product session is incomplete.");
     }
     return {
       userId: session.userId,
@@ -272,7 +272,7 @@ export class AgenteraAuthStore {
     pendingRevocation: PendingSelfRevocation,
   ): string {
     if (!validPendingSelfRevocation(pendingRevocation)) {
-      throw new Error("AgentEra pending revocation record is incomplete.");
+      throw new Error("Aera pending revocation record is incomplete.");
     }
     return this.encrypt(
       JSON.stringify({
@@ -296,7 +296,7 @@ export class AgenteraAuthStore {
   private encrypt(plaintext: string): string {
     if (!this.encryptionAvailable()) {
       throw new Error(
-        "Secure storage is unavailable for AgentEra authentication.",
+        "Secure storage is unavailable for Aera authentication.",
       );
     }
     let encrypted: Buffer;
@@ -304,7 +304,7 @@ export class AgenteraAuthStore {
       encrypted = this.secureStorage.encryptString(plaintext);
     } catch {
       throw new Error(
-        "Secure storage could not protect AgentEra authentication.",
+        "Secure storage could not protect Aera authentication.",
       );
     }
     if (!Buffer.isBuffer(encrypted) || encrypted.length === 0) {
@@ -316,18 +316,18 @@ export class AgenteraAuthStore {
   private decrypt(encoded: string): string {
     if (!this.encryptionAvailable()) {
       throw new Error(
-        "Secure storage is unavailable for AgentEra authentication.",
+        "Secure storage is unavailable for Aera authentication.",
       );
     }
     const encrypted = Buffer.from(encoded, "base64");
     if (encrypted.length === 0 || encrypted.toString("base64") !== encoded) {
-      throw new Error("AgentEra encrypted authentication value is corrupt.");
+      throw new Error("Aera encrypted authentication value is corrupt.");
     }
     try {
       return this.secureStorage.decryptString(encrypted);
     } catch {
       throw new Error(
-        "AgentEra encrypted authentication value could not be opened.",
+        "Aera encrypted authentication value could not be opened.",
       );
     }
   }
@@ -338,10 +338,10 @@ export class AgenteraAuthStore {
     try {
       parsed = JSON.parse(readFileSync(this.filePath, "utf8"));
     } catch {
-      throw new Error("AgentEra authentication store is corrupt.");
+      throw new Error("Aera authentication store is corrupt.");
     }
     if (!parsed || typeof parsed !== "object") {
-      throw new Error("AgentEra authentication store is corrupt.");
+      throw new Error("Aera authentication store is corrupt.");
     }
     const envelope = parsed as Partial<StoredAuthEnvelope>;
     if (
@@ -354,7 +354,7 @@ export class AgenteraAuthStore {
       (envelope.encryptedPendingRevocation !== null &&
         !nonEmpty(envelope.encryptedPendingRevocation))
     ) {
-      throw new Error("AgentEra authentication store is corrupt.");
+      throw new Error("Aera authentication store is corrupt.");
     }
     return {
       schema: STORE_SCHEMA,

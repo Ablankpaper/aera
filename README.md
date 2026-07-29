@@ -1,23 +1,23 @@
-# AgentEra Studio
+# Aera
 
-AgentEra Studio is the AgentEra desktop application for installing, configuring, and using AgentEra Runtime. It combines chat, sessions, agents, memory, skills, tools, schedules, messaging gateways, providers, and a live 3D office in one native interface.
+Aera is the Aera desktop application for installing, configuring, and using Aera Runtime. It combines chat, sessions, agents, memory, skills, tools, schedules, messaging gateways, providers, and a live 3D office in one native interface.
 
 [Releases](https://github.com/bignormal/aera/releases) · [Issues](https://github.com/bignormal/aera/issues) · [License](LICENSE)
 
 English · [简体中文](README.zh-CN.md) · [日本語](README.ja-JP.md) · [Español (LATAM)](README.es-LATAM.md)
 
-> AgentEra Studio is under active development. Features and packaging details may change between releases.
+> Aera is under active development. Features and packaging details may change between releases.
 
 ## Highlights
 
-- Guided installation and updates for AgentEra Runtime
+- Guided installation and updates for Aera Runtime
 - Local, SSH tunnel, and remote server connection modes
 - Streaming chat with tools, attachments, slash commands, reasoning, and usage data
 - Multiple agents with isolated configuration, sessions, memory, skills, and personas
 - Provider and model management for hosted and local OpenAI-compatible endpoints
 - Session search and continuation, scheduled tasks, messaging gateways, and Kanban
 - Backup, import, diagnostics, logs, and automatic desktop updates
-- Interactive AgentEra office and AgentEra Motors showroom
+- Interactive Aera office and Aera Motors showroom
 - Localized interface for 12 languages
 
 ## Install
@@ -26,26 +26,26 @@ Download the latest macOS, Windows, or Linux build from [GitHub Releases](https:
 
 ### Windows
 
-The installer may trigger Windows SmartScreen when a build is not code-signed. Select **More info** and then **Run anyway** only when the file came from the AgentEra release page.
+The installer may trigger Windows SmartScreen when a build is not code-signed. Select **More info** and then **Run anyway** only when the file came from the Aera release page.
 
 ### Linux
 
-Package names use the `agentera-studio` prefix. For example:
+Package names use the `Aera` prefix. For example:
 
 ```bash
-sudo dnf install ./agentera-studio-<version>.rpm
+sudo dnf install ./Aera-<version>.rpm
 ```
 
 ## How it works
 
-On first launch, AgentEra Studio lets you choose a local or remote AgentEra Runtime:
+On first launch, Aera lets you choose a local or remote Aera Runtime:
 
 1. Local mode detects an existing runtime or offers to install it.
 2. Remote and SSH modes validate the target connection without installing a local runtime.
 3. Provider and model settings are configured in the desktop interface.
 4. The workspace opens after the selected runtime is ready.
 
-AgentEra Runtime retains its compatibility paths and command surface, including:
+Aera Runtime retains its compatibility paths and command surface, including:
 
 - `~/.hermes`
 - `~/.hermes/.env`
@@ -58,7 +58,7 @@ These identifiers remain stable so existing installations, profiles, scripts, an
 
 ## Supported providers
 
-AgentEra Studio supports OpenRouter, Anthropic, OpenAI, Google Gemini, xAI, Nous Portal, Qwen, MiniMax, Hugging Face, Groq, and custom OpenAI-compatible endpoints. Local presets include LM Studio, Atomic Chat, Ollama, vLLM, and llama.cpp.
+Aera supports OpenRouter, Anthropic, OpenAI, Google Gemini, xAI, Nous Portal, Qwen, MiniMax, Hugging Face, Groq, and custom OpenAI-compatible endpoints. Local presets include LM Studio, Atomic Chat, Ollama, vLLM, and llama.cpp.
 
 ## Development
 
@@ -115,7 +115,7 @@ On 2026-07-23 the executable gates passed locally at Cloud `16ee99a`, Admin `b18
 ## Project structure
 
 ```text
-src/main/                Electron main process and AgentEra Runtime integration
+src/main/                Electron main process and Aera Runtime integration
 src/preload/             Secure renderer bridge
 src/renderer/src/        React desktop interface
 src/shared/              Shared contracts, branding, and localization
@@ -126,4 +126,4 @@ tests/                   Cross-process and packaging tests
 
 ## License
 
-AgentEra Studio is distributed under the [MIT License](LICENSE).
+Aera is distributed under the [MIT License](LICENSE).

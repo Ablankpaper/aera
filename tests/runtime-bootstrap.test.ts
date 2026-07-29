@@ -202,7 +202,7 @@ async function stageCandidate(
   return candidate;
 }
 
-describe("AgentEra Runtime pre-import bootstrap", () => {
+describe("Aera Runtime pre-import bootstrap", () => {
   it("awaits Runtime recovery before dynamically importing app/start", async () => {
     const source = await readFile(
       join(process.cwd(), "src/main/index.ts"),

@@ -13,20 +13,23 @@ const localeFiles = readdirSync("src/shared/i18n/locales", {
     .map((name) => join(root, name));
 });
 
-describe("AgentEra Studio visible branding", () => {
+describe("Aera visible branding", () => {
   // @lat: [[agentera-branding#Naming contract#Desktop identity]]
   it("owns the desktop packaging identity", () => {
     expect(JSON.parse(read("package.json"))).toMatchObject({
       name: "agentera-studio",
-      description: "AgentEra Studio — private AI agent desktop",
-      author: "AgentEra",
+      description: "Aera — private AI agent desktop",
+      author: "Aera",
       homepage: "https://github.com/bignormal/aera",
     });
 
     const builder = read("electron-builder.yml");
     expect(builder).toContain("appId: com.bignormal.agentera.studio");
-    expect(builder).toContain("productName: AgentEra Studio");
-    expect(builder).toContain("executableName: agentera-studio");
+    expect(builder).toContain("productName: Aera");
+    expect(builder).toContain("executableName: Aera");
+    expect(builder).toContain("artifactName: Aera-${version}");
+    expect(builder).toContain("- aera");
+    expect(builder).toContain("- agentera");
     expect(builder).toContain("owner: bignormal");
     expect(builder).toContain("repo: aera");
   });
@@ -36,19 +39,19 @@ describe("AgentEra Studio visible branding", () => {
     expect(existsSync("src/shared/branding.ts")).toBe(true);
     if (existsSync("src/shared/branding.ts")) {
       expect(read("src/shared/branding.ts")).toContain(
-        'DESKTOP_PRODUCT_NAME = "AgentEra Studio"',
+        'DESKTOP_PRODUCT_NAME = "Aera"',
       );
       expect(read("src/shared/branding.ts")).toContain(
-        'RUNTIME_DISPLAY_NAME = "AgentEra Runtime"',
+        'RUNTIME_DISPLAY_NAME = "Aera Runtime"',
       );
     }
 
     expect(read("src/renderer/index.html")).toContain(
-      "<title>AgentEra Studio</title>",
+      "<title>Aera</title>",
     );
     expect(
       read("src/renderer/src/screens/SplashScreen/SplashScreen.tsx"),
-    ).toContain("AgentEra Studio");
+    ).toContain("Aera");
     expect(read("src/renderer/src/screens/Chat/Chat.tsx")).not.toContain(
       "FollowUsModal",
     );
@@ -58,51 +61,35 @@ describe("AgentEra Studio visible branding", () => {
   });
 
   // @lat: [[agentera-branding#Localization#All supported locales]]
-  it("uses AgentEra names in locale product copy", () => {
+  it("uses Aera names in locale product copy", () => {
     const commonFiles = localeFiles.filter(
       (path) => basename(path) === "common.ts",
     );
     expect(commonFiles).toHaveLength(12);
     for (const path of commonFiles) {
-      expect(read(path), path).toContain('appName: "AgentEra Studio"');
+      expect(read(path), path).toContain('appName: "Aera"');
     }
 
-    const firstPartyLeaks = localeFiles.flatMap((path) =>
-      read(path)
-        .split("\n")
-        .map((line, index) => ({
+    const firstPartyLeaks = localeFiles.flatMap((path) => {
+      const literals =
+        read(path).match(/"(?:\\.|[^"\\])*"/g)?.map((text) => ({
           path,
-          line: index + 1,
-          text: line.trim(),
-        }))
-        .filter(({ text }) => {
-          if (
-            !/(Hermes One|Hermes Desktop|Hermes Agent|Nous Research|fathah)/.test(
-              text,
-            )
-          ) {
-            return false;
-          }
-          if (/^(\/\/|\*|\/\*)/.test(text)) return false;
-          if (/Hermes One (Inference|account)/.test(text)) return false;
-          if (
-            /(constants|providers)\.ts$/.test(path) &&
-            /(Hermes One|Nous Research)/.test(text)
-          ) {
-            return false;
-          }
-          if (
-            /(HERMES_|\.hermes|hermes_cli|<code>hermes\s|@hermes:)/.test(text)
-          ) {
-            return false;
-          }
+          text,
+        })) ?? [];
+      return literals.filter(({ text }) => {
+        if (/\b(?:AgentEra|WorkBuddy|AionUI)\b|Aera Studio/.test(text)) {
           return true;
-        }),
-    );
+        }
+        if (!/\bHermes\b(?! One)/.test(text)) return false;
+        return !/(HERMES_|\.hermes|hermes_cli|<code>hermes\s|@hermes:)/.test(
+          text,
+        );
+      });
+    });
     expect(firstPartyLeaks).toEqual([]);
   });
 
-  it("publishes only AgentEra repository documentation", () => {
+  it("publishes only Aera repository documentation", () => {
     const readmes = [
       "README.md",
       "README.zh-CN.md",
@@ -117,10 +104,10 @@ describe("AgentEra Studio visible branding", () => {
 
     for (const path of [...readmes, ...contributorGuides]) {
       const content = read(path);
-      expect(content, path).toContain("AgentEra Studio");
+      expect(content, path).toContain("Aera");
       expect(content, path).toContain("https://github.com/bignormal/aera");
       expect(content, path).not.toMatch(
-        /Hermes One|Hermes Desktop|Hermes Agent|Nous Research|fathah/,
+        /\b(?:AgentEra|WorkBuddy|AionUI)\b|Aera Studio|Hermes One|Hermes Desktop|Hermes Agent|Nous Research|fathah/,
       );
     }
 
@@ -131,6 +118,17 @@ describe("AgentEra Studio visible branding", () => {
 
   // @lat: [[agentera-branding#Compatibility boundary#Stable runtime identifiers]]
   it("preserves runtime compatibility identifiers", () => {
+    expect(JSON.parse(read("package.json")).name).toBe("agentera-studio");
+    expect(read("electron-builder.yml")).toContain(
+      "appId: com.bignormal.agentera.studio",
+    );
+    expect(read("src/main/app/identity.ts")).toContain('"AgentEra Studio"');
+    expect(read("src/main/index.ts")).toContain(
+      'const schemes = ["aera", "agentera"]',
+    );
+    expect(read("build/winget/Version.template.yaml")).toContain(
+      "PackageIdentifier: Bignormal.AgentEraStudio",
+    );
     expect(read("src/main/installer.ts")).toContain("HERMES_HOME");
     expect(read("src/preload/index.ts")).toContain("hermesAPI");
     expect(read("src/renderer/src/constants.ts")).toContain(

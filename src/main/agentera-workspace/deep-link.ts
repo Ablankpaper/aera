@@ -3,7 +3,7 @@ import type { OrganizationPendingInvitation } from "../../shared/agentera-organi
 import { parseOrganizationInvitationDeepLink } from "../agentera-organization/deep-link";
 
 const INVITATION_LINK_PATTERN =
-  /^agentera:\/\/workspace-invitation#([A-Za-z0-9_-]{43})$/;
+  /^(?:aera|agentera):\/\/workspace-invitation#([A-Za-z0-9_-]{43})$/;
 
 function isCanonicalToken(value: string): boolean {
   try {

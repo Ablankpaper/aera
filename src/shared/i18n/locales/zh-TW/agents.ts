@@ -53,7 +53,7 @@ export default {
   walletCreateFailed: "Couldn't add wallet",
   walletRecoveryTitle: "Recovery phrase",
   walletRecoveryInfo:
-    "Save this phrase now. AgentEra will not show it again after this modal closes.",
+    "Save this phrase now. Aera will not show it again after this modal closes.",
   walletCopyRecovery: "Copy phrase",
   walletDone: "I've saved it",
   walletBalanceLoading: "Loading…",
@@ -61,17 +61,17 @@ export default {
   walletBalanceRefresh: "Refresh",
   walletDeleteTitle: "Remove wallet",
   walletDeleteWarning:
-    "This will permanently remove this wallet from AgentEra. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
+    "This will permanently remove this wallet from Aera. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
   walletDeleteConfirmLabel: "Remove wallet",
   control: {
     experience: enAgents.control.experience,
     official: enAgents.control.official,
-    workspaceSpace: "工作空間",
-    workspaceSpaceTitle: "工作空間 Agent",
+    workspaceSpace: "團隊 / 專案",
+    workspaceSpaceTitle: "團隊 / 專案 Agent",
     workspaceAuthorSubtitle:
-      "建立本機草稿並發佈不可變的工作空間版本；底層準備由系統自動完成。",
+      "建立本機草稿並發佈不可變的團隊/專案版本；底層準備由系統自動完成。",
     workspaceMemberSubtitle:
-      "可直接使用已核准的工作空間智慧體版本；Member 無法編輯或發佈草稿。",
+      "可直接使用已核准的團隊/專案智慧體版本；Member 無法編輯或發佈草稿。",
     role: {
       owner: "Owner",
       admin: "Admin",
@@ -119,25 +119,23 @@ export default {
       withdraw: "撤回提交",
       confirmWithdrawal: "確認撤回",
       withdrawalBoundary:
-        "撤回只會關閉這筆待審核提交；本機草稿與 Hermes 資料維持不變。",
+        "撤回只會關閉這筆待審核提交；本機草稿與 Aera Runtime 資料維持不變。",
       draftReadOnly:
         "此企業草稿目前為唯讀；請重新連線並使用 Owner 或 Admin 角色後再修改或提交。",
     },
     workspaceOfflineNotice:
-      "工作空間目前離線。已驗證的安裝仍可在本機使用；草稿唯讀，發布、探索、安裝與更新均已暫停。",
+      "團隊/專案目前離線。已驗證的安裝仍可在本機使用；草稿唯讀，發布、探索、安裝與更新均已暫停。",
     view: "檢視",
     workspaceDraftReadOnly:
-      "離線期間此工作空間草稿唯讀；重新連線後才能修改或發布。",
+      "離線期間此團隊/專案草稿唯讀；重新連線後才能修改或發布。",
     errors: {
-      workspace_forbidden: "目前的工作空間角色不允許執行此 Agent 操作。",
-      workspace_archived: "此工作空間已封存，Agent 資產為唯讀。",
+      workspace_forbidden: "目前的團隊/專案角色不允許執行此 Agent 操作。",
+      workspace_archived: "此團隊或專案已封存，Agent 資產為唯讀。",
       workspace_owner_unavailable:
-        "Owner 帳戶恢復可用前，此工作空間的 Agent 資產保持唯讀。",
+        "Owner 帳戶恢復可用前，此團隊/專案的 Agent 資產保持唯讀。",
       organization_agent_not_found: "此企業智慧體內容已不存在。",
       organization_agent_forbidden: "目前的企業角色不允許執行此智慧體操作。",
       organization_archived: "此企業組織已封存，智慧體資產為唯讀。",
-      organization_submission_self_review:
-        "必須由另一位 Owner 或 Admin 審核此提交。",
       organization_submission_conflict: "企業提交已變更，請重新整理後再試。",
       organization_submission_superseded: "此提交已由較新的企業提交取代。",
       organization_publication_policy_blocked: "企業政策阻止了此智慧體提交。",

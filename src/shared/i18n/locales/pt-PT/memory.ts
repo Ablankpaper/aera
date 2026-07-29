@@ -1,7 +1,7 @@
 export default {
   title: "Memória",
   subtitle:
-    "O que o AgentEra se lembra sobre si e o seu ambiente entre sessões.",
+    "O que o Aera se lembra sobre si e o seu ambiente entre sessões.",
   sessions: "Sessões",
   messages: "Mensagens",
   memories: "Memórias",
@@ -20,15 +20,15 @@ export default {
   noProvidersFound: "Nenhum fornecedor de memória encontrado nesta instalação.",
   openProviderWebsite: "Abrir site do fornecedor",
   noMemoriesYet:
-    "Ainda sem memórias. O AgentEra guardará factos importantes à medida que conversam.",
+    "Ainda sem memórias. O Aera guardará factos importantes à medida que conversam.",
   noMemoryEntries: "Ainda sem entradas de memória.",
   noToolsetsFound: "Nenhum conjunto de ferramentas encontrado.",
   addManuallyHint:
     "Também pode adicionar memórias manualmente usando o botão acima.",
   userProfileHint:
-    "Fale ao AgentEra sobre si — nome, cargo, preferências, estilo de comunicação.",
+    "Fale ao Aera sobre si — nome, cargo, preferências, estilo de comunicação.",
   providersHint:
-    "Fornecedores de memória modular dão ao AgentEra uma memória de longo prazo avançada. A memória integrada (acima) está sempre activa em conjunto com o fornecedor seleccionado.",
+    "Fornecedores de memória modular dão ao Aera uma memória de longo prazo avançada. A memória integrada (acima) está sempre activa em conjunto com o fornecedor seleccionado.",
   providersHintActive: "Activo: <strong>{{provider}}</strong>",
   providersHintInactive:
     "Nenhum fornecedor externo activo — a usar apenas a integrada.",

@@ -310,28 +310,28 @@ function evidence(candidateDocument) {
 function candidate() {
   const artifacts = [
     artifact(
-      "agentera-studio-0.7.3-arm64.dmg",
+      "Aera-0.7.3-arm64.dmg",
       "macos",
       "arm64",
       "macos_dmg",
       "1",
     ),
     artifact(
-      "agentera-studio-0.7.3-arm64-mac.zip",
+      "Aera-0.7.3-arm64-mac.zip",
       "macos",
       "arm64",
       "macos_zip",
       "2",
     ),
     artifact(
-      "agentera-studio-0.7.3-setup.exe",
+      "Aera-0.7.3-setup.exe",
       "windows",
       "x64",
       "windows_setup",
       "3",
     ),
     artifact(
-      "agentera-studio-0.7.3-portable.exe",
+      "Aera-0.7.3-portable.exe",
       "windows",
       "x64",
       "windows_portable",
@@ -379,7 +379,7 @@ function candidate() {
     platformEvidence: {
       macos: {
         arch: "arm64",
-        signingIdentity: "Developer ID Application: AgentEra (ABCDEFGHIJ)",
+        signingIdentity: "Developer ID Application: Aera (ABCDEFGHIJ)",
         teamId: "ABCDEFGHIJ",
         codesignVerified: true,
         gatekeeperAccepted: true,
@@ -395,7 +395,7 @@ function candidate() {
       },
       windows: {
         arch: "x64",
-        signerSubject: "CN=AgentEra Code Signing",
+        signerSubject: "CN=Aera Code Signing",
         signerThumbprint: "A".repeat(40),
         authenticodeVerifiedArtifacts: [setup.name, portable.name],
         timestampVerifiedArtifacts: [setup.name, portable.name],

@@ -41,7 +41,7 @@ function configDocument(content: string): {
   const document = parseDocument(content.trim() ? content : "{}");
   if (document.errors.length > 0) {
     throw new Error(
-      `Cannot update Hermes custom provider: ${document.errors[0].message}`,
+      `Cannot update Aera Runtime custom provider: ${document.errors[0].message}`,
     );
   }
   const root = asRecord(document.toJS()) ?? {};
@@ -53,7 +53,7 @@ function configDocument(content: string): {
       Array.isArray(providers))
   ) {
     throw new Error(
-      "Cannot update Hermes custom provider: config.yaml providers must be a mapping.",
+      "Cannot update Aera Runtime custom provider: config.yaml providers must be a mapping.",
     );
   }
   // An empty profile is bootstrapped from `{}`. yaml preserves that root as a

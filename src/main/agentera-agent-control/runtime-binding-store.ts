@@ -93,7 +93,7 @@ export class RuntimeBindingStoreError extends Error {
   readonly code: RuntimeBindingStoreErrorCode;
 
   constructor(code: RuntimeBindingStoreErrorCode) {
-    super(`AgentEra RuntimeBinding failed: ${code}.`);
+    super(`Aera RuntimeBinding failed: ${code}.`);
     this.name = "RuntimeBindingStoreError";
     this.code = code;
   }

@@ -36,7 +36,7 @@ export default {
     clearSearch: "清除搜索",
     noSearchResults: "没有找到匹配的模型服务",
     emptyTitle: "还没有模型服务",
-    emptyHint: "添加第一个服务后，AgentEra 会自动连接并读取可用模型。",
+    emptyHint: "添加第一个服务后，Aera 会自动连接并读取可用模型。",
     addFirst: "添加第一个模型",
     inUse: "使用中",
     modelsCount: "{{count}} 个模型",

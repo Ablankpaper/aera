@@ -258,7 +258,7 @@ export async function remoteSetModelConfig(
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error(
-    `Remote AgentEra Runtime dashboard did not switch to ${provider}/${model}; active model is ${last?.provider || "unknown"}/${last?.model || "unknown"}`,
+    `Remote Aera Runtime dashboard did not switch to ${provider}/${model}; active model is ${last?.provider || "unknown"}/${last?.model || "unknown"}`,
   );
 }
 
@@ -276,7 +276,7 @@ export async function remoteAddModel(
   });
   const saved = normalizeRemoteSavedModel(response, 0);
   if (!saved)
-    throw new Error("Remote AgentEra Runtime returned an invalid model row.");
+    throw new Error("Remote Aera Runtime returned an invalid model row.");
   return saved;
 }
 

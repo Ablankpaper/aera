@@ -634,7 +634,7 @@ export function clearVersionCache(): void {
 export function runHermesDoctor(): string {
   const invocation = getRuntimeInvocation();
   if (invocation === null) {
-    return "AgentEra Runtime is not installed.";
+    return "Aera Runtime is not installed.";
   }
   try {
     const output = execFileSync(
@@ -697,7 +697,7 @@ export async function runClawMigrate(
 ): Promise<void> {
   const invocation = getRuntimeInvocation();
   if (invocation === null) {
-    throw new Error("AgentEra Runtime is not installed.");
+    throw new Error("Aera Runtime is not installed.");
   }
 
   const openclaw = checkOpenClawExists();
@@ -762,12 +762,12 @@ export async function runHermesUpdate(
   const invocation = getRuntimeInvocation();
   if (invocation === null) {
     throw new Error(
-      "AgentEra Runtime is not installed. Please install it first.",
+      "Aera Runtime is not installed. Please install it first.",
     );
   }
   if (invocation.source === "managed") {
     throw new Error(
-      "Managed AgentEra Runtime updates are installed through the signed desktop update flow.",
+      "Managed Aera Runtime updates are installed through the signed desktop update flow.",
     );
   }
 
@@ -777,7 +777,7 @@ export async function runHermesUpdate(
     onProgress({
       step: 1,
       totalSteps: 1,
-      title: "Updating AgentEra Runtime",
+      title: "Updating Aera Runtime",
       detail: text.trim().slice(0, 120),
       log,
     });
@@ -848,7 +848,7 @@ function runtimeTrustFile(): string {
     join(process.cwd(), "resources", "agentera-runtime-trust.json"),
   ];
   const path = candidates.find((candidate) => existsSync(candidate));
-  if (!path) throw new Error("AgentEra Runtime trust document is missing");
+  if (!path) throw new Error("Aera Runtime trust document is missing");
   return path;
 }
 
@@ -863,7 +863,7 @@ function nativeRuntimeTarget(): {
     return { platform: "windows", arch: "x64" };
   }
   throw new Error(
-    `Bundled AgentEra Runtime is not available for ${process.platform}-${process.arch}`,
+    `Bundled Aera Runtime is not available for ${process.platform}-${process.arch}`,
   );
 }
 
@@ -929,7 +929,7 @@ export async function runHermesBackup(
 ): Promise<{ success: boolean; path?: string; error?: string }> {
   const invocation = getRuntimeInvocation();
   if (invocation === null) {
-    return { success: false, error: "AgentEra Runtime is not installed." };
+    return { success: false, error: "Aera Runtime is not installed." };
   }
   const args = invocation.cliArgs();
   if (profile && profile !== "default") args.push("-p", profile);
@@ -980,7 +980,7 @@ export async function runHermesImport(
 
   const invocation = getRuntimeInvocation();
   if (invocation === null) {
-    return { success: false, error: "AgentEra Runtime is not installed." };
+    return { success: false, error: "Aera Runtime is not installed." };
   }
   const args = invocation.cliArgs();
   if (profile && profile !== "default") args.push("-p", profile);
@@ -1042,7 +1042,7 @@ export function validateImportArchivePath(
 export function runHermesDump(): Promise<string> {
   const invocation = getRuntimeInvocation();
   if (invocation === null) {
-    return Promise.resolve("AgentEra Runtime is not installed.");
+    return Promise.resolve("Aera Runtime is not installed.");
   }
   return new Promise((resolve) => {
     execFile(

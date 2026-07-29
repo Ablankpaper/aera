@@ -35,7 +35,7 @@ const owner: AgenteraRuntimeOwner = {
   deviceInstallationId: "33333333-3333-4333-8333-333333333333",
 };
 
-describe("AgentEra remote/SSH connection ownership", () => {
+describe("Aera remote/SSH connection ownership", () => {
   let root = "";
 
   beforeEach(() => {
@@ -63,7 +63,7 @@ describe("AgentEra remote/SSH connection ownership", () => {
         ...owner,
         ownerId: "55555555-5555-4555-8555-555555555555",
       }),
-    ).toThrow(/another AgentEra owner/i);
+    ).toThrow(/another Aera owner/i);
     const raw = readFileSync(store.filePath, "utf8");
     expect(raw).not.toContain(contextId);
     expect(raw).not.toContain(owner.ownerId);

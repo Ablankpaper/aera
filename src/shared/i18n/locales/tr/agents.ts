@@ -3,7 +3,7 @@ import enAgents from "../en/agents";
 export default {
   title: "Ajanlar",
   subtitle:
-    "Her ajan, kendi yapılandırması, belleği ve yetenekleriyle izole bir AgentEra ortamında çalışır",
+    "Her ajan, kendi yapılandırması, belleği ve yetenekleriyle izole bir Aera ortamında çalışır",
   newAgent: "Yeni Ajan",
   namePlaceholder: "Ajan adı (örn. kodcu)",
   createTitle: "Yeni ajan",
@@ -57,7 +57,7 @@ export default {
   walletCreateFailed: "Couldn't add wallet",
   walletRecoveryTitle: "Recovery phrase",
   walletRecoveryInfo:
-    "Save this phrase now. AgentEra will not show it again after this modal closes.",
+    "Save this phrase now. Aera will not show it again after this modal closes.",
   walletCopyRecovery: "Copy phrase",
   walletDone: "I've saved it",
   walletBalanceLoading: "Loading…",
@@ -65,7 +65,7 @@ export default {
   walletBalanceRefresh: "Refresh",
   walletDeleteTitle: "Remove wallet",
   walletDeleteWarning:
-    "This will permanently remove this wallet from AgentEra. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
+    "This will permanently remove this wallet from Aera. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
   walletDeleteConfirmLabel: "Remove wallet",
   control: {
     experience: enAgents.control.experience,
@@ -129,7 +129,7 @@ export default {
       withdraw: "Gönderimi geri çek",
       confirmWithdrawal: "Geri çekmeyi doğrula",
       withdrawalBoundary:
-        "Geri çekme yalnızca bu bekleyen gönderimi kapatır; yerel taslaklar ve Hermes verileri değişmez.",
+        "Geri çekme yalnızca bu bekleyen gönderimi kapatır; yerel taslaklar ve Aera Runtime verileri değişmez.",
       draftReadOnly:
         "Bu kurumsal taslak salt okunurdur. Değiştirmek için Sahip veya Yönetici olarak yeniden bağlanın.",
     },

@@ -30,7 +30,7 @@ const ORGANIZATION_A = "30000000-0000-4000-8000-000000000003";
 const ORGANIZATION_B = "40000000-0000-4000-8000-000000000004";
 const DEPARTMENT_ID = "50000000-0000-4000-8000-000000000005";
 const INVITATION_ID = "60000000-0000-4000-8000-000000000006";
-const INVITE_URL = "https://app.agentera.example/invitations/secret-once";
+const INVITE_URL = `agentera://organization-invitation#${"A".repeat(43)}`;
 
 const authState: Extract<
   AgenteraAuthPublicState,
@@ -190,6 +190,7 @@ function installAPIs(
       }),
     ),
     revokeInvitation: vi.fn(() => success(true)),
+    submitInvitationLink: vi.fn(() => success(true)),
     getCurrentPolicy: vi.fn(() =>
       success({
         policy: {
@@ -292,8 +293,12 @@ function installAPIs(
 function renderDialog(
   role: OrganizationRole = "owner",
   offline = false,
-): ReturnType<typeof installAPIs> & { unmount: () => void } {
+): ReturnType<typeof installAPIs> & {
+  onClose: ReturnType<typeof vi.fn>;
+  unmount: () => void;
+} {
   const api = installAPIs(role, { offline });
+  const onClose = vi.fn();
   const rendered = render(
     <OrganizationManagementDialog
       open
@@ -302,10 +307,10 @@ function renderDialog(
           ? { ...authState, status: "offline", cloudAvailable: false }
           : authState
       }
-      onClose={vi.fn()}
+      onClose={onClose}
     />,
   );
-  return { ...api, unmount: rendered.unmount };
+  return { ...api, onClose, unmount: rendered.unmount };
 }
 
 describe("OrganizationManagementDialog", () => {
@@ -353,53 +358,35 @@ describe("OrganizationManagementDialog", () => {
     ).not.toContain("owner");
   });
 
-  it.each([
-    ["admin", true, true, true],
-    ["auditor", false, false, true],
-    ["member", false, false, false],
-  ] as const)(
-    "renders the %s role matrix without treating renderer visibility as authority",
-    async (role, hasInvitations, canMutate, hasAudit) => {
-      renderDialog(role);
-      await screen.findByText("Acme Enterprise");
-      expect(
-        Boolean(
-          screen.queryByRole("tab", {
-            name: "navigation.organization.management.invitations",
-          }),
-        ),
-      ).toBe(hasInvitations);
-      expect(
-        Boolean(
-          screen.queryByRole("tab", {
-            name: "navigation.organization.management.audit",
-          }),
-        ),
-      ).toBe(hasAudit);
-      fireEvent.click(
-        screen.getByRole("tab", {
-          name: "navigation.organization.management.overview",
-        }),
-      );
-      expect(
-        Boolean(
-          screen.queryByRole("button", {
-            name: "navigation.organization.management.rename",
-          }),
-        ),
-      ).toBe(canMutate);
-      expect(
-        screen.queryByRole("button", {
-          name: "navigation.organization.management.transferOwner",
-        }),
-      ).toBeNull();
-      expect(
-        screen.queryByRole("button", {
-          name: "navigation.organization.management.dissolve",
-        }),
-      ).toBeNull();
-    },
-  );
+  it("gives Admin management and invitation controls without Owner-only lifecycle actions", async () => {
+    renderDialog("admin");
+    await screen.findByText("Acme Enterprise");
+    expect(
+      screen.getByRole("tab", {
+        name: "navigation.organization.management.invitations",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", {
+        name: "navigation.organization.management.audit",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "navigation.organization.management.rename",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "navigation.organization.management.transferOwner",
+      }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", {
+        name: "navigation.organization.management.dissolve",
+      }),
+    ).toBeNull();
+  });
 
   it("separates the active policy from the editable draft, publish action, and signed history", async () => {
     const { organizationAPI } = renderDialog("owner");
@@ -467,14 +454,13 @@ describe("OrganizationManagementDialog", () => {
     );
   });
 
-  it("keeps Auditor policy access read-only and Member access summary-only", async () => {
-    const auditor = renderDialog("auditor");
+  it("keeps Auditor access read-only and limited to policy history and audit", async () => {
+    renderDialog("auditor");
     await screen.findByText("Acme Enterprise");
-    fireEvent.click(
-      screen.getByRole("tab", {
-        name: "navigation.organization.management.policy",
-      }),
-    );
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "navigation.organization.management.policy",
+      "navigation.organization.management.audit",
+    ]);
     expect(
       await screen.findByTestId("organization-policy-history-list"),
     ).toBeInTheDocument();
@@ -488,21 +474,35 @@ describe("OrganizationManagementDialog", () => {
         name: "navigation.organization.management.publishPolicy",
       }),
     ).toBeNull();
+    expect(
+      screen.queryByRole("button", {
+        name: "navigation.organization.management.rename",
+      }),
+    ).toBeNull();
 
-    auditor.unmount();
-    renderDialog("member");
-    await screen.findByText("Acme Enterprise");
     fireEvent.click(
       screen.getByRole("tab", {
-        name: "navigation.organization.management.policy",
+        name: "navigation.organization.management.audit",
       }),
     );
+    expect(await screen.findByText("organization.created")).toBeInTheDocument();
+  });
+
+  it("fails closed when a Member reaches the management dialog directly", async () => {
+    renderDialog("member");
     expect(
-      await screen.findByText(
-        "navigation.organization.management.policySummaryOnly",
-      ),
+      await screen.findByText("navigation.organization.management.empty"),
     ).toBeInTheDocument();
-    expect(screen.queryByTestId("organization-policy-history-list")).toBeNull();
+    expect(screen.queryByText("Acme Enterprise")).toBeNull();
+    expect(screen.queryByRole("tab")).toBeNull();
+    expect(
+      screen.queryByLabelText(
+        "navigation.organization.management.invitationLink",
+      ),
+    ).toBeNull();
+    expect(
+      screen.queryByLabelText("navigation.organization.management.createName"),
+    ).toBeNull();
   });
 
   it("requires both exact high-risk confirmations before owner transfer or dissolution", async () => {

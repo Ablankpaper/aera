@@ -51,7 +51,7 @@ describe("Organization translations", () => {
     expect(navigationJa.organization).toBe(organizationEn);
     expect(navigationZhCN.organization).toBe(organizationZhCN);
     expect(navigationZhTW.organization).toBe(organizationZhTW);
-    expect(organizationZhCN.switcher.organizationGroup).toBe("企业组织");
-    expect(organizationZhTW.switcher.organizationGroup).toBe("企業組織");
+    expect(organizationZhCN.switcher.organizationGroup).toBe("企业");
+    expect(organizationZhTW.switcher.organizationGroup).toBe("企業");
   });
 });

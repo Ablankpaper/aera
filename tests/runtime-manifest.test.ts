@@ -32,7 +32,7 @@ const context = {
 
 const testTrust = new Map([[TEST_KEY_ID, TEST_PUBLIC_KEY]]);
 
-describe("AgentEra Runtime manifest protocol", () => {
+describe("Aera Runtime manifest protocol", () => {
   it("uses the producer canonical JSON representation", () => {
     expect(canonicalJsonBytes({ z: 1, a: { d: 4, b: 2 } })).toEqual(
       Buffer.from('{"a":{"b":2,"d":4},"z":1}'),

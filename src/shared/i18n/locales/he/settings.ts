@@ -3,7 +3,7 @@ import { runtimeDistributionEn } from "../runtime-distribution";
 export default {
   title: "הגדרות",
   sections: {
-    hermesAgent: "AgentEra Runtime",
+    hermesAgent: "Aera Runtime",
     appearance: "מראה",
     privacy: "פרטיות",
     credentialPool: "מאגר אישורים",
@@ -11,7 +11,7 @@ export default {
   nav: {
     groups: {
       general: "כללי",
-      hermes: "AgentEra Studio",
+      hermes: "Aera",
     },
     appearance: "מראה",
     language: "שפה",
@@ -53,21 +53,21 @@ export default {
   },
   analytics: {
     label: "שליחת נתוני שימוש אנונימיים",
-    hint: "עוזר לשפר את AgentEra Studio באמצעות שליחת נתוני שימוש אנונימיים ומצרפיים לשירות הניתוח של הפרויקט. ניתן לכבות זאת בכל עת.",
+    hint: "עוזר לשפר את Aera באמצעות שליחת נתוני שימוש אנונימיים ומצרפיים לשירות הניתוח של הפרויקט. ניתן לכבות זאת בכל עת.",
     disclosure: {
       uuid: "מזהה אקראי לכל התקנה, השמור רק במכשיר זה (ללא שם, אימייל או פרטי חשבון).",
       platform: "מערכת ההפעלה שלכם, גרסת Electron וגרסת Node.js.",
       navigation:
         "אילו מסכים אתם מבקרים בתוך האפליקציה (לדוגמה, צ'אט, סשנים, הגדרות). לא נאסף תוכן צ'אט, הנחיות, תגובות מודל או תוכן קבצים.",
       endpoint:
-        "הנתונים נשלחים אל שירות הניתוח של AgentEra. הקלטות סשן ולכידה אוטומטית של צפיות בדפים מושבתות.",
+        "הנתונים נשלחים אל שירות הניתוח של Aera. הקלטות סשן ולכידה אוטומטית של צפיות בדפים מושבתות.",
       notCollected:
         "לעולם לא נאסף: הודעות צ'אט, נתיבי קבצים, מפתחות API, הגדרות מודל, אישורי חשבון.",
     },
   },
   notDetected: "לא זוהה",
   updatedSuccessfully: "עודכן בהצלחה!",
-  updateSuccess: "‏AgentEra עודכן בהצלחה.",
+  updateSuccess: "‏Aera עודכן בהצלחה.",
   updateFailed: "העדכון נכשל.",
   version: "v{{version}}",
   proxyPlaceholder: "לדוגמה: socks5://127.0.0.1:1080 או http://proxy:8080",
@@ -93,14 +93,14 @@ export default {
     "לא ניתן היה להגיע לרשימת המודלים של הספק - עדיין ניתן להקליד שם מודל ידנית",
   customBaseUrlHint: "נקודת קצה של API תואם OpenAI",
   poolHint:
-    "הוסיפו מספר מפתחות API לאותו ספק כדי לאפשר רוטציה אוטומטית ואיזון עומסים. ‏AgentEra יעבור ביניהם במחזוריות.",
+    "הוסיפו מספר מפתחות API לאותו ספק כדי לאפשר רוטציה אוטומטית ואיזון עומסים. ‏Aera יעבור ביניהם במחזוריות.",
   add: "הוספה",
   remove: "הסרה",
   keyLabel: "מפתח",
   empty: "(ריק)",
   dataSection: "נתונים",
   dataHint:
-    "ייצוא או ייבוא של ההגדרות, הסשנים, המיומנויות והזיכרון של AgentEra.",
+    "ייצוא או ייבוא של ההגדרות, הסשנים, המיומנויות והזיכרון של Aera.",
   backingUp: "מגבה...",
   exportBackup: "ייצוא גיבוי",
   importing: "מייבא...",
@@ -117,10 +117,10 @@ export default {
   debugDump: "פלט ניפוי באגים",
   migrationDetected: "זוהתה התקנת OpenClaw",
   migrationDesc:
-    "נמצא OpenClaw בנתיב <code>{{path}}</code>. תוכלו להעביר ל-AgentEra את ההגדרות, מפתחות ה-API, הסשנים והמיומנויות שלכם.",
+    "נמצא OpenClaw בנתיב <code>{{path}}</code>. תוכלו להעביר ל-Aera את ההגדרות, מפתחות ה-API, הסשנים והמיומנויות שלכם.",
   migrationDismiss: "אל תציג שוב",
   migrating: "מעביר...",
-  migrateToHermes: "העברה ל-AgentEra",
+  migrateToHermes: "העברה ל-Aera",
   skip: "דלג",
   appearanceHint: "בחרו את מראה הממשק המועדף עליכם",
   apiKeyPlaceholder: "מפתח API",
@@ -128,11 +128,11 @@ export default {
   connectionSection: "חיבור",
   modeLocal: "מקומי",
   modeRemote: "מרוחק",
-  modeLocalHint: "שימוש ב-AgentEra המותקן על מכשיר זה",
-  modeRemoteHint: "התחברו לשרת AgentEra API ברשת שלכם או בענן",
+  modeLocalHint: "שימוש ב-Aera המותקן על מכשיר זה",
+  modeRemoteHint: "התחברו לשרת Aera API ברשת שלכם או בענן",
   remoteUrl: "כתובת מרוחקת",
   remoteUrlHint:
-    "כתובת שרת AgentEra API ‏(חייבת לחשוף את /health ואת /v1/chat/completions)",
+    "כתובת שרת Aera API ‏(חייבת לחשוף את /health ואת /v1/chat/completions)",
   remoteApiKey: "מפתח API",
   remoteApiKeyHint:
     "תואם ל-API_SERVER_KEY במארח המרוחק. השאירו ריק אם השרת מקבל בקשות ללא אימות.",
@@ -141,20 +141,20 @@ export default {
   save: "שמירה",
   serverConfigTitle: "הגדרת השרת",
   serverConfigHint:
-    "אתם מחוברים לשרת AgentEra מרוחק. בחירת המודל, מפתחות ה-API של הספקים והאישורים מנוהלים בקבצים <code>~/.hermes/.env</code> ו-<code>config.yaml</code> של השרת. ערכו אותם במארח (לדוגמה <code>docker exec -it hermes vi /opt/data/.env</code>) והפעילו מחדש את הקונטיינר.",
+    "אתם מחוברים לשרת Aera מרוחק. בחירת המודל, מפתחות ה-API של הספקים והאישורים מנוהלים בקבצים <code>~/.hermes/.env</code> ו-<code>config.yaml</code> של השרת. ערכו אותם במארח (לדוגמה <code>docker exec -it hermes vi /opt/data/.env</code>) והפעילו מחדש את הקונטיינר.",
   connectionMode: "מצב",
   switchedToLocal: "עברתם למצב מקומי",
 
   // Community
   communityTitle: "קהילה",
   communityHint:
-    "הצטרפו לערוץ ה-Discord שלנו כדי לשאול שאלות, לדווח על בעיות ולשוחח עם משתמשי AgentEra אחרים.",
+    "הצטרפו לערוץ ה-Discord שלנו כדי לשאול שאלות, לדווח על בעיות ולשוחח עם משתמשי Aera אחרים.",
   joinDiscord: "הצטרפות לערוץ Discord",
 
   // SSH & Server Config
   modeSsh: "מנהרת SSH",
   modeSshHint:
-    "מנהרה ל-AgentEra מרוחק דרך SSH — ללא פורטים חשופים או מפתחות API.",
+    "מנהרה ל-Aera מרוחק דרך SSH — ללא פורטים חשופים או מפתחות API.",
   sessionDisabledTitle: "היסטוריית הסשנים מושבתת — ‏API_SERVER_KEY לא הוגדר",
   sessionDisabledDesc:
     "ללא מפתח שרת API, השער אינו יכול לאמת בקשות להמשך סשן. הודעות עדיין יישלחו, אך היסטוריית השיחה לא תישמר בין הפעלות מחדש.",
@@ -164,13 +164,13 @@ export default {
   remoteEnvSshDesc:
     "מצב SSH: הוסיפו ‏API_SERVER_KEY=<your-key>‏ אל ‏~/.hermes/profiles/<profile>/.env‏ במארח המרוחק, ואז הפעילו שם מחדש את השער.",
   remoteEnvDesc:
-    "מצב מרוחק: הוסיפו ‏API_SERVER_KEY=<your-key>‏ אל קובץ ה-.env בשרת ה-AgentEra המרוחק שלכם, ואז הפעילו מחדש את השער.",
+    "מצב מרוחק: הוסיפו ‏API_SERVER_KEY=<your-key>‏ אל קובץ ה-.env בשרת ה-Aera המרוחק שלכם, ואז הפעילו מחדש את השער.",
   sshHost: "מארח SSH",
   sshPort: "פורט SSH",
   sshUsername: "שם משתמש",
   sshKeyPath: "נתיב למפתח הפרטי",
   sshKeyPathOptional: "(אופציונלי, ברירת המחדל ~/.ssh/id_rsa)",
-  sshRemotePort: "פורט AgentEra מרוחק",
+  sshRemotePort: "פורט Aera מרוחק",
   sshRemotePortDefault: "(ברירת מחדל 8642)",
   sshHint:
     "ודאו שאתם יכולים להריץ ssh {{cmd}} ללא בקשת סיסמה. החיבור הראשון נותן אמון במפתח המארח ושומר אותו ב-~/.ssh/known_hosts; חיבור SSH ייכשל אם המפתח ישתנה מאוחר יותר.",
@@ -181,17 +181,17 @@ export default {
   connectSsh: "התחברות דרך SSH",
   sshTitle: "התחברות דרך SSH",
   sshSubtitle:
-    "מנהרה ל-AgentEra מרוחק דרך SSH — ללא פורטים חשופים או מפתחות API.",
+    "מנהרה ל-Aera מרוחק דרך SSH — ללא פורטים חשופים או מפתחות API.",
   sshHostPlaceholder: "192.168.1.100 או myserver.local",
   sshUsernamePlaceholder: "hermes",
   sshErrorRequired: "נדרשים מארח ושם משתמש.",
   sshErrorConnection:
-    "לא ניתן היה להתחבר דרך SSH או להגיע ל-AgentEra במרוחק. ודאו:\n• מפתח ה-SSH נכון (או שברירת המחדל ~/.ssh/id_rsa עובדת)\n• שער ה-AgentEra פועל במרוחק\n• הפורט המרוחק נכון (ברירת מחדל 8642)",
+    "לא ניתן היה להתחבר דרך SSH או להגיע ל-Aera במרוחק. ודאו:\n• מפתח ה-SSH נכון (או שברירת המחדל ~/.ssh/id_rsa עובדת)\n• שער ה-Aera פועל במרוחק\n• הפורט המרוחק נכון (ברירת מחדל 8642)",
   sshErrorFailed: "בדיקת חיבור ה-SSH נכשלה: {{msg}}",
   sshErrorFailedSimple: "בדיקת חיבור ה-SSH נכשלה.",
   remoteErrorUrl: "אנא הזינו כתובת URL.",
   remoteErrorConnection:
-    "לא ניתן היה להגיע ל-AgentEra בכתובת זו. בדקו את הכתובת ואת מפתח ה-API.\n\nהשאירו את המפתח ריק אם השרת מקבל בקשות לא מאומתות (לדוגמה, דרך מנהרת SSH אל localhost).",
+    "לא ניתן היה להגיע ל-Aera בכתובת זו. בדקו את הכתובת ואת מפתח ה-API.\n\nהשאירו את המפתח ריק אם השרת מקבל בקשות לא מאומתות (לדוגמה, דרך מנהרת SSH אל localhost).",
   remoteErrorFailed: "בדיקת החיבור נכשלה.",
   sshSuccess: "מנהרת ה-SSH מחוברת!",
   sshErrorRequiredSimple: "נדרשים מארח ושם משתמש",

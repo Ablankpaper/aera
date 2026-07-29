@@ -92,6 +92,13 @@ function updateCandidateStatus(
   );
 }
 
+function removeCandidate(
+  messages: MemoryCandidateMessage[],
+  batchId: string,
+): MemoryCandidateMessage[] {
+  return messages.filter((message) => message.batch.id !== batchId);
+}
+
 export function useMemoryCandidates({
   profile,
   isAgentBusy,
@@ -205,7 +212,7 @@ export function useMemoryCandidates({
 
   const confirm = useCallback(
     async (batchId: string): Promise<void> => {
-      if (isAgentBusy || inFlight.current.has(batchId)) return;
+      if (inFlight.current.has(batchId)) return;
       const api = window.agenteraGlobalProfile;
       if (!api?.confirmCandidates) return;
       inFlight.current.add(batchId);
@@ -215,11 +222,9 @@ export function useMemoryCandidates({
       try {
         const result = await api.confirmCandidates(batchId, profileId);
         setCandidateMessages((messages) =>
-          updateCandidateStatus(
-            messages,
-            batchId,
-            result.success ? "confirmed" : "error",
-          ),
+          result.success
+            ? removeCandidate(messages, batchId)
+            : updateCandidateStatus(messages, batchId, "error"),
         );
       } catch {
         setCandidateMessages((messages) =>
@@ -229,7 +234,7 @@ export function useMemoryCandidates({
         inFlight.current.delete(batchId);
       }
     },
-    [isAgentBusy, profileId],
+    [profileId],
   );
 
   const reject = useCallback(
@@ -244,11 +249,9 @@ export function useMemoryCandidates({
       try {
         const result = await api.rejectCandidates(batchId, profileId);
         setCandidateMessages((messages) =>
-          updateCandidateStatus(
-            messages,
-            batchId,
-            result.success ? "rejected" : "error",
-          ),
+          result.success
+            ? removeCandidate(messages, batchId)
+            : updateCandidateStatus(messages, batchId, "error"),
         );
       } catch {
         setCandidateMessages((messages) =>

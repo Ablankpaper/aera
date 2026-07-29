@@ -71,13 +71,13 @@ function detail(): OrganizationAgentSubmissionDetail {
 
 function preview(selfReview = false): OrganizationReviewPreview {
   return {
-    reviewHandle: selfReview ? null : REVIEW_HANDLE,
+    reviewHandle: REVIEW_HANDLE,
     selfReview,
     decision: "approve",
     reasonCode: null,
     safeNote: null,
     detail: detail(),
-    expiresAt: selfReview ? null : "2026-07-21T02:00:00.000Z",
+    expiresAt: "2026-07-21T02:00:00.000Z",
   };
 }
 
@@ -95,8 +95,10 @@ function installAPI(overrides: Partial<Window["agenteraAgents"]> = {}): void {
 describe("OrganizationReviewDialog", () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it("never renders approval for the submission author", () => {
-    installAPI();
+  it("allows an authorized submission author to confirm the single approval", async () => {
+    const approved = { ...summary(), status: "approved" as const };
+    const confirmOrganizationReview = vi.fn(async () => success(approved));
+    installAPI({ confirmOrganizationReview });
     render(
       <OrganizationReviewDialog
         open
@@ -107,14 +109,17 @@ describe("OrganizationReviewDialog", () => {
       />,
     );
 
-    expect(
-      screen.queryByRole("button", {
-        name: "agents.control.organization.approve",
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.control.organization.confirmApproval",
       }),
-    ).toBeNull();
-    expect(
-      screen.getByText("agents.control.organization.differentReviewerRequired"),
-    ).toBeInTheDocument();
+    );
+    await waitFor(() =>
+      expect(confirmOrganizationReview).toHaveBeenCalledWith({
+        reviewHandle: REVIEW_HANDLE,
+        confirmation: "approve-organization-agent",
+      }),
+    );
   });
 
   it("prepares and confirms approval using only the one-use review handle", async () => {

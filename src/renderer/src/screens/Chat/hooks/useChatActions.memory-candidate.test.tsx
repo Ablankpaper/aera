@@ -53,4 +53,39 @@ describe("useChatActions memory-candidate ordering", () => {
     finishHermes(true);
     await act(async () => sendPromise);
   });
+
+  it("lets a strict product guide claim Agent creation before Hermes can create an orphan Profile", async () => {
+    const sendViaDashboard = vi.fn(async () => true);
+    const interceptNaturalLanguageMessage = vi.fn(() => true);
+    const setMessages = vi.fn();
+    const setIsLoading = vi.fn();
+
+    const { result } = renderHook(() =>
+      useChatActions({
+        runId: "run-agent-create",
+        profile: "default",
+        hermesSessionId: null,
+        messages: [],
+        isLoading: false,
+        setIsLoading,
+        setMessages,
+        chatInputRef: { current: null },
+        localCommands: { executeLocal: vi.fn(async () => false) },
+        slashCatalog: {} as never,
+        activeTurnRef: { current: null },
+        contextFolder: null,
+        sendViaDashboard,
+        interceptNaturalLanguageMessage,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleSend("帮我创建一个客服智能体");
+    });
+
+    expect(interceptNaturalLanguageMessage).toHaveBeenCalledOnce();
+    expect(sendViaDashboard).not.toHaveBeenCalled();
+    expect(setIsLoading).not.toHaveBeenCalledWith(true);
+    expect(setMessages).toHaveBeenCalledOnce();
+  });
 });

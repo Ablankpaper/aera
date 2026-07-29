@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { expect, test } from "playwright/test";
 
@@ -189,9 +190,72 @@ test.afterAll(async () => {
 test("shares immutable Agent versions while every Hermes adaptive state remains device-local", async () => {
   if (!harness) throw new Error("Agent control E2E harness is unavailable.");
 
+  await writeFile(
+    join(harness.deviceRoots.A.hermesHome, "config.yaml"),
+    [
+      "model:",
+      "  provider: custom",
+      "  model: guided-creation-e2e",
+      '  base_url: "http://127.0.0.1:9/v1"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
   deviceA = await launchAgentControlDevice(harness, "A");
   await authenticateFirstAgentControlDevice(harness, deviceA);
   await claimDefaultProfile(deviceA);
+  const modelSetupLater = deviceA.page.getByRole("button", {
+    name: /稍后|Later/i,
+  });
+  await expect(modelSetupLater).toBeVisible();
+  await modelSetupLater.click();
+  const chatInput = deviceA.page.locator("textarea.chat-input");
+  await expect(chatInput).toBeEnabled();
+  await chatInput.fill("帮我创建一个叫林二的智能体，负责整理客户资料");
+  await deviceA.page.locator("button.chat-send-btn").click();
+  const creationGuide = deviceA.page.locator(".chat-agent-creation");
+  await expect(creationGuide).toHaveClass(/chat-agent-creation--pending/);
+  await expect(creationGuide.locator("input")).toHaveValue("林二");
+  await expect(creationGuide.locator("textarea")).toHaveValue("整理客户资料");
+  await creationGuide.locator(".chat-agent-creation-primary").click();
+  await expect(creationGuide).toHaveClass(/chat-agent-creation--created/);
+  await expect(creationGuide).toContainText("林二");
+  const guidedDrafts = unwrap<AgentDraftDetail[]>(
+    await invokeAgentera(deviceA, "listDrafts"),
+  );
+  const guidedDraft = guidedDrafts.find(
+    ({ displayName }) => displayName === "林二",
+  );
+  expect(guidedDraft).toBeTruthy();
+  const controlDatabase = new DatabaseSync(
+    join(deviceA.userData, "agentera-control-plane", "control-plane.db"),
+    { readOnly: true },
+  );
+  try {
+    expect(
+      controlDatabase
+        .prepare(
+          `SELECT id, display_name, target_scope, workspace_id, organization_id,
+                  manifest_json
+           FROM agent_drafts
+           WHERE display_name = ?`,
+        )
+        .get("林二"),
+    ).toMatchObject({
+      id: guidedDraft!.id,
+      display_name: "林二",
+      target_scope: "USER",
+      workspace_id: null,
+      organization_id: null,
+      manifest_json: expect.stringContaining("整理客户资料"),
+    });
+  } finally {
+    controlDatabase.close();
+  }
+  await creationGuide.locator(".chat-agent-creation-primary").click();
+  await expect(deviceA.page.getByTestId("personal-agent-grid")).toContainText(
+    "林二",
+  );
 
   deviceB = await launchAgentControlDevice(harness, "B");
   await authenticateExistingAgentControlDevice(harness, deviceB);

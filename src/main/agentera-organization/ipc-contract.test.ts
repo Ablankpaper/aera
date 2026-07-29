@@ -12,6 +12,7 @@ import {
   parseCreateOrganizationInput,
   parseDissolveOrganizationInput,
   parseGetOrganizationPolicySnapshotInput,
+  parseOrganizationInvitationLinkInput,
   parseOrganizationAuditPageInput,
   parseOrganizationIDInput,
   parseOrganizationRevisionInput,
@@ -53,23 +54,23 @@ const policyDocument = {
   officialAgents: { installation: "allowed" as const },
 };
 
-describe("AgentEra Organization IPC contract", () => {
+describe("Aera Organization IPC contract", () => {
   it("parses exact low- and high-risk Organization inputs", () => {
     expect(
       parseOrganizationIDInput({ organizationId: ORGANIZATION_ID }),
     ).toEqual({ organizationId: ORGANIZATION_ID });
     expect(
-      parseCreateOrganizationInput({ displayName: "AgentEra Inc" }),
-    ).toEqual({ displayName: "AgentEra Inc" });
+      parseCreateOrganizationInput({ displayName: "Aera Inc" }),
+    ).toEqual({ displayName: "Aera Inc" });
     expect(
       parseRenameOrganizationInput({
         organizationId: ORGANIZATION_ID,
-        displayName: "AgentEra Labs",
+        displayName: "Aera Labs",
         expectedRevision: 2,
       }),
     ).toEqual({
       organizationId: ORGANIZATION_ID,
-      displayName: "AgentEra Labs",
+      displayName: "Aera Labs",
       expectedRevision: 2,
     });
     expect(
@@ -91,7 +92,7 @@ describe("AgentEra Organization IPC contract", () => {
     expect(
       parseDissolveOrganizationInput({
         organizationId: ORGANIZATION_ID,
-        displayName: "AgentEra Labs",
+        displayName: "Aera Labs",
         expectedRevision: 7,
         confirmation: "dissolve-organization",
       }),
@@ -154,6 +155,13 @@ describe("AgentEra Organization IPC contract", () => {
     });
     expect(parseAcceptOrganizationInvitationInput({ token: TOKEN })).toEqual({
       token: TOKEN,
+    });
+    expect(
+      parseOrganizationInvitationLinkInput({
+        inviteUrl: `agentera://organization-invitation#${TOKEN}`,
+      }),
+    ).toEqual({
+      inviteUrl: `agentera://organization-invitation#${TOKEN}`,
     });
     expect(
       parsePublishOrganizationPolicyInput({
@@ -255,7 +263,7 @@ describe("AgentEra Organization IPC contract", () => {
       organizations: [
         {
           id: ORGANIZATION_ID,
-          displayName: "AgentEra",
+          displayName: "Aera",
           status: "active",
           revision: 1,
           role: "owner",
@@ -404,7 +412,7 @@ describe("AgentEra Organization IPC contract", () => {
   });
 });
 
-describe("AgentEra Organization IPC and startup wiring", () => {
+describe("Aera Organization IPC and startup wiring", () => {
   const authenticatedChannels = [
     "agentera-product-space-get-state",
     "agentera-product-space-select",
@@ -412,6 +420,7 @@ describe("AgentEra Organization IPC and startup wiring", () => {
     "agentera-organization-list-members",
     "agentera-organization-list-departments",
     "agentera-organization-get-current-policy",
+    "agentera-organization-submit-invitation-link",
   ];
   const onlineChannels = [
     "agentera-product-space-refresh",

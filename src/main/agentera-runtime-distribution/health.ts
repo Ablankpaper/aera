@@ -15,7 +15,7 @@ const REQUIRED_IMPORTS = [
 ] as const;
 const NETWORK_GUARD = [
   "import socket",
-  'blocked=lambda *_args,**_kwargs: (_ for _ in ()).throw(RuntimeError("network is disabled during AgentEra Runtime health checks"))',
+  'blocked=lambda *_args,**_kwargs: (_ for _ in ()).throw(RuntimeError("network is disabled during Aera Runtime health checks"))',
   "socket.create_connection=blocked",
   "socket.socket.connect=blocked",
   "socket.socket.connect_ex=blocked",

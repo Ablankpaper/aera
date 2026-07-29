@@ -48,7 +48,7 @@ describe("Organization invitation deep links", () => {
   it("finds only the last valid Organization invitation argument", () => {
     expect(
       findOrganizationInvitationInArguments([
-        "/Applications/AgentEra.app",
+        "/Applications/Aera.app",
         WORKSPACE_LINK,
         ORGANIZATION_LINK_A,
         "private-noise",

@@ -50,29 +50,29 @@ function assertExactObjectKeys(
   label: string,
 ): asserts value is Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`AgentEra offline ${label} must be a JSON object.`);
+    throw new Error(`Aera offline ${label} must be a JSON object.`);
   }
   if (
     Object.keys(value).sort().join("\0") !== [...expectedKeys].sort().join("\0")
   ) {
-    throw new Error(`AgentEra offline ${label} contains an unknown field.`);
+    throw new Error(`Aera offline ${label} contains an unknown field.`);
   }
 }
 
 function parseCanonicalHttpsIpIssuer(raw: unknown): string {
   if (typeof raw !== "string" || raw.trim() === "") {
-    throw new Error("AgentEra offline issuer is required.");
+    throw new Error("Aera offline issuer is required.");
   }
   const issuer = parseAgenteraCloudOrigin(raw);
   const parsed = new URL(issuer);
   const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
   if (parsed.protocol !== "https:" || isIP(hostname) === 0) {
     throw new Error(
-      "AgentEra offline issuer must be a canonical HTTPS IP origin.",
+      "Aera offline issuer must be a canonical HTTPS IP origin.",
     );
   }
   if (raw.trim() !== issuer) {
-    throw new Error("AgentEra offline issuer must be a canonical origin.");
+    throw new Error("Aera offline issuer must be a canonical origin.");
   }
   return issuer;
 }
@@ -80,13 +80,13 @@ function parseCanonicalHttpsIpIssuer(raw: unknown): string {
 function parseEd25519PublicKey(raw: unknown): string {
   if (typeof raw !== "string" || !CANONICAL_BASE64URL_PATTERN.test(raw)) {
     throw new Error(
-      "AgentEra offline public key must use canonical base64url.",
+      "Aera offline public key must use canonical base64url.",
     );
   }
   const decoded = Buffer.from(raw, "base64url");
   if (decoded.length !== 32 || decoded.toString("base64url") !== raw) {
     throw new Error(
-      "AgentEra offline public key must be a 32-byte Ed25519 key.",
+      "Aera offline public key must be a 32-byte Ed25519 key.",
     );
   }
   return raw;
@@ -105,7 +105,7 @@ export function parseAgenteraOfflinePublicKeysBuildConfig(
   try {
     parsed = JSON.parse(rawJson);
   } catch {
-    throw new Error("AgentEra offline trust configuration is invalid JSON.");
+    throw new Error("Aera offline trust configuration is invalid JSON.");
   }
   assertExactObjectKeys(
     parsed,
@@ -116,17 +116,17 @@ export function parseAgenteraOfflinePublicKeysBuildConfig(
   const issuer = parseCanonicalHttpsIpIssuer(parsed.issuer);
   if (typeof buildPublicUrl !== "string" || buildPublicUrl.trim() === "") {
     throw new Error(
-      "AgentEra Cloud build origin is required with offline trust keys.",
+      "Aera Cloud build origin is required with offline trust keys.",
     );
   }
   const buildOrigin = parseAgenteraCloudOrigin(buildPublicUrl);
   if (buildPublicUrl.trim() !== buildOrigin || buildOrigin !== issuer) {
     throw new Error(
-      "AgentEra Cloud build origin must exactly match the offline issuer.",
+      "Aera Cloud build origin must exactly match the offline issuer.",
     );
   }
   if (!Array.isArray(parsed.keys) || parsed.keys.length === 0) {
-    throw new Error("AgentEra offline trust configuration requires keys.");
+    throw new Error("Aera offline trust configuration requires keys.");
   }
 
   const roots: Record<string, BundledAgenteraOfflinePublicKey> = {};
@@ -136,10 +136,10 @@ export function parseAgenteraOfflinePublicKeysBuildConfig(
       typeof entry.keyId !== "string" ||
       !OFFLINE_KEY_ID_PATTERN.test(entry.keyId)
     ) {
-      throw new Error("AgentEra offline key ID is invalid.");
+      throw new Error("Aera offline key ID is invalid.");
     }
     if (Object.hasOwn(roots, entry.keyId)) {
-      throw new Error("AgentEra offline key IDs must be unique.");
+      throw new Error("Aera offline key IDs must be unique.");
     }
     roots[entry.keyId] = Object.freeze({
       publicKey: parseEd25519PublicKey(entry.publicKey),
@@ -162,7 +162,7 @@ export function resolveBundledAgenteraOfflinePublicKeys(
   for (const keyId of Object.keys(buildRoots)) {
     if (Object.hasOwn(DEVELOPMENT_OFFLINE_PUBLIC_KEYS, keyId)) {
       throw new Error(
-        "AgentEra offline build key ID collides with development trust.",
+        "Aera offline build key ID collides with development trust.",
       );
     }
   }
@@ -207,14 +207,14 @@ export function resolveAgenteraCloudOrigin(
   const configured =
     sources.runtimePublicUrl?.trim() || sources.buildPublicUrl?.trim();
   if (!configured) {
-    throw new Error("AgentEra cloud origin is not configured.");
+    throw new Error("Aera cloud origin is not configured.");
   }
   return parseAgenteraCloudOrigin(configured, {
     rechargePublicUrls: sources.rechargePublicUrls,
   });
 }
 
-/** Resolve the independent AgentEra APP control-plane origin, runtime first. */
+/** Resolve the independent Aera APP control-plane origin, runtime first. */
 export function getAgenteraCloudOrigin(): string {
   return resolveAgenteraCloudOrigin({
     runtimePublicUrl:
@@ -231,13 +231,13 @@ export function getAgenteraCloudOrigin(): string {
 
 export function parseAgenteraRechargePublicUrl(raw: string): string {
   if (raw.trim() === "") {
-    throw new Error("AgentEra recharge URL is not configured.");
+    throw new Error("Aera recharge URL is not configured.");
   }
   let parsed: URL;
   try {
     parsed = new URL(raw.trim());
   } catch {
-    throw new Error("AgentEra recharge URL is invalid.");
+    throw new Error("Aera recharge URL is invalid.");
   }
   if (
     parsed.username !== "" ||
@@ -250,7 +250,7 @@ export function parseAgenteraRechargePublicUrl(raw: string): string {
       ))
   ) {
     throw new Error(
-      "AgentEra recharge URL requires HTTPS except for loopback development.",
+      "Aera recharge URL requires HTTPS except for loopback development.",
     );
   }
   return parsed.href;

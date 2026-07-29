@@ -748,7 +748,7 @@ describe("CLI fallback session id propagation", () => {
         }).catch(reject);
       }),
     ).rejects.toThrow(
-      "API request timed out. Check the SSH tunnel and remote AgentEra Runtime gateway.",
+      "API request timed out. Check the SSH tunnel and remote Aera Runtime gateway.",
     );
 
     expect(chunks).toEqual([]);

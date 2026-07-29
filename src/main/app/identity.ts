@@ -14,9 +14,18 @@ export function resolveDesktopUserDataPath(
   if (override) return override;
 
   const current = app.getPath("userData");
-  const legacy = join(app.getPath("appData"), "hermes-desktop");
-  if (current !== legacy && pathExists(legacy) && !pathExists(current)) {
-    return legacy;
+  if (pathExists(current)) return null;
+
+  const legacyDirectories = [
+    "AgentEra Studio",
+    "agentera-studio",
+    "hermes-desktop",
+  ];
+  for (const directory of legacyDirectories) {
+    const legacy = join(app.getPath("appData"), directory);
+    if (current !== legacy && pathExists(legacy)) {
+      return legacy;
+    }
   }
 
   return null;

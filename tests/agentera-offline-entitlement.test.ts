@@ -52,7 +52,7 @@ function issueEntitlement(
   return `${signingInput}.${sign(null, Buffer.from(signingInput), privateKey).toString("base64url")}`;
 }
 
-describe("AgentEra signed offline entitlement", () => {
+describe("Aera signed offline entitlement", () => {
   it("accepts exactly one seven-day entitlement bound to this installation", () => {
     const { publicKey, privateKey } = generateKeyPairSync("ed25519");
     const token = issueEntitlement(privateKey);

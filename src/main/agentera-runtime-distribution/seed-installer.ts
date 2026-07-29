@@ -75,7 +75,7 @@ export interface VerifyPackagedRuntimeSeedOptions {
 export interface PackagedSeedInstallProgress {
   step: number;
   totalSteps: number;
-  title: "Preparing AgentEra Runtime";
+  title: "Preparing Aera Runtime";
   detail: string;
 }
 
@@ -346,7 +346,7 @@ function progress(
   callback?.({
     step,
     totalSteps: 5,
-    title: "Preparing AgentEra Runtime",
+    title: "Preparing Aera Runtime",
     detail,
   });
 }
@@ -443,7 +443,7 @@ export async function installPackagedSeed(
       throw new PackagedSeedInstallError(
         "insufficient-disk-space",
         "free-disk-space",
-        "not enough disk space for AgentEra Runtime",
+        "not enough disk space for Aera Runtime",
       );
     }
   } catch (error) {

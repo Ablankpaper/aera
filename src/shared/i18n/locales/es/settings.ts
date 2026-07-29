@@ -3,7 +3,7 @@ import { runtimeDistributionEn } from "../runtime-distribution";
 export default {
   title: "Configuración",
   sections: {
-    hermesAgent: "AgentEra Runtime",
+    hermesAgent: "Aera Runtime",
     appearance: "Apariencia",
     privacy: "Privacidad",
     credentialPool: "Grupo de credenciales",
@@ -11,7 +11,7 @@ export default {
   nav: {
     groups: {
       general: "General",
-      hermes: "AgentEra Studio",
+      hermes: "Aera",
     },
     appearance: "Apariencia",
     language: "Idioma",
@@ -26,7 +26,7 @@ export default {
   runtimeDistribution: runtimeDistributionEn,
   analytics: {
     label: "Enviar analíticas de uso anónimas",
-    hint: "Ayuda a mejorar AgentEra enviando datos de uso anónimos y agregados al servicio de analítica del proyecto. Puedes desactivarlo en cualquier momento.",
+    hint: "Ayuda a mejorar Aera enviando datos de uso anónimos y agregados al servicio de analítica del proyecto. Puedes desactivarlo en cualquier momento.",
     disclosure: {
       uuid: "Un identificador aleatorio por instalación almacenado únicamente en este dispositivo (sin nombre, correo electrónico ni datos de cuenta).",
       platform:
@@ -34,7 +34,7 @@ export default {
       navigation:
         "Qué pantallas visitas dentro de la aplicación (p. ej. Chat, Sesiones, Configuración). No se recopila contenido de chats, prompts, respuestas del modelo ni contenido de archivos.",
       endpoint:
-        "Los datos se envían al servicio de analítica de AgentEra. Las grabaciones de sesión y la captura automática de páginas vistas están desactivadas.",
+        "Los datos se envían al servicio de analítica de Aera. Las grabaciones de sesión y la captura automática de páginas vistas están desactivadas.",
       notCollected:
         "Nunca se recopila: mensajes de chat, rutas de archivos, claves de API, configuración del modelo, credenciales de cuenta.",
     },
@@ -57,7 +57,7 @@ export default {
   },
   notDetected: "No detectado",
   updatedSuccessfully: "¡Actualizado correctamente!",
-  updateSuccess: "AgentEra se actualizó correctamente.",
+  updateSuccess: "Aera se actualizó correctamente.",
   updateFailed: "La actualización falló.",
   version: "v{{version}}",
   proxyPlaceholder: "p. ej. socks5://127.0.0.1:1080 o http://proxy:8080",
@@ -87,14 +87,14 @@ export default {
     "No se pudo acceder a la lista de modelos del proveedor — aún puedes escribir un nombre de modelo",
   customBaseUrlHint: "Endpoint de API compatible con OpenAI",
   poolHint:
-    "Agrega varias API keys para el mismo proveedor para la rotación automática y el equilibrio de carga. AgentEra alternará entre ellas.",
+    "Agrega varias API keys para el mismo proveedor para la rotación automática y el equilibrio de carga. Aera alternará entre ellas.",
   add: "Agregar",
   remove: "Quitar",
   keyLabel: "Clave",
   empty: "(vacío)",
   dataSection: "Datos",
   dataHint:
-    "Exporta o importa tu configuración de AgentEra, sesiones, habilidades y memoria.",
+    "Exporta o importa tu configuración de Aera, sesiones, habilidades y memoria.",
   backingUp: "Creando copia de seguridad...",
   exportBackup: "Exportar copia de seguridad",
   importing: "Importando...",
@@ -111,10 +111,10 @@ export default {
   debugDump: "Volcado de depuración",
   migrationDetected: "Se detectó una instalación de OpenClaw",
   migrationDesc:
-    "Se encontró OpenClaw en <code>{{path}}</code>. Puedes migrar tu configuración, API keys, sesiones y habilidades a AgentEra.",
+    "Se encontró OpenClaw en <code>{{path}}</code>. Puedes migrar tu configuración, API keys, sesiones y habilidades a Aera.",
   migrationDismiss: "No volver a mostrar",
   migrating: "Migrando...",
-  migrateToHermes: "Migrar a AgentEra",
+  migrateToHermes: "Migrar a Aera",
   skip: "Omitir",
   appearanceHint: "Elige la apariencia de interfaz que prefieras",
   apiKeyPlaceholder: "API key",
@@ -122,12 +122,12 @@ export default {
   connectionSection: "Conexión",
   modeLocal: "Local",
   modeRemote: "Remoto",
-  modeLocalHint: "Usando AgentEra instalado en este dispositivo",
+  modeLocalHint: "Usando Aera instalado en este dispositivo",
   modeRemoteHint:
-    "Conectarse a un servidor de API de AgentEra en tu red o en la nube",
+    "Conectarse a un servidor de API de Aera en tu red o en la nube",
   remoteUrl: "URL remota",
   remoteUrlHint:
-    "La URL del servidor de API de AgentEra (debe exponer /health y /v1/chat/completions)",
+    "La URL del servidor de API de Aera (debe exponer /health y /v1/chat/completions)",
   remoteApiKey: "API key",
   remoteApiKeyHint:
     "Coincide con API_SERVER_KEY en el host remoto. Déjalo vacío si el servidor acepta solicitudes no autenticadas.",
@@ -136,7 +136,7 @@ export default {
   save: "Guardar",
   serverConfigTitle: "Configuración del servidor",
   serverConfigHint:
-    "Estás conectado a un servidor remoto de AgentEra. La selección de modelos, las API keys de proveedores y las credenciales se administran en <code>~/.hermes/.env</code> y <code>config.yaml</code> del servidor. Edítalos en el host (por ejemplo, <code>docker exec -it hermes vi /opt/data/.env</code>) y reinicia el contenedor.",
+    "Estás conectado a un servidor remoto de Aera. La selección de modelos, las API keys de proveedores y las credenciales se administran en <code>~/.hermes/.env</code> y <code>config.yaml</code> del servidor. Edítalos en el host (por ejemplo, <code>docker exec -it hermes vi /opt/data/.env</code>) y reinicia el contenedor.",
   connectionMode: "Modo",
   switchedToLocal: "Se cambió al modo local",
 } as const;

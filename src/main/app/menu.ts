@@ -97,7 +97,7 @@ export function buildMenu({ getMainWindow, openExternalUrl }: MenuDeps): void {
             ]
           : []),
         {
-          label: "AgentEra Runtime on GitHub",
+          label: "Aera Runtime on GitHub",
           click: () =>
             openExternalUrl("https://github.com/bignormal/aera-runtime"),
         },

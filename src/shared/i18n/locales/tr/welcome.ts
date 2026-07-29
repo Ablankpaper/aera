@@ -1,5 +1,5 @@
 export default {
-  title: "AgentEra Studio'e Hoş Geldiniz",
+  title: "Aera'e Hoş Geldiniz",
   subtitle:
     "Makinenizde yerel olarak çalışan, kendini geliştiren yapay zeka asistanınız. Gizli, güçlü ve sürekli öğrenen.",
   installIssueTitle: "Kurulum Sorunu",
@@ -9,9 +9,9 @@ export default {
   switchToLocal: "Yerel moda geç",
   installSizeHint: "Bu, gerekli bileşenleri kuracaktır (~2 GB)",
   dividerOr: "veya",
-  connectRemote: "Uzak AgentEra'e Bağlan",
-  connectRemoteTitle: "Uzak AgentEra'e Bağlan",
-  connectRemoteSubtitle: "Çalışan bir AgentEra API sunucusunun URL'sini girin.",
+  connectRemote: "Uzak Aera'e Bağlan",
+  connectRemoteTitle: "Uzak Aera'e Bağlan",
+  connectRemoteSubtitle: "Çalışan bir Aera API sunucusunun URL'sini girin.",
   remoteServerUrl: "Sunucu URL",
   remoteApiKey: "API Anahtarı (isteğe bağlı)",
   remoteApiKeyPlaceholder: "Bearer token (API_SERVER_KEY)",

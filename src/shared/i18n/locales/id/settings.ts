@@ -3,7 +3,7 @@ import { runtimeDistributionEn } from "../runtime-distribution";
 export default {
   title: "Pengaturan",
   sections: {
-    hermesAgent: "AgentEra Runtime",
+    hermesAgent: "Aera Runtime",
     appearance: "Tampilan",
     privacy: "Privasi",
     credentialPool: "Kumpulan Kredensial",
@@ -11,7 +11,7 @@ export default {
   nav: {
     groups: {
       general: "Umum",
-      hermes: "AgentEra Studio",
+      hermes: "Aera",
     },
     appearance: "Tampilan",
     language: "Bahasa",
@@ -26,14 +26,14 @@ export default {
   runtimeDistribution: runtimeDistributionEn,
   analytics: {
     label: "Kirim analitik penggunaan anonim",
-    hint: "Membantu meningkatkan AgentEra dengan mengirim data penggunaan anonim dan teragregasi ke layanan analitik proyek. Anda dapat menonaktifkannya kapan saja.",
+    hint: "Membantu meningkatkan Aera dengan mengirim data penggunaan anonim dan teragregasi ke layanan analitik proyek. Anda dapat menonaktifkannya kapan saja.",
     disclosure: {
       uuid: "Pengenal acak per-instalasi yang disimpan hanya di perangkat ini (tanpa nama, email, atau info akun).",
       platform: "Sistem operasi, versi Electron, dan versi Node.js Anda.",
       navigation:
         "Layar mana yang Anda kunjungi di dalam aplikasi (mis. Chat, Sesi, Pengaturan). Tidak ada konten chat, prompt, respons model, atau isi file yang dikumpulkan.",
       endpoint:
-        "Data dikirim ke layanan analitik AgentEra. Rekaman sesi dan tangkapan pageview otomatis dinonaktifkan.",
+        "Data dikirim ke layanan analitik Aera. Rekaman sesi dan tangkapan pageview otomatis dinonaktifkan.",
       notCollected:
         "Tidak pernah dikumpulkan: pesan chat, jalur file, kunci API, konfigurasi model, kredensial akun.",
     },
@@ -56,7 +56,7 @@ export default {
   },
   notDetected: "Tidak terdeteksi",
   updatedSuccessfully: "Berhasil diperbarui!",
-  updateSuccess: "AgentEra berhasil diperbarui.",
+  updateSuccess: "Aera berhasil diperbarui.",
   updateFailed: "Pembaruan gagal.",
   version: "v{{version}}",
   proxyPlaceholder: "mis. socks5://127.0.0.1:1080 atau http://proxy:8080",
@@ -84,14 +84,14 @@ export default {
     "Tidak dapat menjangkau daftar model provider — Anda masih bisa mengetik nama model",
   customBaseUrlHint: "Endpoint API kompatibel OpenAI",
   poolHint:
-    "Tambahkan beberapa API Key untuk provider yang sama agar AgentEra dapat melakukan rotasi otomatis dan load balancing.",
+    "Tambahkan beberapa API Key untuk provider yang sama agar Aera dapat melakukan rotasi otomatis dan load balancing.",
   add: "Tambah",
   remove: "Hapus",
   keyLabel: "Key",
   empty: "(kosong)",
   dataSection: "Data",
   dataHint:
-    "Ekspor atau impor konfigurasi AgentEra, sesi, skill, dan memori Anda.",
+    "Ekspor atau impor konfigurasi Aera, sesi, skill, dan memori Anda.",
   backingUp: "Membuat backup...",
   exportBackup: "Ekspor Backup",
   importing: "Mengimpor...",
@@ -108,10 +108,10 @@ export default {
   debugDump: "Debug Dump",
   migrationDetected: "Instalasi OpenClaw Terdeteksi",
   migrationDesc:
-    "OpenClaw ditemukan di <code>{{path}}</code>. Anda dapat memigrasikan konfigurasi, API key, sesi, dan skill ke AgentEra.",
+    "OpenClaw ditemukan di <code>{{path}}</code>. Anda dapat memigrasikan konfigurasi, API key, sesi, dan skill ke Aera.",
   migrationDismiss: "Jangan tampilkan lagi",
   migrating: "Memigrasikan...",
-  migrateToHermes: "Migrasi ke AgentEra",
+  migrateToHermes: "Migrasi ke Aera",
   skip: "Lewati",
   appearanceHint: "Pilih tampilan antarmuka yang Anda sukai",
   apiKeyPlaceholder: "API Key",
@@ -119,12 +119,12 @@ export default {
   connectionSection: "Koneksi",
   modeLocal: "Lokal",
   modeRemote: "Remote",
-  modeLocalHint: "Menggunakan AgentEra yang terinstal di perangkat ini",
+  modeLocalHint: "Menggunakan Aera yang terinstal di perangkat ini",
   modeRemoteHint:
-    "Hubungkan ke server AgentEra API di jaringan atau cloud Anda",
+    "Hubungkan ke server Aera API di jaringan atau cloud Anda",
   remoteUrl: "URL Remote",
   remoteUrlHint:
-    "URL server AgentEra API (harus mengekspos /health dan /v1/chat/completions)",
+    "URL server Aera API (harus mengekspos /health dan /v1/chat/completions)",
   remoteApiKey: "API Key",
   remoteApiKeyHint:
     "Cocok dengan API_SERVER_KEY di host remote. Kosongkan jika server menerima request tanpa autentikasi.",
@@ -133,7 +133,7 @@ export default {
   save: "Simpan",
   serverConfigTitle: "Konfigurasi Server",
   serverConfigHint:
-    "Anda terhubung ke server AgentEra remote. Pilihan model, API key provider, dan kredensial dikelola di <code>~/.hermes/.env</code> dan <code>config.yaml</code> pada server. Edit di host (mis. <code>docker exec -it hermes vi /opt/data/.env</code>) lalu restart container.",
+    "Anda terhubung ke server Aera remote. Pilihan model, API key provider, dan kredensial dikelola di <code>~/.hermes/.env</code> dan <code>config.yaml</code> pada server. Edit di host (mis. <code>docker exec -it hermes vi /opt/data/.env</code>) lalu restart container.",
   connectionMode: "Mode",
   switchedToLocal: "Beralih ke mode lokal",
 } as const;

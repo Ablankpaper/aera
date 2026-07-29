@@ -38,7 +38,7 @@ function handler(channel: string): ts.ArrowFunction | ts.FunctionExpression {
   return found;
 }
 
-describe("AgentEra natural-language memory-candidate IPC", () => {
+describe("Aera natural-language memory-candidate IPC", () => {
   it("derives the account in main and accepts only text plus an Agent Profile target", () => {
     const node = handler("agentera-memory-candidates-extract");
     expect(

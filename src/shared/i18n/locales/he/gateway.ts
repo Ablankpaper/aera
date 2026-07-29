@@ -13,8 +13,8 @@ export default {
   startExited: "השער הופעל, אך נעצר שוב לפני שהספיק להיות מוכן.",
   checkLog: "בדקו את יומן השער:",
   gatewayHint:
-    "מחבר את AgentEra ל-Telegram, ל-Discord, ל-Slack ולפלטפורמות נוספות",
-  subtitle: "ניהול פלטפורמות המסרים שאליהן AgentEra Runtime יכול להתחבר.",
+    "מחבר את Aera ל-Telegram, ל-Discord, ל-Slack ולפלטפורמות נוספות",
+  subtitle: "ניהול פלטפורמות המסרים שאליהן Aera Runtime יכול להתחבר.",
   refreshTooltip: "רענון מצב הפלטפורמות",
   refresh: "רענון",
   configHint:

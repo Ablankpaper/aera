@@ -119,7 +119,7 @@ export function useLocalCommands({
             window.hermesAPI.getAppVersion(),
           ]);
           addAgentMessage(
-            `**AgentEra Runtime:** ${hermesVer || "unknown"}\n**AgentEra Studio:** v${appVer}`,
+            `**Aera Runtime:** ${hermesVer || "unknown"}\n**Aera:** v${appVer}`,
           );
           return true;
         }

@@ -1,9 +1,9 @@
 {
   "name": "agentera-studio",
-  "version": "0.7.4-internal-beta.10",
-  "description": "AgentEra Studio — private AI agent desktop",
+  "version": "0.7.4-internal-beta.11",
+  "description": "Aera — private AI agent desktop",
   "main": "./out/main/index.js",
-  "author": "AgentEra",
+  "author": "Aera",
   "homepage": "https://github.com/bignormal/aera",
   "scripts": {
     "prepare:runtime-seed": "node scripts/prepare-agentera-runtime-seed.mjs",

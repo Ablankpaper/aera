@@ -115,7 +115,7 @@ export const MESSAGING_TOOLSET_DEFINITIONS: MessagingToolsetDefinition[] = [
     key: "web",
     label: "Web search",
     description:
-      "Use the configured AgentEra Runtime web/search backend. This still requires a working web backend in config.",
+      "Use the configured Aera Runtime web/search backend. This still requires a working web backend in config.",
   },
   {
     key: "browser",
@@ -134,7 +134,7 @@ export const MESSAGING_TOOLSET_DEFINITIONS: MessagingToolsetDefinition[] = [
     key: "file",
     label: "Files",
     description:
-      "Read and write files reachable by AgentEra Runtime from the messaging platform.",
+      "Read and write files reachable by Aera Runtime from the messaging platform.",
     risk: "high",
   },
   {
@@ -161,17 +161,17 @@ export const MESSAGING_TOOLSET_DEFINITIONS: MessagingToolsetDefinition[] = [
   {
     key: "skills",
     label: "Skills",
-    description: "List, inspect, and manage AgentEra Runtime skills.",
+    description: "List, inspect, and manage Aera Runtime skills.",
   },
   {
     key: "memory",
     label: "Memory",
-    description: "Read and update AgentEra Runtime memory.",
+    description: "Read and update Aera Runtime memory.",
   },
   {
     key: "session_search",
     label: "Session search",
-    description: "Search previous AgentEra Runtime sessions.",
+    description: "Search previous Aera Runtime sessions.",
   },
   {
     key: "clarify",
@@ -196,7 +196,7 @@ export const MESSAGING_TOOLSET_DEFINITIONS: MessagingToolsetDefinition[] = [
   {
     key: "kanban",
     label: "Kanban",
-    description: "Read and manage AgentEra Runtime kanban tasks.",
+    description: "Read and manage Aera Runtime kanban tasks.",
   },
   {
     key: "delegation",
@@ -613,7 +613,7 @@ const ENV_DEFINITIONS: Record<string, MessagingEnvDefinition> = {
     key: "API_SERVER_ENABLED",
     prompt: "Enable API server",
     description:
-      "Expose AgentEra Runtime through its OpenAI-compatible HTTP API",
+      "Expose Aera Runtime through its OpenAI-compatible HTTP API",
     advanced: true,
   },
   API_SERVER_KEY: {
@@ -646,7 +646,7 @@ export const MESSAGING_PLATFORM_CATALOG: MessagingPlatformDefinition[] = [
   {
     id: "telegram",
     name: "Telegram",
-    description: "Run AgentEra Runtime from Telegram DMs, groups, and topics.",
+    description: "Run Aera Runtime from Telegram DMs, groups, and topics.",
     docs_url: messagingDocs("telegram"),
     env_vars: [
       "TELEGRAM_BOT_TOKEN",
@@ -659,7 +659,7 @@ export const MESSAGING_PLATFORM_CATALOG: MessagingPlatformDefinition[] = [
     id: "discord",
     name: "Discord",
     description:
-      "Connect AgentEra Runtime to Discord DMs, channels, and threads.",
+      "Connect Aera Runtime to Discord DMs, channels, and threads.",
     docs_url: messagingDocs("discord"),
     env_vars: [
       "DISCORD_BOT_TOKEN",
@@ -672,7 +672,7 @@ export const MESSAGING_PLATFORM_CATALOG: MessagingPlatformDefinition[] = [
   {
     id: "slack",
     name: "Slack",
-    description: "Use AgentEra Runtime from Slack via Socket Mode.",
+    description: "Use Aera Runtime from Slack via Socket Mode.",
     docs_url: messagingDocs("slack"),
     env_vars: ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"],
     required_env: ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"],
@@ -681,7 +681,7 @@ export const MESSAGING_PLATFORM_CATALOG: MessagingPlatformDefinition[] = [
     id: "mattermost",
     name: "Mattermost",
     description:
-      "Connect AgentEra Runtime to Mattermost channels and direct messages.",
+      "Connect Aera Runtime to Mattermost channels and direct messages.",
     docs_url: messagingDocs("mattermost"),
     env_vars: [
       "MATTERMOST_URL",
@@ -693,7 +693,7 @@ export const MESSAGING_PLATFORM_CATALOG: MessagingPlatformDefinition[] = [
   {
     id: "matrix",
     name: "Matrix",
-    description: "Use AgentEra Runtime in Matrix rooms and direct messages.",
+    description: "Use Aera Runtime in Matrix rooms and direct messages.",
     docs_url: messagingDocs("matrix"),
     env_vars: [
       "MATRIX_HOMESERVER",
@@ -711,7 +711,7 @@ export const MESSAGING_PLATFORM_CATALOG: MessagingPlatformDefinition[] = [
     id: "whatsapp",
     name: "WhatsApp",
     description:
-      "Use AgentEra Runtime through the bundled WhatsApp bridge with QR-based auth.",
+      "Use Aera Runtime through the bundled WhatsApp bridge with QR-based auth.",
     docs_url: messagingDocs("whatsapp"),
     env_vars: [
       "WHATSAPP_ENABLED",
@@ -739,7 +739,7 @@ export const MESSAGING_PLATFORM_CATALOG: MessagingPlatformDefinition[] = [
     id: "bluebubbles",
     name: "BlueBubbles (iMessage)",
     description:
-      "Use AgentEra Runtime through iMessage via a BlueBubbles server.",
+      "Use Aera Runtime through iMessage via a BlueBubbles server.",
     docs_url: messagingDocs("bluebubbles"),
     env_vars: [
       "BLUEBUBBLES_SERVER_URL",
@@ -753,7 +753,7 @@ export const MESSAGING_PLATFORM_CATALOG: MessagingPlatformDefinition[] = [
     id: "homeassistant",
     name: "Home Assistant",
     description:
-      "Control your smart home from AgentEra Runtime via Home Assistant.",
+      "Control your smart home from Aera Runtime via Home Assistant.",
     docs_url: messagingDocs("homeassistant"),
     env_vars: ["HASS_URL", "HASS_TOKEN"],
     required_env: ["HASS_URL", "HASS_TOKEN"],
@@ -761,7 +761,7 @@ export const MESSAGING_PLATFORM_CATALOG: MessagingPlatformDefinition[] = [
   {
     id: "email",
     name: "Email",
-    description: "Talk to AgentEra Runtime through an IMAP/SMTP mailbox.",
+    description: "Talk to Aera Runtime through an IMAP/SMTP mailbox.",
     docs_url: messagingDocs("email"),
     env_vars: [
       "EMAIL_ADDRESS",
@@ -794,7 +794,7 @@ export const MESSAGING_PLATFORM_CATALOG: MessagingPlatformDefinition[] = [
   {
     id: "dingtalk",
     name: "DingTalk",
-    description: "Connect AgentEra Runtime to DingTalk groups.",
+    description: "Connect Aera Runtime to DingTalk groups.",
     docs_url: messagingDocs("dingtalk"),
     env_vars: [
       "DINGTALK_CLIENT_ID",
@@ -807,7 +807,7 @@ export const MESSAGING_PLATFORM_CATALOG: MessagingPlatformDefinition[] = [
   {
     id: "feishu",
     name: "Feishu / Lark",
-    description: "Use AgentEra Runtime inside Feishu / Lark.",
+    description: "Use Aera Runtime inside Feishu / Lark.",
     docs_url: messagingDocs("feishu"),
     env_vars: [
       "FEISHU_APP_ID",
@@ -865,7 +865,7 @@ export const MESSAGING_PLATFORM_CATALOG: MessagingPlatformDefinition[] = [
     id: "qqbot",
     name: "QQ Bot",
     description:
-      "Connect AgentEra Runtime to a QQ Bot from the QQ Open Platform.",
+      "Connect Aera Runtime to a QQ Bot from the QQ Open Platform.",
     docs_url: messagingDocs("qqbot"),
     env_vars: ["QQ_APP_ID", "QQ_CLIENT_SECRET", "QQ_ALLOWED_USERS"],
     required_env: ["QQ_APP_ID", "QQ_CLIENT_SECRET"],
@@ -873,7 +873,7 @@ export const MESSAGING_PLATFORM_CATALOG: MessagingPlatformDefinition[] = [
   {
     id: "yuanbao",
     name: "Yuanbao",
-    description: "Connect AgentEra Runtime to Tencent Yuanbao.",
+    description: "Connect Aera Runtime to Tencent Yuanbao.",
     docs_url: messagingDocs("yuanbao"),
     env_vars: [],
     required_env: [],
@@ -882,7 +882,7 @@ export const MESSAGING_PLATFORM_CATALOG: MessagingPlatformDefinition[] = [
     id: "api_server",
     name: "API server",
     description:
-      "Expose AgentEra Runtime as an OpenAI-compatible HTTP API for tools like Open WebUI.",
+      "Expose Aera Runtime as an OpenAI-compatible HTTP API for tools like Open WebUI.",
     docs_url: messagingDocs("open-webui"),
     env_vars: [
       "API_SERVER_ENABLED",

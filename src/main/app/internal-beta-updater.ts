@@ -469,7 +469,7 @@ class FetchMetadataTransport implements MetadataTransport {
         signal: operation.signal,
         headers: {
           Accept: "application/json",
-          "User-Agent": "AgentEra-Studio-Desktop-Updater",
+          "User-Agent": "Aera-Desktop-Updater",
         },
       });
       if (!response.ok || response.body === null) {
@@ -676,7 +676,7 @@ function safeMacAppPath(path: string | null): string {
     path.startsWith("/Volumes/")
   ) {
     throw new DesktopUpdateError(
-      "请先将 AgentEra Studio 安装到“应用程序”目录后再更新。",
+      "请先将 Aera 安装到“应用程序”目录后再更新。",
     );
   }
   return resolve(path);
@@ -1353,5 +1353,20 @@ export class InternalBetaDesktopUpdater {
 
   dispose(): void {
     this.controller?.abort();
+  }
+}
+
+export function tryCreateInternalBetaDesktopUpdater(
+  options: InternalBetaUpdaterOptions,
+): InternalBetaDesktopUpdater | null {
+  try {
+    return new InternalBetaDesktopUpdater(options);
+  } catch (error) {
+    options.log.error(
+      `Internal Beta updater configuration is unavailable: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
   }
 }

@@ -73,7 +73,7 @@ describe("register IPC official quality terminal bridge", () => {
     });
     failed.onUsage({ totalTokens: 20 });
     failed.onError(
-      "AgentEra Runtime process exited. raw-error-private-canary /Users/private",
+      "Aera Runtime process exited. raw-error-private-canary /Users/private",
     );
     expect(recordMetric).toHaveBeenCalledWith({
       binding,

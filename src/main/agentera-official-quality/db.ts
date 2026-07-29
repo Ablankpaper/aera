@@ -150,7 +150,7 @@ function assertOutsideHermesHome(path: string): void {
     )
   ) {
     throw new Error(
-      "AgentEra official quality path must remain outside HERMES_HOME.",
+      "Aera official quality path must remain outside HERMES_HOME.",
     );
   }
 }
@@ -177,7 +177,7 @@ function initializeSchema(sqlite: AgenteraOfficialQualitySqliteDatabase): void {
     currentVersion < 0 ||
     currentVersion > AGENTERA_OFFICIAL_QUALITY_SCHEMA_VERSION
   ) {
-    throw new Error("Unsupported AgentEra official quality database version.");
+    throw new Error("Unsupported Aera official quality database version.");
   }
   if (currentVersion === AGENTERA_OFFICIAL_QUALITY_SCHEMA_VERSION) return;
   sqlite.exec("BEGIN IMMEDIATE");
@@ -318,7 +318,7 @@ export class AgenteraOfficialQualityDatabase {
       version < 1 ||
       typeof row.updated_at !== "string"
     ) {
-      throw new Error("AgentEra official quality consent is corrupt.");
+      throw new Error("Aera official quality consent is corrupt.");
     }
     return {
       purpose: qualityPurpose,
@@ -457,7 +457,7 @@ export class AgenteraOfficialQualityDatabase {
       .get(accountId, deviceId) as { count?: unknown } | undefined;
     const count = Number(row?.count);
     if (!Number.isSafeInteger(count) || count < 0) {
-      throw new Error("AgentEra official quality outbox is corrupt.");
+      throw new Error("Aera official quality outbox is corrupt.");
     }
     return count;
   }
@@ -610,7 +610,7 @@ export class AgenteraOfficialQualityDatabase {
       typeof row.created_at !== "string" ||
       typeof row.expires_at !== "string"
     ) {
-      throw new Error("AgentEra official quality outbox is corrupt.");
+      throw new Error("Aera official quality outbox is corrupt.");
     }
     let envelope: OfficialQualityEnvelope;
     try {
@@ -619,7 +619,7 @@ export class AgenteraOfficialQualityDatabase {
         now,
       );
     } catch {
-      throw new Error("AgentEra official quality outbox is corrupt.");
+      throw new Error("Aera official quality outbox is corrupt.");
     }
     if (
       envelope.event_id !== eventId ||
@@ -627,7 +627,7 @@ export class AgenteraOfficialQualityDatabase {
         ? "official_quality_metrics"
         : "official_explicit_feedback") !== qualityPurpose
     ) {
-      throw new Error("AgentEra official quality outbox is corrupt.");
+      throw new Error("Aera official quality outbox is corrupt.");
     }
     return {
       eventId,

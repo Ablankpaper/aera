@@ -8,7 +8,7 @@ The first enterprise slice establishes Organization authorization and desktop pr
 
 It supports Organization lifecycle, one transferable Owner, Admin/Auditor/Member roles, single-level Departments, one-time invitations, immutable signed policy snapshots, audit, and offline read-only metadata. The locked design is `docs/superpowers/specs/2026-07-21-agentera-organization-foundation-v1-design.md`.
 
-Organization Agent V1 adds `owner_scope=ORGANIZATION`, mandatory two-person publication review, and USER-owned member installation without changing Hermes runtime ownership.
+Organization Agent V1 adds `owner_scope=ORGANIZATION`, mandatory submission review with one Owner/Admin approval, and USER-owned member installation without changing Hermes runtime ownership.
 
 The approved specification is `docs/superpowers/specs/2026-07-21-agentera-organization-agent-v1-design.md`.
 
@@ -48,13 +48,13 @@ The thirteenth implemented slice makes [[src/main/agentera-product-space/manager
 
 The fourteenth implemented slice exposes [[src/main/agentera-organization/ipc-contract.ts#executeOrganizationIpc|one bounded Organization IPC contract]] and [[src/main/agentera-product-space/ipc-contract.ts#executeProductSpaceIpc|one bounded product-space IPC contract]] through exact preload namespaces. Main process startup opens the Workspace, Organization, and product-space stores below Electron `userData`, attaches the product-space coordinator as the sole Workspace compatibility writer, and gives Agent control only the coordinator's USER, WORKSPACE, or explicit Organization-unavailable context. Every renderer request receives a central preflight, authenticated, or online policy; inputs reject renderer-supplied actor, role, origin, path, Profile, RuntimeBinding, and unknown authority fields, while outputs are rebuilt from reviewed public allowlists. State and invitation events stop at destroyed renderers and expose removable listeners. Account-generation notifications refresh or invalidate all three control-plane views, and shutdown closes the product-space coordinator before its Organization and Workspace sources. Product-space changes only notify Agent control of context changes: they do not stop, start, select, create, or mutate any Hermes Profile, RuntimeBinding, Memory, session, Skill learning, Curator, Gateway, or legacy Agent synchronization path.
 
-The fifteenth implemented slice replaces the legacy Workspace-only renderer selector with [[src/renderer/src/screens/Layout/ProductSpaceSwitcher.tsx#ProductSpaceSwitcher|one global Personal, Workspace, and Organization product-space switcher]] directly below the desktop brand. It groups and sorts Workspace and Organization choices independently, never lists Departments, displays cached offline state, and sends selection only through the product-space bridge without invoking any Hermes Profile method. [[src/renderer/src/screens/Layout/OrganizationManagementDialog.tsx#OrganizationManagementDialog|Organization management]] presents role-aware lifecycle, Membership, Department, invitation, signed policy, and audit controls while treating renderer role checks only as presentation; every mutation still crosses the strict main-process and cloud authorization layers. [[src/renderer/src/screens/Layout/OrganizationPolicyPanel.tsx#OrganizationPolicyPanel|The policy panel]] separates the verified active snapshot, editable next-version settings, publication action, and immutable signed history; editing a draft never relabels it as active before publication succeeds, and publication submits `currentPolicyVersion + 1` as the expected next policy version so the main-process contract (minimum 2) and the cloud's strict current-plus-one check accept the request. Owner transfer and dissolution require exact confirmation material, invitation links remain volatile and visible once, and account, selection, role, close, and late-result changes invalidate sensitive dialog state. [[src/renderer/src/components/OrganizationInvitationGate.tsx#OrganizationInvitationGate|The Organization invitation gate]] retains tokens only in memory across sign-in or offline handoff and selects the accepted Organization through the product-space coordinator. Foundation deliberately renders an explicit `organization_agent_not_enabled` experience: it offers no personal or Workspace draft, publication, or installation controls and states that local Hermes Profiles, Memory, conversations, and private learning remain unchanged.
+The fifteenth implemented slice replaces the legacy Workspace-only renderer selector with [[src/renderer/src/screens/Layout/ProductSpaceSwitcher.tsx#ProductSpaceSwitcher|one trusted work-context switcher]] directly below the desktop brand. The product wording is “我的 / 企业名 / 团队或项目” rather than three peer technical spaces; empty groups are omitted and one shared context hides redundant visual hierarchy. It never lists Departments, displays cached offline state, and sends selection only through the product-space bridge without invoking any Hermes Profile method. [[src/renderer/src/screens/Layout/OrganizationAccessDialog.tsx#OrganizationAccessDialog|The account-level enterprise and invitation dialog]] lets the same account paste a one-time invitation or create another Organization without introducing a second account type. [[src/renderer/src/screens/Layout/OrganizationManagementDialog.tsx#OrganizationManagementDialog|Organization governance]] is visible to Owner/Admin for mutation and Auditor for policy/audit read-only supervision; Member sees no governance entry. Renderer gating remains presentation only, and every mutation or privileged read still crosses strict main-process and cloud authorization. [[src/renderer/src/screens/Layout/OrganizationPolicyPanel.tsx#OrganizationPolicyPanel|The policy panel]] separates the verified active snapshot, editable next-version settings, publication action, and immutable signed history. Owner transfer and dissolution require exact confirmation material, invitation links remain volatile and visible once, and account, selection, role, close, and late-result changes invalidate sensitive dialog state. [[src/renderer/src/components/OrganizationInvitationGate.tsx#OrganizationInvitationGate|The Organization invitation gate]] retains tokens only in memory across sign-in or offline handoff and selects the accepted Organization through the product-space coordinator.
 
 The sixteenth implemented slice closes Foundation with deterministic multi-account and isolation evidence. [[tests/e2e/agentera-organization.e2e.ts]] runs the real strict Organization client, account-generation-aware manager, signed-policy verifier, SQLite cache, and volatile invitation inbox against an in-process cloud fixture. The fixture derives authority only from three bearer identities, rejects unknown routes, headers, queries, bodies, private-runtime fields, idempotency conflicts, unauthorized calls, and token persistence, and stores invitation digests rather than raw secrets. The scenario covers Organization and Department creation, two one-time invitations, Member-to-Admin and Member-to-Auditor transitions, signed policy V2, Auditor policy and audit reads, atomic Owner transfer, archive/restore, leave/removal, empty Department archive, and confirmed dissolution. Before and after every action it hashes the complete populated Hermes tree and separately snapshots selected Profile, active conversation/session, USER RuntimeBinding, Memory, USER, learned Skill, Curator, and Runtime/Gateway identity. [[tests/agentera-organization-boundary.test.ts]] and [[tests/agentera-product-space-boundary.test.ts]] statically prevent Organization or product-space metadata from entering those runtime paths and lock the explicit Organization-Agent-unavailable stop. Run the focused proof with `npm test -- tests/agentera-organization-boundary.test.ts tests/agentera-product-space-boundary.test.ts` and `npm run test:e2e:organization`.
 
 ## Organization Agent approval
 
-Organization publication uses immutable cloud submissions and a different current Owner/Admin reviewer; approval alone can create a signed Version.
+Organization publication uses immutable cloud submissions; one current Owner or Admin approval can create a signed Version, including approval by the submitter.
 
 `aera-cloud/internal/agentcontrol/organization_submission_repository.go:PostgresRepository.ReviewOrganizationAgentSubmission` performs the transactional approval, and `organization_submission_repository_test.go:TestOrganizationApprovalRaceCreatesAtMostOneVersionAndReview` proves concurrent approvals create at most one Version and review.
 
@@ -66,7 +66,7 @@ Pending submissions terminate as approved, rejected, withdrawn, or superseded; a
 
 ### Role, policy, and DLP recheck
 
-Owner/Admin may submit, a different current Owner/Admin may review, Auditor is read-only, and Member may discover and install; policy and DLP are rechecked at review time.
+Owner/Admin may submit and review, Auditor is read-only, and Member may discover and install; policy and DLP are rechecked at review time.
 
 `aera-cloud/internal/agentcontrol/organization_access.go:requireOrganizationAgentAccess` derives current lifecycle and role authority. `organization_submission_repository.go:validateAgainstCurrentOrganizationPolicy` narrows policy again, with coverage in `organization_access_test.go:TestIntersectOrganizationAgentPolicyOnlyNarrows`.
 
@@ -78,7 +78,7 @@ Organization dissolution fails closed while a submission, published definition/v
 
 ### Multi-account executable proof
 
-Four real local accounts prove review separation, role races, immutable versions, USER installations, offline use, removal gates, and private-runtime isolation.
+Four real local accounts prove role gates, approval races, immutable versions, USER installations, offline use, removal gates, and private-runtime isolation.
 
 [[tests/e2e/agentera-organization-agent.e2e.ts]] is the deterministic Owner/Admin/Auditor/Member flow. It snapshots every Profile-private fixture and captures cloud requests to prove Memory, USER, sessions, credentials, local Skills, Curator, files, and private learning never cross the boundary.
 
@@ -110,11 +110,13 @@ V1 expresses model/tool allowlists, manual-or-disabled ExperienceCandidate promo
 
 ## Desktop product context
 
-One trusted main-process coordinator owns Personal, Workspace, or Organization product selection for each authenticated account.
+One trusted main-process coordinator owns USER, WORKSPACE, or ORGANIZATION selection for each authenticated account, while the product presents only where the same account is working.
 
-The global top switcher displays all three scopes side by side. Workspace and Organization remain independent management domains, while a dedicated product-space store prevents two writable selection sources. In an active Organization, “我的智能体” contains the employee's locally ready Agents and “企业智能体” contains the governed Organization catalog, drafts, and review surface.
+The acceptance rule is: “one account, multiple working identities; login decides who you are, context decides where data belongs, and role decides what you can do.” Phone, email, and future SSO remain authentication methods for the same user. Membership or role changes do not create a personal-versus-enterprise account type.
 
-Owner and Admin may create and submit enterprise drafts; Owner, Admin, and Auditor may inspect review history; active Owner, Admin, and Member may use approved enterprise Agents; Auditor remains read-only. The renderer calls every card an Agent and automatically handles the USER-owned Installation, RuntimeBinding, and local Profile needed for execution.
+In an active Organization, “我的智能体” remains available and can create USER-owned drafts; “企业智能体” contains the governed Organization catalog, drafts, and review surface. Owner and Admin may create, submit, and approve enterprise drafts; Auditor may inspect policy, audit, submissions, and review history without mutation; Member may work and use approved Agents but receives no enterprise-management entry.
+
+[[agentera-agent-control-plane#Installation and binding#Conversation boundary|ConversationBoundary]] freezes each new conversation independently from the top selector. Running in an Organization does not make a conversation visible to colleagues: visibility remains PRIVATE until an explicit share operation exists.
 
 Offline Organization metadata is stale and read-only. No offline mutation queue exists, and invalid policy cannot replace a previously verified snapshot.
 
@@ -146,7 +148,7 @@ Every Organization operation is control-plane-only. The static boundary test and
 
 ### Product-space isolation
 
-Personal, Workspace, and Organization selection is account-scoped navigation metadata.
+USER, WORKSPACE, and ORGANIZATION selection is account-scoped navigation metadata; the renderer presents it as “我的 / 企业 / 团队或项目”.
 
 Organization context invalidation must stop new Organization Agent mutation and new conversations before a cloud or RuntimeBinding write, while existing immutable bindings remain usable.
 

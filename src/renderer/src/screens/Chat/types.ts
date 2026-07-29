@@ -4,6 +4,10 @@ export type {
 } from "../../../../shared/attachments";
 
 import type { Attachment } from "../../../../shared/attachments";
+import type {
+  AgenteraAgentControlContext,
+  AgenteraAgentControlErrorCode,
+} from "../../../../shared/agentera-agent-control";
 import type { AgenteraMemoryCandidateBatch } from "../../../../shared/agentera-memory-candidate";
 import type { OfficialQualityFeedbackEligibility } from "../../../../shared/agentera-official-quality";
 
@@ -97,13 +101,34 @@ export interface MemoryCandidateMessage {
   status: "pending" | "saving" | "confirmed" | "rejected" | "error";
 }
 
+/**
+ * Renderer-only guided Agent-draft creation. The target context is captured
+ * when the request is recognized and revalidated before the draft is written,
+ * so a later product-space switch cannot silently change asset ownership.
+ */
+export interface AgentCreationGuideMessage {
+  id: string;
+  kind: "agent_creation_guide";
+  role: "agent";
+  turnId: string;
+  suggestedName: string;
+  suggestedPurpose: string;
+  target: AgenteraAgentControlContext | null;
+  status: "resolving" | "pending" | "creating" | "created" | "error";
+  errorCode?:
+    AgenteraAgentControlErrorCode | "context_changed" | "service_unavailable";
+  draftId?: string;
+  createdName?: string;
+}
+
 export type ChatMessage =
   | ChatBubbleMessage
   | ReasoningMessage
   | ToolCallMessage
   | ToolResultMessage
   | ClarifyMessage
-  | MemoryCandidateMessage;
+  | MemoryCandidateMessage
+  | AgentCreationGuideMessage;
 
 export interface ActiveTurn {
   turnId: string;

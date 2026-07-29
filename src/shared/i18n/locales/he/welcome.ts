@@ -1,5 +1,5 @@
 export default {
-  title: "ברוכים הבאים ל-AgentEra Studio",
+  title: "ברוכים הבאים ל-Aera",
   subtitle:
     "עוזר ה-AI שמשתפר בעצמו ורץ מקומית על המכשיר שלכם. פרטי, עוצמתי, ולומד כל הזמן.",
   installIssueTitle: "בעיה בהתקנה",
@@ -9,9 +9,9 @@ export default {
   switchToLocal: "מעבר למצב מקומי",
   installSizeHint: "פעולה זו תתקין את הרכיבים הנדרשים (כ-2 ג'יגה-בייט)",
   dividerOr: "או",
-  connectRemote: "התחברות ל-AgentEra מרוחק",
-  connectRemoteTitle: "התחברות ל-AgentEra מרוחק",
-  connectRemoteSubtitle: "הזינו את הכתובת של שרת AgentEra API פעיל.",
+  connectRemote: "התחברות ל-Aera מרוחק",
+  connectRemoteTitle: "התחברות ל-Aera מרוחק",
+  connectRemoteSubtitle: "הזינו את הכתובת של שרת Aera API פעיל.",
   remoteServerUrl: "כתובת השרת",
   remoteApiKey: "מפתח API (אופציונלי)",
   remoteApiKeyPlaceholder: "אסימון Bearer ‏(API_SERVER_KEY)",

@@ -131,7 +131,7 @@ export class DashboardGatewayClient {
         }
         reject(
           new Error(
-            "AgentEra Runtime dashboard WebSocket connection timed out",
+            "Aera Runtime dashboard WebSocket connection timed out",
           ),
         );
       }, this.connectTimeoutMs);
@@ -143,7 +143,7 @@ export class DashboardGatewayClient {
         if (this.socket === socket) this.socket = null;
         reject(
           new Error(
-            `Could not connect to AgentEra Runtime dashboard WebSocket`,
+            `Could not connect to Aera Runtime dashboard WebSocket`,
           ),
         );
         this.options.onError?.(event);
@@ -170,9 +170,9 @@ export class DashboardGatewayClient {
         if (!settled) {
           settled = true;
           window.clearTimeout(timeout);
-          reject(new Error("AgentEra Runtime dashboard WebSocket closed"));
+          reject(new Error("Aera Runtime dashboard WebSocket closed"));
         }
-        this.rejectPending("AgentEra Runtime dashboard WebSocket closed");
+        this.rejectPending("Aera Runtime dashboard WebSocket closed");
         this.options.onClose?.(event);
       });
     });
@@ -185,7 +185,7 @@ export class DashboardGatewayClient {
     const socket = this.socket;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       return Promise.reject(
-        new Error("AgentEra Runtime dashboard WebSocket is not connected"),
+        new Error("Aera Runtime dashboard WebSocket is not connected"),
       );
     }
 
@@ -196,7 +196,7 @@ export class DashboardGatewayClient {
       const timeout = window.setTimeout(() => {
         if (!this.pending.delete(id)) return;
         reject(
-          new Error(`AgentEra Runtime dashboard request timed out: ${method}`),
+          new Error(`Aera Runtime dashboard request timed out: ${method}`),
         );
         // An OPEN WebSocket can still be a dead RPC channel (sleep/wake,
         // stalled dashboard reader, half-open tunnel). Reusing it poisons every
@@ -216,7 +216,7 @@ export class DashboardGatewayClient {
   close(): void {
     const socket = this.socket;
     this.socket = null;
-    this.rejectPending("AgentEra Runtime dashboard WebSocket closed");
+    this.rejectPending("Aera Runtime dashboard WebSocket closed");
     if (
       socket &&
       (socket.readyState === WebSocket.CONNECTING ||
@@ -255,7 +255,7 @@ export class DashboardGatewayClient {
         typeof response.error === "string"
           ? response.error
           : response.error.message ||
-            "AgentEra Runtime dashboard request failed";
+            "Aera Runtime dashboard request failed";
       pending.reject(new Error(message));
       return;
     }

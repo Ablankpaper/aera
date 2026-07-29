@@ -10,7 +10,7 @@ export type AgenteraRandomBytes = (size: number) => Buffer;
 
 function requireRandomBytes(value: Buffer, expectedSize: number): Buffer {
   if (!Buffer.isBuffer(value) || value.length !== expectedSize) {
-    throw new Error("AgentEra PKCE random source returned invalid entropy.");
+    throw new Error("Aera PKCE random source returned invalid entropy.");
   }
   return value;
 }

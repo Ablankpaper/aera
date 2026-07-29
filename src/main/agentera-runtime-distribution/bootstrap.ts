@@ -103,7 +103,7 @@ function nativeTarget(
     return { platform: "windows", arch: "x64" };
   }
   throw new Error(
-    `Bundled AgentEra Runtime is unavailable for ${platform}-${arch}`,
+    `Bundled Aera Runtime is unavailable for ${platform}-${arch}`,
   );
 }
 
@@ -129,7 +129,7 @@ function runtimeTrustPath(environment: RuntimeBootstrapEnvironment): string {
   ];
   const selected = candidates.find((candidate) => existsSync(candidate));
   if (selected === undefined) {
-    throw new Error("AgentEra Runtime trust document is missing");
+    throw new Error("Aera Runtime trust document is missing");
   }
   return selected;
 }

@@ -3,7 +3,7 @@ import enAgents from "../en/agents";
 export default {
   title: "Agenci",
   subtitle:
-    "Każdy agent działa w odizolowanym środowisku AgentEra z własną konfiguracją, pamięcią i umiejętnościami",
+    "Każdy agent działa w odizolowanym środowisku Aera z własną konfiguracją, pamięcią i umiejętnościami",
   newAgent: "Nowy agent",
   namePlaceholder: "Nazwa agenta (np. coder)",
   createTitle: "Nowy agent",
@@ -53,7 +53,7 @@ export default {
   walletCreateFailed: "Couldn't add wallet",
   walletRecoveryTitle: "Recovery phrase",
   walletRecoveryInfo:
-    "Save this phrase now. AgentEra will not show it again after this modal closes.",
+    "Save this phrase now. Aera will not show it again after this modal closes.",
   walletCopyRecovery: "Copy phrase",
   walletDone: "I've saved it",
   walletBalanceLoading: "Loading…",
@@ -61,7 +61,7 @@ export default {
   walletBalanceRefresh: "Refresh",
   walletDeleteTitle: "Remove wallet",
   walletDeleteWarning:
-    "This will permanently remove this wallet from AgentEra. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
+    "This will permanently remove this wallet from Aera. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
   walletDeleteConfirmLabel: "Remove wallet",
   control: {
     experience: enAgents.control.experience,
@@ -125,7 +125,7 @@ export default {
       withdraw: "Wycofaj zgłoszenie",
       confirmWithdrawal: "Potwierdź wycofanie",
       withdrawalBoundary:
-        "Wycofanie zamyka tylko to oczekujące zgłoszenie; lokalne szkice i dane Hermes pozostają bez zmian.",
+        "Wycofanie zamyka tylko to oczekujące zgłoszenie; lokalne szkice i dane Aera Runtime pozostają bez zmian.",
       draftReadOnly:
         "Ten szkic firmowy jest tylko do odczytu. Połącz się ponownie jako Właściciel lub Administrator, aby go zmienić.",
     },

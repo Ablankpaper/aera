@@ -19,25 +19,29 @@ vi.mock("../../components/useI18n", () => ({
     setLocale: vi.fn(),
     t: (key: string, options?: Record<string, unknown>): string => {
       const values: Record<string, string> = {
-        "navigation.organization.switcher.label": "Product space switcher",
-        "navigation.organization.switcher.menu": "Product spaces",
-        "navigation.organization.switcher.loading": "Loading product spaces",
+        "navigation.organization.switcher.label": "Work context switcher",
+        "navigation.organization.switcher.menu": "Where you work",
+        "navigation.organization.switcher.loading": "Loading work contexts",
         "navigation.organization.switcher.unavailable":
-          "Product spaces unavailable",
-        "navigation.organization.switcher.runIn": "Run in",
-        "navigation.organization.switcher.personalGroup": "Personal",
-        "navigation.organization.switcher.workspaceGroup": "Workspaces",
+          "Work contexts unavailable",
+        "navigation.organization.switcher.runIn": "Working in",
+        "navigation.organization.switcher.personalGroup": "My",
+        "navigation.organization.switcher.workspaceGroup": "Teams / projects",
         "navigation.organization.switcher.organizationGroup": "Organizations",
-        "navigation.organization.switcher.personal": "Personal space",
-        "navigation.organization.switcher.personalBadge": "Personal",
-        "navigation.organization.switcher.workspaceFallback": "Workspace",
+        "navigation.organization.switcher.personal": "My",
+        "navigation.organization.switcher.personalBadge": "My",
+        "navigation.organization.switcher.workspaceFallback": "Team / project",
         "navigation.organization.switcher.organizationFallback": "Organization",
         "navigation.organization.switcher.offline": "Offline",
         "navigation.organization.switcher.stale": "Stale",
+        "navigation.organization.switcher.organizationAccess":
+          "Organizations and invitations",
+        "navigation.organization.switcher.reviewOrganizations":
+          "Review organization governance",
         "navigation.organization.switcher.manageWorkspaces":
-          "Manage workspaces",
+          "Manage teams / projects",
         "navigation.organization.switcher.manageOrganizations":
-          "Manage organizations",
+          "Manage organization",
         "navigation.organization.roles.owner": "Owner",
         "navigation.organization.roles.admin": "Admin",
         "navigation.organization.roles.auditor": "Auditor",
@@ -45,7 +49,7 @@ vi.mock("../../components/useI18n", () => ({
         "navigation.organization.errors.online_required": "online required",
       };
       if (key === "navigation.organization.switcher.couldNotSwitch") {
-        return `Could not switch product space (${String(options?.error)}).`;
+        return `Could not switch work context (${String(options?.error)}).`;
       }
       return values[key] ?? key;
     },
@@ -158,9 +162,9 @@ function installAPI(
 
 function openMenu(): HTMLElement {
   fireEvent.click(
-    screen.getByRole("button", { name: /product space switcher/i }),
+    screen.getByRole("button", { name: /work context switcher/i }),
   );
-  return screen.getByRole("menu", { name: "Product spaces" });
+  return screen.getByRole("menu", { name: "Where you work" });
 }
 
 describe("ProductSpaceSwitcher", () => {
@@ -171,23 +175,23 @@ describe("ProductSpaceSwitcher", () => {
     });
   });
 
-  it("groups Personal, Workspace, and Organization choices deterministically without Departments", async () => {
+  it("presents My, team/project, and organization choices without technical space language", async () => {
     installAPI();
     render(<ProductSpaceSwitcher authState={authState} />);
-    await screen.findByText("Personal space");
+    await screen.findByText("My");
     const menu = openMenu();
 
     expect(
       within(menu)
         .getAllByRole("group")
         .map((group) => group.getAttribute("aria-label")),
-    ).toEqual(["Personal", "Workspaces", "Organizations"]);
+    ).toEqual(["My", "Teams / projects", "Organizations"]);
     expect(
       within(menu)
         .getAllByRole("menuitemradio")
         .map((item) => item.textContent),
     ).toEqual([
-      "Personal spacePersonal",
+      "My",
       "Alpha WorkspaceAdmin",
       "Zeta WorkspaceMember",
       "Alpha OrganizationOwner",
@@ -196,10 +200,35 @@ describe("ProductSpaceSwitcher", () => {
     expect(within(menu).queryByText(/department/i)).toBeNull();
   });
 
+  it("hides redundant visual hierarchy when the account has only one organization context", async () => {
+    installAPI({
+      ok: true,
+      data: state({
+        options: [
+          { kind: "PERSONAL" },
+          {
+            kind: "ORGANIZATION",
+            organizationId: ORGANIZATION_ALPHA,
+            displayName: "Alpha Organization",
+            role: "member",
+          },
+        ],
+      }),
+    });
+    render(<ProductSpaceSwitcher authState={authState} />);
+    await screen.findByText("My");
+    const menu = openMenu();
+
+    expect(
+      menu.querySelectorAll(".product-space-switcher-group-label"),
+    ).toHaveLength(0);
+    expect(within(menu).getAllByRole("menuitemradio")).toHaveLength(2);
+  });
+
   it("selects only through the Product Space bridge and never switches Hermes Profile", async () => {
     const api = installAPI();
     render(<ProductSpaceSwitcher authState={authState} />);
-    await screen.findByText("Personal space");
+    await screen.findByText("My");
     openMenu();
     fireEvent.click(
       screen.getByRole("menuitemradio", { name: /Alpha Organization.*Owner/i }),
@@ -214,7 +243,7 @@ describe("ProductSpaceSwitcher", () => {
     expect(window.hermesAPI.setActiveProfile).not.toHaveBeenCalled();
   });
 
-  it("shows offline stale state, selection failures, and both management affordances", async () => {
+  it("shows offline stale state, account access, selection failures, and authorized management affordances", async () => {
     const api = installAPI({
       ok: true,
       data: state({
@@ -231,11 +260,13 @@ describe("ProductSpaceSwitcher", () => {
       ok: false,
       errorCode: "online_required",
     });
+    const organizationAccess = vi.fn();
     const manageWorkspaces = vi.fn();
     const manageOrganizations = vi.fn();
     render(
       <ProductSpaceSwitcher
         authState={{ ...authState, status: "offline", cloudAvailable: false }}
+        onOrganizationAccess={organizationAccess}
         onManageWorkspaces={manageWorkspaces}
         onManageOrganizations={manageOrganizations}
       />,
@@ -247,13 +278,22 @@ describe("ProductSpaceSwitcher", () => {
 
     const menu = openMenu();
     fireEvent.click(
-      within(menu).getByRole("menuitem", { name: "Manage workspaces" }),
+      within(menu).getByRole("menuitem", {
+        name: "Organizations and invitations",
+      }),
+    );
+    expect(organizationAccess).toHaveBeenCalledOnce();
+    openMenu();
+    fireEvent.click(
+      within(screen.getByRole("menu")).getByRole("menuitem", {
+        name: "Manage teams / projects",
+      }),
     );
     expect(manageWorkspaces).toHaveBeenCalledOnce();
     openMenu();
     fireEvent.click(
       within(screen.getByRole("menu")).getByRole("menuitem", {
-        name: "Manage organizations",
+        name: "Manage organization",
       }),
     );
     expect(manageOrganizations).toHaveBeenCalledOnce();
@@ -268,6 +308,92 @@ describe("ProductSpaceSwitcher", () => {
     expect(screen.getByRole("menu")).toBeInTheDocument();
   });
 
+  it("keeps account-level organization access for Members but hides management entries", async () => {
+    installAPI({
+      ok: true,
+      data: state({
+        options: [
+          { kind: "PERSONAL" },
+          {
+            kind: "WORKSPACE",
+            workspaceId: WORKSPACE_ZETA,
+            displayName: "Member Team",
+            role: "member",
+          },
+          {
+            kind: "ORGANIZATION",
+            organizationId: ORGANIZATION_ZETA,
+            displayName: "Member Enterprise",
+            role: "member",
+          },
+        ],
+      }),
+    });
+    const organizationAccess = vi.fn();
+    render(
+      <ProductSpaceSwitcher
+        authState={authState}
+        onOrganizationAccess={organizationAccess}
+        onManageWorkspaces={vi.fn()}
+        onManageOrganizations={vi.fn()}
+      />,
+    );
+    await screen.findByText("My");
+    const menu = openMenu();
+
+    expect(
+      within(menu).getByRole("menuitem", {
+        name: "Organizations and invitations",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(menu).queryByRole("menuitem", {
+        name: "Manage teams / projects",
+      }),
+    ).toBeNull();
+    expect(
+      within(menu).queryByRole("menuitem", { name: "Manage organization" }),
+    ).toBeNull();
+  });
+
+  it("shows Auditors a read-only governance entry without a management entry", async () => {
+    installAPI({
+      ok: true,
+      data: state({
+        options: [
+          { kind: "PERSONAL" },
+          {
+            kind: "ORGANIZATION",
+            organizationId: ORGANIZATION_ZETA,
+            displayName: "Audited Enterprise",
+            role: "auditor",
+          },
+        ],
+      }),
+    });
+    const reviewOrganizations = vi.fn();
+    render(
+      <ProductSpaceSwitcher
+        authState={authState}
+        onOrganizationAccess={vi.fn()}
+        onReviewOrganizations={reviewOrganizations}
+        onManageOrganizations={vi.fn()}
+      />,
+    );
+    await screen.findByText("My");
+    const menu = openMenu();
+
+    expect(
+      within(menu).queryByRole("menuitem", { name: "Manage organization" }),
+    ).toBeNull();
+    fireEvent.click(
+      within(menu).getByRole("menuitem", {
+        name: "Review organization governance",
+      }),
+    );
+    expect(reviewOrganizations).toHaveBeenCalledOnce();
+  });
+
   it("renders explicit loading and safe error states", async () => {
     let resolveState:
       | ((value: ProductSpaceResult<ProductSpacePublicState>) => void)
@@ -280,11 +406,11 @@ describe("ProductSpaceSwitcher", () => {
     installAPI(pending);
     render(<ProductSpaceSwitcher authState={authState} />);
     expect(
-      screen.getByRole("button", { name: "Loading product spaces" }),
+      screen.getByRole("button", { name: "Loading work contexts" }),
     ).toBeDisabled();
     resolveState?.({ ok: false, errorCode: "service_unavailable" });
     expect(
-      await screen.findByRole("button", { name: "Product spaces unavailable" }),
+      await screen.findByRole("button", { name: "Work contexts unavailable" }),
     ).toBeInTheDocument();
   });
 });

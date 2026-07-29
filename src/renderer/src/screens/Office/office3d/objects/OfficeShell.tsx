@@ -70,7 +70,7 @@ function NorthWall({ palette }: { palette: WorldPalette }): React.JSX.Element {
   );
 }
 
-/** AgentEra logo decal on the office's south wall. */
+/** Aera logo decal on the office's south wall. */
 function OfficeLogo(): React.JSX.Element {
   const texture = useTexture(agentEraIconUrl, (t) => {
     t.colorSpace = THREE.SRGBColorSpace;

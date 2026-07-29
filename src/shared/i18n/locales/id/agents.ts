@@ -3,7 +3,7 @@ import enAgents from "../en/agents";
 export default {
   title: "Agen",
   subtitle:
-    "Setiap agen berjalan di workspace AgentEra terisolasi dengan konfigurasi, memori, dan skill sendiri",
+    "Setiap agen berjalan di workspace Aera terisolasi dengan konfigurasi, memori, dan skill sendiri",
   newAgent: "Agent Baru",
   namePlaceholder: "Nama agent (mis. coder)",
   createTitle: "Agen baru",
@@ -54,7 +54,7 @@ export default {
   walletCreateFailed: "Couldn't add wallet",
   walletRecoveryTitle: "Recovery phrase",
   walletRecoveryInfo:
-    "Save this phrase now. AgentEra will not show it again after this modal closes.",
+    "Save this phrase now. Aera will not show it again after this modal closes.",
   walletCopyRecovery: "Copy phrase",
   walletDone: "I've saved it",
   walletBalanceLoading: "Loading…",
@@ -62,7 +62,7 @@ export default {
   walletBalanceRefresh: "Refresh",
   walletDeleteTitle: "Remove wallet",
   walletDeleteWarning:
-    "This will permanently remove this wallet from AgentEra. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
+    "This will permanently remove this wallet from Aera. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
   walletDeleteConfirmLabel: "Remove wallet",
   control: {
     experience: enAgents.control.experience,
@@ -125,7 +125,7 @@ export default {
       withdraw: "Tarik pengajuan",
       confirmWithdrawal: "Konfirmasi penarikan",
       withdrawalBoundary:
-        "Penarikan hanya menutup pengajuan tertunda ini; draf lokal dan data Hermes tetap sama.",
+        "Penarikan hanya menutup pengajuan tertunda ini; draf lokal dan data Aera Runtime tetap sama.",
       draftReadOnly:
         "Draf perusahaan ini hanya baca. Sambungkan kembali sebagai Pemilik atau Admin untuk mengubahnya.",
     },

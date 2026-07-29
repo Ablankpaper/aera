@@ -257,7 +257,7 @@ describe("Workspace IPC contract", () => {
     const creation: WorkspaceInvitationCreation = {
       ...invitation(),
       token: TOKEN,
-      inviteUrl: `agentera://workspace-invitation#${TOKEN}`,
+      inviteUrl: `aera://workspace-invitation#${TOKEN}`,
       secretReplayable: false,
     };
     expect(serializeWorkspaceInvitationCreation(creation)).toEqual(creation);
@@ -360,8 +360,8 @@ describe("Workspace IPC and startup wiring", () => {
     );
 
     const builder = source("electron-builder.yml");
-    expect(builder).toContain("name: AgentEra Workspace Invitation");
-    expect(builder).toMatch(/schemes:\s*\n\s*- agentera/);
+    expect(builder).toContain("name: Aera Invitation");
+    expect(builder).toMatch(/schemes:[\s\S]*- aera[\s\S]*- agentera/);
   });
 
   it("exposes removable Workspace listeners without generic URL, token, or header APIs", () => {

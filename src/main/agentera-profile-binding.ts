@@ -147,7 +147,7 @@ export function createAgenteraGuestRuntimeOwner(
   deviceInstallationId: string,
 ): AgenteraRuntimeOwner {
   if (!validUuid(deviceInstallationId)) {
-    throw new Error("AgentEra guest installation identity is invalid.");
+    throw new Error("Aera guest installation identity is invalid.");
   }
   return {
     tenantId: deterministicGuestUuid("tenant", deviceInstallationId),
@@ -191,7 +191,7 @@ function assertOwner(owner: AgenteraRuntimeOwner): void {
     !validUuid(owner.ownerId) ||
     !validUuid(owner.deviceInstallationId)
   ) {
-    throw new Error("AgentEra Runtime owner identity is invalid.");
+    throw new Error("Aera Runtime owner identity is invalid.");
   }
 }
 
@@ -242,16 +242,16 @@ function validBindingV1(value: unknown): value is RuntimeOwnerBindingV1 {
 
 function canonicalProfilePath(profilePath: string): string {
   if (typeof profilePath !== "string" || !isAbsolute(profilePath)) {
-    throw new Error("AgentEra Runtime Profile path must be absolute.");
+    throw new Error("Aera Runtime Profile path must be absolute.");
   }
   let canonical: string;
   try {
     canonical = resolve(realpathSync.native(profilePath));
   } catch {
-    throw new Error("AgentEra Runtime Profile path does not exist.");
+    throw new Error("Aera Runtime Profile path does not exist.");
   }
   if (!statSync(canonical).isDirectory()) {
-    throw new Error("AgentEra Runtime Profile path must be a directory.");
+    throw new Error("Aera Runtime Profile path must be a directory.");
   }
   return canonical;
 }
@@ -408,7 +408,7 @@ export class AgenteraProfileBindingStore {
     if (existing) {
       if (sameOwner(existing.binding, owner)) return { ...existing.binding };
       throw new Error(
-        "This physical Runtime Profile cannot be reassigned to another AgentEra owner.",
+        "This physical Runtime Profile cannot be reassigned to another Aera owner.",
       );
     }
 
@@ -419,7 +419,7 @@ export class AgenteraProfileBindingStore {
         (entry) => entry.binding.runtimeProfileId === runtimeProfileId,
       )
     ) {
-      throw new Error("AgentEra Runtime Profile ID generation failed.");
+      throw new Error("Aera Runtime Profile ID generation failed.");
     }
     const binding: RuntimeOwnerBinding = {
       tenantId: owner.tenantId,
@@ -489,11 +489,11 @@ export class AgenteraProfileBindingStore {
       (entry) => entry.profilePath === canonical,
     );
     if (!stored) {
-      throw new Error("AgentEra Runtime Profile binding is required.");
+      throw new Error("Aera Runtime Profile binding is required.");
     }
     if (!sameOwner(stored.binding, owner)) {
       throw new Error(
-        "This Runtime Profile belongs to another AgentEra owner.",
+        "This Runtime Profile belongs to another Aera owner.",
       );
     }
     return { ...stored.binding };
@@ -506,17 +506,17 @@ export class AgenteraProfileBindingStore {
   ): RuntimeOwnerBinding {
     assertOwner(owner);
     if (!validUuid(agentInstallationId)) {
-      throw new Error("AgentEra Agent Installation ID is invalid.");
+      throw new Error("Aera Agent Installation ID is invalid.");
     }
     const canonical = canonicalProfilePath(profilePath);
     const bindings = this.readBindings();
     const stored = bindings.find((entry) => entry.profilePath === canonical);
     if (!stored) {
-      throw new Error("AgentEra Runtime Profile binding is required.");
+      throw new Error("Aera Runtime Profile binding is required.");
     }
     if (!sameOwner(stored.binding, owner)) {
       throw new Error(
-        "This Runtime Profile belongs to another AgentEra owner.",
+        "This Runtime Profile belongs to another Aera owner.",
       );
     }
     if (stored.binding.agentInstallationId === agentInstallationId) {
@@ -557,7 +557,7 @@ export class AgenteraProfileBindingStore {
       (expected.agentInstallationId !== null &&
         !validUuid(expected.agentInstallationId))
     ) {
-      throw new Error("AgentEra Runtime Profile binding identity is invalid.");
+      throw new Error("Aera Runtime Profile binding identity is invalid.");
     }
     const canonical = canonicalProfilePath(profilePath);
     const bindings = this.readBindings();
@@ -572,7 +572,7 @@ export class AgenteraProfileBindingStore {
       stored.binding.agentInstallationId !== expected.agentInstallationId
     ) {
       throw new Error(
-        "AgentEra Runtime Profile binding cannot be removed by this restore transaction.",
+        "Aera Runtime Profile binding cannot be removed by this restore transaction.",
       );
     }
     bindings.splice(index, 1);
@@ -607,10 +607,10 @@ export class AgenteraProfileBindingStore {
     try {
       envelope = JSON.parse(readFileSync(this.filePath, "utf8"));
     } catch {
-      throw new Error("AgentEra Runtime Profile binding store is corrupt.");
+      throw new Error("Aera Runtime Profile binding store is corrupt.");
     }
     if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) {
-      throw new Error("AgentEra Runtime Profile binding store is corrupt.");
+      throw new Error("Aera Runtime Profile binding store is corrupt.");
     }
     const candidate = envelope as Partial<BindingEnvelope | BindingEnvelopeV1>;
     if (
@@ -620,7 +620,7 @@ export class AgenteraProfileBindingStore {
         candidate.version !== PROFILE_BINDING_VERSION) ||
       typeof candidate.encryptedBindings !== "string"
     ) {
-      throw new Error("AgentEra Runtime Profile binding store is corrupt.");
+      throw new Error("Aera Runtime Profile binding store is corrupt.");
     }
     this.requireEncryption();
     let parsed: unknown;
@@ -630,7 +630,7 @@ export class AgenteraProfileBindingStore {
       );
       parsed = JSON.parse(plaintext);
     } catch {
-      throw new Error("AgentEra Runtime Profile binding store is corrupt.");
+      throw new Error("Aera Runtime Profile binding store is corrupt.");
     }
     const isV1 = candidate.version === PROFILE_BINDING_VERSION_V1;
     const validEntry = (entry: unknown): boolean => {
@@ -648,7 +648,7 @@ export class AgenteraProfileBindingStore {
       );
     };
     if (!Array.isArray(parsed) || parsed.some((entry) => !validEntry(entry))) {
-      throw new Error("AgentEra Runtime Profile binding store is corrupt.");
+      throw new Error("Aera Runtime Profile binding store is corrupt.");
     }
     const bindings: StoredProfileBinding[] = isV1
       ? (parsed as StoredProfileBindingV1[]).map((entry) => ({
@@ -677,7 +677,7 @@ export class AgenteraProfileBindingStore {
         bindings.filter((entry) => entry.binding.agentInstallationId !== null)
           .length
     ) {
-      throw new Error("AgentEra Runtime Profile binding store is corrupt.");
+      throw new Error("Aera Runtime Profile binding store is corrupt.");
     }
     const result = bindings.map((entry) => ({
       profilePath: entry.profilePath,
@@ -704,7 +704,7 @@ export class AgenteraProfileBindingStore {
   private requireEncryption(): void {
     if (!this.secureStorage.isEncryptionAvailable()) {
       throw new Error(
-        "AgentEra secure storage is unavailable for Runtime ownership metadata.",
+        "Aera secure storage is unavailable for Runtime ownership metadata.",
       );
     }
   }

@@ -99,7 +99,7 @@ afterEach(() => {
   }
 });
 
-describe("AgentEra Workspace database", () => {
+describe("Aera Workspace database", () => {
   it("opens at the exact userData path and rejects paths inside HERMES_HOME", () => {
     const root = temporaryRoot();
     const userDataPath = join(root, "user-data");

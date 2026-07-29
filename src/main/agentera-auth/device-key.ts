@@ -54,14 +54,14 @@ export function signAgenteraDeviceDigest(
   digest: Uint8Array,
 ): string {
   if (digest.byteLength !== 32) {
-    throw new Error("AgentEra device signatures require a SHA-256 digest.");
+    throw new Error("Aera device signatures require a SHA-256 digest.");
   }
   const privateDer = Buffer.from(devicePrivateKey, "base64");
   if (
     privateDer.length === 0 ||
     privateDer.toString("base64") !== devicePrivateKey
   ) {
-    throw new Error("AgentEra device private key is corrupt.");
+    throw new Error("Aera device private key is corrupt.");
   }
   const privateKey = createPrivateKey({
     key: privateDer,

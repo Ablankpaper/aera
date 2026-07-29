@@ -38,7 +38,7 @@ export class AgenteraHermesAdapterError extends Error {
   readonly code: AgenteraHermesAdapterErrorCode;
 
   constructor(code: AgenteraHermesAdapterErrorCode) {
-    super(`AgentEra Hermes adapter failed: ${code}.`);
+    super(`Aera Runtime adapter failed: ${code}.`);
     this.name = "AgenteraHermesAdapterError";
     this.code = code;
   }
@@ -395,7 +395,7 @@ function composePublishedInstructions(input: {
     .sort((left, right) => left.name.localeCompare(right.name));
 
   return [
-    "AgentEra installed Agent published base (immutable for this conversation).",
+    "Aera installed Agent published base (immutable for this conversation).",
     version.manifest.identity.system_prompt,
     `Version identity: definition=${binding.agentDefinitionId}; version=${binding.agentVersionId}; version_number=${version.version_number}; digest=${binding.publishedBaseDigest}.`,
     `Policy snapshot: id=${binding.policySnapshotId}; digest=${policy.content_digest}; tool_permission_digest=${binding.toolPermissionDigest}.`,
@@ -409,7 +409,7 @@ function composePublishedInstructions(input: {
       publicationAllowed: policy.document.publication_allowed,
     })}.`,
     "Profile-local SOUL and Skills take precedence when they conflict with this published base.",
-    "Hermes remains the sole execution and adaptive-learning engine; keep all local adaptive state private and do not treat it as part of this published base.",
+    "Aera Runtime remains the sole execution and adaptive-learning engine; keep all local adaptive state private and do not treat it as part of this published base.",
   ].join("\n\n");
 }
 

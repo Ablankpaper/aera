@@ -29,7 +29,7 @@ afterEach(() => {
   }
 });
 
-describe("AgentEra Runtime distribution paths", () => {
+describe("Aera Runtime distribution paths", () => {
   it("derives every mutable path below the dedicated Runtime root", () => {
     const { directory, paths } = makePaths();
     const root = join(directory, "user-data", "runtime");

@@ -24,6 +24,8 @@ type AuthorizedState = Extract<
 interface ProductSpaceSwitcherProps {
   authState: AuthorizedState;
   compact?: boolean;
+  onOrganizationAccess?: () => void;
+  onReviewOrganizations?: () => void;
   onManageWorkspaces?: () => void;
   onManageOrganizations?: () => void;
 }
@@ -83,6 +85,8 @@ function selectionFor(option: ProductSpaceOption): StoredProductSpaceSelection {
 export default function ProductSpaceSwitcher({
   authState,
   compact = false,
+  onOrganizationAccess,
+  onReviewOrganizations,
   onManageWorkspaces,
   onManageOrganizations,
 }: ProductSpaceSwitcherProps): React.JSX.Element {
@@ -182,6 +186,24 @@ export default function ProductSpaceSwitcher({
         : null;
   const offline = state?.access === "offline" || authState.status === "offline";
   const stale = state?.stale === true;
+  const canManageAnyWorkspace = groups.workspaces.some(
+    (workspace) => workspace.role === "owner" || workspace.role === "admin",
+  );
+  const canManageAnyOrganization = groups.organizations.some(
+    (organization) =>
+      organization.role === "owner" || organization.role === "admin",
+  );
+  const canReviewAnyOrganization = groups.organizations.some(
+    (organization) => organization.role === "auditor",
+  );
+  const hasAccountOrManagementAction = Boolean(
+    onOrganizationAccess ||
+    (onManageWorkspaces && canManageAnyWorkspace) ||
+    (onManageOrganizations && canManageAnyOrganization) ||
+    (onReviewOrganizations &&
+      canReviewAnyOrganization &&
+      !canManageAnyOrganization),
+  );
 
   const closeMenu = useCallback((restoreFocus: boolean) => {
     setOpen(false);
@@ -323,7 +345,14 @@ export default function ProductSpaceSwitcher({
     offline ? t("navigation.organization.switcher.offline") : null,
     stale ? t("navigation.organization.switcher.stale") : null,
   ].filter((label): label is string => Boolean(label));
-  const allOptions = [groups.personal, groups.workspaces, groups.organizations];
+  const optionGroups = [
+    { key: "personalGroup", options: groups.personal },
+    { key: "workspaceGroup", options: groups.workspaces },
+    { key: "organizationGroup", options: groups.organizations },
+  ].filter(({ options }) => options.length > 0);
+  const sharedOptionCount =
+    groups.workspaces.length + groups.organizations.length;
+  const showGroupLabels = sharedOptionCount > 1;
   const renderChoice = (option: ProductSpaceOption): React.JSX.Element => {
     const personal = option.kind === "PERSONAL";
     const name = personal
@@ -346,11 +375,11 @@ export default function ProductSpaceSwitcher({
       >
         <Icon size={16} aria-hidden="true" />
         <span className="workspace-switcher-choice-name">{name}</span>
-        <span className="workspace-switcher-badge">
-          {personal
-            ? t("navigation.organization.switcher.personalBadge")
-            : t(`navigation.organization.roles.${option.role}`)}
-        </span>
+        {!personal && (
+          <span className="workspace-switcher-badge">
+            {t(`navigation.organization.roles.${option.role}`)}
+          </span>
+        )}
       </button>
     );
   };
@@ -371,12 +400,7 @@ export default function ProductSpaceSwitcher({
           <div className="workspace-switcher-menu-heading">
             {t("navigation.organization.switcher.runIn")}
           </div>
-          {allOptions.map((options, index) => {
-            const groupKey = [
-              "personalGroup",
-              "workspaceGroup",
-              "organizationGroup",
-            ][index];
+          {optionGroups.map(({ key: groupKey, options }) => {
             const groupLabel = t(
               `navigation.organization.switcher.${groupKey}`,
             );
@@ -387,46 +411,96 @@ export default function ProductSpaceSwitcher({
                 aria-label={groupLabel}
                 key={groupKey}
               >
-                <div className="product-space-switcher-group-label">
-                  {groupLabel}
-                </div>
+                {showGroupLabels && (
+                  <div className="product-space-switcher-group-label">
+                    {groupLabel}
+                  </div>
+                )}
                 {options.map(renderChoice)}
               </div>
             );
           })}
-          <div className="workspace-switcher-menu-divider" />
-          <button
-            type="button"
-            className="workspace-switcher-manage"
-            role="menuitem"
-            aria-label={t("navigation.organization.switcher.manageWorkspaces")}
-            onClick={() => {
-              closeMenu(true);
-              onManageWorkspaces?.();
-            }}
-          >
-            <Settings size={15} aria-hidden="true" />
-            <span>
-              {t("navigation.organization.switcher.manageWorkspaces")}
-            </span>
-          </button>
-          <button
-            type="button"
-            className="workspace-switcher-manage"
-            role="menuitem"
-            aria-label={t(
-              "navigation.organization.switcher.manageOrganizations",
+          {hasAccountOrManagementAction && (
+            <div className="workspace-switcher-menu-divider" />
+          )}
+          {onOrganizationAccess && (
+            <button
+              type="button"
+              className="workspace-switcher-manage"
+              role="menuitem"
+              aria-label={t(
+                "navigation.organization.switcher.organizationAccess",
+              )}
+              onClick={() => {
+                closeMenu(true);
+                onOrganizationAccess();
+              }}
+            >
+              <Building size={15} aria-hidden="true" />
+              <span>
+                {t("navigation.organization.switcher.organizationAccess")}
+              </span>
+            </button>
+          )}
+          {onManageWorkspaces && canManageAnyWorkspace && (
+            <button
+              type="button"
+              className="workspace-switcher-manage"
+              role="menuitem"
+              aria-label={t(
+                "navigation.organization.switcher.manageWorkspaces",
+              )}
+              onClick={() => {
+                closeMenu(true);
+                onManageWorkspaces();
+              }}
+            >
+              <Settings size={15} aria-hidden="true" />
+              <span>
+                {t("navigation.organization.switcher.manageWorkspaces")}
+              </span>
+            </button>
+          )}
+          {onManageOrganizations && canManageAnyOrganization && (
+            <button
+              type="button"
+              className="workspace-switcher-manage"
+              role="menuitem"
+              aria-label={t(
+                "navigation.organization.switcher.manageOrganizations",
+              )}
+              onClick={() => {
+                closeMenu(true);
+                onManageOrganizations();
+              }}
+            >
+              <Building size={15} aria-hidden="true" />
+              <span>
+                {t("navigation.organization.switcher.manageOrganizations")}
+              </span>
+            </button>
+          )}
+          {onReviewOrganizations &&
+            canReviewAnyOrganization &&
+            !canManageAnyOrganization && (
+              <button
+                type="button"
+                className="workspace-switcher-manage"
+                role="menuitem"
+                aria-label={t(
+                  "navigation.organization.switcher.reviewOrganizations",
+                )}
+                onClick={() => {
+                  closeMenu(true);
+                  onReviewOrganizations();
+                }}
+              >
+                <Building size={15} aria-hidden="true" />
+                <span>
+                  {t("navigation.organization.switcher.reviewOrganizations")}
+                </span>
+              </button>
             )}
-            onClick={() => {
-              closeMenu(true);
-              onManageOrganizations?.();
-            }}
-          >
-            <Building size={15} aria-hidden="true" />
-            <span>
-              {t("navigation.organization.switcher.manageOrganizations")}
-            </span>
-          </button>
           {selectionError && (
             <div className="workspace-switcher-selection-error" role="alert">
               {t("navigation.organization.switcher.couldNotSwitch", {

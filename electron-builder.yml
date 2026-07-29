@@ -1,8 +1,9 @@
 appId: com.bignormal.agentera.studio
-productName: AgentEra Studio
+productName: Aera
 protocols:
-  - name: AgentEra Workspace Invitation
+  - name: Aera Invitation
     schemes:
+      - aera
       - agentera
 directories:
   buildResources: build
@@ -22,22 +23,22 @@ extraResources:
       - "**/*"
       - "!.gitkeep"
 win:
-  executableName: agentera-studio
+  executableName: Aera
   icon: build/icon.ico
   target:
     - nsis
     - portable
 portable:
-  artifactName: ${name}-${version}-portable.${ext}
+  artifactName: Aera-${version}-portable.${ext}
 nsis:
-  artifactName: ${name}-${version}-setup.${ext}
+  artifactName: Aera-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
   oneClick: true
   perMachine: false
 mac:
-  artifactName: ${name}-${version}-${arch}-${os}.${ext}
+  artifactName: Aera-${version}-${arch}-${os}.${ext}
   icon: build/icon.icns
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.inherit.plist
@@ -50,29 +51,29 @@ mac:
   gatekeeperAssess: false
   notarize: true
 dmg:
-  artifactName: ${name}-${version}-${arch}.${ext}
+  artifactName: Aera-${version}-${arch}.${ext}
 linux:
   target:
     - AppImage
     - snap
     - deb
     - rpm
-  maintainer: AgentEra
-  vendor: AgentEra
+  maintainer: Aera
+  vendor: Aera
   category: Utility
   synopsis: Private AI agent desktop
   description: >-
-    AgentEra Studio is a native desktop app for installing, configuring, and
-    chatting with AgentEra Runtime.
+    Aera is a native desktop app for installing, configuring, and chatting
+    with Aera Runtime.
 appImage:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: Aera-${version}.${ext}
 deb:
   # Run chmod 4755 on chrome-sandbox so Electron's setuid sandbox helper
   # works on modern Linux distros that disable unprivileged user
   # namespaces (Ubuntu 24.04+, etc.). Closes #395.
   afterInstall: build/linux-after-install.sh
 rpm:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: Aera-${version}.${ext}
   # Same SUID fix for .rpm consumers (Fedora 40+ also restricts userns).
   afterInstall: build/linux-after-install.sh
 npmRebuild: false

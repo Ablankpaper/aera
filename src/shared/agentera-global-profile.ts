@@ -35,8 +35,7 @@ export interface SetAgenteraGlobalProfileEntryInput {
 }
 
 export type AgenteraGlobalProfileResult<T> =
-  | { success: true; value: T }
-  | { success: false; error: string };
+  { success: true; value: T } | { success: false; error: string };
 
 export interface PrepareAgenteraGlobalProfileConversationContextInput {
   runId: string;
@@ -44,10 +43,20 @@ export interface PrepareAgenteraGlobalProfileConversationContextInput {
   resumeSessionId: string | null;
 }
 
+export interface AgenteraConversationBoundarySummary {
+  scope: "USER" | "WORKSPACE" | "ORGANIZATION";
+  scopeId: string;
+  scopeDisplayName: string | null;
+  visibility:
+    "PRIVATE" | "WORKSPACE_SHARED" | "ORGANIZATION_SHARED" | "ARTIFACT_ONLY";
+  origin: "NEW_CONVERSATION" | "LEGACY_DEFAULT";
+}
+
 export interface AgenteraGlobalProfileConversationContext {
   globalProfileVersion: number | null;
   requiresBoundApiTransport: boolean;
   degraded: boolean;
+  conversationBoundary: AgenteraConversationBoundarySummary | null;
 }
 
 export interface AgenteraGlobalProfileHistoryItem {

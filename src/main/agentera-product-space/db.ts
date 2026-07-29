@@ -115,7 +115,7 @@ function assertOutsideHermesHome(path: string): void {
     )
   ) {
     throw new Error(
-      "AgentEra product-space path must remain outside HERMES_HOME.",
+      "Aera product-space path must remain outside HERMES_HOME.",
     );
   }
 }
@@ -217,7 +217,7 @@ function initializeSchema(sqlite: AgenteraProductSpaceSqliteDatabase): void {
     currentVersion < 0 ||
     currentVersion > AGENTERA_PRODUCT_SPACE_SCHEMA_VERSION
   ) {
-    throw new Error("Unsupported AgentEra product-space database version.");
+    throw new Error("Unsupported Aera product-space database version.");
   }
   if (currentVersion === AGENTERA_PRODUCT_SPACE_SCHEMA_VERSION) return;
   sqlite.exec("BEGIN IMMEDIATE");
@@ -269,7 +269,7 @@ export class AgenteraProductSpaceDatabase {
 
   private assertOpen(): void {
     if (this.closed)
-      throw new Error("AgentEra product-space database is closed.");
+      throw new Error("Aera product-space database is closed.");
   }
 
   private transaction<T>(action: () => T): T {
@@ -432,7 +432,7 @@ export function openAgenteraProductSpaceDatabase(
     assertOutsideHermesHome(canonicalDatabase);
     if (!isPathInside(canonicalRoot, canonicalDatabase)) {
       throw new Error(
-        "AgentEra product-space database must remain inside its protected root.",
+        "Aera product-space database must remain inside its protected root.",
       );
     }
     if (existsSync(paths.databasePath)) chmodSync(paths.databasePath, 0o600);

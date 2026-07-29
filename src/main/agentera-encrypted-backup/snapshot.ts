@@ -84,7 +84,7 @@ export class EncryptedBackupSnapshotError extends Error {
   readonly code: EncryptedBackupSnapshotErrorCode;
 
   constructor(code: EncryptedBackupSnapshotErrorCode) {
-    super(`AgentEra encrypted backup snapshot failed: ${code}.`);
+    super(`Aera encrypted backup snapshot failed: ${code}.`);
     this.name = "EncryptedBackupSnapshotError";
     this.code = code;
   }

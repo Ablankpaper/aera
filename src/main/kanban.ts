@@ -116,7 +116,7 @@ async function runKanban(
 
   const invocation = getRuntimeInvocation();
   if (invocation === null) {
-    return { success: false, error: "AgentEra Runtime is not prepared." };
+    return { success: false, error: "Aera Runtime is not prepared." };
   }
   const cliArgs = invocation.cliArgs();
   if (opts.profile && opts.profile !== "default") {
@@ -168,9 +168,9 @@ export function unsupportedInRemote<T>(): KanbanResult<T> {
     success: false,
     unsupportedMode: true,
     error:
-      "Kanban requires either a local AgentEra Runtime install or SSH tunnel mode. " +
+      "Kanban requires either a local Aera Runtime install or SSH tunnel mode. " +
       "Plain remote (HTTP+API key) mode does not yet expose the kanban API. " +
-      "Switch to SSH tunnel mode in Settings to use the board against a remote AgentEra Runtime.",
+      "Switch to SSH tunnel mode in Settings to use the board against a remote Aera Runtime.",
   };
 }
 

@@ -28,7 +28,7 @@ const UUID_PATTERN =
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 function invalidRequest(): Error {
-  return Object.assign(new Error("Invalid AgentEra Workspace request."), {
+  return Object.assign(new Error("Invalid Aera Workspace request."), {
     code: "invalid_request",
   });
 }
@@ -296,13 +296,17 @@ export function serializeWorkspaceInvitationCreation(
   if (hasToken !== hasURL) throw invalidRequest();
   if (!hasToken) return { ...invitation, secretReplayable: false };
   const token = requireToken(value.token);
-  if (value.inviteUrl !== `agentera://workspace-invitation#${token}`) {
+  const inviteUrl = `aera://workspace-invitation#${token}`;
+  if (
+    value.inviteUrl !== inviteUrl &&
+    value.inviteUrl !== `agentera://workspace-invitation#${token}`
+  ) {
     throw invalidRequest();
   }
   return {
     ...invitation,
     token,
-    inviteUrl: value.inviteUrl,
+    inviteUrl,
     secretReplayable: false,
   };
 }

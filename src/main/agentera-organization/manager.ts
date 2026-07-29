@@ -252,7 +252,7 @@ export class AgenteraOrganizationManagerError extends Error {
   readonly code: string;
 
   constructor(code: string) {
-    super(`AgentEra Organization operation failed: ${code}.`);
+    super(`Aera Organization operation failed: ${code}.`);
     this.name = "AgenteraOrganizationManagerError";
     this.code = code;
   }

@@ -1,9 +1,9 @@
 const auth = {
   gate: {
-    title: "Iniciar sessão no AgentEra",
-    checking: "A verificar a sua sessão do AgentEra…",
+    title: "Iniciar sessão no Aera",
+    checking: "A verificar a sua sessão do Aera…",
     browserNote:
-      "O registo, início de sessão e recuperação da palavra-passe são efetuados em segurança no navegador. O AgentEra Studio nunca recolhe a sua palavra-passe nem o código de verificação.",
+      "O registo, início de sessão e recuperação da palavra-passe são efetuados em segurança no navegador. O Aera nunca recolhe a sua palavra-passe nem o código de verificação.",
     openBrowser: "Abrir o navegador para iniciar sessão ou registar",
     waitingForBrowser: "A aguardar autorização no navegador…",
     cancel: "Cancelar",
@@ -12,14 +12,14 @@ const auth = {
     loginFailed:
       "A autorização no navegador não foi concluída. Tente novamente.",
     retryFailed:
-      "O AgentEra não conseguiu verificar a sua sessão. Tente novamente.",
+      "O Aera não conseguiu verificar a sua sessão. Tente novamente.",
     cancelled: "A autorização no navegador foi cancelada.",
     secureStorageTitle: "O armazenamento seguro não está disponível",
     secureStorageDescription:
-      "O AgentEra não consegue guardar a sessão deste dispositivo em segurança. Ative o porta-chaves ou serviço de credenciais do sistema e tente novamente. Nunca é usado armazenamento em texto simples.",
+      "O Aera não consegue guardar a sessão deste dispositivo em segurança. Ative o porta-chaves ou serviço de credenciais do sistema e tente novamente. Nunca é usado armazenamento em texto simples.",
     reasons: {
       sign_in_required:
-        "Inicie sessão ou crie uma conta antes de usar o AgentEra Studio.",
+        "Inicie sessão ou crie uma conta antes de usar o Aera.",
       offline_expired:
         "O acesso offline de sete dias expirou. Ligue-se à internet e inicie sessão novamente.",
       clock_rollback:
@@ -27,20 +27,20 @@ const auth = {
       device_revoked:
         "Este dispositivo já não está autorizado. Inicie sessão para o autorizar novamente.",
       account_disabled:
-        "Esta conta do AgentEra está desativada. Use a página da conta no navegador para obter ajuda.",
+        "Esta conta do Aera está desativada. Use a página da conta no navegador para obter ajuda.",
       account_pending_deletion:
-        "Esta conta aguarda eliminação e não pode autorizar o AgentEra Studio.",
+        "Esta conta aguarda eliminação e não pode autorizar o Aera.",
       secure_storage_unavailable:
-        "As sessões do AgentEra exigem armazenamento seguro do sistema.",
+        "As sessões do Aera exigem armazenamento seguro do sistema.",
     },
   },
   profile: {
     checkingTitle: "A verificar o acesso aos dados locais",
     checkingDescription:
-      "O AgentEra verifica apenas os metadados de propriedade sem abrir o conteúdo privado do Runtime.",
+      "O Aera verifica apenas os metadados de propriedade sem abrir o conteúdo privado do Runtime.",
     title: "Escolha como usar os seus dados locais",
     existingDescription:
-      "Foram encontrados dados do AgentEra Runtime neste dispositivo. Associe-os no local atual ou comece num espaço vazio separado.",
+      "Foram encontrados dados do Aera Runtime neste dispositivo. Associe-os no local atual ou comece num espaço vazio separado.",
     noUpload:
       "Nenhuma opção envia, copia, combina ou reescreve a sua Memory, sessões, ficheiros, competências, dados USER ou estado de aprendizagem.",
     useExisting: "Usar os dados locais existentes",
@@ -52,13 +52,13 @@ const auth = {
       "O ambiente de execução do Agente local está a ser preparado automaticamente.",
     connectionBindingTitle: "A proteger esta ligação do Runtime",
     connectionBindingDescription:
-      "A ligação remota ou SSH está a ser associada ao proprietário do AgentEra com sessão iniciada. Os tokens do produto não são enviados ao Runtime.",
+      "A ligação remota ou SSH está a ser associada ao proprietário do Aera com sessão iniciada. Os tokens do produto não são enviados ao Runtime.",
     otherOwnerTitle: "Estes dados locais pertencem a outra conta",
     otherOwnerDescription:
-      "O AgentEra não abrirá nem reatribuirá dados de um Agente local pertencentes a outra conta. Crie um espaço vazio separado ou inicie sessão como proprietário.",
+      "O Aera não abrirá nem reatribuirá dados de um Agente local pertencentes a outra conta. Crie um espaço vazio separado ou inicie sessão como proprietário.",
     remoteOtherOwnerTitle: "Esta ligação do Runtime pertence a outra conta",
     remoteOtherOwnerDescription:
-      "O AgentEra não herdará o contexto remoto ou SSH do proprietário anterior.",
+      "O Aera não herdará o contexto remoto ou SSH do proprietário anterior.",
     differentAccount: "Iniciar sessão com outra conta",
     failedTitle: "Não foi possível preparar o acesso local",
     failedDescription:
@@ -68,12 +68,12 @@ const auth = {
   offline: {
     title: "Modo local offline",
     description:
-      "As funcionalidades da conta na nuvem estão suspensas. O Agent local, APIs de modelos e aprendizagem Hermes continuam até ao prazo assinado.",
+      "As funcionalidades da conta na nuvem estão suspensas. O Agent local, APIs de modelos e aprendizagem Aera Runtime continuam até ao prazo assinado.",
   },
   account: {
-    settingsNav: "Conta AgentEra",
-    title: "Conta AgentEra",
-    openMenu: "Abrir menu da conta AgentEra",
+    settingsNav: "Conta Aera",
+    title: "Conta Aera",
+    openMenu: "Abrir menu da conta Aera",
     online: "Online · verificada",
     offline: "Offline · acesso local",
     manage: "Gerir conta",
@@ -82,14 +82,14 @@ const auth = {
     switch: "Mudar de conta",
     signOut: "Terminar sessão",
     actionFailed: "Não foi possível concluir esta ação da conta.",
-    unavailable: "As informações da conta AgentEra não estão disponíveis.",
+    unavailable: "As informações da conta Aera não estão disponíveis.",
     userId: "ID da conta",
     deviceId: "Dispositivo",
     offlineUntil: "O acesso offline assinado é válido até {{date}}.",
     localDataWarning:
-      "Eliminar a conta na nuvem ou terminar sessão não apaga, move, envia nem desassocia dados de Agentes locais, Memory, sessões, ficheiros, competências ou aprendizagem do Hermes.",
+      "Eliminar a conta na nuvem ou terminar sessão não apaga, move, envia nem desassocia dados de Agentes locais, Memory, sessões, ficheiros, competências ou aprendizagem do Aera Runtime.",
     rechargeSeparateAccount:
-      "O carregamento abre o site independente de API de modelos. Contas, saldos, chaves, cookies e tokens são separados da conta AgentEra.",
+      "O carregamento abre o site independente de API de modelos. Contas, saldos, chaves, cookies e tokens são separados da conta Aera.",
     pendingRevocationWarning:
       "Ao terminar sessão sem acesso ao serviço de controlo, o dispositivo pode continuar no limite de cinco até a revogação assinada ser entregue automaticamente.",
   },

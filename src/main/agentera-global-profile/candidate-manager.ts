@@ -43,7 +43,7 @@ export class AgenteraMemoryCandidateManager {
 
   constructor(options: AgenteraMemoryCandidateManagerOptions) {
     if (!isAbsolute(options.userDataPath)) {
-      throw new Error("AgentEra candidate userData path must be absolute.");
+      throw new Error("Aera candidate userData path must be absolute.");
     }
     this.rootPath = join(
       resolve(options.userDataPath),
@@ -216,7 +216,7 @@ export class AgenteraMemoryCandidateManager {
   private validNow(): Date {
     const value = this.now();
     if (!Number.isFinite(value.getTime())) {
-      throw new Error("AgentEra candidate clock is invalid.");
+      throw new Error("Aera candidate clock is invalid.");
     }
     return value;
   }
@@ -357,7 +357,7 @@ function proposalFingerprint(
 
 function normalizeUserId(value: unknown): string {
   if (typeof value !== "string" || !USER_ID_RE.test(value)) {
-    throw new Error("AgentEra memory candidate owner is invalid.");
+    throw new Error("Aera memory candidate owner is invalid.");
   }
   return value.toLowerCase();
 }

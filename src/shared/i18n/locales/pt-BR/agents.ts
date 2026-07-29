@@ -3,7 +3,7 @@ import enAgents from "../en/agents";
 export default {
   title: "Agentes",
   subtitle:
-    "Cada agente funciona em um ambiente isolado do AgentEra com sua própria configuração, memória e habilidades",
+    "Cada agente funciona em um ambiente isolado do Aera com sua própria configuração, memória e habilidades",
   newAgent: "Novo Agente",
   namePlaceholder: "Nome do agente (ex: coder)",
   createTitle: "Novo agente",
@@ -54,7 +54,7 @@ export default {
   walletCreateFailed: "Couldn't add wallet",
   walletRecoveryTitle: "Recovery phrase",
   walletRecoveryInfo:
-    "Save this phrase now. AgentEra will not show it again after this modal closes.",
+    "Save this phrase now. Aera will not show it again after this modal closes.",
   walletCopyRecovery: "Copy phrase",
   walletDone: "I've saved it",
   walletBalanceLoading: "Loading…",
@@ -62,7 +62,7 @@ export default {
   walletBalanceRefresh: "Refresh",
   walletDeleteTitle: "Remove wallet",
   walletDeleteWarning:
-    "This will permanently remove this wallet from AgentEra. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
+    "This will permanently remove this wallet from Aera. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
   walletDeleteConfirmLabel: "Remove wallet",
   control: {
     experience: enAgents.control.experience,
@@ -125,7 +125,7 @@ export default {
       withdraw: "Retirar envio",
       confirmWithdrawal: "Confirmar retirada",
       withdrawalBoundary:
-        "A retirada só encerra este envio pendente; rascunhos locais e dados do Hermes não mudam.",
+        "A retirada só encerra este envio pendente; rascunhos locais e dados do Aera Runtime não mudam.",
       draftReadOnly:
         "Este rascunho empresarial é somente leitura. Reconecte-se como Proprietário ou Administrador para alterá-lo.",
     },

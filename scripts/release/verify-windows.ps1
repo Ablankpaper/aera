@@ -62,8 +62,8 @@ function Find-ExtractedSeed([string]$Root) {
 $dist = (Resolve-Path $DistDirectory).Path
 $reference = (Resolve-Path $RuntimeSeedReference).Path
 $manifest = Get-Item (Resolve-Path $RuntimeSeedManifest).Path
-$setup = @(Get-ChildItem $dist -File -Filter "agentera-studio-$DesktopVersion-setup.exe")
-$portable = @(Get-ChildItem $dist -File -Filter "agentera-studio-$DesktopVersion-portable.exe")
+$setup = @(Get-ChildItem $dist -File -Filter "Aera-$DesktopVersion-setup.exe")
+$portable = @(Get-ChildItem $dist -File -Filter "Aera-$DesktopVersion-portable.exe")
 if ($setup.Count -ne 1 -or $portable.Count -ne 1) {
   throw "Expected one NSIS setup and one portable Windows executable"
 }

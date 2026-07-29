@@ -655,7 +655,7 @@ export async function downloadWithResume(
     for (let restart = 0; restart < 2; restart += 1) {
       const headers: Record<string, string> = {
         Accept: "application/octet-stream",
-        "User-Agent": "AgentEra-Studio-Runtime-Updater",
+        "User-Agent": "Aera-Studio-Runtime-Updater",
       };
       if (state && state.received > 0) {
         headers.Range = `bytes=${state.received}-`;

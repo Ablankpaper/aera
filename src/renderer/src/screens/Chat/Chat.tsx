@@ -12,6 +12,7 @@ import { RemoteFolderPicker } from "./RemoteFolderPicker";
 import { WebPreviewPanel } from "./WebPreviewPanel";
 import { useChatScroll } from "./hooks/useChatScroll";
 import { useChatIPC } from "./hooks/useChatIPC";
+import { useAgentCreationGuide } from "./hooks/useAgentCreationGuide";
 import { useChatActions, parseBackgroundCommand } from "./hooks/useChatActions";
 import {
   useModelConfig,
@@ -28,7 +29,9 @@ import {
 import { useI18n } from "../../components/useI18n";
 import { buildChatTranscript } from "./transcriptUtils";
 import { ConfigHealthBanner } from "../../components/ConfigHealthBanner";
+import { ConversationBoundaryIndicator } from "./ConversationBoundaryIndicator";
 import type { Attachment } from "../../../../shared/attachments";
+import type { AgenteraConversationBoundarySummary } from "../../../../shared/agentera-global-profile";
 import type { SessionModelOverride } from "../../../../shared/model-override";
 import type { ActiveTurn, ChatMessage, UsageState } from "./types";
 import type { ContextUsage } from "./ContextGauge";
@@ -99,6 +102,8 @@ interface ChatProps {
    *  "Show details" (no section) or a `/settings <section>` command, which
    *  passes the section name to scroll to. */
   onOpenDiagnose?: (section?: string) => void;
+  /** Opens the product Agent control plane after a guided draft is created. */
+  onOpenMyAgents?: () => void;
   /** Reports the agent generating state so the sidebar / active-sessions bar
    *  can show a spinner on each running session. */
   onLoadingChange?: (runId: string, loading: boolean) => void;
@@ -124,6 +129,7 @@ function Chat({
   onSessionStarted,
   onNewChat,
   onOpenDiagnose,
+  onOpenMyAgents,
   onLoadingChange,
   onSessionIdChange,
   onTitleChange,
@@ -151,9 +157,18 @@ function Chat({
     isAgentBusy: isLoading,
     messages,
   });
+  const agentCreationGuide = useAgentCreationGuide();
   const visibleMessages = useMemo<ChatMessage[]>(
-    () => [...messages, ...memoryCandidates.candidateMessages],
-    [messages, memoryCandidates.candidateMessages],
+    () => [
+      ...messages,
+      ...memoryCandidates.candidateMessages,
+      ...agentCreationGuide.guideMessages,
+    ],
+    [
+      messages,
+      memoryCandidates.candidateMessages,
+      agentCreationGuide.guideMessages,
+    ],
   );
   useEffect(() => {
     onLoadingChange?.(runId, isLoading);
@@ -271,6 +286,8 @@ function Chat({
     globalProfileRequiresBoundTransport,
     setGlobalProfileRequiresBoundTransport,
   ] = useState(true);
+  const [conversationBoundary, setConversationBoundary] =
+    useState<AgenteraConversationBoundarySummary | null>(null);
   const globalProfileContextRequestRef = useRef(0);
   const prepareGlobalProfileConversationContext = useCallback(
     async (resumeSessionId: string | null): Promise<void> => {
@@ -290,6 +307,7 @@ function Chat({
           resumeSessionId,
         });
         if (requestId === globalProfileContextRequestRef.current) {
+          setConversationBoundary(context.conversationBoundary);
           setGlobalProfileRequiresBoundTransport(
             context.requiresBoundApiTransport,
           );
@@ -832,6 +850,7 @@ function Chat({
       : undefined,
     onNaturalLanguageMessageStarted:
       memoryCandidates.onNaturalLanguageMessageStarted,
+    interceptNaturalLanguageMessage: agentCreationGuide.intercept,
   });
 
   // Stable ref to handleSend so the drain effect doesn't re-trigger on
@@ -1101,6 +1120,9 @@ function Chat({
       onDrop={handleDrop}
     >
       <ConfigHealthBanner profile={profile} onOpenDiagnose={onOpenDiagnose} />
+      {conversationBoundary && (
+        <ConversationBoundaryIndicator boundary={conversationBoundary} />
+      )}
 
       <div className="chat-body">
         <div className="chat-messages" ref={containerRef}>
@@ -1120,6 +1142,11 @@ function Chat({
               onMemoryCandidateReject={(batchId) =>
                 void memoryCandidates.reject(batchId)
               }
+              onAgentCreationConfirm={(messageId, input) =>
+                void agentCreationGuide.confirm(messageId, input)
+              }
+              onAgentCreationDismiss={agentCreationGuide.dismiss}
+              onOpenMyAgents={onOpenMyAgents}
               agentAvatar={agentAvatar}
             />
           )}

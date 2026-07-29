@@ -100,7 +100,7 @@ export class RuntimeActivityCoordinator {
   async withSnapshot<T>(operation: () => Promise<T> | T): Promise<T> {
     const lease = this.beginSnapshot();
     if (!lease) {
-      throw new Error("AgentEra Runtime is busy.");
+      throw new Error("Aera Runtime is busy.");
     }
     try {
       return await operation();

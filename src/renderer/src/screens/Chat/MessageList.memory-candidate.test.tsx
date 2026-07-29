@@ -43,6 +43,8 @@ describe("MessageList memory-candidate row", () => {
         onClarifyResolved={vi.fn()}
         onMemoryCandidateConfirm={vi.fn()}
         onMemoryCandidateReject={vi.fn()}
+        onAgentCreationConfirm={vi.fn()}
+        onAgentCreationDismiss={vi.fn()}
       />,
     );
 

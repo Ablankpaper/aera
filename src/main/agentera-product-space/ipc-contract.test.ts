@@ -10,7 +10,7 @@ import {
 const WORKSPACE_ID = "20000000-0000-4000-8000-000000000001";
 const ORGANIZATION_ID = "30000000-0000-4000-8000-000000000001";
 
-describe("AgentEra product-space IPC contract", () => {
+describe("Aera product-space IPC contract", () => {
   it("accepts only an exact selection discriminant and server-known scope ID", () => {
     expect(parseProductSpaceSelectionInput({ kind: "PERSONAL" })).toEqual({
       kind: "PERSONAL",

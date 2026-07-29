@@ -368,7 +368,7 @@ describe("AgenteraGlobalProfileManager", () => {
     );
     expect(resumed).toEqual({
       success: false,
-      error: "AgentEra global profile conversation snapshot is corrupt.",
+      error: "Aera global profile conversation snapshot is corrupt.",
     });
     expect(summarizeGlobalProfileConversationSnapshot(resumed)).toEqual({
       globalProfileVersion: null,
@@ -408,7 +408,7 @@ describe("AgenteraGlobalProfileManager", () => {
     ).toEqual({
       success: false,
       error:
-        "Hermes session is already bound to another global profile snapshot.",
+        "Aera Runtime session is already bound to another global profile snapshot.",
     });
     expect(
       store.prepareConversationSnapshot(USER_ONE, "conversation-resume", {
@@ -428,12 +428,12 @@ describe("AgenteraGlobalProfileManager", () => {
     };
     const composed = composeGlobalProfileEnvelope(
       existing,
-      "[System note: AgentEra global user behavior profile]\n[/System note]",
+      "[System note: Aera global user behavior profile]\n[/System note]",
     );
     if (!composed) throw new Error("missing composed envelope");
 
     expect(composed.instructions).toBe(
-      `${existing.instructions}\n\n[System note: AgentEra global user behavior profile]\n[/System note]`,
+      `${existing.instructions}\n\n[System note: Aera global user behavior profile]\n[/System note]`,
     );
     expect(composed.requireBoundApiTransport).toBe(true);
   });

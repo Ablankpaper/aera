@@ -12,6 +12,11 @@ import type {
 import { Plus, X } from "../../assets/icons";
 import { AppModal, AppModalTitle } from "../../components/modal/AppModal";
 import { useI18n } from "../../components/useI18n";
+import {
+  createDefaultAgentManifest,
+  DEFAULT_AGENT_MODEL,
+  DEFAULT_AGENT_PROVIDER,
+} from "./agentDraftDefaults";
 
 interface EditableAssetRow {
   key: string;
@@ -47,37 +52,12 @@ export interface AgentDraftEditorProps {
   modelProfileId?: string;
 }
 
-const DEFAULT_RUNTIME_VERSION = "v0.18.2-agentera.1";
-const DEFAULT_PROVIDER = "openai";
-const DEFAULT_MODEL = "gpt-5.6";
 const MAX_UPLOAD_BYTES = 256 * 1024;
 const ASSET_DIRECTORY: Record<AgentDraftAssetKind, string> = {
   skill: "skills",
   sop: "sop",
   knowledge: "knowledge",
 };
-
-function newManifest(
-  systemPrompt: string,
-  provider = DEFAULT_PROVIDER,
-  model = DEFAULT_MODEL,
-): AgentEditableManifest {
-  return {
-    schemaVersion: 1,
-    identity: { systemPrompt },
-    assets: [],
-    modelConstraints: {
-      allowedProviders: [provider],
-      allowedModels: [model],
-    },
-    tools: { allowed: [], denied: [] },
-    dependencies: [],
-    runtimeCompatibility: {
-      minimumVersion: DEFAULT_RUNTIME_VERSION,
-      maximumVersionExclusive: null,
-    },
-  };
-}
 
 function assetRows(draft: AgentDraftDetail | null): EditableAssetRow[] {
   if (!draft) return [];
@@ -98,9 +78,10 @@ function modelKey(provider: string, model: string): string {
 
 function currentModelChoice(draft: AgentDraftDetail | null): ModelChoice {
   const provider =
-    draft?.manifest.modelConstraints.allowedProviders[0] ?? DEFAULT_PROVIDER;
+    draft?.manifest.modelConstraints.allowedProviders[0] ??
+    DEFAULT_AGENT_PROVIDER;
   const model =
-    draft?.manifest.modelConstraints.allowedModels[0] ?? DEFAULT_MODEL;
+    draft?.manifest.modelConstraints.allowedModels[0] ?? DEFAULT_AGENT_MODEL;
   return {
     key: modelKey(provider, model),
     provider,
@@ -304,7 +285,7 @@ export default function AgentDraftEditor({
   const manifest = useMemo<AgentEditableManifest>(() => {
     const base =
       current?.manifest ??
-      newManifest(
+      createDefaultAgentManifest(
         systemPrompt.trim(),
         selectedModel.provider,
         selectedModel.model,

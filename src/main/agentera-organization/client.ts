@@ -107,7 +107,7 @@ export class AgenteraOrganizationClientError extends Error {
     code: string,
     retryAfterSeconds: number | null = null,
   ) {
-    super(`AgentEra Organization request failed: ${code}.`);
+    super(`Aera Organization request failed: ${code}.`);
     this.name = "AgenteraOrganizationClientError";
     this.status = status;
     this.code = code;
@@ -558,20 +558,23 @@ function copyInvitationCreation(
   const invitation = copyInvitation(value.invitation);
   if (!invitation) return null;
   const first = status === 201;
+  const token = typeof value.token === "string" ? value.token : "";
+  const expectedCurrentURL = `aera://organization-invitation#${token}`;
+  const expectedLegacyURL = `agentera://organization-invitation#${token}`;
   if (
     first !== Object.hasOwn(value, "token") ||
     first !== Object.hasOwn(value, "invite_url") ||
     (first &&
       (!isCanonicalBase64URL(value.token, TOKEN_PATTERN, 32) ||
-        value.invite_url !==
-          `agentera://organization-invitation#${value.token}`))
+        (value.invite_url !== expectedCurrentURL &&
+          value.invite_url !== expectedLegacyURL)))
   ) {
     return null;
   }
   return {
     invitation,
     ...(first
-      ? { token: value.token as string, inviteUrl: value.invite_url as string }
+      ? { token, inviteUrl: expectedCurrentURL }
       : {}),
     secretReplayable: false,
   };
@@ -1026,7 +1029,7 @@ export class AgenteraOrganizationClient {
       this.timeoutMs < 1 ||
       this.timeoutMs > 120_000
     ) {
-      throw new Error("AgentEra Organization client configuration is invalid.");
+      throw new Error("Aera Organization client configuration is invalid.");
     }
   }
 

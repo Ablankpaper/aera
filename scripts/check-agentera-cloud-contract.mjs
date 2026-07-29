@@ -142,7 +142,6 @@ const ERROR_CODES = [
   "organization_publication_dlp_blocked",
   "organization_publication_policy_blocked",
   "organization_submission_conflict",
-  "organization_submission_self_review",
   "organization_submission_superseded",
   "official_agent_not_eligible",
   "official_client_version_unsupported",
@@ -199,7 +198,6 @@ const ORGANIZATION_AGENT_ERROR_CODES = [
   "organization_publication_dlp_blocked",
   "organization_publication_policy_blocked",
   "organization_submission_conflict",
-  "organization_submission_self_review",
   "organization_submission_superseded",
   "service_unavailable",
   "session_revoked",
@@ -858,7 +856,7 @@ const LOOPBACK_CALLBACK_RESPONSE =
   "^http://127\\.0\\.0\\.1:[1-9][0-9]{0,4}/agentera/oauth/callback\\?";
 
 function fail(message) {
-  throw new Error(`AgentEra cloud contract check failed: ${message}`);
+  throw new Error(`Aera cloud contract check failed: ${message}`);
 }
 
 function object(value, label) {
@@ -1941,4 +1939,4 @@ if (process.env.AGENTERA_SKIP_SIBLING_CONTRACT !== "1" && existsSync(sibling)) {
   }
 }
 
-process.stdout.write(`AgentEra cloud contract OK: ${contractSha256}\n`);
+process.stdout.write(`Aera cloud contract OK: ${contractSha256}\n`);

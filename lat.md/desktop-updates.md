@@ -2,7 +2,7 @@
 
 Packaged Desktop updates use a version-selected public or signed Internal Beta channel. Development and Windows portable builds stay offline.
 
-Public releases continue to use `electron-updater` with the GitHub publisher metadata from `electron-builder.yml`. Versions matching `-internal-beta.N` use the separately signed Internal Beta channel at the baked AgentEra Cloud Origin under `/desktop-updates/internal-beta`.
+Public releases continue to use `electron-updater` with the GitHub publisher metadata from `electron-builder.yml`. Versions matching `-internal-beta.N` use the separately signed Internal Beta channel at the baked Aera Cloud Origin under `/desktop-updates/internal-beta`.
 
 [[src/main/app/updater.ts#setupUpdater]] registers one IPC contract for both channels, persists the auto-upgrade preference under Electron `userData`, performs the first packaged-app check after five seconds, and repeats checks every six hours. It also retains a current snapshot so a renderer created after a background check can recover the `available`, `downloading`, `ready`, or `error` state through `getDesktopUpdateState`.
 

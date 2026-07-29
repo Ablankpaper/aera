@@ -85,6 +85,13 @@ interface UseChatActionsArgs {
   /** Starts additive, renderer-local candidate recognition only after the
    * Hermes request has already been dispatched. */
   onNaturalLanguageMessageStarted?: (text: string, turnId: string) => void;
+  /** Claims a strict product-level natural-language interaction before Hermes
+   * runs. Returning true means the renderer has supplied the guided response. */
+  interceptNaturalLanguageMessage?: (
+    text: string,
+    turnId: string,
+    attachments?: Attachment[],
+  ) => boolean;
 }
 
 interface UseChatActionsResult {
@@ -135,6 +142,7 @@ export function useChatActions({
   enqueueMessage,
   abortDashboard,
   onNaturalLanguageMessageStarted,
+  interceptNaturalLanguageMessage,
 }: UseChatActionsArgs): UseChatActionsResult {
   const messagesRef = useRef(messages);
   const isLoadingRef = useRef(isLoading);
@@ -313,7 +321,7 @@ export function useChatActions({
             (async () => ({
               kind: "error",
               message:
-                "This command requires the AgentEra Runtime gateway. Switch chat transport to Auto or Dashboard and try again.",
+                "This command requires the Aera Runtime gateway. Switch chat transport to Auto or Dashboard and try again.",
             })),
           submitPrompt: async (submission: PreparedModelSubmission) => {
             removePending();
@@ -381,8 +389,18 @@ export function useChatActions({
         return;
       }
 
-      setIsLoading(true);
       const turn = pushUser(text, "user", attachments);
+      try {
+        if (
+          interceptNaturalLanguageMessage?.(text, turn.turnId, attachments) ===
+          true
+        ) {
+          return;
+        }
+      } catch {
+        // A renderer guide must fail open to the regular Hermes request.
+      }
+      setIsLoading(true);
       activeTurnRef.current = {
         ...turn,
         startIndex: messagesRef.current.length,
@@ -413,6 +431,7 @@ export function useChatActions({
       pushUser,
       onSessionStarted,
       onNaturalLanguageMessageStarted,
+      interceptNaturalLanguageMessage,
       sendToAgent,
       setIsLoading,
       setMessages,

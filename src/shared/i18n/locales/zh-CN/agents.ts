@@ -78,7 +78,7 @@ export default {
   walletCreateFailed: "无法添加钱包",
   walletRecoveryTitle: "助记词",
   walletRecoveryInfo:
-    "请立即保存此助记词。关闭此窗口后，AgentEra 不会再次显示。",
+    "请立即保存此助记词。关闭此窗口后，Aera 不会再次显示。",
   walletCopyRecovery: "复制助记词",
   walletDone: "我已保存",
   walletBalanceLoading: "加载中…",
@@ -86,14 +86,14 @@ export default {
   walletBalanceRefresh: "刷新",
   walletDeleteTitle: "移除钱包",
   walletDeleteWarning:
-    "这会从 AgentEra 永久移除此钱包。请确认已经备份助记词，否则将无法恢复钱包。",
+    "这会从 Aera 永久移除此钱包。请确认已经备份助记词，否则将无法恢复钱包。",
   walletDeleteConfirmLabel: "移除钱包",
   sync: "同步",
   syncing: "同步中…",
   syncSignedOut: "未同步",
   syncSignedOutHint:
-    "请在提供商页面登录 AgentEra Studio 账户，以将智能体备份到云端。",
-  syncUpToDate: "已与 AgentEra Studio 账户同步",
+    "请在提供商页面登录 Aera 账户，以将智能体备份到云端。",
+  syncUpToDate: "已与 Aera 账户同步",
   syncSummary:
     "同步完成：上传 {{pushed}} 项、拉取 {{pulled}} 项、新增 {{created}} 项",
   syncErrors: "同步完成，但有 {{count}} 个错误",
@@ -101,14 +101,14 @@ export default {
   syncFailed: "同步失败",
   syncTitle: "云同步",
   syncPaneSubtitle:
-    "将此智能体备份到 AgentEra Studio 账户，并拉取控制台中的更改。",
+    "将此智能体备份到 Aera 账户，并拉取控制台中的更改。",
   syncNow: "立即同步",
   syncAccount: "账户",
   syncLink: "云端智能体",
   syncLinked: "已关联",
   syncNotLinked: "尚未关联，同步后会自动创建",
   syncLastResult: "上次同步",
-  syncSignInHint: "请在提供商页面登录 AgentEra Studio 账户，以同步此智能体。",
+  syncSignInHint: "请在提供商页面登录 Aera 账户，以同步此智能体。",
   syncAction: {
     "up-to-date": "已是最新",
     pushed: "已上传到云端",
@@ -124,11 +124,11 @@ export default {
   walletSourceCloud: "云端",
   walletManagedEmpty: "暂无钱包",
   walletSyncedHint:
-    "钱包由 AgentEra Studio 账户管理，此智能体完成同步后会显示在这里。",
+    "钱包由 Aera 账户管理，此智能体完成同步后会显示在这里。",
   walletSignInHint:
-    "请在提供商页面登录 AgentEra Studio 账户，以查看此智能体的钱包。",
+    "请在提供商页面登录 Aera 账户，以查看此智能体的钱包。",
   walletForeignHint:
-    "此智能体关联到另一个 AgentEra Studio 账户，因此这里不会改动其钱包。",
+    "此智能体关联到另一个 Aera 账户，因此这里不会改动其钱包。",
   hub: {
     officialTab: "官方智能体",
     mineTab: "我的智能体",
@@ -137,9 +137,10 @@ export default {
     filters: "筛选智能体",
     officialTitle: "官方智能体",
     officialSubtitle:
-      "由 AgentEra 官方审核发布，安装后在独立的本地空间中运行。",
+      "由 Aera 官方审核发布，安装后在独立的本地空间中运行。",
     mineSubtitle: "创建和管理属于你的智能体，点击卡片即可查看能力并开始对话。",
-    workspaceSubtitle: "浏览当前工作空间的智能体，或管理你有权限维护的智能体。",
+    workspaceSubtitle:
+      "浏览当前团队或项目的智能体，或管理你有权限维护的智能体。",
     organizationSubtitle:
       "浏览企业智能体，并在权限允许时完成创建、审核与安装。",
     officialFilter: {
@@ -166,11 +167,11 @@ export default {
     createAgent: "创建智能体",
     officialEmptyHint: "官方智能体发布后会显示在这里。",
     officialOfflineHint: "联网后可浏览官方目录；已启用智能体仍可在本地使用。",
-    officialPublisher: "AgentEra 官方",
+    officialPublisher: "Aera 官方",
     officialCardDescription:
-      "{{name}} 已由 AgentEra 官方审核，可直接开始使用。",
+      "{{name}} 已由 Aera 官方审核，可直接开始使用。",
     officialDetailFallback:
-      "{{name}} 是由 AgentEra 官方发布的智能体，可在本地独立运行并协助完成任务。",
+      "{{name}} 是由 Aera 官方发布的智能体，可在本地独立运行并协助完成任务。",
     personalCardFallback: "这个智能体已准备好根据你的要求完成专属任务。",
     publishedCardDescription: "已发布并可使用，系统会自动完成准备。",
     installedCardDescription: "已准备就绪，点击查看详情并开始使用。",
@@ -178,8 +179,8 @@ export default {
     localProfileDescription:
       "使用 {{model}} 模型，已配置 {{count}} 个 Skill，可直接进入对话。",
     localProfileNoModel: "这个本地智能体尚未配置大模型。",
-    personalAgent: "个人智能体",
-    workspaceAgent: "工作空间智能体",
+    personalAgent: "我的智能体",
+    workspaceAgent: "团队 / 项目智能体",
     organizationAgent: "企业智能体",
     localAgent: "本地智能体",
     published: "已发布",
@@ -210,16 +211,16 @@ export default {
     advancedSubtitle: "经验提升、企业审核与权限治理",
   },
   control: {
-    personalSpace: "个人空间",
-    personalSpaceTitle: "个人空间智能体",
+    personalSpace: "我的",
+    personalSpaceTitle: "我的智能体",
     personalSpaceSubtitle:
       "本地草稿、不可变发布版本与隔离安装。运行数据不会被混成普通云同步。",
-    workspaceSpace: "工作空间",
-    workspaceSpaceTitle: "工作空间智能体",
+    workspaceSpace: "团队 / 项目",
+    workspaceSpaceTitle: "团队 / 项目智能体",
     workspaceAuthorSubtitle:
-      "创建、发布和使用工作空间智能体，底层运行隔离由系统自动完成。",
+      "创建、发布和使用团队/项目智能体，底层运行隔离由系统自动完成。",
     workspaceMemberSubtitle:
-      "直接使用已批准的工作空间智能体；成员不具备草稿与发布权限。",
+      "直接使用已批准的团队/项目智能体；成员不具备草稿与发布权限。",
     role: {
       owner: "所有者",
       admin: "管理员",
@@ -266,7 +267,7 @@ export default {
       withdraw: "撤回提交",
       confirmWithdrawal: "确认撤回",
       withdrawalBoundary:
-        "撤回只会关闭这条待审核提交；本地草稿与 Hermes 数据保持不变。",
+        "撤回只会关闭这条待审核提交；本地草稿与 Aera Runtime 数据保持不变。",
       draftReadOnly:
         "此企业草稿当前只读；请重新联网并使用 Owner 或 Admin 角色后再修改或提交。",
     },
@@ -302,7 +303,7 @@ export default {
     offlineNotice:
       "当前使用离线授权。本地草稿和已安装智能体仍可使用；发布、发现、安装与对账已暂停。",
     workspaceOfflineNotice:
-      "工作空间当前离线。已验证安装仍可在本地使用；草稿只读，发布、发现、安装与更新均已暂停。",
+      "团队/项目当前离线。已验证安装仍可在本地使用；草稿只读，发布、发现、安装与更新均已暂停。",
     localDrafts: "本地草稿",
     noDrafts: "暂无本地草稿。",
     revision: "修订",
@@ -328,7 +329,7 @@ export default {
     editDraftTitle: "编辑智能体",
     localDraftStatus: "先完善智能体身份与能力，再保存草稿或直接发布。",
     workspaceDraftReadOnly:
-      "离线期间此工作空间草稿只读；重新连接后才能修改或发布。",
+      "离线期间此团队/项目草稿只读；重新连接后才能修改或发布。",
     name: "智能体名称",
     systemPrompt: "身份与工作方式",
     allowedProviders: "运行服务",
@@ -391,7 +392,7 @@ export default {
       promoteLocalExperience: "提升本地经验",
       promotionTitle: "提升本地经验",
       promotionSubtitle:
-        "选择一个已学习 Skill，先检查本地隐私扫描结果，再明确提交到工作空间审核。",
+        "选择一个已学习 Skill，先检查本地隐私扫描结果，再明确提交到团队/项目审核。",
       privateBoundary:
         "只准备你选中的 Skill 文件。记忆、身份、对话、会话、凭据以及其他未选中的本地学习成果都留在这台电脑。",
       skill: "已学习 Skill",
@@ -412,8 +413,8 @@ export default {
         credential_api_key: "API Key",
         credential_environment_secret: "环境变量密钥",
         private_absolute_path: "本机绝对路径",
-        private_memory_payload: "Hermes Memory 数据",
-        private_user_payload: "Hermes USER 数据",
+        private_memory_payload: "Aera Runtime Memory 数据",
+        private_user_payload: "Aera Runtime USER 数据",
         private_session_payload: "会话数据",
         private_conversation_payload: "对话数据",
         private_credential_store_payload: "凭据存储数据",
@@ -421,7 +422,7 @@ export default {
       },
       onlineToSubmit: "预览已安全保存在本地；联网后才能提交审核。",
       submitConfirmation:
-        "我明确选择把这个 Skill 提交到工作空间审核，并理解提交不等于发布智能体版本。",
+        "我明确选择把这个 Skill 提交到团队/项目审核，并理解提交不等于发布智能体版本。",
       submitForReview: "提交审核",
       retryUpload: "手动重试上传",
       myCandidates: "我的经验候选",
@@ -447,10 +448,10 @@ export default {
       rejectionReason: "拒绝原因",
       chooseReason: "选择原因",
       reason: {
-        not_reusable: "不适合在工作空间复用",
+        not_reusable: "不适合在团队/项目内复用",
         insufficient_quality: "质量仍需完善",
         wrong_scope: "属于其他智能体或作用域",
-        policy_blocked: "被工作空间策略阻止",
+        policy_blocked: "被团队/项目策略阻止",
       },
       safeNote: "可选安全备注",
       commitReview: "提交审核决定",
@@ -468,25 +469,23 @@ export default {
     },
     errors: {
       invalid_request: "智能体请求无效。",
-      sign_in_required: "请先登录 AgentEra Studio。",
-      online_required: "此操作需要连接 AgentEra Cloud。",
-      entitlement_required: "需要续期 AgentEra 使用授权。",
+      sign_in_required: "请先登录 Aera。",
+      online_required: "此操作需要连接 Aera Cloud。",
+      entitlement_required: "需要续期 Aera 使用授权。",
       not_found: "该智能体内容已不存在。",
       conflict: "草稿或安装已发生变化，请刷新后重试。",
       verification_failed: "无法验证智能体签名版本。",
       runtime_incompatible: "该智能体版本暂不支持此电脑上的本地运行环境。",
       local_runtime_required:
         "本地智能体服务尚未就绪，请稍后重试，系统会自动完成准备。",
-      cloud_unavailable: "AgentEra Cloud 暂时不可用。",
-      workspace_forbidden: "当前工作空间角色不允许执行此智能体操作。",
-      workspace_archived: "该工作空间已归档，智能体资产处于只读状态。",
+      cloud_unavailable: "Aera Cloud 暂时不可用。",
+      workspace_forbidden: "当前团队/项目角色不允许执行此智能体操作。",
+      workspace_archived: "该团队或项目已归档，智能体资产处于只读状态。",
       workspace_owner_unavailable:
-        "工作空间 Owner 账户恢复可用前，智能体资产保持只读。",
+        "团队/项目 Owner 账户恢复可用前，智能体资产保持只读。",
       organization_agent_not_found: "该企业智能体内容已不存在。",
       organization_agent_forbidden: "当前企业角色不允许执行此智能体操作。",
       organization_archived: "该企业组织已归档，智能体资产处于只读状态。",
-      organization_submission_self_review:
-        "必须由另一位 Owner 或 Admin 审核此提交。",
       organization_submission_conflict: "企业提交已发生变化，请刷新后重试。",
       organization_submission_superseded: "此提交已被更新的企业提交替代。",
       organization_publication_policy_blocked: "企业策略阻止了此智能体提交。",
@@ -495,7 +494,7 @@ export default {
         "当前账户和设备不在此官方智能体的可用范围内。",
       official_release_paused: "此官方发布已暂停新安装。",
       official_client_version_unsupported:
-        "请先更新 AgentEra Studio，再安装此官方智能体。",
+        "请先更新 Aera，再安装此官方智能体。",
       official_installation_policy_blocked: "平台策略不允许安装此官方智能体。",
       candidate_source_ineligible: "该安装或 Skill 不符合经验提升条件。",
       candidate_dlp_blocked: "本地隐私扫描阻止了该候选。",
@@ -503,7 +502,7 @@ export default {
       candidate_not_approved: "只有已批准候选才能创建草稿。",
       candidate_base_advanced: "智能体发布版本已前进，请刷新导入预览。",
       candidate_import_failed:
-        "无法把已批准 Skill 写入本地草稿；云端批准和 Hermes 本地学习成果均未改变。",
+        "无法把已批准 Skill 写入本地草稿；云端批准和 Aera Runtime 本地学习成果均未改变。",
       operation_failed: "无法安全完成该智能体操作。",
     },
   },

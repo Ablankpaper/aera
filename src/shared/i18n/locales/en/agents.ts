@@ -4,7 +4,7 @@ export default {
     "Create, publish, and use Agents while private data and learning stay local",
   legacyTitle: "On-device Agents",
   legacySubtitle:
-    "AgentEra automatically prepares and isolates each Agent; no runtime management is required.",
+    "Aera automatically prepares and isolates each Agent; no runtime management is required.",
   legacyAccountSyncLabel: "legacy account sync",
   legacyNewProfile: "New on-device Agent",
   newAgent: "New Agent",
@@ -80,7 +80,7 @@ export default {
   walletCreateFailed: "Couldn't add wallet",
   walletRecoveryTitle: "Recovery phrase",
   walletRecoveryInfo:
-    "Save this phrase now. AgentEra will not show it again after this modal closes.",
+    "Save this phrase now. Aera will not show it again after this modal closes.",
   walletCopyRecovery: "Copy phrase",
   walletDone: "I've saved it",
   walletBalanceLoading: "Loading…",
@@ -88,7 +88,7 @@ export default {
   walletBalanceRefresh: "Refresh",
   walletDeleteTitle: "Remove wallet",
   walletDeleteWarning:
-    "This will permanently remove this wallet from AgentEra. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
+    "This will permanently remove this wallet from Aera. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
   walletDeleteConfirmLabel: "Remove wallet",
   hub: {
     officialTab: "Official Agents",
@@ -98,11 +98,11 @@ export default {
     filters: "Filter Agents",
     officialTitle: "Official Agents",
     officialSubtitle:
-      "Reviewed and published by AgentEra, then installed into an isolated local space.",
+      "Reviewed and published by Aera, then installed into an isolated local space.",
     mineSubtitle:
       "Create and manage your Agents. Open a card to review its abilities and start a conversation.",
     workspaceSubtitle:
-      "Browse Agents in this Workspace or manage the ones your role can maintain.",
+      "Browse Agents in this team or project, or manage the ones your role can maintain.",
     organizationSubtitle:
       "Browse enterprise Agents and create, review, or install them when your role allows it.",
     officialFilter: {
@@ -133,15 +133,15 @@ export default {
     officialEmptyHint: "Official Agents will appear here when published.",
     officialOfflineHint:
       "Reconnect to browse the catalog. Enabled Agents remain available locally.",
-    officialPublisher: "AgentEra Official",
+    officialPublisher: "Aera Official",
     officialCardDescription:
-      "{{name}} has been reviewed by AgentEra and is ready to use.",
+      "{{name}} has been reviewed by Aera and is ready to use.",
     officialDetailFallback:
-      "{{name}} is an official AgentEra Agent that runs independently on this device to help complete tasks.",
+      "{{name}} is an official Aera Agent that runs independently on this device to help complete tasks.",
     personalCardFallback:
       "This Agent is ready to help with work tailored to your instructions.",
     publishedCardDescription:
-      "Published and ready to use. AgentEra completes setup automatically.",
+      "Published and ready to use. Aera completes setup automatically.",
     installedCardDescription:
       "Ready to use. Open the details to start a conversation.",
     pendingCardDescription:
@@ -150,8 +150,8 @@ export default {
       "Uses {{model}} with {{count}} configured Skills and is ready for conversation.",
     localProfileNoModel:
       "This local Agent does not have a model configured yet.",
-    personalAgent: "Personal Agent",
-    workspaceAgent: "Workspace Agent",
+    personalAgent: "My Agent",
+    workspaceAgent: "Team / project Agent",
     organizationAgent: "Enterprise Agent",
     localAgent: "Local Agent",
     published: "Published",
@@ -186,15 +186,15 @@ export default {
   syncing: "Syncing…",
   syncSignedOut: "Not synced",
   syncSignedOutHint:
-    "Sign in to your AgentEra Studio account on the Providers page to back agents up to the cloud.",
-  syncUpToDate: "Synced with your AgentEra Studio account",
+    "Sign in to your Aera account on the Providers page to back agents up to the cloud.",
+  syncUpToDate: "Synced with your Aera account",
   syncSummary: "Synced — {{pushed}} pushed, {{pulled}} pulled, {{created}} new",
   syncErrors: "Sync finished with {{count}} error(s)",
   syncUnauthorized: "Session expired — sign in again on the Providers page",
   syncFailed: "Sync failed",
   syncTitle: "Cloud sync",
   syncPaneSubtitle:
-    "Back this agent up to your AgentEra Studio account and pull changes made in the console.",
+    "Back this agent up to your Aera account and pull changes made in the console.",
   syncNow: "Sync now",
   syncAccount: "Account",
   syncLink: "Cloud agent",
@@ -202,7 +202,7 @@ export default {
   syncNotLinked: "Not linked yet — sync to create it",
   syncLastResult: "Last sync",
   syncSignInHint:
-    "Sign in to your AgentEra Studio account on the Providers page to sync this agent.",
+    "Sign in to your Aera account on the Providers page to sync this agent.",
   syncAction: {
     "up-to-date": "Up to date",
     pushed: "Pushed to cloud",
@@ -218,22 +218,22 @@ export default {
   walletSourceCloud: "Cloud",
   walletManagedEmpty: "No wallets yet",
   walletSyncedHint:
-    "Wallets are managed in your AgentEra Studio account and appear here once this agent syncs.",
+    "Wallets are managed in your Aera account and appear here once this agent syncs.",
   walletSignInHint:
-    "Sign in to your AgentEra Studio account on the Providers page to see this agent's wallets.",
+    "Sign in to your Aera account on the Providers page to see this agent's wallets.",
   walletForeignHint:
-    "This agent is linked to a different AgentEra Studio account, so its wallets stay untouched here.",
+    "This agent is linked to a different Aera account, so its wallets stay untouched here.",
   control: {
-    personalSpace: "Personal space",
-    personalSpaceTitle: "Personal-space Agents",
+    personalSpace: "My",
+    personalSpaceTitle: "My Agents",
     personalSpaceSubtitle:
       "Create, publish, and use your Agents. Private data never becomes ordinary cloud sync.",
-    workspaceSpace: "Workspace",
-    workspaceSpaceTitle: "Workspace Agents",
+    workspaceSpace: "Team / project",
+    workspaceSpaceTitle: "Team / project Agents",
     workspaceAuthorSubtitle:
-      "Create, publish, and use Workspace Agents while AgentEra manages runtime isolation.",
+      "Create, publish, and use team/project Agents while Aera manages runtime isolation.",
     workspaceMemberSubtitle:
-      "Use approved Workspace Agents. Members cannot create drafts or publish versions.",
+      "Use approved team/project Agents. Members cannot create drafts or publish versions.",
     role: {
       owner: "Owner",
       admin: "Admin",
@@ -286,7 +286,7 @@ export default {
       withdraw: "Withdraw submission",
       confirmWithdrawal: "Confirm withdrawal",
       withdrawalBoundary:
-        "Withdrawal only closes this pending submission. Local drafts and Hermes data stay unchanged.",
+        "Withdrawal only closes this pending submission. Local drafts and Aera Runtime data stay unchanged.",
       draftReadOnly:
         "This enterprise draft is read-only. Reconnect with an Owner or Admin role before changing or submitting it.",
     },
@@ -300,7 +300,7 @@ export default {
       confirmInstall: "Start using",
       installTitle: "Start using official Agent",
       freshProfileBoundary:
-        "AgentEra prepares this Agent automatically. It will be ready to use when setup finishes.",
+        "Aera prepares this Agent automatically. It will be ready to use when setup finishes.",
       privateDataBoundary:
         "Memory, conversations, files, credentials, private Skills, and local learning stay on this computer and are never uploaded by this flow.",
       installedLocally: "Verified official Agent installed locally",
@@ -324,7 +324,7 @@ export default {
     offlineNotice:
       "Offline access is active. Local drafts and installed Agents remain available; publication, discovery, installation, and reconciliation are paused.",
     workspaceOfflineNotice:
-      "Workspace access is offline. Verified installations remain usable locally; drafts are read-only and cloud publication, discovery, installation, and updates are paused.",
+      "Team/project access is offline. Verified installations remain usable locally; drafts are read-only and cloud publication, discovery, installation, and updates are paused.",
     localDrafts: "Local drafts",
     noDrafts: "No local drafts yet.",
     revision: "Revision",
@@ -351,7 +351,7 @@ export default {
     localDraftStatus:
       "Define the Agent's identity and capabilities, then save a draft or publish it.",
     workspaceDraftReadOnly:
-      "This Workspace draft is read-only while offline. Reconnect before changing or publishing it.",
+      "This team/project draft is read-only while offline. Reconnect before changing or publishing it.",
     name: "Agent name",
     systemPrompt: "Identity and working style",
     allowedProviders: "Runtime service",
@@ -365,7 +365,7 @@ export default {
     fileImported: "Imported {{name}}",
     versionAssets: "Capability documents",
     versionAssetsHint:
-      "Choose Skill, SOP, or knowledge documents; AgentEra creates their internal structure.",
+      "Choose Skill, SOP, or knowledge documents; Aera creates their internal structure.",
     assetUpload: "Add {{kind}} document",
     noVersionAssets: "No capability documents yet.",
     uploadTooLarge: "Each document must be 256 KB or smaller.",
@@ -400,11 +400,11 @@ export default {
     retryTitle: "Continue Agent setup",
     updateTitle: "Select a version for later conversations",
     installIsolationHint:
-      "AgentEra prepares this Agent automatically and keeps its private data isolated.",
+      "Aera prepares this Agent automatically and keeps its private data isolated.",
     freshProfile: "Create a new Agent",
     claimProfile: "Use an existing Agent",
     profileName: "Agent name",
-    noCloneHint: "AgentEra never copies another Agent's private data.",
+    noCloneHint: "Aera never copies another Agent's private data.",
     localProfile: "On-device Agent",
     claimConfirmation:
       "I understand this reuses the selected on-device Agent data without copying or rewriting it.",
@@ -420,7 +420,7 @@ export default {
       promoteLocalExperience: "Promote local experience",
       promotionTitle: "Promote local experience",
       promotionSubtitle:
-        "Select one learned Skill, inspect the local privacy scan, then explicitly submit it for Workspace review.",
+        "Select one learned Skill, inspect the local privacy scan, then explicitly submit it for team/project review.",
       privateBoundary:
         "Only the selected Skill files are prepared. Identity, memory, conversations, sessions, credentials, and every unselected local learning result stay on this computer.",
       skill: "Learned Skill",
@@ -442,8 +442,8 @@ export default {
         credential_api_key: "API key",
         credential_environment_secret: "Environment secret",
         private_absolute_path: "Private absolute path",
-        private_memory_payload: "Hermes Memory payload",
-        private_user_payload: "Hermes USER payload",
+        private_memory_payload: "Aera Runtime Memory payload",
+        private_user_payload: "Aera Runtime USER payload",
         private_session_payload: "Session payload",
         private_conversation_payload: "Conversation payload",
         private_credential_store_payload: "Credential-store payload",
@@ -452,7 +452,7 @@ export default {
       onlineToSubmit:
         "This preview is safely stored locally. Reconnect before submitting it for review.",
       submitConfirmation:
-        "I explicitly choose this Skill for Workspace review and understand that submission does not publish an Agent version.",
+        "I explicitly choose this Skill for team/project review and understand that submission does not publish an Agent version.",
       submitForReview: "Submit for review",
       retryUpload: "Retry upload manually",
       myCandidates: "My candidates",
@@ -478,10 +478,10 @@ export default {
       rejectionReason: "Rejection reason",
       chooseReason: "Choose a reason",
       reason: {
-        not_reusable: "Not reusable across the Workspace",
+        not_reusable: "Not reusable across the team / project",
         insufficient_quality: "Needs more quality work",
         wrong_scope: "Belongs to a different Agent or scope",
-        policy_blocked: "Blocked by Workspace policy",
+        policy_blocked: "Blocked by team/project policy",
       },
       safeNote: "Optional safe note",
       commitReview: "Commit review",
@@ -499,10 +499,10 @@ export default {
     },
     errors: {
       invalid_request: "The Agent request is invalid.",
-      sign_in_required: "Sign in to AgentEra Studio to continue.",
-      online_required: "A live AgentEra Cloud connection is required.",
+      sign_in_required: "Sign in to Aera to continue.",
+      online_required: "A live Aera Cloud connection is required.",
       entitlement_required:
-        "Your AgentEra access authorization must be renewed.",
+        "Your Aera access authorization must be renewed.",
       not_found: "The Agent item no longer exists.",
       conflict: "This draft or installation changed. Refresh before retrying.",
       verification_failed: "The signed Agent version could not be verified.",
@@ -510,21 +510,19 @@ export default {
         "This Agent version is not compatible with this device's local environment.",
       local_runtime_required:
         "The local Agent service is not ready yet. Try again shortly; setup is automatic.",
-      cloud_unavailable: "AgentEra Cloud is temporarily unavailable.",
+      cloud_unavailable: "Aera Cloud is temporarily unavailable.",
       workspace_forbidden:
-        "Your current Workspace role does not allow this Agent operation.",
+        "Your current team/project role does not allow this Agent operation.",
       workspace_archived:
-        "This Workspace is archived. Its Agent assets are read-only.",
+        "This team or project is archived. Its Agent assets are read-only.",
       workspace_owner_unavailable:
-        "This Workspace is read-only until its Owner account is available.",
+        "This team or project is read-only until its Owner account is available.",
       organization_agent_not_found:
         "This enterprise Agent item no longer exists.",
       organization_agent_forbidden:
         "Your current Organization role does not allow this Agent operation.",
       organization_archived:
         "This Organization is archived. Its Agent assets are read-only.",
-      organization_submission_self_review:
-        "A different Owner or Admin must review this submission.",
       organization_submission_conflict:
         "This enterprise submission changed. Refresh before retrying.",
       organization_submission_superseded:
@@ -538,7 +536,7 @@ export default {
       official_release_paused:
         "This official release is paused for new installations.",
       official_client_version_unsupported:
-        "Update AgentEra Studio before installing this official Agent.",
+        "Update Aera before installing this official Agent.",
       official_installation_policy_blocked:
         "Platform policy does not allow this official Agent installation.",
       candidate_source_ineligible:
@@ -550,7 +548,7 @@ export default {
       candidate_base_advanced:
         "The published Agent advanced. Refresh the import preview.",
       candidate_import_failed:
-        "The approved Skill could not be written into a local draft. The approval and local Hermes learning remain unchanged.",
+        "The approved Skill could not be written into a local draft. The approval and local Aera Runtime learning remain unchanged.",
       operation_failed: "The Agent operation could not be completed safely.",
     },
   },

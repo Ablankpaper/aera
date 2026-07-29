@@ -11,7 +11,7 @@ interface SmokeStep {
   cwd: string;
 }
 
-describe("AgentEra authentication smoke gate", () => {
+describe("Aera authentication smoke gate", () => {
   it("pins every malicious callback and contract check in its execution plan", () => {
     const desktopRoot = resolve(import.meta.dirname, "..");
     const output = execFileSync(

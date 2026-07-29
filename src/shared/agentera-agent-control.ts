@@ -352,7 +352,6 @@ export type AgenteraAgentControlErrorCode =
   | "organization_agent_not_found"
   | "organization_agent_forbidden"
   | "organization_archived"
-  | "organization_submission_self_review"
   | "organization_submission_conflict"
   | "organization_submission_superseded"
   | "organization_publication_policy_blocked"

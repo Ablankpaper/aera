@@ -24,7 +24,7 @@ function connection(mode: "local" | "remote" | "ssh"): ConnectionConfig {
   };
 }
 
-describe("AgentEra sanitized startup preflight", () => {
+describe("Aera sanitized startup preflight", () => {
   it.each([
     [{ installed: false, hasApiKey: false }, "welcome"],
     [{ installed: true, hasApiKey: false }, "main"],

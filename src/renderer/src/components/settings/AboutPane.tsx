@@ -20,7 +20,7 @@ import RuntimeDistributionCard from "./RuntimeDistributionCard";
 
 /**
  * About & Updates. Two clearly-separated cards for the two distinct update
- * channels: the **AgentEra Runtime** (Python engine) and **AgentEra Studio** (this
+ * channels: the **Aera Runtime** (Python engine) and **Aera** (this
  * Electron app). They ship independently, so each owns its own update action.
  */
 export default function AboutPane(): React.JSX.Element {
@@ -59,7 +59,7 @@ export default function AboutPane(): React.JSX.Element {
     <div className="settings-modal-pane">
       <ConfigHealth />
 
-      {/* ── AgentEra Runtime (engine) ─────────────────────────── */}
+      {/* ── Aera Runtime (engine) ─────────────────────────── */}
       <RuntimeDistributionCard
         onExternalUpdate={handleUpdateHermes}
         externalUpdating={updating}
@@ -152,7 +152,7 @@ export default function AboutPane(): React.JSX.Element {
         )}
       </RuntimeDistributionCard>
 
-      {/* ── AgentEra Studio (this app) ────────────────────────── */}
+      {/* ── Aera (this app) ────────────────────────── */}
       <section className="settings-card">
         <header className="settings-card-head">
           <span className="settings-card-icon">

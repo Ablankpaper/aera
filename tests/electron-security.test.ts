@@ -102,7 +102,7 @@ describe("Electron external URL policy", () => {
     expect(isAllowedExternalUrl({ href: "https://example.com" })).toBe(false);
   });
 
-  it("allows only the configured AgentEra OAuth endpoint for product sign-in", () => {
+  it("allows only the configured Aera OAuth endpoint for product sign-in", () => {
     const origin = "https://accounts.agentera.example";
     const allowed = new URL("/oauth/authorize", origin);
     allowed.search = new URLSearchParams({
@@ -113,7 +113,7 @@ describe("Electron external URL policy", () => {
       state: "b".repeat(43),
       installation_id: "11111111-1111-4111-8111-111111111111",
       device_public_key: "c".repeat(43),
-      device_name: "AgentEra Test Mac",
+      device_name: "Aera Test Mac",
       platform: "darwin",
       app_version: "0.7.3",
       prompt: "select_account",

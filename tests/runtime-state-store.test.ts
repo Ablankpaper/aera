@@ -85,7 +85,7 @@ afterEach(() => {
   }
 });
 
-describe("AgentEra Runtime pointer state store", () => {
+describe("Aera Runtime pointer state store", () => {
   it("rejects malformed, unknown-schema, and missing-directory pointers", async () => {
     const { paths, store } = makeStore();
     await store.recover();

@@ -14,5 +14,5 @@ export default {
   startExited: "O gateway foi iniciado, mas parou antes de ficar pronto.",
   checkLog: "Verifique o log do gateway:",
   gatewayHint:
-    "Conecta o AgentEra ao Telegram, Discord, Slack e outras plataformas",
+    "Conecta o Aera ao Telegram, Discord, Slack e outras plataformas",
 } as const;

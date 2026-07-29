@@ -1,5 +1,5 @@
 export default {
-  appName: "AgentEra Studio",
+  appName: "Aera",
   continue: "继续",
   cancel: "取消",
   retry: "重试",
@@ -61,7 +61,7 @@ export default {
   splashCheckingSsh: "正在检查 SSH 连接…",
   splashCheckingRemote: "正在检查远程连接…",
   splashLocalAfterSignIn: "正在切换到本地模式…",
-  remoteNoticeTitle: "已连接到远程 AgentEra Runtime",
+  remoteNoticeTitle: "已连接到远程 Aera Runtime",
   remoteNoticeDescription:
     "远程模式暂不支持{{feature}}。相关数据保存在服务器上，目前还无法通过 API 访问。",
 } as const;

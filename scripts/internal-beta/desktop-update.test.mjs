@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/explicit-function-return-type */
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -12,7 +13,7 @@ import {
   verifyDesktopUpdateBundle,
 } from "./desktop-update.mjs";
 
-const VERSION = "0.7.4-internal-beta.10";
+const VERSION = "0.7.4-internal-beta.11";
 const BASE_URL = "https://47.100.169.193/desktop-updates/internal-beta";
 
 async function fixture() {

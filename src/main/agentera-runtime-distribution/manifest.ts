@@ -520,7 +520,7 @@ function validateArchiveName(
     !value.startsWith("agentera-runtime-")
   ) {
     throw new RuntimeProtocolError(
-      "archive_name must be a plain AgentEra file name",
+      "archive_name must be a plain Aera file name",
     );
   }
   const extension = platform === "darwin" ? ".tar.zst" : ".zip";

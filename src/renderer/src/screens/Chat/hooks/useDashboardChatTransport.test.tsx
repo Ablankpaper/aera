@@ -261,7 +261,7 @@ describe("useDashboardChatTransport recovery", () => {
         modelOptionsCalls += 1;
         if (modelOptionsCalls === 1) {
           throw new Error(
-            "AgentEra Runtime dashboard request timed out: model.options",
+            "Aera Runtime dashboard request timed out: model.options",
           );
         }
         return {
@@ -312,7 +312,7 @@ describe("useDashboardChatTransport recovery", () => {
         createCalls += 1;
         if (createCalls === 1) {
           throw new Error(
-            "AgentEra Runtime dashboard request timed out: session.create",
+            "Aera Runtime dashboard request timed out: session.create",
           );
         }
         return {

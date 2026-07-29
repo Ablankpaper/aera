@@ -243,7 +243,7 @@ describe("Agents unified product surface", () => {
     expect(screen.queryByText("agents.legacyTitle")).toBeNull();
   });
 
-  // @lat: [[agentera-agent-control-plane#AgentEra Agent control plane V1#Trusted Workspace Agent context#Product-facing Agent projection]]
+    // @lat: [[agentera-agent-control-plane#AgentEra Agent control plane V1#Trusted Workspace Agent context#Product-facing Agent projection]]
   it("automatically prepares the local runtime and opens a newly used Agent", async () => {
     const hermes = installHermesAPI();
     const defaultProfile = profile("default", {

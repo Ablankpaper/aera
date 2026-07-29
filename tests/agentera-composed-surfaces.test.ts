@@ -3,15 +3,15 @@ import { describe, expect, it } from "vitest";
 
 const read = (path: string): string => readFileSync(path, "utf8");
 
-describe("AgentEra composed application surfaces", () => {
-  it("uses AgentEra-owned menu and support links", () => {
+describe("Aera composed application surfaces", () => {
+  it("uses Aera-owned menu and support links", () => {
     const menu = read("src/main/app/menu.ts");
-    expect(menu).toContain("AgentEra Runtime on GitHub");
+    expect(menu).toContain("Aera Runtime on GitHub");
     expect(menu).toContain("https://github.com/bignormal/aera/issues");
     expect(menu).not.toContain("fathah/hermes-desktop");
   });
 
-  it("presents the bundled engine as AgentEra Runtime", () => {
+  it("presents the bundled engine as Aera Runtime", () => {
     const sources = [
       "src/main/installer.ts",
       "src/main/ipc/register.ts",
@@ -25,14 +25,14 @@ describe("AgentEra composed application surfaces", () => {
       "src/renderer/src/screens/Chat/slash/commandCatalog.ts",
     ].map(read);
 
-    expect(sources.join("\n")).toContain("AgentEra Runtime");
+    expect(sources.join("\n")).toContain("Aera Runtime");
     for (const source of sources) {
       expect(source).not.toContain("Hermes Agent");
       expect(source).not.toContain("Hermes Desktop");
     }
   });
 
-  it("uses only AgentEra artwork in composed desktop views", () => {
+  it("uses only Aera artwork in composed desktop views", () => {
     const layout = read("src/renderer/src/screens/Layout/Layout.tsx");
     const about = read("src/renderer/src/components/settings/AboutPane.tsx");
     const empty = read("src/renderer/src/screens/Chat/ChatEmptyState.tsx");
@@ -58,7 +58,7 @@ describe("AgentEra composed application surfaces", () => {
     ).not.toContain("CommunityPane");
   });
 
-  it("brands the office experience as AgentEra", () => {
+  it("brands the office experience as Aera", () => {
     const showroom = read(
       "src/renderer/src/screens/Office/office3d/objects/CarShowroom.tsx",
     );
@@ -66,16 +66,17 @@ describe("AgentEra composed application surfaces", () => {
       "src/renderer/src/screens/Office/office3d/objects/OfficeShell.tsx",
     );
 
-    expect(showroom).toContain("AGENTERA MOTORS");
-    expect(showroom).toContain("AgentEra S1");
-    expect(showroom).toContain("AgentEra GT");
+    expect(showroom).toContain("AERA MOTORS");
+    expect(showroom).not.toContain("AGENTERA MOTORS");
+    expect(showroom).toContain("Aera S1");
+    expect(showroom).toContain("Aera GT");
     expect(showroom).not.toContain("Hermes S1");
     expect(showroom).not.toContain("Hermes GT");
     expect(office).toContain("iconv2.png");
     expect(office).not.toContain("hermes-one-hq.webp");
   });
 
-  it("keeps the empty-state AgentEra mark transparent", () => {
+  it("keeps the empty-state Aera mark transparent", () => {
     const styles = read("src/renderer/src/assets/main.css");
     const emptyIconRule = styles.match(/\.chat-empty-icon\s*\{([^}]*)\}/)?.[1];
 
@@ -122,6 +123,6 @@ describe("AgentEra composed application surfaces", () => {
         chatMessages,
         dashboardTransport,
       ].join("\n"),
-    ).toContain("AgentEra");
+    ).toContain("Aera");
   });
 });

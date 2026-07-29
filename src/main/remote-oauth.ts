@@ -333,7 +333,7 @@ export function openRemoteOAuthLogin(
     const loginWindow = new BrowserWindow({
       width: 520,
       height: 720,
-      title: "Sign in to remote AgentEra Runtime gateway",
+      title: "Sign in to remote Aera Runtime gateway",
       autoHideMenuBar: true,
       ...(parent ? { parent, modal: true } : {}),
       webPreferences: {

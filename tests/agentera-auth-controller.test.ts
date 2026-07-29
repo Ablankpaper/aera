@@ -201,7 +201,7 @@ function pkce(fill: number): AgenteraPkceAttempt {
   };
 }
 
-describe("AgentEra authentication controller", () => {
+describe("Aera authentication controller", () => {
   let root = "";
   let store: AgenteraAuthStore;
   let cloud: FakeCloudClient;
@@ -266,7 +266,7 @@ describe("AgentEra authentication controller", () => {
         focused += 1;
       },
       getDeviceMetadata: () => ({
-        deviceName: "AgentEra Test Mac",
+        deviceName: "Aera Test Mac",
         platform: "darwin",
         appVersion: "0.7.3",
       }),
@@ -759,7 +759,7 @@ describe("AgentEra authentication controller", () => {
     const controller = createAgenteraAuthController({
       ...runtime(),
       getCloudClient: () => {
-        throw new Error("AgentEra cloud origin is invalid.");
+        throw new Error("Aera cloud origin is invalid.");
       },
     });
 

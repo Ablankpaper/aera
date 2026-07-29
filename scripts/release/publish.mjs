@@ -153,7 +153,7 @@ export async function promoteDesktopRelease(options, dependencies = {}) {
       repository: options.repository,
       tag: options.releaseTag,
       sourceSha: options.sourceSha,
-      message: `AgentEra Studio ${verified.candidate.version}`,
+      message: `Aera ${verified.candidate.version}`,
     });
   }
 
@@ -169,7 +169,7 @@ export async function promoteDesktopRelease(options, dependencies = {}) {
   const release = await github.createDraftRelease({
     repository: options.repository,
     tag: options.releaseTag,
-    name: `AgentEra Studio ${verified.candidate.version}`,
+    name: `Aera ${verified.candidate.version}`,
     body: releaseBody(verified, options),
   });
   if (

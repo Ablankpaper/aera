@@ -83,7 +83,7 @@ export default {
     model: "Pokaż lub przełącz bieżący model",
     memory: "Pokaż pamięć agenta",
     persona: "Pokaż bieżącą personę",
-    version: "Pokaż wersję AgentEra",
+    version: "Pokaż wersję Aera",
   },
   queued:
     "{{count}} wiadomość/wiadomości w kolejce — zostaną wysłane po zakończeniu pracy agenta",

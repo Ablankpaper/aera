@@ -67,7 +67,7 @@ export class AgenteraCloudClientError extends Error {
   readonly code: string;
 
   constructor(status: number, code: string) {
-    super(`AgentEra cloud request failed: ${code}.`);
+    super(`Aera cloud request failed: ${code}.`);
     this.name = "AgenteraCloudClientError";
     this.status = status;
     this.code = code;
@@ -174,7 +174,7 @@ export class AgenteraCloudClient implements AgenteraCloudClientPort {
       this.timeoutMs < 1 ||
       this.timeoutMs > 120_000
     ) {
-      throw new Error("AgentEra cloud client configuration is invalid.");
+      throw new Error("Aera cloud client configuration is invalid.");
     }
   }
 

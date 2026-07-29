@@ -184,7 +184,7 @@ function assertOutsideHermesHome(path: string): void {
     )
   ) {
     throw new Error(
-      "AgentEra Organization path must remain outside HERMES_HOME.",
+      "Aera Organization path must remain outside HERMES_HOME.",
     );
   }
 }
@@ -779,7 +779,7 @@ function initializeSchema(sqlite: AgenteraOrganizationSqliteDatabase): void {
     currentVersion < 0 ||
     currentVersion > AGENTERA_ORGANIZATION_SCHEMA_VERSION
   ) {
-    throw new Error("Unsupported AgentEra Organization database version.");
+    throw new Error("Unsupported Aera Organization database version.");
   }
   if (currentVersion === AGENTERA_ORGANIZATION_SCHEMA_VERSION) return;
 
@@ -893,7 +893,7 @@ export class AgenteraOrganizationDatabase {
 
   private assertOpen(): void {
     if (this.closed)
-      throw new Error("AgentEra Organization database is closed.");
+      throw new Error("Aera Organization database is closed.");
   }
 
   private transaction<T>(action: () => T): T {
@@ -1225,7 +1225,7 @@ export class AgenteraOrganizationDatabase {
           (normalized.snapshot.policyVersion === currentVersion &&
             normalized.snapshot.id !== currentSnapshotId)
         ) {
-          throw new Error("AgentEra Organization verified policy is stale.");
+          throw new Error("Aera Organization verified policy is stale.");
         }
       }
       this.sqlite
@@ -1368,7 +1368,7 @@ export class AgenteraOrganizationDatabase {
       if (existing) {
         if (existing.requestDigest !== input.requestDigest) {
           throw new Error(
-            "AgentEra Organization has a conflicting mutation intent.",
+            "Aera Organization has a conflicting mutation intent.",
           );
         }
         return existing;
@@ -1507,7 +1507,7 @@ export function openAgenteraOrganizationDatabase(
     assertOutsideHermesHome(canonicalDatabase);
     if (!isPathInside(canonicalRoot, canonicalDatabase)) {
       throw new Error(
-        "AgentEra Organization database must remain inside its protected root.",
+        "Aera Organization database must remain inside its protected root.",
       );
     }
     if (existsSync(paths.databasePath)) chmodSync(paths.databasePath, 0o600);

@@ -34,7 +34,7 @@ export class AgenteraAgentTrustError extends Error {
   readonly code: AgenteraAgentTrustErrorCode;
 
   constructor(code: AgenteraAgentTrustErrorCode) {
-    super(`AgentEra Agent trust verification failed: ${code}.`);
+    super(`Aera Agent trust verification failed: ${code}.`);
     this.name = "AgenteraAgentTrustError";
     this.code = code;
   }

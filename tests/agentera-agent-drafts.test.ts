@@ -73,7 +73,7 @@ function assets(content = "# Notes\n"): AgentDraftAssetInput[] {
   return [{ path: "knowledge/notes.md", content }];
 }
 
-describe("AgentEra desktop-local Agent drafts", () => {
+describe("Aera desktop-local Agent drafts", () => {
   let root = "";
   let userDataPath = "";
   let database: AgenteraControlPlaneDatabase;

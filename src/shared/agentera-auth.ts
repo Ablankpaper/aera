@@ -85,7 +85,7 @@ export function serializeAgenteraAuthPublicState(
     case "unauthenticated":
       if (state.reason === undefined) return { status: "unauthenticated" };
       if (!validReason(state.reason)) {
-        throw new Error("AgentEra authentication state has an invalid reason.");
+        throw new Error("Aera authentication state has an invalid reason.");
       }
       return { status: "unauthenticated", reason: state.reason };
     case "authenticated":
@@ -100,10 +100,10 @@ export function serializeAgenteraAuthPublicState(
       };
     case "blocked":
       if (!validReason(state.reason)) {
-        throw new Error("AgentEra authentication state has an invalid reason.");
+        throw new Error("Aera authentication state has an invalid reason.");
       }
       return { status: "blocked", reason: state.reason };
     default:
-      throw new Error("AgentEra authentication state has an invalid status.");
+      throw new Error("Aera authentication state has an invalid status.");
   }
 }

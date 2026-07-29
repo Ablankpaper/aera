@@ -172,7 +172,7 @@ export class AgenteraAuthControllerImpl implements AgenteraAuthController {
     } = {},
   ): Promise<void> {
     if (this.activeAttempt) {
-      throw new Error("AgentEra browser sign-in is already in progress.");
+      throw new Error("Aera browser sign-in is already in progress.");
     }
 
     let resolveDone!: () => void;
@@ -197,11 +197,11 @@ export class AgenteraAuthControllerImpl implements AgenteraAuthController {
         (await this.deliverPendingRevocation()) === "pending"
       ) {
         throw new Error(
-          "AgentEra must finish the previous device sign-out before signing in again.",
+          "Aera must finish the previous device sign-out before signing in again.",
         );
       }
       if (attempt.cancelled) {
-        throw new Error("AgentEra browser sign-in was cancelled.");
+        throw new Error("Aera browser sign-in was cancelled.");
       }
       const identity = getOrCreateAgenteraDeviceIdentity(this.runtime.store);
       const pkce = this.runtime.createPkce();
@@ -212,7 +212,7 @@ export class AgenteraAuthControllerImpl implements AgenteraAuthController {
       if (attempt.cancelled) {
         void listener.callback.catch(() => undefined);
         listener.cancel();
-        throw new Error("AgentEra browser sign-in was cancelled.");
+        throw new Error("Aera browser sign-in was cancelled.");
       }
 
       const client = this.runtime.getCloudClient();
@@ -230,7 +230,7 @@ export class AgenteraAuthControllerImpl implements AgenteraAuthController {
       await this.runtime.openExternal(authorizationUrl.href, client.origin);
       const callback = await listener.callback;
       if (attempt.cancelled) {
-        throw new Error("AgentEra browser sign-in was cancelled.");
+        throw new Error("Aera browser sign-in was cancelled.");
       }
       const tokens = await client.exchangeAuthorizationCode({
         authorizationCode: callback.authorizationCode,
@@ -238,7 +238,7 @@ export class AgenteraAuthControllerImpl implements AgenteraAuthController {
         identity,
       });
       if (attempt.cancelled) {
-        throw new Error("AgentEra browser sign-in was cancelled.");
+        throw new Error("Aera browser sign-in was cancelled.");
       }
       this.acceptOnlineTokens(tokens, client);
       this.lifecycle.noteOnlineValidationSucceeded();
@@ -294,10 +294,10 @@ export class AgenteraAuthControllerImpl implements AgenteraAuthController {
     const active = this.activeAttempt;
     const authorizationUrl = active?.authorizationUrl;
     if (!authorizationUrl || active.cancelled) {
-      throw new Error("No active AgentEra browser login is available.");
+      throw new Error("No active Aera browser login is available.");
     }
     if (!this.runtime.writeClipboard) {
-      throw new Error("AgentEra clipboard access is unavailable.");
+      throw new Error("Aera clipboard access is unavailable.");
     }
     await this.runtime.writeClipboard(authorizationUrl);
   }
@@ -393,18 +393,18 @@ export class AgenteraAuthControllerImpl implements AgenteraAuthController {
   /** Re-check the trusted local deadline synchronously at every Runtime edge. */
   assertCanStartNewTask(): void {
     if (!hasProductAccess(this.state)) {
-      throw new Error("AgentEra product sign-in is required.");
+      throw new Error("Aera product sign-in is required.");
     }
     if (!this.entitlement || !this.timeAnchor) {
       this.publish({ status: "blocked", reason: "sign_in_required" });
-      throw new Error("AgentEra offline access could not be verified.");
+      throw new Error("Aera offline access could not be verified.");
     }
     const evaluated = this.timeAnchor.evaluate();
     if (evaluated.rollbackDetected) {
       this.publish({ status: "blocked", reason: "clock_rollback" });
       this.lifecycle.cancel();
       throw new Error(
-        "AgentEra offline access requires online clock verification.",
+        "Aera offline access requires online clock verification.",
       );
     }
     if (
@@ -412,13 +412,13 @@ export class AgenteraAuthControllerImpl implements AgenteraAuthController {
     ) {
       this.publish({ status: "blocked", reason: "offline_expired" });
       this.lifecycle.cancel();
-      throw new Error("AgentEra offline access has expired.");
+      throw new Error("Aera offline access has expired.");
     }
   }
 
   async openPortal(target: AgenteraPortalTarget): Promise<void> {
     if (!hasProductAccess(this.state)) {
-      throw new Error("AgentEra product sign-in is required.");
+      throw new Error("Aera product sign-in is required.");
     }
     const client = this.runtime.getCloudClient();
     let url: string;
@@ -428,11 +428,11 @@ export class AgenteraAuthControllerImpl implements AgenteraAuthController {
       const configured =
         this.runtime.getRechargePublicUrl?.() ?? getAgenteraRechargePublicUrl();
       if (!configured) {
-        throw new Error("AgentEra recharge URL is not configured.");
+        throw new Error("Aera recharge URL is not configured.");
       }
       url = configured;
     } else {
-      throw new Error("AgentEra portal target is invalid.");
+      throw new Error("Aera portal target is invalid.");
     }
 
     if (this.runtime.openTrustedExternal) {
@@ -511,14 +511,14 @@ export class AgenteraAuthControllerImpl implements AgenteraAuthController {
   ): void {
     const identity = this.runtime.store.getInstallation();
     if (!identity) {
-      throw new Error("AgentEra installation identity is unavailable.");
+      throw new Error("Aera installation identity is unavailable.");
     }
     const trustedServerTime = new Date(tokens.trustedServerTime);
     if (
       !Number.isFinite(trustedServerTime.getTime()) ||
       trustedServerTime.toISOString() !== tokens.trustedServerTime
     ) {
-      throw new Error("AgentEra trusted server time is invalid.");
+      throw new Error("Aera trusted server time is invalid.");
     }
     const entitlement = verifyAgenteraOfflineEntitlement({
       serialized: tokens.offlineEntitlement,
@@ -690,7 +690,7 @@ export class AgenteraAuthControllerImpl implements AgenteraAuthController {
         this.runtime.onProductAccessLost?.();
       } catch (error) {
         console.error(
-          "[AgentEra] Failed to stop the active Runtime context",
+          "[Aera] Failed to stop the active Runtime context",
           error,
         );
       }

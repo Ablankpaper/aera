@@ -347,6 +347,29 @@ export default function AgentControlPanel({
     await load();
   };
 
+  const openNewDraft = async (): Promise<void> => {
+    if (activeTab === "mine" && isOrganization) {
+      setLoading(true);
+      setError(null);
+      try {
+        const selected = await window.agenteraProductSpace.select({
+          kind: "PERSONAL",
+        });
+        if (!selected.ok) {
+          setError("agents.control.errors.operation_failed");
+          setLoading(false);
+          return;
+        }
+        await load();
+      } catch {
+        setError("agents.control.errors.operation_failed");
+        setLoading(false);
+        return;
+      }
+    }
+    setEditor("new");
+  };
+
   const definitionNames = useMemo(
     () => new Map(definitions.map((item) => [item.id, item.displayName])),
     [definitions],
@@ -384,6 +407,8 @@ export default function AgentControlPanel({
   const showNewDraft = isOrganization
     ? organizationCanAuthor
     : !isWorkspaceMember;
+  const newDraftDisabled =
+    loading || (activeTab === "mine" && isOrganization ? false : !canAuthor);
   const draftReadOnly = workspaceReadOnly || organizationReadOnly;
   const officialInstallations = installations.filter(
     (installation) => installation.sourceScope === "PLATFORM",
@@ -915,14 +940,13 @@ export default function AgentControlPanel({
           >
             <Refresh size={16} />
           </button>
-          {((activeTab === "mine" && !isOrganization) ||
-            (activeTab === "enterprise" && isOrganization)) &&
-          showNewDraft ? (
+          {(activeTab === "mine" && (!isOrganization ? showNewDraft : true)) ||
+          (activeTab === "enterprise" && isOrganization && showNewDraft) ? (
             <button
               type="button"
               className="btn btn-primary btn-sm agent-hub-create-button"
-              onClick={() => setEditor("new")}
-              disabled={!canAuthor}
+              onClick={() => void openNewDraft()}
+              disabled={newDraftDisabled}
             >
               <Plus size={15} />
               {t(
@@ -1066,13 +1090,12 @@ export default function AgentControlPanel({
               <p>{t(personalEmptyHint)}</p>
               {!hasSearchQuery &&
               visiblePersonalCards.length === 0 &&
-              showNewDraft &&
-              (!isOrganization || activeTab === "enterprise") ? (
+              ((activeTab === "mine" && isOrganization) || showNewDraft) ? (
                 <button
                   type="button"
                   className="btn btn-primary"
-                  disabled={!canAuthor}
-                  onClick={() => setEditor("new")}
+                  disabled={newDraftDisabled}
+                  onClick={() => void openNewDraft()}
                 >
                   <Plus size={16} />
                   {t("agents.hub.createAgent")}

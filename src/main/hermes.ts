@@ -310,7 +310,7 @@ function transcribeAudioViaLocalPython(
   const invocation = getRuntimeInvocation();
   if (!invocation) {
     throw new Error(
-      "Voice input needs a local AgentEra Runtime install with speech-to-text support.",
+      "Voice input needs a local Aera Runtime install with speech-to-text support.",
     );
   }
 
@@ -424,7 +424,7 @@ export async function transcribeAudio(
     setApiCacheFor(resolved, ready);
     if (!ready) {
       throw new Error(
-        "Voice input needs the AgentEra Runtime API server, but it is not running.",
+        "Voice input needs the Aera Runtime API server, but it is not running.",
       );
     }
   }
@@ -459,7 +459,7 @@ export async function transcribeAudio(
   } | null;
   if (!data) {
     throw new Error(
-      "Transcription failed. The AgentEra Runtime API returned an invalid response.",
+      "Transcription failed. The Aera Runtime API returned an invalid response.",
     );
   }
   return (data.transcript || data.text || "").trim();
@@ -545,7 +545,7 @@ async function waitForDashboardReady(
     if (await isDashboardReady(baseUrl, token)) return;
     await delay(500);
   }
-  throw new Error("AgentEra Runtime dashboard gateway did not become ready");
+  throw new Error("Aera Runtime dashboard gateway did not become ready");
 }
 
 class TuiGatewayClient {
@@ -589,7 +589,7 @@ class TuiGatewayClient {
     await this.start();
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error(
-        "AgentEra Runtime dashboard gateway stream is not connected",
+        "Aera Runtime dashboard gateway stream is not connected",
       );
     }
 
@@ -598,7 +598,7 @@ class TuiGatewayClient {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(
-          new Error(`AgentEra Runtime gateway request timed out: ${method}`),
+          new Error(`Aera Runtime gateway request timed out: ${method}`),
         );
       }, timeoutMs);
       timer.unref?.();
@@ -642,7 +642,7 @@ class TuiGatewayClient {
     this.ws?.close();
     this.proc?.kill("SIGTERM");
     this.rejectPending(
-      new Error("AgentEra Runtime dashboard gateway stream stopped"),
+      new Error("Aera Runtime dashboard gateway stream stopped"),
     );
     this.reset();
   }
@@ -650,7 +650,7 @@ class TuiGatewayClient {
   private async startDashboardBackend(): Promise<void> {
     const invocation = getRuntimeInvocation();
     if (!invocation) {
-      throw new Error("AgentEra Runtime is not prepared.");
+      throw new Error("Aera Runtime is not prepared.");
     }
 
     this.port = await pickDashboardPort();
@@ -687,7 +687,7 @@ class TuiGatewayClient {
       proc.once("exit", (code, signal) => {
         reject(
           new Error(
-            `AgentEra Runtime dashboard gateway exited before ready (${signal || code})`,
+            `Aera Runtime dashboard gateway exited before ready (${signal || code})`,
           ),
         );
       });
@@ -717,7 +717,7 @@ class TuiGatewayClient {
     proc.removeAllListeners("exit");
     proc.once("exit", (code, signal) => {
       const error = new Error(
-        `AgentEra Runtime dashboard gateway exited (${signal || code})`,
+        `Aera Runtime dashboard gateway exited (${signal || code})`,
       );
       this.rejectPending(error);
       this.reset();
@@ -730,7 +730,7 @@ class TuiGatewayClient {
       this.ws = ws;
       const timer = setTimeout(() => {
         reject(
-          new Error("AgentEra Runtime dashboard gateway WebSocket timed out"),
+          new Error("Aera Runtime dashboard gateway WebSocket timed out"),
         );
         ws.close();
       }, 15_000);
@@ -748,7 +748,7 @@ class TuiGatewayClient {
       ws.on("close", () => {
         if (this.ws !== ws) return;
         const error = new Error(
-          "AgentEra Runtime dashboard gateway WebSocket closed",
+          "Aera Runtime dashboard gateway WebSocket closed",
         );
         this.rejectPending(error);
         this.reset();
@@ -771,7 +771,7 @@ class TuiGatewayClient {
       this.pending.delete(String(frame.id));
       if (frame.error) {
         pending.reject(
-          new Error(frame.error.message || "AgentEra Runtime RPC failed"),
+          new Error(frame.error.message || "Aera Runtime RPC failed"),
         );
       } else {
         pending.resolve(frame.result);
@@ -838,7 +838,7 @@ function waitForGatewayEvent(
     const timer = setTimeout(() => {
       cleanup();
       reject(
-        new Error("Timed out waiting for AgentEra Runtime gateway readiness"),
+        new Error("Timed out waiting for Aera Runtime gateway readiness"),
       );
     }, timeoutMs);
     timer.unref?.();
@@ -1130,6 +1130,9 @@ export interface HermesConversationEnvelope {
   instructions: string;
   requireBoundApiTransport: boolean;
 }
+
+const BOUND_API_TRANSPORT_UNAVAILABLE =
+  "Aera bound runtime connection is unavailable.";
 
 type ChatContent =
   | string
@@ -1614,7 +1617,7 @@ function sendMessageViaApi(
   });
   req.on("timeout", () => {
     finish(
-      "API request timed out. Check the SSH tunnel and remote AgentEra Runtime gateway.",
+      "API request timed out. Check the SSH tunnel and remote Aera Runtime gateway.",
     );
     req.destroy();
   });
@@ -1793,7 +1796,7 @@ function sendMessageViaRuns(
       const err =
         typeof raw.error === "string" && raw.error
           ? raw.error
-          : "AgentEra Runtime run failed.";
+          : "Aera Runtime run failed.";
       if (!hasContent) {
         fallbackToChatCompletions();
         return;
@@ -1803,7 +1806,7 @@ function sendMessageViaRuns(
     }
 
     if (eventName === "run.cancelled") {
-      finish(hasContent ? undefined : "AgentEra Runtime run was cancelled.");
+      finish(hasContent ? undefined : "Aera Runtime run was cancelled.");
       return;
     }
 
@@ -1999,7 +2002,7 @@ async function sendMessageViaTuiGateway(
     cleanup();
     client.stop();
     console.warn(
-      "[chat] AgentEra Runtime gateway stream failed before output; falling back to API stream:",
+      "[chat] Aera Runtime gateway stream failed before output; falling back to API stream:",
       reason,
     );
     void sendMessageViaNonGatewayApi(
@@ -2067,7 +2070,7 @@ async function sendMessageViaTuiGateway(
       const error =
         typeof event.payload?.message === "string"
           ? event.payload.message
-          : "AgentEra Runtime gateway stream reported an error.";
+          : "Aera Runtime gateway stream reported an error.";
       if (!hasGatewayOutput) {
         startApiFallback(error);
         return;
@@ -2114,7 +2117,7 @@ async function sendMessageViaTuiGateway(
           .request("session.interrupt", { session_id: activeSessionId }, 5_000)
           .catch(() => undefined);
         finish(
-          "AgentEra Runtime requested clarify input, but the gateway provided no request_id to answer.",
+          "Aera Runtime requested clarify input, but the gateway provided no request_id to answer.",
         );
         return;
       }
@@ -2140,8 +2143,7 @@ async function sendMessageViaTuiGateway(
           });
       });
       const payload = event.payload as
-        | { question?: string; prompt?: string; choices?: unknown }
-        | undefined;
+        { question?: string; prompt?: string; choices?: unknown } | undefined;
       cb.onClarify?.({
         requestId,
         question: String(payload?.question ?? payload?.prompt ?? ""),
@@ -2163,7 +2165,7 @@ async function sendMessageViaTuiGateway(
           .request("session.interrupt", { session_id: activeSessionId }, 5_000)
           .catch(() => undefined);
         finish(
-          `AgentEra Runtime requested ${event.type.replace(".request", "")} input, but the gateway provided no request_id to answer.`,
+          `Aera Runtime requested ${event.type.replace(".request", "")} input, but the gateway provided no request_id to answer.`,
         );
         return;
       }
@@ -2174,8 +2176,7 @@ async function sendMessageViaTuiGateway(
       // For secret.request: try the configured security provider first. If the
       // vault already holds the key, answer silently without prompting the user.
       const payload = event.payload as
-        | { prompt?: string; env_var?: string }
-        | undefined;
+        { prompt?: string; env_var?: string } | undefined;
       const envVar = String(payload?.env_var ?? "");
 
       // Vault-first resolution for secret.request: attempt a provider lookup
@@ -2241,7 +2242,7 @@ async function sendMessageViaTuiGateway(
     }
 
     if (!activeSessionId) {
-      throw new Error("AgentEra Runtime gateway did not return a session id");
+      throw new Error("Aera Runtime gateway did not return a session id");
     }
 
     if (!hasSessionInfo) {
@@ -2354,7 +2355,7 @@ function sendMessageViaCli(
 ): ChatHandle {
   const invocation = getRuntimeInvocation();
   if (!invocation) {
-    cb.onError("AgentEra Runtime is not prepared.");
+    cb.onError("Aera Runtime is not prepared.");
     return { abort: () => undefined };
   }
 
@@ -2652,8 +2653,8 @@ function sendMessageViaCli(
       const detail = stderrBuffer.trim();
       cb.onError(
         detail
-          ? `AgentEra Runtime exited with code ${code}: ${detail}`
-          : `AgentEra Runtime exited with code ${code}. Check your model configuration and API key.`,
+          ? `Aera Runtime exited with code ${code}: ${detail}`
+          : `Aera Runtime exited with code ${code}. Check your model configuration and API key.`,
       );
     }
   });
@@ -2769,7 +2770,7 @@ async function sendMessageViaBestApi(
       );
     } catch (error) {
       console.warn(
-        "[chat] AgentEra Runtime gateway stream unavailable; falling back to API stream:",
+        "[chat] Aera Runtime gateway stream unavailable; falling back to API stream:",
         error instanceof Error ? error.message : String(error),
       );
     }
@@ -2829,7 +2830,10 @@ async function sendMessageViaBestApiWithLocalRecovery(
     retrying = true;
     activeHandle?.abort();
     setApiCacheFor(profile, false);
-    const recovered = await startGatewayWithRecovery(profile);
+    const recovered = await startGatewayWithRecovery(
+      profile,
+      envelope?.requireBoundApiTransport ? 30_000 : 8_000,
+    );
     if (aborted) return;
 
     if (recovered) {
@@ -2850,7 +2854,7 @@ async function sendMessageViaBestApiWithLocalRecovery(
 
     if (envelope?.requireBoundApiTransport) {
       settled = true;
-      cb.onError("Bound Hermes API transport is unavailable.");
+      cb.onError(BOUND_API_TRANSPORT_UNAVAILABLE);
       return;
     }
 
@@ -2974,6 +2978,33 @@ export async function sendMessage(
     );
   }
 
+  // Runtime-bound Agent turns are profile-specific and fail closed. Never
+  // trust the process-wide readiness cache here: it may describe the profile
+  // that was active immediately before this Agent was selected. That stale
+  // `true` was most visible on image turns because attachments cannot use the
+  // text-only CLI fallback. Probe the bound profile directly and give a new or
+  // slow-starting profile the full recovery window before sending.
+  if (envelope?.requireBoundApiTransport) {
+    const boundTransportReady =
+      (await isApiServerReady(profile)) ||
+      (await startGatewayWithRecovery(profile, 30_000));
+    setApiCacheFor(profile, boundTransportReady);
+    if (!boundTransportReady) {
+      throw new Error(BOUND_API_TRANSPORT_UNAVAILABLE);
+    }
+    return sendMessageViaBestApiWithLocalRecovery(
+      message,
+      cb,
+      profile,
+      resumeSessionId,
+      history,
+      attachments,
+      contextFolder,
+      override,
+      envelope,
+    );
+  }
+
   const mc = getModelConfig(profile);
   const eff = effectiveModelConfig(profile, override);
   // Official upstream desktop hot-swaps the active gateway session with
@@ -3017,10 +3048,6 @@ export async function sendMessage(
       override,
       envelope,
     );
-  }
-
-  if (envelope?.requireBoundApiTransport) {
-    throw new Error("Bound Hermes API transport is unavailable.");
   }
 
   // Fallback to CLI
@@ -3102,7 +3129,7 @@ function invalidateApiCacheFor(profile?: string): void {
 function getGatewaySpawnError(): string | null {
   return getRuntimeInvocation()
     ? null
-    : "Cannot start the gateway because AgentEra Runtime is not prepared. Install or repair AgentEra Runtime, then try again.";
+    : "Cannot start the gateway because Aera Runtime is not prepared. Install or repair Aera Runtime, then try again.";
 }
 
 function canSpawnGateway(): boolean {
@@ -3200,7 +3227,7 @@ export function startGatewayDetailed(profile?: string): GatewayStartResult {
   // that pops a generic error dialog.  Refuse cleanly here.
   if (isRemoteMode()) {
     const error =
-      "The local gateway can only be started in local mode. Switch to local mode, or start the gateway on the remote AgentEra Runtime host.";
+      "The local gateway can only be started in local mode. Switch to local mode, or start the gateway on the remote Aera Runtime host.";
     console.warn(
       "[gateway] startGateway() called in remote/SSH mode — refusing local spawn",
     );
@@ -3221,7 +3248,7 @@ export function startGatewayDetailed(profile?: string): GatewayStartResult {
   }
   const invocation = getRuntimeInvocation();
   if (!invocation) {
-    const error = "AgentEra Runtime is not prepared.";
+    const error = "Aera Runtime is not prepared.";
     return { success: false, running: false, error };
   }
 

@@ -109,7 +109,7 @@ export function agentCommandsFromCatalog(
     commands.push({
       name,
       description,
-      category: "AgentEra Runtime",
+      category: "Aera Runtime",
       source: "agent",
       target: "agent",
       allowWhileBusy: true,
@@ -167,8 +167,8 @@ export function reconcileSlashCatalog({
     )
     .map(([alias]) => ({
       name: alias,
-      description: `AgentEra Runtime command /${alias}`,
-      category: "AgentEra Runtime",
+      description: `Aera Runtime command /${alias}`,
+      category: "Aera Runtime",
       source: "agent",
       target: "agent",
       allowWhileBusy: true,

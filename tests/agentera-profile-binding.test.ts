@@ -69,7 +69,7 @@ function hashTree(root: string): Record<string, string> {
   return result;
 }
 
-describe("AgentEra non-destructive Runtime Profile ownership", () => {
+describe("Aera non-destructive Runtime Profile ownership", () => {
   let root = "";
   let userData = "";
   let profilePath = "";
@@ -186,7 +186,7 @@ describe("AgentEra non-destructive Runtime Profile ownership", () => {
     );
     expect(() =>
       afterLogout.verifyProfileBinding(profilePath, otherOwner),
-    ).toThrow(/another AgentEra owner/i);
+    ).toThrow(/another Aera owner/i);
 
     // A cloud outage/account deletion has no local destructive fallback.
     await expect(
@@ -457,7 +457,7 @@ describe("AgentEra non-destructive Runtime Profile ownership", () => {
         otherOwner,
         AGENT_INSTALLATION_ID,
       ),
-    ).toThrow(/another AgentEra owner/i);
+    ).toThrow(/another Aera owner/i);
 
     const missingPath = join(root, "missing-base-binding");
     mkdirSync(missingPath);

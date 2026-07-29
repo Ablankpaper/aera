@@ -123,7 +123,7 @@ afterEach(() => {
   }
 });
 
-describe("AgentEra encrypted backup archive", () => {
+describe("Aera encrypted backup archive", () => {
   it("streams canonical files into fixed 8 MiB independently encrypted chunks", async () => {
     const contents = [
       Buffer.from("private-canary-before-random\n"),

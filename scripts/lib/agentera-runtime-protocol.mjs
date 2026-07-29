@@ -813,7 +813,7 @@ async function main() {
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`AgentEra Runtime verification failed: ${message}\n`);
+    process.stderr.write(`Aera Runtime verification failed: ${message}\n`);
     process.exitCode = 1;
   }
 }

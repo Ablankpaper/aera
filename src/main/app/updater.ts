@@ -8,6 +8,7 @@ import { updaterLogger } from "../updater-log";
 import {
   InternalBetaDesktopUpdater,
   resolveCurrentMacAppPath,
+  tryCreateInternalBetaDesktopUpdater,
   type DesktopUpdateSnapshot,
 } from "./internal-beta-updater";
 import {
@@ -137,7 +138,7 @@ function setupInternalBetaUpdater({ getMainWindow }: UpdaterDeps): boolean {
     return false;
   }
 
-  const updater = new InternalBetaDesktopUpdater({
+  const updater = tryCreateInternalBetaDesktopUpdater({
     currentVersion: app.getVersion(),
     platform,
     arch,
@@ -150,6 +151,7 @@ function setupInternalBetaUpdater({ getMainWindow }: UpdaterDeps): boolean {
     onState: (snapshot) => publishSnapshot(getMainWindow, snapshot),
     log: updaterLogger,
   });
+  if (updater === null) return false;
   internalBetaUpdaterInstance = updater;
 
   ipcMain.handle("check-for-updates", () => updater.check());

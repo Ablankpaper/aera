@@ -18,7 +18,7 @@ function pngHasAlpha(path: string): boolean {
   return colorType === 4 || colorType === 6;
 }
 
-describe("AgentEra icon assets", () => {
+describe("Aera icon assets", () => {
   // @lat: [[agentera-branding#Naming contract#Desktop identity]]
   it("uses the approved source and generated platform assets", () => {
     expect(

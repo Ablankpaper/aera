@@ -278,7 +278,7 @@ export async function listProfiles(
 }
 
 /**
- * Metadata-only inventory for AgentEra ownership claims. It intentionally does
+ * Metadata-only inventory for Aera ownership claims. It intentionally does
  * not open Profile config, Memory, USER, sessions, skills, or Curator files.
  */
 export async function listLocalProfileLocations(): Promise<
@@ -338,7 +338,7 @@ export function createProfile(
     : ["profile", "create", id];
   const invocation = getRuntimeInvocation();
   if (invocation === null) {
-    return { success: false, error: "AgentEra Runtime is not prepared." };
+    return { success: false, error: "Aera Runtime is not prepared." };
   }
 
   try {
@@ -386,7 +386,7 @@ export function deleteProfile(name: string): {
   }
   const invocation = getRuntimeInvocation();
   if (invocation === null) {
-    return { success: false, error: "AgentEra Runtime is not prepared." };
+    return { success: false, error: "Aera Runtime is not prepared." };
   }
 
   try {

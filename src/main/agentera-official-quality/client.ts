@@ -57,7 +57,7 @@ export class AgenteraOfficialQualityClientError extends Error {
   readonly retryable: boolean;
 
   constructor(status: number, code: string, retryable: boolean) {
-    super(`AgentEra official quality request failed: ${code}.`);
+    super(`Aera official quality request failed: ${code}.`);
     this.name = "AgenteraOfficialQualityClientError";
     this.status = status;
     this.code = code;
@@ -152,7 +152,7 @@ export class AgenteraOfficialQualityClient implements OfficialQualityClient {
       this.timeoutMs > 120_000
     ) {
       throw new Error(
-        "Invalid AgentEra official quality client configuration.",
+        "Invalid Aera official quality client configuration.",
       );
     }
   }

@@ -102,7 +102,7 @@ export function runHermesAuthLogin(
     if (invocation === null) {
       resolve({
         success: false,
-        error: "AgentEra Runtime is not prepared.",
+        error: "Aera Runtime is not prepared.",
       });
       return;
     }

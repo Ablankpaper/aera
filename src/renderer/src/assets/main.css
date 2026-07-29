@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ========================================================================
-   AgentEra Studio — Clean Design System
+   Aera — Clean Design System
    Dark + Light mode, no gradients, flat design
    ======================================================================== */
 
@@ -3356,6 +3356,36 @@ body {
   position: relative;
 }
 
+.chat-conversation-boundary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 6px 24px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
+  color: var(--text-secondary);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.chat-conversation-boundary > svg {
+  color: var(--accent-text);
+  flex-shrink: 0;
+}
+
+.chat-conversation-boundary strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.chat-conversation-boundary-divider {
+  width: 1px;
+  height: 14px;
+  margin: 0 2px;
+  background: var(--border-bright);
+}
+
 /* Chat body: holds messages and worktree panel side by side */
 .chat-body {
   display: flex;
@@ -5054,6 +5084,151 @@ body {
   margin-top: 10px;
   color: var(--danger-color, #d14343);
   font-size: 12px;
+}
+
+.chat-agent-creation {
+  width: min(600px, calc(100% - 72px));
+  margin: 10px 0 18px 44px;
+  padding: 17px;
+  border: 1px solid
+    color-mix(in srgb, var(--accent-color) 32%, var(--border-color));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-secondary) 95%, var(--accent-color));
+  box-shadow: 0 8px 24px rgb(0 0 0 / 6%);
+}
+
+.chat-agent-creation-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.chat-agent-creation-heading > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--accent-color);
+}
+
+.chat-agent-creation-title {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 680;
+}
+
+.chat-agent-creation-heading p {
+  margin: 4px 0 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.chat-agent-creation-target {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 15px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.chat-agent-creation-target strong {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.chat-agent-creation > label {
+  display: grid;
+  gap: 6px;
+  margin-top: 13px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.chat-agent-creation input,
+.chat-agent-creation textarea {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  outline: none;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.chat-agent-creation textarea {
+  min-height: 82px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.chat-agent-creation input:focus,
+.chat-agent-creation textarea:focus {
+  border-color: var(--accent-color);
+}
+
+.chat-agent-creation label small,
+.chat-agent-creation-status {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.chat-agent-creation-status {
+  margin-top: 15px;
+}
+
+.chat-agent-creation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 15px;
+}
+
+.chat-agent-creation-actions button {
+  min-height: 34px;
+  padding: 0 13px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-agent-creation-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.chat-agent-creation-secondary {
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.chat-agent-creation-primary {
+  border: 1px solid var(--accent-color);
+  background: var(--accent-color);
+  color: white;
+}
+
+.chat-agent-creation-error {
+  margin-top: 11px;
+  color: var(--danger-color, #d14343);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.chat-agent-creation--created {
+  border-color: color-mix(in srgb, #35a36f 42%, var(--border-color));
+}
+
+.chat-agent-creation--created .chat-agent-creation-heading > svg {
+  color: #35a36f;
 }
 
 /* Override Tailwind preflight spacing inside agent bubbles */
@@ -10335,8 +10510,8 @@ body {
   }
 }
 
-/* Cards — visually separate distinct concerns within a pane (e.g. the AgentEra
-   Runtime vs AgentEra Studio update channels in About). */
+/* Cards — visually separate distinct concerns within a pane (e.g. the Aera
+   Runtime vs Aera update channels in About). */
 .settings-card {
   display: flex;
   flex-direction: column;
@@ -11420,7 +11595,7 @@ body {
   margin-top: 4px;
 }
 
-/* AgentEra personal-space control plane. This stays visually and structurally
+/* Aera personal-space control plane. This stays visually and structurally
    separate from the legacy physical Profile/Hermes One section below it. */
 .agent-control-panel {
   display: grid;
@@ -17943,6 +18118,132 @@ body {
   color: var(--error, #dc2626);
 }
 
+.organization-invitation-entry {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.75fr) minmax(260px, 1.25fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.organization-invitation-entry > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.organization-invitation-entry strong {
+  font-size: 12px;
+}
+
+.organization-invitation-entry span {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.organization-invitation-entry input {
+  min-width: 0;
+  width: 100%;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 11px;
+}
+
+.organization-invitation-entry input:focus {
+  border-color: var(--accent);
+}
+
+.organization-access-dialog {
+  width: min(720px, 94vw);
+  height: auto;
+  min-height: 0;
+}
+
+.organization-access-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 20px 22px 22px;
+}
+
+.organization-access-section {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--bg-primary) 54%, transparent);
+}
+
+.organization-access-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.organization-access-heading > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+.organization-access-heading h3,
+.organization-access-heading p {
+  margin: 0;
+}
+
+.organization-access-heading h3 {
+  font-size: 14px;
+}
+
+.organization-access-heading p {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.organization-access-section label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.organization-access-section input {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.organization-access-section input:focus {
+  border-color: var(--accent);
+}
+
+.organization-access-section .btn {
+  width: 100%;
+  margin-top: auto;
+}
+
 .workspace-management-body {
   min-height: 0;
   flex: 1;
@@ -18730,6 +19031,18 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .organization-invitation-entry {
+    grid-template-columns: 1fr;
+  }
+
+  .organization-invitation-entry .btn {
+    width: 100%;
+  }
+
+  .organization-access-body {
+    grid-template-columns: 1fr;
+  }
+
   .workspace-management-list {
     max-height: 210px;
     border-inline-end: 0;
@@ -18780,7 +19093,7 @@ body {
 
 /* ========================================================================
    AGENT HUB
-   WorkBuddy-inspired catalog shell for official and personal Agents. The
+   Guided catalog shell for official and personal Agents. The
    underlying draft, installation, Profile, and governance controls remain in
    the collapsed advanced section; this layer only simplifies discovery.
    ======================================================================== */

@@ -14,6 +14,7 @@ export default defineConfig(
       ".ci/**",
       ".claude/**",
       ".agents/**",
+      ".worktrees/**",
       "build/**",
       // CDP E2E harness — plain Node CommonJS scripts driving the
       // dev electron via Chrome DevTools Protocol for live testing.
@@ -60,6 +61,14 @@ export default defineConfig(
           caughtErrorsIgnorePattern: "^_",
         },
       ],
+    },
+  },
+  {
+    files: ["scripts/internal-beta/desktop-update.mjs"],
+    rules: {
+      // This updater intentionally strips all C0 control characters before
+      // persisting remote manifest text.
+      "no-control-regex": "off",
     },
   },
   {

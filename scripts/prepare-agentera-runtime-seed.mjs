@@ -281,7 +281,7 @@ function releaseAssetUrl(origin, lock, name) {
 async function downloadAsset(url, destination, githubToken) {
   const headers = {
     Accept: "application/octet-stream",
-    "User-Agent": "AgentEra-Studio-Runtime-Seed-Builder",
+    "User-Agent": "Aera-Studio-Runtime-Seed-Builder",
   };
   if (
     githubToken &&
@@ -530,7 +530,7 @@ async function main() {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(
-      `AgentEra Runtime Seed preparation failed: ${message}\n`,
+      `Aera Runtime Seed preparation failed: ${message}\n`,
     );
     process.exitCode = 1;
   }

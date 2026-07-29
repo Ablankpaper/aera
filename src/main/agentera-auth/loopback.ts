@@ -61,23 +61,23 @@ function send(
 const SUCCESS_PAGE = `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
-<title>AgentEra Studio</title><style>body{font-family:system-ui,sans-serif;margin:4rem;color:#111}main{max-width:34rem;margin:auto}</style></head>
-<body><main><h1>登录已完成</h1><p>正在返回 AgentEra Studio，现在可以关闭此页面。</p></main></body></html>`;
+<title>Aera</title><style>body{font-family:system-ui,sans-serif;margin:4rem;color:#111}main{max-width:34rem;margin:auto}</style></head>
+<body><main><h1>登录已完成</h1><p>正在返回 Aera，现在可以关闭此页面。</p></main></body></html>`;
 
 export async function startAgenteraLoopbackListener(
   options: AgenteraLoopbackOptions,
 ): Promise<AgenteraLoopbackListener> {
   const host = options.host ?? "127.0.0.1";
   if (host !== "127.0.0.1") {
-    throw new Error("AgentEra OAuth listener must bind to 127.0.0.1 loopback.");
+    throw new Error("Aera OAuth listener must bind to 127.0.0.1 loopback.");
   }
   const expectedStateBytes = decodeCanonical32(options.expectedState);
   if (!expectedStateBytes) {
-    throw new Error("AgentEra OAuth listener requires a 256-bit state.");
+    throw new Error("Aera OAuth listener requires a 256-bit state.");
   }
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 300_000) {
-    throw new Error("AgentEra OAuth listener timeout is invalid.");
+    throw new Error("Aera OAuth listener timeout is invalid.");
   }
 
   let resolveCallback!: (value: AgenteraLoopbackCallback) => void;
@@ -180,7 +180,7 @@ export async function startAgenteraLoopbackListener(
   await new Promise<void>((resolveStart, rejectStart) => {
     let started = false;
     server.once("error", (error) => {
-      const message = "AgentEra OAuth loopback listener failed.";
+      const message = "Aera OAuth loopback listener failed.";
       if (!started) {
         settled = true;
         rejectCallback(new Error(message));
@@ -199,7 +199,7 @@ export async function startAgenteraLoopbackListener(
         address.port > 65535
       ) {
         const error = new Error(
-          "AgentEra OAuth listener did not bind to IPv4 loopback.",
+          "Aera OAuth listener did not bind to IPv4 loopback.",
         );
         settled = true;
         rejectCallback(error);
@@ -214,7 +214,7 @@ export async function startAgenteraLoopbackListener(
   });
 
   timer = setTimeout(
-    () => fail("AgentEra browser sign-in timed out."),
+    () => fail("Aera browser sign-in timed out."),
     timeoutMs,
   );
   timer.unref?.();
@@ -222,11 +222,11 @@ export async function startAgenteraLoopbackListener(
   return {
     redirectUri,
     callback,
-    cancel: () => fail("AgentEra browser sign-in was cancelled."),
+    cancel: () => fail("Aera browser sign-in was cancelled."),
     close: () => {
       if (!settled) {
         settled = true;
-        rejectCallback(new Error("AgentEra browser sign-in was closed."));
+        rejectCallback(new Error("Aera browser sign-in was closed."));
       }
       closeTransport();
     },

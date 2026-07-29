@@ -38,9 +38,9 @@ afterEach(() => {
   }
 });
 
-describe("AgentEra control-plane database", () => {
-  it("pins the Official Agent and encrypted-backup local schema at version 7", () => {
-    expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(7);
+describe("Aera control-plane database", () => {
+  it("pins the Official Agent, encrypted-backup, and conversation-boundary local schema at version 8", () => {
+    expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(8);
   });
 
   it("opens exactly below Electron userData and never below HERMES_HOME", () => {
@@ -112,6 +112,7 @@ describe("AgentEra control-plane database", () => {
       expect(tables.map(({ name }) => name)).toEqual([
         "agent_drafts",
         "cached_agent_versions",
+        "conversation_boundaries",
         "draft_assets",
         "encrypted_backup_restores",
         "local_agent_installations",
@@ -326,7 +327,7 @@ describe("AgentEra control-plane database", () => {
       databaseFactory: nodeSqliteFactory,
     });
     expect(database.sqlite.prepare("PRAGMA user_version").get()).toEqual({
-      user_version: 7,
+      user_version: AGENTERA_CONTROL_PLANE_SCHEMA_VERSION,
     });
     expect(
       database.sqlite
@@ -386,7 +387,7 @@ describe("AgentEra control-plane database", () => {
     database.close();
   });
 
-  it("migrates v4 rows unchanged and enforces exact v7 Organization variants", () => {
+  it("migrates v4 rows unchanged and enforces exact v8 Organization variants", () => {
     const userDataPath = join(temporaryRoot(), "user-data");
     const paths = resolveAgenteraControlPlanePaths(userDataPath);
     mkdirSync(paths.rootPath, { recursive: true });
@@ -550,7 +551,7 @@ describe("AgentEra control-plane database", () => {
             unknown
           >,
         ),
-      ).toEqual([7]);
+      ).toEqual([AGENTERA_CONTROL_PLANE_SCHEMA_VERSION]);
       expect(
         database.sqlite
           .prepare(

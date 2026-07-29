@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { AgenteraTrustedTimeAnchor } from "../src/main/agentera-auth/time-anchor";
 
-describe("AgentEra trusted time anchor", () => {
+describe("Aera trusted time anchor", () => {
   it("advances with monotonic time even when the wall clock stalls", () => {
     const wall = Date.parse("2026-07-18T01:00:00.000Z");
     let monotonic = 10_000;

@@ -85,7 +85,7 @@ export class AgenteraWorkspaceClientError extends Error {
     code: string,
     retryAfterSeconds: number | null = null,
   ) {
-    super(`AgentEra Workspace request failed: ${code}.`);
+    super(`Aera Workspace request failed: ${code}.`);
     this.name = "AgenteraWorkspaceClientError";
     this.status = status;
     this.code = code;
@@ -432,18 +432,27 @@ function copyWorkspaceInvitationCreation(
 ): WorkspaceInvitationCreation | null {
   if (!isRawWorkspaceInvitationCreation(value)) return null;
   const firstCreation = responseStatus === 201;
+  const expectedCurrentURL =
+    value.token === undefined
+      ? undefined
+      : `aera://workspace-invitation#${value.token}`;
+  const expectedLegacyURL =
+    value.token === undefined
+      ? undefined
+      : `agentera://workspace-invitation#${value.token}`;
   if (
     firstCreation !== (value.token !== undefined) ||
     firstCreation !== (value.invite_url !== undefined) ||
     (firstCreation &&
-      value.invite_url !== `agentera://workspace-invitation#${value.token}`)
+      value.invite_url !== expectedCurrentURL &&
+      value.invite_url !== expectedLegacyURL)
   ) {
     return null;
   }
   return {
     ...copyInvitationFields(value),
     ...(firstCreation
-      ? { token: value.token, inviteUrl: value.invite_url }
+      ? { token: value.token, inviteUrl: expectedCurrentURL }
       : {}),
     secretReplayable: false,
   };
@@ -752,7 +761,7 @@ export class AgenteraWorkspaceClient {
       this.timeoutMs < 1 ||
       this.timeoutMs > 120_000
     ) {
-      throw new Error("AgentEra Workspace client configuration is invalid.");
+      throw new Error("Aera Workspace client configuration is invalid.");
     }
   }
 

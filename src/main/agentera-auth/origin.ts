@@ -38,17 +38,17 @@ export function parseAgenteraCloudOrigin(
   options: AgenteraCloudOriginOptions = {},
 ): string {
   if (raw.trim() === "") {
-    throw new Error("AgentEra cloud origin is not configured.");
+    throw new Error("Aera cloud origin is not configured.");
   }
 
   let parsed: URL;
   try {
     parsed = new URL(raw.trim());
   } catch {
-    throw new Error("AgentEra cloud origin is not a valid URL.");
+    throw new Error("Aera cloud origin is not a valid URL.");
   }
   if (parsed.username !== "" || parsed.password !== "") {
-    throw new Error("AgentEra cloud origin cannot contain credentials.");
+    throw new Error("Aera cloud origin cannot contain credentials.");
   }
   if (
     parsed.protocol !== "https:" &&
@@ -57,26 +57,26 @@ export function parseAgenteraCloudOrigin(
     )
   ) {
     throw new Error(
-      "AgentEra cloud origin requires HTTPS except for loopback development.",
+      "Aera cloud origin requires HTTPS except for loopback development.",
     );
   }
   if (parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== "") {
     throw new Error(
-      "AgentEra cloud endpoint must be configured as an exact origin.",
+      "Aera cloud endpoint must be configured as an exact origin.",
     );
   }
   if (parsed.host === "") {
-    throw new Error("AgentEra cloud origin is not a valid URL.");
+    throw new Error("Aera cloud origin is not a valid URL.");
   }
 
   for (const rechargeUrl of options.rechargePublicUrls ?? []) {
     if (rechargeUrl.trim() === "") continue;
     if (
-      comparableOrigin(rechargeUrl, "AgentEra recharge origin") ===
+      comparableOrigin(rechargeUrl, "Aera recharge origin") ===
       parsed.origin
     ) {
       throw new Error(
-        "AgentEra cloud authentication cannot reuse the recharge-site origin.",
+        "Aera cloud authentication cannot reuse the recharge-site origin.",
       );
     }
   }
@@ -88,13 +88,13 @@ export function agenteraCloudUrl(origin: string, path: string): URL {
   const normalizedOrigin = parseAgenteraCloudOrigin(origin);
   if (!path.startsWith("/") || path.startsWith("//")) {
     throw new Error(
-      "AgentEra cloud path must remain on the configured origin.",
+      "Aera cloud path must remain on the configured origin.",
     );
   }
   const resolved = new URL(path, `${normalizedOrigin}/`);
   if (resolved.origin !== normalizedOrigin) {
     throw new Error(
-      "AgentEra cloud path must remain on the configured origin.",
+      "Aera cloud path must remain on the configured origin.",
     );
   }
   return resolved;

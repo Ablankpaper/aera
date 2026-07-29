@@ -89,7 +89,7 @@ function registeredProfileArguments(): Record<string, number> {
   return result;
 }
 
-describe("AgentEra central IPC product-access guard", () => {
+describe("Aera central IPC product-access guard", () => {
   it("assigns exactly one explicit access level to every IPC channel", () => {
     const channels = registeredChannels();
     expect(channels.length).toBeGreaterThan(100);
@@ -268,7 +268,7 @@ describe("AgentEra central IPC product-access guard", () => {
 
     guard.assert.mockImplementationOnce((level: ProductAccessLevel) => {
       expect(level).toBe("bound-profile");
-      throw new Error("AgentEra Profile binding is required.");
+      throw new Error("Aera Profile binding is required.");
     });
     await expect(async () => {
       await registrations.get("send-message")?.({});

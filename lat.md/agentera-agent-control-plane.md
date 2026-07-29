@@ -24,7 +24,7 @@ The approved enterprise foundation adds Organization identity, transferable owne
 
 The approved direction extends published assets to `owner_scope=ORGANIZATION` while every employee Installation, policy overlay, RuntimeBinding, physical Hermes Profile, and adaptive state remains USER-owned.
 
-Editable drafts remain local to an Owner/Admin device. Submission creates one immutable cloud review package, and a different current Owner/Admin must approve it before the cloud signs and inserts an immutable AgentVersion. No direct Organization publish route exists.
+Editable drafts remain local to an Owner/Admin device. Submission creates one immutable cloud review package, and one current Owner or Admin approval is sufficient before the cloud signs and inserts an immutable AgentVersion. The submitter may perform that approval; authorization, policy, DLP, lifecycle, revision, and idempotency are still rechecked transactionally. No direct Organization publish route exists.
 
 Owner/Admin/Auditor may inspect review history, while active Owner/Admin/Member may discover and install approved versions. Organization policy and DLP run at submission and approval, and every protected cloud transaction rechecks lifecycle, Membership, role, and current policy.
 
@@ -116,6 +116,12 @@ The product UI presents drafts, published definitions, installations, and device
 
 [[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] reuses the configured Hermes model library, imports identity and capability Markdown, and derives safe asset paths. Personal publish and publish-and-use complete from one explicit action; Workspace keeps its trusted preview and Organization keeps mandatory review.
 
+### Guided product Agent creation
+
+Natural-language creation in the default chat produces a real product draft rather than an unlisted Hermes-only Profile.
+
+[[src/renderer/src/screens/Chat/agentCreationIntent.ts#parseAgentCreationIntent]] recognizes only explicit creation commands and leaves questions, status reports, and messages with attachments on the normal Hermes path. [[src/renderer/src/screens/Chat/hooks/useAgentCreationGuide.ts#useAgentCreationGuide]] captures the trusted Agent context, asks for missing name and responsibilities, revalidates that context immediately before mutation, and calls the existing `createDraft` preload method. [[src/renderer/src/screens/Chat/AgentCreationGuideCard.tsx#AgentCreationGuideCard]] links a successful draft to “我的智能体”; it never creates an unregistered runtime Profile as a substitute.
+
 ### Context-only refresh
 
 Changing the selected product space invalidates publication handles and refreshes Agent control state without selecting, reading, creating, or mutating a Profile or RuntimeBinding.
@@ -199,6 +205,14 @@ The authentication installation ID is not reused as the Agent Installation ID. N
 Manual selection downloads and verifies the immutable version, calls the cloud selection transaction, retrieves the newly signed policy through `GET /api/v1/policy-snapshots/{policy_snapshot_id}`, and only then atomically activates the read-only projection for later conversations. A missing or invalid policy leaves the last local version selected.
 
 [[src/main/agentera-agent-control/runtime-binding-store.ts#RuntimeBindingStore]] commits a complete local binding before queuing its sanitized cloud record. [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] retries that outbox after installed turns, session attachment, and authentication changes, but delivery failure cannot delay or roll back Hermes.
+
+### Conversation boundary
+
+Every authenticated conversation freezes data ownership, visibility, and the complete RuntimeBinding snapshot before its first message.
+
+[[src/main/agentera-agent-control/conversation-boundary-store.ts#ConversationBoundaryStore]] persists an actor-partitioned immutable boundary containing scope, scope id, private-by-default visibility, Installation, Definition, Version, Runtime, policy, Memory/files/Artifact ownership, and tool-permission snapshot. A resumed unbound legacy session defaults to USER and PRIVATE; selecting another work context cannot mutate an existing boundary or silently migrate history.
+
+The conversation-context IPC first refreshes the trusted product context and prepares any installed-Agent RuntimeBinding, then creates the boundary. The send path repeats the same idempotent check and fails closed if the trusted coordinator is unavailable. [[src/renderer/src/screens/Chat/ConversationBoundaryIndicator.tsx#ConversationBoundaryIndicator]] displays “运行于” independently from “可见性”, so an Organization or team/project run remains “仅自己” until a future explicit share action changes visibility.
 
 ## Hermes integration
 

@@ -11,7 +11,7 @@ import {
   resolveBundledAgenteraOfflinePublicKeys,
 } from "../src/main/agentera-auth/config";
 
-describe("AgentEra cloud endpoint configuration", () => {
+describe("Aera cloud endpoint configuration", () => {
   const betaIssuer = "https://203.0.113.10";
   const betaPublicKey = Buffer.alloc(32, 73).toString("base64url");
 

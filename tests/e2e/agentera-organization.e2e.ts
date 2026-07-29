@@ -318,7 +318,7 @@ class OrganizationRouteFixture {
           ["display_name"],
           "create organization",
         );
-        if (request.display_name !== "AgentEra Research") {
+        if (request.display_name !== "Aera Research") {
           return this.fail("Unexpected Organization display name.");
         }
         return this.idempotent(
@@ -1679,7 +1679,7 @@ test("runs the three-account Organization lifecycle without changing Hermes stat
     ).toMatchObject({ stale: false, organizations: [] });
 
     const created = await guarded("A creates Organization", () =>
-      manager!.create({ displayName: "AgentEra Research" }),
+      manager!.create({ displayName: "Aera Research" }),
     );
     expect(created).toMatchObject({
       id: ORGANIZATION_ID,
@@ -1984,7 +1984,7 @@ test("runs the three-account Organization lifecycle without changing Hermes stat
     const dissolved = await guarded("B safely dissolves Organization", () =>
       manager!.dissolve({
         organizationId: ORGANIZATION_ID,
-        displayName: "AgentEra Research",
+        displayName: "Aera Research",
         expectedRevision: finalArchive.revision,
         confirmation: "dissolve-organization",
       }),

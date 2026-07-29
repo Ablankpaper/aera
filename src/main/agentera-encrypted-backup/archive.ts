@@ -131,7 +131,7 @@ export interface CreateEncryptedBackupArchiveInput {
 }
 
 function invalidArchive(): never {
-  throw new Error("Invalid AgentEra encrypted backup archive.");
+  throw new Error("Invalid Aera encrypted backup archive.");
 }
 
 function uuid(value: unknown): string {
@@ -162,7 +162,7 @@ function randomExact(
 
 function throwIfCancelled(signal?: AbortSignal): void {
   if (signal?.aborted) {
-    throw new Error("AgentEra encrypted backup archive was cancelled.");
+    throw new Error("Aera encrypted backup archive was cancelled.");
   }
 }
 

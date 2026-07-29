@@ -104,7 +104,7 @@ afterEach(() => {
   }
 });
 
-describe("AgentEra editable Agent manifest", () => {
+describe("Aera editable Agent manifest", () => {
   it("matches cloud canonical ordering, limits, and content digests", () => {
     const canonical = canonicalizeEditableAgent(
       editableManifest(),

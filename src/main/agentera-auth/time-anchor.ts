@@ -16,7 +16,7 @@ export interface AgenteraTrustedTimeEvaluation {
 function parseTrustedServerTime(value: string): number {
   const parsed = new Date(value);
   if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== value) {
-    throw new Error("AgentEra trusted server time is invalid.");
+    throw new Error("Aera trusted server time is invalid.");
   }
   return parsed.getTime();
 }
@@ -48,7 +48,7 @@ export class AgenteraTrustedTimeAnchor {
       this.rollbackToleranceMs < 0 ||
       this.rollbackToleranceMs > 60 * 60 * 1000
     ) {
-      throw new Error("AgentEra clock rollback tolerance is invalid.");
+      throw new Error("Aera clock rollback tolerance is invalid.");
     }
     this.reset(options.trustedServerTime);
   }
@@ -58,7 +58,7 @@ export class AgenteraTrustedTimeAnchor {
     const wall = this.wallNow();
     const monotonic = this.monotonicNow();
     if (!Number.isFinite(wall) || !Number.isFinite(monotonic)) {
-      throw new Error("AgentEra trusted time clocks are unavailable.");
+      throw new Error("Aera trusted time clocks are unavailable.");
     }
     this.trustedAtReset = trusted;
     this.wallAtReset = wall;

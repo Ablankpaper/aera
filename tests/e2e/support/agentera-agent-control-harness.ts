@@ -48,7 +48,7 @@ const defaultCloudRoot = resolve(
     resolve(desktopRoot, "../aera-cloud"),
 );
 const cloudPublicOrigin = "http://127.0.0.1:8086";
-const password = "AgentEra Runtime E2E battery staple 2026";
+const password = "Aera Runtime E2E battery staple 2026";
 const REQUEST_BODY_LIMIT = 8 * 1024 * 1024;
 
 type SMSDelivery = {
@@ -519,7 +519,7 @@ async function waitForCloud(
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
-      throw new Error(`AgentEra cloud exited before readiness.\n${logs()}`);
+      throw new Error(`Aera cloud exited before readiness.\n${logs()}`);
     }
     try {
       const response = await fetch(`${backendOrigin}/health/ready`);
@@ -529,7 +529,7 @@ async function waitForCloud(
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 200));
   }
-  throw new Error(`AgentEra cloud did not become ready.\n${logs()}`);
+  throw new Error(`Aera cloud did not become ready.\n${logs()}`);
 }
 
 async function startCloud(harness: AgentControlHarness): Promise<void> {
@@ -696,7 +696,7 @@ async function generateOfficialPKI(
       "-days",
       "1",
       "-subj",
-      "/CN=AgentEra Official E2E CA",
+      "/CN=Aera Official E2E CA",
       "-addext",
       "basicConstraints=critical,CA:TRUE",
       "-addext",
@@ -865,7 +865,7 @@ function officialEnvironment(
     AGENTERA_CLOUD_OFFICIAL_AGENTS_ENABLED: "true",
     AGENTERA_CLOUD_PLATFORM_ID: "019f0000-0000-7000-8000-000000000999",
     AGENTERA_CLOUD_PLATFORM_KEY: `agentera_official_e2e_${process.pid}`,
-    AGENTERA_CLOUD_PLATFORM_DISPLAY_NAME: "AgentEra Official E2E",
+    AGENTERA_CLOUD_PLATFORM_DISPLAY_NAME: "Aera Official E2E",
     AGENTERA_CLOUD_OFFICIAL_ROLLOUT_HMAC_ACTIVE_KEY_ID: "official-e2e-v1",
     AGENTERA_CLOUD_OFFICIAL_ROLLOUT_HMAC_KEYS: cloudKeyRing(randomKey()),
     AERA_ADMIN_ENVIRONMENT: "test",
@@ -1620,7 +1620,7 @@ export async function claimDefaultProfile(
     )
     .toMatchObject({ phase: "current" });
 
-  // @lat: [[agentera-agent-control-plane#AgentEra Agent control plane V1#Trusted Workspace Agent context#Product-facing Agent projection]]
+// @lat: [[agentera-agent-control-plane#AgentEra Agent control plane V1#Trusted Workspace Agent context#Product-facing Agent projection]]
   // Fresh installations now bind their empty local Runtime automatically. The
   // legacy ownership screen remains only for an exceptional data/owner
   // conflict, so the E2E helper must accept either safe path.
@@ -2113,7 +2113,7 @@ export async function startBoundConversation(
     ({ profile, runId }) => {
       void window.hermesAPI
         .sendMessage(
-          "Create the immutable AgentEra RuntimeBinding for this conversation.",
+          "Create the immutable Aera RuntimeBinding for this conversation.",
           profile,
           undefined,
           undefined,

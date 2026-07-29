@@ -14,9 +14,9 @@ export default {
   startExited: "Geçit başlatıldı, ancak hazır hale gelmeden önce tekrar durdu.",
   checkLog: "Geçit günlüğünü kontrol edin:",
   gatewayHint:
-    "AgentEra'i Telegram, Discord, Slack ve diğer platformlara bağlar",
+    "Aera'i Telegram, Discord, Slack ve diğer platformlara bağlar",
   subtitle:
-    "AgentEra Ajanının bağlanabileceği mesajlaşma platformlarını yönetin.",
+    "Aera Ajanının bağlanabileceği mesajlaşma platformlarını yönetin.",
   refreshTooltip: "Platform durumunu yenile",
   refresh: "Yenile",
   configHint:

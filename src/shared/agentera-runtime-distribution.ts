@@ -42,7 +42,7 @@ const RUNTIME_DISTRIBUTION_PHASES = new Set<RuntimeDistributionPhase>([
 function nullableString(value: unknown, field: string): string | null {
   if (value === null) return null;
   if (typeof value !== "string" || value.length > 256) {
-    throw new Error(`AgentEra Runtime state has an invalid ${field}.`);
+    throw new Error(`Aera Runtime state has an invalid ${field}.`);
   }
   return value;
 }
@@ -50,7 +50,7 @@ function nullableString(value: unknown, field: string): string | null {
 function nullableVersion(value: unknown, field: string): string | null {
   const version = nullableString(value, field);
   if (version !== null && !/^[0-9A-Za-z][0-9A-Za-z._-]{0,127}$/.test(version)) {
-    throw new Error(`AgentEra Runtime state has an invalid ${field}.`);
+    throw new Error(`Aera Runtime state has an invalid ${field}.`);
   }
   return version;
 }
@@ -59,7 +59,7 @@ function nullableCommit(value: unknown): string | null {
   const commit = nullableString(value, "currentSourceCommit");
   if (commit !== null && !/^[0-9a-f]{40}$/.test(commit)) {
     throw new Error(
-      "AgentEra Runtime state has an invalid currentSourceCommit.",
+      "Aera Runtime state has an invalid currentSourceCommit.",
     );
   }
   return commit;
@@ -71,7 +71,7 @@ function nullableTimestamp(value: unknown): string | null {
     timestamp !== null &&
     (!timestamp.endsWith("Z") || Number.isNaN(Date.parse(timestamp)))
   ) {
-    throw new Error("AgentEra Runtime state has an invalid lastCheckedAt.");
+    throw new Error("Aera Runtime state has an invalid lastCheckedAt.");
   }
   return timestamp;
 }
@@ -79,7 +79,7 @@ function nullableTimestamp(value: unknown): string | null {
 function nullableErrorCode(value: unknown): string | null {
   const code = nullableString(value, "lastErrorCode");
   if (code !== null && !/^runtime_[a-z0-9_]+$/.test(code)) {
-    throw new Error("AgentEra Runtime state has an invalid lastErrorCode.");
+    throw new Error("Aera Runtime state has an invalid lastErrorCode.");
   }
   return code;
 }
@@ -87,14 +87,14 @@ function nullableErrorCode(value: unknown): string | null {
 function nullableNumber(value: unknown, field: string): number | null {
   if (value === null) return null;
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    throw new Error(`AgentEra Runtime state has an invalid ${field}.`);
+    throw new Error(`Aera Runtime state has an invalid ${field}.`);
   }
   return value;
 }
 
 function booleanValue(value: unknown, field: string): boolean {
   if (typeof value !== "boolean") {
-    throw new Error(`AgentEra Runtime state has an invalid ${field}.`);
+    throw new Error(`Aera Runtime state has an invalid ${field}.`);
   }
   return value;
 }
@@ -113,7 +113,7 @@ export function serializeRuntimeDistributionPublicState(
     typeof phase !== "string" ||
     !RUNTIME_DISTRIBUTION_PHASES.has(phase as RuntimeDistributionPhase)
   ) {
-    throw new Error("AgentEra Runtime state has an invalid phase.");
+    throw new Error("Aera Runtime state has an invalid phase.");
   }
   return {
     phase: phase as RuntimeDistributionPhase,

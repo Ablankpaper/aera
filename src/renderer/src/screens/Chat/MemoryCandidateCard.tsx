@@ -1,25 +1,24 @@
 import { memo } from "react";
-import { Check, UserRound, UsersRound, X } from "lucide-react";
+import { UserRound, UsersRound } from "lucide-react";
 import { useI18n } from "../../components/useI18n";
 import type { MemoryCandidateMessage } from "./types";
 
 interface MemoryCandidateCardProps {
   message: MemoryCandidateMessage;
-  isAgentBusy: boolean;
   onConfirm: (batchId: string) => void;
   onReject: (batchId: string) => void;
 }
 
 export const MemoryCandidateCard = memo(function MemoryCandidateCard({
   message,
-  isAgentBusy,
   onConfirm,
   onReject,
-}: MemoryCandidateCardProps): React.JSX.Element {
+}: MemoryCandidateCardProps): React.JSX.Element | null {
   const { t } = useI18n();
   const { batch, status } = message;
   const resolved = status === "confirmed" || status === "rejected";
   const submitting = status === "saving";
+  if (resolved) return null;
 
   return (
     <section
@@ -30,22 +29,10 @@ export const MemoryCandidateCard = memo(function MemoryCandidateCard({
           <div className="chat-memory-candidate-title">
             {t("chat.memoryCandidate.title")}
           </div>
-          {!resolved && (
-            <div className="chat-memory-candidate-subtitle">
-              {t("chat.memoryCandidate.subtitle")}
-            </div>
-          )}
-        </div>
-        {resolved && (
-          <div className="chat-memory-candidate-receipt">
-            {status === "confirmed" ? <Check size={15} /> : <X size={15} />}
-            {t(
-              status === "confirmed"
-                ? "chat.memoryCandidate.saved"
-                : "chat.memoryCandidate.notSaved",
-            )}
+          <div className="chat-memory-candidate-subtitle">
+            {t("chat.memoryCandidate.subtitle")}
           </div>
-        )}
+        </div>
       </div>
 
       <div className="chat-memory-candidate-items">
@@ -77,42 +64,33 @@ export const MemoryCandidateCard = memo(function MemoryCandidateCard({
         ))}
       </div>
 
-      {!resolved && (
-        <>
-          {status === "error" && (
-            <div className="chat-memory-candidate-error" role="alert">
-              {t("chat.memoryCandidate.error")}
-            </div>
-          )}
-          {isAgentBusy && (
-            <div className="chat-memory-candidate-wait">
-              {t("chat.memoryCandidate.waitForReply")}
-            </div>
-          )}
-          <div className="chat-memory-candidate-actions">
-            <button
-              type="button"
-              className="chat-memory-candidate-reject"
-              disabled={submitting}
-              onClick={() => onReject(batch.id)}
-            >
-              {t("chat.memoryCandidate.reject")}
-            </button>
-            <button
-              type="button"
-              className="chat-memory-candidate-confirm"
-              disabled={submitting || isAgentBusy}
-              onClick={() => onConfirm(batch.id)}
-            >
-              {t(
-                submitting
-                  ? "chat.memoryCandidate.saving"
-                  : "chat.memoryCandidate.confirm",
-              )}
-            </button>
-          </div>
-        </>
+      {status === "error" && (
+        <div className="chat-memory-candidate-error" role="alert">
+          {t("chat.memoryCandidate.error")}
+        </div>
       )}
+      <div className="chat-memory-candidate-actions">
+        <button
+          type="button"
+          className="chat-memory-candidate-reject"
+          disabled={submitting}
+          onClick={() => onReject(batch.id)}
+        >
+          {t("chat.memoryCandidate.reject")}
+        </button>
+        <button
+          type="button"
+          className="chat-memory-candidate-confirm"
+          disabled={submitting}
+          onClick={() => onConfirm(batch.id)}
+        >
+          {t(
+            submitting
+              ? "chat.memoryCandidate.saving"
+              : "chat.memoryCandidate.confirm",
+          )}
+        </button>
+      </div>
     </section>
   );
 });

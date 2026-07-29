@@ -235,7 +235,7 @@ async function main() {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(
-      `AgentEra packaged Runtime Seed verification failed: ${message}\n`,
+      `Aera packaged Runtime Seed verification failed: ${message}\n`,
     );
     process.exitCode = 1;
   }

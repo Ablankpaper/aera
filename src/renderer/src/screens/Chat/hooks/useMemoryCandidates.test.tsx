@@ -278,7 +278,7 @@ describe("useMemoryCandidates", () => {
     ]);
   });
 
-  it("does not confirm an identity revision while Hermes is generating", async () => {
+  it("lets a displayed post-reply candidate resolve during a later Hermes turn", async () => {
     const api = installApi();
     const { result, rerender } = renderCandidateHook(true);
     act(() =>
@@ -297,11 +297,18 @@ describe("useMemoryCandidates", () => {
     await act(async () => {
       await result.current.confirm(batch.id);
     });
-    expect(api.confirmCandidates).not.toHaveBeenCalled();
-    expect(result.current.messages[1]).toMatchObject({ status: "pending" });
+    expect(api.confirmCandidates).toHaveBeenCalledWith(
+      batch.id,
+      "vertical-agent-one",
+    );
+    expect(
+      result.current.messages.filter(
+        (message) => message.kind === "memory_candidate",
+      ),
+    ).toHaveLength(0);
   });
 
-  it("records confirmed and rejected receipts without putting either into Hermes history", async () => {
+  it("removes confirmed and rejected cards without putting either into Hermes history", async () => {
     const api = installApi();
     const { result, rerender } = renderCandidateHook(true);
     act(() =>
@@ -321,7 +328,7 @@ describe("useMemoryCandidates", () => {
       batch.id,
       "vertical-agent-one",
     );
-    expect(result.current.messages[1]).toMatchObject({ status: "confirmed" });
+    expect(result.current.messages).toHaveLength(1);
 
     api.extractCandidates.mockResolvedValueOnce({
       success: true,
@@ -336,7 +343,7 @@ describe("useMemoryCandidates", () => {
       result.current.appendAgentReply("第二条回复完成。", "turn-two");
     });
     rerender({ busy: false, activeProfile: "vertical-agent-one" });
-    await waitFor(() => expect(result.current.messages).toHaveLength(4));
+    await waitFor(() => expect(result.current.messages).toHaveLength(3));
     const secondId = "33333333-3333-4333-8333-333333333333";
     await act(async () => {
       await result.current.reject(secondId);
@@ -345,6 +352,9 @@ describe("useMemoryCandidates", () => {
       secondId,
       "vertical-agent-one",
     );
-    expect(result.current.messages[3]).toMatchObject({ status: "rejected" });
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages.every((message) => message.kind !== "memory_candidate")).toBe(
+      true,
+    );
   });
 });

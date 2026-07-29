@@ -3,7 +3,7 @@ import enAgents from "../en/agents";
 export default {
   title: "エージェント",
   subtitle:
-    "各エージェントは独立した AgentEra 環境で、固有の設定・メモリ・スキルを使用します",
+    "各エージェントは独立した Aera 環境で、固有の設定・メモリ・スキルを使用します",
   newAgent: "新規エージェント",
   namePlaceholder: "エージェント名（例：coder）",
   createTitle: "新規エージェント",
@@ -54,7 +54,7 @@ export default {
   walletCreateFailed: "Couldn't add wallet",
   walletRecoveryTitle: "Recovery phrase",
   walletRecoveryInfo:
-    "Save this phrase now. AgentEra will not show it again after this modal closes.",
+    "Save this phrase now. Aera will not show it again after this modal closes.",
   walletCopyRecovery: "Copy phrase",
   walletDone: "I've saved it",
   walletBalanceLoading: "Loading…",
@@ -62,7 +62,7 @@ export default {
   walletBalanceRefresh: "Refresh",
   walletDeleteTitle: "Remove wallet",
   walletDeleteWarning:
-    "This will permanently remove this wallet from AgentEra. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
+    "This will permanently remove this wallet from Aera. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
   walletDeleteConfirmLabel: "Remove wallet",
   control: {
     experience: enAgents.control.experience,
@@ -125,7 +125,7 @@ export default {
       withdraw: "提出を取り下げ",
       confirmWithdrawal: "取り下げを確定",
       withdrawalBoundary:
-        "取り下げはこの保留中の提出だけを閉じます。ローカルドラフトと Hermes データは変更されません。",
+        "取り下げはこの保留中の提出だけを閉じます。ローカルドラフトと Aera Runtime データは変更されません。",
       draftReadOnly:
         "この企業ドラフトは読み取り専用です。オーナーまたは管理者として再接続してから変更してください。",
     },

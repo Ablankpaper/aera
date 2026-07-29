@@ -1,9 +1,9 @@
 const auth = {
   gate: {
-    title: "登录 AgentEra",
+    title: "登录 Aera",
     productCaption: "智能工作空间",
     slogan: "艾拉，帮你实现一切想象力。",
-    checking: "正在检查 AgentEra 会话…",
+    checking: "正在检查 Aera 会话…",
     browserNote:
       "点击登录后将在系统浏览器中完成登录或注册，完成后会自动返回桌面端。",
     openBrowser: "登录 / 注册",
@@ -21,49 +21,49 @@ const auth = {
     retry: "重试",
     retrying: "正在重新检查…",
     loginFailed: "浏览器登录未完成，请重试。",
-    retryFailed: "AgentEra 无法验证当前会话，请重试。",
+    retryFailed: "Aera 无法验证当前会话，请重试。",
     cancelled: "已取消登录。",
     legalPrefix: "继续即表示你同意",
     privacy: "隐私政策",
     terms: "服务条款",
     secureStorageTitle: "安全存储不可用",
     secureStorageDescription:
-      "AgentEra 无法安全保存此设备会话。请启用系统钥匙串或凭据服务后重试，软件绝不会降级为明文存储。",
+      "Aera 无法安全保存此设备会话。请启用系统钥匙串或凭据服务后重试，软件绝不会降级为明文存储。",
     reasons: {
-      sign_in_required: "使用 AgentEra Studio 前，请先登录或创建账户。",
+      sign_in_required: "使用 Aera 前，请先登录或创建账户。",
       offline_expired: "7 天离线使用期限已到，请联网并重新登录。",
       clock_rollback: "系统时间出现异常变化，请联网验证此设备。",
       device_revoked: "此设备登录已失效，请重新登录。",
-      account_disabled: "此 AgentEra 账户目前已停用，请前往网页账户中心处理。",
+      account_disabled: "此 Aera 账户目前已停用，请前往网页账户中心处理。",
       account_pending_deletion:
-        "此账户正在等待注销，无法登录 AgentEra Studio。",
-      secure_storage_unavailable: "AgentEra 会话必须使用系统安全存储。",
+        "此账户正在等待注销，无法登录 Aera。",
+      secure_storage_unavailable: "Aera 会话必须使用系统安全存储。",
     },
   },
   profile: {
     checkingTitle: "正在检查本地数据访问权",
     checkingDescription:
-      "AgentEra 只检查归属元数据，不会打开你的 Runtime 私有内容。",
+      "Aera 只检查归属元数据，不会打开你的 Runtime 私有内容。",
     title: "选择如何使用本地数据",
     existingDescription:
-      "此设备上检测到已有 AgentEra Runtime 数据。你可以原地绑定，也可以创建一个独立的全新空间。",
+      "此设备上检测到已有 Aera Runtime 数据。你可以原地绑定，也可以创建一个独立的全新空间。",
     noUpload:
       "两个选项都不会上传、复制、合并或改写你的 Memory、会话、文件、技能、USER 资料或学习状态。",
     useExisting: "使用现有本地数据",
     createNew: "创建全新空间",
     binding: "正在安全绑定…",
     creating: "正在创建空白空间…",
-    emptyBindingTitle: "正在准备个人空间",
+    emptyBindingTitle: "正在准备“我的”",
     emptyBindingDescription: "正在自动准备本地智能体运行环境。",
     connectionBindingTitle: "正在保护此 Runtime 连接",
     connectionBindingDescription:
-      "正在把远程或 SSH 连接绑定到当前 AgentEra 所有者，产品 Token 不会发送给 Runtime。",
+      "正在把远程或 SSH 连接绑定到当前 Aera 所有者，产品 Token 不会发送给 Runtime。",
     otherOwnerTitle: "此本地数据属于另一个账户",
     otherOwnerDescription:
-      "AgentEra 不会打开或重新分配其他账户的本地智能体数据。请创建独立空白空间，或使用其所有者账户登录。",
+      "Aera 不会打开或重新分配其他账户的本地智能体数据。请创建独立空白空间，或使用其所有者账户登录。",
     remoteOtherOwnerTitle: "此 Runtime 连接属于另一个账户",
     remoteOtherOwnerDescription:
-      "AgentEra 不会继承上一位所有者的远程或 SSH 连接上下文。",
+      "Aera 不会继承上一位所有者的远程或 SSH 连接上下文。",
     differentAccount: "使用其他账户登录",
     failedTitle: "无法准备本地访问",
     failedDescription:
@@ -73,13 +73,13 @@ const auth = {
   offline: {
     title: "本地离线模式",
     description:
-      "云端账户功能已暂停；在签名离线期限内，本地 Agent、模型 API 与 Hermes 自学习仍可正常使用。",
+      "云端账户功能已暂停；在签名离线期限内，本地 Agent、模型 API 与 Aera Runtime 自学习仍可正常使用。",
   },
   account: {
-    settingsNav: "AgentEra 账户",
-    title: "AgentEra 账户",
+    settingsNav: "Aera 账户",
+    title: "Aera 账户",
     defaultDisplayName: "用户",
-    openMenu: "打开 AgentEra 账户菜单",
+    openMenu: "打开 Aera 账户菜单",
     signIn: "登录",
     signingIn: "正在打开浏览器…",
     guestLocal: "游客模式 · 本地使用",
@@ -91,19 +91,19 @@ const auth = {
     switch: "切换账户",
     signOut: "退出登录",
     actionFailed: "暂时无法完成此账户操作。",
-    unavailable: "AgentEra 账户信息暂不可用。",
+    unavailable: "Aera 账户信息暂不可用。",
     userId: "账户 ID",
     deviceId: "设备",
     offlineUntil: "签名离线授权有效至 {{date}}。",
     localDataWarning:
       "注销云端账户或退出登录都不会删除、移动、上传或解绑本地智能体数据、Memory、会话、文件、技能及自学习状态。",
     rechargeSeparateAccount:
-      "充值会打开独立的模型 API 网站；该网站的账户、余额、API Key、Cookie 与 Token 均不和 AgentEra 账户共用。",
+      "充值会打开独立的模型 API 网站；该网站的账户、余额、API Key、Cookie 与 Token 均不和 Aera 账户共用。",
     pendingRevocationWarning:
       "若控制服务不可达时退出，此设备在签名撤销请求自动补发成功前，仍可能暂时占用最多 5 台设备的名额。",
     profile: {
       title: "个人资料",
-      description: "设置你在 AgentEra Studio 中显示的名称和个人信息。",
+      description: "设置你在 Aera 中显示的名称和个人信息。",
       loading: "正在加载个人资料…",
       displayName: "用户名",
       displayNamePlaceholder: "例如：艾拉用户",

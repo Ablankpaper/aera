@@ -51,15 +51,20 @@ async function bootstrapAndStartMainProcess(): Promise<void> {
 const workspaceInvitationInbox = new WorkspaceInvitationInbox();
 
 function registerAgenteraInvitationProtocol(): void {
+  const schemes = ["aera", "agentera"];
   if (app.isPackaged) {
-    app.setAsDefaultProtocolClient("agentera");
+    for (const scheme of schemes) {
+      app.setAsDefaultProtocolClient(scheme);
+    }
     return;
   }
   const developmentEntry = process.argv[1];
   if (typeof developmentEntry === "string" && developmentEntry.length > 0) {
-    app.setAsDefaultProtocolClient("agentera", process.execPath, [
-      resolve(developmentEntry),
-    ]);
+    for (const scheme of schemes) {
+      app.setAsDefaultProtocolClient(scheme, process.execPath, [
+        resolve(developmentEntry),
+      ]);
+    }
   }
 }
 

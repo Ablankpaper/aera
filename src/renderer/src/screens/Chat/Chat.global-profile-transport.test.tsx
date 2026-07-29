@@ -1,4 +1,4 @@
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Chat from "./Chat";
 
@@ -103,6 +103,13 @@ describe("Chat global-profile transport freeze", () => {
       globalProfileVersion: 3,
       requiresBoundApiTransport: true,
       degraded: false,
+      conversationBoundary: {
+        scope: "ORGANIZATION",
+        scopeId: "10000000-0000-4000-8000-000000000001",
+        scopeDisplayName: "Acme",
+        visibility: "PRIVATE",
+        origin: "NEW_CONVERSATION",
+      },
     }));
 
     Object.defineProperty(window, "agenteraGlobalProfile", {
@@ -164,6 +171,10 @@ describe("Chat global-profile transport freeze", () => {
       expect(dashboard.enabledValues.at(-1)).toBe(false);
     });
 
+    expect(screen.getByText("Acme")).toBeInTheDocument();
+    expect(
+      screen.getByText("chat.boundary.visibilityValue.PRIVATE"),
+    ).toBeInTheDocument();
     expect(emitGlobalProfileChanged).toBeNull();
   });
 
@@ -173,11 +184,13 @@ describe("Chat global-profile transport freeze", () => {
         globalProfileVersion: 0,
         requiresBoundApiTransport: false,
         degraded: false,
+        conversationBoundary: null,
       })
       .mockResolvedValueOnce({
         globalProfileVersion: 4,
         requiresBoundApiTransport: true,
         degraded: false,
+        conversationBoundary: null,
       });
     const onSessionIdChange = vi.fn();
     render(
@@ -216,7 +229,7 @@ describe("Chat global-profile transport freeze", () => {
     });
   });
 
-  // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Account-required routing#Chat transport privacy]]
+    // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Account-required routing#Chat transport privacy]]
   it("does not read account-owned connection configuration for a guest chat", async () => {
     const getConnectionConfig = window.hermesAPI
       .getConnectionConfig as ReturnType<typeof vi.fn>;

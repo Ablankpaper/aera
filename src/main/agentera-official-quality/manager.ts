@@ -79,7 +79,7 @@ export class AgenteraOfficialQualityManager {
       typeof options.getPrincipal !== "function"
     ) {
       throw new Error(
-        "Invalid AgentEra official quality manager configuration.",
+        "Invalid Aera official quality manager configuration.",
       );
     }
     this.database = options.database;
@@ -128,7 +128,7 @@ export class AgenteraOfficialQualityManager {
     input: OfficialQualityFeedbackSubmission,
   ): Promise<OfficialQualityFeedbackSubmissionResult> {
     const principal = this.getPrincipal();
-    if (!principal) throw new Error("AgentEra product sign-in is required.");
+    if (!principal) throw new Error("Aera product sign-in is required.");
     this.purgeExpiredFeedbackCandidates();
     const candidate = this.feedbackCandidates.get(input.eventId);
     if (
@@ -156,7 +156,7 @@ export class AgenteraOfficialQualityManager {
   ): Promise<OfficialQualityConsentReceipt> {
     const principal = this.getPrincipal();
     if (!principal) {
-      throw new Error("AgentEra product sign-in is required.");
+      throw new Error("Aera product sign-in is required.");
     }
     const receipt = this.database.setConsent(
       principal.accountId,

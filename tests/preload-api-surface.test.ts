@@ -228,7 +228,7 @@ describe("Preload API Surface", () => {
   });
 });
 
-describe("AgentEra product-auth preload namespace", () => {
+describe("Aera product-auth preload namespace", () => {
   const expected = [
     "getState",
     "startLogin",
@@ -260,7 +260,7 @@ describe("AgentEra product-auth preload namespace", () => {
   });
 });
 
-describe("AgentEra Runtime-access preload namespace", () => {
+describe("Aera Runtime-access preload namespace", () => {
   const expected = [
     "probeInstallFiles",
     "runStartupPreflight",
@@ -292,7 +292,7 @@ describe("AgentEra Runtime-access preload namespace", () => {
   });
 });
 
-describe("AgentEra global-profile preload namespace", () => {
+describe("Aera global-profile preload namespace", () => {
   const expected = [
     "get",
     "setEntry",
@@ -319,7 +319,7 @@ describe("AgentEra global-profile preload namespace", () => {
   });
 });
 
-describe("AgentEra Runtime-distribution preload namespace", () => {
+describe("Aera Runtime-distribution preload namespace", () => {
   const expected = [
     "getState",
     "checkForUpdate",
@@ -350,7 +350,7 @@ describe("AgentEra Runtime-distribution preload namespace", () => {
   });
 });
 
-describe("AgentEra Agent-control preload namespace", () => {
+describe("Aera Agent-control preload namespace", () => {
   const expected = [
     "getState",
     "listDrafts",
@@ -428,7 +428,7 @@ describe("AgentEra Agent-control preload namespace", () => {
   });
 });
 
-describe("AgentEra Workspace preload namespace", () => {
+describe("Aera Workspace preload namespace", () => {
   const expected = [
     "getState",
     "refresh",
@@ -470,7 +470,7 @@ describe("AgentEra Workspace preload namespace", () => {
   });
 });
 
-describe("AgentEra Product Space preload namespace", () => {
+describe("Aera Product Space preload namespace", () => {
   const expected = ["getState", "refresh", "select", "onStateChanged"];
 
   it("exposes exactly the global selection surface", () => {
@@ -500,7 +500,7 @@ describe("AgentEra Product Space preload namespace", () => {
   });
 });
 
-describe("AgentEra Organization preload namespace", () => {
+describe("Aera Organization preload namespace", () => {
   const expected = [
     "getState",
     "refresh",
@@ -523,6 +523,7 @@ describe("AgentEra Organization preload namespace", () => {
     "createInvitation",
     "revokeInvitation",
     "acceptInvitation",
+    "submitInvitationLink",
     "getPendingInvitation",
     "dismissPendingInvitation",
     "getCurrentPolicy",

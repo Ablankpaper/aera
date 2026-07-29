@@ -21,6 +21,7 @@ import Agents from "../Agents/Agents";
 import Discover from "../Discover/Discover";
 import ProductSpaceSwitcher from "./ProductSpaceSwitcher";
 import WorkspaceManagementDialog from "./WorkspaceManagementDialog";
+import OrganizationAccessDialog from "./OrganizationAccessDialog";
 import OrganizationManagementDialog from "./OrganizationManagementDialog";
 import SidebarRecentSessions from "./SidebarRecentSessions";
 import StartupModelSetupPrompt from "./StartupModelSetupPrompt";
@@ -262,6 +263,7 @@ function Layout({
     }
   });
   const [workspaceManagementOpen, setWorkspaceManagementOpen] = useState(false);
+  const [organizationAccessOpen, setOrganizationAccessOpen] = useState(false);
   const [organizationManagementOpen, setOrganizationManagementOpen] =
     useState(false);
   // Full-list sessions modal (opened from the sidebar "Show more" affordance or
@@ -715,13 +717,13 @@ function Layout({
     <div className={`layout ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <div className="sidebar-product" aria-label="AgentEra Studio">
+          <div className="sidebar-product" aria-label="Aera">
             <img
               className="sidebar-logo"
               src={agentEraIcon}
-              alt="AgentEra Studio"
+              alt="Aera"
             />
-            <span className="sidebar-wordmark">AgentEra Studio</span>
+            <span className="sidebar-wordmark">Aera</span>
           </div>
           <button
             className="sidebar-collapse-toggle"
@@ -757,6 +759,8 @@ function Layout({
           <ProductSpaceSwitcher
             authState={signedInState}
             compact={sidebarCollapsed}
+            onOrganizationAccess={() => setOrganizationAccessOpen(true)}
+            onReviewOrganizations={() => setOrganizationManagementOpen(true)}
             onManageWorkspaces={() => setWorkspaceManagementOpen(true)}
             onManageOrganizations={() => setOrganizationManagementOpen(true)}
           />
@@ -912,6 +916,7 @@ function Layout({
                 onOpenDiagnose={(section?: string) =>
                   openSettings(section, { profile: run.profile })
                 }
+                onOpenMyAgents={() => goTo("agents")}
                 onLoadingChange={handleRunLoading}
                 onSessionIdChange={handleRunSessionId}
                 onTitleChange={handleRunTitle}
@@ -1011,6 +1016,13 @@ function Layout({
           open={workspaceManagementOpen}
           authState={signedInState}
           onClose={() => setWorkspaceManagementOpen(false)}
+        />
+      )}
+      {signedInState && (
+        <OrganizationAccessDialog
+          open={organizationAccessOpen}
+          authState={signedInState}
+          onClose={() => setOrganizationAccessOpen(false)}
         />
       )}
       {signedInState && (

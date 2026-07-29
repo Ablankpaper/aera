@@ -204,6 +204,7 @@ const AUTHENTICATED_CHANNELS = [
   "agentera-organization-get-state",
   "agentera-organization-list-departments",
   "agentera-organization-list-members",
+  "agentera-organization-submit-invitation-link",
   "agentera-official-quality-set-explicit-feedback-consent",
   "agentera-official-quality-set-passive-consent",
   "agentera-official-quality-submit-feedback",
@@ -505,7 +506,7 @@ function buildChannelPolicy(): Readonly<Record<string, ProductAccessLevel>> {
   ): void => {
     for (const channel of channels) {
       if (policy[channel]) {
-        throw new Error(`Duplicate AgentEra IPC policy for ${channel}.`);
+        throw new Error(`Duplicate Aera IPC policy for ${channel}.`);
       }
       policy[channel] = level;
     }
@@ -534,20 +535,20 @@ export function createProductAccessGuard(options: {
         if (level === "bound-profile") {
           if (!options.isRuntimeContextBound()) {
             throw accessError(
-              "AgentEra guest Runtime Profile binding is required.",
+              "Aera guest Runtime Profile binding is required.",
               "profile_binding_required",
             );
           }
           return;
         }
         throw accessError(
-          "AgentEra product sign-in is required.",
+          "Aera product sign-in is required.",
           "sign_in_required",
         );
       }
       if (!hasAgenteraSignedInAccess(state)) {
         throw accessError(
-          "AgentEra product sign-in is required.",
+          "Aera product sign-in is required.",
           "sign_in_required",
         );
       }
@@ -558,13 +559,13 @@ export function createProductAccessGuard(options: {
         (state.status !== "authenticated" || !state.cloudAvailable)
       ) {
         throw accessError(
-          "AgentEra online access is required.",
+          "Aera online access is required.",
           "online_required",
         );
       }
       if (level === "bound-profile" && !options.isRuntimeContextBound()) {
         throw accessError(
-          "AgentEra Runtime Profile binding is required.",
+          "Aera Runtime Profile binding is required.",
           "profile_binding_required",
         );
       }
@@ -594,7 +595,7 @@ export function createGuardedIpcMain<T extends object>(
       return (channel: string, listener: (...args: unknown[]) => unknown) => {
         const level = AGENTERA_IPC_CHANNEL_POLICY[channel];
         if (!level) {
-          throw new Error(`Missing AgentEra IPC policy for ${channel}.`);
+          throw new Error(`Missing Aera IPC policy for ${channel}.`);
         }
         const guardedListener = (...args: unknown[]): unknown => {
           guard.assert(level);

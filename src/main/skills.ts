@@ -349,7 +349,7 @@ export function installSkill(
 ): SkillCliResult {
   const invocation = getRuntimeInvocation();
   if (!invocation) {
-    return { success: false, error: "AgentEra Runtime is not prepared." };
+    return { success: false, error: "Aera Runtime is not prepared." };
   }
 
   try {
@@ -387,7 +387,7 @@ export function installSkill(
 export function uninstallSkill(name: string, profile?: string): SkillCliResult {
   const invocation = getRuntimeInvocation();
   if (!invocation) {
-    return { success: false, error: "AgentEra Runtime is not prepared." };
+    return { success: false, error: "Aera Runtime is not prepared." };
   }
 
   // Try the CLI first (updates hub lock files, handles complex cases).

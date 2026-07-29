@@ -77,7 +77,7 @@ export class EncryptedBackupRestoreError extends Error {
   readonly code: EncryptedBackupRestoreErrorCode;
 
   constructor(code: EncryptedBackupRestoreErrorCode) {
-    super(`AgentEra encrypted backup restore failed: ${code}.`);
+    super(`Aera encrypted backup restore failed: ${code}.`);
     this.name = "EncryptedBackupRestoreError";
     this.code = code;
   }

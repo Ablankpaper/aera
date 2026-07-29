@@ -423,18 +423,18 @@ async function promotionFixture() {
   await mkdir(evidenceDirectory, { recursive: true });
 
   const artifactPaths = {
-    macDmg: join(artifactsDirectory, `agentera-studio-${VERSION}-arm64.dmg`),
+    macDmg: join(artifactsDirectory, `Aera-${VERSION}-arm64.dmg`),
     macZip: join(
       artifactsDirectory,
-      `agentera-studio-${VERSION}-arm64-mac.zip`,
+      `Aera-${VERSION}-arm64-mac.zip`,
     ),
     windowsSetup: join(
       artifactsDirectory,
-      `agentera-studio-${VERSION}-setup.exe`,
+      `Aera-${VERSION}-setup.exe`,
     ),
     windowsPortable: join(
       artifactsDirectory,
-      `agentera-studio-${VERSION}-portable.exe`,
+      `Aera-${VERSION}-portable.exe`,
     ),
     latestMac: join(artifactsDirectory, "latest-mac.yml"),
     latestWindows: join(artifactsDirectory, "latest.yml"),
@@ -551,7 +551,7 @@ async function promotionFixture() {
     platformEvidence: {
       macos: {
         arch: "arm64",
-        signingIdentity: "Developer ID Application: AgentEra (ABCDEFGHIJ)",
+        signingIdentity: "Developer ID Application: Aera (ABCDEFGHIJ)",
         teamId: "ABCDEFGHIJ",
         codesignVerified: true,
         gatekeeperAccepted: true,
@@ -574,7 +574,7 @@ async function promotionFixture() {
       },
       windows: {
         arch: "x64",
-        signerSubject: "CN=AgentEra Code Signing",
+        signerSubject: "CN=Aera Code Signing",
         signerThumbprint: "A".repeat(40),
         authenticodeVerifiedArtifacts: [
           windowsSetup.name,

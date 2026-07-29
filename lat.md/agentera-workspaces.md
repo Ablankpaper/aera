@@ -22,11 +22,15 @@ The cloud persists only a SHA-256 digest of a token carrying at least 256 random
 
 ## Desktop context
 
-The global switcher below the AgentEra brand combines the existing personal-space identity with active workspace memberships returned by the dedicated Workspace API.
+The global switcher below the AgentEra brand presents “我的” plus active teams or projects returned by the dedicated Workspace API.
 
 Selection is account-scoped product navigation state. It does not switch a Hermes Profile, move sessions or files, rewrite a RuntimeBinding, or activate a workspace Agent. Archived workspaces are managed separately and are not selectable as an active context.
 
-The global selector is now backed by one trusted product-space coordinator shared with [[agentera-organizations|Organization Foundation]]. Existing Workspace selection compatibility delegates to that coordinator, so Personal, Workspace, and Organization cannot become competing writable selection stores. This changes navigation metadata only: it neither changes Workspace Agent ownership nor switches the active Hermes Profile, and Departments never become global choices.
+[[agentera-agent-control-plane#Installation and binding#Conversation boundary|Each conversation freezes its own boundary]] before the first message. Changing the selected team/project affects only a later new conversation; it cannot re-home an existing session, files, Memory, Artifact, or Agent run. Team/project conversations default to “仅自己”, and runtime scope never implies shared visibility.
+
+The global selector is backed by one trusted product-space coordinator shared with [[agentera-organizations|Organization Foundation]]. Existing Workspace selection compatibility delegates to that coordinator, so USER, WORKSPACE, and ORGANIZATION cannot become competing writable selection stores. The renderer calls WORKSPACE records “团队 / 项目” and hides empty or redundant hierarchy; this changes wording and navigation only, not ownership or authorization.
+
+Legacy Workspace rows currently have no Organization foreign key. They remain selectable as compatibility teams/projects and are never silently attached to an Organization. A later P2 schema migration may add explicit Organization parentage, but it must preserve existing records and cannot infer ownership from display names or current selection.
 
 The desktop sidebar keeps Agent/profile selection in the dedicated 智能体 view. The profile switcher is not rendered as a second footer navigation entry, so removing that visual affordance does not remove Profiles, sessions, files, or their local data.
 

@@ -337,7 +337,7 @@ function App(): React.JSX.Element {
   async function handleCreateFreshProfile(): Promise<void> {
     const startedWith = authStateRef.current;
     await window.agenteraRuntimeAccess.createFreshProfile(
-      `AgentEra Space ${Date.now().toString(36)}`,
+      `Aera Space ${Date.now().toString(36)}`,
     );
     if (!(await operationSessionIsStillCurrent(startedWith))) return;
     const currentPreflight = preflightRef.current;

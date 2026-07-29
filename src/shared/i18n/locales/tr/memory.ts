@@ -1,7 +1,7 @@
 export default {
   title: "Bellek",
   subtitle:
-    "AgentEra'in oturumlar arasında sizin ve ortamınız hakkında hatırladıkları.",
+    "Aera'in oturumlar arasında sizin ve ortamınız hakkında hatırladıkları.",
   sessions: "Oturumlar",
   messages: "Mesajlar",
   memories: "Anılar",
@@ -20,15 +20,15 @@ export default {
   noProvidersFound: "Bu kurulumda bellek sağlayıcısı bulunamadı.",
   openProviderWebsite: "Sağlayıcı web sitesini aç",
   noMemoriesYet:
-    "Henüz anı yok. AgentEra sohbet ederken önemli bilgileri kaydedecek.",
+    "Henüz anı yok. Aera sohbet ederken önemli bilgileri kaydedecek.",
   noMemoryEntries: "Henüz bellek girdisi yok.",
   noToolsetsFound: "Araç seti bulunamadı.",
   addManuallyHint:
     "Yukarıdaki butonu kullanarak belleğe manuel olarak da ekleme yapabilirsiniz.",
   userProfileHint:
-    "AgentEra'e kendinizden bahsedin — ad, rol, tercihler, iletişim tarzı.",
+    "Aera'e kendinizden bahsedin — ad, rol, tercihler, iletişim tarzı.",
   providersHint:
-    "Takılabilir bellek sağlayıcıları, AgentEra'e gelişmiş uzun süreli bellek verir. Yerleşik bellek (yukarıda) seçilen sağlayıcının yanında her zaman aktiftir.",
+    "Takılabilir bellek sağlayıcıları, Aera'e gelişmiş uzun süreli bellek verir. Yerleşik bellek (yukarıda) seçilen sağlayıcının yanında her zaman aktiftir.",
   providersHintActive: "Aktif: <strong>{{provider}}</strong>",
   providersHintInactive:
     "Harici sağlayıcı aktif değil — yalnızca yerleşik bellek kullanılıyor.",

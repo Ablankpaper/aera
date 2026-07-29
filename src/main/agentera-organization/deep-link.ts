@@ -1,5 +1,5 @@
 const INVITATION_LINK_PATTERN =
-  /^agentera:\/\/organization-invitation#([A-Za-z0-9_-]{43})$/;
+  /^(?:aera|agentera):\/\/organization-invitation#([A-Za-z0-9_-]{43})$/;
 
 function isCanonicalToken(value: string): boolean {
   try {

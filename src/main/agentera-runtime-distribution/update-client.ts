@@ -307,7 +307,7 @@ class FetchRuntimeMetadataTransport implements RuntimeMetadataTransport {
         signal: operation.signal,
         headers: {
           Accept: "application/octet-stream",
-          "User-Agent": "AgentEra-Studio-Runtime-Updater",
+          "User-Agent": "Aera-Studio-Runtime-Updater",
         },
       });
       if (!response.ok || response.body === null) {

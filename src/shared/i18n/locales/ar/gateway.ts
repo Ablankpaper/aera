@@ -12,8 +12,8 @@ export default {
   stopFailed: "تعذر إيقاف البوابة.",
   startExited: "تم بدء تشغيل البوابة، لكنها توقفت مرة أخرى قبل أن تصبح جاهزة.",
   checkLog: "تفقّد سجل البوابة:",
-  gatewayHint: "يربط AgentEra بـ Telegram و Discord و Slack ومنصات أخرى",
-  subtitle: "إدارة منصات المراسلة التي يمكن لوكيل AgentEra الاتصال بها.",
+  gatewayHint: "يربط Aera بـ Telegram و Discord و Slack ومنصات أخرى",
+  subtitle: "إدارة منصات المراسلة التي يمكن لوكيل Aera الاتصال بها.",
   refreshTooltip: "تحديث حالة المنصة",
   refresh: "تحديث",
   configHint:

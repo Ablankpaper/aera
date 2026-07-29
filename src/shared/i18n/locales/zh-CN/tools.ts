@@ -42,7 +42,7 @@ export default {
   mcpNoResults: "没有符合筛选条件的 MCP 服务器。",
   mcpEmptyTitle: "尚未配置 MCP 服务器",
   mcpEmptyDescription:
-    "添加自定义 HTTP 或 stdio 服务器，或从 AgentEra MCP 目录安装。",
+    "添加自定义 HTTP 或 stdio 服务器，或从 Aera MCP 目录安装。",
   mcpLoadFailed: "加载 MCP 服务器失败。",
   mcpAddFailed: "添加 MCP 服务器失败。",
   mcpRemoveFailed: "移除 MCP 服务器失败。",

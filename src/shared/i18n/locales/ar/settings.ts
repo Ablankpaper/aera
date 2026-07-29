@@ -3,7 +3,7 @@ import { runtimeDistributionEn } from "../runtime-distribution";
 export default {
   title: "الإعدادات",
   sections: {
-    hermesAgent: "AgentEra Runtime",
+    hermesAgent: "Aera Runtime",
     appearance: "المظهر",
     privacy: "الخصوصية",
     credentialPool: "مجموعة بيانات الاعتماد",
@@ -11,7 +11,7 @@ export default {
   nav: {
     groups: {
       general: "عام",
-      hermes: "AgentEra Studio",
+      hermes: "Aera",
     },
     appearance: "المظهر",
     language: "اللغة",
@@ -25,7 +25,7 @@ export default {
   },
   runtimeDistribution: runtimeDistributionEn,
   agentSubtitle: "محرك الذكاء الاصطناعي المحلي",
-  desktopTitle: "AgentEra Studio",
+  desktopTitle: "Aera",
   desktopSubtitle: "تطبيق سطح المكتب هذا",
   statusUpToDate: "محدث",
   statusUpdateAvailable: "تحديث متاح",
@@ -64,11 +64,11 @@ export default {
   },
   analytics: {
     label: "إرسال إحصائيات استخدام مجهولة",
-    hint: "تُجمع بشكل مجهول وتُستخدم فقط لتحسين AgentEra Studio — أبداً محادثاتك أو ملفاتك أو أوامرك أو أي بيانات شخصية.",
+    hint: "تُجمع بشكل مجهول وتُستخدم فقط لتحسين Aera — أبداً محادثاتك أو ملفاتك أو أوامرك أو أي بيانات شخصية.",
   },
   notDetected: "لم يتم الكشف",
   updatedSuccessfully: "تم التحديث بنجاح!",
-  updateSuccess: "تم تحديث AgentEra بنجاح.",
+  updateSuccess: "تم تحديث Aera بنجاح.",
   updateFailed: "فشل التحديث.",
   version: "v{{version}}",
   proxyPlaceholder: "مثال: socks5://127.0.0.1:1080 أو http://proxy:8080",
@@ -96,13 +96,13 @@ export default {
   compatApiKeyHint:
     "مخزّن كـ {{envVar}} — مطلوب لنقاط النهاية البعيدة، اختياري للنطاق المحلي.",
   poolHint:
-    "أضف مفاتيح API متعددة لنفس المزوّد للتدوير التلقائي وتوزيع الحمل. سيتنقل AgentEra بينها.",
+    "أضف مفاتيح API متعددة لنفس المزوّد للتدوير التلقائي وتوزيع الحمل. سيتنقل Aera بينها.",
   add: "إضافة",
   remove: "إزالة",
   keyLabel: "المفتاح",
   empty: "(فارغ)",
   dataSection: "البيانات",
-  dataHint: "تصدير أو استيراد إعدادات AgentEra وجلساته ومهاراته وذاكرته.",
+  dataHint: "تصدير أو استيراد إعدادات Aera وجلساته ومهاراته وذاكرته.",
   backingUp: "جارٍ النسخ الاحتياطي...",
   exportBackup: "تصدير نسخة احتياطية",
   importing: "جارٍ الاستيراد...",
@@ -115,17 +115,17 @@ export default {
   latestVersion: "محدث بالفعل",
   autoUpgradeDesktop: "الترقية التلقائية لتطبيق سطح المكتب",
   autoUpgradeDesktopHint:
-    "تنزيل إصدارات AgentEra Studio الجديدة من GitHub تلقائياً عند بدء التطبيق. أوقف هذا لإظهار زر الترقية عند بدء التشغيل دون تنزيل حتى تنقر عليه.",
+    "تنزيل إصدارات Aera الجديدة من GitHub تلقائياً عند بدء التطبيق. أوقف هذا لإظهار زر الترقية عند بدء التشغيل دون تنزيل حتى تنقر عليه.",
   runningDiagnosis: "جارٍ تشغيل التشخيص...",
   runDiagnosis: "تشغيل التشخيص",
   running: "جارٍ التشغيل...",
   debugDump: "تفريغ التصحيح",
   migrationDetected: "تم اكتشاف تثبيت OpenClaw",
   migrationDesc:
-    "تم العثور على OpenClaw في <code>{{path}}</code>. يمكنك ترحيل إعداداتك ومفاتيح API وجلساتك ومهاراتك إلى AgentEra.",
+    "تم العثور على OpenClaw في <code>{{path}}</code>. يمكنك ترحيل إعداداتك ومفاتيح API وجلساتك ومهاراتك إلى Aera.",
   migrationDismiss: "عدم الإظهار مرة أخرى",
   migrating: "جارٍ الترحيل...",
-  migrateToHermes: "الترحيل إلى AgentEra",
+  migrateToHermes: "الترحيل إلى Aera",
   skip: "تخطي",
   appearanceHint: "اختر مظهر الواجهة المفضل",
   apiKeyPlaceholder: "مفتاح API",
@@ -133,11 +133,11 @@ export default {
   connectionSection: "الاتصال",
   modeLocal: "محلي",
   modeRemote: "عن بُعد",
-  modeLocalHint: "استخدام AgentEra المثبت على هذا الجهاز",
-  modeRemoteHint: "الاتصال بخادم AgentEra API على شبكتك أو السحابة",
+  modeLocalHint: "استخدام Aera المثبت على هذا الجهاز",
+  modeRemoteHint: "الاتصال بخادم Aera API على شبكتك أو السحابة",
   remoteUrl: "الرابط البعيد",
   remoteUrlHint:
-    "رابط خادم AgentEra API (يجب أن يعرض /health و /v1/chat/completions)",
+    "رابط خادم Aera API (يجب أن يعرض /health و /v1/chat/completions)",
   remoteApiKey: "*** البعيد",
   remoteApiKeyHint:
     "يطابق API_SERVER_KEY على المضيف البعيد. اتركه فارغاً إذا كان الخادم يقبل الطلبات غير الموثقة.",
@@ -146,30 +146,30 @@ export default {
   save: "حفظ",
   serverConfigTitle: "إعدادات الخادم",
   serverConfigHint:
-    "أنت متصل بخادم AgentEra عن بُعد. اختيار النموذج ومفاتيح API للمزوّدين وبيانات الاعتماد تُدار في <code>~/.hermes/.env</code> و <code>config.yaml</code> على الخادم. حرّرها على المضيف (مثال: <code>docker exec -it hermes vi /opt/data/.env</code>) وأعد تشغيل الحاوية.",
+    "أنت متصل بخادم Aera عن بُعد. اختيار النموذج ومفاتيح API للمزوّدين وبيانات الاعتماد تُدار في <code>~/.hermes/.env</code> و <code>config.yaml</code> على الخادم. حرّرها على المضيف (مثال: <code>docker exec -it hermes vi /opt/data/.env</code>) وأعد تشغيل الحاوية.",
   connectionMode: "وضع الاتصال",
   switchedToLocal: "تم التبديل إلى الوضع المحلي",
 
   // Community
   communityTitle: "المجتمع",
   communityHint:
-    "انضم إلى قناة Discord لدينا لطرح الأسئلة والإبلاغ عن المشكلات والتحدث مع مستخدمي AgentEra الآخرين.",
+    "انضم إلى قناة Discord لدينا لطرح الأسئلة والإبلاغ عن المشكلات والتحدث مع مستخدمي Aera الآخرين.",
   joinDiscord: "الانضمام إلى قناة Discord",
   communityLinksHint:
-    "تواصل مع مجتمع AgentEra Studio، واحصل على المساعدة، وابق على اطلاع.",
+    "تواصل مع مجتمع Aera، واحصل على المساعدة، وابق على اطلاع.",
   linkWebsite: "الموقع",
   linkDiscord: "Discord",
   linkX: "X",
   linkTelegram: "Telegram",
   supportTitle: "دعم المطور",
   supportHint:
-    "AgentEra Studio مجاني ومفتوح المصدر — إذا كان مفيداً لك، فكر في دعم تطويره.",
+    "Aera مجاني ومفتوح المصدر — إذا كان مفيداً لك، فكر في دعم تطويره.",
   supportKofi: "الدعم على Ko-fi",
 
   // SSH & Server Config
   modeSsh: "نفق SSH",
   modeSshHint:
-    "نفق إلى AgentEra عن بُعد عبر SSH — بدون منافذ مكشوفة أو مفاتيح API مطلوبة.",
+    "نفق إلى Aera عن بُعد عبر SSH — بدون منافذ مكشوفة أو مفاتيح API مطلوبة.",
   sessionDisabledTitle: "سجل الجلسات معطل — API_SERVER_KEY غير معيّن",
   sessionDisabledDesc:
     "بدون مفتاح خادم API، لا تستطيع البوابة مصادقة طلبات استمرار الجلسة. ستظل الرسائل تُرسل، لكن سجل المحادثة لن يُحفظ عبر عمليات إعادة التشغيل.",
@@ -179,13 +179,13 @@ export default {
   remoteEnvSshDesc:
     "وضع SSH: أضف API_SERVER_KEY=<مفتاحك> إلى ~/.hermes/profiles/<profile>/.env على المضيف البعيد، ثم أعد تشغيل البوابة هناك.",
   remoteEnvDesc:
-    "الوضع البعيد: أضف API_SERVER_KEY=<مفتاحك> إلى ملف .env على خادم AgentEra البعيد، ثم أعد تشغيل البوابة.",
+    "الوضع البعيد: أضف API_SERVER_KEY=<مفتاحك> إلى ملف .env على خادم Aera البعيد، ثم أعد تشغيل البوابة.",
   sshHost: "مضيف SSH",
   sshPort: "منفذ SSH",
   sshUsername: "اسم المستخدم",
   sshKeyPath: "مسار المفتاح الخاص",
   sshKeyPathOptional: "(اختياري، الافتراضي ~/.ssh/id_rsa)",
-  sshRemotePort: "منفذ AgentEra البعيد",
+  sshRemotePort: "منفذ Aera البعيد",
   sshRemotePortDefault: "(الافتراضي 8642)",
   sshHint:
     "تأكد من أنك تستطيع تشغيل ssh {{cmd}} بدون طلب كلمة مرور. الاتصال الأول يثق بمفتاح المضيف ويخزنه في ~/.ssh/known_hosts؛ سيفشل SSH إذا تغير هذا المفتاح لاحقاً.",
@@ -196,17 +196,17 @@ export default {
   connectSsh: "الاتصال عبر SSH",
   sshTitle: "الاتصال عبر SSH",
   sshSubtitle:
-    "نفق إلى AgentEra عن بُعد عبر SSH — بدون منافذ مكشوفة أو مفاتيح API مطلوبة.",
+    "نفق إلى Aera عن بُعد عبر SSH — بدون منافذ مكشوفة أو مفاتيح API مطلوبة.",
   sshHostPlaceholder: "192.168.1.100 أو myserver.local",
   sshUsernamePlaceholder: "hermes",
   sshErrorRequired: "المضيف واسم المستخدم مطلوبان.",
   sshErrorConnection:
-    "تعذر الاتصال عبر SSH أو الوصول إلى AgentEra عن بُعد. تأكد من:\\n• مفتاح SSH صحيح (أو ~/.ssh/id_rsa الافتراضي يعمل)\\n• بوابة AgentEra تعمل على الجهاز البعيد\\n• المنفذ البعيد صحيح (الافتراضي 8642)",
+    "تعذر الاتصال عبر SSH أو الوصول إلى Aera عن بُعد. تأكد من:\\n• مفتاح SSH صحيح (أو ~/.ssh/id_rsa الافتراضي يعمل)\\n• بوابة Aera تعمل على الجهاز البعيد\\n• المنفذ البعيد صحيح (الافتراضي 8642)",
   sshErrorFailed: "فشل اختبار اتصال SSH: {{msg}}",
   sshErrorFailedSimple: "فشل اختبار اتصال SSH.",
   remoteErrorUrl: "يرجى إدخال رابط.",
   remoteErrorConnection:
-    "تعذر الوصول إلى AgentEra على هذا الرابط. تحقق من الرابط ومفتاح API.\\n\\nاترك المفتاح فارغاً إذا كان الخادم يقبل الطلبات غير الموثقة (مثل عبر نفق SSH إلى localhost).",
+    "تعذر الوصول إلى Aera على هذا الرابط. تحقق من الرابط ومفتاح API.\\n\\nاترك المفتاح فارغاً إذا كان الخادم يقبل الطلبات غير الموثقة (مثل عبر نفق SSH إلى localhost).",
   remoteErrorFailed: "فشل اختبار الاتصال.",
   sshSuccess: "اتصال SSH隧道 متصل!",
   sshErrorRequiredSimple: "المضيف واسم المستخدم مطلوبان",

@@ -49,7 +49,7 @@ export default {
   saving: "جارٍ الحفظ...",
   apiKeyLabel: "مفتاح API {{provider}}",
   noApiKeyRequired:
-    "{{provider}} لا يتطلب مفتاح API. سيستخدم AgentEra إعدادات CLI/OAuth المحلية الخاصة بك.",
+    "{{provider}} لا يتطلب مفتاح API. سيستخدم Aera إعدادات CLI/OAuth المحلية الخاصة بك.",
   localNoKeyNeeded: "لا حاجة لمفتاح API",
   localLlm: "LLM محلي",
   modelBaseUrlPlaceholder: "http://localhost:1234/v1",

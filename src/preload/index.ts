@@ -2267,6 +2267,10 @@ const agenteraOrganizationAPI = {
     token: string;
   }): Promise<AgenteraOrganizationResult<OrganizationInvitationAcceptance>> =>
     ipcRenderer.invoke("agentera-organization-accept-invitation", input),
+  submitInvitationLink: (input: {
+    inviteUrl: string;
+  }): Promise<AgenteraOrganizationResult<true>> =>
+    ipcRenderer.invoke("agentera-organization-submit-invitation-link", input),
   getPendingInvitation: (): Promise<
     AgenteraOrganizationResult<OrganizationPendingInvitation | null>
   > => ipcRenderer.invoke("agentera-organization-get-pending-invitation"),

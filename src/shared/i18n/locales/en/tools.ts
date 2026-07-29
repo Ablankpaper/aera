@@ -88,7 +88,7 @@ export default {
   mcpNoResults: "No MCP servers match your filter.",
   mcpEmptyTitle: "No MCP servers configured",
   mcpEmptyDescription:
-    "Add a custom HTTP or stdio server, or install one from the AgentEra MCP catalog.",
+    "Add a custom HTTP or stdio server, or install one from the Aera MCP catalog.",
   mcpLoadFailed: "Failed to load MCP servers.",
   mcpAddFailed: "Failed to add MCP server.",
   mcpRemoveFailed: "Failed to remove MCP server.",

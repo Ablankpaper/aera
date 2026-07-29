@@ -41,7 +41,7 @@ function generatedSchemaBlock(source: string, schema: string): string {
   return source.slice(start, end < 0 ? undefined : end);
 }
 
-describe("AgentEra cloud contract pin", () => {
+describe("Aera cloud contract pin", () => {
   it("forces byte-hashed contract artifacts to LF on every checkout", () => {
     const attributes = execFileSync(
       "git",

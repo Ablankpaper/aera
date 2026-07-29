@@ -573,7 +573,7 @@ function validateSessionId(value: unknown): string {
     value.length > 512 ||
     /\p{Cc}/u.test(value)
   ) {
-    throw new Error("Hermes session identity is invalid.");
+    throw new Error("Aera Runtime session identity is invalid.");
   }
   return value;
 }

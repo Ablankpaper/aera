@@ -346,7 +346,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
         case "tools":
           return "Tools & skills";
         case "agent":
-          return "AgentEra Runtime";
+          return "Aera Runtime";
       }
     }
 

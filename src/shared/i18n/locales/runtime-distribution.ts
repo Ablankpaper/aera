@@ -21,7 +21,7 @@ export const runtimeDistributionEn = {
   externalUpdate: "Update external Runtime",
   switchToManaged: "Switch to managed Runtime",
   externalUnmanagedHint:
-    "This is an explicitly selected, unmanaged checkout. Its local update command runs only when you choose it; AgentEra Studio never changes or deletes it while using managed Runtime.",
+    "This is an explicitly selected, unmanaged checkout. Its local update command runs only when you choose it; Aera never changes or deletes it while using managed Runtime.",
   currentVersion: "Managed version",
   sourceCommit: "Source commit",
   packagedSeedVersion: "Packaged Seed",
@@ -48,9 +48,9 @@ export const runtimeDistributionEn = {
       "The Runtime update service is temporarily unavailable.",
     runtime_update_metadata_invalid:
       "The update metadata did not pass signature or policy checks.",
-    runtime_restart_failed: "AgentEra Studio could not restart safely.",
+    runtime_restart_failed: "Aera could not restart safely.",
     runtime_install_failed:
-      "The signed Runtime included with AgentEra Studio could not be installed.",
+      "The signed Runtime included with Aera could not be installed.",
     runtime_update_not_available: "No confirmed Runtime update is available.",
     runtime_candidate_missing: "The prepared Runtime candidate is missing.",
   },
@@ -79,7 +79,7 @@ export const runtimeDistributionZhCn = {
   externalUpdate: "更新外部 Runtime",
   switchToManaged: "切换到托管 Runtime",
   externalUnmanagedHint:
-    "当前使用的是你明确选择的非托管 checkout。只有你主动操作时才会运行它自己的本地更新命令；切换到托管 Runtime 后，AgentEra Studio 也不会修改或删除它。",
+    "当前使用的是你明确选择的非托管 checkout。只有你主动操作时才会运行它自己的本地更新命令；切换到托管 Runtime 后，Aera 也不会修改或删除它。",
   currentVersion: "托管版本",
   sourceCommit: "源码提交",
   packagedSeedVersion: "安装包内置版本",
@@ -99,8 +99,8 @@ export const runtimeDistributionZhCn = {
     runtime_download_failed: "Runtime 下载失败，请检查网络或系统代理后重试。",
     runtime_update_unavailable: "Runtime 更新服务暂时不可用。",
     runtime_update_metadata_invalid: "更新元数据未通过签名或策略校验。",
-    runtime_restart_failed: "AgentEra Studio 未能安全重启。",
-    runtime_install_failed: "无法安装 AgentEra Studio 内置的签名 Runtime。",
+    runtime_restart_failed: "Aera 未能安全重启。",
+    runtime_install_failed: "无法安装 Aera 内置的签名 Runtime。",
     runtime_update_not_available: "当前没有已确认的 Runtime 更新。",
     runtime_candidate_missing: "已准备的 Runtime 候选版本不存在。",
   },
@@ -130,7 +130,7 @@ export const runtimeDistributionZhTw = {
   externalUpdate: "更新外部 Runtime",
   switchToManaged: "切換到託管 Runtime",
   externalUnmanagedHint:
-    "目前使用的是你明確選擇的非託管 checkout。只有你主動操作時才會執行它自己的本機更新命令；切換到託管 Runtime 後，AgentEra Studio 也不會修改或刪除它。",
+    "目前使用的是你明確選擇的非託管 checkout。只有你主動操作時才會執行它自己的本機更新命令；切換到託管 Runtime 後，Aera 也不會修改或刪除它。",
   currentVersion: "託管版本",
   sourceCommit: "原始碼提交",
   packagedSeedVersion: "安裝包內建版本",

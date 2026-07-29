@@ -28,7 +28,7 @@ class FakeSecureStorage implements SecureStorageAdapter {
   }
 }
 
-describe("AgentEra installation device identity", () => {
+describe("Aera installation device identity", () => {
   let userData = "";
 
   beforeEach(() => {

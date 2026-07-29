@@ -15,5 +15,5 @@ export default {
     "Bramka została uruchomiona, ale zatrzymała się przed osiągnięciem gotowości.",
   checkLog: "Sprawdź dziennik bramki:",
   gatewayHint:
-    "Łączy AgentEra z Telegramem, Discordem, Slackiem i innymi platformami",
+    "Łączy Aera z Telegramem, Discordem, Slackiem i innymi platformami",
 } as const;

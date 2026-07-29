@@ -61,7 +61,7 @@ function tokenResponse(refresh = refreshToken): Record<string, string> {
   };
 }
 
-describe("AgentEra cloud desktop client", () => {
+describe("Aera cloud desktop client", () => {
   let root = "";
   let identity: InstallationIdentity;
   let server: Server | null = null;
@@ -105,7 +105,7 @@ describe("AgentEra cloud desktop client", () => {
       redirectUri: "http://127.0.0.1:43123/agentera/oauth/callback",
       pkce,
       identity,
-      deviceName: "AgentEra Test Mac",
+      deviceName: "Aera Test Mac",
       platform: "darwin",
       appVersion: "0.7.3",
       forceAccountSelection: true,

@@ -44,18 +44,18 @@ function normalizeText(
   allowNewlines = false,
 ): string {
   if (typeof value !== "string") {
-    throw new Error(`AgentEra user profile ${field} is invalid.`);
+    throw new Error(`Aera user profile ${field} is invalid.`);
   }
   const normalized = value.trim().replace(/\r\n?/g, "\n");
   if (Array.from(normalized).length > maximum) {
-    throw new Error(`AgentEra user profile ${field} is too long.`);
+    throw new Error(`Aera user profile ${field} is too long.`);
   }
   for (const character of normalized) {
     if (
       character < " " &&
       !(allowNewlines && (character === "\n" || character === "\t"))
     ) {
-      throw new Error(`AgentEra user profile ${field} contains control text.`);
+      throw new Error(`Aera user profile ${field} contains control text.`);
     }
   }
   return normalized;
@@ -63,7 +63,7 @@ function normalizeText(
 
 function normalizeUserId(userId: unknown): string {
   if (typeof userId !== "string" || !USER_ID_RE.test(userId)) {
-    throw new Error("AgentEra user profile owner is invalid.");
+    throw new Error("Aera user profile owner is invalid.");
   }
   return userId.toLowerCase();
 }
@@ -71,26 +71,26 @@ function normalizeUserId(userId: unknown): string {
 function normalizeAvatar(value: unknown): string | null {
   if (value === null) return null;
   if (typeof value !== "string") {
-    throw new Error("AgentEra user profile avatar is invalid.");
+    throw new Error("Aera user profile avatar is invalid.");
   }
   const match = AVATAR_RE.exec(value);
   if (!match) {
-    throw new Error("AgentEra user profile avatar is invalid.");
+    throw new Error("Aera user profile avatar is invalid.");
   }
   const bytes = Buffer.from(match[1], "base64");
   if (bytes.length === 0 || bytes.length > MAX_AVATAR_BYTES) {
-    throw new Error("AgentEra user profile avatar is too large.");
+    throw new Error("Aera user profile avatar is too large.");
   }
   return value;
 }
 
 function normalizeInput(input: unknown): AgenteraUserProfileInput {
   if (!isRecord(input)) {
-    throw new Error("AgentEra user profile input is invalid.");
+    throw new Error("Aera user profile input is invalid.");
   }
   const displayName = normalizeText(input.displayName, "display name", 80);
   if (!displayName) {
-    throw new Error("AgentEra user profile display name is required.");
+    throw new Error("Aera user profile display name is required.");
   }
   return {
     displayName,
@@ -132,7 +132,7 @@ export class AgenteraUserProfileStore {
 
   constructor(options: AgenteraUserProfileStoreOptions) {
     if (!isAbsolute(options.userDataPath)) {
-      throw new Error("AgentEra user profile userData path must be absolute.");
+      throw new Error("Aera user profile userData path must be absolute.");
     }
     const userDataPath = resolve(options.userDataPath);
     this.filePath = join(
@@ -174,7 +174,7 @@ export class AgenteraUserProfileStore {
     const input = normalizeInput(rawInput);
     const timestamp = this.now();
     if (!Number.isFinite(timestamp.getTime())) {
-      throw new Error("AgentEra user profile clock is invalid.");
+      throw new Error("Aera user profile clock is invalid.");
     }
     const profile: StoredUserProfile = {
       userId: normalizedUserId,
@@ -193,22 +193,22 @@ export class AgenteraUserProfileStore {
     try {
       parsed = JSON.parse(readFileSync(this.filePath, "utf8"));
     } catch {
-      throw new Error("AgentEra local user profile store is corrupt.");
+      throw new Error("Aera local user profile store is corrupt.");
     }
     if (!isRecord(parsed)) {
-      throw new Error("AgentEra local user profile store is corrupt.");
+      throw new Error("Aera local user profile store is corrupt.");
     }
     if (
       parsed.schema !== STORE_SCHEMA ||
       parsed.version !== STORE_VERSION ||
       !isRecord(parsed.profiles)
     ) {
-      throw new Error("AgentEra local user profile store is unsupported.");
+      throw new Error("Aera local user profile store is unsupported.");
     }
     const profiles: Record<string, StoredUserProfile> = {};
     for (const [userId, value] of Object.entries(parsed.profiles)) {
       if (!USER_ID_RE.test(userId) || !validStoredProfile(value)) {
-        throw new Error("AgentEra local user profile store is corrupt.");
+        throw new Error("Aera local user profile store is corrupt.");
       }
       profiles[userId.toLowerCase()] = { ...value };
     }

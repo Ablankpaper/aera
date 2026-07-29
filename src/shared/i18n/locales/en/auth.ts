@@ -1,9 +1,9 @@
 const auth = {
   gate: {
-    title: "Sign in to AgentEra",
+    title: "Sign in to Aera",
     productCaption: "Your intelligent workspace",
     slogan: "Aila turns every idea into possibility.",
-    checking: "Checking your AgentEra session…",
+    checking: "Checking your Aera session…",
     browserNote:
       "Select sign in to finish in your browser. You will return to the desktop app automatically.",
     openBrowser: "Sign in / Register",
@@ -21,17 +21,17 @@ const auth = {
     retry: "Retry",
     retrying: "Checking again…",
     loginFailed: "Browser sign-in did not finish. Please try again.",
-    retryFailed: "AgentEra could not verify your session. Please try again.",
+    retryFailed: "Aera could not verify your session. Please try again.",
     cancelled: "Sign-in was cancelled.",
     legalPrefix: "By continuing, you agree to the",
     privacy: "Privacy Policy",
     terms: "Terms of Service",
     secureStorageTitle: "Secure storage is unavailable",
     secureStorageDescription:
-      "AgentEra cannot safely store this device session. Enable your system keychain or credential service, then retry. Plaintext storage is never used.",
+      "Aera cannot safely store this device session. Enable your system keychain or credential service, then retry. Plaintext storage is never used.",
     reasons: {
       sign_in_required:
-        "Sign in or create an account before using AgentEra Studio.",
+        "Sign in or create an account before using Aera.",
       offline_expired:
         "Your seven-day offline access has expired. Connect to the internet and sign in again.",
       clock_rollback:
@@ -39,38 +39,38 @@ const auth = {
       device_revoked:
         "This device's sign-in has expired. Sign in again to continue.",
       account_disabled:
-        "This AgentEra account is currently disabled. Use the browser account page for help.",
+        "This Aera account is currently disabled. Use the browser account page for help.",
       account_pending_deletion:
-        "This account is pending deletion and cannot sign in to AgentEra Studio.",
+        "This account is pending deletion and cannot sign in to Aera.",
       secure_storage_unavailable:
-        "Secure system storage is required for AgentEra sessions.",
+        "Secure system storage is required for Aera sessions.",
     },
   },
   profile: {
     checkingTitle: "Checking local data access",
     checkingDescription:
-      "AgentEra is checking ownership metadata without opening your private Runtime content.",
+      "Aera is checking ownership metadata without opening your private Runtime content.",
     title: "Choose how to use your local data",
     existingDescription:
-      "Existing AgentEra Runtime data was found on this device. Choose whether to bind it in place or start with a separate empty space.",
+      "Existing Aera Runtime data was found on this device. Choose whether to bind it in place or start with a separate empty space.",
     noUpload:
       "Neither choice uploads, copies, merges, or rewrites your Memory, sessions, files, skills, USER data, or learning state.",
     useExisting: "Use existing local data",
     createNew: "Create a new space",
     binding: "Binding securely…",
     creating: "Creating an empty space…",
-    emptyBindingTitle: "Preparing your personal space",
+    emptyBindingTitle: "Preparing your private work area",
     emptyBindingDescription:
       "The local Agent runtime is being prepared automatically.",
     connectionBindingTitle: "Securing this Runtime connection",
     connectionBindingDescription:
-      "The remote or SSH connection is being bound to the signed-in AgentEra owner. Product tokens are not sent to the Runtime.",
+      "The remote or SSH connection is being bound to the signed-in Aera owner. Product tokens are not sent to the Runtime.",
     otherOwnerTitle: "This local data belongs to another account",
     otherOwnerDescription:
-      "AgentEra will not open or reassign local Agent data owned by another account. Create a separate empty space or sign in with its owner.",
+      "Aera will not open or reassign local Agent data owned by another account. Create a separate empty space or sign in with its owner.",
     remoteOtherOwnerTitle: "This Runtime connection belongs to another account",
     remoteOtherOwnerDescription:
-      "AgentEra will not inherit the previous owner's remote or SSH connection context.",
+      "Aera will not inherit the previous owner's remote or SSH connection context.",
     differentAccount: "Sign in with a different account",
     failedTitle: "Local access could not be prepared",
     failedDescription:
@@ -80,13 +80,13 @@ const auth = {
   offline: {
     title: "Local offline mode",
     description:
-      "Cloud account features are paused. Local Agent work, model APIs, and Hermes learning remain available until the signed offline deadline.",
+      "Cloud account features are paused. Local Agent work, model APIs, and Aera Runtime learning remain available until the signed offline deadline.",
   },
   account: {
-    settingsNav: "AgentEra account",
-    title: "AgentEra account",
+    settingsNav: "Aera account",
+    title: "Aera account",
     defaultDisplayName: "User",
-    openMenu: "Open AgentEra account menu",
+    openMenu: "Open Aera account menu",
     signIn: "Sign in",
     signingIn: "Opening browser…",
     guestLocal: "Guest mode · local only",
@@ -98,20 +98,20 @@ const auth = {
     switch: "Switch account",
     signOut: "Sign out",
     actionFailed: "This account action could not be completed.",
-    unavailable: "AgentEra account information is unavailable.",
+    unavailable: "Aera account information is unavailable.",
     userId: "Account ID",
     deviceId: "Device",
     offlineUntil: "Signed offline access is valid until {{date}}.",
     localDataWarning:
       "Deleting or signing out of the cloud account does not delete, move, upload, or unbind local Agent data, Memory, sessions, files, skills, or learning state.",
     rechargeSeparateAccount:
-      "Recharge opens the independent model API website. Its accounts, balances, API keys, cookies, and tokens are separate from this AgentEra account.",
+      "Recharge opens the independent model API website. Its accounts, balances, API keys, cookies, and tokens are separate from this Aera account.",
     pendingRevocationWarning:
       "If you sign out while the control plane is unreachable, this device may still count toward the five-device limit until the signed self-revocation is delivered automatically.",
     profile: {
       title: "Personal details",
       description:
-        "Choose the name and personal details shown in AgentEra Studio.",
+        "Choose the name and personal details shown in Aera.",
       loading: "Loading details…",
       displayName: "Username",
       displayNamePlaceholder: "For example: Aera user",

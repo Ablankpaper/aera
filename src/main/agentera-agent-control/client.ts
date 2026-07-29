@@ -127,7 +127,6 @@ const STABLE_ERROR_CODES: ReadonlySet<string> = new Set<StableErrorCode>([
   "organization_agent_not_found",
   "organization_agent_forbidden",
   "organization_archived",
-  "organization_submission_self_review",
   "organization_submission_conflict",
   "organization_submission_superseded",
   "organization_publication_policy_blocked",
@@ -164,7 +163,7 @@ export class AgenteraAgentControlClientError extends Error {
     code: string,
     findings: readonly CloudExperienceCandidateFinding[] = [],
   ) {
-    super(`AgentEra Agent control request failed: ${code}.`);
+    super(`Aera Agent control request failed: ${code}.`);
     this.name = "AgenteraAgentControlClientError";
     this.status = status;
     this.code = code;
@@ -1578,7 +1577,7 @@ export class AgenteraAgentControlClient {
       (hasOfficialConfiguration && !hasCompleteOfficialConfiguration)
     ) {
       throw new Error(
-        "AgentEra Agent control client configuration is invalid.",
+        "Aera Agent control client configuration is invalid.",
       );
     }
   }

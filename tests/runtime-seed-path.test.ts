@@ -10,13 +10,13 @@ describe("packaged Runtime Seed path", () => {
     expect(
       resolvePackagedRuntimeSeedDirectory({
         isPackaged: true,
-        resourcesPath: "/Applications/AgentEra Studio.app/Contents/Resources",
+        resourcesPath: "/Applications/Aera.app/Contents/Resources",
         workingDirectory: "/source/aera",
         developmentOverride: "/tmp/development-seed",
       }),
     ).toBe(
       join(
-        "/Applications/AgentEra Studio.app/Contents/Resources",
+        "/Applications/Aera.app/Contents/Resources",
         "agentera-runtime-seed",
       ),
     );

@@ -165,7 +165,7 @@ export function buildSpdxDocument({
     filesAnalyzed: false,
     licenseConcluded: "NOASSERTION",
     licenseDeclared: "NOASSERTION",
-    name: "AgentEra Runtime Seed",
+    name: "Aera Runtime Seed",
     versionInfo: runtimeLock.runtime_version,
   });
 

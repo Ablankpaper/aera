@@ -348,6 +348,7 @@ import {
   parseDismissOrganizationInvitationInput,
   parseDissolveOrganizationInput,
   parseGetOrganizationPolicySnapshotInput,
+  parseOrganizationInvitationLinkInput,
   parseOrganizationAuditPageInput,
   parseOrganizationIDInput,
   parseOrganizationRevisionInput,
@@ -404,9 +405,11 @@ import {
 import type { AgenteraMemoryCandidateManager } from "../agentera-global-profile/candidate-manager";
 import type { AgenteraMemoryCandidateConfirmationCoordinator } from "../agentera-global-profile/candidate-confirmation";
 import type {
+  AgenteraConversationBoundarySummary,
   AgenteraGlobalProfileConversationContext,
   SetAgenteraGlobalProfileEntryInput,
 } from "../../shared/agentera-global-profile";
+import type { ConversationBoundary } from "../agentera-agent-control/conversation-boundary-store";
 import {
   createWallet,
   deleteWallet,
@@ -627,7 +630,7 @@ async function getSshDashboardSessionConfig(
   const dash = await sshEnsureDashboard(conn.ssh, profile);
   if (!dash)
     throw new Error(
-      "AgentEra Runtime dashboard is unavailable on this SSH remote (needs Node + the dashboard web dist).",
+      "Aera Runtime dashboard is unavailable on this SSH remote (needs Node + the dashboard web dist).",
     );
   await ensureSshTunnel({ ...conn.ssh, remotePort: dash.port });
   const remoteUrl = getSshTunnelUrl();
@@ -861,7 +864,7 @@ function normalizedBaseUrl(value: string | undefined): string {
 }
 
 /**
- * Turn a Desktop named-custom library attachment into AgentEra Runtime's native
+ * Turn a Desktop named-custom library attachment into Aera Runtime's native
  * `providers.<name>` + `custom:<name>` route. Preset compatibility providers
  * without a providerLabel keep their existing route; this bridge only runs
  * when the model can be tied to a first-class named provider.
@@ -947,6 +950,19 @@ function refreshLocalModelRuntimeSnapshot(
     void restartGateway(profile);
   }
   return true;
+}
+
+function summarizeConversationBoundaryForRenderer(
+  boundary: ConversationBoundary,
+  scopeDisplayName: string | null,
+): AgenteraConversationBoundarySummary {
+  return {
+    scope: boundary.scopeType,
+    scopeId: boundary.scopeId,
+    scopeDisplayName,
+    visibility: boundary.visibility,
+    origin: boundary.origin,
+  };
 }
 
 export function registerIpcHandlers(context: IpcContext): void {
@@ -1139,7 +1155,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         ? getActiveProfileNameSync()
         : candidate;
     if (typeof profile !== "string" || !isValidProfileName(profile)) {
-      throw new Error("AgentEra Runtime Profile target is invalid.");
+      throw new Error("Aera Runtime Profile target is invalid.");
     }
     agenteraProfileBindings.verifyProfileBinding(
       profileHome(profile),
@@ -1296,7 +1312,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     listener: (...args: unknown[]) => unknown,
   ): void => {
     const level = AGENTERA_IPC_CHANNEL_POLICY[channel];
-    if (!level) throw new Error(`Missing AgentEra IPC policy for ${channel}.`);
+    if (!level) throw new Error(`Missing Aera IPC policy for ${channel}.`);
     electronIpcMain.handle(channel, (event, ...args: unknown[]) =>
       executeAgentControlIpc(() => {
         productAccessGuard.assert(level);
@@ -1309,7 +1325,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     listener: (...args: unknown[]) => unknown,
   ): void => {
     const level = AGENTERA_IPC_CHANNEL_POLICY[channel];
-    if (!level) throw new Error(`Missing AgentEra IPC policy for ${channel}.`);
+    if (!level) throw new Error(`Missing Aera IPC policy for ${channel}.`);
     electronIpcMain.handle(channel, (event, ...args: unknown[]) =>
       executeWorkspaceIpc(() => {
         productAccessGuard.assert(level);
@@ -1322,7 +1338,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     listener: (...args: unknown[]) => unknown,
   ): void => {
     const level = AGENTERA_IPC_CHANNEL_POLICY[channel];
-    if (!level) throw new Error(`Missing AgentEra IPC policy for ${channel}.`);
+    if (!level) throw new Error(`Missing Aera IPC policy for ${channel}.`);
     electronIpcMain.handle(channel, (event, ...args: unknown[]) =>
       executeOrganizationIpc(() => {
         productAccessGuard.assert(level);
@@ -1335,7 +1351,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     listener: (...args: unknown[]) => unknown,
   ): void => {
     const level = AGENTERA_IPC_CHANNEL_POLICY[channel];
-    if (!level) throw new Error(`Missing AgentEra IPC policy for ${channel}.`);
+    if (!level) throw new Error(`Missing Aera IPC policy for ${channel}.`);
     electronIpcMain.handle(channel, (event, ...args: unknown[]) =>
       executeProductSpaceIpc(() => {
         productAccessGuard.assert(level);
@@ -1501,6 +1517,18 @@ export function registerIpcHandlers(context: IpcContext): void {
       const accepted = await requireOrganization().acceptInvitation(parsed);
       workspaceInvitationInbox.clearAcceptedOrganization(parsed.token);
       return serializeOrganizationInvitationAcceptance(accepted);
+    },
+  );
+  registerOrganizationHandler(
+    "agentera-organization-submit-invitation-link",
+    (_event, input: unknown) => {
+      const parsed = parseOrganizationInvitationLinkInput(input);
+      if (!workspaceInvitationInbox.receiveDeepLink(parsed.inviteUrl)) {
+        throw Object.assign(new Error("Invalid Organization invitation."), {
+          code: "invalid_request",
+        });
+      }
+      return true;
     },
   );
   registerOrganizationHandler(
@@ -1917,7 +1945,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       ),
   );
   const mainWindow = getMainWindow();
-  // AgentEra product authentication is intentionally namespaced away from the
+  // Aera product authentication is intentionally namespaced away from the
   // legacy Hermes account and provider OAuth channels.
   ipcMain.handle("agentera-auth-get-state", () =>
     agenteraAuth.getPublicState(),
@@ -1931,7 +1959,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       typeof rawOptions !== "object" ||
       Array.isArray(rawOptions)
     ) {
-      throw new Error("AgentEra login options are invalid.");
+      throw new Error("Aera login options are invalid.");
     }
     const options = rawOptions as Record<string, unknown>;
     if (
@@ -1939,7 +1967,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       (options.forceAccountSelection !== undefined &&
         typeof options.forceAccountSelection !== "boolean")
     ) {
-      throw new Error("AgentEra login options are invalid.");
+      throw new Error("Aera login options are invalid.");
     }
     return {
       forceAccountSelection: options.forceAccountSelection === true,
@@ -1972,7 +2000,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle("agentera-auth-logout", () => agenteraAuth.logout());
   ipcMain.handle("agentera-auth-open-portal", (_event, target: unknown) => {
     if (target !== "account" && target !== "devices" && target !== "recharge") {
-      throw new Error("AgentEra portal target is invalid.");
+      throw new Error("Aera portal target is invalid.");
     }
     return agenteraAuth.openPortal(target);
   });
@@ -1992,7 +2020,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         typeof rawInput !== "object" ||
         Array.isArray(rawInput)
       ) {
-        throw new Error("AgentEra user profile input is invalid.");
+        throw new Error("Aera user profile input is invalid.");
       }
       const input = rawInput as Record<string, unknown>;
       const expectedKeys = [
@@ -2007,7 +2035,7 @@ export function registerIpcHandlers(context: IpcContext): void {
           (key) => !Object.prototype.hasOwnProperty.call(input, key),
         )
       ) {
-        throw new Error("AgentEra user profile input is invalid.");
+        throw new Error("Aera user profile input is invalid.");
       }
       const profile = agenteraUserProfiles.save(currentAgenteraUserId(), {
         displayName: input.displayName as string,
@@ -2067,30 +2095,30 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
   ipcMain.handle(
     "agentera-global-profile-conversation-context",
-    (
+    async (
       _event,
       runId: string,
       profile?: string,
       resumeSessionId?: string | null,
-    ): AgenteraGlobalProfileConversationContext => {
+    ): Promise<AgenteraGlobalProfileConversationContext> => {
       if (
         typeof runId !== "string" ||
         !runId ||
         runId.length > 256 ||
         /\p{Cc}/u.test(runId)
       ) {
-        throw new Error("AgentEra conversation identity is invalid.");
+        throw new Error("Aera conversation identity is invalid.");
       }
       const identityProfileId = profile?.trim() || "default";
       if (!isValidProfileName(identityProfileId)) {
-        throw new Error("AgentEra Runtime Profile target is invalid.");
+        throw new Error("Aera Runtime Profile target is invalid.");
       }
       if (
         resumeSessionId !== undefined &&
         resumeSessionId !== null &&
         typeof resumeSessionId !== "string"
       ) {
-        throw new Error("AgentEra Hermes session identity is invalid.");
+        throw new Error("Aera Runtime session identity is invalid.");
       }
       const identityResumeSessionId = agentIdentity.resolveResumeSessionId(
         identityProfileId,
@@ -2100,10 +2128,59 @@ export function registerIpcHandlers(context: IpcContext): void {
         identityProfileId,
         runId,
       );
+      const authState = agenteraAuth.getPublicState();
+      const hasSignedInAccess = hasAgenteraSignedInAccess(authState);
+      const turnOwner = getAgenteraRuntimeOwner();
+      const productSpaceState = hasSignedInAccess
+        ? await requireProductSpace().getState()
+        : null;
       const binding = agenteraProfileBindings.verifyProfileBinding(
         profileHome(identityProfileId),
-        getAgenteraRuntimeOwner(),
+        turnOwner,
       );
+      let conversationBoundary: AgenteraConversationBoundarySummary | null =
+        null;
+      if (hasSignedInAccess) {
+        const control = requireAgentControl();
+        const preparedAgentTurn = await control.prepareHermesTurn({
+          conversationKey: identityConversationKey,
+          profilePath: profileHome(identityProfileId),
+          owner: turnOwner,
+          resumeSessionId: identityResumeSessionId || null,
+        });
+        const boundary = control.prepareConversationBoundary({
+          conversationKey: identityConversationKey,
+          owner: turnOwner,
+          resumeSessionId:
+            preparedAgentTurn?.resumeSessionId ??
+            identityResumeSessionId ??
+            null,
+          runtimeBinding: preparedAgentTurn?.binding ?? null,
+        });
+        const matchingOption = productSpaceState?.options.find((option) => {
+          if (
+            boundary.scopeType === "WORKSPACE" &&
+            option.kind === "WORKSPACE"
+          ) {
+            return option.workspaceId === boundary.scopeId;
+          }
+          if (
+            boundary.scopeType === "ORGANIZATION" &&
+            option.kind === "ORGANIZATION"
+          ) {
+            return option.organizationId === boundary.scopeId;
+          }
+          return false;
+        });
+        const scopeDisplayName =
+          matchingOption && matchingOption.kind !== "PERSONAL"
+            ? matchingOption.displayName
+            : null;
+        conversationBoundary = summarizeConversationBoundaryForRenderer(
+          boundary,
+          scopeDisplayName,
+        );
+      }
       const result = agenteraGlobalProfiles.prepareConversationSnapshot(
         currentAgenteraUserId(),
         identityConversationKey,
@@ -2128,6 +2205,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       const context = summarizeGlobalProfileConversationSnapshot(result);
       return {
         ...context,
+        conversationBoundary,
         requiresBoundApiTransport:
           context.requiresBoundApiTransport ||
           binding.agentInstallationId !== null ||
@@ -2177,8 +2255,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     action?: (
       manager: RuntimeDistributionManager,
     ) =>
-      | RuntimeDistributionPublicState
-      | Promise<RuntimeDistributionPublicState>,
+      RuntimeDistributionPublicState | Promise<RuntimeDistributionPublicState>,
   ): Promise<RuntimeDistributionPublicState> => {
     if (runtimeDistribution === null) {
       return serializeRuntimeDistributionPublicState(
@@ -2285,7 +2362,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     }
 
     const created = agenteraProfileBindings.createAndBindFreshProfile({
-      name: `AgentEra Space ${Date.now().toString(36)}`,
+      name: `Aera Space ${Date.now().toString(36)}`,
       owner,
       createProfile,
       resolveProfilePath: (profileId) => profileHome(profileId),
@@ -2434,7 +2511,7 @@ export function registerIpcHandlers(context: IpcContext): void {
             return {
               success: false,
               error:
-                "AgentEra Runtime was prepared but could not be activated. Retry the local repair.",
+                "Aera Runtime was prepared but could not be activated. Retry the local repair.",
               errorCode: "runtime-activation-failed",
               repairRequired: true,
               action: "retry",
@@ -2445,12 +2522,12 @@ export function registerIpcHandlers(context: IpcContext): void {
       }
       const error =
         result.errorCode === "packaged-seed-invalid"
-          ? "The Runtime included with AgentEra Studio is missing or invalid. Reinstall AgentEra Studio."
+          ? "The Runtime included with Aera is missing or invalid. Reinstall Aera."
           : result.errorCode === "insufficient-disk-space"
-            ? "There is not enough free disk space to prepare AgentEra Runtime."
+            ? "There is not enough free disk space to prepare Aera Runtime."
             : result.errorCode === "runtime-health-failed"
-              ? "The included AgentEra Runtime did not pass its local health check."
-              : "AgentEra Runtime could not be prepared from the local installer resources.";
+              ? "The included Aera Runtime did not pass its local health check."
+              : "Aera Runtime could not be prepared from the local installer resources.";
       return {
         success: false,
         error,
@@ -2534,7 +2611,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         event.sender.send("install-progress", {
           step: 1,
           totalSteps: 1,
-          title: "Updating remote AgentEra Runtime",
+          title: "Updating remote Aera Runtime",
           detail: "Running hermes update over SSH...",
           log: "Running hermes update over SSH...\n",
         });
@@ -2544,7 +2621,7 @@ export function registerIpcHandlers(context: IpcContext): void {
           event.sender.send("install-progress", {
             step: 1,
             totalSteps: 1,
-            title: "Updating remote AgentEra Runtime",
+            title: "Updating remote Aera Runtime",
             detail: "Dashboard compatibility check needs attention.",
             log: `Dashboard compatibility warning: ${
               compat.error ? `${compat.detail}: ${compat.error}` : compat.detail
@@ -2567,7 +2644,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         event.sender.send("install-progress", {
           step: 1,
           totalSteps: 1,
-          title: "Updating AgentEra Runtime",
+          title: "Updating Aera Runtime",
           detail: "Dashboard compatibility check needs attention.",
           log: `Dashboard compatibility warning: ${
             compat.error ? `${compat.detail}: ${compat.error}` : compat.detail
@@ -3204,21 +3281,43 @@ export function registerIpcHandlers(context: IpcContext): void {
         chatRunId,
       );
       const globalProfileUserId = currentAgenteraUserId();
+      const turnOwner = getAgenteraRuntimeOwner();
       const runtimeRun = runtimeActivity.beginRun(chatRunId);
       if (runtimeRun === null) {
-        throw new Error("AgentEra Runtime restart is pending.");
+        throw new Error("Aera Runtime restart is pending.");
       }
       try {
+        const hasSignedInAccess = hasAgenteraSignedInAccess(
+          agenteraAuth.getPublicState(),
+        );
+        if (hasSignedInAccess) {
+          // Load and verify the selected work context before freezing the
+          // ConversationBoundary. A persisted Organization id alone is never
+          // sufficient proof of current membership or role.
+          await requireProductSpace().getState();
+        }
         const preparedAgentTurn =
-          agenteraAgentControl &&
-          hasAgenteraSignedInAccess(agenteraAuth.getPublicState())
+          agenteraAgentControl && hasSignedInAccess
             ? await agenteraAgentControl.prepareHermesTurn({
                 conversationKey: identityConversationKey,
                 profilePath: profileHome(profile),
-                owner: getAgenteraRuntimeOwner(),
+                owner: turnOwner,
                 resumeSessionId: identityResumeSessionId || null,
               })
             : null;
+        if (!agenteraAgentControl && hasSignedInAccess) {
+          throw new Error("Aera conversation boundary is unavailable.");
+        }
+        const conversationBoundary =
+          agenteraAgentControl?.prepareConversationBoundary({
+            conversationKey: identityConversationKey,
+            owner: turnOwner,
+            resumeSessionId:
+              preparedAgentTurn?.resumeSessionId ??
+              identityResumeSessionId ??
+              null,
+            runtimeBinding: preparedAgentTurn?.binding ?? null,
+          }) ?? null;
         let conversationEnvelope = preparedAgentTurn?.envelope;
         try {
           const globalSnapshot =
@@ -3307,6 +3406,30 @@ export function registerIpcHandlers(context: IpcContext): void {
         const abortThisRun = (): void => {
           runtimeActivity.abortRun(chatRunId);
         };
+        let boundRuntimeSessionId: string | null =
+          preparedAgentTurn?.binding.hermesSessionId ?? null;
+        let boundConversationBoundarySessionId: string | null =
+          conversationBoundary?.hermesSessionId ?? null;
+        const bindControlPlaneSession = (sessionId: string): void => {
+          if (preparedAgentTurn && boundRuntimeSessionId !== sessionId) {
+            agenteraAgentControl?.attachHermesSession(
+              preparedAgentTurn.binding.id,
+              sessionId,
+            );
+            boundRuntimeSessionId = sessionId;
+          }
+          if (
+            conversationBoundary &&
+            boundConversationBoundarySessionId !== sessionId
+          ) {
+            agenteraAgentControl?.attachConversationBoundarySession(
+              conversationBoundary.id,
+              sessionId,
+              turnOwner,
+            );
+            boundConversationBoundarySessionId = sessionId;
+          }
+        };
         let boundGlobalProfileSessionId: string | null = null;
         const bindGlobalProfileSnapshotToSession = (
           sessionId: string,
@@ -3323,7 +3446,7 @@ export function registerIpcHandlers(context: IpcContext): void {
             boundGlobalProfileSessionId = sessionId;
           } else {
             console.warn(
-              "[agentera-global-profile] Failed to bind Hermes session snapshot:",
+              "[agentera-global-profile] Failed to bind Aera Runtime session snapshot:",
               bound.error,
             );
           }
@@ -3353,6 +3476,15 @@ export function registerIpcHandlers(context: IpcContext): void {
               runtimeRun.finish();
               officialQualityObserver.onDone();
               if (sessionId) {
+                try {
+                  bindControlPlaneSession(sessionId);
+                } catch {
+                  const message =
+                    "Aera conversation boundary session attachment failed.";
+                  safeSend("chat-error", message);
+                  rejectChat(new Error(message));
+                  return;
+                }
                 bindGlobalProfileSnapshotToSession(sessionId);
                 const recorded = agentIdentity.recordSessionRevision(
                   identityProfileId,
@@ -3392,21 +3524,16 @@ export function registerIpcHandlers(context: IpcContext): void {
               }
             },
             onSessionStarted: (sessionId) => {
-              if (preparedAgentTurn) {
-                try {
-                  agenteraAgentControl?.attachHermesSession(
-                    preparedAgentTurn.binding.id,
-                    sessionId,
-                  );
-                } catch {
-                  runtimeRun.finish();
-                  abortThisRun();
-                  const message =
-                    "AgentEra RuntimeBinding session attachment failed.";
-                  safeSend("chat-error", message);
-                  rejectChat(new Error(message));
-                  return;
-                }
+              try {
+                bindControlPlaneSession(sessionId);
+              } catch {
+                runtimeRun.finish();
+                abortThisRun();
+                const message =
+                  "Aera conversation boundary session attachment failed.";
+                safeSend("chat-error", message);
+                rejectChat(new Error(message));
+                return;
               }
               bindGlobalProfileSnapshotToSession(sessionId);
               const recorded = agentIdentity.recordSessionRevision(
@@ -3613,7 +3740,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         success: false,
         running: false,
         error:
-          "Remote mode points at an already-running AgentEra Runtime server. Start or restart the gateway on that remote host.",
+          "Remote mode points at an already-running Aera Runtime server. Start or restart the gateway on that remote host.",
       };
     }
     return startGatewayDetailed();
@@ -3909,31 +4036,75 @@ export function registerIpcHandlers(context: IpcContext): void {
     },
   );
 
-  ipcMain.handle("delete-session", (_event, sessionId: string) => {
+  ipcMain.handle("delete-session", async (_event, sessionId: string) => {
+    let owner: AgenteraRuntimeOwner | null = null;
+    try {
+      owner = agenteraAgentControl ? getAgenteraRuntimeOwner() : null;
+    } catch {
+      owner = null;
+    }
     const conn = getConnectionConfig();
-    if (conn.mode === "remote") return remoteDeleteSession(conn, sessionId);
-    if (conn.mode === "ssh" && conn.ssh)
-      return withSshDashboardSessions(
-        conn,
-        (config) => remoteDeleteSession(config, sessionId),
-        undefined,
-        activeSshProfile(),
-      );
-    return deleteSession(sessionId);
+    const result =
+      conn.mode === "remote"
+        ? await remoteDeleteSession(conn, sessionId)
+        : conn.mode === "ssh" && conn.ssh
+          ? await withSshDashboardSessions(
+              conn,
+              (config) => remoteDeleteSession(config, sessionId),
+              undefined,
+              activeSshProfile(),
+            )
+          : deleteSession(sessionId);
+    if (owner) {
+      try {
+        agenteraAgentControl?.deleteConversationBoundariesForSessions(
+          [sessionId],
+          owner,
+        );
+      } catch (error) {
+        console.warn(
+          "[agentera-conversation-boundary] Failed to remove deleted session boundary:",
+          error,
+        );
+      }
+    }
+    return result;
   });
 
-  ipcMain.handle("delete-sessions", (_event, sessionIds: string[]) => {
+  ipcMain.handle("delete-sessions", async (_event, sessionIds: string[]) => {
     const ids = Array.isArray(sessionIds) ? sessionIds : [];
+    let owner: AgenteraRuntimeOwner | null = null;
+    try {
+      owner = agenteraAgentControl ? getAgenteraRuntimeOwner() : null;
+    } catch {
+      owner = null;
+    }
     const conn = getConnectionConfig();
-    if (conn.mode === "remote") return remoteDeleteSessions(conn, ids);
-    if (conn.mode === "ssh" && conn.ssh)
-      return withSshDashboardSessions(
-        conn,
-        (config) => remoteDeleteSessions(config, ids),
-        undefined,
-        activeSshProfile(),
-      );
-    return deleteSessions(ids);
+    const result =
+      conn.mode === "remote"
+        ? await remoteDeleteSessions(conn, ids)
+        : conn.mode === "ssh" && conn.ssh
+          ? await withSshDashboardSessions(
+              conn,
+              (config) => remoteDeleteSessions(config, ids),
+              undefined,
+              activeSshProfile(),
+            )
+          : deleteSessions(ids);
+    if (owner) {
+      try {
+        agenteraAgentControl?.deleteConversationBoundariesForSessions(
+          ids,
+          owner,
+        );
+      } catch (error) {
+        console.warn(
+          "[agentera-conversation-boundary] Failed to remove deleted session boundaries:",
+          error,
+        );
+      }
+    }
+    return result;
   });
 
   // Profiles

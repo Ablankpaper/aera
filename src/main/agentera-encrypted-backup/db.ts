@@ -218,7 +218,7 @@ function assertOutsideHermesHome(path: string): void {
     )
   ) {
     throw new Error(
-      "AgentEra encrypted backup path must remain outside HERMES_HOME.",
+      "Aera encrypted backup path must remain outside HERMES_HOME.",
     );
   }
 }
@@ -246,7 +246,7 @@ function initializeSchema(sqlite: AgenteraEncryptedBackupSqliteDatabase): void {
     | Record<string, unknown>
     | undefined;
   if (!integrity || Object.values(integrity)[0] !== "ok") {
-    throw new Error("AgentEra encrypted backup database is corrupt.");
+    throw new Error("Aera encrypted backup database is corrupt.");
   }
   const current = sqlite.prepare("PRAGMA user_version").get() as
     | Record<string, unknown>
@@ -257,7 +257,7 @@ function initializeSchema(sqlite: AgenteraEncryptedBackupSqliteDatabase): void {
     currentVersion < 0 ||
     currentVersion > AGENTERA_ENCRYPTED_BACKUP_SCHEMA_VERSION
   ) {
-    throw new Error("Unsupported AgentEra encrypted backup database version.");
+    throw new Error("Unsupported Aera encrypted backup database version.");
   }
   if (currentVersion === AGENTERA_ENCRYPTED_BACKUP_SCHEMA_VERSION) return;
 
@@ -351,11 +351,11 @@ function positiveInteger(value: unknown, label: string): number {
 
 function canonicalTimestamp(value: unknown, label: string): string {
   if (typeof value !== "string") {
-    throw new Error(`AgentEra encrypted backup ${label} is corrupt.`);
+    throw new Error(`Aera encrypted backup ${label} is corrupt.`);
   }
   const parsed = new Date(value);
   if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== value) {
-    throw new Error(`AgentEra encrypted backup ${label} is corrupt.`);
+    throw new Error(`Aera encrypted backup ${label} is corrupt.`);
   }
   return value;
 }
@@ -373,32 +373,32 @@ function encryptedBytes(value: unknown, label: string): Buffer {
     value.byteLength < 1 ||
     value.byteLength > 64 * 1024
   ) {
-    throw new Error(`AgentEra encrypted backup ${label} is corrupt.`);
+    throw new Error(`Aera encrypted backup ${label} is corrupt.`);
   }
   return Buffer.from(value);
 }
 
 function publicKey(value: unknown): string {
   if (typeof value !== "string") {
-    throw new Error("AgentEra encrypted backup device record is corrupt.");
+    throw new Error("Aera encrypted backup device record is corrupt.");
   }
   try {
     base64urlDecode(value, 32);
   } catch {
-    throw new Error("AgentEra encrypted backup device record is corrupt.");
+    throw new Error("Aera encrypted backup device record is corrupt.");
   }
   return value;
 }
 
 function parseRecoveryEnvelope(value: unknown): RecoveryRootKeyEnvelopeV1 {
   if (typeof value !== "string") {
-    throw new Error("AgentEra encrypted backup account record is corrupt.");
+    throw new Error("Aera encrypted backup account record is corrupt.");
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
   } catch {
-    throw new Error("AgentEra encrypted backup account record is corrupt.");
+    throw new Error("Aera encrypted backup account record is corrupt.");
   }
   if (
     parsed === null ||
@@ -406,7 +406,7 @@ function parseRecoveryEnvelope(value: unknown): RecoveryRootKeyEnvelopeV1 {
     Array.isArray(parsed) ||
     Object.getPrototypeOf(parsed) !== Object.prototype
   ) {
-    throw new Error("AgentEra encrypted backup account record is corrupt.");
+    throw new Error("Aera encrypted backup account record is corrupt.");
   }
   const object = parsed as Record<string, unknown>;
   const actualFields = Object.keys(object).sort();
@@ -420,14 +420,14 @@ function parseRecoveryEnvelope(value: unknown): RecoveryRootKeyEnvelopeV1 {
     object.iterations !== AGENTERA_BACKUP_ARGON2_ITERATIONS ||
     object.parallelism !== AGENTERA_BACKUP_ARGON2_PARALLELISM
   ) {
-    throw new Error("AgentEra encrypted backup account record is corrupt.");
+    throw new Error("Aera encrypted backup account record is corrupt.");
   }
   try {
     base64urlDecode(String(object.salt), 16);
     base64urlDecode(String(object.nonce), 12);
     base64urlDecode(String(object.ciphertext), 48);
   } catch {
-    throw new Error("AgentEra encrypted backup account record is corrupt.");
+    throw new Error("Aera encrypted backup account record is corrupt.");
   }
   return {
     formatVersion: AGENTERA_BACKUP_FORMAT_VERSION,
@@ -566,7 +566,7 @@ export class AgenteraEncryptedBackupDatabase {
         updatedAt: canonicalTimestamp(row.updated_at, "update time"),
       };
     } catch {
-      throw new Error("AgentEra encrypted backup account record is corrupt.");
+      throw new Error("Aera encrypted backup account record is corrupt.");
     }
   }
 
@@ -678,7 +678,7 @@ export class AgenteraEncryptedBackupDatabase {
       };
     } catch {
       throw new Error(
-        "AgentEra encrypted backup pending device record is corrupt.",
+        "Aera encrypted backup pending device record is corrupt.",
       );
     }
   }
@@ -838,7 +838,7 @@ export class AgenteraEncryptedBackupDatabase {
             : canonicalTimestamp(row.revoked_at, "revocation time"),
       };
     } catch {
-      throw new Error("AgentEra encrypted backup device record is corrupt.");
+      throw new Error("Aera encrypted backup device record is corrupt.");
     }
   }
 

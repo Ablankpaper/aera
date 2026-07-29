@@ -1,5 +1,5 @@
 export default {
-  appName: "AgentEra Studio",
+  appName: "Aera",
   continue: "Continue",
   cancel: "Cancel",
   retry: "Retry",
@@ -61,7 +61,7 @@ export default {
   splashCheckingSsh: "Checking SSH connection…",
   splashCheckingRemote: "Checking remote connection…",
   splashLocalAfterSignIn: "Switching to local mode…",
-  remoteNoticeTitle: "Connected to remote AgentEra Runtime",
+  remoteNoticeTitle: "Connected to remote Aera Runtime",
   remoteNoticeDescription:
     "{{feature}} is not available in remote mode. This data lives on the server and is not accessible through the API yet.",
 } as const;

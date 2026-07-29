@@ -1,5 +1,5 @@
 /**
- * Renderer-safe, non-secret personal information owned by one AgentEra
+ * Renderer-safe, non-secret personal information owned by one Aera
  * account. Authentication material and account identities deliberately stay
  * outside this shape.
  */

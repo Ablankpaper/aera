@@ -45,7 +45,7 @@ export class AgenteraProductSpaceManagerError extends Error {
   readonly code: string;
 
   constructor(code: string) {
-    super(`AgentEra product-space operation failed: ${code}.`);
+    super(`Aera product-space operation failed: ${code}.`);
     this.name = "AgenteraProductSpaceManagerError";
     this.code = code;
   }

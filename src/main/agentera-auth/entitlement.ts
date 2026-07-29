@@ -53,8 +53,8 @@ export class AgenteraOfflineEntitlementError extends Error {
   constructor(code: "invalid" | "expired") {
     super(
       code === "expired"
-        ? "AgentEra offline entitlement is expired."
-        : "AgentEra offline entitlement is invalid.",
+        ? "Aera offline entitlement is expired."
+        : "Aera offline entitlement is invalid.",
     );
     this.name = "AgenteraOfflineEntitlementError";
     this.code = code;

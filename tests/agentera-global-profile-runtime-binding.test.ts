@@ -20,6 +20,9 @@ describe("global-profile transport at the RuntimeBinding boundary", () => {
     expect(handler).toContain("binding.agentInstallationId !== null");
     expect(handler).toContain("identityConversationKey !== runId");
     expect(handler).toContain("requiresBoundApiTransport:");
+    expect(handler).toContain("prepareHermesTurn({");
+    expect(handler).toContain("prepareConversationBoundary({");
+    expect(handler).toContain("conversationBoundary,");
   });
 
   it("binds the frozen global-profile snapshot to the durable Hermes session id", () => {

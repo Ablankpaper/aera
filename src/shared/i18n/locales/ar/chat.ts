@@ -13,7 +13,7 @@ export default {
   reasoningEffort: {
     title: "مستوى التفكير",
     auto: "تلقائي",
-    autoDescription: "دع AgentEra والنموذج يقرران.",
+    autoDescription: "دع Aera والنموذج يقرران.",
     hint: "التلقائي هو الأكثر أماناً. المستويات اليدوية قد يتم تجاهلها أو رفضها من قبل النماذج التي لا تدعم مستوى التفكير.",
     saveError: "تعذر حفظ مستوى التفكير. تمت استعادة التحديد السابق.",
     minimal: "أدنى",
@@ -38,11 +38,11 @@ export default {
   approve: "موافقة",
   deny: "رفض",
   clarify: {
-    defaultQuestion: "يحتاج AgentEra إلى مدخلاتك.",
+    defaultQuestion: "يحتاج Aera إلى مدخلاتك.",
     placeholder: "اكتب إجابتك… (Ctrl+Enter للإرسال)",
     send: "إرسال",
-    skip: "تخطي — دع AgentEra يقرر",
-    skipped: "تم التخطي — قرر AgentEra",
+    skip: "تخطي — دع Aera يقرر",
+    skipped: "تم التخطي — قرر Aera",
     error: "تعذر تسليم إجابتك — ربما انتهت الجولة. حاول مرة أخرى.",
   },
   thinking: "جارٍ التفكير...",
@@ -127,7 +127,7 @@ export default {
     model: "عرض أو تبديل النموذج الحالي",
     memory: "عرض ذاكرة الوكيل",
     persona: "عرض الشخصية الحالية",
-    version: "عرض إصدار AgentEra",
+    version: "عرض إصدار Aera",
   },
   queued: "{{count}} رسالة في قائمة الانتظار — سيتم الإرسال عندما ينتهي الوكيل",
   queuedCount: "{{count}} في الانتظار",
@@ -161,7 +161,7 @@ export default {
   followUs: {
     title: "تابعنا على X",
     description:
-      "ابق على اطلاع بآخر ميزات ونصائح وتحديثات AgentEra Studio. تابعنا على X!",
+      "ابق على اطلاع بآخر ميزات ونصائح وتحديثات Aera. تابعنا على X!",
     follow: "متابعة",
     notNow: "ليس الآن",
   },

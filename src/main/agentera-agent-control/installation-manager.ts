@@ -86,7 +86,7 @@ export class AgentInstallationManagerError extends Error {
   readonly code: AgentInstallationManagerErrorCode;
 
   constructor(code: AgentInstallationManagerErrorCode) {
-    super(`AgentEra Agent installation failed: ${code}.`);
+    super(`Aera Agent installation failed: ${code}.`);
     this.name = "AgentInstallationManagerError";
     this.code = code;
   }
@@ -709,7 +709,7 @@ function restoreFailure(
   code: "destination_exists" | "activation_failed",
 ): Error {
   return Object.assign(
-    new Error(`AgentEra encrypted backup restore failed: ${code}.`),
+    new Error(`Aera encrypted backup restore failed: ${code}.`),
     { code },
   );
 }

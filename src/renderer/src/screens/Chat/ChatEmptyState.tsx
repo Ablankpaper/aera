@@ -54,7 +54,7 @@ export const ChatEmptyState = memo(function ChatEmptyState({
   return (
     <div className="chat-empty">
       <div className="chat-empty-icon">
-        <img className="chat-empty-logo" src={agentEraIcon} alt="AgentEra" />
+        <img className="chat-empty-logo" src={agentEraIcon} alt="Aera" />
       </div>
       <div className="chat-empty-text">{t("chat.emptyTitle")}</div>
       <div className="chat-empty-hint">{t("chat.emptyHint")}</div>

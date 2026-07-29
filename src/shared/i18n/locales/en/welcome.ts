@@ -1,5 +1,5 @@
 export default {
-  title: "Welcome to AgentEra Studio",
+  title: "Welcome to Aera",
   subtitle:
     "Your self-improving AI assistant that runs locally on your machine. Private, powerful, and always learning.",
   installIssueTitle: "Installation Issue",
@@ -9,9 +9,9 @@ export default {
   switchToLocal: "Switch to local mode",
   installSizeHint: "This will install required components (~2 GB)",
   dividerOr: "or",
-  connectRemote: "Connect to Remote AgentEra",
-  connectRemoteTitle: "Connect to Remote AgentEra",
-  connectRemoteSubtitle: "Enter the URL of a running AgentEra API server.",
+  connectRemote: "Connect to Remote Aera",
+  connectRemoteTitle: "Connect to Remote Aera",
+  connectRemoteSubtitle: "Enter the URL of a running Aera API server.",
   remoteServerUrl: "Server URL",
   remoteApiKey: "API Key (optional)",
   remoteApiKeyPlaceholder: "Bearer token (API_SERVER_KEY)",

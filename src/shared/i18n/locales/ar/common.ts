@@ -1,5 +1,5 @@
 export default {
-  appName: "AgentEra Studio",
+  appName: "Aera",
   continue: "متابعة",
   cancel: "إلغاء",
   retry: "إعادة المحاولة",

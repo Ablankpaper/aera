@@ -178,7 +178,7 @@ export class AgenteraEncryptedBackupClientError extends Error {
     retryable: boolean,
     restartRequired = false,
   ) {
-    super(`AgentEra encrypted backup request failed: ${code}.`);
+    super(`Aera encrypted backup request failed: ${code}.`);
     this.name = "AgenteraEncryptedBackupClientError";
     this.status = status;
     this.code = code;
@@ -710,7 +710,7 @@ export class AgenteraEncryptedBackupClient implements EncryptedBackupCloudClient
       this.timeoutMs > 120_000
     ) {
       throw new Error(
-        "Invalid AgentEra encrypted backup client configuration.",
+        "Invalid Aera encrypted backup client configuration.",
       );
     }
   }

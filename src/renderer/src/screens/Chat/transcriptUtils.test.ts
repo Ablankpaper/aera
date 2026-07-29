@@ -12,12 +12,12 @@ describe("buildChatTranscript (issue #298)", () => {
     expect(buildChatTranscript([], "markdown")).toBe("");
   });
 
-  it("formats plain text with You / AgentEra speakers", () => {
+  it("formats plain text with You / Aera speakers", () => {
     const out = buildChatTranscript(
       [msg("user", "hi"), msg("agent", "hello there")],
       "text",
     );
-    expect(out).toBe("You: hi\n\nAgentEra: hello there");
+    expect(out).toBe("You: hi\n\nAera: hello there");
   });
 
   it("formats markdown with bold speaker headers", () => {
@@ -25,7 +25,7 @@ describe("buildChatTranscript (issue #298)", () => {
       [msg("user", "hi"), msg("agent", "hello there")],
       "markdown",
     );
-    expect(out).toBe("**You:**\n\nhi\n\n**AgentEra:**\n\nhello there");
+    expect(out).toBe("**You:**\n\nhi\n\n**Aera:**\n\nhello there");
   });
 
   it("trims surrounding whitespace from message content", () => {
@@ -34,9 +34,9 @@ describe("buildChatTranscript (issue #298)", () => {
     );
   });
 
-  it("maps the agent role to AgentEra and user to You", () => {
+  it("maps the agent role to Aera and user to You", () => {
     expect(buildChatTranscript([msg("agent", "x")], "text")).toBe(
-      "AgentEra: x",
+      "Aera: x",
     );
     expect(buildChatTranscript([msg("user", "x")], "text")).toBe("You: x");
   });

@@ -149,7 +149,7 @@ function Agents({ activeProfile, onChatWith }: AgentsProps): React.JSX.Element {
     <div className="agents-container">
       <AgentControlPanel
         profiles={agentProfiles}
-        initialTab="official"
+        initialTab="mine"
         onChatWithProfile={(profileId) => void handleChatWith(profileId)}
         onProfilesChanged={loadProfiles}
         onAgentReady={handleAgentReady}

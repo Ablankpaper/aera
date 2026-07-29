@@ -56,7 +56,7 @@ describe("Workspace translations", () => {
     expect(navigationJa.workspace).toBe(workspaceEn);
     expect(navigationZhCN.workspace).toBe(workspaceZhCN);
     expect(navigationZhTW.workspace).toBe(workspaceZhTW);
-    expect(workspaceZhCN.personal).toBe("个人空间");
-    expect(workspaceZhTW.personal).toBe("個人空間");
+    expect(workspaceZhCN.personal).toBe("我的");
+    expect(workspaceZhTW.personal).toBe("我的");
   });
 });

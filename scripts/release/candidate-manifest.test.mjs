@@ -94,7 +94,7 @@ test("rejects update metadata inconsistent with the signed target bytes", () => 
 test("never treats a Linux artifact as releasable", () => {
   const malformed = candidate();
   malformed.artifacts.push({
-    name: "agentera-studio-0.7.3.AppImage",
+    name: "Aera-0.7.3.AppImage",
     platform: "linux",
     arch: "x64",
     kind: "linux_appimage",
@@ -114,7 +114,7 @@ test("builds deterministic update metadata and an SPDX Runtime Seed package", ()
   const metadata = buildUpdateMetadata({
     version: VERSION,
     target: {
-      name: "agentera-studio-0.7.3-setup.exe",
+      name: "Aera-0.7.3-setup.exe",
       size: 123,
       sha512: updateSha512,
     },
@@ -145,7 +145,7 @@ test("builds deterministic update metadata and an SPDX Runtime Seed package", ()
   assert.ok(
     sbom.packages.some(
       (item) =>
-        item.name === "AgentEra Runtime Seed" &&
+        item.name === "Aera Runtime Seed" &&
         item.versionInfo === "0.18.2-agentera.1",
     ),
   );
@@ -157,28 +157,28 @@ test("builds deterministic update metadata and an SPDX Runtime Seed package", ()
 
 function candidate() {
   const macDmg = artifact(
-    "agentera-studio-0.7.3-arm64.dmg",
+    "Aera-0.7.3-arm64.dmg",
     "macos",
     "arm64",
     "macos_dmg",
     "1",
   );
   const macZip = artifact(
-    "agentera-studio-0.7.3-arm64-mac.zip",
+    "Aera-0.7.3-arm64-mac.zip",
     "macos",
     "arm64",
     "macos_zip",
     "2",
   );
   const windowsSetup = artifact(
-    "agentera-studio-0.7.3-setup.exe",
+    "Aera-0.7.3-setup.exe",
     "windows",
     "x64",
     "windows_setup",
     "3",
   );
   const windowsPortable = artifact(
-    "agentera-studio-0.7.3-portable.exe",
+    "Aera-0.7.3-portable.exe",
     "windows",
     "x64",
     "windows_portable",
@@ -232,7 +232,7 @@ function candidate() {
     platformEvidence: {
       macos: {
         arch: "arm64",
-        signingIdentity: "Developer ID Application: AgentEra (ABCDEFGHIJ)",
+        signingIdentity: "Developer ID Application: Aera (ABCDEFGHIJ)",
         teamId: "ABCDEFGHIJ",
         codesignVerified: true,
         gatekeeperAccepted: true,
@@ -255,7 +255,7 @@ function candidate() {
       },
       windows: {
         arch: "x64",
-        signerSubject: "CN=AgentEra Code Signing",
+        signerSubject: "CN=Aera Code Signing",
         signerThumbprint: "A".repeat(40),
         authenticodeVerifiedArtifacts: [
           windowsSetup.name,

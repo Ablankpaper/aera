@@ -3,7 +3,7 @@ import { runtimeDistributionEn } from "../runtime-distribution";
 export default {
   title: "Settings",
   sections: {
-    hermesAgent: "AgentEra Runtime",
+    hermesAgent: "Aera Runtime",
     appearance: "Appearance",
     privacy: "Privacy",
     credentialPool: "Credential Pool",
@@ -11,7 +11,7 @@ export default {
   nav: {
     groups: {
       general: "General",
-      hermes: "AgentEra Studio",
+      hermes: "Aera",
     },
     appearance: "Appearance",
     language: "Language",
@@ -25,7 +25,7 @@ export default {
   },
   runtimeDistribution: runtimeDistributionEn,
   agentSubtitle: "The local AI engine",
-  desktopTitle: "AgentEra Studio",
+  desktopTitle: "Aera",
   desktopSubtitle: "This desktop app",
   statusUpToDate: "Up to date",
   statusUpdateAvailable: "Update available",
@@ -76,7 +76,7 @@ export default {
   },
   analytics: {
     label: "Send anonymous usage analytics",
-    hint: "Collected anonymously and used only to improve AgentEra Studio — never your chats, files, prompts, or any personal data.",
+    hint: "Collected anonymously and used only to improve Aera — never your chats, files, prompts, or any personal data.",
   },
   officialQuality: {
     title: "Official Agent quality feedback",
@@ -99,7 +99,7 @@ export default {
   },
   notDetected: "Not detected",
   updatedSuccessfully: "Updated successfully!",
-  updateSuccess: "AgentEra updated successfully.",
+  updateSuccess: "Aera updated successfully.",
   updateFailed: "Update failed.",
   version: "v{{version}}",
   proxyPlaceholder: "e.g. socks5://127.0.0.1:1080 or http://proxy:8080",
@@ -128,25 +128,25 @@ export default {
   compatApiKeyHint:
     "Stored as {{envVar}} — required for remote endpoints, optional for localhost.",
   poolHint:
-    "Add multiple API Keys for the same provider for automatic rotation and load balancing. AgentEra will cycle through them.",
+    "Add multiple API Keys for the same provider for automatic rotation and load balancing. Aera will cycle through them.",
   add: "Add",
   remove: "Remove",
   keyLabel: "Key",
   empty: "(empty)",
   dataSection: "Data",
   dataHint:
-    "Export or import your AgentEra configuration, sessions, skills, and memory.",
+    "Export or import your Aera configuration, sessions, skills, and memory.",
   encryptedBackup: {
     title: "End-to-end encrypted cloud backup",
     privacy:
-      "AgentEra encrypts approved Agent data on this device. The Cloud stores ciphertext and public device metadata only.",
+      "Aera encrypts approved Agent data on this device. The Cloud stores ciphertext and public device metadata only.",
     refresh: "Refresh encrypted backup state",
     loading: "Loading encrypted backup state…",
     signInRequired:
       "Sign in and connect to the Cloud to manage encrypted backups.",
     recoverySetup: "Recovery setup",
     recoverySetupHint:
-      "Create a device-owned encryption root and a one-time 24-word recovery phrase. AgentEra cannot recover this phrase for you.",
+      "Create a device-owned encryption root and a one-time 24-word recovery phrase. Aera cannot recover this phrase for you.",
     setup: "Set up encrypted backup",
     registerThisDevice: "Register this device for migration",
     manualTitle: "Back up an active Agent",
@@ -243,19 +243,19 @@ export default {
   latestVersion: "Already up to date",
   autoUpgradeDesktop: "Auto-upgrade desktop app",
   autoUpgradeDesktopHint:
-    "Automatically download new AgentEra Studio releases from GitHub when the app starts. Turn this off to show the startup upgrade button without downloading until you click it.",
+    "Automatically download new Aera releases from GitHub when the app starts. Turn this off to show the startup upgrade button without downloading until you click it.",
   runningDiagnosis: "Running diagnosis...",
   runDiagnosis: "Run Diagnosis",
   running: "Running...",
   debugDump: "Debug Dump",
   migrationDetected: "OpenClaw Installation Detected",
   migrationDesc:
-    "Found OpenClaw at <code>{{path}}</code>. You can migrate your configuration, API keys, sessions, and skills to AgentEra.",
+    "Found OpenClaw at <code>{{path}}</code>. You can migrate your configuration, API keys, sessions, and skills to Aera.",
   migrationDismiss: "Don't show again",
   migrationComplete: "Import completed.",
   migrationFailed: "Import failed.",
   migrating: "Migrating...",
-  migrateToHermes: "Migrate to AgentEra",
+  migrateToHermes: "Migrate to Aera",
   skip: "Skip",
   appearanceHint: "Choose your preferred interface appearance",
   apiKeyPlaceholder: "API Key",
@@ -263,11 +263,11 @@ export default {
   connectionSection: "Connection",
   modeLocal: "Local",
   modeRemote: "Remote",
-  modeLocalHint: "Using AgentEra installed on this device",
-  modeRemoteHint: "Connect to a AgentEra API server on your network or cloud",
+  modeLocalHint: "Using Aera installed on this device",
+  modeRemoteHint: "Connect to a Aera API server on your network or cloud",
   remoteUrl: "Remote URL",
   remoteUrlHint:
-    "The AgentEra API server URL (must expose /health and /v1/chat/completions)",
+    "The Aera API server URL (must expose /health and /v1/chat/completions)",
   remoteApiKey: "API Key",
   remoteApiKeyHint:
     "Matches API_SERVER_KEY on the remote host. Leave empty if the server accepts unauthenticated requests.",
@@ -291,7 +291,7 @@ export default {
   chatTransportDashboard: "Dashboard",
   chatTransportLegacy: "Legacy",
   sshChatTransportHint:
-    "Auto tries the AgentEra Runtime dashboard WebSocket through the SSH tunnel first, then falls back to legacy SSH chat. Dashboard forces the upstream dashboard path; Legacy keeps the older SSH transport.",
+    "Auto tries the Aera Runtime dashboard WebSocket through the SSH tunnel first, then falls back to legacy SSH chat. Dashboard forces the upstream dashboard path; Legacy keeps the older SSH transport.",
   transportChecking: "Checking transport…",
   transportCheckingShort: "Checking…",
   transportActiveLegacy: "Active: Legacy",
@@ -309,30 +309,30 @@ export default {
   save: "Save",
   serverConfigTitle: "Server Configuration",
   serverConfigHint:
-    "You&apos;re connected to a remote AgentEra server. Model selection, provider API keys, and credentials are managed on the server&apos;s <code>~/.hermes/.env</code> and <code>config.yaml</code>. Edit them on the host (e.g. <code>docker exec -it hermes vi /opt/data/.env</code>) and restart the container.",
+    "You&apos;re connected to a remote Aera server. Model selection, provider API keys, and credentials are managed on the server&apos;s <code>~/.hermes/.env</code> and <code>config.yaml</code>. Edit them on the host (e.g. <code>docker exec -it hermes vi /opt/data/.env</code>) and restart the container.",
   connectionMode: "Connection Mode",
   switchedToLocal: "Switched to local mode",
 
   // Community
   communityTitle: "Community",
   communityHint:
-    "Join our Discord channel to ask questions, report issues, and chat with other AgentEra users.",
+    "Join our Discord channel to ask questions, report issues, and chat with other Aera users.",
   joinDiscord: "Join Discord Channel",
   communityLinksHint:
-    "Connect with the AgentEra Studio community, get help, and stay up to date.",
+    "Connect with the Aera community, get help, and stay up to date.",
   linkWebsite: "Website",
   linkDiscord: "Discord",
   linkX: "X",
   linkTelegram: "Telegram",
   supportTitle: "Support the developer",
   supportHint:
-    "AgentEra Studio is free and open source — if it helps you, consider supporting its development.",
+    "Aera is free and open source — if it helps you, consider supporting its development.",
   supportKofi: "Support on Ko-fi",
 
   // SSH & Server Config
   modeSsh: "SSH Tunnel",
   modeSshHint:
-    "Tunnel to a remote AgentEra over SSH — no exposed ports or API keys needed.",
+    "Tunnel to a remote Aera over SSH — no exposed ports or API keys needed.",
   sessionDisabledTitle: "Session history disabled — API_SERVER_KEY not set",
   sessionDisabledDesc:
     "Without an API server key the gateway cannot authenticate session continuation requests. Messages will still send, but conversation history won't be preserved across restarts.",
@@ -342,13 +342,13 @@ export default {
   remoteEnvSshDesc:
     "SSH mode: add API_SERVER_KEY=<your-key> to ~/.hermes/profiles/<profile>/.env on the remote host, then restart the gateway there.",
   remoteEnvDesc:
-    "Remote mode: add API_SERVER_KEY=<your-key> to the .env on your remote AgentEra server, then restart the gateway.",
+    "Remote mode: add API_SERVER_KEY=<your-key> to the .env on your remote Aera server, then restart the gateway.",
   sshHost: "SSH Host",
   sshPort: "SSH Port",
   sshUsername: "Username",
   sshKeyPath: "Private Key Path",
   sshKeyPathOptional: "(optional, defaults to ~/.ssh/id_rsa)",
-  sshRemotePort: "Remote AgentEra Port",
+  sshRemotePort: "Remote Aera Port",
   sshRemotePortDefault: "(default 8642)",
   sshHint:
     "Make sure you can run ssh {{cmd}} without a password prompt. The first connection trusts the host key and stores it in ~/.ssh/known_hosts; SSH will fail closed if that key changes later.",
@@ -359,17 +359,17 @@ export default {
   connectSsh: "Connect via SSH",
   sshTitle: "Connect via SSH",
   sshSubtitle:
-    "Tunnel to a remote AgentEra over SSH — no exposed ports or API keys needed.",
+    "Tunnel to a remote Aera over SSH — no exposed ports or API keys needed.",
   sshHostPlaceholder: "192.168.1.100 or myserver.local",
   sshUsernamePlaceholder: "hermes",
   sshErrorRequired: "Host and username are required.",
   sshErrorConnection:
-    "Could not connect via SSH or reach AgentEra on the remote. Make sure:\n• SSH key is correct (or default ~/.ssh/id_rsa works)\n• AgentEra gateway is running on the remote\n• The remote port is correct (default 8642)",
+    "Could not connect via SSH or reach Aera on the remote. Make sure:\n• SSH key is correct (or default ~/.ssh/id_rsa works)\n• Aera gateway is running on the remote\n• The remote port is correct (default 8642)",
   sshErrorFailed: "SSH connection test failed: {{msg}}",
   sshErrorFailedSimple: "SSH connection test failed.",
   remoteErrorUrl: "Please enter a URL.",
   remoteErrorConnection:
-    "Could not reach AgentEra at this URL. Check the URL and API key.\n\nLeave the key empty if the server accepts unauthenticated requests (e.g. via SSH tunnel to localhost).",
+    "Could not reach Aera at this URL. Check the URL and API key.\n\nLeave the key empty if the server accepts unauthenticated requests (e.g. via SSH tunnel to localhost).",
   remoteErrorFailed: "Connection test failed.",
   sshSuccess: "SSH tunnel connected!",
   sshErrorRequiredSimple: "Host and username are required",

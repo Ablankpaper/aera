@@ -60,7 +60,7 @@ function SplashScreen({
         preload="auto"
         style={{ display: "block", objectFit: "cover" }}
       />
-      <div className="splash-wordmark">AgentEra Studio</div>
+      <div className="splash-wordmark">Aera</div>
       {onSwitchToLocal && showEscape && (
         <div className="splash-escape">
           <span className="splash-escape-hint">

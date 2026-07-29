@@ -23,7 +23,7 @@ export default {
   startingClaw3dService: "正在啟動 Claw3D 服務...",
   clickToStart: '點擊"啟動"來執行 Claw3D',
   setupDesc1:
-    "Claw3D 是你的 AgentEra Runtime 的 3D 視覺化環境。它讓你可以看到 Agent 在互動式辦公空間中工作。",
+    "Claw3D 是你的 Aera Runtime 的 3D 視覺化環境。它讓你可以看到 Agent 在互動式辦公空間中工作。",
   setupDesc2:
     "點擊下方自動下載並設定 Claw3D。這將複製儲存庫並安裝所有相依套件。",
   // Enterable building interiors
@@ -45,7 +45,7 @@ export default {
   repComingSoon: "敬請期待",
   repLoading: "處理中…",
   repErrorGeneric: "發生錯誤，請重試。",
-  repStatusSignedOut: "請登入您的 AgentEra 帳戶以使用銀行。",
+  repStatusSignedOut: "請登入您的 Aera 帳戶以使用銀行。",
   repStatusUnlinked: "該智能體尚未關聯雲端智能體。請登入後重試。",
   repWalletsNone: "還沒有帳戶 — 先開設一個吧。",
   repBadgeTransactable: "可交易",
@@ -55,5 +55,5 @@ export default {
   repBalanceTotal: "總計",
   repCreateSuccess: "帳戶已開設",
   repCreateExists: "該智能體已有銀行帳戶。",
-  repStatusForeign: "該智能體已關聯到另一個 AgentEra Studio 帳戶。",
+  repStatusForeign: "該智能體已關聯到另一個 Aera 帳戶。",
 } as const;

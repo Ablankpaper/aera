@@ -24,7 +24,7 @@ export default {
   startingClaw3dService: "Iniciando el servicio de Claw3D...",
   clickToStart: 'Haz clic en "Iniciar" para ejecutar Claw3D',
   setupDesc1:
-    "Claw3D es un entorno de visualización 3D para tus agentes de AgentEra. Te permite ver a tus agentes trabajando en un espacio de oficina interactivo.",
+    "Claw3D es un entorno de visualización 3D para tus agentes de Aera. Te permite ver a tus agentes trabajando en un espacio de oficina interactivo.",
   setupDesc2:
     "Haz clic abajo para descargar y configurar Claw3D automáticamente. Esto clonará el repositorio e instalará todas las dependencias.",
   // Enterable building interiors
@@ -48,7 +48,7 @@ export default {
   repLoading: "Procesando…",
   repErrorGeneric: "Algo salió mal. Inténtalo de nuevo.",
   repStatusSignedOut:
-    "Inicia sesión en tu cuenta de AgentEra para usar el banco.",
+    "Inicia sesión en tu cuenta de Aera para usar el banco.",
   repStatusUnlinked:
     "Este agente aún no está vinculado a un agente en la nube. Inicia sesión e inténtalo de nuevo.",
   repWalletsNone: "Aún no hay cuentas: crea una para empezar.",
@@ -61,5 +61,5 @@ export default {
   repCreateSuccess: "Cuenta creada",
   repCreateExists: "Este agente ya tiene una cuenta bancaria.",
   repStatusForeign:
-    "Este agente está vinculado a otra cuenta de AgentEra Studio.",
+    "Este agente está vinculado a otra cuenta de Aera.",
 } as const;

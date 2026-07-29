@@ -300,15 +300,49 @@ describe("Organization publication service", () => {
     expect(withdrawSubmission).toHaveBeenCalledOnce();
   });
 
-  it("omits review confirmation for the submission author", async () => {
-    const preview = await service().prepareReview({
+  it("allows one authorized owner to submit and approve", async () => {
+    reviewSubmission.mockResolvedValue(
+      submissionDetail({
+        status: "approved",
+        revision: 2,
+        terminal_at: NOW.toISOString(),
+        review: {
+          id: REVIEW_ID,
+          reviewer_user_id: USER_ID,
+          decision: "approve",
+          reason_code: null,
+          safe_note: null,
+          organization_policy_snapshot_id: POLICY_ID,
+          organization_policy_version: 1,
+          reviewed_content_digest: submissionDetail().content_digest,
+          reviewed_at: NOW.toISOString(),
+        },
+      }),
+    );
+    const publication = service();
+    const preview = await publication.prepareReview({
       submissionId: SUBMISSION_ID,
       decision: "approve",
       reasonCode: null,
       safeNote: null,
     });
-    expect(preview).toMatchObject({ selfReview: true, reviewHandle: null });
-    expect(reviewSubmission).not.toHaveBeenCalled();
+    expect(preview).toMatchObject({
+      selfReview: true,
+      reviewHandle: HANDLE_ID,
+    });
+    await publication.reviewPrepared({
+      reviewHandle: HANDLE_ID,
+      confirmation: "approve-organization-agent",
+    });
+    expect(reviewSubmission).toHaveBeenCalledWith(
+      ORGANIZATION_ID,
+      SUBMISSION_ID,
+      {
+        expected_revision: 1,
+        decision: "approve",
+      },
+      expect.any(String),
+    );
   });
 
   it("fails stale cloud review revisions before dispatching a mutation", async () => {

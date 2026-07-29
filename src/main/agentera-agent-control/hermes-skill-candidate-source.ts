@@ -71,7 +71,7 @@ export class HermesSkillCandidateSourceError extends Error {
   readonly code: HermesSkillCandidateSourceErrorCode;
 
   constructor(code: HermesSkillCandidateSourceErrorCode) {
-    super("Hermes Skill candidate source is not eligible.");
+    super("Aera Runtime Skill candidate source is not eligible.");
     this.name = "HermesSkillCandidateSourceError";
     this.code = code;
   }

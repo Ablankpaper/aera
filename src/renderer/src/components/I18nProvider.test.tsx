@@ -67,7 +67,7 @@ describe("I18nProvider", () => {
     });
 
     expect(
-      await screen.findByText("Welcome to AgentEra Studio"),
+      await screen.findByText("Welcome to Aera"),
     ).toBeInTheDocument();
   });
 
@@ -86,7 +86,7 @@ describe("I18nProvider", () => {
 
     expect(setLocale).toHaveBeenLastCalledWith("es");
     expect(
-      await screen.findByText("Bienvenido a AgentEra Studio"),
+      await screen.findByText("Bienvenido a Aera"),
     ).toBeInTheDocument();
   });
 
@@ -114,7 +114,7 @@ describe("I18nProvider", () => {
 
     expect(setLocale).toHaveBeenLastCalledWith("es");
     expect(
-      await screen.findByText("Bienvenido a AgentEra Studio"),
+      await screen.findByText("Bienvenido a Aera"),
     ).toBeInTheDocument();
   });
 });

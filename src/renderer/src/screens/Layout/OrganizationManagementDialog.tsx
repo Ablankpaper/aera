@@ -12,7 +12,7 @@ import type {
   OrganizationPolicySummary,
   OrganizationPublicState,
 } from "../../../../shared/agentera-organization";
-import { Copy, Plus, Refresh, Trash, X } from "../../assets/icons";
+import { Copy, Refresh, Trash, X } from "../../assets/icons";
 import { useI18n } from "../../components/useI18n";
 import OrganizationPolicyPanel from "./OrganizationPolicyPanel";
 
@@ -22,12 +22,7 @@ type AuthorizedState = Extract<
 >;
 
 type Tab =
-  | "overview"
-  | "members"
-  | "departments"
-  | "invitations"
-  | "policy"
-  | "audit";
+  "overview" | "members" | "departments" | "invitations" | "policy" | "audit";
 
 interface OrganizationManagementDialogProps {
   open: boolean;
@@ -45,6 +40,16 @@ const DEFAULT_POLICY: OrganizationPolicyDocument = {
 
 function roleKey(role: OrganizationMember["role"]): string {
   return `navigation.organization.roles.${role}`;
+}
+
+function canManageOrganization(role: OrganizationMember["role"]): boolean {
+  return role === "owner" || role === "admin";
+}
+
+function canReviewOrganizationGovernance(
+  role: OrganizationMember["role"],
+): boolean {
+  return canManageOrganization(role) || role === "auditor";
 }
 
 export default function OrganizationManagementDialog({
@@ -79,7 +84,6 @@ export default function OrganizationManagementDialog({
   const [busy, setBusy] = useState(false);
   const [errorCode, setErrorCode] =
     useState<AgenteraOrganizationErrorCode | null>(null);
-  const [createName, setCreateName] = useState("");
   const [renameName, setRenameName] = useState("");
   const [departmentName, setDepartmentName] = useState("");
   const [invitationSecret, setInvitationSecret] = useState<string | null>(null);
@@ -93,12 +97,19 @@ export default function OrganizationManagementDialog({
   const contextRef = useRef({ open, userId: authState.userId, selectedId });
   contextRef.current = { open, userId: authState.userId, selectedId };
 
+  const governanceOrganizations = useMemo(
+    () =>
+      organizationState?.organizations.filter((organization) =>
+        canReviewOrganizationGovernance(organization.role),
+      ) ?? [],
+    [organizationState],
+  );
   const selectedOrganization = useMemo(
     () =>
-      organizationState?.organizations.find(
+      governanceOrganizations.find(
         (organization) => organization.id === selectedId,
       ),
-    [organizationState, selectedId],
+    [governanceOrganizations, selectedId],
   );
   const online =
     authState.status === "authenticated" &&
@@ -126,12 +137,18 @@ export default function OrganizationManagementDialog({
         if (
           candidate &&
           next.organizations.some(
-            (organization) => organization.id === candidate,
+            (organization) =>
+              organization.id === candidate &&
+              canReviewOrganizationGovernance(organization.role),
           )
         ) {
           return candidate;
         }
-        return next.organizations[0]?.id ?? null;
+        return (
+          next.organizations.find((organization) =>
+            canReviewOrganizationGovernance(organization.role),
+          )?.id ?? null
+        );
       });
     },
     [],
@@ -157,7 +174,13 @@ export default function OrganizationManagementDialog({
 
     const productUnsubscribe = window.agenteraProductSpace.onStateChanged(
       (state) => {
-        if (!current || state.selected.kind !== "ORGANIZATION") return;
+        if (
+          !current ||
+          state.selected.kind !== "ORGANIZATION" ||
+          !canReviewOrganizationGovernance(state.selected.role)
+        ) {
+          return;
+        }
         setSelectedId(state.selected.organizationId);
         setTab("overview");
       },
@@ -208,6 +231,13 @@ export default function OrganizationManagementDialog({
     setDissolveName("");
     setDissolveConfirmation("");
   }, [authState.userId, open, selectedId]);
+
+  useEffect(() => {
+    if (selectedOrganization?.role !== "auditor") return;
+    setTab((current) =>
+      current === "policy" || current === "audit" ? current : "policy",
+    );
+  }, [selectedOrganization?.role, selectedId]);
 
   useEffect(() => {
     if (!open || !selectedOrganization) {
@@ -368,10 +398,17 @@ export default function OrganizationManagementDialog({
 
   if (!open) return null;
 
-  const tabs: Tab[] = ["overview", "members", "departments"];
-  if (canAdminister) tabs.push("invitations");
-  tabs.push("policy");
-  if (canAudit) tabs.push("audit");
+  const tabs: Tab[] =
+    role === "auditor"
+      ? ["policy", "audit"]
+      : [
+          "overview",
+          "members",
+          "departments",
+          "invitations",
+          "policy",
+          "audit",
+        ];
 
   const ownerMember = members.find((member) => member.role === "owner");
   const transferMember = members.find(
@@ -434,51 +471,11 @@ export default function OrganizationManagementDialog({
 
         <div className="workspace-management-body">
           <aside className="workspace-management-list">
-            <form
-              className="workspace-management-create"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (!createName || !online) return;
-                void run(
-                  () =>
-                    window.agenteraOrganization.create({
-                      displayName: createName,
-                    }),
-                  async (created) => {
-                    setCreateName("");
-                    await refreshState(created.id);
-                  },
-                );
-              }}
-            >
-              <label>
-                <span>
-                  {t("navigation.organization.management.createName")}
-                </span>
-                <input
-                  value={createName}
-                  onChange={(event) => setCreateName(event.target.value)}
-                  disabled={!online || busy}
-                  aria-label={t(
-                    "navigation.organization.management.createName",
-                  )}
-                />
-              </label>
-              <button
-                type="submit"
-                className="btn btn-primary btn-sm"
-                disabled={!online || busy || !createName}
-                data-testid="organization-mutation"
-              >
-                <Plus size={14} aria-hidden="true" />
-                {t("navigation.organization.management.create")}
-              </button>
-            </form>
             {loading ? (
               <p>{t("navigation.organization.management.loading")}</p>
-            ) : organizationState?.organizations.length ? (
+            ) : governanceOrganizations.length ? (
               <div className="workspace-management-list-items">
-                {organizationState.organizations.map((organization) => (
+                {governanceOrganizations.map((organization) => (
                   <button
                     type="button"
                     key={organization.id}
@@ -841,9 +838,7 @@ export default function OrganizationManagementDialog({
                                             userId: member.userId,
                                             patch: {
                                               role: event.target.value as
-                                                | "admin"
-                                                | "auditor"
-                                                | "member",
+                                                "admin" | "auditor" | "member",
                                               expectedRevision: member.revision,
                                             },
                                           },

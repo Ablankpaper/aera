@@ -72,7 +72,7 @@ export default function OrganizationReviewDialog({
   };
 
   const confirm = async (): Promise<void> => {
-    if (busy || !preview?.reviewHandle || preview.selfReview) return;
+    if (busy || !preview?.reviewHandle) return;
     setBusy(true);
     setError(null);
     const result = await window.agenteraAgents.confirmOrganizationReview({
@@ -204,11 +204,6 @@ export default function OrganizationReviewDialog({
           </div>
         ) : null}
 
-        {preview?.selfReview ? (
-          <div className="agent-control-notice">
-            {t("agents.control.organization.differentReviewerRequired")}
-          </div>
-        ) : null}
         {error ? <div className="agents-create-error">{t(error)}</div> : null}
         {notice ? (
           <div className="agent-control-success">{t(notice)}</div>
@@ -238,7 +233,7 @@ export default function OrganizationReviewDialog({
               {t("agents.control.organization.approve")}
             </button>
           </>
-        ) : !preview.selfReview && preview.reviewHandle ? (
+        ) : preview.reviewHandle ? (
           <button
             type="button"
             className="btn btn-primary"

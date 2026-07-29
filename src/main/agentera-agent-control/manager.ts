@@ -59,7 +59,14 @@ import {
   AgenteraHermesAdapter,
   type PreparedInstalledHermesTurn,
 } from "./hermes-adapter";
-import { RuntimeBindingStore } from "./runtime-binding-store";
+import {
+  RuntimeBindingStore,
+  type LocalRuntimeBinding,
+} from "./runtime-binding-store";
+import {
+  ConversationBoundaryStore,
+  type ConversationBoundary,
+} from "./conversation-boundary-store";
 import { ExperienceCandidateService } from "./experience-candidate-service";
 import { ExperienceCandidateImporter } from "./experience-candidate-importer";
 import { ExperienceCandidateStore } from "./experience-candidate-store";
@@ -83,6 +90,13 @@ export interface PrepareAgenteraHermesTurnInput {
   profilePath: string;
   owner: AgenteraRuntimeOwner;
   resumeSessionId: string | null;
+}
+
+export interface PrepareAgenteraConversationBoundaryInput {
+  conversationKey: string;
+  owner: AgenteraRuntimeOwner;
+  resumeSessionId: string | null;
+  runtimeBinding: LocalRuntimeBinding | null;
 }
 
 interface FullAgentControlOptions {
@@ -154,7 +168,7 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function codedError(code: string): Error {
-  return Object.assign(new Error(`AgentEra Agent control failed: ${code}.`), {
+  return Object.assign(new Error(`Aera Agent control failed: ${code}.`), {
     code,
   });
 }
@@ -1036,6 +1050,46 @@ export class AgenteraAgentControlManager {
     this.queueRuntimeBindingDelivery();
   }
 
+  prepareConversationBoundary(
+    input: PrepareAgenteraConversationBoundaryInput,
+  ): ConversationBoundary {
+    return this.conversationBoundaryStore(input.owner).prepare({
+      conversationKey: input.conversationKey,
+      resumeSessionId: input.resumeSessionId,
+      context: this.assetContext(),
+      runtimeBinding: input.runtimeBinding,
+    });
+  }
+
+  attachConversationBoundarySession(
+    boundaryId: string,
+    sessionId: string,
+    owner: AgenteraRuntimeOwner,
+  ): ConversationBoundary {
+    return this.conversationBoundaryStore(owner).attachHermesSession(
+      boundaryId,
+      sessionId,
+    );
+  }
+
+  getConversationBoundaryForSession(
+    sessionId: string,
+    owner: AgenteraRuntimeOwner,
+  ): ConversationBoundary | null {
+    return this.conversationBoundaryStore(owner).getByHermesSessionId(
+      sessionId,
+    );
+  }
+
+  deleteConversationBoundariesForSessions(
+    sessionIds: readonly string[],
+    owner: AgenteraRuntimeOwner,
+  ): number {
+    return this.conversationBoundaryStore(owner).deleteForHermesSessions(
+      sessionIds,
+    );
+  }
+
   private requireFull(): FullAgentControlOptions {
     const options = this.options as AgenteraAgentControlManagerOptions &
       Partial<FullAgentControlOptions>;
@@ -1066,6 +1120,17 @@ export class AgenteraAgentControlManager {
 
   private owner(): AgenteraRuntimeOwner {
     return this.requireFull().getOwner();
+  }
+
+  private conversationBoundaryStore(
+    owner: AgenteraRuntimeOwner,
+  ): ConversationBoundaryStore {
+    return new ConversationBoundaryStore({
+      database: this.requireFull().database,
+      owner,
+      now: this.options.now,
+      randomUUID: this.options.randomUUID,
+    });
   }
 
   private context(): NormalizedAgentContext {
@@ -1288,6 +1353,7 @@ export class AgenteraAgentControlManager {
       cache: runtime.cache,
       context,
       runtimeVersion: runtime.runtimeVersion,
+      refreshTrust: () => this.refreshSigningKeys(),
     });
     this.contextComponents = { key, publisher };
     return this.contextComponents;

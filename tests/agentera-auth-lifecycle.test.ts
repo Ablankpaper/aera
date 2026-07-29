@@ -154,7 +154,7 @@ class FakeClient implements AgenteraCloudClientPort {
   }
 }
 
-describe("AgentEra authorization lifecycle", () => {
+describe("Aera authorization lifecycle", () => {
   it("schedules fifteen-minute validation and bounded jittered recovery", async () => {
     const scheduled: Array<{ callback: () => void; delay: number }> = [];
     const validateOnline = vi.fn().mockResolvedValue(undefined);

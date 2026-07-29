@@ -87,7 +87,7 @@ function runHermesMcpCli(
 ): Promise<HermesCliResult> {
   const invocation = getRuntimeInvocation();
   if (invocation === null) {
-    return Promise.reject(new Error("AgentEra Runtime is not prepared."));
+    return Promise.reject(new Error("Aera Runtime is not prepared."));
   }
   return new Promise((resolve, reject) => {
     const child = execFile(
@@ -661,12 +661,12 @@ function unsupportedMcpApiMessage(
   feature: "catalog" | "install" | "test",
 ): string {
   if (feature === "catalog") {
-    return "MCP catalog is not available from this AgentEra Runtime gateway yet. Add a custom MCP server manually.";
+    return "MCP catalog is not available from this Aera Runtime gateway yet. Add a custom MCP server manually.";
   }
   if (feature === "install") {
-    return "MCP catalog install is not available from this AgentEra Runtime gateway yet. Add a custom MCP server manually.";
+    return "MCP catalog install is not available from this Aera Runtime gateway yet. Add a custom MCP server manually.";
   }
-  return "MCP server testing is not available from this AgentEra Runtime gateway yet.";
+  return "MCP server testing is not available from this Aera Runtime gateway yet.";
 }
 
 export async function listMcpServers(

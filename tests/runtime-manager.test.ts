@@ -169,7 +169,7 @@ async function harness(
   };
 }
 
-describe("AgentEra Runtime distribution manager", () => {
+describe("Aera Runtime distribution manager", () => {
   it("checks only signed metadata and performs zero archive downloads", async () => {
     const setup = await harness();
     const manager = createRuntimeDistributionManager(setup.options);

@@ -616,17 +616,6 @@ export class OrganizationPublicationService {
       );
       if (value.status !== "pending") throw terminalConflict(value);
       this.refreshSubmissionReference(value);
-      if (value.submitted_by_user_id === actor) {
-        return {
-          reviewHandle: null,
-          selfReview: true,
-          decision: command.decision,
-          reasonCode: command.reasonCode,
-          safeNote: command.safeNote,
-          detail: publicDetail(value),
-          expiresAt: null,
-        };
-      }
       const handle = this.newHandle(this.reviews);
       const expiresAt = this.nowMilliseconds() + this.handleTtlMs;
       this.reviews.set(handle, {
@@ -642,7 +631,7 @@ export class OrganizationPublicationService {
       });
       return {
         reviewHandle: handle,
-        selfReview: false,
+        selfReview: value.submitted_by_user_id === actor,
         decision: command.decision,
         reasonCode: command.reasonCode,
         safeNote: command.safeNote,
@@ -685,9 +674,6 @@ export class OrganizationPublicationService {
         current.submitted_by_user_id !== prepared.submittedByUserId
       ) {
         throw codedError("conflict");
-      }
-      if (current.submitted_by_user_id === actor) {
-        throw codedError("organization_submission_self_review");
       }
       const body: ReviewOrganizationAgentRequest =
         prepared.decision === "approve"

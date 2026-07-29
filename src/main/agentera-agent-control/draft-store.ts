@@ -31,7 +31,7 @@ export class AgentDraftStoreError extends Error {
   readonly code: AgentDraftStoreErrorCode;
 
   constructor(code: AgentDraftStoreErrorCode) {
-    super(`AgentEra Agent draft operation failed: ${code}.`);
+    super(`Aera Agent draft operation failed: ${code}.`);
     this.name = "AgentDraftStoreError";
     this.code = code;
   }
@@ -584,7 +584,7 @@ export class AgentDraftStore {
       Buffer.byteLength(errorSummary, "utf8") > 256 ||
       /[\0\r\n]/.test(errorSummary)
     ) {
-      throw new Error("AgentEra publication error summary must be bounded.");
+      throw new Error("Aera publication error summary must be bounded.");
     }
     const result = this.database.sqlite
       .prepare(

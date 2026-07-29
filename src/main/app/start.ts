@@ -181,7 +181,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
       mainWindow.focus();
     },
     getDeviceMetadata: () => ({
-      deviceName: (hostname().trim() || "AgentEra device").slice(0, 100),
+      deviceName: (hostname().trim() || "Aera device").slice(0, 100),
       platform:
         process.platform === "win32"
           ? "windows"
@@ -194,7 +194,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
   const getAgenteraRuntimeOwner = (): AgenteraRuntimeOwner => {
     const state = agenteraAuth.getPublicState();
     if (!hasAgenteraSignedInAccess(state) && !hasAgenteraGuestAccess(state)) {
-      throw new Error("AgentEra product sign-in is required.");
+      throw new Error("Aera product sign-in is required.");
     }
     const installation =
       agenteraAuthStore.getInstallation() ??
@@ -202,7 +202,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
         ? getOrCreateAgenteraDeviceIdentity(agenteraAuthStore)
         : null);
     if (!installation) {
-      throw new Error("AgentEra installation identity is unavailable.");
+      throw new Error("Aera installation identity is unavailable.");
     }
     if (hasAgenteraGuestAccess(state)) {
       return createAgenteraGuestRuntimeOwner(installation.installationId);
@@ -400,7 +400,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
         if (invocationVersion) return invocationVersion;
         const state = await runtimeDistribution?.getState();
         if (!state?.currentVersion) {
-          throw new Error("AgentEra Runtime version is unavailable.");
+          throw new Error("Aera Runtime version is unavailable.");
         }
         return state.currentVersion;
       },
@@ -653,7 +653,7 @@ export function stopActiveRuntimeContext(): void {
   cleanupTempMediaFiles();
   stopAllDashboards();
   // A Profile or connection context must never remain mounted across an
-  // AgentEra owner transition. Stop local execution, remote/SSH transport,
+  // Aera owner transition. Stop local execution, remote/SSH transport,
   // and cached SQLite access before the next owner can claim a context.
   stopGateway(undefined, true);
   stopSshTunnel();
@@ -703,7 +703,7 @@ function openAgenteraAuthUrl(rawUrl: string, expectedOrigin: string): void {
       isAllowedAgenteraAuthExternalUrl(candidate, expectedOrigin),
     )
   ) {
-    throw new Error("AgentEra browser authorization URL was blocked.");
+    throw new Error("Aera browser authorization URL was blocked.");
   }
 }
 

@@ -144,7 +144,7 @@ describe("AgenteraWorkspaceClient", () => {
 
     expect(created).toMatchObject({
       token: RAW_TOKEN,
-      inviteUrl: `agentera://workspace-invitation#${RAW_TOKEN}`,
+      inviteUrl: `aera://workspace-invitation#${RAW_TOKEN}`,
     });
     expect(getAccessToken).toHaveBeenCalledTimes(13);
     const calls = fetcher.mock.calls.map(([url, init]) => ({

@@ -35,7 +35,7 @@ function importedModules(contents: string): string[] {
 }
 
 // @lat: [[agentera-workspaces#Release gate#Hermes compatibility boundary]]
-describe("AgentEra Workspace remains outside the Hermes adaptive core", () => {
+describe("Aera Workspace remains outside the Hermes adaptive core", () => {
   it("has no Workspace-domain import path into Hermes execution or private state", () => {
     const forbiddenDependency =
       /(?:^|\/)(?:agent-sync|agentera-agent-control|agentera-profile-binding|hermes|profiles|profile-meta|sessions|skills|curator|installer|runtime-distribution|runtime-manager|runtime-binding)(?:$|[/.])/i;

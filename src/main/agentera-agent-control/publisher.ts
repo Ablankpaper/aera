@@ -87,6 +87,7 @@ export interface AgentPublisherOptions {
   cache: VerifiedAgentVersionCache;
   context?: AgentAssetContext;
   runtimeVersion: string;
+  refreshTrust?: () => Promise<void>;
   randomUUID?: () => string;
 }
 
@@ -96,7 +97,7 @@ export class AgentPublisherError extends Error {
   readonly code: AgentPublisherErrorCode;
 
   constructor(code: AgentPublisherErrorCode) {
-    super(`AgentEra Agent publication failed: ${code}.`);
+    super(`Aera Agent publication failed: ${code}.`);
     this.name = "AgentPublisherError";
     this.code = code;
   }
@@ -196,6 +197,7 @@ export class AgentPublisher {
   private readonly trust: AgentPublicationTrust;
   private readonly cache: VerifiedAgentVersionCache;
   private readonly runtimeVersion: string;
+  private readonly refreshTrust: (() => Promise<void>) | null;
   private readonly randomUUID: () => string;
   private readonly context: NormalizedPublicationContext;
   private readonly handles = new Map<string, PreparedPublication>();
@@ -206,7 +208,7 @@ export class AgentPublisher {
       options.runtimeVersion.length === 0 ||
       options.runtimeVersion.length > 128
     ) {
-      throw new Error("AgentEra Agent publisher Runtime version is invalid.");
+      throw new Error("Aera Agent publisher Runtime version is invalid.");
     }
     this.drafts = options.drafts;
     this.client = options.client;
@@ -214,6 +216,7 @@ export class AgentPublisher {
     this.cache = options.cache;
     this.context = normalizeContext(options.context);
     this.runtimeVersion = options.runtimeVersion;
+    this.refreshTrust = options.refreshTrust ?? null;
     this.randomUUID = options.randomUUID ?? nodeRandomUUID;
   }
 
@@ -323,7 +326,7 @@ export class AgentPublisher {
     }
 
     try {
-      this.verifyPublication(prepared, publication);
+      await this.verifyPublicationWithTrustRefresh(prepared, publication);
       this.cache.cacheVerifiedVersion(publication.version);
       this.drafts.markPublished(
         current.id,
@@ -442,6 +445,24 @@ export class AgentPublisher {
     });
     if (verified.contentDigest !== prepared.contentDigest) {
       throw new AgentPublisherError("published_content_mismatch");
+    }
+  }
+
+  private async verifyPublicationWithTrustRefresh(
+    prepared: PreparedPublication,
+    publication: AgentPublication,
+  ): Promise<void> {
+    try {
+      this.verifyPublication(prepared, publication);
+    } catch (error) {
+      if (
+        !(error instanceof AgenteraAgentTrustError) ||
+        this.refreshTrust === null
+      ) {
+        throw error;
+      }
+      await this.refreshTrust();
+      this.verifyPublication(prepared, publication);
     }
   }
 

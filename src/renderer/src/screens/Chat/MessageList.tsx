@@ -4,7 +4,10 @@ import type { AgentAvatarInfo } from "./MessageRow";
 import { ReasoningRow, ToolActivityGroup } from "./HistoryRow";
 import { ClarifyCard } from "./ClarifyCard";
 import { MemoryCandidateCard } from "./MemoryCandidateCard";
+import { AgentCreationGuideCard } from "./AgentCreationGuideCard";
+import type { AgentCreationInput } from "./hooks/useAgentCreationGuide";
 import type {
+  AgentCreationGuideMessage,
   ChatMessage,
   ClarifyMessage,
   MemoryCandidateMessage,
@@ -27,6 +30,12 @@ interface MessageListProps {
   onClarifyResolved: (requestId: string, answer: string) => void;
   onMemoryCandidateConfirm: (batchId: string) => void;
   onMemoryCandidateReject: (batchId: string) => void;
+  onAgentCreationConfirm: (
+    messageId: string,
+    input: AgentCreationInput,
+  ) => void;
+  onAgentCreationDismiss: (messageId: string) => void;
+  onOpenMyAgents?: () => void;
   /** Appearance of the agent this conversation is with, so idle avatars show
    *  the agent's profile picture instead of the loading gif. */
   agentAvatar?: AgentAvatarInfo;
@@ -78,6 +87,9 @@ export const MessageList = memo(function MessageList({
   onClarifyResolved,
   onMemoryCandidateConfirm,
   onMemoryCandidateReject,
+  onAgentCreationConfirm,
+  onAgentCreationDismiss,
+  onOpenMyAgents,
   agentAvatar,
 }: MessageListProps): React.JSX.Element {
   // Bubbles with empty content are still hidden (live-stream placeholders).
@@ -164,9 +176,21 @@ export const MessageList = memo(function MessageList({
         <MemoryCandidateCard
           key={msg.id}
           message={msg as MemoryCandidateMessage}
-          isAgentBusy={isLoading}
           onConfirm={onMemoryCandidateConfirm}
           onReject={onMemoryCandidateReject}
+        />,
+      );
+      continue;
+    }
+
+    if (k === "agent_creation_guide") {
+      rows.push(
+        <AgentCreationGuideCard
+          key={msg.id}
+          message={msg as AgentCreationGuideMessage}
+          onConfirm={onAgentCreationConfirm}
+          onDismiss={onAgentCreationDismiss}
+          onOpenMyAgents={onOpenMyAgents}
         />,
       );
       continue;

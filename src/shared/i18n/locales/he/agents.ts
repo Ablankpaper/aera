@@ -3,7 +3,7 @@ import enAgents from "../en/agents";
 export default {
   title: "סוכנים",
   subtitle:
-    "כל סוכן פועל בסביבת AgentEra מבודדת עם הגדרות, זיכרון ומיומנויות משלו",
+    "כל סוכן פועל בסביבת Aera מבודדת עם הגדרות, זיכרון ומיומנויות משלו",
   newAgent: "סוכן חדש",
   namePlaceholder: "שם הסוכן (לדוגמה: coder)",
   createTitle: "סוכן חדש",
@@ -57,7 +57,7 @@ export default {
   walletCreateFailed: "Couldn't add wallet",
   walletRecoveryTitle: "Recovery phrase",
   walletRecoveryInfo:
-    "Save this phrase now. AgentEra will not show it again after this modal closes.",
+    "Save this phrase now. Aera will not show it again after this modal closes.",
   walletCopyRecovery: "Copy phrase",
   walletDone: "I've saved it",
   walletBalanceLoading: "Loading…",
@@ -65,7 +65,7 @@ export default {
   walletBalanceRefresh: "Refresh",
   walletDeleteTitle: "Remove wallet",
   walletDeleteWarning:
-    "This will permanently remove this wallet from AgentEra. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
+    "This will permanently remove this wallet from Aera. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",
   walletDeleteConfirmLabel: "Remove wallet",
   control: {
     experience: enAgents.control.experience,
@@ -125,7 +125,7 @@ export default {
       withdraw: "משיכת הגשה",
       confirmWithdrawal: "אישור משיכה",
       withdrawalBoundary:
-        "המשיכה סוגרת רק את ההגשה הממתינה; טיוטות מקומיות ונתוני Hermes אינם משתנים.",
+        "המשיכה סוגרת רק את ההגשה הממתינה; טיוטות מקומיות ונתוני Aera Runtime אינם משתנים.",
       draftReadOnly:
         "הטיוטה הארגונית היא לקריאה בלבד. התחברו מחדש כבעלים או מנהל כדי לשנותה.",
     },

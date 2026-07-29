@@ -9,7 +9,7 @@ import {
   resolve,
 } from "node:path";
 
-export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 7;
+export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 8;
 
 export type AgentAssetContext =
   | { scope: "USER" }
@@ -105,7 +105,7 @@ function assertOutsideHermesHome(controlPlaneRoot: string): void {
     )
   ) {
     throw new Error(
-      "AgentEra control-plane path must remain outside HERMES_HOME.",
+      "Aera control-plane path must remain outside HERMES_HOME.",
     );
   }
 }
@@ -130,15 +130,14 @@ export function resolveAgenteraControlPlanePaths(
 
 function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
   const current = sqlite.prepare("PRAGMA user_version").get() as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   const currentVersion = current ? Number(Object.values(current)[0]) : 0;
   if (
     !Number.isSafeInteger(currentVersion) ||
     currentVersion < 0 ||
     currentVersion > AGENTERA_CONTROL_PLANE_SCHEMA_VERSION
   ) {
-    throw new Error("Unsupported AgentEra control-plane database version.");
+    throw new Error("Unsupported Aera control-plane database version.");
   }
 
   sqlite.exec("BEGIN IMMEDIATE");
@@ -320,6 +319,93 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
         binding_json TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS conversation_boundaries (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        actor_user_id TEXT NOT NULL,
+        device_installation_id TEXT NOT NULL,
+        conversation_key TEXT NOT NULL,
+        hermes_session_id TEXT,
+        scope_type TEXT NOT NULL
+          CHECK (scope_type IN ('USER', 'WORKSPACE', 'ORGANIZATION')),
+        scope_id TEXT NOT NULL,
+        visibility TEXT NOT NULL
+          CHECK (
+            visibility IN (
+              'PRIVATE',
+              'WORKSPACE_SHARED',
+              'ORGANIZATION_SHARED',
+              'ARTIFACT_ONLY'
+            )
+          ),
+        memory_scope TEXT NOT NULL CHECK (memory_scope = 'ACTOR_PRIVATE'),
+        files_scope TEXT NOT NULL CHECK (files_scope = 'CONVERSATION_PRIVATE'),
+        artifact_scope TEXT NOT NULL
+          CHECK (artifact_scope = 'CONVERSATION_PRIVATE'),
+        agent_run_scope TEXT NOT NULL
+          CHECK (agent_run_scope = 'CONVERSATION_BOUNDARY'),
+        runtime_binding_id TEXT REFERENCES runtime_bindings(id) ON DELETE RESTRICT,
+        agent_installation_id TEXT,
+        agent_definition_id TEXT,
+        agent_version_id TEXT,
+        runtime_profile_id TEXT,
+        runtime_version TEXT,
+        policy_snapshot_id TEXT,
+        official_release_revision_id TEXT,
+        tool_permission_snapshot_kind TEXT NOT NULL
+          CHECK (
+            tool_permission_snapshot_kind IN ('PROFILE_DEFAULT', 'AGENT_DIGEST')
+          ),
+        tool_permission_digest TEXT,
+        origin TEXT NOT NULL
+          CHECK (origin IN ('NEW_CONVERSATION', 'LEGACY_DEFAULT')),
+        created_at TEXT NOT NULL,
+        UNIQUE (
+          tenant_id, actor_user_id, device_installation_id, conversation_key
+        ),
+        UNIQUE (
+          tenant_id, actor_user_id, device_installation_id, hermes_session_id
+        ),
+        CHECK (
+          (scope_type = 'USER' AND scope_id = tenant_id)
+          OR scope_type IN ('WORKSPACE', 'ORGANIZATION')
+        ),
+        CHECK (
+          (
+            runtime_binding_id IS NULL
+            AND agent_installation_id IS NULL
+            AND agent_definition_id IS NULL
+            AND agent_version_id IS NULL
+            AND runtime_profile_id IS NULL
+            AND runtime_version IS NULL
+            AND policy_snapshot_id IS NULL
+            AND official_release_revision_id IS NULL
+            AND tool_permission_snapshot_kind = 'PROFILE_DEFAULT'
+            AND tool_permission_digest IS NULL
+          )
+          OR
+          (
+            runtime_binding_id IS NOT NULL
+            AND agent_installation_id IS NOT NULL
+            AND agent_definition_id IS NOT NULL
+            AND agent_version_id IS NOT NULL
+            AND runtime_profile_id IS NOT NULL
+            AND runtime_version IS NOT NULL
+            AND policy_snapshot_id IS NOT NULL
+            AND tool_permission_snapshot_kind = 'AGENT_DIGEST'
+            AND tool_permission_digest IS NOT NULL
+          )
+        )
+      );
+      CREATE INDEX IF NOT EXISTS conversation_boundaries_session_idx
+        ON conversation_boundaries (
+          tenant_id, actor_user_id, device_installation_id, hermes_session_id
+        );
+      CREATE INDEX IF NOT EXISTS conversation_boundaries_scope_idx
+        ON conversation_boundaries (
+          tenant_id, actor_user_id, scope_type, scope_id, created_at
+        );
 
       CREATE TABLE IF NOT EXISTS signing_key_cache (
         origin TEXT NOT NULL,
@@ -878,6 +964,97 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
             tenant_id, owner_id, device_installation_id, backup_id
           )
         );
+        PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
+      `);
+    }
+    if (currentVersion >= 1 && currentVersion <= 7) {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS conversation_boundaries (
+          id TEXT PRIMARY KEY,
+          tenant_id TEXT NOT NULL,
+          actor_user_id TEXT NOT NULL,
+          device_installation_id TEXT NOT NULL,
+          conversation_key TEXT NOT NULL,
+          hermes_session_id TEXT,
+          scope_type TEXT NOT NULL
+            CHECK (scope_type IN ('USER', 'WORKSPACE', 'ORGANIZATION')),
+          scope_id TEXT NOT NULL,
+          visibility TEXT NOT NULL
+            CHECK (
+              visibility IN (
+                'PRIVATE',
+                'WORKSPACE_SHARED',
+                'ORGANIZATION_SHARED',
+                'ARTIFACT_ONLY'
+              )
+            ),
+          memory_scope TEXT NOT NULL CHECK (memory_scope = 'ACTOR_PRIVATE'),
+          files_scope TEXT NOT NULL CHECK (files_scope = 'CONVERSATION_PRIVATE'),
+          artifact_scope TEXT NOT NULL
+            CHECK (artifact_scope = 'CONVERSATION_PRIVATE'),
+          agent_run_scope TEXT NOT NULL
+            CHECK (agent_run_scope = 'CONVERSATION_BOUNDARY'),
+          runtime_binding_id TEXT REFERENCES runtime_bindings(id) ON DELETE RESTRICT,
+          agent_installation_id TEXT,
+          agent_definition_id TEXT,
+          agent_version_id TEXT,
+          runtime_profile_id TEXT,
+          runtime_version TEXT,
+          policy_snapshot_id TEXT,
+          official_release_revision_id TEXT,
+          tool_permission_snapshot_kind TEXT NOT NULL
+            CHECK (
+              tool_permission_snapshot_kind IN ('PROFILE_DEFAULT', 'AGENT_DIGEST')
+            ),
+          tool_permission_digest TEXT,
+          origin TEXT NOT NULL
+            CHECK (origin IN ('NEW_CONVERSATION', 'LEGACY_DEFAULT')),
+          created_at TEXT NOT NULL,
+          UNIQUE (
+            tenant_id, actor_user_id, device_installation_id, conversation_key
+          ),
+          UNIQUE (
+            tenant_id, actor_user_id, device_installation_id, hermes_session_id
+          ),
+          CHECK (
+            (scope_type = 'USER' AND scope_id = tenant_id)
+            OR scope_type IN ('WORKSPACE', 'ORGANIZATION')
+          ),
+          CHECK (
+            (
+              runtime_binding_id IS NULL
+              AND agent_installation_id IS NULL
+              AND agent_definition_id IS NULL
+              AND agent_version_id IS NULL
+              AND runtime_profile_id IS NULL
+              AND runtime_version IS NULL
+              AND policy_snapshot_id IS NULL
+              AND official_release_revision_id IS NULL
+              AND tool_permission_snapshot_kind = 'PROFILE_DEFAULT'
+              AND tool_permission_digest IS NULL
+            )
+            OR
+            (
+              runtime_binding_id IS NOT NULL
+              AND agent_installation_id IS NOT NULL
+              AND agent_definition_id IS NOT NULL
+              AND agent_version_id IS NOT NULL
+              AND runtime_profile_id IS NOT NULL
+              AND runtime_version IS NOT NULL
+              AND policy_snapshot_id IS NOT NULL
+              AND tool_permission_snapshot_kind = 'AGENT_DIGEST'
+              AND tool_permission_digest IS NOT NULL
+            )
+          )
+        );
+        CREATE INDEX IF NOT EXISTS conversation_boundaries_session_idx
+          ON conversation_boundaries (
+            tenant_id, actor_user_id, device_installation_id, hermes_session_id
+          );
+        CREATE INDEX IF NOT EXISTS conversation_boundaries_scope_idx
+          ON conversation_boundaries (
+            tenant_id, actor_user_id, scope_type, scope_id, created_at
+          );
         PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
       `);
     }

@@ -15,7 +15,7 @@ export default {
     advancedTab: "Advanced",
     generalTitle: "Models",
     generalSubtitle:
-      "Choose a service, enter its API key, and let AgentEra fetch the models.",
+      "Choose a service, enter its API key, and let Aera fetch the models.",
     addModel: "Add model",
     defaultModel: "Default model",
     notConfigured: "Not configured",
@@ -31,7 +31,7 @@ export default {
     noSearchResults: "No matching model services",
     emptyTitle: "No model services yet",
     emptyHint:
-      "Add your first service and AgentEra will connect and fetch its models.",
+      "Add your first service and Aera will connect and fetch its models.",
     addFirst: "Add your first model",
     inUse: "In use",
     modelsCount: "{{count}} models",
@@ -85,7 +85,7 @@ export default {
     deleteDescription:
       "This removes the service's model records, configuration, and saved key. This cannot be undone.",
     deleteActiveFallback:
-      "This is the current default. AgentEra will switch to another available service before deleting it.",
+      "This is the current default. Aera will switch to another available service before deleting it.",
     deleteLastActive:
       "This is the last available service. The default model will be cleared after deletion.",
     confirmDelete: "Delete service",

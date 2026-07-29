@@ -1,5 +1,5 @@
 export default {
-  title: "Selamat datang di AgentEra Studio",
+  title: "Selamat datang di Aera",
   subtitle:
     "Asisten AI yang terus berkembang dan berjalan lokal di mesin Anda. Privat, kuat, dan selalu belajar.",
   installIssueTitle: "Masalah Instalasi",
@@ -9,10 +9,10 @@ export default {
   switchToLocal: "Beralih ke mode lokal",
   installSizeHint: "Ini akan menginstal komponen yang diperlukan (~2 GB)",
   dividerOr: "atau",
-  connectRemote: "Hubungkan ke AgentEra Remote",
-  connectRemoteTitle: "Hubungkan ke AgentEra Remote",
+  connectRemote: "Hubungkan ke Aera Remote",
+  connectRemoteTitle: "Hubungkan ke Aera Remote",
   connectRemoteSubtitle:
-    "Masukkan URL server AgentEra API yang sedang berjalan.",
+    "Masukkan URL server Aera API yang sedang berjalan.",
   remoteServerUrl: "URL Server",
   remoteApiKey: "API Key (opsional)",
   remoteApiKeyPlaceholder: "Bearer token (API_SERVER_KEY)",

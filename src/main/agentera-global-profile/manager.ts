@@ -42,6 +42,11 @@ export interface AgenteraGlobalProfileConversationSnapshot {
   snapshotSha256: string;
 }
 
+type AgenteraGlobalProfileSnapshotContext = Omit<
+  AgenteraGlobalProfileConversationContext,
+  "conversationBoundary"
+>;
+
 export interface AgenteraGlobalProfileSessionReference {
   profileId: string;
   sessionId: string;
@@ -114,7 +119,7 @@ export class AgenteraGlobalProfileManager {
   constructor(options: AgenteraGlobalProfileManagerOptions) {
     if (!isAbsolute(options.userDataPath)) {
       throw new Error(
-        "AgentEra global profile userData path must be absolute.",
+        "Aera global profile userData path must be absolute.",
       );
     }
     this.rootPath = join(
@@ -335,7 +340,7 @@ export class AgenteraGlobalProfileManager {
         .map((name) =>
           this.readProfileFile(
             join(directory, name),
-            "AgentEra global profile history",
+            "Aera global profile history",
           ),
         )
         .sort((left, right) => right.profileVersion - left.profileVersion)
@@ -361,7 +366,7 @@ export class AgenteraGlobalProfileManager {
       }
       const target = this.readProfileFile(
         this.historyPath(normalizedUserId, targetVersion),
-        "AgentEra global profile history",
+        "Aera global profile history",
       );
       if (target.profileVersion !== targetVersion) {
         throw new Error("Global behavior profile history is corrupt.");
@@ -476,7 +481,7 @@ export class AgenteraGlobalProfileManager {
         );
         if (!sameSnapshotBytes(existing, source)) {
           throw new Error(
-            "Hermes session is already bound to another global profile snapshot.",
+            "Aera Runtime session is already bound to another global profile snapshot.",
           );
         }
         return { success: true, value: publicSnapshot(existing) };
@@ -496,7 +501,7 @@ export class AgenteraGlobalProfileManager {
     const normalizedUserId = normalizeUserId(userId);
     const path = this.profilePath(normalizedUserId);
     if (!existsSync(path)) return emptyProfile();
-    return this.readProfileFile(path, "AgentEra global behavior profile");
+    return this.readProfileFile(path, "Aera global behavior profile");
   }
 
   private readProfileFile(path: string, label: string): AgenteraGlobalProfile {
@@ -538,7 +543,7 @@ export class AgenteraGlobalProfileManager {
     } else {
       const stored = this.readProfileFile(
         historyPath,
-        "AgentEra global profile history",
+        "Aera global profile history",
       );
       if (JSON.stringify(stored) !== JSON.stringify(current)) {
         throw new Error("Global behavior profile history is corrupt.");
@@ -565,17 +570,17 @@ export class AgenteraGlobalProfileManager {
     try {
       parsed = JSON.parse(readFileSync(path, "utf8"));
     } catch {
-      throw new Error("AgentEra global profile audit is corrupt.");
+      throw new Error("Aera global profile audit is corrupt.");
     }
     if (!isRecord(parsed)) {
-      throw new Error("AgentEra global profile audit is corrupt.");
+      throw new Error("Aera global profile audit is corrupt.");
     }
     if (
       parsed.schema !== AUDIT_SCHEMA ||
       parsed.version !== AUDIT_VERSION ||
       !Array.isArray(parsed.events)
     ) {
-      throw new Error("AgentEra global profile audit is corrupt.");
+      throw new Error("Aera global profile audit is corrupt.");
     }
     return parsed as unknown as StoredAudit;
   }
@@ -658,7 +663,7 @@ export class AgenteraGlobalProfileManager {
   private validNow(): Date {
     const value = this.now();
     if (!Number.isFinite(value.getTime())) {
-      throw new Error("AgentEra global profile clock is invalid.");
+      throw new Error("Aera global profile clock is invalid.");
     }
     return value;
   }
@@ -679,7 +684,7 @@ export function composeGlobalProfileEnvelope(
 
 export function summarizeGlobalProfileConversationSnapshot(
   result: AgenteraGlobalProfileResult<AgenteraGlobalProfileConversationSnapshot>,
-): AgenteraGlobalProfileConversationContext {
+): AgenteraGlobalProfileSnapshotContext {
   if (!result.success) {
     return {
       globalProfileVersion: null,
@@ -705,7 +710,7 @@ function emptyProfile(): AgenteraGlobalProfile {
 
 function normalizeUserId(value: unknown): string {
   if (typeof value !== "string" || !USER_ID_RE.test(value)) {
-    throw new Error("AgentEra global profile owner is invalid.");
+    throw new Error("Aera global profile owner is invalid.");
   }
   return value.toLowerCase();
 }
@@ -855,8 +860,8 @@ function validateStoredProfile(
 
 function renderGlobalProfile(profile: AgenteraGlobalProfile): string {
   const lines = [
-    "[System note: AgentEra global user behavior profile]",
-    "This block is read-only context supplied by AgentEra.",
+    "[System note: Aera global user behavior profile]",
+    "This block is read-only context supplied by Aera.",
     "Do not edit it with the memory tool. Do not copy, summarize, sync, or persist",
     "any part of this block into MEMORY.md, USER.md, Skills, or Curator.",
     `Version: ${profile.profileVersion}`,
@@ -885,12 +890,12 @@ function readConversationSnapshot(
     parsed = JSON.parse(readFileSync(path, "utf8"));
   } catch {
     throw new Error(
-      "AgentEra global profile conversation snapshot is corrupt.",
+      "Aera global profile conversation snapshot is corrupt.",
     );
   }
   if (!isRecord(parsed)) {
     throw new Error(
-      "AgentEra global profile conversation snapshot is corrupt.",
+      "Aera global profile conversation snapshot is corrupt.",
     );
   }
   if (
@@ -907,7 +912,7 @@ function readConversationSnapshot(
     !Number.isFinite(Date.parse(parsed.createdAt))
   ) {
     throw new Error(
-      "AgentEra global profile conversation snapshot is corrupt.",
+      "Aera global profile conversation snapshot is corrupt.",
     );
   }
   return parsed as unknown as StoredConversationSnapshot;
@@ -938,7 +943,7 @@ function sessionReferenceSha256(
   reference: AgenteraGlobalProfileSessionReference,
 ): string {
   if (!isRecord(reference)) {
-    throw new Error("Hermes session snapshot reference is invalid.");
+    throw new Error("Aera Runtime session snapshot reference is invalid.");
   }
   const profileId = normalizeAgentProfileId(reference.profileId);
   const sessionId = normalizeSessionId(reference.sessionId);
@@ -962,7 +967,7 @@ function normalizeSessionId(value: unknown): string {
     value.length > 512 ||
     /\p{Cc}/u.test(value)
   ) {
-    throw new Error("Hermes session identity is invalid.");
+    throw new Error("Aera Runtime session identity is invalid.");
   }
   return value;
 }
@@ -974,7 +979,7 @@ function normalizeConversationKey(value: unknown): string {
     value.length > 512 ||
     /\p{Cc}/u.test(value)
   ) {
-    throw new Error("AgentEra conversation identity is invalid.");
+    throw new Error("Aera conversation identity is invalid.");
   }
   return value;
 }
@@ -984,7 +989,7 @@ function normalizeOperationId(value: unknown): string {
     typeof value !== "string" ||
     !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)
   ) {
-    throw new Error("AgentEra global profile operation is invalid.");
+    throw new Error("Aera global profile operation is invalid.");
   }
   return value;
 }

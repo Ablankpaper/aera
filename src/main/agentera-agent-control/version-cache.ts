@@ -34,7 +34,7 @@ export class AgentVersionCacheError extends Error {
   readonly code: AgentVersionCacheErrorCode;
 
   constructor(code: AgentVersionCacheErrorCode) {
-    super(`AgentEra Agent version cache failed: ${code}.`);
+    super(`Aera Agent version cache failed: ${code}.`);
     this.name = "AgentVersionCacheError";
     this.code = code;
   }
@@ -340,14 +340,14 @@ export class AgentVersionCache {
       typeof options.runtimeVersion !== "string" ||
       options.runtimeVersion.length === 0
     ) {
-      throw new Error("AgentEra Agent version cache configuration is invalid.");
+      throw new Error("Aera Agent version cache configuration is invalid.");
     }
     this.database = options.database;
     if (
       !validUuid(options.owner.tenantId) ||
       !validUuid(options.owner.ownerId)
     ) {
-      throw new Error("AgentEra Agent version cache owner is invalid.");
+      throw new Error("Aera Agent version cache owner is invalid.");
     }
     this.tenantId = options.owner.tenantId.toLowerCase();
     this.ownerId = options.owner.ownerId.toLowerCase();

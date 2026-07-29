@@ -67,47 +67,47 @@ const DISPLAY_CARS: DisplayCar[] = [
     rotY: Math.PI / 2 - 0.3,
     url: car1GlbUrl,
     tint: "#b03a2e",
-    name: "AgentEra S1 Crimson",
+    name: "Aera S1 Crimson",
   },
   {
     pos: [-4, 0, -2.5],
     rotY: Math.PI / 2 + 0.25,
     url: car2GlbUrl,
     tint: "#1f618d",
-    name: "AgentEra GT Azure",
+    name: "Aera GT Azure",
   },
   {
     pos: [-4, 0, 2.5],
     rotY: Math.PI / 2 - 0.25,
     url: car1GlbUrl,
     tint: "#e8e8e8",
-    name: "AgentEra S1 Pearl",
+    name: "Aera S1 Pearl",
   },
   {
     pos: [-4, 0, 7],
     rotY: Math.PI / 2 + 0.3,
     url: car2GlbUrl,
     tint: "#39414f",
-    name: "AgentEra GT Gunmetal",
+    name: "Aera GT Gunmetal",
   },
   {
     pos: [2.5, 0, -6.5],
     rotY: Math.PI / 2,
     url: car2GlbUrl,
     tint: "#ca6f1e",
-    name: "AgentEra GT Sunset",
+    name: "Aera GT Sunset",
   },
   {
     pos: [2.5, 0, 6.5],
     rotY: Math.PI / 2,
     url: car1GlbUrl,
     tint: "#239b56",
-    name: "AgentEra S1 Emerald",
+    name: "Aera S1 Emerald",
   },
 ];
 
 const HERO_CAR: ShowroomCar = {
-  name: "AgentEra S1 Aurum",
+  name: "Aera S1 Aurum",
   tint: "#d4ac0d",
 };
 
@@ -213,7 +213,7 @@ export const CarShowroom = memo(function CarShowroom({
         anchorY="middle"
         letterSpacing={0.12}
       >
-        AGENTERA MOTORS
+        AERA MOTORS
       </Text>
       {/* Display pedestal + rotating hero car near the storefront */}
       <mesh position={[1.5, 0.08, 0]} castShadow receiveShadow>

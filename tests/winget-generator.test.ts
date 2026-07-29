@@ -62,14 +62,13 @@ describe("generateWingetManifests", () => {
     const distDir = join(TEST_DIR, "dist");
     mkdirSync(distDir, { recursive: true });
     writeFileSync(
-      join(distDir, "agentera-studio-9.9.9-setup.exe"),
+      join(distDir, "Aera-9.9.9-setup.exe"),
       "fake-installer-bytes",
     );
 
     generateWingetManifests({
       rootDir: TEST_DIR,
       version: "9.9.9",
-      name: "agentera-studio",
       publishOwner: "bignormal",
     });
 
@@ -98,14 +97,13 @@ describe("generateWingetManifests", () => {
     const distDir = join(TEST_DIR, "dist");
     mkdirSync(distDir, { recursive: true });
     writeFileSync(
-      join(distDir, "agentera-studio-9.9.9-setup.exe"),
+      join(distDir, "Aera-9.9.9-setup.exe"),
       "fake-installer-bytes",
     );
 
     generateWingetManifests({
       rootDir: TEST_DIR,
       version: "9.9.9",
-      name: "agentera-studio",
       publishOwner: "bignormal",
     });
 
@@ -122,7 +120,7 @@ describe("generateWingetManifests", () => {
     const content = readFileSync(outFile, "utf-8");
     expect(content).toContain("Version: 9.9.9");
     expect(content).toContain(
-      "Url: https://github.com/bignormal/aera/releases/download/v9.9.9/agentera-studio-9.9.9-setup.exe",
+      "Url: https://github.com/bignormal/aera/releases/download/v9.9.9/Aera-9.9.9-setup.exe",
     );
     expect(content).toMatch(/Sha: [A-F0-9]{64}/);
     expect(content).toMatch(/Date: \d{4}-\d{2}-\d{2}/);
@@ -134,14 +132,13 @@ describe("generateWingetManifests", () => {
     const distDir = join(TEST_DIR, "dist");
     mkdirSync(distDir, { recursive: true });
     writeFileSync(
-      join(distDir, "agentera-studio-9.9.9-setup.exe"),
+      join(distDir, "Aera-9.9.9-setup.exe"),
       "fake-installer-bytes",
     );
 
     generateWingetManifests({
       rootDir: TEST_DIR,
       version: "9.9.9",
-      name: "agentera-studio",
       publishOwner: "bignormal",
     });
 
@@ -170,7 +167,6 @@ describe("generateWingetManifests", () => {
       generateWingetManifests({
         rootDir: TEST_DIR,
         version: "9.9.9",
-        name: "agentera-studio",
         publishOwner: "bignormal",
       }),
     ).toThrow(/installer not found/i);
@@ -181,7 +177,7 @@ describe("generateWingetManifests", () => {
     const distDir = join(TEST_DIR, "dist");
     mkdirSync(distDir, { recursive: true });
     writeFileSync(
-      join(distDir, "agentera-studio-9.9.9-setup.exe"),
+      join(distDir, "Aera-9.9.9-setup.exe"),
       "fake-installer-bytes",
     );
 
@@ -189,7 +185,6 @@ describe("generateWingetManifests", () => {
       generateWingetManifests({
         rootDir: TEST_DIR,
         version: "9.9.9",
-        name: "agentera-studio",
         publishOwner: "bignormal",
       }),
     ).toThrow(/templates not found/i);

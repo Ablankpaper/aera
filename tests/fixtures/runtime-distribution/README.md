@@ -5,4 +5,4 @@ intentionally committed so tests can construct signed manifests without any
 production signing material.
 
 The key id is `agentera-runtime-test-01`. It is not present in the production
-AgentEra Runtime trust set and cannot sign a distributable Runtime release.
+Aera Runtime trust set and cannot sign a distributable Runtime release.

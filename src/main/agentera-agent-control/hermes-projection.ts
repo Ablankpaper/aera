@@ -44,7 +44,7 @@ export class HermesProjectionError extends Error {
   readonly code: HermesProjectionErrorCode;
 
   constructor(code: HermesProjectionErrorCode) {
-    super(`AgentEra Hermes projection failed: ${code}.`);
+    super(`Aera Runtime projection failed: ${code}.`);
     this.name = "HermesProjectionError";
     this.code = code;
   }
@@ -174,7 +174,7 @@ function wrapperBytes(
     [
       "---",
       `name: ${scopedName}`,
-      `description: Published AgentEra skill ${originalName}`,
+      `description: Published Aera skill ${originalName}`,
       "metadata:",
       "  agentera:",
       `    original_name: ${originalName}`,

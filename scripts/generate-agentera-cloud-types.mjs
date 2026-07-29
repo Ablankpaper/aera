@@ -47,6 +47,6 @@ export async function generateAgenteraCloudTypes() {
 if (process.argv[1] && resolve(process.argv[1]) === scriptPath) {
   const { contractSha256 } = await generateAgenteraCloudTypes();
   process.stdout.write(
-    `Generated ${generatedPath} from AgentEra cloud contract ${contractSha256}.\n`,
+    `Generated ${generatedPath} from Aera cloud contract ${contractSha256}.\n`,
   );
 }

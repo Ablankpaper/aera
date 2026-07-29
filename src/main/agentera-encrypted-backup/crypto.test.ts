@@ -53,7 +53,7 @@ const bytes = (hex: string): Uint8Array => Buffer.from(hex, "hex");
 const hex = (value: Uint8Array): string => Buffer.from(value).toString("hex");
 const utf8 = (value: string): Uint8Array => new TextEncoder().encode(value);
 
-describe("AgentEra encrypted backup crypto v1", () => {
+describe("Aera encrypted backup crypto v1", () => {
   it("locks format, suite, BIP39 entropy, and strict base64url encoding", () => {
     expect(AGENTERA_BACKUP_FORMAT_VERSION).toBe(vector.formatVersion);
     expect(AGENTERA_BACKUP_CIPHER_SUITE).toBe(vector.cipherSuite);

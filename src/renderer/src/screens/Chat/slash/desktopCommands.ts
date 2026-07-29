@@ -247,7 +247,7 @@ const LOCAL_COMMANDS: ReadonlyArray<
   ["memory", "Show agent memory"],
   ["tools", "Show available toolsets"],
   ["skills", "Show installed skills"],
-  ["version", "Show AgentEra Runtime version"],
+  ["version", "Show Aera Runtime version"],
   ["fast", "Toggle fast mode", true],
   ["usage", "Show token usage"],
 ];

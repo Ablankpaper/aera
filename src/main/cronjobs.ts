@@ -333,7 +333,7 @@ function runCronCommand(
     return Promise.resolve({
       success: false,
       output: "",
-      error: "AgentEra Runtime is not prepared.",
+      error: "Aera Runtime is not prepared.",
     });
   }
   const cliArgs = invocation.cliArgs();

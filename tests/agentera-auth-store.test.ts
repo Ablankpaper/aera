@@ -42,7 +42,7 @@ class FakeSecureStorage implements SecureStorageAdapter {
   }
 }
 
-describe("AgentEra app-level authentication store", () => {
+describe("Aera app-level authentication store", () => {
   let root = "";
   let userData = "";
   let hermesHome = "";

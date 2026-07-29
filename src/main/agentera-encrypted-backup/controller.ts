@@ -81,7 +81,7 @@ type ProgressListener = (progress: AgenteraEncryptedBackupProgress[]) => void;
 
 function codedError(code: string): Error {
   return Object.assign(
-    new Error(`AgentEra encrypted backup failed: ${code}.`),
+    new Error(`Aera encrypted backup failed: ${code}.`),
     {
       code,
     },

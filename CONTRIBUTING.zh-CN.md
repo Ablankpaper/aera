@@ -1,6 +1,6 @@
-# 为 AgentEra Studio 做贡献
+# 为 Aera 做贡献
 
-感谢你愿意为 AgentEra Studio 做出贡献。无论是修复 bug、添加新功能、完善文档，还是修正一个拼写错误，每一份贡献都很有价值。
+感谢你愿意为 Aera 做出贡献。无论是修复 bug、添加新功能、完善文档，还是修正一个拼写错误，每一份贡献都很有价值。
 
 ## 语言
 
@@ -80,7 +80,7 @@
 ## 项目结构
 
 ```text
-src/main/                Electron 主进程、IPC 处理器、AgentEra 集成
+src/main/                Electron 主进程、IPC 处理器、Aera 集成
 src/preload/             安全的 renderer bridge
 src/renderer/src/        React 应用和 UI 组件
 resources/               应用图标和打包资源

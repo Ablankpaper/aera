@@ -126,9 +126,9 @@ function ProfileClaim({
       aria-labelledby="agentera-profile-claim-title"
     >
       <section className="agentera-gate-card agentera-profile-card">
-        <div className="agentera-gate-brand" aria-label="AgentEra">
+        <div className="agentera-gate-brand" aria-label="Aera">
           <HermesLogo size={48} />
-          <span>AgentEra</span>
+          <span>Aera</span>
         </div>
         <h1 id="agentera-profile-claim-title" className="agentera-gate-title">
           {t(titleKey)}

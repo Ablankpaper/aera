@@ -40,7 +40,7 @@ export async function promptSudoPassword(): Promise<string> {
       "Your password is sent only to the local sudo prompt and is never stored.",
     {
       title: "Administrator Password Required",
-      heading: "AgentEra Runtime needs your sudo password",
+      heading: "Aera Runtime needs your sudo password",
     },
   );
   return value ?? "";
@@ -62,8 +62,8 @@ export async function promptSecretValue(
   const value = await showPasswordDialog(parent, detail, {
     title: "Secret Required",
     heading: envVar
-      ? `AgentEra Runtime needs a value for ${envVar}`
-      : "AgentEra Runtime needs a secret value",
+      ? `Aera Runtime needs a value for ${envVar}`
+      : "Aera Runtime needs a secret value",
   });
   return value ?? "";
 }

@@ -22,6 +22,7 @@ import {
   AgenteraOrganizationPolicyVerificationError,
   canonicalizeOrganizationPolicyDocument,
 } from "./policy-verifier";
+import { parseOrganizationInvitationDeepLink } from "./deep-link";
 import type {
   AcceptOrganizationInvitationInput,
   CreateOrganizationDepartmentInput,
@@ -52,7 +53,7 @@ const EVENT_TYPE_PATTERN = /^[a-z][a-z0-9._:-]{0,127}$/;
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]{1,684}$/;
 
 function invalidRequest(): never {
-  throw Object.assign(new Error("Invalid AgentEra Organization request."), {
+  throw Object.assign(new Error("Invalid Aera Organization request."), {
     code: "invalid_request",
   });
 }
@@ -208,6 +209,20 @@ function requireWorkspacePage(
 export function parseOrganizationIDInput(value: unknown): OrganizationIDInput {
   const object = exactObject(value, ["organizationId"]);
   return { organizationId: requireUUID(object.organizationId) };
+}
+
+export function parseOrganizationInvitationLinkInput(value: unknown): {
+  inviteUrl: string;
+} {
+  const object = exactObject(value, ["inviteUrl"]);
+  const inviteUrl = safeText(object.inviteUrl, 512, {
+    trimmed: true,
+    normalized: true,
+  });
+  if (parseOrganizationInvitationDeepLink(inviteUrl) === null) {
+    invalidRequest();
+  }
+  return { inviteUrl };
 }
 
 export function parseCreateOrganizationInput(
@@ -598,8 +613,13 @@ export function serializeOrganizationInvitationCreation(
   if (hasToken !== hasURL) invalidRequest();
   if (!hasToken) return { invitation, secretReplayable: false };
   const token = requireToken(value.token);
-  const inviteUrl = `agentera://organization-invitation#${token}`;
-  if (value.inviteUrl !== inviteUrl) invalidRequest();
+  const inviteUrl = `aera://organization-invitation#${token}`;
+  if (
+    value.inviteUrl !== inviteUrl &&
+    value.inviteUrl !== `agentera://organization-invitation#${token}`
+  ) {
+    invalidRequest();
+  }
   return { invitation, token, inviteUrl, secretReplayable: false };
 }
 

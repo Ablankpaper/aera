@@ -710,7 +710,7 @@ function logDashboardEvent(
   const events = window.__HERMES_DASHBOARD_EVENTS__ ?? [];
   events.push(summary);
   window.__HERMES_DASHBOARD_EVENTS__ = events.slice(-200);
-  console.info("[AgentEra Runtime dashboard event]", summary);
+  console.info("[Aera Runtime dashboard event]", summary);
 }
 
 export function usageFromPayload(payload: unknown): Partial<UsageState> | null {
@@ -820,7 +820,7 @@ function completionErrorMessage(payload: unknown): string {
   const row = asRecord(payload);
   const raw = String(row.error || row.text || row.rendered || "").trim();
   return (
-    raw.replace(/^error\s*:\s*/i, "") || "AgentEra Runtime reported an error"
+    raw.replace(/^error\s*:\s*/i, "") || "Aera Runtime reported an error"
   );
 }
 
@@ -1212,7 +1212,7 @@ export function useDashboardChatTransport({
       // Already known unavailable on this remote/SSH connection — fail fast so the
       // caller falls back to legacy without re-running the slow status+probe.
       if (dashboardUnavailableRef.current) {
-        throw new Error("AgentEra Runtime dashboard transport is unavailable");
+        throw new Error("Aera Runtime dashboard transport is unavailable");
       }
       if (connectingRef.current) return connectingRef.current;
 
@@ -1231,7 +1231,7 @@ export function useDashboardChatTransport({
           const status = await window.hermesAPI.startDashboard(profile);
           if (clientGenerationRef.current !== generation) {
             throw new Error(
-              "AgentEra Runtime dashboard connection was superseded",
+              "Aera Runtime dashboard connection was superseded",
             );
           }
           if (!status.running || !status.connection) {
@@ -1252,12 +1252,12 @@ export function useDashboardChatTransport({
               dashboardUnavailableRef.current = true;
               onDashboardUnavailable?.(
                 status.error ||
-                  "AgentEra Runtime dashboard transport is unavailable",
+                  "Aera Runtime dashboard transport is unavailable",
               );
             }
             throw new Error(
               status.error ||
-                "AgentEra Runtime dashboard transport is unavailable",
+                "Aera Runtime dashboard transport is unavailable",
             );
           }
           const client: DashboardGatewayClient = new DashboardGatewayClient({
@@ -1285,7 +1285,7 @@ export function useDashboardChatTransport({
               : status.connection.wsUrl;
             if (!freshUrl) {
               throw new Error(
-                "AgentEra Runtime dashboard WebSocket URL is unavailable",
+                "Aera Runtime dashboard WebSocket URL is unavailable",
               );
             }
             await client.connect(freshUrl);
@@ -1294,7 +1294,7 @@ export function useDashboardChatTransport({
             client.close();
             if (clientGenerationRef.current !== generation) {
               throw new Error(
-                "AgentEra Runtime dashboard connection was superseded",
+                "Aera Runtime dashboard connection was superseded",
               );
             }
             // Transient connect failure while the dashboard IS up — back off and
@@ -1305,7 +1305,7 @@ export function useDashboardChatTransport({
           if (clientGenerationRef.current !== generation) {
             client.close();
             throw new Error(
-              "AgentEra Runtime dashboard connection was superseded",
+              "Aera Runtime dashboard connection was superseded",
             );
           }
           clientRef.current = client;
@@ -1316,8 +1316,8 @@ export function useDashboardChatTransport({
         // /v1 to the dashboard tunnel (which 405s).
         const err = new Error(
           lastConnectErr instanceof Error
-            ? `AgentEra Runtime dashboard chat connection failed: ${lastConnectErr.message}`
-            : "AgentEra Runtime dashboard chat connection failed",
+            ? `Aera Runtime dashboard chat connection failed: ${lastConnectErr.message}`
+            : "Aera Runtime dashboard chat connection failed",
         ) as Error & { dashboardWasReachable?: boolean };
         err.dashboardWasReachable = true;
         throw err;
@@ -1556,7 +1556,7 @@ export function useDashboardChatTransport({
             ? `; /model output: ${slashResponse.output}`
             : "";
           throw new Error(
-            `AgentEra Runtime dashboard did not switch to ${dashboardProvider}/${model}; live model is ${live.provider || "unknown"}/${live.model || "unknown"}${warning}${output}; custom inventory: ${modelOptionsSummary(before)}`,
+            `Aera Runtime dashboard did not switch to ${dashboardProvider}/${model}; live model is ${live.provider || "unknown"}/${live.model || "unknown"}${warning}${output}; custom inventory: ${modelOptionsSummary(before)}`,
           );
         }
         appliedModelRef.current = key;
@@ -1743,7 +1743,7 @@ export function useDashboardChatTransport({
         if (!syncedAttachments.handled) {
           if (fallbackOnUnavailable) return false;
           return failActiveTurn(
-            "AgentEra Runtime dashboard could not attach the selected file. Use Auto or Legacy to fall back to the legacy attachment path.",
+            "Aera Runtime dashboard could not attach the selected file. Use Auto or Legacy to fall back to the legacy attachment path.",
           );
         }
         const submitText = dashboardPromptTextWithAttachmentRefs(
@@ -1788,7 +1788,7 @@ export function useDashboardChatTransport({
             client = await ensureClient();
           }
         }
-        throw new Error("AgentEra Runtime dashboard recovery exhausted");
+        throw new Error("Aera Runtime dashboard recovery exhausted");
       } catch (err) {
         // A synchronous setup/submit failure does not invalidate the persisted
         // conversation. Drop only the process-local binding so the next send

@@ -6,6 +6,7 @@ node_modules/
 
 # Build output
 dist/
+dist-beta*/
 out/
 
 # Browser test artifacts may include local callback URLs and captured pages

@@ -68,7 +68,7 @@ function assertOwner(owner: AgenteraRuntimeOwner): void {
     !validUuid(owner.ownerId) ||
     !validUuid(owner.deviceInstallationId)
   ) {
-    throw new Error("AgentEra connection owner identity is invalid.");
+    throw new Error("Aera connection owner identity is invalid.");
   }
 }
 
@@ -181,7 +181,7 @@ export class AgenteraConnectionOwnerStore {
     if (existing) {
       if (sameOwner(existing, owner)) return { ...existing };
       throw new Error(
-        "This connection context cannot be reassigned to another AgentEra owner.",
+        "This connection context cannot be reassigned to another Aera owner.",
       );
     }
     const binding: ConnectionOwnerBinding = {
@@ -207,11 +207,11 @@ export class AgenteraConnectionOwnerStore {
       (candidate) => candidate.connectionContextId === connectionContextId,
     );
     if (!binding) {
-      throw new Error("AgentEra connection context binding is required.");
+      throw new Error("Aera connection context binding is required.");
     }
     if (!sameOwner(binding, owner)) {
       throw new Error(
-        "This connection context belongs to another AgentEra owner.",
+        "This connection context belongs to another Aera owner.",
       );
     }
     return { ...binding };
@@ -219,7 +219,7 @@ export class AgenteraConnectionOwnerStore {
 
   private assertContext(connectionContextId: string): void {
     if (!validUuid(connectionContextId)) {
-      throw new Error("AgentEra connection context ID is invalid.");
+      throw new Error("Aera connection context ID is invalid.");
     }
   }
 
@@ -229,10 +229,10 @@ export class AgenteraConnectionOwnerStore {
     try {
       envelope = JSON.parse(readFileSync(this.filePath, "utf8"));
     } catch {
-      throw new Error("AgentEra connection ownership store is corrupt.");
+      throw new Error("Aera connection ownership store is corrupt.");
     }
     if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) {
-      throw new Error("AgentEra connection ownership store is corrupt.");
+      throw new Error("Aera connection ownership store is corrupt.");
     }
     const candidate = envelope as Partial<
       ConnectionOwnerEnvelope | ConnectionOwnerEnvelopeV1
@@ -244,7 +244,7 @@ export class AgenteraConnectionOwnerStore {
         candidate.version !== CONNECTION_OWNER_VERSION) ||
       typeof candidate.encryptedBindings !== "string"
     ) {
-      throw new Error("AgentEra connection ownership store is corrupt.");
+      throw new Error("Aera connection ownership store is corrupt.");
     }
     this.requireEncryption();
     let parsed: unknown;
@@ -254,7 +254,7 @@ export class AgenteraConnectionOwnerStore {
       );
       parsed = JSON.parse(decrypted);
     } catch {
-      throw new Error("AgentEra connection ownership store is corrupt.");
+      throw new Error("Aera connection ownership store is corrupt.");
     }
     const isV1 = candidate.version === CONNECTION_OWNER_VERSION_V1;
     if (
@@ -263,7 +263,7 @@ export class AgenteraConnectionOwnerStore {
         isV1 ? !validBindingV1(binding) : !validBinding(binding),
       )
     ) {
-      throw new Error("AgentEra connection ownership store is corrupt.");
+      throw new Error("Aera connection ownership store is corrupt.");
     }
     const bindings: ConnectionOwnerBinding[] = isV1
       ? (parsed as ConnectionOwnerBindingV1[]).map((binding) => ({
@@ -279,7 +279,7 @@ export class AgenteraConnectionOwnerStore {
       new Set(bindings.map((binding) => binding.connectionContextId)).size !==
       bindings.length
     ) {
-      throw new Error("AgentEra connection ownership store is corrupt.");
+      throw new Error("Aera connection ownership store is corrupt.");
     }
     const result = bindings.map((binding) => ({ ...binding }));
     if (isV1) this.persistBindings(result);
@@ -303,7 +303,7 @@ export class AgenteraConnectionOwnerStore {
   private requireEncryption(): void {
     if (!this.secureStorage.isEncryptionAvailable()) {
       throw new Error(
-        "AgentEra secure storage is unavailable for connection ownership metadata.",
+        "Aera secure storage is unavailable for connection ownership metadata.",
       );
     }
   }

@@ -288,7 +288,7 @@ function buildSpec(
   const compat = m?.compatibility;
   if (compat?.hermes) {
     rows.push({
-      label: "Requires AgentEra Runtime",
+      label: "Requires Aera Runtime",
       value: compat.hermes,
       mono: true,
     });

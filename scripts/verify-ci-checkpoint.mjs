@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/explicit-function-return-type */
 import { readFile } from "node:fs/promises";
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;

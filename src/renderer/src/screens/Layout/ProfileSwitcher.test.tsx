@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../../components/useI18n", () => ({
   useI18n: () => ({
     t: (key: string): string =>
-      key === "common.appName" ? "AgentEra Studio" : key,
+      key === "common.appName" ? "Aera" : key,
   }),
 }));
 
@@ -78,7 +78,7 @@ describe("ProfileSwitcher", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("AgentEra Studio")).toBeInTheDocument();
+      expect(screen.getByText("Aera")).toBeInTheDocument();
     });
   });
 
@@ -110,7 +110,7 @@ describe("ProfileSwitcher", () => {
     );
 
     const trigger = await screen.findByRole("button", {
-      name: /AgentEra Studio/,
+      name: /Aera/,
     });
     fireEvent.click(trigger);
 
@@ -119,7 +119,7 @@ describe("ProfileSwitcher", () => {
       expect(window.hermesAPI.listProfiles).toHaveBeenCalledTimes(2);
     });
     fireEvent.click(
-      within(menu).getByRole("menuitem", { name: /AgentEra Studio/ }),
+      within(menu).getByRole("menuitem", { name: /Aera/ }),
     );
 
     expect(profileModalMocks.openProfile).toHaveBeenCalledWith(

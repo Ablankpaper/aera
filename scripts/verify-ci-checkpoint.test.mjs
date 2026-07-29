@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/explicit-function-return-type */
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -48,7 +49,7 @@ function checkpoint(overrides = {}) {
         repository: "bignormal/aera-cloud",
         commitSha: sha("b"),
         commitCommittedAt: committedAt,
-        workflowName: "AgentEra cloud CI",
+        workflowName: "Aera cloud CI",
         runUrl: "https://github.com/bignormal/aera-cloud/actions/runs/1002",
         conclusion: "success",
         completedAt,

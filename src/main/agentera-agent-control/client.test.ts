@@ -685,7 +685,7 @@ describe("AgenteraAgentControlClient", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it("fetches a policy snapshot through the strict AgentEra contract", async () => {
+  it("fetches a policy snapshot through the strict Aera contract", async () => {
     const fetcher = vi.fn(
       async (_url: URL | RequestInfo, _init?: RequestInit) =>
         jsonResponse(policySnapshot()),

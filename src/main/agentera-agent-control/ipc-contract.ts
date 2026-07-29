@@ -51,7 +51,7 @@ const MAX_FINDING_PATH_BYTES = 512;
 const MAX_IPC_FINDINGS = 128;
 
 function invalidRequest(): never {
-  const error = new Error("AgentEra Agent control request is invalid.");
+  const error = new Error("Aera Agent control request is invalid.");
   Object.assign(error, { code: "invalid_request" });
   throw error;
 }
@@ -529,7 +529,6 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
     code === "organization_agent_not_found" ||
     code === "organization_agent_forbidden" ||
     code === "organization_archived" ||
-    code === "organization_submission_self_review" ||
     code === "organization_submission_conflict" ||
     code === "organization_submission_superseded" ||
     code === "organization_publication_policy_blocked" ||

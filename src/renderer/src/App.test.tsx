@@ -36,7 +36,7 @@ vi.mock("./components/ErrorBoundary", () => ({
 vi.mock("react-hot-toast", () => ({ Toaster: () => null }));
 vi.mock("./utils/analytics", () => ({ captureScreenView: vi.fn() }));
 vi.mock("./components/common/HermesLogo", () => ({
-  default: () => <span aria-label="AgentEra logo" />,
+  default: () => <span aria-label="Aera logo" />,
 }));
 vi.mock("./components/WorkspaceInvitationGate", () => ({
   default: ({ authState }: { authState: AgenteraAuthPublicState }) => (
@@ -201,7 +201,7 @@ async function finishSplash(): Promise<void> {
   });
 }
 
-describe("AgentEra startup gate", () => {
+describe("Aera startup gate", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     authListener = undefined;
@@ -431,7 +431,7 @@ describe("AgentEra startup gate", () => {
 
     expect(runtime.createFreshProfile).toHaveBeenCalledOnce();
     expect(runtime.createFreshProfile.mock.calls[0][0]).toMatch(
-      /^AgentEra Space /,
+      /^Aera Space /,
     );
     expect(runtime.bindActiveProfile).not.toHaveBeenCalled();
     expect(screen.getByTestId("screen-main")).toBeInTheDocument();

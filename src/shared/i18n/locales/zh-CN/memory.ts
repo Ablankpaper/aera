@@ -45,14 +45,14 @@ export default {
     "例如：用户希望当前智能体使用简洁回答；本内容仅保存在当前智能体中。",
   noProvidersFound: "未在当前安装中找到任何外部记忆提供商。",
   openProviderWebsite: "打开提供商网站",
-  noMemoriesYet: "还没有记忆。AgentEra 会在你聊天时保存重要信息。",
+  noMemoriesYet: "还没有记忆。Aera 会在你聊天时保存重要信息。",
   noMemoryEntries: "暂无记忆条目。",
   noToolsetsFound: "未找到工具集。",
   addManuallyHint: "你也可以使用上面的按钮手动添加记忆。",
   userProfileHint:
     "这是当前智能体私有的 USER.md，只表示它对你的认识，并不是账号级全局用户画像。",
   providersHint:
-    "可插拔的记忆提供商为 AgentEra 提供高级长期记忆。内置记忆(上方)始终与所选提供商一起激活。",
+    "可插拔的记忆提供商为 Aera 提供高级长期记忆。内置记忆(上方)始终与所选提供商一起激活。",
   providersHintActive: "当前激活: <strong>{{provider}}</strong>",
   providersHintInactive: "没有外部提供商激活 — 仅使用内置记忆。",
   enterEnvKey: "输入 {{key}}",

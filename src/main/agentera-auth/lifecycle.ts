@@ -113,11 +113,11 @@ export function createPendingAgenteraSelfRevocation(
 ): PendingSelfRevocation {
   const now = options.now ?? new Date();
   if (!Number.isFinite(now.getTime())) {
-    throw new Error("AgentEra self-revocation time is invalid.");
+    throw new Error("Aera self-revocation time is invalid.");
   }
   const nonce = options.nonce ? Buffer.from(options.nonce) : randomBytes(32);
   if (nonce.length !== 32) {
-    throw new Error("AgentEra self-revocation nonce is invalid.");
+    throw new Error("Aera self-revocation nonce is invalid.");
   }
   const timestamp = String(Math.floor(now.getTime() / 1000));
   const digest = selfRevocationDigest(
@@ -150,7 +150,7 @@ export function refreshPendingAgenteraSelfRevocation(
     nonce.toString("base64url") !== pending.nonce ||
     pending.installationId !== identity.installationId
   ) {
-    throw new Error("AgentEra pending self-revocation is invalid.");
+    throw new Error("Aera pending self-revocation is invalid.");
   }
   return createPendingAgenteraSelfRevocation({
     deviceId: pending.deviceId,

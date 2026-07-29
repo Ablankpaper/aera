@@ -14,7 +14,7 @@ export default {
   hideArchived: "隐藏已归档",
   archivedTooltip: "显示或隐藏归档列",
 
-  remoteUnsupportedTitle: "看板需要本地安装 AgentEra 或 SSH 隧道模式。",
+  remoteUnsupportedTitle: "看板需要本地安装 Aera 或 SSH 隧道模式。",
   remoteUnsupportedHint:
     "纯远程（HTTP + API Key）模式尚未开放看板 API。请在设置中切换到本地或 SSH 隧道模式来管理看板。",
 

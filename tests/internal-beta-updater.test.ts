@@ -24,6 +24,7 @@ import {
   extractDesktopUpdateZip,
   InternalBetaDesktopUpdater,
   resolveCurrentMacAppPath,
+  tryCreateInternalBetaDesktopUpdater,
   type ArtifactDownloadRequest,
   type DesktopUpdateManifest,
   type MetadataTransport,
@@ -34,7 +35,7 @@ const BASE_URL = new URL(
   "https://updates.example.test/desktop-updates/internal-beta",
 );
 const CURRENT_VERSION = "0.7.4-internal-beta.9";
-const NEXT_VERSION = "0.7.4-internal-beta.10";
+const NEXT_VERSION = "0.7.4-internal-beta.11";
 const KEY_ID = "desktop-update-test";
 const createdDirectories: string[] = [];
 const execFile = promisify(execFileCallback);
@@ -184,6 +185,36 @@ function createUpdater(options: {
 
 describe("Internal Beta desktop updater", () => {
   // @lat: [[desktop-updates#Internal Beta signed update channel]]
+  it("fails closed when packaged update configuration is invalid", () => {
+    const log = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    expect(
+      tryCreateInternalBetaDesktopUpdater({
+        currentVersion: CURRENT_VERSION,
+        platform: "win32",
+        arch: "x64",
+        userDataPath: "/unused",
+        currentAppPath: null,
+        baseUrl: new URL(
+          "http://127.0.0.1:8086/desktop-updates/internal-beta",
+        ),
+        trustedPublicKeys: new Map(),
+        autoDownload: false,
+        onState: vi.fn(),
+        log,
+      }),
+    ).toBeNull();
+    expect(log.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "Internal Beta updater configuration is unavailable",
+      ),
+    );
+  });
+
   it("checks, verifies, downloads, restores, and installs a signed release", async () => {
     const userDataPath = await createUserData();
     const release = signedRelease();
@@ -292,9 +323,9 @@ describe("Internal Beta desktop updater", () => {
     () => {
       expect(
         resolveCurrentMacAppPath(
-          "/Applications/AgentEra Studio.app/Contents/MacOS/AgentEra Studio",
+          "/Applications/Aera.app/Contents/MacOS/Aera",
         ),
-      ).toBe("/Applications/AgentEra Studio.app");
+      ).toBe("/Applications/Aera.app");
       expect(resolveCurrentMacAppPath("/usr/local/bin/agentera")).toBeNull();
     },
   );
@@ -303,7 +334,7 @@ describe("Internal Beta desktop updater", () => {
     "commits a macOS swap only after the new app reports healthy",
     async () => {
       const root = await createUserData();
-      const current = join(root, "AgentEra Studio.app");
+      const current = join(root, "Aera.app");
       const staged = join(root, "staged.app");
       const backup = join(root, "backup.app");
       const marker = join(root, "healthy");
@@ -350,7 +381,7 @@ describe("Internal Beta desktop updater", () => {
     "rolls a macOS swap back when the new app never reports healthy",
     async () => {
       const root = await createUserData();
-      const current = join(root, "AgentEra Studio.app");
+      const current = join(root, "Aera.app");
       const staged = join(root, "staged.app");
       const backup = join(root, "backup.app");
       const marker = join(root, "healthy");

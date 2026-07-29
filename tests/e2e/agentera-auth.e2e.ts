@@ -27,7 +27,7 @@ const cloudRoot = resolve(
     resolve(desktopRoot, "../aera-cloud"),
 );
 const cloudOrigin = "http://127.0.0.1:8086";
-const password = "AgentEra E2E battery staple 2026";
+const password = "Aera E2E battery staple 2026";
 const firstPhone = "+8613900000001";
 const secondPhone = "+8613900000002";
 
@@ -300,7 +300,7 @@ async function waitForReady(
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (process.exitCode !== null) {
-      throw new Error(`AgentEra cloud exited before readiness.\n${logs()}`);
+      throw new Error(`Aera cloud exited before readiness.\n${logs()}`);
     }
     try {
       const response = await fetch(`${cloudOrigin}/health/ready`);
@@ -310,7 +310,7 @@ async function waitForReady(
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 200));
   }
-  throw new Error(`AgentEra cloud did not become ready.\n${logs()}`);
+  throw new Error(`Aera cloud did not become ready.\n${logs()}`);
 }
 
 async function startCloud(current: Harness): Promise<ChildProcess> {
@@ -504,7 +504,7 @@ async function loginBrowser(page: Page, phone: string): Promise<void> {
 test.beforeAll(async () => {
   if (!(await portAvailable(8086))) {
     throw new Error(
-      "AgentEra E2E requires the reviewed loopback issuer port 8086 to be free.",
+      "Aera E2E requires the reviewed loopback issuer port 8086 to be free.",
     );
   }
   const root = await mkdtemp(join(tmpdir(), "agentera-auth-e2e-"));

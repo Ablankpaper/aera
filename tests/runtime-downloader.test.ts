@@ -16,7 +16,7 @@ import {
   runtimePartialPaths,
 } from "../src/main/agentera-runtime-distribution/downloader";
 
-const BODY = Buffer.from("AgentEra Runtime resumable download fixture", "utf8");
+const BODY = Buffer.from("Aera Runtime resumable download fixture", "utf8");
 const HASH = createHash("sha256").update(BODY).digest("hex");
 
 function listen(server: Server): Promise<number> {

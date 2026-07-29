@@ -20,12 +20,12 @@ describe("SplashScreen", () => {
   });
 
   // @lat: [[agentera-branding#Naming contract#Visible application names]]
-  it("shows the AgentEra Studio wordmark without the Hermes image", () => {
+  it("shows the Aera wordmark without the Hermes image", () => {
     const onFinished = vi.fn();
 
     render(<SplashScreen onFinished={onFinished} />);
 
-    expect(screen.getByText("AgentEra Studio")).toHaveClass("splash-wordmark");
+    expect(screen.getByText("Aera")).toHaveClass("splash-wordmark");
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     expect(onFinished).toHaveBeenCalledOnce();
   });

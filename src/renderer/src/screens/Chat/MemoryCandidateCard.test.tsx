@@ -55,7 +55,6 @@ describe("MemoryCandidateCard", () => {
     render(
       <MemoryCandidateCard
         message={message()}
-        isAgentBusy={false}
         onConfirm={onConfirm}
         onReject={onReject}
       />,
@@ -78,11 +77,10 @@ describe("MemoryCandidateCard", () => {
     expect(onReject).not.toHaveBeenCalled();
   });
 
-  it("keeps identity-changing confirmation disabled while Hermes is generating", () => {
+  it("keeps both decisions available once the post-reply card is shown", () => {
     render(
       <MemoryCandidateCard
         message={message()}
-        isAgentBusy
         onConfirm={vi.fn()}
         onReject={vi.fn()}
       />,
@@ -90,34 +88,29 @@ describe("MemoryCandidateCard", () => {
 
     expect(
       screen.getByRole("button", { name: "chat.memoryCandidate.confirm" }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     expect(
-      screen.getByText("chat.memoryCandidate.waitForReply"),
-    ).toBeInTheDocument();
+      screen.getByRole("button", { name: "chat.memoryCandidate.reject" }),
+    ).toBeEnabled();
   });
 
-  it("turns into a compact receipt after the decision", () => {
+  it("renders nothing after either decision", () => {
     const { rerender } = render(
       <MemoryCandidateCard
         message={message("confirmed")}
-        isAgentBusy={false}
         onConfirm={vi.fn()}
         onReject={vi.fn()}
       />,
     );
-    expect(screen.getByText("chat.memoryCandidate.saved")).toBeInTheDocument();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(document.body.textContent).toBe("");
 
     rerender(
       <MemoryCandidateCard
         message={message("rejected")}
-        isAgentBusy={false}
         onConfirm={vi.fn()}
         onReject={vi.fn()}
       />,
     );
-    expect(
-      screen.getByText("chat.memoryCandidate.notSaved"),
-    ).toBeInTheDocument();
+    expect(document.body.textContent).toBe("");
   });
 });

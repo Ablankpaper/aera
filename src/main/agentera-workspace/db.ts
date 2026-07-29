@@ -126,7 +126,7 @@ function assertOutsideHermesHome(path: string): void {
       canonicalPotentialPath(path),
     )
   ) {
-    throw new Error("AgentEra Workspace path must remain outside HERMES_HOME.");
+    throw new Error("Aera Workspace path must remain outside HERMES_HOME.");
   }
 }
 
@@ -334,7 +334,7 @@ function initializeSchema(sqlite: AgenteraWorkspaceSqliteDatabase): void {
     currentVersion < 0 ||
     currentVersion > AGENTERA_WORKSPACE_SCHEMA_VERSION
   ) {
-    throw new Error("Unsupported AgentEra Workspace database version.");
+    throw new Error("Unsupported Aera Workspace database version.");
   }
   if (currentVersion === AGENTERA_WORKSPACE_SCHEMA_VERSION) return;
 
@@ -402,7 +402,7 @@ export class AgenteraWorkspaceDatabase {
   }
 
   private assertOpen(): void {
-    if (this.closed) throw new Error("AgentEra Workspace database is closed.");
+    if (this.closed) throw new Error("Aera Workspace database is closed.");
   }
 
   private transaction(action: () => void): void {

@@ -712,7 +712,7 @@ export class AgenteraEncryptedBackupKeyStore {
     }
     if (!available || weakBackend) {
       throw new Error(
-        "Secure storage is unavailable for AgentEra encrypted backup keys.",
+        "Secure storage is unavailable for Aera encrypted backup keys.",
       );
     }
   }
@@ -727,7 +727,7 @@ export class AgenteraEncryptedBackupKeyStore {
       return Buffer.from(encrypted);
     } catch {
       throw new Error(
-        "Secure storage could not protect AgentEra encrypted backup keys.",
+        "Secure storage could not protect Aera encrypted backup keys.",
       );
     }
   }
@@ -739,13 +739,13 @@ export class AgenteraEncryptedBackupKeyStore {
       plaintext = this.secureStorage.decryptString(Buffer.from(encrypted));
     } catch {
       throw new Error(
-        "AgentEra encrypted backup root key could not be opened.",
+        "Aera encrypted backup root key could not be opened.",
       );
     }
     try {
       return base64urlDecode(plaintext, 32);
     } catch {
-      throw new Error("AgentEra encrypted backup root key is corrupt.");
+      throw new Error("Aera encrypted backup root key is corrupt.");
     }
   }
 
@@ -756,13 +756,13 @@ export class AgenteraEncryptedBackupKeyStore {
       plaintext = this.secureStorage.decryptString(Buffer.from(encrypted));
     } catch {
       throw new Error(
-        "AgentEra encrypted backup device key could not be opened.",
+        "Aera encrypted backup device key could not be opened.",
       );
     }
     try {
       return base64urlDecode(plaintext, 32);
     } catch {
-      throw new Error("AgentEra encrypted backup device key is corrupt.");
+      throw new Error("Aera encrypted backup device key is corrupt.");
     }
   }
 }

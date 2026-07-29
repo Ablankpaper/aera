@@ -94,7 +94,7 @@ export default {
   mcpNoResults: "Filtrenizle eşleşen MCP sunucusu bulunamadı.",
   mcpEmptyTitle: "Yapılandırılmış MCP sunucusu yok",
   mcpEmptyDescription:
-    "Özel bir HTTP veya stdio sunucusu ekleyin ya da AgentEra MCP kataloğundan birini kurun.",
+    "Özel bir HTTP veya stdio sunucusu ekleyin ya da Aera MCP kataloğundan birini kurun.",
   mcpLoadFailed: "MCP sunucuları yüklenemedi.",
   mcpAddFailed: "MCP sunucusu eklenemedi.",
   mcpRemoveFailed: "MCP sunucusu kaldırılamadı.",

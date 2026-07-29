@@ -176,7 +176,7 @@ export class AgenteraWorkspaceManagerError extends Error {
   readonly code: string;
 
   constructor(code: string) {
-    super(`AgentEra Workspace operation failed: ${code}.`);
+    super(`Aera Workspace operation failed: ${code}.`);
     this.name = "AgenteraWorkspaceManagerError";
     this.code = code;
   }

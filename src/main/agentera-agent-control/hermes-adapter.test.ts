@@ -177,7 +177,7 @@ function projection(agentVersion = version()): HermesVersionProjection {
   };
 }
 
-describe("AgentEra adapter around the real Hermes transport", () => {
+describe("Aera adapter around the real Hermes transport", () => {
   let root = "";
   let database: AgenteraControlPlaneDatabase;
   let bindingStore: RuntimeBindingStore;

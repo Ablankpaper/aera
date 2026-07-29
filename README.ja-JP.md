@@ -1,23 +1,23 @@
-# AgentEra Studio
+# Aera
 
-AgentEra Studio は、AgentEra Runtime のインストール、設定、利用を行う AgentEra のデスクトップアプリです。チャット、セッション、エージェント、メモリ、スキル、ツール、スケジュール、メッセージングゲートウェイ、プロバイダー、3D オフィスを 1 つのネイティブ UI に統合します。
+Aera は、Aera Runtime のインストール、設定、利用を行う Aera のデスクトップアプリです。チャット、セッション、エージェント、メモリ、スキル、ツール、スケジュール、メッセージングゲートウェイ、プロバイダー、3D オフィスを 1 つのネイティブ UI に統合します。
 
 [リリース](https://github.com/bignormal/aera/releases) · [Issue](https://github.com/bignormal/aera/issues) · [ライセンス](LICENSE)
 
 [English](README.md) · [简体中文](README.zh-CN.md) · 日本語 · [Español (LATAM)](README.es-LATAM.md)
 
-> AgentEra Studio は現在も開発中です。機能やパッケージの詳細はリリースごとに変更される場合があります。
+> Aera は現在も開発中です。機能やパッケージの詳細はリリースごとに変更される場合があります。
 
 ## 主な機能
 
-- AgentEra Runtime のガイド付きインストールと更新
+- Aera Runtime のガイド付きインストールと更新
 - ローカル、SSH トンネル、リモートサーバーの接続モード
 - ツール、添付ファイル、スラッシュコマンド、推論、使用量を備えたストリーミングチャット
 - エージェントごとに分離された設定、セッション、メモリ、スキル、ペルソナ
 - クラウドおよびローカル OpenAI 互換エンドポイントのプロバイダー・モデル管理
 - セッション検索と再開、スケジュール、メッセージングゲートウェイ、Kanban
 - バックアップ、インポート、診断、ログ、デスクトップ自動更新
-- AgentEra オフィスと AgentEra Motors ショールーム
+- Aera オフィスと Aera Motors ショールーム
 - 12 言語の UI
 
 ## インストール
@@ -26,26 +26,26 @@ AgentEra Studio は、AgentEra Runtime のインストール、設定、利用�
 
 ### Windows
 
-コード署名されていないビルドでは Windows SmartScreen が表示される場合があります。AgentEra の Release ページから取得したファイルであることを確認してから実行してください。
+コード署名されていないビルドでは Windows SmartScreen が表示される場合があります。Aera の Release ページから取得したファイルであることを確認してから実行してください。
 
 ### Linux
 
-パッケージ名には `agentera-studio` プレフィックスを使用します。
+パッケージ名には `Aera` プレフィックスを使用します。
 
 ```bash
-sudo dnf install ./agentera-studio-<version>.rpm
+sudo dnf install ./Aera-<version>.rpm
 ```
 
 ## 仕組み
 
-初回起動時に、ローカルまたはリモートの AgentEra Runtime を選択します。
+初回起動時に、ローカルまたはリモートの Aera Runtime を選択します。
 
 1. ローカルモードでは既存 Runtime を検出し、必要な場合はインストールします。
 2. リモートおよび SSH モードでは、ローカル Runtime をインストールせず接続先を検証します。
 3. デスクトップ UI からプロバイダーとモデルを設定します。
 4. Runtime の準備が完了するとメインワークスペースを開きます。
 
-AgentEra Runtime は既存環境との互換性のため、次のパスとコマンドを維持します。
+Aera Runtime は既存環境との互換性のため、次のパスとコマンドを維持します。
 
 - `~/.hermes`
 - `~/.hermes/.env`
@@ -73,4 +73,4 @@ npm run build
 
 ## ライセンス
 
-AgentEra Studio は [MIT License](LICENSE) の下で配布されます。
+Aera は [MIT License](LICENSE) の下で配布されます。

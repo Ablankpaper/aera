@@ -6,8 +6,10 @@ import {
 } from "../src/main/app/identity";
 
 const appData = resolve("app-data");
-const currentUserData = join(appData, "AgentEra Studio");
-const legacyUserData = join(appData, "hermes-desktop");
+const currentUserData = join(appData, "Aera");
+const legacyProductUserData = join(appData, "AgentEra Studio");
+const legacyPackageUserData = join(appData, "agentera-studio");
+const legacyHermesUserData = join(appData, "hermes-desktop");
 const isolatedUserData = resolve("isolated");
 
 afterEach(() => {
@@ -37,11 +39,15 @@ describe("desktop identity data continuity", () => {
     expect(app.calls).toEqual([isolatedUserData]);
   });
 
-  it("adopts legacy data only when the new directory is absent", () => {
+  it.each([
+    ["legacy product directory", legacyProductUserData],
+    ["legacy package directory", legacyPackageUserData],
+    ["legacy upstream directory", legacyHermesUserData],
+  ])("adopts %s only when the Aera directory is absent", (_label, legacy) => {
     const app = fakeApp(currentUserData);
-    const exists = (path: string): boolean => path === legacyUserData;
+    const exists = (path: string): boolean => path === legacy;
 
-    expect(resolveDesktopUserDataPath(app, "", exists)).toBe(legacyUserData);
+    expect(resolveDesktopUserDataPath(app, "", exists)).toBe(legacy);
   });
 
   it("does not overwrite an existing new data directory", () => {
@@ -49,5 +55,15 @@ describe("desktop identity data continuity", () => {
     const exists = (): boolean => true;
 
     expect(resolveDesktopUserDataPath(app, "", exists)).toBeNull();
+  });
+
+  it("prefers the newest legacy product directory when several exist", () => {
+    const app = fakeApp(currentUserData);
+    const exists = (path: string): boolean =>
+      path === legacyProductUserData || path === legacyHermesUserData;
+
+    expect(resolveDesktopUserDataPath(app, "", exists)).toBe(
+      legacyProductUserData,
+    );
   });
 });

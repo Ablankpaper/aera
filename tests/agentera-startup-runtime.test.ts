@@ -40,7 +40,7 @@ vi.mock("../src/main/utils", () => ({
 
 import { probeAgenteraInstallFiles } from "../src/main/agentera-startup-preflight";
 
-describe("AgentEra startup Runtime probe", () => {
+describe("Aera startup Runtime probe", () => {
   it("tracks the live managed Runtime selection without reading user data", () => {
     runtimeState.prepared = true;
     expect(probeAgenteraInstallFiles()).toEqual({

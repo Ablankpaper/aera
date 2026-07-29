@@ -139,7 +139,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Prepare locked AgentEra Runtime Seed
+      - name: Prepare locked Aera Runtime Seed
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: npm run prepare:runtime-seed -- --platform darwin --arch arm64
@@ -324,7 +324,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Prepare locked AgentEra Runtime Seed
+      - name: Prepare locked Aera Runtime Seed
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: npm run prepare:runtime-seed -- --platform windows --arch x64
@@ -383,8 +383,8 @@ jobs:
         run: |
           $destination = Join-Path $env:RUNNER_TEMP "windows-candidate"
           New-Item -ItemType Directory -Path (Join-Path $destination "runtime-seed") | Out-Null
-          $setup = @(Get-ChildItem "dist" -File -Filter "agentera-studio-$env:DESKTOP_VERSION-setup.exe")
-          $portable = @(Get-ChildItem "dist" -File -Filter "agentera-studio-$env:DESKTOP_VERSION-portable.exe")
+          $setup = @(Get-ChildItem "dist" -File -Filter "Aera-$env:DESKTOP_VERSION-setup.exe")
+          $portable = @(Get-ChildItem "dist" -File -Filter "Aera-$env:DESKTOP_VERSION-portable.exe")
           if ($setup.Count -ne 1 -or $portable.Count -ne 1) {
             throw "Expected exactly one setup and one portable executable"
           }

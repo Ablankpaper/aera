@@ -621,6 +621,48 @@ describe("AgentControlPanel", () => {
     },
   );
 
+  it("switches an Organization member to Personal before creating from My Agents", async () => {
+    let context: AgenteraAgentControlPublicState["context"] = {
+      scope: "ORGANIZATION",
+      organizationId: ORGANIZATION_ID,
+      role: "member",
+    };
+    const api = installAPI({
+      getState: vi.fn(async () => success(controlState(context))),
+    });
+    const select = vi.fn(async () => {
+      context = { scope: "USER" };
+      return success({
+        access: "online" as const,
+        stale: false,
+        selected: { kind: "PERSONAL" as const },
+        options: [{ kind: "PERSONAL" as const }],
+      });
+    });
+    Object.defineProperty(window, "agenteraProductSpace", {
+      configurable: true,
+      value: { select },
+    });
+
+    render(<AgentControlPanel profiles={[]} initialTab="mine" />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "agents.control.newAgent",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(select).toHaveBeenCalledWith({ kind: "PERSONAL" }),
+    );
+    expect(api.getState).toHaveBeenCalledTimes(2);
+    expect(
+      await screen.findByRole("dialog", {
+        name: "agents.control.newDraftTitle",
+      }),
+    ).toBeInTheDocument();
+  });
+
   it("shows cached Organization content read-only while offline", async () => {
     const api = installAPI({
       getState: vi.fn(async () =>
@@ -793,7 +835,7 @@ describe("AgentControlPanel", () => {
     );
   });
 
-  // @lat: [[agentera-agent-control-plane#AgentEra Agent control plane V1#Trusted Workspace Agent context#Context-only refresh]]
+    // @lat: [[agentera-agent-control-plane#AgentEra Agent control plane V1#Trusted Workspace Agent context#Context-only refresh]]
   it("keeps the create-and-publish workflow open across same-context state invalidations", async () => {
     const current = controlState();
     const created = draft();

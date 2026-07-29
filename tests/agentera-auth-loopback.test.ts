@@ -27,7 +27,7 @@ async function start(
   return listener;
 }
 
-describe("AgentEra OAuth loopback listener", () => {
+describe("Aera OAuth loopback listener", () => {
   // @lat: [[agentera-app-authentication#Browser sign-in#Loopback callback]]
   it("binds an ephemeral IPv4 loopback port and consumes one exact callback", async () => {
     const state = Buffer.alloc(32, 2).toString("base64url");
@@ -46,7 +46,7 @@ describe("AgentEra OAuth loopback listener", () => {
     expect(response.headers.get("content-security-policy")).toContain(
       "default-src 'none'",
     );
-    expect(page).toContain("AgentEra Studio");
+    expect(page).toContain("Aera");
     expect(page).not.toContain(code);
     expect(page).not.toContain(state);
     await expect(listener.callback).resolves.toEqual({
@@ -149,7 +149,7 @@ describe("AgentEra OAuth loopback listener", () => {
   });
 });
 
-describe("AgentEra PKCE material", () => {
+describe("Aera PKCE material", () => {
   it("creates independent 256-bit state and S256 verifier material", () => {
     let fill = 0;
     const first = createAgenteraPkceAttempt((size) =>

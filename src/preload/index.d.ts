@@ -380,6 +380,9 @@ interface AgenteraOrganizationAPI {
   acceptInvitation: (input: {
     token: string;
   }) => Promise<AgenteraOrganizationResult<OrganizationInvitationAcceptance>>;
+  submitInvitationLink: (input: {
+    inviteUrl: string;
+  }) => Promise<AgenteraOrganizationResult<true>>;
   getPendingInvitation: () => Promise<
     AgenteraOrganizationResult<OrganizationPendingInvitation | null>
   >;

@@ -40,7 +40,7 @@ type RemoteRecord = Record<string, unknown>;
 function normalizeRemoteDashboardBaseUrl(value: string): string {
   const raw = value.trim();
   if (!raw)
-    throw new Error("Remote AgentEra Runtime dashboard URL is not configured.");
+    throw new Error("Remote Aera Runtime dashboard URL is not configured.");
   const url = new URL(raw);
   url.hash = "";
   url.search = "";
@@ -91,7 +91,7 @@ export function remoteRequestJson<T>(
   const token = config.apiKey.trim();
   if (!token)
     throw new Error(
-      "Remote AgentEra Runtime dashboard token is not configured.",
+      "Remote Aera Runtime dashboard token is not configured.",
     );
 
   return new Promise((resolve, reject) => {
@@ -143,7 +143,7 @@ export function remoteRequestJson<T>(
     req.setTimeout(options.timeoutMs ?? 15_000, () => {
       req.destroy(
         new Error(
-          `Timed out connecting to remote AgentEra Runtime dashboard after ${
+          `Timed out connecting to remote Aera Runtime dashboard after ${
             options.timeoutMs ?? 15_000
           }ms`,
         ),

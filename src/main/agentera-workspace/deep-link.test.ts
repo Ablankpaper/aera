@@ -39,7 +39,7 @@ describe("Workspace invitation deep links", () => {
   it("finds the last valid invitation in initial or second-instance arguments", () => {
     expect(
       findWorkspaceInvitationInArguments([
-        "/Applications/AgentEra.app",
+        "/Applications/Aera.app",
         "--flag",
         LINK_A,
         "private-noise",

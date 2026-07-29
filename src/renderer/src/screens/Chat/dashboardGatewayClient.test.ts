@@ -113,7 +113,7 @@ describe("DashboardGatewayClient.request", () => {
 
     const request = client.request("model.options");
     const assertion = expect(request).rejects.toThrow(
-      "AgentEra Runtime dashboard request timed out: model.options",
+      "Aera Runtime dashboard request timed out: model.options",
     );
     await vi.advanceTimersByTimeAsync(1_000);
     await assertion;

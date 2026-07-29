@@ -52,6 +52,9 @@ function isAllowedTechnicalLiteral(key: string): boolean {
     /^setup\.providerCards\.[^.]+\.name$/.test(key) ||
     key.startsWith("setup.localPresets.") ||
     /^settings\.language\.(english|spanish|turkish)$/.test(key) ||
+    /^navigation\.organization\.(management|access)\.invitationLinkPlaceholder$/.test(
+      key,
+    ) ||
     /^schedules\.deliverTargets\.(telegram|discord|slack|whatsapp|signal|matrix|mattermost|webhook|homeassistant)$/.test(
       key,
     )
@@ -60,7 +63,7 @@ function isAllowedTechnicalLiteral(key: string): boolean {
 
 describe("shared i18n", () => {
   it("returns English text by default", () => {
-    expect(t("welcome.title")).toBe("Welcome to AgentEra Studio");
+    expect(t("welcome.title")).toBe("Welcome to Aera");
   });
 
   it("falls back to the key when an English key is missing", () => {
@@ -68,7 +71,7 @@ describe("shared i18n", () => {
   });
 
   it("returns zh-CN text when available", () => {
-    expect(t("welcome.title", "zh-CN")).toBe("欢迎使用 AgentEra Studio");
+    expect(t("welcome.title", "zh-CN")).toBe("欢迎使用 Aera");
   });
 
   it("provides complete Simplified Chinese copy for every source key", () => {
@@ -111,23 +114,23 @@ describe("shared i18n", () => {
   });
 
   it("returns zh-TW text when available", () => {
-    expect(t("welcome.title", "zh-TW")).toBe("歡迎使用 AgentEra Studio");
+    expect(t("welcome.title", "zh-TW")).toBe("歡迎使用 Aera");
   });
 
   it("returns es text when available", () => {
-    expect(t("welcome.title", "es")).toBe("Bienvenido a AgentEra Studio");
+    expect(t("welcome.title", "es")).toBe("Bienvenido a Aera");
   });
 
   it("returns id text when available", () => {
-    expect(t("welcome.title", "id")).toBe("Selamat datang di AgentEra Studio");
+    expect(t("welcome.title", "id")).toBe("Selamat datang di Aera");
   });
 
   it("returns pl text when available", () => {
-    expect(t("welcome.title", "pl")).toBe("Witamy w AgentEra Studio");
+    expect(t("welcome.title", "pl")).toBe("Witamy w Aera");
   });
 
   it("returns he text when available", () => {
-    expect(t("welcome.title", "he")).toBe("ברוכים הבאים ל-AgentEra Studio");
+    expect(t("welcome.title", "he")).toBe("ברוכים הבאים ל-Aera");
   });
 
   it("reports he as a right-to-left locale", () => {
@@ -153,7 +156,7 @@ describe("shared i18n", () => {
     );
   });
 
-  it("provides the complete AgentEra auth copy in every supported locale", () => {
+  it("provides the complete Aera auth copy in every supported locale", () => {
     const expected = leafKeys(resources.en.translation.auth).sort();
     expect(expected.length).toBeGreaterThan(30);
 

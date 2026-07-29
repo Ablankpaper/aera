@@ -1,5 +1,5 @@
 export default {
-  title: "AgentEra Studio へようこそ",
+  title: "Aera へようこそ",
   subtitle:
     "あなたのマシンでローカル実行する自己進化型 AI アシスタント。プライベートで、強力で、常に学習します。",
   installIssueTitle: "インストールの問題",
@@ -8,10 +8,10 @@ export default {
   recheck: "インストールしました — 再チェック",
   installSizeHint: "必要なコンポーネント（約 2 GB）をインストールします",
   dividerOr: "または",
-  connectRemote: "リモート AgentEra に接続",
-  connectRemoteTitle: "リモート AgentEra に接続",
+  connectRemote: "リモート Aera に接続",
+  connectRemoteTitle: "リモート Aera に接続",
   connectRemoteSubtitle:
-    "稼働中の AgentEra API サーバの URL を入力してください。",
+    "稼働中の Aera API サーバの URL を入力してください。",
   remoteServerUrl: "サーバ URL",
   remoteApiKey: "API キー（任意）",
   remoteApiKeyPlaceholder: "Bearer トークン（API_SERVER_KEY）",

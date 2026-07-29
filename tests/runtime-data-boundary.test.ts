@@ -338,7 +338,7 @@ function stableOffer(
 }
 
 // @lat: [[agentera-runtime-distribution#Release gate]]
-describe("AgentEra Runtime preserves Hermes adaptive data", () => {
+describe("Aera Runtime preserves Hermes adaptive data", () => {
   it("keeps the complete Hermes boundary invariant through install, update, rollback, switch, repair, and cleanup", async () => {
     const root = await temporaryRoot();
     const hermesHome = join(root, "hermes-home");

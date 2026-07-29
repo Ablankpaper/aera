@@ -1,9 +1,9 @@
 const auth = {
   gate: {
-    title: "AgentEra'da oturum açın",
-    checking: "AgentEra oturumunuz denetleniyor…",
+    title: "Aera'da oturum açın",
+    checking: "Aera oturumunuz denetleniyor…",
     browserNote:
-      "Kayıt, oturum açma ve parola kurtarma tarayıcınızda güvenle yapılır. AgentEra Studio parolanızı veya doğrulama kodunuzu hiçbir zaman toplamaz.",
+      "Kayıt, oturum açma ve parola kurtarma tarayıcınızda güvenle yapılır. Aera parolanızı veya doğrulama kodunuzu hiçbir zaman toplamaz.",
     openBrowser: "Oturum açmak veya kaydolmak için tarayıcıyı aç",
     waitingForBrowser: "Tarayıcı yetkilendirmesi bekleniyor…",
     cancel: "İptal",
@@ -11,14 +11,14 @@ const auth = {
     retrying: "Yeniden denetleniyor…",
     loginFailed:
       "Tarayıcı yetkilendirmesi tamamlanmadı. Lütfen yeniden deneyin.",
-    retryFailed: "AgentEra oturumunuzu doğrulayamadı. Lütfen yeniden deneyin.",
+    retryFailed: "Aera oturumunuzu doğrulayamadı. Lütfen yeniden deneyin.",
     cancelled: "Tarayıcı yetkilendirmesi iptal edildi.",
     secureStorageTitle: "Güvenli depolama kullanılamıyor",
     secureStorageDescription:
-      "AgentEra bu cihaz oturumunu güvenle saklayamıyor. Sistem anahtarlığını veya kimlik bilgisi hizmetini etkinleştirip yeniden deneyin. Düz metin depolama hiçbir zaman kullanılmaz.",
+      "Aera bu cihaz oturumunu güvenle saklayamıyor. Sistem anahtarlığını veya kimlik bilgisi hizmetini etkinleştirip yeniden deneyin. Düz metin depolama hiçbir zaman kullanılmaz.",
     reasons: {
       sign_in_required:
-        "AgentEra Studio'yu kullanmadan önce oturum açın veya hesap oluşturun.",
+        "Aera'yu kullanmadan önce oturum açın veya hesap oluşturun.",
       offline_expired:
         "Yedi günlük çevrimdışı erişiminiz sona erdi. İnternete bağlanıp yeniden oturum açın.",
       clock_rollback:
@@ -26,20 +26,20 @@ const auth = {
       device_revoked:
         "Bu cihaz artık yetkili değil. Yeniden yetkilendirmek için oturum açın.",
       account_disabled:
-        "Bu AgentEra hesabı devre dışı. Yardım için tarayıcıdaki hesap sayfasını kullanın.",
+        "Bu Aera hesabı devre dışı. Yardım için tarayıcıdaki hesap sayfasını kullanın.",
       account_pending_deletion:
-        "Bu hesap silinmeyi bekliyor ve AgentEra Studio'yu yetkilendiremez.",
+        "Bu hesap silinmeyi bekliyor ve Aera'yu yetkilendiremez.",
       secure_storage_unavailable:
-        "AgentEra oturumları için güvenli sistem depolaması gerekir.",
+        "Aera oturumları için güvenli sistem depolaması gerekir.",
     },
   },
   profile: {
     checkingTitle: "Yerel veri erişimi denetleniyor",
     checkingDescription:
-      "AgentEra özel Runtime içeriğinizi açmadan yalnızca sahiplik meta verilerini denetler.",
+      "Aera özel Runtime içeriğinizi açmadan yalnızca sahiplik meta verilerini denetler.",
     title: "Yerel verilerinizi nasıl kullanacağınızı seçin",
     existingDescription:
-      "Bu cihazda mevcut AgentEra Runtime verileri bulundu. Yerinde bağlayın veya ayrı bir boş alanla başlayın.",
+      "Bu cihazda mevcut Aera Runtime verileri bulundu. Yerinde bağlayın veya ayrı bir boş alanla başlayın.",
     noUpload:
       "Her iki seçenek de Memory, oturumlar, dosyalar, beceriler, USER verileri veya öğrenme durumunuzu yüklemez, kopyalamaz, birleştirmez ya da yeniden yazmaz.",
     useExisting: "Mevcut yerel verileri kullan",
@@ -51,13 +51,13 @@ const auth = {
       "Yerel Ajan çalışma ortamı otomatik olarak hazırlanıyor.",
     connectionBindingTitle: "Bu Runtime bağlantısı güvenceye alınıyor",
     connectionBindingDescription:
-      "Uzak veya SSH bağlantısı, oturum açmış AgentEra sahibine bağlanıyor. Ürün tokenları Runtime'a gönderilmez.",
+      "Uzak veya SSH bağlantısı, oturum açmış Aera sahibine bağlanıyor. Ürün tokenları Runtime'a gönderilmez.",
     otherOwnerTitle: "Bu yerel veriler başka bir hesaba ait",
     otherOwnerDescription:
-      "AgentEra başka bir hesaba ait yerel Ajan verilerini açmaz veya yeniden atamaz. Ayrı bir boş alan oluşturun ya da sahibiyle oturum açın.",
+      "Aera başka bir hesaba ait yerel Ajan verilerini açmaz veya yeniden atamaz. Ayrı bir boş alan oluşturun ya da sahibiyle oturum açın.",
     remoteOtherOwnerTitle: "Bu Runtime bağlantısı başka bir hesaba ait",
     remoteOtherOwnerDescription:
-      "AgentEra önceki sahibin uzak veya SSH bağlantı bağlamını devralmaz.",
+      "Aera önceki sahibin uzak veya SSH bağlantı bağlamını devralmaz.",
     differentAccount: "Farklı bir hesapla oturum aç",
     failedTitle: "Yerel erişim hazırlanamadı",
     failedDescription:
@@ -67,12 +67,12 @@ const auth = {
   offline: {
     title: "Yerel çevrimdışı mod",
     description:
-      "Bulut hesap özellikleri duraklatıldı. Yerel Agent, model API'leri ve Hermes öğrenmesi imzalı çevrimdışı süre dolana kadar kullanılabilir.",
+      "Bulut hesap özellikleri duraklatıldı. Yerel Agent, model API'leri ve Aera Runtime öğrenmesi imzalı çevrimdışı süre dolana kadar kullanılabilir.",
   },
   account: {
-    settingsNav: "AgentEra hesabı",
-    title: "AgentEra hesabı",
-    openMenu: "AgentEra hesap menüsünü aç",
+    settingsNav: "Aera hesabı",
+    title: "Aera hesabı",
+    openMenu: "Aera hesap menüsünü aç",
     online: "Çevrimiçi · doğrulandı",
     offline: "Çevrimdışı · yerel erişim",
     manage: "Hesabı yönet",
@@ -81,7 +81,7 @@ const auth = {
     switch: "Hesap değiştir",
     signOut: "Çıkış yap",
     actionFailed: "Bu hesap işlemi tamamlanamadı.",
-    unavailable: "AgentEra hesap bilgileri kullanılamıyor.",
+    unavailable: "Aera hesap bilgileri kullanılamıyor.",
     userId: "Hesap kimliği",
     deviceId: "Cihaz",
     offlineUntil:
@@ -89,7 +89,7 @@ const auth = {
     localDataWarning:
       "Bulut hesabını silmek veya çıkış yapmak yerel Ajan verilerini, Memory, oturum, dosya, beceri ya da öğrenme durumunu silmez, taşımaz, yüklemez veya bağını kaldırmaz.",
     rechargeSeparateAccount:
-      "Bakiye yükleme bağımsız model API sitesini açar. Hesapları, bakiyeleri, anahtarları, çerezleri ve tokenları AgentEra hesabından ayrıdır.",
+      "Bakiye yükleme bağımsız model API sitesini açar. Hesapları, bakiyeleri, anahtarları, çerezleri ve tokenları Aera hesabından ayrıdır.",
     pendingRevocationWarning:
       "Kontrol hizmetine erişilemezken çıkış yapılırsa, imzalı iptal otomatik teslim edilene kadar cihaz beş cihaz sınırında sayılabilir.",
   },

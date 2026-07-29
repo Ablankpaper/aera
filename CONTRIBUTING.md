@@ -1,6 +1,6 @@
-# Contributing to AgentEra Studio
+# Contributing to Aera
 
-Thanks for your interest in contributing to AgentEra Studio! Whether it's a bug fix, a new feature, improved docs, or just a typo — every contribution helps.
+Thanks for your interest in contributing to Aera! Whether it's a bug fix, a new feature, improved docs, or just a typo — every contribution helps.
 
 ## Languages
 
@@ -80,7 +80,7 @@ Have an idea? [Open an issue](https://github.com/bignormal/aera/issues/new) and 
 ## Project Structure
 
 ```text
-src/main/                Electron main process, IPC handlers, AgentEra integration
+src/main/                Electron main process, IPC handlers, Aera integration
 src/preload/             Secure renderer bridge
 src/renderer/src/        React app and UI components
 resources/               App icons and packaged assets

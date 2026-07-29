@@ -27,7 +27,7 @@ export class AgentManifestValidationError extends Error {
   readonly code: AgentManifestValidationErrorCode;
 
   constructor(code: AgentManifestValidationErrorCode) {
-    super(`AgentEra Agent manifest validation failed: ${code}.`);
+    super(`Aera Agent manifest validation failed: ${code}.`);
     this.name = "AgentManifestValidationError";
     this.code = code;
   }

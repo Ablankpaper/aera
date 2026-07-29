@@ -49,13 +49,13 @@ if (process.argv.includes("--plan")) {
 
 if (!existsSync(resolve(cloudRoot, "go.mod"))) {
   console.error(
-    `AgentEra cloud repository not found at ${cloudRoot}. Set AGENTERA_CLOUD_REPO to its checkout path.`,
+    `Aera cloud repository not found at ${cloudRoot}. Set AGENTERA_CLOUD_REPO to its checkout path.`,
   );
   process.exit(2);
 }
 
 for (const step of steps) {
-  console.log(`\n[AgentEra auth smoke] ${step.name}`);
+  console.log(`\n[Aera auth smoke] ${step.name}`);
   const result = spawnSync(step.command, step.args, {
     cwd: step.cwd,
     env: process.env,
@@ -70,4 +70,4 @@ for (const step of steps) {
   }
 }
 
-console.log("\nAgentEra authentication smoke gate passed.");
+console.log("\nAera authentication smoke gate passed.");

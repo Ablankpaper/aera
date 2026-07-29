@@ -5,7 +5,8 @@
 // the result under dist/winget/manifests/b/Bignormal/AgentEraStudio/<version>/.
 //
 // Run from CLI: VERSION=0.2.3 PUBLISH_OWNER=bignormal node scripts/generate-winget-manifests.mjs
-// Or import as ESM and call generateWingetManifests({ rootDir, version, name, publishOwner }).
+// The PackageIdentifier and output directory intentionally retain their legacy
+// values so existing WinGet installations upgrade in place.
 
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
@@ -16,10 +17,14 @@ import { fileURLToPath } from "node:url";
 export function generateWingetManifests({
   rootDir,
   version,
-  name,
+  artifactBaseName = "Aera",
   publishOwner,
 }) {
-  const exePath = join(rootDir, "dist", `${name}-${version}-setup.exe`);
+  const exePath = join(
+    rootDir,
+    "dist",
+    `${artifactBaseName}-${version}-setup.exe`,
+  );
   if (!existsSync(exePath)) {
     throw new Error(
       `NSIS installer not found at ${exePath}. ` +
@@ -32,7 +37,7 @@ export function generateWingetManifests({
     .digest("hex")
     .toUpperCase();
   const releaseDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-  const installerUrl = `https://github.com/${publishOwner}/aera/releases/download/v${version}/${name}-${version}-setup.exe`;
+  const installerUrl = `https://github.com/${publishOwner}/aera/releases/download/v${version}/${artifactBaseName}-${version}-setup.exe`;
   const releaseNotesUrl = `https://github.com/${publishOwner}/aera/releases/tag/v${version}`;
 
   const replacements = {
@@ -95,7 +100,7 @@ if (isCli) {
   const result = generateWingetManifests({
     rootDir,
     version: process.env.VERSION || pkg.version,
-    name: pkg.name,
+    artifactBaseName: "Aera",
     publishOwner: process.env.PUBLISH_OWNER || "bignormal",
   });
   console.log(`Winget manifests generated in ${result.outDir}`);

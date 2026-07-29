@@ -3,7 +3,7 @@ import { runtimeDistributionZhCn } from "../runtime-distribution";
 export default {
   title: "设置",
   sections: {
-    hermesAgent: "AgentEra Runtime",
+    hermesAgent: "Aera Runtime",
     appearance: "外观",
     privacy: "隐私",
     credentialPool: "凭据池",
@@ -11,7 +11,7 @@ export default {
   nav: {
     groups: {
       general: "通用",
-      hermes: "AgentEra Studio",
+      hermes: "Aera",
     },
     appearance: "外观",
     language: "语言",
@@ -25,7 +25,7 @@ export default {
   },
   runtimeDistribution: runtimeDistributionZhCn,
   agentSubtitle: "本地 AI 引擎",
-  desktopTitle: "AgentEra Studio",
+  desktopTitle: "Aera",
   desktopSubtitle: "当前桌面应用",
   statusUpToDate: "已是最新版本",
   statusUpdateAvailable: "有可用更新",
@@ -37,14 +37,14 @@ export default {
   onLatestVersion: "你正在使用最新版本。",
   analytics: {
     label: "发送匿名使用情况分析",
-    hint: "通过向项目的分析服务发送匿名、聚合的使用数据来帮助改进 AgentEra。您可以随时关闭。",
+    hint: "通过向项目的分析服务发送匿名、聚合的使用数据来帮助改进 Aera。您可以随时关闭。",
     disclosure: {
       uuid: "仅存储在本设备上的每次安装的随机标识符（不包含姓名、电子邮件或账户信息）。",
       platform: "您的操作系统、Electron 版本和 Node.js 版本。",
       navigation:
         "您在应用内打开了哪些界面（例如聊天、会话、设置）。不会收集任何聊天内容、提示词、模型响应或文件内容。",
       endpoint:
-        "数据将发送至 AgentEra 分析服务。已禁用会话录制和页面浏览自动捕获。",
+        "数据将发送至 Aera 分析服务。已禁用会话录制和页面浏览自动捕获。",
       notCollected:
         "永不收集：聊天消息、文件路径、API 密钥、模型配置、账户凭据。",
     },
@@ -108,7 +108,7 @@ export default {
   },
   notDetected: "未检测到",
   updatedSuccessfully: "更新成功！",
-  updateSuccess: "AgentEra 更新成功。",
+  updateSuccess: "Aera 更新成功。",
   updateFailed: "更新失败。",
   version: "v{{version}}",
   proxyPlaceholder: "例如:socks5://127.0.0.1:1080 或 http://proxy:8080",
@@ -131,23 +131,23 @@ export default {
   customBaseUrlHint: "兼容 OpenAI 的 API 地址",
   compatApiKeyHint: "将保存为 {{envVar}}；远程服务必须填写，本地服务可选。",
   poolHint:
-    "为同一提供商添加多个 API Key,以便自动轮换和负载均衡。AgentEra 会在它们之间轮流使用。",
+    "为同一提供商添加多个 API Key,以便自动轮换和负载均衡。Aera 会在它们之间轮流使用。",
   add: "添加",
   remove: "移除",
   keyLabel: "密钥",
   empty: "(空)",
   dataSection: "数据",
-  dataHint: "导出或导入你的 AgentEra 配置、会话、技能和记忆。",
+  dataHint: "导出或导入你的 Aera 配置、会话、技能和记忆。",
   encryptedBackup: {
     title: "端到端加密云备份",
     privacy:
-      "AgentEra 仅在本机加密允许备份的智能体数据；Cloud 只保存密文和公开设备元数据。",
+      "Aera 仅在本机加密允许备份的智能体数据；Cloud 只保存密文和公开设备元数据。",
     refresh: "刷新加密备份状态",
     loading: "正在加载加密备份状态…",
     signInRequired: "请登录并连接 Cloud 后管理加密备份。",
     recoverySetup: "恢复设置",
     recoverySetupHint:
-      "创建由设备持有的加密根密钥和仅显示一次的 24 词恢复短语。AgentEra 无法替你找回该短语。",
+      "创建由设备持有的加密根密钥和仅显示一次的 24 词恢复短语。Aera 无法替你找回该短语。",
     setup: "设置加密备份",
     registerThisDevice: "注册此设备以迁移",
     manualTitle: "备份当前智能体",
@@ -237,19 +237,19 @@ export default {
   latestVersion: "已是最新版本",
   autoUpgradeDesktop: "自动升级桌面应用",
   autoUpgradeDesktopHint:
-    "应用启动时自动从 GitHub 下载新版 AgentEra Studio。关闭后，启动时仍会显示升级按钮，但只有点击后才会下载。",
+    "应用启动时自动从 GitHub 下载新版 Aera。关闭后，启动时仍会显示升级按钮，但只有点击后才会下载。",
   runningDiagnosis: "运行中...",
   runDiagnosis: "运行诊断",
   running: "运行中...",
   debugDump: "调试转储",
   migrationDetected: "检测到 OpenClaw 安装",
   migrationDesc:
-    "在 <code>{{path}}</code> 发现 OpenClaw。你可以将配置、API Key、会话和技能迁移到 AgentEra。",
+    "在 <code>{{path}}</code> 发现 OpenClaw。你可以将配置、API Key、会话和技能迁移到 Aera。",
   migrationDismiss: "不再显示",
   migrationComplete: "导入完成。",
   migrationFailed: "导入失败。",
   migrating: "迁移中...",
-  migrateToHermes: "迁移到 AgentEra",
+  migrateToHermes: "迁移到 Aera",
   skip: "跳过",
   appearanceHint: "选择你偏好的界面外观",
   apiKeyPlaceholder: "API 密钥",
@@ -257,11 +257,11 @@ export default {
   connectionSection: "连接",
   modeLocal: "本地",
   modeRemote: "远程",
-  modeLocalHint: "使用本机安装的 AgentEra",
-  modeRemoteHint: "连接到网络或云服务器上的 AgentEra API",
+  modeLocalHint: "使用本机安装的 Aera",
+  modeRemoteHint: "连接到网络或云服务器上的 Aera API",
   remoteUrl: "远程服务器地址",
   remoteUrlHint:
-    "AgentEra API 服务器地址（需开放 /health 和 /v1/chat/completions）",
+    "Aera API 服务器地址（需开放 /health 和 /v1/chat/completions）",
   remoteApiKey: "API 密钥",
   remoteApiKeyHint:
     "与远程主机上的 API_SERVER_KEY 匹配。如果服务器接受未认证的请求，可以留空。",
@@ -284,7 +284,7 @@ export default {
   chatTransportDashboard: "控制台",
   chatTransportLegacy: "旧版",
   sshChatTransportHint:
-    "自动模式会先通过 SSH 隧道尝试连接 AgentEra Runtime 控制台 WebSocket，失败后再回退到旧版 SSH 聊天。控制台模式会固定使用上游控制台路径；旧版模式会保留原有 SSH 传输方式。",
+    "自动模式会先通过 SSH 隧道尝试连接 Aera Runtime 控制台 WebSocket，失败后再回退到旧版 SSH 聊天。控制台模式会固定使用上游控制台路径；旧版模式会保留原有 SSH 传输方式。",
   transportChecking: "正在检查传输方式…",
   transportCheckingShort: "检查中…",
   transportActiveLegacy: "当前使用：旧版",
@@ -302,26 +302,26 @@ export default {
   save: "保存",
   serverConfigTitle: "服务器配置",
   serverConfigHint:
-    "你已连接到远程 AgentEra 服务器。模型选择、提供商 API Key 和凭据均在服务器的 <code>~/.hermes/.env</code> 和 <code>config.yaml</code> 中管理。请在主机上编辑（例如 <code>docker exec -it hermes vi /opt/data/.env</code>）然后重启容器。",
+    "你已连接到远程 Aera 服务器。模型选择、提供商 API Key 和凭据均在服务器的 <code>~/.hermes/.env</code> 和 <code>config.yaml</code> 中管理。请在主机上编辑（例如 <code>docker exec -it hermes vi /opt/data/.env</code>）然后重启容器。",
   connectionMode: "模式",
   switchedToLocal: "已切换到本地模式",
 
   communityTitle: "社区",
   communityHint:
-    "加入我们的 Discord 频道，提出问题、报告问题，并与其他 AgentEra 用户交流。",
+    "加入我们的 Discord 频道，提出问题、报告问题，并与其他 Aera 用户交流。",
   joinDiscord: "加入 Discord 频道",
-  communityLinksHint: "加入 AgentEra Studio 社区，获取帮助并了解最新动态。",
+  communityLinksHint: "加入 Aera 社区，获取帮助并了解最新动态。",
   linkWebsite: "网站",
   linkDiscord: "Discord",
   linkX: "X",
   linkTelegram: "Telegram",
   supportTitle: "支持开发者",
   supportHint:
-    "AgentEra Studio 免费且开源。如果它对你有帮助，欢迎支持项目继续开发。",
+    "Aera 免费且开源。如果它对你有帮助，欢迎支持项目继续开发。",
   supportKofi: "通过 Ko-fi 支持",
 
   modeSsh: "SSH 隧道",
-  modeSshHint: "通过 SSH 隧道连接远程 AgentEra，无需暴露端口或 API Key。",
+  modeSshHint: "通过 SSH 隧道连接远程 Aera，无需暴露端口或 API Key。",
   sessionDisabledTitle: "会话历史已禁用 — 未设置 API_SERVER_KEY",
   sessionDisabledDesc:
     "没有 API Server Key 时，网关无法认证会话续接请求。消息仍可发送，但重启后不会保留对话历史。",
@@ -331,13 +331,13 @@ export default {
   remoteEnvSshDesc:
     "SSH 模式：在远程主机的 ~/.hermes/profiles/<profile>/.env 中添加 API_SERVER_KEY=<your-key>，然后重启远程网关。",
   remoteEnvDesc:
-    "远程模式：在远程 AgentEra 服务器的 .env 中添加 API_SERVER_KEY=<your-key>，然后重启网关。",
+    "远程模式：在远程 Aera 服务器的 .env 中添加 API_SERVER_KEY=<your-key>，然后重启网关。",
   sshHost: "SSH 主机",
   sshPort: "SSH 端口",
   sshUsername: "用户名",
   sshKeyPath: "私钥路径",
   sshKeyPathOptional: "（可选，默认为 ~/.ssh/id_rsa）",
-  sshRemotePort: "远程 AgentEra 端口",
+  sshRemotePort: "远程 Aera 端口",
   sshRemotePortDefault: "（默认 8642）",
   sshHint:
     "请确认可以在不出现密码提示的情况下运行 ssh {{cmd}}。首次连接会信任主机密钥并保存到 ~/.ssh/known_hosts；如果密钥之后发生变化，SSH 将拒绝连接。",
@@ -347,17 +347,17 @@ export default {
   testSsh: "测试 SSH 连接",
   connectSsh: "通过 SSH 连接",
   sshTitle: "通过 SSH 连接",
-  sshSubtitle: "通过 SSH 隧道连接远程 AgentEra，无需暴露端口或 API Key。",
+  sshSubtitle: "通过 SSH 隧道连接远程 Aera，无需暴露端口或 API Key。",
   sshHostPlaceholder: "192.168.1.100 或 myserver.local",
   sshUsernamePlaceholder: "hermes",
   sshErrorRequired: "主机和用户名为必填项。",
   sshErrorConnection:
-    "无法通过 SSH 连接或访问远程 AgentEra。请确认：\n• SSH 密钥正确（或默认的 ~/.ssh/id_rsa 可用）\n• 远程 AgentEra 网关正在运行\n• 远程端口正确（默认 8642）",
+    "无法通过 SSH 连接或访问远程 Aera。请确认：\n• SSH 密钥正确（或默认的 ~/.ssh/id_rsa 可用）\n• 远程 Aera 网关正在运行\n• 远程端口正确（默认 8642）",
   sshErrorFailed: "SSH 连接测试失败：{{msg}}",
   sshErrorFailedSimple: "SSH 连接测试失败。",
   remoteErrorUrl: "请输入 URL。",
   remoteErrorConnection:
-    "无法通过此 URL 访问 AgentEra。请检查 URL 和 API Key。\n\n如果服务器接受未认证请求（例如通过 SSH 隧道连接 localhost），请将 Key 留空。",
+    "无法通过此 URL 访问 Aera。请检查 URL 和 API Key。\n\n如果服务器接受未认证请求（例如通过 SSH 隧道连接 localhost），请将 Key 留空。",
   remoteErrorFailed: "连接测试失败。",
   sshSuccess: "SSH 隧道连接成功！",
   sshErrorRequiredSimple: "主机和用户名为必填项",

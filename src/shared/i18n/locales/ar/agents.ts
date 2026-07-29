@@ -3,7 +3,7 @@ import enAgents from "../en/agents";
 export default {
   title: "الوكلاء",
   subtitle:
-    "كل وكيل يعمل في مساحة AgentEra معزولة بإعداداته وذاكرته ومهاراته الخاصة",
+    "كل وكيل يعمل في مساحة Aera معزولة بإعداداته وذاكرته ومهاراته الخاصة",
   newAgent: "وكيل جديد",
   namePlaceholder: "اسم الوكيل (مثال: مبرمج)",
   cloneConfig: "نسخ الإعدادات ومفاتيح API",
@@ -66,7 +66,7 @@ export default {
   walletCreateFailed: "تعذر إضافة المحفظة",
   walletRecoveryTitle: "عبارة الاستعادة",
   walletRecoveryInfo:
-    "احفظ هذه العبارة الآن. لن يعرضها AgentEra مرة أخرى بعد إغلاق هذه النافذة.",
+    "احفظ هذه العبارة الآن. لن يعرضها Aera مرة أخرى بعد إغلاق هذه النافذة.",
   walletCopyRecovery: "نسخ العبارة",
   walletDone: "لقد حفظتها",
   walletBalanceLoading: "جارٍ التحميل...",
@@ -74,7 +74,7 @@ export default {
   walletBalanceRefresh: "تحديث",
   walletDeleteTitle: "إزالة المحفظة",
   walletDeleteWarning:
-    "سيؤدي هذا إلى إزالة هذه المحفظة من AgentEra بشكل دائم. تأكد من نسخ عبارة الاستعادة احتياطياً — فلن تتمكن من استعادة المحفظة بدونها.",
+    "سيؤدي هذا إلى إزالة هذه المحفظة من Aera بشكل دائم. تأكد من نسخ عبارة الاستعادة احتياطياً — فلن تتمكن من استعادة المحفظة بدونها.",
   walletDeleteConfirmLabel: "إزالة المحفظة",
   control: {
     experience: enAgents.control.experience,
@@ -82,7 +82,7 @@ export default {
     workspaceSpace: "مساحة العمل",
     workspaceSpaceTitle: "وكلاء مساحة العمل",
     workspaceAuthorSubtitle:
-      "أنشئ مسودات محلية وانشر إصدارات ثابتة لمساحة العمل واستخدمها؛ يتولى AgentEra الإعداد تلقائيًا.",
+      "أنشئ مسودات محلية وانشر إصدارات ثابتة لمساحة العمل واستخدمها؛ يتولى Aera الإعداد تلقائيًا.",
     workspaceMemberSubtitle:
       "استخدم إصدارات وكلاء مساحة العمل المعتمدة. التأليف والنشر غير متاحين للأعضاء.",
     role: {
@@ -134,7 +134,7 @@ export default {
       withdraw: "سحب الإرسال",
       confirmWithdrawal: "تأكيد السحب",
       withdrawalBoundary:
-        "يغلق السحب هذا الإرسال المعلق فقط؛ لا تتغير المسودات المحلية أو بيانات Hermes.",
+        "يغلق السحب هذا الإرسال المعلق فقط؛ لا تتغير المسودات المحلية أو بيانات Aera Runtime.",
       draftReadOnly:
         "مسودة المؤسسة للقراءة فقط. أعد الاتصال كمالك أو مسؤول قبل تعديلها أو إرسالها.",
     },

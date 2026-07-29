@@ -9,7 +9,7 @@ import { AgenteraUserProfileStore } from "../src/main/agentera-user-profile-stor
 const USER_ONE = "11111111-1111-4111-8111-111111111111";
 const USER_TWO = "22222222-2222-4222-8222-222222222222";
 
-describe("AgentEra local user profile store", () => {
+describe("Aera local user profile store", () => {
   let root = "";
   let userData = "";
 

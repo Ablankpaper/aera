@@ -17,7 +17,7 @@ export default {
   reasoningEffort: {
     title: "Reasoning Level",
     auto: "Auto",
-    autoDescription: "Let AgentEra and the model decide.",
+    autoDescription: "Let Aera and the model decide.",
     hint: "Auto is safest. Manual levels may be ignored or rejected by models that do not support reasoning effort.",
     saveError: "Could not save reasoning level. Selection was restored.",
     minimal: "Minimal",
@@ -43,11 +43,11 @@ export default {
   approve: "Approve",
   deny: "Deny",
   clarify: {
-    defaultQuestion: "AgentEra needs your input.",
+    defaultQuestion: "Aera needs your input.",
     placeholder: "Type your answer…  (Ctrl+Enter to send)",
     send: "Send",
-    skip: "Skip — let AgentEra decide",
-    skipped: "Skipped — AgentEra decided",
+    skip: "Skip — let Aera decide",
+    skipped: "Skipped — Aera decided",
     error: "Couldn't deliver your answer — the turn may have ended. Try again.",
   },
   memoryCandidate: {
@@ -62,6 +62,55 @@ export default {
     notSaved: "Not saved",
     waitForReply: "You can save this after the Agent finishes replying.",
     error: "Couldn't save this. Please try again.",
+  },
+  agentCreation: {
+    title: "Let's create this Agent",
+    description:
+      "Complete the missing details. A real product draft will be created in the captured work context, with safe defaults for anything you leave blank.",
+    resolving: "Checking where this Agent should belong…",
+    targetLabel: "Belongs to",
+    target: {
+      USER: "My",
+      WORKSPACE: "Current team / project",
+      ORGANIZATION: "Current organization",
+      UNKNOWN: "Checking…",
+    },
+    name: "Agent name",
+    defaultName: "New Agent",
+    purpose: "Role and responsibilities",
+    purposePlaceholder:
+      "For example: organize customer requests and draft replies",
+    defaultHint:
+      "Leave responsibilities blank to use the general-purpose default configuration.",
+    cancel: "Cancel",
+    createDraft: "Create draft",
+    creating: "Creating…",
+    retry: "Retry",
+    createdTitle: "“{{name}}” draft created",
+    createdDescription:
+      "It is now stored in the product Agent list. Open My Agents to refine, publish, or publish and use it.",
+    openMyAgents: "Open My Agents",
+    done: "Done",
+    contextChanged:
+      "Your work context changed after this request. Return to the original context or start a new creation request so ownership is never changed silently.",
+    serviceUnavailable: "The Agent service is temporarily unavailable.",
+    createFailed: "The Agent draft could not be created.",
+  },
+  boundary: {
+    label: "Conversation data boundary",
+    runningIn: "Running in:",
+    visibility: "Visibility:",
+    scope: {
+      USER: "My",
+      WORKSPACE: "Current team / project",
+      ORGANIZATION: "Current organization",
+    },
+    visibilityValue: {
+      PRIVATE: "Only me",
+      WORKSPACE_SHARED: "Shared with team / project",
+      ORGANIZATION_SHARED: "Shared with organization",
+      ARTIFACT_ONLY: "Final result only",
+    },
   },
   thinking: "Thinking…",
   thought: "Thought",
@@ -155,7 +204,7 @@ export default {
     model: "Show or switch the current model",
     memory: "Show agent memory",
     persona: "Show current persona",
-    version: "Show AgentEra version",
+    version: "Show Aera version",
   },
   queued: "{{count}} message(s) queued — will send when the agent finishes",
   queuedCount: "{{count}} queued",
@@ -228,7 +277,7 @@ export default {
   followUs: {
     title: "Follow Us on X",
     description:
-      "Stay up to date with the latest AgentEra Studio features, tips, and updates. Follow us on X!",
+      "Stay up to date with the latest Aera features, tips, and updates. Follow us on X!",
     follow: "Follow",
     notNow: "Not Now",
   },

@@ -1,5 +1,14 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  writeFile,
+} from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 
 import { expect, test } from "playwright/test";
@@ -86,6 +95,7 @@ type OrganizationMethod =
   | "patchMember"
   | "removeMember"
   | "createInvitation"
+  | "revokeInvitation"
   | "acceptInvitation";
 
 interface AccountIdentity {
@@ -104,6 +114,12 @@ let ownerDevice: AgentControlDevice | null = null;
 let adminDevice: AgentControlDevice | null = null;
 let auditorDevice: AgentControlDevice | null = null;
 let memberDevice: AgentControlDevice | null = null;
+let visionModelServer: Server | null = null;
+const visionModelRequests: Array<{
+  method: string;
+  path: string;
+  body: unknown;
+}> = [];
 
 test.setTimeout(360_000);
 
@@ -205,7 +221,7 @@ async function createInvitationAndAccept(
   owner: AgentControlDevice,
   invitee: AgentControlDevice,
   organizationId: string,
-): Promise<void> {
+): Promise<OrganizationInvitationCreation> {
   const invitation = unwrapOrganization(
     await invokeOrganization<OrganizationInvitationCreation>(
       owner,
@@ -221,6 +237,7 @@ async function createInvitationAndAccept(
       token: invitation.token,
     }),
   );
+  return invitation;
 }
 
 async function organizationMembers(
@@ -385,7 +402,7 @@ async function approve(
 ): Promise<OrganizationAgentSubmissionSummary> {
   const preview = await prepareApproval(device, submissionId);
   if (!preview.reviewHandle) {
-    throw new Error("A different Organization reviewer is required.");
+    throw new Error("The current Owner or Admin did not receive a review handle.");
   }
   return unwrapAgent(
     await invokeAgentera<OrganizationAgentSubmissionSummary>(
@@ -486,11 +503,96 @@ async function attemptBoundConversation(
   );
 }
 
+async function startVisionModelServer(): Promise<string> {
+  visionModelServer = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      let body: unknown = null;
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      } catch {
+        response.writeHead(400).end();
+        return;
+      }
+      visionModelRequests.push({
+        method: request.method ?? "",
+        path: request.url ?? "",
+        body,
+      });
+      if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
+        response.writeHead(404).end();
+        return;
+      }
+      const stream =
+        typeof body === "object" &&
+        body !== null &&
+        (body as { stream?: unknown }).stream === true;
+      if (!stream) {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(
+          JSON.stringify({
+            id: "vision-e2e",
+            object: "chat.completion",
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "IMAGE_TRANSPORT_RECOVERED",
+                },
+                finish_reason: "stop",
+              },
+            ],
+          }),
+        );
+        return;
+      }
+      response.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+      response.write(
+        `data: ${JSON.stringify({
+          id: "vision-e2e",
+          object: "chat.completion.chunk",
+          choices: [
+            {
+              index: 0,
+              delta: {
+                role: "assistant",
+                content: "IMAGE_TRANSPORT_RECOVERED",
+              },
+              finish_reason: null,
+            },
+          ],
+        })}\n\n`,
+      );
+      response.end("data: [DONE]\n\n");
+    });
+  });
+  await new Promise<void>((resolveListen, rejectListen) => {
+    visionModelServer!.once("error", rejectListen);
+    visionModelServer!.listen(0, "127.0.0.1", () => resolveListen());
+  });
+  const address = visionModelServer.address() as AddressInfo;
+  return `http://127.0.0.1:${address.port}`;
+}
+
+async function stopVisionModelServer(): Promise<void> {
+  const server = visionModelServer;
+  visionModelServer = null;
+  if (!server) return;
+  await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+}
+
 test.beforeAll(async () => {
   harness = await createAgentControlHarness();
 });
 
 test.afterAll(async () => {
+  await stopVisionModelServer();
   await closeAgentControlHarness(harness);
   harness = null;
   ownerDevice = null;
@@ -501,7 +603,7 @@ test.afterAll(async () => {
 
 // @lat: [[agentera-organizations#Organization Agent approval#Multi-account executable proof]]
 // @lat: [[agentera-agent-control-plane#Release gate#Organization Agent isolation]]
-test("organization agent requires two people and keeps every employee runtime private", async () => {
+test("organization agent needs one current reviewer and keeps every employee runtime private", async () => {
   if (!harness)
     throw new Error("Organization Agent E2E harness is unavailable.");
 
@@ -541,13 +643,54 @@ test("organization agent requires two people and keeps every employee runtime pr
       displayName: "Organization Agent E2E",
     }),
   );
-  await createInvitationAndAccept(owner.device, admin.device, organization.id);
-  await createInvitationAndAccept(
+  const adminInvitation = await createInvitationAndAccept(
+    owner.device,
+    admin.device,
+    organization.id,
+  );
+  expect(
+    await invokeOrganization(auditor.device, "acceptInvitation", {
+      token: adminInvitation.token,
+    }),
+  ).toEqual({ ok: false, errorCode: "invitation_unavailable" });
+  const auditorInvitation = await createInvitationAndAccept(
     owner.device,
     auditor.device,
     organization.id,
   );
-  await createInvitationAndAccept(owner.device, member.device, organization.id);
+  expect(
+    await invokeOrganization(member.device, "acceptInvitation", {
+      token: auditorInvitation.token,
+    }),
+  ).toEqual({ ok: false, errorCode: "invitation_unavailable" });
+  const revokedMemberInvitation = unwrapOrganization(
+    await invokeOrganization<OrganizationInvitationCreation>(
+      owner.device,
+      "createInvitation",
+      { organizationId: organization.id },
+    ),
+  );
+  unwrapOrganization(
+    await invokeOrganization<true>(owner.device, "revokeInvitation", {
+      organizationId: organization.id,
+      invitationId: revokedMemberInvitation.invitation.id,
+    }),
+  );
+  expect(
+    await invokeOrganization(member.device, "acceptInvitation", {
+      token: revokedMemberInvitation.token,
+    }),
+  ).toEqual({ ok: false, errorCode: "invitation_unavailable" });
+  const memberInvitation = await createInvitationAndAccept(
+    owner.device,
+    member.device,
+    organization.id,
+  );
+  expect(
+    await invokeOrganization(admin.device, "acceptInvitation", {
+      token: memberInvitation.token,
+    }),
+  ).toEqual({ ok: false, errorCode: "invitation_unavailable" });
 
   let members = await organizationMembers(owner.device, organization.id);
   const adminMember = members.find(
@@ -602,7 +745,13 @@ test("organization agent requires two people and keeps every employee runtime pr
     organizationDraft(LOCKED_V1_MARKER),
   );
   const selfReview = await prepareApproval(owner.device, initial.submission.id);
-  expect(selfReview).toMatchObject({ selfReview: true, reviewHandle: null });
+  expect(selfReview).toMatchObject({
+    selfReview: true,
+    reviewHandle: expect.any(String),
+  });
+  if (!selfReview.reviewHandle) {
+    throw new Error("Single-owner review handle is missing.");
+  }
   expect(
     await invokeAgentera(
       member.device,
@@ -619,7 +768,16 @@ test("organization agent requires two people and keeps every employee runtime pr
     }),
   ).toEqual({ ok: false, errorCode: "organization_agent_forbidden" });
 
-  const approvedInitial = await approve(admin.device, initial.submission.id);
+  const approvedInitial = unwrapAgent(
+    await invokeAgentera<OrganizationAgentSubmissionSummary>(
+      owner.device,
+      "confirmOrganizationReview",
+      {
+        reviewHandle: selfReview.reviewHandle,
+        confirmation: "approve-organization-agent",
+      },
+    ),
+  );
   expect(approvedInitial.status).toBe("approved");
   const definitions = unwrapAgent(
     await invokeAgentera<AgenteraAgentDefinitionSummary[]>(
@@ -695,6 +853,64 @@ test("organization agent requires two people and keeps every employee runtime pr
   );
 
   const memberProfile = deviceProfilePath(member.device, MEMBER_PROFILE);
+  const visionModelOrigin = await startVisionModelServer();
+  await writeFile(
+    join(memberProfile, "config.yaml"),
+    [
+      "model:",
+      "  provider: custom",
+      "  model: e2e-vision",
+      `  base_url: "${visionModelOrigin}/v1"`,
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await appendFile(
+    join(memberProfile, ".env"),
+    "CUSTOM_API_KEY=e2e-loopback-only\n",
+    "utf8",
+  );
+  const imageTurn = await member.device.page.evaluate(
+    async ({ profile, attachment }) => {
+      try {
+        const result = await window.hermesAPI.sendMessage(
+          "Describe this test image.",
+          profile,
+          undefined,
+          undefined,
+          [attachment],
+          undefined,
+          "member-image-recovery",
+        );
+        return { ok: true as const, result };
+      } catch (error) {
+        return {
+          ok: false as const,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    {
+      profile: MEMBER_PROFILE,
+      attachment: {
+        id: "vision-recovery-image",
+        kind: "image" as const,
+        name: "pixel.png",
+        mime: "image/png",
+        size: 68,
+        dataUrl:
+          "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      },
+    },
+  );
+  expect(imageTurn).toMatchObject({
+    ok: true,
+    result: { response: expect.stringContaining("IMAGE_TRANSPORT_RECOVERED") },
+  });
+  expect(JSON.stringify(visionModelRequests)).toContain(
+    "data:image/png;base64,",
+  );
+  await stopVisionModelServer();
   await writeMemberLearning(memberProfile);
   const memberPrivate = await privateProfileSnapshot(
     memberProfile,
@@ -703,16 +919,73 @@ test("organization agent requires two people and keeps every employee runtime pr
   await startBoundConversation(member.device, MEMBER_PROFILE, "member-v1");
   await expect
     .poll(
-      async () => (await localAgentControlState(member.device)).bindings.length,
+      async () =>
+        (await localAgentControlState(member.device)).bindings.find(
+          ({ conversationKey }) => conversationKey === "member-v1",
+        ) ?? null,
     )
-    .toBe(1);
+    .toMatchObject({
+      conversationKey: "member-v1",
+      agentVersionId: versionOne.id,
+      agentInstallationId: installation.id,
+    });
   expect(
-    (await localAgentControlState(member.device)).bindings[0],
+    (await localAgentControlState(member.device)).bindings.find(
+      ({ conversationKey }) => conversationKey === "member-v1",
+    ),
   ).toMatchObject({
     conversationKey: "member-v1",
     agentVersionId: versionOne.id,
     agentInstallationId: installation.id,
   });
+  const organizationBoundary = await member.device.page.evaluate(
+    ({ runId, profile }) =>
+      window.agenteraGlobalProfile.prepareConversationContext({
+        runId,
+        profile,
+        resumeSessionId: null,
+      }),
+    { runId: "member-v1", profile: MEMBER_PROFILE },
+  );
+  expect(organizationBoundary.conversationBoundary).toEqual({
+    scope: "ORGANIZATION",
+    scopeId: organization.id,
+    scopeDisplayName: organization.displayName,
+    visibility: "PRIVATE",
+    origin: "NEW_CONVERSATION",
+  });
+
+  const selectedPersonal = unwrapProductSpace(
+    (await member.device.page.evaluate(() =>
+      window.agenteraProductSpace.select({ kind: "PERSONAL" }),
+    )) as ProductSpaceResult<ProductSpacePublicState>,
+  );
+  expect(selectedPersonal.selected).toEqual({ kind: "PERSONAL" });
+  const bindingsBeforeScopeSwitchAttempt = (
+    await localAgentControlState(member.device)
+  ).bindings.length;
+  const pinnedAfterScopeSwitch = await member.device.page.evaluate(
+    ({ runId, profile }) =>
+      window.agenteraGlobalProfile.prepareConversationContext({
+        runId,
+        profile,
+        resumeSessionId: null,
+      }),
+    { runId: "member-v1", profile: MEMBER_PROFILE },
+  );
+  expect(pinnedAfterScopeSwitch.conversationBoundary).toEqual(
+    organizationBoundary.conversationBoundary,
+  );
+  const crossScopeAttempt = await attemptBoundConversation(
+    member.device,
+    MEMBER_PROFILE,
+    "member-personal-cross-scope",
+  );
+  expect(crossScopeAttempt.outcome).toBe("rejected");
+  expect((await localAgentControlState(member.device)).bindings).toHaveLength(
+    bindingsBeforeScopeSwitchAttempt,
+  );
+  await selectOrganization(member.device, organization.id, "member");
 
   const demotionSubmission = await createAndSubmit(
     owner.device,
@@ -831,9 +1104,16 @@ test("organization agent requires two people and keeps every employee runtime pr
   await startBoundConversation(member.device, MEMBER_PROFILE, "member-v2");
   await expect
     .poll(
-      async () => (await localAgentControlState(member.device)).bindings.length,
+      async () =>
+        (await localAgentControlState(member.device)).bindings.find(
+          ({ conversationKey }) => conversationKey === "member-v2",
+        ) ?? null,
     )
-    .toBe(2);
+    .toMatchObject({
+      conversationKey: "member-v2",
+      agentVersionId: versionTwo.id,
+      agentInstallationId: installation.id,
+    });
   const versionedBindings = (await localAgentControlState(member.device))
     .bindings;
   expect(
@@ -875,9 +1155,30 @@ test("organization agent requires two people and keeps every employee runtime pr
   );
   await expect
     .poll(
-      async () => (await localAgentControlState(memberDevice!)).bindings.length,
+      async () =>
+        (await localAgentControlState(memberDevice!)).bindings.find(
+          ({ conversationKey }) => conversationKey === "member-offline-v2",
+        ) ?? null,
     )
-    .toBe(3);
+    .toMatchObject({
+      conversationKey: "member-offline-v2",
+      agentVersionId: versionTwo.id,
+      agentInstallationId: installation.id,
+    });
+  const offlineBindings = (await localAgentControlState(memberDevice)).bindings;
+  expect(
+    new Set(offlineBindings.map(({ conversationKey }) => conversationKey)).size,
+  ).toBe(offlineBindings.length);
+  expect(
+    offlineBindings.find(
+      ({ conversationKey }) => conversationKey === "member-v1",
+    )?.agentVersionId,
+  ).toBe(versionOne.id);
+  expect(
+    offlineBindings.find(
+      ({ conversationKey }) => conversationKey === "member-v2",
+    )?.agentVersionId,
+  ).toBe(versionTwo.id);
   expect(
     await privateProfileSnapshot(memberProfile, MEMBER_PRIVATE_MARKERS),
   ).toEqual(memberPrivate);
