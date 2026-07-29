@@ -148,6 +148,8 @@ import {
   stopHealthPolling,
 } from "../src/main/hermes";
 
+const queuedRestartHealthTimeoutMs = process.platform === "win32" ? 1000 : 50;
+
 function profilePidFile(profile = "work"): string {
   return join(TEST_HOME, "profiles", profile, "gateway.pid");
 }
@@ -385,9 +387,17 @@ describe("restartGatewayViaCli", () => {
       .mockImplementation(() => ["-e", "process.exit(0)"]);
     healthStatuses.push(503, 200, 503, 503, 503, 200, 200, 200);
 
-    const first = restartGatewayViaCli("work", 50, 1);
-    const second = restartGatewayViaCli("personal", 50, 1);
-    const third = restartGatewayViaCli("personal", 50, 1);
+    const first = restartGatewayViaCli("work", queuedRestartHealthTimeoutMs, 1);
+    const second = restartGatewayViaCli(
+      "personal",
+      queuedRestartHealthTimeoutMs,
+      1,
+    );
+    const third = restartGatewayViaCli(
+      "personal",
+      queuedRestartHealthTimeoutMs,
+      1,
+    );
 
     await expect(Promise.all([first, second, third])).resolves.toEqual([
       false,

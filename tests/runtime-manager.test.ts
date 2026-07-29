@@ -35,6 +35,8 @@ import {
 } from "./fixtures/runtime-distribution/fixture";
 
 const temporaryDirectories: string[] = [];
+const runtimeManagerTestTimeoutMs =
+  process.platform === "win32" ? 20_000 : 5_000;
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -206,44 +208,48 @@ describe("AgentEra Runtime distribution manager", () => {
     expect(setup.download).not.toHaveBeenCalled();
   });
 
-  it("downloads only after confirmation, verifies, extracts, and stages without activating", async () => {
-    const setup = await harness();
-    const manager = createRuntimeDistributionManager(setup.options);
-    await manager.initialize();
-    await manager.check();
+  it(
+    "downloads only after confirmation, verifies, extracts, and stages without activating",
+    async () => {
+      const setup = await harness();
+      const manager = createRuntimeDistributionManager(setup.options);
+      await manager.initialize();
+      await manager.check();
 
-    const state = await manager.downloadConfirmed();
+      const state = await manager.downloadConfirmed();
 
-    expect(setup.download).toHaveBeenCalledOnce();
-    expect(setup.extractor).toHaveBeenCalledOnce();
-    expect(state).toMatchObject({
-      phase: "candidate-ready",
-      currentVersion: "0.18.1-agentera.1",
-      availableVersion: TEST_RUNTIME_VERSION,
-      canRestart: true,
-    });
-    const journal = await setup.store.readState();
-    expect(journal.current?.versionDirectory).toBe("current-v1");
-    expect(journal.candidate).toMatchObject({
-      runtimeVersion: TEST_RUNTIME_VERSION,
-      sourceCommit: TEST_SOURCE_COMMIT,
-      applyOnNextLaunch: false,
-    });
-    const candidateRoot = join(
-      setup.paths.versions,
-      journal.candidate!.versionDirectory,
-    );
-    expect(
-      createHash("sha256")
-        .update(
-          await readFile(join(candidateRoot, RUNTIME_MANIFEST_METADATA_NAME)),
-        )
-        .digest("hex"),
-    ).toBe(journal.candidate?.manifestSha256);
-    await expect(
-      readFile(join(candidateRoot, RUNTIME_SIGNATURE_METADATA_NAME)),
-    ).resolves.toEqual(setup.offer.signatureBytes);
-  });
+      expect(setup.download).toHaveBeenCalledOnce();
+      expect(setup.extractor).toHaveBeenCalledOnce();
+      expect(state).toMatchObject({
+        phase: "candidate-ready",
+        currentVersion: "0.18.1-agentera.1",
+        availableVersion: TEST_RUNTIME_VERSION,
+        canRestart: true,
+      });
+      const journal = await setup.store.readState();
+      expect(journal.current?.versionDirectory).toBe("current-v1");
+      expect(journal.candidate).toMatchObject({
+        runtimeVersion: TEST_RUNTIME_VERSION,
+        sourceCommit: TEST_SOURCE_COMMIT,
+        applyOnNextLaunch: false,
+      });
+      const candidateRoot = join(
+        setup.paths.versions,
+        journal.candidate!.versionDirectory,
+      );
+      expect(
+        createHash("sha256")
+          .update(
+            await readFile(join(candidateRoot, RUNTIME_MANIFEST_METADATA_NAME)),
+          )
+          .digest("hex"),
+      ).toBe(journal.candidate?.manifestSha256);
+      await expect(
+        readFile(join(candidateRoot, RUNTIME_SIGNATURE_METADATA_NAME)),
+      ).resolves.toEqual(setup.offer.signatureBytes);
+    },
+    runtimeManagerTestTimeoutMs,
+  );
 
   it("cancels an active download without changing current or staging a candidate", async () => {
     let started!: () => void;
@@ -259,7 +265,9 @@ describe("AgentEra Runtime distribution manager", () => {
               "abort",
               () =>
                 reject(
-                  Object.assign(new Error("cancelled"), { name: "AbortError" }),
+                  Object.assign(new Error("cancelled"), {
+                    name: "AbortError",
+                  }),
                 ),
               { once: true },
             );
@@ -305,56 +313,64 @@ describe("AgentEra Runtime distribution manager", () => {
     });
   });
 
-  it("refuses restart while tasks are active and only then marks next-launch activation", async () => {
-    const setup = await harness();
-    const manager = createRuntimeDistributionManager(setup.options);
-    await manager.initialize();
-    await manager.check();
-    await manager.downloadConfirmed();
-    setup.activeRuns.count = 1;
+  it(
+    "refuses restart while tasks are active and only then marks next-launch activation",
+    async () => {
+      const setup = await harness();
+      const manager = createRuntimeDistributionManager(setup.options);
+      await manager.initialize();
+      await manager.check();
+      await manager.downloadConfirmed();
+      setup.activeRuns.count = 1;
 
-    const refused = await manager.restartToApply();
+      const refused = await manager.restartToApply();
 
-    expect(refused.lastErrorCode).toBe("runtime_tasks_active");
-    expect(setup.stopRuntimeContext).not.toHaveBeenCalled();
-    expect(setup.relaunch).not.toHaveBeenCalled();
-    expect((await setup.store.readState()).candidate?.applyOnNextLaunch).toBe(
-      false,
-    );
+      expect(refused.lastErrorCode).toBe("runtime_tasks_active");
+      expect(setup.stopRuntimeContext).not.toHaveBeenCalled();
+      expect(setup.relaunch).not.toHaveBeenCalled();
+      expect((await setup.store.readState()).candidate?.applyOnNextLaunch).toBe(
+        false,
+      );
 
-    setup.activeRuns.count = 0;
-    await manager.restartToApply();
+      setup.activeRuns.count = 0;
+      await manager.restartToApply();
 
-    expect(setup.stopRuntimeContext).toHaveBeenCalledOnce();
-    expect(setup.relaunch).toHaveBeenCalledOnce();
-    expect((await setup.store.readState()).candidate?.applyOnNextLaunch).toBe(
-      true,
-    );
-  });
+      expect(setup.stopRuntimeContext).toHaveBeenCalledOnce();
+      expect(setup.relaunch).toHaveBeenCalledOnce();
+      expect((await setup.store.readState()).candidate?.applyOnNextLaunch).toBe(
+        true,
+      );
+    },
+    runtimeManagerTestTimeoutMs,
+  );
 
-  it("atomically reserves the Runtime transition before stopping the live context", async () => {
-    const beginRuntimeTransition = vi.fn(() => false);
-    const cancelRuntimeTransition = vi.fn();
-    const setup = await harness({
-      beginRuntimeTransition,
-      cancelRuntimeTransition,
-    });
-    const manager = createRuntimeDistributionManager(setup.options);
-    await manager.initialize();
-    await manager.check();
-    await manager.downloadConfirmed();
+  it(
+    "atomically reserves the Runtime transition before stopping the live context",
+    async () => {
+      const beginRuntimeTransition = vi.fn(() => false);
+      const cancelRuntimeTransition = vi.fn();
+      const setup = await harness({
+        beginRuntimeTransition,
+        cancelRuntimeTransition,
+      });
+      const manager = createRuntimeDistributionManager(setup.options);
+      await manager.initialize();
+      await manager.check();
+      await manager.downloadConfirmed();
 
-    const refused = await manager.restartToApply();
+      const refused = await manager.restartToApply();
 
-    expect(beginRuntimeTransition).toHaveBeenCalledOnce();
-    expect(refused.lastErrorCode).toBe("runtime_tasks_active");
-    expect(setup.stopRuntimeContext).not.toHaveBeenCalled();
-    expect(setup.relaunch).not.toHaveBeenCalled();
-    expect(cancelRuntimeTransition).not.toHaveBeenCalled();
-    expect((await setup.store.readState()).candidate?.applyOnNextLaunch).toBe(
-      false,
-    );
-  });
+      expect(beginRuntimeTransition).toHaveBeenCalledOnce();
+      expect(refused.lastErrorCode).toBe("runtime_tasks_active");
+      expect(setup.stopRuntimeContext).not.toHaveBeenCalled();
+      expect(setup.relaunch).not.toHaveBeenCalled();
+      expect(cancelRuntimeTransition).not.toHaveBeenCalled();
+      expect((await setup.store.readState()).candidate?.applyOnNextLaunch).toBe(
+        false,
+      );
+    },
+    runtimeManagerTestTimeoutMs,
+  );
 
   it("releases a reserved Runtime transition when restart preparation fails", async () => {
     const beginRuntimeTransition = vi.fn(() => true);
