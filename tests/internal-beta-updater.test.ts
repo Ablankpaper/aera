@@ -21,6 +21,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildMacUpdateHelperScript,
   compareInternalBetaVersions,
+  extractDesktopUpdateZip,
   InternalBetaDesktopUpdater,
   resolveCurrentMacAppPath,
   type ArtifactDownloadRequest,
@@ -32,8 +33,8 @@ import { canonicalJsonBytes } from "../src/main/agentera-runtime-distribution/ma
 const BASE_URL = new URL(
   "https://updates.example.test/desktop-updates/internal-beta",
 );
-const CURRENT_VERSION = "0.7.4-internal-beta.7";
-const NEXT_VERSION = "0.7.4-internal-beta.8";
+const CURRENT_VERSION = "0.7.4-internal-beta.8";
+const NEXT_VERSION = "0.7.4-internal-beta.9";
 const KEY_ID = "desktop-update-test";
 const createdDirectories: string[] = [];
 const execFile = promisify(execFileCallback);
@@ -241,6 +242,49 @@ describe("Internal Beta desktop updater", () => {
     expect(compareInternalBetaVersions(CURRENT_VERSION, NEXT_VERSION)).toBe(-1);
     expect(compareInternalBetaVersions(NEXT_VERSION, CURRENT_VERSION)).toBe(1);
     expect(compareInternalBetaVersions(NEXT_VERSION, NEXT_VERSION)).toBe(0);
+  });
+
+  it("disables Electron ASAR interception while extracting an update", async () => {
+    const electronProcess = process as NodeJS.Process & { noAsar?: boolean };
+    const previousNoAsar = electronProcess.noAsar;
+    electronProcess.noAsar = false;
+    const extractor = vi.fn(async () => {
+      expect(electronProcess.noAsar).toBe(true);
+    });
+
+    try {
+      await extractDesktopUpdateZip(
+        "/tmp/aera-update.zip",
+        "/tmp/aera-update-staging",
+        extractor,
+      );
+      expect(extractor).toHaveBeenCalledOnce();
+      expect(electronProcess.noAsar).toBe(false);
+    } finally {
+      electronProcess.noAsar = previousNoAsar;
+    }
+  });
+
+  it("restores Electron ASAR interception after extraction fails", async () => {
+    const electronProcess = process as NodeJS.Process & { noAsar?: boolean };
+    const previousNoAsar = electronProcess.noAsar;
+    electronProcess.noAsar = false;
+
+    try {
+      await expect(
+        extractDesktopUpdateZip(
+          "/tmp/aera-update.zip",
+          "/tmp/aera-update-staging",
+          async () => {
+            expect(electronProcess.noAsar).toBe(true);
+            throw new Error("fixture extraction failed");
+          },
+        ),
+      ).rejects.toThrow("fixture extraction failed");
+      expect(electronProcess.noAsar).toBe(false);
+    } finally {
+      electronProcess.noAsar = previousNoAsar;
+    }
   });
 
   it.skipIf(process.platform === "win32")(

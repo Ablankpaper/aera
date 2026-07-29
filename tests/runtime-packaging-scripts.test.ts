@@ -384,7 +384,13 @@ describe("Runtime Seed packaging scripts", () => {
         filter: ["**/*", "!.gitkeep"],
       },
     ]);
-    expect(config.files).toContain("!resources/agentera-runtime-seed/**");
+    expect(config.files).toEqual([
+      "out/**/*",
+      "package.json",
+      "resources/icon.png",
+      "resources/agentera-runtime-trust.json",
+      "!resources/agentera-runtime-seed/**",
+    ]);
     const scripts = JSON.parse(
       readFileSync(join(process.cwd(), "package.json"), "utf8"),
     ).scripts;

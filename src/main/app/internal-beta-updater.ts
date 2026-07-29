@@ -583,7 +583,7 @@ async function defaultPrepareArtifact(
   if (offer.artifact.platform === "win32") return;
   await rm(stagingDirectory, { recursive: true, force: true });
   await mkdir(stagingDirectory, { recursive: true, mode: 0o700 });
-  await extractZip(artifactPath, { dir: stagingDirectory });
+  await extractDesktopUpdateZip(artifactPath, stagingDirectory);
   const children = await readdir(stagingDirectory);
   if (
     children.length !== 1 ||
@@ -644,6 +644,26 @@ async function defaultPrepareArtifact(
   ]);
   if (!architectures.split(/\s+/u).includes("arm64")) {
     throw new DesktopUpdateError("Desktop update app is not Apple Silicon");
+  }
+}
+
+type DesktopUpdateZipExtractor = (
+  archivePath: string,
+  options: { dir: string },
+) => Promise<void>;
+
+export async function extractDesktopUpdateZip(
+  archivePath: string,
+  stagingDirectory: string,
+  extractor: DesktopUpdateZipExtractor = extractZip,
+): Promise<void> {
+  const electronProcess = process as NodeJS.Process & { noAsar?: boolean };
+  const previousNoAsar = electronProcess.noAsar;
+  electronProcess.noAsar = true;
+  try {
+    await extractor(archivePath, { dir: stagingDirectory });
+  } finally {
+    electronProcess.noAsar = previousNoAsar;
   }
 }
 

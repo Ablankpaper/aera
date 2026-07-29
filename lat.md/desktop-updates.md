@@ -22,9 +22,13 @@ Internal Beta update trust is independent from GitHub and offline entitlements. 
 
 On macOS, the verified ZIP must contain exactly one app with bundle ID `com.bignormal.agentera.studio`, the signed manifest version, and an arm64 executable. Restart launches a detached helper that moves the current app to a version-specific backup, swaps in the staged app, and opens it. The helper deletes the backup only after the new app writes a private healthy-start marker; an open failure or health timeout restores the previous app. On Windows, restart launches only the verified NSIS setup. Pending metadata and bytes survive an ordinary application restart; stale or invalid pending state is discarded.
 
-The unsigned `0.7.4-internal-beta.6` packages predate this client and therefore require one final manual installation of the first update-capable bridge (`0.7.4-internal-beta.7`). Every later reviewed Internal Beta can use the online channel. OS-level Developer ID/notarization and Authenticode remain separate production gates; the channel signature authenticates exact update bytes but does not claim platform signing.
+macOS extraction temporarily disables Electron's process-wide ASAR path interception while `extract-zip` writes the staged bundle, then restores the previous setting on both success and failure. Without that boundary, writing the staged `Contents/Resources/app.asar` can stall after a fully verified download.
+
+The unsigned `0.7.4-internal-beta.6` package predates this client, while Beta.7 and Beta.8 can verify and download updates but stall when Electron intercepts the staged `app.asar` path. Those versions require one manual installation of the corrected bridge (`0.7.4-internal-beta.9`). Every later reviewed Internal Beta can use the online channel. OS-level Developer ID/notarization and Authenticode remain separate production gates; the channel signature authenticates exact update bytes but does not claim platform signing.
 
 `.github/workflows/internal-beta.yml` builds both target packages from one exact successful-CI source, creates and locally verifies canonical update metadata with the protected offline signing key, records those metadata bytes in `SHA256SUMS`, and then streams only the two update artifacts plus metadata to the dedicated `aera-updates` SSH principal. The forced server command `scripts/internal-beta/publish-desktop-update.sh` rejects extra paths, unsafe archive entries, invalid signatures, changed hashes, downgrades, and replacement bytes under an existing version. A channel-wide file lock serializes version checks and publication. It publishes immutable release directories before atomically switching the `current` metadata symlink. The workflow then compares live metadata byte-for-byte and probes both live versioned artifacts.
+
+Desktop packaging uses an explicit application allowlist: compiled `out`, package metadata, the application icon, and Runtime trust. Runtime Seed remains a separately verified `extraResources` payload. Developer worktrees, source, tests, caches, release evidence, and local build output must not enter `app.asar`.
 
 The Cloud Caddy route serves current metadata with `Cache-Control: no-store` and immutable versioned artifacts with a one-year cache. The general Cloud reverse proxy cannot shadow these paths.
 
@@ -38,6 +42,8 @@ The release contract covers signed metadata, exact artifact bytes, persisted sta
 - Script and application trust roots must remain byte-identical.
 - Server publication is atomic and idempotent only for the exact same signed bytes.
 - Login/render timing cannot hide an already available or downloaded update.
+- macOS extraction writes the staged `app.asar` with Electron ASAR interception disabled and restores the previous process setting after success or failure.
+- Packaged `app.asar` is produced from an explicit application allowlist and excludes local source, tests, worktrees, caches, evidence, and build output.
 
 ## Immutable signed production candidates
 
