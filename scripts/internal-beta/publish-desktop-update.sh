@@ -220,6 +220,15 @@ openssl pkeyutl -verify \
   -sigfile "$signature_raw" >/dev/null ||
   fail "metadata signature is invalid"
 
+# Serialize the monotonic-version check and publication. The lock is attached
+# to this shell's inherited file description and remains held after Python
+# returns, until the publisher process exits.
+exec 9>"$channel_root/.publish.lock"
+python3 - <<'PY'
+import fcntl
+fcntl.flock(9, fcntl.LOCK_EX)
+PY
+
 current_manifest="$channel_root/current/manifest.json"
 if [[ -f $current_manifest ]]; then
   current_version=$(python3 - "$current_manifest" <<'PY'

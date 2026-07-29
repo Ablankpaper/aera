@@ -84,7 +84,7 @@ Cosign `v3.0.6` signs the canonical manifest and SLSA v1 provenance as blobs. Ve
 
 The assembly job verifies the detached update signature locally, uploads the complete 30-day evidence artifact, and only then streams a four-file tar archive to `aera-updates@AERA_DESKTOP_UPDATE_PUBLISH_HOST`. The host key is pinned and the authorized key must force `scripts/internal-beta/publish-desktop-update.sh`, disable PTY/forwarding, and grant no shell.
 
-The server command verifies canonical metadata, the pinned key ID and Ed25519 signature, both artifact digests and sizes, version monotonicity, and immutable version bytes. It stores artifacts under `/var/lib/aera/desktop-updates/internal-beta/releases/VERSION`, metadata under `versions/VERSION`, and atomically replaces only the relative `current` symlink. Caddy serves the reviewed path. The workflow fails unless live metadata equals the locally signed bytes and both versioned artifacts answer an HTTPS range probe.
+The server command verifies canonical metadata, the pinned key ID and Ed25519 signature, both artifact digests and sizes, version monotonicity, and immutable version bytes. A channel-wide file lock serializes the monotonicity check and publish operation. It stores artifacts under `/var/lib/aera/desktop-updates/internal-beta/releases/VERSION`, metadata under `versions/VERSION`, and atomically replaces only the relative `current` symlink. Caddy serves the reviewed path. The workflow fails unless live metadata equals the locally signed bytes and both versioned artifacts answer an HTTPS range probe.
 
 ## Operator verification
 
