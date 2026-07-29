@@ -59,7 +59,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain=v1)"
           VERSION=$(node -p "require('./package.json').version")
-          test "$VERSION" = "0.7.4-internal-beta.7"
+          test "$VERSION" = "0.7.4-internal-beta.8"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Verify successful CI belongs to the exact source
@@ -448,7 +448,7 @@ jobs:
             --manifest candidate/desktop-update/manifest.json \
             --private-key-env DESKTOP_UPDATE_SIGNING_PRIVATE_KEY \
             --published-at "$CREATED_AT" \
-            --release-notes "新增在线更新闭环，并完成更新包签名与完整性校验。" \
+            --release-notes "完成 Beta.7 到 Beta.8 在线更新闭环验收。" \
             --signature candidate/desktop-update/manifest.sig \
             --version "$VERSION"
           node scripts/internal-beta/desktop-update.mjs verify \

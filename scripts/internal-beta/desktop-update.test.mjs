@@ -12,7 +12,7 @@ import {
   verifyDesktopUpdateBundle,
 } from "./desktop-update.mjs";
 
-const VERSION = "0.7.4-internal-beta.7";
+const VERSION = "0.7.4-internal-beta.8";
 const BASE_URL = "https://47.100.169.193/desktop-updates/internal-beta";
 
 async function fixture() {

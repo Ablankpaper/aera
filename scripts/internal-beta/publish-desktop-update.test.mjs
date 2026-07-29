@@ -25,7 +25,7 @@ import {
 } from "./desktop-update.mjs";
 
 const executeFile = promisify(execFile);
-const VERSION = "0.7.4-internal-beta.7";
+const VERSION = "0.7.4-internal-beta.8";
 const BASE_URL = "https://47.100.169.193/desktop-updates/internal-beta";
 const SCRIPT = resolve("scripts/internal-beta/publish-desktop-update.sh");
 const temporaryRoots = [];
