@@ -237,85 +237,48 @@ describe("Internal Beta desktop updater", () => {
     });
   });
 
-  it("orders Internal Beta versions and resolves the containing macOS app", () => {
+  it("orders Internal Beta versions", () => {
     expect(compareInternalBetaVersions(CURRENT_VERSION, NEXT_VERSION)).toBe(-1);
     expect(compareInternalBetaVersions(NEXT_VERSION, CURRENT_VERSION)).toBe(1);
     expect(compareInternalBetaVersions(NEXT_VERSION, NEXT_VERSION)).toBe(0);
-    expect(
-      resolveCurrentMacAppPath(
-        "/Applications/AgentEra Studio.app/Contents/MacOS/AgentEra Studio",
-      ),
-    ).toBe("/Applications/AgentEra Studio.app");
-    expect(resolveCurrentMacAppPath("/usr/local/bin/agentera")).toBeNull();
   });
 
-  it("commits a macOS swap only after the new app reports healthy", async () => {
-    const root = await createUserData();
-    const current = join(root, "AgentEra Studio.app");
-    const staged = join(root, "staged.app");
-    const backup = join(root, "backup.app");
-    const marker = join(root, "healthy");
-    const journal = join(root, "install-journal.json");
-    await Promise.all([
-      mkdir(current),
-      mkdir(staged),
-      writeFile(journal, "pending"),
-    ]);
-    await Promise.all([
-      writeFile(join(current, "version"), "old"),
-      writeFile(join(staged, "version"), "new"),
-    ]);
+  it.skipIf(process.platform === "win32")(
+    "resolves the containing macOS app",
+    () => {
+      expect(
+        resolveCurrentMacAppPath(
+          "/Applications/AgentEra Studio.app/Contents/MacOS/AgentEra Studio",
+        ),
+      ).toBe("/Applications/AgentEra Studio.app");
+      expect(resolveCurrentMacAppPath("/usr/local/bin/agentera")).toBeNull();
+    },
+  );
 
-    const operation = execFile("/bin/sh", [
-      "-c",
-      buildMacUpdateHelperScript({
-        processWaitAttempts: 2,
-        healthyWaitAttempts: 20,
-      }),
-      "aera-desktop-updater-test",
-      "99999999",
-      current,
-      staged,
-      backup,
-      marker,
-      journal,
-      "/usr/bin/true",
-    ]);
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
-    await writeFile(marker, "healthy");
-    await operation;
+  it.skipIf(process.platform === "win32")(
+    "commits a macOS swap only after the new app reports healthy",
+    async () => {
+      const root = await createUserData();
+      const current = join(root, "AgentEra Studio.app");
+      const staged = join(root, "staged.app");
+      const backup = join(root, "backup.app");
+      const marker = join(root, "healthy");
+      const journal = join(root, "install-journal.json");
+      await Promise.all([
+        mkdir(current),
+        mkdir(staged),
+        writeFile(journal, "pending"),
+      ]);
+      await Promise.all([
+        writeFile(join(current, "version"), "old"),
+        writeFile(join(staged, "version"), "new"),
+      ]);
 
-    await expect(readFile(join(current, "version"), "utf8")).resolves.toBe(
-      "new",
-    );
-    await expect(access(backup)).rejects.toThrow();
-    await expect(access(marker)).rejects.toThrow();
-    await expect(access(journal)).rejects.toThrow();
-  });
-
-  it("rolls a macOS swap back when the new app never reports healthy", async () => {
-    const root = await createUserData();
-    const current = join(root, "AgentEra Studio.app");
-    const staged = join(root, "staged.app");
-    const backup = join(root, "backup.app");
-    const marker = join(root, "healthy");
-    const journal = join(root, "install-journal.json");
-    await Promise.all([
-      mkdir(current),
-      mkdir(staged),
-      writeFile(journal, "pending"),
-    ]);
-    await Promise.all([
-      writeFile(join(current, "version"), "old"),
-      writeFile(join(staged, "version"), "new"),
-    ]);
-
-    await expect(
-      execFile("/bin/sh", [
+      const operation = execFile("/bin/sh", [
         "-c",
         buildMacUpdateHelperScript({
           processWaitAttempts: 2,
-          healthyWaitAttempts: 2,
+          healthyWaitAttempts: 20,
         }),
         "aera-desktop-updater-test",
         "99999999",
@@ -325,14 +288,63 @@ describe("Internal Beta desktop updater", () => {
         marker,
         journal,
         "/usr/bin/true",
-      ]),
-    ).rejects.toThrow();
+      ]);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+      await writeFile(marker, "healthy");
+      await operation;
 
-    await expect(readFile(join(current, "version"), "utf8")).resolves.toBe(
-      "old",
-    );
-    await expect(access(backup)).rejects.toThrow();
-    await expect(access(marker)).rejects.toThrow();
-    await expect(access(journal)).rejects.toThrow();
-  });
+      await expect(readFile(join(current, "version"), "utf8")).resolves.toBe(
+        "new",
+      );
+      await expect(access(backup)).rejects.toThrow();
+      await expect(access(marker)).rejects.toThrow();
+      await expect(access(journal)).rejects.toThrow();
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "rolls a macOS swap back when the new app never reports healthy",
+    async () => {
+      const root = await createUserData();
+      const current = join(root, "AgentEra Studio.app");
+      const staged = join(root, "staged.app");
+      const backup = join(root, "backup.app");
+      const marker = join(root, "healthy");
+      const journal = join(root, "install-journal.json");
+      await Promise.all([
+        mkdir(current),
+        mkdir(staged),
+        writeFile(journal, "pending"),
+      ]);
+      await Promise.all([
+        writeFile(join(current, "version"), "old"),
+        writeFile(join(staged, "version"), "new"),
+      ]);
+
+      await expect(
+        execFile("/bin/sh", [
+          "-c",
+          buildMacUpdateHelperScript({
+            processWaitAttempts: 2,
+            healthyWaitAttempts: 2,
+          }),
+          "aera-desktop-updater-test",
+          "99999999",
+          current,
+          staged,
+          backup,
+          marker,
+          journal,
+          "/usr/bin/true",
+        ]),
+      ).rejects.toThrow();
+
+      await expect(readFile(join(current, "version"), "utf8")).resolves.toBe(
+        "old",
+      );
+      await expect(access(backup)).rejects.toThrow();
+      await expect(access(marker)).rejects.toThrow();
+      await expect(access(journal)).rejects.toThrow();
+    },
+  );
 });

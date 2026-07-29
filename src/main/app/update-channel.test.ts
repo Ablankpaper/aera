@@ -22,10 +22,9 @@ describe("desktop update channel", () => {
   });
 
   it("pins the same Desktop update trust root as the release verifier", async () => {
-    const reviewed = await readFile(
-      resolve("build/desktop-update-signing-public.pem"),
-      "utf8",
-    );
+    const reviewed = (
+      await readFile(resolve("build/desktop-update-signing-public.pem"), "utf8")
+    ).replace(/\r\n/gu, "\n");
     expect(
       INTERNAL_BETA_UPDATE_PUBLIC_KEYS.get(INTERNAL_BETA_UPDATE_KEY_ID),
     ).toBe(reviewed);
