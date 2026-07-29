@@ -44,7 +44,7 @@ export default {
   titlePlaceholder: "¿Qué hay que hacer?",
   fieldBody: "Descripción (opcional)",
   bodyPlaceholder: "Contexto, criterios de aceptación, enlaces…",
-  fieldAssignee: "Perfil asignado",
+  fieldAssignee: "Agente asignado",
   assigneeNone: "— Triage (sin asignado)",
   fieldPriority: "Prioridad",
   priorityNormal: "Normal (0)",

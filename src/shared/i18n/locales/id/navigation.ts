@@ -10,7 +10,7 @@ export default {
   noChats: "Tidak ada obrolan",
   discover: "Jelajahi",
   pinned: "Disematkan",
-  agents: "Profil",
+  agents: "Agen",
   office: "Office",
   models: "Model",
   providers: "Model",

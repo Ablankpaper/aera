@@ -198,6 +198,7 @@ function Chat({
     "auto" | "dashboard" | "legacy"
   >("auto");
   const [connectionModeLoaded, setConnectionModeLoaded] = useState(false);
+  const [runtimeConnectionRevision, setRuntimeConnectionRevision] = useState(0);
   // Working folder bound to this conversation (issue #27). Per-conversation;
   // persisted per session so a re-opened conversation restores its folder, and
   // reset on new chat below.
@@ -379,6 +380,7 @@ function Chat({
     };
     void loadConnectionConfig();
     const unsubscribe = window.hermesAPI.onConnectionConfigChanged((conn) => {
+      setRuntimeConnectionRevision((revision) => revision + 1);
       setConnectionModeLoaded(true);
       setConnectionMode(conn.mode);
       setRemoteMode(conn.mode !== "local");
@@ -397,6 +399,15 @@ function Chat({
       unsubscribe();
     };
   }, [allowAccountConnection]);
+
+  useEffect(() => {
+    return window.hermesAPI.onRuntimeSnapshotChanged?.(() => {
+      // This notification carries no account connection data, so guest chats
+      // can safely retire a local Dashboard snapshot after a model route or
+      // credential change without crossing the guest/account boundary.
+      setRuntimeConnectionRevision((revision) => revision + 1);
+    });
+  }, []);
 
   const { containerRef, bottomRef } = useChatScroll(visibleMessages);
   const modelConfig = useModelConfig(profile);
@@ -691,6 +702,7 @@ function Chat({
     activeTurnRef,
     contextFolder,
     connectionMode,
+    runtimeConnectionRevision,
     enabled: dashboardChatEnabled,
     fallbackOnUnavailable: chatTransportPreference === "auto",
     hermesSessionId,

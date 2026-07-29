@@ -4,6 +4,7 @@ import {
   PROVIDERS,
   OAUTH_PROVIDERS,
   OPENAI_COMPATIBLE_BASE_URLS,
+  displayBrandFromConfig as displayProviderFromConfig,
   providerRouteForEnvKey,
 } from "../../constants";
 import { useI18n } from "../../components/useI18n";
@@ -18,22 +19,12 @@ import { useDiscoveredModels } from "../../hooks/useDiscoveredModels";
 import { KeyRound, Workflow, User, Sparkles } from "../../assets/icons";
 import { ChevronDown, Settings2, X } from "lucide-react";
 import { customProviderEnvKey } from "../../../../shared/url-key-map";
+import {
+  customProviderRuntimeRoute,
+  isCustomProviderRoute,
+  namedCustomProviderRuntimeName,
+} from "../../../../shared/custom-providers";
 import type { HermesAccount } from "../../../../shared/account";
-
-// config.yaml stores OpenAI-compatible providers as `custom` + base_url (the
-// agent can't resolve their brand id). Map a loaded (provider, baseUrl) back to
-// the brand id so the summary/logo shows the brand instead of "Custom".
-function displayProviderFromConfig(provider: string, baseUrl: string): string {
-  // Legacy configs store `qwen` (the pre-#825 grid id); the agent aliases
-  // qwen → alibaba, so land those on the DashScope card instead of leaving
-  // an id no card or label knows about.
-  if (provider === "qwen") return "alibaba";
-  if (provider !== "custom" || !baseUrl) return provider;
-  const match = Object.entries(OPENAI_COMPATIBLE_BASE_URLS).find(
-    ([, url]) => url === baseUrl,
-  );
-  return match ? match[0] : provider;
-}
 
 // A library model as returned by `listModels()`.
 interface LibModel {
@@ -221,17 +212,19 @@ function Providers({
   const persistedCustomUrl = useRef(false);
 
   const loadConfig = useCallback(async (): Promise<void> => {
-    const [envData, mc, pool] = await Promise.all([
+    const [envData, mc, pool, configuredCustomProviders] = await Promise.all([
       window.hermesAPI.getEnv(profile),
       window.hermesAPI.getModelConfig(profile),
       window.hermesAPI.getCredentialPool(),
+      window.hermesAPI.listCustomProviders(profile).catch(() => []),
     ]);
     setEnv(envData);
     setModelProvider(displayProviderFromConfig(mc.provider, mc.baseUrl));
     setModelName(mc.model);
     setModelBaseUrl(mc.baseUrl);
+    setCustomProviders(configuredCustomProviders);
     persistedCustomUrl.current =
-      mc.provider === "custom" && Boolean(mc.baseUrl?.trim());
+      isCustomProviderRoute(mc.provider) && Boolean(mc.baseUrl?.trim());
     setCredPool(pool);
 
     requestAnimationFrame(() => {
@@ -254,7 +247,7 @@ function Providers({
       setModelName(mc.model);
       setModelBaseUrl(mc.baseUrl);
       persistedCustomUrl.current =
-        mc.provider === "custom" && Boolean(mc.baseUrl?.trim());
+        isCustomProviderRoute(mc.provider) && Boolean(mc.baseUrl?.trim());
       requestAnimationFrame(() => {
         modelLoaded.current = true;
       });
@@ -290,7 +283,7 @@ function Providers({
       profile,
     );
     persistedCustomUrl.current =
-      configProvider === "custom" && Boolean(modelBaseUrl.trim());
+      isCustomProviderRoute(configProvider) && Boolean(modelBaseUrl.trim());
     setModelSaved(true);
     setTimeout(() => setModelSaved(false), 2000);
   }, [modelProvider, modelName, modelBaseUrl, profile]);
@@ -320,10 +313,33 @@ function Providers({
     if (modelLibTimer.current) clearTimeout(modelLibTimer.current);
     modelLibTimer.current = setTimeout(() => {
       const displayName = modelName.split("/").pop() || modelName;
+      const normalizedBaseUrl = modelBaseUrl.trim().replace(/\/+$/, "");
+      const routeName = namedCustomProviderRuntimeName(modelProvider);
+      const customProvider = customProviders.find((candidate) => {
+        if (
+          candidate.baseUrl.trim().replace(/\/+$/, "") !== normalizedBaseUrl
+        ) {
+          return false;
+        }
+        return (
+          !routeName ||
+          customProviderRuntimeRoute(candidate.name) === `custom:${routeName}`
+        );
+      });
       const libProvider =
-        modelProvider in OPENAI_COMPATIBLE_BASE_URLS ? "custom" : modelProvider;
+        modelProvider in OPENAI_COMPATIBLE_BASE_URLS ||
+        isCustomProviderRoute(modelProvider)
+          ? "custom"
+          : modelProvider;
       window.hermesAPI
-        .addModel(displayName, libProvider, modelName, modelBaseUrl)
+        .addModel(
+          displayName,
+          libProvider,
+          modelName,
+          modelBaseUrl,
+          undefined,
+          customProvider?.name,
+        )
         .catch(() => {
           /* non-fatal — library write is best-effort */
         });
@@ -331,7 +347,7 @@ function Providers({
     return () => {
       if (modelLibTimer.current) clearTimeout(modelLibTimer.current);
     };
-  }, [modelProvider, modelName, modelBaseUrl]);
+  }, [modelProvider, modelName, modelBaseUrl, customProviders]);
 
   async function handleBlur(key: string): Promise<void> {
     // Cancel any pending debounced save for this key — the blur handler
@@ -595,8 +611,8 @@ function Providers({
 
   // Apply the chosen model as the active/default config. Discovered-only models
   // are persisted to the library first (so the key resolves + they reappear).
-  // The debounced auto-save then writes config.yaml; the API key is resolved
-  // automatically at runtime.
+  // Persist immediately and read Main's canonical route back; the API key is
+  // resolved automatically at runtime.
   async function confirmModelPick(): Promise<void> {
     const p = activeProvider;
     if (!p || !pickModel) return;
@@ -611,22 +627,35 @@ function Providers({
         p.providerLabel,
       )) as LibModel;
     }
-    const nextProvider = displayProviderFromConfig(
-      saved.provider,
-      saved.baseUrl,
-    );
     // DashScope (`alibaba`) is the one native provider with a user-chosen
     // base_url (mainland vs international, picked at first-run Setup).
     // Re-picking a model must not drop it to "" — the save-side canonical
     // fill would silently flip a mainland user to the intl endpoint (#825).
     const keepDashScopeUrl =
-      nextProvider === "alibaba" && modelProvider === "alibaba" && modelBaseUrl;
-    setModelProvider(nextProvider);
-    setModelName(saved.model);
-    setModelBaseUrl(
-      saved.baseUrl || (keepDashScopeUrl ? modelBaseUrl : p.baseUrl || ""),
+      p.provider === "alibaba" && modelProvider === "alibaba" && modelBaseUrl;
+    const nextBaseUrl =
+      saved.baseUrl || (keepDashScopeUrl ? modelBaseUrl : p.baseUrl || "");
+    await window.hermesAPI.setModelConfig(
+      saved.provider,
+      saved.model,
+      nextBaseUrl,
+      profile,
     );
+    const persisted = await window.hermesAPI.getModelConfig(profile);
+
+    modelLoaded.current = false;
+    setModelProvider(
+      displayProviderFromConfig(persisted.provider, persisted.baseUrl),
+    );
+    setModelName(persisted.model);
+    setModelBaseUrl(persisted.baseUrl);
+    persistedCustomUrl.current =
+      isCustomProviderRoute(persisted.provider) &&
+      Boolean(persisted.baseUrl.trim());
     setModelPickerOpen(false);
+    requestAnimationFrame(() => {
+      modelLoaded.current = true;
+    });
   }
 
   return (

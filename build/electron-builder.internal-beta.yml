@@ -16,9 +16,6 @@ mac:
 dmg:
   artifactName: Aera-Internal-Beta-${version}-macos-${arch}.${ext}
 
-win:
-  signAndEditExecutable: false
-
 nsis:
   artifactName: Aera-Internal-Beta-${version}-windows-${arch}-setup.${ext}
 

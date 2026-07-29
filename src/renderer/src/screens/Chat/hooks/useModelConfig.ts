@@ -3,6 +3,10 @@ import { PROVIDERS, displayBrandFromConfig } from "../../../constants";
 import { useDiscoveredModels } from "../../../hooks/useDiscoveredModels";
 import { useI18n } from "../../../components/useI18n";
 import type { ModelGroup } from "../types";
+import {
+  customProviderRuntimeRoute,
+  isCustomProviderRoute,
+} from "../../../../../shared/custom-providers";
 
 const OLLAMA_CLOUD_PROVIDER = "ollama-cloud";
 const OLLAMA_CLOUD_BASE_URL = "https://ollama.com/v1";
@@ -19,7 +23,7 @@ export function effectiveOverrideBaseUrl(
   provider: string,
   baseUrl: string,
 ): string {
-  return provider === "custom" || provider === OLLAMA_CLOUD_PROVIDER
+  return isCustomProviderRoute(provider) || provider === OLLAMA_CLOUD_PROVIDER
     ? baseUrl
     : "";
 }
@@ -29,6 +33,7 @@ interface SavedModelForPicker {
   model: string;
   name: string;
   baseUrl?: string;
+  providerLabel?: string;
 }
 
 function mergeLiveOllamaCloudModels(
@@ -73,20 +78,28 @@ interface UseModelConfigResult {
 function groupModelsByProvider(models: SavedModelForPicker[]): ModelGroup[] {
   const groupMap = new Map<string, ModelGroup>();
   for (const m of models) {
+    // A named custom model is stored as `provider: custom` + providerLabel in
+    // the Desktop library, but Hermes routes it as `custom:<name>`. Carry that
+    // native identity into session-only picker selections instead of
+    // downgrading them to the legacy bare-custom resolver.
+    const runtimeProvider =
+      m.provider === "custom" && m.providerLabel
+        ? customProviderRuntimeRoute(m.providerLabel)
+        : m.provider;
     // Group by display brand so OpenAI-compatible providers stored as `custom`
     // (Hermes One, Groq, …) show under their own header instead of the generic
     // "OpenAI Compatible / Local" bucket. Each model keeps its raw provider +
     // baseUrl below so selection/routing is unchanged.
-    const brand = displayBrandFromConfig(m.provider, m.baseUrl || "");
+    const brand = displayBrandFromConfig(runtimeProvider, m.baseUrl || "");
     if (!groupMap.has(brand)) {
       groupMap.set(brand, {
         provider: brand,
-        providerLabel: PROVIDERS.labels[brand] || brand,
+        providerLabel: m.providerLabel || PROVIDERS.labels[brand] || brand,
         models: [],
       });
     }
     groupMap.get(brand)!.models.push({
-      provider: m.provider,
+      provider: runtimeProvider,
       model: m.model,
       label: m.name,
       baseUrl: m.baseUrl || "",

@@ -41,20 +41,20 @@ const auth = {
     existingDescription:
       "このデバイスに既存の AgentEra Runtime データがあります。そのまま関連付けるか、独立した空のスペースを作成してください。",
     noUpload:
-      "どちらを選んでも、Memory、セッション、ファイル、スキル、USER プロファイル、学習状態のアップロード、コピー、統合、書き換えは行われません。",
+      "どちらを選んでも、Memory、セッション、ファイル、スキル、USER データ、学習状態のアップロード、コピー、統合、書き換えは行われません。",
     useExisting: "既存のローカルデータを使用",
     createNew: "新しいスペースを作成",
     binding: "安全に関連付けています…",
     creating: "空のスペースを作成しています…",
     emptyBindingTitle: "個人スペースを準備中",
     emptyBindingDescription:
-      "この空のローカル Profile を AgentEra アカウントに関連付けています。",
+      "ローカルエージェントの実行環境を自動で準備しています。",
     connectionBindingTitle: "Runtime 接続を保護しています",
     connectionBindingDescription:
       "リモートまたは SSH 接続を現在の AgentEra 所有者に関連付けています。製品 Token は Runtime に送信されません。",
     otherOwnerTitle: "このローカルデータは別のアカウントに属しています",
     otherOwnerDescription:
-      "AgentEra はこの物理 Profile を開いたり再割り当てしたりしません。別の空スペースを作るか、所有者としてサインインしてください。",
+      "AgentEra は別のアカウントに属するローカルエージェントデータを開いたり再割り当てしたりしません。別の空スペースを作るか、所有者としてサインインしてください。",
     remoteOtherOwnerTitle: "この Runtime 接続は別のアカウントに属しています",
     remoteOtherOwnerDescription:
       "AgentEra は以前の所有者のリモートまたは SSH 接続情報を引き継ぎません。",
@@ -86,7 +86,7 @@ const auth = {
     deviceId: "デバイス",
     offlineUntil: "署名済みオフラインアクセスは {{date}} まで有効です。",
     localDataWarning:
-      "クラウドアカウントの削除やサインアウトで、ローカルの Hermes Profile、Memory、セッション、ファイル、スキル、学習状態が削除・移動・アップロード・解除されることはありません。",
+      "クラウドアカウントの削除やサインアウトで、ローカルエージェントデータ、Memory、セッション、ファイル、スキル、学習状態が削除・移動・アップロード・解除されることはありません。",
     rechargeSeparateAccount:
       "チャージは独立したモデル API サイトを開きます。そのアカウント、残高、API キー、Cookie、Token は AgentEra と共有されません。",
     pendingRevocationWarning:

@@ -10,7 +10,7 @@ export default {
   noChats: "チャットなし",
   discover: "見つける",
   pinned: "ピン留め",
-  agents: "プロファイル",
+  agents: "エージェント",
   office: "オフィス",
   models: "モデル",
   providers: "モデル",

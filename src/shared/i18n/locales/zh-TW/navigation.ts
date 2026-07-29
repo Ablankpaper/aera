@@ -10,7 +10,7 @@ export default {
   noChats: "沒有聊天",
   discover: "探索",
   pinned: "已釘選",
-  agents: "檔案",
+  agents: "智慧體",
   office: "工作區",
   models: "模型",
   providers: "模型",

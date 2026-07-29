@@ -16,6 +16,7 @@ import { buildLocalDashboardCliArgs } from "./dashboard-launch";
 import { dashboardWebSocketUrlForRenderer } from "./dashboard-websocket-relay";
 import { ensureLocalDashboardCompatibility } from "./hermes-agent-compat";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
+import { killProcessTree } from "./process-tree";
 import { hydrateProfileRuntimeEnv } from "./profile-runtime-env";
 import {
   buildRemoteOAuthWsUrl,
@@ -29,6 +30,7 @@ import { sshEnsureDashboard } from "./ssh-remote";
 import {
   getActiveProfileNameSync,
   normalizeProfileName,
+  pidIsAlive,
   profileHome,
 } from "./utils";
 
@@ -60,6 +62,8 @@ interface ManagedDashboard {
 }
 
 const dashboards = new Map<string, ManagedDashboard>();
+const dashboardStarts = new Map<string, Promise<DashboardStatus>>();
+const dashboardStartGenerations = new Map<string, number>();
 
 function resolveProfile(profile?: string): string | undefined {
   return normalizeProfileName(profile ?? getActiveProfileNameSync());
@@ -67,6 +71,18 @@ function resolveProfile(profile?: string): string | undefined {
 
 function profileKey(profile?: string): string {
   return resolveProfile(profile) ?? "default";
+}
+
+function dashboardStartGeneration(key: string): number {
+  return dashboardStartGenerations.get(key) ?? 0;
+}
+
+function supersededDashboardStartStatus(): DashboardStatus {
+  return {
+    supported: true,
+    running: false,
+    error: "Dashboard start was superseded by a Runtime configuration change.",
+  };
 }
 
 function dashboardWsUrl(baseUrl: string, token: string): string {
@@ -161,7 +177,12 @@ function getManagedDashboard(profile?: string): ManagedDashboard | undefined {
   const key = profileKey(profile);
   const managed = dashboards.get(key);
   if (!managed) return undefined;
-  if (managed.proc.exitCode === null && !managed.proc.killed) return managed;
+  // ChildProcess.killed/signalCode describe signal bookkeeping, not reliable
+  // OS liveness: Python can still serve an established WebSocket after those
+  // fields change. Keep the process managed until the PID is actually gone.
+  if (managed.proc.pid && pidIsAlive(managed.proc.pid)) {
+    return managed;
+  }
   dashboards.delete(key);
   return undefined;
 }
@@ -591,6 +612,37 @@ export async function startDashboard(
     return getRemoteDashboardStatusForConfig(config, profile);
   if (mode === "ssh") return getSshDashboardStatusForConfig(config, profile);
 
+  const key = profileKey(profile);
+  const pending = dashboardStarts.get(key);
+  if (pending) return pending;
+
+  const existing = getManagedDashboard(profile);
+  if (existing) {
+    return {
+      supported: true,
+      running: true,
+      connection: { ...existing.connection, alreadyRunning: true },
+      logPath: existing.connection.logPath,
+    };
+  }
+
+  const generation = dashboardStartGeneration(key);
+  const start = startLocalDashboard(profile, key, generation);
+  dashboardStarts.set(key, start);
+  try {
+    return await start;
+  } finally {
+    if (dashboardStarts.get(key) === start) dashboardStarts.delete(key);
+  }
+}
+
+async function startLocalDashboard(
+  profile: string | undefined,
+  key: string,
+  generation: number,
+): Promise<DashboardStatus> {
+  // Recheck after winning the per-profile start slot. This covers a process
+  // becoming ready between the wrapper's fast-path lookup and this call.
   const existing = getManagedDashboard(profile);
   if (existing) {
     return {
@@ -622,9 +674,11 @@ export async function startDashboard(
       : compat.detail;
 
   const resolvedProfile = resolveProfile(profile);
-  const key = profileKey(profile);
   const token = randomBytes(24).toString("hex");
   const port = await getFreePort();
+  if (dashboardStartGeneration(key) !== generation) {
+    return supersededDashboardStartStatus();
+  }
   const baseUrl = `http://127.0.0.1:${port}`;
   const logPath = dashboardLogPath(resolvedProfile);
   const stderrFd = openSync(logPath, "a");
@@ -651,7 +705,9 @@ export async function startDashboard(
       cwd: invocation.workingDirectory,
       env: dashboardEnv,
       stdio: ["ignore", "ignore", stderrFd],
-      detached: false,
+      // A dedicated POSIX process group lets stopDashboard terminate the
+      // dashboard and workers it spawned. Windows uses taskkill /T instead.
+      detached: process.platform !== "win32",
       ...HIDDEN_SUBPROCESS_OPTIONS,
     });
   } catch (err) {
@@ -679,7 +735,12 @@ export async function startDashboard(
 
   dashboards.set(key, { proc, connection });
   proc.once("exit", () => {
-    if (dashboards.get(key)?.proc === proc) dashboards.delete(key);
+    if (
+      dashboards.get(key)?.proc === proc &&
+      (!proc.pid || !pidIsAlive(proc.pid))
+    ) {
+      dashboards.delete(key);
+    }
   });
 
   try {
@@ -689,12 +750,11 @@ export async function startDashboard(
     );
     await probeDashboardWebSocket(connection, 5_000);
   } catch (err) {
-    dashboards.delete(key);
-    try {
-      proc.kill();
-    } catch {
-      // Ignore shutdown errors for a failed probe; the log path is returned.
-    }
+    if (dashboards.get(key)?.proc === proc) dashboards.delete(key);
+    killProcessTree(proc, {
+      detachedProcessGroup: process.platform !== "win32",
+      forceAfterMs: 0,
+    });
     return {
       supported: true,
       running: false,
@@ -708,24 +768,37 @@ export async function startDashboard(
     };
   }
 
+  if (dashboardStartGeneration(key) !== generation) {
+    if (dashboards.get(key)?.proc === proc) dashboards.delete(key);
+    killProcessTree(proc, {
+      detachedProcessGroup: process.platform !== "win32",
+      forceAfterMs: 0,
+    });
+    return supersededDashboardStartStatus();
+  }
+
   return { supported: true, running: true, connection, logPath };
 }
 
 export function stopDashboard(profile?: string): boolean {
   const key = profileKey(profile);
+  dashboardStartGenerations.set(key, dashboardStartGeneration(key) + 1);
+  dashboardStarts.delete(key);
   const managed = dashboards.get(key);
   if (!managed) return true;
   dashboards.delete(key);
-  try {
-    managed.proc.kill();
-  } catch {
-    return false;
-  }
+  killProcessTree(managed.proc, {
+    detachedProcessGroup: process.platform !== "win32",
+    forceAfterMs: 0,
+  });
   return true;
 }
 
 export function stopAllDashboards(): void {
-  for (const key of [...dashboards.keys()]) {
+  for (const key of new Set([
+    ...dashboards.keys(),
+    ...dashboardStarts.keys(),
+  ])) {
     stopDashboard(key === "default" ? undefined : key);
   }
 }

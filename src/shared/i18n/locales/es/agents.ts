@@ -1,28 +1,28 @@
 import enAgents from "../en/agents";
 
 export default {
-  title: "Perfiles",
+  title: "Agentes",
   subtitle:
-    "Cada perfil es un espacio de trabajo aislado de AgentEra con su propia configuración, memoria y habilidades",
+    "Cada agente funciona en un espacio aislado de AgentEra con su propia configuración, memoria y habilidades",
   newAgent: "Nuevo agente",
   namePlaceholder: "Nombre del agente (p. ej. coder)",
-  createTitle: "Nuevo perfil",
+  createTitle: "Nuevo agente",
   nameLabel: "Nombre del agente",
   cloneConfig: "Clonar configuración y API keys",
   cloneFromLabel: "Clonar desde",
   running: "En ejecución",
   off: "Apagado",
   starting: "Iniciando…",
-  createFailed: "No se pudo crear el perfil",
+  createFailed: "No se pudo crear el agente",
   creating: "Creando...",
   create: "Crear",
-  deleteFailed: "No se pudo eliminar el perfil",
+  deleteFailed: "No se pudo eliminar el agente",
   active: "Activo",
   noModel: "No hay un modelo configurado",
   skillsCount: "{{count}} habilidades",
   gatewayRunning: "Gateway en ejecución",
   gatewayOff: "Gateway desactivado",
-  colProfile: "Perfil",
+  colProfile: "Agente",
   colModel: "Modelo",
   colStatus: "Estado",
   colActions: "Acciones",
@@ -33,8 +33,8 @@ export default {
   deleteTitle: "Eliminar agente",
   auto: "Automático",
   local: "Local",
-  manageProfiles: "Gestionar perfiles",
-  switchProfile: "Cambiar perfil",
+  manageProfiles: "Gestionar agentes",
+  switchProfile: "Cambiar agente",
   defaultTag: "predeterminado",
   sectionWallet: "Wallet",
   walletTitle: "Base wallets",
@@ -73,9 +73,9 @@ export default {
     workspaceSpace: "Espacio de trabajo",
     workspaceSpaceTitle: "Agentes del espacio de trabajo",
     workspaceAuthorSubtitle:
-      "Crea borradores locales, publica versiones inmutables del espacio e instálalas en perfiles locales aislados.",
+      "Crea borradores locales y publica versiones inmutables del espacio; el entorno local se prepara automáticamente.",
     workspaceMemberSubtitle:
-      "Instala versiones aprobadas en perfiles locales aislados. Los miembros no pueden crear ni publicar borradores.",
+      "Usa versiones aprobadas con un entorno local preparado automáticamente. Los miembros no pueden crear ni publicar borradores.",
     role: {
       owner: "Propietario",
       admin: "Administrador",
@@ -102,7 +102,7 @@ export default {
       submittedNotPublished:
         "Enviado a revisión. No se publicó ni instaló ninguna versión.",
       approvedNotInstalled:
-        "Versión aprobada. No se modificó ningún Perfil ni Memory de empleados.",
+        "Versión aprobada. No se modificaron los datos locales de ejecución ni Memory de los empleados.",
       rejectedNotPublished:
         "Envío rechazado. No se publicó ni instaló ninguna versión.",
       runtimeBoundary:

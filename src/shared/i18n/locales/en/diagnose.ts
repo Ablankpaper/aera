@@ -11,12 +11,6 @@ export default {
     infos: "{{count}} note(s)",
     showDetails: "Show details",
   },
-  localConnection: {
-    preparing: "Finishing the secure local connection automatically…",
-    notReady:
-      "Your model is configured, but the local connection is not ready.",
-    autoFix: "Fix automatically",
-  },
   fix: {
     apply: "Apply fix",
     running: "Applying…",

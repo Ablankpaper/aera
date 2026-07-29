@@ -111,6 +111,31 @@ async function startNameEdit(): Promise<HTMLInputElement> {
 }
 
 describe("ProfileModal name editor", () => {
+  it("keeps runtime routing and internal Profile identifiers out of Agent details", async () => {
+    installHermesAPI([
+      {
+        ...profile("Visible Agent"),
+        model: "provider/model-x",
+        provider: "private-provider-route",
+        skillCount: 2,
+        gatewayRunning: true,
+      },
+    ]);
+    renderModal();
+
+    expect(
+      (await screen.findAllByText("Visible Agent")).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText("model-x")).toBeInTheDocument();
+    expect(screen.getByText("agents.skillsCount")).toBeInTheDocument();
+    expect(
+      screen.queryByText("private-provider-route"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("agents.gatewayRunning")).not.toBeInTheDocument();
+    expect(screen.queryByText("default")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Runtime Profile/i)).not.toBeInTheDocument();
+  });
+
   it("does not save a canceled Escape edit when blur fires afterward", async () => {
     const api = installHermesAPI([profile()]);
     renderModal();

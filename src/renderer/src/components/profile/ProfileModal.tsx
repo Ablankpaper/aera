@@ -2,12 +2,10 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Brain,
   Database,
-  Plug,
   Pencil,
   Puzzle,
   Refresh,
   Settings,
-  Signal,
   Sparkles,
   Trash,
   User,
@@ -78,11 +76,10 @@ const PROFILE_SECTIONS: ReadonlyArray<{
 ];
 
 /**
- * Global profile detail/appearance modal (80vw × 80vh). Opened from anywhere
- * via the ProfileModalProvider's `openProfile`. Self-loads its data through
- * `listProfiles()` (there is no single-profile IPC) and re-loads after each
- * mutation so it always reflects the live profile. Notifies the opener via
- * `onChanged` / `onDeleted` so sibling lists (sidebar, Agents) stay in sync.
+ * Product-facing Agent detail modal backed by an internal runtime Profile.
+ * Runtime identifiers, provider routing, gateway state, and binding controls
+ * stay hidden; the user manages only Agent-level identity, memory, wallet,
+ * sync, and lifecycle actions.
  */
 export default function ProfileModal({
   name,
@@ -261,12 +258,6 @@ export default function ProfileModal({
     }
   }
 
-  function providerLabel(provider: string): string {
-    if (!provider || provider === "auto") return t("agents.auto");
-    if (provider === "custom") return t("agents.local");
-    return provider.charAt(0).toUpperCase() + provider.slice(1);
-  }
-
   const profileChips: ReadonlyArray<{
     key: string;
     value: string;
@@ -274,11 +265,6 @@ export default function ProfileModal({
     state?: "on" | "off";
   }> = profile
     ? [
-        {
-          key: "provider",
-          value: providerLabel(profile.provider),
-          Icon: Plug,
-        },
         {
           key: "model",
           value: profile.model
@@ -291,17 +277,9 @@ export default function ProfileModal({
           value: t("agents.skillsCount", { count: profile.skillCount }),
           Icon: Puzzle,
         },
-        {
-          key: "gateway",
-          value: profile.gatewayRunning
-            ? t("agents.gatewayRunning")
-            : t("agents.gatewayOff"),
-          Icon: Signal,
-          state: profile.gatewayRunning ? "on" : "off",
-        },
       ]
     : [];
-  const agentName = profile?.name || id;
+  const agentName = profile?.name || t("agents.hub.localAgent");
 
   return (
     <AppModal
@@ -416,9 +394,6 @@ export default function ProfileModal({
                           </span>
                           <Pencil size={14} aria-hidden="true" />
                         </button>
-                      )}
-                      {profile.id !== profile.name && (
-                        <span className="profile-modal-tag">{profile.id}</span>
                       )}
                       {nameSaving && (
                         <span className="profile-modal-tag">

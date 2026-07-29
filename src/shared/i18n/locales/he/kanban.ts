@@ -41,7 +41,7 @@ export default {
   titlePlaceholder: "מה צריך לעשות?",
   fieldBody: "תוכן (אופציונלי)",
   bodyPlaceholder: "הקשר, קריטריוני קבלה, קישורים…",
-  fieldAssignee: "פרופיל אחראי",
+  fieldAssignee: "סוכן אחראי",
   assigneeNone: "- מיון (ללא אחראי)",
   fieldPriority: "עדיפות",
   priorityNormal: "רגילה (0)",

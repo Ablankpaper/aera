@@ -26,3 +26,35 @@ export interface CustomProviderFile {
   version: 1;
   providers: CustomProviderRecord[];
 }
+
+/** Match Hermes Agent's canonical normalisation for a named custom provider. */
+export function normalizeCustomProviderRuntimeName(name: string): string {
+  return (name || "").trim().toLowerCase().replace(/ /g, "-");
+}
+
+/** Durable provider identity understood by Hermes Agent's native resolver. */
+export function customProviderRuntimeRoute(name: string): string {
+  const normalized = normalizeCustomProviderRuntimeName(name);
+  if (!normalized) throw new Error("Custom provider name is required.");
+  return `custom:${normalized}`;
+}
+
+/** Normalized native name from `custom:<name>`, or null for non-named routes. */
+export function namedCustomProviderRuntimeName(
+  provider: string | null | undefined,
+): string | null {
+  const normalized = (provider || "").trim().toLowerCase();
+  if (!normalized.startsWith("custom:")) return null;
+  const name = normalized.slice("custom:".length).trim();
+  return name || null;
+}
+
+/** True for either the legacy bare route or a native named custom route. */
+export function isCustomProviderRoute(
+  provider: string | null | undefined,
+): boolean {
+  const normalized = (provider || "").trim().toLowerCase();
+  return (
+    normalized === "custom" || namedCustomProviderRuntimeName(provider) !== null
+  );
+}

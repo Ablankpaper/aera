@@ -10,7 +10,7 @@ export default {
   noChats: "Sin chats",
   discover: "Descubrir",
   pinned: "Fijados",
-  agents: "Perfiles",
+  agents: "Agentes",
   office: "Office",
   models: "Modelos",
   providers: "Modelos",

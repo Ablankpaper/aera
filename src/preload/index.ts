@@ -515,6 +515,13 @@ const hermesAPI = {
       ipcRenderer.removeListener("connection-config-changed", handler);
   },
 
+  onRuntimeSnapshotChanged: (callback: () => void): (() => void) => {
+    const handler = (): void => callback();
+    ipcRenderer.on("runtime-snapshot-changed", handler);
+    return () =>
+      ipcRenderer.removeListener("runtime-snapshot-changed", handler);
+  },
+
   setSshConfig: (
     host: string,
     port: number,

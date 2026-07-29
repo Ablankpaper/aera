@@ -1,5 +1,6 @@
 import type { SavedModel } from "./models";
 import { remoteRequestJson, type RemoteSessionConfig } from "./remote-sessions";
+import { isCustomProviderRoute } from "../shared/custom-providers";
 
 type RemoteRecord = Record<string, unknown>;
 const REMOTE_MODEL_OPTIONS_TIMEOUT_MS = 60_000;
@@ -237,7 +238,7 @@ export async function remoteSetModelConfig(
       scope: "main",
       provider,
       model,
-      base_url: provider === "custom" ? baseUrl : "",
+      base_url: isCustomProviderRoute(provider) ? baseUrl : "",
     },
     timeoutMs: 15_000,
   });
@@ -248,7 +249,7 @@ export async function remoteSetModelConfig(
     if (
       last.provider === provider &&
       last.model === model &&
-      (provider !== "custom" ||
+      (!isCustomProviderRoute(provider) ||
         (last.baseUrl || "").replace(/\/+$/, "") ===
           (baseUrl || "").replace(/\/+$/, ""))
     ) {

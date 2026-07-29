@@ -112,7 +112,9 @@ V1 expresses model/tool allowlists, manual-or-disabled ExperienceCandidate promo
 
 One trusted main-process coordinator owns Personal, Workspace, or Organization product selection for each authenticated account.
 
-The global top switcher displays all three scopes side by side. Workspace and Organization remain independent management domains, while a dedicated product-space store prevents two writable selection sources. An active Organization selection exposes its governed Agent catalog, review history, drafts, and role-appropriate installation actions.
+The global top switcher displays all three scopes side by side. Workspace and Organization remain independent management domains, while a dedicated product-space store prevents two writable selection sources. In an active Organization, “我的智能体” contains the employee's locally ready Agents and “企业智能体” contains the governed Organization catalog, drafts, and review surface.
+
+Owner and Admin may create and submit enterprise drafts; Owner, Admin, and Auditor may inspect review history; active Owner, Admin, and Member may use approved enterprise Agents; Auditor remains read-only. The renderer calls every card an Agent and automatically handles the USER-owned Installation, RuntimeBinding, and local Profile needed for execution.
 
 Offline Organization metadata is stale and read-only. No offline mutation queue exists, and invalid policy cannot replace a previously verified snapshot.
 
@@ -120,7 +122,7 @@ Offline Organization metadata is stale and read-only. No offline mutation queue 
 
 Organization owns control-plane metadata plus immutable enterprise Agent definitions and versions; employees retain USER-owned local runtime state.
 
-Switching Organization context does not select, create, clone, move, merge, or delete a Profile or RuntimeBinding. [[agentera-self-evolution#AgentEra self-evolution compatibility#Runtime isolation|Every Installation maps to an independent writable Profile]], and Memory, USER, sessions, files, credentials, learned Skills, Curator, and private learning remain local.
+Switching Organization context does not select, create, clone, move, merge, or delete a Profile or RuntimeBinding. Only an explicit “使用智能体” action may ask the existing Installation path to prepare that Agent's isolated local runtime. [[agentera-self-evolution#AgentEra self-evolution compatibility#Runtime isolation|Every Installation maps to an independent writable Profile]], and Memory, USER, sessions, files, credentials, learned Skills, Curator, and private learning remain local.
 
 ## Relationship to Workspace and Agent control
 

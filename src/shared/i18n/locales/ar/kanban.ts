@@ -49,7 +49,7 @@ export default {
   titlePlaceholder: "ما الذي يجب إنجازه؟",
   fieldBody: "الوصف (اختياري)",
   bodyPlaceholder: "سياق، معايير قبول، روابط...",
-  fieldAssignee: "ملف العامل المعين",
+  fieldAssignee: "الوكيل المعيّن",
   assigneeNone: "— فرز (بدون تعيين)",
   fieldPriority: "الأولوية",
   priorityNormal: "عادية (0)",

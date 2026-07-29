@@ -104,11 +104,25 @@ Draft and Installation presentation is filtered by the exact selected context wh
 
 [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] supplies the trusted context to draft, discovery, publication, and install-source operations. Version cache, Profile binding, Hermes adapter, and RuntimeBinding components remain keyed only by USER, device, and Runtime version.
 
+### Product-facing Agent projection
+
+The product UI presents drafts, published definitions, installations, and device-local runtime projections through one user concept: the Agent.
+
+[[src/renderer/src/screens/Agents/AgentControlPanel.tsx#AgentControlPanel]] joins those internal records into one card and detail action. It never renders a second Runtime Profile, Installation, or RuntimeBinding management surface. An existing Hermes Profile appears as a ready Agent; choosing a published or pending Agent internally installs, retries, selects the immutable version, prepares an isolated local runtime, activates it, and opens chat.
+
+[[src/renderer/src/screens/Agents/Agents.tsx#Agents]] resolves the resulting Installation back to its local Profile after materialization. This is an internal bridge only: the user selects “使用智能体” and does not name, claim, bind, or synchronize runtime records manually.
+
+[[src/renderer/src/screens/Layout/ProfileSwitcher.tsx#ProfileSwitcher]] presents the same internal records only as Agents. Users may switch Agents, open the Agent screen, or open product-level Agent settings; provider routing, gateway state, internal Profile IDs, Installations, and RuntimeBindings remain hidden.
+
+[[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] reuses the configured Hermes model library, imports identity and capability Markdown, and derives safe asset paths. Personal publish and publish-and-use complete from one explicit action; Workspace keeps its trusted preview and Organization keeps mandatory review.
+
 ### Context-only refresh
 
 Changing the selected product space invalidates publication handles and refreshes Agent control state without selecting, reading, creating, or mutating a Profile or RuntimeBinding.
 
 The startup composition subscribes the Agent manager only to [[src/main/agentera-workspace/manager.ts#AgenteraWorkspaceManager#subscribeSelectedAgentContext]] and calls its context refresh hook. Runtime lifecycle remains outside that bridge.
+
+A same-context state notification refreshes lists without closing the draft editor or interrupting its save-and-publish workflow. A real scope, owner, or role change still closes context-bound editors and one-use dialogs before later mutation.
 
 ### Role-aware presentation
 
@@ -116,7 +130,7 @@ The main process returns the trusted USER or WORKSPACE context with Agent contro
 
 Personal behavior remains unchanged. Workspace Owner and Admin can view and author their account-local Workspace drafts while online; Member receives an install-only view and the renderer does not enumerate drafts. Offline Workspace drafts remain visible to their Owner or Admin but every field and author action is read-only.
 
-[[src/renderer/src/screens/Agents/AgentControlPanel.tsx#AgentControlPanel]] closes context-bound dialogs when the selected scope, Workspace, or role changes and pauses Workspace discovery, installation, publication, and updates offline. [[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] renders the publication target from the one-use preview returned by main and never submits a Workspace ID, owner scope, or role.
+[[src/renderer/src/screens/Agents/AgentControlPanel.tsx#AgentControlPanel]] closes context-bound dialogs when the selected scope, Workspace, or role changes and pauses Workspace discovery, installation, publication, and updates offline. Same-context draft refreshes do not unmount the active editor. [[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] renders the publication target from the one-use preview returned by main and never submits a Workspace ID, owner scope, or role.
 
 Lifecycle denials preserve the stable `workspace_forbidden`, `workspace_archived`, and `workspace_owner_unavailable` codes while discarding raw cloud bodies and private error details.
 
@@ -148,7 +162,7 @@ The renderer keeps promotion, review, draft import, and publication as separate 
 
 [[src/renderer/src/screens/Agents/ExperienceCandidatePanel.tsx#ExperienceCandidatePanel]] calls the own-status list for every Workspace role and does not call review-list or review-detail methods for Member. [[src/renderer/src/screens/Agents/ExperienceReviewDialog.tsx#ExperienceReviewDialog]] commits a bounded terminal decision before requesting an approved import preview, confirms same-name replacement, refreshes a stale base without a draft mutation, and passes only the returned draft to the existing editor.
 
-Agent-control state invalidation closes promotion, review, installation, publication, and archive dialogs and refreshes the candidate panel even when the visible Workspace scope key is unchanged. This fail-closed renderer rule complements the main process clearing one-use handles on account, device, and selected-context changes.
+Same-context Agent-control invalidation closes transient experience, official-install, and archive dialogs and refreshes the candidate panel, but it does not unmount an active draft save or publication sequence. A selected scope, owner, or role change closes the editor as well. This renderer rule complements the main process clearing one-use handles on account, device, and selected-context changes.
 
 ## Owner identity
 

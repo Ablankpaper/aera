@@ -139,7 +139,7 @@ export default {
   encryptedBackup: {
     title: "End-to-end encrypted cloud backup",
     privacy:
-      "AgentEra encrypts approved Profile data on this device. The Cloud stores ciphertext and public device metadata only.",
+      "AgentEra encrypts approved Agent data on this device. The Cloud stores ciphertext and public device metadata only.",
     refresh: "Refresh encrypted backup state",
     loading: "Loading encrypted backup state…",
     signInRequired:
@@ -149,8 +149,8 @@ export default {
       "Create a device-owned encryption root and a one-time 24-word recovery phrase. AgentEra cannot recover this phrase for you.",
     setup: "Set up encrypted backup",
     registerThisDevice: "Register this device for migration",
-    manualTitle: "Backup an active user Profile",
-    profile: "Agent installation",
+    manualTitle: "Back up an active Agent",
+    profile: "Agent",
     progress: "Encrypted upload {{percent}}%",
     cancelBackup: "Cancel backup",
     dailySchedule: "Back up daily when online and idle",
@@ -189,17 +189,17 @@ export default {
       "The Cloud removes recovery envelopes first, then permanently deletes ciphertext objects. This cannot be undone.",
     confirmDelete: "Delete backup",
     cancel: "Cancel",
-    restoreTitle: "Restore into a fresh Profile",
+    restoreTitle: "Restore as a new Agent",
     restoreFreshWarning:
-      "Restore always creates a new Profile and Installation. It never overwrites existing Profile data, sessions, Memory, Skills, or RuntimeBindings.",
+      "Restore always creates a separate Agent. It never overwrites existing Agent data, sessions, Memory, Skills, or runtime settings.",
     recoveryPhrase: "24-word recovery phrase",
     recoveryPhraseOptional:
       "Optional on an authorized device; required for phrase-only recovery",
     prepareRestore: "Verify backup",
     restorePreview: "Verified source installation {{id}}",
-    restoreName: "New Profile name",
-    confirmFreshProfile: "I understand this creates a separate fresh Profile",
-    confirmRestore: "Create restored Profile",
+    restoreName: "New Agent name",
+    confirmFreshProfile: "I understand this creates a separate new Agent",
+    confirmRestore: "Create restored Agent",
     notices: {
       recoveryConfirmed: "Recovery phrase confirmation saved.",
       deviceRegistered:
@@ -210,7 +210,7 @@ export default {
       deviceAuthorized: "Device authorized.",
       deviceRevoked: "Device revoked.",
       backupDeleted: "Backup deletion started.",
-      restoreComplete: "Restore completed in a fresh Profile.",
+      restoreComplete: "Restore completed as a new Agent.",
     },
     errors: {
       authentication_required: "Sign in to continue.",

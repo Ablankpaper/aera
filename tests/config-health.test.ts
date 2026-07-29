@@ -63,6 +63,33 @@ describe("runConfigHealthCheck", () => {
     expect(report.summary.warnings).toBe(0);
   });
 
+  it("does not treat an absent internal gateway key as a failed model connection", async () => {
+    writeConfig(
+      [
+        "model:",
+        "  provider: custom:petoi",
+        "  default: gpt-5.6-sol",
+        "  base_url: https://api.petoi.cn/v1",
+        "providers:",
+        "  petoi:",
+        "    name: petoi.cn",
+        "    api: https://api.petoi.cn/v1",
+        "    key_env: CUSTOM_PROVIDER_PETOI_KEY",
+        "    transport: chat_completions",
+        "    default_model: gpt-5.6-sol",
+        "    models:",
+        "      gpt-5.6-sol: {}",
+        "",
+      ].join("\n"),
+    );
+    writeEnv("CUSTOM_PROVIDER_PETOI_KEY=provider-secret\n");
+
+    const { runConfigHealthCheck } = await freshHealth(TEST_DIR);
+    const report = runConfigHealthCheck();
+
+    expect(report.issues).toEqual([]);
+  });
+
   it("flags API_SERVER_KEY_NON_CANONICAL when key lives in api_server.token only", async () => {
     writeConfig(["api_server:", "  token: sk-nested-only", ""].join("\n"));
     // No .env file

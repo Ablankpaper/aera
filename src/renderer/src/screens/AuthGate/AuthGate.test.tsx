@@ -36,6 +36,7 @@ describe("AuthGate", () => {
 
     expect(screen.getByText("auth.gate.slogan")).toBeInTheDocument();
     expect(screen.getByTestId("aila-3d-model")).toBeInTheDocument();
+    expect(document.querySelector(".aila-3d-fallback-core")).toBeNull();
     expect(screen.getByText("auth.gate.privacy")).toBeInTheDocument();
     expect(screen.getByText("auth.gate.terms")).toBeInTheDocument();
     expect(

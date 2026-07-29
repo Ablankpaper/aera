@@ -10,11 +10,6 @@ export default {
     infos: "{{count}} 项说明",
     showDetails: "查看详情",
   },
-  localConnection: {
-    preparing: "正在自动完成本地安全连接…",
-    notReady: "模型已配置，但本地连接尚未就绪。",
-    autoFix: "自动修复",
-  },
   fix: {
     apply: "应用修复",
     running: "正在修复…",

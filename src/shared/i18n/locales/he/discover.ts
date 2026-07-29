@@ -21,7 +21,7 @@ export default {
   loadError: "טעינת מאגר הקהילה נכשלה.",
   retry: "נסה שוב",
   install_other: "התקנה",
-  targetProfile: "יותקן בפרופיל הפעיל",
+  targetProfile: "יותקן בסוכן הפעיל",
   actions: {
     install: { setup: "התקנה", working: "מתקין...", done: "מותקן" },
     connect: { setup: "התחברות", working: "מתחבר...", done: "מחובר" },

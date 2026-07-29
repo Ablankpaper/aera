@@ -44,7 +44,7 @@ export default {
   titlePlaceholder: "Ne yapılması gerekiyor?",
   fieldBody: "Açıklama (isteğe bağlı)",
   bodyPlaceholder: "Bağlam, kabul kriterleri, bağlantılar…",
-  fieldAssignee: "Atanan profil",
+  fieldAssignee: "Atanan ajan",
   assigneeNone: "— Triyaj (atanan yok)",
   fieldPriority: "Öncelik",
   priorityNormal: "Normal (0)",

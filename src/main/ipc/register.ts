@@ -419,6 +419,16 @@ import {
   removeCustomProvider,
   upsertCustomProvider,
 } from "../providers-store";
+import {
+  removeNativeCustomProvider,
+  upsertNativeCustomProvider,
+} from "../native-custom-provider";
+import {
+  isCustomProviderRoute,
+  namedCustomProviderRuntimeName,
+  normalizeCustomProviderRuntimeName,
+} from "../../shared/custom-providers";
+import { customProviderEnvKey } from "../../shared/url-key-map";
 import { syncWalletsForProfile } from "../wallet-sync";
 import { getWalletPortfolio, provisionAgentWallet } from "../wallet-actions";
 import { getTokenBalances } from "../wallet-balances";
@@ -554,6 +564,7 @@ export interface IpcContext {
   runtimeActivity: RuntimeActivityCoordinator;
   getMainWindow: () => BrowserWindow | null;
   notifyConnectionConfigChanged: () => void;
+  notifyRuntimeSnapshotChanged: () => void;
   notifyModelLibraryChanged: () => void;
   notifyCustomProvidersChanged: () => void;
   openExternalUrl: (rawUrl: unknown) => void;
@@ -825,14 +836,117 @@ function resolveLibraryModelEntry(
   model: string,
   baseUrl: string,
 ): SavedModel | undefined {
-  const matches = listModels().filter(
-    (m) => m.provider === provider && m.model === model,
-  );
-  if (matches.length <= 1) return matches[0];
   const norm = (u: string | undefined): string =>
     (u || "").trim().replace(/\/+$/, "");
+  const namedCustom = namedCustomProviderRuntimeName(provider) || "";
+  const matches = listModels().filter(
+    (candidate) =>
+      candidate.model === model &&
+      (candidate.provider === provider ||
+        (namedCustom &&
+          candidate.provider === "custom" &&
+          ((!candidate.providerLabel &&
+            norm(candidate.baseUrl) === norm(baseUrl)) ||
+            normalizeCustomProviderRuntimeName(
+              candidate.providerLabel || "",
+            ) === namedCustom))),
+  );
+  if (matches.length <= 1) return matches[0];
   const target = norm(baseUrl);
   return matches.find((m) => norm(m.baseUrl) === target) ?? matches[0];
+}
+
+function normalizedBaseUrl(value: string | undefined): string {
+  return (value || "").trim().replace(/\/+$/, "").toLowerCase();
+}
+
+/**
+ * Turn a Desktop named-custom library attachment into AgentEra Runtime's native
+ * `providers.<name>` + `custom:<name>` route. Preset compatibility providers
+ * without a providerLabel keep their existing route; this bridge only runs
+ * when the model can be tied to a first-class named provider.
+ */
+function persistNativeCustomRouteForModel(
+  provider: string,
+  model: string,
+  baseUrl: string,
+  profile: string | undefined,
+  libraryEntry: SavedModel | undefined,
+): string {
+  if (!isCustomProviderRoute(provider)) {
+    return provider;
+  }
+
+  const targetUrl = normalizedBaseUrl(baseUrl);
+  let providerName = (libraryEntry?.providerLabel || "").trim();
+  const routeName = namedCustomProviderRuntimeName(provider);
+  if (!providerName && routeName) {
+    providerName =
+      listCustomProviders(profile).find(
+        (record) =>
+          normalizeCustomProviderRuntimeName(record.name) === routeName &&
+          (!targetUrl || normalizedBaseUrl(record.baseUrl) === targetUrl),
+      )?.name || routeName;
+  }
+  if (!providerName && targetUrl) {
+    providerName =
+      listCustomProviders(profile).find(
+        (record) => normalizedBaseUrl(record.baseUrl) === targetUrl,
+      )?.name || "";
+  }
+  if (!providerName || !targetUrl) {
+    return provider;
+  }
+
+  const providerAnchor = customProviderEnvKey(providerName);
+  const models = listModels()
+    .filter(
+      (candidate) =>
+        normalizedBaseUrl(candidate.baseUrl) === targetUrl &&
+        candidate.providerLabel &&
+        customProviderEnvKey(candidate.providerLabel) === providerAnchor,
+    )
+    .map((candidate) => candidate.model);
+  if (!models.includes(model)) models.unshift(model);
+
+  return upsertNativeCustomProvider(profile, {
+    name: providerName,
+    baseUrl,
+    model,
+    models,
+    apiMode: libraryEntry?.apiMode ?? null,
+  });
+}
+
+function isRuntimeCredentialEnvKey(key: string): boolean {
+  return (
+    key.endsWith("_API_KEY") ||
+    key.endsWith("_TOKEN") ||
+    key === "HF_TOKEN" ||
+    key === "CUSTOM_API_KEY" ||
+    (key.startsWith("CUSTOM_PROVIDER_") && key.endsWith("_KEY"))
+  );
+}
+
+function refreshLocalModelRuntimeSnapshot(
+  previous: { provider: string; model: string; baseUrl: string },
+  next: { provider: string; model: string; baseUrl: string },
+  profile?: string,
+): boolean {
+  const changed =
+    previous.provider !== next.provider ||
+    previous.model !== next.model ||
+    previous.baseUrl !== next.baseUrl;
+  if (!changed) return false;
+
+  // Dashboard and gateway both snapshot config/env at process start. Retire
+  // the dashboard before returning so a send immediately after Save cannot hit
+  // the old route; the renderer reconnects lazily.
+  stopDashboard(profile);
+  if (isGatewayRunning(profile)) {
+    void restartGateway(profile);
+  }
+  return true;
 }
 
 export function registerIpcHandlers(context: IpcContext): void {
@@ -840,6 +954,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     runtimeActivity,
     getMainWindow,
     notifyConnectionConfigChanged,
+    notifyRuntimeSnapshotChanged,
     notifyModelLibraryChanged,
     notifyCustomProvidersChanged,
     openExternalUrl,
@@ -2614,6 +2729,22 @@ export function registerIpcHandlers(context: IpcContext): void {
         return true;
       }
       setEnvValue(key, value, profile);
+      // Every local Runtime process receives a snapshot of the profile env at
+      // spawn. Retire the managed dashboard as soon as a credential changes so
+      // the next chat starts it with the new key; model discovery uses the key
+      // directly and therefore must not be mistaken for proof that an older
+      // dashboard process has the same credential.
+      const looksLikeCredential = isRuntimeCredentialEnvKey(key);
+      if (looksLikeCredential) {
+        stopDashboard(profile);
+        // Tell every mounted chat to retire its WebSocket immediately. This
+        // payload-free lifecycle signal is separate from account connection
+        // config, so guest chats do not receive Remote/SSH account details. A
+        // dashboard process can take time to finish after SIGTERM (especially
+        // after a provider error); without the signal the renderer may keep
+        // submitting to it even after a fresh dashboard has started.
+        notifyRuntimeSnapshotChanged();
+      }
       // Restart gateway so it picks up the new API key.
       // The earlier condition had a precedence bug —
       //   `(isGatewayRunning() && _API_KEY) || _TOKEN || HF_TOKEN`
@@ -2622,12 +2753,8 @@ export function registerIpcHandlers(context: IpcContext): void {
       // `startGateway` path with no local install (issue #266).
       // restartGateway() now also self-gates on isRemoteMode(), so this
       // is belt-and-braces, but the condition is fixed too for clarity.
-      const looksLikeCredential =
-        key.endsWith("_API_KEY") ||
-        key.endsWith("_TOKEN") ||
-        key === "HF_TOKEN";
       if (isGatewayRunning(profile) && looksLikeCredential) {
-        restartGateway(profile);
+        void restartGateway(profile);
       }
       return true;
     },
@@ -2704,22 +2831,27 @@ export function registerIpcHandlers(context: IpcContext): void {
             // activated model's context-window and api_mode into config.yaml
             // so this local fallback write doesn't leave a stale transport.
             const libEntry = resolveLibraryModelEntry(provider, model, baseUrl);
-            setModelConfig(
+            const runtimeProvider = persistNativeCustomRouteForModel(
               provider,
+              model,
+              baseUrl,
+              profile,
+              libEntry,
+            );
+            setModelConfig(
+              runtimeProvider,
               model,
               baseUrl,
               profile,
               libEntry?.contextLength ?? null,
               libEntry?.apiMode ?? null,
             );
-            if (
-              isGatewayRunning(profile) &&
-              (prev.provider !== provider ||
-                prev.model !== model ||
-                prev.baseUrl !== baseUrl)
-            ) {
-              restartGateway(profile);
-            }
+            const changed = refreshLocalModelRuntimeSnapshot(
+              prev,
+              { provider: runtimeProvider, model, baseUrl },
+              profile,
+            );
+            if (changed) notifyRuntimeSnapshotChanged();
             return true;
           },
         );
@@ -2760,24 +2892,27 @@ export function registerIpcHandlers(context: IpcContext): void {
       // `api_mode`, since a leftover `anthropic_messages`/`chat_completions`
       // would otherwise route the new endpoint over the wrong protocol.
       const libEntry = resolveLibraryModelEntry(provider, model, baseUrl);
-      setModelConfig(
+      const runtimeProvider = persistNativeCustomRouteForModel(
         provider,
+        model,
+        baseUrl,
+        profile,
+        libEntry,
+      );
+      setModelConfig(
+        runtimeProvider,
         model,
         baseUrl,
         profile,
         libEntry?.contextLength ?? null,
         libEntry?.apiMode ?? null,
       );
-
-      // Restart gateway when provider, model, or endpoint changes so it picks up new config
-      if (
-        isGatewayRunning(profile) &&
-        (prev.provider !== provider ||
-          prev.model !== model ||
-          prev.baseUrl !== baseUrl)
-      ) {
-        restartGateway(profile);
-      }
+      const changed = refreshLocalModelRuntimeSnapshot(
+        prev,
+        { provider: runtimeProvider, model, baseUrl },
+        profile,
+      );
+      if (changed) notifyRuntimeSnapshotChanged();
 
       return true;
     },
@@ -2895,7 +3030,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         ),
       });
       resetSshDashboardAvailability();
-      notifyConnectionConfigChanged();
+      notifyRuntimeSnapshotChanged();
       return true;
     },
   );
@@ -3986,6 +4121,9 @@ export function registerIpcHandlers(context: IpcContext): void {
     "remove-custom-provider",
     (_event, profile: string | undefined, name: string) => {
       removeCustomProvider(profile, name);
+      removeNativeCustomProvider(profile, name);
+      stopDashboard(profile);
+      notifyConnectionConfigChanged();
       notifyCustomProvidersChanged();
     },
   );

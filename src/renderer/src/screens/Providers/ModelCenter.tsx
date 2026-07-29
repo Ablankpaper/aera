@@ -20,7 +20,10 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { CustomProviderRecord } from "../../../../shared/custom-providers";
+import {
+  customProviderRuntimeRoute,
+  type CustomProviderRecord,
+} from "../../../../shared/custom-providers";
 import {
   customProviderEnvKey,
   isLocalBaseUrl,
@@ -215,8 +218,8 @@ function ModelServiceCard({
     : modelIds;
   const firstModel = orderedModelIds[0] || "";
   const providerIdentity =
-    service.provider === "custom"
-      ? `custom:${service.label}`
+    service.kind === "custom" && service.providerLabel
+      ? customProviderRuntimeRoute(service.providerLabel)
       : service.provider;
 
   return (
@@ -789,6 +792,23 @@ export default function ModelCenter({
     });
   };
 
+  const persistAndReadActiveModel = async (
+    provider: string,
+    model: string,
+    baseUrl: string,
+  ): Promise<ActiveModel> => {
+    await window.hermesAPI.setModelConfig(provider, model, baseUrl, profile);
+    // Main owns provider canonicalisation (`custom` library attachment →
+    // `custom:<name>` Hermes route). Read that result back instead of
+    // reconstructing a second provider identity in the Renderer.
+    const persisted = await window.hermesAPI.getModelConfig(profile);
+    return {
+      provider: persisted.provider,
+      model: persisted.model,
+      baseUrl: persisted.baseUrl,
+    };
+  };
+
   const activateServiceModel = async (
     service: ModelService,
     modelId: string,
@@ -798,17 +818,12 @@ export default function ModelCenter({
     setBusyService({ key: service.key, action: "activate" });
     updateServiceFeedback(service.key);
     try {
-      await window.hermesAPI.setModelConfig(
+      const persisted = await persistAndReadActiveModel(
         service.provider,
         model,
         service.baseUrl,
-        profile,
       );
-      onActivated({
-        provider: service.provider,
-        model,
-        baseUrl: service.baseUrl,
-      });
+      onActivated(persisted);
       updateServiceFeedback(service.key, {
         tone: "success",
         message: t("providers.center.defaultUpdated"),
@@ -921,13 +936,12 @@ export default function ModelCenter({
               baseUrl: fallback.baseUrl,
             }
           : { provider: "auto", model: "", baseUrl: "" };
-        await window.hermesAPI.setModelConfig(
+        const persisted = await persistAndReadActiveModel(
           nextModel.provider,
           nextModel.model,
           nextModel.baseUrl,
-          profile,
         );
-        onActivated(nextModel);
+        onActivated(persisted);
       }
 
       // These writes intentionally remain sequential. Each remove reads and
@@ -1029,17 +1043,12 @@ export default function ModelCenter({
           form.mode === "custom" ? form.apiMode : route.preset?.apiMode,
         );
       }
-      await window.hermesAPI.setModelConfig(
+      const persisted = await persistAndReadActiveModel(
         route.provider,
         modelId,
         route.baseUrl,
-        profile,
       );
-      onActivated({
-        provider: route.provider,
-        model: modelId,
-        baseUrl: route.baseUrl,
-      });
+      onActivated(persisted);
       await reload();
       setForm((previous) => ({ ...previous, apiKey: "" }));
       setShowKey(false);

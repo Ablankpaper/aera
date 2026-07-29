@@ -42,21 +42,31 @@ Each action calls an existing desktop API with an optimistic local update and ro
 
 Pinned rows are a desktop-only affordance: their ids live in `localStorage` (`hermes.sidebar.pinnedSessions`), and pinned sessions are pulled out of the normal grouping into a collapsible **Pinned** section at the top of the list.
 
+## Provider failures keep one conversation
+
+A failed provider turn is an error inside the current Hermes conversation, not a request to create another sidebar chat.
+
+[[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts#useDashboardChatTransport]] marks an asynchronous failed `message.complete` on the active turn but preserves its Runtime and stored session ids. If a setup or submit RPC rejects synchronously, it drops only the process-local Runtime binding; the next send rebinds through Hermes Agent's native `session.resume` using the same stored session id. It never force-creates and seeds a replacement conversation merely because a provider returned 401. This keeps consecutive failed sends and a later credential recovery on one sidebar row while retaining the transcript and local error overlay.
+
+Regression coverage in [[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.test.tsx]] locks both asynchronous and synchronous failure paths: neither may call `session.close` or create a second stored chat, and the synchronous recovery must resume the existing id.
+
 ## Full-list modal
 
 The Cmd/Ctrl+K menu action opens an 80%×80% modal that reuses the existing Sessions screen rather than a separate route.
 
 The modal in [[src/renderer/src/screens/Layout/Layout.tsx#Layout]] renders [[src/renderer/src/screens/Sessions/Sessions.tsx]] inside a `.sessions-modal` over the shared `.models-modal-overlay` backdrop. Resuming a session or starting a new chat from the modal closes it; Esc and a backdrop click also close it. Because the Sessions screen owns its own fetching gated on `visible`, it loads only while the modal is open.
 
-## Profile switch and active chat
+## Agent switch and active chat
 
-The footer profile switcher keeps the selected shell profile aligned with the visible chat run, while preserving older conversations under their original profiles.
+The footer presents the selected shell Profile as an Agent and keeps it aligned with the visible chat run, while preserving older conversations under their original internal Profile IDs.
 
 [[src/renderer/src/screens/Layout/ProfileSwitcher.tsx#ProfileSwitcher]] persists the selected profile through main-process profile switching, then [[src/renderer/src/screens/Layout/Layout.tsx#Layout]] applies [[src/renderer/src/screens/Layout/chatRuns.ts#selectProfileRunTransition]] before rendering Chat. If the active chat is blank, it is re-homed to the selected profile; if it already belongs to another profile, the shell activates an existing blank run for the selected profile or creates a fresh one. This prevents the footer, Settings, recent sessions, and chat transport from disagreeing about which agent is active.
 
 Opening a sidebar session after switching profiles consumes that blank selected-profile run instead of appending beside it. [[src/renderer/src/screens/Layout/chatRuns.ts#openSessionRunTransition]] replaces the active scratch run when it belongs to the same profile as the resumed session, so the tab strip shows the previous session without an extra "New conversation" tab.
 
 The switcher trigger preserves the old app-brand label for an unrenamed default profile: when `listProfiles` returns the fallback `name === id === "default"`, the button shows `common.appName`; once a custom name is stored, it shows that user-facing name.
+
+Opening the active entry shows only product-level Agent settings. Provider routing, gateway state, internal Profile IDs, Installation records, and RuntimeBindings are not rendered; switching and routing continue to use the stable Profile ID internally.
 
 The same per-profile appearance also drives the agent avatar inside the transcript. [[src/renderer/src/screens/Layout/Layout.tsx#Layout]] passes `getAppearance(run.profile)` to each [[src/renderer/src/screens/Chat/Chat.tsx]] as `agentAppearance`, which forwards `{ name, color, avatar }` through [[src/renderer/src/screens/Chat/MessageList.tsx]] to every [[src/renderer/src/screens/Chat/MessageRow.tsx#HermesAvatar]] (and the reasoning/tool-activity rows in [[src/renderer/src/screens/Chat/HistoryRow.tsx]]). `HermesAvatar` plays the looping `loadingo.gif` only while a turn is generating (`active`); once generation stops it runs out the current gif loop, then swaps to the agent's [[src/renderer/src/components/common/ProfileAvatar.tsx]] so idle turns are identified by who produced them. The live typing indicator has no resolved agent yet, so it falls back to the gif.
 
@@ -84,37 +94,35 @@ Two deliberate asymmetries: bundled skills stay local in remote mode (that list 
 
 ## Agents page
 
-The Agents page is a catalog-first surface with separate Official Agents and My Agents tabs; legacy Runtime Profile and governance controls remain available under collapsed advanced management.
+The Agents page is a catalog-first surface with Official Agents, My Agents, and an Organization-only Enterprise Agents tab. Runtime Profiles, Installations, and RuntimeBindings remain implementation records and are not separate user-managed objects.
 
-[[src/renderer/src/screens/Agents/Agents.tsx]] opens [[src/renderer/src/screens/Agents/AgentControlPanel.tsx#AgentControlPanel]] on the Official Agents tab with advanced management collapsed. The toolbar keeps tab selection, search, refresh, and context-appropriate creation together. Official, personal, Workspace, and Organization entries use the same compact card anatomy; search and small status filters change the visible card set without changing the trusted scope.
+[[src/renderer/src/screens/Agents/Agents.tsx]] opens [[src/renderer/src/screens/Agents/AgentControlPanel.tsx#AgentControlPanel]] on the Official Agents tab. The toolbar keeps tab selection, search, refresh, and context-appropriate creation together. Official, personal, Workspace, and Organization entries use the same compact card anatomy; search and small status filters change the visible card set without changing the trusted scope.
 
-Opening a card uses [[src/renderer/src/screens/Agents/AgentHubDetailDialog.tsx#AgentHubDetailDialog]] to show capability text, expertise tags, example prompts, and one primary action. Official installation and managed update still use their dedicated confirmation/API paths; a linked installation starts chat through its renderer-safe local Profile id. Personal entries route to the existing draft editor, version install/retry, Profile chat/edit, update, and archive handlers rather than simulated actions.
+Opening a card uses [[src/renderer/src/screens/Agents/AgentHubDetailDialog.tsx#AgentHubDetailDialog]] to show capability text, expertise tags, example prompts, and one primary action. **Start using** internally performs the verified install/retry, immutable-version selection, local preparation, activation, and chat transition. Official installation and managed update retain their dedicated confirmation/API paths, but their product labels remain Agent-level.
 
-My Agents contains actual draft, published, pending, or installed control-plane Agents. A bare legacy Runtime Profile no longer prevents the true empty state from appearing. Search misses and status-filter misses use their own recovery hints, so an existing Agent hidden by a query or filter is never reported as an empty catalog and the create action appears only for the genuine empty state. Those Profiles move to the expanded Advanced management list with their real edit, chat, create, and account-sync actions; drafts, immutable versions, installations, experience candidates, and Organization review controls remain in the same collapsed area.
+My Agents joins actual drafts, published definitions, pending or active Installations, and unmatched local Profiles into one Agent-card projection. An unmatched Profile appears as a ready local Agent rather than a second management list. Search misses and status-filter misses use their own recovery hints, so an existing Agent hidden by a query or filter is never reported as an empty catalog.
 
-Legacy Profile creation still opens an [[src/renderer/src/components/modal/AppModal.tsx#AppModal]] with a user-facing agent-name field, a "clone config & API keys" toggle, and a source-profile selector defaulting to the active Profile id. Create calls `window.hermesAPI.createProfile(name, cloneFrom)` where `name` is the label and `cloneFrom` is a source id or `null`; the modal remains open on failure. [[src/main/profiles.ts#createProfile]] generates a CLI-safe internal id, stores display metadata, and maps a non-null source to `hermes profile create <id> --clone-from <source>`. Selecting **Start using** still switches by Profile id and starts its gateway before navigation; SSH persistence and gateway startup retain their existing main-process behavior.
+[[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] creates Agents from a name, identity instructions or imported Markdown, a configured model selection, and optional Skill/SOP/knowledge Markdown. Provider lists, model IDs, asset paths, and local runtime preparation are derived automatically. Publish-and-use completes publication, preparation, activation, and chat from one explicit user action.
 
-The profile modal's inline name editor saves on Enter/blur, but Escape is a real cancel path: it restores the current saved name and suppresses the blur-save that browsers fire as the input unmounts.
+## Office Agent labels
 
-## Office profile labels
-
-The Office scene shows each profile's user-facing name while keeping profile ids stable for routing.
+The Office scene shows each Agent's user-facing name while keeping internal Profile IDs stable for routing.
 
 [[src/renderer/src/screens/Office/Office.tsx]] loads profiles through `listProfiles()` and maps them with [[src/renderer/src/screens/Office/office3d/agents.ts#profileToOfficeAgent]]. The mapped Office agent keeps `id = profile.id` for selection, CEO persistence, and One Chat routing, but uses `profile.name` as `agent.name`, so the 3D speech bubble, details sidebar, and One Chat labels match the renamed agent. The visible-tab poll uses [[src/renderer/src/screens/Office/office3d/agents.ts#officeAgentsChanged]] so name changes refresh without requiring a manual Office reload.
 
-## Profile detail modal
+## Agent detail facade
 
-A single global modal (80vw × 80vh) with a left-section nav views and edits a profile, opened from anywhere via a context hook so future profile features share one surface.
+A single global modal (80vw × 80vh) exposes Agent-level identity, persona, memory, wallet, sync, and lifecycle settings while continuing to use the underlying Profile record internally.
 
-[[src/renderer/src/components/profile/ProfileModalProvider.tsx#ProfileModalProvider]] mounts [[src/renderer/src/components/profile/ProfileModal.tsx#ProfileModal]] at the app root and exposes `openProfile(id, opts)` through [[src/renderer/src/components/profile/ProfileModalContext.ts#useProfileModal]]. The sidebar popover's active profile (a button in [[src/renderer/src/screens/Layout/ProfileSwitcher.tsx#ProfileSwitcher]]) and each profile row's edit control in [[src/renderer/src/screens/Agents/Agents.tsx]] both call `openProfile`, passing `onChanged` to refresh their lists and `onDeleted` to fall back to the default profile when the active one is removed. `opts.initialSection` deep-links to a specific left-nav section on open — the Office tab's bank ATMs use it to jump straight to **Wallet** (see [[office-3d-interiors#Office 3D Interiors#Interactables]]). The header shows the profile avatar and user-facing name; the icon'd left nav (`PROFILE_SECTIONS`) switches the right pane between **Profile** (inline name editing in the identity title, avatar upload/remove, colour, and lucide provider/model/skills/gateway chips), **Persona** (a profile-scoped copy of [[src/renderer/src/screens/Soul/Soul.tsx#Soul]]), **Agent Memory** (a profile-scoped copy of [[src/renderer/src/screens/Memory/MemoryEntries.tsx#MemoryEntries]] loaded through `readMemory(profile.id)`), **Wallet** (a profile-scoped Base wallet pane in [[src/renderer/src/components/profile/ProfileWalletPane.tsx#ProfileWalletPane]]), and **Advanced** (the delete danger zone). Every profile — including default — is editable; only the default profile can't be deleted, so its Advanced pane just says so. The modal self-loads via `listProfiles()` and re-reads after every mutation, replacing the former inline `agents-appearance` modal.
+[[src/renderer/src/components/profile/ProfileModalProvider.tsx#ProfileModalProvider]] mounts [[src/renderer/src/components/profile/ProfileModal.tsx#ProfileModal]] at the app root and exposes `openProfile(id, opts)` through [[src/renderer/src/components/profile/ProfileModalContext.ts#useProfileModal]]. The sidebar active Agent and the Office bank ATM use this facade; the Agents catalog itself uses its capability-and-use detail dialog instead. The header shows only the Agent avatar and user-facing name. The overview exposes model and Skill counts but hides provider routing, gateway state, internal Profile IDs, Profile paths, Installations, and RuntimeBindings. The remaining sections are **Persona**, **Agent Memory**, **Wallet**, **Sync**, and **Advanced** lifecycle actions. Only the default Agent cannot be deleted.
 
 Agent names are desktop metadata in `profile-meta.json`, surfaced as `ProfileInfo.name` from [[src/main/profiles.ts#listProfiles]] and mutated through [[src/main/profile-meta.ts#setProfileName]]. They do not rename the stable profile id or directory, so profile-scoped memory, wallets, sessions, active profile selection, and gateway routing continue to use `profile.id`. If the save IPC rejects, the inline editor remains open, clears its Saving tag, and shows the name-update error instead of trapping the user in a pending state.
 
 Legacy renderer state can still contain a run without a profile id during upgrades. Profile avatars and the active-session strip treat a missing profile as `default`, and profile-name IPC handlers accept omitted names as an empty value, so stale state cannot trip a `.trim()` exception and black-screen the app.
 
-### Profile wallets
+### Agent wallets
 
-Profile wallets are local Base-network Ethereum wallets, capped per profile and kept separate from chat/provider credentials.
+Agent wallets are local Base-network Ethereum wallets, internally capped per Profile and kept separate from chat/provider credentials.
 
 [[src/renderer/src/components/profile/ProfileWalletPane.tsx#ProfileWalletPane]] lists public wallet metadata from `listWallets(profile)`, opens a create/import modal, and only displays a recovery phrase in the one-time success state after `createWallet` or `importWallet`. [[src/main/wallet-store.ts#createWallet]] generates a BIP-39 recovery phrase with Node crypto entropy, derives the Ethereum address with `ethers`, and stores public metadata plus an encrypted recovery phrase in `wallets.json` under the profile home. [[src/main/wallet-store.ts#importWallet]] validates an existing recovery phrase, rejects duplicate addresses in the same profile, and uses the same Base wallet metadata shape from [[src/shared/wallets.ts#ProfileWallet]].
 

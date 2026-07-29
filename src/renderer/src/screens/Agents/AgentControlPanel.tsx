@@ -6,7 +6,6 @@ import type {
   AgenteraAgentControlPublicState,
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
-  AgenteraAgentVersionSummary,
   OfficialAgentInstallPreview,
   OfficialAgentSummary,
   OfficialManagedUpdate,
@@ -28,14 +27,13 @@ import AgentHubDetailDialog, {
 import AgentDraftEditor from "./AgentDraftEditor";
 import ExperienceCandidatePanel from "./ExperienceCandidatePanel";
 import ExperiencePromotionDialog from "./ExperiencePromotionDialog";
-import AgentInstallDialog, {
-  type AgentInstallProfileOption,
-} from "./AgentInstallDialog";
 import OrganizationSubmissionPanel from "./OrganizationSubmissionPanel";
 import OfficialAgentInstallDialog from "./OfficialAgentInstallDialog";
 import OfficialAgentSection from "./OfficialAgentSection";
 
-export interface AgentControlProfileOption extends AgentInstallProfileOption {
+export interface AgentControlProfileOption {
+  id: string;
+  name: string;
   model?: string;
   provider?: string;
   skillCount?: number;
@@ -48,17 +46,12 @@ export interface AgentControlProfileOption extends AgentInstallProfileOption {
 
 export interface AgentControlPanelProps {
   profiles: AgentControlProfileOption[];
-  initialTab?: "official" | "mine";
+  initialTab?: "official" | "mine" | "enterprise";
   advancedOpenByDefault?: boolean;
   onChatWithProfile?: (profileId: string) => void;
-  onEditProfile?: (profileId: string) => void;
-  onCreateLocalProfile?: () => void;
-  onProfilesChanged?: () => void | Promise<void>;
-  profileSyncLabel?: string | null;
-  profileSyncTitle?: string;
-  profileSyncEnabled?: boolean;
-  profileSyncing?: boolean;
-  onSyncProfiles?: () => void;
+  onProfilesChanged?: () => unknown | Promise<unknown>;
+  onAgentReady?: (installationId: string) => boolean | Promise<boolean>;
+  modelProfileId?: string;
 }
 
 interface PersonalAgentCard {
@@ -71,14 +64,7 @@ interface PersonalAgentCard {
   installation: AgenteraAgentInstallationSummary | null;
   profile: AgentControlProfileOption | null;
   iconSrc: string | null;
-}
-
-interface InstallDialogState {
-  mode: "install" | "retry" | "update";
-  definitionId: string;
-  versionId: string;
-  installation: AgenteraAgentInstallationSummary | null;
-  versions: AgenteraAgentVersionSummary[];
+  origin: "definition" | "draft" | "installation" | "profile";
 }
 
 function errorKey(code: AgenteraAgentControlErrorCode): string {
@@ -115,19 +101,26 @@ function draftIconDataUrl(draft: AgentDraft | null): string | null {
     : null;
 }
 
+function automaticRuntimeName(
+  displayName: string,
+  definitionId: string,
+  profiles: readonly AgentControlProfileOption[],
+): string {
+  const normalized = displayName.trim() || "Agent";
+  if (!profiles.some((profile) => profile.name === normalized)) {
+    return normalized;
+  }
+  return `${normalized}-${definitionId.slice(0, 8)}`;
+}
+
 export default function AgentControlPanel({
   profiles,
   initialTab = "mine",
   advancedOpenByDefault = true,
   onChatWithProfile,
-  onEditProfile,
-  onCreateLocalProfile,
   onProfilesChanged,
-  profileSyncLabel = null,
-  profileSyncTitle,
-  profileSyncEnabled = false,
-  profileSyncing = false,
-  onSyncProfiles,
+  onAgentReady,
+  modelProfileId,
 }: AgentControlPanelProps): React.JSX.Element {
   const { t } = useI18n();
   const [state, setState] = useState<AgenteraAgentControlPublicState | null>(
@@ -153,10 +146,8 @@ export default function AgentControlPanel({
   >(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [editor, setEditor] = useState<AgentDraftDetail | "new" | null>(null);
-  const [installDialog, setInstallDialog] = useState<InstallDialogState | null>(
-    null,
-  );
   const [archiveTarget, setArchiveTarget] =
     useState<AgenteraAgentInstallationSummary | null>(null);
   const [promotionTarget, setPromotionTarget] =
@@ -164,7 +155,10 @@ export default function AgentControlPanel({
   const [candidateRefreshToken, setCandidateRefreshToken] = useState(0);
   const [organizationRefreshToken, setOrganizationRefreshToken] = useState(0);
   const [archiving, setArchiving] = useState(false);
-  const [activeTab, setActiveTab] = useState<"official" | "mine">(initialTab);
+  const [busyPersonalKey, setBusyPersonalKey] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<
+    "official" | "mine" | "enterprise"
+  >(initialTab);
   const [query, setQuery] = useState("");
   const [officialFilter, setOfficialFilter] = useState<
     "all" | "installed" | "updates"
@@ -266,7 +260,6 @@ export default function AgentControlPanel({
         selectedContextKey.current !== nextContextKey
       ) {
         setEditor(null);
-        setInstallDialog(null);
         setArchiveTarget(null);
         setPromotionTarget(null);
         setOfficialInstallPreview(null);
@@ -292,8 +285,6 @@ export default function AgentControlPanel({
   useEffect(() => {
     void load();
     return window.agenteraAgents.onStateChanged(() => {
-      setEditor(null);
-      setInstallDialog(null);
       setArchiveTarget(null);
       setPromotionTarget(null);
       setOfficialInstallPreview(null);
@@ -312,43 +303,6 @@ export default function AgentControlPanel({
       return;
     }
     setEditor(result.data);
-  };
-
-  const requestInstall = (target: {
-    definitionId: string;
-    versionId: string;
-  }): void => {
-    setEditor(null);
-    setInstallDialog({
-      mode: "install",
-      definitionId: target.definitionId,
-      versionId: target.versionId,
-      installation: null,
-      versions: [],
-    });
-  };
-
-  const requestUpdate = async (
-    installation: AgenteraAgentInstallationSummary,
-  ): Promise<void> => {
-    setError(null);
-    const result = await window.agenteraAgents.listVersions(
-      installation.definitionId,
-    );
-    if (!result.ok) {
-      setError(errorKey(result.errorCode));
-      return;
-    }
-    const latest = [...result.data].sort(
-      (left, right) => right.versionNumber - left.versionNumber,
-    )[0];
-    setInstallDialog({
-      mode: "update",
-      definitionId: installation.definitionId,
-      versionId: latest?.id ?? installation.selectedVersionId,
-      installation,
-      versions: result.data,
-    });
   };
 
   const confirmArchive = async (): Promise<void> => {
@@ -423,12 +377,7 @@ export default function AgentControlPanel({
     organizationOnline && context.role !== "auditor";
   const organizationCanSeeInstallations =
     !isOrganization || context.role !== "auditor";
-  const organizationCanViewDrafts =
-    isOrganization && (context.role === "owner" || context.role === "admin");
   const organizationReadOnly = isOrganization && !organizationCanAuthor;
-  const canViewDrafts = isOrganization
-    ? organizationCanViewDrafts
-    : !isWorkspaceMember;
   const canAuthor = isOrganization
     ? organizationCanAuthor
     : !isWorkspace || (!isWorkspaceMember && !workspaceReadOnly);
@@ -447,10 +396,99 @@ export default function AgentControlPanel({
     state.cloudAvailable === true &&
     organizationCanSeeInstallations;
 
+  useEffect(() => {
+    if (state && !isOrganization && activeTab === "enterprise") {
+      setActiveTab("mine");
+    }
+  }, [activeTab, isOrganization, state]);
+
+  const finishAgentActivation = useCallback(
+    async (installationId: string): Promise<void> => {
+      await onProfilesChanged?.();
+      const opened = onAgentReady ? await onAgentReady(installationId) : false;
+      if (!opened) setNotice("agents.control.agentReadyManualOpen");
+    },
+    [onAgentReady, onProfilesChanged],
+  );
+
+  const activateAgent = useCallback(
+    async (target: {
+      key: string;
+      displayName: string;
+      definitionId: string;
+      versionId: string;
+      installation: AgenteraAgentInstallationSummary | null;
+      profile: AgentControlProfileOption | null;
+    }): Promise<void> => {
+      if (busyPersonalKey) return;
+      setBusyPersonalKey(target.key);
+      setError(null);
+      setNotice(null);
+      try {
+        if (
+          target.installation?.status === "active" &&
+          target.installation.selectedVersionId === target.versionId
+        ) {
+          if (target.profile && onChatWithProfile) {
+            onChatWithProfile(target.profile.id);
+          } else {
+            await finishAgentActivation(target.installation.id);
+          }
+          return;
+        }
+        if (target.installation?.status === "active" && !target.profile) {
+          await finishAgentActivation(target.installation.id);
+          return;
+        }
+        const result =
+          target.installation?.status === "pending"
+            ? await window.agenteraAgents.retryPendingInstallation({
+                id: target.installation.id,
+                target: {
+                  kind: "fresh",
+                  profileName: automaticRuntimeName(
+                    target.displayName,
+                    target.definitionId,
+                    profiles,
+                  ),
+                },
+              })
+            : target.installation?.status === "active" && target.profile
+              ? await window.agenteraAgents.selectInstallationVersion({
+                  id: target.installation.id,
+                  versionId: target.versionId,
+                  localProfileId: target.profile.id,
+                })
+              : await window.agenteraAgents.installVersion({
+                  definitionId: target.definitionId,
+                  versionId: target.versionId,
+                  profileName: automaticRuntimeName(
+                    target.displayName,
+                    target.definitionId,
+                    profiles,
+                  ),
+                });
+        if (!result.ok) {
+          setError(errorKey(result.errorCode));
+          return;
+        }
+        setEditor(null);
+        await load();
+        await finishAgentActivation(result.data.id);
+      } catch {
+        setError("agents.control.errors.operation_failed");
+      } finally {
+        setBusyPersonalKey(null);
+      }
+    },
+    [busyPersonalKey, finishAgentActivation, load, onChatWithProfile, profiles],
+  );
+
   const personalCards = useMemo(() => {
     const result: PersonalAgentCard[] = [];
     const representedDrafts = new Set<string>();
     const representedInstallations = new Set<string>();
+    const representedProfiles = new Set<string>();
     const installationByDefinition = new Map(
       scopedInstallations.map((installation) => [
         installation.definitionId,
@@ -490,6 +528,7 @@ export default function AgentControlPanel({
         : null;
       if (draft) representedDrafts.add(draft.id);
       if (installation) representedInstallations.add(installation.id);
+      if (profile) representedProfiles.add(profile.id);
       const tags = [sourceTag(installation), t("agents.hub.published")];
       if (installation?.status === "active")
         tags.push(t("agents.hub.installed"));
@@ -512,6 +551,7 @@ export default function AgentControlPanel({
         installation,
         profile,
         iconSrc: draftIconDataUrl(draft),
+        origin: "definition",
       });
     }
 
@@ -535,12 +575,14 @@ export default function AgentControlPanel({
         installation: null,
         profile: null,
         iconSrc: draftIconDataUrl(draft),
+        origin: "draft",
       });
     }
 
     for (const installation of scopedInstallations) {
       if (representedInstallations.has(installation.id)) continue;
       const profile = profileByInstallation.get(installation.id) ?? null;
+      if (profile) representedProfiles.add(profile.id);
       result.push({
         key: `installation:${installation.id}`,
         name: profile?.name ?? definitionName(installation.definitionId),
@@ -559,6 +601,33 @@ export default function AgentControlPanel({
         installation,
         profile,
         iconSrc: null,
+        origin: "installation",
+      });
+    }
+
+    for (const profile of profiles) {
+      if (representedProfiles.has(profile.id)) continue;
+      const model = profile.model?.split("/").pop() ?? profile.model;
+      result.push({
+        key: `profile:${profile.id}`,
+        name: profile.name,
+        description: profile.model
+          ? t("agents.hub.localProfileDescription", {
+              model: model || profile.model,
+              count: profile.skillCount ?? 0,
+            })
+          : t("agents.hub.localProfileNoModel"),
+        tags: [
+          t("agents.hub.localAgent"),
+          t("agents.hub.ready"),
+          ...(model ? [model] : []),
+        ],
+        draft: null,
+        definition: null,
+        installation: null,
+        profile,
+        iconSrc: null,
+        origin: "profile",
       });
     }
 
@@ -574,9 +643,46 @@ export default function AgentControlPanel({
     t,
   ]);
 
+  const requestInstall = useCallback(
+    (target: {
+      definitionId: string;
+      versionId: string;
+      displayName?: string;
+    }): void => {
+      const installation =
+        scopedInstallations.find(
+          (item) => item.definitionId === target.definitionId,
+        ) ?? null;
+      const profile = installation
+        ? (profiles.find(
+            (item) => item.agentInstallationId === installation.id,
+          ) ?? null)
+        : null;
+      const displayName =
+        target.displayName ?? definitionName(target.definitionId);
+      void activateAgent({
+        key: `definition:${target.definitionId}`,
+        displayName,
+        definitionId: target.definitionId,
+        versionId: target.versionId,
+        installation,
+        profile,
+      });
+    },
+    [activateAgent, definitionName, profiles, scopedInstallations],
+  );
+
+  const visiblePersonalCards = useMemo(() => {
+    if (!isOrganization) return personalCards;
+    if (activeTab === "enterprise") {
+      return personalCards.filter((card) => card.origin !== "profile");
+    }
+    return personalCards.filter((card) => card.profile !== null);
+  }, [activeTab, isOrganization, personalCards]);
+
   const filteredPersonalCards = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
-    return personalCards.filter((card) => {
+    return visiblePersonalCards.filter((card) => {
       if (
         normalizedQuery &&
         !`${card.name} ${card.description}`
@@ -591,19 +697,23 @@ export default function AgentControlPanel({
       }
       return true;
     });
-  }, [mineFilter, personalCards, query]);
+  }, [mineFilter, query, visiblePersonalCards]);
 
   const hasSearchQuery = query.trim().length > 0;
   const personalEmptyTitle = hasSearchQuery
     ? "agents.hub.noSearchResults"
-    : personalCards.length > 0
+    : visiblePersonalCards.length > 0
       ? "agents.hub.noFilteredResults"
-      : "agents.hub.noPersonalAgents";
+      : activeTab === "enterprise"
+        ? "agents.hub.noEnterpriseAgents"
+        : "agents.hub.noPersonalAgents";
   const personalEmptyHint = hasSearchQuery
     ? "agents.hub.noSearchResultsHint"
-    : personalCards.length > 0
+    : visiblePersonalCards.length > 0
       ? "agents.hub.noFilteredResultsHint"
-      : "agents.hub.noPersonalAgentsHint";
+      : activeTab === "enterprise"
+        ? "agents.hub.noEnterpriseAgentsHint"
+        : "agents.hub.noPersonalAgentsHint";
 
   const selectedPersonal =
     personalCards.find((card) => card.key === selectedPersonalKey) ?? null;
@@ -611,12 +721,64 @@ export default function AgentControlPanel({
   let selectedPersonalPrimary: AgentHubDetailAction | null = null;
   const selectedPersonalExtra: AgentHubDetailAction[] = [];
   if (selectedPersonal) {
+    const definitionId =
+      selectedPersonal.definition?.id ??
+      selectedPersonal.draft?.publishedRevision?.definitionId ??
+      selectedPersonal.installation?.definitionId ??
+      null;
+    const versionId =
+      selectedPersonal.definition?.latestVersionId ??
+      selectedPersonal.draft?.publishedRevision?.versionId ??
+      selectedPersonal.installation?.selectedVersionId ??
+      null;
     if (selectedPersonal.profile && onChatWithProfile) {
       selectedPersonalPrimary = {
         label: t("agents.hub.useAgent"),
         kind: "chat",
         onClick: () => {
           onChatWithProfile(selectedPersonal.profile!.id);
+          setSelectedPersonalKey(null);
+        },
+      };
+    } else if (
+      selectedPersonal.installation?.status === "pending" &&
+      definitionId &&
+      versionId
+    ) {
+      selectedPersonalPrimary = {
+        label: t("agents.control.retryAgent"),
+        disabled:
+          !state?.cloudAvailable ||
+          (isOrganization && !organizationCanInstall) ||
+          busyPersonalKey === selectedPersonal.key,
+        onClick: () => {
+          void activateAgent({
+            key: selectedPersonal.key,
+            displayName: selectedPersonal.name,
+            definitionId,
+            versionId,
+            installation: selectedPersonal.installation,
+            profile: selectedPersonal.profile,
+          });
+          setSelectedPersonalKey(null);
+        },
+      };
+    } else if (definitionId && versionId) {
+      selectedPersonalPrimary = {
+        label: t("agents.hub.useAgent"),
+        disabled:
+          !state?.cloudAvailable ||
+          (isOrganization && !organizationCanInstall) ||
+          busyPersonalKey === selectedPersonal.key,
+        onClick: () => {
+          void activateAgent({
+            key: selectedPersonal.key,
+            displayName: selectedPersonal.name,
+            definitionId,
+            versionId,
+            installation: selectedPersonal.installation,
+            profile: selectedPersonal.profile,
+          });
           setSelectedPersonalKey(null);
         },
       };
@@ -628,45 +790,12 @@ export default function AgentControlPanel({
           setSelectedPersonalKey(null);
         },
       };
-    } else if (selectedPersonal.installation?.status === "pending") {
-      selectedPersonalPrimary = {
-        label: t("agents.control.retry"),
-        disabled: !state?.cloudAvailable,
-        onClick: () => {
-          const installation = selectedPersonal.installation!;
-          setInstallDialog({
-            mode: "retry",
-            definitionId: installation.definitionId,
-            versionId: installation.selectedVersionId,
-            installation,
-            versions: [],
-          });
-          setSelectedPersonalKey(null);
-        },
-      };
-    } else if (selectedPersonal.definition?.latestVersionId) {
-      selectedPersonalPrimary = {
-        label: t("agents.hub.installAgent"),
-        disabled: !state?.cloudAvailable,
-        onClick: () => {
-          requestInstall({
-            definitionId: selectedPersonal.definition!.id,
-            versionId: selectedPersonal.definition!.latestVersionId!,
-          });
-          setSelectedPersonalKey(null);
-        },
-      };
     }
-    if (selectedPersonal.profile && onEditProfile) {
-      selectedPersonalExtra.push({
-        label: t("agents.hub.editAppearance"),
-        onClick: () => {
-          onEditProfile(selectedPersonal.profile!.id);
-          setSelectedPersonalKey(null);
-        },
-      });
-    }
-    if (selectedPersonal.draft && selectedPersonal.profile && !draftReadOnly) {
+    if (
+      selectedPersonal.draft &&
+      selectedPersonalPrimary?.label !== t("agents.control.edit") &&
+      !draftReadOnly
+    ) {
       selectedPersonalExtra.push({
         label: t("agents.control.edit"),
         onClick: () => {
@@ -676,21 +805,45 @@ export default function AgentControlPanel({
       });
     }
     if (selectedPersonal.installation?.status === "active") {
-      selectedPersonalExtra.push(
-        {
-          label: t("agents.control.update"),
-          disabled: !state?.cloudAvailable,
-          onClick: () => void requestUpdate(selectedPersonal.installation!),
-        },
-        {
-          label: t("agents.control.archive"),
-          disabled: !state?.cloudAvailable,
+      if (isWorkspace) {
+        selectedPersonalExtra.push({
+          label: t("agents.control.experience.promoteLocalExperience"),
+          disabled: state?.access !== "online" || state.cloudAvailable !== true,
           onClick: () => {
-            setArchiveTarget(selectedPersonal.installation!);
+            setPromotionTarget(selectedPersonal.installation!);
             setSelectedPersonalKey(null);
           },
+        });
+      }
+      if (
+        selectedPersonal.profile &&
+        selectedPersonal.definition?.latestVersionId &&
+        selectedPersonal.definition.latestVersionId !==
+          selectedPersonal.installation.selectedVersionId
+      ) {
+        selectedPersonalExtra.push({
+          label: t("agents.control.update"),
+          disabled:
+            !state?.cloudAvailable || busyPersonalKey === selectedPersonal.key,
+          onClick: () =>
+            void activateAgent({
+              key: selectedPersonal.key,
+              displayName: selectedPersonal.name,
+              definitionId: selectedPersonal.installation!.definitionId,
+              versionId: selectedPersonal.definition!.latestVersionId!,
+              installation: selectedPersonal.installation,
+              profile: selectedPersonal.profile,
+            }),
+        });
+      }
+      selectedPersonalExtra.push({
+        label: t("agents.control.archive"),
+        disabled: !state?.cloudAvailable,
+        onClick: () => {
+          setArchiveTarget(selectedPersonal.installation!);
+          setSelectedPersonalKey(null);
         },
-      );
+      });
     }
   }
 
@@ -706,6 +859,7 @@ export default function AgentControlPanel({
             onClick={() => {
               setActiveTab("official");
               setQuery("");
+              setSelectedPersonalKey(null);
             }}
           >
             <Sparkles size={17} />
@@ -719,11 +873,28 @@ export default function AgentControlPanel({
             onClick={() => {
               setActiveTab("mine");
               setQuery("");
+              setSelectedPersonalKey(null);
             }}
           >
             <Bot size={17} />
             {t("agents.hub.mineTab")}
           </button>
+          {isOrganization ? (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "enterprise"}
+              className={activeTab === "enterprise" ? "active" : ""}
+              onClick={() => {
+                setActiveTab("enterprise");
+                setQuery("");
+                setSelectedPersonalKey(null);
+              }}
+            >
+              <Bot size={17} />
+              {t("agents.hub.enterpriseTab")}
+            </button>
+          ) : null}
         </div>
         <div className="agent-hub-toolbar-actions">
           <label className="agent-hub-search">
@@ -744,7 +915,9 @@ export default function AgentControlPanel({
           >
             <Refresh size={16} />
           </button>
-          {activeTab === "mine" && showNewDraft ? (
+          {((activeTab === "mine" && !isOrganization) ||
+            (activeTab === "enterprise" && isOrganization)) &&
+          showNewDraft ? (
             <button
               type="button"
               className="btn btn-primary btn-sm agent-hub-create-button"
@@ -753,7 +926,7 @@ export default function AgentControlPanel({
             >
               <Plus size={15} />
               {t(
-                isOrganization
+                activeTab === "enterprise"
                   ? "agents.control.organization.newDraft"
                   : "agents.control.newAgent",
               )}
@@ -780,6 +953,7 @@ export default function AgentControlPanel({
         </div>
       ) : null}
       {error ? <div className="agents-create-error">{t(error)}</div> : null}
+      {notice ? <div className="agent-control-success">{t(notice)}</div> : null}
 
       {loading ? (
         <div className="agent-hub-loading">
@@ -842,21 +1016,24 @@ export default function AgentControlPanel({
               <div className="agent-hub-title-row">
                 <h2 id="agent-control-title">
                   {t(
-                    isOrganization
+                    activeTab === "enterprise"
                       ? "agents.control.organization.title"
                       : isWorkspace
                         ? "agents.control.workspaceSpaceTitle"
                         : "agents.control.personalSpaceTitle",
                   )}
                 </h2>
-                {isWorkspace || isOrganization ? (
+                {context.scope !== "USER" &&
+                (isWorkspace || activeTab === "enterprise") ? (
                   <span>{t(`agents.control.role.${context.role}`)}</span>
                 ) : null}
               </div>
               <p>
                 {t(
                   isOrganization
-                    ? "agents.hub.organizationSubtitle"
+                    ? activeTab === "enterprise"
+                      ? "agents.hub.organizationSubtitle"
+                      : "agents.hub.mineSubtitle"
                     : isWorkspace
                       ? "agents.hub.workspaceSubtitle"
                       : "agents.hub.mineSubtitle",
@@ -887,7 +1064,10 @@ export default function AgentControlPanel({
               </div>
               <strong>{t(personalEmptyTitle)}</strong>
               <p>{t(personalEmptyHint)}</p>
-              {!hasSearchQuery && personalCards.length === 0 && showNewDraft ? (
+              {!hasSearchQuery &&
+              visiblePersonalCards.length === 0 &&
+              showNewDraft &&
+              (!isOrganization || activeTab === "enterprise") ? (
                 <button
                   type="button"
                   className="btn btn-primary"
@@ -948,326 +1128,58 @@ export default function AgentControlPanel({
             </div>
           )}
 
-          <section
-            className={`agent-hub-advanced ${advancedOpen ? "open" : ""}`}
-          >
-            <button
-              type="button"
-              className="agent-hub-advanced-toggle"
-              aria-expanded={advancedOpen}
-              onClick={() => setAdvancedOpen((value) => !value)}
+          {isWorkspace ||
+          (isOrganization &&
+            activeTab === "enterprise" &&
+            organizationCanReadReview) ? (
+            <section
+              className={`agent-hub-advanced ${advancedOpen ? "open" : ""}`}
             >
-              <span>
-                <strong>{t("agents.hub.advancedTitle")}</strong>
-                <small>{t("agents.hub.advancedSubtitle")}</small>
-              </span>
-              <ChevronDown size={18} />
-            </button>
-            {advancedOpen ? (
-              <div className="agent-hub-advanced-body">
-                <section className="agent-hub-local-profiles">
-                  <div className="agent-control-group-title">
-                    <div>
-                      <h3>{t("agents.legacyTitle")}</h3>
-                      <p>{t("agents.legacySubtitle")}</p>
-                    </div>
-                    <div className="agent-control-inline-actions">
-                      {profileSyncLabel ? (
-                        <span
-                          className="agent-hub-sync-status"
-                          title={profileSyncTitle}
-                        >
-                          {profileSyncLabel}
-                        </span>
-                      ) : null}
-                      {onSyncProfiles && profileSyncEnabled ? (
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={onSyncProfiles}
-                          disabled={profileSyncing}
-                        >
-                          {profileSyncing
-                            ? t("agents.syncing")
-                            : t("agents.sync")}
-                        </button>
-                      ) : null}
-                      <span className="agent-hub-legacy-badge">
-                        {t("agents.legacyAccountSyncLabel")}
-                      </span>
-                      {onCreateLocalProfile ? (
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={onCreateLocalProfile}
-                        >
-                          <Plus size={14} />
-                          {t("agents.legacyNewProfile")}
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                  {profiles.length > 0 ? (
-                    <div
-                      className="agent-hub-profile-list"
-                      data-testid="local-runtime-profiles"
-                    >
-                      {profiles.map((profile) => (
-                        <article
-                          key={profile.id}
-                          className="agent-hub-profile-row"
-                        >
-                          <ProfileAvatar
-                            name={profile.id}
-                            color={profile.color}
-                            avatar={profile.avatar}
-                            size={34}
-                          />
-                          <div className="agent-hub-profile-copy">
-                            <strong>{profile.name}</strong>
-                            <span>
-                              {profile.model
-                                ? (profile.model.split("/").pop() ??
-                                  profile.model)
-                                : t("agents.noModel")}
-                              {profile.gatewayRunning
-                                ? ` · ${t("agents.running")}`
-                                : ""}
-                            </span>
-                          </div>
-                          <div className="agent-control-inline-actions">
-                            {onEditProfile ? (
-                              <button
-                                type="button"
-                                className="btn btn-secondary btn-sm"
-                                onClick={() => onEditProfile(profile.id)}
-                              >
-                                {t("agents.hub.editAppearance")}
-                              </button>
-                            ) : null}
-                            {onChatWithProfile ? (
-                              <button
-                                type="button"
-                                className="btn btn-primary btn-sm"
-                                onClick={() => onChatWithProfile(profile.id)}
-                              >
-                                {t("agents.hub.useAgent")}
-                              </button>
-                            ) : null}
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  ) : null}
-                </section>
-
-                <div className="agent-control-columns">
-                  {canViewDrafts ? (
-                    <section className="agent-control-group">
-                      <div className="agent-control-group-title">
-                        <h3>{t("agents.control.localDrafts")}</h3>
-                        <span>{drafts.length}</span>
-                      </div>
-                      {drafts.length === 0 ? (
-                        <p className="agent-control-empty">
-                          {t("agents.control.noDrafts")}
-                        </p>
-                      ) : (
-                        drafts.map((draft) => (
-                          <article
-                            key={draft.id}
-                            className="agent-control-card"
-                          >
-                            <div>
-                              <strong>{draft.displayName}</strong>
-                              <p>
-                                {t("agents.control.revision")} {draft.revision}{" "}
-                                ·{" "}
-                                {draft.publishedRevision
-                                  ? t("agents.control.published")
-                                  : t("agents.control.localOnly")}
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => void editDraft(draft.id)}
-                            >
-                              {t(
-                                draftReadOnly
-                                  ? "agents.control.view"
-                                  : "agents.control.edit",
-                              )}
-                            </button>
-                          </article>
-                        ))
-                      )}
-                    </section>
+              <button
+                type="button"
+                className="agent-hub-advanced-toggle"
+                aria-expanded={advancedOpen}
+                onClick={() => setAdvancedOpen((value) => !value)}
+              >
+                <span>
+                  <strong>{t("agents.hub.advancedTitle")}</strong>
+                  <small>{t("agents.hub.advancedSubtitle")}</small>
+                </span>
+                <ChevronDown size={18} />
+              </button>
+              {advancedOpen ? (
+                <div className="agent-hub-advanced-body">
+                  {isWorkspace && state ? (
+                    <ExperienceCandidatePanel
+                      online={state.access === "online" && state.cloudAvailable}
+                      canReview={!isWorkspaceMember}
+                      contextKey={contextKey(state)}
+                      refreshToken={candidateRefreshToken}
+                      onDraftReady={(draft) => {
+                        setEditor(draft);
+                        setCandidateRefreshToken((value) => value + 1);
+                        void load();
+                      }}
+                    />
                   ) : null}
 
-                  <section className="agent-control-group">
-                    <div className="agent-control-group-title">
-                      <h3>{t("agents.control.publishedAgents")}</h3>
-                      <span>{definitions.length}</span>
-                    </div>
-                    {definitions.length === 0 ? (
-                      <p className="agent-control-empty">
-                        {state?.cloudAvailable
-                          ? t("agents.control.noPublishedAgents")
-                          : t("agents.control.discoveryPaused")}
-                      </p>
-                    ) : (
-                      definitions.map((definition) => (
-                        <article
-                          key={definition.id}
-                          className="agent-control-card"
-                        >
-                          <div>
-                            <strong>{definition.displayName}</strong>
-                            <p>{t("agents.control.immutableVersion")}</p>
-                          </div>
-                          {definition.latestVersionId &&
-                          (!isOrganization || organizationCanInstall) ? (
-                            <button
-                              type="button"
-                              className="btn btn-primary btn-sm"
-                              onClick={() =>
-                                requestInstall({
-                                  definitionId: definition.id,
-                                  versionId: definition.latestVersionId!,
-                                })
-                              }
-                            >
-                              {t("agents.control.install")}
-                            </button>
-                          ) : null}
-                        </article>
-                      ))
-                    )}
-                  </section>
+                  {isOrganization &&
+                  activeTab === "enterprise" &&
+                  organizationCanReadReview &&
+                  state ? (
+                    <OrganizationSubmissionPanel
+                      online={organizationOnline}
+                      canAuthor={organizationCanAuthor}
+                      canReview={organizationCanReview}
+                      contextKey={contextKey(state)}
+                      refreshToken={organizationRefreshToken}
+                      onChanged={() => void load()}
+                    />
+                  ) : null}
                 </div>
-
-                {organizationCanSeeInstallations ? (
-                  <section className="agent-control-group agent-control-installations">
-                    <div className="agent-control-group-title">
-                      <h3>{t("agents.control.installations")}</h3>
-                      <span>{scopedInstallations.length}</span>
-                    </div>
-                    {scopedInstallations.length === 0 ? (
-                      <p className="agent-control-empty">
-                        {t("agents.control.noInstallations")}
-                      </p>
-                    ) : (
-                      scopedInstallations.map((installation, index) => (
-                        <article
-                          key={`${installation.id}-${index}`}
-                          className="agent-control-card agent-control-installation-card"
-                        >
-                          <div>
-                            <strong>
-                              {definitionName(installation.definitionId)}
-                            </strong>
-                            <p>
-                              {installation.status === "pending"
-                                ? t("agents.control.pendingInstallation")
-                                : t("agents.control.installedLocally")}
-                            </p>
-                          </div>
-                          <div className="agent-control-inline-actions">
-                            {!isOrganization || organizationOnline ? (
-                              <>
-                                {installation.status === "pending" ? (
-                                  <button
-                                    type="button"
-                                    className="btn btn-primary btn-sm"
-                                    disabled={!state?.cloudAvailable}
-                                    onClick={() =>
-                                      setInstallDialog({
-                                        mode: "retry",
-                                        definitionId: installation.definitionId,
-                                        versionId:
-                                          installation.selectedVersionId,
-                                        installation,
-                                        versions: [],
-                                      })
-                                    }
-                                  >
-                                    {t("agents.control.retry")}
-                                  </button>
-                                ) : null}
-                                {installation.status === "active" ? (
-                                  <>
-                                    {isWorkspace ? (
-                                      <button
-                                        type="button"
-                                        className="btn btn-primary btn-sm"
-                                        onClick={() =>
-                                          setPromotionTarget(installation)
-                                        }
-                                      >
-                                        {t(
-                                          "agents.control.experience.promoteLocalExperience",
-                                        )}
-                                      </button>
-                                    ) : null}
-                                    <button
-                                      type="button"
-                                      className="btn btn-secondary btn-sm"
-                                      disabled={!state?.cloudAvailable}
-                                      onClick={() =>
-                                        void requestUpdate(installation)
-                                      }
-                                    >
-                                      {t("agents.control.update")}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="btn btn-secondary btn-sm"
-                                      disabled={!state?.cloudAvailable}
-                                      onClick={() =>
-                                        setArchiveTarget(installation)
-                                      }
-                                    >
-                                      {t("agents.control.archive")}
-                                    </button>
-                                  </>
-                                ) : null}
-                              </>
-                            ) : null}
-                          </div>
-                        </article>
-                      ))
-                    )}
-                  </section>
-                ) : null}
-
-                {isWorkspace && state ? (
-                  <ExperienceCandidatePanel
-                    online={state.access === "online" && state.cloudAvailable}
-                    canReview={!isWorkspaceMember}
-                    contextKey={contextKey(state)}
-                    refreshToken={candidateRefreshToken}
-                    onDraftReady={(draft) => {
-                      setEditor(draft);
-                      setCandidateRefreshToken((value) => value + 1);
-                      void load();
-                    }}
-                  />
-                ) : null}
-
-                {isOrganization && organizationCanReadReview && state ? (
-                  <OrganizationSubmissionPanel
-                    online={organizationOnline}
-                    canAuthor={organizationCanAuthor}
-                    canReview={organizationCanReview}
-                    contextKey={contextKey(state)}
-                    refreshToken={organizationRefreshToken}
-                    onChanged={() => void load()}
-                  />
-                ) : null}
-              </div>
-            ) : null}
-          </section>
+              ) : null}
+            </section>
+          ) : null}
         </div>
       )}
 
@@ -1280,9 +1192,12 @@ export default function AgentControlPanel({
           meta={
             selectedPersonal.profile
               ? t("agents.hub.ready")
-              : selectedPersonal.draft
-                ? t("agents.hub.localDraft")
-                : t("agents.hub.published")
+              : selectedPersonal.installation?.status === "pending"
+                ? t("agents.hub.pending")
+                : selectedPersonal.definition ||
+                    selectedPersonal.draft?.publishedRevision
+                  ? t("agents.hub.published")
+                  : t("agents.hub.localDraft")
           }
           iconSrc={selectedPersonal.iconSrc}
           iconColor={selectedPersonal.profile?.color}
@@ -1303,6 +1218,7 @@ export default function AgentControlPanel({
         draft={editor === "new" ? null : editor}
         readOnly={draftReadOnly}
         publicationTarget={isOrganization ? "ORGANIZATION" : "DIRECT"}
+        modelProfileId={modelProfileId}
         onClose={() => setEditor(null)}
         onSaved={() => void load()}
         onPublished={() => void load()}
@@ -1312,18 +1228,6 @@ export default function AgentControlPanel({
         }}
         onRequestInstall={requestInstall}
       />
-      {installDialog && (
-        <AgentInstallDialog
-          open
-          {...installDialog}
-          profiles={profiles}
-          onClose={() => setInstallDialog(null)}
-          onCompleted={() => {
-            void load();
-            void onProfilesChanged?.();
-          }}
-        />
-      )}
       {officialInstallPreview ? (
         <OfficialAgentInstallDialog
           open

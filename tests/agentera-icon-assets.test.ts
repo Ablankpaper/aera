@@ -43,4 +43,13 @@ describe("AgentEra icon assets", () => {
       0, 0, 1, 0,
     ]);
   });
+
+  // @lat: [[agentera-branding#Localization#Aila sign-in identity]]
+  it("keeps the approved Aila GLB as the account-gate character", () => {
+    expect(
+      createHash("sha256")
+        .update(readAsset("src/renderer/src/assets/aila.glb"))
+        .digest("hex"),
+    ).toBe("5bde10c00ceb9c5f249c660f190cc78c4f1c664ff27181bb03d57cb8bfccd2c8");
+  });
 });

@@ -21,6 +21,7 @@ interface SavedModel {
   provider: string;
   model: string;
   baseUrl: string;
+  providerLabel?: string;
   createdAt: number;
 }
 
@@ -144,6 +145,40 @@ describe("useModelConfig", () => {
         model: "hermesone-swift",
         provider: "custom",
       });
+    });
+  });
+
+  it("carries a named custom provider's native route into chat picker selections", async () => {
+    savedModels = [
+      {
+        id: "anhepro-sol",
+        name: "gpt-5.6-sol",
+        provider: "custom",
+        providerLabel: "anhepro.com",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://api.anhepro.com/v1",
+        createdAt: 1,
+      },
+    ];
+
+    render(<GroupHarness />);
+
+    await waitFor(() => {
+      const groups = JSON.parse(
+        screen.getByTestId("groups").textContent || "[]",
+      );
+      expect(groups).toEqual([
+        {
+          provider: "custom:anhepro.com",
+          label: "anhepro.com",
+          models: [
+            {
+              model: "gpt-5.6-sol",
+              provider: "custom:anhepro.com",
+            },
+          ],
+        },
+      ]);
     });
   });
 });

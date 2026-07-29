@@ -50,7 +50,7 @@ export default {
   titlePlaceholder: "What needs to be done?",
   fieldBody: "Body (optional)",
   bodyPlaceholder: "Context, acceptance criteria, links…",
-  fieldAssignee: "Assignee profile",
+  fieldAssignee: "Assignee Agent",
   assigneeNone: "— Triage (no assignee)",
   fieldPriority: "Priority",
   priorityNormal: "Normal (0)",

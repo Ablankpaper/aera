@@ -41,7 +41,7 @@ describe("AgenteraAccountMenu", () => {
     });
   });
 
-  // @lat: [[agentera-app-authentication#Startup gate#Guest-first routing]]
+  // @lat: [[agentera-app-authentication#Startup gate#Account-required routing]]
   it("shows a bottom-left sign-in control and opens browser login only after activation", async () => {
     const onSignIn = vi.fn().mockResolvedValue(undefined);
     render(

@@ -42,20 +42,20 @@ const auth = {
     existingDescription:
       "Foram encontrados dados do AgentEra Runtime neste dispositivo. Associe-os no local atual ou comece num espaço vazio separado.",
     noUpload:
-      "Nenhuma opção envia, copia, combina ou reescreve a sua Memory, sessões, ficheiros, competências, perfil USER ou estado de aprendizagem.",
+      "Nenhuma opção envia, copia, combina ou reescreve a sua Memory, sessões, ficheiros, competências, dados USER ou estado de aprendizagem.",
     useExisting: "Usar os dados locais existentes",
     createNew: "Criar um novo espaço",
     binding: "A associar em segurança…",
     creating: "A criar um espaço vazio…",
     emptyBindingTitle: "A preparar o seu espaço pessoal",
     emptyBindingDescription:
-      "Este Profile local vazio está a ser associado à sua conta do AgentEra.",
+      "O ambiente de execução do Agente local está a ser preparado automaticamente.",
     connectionBindingTitle: "A proteger esta ligação do Runtime",
     connectionBindingDescription:
       "A ligação remota ou SSH está a ser associada ao proprietário do AgentEra com sessão iniciada. Os tokens do produto não são enviados ao Runtime.",
     otherOwnerTitle: "Estes dados locais pertencem a outra conta",
     otherOwnerDescription:
-      "O AgentEra não abrirá nem reatribuirá este Profile físico. Crie um espaço vazio separado ou inicie sessão como proprietário.",
+      "O AgentEra não abrirá nem reatribuirá dados de um Agente local pertencentes a outra conta. Crie um espaço vazio separado ou inicie sessão como proprietário.",
     remoteOtherOwnerTitle: "Esta ligação do Runtime pertence a outra conta",
     remoteOtherOwnerDescription:
       "O AgentEra não herdará o contexto remoto ou SSH do proprietário anterior.",
@@ -87,7 +87,7 @@ const auth = {
     deviceId: "Dispositivo",
     offlineUntil: "O acesso offline assinado é válido até {{date}}.",
     localDataWarning:
-      "Eliminar a conta na nuvem ou terminar sessão não apaga, move, envia nem desassocia Profiles, Memory, sessões, ficheiros, competências ou aprendizagem local do Hermes.",
+      "Eliminar a conta na nuvem ou terminar sessão não apaga, move, envia nem desassocia dados de Agentes locais, Memory, sessões, ficheiros, competências ou aprendizagem do Hermes.",
     rechargeSeparateAccount:
       "O carregamento abre o site independente de API de modelos. Contas, saldos, chaves, cookies e tokens são separados da conta AgentEra.",
     pendingRevocationWarning:

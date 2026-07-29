@@ -25,6 +25,7 @@ extraResources:
       - "!.gitkeep"
 win:
   executableName: agentera-studio
+  icon: build/icon.ico
   target:
     - nsis
     - portable

@@ -41,20 +41,20 @@ const auth = {
     existingDescription:
       "Data AgentEra Runtime yang ada ditemukan di perangkat ini. Ikat di tempat atau mulai dengan ruang kosong yang terpisah.",
     noUpload:
-      "Kedua pilihan tidak mengunggah, menyalin, menggabungkan, atau menulis ulang Memory, sesi, file, skill, profil USER, maupun status pembelajaran Anda.",
+      "Kedua pilihan tidak mengunggah, menyalin, menggabungkan, atau menulis ulang Memory, sesi, file, skill, data USER, maupun status pembelajaran Anda.",
     useExisting: "Gunakan data lokal yang ada",
     createNew: "Buat ruang baru",
     binding: "Mengikat dengan aman…",
     creating: "Membuat ruang kosong…",
     emptyBindingTitle: "Menyiapkan ruang pribadi Anda",
     emptyBindingDescription:
-      "Profile lokal kosong ini sedang diikat ke akun AgentEra Anda.",
+      "Lingkungan runtime Agen lokal sedang disiapkan secara otomatis.",
     connectionBindingTitle: "Mengamankan koneksi Runtime ini",
     connectionBindingDescription:
       "Koneksi jarak jauh atau SSH sedang diikat ke pemilik AgentEra yang masuk. Token produk tidak dikirim ke Runtime.",
     otherOwnerTitle: "Data lokal ini milik akun lain",
     otherOwnerDescription:
-      "AgentEra tidak akan membuka atau memindahkan kepemilikan Profile fisik ini. Buat ruang kosong terpisah atau masuk sebagai pemiliknya.",
+      "AgentEra tidak akan membuka atau memindahkan data Agen lokal milik akun lain. Buat ruang kosong terpisah atau masuk sebagai pemiliknya.",
     remoteOtherOwnerTitle: "Koneksi Runtime ini milik akun lain",
     remoteOtherOwnerDescription:
       "AgentEra tidak akan mewarisi konteks jarak jauh atau SSH milik pengguna sebelumnya.",
@@ -86,7 +86,7 @@ const auth = {
     deviceId: "Perangkat",
     offlineUntil: "Akses offline bertanda tangan berlaku hingga {{date}}.",
     localDataWarning:
-      "Menghapus akun cloud atau keluar tidak menghapus, memindahkan, mengunggah, atau melepas ikatan Profile, Memory, sesi, file, skill, maupun pembelajaran Hermes lokal.",
+      "Menghapus akun cloud atau keluar tidak menghapus, memindahkan, mengunggah, atau melepas ikatan data Agen lokal, Memory, sesi, file, skill, maupun pembelajaran Hermes.",
     rechargeSeparateAccount:
       "Isi saldo membuka situs API model yang terpisah. Akun, saldo, API key, cookie, dan tokennya terpisah dari akun AgentEra.",
     pendingRevocationWarning:

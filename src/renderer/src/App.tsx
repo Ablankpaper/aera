@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster } from "react-hot-toast";
 import {
-  hasAgenteraDesktopAccess,
-  hasAgenteraGuestAccess,
   hasAgenteraSignedInAccess,
   type AgenteraAuthPublicState,
-  type AgenteraDesktopAccessState,
+  type AgenteraSignedInAuthState,
 } from "../../shared/agentera-auth";
 import type {
   AgenteraConnectionClaimPublicState,
@@ -39,9 +37,6 @@ function isSameDesktopSession(
   previous: AgenteraAuthPublicState,
   next: AgenteraAuthPublicState,
 ): boolean {
-  if (hasAgenteraGuestAccess(previous) && hasAgenteraGuestAccess(next)) {
-    return true;
-  }
   if (
     !hasAgenteraSignedInAccess(previous) ||
     !hasAgenteraSignedInAccess(next)
@@ -106,7 +101,7 @@ function App(): React.JSX.Element {
   const pendingSwitchToLocalRef = useRef(false);
   const forceAccountSelectionRef = useRef(false);
   const visibleScreen: Screen =
-    screen !== "splash" && !hasAgenteraDesktopAccess(authState)
+    screen !== "splash" && !hasAgenteraSignedInAccess(authState)
       ? "auth"
       : screen === "main" && !runtimeAccessReady
         ? "profile-claim"
@@ -124,27 +119,12 @@ function App(): React.JSX.Element {
       setOwnershipInspectionError(false);
       setRuntimeAccessReady(false);
 
-      if (!hasAgenteraDesktopAccess(state)) {
+      if (!hasAgenteraSignedInAccess(state)) {
         setScreen("auth");
         return;
       }
 
       let preflight = initialPreflight;
-      if (
-        hasAgenteraGuestAccess(state) &&
-        preflight.connectionMode !== "local"
-      ) {
-        pendingSwitchToLocalRef.current = false;
-        try {
-          await window.agenteraRuntimeAccess.switchToLocal();
-          preflight = await window.agenteraRuntimeAccess.runStartupPreflight();
-        } catch {
-          if (routeId !== routeIdRef.current) return;
-          setOwnershipInspectionError(true);
-          setScreen("profile-claim");
-          return;
-        }
-      }
       if (pendingSwitchToLocalRef.current) {
         pendingSwitchToLocalRef.current = false;
         if (preflight.connectionMode !== "local") {
@@ -166,8 +146,8 @@ function App(): React.JSX.Element {
       setVerifyWarning(preflight.verifyWarning);
 
       if (preflight.postAuthTarget === "welcome") {
-        // A missing Runtime is not a user choice: guest and account sessions
-        // proceed directly to the signed Seed bundled with the desktop app.
+        // A missing Runtime is not a user choice: after account access is
+        // restored, proceed directly to the signed Seed bundled with the app.
         setScreen("installing");
         return;
       }
@@ -238,7 +218,7 @@ function App(): React.JSX.Element {
     } catch {
       // A failed readiness probe must not expose an unresolved Runtime
       // context. The safe fallback is bundled installation followed by the
-      // guest/account Profile ownership check.
+      // signed-in account Profile ownership check.
     }
 
     try {
@@ -410,7 +390,7 @@ function App(): React.JSX.Element {
     pendingSwitchToLocalRef.current = true;
     setSplashStatus(t("common.splashLocalAfterSignIn"));
     const preflight = preflightRef.current;
-    if (preflight && hasAgenteraDesktopAccess(authStateRef.current)) {
+    if (preflight && hasAgenteraSignedInAccess(authStateRef.current)) {
       void routeAfterAuthentication(authStateRef.current, preflight);
     }
   }
@@ -465,7 +445,7 @@ function App(): React.JSX.Element {
       case "main":
         return (
           <Layout
-            authState={authState as AgenteraDesktopAccessState}
+            authState={authState as AgenteraSignedInAuthState}
             verifyWarning={verifyWarning}
             onReinstall={handleVerifyReinstall}
             onDismissVerifyWarning={handleDismissVerifyWarning}

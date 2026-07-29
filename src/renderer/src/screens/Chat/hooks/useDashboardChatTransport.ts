@@ -15,6 +15,7 @@ import type { AgentCommandsCatalogResponse } from "../slash/types";
 import type { ActiveTurn, Attachment, ChatMessage, UsageState } from "../types";
 import type { DesktopSessionContinuationItem } from "../../../../../shared/session-continuation";
 import type { OfficialQualityFeedbackEligibility } from "../../../../../shared/agentera-official-quality";
+import { isCustomProviderRoute } from "../../../../../shared/custom-providers";
 
 interface SessionResponse {
   info?: unknown;
@@ -86,6 +87,9 @@ interface UseDashboardChatTransportArgs {
   activeTurnRef: React.MutableRefObject<ActiveTurn | null>;
   contextFolder: string | null;
   connectionMode: DashboardConnectionMode;
+  /** Incremented whenever Main retires the current Runtime connection
+   *  snapshot (connection, model route, or credential change). */
+  runtimeConnectionRevision: number;
   enabled: boolean;
   fallbackOnUnavailable: boolean;
   hermesSessionId: string | null;
@@ -645,9 +649,10 @@ export function dashboardModelMatches(
   if (liveModel !== model) return false;
   if (liveProvider === provider) return true;
 
-  // Named custom providers can be reported by Hermes Agent as custom:<slug>
-  // while Hermes One's older model config still treats them as custom rows.
-  return provider === "custom" && liveProvider.startsWith("custom:");
+  // Hermes may expose the resolved billing class (`custom`) or the durable
+  // named route (`custom:<name>`). They are equivalent for model matching; the
+  // named route itself remains intact for the subsequent request.
+  return isCustomProviderRoute(provider) && isCustomProviderRoute(liveProvider);
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -968,6 +973,7 @@ export function useDashboardChatTransport({
   activeTurnRef,
   contextFolder,
   connectionMode,
+  runtimeConnectionRevision,
   enabled,
   fallbackOnUnavailable,
   hermesSessionId,
@@ -999,7 +1005,6 @@ export function useDashboardChatTransport({
   const reasoningSegmentClosedRef = useRef(false);
   const appliedModelRef = useRef<string | null>(null);
   const runtimeModelSelectionRef = useRef<string | null>(null);
-  const recreateRuntimeSessionRef = useRef(false);
   const lastRuntimeSessionWasCreatedRef = useRef(false);
   const pendingClarifyRequestIdRef = useRef<string | null>(null);
   const pendingRecoveredContinuationRef = useRef<
@@ -1031,7 +1036,6 @@ export function useDashboardChatTransport({
     reasoningSegmentClosedRef.current = false;
     appliedModelRef.current = null;
     runtimeModelSelectionRef.current = null;
-    recreateRuntimeSessionRef.current = false;
     lastRuntimeSessionWasCreatedRef.current = false;
     pendingClarifyRequestIdRef.current = null;
     lastSyncedCwdRef.current = null;
@@ -1052,12 +1056,11 @@ export function useDashboardChatTransport({
     reasoningSegmentClosedRef.current = false;
     appliedModelRef.current = null;
     runtimeModelSelectionRef.current = null;
-    recreateRuntimeSessionRef.current = false;
     lastRuntimeSessionWasCreatedRef.current = false;
     pendingClarifyRequestIdRef.current = null;
     pendingRecoveredContinuationRef.current = [];
     lastSyncedCwdRef.current = null;
-  }, [connectionMode, profile]);
+  }, [connectionMode, profile, runtimeConnectionRevision]);
 
   const handleGatewayEvent = useCallback(
     (event: DashboardStreamEvent): void => {
@@ -1124,7 +1127,6 @@ export function useDashboardChatTransport({
         if (failed) {
           appliedModelRef.current = null;
           runtimeModelSelectionRef.current = null;
-          recreateRuntimeSessionRef.current = true;
           const storedSessionId = storedSessionIdRef.current;
           const userContent = userContentById(
             messagesRef.current,
@@ -1263,6 +1265,17 @@ export function useDashboardChatTransport({
             onClose: () => {
               if (clientRef.current === client) {
                 clientRef.current = null;
+                // A runtime session id is meaningful only inside the dashboard
+                // process that returned it. Preserve the stored conversation,
+                // but invalidate every process-local binding so the next send
+                // reconnects and uses Hermes' native session.resume path.
+                runtimeSessionIdRef.current = null;
+                reasoningSegmentClosedRef.current = false;
+                appliedModelRef.current = null;
+                runtimeModelSelectionRef.current = null;
+                lastRuntimeSessionWasCreatedRef.current = false;
+                pendingClarifyRequestIdRef.current = null;
+                lastSyncedCwdRef.current = null;
               }
             },
           });
@@ -1331,7 +1344,6 @@ export function useDashboardChatTransport({
       client: DashboardGatewayClient,
       options: {
         excludeSeedUserId?: string | null;
-        forceCreate?: boolean;
       } = {},
     ): Promise<string> => {
       let targetSessionId = runtimeSessionIdRef.current;
@@ -1345,7 +1357,6 @@ export function useDashboardChatTransport({
           client,
           contextFolder,
           excludeSeedUserId,
-          forceCreate: options.forceCreate ?? false,
           messages: messagesRef.current,
           model,
           modelBaseUrl,
@@ -1378,7 +1389,6 @@ export function useDashboardChatTransport({
         }
         const storedId = response.storedSessionId;
         storedSessionIdRef.current = storedId;
-        recreateRuntimeSessionRef.current = false;
         setHermesSessionId(storedId);
       }
 
@@ -1465,7 +1475,7 @@ export function useDashboardChatTransport({
         if (
           storedSessionIdRef.current &&
           !dashboardModelMatches(dashboardProvider, model, before) &&
-          (provider === "custom" ||
+          (isCustomProviderRoute(provider) ||
             (before.provider || "").toLowerCase().startsWith("custom"))
         ) {
           targetSessionId = await resetRuntimeSession(targetSessionId);
@@ -1709,26 +1719,7 @@ export function useDashboardChatTransport({
         activeClient: DashboardGatewayClient,
       ): Promise<boolean> => {
         let continuationItems: DesktopSessionContinuationItem[] = [];
-        const forceCreateRuntime = recreateRuntimeSessionRef.current;
-        if (recreateRuntimeSessionRef.current) {
-          continuationItems = dashboardContinuationItemsFromTranscript(
-            messagesRef.current,
-            { excludeUserId: activeTurnRef.current?.userId ?? null },
-          );
-          const staleRuntimeSessionId = runtimeSessionIdRef.current;
-          if (staleRuntimeSessionId) {
-            await activeClient
-              .request("session.close", { session_id: staleRuntimeSessionId })
-              .catch(() => undefined);
-          }
-          runtimeSessionIdRef.current = null;
-          reasoningSegmentClosedRef.current = false;
-          appliedModelRef.current = null;
-          runtimeModelSelectionRef.current = null;
-        }
-        const runtimeSessionId = await ensureRuntimeSession(activeClient, {
-          forceCreate: forceCreateRuntime,
-        });
+        const runtimeSessionId = await ensureRuntimeSession(activeClient);
         if (
           lastRuntimeSessionWasCreatedRef.current ||
           pendingRecoveredContinuationRef.current.length > 0
@@ -1799,9 +1790,17 @@ export function useDashboardChatTransport({
         }
         throw new Error("AgentEra Runtime dashboard recovery exhausted");
       } catch (err) {
+        // A synchronous setup/submit failure does not invalidate the persisted
+        // conversation. Drop only the process-local binding so the next send
+        // uses Hermes' native session.resume path. Force-creating and seeding a
+        // replacement stored session here made every recoverable provider
+        // error appear as another chat in the sidebar.
+        runtimeSessionIdRef.current = null;
+        reasoningSegmentClosedRef.current = false;
         appliedModelRef.current = null;
         runtimeModelSelectionRef.current = null;
-        recreateRuntimeSessionRef.current = true;
+        lastRuntimeSessionWasCreatedRef.current = false;
+        lastSyncedCwdRef.current = null;
         const message = err instanceof Error ? err.message : String(err);
         return failActiveTurn(message);
       }

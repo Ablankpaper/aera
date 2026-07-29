@@ -1561,11 +1561,13 @@ export async function authenticateExistingAgentControlDevice(
   harness: AgentControlHarness,
   device: AgentControlDevice,
 ): Promise<void> {
-  await expect(
-    device.page.locator('[data-testid="screen-auth"]'),
-  ).toBeVisible();
+  const authGate = device.page.locator('[data-testid="screen-auth"]');
+  await expect(authGate).toBeVisible();
+  const loginButton = authGate.locator(".agentera-gate-primary");
+  await expect(loginButton).toBeVisible();
+  await expect(loginButton).toBeEnabled();
   const authorizationURL = await captureExternalURL(device, () =>
-    device.page.locator(".agentera-gate-primary").click(),
+    loginButton.click({ force: true }),
   );
   const page = harness.browserPage;
   await page.goto(authorizationURL);
@@ -1583,9 +1585,16 @@ export async function authenticateExistingAgentControlDevice(
     await page.locator('button[type="submit"].primary-button').click();
     await page.waitForURL(/\/authorize\?request_id=/);
   }
+  const callbackPath = /\/agentera\/oauth\/callback(?:\?|$)/u;
   const approve = page.locator("button.primary-button");
-  await expect(approve).toBeVisible();
-  await approve.click({ noWaitAfter: true });
+  await expect
+    .poll(
+      async () => callbackPath.test(page.url()) || (await approve.isVisible()),
+    )
+    .toBe(true);
+  if (!callbackPath.test(page.url())) {
+    await approve.click({ noWaitAfter: true });
+  }
   await expect
     .poll(async () =>
       device.page.evaluate(() => window.agenteraAuth.getState()),
@@ -1596,25 +1605,46 @@ export async function authenticateExistingAgentControlDevice(
 export async function claimDefaultProfile(
   device: AgentControlDevice,
 ): Promise<void> {
-  await expect(
-    device.page.locator('[data-testid="screen-profile-claim"]'),
-  ).toBeVisible({ timeout: 180_000 });
+  const agentControlIsReady = async (): Promise<boolean> =>
+    device.page.evaluate(async () => {
+      const result = await window.agenteraAgents.getState();
+      return result.ok;
+    });
+  const claimScreen = device.page.locator(
+    '[data-testid="screen-profile-claim"]',
+  );
+
   await expect
     .poll(() =>
       device.page.evaluate(() => window.agenteraRuntimeDistribution.getState()),
     )
     .toMatchObject({ phase: "current" });
-  const claim = device.page.locator(".agentera-profile-actions .btn-primary");
-  await expect(claim).toBeEnabled();
-  await claim.click();
+
+  // @lat: [[agentera-agent-control-plane#AgentEra Agent control plane V1#Trusted Workspace Agent context#Product-facing Agent projection]]
+  // Fresh installations now bind their empty local Runtime automatically. The
+  // legacy ownership screen remains only for an exceptional data/owner
+  // conflict, so the E2E helper must accept either safe path.
   await expect
-    .poll(() =>
-      device.page.evaluate(async () => {
-        const result = await window.agenteraAgents.getState();
-        return result.ok;
-      }),
+    .poll(
+      async () =>
+        (await agentControlIsReady()) || (await claimScreen.isVisible()),
+      { timeout: 180_000 },
     )
     .toBe(true);
+  if (await agentControlIsReady()) return;
+
+  const claim = device.page.locator(".agentera-profile-actions .btn-primary");
+  await expect
+    .poll(
+      async () =>
+        (await agentControlIsReady()) ||
+        ((await claim.count()) === 1 && (await claim.isEnabled())),
+    )
+    .toBe(true);
+  if (await agentControlIsReady()) return;
+
+  await claim.click();
+  await expect.poll(agentControlIsReady).toBe(true);
 }
 
 export async function invokeAgentera<T = unknown>(

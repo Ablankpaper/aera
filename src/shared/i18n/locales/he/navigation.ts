@@ -10,7 +10,7 @@ export default {
   noChats: "אין צ'אטים",
   pinned: "מוצמדים",
   discover: "גילוי",
-  agents: "פרופילים",
+  agents: "סוכנים",
   office: "אופיס",
   models: "מודלים",
   providers: "מודלים",

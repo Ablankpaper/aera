@@ -52,8 +52,8 @@ vi.mock("fs", async () => {
     ...actual,
     existsSync: vi.fn(
       (p: string) =>
-        // Pretend the config file always exists; the audit gates the
-        // EMPTY_API_SERVER_KEY warning on config existence.
+        // Keep config/.env locations visible to placement and credential
+        // diagnostics without touching a real profile.
         String(p).endsWith("config.yaml") || String(p).endsWith(".env"),
     ),
   };
@@ -142,24 +142,11 @@ describe("config-health audit - vault awareness", () => {
     }
   });
 
-  describe("env provider (default) - byte-for-byte unchanged", () => {
-    it("still fires EMPTY_API_SERVER_KEY when neither .env nor vault has the key", () => {
-      const report = runConfigHealthCheck("default");
-      const codes = report.issues.map((i) => i.code);
-      expect(codes).toContain("EMPTY_API_SERVER_KEY");
-    });
-
+  describe("env provider (default)", () => {
     it("still fires MODEL_KEY_MISSING when the active model's key is absent everywhere", () => {
       const report = runConfigHealthCheck("default");
       const codes = report.issues.map((i) => i.code);
       expect(codes).toContain("MODEL_KEY_MISSING");
-    });
-
-    it("does NOT fire EMPTY_API_SERVER_KEY when the .env file has the key", () => {
-      mockedReadEnv.mockReturnValue({ API_SERVER_KEY: "from-dotenv" });
-      const report = runConfigHealthCheck("default");
-      const codes = report.issues.map((i) => i.code);
-      expect(codes).not.toContain("EMPTY_API_SERVER_KEY");
     });
 
     it("does NOT fire MODEL_KEY_MISSING when the .env file has the key", () => {
@@ -181,13 +168,6 @@ describe("config-health audit - vault awareness", () => {
   });
 
   describe("command provider - vault-only user", () => {
-    it("does NOT fire EMPTY_API_SERVER_KEY when the vault has the key", () => {
-      mocks.fakeVault = { API_SERVER_KEY: "from-vault" };
-      const report = runConfigHealthCheck("default");
-      const codes = report.issues.map((i) => i.code);
-      expect(codes).not.toContain("EMPTY_API_SERVER_KEY");
-    });
-
     it("does NOT fire MODEL_KEY_MISSING when the vault has the active model's key", () => {
       mocks.fakeVault = { ANTHROPIC_API_KEY: "from-vault" };
       const report = runConfigHealthCheck("default");
@@ -210,13 +190,6 @@ describe("config-health audit - vault awareness", () => {
   });
 
   describe("process.env (vault-style env injection) - works the same way", () => {
-    it("does NOT fire EMPTY_API_SERVER_KEY when process.env has the key", () => {
-      process.env.API_SERVER_KEY = "from-process-env";
-      const report = runConfigHealthCheck("default");
-      const codes = report.issues.map((i) => i.code);
-      expect(codes).not.toContain("EMPTY_API_SERVER_KEY");
-    });
-
     it("does NOT fire MODEL_KEY_MISSING when process.env has the key", () => {
       process.env.ANTHROPIC_API_KEY = "from-process-env";
       const report = runConfigHealthCheck("default");
@@ -226,20 +199,6 @@ describe("config-health audit - vault awareness", () => {
   });
 
   describe("rotation + deletion - reflected on next audit", () => {
-    it("EMPTY_API_SERVER_KEY fires when the only source is removed", () => {
-      mockedReadEnv.mockReturnValue({ API_SERVER_KEY: "from-dotenv" });
-      let report = runConfigHealthCheck("default");
-      expect(report.issues.map((i) => i.code)).not.toContain(
-        "EMPTY_API_SERVER_KEY",
-      );
-
-      mockedReadEnv.mockReturnValue({});
-      report = runConfigHealthCheck("default");
-      expect(report.issues.map((i) => i.code)).toContain(
-        "EMPTY_API_SERVER_KEY",
-      );
-    });
-
     it("MODEL_KEY_MISSING recovers when a vault key is added", () => {
       let report = runConfigHealthCheck("default");
       expect(report.issues.map((i) => i.code)).toContain("MODEL_KEY_MISSING");

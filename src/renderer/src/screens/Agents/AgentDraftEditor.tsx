@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AgentDraftAssetKind,
   AgentDraftDetail,
@@ -18,6 +18,14 @@ interface EditableAssetRow {
   path: string;
   kind: AgentDraftAssetKind;
   content: string;
+  fileName: string;
+}
+
+interface ModelChoice {
+  key: string;
+  provider: string;
+  model: string;
+  label: string;
 }
 
 export interface AgentDraftEditorProps {
@@ -34,19 +42,33 @@ export interface AgentDraftEditorProps {
   onRequestInstall: (target: {
     definitionId: string;
     versionId: string;
+    displayName: string;
   }) => void;
+  modelProfileId?: string;
 }
 
 const DEFAULT_RUNTIME_VERSION = "v0.18.2-agentera.1";
+const DEFAULT_PROVIDER = "openai";
+const DEFAULT_MODEL = "gpt-5.6";
+const MAX_UPLOAD_BYTES = 256 * 1024;
+const ASSET_DIRECTORY: Record<AgentDraftAssetKind, string> = {
+  skill: "skills",
+  sop: "sop",
+  knowledge: "knowledge",
+};
 
-function newManifest(systemPrompt: string): AgentEditableManifest {
+function newManifest(
+  systemPrompt: string,
+  provider = DEFAULT_PROVIDER,
+  model = DEFAULT_MODEL,
+): AgentEditableManifest {
   return {
     schemaVersion: 1,
     identity: { systemPrompt },
     assets: [],
     modelConstraints: {
-      allowedProviders: ["openai"],
-      allowedModels: ["gpt-5.6"],
+      allowedProviders: [provider],
+      allowedModels: [model],
     },
     tools: { allowed: [], denied: [] },
     dependencies: [],
@@ -63,17 +85,84 @@ function assetRows(draft: AgentDraftDetail | null): EditableAssetRow[] {
     key: `${metadata.path}\0${index}`,
     path: metadata.path,
     kind: metadata.kind,
+    fileName: metadata.path.split("/").pop() ?? metadata.path,
     content:
       draft.editableAssets.find((asset) => asset.path === metadata.path)
         ?.content ?? "",
   }));
 }
 
-function splitList(value: string): string[] {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+function modelKey(provider: string, model: string): string {
+  return `${provider}\0${model}`;
+}
+
+function currentModelChoice(draft: AgentDraftDetail | null): ModelChoice {
+  const provider =
+    draft?.manifest.modelConstraints.allowedProviders[0] ?? DEFAULT_PROVIDER;
+  const model =
+    draft?.manifest.modelConstraints.allowedModels[0] ?? DEFAULT_MODEL;
+  return {
+    key: modelKey(provider, model),
+    provider,
+    model,
+    label: model,
+  };
+}
+
+function slugFromFileName(fileName: string): string {
+  const withoutExtension = fileName.replace(/\.[^.]+$/, "");
+  const normalized = withoutExtension
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9\u3400-\u9fff-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLocaleLowerCase();
+  return normalized || "document";
+}
+
+function nextAssetPath(
+  kind: AgentDraftAssetKind,
+  fileName: string,
+  existing: readonly EditableAssetRow[],
+): string {
+  const slug = slugFromFileName(fileName);
+  const base =
+    kind === "skill"
+      ? `${ASSET_DIRECTORY[kind]}/${slug}/SKILL.md`
+      : `${ASSET_DIRECTORY[kind]}/${slug}.md`;
+  if (!existing.some((asset) => asset.path === base)) return base;
+  let suffix = 2;
+  while (true) {
+    const candidate =
+      kind === "skill"
+        ? `${ASSET_DIRECTORY[kind]}/${slug}-${suffix}/SKILL.md`
+        : `${ASSET_DIRECTORY[kind]}/${slug}-${suffix}.md`;
+    if (!existing.some((asset) => asset.path === candidate)) return candidate;
+    suffix += 1;
+  }
+}
+
+function readTextFile(file: File): Promise<string> {
+  if (typeof file.text === "function") return file.text();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error("read_failed"));
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.readAsText(file);
+  });
+}
+
+function sameDraftContent(
+  draft: AgentDraftDetail,
+  displayName: string,
+  manifest: AgentEditableManifest,
+  assets: Array<{ path: string; content: string }>,
+): boolean {
+  return (
+    draft.displayName === displayName &&
+    JSON.stringify(draft.manifest) === JSON.stringify(manifest) &&
+    JSON.stringify(draft.editableAssets) === JSON.stringify(assets)
+  );
 }
 
 function errorKey(code: AgenteraAgentControlErrorCode): string {
@@ -90,19 +179,22 @@ export default function AgentDraftEditor({
   onPublished,
   onOrganizationSubmitted = () => undefined,
   onRequestInstall,
+  modelProfileId,
 }: AgentDraftEditorProps): React.JSX.Element {
   const { t } = useI18n();
+  const identityFileInputRef = useRef<HTMLInputElement | null>(null);
   const [current, setCurrent] = useState<AgentDraftDetail | null>(draft);
   const [name, setName] = useState(draft?.displayName ?? "");
   const [systemPrompt, setSystemPrompt] = useState(
     draft?.manifest.identity.systemPrompt ?? "",
   );
-  const [providers, setProviders] = useState(
-    draft?.manifest.modelConstraints.allowedProviders.join(", ") ?? "openai",
+  const [identityFileName, setIdentityFileName] = useState<string | null>(null);
+  const [selectedModelKey, setSelectedModelKey] = useState(
+    currentModelChoice(draft).key,
   );
-  const [models, setModels] = useState(
-    draft?.manifest.modelConstraints.allowedModels.join(", ") ?? "gpt-5.6",
-  );
+  const [modelChoices, setModelChoices] = useState<ModelChoice[]>([
+    currentModelChoice(draft),
+  ]);
   const [assets, setAssets] = useState<EditableAssetRow[]>(assetRows(draft));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -117,12 +209,10 @@ export default function AgentDraftEditor({
     setCurrent(draft);
     setName(draft?.displayName ?? "");
     setSystemPrompt(draft?.manifest.identity.systemPrompt ?? "");
-    setProviders(
-      draft?.manifest.modelConstraints.allowedProviders.join(", ") ?? "openai",
-    );
-    setModels(
-      draft?.manifest.modelConstraints.allowedModels.join(", ") ?? "gpt-5.6",
-    );
+    setIdentityFileName(null);
+    const initialChoice = currentModelChoice(draft);
+    setSelectedModelKey(initialChoice.key);
+    setModelChoices([initialChoice]);
     setAssets(assetRows(draft));
     setBusy(false);
     setError(null);
@@ -132,16 +222,93 @@ export default function AgentDraftEditor({
     setPublishAndUse(false);
   }, [draft, open]);
 
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const loadModels = async (): Promise<void> => {
+      const bridge = window.hermesAPI;
+      if (!bridge?.listModels || !bridge.getModelConfig) return;
+      try {
+        const [configured, saved] = await Promise.all([
+          bridge.getModelConfig(modelProfileId),
+          bridge.listModels(),
+        ]);
+        if (cancelled) return;
+        const byKey = new Map<string, ModelChoice>();
+        const addChoice = (
+          provider: string,
+          model: string,
+          label: string,
+        ): void => {
+          if (!provider.trim() || !model.trim()) return;
+          const key = modelKey(provider.trim(), model.trim());
+          const choice = {
+            key,
+            provider: provider.trim(),
+            model: model.trim(),
+            label,
+          };
+          const existing = byKey.get(key);
+          if (existing) {
+            if (existing.label === existing.model && label !== choice.model) {
+              byKey.set(key, choice);
+            }
+            return;
+          }
+          byKey.set(key, choice);
+        };
+        const draftChoice = currentModelChoice(draft);
+        addChoice(draftChoice.provider, draftChoice.model, draftChoice.label);
+        addChoice(
+          configured.provider,
+          configured.model,
+          configured.model || configured.provider,
+        );
+        for (const item of saved) {
+          const providerLabel = item.providerLabel || item.provider;
+          addChoice(
+            item.provider,
+            item.model,
+            item.name
+              ? `${item.name} · ${providerLabel}`
+              : `${item.model} · ${providerLabel}`,
+          );
+        }
+        const nextChoices = [...byKey.values()];
+        setModelChoices(nextChoices);
+        if (!draft && configured.provider && configured.model) {
+          setSelectedModelKey(modelKey(configured.provider, configured.model));
+        }
+      } catch {
+        // The editor remains usable with the safe built-in fallback.
+      }
+    };
+    void loadModels();
+    return () => {
+      cancelled = true;
+    };
+  }, [draft, modelProfileId, open]);
+
+  const selectedModel =
+    modelChoices.find((choice) => choice.key === selectedModelKey) ??
+    currentModelChoice(draft);
+
   const canSave =
     !readOnly &&
     name.trim().length > 0 &&
     systemPrompt.trim().length > 0 &&
-    splitList(providers).length > 0 &&
-    splitList(models).length > 0 &&
+    selectedModel.provider.length > 0 &&
+    selectedModel.model.length > 0 &&
     assets.every((asset) => asset.path.trim() && asset.content.length > 0);
 
   const manifest = useMemo<AgentEditableManifest>(() => {
-    const base = current?.manifest ?? newManifest(systemPrompt.trim());
+    const base =
+      current?.manifest ??
+      newManifest(
+        systemPrompt.trim(),
+        selectedModel.provider,
+        selectedModel.model,
+      );
     return {
       ...base,
       identity: { systemPrompt: systemPrompt.trim() },
@@ -151,26 +318,33 @@ export default function AgentDraftEditor({
         mediaType: "text/markdown" as const,
       })),
       modelConstraints: {
-        allowedProviders: splitList(providers),
-        allowedModels: splitList(models),
+        allowedProviders: [selectedModel.provider],
+        allowedModels: [selectedModel.model],
       },
     };
-  }, [assets, current?.manifest, models, providers, systemPrompt]);
+  }, [assets, current?.manifest, selectedModel, systemPrompt]);
 
   const persist = async (): Promise<AgentDraftDetail | null> => {
     if (readOnly || !canSave || busy) return null;
-    setBusy(true);
-    setError(null);
-    setNotice(null);
     const editableAssets = assets.map((asset) => ({
       path: asset.path.trim(),
       content: asset.content,
     }));
+    const displayName = name.trim();
+    if (
+      current &&
+      sameDraftContent(current, displayName, manifest, editableAssets)
+    ) {
+      return current;
+    }
+    setBusy(true);
+    setError(null);
+    setNotice(null);
     const result = current
       ? await window.agenteraAgents.updateDraft({
           id: current.id,
           expectedRevision: current.revision,
-          displayName: name.trim(),
+          displayName,
           icon: current.icon,
           manifest,
           assets: editableAssets,
@@ -178,7 +352,7 @@ export default function AgentDraftEditor({
       : await window.agenteraAgents.createDraft({
           sourceAgentDefinitionId: null,
           baseAgentVersionId: null,
-          displayName: name.trim(),
+          displayName,
           icon: null,
           manifest,
           assets: editableAssets,
@@ -192,6 +366,33 @@ export default function AgentDraftEditor({
     onSaved(result.data);
     setNotice("agents.control.savedLocally");
     return result.data;
+  };
+
+  const publishPrepared = async (
+    prepared: PublicationPreview,
+    andUse: boolean,
+  ): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    const result = await window.agenteraAgents.confirmPublication(
+      prepared.publicationHandle,
+    );
+    setBusy(false);
+    setPreview(null);
+    if (!result.ok) {
+      setError(errorKey(result.errorCode));
+      return;
+    }
+    onPublished(result.data);
+    if (andUse) {
+      onRequestInstall({
+        definitionId: result.data.definitionId,
+        versionId: result.data.versionId,
+        displayName: name.trim(),
+      });
+    } else {
+      setNotice("agents.control.publishOnlySuccess");
+    }
   };
 
   const prepare = async (andUse: boolean): Promise<void> => {
@@ -219,6 +420,10 @@ export default function AgentDraftEditor({
       setError(errorKey(result.errorCode));
       return;
     }
+    if (result.data.targetScope === "USER") {
+      await publishPrepared(result.data, andUse);
+      return;
+    }
     setPublishAndUse(andUse);
     setPreview(result.data);
   };
@@ -243,39 +448,73 @@ export default function AgentDraftEditor({
 
   const confirm = async (): Promise<void> => {
     if (readOnly || !preview || busy) return;
-    setBusy(true);
+    await publishPrepared(preview, publishAndUse);
+  };
+
+  const importIdentityFile = async (file: File | undefined): Promise<void> => {
+    if (!file || readOnly) return;
     setError(null);
-    const result = await window.agenteraAgents.confirmPublication(
-      preview.publicationHandle,
-    );
-    setBusy(false);
-    setPreview(null);
-    if (!result.ok) {
-      setError(errorKey(result.errorCode));
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setError("agents.control.uploadTooLarge");
       return;
     }
-    onPublished(result.data);
-    if (publishAndUse) {
-      onRequestInstall({
-        definitionId: result.data.definitionId,
-        versionId: result.data.versionId,
-      });
-    } else {
-      setNotice("agents.control.publishOnlySuccess");
+    try {
+      const content = await readTextFile(file);
+      if (!content.trim()) {
+        setError("agents.control.uploadEmpty");
+        return;
+      }
+      setSystemPrompt(content);
+      setIdentityFileName(file.name);
+      if (!name.trim()) {
+        setName(file.name.replace(/\.[^.]+$/, ""));
+      }
+    } catch {
+      setError("agents.control.uploadFailed");
+    } finally {
+      if (identityFileInputRef.current) {
+        identityFileInputRef.current.value = "";
+      }
     }
   };
 
-  const addAsset = (kind: AgentDraftAssetKind): void => {
-    const index = assets.length + 1;
-    setAssets((currentAssets) => [
-      ...currentAssets,
-      {
-        key: `${Date.now()}-${index}`,
-        path: `${kind}/${kind}-${index}.md`,
-        kind,
-        content: "# ",
-      },
-    ]);
+  const importAssets = async (
+    kind: AgentDraftAssetKind,
+    files: FileList | null,
+  ): Promise<void> => {
+    if (!files || files.length === 0 || readOnly) return;
+    setError(null);
+    try {
+      const imported: Array<{ file: File; content: string }> = [];
+      for (const file of Array.from(files)) {
+        if (file.size > MAX_UPLOAD_BYTES) {
+          setError("agents.control.uploadTooLarge");
+          return;
+        }
+        const content = await readTextFile(file);
+        if (!content.trim()) {
+          setError("agents.control.uploadEmpty");
+          return;
+        }
+        imported.push({ file, content });
+      }
+      setAssets((currentAssets) => {
+        const next = [...currentAssets];
+        for (const item of imported) {
+          const path = nextAssetPath(kind, item.file.name, next);
+          next.push({
+            key: `${path}\0${crypto.randomUUID()}`,
+            path,
+            kind,
+            content: item.content,
+            fileName: item.file.name,
+          });
+        }
+        return next;
+      });
+    } catch {
+      setError("agents.control.uploadFailed");
+    }
   };
 
   return (
@@ -339,23 +578,50 @@ export default function AgentDraftEditor({
               onChange={(event) => setSystemPrompt(event.target.value)}
             />
           </label>
-          <label className="agents-create-field">
-            <span>{t("agents.control.allowedProviders")}</span>
+          <div className="agent-control-identity-upload agent-control-wide-field">
             <input
-              className="input"
-              value={providers}
+              ref={identityFileInputRef}
+              type="file"
+              accept=".md,text/markdown,text/plain"
+              aria-label={t("agents.control.identityUpload")}
               disabled={readOnly}
-              onChange={(event) => setProviders(event.target.value)}
+              onChange={(event) =>
+                void importIdentityFile(event.currentTarget.files?.[0])
+              }
             />
-          </label>
-          <label className="agents-create-field">
-            <span>{t("agents.control.allowedModels")}</span>
-            <input
-              className="input"
-              value={models}
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
               disabled={readOnly}
-              onChange={(event) => setModels(event.target.value)}
-            />
+              onClick={() => identityFileInputRef.current?.click()}
+            >
+              <Plus size={13} />
+              {t("agents.control.identityUpload")}
+            </button>
+            <span>
+              {identityFileName
+                ? t("agents.control.fileImported", {
+                    name: identityFileName,
+                  })
+                : t("agents.control.identityUploadHint")}
+            </span>
+          </div>
+          <label className="agents-create-field agent-control-wide-field">
+            <span>{t("agents.control.runtimeModel")}</span>
+            <select
+              className="input"
+              aria-label={t("agents.control.runtimeModel")}
+              value={selectedModelKey}
+              disabled={readOnly}
+              onChange={(event) => setSelectedModelKey(event.target.value)}
+            >
+              {modelChoices.map((choice) => (
+                <option key={choice.key} value={choice.key}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+            <small>{t("agents.control.runtimeModelHint")}</small>
           </label>
 
           <section className="agent-control-assets agent-control-wide-field">
@@ -366,62 +632,39 @@ export default function AgentDraftEditor({
               </div>
               <div className="agent-control-inline-actions">
                 {(["skill", "sop", "knowledge"] as const).map((kind) => (
-                  <button
+                  <label
                     key={kind}
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    disabled={readOnly}
-                    onClick={() => addAsset(kind)}
+                    className={`btn btn-secondary btn-sm agent-control-file-button${
+                      readOnly ? " disabled" : ""
+                    }`}
                   >
+                    <input
+                      type="file"
+                      multiple
+                      accept=".md,.txt,text/markdown,text/plain"
+                      aria-label={t("agents.control.assetUpload", {
+                        kind: t(`agents.control.asset.${kind}`),
+                      })}
+                      disabled={readOnly}
+                      onChange={(event) => {
+                        void importAssets(kind, event.currentTarget.files);
+                        event.currentTarget.value = "";
+                      }}
+                    />
                     <Plus size={13} />
-                    {t(`agents.control.asset.${kind}`)}
-                  </button>
+                    {t("agents.control.assetUpload", {
+                      kind: t(`agents.control.asset.${kind}`),
+                    })}
+                  </label>
                 ))}
               </div>
             </div>
             {assets.map((asset) => (
               <div key={asset.key} className="agent-control-asset-row">
-                <select
-                  className="input"
-                  value={asset.kind}
-                  aria-label={t("agents.control.assetKind")}
-                  disabled={readOnly}
-                  onChange={(event) =>
-                    setAssets((currentAssets) =>
-                      currentAssets.map((item) =>
-                        item.key === asset.key
-                          ? {
-                              ...item,
-                              kind: event.target.value as AgentDraftAssetKind,
-                            }
-                          : item,
-                      ),
-                    )
-                  }
-                >
-                  <option value="skill">
-                    {t("agents.control.asset.skill")}
-                  </option>
-                  <option value="sop">{t("agents.control.asset.sop")}</option>
-                  <option value="knowledge">
-                    {t("agents.control.asset.knowledge")}
-                  </option>
-                </select>
-                <input
-                  className="input"
-                  aria-label={t("agents.control.assetPath")}
-                  value={asset.path}
-                  disabled={readOnly}
-                  onChange={(event) =>
-                    setAssets((currentAssets) =>
-                      currentAssets.map((item) =>
-                        item.key === asset.key
-                          ? { ...item, path: event.target.value }
-                          : item,
-                      ),
-                    )
-                  }
-                />
+                <div className="agent-control-asset-file">
+                  <strong>{asset.fileName}</strong>
+                  <span>{t(`agents.control.asset.${asset.kind}`)}</span>
+                </div>
                 <textarea
                   className="input agent-control-textarea"
                   aria-label={t("agents.control.assetContent")}
@@ -452,6 +695,11 @@ export default function AgentDraftEditor({
                 </button>
               </div>
             ))}
+            {assets.length === 0 ? (
+              <p className="agent-control-empty">
+                {t("agents.control.noVersionAssets")}
+              </p>
+            ) : null}
           </section>
 
           {error && <div className="agents-create-error">{t(error)}</div>}

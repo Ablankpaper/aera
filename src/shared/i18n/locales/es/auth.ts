@@ -40,20 +40,20 @@ const auth = {
     existingDescription:
       "Se encontraron datos de AgentEra Runtime en este dispositivo. Puedes vincularlos donde están o empezar en un espacio vacío independiente.",
     noUpload:
-      "Ninguna opción sube, copia, combina ni reescribe tu Memory, sesiones, archivos, habilidades, perfil USER o estado de aprendizaje.",
+      "Ninguna opción sube, copia, combina ni reescribe tu Memory, sesiones, archivos, habilidades, datos USER o estado de aprendizaje.",
     useExisting: "Usar los datos locales existentes",
     createNew: "Crear un espacio nuevo",
     binding: "Vinculando de forma segura…",
     creating: "Creando un espacio vacío…",
     emptyBindingTitle: "Preparando tu espacio personal",
     emptyBindingDescription:
-      "Este Profile local vacío se está vinculando a tu cuenta de AgentEra.",
+      "El entorno de ejecución del Agente local se está preparando automáticamente.",
     connectionBindingTitle: "Protegiendo esta conexión de Runtime",
     connectionBindingDescription:
       "La conexión remota o SSH se vincula al propietario de AgentEra conectado. Los tokens del producto no se envían al Runtime.",
     otherOwnerTitle: "Estos datos locales pertenecen a otra cuenta",
     otherOwnerDescription:
-      "AgentEra no abrirá ni reasignará este Profile físico. Crea un espacio vacío separado o inicia sesión con su propietario.",
+      "AgentEra no abrirá ni reasignará datos de un Agente local que pertenezcan a otra cuenta. Crea un espacio vacío separado o inicia sesión con su propietario.",
     remoteOtherOwnerTitle: "Esta conexión de Runtime pertenece a otra cuenta",
     remoteOtherOwnerDescription:
       "AgentEra no heredará el contexto remoto o SSH del propietario anterior.",
@@ -85,7 +85,7 @@ const auth = {
     deviceId: "Dispositivo",
     offlineUntil: "El acceso firmado sin conexión es válido hasta {{date}}.",
     localDataWarning:
-      "Eliminar la cuenta en la nube o cerrar sesión no borra, mueve, sube ni desvincula Profiles, Memory, sesiones, archivos, habilidades ni aprendizaje local de Hermes.",
+      "Eliminar la cuenta en la nube o cerrar sesión no borra, mueve, sube ni desvincula datos de Agentes locales, Memory, sesiones, archivos, habilidades ni aprendizaje de Hermes.",
     rechargeSeparateAccount:
       "La recarga abre el sitio independiente de API de modelos. Sus cuentas, saldos, claves, cookies y tokens están separados de AgentEra.",
     pendingRevocationWarning:

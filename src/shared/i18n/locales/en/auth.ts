@@ -54,20 +54,20 @@ const auth = {
     existingDescription:
       "Existing AgentEra Runtime data was found on this device. Choose whether to bind it in place or start with a separate empty space.",
     noUpload:
-      "Neither choice uploads, copies, merges, or rewrites your Memory, sessions, files, skills, USER profile, or learning state.",
+      "Neither choice uploads, copies, merges, or rewrites your Memory, sessions, files, skills, USER data, or learning state.",
     useExisting: "Use existing local data",
     createNew: "Create a new space",
     binding: "Binding securely…",
     creating: "Creating an empty space…",
     emptyBindingTitle: "Preparing your personal space",
     emptyBindingDescription:
-      "This empty local Profile is being bound to your current local space.",
+      "The local Agent runtime is being prepared automatically.",
     connectionBindingTitle: "Securing this Runtime connection",
     connectionBindingDescription:
       "The remote or SSH connection is being bound to the signed-in AgentEra owner. Product tokens are not sent to the Runtime.",
     otherOwnerTitle: "This local data belongs to another account",
     otherOwnerDescription:
-      "AgentEra will not open or reassign this physical Profile. Create a separate empty space or sign in with its owner.",
+      "AgentEra will not open or reassign local Agent data owned by another account. Create a separate empty space or sign in with its owner.",
     remoteOtherOwnerTitle: "This Runtime connection belongs to another account",
     remoteOtherOwnerDescription:
       "AgentEra will not inherit the previous owner's remote or SSH connection context.",
@@ -103,16 +103,16 @@ const auth = {
     deviceId: "Device",
     offlineUntil: "Signed offline access is valid until {{date}}.",
     localDataWarning:
-      "Deleting or signing out of the cloud account does not delete, move, upload, or unbind local Hermes Profiles, Memory, sessions, files, skills, or learning state.",
+      "Deleting or signing out of the cloud account does not delete, move, upload, or unbind local Agent data, Memory, sessions, files, skills, or learning state.",
     rechargeSeparateAccount:
       "Recharge opens the independent model API website. Its accounts, balances, API keys, cookies, and tokens are separate from this AgentEra account.",
     pendingRevocationWarning:
       "If you sign out while the control plane is unreachable, this device may still count toward the five-device limit until the signed self-revocation is delivered automatically.",
     profile: {
-      title: "Personal profile",
+      title: "Personal details",
       description:
         "Choose the name and personal details shown in AgentEra Studio.",
-      loading: "Loading profile…",
+      loading: "Loading details…",
       displayName: "Username",
       displayNamePlaceholder: "For example: Aera user",
       occupation: "Role / occupation",
@@ -125,12 +125,12 @@ const auth = {
       avatarHint: "JPG, PNG, or WebP. Images are cropped to a square.",
       localOnly:
         "Stored only on this device and kept separate for each signed-in account.",
-      save: "Save profile",
+      save: "Save details",
       saving: "Saving…",
-      saved: "Profile saved",
+      saved: "Details saved",
       nameRequired: "Enter a username.",
       uploadFailed: "This image could not be read. Try another one.",
-      saveFailed: "The profile could not be saved. Try again.",
+      saveFailed: "The details could not be saved. Try again.",
     },
   },
 };
