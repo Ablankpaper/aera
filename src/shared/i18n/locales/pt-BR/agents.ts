@@ -1,28 +1,28 @@
 import enAgents from "../en/agents";
 
 export default {
-  title: "Perfis",
+  title: "Agentes",
   subtitle:
-    "Cada perfil é um espaço de trabalho isolado do AgentEra com sua própria configuração, memória e habilidades",
+    "Cada agente funciona em um ambiente isolado do AgentEra com sua própria configuração, memória e habilidades",
   newAgent: "Novo Agente",
   namePlaceholder: "Nome do agente (ex: coder)",
-  createTitle: "Novo perfil",
+  createTitle: "Novo agente",
   nameLabel: "Nome do agente",
   cloneConfig: "Clonar configuração e chaves de API",
   cloneFromLabel: "Clonar de",
   running: "Em execução",
   off: "Desligado",
   starting: "Iniciando…",
-  createFailed: "Falha ao criar o perfil",
+  createFailed: "Falha ao criar o agente",
   creating: "Criando...",
   create: "Criar",
-  deleteFailed: "Falha ao excluir o perfil",
+  deleteFailed: "Falha ao excluir o agente",
   active: "Ativo",
   noModel: "Nenhum modelo definido",
   skillsCount: "{{count}} habilidades",
   gatewayRunning: "Gateway em execução",
   gatewayOff: "Gateway desligado",
-  colProfile: "Perfil",
+  colProfile: "Agente",
   colModel: "Modelo",
   colStatus: "Status",
   colActions: "Ações",
@@ -99,7 +99,7 @@ export default {
       submittedNotPublished:
         "Enviado para revisão. Nenhuma versão foi publicada ou instalada.",
       approvedNotInstalled:
-        "Versão aprovada. Nenhum Perfil ou Memory de funcionário foi alterado.",
+        "Versão aprovada. Nenhum dado de execução local ou Memory de funcionário foi alterado.",
       rejectedNotPublished:
         "Envio rejeitado. Nenhuma versão foi publicada ou instalada.",
       runtimeBoundary:

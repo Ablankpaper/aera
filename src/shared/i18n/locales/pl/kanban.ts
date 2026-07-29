@@ -39,7 +39,7 @@ export default {
   titlePlaceholder: "Co trzeba zrobić?",
   fieldBody: "Treść (opcjonalnie)",
   bodyPlaceholder: "Kontekst, kryteria akceptacji, linki…",
-  fieldAssignee: "Profil wykonawcy",
+  fieldAssignee: "Przypisany agent",
   assigneeNone: "— Triage (bez wykonawcy)",
   fieldPriority: "Priorytet",
   priorityNormal: "Normalny (0)",

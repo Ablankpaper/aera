@@ -1,19 +1,19 @@
 import enAgents from "../en/agents";
 
 export default {
-  title: "Profile",
+  title: "Agenci",
   subtitle:
-    "Każdy profil to odizolowany obszar roboczy AgentEra z własną konfiguracją, pamięcią i umiejętnościami",
+    "Każdy agent działa w odizolowanym środowisku AgentEra z własną konfiguracją, pamięcią i umiejętnościami",
   newAgent: "Nowy agent",
   namePlaceholder: "Nazwa agenta (np. coder)",
-  createTitle: "Nowy profil",
+  createTitle: "Nowy agent",
   nameLabel: "Nazwa agenta",
   cloneConfig: "Sklonuj konfigurację i klucze API",
   cloneFromLabel: "Klonuj z",
   running: "Działa",
   off: "Wył.",
   starting: "Uruchamianie…",
-  createFailed: "Nie udało się utworzyć profilu",
+  createFailed: "Nie udało się utworzyć agenta",
   creating: "Tworzenie...",
   create: "Utwórz",
   active: "Aktywny",
@@ -21,7 +21,7 @@ export default {
   skillsCount: "{{count}} umiejętności",
   gatewayRunning: "Bramka działa",
   gatewayOff: "Bramka wyłączona",
-  colProfile: "Profil",
+  colProfile: "Agent",
   colModel: "Model",
   colStatus: "Status",
   colActions: "Akcje",
@@ -69,9 +69,9 @@ export default {
     workspaceSpace: "Obszar roboczy",
     workspaceSpaceTitle: "Agenci obszaru roboczego",
     workspaceAuthorSubtitle:
-      "Twórz lokalne szkice, publikuj niezmienne wersje obszaru i instaluj je w odizolowanych lokalnych profilach.",
+      "Twórz lokalne szkice i publikuj niezmienne wersje obszaru; środowisko lokalne jest przygotowywane automatycznie.",
     workspaceMemberSubtitle:
-      "Instaluj zatwierdzone wersje w odizolowanych lokalnych profilach. Członkowie nie mogą tworzyć ani publikować szkiców.",
+      "Używaj zatwierdzonych wersji z automatycznie przygotowanym środowiskiem lokalnym. Członkowie nie mogą tworzyć ani publikować szkiców.",
     role: {
       owner: "Właściciel",
       admin: "Administrator",
@@ -98,7 +98,7 @@ export default {
       submittedNotPublished:
         "Wysłano do przeglądu. Żadna wersja nie została opublikowana ani zainstalowana.",
       approvedNotInstalled:
-        "Wersja zatwierdzona. Nie zmieniono żadnego Profile ani Memory pracownika.",
+        "Wersja zatwierdzona. Nie zmieniono lokalnych danych wykonawczych ani Memory pracownika.",
       rejectedNotPublished:
         "Zgłoszenie odrzucone. Żadna wersja nie została opublikowana ani zainstalowana.",
       runtimeBoundary:

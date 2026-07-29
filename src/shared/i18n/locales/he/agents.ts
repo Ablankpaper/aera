@@ -1,28 +1,28 @@
 import enAgents from "../en/agents";
 
 export default {
-  title: "פרופילים",
+  title: "סוכנים",
   subtitle:
-    "כל פרופיל הוא סביבת עבודה מבודדת של AgentEra עם הגדרות, זיכרון ומיומנויות משלו",
+    "כל סוכן פועל בסביבת AgentEra מבודדת עם הגדרות, זיכרון ומיומנויות משלו",
   newAgent: "סוכן חדש",
   namePlaceholder: "שם הסוכן (לדוגמה: coder)",
-  createTitle: "פרופיל חדש",
+  createTitle: "סוכן חדש",
   nameLabel: "שם הסוכן",
   cloneConfig: "שכפול הגדרות ומפתחות API",
   cloneFromLabel: "שכפול מ",
   running: "פעיל",
   off: "כבוי",
   starting: "מפעיל…",
-  createFailed: "יצירת הפרופיל נכשלה",
+  createFailed: "יצירת הסוכן נכשלה",
   creating: "יוצר...",
   create: "יצירה",
-  deleteFailed: "מחיקת הפרופיל נכשלה",
+  deleteFailed: "מחיקת הסוכן נכשלה",
   active: "פעיל",
   noModel: "לא הוגדר מודל",
   skillsCount: "{{count}} מיומנויות",
   gatewayRunning: "השער פועל",
   gatewayOff: "השער כבוי",
-  colProfile: "פרופיל",
+  colProfile: "סוכן",
   colModel: "מודל",
   colStatus: "סטטוס",
   colActions: "פעולות",
@@ -33,8 +33,8 @@ export default {
   deleteTitle: "מחיקת סוכן",
   auto: "אוטומטי",
   local: "מקומי",
-  manageProfiles: "ניהול פרופילים",
-  switchProfile: "החלפת פרופיל",
+  manageProfiles: "ניהול סוכנים",
+  switchProfile: "החלפת סוכן",
   defaultTag: "ברירת מחדל",
   sectionWallet: "Wallet",
   walletTitle: "Base wallets",
@@ -73,9 +73,9 @@ export default {
     workspaceSpace: "סביבת עבודה",
     workspaceSpaceTitle: "סוכני סביבת העבודה",
     workspaceAuthorSubtitle:
-      "צרו טיוטות מקומיות, פרסמו גרסאות קבועות והתקינו אותן בפרופילים מקומיים מבודדים.",
+      "צרו טיוטות מקומיות ופרסמו גרסאות קבועות; סביבת ההרצה המקומית מוכנה אוטומטית.",
     workspaceMemberSubtitle:
-      "התקינו גרסאות מאושרות בפרופילים מקומיים מבודדים. לחברים אין הרשאת עריכה או פרסום.",
+      "השתמשו בגרסאות מאושרות עם סביבת הרצה מקומית שמוכנה אוטומטית. לחברים אין הרשאת עריכה או פרסום.",
     role: {
       owner: "בעלים",
       admin: "מנהל",
@@ -100,7 +100,7 @@ export default {
       differentReviewerRequired: "בעלים או מנהל אחר חייב לבדוק את ההגשה הזו.",
       submittedNotPublished: "נשלח לבדיקה. אף גרסה לא פורסמה או הותקנה.",
       approvedNotInstalled:
-        "הגרסה אושרה. שום Profile או Memory של עובד לא השתנו.",
+        "הגרסה אושרה. נתוני ההרצה המקומיים ו-Memory של העובדים לא השתנו.",
       rejectedNotPublished: "ההגשה נדחתה. אף גרסה לא פורסמה או הותקנה.",
       runtimeBoundary:
         "נכסי הארגון הם לקריאה בלבד; הסוכן ממשיך לפעול וללמוד מקומית.",

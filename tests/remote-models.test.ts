@@ -198,12 +198,26 @@ describe("remote dashboard models", () => {
         "https://api.deepseek.com/v1",
       ),
     ).resolves.toBe(true);
+    await expect(
+      remoteSetModelConfig(
+        { remoteUrl: url, apiKey: "token" },
+        "custom:anhepro.com",
+        "gpt-5.6-sol",
+        "https://api.anhepro.com/v1",
+      ),
+    ).resolves.toBe(true);
     expect(seenBodies).toEqual([
       {
         scope: "main",
         provider: "custom",
         model: "deepseek-v4-pro",
         base_url: "https://api.deepseek.com/v1",
+      },
+      {
+        scope: "main",
+        provider: "custom:anhepro.com",
+        model: "gpt-5.6-sol",
+        base_url: "https://api.anhepro.com/v1",
       },
     ]);
   });

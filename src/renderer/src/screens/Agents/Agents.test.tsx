@@ -1,7 +1,16 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import type React from "react";
 import { describe, expect, it, vi } from "vitest";
-import type { AgentDraftDetail } from "../../../../shared/agentera-agent-control";
+import type {
+  AgenteraAgentDefinitionSummary,
+  AgenteraAgentInstallationSummary,
+} from "../../../../shared/agentera-agent-control";
 
 vi.mock("../../components/useI18n", () => ({
   useI18n: () => ({
@@ -13,9 +22,6 @@ vi.mock("../../components/common/HermesLogo", () => ({
   default: (): React.JSX.Element => <div data-testid="hermes-logo" />,
 }));
 
-// Agents reads the global profile modal via useProfileModal, which throws
-// outside a ProfileModalProvider. These tests render Agents in isolation, so
-// stub the hook with a no-op modal opener.
 vi.mock("../../components/profile/ProfileModalContext", () => ({
   useProfileModal: () => ({
     openProfile: vi.fn(),
@@ -24,6 +30,10 @@ vi.mock("../../components/profile/ProfileModalContext", () => ({
 }));
 
 import Agents from "./Agents";
+
+const DEFINITION_ID = "11111111-1111-4111-8111-111111111111";
+const VERSION_ID = "22222222-2222-4222-8222-222222222222";
+const INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
 
 interface ProfileInfo {
   id: string;
@@ -37,37 +47,73 @@ interface ProfileInfo {
   hasSoul: boolean;
   skillCount: number;
   gatewayRunning: boolean;
+  agentInstallationId?: string | null;
+  runtimeProfileId?: string | null;
 }
 
-function profile(name: string, isDefault = false): ProfileInfo {
+function profile(
+  id: string,
+  options: {
+    isDefault?: boolean;
+    name?: string;
+    agentInstallationId?: string | null;
+  } = {},
+): ProfileInfo {
   return {
-    id: name,
-    name,
-    path: isDefault ? "C:/hermes" : `C:/hermes/profiles/${name}`,
-    isDefault,
-    isActive: isDefault,
-    model: "",
-    provider: "auto",
-    hasEnv: false,
-    hasSoul: false,
+    id,
+    name: options.name ?? id,
+    path: options.isDefault ? "C:/hermes" : `C:/hermes/profiles/${id}`,
+    isDefault: options.isDefault ?? false,
+    isActive: options.isDefault ?? false,
+    model: "gpt-5.6-sol",
+    provider: "custom",
+    hasEnv: true,
+    hasSoul: true,
     skillCount: 0,
     gatewayRunning: false,
+    agentInstallationId: options.agentInstallationId ?? null,
+    runtimeProfileId: null,
+  };
+}
+
+function definition(): AgenteraAgentDefinitionSummary {
+  return {
+    id: DEFINITION_ID,
+    displayName: "Research Agent",
+    status: "active",
+    latestVersionId: VERSION_ID,
+    createdAt: "2026-07-29T00:00:00.000Z",
+    updatedAt: "2026-07-29T00:00:00.000Z",
+  };
+}
+
+function installation(): AgenteraAgentInstallationSummary {
+  return {
+    id: INSTALLATION_ID,
+    sourceScope: "USER",
+    officialReleaseId: null,
+    selectedReleaseRevisionId: null,
+    updatePolicy: "manual",
+    definitionId: DEFINITION_ID,
+    selectedVersionId: VERSION_ID,
+    runtimeProfileId: "research-agent",
+    policySnapshotId: "44444444-4444-4444-8444-444444444444",
+    status: "active",
+    retryCode: null,
+    createdAt: "2026-07-29T00:00:00.000Z",
+    updatedAt: "2026-07-29T00:00:00.000Z",
   };
 }
 
 function installHermesAPI(): {
   listProfiles: ReturnType<typeof vi.fn>;
   createProfile: ReturnType<typeof vi.fn>;
-  deleteProfile: ReturnType<typeof vi.fn>;
   setActiveProfile: ReturnType<typeof vi.fn>;
-  getAgentSyncStatus: ReturnType<typeof vi.fn>;
-  syncAgents: ReturnType<typeof vi.fn>;
 } {
   const api = {
     listProfiles: vi.fn(),
     createProfile: vi.fn(),
-    deleteProfile: vi.fn(),
-    setActiveProfile: vi.fn(),
+    setActiveProfile: vi.fn(async () => true),
     getAgentSyncStatus: vi.fn(async () => ({
       signedIn: false,
       running: false,
@@ -75,6 +121,7 @@ function installHermesAPI(): {
       lastResult: null,
     })),
     syncAgents: vi.fn(),
+    onAgentSyncUpdated: vi.fn(() => () => undefined),
   };
   Object.defineProperty(window, "hermesAPI", {
     configurable: true,
@@ -83,40 +130,10 @@ function installHermesAPI(): {
   return api;
 }
 
-function localDraft(): AgentDraftDetail {
-  return {
-    id: "11111111-1111-4111-8111-111111111111",
-    sourceAgentDefinitionId: null,
-    baseAgentVersionId: null,
-    displayName: "Research Agent",
-    icon: null,
-    manifest: {
-      schemaVersion: 1,
-      identity: { systemPrompt: "Research carefully" },
-      assets: [],
-      modelConstraints: {
-        allowedProviders: ["openai"],
-        allowedModels: ["gpt-5.6"],
-      },
-      tools: { allowed: [], denied: [] },
-      dependencies: [],
-      runtimeCompatibility: {
-        minimumVersion: "v0.18.2-agentera.1",
-        maximumVersionExclusive: null,
-      },
-    },
-    assets: [],
-    editableAssets: [],
-    revision: 1,
-    createdAt: "2026-07-19T00:00:00.000Z",
-    updatedAt: "2026-07-19T00:00:00.000Z",
-    lastPublicationAttempt: null,
-    publishedRevision: null,
-  };
-}
-
-function installAgenteraAPI(): {
-  createDraft: ReturnType<typeof vi.fn>;
+function installAgenteraAPI(
+  overrides: Partial<Window["agenteraAgents"]> = {},
+): Window["agenteraAgents"] & {
+  installVersion: ReturnType<typeof vi.fn>;
 } {
   const api = {
     getState: vi.fn(async () => ({
@@ -131,23 +148,64 @@ function installAgenteraAPI(): {
     })),
     listDrafts: vi.fn(async () => ({ ok: true as const, data: [] })),
     getDraft: vi.fn(),
-    createDraft: vi.fn(async () => ({
-      ok: true as const,
-      data: localDraft(),
-    })),
+    createDraft: vi.fn(),
     updateDraft: vi.fn(),
     deleteDraft: vi.fn(),
     preparePublication: vi.fn(),
     confirmPublication: vi.fn(),
+    prepareOrganizationSubmission: vi.fn(),
+    confirmOrganizationSubmission: vi.fn(),
+    listOrganizationSubmissions: vi.fn(async () => ({
+      ok: true as const,
+      data: [],
+    })),
+    getOrganizationSubmission: vi.fn(),
+    prepareOrganizationReview: vi.fn(),
+    confirmOrganizationReview: vi.fn(),
+    prepareOrganizationWithdrawal: vi.fn(),
+    confirmOrganizationWithdrawal: vi.fn(),
     listDefinitions: vi.fn(async () => ({ ok: true as const, data: [] })),
-    listVersions: vi.fn(),
-    listInstallations: vi.fn(async () => ({ ok: true as const, data: [] })),
+    listOfficialAgents: vi.fn(async () => ({ ok: true as const, data: [] })),
+    getOfficialAgentDetail: vi.fn(),
+    prepareOfficialInstall: vi.fn(),
+    confirmOfficialInstall: vi.fn(),
+    refreshOfficialUpdates: vi.fn(async () => ({
+      ok: true as const,
+      data: [],
+    })),
+    applyOfficialUpdate: vi.fn(),
+    listVersions: vi.fn(async () => ({ ok: true as const, data: [] })),
+    listInstallations: vi.fn(async () => ({
+      ok: true as const,
+      data: [],
+    })),
     installVersion: vi.fn(),
     claimVersion: vi.fn(),
     retryPendingInstallation: vi.fn(),
     selectInstallationVersion: vi.fn(),
     archiveInstallation: vi.fn(),
+    listEligibleExperienceSkills: vi.fn(async () => ({
+      ok: true as const,
+      data: [],
+    })),
+    prepareExperienceCandidate: vi.fn(),
+    submitExperienceCandidate: vi.fn(),
+    listMyExperienceCandidates: vi.fn(async () => ({
+      ok: true as const,
+      data: [],
+    })),
+    listExperienceReviewQueue: vi.fn(async () => ({
+      ok: true as const,
+      data: [],
+    })),
+    getExperienceCandidate: vi.fn(),
+    reviewExperienceCandidate: vi.fn(),
+    prepareExperienceCandidateImport: vi.fn(),
+    confirmExperienceCandidateImport: vi.fn(),
     onStateChanged: vi.fn(() => () => undefined),
+    ...overrides,
+  } as unknown as Window["agenteraAgents"] & {
+    installVersion: ReturnType<typeof vi.fn>;
   };
   Object.defineProperty(window, "agenteraAgents", {
     configurable: true,
@@ -156,115 +214,84 @@ function installAgenteraAPI(): {
   return api;
 }
 
-describe("Agents profile creation", () => {
-  it("refreshes profiles after a failed create so ambiguous successes appear", async () => {
-    const api = installHermesAPI();
-    installAgenteraAPI();
-    api.listProfiles
-      .mockResolvedValueOnce([profile("default", true)])
-      .mockResolvedValueOnce([profile("default", true), profile("test2")]);
-    api.createProfile.mockResolvedValue({
-      success: false,
-      error:
-        "Error: Profile 'test2' already exists at C:/hermes/profiles/test2",
-    });
-
-    render(
-      <Agents
-        activeProfile="default"
-        onSelectProfile={() => {}}
-        onChatWith={() => {}}
-      />,
-    );
-
-    fireEvent.click(
-      await screen.findByRole("tab", { name: "agents.hub.mineTab" }),
-    );
-    expect(
-      await screen.findByText("agents.control.personalSpaceTitle"),
-    ).toBeTruthy();
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: /agents\.hub\.advancedTitle/,
-      }),
-    );
-    await waitFor(() => {
-      expect(screen.getByText("default")).toBeTruthy();
-    });
-
-    fireEvent.click(screen.getByText("agents.legacyNewProfile"));
-    fireEvent.change(screen.getByPlaceholderText("agents.namePlaceholder"), {
-      target: { value: "test2" },
-    });
-    fireEvent.click(screen.getByText("agents.create"));
-
-    expect(api.createProfile).toHaveBeenCalledWith("test2", "default");
-
-    // The create modal stays open on failure (so the user can retry), and its
-    // clone-from <select> also lists profiles — so "test2" can appear both as
-    // an <option> and as the refreshed table row. Assert it shows up at all.
-    await waitFor(() => {
-      expect(screen.getAllByText("test2").length).toBeGreaterThan(0);
-    });
-    expect(screen.getByText(/already exists/)).toBeTruthy();
-    expect(api.listProfiles).toHaveBeenCalledTimes(2);
-
-    // Close the Radix modal while this jsdom environment is still alive so
-    // its deferred focus-restoration event cannot escape into another worker.
-    fireEvent.click(screen.getByRole("button", { name: "common.close" }));
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).toBeNull();
-    });
-  });
-
-  it("keeps AgentEra actions on the new namespace and legacy Hermes One controls separate", async () => {
+describe("Agents unified product surface", () => {
+  it("shows and opens an existing local runtime only as an Agent", async () => {
     const hermes = installHermesAPI();
-    const agentera = installAgenteraAPI();
-    hermes.listProfiles.mockResolvedValue([profile("default", true)]);
+    installAgenteraAPI();
+    hermes.listProfiles.mockResolvedValue([
+      profile("default", { isDefault: true, name: "Default Agent" }),
+    ]);
+    const onChatWith = vi.fn();
 
-    render(
-      <Agents
-        activeProfile="default"
-        onSelectProfile={() => {}}
-        onChatWith={() => {}}
-      />,
-    );
+    render(<Agents activeProfile="default" onChatWith={onChatWith} />);
 
     fireEvent.click(
       await screen.findByRole("tab", { name: "agents.hub.mineTab" }),
     );
-    expect(
-      await screen.findByText("agents.control.personalSpaceTitle"),
-    ).toBeTruthy();
+    const grid = await screen.findByTestId("personal-agent-grid");
+    fireEvent.click(within(grid).getByText("Default Agent").closest("button")!);
     fireEvent.click(
-      screen.getByRole("button", {
-        name: /agents\.hub\.advancedTitle/,
-      }),
-    );
-    expect(screen.getByText("agents.legacyTitle")).toBeTruthy();
-    expect(screen.getByText("agents.legacyAccountSyncLabel")).toBeTruthy();
-    const syncStatusCalls = hermes.getAgentSyncStatus.mock.calls.length;
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "agents.control.newAgent" }),
-    );
-    fireEvent.change(screen.getByLabelText("agents.control.name"), {
-      target: { value: "Research Agent" },
-    });
-    fireEvent.change(screen.getByLabelText("agents.control.systemPrompt"), {
-      target: { value: "Research carefully" },
-    });
-    fireEvent.click(
-      screen.getByRole("button", { name: "agents.control.saveLocal" }),
+      screen.getByRole("button", { name: "agents.hub.useAgent" }),
     );
 
-    await waitFor(() => expect(agentera.createDraft).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(hermes.setActiveProfile).toHaveBeenCalledWith("default"),
+    );
+    expect(onChatWith).toHaveBeenCalledWith("default");
     expect(hermes.createProfile).not.toHaveBeenCalled();
-    expect(hermes.syncAgents).not.toHaveBeenCalled();
-    expect(hermes.getAgentSyncStatus).toHaveBeenCalledTimes(syncStatusCalls);
+    expect(screen.queryByTestId("local-runtime-profiles")).toBeNull();
+    expect(screen.queryByText("agents.legacyTitle")).toBeNull();
   });
 
-  // Profile deletion (optimistic hide + rollback on failure) moved out of the
-  // Agents screen into the ProfileModal danger zone, so its rendering tests no
-  // longer belong here. The Agents screen only opens that modal now.
+  // @lat: [[agentera-agent-control-plane#AgentEra Agent control plane V1#Trusted Workspace Agent context#Product-facing Agent projection]]
+  it("automatically prepares the local runtime and opens a newly used Agent", async () => {
+    const hermes = installHermesAPI();
+    const defaultProfile = profile("default", {
+      isDefault: true,
+      name: "Default Agent",
+    });
+    const installedProfile = profile("research-agent", {
+      name: "Research Agent",
+      agentInstallationId: INSTALLATION_ID,
+    });
+    hermes.listProfiles
+      .mockResolvedValueOnce([defaultProfile])
+      .mockResolvedValue([defaultProfile, installedProfile]);
+    const agentera = installAgenteraAPI({
+      listDefinitions: vi.fn(async () => ({
+        ok: true as const,
+        data: [definition()],
+      })),
+      installVersion: vi.fn(async () => ({
+        ok: true as const,
+        data: installation(),
+      })),
+    });
+    const onChatWith = vi.fn();
+
+    render(<Agents activeProfile="default" onChatWith={onChatWith} />);
+
+    fireEvent.click(
+      await screen.findByRole("tab", { name: "agents.hub.mineTab" }),
+    );
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.hub.useAgent" }),
+    );
+
+    await waitFor(() =>
+      expect(agentera.installVersion).toHaveBeenCalledWith({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profileName: "Research Agent",
+      }),
+    );
+    await waitFor(() =>
+      expect(hermes.setActiveProfile).toHaveBeenCalledWith("research-agent"),
+    );
+    expect(onChatWith).toHaveBeenCalledWith("research-agent");
+    expect(hermes.createProfile).not.toHaveBeenCalled();
+  });
 });

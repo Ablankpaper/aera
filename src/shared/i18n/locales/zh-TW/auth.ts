@@ -39,13 +39,13 @@ const auth = {
     binding: "正在安全綁定…",
     creating: "正在建立空白空間…",
     emptyBindingTitle: "正在準備個人空間",
-    emptyBindingDescription: "正在將此空白本機 Profile 綁定到目前本機空間。",
+    emptyBindingDescription: "正在自動準備本機智慧體執行環境。",
     connectionBindingTitle: "正在保護此 Runtime 連線",
     connectionBindingDescription:
       "正在把遠端或 SSH 連線綁定到目前 AgentEra 擁有者，產品 Token 不會傳送給 Runtime。",
     otherOwnerTitle: "此本機資料屬於另一個帳戶",
     otherOwnerDescription:
-      "AgentEra 不會開啟或重新分配此實體 Profile。請建立獨立空白空間，或使用其擁有者帳戶登入。",
+      "AgentEra 不會開啟或重新分配其他帳戶的本機智慧體資料。請建立獨立空白空間，或使用其擁有者帳戶登入。",
     remoteOtherOwnerTitle: "此 Runtime 連線屬於另一個帳戶",
     remoteOtherOwnerDescription:
       "AgentEra 不會繼承上一位擁有者的遠端或 SSH 連線內容。",
@@ -80,7 +80,7 @@ const auth = {
     deviceId: "裝置",
     offlineUntil: "簽章離線授權有效至 {{date}}。",
     localDataWarning:
-      "刪除雲端帳戶或登出都不會刪除、移動、上傳或解除綁定本機 Hermes Profile、Memory、工作階段、檔案、技能及自我學習狀態。",
+      "刪除雲端帳戶或登出都不會刪除、移動、上傳或解除綁定本機智慧體資料、Memory、工作階段、檔案、技能及自我學習狀態。",
     rechargeSeparateAccount:
       "儲值會開啟獨立的模型 API 網站；該網站的帳戶、餘額、API Key、Cookie 與 Token 均不與 AgentEra 帳戶共用。",
     pendingRevocationWarning:

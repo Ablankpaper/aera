@@ -20,7 +20,7 @@ export default {
   loadError: "Couldn't load the community registry.",
   retry: "Retry",
   install_other: "Set up",
-  targetProfile: "Installs into the active profile",
+  targetProfile: "Installs into the active Agent",
   actions: {
     install: { setup: "Install", working: "Installing...", done: "Installed" },
     connect: { setup: "Connect", working: "Connecting...", done: "Connected" },

@@ -944,6 +944,7 @@ interface HermesAPI {
       };
     }) => void,
   ) => () => void;
+  onRuntimeSnapshotChanged: (callback: () => void) => () => void;
   setSshConfig: (
     host: string,
     port: number,

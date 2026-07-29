@@ -27,6 +27,7 @@ describe("ModelCenter", () => {
   const discoverProviderModels = vi.fn();
   const addModel = vi.fn();
   const setModelConfig = vi.fn();
+  const getModelConfig = vi.fn();
   const upsertCustomProvider = vi.fn();
   const removeCustomProvider = vi.fn();
   const removeModel = vi.fn();
@@ -52,6 +53,14 @@ describe("ModelCenter", () => {
       createdAt: Date.now(),
     });
     setModelConfig.mockResolvedValue(true);
+    getModelConfig.mockImplementation(async () => {
+      const lastCall = setModelConfig.mock.lastCall;
+      return {
+        provider: lastCall?.[0] ?? "auto",
+        model: lastCall?.[1] ?? "",
+        baseUrl: lastCall?.[2] ?? "",
+      };
+    });
     upsertCustomProvider.mockResolvedValue(null);
     removeCustomProvider.mockResolvedValue(undefined);
     removeModel.mockResolvedValue(true);
@@ -66,6 +75,7 @@ describe("ModelCenter", () => {
         discoverProviderModels,
         addModel,
         setModelConfig,
+        getModelConfig,
         upsertCustomProvider,
         removeCustomProvider,
         removeModel,
@@ -241,7 +251,7 @@ describe("ModelCenter", () => {
       />,
     );
 
-    expect(await screen.findByText("custom:Petoi")).toBeInTheDocument();
+    expect(await screen.findByText("custom")).toBeInTheDocument();
     expect(
       screen.getByText("providers.center.modelsCount:2"),
     ).toBeInTheDocument();
@@ -310,6 +320,74 @@ describe("ModelCenter", () => {
       provider: "custom",
       model: "gpt-5.5",
       baseUrl: "https://api.petoi.cn/v1",
+    });
+  });
+
+  it("uses Main's canonical named-custom route after activating a service", async () => {
+    listModels.mockResolvedValue([
+      {
+        id: "model-1",
+        name: "gpt-5.6-sol",
+        provider: "custom",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://api.anhepro.com/v1",
+        providerLabel: "Anhe Pro",
+        createdAt: 2,
+      },
+    ]);
+    listCustomProviders.mockResolvedValue([
+      {
+        id: "anhepro",
+        name: "Anhe Pro",
+        baseUrl: "https://api.anhepro.com/v1",
+        createdAt: 1,
+      },
+    ]);
+    getModelConfig.mockResolvedValue({
+      provider: "custom:anhe-pro",
+      model: "gpt-5.6-sol",
+      baseUrl: "https://api.anhepro.com/v1",
+    });
+    const onActivated = vi.fn();
+    const { container } = render(
+      <ModelCenter
+        profile="acceptance"
+        env={{ CUSTOM_PROVIDER_ANHE_PRO_KEY: "configured" }}
+        activeModel={{ provider: "auto", model: "", baseUrl: "" }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={onActivated}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    const card = await waitFor(() => {
+      const element = container.querySelector(
+        '[data-service-key="custom:anhepro"]',
+      );
+      expect(element).toBeInTheDocument();
+      return element as HTMLElement;
+    });
+    expect(within(card).getByText("custom:anhe-pro")).toBeInTheDocument();
+
+    fireEvent.click(
+      within(card).getByRole("button", {
+        name: "providers.center.setDefault",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(setModelConfig).toHaveBeenCalledWith(
+        "custom",
+        "gpt-5.6-sol",
+        "https://api.anhepro.com/v1",
+        "acceptance",
+      ),
+    );
+    expect(onActivated).toHaveBeenCalledWith({
+      provider: "custom:anhe-pro",
+      model: "gpt-5.6-sol",
+      baseUrl: "https://api.anhepro.com/v1",
     });
   });
 

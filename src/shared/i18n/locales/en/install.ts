@@ -22,7 +22,7 @@ export default {
   confirmBundledRuntime:
     "AgentEra Runtime is already included with this desktop app and will be prepared locally.",
   confirmOfflinePreparation:
-    "This first preparation does not download Hermes from GitHub and does not change your Profile, Memory, sessions, or learned Skills.",
+    "This first preparation does not download Hermes from GitHub and does not change your Agent data, Memory, sessions, or learned Skills.",
   confirmPrepareBtn: "Prepare Runtime",
   useExistingBtn: "Use existing external Runtime",
   useExistingHint:

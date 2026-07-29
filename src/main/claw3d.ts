@@ -1,4 +1,4 @@
-import { spawn, ChildProcess, spawnSync, execFileSync } from "child_process";
+import { spawn, ChildProcess, spawnSync } from "child_process";
 import {
   existsSync,
   readFileSync,
@@ -12,6 +12,7 @@ import { createConnection } from "net";
 import { getEnhancedPath, HERMES_HOME } from "./installer";
 import { stripAnsi, safeWriteFile, getActiveProfileNameSync } from "./utils";
 import { getApiServerKey, getConnectionConfig, getModelConfig } from "./config";
+import { killProcessTree } from "./process-tree";
 import http from "http";
 
 const HERMES_OFFICE_REPO = "https://github.com/fathah/hermes-office";
@@ -811,54 +812,6 @@ export async function setupClaw3d(
 
   // Write config files so Claw3D skips onboarding
   writeClaw3dSettings();
-}
-
-function killProcessTree(proc: ChildProcess): void {
-  if (!proc.pid) return;
-
-  if (process.platform === "win32") {
-    try {
-      // /F: Force terminate the process
-      // /T: Terminate the specified process and any child processes started by it
-      execFileSync("taskkill", ["/F", "/T", "/PID", String(proc.pid)], {
-        stdio: "ignore",
-      });
-    } catch (err) {
-      console.error(
-        `[killProcessTree] taskkill failed for PID ${proc.pid}:`,
-        err,
-      );
-      try {
-        proc.kill("SIGKILL");
-      } catch {
-        /* already dead */
-      }
-    }
-  } else {
-    // POSIX: Kill the process group (since the process was spawned as detached)
-    try {
-      process.kill(-proc.pid, "SIGTERM");
-    } catch {
-      try {
-        proc.kill("SIGTERM");
-      } catch {
-        /* already dead */
-      }
-    }
-    // Fallback: SIGKILL after 3 seconds
-    const pid = proc.pid;
-    setTimeout(() => {
-      try {
-        process.kill(-pid, "SIGKILL");
-      } catch {
-        try {
-          process.kill(pid, "SIGKILL");
-        } catch {
-          /* already dead */
-        }
-      }
-    }, 3000);
-  }
 }
 
 export function startDevServer(): boolean {

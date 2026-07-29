@@ -10,21 +10,23 @@ The existing Hermes account client remains a separate compatibility feature. The
 
 ## Startup gate
 
-The splash preflights Runtime and connection readiness without mounting user content, restores a valid account session when one exists, and otherwise enters an isolated local guest space without opening a browser.
+The splash preflights Runtime and connection readiness without mounting user content, then restores a valid encrypted account session when one exists.
 
-An online session or valid signed offline entitlement selects the account-bound Runtime Profile before any runnable user screen opens. A fresh guest or authenticated device may install Runtime first, but must resolve its own physical Profile before main. Authentication never becomes a writer to [[agentera-self-evolution#AgentEra self-evolution compatibility#Local learning loop|Hermes local learning]].
+If no valid account session is available, the renderer stops at the account gate until the user explicitly completes browser sign-in.
 
-### Guest-first routing
+An online session or valid signed offline entitlement selects the account-bound Runtime Profile before any runnable user screen opens. A newly authenticated device may install Runtime first, but must resolve its own physical Profile before main. Authentication never becomes a writer to [[agentera-self-evolution#AgentEra self-evolution compatibility#Local learning loop|Hermes local learning]].
 
-An absent account session is a usable local guest state, not a full-screen login gate.
+### Account-required routing
 
-[[src/renderer/src/App.tsx#App]] routes the guest through signed Runtime preparation and local Profile resolution, forces stale Remote or SSH configuration back to local mode, and never calls browser login during startup. [[src/renderer/src/components/AgenteraAccountMenu.tsx#AgenteraAccountMenu]] shows a bottom-left “登录” control; only that explicit action opens browser registration or sign-in. A valid encrypted account session still restores automatically across launches.
+An absent account session is not a runnable product state during internal testing.
 
-Blocked account states remain on the recovery gate, and unavailable secure storage stays fail closed. Guest mode cannot use account portals, Cloud control-plane operations, workspaces, organizations, encrypted backup, or official quality submission.
+[[src/renderer/src/App.tsx#App]] restores valid online or signed offline account access automatically across launches. An unauthenticated, expired, revoked, disabled, or secure-storage-blocked state remains on [[src/renderer/src/screens/AuthGate/AuthGate.tsx#AuthGate]]; only the explicit login action opens browser registration or sign-in. Runtime installation, Profile ownership resolution, chat, and the main layout cannot mount before signed account access.
+
+Blocked account states remain on the recovery gate, and unavailable secure storage stays fail closed. The account gate preserves the local Hermes data directory but exposes no account portals, Cloud control-plane operations, workspaces, organizations, encrypted backup, official quality submission, or local chat.
 
 #### Layout connection privacy
 
-The guest layout presents local mode directly and does not invoke account-only Remote/SSH mode inspection. A rejected account-mode check also falls back to local presentation without an unhandled renderer rejection.
+The layout mounts only for a signed account. A rejected account-mode check falls back to local presentation without an unhandled renderer rejection.
 
 ##### Account connection lookup fallback
 
@@ -32,19 +34,19 @@ An authenticated layout whose Remote/SSH mode lookup rejects presents local mode
 
 #### Chat transport privacy
 
-Guest chat initializes the local transport without reading or subscribing to account-owned Remote/SSH connection configuration. Signing in remounts that transport boundary with account access.
+Unauthenticated state never initializes chat transport or reads and subscribes to account-owned Remote/SSH connection configuration.
 
 ### Guest Profile isolation
 
-Guest Runtime access uses an installation-scoped local owner that is never a Cloud user or bearer identity.
+The installation-scoped guest owner remains an internal compatibility boundary for old local data and focused isolation tests, but the current product startup does not select it as a runnable session.
 
-[[src/main/agentera-profile-binding.ts#createAgenteraGuestRuntimeOwner]] derives domain-separated guest owner identifiers from the protected installation identity. The normal binding store then resolves or creates a guest-owned physical Profile. Signing in switches to the account’s own binding or a fresh Profile; signing out returns to the guest binding. Neither transition opens, reassigns, copies, or merges the other owner’s Hermes data.
+[[src/main/agentera-profile-binding.ts#createAgenteraGuestRuntimeOwner]] derives domain-separated guest owner identifiers from the protected installation identity. The binding store can still recognize guest-owned physical Profiles without opening, reassigning, copying, or merging them into a signed account.
 
-The central IPC guard grants pre-account access only to explicit bootstrap operations and an already bound guest Profile. Account and online channels still require signed product access, while every Profile-targeted guest call is checked against the guest binding before its handler runs.
+The central IPC guard retains the narrow legacy policy for explicit bootstrap operations and an already bound guest Profile, but [[src/renderer/src/App.tsx#App]] does not route unauthenticated users into those handlers. Account and online channels require signed product access.
 
 #### Profile discovery owner freshness
 
-Local Profile discovery may await filesystem work while a guest signs in or an account switches, so ownership is resolved only after discovery returns and immediately before synchronous bind, activation, or creation.
+Local Profile discovery may await filesystem work while authentication or an account switch changes ownership, so ownership is resolved only after discovery returns and immediately before synchronous bind, activation, or creation.
 
 [[src/main/agentera-profile-binding.ts#discoverProfilesForCurrentOwner]] returns discovered locations with the then-current validated owner. The local account-space IPC handler uses that pair without another asynchronous boundary, preventing a stale guest or account principal from binding the Profile.
 
@@ -64,11 +66,11 @@ The separate `window.agenteraRuntimeDistribution` lifecycle namespace is authent
 
 ### Renderer state machine
 
-[[src/renderer/src/App.tsx#App]] applies the sanitized startup target only after guest or account Runtime ownership checks.
+[[src/renderer/src/App.tsx#App]] applies the sanitized startup target only after signed account access and Runtime ownership checks.
 
-The three-second branded splash remains unchanged. A missing Runtime proceeds to bundled installation for either guest or account access. `main` additionally requires the current local Profile to match the guest/account owner; remote and SSH contexts remain account-only. A legacy `setup` target is normalized to `main` after that ownership check.
+The three-second branded splash remains unchanged. A missing Runtime proceeds to bundled installation only after account access. `main` additionally requires the current local Profile to match the signed account owner; remote and SSH contexts remain account-only. A legacy `setup` target is normalized to `main` after that ownership check.
 
-[[src/renderer/src/screens/AuthGate/AuthGate.tsx#AuthGate]] remains the explicit sign-in/recovery surface and presents the product-owned `src/renderer/src/assets/aila.glb` as Aila's native Three.js 3D character. It opens registration, sign-in, and recovery only in the system browser, never renders password, email, phone, verification-code, WebView, or local-bypass inputs, and explains fail-closed platform secure-storage errors.
+[[src/renderer/src/screens/AuthGate/AuthGate.tsx#AuthGate]] is the explicit sign-in/recovery surface and presents the product-owned `src/renderer/src/assets/aila.glb` as Aila's native Three.js 3D character. While that asset loads, the surface shows only a neutral progress indicator and never substitutes a different avatar or flat “A” identity. It opens registration, sign-in, and recovery only in the system browser, never renders password, email, phone, verification-code, WebView, or local-bypass inputs, and explains fail-closed platform secure-storage errors.
 
 Before the renderer can show any runnable screen, the authenticated local route resolves the account's own physical space in the main process. It keeps an already-active owned Profile, otherwise reactivates that account's earliest still-present binding. If the account has no binding, it binds an empty active Profile or creates a fresh non-cloned Profile beside meaningful unowned or foreign data. Returning accounts therefore reuse their original local space, while every new account proceeds automatically with a blank isolated space and never sees or inherits another account's Runtime data.
 
@@ -152,7 +154,9 @@ The controller serializes refreshes so a rotating Refresh Token is never replaye
 
 ### Runtime edge enforcement
 
-Every account Runtime IPC edge rechecks the current trusted deadline before its handler can start new work. A guest edge instead requires the explicit guest-capable policy level and the installation-scoped guest Profile binding.
+Every account Runtime IPC edge rechecks the current trusted deadline before its handler can start new work.
+
+The retained legacy guest edge still requires the explicit guest-capable policy level and installation-scoped guest Profile binding, but is not reachable from current product startup.
 
 [[src/main/ipc/auth-guard.ts#createProductAccessGuard]] calls the controller's synchronous entitlement assertion before Profile ownership checks. Expiry, rollback, revocation, account disablement, or deletion publishes a blocked state; the existing owner-switch coordinator then aborts active runs and closes Gateway, SSH, dashboard, and SQLite state without editing Hermes files.
 
@@ -176,7 +180,7 @@ The sidebar account menu and Settings account pane expose only online/offline st
 
 [[src/renderer/src/components/AgenteraAccountMenu.tsx#AgenteraAccountMenu]] and [[src/renderer/src/components/settings/AgenteraAccountPane.tsx#AgenteraAccountPane]] open account and device management on the configured cloud Origin. Recharge opens the separately configured URL validated by [[src/main/agentera-auth/config.ts#parseAgenteraRechargePublicUrl]] and shares no AgentEra APP credential.
 
-When no account session exists, the sidebar renders only the guest-local status and the explicit “登录” action. It does not probe account profile data or open a browser until the user activates that control.
+When no account session exists, the sidebar and main layout do not mount. The full-screen account gate does not probe account Profile data or open a browser until the user activates its explicit login control.
 
 Switching accounts completes safe sign-out first and then opens browser authorization with explicit account selection. The UI warns that a pending offline revocation may temporarily count toward the five-device limit and that cloud account deletion cannot erase local Hermes data.
 
@@ -186,9 +190,9 @@ The cloud may transfer an installation to another AgentEra account only after th
 
 ## Existing Profile migration
 
-The first guest or authenticated launch binds an empty owner-specific Profile automatically.
+The first authenticated launch binds an empty account-specific Profile automatically.
 
-If the active Profile already contains meaningful unowned or differently owned data, that data remains untouched and the current guest/account owner receives a separate fresh Profile automatically. Later sign-in, sign-out, and account switches follow the same deterministic rule: the main process reactivates that owner’s existing bound Profile, or creates one isolated fresh Profile when the owner is new on the device.
+If the active Profile already contains meaningful unowned or differently owned data, that data remains untouched and the current account owner receives a separate fresh Profile automatically. Later sign-in and account switches follow the same deterministic rule: the main process reactivates that owner’s existing bound Profile, or creates one isolated fresh Profile when the owner is new on the device. Signing out returns to the account gate instead of opening a guest workspace.
 
 Binding never copies, uploads, or rewrites Memory, USER, skills, sessions, files, or Curator state. One physical Profile belongs to one AgentEra owner, consistent with [[agentera-self-evolution#AgentEra self-evolution compatibility#Runtime isolation|Runtime isolation]].
 

@@ -44,7 +44,7 @@ export default {
   titlePlaceholder: "O que precisa de ser feito?",
   fieldBody: "Corpo (opcional)",
   bodyPlaceholder: "Contexto, critérios de aceitação, ligações…",
-  fieldAssignee: "Perfil responsável",
+  fieldAssignee: "Agente responsável",
   assigneeNone: "— Triagem (sem responsável)",
   fieldPriority: "Prioridade",
   priorityNormal: "Normal (0)",

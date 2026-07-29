@@ -21,15 +21,16 @@ interface ProfileSwitcherProps {
   activeProfile: string;
   /** Called after a successful switch so the shell can reset chat state. */
   onSwitch: (name: string) => void;
-  /** Open the full Profiles management screen. */
+  /** Open the product-level Agents management screen. */
   onManage: () => void;
   /** Render as an icon-only sidebar footer affordance. */
   compact?: boolean;
 }
 
 /**
- * Sidebar footer control: shows the active profile and, on click, opens a
- * popover to switch between profiles or jump to the management screen.
+ * Sidebar footer control: presents runtime profiles as product-level Agents.
+ * The popover switches Agents, opens the Agent management screen, or opens the
+ * active Agent's product-level settings without exposing runtime bindings.
  */
 export default function ProfileSwitcher({
   activeProfile,
@@ -84,14 +85,15 @@ export default function ProfileSwitcher({
   }, [open]);
 
   const activeInfo = profiles.find((p) => p.id === activeProfile);
-  const hasDefaultFallbackName =
-    activeInfo?.isDefault && activeInfo.name === activeInfo.id;
-  const label =
-    activeInfo && !hasDefaultFallbackName
-      ? activeInfo.name
-      : activeProfile === "default"
-        ? t("common.appName")
-        : activeProfile;
+  const displayProfileName = (profile: ProfileInfo): string =>
+    profile.isDefault && profile.name === profile.id
+      ? t("common.appName")
+      : profile.name;
+  const label = activeInfo
+    ? displayProfileName(activeInfo)
+    : activeProfile === "default"
+      ? t("common.appName")
+      : activeProfile;
 
   async function handleSelect(name: string): Promise<void> {
     setOpen(false);
@@ -122,7 +124,7 @@ export default function ProfileSwitcher({
                     className="profile-menu-active-section"
                     role="menuitem"
                     title={t("agents.editAppearanceFor", {
-                      name: active.name,
+                      name: displayProfileName(active),
                     })}
                     onClick={() => {
                       setOpen(false);
@@ -142,14 +144,11 @@ export default function ProfileSwitcher({
                     </div>
                     <span className="profile-menu-info">
                       <span className="profile-menu-name">
-                        {active.name}
+                        {displayProfileName(active)}
                         {active.isDefault && (
                           <span className="profile-menu-tag">
                             {t("agents.defaultTag")}
                           </span>
-                        )}
-                        {active.id !== active.name && (
-                          <span className="profile-menu-tag">{active.id}</span>
                         )}
                       </span>
                       <span className="profile-menu-meta">
@@ -181,14 +180,11 @@ export default function ProfileSwitcher({
                           />
                           <span className="profile-menu-info">
                             <span className="profile-menu-name">
-                              {p.name}
+                              {displayProfileName(p)}
                               {p.isDefault && (
                                 <span className="profile-menu-tag">
                                   {t("agents.defaultTag")}
                                 </span>
-                              )}
-                              {p.id !== p.name && (
-                                <span className="profile-menu-tag">{p.id}</span>
                               )}
                               <span
                                 className={`profile-menu-gateway ${

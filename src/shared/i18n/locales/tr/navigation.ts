@@ -10,7 +10,7 @@ export default {
   noChats: "Sohbet yok",
   pinned: "Sabitlenenler",
   discover: "Keşfet",
-  agents: "Profiller",
+  agents: "Ajanlar",
   office: "Ofis",
   models: "Modeller",
   providers: "Modeller",

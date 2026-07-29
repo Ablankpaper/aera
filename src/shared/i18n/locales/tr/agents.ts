@@ -1,28 +1,28 @@
 import enAgents from "../en/agents";
 
 export default {
-  title: "Profiller",
+  title: "Ajanlar",
   subtitle:
-    "Her profil, kendi yapılandırması, belleği ve yetenekleriyle izole bir AgentEra çalışma alanıdır",
+    "Her ajan, kendi yapılandırması, belleği ve yetenekleriyle izole bir AgentEra ortamında çalışır",
   newAgent: "Yeni Ajan",
   namePlaceholder: "Ajan adı (örn. kodcu)",
-  createTitle: "Yeni profil",
+  createTitle: "Yeni ajan",
   nameLabel: "Ajan adı",
   cloneConfig: "Yapılandırma ve API anahtarlarını kopyala",
   cloneFromLabel: "Şuradan kopyala",
   running: "Çalışıyor",
   off: "Kapalı",
   starting: "Başlatılıyor…",
-  createFailed: "Profil oluşturulamadı",
+  createFailed: "Ajan oluşturulamadı",
   creating: "Oluşturuluyor...",
   create: "Oluştur",
-  deleteFailed: "Profil silinemedi",
+  deleteFailed: "Ajan silinemedi",
   active: "Aktif",
   noModel: "Model ayarlanmamış",
   skillsCount: "{{count}} yetenek",
   gatewayRunning: "Gateway çalışıyor",
   gatewayOff: "Gateway kapalı",
-  colProfile: "Profil",
+  colProfile: "Ajan",
   colModel: "Model",
   colStatus: "Durum",
   colActions: "Eylemler",
@@ -33,8 +33,8 @@ export default {
   deleteTitle: "Ajanı sil",
   auto: "Otomatik",
   local: "Yerel",
-  manageProfiles: "Profilleri yönet",
-  switchProfile: "Profili değiştir",
+  manageProfiles: "Ajanları yönet",
+  switchProfile: "Ajanı değiştir",
   defaultTag: "varsayılan",
   sectionWallet: "Wallet",
   walletTitle: "Base wallets",
@@ -73,9 +73,9 @@ export default {
     workspaceSpace: "Çalışma alanı",
     workspaceSpaceTitle: "Çalışma alanı Ajanları",
     workspaceAuthorSubtitle:
-      "Yerel taslaklar oluşturun, değişmez çalışma alanı sürümleri yayımlayın ve bunları yalıtılmış yerel Profillere kurun.",
+      "Yerel taslaklar oluşturun ve değişmez çalışma alanı sürümleri yayımlayın; yerel çalışma ortamı otomatik hazırlanır.",
     workspaceMemberSubtitle:
-      "Onaylı sürümleri yalıtılmış yerel Profillere kurun. Üyeler taslak düzenleyemez veya yayımlayamaz.",
+      "Onaylı sürümleri otomatik hazırlanan yerel çalışma ortamıyla kullanın. Üyeler taslak düzenleyemez veya yayımlayamaz.",
     role: {
       owner: "Sahip",
       admin: "Yönetici",
@@ -102,7 +102,7 @@ export default {
       submittedNotPublished:
         "İncelemeye gönderildi. Hiçbir sürüm yayımlanmadı veya kurulmadı.",
       approvedNotInstalled:
-        "Sürüm onaylandı. Hiçbir çalışan Profile veya Memory verisi değiştirilmedi.",
+        "Sürüm onaylandı. Çalışanların yerel çalışma verileri veya Memory verileri değiştirilmedi.",
       rejectedNotPublished:
         "Gönderim reddedildi. Hiçbir sürüm yayımlanmadı veya kurulmadı.",
       runtimeBoundary:

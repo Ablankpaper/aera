@@ -41,20 +41,20 @@ const auth = {
     existingDescription:
       "Bu cihazda mevcut AgentEra Runtime verileri bulundu. Yerinde bağlayın veya ayrı bir boş alanla başlayın.",
     noUpload:
-      "Her iki seçenek de Memory, oturumlar, dosyalar, beceriler, USER profili veya öğrenme durumunuzu yüklemez, kopyalamaz, birleştirmez ya da yeniden yazmaz.",
+      "Her iki seçenek de Memory, oturumlar, dosyalar, beceriler, USER verileri veya öğrenme durumunuzu yüklemez, kopyalamaz, birleştirmez ya da yeniden yazmaz.",
     useExisting: "Mevcut yerel verileri kullan",
     createNew: "Yeni alan oluştur",
     binding: "Güvenle bağlanıyor…",
     creating: "Boş alan oluşturuluyor…",
     emptyBindingTitle: "Kişisel alanınız hazırlanıyor",
     emptyBindingDescription:
-      "Bu boş yerel Profile, AgentEra hesabınıza bağlanıyor.",
+      "Yerel Ajan çalışma ortamı otomatik olarak hazırlanıyor.",
     connectionBindingTitle: "Bu Runtime bağlantısı güvenceye alınıyor",
     connectionBindingDescription:
       "Uzak veya SSH bağlantısı, oturum açmış AgentEra sahibine bağlanıyor. Ürün tokenları Runtime'a gönderilmez.",
     otherOwnerTitle: "Bu yerel veriler başka bir hesaba ait",
     otherOwnerDescription:
-      "AgentEra bu fiziksel Profile'ı açmaz veya başka hesaba atamaz. Ayrı bir boş alan oluşturun ya da sahibiyle oturum açın.",
+      "AgentEra başka bir hesaba ait yerel Ajan verilerini açmaz veya yeniden atamaz. Ayrı bir boş alan oluşturun ya da sahibiyle oturum açın.",
     remoteOtherOwnerTitle: "Bu Runtime bağlantısı başka bir hesaba ait",
     remoteOtherOwnerDescription:
       "AgentEra önceki sahibin uzak veya SSH bağlantı bağlamını devralmaz.",
@@ -87,7 +87,7 @@ const auth = {
     offlineUntil:
       "İmzalı çevrimdışı erişim {{date}} tarihine kadar geçerlidir.",
     localDataWarning:
-      "Bulut hesabını silmek veya çıkış yapmak yerel Hermes Profile, Memory, oturum, dosya, beceri ya da öğrenme durumunu silmez, taşımaz, yüklemez veya bağını kaldırmaz.",
+      "Bulut hesabını silmek veya çıkış yapmak yerel Ajan verilerini, Memory, oturum, dosya, beceri ya da öğrenme durumunu silmez, taşımaz, yüklemez veya bağını kaldırmaz.",
     rechargeSeparateAccount:
       "Bakiye yükleme bağımsız model API sitesini açar. Hesapları, bakiyeleri, anahtarları, çerezleri ve tokenları AgentEra hesabından ayrıdır.",
     pendingRevocationWarning:

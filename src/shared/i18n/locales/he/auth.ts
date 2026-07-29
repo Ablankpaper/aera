@@ -39,19 +39,19 @@ const auth = {
     existingDescription:
       "נמצאו במכשיר נתוני AgentEra Runtime קיימים. אפשר לקשר אותם במקום או להתחיל במרחב ריק ונפרד.",
     noUpload:
-      "אף אפשרות אינה מעלה, מעתיקה, ממזגת או משכתבת את ה-Memory, ההפעלות, הקבצים, המיומנויות, פרופיל USER או מצב הלמידה.",
+      "אף אפשרות אינה מעלה, מעתיקה, ממזגת או משכתבת את ה-Memory, ההפעלות, הקבצים, המיומנויות, נתוני USER או מצב הלמידה.",
     useExisting: "שימוש בנתונים המקומיים הקיימים",
     createNew: "יצירת מרחב חדש",
     binding: "מקשר באופן מאובטח…",
     creating: "יוצר מרחב ריק…",
     emptyBindingTitle: "מכין את המרחב האישי שלך",
-    emptyBindingDescription: "ה-Profile המקומי הריק מקושר לחשבון AgentEra שלך.",
+    emptyBindingDescription: "סביבת ההפעלה של הסוכן המקומי מוכנה אוטומטית.",
     connectionBindingTitle: "מאבטח את חיבור ה-Runtime",
     connectionBindingDescription:
       "החיבור המרוחק או חיבור SSH מקושר לבעל חשבון AgentEra המחובר. אסימוני המוצר אינם נשלחים ל-Runtime.",
     otherOwnerTitle: "הנתונים המקומיים האלה שייכים לחשבון אחר",
     otherOwnerDescription:
-      "AgentEra לא יפתח ולא יקצה מחדש את ה-Profile הפיזי הזה. יש ליצור מרחב ריק נפרד או להיכנס כבעלים שלו.",
+      "AgentEra לא יפתח ולא יקצה מחדש נתוני סוכן מקומי השייכים לחשבון אחר. יש ליצור מרחב ריק נפרד או להיכנס כבעלים שלו.",
     remoteOtherOwnerTitle: "חיבור ה-Runtime הזה שייך לחשבון אחר",
     remoteOtherOwnerDescription:
       "AgentEra לא יירש את הקשר החיבור המרוחק או SSH של הבעלים הקודם.",
@@ -83,7 +83,7 @@ const auth = {
     deviceId: "מכשיר",
     offlineUntil: "הגישה החתומה הלא מקוונת תקפה עד {{date}}.",
     localDataWarning:
-      "מחיקת חשבון הענן או יציאה אינן מוחקות, מעבירות, מעלות או מנתקות Profiles, Memory, הפעלות, קבצים, מיומנויות או למידת Hermes המקומית.",
+      "מחיקת חשבון הענן או יציאה אינן מוחקות, מעבירות, מעלות או מנתקות נתוני סוכנים מקומיים, Memory, הפעלות, קבצים, מיומנויות או למידת Hermes.",
     rechargeSeparateAccount:
       "הטעינה פותחת אתר API עצמאי; החשבונות, היתרות, המפתחות, העוגיות והאסימונים שלו נפרדים מחשבון AgentEra.",
     pendingRevocationWarning:

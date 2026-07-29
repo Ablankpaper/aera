@@ -53,6 +53,7 @@ type Harness = {
   cloudBinary: string;
   postgresPort: number;
   redisPort: number;
+  minioPort: number;
   composeProject: string;
   captureServer: Server;
   captureOrigin: string;
@@ -247,6 +248,7 @@ function composeEnvironment(current: Harness): NodeJS.ProcessEnv {
     ...process.env,
     AERA_CLOUD_POSTGRES_BIND: `127.0.0.1:${current.postgresPort}`,
     AERA_CLOUD_REDIS_BIND: `127.0.0.1:${current.redisPort}`,
+    AERA_CLOUD_MINIO_BIND: `127.0.0.1:${current.minioPort}`,
   };
 }
 
@@ -324,6 +326,7 @@ async function startCloud(current: Harness): Promise<ChildProcess> {
       AGENTERA_CLOUD_PUBLIC_URL: cloudOrigin,
       AGENTERA_CLOUD_DATABASE_URL: `postgres://aera_cloud:aera-cloud-dev-only@127.0.0.1:${current.postgresPort}/aera_cloud?sslmode=disable`,
       AGENTERA_CLOUD_REDIS_ADDR: `127.0.0.1:${current.redisPort}`,
+      AGENTERA_CLOUD_ENCRYPTED_BACKUP_ENDPOINT: `127.0.0.1:${current.minioPort}`,
       AGENTERA_CLOUD_SMS_ENDPOINT: `${current.captureOrigin}/sms`,
       AGENTERA_CLOUD_SMS_API_KEY: "e2e-sms-secret",
       AGENTERA_CLOUD_CAPTCHA_ENDPOINT: `${current.captureOrigin}/captcha`,
@@ -517,6 +520,7 @@ test.beforeAll(async () => {
     cloudBinary: join(root, "aera-cloud"),
     postgresPort: await freePort(),
     redisPort: await freePort(),
+    minioPort: await freePort(),
     composeProject: `agentera-auth-e2e-${process.pid}`,
     captureServer: capture.server,
     captureOrigin: capture.origin,

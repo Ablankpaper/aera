@@ -42,7 +42,7 @@ export default {
   titlePlaceholder: "需要完成什么？",
   fieldBody: "内容（可选）",
   bodyPlaceholder: "上下文、验收条件、链接…",
-  fieldAssignee: "指派代理",
+  fieldAssignee: "指派智能体",
   assigneeNone: "— 分类（不指派）",
   fieldPriority: "优先级",
   priorityNormal: "普通 (0)",

@@ -80,11 +80,19 @@ function webGLAvailable(): boolean {
   }
 }
 
-function AilaFallback(): React.JSX.Element {
+function AilaLoadingState(): React.JSX.Element {
   return (
-    <div className="aila-3d-fallback" aria-hidden="true">
-      <div className="aila-3d-fallback-halo" />
-      <div className="aila-3d-fallback-core">A</div>
+    <div className="aila-3d-loading" role="status">
+      <span className="aila-3d-loading-ring" aria-hidden="true" />
+      <span className="sr-only">正在加载艾拉 3D 形象</span>
+    </div>
+  );
+}
+
+function AilaUnavailable(): React.JSX.Element {
+  return (
+    <div className="aila-3d-unavailable" role="status">
+      需要启用 3D 图形加速以显示艾拉形象。
     </div>
   );
 }
@@ -98,9 +106,10 @@ export default function Aila3DModel(): React.JSX.Element {
     <div
       className="aila-3d-model"
       data-testid="aila-3d-model"
-      data-renderer={available ? "three-glb" : "fallback"}
+      data-renderer={available ? "three-glb" : "unavailable"}
       data-model-ready={ready ? "true" : "false"}
       aria-label="艾拉 3D 模型"
+      aria-busy={available && !ready}
     >
       {available ? (
         <>
@@ -132,10 +141,10 @@ export default function Aila3DModel(): React.JSX.Element {
               <AilaAsset onReady={handleReady} />
             </Suspense>
           </Canvas>
-          {!ready && <AilaFallback />}
+          {!ready && <AilaLoadingState />}
         </>
       ) : (
-        <AilaFallback />
+        <AilaUnavailable />
       )}
     </div>
   );

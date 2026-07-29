@@ -47,7 +47,6 @@ export type Severity = "error" | "warning" | "info";
 export type IssueCode =
   | "API_SERVER_KEY_NON_CANONICAL"
   | "API_SERVER_KEY_MULTIPLE_VALUES"
-  | "EMPTY_API_SERVER_KEY"
   | "MODEL_KEY_MISSING"
   | "UI_RUNTIME_ENVKEY_MISMATCH"
   | "NON_ASCII_CREDENTIAL"
@@ -159,13 +158,12 @@ export function autoFixIssue(
  * just surfaces it so users see it happened (and re-fires if the auto
  * migration failed for some reason).
  *
- * Vault-aware: a `command` provider with `API_SERVER_KEY` configured in
- * the vault satisfies the "is the key set?" check. We still surface
- * the .env view (so a user with a value in BOTH .env and the vault can
- * see the .env one for migration purposes) but we do NOT fire the
- * `EMPTY_API_SERVER_KEY` warning when the provider has the key — that
- * warning would push the user to write the key back into .env, which
- * defeats the point of vault-only mode.
+ * This check only reports conflicting or non-canonical values. An absent
+ * `API_SERVER_KEY` is not a model/chat readiness failure: Dashboard chat uses
+ * its own ephemeral session token, while the legacy gateway calls
+ * `ensureLocalApiServerKey()` in Main immediately before spawn. Reporting a
+ * missing value here created a second Renderer-owned repair path and a false
+ * "local connection not ready" banner after otherwise-successful replies.
  */
 function checkApiServerKeyPlacement(profile?: string): ConfigHealthIssue[] {
   const issues: ConfigHealthIssue[] = [];
@@ -175,11 +173,6 @@ function checkApiServerKeyPlacement(profile?: string): ConfigHealthIssue[] {
   const envKey = (env.API_SERVER_KEY ?? "").trim();
   const topLevel = (getConfigValue("API_SERVER_KEY", profile) ?? "").trim();
   const nested = (getConfigValue("api_server.token", profile) ?? "").trim();
-  // Fully-resolved view (process.env > .env > provider) — a vault-only user
-  // has a non-empty value here even when envKey is empty.
-  const resolved = resolvedSecretMap(profile);
-  const resolvedKey = (resolved.API_SERVER_KEY ?? "").trim();
-
   // Multiple values: if two or more non-empty locations disagree, that's
   // ambiguous and the user has to resolve which one wins. Compare the
   // .env view against config.yaml — a vault-only user is a single-value
@@ -226,31 +219,6 @@ function checkApiServerKeyPlacement(profile?: string): ConfigHealthIssue[] {
       fixLocation: ".env",
       context: { source },
     });
-  }
-
-  // Empty: no key in any checked location AND the gateway is configured
-  // to require one. Skip if the vault (via the secrets provider) already
-  // has the key — for a vault-only user, the key IS configured and
-  // writing it back to .env would defeat the vault-first workflow.
-  // We can't auto-fix this — the user has to provide a secret.
-  if (!envKey && !topLevel && !nested && !resolvedKey) {
-    // Only flag if a gateway run.py / api_server is actually configured.
-    // For a fresh install with no setup yet, this would be noise.
-    const configExists = existsSync(configFile);
-    if (configExists) {
-      issues.push({
-        code: "EMPTY_API_SERVER_KEY",
-        severity: "warning",
-        message:
-          "No API_SERVER_KEY is set — chat will fail because the AgentEra Runtime gateway requires auth.",
-        detail:
-          "API_SERVER_KEY is mandatory for AgentEra Runtime API access. " +
-          "Set it in .env (or under Settings → Providers) to authenticate requests.",
-        locations: [envFile],
-        autoFixable: false,
-        fixLocation: "setup",
-      });
-    }
   }
 
   return issues;

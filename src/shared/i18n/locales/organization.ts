@@ -168,7 +168,7 @@ export const organizationEn = {
     description:
       "Enterprise policy and membership are active. Organization Agent authoring and installation are not enabled in this version.",
     boundary:
-      "Your existing local Hermes Profiles, Memory, conversations, and private learning are unchanged.",
+      "Your existing local Agents, Memory, conversations, and private learning are unchanged.",
   },
 } as const;
 
@@ -338,8 +338,7 @@ export const organizationZhCN = {
     title: "企业 Agent 将在下一阶段开放",
     description:
       "企业成员与策略已生效，但当前版本尚未开放企业 Agent 的创建、发布和安装。",
-    boundary:
-      "现有本地 Hermes Profile、Memory、会话和私有学习成果不会发生任何变化。",
+    boundary: "现有本地智能体、Memory、会话和私有学习成果不会发生任何变化。",
   },
 } as const;
 
@@ -400,7 +399,6 @@ export const organizationZhTW = {
     title: "企業 Agent 將在下一階段開放",
     description:
       "企業成員與策略已生效，但目前版本尚未開放企業 Agent 的建立、發佈和安裝。",
-    boundary:
-      "現有本機 Hermes Profile、Memory、對話和私有學習成果不會發生任何變化。",
+    boundary: "現有本機智慧體、Memory、對話和私有學習成果不會發生任何變化。",
   },
 } as const;

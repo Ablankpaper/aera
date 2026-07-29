@@ -86,6 +86,17 @@ function draft(): AgentDraftDetail {
   };
 }
 
+function publishedDraft(): AgentDraftDetail {
+  return {
+    ...draft(),
+    publishedRevision: {
+      revision: 1,
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+    },
+  };
+}
+
 function definition(): AgenteraAgentDefinitionSummary {
   return {
     id: DEFINITION_ID,
@@ -308,43 +319,36 @@ describe("AgentControlPanel", () => {
     ).toBeNull();
   });
 
-  it("shows a true My Agents empty state while retaining legacy Profiles in advanced management", async () => {
+  it("presents an existing local runtime only as a ready Agent", async () => {
     installAPI({
       listDefinitions: vi.fn(async () => success([])),
     });
-    const onEditProfile = vi.fn();
     const onChatWithProfile = vi.fn();
     render(
       <AgentControlPanel
         profiles={[{ id: "default", name: "Default" }]}
         advancedOpenByDefault={false}
-        onEditProfile={onEditProfile}
         onChatWithProfile={onChatWithProfile}
       />,
     );
 
-    expect(await screen.findByText("agents.hub.noPersonalAgents")).toBeTruthy();
+    const grid = await screen.findByTestId("personal-agent-grid");
+    const card = within(grid).getByText("Default").closest("button");
+    expect(card).toBeTruthy();
+    expect(screen.queryByTestId("local-runtime-profiles")).toBeNull();
+    expect(screen.queryByText("agents.legacyTitle")).toBeNull();
+
+    fireEvent.click(card!);
+    expect(await screen.findByRole("dialog", { name: "Default" })).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "agents.hub.createAgent" }),
-    ).toBeEnabled();
-    expect(screen.queryByTestId("personal-agent-grid")).toBeNull();
+      screen.queryByRole("button", { name: "agents.hub.editAppearance" }),
+    ).toBeNull();
 
     fireEvent.click(
-      screen.getByRole("button", { name: /agents.hub.advancedTitle/ }),
-    );
-    const profileList = await screen.findByTestId("local-runtime-profiles");
-    expect(within(profileList).getByText("Default")).toBeTruthy();
-    fireEvent.click(
-      within(profileList).getByRole("button", {
-        name: "agents.hub.editAppearance",
-      }),
-    );
-    fireEvent.click(
-      within(profileList).getByRole("button", {
+      screen.getByRole("button", {
         name: "agents.hub.useAgent",
       }),
     );
-    expect(onEditProfile).toHaveBeenCalledWith("default");
     expect(onChatWithProfile).toHaveBeenCalledWith("default");
   });
 
@@ -393,6 +397,32 @@ describe("AgentControlPanel", () => {
     expect(
       screen.queryByRole("button", { name: "agents.hub.createAgent" }),
     ).toBeNull();
+  });
+
+  it("shows a published Agent as usable even before the catalog refresh catches up", async () => {
+    installAPI({
+      listDrafts: vi.fn(async () => success([publishedDraft() as AgentDraft])),
+      listDefinitions: vi.fn(async () => success([])),
+    });
+    render(<AgentControlPanel profiles={[]} />);
+
+    fireEvent.click(
+      (await screen.findByText("Workspace Research Agent")).closest("button")!,
+    );
+    const detailDialog = await screen.findByRole("dialog", {
+      name: "Workspace Research Agent",
+    });
+    expect(detailDialog).toHaveTextContent("agents.hub.published");
+    expect(
+      within(detailDialog).getByRole("button", {
+        name: "agents.hub.useAgent",
+      }),
+    ).toBeEnabled();
+    expect(
+      within(detailDialog).getByRole("button", {
+        name: "agents.control.edit",
+      }),
+    ).toBeEnabled();
   });
 
   it("loads and applies a managed official update only through the official API", async () => {
@@ -495,6 +525,9 @@ describe("AgentControlPanel", () => {
       expect(
         screen.getByRole("button", { name: "agents.control.newAgent" }),
       ).toBeEnabled();
+      fireEvent.click(
+        screen.getByText("Workspace Research Agent").closest("button")!,
+      );
       expect(
         screen.getByRole("button", { name: "agents.control.edit" }),
       ).toBeEnabled();
@@ -531,7 +564,7 @@ describe("AgentControlPanel", () => {
       within(personalGrid).getByText("Research Agent").closest("button")!,
     );
     expect(
-      screen.getByRole("button", { name: "agents.hub.installAgent" }),
+      screen.getByRole("button", { name: "agents.hub.useAgent" }),
     ).toBeEnabled();
   });
 
@@ -541,6 +574,7 @@ describe("AgentControlPanel", () => {
     ["auditor", false, true, false],
     ["member", false, false, true],
   ] as const)(
+    // @lat: [[agentera-organizations#AgentEra Organization and Organization Agent V1#Desktop product context]]
     "renders Organization role %s with author=%s history=%s install=%s",
     async (role, author, history, install) => {
       const api = installAPI({
@@ -556,6 +590,11 @@ describe("AgentControlPanel", () => {
       });
       render(<AgentControlPanel profiles={[]} />);
 
+      fireEvent.click(
+        await screen.findByRole("tab", {
+          name: "agents.hub.enterpriseTab",
+        }),
+      );
       expect(
         await screen.findByRole("heading", {
           name: "agents.control.organization.title",
@@ -569,11 +608,12 @@ describe("AgentControlPanel", () => {
       expect(
         screen.queryByText("agents.control.organization.reviewTitle") !== null,
       ).toBe(history);
-      expect(
-        screen.queryAllByRole("button", {
-          name: "agents.control.install",
-        }).length > 0,
-      ).toBe(install);
+      fireEvent.click(screen.getByText("Research Agent").closest("button")!);
+      const useButton = screen.getByRole("button", {
+        name: "agents.hub.useAgent",
+      });
+      expect(useButton).toBeTruthy();
+      expect(useButton).toHaveProperty("disabled", !install);
       expect(api.listDrafts.mock.calls.length > 0).toBe(author);
       expect(api.listOrganizationSubmissions.mock.calls.length > 0).toBe(
         history,
@@ -598,6 +638,11 @@ describe("AgentControlPanel", () => {
     });
     render(<AgentControlPanel profiles={[]} />);
 
+    fireEvent.click(
+      await screen.findByRole("tab", {
+        name: "agents.hub.enterpriseTab",
+      }),
+    );
     expect(
       (await screen.findAllByText("agents.control.organization.cachedReadOnly"))
         .length,
@@ -613,7 +658,7 @@ describe("AgentControlPanel", () => {
       }),
     ).toBeNull();
     expect(
-      screen.queryByRole("button", { name: "agents.control.install" }),
+      screen.queryByRole("button", { name: "agents.hub.useAgent" }),
     ).toBeNull();
     expect(api.listDefinitions).not.toHaveBeenCalled();
     expect(api.listOrganizationSubmissions).not.toHaveBeenCalled();
@@ -630,20 +675,16 @@ describe("AgentControlPanel", () => {
           }),
         ),
       ),
-      listInstallations: vi.fn(async () =>
-        success([installation("pending"), installation("active")]),
-      ),
+      listInstallations: vi.fn(async () => success([installation("active")])),
     });
     render(<AgentControlPanel profiles={[]} />);
 
-    const promote = await screen.findByRole("button", {
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    const promote = screen.getByRole("button", {
       name: "agents.control.experience.promoteLocalExperience",
     });
-    expect(
-      screen.getAllByRole("button", {
-        name: "agents.control.experience.promoteLocalExperience",
-      }),
-    ).toHaveLength(1);
     expect(api.listEligibleExperienceSkills).not.toHaveBeenCalled();
     fireEvent.click(promote);
 
@@ -729,7 +770,10 @@ describe("AgentControlPanel", () => {
     render(<AgentControlPanel profiles={[]} />);
 
     fireEvent.click(
-      await screen.findByRole("button", {
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
         name: "agents.control.experience.promoteLocalExperience",
       }),
     );
@@ -746,6 +790,86 @@ describe("AgentControlPanel", () => {
           name: "agents.control.experience.promotionTitle",
         }),
       ).toBeNull(),
+    );
+  });
+
+  // @lat: [[agentera-agent-control-plane#AgentEra Agent control plane V1#Trusted Workspace Agent context#Context-only refresh]]
+  it("keeps the create-and-publish workflow open across same-context state invalidations", async () => {
+    const current = controlState();
+    const created = draft();
+    let notify: (() => void) | null = null;
+    let completeCreate:
+      | ((result: AgenteraAgentControlResult<AgentDraftDetail>) => void)
+      | null = null;
+    const api = installAPI({
+      getState: vi.fn(async () => success(current)),
+      listDrafts: vi.fn(async () => success([])),
+      listDefinitions: vi.fn(async () => success([])),
+      createDraft: vi.fn(
+        () =>
+          new Promise<AgenteraAgentControlResult<AgentDraftDetail>>(
+            (resolve) => {
+              completeCreate = resolve;
+            },
+          ),
+      ),
+      preparePublication: vi.fn(async () =>
+        success({
+          publicationHandle: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          draftId: created.id,
+          revision: created.revision,
+          targetScope: "USER" as const,
+          assetCounts: { skill: 0, sop: 0, knowledge: 0 },
+          totalBytes: 0,
+        }),
+      ),
+      confirmPublication: vi.fn(async () =>
+        success({
+          draftId: created.id,
+          revision: created.revision,
+          definitionId: DEFINITION_ID,
+          versionId: VERSION_ID,
+          versionNumber: 1,
+          contentDigest: "b".repeat(64),
+          publishedAt: "2026-07-20T01:00:00.000Z",
+          replayed: false,
+        }),
+      ),
+      onStateChanged: vi.fn((listener) => {
+        notify = () => listener(current);
+        return () => undefined;
+      }),
+    });
+    render(<AgentControlPanel profiles={[]} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "agents.control.newAgent",
+      }),
+    );
+    fireEvent.change(screen.getByLabelText("agents.control.name"), {
+      target: { value: created.displayName },
+    });
+    fireEvent.change(screen.getByLabelText("agents.control.systemPrompt"), {
+      target: { value: created.manifest.identity.systemPrompt },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.control.publish" }),
+    );
+    await waitFor(() => expect(api.createDraft).toHaveBeenCalledTimes(1));
+
+    await act(async () => notify?.());
+    expect(
+      screen.getByRole("dialog", {
+        name: "agents.control.newDraftTitle",
+      }),
+    ).toBeTruthy();
+
+    await act(async () => completeCreate?.(success(created)));
+    await waitFor(() =>
+      expect(api.confirmPublication).toHaveBeenCalledWith(
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      ),
     );
   });
 
@@ -775,6 +899,9 @@ describe("AgentControlPanel", () => {
     expect(
       screen.getByRole("button", { name: "agents.control.newAgent" }),
     ).toBeDisabled();
+    fireEvent.click(
+      screen.getByText("Workspace Research Agent").closest("button")!,
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "agents.control.view" }),
     );
@@ -844,27 +971,55 @@ describe("AgentControlPanel", () => {
     },
   );
 
-  it("shows pending retry and archives without deleting local Profile data", async () => {
+  it("retries a pending Agent with an automatically prepared local runtime", async () => {
     const api = installAPI({
-      listInstallations: vi.fn(async () =>
-        success([installation("pending"), installation("active")]),
+      listInstallations: vi.fn(async () => success([installation("pending")])),
+      retryPendingInstallation: vi.fn(async () =>
+        success(installation("active")),
       ),
+    });
+    render(<AgentControlPanel profiles={[]} />);
+
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.control.retryAgent" }),
+    );
+    await waitFor(() =>
+      expect(api.retryPendingInstallation).toHaveBeenCalledWith({
+        id: INSTALLATION_ID,
+        target: {
+          kind: "fresh",
+          profileName: "Research Agent",
+        },
+      }),
+    );
+    expect(
+      screen.queryByRole("dialog", { name: "agents.control.retryTitle" }),
+    ).toBeNull();
+  });
+
+  it("archives an active Agent without exposing or deleting its local runtime", async () => {
+    const api = installAPI({
+      listInstallations: vi.fn(async () => success([installation("active")])),
       archiveInstallation: vi.fn(async () => success(installation("active"))),
     });
     render(
-      <AgentControlPanel profiles={[{ id: "default", name: "Default" }]} />,
+      <AgentControlPanel
+        profiles={[
+          {
+            id: "research-runtime",
+            name: "Research Agent",
+            agentInstallationId: INSTALLATION_ID,
+          },
+        ]}
+      />,
     );
 
     fireEvent.click(
-      await screen.findByRole("button", { name: "agents.control.retry" }),
+      (await screen.findByText("Research Agent")).closest("button")!,
     );
-    expect(
-      screen.getByRole("dialog", { name: "agents.control.retryTitle" }),
-    ).toBeTruthy();
-    fireEvent.click(
-      screen.getByRole("button", { name: "agents.control.cancel" }),
-    );
-
     fireEvent.click(
       screen.getByRole("button", { name: "agents.control.archive" }),
     );

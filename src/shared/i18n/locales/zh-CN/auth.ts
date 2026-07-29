@@ -54,13 +54,13 @@ const auth = {
     binding: "正在安全绑定…",
     creating: "正在创建空白空间…",
     emptyBindingTitle: "正在准备个人空间",
-    emptyBindingDescription: "正在将此空白本地 Profile 绑定到当前本地空间。",
+    emptyBindingDescription: "正在自动准备本地智能体运行环境。",
     connectionBindingTitle: "正在保护此 Runtime 连接",
     connectionBindingDescription:
       "正在把远程或 SSH 连接绑定到当前 AgentEra 所有者，产品 Token 不会发送给 Runtime。",
     otherOwnerTitle: "此本地数据属于另一个账户",
     otherOwnerDescription:
-      "AgentEra 不会打开或重新分配此物理 Profile。请创建独立空白空间，或使用其所有者账户登录。",
+      "AgentEra 不会打开或重新分配其他账户的本地智能体数据。请创建独立空白空间，或使用其所有者账户登录。",
     remoteOtherOwnerTitle: "此 Runtime 连接属于另一个账户",
     remoteOtherOwnerDescription:
       "AgentEra 不会继承上一位所有者的远程或 SSH 连接上下文。",
@@ -96,7 +96,7 @@ const auth = {
     deviceId: "设备",
     offlineUntil: "签名离线授权有效至 {{date}}。",
     localDataWarning:
-      "注销云端账户或退出登录都不会删除、移动、上传或解绑本地 Hermes Profile、Memory、会话、文件、技能及自学习状态。",
+      "注销云端账户或退出登录都不会删除、移动、上传或解绑本地智能体数据、Memory、会话、文件、技能及自学习状态。",
     rechargeSeparateAccount:
       "充值会打开独立的模型 API 网站；该网站的账户、余额、API Key、Cookie 与 Token 均不和 AgentEra 账户共用。",
     pendingRevocationWarning:

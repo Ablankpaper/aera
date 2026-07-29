@@ -10,7 +10,6 @@ import {
   patchRun,
   isScratchRun,
   openSessionRunTransition,
-  selectProfileRunTransition,
   findRunBySession,
   cycleRunId,
   runIdAtOrdinal,
@@ -513,21 +512,6 @@ function Layout({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [sessionsModalOpen]);
 
-  const handleSelectProfile = useCallback(
-    (name: string) => {
-      // Selecting an agent is administrative: switch the active profile (the
-      // component already started its gateway via setActiveProfile). Existing
-      // chats remain on their original profile, but the visible chat must move
-      // to a scratch run for the selected profile so the footer and transport
-      // never point at different agents.
-      setActiveProfile(name);
-      const next = selectProfileRunTransition(runs, activeRunId, name);
-      setRuns(next.runs);
-      setActiveRunId(next.activeRunId);
-    },
-    [runs, activeRunId],
-  );
-
   // The "Chat" affordance: start (or reuse a blank) conversation with an agent
   // and show it. This is the only path from the profile list that opens a chat.
   const handleChatWithProfile = useCallback(
@@ -968,7 +952,6 @@ function Layout({
             ) : (
               <Agents
                 activeProfile={activeProfile}
-                onSelectProfile={handleSelectProfile}
                 onChatWith={handleChatWithProfile}
               />
             )}

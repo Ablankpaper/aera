@@ -552,6 +552,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     runtimeActivity,
     getMainWindow: () => mainWindow,
     notifyConnectionConfigChanged,
+    notifyRuntimeSnapshotChanged,
     notifyModelLibraryChanged,
     notifyCustomProvidersChanged,
     openExternalUrl,
@@ -664,6 +665,10 @@ function notifyConnectionConfigChanged(): void {
     "connection-config-changed",
     getPublicConnectionConfig(),
   );
+}
+
+function notifyRuntimeSnapshotChanged(): void {
+  mainWindow?.webContents.send("runtime-snapshot-changed");
 }
 
 function notifyModelLibraryChanged(): void {

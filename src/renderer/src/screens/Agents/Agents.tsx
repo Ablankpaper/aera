@@ -1,8 +1,4 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { X } from "../../assets/icons";
-import { AppModal, AppModalTitle } from "../../components/modal/AppModal";
-import { useI18n } from "../../components/useI18n";
-import { useProfileModal } from "../../components/profile/ProfileModalContext";
 import type {
   AgentSyncResult,
   AgentSyncStatus,
@@ -29,25 +25,11 @@ interface ProfileInfo {
 
 interface AgentsProps {
   activeProfile: string;
-  onSelectProfile: (name: string) => void;
   onChatWith: (name: string) => void;
 }
 
-function Agents({
-  activeProfile,
-  onSelectProfile,
-  onChatWith,
-}: AgentsProps): React.JSX.Element {
-  const { t } = useI18n();
-  const { openProfile } = useProfileModal();
+function Agents({ activeProfile, onChatWith }: AgentsProps): React.JSX.Element {
   const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
-  const [showCreate, setShowCreate] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [cloneConfig, setCloneConfig] = useState(true);
-  // Source profile to clone config/keys/skills from when `cloneConfig` is on.
-  const [cloneSource, setCloneSource] = useState("default");
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState("");
   const agentProfiles = useMemo(
     () =>
       profiles.map((profile) => ({
@@ -65,9 +47,10 @@ function Agents({
     [profiles],
   );
 
-  const loadProfiles = useCallback(async (): Promise<void> => {
+  const loadProfiles = useCallback(async (): Promise<ProfileInfo[]> => {
     const list = await window.hermesAPI.listProfiles();
     setProfiles(list);
+    return list;
   }, []);
 
   useEffect(() => {
@@ -75,8 +58,7 @@ function Agents({
   }, [loadProfiles]);
 
   // Cloud sync: null while the signed-in state is still loading.
-  const [syncStatus, setSyncStatus] = useState<AgentSyncStatus | null>(null);
-  const [syncing, setSyncing] = useState(false);
+  const [, setSyncStatus] = useState<AgentSyncStatus | null>(null);
   const autoSyncedRef = useRef(false);
 
   const refreshSyncStatus = useCallback(async (): Promise<void> => {
@@ -88,7 +70,6 @@ function Agents({
   }, []);
 
   const runSync = useCallback(async (): Promise<void> => {
-    setSyncing(true);
     try {
       const result = await window.hermesAPI.syncAgents();
       setSyncStatus((s) => (s ? { ...s, lastResult: result } : s));
@@ -98,7 +79,6 @@ function Agents({
     } catch {
       // Surfaced through lastResult on the next status refresh.
     } finally {
-      setSyncing(false);
       void refreshSyncStatus();
     }
   }, [loadProfiles, refreshSyncStatus]);
@@ -131,91 +111,6 @@ function Agents({
     });
   }, [loadProfiles]);
 
-  const syncSummary = useCallback(
-    (result: AgentSyncResult): string => {
-      if (result.status === "unauthorized") return t("agents.syncUnauthorized");
-      if (result.status === "error") {
-        return result.error || t("agents.syncFailed");
-      }
-      const counts = { pushed: 0, pulled: 0, created: 0, errors: 0 };
-      for (const outcome of result.outcomes) {
-        if (
-          outcome.action === "pushed" ||
-          outcome.action === "created-remote"
-        ) {
-          counts.pushed += 1;
-        } else if (outcome.action === "pulled") {
-          counts.pulled += 1;
-        }
-        if (outcome.action === "created-local") counts.created += 1;
-        if (outcome.action === "error") counts.errors += 1;
-      }
-      if (counts.errors > 0) {
-        return t("agents.syncErrors", { count: counts.errors });
-      }
-      if (counts.pushed + counts.pulled + counts.created === 0) {
-        return t("agents.syncUpToDate");
-      }
-      return t("agents.syncSummary", counts);
-    },
-    [t],
-  );
-
-  const profileSyncLabel = useMemo(() => {
-    if (!syncStatus) return null;
-    if (!syncStatus.signedIn) return t("agents.syncSignedOut");
-    return syncStatus.lastResult
-      ? syncSummary(syncStatus.lastResult)
-      : (syncStatus.accountLabel ?? t("agents.syncUpToDate"));
-  }, [syncStatus, syncSummary, t]);
-
-  const profileSyncTitle = useMemo(() => {
-    if (!syncStatus) return undefined;
-    if (!syncStatus.signedIn) return t("agents.syncSignedOutHint");
-    return (
-      syncStatus.lastResult?.outcomes
-        .flatMap((outcome) =>
-          outcome.warnings.map((warning) => `${outcome.profile}: ${warning}`),
-        )
-        .join("\n") ||
-      syncStatus.accountLabel ||
-      undefined
-    );
-  }, [syncStatus, t]);
-
-  // Open the create modal, defaulting the clone source to the active profile.
-  const openCreate = useCallback((): void => {
-    setNewName("");
-    setError("");
-    setCloneConfig(true);
-    setCloneSource(activeProfile || "default");
-    setShowCreate(true);
-  }, [activeProfile]);
-
-  function closeCreate(): void {
-    setShowCreate(false);
-    setError("");
-  }
-
-  async function handleCreate(): Promise<void> {
-    const name = newName.trim();
-    if (!name) return;
-    setCreating(true);
-    setError("");
-    const result = await window.hermesAPI.createProfile(
-      name,
-      cloneConfig ? cloneSource : null,
-    );
-    setCreating(false);
-    if (result.success) {
-      setShowCreate(false);
-      setNewName("");
-    } else {
-      setError(result.error || t("agents.createFailed"));
-    }
-    loadProfiles();
-  }
-
   // "Chat" button — make the agent active (starts its gateway) then open a
   // conversation with it. The only path here that starts a chat.
   const handleChatWith = useCallback(
@@ -227,18 +122,27 @@ function Agents({
     [loadProfiles, onChatWith],
   );
 
-  const handleEditProfile = useCallback(
-    (profileId: string): void => {
-      setError("");
-      openProfile(profileId, {
-        onChanged: loadProfiles,
-        onDeleted: (deletedProfileId) => {
-          if (activeProfile === deletedProfileId) onSelectProfile("default");
-          void loadProfiles();
-        },
-      });
+  const handleAgentReady = useCallback(
+    async (installationId: string): Promise<boolean> => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const list = await loadProfiles();
+        const installed = list.find(
+          (profile) => profile.agentInstallationId === installationId,
+        );
+        if (installed) {
+          await window.hermesAPI.setActiveProfile(installed.id);
+          onChatWith(installed.id);
+          return true;
+        }
+        if (attempt < 2) {
+          await new Promise<void>((resolve) => {
+            window.setTimeout(resolve, 75);
+          });
+        }
+      }
+      return false;
     },
-    [activeProfile, loadProfiles, onSelectProfile, openProfile],
+    [loadProfiles, onChatWith],
   );
 
   return (
@@ -246,103 +150,11 @@ function Agents({
       <AgentControlPanel
         profiles={agentProfiles}
         initialTab="official"
-        advancedOpenByDefault={false}
         onChatWithProfile={(profileId) => void handleChatWith(profileId)}
-        onEditProfile={handleEditProfile}
-        onCreateLocalProfile={openCreate}
         onProfilesChanged={loadProfiles}
-        profileSyncLabel={profileSyncLabel}
-        profileSyncTitle={profileSyncTitle}
-        profileSyncEnabled={Boolean(syncStatus?.signedIn)}
-        profileSyncing={syncing}
-        onSyncProfiles={() => void runSync()}
+        onAgentReady={handleAgentReady}
+        modelProfileId={activeProfile}
       />
-
-      <AppModal
-        open={showCreate}
-        onOpenChange={(open) => {
-          if (!open) closeCreate();
-        }}
-        className="agents-create-modal"
-        labelledBy="agents-create-title"
-      >
-        <div className="agents-create-modal-header">
-          <AppModalTitle
-            id="agents-create-title"
-            className="agents-create-modal-title"
-          >
-            {t("agents.createTitle")}
-          </AppModalTitle>
-          <button
-            type="button"
-            className="profile-modal-close"
-            onClick={closeCreate}
-            aria-label={t("common.close")}
-          >
-            <X size={18} />
-          </button>
-        </div>
-        <div className="agents-create-modal-body">
-          <label className="agents-create-field">
-            <span>{t("agents.nameLabel")}</span>
-            <input
-              className="input"
-              placeholder={t("agents.namePlaceholder")}
-              value={newName}
-              onChange={(event) => {
-                setNewName(event.target.value);
-                setError("");
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void handleCreate();
-              }}
-              autoFocus
-            />
-          </label>
-          <label className="agents-create-clone">
-            <input
-              type="checkbox"
-              checked={cloneConfig}
-              onChange={(event) => setCloneConfig(event.target.checked)}
-            />
-            <span>{t("agents.cloneConfig")}</span>
-          </label>
-          {cloneConfig ? (
-            <label className="agents-create-field">
-              <span>{t("agents.cloneFromLabel")}</span>
-              <select
-                className="input"
-                value={cloneSource}
-                onChange={(event) => setCloneSource(event.target.value)}
-              >
-                {profiles.map((profile) => (
-                  <option key={profile.id} value={profile.id}>
-                    {profile.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          {error ? <div className="agents-create-error">{error}</div> : null}
-          <div className="agents-create-modal-actions">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={closeCreate}
-            >
-              {t("common.cancel")}
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => void handleCreate()}
-              disabled={creating || !newName.trim()}
-            >
-              {creating ? t("agents.creating") : t("agents.create")}
-            </button>
-          </div>
-        </div>
-      </AppModal>
     </div>
   );
 }

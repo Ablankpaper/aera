@@ -45,14 +45,13 @@ const auth = {
     binding: "جارٍ الربط بأمان…",
     creating: "جارٍ إنشاء مساحة فارغة…",
     emptyBindingTitle: "جارٍ إعداد مساحتك الشخصية",
-    emptyBindingDescription:
-      "يتم ربط Profile المحلي الفارغ بحساب AgentEra الخاص بك.",
+    emptyBindingDescription: "يتم إعداد بيئة تشغيل الوكيل المحلي تلقائيًا.",
     connectionBindingTitle: "جارٍ تأمين اتصال Runtime",
     connectionBindingDescription:
       "يتم ربط الاتصال البعيد أو SSH بمالك AgentEra المسجل دخوله. لا تُرسل رموز المنتج إلى Runtime.",
     otherOwnerTitle: "هذه البيانات المحلية مملوكة لحساب آخر",
     otherOwnerDescription:
-      "لن يفتح AgentEra هذا الـ Profile الفعلي أو يعيد تعيينه. أنشئ مساحة فارغة منفصلة أو سجّل الدخول بحساب مالكه.",
+      "لن يفتح AgentEra بيانات وكيل محلي تخص حسابًا آخر أو يعيد تعيينها. أنشئ مساحة فارغة منفصلة أو سجّل الدخول بحساب مالكه.",
     remoteOtherOwnerTitle: "اتصال Runtime هذا مملوك لحساب آخر",
     remoteOtherOwnerDescription:
       "لن يرث AgentEra سياق الاتصال البعيد أو SSH للمالك السابق.",
@@ -84,7 +83,7 @@ const auth = {
     deviceId: "الجهاز",
     offlineUntil: "الوصول الموقّع دون اتصال صالح حتى {{date}}.",
     localDataWarning:
-      "حذف الحساب السحابي أو تسجيل الخروج لا يحذف أو ينقل أو يرفع أو يفك ربط Profiles أو Memory أو الجلسات أو الملفات أو المهارات أو حالة تعلّم Hermes المحلية.",
+      "حذف الحساب السحابي أو تسجيل الخروج لا يحذف أو ينقل أو يرفع أو يفك ربط بيانات الوكلاء أو Memory أو الجلسات أو الملفات أو المهارات أو حالة تعلّم Hermes المحلية.",
     rechargeSeparateAccount:
       "يفتح الشحن موقع API النماذج المستقل؛ حساباته وأرصدته ومفاتيحه وملفات Cookie ورموزه منفصلة عن حساب AgentEra.",
     pendingRevocationWarning:

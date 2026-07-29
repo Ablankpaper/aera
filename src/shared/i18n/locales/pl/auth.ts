@@ -41,20 +41,20 @@ const auth = {
     existingDescription:
       "Na tym urządzeniu znaleziono dane AgentEra Runtime. Możesz powiązać je w miejscu lub utworzyć oddzielną pustą przestrzeń.",
     noUpload:
-      "Żadna opcja nie przesyła, nie kopiuje, nie scala ani nie nadpisuje Memory, sesji, plików, umiejętności, profilu USER ani stanu uczenia.",
+      "Żadna opcja nie przesyła, nie kopiuje, nie scala ani nie nadpisuje Memory, sesji, plików, umiejętności, danych USER ani stanu uczenia.",
     useExisting: "Użyj istniejących danych lokalnych",
     createNew: "Utwórz nową przestrzeń",
     binding: "Bezpieczne powiązywanie…",
     creating: "Tworzenie pustej przestrzeni…",
     emptyBindingTitle: "Przygotowywanie przestrzeni osobistej",
     emptyBindingDescription:
-      "Ten pusty lokalny Profile jest wiązany z kontem AgentEra.",
+      "Lokalne środowisko Agenta jest przygotowywane automatycznie.",
     connectionBindingTitle: "Zabezpieczanie połączenia Runtime",
     connectionBindingDescription:
       "Połączenie zdalne lub SSH jest wiązane z zalogowanym właścicielem AgentEra. Tokeny produktu nie są wysyłane do Runtime.",
     otherOwnerTitle: "Te dane lokalne należą do innego konta",
     otherOwnerDescription:
-      "AgentEra nie otworzy ani nie przypisze ponownie tego fizycznego Profile. Utwórz oddzielną pustą przestrzeń lub zaloguj się jako właściciel.",
+      "AgentEra nie otworzy ani nie przypisze ponownie lokalnych danych Agenta należących do innego konta. Utwórz oddzielną pustą przestrzeń lub zaloguj się jako właściciel.",
     remoteOtherOwnerTitle: "To połączenie Runtime należy do innego konta",
     remoteOtherOwnerDescription:
       "AgentEra nie odziedziczy kontekstu zdalnego ani SSH poprzedniego właściciela.",
@@ -86,7 +86,7 @@ const auth = {
     deviceId: "Urządzenie",
     offlineUntil: "Podpisany dostęp offline jest ważny do {{date}}.",
     localDataWarning:
-      "Usunięcie konta w chmurze lub wylogowanie nie usuwa, przenosi, wysyła ani odłącza lokalnych Profiles, Memory, sesji, plików, umiejętności ani nauki Hermes.",
+      "Usunięcie konta w chmurze lub wylogowanie nie usuwa, przenosi, wysyła ani odłącza lokalnych danych Agentów, Memory, sesji, plików, umiejętności ani nauki Hermes.",
     rechargeSeparateAccount:
       "Doładowanie otwiera niezależny serwis API modeli. Jego konta, salda, klucze, cookies i tokeny są oddzielne od AgentEra.",
     pendingRevocationWarning:

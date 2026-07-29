@@ -20,7 +20,7 @@ export default {
   loadError: "تعذر تحميل السجل المجتمعي.",
   retry: "إعادة المحاولة",
   install_other: "إعداد",
-  targetProfile: "يتم التثبيت في الملف الشخصي النشط",
+  targetProfile: "يتم التثبيت في الوكيل النشط",
   actions: {
     install: { setup: "تثبيت", working: "جارٍ التثبيت...", done: "مثبت" },
     connect: { setup: "اتصال", working: "جارٍ الاتصال...", done: "متصل" },

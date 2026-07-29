@@ -1,28 +1,28 @@
 import enAgents from "../en/agents";
 
 export default {
-  title: "プロファイル",
+  title: "エージェント",
   subtitle:
-    "各プロファイルは独立した AgentEra ワークスペースで、固有の設定・メモリ・スキルを持ちます",
+    "各エージェントは独立した AgentEra 環境で、固有の設定・メモリ・スキルを使用します",
   newAgent: "新規エージェント",
   namePlaceholder: "エージェント名（例：coder）",
-  createTitle: "新規プロファイル",
+  createTitle: "新規エージェント",
   nameLabel: "エージェント名",
   cloneConfig: "設定と API キーを複製",
   cloneFromLabel: "複製元",
   running: "稼働中",
   off: "停止",
   starting: "起動中…",
-  createFailed: "プロファイル作成に失敗しました",
+  createFailed: "エージェント作成に失敗しました",
   creating: "作成中...",
   create: "作成",
-  deleteFailed: "プロファイルの削除に失敗しました",
+  deleteFailed: "エージェントの削除に失敗しました",
   active: "稼働中",
   noModel: "モデル未設定",
   skillsCount: "{{count}} スキル",
   gatewayRunning: "ゲートウェイ稼働中",
   gatewayOff: "ゲートウェイ停止",
-  colProfile: "プロファイル",
+  colProfile: "エージェント",
   colModel: "モデル",
   colStatus: "ステータス",
   colActions: "操作",
@@ -70,9 +70,9 @@ export default {
     workspaceSpace: "ワークスペース",
     workspaceSpaceTitle: "ワークスペース Agent",
     workspaceAuthorSubtitle:
-      "ローカル下書きを作成し、不変のワークスペース版を公開して、分離されたローカル Profile にインストールします。",
+      "ローカル下書きを作成し、不変のワークスペース版を公開します。実行環境は自動的に準備されます。",
     workspaceMemberSubtitle:
-      "承認済みのワークスペース版を分離されたローカル Profile にインストールできます。Member は編集・公開できません。",
+      "承認済みのワークスペース版を使用できます。ローカル実行環境は自動的に準備され、Member は編集・公開できません。",
     role: {
       owner: "オーナー",
       admin: "管理者",
@@ -99,7 +99,7 @@ export default {
       submittedNotPublished:
         "レビューに提出しました。バージョンは公開もインストールもされていません。",
       approvedNotInstalled:
-        "バージョンを承認しました。従業員の Profile や Memory は変更されていません。",
+        "バージョンを承認しました。従業員のローカル実行データや Memory は変更されていません。",
       rejectedNotPublished:
         "提出を却下しました。バージョンは公開もインストールもされていません。",
       runtimeBoundary:

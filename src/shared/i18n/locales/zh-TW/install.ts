@@ -20,7 +20,7 @@ export default {
   confirmBundledRuntime:
     "AgentEra Runtime 已內建於桌面應用，將直接在本機完成準備。",
   confirmOfflinePreparation:
-    "首次準備不會從 GitHub 下載 Hermes，也不會修改你的 Profile、Memory、工作階段或已學習 Skills。",
+    "首次準備不會從 GitHub 下載 Hermes，也不會修改你的智慧體資料、Memory、工作階段或已學習 Skills。",
   confirmPrepareBtn: "準備 Runtime",
   useExistingBtn: "使用現有外部 Runtime",
   useExistingHint:

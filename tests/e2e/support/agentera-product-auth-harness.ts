@@ -526,25 +526,15 @@ export async function authenticateNewProductAccount(
     throw new Error("AgentEra E2E account phone is invalid.");
   }
   const authGate = desktopPage.locator('[data-testid="screen-auth"]');
-  const guestLogin = desktopPage.locator(".agentera-guest-login");
-  await expect(authGate.or(guestLogin)).toBeVisible();
-  if (await guestLogin.isVisible()) {
-    const startupModelPrompt = desktopPage.locator(".startup-model-prompt");
-    await startupModelPrompt
-      .waitFor({ state: "visible", timeout: 2_000 })
-      .catch(() => undefined);
-    if (await startupModelPrompt.isVisible()) {
-      await startupModelPrompt.locator(".btn-secondary").click();
-    }
-  }
+  await expect(authGate).toBeVisible();
+  const loginButton = authGate.locator(".agentera-gate-primary");
+  await expect(loginButton).toBeVisible();
+  await expect(loginButton).toBeEnabled();
   const authorizationURL = await captureExternalURL(app, () =>
-    authGate
-      .isVisible()
-      .then((visible) =>
-        visible
-          ? desktopPage.locator(".agentera-gate-primary").click()
-          : guestLogin.click(),
-      ),
+    // Four-client organization tests intentionally keep prior Electron
+    // devices alive. After visibility/enabled checks, force avoids a
+    // redundant scroll/actionability pass stalling behind those renderers.
+    loginButton.click({ force: true }),
   );
   expect(new URL(authorizationURL).origin).toBe(productAuthCloudOrigin);
 

@@ -6,7 +6,7 @@ export default {
   newChat: "محادثة جديدة",
   sessions: "الجلسات",
   discover: "اكتشف",
-  agents: "الملفات الشخصية",
+  agents: "الوكلاء",
   office: "المكتب",
   models: "النماذج",
   providers: "النماذج",

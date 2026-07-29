@@ -21,7 +21,7 @@ export default {
   loadError: "Topluluk kayıt defteri yüklenemedi.",
   retry: "Yeniden Dene",
   install_other: "Kur",
-  targetProfile: "Aktif profile kurulur",
+  targetProfile: "Etkin ajana kurulur",
   actions: {
     install: { setup: "Yükle", working: "Yükleniyor...", done: "Yüklendi" },
     connect: { setup: "Bağlan", working: "Bağlanıyor...", done: "Bağlandı" },

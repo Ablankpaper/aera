@@ -55,6 +55,7 @@ interface HarnessApi {
   setMessages?: Dispatch<SetStateAction<ChatMessage[]>>;
   setModel?: Dispatch<SetStateAction<string>>;
   setProvider?: Dispatch<SetStateAction<string>>;
+  setRuntimeConnectionRevision?: Dispatch<SetStateAction<number>>;
 }
 
 const activeBadTurn: ActiveTurn = {
@@ -105,11 +106,13 @@ function Harness({
   const [connectionMode, setConnectionMode] = useState<
     "local" | "remote" | "ssh"
   >(initialConnectionMode);
+  const [runtimeConnectionRevision, setRuntimeConnectionRevision] = useState(0);
   const activeTurnRef = useRef<ActiveTurn | null>({ ...activeBadTurn });
   const transport = useDashboardChatTransport({
     activeTurnRef,
     contextFolder: null,
     connectionMode,
+    runtimeConnectionRevision,
     enabled: true,
     fallbackOnUnavailable,
     hermesSessionId,
@@ -138,6 +141,7 @@ function Harness({
       setMessages,
       setModel,
       setProvider,
+      setRuntimeConnectionRevision,
     });
   }, [
     activeTurnRef,
@@ -145,6 +149,7 @@ function Harness({
     messages,
     setConnectionMode,
     setMessages,
+    setRuntimeConnectionRevision,
     transport.sendMessage,
   ]);
 
@@ -387,7 +392,7 @@ describe("useDashboardChatTransport recovery", () => {
     vi.clearAllMocks();
   });
 
-  it("creates a clean runtime after a failed provider turn", async () => {
+  it("keeps a failed provider turn in the same runtime conversation", async () => {
     const requests: Array<{ method: string; params: unknown }> = [];
     let liveModel = "bad-model";
     let liveProvider = "bad-provider";
@@ -471,23 +476,18 @@ describe("useDashboardChatTransport recovery", () => {
           provider: "bad-provider",
         },
       },
-      {
-        method: "session.create",
-        params: {
-          cols: 96,
-          model: "good-model",
-          provider: "good-provider",
-        },
-      },
     ]);
     expect(requests).not.toContainEqual({
-      method: "session.create",
+      method: "session.close",
       params: {
-        cols: 96,
-        messages: [
-          { role: "user", content: "bad provider turn" },
-          { role: "assistant", content: "Error: Invalid API Key" },
-        ],
+        session_id: "live-bad",
+      },
+    });
+    expect(requests).toContainEqual({
+      method: "prompt.submit",
+      params: {
+        session_id: "live-bad",
+        text: "recovery turn",
       },
     });
     expect(window.hermesAPI.recordSessionLocalError).toHaveBeenCalledWith(
@@ -497,13 +497,169 @@ describe("useDashboardChatTransport recovery", () => {
         userContent: "bad provider turn",
       },
     );
-    expect(window.hermesAPI.recordSessionContinuation).toHaveBeenCalledWith(
-      "stored-chat",
-      [
-        { kind: "user", content: "bad provider turn" },
-        { kind: "assistant", content: "", error: "Invalid API Key" },
-      ],
-    );
+    expect(window.hermesAPI.recordSessionContinuation).not.toHaveBeenCalled();
+  });
+
+  it("rebinds the stored conversation after a synchronous provider failure instead of force-creating a chat", async () => {
+    const requests: Array<{ method: string; params: unknown }> = [];
+    let submitCalls = 0;
+    let resumeCalls = 0;
+    dashboardMock.request.mockImplementation(async (method, params) => {
+      requests.push({ method, params });
+      if (method === "session.resume") {
+        resumeCalls += 1;
+        return {
+          session_id: resumeCalls === 1 ? "live-bad" : "live-recovered",
+          resumed: "stored-chat",
+        };
+      }
+      if (method === "session.create") {
+        return {
+          session_id: "unexpected-new-chat",
+          stored_session_id: "unexpected-new-chat",
+        };
+      }
+      if (method === "model.options") {
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      }
+      if (method === "prompt.submit") {
+        submitCalls += 1;
+        if (submitCalls === 1) throw new Error("HTTP 401: Invalid API key");
+      }
+      return {};
+    });
+
+    const api: HarnessApi = {};
+    render(<Harness api={api} hermesSessionId="stored-chat" />);
+
+    await act(async () => {
+      await api.send?.("bad provider turn");
+    });
+
+    await act(async () => {
+      api.activeTurnRef!.current = { ...activeRecoveryTurn };
+      api.setMessages?.((prev) => [
+        ...prev,
+        {
+          id: "u-recovery",
+          role: "user",
+          content: "recovery turn",
+          turnId: "turn-recovery",
+        },
+      ]);
+    });
+
+    await act(async () => {
+      await api.send?.("recovery turn");
+    });
+
+    expect(
+      requests.filter((request) => request.method === "session.create"),
+    ).toHaveLength(0);
+    expect(
+      requests.filter((request) => request.method === "session.resume"),
+    ).toEqual([
+      {
+        method: "session.resume",
+        params: { session_id: "stored-chat", cols: 96 },
+      },
+      {
+        method: "session.resume",
+        params: { session_id: "stored-chat", cols: 96 },
+      },
+    ]);
+    expect(requests).not.toContainEqual({
+      method: "session.close",
+      params: { session_id: "live-bad" },
+    });
+    expect(requests).toContainEqual({
+      method: "prompt.submit",
+      params: { session_id: "live-recovered", text: "recovery turn" },
+    });
+  });
+
+  it("retires a stale dashboard snapshot and resumes the same stored conversation", async () => {
+    const requests: Array<{ method: string; params: unknown }> = [];
+    let resumeCalls = 0;
+    dashboardMock.request.mockImplementation(async (method, params) => {
+      requests.push({ method, params });
+      if (method === "session.resume") {
+        resumeCalls += 1;
+        return {
+          session_id:
+            resumeCalls === 1 ? "live-before-restart" : "live-after-restart",
+          resumed: "stored-chat",
+        };
+      }
+      if (method === "session.create") {
+        return {
+          session_id: "unexpected-new-chat",
+          stored_session_id: "unexpected-new-chat",
+        };
+      }
+      if (method === "model.options") {
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      }
+      return {};
+    });
+
+    const api: HarnessApi = {};
+    render(<Harness api={api} hermesSessionId="stored-chat" />);
+
+    await act(async () => {
+      await api.send?.("turn before credential change");
+    });
+
+    await act(async () => {
+      api.setRuntimeConnectionRevision?.((revision) => revision + 1);
+    });
+    await waitFor(() => expect(dashboardMock.close).toHaveBeenCalled());
+
+    await act(async () => {
+      api.activeTurnRef!.current = {
+        startIndex: api.messages?.length ?? 0,
+        status: "running",
+        turnId: "turn-after-restart",
+        userId: "u-after-restart",
+      };
+      api.setMessages?.((prev) => [
+        ...prev,
+        {
+          id: "u-after-restart",
+          role: "user",
+          content: "turn after credential change",
+          turnId: "turn-after-restart",
+        },
+      ]);
+    });
+
+    await act(async () => {
+      await api.send?.("turn after credential change");
+    });
+
+    expect(dashboardMock.connect).toHaveBeenCalledTimes(2);
+    expect(
+      requests.filter((request) => request.method === "session.create"),
+    ).toHaveLength(0);
+    expect(
+      requests.filter((request) => request.method === "session.resume"),
+    ).toEqual([
+      {
+        method: "session.resume",
+        params: { session_id: "stored-chat", cols: 96 },
+      },
+      {
+        method: "session.resume",
+        params: { session_id: "stored-chat", cols: 96 },
+      },
+    ]);
+    expect(requests).toContainEqual({
+      method: "prompt.submit",
+      params: {
+        session_id: "live-after-restart",
+        text: "turn after credential change",
+      },
+    });
   });
 
   it("discards an in-flight dashboard client after the connection mode changes", async () => {

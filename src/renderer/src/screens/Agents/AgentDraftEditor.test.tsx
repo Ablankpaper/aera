@@ -122,7 +122,10 @@ function installAPI(
 }
 
 describe("AgentDraftEditor", () => {
-  beforeEach(() => vi.restoreAllMocks());
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    Reflect.deleteProperty(window, "hermesAPI");
+  });
 
   it("creates a local draft without making any publication or installation call", async () => {
     const created = detail();
@@ -159,6 +162,126 @@ describe("AgentDraftEditor", () => {
     expectNoRendererOwnershipInput(api.createDraft);
   });
 
+  it("uses configured models and imports identity and capability Markdown without manual paths", async () => {
+    Object.defineProperty(window, "hermesAPI", {
+      configurable: true,
+      value: {
+        getModelConfig: vi.fn(async () => ({
+          provider: "custom",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://api.example.test/v1",
+        })),
+        listModels: vi.fn(async () => [
+          {
+            id: "custom-gpt-56-sol",
+            name: "Production model",
+            provider: "custom",
+            providerLabel: "Private gateway",
+            model: "gpt-5.6-sol",
+            baseUrl: "https://api.example.test/v1",
+            createdAt: 1,
+          },
+        ]),
+      },
+    });
+    const created = detail();
+    const api = installAPI({
+      createDraft: vi.fn(async () => success(created)),
+    });
+    render(
+      <AgentDraftEditor
+        open
+        draft={null}
+        modelProfileId="default"
+        onClose={() => undefined}
+        onSaved={() => undefined}
+        onPublished={() => undefined}
+        onRequestInstall={() => undefined}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("option", {
+          name: "Production model · Private gateway",
+        }),
+      ).toBeTruthy(),
+    );
+    const identityFile = new File(
+      ["# Video Producer\nYou plan short-form product videos."],
+      "video-producer.md",
+      { type: "text/markdown" },
+    );
+    Object.defineProperty(identityFile, "text", {
+      value: async () =>
+        "# Video Producer\nYou plan short-form product videos.",
+    });
+    fireEvent.change(screen.getByLabelText("agents.control.identityUpload"), {
+      target: { files: [identityFile] },
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText("agents.control.systemPrompt")).toHaveValue(
+        "# Video Producer\nYou plan short-form product videos.",
+      ),
+    );
+    expect(screen.getByLabelText("agents.control.name")).toHaveValue(
+      "video-producer",
+    );
+
+    const skillFile = new File(
+      ["# Research\nAlways verify primary sources."],
+      "research.md",
+      { type: "text/markdown" },
+    );
+    Object.defineProperty(skillFile, "text", {
+      value: async () => "# Research\nAlways verify primary sources.",
+    });
+    fireEvent.change(
+      screen.getAllByLabelText("agents.control.assetUpload")[0],
+      {
+        target: { files: [skillFile] },
+      },
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("agents.control.assetContent")).toHaveValue(
+        "# Research\nAlways verify primary sources.",
+      ),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.control.saveLocal" }),
+    );
+    await waitFor(() => expect(api.createDraft).toHaveBeenCalledTimes(1));
+    expect(api.createDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: "video-producer",
+        manifest: expect.objectContaining({
+          identity: {
+            systemPrompt:
+              "# Video Producer\nYou plan short-form product videos.",
+          },
+          modelConstraints: {
+            allowedProviders: ["custom"],
+            allowedModels: ["gpt-5.6-sol"],
+          },
+          assets: [
+            {
+              path: "skills/research/SKILL.md",
+              kind: "skill",
+              mediaType: "text/markdown",
+            },
+          ],
+        }),
+        assets: [
+          {
+            path: "skills/research/SKILL.md",
+            content: "# Research\nAlways verify primary sources.",
+          },
+        ],
+      }),
+    );
+  });
+
   it("shows a stable conflict message for a stale local revision", async () => {
     const api = installAPI({
       updateDraft: vi.fn(async () => ({
@@ -177,6 +300,9 @@ describe("AgentDraftEditor", () => {
       />,
     );
 
+    fireEvent.change(screen.getByLabelText("agents.control.name"), {
+      target: { value: "Research Agent Updated" },
+    });
     fireEvent.click(
       screen.getByRole("button", { name: "agents.control.saveLocal" }),
     );
@@ -189,8 +315,7 @@ describe("AgentDraftEditor", () => {
     expectNoRendererOwnershipInput(api.updateDraft);
   });
 
-  it("previews exact publication categories and excludes private Hermes data", async () => {
-    const saved = detail(2);
+  it("publishes a personal Agent in one explicit action and excludes private Hermes data", async () => {
     const published = {
       draftId: DRAFT_ID,
       revision: 2,
@@ -202,7 +327,6 @@ describe("AgentDraftEditor", () => {
       replayed: false,
     };
     const api = installAPI({
-      updateDraft: vi.fn(async () => success(saved)),
       preparePublication: vi.fn(async () =>
         success({
           publicationHandle: HANDLE_ID,
@@ -229,24 +353,11 @@ describe("AgentDraftEditor", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "agents.control.publish" }),
     );
-    const dialog = await screen.findByRole("dialog", {
-      name: "agents.control.publishPreviewTitle",
-    });
-    expect(dialog).toHaveTextContent("agents.control.personalSpace");
-    expect(dialog).toHaveTextContent("2");
-    expect(dialog).toHaveTextContent("1");
-    expect(dialog).toHaveTextContent("3");
-    expect(dialog).toHaveTextContent("4096");
-    expect(dialog).toHaveTextContent("agents.control.privateDataExcluded");
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "agents.control.confirmPublish" }),
-    );
     await waitFor(() =>
       expect(api.confirmPublication).toHaveBeenCalledWith(HANDLE_ID),
     );
     expect(screen.getByText("agents.control.publishOnlySuccess")).toBeTruthy();
-    expectNoRendererOwnershipInput(api.updateDraft);
+    expect(api.updateDraft).not.toHaveBeenCalled();
     expectNoRendererOwnershipInput(api.preparePublication);
     expectNoRendererOwnershipInput(api.confirmPublication);
   });
@@ -407,8 +518,7 @@ describe("AgentDraftEditor", () => {
     expect(api.preparePublication).not.toHaveBeenCalled();
   });
 
-  it("keeps publish-and-use visibly sequential and requests install only after publish", async () => {
-    const saved = detail(2);
+  it("publishes and starts personal Agent setup in one explicit action", async () => {
     const published = {
       draftId: DRAFT_ID,
       revision: 2,
@@ -420,7 +530,6 @@ describe("AgentDraftEditor", () => {
       replayed: false,
     };
     installAPI({
-      updateDraft: vi.fn(async () => success(saved)),
       preparePublication: vi.fn(async () =>
         success({
           publicationHandle: HANDLE_ID,
@@ -451,17 +560,17 @@ describe("AgentDraftEditor", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "agents.control.publishAndUse" }),
     );
-    expect(onRequestInstall).not.toHaveBeenCalled();
-    fireEvent.click(
-      await screen.findByRole("button", {
-        name: "agents.control.confirmPublish",
-      }),
-    );
     await waitFor(() =>
       expect(onRequestInstall).toHaveBeenCalledWith({
         definitionId: DEFINITION_ID,
         versionId: VERSION_ID,
+        displayName: "Research Agent",
       }),
     );
+    expect(
+      screen.queryByRole("button", {
+        name: "agents.control.confirmPublish",
+      }),
+    ).toBeNull();
   });
 });

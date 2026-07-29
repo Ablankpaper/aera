@@ -91,7 +91,7 @@ export default {
   removeAttachmentNamed: "移除 {{name}}",
   dropToAttach: "拖放文件以添加附件",
   dashboardUnavailableFallback:
-    "当前连接无法使用控制台聊天，已切换到基础聊天。档案切换和会话历史功能将受到限制。",
+    "当前连接无法使用控制台聊天，已切换到基础聊天。智能体切换和会话历史功能将受到限制。",
   attachUnsupported: "{{name}}：不支持的文件类型",
   attachImageTooLarge: "{{name}}：图片过大（最大 50 MB）",
   attachImageUncompressible:

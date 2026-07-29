@@ -1,28 +1,28 @@
 import enAgents from "../en/agents";
 
 export default {
-  title: "Profil",
+  title: "Agen",
   subtitle:
-    "Setiap profil adalah workspace AgentEra terisolasi dengan konfigurasi, memori, dan skill sendiri",
+    "Setiap agen berjalan di workspace AgentEra terisolasi dengan konfigurasi, memori, dan skill sendiri",
   newAgent: "Agent Baru",
   namePlaceholder: "Nama agent (mis. coder)",
-  createTitle: "Profil baru",
+  createTitle: "Agen baru",
   nameLabel: "Nama agent",
   cloneConfig: "Klon konfigurasi & API key",
   cloneFromLabel: "Klon dari",
   running: "Berjalan",
   off: "Mati",
   starting: "Memulai…",
-  createFailed: "Gagal membuat profil",
+  createFailed: "Gagal membuat agen",
   creating: "Membuat...",
   create: "Buat",
-  deleteFailed: "Gagal menghapus profil",
+  deleteFailed: "Gagal menghapus agen",
   active: "Aktif",
   noModel: "Model belum diatur",
   skillsCount: "{{count}} skill",
   gatewayRunning: "Gateway berjalan",
   gatewayOff: "Gateway mati",
-  colProfile: "Profil",
+  colProfile: "Agen",
   colModel: "Model",
   colStatus: "Status",
   colActions: "Tindakan",
@@ -70,9 +70,9 @@ export default {
     workspaceSpace: "Workspace",
     workspaceSpaceTitle: "Agent Workspace",
     workspaceAuthorSubtitle:
-      "Buat draf lokal, publikasikan versi Workspace yang tidak dapat diubah, lalu instal ke Profil lokal yang terisolasi.",
+      "Buat draf lokal dan publikasikan versi Workspace yang tidak dapat diubah; lingkungan lokal disiapkan otomatis.",
     workspaceMemberSubtitle:
-      "Instal versi Agent Workspace yang disetujui ke Profil lokal terisolasi. Member tidak dapat menulis atau menerbitkan.",
+      "Gunakan versi Agent Workspace yang disetujui dengan lingkungan lokal yang disiapkan otomatis. Member tidak dapat menulis atau menerbitkan.",
     role: {
       owner: "Pemilik",
       admin: "Admin",
@@ -99,7 +99,7 @@ export default {
       submittedNotPublished:
         "Diajukan untuk ditinjau. Tidak ada versi yang diterbitkan atau dipasang.",
       approvedNotInstalled:
-        "Versi disetujui. Tidak ada Profile atau Memory karyawan yang diubah.",
+        "Versi disetujui. Data eksekusi lokal dan Memory karyawan tidak diubah.",
       rejectedNotPublished:
         "Pengajuan ditolak. Tidak ada versi yang diterbitkan atau dipasang.",
       runtimeBoundary:

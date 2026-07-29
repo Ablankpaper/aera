@@ -216,7 +216,7 @@ describe("Chat global-profile transport freeze", () => {
     });
   });
 
-  // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Guest-first routing#Chat transport privacy]]
+  // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Account-required routing#Chat transport privacy]]
   it("does not read account-owned connection configuration for a guest chat", async () => {
     const getConnectionConfig = window.hermesAPI
       .getConnectionConfig as ReturnType<typeof vi.fn>;

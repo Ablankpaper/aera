@@ -20,7 +20,7 @@ export default {
   loadError: "无法加载社区目录。",
   retry: "重试",
   install_other: "设置",
-  targetProfile: "将安装到当前档案",
+  targetProfile: "将安装到当前智能体",
   actions: {
     install: { setup: "安装", working: "安装中...", done: "已安装" },
     connect: { setup: "连接", working: "连接中...", done: "已连接" },

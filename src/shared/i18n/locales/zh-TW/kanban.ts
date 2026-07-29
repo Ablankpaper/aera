@@ -33,7 +33,7 @@ export default {
   titlePlaceholder: "需要完成什麼？",
   fieldBody: "內容（選填）",
   bodyPlaceholder: "上下文、驗收條件、連結…",
-  fieldAssignee: "指派代理",
+  fieldAssignee: "指派智慧體",
   assigneeNone: "— 分類（不指派）",
   fieldPriority: "優先順序",
   priorityNormal: "一般 (0)",

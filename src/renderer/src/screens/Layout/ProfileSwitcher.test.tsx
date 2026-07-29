@@ -1,4 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import type React from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -9,9 +15,13 @@ vi.mock("../../components/useI18n", () => ({
   }),
 }));
 
+const profileModalMocks = vi.hoisted(() => ({
+  openProfile: vi.fn(),
+}));
+
 vi.mock("../../components/profile/ProfileModalContext", () => ({
   useProfileModal: () => ({
-    openProfile: vi.fn(),
+    openProfile: profileModalMocks.openProfile,
   }),
 }));
 
@@ -86,5 +96,36 @@ describe("ProfileSwitcher", () => {
     await waitFor(() => {
       expect(screen.getByText("卢姐")).toBeInTheDocument();
     });
+  });
+
+  it("opens the active Agent through the product-level settings facade", async () => {
+    installHermesAPI([profile("default")]);
+
+    render(
+      <ProfileSwitcher
+        activeProfile="default"
+        onSwitch={() => {}}
+        onManage={() => {}}
+      />,
+    );
+
+    const trigger = await screen.findByRole("button", {
+      name: /AgentEra Studio/,
+    });
+    fireEvent.click(trigger);
+
+    const menu = screen.getByRole("menu");
+    await waitFor(() => {
+      expect(window.hermesAPI.listProfiles).toHaveBeenCalledTimes(2);
+    });
+    fireEvent.click(
+      within(menu).getByRole("menuitem", { name: /AgentEra Studio/ }),
+    );
+
+    expect(profileModalMocks.openProfile).toHaveBeenCalledWith(
+      "default",
+      expect.objectContaining({ onChanged: expect.any(Function) }),
+    );
+    expect(screen.queryByText(/Runtime Profile/i)).not.toBeInTheDocument();
   });
 });

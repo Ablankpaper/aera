@@ -211,14 +211,14 @@ describe("AgentEra startup gate", () => {
     vi.useRealTimers();
   });
 
-  // @lat: [[agentera-app-authentication#Startup gate#Guest-first routing]]
+  // @lat: [[agentera-app-authentication#Startup gate#Account-required routing]]
   it.each([
-    { target: "welcome" as const, expected: "screen-installing" },
-    { target: "setup" as const, expected: "screen-main" },
-    { target: "main" as const, expected: "screen-main" },
+    { target: "welcome" as const },
+    { target: "setup" as const },
+    { target: "main" as const },
   ])(
-    "routes an unauthenticated $target launch into the local guest $expected",
-    async ({ target, expected }) => {
+    "keeps an unauthenticated $target launch behind the account gate",
+    async ({ target }) => {
       const { runtime, auth } = installWindowMocks({
         target,
         authState: {
@@ -231,12 +231,11 @@ describe("AgentEra startup gate", () => {
 
       await finishSplash();
 
-      expect(screen.getByTestId(expected)).toBeInTheDocument();
-      expect(screen.queryByTestId("screen-auth")).toBeNull();
+      expect(screen.getByTestId("screen-auth")).toBeInTheDocument();
+      expect(screen.queryByTestId("screen-installing")).toBeNull();
+      expect(screen.queryByTestId("screen-main")).toBeNull();
       expect(auth.startLogin).not.toHaveBeenCalled();
-      expect(runtime.resolveAccountProfile).toHaveBeenCalledTimes(
-        target === "welcome" ? 0 : 1,
-      );
+      expect(runtime.resolveAccountProfile).not.toHaveBeenCalled();
     },
   );
 
@@ -363,7 +362,7 @@ describe("AgentEra startup gate", () => {
     },
   );
 
-  it("runs splash -> guest install -> isolated claim -> main without starting browser login", async () => {
+  it("runs splash -> account login -> install -> isolated claim -> main", async () => {
     const { runtime, auth } = installWindowMocks({
       target: "welcome",
       authState: {
@@ -393,9 +392,15 @@ describe("AgentEra startup gate", () => {
 
     expect(screen.getByTestId("screen-splash")).toBeInTheDocument();
     await finishSplash();
-    expect(screen.getByTestId("screen-installing")).toBeInTheDocument();
-    expect(screen.queryByTestId("screen-welcome")).toBeNull();
+    expect(screen.getByTestId("screen-auth")).toBeInTheDocument();
     expect(auth.startLogin).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "auth.gate.openBrowser" }),
+    );
+    await act(async () => undefined);
+    expect(auth.startLogin).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("screen-installing")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("screen-installing"));
     await act(async () => undefined);
@@ -433,7 +438,7 @@ describe("AgentEra startup gate", () => {
     expect(screen.queryByTestId("screen-setup")).toBeNull();
   });
 
-  it("moves an unauthenticated remote configuration to isolated local guest mode", async () => {
+  it("queues a remote-to-local switch until account login succeeds", async () => {
     const { runtime, auth } = installWindowMocks({
       target: "main",
       mode: "remote",
@@ -459,10 +464,19 @@ describe("AgentEra startup gate", () => {
     expect(runtime.switchToLocal).not.toHaveBeenCalled();
 
     await finishSplash();
+    expect(screen.getByTestId("screen-auth")).toBeInTheDocument();
+    expect(runtime.switchToLocal).not.toHaveBeenCalled();
+    auth.startLogin.mockImplementation(async () => {
+      authListener?.(authenticated);
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "auth.gate.openBrowser" }),
+    );
+    await act(async () => undefined);
+
     expect(runtime.switchToLocal).toHaveBeenCalledOnce();
     expect(screen.getByTestId("screen-installing")).toBeInTheDocument();
-    expect(screen.queryByTestId("screen-welcome")).toBeNull();
-    expect(auth.startLogin).not.toHaveBeenCalled();
+    expect(auth.startLogin).toHaveBeenCalledOnce();
   });
 
   it("does not interrupt an in-progress screen for a same-owner session refresh", async () => {

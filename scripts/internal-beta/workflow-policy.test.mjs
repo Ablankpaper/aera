@@ -12,6 +12,7 @@ const builderPath = new URL(
   "../../build/electron-builder.internal-beta.yml",
   import.meta.url,
 );
+const baseBuilderPath = new URL("../../electron-builder.yml", import.meta.url);
 
 test("internal-Beta workflow is exact-SHA, unsigned, nonpublishing, and Sigstore-bound", async () => {
   const raw = await readFile(workflowPath, "utf8");
@@ -85,9 +86,13 @@ test("internal-Beta workflow is exact-SHA, unsigned, nonpublishing, and Sigstore
   );
 });
 
-test("internal-Beta Electron Builder overlay explicitly disables signing and publishing", async () => {
-  const raw = await readFile(builderPath, "utf8");
+test("internal-Beta Electron Builder overlay stays unsigned while preserving Windows resources", async () => {
+  const [raw, baseRaw] = await Promise.all([
+    readFile(builderPath, "utf8"),
+    readFile(baseBuilderPath, "utf8"),
+  ]);
   const config = parseYAML(raw);
+  const baseConfig = parseYAML(baseRaw);
 
   assert.equal(config.extends, "electron-builder.yml");
   assert.equal(config.forceCodeSigning, false);
@@ -99,7 +104,12 @@ test("internal-Beta Electron Builder overlay explicitly disables signing and pub
     config.dmg.artifactName,
     "Aera-Internal-Beta-${version}-macos-${arch}.${ext}",
   );
-  assert.equal(config.win.signAndEditExecutable, false);
+  assert.notEqual(
+    config.win?.signAndEditExecutable,
+    false,
+    "Windows internal-beta packages must keep PE resource editing enabled so icon/version metadata is embedded",
+  );
+  assert.equal(baseConfig.win.icon, "build/icon.ico");
   assert.equal(
     config.mac.artifactName,
     "Aera-Internal-Beta-${version}-macos-${arch}.${ext}",

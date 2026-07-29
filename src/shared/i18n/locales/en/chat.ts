@@ -93,7 +93,7 @@ export default {
   removeAttachmentNamed: "Remove {{name}}",
   dropToAttach: "Drop files to attach",
   dashboardUnavailableFallback:
-    "Dashboard chat isn't available on this connection — using basic chat. Profile switching and session history are limited.",
+    "Dashboard chat isn't available on this connection — using basic chat. Agent switching and session history are limited.",
   attachUnsupported: "{{name}}: file type not supported",
   attachImageTooLarge: "{{name}}: image too large (max 50 MB)",
   attachImageUncompressible:

@@ -1,5 +1,7 @@
 // ── Shared Types ────────────────────────────────────────
 
+import { isCustomProviderRoute } from "../../shared/custom-providers";
+
 export interface FieldDef {
   key: string;
   label: string;
@@ -427,7 +429,7 @@ export function displayBrandFromConfig(
   // Legacy configs store `qwen` (the pre-#825 grid id); the agent aliases
   // qwen → alibaba, so land those on the DashScope brand.
   if (provider === "qwen") return "alibaba";
-  if (provider !== "custom" || !baseUrl) return provider;
+  if (!isCustomProviderRoute(provider) || !baseUrl) return provider;
   const norm = (u: string): string =>
     (u || "").trim().replace(/\/+$/, "").toLowerCase();
   const target = norm(baseUrl);
