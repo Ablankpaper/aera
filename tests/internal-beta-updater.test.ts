@@ -32,8 +32,8 @@ import { canonicalJsonBytes } from "../src/main/agentera-runtime-distribution/ma
 const BASE_URL = new URL(
   "https://updates.example.test/desktop-updates/internal-beta",
 );
-const CURRENT_VERSION = "0.7.4-internal-beta.6";
-const NEXT_VERSION = "0.7.4-internal-beta.7";
+const CURRENT_VERSION = "0.7.4-internal-beta.7";
+const NEXT_VERSION = "0.7.4-internal-beta.8";
 const KEY_ID = "desktop-update-test";
 const createdDirectories: string[] = [];
 const execFile = promisify(execFileCallback);
