@@ -662,6 +662,25 @@ function safeMacAppPath(path: string | null): string {
   return resolve(path);
 }
 
+async function spawnDetached(
+  command: string,
+  args: string[],
+  options?: { windowsHide?: boolean },
+): Promise<void> {
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: options?.windowsHide,
+    });
+    child.once("error", rejectPromise);
+    child.once("spawn", () => {
+      child.unref();
+      resolvePromise();
+    });
+  });
+}
+
 export function buildMacUpdateHelperScript(options?: {
   processWaitAttempts?: number;
   healthyWaitAttempts?: number;
@@ -727,12 +746,9 @@ async function defaultInstallArtifact(
   context: InstallContext,
 ): Promise<void> {
   if (context.platform === "win32") {
-    const child = spawn(pending.artifactPath, ["--updated", "--force-run"], {
-      detached: true,
-      stdio: "ignore",
+    await spawnDetached(pending.artifactPath, ["--updated", "--force-run"], {
       windowsHide: false,
     });
-    child.unref();
     return;
   }
 
@@ -768,23 +784,18 @@ async function defaultInstallArtifact(
     }),
     { flag: "wx", mode: 0o600 },
   );
-  const child = spawn(
-    "/bin/sh",
-    [
-      "-c",
-      buildMacUpdateHelperScript(),
-      "aera-desktop-updater",
-      String(process.pid),
-      currentAppPath,
-      stagedAppPath,
-      backupPath,
-      markerPath,
-      journalPath,
-      "/usr/bin/open",
-    ],
-    { detached: true, stdio: "ignore" },
-  );
-  child.unref();
+  await spawnDetached("/bin/sh", [
+    "-c",
+    buildMacUpdateHelperScript(),
+    "aera-desktop-updater",
+    String(process.pid),
+    currentAppPath,
+    stagedAppPath,
+    backupPath,
+    markerPath,
+    journalPath,
+    "/usr/bin/open",
+  ]);
 }
 
 export function resolveCurrentMacAppPath(
