@@ -44,7 +44,11 @@ function formatBytes(value: number | null): string {
   return `${Number.isInteger(amount) ? amount : amount.toFixed(1)} ${unit}`;
 }
 
-function badgeClass(phase: RuntimeDistributionPhase): string {
+function badgeClass(
+  phase: RuntimeDistributionPhase,
+  currentVersionUnverified: boolean,
+): string {
+  if (currentVersionUnverified) return "";
   if (phase === "current") return "is-ok";
   if (phase === "update-available" || phase === "candidate-ready") {
     return "is-update";
@@ -79,7 +83,11 @@ export default function RuntimeDistributionCard({
   } = useRuntimeDistribution();
   const [confirmingDownload, setConfirmingDownload] = useState(false);
   const phase = state?.phase ?? "checking";
-  const statusKey = STATUS_KEYS[phase];
+  const currentVersionUnverified =
+    phase === "current" && state?.lastErrorCode !== null;
+  const statusKey = currentVersionUnverified
+    ? "currentUsable"
+    : STATUS_KEYS[phase];
 
   return (
     <>
@@ -102,7 +110,12 @@ export default function RuntimeDistributionCard({
               {t("settings.runtimeDistribution.subtitle")}
             </div>
           </div>
-          <span className={`settings-card-badge ${badgeClass(phase)}`.trim()}>
+          <span
+            className={`settings-card-badge ${badgeClass(
+              phase,
+              currentVersionUnverified,
+            )}`.trim()}
+          >
             {t(`settings.runtimeDistribution.status.${statusKey}`)}
           </span>
         </header>

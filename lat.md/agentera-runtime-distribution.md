@@ -98,6 +98,8 @@ The launch that installs or repairs from the exact packaged Seed does not immedi
 
 [[src/renderer/src/components/settings/RuntimeDistributionCard.tsx#RuntimeDistributionCard]] gives Runtime updates their own About card, separate from the desktop app updater. It shows managed status, version, and short source commit; download requires a modal that names the version, trusted `bignormal/aera-runtime` source, and size. The checkout-local unmanaged updater appears only in explicit external mode.
 
+The card claims “up to date” only after a successful metadata check with no offer. If the stable channel cannot be reached or its metadata is rejected, the current signed Runtime remains active but is labeled only as usable; the bounded update error remains visible so transport failure cannot be mistaken for freshness proof.
+
 [[src/main/agentera-runtime-distribution/bootstrap.ts#bootstrapRuntimeDistribution]] runs before `app/start` is dynamically imported. An approved candidate's signature, pointer binding, complete extracted inventory, and isolated offline health are checked again below `userData/runtime/health`; only then does the journal move current to previous and candidate to current. Failure keeps the existing current version, records only an error code, numeric exit code, version, short commit, and timestamp, and durably suppresses the failed candidate until a newer staging action replaces it. No path, credential, Profile, Memory, session, learned Skill, or raw exception enters the diagnostic.
 
 ## Release gate

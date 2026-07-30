@@ -93,6 +93,26 @@ describe("RuntimeDistributionCard", () => {
     expect(mocked.restartToApply).toHaveBeenCalledOnce();
   });
 
+  it("does not claim the Runtime is up to date when update checking failed", () => {
+    mocked.state = state("current", {
+      lastErrorCode: "runtime_update_unavailable",
+    });
+    render(<RuntimeDistributionCard />);
+
+    const status = screen.getByText(
+      "settings.runtimeDistribution.status.currentUsable",
+    );
+    expect(status).not.toHaveClass("is-ok");
+    expect(
+      screen.queryByText("settings.runtimeDistribution.status.current"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "settings.runtimeDistribution.errors.runtime_update_unavailable",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("requires an explicit version/source/size confirmation before downloading", async () => {
     mocked.state = state("update-available", {
       availableVersion: "0.19.0-agentera.1",
