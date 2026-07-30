@@ -28,8 +28,29 @@ interface AgentsProps {
   onChatWith: (name: string) => void;
 }
 
+export function selectAgentModelProfileId(
+  profiles: readonly ProfileInfo[],
+  activeProfile: string,
+): string | undefined {
+  const isConfigured = (profile: ProfileInfo): boolean =>
+    profile.provider.trim().length > 0 &&
+    profile.provider.trim().toLocaleLowerCase() !== "auto" &&
+    profile.model.trim().length > 0;
+  const accountProfile = profiles.find(
+    (profile) => !profile.agentInstallationId && isConfigured(profile),
+  );
+  if (accountProfile) return accountProfile.id;
+  const active = profiles.find((profile) => profile.id === activeProfile);
+  if (active && isConfigured(active)) return active.id;
+  return profiles.find(isConfigured)?.id;
+}
+
 function Agents({ activeProfile, onChatWith }: AgentsProps): React.JSX.Element {
   const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
+  const modelProfileId = useMemo(
+    () => selectAgentModelProfileId(profiles, activeProfile),
+    [activeProfile, profiles],
+  );
   const agentProfiles = useMemo(
     () =>
       profiles.map((profile) => ({
@@ -56,6 +77,14 @@ function Agents({ activeProfile, onChatWith }: AgentsProps): React.JSX.Element {
   useEffect(() => {
     loadProfiles();
   }, [loadProfiles]);
+
+  useEffect(
+    () =>
+      window.hermesAPI.onModelLibraryChanged(() => {
+        void loadProfiles();
+      }),
+    [loadProfiles],
+  );
 
   // Cloud sync: null while the signed-in state is still loading.
   const [, setSyncStatus] = useState<AgentSyncStatus | null>(null);
@@ -153,7 +182,7 @@ function Agents({ activeProfile, onChatWith }: AgentsProps): React.JSX.Element {
         onChatWithProfile={(profileId) => void handleChatWith(profileId)}
         onProfilesChanged={loadProfiles}
         onAgentReady={handleAgentReady}
-        modelProfileId={activeProfile}
+        modelProfileId={modelProfileId}
       />
     </div>
   );

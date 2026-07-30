@@ -84,9 +84,11 @@ import type {
   AgenteraAgentControlResult,
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
+  AgenteraAgentOperationScope,
   AgenteraAgentVersionSummary,
   AgenteraClaimVersionInput,
   AgenteraInstallVersionInput,
+  AgenteraRepairInstallationModelInput,
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
@@ -2444,32 +2446,43 @@ const agenteraAgentsAPI = {
   getState: (): Promise<
     AgenteraAgentControlResult<AgenteraAgentControlPublicState>
   > => ipcRenderer.invoke("agentera-agents-get-state"),
-  listDrafts: (): Promise<AgenteraAgentControlResult<AgentDraft[]>> =>
-    ipcRenderer.invoke("agentera-agents-list-drafts"),
+  listDrafts: (
+    scope?: AgenteraAgentOperationScope,
+  ): Promise<AgenteraAgentControlResult<AgentDraft[]>> =>
+    ipcRenderer.invoke("agentera-agents-list-drafts", scope),
   getDraft: (
     id: string,
+    scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentControlResult<AgentDraftDetail>> =>
-    ipcRenderer.invoke("agentera-agents-get-draft", id),
+    ipcRenderer.invoke("agentera-agents-get-draft", id, scope),
   createDraft: (
     input: CreateAgentDraftInput,
+    scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentControlResult<AgentDraftDetail>> =>
-    ipcRenderer.invoke("agentera-agents-create-draft", input),
+    ipcRenderer.invoke("agentera-agents-create-draft", input, scope),
   updateDraft: (
     input: UpdateAgentDraftInput,
+    scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentControlResult<AgentDraftDetail>> =>
-    ipcRenderer.invoke("agentera-agents-update-draft", input),
-  deleteDraft: (id: string): Promise<AgenteraAgentControlResult<true>> =>
-    ipcRenderer.invoke("agentera-agents-delete-draft", id),
+    ipcRenderer.invoke("agentera-agents-update-draft", input, scope),
+  deleteDraft: (
+    id: string,
+    scope?: AgenteraAgentOperationScope,
+  ): Promise<AgenteraAgentControlResult<true>> =>
+    ipcRenderer.invoke("agentera-agents-delete-draft", id, scope),
   preparePublication: (
     id: string,
+    scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentControlResult<PublicationPreview>> =>
-    ipcRenderer.invoke("agentera-agents-prepare-publication", id),
+    ipcRenderer.invoke("agentera-agents-prepare-publication", id, scope),
   confirmPublication: (
     publicationHandle: string,
+    scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentControlResult<PublishedRevision>> =>
     ipcRenderer.invoke(
       "agentera-agents-confirm-publication",
       publicationHandle,
+      scope,
     ),
   prepareOrganizationSubmission: (
     draftId: string,
@@ -2517,9 +2530,10 @@ const agenteraAgentsAPI = {
       "agentera-agents-confirm-organization-withdrawal",
       input,
     ),
-  listDefinitions: (): Promise<
-    AgenteraAgentControlResult<AgenteraAgentDefinitionSummary[]>
-  > => ipcRenderer.invoke("agentera-agents-list-definitions"),
+  listDefinitions: (
+    scope?: AgenteraAgentOperationScope,
+  ): Promise<AgenteraAgentControlResult<AgenteraAgentDefinitionSummary[]>> =>
+    ipcRenderer.invoke("agentera-agents-list-definitions", scope),
   listOfficialAgents: (): Promise<
     AgenteraAgentControlResult<OfficialAgentSummary[]>
   > => ipcRenderer.invoke("agentera-agents-list-official"),
@@ -2547,31 +2561,47 @@ const agenteraAgentsAPI = {
     ipcRenderer.invoke("agentera-agents-apply-official-update", installationId),
   listVersions: (
     definitionId: string,
+    scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentControlResult<AgenteraAgentVersionSummary[]>> =>
-    ipcRenderer.invoke("agentera-agents-list-versions", definitionId),
-  listInstallations: (): Promise<
-    AgenteraAgentControlResult<AgenteraAgentInstallationSummary[]>
-  > => ipcRenderer.invoke("agentera-agents-list-installations"),
+    ipcRenderer.invoke("agentera-agents-list-versions", definitionId, scope),
+  listInstallations: (
+    scope?: AgenteraAgentOperationScope,
+  ): Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary[]>> =>
+    ipcRenderer.invoke("agentera-agents-list-installations", scope),
   installVersion: (
     input: AgenteraInstallVersionInput,
+    scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>> =>
-    ipcRenderer.invoke("agentera-agents-install-version", input),
+    ipcRenderer.invoke("agentera-agents-install-version", input, scope),
   claimVersion: (
     input: AgenteraClaimVersionInput,
+    scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>> =>
-    ipcRenderer.invoke("agentera-agents-claim-version", input),
+    ipcRenderer.invoke("agentera-agents-claim-version", input, scope),
   retryPendingInstallation: (
     input: AgenteraRetryPendingInstallationInput,
+    scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>> =>
-    ipcRenderer.invoke("agentera-agents-retry-installation", input),
+    ipcRenderer.invoke("agentera-agents-retry-installation", input, scope),
   selectInstallationVersion: (
     input: AgenteraSelectInstallationVersionInput,
+    scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>> =>
-    ipcRenderer.invoke("agentera-agents-select-version", input),
+    ipcRenderer.invoke("agentera-agents-select-version", input, scope),
+  repairInstallationModel: (
+    input: AgenteraRepairInstallationModelInput,
+    scope?: AgenteraAgentOperationScope,
+  ): Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-repair-installation-model",
+      input,
+      scope,
+    ),
   archiveInstallation: (
     id: string,
+    scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>> =>
-    ipcRenderer.invoke("agentera-agents-archive-installation", id),
+    ipcRenderer.invoke("agentera-agents-archive-installation", id, scope),
   listEligibleExperienceSkills: (
     installationId: string,
   ): Promise<AgenteraAgentControlResult<EligibleExperienceSkill[]>> =>

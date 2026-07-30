@@ -21,6 +21,7 @@
     "test:e2e:workspace": "playwright test tests/e2e/agentera-workspace.e2e.ts",
     "test:e2e:organization": "playwright test tests/e2e/agentera-organization.e2e.ts",
     "test:e2e:organization-agent": "npm run build && playwright test tests/e2e/agentera-organization-agent.e2e.ts",
+    "test:e2e:personal-agent-live": "npm run build && playwright test tests/e2e/agentera-personal-agent-live.e2e.ts",
     "test:e2e:workspace-agent": "npm run build && playwright test tests/e2e/agentera-workspace-agent.e2e.ts",
     "test:e2e:experience-candidate": "npm run build && playwright test tests/e2e/agentera-experience-candidate.e2e.ts",
     "test:e2e:official-managed-agent": "npm run build && playwright test tests/e2e/agentera-official-managed-agent.e2e.ts",

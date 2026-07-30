@@ -88,6 +88,7 @@ export interface FreshProfileBindingRequest {
   ) => ProfileCreationResult;
   resolveProfilePath: (profileId: string) => string;
   activateProfile: (profileId: string) => void;
+  activate?: boolean;
 }
 
 export type ProfileClaimInspection =
@@ -462,7 +463,9 @@ export class AgenteraProfileBindingStore {
       profileId: created.id,
       binding: this.bindExistingProfile(profilePath, request.owner),
     };
-    request.activateProfile(created.id);
+    if (request.activate !== false) {
+      request.activateProfile(created.id);
+    }
     return result;
   }
 

@@ -629,7 +629,10 @@ export class AgentDraftStore {
         `UPDATE agent_drafts
          SET source_agent_definition_id = ?, base_agent_version_id = ?,
              published_definition_id = ?, published_version_id = ?,
-             published_revision = ?, publication_error_code = NULL,
+             published_revision = ?, publication_attempt_revision = NULL,
+             publication_attempted_at = NULL,
+             publication_idempotency_key = NULL,
+             publication_error_code = NULL,
              publication_error_summary = NULL, updated_at = ?
 		 WHERE id = ? AND tenant_id = ? AND owner_id = ?
 		   AND target_scope = ? AND workspace_id IS ?

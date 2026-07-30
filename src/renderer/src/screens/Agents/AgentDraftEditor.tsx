@@ -4,6 +4,7 @@ import type {
   AgentDraftDetail,
   AgentEditableManifest,
   AgenteraAgentControlErrorCode,
+  AgenteraAgentOperationScope,
   OrganizationAgentSubmissionSummary,
   OrganizationSubmissionPreview,
   PublicationPreview,
@@ -38,6 +39,7 @@ export interface AgentDraftEditorProps {
   draft: AgentDraftDetail | null;
   readOnly?: boolean;
   publicationTarget?: "DIRECT" | "ORGANIZATION";
+  operationScope?: AgenteraAgentOperationScope;
   onClose: () => void;
   onSaved: (draft: AgentDraftDetail) => void;
   onPublished: (revision: PublishedRevision) => void;
@@ -48,6 +50,7 @@ export interface AgentDraftEditorProps {
     definitionId: string;
     versionId: string;
     displayName: string;
+    modelProfileId: string;
   }) => void;
   modelProfileId?: string;
 }
@@ -74,6 +77,39 @@ function assetRows(draft: AgentDraftDetail | null): EditableAssetRow[] {
 
 function modelKey(provider: string, model: string): string {
   return `${provider}\0${model}`;
+}
+
+function normalizedModelEndpoint(value: string): string {
+  return value.trim().replace(/\/+$/, "").toLocaleLowerCase();
+}
+
+function modelBelongsToConfiguredRoute(
+  configured: { provider: string; baseUrl: string },
+  candidate: {
+    provider: string;
+    baseUrl: string;
+    providerLabel?: string;
+    name: string;
+  },
+): boolean {
+  const configuredProvider = configured.provider.trim().toLocaleLowerCase();
+  const candidateProvider = candidate.provider.trim().toLocaleLowerCase();
+  const configuredEndpoint = normalizedModelEndpoint(configured.baseUrl);
+  if (
+    configuredEndpoint &&
+    normalizedModelEndpoint(candidate.baseUrl) !== configuredEndpoint
+  ) {
+    return false;
+  }
+  if (configuredProvider.startsWith("custom:")) {
+    const configuredName = configuredProvider.slice("custom:".length);
+    const candidateName = (candidate.providerLabel || candidate.name)
+      .trim()
+      .toLocaleLowerCase()
+      .replace(/ /g, "-");
+    return candidateProvider === "custom" && candidateName === configuredName;
+  }
+  return candidateProvider === configuredProvider;
 }
 
 function currentModelChoice(draft: AgentDraftDetail | null): ModelChoice {
@@ -155,6 +191,7 @@ export default function AgentDraftEditor({
   draft,
   readOnly = false,
   publicationTarget = "DIRECT",
+  operationScope,
   onClose,
   onSaved,
   onPublished,
@@ -181,9 +218,13 @@ export default function AgentDraftEditor({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [preview, setPreview] = useState<PublicationPreview | null>(null);
+  const [publicationDraft, setPublicationDraft] =
+    useState<AgentDraftDetail | null>(null);
   const [organizationPreview, setOrganizationPreview] =
     useState<OrganizationSubmissionPreview | null>(null);
   const [publishAndUse, setPublishAndUse] = useState(false);
+  const [hasConfiguredRuntimeModel, setHasConfiguredRuntimeModel] =
+    useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -199,12 +240,18 @@ export default function AgentDraftEditor({
     setError(null);
     setNotice(null);
     setPreview(null);
+    setPublicationDraft(null);
     setOrganizationPreview(null);
     setPublishAndUse(false);
+    setHasConfiguredRuntimeModel(false);
   }, [draft, open]);
 
   useEffect(() => {
     if (!open) return;
+    if (!modelProfileId) {
+      setHasConfiguredRuntimeModel(false);
+      return;
+    }
     let cancelled = false;
     const loadModels = async (): Promise<void> => {
       const bridge = window.hermesAPI;
@@ -246,9 +293,10 @@ export default function AgentDraftEditor({
           configured.model || configured.provider,
         );
         for (const item of saved) {
+          if (!modelBelongsToConfiguredRoute(configured, item)) continue;
           const providerLabel = item.providerLabel || item.provider;
           addChoice(
-            item.provider,
+            configured.provider,
             item.model,
             item.name
               ? `${item.name} · ${providerLabel}`
@@ -257,11 +305,29 @@ export default function AgentDraftEditor({
         }
         const nextChoices = [...byKey.values()];
         setModelChoices(nextChoices);
-        if (!draft && configured.provider && configured.model) {
-          setSelectedModelKey(modelKey(configured.provider, configured.model));
+        setHasConfiguredRuntimeModel(
+          configured.provider.trim().length > 0 &&
+            configured.provider.trim().toLocaleLowerCase() !== "auto" &&
+            configured.model.trim().length > 0,
+        );
+        const configuredKey = modelKey(
+          configured.provider.trim(),
+          configured.model.trim(),
+        );
+        const staleNamedProvider =
+          draft !== null &&
+          draftChoice.model === configured.model.trim() &&
+          draftChoice.provider.trim().toLocaleLowerCase() !==
+            configured.provider.trim().toLocaleLowerCase();
+        if (
+          configured.provider.trim() &&
+          configured.model.trim() &&
+          (!draft || staleNamedProvider)
+        ) {
+          setSelectedModelKey(configuredKey);
         }
       } catch {
-        // The editor remains usable with the safe built-in fallback.
+        if (!cancelled) setHasConfiguredRuntimeModel(false);
       }
     };
     void loadModels();
@@ -305,12 +371,21 @@ export default function AgentDraftEditor({
     };
   }, [assets, current?.manifest, selectedModel, systemPrompt]);
 
+  const editableAssets = useMemo(
+    () =>
+      assets.map((asset) => ({
+        path: asset.path.trim(),
+        content: asset.content,
+      })),
+    [assets],
+  );
+  const alreadyPublished =
+    current !== null &&
+    current.publishedRevision?.revision === current.revision &&
+    sameDraftContent(current, name.trim(), manifest, editableAssets);
+
   const persist = async (): Promise<AgentDraftDetail | null> => {
     if (readOnly || !canSave || busy) return null;
-    const editableAssets = assets.map((asset) => ({
-      path: asset.path.trim(),
-      content: asset.content,
-    }));
     const displayName = name.trim();
     if (
       current &&
@@ -322,22 +397,28 @@ export default function AgentDraftEditor({
     setError(null);
     setNotice(null);
     const result = current
-      ? await window.agenteraAgents.updateDraft({
-          id: current.id,
-          expectedRevision: current.revision,
-          displayName,
-          icon: current.icon,
-          manifest,
-          assets: editableAssets,
-        })
-      : await window.agenteraAgents.createDraft({
-          sourceAgentDefinitionId: null,
-          baseAgentVersionId: null,
-          displayName,
-          icon: null,
-          manifest,
-          assets: editableAssets,
-        });
+      ? await window.agenteraAgents.updateDraft(
+          {
+            id: current.id,
+            expectedRevision: current.revision,
+            displayName,
+            icon: current.icon,
+            manifest,
+            assets: editableAssets,
+          },
+          operationScope,
+        )
+      : await window.agenteraAgents.createDraft(
+          {
+            sourceAgentDefinitionId: null,
+            baseAgentVersionId: null,
+            displayName,
+            icon: null,
+            manifest,
+            assets: editableAssets,
+          },
+          operationScope,
+        );
     setBusy(false);
     if (!result.ok) {
       setError(errorKey(result.errorCode));
@@ -352,24 +433,45 @@ export default function AgentDraftEditor({
   const publishPrepared = async (
     prepared: PublicationPreview,
     andUse: boolean,
+    saved: AgentDraftDetail,
   ): Promise<void> => {
     setBusy(true);
     setError(null);
     const result = await window.agenteraAgents.confirmPublication(
       prepared.publicationHandle,
+      operationScope,
     );
     setBusy(false);
     setPreview(null);
+    setPublicationDraft(null);
     if (!result.ok) {
       setError(errorKey(result.errorCode));
       return;
     }
+    const publishedDraft: AgentDraftDetail = {
+      ...saved,
+      sourceAgentDefinitionId: result.data.definitionId,
+      baseAgentVersionId: result.data.versionId,
+      lastPublicationAttempt: null,
+      publishedRevision: {
+        revision: result.data.revision,
+        definitionId: result.data.definitionId,
+        versionId: result.data.versionId,
+      },
+    };
+    setCurrent(publishedDraft);
     onPublished(result.data);
     if (andUse) {
+      if (!modelProfileId) {
+        setError("agents.control.runtimeModelRequired");
+        return;
+      }
+      onClose();
       onRequestInstall({
         definitionId: result.data.definitionId,
         versionId: result.data.versionId,
         displayName: name.trim(),
+        modelProfileId,
       });
     } else {
       setNotice("agents.control.publishOnlySuccess");
@@ -377,7 +479,11 @@ export default function AgentDraftEditor({
   };
 
   const prepare = async (andUse: boolean): Promise<void> => {
-    if (readOnly) return;
+    if (readOnly || alreadyPublished) return;
+    if (andUse && !modelProfileId) {
+      setError("agents.control.runtimeModelRequired");
+      return;
+    }
     const saved = await persist();
     if (!saved) return;
     setBusy(true);
@@ -395,17 +501,21 @@ export default function AgentDraftEditor({
       setOrganizationPreview(result.data);
       return;
     }
-    const result = await window.agenteraAgents.preparePublication(saved.id);
+    const result = await window.agenteraAgents.preparePublication(
+      saved.id,
+      operationScope,
+    );
     setBusy(false);
     if (!result.ok) {
       setError(errorKey(result.errorCode));
       return;
     }
     if (result.data.targetScope === "USER") {
-      await publishPrepared(result.data, andUse);
+      await publishPrepared(result.data, andUse, saved);
       return;
     }
     setPublishAndUse(andUse);
+    setPublicationDraft(saved);
     setPreview(result.data);
   };
 
@@ -428,8 +538,8 @@ export default function AgentDraftEditor({
   };
 
   const confirm = async (): Promise<void> => {
-    if (readOnly || !preview || busy) return;
-    await publishPrepared(preview, publishAndUse);
+    if (readOnly || !preview || !publicationDraft || busy) return;
+    await publishPrepared(preview, publishAndUse, publicationDraft);
   };
 
   const importIdentityFile = async (file: File | undefined): Promise<void> => {
@@ -686,9 +796,15 @@ export default function AgentDraftEditor({
           {error && <div className="agents-create-error">{t(error)}</div>}
           {notice && <div className="agent-control-success">{t(notice)}</div>}
           {!readOnly && publicationTarget !== "ORGANIZATION" ? (
-            <p className="agent-control-sequence agent-control-wide-field">
-              {t("agents.control.publishAndUseSequence")}
-            </p>
+            hasConfiguredRuntimeModel ? (
+              <p className="agent-control-sequence agent-control-wide-field">
+                {t("agents.control.publishAndUseSequence")}
+              </p>
+            ) : (
+              <div className="agents-create-error agent-control-wide-field">
+                {t("agents.control.runtimeModelRequired")}
+              </div>
+            )
           ) : null}
         </div>
 
@@ -718,7 +834,7 @@ export default function AgentDraftEditor({
               <button
                 type="button"
                 className="btn btn-secondary"
-                disabled={!canSave || busy}
+                disabled={!canSave || busy || alreadyPublished}
                 onClick={() => void prepare(false)}
               >
                 {t("agents.control.publish")}
@@ -726,7 +842,12 @@ export default function AgentDraftEditor({
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={!canSave || busy}
+                disabled={
+                  !canSave ||
+                  busy ||
+                  alreadyPublished ||
+                  !hasConfiguredRuntimeModel
+                }
                 onClick={() => void prepare(true)}
               >
                 {t("agents.control.publishAndUse")}

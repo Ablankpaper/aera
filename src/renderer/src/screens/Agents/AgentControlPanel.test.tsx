@@ -22,7 +22,9 @@ import type {
   OfficialAgentSummary,
   OfficialManagedUpdate,
 } from "../../../../shared/agentera-agent-control";
-import AgentControlPanel from "./AgentControlPanel";
+import AgentControlPanel, {
+  type AgentControlProfileOption,
+} from "./AgentControlPanel";
 
 vi.mock("../../components/useI18n", () => ({
   useI18n: () => ({ t: (key: string): string => key }),
@@ -30,6 +32,7 @@ vi.mock("../../components/useI18n", () => ({
 
 const DEFINITION_ID = "11111111-1111-4111-8111-111111111111";
 const VERSION_ID = "22222222-2222-4222-8222-222222222222";
+const NEXT_VERSION_ID = "aaaaaaaa-2222-4222-8222-222222222222";
 const INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
 const WORKSPACE_ID = "66666666-6666-4666-8666-666666666666";
 const ORGANIZATION_ID = "99999999-9999-4999-8999-999999999999";
@@ -129,6 +132,17 @@ function installation(
   };
 }
 
+function configuredModelProfile(
+  id = "configured-source",
+): AgentControlProfileOption {
+  return {
+    id,
+    name: "Configured source",
+    provider: "openai",
+    model: "gpt-5.6",
+  };
+}
+
 function officialAgent(): OfficialAgentSummary {
   return {
     definitionId: DEFINITION_ID,
@@ -223,6 +237,7 @@ type MockedPanelAgenteraAPI = Window["agenteraAgents"] & {
   listDrafts: ReturnType<typeof vi.fn>;
   listOrganizationSubmissions: ReturnType<typeof vi.fn>;
   archiveInstallation: ReturnType<typeof vi.fn>;
+  installVersion: ReturnType<typeof vi.fn>;
 };
 
 function installAPI(
@@ -258,6 +273,7 @@ function installAPI(
     claimVersion: vi.fn(),
     retryPendingInstallation: vi.fn(),
     selectInstallationVersion: vi.fn(),
+    repairInstallationModel: vi.fn(),
     archiveInstallation: vi.fn(),
     listEligibleExperienceSkills: vi.fn(async () => success([])),
     prepareExperienceCandidate: vi.fn(),
@@ -319,6 +335,24 @@ describe("AgentControlPanel", () => {
     ).toBeNull();
   });
 
+  it("keeps My Agents usable when the unrelated official catalog is unavailable", async () => {
+    const api = installAPI({
+      listOfficialAgents: vi.fn(async () => ({
+        ok: false as const,
+        errorCode: "cloud_unavailable" as const,
+      })),
+    });
+
+    render(<AgentControlPanel profiles={[]} initialTab="mine" />);
+
+    expect(await screen.findByText("Research Agent")).toBeVisible();
+    expect(
+      screen.queryByText("agents.control.errors.cloud_unavailable"),
+    ).toBeNull();
+    expect(api.listOfficialAgents).not.toHaveBeenCalled();
+    expect(api.refreshOfficialUpdates).not.toHaveBeenCalled();
+  });
+
   it("presents an existing local runtime only as a ready Agent", async () => {
     installAPI({
       listDefinitions: vi.fn(async () => success([])),
@@ -326,7 +360,14 @@ describe("AgentControlPanel", () => {
     const onChatWithProfile = vi.fn();
     render(
       <AgentControlPanel
-        profiles={[{ id: "default", name: "Default" }]}
+        profiles={[
+          {
+            id: "default",
+            name: "Default",
+            provider: "openai",
+            model: "openai/gpt-5.6",
+          },
+        ]}
         advancedOpenByDefault={false}
         onChatWithProfile={onChatWithProfile}
       />,
@@ -350,6 +391,82 @@ describe("AgentControlPanel", () => {
       }),
     );
     expect(onChatWithProfile).toHaveBeenCalledWith("default");
+  });
+
+  it("does not present an unconfigured Runtime Profile as ready", async () => {
+    installAPI({
+      listDefinitions: vi.fn(async () => success([])),
+    });
+    render(
+      <AgentControlPanel
+        profiles={[
+          {
+            id: "unconfigured",
+            name: "Unconfigured",
+            provider: "auto",
+            model: "",
+          },
+        ]}
+        advancedOpenByDefault={false}
+      />,
+    );
+
+    const grid = await screen.findByTestId("personal-agent-grid");
+    expect(within(grid).getByText("Unconfigured")).toBeTruthy();
+    expect(
+      within(grid).queryByText("agents.hub.ready"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(within(grid).getByText("Unconfigured").closest("button")!);
+    const detailDialog = screen.getByRole("dialog", { name: "Unconfigured" });
+    expect(
+      within(detailDialog).queryByText("agents.hub.ready"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      within(detailDialog).getByRole("button", {
+        name: "agents.control.close",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.hub.mineFilter.ready" }),
+    );
+    expect(screen.getByText("agents.hub.noFilteredResults")).toBeTruthy();
+  });
+
+  it("does not install a published Agent before a runnable model source exists", async () => {
+    const api = installAPI({
+      listDefinitions: vi.fn(async () => success([definition()])),
+    });
+    render(<AgentControlPanel profiles={[]} advancedOpenByDefault={false} />);
+
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    const action = screen.getByRole("button", {
+      name: "agents.hub.configureModelFirst",
+    });
+    expect(action).toBeDisabled();
+    fireEvent.click(action);
+
+    expect(api.installVersion).not.toHaveBeenCalled();
+  });
+
+  it("does not retry a pending Agent before a runnable model source exists", async () => {
+    const api = installAPI({
+      listDefinitions: vi.fn(async () => success([definition()])),
+      listInstallations: vi.fn(async () => success([installation("pending")])),
+    });
+    render(<AgentControlPanel profiles={[]} advancedOpenByDefault={false} />);
+
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    const action = screen.getByRole("button", {
+      name: "agents.hub.configureModelFirst",
+    });
+    expect(action).toBeDisabled();
+    fireEvent.click(action);
+
+    expect(api.retryPendingInstallation).not.toHaveBeenCalled();
   });
 
   it("distinguishes an empty filter from a truly empty My Agents catalog", async () => {
@@ -404,7 +521,12 @@ describe("AgentControlPanel", () => {
       listDrafts: vi.fn(async () => success([publishedDraft() as AgentDraft])),
       listDefinitions: vi.fn(async () => success([])),
     });
-    render(<AgentControlPanel profiles={[]} />);
+    render(
+      <AgentControlPanel
+        profiles={[configuredModelProfile()]}
+        modelProfileId="configured-source"
+      />,
+    );
 
     fireEvent.click(
       (await screen.findByText("Workspace Research Agent")).closest("button")!,
@@ -548,7 +670,10 @@ describe("AgentControlPanel", () => {
       listDrafts: vi.fn(async () => success([draft() as AgentDraft])),
     });
     render(
-      <AgentControlPanel profiles={[{ id: "default", name: "Default" }]} />,
+      <AgentControlPanel
+        profiles={[configuredModelProfile("default")]}
+        modelProfileId="default"
+      />,
     );
 
     expect(
@@ -588,7 +713,12 @@ describe("AgentControlPanel", () => {
           ),
         ),
       });
-      render(<AgentControlPanel profiles={[]} />);
+      render(
+        <AgentControlPanel
+          profiles={[configuredModelProfile()]}
+          modelProfileId="configured-source"
+        />,
+      );
 
       fireEvent.click(
         await screen.findByRole("tab", {
@@ -614,15 +744,17 @@ describe("AgentControlPanel", () => {
       });
       expect(useButton).toBeTruthy();
       expect(useButton).toHaveProperty("disabled", !install);
-      expect(api.listDrafts.mock.calls.length > 0).toBe(author);
+      expect(
+        api.listDrafts.mock.calls.some(([scope]) => scope === undefined),
+      ).toBe(author);
       expect(api.listOrganizationSubmissions.mock.calls.length > 0).toBe(
         history,
       );
     },
   );
 
-  it("switches an Organization member to Personal before creating from My Agents", async () => {
-    let context: AgenteraAgentControlPublicState["context"] = {
+  it("keeps the selected Organization while My Agents explicitly operates on USER assets", async () => {
+    const context: AgenteraAgentControlPublicState["context"] = {
       scope: "ORGANIZATION",
       organizationId: ORGANIZATION_ID,
       role: "member",
@@ -630,21 +762,19 @@ describe("AgentControlPanel", () => {
     const api = installAPI({
       getState: vi.fn(async () => success(controlState(context))),
     });
-    const select = vi.fn(async () => {
-      context = { scope: "USER" };
-      return success({
-        access: "online" as const,
-        stale: false,
-        selected: { kind: "PERSONAL" as const },
-        options: [{ kind: "PERSONAL" as const }],
-      });
-    });
+    const select = vi.fn();
     Object.defineProperty(window, "agenteraProductSpace", {
       configurable: true,
       value: { select },
     });
 
-    render(<AgentControlPanel profiles={[]} initialTab="mine" />);
+    render(
+      <AgentControlPanel
+        profiles={[]}
+        initialTab="mine"
+        modelProfileId="configured-source"
+      />,
+    );
 
     fireEvent.click(
       await screen.findByRole("button", {
@@ -652,15 +782,348 @@ describe("AgentControlPanel", () => {
       }),
     );
 
-    await waitFor(() =>
-      expect(select).toHaveBeenCalledWith({ kind: "PERSONAL" }),
-    );
-    expect(api.getState).toHaveBeenCalledTimes(2);
+    expect(select).not.toHaveBeenCalled();
+    expect(api.getState).toHaveBeenCalledTimes(1);
+    expect(api.listDrafts).toHaveBeenCalledWith("USER");
+    expect(api.listDefinitions).toHaveBeenCalledWith("USER");
+    expect(api.listInstallations).toHaveBeenCalledWith("USER");
     expect(
       await screen.findByRole("dialog", {
         name: "agents.control.newDraftTitle",
       }),
     ).toBeInTheDocument();
+  });
+
+  it("installs a Chinese-named personal Agent with a valid private Runtime profile id", async () => {
+    const chineseDraft = {
+      ...publishedDraft(),
+      displayName: "小助理",
+    };
+    const api = installAPI({
+      getState: vi.fn(async () =>
+        success(
+          controlState({
+            scope: "ORGANIZATION",
+            organizationId: ORGANIZATION_ID,
+            role: "member",
+          }),
+        ),
+      ),
+      listDrafts: vi.fn(async () => success([chineseDraft as AgentDraft])),
+      listDefinitions: vi.fn(async () => success([])),
+      installVersion: vi.fn(async () => success(installation("active"))),
+    });
+    render(
+      <AgentControlPanel
+        profiles={[]}
+        initialTab="mine"
+        modelProfileId="configured-source"
+      />,
+    );
+
+    fireEvent.click((await screen.findByText("小助理")).closest("button")!);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.hub.useAgent",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(api.installVersion).toHaveBeenCalledWith(
+        {
+          definitionId: DEFINITION_ID,
+          versionId: VERSION_ID,
+          profileName: "aera-agent-11111111-111",
+          modelProfileId: "configured-source",
+        },
+        "USER",
+      ),
+    );
+    expect(api.installVersion.mock.calls[0]?.[0]?.profileName).toMatch(
+      /^[a-z0-9_][a-z0-9_-]{0,63}$/,
+    );
+  });
+
+  it("repairs an active unconfigured personal Agent from the current owner's model before opening chat", async () => {
+    const context: AgenteraAgentControlPublicState["context"] = {
+      scope: "ORGANIZATION",
+      organizationId: ORGANIZATION_ID,
+      role: "owner",
+    };
+    const activeInstallation = installation("active");
+    const api = installAPI({
+      getState: vi.fn(async () => success(controlState(context))),
+      listInstallations: vi.fn(async () => success([activeInstallation])),
+      repairInstallationModel: vi.fn(async () => success(activeInstallation)),
+    });
+    const onProfilesChanged = vi.fn(async () => undefined);
+    const onChatWithProfile = vi.fn();
+    render(
+      <AgentControlPanel
+        profiles={[
+          {
+            id: "installed-agent",
+            name: "Research Agent",
+            provider: "auto",
+            model: "",
+            agentInstallationId: INSTALLATION_ID,
+          },
+        ]}
+        modelProfileId="configured-source"
+        onProfilesChanged={onProfilesChanged}
+        onChatWithProfile={onChatWithProfile}
+      />,
+    );
+
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.hub.useAgent" }),
+    );
+
+    await waitFor(() =>
+      expect(api.repairInstallationModel).toHaveBeenCalledWith(
+        {
+          id: INSTALLATION_ID,
+          localProfileId: "installed-agent",
+          modelProfileId: "configured-source",
+        },
+        "USER",
+      ),
+    );
+    expect(onProfilesChanged).toHaveBeenCalledOnce();
+    expect(onChatWithProfile).toHaveBeenCalledWith("installed-agent");
+  });
+
+  it("routes an incompatible published Agent to editing instead of attempting an invalid model repair", async () => {
+    const activeInstallation = installation("active");
+    const incompatibleDraft = publishedDraft();
+    const api = installAPI({
+      listDrafts: vi.fn(async () => success([incompatibleDraft as AgentDraft])),
+      getDraft: vi.fn(async () => success(incompatibleDraft)),
+      listInstallations: vi.fn(async () => success([activeInstallation])),
+    });
+    render(
+      <AgentControlPanel
+        profiles={[
+          {
+            id: "installed-agent",
+            name: "Research Agent",
+            provider: "auto",
+            model: "",
+            agentInstallationId: INSTALLATION_ID,
+          },
+          {
+            id: "configured-source",
+            name: "Configured source",
+            provider: "custom:aera-local",
+            model: "aera-e2e-model",
+          },
+        ]}
+        modelProfileId="configured-source"
+      />,
+    );
+
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    const detailDialog = screen.getByRole("dialog", {
+      name: "Research Agent",
+    });
+    expect(
+      within(detailDialog).queryByRole("button", {
+        name: "agents.hub.useAgent",
+      }),
+    ).toBeNull();
+    fireEvent.click(
+      within(detailDialog).getByRole("button", {
+        name: "agents.control.edit",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(api.getDraft).toHaveBeenCalledWith(
+        incompatibleDraft.id,
+        undefined,
+      ),
+    );
+    expect(api.repairInstallationModel).not.toHaveBeenCalled();
+  });
+
+  it("selects a compatible newly published version before repairing its existing Runtime Profile", async () => {
+    const oldInstallation = installation("active");
+    const updatedInstallation = {
+      ...oldInstallation,
+      selectedVersionId: NEXT_VERSION_ID,
+    };
+    const compatibleDraft = {
+      ...publishedDraft(),
+      baseAgentVersionId: NEXT_VERSION_ID,
+      manifest: {
+        ...publishedDraft().manifest,
+        modelConstraints: {
+          allowedProviders: ["custom:aera-local"],
+          allowedModels: ["aera-e2e-model"],
+        },
+      },
+      publishedRevision: {
+        revision: 1,
+        definitionId: DEFINITION_ID,
+        versionId: NEXT_VERSION_ID,
+      },
+    };
+    const calls: string[] = [];
+    const api = installAPI({
+      listDrafts: vi.fn(async () => success([compatibleDraft as AgentDraft])),
+      listDefinitions: vi.fn(async () =>
+        success([
+          {
+            ...definition(),
+            latestVersionId: NEXT_VERSION_ID,
+          },
+        ]),
+      ),
+      listInstallations: vi.fn(async () => success([oldInstallation])),
+      selectInstallationVersion: vi.fn(async () => {
+        calls.push("select");
+        return success(updatedInstallation);
+      }),
+      repairInstallationModel: vi.fn(async () => {
+        calls.push("repair");
+        return success(updatedInstallation);
+      }),
+    });
+    const onProfilesChanged = vi.fn(async () => undefined);
+    const onChatWithProfile = vi.fn();
+    render(
+      <AgentControlPanel
+        profiles={[
+          {
+            id: "installed-agent",
+            name: "Research Agent",
+            provider: "auto",
+            model: "",
+            agentInstallationId: INSTALLATION_ID,
+          },
+          {
+            id: "configured-source",
+            name: "Configured source",
+            provider: "custom:aera-local",
+            model: "aera-e2e-model",
+          },
+        ]}
+        modelProfileId="configured-source"
+        onProfilesChanged={onProfilesChanged}
+        onChatWithProfile={onChatWithProfile}
+      />,
+    );
+
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.hub.useAgent" }),
+    );
+
+    await waitFor(() => expect(api.repairInstallationModel).toHaveBeenCalled());
+    expect(calls).toEqual(["select", "repair"]);
+    expect(api.selectInstallationVersion).toHaveBeenCalledWith(
+      {
+        id: INSTALLATION_ID,
+        versionId: NEXT_VERSION_ID,
+        localProfileId: "installed-agent",
+      },
+      undefined,
+    );
+    expect(onProfilesChanged).toHaveBeenCalledOnce();
+    expect(onChatWithProfile).toHaveBeenCalledWith("installed-agent");
+  });
+
+  it("re-seeds a configured Runtime Profile after selecting a newly published model route", async () => {
+    const oldInstallation = installation("active");
+    const updatedInstallation = {
+      ...oldInstallation,
+      selectedVersionId: NEXT_VERSION_ID,
+    };
+    const updatedDraft = {
+      ...publishedDraft(),
+      baseAgentVersionId: NEXT_VERSION_ID,
+      manifest: {
+        ...publishedDraft().manifest,
+        modelConstraints: {
+          allowedProviders: ["custom:aera-local"],
+          allowedModels: ["aera-e2e-model"],
+        },
+      },
+      publishedRevision: {
+        revision: 1,
+        definitionId: DEFINITION_ID,
+        versionId: NEXT_VERSION_ID,
+      },
+    };
+    const calls: string[] = [];
+    const api = installAPI({
+      listDrafts: vi.fn(async () => success([updatedDraft as AgentDraft])),
+      listDefinitions: vi.fn(async () =>
+        success([
+          {
+            ...definition(),
+            latestVersionId: NEXT_VERSION_ID,
+          },
+        ]),
+      ),
+      listInstallations: vi.fn(async () => success([oldInstallation])),
+      selectInstallationVersion: vi.fn(async () => {
+        calls.push("select");
+        return success(updatedInstallation);
+      }),
+      repairInstallationModel: vi.fn(async () => {
+        calls.push("repair");
+        return success(updatedInstallation);
+      }),
+    });
+    const onChatWithProfile = vi.fn();
+    render(
+      <AgentControlPanel
+        profiles={[
+          {
+            id: "configured-source",
+            name: "Configured source",
+            provider: "custom:aera-local",
+            model: "aera-e2e-model",
+          },
+          {
+            id: "installed-agent",
+            name: "Research Agent",
+            agentInstallationId: INSTALLATION_ID,
+            provider: "openai",
+            model: "gpt-5.6",
+          },
+        ]}
+        modelProfileId="configured-source"
+        onChatWithProfile={onChatWithProfile}
+      />,
+    );
+
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.hub.useAgent" }),
+    );
+
+    await waitFor(() => expect(api.repairInstallationModel).toHaveBeenCalled());
+    expect(calls).toEqual(["select", "repair"]);
+    expect(api.repairInstallationModel).toHaveBeenCalledWith(
+      {
+        id: INSTALLATION_ID,
+        localProfileId: "installed-agent",
+        modelProfileId: "configured-source",
+      },
+      undefined,
+    );
+    expect(onChatWithProfile).toHaveBeenCalledWith("installed-agent");
   });
 
   it("shows cached Organization content read-only while offline", async () => {
@@ -835,7 +1298,7 @@ describe("AgentControlPanel", () => {
     );
   });
 
-    // @lat: [[agentera-agent-control-plane#AgentEra Agent control plane V1#Trusted Workspace Agent context#Context-only refresh]]
+  // @lat: [[agentera-agent-control-plane#AgentEra Agent control plane V1#Trusted Workspace Agent context#Context-only refresh]]
   it("keeps the create-and-publish workflow open across same-context state invalidations", async () => {
     const current = controlState();
     const created = draft();
@@ -911,6 +1374,7 @@ describe("AgentControlPanel", () => {
     await waitFor(() =>
       expect(api.confirmPublication).toHaveBeenCalledWith(
         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        undefined,
       ),
     );
   });
@@ -1020,7 +1484,12 @@ describe("AgentControlPanel", () => {
         success(installation("active")),
       ),
     });
-    render(<AgentControlPanel profiles={[]} />);
+    render(
+      <AgentControlPanel
+        profiles={[configuredModelProfile()]}
+        modelProfileId="configured-source"
+      />,
+    );
 
     fireEvent.click(
       (await screen.findByText("Research Agent")).closest("button")!,
@@ -1029,17 +1498,239 @@ describe("AgentControlPanel", () => {
       screen.getByRole("button", { name: "agents.control.retryAgent" }),
     );
     await waitFor(() =>
-      expect(api.retryPendingInstallation).toHaveBeenCalledWith({
-        id: INSTALLATION_ID,
-        target: {
-          kind: "fresh",
-          profileName: "Research Agent",
+      expect(api.retryPendingInstallation).toHaveBeenCalledWith(
+        {
+          id: INSTALLATION_ID,
+          target: {
+            kind: "fresh",
+            profileName: "aera-agent-11111111-111",
+            modelProfileId: "configured-source",
+          },
         },
-      }),
+        undefined,
+      ),
     );
     expect(
       screen.queryByRole("dialog", { name: "agents.control.retryTitle" }),
     ).toBeNull();
+  });
+
+  it("retries a pending Agent through its already prepared runtime instead of opening chat", async () => {
+    const pendingWithProfile = {
+      ...installation("pending"),
+      runtimeProfileId: "44444444-4444-4444-8444-444444444444",
+      retryCode: "activation_failed",
+    };
+    const api = installAPI({
+      listInstallations: vi.fn(async () => success([pendingWithProfile])),
+      retryPendingInstallation: vi.fn(async () =>
+        success(installation("active")),
+      ),
+    });
+    const onChatWithProfile = vi.fn();
+    render(
+      <AgentControlPanel
+        profiles={[
+          configuredModelProfile(),
+          {
+            id: "prepared-agent",
+            name: "Research Agent",
+            agentInstallationId: INSTALLATION_ID,
+            provider: "openai",
+            model: "gpt-5.6",
+          },
+        ]}
+        modelProfileId="configured-source"
+        onChatWithProfile={onChatWithProfile}
+      />,
+    );
+
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.control.retryAgent" }),
+    );
+
+    await waitFor(() =>
+      expect(api.retryPendingInstallation).toHaveBeenCalledWith(
+        {
+          id: INSTALLATION_ID,
+          target: {
+            kind: "claim",
+            localProfileId: "prepared-agent",
+            confirmation: "claim-existing-profile",
+          },
+        },
+        undefined,
+      ),
+    );
+    expect(api.installVersion).not.toHaveBeenCalled();
+    expect(onChatWithProfile).not.toHaveBeenCalled();
+  });
+
+  it("activates an existing pending v1 runtime before selecting and re-seeding published v2", async () => {
+    const pendingWithProfile = {
+      ...installation("pending"),
+      runtimeProfileId: "44444444-4444-4444-8444-444444444444",
+      retryCode: "activation_failed",
+    };
+    const activeV1 = installation("active");
+    const activeV2 = {
+      ...activeV1,
+      selectedVersionId: NEXT_VERSION_ID,
+    };
+    const calls: string[] = [];
+    const api = installAPI({
+      listDefinitions: vi.fn(async () =>
+        success([
+          {
+            ...definition(),
+            latestVersionId: NEXT_VERSION_ID,
+          },
+        ]),
+      ),
+      listInstallations: vi.fn(async () => success([pendingWithProfile])),
+      retryPendingInstallation: vi.fn(async () => {
+        calls.push("activate-v1");
+        return success(activeV1);
+      }),
+      selectInstallationVersion: vi.fn(async () => {
+        calls.push("select-v2");
+        return success(activeV2);
+      }),
+      repairInstallationModel: vi.fn(async () => {
+        calls.push("seed-v2");
+        return success(activeV2);
+      }),
+    });
+    const onAgentReady = vi.fn(async () => true);
+    render(
+      <AgentControlPanel
+        profiles={[
+          {
+            id: "configured-source",
+            name: "Configured source",
+            provider: "custom:aera-local",
+            model: "aera-e2e-model",
+          },
+          {
+            id: "prepared-agent",
+            name: "Research Agent",
+            agentInstallationId: INSTALLATION_ID,
+            provider: "openai",
+            model: "gpt-5.6",
+          },
+        ]}
+        modelProfileId="configured-source"
+        onAgentReady={onAgentReady}
+      />,
+    );
+
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.control.retryAgent" }),
+    );
+
+    await waitFor(() => expect(api.repairInstallationModel).toHaveBeenCalled());
+    expect(calls).toEqual(["activate-v1", "select-v2", "seed-v2"]);
+    expect(api.retryPendingInstallation).toHaveBeenCalledWith(
+      {
+        id: INSTALLATION_ID,
+        target: {
+          kind: "claim",
+          localProfileId: "prepared-agent",
+          confirmation: "claim-existing-profile",
+        },
+      },
+      undefined,
+    );
+    expect(api.selectInstallationVersion).toHaveBeenCalledWith(
+      {
+        id: INSTALLATION_ID,
+        versionId: NEXT_VERSION_ID,
+        localProfileId: "prepared-agent",
+      },
+      undefined,
+    );
+    expect(api.repairInstallationModel).toHaveBeenCalledWith(
+      {
+        id: INSTALLATION_ID,
+        localProfileId: "prepared-agent",
+        modelProfileId: "configured-source",
+      },
+      undefined,
+    );
+    expect(onAgentReady).toHaveBeenCalledWith(INSTALLATION_ID);
+  });
+
+  it("archives a profile-less pending v1 before installing a newly published v2", async () => {
+    const calls: string[] = [];
+    const oldPending = installation("pending");
+    const archived = {
+      ...oldPending,
+      status: "archived" as const,
+      retryCode: null,
+    };
+    const installed = {
+      ...installation("active"),
+      id: "bbbbbbbb-3333-4333-8333-333333333333",
+      selectedVersionId: NEXT_VERSION_ID,
+    };
+    const api = installAPI({
+      listDefinitions: vi.fn(async () =>
+        success([
+          {
+            ...definition(),
+            latestVersionId: NEXT_VERSION_ID,
+          },
+        ]),
+      ),
+      listInstallations: vi.fn(async () => success([oldPending])),
+      archiveInstallation: vi.fn(async () => {
+        calls.push("archive");
+        return success(archived);
+      }),
+      installVersion: vi.fn(async () => {
+        calls.push("install-v2");
+        return success(installed);
+      }),
+    });
+    const onAgentReady = vi.fn(async () => true);
+    render(
+      <AgentControlPanel
+        profiles={[configuredModelProfile()]}
+        modelProfileId="configured-source"
+        onAgentReady={onAgentReady}
+      />,
+    );
+
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.control.retryAgent" }),
+    );
+
+    await waitFor(() => expect(api.installVersion).toHaveBeenCalled());
+    expect(calls).toEqual(["archive", "install-v2"]);
+    expect(api.archiveInstallation).toHaveBeenCalledWith(
+      INSTALLATION_ID,
+      undefined,
+    );
+    expect(api.installVersion).toHaveBeenCalledWith(
+      {
+        definitionId: DEFINITION_ID,
+        versionId: NEXT_VERSION_ID,
+        profileName: "aera-agent-11111111-111",
+        modelProfileId: "configured-source",
+      },
+      undefined,
+    );
+    expect(api.retryPendingInstallation).not.toHaveBeenCalled();
+    expect(onAgentReady).toHaveBeenCalledWith(installed.id);
   });
 
   it("archives an active Agent without exposing or deleting its local runtime", async () => {
@@ -1076,7 +1767,10 @@ describe("AgentControlPanel", () => {
       screen.getByRole("button", { name: "agents.control.confirmArchive" }),
     );
     await waitFor(() =>
-      expect(api.archiveInstallation).toHaveBeenCalledWith(INSTALLATION_ID),
+      expect(api.archiveInstallation).toHaveBeenCalledWith(
+        INSTALLATION_ID,
+        undefined,
+      ),
     );
   });
 

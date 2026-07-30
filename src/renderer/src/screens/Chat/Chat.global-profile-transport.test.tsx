@@ -229,7 +229,24 @@ describe("Chat global-profile transport freeze", () => {
     });
   });
 
-    // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Account-required routing#Chat transport privacy]]
+  it("fails closed when immutable conversation context preparation fails", async () => {
+    prepareConversationContext.mockRejectedValueOnce(
+      new Error("boundary_conflict"),
+    );
+
+    render(<Chat runId="conflicted-run" profile="published-agent" />);
+
+    await waitFor(() => {
+      expect(prepareConversationContext).toHaveBeenCalledWith({
+        runId: "conflicted-run",
+        profile: "published-agent",
+        resumeSessionId: null,
+      });
+      expect(dashboard.enabledValues.at(-1)).toBe(false);
+    });
+  });
+
+  // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Account-required routing#Chat transport privacy]]
   it("does not read account-owned connection configuration for a guest chat", async () => {
     const getConnectionConfig = window.hermesAPI
       .getConnectionConfig as ReturnType<typeof vi.fn>;

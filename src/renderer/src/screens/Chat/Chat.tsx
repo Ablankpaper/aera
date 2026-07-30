@@ -295,9 +295,9 @@ function Chat({
       setGlobalProfileRequiresBoundTransport(true);
       const api = window.agenteraGlobalProfile;
       if (!api?.prepareConversationContext) {
-        if (requestId === globalProfileContextRequestRef.current) {
-          setGlobalProfileRequiresBoundTransport(false);
-        }
+        // Fail closed: an installed Agent must never silently fall back to an
+        // unbound dashboard transport when its immutable context cannot be
+        // prepared.
         return;
       }
       try {
@@ -313,11 +313,9 @@ function Chat({
           );
         }
       } catch {
-        // Context preparation is additive. If the Aera-owned snapshot cannot be
-        // prepared, keep native Hermes chat available without injecting it.
-        if (requestId === globalProfileContextRequestRef.current) {
-          setGlobalProfileRequiresBoundTransport(false);
-        }
+        // ConversationBoundary and RuntimeBinding are security/data-boundary
+        // primitives, not optional decoration. Keep the bound IPC transport
+        // required so the main process can reject or recover explicitly.
       }
     },
     [profile, runId],

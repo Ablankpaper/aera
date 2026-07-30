@@ -8,7 +8,7 @@ import {
   type ChatRun,
   mintRun,
   patchRun,
-  isScratchRun,
+  openProfileRunTransition,
   openSessionRunTransition,
   findRunBySession,
   cycleRunId,
@@ -535,18 +535,9 @@ function Layout({
   const handleChatWithProfile = useCallback(
     (name: string) => {
       setActiveProfile(name);
-      const active = runs.find((r) => r.runId === activeRunId);
-      if (active && isScratchRun(active)) {
-        setRuns((prev) =>
-          prev.map((r) =>
-            r.runId === active.runId ? { ...r, profile: name } : r,
-          ),
-        );
-      } else {
-        const run = mintRun(name);
-        setRuns((prev) => [...prev, run]);
-        setActiveRunId(run.runId);
-      }
+      const transition = openProfileRunTransition(runs, activeRunId, name);
+      setRuns(transition.runs);
+      setActiveRunId(transition.activeRunId);
       goTo("chat");
     },
     [runs, activeRunId, goTo],
@@ -718,11 +709,7 @@ function Layout({
       <aside className="sidebar">
         <div className="sidebar-brand">
           <div className="sidebar-product" aria-label="Aera">
-            <img
-              className="sidebar-logo"
-              src={agentEraIcon}
-              alt="Aera"
-            />
+            <img className="sidebar-logo" src={agentEraIcon} alt="Aera" />
             <span className="sidebar-wordmark">Aera</span>
           </div>
           <button

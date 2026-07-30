@@ -6,9 +6,11 @@ import type {
   AgenteraAgentControlContext,
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
+  AgenteraAgentOperationScope,
   AgenteraAgentVersionSummary,
   AgenteraClaimVersionInput,
   AgenteraInstallVersionInput,
+  AgenteraRepairInstallationModelInput,
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
@@ -502,61 +504,82 @@ export class AgenteraAgentControlManager {
     this.emitState();
   }
 
-  listDrafts(): AgentDraft[] {
-    this.assertDraftReadAccess();
-    return this.requireDrafts().listDrafts();
+  listDrafts(scope?: AgenteraAgentOperationScope): AgentDraft[] {
+    const context = this.operationAssetContext(scope);
+    this.assertDraftReadAccess(context);
+    return this.requireDrafts(context).listDrafts();
   }
 
-  getDraft(id: string): AgentDraftDetail {
-    this.assertDraftReadAccess();
-    return this.requireDrafts().getDraftDetail(id);
+  getDraft(id: string, scope?: AgenteraAgentOperationScope): AgentDraftDetail {
+    const context = this.operationAssetContext(scope);
+    this.assertDraftReadAccess(context);
+    return this.requireDrafts(context).getDraftDetail(id);
   }
 
-  createDraft(input: CreateAgentDraftInput): AgentDraftDetail {
-    this.assertAuthoringAccess();
-    const created = this.requireDrafts().createDraft(input);
-    const result = this.requireDrafts().getDraftDetail(created.id);
+  createDraft(
+    input: CreateAgentDraftInput,
+    scope?: AgenteraAgentOperationScope,
+  ): AgentDraftDetail {
+    const context = this.operationAssetContext(scope);
+    this.assertAuthoringAccess(context);
+    const drafts = this.requireDrafts(context);
+    const created = drafts.createDraft(input);
+    const result = drafts.getDraftDetail(created.id);
     this.emitState();
     return result;
   }
 
-  updateDraft(input: UpdateAgentDraftInput): AgentDraftDetail {
-    this.assertAuthoringAccess();
-    const updated = this.requireDrafts().updateDraft(input);
-    const result = this.requireDrafts().getDraftDetail(updated.id);
+  updateDraft(
+    input: UpdateAgentDraftInput,
+    scope?: AgenteraAgentOperationScope,
+  ): AgentDraftDetail {
+    const context = this.operationAssetContext(scope);
+    this.assertAuthoringAccess(context);
+    const drafts = this.requireDrafts(context);
+    const updated = drafts.updateDraft(input);
+    const result = drafts.getDraftDetail(updated.id);
     this.emitState();
     return result;
   }
 
-  deleteDraft(id: string): true {
-    this.assertAuthoringAccess();
-    this.requireDrafts().deleteDraft(id);
+  deleteDraft(id: string, scope?: AgenteraAgentOperationScope): true {
+    const context = this.operationAssetContext(scope);
+    this.assertAuthoringAccess(context);
+    this.requireDrafts(context).deleteDraft(id);
     this.emitState();
     return true;
   }
 
-  async preparePublication(id: string): Promise<PublicationPreview> {
-    this.assertWorkspacePublicationRole();
+  async preparePublication(
+    id: string,
+    scope?: AgenteraAgentOperationScope,
+  ): Promise<PublicationPreview> {
+    const context = this.operationAssetContext(scope);
+    this.assertWorkspacePublicationRole(context);
     await this.assertOnlineAccess(true);
-    const components = await this.ensureContextComponents();
+    const components = await this.ensureContextComponents(context);
     const preview = components.publisher.preparePublication(id);
     this.publicationOwners.set(
       preview.publicationHandle,
-      this.operationContextKey(),
+      this.operationContextKey(context),
     );
     return preview;
   }
 
-  async confirmPublication(handle: string): Promise<PublishedRevision> {
-    this.assertWorkspacePublicationRole();
+  async confirmPublication(
+    handle: string,
+    scope?: AgenteraAgentOperationScope,
+  ): Promise<PublishedRevision> {
+    const context = this.operationAssetContext(scope);
+    this.assertWorkspacePublicationRole(context);
     const expectedOwner = this.publicationOwners.get(handle);
     this.publicationOwners.delete(handle);
-    if (!expectedOwner || expectedOwner !== this.operationContextKey()) {
+    if (!expectedOwner || expectedOwner !== this.operationContextKey(context)) {
       throw codedError("publication_confirmation_invalid");
     }
     await this.assertOnlineAccess(true);
     const result = await (
-      await this.ensureContextComponents()
+      await this.ensureContextComponents(context)
     ).publisher.confirmPublication(handle);
     this.emitState();
     return result;
@@ -643,9 +666,11 @@ export class AgenteraAgentControlManager {
     );
   }
 
-  async listDefinitions(): Promise<AgenteraAgentDefinitionSummary[]> {
+  async listDefinitions(
+    scope?: AgenteraAgentOperationScope,
+  ): Promise<AgenteraAgentDefinitionSummary[]> {
     await this.assertOnlineAccess(false);
-    const context = this.assetContext();
+    const context = this.operationAssetContext(scope);
     const definitions =
       context.scope === "USER"
         ? await this.requireFull().client.listDefinitions()
@@ -740,9 +765,10 @@ export class AgenteraAgentControlManager {
 
   async listVersions(
     definitionId: string,
+    scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentVersionSummary[]> {
     await this.assertOnlineAccess(false);
-    const context = this.assetContext();
+    const context = this.operationAssetContext(scope);
     const versions =
       context.scope === "USER"
         ? await this.requireFull().client.listVersions(definitionId)
@@ -758,12 +784,15 @@ export class AgenteraAgentControlManager {
     return versions.map(serializeVersion);
   }
 
-  async listInstallations(): Promise<AgenteraAgentInstallationSummary[]> {
-    this.assertInstallationRole();
+  async listInstallations(
+    scope?: AgenteraAgentOperationScope,
+  ): Promise<AgenteraAgentInstallationSummary[]> {
+    const context = this.operationAssetContext(scope);
+    this.assertInstallationRole(context);
     const installationManager = (await this.ensureRuntimeComponents())
       .installations;
     return [
-      ...installationManager.listLocalInstallations(this.assetContext()),
+      ...installationManager.listLocalInstallations(context),
       ...installationManager.listManagedInstallations(),
     ].map(serializeInstallation);
   }
@@ -828,17 +857,22 @@ export class AgenteraAgentControlManager {
 
   async installVersion(
     input: AgenteraInstallVersionInput,
+    scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentInstallationSummary> {
-    this.assertInstallationRole();
+    const source = this.operationAssetContext(scope);
+    this.assertInstallationRole(source);
     await this.assertOnlineLocalRuntimeAccess();
-    const source = this.assetContext();
     const result = await (
       await this.ensureRuntimeComponents()
     ).installations.install({
       definitionId: input.definitionId,
       versionId: input.versionId,
       source,
-      profile: { kind: "fresh", name: input.profileName },
+      profile: {
+        kind: "fresh",
+        name: input.profileName,
+        modelSourceProfileId: input.modelProfileId,
+      },
     });
     this.emitState();
     return serializeInstallation(result);
@@ -868,13 +902,14 @@ export class AgenteraAgentControlManager {
 
   async claimVersion(
     input: AgenteraClaimVersionInput,
+    scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentInstallationSummary> {
-    this.assertInstallationRole();
+    const source = this.operationAssetContext(scope);
+    this.assertInstallationRole(source);
     await this.assertOnlineLocalRuntimeAccess();
     if (input.confirmation !== "claim-existing-profile") {
       throw codedError("invalid_request");
     }
-    const source = this.assetContext();
     const profiles = this.requireFull().profiles;
     const result = await (
       await this.ensureRuntimeComponents()
@@ -894,17 +929,24 @@ export class AgenteraAgentControlManager {
 
   async retryPendingInstallation(
     input: AgenteraRetryPendingInstallationInput,
+    scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentInstallationSummary> {
-    this.assertInstallationRole();
+    const context = this.operationAssetContext(scope);
+    this.assertInstallationRole(context);
     await this.assertOnlineLocalRuntimeAccess();
     const profiles = this.requireFull().profiles;
     const components = await this.ensureRuntimeComponents();
     this.assertInstallationInContext(
       components.installations.getLocalInstallation(input.id),
+      context,
     );
     const target =
       input.target.kind === "fresh"
-        ? ({ kind: "fresh", name: input.target.profileName } as const)
+        ? ({
+            kind: "fresh",
+            name: input.target.profileName,
+            modelSourceProfileId: input.target.modelProfileId,
+          } as const)
         : ({
             kind: "claim",
             profileId: input.target.localProfileId,
@@ -922,12 +964,15 @@ export class AgenteraAgentControlManager {
 
   async selectInstallationVersion(
     input: AgenteraSelectInstallationVersionInput,
+    scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentInstallationSummary> {
-    this.assertInstallationRole();
+    const context = this.operationAssetContext(scope);
+    this.assertInstallationRole(context);
     await this.assertOnlineLocalRuntimeAccess();
     const components = await this.ensureRuntimeComponents();
     this.assertInstallationInContext(
       components.installations.getLocalInstallation(input.id),
+      context,
     );
     const result = await components.installations.selectInstallationVersion({
       agentInstallationId: input.id,
@@ -940,14 +985,41 @@ export class AgenteraAgentControlManager {
     return serializeInstallation(result);
   }
 
+  async repairInstallationModel(
+    input: AgenteraRepairInstallationModelInput,
+    scope?: AgenteraAgentOperationScope,
+  ): Promise<AgenteraAgentInstallationSummary> {
+    const context = this.operationAssetContext(scope);
+    this.assertInstallationRole(context);
+    await this.assertOnlineLocalRuntimeAccess();
+    const components = await this.ensureRuntimeComponents();
+    this.assertInstallationInContext(
+      components.installations.getLocalInstallation(input.id),
+      context,
+    );
+    const result = await components.installations.repairInstallationModel({
+      agentInstallationId: input.id,
+      profilePath: this.requireFull().profiles.resolveProfilePath(
+        input.localProfileId,
+      ),
+      localProfileId: input.localProfileId,
+      modelSourceProfileId: input.modelProfileId,
+    });
+    this.emitState();
+    return serializeInstallation(result);
+  }
+
   async archiveInstallation(
     id: string,
+    scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentInstallationSummary> {
-    this.assertInstallationRole();
+    const context = this.operationAssetContext(scope);
+    this.assertInstallationRole(context);
     await this.assertOnlineAccess(true);
     const components = await this.ensureRuntimeComponents();
     this.assertInstallationInContext(
       components.installations.getLocalInstallation(id),
+      context,
     );
     const result = await components.installations.archiveInstallation(id);
     this.emitState();
@@ -1109,12 +1181,14 @@ export class AgenteraAgentControlManager {
     return options as FullAgentControlOptions;
   }
 
-  private requireDrafts(): AgentDraftStore {
+  private requireDrafts(
+    context: AgentAssetContext = this.assetContext(),
+  ): AgentDraftStore {
     const full = this.requireFull();
     return new AgentDraftStore({
       database: full.database,
       owner: full.getOwner(),
-      context: this.assetContext(),
+      context,
     });
   }
 
@@ -1141,13 +1215,22 @@ export class AgenteraAgentControlManager {
     return this.context();
   }
 
-  private operationContextKey(): string {
-    return `${runtimeComponentKey(this.owner())}\0${contextKey(this.context())}`;
+  private operationAssetContext(
+    scope?: AgenteraAgentOperationScope,
+  ): AgentAssetContext {
+    return scope === "USER" ? { scope: "USER" } : this.assetContext();
   }
 
-  private assertWorkspacePublicationRole(): void {
+  private operationContextKey(
+    context: AgentAssetContext = this.assetContext(),
+  ): string {
+    return `${runtimeComponentKey(this.owner())}\0${contextKey(context)}`;
+  }
+
+  private assertWorkspacePublicationRole(
+    context: AgentAssetContext = this.assetContext(),
+  ): void {
     this.assertLocalAccess();
-    const context = this.assetContext();
     if (context.scope === "ORGANIZATION") {
       throw codedError("organization_agent_forbidden");
     }
@@ -1164,9 +1247,10 @@ export class AgenteraAgentControlManager {
     }
   }
 
-  private assertAuthoringAccess(): void {
+  private assertAuthoringAccess(
+    context: AgentAssetContext = this.assetContext(),
+  ): void {
     this.assertLocalAccess();
-    const context = this.assetContext();
     if (context.scope === "USER") return;
     if (context.scope === "WORKSPACE" && context.role === "member") {
       throw codedError("workspace_forbidden");
@@ -1184,9 +1268,10 @@ export class AgenteraAgentControlManager {
     }
   }
 
-  private assertDraftReadAccess(): void {
+  private assertDraftReadAccess(
+    context: AgentAssetContext = this.assetContext(),
+  ): void {
     this.assertLocalAccess();
-    const context = this.assetContext();
     if (
       context.scope === "ORGANIZATION" &&
       context.role !== "owner" &&
@@ -1215,9 +1300,10 @@ export class AgenteraAgentControlManager {
     }
   }
 
-  private assertInstallationRole(): void {
+  private assertInstallationRole(
+    context: AgentAssetContext = this.assetContext(),
+  ): void {
     this.assertLocalAccess();
-    const context = this.assetContext();
     if (context.scope === "ORGANIZATION" && context.role === "auditor") {
       throw codedError("organization_agent_forbidden");
     }
@@ -1225,8 +1311,9 @@ export class AgenteraAgentControlManager {
 
   private assertInstallationInContext(
     installation: LocalAgentInstallation,
+    context: AgentAssetContext = this.assetContext(),
   ): void {
-    if (!installationMatchesContext(installation, this.assetContext())) {
+    if (!installationMatchesContext(installation, context)) {
       throw codedError("installation_not_found");
     }
   }
@@ -1333,12 +1420,13 @@ export class AgenteraAgentControlManager {
     return this.runtime;
   }
 
-  private async ensureContextComponents(): Promise<ContextComponents> {
+  private async ensureContextComponents(
+    context: AgentAssetContext = this.assetContext(),
+  ): Promise<ContextComponents> {
     const full = this.requireFull();
     if (!this.trust) throw codedError("operation_failed");
     const runtime = await this.ensureRuntimeComponents();
     const owner = full.getOwner();
-    const context = this.assetContext();
     const key = `${runtime.key}\0${contextKey(context)}`;
     if (this.contextComponents?.key === key) return this.contextComponents;
     this.publicationOwners.clear();

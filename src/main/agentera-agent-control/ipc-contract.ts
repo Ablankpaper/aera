@@ -5,9 +5,11 @@ import type {
   AgenteraAgentControlResult,
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
+  AgenteraAgentOperationScope,
   AgenteraAgentVersionSummary,
   AgenteraClaimVersionInput,
   AgenteraInstallVersionInput,
+  AgenteraRepairInstallationModelInput,
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
@@ -97,6 +99,14 @@ export function parseAgentControlId(value: unknown): string {
   return value.toLowerCase();
 }
 
+export function parseAgentOperationScope(
+  value: unknown,
+): AgenteraAgentOperationScope | undefined {
+  if (value === undefined) return undefined;
+  if (value !== "USER") return invalidRequest();
+  return value;
+}
+
 function parseProfileId(value: unknown): string {
   if (typeof value !== "string" || !PROFILE_ID_PATTERN.test(value)) {
     return invalidRequest();
@@ -145,13 +155,24 @@ export function parseUpdateDraftInput(value: unknown): UpdateAgentDraftInput {
 export function parseInstallVersionInput(
   value: unknown,
 ): AgenteraInstallVersionInput {
-  if (!exactObject(value, ["definitionId", "versionId", "profileName"])) {
+  if (
+    !exactObject(value, ["definitionId", "versionId", "profileName"]) &&
+    !exactObject(value, [
+      "definitionId",
+      "versionId",
+      "profileName",
+      "modelProfileId",
+    ])
+  ) {
     return invalidRequest();
   }
   return {
     definitionId: parseAgentControlId(value.definitionId),
     versionId: parseAgentControlId(value.versionId),
     profileName: parseProfileId(value.profileName),
+    ...(Object.hasOwn(value, "modelProfileId")
+      ? { modelProfileId: parseProfileId(value.modelProfileId) }
+      : {}),
   };
 }
 
@@ -198,12 +219,19 @@ export function parseRetryPendingInstallationInput(
   if (!exactObject(value, ["id", "target"])) return invalidRequest();
   const id = parseAgentControlId(value.id);
   const target = value.target;
-  if (exactObject(target, ["kind", "profileName"]) && target.kind === "fresh") {
+  if (
+    (exactObject(target, ["kind", "profileName"]) ||
+      exactObject(target, ["kind", "profileName", "modelProfileId"])) &&
+    target.kind === "fresh"
+  ) {
     return {
       id,
       target: {
         kind: "fresh",
         profileName: parseProfileId(target.profileName),
+        ...(Object.hasOwn(target, "modelProfileId")
+          ? { modelProfileId: parseProfileId(target.modelProfileId) }
+          : {}),
       },
     };
   }
@@ -234,6 +262,19 @@ export function parseSelectInstallationVersionInput(
     id: parseAgentControlId(value.id),
     versionId: parseAgentControlId(value.versionId),
     localProfileId: parseProfileId(value.localProfileId),
+  };
+}
+
+export function parseRepairInstallationModelInput(
+  value: unknown,
+): AgenteraRepairInstallationModelInput {
+  if (!exactObject(value, ["id", "localProfileId", "modelProfileId"])) {
+    return invalidRequest();
+  }
+  return {
+    id: parseAgentControlId(value.id),
+    localProfileId: parseProfileId(value.localProfileId),
+    modelProfileId: parseProfileId(value.modelProfileId),
   };
 }
 

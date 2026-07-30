@@ -73,6 +73,7 @@ type AgentInstallationRetryCode =
   | "materialization_policy_failed"
   | "materialization_projection_failed"
   | "profile_creation_failed"
+  | "profile_model_configuration_failed"
   | "profile_attachment_failed"
   | "profile_projection_failed"
   | "managed_update_target_failed"
@@ -166,10 +167,15 @@ export interface AgentInstallationProfileAdapter {
   deleteProfile(profileId: string): { success: boolean; error?: string };
   resolveProfilePath(profileId: string): string;
   activateProfile(profileId: string): void;
+  configureFreshProfileModel?: (input: {
+    sourceProfileId: string;
+    targetProfileId: string;
+    version: AgentVersion;
+  }) => void;
 }
 
 export type AgentInstallationProfileTarget =
-  | { kind: "fresh"; name: string }
+  | { kind: "fresh"; name: string; modelSourceProfileId?: string }
   | { kind: "claim"; profileId: string; profilePath: string };
 
 export type AgentInstallationSource =
@@ -1490,6 +1496,80 @@ export class AgentInstallationManager {
     return this.getLocalInstallation(local.agentInstallationId);
   }
 
+  async repairInstallationModel(input: {
+    agentInstallationId: string;
+    profilePath: string;
+    localProfileId: string;
+    modelSourceProfileId: string;
+  }): Promise<LocalAgentInstallation> {
+    const local = this.getLocalInstallation(input.agentInstallationId);
+    if (
+      local.status !== "active" ||
+      local.runtimeProfileId === null ||
+      input.localProfileId === input.modelSourceProfileId
+    ) {
+      throw new AgentInstallationManagerError("installation_conflict");
+    }
+
+    try {
+      const targetBinding = this.profileBindings.verifyProfileBinding(
+        input.profilePath,
+        this.owner,
+      );
+      if (
+        targetBinding.agentInstallationId !== local.agentInstallationId ||
+        targetBinding.runtimeProfileId !== local.runtimeProfileId
+      ) {
+        throw new AgentInstallationManagerError("installation_conflict");
+      }
+      this.profileBindings.verifyProfileBinding(
+        this.profiles.resolveProfilePath(input.modelSourceProfileId),
+        this.owner,
+      );
+    } catch {
+      throw new AgentInstallationManagerError("profile_binding_failed");
+    }
+
+    let version: AgentVersion;
+    try {
+      version = this.cache.getVerifiedVersion(local.selectedVersionId);
+      assertVersion(version, local.definitionId, local.selectedVersionId);
+    } catch {
+      throw new AgentInstallationManagerError("materialization_failed");
+    }
+
+    try {
+      if (!this.profiles.configureFreshProfileModel) {
+        throw new Error("Runtime Profile model configuration is unavailable.");
+      }
+      this.profiles.configureFreshProfileModel({
+        sourceProfileId: input.modelSourceProfileId,
+        targetProfileId: input.localProfileId,
+        version,
+      });
+    } catch {
+      throw new AgentInstallationManagerError("profile_binding_failed");
+    }
+
+    this.database.sqlite
+      .prepare(
+        `UPDATE local_agent_installations
+         SET retry_code = NULL, updated_at = ?
+         WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
+           AND device_installation_id = ? AND status = 'active'
+           AND runtime_profile_id = ?`,
+      )
+      .run(
+        timestamp(this.now),
+        local.agentInstallationId,
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+        local.runtimeProfileId,
+      );
+    return this.getLocalInstallation(local.agentInstallationId);
+  }
+
   async applyManagedOfficialUpdate(
     agentInstallationIdInput: string,
   ): Promise<LocalAgentInstallation> {
@@ -1818,21 +1898,51 @@ export class AgentInstallationManager {
 
     let profilePath: string;
     let binding: RuntimeOwnerBinding;
+    let createdFreshProfile: {
+      id: string;
+      path: string;
+      runtimeProfileId: string;
+    } | null = null;
     let profileStage: AgentInstallationRetryCode = "profile_creation_failed";
     try {
       if (local.runtimeProfileId !== null && target.kind !== "claim") {
         throw new AgentInstallationManagerError("installation_conflict");
       }
       if (target.kind === "fresh") {
+        if (target.modelSourceProfileId) {
+          this.profileBindings.verifyProfileBinding(
+            this.profiles.resolveProfilePath(target.modelSourceProfileId),
+            this.owner,
+          );
+        }
         const created = this.profileBindings.createAndBindFreshProfile({
           name: target.name,
           owner: this.owner,
           createProfile: this.profiles.createProfile,
           resolveProfilePath: this.profiles.resolveProfilePath,
           activateProfile: this.profiles.activateProfile,
+          activate: false,
         });
         profilePath = this.profiles.resolveProfilePath(created.profileId);
         binding = created.binding;
+        createdFreshProfile = {
+          id: created.profileId,
+          path: profilePath,
+          runtimeProfileId: binding.runtimeProfileId,
+        };
+        if (target.modelSourceProfileId) {
+          profileStage = "profile_model_configuration_failed";
+          if (!this.profiles.configureFreshProfileModel) {
+            throw new Error(
+              "Fresh Profile model configuration is unavailable.",
+            );
+          }
+          this.profiles.configureFreshProfileModel({
+            sourceProfileId: target.modelSourceProfileId,
+            targetProfileId: created.profileId,
+            version,
+          });
+        }
       } else {
         profilePath = target.profilePath;
         binding = this.profileBindings.bindExistingProfile(
@@ -1869,7 +1979,55 @@ export class AgentInstallationManager {
       );
       profileStage = "profile_projection_failed";
       this.projection.activateForProfile({ projection, profilePath });
-    } catch {
+    } catch (error) {
+      if (createdFreshProfile !== null) {
+        let bindingRemoved = false;
+        try {
+          const currentBinding = this.profileBindings.verifyProfileBinding(
+            createdFreshProfile.path,
+            this.owner,
+          );
+          bindingRemoved = this.profileBindings.removeProfileBinding(
+            createdFreshProfile.path,
+            this.owner,
+            {
+              runtimeProfileId: currentBinding.runtimeProfileId,
+              agentInstallationId: currentBinding.agentInstallationId,
+            },
+          );
+        } catch (cleanupError) {
+          reportStageFailure("fresh-profile-binding-cleanup", cleanupError);
+        }
+        if (bindingRemoved) {
+          try {
+            const deleted = this.profiles.deleteProfile(createdFreshProfile.id);
+            if (!deleted.success) {
+              throw new Error(
+                deleted.error || "Fresh Profile deletion failed.",
+              );
+            }
+          } catch (cleanupError) {
+            reportStageFailure("fresh-profile-delete", cleanupError);
+          }
+          this.database.sqlite
+            .prepare(
+              `UPDATE local_agent_installations
+               SET runtime_profile_id = NULL, updated_at = ?
+               WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
+                 AND device_installation_id = ? AND status = 'pending'
+                 AND (runtime_profile_id IS NULL OR runtime_profile_id = ?)`,
+            )
+            .run(
+              timestamp(this.now),
+              local.agentInstallationId,
+              this.owner.tenantId,
+              this.owner.ownerId,
+              this.owner.deviceInstallationId,
+              createdFreshProfile.runtimeProfileId,
+            );
+        }
+      }
+      reportStageFailure("profile", error);
       this.recordFailure(local.agentInstallationId, profileStage);
       throw new AgentInstallationManagerError("profile_binding_failed");
     }
@@ -1912,6 +2070,13 @@ export class AgentInstallationManager {
           this.owner.ownerId,
           this.owner.deviceInstallationId,
         );
+      if (createdFreshProfile !== null) {
+        try {
+          this.profiles.activateProfile(createdFreshProfile.id);
+        } catch (error) {
+          reportStageFailure("fresh-profile-activation", error);
+        }
+      }
     } catch {
       this.recordFailure(local.agentInstallationId, "activation_failed");
       throw new AgentInstallationManagerError("activation_failed");

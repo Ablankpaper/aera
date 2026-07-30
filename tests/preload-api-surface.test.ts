@@ -381,6 +381,7 @@ describe("Aera Agent-control preload namespace", () => {
     "claimVersion",
     "retryPendingInstallation",
     "selectInstallationVersion",
+    "repairInstallationModel",
     "archiveInstallation",
     "listEligibleExperienceSkills",
     "prepareExperienceCandidate",

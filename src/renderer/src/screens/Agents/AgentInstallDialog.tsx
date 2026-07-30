@@ -21,6 +21,7 @@ export interface AgentInstallDialogProps {
   installation: AgenteraAgentInstallationSummary | null;
   versions: AgenteraAgentVersionSummary[];
   profiles: AgentInstallProfileOption[];
+  modelProfileId?: string;
   onClose: () => void;
   onCompleted: (installation: AgenteraAgentInstallationSummary) => void;
 }
@@ -37,6 +38,7 @@ export default function AgentInstallDialog({
   installation,
   versions,
   profiles,
+  modelProfileId,
   onClose,
   onCompleted,
 }: AgentInstallDialogProps): React.JSX.Element {
@@ -95,7 +97,11 @@ export default function AgentInstallDialog({
               id: installation.id,
               target:
                 target === "fresh"
-                  ? { kind: "fresh", profileName: profileName.trim() }
+                  ? {
+                      kind: "fresh",
+                      profileName: profileName.trim(),
+                      ...(modelProfileId ? { modelProfileId } : {}),
+                    }
                   : {
                       kind: "claim",
                       localProfileId,
@@ -107,6 +113,7 @@ export default function AgentInstallDialog({
                 definitionId,
                 versionId,
                 profileName: profileName.trim(),
+                ...(modelProfileId ? { modelProfileId } : {}),
               })
             : await window.agenteraAgents.claimVersion({
                 definitionId,

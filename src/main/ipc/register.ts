@@ -120,6 +120,7 @@ import {
   sendMessage,
   transcribeAudio,
   startGateway,
+  startGatewayWithRecovery,
   startGatewayDetailed,
   stopGateway,
   isGatewayRunning,
@@ -129,6 +130,7 @@ import {
   setSshRemoteApiKey,
   resolvePendingClarify,
 } from "../hermes";
+import { ensureProfilePortAvailable } from "../gateway-ports";
 import {
   freshDashboardWebSocketUrl,
   getDashboardStatus,
@@ -296,6 +298,7 @@ import {
 import {
   executeAgentControlIpc,
   parseAgentControlId,
+  parseAgentOperationScope,
   parseClaimVersionInput,
   parseConfirmExperienceCandidateImportInput,
   parseConfirmOfficialAgentInstallInput,
@@ -306,6 +309,7 @@ import {
   parseInstallVersionInput,
   parsePrepareExperienceCandidateInput,
   parsePrepareOrganizationReviewInput,
+  parseRepairInstallationModelInput,
   parseRetryPendingInstallationInput,
   parseReviewExperienceCandidateInput,
   parseSelectInstallationVersionInput,
@@ -1710,38 +1714,56 @@ export function registerIpcHandlers(context: IpcContext): void {
   registerAgentControlHandler("agentera-agents-get-state", () =>
     requireAgentControl().getState(),
   );
-  registerAgentControlHandler("agentera-agents-list-drafts", () =>
-    requireAgentControl().listDrafts(),
+  registerAgentControlHandler("agentera-agents-list-drafts", (_event, scope) =>
+    requireAgentControl().listDrafts(parseAgentOperationScope(scope)),
   );
   registerAgentControlHandler(
     "agentera-agents-get-draft",
-    (_event, id: unknown) =>
-      requireAgentControl().getDraft(parseAgentControlId(id)),
+    (_event, id: unknown, scope: unknown) =>
+      requireAgentControl().getDraft(
+        parseAgentControlId(id),
+        parseAgentOperationScope(scope),
+      ),
   );
   registerAgentControlHandler(
     "agentera-agents-create-draft",
-    (_event, input: unknown) =>
-      requireAgentControl().createDraft(parseCreateDraftInput(input)),
+    (_event, input: unknown, scope: unknown) =>
+      requireAgentControl().createDraft(
+        parseCreateDraftInput(input),
+        parseAgentOperationScope(scope),
+      ),
   );
   registerAgentControlHandler(
     "agentera-agents-update-draft",
-    (_event, input: unknown) =>
-      requireAgentControl().updateDraft(parseUpdateDraftInput(input)),
+    (_event, input: unknown, scope: unknown) =>
+      requireAgentControl().updateDraft(
+        parseUpdateDraftInput(input),
+        parseAgentOperationScope(scope),
+      ),
   );
   registerAgentControlHandler(
     "agentera-agents-delete-draft",
-    (_event, id: unknown) =>
-      requireAgentControl().deleteDraft(parseAgentControlId(id)),
+    (_event, id: unknown, scope: unknown) =>
+      requireAgentControl().deleteDraft(
+        parseAgentControlId(id),
+        parseAgentOperationScope(scope),
+      ),
   );
   registerAgentControlHandler(
     "agentera-agents-prepare-publication",
-    (_event, id: unknown) =>
-      requireAgentControl().preparePublication(parseAgentControlId(id)),
+    (_event, id: unknown, scope: unknown) =>
+      requireAgentControl().preparePublication(
+        parseAgentControlId(id),
+        parseAgentOperationScope(scope),
+      ),
   );
   registerAgentControlHandler(
     "agentera-agents-confirm-publication",
-    (_event, handle: unknown) =>
-      requireAgentControl().confirmPublication(parseAgentControlId(handle)),
+    (_event, handle: unknown, scope: unknown) =>
+      requireAgentControl().confirmPublication(
+        parseAgentControlId(handle),
+        parseAgentOperationScope(scope),
+      ),
   );
   registerAgentControlHandler(
     "agentera-agents-prepare-organization-submission",
@@ -1813,8 +1835,10 @@ export function registerIpcHandlers(context: IpcContext): void {
         ),
       ),
   );
-  registerAgentControlHandler("agentera-agents-list-definitions", () =>
-    requireAgentControl().listDefinitions(),
+  registerAgentControlHandler(
+    "agentera-agents-list-definitions",
+    (_event, scope) =>
+      requireAgentControl().listDefinitions(parseAgentOperationScope(scope)),
   );
   registerAgentControlHandler("agentera-agents-list-official", () =>
     requireAgentControl().listOfficialAgents(),
@@ -1852,40 +1876,64 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
   registerAgentControlHandler(
     "agentera-agents-list-versions",
-    (_event, definitionId: unknown) =>
-      requireAgentControl().listVersions(parseAgentControlId(definitionId)),
+    (_event, definitionId: unknown, scope: unknown) =>
+      requireAgentControl().listVersions(
+        parseAgentControlId(definitionId),
+        parseAgentOperationScope(scope),
+      ),
   );
-  registerAgentControlHandler("agentera-agents-list-installations", () =>
-    requireAgentControl().listInstallations(),
+  registerAgentControlHandler(
+    "agentera-agents-list-installations",
+    (_event, scope) =>
+      requireAgentControl().listInstallations(parseAgentOperationScope(scope)),
   );
   registerAgentControlHandler(
     "agentera-agents-install-version",
-    (_event, input: unknown) =>
-      requireAgentControl().installVersion(parseInstallVersionInput(input)),
+    (_event, input: unknown, scope: unknown) =>
+      requireAgentControl().installVersion(
+        parseInstallVersionInput(input),
+        parseAgentOperationScope(scope),
+      ),
   );
   registerAgentControlHandler(
     "agentera-agents-claim-version",
-    (_event, input: unknown) =>
-      requireAgentControl().claimVersion(parseClaimVersionInput(input)),
+    (_event, input: unknown, scope: unknown) =>
+      requireAgentControl().claimVersion(
+        parseClaimVersionInput(input),
+        parseAgentOperationScope(scope),
+      ),
   );
   registerAgentControlHandler(
     "agentera-agents-retry-installation",
-    (_event, input: unknown) =>
+    (_event, input: unknown, scope: unknown) =>
       requireAgentControl().retryPendingInstallation(
         parseRetryPendingInstallationInput(input),
+        parseAgentOperationScope(scope),
       ),
   );
   registerAgentControlHandler(
     "agentera-agents-select-version",
-    (_event, input: unknown) =>
+    (_event, input: unknown, scope: unknown) =>
       requireAgentControl().selectInstallationVersion(
         parseSelectInstallationVersionInput(input),
+        parseAgentOperationScope(scope),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-repair-installation-model",
+    (_event, input: unknown, scope: unknown) =>
+      requireAgentControl().repairInstallationModel(
+        parseRepairInstallationModelInput(input),
+        parseAgentOperationScope(scope),
       ),
   );
   registerAgentControlHandler(
     "agentera-agents-archive-installation",
-    (_event, id: unknown) =>
-      requireAgentControl().archiveInstallation(parseAgentControlId(id)),
+    (_event, id: unknown, scope: unknown) =>
+      requireAgentControl().archiveInstallation(
+        parseAgentControlId(id),
+        parseAgentOperationScope(scope),
+      ),
   );
   registerAgentControlHandler(
     "agentera-agents-list-eligible-experience-skills",
@@ -2255,7 +2303,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     action?: (
       manager: RuntimeDistributionManager,
     ) =>
-      RuntimeDistributionPublicState | Promise<RuntimeDistributionPublicState>,
+      | RuntimeDistributionPublicState
+      | Promise<RuntimeDistributionPublicState>,
   ): Promise<RuntimeDistributionPublicState> => {
     if (runtimeDistribution === null) {
       return serializeRuntimeDistributionPublicState(
@@ -3356,7 +3405,17 @@ export function registerIpcHandlers(context: IpcContext): void {
           );
         }
         if (!isRemoteMode() && !isGatewayRunning(profile)) {
+          // A named Agent Profile may inherit a port already occupied by a
+          // different local Aera instance. Reconcile and await the real
+          // profile gateway before beginning a bound Agent turn.
+          await ensureProfilePortAvailable(profile);
           startGateway(profile);
+          await startGatewayWithRecovery(
+            profile,
+            preparedAgentTurn?.envelope.requireBoundApiTransport
+              ? 30_000
+              : 8_000,
+          );
         }
 
         const conn = getConnectionConfig();

@@ -100,6 +100,7 @@ import {
 } from "../agentera-product-space/db";
 import { AgenteraProductSpaceManager } from "../agentera-product-space/manager";
 import { createProfile, deleteProfile, setActiveProfile } from "../profiles";
+import { seedAgentModelProfile } from "../agentera-agent-control/model-profile-seed";
 import { AgentIdentityService } from "../agent-identity";
 import { AgentUserMemoryRepairService } from "../agent-user-memory-repair";
 import { AgenteraGlobalProfileManager } from "../agentera-global-profile/manager";
@@ -424,6 +425,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
         deleteProfile,
         resolveProfilePath: (profileId) => profileHome(profileId),
         activateProfile: setActiveProfile,
+        configureFreshProfileModel: seedAgentModelProfile,
       },
       userDataPath: app.getPath("userData"),
       getOwner: getAgenteraRuntimeOwner,

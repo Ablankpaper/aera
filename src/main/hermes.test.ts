@@ -53,7 +53,10 @@ vi.mock("./utils", () => ({
   normalizeProfileName: (p?: string) => p,
   getActiveProfileNameSync: vi.fn(() => undefined),
 }));
-vi.mock("./gateway-ports", () => ({ getProfilePort: vi.fn(() => 8642) }));
+vi.mock("./gateway-ports", () => ({
+  ensureProfilePortAvailable: vi.fn(async () => 8642),
+  getProfilePort: vi.fn(() => 8642),
+}));
 vi.mock("./models", () => ({ readModels: vi.fn(() => []) }));
 vi.mock("./secrets", () => ({ providerListSafe: vi.fn(() => ({})) }));
 vi.mock("child_process", () => {

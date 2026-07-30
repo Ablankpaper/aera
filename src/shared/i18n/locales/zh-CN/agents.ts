@@ -77,8 +77,7 @@ export default {
   walletLoadFailed: "无法加载钱包",
   walletCreateFailed: "无法添加钱包",
   walletRecoveryTitle: "助记词",
-  walletRecoveryInfo:
-    "请立即保存此助记词。关闭此窗口后，Aera 不会再次显示。",
+  walletRecoveryInfo: "请立即保存此助记词。关闭此窗口后，Aera 不会再次显示。",
   walletCopyRecovery: "复制助记词",
   walletDone: "我已保存",
   walletBalanceLoading: "加载中…",
@@ -91,8 +90,7 @@ export default {
   sync: "同步",
   syncing: "同步中…",
   syncSignedOut: "未同步",
-  syncSignedOutHint:
-    "请在提供商页面登录 Aera 账户，以将智能体备份到云端。",
+  syncSignedOutHint: "请在提供商页面登录 Aera 账户，以将智能体备份到云端。",
   syncUpToDate: "已与 Aera 账户同步",
   syncSummary:
     "同步完成：上传 {{pushed}} 项、拉取 {{pulled}} 项、新增 {{created}} 项",
@@ -100,8 +98,7 @@ export default {
   syncUnauthorized: "会话已过期，请在提供商页面重新登录",
   syncFailed: "同步失败",
   syncTitle: "云同步",
-  syncPaneSubtitle:
-    "将此智能体备份到 Aera 账户，并拉取控制台中的更改。",
+  syncPaneSubtitle: "将此智能体备份到 Aera 账户，并拉取控制台中的更改。",
   syncNow: "立即同步",
   syncAccount: "账户",
   syncLink: "云端智能体",
@@ -123,12 +120,9 @@ export default {
   walletSourceLocal: "本地",
   walletSourceCloud: "云端",
   walletManagedEmpty: "暂无钱包",
-  walletSyncedHint:
-    "钱包由 Aera 账户管理，此智能体完成同步后会显示在这里。",
-  walletSignInHint:
-    "请在提供商页面登录 Aera 账户，以查看此智能体的钱包。",
-  walletForeignHint:
-    "此智能体关联到另一个 Aera 账户，因此这里不会改动其钱包。",
+  walletSyncedHint: "钱包由 Aera 账户管理，此智能体完成同步后会显示在这里。",
+  walletSignInHint: "请在提供商页面登录 Aera 账户，以查看此智能体的钱包。",
+  walletForeignHint: "此智能体关联到另一个 Aera 账户，因此这里不会改动其钱包。",
   hub: {
     officialTab: "官方智能体",
     mineTab: "我的智能体",
@@ -136,8 +130,7 @@ export default {
     searchPlaceholder: "搜索智能体名称或能力",
     filters: "筛选智能体",
     officialTitle: "官方智能体",
-    officialSubtitle:
-      "由 Aera 官方审核发布，安装后在独立的本地空间中运行。",
+    officialSubtitle: "由 Aera 官方审核发布，安装后在独立的本地空间中运行。",
     mineSubtitle: "创建和管理属于你的智能体，点击卡片即可查看能力并开始对话。",
     workspaceSubtitle:
       "浏览当前团队或项目的智能体，或管理你有权限维护的智能体。",
@@ -168,8 +161,7 @@ export default {
     officialEmptyHint: "官方智能体发布后会显示在这里。",
     officialOfflineHint: "联网后可浏览官方目录；已启用智能体仍可在本地使用。",
     officialPublisher: "Aera 官方",
-    officialCardDescription:
-      "{{name}} 已由 Aera 官方审核，可直接开始使用。",
+    officialCardDescription: "{{name}} 已由 Aera 官方审核，可直接开始使用。",
     officialDetailFallback:
       "{{name}} 是由 Aera 官方发布的智能体，可在本地独立运行并协助完成任务。",
     personalCardFallback: "这个智能体已准备好根据你的要求完成专属任务。",
@@ -179,6 +171,8 @@ export default {
     localProfileDescription:
       "使用 {{model}} 模型，已配置 {{count}} 个 Skill，可直接进入对话。",
     localProfileNoModel: "这个本地智能体尚未配置大模型。",
+    modelRequired: "当前账号还没有可用的模型配置，请先在“模型”中完成配置。",
+    configureModelFirst: "请先配置模型",
     personalAgent: "我的智能体",
     workspaceAgent: "团队 / 项目智能体",
     organizationAgent: "企业智能体",
@@ -337,6 +331,8 @@ export default {
     runtimeModel: "运行模型",
     runtimeModelHint:
       "已自动读取你配置好的模型；选择这个智能体默认使用的模型即可。",
+    runtimeModelRequired:
+      "当前账号还没有可用于运行智能体的模型配置。你可以先发布，配置模型后再开始使用。",
     identityUpload: "导入 MD 身份文档",
     identityUploadHint: "可直接上传已有的 Markdown 提示词或身份说明。",
     fileImported: "已导入 {{name}}",

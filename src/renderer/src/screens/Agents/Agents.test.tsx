@@ -29,7 +29,7 @@ vi.mock("../../components/profile/ProfileModalContext", () => ({
   }),
 }));
 
-import Agents from "./Agents";
+import Agents, { selectAgentModelProfileId } from "./Agents";
 
 const DEFINITION_ID = "11111111-1111-4111-8111-111111111111";
 const VERSION_ID = "22222222-2222-4222-8222-222222222222";
@@ -109,7 +109,9 @@ function installHermesAPI(): {
   listProfiles: ReturnType<typeof vi.fn>;
   createProfile: ReturnType<typeof vi.fn>;
   setActiveProfile: ReturnType<typeof vi.fn>;
+  emitModelLibraryChanged: () => void;
 } {
+  let modelLibraryChanged: (() => void) | null = null;
   const api = {
     listProfiles: vi.fn(),
     createProfile: vi.fn(),
@@ -122,12 +124,21 @@ function installHermesAPI(): {
     })),
     syncAgents: vi.fn(),
     onAgentSyncUpdated: vi.fn(() => () => undefined),
+    onModelLibraryChanged: vi.fn((callback: () => void) => {
+      modelLibraryChanged = callback;
+      return () => {
+        modelLibraryChanged = null;
+      };
+    }),
   };
   Object.defineProperty(window, "hermesAPI", {
     configurable: true,
     value: api,
   });
-  return api;
+  return {
+    ...api,
+    emitModelLibraryChanged: () => modelLibraryChanged?.(),
+  };
 }
 
 function installAgenteraAPI(
@@ -215,6 +226,32 @@ function installAgenteraAPI(
 }
 
 describe("Agents unified product surface", () => {
+  it("uses a configured account Profile instead of a previously active installed Agent", () => {
+    const accountProfile = profile("account-home", {
+      name: "Account home",
+    });
+    const installedProfile = profile("previous-agent", {
+      agentInstallationId: INSTALLATION_ID,
+    });
+
+    expect(
+      selectAgentModelProfileId(
+        [installedProfile, accountProfile],
+        installedProfile.id,
+      ),
+    ).toBe(accountProfile.id);
+  });
+
+  it("reuses only the model route from a configured current-owner Agent when no account Profile is configured", () => {
+    const installedProfile = profile("configured-agent", {
+      agentInstallationId: INSTALLATION_ID,
+    });
+
+    expect(
+      selectAgentModelProfileId([installedProfile], installedProfile.id),
+    ).toBe(installedProfile.id);
+  });
+
   it("shows and opens an existing local runtime only as an Agent", async () => {
     const hermes = installHermesAPI();
     installAgenteraAPI();
@@ -243,7 +280,7 @@ describe("Agents unified product surface", () => {
     expect(screen.queryByText("agents.legacyTitle")).toBeNull();
   });
 
-    // @lat: [[agentera-agent-control-plane#AgentEra Agent control plane V1#Trusted Workspace Agent context#Product-facing Agent projection]]
+  // @lat: [[agentera-agent-control-plane#AgentEra Agent control plane V1#Trusted Workspace Agent context#Product-facing Agent projection]]
   it("automatically prepares the local runtime and opens a newly used Agent", async () => {
     const hermes = installHermesAPI();
     const defaultProfile = profile("default", {
@@ -282,16 +319,72 @@ describe("Agents unified product surface", () => {
     );
 
     await waitFor(() =>
-      expect(agentera.installVersion).toHaveBeenCalledWith({
-        definitionId: DEFINITION_ID,
-        versionId: VERSION_ID,
-        profileName: "Research Agent",
-      }),
+      expect(agentera.installVersion).toHaveBeenCalledWith(
+        {
+          definitionId: DEFINITION_ID,
+          versionId: VERSION_ID,
+          profileName: "aera-agent-11111111-111",
+          modelProfileId: "default",
+        },
+        undefined,
+      ),
     );
     await waitFor(() =>
       expect(hermes.setActiveProfile).toHaveBeenCalledWith("research-agent"),
     );
     expect(onChatWith).toHaveBeenCalledWith("research-agent");
     expect(hermes.createProfile).not.toHaveBeenCalled();
+  });
+
+  it("refreshes the Agent model source after the model library changes", async () => {
+    const hermes = installHermesAPI();
+    const unconfiguredDefault = {
+      ...profile("default", {
+        isDefault: true,
+        name: "Default Agent",
+      }),
+      model: "",
+      provider: "auto",
+    };
+    const configuredDefault = profile("default", {
+      isDefault: true,
+      name: "Default Agent",
+    });
+    hermes.listProfiles
+      .mockResolvedValueOnce([unconfiguredDefault])
+      .mockResolvedValue([configuredDefault]);
+    const agentera = installAgenteraAPI({
+      listDefinitions: vi.fn(async () => ({
+        ok: true as const,
+        data: [definition()],
+      })),
+      installVersion: vi.fn(async () => ({
+        ok: true as const,
+        data: installation(),
+      })),
+    });
+
+    render(<Agents activeProfile="default" onChatWith={vi.fn()} />);
+
+    await screen.findByText("Research Agent");
+    hermes.emitModelLibraryChanged();
+
+    await waitFor(() => expect(hermes.listProfiles).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByText("Research Agent").closest("button")!);
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.hub.useAgent" }),
+    );
+
+    await waitFor(() =>
+      expect(agentera.installVersion).toHaveBeenCalledWith(
+        {
+          definitionId: DEFINITION_ID,
+          versionId: VERSION_ID,
+          profileName: "aera-agent-11111111-111",
+          modelProfileId: "default",
+        },
+        undefined,
+      ),
+    );
   });
 });
