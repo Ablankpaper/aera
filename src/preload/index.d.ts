@@ -90,9 +90,11 @@ import type {
   AgenteraAgentControlResult,
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
+  AgenteraAgentOperationScope,
   AgenteraAgentVersionSummary,
   AgenteraClaimVersionInput,
   AgenteraInstallVersionInput,
+  AgenteraRepairInstallationModelInput,
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
@@ -492,22 +494,32 @@ interface AgenteraAgentsAPI {
   getState: () => Promise<
     AgenteraAgentControlResult<AgenteraAgentControlPublicState>
   >;
-  listDrafts: () => Promise<AgenteraAgentControlResult<AgentDraft[]>>;
+  listDrafts: (
+    scope?: AgenteraAgentOperationScope,
+  ) => Promise<AgenteraAgentControlResult<AgentDraft[]>>;
   getDraft: (
     id: string,
+    scope?: AgenteraAgentOperationScope,
   ) => Promise<AgenteraAgentControlResult<AgentDraftDetail>>;
   createDraft: (
     input: CreateAgentDraftInput,
+    scope?: AgenteraAgentOperationScope,
   ) => Promise<AgenteraAgentControlResult<AgentDraftDetail>>;
   updateDraft: (
     input: UpdateAgentDraftInput,
+    scope?: AgenteraAgentOperationScope,
   ) => Promise<AgenteraAgentControlResult<AgentDraftDetail>>;
-  deleteDraft: (id: string) => Promise<AgenteraAgentControlResult<true>>;
+  deleteDraft: (
+    id: string,
+    scope?: AgenteraAgentOperationScope,
+  ) => Promise<AgenteraAgentControlResult<true>>;
   preparePublication: (
     id: string,
+    scope?: AgenteraAgentOperationScope,
   ) => Promise<AgenteraAgentControlResult<PublicationPreview>>;
   confirmPublication: (
     publicationHandle: string,
+    scope?: AgenteraAgentOperationScope,
   ) => Promise<AgenteraAgentControlResult<PublishedRevision>>;
   prepareOrganizationSubmission: (
     draftId: string,
@@ -533,9 +545,9 @@ interface AgenteraAgentsAPI {
   confirmOrganizationWithdrawal: (
     input: ConfirmOrganizationWithdrawalInput,
   ) => Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionSummary>>;
-  listDefinitions: () => Promise<
-    AgenteraAgentControlResult<AgenteraAgentDefinitionSummary[]>
-  >;
+  listDefinitions: (
+    scope?: AgenteraAgentOperationScope,
+  ) => Promise<AgenteraAgentControlResult<AgenteraAgentDefinitionSummary[]>>;
   listOfficialAgents: () => Promise<
     AgenteraAgentControlResult<OfficialAgentSummary[]>
   >;
@@ -556,24 +568,34 @@ interface AgenteraAgentsAPI {
   ) => Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>>;
   listVersions: (
     definitionId: string,
+    scope?: AgenteraAgentOperationScope,
   ) => Promise<AgenteraAgentControlResult<AgenteraAgentVersionSummary[]>>;
-  listInstallations: () => Promise<
-    AgenteraAgentControlResult<AgenteraAgentInstallationSummary[]>
-  >;
+  listInstallations: (
+    scope?: AgenteraAgentOperationScope,
+  ) => Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary[]>>;
   installVersion: (
     input: AgenteraInstallVersionInput,
+    scope?: AgenteraAgentOperationScope,
   ) => Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>>;
   claimVersion: (
     input: AgenteraClaimVersionInput,
+    scope?: AgenteraAgentOperationScope,
   ) => Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>>;
   retryPendingInstallation: (
     input: AgenteraRetryPendingInstallationInput,
+    scope?: AgenteraAgentOperationScope,
   ) => Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>>;
   selectInstallationVersion: (
     input: AgenteraSelectInstallationVersionInput,
+    scope?: AgenteraAgentOperationScope,
+  ) => Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>>;
+  repairInstallationModel: (
+    input: AgenteraRepairInstallationModelInput,
+    scope?: AgenteraAgentOperationScope,
   ) => Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>>;
   archiveInstallation: (
     id: string,
+    scope?: AgenteraAgentOperationScope,
   ) => Promise<AgenteraAgentControlResult<AgenteraAgentInstallationSummary>>;
   listEligibleExperienceSkills: (
     installationId: string,

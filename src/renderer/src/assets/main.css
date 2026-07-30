@@ -13638,6 +13638,16 @@ body {
   margin-top: 2px;
 }
 
+.kanban-board-form-error {
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--error) 42%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--error) 9%, transparent);
+  color: var(--error);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .schedules-textarea {
   resize: vertical;
   min-height: 60px;

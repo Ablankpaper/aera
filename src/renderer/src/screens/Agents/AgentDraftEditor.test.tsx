@@ -181,6 +181,14 @@ describe("AgentDraftEditor", () => {
             baseUrl: "https://api.example.test/v1",
             createdAt: 1,
           },
+          {
+            id: "unconfigured-openai",
+            name: "Unconfigured OpenAI",
+            provider: "openai",
+            model: "gpt-5.6",
+            baseUrl: "https://api.openai.com/v1",
+            createdAt: 2,
+          },
         ]),
       },
     });
@@ -207,6 +215,9 @@ describe("AgentDraftEditor", () => {
         }),
       ).toBeTruthy(),
     );
+    expect(
+      screen.queryByRole("option", { name: "Unconfigured OpenAI · openai" }),
+    ).toBeNull();
     const identityFile = new File(
       ["# Video Producer\nYou plan short-form product videos."],
       "video-producer.md",
@@ -279,6 +290,7 @@ describe("AgentDraftEditor", () => {
           },
         ],
       }),
+      undefined,
     );
   });
 
@@ -311,6 +323,7 @@ describe("AgentDraftEditor", () => {
     );
     expect(api.updateDraft).toHaveBeenCalledWith(
       expect.objectContaining({ id: DRAFT_ID, expectedRevision: 2 }),
+      undefined,
     );
     expectNoRendererOwnershipInput(api.updateDraft);
   });
@@ -354,12 +367,90 @@ describe("AgentDraftEditor", () => {
       screen.getByRole("button", { name: "agents.control.publish" }),
     );
     await waitFor(() =>
-      expect(api.confirmPublication).toHaveBeenCalledWith(HANDLE_ID),
+      expect(api.confirmPublication).toHaveBeenCalledWith(HANDLE_ID, undefined),
     );
     expect(screen.getByText("agents.control.publishOnlySuccess")).toBeTruthy();
     expect(api.updateDraft).not.toHaveBeenCalled();
     expectNoRendererOwnershipInput(api.preparePublication);
     expectNoRendererOwnershipInput(api.confirmPublication);
+  });
+
+  it("keeps an Organization shell context while publishing explicitly scoped USER assets", async () => {
+    const published = {
+      draftId: DRAFT_ID,
+      revision: 2,
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      versionNumber: 1,
+      contentDigest: "b".repeat(64),
+      publishedAt: "2026-07-19T01:00:00.000Z",
+      replayed: false,
+    };
+    const api = installAPI({
+      preparePublication: vi.fn(async () =>
+        success({
+          publicationHandle: HANDLE_ID,
+          draftId: DRAFT_ID,
+          revision: 2,
+          targetScope: "USER" as const,
+          assetCounts: { skill: 0, sop: 0, knowledge: 0 },
+          totalBytes: 0,
+        }),
+      ),
+      confirmPublication: vi.fn(async () => success(published)),
+    });
+    render(
+      <AgentDraftEditor
+        open
+        draft={detail()}
+        operationScope="USER"
+        onClose={() => undefined}
+        onSaved={() => undefined}
+        onPublished={() => undefined}
+        onRequestInstall={() => undefined}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.control.publish" }),
+    );
+    await waitFor(() =>
+      expect(api.confirmPublication).toHaveBeenCalledWith(HANDLE_ID, "USER"),
+    );
+    expect(api.preparePublication).toHaveBeenCalledWith(DRAFT_ID, "USER");
+  });
+
+  it("prevents republishing the same unchanged signed revision", () => {
+    const published = detail(2);
+    published.publishedRevision = {
+      revision: 2,
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+    };
+    render(
+      <AgentDraftEditor
+        open
+        draft={published}
+        onClose={() => undefined}
+        onSaved={() => undefined}
+        onPublished={() => undefined}
+        onRequestInstall={() => undefined}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "agents.control.publish" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "agents.control.publishAndUse" }),
+    ).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("agents.control.systemPrompt"), {
+      target: { value: "Research carefully with a new revision." },
+    });
+    expect(
+      screen.getByRole("button", { name: "agents.control.publish" }),
+    ).toBeEnabled();
   });
 
   // @lat: [[agentera-agent-control-plane#Trusted Workspace Agent context#Role-aware presentation]]
@@ -519,6 +610,17 @@ describe("AgentDraftEditor", () => {
   });
 
   it("publishes and starts personal Agent setup in one explicit action", async () => {
+    Object.defineProperty(window, "hermesAPI", {
+      configurable: true,
+      value: {
+        getModelConfig: vi.fn(async () => ({
+          provider: "custom",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://api.example.test/v1",
+        })),
+        listModels: vi.fn(async () => []),
+      },
+    });
     const published = {
       draftId: DRAFT_ID,
       revision: 2,
@@ -542,21 +644,25 @@ describe("AgentDraftEditor", () => {
       ),
       confirmPublication: vi.fn(async () => success(published)),
     });
+    const onClose = vi.fn();
     const onRequestInstall = vi.fn();
     render(
       <AgentDraftEditor
         open
         draft={detail()}
-        onClose={() => undefined}
+        modelProfileId="account-home"
+        onClose={onClose}
         onSaved={() => undefined}
         onPublished={() => undefined}
         onRequestInstall={onRequestInstall}
       />,
     );
 
-    expect(
-      screen.getByText("agents.control.publishAndUseSequence"),
-    ).toBeTruthy();
+    await waitFor(() =>
+      expect(
+        screen.getByText("agents.control.publishAndUseSequence"),
+      ).toBeInTheDocument(),
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "agents.control.publishAndUse" }),
     );
@@ -565,12 +671,88 @@ describe("AgentDraftEditor", () => {
         definitionId: DEFINITION_ID,
         versionId: VERSION_ID,
         displayName: "Research Agent",
+        modelProfileId: "account-home",
       }),
+    );
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(onClose.mock.invocationCallOrder[0]).toBeLessThan(
+      onRequestInstall.mock.invocationCallOrder[0],
     );
     expect(
       screen.queryByRole("button", {
         name: "agents.control.confirmPublish",
       }),
     ).toBeNull();
+  });
+
+  it("moves a stale named custom draft onto the current Runtime provider identity", async () => {
+    Object.defineProperty(window, "hermesAPI", {
+      configurable: true,
+      value: {
+        getModelConfig: vi.fn(async () => ({
+          provider: "custom:aera-e2e",
+          model: "aera-e2e-model",
+          baseUrl: "http://127.0.0.1:18088/v1",
+        })),
+        listModels: vi.fn(async () => [
+          {
+            id: "aera-e2e-model",
+            name: "aera-e2e-model",
+            provider: "custom",
+            providerLabel: "Aera E2E",
+            model: "aera-e2e-model",
+            baseUrl: "http://127.0.0.1:18088/v1",
+            createdAt: 1,
+          },
+        ]),
+      },
+    });
+    const stale = detail();
+    stale.manifest.modelConstraints = {
+      allowedProviders: ["custom:aera-本地-e2e-模型"],
+      allowedModels: ["aera-e2e-model"],
+    };
+    installAPI();
+
+    render(
+      <AgentDraftEditor
+        open
+        draft={stale}
+        modelProfileId="account-home"
+        onClose={() => undefined}
+        onSaved={() => undefined}
+        onPublished={() => undefined}
+        onRequestInstall={() => undefined}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("agents.control.runtimeModel")).toHaveValue(
+        "custom:aera-e2e\u0000aera-e2e-model",
+      ),
+    );
+  });
+
+  it("keeps publish available but blocks publish-and-use without an account model Profile", () => {
+    render(
+      <AgentDraftEditor
+        open
+        draft={detail()}
+        onClose={() => undefined}
+        onSaved={() => undefined}
+        onPublished={() => undefined}
+        onRequestInstall={() => undefined}
+      />,
+    );
+
+    expect(
+      screen.getByText("agents.control.runtimeModelRequired"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "agents.control.publish" }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "agents.control.publishAndUse" }),
+    ).toBeDisabled();
   });
 });

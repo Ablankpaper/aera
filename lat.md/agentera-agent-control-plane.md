@@ -110,11 +110,13 @@ The product UI presents drafts, published definitions, installations, and device
 
 [[src/renderer/src/screens/Agents/AgentControlPanel.tsx#AgentControlPanel]] joins those internal records into one card and detail action. It never renders a second Runtime Profile, Installation, or RuntimeBinding management surface. An existing Hermes Profile appears as a ready Agent; choosing a published or pending Agent internally installs, retries, selects the immutable version, prepares an isolated local runtime, activates it, and opens chat.
 
+While the shell remains in an Organization, “我的智能体” explicitly sends USER-scoped Agent operations instead of switching the global product space to PERSONAL. The draft editor, publish callback, Installation lookup, and return navigation therefore keep the Organization shell selected while operating only on the signed-in user's private Agent records.
+
 [[src/renderer/src/screens/Agents/Agents.tsx#Agents]] resolves the resulting Installation back to its local Profile after materialization. This is an internal bridge only: the user selects “使用智能体” and does not name, claim, bind, or synchronize runtime records manually.
 
 [[src/renderer/src/screens/Layout/ProfileSwitcher.tsx#ProfileSwitcher]] presents the same internal records only as Agents. Users may switch Agents, open the Agent screen, or open product-level Agent settings; provider routing, gateway state, internal Profile IDs, Installations, and RuntimeBindings remain hidden.
 
-[[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] reuses the configured Hermes model library, imports identity and capability Markdown, and derives safe asset paths. Personal publish and publish-and-use complete from one explicit action; Workspace keeps its trusted preview and Organization keeps mandatory review.
+[[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] reuses the configured Hermes model library, imports identity and capability Markdown, and derives safe asset paths. Personal publish and publish-and-use complete from one explicit action and carry the selected source model Profile snapshot into installation; Workspace keeps its trusted preview and Organization keeps mandatory review.
 
 ### Guided product Agent creation
 
@@ -201,6 +203,10 @@ Publication uses an allowlisted canonical manifest, content digest, platform Ed2
 An Agent Installation selects one immutable version for one device/Profile pair and maps to one physically isolated writable `HERMES_HOME` through the existing encrypted Profile binding store.
 
 The authentication installation ID is not reused as the Agent Installation ID. New Agent installations create a fresh Profile with `cloneFrom=null`; existing learned Profiles require explicit same-owner claim. A RuntimeBinding freezes version, Profile, Runtime, policy, and tools for one conversation.
+
+Creating a Hermes Runtime Profile directly is not equivalent to creating a product Agent. A usable Agent additionally requires a verified immutable AgentVersion, USER-owned Installation, Profile binding, and RuntimeBinding. [[src/main/agentera-agent-control/model-profile-seed.ts#seedAgentModelProfile]] copies only the selected provider route and credential into the isolated target Profile, and it must choose a model allowed by the signed version; if the source Profile's current model is not allowed, an allowed model may be selected only from the same saved provider route.
+
+Installation activation is fail-closed until model projection succeeds. A pending Installation that already owns a prepared Profile is retried by explicitly claiming that Profile, not by opening chat or creating a second Profile. A profile-less pending Installation for an older version is archived before installing the newly published version. An active Profile whose selected version differs from the requested version must select the new immutable version and re-seed its signed model route before chat.
 
 Manual selection downloads and verifies the immutable version, calls the cloud selection transaction, retrieves the newly signed policy through `GET /api/v1/policy-snapshots/{policy_snapshot_id}`, and only then atomically activates the read-only projection for later conversations. A missing or invalid policy leaves the last local version selected.
 

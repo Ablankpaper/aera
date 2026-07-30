@@ -20,7 +20,13 @@ export interface ChatRun {
   seed?: ChatMessage[];
 }
 
-/** A blank chat that can be reassigned to another profile without losing work. */
+/**
+ * A blank chat within one fixed Profile.
+ *
+ * Even before the first message, the main process may already have frozen this
+ * run's ConversationBoundary and RuntimeBinding. Callers must therefore never
+ * reassign a scratch run to a different Profile.
+ */
 export function isScratchRun(r: ChatRun): boolean {
   return !r.sessionId && !r.loading && !r.title;
 }
@@ -65,20 +71,31 @@ export function selectProfileRunTransition(
     return { activeRunId, runs };
   }
 
-  if (isScratchRun(active)) {
-    return {
-      activeRunId,
-      runs: runs.map((r) =>
-        r.runId === activeRunId ? { ...r, profile } : r,
-      ),
-    };
-  }
-
   const scratch = runs.find((r) => r.profile === profile && isScratchRun(r));
   if (scratch) {
     return { activeRunId: scratch.runId, runs };
   }
 
+  const next = mintRun(profile);
+  return { activeRunId: next.runId, runs: [...runs, next] };
+}
+
+/**
+ * Start using an Agent/Profile from a catalog card.
+ *
+ * A different Profile always receives a new run id. Reusing the visible blank
+ * run here used to mutate an already-frozen ConversationBoundary, which made a
+ * newly published Agent fail with boundary_conflict before its first turn.
+ */
+export function openProfileRunTransition(
+  runs: ChatRun[],
+  activeRunId: string,
+  profile: string,
+): { activeRunId: string; runs: ChatRun[] } {
+  const active = runs.find((r) => r.runId === activeRunId);
+  if (active?.profile === profile && isScratchRun(active)) {
+    return { activeRunId, runs };
+  }
   const next = mintRun(profile);
   return { activeRunId: next.runId, runs: [...runs, next] };
 }

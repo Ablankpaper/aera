@@ -42,7 +42,7 @@ import {
   normalizeProfileName,
   getActiveProfileNameSync,
 } from "./utils";
-import { getProfilePort } from "./gateway-ports";
+import { ensureProfilePortAvailable, getProfilePort } from "./gateway-ports";
 import { promptSudoPassword, promptSecretValue } from "./gatewayPrompt";
 import { getSecret } from "./secrets";
 import { readModels } from "./models";
@@ -588,18 +588,14 @@ class TuiGatewayClient {
   ): Promise<T> {
     await this.start();
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error(
-        "Aera Runtime dashboard gateway stream is not connected",
-      );
+      throw new Error("Aera Runtime dashboard gateway stream is not connected");
     }
 
     const id = `r${++this.nextId}`;
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(
-          new Error(`Aera Runtime gateway request timed out: ${method}`),
-        );
+        reject(new Error(`Aera Runtime gateway request timed out: ${method}`));
       }, timeoutMs);
       timer.unref?.();
       this.pending.set(id, {
@@ -729,9 +725,7 @@ class TuiGatewayClient {
       const ws = new WebSocket(url);
       this.ws = ws;
       const timer = setTimeout(() => {
-        reject(
-          new Error("Aera Runtime dashboard gateway WebSocket timed out"),
-        );
+        reject(new Error("Aera Runtime dashboard gateway WebSocket timed out"));
         ws.close();
       }, 15_000);
       timer.unref?.();
@@ -837,9 +831,7 @@ function waitForGatewayEvent(
     let cleanup = (): void => undefined;
     const timer = setTimeout(() => {
       cleanup();
-      reject(
-        new Error("Timed out waiting for Aera Runtime gateway readiness"),
-      );
+      reject(new Error("Timed out waiting for Aera Runtime gateway readiness"));
     }, timeoutMs);
     timer.unref?.();
     cleanup = client.onEvent((event) => {
@@ -2143,7 +2135,8 @@ async function sendMessageViaTuiGateway(
           });
       });
       const payload = event.payload as
-        { question?: string; prompt?: string; choices?: unknown } | undefined;
+        | { question?: string; prompt?: string; choices?: unknown }
+        | undefined;
       cb.onClarify?.({
         requestId,
         question: String(payload?.question ?? payload?.prompt ?? ""),
@@ -2176,7 +2169,8 @@ async function sendMessageViaTuiGateway(
       // For secret.request: try the configured security provider first. If the
       // vault already holds the key, answer silently without prompting the user.
       const payload = event.payload as
-        { prompt?: string; env_var?: string } | undefined;
+        | { prompt?: string; env_var?: string }
+        | undefined;
       const envVar = String(payload?.env_var ?? "");
 
       // Vault-first resolution for secret.request: attempt a provider lookup
@@ -3623,6 +3617,8 @@ async function restartGatewayLocallyOnce(
       return false;
     }
 
+    ensureApiServerConfig(resolveProfile(profile));
+    await ensureProfilePortAvailable(resolveProfile(profile));
     const startResult = startGatewayDetailed(profile);
     if (!startResult.success && !startResult.alreadyRunning) {
       setApiCacheFor(profile, false);
@@ -3718,6 +3714,8 @@ export async function startGatewayWithRecovery(
     );
   }
 
+  ensureApiServerConfig(resolveProfile(profile));
+  await ensureProfilePortAvailable(resolveProfile(profile));
   const startResult = startGatewayDetailed(profile);
   if (!startResult.success && !startResult.alreadyRunning) return false;
 

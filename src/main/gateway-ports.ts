@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, statSync } from "fs";
+import { createServer } from "node:net";
 import { join } from "path";
 import { HERMES_HOME } from "./installer";
 import { normalizeProfileName } from "./utils";
@@ -81,6 +82,37 @@ function allocateFreePort(profile: string): number {
   return DEFAULT_API_SERVER_PORT;
 }
 
+async function canBindLoopbackPort(port: number): Promise<boolean> {
+  return await new Promise<boolean>((resolve) => {
+    const server = createServer();
+    let settled = false;
+    const finish = (available: boolean): void => {
+      if (settled) return;
+      settled = true;
+      server.removeAllListeners();
+      if (server.listening) {
+        server.close(() => resolve(available));
+      } else {
+        resolve(available);
+      }
+    };
+    server.once("error", () => finish(false));
+    server.once("listening", () => finish(true));
+    server.unref();
+    server.listen({ host: "127.0.0.1", port, exclusive: true });
+  });
+}
+
+export async function firstBindablePort(
+  candidates: readonly number[],
+  probe: (port: number) => Promise<boolean> = canBindLoopbackPort,
+): Promise<number | null> {
+  for (const port of candidates) {
+    if (await probe(port)) return port;
+  }
+  return null;
+}
+
 /**
  * Resolve the api_server port the desktop should bind `profile`'s gateway to.
  *
@@ -116,4 +148,27 @@ export function getProfilePort(profile?: string): number {
   // writes the block using this same value; the spawn also passes it via
   // API_SERVER_PORT, which the gateway honours when config omits the port.
   return allocateFreePort(name);
+}
+
+/**
+ * Reconcile a named Profile's persisted port with the machine, not only with
+ * this HERMES_HOME. Multiple Aera test/installed instances can legitimately
+ * have separate Profile directories while still sharing 127.0.0.1.
+ */
+export async function ensureProfilePortAvailable(
+  profile?: string,
+): Promise<number> {
+  const name = normalizeProfileName(profile);
+  const current = getProfilePort(name);
+  if (!name || (await canBindLoopbackPort(current))) return current;
+
+  const claimed = portsInUse(name);
+  const candidates: number[] = [];
+  for (let port = PORT_RANGE_START; port <= PORT_RANGE_END; port += 1) {
+    if (!claimed.has(port) && port !== current) candidates.push(port);
+  }
+  const available = await firstBindablePort(candidates);
+  if (available === null) return current;
+  setConfigValue(API_SERVER_PORT_PATH, String(available), name);
+  return available;
 }

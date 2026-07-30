@@ -262,6 +262,7 @@ const ONLINE_CHANNELS = [
   "agentera-agents-prepare-organization-withdrawal",
   "agentera-agents-prepare-official-install",
   "agentera-agents-refresh-official-updates",
+  "agentera-agents-repair-installation-model",
   "agentera-agents-retry-installation",
   "agentera-agents-review-experience-candidate",
   "agentera-agents-select-version",
@@ -558,10 +559,7 @@ export function createProductAccessGuard(options: {
         level === "online" &&
         (state.status !== "authenticated" || !state.cloudAvailable)
       ) {
-        throw accessError(
-          "Aera online access is required.",
-          "online_required",
-        );
+        throw accessError("Aera online access is required.", "online_required");
       }
       if (level === "bound-profile" && !options.isRuntimeContextBound()) {
         throw accessError(

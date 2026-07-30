@@ -296,6 +296,7 @@ describe("explicit Agent publication", () => {
       definitionId: DEFINITION_ID,
       versionId: VERSION_ID,
     });
+    expect(drafts.getDraft(DRAFT_ID).lastPublicationAttempt).toBeNull();
     await expect(service.confirmPublication(HANDLE_ID)).rejects.toMatchObject({
       code: "publication_confirmation_invalid",
     });

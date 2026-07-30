@@ -1610,6 +1610,16 @@ export async function claimDefaultProfile(
       const result = await window.agenteraAgents.getState();
       return result.ok;
     });
+  const activeProfileIsBound = async (): Promise<boolean> =>
+    device.page.evaluate(async () => {
+      const inspection =
+        await window.agenteraRuntimeAccess.inspectActiveProfile();
+      return (
+        inspection.status === "owned" && inspection.isCurrentOwner === true
+      );
+    });
+  const accountRuntimeIsReady = async (): Promise<boolean> =>
+    (await agentControlIsReady()) && (await activeProfileIsBound());
   const claimScreen = device.page.locator(
     '[data-testid="screen-profile-claim"]',
   );
@@ -1620,31 +1630,31 @@ export async function claimDefaultProfile(
     )
     .toMatchObject({ phase: "current" });
 
-// @lat: [[agentera-agent-control-plane#AgentEra Agent control plane V1#Trusted Workspace Agent context#Product-facing Agent projection]]
+  // @lat: [[agentera-agent-control-plane#AgentEra Agent control plane V1#Trusted Workspace Agent context#Product-facing Agent projection]]
   // Fresh installations now bind their empty local Runtime automatically. The
   // legacy ownership screen remains only for an exceptional data/owner
   // conflict, so the E2E helper must accept either safe path.
   await expect
     .poll(
       async () =>
-        (await agentControlIsReady()) || (await claimScreen.isVisible()),
+        (await accountRuntimeIsReady()) || (await claimScreen.isVisible()),
       { timeout: 180_000 },
     )
     .toBe(true);
-  if (await agentControlIsReady()) return;
+  if (await accountRuntimeIsReady()) return;
 
   const claim = device.page.locator(".agentera-profile-actions .btn-primary");
   await expect
     .poll(
       async () =>
-        (await agentControlIsReady()) ||
+        (await accountRuntimeIsReady()) ||
         ((await claim.count()) === 1 && (await claim.isEnabled())),
     )
     .toBe(true);
-  if (await agentControlIsReady()) return;
+  if (await accountRuntimeIsReady()) return;
 
   await claim.click();
-  await expect.poll(agentControlIsReady).toBe(true);
+  await expect.poll(accountRuntimeIsReady).toBe(true);
 }
 
 export async function invokeAgentera<T = unknown>(

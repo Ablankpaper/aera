@@ -12,6 +12,7 @@ import type {
 } from "../../shared/agentera-agent-control";
 import type { AgenteraAgentControlClient } from "./client";
 import type { AgenteraHermesAdapter } from "./hermes-adapter";
+import { RuntimeBindingStore } from "./runtime-binding-store";
 import {
   openAgenteraControlPlaneDatabase,
   type AgenteraControlPlaneDatabase,
@@ -27,6 +28,11 @@ const OWNER = {
 const ORGANIZATION_ID = "20000000-0000-4000-8000-000000000001";
 const OTHER_ORGANIZATION_ID = "20000000-0000-4000-8000-000000000002";
 const OFFICIAL_DEFINITION_ID = "30000000-0000-4000-8000-000000000001";
+const PERSONAL_INSTALLATION_ID = "40000000-0000-4000-8000-000000000001";
+const PERSONAL_VERSION_ID = "40000000-0000-4000-8000-000000000002";
+const PERSONAL_PROFILE_ID = "40000000-0000-4000-8000-000000000003";
+const PERSONAL_POLICY_ID = "40000000-0000-4000-8000-000000000004";
+const PERSONAL_BINDING_ID = "40000000-0000-4000-8000-000000000005";
 
 function officialSummary(): OfficialAgentSummary {
   return {
@@ -172,6 +178,107 @@ describe("Agent control Organization Foundation context", () => {
     expect(listOrganizationDefinitions).toHaveBeenCalledWith(ORGANIZATION_ID);
     expect(listDefinitions).not.toHaveBeenCalled();
     expect(listWorkspaceDefinitions).not.toHaveBeenCalled();
+  });
+
+  it("allows explicit USER Agent operations without changing the trusted Organization context", async () => {
+    const listDefinitions = vi.fn(async () => []);
+    const listOrganizationDefinitions = vi.fn(async () => []);
+    const { manager } = fullManager(
+      () => ({
+        scope: "ORGANIZATION",
+        organizationId: ORGANIZATION_ID,
+        role: "member",
+      }),
+      { listDefinitions, listOrganizationDefinitions },
+    );
+
+    const created = manager.createDraft(draftInput(), "USER");
+    expect(manager.listDrafts("USER")).toEqual([
+      expect.objectContaining({
+        id: created.id,
+        displayName: created.displayName,
+      }),
+    ]);
+    await expect(manager.listDefinitions("USER")).resolves.toEqual([]);
+    expect(listDefinitions).toHaveBeenCalledOnce();
+    expect(listOrganizationDefinitions).not.toHaveBeenCalled();
+    expect(manager.getState().context).toEqual({
+      scope: "ORGANIZATION",
+      organizationId: ORGANIZATION_ID,
+      role: "member",
+    });
+  });
+
+  it("keeps an installed personal Agent conversation in the selected Organization run scope", () => {
+    const { manager, database } = fullManager(() => ({
+      scope: "ORGANIZATION",
+      organizationId: ORGANIZATION_ID,
+      role: "owner",
+    }));
+    const now = "2026-07-30T00:00:00.000Z";
+    database.sqlite
+      .prepare(
+        `INSERT INTO local_agent_installations (
+           agent_installation_id, tenant_id, owner_id, device_installation_id,
+           source_scope, source_workspace_id, source_organization_id,
+           official_release_id, selected_release_revision_id, update_policy,
+           definition_id, selected_version_id, runtime_profile_id,
+           policy_snapshot_id, status, retry_code, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 'USER', NULL, NULL, NULL, NULL, 'manual',
+                   ?, ?, ?, ?, 'active', NULL, ?, ?)`,
+      )
+      .run(
+        PERSONAL_INSTALLATION_ID,
+        OWNER.tenantId,
+        OWNER.ownerId,
+        OWNER.deviceInstallationId,
+        OFFICIAL_DEFINITION_ID,
+        PERSONAL_VERSION_ID,
+        PERSONAL_PROFILE_ID,
+        PERSONAL_POLICY_ID,
+        now,
+        now,
+      );
+    const binding = new RuntimeBindingStore({
+      database,
+      owner: OWNER,
+      now: () => new Date(now),
+      randomUUID: () => PERSONAL_BINDING_ID,
+    }).getOrCreateForConversation({
+      conversationKey: "personal-agent-from-organization-shell",
+      tenantId: OWNER.tenantId,
+      ownerScope: "USER",
+      ownerId: OWNER.ownerId,
+      deviceId: OWNER.deviceInstallationId,
+      agentDefinitionId: OFFICIAL_DEFINITION_ID,
+      agentVersionId: PERSONAL_VERSION_ID,
+      agentInstallationId: PERSONAL_INSTALLATION_ID,
+      runtimeProfileId: PERSONAL_PROFILE_ID,
+      runtimeVersion: "v0.18.2-agentera.1",
+      policySnapshotId: PERSONAL_POLICY_ID,
+      officialReleaseRevisionId: null,
+      toolPermissionDigest: "1".repeat(64),
+      publishedBaseDigest: "2".repeat(64),
+    });
+
+    expect(
+      manager.prepareConversationBoundary({
+        conversationKey: binding.conversationKey,
+        owner: OWNER,
+        resumeSessionId: null,
+        runtimeBinding: binding,
+      }),
+    ).toMatchObject({
+      scopeType: "ORGANIZATION",
+      scopeId: ORGANIZATION_ID,
+      visibility: "PRIVATE",
+      runtimeBindingId: PERSONAL_BINDING_ID,
+    });
+    expect(manager.getState().context).toEqual({
+      scope: "ORGANIZATION",
+      organizationId: ORGANIZATION_ID,
+      role: "owner",
+    });
   });
 
   it.each([

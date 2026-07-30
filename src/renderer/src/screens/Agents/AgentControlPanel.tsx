@@ -6,6 +6,7 @@ import type {
   AgenteraAgentControlPublicState,
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
+  AgenteraAgentOperationScope,
   OfficialAgentInstallPreview,
   OfficialAgentSummary,
   OfficialManagedUpdate,
@@ -101,16 +102,63 @@ function draftIconDataUrl(draft: AgentDraft | null): string | null {
     : null;
 }
 
+export function isRunnableAgentProfile(
+  profile: AgentControlProfileOption | null | undefined,
+): profile is AgentControlProfileOption {
+  if (!profile) return false;
+  const provider = profile.provider?.trim().toLocaleLowerCase() ?? "";
+  return (
+    provider.length > 0 &&
+    provider !== "auto" &&
+    (profile.model?.trim().length ?? 0) > 0
+  );
+}
+
+function publishedDraftAllowsProfileModel(
+  draft: AgentDraft,
+  modelProfile: AgentControlProfileOption,
+  versionId: string,
+): boolean {
+  const published = draft.publishedRevision;
+  if (
+    !published ||
+    published.revision !== draft.revision ||
+    published.versionId !== versionId
+  ) {
+    return false;
+  }
+  const provider = modelProfile.provider?.trim().toLocaleLowerCase() ?? "";
+  const model = modelProfile.model?.trim() ?? "";
+  const allowedProviders = draft.manifest.modelConstraints.allowedProviders.map(
+    (value) => value.trim().toLocaleLowerCase(),
+  );
+  const providerAllowed =
+    allowedProviders.includes(provider) ||
+    (provider.startsWith("custom:") && allowedProviders.includes("custom"));
+  return (
+    provider.length > 0 &&
+    provider !== "auto" &&
+    model.length > 0 &&
+    providerAllowed &&
+    draft.manifest.modelConstraints.allowedModels.includes(model)
+  );
+}
+
 function automaticRuntimeName(
-  displayName: string,
+  _displayName: string,
   definitionId: string,
   profiles: readonly AgentControlProfileOption[],
 ): string {
-  const normalized = displayName.trim() || "Agent";
-  if (!profiles.some((profile) => profile.name === normalized)) {
-    return normalized;
+  const base = `aera-agent-${definitionId.slice(0, 12).toLocaleLowerCase()}`;
+  const existing = new Set(
+    profiles.flatMap((profile) => [profile.id, profile.name]),
+  );
+  if (!existing.has(base)) {
+    return base;
   }
-  return `${normalized}-${definitionId.slice(0, 8)}`;
+  let suffix = 2;
+  while (existing.has(`${base}-${suffix}`)) suffix += 1;
+  return `${base}-${suffix}`;
 }
 
 export default function AgentControlPanel({
@@ -186,13 +234,21 @@ export default function AgentControlPanel({
       }
       const nextState = stateResult.data;
       const nextContextKey = contextKey(nextState);
+      const operationScope: AgenteraAgentOperationScope | undefined =
+        nextState.context.scope === "ORGANIZATION" && activeTab === "mine"
+          ? "USER"
+          : undefined;
       const canListInstallations =
+        operationScope === "USER" ||
+        nextState.context.scope !== "ORGANIZATION" ||
+        nextState.context.role !== "auditor";
+      const canListOfficialAgents =
         nextState.context.scope !== "ORGANIZATION" ||
         nextState.context.role !== "auditor";
       let nextInstallations: AgenteraAgentInstallationSummary[] = [];
       if (canListInstallations) {
         const installationResult =
-          await window.agenteraAgents.listInstallations();
+          await window.agenteraAgents.listInstallations(operationScope);
         if (epoch !== loadEpoch.current) return;
         if (!installationResult.ok) {
           setError(errorKey(installationResult.errorCode));
@@ -208,12 +264,15 @@ export default function AgentControlPanel({
         (nextState.context.role === "owner" ||
           nextState.context.role === "admin");
       const canReadDrafts =
-        nextState.context.scope === "ORGANIZATION"
-          ? organizationCanReadDrafts
-          : !workspaceMemberInstallOnly;
+        operationScope === "USER"
+          ? true
+          : nextState.context.scope === "ORGANIZATION"
+            ? organizationCanReadDrafts
+            : !workspaceMemberInstallOnly;
       let nextDrafts: AgentDraft[] = [];
       if (canReadDrafts) {
-        const draftResult = await window.agenteraAgents.listDrafts();
+        const draftResult =
+          await window.agenteraAgents.listDrafts(operationScope);
         if (epoch !== loadEpoch.current) return;
         if (!draftResult.ok) {
           setError(errorKey(draftResult.errorCode));
@@ -227,14 +286,15 @@ export default function AgentControlPanel({
       let nextOfficialUpdates: OfficialManagedUpdate[] = [];
       let nextError: string | null = null;
       if (nextState.access === "online" && nextState.cloudAvailable) {
-        const definitionResult = await window.agenteraAgents.listDefinitions();
+        const definitionResult =
+          await window.agenteraAgents.listDefinitions(operationScope);
         if (epoch !== loadEpoch.current) return;
         if (!definitionResult.ok) {
           nextError = errorKey(definitionResult.errorCode);
         } else {
           nextDefinitions = definitionResult.data;
         }
-        if (canListInstallations) {
+        if (activeTab === "official" && canListOfficialAgents) {
           const officialResult =
             await window.agenteraAgents.listOfficialAgents();
           if (epoch !== loadEpoch.current) return;
@@ -280,7 +340,7 @@ export default function AgentControlPanel({
     } finally {
       if (epoch === loadEpoch.current) setLoading(false);
     }
-  }, []);
+  }, [activeTab]);
 
   useEffect(() => {
     void load();
@@ -297,7 +357,10 @@ export default function AgentControlPanel({
 
   const editDraft = async (id: string): Promise<void> => {
     setError(null);
-    const result = await window.agenteraAgents.getDraft(id);
+    const result = await window.agenteraAgents.getDraft(
+      id,
+      personalOperationScope,
+    );
     if (!result.ok) {
       setError(errorKey(result.errorCode));
       return;
@@ -310,6 +373,7 @@ export default function AgentControlPanel({
     setArchiving(true);
     const result = await window.agenteraAgents.archiveInstallation(
       archiveTarget.id,
+      personalOperationScope,
     );
     setArchiving(false);
     setArchiveTarget(null);
@@ -347,26 +411,7 @@ export default function AgentControlPanel({
     await load();
   };
 
-  const openNewDraft = async (): Promise<void> => {
-    if (activeTab === "mine" && isOrganization) {
-      setLoading(true);
-      setError(null);
-      try {
-        const selected = await window.agenteraProductSpace.select({
-          kind: "PERSONAL",
-        });
-        if (!selected.ok) {
-          setError("agents.control.errors.operation_failed");
-          setLoading(false);
-          return;
-        }
-        await load();
-      } catch {
-        setError("agents.control.errors.operation_failed");
-        setLoading(false);
-        return;
-      }
-    }
+  const openNewDraft = (): void => {
     setEditor("new");
   };
 
@@ -383,6 +428,9 @@ export default function AgentControlPanel({
   const context = state?.context ?? ({ scope: "USER" } as const);
   const isWorkspace = context.scope === "WORKSPACE";
   const isOrganization = context.scope === "ORGANIZATION";
+  const isPersonalAgentView = isOrganization && activeTab === "mine";
+  const personalOperationScope: AgenteraAgentOperationScope | undefined =
+    isPersonalAgentView ? "USER" : undefined;
   const isWorkspaceMember = isWorkspace && context.role === "member";
   const workspaceReadOnly =
     isWorkspace &&
@@ -401,15 +449,19 @@ export default function AgentControlPanel({
   const organizationCanSeeInstallations =
     !isOrganization || context.role !== "auditor";
   const organizationReadOnly = isOrganization && !organizationCanAuthor;
-  const canAuthor = isOrganization
-    ? organizationCanAuthor
-    : !isWorkspace || (!isWorkspaceMember && !workspaceReadOnly);
-  const showNewDraft = isOrganization
-    ? organizationCanAuthor
-    : !isWorkspaceMember;
-  const newDraftDisabled =
-    loading || (activeTab === "mine" && isOrganization ? false : !canAuthor);
-  const draftReadOnly = workspaceReadOnly || organizationReadOnly;
+  const canAuthor = isPersonalAgentView
+    ? true
+    : isOrganization
+      ? organizationCanAuthor
+      : !isWorkspace || (!isWorkspaceMember && !workspaceReadOnly);
+  const showNewDraft = isPersonalAgentView
+    ? true
+    : isOrganization
+      ? organizationCanAuthor
+      : !isWorkspaceMember;
+  const newDraftDisabled = loading || !canAuthor;
+  const draftReadOnly =
+    workspaceReadOnly || (!isPersonalAgentView && organizationReadOnly);
   const officialInstallations = installations.filter(
     (installation) => installation.sourceScope === "PLATFORM",
   );
@@ -436,78 +488,173 @@ export default function AgentControlPanel({
     [onAgentReady, onProfilesChanged],
   );
 
-  const activateAgent = useCallback(
-    async (target: {
-      key: string;
-      displayName: string;
-      definitionId: string;
-      versionId: string;
-      installation: AgenteraAgentInstallationSummary | null;
-      profile: AgentControlProfileOption | null;
-    }): Promise<void> => {
-      if (busyPersonalKey) return;
-      setBusyPersonalKey(target.key);
-      setError(null);
-      setNotice(null);
-      try {
-        if (
-          target.installation?.status === "active" &&
-          target.installation.selectedVersionId === target.versionId
-        ) {
-          if (target.profile && onChatWithProfile) {
-            onChatWithProfile(target.profile.id);
-          } else {
-            await finishAgentActivation(target.installation.id);
+  const activateAgent = async (target: {
+    key: string;
+    displayName: string;
+    definitionId: string;
+    versionId: string;
+    installation: AgenteraAgentInstallationSummary | null;
+    profile: AgentControlProfileOption | null;
+    modelProfileId?: string;
+  }): Promise<void> => {
+    if (busyPersonalKey) return;
+    setBusyPersonalKey(target.key);
+    setError(null);
+    setNotice(null);
+    try {
+      let installation = target.installation;
+      const sourceModelProfileId = target.modelProfileId ?? modelProfileId;
+      let profileReady = isRunnableAgentProfile(target.profile);
+      const alignActiveProfileVersion = async (
+        activeInstallation: AgenteraAgentInstallationSummary,
+        profile: AgentControlProfileOption,
+        ready: boolean,
+      ): Promise<{
+        installation: AgenteraAgentInstallationSummary;
+        profileReady: boolean;
+      } | null> => {
+        let aligned = activeInstallation;
+        let versionChanged = false;
+        if (aligned.selectedVersionId !== target.versionId) {
+          const selected =
+            await window.agenteraAgents.selectInstallationVersion(
+              {
+                id: aligned.id,
+                versionId: target.versionId,
+                localProfileId: profile.id,
+              },
+              personalOperationScope,
+            );
+          if (!selected.ok) {
+            setError(errorKey(selected.errorCode));
+            return null;
           }
-          return;
+          aligned = selected.data;
+          versionChanged = true;
+          setEditor(null);
+          await load();
         }
-        if (target.installation?.status === "active" && !target.profile) {
-          await finishAgentActivation(target.installation.id);
-          return;
+        if (versionChanged || !ready) {
+          if (!sourceModelProfileId) {
+            setError("agents.hub.modelRequired");
+            return null;
+          }
+          const repaired = await window.agenteraAgents.repairInstallationModel(
+            {
+              id: aligned.id,
+              localProfileId: profile.id,
+              modelProfileId: sourceModelProfileId,
+            },
+            personalOperationScope,
+          );
+          if (!repaired.ok) {
+            setError(errorKey(repaired.errorCode));
+            return null;
+          }
+          aligned = repaired.data;
+          await onProfilesChanged?.();
+          ready = true;
         }
-        const result =
-          target.installation?.status === "pending"
-            ? await window.agenteraAgents.retryPendingInstallation({
-                id: target.installation.id,
-                target: {
-                  kind: "fresh",
-                  profileName: automaticRuntimeName(
-                    target.displayName,
-                    target.definitionId,
-                    profiles,
-                  ),
-                },
-              })
-            : target.installation?.status === "active" && target.profile
-              ? await window.agenteraAgents.selectInstallationVersion({
-                  id: target.installation.id,
-                  versionId: target.versionId,
-                  localProfileId: target.profile.id,
-                })
-              : await window.agenteraAgents.installVersion({
-                  definitionId: target.definitionId,
-                  versionId: target.versionId,
-                  profileName: automaticRuntimeName(
-                    target.displayName,
-                    target.definitionId,
-                    profiles,
-                  ),
-                });
-        if (!result.ok) {
-          setError(errorKey(result.errorCode));
-          return;
+        return { installation: aligned, profileReady: ready };
+      };
+      if (installation?.status === "active" && target.profile) {
+        const aligned = await alignActiveProfileVersion(
+          installation,
+          target.profile,
+          profileReady,
+        );
+        if (!aligned) return;
+        installation = aligned.installation;
+        profileReady = aligned.profileReady;
+        if (profileReady && onChatWithProfile) {
+          onChatWithProfile(target.profile.id);
+        } else {
+          await finishAgentActivation(installation.id);
         }
-        setEditor(null);
-        await load();
-        await finishAgentActivation(result.data.id);
-      } catch {
-        setError("agents.control.errors.operation_failed");
-      } finally {
-        setBusyPersonalKey(null);
+        return;
       }
-    },
-    [busyPersonalKey, finishAgentActivation, load, onChatWithProfile, profiles],
-  );
+      if (installation?.status === "active" && !target.profile) {
+        await finishAgentActivation(installation.id);
+        return;
+      }
+      if (
+        installation?.status === "pending" &&
+        installation.selectedVersionId !== target.versionId &&
+        !target.profile
+      ) {
+        const archived = await window.agenteraAgents.archiveInstallation(
+          installation.id,
+          personalOperationScope,
+        );
+        if (!archived.ok) {
+          setError(errorKey(archived.errorCode));
+          return;
+        }
+        installation = null;
+      }
+      if (!sourceModelProfileId) {
+        setError("agents.hub.modelRequired");
+        return;
+      }
+      const result =
+        installation?.status === "pending"
+          ? await window.agenteraAgents.retryPendingInstallation(
+              {
+                id: installation.id,
+                target: target.profile
+                  ? {
+                      kind: "claim",
+                      localProfileId: target.profile.id,
+                      confirmation: "claim-existing-profile",
+                    }
+                  : {
+                      kind: "fresh",
+                      profileName: automaticRuntimeName(
+                        target.displayName,
+                        target.definitionId,
+                        profiles,
+                      ),
+                      modelProfileId: sourceModelProfileId,
+                    },
+              },
+              personalOperationScope,
+            )
+          : await window.agenteraAgents.installVersion(
+              {
+                definitionId: target.definitionId,
+                versionId: target.versionId,
+                profileName: automaticRuntimeName(
+                  target.displayName,
+                  target.definitionId,
+                  profiles,
+                ),
+                modelProfileId: sourceModelProfileId,
+              },
+              personalOperationScope,
+            );
+      if (!result.ok) {
+        setError(errorKey(result.errorCode));
+        return;
+      }
+      installation = result.data;
+      if (target.profile && installation.status === "active") {
+        const aligned = await alignActiveProfileVersion(
+          installation,
+          target.profile,
+          profileReady,
+        );
+        if (!aligned) return;
+        installation = aligned.installation;
+      }
+      setEditor(null);
+      await load();
+      await finishAgentActivation(installation.id);
+    } catch {
+      setError("agents.control.errors.operation_failed");
+    } finally {
+      setBusyPersonalKey(null);
+    }
+  };
 
   const personalCards = useMemo(() => {
     const result: PersonalAgentCard[] = [];
@@ -539,11 +686,13 @@ export default function AgentControlPanel({
         ? t("agents.hub.workspaceAgent")
         : installation?.sourceScope === "ORGANIZATION"
           ? t("agents.hub.organizationAgent")
-          : isWorkspace
-            ? t("agents.hub.workspaceAgent")
-            : isOrganization
-              ? t("agents.hub.organizationAgent")
-              : t("agents.hub.personalAgent");
+          : isPersonalAgentView
+            ? t("agents.hub.personalAgent")
+            : isWorkspace
+              ? t("agents.hub.workspaceAgent")
+              : isOrganization
+                ? t("agents.hub.organizationAgent")
+                : t("agents.hub.personalAgent");
 
     for (const definition of definitions) {
       const draft = draftByDefinition.get(definition.id) ?? null;
@@ -633,6 +782,7 @@ export default function AgentControlPanel({
     for (const profile of profiles) {
       if (representedProfiles.has(profile.id)) continue;
       const model = profile.model?.split("/").pop() ?? profile.model;
+      const runnable = isRunnableAgentProfile(profile);
       result.push({
         key: `profile:${profile.id}`,
         name: profile.name,
@@ -644,7 +794,7 @@ export default function AgentControlPanel({
           : t("agents.hub.localProfileNoModel"),
         tags: [
           t("agents.hub.localAgent"),
-          t("agents.hub.ready"),
+          ...(runnable ? [t("agents.hub.ready")] : []),
           ...(model ? [model] : []),
         ],
         draft: null,
@@ -662,47 +812,47 @@ export default function AgentControlPanel({
     definitionName,
     drafts,
     isOrganization,
+    isPersonalAgentView,
     isWorkspace,
     profiles,
     scopedInstallations,
     t,
   ]);
 
-  const requestInstall = useCallback(
-    (target: {
-      definitionId: string;
-      versionId: string;
-      displayName?: string;
-    }): void => {
-      const installation =
-        scopedInstallations.find(
-          (item) => item.definitionId === target.definitionId,
-        ) ?? null;
-      const profile = installation
-        ? (profiles.find(
-            (item) => item.agentInstallationId === installation.id,
-          ) ?? null)
-        : null;
-      const displayName =
-        target.displayName ?? definitionName(target.definitionId);
-      void activateAgent({
-        key: `definition:${target.definitionId}`,
-        displayName,
-        definitionId: target.definitionId,
-        versionId: target.versionId,
-        installation,
-        profile,
-      });
-    },
-    [activateAgent, definitionName, profiles, scopedInstallations],
-  );
+  const requestInstall = (target: {
+    definitionId: string;
+    versionId: string;
+    displayName?: string;
+    modelProfileId?: string;
+  }): void => {
+    const installation =
+      scopedInstallations.find(
+        (item) => item.definitionId === target.definitionId,
+      ) ?? null;
+    const profile = installation
+      ? (profiles.find(
+          (item) => item.agentInstallationId === installation.id,
+        ) ?? null)
+      : null;
+    const displayName =
+      target.displayName ?? definitionName(target.definitionId);
+    void activateAgent({
+      key: `definition:${target.definitionId}`,
+      displayName,
+      definitionId: target.definitionId,
+      versionId: target.versionId,
+      installation,
+      profile,
+      modelProfileId: target.modelProfileId,
+    });
+  };
 
   const visiblePersonalCards = useMemo(() => {
     if (!isOrganization) return personalCards;
     if (activeTab === "enterprise") {
       return personalCards.filter((card) => card.origin !== "profile");
     }
-    return personalCards.filter((card) => card.profile !== null);
+    return personalCards;
   }, [activeTab, isOrganization, personalCards]);
 
   const filteredPersonalCards = useMemo(() => {
@@ -716,7 +866,7 @@ export default function AgentControlPanel({
       ) {
         return false;
       }
-      if (mineFilter === "ready") return card.profile !== null;
+      if (mineFilter === "ready") return isRunnableAgentProfile(card.profile);
       if (mineFilter === "drafts") {
         return Boolean(card.draft && !card.draft.publishedRevision);
       }
@@ -742,6 +892,8 @@ export default function AgentControlPanel({
 
   const selectedPersonal =
     personalCards.find((card) => card.key === selectedPersonalKey) ?? null;
+  const selectedModelProfile =
+    profiles.find((profile) => profile.id === modelProfileId) ?? null;
 
   let selectedPersonalPrimary: AgentHubDetailAction | null = null;
   const selectedPersonalExtra: AgentHubDetailAction[] = [];
@@ -756,7 +908,34 @@ export default function AgentControlPanel({
       selectedPersonal.draft?.publishedRevision?.versionId ??
       selectedPersonal.installation?.selectedVersionId ??
       null;
-    if (selectedPersonal.profile && onChatWithProfile) {
+    const requiresRepublishForModel = Boolean(
+      selectedPersonal.installation?.status === "active" &&
+      selectedPersonal.profile &&
+      !isRunnableAgentProfile(selectedPersonal.profile) &&
+      selectedPersonal.draft &&
+      selectedModelProfile &&
+      versionId &&
+      !publishedDraftAllowsProfileModel(
+        selectedPersonal.draft,
+        selectedModelProfile,
+        versionId,
+      ),
+    );
+    if (requiresRepublishForModel && selectedPersonal.draft && !draftReadOnly) {
+      selectedPersonalPrimary = {
+        label: t("agents.control.edit"),
+        onClick: () => {
+          void editDraft(selectedPersonal.draft!.id);
+          setSelectedPersonalKey(null);
+        },
+      };
+    } else if (
+      isRunnableAgentProfile(selectedPersonal.profile) &&
+      selectedPersonal.installation?.status !== "pending" &&
+      (!selectedPersonal.installation ||
+        selectedPersonal.installation.selectedVersionId === versionId) &&
+      onChatWithProfile
+    ) {
       selectedPersonalPrimary = {
         label: t("agents.hub.useAgent"),
         kind: "chat",
@@ -771,10 +950,17 @@ export default function AgentControlPanel({
       versionId
     ) {
       selectedPersonalPrimary = {
-        label: t("agents.control.retryAgent"),
+        label: t(
+          modelProfileId
+            ? "agents.control.retryAgent"
+            : "agents.hub.configureModelFirst",
+        ),
         disabled:
           !state?.cloudAvailable ||
-          (isOrganization && !organizationCanInstall) ||
+          !modelProfileId ||
+          (isOrganization &&
+            activeTab === "enterprise" &&
+            !organizationCanInstall) ||
           busyPersonalKey === selectedPersonal.key,
         onClick: () => {
           void activateAgent({
@@ -790,10 +976,17 @@ export default function AgentControlPanel({
       };
     } else if (definitionId && versionId) {
       selectedPersonalPrimary = {
-        label: t("agents.hub.useAgent"),
+        label: t(
+          !modelProfileId
+            ? "agents.hub.configureModelFirst"
+            : "agents.hub.useAgent",
+        ),
         disabled:
           !state?.cloudAvailable ||
-          (isOrganization && !organizationCanInstall) ||
+          !modelProfileId ||
+          (isOrganization &&
+            activeTab === "enterprise" &&
+            !organizationCanInstall) ||
           busyPersonalKey === selectedPersonal.key,
         onClick: () => {
           void activateAgent({
@@ -1133,7 +1326,7 @@ export default function AgentControlPanel({
                       <strong>{card.name}</strong>
                       <span>{card.tags[0]}</span>
                     </div>
-                    {card.profile ? (
+                    {isRunnableAgentProfile(card.profile) ? (
                       <span className="agent-hub-card-state installed">
                         <Check size={12} />
                         {t("agents.hub.ready")}
@@ -1213,7 +1406,7 @@ export default function AgentControlPanel({
           name={selectedPersonal.name}
           eyebrow={selectedPersonal.tags[0] ?? t("agents.hub.personalAgent")}
           meta={
-            selectedPersonal.profile
+            isRunnableAgentProfile(selectedPersonal.profile)
               ? t("agents.hub.ready")
               : selectedPersonal.installation?.status === "pending"
                 ? t("agents.hub.pending")
@@ -1240,7 +1433,12 @@ export default function AgentControlPanel({
         open={editor !== null}
         draft={editor === "new" ? null : editor}
         readOnly={draftReadOnly}
-        publicationTarget={isOrganization ? "ORGANIZATION" : "DIRECT"}
+        publicationTarget={
+          isOrganization && activeTab === "enterprise"
+            ? "ORGANIZATION"
+            : "DIRECT"
+        }
+        operationScope={personalOperationScope}
         modelProfileId={modelProfileId}
         onClose={() => setEditor(null)}
         onSaved={() => void load()}

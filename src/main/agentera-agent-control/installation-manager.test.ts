@@ -540,9 +540,9 @@ describe("Agent installation orchestration", () => {
       "verify:policy",
       `project:${VERSION_ID}`,
       "profile:create:null",
-      "profile:activate:fresh-agent",
       `profile:project:${VERSION_ID}`,
       "cloud:activate",
+      "profile:activate:fresh-agent",
     ]);
     expect(installed).toMatchObject({
       agentInstallationId: AGENT_INSTALLATION_ID,
@@ -561,6 +561,234 @@ describe("Agent installation orchestration", () => {
       agentInstallationId: AGENT_INSTALLATION_ID,
       runtimeProfileId: RUNTIME_PROFILE_ID,
     });
+  });
+
+  it("verifies the model source owner and seeds only the fresh Profile before projection", async () => {
+    const sourceProfilePath = join(profilesRoot, "source-profile");
+    mkdirSync(sourceProfilePath, { recursive: true });
+    const originalResolveProfilePath = profiles.resolveProfilePath;
+    profiles.resolveProfilePath = vi.fn((id: string) =>
+      id === "source-profile"
+        ? sourceProfilePath
+        : originalResolveProfilePath(id),
+    );
+    const originalVerifyProfileBinding =
+      bindings.verifyProfileBinding.bind(bindings);
+    const verifyProfileBinding = vi
+      .spyOn(bindings, "verifyProfileBinding")
+      .mockImplementation((profilePath, requestedOwner) =>
+        profilePath === sourceProfilePath
+          ? {
+              tenantId: requestedOwner.tenantId,
+              ownerScope: "USER",
+              ownerId: requestedOwner.ownerId,
+              deviceInstallationId: requestedOwner.deviceInstallationId,
+              agentInstallationId: null,
+              runtimeProfileId: "19191919-1919-4919-8919-191919191919",
+              boundAt: NOW.toISOString(),
+            }
+          : originalVerifyProfileBinding(profilePath, requestedOwner),
+      );
+    const configureFreshProfileModel = vi.fn(
+      (input: {
+        sourceProfileId: string;
+        targetProfileId: string;
+        version: AgentVersion;
+      }) => {
+        events.push(`profile:model:${input.targetProfileId}`);
+      },
+    );
+    profiles.configureFreshProfileModel = configureFreshProfileModel;
+
+    await manager().install({
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      profile: {
+        kind: "fresh",
+        name: "Fresh Agent",
+        modelSourceProfileId: "source-profile",
+      },
+    });
+
+    expect(verifyProfileBinding).toHaveBeenCalledWith(sourceProfilePath, owner);
+    expect(configureFreshProfileModel).toHaveBeenCalledWith({
+      sourceProfileId: "source-profile",
+      targetProfileId: "fresh-agent",
+      version: v1,
+    });
+    expect(events).toEqual([
+      "cloud:create-pending",
+      "cloud:get-version",
+      "verify-cache:version",
+      "verify:policy",
+      `project:${VERSION_ID}`,
+      "profile:create:null",
+      "profile:model:fresh-agent",
+      `profile:project:${VERSION_ID}`,
+      "cloud:activate",
+      "profile:activate:fresh-agent",
+    ]);
+  });
+
+  it("removes a fresh Profile and binding when signed model configuration fails", async () => {
+    const sourceProfilePath = join(profilesRoot, "source-profile");
+    mkdirSync(sourceProfilePath, { recursive: true });
+    const originalResolveProfilePath = profiles.resolveProfilePath;
+    profiles.resolveProfilePath = vi.fn((id: string) =>
+      id === "source-profile"
+        ? sourceProfilePath
+        : originalResolveProfilePath(id),
+    );
+    const originalVerifyProfileBinding =
+      bindings.verifyProfileBinding.bind(bindings);
+    vi.spyOn(bindings, "verifyProfileBinding").mockImplementation(
+      (profilePath, requestedOwner) =>
+        profilePath === sourceProfilePath
+          ? {
+              tenantId: requestedOwner.tenantId,
+              ownerScope: "USER",
+              ownerId: requestedOwner.ownerId,
+              deviceInstallationId: requestedOwner.deviceInstallationId,
+              agentInstallationId: null,
+              runtimeProfileId: "19191919-1919-4919-8919-191919191919",
+              boundAt: NOW.toISOString(),
+            }
+          : originalVerifyProfileBinding(profilePath, requestedOwner),
+    );
+    profiles.configureFreshProfileModel = vi.fn(() => {
+      events.push("profile:model:failed");
+      throw new Error(
+        "The source Profile model is not allowed by the signed Agent version.",
+      );
+    });
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: {
+          kind: "fresh",
+          name: "Fresh Agent",
+          modelSourceProfileId: "source-profile",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "profile_binding_failed" });
+
+    expect(deleteProfile).toHaveBeenCalledWith("fresh-agent");
+    expect(existsSync(freshProfilePath)).toBe(false);
+    expect(() =>
+      bindings.verifyProfileBinding(freshProfilePath, owner),
+    ).toThrow();
+    expect(events).not.toContain("profile:activate:fresh-agent");
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT status, retry_code, runtime_profile_id
+           FROM local_agent_installations
+           WHERE agent_installation_id = ?`,
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({
+      status: "pending",
+      retry_code: "profile_model_configuration_failed",
+      runtime_profile_id: null,
+    });
+  });
+
+  it("repairs an active installation model only from a verified current-owner Profile", async () => {
+    await manager().install({
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      profile: { kind: "fresh", name: "Fresh Agent" },
+    });
+    const sourceProfilePath = join(profilesRoot, "source-profile");
+    mkdirSync(sourceProfilePath, { recursive: true });
+    const originalResolveProfilePath = profiles.resolveProfilePath;
+    profiles.resolveProfilePath = vi.fn((id: string) =>
+      id === "source-profile"
+        ? sourceProfilePath
+        : originalResolveProfilePath(id),
+    );
+    const originalVerifyProfileBinding =
+      bindings.verifyProfileBinding.bind(bindings);
+    vi.spyOn(bindings, "verifyProfileBinding").mockImplementation(
+      (profilePath, requestedOwner) =>
+        profilePath === sourceProfilePath
+          ? {
+              tenantId: requestedOwner.tenantId,
+              ownerScope: "USER",
+              ownerId: requestedOwner.ownerId,
+              deviceInstallationId: requestedOwner.deviceInstallationId,
+              agentInstallationId: null,
+              runtimeProfileId: "19191919-1919-4919-8919-191919191919",
+              boundAt: NOW.toISOString(),
+            }
+          : originalVerifyProfileBinding(profilePath, requestedOwner),
+    );
+    const configureFreshProfileModel = vi.fn();
+    profiles.configureFreshProfileModel = configureFreshProfileModel;
+
+    const repaired = await manager().repairInstallationModel({
+      agentInstallationId: AGENT_INSTALLATION_ID,
+      profilePath: freshProfilePath,
+      localProfileId: "fresh-agent",
+      modelSourceProfileId: "source-profile",
+    });
+
+    expect(cache.getVerifiedVersion).toHaveBeenCalledWith(VERSION_ID);
+    expect(configureFreshProfileModel).toHaveBeenCalledWith({
+      sourceProfileId: "source-profile",
+      targetProfileId: "fresh-agent",
+      version: v1,
+    });
+    expect(repaired).toMatchObject({
+      agentInstallationId: AGENT_INSTALLATION_ID,
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+      status: "active",
+      retryCode: null,
+    });
+    expect(client.selectInstallationVersion).not.toHaveBeenCalled();
+    expect(client.activateInstallation).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when an active installation model source is not owned by the current account", async () => {
+    await manager().install({
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      profile: { kind: "fresh", name: "Fresh Agent" },
+    });
+    const sourceProfilePath = join(profilesRoot, "foreign-source");
+    mkdirSync(sourceProfilePath, { recursive: true });
+    const originalResolveProfilePath = profiles.resolveProfilePath;
+    profiles.resolveProfilePath = vi.fn((id: string) =>
+      id === "foreign-source"
+        ? sourceProfilePath
+        : originalResolveProfilePath(id),
+    );
+    const originalVerifyProfileBinding =
+      bindings.verifyProfileBinding.bind(bindings);
+    vi.spyOn(bindings, "verifyProfileBinding").mockImplementation(
+      (profilePath, requestedOwner) => {
+        if (profilePath === sourceProfilePath) {
+          throw new Error(
+            "This Runtime Profile belongs to another Aera owner.",
+          );
+        }
+        return originalVerifyProfileBinding(profilePath, requestedOwner);
+      },
+    );
+    const configureFreshProfileModel = vi.fn();
+    profiles.configureFreshProfileModel = configureFreshProfileModel;
+
+    await expect(
+      manager().repairInstallationModel({
+        agentInstallationId: AGENT_INSTALLATION_ID,
+        profilePath: freshProfilePath,
+        localProfileId: "fresh-agent",
+        modelSourceProfileId: "foreign-source",
+      }),
+    ).rejects.toMatchObject({ code: "profile_binding_failed" });
+    expect(configureFreshProfileModel).not.toHaveBeenCalled();
   });
 
   it("restores verified private state into a fresh USER installation without importing historical RuntimeBindings", async () => {

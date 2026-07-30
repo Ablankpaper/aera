@@ -3,6 +3,7 @@ import {
   cycleRunId,
   isScratchRun,
   mintRun,
+  openProfileRunTransition,
   openSessionRunTransition,
   runIdAtOrdinal,
   selectProfileRunTransition,
@@ -24,13 +25,23 @@ function run(
 }
 
 describe("chat run profile transitions", () => {
-  it("re-homes a scratch run when switching profiles", () => {
+  it("never re-homes a scratch run whose boundary may already be frozen", () => {
+    const randomUUID = vi
+      .spyOn(crypto, "randomUUID")
+      .mockReturnValue("00000000-0000-4000-8000-000000000010");
     const runs = [run("run-a", "kitt")];
 
     const next = selectProfileRunTransition(runs, "run-a", "alfie");
 
-    expect(next.activeRunId).toBe("run-a");
-    expect(next.runs).toEqual([{ ...runs[0], profile: "alfie" }]);
+    expect(next.activeRunId).toBe("run-00000000-0000-4000-8000-000000000010");
+    expect(next.runs).toEqual([
+      runs[0],
+      expect.objectContaining({
+        runId: "run-00000000-0000-4000-8000-000000000010",
+        profile: "alfie",
+      }),
+    ]);
+    randomUUID.mockRestore();
   });
 
   it("activates an existing scratch run for the selected profile", () => {
@@ -92,6 +103,38 @@ describe("chat run profile transitions", () => {
       seed: undefined,
     });
     randomUUID.mockRestore();
+  });
+
+  it("opens a different Agent in a fresh run instead of mutating a blank run", () => {
+    const randomUUID = vi
+      .spyOn(crypto, "randomUUID")
+      .mockReturnValue("00000000-0000-4000-8000-000000000011");
+    const existing = run("run-default", "default");
+
+    const next = openProfileRunTransition(
+      [existing],
+      existing.runId,
+      "published-agent",
+    );
+
+    expect(next.activeRunId).toBe("run-00000000-0000-4000-8000-000000000011");
+    expect(next.runs).toEqual([
+      existing,
+      expect.objectContaining({
+        runId: "run-00000000-0000-4000-8000-000000000011",
+        profile: "published-agent",
+      }),
+    ]);
+    randomUUID.mockRestore();
+  });
+
+  it("keeps the current blank run when it already belongs to the requested Agent", () => {
+    const existing = run("run-agent", "published-agent");
+    const runs = [existing];
+
+    expect(
+      openProfileRunTransition(runs, existing.runId, "published-agent"),
+    ).toEqual({ activeRunId: existing.runId, runs });
   });
 
   it("replaces the active same-profile scratch run when opening a session", () => {

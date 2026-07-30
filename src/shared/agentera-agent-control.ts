@@ -3,6 +3,13 @@ export type AgentDraftAssetMediaType = "text/markdown" | "text/plain";
 export type AgentDraftIconMediaType = "image/png" | "image/webp";
 export type OfficialAgentChannel = "internal" | "stable";
 
+/**
+ * A renderer may explicitly operate on the signed-in user's private Agent
+ * assets while the shell remains inside an Organization context. Arbitrary
+ * tenant identifiers are deliberately not accepted at this boundary.
+ */
+export type AgenteraAgentOperationScope = "USER";
+
 export interface OfficialAgentSummary {
   definitionId: string;
   displayName: string;
@@ -424,6 +431,7 @@ export interface AgenteraInstallVersionInput {
   definitionId: string;
   versionId: string;
   profileName: string;
+  modelProfileId?: string;
 }
 
 export interface AgenteraClaimVersionInput {
@@ -434,7 +442,7 @@ export interface AgenteraClaimVersionInput {
 }
 
 export type AgenteraPendingInstallationTarget =
-  | { kind: "fresh"; profileName: string }
+  | { kind: "fresh"; profileName: string; modelProfileId?: string }
   | {
       kind: "claim";
       localProfileId: string;
@@ -450,6 +458,12 @@ export interface AgenteraSelectInstallationVersionInput {
   id: string;
   versionId: string;
   localProfileId: string;
+}
+
+export interface AgenteraRepairInstallationModelInput {
+  id: string;
+  localProfileId: string;
+  modelProfileId: string;
 }
 
 export interface EligibleExperienceSkill {

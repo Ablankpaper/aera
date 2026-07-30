@@ -150,6 +150,9 @@ export default {
       "Uses {{model}} with {{count}} configured Skills and is ready for conversation.",
     localProfileNoModel:
       "This local Agent does not have a model configured yet.",
+    modelRequired:
+      "This account has no usable model configuration. Configure one in Models first.",
+    configureModelFirst: "Configure a model first",
     personalAgent: "My Agent",
     workspaceAgent: "Team / project Agent",
     organizationAgent: "Enterprise Agent",
@@ -359,6 +362,8 @@ export default {
     runtimeModel: "Runtime model",
     runtimeModelHint:
       "Configured models are loaded automatically. Choose the default for this Agent.",
+    runtimeModelRequired:
+      "This account does not have a configured model for running Agents yet. You can publish now and start using it after configuring a model.",
     identityUpload: "Import Markdown identity",
     identityUploadHint:
       "Upload an existing Markdown prompt or identity document.",
@@ -501,8 +506,7 @@ export default {
       invalid_request: "The Agent request is invalid.",
       sign_in_required: "Sign in to Aera to continue.",
       online_required: "A live Aera Cloud connection is required.",
-      entitlement_required:
-        "Your Aera access authorization must be renewed.",
+      entitlement_required: "Your Aera access authorization must be renewed.",
       not_found: "The Agent item no longer exists.",
       conflict: "This draft or installation changed. Refresh before retrying.",
       verification_failed: "The signed Agent version could not be verified.",
