@@ -41,16 +41,16 @@ gh workflow run internal-beta.yml \
   -f ci_run_id=30100000001
 ```
 
-The workflow refuses a non-`main` workflow identity, a source mismatch, a failed or incomplete CI matrix, a version other than `0.7.4-internal-beta.10`, malformed public trust, or an unapproved Runtime Seed lock.
+The workflow refuses a non-`main` workflow identity, a source mismatch, a failed or incomplete CI matrix, a version other than `0.7.4-internal-beta.12`, malformed public trust, or an unapproved Runtime Seed lock.
 
 ## Built bytes
 
 The platform jobs prepare and independently verify Runtime Seed candidate `dcb0f0bc6a0e2d18c55beedc6517dbc41d8b01e0` (`runtime-v0.18.2-agentera.1-rc.4`), rebuild native modules for the target architecture, compile the baked Beta trust, and package:
 
-- `Aera-Internal-Beta-0.7.4-internal-beta.10-macos-arm64.dmg`
-- `Aera-Internal-Beta-0.7.4-internal-beta.10-macos-arm64.zip`
-- `Aera-Internal-Beta-0.7.4-internal-beta.10-windows-x64-setup.exe`
-- `Aera-Internal-Beta-0.7.4-internal-beta.10-windows-x64-portable.exe`
+- `Aera-Internal-Beta-0.7.4-internal-beta.12-macos-arm64.dmg`
+- `Aera-Internal-Beta-0.7.4-internal-beta.12-macos-arm64.zip`
+- `Aera-Internal-Beta-0.7.4-internal-beta.12-windows-x64-setup.exe`
+- `Aera-Internal-Beta-0.7.4-internal-beta.12-windows-x64-portable.exe`
 
 The Electron Builder overlay sets `identity: null`, `notarize: false`, and `forceCodeSigning: false`; the jobs also set `CSC_IDENTITY_AUTO_DISCOVERY=false` and always pass `--publish never`. Hardened Runtime remains enabled in the macOS application, and normal Windows resource metadata remains embedded.
 

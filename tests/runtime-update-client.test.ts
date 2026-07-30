@@ -12,6 +12,7 @@ import {
 } from "./fixtures/runtime-distribution/fixture";
 
 import {
+  FetchRuntimeMetadataTransport,
   RuntimeUpdateUrlError,
   assertAllowedRuntimeUpdateUrl,
   checkStableRuntimeUpdate,
@@ -151,6 +152,36 @@ function createUpdateFixture(
 }
 
 describe("Runtime stable update client", () => {
+  it("uses an injected Chromium-network fetcher for metadata", async () => {
+    const requests: Array<{
+      url: string;
+      redirect: string;
+      userAgent: string | undefined;
+    }> = [];
+    const transport = new FetchRuntimeMetadataTransport(async (url, init) => {
+      requests.push({
+        url,
+        redirect: init.redirect,
+        userAgent: init.headers["User-Agent"],
+      });
+      return new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: { "Content-Length": "3" },
+      });
+    });
+
+    await expect(
+      transport.get(new URL(LATEST_INDEX_URL), new AbortController().signal),
+    ).resolves.toEqual(Buffer.from([1, 2, 3]));
+    expect(requests).toEqual([
+      {
+        url: LATEST_INDEX_URL,
+        redirect: "follow",
+        userAgent: "Aera-Studio-Runtime-Updater",
+      },
+    ]);
+  });
+
   it("fetches only signed index/manifest metadata and returns an offer", async () => {
     const fixture = createUpdateFixture();
     const offer = await checkStableRuntimeUpdate(fixture.context);

@@ -2,6 +2,7 @@ import {
   app,
   BrowserWindow,
   clipboard,
+  net,
   safeStorage,
   session,
   shell,
@@ -51,6 +52,16 @@ import {
 import { createProductAccessGuard } from "../ipc/auth-guard";
 import { getActiveProfileNameSync, profileHome } from "../utils";
 import { createRuntimeBootstrapOptions } from "../agentera-runtime-distribution/bootstrap";
+import {
+  FetchRuntimeDownloadTransport,
+  downloadWithResume,
+} from "../agentera-runtime-distribution/downloader";
+import {
+  FetchRuntimeMetadataTransport,
+  checkStableRuntimeUpdate,
+} from "../agentera-runtime-distribution/update-client";
+import type { RuntimeFetch } from "../agentera-runtime-distribution/fetch";
+import { createElectronRuntimeDownloadUrlResolver } from "../agentera-runtime-distribution/electron-transport";
 import {
   createRuntimeDistributionManager,
   type RuntimeDistributionManager,
@@ -249,8 +260,32 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
       platform: process.platform,
       arch: process.arch,
     });
+    const runtimeFetch: RuntimeFetch = (url, init) =>
+      net.fetch(url, {
+        ...init,
+        bypassCustomProtocolHandlers: true,
+      });
+    const runtimeMetadataTransport = new FetchRuntimeMetadataTransport(
+      runtimeFetch,
+    );
+    const runtimeDownloadTransport = new FetchRuntimeDownloadTransport(
+      runtimeFetch,
+      createElectronRuntimeDownloadUrlResolver((requestOptions) =>
+        net.request(requestOptions),
+      ),
+    );
     runtimeDistribution = createRuntimeDistributionManager({
       ...runtimeOptions,
+      checkUpdate: (context) =>
+        checkStableRuntimeUpdate({
+          ...context,
+          transport: runtimeMetadataTransport,
+        }),
+      download: (request) =>
+        downloadWithResume({
+          ...request,
+          transport: runtimeDownloadTransport,
+        }),
       activeRunCount: () => runtimeActivity.activeRunCount,
       beginRuntimeTransition: () => runtimeActivity.beginTransition(),
       cancelRuntimeTransition: () => runtimeActivity.cancelTransition(),

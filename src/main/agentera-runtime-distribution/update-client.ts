@@ -11,6 +11,7 @@ import {
   type RuntimeManifest,
   type RuntimePlatform,
 } from "./manifest";
+import { nodeRuntimeFetch, type RuntimeFetch } from "./fetch";
 
 export type RuntimeUpdateErrorCode =
   | "runtime_update_unavailable"
@@ -297,11 +298,13 @@ function createMetadataSignal(signal: AbortSignal): {
   };
 }
 
-class FetchRuntimeMetadataTransport implements RuntimeMetadataTransport {
+export class FetchRuntimeMetadataTransport implements RuntimeMetadataTransport {
+  constructor(private readonly fetcher: RuntimeFetch = nodeRuntimeFetch) {}
+
   async get(url: URL, signal: AbortSignal): Promise<Buffer> {
     const operation = createMetadataSignal(signal);
     try {
-      const response = await fetch(url, {
+      const response = await this.fetcher(url.href, {
         method: "GET",
         redirect: "follow",
         signal: operation.signal,

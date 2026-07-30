@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  FetchRuntimeDownloadTransport,
   RuntimeDownloadCancelledError,
   downloadWithResume,
   runtimePartialPaths,
@@ -92,6 +93,68 @@ function request(
 }
 
 describe("Runtime resumable downloader", () => {
+  it("uses an injected Chromium-network fetcher through bounded redirects", async () => {
+    const fixture = createDownloadFixture();
+    const requests: Array<{
+      url: string;
+      redirect: string;
+      range: string | undefined;
+    }> = [];
+    const transport = new FetchRuntimeDownloadTransport(
+      async (url, init) => {
+        requests.push({
+          url,
+          redirect: init.redirect,
+          range: init.headers.Range,
+        });
+        return new Response(new Uint8Array(BODY), {
+          status: 200,
+          headers: {
+            "Content-Length": String(BODY.length),
+            ETag: '"fetch-v1"',
+          },
+        });
+      },
+      async (url) => new URL("/asset", url),
+    );
+    try {
+      await request(new URL("https://updates.example/runtime"), fixture, {
+        transport,
+      });
+      expect(readFileSync(fixture.destination)).toEqual(BODY);
+      expect(requests).toEqual([
+        {
+          url: "https://updates.example/asset",
+          redirect: "error",
+          range: undefined,
+        },
+      ]);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("preserves the read timeout on the Chromium-network transport", async () => {
+    const fixture = createDownloadFixture();
+    const transport = new FetchRuntimeDownloadTransport(
+      async () =>
+        new Response(new ReadableStream<Uint8Array>(), {
+          status: 200,
+          headers: { "Content-Length": String(BODY.length) },
+        }),
+    );
+    try {
+      await expect(
+        request(new URL("https://updates.example/runtime"), fixture, {
+          transport,
+          timeouts: { connectMs: 100, readMs: 20, overallMs: 200 },
+        }),
+      ).rejects.toThrow(/read timeout/i);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   it("streams a complete verified file and removes partial metadata", async () => {
     const fixture = createDownloadFixture();
     const progress: number[] = [];

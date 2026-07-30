@@ -15,6 +15,8 @@ import type { ClientRequest, IncomingMessage } from "node:http";
 import { request as requestHttps } from "node:https";
 import { dirname } from "node:path";
 
+import { nodeRuntimeFetch, type RuntimeFetch } from "./fetch";
+
 export interface RuntimeDownloadRequest {
   url: URL;
   destination: string;
@@ -26,6 +28,7 @@ export interface RuntimeDownloadRequest {
   partialMaxAgeMs?: number;
   now?: () => Date;
   timeouts?: Partial<RuntimeDownloadTimeouts>;
+  transport?: RuntimeDownloadTransport;
 }
 
 export interface RuntimeDownloadTimeouts {
@@ -38,6 +41,32 @@ export interface RuntimePartialPaths {
   data: string;
   metadata: string;
 }
+
+export interface RuntimeDownloadResponse {
+  statusCode: number;
+  getHeader(name: string): string | null;
+  body: AsyncIterable<Uint8Array>;
+  discard(): void;
+  cancel(error?: Error): void;
+}
+
+export interface RuntimeDownloadTransport {
+  get(
+    url: URL,
+    headers: Record<string, string>,
+    signal: AbortSignal,
+    timeouts: RuntimeDownloadTimeouts,
+    maxRedirects: number,
+  ): Promise<RuntimeDownloadResponse>;
+}
+
+export type RuntimeDownloadUrlResolver = (
+  url: URL,
+  headers: Record<string, string>,
+  signal: AbortSignal,
+  timeouts: RuntimeDownloadTimeouts,
+  maxRedirects: number,
+) => Promise<URL>;
 
 interface RuntimePartialMetadata {
   schemaVersion: 1;
@@ -325,8 +354,8 @@ function headerValue(value: string | string[] | undefined): string | null {
   return value ?? null;
 }
 
-function contentLength(response: IncomingMessage): number | null {
-  const raw = headerValue(response.headers["content-length"]);
+function contentLength(response: RuntimeDownloadResponse): number | null {
+  const raw = response.getHeader("content-length");
   if (raw === null) return null;
   if (!/^(?:0|[1-9][0-9]*)$/.test(raw)) {
     throw new RuntimeDownloadIntegrityError(
@@ -343,11 +372,11 @@ function contentLength(response: IncomingMessage): number | null {
 }
 
 function validateContentRange(
-  response: IncomingMessage,
+  response: RuntimeDownloadResponse,
   start: number,
   expectedSize: number,
 ): void {
-  const raw = headerValue(response.headers["content-range"]);
+  const raw = response.getHeader("content-range");
   const match = raw ? /^bytes ([0-9]+)-([0-9]+)\/([0-9]+)$/.exec(raw) : null;
   if (!match) {
     throw new RuntimeDownloadIntegrityError(
@@ -377,10 +406,10 @@ function validateContentRange(
 
 function validatorsMatch(
   state: ResumeState,
-  response: IncomingMessage,
+  response: RuntimeDownloadResponse,
 ): boolean {
-  const etag = headerValue(response.headers.etag);
-  const lastModified = headerValue(response.headers["last-modified"]);
+  const etag = response.getHeader("etag");
+  const lastModified = response.getHeader("last-modified");
   return !(
     (state.etag !== null && etag !== state.etag) ||
     (state.lastModified !== null && lastModified !== state.lastModified)
@@ -507,6 +536,207 @@ async function responseWithRedirects(
   }
 }
 
+function nodeDownloadResponse(
+  response: IncomingMessage,
+): RuntimeDownloadResponse {
+  return {
+    statusCode: response.statusCode ?? 0,
+    getHeader: (name) => headerValue(response.headers[name.toLowerCase()]),
+    body: response as unknown as AsyncIterable<Uint8Array>,
+    discard: () => response.resume(),
+    cancel: (error) => response.destroy(error),
+  };
+}
+
+class NodeRuntimeDownloadTransport implements RuntimeDownloadTransport {
+  async get(
+    url: URL,
+    headers: Record<string, string>,
+    signal: AbortSignal,
+    timeouts: RuntimeDownloadTimeouts,
+    maxRedirects: number,
+  ): Promise<RuntimeDownloadResponse> {
+    return nodeDownloadResponse(
+      await responseWithRedirects(url, headers, signal, timeouts, maxRedirects),
+    );
+  }
+}
+
+export function resolveRuntimeDownloadRedirect(
+  current: URL,
+  location: string | null,
+  redirects: number,
+  maxRedirects: number,
+): URL {
+  if (location === null) {
+    throw new RuntimeDownloadError(
+      "Runtime download redirect is missing Location",
+    );
+  }
+  if (redirects >= maxRedirects) {
+    throw new RuntimeDownloadError(
+      "Runtime download exceeded the redirect limit",
+    );
+  }
+  const next = new URL(location, current);
+  if (
+    (next.protocol !== "http:" && next.protocol !== "https:") ||
+    next.username.length > 0 ||
+    next.password.length > 0 ||
+    next.hash.length > 0 ||
+    (current.protocol === "https:" && next.protocol !== "https:")
+  ) {
+    throw new RuntimeDownloadError(
+      "Runtime download redirect target is not allowed",
+    );
+  }
+  return next;
+}
+
+function fetchResponseBody(
+  body: ReadableStream<Uint8Array>,
+  controller: AbortController,
+  readMs: number,
+  dispose: () => void,
+): AsyncIterable<Uint8Array> {
+  return {
+    async *[Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
+      const iterator = (body as unknown as AsyncIterable<Uint8Array>)[
+        Symbol.asyncIterator
+      ]();
+      let readTimer: NodeJS.Timeout | null = null;
+      try {
+        for (;;) {
+          const next = await Promise.race([
+            iterator.next(),
+            new Promise<never>((_resolve, reject) => {
+              readTimer = setTimeout(() => {
+                const error = new RuntimeDownloadTimeoutError(
+                  "Runtime download read timeout",
+                );
+                controller.abort(error);
+                reject(error);
+              }, readMs);
+              readTimer.unref?.();
+            }),
+          ]);
+          if (readTimer !== null) {
+            clearTimeout(readTimer);
+            readTimer = null;
+          }
+          if (next.done) return;
+          yield next.value;
+        }
+      } finally {
+        if (readTimer !== null) clearTimeout(readTimer);
+        void iterator.return?.().catch(() => undefined);
+        dispose();
+      }
+    },
+  };
+}
+
+export class FetchRuntimeDownloadTransport implements RuntimeDownloadTransport {
+  constructor(
+    private readonly fetcher: RuntimeFetch = nodeRuntimeFetch,
+    private readonly resolveUrl?: RuntimeDownloadUrlResolver,
+  ) {}
+
+  async get(
+    url: URL,
+    headers: Record<string, string>,
+    signal: AbortSignal,
+    timeouts: RuntimeDownloadTimeouts,
+    maxRedirects: number,
+  ): Promise<RuntimeDownloadResponse> {
+    const controller = new AbortController();
+    const onAbort = (): void => controller.abort(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) controller.abort(signal.reason);
+    let disposed = false;
+    const dispose = (): void => {
+      if (disposed) return;
+      disposed = true;
+      signal.removeEventListener("abort", onAbort);
+    };
+    try {
+      const resolvedUrl = this.resolveUrl
+        ? await this.resolveUrl(
+            url,
+            headers,
+            controller.signal,
+            timeouts,
+            maxRedirects,
+          )
+        : url;
+      if (
+        (resolvedUrl.protocol !== "http:" &&
+          resolvedUrl.protocol !== "https:") ||
+        resolvedUrl.username.length > 0 ||
+        resolvedUrl.password.length > 0 ||
+        resolvedUrl.hash.length > 0 ||
+        (url.protocol === "https:" && resolvedUrl.protocol !== "https:")
+      ) {
+        throw new RuntimeDownloadError(
+          "Runtime download resolved URL is not allowed",
+        );
+      }
+      let connectionTimedOut = false;
+      const connectTimer = setTimeout(() => {
+        connectionTimedOut = true;
+        controller.abort(
+          new RuntimeDownloadTimeoutError(
+            "Runtime download connection timeout",
+          ),
+        );
+      }, timeouts.connectMs);
+      connectTimer.unref?.();
+      let response: Response;
+      try {
+        response = await this.fetcher(resolvedUrl.href, {
+          method: "GET",
+          redirect: this.resolveUrl ? "error" : "follow",
+          signal: controller.signal,
+          headers,
+        });
+      } catch (error) {
+        if (connectionTimedOut) {
+          throw new RuntimeDownloadTimeoutError(
+            "Runtime download connection timeout",
+          );
+        }
+        throw error;
+      } finally {
+        clearTimeout(connectTimer);
+      }
+      if (response.body === null) {
+        throw new RuntimeDownloadError("Runtime download response has no body");
+      }
+      const body = response.body;
+      const discard = (): void => {
+        void body.cancel().catch(() => undefined);
+        dispose();
+      };
+      return {
+        statusCode: response.status,
+        getHeader: (name) => response.headers.get(name),
+        body: fetchResponseBody(body, controller, timeouts.readMs, dispose),
+        discard,
+        cancel: (error) => {
+          controller.abort(error);
+          void body.cancel(error).catch(() => undefined);
+          dispose();
+        },
+      };
+    } catch (error) {
+      dispose();
+      throw error;
+    }
+  }
+}
+
+const NODE_RUNTIME_DOWNLOAD_TRANSPORT = new NodeRuntimeDownloadTransport();
+
 async function persistPartialAfterFailure(
   paths: RuntimePartialPaths,
   metadata: RuntimePartialMetadata,
@@ -523,7 +753,7 @@ async function persistPartialAfterFailure(
 async function consumeResponse(
   request: RuntimeDownloadRequest,
   paths: RuntimePartialPaths,
-  response: IncomingMessage,
+  response: RuntimeDownloadResponse,
   state: ResumeState | null,
   now: () => Date,
 ): Promise<void> {
@@ -533,7 +763,7 @@ async function consumeResponse(
   } else if (response.statusCode === 200) {
     const length = contentLength(response);
     if (length !== null && length !== request.expectedSize) {
-      response.resume();
+      response.discard();
       await clearPartial(paths);
       throw new RuntimeDownloadIntegrityError(
         "Runtime download Content-Length differs from the expected size",
@@ -542,7 +772,7 @@ async function consumeResponse(
     start = 0;
     state = null;
   } else {
-    response.resume();
+    response.discard();
     throw new RuntimeDownloadError(
       `Runtime download returned HTTP ${response.statusCode ?? 0}`,
     );
@@ -555,8 +785,8 @@ async function consumeResponse(
     expectedSize: request.expectedSize,
     expectedSha256: request.expectedSha256,
     received: start,
-    etag: headerValue(response.headers.etag),
-    lastModified: headerValue(response.headers["last-modified"]),
+    etag: response.getHeader("etag"),
+    lastModified: response.getHeader("last-modified"),
     createdAt: state?.createdAt ?? timestamp,
     updatedAt: timestamp,
   };
@@ -565,10 +795,10 @@ async function consumeResponse(
   await writeMetadata(paths.metadata, metadata);
   request.onProgress(received, request.expectedSize);
   try {
-    for await (const chunk of response) {
+    for await (const chunk of response.body) {
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       if (received + bytes.length > request.expectedSize) {
-        response.destroy();
+        response.cancel();
         throw new RuntimeDownloadIntegrityError(
           "Runtime download exceeded the expected size",
         );
@@ -651,6 +881,7 @@ export async function downloadWithResume(
   }
 
   const operation = createOperationSignal(request.signal, timeouts.overallMs);
+  const transport = request.transport ?? NODE_RUNTIME_DOWNLOAD_TRANSPORT;
   try {
     for (let restart = 0; restart < 2; restart += 1) {
       const headers: Record<string, string> = {
@@ -662,7 +893,7 @@ export async function downloadWithResume(
         const validator = state.etag ?? state.lastModified;
         if (validator) headers["If-Range"] = validator;
       }
-      const response = await responseWithRedirects(
+      const response = await transport.get(
         request.url,
         headers,
         operation.signal,
@@ -675,7 +906,7 @@ export async function downloadWithResume(
         response.statusCode === 206 &&
         !validatorsMatch(state, response)
       ) {
-        response.resume();
+        response.discard();
         await clearPartial(paths);
         state = null;
         continue;
