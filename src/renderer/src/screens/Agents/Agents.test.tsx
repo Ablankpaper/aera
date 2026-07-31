@@ -226,20 +226,26 @@ function installAgenteraAPI(
 }
 
 describe("Agents unified product surface", () => {
-  it("uses a configured account Profile instead of a previously active installed Agent", () => {
-    const accountProfile = profile("account-home", {
-      name: "Account home",
-    });
-    const installedProfile = profile("previous-agent", {
-      agentInstallationId: INSTALLATION_ID,
-    });
+  it("uses the active configured Profile even when it belongs to an installed Agent", () => {
+    const accountProfile = {
+      ...profile("account-home", { name: "Account home" }),
+      provider: "openai",
+      model: "gpt-5.4",
+    };
+    const installedProfile = {
+      ...profile("previous-agent", {
+        agentInstallationId: INSTALLATION_ID,
+      }),
+      provider: "custom:gpt",
+      model: "gpt-5.6-sol",
+    };
 
     expect(
       selectAgentModelProfileId(
         [installedProfile, accountProfile],
         installedProfile.id,
       ),
-    ).toBe(accountProfile.id);
+    ).toBe(installedProfile.id);
   });
 
   it("prefers the active configured account Profile over another stale account Profile", () => {

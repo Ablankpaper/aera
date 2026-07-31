@@ -118,7 +118,9 @@ While the shell remains in an Organization, “我的智能体” explicitly sen
 
 [[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] reuses the configured Hermes model library, imports identity and capability Markdown, and derives safe asset paths. Personal publish and publish-and-use complete from one explicit action and carry the selected source model Profile snapshot into installation; Workspace keeps its trusted preview and Organization keeps mandatory review.
 
-[[src/renderer/src/screens/Agents/Agents.tsx#selectAgentModelProfileId]] selects the currently active configured non-installed Profile before any other account Profile, so changing the active custom provider cannot sign a new Agent against a stale default model. If the active Profile belongs to an installed Agent, a configured non-installed account Profile still wins and only its model route is reused.
+[[src/renderer/src/screens/Agents/Agents.tsx#selectAgentModelProfileId]] selects the currently active configured current-owner Profile before any other Profile, including when that Profile belongs to an installed Agent. The main-process Profile listing already filters by owner, so Agent creation follows the model service the user actually activated instead of reopening a stale account Profile.
+
+[[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] then loads every saved model attached to that configured provider and base URL, preserves the canonical named-custom provider identity, and excludes models belonging to other services. A configured non-installed Profile remains the fallback when the active Profile has no valid model route.
 
 ### Guided product Agent creation
 

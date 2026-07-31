@@ -294,6 +294,77 @@ describe("AgentDraftEditor", () => {
     );
   });
 
+  it("lists every model from the active named custom service and excludes other routes", async () => {
+    const catalogModels = [
+      "gpt-5.6-sol",
+      "codex-auto-review",
+      "gpt-5.3-codex-spark",
+      "gpt-5.4",
+      "gpt-5.4-mini",
+      "gpt-5.4-openai-compact",
+      ...Array.from({ length: 12 }, (_, index) => `catalog-model-${index + 7}`),
+    ];
+    Object.defineProperty(window, "hermesAPI", {
+      configurable: true,
+      value: {
+        getModelConfig: vi.fn(async () => ({
+          provider: "custom:gpt",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://current-gateway.example.test/v1",
+        })),
+        listModels: vi.fn(async () => [
+          ...catalogModels.map((model, index) => ({
+            id: `gpt-${index}`,
+            name: model,
+            provider: "custom",
+            providerLabel: "GPT",
+            model,
+            baseUrl: "https://current-gateway.example.test/v1",
+            createdAt: index + 1,
+          })),
+          {
+            id: "old-route-model",
+            name: "Old route model",
+            provider: "custom",
+            providerLabel: "Old GPT",
+            model: "old-fixed-model",
+            baseUrl: "https://old-gateway.example.test/v1",
+            createdAt: 99,
+          },
+        ]),
+      },
+    });
+    const configuredDraft = detail();
+    configuredDraft.manifest.modelConstraints = {
+      allowedProviders: ["custom:gpt"],
+      allowedModels: ["gpt-5.6-sol"],
+    };
+    installAPI();
+
+    render(
+      <AgentDraftEditor
+        open
+        draft={configuredDraft}
+        modelProfileId="active-installed-agent"
+        onClose={() => undefined}
+        onSaved={() => undefined}
+        onPublished={() => undefined}
+        onRequestInstall={() => undefined}
+      />,
+    );
+
+    const select = screen.getByLabelText(
+      "agents.control.runtimeModel",
+    ) as HTMLSelectElement;
+    await waitFor(() => expect(select.options).toHaveLength(18));
+    expect(Array.from(select.options, (option) => option.value)).toEqual(
+      catalogModels.map((model) => `custom:gpt\u0000${model}`),
+    );
+    expect(
+      screen.queryByRole("option", { name: "Old route model · Old GPT" }),
+    ).toBeNull();
+  });
+
   it("shows a stable conflict message for a stale local revision", async () => {
     const api = installAPI({
       updateDraft: vi.fn(async () => ({
