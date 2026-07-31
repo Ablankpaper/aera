@@ -166,6 +166,8 @@ export default {
       "{{name}} 是由 Aera 官方发布的智能体，可在本地独立运行并协助完成任务。",
     personalCardFallback: "这个智能体已准备好根据你的要求完成专属任务。",
     publishedCardDescription: "已发布并可使用，系统会自动完成准备。",
+    modelCompatibilityPendingCardDescription:
+      "当前模型与该签名版本不兼容，请配置匹配模型或发布兼容版本后重试。",
     installedCardDescription: "已准备就绪，点击查看详情并开始使用。",
     pendingCardDescription: "智能体尚未准备完成，可在详情中继续启用。",
     localProfileDescription:
@@ -472,6 +474,8 @@ export default {
       conflict: "草稿或安装已发生变化，请刷新后重试。",
       verification_failed: "无法验证智能体签名版本。",
       runtime_incompatible: "该智能体版本暂不支持此电脑上的本地运行环境。",
+      profile_model_configuration_failed:
+        "当前模型与该智能体的签名版本不兼容。请配置版本允许的模型，或由发布者发布兼容当前模型的新版本。",
       local_runtime_required:
         "本地智能体服务尚未就绪，请稍后重试，系统会自动完成准备。",
       cloud_unavailable: "Aera Cloud 暂时不可用。",

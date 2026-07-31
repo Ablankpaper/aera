@@ -62,6 +62,7 @@ export type AgentInstallationManagerErrorCode =
   | "creation_failed"
   | "materialization_failed"
   | "profile_binding_failed"
+  | "profile_model_configuration_failed"
   | "activation_failed"
   | "update_failed"
   | "archive_failed"
@@ -1548,7 +1549,9 @@ export class AgentInstallationManager {
         version,
       });
     } catch {
-      throw new AgentInstallationManagerError("profile_binding_failed");
+      throw new AgentInstallationManagerError(
+        "profile_model_configuration_failed",
+      );
     }
 
     this.database.sqlite
@@ -2029,7 +2032,11 @@ export class AgentInstallationManager {
       }
       reportStageFailure("profile", error);
       this.recordFailure(local.agentInstallationId, profileStage);
-      throw new AgentInstallationManagerError("profile_binding_failed");
+      throw new AgentInstallationManagerError(
+        profileStage === "profile_model_configuration_failed"
+          ? "profile_model_configuration_failed"
+          : "profile_binding_failed",
+      );
     }
 
     try {

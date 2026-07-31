@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { AGENTERA_IPC_CHANNEL_POLICY } from "../ipc/auth-guard";
 import {
+  executeAgentControlIpc,
   parseAgentOperationScope,
   parseInstallVersionInput,
   parseRepairInstallationModelInput,
@@ -14,6 +15,19 @@ const VERSION_ID = "22222222-2222-4222-8222-222222222222";
 const INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
 
 describe("Agent control IPC operation scope", () => {
+  it("preserves a signed model compatibility failure for an actionable renderer error", async () => {
+    const result = await executeAgentControlIpc(() => {
+      throw Object.assign(new Error("model route mismatch"), {
+        code: "profile_model_configuration_failed",
+      });
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: "profile_model_configuration_failed",
+    });
+  });
+
   it("accepts only the private USER override and never arbitrary tenant input", () => {
     expect(parseAgentOperationScope(undefined)).toBeUndefined();
     expect(parseAgentOperationScope("USER")).toBe("USER");
