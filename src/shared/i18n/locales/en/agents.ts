@@ -142,6 +142,8 @@ export default {
       "This Agent is ready to help with work tailored to your instructions.",
     publishedCardDescription:
       "Published and ready to use. Aera completes setup automatically.",
+    modelCompatibilityPendingCardDescription:
+      "The current model is incompatible with this signed version. Configure a compatible model or publish a compatible version before retrying.",
     installedCardDescription:
       "Ready to use. Open the details to start a conversation.",
     pendingCardDescription:
@@ -512,6 +514,8 @@ export default {
       verification_failed: "The signed Agent version could not be verified.",
       runtime_incompatible:
         "This Agent version is not compatible with this device's local environment.",
+      profile_model_configuration_failed:
+        "The current model is incompatible with this signed Agent version. Configure a model allowed by the version, or ask the publisher to release a version compatible with the current model.",
       local_runtime_required:
         "The local Agent service is not ready yet. Try again shortly; setup is automatic.",
       cloud_unavailable: "Aera Cloud is temporarily unavailable.",

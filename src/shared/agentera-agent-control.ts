@@ -351,6 +351,7 @@ export type AgenteraAgentControlErrorCode =
   | "conflict"
   | "verification_failed"
   | "runtime_incompatible"
+  | "profile_model_configuration_failed"
   | "local_runtime_required"
   | "cloud_unavailable"
   | "workspace_forbidden"

@@ -607,6 +607,9 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
   if (code === "runtime_incompatible" || code === "runtime_drift") {
     return "runtime_incompatible";
   }
+  if (code === "profile_model_configuration_failed") {
+    return "profile_model_configuration_failed";
+  }
   if (
     code === "service_unavailable" ||
     code === "creation_failed" ||

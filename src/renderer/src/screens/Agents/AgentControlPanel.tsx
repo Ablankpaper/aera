@@ -713,12 +713,16 @@ export default function AgentControlPanel({
       result.push({
         key: `definition:${definition.id}`,
         name: definition.displayName,
-        description: draft
-          ? plainSummary(
-              draft.manifest.identity.systemPrompt,
-              t("agents.hub.personalCardFallback"),
-            )
-          : t("agents.hub.publishedCardDescription"),
+        description:
+          installation?.status === "pending" &&
+          installation.retryCode === "profile_model_configuration_failed"
+            ? t("agents.hub.modelCompatibilityPendingCardDescription")
+            : draft
+              ? plainSummary(
+                  draft.manifest.identity.systemPrompt,
+                  t("agents.hub.personalCardFallback"),
+                )
+              : t("agents.hub.publishedCardDescription"),
         tags: tags.slice(0, 4),
         draft,
         definition,

@@ -672,7 +672,9 @@ describe("Agent installation orchestration", () => {
           modelSourceProfileId: "source-profile",
         },
       }),
-    ).rejects.toMatchObject({ code: "profile_binding_failed" });
+    ).rejects.toMatchObject({
+      code: "profile_model_configuration_failed",
+    });
 
     expect(deleteProfile).toHaveBeenCalledWith("fresh-agent");
     expect(existsSync(freshProfilePath)).toBe(false);
@@ -749,6 +751,54 @@ describe("Agent installation orchestration", () => {
     });
     expect(client.selectInstallationVersion).not.toHaveBeenCalled();
     expect(client.activateInstallation).toHaveBeenCalledOnce();
+  });
+
+  it("reports the signed model compatibility failure while repairing an active installation", async () => {
+    await manager().install({
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      profile: { kind: "fresh", name: "Fresh Agent" },
+    });
+    const sourceProfilePath = join(profilesRoot, "source-profile");
+    mkdirSync(sourceProfilePath, { recursive: true });
+    const originalResolveProfilePath = profiles.resolveProfilePath;
+    profiles.resolveProfilePath = vi.fn((id: string) =>
+      id === "source-profile"
+        ? sourceProfilePath
+        : originalResolveProfilePath(id),
+    );
+    const originalVerifyProfileBinding =
+      bindings.verifyProfileBinding.bind(bindings);
+    vi.spyOn(bindings, "verifyProfileBinding").mockImplementation(
+      (profilePath, requestedOwner) =>
+        profilePath === sourceProfilePath
+          ? {
+              tenantId: requestedOwner.tenantId,
+              ownerScope: "USER",
+              ownerId: requestedOwner.ownerId,
+              deviceInstallationId: requestedOwner.deviceInstallationId,
+              agentInstallationId: null,
+              runtimeProfileId: "19191919-1919-4919-8919-191919191919",
+              boundAt: NOW.toISOString(),
+            }
+          : originalVerifyProfileBinding(profilePath, requestedOwner),
+    );
+    profiles.configureFreshProfileModel = vi.fn(() => {
+      throw new Error(
+        "The source Profile model is not allowed by the signed Agent version.",
+      );
+    });
+
+    await expect(
+      manager().repairInstallationModel({
+        agentInstallationId: AGENT_INSTALLATION_ID,
+        profilePath: freshProfilePath,
+        localProfileId: "fresh-agent",
+        modelSourceProfileId: "source-profile",
+      }),
+    ).rejects.toMatchObject({
+      code: "profile_model_configuration_failed",
+    });
   });
 
   it("fails closed when an active installation model source is not owned by the current account", async () => {

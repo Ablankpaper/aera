@@ -1515,6 +1515,50 @@ describe("AgentControlPanel", () => {
     ).toBeNull();
   });
 
+  it("shows the signed model compatibility failure instead of claiming a pending Agent is usable", async () => {
+    const modelMismatch = {
+      ...installation("pending"),
+      retryCode: "profile_model_configuration_failed",
+    };
+    const api = installAPI({
+      listInstallations: vi.fn(async () => success([modelMismatch])),
+      retryPendingInstallation: vi.fn(async () => ({
+        ok: false as const,
+        errorCode: "profile_model_configuration_failed" as const,
+      })),
+    });
+    render(
+      <AgentControlPanel
+        profiles={[configuredModelProfile()]}
+        modelProfileId="configured-source"
+      />,
+    );
+
+    expect(
+      await screen.findByText(
+        "agents.hub.modelCompatibilityPendingCardDescription",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText("agents.hub.publishedCardDescription"),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByText("Research Agent").closest("button")!);
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.control.retryAgent" }),
+    );
+
+    expect(
+      await screen.findByText(
+        "agents.control.errors.profile_model_configuration_failed",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText("agents.control.errors.operation_failed"),
+    ).toBeNull();
+    expect(api.retryPendingInstallation).toHaveBeenCalledOnce();
+  });
+
   it("retries a pending Agent through its already prepared runtime instead of opening chat", async () => {
     const pendingWithProfile = {
       ...installation("pending"),
