@@ -64,6 +64,28 @@ function dependencies(): Mocked<SeedDependencies> {
 }
 
 describe("Agent Profile model seeding", () => {
+  it("validates a compatible installed Agent Profile without copying its model route onto itself", () => {
+    const deps = dependencies();
+
+    seedAgentModelProfile(
+      {
+        sourceProfileId: "installed-agent",
+        targetProfileId: "installed-agent",
+        version: version(["custom:anhepro.com"], ["gpt-5.6-sol"]),
+      },
+      deps,
+    );
+
+    expect(deps.getSecret).toHaveBeenCalledWith(
+      "CUSTOM_PROVIDER_ANHEPRO_COM_KEY",
+      "installed-agent",
+    );
+    expect(deps.upsertCustomProvider).not.toHaveBeenCalled();
+    expect(deps.upsertNativeCustomProvider).not.toHaveBeenCalled();
+    expect(deps.setModelConfig).not.toHaveBeenCalled();
+    expect(deps.setEnvValue).not.toHaveBeenCalled();
+  });
+
   it("copies only the signed named-provider route and its exact credential", () => {
     const deps = dependencies();
 
@@ -106,7 +128,7 @@ describe("Agent Profile model seeding", () => {
     );
   });
 
-  it("selects the signed model from the source route even when another model is currently active", () => {
+  it("reconfigures an in-place Agent Profile when the new signed version selects another model", () => {
     const deps = dependencies();
     deps.getModelConfig.mockReturnValue({
       provider: "custom:anhepro.com",
@@ -141,14 +163,14 @@ describe("Agent Profile model seeding", () => {
     seedAgentModelProfile(
       {
         sourceProfileId: "source-profile",
-        targetProfileId: "target-profile",
+        targetProfileId: "source-profile",
         version: version(["custom:anhepro.com"], ["signed-model"]),
       },
       deps,
     );
 
     expect(deps.upsertNativeCustomProvider).toHaveBeenCalledWith(
-      "target-profile",
+      "source-profile",
       {
         name: "anhepro.com",
         baseUrl: "https://api.anhepro.com/v1",
@@ -161,7 +183,7 @@ describe("Agent Profile model seeding", () => {
       "custom:anhepro.com",
       "signed-model",
       "https://api.anhepro.com/v1",
-      "target-profile",
+      "source-profile",
       64_000,
       "chat_completions",
     );

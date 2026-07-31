@@ -18,10 +18,10 @@ test("internal-Beta workflow is exact-SHA, OS-unsigned, update-signed, published
   const raw = await readFile(workflowPath, "utf8");
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.16"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.17"/u);
   assert.match(
     raw,
-    /--release-notes "Beta\.16 修复新建智能体未读取当前自定义中转的完整模型列表、反而显示旧 Profile 固定模型的问题。"/u,
+    /--release-notes "Beta\.17 修复已发布智能体升级新版本时当前 Agent Profile 被误判为模型修复冲突，并确保新版本进入新会话。"/u,
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [

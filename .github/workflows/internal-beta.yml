@@ -59,7 +59,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain=v1)"
           VERSION=$(node -p "require('./package.json').version")
-          test "$VERSION" = "0.7.4-internal-beta.16"
+          test "$VERSION" = "0.7.4-internal-beta.17"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Verify successful CI belongs to the exact source
@@ -448,7 +448,7 @@ jobs:
             --manifest candidate/desktop-update/manifest.json \
             --private-key-env DESKTOP_UPDATE_SIGNING_PRIVATE_KEY \
             --published-at "$CREATED_AT" \
-            --release-notes "Beta.16 修复新建智能体未读取当前自定义中转的完整模型列表、反而显示旧 Profile 固定模型的问题。" \
+            --release-notes "Beta.17 修复已发布智能体升级新版本时当前 Agent Profile 被误判为模型修复冲突，并确保新版本进入新会话。" \
             --signature candidate/desktop-update/manifest.sig \
             --version "$VERSION"
           node scripts/internal-beta/desktop-update.mjs verify \

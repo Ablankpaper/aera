@@ -1037,7 +1037,85 @@ describe("AgentControlPanel", () => {
       undefined,
     );
     expect(onProfilesChanged).toHaveBeenCalledOnce();
-    expect(onChatWithProfile).toHaveBeenCalledWith("installed-agent");
+    expect(onChatWithProfile).toHaveBeenCalledWith("installed-agent", {
+      forceNewRun: true,
+    });
+  });
+
+  it("updates from the active Agent Profile without reporting a self-repair conflict", async () => {
+    const oldInstallation = installation("active");
+    const updatedInstallation = {
+      ...oldInstallation,
+      selectedVersionId: NEXT_VERSION_ID,
+    };
+    const compatibleDraft = {
+      ...publishedDraft(),
+      baseAgentVersionId: NEXT_VERSION_ID,
+      manifest: {
+        ...publishedDraft().manifest,
+        modelConstraints: {
+          allowedProviders: ["custom:aera-local"],
+          allowedModels: ["aera-e2e-model"],
+        },
+      },
+      publishedRevision: {
+        revision: 1,
+        definitionId: DEFINITION_ID,
+        versionId: NEXT_VERSION_ID,
+      },
+    };
+    const api = installAPI({
+      listDrafts: vi.fn(async () => success([compatibleDraft as AgentDraft])),
+      listDefinitions: vi.fn(async () =>
+        success([
+          {
+            ...definition(),
+            latestVersionId: NEXT_VERSION_ID,
+          },
+        ]),
+      ),
+      listInstallations: vi.fn(async () => success([oldInstallation])),
+      selectInstallationVersion: vi.fn(async () =>
+        success(updatedInstallation),
+      ),
+      repairInstallationModel: vi.fn(async () => success(updatedInstallation)),
+    });
+    const onChatWithProfile = vi.fn();
+    render(
+      <AgentControlPanel
+        profiles={[
+          {
+            id: "installed-agent",
+            name: "Research Agent",
+            provider: "custom:aera-local",
+            model: "aera-e2e-model",
+            agentInstallationId: INSTALLATION_ID,
+          },
+        ]}
+        modelProfileId="installed-agent"
+        onChatWithProfile={onChatWithProfile}
+      />,
+    );
+
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.hub.useAgent" }),
+    );
+
+    await waitFor(() => expect(api.repairInstallationModel).toHaveBeenCalled());
+    expect(api.repairInstallationModel).toHaveBeenCalledWith(
+      {
+        id: INSTALLATION_ID,
+        localProfileId: "installed-agent",
+        modelProfileId: "installed-agent",
+      },
+      undefined,
+    );
+    expect(onChatWithProfile).toHaveBeenCalledWith("installed-agent", {
+      forceNewRun: true,
+    });
   });
 
   it("re-seeds a configured Runtime Profile after selecting a newly published model route", async () => {
@@ -1123,7 +1201,9 @@ describe("AgentControlPanel", () => {
       },
       undefined,
     );
-    expect(onChatWithProfile).toHaveBeenCalledWith("installed-agent");
+    expect(onChatWithProfile).toHaveBeenCalledWith("installed-agent", {
+      forceNewRun: true,
+    });
   });
 
   it("shows cached Organization content read-only while offline", async () => {
@@ -1707,7 +1787,9 @@ describe("AgentControlPanel", () => {
       },
       undefined,
     );
-    expect(onAgentReady).toHaveBeenCalledWith(INSTALLATION_ID);
+    expect(onAgentReady).toHaveBeenCalledWith(INSTALLATION_ID, {
+      forceNewRun: true,
+    });
   });
 
   it("archives a profile-less pending v1 before installing a newly published v2", async () => {

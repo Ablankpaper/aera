@@ -137,6 +137,30 @@ describe("chat run profile transitions", () => {
     ).toEqual({ activeRunId: existing.runId, runs });
   });
 
+  it("mints a new same-profile run after an Agent version changes", () => {
+    const randomUUID = vi
+      .spyOn(crypto, "randomUUID")
+      .mockReturnValue("00000000-0000-4000-8000-000000000012");
+    const existing = run("run-agent-v1", "published-agent");
+
+    const next = openProfileRunTransition(
+      [existing],
+      existing.runId,
+      "published-agent",
+      { forceNewRun: true },
+    );
+
+    expect(next.activeRunId).toBe("run-00000000-0000-4000-8000-000000000012");
+    expect(next.runs).toEqual([
+      existing,
+      expect.objectContaining({
+        runId: "run-00000000-0000-4000-8000-000000000012",
+        profile: "published-agent",
+      }),
+    ]);
+    randomUUID.mockRestore();
+  });
+
   it("replaces the active same-profile scratch run when opening a session", () => {
     const scratch = run("run-scratch", "test-writer");
     const saved = run("run-saved", "test-writer", {

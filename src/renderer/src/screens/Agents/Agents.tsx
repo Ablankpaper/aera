@@ -3,7 +3,9 @@ import type {
   AgentSyncResult,
   AgentSyncStatus,
 } from "../../../../shared/agent-sync";
-import AgentControlPanel from "./AgentControlPanel";
+import AgentControlPanel, {
+  type AgentChatOpenOptions,
+} from "./AgentControlPanel";
 
 interface ProfileInfo {
   id: string;
@@ -25,7 +27,7 @@ interface ProfileInfo {
 
 interface AgentsProps {
   activeProfile: string;
-  onChatWith: (name: string) => void;
+  onChatWith: (name: string, options?: AgentChatOpenOptions) => void;
 }
 
 export function selectAgentModelProfileId(
@@ -148,16 +150,20 @@ function Agents({ activeProfile, onChatWith }: AgentsProps): React.JSX.Element {
   // "Chat" button — make the agent active (starts its gateway) then open a
   // conversation with it. The only path here that starts a chat.
   const handleChatWith = useCallback(
-    async (name: string): Promise<void> => {
+    async (name: string, options?: AgentChatOpenOptions): Promise<void> => {
       await window.hermesAPI.setActiveProfile(name);
-      onChatWith(name);
+      if (options) onChatWith(name, options);
+      else onChatWith(name);
       void loadProfiles();
     },
     [loadProfiles, onChatWith],
   );
 
   const handleAgentReady = useCallback(
-    async (installationId: string): Promise<boolean> => {
+    async (
+      installationId: string,
+      options?: AgentChatOpenOptions,
+    ): Promise<boolean> => {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         const list = await loadProfiles();
         const installed = list.find(
@@ -165,7 +171,8 @@ function Agents({ activeProfile, onChatWith }: AgentsProps): React.JSX.Element {
         );
         if (installed) {
           await window.hermesAPI.setActiveProfile(installed.id);
-          onChatWith(installed.id);
+          if (options) onChatWith(installed.id, options);
+          else onChatWith(installed.id);
           return true;
         }
         if (attempt < 2) {
@@ -184,7 +191,9 @@ function Agents({ activeProfile, onChatWith }: AgentsProps): React.JSX.Element {
       <AgentControlPanel
         profiles={agentProfiles}
         initialTab="mine"
-        onChatWithProfile={(profileId) => void handleChatWith(profileId)}
+        onChatWithProfile={(profileId, options) =>
+          void handleChatWith(profileId, options)
+        }
         onProfilesChanged={loadProfiles}
         onAgentReady={handleAgentReady}
         modelProfileId={modelProfileId}

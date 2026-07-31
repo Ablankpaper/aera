@@ -1504,11 +1504,7 @@ export class AgentInstallationManager {
     modelSourceProfileId: string;
   }): Promise<LocalAgentInstallation> {
     const local = this.getLocalInstallation(input.agentInstallationId);
-    if (
-      local.status !== "active" ||
-      local.runtimeProfileId === null ||
-      input.localProfileId === input.modelSourceProfileId
-    ) {
+    if (local.status !== "active" || local.runtimeProfileId === null) {
       throw new AgentInstallationManagerError("installation_conflict");
     }
 
