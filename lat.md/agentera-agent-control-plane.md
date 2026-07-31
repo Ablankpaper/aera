@@ -38,7 +38,7 @@ The approved written specification is `docs/superpowers/specs/2026-07-21-agenter
 
 The approved direction extends immutable Agent assets to `owner_scope=PLATFORM` while every desktop Installation, physical Hermes Profile, policy overlay, RuntimeBinding, and adaptive state remains USER-owned.
 
-Platform employees use the separate Aera Admin application: Developer authors and submits, a different Super Admin approves immutable publication, Operator manages deterministic rollout and requests rollback, and Auditor remains read-only. Internal operations cross the fail-closed mTLS plus service-JWT Cloud listener; ordinary desktop users only browse and install eligible official Agents.
+Platform employees use the separate Aera Admin application: Developer authors and submits, Super Admin reviews immutable publication and governs dual-control rollback, Operator manages activation, rollout, pause, and resume, and Auditor remains read-only. Admin derives the signed Cloud actor role only from the authenticated local administrator role; operation metadata may reject a duty mismatch but never replace that actor identity. Cloud binds each official-Agent scope to the matching duty before accepting the JWT and envelope. Internal operations cross the fail-closed mTLS plus service-JWT Cloud listener; ordinary desktop users only browse and install eligible official Agents.
 
 Official releases use append-only revisions for activation, percentage and allowlist changes, minimum desktop versions, pause, resume, and rollback. Pause stops new discovery and installation but does not remotely disable an installed Agent. Update and rollback replace only the verified immutable base for later conversations; active RuntimeBindings and Hermes private learning remain unchanged.
 
