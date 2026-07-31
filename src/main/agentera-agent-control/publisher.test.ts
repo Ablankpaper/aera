@@ -344,16 +344,24 @@ describe("explicit Agent publication", () => {
     expect(publishInitial).not.toHaveBeenCalled();
   });
 
-  it("publishes an edited definition from its exact immutable base version", async () => {
+  it("publishes an edited definition with its updated display name from the exact immutable base version", async () => {
     drafts.deleteDraft(DRAFT_ID);
     drafts.createDraft({
       sourceAgentDefinitionId: DEFINITION_ID,
       baseAgentVersionId: BASE_VERSION_ID,
-      displayName: "Research Agent",
+      displayName: "Renamed Research Agent",
       icon: null,
       manifest: manifest(),
       assets: assets(),
     });
+    publication = {
+      ...publication,
+      definition: {
+        ...publication.definition,
+        display_name: "Renamed Research Agent",
+      },
+    };
+    publishNext.mockResolvedValue(publication);
     const service = publisher();
     const preview = service.preparePublication(DRAFT_ID);
     await service.confirmPublication(preview.publicationHandle);
@@ -362,7 +370,28 @@ describe("explicit Agent publication", () => {
     expect(publishNext.mock.calls[0][0]).toBe(DEFINITION_ID);
     expect(publishNext.mock.calls[0][1]).toMatchObject({
       base_version_id: BASE_VERSION_ID,
+      display_name: "Renamed Research Agent",
     });
+  });
+
+  it("rejects a next publication response that keeps the stale definition name", async () => {
+    drafts.deleteDraft(DRAFT_ID);
+    drafts.createDraft({
+      sourceAgentDefinitionId: DEFINITION_ID,
+      baseAgentVersionId: BASE_VERSION_ID,
+      displayName: "Renamed Research Agent",
+      icon: null,
+      manifest: manifest(),
+      assets: assets(),
+    });
+
+    const service = publisher();
+    await expect(
+      service.confirmPublication(
+        service.preparePublication(DRAFT_ID).publicationHandle,
+      ),
+    ).rejects.toMatchObject({ code: "published_content_mismatch" });
+    expect(drafts.getDraft(DRAFT_ID).publishedRevision).toBeNull();
   });
 
   it.each(["owner", "admin"] as const)(
@@ -404,6 +433,22 @@ describe("explicit Agent publication", () => {
       );
       expect(publishInitial).not.toHaveBeenCalled();
 
+      drafts.updateDraft({
+        id: DRAFT_ID,
+        expectedRevision: 1,
+        displayName: "Renamed Workspace Agent",
+        icon: null,
+        manifest: manifest(),
+        assets: assets(),
+      });
+      publication = {
+        ...publication,
+        definition: {
+          ...publication.definition,
+          display_name: "Renamed Workspace Agent",
+        },
+      };
+      publishWorkspaceNext.mockResolvedValue(publication);
       const next = publisher(context);
       await next.confirmPublication(
         next.preparePublication(DRAFT_ID).publicationHandle,
@@ -411,7 +456,10 @@ describe("explicit Agent publication", () => {
       expect(publishWorkspaceNext).toHaveBeenCalledWith(
         WORKSPACE_ID,
         DEFINITION_ID,
-        expect.objectContaining({ base_version_id: VERSION_ID }),
+        expect.objectContaining({
+          base_version_id: VERSION_ID,
+          display_name: "Renamed Workspace Agent",
+        }),
         expect.any(String),
       );
       expect(publishNext).not.toHaveBeenCalled();

@@ -118,6 +118,8 @@ While the shell remains in an Organization, “我的智能体” explicitly sen
 
 [[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] reuses the configured Hermes model library, imports identity and capability Markdown, and derives safe asset paths. Personal publish and publish-and-use complete from one explicit action and carry the selected source model Profile snapshot into installation; Workspace keeps its trusted preview and Organization keeps mandatory review.
 
+[[src/renderer/src/screens/Agents/Agents.tsx#selectAgentModelProfileId]] selects the currently active configured non-installed Profile before any other account Profile, so changing the active custom provider cannot sign a new Agent against a stale default model. If the active Profile belongs to an installed Agent, a configured non-installed account Profile still wins and only its model route is reused.
+
 ### Guided product Agent creation
 
 Natural-language creation in the default chat produces a real product draft rather than an unlisted Hermes-only Profile.
@@ -197,6 +199,10 @@ One Electron userData root may outlive several product logins, so every local Ag
 An explicit publish action turns one local draft revision into an immutable cloud AgentVersion under a stable AgentDefinition.
 
 Publication uses an allowlisted canonical manifest, content digest, platform Ed25519 attestation, policy checks, idempotency, ownership authorization, and audit. A failure leaves the local draft and Hermes Profile unchanged; published versions never use last-writer-wins reconciliation.
+
+`AgentDefinition.display_name` is mutable display metadata, not immutable Runtime content. A USER or WORKSPACE next-version publication carries the current draft name and atomically updates that stable definition alongside `latest_version_id`; the new AgentVersion is still immutable, and every existing RuntimeBinding remains pinned to its original version.
+
+The current Desktop contract requires `display_name` and rejects a publication response that returns a stale name. During a Cloud-first rolling upgrade, an older Desktop that omits the field keeps the existing definition name. Organization next-version submissions retain their separate reviewed governance contract and do not gain an implicit rename path.
 
 ## Installation and binding
 

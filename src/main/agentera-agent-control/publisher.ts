@@ -396,6 +396,7 @@ export class AgentPublisher {
     ) {
       const body: PublishNextAgentVersionRequest = {
         base_version_id: prepared.baseAgentVersionId,
+        display_name: prepared.displayName,
         manifest,
         bundle,
       };
@@ -425,8 +426,7 @@ export class AgentPublisher {
       publication.definition.latest_version_id !== publication.version.id ||
       (expectedDefinitionId !== null &&
         publication.definition.id !== expectedDefinitionId) ||
-      (expectedDefinitionId === null &&
-        publication.definition.display_name !== prepared.displayName)
+      publication.definition.display_name !== prepared.displayName
     ) {
       throw new AgentPublisherError("published_content_mismatch");
     }
