@@ -180,6 +180,8 @@ export function seedAgentModelProfile(
     baseUrl,
     models,
   );
+  const alreadyCompatibleInPlace =
+    input.sourceProfileId === input.targetProfileId && model === currentModel;
   const saved = matchingSavedModel(models, provider, model, baseUrl);
   const namedProvider = namedCustomProviderRuntimeName(provider);
   if (isCustomProviderRoute(provider)) {
@@ -211,6 +213,7 @@ export function seedAgentModelProfile(
       input.sourceProfileId,
       dependencies,
     );
+    if (alreadyCompatibleInPlace) return;
 
     dependencies.upsertCustomProvider(input.targetProfileId, {
       name: providerName,
@@ -255,6 +258,7 @@ export function seedAgentModelProfile(
         dependencies,
       )
     : null;
+  if (alreadyCompatibleInPlace) return;
   dependencies.setModelConfig(
     provider,
     model,

@@ -33,6 +33,7 @@ import Agents, { selectAgentModelProfileId } from "./Agents";
 
 const DEFINITION_ID = "11111111-1111-4111-8111-111111111111";
 const VERSION_ID = "22222222-2222-4222-8222-222222222222";
+const PREVIOUS_VERSION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
 
 interface ProfileInfo {
@@ -358,6 +359,65 @@ describe("Agents unified product surface", () => {
     );
     expect(onChatWith).toHaveBeenCalledWith("research-agent");
     expect(hermes.createProfile).not.toHaveBeenCalled();
+  });
+
+  it("forwards a forced fresh run after selecting a new version on the active Agent Profile", async () => {
+    const hermes = installHermesAPI();
+    const installedProfile = profile("research-agent", {
+      name: "Research Agent",
+      agentInstallationId: INSTALLATION_ID,
+    });
+    hermes.listProfiles.mockResolvedValue([installedProfile]);
+    const oldInstallation = {
+      ...installation(),
+      selectedVersionId: PREVIOUS_VERSION_ID,
+    };
+    const updatedInstallation = installation();
+    const repairInstallationModel = vi.fn(async () => ({
+      ok: true as const,
+      data: updatedInstallation,
+    }));
+    const agentera = installAgenteraAPI({
+      listDefinitions: vi.fn(async () => ({
+        ok: true as const,
+        data: [definition()],
+      })),
+      listInstallations: vi.fn(async () => ({
+        ok: true as const,
+        data: [oldInstallation],
+      })),
+      selectInstallationVersion: vi.fn(async () => ({
+        ok: true as const,
+        data: updatedInstallation,
+      })),
+      repairInstallationModel,
+    });
+    const onChatWith = vi.fn();
+
+    render(<Agents activeProfile="research-agent" onChatWith={onChatWith} />);
+
+    fireEvent.click(
+      await screen.findByRole("tab", { name: "agents.hub.mineTab" }),
+    );
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.hub.useAgent" }),
+    );
+
+    await waitFor(() => expect(repairInstallationModel).toHaveBeenCalled());
+    expect(agentera.selectInstallationVersion).toHaveBeenCalledWith(
+      {
+        id: INSTALLATION_ID,
+        versionId: VERSION_ID,
+        localProfileId: "research-agent",
+      },
+      undefined,
+    );
+    expect(onChatWith).toHaveBeenCalledWith("research-agent", {
+      forceNewRun: true,
+    });
   });
 
   it("refreshes the Agent model source after the model library changes", async () => {

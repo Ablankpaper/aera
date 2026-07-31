@@ -214,6 +214,8 @@ The authentication installation ID is not reused as the Agent Installation ID. N
 
 Creating a Hermes Runtime Profile directly is not equivalent to creating a product Agent. A usable Agent additionally requires a verified immutable AgentVersion, USER-owned Installation, Profile binding, and RuntimeBinding. [[src/main/agentera-agent-control/model-profile-seed.ts#seedAgentModelProfile]] copies only the selected provider route and credential into the isolated target Profile, and it must choose a model allowed by the signed version; if the source Profile's current model is not allowed, an allowed model may be selected only from the same saved provider route.
 
+When the active installed Agent Profile is also the selected model source, repair verifies the same-owner binding, credential availability, and signed model constraints in place. An already compatible route is not copied onto itself; a different allowed signed model is reconfigured on that Profile, while an unavailable credential or incompatible route still fails closed. After a version change, [[src/renderer/src/screens/Layout/chatRuns.ts#openProfileRunTransition]] forces a new run even for a same-Profile blank tab, so the previous conversation keeps its original RuntimeBinding and only the new run can freeze the selected version.
+
 [[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager#install]] and [[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager#repairInstallationModel]] preserve `profile_model_configuration_failed` when the signed provider/model constraints cannot be projected. [[src/main/agentera-agent-control/ipc-contract.ts#mappedCode]] exposes only that allowlisted reason, and [[src/renderer/src/screens/Agents/AgentControlPanel.tsx#AgentControlPanel]] keeps the pending Agent non-runnable while showing model-compatibility guidance instead of a generic safety error or “published and usable” claim.
 
 Installation activation is fail-closed until model projection succeeds. A pending Installation that already owns a prepared Profile is retried by explicitly claiming that Profile, not by opening chat or creating a second Profile. A profile-less pending Installation for an older version is archived before installing the newly published version. An active Profile whose selected version differs from the requested version must select the new immutable version and re-seed its signed model route before chat.
@@ -258,7 +260,7 @@ Publication and discovery pause offline. Cloud, publication, installation, and a
 
 The feature cannot begin from or ship with a falsely green authentication or compatibility baseline.
 
-Cloud tests run without cache, version immutability and owner isolation are proven, private Profile fixtures remain byte-identical through install/update failures, and active conversations keep a stable binding. The detailed approved design is `docs/superpowers/specs/2026-07-19-agentera-user-agent-control-plane-v1-design.md`.
+Cloud tests run without cache, version immutability and owner isolation are proven, private Profile fixtures remain byte-identical through install/update failures, and active conversations keep a stable binding. Desktop regression tests also cover same-Profile model validation, v1-to-v2 selection without self-repair conflict, forced creation of the new run, and preservation of the old run. The detailed approved design is `docs/superpowers/specs/2026-07-19-agentera-user-agent-control-plane-v1-design.md`.
 
 ### Personal publish and use
 

@@ -45,13 +45,23 @@ export interface AgentControlProfileOption {
   runtimeProfileId?: string | null;
 }
 
+export interface AgentChatOpenOptions {
+  forceNewRun?: boolean;
+}
+
 export interface AgentControlPanelProps {
   profiles: AgentControlProfileOption[];
   initialTab?: "official" | "mine" | "enterprise";
   advancedOpenByDefault?: boolean;
-  onChatWithProfile?: (profileId: string) => void;
+  onChatWithProfile?: (
+    profileId: string,
+    options?: AgentChatOpenOptions,
+  ) => void;
   onProfilesChanged?: () => unknown | Promise<unknown>;
-  onAgentReady?: (installationId: string) => boolean | Promise<boolean>;
+  onAgentReady?: (
+    installationId: string,
+    options?: AgentChatOpenOptions,
+  ) => boolean | Promise<boolean>;
   modelProfileId?: string;
 }
 
@@ -480,9 +490,16 @@ export default function AgentControlPanel({
   }, [activeTab, isOrganization, state]);
 
   const finishAgentActivation = useCallback(
-    async (installationId: string): Promise<void> => {
+    async (
+      installationId: string,
+      options?: AgentChatOpenOptions,
+    ): Promise<void> => {
       await onProfilesChanged?.();
-      const opened = onAgentReady ? await onAgentReady(installationId) : false;
+      const opened = onAgentReady
+        ? options
+          ? await onAgentReady(installationId, options)
+          : await onAgentReady(installationId)
+        : false;
       if (!opened) setNotice("agents.control.agentReadyManualOpen");
     },
     [onAgentReady, onProfilesChanged],
@@ -505,6 +522,7 @@ export default function AgentControlPanel({
       let installation = target.installation;
       const sourceModelProfileId = target.modelProfileId ?? modelProfileId;
       let profileReady = isRunnableAgentProfile(target.profile);
+      let forceNewRun = false;
       const alignActiveProfileVersion = async (
         activeInstallation: AgenteraAgentInstallationSummary,
         profile: AgentControlProfileOption,
@@ -512,6 +530,7 @@ export default function AgentControlPanel({
       ): Promise<{
         installation: AgenteraAgentInstallationSummary;
         profileReady: boolean;
+        versionChanged: boolean;
       } | null> => {
         let aligned = activeInstallation;
         let versionChanged = false;
@@ -555,7 +574,11 @@ export default function AgentControlPanel({
           await onProfilesChanged?.();
           ready = true;
         }
-        return { installation: aligned, profileReady: ready };
+        return {
+          installation: aligned,
+          profileReady: ready,
+          versionChanged,
+        };
       };
       if (installation?.status === "active" && target.profile) {
         const aligned = await alignActiveProfileVersion(
@@ -567,7 +590,11 @@ export default function AgentControlPanel({
         installation = aligned.installation;
         profileReady = aligned.profileReady;
         if (profileReady && onChatWithProfile) {
-          onChatWithProfile(target.profile.id);
+          if (aligned.versionChanged) {
+            onChatWithProfile(target.profile.id, { forceNewRun: true });
+          } else {
+            onChatWithProfile(target.profile.id);
+          }
         } else {
           await finishAgentActivation(installation.id);
         }
@@ -645,10 +672,15 @@ export default function AgentControlPanel({
         );
         if (!aligned) return;
         installation = aligned.installation;
+        forceNewRun = aligned.versionChanged;
       }
       setEditor(null);
       await load();
-      await finishAgentActivation(installation.id);
+      if (forceNewRun) {
+        await finishAgentActivation(installation.id, { forceNewRun: true });
+      } else {
+        await finishAgentActivation(installation.id);
+      }
     } catch {
       setError("agents.control.errors.operation_failed");
     } finally {

@@ -6,6 +6,7 @@ import {
 } from "../Chat/sessionHistory";
 import {
   type ChatRun,
+  type OpenProfileRunOptions,
   mintRun,
   patchRun,
   openProfileRunTransition,
@@ -533,9 +534,14 @@ function Layout({
   // The "Chat" affordance: start (or reuse a blank) conversation with an agent
   // and show it. This is the only path from the profile list that opens a chat.
   const handleChatWithProfile = useCallback(
-    (name: string) => {
+    (name: string, options?: OpenProfileRunOptions) => {
       setActiveProfile(name);
-      const transition = openProfileRunTransition(runs, activeRunId, name);
+      const transition = openProfileRunTransition(
+        runs,
+        activeRunId,
+        name,
+        options,
+      );
       setRuns(transition.runs);
       setActiveRunId(transition.activeRunId);
       goTo("chat");

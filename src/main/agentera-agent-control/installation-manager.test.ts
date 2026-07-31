@@ -753,6 +753,36 @@ describe("Agent installation orchestration", () => {
     expect(client.activateInstallation).toHaveBeenCalledOnce();
   });
 
+  it("validates an active Agent model in place when its Profile is the selected source", async () => {
+    await manager().install({
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      profile: { kind: "fresh", name: "Fresh Agent" },
+    });
+    const configureFreshProfileModel = vi.fn();
+    profiles.configureFreshProfileModel = configureFreshProfileModel;
+
+    const repaired = await manager().repairInstallationModel({
+      agentInstallationId: AGENT_INSTALLATION_ID,
+      profilePath: freshProfilePath,
+      localProfileId: "fresh-agent",
+      modelSourceProfileId: "fresh-agent",
+    });
+
+    expect(configureFreshProfileModel).toHaveBeenCalledWith({
+      sourceProfileId: "fresh-agent",
+      targetProfileId: "fresh-agent",
+      version: v1,
+    });
+    expect(repaired).toMatchObject({
+      agentInstallationId: AGENT_INSTALLATION_ID,
+      selectedVersionId: VERSION_ID,
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+      status: "active",
+      retryCode: null,
+    });
+  });
+
   it("reports the signed model compatibility failure while repairing an active installation", async () => {
     await manager().install({
       definitionId: DEFINITION_ID,

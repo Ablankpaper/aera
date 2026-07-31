@@ -20,6 +20,10 @@ export interface ChatRun {
   seed?: ChatMessage[];
 }
 
+export interface OpenProfileRunOptions {
+  forceNewRun?: boolean;
+}
+
 /**
  * A blank chat within one fixed Profile.
  *
@@ -91,9 +95,14 @@ export function openProfileRunTransition(
   runs: ChatRun[],
   activeRunId: string,
   profile: string,
+  options: OpenProfileRunOptions = {},
 ): { activeRunId: string; runs: ChatRun[] } {
   const active = runs.find((r) => r.runId === activeRunId);
-  if (active?.profile === profile && isScratchRun(active)) {
+  if (
+    !options.forceNewRun &&
+    active?.profile === profile &&
+    isScratchRun(active)
+  ) {
     return { activeRunId, runs };
   }
   const next = mintRun(profile);
