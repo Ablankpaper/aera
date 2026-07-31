@@ -18,10 +18,10 @@ test("internal-Beta workflow is exact-SHA, OS-unsigned, update-signed, published
   const raw = await readFile(workflowPath, "utf8");
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.13"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.14"/u);
   assert.match(
     raw,
-    /--release-notes "Beta\.13 修复个人与企业组织智能体的创建、发布、共享安装及开始使用流程。"/u,
+    /--release-notes "Beta\.14 修复智能体签名模型不兼容时的通用错误提示与可用状态误标。"/u,
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
