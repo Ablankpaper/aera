@@ -36,20 +36,17 @@ export function selectAgentModelProfileId(
     profile.provider.trim().length > 0 &&
     profile.provider.trim().toLocaleLowerCase() !== "auto" &&
     profile.model.trim().length > 0;
-  // The model source follows the user's current non-installed Profile. A
-  // stale default Profile can remain configured after the user switches to a
-  // custom gateway on another account Profile; choosing it first would sign a
-  // newly-created Agent with the wrong provider/model (and make installation
-  // fail closed on the signed compatibility check).
+  // list-profiles is already restricted by the main process to Profiles bound
+  // to the current owner. Follow the active configured Profile first even when
+  // it belongs to an installed Agent: Model Center writes the selected service
+  // to that Profile, and skipping it would reopen a stale account Profile and
+  // expose only that old route's model catalog in the Agent editor.
   const active = profiles.find((profile) => profile.id === activeProfile);
-  if (active && !active.agentInstallationId && isConfigured(active)) {
-    return active.id;
-  }
+  if (active && isConfigured(active)) return active.id;
   const accountProfile = profiles.find(
     (profile) => !profile.agentInstallationId && isConfigured(profile),
   );
   if (accountProfile) return accountProfile.id;
-  if (active && isConfigured(active)) return active.id;
   return profiles.find(isConfigured)?.id;
 }
 
