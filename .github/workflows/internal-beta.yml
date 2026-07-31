@@ -59,7 +59,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain=v1)"
           VERSION=$(node -p "require('./package.json').version")
-          test "$VERSION" = "0.7.4-internal-beta.14"
+          test "$VERSION" = "0.7.4-internal-beta.15"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Verify successful CI belongs to the exact source
@@ -448,7 +448,7 @@ jobs:
             --manifest candidate/desktop-update/manifest.json \
             --private-key-env DESKTOP_UPDATE_SIGNING_PRIVATE_KEY \
             --published-at "$CREATED_AT" \
-            --release-notes "Beta.14 修复智能体签名模型不兼容时的通用错误提示与可用状态误标。" \
+            --release-notes "Beta.15 修复更换自定义中转模型后新建智能体误绑定旧模型，以及发布新版本后卡片名称不更新。" \
             --signature candidate/desktop-update/manifest.sig \
             --version "$VERSION"
           node scripts/internal-beta/desktop-update.mjs verify \
