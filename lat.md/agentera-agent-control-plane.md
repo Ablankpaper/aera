@@ -250,6 +250,14 @@ The feature cannot begin from or ship with a falsely green authentication or com
 
 Cloud tests run without cache, version immutability and owner isolation are proven, private Profile fixtures remain byte-identical through install/update failures, and active conversations keep a stable binding. The detailed approved design is `docs/superpowers/specs/2026-07-19-agentera-user-agent-control-plane-v1-design.md`.
 
+### Personal publish and use
+
+The personal Agent gate exercises the complete USER-scoped path while the visible product shell remains in an Organization.
+
+[[tests/e2e/agentera-personal-agent-live.e2e.ts]] configures one saved provider route on the account Profile, publishes and installs a personal Agent into a distinct non-default Profile, verifies the selected model projection and active USER-owned Installation, finds the Agent through the Ready catalog filter, starts it again, and receives the fixed acceptance marker through the live model endpoint. The Organization selection must remain unchanged throughout both publish-and-use and later start-use actions.
+
+Run the executable proof with `AGENTERA_PERSONAL_AGENT_LIVE_API_KEY`, and optionally `AGENTERA_PERSONAL_AGENT_LIVE_BASE_URL` and `AGENTERA_PERSONAL_AGENT_LIVE_MODEL`, supplied only through the local process environment: `npm run test:e2e:personal-agent-live`. The test skips without an explicit API key and never records the credential in the repository or its LAT contract.
+
 ### ExperienceCandidate boundary
 
 The candidate gate exercises the complete selected-Skill promotion path while keeping every Installation, physical Profile, and RuntimeBinding USER-owned.
