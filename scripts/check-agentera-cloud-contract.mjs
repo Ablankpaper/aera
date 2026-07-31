@@ -988,6 +988,25 @@ function validateCriticalContract(document) {
       fail(`${schemaName} is no longer a strict object`);
     }
   }
+  const nextPublicationRequest = object(
+    schemas.PublishNextAgentVersionRequest,
+    "PublishNextAgentVersionRequest",
+  );
+  exactMembers(
+    nextPublicationRequest.required ?? [],
+    ["base_version_id", "bundle", "display_name", "manifest"],
+    "PublishNextAgentVersionRequest.required",
+  );
+  exactMembers(
+    Object.keys(
+      object(
+        nextPublicationRequest.properties,
+        "PublishNextAgentVersionRequest.properties",
+      ),
+    ),
+    ["base_version_id", "bundle", "display_name", "manifest"],
+    "PublishNextAgentVersionRequest.properties",
+  );
   for (const schemaName of ORGANIZATION_AGENT_SCHEMAS) {
     object(schemas[schemaName], schemaName);
   }

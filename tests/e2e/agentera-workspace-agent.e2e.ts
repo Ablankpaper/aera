@@ -42,6 +42,7 @@ import {
 const OWNER_PHONE = "+8613900000041";
 const MEMBER_PHONE = "+8613900000042";
 const MEMBER_PROFILE = "workspace-member-agent";
+const RENAMED_WORKSPACE_AGENT = "Renamed Workspace research Agent";
 const MEMBER_MEMORY_SECRET = "WORKSPACE_MEMBER_PRIVATE_MEMORY_2026_07_20";
 const MEMBER_SKILL_SECRET = "WORKSPACE_MEMBER_PRIVATE_SKILL_2026_07_20";
 const PRIVATE_MARKERS = [
@@ -218,6 +219,7 @@ async function updateWorkspaceDraft(
   device: AgentControlDevice,
   draftId: string,
   content: string,
+  displayName: string,
 ): Promise<AgentDraftDetail> {
   const current = unwrapAgent(
     await invokeAgentera<AgentDraftDetail>(device, "getDraft", draftId),
@@ -230,6 +232,7 @@ async function updateWorkspaceDraft(
   return unwrapAgent(
     await invokeAgentera<AgentDraftDetail>(device, "updateDraft", {
       ...editable,
+      displayName,
       id: current.id,
       expectedRevision: current.revision,
     }),
@@ -535,9 +538,23 @@ test("publishes Workspace versions while Member learning and RuntimeBindings rem
     ownerDevice,
     draft.id,
     "Workspace base version two",
+    RENAMED_WORKSPACE_AGENT,
   );
   const versionTwo = await publishWorkspaceDraft(ownerDevice, draft.id);
   expect(versionTwo.versionNumber).toBe(2);
+  for (const device of [ownerDevice, memberDevice]) {
+    const definitions = unwrapAgent(
+      await invokeAgentera(device, "listDefinitions"),
+    ) as Array<{ id: string; displayName: string }>;
+    expect(definitions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: versionOne.definitionId,
+          displayName: RENAMED_WORKSPACE_AGENT,
+        }),
+      ]),
+    );
+  }
   expect(await privateProfileSnapshot(memberProfile, PRIVATE_MARKERS)).toEqual(
     memberLearning,
   );
@@ -648,6 +665,16 @@ test("publishes Workspace versions while Member learning and RuntimeBindings rem
           `/api/v1/workspaces/${workspace.id}/agent-definitions/${versionOne.definitionId}/versions`,
     ),
   ).toBe(true);
+  const nextPublicationRequest = requests.find(
+    (request) =>
+      request.method === "POST" &&
+      request.path ===
+        `/api/v1/workspaces/${workspace.id}/agent-definitions/${versionOne.definitionId}/versions`,
+  );
+  expect(nextPublicationRequest?.body).toMatchObject({
+    base_version_id: versionOne.versionId,
+    display_name: RENAMED_WORKSPACE_AGENT,
+  });
   const installationRequest = requests.find(
     (request) =>
       request.method === "POST" &&

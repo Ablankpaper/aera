@@ -36,11 +36,19 @@ export function selectAgentModelProfileId(
     profile.provider.trim().length > 0 &&
     profile.provider.trim().toLocaleLowerCase() !== "auto" &&
     profile.model.trim().length > 0;
+  // The model source follows the user's current non-installed Profile. A
+  // stale default Profile can remain configured after the user switches to a
+  // custom gateway on another account Profile; choosing it first would sign a
+  // newly-created Agent with the wrong provider/model (and make installation
+  // fail closed on the signed compatibility check).
+  const active = profiles.find((profile) => profile.id === activeProfile);
+  if (active && !active.agentInstallationId && isConfigured(active)) {
+    return active.id;
+  }
   const accountProfile = profiles.find(
     (profile) => !profile.agentInstallationId && isConfigured(profile),
   );
   if (accountProfile) return accountProfile.id;
-  const active = profiles.find((profile) => profile.id === activeProfile);
   if (active && isConfigured(active)) return active.id;
   return profiles.find(isConfigured)?.id;
 }

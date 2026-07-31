@@ -242,6 +242,24 @@ describe("Agents unified product surface", () => {
     ).toBe(accountProfile.id);
   });
 
+  it("prefers the active configured account Profile over another stale account Profile", () => {
+    const staleDefault = {
+      ...profile("default", { isDefault: true, name: "Default Agent" }),
+      provider: "openai",
+      model: "gpt-5.6",
+    };
+    const activeCustomProfile = profile("agent", {
+      name: "Custom gateway",
+    });
+
+    expect(
+      selectAgentModelProfileId(
+        [staleDefault, activeCustomProfile],
+        activeCustomProfile.id,
+      ),
+    ).toBe(activeCustomProfile.id);
+  });
+
   it("reuses only the model route from a configured current-owner Agent when no account Profile is configured", () => {
     const installedProfile = profile("configured-agent", {
       agentInstallationId: INSTALLATION_ID,

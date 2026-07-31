@@ -141,6 +141,15 @@ describe("Aera cloud contract pin", () => {
     expect(source).not.toContain("agent_draft");
   });
 
+  it("requires the mutable display name on every new Agent version request", () => {
+    const source = readFileSync(generatedTypes, "utf8");
+    const nextPublication = generatedSchemaBlock(
+      source,
+      "PublishNextAgentVersionRequest",
+    );
+    expect(nextPublication).toContain("readonly display_name: string;");
+  });
+
   it("generates strict Workspace control schemas without Hermes private state", () => {
     const source = readFileSync(generatedTypes, "utf8");
     for (const schema of [
