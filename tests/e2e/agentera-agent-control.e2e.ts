@@ -190,26 +190,39 @@ test.afterAll(async () => {
 test("shares immutable Agent versions while every Hermes adaptive state remains device-local", async () => {
   if (!harness) throw new Error("Agent control E2E harness is unavailable.");
 
-  await writeFile(
-    join(harness.deviceRoots.A.hermesHome, "config.yaml"),
-    [
-      "model:",
-      "  provider: custom",
-      "  model: guided-creation-e2e",
-      '  base_url: "http://127.0.0.1:9/v1"',
-      "",
-    ].join("\n"),
-    "utf8",
-  );
+  const compatibleModelConfig = [
+    "model:",
+    "  provider: openai",
+    "  default: gpt-5.6",
+    '  base_url: "http://127.0.0.1:9/v1"',
+    "",
+  ].join("\n");
+  await Promise.all([
+    writeFile(
+      join(harness.deviceRoots.A.hermesHome, "config.yaml"),
+      compatibleModelConfig,
+      "utf8",
+    ),
+    writeFile(
+      join(harness.deviceRoots.B.hermesHome, "config.yaml"),
+      compatibleModelConfig,
+      "utf8",
+    ),
+  ]);
   deviceA = await launchAgentControlDevice(harness, "A");
   await authenticateFirstAgentControlDevice(harness, deviceA);
   await claimDefaultProfile(deviceA);
   const modelSetupLater = deviceA.page.getByRole("button", {
     name: /稍后|Later/i,
   });
-  await expect(modelSetupLater).toBeVisible();
-  await modelSetupLater.click();
   const chatInput = deviceA.page.locator("textarea.chat-input");
+  await expect
+    .poll(
+      async () =>
+        (await modelSetupLater.isVisible()) || (await chatInput.isEnabled()),
+    )
+    .toBe(true);
+  if (await modelSetupLater.isVisible()) await modelSetupLater.click();
   await expect(chatInput).toBeEnabled();
   await chatInput.fill("帮我创建一个叫林二的智能体，负责整理客户资料");
   await deviceA.page.locator("button.chat-send-btn").click();
@@ -360,11 +373,12 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
         pending,
       )}; freshProfile=${JSON.stringify(freshProfile)}; exchanges=${JSON.stringify(
         agentControlExchangeDiagnostics(harness),
-      )}`,
+      )}; process=${JSON.stringify(deviceProcessDiagnostics(deviceB))}`,
     );
   }
   const bInstallation = bInstallationResult.data;
   const bProfile = deviceProfilePath(deviceB, "device-b-agent");
+  await writeFile(join(bProfile, "config.yaml"), compatibleModelConfig, "utf8");
   const bAdaptiveMarker = join(bProfile, "adaptive/device-marker.txt");
   await mkdir(dirname(bAdaptiveMarker), { recursive: true });
   await writeFile(bAdaptiveMarker, "DEVICE_B_ADAPTIVE_MARKER\n", "utf8");

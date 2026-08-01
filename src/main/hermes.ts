@@ -1639,6 +1639,14 @@ function apiHistory(
   }));
 }
 
+/** A successful Runs status is not a successful model response without output. */
+export function shouldFallbackFromEmptyRunCompletion(
+  hasActivity: boolean,
+  output: string,
+): boolean {
+  return !hasActivity && output.trim().length === 0;
+}
+
 function postRunStop(
   apiUrl: string,
   profile: string | undefined,
@@ -1702,6 +1710,7 @@ function sendMessageViaRuns(
 
   let runId = "";
   let hasContent = false;
+  let hasRunActivity = false;
   let finished = false;
   let fallbackStarted = false;
   let startReq: http.ClientRequest | null = null;
@@ -1747,6 +1756,7 @@ function sendMessageViaRuns(
       const delta = typeof raw.delta === "string" ? raw.delta : "";
       if (delta) {
         hasContent = true;
+        hasRunActivity = true;
         announceSessionId(sessionId);
         cb.onChunk(delta);
       }
@@ -1754,14 +1764,16 @@ function sendMessageViaRuns(
     }
 
     const reasoning = runEventReasoningText(raw);
-    if (reasoning && cb.onReasoningChunk) {
+    if (reasoning) {
+      hasRunActivity = true;
       announceSessionId(sessionId);
-      cb.onReasoningChunk(reasoning);
+      cb.onReasoningChunk?.(reasoning);
       return;
     }
 
     const toolEvent = chatToolEventFromRunEvent(raw);
     if (toolEvent) {
+      hasRunActivity = true;
       announceSessionId(sessionId);
       if (cb.onToolEvent) {
         cb.onToolEvent(toolEvent);
@@ -1773,8 +1785,13 @@ function sendMessageViaRuns(
 
     if (eventName === "run.completed") {
       const output = typeof raw.output === "string" ? raw.output : "";
+      if (shouldFallbackFromEmptyRunCompletion(hasRunActivity, output)) {
+        fallbackToChatCompletions();
+        return;
+      }
       if (output && !hasContent) {
         hasContent = true;
+        hasRunActivity = true;
         announceSessionId(sessionId);
         cb.onChunk(output);
       }
@@ -1789,7 +1806,7 @@ function sendMessageViaRuns(
         typeof raw.error === "string" && raw.error
           ? raw.error
           : "Aera Runtime run failed.";
-      if (!hasContent) {
+      if (!hasRunActivity) {
         fallbackToChatCompletions();
         return;
       }
@@ -1859,13 +1876,19 @@ function sendMessageViaRuns(
               }
             }
           }
-          if (!finished) finish();
+          if (!finished && !fallbackStarted) {
+            if (!hasRunActivity) {
+              stopRunAndFallback();
+            } else {
+              finish();
+            }
+          }
         });
       },
     );
     eventsReq.on("error", (err) => {
       if (err.name === "AbortError" || finished) return;
-      if (!hasContent) {
+      if (!hasRunActivity) {
         stopRunAndFallback();
         return;
       }
@@ -1873,7 +1896,7 @@ function sendMessageViaRuns(
     });
     eventsReq.on("timeout", () => {
       eventsReq?.destroy();
-      if (!hasContent) {
+      if (!hasRunActivity) {
         stopRunAndFallback();
         return;
       }

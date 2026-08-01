@@ -1,5 +1,6 @@
 import { randomUUID as nodeRandomUUID } from "node:crypto";
 import type { AgenteraRuntimeOwner } from "../agentera-profile-binding";
+import type { SessionModelOverride } from "../../shared/model-override";
 import type { CreateRuntimeBindingRecordRequest } from "./client";
 import type { AgenteraControlPlaneDatabase } from "./db";
 
@@ -19,6 +20,7 @@ const BINDING_FIELDS = [
   "agentInstallationId",
   "runtimeProfileId",
   "runtimeVersion",
+  "modelRoute",
   "policySnapshotId",
   "officialReleaseRevisionId",
   "toolPermissionDigest",
@@ -27,6 +29,12 @@ const BINDING_FIELDS = [
   "createdAt",
 ] as const;
 const LEGACY_BINDING_FIELDS = BINDING_FIELDS.filter(
+  (field) => field !== "officialReleaseRevisionId",
+);
+const PRE_MODEL_BINDING_FIELDS = BINDING_FIELDS.filter(
+  (field) => field !== "modelRoute",
+);
+const PRE_MODEL_LEGACY_BINDING_FIELDS = PRE_MODEL_BINDING_FIELDS.filter(
   (field) => field !== "officialReleaseRevisionId",
 );
 const CLOUD_FIELDS = [
@@ -56,6 +64,7 @@ export interface LocalRuntimeBinding {
   agentInstallationId: string;
   runtimeProfileId: string;
   runtimeVersion: string;
+  modelRoute: SessionModelOverride | null;
   policySnapshotId: string;
   officialReleaseRevisionId: string | null;
   toolPermissionDigest: string;
@@ -66,8 +75,12 @@ export interface LocalRuntimeBinding {
 
 export type CreateLocalRuntimeBindingInput = Omit<
   LocalRuntimeBinding,
-  "id" | "hermesSessionId" | "localAdaptiveStateRevision" | "createdAt"
->;
+  | "id"
+  | "hermesSessionId"
+  | "localAdaptiveStateRevision"
+  | "createdAt"
+  | "modelRoute"
+> & { modelRoute: SessionModelOverride };
 
 export interface PendingRuntimeBindingCloudRecord {
   id: string;
@@ -159,6 +172,32 @@ function boundedText(
   return value;
 }
 
+function modelRoute(
+  value: unknown,
+  error: RuntimeBindingStoreErrorCode,
+): SessionModelOverride {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new RuntimeBindingStoreError(error);
+  }
+  if (!exactKeys(value, ["provider", "model", "baseUrl"])) {
+    throw new RuntimeBindingStoreError(error);
+  }
+  const record = value as Record<string, unknown>;
+  const provider = boundedText(record.provider, 128, error).trim();
+  const model = boundedText(record.model, 512, error).trim();
+  if (
+    !provider ||
+    provider.toLowerCase() === "auto" ||
+    !model ||
+    typeof record.baseUrl !== "string" ||
+    Buffer.byteLength(record.baseUrl, "utf8") > 2_048 ||
+    /[\0\r\n]/.test(record.baseUrl)
+  ) {
+    throw new RuntimeBindingStoreError(error);
+  }
+  return { provider, model, baseUrl: record.baseUrl.trim() };
+}
+
 function isoTimestamp(
   value: unknown,
   error: RuntimeBindingStoreErrorCode,
@@ -196,6 +235,7 @@ function normalizeInput(
       "agentInstallationId",
       "runtimeProfileId",
       "runtimeVersion",
+      "modelRoute",
       "policySnapshotId",
       "officialReleaseRevisionId",
       "toolPermissionDigest",
@@ -216,6 +256,7 @@ function normalizeInput(
     agentInstallationId: uuid(input.agentInstallationId, "invalid_binding"),
     runtimeProfileId: uuid(input.runtimeProfileId, "invalid_binding"),
     runtimeVersion: boundedText(input.runtimeVersion, 128, "invalid_binding"),
+    modelRoute: modelRoute(input.modelRoute, "invalid_binding"),
     policySnapshotId: uuid(input.policySnapshotId, "invalid_binding"),
     officialReleaseRevisionId:
       input.officialReleaseRevisionId === null
@@ -232,7 +273,9 @@ function parseBinding(value: unknown): LocalRuntimeBinding {
     typeof value !== "object" ||
     Array.isArray(value) ||
     (!exactKeys(value, BINDING_FIELDS) &&
-      !exactKeys(value, LEGACY_BINDING_FIELDS))
+      !exactKeys(value, LEGACY_BINDING_FIELDS) &&
+      !exactKeys(value, PRE_MODEL_BINDING_FIELDS) &&
+      !exactKeys(value, PRE_MODEL_LEGACY_BINDING_FIELDS))
   ) {
     throw new RuntimeBindingStoreError("binding_corrupt");
   }
@@ -260,6 +303,9 @@ function parseBinding(value: unknown): LocalRuntimeBinding {
     agentInstallationId: uuid(record.agentInstallationId, "binding_corrupt"),
     runtimeProfileId: uuid(record.runtimeProfileId, "binding_corrupt"),
     runtimeVersion: boundedText(record.runtimeVersion, 128, "binding_corrupt"),
+    modelRoute: Object.hasOwn(record, "modelRoute")
+      ? modelRoute(record.modelRoute, "binding_corrupt")
+      : null,
     policySnapshotId: uuid(record.policySnapshotId, "binding_corrupt"),
     officialReleaseRevisionId: Object.hasOwn(
       record,
@@ -366,7 +412,10 @@ function parseCloudBody(value: unknown): CreateRuntimeBindingRecordRequest {
 
 function immutableInputOf(
   binding: LocalRuntimeBinding,
-): CreateLocalRuntimeBindingInput {
+): Omit<
+  LocalRuntimeBinding,
+  "id" | "hermesSessionId" | "localAdaptiveStateRevision" | "createdAt"
+> {
   return {
     conversationKey: binding.conversationKey,
     tenantId: binding.tenantId,
@@ -378,6 +427,7 @@ function immutableInputOf(
     agentInstallationId: binding.agentInstallationId,
     runtimeProfileId: binding.runtimeProfileId,
     runtimeVersion: binding.runtimeVersion,
+    modelRoute: binding.modelRoute,
     policySnapshotId: binding.policySnapshotId,
     officialReleaseRevisionId: binding.officialReleaseRevisionId,
     toolPermissionDigest: binding.toolPermissionDigest,

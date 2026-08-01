@@ -98,6 +98,8 @@ Owner and Admin can prepare and confirm Workspace publication, while Member is r
 
 [[src/main/agentera-agent-control/publisher.ts#AgentPublisher]] binds each one-use preview to its target scope and dispatches initial and next immutable versions through the corresponding USER or Workspace client method.
 
+Publication failures retain their exact bounded cause instead of presenting every post-upload failure as a signature error. A signature that remains invalid after one trust-key refresh, Cloud content or digest that differs from the prepared draft, and a verified version that cannot be cached are separate renderer-safe outcomes. The draft stores the narrower internal code for diagnosis, while no failed path marks the draft published or creates a usable local cache record.
+
 ### Local context partitions
 
 Draft and Installation presentation is filtered by the exact selected context while the underlying Installation owner and device tuple remain USER-owned.
@@ -116,11 +118,11 @@ While the shell remains in an Organization, “我的智能体” explicitly sen
 
 [[src/renderer/src/screens/Layout/ProfileSwitcher.tsx#ProfileSwitcher]] presents the same internal records only as Agents. Users may switch Agents, open the Agent screen, or open product-level Agent settings; provider routing, gateway state, internal Profile IDs, Installations, and RuntimeBindings remain hidden.
 
-[[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] reuses the configured Hermes model library, imports identity and capability Markdown, and derives safe asset paths. Personal publish and publish-and-use complete from one explicit action and carry the selected source model Profile snapshot into installation; Workspace keeps its trusted preview and Organization keeps mandatory review.
+[[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] imports identity and capability Markdown and derives safe asset paths without requiring a Runtime model. New drafts default to a signed user-select model policy; allowlist and fixed-model policies are explicit advanced authoring choices.
 
-[[src/renderer/src/screens/Agents/Agents.tsx#selectAgentModelProfileId]] selects the currently active configured current-owner Profile before any other Profile, including when that Profile belongs to an installed Agent. The main-process Profile listing already filters by owner, so Agent creation follows the model service the user actually activated instead of reopening a stale account Profile.
+Publishing an Agent and choosing a local model are separate actions. Publish-and-use may continue as one explicit product action, but it first publishes the immutable version and then resolves a current-owner Profile model during installation; publishing alone never requires a configured Runtime model.
 
-[[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] then loads every saved model attached to that configured provider and base URL, preserves the canonical named-custom provider identity, and excludes models belonging to other services. A configured non-installed Profile remains the fallback when the active Profile has no valid model route.
+Agent model pickers query credential-backed routes across the current owner's non-Agent Profiles, preferring the active Profile but not requiring one model to be the Profile default. Provider, credential, and model-library change events refresh the choices. They never merge a draft's historical model with unrelated global model history, and every visible option carries a consistent provider label.
 
 ### Guided product Agent creation
 
@@ -212,7 +214,17 @@ An Agent Installation selects one immutable version for one device/Profile pair 
 
 The authentication installation ID is not reused as the Agent Installation ID. New Agent installations create a fresh Profile with `cloneFrom=null`; existing learned Profiles require explicit same-owner claim. A RuntimeBinding freezes version, Profile, Runtime, policy, and tools for one conversation.
 
-Creating a Hermes Runtime Profile directly is not equivalent to creating a product Agent. A usable Agent additionally requires a verified immutable AgentVersion, USER-owned Installation, Profile binding, and RuntimeBinding. [[src/main/agentera-agent-control/model-profile-seed.ts#seedAgentModelProfile]] copies only the selected provider route and credential into the isolated target Profile, and it must choose a model allowed by the signed version; if the source Profile's current model is not allowed, an allowed model may be selected only from the same saved provider route.
+### Model policy and runtime selection
+
+An immutable AgentVersion signs a model policy, while the user's Installation selects the concrete local route that satisfies it.
+
+Manifest V1 remains byte-for-byte compatible and keeps its required provider/model constraints. Manifest V2 uses one of three modes: `user_select` permits any current-owner configured route, `allowlist` permits only listed providers and models, and `fixed` requires exactly one provider and model. Provider endpoints, display names, credentials, Profile paths, and secret fingerprints never enter the shared AgentVersion.
+
+The concrete route is resolved only when the user starts using or repairs an Agent. The main process validates the selected route against the signed model policy and effective tenant policy, copies only that route and its same-owner credential into the isolated target Profile, and freezes the resolved route in each new RuntimeBinding. Changing the user's selected model affects only later conversations.
+
+An installed or shared Agent never treats an empty successful transport as a usable response. If the Runs API reports completion without text, reasoning, or tool activity, the main process performs the bounded Chat Completions compatibility fallback; any observed tool activity suppresses replay so side effects cannot run twice. If the compatibility path also returns no content, the turn fails instead of rendering a false success.
+
+Creating a Hermes Runtime Profile directly is not equivalent to creating a product Agent. A usable Agent additionally requires a verified immutable AgentVersion, USER-owned Installation, Profile binding, and RuntimeBinding. [[src/main/agentera-agent-control/model-profile-seed.ts#seedAgentModelProfile]] copies only the selected provider route and same-owner credential into the isolated target Profile after validating the signed model policy.
 
 When the active installed Agent Profile is also the selected model source, repair verifies the same-owner binding, credential availability, and signed model constraints in place. An already compatible route is not copied onto itself; a different allowed signed model is reconfigured on that Profile, while an unavailable credential or incompatible route still fails closed. After a version change, [[src/renderer/src/screens/Layout/chatRuns.ts#openProfileRunTransition]] forces a new run even for a same-Profile blank tab, so the previous conversation keeps its original RuntimeBinding and only the new run can freeze the selected version.
 

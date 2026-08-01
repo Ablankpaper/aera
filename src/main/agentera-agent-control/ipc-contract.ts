@@ -32,6 +32,7 @@ import type {
 } from "../../shared/agentera-agent-control";
 import type { AgentDefinition, AgentVersion } from "./client";
 import type { LocalAgentInstallation } from "./installation-manager";
+import { modelPolicyForManifest } from "./model-policy";
 import type {
   OrganizationAgentSubmissionDetail as MainOrganizationAgentSubmissionDetail,
   OrganizationReviewPreview as MainOrganizationReviewPreview,
@@ -114,6 +115,19 @@ function parseProfileId(value: unknown): string {
   return value;
 }
 
+function parseRuntimeModelSelection(value: unknown): {
+  sourceProfileId: string;
+  modelLibraryId: string;
+} {
+  if (!exactObject(value, ["sourceProfileId", "modelLibraryId"])) {
+    return invalidRequest();
+  }
+  return {
+    sourceProfileId: parseProfileId(value.sourceProfileId),
+    modelLibraryId: parseAgentControlId(value.modelLibraryId),
+  };
+}
+
 function assertDraftShape(
   value: unknown,
   fields: readonly string[],
@@ -162,6 +176,12 @@ export function parseInstallVersionInput(
       "versionId",
       "profileName",
       "modelProfileId",
+    ]) &&
+    !exactObject(value, [
+      "definitionId",
+      "versionId",
+      "profileName",
+      "modelSelection",
     ])
   ) {
     return invalidRequest();
@@ -172,6 +192,9 @@ export function parseInstallVersionInput(
     profileName: parseProfileId(value.profileName),
     ...(Object.hasOwn(value, "modelProfileId")
       ? { modelProfileId: parseProfileId(value.modelProfileId) }
+      : {}),
+    ...(Object.hasOwn(value, "modelSelection")
+      ? { modelSelection: parseRuntimeModelSelection(value.modelSelection) }
       : {}),
   };
 }
@@ -221,7 +244,8 @@ export function parseRetryPendingInstallationInput(
   const target = value.target;
   if (
     (exactObject(target, ["kind", "profileName"]) ||
-      exactObject(target, ["kind", "profileName", "modelProfileId"])) &&
+      exactObject(target, ["kind", "profileName", "modelProfileId"]) ||
+      exactObject(target, ["kind", "profileName", "modelSelection"])) &&
     target.kind === "fresh"
   ) {
     return {
@@ -231,6 +255,11 @@ export function parseRetryPendingInstallationInput(
         profileName: parseProfileId(target.profileName),
         ...(Object.hasOwn(target, "modelProfileId")
           ? { modelProfileId: parseProfileId(target.modelProfileId) }
+          : {}),
+        ...(Object.hasOwn(target, "modelSelection")
+          ? {
+              modelSelection: parseRuntimeModelSelection(target.modelSelection),
+            }
           : {}),
       },
     };
@@ -268,13 +297,28 @@ export function parseSelectInstallationVersionInput(
 export function parseRepairInstallationModelInput(
   value: unknown,
 ): AgenteraRepairInstallationModelInput {
-  if (!exactObject(value, ["id", "localProfileId", "modelProfileId"])) {
+  const usesProfile = exactObject(value, [
+    "id",
+    "localProfileId",
+    "modelProfileId",
+  ]);
+  const usesSelection = exactObject(value, [
+    "id",
+    "localProfileId",
+    "modelSelection",
+  ]);
+  if (!usesProfile && !usesSelection) {
     return invalidRequest();
   }
+  const input = value as Record<string, unknown>;
   return {
-    id: parseAgentControlId(value.id),
-    localProfileId: parseProfileId(value.localProfileId),
-    modelProfileId: parseProfileId(value.modelProfileId),
+    id: parseAgentControlId(input.id),
+    localProfileId: parseProfileId(input.localProfileId),
+    ...(usesProfile
+      ? { modelProfileId: parseProfileId(input.modelProfileId) }
+      : {
+          modelSelection: parseRuntimeModelSelection(input.modelSelection),
+        }),
   };
 }
 
@@ -596,14 +640,22 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
     return "conflict";
   }
   if (
-    code === "verification_failed" ||
-    code.includes("signature") ||
-    code.includes("digest") ||
-    code === "cache_corrupt" ||
-    code === "published_content_mismatch"
+    code === "published_content_mismatch" ||
+    code.includes("digest_mismatch")
   ) {
-    return "verification_failed";
+    return "published_content_mismatch";
   }
+  if (
+    code === "publication_cache_failed" ||
+    code === "cache_corrupt" ||
+    code === "cache_permissions_invalid"
+  ) {
+    return "publication_cache_failed";
+  }
+  if (code === "signature_verification_failed" || code.includes("signature")) {
+    return "signature_verification_failed";
+  }
+  if (code === "verification_failed") return "verification_failed";
   if (code === "runtime_incompatible" || code === "runtime_drift") {
     return "runtime_incompatible";
   }
@@ -780,6 +832,7 @@ export function serializeOrganizationSubmissionDetail(
     0,
   );
   if (totalBytes !== value.totalBytes) return invalidRequest();
+  const modelPolicy = modelPolicyForManifest(value.manifest);
   return {
     summary: serializeOrganizationAgentSubmission(value.summary),
     displayName: value.displayName,
@@ -793,8 +846,8 @@ export function serializeOrganizationSubmissionDetail(
     systemPrompt: value.manifest.identity.system_prompt,
     assets,
     modelConstraints: {
-      allowedProviders: [...value.manifest.model_constraints.allowed_providers],
-      allowedModels: [...value.manifest.model_constraints.allowed_models],
+      allowedProviders: [...modelPolicy.allowedProviders],
+      allowedModels: [...modelPolicy.allowedModels],
     },
     tools: {
       allowed: [...value.manifest.tools.allowed],

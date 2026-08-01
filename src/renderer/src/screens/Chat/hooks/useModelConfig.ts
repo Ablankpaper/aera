@@ -6,7 +6,11 @@ import type { ModelGroup } from "../types";
 import {
   customProviderRuntimeRoute,
   isCustomProviderRoute,
+  namedCustomProviderRuntimeName,
+  normalizeCustomProviderRuntimeName,
+  type CustomProviderRecord,
 } from "../../../../../shared/custom-providers";
+import { customProviderEnvKey } from "../../../../../shared/url-key-map";
 
 const OLLAMA_CLOUD_PROVIDER = "ollama-cloud";
 const OLLAMA_CLOUD_BASE_URL = "https://ollama.com/v1";
@@ -34,6 +38,60 @@ interface SavedModelForPicker {
   name: string;
   baseUrl?: string;
   providerLabel?: string;
+}
+
+function normalizedEndpoint(value: string | undefined): string {
+  return (value || "").trim().replace(/\/+$/, "").toLowerCase();
+}
+
+/**
+ * The model library is global, while named custom-provider identities are
+ * Profile-scoped. Only expose attachments whose owning provider still exists
+ * in the current Profile, and canonicalize renamed providers by endpoint so a
+ * stale library label cannot recreate an obsolete runtime route.
+ */
+export function availableModelsForProfile(
+  models: SavedModelForPicker[],
+  providers: CustomProviderRecord[],
+): SavedModelForPicker[] {
+  return models.flatMap((model) => {
+    if (!isCustomProviderRoute(model.provider)) return [model];
+
+    const endpoint = normalizedEndpoint(model.baseUrl);
+    const labelAnchor = model.providerLabel
+      ? customProviderEnvKey(model.providerLabel)
+      : null;
+    const namedRoute = namedCustomProviderRuntimeName(model.provider);
+    const provider =
+      providers.find((candidate) => {
+        if (endpoint && normalizedEndpoint(candidate.baseUrl) !== endpoint) {
+          return false;
+        }
+        if (labelAnchor) {
+          return customProviderEnvKey(candidate.name) === labelAnchor;
+        }
+        if (namedRoute) {
+          return (
+            normalizeCustomProviderRuntimeName(candidate.name) === namedRoute
+          );
+        }
+        return Boolean(endpoint);
+      }) ??
+      (endpoint
+        ? providers.find(
+            (candidate) => normalizedEndpoint(candidate.baseUrl) === endpoint,
+          )
+        : undefined);
+    if (!provider) return [];
+    return [
+      {
+        ...model,
+        provider: "custom",
+        providerLabel: provider.name,
+        baseUrl: provider.baseUrl,
+      },
+    ];
+  });
 }
 
 function mergeLiveOllamaCloudModels(
@@ -135,15 +193,16 @@ export function useModelConfig(profile?: string): UseModelConfigResult {
 
   const reload = useCallback(async (): Promise<void> => {
     const seq = ++loadSeqRef.current;
-    const [mc, savedModels] = await Promise.all([
+    const [mc, savedModels, customProviders] = await Promise.all([
       window.hermesAPI.getModelConfig(profile),
       window.hermesAPI.listModels(),
+      window.hermesAPI.listCustomProviders(profile).catch(() => []),
     ]);
     if (seq !== loadSeqRef.current) return;
     setCurrentModel(mc.model);
     setCurrentProvider(mc.provider);
     setCurrentBaseUrl(mc.baseUrl);
-    setSavedModels(savedModels);
+    setSavedModels(availableModelsForProfile(savedModels, customProviders));
   }, [profile]);
 
   // Initial load + reload whenever the profile changes (canonical
@@ -165,6 +224,12 @@ export function useModelConfig(profile?: string): UseModelConfigResult {
 
   useEffect(() => {
     return window.hermesAPI.onModelLibraryChanged(() => {
+      void reload();
+    });
+  }, [reload]);
+
+  useEffect(() => {
+    return window.hermesAPI.onCustomProvidersChanged(() => {
       void reload();
     });
   }, [reload]);

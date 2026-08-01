@@ -190,20 +190,13 @@ function canonicalCandidate(
 }
 
 function editableManifest(version: AgentVersion): AgentEditableManifest {
-  return {
-    schemaVersion: 1,
+  const common = {
     identity: { systemPrompt: version.manifest.identity.system_prompt },
     assets: version.manifest.assets.map((asset) => ({
       path: asset.path,
       kind: asset.kind,
       mediaType: asset.media_type,
     })),
-    modelConstraints: {
-      allowedProviders: [
-        ...version.manifest.model_constraints.allowed_providers,
-      ],
-      allowedModels: [...version.manifest.model_constraints.allowed_models],
-    },
     tools: {
       allowed: [...version.manifest.tools.allowed],
       denied: [...version.manifest.tools.denied],
@@ -217,6 +210,27 @@ function editableManifest(version: AgentVersion): AgentEditableManifest {
       maximumVersionExclusive:
         version.manifest.runtime_compatibility.maximum_version_exclusive ??
         null,
+    },
+  };
+  if (version.manifest.schema_version === 1) {
+    return {
+      schemaVersion: 1,
+      ...common,
+      modelConstraints: {
+        allowedProviders: [
+          ...version.manifest.model_constraints.allowed_providers,
+        ],
+        allowedModels: [...version.manifest.model_constraints.allowed_models],
+      },
+    };
+  }
+  return {
+    schemaVersion: 2,
+    ...common,
+    modelPolicy: {
+      mode: version.manifest.model_policy.mode,
+      allowedProviders: [...version.manifest.model_policy.allowed_providers],
+      allowedModels: [...version.manifest.model_policy.allowed_models],
     },
   };
 }

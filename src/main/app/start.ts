@@ -7,11 +7,15 @@ import {
   session,
   shell,
 } from "electron";
-import { join } from "path";
+import { basename, join } from "path";
 import { hostname } from "node:os";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import icon from "../../../resources/icon.png?asset";
-import { getConnectionConfig, getPublicConnectionConfig } from "../config";
+import {
+  getConnectionConfig,
+  getModelConfig,
+  getPublicConnectionConfig,
+} from "../config";
 import { stopGateway, stopHealthPolling } from "../hermes";
 import { stopAllDashboards } from "../dashboard";
 import { cleanupTempMediaFiles } from "../media";
@@ -425,6 +429,10 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
         deleteProfile,
         resolveProfilePath: (profileId) => profileHome(profileId),
         activateProfile: setActiveProfile,
+        readProfileModelConfig: (profilePath) =>
+          getModelConfig(
+            profilePath === profileHome() ? "default" : basename(profilePath),
+          ),
         configureFreshProfileModel: seedAgentModelProfile,
       },
       userDataPath: app.getPath("userData"),

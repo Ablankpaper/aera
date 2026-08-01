@@ -77,6 +77,7 @@ import {
   conversationSystemMessage,
   getRemoteAuthHeader,
   sendMessage,
+  shouldFallbackFromEmptyRunCompletion,
   shouldForceCliForSessionOverride,
   stopHealthPolling,
   transcribeAudio,
@@ -110,6 +111,15 @@ describe("bound Hermes conversation instructions", () => {
         "files, use the file, terminal, and code-execution tools with " +
         "absolute paths under this folder.",
     });
+  });
+});
+
+describe("Hermes Runs empty completion handling", () => {
+  it("falls back only when HTTP 200 completes without output or other activity", () => {
+    expect(shouldFallbackFromEmptyRunCompletion(false, "")).toBe(true);
+    expect(shouldFallbackFromEmptyRunCompletion(false, "   ")).toBe(true);
+    expect(shouldFallbackFromEmptyRunCompletion(false, "answer")).toBe(false);
+    expect(shouldFallbackFromEmptyRunCompletion(true, "")).toBe(false);
   });
 });
 

@@ -255,6 +255,7 @@ describe("Agent control Organization Foundation context", () => {
       agentInstallationId: PERSONAL_INSTALLATION_ID,
       runtimeProfileId: PERSONAL_PROFILE_ID,
       runtimeVersion: "v0.18.2-agentera.1",
+      modelRoute: { provider: "openai", model: "gpt-5.6", baseUrl: "" },
       policySnapshotId: PERSONAL_POLICY_ID,
       officialReleaseRevisionId: null,
       toolPermissionDigest: "1".repeat(64),

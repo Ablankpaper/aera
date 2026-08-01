@@ -124,6 +124,28 @@ function agentVersion(): AgentVersion {
   };
 }
 
+function agentVersionV2(): AgentVersion {
+  return {
+    ...agentVersion(),
+    manifest: {
+      schema_version: 2,
+      identity: { system_prompt: "Select the local runtime model." },
+      assets: [],
+      model_policy: {
+        mode: "user_select",
+        allowed_providers: [],
+        allowed_models: [],
+      },
+      tools: { allowed: [], denied: [] },
+      dependencies: [],
+      runtime_compatibility: {
+        minimum_version: "v0.18.2-agentera.1",
+        maximum_version_exclusive: null,
+      },
+    },
+  };
+}
+
 function managedInstallation(): AgentInstallation {
   return {
     ...installation(),
@@ -162,6 +184,30 @@ function policySnapshot(): AgentPolicySnapshot {
     signing_key_id: "policy-test-key",
     signature: "A".repeat(86),
     created_at: NOW.toISOString(),
+  };
+}
+
+function policySnapshotV2(): AgentPolicySnapshot {
+  return {
+    ...policySnapshot(),
+    document: {
+      schema_version: 2,
+      agent_definition_id: DEFINITION_ID,
+      agent_version_id: VERSION_ID,
+      version_digest: VERSION_DIGEST,
+      model_policy: {
+        mode: "user_select",
+        allowed_providers: [],
+        allowed_models: [],
+      },
+      runtime_compatibility: {
+        minimum_version: "v0.18.2-agentera.1",
+        maximum_version_exclusive: "v0.19.0",
+      },
+      tools: { allowed: ["files.read"], denied: [] },
+      deny_rules: [],
+      publication_allowed: false,
+    },
   };
 }
 
@@ -711,6 +757,25 @@ describe("AgenteraAgentControlClient", () => {
     await expect(client.getPolicySnapshot(POLICY_ID)).rejects.toMatchObject({
       code: "invalid_response",
     });
+  });
+
+  it("accepts strict V2 user_select version and policy responses", async () => {
+    const responses = [agentVersionV2(), policySnapshotV2()];
+    const fetcher = vi.fn(async () => jsonResponse(responses.shift()));
+    const client = new AgenteraAgentControlClient({
+      origin: "http://127.0.0.1:8086",
+      getAccessToken: () => "agentera-product-access",
+      getInstallationIdentity: () => deviceIdentity(),
+      fetch: fetcher as typeof fetch,
+      now: () => NOW,
+    });
+
+    await expect(client.getVersion(VERSION_ID)).resolves.toEqual(
+      agentVersionV2(),
+    );
+    await expect(client.getPolicySnapshot(POLICY_ID)).resolves.toEqual(
+      policySnapshotV2(),
+    );
   });
 
   it("applies one timeout and enforces declared and streamed response bounds", async () => {

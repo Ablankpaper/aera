@@ -147,6 +147,9 @@ function policySnapshot(
   id = POLICY_ID,
   installationId = INSTALLATION_ID,
 ): AgentPolicySnapshot {
+  if (version.manifest.schema_version !== 1) {
+    throw new Error("V1 policy fixture requires a V1 manifest");
+  }
   return {
     id,
     installation_id: installationId,

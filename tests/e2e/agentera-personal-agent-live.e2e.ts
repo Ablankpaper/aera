@@ -201,16 +201,31 @@ test("keeps the Organization shell while a personal Agent publishes, becomes rea
       .fill(
         `You are a live acceptance Agent. When asked for the validation marker, reply with exactly ${LIVE_REPLY_MARKER} and nothing else.`,
       );
-    const runtimeModel = editor.getByLabel(/^(Runtime model|运行模型)$/);
-    await expect(runtimeModel).toHaveValue(
-      `${LIVE_PROVIDER_ROUTE}\u0000${LIVE_MODEL}`,
-    );
+    await expect(
+      editor.getByLabel(/^(Model behavior|模型使用方式)$/),
+    ).toHaveValue("user_select");
+    await expect(
+      editor.getByText(/^(The model is optional\.|模型为选填项。)/),
+    ).toBeVisible();
 
     const publishAndUse = editor.getByRole("button", {
       name: /^(Publish and use|发布并使用)$/,
     });
     await expect(publishAndUse).toBeEnabled();
     await publishAndUse.click();
+
+    const modelDialog = device.page.getByRole("dialog", {
+      name: /^(Choose a model for this use|选择本次使用的模型)$/,
+    });
+    await expect(modelDialog).toBeVisible();
+    await modelDialog
+      .getByLabel(/^(Runtime model for this use|本次运行模型)$/)
+      .selectOption({ label: `${LIVE_MODEL} · ${LIVE_PROVIDER_NAME}` });
+    await modelDialog
+      .getByRole("button", {
+        name: /^(Confirm and start|确认并开始使用)$/,
+      })
+      .click();
 
     const chatInput = device.page.locator("textarea.chat-input:visible");
     await expect(chatInput).toBeVisible({ timeout: 240_000 });

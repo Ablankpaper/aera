@@ -461,6 +461,44 @@ export function removeModel(id: string): boolean {
   return true;
 }
 
+/**
+ * Remove every model-library attachment owned by one named custom provider.
+ *
+ * Current rows are keyed by `providerLabel`. Older rows predate that field, so
+ * the provider's exact normalized endpoint is the only safe identity available
+ * for those attachments. Shared model definitions are intentionally retained:
+ * another provider may expose the same model id and reuse that metadata.
+ */
+export function removeModelsForCustomProvider(
+  name: string,
+  baseUrl?: string,
+): number {
+  const rows = readModelsRaw();
+  const providerAnchor = customProviderEnvKey(name.trim());
+  const endpoint = (baseUrl || "")
+    .trim()
+    .replace(/\/+$/, "")
+    .toLocaleLowerCase();
+  const next = rows.filter((row) => {
+    const provider = row.provider.trim().toLocaleLowerCase();
+    const labelMatches =
+      Boolean(row.providerLabel) &&
+      customProviderEnvKey(row.providerLabel || "") === providerAnchor;
+    const namedRouteMatches =
+      provider.startsWith("custom:") &&
+      customProviderEnvKey(provider.slice("custom:".length)) === providerAnchor;
+    const legacyEndpointMatches =
+      !row.providerLabel &&
+      provider === "custom" &&
+      Boolean(endpoint) &&
+      row.baseUrl.trim().replace(/\/+$/, "").toLocaleLowerCase() === endpoint;
+    return !(labelMatches || namedRouteMatches || legacyEndpointMatches);
+  });
+  const removed = rows.length - next.length;
+  if (removed > 0) writeModels(next);
+  return removed;
+}
+
 export function updateModel(
   id: string,
   fields: Partial<

@@ -294,7 +294,7 @@ function organizationDraft(
     displayName: "Enterprise Research",
     icon: null,
     manifest: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       identity: {
         systemPrompt: `Use only the approved Organization base: ${marker}`,
       },
@@ -315,9 +315,10 @@ function organizationDraft(
           mediaType: "text/markdown",
         },
       ],
-      modelConstraints: {
-        allowedProviders: ["openai"],
-        allowedModels: ["gpt-5.6"],
+      modelPolicy: {
+        mode: "user_select",
+        allowedProviders: [],
+        allowedModels: [],
       },
       tools: { allowed: [], denied: [] },
       dependencies: [],
@@ -402,7 +403,9 @@ async function approve(
 ): Promise<OrganizationAgentSubmissionSummary> {
   const preview = await prepareApproval(device, submissionId);
   if (!preview.reviewHandle) {
-    throw new Error("The current Owner or Admin did not receive a review handle.");
+    throw new Error(
+      "The current Owner or Admin did not receive a review handle.",
+    );
   }
   return unwrapAgent(
     await invokeAgentera<OrganizationAgentSubmissionSummary>(
@@ -859,7 +862,7 @@ test("organization agent needs one current reviewer and keeps every employee run
     [
       "model:",
       "  provider: custom",
-      "  model: e2e-vision",
+      "  default: e2e-vision",
       `  base_url: "${visionModelOrigin}/v1"`,
       "",
     ].join("\n"),

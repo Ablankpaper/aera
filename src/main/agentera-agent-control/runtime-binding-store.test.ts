@@ -51,6 +51,11 @@ function bindingInput(
     agentInstallationId: INSTALLATION_ID,
     runtimeProfileId: RUNTIME_PROFILE_ID,
     runtimeVersion: "v0.18.2-agentera.1",
+    modelRoute: {
+      provider: "openai",
+      model: "gpt-5.6",
+      baseUrl: "",
+    },
     policySnapshotId: POLICY_ID,
     officialReleaseRevisionId: null,
     toolPermissionDigest: TOOL_DIGEST,
@@ -103,6 +108,11 @@ describe("immutable local RuntimeBinding store", () => {
       agentInstallationId: INSTALLATION_ID,
       runtimeProfileId: RUNTIME_PROFILE_ID,
       runtimeVersion: "v0.18.2-agentera.1",
+      modelRoute: {
+        provider: "openai",
+        model: "gpt-5.6",
+        baseUrl: "",
+      },
       policySnapshotId: POLICY_ID,
       officialReleaseRevisionId: null,
       toolPermissionDigest: TOOL_DIGEST,
@@ -144,6 +154,26 @@ describe("immutable local RuntimeBinding store", () => {
     ]) {
       expect(serialized).not.toContain(forbidden);
     }
+  });
+
+  it("freezes the credential-free model route locally without adding it to the cloud outbox", () => {
+    const binding = store.getOrCreateForConversation({
+      ...bindingInput({ conversationKey: "route-bound-conversation" }),
+      modelRoute: {
+        provider: "custom:petoi",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://api.petoi.cn/v1",
+      },
+    } as CreateLocalRuntimeBindingInput);
+
+    expect(binding.modelRoute).toEqual({
+      provider: "custom:petoi",
+      model: "gpt-5.6-sol",
+      baseUrl: "https://api.petoi.cn/v1",
+    });
+    expect(JSON.stringify(store.listPendingCloudRecords())).not.toMatch(
+      /petoi|gpt-5\.6-sol|baseUrl|modelRoute/i,
+    );
   });
 
   it("exports only owner-scoped immutable provenance for one Installation", () => {
@@ -223,6 +253,7 @@ describe("immutable local RuntimeBinding store", () => {
 
     expect(store.getByConversationKey(legacy.conversationKey)).toEqual({
       ...legacy,
+      modelRoute: null,
       officialReleaseRevisionId: null,
     });
   });

@@ -102,7 +102,9 @@ Opening a card uses [[src/renderer/src/screens/Agents/AgentHubDetailDialog.tsx#A
 
 My Agents joins actual drafts, published definitions, pending or active Installations, and unmatched local Profiles into one Agent-card projection. An unmatched Profile appears as a ready local Agent rather than a second management list. Search misses and status-filter misses use their own recovery hints, so an existing Agent hidden by a query or filter is never reported as an empty catalog.
 
-[[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] creates Agents from a name, identity instructions or imported Markdown, a configured model selection, and optional Skill/SOP/knowledge Markdown. Provider lists, model IDs, asset paths, and local runtime preparation are derived automatically. Publish-and-use completes publication, preparation, activation, and chat from one explicit user action.
+[[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] creates Agents from a name, identity instructions or imported Markdown, an optional advanced model policy, and optional Skill/SOP/knowledge Markdown. **Start using** selects a current live model route, while publish-and-use keeps publication, route selection, preparation, activation, and chat in one explicit product flow.
+
+Agent and chat model selectors read the current credential-backed model library. Deleting a custom provider removes its provider and global-model rows together and clears an active model that referenced the removed route, so historical provider configuration cannot reappear in later Agent editors or chat selectors.
 
 ## Office Agent labels
 

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AgentDraft,
   AgentDraftDetail,
+  AgentRuntimeModelRoute,
+  AgentRuntimeModelSelection,
   AgenteraAgentControlErrorCode,
   AgenteraAgentControlPublicState,
   AgenteraAgentDefinitionSummary,
@@ -11,6 +13,7 @@ import type {
   OfficialAgentSummary,
   OfficialManagedUpdate,
 } from "../../../../shared/agentera-agent-control";
+import { runtimeModelPolicyForEditableManifest } from "../../../../shared/agentera-agent-control";
 import {
   Bot,
   Check,
@@ -51,6 +54,7 @@ export interface AgentChatOpenOptions {
 
 export interface AgentControlPanelProps {
   profiles: AgentControlProfileOption[];
+  runtimeModelRoutes?: AgentRuntimeModelRoute[];
   initialTab?: "official" | "mine" | "enterprise";
   advancedOpenByDefault?: boolean;
   onChatWithProfile?: (
@@ -76,6 +80,24 @@ interface PersonalAgentCard {
   profile: AgentControlProfileOption | null;
   iconSrc: string | null;
   origin: "definition" | "draft" | "installation" | "profile";
+}
+
+interface AgentActivationTarget {
+  key: string;
+  displayName: string;
+  definitionId: string;
+  versionId: string;
+  installation: AgenteraAgentInstallationSummary | null;
+  profile: AgentControlProfileOption | null;
+}
+
+interface AgentRuntimeModelOption {
+  id: string;
+  provider: string;
+  providerLabel: string;
+  model: string;
+  modelProfileId?: string;
+  modelSelection?: AgentRuntimeModelSelection;
 }
 
 function errorKey(code: AgenteraAgentControlErrorCode): string {
@@ -124,9 +146,10 @@ export function isRunnableAgentProfile(
   );
 }
 
-function publishedDraftAllowsProfileModel(
+function publishedDraftAllowsModel(
   draft: AgentDraft,
-  modelProfile: AgentControlProfileOption,
+  providerValue: string,
+  modelValue: string,
   versionId: string,
 ): boolean {
   const published = draft.publishedRevision;
@@ -137,10 +160,14 @@ function publishedDraftAllowsProfileModel(
   ) {
     return false;
   }
-  const provider = modelProfile.provider?.trim().toLocaleLowerCase() ?? "";
-  const model = modelProfile.model?.trim() ?? "";
-  const allowedProviders = draft.manifest.modelConstraints.allowedProviders.map(
-    (value) => value.trim().toLocaleLowerCase(),
+  const provider = providerValue.trim().toLocaleLowerCase();
+  const model = modelValue.trim();
+  const policy = runtimeModelPolicyForEditableManifest(draft.manifest);
+  if (policy.mode === "user_select") {
+    return provider.length > 0 && provider !== "auto" && model.length > 0;
+  }
+  const allowedProviders = policy.allowedProviders.map((value) =>
+    value.trim().toLocaleLowerCase(),
   );
   const providerAllowed =
     allowedProviders.includes(provider) ||
@@ -150,7 +177,7 @@ function publishedDraftAllowsProfileModel(
     provider !== "auto" &&
     model.length > 0 &&
     providerAllowed &&
-    draft.manifest.modelConstraints.allowedModels.includes(model)
+    policy.allowedModels.includes(model)
   );
 }
 
@@ -173,6 +200,7 @@ function automaticRuntimeName(
 
 export default function AgentControlPanel({
   profiles,
+  runtimeModelRoutes,
   initialTab = "mine",
   advancedOpenByDefault = true,
   onChatWithProfile,
@@ -228,6 +256,9 @@ export default function AgentControlPanel({
   const [selectedPersonalKey, setSelectedPersonalKey] = useState<string | null>(
     null,
   );
+  const [pendingModelSelection, setPendingModelSelection] =
+    useState<AgentActivationTarget | null>(null);
+  const [selectedModelSourceId, setSelectedModelSourceId] = useState("");
   const loadEpoch = useRef(0);
   const selectedContextKey = useRef<string | null>(null);
 
@@ -505,22 +536,30 @@ export default function AgentControlPanel({
     [onAgentReady, onProfilesChanged],
   );
 
-  const activateAgent = async (target: {
-    key: string;
-    displayName: string;
-    definitionId: string;
-    versionId: string;
-    installation: AgenteraAgentInstallationSummary | null;
-    profile: AgentControlProfileOption | null;
-    modelProfileId?: string;
-  }): Promise<void> => {
+  const activateAgent = async (
+    target: AgentActivationTarget & {
+      modelProfileId?: string;
+      modelSelection?: AgentRuntimeModelSelection;
+    },
+  ): Promise<void> => {
     if (busyPersonalKey) return;
     setBusyPersonalKey(target.key);
     setError(null);
     setNotice(null);
     try {
       let installation = target.installation;
-      const sourceModelProfileId = target.modelProfileId ?? modelProfileId;
+      const sourceModelProfileId =
+        target.modelSelection?.sourceProfileId ??
+        target.modelProfileId ??
+        modelProfileId;
+      const modelSourceInput = target.modelSelection
+        ? { modelSelection: target.modelSelection }
+        : sourceModelProfileId
+          ? { modelProfileId: sourceModelProfileId }
+          : {};
+      const modelSelectionRequested = Boolean(
+        target.modelSelection || target.modelProfileId,
+      );
       let profileReady = isRunnableAgentProfile(target.profile);
       let forceNewRun = false;
       const alignActiveProfileVersion = async (
@@ -553,7 +592,7 @@ export default function AgentControlPanel({
           setEditor(null);
           await load();
         }
-        if (versionChanged || !ready) {
+        if (versionChanged || !ready || modelSelectionRequested) {
           if (!sourceModelProfileId) {
             setError("agents.hub.modelRequired");
             return null;
@@ -562,7 +601,7 @@ export default function AgentControlPanel({
             {
               id: aligned.id,
               localProfileId: profile.id,
-              modelProfileId: sourceModelProfileId,
+              ...modelSourceInput,
             },
             personalOperationScope,
           );
@@ -573,6 +612,7 @@ export default function AgentControlPanel({
           aligned = repaired.data;
           await onProfilesChanged?.();
           ready = true;
+          forceNewRun = true;
         }
         return {
           installation: aligned,
@@ -590,7 +630,7 @@ export default function AgentControlPanel({
         installation = aligned.installation;
         profileReady = aligned.profileReady;
         if (profileReady && onChatWithProfile) {
-          if (aligned.versionChanged) {
+          if (forceNewRun || aligned.versionChanged) {
             onChatWithProfile(target.profile.id, { forceNewRun: true });
           } else {
             onChatWithProfile(target.profile.id);
@@ -641,7 +681,7 @@ export default function AgentControlPanel({
                         target.definitionId,
                         profiles,
                       ),
-                      modelProfileId: sourceModelProfileId,
+                      ...modelSourceInput,
                     },
               },
               personalOperationScope,
@@ -655,7 +695,7 @@ export default function AgentControlPanel({
                   target.definitionId,
                   profiles,
                 ),
-                modelProfileId: sourceModelProfileId,
+                ...modelSourceInput,
               },
               personalOperationScope,
             );
@@ -672,7 +712,7 @@ export default function AgentControlPanel({
         );
         if (!aligned) return;
         installation = aligned.installation;
-        forceNewRun = aligned.versionChanged;
+        forceNewRun = forceNewRun || aligned.versionChanged;
       }
       setEditor(null);
       await load();
@@ -855,6 +895,36 @@ export default function AgentControlPanel({
     t,
   ]);
 
+  const selectableModelProfiles = useMemo(() => {
+    const runnable = profiles.filter(isRunnableAgentProfile);
+    const ownerConfigured = runnable.filter(
+      (profile) => !profile.agentInstallationId,
+    );
+    return ownerConfigured.length > 0 ? ownerConfigured : runnable;
+  }, [profiles]);
+
+  const selectableModelSources = useMemo<AgentRuntimeModelOption[]>(() => {
+    if (runtimeModelRoutes !== undefined) {
+      return runtimeModelRoutes.map((route) => ({
+        id: route.id,
+        provider: route.provider,
+        providerLabel: route.providerLabel,
+        model: route.model,
+        modelSelection: {
+          sourceProfileId: route.sourceProfileId,
+          modelLibraryId: route.modelLibraryId,
+        },
+      }));
+    }
+    return selectableModelProfiles.map((profile) => ({
+      id: profile.id,
+      provider: profile.provider || "",
+      providerLabel: profile.provider || "",
+      model: profile.model || "",
+      modelProfileId: profile.id,
+    }));
+  }, [runtimeModelRoutes, selectableModelProfiles]);
+
   const requestInstall = (target: {
     definitionId: string;
     versionId: string;
@@ -872,15 +942,41 @@ export default function AgentControlPanel({
       : null;
     const displayName =
       target.displayName ?? definitionName(target.definitionId);
-    void activateAgent({
+    const activationTarget: AgentActivationTarget = {
       key: `definition:${target.definitionId}`,
       displayName,
       definitionId: target.definitionId,
       versionId: target.versionId,
       installation,
       profile,
-      modelProfileId: target.modelProfileId,
-    });
+    };
+    if (target.modelProfileId) {
+      void activateAgent({
+        ...activationTarget,
+        modelProfileId: target.modelProfileId,
+      });
+      return;
+    }
+    if (
+      installation?.status === "pending" &&
+      installation.selectedVersionId === target.versionId &&
+      profile &&
+      isRunnableAgentProfile(profile)
+    ) {
+      void activateAgent(activationTarget);
+      return;
+    }
+    if (selectableModelSources.length === 0) {
+      setError("agents.hub.modelRequired");
+      return;
+    }
+    const preferred = selectableModelSources.find(
+      (candidate) =>
+        candidate.modelSelection?.sourceProfileId === modelProfileId ||
+        candidate.modelProfileId === modelProfileId,
+    );
+    setSelectedModelSourceId(preferred?.id ?? selectableModelSources[0].id);
+    setPendingModelSelection(activationTarget);
   };
 
   const visiblePersonalCards = useMemo(() => {
@@ -928,8 +1024,6 @@ export default function AgentControlPanel({
 
   const selectedPersonal =
     personalCards.find((card) => card.key === selectedPersonalKey) ?? null;
-  const selectedModelProfile =
-    profiles.find((profile) => profile.id === modelProfileId) ?? null;
 
   let selectedPersonalPrimary: AgentHubDetailAction | null = null;
   const selectedPersonalExtra: AgentHubDetailAction[] = [];
@@ -944,18 +1038,25 @@ export default function AgentControlPanel({
       selectedPersonal.draft?.publishedRevision?.versionId ??
       selectedPersonal.installation?.selectedVersionId ??
       null;
+    const hasCompatibleModelProfile = Boolean(
+      selectedPersonal.draft &&
+      versionId &&
+      selectableModelSources.some((source) =>
+        publishedDraftAllowsModel(
+          selectedPersonal.draft!,
+          source.provider,
+          source.model,
+          versionId,
+        ),
+      ),
+    );
     const requiresRepublishForModel = Boolean(
       selectedPersonal.installation?.status === "active" &&
       selectedPersonal.profile &&
       !isRunnableAgentProfile(selectedPersonal.profile) &&
       selectedPersonal.draft &&
-      selectedModelProfile &&
       versionId &&
-      !publishedDraftAllowsProfileModel(
-        selectedPersonal.draft,
-        selectedModelProfile,
-        versionId,
-      ),
+      !hasCompatibleModelProfile,
     );
     if (requiresRepublishForModel && selectedPersonal.draft && !draftReadOnly) {
       selectedPersonalPrimary = {
@@ -966,10 +1067,8 @@ export default function AgentControlPanel({
         },
       };
     } else if (
+      !selectedPersonal.installation &&
       isRunnableAgentProfile(selectedPersonal.profile) &&
-      selectedPersonal.installation?.status !== "pending" &&
-      (!selectedPersonal.installation ||
-        selectedPersonal.installation.selectedVersionId === versionId) &&
       onChatWithProfile
     ) {
       selectedPersonalPrimary = {
@@ -987,25 +1086,22 @@ export default function AgentControlPanel({
     ) {
       selectedPersonalPrimary = {
         label: t(
-          modelProfileId
+          selectableModelSources.length > 0
             ? "agents.control.retryAgent"
             : "agents.hub.configureModelFirst",
         ),
         disabled:
           !state?.cloudAvailable ||
-          !modelProfileId ||
+          selectableModelSources.length === 0 ||
           (isOrganization &&
             activeTab === "enterprise" &&
             !organizationCanInstall) ||
           busyPersonalKey === selectedPersonal.key,
         onClick: () => {
-          void activateAgent({
-            key: selectedPersonal.key,
+          requestInstall({
             displayName: selectedPersonal.name,
             definitionId,
             versionId,
-            installation: selectedPersonal.installation,
-            profile: selectedPersonal.profile,
           });
           setSelectedPersonalKey(null);
         },
@@ -1013,25 +1109,22 @@ export default function AgentControlPanel({
     } else if (definitionId && versionId) {
       selectedPersonalPrimary = {
         label: t(
-          !modelProfileId
+          selectableModelSources.length === 0
             ? "agents.hub.configureModelFirst"
             : "agents.hub.useAgent",
         ),
         disabled:
           !state?.cloudAvailable ||
-          !modelProfileId ||
+          selectableModelSources.length === 0 ||
           (isOrganization &&
             activeTab === "enterprise" &&
             !organizationCanInstall) ||
           busyPersonalKey === selectedPersonal.key,
         onClick: () => {
-          void activateAgent({
-            key: selectedPersonal.key,
+          requestInstall({
             displayName: selectedPersonal.name,
             definitionId,
             versionId,
-            installation: selectedPersonal.installation,
-            profile: selectedPersonal.profile,
           });
           setSelectedPersonalKey(null);
         },
@@ -1476,6 +1569,7 @@ export default function AgentControlPanel({
         }
         operationScope={personalOperationScope}
         modelProfileId={modelProfileId}
+        runtimeModelRoutes={runtimeModelRoutes}
         onClose={() => setEditor(null)}
         onSaved={() => void load()}
         onPublished={() => void load()}
@@ -1485,6 +1579,68 @@ export default function AgentControlPanel({
         }}
         onRequestInstall={requestInstall}
       />
+      {pendingModelSelection ? (
+        <div className="agent-control-dialog-backdrop">
+          <div
+            className="agent-control-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="agent-model-selection-title"
+          >
+            <h3 id="agent-model-selection-title">
+              {t("agents.hub.chooseRuntimeModel")}
+            </h3>
+            <p>{t("agents.hub.chooseRuntimeModelHint")}</p>
+            <label className="agents-create-field">
+              <span>{t("agents.control.runtimeModel")}</span>
+              <select
+                className="input"
+                aria-label={t("agents.hub.runtimeModelChoice")}
+                value={selectedModelSourceId}
+                onChange={(event) =>
+                  setSelectedModelSourceId(event.target.value)
+                }
+              >
+                {selectableModelSources.map((source) => (
+                  <option key={source.id} value={source.id}>
+                    {`${source.model} · ${source.providerLabel}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="agent-control-dialog-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setPendingModelSelection(null)}
+              >
+                {t("agents.control.cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!selectedModelSourceId || busyPersonalKey !== null}
+                onClick={() => {
+                  const target = pendingModelSelection;
+                  const source = selectableModelSources.find(
+                    (candidate) => candidate.id === selectedModelSourceId,
+                  );
+                  if (!source) return;
+                  setPendingModelSelection(null);
+                  void activateAgent({
+                    ...target,
+                    ...(source.modelSelection
+                      ? { modelSelection: source.modelSelection }
+                      : { modelProfileId: source.modelProfileId }),
+                  });
+                }}
+              >
+                {t("agents.hub.confirmRuntimeModel")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {officialInstallPreview ? (
         <OfficialAgentInstallDialog
           open

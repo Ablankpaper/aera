@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  AERA_ENCRYPTED_BACKUP_CLOUD_SHA: a5a4ca7e736c3aee98c926255d2b65bac016ae79
+  AERA_ENCRYPTED_BACKUP_CLOUD_SHA: 1d2fbc99662bdfc10d4ff3669c7eb47d63dc2034
 
 # A newer commit on the same ref supersedes an in-flight run.
 concurrency:

@@ -175,6 +175,11 @@ export default {
     localProfileNoModel: "这个本地智能体尚未配置大模型。",
     modelRequired: "当前账号还没有可用的模型配置，请先在“模型”中完成配置。",
     configureModelFirst: "请先配置模型",
+    chooseRuntimeModel: "选择本次使用的模型",
+    chooseRuntimeModelHint:
+      "这里只使用你当前账号的模型与凭据；不会把模型配置写入共享智能体。",
+    runtimeModelChoice: "本次运行模型",
+    confirmRuntimeModel: "确认并开始使用",
     personalAgent: "我的智能体",
     workspaceAgent: "团队 / 项目智能体",
     organizationAgent: "企业智能体",
@@ -331,8 +336,18 @@ export default {
     allowedProviders: "运行服务",
     allowedModels: "运行模型",
     runtimeModel: "运行模型",
-    runtimeModelHint:
-      "已自动读取你配置好的模型；选择这个智能体默认使用的模型即可。",
+    runtimeModelHint: "仅显示当前仍存在的模型路由；模型名后会标明提供商。",
+    runtimeModelUnavailable: "当前没有可用的实时模型路由",
+    runtimeModelChosenOnUse:
+      "模型为选填项。开始使用时，由当前用户从自己的可用模型中选择。",
+    modelPolicyMode: "模型使用方式",
+    modelPolicyHint:
+      "默认在开始使用时选择；只有确实需要限制模型时才固定或设置允许范围。",
+    modelPolicy: {
+      userSelect: "开始使用时选择（推荐）",
+      fixed: "固定一个模型",
+      allowlist: "限制为允许的模型",
+    },
     runtimeModelRequired:
       "当前账号还没有可用于运行智能体的模型配置。你可以先发布，配置模型后再开始使用。",
     identityUpload: "导入 MD 身份文档",
@@ -359,7 +374,8 @@ export default {
     saveLocal: "保存草稿",
     publish: "发布",
     publishAndUse: "发布并使用",
-    publishAndUseSequence: "发布并使用会自动完成发布与准备，然后进入对话。",
+    publishAndUseSequence:
+      "发布并使用会先完成发布，再让当前用户选择自己的模型，然后进入对话。",
     publishPreviewTitle: "确认发布内容",
     target: "目标",
     totalBytes: "总字节数",
@@ -472,7 +488,13 @@ export default {
       entitlement_required: "需要续期 Aera 使用授权。",
       not_found: "该智能体内容已不存在。",
       conflict: "草稿或安装已发生变化，请刷新后重试。",
-      verification_failed: "无法验证智能体签名版本。",
+      verification_failed: "无法验证智能体版本。",
+      signature_verification_failed:
+        "Cloud 返回的智能体版本签名在刷新验证密钥后仍无效，本次发布未完成。",
+      published_content_mismatch:
+        "Cloud 返回的智能体版本内容或摘要与本次草稿不一致，本次发布已安全关闭。",
+      publication_cache_failed:
+        "智能体版本已通过验证，但本机无法安全缓存，本次发布未完成。",
       runtime_incompatible: "该智能体版本暂不支持此电脑上的本地运行环境。",
       profile_model_configuration_failed:
         "当前模型与该智能体的签名版本不兼容。请配置版本允许的模型，或由发布者发布兼容当前模型的新版本。",

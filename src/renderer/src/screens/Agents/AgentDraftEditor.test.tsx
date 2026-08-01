@@ -31,7 +31,7 @@ function detail(revision = 1): AgentDraftDetail {
     displayName: "Research Agent",
     icon: null,
     manifest: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       identity: { systemPrompt: "Research carefully" },
       assets: [
         {
@@ -40,9 +40,10 @@ function detail(revision = 1): AgentDraftDetail {
           mediaType: "text/markdown",
         },
       ],
-      modelConstraints: {
-        allowedProviders: ["openai"],
-        allowedModels: ["gpt-5.6"],
+      modelPolicy: {
+        mode: "user_select",
+        allowedProviders: [],
+        allowedModels: [],
       },
       tools: { allowed: [], denied: [] },
       dependencies: [],
@@ -162,7 +163,7 @@ describe("AgentDraftEditor", () => {
     expectNoRendererOwnershipInput(api.createDraft);
   });
 
-  it("uses configured models and imports identity and capability Markdown without manual paths", async () => {
+  it("keeps model selection optional while importing identity and capability Markdown", async () => {
     Object.defineProperty(window, "hermesAPI", {
       configurable: true,
       value: {
@@ -208,16 +209,10 @@ describe("AgentDraftEditor", () => {
       />,
     );
 
-    await waitFor(() =>
-      expect(
-        screen.getByRole("option", {
-          name: "Production model · Private gateway",
-        }),
-      ).toBeTruthy(),
-    );
+    expect(screen.queryByLabelText("agents.control.runtimeModel")).toBeNull();
     expect(
-      screen.queryByRole("option", { name: "Unconfigured OpenAI · openai" }),
-    ).toBeNull();
+      screen.getByText("agents.control.runtimeModelChosenOnUse"),
+    ).toBeInTheDocument();
     const identityFile = new File(
       ["# Video Producer\nYou plan short-form product videos."],
       "video-producer.md",
@@ -271,9 +266,10 @@ describe("AgentDraftEditor", () => {
             systemPrompt:
               "# Video Producer\nYou plan short-form product videos.",
           },
-          modelConstraints: {
-            allowedProviders: ["custom"],
-            allowedModels: ["gpt-5.6-sol"],
+          modelPolicy: {
+            mode: "user_select",
+            allowedProviders: [],
+            allowedModels: [],
           },
           assets: [
             {
@@ -335,7 +331,11 @@ describe("AgentDraftEditor", () => {
       },
     });
     const configuredDraft = detail();
-    configuredDraft.manifest.modelConstraints = {
+    if (configuredDraft.manifest.schemaVersion !== 2) {
+      throw new Error("V2 fixture required");
+    }
+    configuredDraft.manifest.modelPolicy = {
+      mode: "allowlist",
       allowedProviders: ["custom:gpt"],
       allowedModels: ["gpt-5.6-sol"],
     };
@@ -353,16 +353,93 @@ describe("AgentDraftEditor", () => {
       />,
     );
 
-    const select = screen.getByLabelText(
-      "agents.control.runtimeModel",
-    ) as HTMLSelectElement;
-    await waitFor(() => expect(select.options).toHaveLength(18));
-    expect(Array.from(select.options, (option) => option.value)).toEqual(
-      catalogModels.map((model) => `custom:gpt\u0000${model}`),
+    await waitFor(() =>
+      expect(screen.getAllByRole("checkbox")).toHaveLength(18),
     );
     expect(
-      screen.queryByRole("option", { name: "Old route model · Old GPT" }),
+      screen.getByRole("checkbox", {
+        name: "gpt-5.6-sol · GPT",
+      }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole("checkbox", {
+        name: "catalog-model-18 · GPT",
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.queryByRole("checkbox", {
+        name: "Old route model · Old GPT",
+      }),
     ).toBeNull();
+  });
+
+  it("publishes a real multi-route allowlist instead of collapsing it to one model", async () => {
+    const saved = detail(2);
+    const api = installAPI({
+      updateDraft: vi.fn(async () => success(saved)),
+    });
+    render(
+      <AgentDraftEditor
+        open
+        draft={detail()}
+        modelProfileId="account-home"
+        runtimeModelRoutes={[
+          {
+            id: "petoi-route",
+            sourceProfileId: "account-home",
+            modelLibraryId: "petoi-model",
+            provider: "custom:petoi",
+            providerLabel: "Petoi",
+            model: "gpt-5.6-sol",
+            displayName: "gpt-5.6-sol",
+            baseUrl: "https://api.petoi.cn/v1",
+          },
+          {
+            id: "yundu-route",
+            sourceProfileId: "account-home",
+            modelLibraryId: "yundu-model",
+            provider: "custom:yundu.lat",
+            providerLabel: "yundu.lat",
+            model: "claude-opus-4-6",
+            displayName: "claude-opus-4-6",
+            baseUrl: "https://yundu.lat/v1",
+          },
+        ]}
+        onClose={() => undefined}
+        onSaved={() => undefined}
+        onPublished={() => undefined}
+        onRequestInstall={() => undefined}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("agents.control.modelPolicyMode"), {
+      target: { value: "allowlist" },
+    });
+    const petoi = await screen.findByRole("checkbox", {
+      name: "gpt-5.6-sol · Petoi",
+    });
+    const yundu = screen.getByRole("checkbox", {
+      name: "claude-opus-4-6 · yundu.lat",
+    });
+    expect(petoi).toBeChecked();
+    fireEvent.click(yundu);
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.control.saveLocal" }),
+    );
+
+    await waitFor(() => expect(api.updateDraft).toHaveBeenCalledOnce());
+    expect(api.updateDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        manifest: expect.objectContaining({
+          modelPolicy: {
+            mode: "allowlist",
+            allowedProviders: ["custom:petoi", "custom:yundu.lat"],
+            allowedModels: ["gpt-5.6-sol", "claude-opus-4-6"],
+          },
+        }),
+      }),
+      undefined,
+    );
   });
 
   it("shows a stable conflict message for a stale local revision", async () => {
@@ -742,7 +819,6 @@ describe("AgentDraftEditor", () => {
         definitionId: DEFINITION_ID,
         versionId: VERSION_ID,
         displayName: "Research Agent",
-        modelProfileId: "account-home",
       }),
     );
     expect(onClose).toHaveBeenCalledOnce();
@@ -779,7 +855,11 @@ describe("AgentDraftEditor", () => {
       },
     });
     const stale = detail();
-    stale.manifest.modelConstraints = {
+    if (stale.manifest.schemaVersion !== 2) {
+      throw new Error("V2 fixture required");
+    }
+    stale.manifest.modelPolicy = {
+      mode: "fixed",
       allowedProviders: ["custom:aera-本地-e2e-模型"],
       allowedModels: ["aera-e2e-model"],
     };
@@ -804,7 +884,7 @@ describe("AgentDraftEditor", () => {
     );
   });
 
-  it("keeps publish available but blocks publish-and-use without an account model Profile", () => {
+  it("keeps publish and publish-and-use available before a model is selected", () => {
     render(
       <AgentDraftEditor
         open
@@ -817,13 +897,13 @@ describe("AgentDraftEditor", () => {
     );
 
     expect(
-      screen.getByText("agents.control.runtimeModelRequired"),
+      screen.getByText("agents.control.runtimeModelChosenOnUse"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "agents.control.publish" }),
     ).toBeEnabled();
     expect(
       screen.getByRole("button", { name: "agents.control.publishAndUse" }),
-    ).toBeDisabled();
+    ).toBeEnabled();
   });
 });

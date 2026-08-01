@@ -155,6 +155,11 @@ export default {
     modelRequired:
       "This account has no usable model configuration. Configure one in Models first.",
     configureModelFirst: "Configure a model first",
+    chooseRuntimeModel: "Choose a model for this use",
+    chooseRuntimeModelHint:
+      "Only your current account's model and credential are used. They are never written into the shared Agent.",
+    runtimeModelChoice: "Runtime model for this use",
+    confirmRuntimeModel: "Confirm and start",
     personalAgent: "My Agent",
     workspaceAgent: "Team / project Agent",
     organizationAgent: "Enterprise Agent",
@@ -363,7 +368,18 @@ export default {
     allowedModels: "Runtime model",
     runtimeModel: "Runtime model",
     runtimeModelHint:
-      "Configured models are loaded automatically. Choose the default for this Agent.",
+      "Only currently available model routes are shown, with the provider after the model name.",
+    runtimeModelUnavailable: "No live model route is currently available",
+    runtimeModelChosenOnUse:
+      "The model is optional. Each user chooses from their own available models when starting the Agent.",
+    modelPolicyMode: "Model behavior",
+    modelPolicyHint:
+      "Choose at use time by default. Pin or restrict a model only when the Agent truly requires it.",
+    modelPolicy: {
+      userSelect: "Choose when starting (recommended)",
+      fixed: "Pin one model",
+      allowlist: "Restrict to allowed models",
+    },
     runtimeModelRequired:
       "This account does not have a configured model for running Agents yet. You can publish now and start using it after configuring a model.",
     identityUpload: "Import Markdown identity",
@@ -392,7 +408,7 @@ export default {
     publish: "Publish",
     publishAndUse: "Publish and use",
     publishAndUseSequence:
-      "Publish and use completes publication and setup, then opens a conversation.",
+      "Publish and use publishes first, then lets the current user choose their own model before opening a conversation.",
     publishPreviewTitle: "Review publication",
     target: "Target",
     totalBytes: "Total bytes",
@@ -511,7 +527,13 @@ export default {
       entitlement_required: "Your Aera access authorization must be renewed.",
       not_found: "The Agent item no longer exists.",
       conflict: "This draft or installation changed. Refresh before retrying.",
-      verification_failed: "The signed Agent version could not be verified.",
+      verification_failed: "The Agent version could not be verified.",
+      signature_verification_failed:
+        "The Agent signature remained invalid after refreshing verification keys, so publication did not complete.",
+      published_content_mismatch:
+        "The Agent version content or digest returned by Cloud did not match this draft, so publication closed safely.",
+      publication_cache_failed:
+        "The Agent version was verified but could not be cached safely on this device, so publication did not complete.",
       runtime_incompatible:
         "This Agent version is not compatible with this device's local environment.",
       profile_model_configuration_failed:

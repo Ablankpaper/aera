@@ -69,9 +69,14 @@ describe("useAgentCreationGuide", () => {
         icon: null,
         assets: [],
         manifest: expect.objectContaining({
-          schemaVersion: 1,
+          schemaVersion: 2,
           identity: {
             systemPrompt: expect.stringContaining("整理客户资料"),
+          },
+          modelPolicy: {
+            mode: "user_select",
+            allowedProviders: [],
+            allowedModels: [],
           },
         }),
       }),

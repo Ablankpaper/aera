@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -106,6 +107,14 @@ function installation(): AgenteraAgentInstallationSummary {
   };
 }
 
+function confirmRuntimeModelSelection(): void {
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "agents.hub.confirmRuntimeModel",
+    }),
+  );
+}
+
 function installHermesAPI(): {
   listProfiles: ReturnType<typeof vi.fn>;
   createProfile: ReturnType<typeof vi.fn>;
@@ -131,6 +140,8 @@ function installHermesAPI(): {
         modelLibraryChanged = null;
       };
     }),
+    onCustomProvidersChanged: vi.fn(() => () => undefined),
+    onConnectionConfigChanged: vi.fn(() => () => undefined),
   };
   Object.defineProperty(window, "hermesAPI", {
     configurable: true,
@@ -342,6 +353,7 @@ describe("Agents unified product surface", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "agents.hub.useAgent" }),
     );
+    confirmRuntimeModelSelection();
 
     await waitFor(() =>
       expect(agentera.installVersion).toHaveBeenCalledWith(
@@ -405,6 +417,7 @@ describe("Agents unified product surface", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "agents.hub.useAgent" }),
     );
+    confirmRuntimeModelSelection();
 
     await waitFor(() => expect(repairInstallationModel).toHaveBeenCalled());
     expect(agentera.selectInstallationVersion).toHaveBeenCalledWith(
@@ -451,13 +464,16 @@ describe("Agents unified product surface", () => {
     render(<Agents activeProfile="default" onChatWith={vi.fn()} />);
 
     await screen.findByText("Research Agent");
-    hermes.emitModelLibraryChanged();
+    await act(async () => {
+      hermes.emitModelLibraryChanged();
+    });
 
     await waitFor(() => expect(hermes.listProfiles).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByText("Research Agent").closest("button")!);
     fireEvent.click(
       screen.getByRole("button", { name: "agents.hub.useAgent" }),
     );
+    confirmRuntimeModelSelection();
 
     await waitFor(() =>
       expect(agentera.installVersion).toHaveBeenCalledWith(
