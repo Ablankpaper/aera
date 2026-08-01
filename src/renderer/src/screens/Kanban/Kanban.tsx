@@ -160,6 +160,7 @@ function isValidDragTransition(from: string, to: string): boolean {
 }
 
 const POLL_INTERVAL_MS = 6000;
+const BOARD_SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 // Sentinel slug for the read-only Claw3D HQ virtual board. Distinct from any
 // real hermes-agent kanban board slug (which is bash-safe alphanumeric per
@@ -284,6 +285,7 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
   // New board form
   const [newBoardSlug, setNewBoardSlug] = useState("");
   const [newBoardName, setNewBoardName] = useState("");
+  const [newBoardError, setNewBoardError] = useState("");
 
   const currentBoard = useMemo(
     () => boards.find((b) => b.is_current) ?? null,
@@ -533,23 +535,40 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
   }
 
   async function handleCreateBoard(): Promise<void> {
-    if (!newBoardSlug.trim()) return;
-    setActionBusy("board-create");
-    const res = await window.hermesAPI.kanbanCreateBoard(
-      newBoardSlug.trim(),
-      newBoardName.trim() || undefined,
-      true,
-      profile,
-    );
-    setActionBusy(null);
-    if (!res.success) {
-      setError(res.error || t("kanban.errCreateBoard"));
+    const normalizedSlug = newBoardSlug.trim().toLowerCase();
+    if (!normalizedSlug) return;
+    if (!BOARD_SLUG_PATTERN.test(normalizedSlug)) {
+      setNewBoardError(t("kanban.errInvalidBoardSlug"));
       return;
     }
-    setShowNewBoard(false);
-    setNewBoardSlug("");
-    setNewBoardName("");
-    loadAll();
+    setNewBoardError("");
+    setActionBusy("board-create");
+    try {
+      const res = await window.hermesAPI.kanbanCreateBoard(
+        normalizedSlug,
+        newBoardName.trim() || undefined,
+        true,
+        profile,
+      );
+      if (!res.success) {
+        setNewBoardError(res.error || t("kanban.errCreateBoard"));
+        return;
+      }
+      setShowNewBoard(false);
+      setNewBoardSlug("");
+      setNewBoardName("");
+      setNewBoardError("");
+      setActiveBoardSlug(normalizedSlug);
+      await loadAll();
+    } catch (createError) {
+      setNewBoardError(
+        createError instanceof Error
+          ? createError.message
+          : t("kanban.errCreateBoard"),
+      );
+    } finally {
+      setActionBusy(null);
+    }
   }
 
   async function handleMove(task: KanbanTask, target: string): Promise<void> {
@@ -791,7 +810,10 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
           {!isHqActive && (
             <button
               className="kanban-board-chip kanban-board-chip-add"
-              onClick={() => setShowNewBoard(true)}
+              onClick={() => {
+                setNewBoardError("");
+                setShowNewBoard(true);
+              }}
               data-tooltip={t("kanban.newBoardTooltip")}
             >
               <Plus size={12} />
@@ -1213,14 +1235,20 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
       {showNewBoard && (
         <div
           className="skills-detail-overlay"
-          onClick={() => setShowNewBoard(false)}
+          onClick={() => {
+            setShowNewBoard(false);
+            setNewBoardError("");
+          }}
         >
           <div className="schedules-modal" onClick={(e) => e.stopPropagation()}>
             <div className="schedules-modal-header">
               <span>{t("kanban.newBoardTitle")}</span>
               <button
                 className="btn-ghost"
-                onClick={() => setShowNewBoard(false)}
+                onClick={() => {
+                  setShowNewBoard(false);
+                  setNewBoardError("");
+                }}
               >
                 <X size={14} />
               </button>
@@ -1234,7 +1262,10 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
                   className="input"
                   type="text"
                   value={newBoardSlug}
-                  onChange={(e) => setNewBoardSlug(e.target.value)}
+                  onChange={(e) => {
+                    setNewBoardSlug(e.target.value);
+                    setNewBoardError("");
+                  }}
                   placeholder={t("kanban.slugPlaceholder")}
                   autoFocus
                 />
@@ -1251,11 +1282,19 @@ function Kanban({ profile, visible }: KanbanProps): React.JSX.Element {
                   placeholder={t("kanban.displayNamePlaceholder")}
                 />
               </div>
+              {newBoardError && (
+                <div className="kanban-board-form-error" role="alert">
+                  {newBoardError}
+                </div>
+              )}
             </div>
             <div className="schedules-modal-footer">
               <button
                 className="btn btn-secondary"
-                onClick={() => setShowNewBoard(false)}
+                onClick={() => {
+                  setShowNewBoard(false);
+                  setNewBoardError("");
+                }}
               >
                 {t("common.cancel")}
               </button>

@@ -630,6 +630,61 @@ describe("Agent installation orchestration", () => {
     ]);
   });
 
+  // @lat: [[agentera-agent-control-plane#Cloud boundary#Platform identifier acceptance]]
+  it("installs a version whose control-plane identifiers are UUIDv7", async () => {
+    const definitionId = "0199e6c2-4b3e-7a91-8f2d-1c4b7e9a3d55";
+    const versionId = "0199e6c2-4b3e-7c10-b0d4-2f8a5c1e6b77";
+    const v7 = { ...makeVersion(versionId), definition_id: definitionId };
+    const basePolicy = makePolicy(v7);
+    const v7Policy = {
+      ...basePolicy,
+      document: { ...basePolicy.document, agent_definition_id: definitionId },
+    };
+    createInstallation.mockImplementationOnce(async () => {
+      events.push("cloud:create-pending");
+      return {
+        installation: {
+          ...pendingInstallation(versionId),
+          definition_id: definitionId,
+        },
+        policy_snapshot: v7Policy,
+        replayed: false,
+      };
+    });
+    getVersion.mockImplementationOnce(async () => {
+      events.push("cloud:get-version");
+      return v7;
+    });
+    getPolicySnapshot.mockResolvedValue(v7Policy);
+    activateInstallation.mockImplementationOnce(
+      async (_id, runtimeProfileId) => {
+        events.push("cloud:activate");
+        return {
+          ...pendingInstallation(versionId),
+          definition_id: definitionId,
+          runtime_profile_id: runtimeProfileId,
+          policy_snapshot_id: v7Policy.id,
+          status: "active",
+          activated_at: NOW.toISOString(),
+        };
+      },
+    );
+    cache.getVerifiedVersion = vi.fn(() => v7);
+    cache.getVerifiedPolicySnapshot = vi.fn(() => v7Policy);
+    trust.verifyPolicy = vi.fn(() => {
+      events.push("verify:policy");
+      return { contentDigest: v7Policy.content_digest };
+    });
+
+    await expect(
+      manager().install({
+        definitionId,
+        versionId,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).resolves.toMatchObject({ status: "active" });
+  });
+
   it("removes a fresh Profile and binding when signed model configuration fails", async () => {
     const sourceProfilePath = join(profilesRoot, "source-profile");
     mkdirSync(sourceProfilePath, { recursive: true });
@@ -1173,6 +1228,24 @@ describe("Agent installation orchestration", () => {
         .prepare("SELECT COUNT(*) AS count FROM local_agent_installations")
         .get(),
     ).toEqual({ count: 0 });
+  });
+
+  // @lat: [[agentera-agent-control-plane#Offline and failure behavior#Failure attribution by trust boundary]]
+  it("reports a malformed cloud identifier as a conflict, not an invalid request", async () => {
+    createInstallation.mockResolvedValueOnce({
+      installation: { ...pendingInstallation(), id: "not-a-uuid" },
+      policy_snapshot: policy,
+      replayed: false,
+    });
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "installation_conflict" });
+    expect(createProfile).not.toHaveBeenCalled();
   });
 
   it("retries official activation with the same created Profile and preserves local Memory", async () => {

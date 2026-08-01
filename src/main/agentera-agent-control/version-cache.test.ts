@@ -88,7 +88,10 @@ function assets(): AgentDraftAssetInput[] {
   return [{ path: "skills/research/SKILL.md", content: "# Research\n" }];
 }
 
-function signedFixture(): {
+function signedFixture(
+  definitionId: string = DEFINITION_ID,
+  versionId: string = VERSION_ID,
+): {
   version: AgentVersion;
   keys: components["schemas"]["SigningKeySet"];
 } {
@@ -100,8 +103,8 @@ function signedFixture(): {
   const payload = Buffer.from(
     [
       "agentera-agent-version-v1",
-      DEFINITION_ID,
-      VERSION_ID,
+      definitionId,
+      versionId,
       "1",
       canonical.manifestDigest,
       canonical.bundleDigest,
@@ -110,8 +113,8 @@ function signedFixture(): {
   );
   return {
     version: {
-      id: VERSION_ID,
-      definition_id: DEFINITION_ID,
+      id: versionId,
+      definition_id: definitionId,
       version_number: 1,
       manifest: JSON.parse(
         canonical.manifestBytes.toString("utf8"),
@@ -301,6 +304,27 @@ describe("verified immutable Agent version cache", () => {
         cache_relative_path: `accounts/${secondOwner.tenantId}/${secondOwner.ownerId}/${VERSION_ID}/${version.content_digest}`,
       },
     ]);
+  });
+
+  it("caches a verified version whose control-plane identifiers are UUIDv7", () => {
+    const definitionId = "0199e6c2-4b3e-7a91-8f2d-1c4b7e9a3d55";
+    const versionId = "0199e6c2-4b3e-7c10-b0d4-2f8a5c1e6b77";
+    const fixture = signedFixture(definitionId, versionId);
+    trust.replaceKeys(ORIGIN, fixture.keys, NOW.toISOString());
+    const store = new AgentVersionCache({
+      database,
+      owner: { tenantId: definitionId, ownerId: INSTALLATION_ID },
+      trust,
+      origin: ORIGIN,
+      runtimeVersion: "v0.18.2-agentera.1",
+      now: () => NOW,
+      randomUUID: () => STAGING_ID,
+    });
+
+    expect(store.cacheVerifiedVersion(fixture.version)).toEqual(
+      fixture.version,
+    );
+    expect(store.getVerifiedVersion(versionId)).toEqual(fixture.version);
   });
 
   it("normalizes a valid cloud RFC3339 timestamp before persisting the immutable version", () => {

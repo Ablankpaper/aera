@@ -23,6 +23,7 @@ import {
   canonicalizeExperienceCandidate,
   scanExperienceCandidate,
 } from "./experience-candidate-contract";
+import { AGENTERA_UUID_PATTERN as UUID_PATTERN } from "../../shared/agentera-identifier";
 
 export interface PrepareLocalExperienceCandidate {
   id: string;
@@ -115,8 +116,6 @@ interface ImportRow {
   imported_at: unknown;
 }
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const ERROR_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 

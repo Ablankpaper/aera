@@ -480,6 +480,36 @@ describe("AgenteraProductSpaceManager", () => {
     );
   });
 
+  it("keeps a selected Organization when a degraded refresh reports no Organizations", async () => {
+    const organizations = mutableSource(
+      organizationState([organization(ORGANIZATION_A, "Organization")]),
+    );
+    const database = databaseFor();
+    const manager = managerFor({
+      database,
+      workspaceSource: mutableSource(workspaceState([])),
+      organizationSource: organizations,
+      getAuthState: () => authState(),
+    });
+    await manager.getState();
+    await manager.select({
+      kind: "ORGANIZATION",
+      organizationId: ORGANIZATION_A,
+    });
+
+    organizations.set(organizationState([], true));
+    await manager.notifySourceStateChanged();
+
+    await expect(manager.getState()).resolves.toMatchObject({
+      stale: true,
+      selected: { kind: "ORGANIZATION", organizationId: ORGANIZATION_A },
+    });
+    expect(database.readSelection(ACCOUNT_A)).toEqual({
+      kind: "ORGANIZATION",
+      organizationId: ORGANIZATION_A,
+    });
+  });
+
   it("emits exactly once per real selection change", async () => {
     const manager = managerFor({
       workspaceSource: mutableSource(

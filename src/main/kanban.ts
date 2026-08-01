@@ -93,6 +93,7 @@ export interface KanbanResult<T = unknown> {
 }
 
 const KANBAN_TIMEOUT_MS = 20000;
+const KANBAN_BOARD_SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 interface RunOpts {
   profile?: string;
@@ -213,12 +214,52 @@ export async function createBoard(
   profile?: string,
 ): Promise<KanbanResult<void>> {
   if (isRemoteOnlyMode()) return unsupportedInRemote();
-  if (!slug) return { success: false, error: "Missing board slug" };
-  const args = ["boards", "create", slug];
+  const normalizedSlug = slug.trim().toLowerCase();
+  if (!normalizedSlug) {
+    return { success: false, error: "Missing board slug" };
+  }
+  if (!KANBAN_BOARD_SLUG_PATTERN.test(normalizedSlug)) {
+    return {
+      success: false,
+      error:
+        "Board identifier must use 1-64 lowercase letters, numbers, hyphens, or underscores, and must start with a letter or number.",
+    };
+  }
+  const args = ["boards", "create", normalizedSlug];
   if (name) args.push("--name", name);
   if (switchAfter) args.push("--switch");
   const res = await runKanban(args, { profile });
-  return { success: res.success, error: res.error };
+  if (!res.success) return { success: false, error: res.error };
+
+  // Runtime releases before agentera.3 discarded Kanban sub-command exit
+  // codes.  A rejected slug therefore looked successful to Desktop even
+  // though no board was written.  Verify the durable postcondition so this
+  // Desktop remains correct while an older Runtime is still being upgraded.
+  const listed = await listBoards(true, profile);
+  if (!listed.success) {
+    return {
+      success: false,
+      error: listed.error || "Could not verify the newly created board.",
+    };
+  }
+  const created = listed.data?.find(
+    (board) => board.slug === normalizedSlug && !board.archived,
+  );
+  if (!created) {
+    return {
+      success: false,
+      error:
+        (res.stdout || "").trim() ||
+        "Aera Runtime did not persist the newly created board.",
+    };
+  }
+  if (switchAfter && !created.is_current) {
+    return {
+      success: false,
+      error: "The board was created but Aera Runtime did not switch to it.",
+    };
+  }
+  return { success: true };
 }
 
 export async function removeBoard(

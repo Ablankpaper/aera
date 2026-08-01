@@ -232,6 +232,12 @@ Cloud data is limited to Agent definitions, immutable versions, installations, p
 
 API keys, tokens, Base URLs, Profile paths, Memory, USER, conversations, files, credentials, unpromoted Skills, and Curator state remain local and are rejected by control-plane endpoints.
 
+### Platform identifier acceptance
+
+Every layer that checks a control-plane identifier accepts the same UUID versions, so no identifier is admitted at one boundary and rejected at a deeper one.
+
+[[src/shared/agentera-identifier.ts#AGENTERA_UUID_PATTERN]] is the single accepted shape, shared by the IPC contract, installation manager, version cache, draft store, publisher, manifest, and both Hermes projections. Identifiers are only ever compared, never decoded, so the version range stays wide while the variant nibble and layout stay strict. Every plane currently mints v4, so the wide range changes no live behavior; it removes the trap that appears the moment one adopts another version, where a narrower downstream validator would surface a version disagreement as an invalid request or a verification failure far from its cause. Paths comparing signed or digested bytes additionally require the canonical lowercase spelling instead of normalizing. Well-formedness never implies authorization: ownership, membership, and signatures are always verified separately.
+
 ## Legacy sync separation
 
 The imported Hermes One `/api/agents` reconciler remains a transitional compatibility feature and is not extended into the AgentEra control plane.
@@ -244,11 +250,25 @@ A valid offline entitlement allows cached installed versions, local RuntimeBindi
 
 Publication and discovery pause offline. Cloud, publication, installation, and audit failures never delete or roll back a draft, installed version, completed turn, Profile binding, or private adaptive state.
 
+### Failure attribution by trust boundary
+
+A reported failure names the boundary that actually failed, because the user-visible verdict is what decides whether they retry, fix their input, or escalate.
+
+Only caller input may be reported as an invalid request. [[src/main/agentera-agent-control/installation-manager.ts#cloudUuid]] validates control-plane response fields and reports `installation_conflict`, matching every other cloud-response mismatch in that module; the caller-input helper keeps `invalid_installation_request`. Sharing one helper across both boundaries made a control-plane fault surface as “智能体请求无效” — the user's own bad request — with no failing step to point at, which is how a published Agent could refuse to start.
+
+Verification failures likewise report their own cause. [[src/main/agentera-agent-control/publisher.ts#AgentPublisher]] returns the specific local verification code instead of a single hardcoded content mismatch, and every trust-store fault — unknown signing key, issuer mismatch, signing-purpose mismatch, invalid signing keys, invalid trust cache, signature, digest — maps to `verification_failed` rather than degrading to a generic operation failure or being caught by the `invalid_` prefix rule. Without this, “无法验证智能体签名版本” was a catch-all for unrelated publication faults rather than evidence of a real signature problem. Authorization is separate again: an Auditor installing is refused as `organization_agent_forbidden`, never as a malformed request.
+
 ## Release gate
 
 The feature cannot begin from or ship with a falsely green authentication or compatibility baseline.
 
 Cloud tests run without cache, version immutability and owner isolation are proven, private Profile fixtures remain byte-identical through install/update failures, and active conversations keep a stable binding. The detailed approved design is `docs/superpowers/specs/2026-07-19-agentera-user-agent-control-plane-v1-design.md`.
+
+### Personal publish and use
+
+The personal publish-and-use path is proven end to end against a live model, because each step passing in isolation does not establish that the feature works.
+
+One run inside a selected Organization creates a “我的智能体” draft, publishes it, installs it, and answers a real prompt through a configured provider. It asserts the Organization shell is still selected after publication, that the Agent reports ready rather than merely published, and that it is offered as usable. Those three are the reported failures this gate exists to catch, and none of them is visible to a unit test that stubs the cloud, the trust store, or the model. The live provider credential is supplied by environment variable and the test skips without it, so the suite stays green offline while the gate remains meaningful when credentials are present.
 
 ### ExperienceCandidate boundary
 

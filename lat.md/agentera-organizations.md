@@ -120,6 +120,14 @@ In an active Organization, “我的智能体” remains available and can creat
 
 Offline Organization metadata is stale and read-only. No offline mutation queue exists, and invalid policy cannot replace a previously verified snapshot.
 
+### Authoritative scope retirement
+
+Only an authoritative refresh may retire a stored selection, because a degraded one cannot distinguish a revoked Membership from a scope it merely failed to list.
+
+[[src/main/agentera-product-space/manager.ts#AgenteraProductSpaceManager#reconcile]] falls back to Personal and persists that fall back only when access is not offline and the relevant cached scope is not stale. Otherwise the stored scope is rebuilt and kept selected, so a refresh that reports an empty scope list cannot silently move the account back to “我的” and write that loss to disk — the visible failure being an Organization user who creates an Agent, triggers a refresh, and lands outside the Organization.
+
+A rebuilt scope keeps only its identity and carries the least-privileged `member` role. A degraded refresh supplies no evidence of authority, so it is never allowed to assert Owner, Admin, or Auditor. Renderer gating stays presentation only and does not compensate: `isOrganization` governs whether the “企业智能体” tab exists at all, so pinning an active tab against a degraded snapshot would leave the tab bar with nothing selected.
+
 ## Hermes boundary
 
 Organization owns control-plane metadata plus immutable enterprise Agent definitions and versions; employees retain USER-owned local runtime state.

@@ -23,6 +23,7 @@ import {
   AgenteraAgentTrustError,
   canonicalizeAgentVersionContent,
 } from "./trust";
+import { AGENTERA_UUID_PATTERN as UUID_PATTERN } from "../../shared/agentera-identifier";
 
 export interface AgentPublicationDraftStore {
   getDraft(id: string): AgentDraft;
@@ -115,8 +116,6 @@ interface PreparedPublication {
   contentDigest: string;
 }
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function requireUuid(value: unknown): string {
   if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
@@ -335,11 +334,16 @@ export class AgentPublisher {
         publication.version.id,
       );
     } catch (error) {
-      this.recordFailure(prepared, localVerificationFailureCode(error));
+      // Publication stays closed for every failure here, but the reason must
+      // survive: collapsing key-trust, cache, and content faults into one code
+      // told users their content was altered when the real cause was an
+      // unusable signing key, and left no way to tell those cases apart.
+      const failureCode = localVerificationFailureCode(error);
+      this.recordFailure(prepared, failureCode);
       if (error instanceof AgentDraftStoreError) {
         throw new AgentPublisherError(error.code);
       }
-      throw new AgentPublisherError("published_content_mismatch");
+      throw new AgentPublisherError(failureCode);
     }
 
     return {

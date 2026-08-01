@@ -181,6 +181,36 @@ function optionSelection(option: ProductSpaceOption): ProductSpaceSelection {
   }
 }
 
+/**
+ * Rebuild the option for a stored scope that a stale refresh failed to list.
+ *
+ * The scope keeps its identity so the user is not silently moved back to
+ * Personal, but it carries the least-privileged `member` role: a degraded
+ * refresh is never allowed to assert Owner, Admin, or Auditor authority.
+ */
+function staleSelectedOption(
+  selection: StoredProductSpaceSelection,
+): ProductSpaceOption | null {
+  switch (selection.kind) {
+    case "PERSONAL":
+      return { kind: "PERSONAL" };
+    case "WORKSPACE":
+      return {
+        kind: "WORKSPACE",
+        workspaceId: selection.workspaceId,
+        displayName: "",
+        role: "member",
+      };
+    case "ORGANIZATION":
+      return {
+        kind: "ORGANIZATION",
+        organizationId: selection.organizationId,
+        displayName: "",
+        role: "member",
+      };
+  }
+}
+
 function findStoredOption(
   selection: StoredProductSpaceSelection,
   options: readonly ProductSpaceOption[],
@@ -458,9 +488,21 @@ export class AgenteraProductSpaceManager {
     };
     let selectedOption = findStoredOption(stored, options);
     if (!selectedOption) {
-      stored = { kind: "PERSONAL" };
-      selectedOption = options[0];
-      this.database.writeSelection(access.userId, stored, this.now());
+      // Only an authoritative source may retire the stored scope. A stale or
+      // offline refresh can report an empty scope list while the membership is
+      // still valid; dropping the selection then would silently move the user
+      // back to Personal and persist that loss.
+      const authoritative =
+        access.status !== "offline" &&
+        (stored.kind !== "WORKSPACE" || !workspace.stale) &&
+        (stored.kind !== "ORGANIZATION" || !organization.stale);
+      if (authoritative) {
+        stored = { kind: "PERSONAL" };
+        selectedOption = options[0];
+        this.database.writeSelection(access.userId, stored, this.now());
+      } else {
+        selectedOption = staleSelectedOption(stored) ?? options[0];
+      }
     }
     return {
       access: access.status === "offline" ? "offline" : "online",

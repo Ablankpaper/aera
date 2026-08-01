@@ -86,6 +86,8 @@ export default {
   errCreateTask: "创建任务失败",
   errSwitchBoard: "切换看板失败",
   errCreateBoard: "创建看板失败",
+  errInvalidBoardSlug:
+    "看板标识仅支持 1–64 位小写字母、数字、连字符或下划线，并须以字母或数字开头；中文名称可填写在“显示名称”中。",
   errSpecify: "细化任务失败",
   errArchive: "归档任务失败",
   errReclaim: "回收失败",

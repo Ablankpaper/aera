@@ -100,6 +100,8 @@ export default {
   errCreateTask: "Failed to create task",
   errSwitchBoard: "Failed to switch board",
   errCreateBoard: "Failed to create board",
+  errInvalidBoardSlug:
+    "Use 1–64 letters, numbers, hyphens, or underscores. Start with a letter or number.",
   errSpecify: "Failed to specify task",
   errArchive: "Failed to archive task",
   errReclaim: "Failed to reclaim",
