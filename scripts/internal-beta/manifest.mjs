@@ -14,7 +14,7 @@ import {
 
 export { canonicalJSONStringify };
 
-export const INTERNAL_BETA_VERSION = "0.7.4-internal-beta.17";
+export const INTERNAL_BETA_VERSION = "0.7.4-internal-beta.18";
 export const INTERNAL_BETA_RUNTIME_SOURCE_SHA =
   "dcb0f0bc6a0e2d18c55beedc6517dbc41d8b01e0";
 export const INTERNAL_BETA_WORKFLOW_IDENTITY =
