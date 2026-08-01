@@ -14,8 +14,9 @@ import {
   type AgentInstallationSource,
   type LocalAgentInstallation,
 } from "./installation-manager";
-import { AGENTERA_CANONICAL_UUID_PATTERN as UUID_PATTERN } from "../../shared/agentera-identifier";
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const DEFAULT_HANDLE_TTL_MS = 5 * 60 * 1000;
 
 export interface OfficialAgentServiceClient {

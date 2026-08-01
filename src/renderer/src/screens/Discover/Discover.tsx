@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Search,
   Refresh,
@@ -95,7 +95,6 @@ export default function Discover({
   const [detailLoading, setDetailLoading] = useState(false);
   // Confirm step before removing an installed item from the detail dialog.
   const [confirmUninstall, setConfirmUninstall] = useState(false);
-  const loadRequestRef = useRef(0);
 
   const loadInstalled = useCallback(async () => {
     try {
@@ -117,72 +116,38 @@ export default function Discover({
 
   const load = useCallback(
     async (force = false) => {
-      const requestId = ++loadRequestRef.current;
-      let contentRevealed = false;
-      const revealAvailableContent = (): void => {
-        if (requestId !== loadRequestRef.current || contentRevealed) {
-          return;
-        }
-        contentRevealed = true;
-        setLoading(false);
-      };
-
       setLoading(true);
       setError(null);
-      void loadInstalled();
-
-      const registryTask = (async (): Promise<void> => {
-        try {
-          const data = await window.hermesAPI.fetchRegistry(force);
-          if (requestId !== loadRequestRef.current) return;
-          setError(data.error ?? null);
-          setCatalog({
-            skills: data.skills ?? [],
-            mcps: data.mcps ?? [],
-            agents: data.agents ?? [],
-            workflows: data.workflows ?? [],
-          });
-        } catch (registryError) {
-          if (requestId !== loadRequestRef.current) return;
-          setError(
-            registryError instanceof Error
-              ? registryError.message
-              : t("discover.loadError"),
-          );
-        } finally {
-          revealAvailableContent();
-        }
-      })();
-
-      const bundledTask = (async (): Promise<void> => {
-        try {
-          const bundled = await window.hermesAPI.listBundledSkills();
-          if (requestId !== loadRequestRef.current) return;
-          // `source: name` so the existing install path runs
-          // `hermes skills install <name>`.
-          setBundledSkills(
-            bundled.map((b) => ({
-              id: b.name,
-              name: b.name,
-              description: b.description,
-              category: b.category,
-              source: b.name,
-            })),
-          );
-        } catch (bundledError) {
-          if (requestId !== loadRequestRef.current) return;
-          setError(
-            bundledError instanceof Error
-              ? bundledError.message
-              : t("discover.loadError"),
-          );
-        } finally {
-          revealAvailableContent();
-        }
-      })();
-
-      await Promise.allSettled([registryTask, bundledTask]);
-      if (requestId === loadRequestRef.current) setLoading(false);
+      try {
+        const [data, bundled] = await Promise.all([
+          window.hermesAPI.fetchRegistry(force),
+          window.hermesAPI.listBundledSkills(),
+        ]);
+        if (data.error) setError(data.error);
+        setCatalog({
+          skills: data.skills ?? [],
+          mcps: data.mcps ?? [],
+          agents: data.agents ?? [],
+          workflows: data.workflows ?? [],
+        });
+        // `source: name` so the existing install path runs
+        // `hermes skills install <name>`.
+        setBundledSkills(
+          bundled.map((b) => ({
+            id: b.name,
+            name: b.name,
+            description: b.description,
+            category: b.category,
+            source: b.name,
+          })),
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : t("discover.loadError"));
+        setCatalog(EMPTY);
+      } finally {
+        setLoading(false);
+      }
+      loadInstalled();
     },
     [loadInstalled, t],
   );
@@ -192,13 +157,6 @@ export default function Discover({
   useEffect(() => {
     load();
   }, [load]);
-
-  useEffect(
-    () => () => {
-      loadRequestRef.current += 1;
-    },
-    [],
-  );
 
   useEffect(() => {
     if (visible) loadInstalled();

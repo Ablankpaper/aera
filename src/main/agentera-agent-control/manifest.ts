@@ -10,7 +10,6 @@ import type {
   AgentDraftIconMediaType,
   AgentEditableManifest,
 } from "../../shared/agentera-agent-control";
-import { AGENTERA_UUID_PATTERN as UUID_PATTERN } from "../../shared/agentera-identifier";
 
 export const MAX_AGENT_ASSET_COUNT = 128;
 export const MAX_AGENT_ASSET_BYTES = 256 * 1024;
@@ -65,6 +64,8 @@ interface ParsedSemanticVersion {
 
 type JsonObject = Record<string, unknown>;
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SEMANTIC_VERSION_PATTERN =
   /^(?:v)?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/;
 const UINT64_MAX = 18_446_744_073_709_551_615n;

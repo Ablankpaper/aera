@@ -46,8 +46,9 @@ import type {
   ProfileCreationResult,
   RuntimeOwnerBinding,
 } from "../agentera-profile-binding";
-import { AGENTERA_UUID_PATTERN as UUID_PATTERN } from "../../shared/agentera-identifier";
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const PROFILE_ID_PATTERN = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
 const RESTORE_MAXIMUM_FILES = 100_000;
@@ -306,25 +307,6 @@ function nullableUuid(value: unknown): string | null {
   return value === null ? null : uuid(value);
 }
 
-/**
- * Validate an identifier that arrived from the control plane, not from a caller.
- *
- * `uuid` reports `invalid_installation_request`, which the IPC layer maps to
- * "invalid request" and shows the user as a malformed request they could fix.
- * That verdict is only ever true of caller input. When the cloud returns a field
- * the desktop cannot parse, the request was well formed and the two sides simply
- * disagree, so it is reported as a conflict — the same verdict every other
- * cloud-response mismatch in this module already produces. Sharing one helper
- * across both boundaries is what made a control-plane fault read to the user as
- * their own bad request, with no failing step to point at.
- */
-function cloudUuid(value: unknown): string {
-  if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
-    throw new AgentInstallationManagerError("installation_conflict");
-  }
-  return value.toLowerCase();
-}
-
 function normalizeInstallationSource(
   context: AgentAssetContext | AgentInstallationSource | undefined,
 ): NormalizedInstallationSource {
@@ -535,17 +517,17 @@ function assertPendingCreation(
   const installation = creation.installation;
   const policy = creation.policy_snapshot;
   if (
-    cloudUuid(installation.definition_id) !== definitionId ||
-    cloudUuid(installation.selected_version_id) !== versionId ||
+    uuid(installation.definition_id) !== definitionId ||
+    uuid(installation.selected_version_id) !== versionId ||
     installation.status !== "pending" ||
     installation.runtime_profile_id !== undefined ||
     installation.policy_snapshot_id === undefined ||
-    cloudUuid(installation.policy_snapshot_id) !== cloudUuid(policy.id) ||
-    cloudUuid(policy.installation_id) !== cloudUuid(installation.id) ||
-    cloudUuid(policy.agent_version_id) !== versionId ||
+    uuid(installation.policy_snapshot_id) !== uuid(policy.id) ||
+    uuid(policy.installation_id) !== uuid(installation.id) ||
+    uuid(policy.agent_version_id) !== versionId ||
     policy.issuer !== expectedOrigin ||
     !cloudSourceMatches(installation, source) ||
-    !policySourceMatches(policy, source, owner, cloudUuid(installation.id))
+    !policySourceMatches(policy, source, owner, uuid(installation.id))
   ) {
     throw new AgentInstallationManagerError("installation_conflict");
   }
@@ -559,10 +541,9 @@ function cloudSourceMatches(
     return (
       installation.update_policy === "managed" &&
       installation.official_release_id !== undefined &&
-      cloudUuid(installation.official_release_id) ===
-        source.officialReleaseId &&
+      uuid(installation.official_release_id) === source.officialReleaseId &&
       installation.selected_release_revision_id !== undefined &&
-      cloudUuid(installation.selected_release_revision_id) ===
+      uuid(installation.selected_release_revision_id) ===
         source.selectedReleaseRevisionId
     );
   }
@@ -583,12 +564,11 @@ function policySourceMatches(
   if (source.scope !== "PLATFORM") return context === undefined;
   return (
     context !== undefined &&
-    cloudUuid(context.release_id) === source.officialReleaseId &&
-    cloudUuid(context.release_revision_id) ===
-      source.selectedReleaseRevisionId &&
-    cloudUuid(context.user_id) === owner.ownerId &&
-    cloudUuid(context.device_installation_id) === owner.deviceInstallationId &&
-    cloudUuid(context.installation_id) === installationId
+    uuid(context.release_id) === source.officialReleaseId &&
+    uuid(context.release_revision_id) === source.selectedReleaseRevisionId &&
+    uuid(context.user_id) === owner.ownerId &&
+    uuid(context.device_installation_id) === owner.deviceInstallationId &&
+    uuid(context.installation_id) === installationId
   );
 }
 
@@ -598,8 +578,8 @@ function assertVersion(
   versionId: string,
 ): void {
   if (
-    cloudUuid(version.id) !== versionId ||
-    cloudUuid(version.definition_id) !== definitionId ||
+    uuid(version.id) !== versionId ||
+    uuid(version.definition_id) !== definitionId ||
     !DIGEST_PATTERN.test(version.content_digest)
   ) {
     throw new AgentInstallationManagerError("installation_conflict");
@@ -650,11 +630,11 @@ function assertPolicy(
   owner: AgenteraRuntimeOwner,
 ): void {
   if (
-    cloudUuid(policy.installation_id) !== installationId ||
-    cloudUuid(policy.agent_version_id) !== cloudUuid(version.id) ||
+    uuid(policy.installation_id) !== installationId ||
+    uuid(policy.agent_version_id) !== uuid(version.id) ||
     policy.issuer !== expectedOrigin ||
-    cloudUuid(policy.document.agent_definition_id) !== definitionId ||
-    cloudUuid(policy.document.agent_version_id) !== cloudUuid(version.id) ||
+    uuid(policy.document.agent_definition_id) !== definitionId ||
+    uuid(policy.document.agent_version_id) !== uuid(version.id) ||
     policy.document.version_digest !== version.content_digest ||
     !DIGEST_PATTERN.test(policy.content_digest) ||
     !policySourceMatches(
@@ -683,9 +663,9 @@ function assertCloudState(
   expectedRuntimeProfileId: string | null,
 ): void {
   if (
-    cloudUuid(installation.id) !== local.agentInstallationId ||
-    cloudUuid(installation.definition_id) !== local.definitionId ||
-    cloudUuid(installation.selected_version_id) !== expectedVersionId ||
+    uuid(installation.id) !== local.agentInstallationId ||
+    uuid(installation.definition_id) !== local.definitionId ||
+    uuid(installation.selected_version_id) !== expectedVersionId ||
     installation.status !== expectedStatus ||
     !cloudSourceMatches(installation, {
       scope: local.sourceScope,
@@ -697,8 +677,7 @@ function assertCloudState(
     }) ||
     (expectedRuntimeProfileId === null
       ? installation.runtime_profile_id !== undefined
-      : cloudUuid(installation.runtime_profile_id) !==
-        expectedRuntimeProfileId)
+      : uuid(installation.runtime_profile_id) !== expectedRuntimeProfileId)
   ) {
     throw new AgentInstallationManagerError("installation_conflict");
   }
@@ -713,23 +692,23 @@ function assertManagedCloudState(
     local.sourceScope !== "PLATFORM" ||
     local.officialReleaseId === null ||
     local.runtimeProfileId === null ||
-    cloudUuid(installation.id) !== local.agentInstallationId ||
-    cloudUuid(installation.definition_id) !== local.definitionId ||
-    cloudUuid(installation.selected_version_id) !== intent.targetVersionId ||
+    uuid(installation.id) !== local.agentInstallationId ||
+    uuid(installation.definition_id) !== local.definitionId ||
+    uuid(installation.selected_version_id) !== intent.targetVersionId ||
     installation.status !== "active" ||
     installation.update_policy !== "managed" ||
     installation.official_release_id === undefined ||
-    cloudUuid(installation.official_release_id) !== local.officialReleaseId ||
+    uuid(installation.official_release_id) !== local.officialReleaseId ||
     installation.selected_release_revision_id === undefined ||
-    cloudUuid(installation.selected_release_revision_id) !==
+    uuid(installation.selected_release_revision_id) !==
       intent.targetReleaseRevisionId ||
     installation.runtime_profile_id === undefined ||
-    cloudUuid(installation.runtime_profile_id) !== local.runtimeProfileId ||
+    uuid(installation.runtime_profile_id) !== local.runtimeProfileId ||
     installation.policy_snapshot_id === undefined
   ) {
     throw new AgentInstallationManagerError("installation_conflict");
   }
-  cloudUuid(installation.policy_snapshot_id);
+  uuid(installation.policy_snapshot_id);
 }
 
 function restoreFailure(
@@ -1309,8 +1288,8 @@ export class AgentInstallationManager {
       throw new AgentInstallationManagerError("creation_failed");
     }
 
-    const installationId = cloudUuid(creation.installation.id);
-    const policyId = cloudUuid(creation.policy_snapshot.id);
+    const installationId = uuid(creation.installation.id);
+    const policyId = uuid(creation.policy_snapshot.id);
     const createdAt = timestamp(this.now);
     try {
       const existing = this.database.sqlite
@@ -1627,12 +1606,12 @@ export class AgentInstallationManager {
       let normalized: Omit<ManagedUpdateIntent, "id" | "idempotencyKey">;
       try {
         normalized = {
-          installationId: cloudUuid(update.installationId),
-          expectedSelectedReleaseRevisionId: cloudUuid(
+          installationId: uuid(update.installationId),
+          expectedSelectedReleaseRevisionId: uuid(
             update.expectedSelectedReleaseRevisionId,
           ),
-          targetReleaseRevisionId: cloudUuid(update.targetReleaseRevisionId),
-          targetVersionId: cloudUuid(update.targetVersionId),
+          targetReleaseRevisionId: uuid(update.targetReleaseRevisionId),
+          targetVersionId: uuid(update.targetVersionId),
         };
       } catch {
         this.recordManagedUpdateFailure(
@@ -2070,7 +2049,7 @@ export class AgentInstallationManager {
       if (
         local.policySnapshotId === null ||
         activated.policy_snapshot_id === undefined ||
-        cloudUuid(activated.policy_snapshot_id) !== local.policySnapshotId
+        uuid(activated.policy_snapshot_id) !== local.policySnapshotId
       ) {
         throw new AgentInstallationManagerError("installation_conflict");
       }

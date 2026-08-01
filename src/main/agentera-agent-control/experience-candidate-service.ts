@@ -40,7 +40,6 @@ import {
   type HermesSkillCandidateSource,
 } from "./hermes-skill-candidate-source";
 import type { LocalAgentInstallation } from "./installation-manager";
-import { AGENTERA_UUID_PATTERN as UUID_PATTERN } from "../../shared/agentera-identifier";
 
 export type {
   PrepareExperienceCandidateInput,
@@ -48,6 +47,8 @@ export type {
   SubmitExperienceCandidateInput,
 } from "../../shared/agentera-agent-control";
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SKILL_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,98}[a-z0-9])?$/;
 const REASON_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const TRANSIENT_CLIENT_CODES = new Set([

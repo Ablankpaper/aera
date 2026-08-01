@@ -25,8 +25,9 @@ import {
   canonicalizeEditableAgent,
   type CanonicalEditableAgent,
 } from "./manifest";
-import { AGENTERA_CANONICAL_UUID_PATTERN as UUID_PATTERN } from "../../shared/agentera-identifier";
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const REASON_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const DEFAULT_HANDLE_TTL_MS = 5 * 60 * 1000;

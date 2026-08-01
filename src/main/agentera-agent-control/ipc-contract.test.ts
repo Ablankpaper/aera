@@ -3,12 +3,10 @@
 import { describe, expect, it } from "vitest";
 import { AGENTERA_IPC_CHANNEL_POLICY } from "../ipc/auth-guard";
 import {
-  executeAgentControlIpc,
   parseAgentOperationScope,
   parseInstallVersionInput,
   parseRepairInstallationModelInput,
   parseRetryPendingInstallationInput,
-  parseSelectInstallationVersionInput,
 } from "./ipc-contract";
 
 const DEFINITION_ID = "11111111-1111-4111-8111-111111111111";
@@ -101,65 +99,5 @@ describe("Agent control IPC operation scope", () => {
         modelProfileId: "configured-source",
       }),
     ).toThrow("Aera Agent control request is invalid.");
-  });
-
-  it("accepts the canonical UUIDv7 identifiers the control plane actually issues", () => {
-    const definitionId = "0199e6c2-4b3e-7a91-8f2d-1c4b7e9a3d55";
-    const versionId = "0199e6c2-4b3e-7c10-b0d4-2f8a5c1e6b77";
-    const installationId = "0199e6c2-4b3e-7de2-9c31-7a0b4d2e8f91";
-
-    expect(
-      parseInstallVersionInput({
-        definitionId,
-        versionId,
-        profileName: "fresh-agent",
-        modelProfileId: "configured-source",
-      }),
-    ).toEqual({
-      definitionId,
-      versionId,
-      profileName: "fresh-agent",
-      modelProfileId: "configured-source",
-    });
-    expect(
-      parseSelectInstallationVersionInput({
-        id: installationId,
-        versionId,
-        localProfileId: "installed-agent",
-      }),
-    ).toEqual({
-      id: installationId,
-      versionId,
-      localProfileId: "installed-agent",
-    });
-    expect(() =>
-      parseInstallVersionInput({
-        definitionId,
-        versionId: "0199e6c2-4b3e-7c10-b0d4-2f8a5c1e6b7",
-        profileName: "fresh-agent",
-        modelProfileId: "configured-source",
-      }),
-    ).toThrow("Aera Agent control request is invalid.");
-  });
-
-  it("reports every trust-store fault as a verification failure", async () => {
-    const codes = [
-      "unknown_signing_key",
-      "issuer_mismatch",
-      "signing_purpose_mismatch",
-      "invalid_signing_keys",
-      "invalid_trust_cache",
-      "signature_invalid",
-      "digest_mismatch",
-    ] as const;
-
-    for (const code of codes) {
-      const failure = Object.assign(new Error(code), { code });
-      await expect(
-        executeAgentControlIpc(() => {
-          throw failure;
-        }),
-      ).resolves.toEqual({ ok: false, errorCode: "verification_failed" });
-    }
   });
 });

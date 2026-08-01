@@ -36,31 +36,6 @@ const REGISTRY_REPO_BASE = `https://github.com/${REGISTRY_REPO}/tree/${REGISTRY_
 const INDEX_URL = `${REGISTRY_RAW_BASE}/index.json`;
 const MODELS_URL = `${REGISTRY_RAW_BASE}/models.json`;
 const TREE_URL = `https://api.github.com/repos/${REGISTRY_REPO}/git/trees/${REGISTRY_BRANCH}?recursive=1`;
-const REGISTRY_FETCH_TIMEOUT_MS = 8_000;
-
-async function fetchRegistryResource(
-  input: string,
-  init: RequestInit = {},
-): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    REGISTRY_FETCH_TIMEOUT_MS,
-  );
-  try {
-    return await fetch(input, {
-      ...init,
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error("Community registry request timed out");
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
 
 /** index.json entry shape. */
 interface IndexEntry {
@@ -152,7 +127,7 @@ export async function fetchRegistry(
     return cache.data;
   }
   try {
-    const res = await fetchRegistryResource(INDEX_URL, {
+    const res = await fetch(INDEX_URL, {
       headers: { Accept: "application/json" },
     });
     if (!res.ok) {
@@ -194,7 +169,7 @@ export async function fetchModelRegistry(
     return modelCache.data;
   }
   try {
-    const res = await fetchRegistryResource(MODELS_URL, {
+    const res = await fetch(MODELS_URL, {
       headers: { Accept: "application/json" },
     });
     if (!res.ok) {
@@ -257,7 +232,7 @@ export interface InstallResult {
 
 async function tryFetchText(path: string): Promise<string> {
   try {
-    const res = await fetchRegistryResource(`${REGISTRY_RAW_BASE}/${path}`);
+    const res = await fetch(`${REGISTRY_RAW_BASE}/${path}`);
     if (!res.ok) return "";
     const text = await res.text();
     return text.trim() ? text : "";
@@ -352,9 +327,7 @@ export async function fetchRegistryDetail(
 
 async function fetchManifest(path: string): Promise<EntryManifest | null> {
   try {
-    const res = await fetchRegistryResource(
-      `${REGISTRY_RAW_BASE}/${path}/manifest.json`,
-    );
+    const res = await fetch(`${REGISTRY_RAW_BASE}/${path}/manifest.json`);
     if (!res.ok) return null;
     return (await res.json()) as EntryManifest;
   } catch {
@@ -384,7 +357,7 @@ async function listFolderFiles(folder: string): Promise<string[]> {
       Accept: "application/vnd.github+json",
     };
     if (ghToken) headers.Authorization = `Bearer ${ghToken}`;
-    const res = await fetchRegistryResource(TREE_URL, { headers });
+    const res = await fetch(TREE_URL, { headers });
     if (!res.ok) throw new Error(`Tree fetch failed (${res.status})`);
     const json = (await res.json()) as { tree?: TreeBlob[] };
     treeCache = { at: Date.now(), blobs: json.tree ?? [] };
@@ -406,7 +379,7 @@ async function downloadFolder(
   }
   for (const file of files) {
     const rel = file.slice(repoFolder.length + 1);
-    const res = await fetchRegistryResource(`${REGISTRY_RAW_BASE}/${file}`);
+    const res = await fetch(`${REGISTRY_RAW_BASE}/${file}`);
     if (!res.ok) return { success: false, error: `Fetch failed: ${rel}` };
     const body = await res.text();
     safeWriteFile(join(destDir, rel), body);

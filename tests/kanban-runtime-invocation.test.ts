@@ -50,7 +50,7 @@ vi.mock("../src/main/ssh-remote", () => ({
   sshListClaw3dHqTasks: vi.fn(),
 }));
 
-import { createBoard, listBoards } from "../src/main/kanban";
+import { listBoards } from "../src/main/kanban";
 
 describe("Kanban Runtime invocation", () => {
   it("runs local board listing through the managed Runtime", async () => {
@@ -77,113 +77,5 @@ describe("Kanban Runtime invocation", () => {
       }),
       expect.any(Function),
     );
-  });
-
-  it("rejects an invalid board identifier before invoking Runtime", async () => {
-    execFileSpy.mockClear();
-
-    await expect(createBoard("测试看板", "测试看板", true)).resolves.toEqual({
-      success: false,
-      error: expect.stringContaining("Board identifier"),
-    });
-    expect(execFileSpy).not.toHaveBeenCalled();
-  });
-
-  it("verifies a newly created board was durably persisted and selected", async () => {
-    execFileSpy
-      .mockImplementationOnce(
-        (
-          _file: string,
-          _args: string[],
-          _options: Record<string, unknown>,
-          callback: (
-            error: Error | null,
-            stdout: string,
-            stderr: string,
-          ) => void,
-        ) => callback(null, "Board created.", ""),
-      )
-      .mockImplementationOnce(
-        (
-          _file: string,
-          _args: string[],
-          _options: Record<string, unknown>,
-          callback: (
-            error: Error | null,
-            stdout: string,
-            stderr: string,
-          ) => void,
-        ) =>
-          callback(
-            null,
-            JSON.stringify([
-              {
-                slug: "release-board",
-                name: "Release Board",
-                is_current: true,
-                archived: false,
-                total: 0,
-                counts: {},
-              },
-            ]),
-            "",
-          ),
-      );
-
-    await expect(
-      createBoard("Release-Board", "Release Board", true, "work"),
-    ).resolves.toEqual({ success: true });
-    expect(execFileSpy).toHaveBeenNthCalledWith(
-      1,
-      "/tmp/runtime/test/python/bin/python3",
-      [
-        "-m",
-        "hermes_cli.main",
-        "-p",
-        "work",
-        "kanban",
-        "boards",
-        "create",
-        "release-board",
-        "--name",
-        "Release Board",
-        "--switch",
-      ],
-      expect.any(Object),
-      expect.any(Function),
-    );
-  });
-
-  it("does not report success when an older Runtime drops an error exit code", async () => {
-    execFileSpy
-      .mockImplementationOnce(
-        (
-          _file: string,
-          _args: string[],
-          _options: Record<string, unknown>,
-          callback: (
-            error: Error | null,
-            stdout: string,
-            stderr: string,
-          ) => void,
-        ) => callback(null, "kanban boards create: storage is unavailable", ""),
-      )
-      .mockImplementationOnce(
-        (
-          _file: string,
-          _args: string[],
-          _options: Record<string, unknown>,
-          callback: (
-            error: Error | null,
-            stdout: string,
-            stderr: string,
-          ) => void,
-        ) => callback(null, "[]", ""),
-      );
-
-    await expect(createBoard("missing-board")).resolves.toEqual({
-      success: false,
-      error: "kanban boards create: storage is unavailable",
-    });
   });
 });

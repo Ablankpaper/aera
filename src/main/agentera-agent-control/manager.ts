@@ -86,7 +86,6 @@ import {
   serializeInstallation,
   serializeVersion,
 } from "./ipc-contract";
-import { AGENTERA_UUID_PATTERN as UUID_PATTERN } from "../../shared/agentera-identifier";
 
 export interface PrepareAgenteraHermesTurnInput {
   conversationKey: string;
@@ -167,6 +166,8 @@ interface OfficialAgentComponents {
   service: OfficialAgentService;
 }
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function codedError(code: string): Error {
   return Object.assign(new Error(`Aera Agent control failed: ${code}.`), {

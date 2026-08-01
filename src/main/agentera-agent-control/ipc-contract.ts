@@ -38,8 +38,9 @@ import type {
   OrganizationSubmissionPreview as MainOrganizationSubmissionPreview,
   OrganizationWithdrawalPreview as MainOrganizationWithdrawalPreview,
 } from "./organization-publication-service";
-import { AGENTERA_UUID_PATTERN as UUID_PATTERN } from "../../shared/agentera-identifier";
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const PROFILE_ID_PATTERN = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
 const SKILL_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,98}[a-z0-9])?$/;
@@ -599,15 +600,7 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
     code.includes("signature") ||
     code.includes("digest") ||
     code === "cache_corrupt" ||
-    code === "published_content_mismatch" ||
-    // Trust-store faults are verification failures, not malformed requests.
-    // Without these the `invalid_` prefix rule below would report a key or
-    // cache problem as an invalid request.
-    code === "unknown_signing_key" ||
-    code === "issuer_mismatch" ||
-    code === "signing_purpose_mismatch" ||
-    code === "invalid_signing_keys" ||
-    code === "invalid_trust_cache"
+    code === "published_content_mismatch"
   ) {
     return "verification_failed";
   }

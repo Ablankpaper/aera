@@ -504,28 +504,6 @@ describe("explicit Agent publication", () => {
     expect(drafts.getDraft(DRAFT_ID).publishedRevision).toBeNull();
   });
 
-  it("reports an unusable signing key as a key fault, not altered content", async () => {
-    const emptyTrust = new AgenteraAgentTrustStore();
-    const refreshTrust = vi.fn(async () => undefined);
-    const service = new AgentPublisher({
-      drafts,
-      client,
-      trust: emptyTrust,
-      cache,
-      runtimeVersion: "v0.18.2-agentera.1",
-      refreshTrust,
-      randomUUID: () => HANDLE_ID,
-    });
-
-    await expect(
-      service.confirmPublication(
-        service.preparePublication(DRAFT_ID).publicationHandle,
-      ),
-    ).rejects.toMatchObject({ code: "unknown_signing_key" });
-    expect(cacheVersion).not.toHaveBeenCalled();
-    expect(drafts.getDraft(DRAFT_ID).publishedRevision).toBeNull();
-  });
-
   it("records the exact local trust failure while keeping publication closed", async () => {
     publishInitial.mockResolvedValueOnce({
       ...publication,
@@ -541,7 +519,7 @@ describe("explicit Agent publication", () => {
 
     await expect(
       service.confirmPublication(preview.publicationHandle),
-    ).rejects.toMatchObject({ code: "signature_invalid" });
+    ).rejects.toMatchObject({ code: "published_content_mismatch" });
     expect(cacheVersion).not.toHaveBeenCalled();
     expect(drafts.getDraft(DRAFT_ID).publishedRevision).toBeNull();
     expect(drafts.getDraft(DRAFT_ID).lastPublicationAttempt).toMatchObject({

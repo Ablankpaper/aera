@@ -473,10 +473,6 @@ export default function AgentControlPanel({
     state.cloudAvailable === true &&
     organizationCanSeeInstallations;
 
-  // The Enterprise tab only exists while the context carries Organization
-  // scope, so a context without it must not leave the tab bar with nothing
-  // selected. Holding the selected Organization across a degraded refresh is
-  // the product space manager's job, not this reset's.
   useEffect(() => {
     if (state && !isOrganization && activeTab === "enterprise") {
       setActiveTab("mine");
