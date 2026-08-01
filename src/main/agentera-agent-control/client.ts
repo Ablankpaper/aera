@@ -544,6 +544,34 @@ function isModelConstraints(value: unknown): boolean {
   );
 }
 
+function isModelPolicy(value: unknown): boolean {
+  if (
+    !hasExactFields(value, ["allowed_models", "allowed_providers", "mode"]) ||
+    !isStringArray(value.allowed_models) ||
+    !isStringArray(value.allowed_providers)
+  ) {
+    return false;
+  }
+  switch (value.mode) {
+    case "user_select":
+      return (
+        value.allowed_models.length === 0 &&
+        value.allowed_providers.length === 0
+      );
+    case "allowlist":
+      return (
+        value.allowed_models.length > 0 && value.allowed_providers.length > 0
+      );
+    case "fixed":
+      return (
+        value.allowed_models.length === 1 &&
+        value.allowed_providers.length === 1
+      );
+    default:
+      return false;
+  }
+}
+
 function isToolPolicy(value: unknown): boolean {
   return (
     hasExactFields(value, ["allowed", "denied"]) &&
@@ -553,20 +581,29 @@ function isToolPolicy(value: unknown): boolean {
 }
 
 function isManifest(value: unknown): boolean {
+  if (!isObject(value)) return false;
+  const modelField =
+    value.schema_version === 1
+      ? "model_constraints"
+      : value.schema_version === 2
+        ? "model_policy"
+        : null;
   if (
+    modelField === null ||
     !hasExactFields(value, [
       "assets",
       "dependencies",
       "identity",
-      "model_constraints",
+      modelField,
       "runtime_compatibility",
       "schema_version",
       "tools",
     ]) ||
-    value.schema_version !== 1 ||
     !hasExactFields(value.identity, ["system_prompt"]) ||
     !isBoundedString(value.identity.system_prompt, 1, 262_144) ||
-    !isModelConstraints(value.model_constraints) ||
+    (value.schema_version === 1
+      ? !isModelConstraints(value.model_constraints)
+      : !isModelPolicy(value.model_policy)) ||
     !isRuntimeCompatibility(value.runtime_compatibility) ||
     !isToolPolicy(value.tools) ||
     !Array.isArray(value.assets) ||
@@ -828,14 +865,22 @@ function isOfficialPolicyContext(value: unknown): boolean {
 }
 
 function isPolicyDocument(value: unknown): boolean {
+  if (!isObject(value)) return false;
+  const modelField =
+    value.schema_version === 1
+      ? "model_constraints"
+      : value.schema_version === 2
+        ? "model_policy"
+        : null;
   return (
+    modelField !== null &&
     hasExactFields(
       value,
       [
         "agent_definition_id",
         "agent_version_id",
         "deny_rules",
-        "model_constraints",
+        modelField,
         "publication_allowed",
         "runtime_compatibility",
         "schema_version",
@@ -844,11 +889,12 @@ function isPolicyDocument(value: unknown): boolean {
       ],
       ["official_context"],
     ) &&
-    value.schema_version === 1 &&
     isUUID(value.agent_definition_id) &&
     isUUID(value.agent_version_id) &&
     isDigest(value.version_digest) &&
-    isModelConstraints(value.model_constraints) &&
+    (value.schema_version === 1
+      ? isModelConstraints(value.model_constraints)
+      : isModelPolicy(value.model_policy)) &&
     isToolPolicy(value.tools) &&
     isRuntimeCompatibility(value.runtime_compatibility) &&
     value.publication_allowed === false &&
@@ -1576,9 +1622,7 @@ export class AgenteraAgentControlClient {
       this.timeoutMs > 120_000 ||
       (hasOfficialConfiguration && !hasCompleteOfficialConfiguration)
     ) {
-      throw new Error(
-        "Aera Agent control client configuration is invalid.",
-      );
+      throw new Error("Aera Agent control client configuration is invalid.");
     }
   }
 

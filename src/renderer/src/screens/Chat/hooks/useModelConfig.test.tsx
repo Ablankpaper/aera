@@ -47,7 +47,14 @@ function GroupHarness(): React.JSX.Element {
 
 describe("useModelConfig", () => {
   let savedModels: SavedModel[];
+  let customProviders: Array<{
+    id: string;
+    name: string;
+    baseUrl: string;
+    createdAt: number;
+  }>;
   let emitModelLibraryChanged: (() => void) | null;
+  let emitCustomProvidersChanged: (() => void) | null;
 
   beforeEach(() => {
     savedModels = [
@@ -60,7 +67,9 @@ describe("useModelConfig", () => {
         createdAt: 1,
       },
     ];
+    customProviders = [];
     emitModelLibraryChanged = null;
+    emitCustomProvidersChanged = null;
 
     Object.defineProperty(window, "hermesAPI", {
       configurable: true,
@@ -71,9 +80,14 @@ describe("useModelConfig", () => {
           baseUrl: "",
         })),
         listModels: vi.fn(async () => savedModels),
+        listCustomProviders: vi.fn(async () => customProviders),
         onConnectionConfigChanged: vi.fn(() => vi.fn()),
         onModelLibraryChanged: vi.fn((callback: () => void) => {
           emitModelLibraryChanged = callback;
+          return vi.fn();
+        }),
+        onCustomProvidersChanged: vi.fn((callback: () => void) => {
+          emitCustomProvidersChanged = callback;
           return vi.fn();
         }),
         setModelConfig: vi.fn(async () => true),
@@ -117,6 +131,14 @@ describe("useModelConfig", () => {
   });
 
   it("groups a custom Hermes One model under the Hermes One brand while keeping custom routing", async () => {
+    customProviders = [
+      {
+        id: "hermes-one",
+        name: "Hermes One",
+        baseUrl: "https://inference.hermesone.org/v1",
+        createdAt: 1,
+      },
+    ];
     savedModels = [
       {
         id: "hs-swift",
@@ -140,15 +162,23 @@ describe("useModelConfig", () => {
       expect(hs).toBeTruthy();
       // Not lumped under the generic OpenAI-compatible bucket.
       expect(hs.provider).toBe("hermesone");
-      // Routing stays on `custom` + the base URL so the request still resolves.
+      // Routing uses the Profile's current named-provider identity.
       expect(hs.models[0]).toEqual({
         model: "hermesone-swift",
-        provider: "custom",
+        provider: "custom:hermes-one",
       });
     });
   });
 
   it("carries a named custom provider's native route into chat picker selections", async () => {
+    customProviders = [
+      {
+        id: "anhepro",
+        name: "anhepro.com",
+        baseUrl: "https://api.anhepro.com/v1",
+        createdAt: 1,
+      },
+    ];
     savedModels = [
       {
         id: "anhepro-sol",
@@ -179,6 +209,61 @@ describe("useModelConfig", () => {
           ],
         },
       ]);
+    });
+  });
+
+  it("removes historical custom-provider groups as soon as the current Profile provider list changes", async () => {
+    customProviders = [
+      {
+        id: "petoi",
+        name: "Petoi",
+        baseUrl: "https://api.petoi.cn/v1",
+        createdAt: 1,
+      },
+      {
+        id: "yundu",
+        name: "yundu.lat",
+        baseUrl: "https://yundu.lat/v1",
+        createdAt: 2,
+      },
+    ];
+    savedModels = [
+      {
+        id: "petoi-sol",
+        name: "gpt-5.6-sol",
+        provider: "custom",
+        providerLabel: "Petoi",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://api.petoi.cn/v1",
+        createdAt: 1,
+      },
+      {
+        id: "yundu-opus",
+        name: "claude-opus-4-6",
+        provider: "custom",
+        providerLabel: "yundu.lat",
+        model: "claude-opus-4-6",
+        baseUrl: "https://yundu.lat/v1",
+        createdAt: 2,
+      },
+    ];
+
+    render(<GroupHarness />);
+    await waitFor(() => {
+      expect(screen.getByTestId("groups")).toHaveTextContent("Petoi");
+      expect(screen.getByTestId("groups")).toHaveTextContent("yundu.lat");
+    });
+
+    customProviders = customProviders.filter(
+      (provider) => provider.name === "yundu.lat",
+    );
+    await act(async () => {
+      emitCustomProvidersChanged?.();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("groups")).not.toHaveTextContent("Petoi");
+      expect(screen.getByTestId("groups")).toHaveTextContent("yundu.lat");
     });
   });
 });

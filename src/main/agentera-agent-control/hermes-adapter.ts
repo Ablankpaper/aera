@@ -14,6 +14,12 @@ import type {
 } from "../agentera-profile-binding";
 import type { HermesConversationEnvelope } from "../hermes";
 import type { AgenteraAgentControlContext } from "../../shared/agentera-agent-control";
+import type { SessionModelOverride } from "../../shared/model-override";
+import {
+  agentModelPolicyAllowsRoute,
+  modelPolicyForManifest,
+  modelPolicyForPolicyDocument,
+} from "./model-policy";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -31,6 +37,7 @@ export type AgenteraHermesAdapterErrorCode =
   | "policy_invalid"
   | "runtime_drift"
   | "tool_policy_drift"
+  | "model_policy_drift"
   | "version_revoked"
   | "projection_invalid";
 
@@ -78,6 +85,7 @@ export interface AgenteraHermesAdapterOptions {
     version: AgentVersion,
     policy: AgentPolicySnapshot,
   ) => string | Promise<string>;
+  getProfileModelConfig: (profilePath: string) => SessionModelOverride;
   isVersionRevoked: (versionId: string) => boolean | Promise<boolean>;
   assertEntitled: () => void | Promise<void>;
   getAgentContext: () => AgenteraAgentControlContext;
@@ -95,6 +103,7 @@ export interface PreparedInstalledHermesTurn {
   profilePath: string;
   resumeSessionId: string | undefined;
   envelope: HermesConversationEnvelope;
+  modelOverride: SessionModelOverride;
 }
 
 interface LocalInstallationRow {
@@ -402,7 +411,7 @@ function composePublishedInstructions(input: {
     `Published version-scoped Skills (read-only): ${stableJson(skills)}.`,
     `Published assets (read-only): ${stableJson(assets)}.`,
     `Effective policy constraints: ${stableJson({
-      model: policy.document.model_constraints,
+      model: modelPolicyForPolicyDocument(policy.document),
       runtime: policy.document.runtime_compatibility,
       tools: policy.document.tools,
       denyRules: policy.document.deny_rules,
@@ -570,6 +579,28 @@ export class AgenteraHermesAdapter {
       throw new AgenteraHermesAdapterError("tool_policy_drift");
     }
 
+    let currentModelRoute: SessionModelOverride;
+    try {
+      currentModelRoute = this.options.getProfileModelConfig(input.profilePath);
+    } catch {
+      throw new AgenteraHermesAdapterError("model_policy_drift");
+    }
+    const selectedModelRoute = existing?.modelRoute ?? currentModelRoute;
+    if (
+      !agentModelPolicyAllowsRoute(
+        modelPolicyForManifest(version.manifest),
+        selectedModelRoute.provider,
+        selectedModelRoute.model,
+      ) ||
+      !agentModelPolicyAllowsRoute(
+        modelPolicyForPolicyDocument(policy.document),
+        selectedModelRoute.provider,
+        selectedModelRoute.model,
+      )
+    ) {
+      throw new AgenteraHermesAdapterError("model_policy_drift");
+    }
+
     let projection: HermesVersionProjection;
     try {
       projection = this.options.projection.materializeVersion({
@@ -593,6 +624,7 @@ export class AgenteraHermesAdapter {
         agentInstallationId: installation.agentInstallationId,
         runtimeProfileId: installation.runtimeProfileId,
         runtimeVersion,
+        modelRoute: currentModelRoute,
         policySnapshotId: policyId,
         officialReleaseRevisionId: installation.selectedReleaseRevisionId,
         toolPermissionDigest: currentToolDigest,
@@ -609,6 +641,7 @@ export class AgenteraHermesAdapter {
       profilePath: input.profilePath,
       resumeSessionId: binding.hermesSessionId ?? undefined,
       envelope: { instructions, requireBoundApiTransport: true },
+      modelOverride: selectedModelRoute,
     };
   }
 

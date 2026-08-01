@@ -148,7 +148,7 @@ function workspaceDraft(content: string): CreateAgentDraftInput {
     displayName: "Workspace research Agent",
     icon: null,
     manifest: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       identity: {
         systemPrompt: `Use the immutable Workspace base: ${content}`,
       },
@@ -169,9 +169,10 @@ function workspaceDraft(content: string): CreateAgentDraftInput {
           mediaType: "text/markdown",
         },
       ],
-      modelConstraints: {
-        allowedProviders: ["openai"],
-        allowedModels: ["gpt-5.6"],
+      modelPolicy: {
+        mode: "user_select",
+        allowedProviders: [],
+        allowedModels: [],
       },
       tools: { allowed: [], denied: [] },
       dependencies: [],
@@ -492,6 +493,17 @@ test("publishes Workspace versions while Member learning and RuntimeBindings rem
     }),
   ) as { id: string; runtimeProfileId: string | null };
   const memberProfile = deviceProfilePath(memberDevice, MEMBER_PROFILE);
+  await writeFile(
+    join(memberProfile, "config.yaml"),
+    [
+      "model:",
+      "  provider: openai",
+      "  default: gpt-5.6",
+      '  base_url: "http://127.0.0.1:9/v1"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
   expect(memberProfile).not.toBe(memberDefaultProfile);
   expect(memberProfile).not.toBe(ownerProfile);
   expect(memberInstallation.runtimeProfileId).not.toBeNull();

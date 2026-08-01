@@ -46,6 +46,7 @@ import type {
   ProfileCreationResult,
   RuntimeOwnerBinding,
 } from "../agentera-profile-binding";
+import type { SessionModelOverride } from "../../shared/model-override";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -168,15 +169,23 @@ export interface AgentInstallationProfileAdapter {
   deleteProfile(profileId: string): { success: boolean; error?: string };
   resolveProfilePath(profileId: string): string;
   activateProfile(profileId: string): void;
+  readProfileModelConfig?: (profilePath: string) => SessionModelOverride;
   configureFreshProfileModel?: (input: {
     sourceProfileId: string;
     targetProfileId: string;
     version: AgentVersion;
+    policy: AgentPolicySnapshot;
+    sourceModelId?: string;
   }) => void;
 }
 
 export type AgentInstallationProfileTarget =
-  | { kind: "fresh"; name: string; modelSourceProfileId?: string }
+  | {
+      kind: "fresh";
+      name: string;
+      modelSourceProfileId?: string;
+      modelSourceModelId?: string;
+    }
   | { kind: "claim"; profileId: string; profilePath: string };
 
 export type AgentInstallationSource =
@@ -1502,6 +1511,7 @@ export class AgentInstallationManager {
     profilePath: string;
     localProfileId: string;
     modelSourceProfileId: string;
+    modelSourceModelId?: string;
   }): Promise<LocalAgentInstallation> {
     const local = this.getLocalInstallation(input.agentInstallationId);
     if (local.status !== "active" || local.runtimeProfileId === null) {
@@ -1528,9 +1538,17 @@ export class AgentInstallationManager {
     }
 
     let version: AgentVersion;
+    let policy: AgentPolicySnapshot;
     try {
       version = this.cache.getVerifiedVersion(local.selectedVersionId);
       assertVersion(version, local.definitionId, local.selectedVersionId);
+      if (local.policySnapshotId === null) {
+        throw new AgentInstallationManagerError("installation_conflict");
+      }
+      policy = this.cache.getVerifiedPolicySnapshot(
+        local.selectedVersionId,
+        local.policySnapshotId,
+      );
     } catch {
       throw new AgentInstallationManagerError("materialization_failed");
     }
@@ -1543,6 +1561,10 @@ export class AgentInstallationManager {
         sourceProfileId: input.modelSourceProfileId,
         targetProfileId: input.localProfileId,
         version,
+        policy,
+        ...(input.modelSourceModelId
+          ? { sourceModelId: input.modelSourceModelId }
+          : {}),
       });
     } catch {
       throw new AgentInstallationManagerError(
@@ -1940,6 +1962,10 @@ export class AgentInstallationManager {
             sourceProfileId: target.modelSourceProfileId,
             targetProfileId: created.profileId,
             version,
+            policy,
+            ...(target.modelSourceModelId
+              ? { sourceModelId: target.modelSourceModelId }
+              : {}),
           });
         }
       } else {

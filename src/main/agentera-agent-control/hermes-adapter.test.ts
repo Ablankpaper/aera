@@ -22,6 +22,7 @@ import {
 import { RuntimeBindingStore } from "./runtime-binding-store";
 import type { AgenteraRuntimeOwner } from "../agentera-profile-binding";
 import type { AgenteraAgentControlContext } from "../../shared/agentera-agent-control";
+import type { SessionModelOverride } from "../../shared/model-override";
 
 const TENANT_ID = "11111111-1111-4111-8111-111111111111";
 const OWNER_ID = "22222222-2222-4222-8222-222222222222";
@@ -111,6 +112,9 @@ function policy(
   agentVersion = version(),
   policyId = POLICY_ID,
 ): AgentPolicySnapshot {
+  if (agentVersion.manifest.schema_version !== 1) {
+    throw new Error("V1 policy fixture requires a V1 manifest");
+  }
   return {
     id: policyId,
     installation_id: INSTALLATION_ID,
@@ -194,6 +198,7 @@ describe("Aera adapter around the real Hermes transport", () => {
   >;
   let assertEntitled: ReturnType<typeof vi.fn<() => void>>;
   let agentContext: AgenteraAgentControlContext;
+  let currentModelRoute: SessionModelOverride;
   let materializeVersion: ReturnType<
     typeof vi.fn<
       (input: {
@@ -271,6 +276,11 @@ describe("Aera adapter around the real Hermes transport", () => {
     isVersionRevoked = vi.fn(() => false);
     assertEntitled = vi.fn();
     agentContext = { scope: "USER" };
+    currentModelRoute = {
+      provider: "openai",
+      model: "gpt-5.6",
+      baseUrl: "",
+    };
     materializeVersion = vi.fn(() => projection(agentVersion));
   });
 
@@ -291,6 +301,7 @@ describe("Aera adapter around the real Hermes transport", () => {
       getConnectionMode: () => mode,
       getRuntimeVersion,
       getCurrentToolPermissionDigest,
+      getProfileModelConfig: () => currentModelRoute,
       isVersionRevoked,
       assertEntitled,
       getAgentContext: () => agentContext,
@@ -309,6 +320,7 @@ describe("Aera adapter around the real Hermes transport", () => {
     expect(first.profilePath).toBe(PROFILE_PATH);
     expect(first.resumeSessionId).toBeUndefined();
     expect(first.envelope.requireBoundApiTransport).toBe(true);
+    expect(first.modelOverride).toEqual(currentModelRoute);
     expect(first.binding).toMatchObject({
       id: BINDING_ID,
       agentVersionId: VERSION_ID,
@@ -316,6 +328,7 @@ describe("Aera adapter around the real Hermes transport", () => {
       officialReleaseRevisionId: null,
       runtimeProfileId: RUNTIME_PROFILE_ID,
       runtimeVersion: RUNTIME_VERSION,
+      modelRoute: currentModelRoute,
       toolPermissionDigest: digestToolPermissionDeclaration(
         version(),
         policy(),
@@ -339,6 +352,11 @@ describe("Aera adapter around the real Hermes transport", () => {
     expect(first.envelope.instructions).not.toContain("USER.md");
 
     subject.attachHermesSession(first.binding.id, "desk-original-session");
+    currentModelRoute = {
+      provider: "custom:changed-default",
+      model: "changed-after-conversation-start",
+      baseUrl: "https://changed.invalid/v1",
+    };
     const second = await subject.prepareInstalledTurn({
       conversationKey: "run-agent-1",
       profilePath: PROFILE_PATH,
@@ -351,6 +369,7 @@ describe("Aera adapter around the real Hermes transport", () => {
     });
     expect(second.resumeSessionId).toBe("desk-original-session");
     expect(second.envelope).toEqual(first.envelope);
+    expect(second.modelOverride).toEqual(first.modelOverride);
     expect(cache.getVerifiedVersion).toHaveBeenCalledTimes(2);
     expect(cache.getVerifiedPolicySnapshot).toHaveBeenCalledTimes(2);
     expect(assertEntitled).toHaveBeenCalledTimes(2);

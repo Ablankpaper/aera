@@ -944,12 +944,6 @@ export default function ModelCenter({
         onActivated(persisted);
       }
 
-      // These writes intentionally remain sequential. Each remove reads and
-      // rewrites the same models file, so parallel calls could reintroduce rows
-      // through a last-writer-wins race.
-      for (const model of service.models) {
-        await window.hermesAPI.removeModel(model.id);
-      }
       if (service.customProvider) {
         await window.hermesAPI.removeCustomProvider(
           profile,

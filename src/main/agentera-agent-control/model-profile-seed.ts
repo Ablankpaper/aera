@@ -7,6 +7,7 @@ import {
 import { expectedEnvKeyForModel } from "../installer";
 import { readModels, type SavedModel } from "../models";
 import { upsertNativeCustomProvider } from "../native-custom-provider";
+import { canonicalProviderBaseUrl } from "../provider-registry";
 import { listCustomProviders, upsertCustomProvider } from "../providers-store";
 import { getSecret } from "../secrets";
 import {
@@ -15,12 +16,19 @@ import {
   normalizeCustomProviderRuntimeName,
 } from "../../shared/custom-providers";
 import { customProviderEnvKey } from "../../shared/url-key-map";
-import type { AgentVersion } from "./client";
+import type { AgentPolicySnapshot, AgentVersion } from "./client";
+import {
+  agentModelPolicyAllowsRoute,
+  modelPolicyForManifest,
+  modelPolicyForPolicyDocument,
+} from "./model-policy";
 
 export interface AgentModelProfileSeedInput {
   sourceProfileId: string;
+  sourceModelId?: string;
   targetProfileId: string;
   version: AgentVersion;
+  policy: AgentPolicySnapshot;
 }
 
 interface ModelProfileSeedDependencies {
@@ -48,12 +56,12 @@ const DEFAULT_DEPENDENCIES: ModelProfileSeedDependencies = {
 };
 
 function normalizedEndpoint(value: string): string {
-  return value.trim().replace(/\/+$/, "").toLocaleLowerCase();
+  return value.trim().replace(/\/+$/, "").toLowerCase();
 }
 
 function isLocalNoKeyEndpoint(value: string): boolean {
   try {
-    const hostname = new URL(value).hostname.toLocaleLowerCase();
+    const hostname = new URL(value).hostname.toLowerCase();
     return (
       hostname === "localhost" ||
       hostname === "127.0.0.1" ||
@@ -84,15 +92,15 @@ function matchingSavedModel(
       }
       if (namedProvider) {
         return (
-          candidate.provider.trim().toLocaleLowerCase() === "custom" &&
+          candidate.provider.trim().toLowerCase() === "custom" &&
           normalizeCustomProviderRuntimeName(
             candidate.providerLabel || candidate.name,
           ) === namedProvider
         );
       }
       return (
-        candidate.provider.trim().toLocaleLowerCase() ===
-        provider.trim().toLocaleLowerCase()
+        candidate.provider.trim().toLowerCase() ===
+        provider.trim().toLowerCase()
       );
     }) ?? null
   );
@@ -100,35 +108,38 @@ function matchingSavedModel(
 
 function resolveSignedSourceModel(
   version: AgentVersion,
+  policy: AgentPolicySnapshot,
   provider: string,
   currentModel: string,
   baseUrl: string,
   models: readonly SavedModel[],
+  exactSelection: boolean,
 ): string {
-  const allowedProviders =
-    version.manifest.model_constraints.allowed_providers.map((value) =>
-      value.trim().toLocaleLowerCase(),
-    );
-  const normalizedProvider = provider.trim().toLocaleLowerCase();
-  const providerAllowed =
-    allowedProviders.includes(normalizedProvider) ||
-    (isCustomProviderRoute(provider) && allowedProviders.includes("custom"));
-  if (!providerAllowed) {
+  const versionPolicy = modelPolicyForManifest(version.manifest);
+  const effectivePolicy = modelPolicyForPolicyDocument(policy.document);
+  const allows = (candidate: string): boolean =>
+    agentModelPolicyAllowsRoute(versionPolicy, provider, candidate) &&
+    agentModelPolicyAllowsRoute(effectivePolicy, provider, candidate);
+  if (allows(currentModel)) return currentModel;
+  if (exactSelection) {
     throw new Error(
-      "The source Profile model is not allowed by the signed Agent version.",
+      "The selected model route is not allowed by the signed effective policy.",
     );
   }
-  const allowedModels = version.manifest.model_constraints.allowed_models.map(
-    (value) => value.trim(),
-  );
-  if (allowedModels.includes(currentModel)) return currentModel;
-  const signedModel = allowedModels.find(
+  const candidates = [
+    ...new Set([
+      ...versionPolicy.allowedModels,
+      ...effectivePolicy.allowedModels,
+    ]),
+  ];
+  const signedModel = candidates.find(
     (candidate) =>
+      allows(candidate) &&
       matchingSavedModel(models, provider, candidate, baseUrl) !== null,
   );
   if (!signedModel) {
     throw new Error(
-      "The source Profile model is not allowed by the signed Agent version.",
+      "The source Profile model is not allowed by the signed effective policy.",
     );
   }
   return signedModel;
@@ -166,23 +177,69 @@ export function seedAgentModelProfile(
   dependencies: ModelProfileSeedDependencies = DEFAULT_DEPENDENCIES,
 ): void {
   const source = dependencies.getModelConfig(input.sourceProfileId);
-  const provider = source.provider.trim();
-  const currentModel = source.model.trim();
-  const baseUrl = source.baseUrl.trim();
-  if (!provider || provider === "auto" || !currentModel) {
+  const models = dependencies.readModels();
+  const selected = input.sourceModelId
+    ? (models.find((candidate) => candidate.id === input.sourceModelId) ?? null)
+    : null;
+  if (input.sourceModelId && !selected) {
+    throw new Error("The selected model route is no longer available.");
+  }
+  let provider = source.provider.trim();
+  let currentModel = source.model.trim();
+  let baseUrl = source.baseUrl.trim();
+  if (selected) {
+    currentModel = selected.model.trim();
+    if (isCustomProviderRoute(selected.provider)) {
+      const selectedEndpoint = normalizedEndpoint(selected.baseUrl || "");
+      const selectedAnchor = selected.providerLabel
+        ? customProviderEnvKey(selected.providerLabel)
+        : null;
+      if (!selectedEndpoint && !selectedAnchor) {
+        throw new Error(
+          "The selected custom provider identity is unavailable.",
+        );
+      }
+      const record = dependencies
+        .listCustomProviders(input.sourceProfileId)
+        .find(
+          (candidate) =>
+            (!selectedEndpoint ||
+              normalizedEndpoint(candidate.baseUrl) === selectedEndpoint) &&
+            (!selectedAnchor ||
+              customProviderEnvKey(candidate.name) === selectedAnchor),
+        );
+      if (!record) {
+        throw new Error("The selected custom provider is no longer available.");
+      }
+      provider = `custom:${normalizeCustomProviderRuntimeName(record.name)}`;
+      baseUrl = record.baseUrl.trim();
+    } else {
+      provider = selected.provider.trim();
+      baseUrl =
+        selected.baseUrl.trim() || canonicalProviderBaseUrl(provider) || "";
+    }
+  }
+  if (!provider || provider.toLowerCase() === "auto" || !currentModel) {
     throw new Error("The source Profile has no configured model.");
   }
-  const models = dependencies.readModels();
   const model = resolveSignedSourceModel(
     input.version,
+    input.policy,
     provider,
     currentModel,
     baseUrl,
     models,
+    Boolean(selected),
   );
   const alreadyCompatibleInPlace =
-    input.sourceProfileId === input.targetProfileId && model === currentModel;
-  const saved = matchingSavedModel(models, provider, model, baseUrl);
+    input.sourceProfileId === input.targetProfileId &&
+    model === source.model.trim() &&
+    provider.toLowerCase() === source.provider.trim().toLowerCase() &&
+    normalizedEndpoint(baseUrl) === normalizedEndpoint(source.baseUrl);
+  const saved =
+    selected && selected.model.trim() === model
+      ? selected
+      : matchingSavedModel(models, provider, model, baseUrl);
   const namedProvider = namedCustomProviderRuntimeName(provider);
   if (isCustomProviderRoute(provider)) {
     if (!baseUrl) {

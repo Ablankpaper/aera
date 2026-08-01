@@ -147,6 +147,9 @@ function makePolicy(
   version: AgentVersion,
   id = POLICY_ID,
 ): AgentPolicySnapshot {
+  if (version.manifest.schema_version !== 1) {
+    throw new Error("V1 policy fixture requires a V1 manifest");
+  }
   return {
     id,
     installation_id: AGENT_INSTALLATION_ID,
@@ -594,6 +597,7 @@ describe("Agent installation orchestration", () => {
         sourceProfileId: string;
         targetProfileId: string;
         version: AgentVersion;
+        policy: AgentPolicySnapshot;
       }) => {
         events.push(`profile:model:${input.targetProfileId}`);
       },
@@ -615,6 +619,7 @@ describe("Agent installation orchestration", () => {
       sourceProfileId: "source-profile",
       targetProfileId: "fresh-agent",
       version: v1,
+      policy,
     });
     expect(events).toEqual([
       "cloud:create-pending",
@@ -742,6 +747,7 @@ describe("Agent installation orchestration", () => {
       sourceProfileId: "source-profile",
       targetProfileId: "fresh-agent",
       version: v1,
+      policy,
     });
     expect(repaired).toMatchObject({
       agentInstallationId: AGENT_INSTALLATION_ID,
@@ -773,6 +779,7 @@ describe("Agent installation orchestration", () => {
       sourceProfileId: "fresh-agent",
       targetProfileId: "fresh-agent",
       version: v1,
+      policy,
     });
     expect(repaired).toMatchObject({
       agentInstallationId: AGENT_INSTALLATION_ID,

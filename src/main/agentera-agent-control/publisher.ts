@@ -172,6 +172,17 @@ function stableFailureSummary(code: string): string {
       return "Agent content was rejected.";
     case "runtime_incompatible":
       return "Runtime version is incompatible.";
+    case "signature_invalid":
+    case "signature_verification_failed":
+      return "Published Agent signature verification failed.";
+    case "digest_mismatch":
+    case "published_content_mismatch":
+      return "Published Agent content did not match the draft.";
+    case "cache_conflict":
+    case "cache_corrupt":
+    case "cache_permissions_invalid":
+    case "publication_cache_failed":
+      return "Verified Agent version cache failed.";
     default:
       return "Publication failed.";
   }
@@ -189,6 +200,31 @@ function publicFailureCode(error: unknown): string {
 function localVerificationFailureCode(error: unknown): string {
   if (error instanceof AgenteraAgentTrustError) return error.code;
   return publicFailureCode(error);
+}
+
+function boundedFailureCode(error: unknown, fallback: string): string {
+  const code =
+    error !== null &&
+    typeof error === "object" &&
+    typeof (error as { code?: unknown }).code === "string"
+      ? (error as { code: string }).code
+      : "";
+  return /^[a-z][a-z0-9_]{0,63}$/.test(code) ? code : fallback;
+}
+
+function publicationVerificationFailureCode(error: unknown): string {
+  if (error instanceof AgentPublisherError) return error.code;
+  if (error instanceof AgenteraAgentTrustError) {
+    if (error.code === "digest_mismatch") {
+      return "published_content_mismatch";
+    }
+    if (error.code === "runtime_incompatible") {
+      return "runtime_incompatible";
+    }
+    return "signature_verification_failed";
+  }
+  if (error instanceof AgenteraAgentControlClientError) return error.code;
+  return "verification_failed";
 }
 
 export class AgentPublisher {
@@ -327,7 +363,22 @@ export class AgentPublisher {
 
     try {
       await this.verifyPublicationWithTrustRefresh(prepared, publication);
+    } catch (error) {
+      this.recordFailure(prepared, localVerificationFailureCode(error));
+      throw new AgentPublisherError(publicationVerificationFailureCode(error));
+    }
+
+    try {
       this.cache.cacheVerifiedVersion(publication.version);
+    } catch (error) {
+      this.recordFailure(
+        prepared,
+        boundedFailureCode(error, "publication_cache_failed"),
+      );
+      throw new AgentPublisherError("publication_cache_failed");
+    }
+
+    try {
       this.drafts.markPublished(
         current.id,
         current.revision,
@@ -335,11 +386,11 @@ export class AgentPublisher {
         publication.version.id,
       );
     } catch (error) {
-      this.recordFailure(prepared, localVerificationFailureCode(error));
+      this.recordFailure(prepared, publicFailureCode(error));
       if (error instanceof AgentDraftStoreError) {
         throw new AgentPublisherError(error.code);
       }
-      throw new AgentPublisherError("published_content_mismatch");
+      throw new AgentPublisherError("publication_failed");
     }
 
     return {

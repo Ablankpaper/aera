@@ -62,6 +62,11 @@ function binding(
     localAdaptiveStateRevision: "d0000000-0000-4000-8000-000000000001",
     createdAt: "2026-07-23T12:00:00.000Z",
     ...overrides,
+    modelRoute: overrides.modelRoute ?? {
+      provider: "openai",
+      model: "gpt-5.6",
+      baseUrl: "",
+    },
   };
 }
 

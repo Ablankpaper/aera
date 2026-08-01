@@ -81,6 +81,7 @@ import {
   type OrganizationWithdrawalPreview,
 } from "./organization-publication-service";
 import { OfficialAgentService } from "./official-agent-service";
+import { modelPolicyForManifest } from "./model-policy";
 import {
   serializeDefinition,
   serializeInstallation,
@@ -703,18 +704,15 @@ export class AgenteraAgentControlManager {
       throw codedError("verification_failed");
     }
     const version = serializeVersion(detail.version);
+    const modelPolicy = modelPolicyForManifest(detail.version.manifest);
     return {
       agent: { ...detail.agent },
       capabilitySummary: publicCapabilitySummary(
         detail.version.manifest.identity.system_prompt,
       ),
       assetCounts: { ...version.assetCounts },
-      allowedProviders: [
-        ...detail.version.manifest.model_constraints.allowed_providers,
-      ],
-      allowedModels: [
-        ...detail.version.manifest.model_constraints.allowed_models,
-      ],
+      allowedProviders: [...modelPolicy.allowedProviders],
+      allowedModels: [...modelPolicy.allowedModels],
       allowedToolCount: publicCount(
         detail.version.manifest.tools.allowed.length,
       ),
@@ -871,7 +869,9 @@ export class AgenteraAgentControlManager {
       profile: {
         kind: "fresh",
         name: input.profileName,
-        modelSourceProfileId: input.modelProfileId,
+        modelSourceProfileId:
+          input.modelSelection?.sourceProfileId ?? input.modelProfileId,
+        modelSourceModelId: input.modelSelection?.modelLibraryId,
       },
     });
     this.emitState();
@@ -945,7 +945,10 @@ export class AgenteraAgentControlManager {
         ? ({
             kind: "fresh",
             name: input.target.profileName,
-            modelSourceProfileId: input.target.modelProfileId,
+            modelSourceProfileId:
+              input.target.modelSelection?.sourceProfileId ??
+              input.target.modelProfileId,
+            modelSourceModelId: input.target.modelSelection?.modelLibraryId,
           } as const)
         : ({
             kind: "claim",
@@ -997,13 +1000,17 @@ export class AgenteraAgentControlManager {
       components.installations.getLocalInstallation(input.id),
       context,
     );
+    const modelSourceProfileId =
+      input.modelSelection?.sourceProfileId ?? input.modelProfileId;
+    if (!modelSourceProfileId) throw codedError("invalid_request");
     const result = await components.installations.repairInstallationModel({
       agentInstallationId: input.id,
       profilePath: this.requireFull().profiles.resolveProfilePath(
         input.localProfileId,
       ),
       localProfileId: input.localProfileId,
-      modelSourceProfileId: input.modelProfileId,
+      modelSourceProfileId,
+      modelSourceModelId: input.modelSelection?.modelLibraryId,
     });
     this.emitState();
     return serializeInstallation(result);
@@ -1405,6 +1412,12 @@ export class AgenteraAgentControlManager {
       projection: this.projection,
       getConnectionMode: full.getConnectionMode,
       getRuntimeVersion: full.getRuntimeVersion,
+      getProfileModelConfig: (profilePath) => {
+        if (!full.profiles.readProfileModelConfig) {
+          throw codedError("operation_failed");
+        }
+        return full.profiles.readProfileModelConfig(profilePath);
+      },
       isVersionRevoked: full.isVersionRevoked ?? (() => false),
       assertEntitled: full.assertEntitled,
       getAgentContext: () => this.context(),

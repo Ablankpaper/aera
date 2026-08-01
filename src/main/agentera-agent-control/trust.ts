@@ -94,6 +94,10 @@ interface CanonicalModelConstraints {
   allowed_providers: string[];
 }
 
+interface CanonicalModelPolicyV2 extends CanonicalModelConstraints {
+  mode: "user_select" | "allowlist" | "fixed";
+}
+
 interface CanonicalTools {
   allowed: string[];
   denied: string[];
@@ -217,6 +221,31 @@ function canonicalModelConstraints(value: unknown): CanonicalModelConstraints {
   };
 }
 
+function canonicalModelPolicyV2(value: unknown): CanonicalModelPolicyV2 {
+  if (!exactObject(value, ["allowed_models", "allowed_providers", "mode"])) {
+    throw new AgenteraAgentTrustError("digest_mismatch");
+  }
+  const allowedModels = requireStringArray(value.allowed_models);
+  const allowedProviders = requireStringArray(value.allowed_providers);
+  const mode = value.mode;
+  const valid =
+    (mode === "user_select" &&
+      allowedModels.length === 0 &&
+      allowedProviders.length === 0) ||
+    (mode === "allowlist" &&
+      allowedModels.length > 0 &&
+      allowedProviders.length > 0) ||
+    (mode === "fixed" &&
+      allowedModels.length === 1 &&
+      allowedProviders.length === 1);
+  if (!valid) throw new AgenteraAgentTrustError("digest_mismatch");
+  return {
+    allowed_models: allowedModels,
+    allowed_providers: allowedProviders,
+    mode,
+  };
+}
+
 function canonicalTools(value: unknown): CanonicalTools {
   if (!exactObject(value, ["allowed", "denied"])) {
     throw new AgenteraAgentTrustError("digest_mismatch");
@@ -249,17 +278,26 @@ function canonicalRuntimeCompatibility(
 }
 
 function canonicalManifestBytes(value: unknown): Buffer {
+  if (!isObject(value)) {
+    throw new AgenteraAgentTrustError("digest_mismatch");
+  }
+  const modelField =
+    value.schema_version === 1
+      ? "model_constraints"
+      : value.schema_version === 2
+        ? "model_policy"
+        : null;
   if (
+    modelField === null ||
     !exactObject(value, [
       "assets",
       "dependencies",
       "identity",
-      "model_constraints",
+      modelField,
       "runtime_compatibility",
       "schema_version",
       "tools",
     ]) ||
-    value.schema_version !== 1 ||
     !Array.isArray(value.assets) ||
     value.assets.length > 128 ||
     !Array.isArray(value.dependencies) ||
@@ -301,19 +339,37 @@ function canonicalManifestBytes(value: unknown): Buffer {
       agent_version_id: dependency.agent_version_id,
     };
   });
-  const canonical = {
+  const common = {
     assets,
     dependencies,
     identity: {
       system_prompt: requireString(value.identity.system_prompt, 262_144),
     },
-    model_constraints: canonicalModelConstraints(value.model_constraints),
     runtime_compatibility: canonicalRuntimeCompatibility(
       value.runtime_compatibility,
     ),
-    schema_version: 1,
     tools: canonicalTools(value.tools),
   };
+  const canonical =
+    value.schema_version === 1
+      ? {
+          assets: common.assets,
+          dependencies: common.dependencies,
+          identity: common.identity,
+          model_constraints: canonicalModelConstraints(value.model_constraints),
+          runtime_compatibility: common.runtime_compatibility,
+          schema_version: 1,
+          tools: common.tools,
+        }
+      : {
+          assets: common.assets,
+          dependencies: common.dependencies,
+          identity: common.identity,
+          model_policy: canonicalModelPolicyV2(value.model_policy),
+          runtime_compatibility: common.runtime_compatibility,
+          schema_version: 2,
+          tools: common.tools,
+        };
   return goCanonicalJsonBytes(canonical);
 }
 
@@ -427,14 +483,24 @@ function verifyManifestAssets(
 }
 
 function canonicalPolicyDocumentBytes(value: unknown): Buffer {
+  if (!isObject(value)) {
+    throw new AgenteraAgentTrustError("digest_mismatch");
+  }
+  const modelField =
+    value.schema_version === 1
+      ? "model_constraints"
+      : value.schema_version === 2
+        ? "model_policy"
+        : null;
   if (
+    modelField === null ||
     !exactObject(
       value,
       [
         "agent_definition_id",
         "agent_version_id",
         "deny_rules",
-        "model_constraints",
+        modelField,
         "publication_allowed",
         "runtime_compatibility",
         "schema_version",
@@ -443,7 +509,6 @@ function canonicalPolicyDocumentBytes(value: unknown): Buffer {
       ],
       ["official_context"],
     ) ||
-    value.schema_version !== 1 ||
     !UUID_PATTERN.test(String(value.agent_definition_id)) ||
     !UUID_PATTERN.test(String(value.agent_version_id)) ||
     !DIGEST_PATTERN.test(String(value.version_digest)) ||
@@ -451,12 +516,10 @@ function canonicalPolicyDocumentBytes(value: unknown): Buffer {
   ) {
     throw new AgenteraAgentTrustError("digest_mismatch");
   }
-  const canonical = {
-    schema_version: 1,
+  const common = {
     agent_definition_id: value.agent_definition_id,
     agent_version_id: value.agent_version_id,
     version_digest: value.version_digest,
-    model_constraints: canonicalModelConstraints(value.model_constraints),
     tools: canonicalTools(value.tools),
     runtime_compatibility: canonicalRuntimeCompatibility(
       value.runtime_compatibility,
@@ -471,6 +534,36 @@ function canonicalPolicyDocumentBytes(value: unknown): Buffer {
           ),
         }),
   };
+  const canonical =
+    value.schema_version === 1
+      ? {
+          schema_version: 1,
+          agent_definition_id: common.agent_definition_id,
+          agent_version_id: common.agent_version_id,
+          version_digest: common.version_digest,
+          model_constraints: canonicalModelConstraints(value.model_constraints),
+          tools: common.tools,
+          runtime_compatibility: common.runtime_compatibility,
+          publication_allowed: common.publication_allowed,
+          deny_rules: common.deny_rules,
+          ...(common.official_context === undefined
+            ? {}
+            : { official_context: common.official_context }),
+        }
+      : {
+          schema_version: 2,
+          agent_definition_id: common.agent_definition_id,
+          agent_version_id: common.agent_version_id,
+          version_digest: common.version_digest,
+          model_policy: canonicalModelPolicyV2(value.model_policy),
+          tools: common.tools,
+          runtime_compatibility: common.runtime_compatibility,
+          publication_allowed: common.publication_allowed,
+          deny_rules: common.deny_rules,
+          ...(common.official_context === undefined
+            ? {}
+            : { official_context: common.official_context }),
+        };
   return goCanonicalJsonBytes(canonical);
 }
 

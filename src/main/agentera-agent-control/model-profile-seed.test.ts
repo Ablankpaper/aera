@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { describe, expect, it, vi, type Mocked } from "vitest";
-import type { AgentVersion } from "./client";
+import type { AgentPolicySnapshot, AgentVersion } from "./client";
 import { seedAgentModelProfile } from "./model-profile-seed";
 
 type SeedDependencies = NonNullable<
@@ -17,6 +17,52 @@ function version(providers: string[], models: string[]): AgentVersion {
       },
     },
   } as unknown as AgentVersion;
+}
+
+function versionV2(
+  mode: "user_select" | "allowlist" | "fixed",
+  providers: string[] = [],
+  models: string[] = [],
+): AgentVersion {
+  return {
+    manifest: {
+      schema_version: 2,
+      model_policy: {
+        mode,
+        allowed_providers: providers,
+        allowed_models: models,
+      },
+    },
+  } as unknown as AgentVersion;
+}
+
+function policyV2(
+  mode: "user_select" | "allowlist" | "fixed",
+  providers: string[] = [],
+  models: string[] = [],
+): AgentPolicySnapshot {
+  return {
+    document: {
+      schema_version: 2,
+      model_policy: {
+        mode,
+        allowed_providers: providers,
+        allowed_models: models,
+      },
+    },
+  } as unknown as AgentPolicySnapshot;
+}
+
+function policyV1(providers: string[], models: string[]): AgentPolicySnapshot {
+  return {
+    document: {
+      schema_version: 1,
+      model_constraints: {
+        allowed_providers: providers,
+        allowed_models: models,
+      },
+    },
+  } as unknown as AgentPolicySnapshot;
 }
 
 function dependencies(): Mocked<SeedDependencies> {
@@ -64,6 +110,132 @@ function dependencies(): Mocked<SeedDependencies> {
 }
 
 describe("Agent Profile model seeding", () => {
+  it("copies the exact selected library route instead of the source Profile default", () => {
+    const deps = dependencies();
+    deps.getModelConfig.mockReturnValue({
+      provider: "custom:yundu.lat",
+      model: "claude-sonnet-4-6",
+      baseUrl: "https://yundu.lat/v1",
+    });
+    deps.readModels.mockReturnValue([
+      {
+        id: "selected-petoi-model",
+        name: "gpt-5.6-sol",
+        provider: "custom",
+        providerLabel: "Petoi",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://api.petoi.cn/v1",
+        apiMode: "chat_completions",
+        createdAt: 1,
+      },
+    ]);
+    deps.listCustomProviders.mockReturnValue([
+      {
+        id: "petoi-provider",
+        name: "Petoi",
+        baseUrl: "https://api.petoi.cn/v1",
+        createdAt: 1,
+      },
+    ]);
+    deps.upsertNativeCustomProvider.mockReturnValue("custom:petoi");
+
+    seedAgentModelProfile(
+      {
+        sourceProfileId: "source-profile",
+        sourceModelId: "selected-petoi-model",
+        targetProfileId: "target-profile",
+        version: versionV2("user_select"),
+        policy: policyV2("user_select"),
+      },
+      deps,
+    );
+
+    expect(deps.getSecret).toHaveBeenCalledWith(
+      "CUSTOM_PROVIDER_PETOI_KEY",
+      "source-profile",
+    );
+    expect(deps.setModelConfig).toHaveBeenCalledWith(
+      "custom:petoi",
+      "gpt-5.6-sol",
+      "https://api.petoi.cn/v1",
+      "target-profile",
+      undefined,
+      "chat_completions",
+    );
+  });
+
+  it("rejects a legacy custom model row that has no provider identity", () => {
+    const deps = dependencies();
+    deps.readModels.mockReturnValue([
+      {
+        id: "ambiguous-custom-model",
+        name: "gpt-5.6-sol",
+        provider: "custom",
+        model: "gpt-5.6-sol",
+        baseUrl: "",
+        createdAt: 1,
+      },
+    ]);
+
+    expect(() =>
+      seedAgentModelProfile(
+        {
+          sourceProfileId: "source-profile",
+          sourceModelId: "ambiguous-custom-model",
+          targetProfileId: "target-profile",
+          version: versionV2("user_select"),
+          policy: policyV2("user_select"),
+        },
+        deps,
+      ),
+    ).toThrow(/identity is unavailable/i);
+    expect(deps.getSecret).not.toHaveBeenCalled();
+    expect(deps.setModelConfig).not.toHaveBeenCalled();
+  });
+
+  it("uses the current owner's live route for a V2 user_select Agent", () => {
+    const deps = dependencies();
+
+    seedAgentModelProfile(
+      {
+        sourceProfileId: "source-profile",
+        targetProfileId: "target-profile",
+        version: versionV2("user_select"),
+        policy: policyV2("user_select"),
+      },
+      deps,
+    );
+
+    expect(deps.setModelConfig).toHaveBeenCalledWith(
+      "custom:anhepro.com",
+      "gpt-5.6-sol",
+      "https://api.anhepro.com/v1",
+      "target-profile",
+      64_000,
+      "chat_completions",
+    );
+  });
+
+  it("enforces the signed effective tenant policy in addition to the version manifest", () => {
+    const deps = dependencies();
+
+    expect(() =>
+      seedAgentModelProfile(
+        {
+          sourceProfileId: "source-profile",
+          targetProfileId: "target-profile",
+          version: versionV2("user_select"),
+          policy: policyV2("allowlist", ["openai"], ["gpt-5.6"]),
+        },
+        deps,
+      ),
+    ).toThrow(/effective policy/i);
+
+    expect(deps.getSecret).not.toHaveBeenCalled();
+    expect(deps.setModelConfig).not.toHaveBeenCalled();
+    expect(deps.setEnvValue).not.toHaveBeenCalled();
+  });
+
   it("validates a compatible installed Agent Profile without copying its model route onto itself", () => {
     const deps = dependencies();
 
@@ -72,6 +244,7 @@ describe("Agent Profile model seeding", () => {
         sourceProfileId: "installed-agent",
         targetProfileId: "installed-agent",
         version: version(["custom:anhepro.com"], ["gpt-5.6-sol"]),
+        policy: policyV1(["custom:anhepro.com"], ["gpt-5.6-sol"]),
       },
       deps,
     );
@@ -94,6 +267,7 @@ describe("Agent Profile model seeding", () => {
         sourceProfileId: "source-profile",
         targetProfileId: "target-profile",
         version: version(["custom:anhepro.com"], ["gpt-5.6-sol"]),
+        policy: policyV1(["custom:anhepro.com"], ["gpt-5.6-sol"]),
       },
       deps,
     );
@@ -165,6 +339,7 @@ describe("Agent Profile model seeding", () => {
         sourceProfileId: "source-profile",
         targetProfileId: "source-profile",
         version: version(["custom:anhepro.com"], ["signed-model"]),
+        policy: policyV1(["custom:anhepro.com"], ["signed-model"]),
       },
       deps,
     );
@@ -198,6 +373,7 @@ describe("Agent Profile model seeding", () => {
           sourceProfileId: "source-profile",
           targetProfileId: "target-profile",
           version: version(["openai"], ["gpt-5.6"]),
+          policy: policyV1(["openai"], ["gpt-5.6"]),
         },
         deps,
       ),
@@ -219,6 +395,7 @@ describe("Agent Profile model seeding", () => {
           sourceProfileId: "source-profile",
           targetProfileId: "target-profile",
           version: version(["custom:anhepro.com"], ["gpt-5.6-sol"]),
+          policy: policyV1(["custom:anhepro.com"], ["gpt-5.6-sol"]),
         },
         deps,
       ),

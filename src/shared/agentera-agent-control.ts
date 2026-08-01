@@ -69,16 +69,13 @@ export interface AgentEditableDependency {
   agentVersionId: string;
 }
 
-export interface AgentEditableManifest {
-  schemaVersion: 1;
+export type AgentModelSelectionMode = "user_select" | "allowlist" | "fixed";
+
+interface AgentEditableManifestBase {
   identity: {
     systemPrompt: string;
   };
   assets: AgentEditableManifestAsset[];
-  modelConstraints: {
-    allowedProviders: string[];
-    allowedModels: string[];
-  };
   tools: {
     allowed: string[];
     denied: string[];
@@ -87,6 +84,44 @@ export interface AgentEditableManifest {
   runtimeCompatibility: {
     minimumVersion: string;
     maximumVersionExclusive: string | null;
+  };
+}
+
+export interface AgentEditableManifestV1 extends AgentEditableManifestBase {
+  schemaVersion: 1;
+  modelConstraints: {
+    allowedProviders: string[];
+    allowedModels: string[];
+  };
+}
+
+export interface AgentEditableManifestV2 extends AgentEditableManifestBase {
+  schemaVersion: 2;
+  modelPolicy: {
+    mode: AgentModelSelectionMode;
+    allowedProviders: string[];
+    allowedModels: string[];
+  };
+}
+
+export type AgentEditableManifest =
+  | AgentEditableManifestV1
+  | AgentEditableManifestV2;
+
+export interface AgentRuntimeModelPolicy {
+  mode: AgentModelSelectionMode;
+  allowedProviders: readonly string[];
+  allowedModels: readonly string[];
+}
+
+export function runtimeModelPolicyForEditableManifest(
+  manifest: AgentEditableManifest,
+): AgentRuntimeModelPolicy {
+  if (manifest.schemaVersion === 2) return manifest.modelPolicy;
+  return {
+    mode: "allowlist",
+    allowedProviders: manifest.modelConstraints.allowedProviders,
+    allowedModels: manifest.modelConstraints.allowedModels,
   };
 }
 
@@ -350,6 +385,9 @@ export type AgenteraAgentControlErrorCode =
   | "not_found"
   | "conflict"
   | "verification_failed"
+  | "signature_verification_failed"
+  | "published_content_mismatch"
+  | "publication_cache_failed"
   | "runtime_incompatible"
   | "profile_model_configuration_failed"
   | "local_runtime_required"
@@ -428,11 +466,31 @@ export interface AgenteraAgentInstallationSummary {
   updatedAt: string;
 }
 
+/** A local, credential-backed model route eligible for one Agent Runtime. */
+export interface AgentRuntimeModelRoute {
+  /** Profile + library-row identity; local only and never published. */
+  id: string;
+  sourceProfileId: string;
+  modelLibraryId: string;
+  provider: string;
+  providerLabel: string;
+  model: string;
+  displayName: string;
+  baseUrl: string;
+}
+
+/** Renderer selection revalidated by Main before any Runtime Profile write. */
+export interface AgentRuntimeModelSelection {
+  sourceProfileId: string;
+  modelLibraryId: string;
+}
+
 export interface AgenteraInstallVersionInput {
   definitionId: string;
   versionId: string;
   profileName: string;
   modelProfileId?: string;
+  modelSelection?: AgentRuntimeModelSelection;
 }
 
 export interface AgenteraClaimVersionInput {
@@ -443,7 +501,12 @@ export interface AgenteraClaimVersionInput {
 }
 
 export type AgenteraPendingInstallationTarget =
-  | { kind: "fresh"; profileName: string; modelProfileId?: string }
+  | {
+      kind: "fresh";
+      profileName: string;
+      modelProfileId?: string;
+      modelSelection?: AgentRuntimeModelSelection;
+    }
   | {
       kind: "claim";
       localProfileId: string;
@@ -464,7 +527,8 @@ export interface AgenteraSelectInstallationVersionInput {
 export interface AgenteraRepairInstallationModelInput {
   id: string;
   localProfileId: string;
-  modelProfileId: string;
+  modelProfileId?: string;
+  modelSelection?: AgentRuntimeModelSelection;
 }
 
 export interface EligibleExperienceSkill {

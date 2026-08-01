@@ -245,6 +245,7 @@ import {
   listModels,
   addModel,
   removeModel,
+  removeModelsForCustomProvider,
   updateModel,
   listModelDefinitions,
   getModelDefinition,
@@ -414,6 +415,7 @@ import type {
   SetAgenteraGlobalProfileEntryInput,
 } from "../../shared/agentera-global-profile";
 import type { ConversationBoundary } from "../agentera-agent-control/conversation-boundary-store";
+import { listAgentRuntimeModelRoutes } from "../agentera-agent-control/runtime-model-routes";
 import {
   createWallet,
   deleteWallet,
@@ -3639,7 +3641,7 @@ export function registerIpcHandlers(context: IpcContext): void {
           history,
           attachments,
           contextFolder,
-          modelOverride,
+          preparedAgentTurn?.modelOverride ?? modelOverride,
           conversationEnvelope,
         );
 
@@ -4335,6 +4337,9 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle("list-custom-providers", (_event, profile?: string) =>
     listCustomProviders(profile),
   );
+  ipcMain.handle("list-agent-runtime-model-routes", (_event, profile: string) =>
+    listAgentRuntimeModelRoutes(profile),
+  );
   ipcMain.handle(
     "upsert-custom-provider",
     (
@@ -4350,11 +4355,37 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle(
     "remove-custom-provider",
     (_event, profile: string | undefined, name: string) => {
+      const anchor = customProviderEnvKey(name);
+      const provider = listCustomProviders(profile).find(
+        (candidate) => customProviderEnvKey(candidate.name) === anchor,
+      );
       removeCustomProvider(profile, name);
       removeNativeCustomProvider(profile, name);
+      const removedModels = removeModelsForCustomProvider(
+        provider?.name || name,
+        provider?.baseUrl,
+      );
+      const currentModel = getModelConfig(profile);
+      const currentCustomName = namedCustomProviderRuntimeName(
+        currentModel.provider,
+      );
+      const deletedCustomName = normalizeCustomProviderRuntimeName(
+        provider?.name || name,
+      );
+      const currentUsesDeletedProvider =
+        isCustomProviderRoute(currentModel.provider) &&
+        ((Boolean(currentCustomName) &&
+          currentCustomName === deletedCustomName) ||
+          (Boolean(provider?.baseUrl) &&
+            normalizedBaseUrl(currentModel.baseUrl) ===
+              normalizedBaseUrl(provider?.baseUrl)));
+      if (currentUsesDeletedProvider) {
+        setModelConfig("auto", "", "", profile);
+      }
       stopDashboard(profile);
       notifyConnectionConfigChanged();
       notifyCustomProvidersChanged();
+      if (removedModels > 0) notifyModelLibraryChanged();
     },
   );
   // Cloud wallets provisioned by the backend for the profile's linked agent.

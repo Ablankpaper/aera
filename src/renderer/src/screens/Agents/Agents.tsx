@@ -3,6 +3,7 @@ import type {
   AgentSyncResult,
   AgentSyncStatus,
 } from "../../../../shared/agent-sync";
+import type { AgentRuntimeModelRoute } from "../../../../shared/agentera-agent-control";
 import AgentControlPanel, {
   type AgentChatOpenOptions,
 } from "./AgentControlPanel";
@@ -54,6 +55,9 @@ export function selectAgentModelProfileId(
 
 function Agents({ activeProfile, onChatWith }: AgentsProps): React.JSX.Element {
   const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
+  const [runtimeModelRoutes, setRuntimeModelRoutes] = useState<
+    AgentRuntimeModelRoute[] | undefined
+  >(undefined);
   const modelProfileId = useMemo(
     () => selectAgentModelProfileId(profiles, activeProfile),
     [activeProfile, profiles],
@@ -81,17 +85,62 @@ function Agents({ activeProfile, onChatWith }: AgentsProps): React.JSX.Element {
     return list;
   }, []);
 
+  const modelSourceProfileIds = useMemo(() => {
+    const ownerProfiles = profiles.filter(
+      (profile) => !profile.agentInstallationId,
+    );
+    const eligible = ownerProfiles.length > 0 ? ownerProfiles : profiles;
+    const preferred = [
+      ...eligible.filter((profile) => profile.id === activeProfile),
+      ...eligible.filter((profile) => profile.id !== activeProfile),
+    ];
+    return [...new Set(preferred.map((profile) => profile.id))];
+  }, [activeProfile, profiles]);
+
+  const loadRuntimeModelRoutes = useCallback(async (): Promise<void> => {
+    const bridge = window.hermesAPI.listAgentRuntimeModelRoutes;
+    if (!bridge) {
+      setRuntimeModelRoutes(undefined);
+      return;
+    }
+    if (modelSourceProfileIds.length === 0) {
+      setRuntimeModelRoutes([]);
+      return;
+    }
+    const batches = await Promise.all(
+      modelSourceProfileIds.map((profileId) => bridge(profileId)),
+    );
+    const byRoute = new Map<string, AgentRuntimeModelRoute>();
+    for (const route of batches.flat()) {
+      const key = `${route.provider}\0${route.model}\0${route.baseUrl}`;
+      if (!byRoute.has(key)) byRoute.set(key, route);
+    }
+    setRuntimeModelRoutes([...byRoute.values()]);
+  }, [modelSourceProfileIds]);
+
   useEffect(() => {
     loadProfiles();
   }, [loadProfiles]);
 
-  useEffect(
-    () =>
-      window.hermesAPI.onModelLibraryChanged(() => {
-        void loadProfiles();
-      }),
-    [loadProfiles],
-  );
+  useEffect(() => {
+    void loadRuntimeModelRoutes();
+  }, [loadRuntimeModelRoutes]);
+
+  useEffect(() => {
+    const reloadRoutes = (): void => {
+      void Promise.all([loadProfiles(), loadRuntimeModelRoutes()]);
+    };
+    const offModels = window.hermesAPI.onModelLibraryChanged(reloadRoutes);
+    const offProviders =
+      window.hermesAPI.onCustomProvidersChanged(reloadRoutes);
+    const offConnection =
+      window.hermesAPI.onConnectionConfigChanged(reloadRoutes);
+    return () => {
+      offModels();
+      offProviders();
+      offConnection();
+    };
+  }, [loadProfiles, loadRuntimeModelRoutes]);
 
   // Cloud sync: null while the signed-in state is still loading.
   const [, setSyncStatus] = useState<AgentSyncStatus | null>(null);
@@ -190,6 +239,7 @@ function Agents({ activeProfile, onChatWith }: AgentsProps): React.JSX.Element {
     <div className="agents-container">
       <AgentControlPanel
         profiles={agentProfiles}
+        runtimeModelRoutes={runtimeModelRoutes}
         initialTab="mine"
         onChatWithProfile={(profileId, options) =>
           void handleChatWith(profileId, options)

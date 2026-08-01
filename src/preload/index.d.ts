@@ -90,6 +90,7 @@ import type {
   AgenteraAgentControlResult,
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
+  AgentRuntimeModelRoute,
   AgenteraAgentOperationScope,
   AgenteraAgentVersionSummary,
   AgenteraClaimVersionInput,
@@ -902,6 +903,9 @@ interface HermesAPI {
   getModelConfig: (
     profile?: string,
   ) => Promise<{ provider: string; model: string; baseUrl: string }>;
+  listAgentRuntimeModelRoutes: (
+    profile: string,
+  ) => Promise<AgentRuntimeModelRoute[]>;
   getAuxiliaryConfig: (
     profile?: string,
   ) => Promise<

@@ -700,7 +700,7 @@ describe("ModelCenter", () => {
         "acceptance",
       ),
     );
-    expect(removeModel).toHaveBeenCalledWith("anhepro-model");
+    expect(removeModel).not.toHaveBeenCalled();
     expect(removeCustomProvider).toHaveBeenCalledWith(
       "acceptance",
       "anhepro.com",

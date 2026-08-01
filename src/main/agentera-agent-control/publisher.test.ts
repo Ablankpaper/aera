@@ -40,7 +40,6 @@ import { AgentDraftStore } from "./draft-store";
 import { canonicalizeEditableAgent } from "./manifest";
 import {
   AgentPublisher,
-  AgentPublisherError,
   type AgentPublicationClient,
   type VerifiedAgentVersionCache,
 } from "./publisher";
@@ -547,7 +546,7 @@ describe("explicit Agent publication", () => {
     const preview = service.preparePublication(DRAFT_ID);
     await expect(
       service.confirmPublication(preview.publicationHandle),
-    ).rejects.toBeInstanceOf(AgentPublisherError);
+    ).rejects.toMatchObject({ code: "published_content_mismatch" });
     expect(cacheVersion).not.toHaveBeenCalled();
     expect(drafts.getDraft(DRAFT_ID).publishedRevision).toBeNull();
   });
@@ -567,12 +566,52 @@ describe("explicit Agent publication", () => {
 
     await expect(
       service.confirmPublication(preview.publicationHandle),
-    ).rejects.toMatchObject({ code: "published_content_mismatch" });
+    ).rejects.toMatchObject({ code: "signature_verification_failed" });
     expect(cacheVersion).not.toHaveBeenCalled();
     expect(drafts.getDraft(DRAFT_ID).publishedRevision).toBeNull();
     expect(drafts.getDraft(DRAFT_ID).lastPublicationAttempt).toMatchObject({
       errorCode: "signature_invalid",
-      errorSummary: "Publication failed.",
+      errorSummary: "Published Agent signature verification failed.",
+    });
+  });
+
+  it("keeps Runtime incompatibility distinct from signature verification", async () => {
+    const service = new AgentPublisher({
+      drafts,
+      client,
+      trust,
+      cache,
+      runtimeVersion: "v0.18.1",
+      randomUUID: () => HANDLE_ID,
+    });
+    const preview = service.preparePublication(DRAFT_ID);
+
+    await expect(
+      service.confirmPublication(preview.publicationHandle),
+    ).rejects.toMatchObject({ code: "runtime_incompatible" });
+    expect(cacheVersion).not.toHaveBeenCalled();
+    expect(drafts.getDraft(DRAFT_ID).lastPublicationAttempt).toMatchObject({
+      errorCode: "runtime_incompatible",
+      errorSummary: "Runtime version is incompatible.",
+    });
+  });
+
+  it("reports a verified-version cache failure separately from signature and content failures", async () => {
+    cacheVersion.mockImplementationOnce(() => {
+      throw Object.assign(new Error("private cache path"), {
+        code: "cache_corrupt",
+      });
+    });
+    const service = publisher();
+    const preview = service.preparePublication(DRAFT_ID);
+
+    await expect(
+      service.confirmPublication(preview.publicationHandle),
+    ).rejects.toMatchObject({ code: "publication_cache_failed" });
+    expect(drafts.getDraft(DRAFT_ID).publishedRevision).toBeNull();
+    expect(drafts.getDraft(DRAFT_ID).lastPublicationAttempt).toMatchObject({
+      errorCode: "cache_corrupt",
+      errorSummary: "Verified Agent version cache failed.",
     });
   });
 });

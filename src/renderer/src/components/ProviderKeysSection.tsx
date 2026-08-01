@@ -521,22 +521,13 @@ export function ProviderKeysSection({
     setEditing(null);
   }
 
-  // Remove a custom provider: delete its models (matched by label, or base URL
-  // for legacy unlabeled ones), drop its identity record, then clear its key.
+  // Main owns the provider + model-library cascade as one operation. Keeping
+  // the delete below profile-scoped also prevents renderer-side read/rewrite
+  // loops from racing another model-library mutation.
   async function removeCustomAndClose(
     name: string,
-    baseUrl: string,
+    _baseUrl: string,
   ): Promise<void> {
-    const all = (await window.hermesAPI.listModels()) as LibModel[];
-    const target = normUrl(baseUrl);
-    for (const m of all) {
-      if (m.provider !== "custom") continue;
-      const match = name
-        ? m.providerLabel === name ||
-          (!m.providerLabel && normUrl(m.baseUrl) === target)
-        : normUrl(m.baseUrl) === target;
-      if (match) await window.hermesAPI.removeModel(m.id);
-    }
     if (name) {
       await window.hermesAPI.removeCustomProvider(profile, name);
       await onRemove(customProviderEnvKey(name));

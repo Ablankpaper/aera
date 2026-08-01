@@ -269,26 +269,36 @@ class StrictJsonParser {
 }
 
 function copyEditableManifest(value: unknown): AgentEditableManifest {
+  if (!isJsonObject(value)) return invalidContent();
+  const schemaVersion = value.schemaVersion;
+  const fields =
+    schemaVersion === 1
+      ? [
+          "schemaVersion",
+          "identity",
+          "assets",
+          "modelConstraints",
+          "tools",
+          "dependencies",
+          "runtimeCompatibility",
+        ]
+      : schemaVersion === 2
+        ? [
+            "schemaVersion",
+            "identity",
+            "assets",
+            "modelPolicy",
+            "tools",
+            "dependencies",
+            "runtimeCompatibility",
+          ]
+        : [];
   if (
-    !exactObject(value, [
-      "schemaVersion",
-      "identity",
-      "assets",
-      "modelConstraints",
-      "tools",
-      "dependencies",
-      "runtimeCompatibility",
-    ]) ||
-    value.schemaVersion !== 1 ||
+    fields.length === 0 ||
+    !exactObject(value, fields) ||
     !exactObject(value.identity, ["systemPrompt"]) ||
     typeof value.identity.systemPrompt !== "string" ||
     !Array.isArray(value.assets) ||
-    !exactObject(value.modelConstraints, [
-      "allowedProviders",
-      "allowedModels",
-    ]) ||
-    !Array.isArray(value.modelConstraints.allowedProviders) ||
-    !Array.isArray(value.modelConstraints.allowedModels) ||
     !exactObject(value.tools, ["allowed", "denied"]) ||
     !Array.isArray(value.tools.allowed) ||
     !Array.isArray(value.tools.denied) ||
@@ -300,6 +310,32 @@ function copyEditableManifest(value: unknown): AgentEditableManifest {
     typeof value.runtimeCompatibility.minimumVersion !== "string" ||
     (value.runtimeCompatibility.maximumVersionExclusive !== null &&
       typeof value.runtimeCompatibility.maximumVersionExclusive !== "string")
+  ) {
+    return invalidContent();
+  }
+  if (
+    schemaVersion === 1 &&
+    (!exactObject(value.modelConstraints, [
+      "allowedProviders",
+      "allowedModels",
+    ]) ||
+      !Array.isArray(value.modelConstraints.allowedProviders) ||
+      !Array.isArray(value.modelConstraints.allowedModels))
+  ) {
+    return invalidContent();
+  }
+  if (
+    schemaVersion === 2 &&
+    (!exactObject(value.modelPolicy, [
+      "mode",
+      "allowedProviders",
+      "allowedModels",
+    ]) ||
+      (value.modelPolicy.mode !== "user_select" &&
+        value.modelPolicy.mode !== "allowlist" &&
+        value.modelPolicy.mode !== "fixed") ||
+      !Array.isArray(value.modelPolicy.allowedProviders) ||
+      !Array.isArray(value.modelPolicy.allowedModels))
   ) {
     return invalidContent();
   }
@@ -337,22 +373,18 @@ function copyEditableManifest(value: unknown): AgentEditableManifest {
       agentVersionId: dependency.agentVersionId,
     };
   });
-  const copyStringArray = (input: unknown[]): string[] => {
-    if (!input.every((item) => typeof item === "string")) {
+  const copyStringArray = (input: unknown): string[] => {
+    if (
+      !Array.isArray(input) ||
+      !input.every((item) => typeof item === "string")
+    ) {
       return invalidContent();
     }
     return [...(input as string[])];
   };
-  return {
-    schemaVersion: 1,
+  const common = {
     identity: { systemPrompt: value.identity.systemPrompt },
     assets,
-    modelConstraints: {
-      allowedProviders: copyStringArray(
-        value.modelConstraints.allowedProviders,
-      ),
-      allowedModels: copyStringArray(value.modelConstraints.allowedModels),
-    },
     tools: {
       allowed: copyStringArray(value.tools.allowed),
       denied: copyStringArray(value.tools.denied),
@@ -362,6 +394,27 @@ function copyEditableManifest(value: unknown): AgentEditableManifest {
       minimumVersion: value.runtimeCompatibility.minimumVersion,
       maximumVersionExclusive:
         value.runtimeCompatibility.maximumVersionExclusive,
+    },
+  };
+  if (schemaVersion === 1) {
+    const modelConstraints = value.modelConstraints as JsonObject;
+    return {
+      schemaVersion: 1,
+      ...common,
+      modelConstraints: {
+        allowedProviders: copyStringArray(modelConstraints.allowedProviders),
+        allowedModels: copyStringArray(modelConstraints.allowedModels),
+      },
+    };
+  }
+  const modelPolicy = value.modelPolicy as JsonObject;
+  return {
+    schemaVersion: 2,
+    ...common,
+    modelPolicy: {
+      mode: modelPolicy.mode as "user_select" | "allowlist" | "fixed",
+      allowedProviders: copyStringArray(modelPolicy.allowedProviders),
+      allowedModels: copyStringArray(modelPolicy.allowedModels),
     },
   };
 }
@@ -609,11 +662,27 @@ export function canonicalizeEditableAgent(
   }
   if (manifestPaths.size !== bundleByPath.size) return invalidContent();
 
-  const providers = canonicalStringSet(
-    manifest.modelConstraints.allowedProviders,
-  );
-  const models = canonicalStringSet(manifest.modelConstraints.allowedModels);
-  if (providers.length === 0 || models.length === 0) return invalidContent();
+  const modelPolicy =
+    manifest.schemaVersion === 1
+      ? {
+          mode: "allowlist" as const,
+          allowedProviders: manifest.modelConstraints.allowedProviders,
+          allowedModels: manifest.modelConstraints.allowedModels,
+        }
+      : manifest.modelPolicy;
+  const providers = canonicalStringSet(modelPolicy.allowedProviders);
+  const models = canonicalStringSet(modelPolicy.allowedModels);
+  const modelPolicyValid =
+    (modelPolicy.mode === "user_select" &&
+      providers.length === 0 &&
+      models.length === 0) ||
+    (modelPolicy.mode === "allowlist" &&
+      providers.length > 0 &&
+      models.length > 0) ||
+    (modelPolicy.mode === "fixed" &&
+      providers.length === 1 &&
+      models.length === 1);
+  if (!modelPolicyValid) return invalidContent();
   const allowedTools = canonicalStringSet(manifest.tools.allowed);
   const deniedTools = canonicalStringSet(manifest.tools.denied);
   if (deniedTools.some((tool) => allowedTools.includes(tool))) {
@@ -667,21 +736,39 @@ export function canonicalizeEditableAgent(
     .sort(([left], [right]) => utf8Compare(left, right))
     .map(([path, content]) => ({ content, path }));
 
-  const canonicalManifest = {
-    assets: canonicalAssets,
-    dependencies,
-    identity: { system_prompt: manifest.identity.systemPrompt },
-    model_constraints: {
-      allowed_models: models,
-      allowed_providers: providers,
-    },
-    runtime_compatibility: {
-      maximum_version_exclusive: maximum?.normalized ?? null,
-      minimum_version: minimum.normalized,
-    },
-    schema_version: 1,
-    tools: { allowed: allowedTools, denied: deniedTools },
-  };
+  const canonicalManifest =
+    manifest.schemaVersion === 1
+      ? {
+          assets: canonicalAssets,
+          dependencies,
+          identity: { system_prompt: manifest.identity.systemPrompt },
+          model_constraints: {
+            allowed_models: models,
+            allowed_providers: providers,
+          },
+          runtime_compatibility: {
+            maximum_version_exclusive: maximum?.normalized ?? null,
+            minimum_version: minimum.normalized,
+          },
+          schema_version: 1,
+          tools: { allowed: allowedTools, denied: deniedTools },
+        }
+      : {
+          assets: canonicalAssets,
+          dependencies,
+          identity: { system_prompt: manifest.identity.systemPrompt },
+          model_policy: {
+            allowed_models: models,
+            allowed_providers: providers,
+            mode: modelPolicy.mode,
+          },
+          runtime_compatibility: {
+            maximum_version_exclusive: maximum?.normalized ?? null,
+            minimum_version: minimum.normalized,
+          },
+          schema_version: 2,
+          tools: { allowed: allowedTools, denied: deniedTools },
+        };
   const manifestBytes = canonicalJsonBytes(canonicalManifest);
   if (manifestBytes.length > MAX_AGENT_MANIFEST_BYTES) return invalidContent();
   const bundleBytes = canonicalJsonBytes({ assets: bundleAssets });
@@ -695,29 +782,45 @@ export function canonicalizeEditableAgent(
     .update(bundleBytes)
     .digest("hex");
 
-  return {
-    normalizedManifest: {
-      schemaVersion: 1,
-      identity: { systemPrompt: manifest.identity.systemPrompt },
-      assets: assetMetadata.map(({ path, kind, mediaType }) => ({
-        path,
-        kind,
-        mediaType,
-      })),
-      modelConstraints: {
-        allowedProviders: providers,
-        allowedModels: models,
-      },
-      tools: { allowed: allowedTools, denied: deniedTools },
-      dependencies: dependencies.map((dependency) => ({
-        agentDefinitionId: dependency.agent_definition_id,
-        agentVersionId: dependency.agent_version_id,
-      })),
-      runtimeCompatibility: {
-        minimumVersion: minimum.normalized,
-        maximumVersionExclusive: maximum?.normalized ?? null,
-      },
+  const normalizedCommon = {
+    identity: { systemPrompt: manifest.identity.systemPrompt },
+    assets: assetMetadata.map(({ path, kind, mediaType }) => ({
+      path,
+      kind,
+      mediaType,
+    })),
+    tools: { allowed: allowedTools, denied: deniedTools },
+    dependencies: dependencies.map((dependency) => ({
+      agentDefinitionId: dependency.agent_definition_id,
+      agentVersionId: dependency.agent_version_id,
+    })),
+    runtimeCompatibility: {
+      minimumVersion: minimum.normalized,
+      maximumVersionExclusive: maximum?.normalized ?? null,
     },
+  };
+  const normalizedManifest: AgentEditableManifest =
+    manifest.schemaVersion === 1
+      ? {
+          schemaVersion: 1,
+          ...normalizedCommon,
+          modelConstraints: {
+            allowedProviders: providers,
+            allowedModels: models,
+          },
+        }
+      : {
+          schemaVersion: 2,
+          ...normalizedCommon,
+          modelPolicy: {
+            mode: modelPolicy.mode,
+            allowedProviders: providers,
+            allowedModels: models,
+          },
+        };
+
+  return {
+    normalizedManifest,
     assets: assetMetadata,
     manifestBytes,
     bundleBytes,

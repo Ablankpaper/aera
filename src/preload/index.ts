@@ -84,6 +84,7 @@ import type {
   AgenteraAgentControlResult,
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
+  AgentRuntimeModelRoute,
   AgenteraAgentOperationScope,
   AgenteraAgentVersionSummary,
   AgenteraClaimVersionInput,
@@ -404,6 +405,11 @@ const hermesAPI = {
     profile?: string,
   ): Promise<{ provider: string; model: string; baseUrl: string }> =>
     ipcRenderer.invoke("get-model-config", profile),
+
+  listAgentRuntimeModelRoutes: (
+    profile: string,
+  ): Promise<AgentRuntimeModelRoute[]> =>
+    ipcRenderer.invoke("list-agent-runtime-model-routes", profile),
 
   setModelConfig: (
     provider: string,

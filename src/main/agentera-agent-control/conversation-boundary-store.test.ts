@@ -165,6 +165,7 @@ describe("ConversationBoundaryStore", () => {
       agentInstallationId: "40000000-0000-4000-8000-000000000003",
       runtimeProfileId: "40000000-0000-4000-8000-000000000004",
       runtimeVersion: "v0.18.2-agentera.1",
+      modelRoute: { provider: "openai", model: "gpt-5.6", baseUrl: "" },
       policySnapshotId: "40000000-0000-4000-8000-000000000005",
       officialReleaseRevisionId: null,
       toolPermissionDigest: "a".repeat(64),
