@@ -8,6 +8,20 @@ The first enterprise slice establishes Organization authorization and desktop pr
 
 It supports Organization lifecycle, one transferable Owner, Admin/Auditor/Member roles, single-level Departments, one-time invitations, immutable signed policy snapshots, audit, and offline read-only metadata. The locked design is `docs/superpowers/specs/2026-07-21-agentera-organization-foundation-v1-design.md`.
 
+## Invitations
+
+Organization invitations are single-use, seven-day bearer grants whose raw token is never persisted.
+
+Cloud persists only the token digest and returns the fragment-only deep link once. Desktop keeps a received token only in the volatile main-process inbox and routes invitation copying through Electron's main-process clipboard bridge; success is shown only after the write resolves, while failure instructs the administrator to copy the visible one-time link manually.
+
+Acceptance distinguishes an unknown link from an expired, revoked, or already-used invitation without exposing raw tokens or server details. Unknown remains `invitation_unavailable`; expired and revoked links are gone, and a consumed single-use link is a conflict. The renderer removes the fragment before display and presents the exact safe state.
+
+### Independent live proof
+
+`tests/e2e/agentera-organization-invitation-live.e2e.ts` is the invitation-only real Desktop and Cloud acceptance gate; it proves the system clipboard and terminal link states without performing any Agent action.
+
+The gate builds and starts the exact configured Cloud checkout, authenticates three fresh Desktop accounts, creates the Organization and invitation through the real control plane, copies the one-time `aera://` link through Electron's system clipboard bridge, accepts it on a second Desktop, and verifies exact already-used and revoked states on a third Desktop. It refreshes the Owner projection to prove the accepted membership without creating, publishing, reviewing, installing, or running any Agent. Run it with `AGENTERA_E2E_CLOUD_ROOT=<exact-cloud-checkout> AGENTERA_RUNTIME_SEED_DIR=<locked-runtime-seed> npm run test:e2e:organization-invitation-live`.
+
 Organization Agent V1 adds `owner_scope=ORGANIZATION`, mandatory submission review with one Owner/Admin approval, and USER-owned member installation without changing Hermes runtime ownership.
 
 The approved specification is `docs/superpowers/specs/2026-07-21-agentera-organization-agent-v1-design.md`.

@@ -293,8 +293,10 @@ function installAPIs(
 function renderDialog(
   role: OrganizationRole = "owner",
   offline = false,
+  copyInvitationLink = vi.fn().mockResolvedValue(undefined),
 ): ReturnType<typeof installAPIs> & {
   onClose: ReturnType<typeof vi.fn>;
+  copyInvitationLink: ReturnType<typeof vi.fn>;
   unmount: () => void;
 } {
   const api = installAPIs(role, { offline });
@@ -308,9 +310,10 @@ function renderDialog(
           : authState
       }
       onClose={onClose}
+      copyInvitationLink={copyInvitationLink}
     />,
   );
-  return { ...api, onClose, unmount: rendered.unmount };
+  return { ...api, onClose, copyInvitationLink, unmount: rendered.unmount };
 }
 
 describe("OrganizationManagementDialog", () => {
@@ -322,7 +325,7 @@ describe("OrganizationManagementDialog", () => {
   });
 
   it("gives Owner the complete management surface and keeps invitation secret display one-shot", async () => {
-    const { organizationAPI } = renderDialog("owner");
+    const { organizationAPI, copyInvitationLink } = renderDialog("owner");
     await screen.findByText("Acme Enterprise");
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
       "navigation.organization.management.overview",
@@ -349,13 +352,49 @@ describe("OrganizationManagementDialog", () => {
         name: "navigation.organization.management.copyInvitation",
       }),
     );
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(INVITE_URL);
+    await waitFor(() =>
+      expect(copyInvitationLink).toHaveBeenCalledWith(INVITE_URL),
+    );
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", {
+        name: "navigation.organization.management.invitationCopied",
+      }),
+    ).toBeInTheDocument();
     expect(organizationAPI.createInvitation).toHaveBeenCalledWith({
       organizationId: ORGANIZATION_A,
     });
     expect(
       JSON.stringify(organizationAPI.createInvitation.mock.calls),
     ).not.toContain("owner");
+  });
+
+  it("reports clipboard failure instead of leaving a stale invitation silently copied", async () => {
+    const copyToClipboard = vi.fn().mockRejectedValue(new Error("denied"));
+    renderDialog("owner", false, copyToClipboard);
+    await screen.findByText("Acme Enterprise");
+    fireEvent.click(
+      screen.getByRole("tab", {
+        name: "navigation.organization.management.invitations",
+      }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "navigation.organization.management.createInvitation",
+      }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "navigation.organization.management.copyInvitation",
+      }),
+    );
+    expect(
+      await screen.findByRole("alert", {
+        name: "navigation.organization.management.invitationCopyFailed",
+      }),
+    ).toBeInTheDocument();
+    expect(copyToClipboard).toHaveBeenCalledWith(INVITE_URL);
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
   });
 
   it("gives Admin management and invitation controls without Owner-only lifecycle actions", async () => {
@@ -548,6 +587,7 @@ describe("OrganizationManagementDialog", () => {
         open
         authState={authState}
         onClose={vi.fn()}
+        copyInvitationLink={vi.fn().mockResolvedValue(undefined)}
       />,
     );
     await screen.findByText("Acme Enterprise");
@@ -651,6 +691,7 @@ describe("OrganizationManagementDialog", () => {
         open
         authState={authState}
         onClose={vi.fn()}
+        copyInvitationLink={vi.fn().mockResolvedValue(undefined)}
       />,
     );
     await screen.findByText("Alpha Enterprise");

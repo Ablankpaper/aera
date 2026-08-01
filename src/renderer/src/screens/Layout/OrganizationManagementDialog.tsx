@@ -22,12 +22,18 @@ type AuthorizedState = Extract<
 >;
 
 type Tab =
-  "overview" | "members" | "departments" | "invitations" | "policy" | "audit";
+  | "overview"
+  | "members"
+  | "departments"
+  | "invitations"
+  | "policy"
+  | "audit";
 
 interface OrganizationManagementDialogProps {
   open: boolean;
   authState: AuthorizedState;
   onClose: () => void;
+  copyInvitationLink: (inviteUrl: string) => Promise<void>;
 }
 
 const DEFAULT_POLICY: OrganizationPolicyDocument = {
@@ -56,6 +62,7 @@ export default function OrganizationManagementDialog({
   open,
   authState,
   onClose,
+  copyInvitationLink,
 }: OrganizationManagementDialogProps): React.JSX.Element | null {
   const { t } = useI18n();
   const [organizationState, setOrganizationState] =
@@ -88,6 +95,9 @@ export default function OrganizationManagementDialog({
   const [departmentName, setDepartmentName] = useState("");
   const [invitationSecret, setInvitationSecret] = useState<string | null>(null);
   const [secretUnavailable, setSecretUnavailable] = useState(false);
+  const [invitationCopyState, setInvitationCopyState] = useState<
+    "idle" | "copying" | "copied" | "failed"
+  >("idle");
   const [transferTarget, setTransferTarget] = useState("");
   const [transferConfirmation, setTransferConfirmation] = useState("");
   const [dissolveName, setDissolveName] = useState("");
@@ -159,6 +169,7 @@ export default function OrganizationManagementDialog({
       detailsEpoch.current += 1;
       setInvitationSecret(null);
       setSecretUnavailable(false);
+      setInvitationCopyState("idle");
       setErrorCode(null);
       return;
     }
@@ -171,6 +182,7 @@ export default function OrganizationManagementDialog({
     setBusy(false);
     setInvitationSecret(null);
     setSecretUnavailable(false);
+    setInvitationCopyState("idle");
 
     const productUnsubscribe = window.agenteraProductSpace.onStateChanged(
       (state) => {
@@ -838,7 +850,9 @@ export default function OrganizationManagementDialog({
                                             userId: member.userId,
                                             patch: {
                                               role: event.target.value as
-                                                "admin" | "auditor" | "member",
+                                                | "admin"
+                                                | "auditor"
+                                                | "member",
                                               expectedRevision: member.revision,
                                             },
                                           },
@@ -1059,6 +1073,7 @@ export default function OrganizationManagementDialog({
                         onClick={() => {
                           setInvitationSecret(null);
                           setSecretUnavailable(false);
+                          setInvitationCopyState("idle");
                           void run(
                             () =>
                               window.agenteraOrganization.createInvitation({
@@ -1067,6 +1082,7 @@ export default function OrganizationManagementDialog({
                             async (created) => {
                               if (created.inviteUrl && created.token) {
                                 setInvitationSecret(created.inviteUrl);
+                                setInvitationCopyState("idle");
                               } else {
                                 setSecretUnavailable(true);
                               }
@@ -1098,18 +1114,39 @@ export default function OrganizationManagementDialog({
                         <button
                           type="button"
                           className="btn btn-secondary btn-sm"
+                          disabled={invitationCopyState === "copying"}
                           aria-label={t(
-                            "navigation.organization.management.copyInvitation",
+                            invitationCopyState === "copied"
+                              ? "navigation.organization.management.invitationCopied"
+                              : "navigation.organization.management.copyInvitation",
                           )}
-                          onClick={() =>
-                            void navigator.clipboard.writeText(invitationSecret)
-                          }
+                          onClick={() => {
+                            const inviteUrl = invitationSecret;
+                            setInvitationCopyState("copying");
+                            void copyInvitationLink(inviteUrl)
+                              .then(() => setInvitationCopyState("copied"))
+                              .catch(() => setInvitationCopyState("failed"));
+                          }}
                         >
                           <Copy size={14} aria-hidden="true" />
                           {t(
-                            "navigation.organization.management.copyInvitation",
+                            invitationCopyState === "copied"
+                              ? "navigation.organization.management.invitationCopied"
+                              : "navigation.organization.management.copyInvitation",
                           )}
                         </button>
+                        {invitationCopyState === "failed" && (
+                          <p
+                            role="alert"
+                            aria-label={t(
+                              "navigation.organization.management.invitationCopyFailed",
+                            )}
+                          >
+                            {t(
+                              "navigation.organization.management.invitationCopyFailed",
+                            )}
+                          </p>
+                        )}
                       </div>
                     )}
                     {secretUnavailable && (
