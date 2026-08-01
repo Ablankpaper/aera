@@ -181,4 +181,28 @@ describe("OrganizationInvitationGate", () => {
     ).toBeInTheDocument();
     expect(document.body.textContent).not.toContain(TOKEN);
   });
+
+  it.each([
+    ["invitation_expired", "navigation.organization.errors.invitation_expired"],
+    ["invitation_revoked", "navigation.organization.errors.invitation_revoked"],
+    ["invitation_used", "navigation.organization.errors.invitation_used"],
+  ] as const)(
+    "shows the exact %s invitation state",
+    async (errorCode, message) => {
+      const api = installAPIs(null);
+      render(<OrganizationInvitationGate authState={authenticated} />);
+      api.receive(TOKEN);
+      api.organization.acceptInvitation.mockResolvedValueOnce({
+        ok: false,
+        errorCode,
+      });
+      fireEvent.click(
+        await screen.findByRole("button", {
+          name: "navigation.organization.invitation.accept",
+        }),
+      );
+      expect(await screen.findByText(message)).toBeInTheDocument();
+      expect(document.body.textContent).not.toContain(TOKEN);
+    },
+  );
 });

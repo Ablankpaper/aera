@@ -20,6 +20,7 @@
     "test:e2e:agent-control": "playwright test tests/e2e/agentera-agent-control.e2e.ts",
     "test:e2e:workspace": "playwright test tests/e2e/agentera-workspace.e2e.ts",
     "test:e2e:organization": "playwright test tests/e2e/agentera-organization.e2e.ts",
+    "test:e2e:organization-invitation-live": "npm run build && playwright test tests/e2e/agentera-organization-invitation-live.e2e.ts",
     "test:e2e:organization-agent": "npm run build && playwright test tests/e2e/agentera-organization-agent.e2e.ts",
     "test:e2e:personal-agent-live": "npm run build && playwright test tests/e2e/agentera-personal-agent-live.e2e.ts",
     "test:e2e:workspace-agent": "npm run build && playwright test tests/e2e/agentera-workspace-agent.e2e.ts",

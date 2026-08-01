@@ -714,5 +714,20 @@ describe("AgenteraOrganizationClient", () => {
       code: "organization_forbidden",
     });
     expect(String(stable)).not.toContain(secret);
+
+    for (const [status, code] of [
+      [410, "invitation_expired"],
+      [410, "invitation_revoked"],
+      [409, "invitation_used"],
+    ] as const) {
+      const invitationFailure = createClient((async () =>
+        jsonResponse(
+          { error: { code, request_id: "invitation-request" } },
+          status,
+        )) as typeof fetch);
+      await expect(
+        invitationFailure.acceptInvitation(TOKEN, `accept-${code}`),
+      ).rejects.toMatchObject({ status, code });
+    }
   });
 });

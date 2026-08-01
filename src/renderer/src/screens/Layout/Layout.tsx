@@ -1023,6 +1023,9 @@ function Layout({
           open={organizationManagementOpen}
           authState={signedInState}
           onClose={() => setOrganizationManagementOpen(false)}
+          copyInvitationLink={(inviteUrl) =>
+            window.hermesAPI.copyToClipboard(inviteUrl)
+          }
         />
       )}
       {startupProfile && (

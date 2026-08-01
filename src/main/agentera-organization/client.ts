@@ -65,6 +65,9 @@ const STABLE_ERROR_CODES: ReadonlySet<RawOrganizationErrorCode> = new Set([
   "organization_forbidden",
   "organization_not_found",
   "invitation_unavailable",
+  "invitation_expired",
+  "invitation_revoked",
+  "invitation_used",
   "organization_conflict",
   "organization_archived",
   "organization_limit_reached",
@@ -573,9 +576,7 @@ function copyInvitationCreation(
   }
   return {
     invitation,
-    ...(first
-      ? { token, inviteUrl: expectedCurrentURL }
-      : {}),
+    ...(first ? { token, inviteUrl: expectedCurrentURL } : {}),
     secretReplayable: false,
   };
 }

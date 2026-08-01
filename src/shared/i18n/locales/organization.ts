@@ -38,6 +38,9 @@ export const organizationEn = {
     organization_not_found: "The organization is no longer available.",
     invitation_unavailable:
       "This invitation is unavailable or has already been used.",
+    invitation_expired: "This invitation has expired. Ask for a new link.",
+    invitation_revoked: "This invitation was revoked. Ask for a new link.",
+    invitation_used: "This one-time invitation has already been used.",
     organization_conflict: "The organization changed. Refresh and try again.",
     organization_archived: "This organization is archived.",
     organization_limit_reached: "The organization limit has been reached.",
@@ -116,6 +119,9 @@ export const organizationEn = {
     invitationSecretUnavailable:
       "This replayed response contains no secret. Create a new invitation for a new link.",
     copyInvitation: "Copy invitation link",
+    invitationCopied: "Invitation link copied",
+    invitationCopyFailed:
+      "The invitation link was not copied. Copy it manually before leaving this page.",
     currentPolicy: "Current policy",
     currentPolicyDescription:
       "This signed policy remains in effect until a new version is published successfully.",
@@ -239,6 +245,9 @@ export const organizationZhCN = {
     organization_forbidden: "你没有执行此操作的权限。",
     organization_not_found: "该企业组织已不可用。",
     invitation_unavailable: "此邀请不可用或已经被使用。",
+    invitation_expired: "此邀请已过期，请让管理员创建新链接。",
+    invitation_revoked: "此邀请已被撤销，请让管理员创建新链接。",
+    invitation_used: "此一次性邀请已经被使用。",
     organization_conflict: "企业组织已发生变化，请刷新后重试。",
     organization_archived: "该企业组织已归档。",
     organization_limit_reached: "已达到企业组织数量上限。",
@@ -315,6 +324,8 @@ export const organizationZhCN = {
     invitationSecretOnce: "请立即复制此链接，邀请密钥不会再次显示。",
     invitationSecretUnavailable: "重复响应不包含密钥，请新建邀请以获得新链接。",
     copyInvitation: "复制邀请链接",
+    invitationCopied: "邀请链接已复制",
+    invitationCopyFailed: "邀请链接复制失败，请在离开此页面前手动复制。",
     currentPolicy: "当前策略",
     currentPolicyDescription:
       "此签名策略正在生效；只有新版本成功发布后，当前策略才会切换。",

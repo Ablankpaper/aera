@@ -61,8 +61,8 @@ const ACCESS_B = "fixture-access-account-b";
 const ACCESS_C = "fixture-access-account-c";
 const TOKEN_B = "A".repeat(43);
 const TOKEN_C = "Q".repeat(43);
-const LINK_B = `agentera://organization-invitation#${TOKEN_B}`;
-const LINK_C = `agentera://organization-invitation#${TOKEN_C}`;
+const LINK_B = `aera://organization-invitation#${TOKEN_B}`;
+const LINK_C = `aera://organization-invitation#${TOKEN_C}`;
 const CREATED_AT = "2026-07-21T08:00:00Z";
 const OFFLINE_EXPIRES_AT = "2026-07-28T08:00:00Z";
 
