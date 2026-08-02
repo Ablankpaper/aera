@@ -21,6 +21,10 @@ export async function verifyMacCandidate(options) {
   const reference = resolve(options.runtimeSeedReference);
   const manifest = resolve(options.runtimeSeedManifest);
   const desktopVersion = required(options.desktopVersion, "desktop version");
+  const notarizationMode = options.notarizationMode ?? "required";
+  if (!new Set(["required", "deferred"]).has(notarizationMode)) {
+    throw new Error("macOS notarization mode is invalid");
+  }
 
   await run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", app]);
   const signature = await run("codesign", ["-dv", "--verbose=4", app], {
@@ -40,9 +44,11 @@ export async function verifyMacCandidate(options) {
   if (!signingIdentity.includes(`(${teamId})`)) {
     throw new Error("Developer ID identity and TeamIdentifier differ");
   }
-  await run("spctl", ["--assess", "--type", "execute", "--verbose=4", app]);
-  await run("xcrun", ["stapler", "validate", app]);
-  await run("xcrun", ["stapler", "validate", dmg]);
+  if (notarizationMode === "required") {
+    await run("spctl", ["--assess", "--type", "execute", "--verbose=4", app]);
+    await run("xcrun", ["stapler", "validate", app]);
+    await run("xcrun", ["stapler", "validate", dmg]);
+  }
 
   const nativeModule = join(
     app,
@@ -92,13 +98,18 @@ export async function verifyMacCandidate(options) {
     ]);
   }
 
-  const notarization = JSON.parse(
-    await readFile(options.notarizationEvidence, "utf8"),
-  );
-  const notarizations = validateNotarizations(notarization, [
-    basename(dmg),
-    basename(zip),
-  ]);
+  const notarizations =
+    notarizationMode === "required"
+      ? validateNotarizations(
+          JSON.parse(
+            await readFile(
+              required(options.notarizationEvidence, "notarization evidence"),
+              "utf8",
+            ),
+          ),
+          [basename(dmg), basename(zip)],
+        )
+      : [];
   const [dmgHash, zipHash, manifestHash] = await Promise.all([
     hashArtifact(dmg),
     hashArtifact(zip),
@@ -109,9 +120,10 @@ export async function verifyMacCandidate(options) {
     signingIdentity,
     teamId,
     codesignVerified: true,
-    gatekeeperAccepted: true,
-    appStapled: true,
-    dmgStapled: true,
+    ...(notarizationMode === "deferred" ? { notarizationMode } : {}),
+    gatekeeperAccepted: notarizationMode === "required",
+    appStapled: notarizationMode === "required",
+    dmgStapled: notarizationMode === "required",
     notarizations,
     runtimeSeedVerifiedArtifacts: [basename(dmg), basename(zip)],
     nativeModuleArchitecture: "arm64",
@@ -253,6 +265,7 @@ if (
     runtimeSeedReference: values.runtime_seed_reference,
     runtimeSeedManifest: values.runtime_seed_manifest,
     desktopVersion: values.desktop_version,
+    notarizationMode: values.notarization_mode,
     notarizationEvidence: values.notarization_evidence,
   })
     .then(async (evidence) => {
@@ -261,7 +274,7 @@ if (
         mode: 0o600,
       });
       process.stdout.write(
-        "macOS candidate signatures and notarization verified\n",
+        "macOS candidate signature and configured notarization policy verified\n",
       );
     })
     .catch((error) => {
