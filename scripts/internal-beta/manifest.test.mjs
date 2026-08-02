@@ -128,14 +128,11 @@ async function createFixture(runtimePatch = {}) {
       signingIdentity: "Developer ID Application: Aera Test (AERA123456)",
       teamId: "AERA123456",
       codesignVerified: true,
-      gatekeeperAccepted: true,
-      appStapled: true,
-      dmgStapled: true,
-      notarizations: macArtifacts.map(({ name }, index) => ({
-        artifact: name,
-        id: `00000000-0000-4000-8000-00000000000${index}`,
-        status: "Accepted",
-      })),
+      notarizationMode: "deferred",
+      gatekeeperAccepted: false,
+      appStapled: false,
+      dmgStapled: false,
+      notarizations: [],
       runtimeSeedVerifiedArtifacts: macArtifacts.map(({ name }) => name),
       nativeModuleArchitecture: "arm64",
       runtimeSeedManifest: {
@@ -340,7 +337,7 @@ test("rejects semantic macOS evidence that is unsigned or mismatched", async () 
       evidence.codesignVerified = false;
     },
     (evidence) => {
-      evidence.notarizations[0].status = "Invalid";
+      evidence.notarizationMode = "required";
     },
     (evidence) => {
       evidence.artifacts[0].sha256 = "f".repeat(64);

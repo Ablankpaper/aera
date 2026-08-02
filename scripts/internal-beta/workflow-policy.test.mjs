@@ -18,14 +18,14 @@ const macBuilderPath = new URL(
 );
 const baseBuilderPath = new URL("../../electron-builder.yml", import.meta.url);
 
-test("internal-Beta workflow is exact-SHA, macOS-signed, update-signed, published, and Sigstore-bound", async () => {
+test("internal-Beta workflow is exact-SHA, Developer-ID-signed, update-signed, published, and Sigstore-bound", async () => {
   const raw = await readFile(workflowPath, "utf8");
   const workflow = parseYAML(raw);
 
   assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.20"/u);
   assert.match(
     raw,
-    /--release-notes "Beta\.20 增加 macOS Developer ID 签名、公证与严格候选验证，并完成 Runtime 稳定更新闭环。"/u,
+    /--release-notes "Beta\.20 增加 macOS Developer ID 签名与严格候选验证；本内测版延期 Apple 公证，并完成 Runtime 稳定更新闭环。"/u,
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
@@ -90,19 +90,12 @@ test("internal-Beta workflow is exact-SHA, macOS-signed, update-signed, publishe
     raw,
     /curl[\s\S]*\/desktop-updates\/internal-beta|base_url=.*\/desktop-updates\/internal-beta/iu,
   );
-  for (const secret of [
-    "CSC_LINK",
-    "CSC_KEY_PASSWORD",
-    "ASC_API_KEY",
-    "ASC_KEY_ID",
-    "ASC_ISSUER_ID",
-  ]) {
+  for (const secret of ["CSC_LINK", "CSC_KEY_PASSWORD"]) {
     assert.match(raw, new RegExp(`secrets\\.${secret}`, "u"));
   }
   assert.match(raw, /-c\.forceCodeSigning=true/u);
-  assert.match(raw, /-c\.mac\.notarize=true/u);
-  assert.match(raw, /xcrun notarytool submit[\s\S]*--wait/iu);
-  assert.match(raw, /xcrun stapler (?:staple|validate)/iu);
+  assert.match(raw, /-c\.mac\.notarize=false/u);
+  assert.match(raw, /--notarization-mode deferred/u);
   assert.match(raw, /node scripts\/release\/verify-macos\.mjs/iu);
   assert.match(raw, /candidate\/evidence\/macos-evidence\.json/u);
 
@@ -110,6 +103,8 @@ test("internal-Beta workflow is exact-SHA, macOS-signed, update-signed, publishe
   assert.doesNotMatch(raw, /attestations:\s*write/iu);
   assert.doesNotMatch(raw, /\bgh\s+release\b|create[-_ ]tag|refs\/tags/iu);
   assert.doesNotMatch(raw, /WIN_CSC|signtool/iu);
+  assert.doesNotMatch(raw, /ASC_API_KEY|ASC_KEY_ID|ASC_ISSUER_ID/iu);
+  assert.doesNotMatch(raw, /xcrun (?:notarytool|stapler)/iu);
   assert.doesNotMatch(
     raw,
     /repository:\s*bignormal\/aera-runtime|git\s+clone[\s\S]*aera-runtime/iu,
@@ -158,7 +153,7 @@ test("internal-Beta overlays separate unsigned Windows from strict macOS signing
   assert.equal(macConfig.forceCodeSigning, true);
   assert.deepEqual(macConfig.publish, []);
   assert.equal(macConfig.mac.identity, undefined);
-  assert.equal(macConfig.mac.notarize, true);
+  assert.equal(macConfig.mac.notarize, false);
   assert.equal(macConfig.mac.hardenedRuntime, true);
   assert.equal(
     macConfig.mac.artifactName,

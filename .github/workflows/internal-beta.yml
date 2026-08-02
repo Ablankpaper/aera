@@ -113,7 +113,7 @@ jobs:
           node --test scripts/internal-beta/*.test.mjs
 
   macos:
-    name: Build, sign, and notarize macOS arm64 internal Beta
+    name: Build and Developer-ID-sign macOS arm64 internal Beta
     needs: validate
     runs-on: macos-15
     environment: internal-beta
@@ -164,41 +164,17 @@ jobs:
             {"issuer":"${{ vars.AERA_INTERNAL_BETA_ORIGIN }}","keys":[{"keyId":"${{ vars.AERA_INTERNAL_BETA_OFFLINE_KEY_ID }}","publicKey":"${{ vars.AERA_INTERNAL_BETA_OFFLINE_PUBLIC_KEY }}"}]}
         run: npm run build
 
-      - name: Require signing and notarization credentials
+      - name: Require Developer ID signing credentials
         shell: bash
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY }}
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
           set -euo pipefail
           test -n "$CSC_LINK"
           test -n "$CSC_KEY_PASSWORD"
-          test -n "$ASC_API_KEY_BASE64"
-          test -n "$ASC_KEY_ID"
-          test -n "$ASC_ISSUER_ID"
-          KEY_DIR="$RUNNER_TEMP/appstore"
-          KEY_PATH="$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8"
-          mkdir -p "$KEY_DIR"
-          APPLE_API_KEY_PATH="$KEY_PATH" node --input-type=module <<'NODE'
-          import { writeFile } from "node:fs/promises";
 
-          const bytes = Buffer.from(process.env.ASC_API_KEY_BASE64, "base64");
-          if (!bytes.toString("utf8").includes("BEGIN PRIVATE KEY")) {
-            throw new Error("App Store Connect API key is invalid");
-          }
-          await writeFile(process.env.APPLE_API_KEY_PATH, bytes, {
-            flag: "wx",
-            mode: 0o600,
-          });
-          NODE
-          echo "APPLE_API_KEY=$KEY_PATH" >> "$GITHUB_ENV"
-          echo "APPLE_API_KEY_ID=$ASC_KEY_ID" >> "$GITHUB_ENV"
-          echo "APPLE_API_ISSUER=$ASC_ISSUER_ID" >> "$GITHUB_ENV"
-
-      - name: Package signed and notarized macOS DMG and ZIP
+      - name: Package Developer-ID-signed macOS DMG and ZIP
         shell: bash
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
@@ -207,9 +183,9 @@ jobs:
           npx electron-builder
           --config build/electron-builder.internal-beta-macos.yml
           --mac dmg zip --arm64 --publish never
-          -c.forceCodeSigning=true -c.mac.notarize=true
+          -c.forceCodeSigning=true -c.mac.notarize=false
 
-      - name: Bind notarization IDs to final macOS bytes
+      - name: Resolve final signed macOS bytes
         id: mac_paths
         shell: bash
         env:
@@ -227,46 +203,6 @@ jobs:
             -type f -name '*.manifest.json' -print)
           test -n "$RUNTIME_MANIFEST"
           test "$(printf '%s\n' "$RUNTIME_MANIFEST" | wc -l | tr -d ' ')" -eq 1
-
-          xcrun notarytool submit "$DMG_PATH" \
-            --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" \
-            --issuer "$APPLE_API_ISSUER" --wait --output-format json \
-            > "$RUNNER_TEMP/dmg-notarization.json"
-          xcrun notarytool submit "$ZIP_PATH" \
-            --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" \
-            --issuer "$APPLE_API_ISSUER" --wait --output-format json \
-            > "$RUNNER_TEMP/zip-notarization.json"
-          xcrun stapler staple "$DMG_PATH"
-          xcrun stapler validate "$DMG_PATH"
-
-          DMG_PATH="$DMG_PATH" ZIP_PATH="$ZIP_PATH" \
-          DMG_RESULT="$RUNNER_TEMP/dmg-notarization.json" \
-          ZIP_RESULT="$RUNNER_TEMP/zip-notarization.json" \
-          NOTARIZATION_OUTPUT="$RUNNER_TEMP/notarizations.json" \
-            node --input-type=module <<'NODE'
-          import { basename } from "node:path";
-          import { readFile, writeFile } from "node:fs/promises";
-          import { canonicalJSONStringify } from "./scripts/release/candidate-manifest.mjs";
-
-          const read = async (path) => JSON.parse(await readFile(path, "utf8"));
-          const dmg = await read(process.env.DMG_RESULT);
-          const zip = await read(process.env.ZIP_RESULT);
-          for (const result of [dmg, zip]) {
-            if (result.status !== "Accepted" || typeof result.id !== "string") {
-              throw new Error("Apple notarization was not accepted");
-            }
-          }
-          await writeFile(
-            process.env.NOTARIZATION_OUTPUT,
-            canonicalJSONStringify({
-              notarizations: [
-                { artifact: basename(process.env.DMG_PATH), id: dmg.id, status: dmg.status },
-                { artifact: basename(process.env.ZIP_PATH), id: zip.id, status: zip.status },
-              ],
-            }),
-            { flag: "wx", mode: 0o600 },
-          );
-          NODE
           echo "app=$APP_PATH" >> "$GITHUB_OUTPUT"
           echo "dmg=$DMG_PATH" >> "$GITHUB_OUTPUT"
           echo "zip=$ZIP_PATH" >> "$GITHUB_OUTPUT"
@@ -285,7 +221,7 @@ jobs:
             --runtime-seed-reference resources/agentera-runtime-seed \
             --runtime-seed-manifest "${{ steps.mac_paths.outputs.runtime_manifest }}" \
             --desktop-version "$VERSION" \
-            --notarization-evidence "$RUNNER_TEMP/notarizations.json" \
+            --notarization-mode deferred \
             --output "$RUNNER_TEMP/macos-evidence.json"
 
       - name: Stage signed immutable macOS bytes and evidence
@@ -553,7 +489,7 @@ jobs:
             --manifest candidate/desktop-update/manifest.json \
             --private-key-env DESKTOP_UPDATE_SIGNING_PRIVATE_KEY \
             --published-at "$CREATED_AT" \
-            --release-notes "Beta.20 增加 macOS Developer ID 签名、公证与严格候选验证，并完成 Runtime 稳定更新闭环。" \
+            --release-notes "Beta.20 增加 macOS Developer ID 签名与严格候选验证；本内测版延期 Apple 公证，并完成 Runtime 稳定更新闭环。" \
             --signature candidate/desktop-update/manifest.sig \
             --version "$VERSION"
           node scripts/internal-beta/desktop-update.mjs verify \
