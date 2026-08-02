@@ -516,6 +516,76 @@ describe("Aera Runtime distribution manager", () => {
     });
   });
 
+  it("resynchronizes after the packaged Seed installer replaces the current pointer", async () => {
+    const repair = vi.fn();
+    const setup = await harness({ repair });
+    const manager = createRuntimeDistributionManager(setup.options);
+    await expect(manager.initialize()).resolves.toMatchObject({
+      phase: "current",
+      currentVersion: "0.18.1-agentera.1",
+      packagedSeedVersion: null,
+      canCheck: true,
+    });
+
+    await mkdir(join(setup.paths.versions, "seed-repair-v0"));
+    await setup.store.setCurrent({
+      ...pointer("seed-repair-v0"),
+      runtimeVersion: "0.18.0-agentera.9",
+      sourceCommit: "c".repeat(40),
+      manifestSha256: "d".repeat(64),
+      installedAt: "2026-07-18T13:30:00.000Z",
+    });
+
+    const state = await manager.retryRepair();
+
+    expect(repair).not.toHaveBeenCalled();
+    expect(setup.stopRuntimeContext).not.toHaveBeenCalled();
+    expect(state).toMatchObject({
+      phase: "current",
+      currentVersion: "0.18.0-agentera.9",
+      currentSourceCommit: "c".repeat(40),
+      packagedSeedVersion: "0.18.0-agentera.9",
+      canCheck: false,
+      lastErrorCode: null,
+    });
+    await expect(manager.check()).resolves.toMatchObject({
+      phase: "current",
+      packagedSeedVersion: "0.18.0-agentera.9",
+      canCheck: false,
+    });
+    expect(setup.checkUpdate).not.toHaveBeenCalled();
+
+    const nextLaunch = createRuntimeDistributionManager(setup.options);
+    await expect(nextLaunch.initialize()).resolves.toMatchObject({
+      phase: "current",
+      currentVersion: "0.18.0-agentera.9",
+      packagedSeedVersion: null,
+      canCheck: true,
+    });
+  });
+
+  it("detects a same-version packaged Seed repair directory", async () => {
+    const repair = vi.fn();
+    const setup = await harness({ repair });
+    const manager = createRuntimeDistributionManager(setup.options);
+    await manager.initialize();
+
+    await mkdir(join(setup.paths.versions, "current-v1-repair"));
+    await setup.store.setCurrent({
+      ...pointer("current-v1-repair"),
+      installedAt: "2026-07-18T13:30:00.000Z",
+    });
+
+    await expect(manager.retryRepair()).resolves.toMatchObject({
+      phase: "current",
+      currentVersion: "0.18.1-agentera.1",
+      packagedSeedVersion: "0.18.1-agentera.1",
+      canCheck: false,
+      lastErrorCode: null,
+    });
+    expect(repair).not.toHaveBeenCalled();
+  });
+
   it("reserves and releases a Runtime transition around packaged Seed repair", async () => {
     let repairedStore: RuntimeStateStore | null = null;
     const repair = vi.fn(async () => {
