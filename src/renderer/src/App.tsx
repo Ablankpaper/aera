@@ -100,7 +100,6 @@ function App(): React.JSX.Element {
   );
   const authStateRef = useRef<AgenteraAuthPublicState>(authState);
   const pendingSwitchToLocalRef = useRef(false);
-  const forceAccountSelectionRef = useRef(false);
   const visibleScreen: Screen =
     screen !== "splash" && !hasAgenteraSignedInAccess(authState)
       ? "auth"
@@ -280,19 +279,11 @@ function App(): React.JSX.Element {
   }, []);
 
   async function handleOpenBrowser(): Promise<void> {
-    const forceAccountSelection = forceAccountSelectionRef.current;
-    await window.agenteraAuth.startLogin(
-      forceAccountSelection ? { forceAccountSelection: true } : undefined,
-    );
-    forceAccountSelectionRef.current = false;
+    await window.agenteraAuth.startLogin({ forceAccountSelection: true });
   }
 
   async function handleRestartBrowserLogin(): Promise<void> {
-    const forceAccountSelection = forceAccountSelectionRef.current;
-    await window.agenteraAuth.restartLogin(
-      forceAccountSelection ? { forceAccountSelection: true } : undefined,
-    );
-    forceAccountSelectionRef.current = false;
+    await window.agenteraAuth.restartLogin({ forceAccountSelection: true });
   }
 
   async function handleRetryAuth(): Promise<void> {
@@ -304,7 +295,6 @@ function App(): React.JSX.Element {
   }
 
   async function handleUseDifferentAccount(): Promise<void> {
-    forceAccountSelectionRef.current = true;
     await window.agenteraAuth.logout();
     const state: AgenteraAuthPublicState = {
       status: "unauthenticated",

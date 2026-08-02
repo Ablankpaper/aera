@@ -28,8 +28,12 @@ describe("AgenteraAccountPane", () => {
     updatedAt: "2026-07-25T02:00:00.000Z",
   };
   let updateUserProfile: ReturnType<typeof vi.fn>;
+  let startLogin: ReturnType<typeof vi.fn>;
+  let logout: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    startLogin = vi.fn().mockResolvedValue(undefined);
+    logout = vi.fn().mockResolvedValue(undefined);
     updateUserProfile = vi.fn().mockImplementation(async (input) => ({
       ...currentProfile,
       ...input,
@@ -38,12 +42,27 @@ describe("AgenteraAccountPane", () => {
     Object.defineProperty(window, "agenteraAuth", {
       configurable: true,
       value: {
+        startLogin,
+        logout,
         getState: vi.fn().mockResolvedValue(state),
         onStateChanged: vi.fn(() => vi.fn()),
         getUserProfile: vi.fn().mockResolvedValue(currentProfile),
         updateUserProfile,
         onUserProfileChanged: vi.fn(() => vi.fn()),
       },
+    });
+  });
+
+  it("forces account selection for the default switch-account action", async () => {
+    render(<AgenteraAccountPane state={state} />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "auth.account.switch" }),
+    );
+
+    await waitFor(() => expect(logout).toHaveBeenCalledOnce());
+    expect(startLogin).toHaveBeenCalledWith({
+      forceAccountSelection: true,
     });
   });
 
