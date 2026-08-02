@@ -18,14 +18,14 @@ const macBuilderPath = new URL(
 );
 const baseBuilderPath = new URL("../../electron-builder.yml", import.meta.url);
 
-test("internal-Beta workflow is exact-SHA, Developer-ID-signed, update-signed, published, and Sigstore-bound", async () => {
+test("internal-Beta workflow is exact-SHA, Developer-ID-notarized, update-signed, published, and Sigstore-bound", async () => {
   const raw = await readFile(workflowPath, "utf8");
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.20"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.21"/u);
   assert.match(
     raw,
-    /--release-notes "Beta\.20 增加 macOS Developer ID 签名与严格候选验证；本内测版延期 Apple 公证，并完成 Runtime 稳定更新闭环。"/u,
+    /--release-notes "Beta\.21 修复主动退出后的账户重新选择与 Runtime Seed 重装状态同步，并恢复 macOS Apple 公证、装订与 Gatekeeper 验证。"/u,
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
@@ -93,9 +93,30 @@ test("internal-Beta workflow is exact-SHA, Developer-ID-signed, update-signed, p
   for (const secret of ["CSC_LINK", "CSC_KEY_PASSWORD"]) {
     assert.match(raw, new RegExp(`secrets\\.${secret}`, "u"));
   }
+  for (const secret of ["ASC_API_KEY", "ASC_KEY_ID", "ASC_ISSUER_ID"]) {
+    assert.match(raw, new RegExp(`secrets\\.${secret}`, "u"));
+  }
   assert.match(raw, /-c\.forceCodeSigning=true/u);
   assert.match(raw, /-c\.mac\.notarize=false/u);
-  assert.match(raw, /--notarization-mode deferred/u);
+  assert.match(raw, /--prepackaged "\$APP_PATH"/u);
+  assert.match(raw, /xcrun notarytool submit[\s\S]*--no-wait/iu);
+  assert.match(raw, /xcrun notarytool wait/iu);
+  assert.match(
+    raw,
+    /wait_for_submission "\$DMG_SUBMISSION_ID" "\$DMG_RESULT" &[\s\S]*DMG_WAIT_PID=\$!/u,
+  );
+  assert.match(
+    raw,
+    /wait_for_submission "\$ZIP_SUBMISSION_ID" "\$ZIP_RESULT" &[\s\S]*ZIP_WAIT_PID=\$!/u,
+  );
+  assert.match(raw, /wait "\$DMG_WAIT_PID"/u);
+  assert.match(raw, /wait "\$ZIP_WAIT_PID"/u);
+  assert.match(raw, /xcrun stapler staple "\$APP_PATH"/u);
+  assert.match(raw, /xcrun stapler staple "\$DMG_PATH"/u);
+  assert.match(raw, /xcrun stapler validate "\$APP_PATH"/u);
+  assert.match(raw, /xcrun stapler validate "\$DMG_PATH"/u);
+  assert.match(raw, /timeout-minutes:\s*355/u);
+  assert.doesNotMatch(raw, /--notarization-mode deferred/u);
   assert.match(raw, /node scripts\/release\/verify-macos\.mjs/iu);
   assert.match(raw, /candidate\/evidence\/macos-evidence\.json/u);
 
@@ -103,8 +124,6 @@ test("internal-Beta workflow is exact-SHA, Developer-ID-signed, update-signed, p
   assert.doesNotMatch(raw, /attestations:\s*write/iu);
   assert.doesNotMatch(raw, /\bgh\s+release\b|create[-_ ]tag|refs\/tags/iu);
   assert.doesNotMatch(raw, /WIN_CSC|signtool/iu);
-  assert.doesNotMatch(raw, /ASC_API_KEY|ASC_KEY_ID|ASC_ISSUER_ID/iu);
-  assert.doesNotMatch(raw, /xcrun (?:notarytool|stapler)/iu);
   assert.doesNotMatch(
     raw,
     /repository:\s*bignormal\/aera-runtime|git\s+clone[\s\S]*aera-runtime/iu,

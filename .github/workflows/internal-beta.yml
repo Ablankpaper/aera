@@ -59,7 +59,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain=v1)"
           VERSION=$(node -p "require('./package.json').version")
-          test "$VERSION" = "0.7.4-internal-beta.20"
+          test "$VERSION" = "0.7.4-internal-beta.21"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Verify successful CI belongs to the exact source
@@ -113,11 +113,11 @@ jobs:
           node --test scripts/internal-beta/*.test.mjs
 
   macos:
-    name: Build and Developer-ID-sign macOS arm64 internal Beta
+    name: Build, sign, and notarize macOS arm64 internal Beta
     needs: validate
     runs-on: macos-15
     environment: internal-beta
-    timeout-minutes: 90
+    timeout-minutes: 355
     steps:
       - name: Check out exact Desktop source
         uses: actions/checkout@v4
@@ -164,17 +164,41 @@ jobs:
             {"issuer":"${{ vars.AERA_INTERNAL_BETA_ORIGIN }}","keys":[{"keyId":"${{ vars.AERA_INTERNAL_BETA_OFFLINE_KEY_ID }}","publicKey":"${{ vars.AERA_INTERNAL_BETA_OFFLINE_PUBLIC_KEY }}"}]}
         run: npm run build
 
-      - name: Require Developer ID signing credentials
+      - name: Require signing and notarization credentials
         shell: bash
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
           set -euo pipefail
           test -n "$CSC_LINK"
           test -n "$CSC_KEY_PASSWORD"
+          test -n "$ASC_API_KEY_BASE64"
+          test -n "$ASC_KEY_ID"
+          test -n "$ASC_ISSUER_ID"
+          KEY_DIR="$RUNNER_TEMP/appstore"
+          KEY_PATH="$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8"
+          mkdir -p "$KEY_DIR"
+          APPLE_API_KEY_PATH="$KEY_PATH" node --input-type=module <<'NODE'
+          import { writeFile } from "node:fs/promises";
 
-      - name: Package Developer-ID-signed macOS DMG and ZIP
+          const bytes = Buffer.from(process.env.ASC_API_KEY_BASE64, "base64");
+          if (!bytes.toString("utf8").includes("BEGIN PRIVATE KEY")) {
+            throw new Error("App Store Connect API key is invalid");
+          }
+          await writeFile(process.env.APPLE_API_KEY_PATH, bytes, {
+            flag: "wx",
+            mode: 0o600,
+          });
+          NODE
+          echo "APPLE_API_KEY=$KEY_PATH" >> "$GITHUB_ENV"
+          echo "APPLE_API_KEY_ID=$ASC_KEY_ID" >> "$GITHUB_ENV"
+          echo "APPLE_API_ISSUER=$ASC_ISSUER_ID" >> "$GITHUB_ENV"
+
+      - name: Package one Developer-ID-signed macOS app
         shell: bash
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
@@ -182,10 +206,115 @@ jobs:
         run: >-
           npx electron-builder
           --config build/electron-builder.internal-beta-macos.yml
-          --mac dmg zip --arm64 --publish never
+          --mac --arm64 --dir --publish never
           -c.forceCodeSigning=true -c.mac.notarize=false
 
-      - name: Resolve final signed macOS bytes
+      - name: Resolve and archive the signed app payload
+        id: app_paths
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          APP_PATH=$(find dist -maxdepth 3 -type d -name '*.app' -print)
+          test -n "$APP_PATH"
+          test "$(printf '%s\n' "$APP_PATH" | wc -l | tr -d ' ')" -eq 1
+          RUNTIME_MANIFEST=$(find resources/agentera-runtime-seed -maxdepth 1 \
+            -type f -name '*.manifest.json' -print)
+          test -n "$RUNTIME_MANIFEST"
+          test "$(printf '%s\n' "$RUNTIME_MANIFEST" | wc -l | tr -d ' ')" -eq 1
+          PAYLOAD_ZIP="$RUNNER_TEMP/Aera-Internal-Beta-$VERSION-app-notarization.zip"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          ditto -c -k --keepParent "$APP_PATH" "$PAYLOAD_ZIP"
+          test -f "$PAYLOAD_ZIP"
+          echo "app=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "payload_zip=$PAYLOAD_ZIP" >> "$GITHUB_OUTPUT"
+          echo "runtime_manifest=$RUNTIME_MANIFEST" >> "$GITHUB_OUTPUT"
+
+      - name: Submit the signed app payload exactly once
+        id: app_notary
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAYLOAD_ZIP="${{ steps.app_paths.outputs.payload_zip }}"
+          SUBMISSION_JSON="$RUNNER_TEMP/app-notarization-submission.json"
+          xcrun notarytool submit "$PAYLOAD_ZIP" \
+            --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" --no-wait --output-format json \
+            > "$SUBMISSION_JSON"
+          APP_SUBMISSION_ID=$(
+            NOTARY_JSON="$SUBMISSION_JSON" node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+
+          const result = JSON.parse(await readFile(process.env.NOTARY_JSON, "utf8"));
+          if (typeof result.id !== "string" || result.id.length === 0) {
+            throw new Error("App notarization submission ID is missing");
+          }
+          process.stdout.write(result.id);
+          NODE
+          )
+          echo "submission_id=$APP_SUBMISSION_ID" >> "$GITHUB_OUTPUT"
+          echo "::notice title=App notarization submitted::$APP_SUBMISSION_ID"
+          preserve="$RUNNER_TEMP/app-notarization-payload"
+          mkdir -p "$preserve"
+          cp "$PAYLOAD_ZIP" "$SUBMISSION_JSON" "$preserve/"
+
+      - name: Preserve app payload and submission identity before waiting
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-internal-beta-app-notary-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/app-notarization-payload
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Wait for the same app submission and staple the app
+        shell: bash
+        env:
+          APP_SUBMISSION_ID: ${{ steps.app_notary.outputs.submission_id }}
+        run: |
+          set -euo pipefail
+          APP_PATH="${{ steps.app_paths.outputs.app }}"
+          RESULT_JSON="$RUNNER_TEMP/app-notarization-result.json"
+          xcrun notarytool wait "$APP_SUBMISSION_ID" \
+            --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" --timeout 165m --output-format json \
+            > "$RESULT_JSON"
+          if ! NOTARY_JSON="$RESULT_JSON" node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+
+          const result = JSON.parse(await readFile(process.env.NOTARY_JSON, "utf8"));
+          if (result.status !== "Accepted") {
+            throw new Error(`App notarization is ${result.status ?? "unknown"}`);
+          }
+          NODE
+          then
+            xcrun notarytool log "$APP_SUBMISSION_ID" \
+              --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" \
+              --issuer "$APPLE_API_ISSUER" \
+              "$RUNNER_TEMP/app-notarization-log.json" || true
+            exit 1
+          fi
+          xcrun stapler staple "$APP_PATH"
+          xcrun stapler validate "$APP_PATH"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          spctl --assess --type execute --verbose=4 "$APP_PATH"
+
+      - name: Package final DMG and ZIP from the stapled app
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          APP_PATH="${{ steps.app_paths.outputs.app }}"
+          npx electron-builder \
+            --config build/electron-builder.internal-beta-macos.yml \
+            --prepackaged "$APP_PATH" \
+            --mac dmg zip --arm64 --publish never \
+            -c.forceCodeSigning=true -c.mac.notarize=false
+
+      - name: Resolve final signed and stapled macOS bytes
         id: mac_paths
         shell: bash
         env:
@@ -194,21 +323,135 @@ jobs:
           set -euo pipefail
           DMG_PATH="dist/Aera-Internal-Beta-$VERSION-macos-arm64.dmg"
           ZIP_PATH="dist/Aera-Internal-Beta-$VERSION-macos-arm64.zip"
-          APP_PATH=$(find dist -maxdepth 3 -type d -name '*.app' -print)
-          test -n "$APP_PATH"
-          test "$(printf '%s\n' "$APP_PATH" | wc -l | tr -d ' ')" -eq 1
+          APP_PATH="${{ steps.app_paths.outputs.app }}"
+          test -d "$APP_PATH"
           test -f "$DMG_PATH"
           test -f "$ZIP_PATH"
-          RUNTIME_MANIFEST=$(find resources/agentera-runtime-seed -maxdepth 1 \
-            -type f -name '*.manifest.json' -print)
-          test -n "$RUNTIME_MANIFEST"
-          test "$(printf '%s\n' "$RUNTIME_MANIFEST" | wc -l | tr -d ' ')" -eq 1
+          hdiutil verify "$DMG_PATH"
           echo "app=$APP_PATH" >> "$GITHUB_OUTPUT"
           echo "dmg=$DMG_PATH" >> "$GITHUB_OUTPUT"
           echo "zip=$ZIP_PATH" >> "$GITHUB_OUTPUT"
-          echo "runtime_manifest=$RUNTIME_MANIFEST" >> "$GITHUB_OUTPUT"
+          echo "runtime_manifest=${{ steps.app_paths.outputs.runtime_manifest }}" \
+            >> "$GITHUB_OUTPUT"
 
-      - name: Verify signed macOS candidate
+      - name: Submit final DMG and ZIP exactly once
+        id: container_notary
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG_PATH="${{ steps.mac_paths.outputs.dmg }}"
+          ZIP_PATH="${{ steps.mac_paths.outputs.zip }}"
+          submit() {
+            local artifact="$1"
+            local output="$2"
+            xcrun notarytool submit "$artifact" \
+              --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" \
+              --issuer "$APPLE_API_ISSUER" --no-wait --output-format json \
+              > "$output"
+          }
+          read_id() {
+            NOTARY_JSON="$1" node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+
+          const result = JSON.parse(await readFile(process.env.NOTARY_JSON, "utf8"));
+          if (typeof result.id !== "string" || result.id.length === 0) {
+            throw new Error("Container notarization submission ID is missing");
+          }
+          process.stdout.write(result.id);
+          NODE
+          }
+          DMG_SUBMISSION="$RUNNER_TEMP/dmg-notarization-submission.json"
+          ZIP_SUBMISSION="$RUNNER_TEMP/zip-notarization-submission.json"
+          submit "$DMG_PATH" "$DMG_SUBMISSION"
+          submit "$ZIP_PATH" "$ZIP_SUBMISSION"
+          DMG_SUBMISSION_ID=$(read_id "$DMG_SUBMISSION")
+          ZIP_SUBMISSION_ID=$(read_id "$ZIP_SUBMISSION")
+          echo "dmg_submission_id=$DMG_SUBMISSION_ID" >> "$GITHUB_OUTPUT"
+          echo "zip_submission_id=$ZIP_SUBMISSION_ID" >> "$GITHUB_OUTPUT"
+          echo "::notice title=DMG notarization submitted::$DMG_SUBMISSION_ID"
+          echo "::notice title=ZIP notarization submitted::$ZIP_SUBMISSION_ID"
+          preserve="$RUNNER_TEMP/container-notarization-payload"
+          mkdir -p "$preserve"
+          cp "$DMG_PATH" "$ZIP_PATH" "$DMG_SUBMISSION" "$ZIP_SUBMISSION" \
+            "$preserve/"
+
+      - name: Preserve final containers and submission identities before waiting
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-internal-beta-container-notary-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/container-notarization-payload
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Wait for the same final submissions and staple the DMG
+        shell: bash
+        env:
+          DMG_SUBMISSION_ID: ${{ steps.container_notary.outputs.dmg_submission_id }}
+          ZIP_SUBMISSION_ID: ${{ steps.container_notary.outputs.zip_submission_id }}
+        run: |
+          set -euo pipefail
+          DMG_PATH="${{ steps.mac_paths.outputs.dmg }}"
+          ZIP_PATH="${{ steps.mac_paths.outputs.zip }}"
+          DMG_RESULT="$RUNNER_TEMP/dmg-notarization-result.json"
+          ZIP_RESULT="$RUNNER_TEMP/zip-notarization-result.json"
+          wait_for_submission() {
+            local submission_id="$1"
+            local output="$2"
+            xcrun notarytool wait "$submission_id" \
+              --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" \
+              --issuer "$APPLE_API_ISSUER" --timeout 165m --output-format json \
+              > "$output"
+          }
+          wait_for_submission "$DMG_SUBMISSION_ID" "$DMG_RESULT" &
+          DMG_WAIT_PID=$!
+          wait_for_submission "$ZIP_SUBMISSION_ID" "$ZIP_RESULT" &
+          ZIP_WAIT_PID=$!
+          wait_status=0
+          wait "$DMG_WAIT_PID" || wait_status=1
+          wait "$ZIP_WAIT_PID" || wait_status=1
+          if (( wait_status != 0 )); then
+            xcrun notarytool log "$DMG_SUBMISSION_ID" \
+              --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" \
+              --issuer "$APPLE_API_ISSUER" \
+              "$RUNNER_TEMP/dmg-notarization-log.json" || true
+            xcrun notarytool log "$ZIP_SUBMISSION_ID" \
+              --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" \
+              --issuer "$APPLE_API_ISSUER" \
+              "$RUNNER_TEMP/zip-notarization-log.json" || true
+            exit 1
+          fi
+          DMG_PATH="$DMG_PATH" ZIP_PATH="$ZIP_PATH" \
+          DMG_RESULT="$DMG_RESULT" ZIP_RESULT="$ZIP_RESULT" \
+          NOTARIZATION_OUTPUT="$RUNNER_TEMP/notarizations.json" \
+            node --input-type=module <<'NODE'
+          import { basename } from "node:path";
+          import { readFile, writeFile } from "node:fs/promises";
+          import { canonicalJSONStringify } from "./scripts/release/candidate-manifest.mjs";
+
+          const read = async (path) => JSON.parse(await readFile(path, "utf8"));
+          const dmg = await read(process.env.DMG_RESULT);
+          const zip = await read(process.env.ZIP_RESULT);
+          for (const result of [dmg, zip]) {
+            if (result.status !== "Accepted" || typeof result.id !== "string") {
+              throw new Error("Apple container notarization was not accepted");
+            }
+          }
+          await writeFile(
+            process.env.NOTARIZATION_OUTPUT,
+            canonicalJSONStringify({
+              notarizations: [
+                { artifact: basename(process.env.DMG_PATH), id: dmg.id, status: dmg.status },
+                { artifact: basename(process.env.ZIP_PATH), id: zip.id, status: zip.status },
+              ],
+            }),
+            { flag: "wx", mode: 0o600 },
+          );
+          NODE
+          xcrun stapler staple "$DMG_PATH"
+          xcrun stapler validate "$DMG_PATH"
+
+      - name: Verify signed and notarized macOS candidate
         shell: bash
         env:
           VERSION: ${{ needs.validate.outputs.version }}
@@ -221,8 +464,21 @@ jobs:
             --runtime-seed-reference resources/agentera-runtime-seed \
             --runtime-seed-manifest "${{ steps.mac_paths.outputs.runtime_manifest }}" \
             --desktop-version "$VERSION" \
-            --notarization-mode deferred \
+            --notarization-evidence "$RUNNER_TEMP/notarizations.json" \
             --output "$RUNNER_TEMP/macos-evidence.json"
+
+      - name: Preserve non-secret notarization diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-internal-beta-notary-diagnostics-${{ inputs.source_sha }}
+          path: |
+            ${{ runner.temp }}/*notarization-*.json
+            ${{ runner.temp }}/app-notarization-payload
+            ${{ runner.temp }}/container-notarization-payload
+          if-no-files-found: ignore
+          retention-days: 30
+          compression-level: 0
 
       - name: Stage signed immutable macOS bytes and evidence
         shell: bash
@@ -489,7 +745,7 @@ jobs:
             --manifest candidate/desktop-update/manifest.json \
             --private-key-env DESKTOP_UPDATE_SIGNING_PRIVATE_KEY \
             --published-at "$CREATED_AT" \
-            --release-notes "Beta.20 增加 macOS Developer ID 签名与严格候选验证；本内测版延期 Apple 公证，并完成 Runtime 稳定更新闭环。" \
+            --release-notes "Beta.21 修复主动退出后的账户重新选择与 Runtime Seed 重装状态同步，并恢复 macOS Apple 公证、装订与 Gatekeeper 验证。" \
             --signature candidate/desktop-update/manifest.sig \
             --version "$VERSION"
           node scripts/internal-beta/desktop-update.mjs verify \

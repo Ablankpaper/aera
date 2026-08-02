@@ -18,7 +18,7 @@ import {
   verifyInternalBetaManifestFiles,
 } from "./manifest.mjs";
 
-const VERSION = "0.7.4-internal-beta.20";
+const VERSION = "0.7.4-internal-beta.21";
 const SOURCE_SHA = "a".repeat(40);
 const RUNTIME_SHA = "dcb0f0bc6a0e2d18c55beedc6517dbc41d8b01e0";
 const ORIGIN = "https://203.0.113.10";
@@ -128,11 +128,14 @@ async function createFixture(runtimePatch = {}) {
       signingIdentity: "Developer ID Application: Aera Test (AERA123456)",
       teamId: "AERA123456",
       codesignVerified: true,
-      notarizationMode: "deferred",
-      gatekeeperAccepted: false,
-      appStapled: false,
-      dmgStapled: false,
-      notarizations: [],
+      gatekeeperAccepted: true,
+      appStapled: true,
+      dmgStapled: true,
+      notarizations: macArtifacts.map(({ name }, index) => ({
+        artifact: name,
+        id: `00000000-0000-4000-8000-00000000000${index}`,
+        status: "Accepted",
+      })),
       runtimeSeedVerifiedArtifacts: macArtifacts.map(({ name }) => name),
       nativeModuleArchitecture: "arm64",
       runtimeSeedManifest: {
@@ -337,7 +340,7 @@ test("rejects semantic macOS evidence that is unsigned or mismatched", async () 
       evidence.codesignVerified = false;
     },
     (evidence) => {
-      evidence.notarizationMode = "required";
+      evidence.notarizations[0].status = "Invalid";
     },
     (evidence) => {
       evidence.artifacts[0].sha256 = "f".repeat(64);

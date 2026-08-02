@@ -84,16 +84,20 @@ node scripts/internal-beta/verify-live-evidence.mjs \
   --artifacts EXACT_PACKAGE_DIRECTORY
 ```
 
-## 4. Install the unsigned internal-only packages
+## 4. Install the platform-verified internal-only packages
 
-These packages deliberately make no Developer ID, notarization, Authenticode,
-or SmartScreen-reputation claim.
+The Beta.21 macOS package requires Developer ID signing, accepted Apple
+notarization, application and DMG stapling, strict signature verification, and
+Gatekeeper acceptance. The Windows package remains explicitly unsigned and
+makes no Authenticode or SmartScreen-reputation claim.
 
-For macOS, first run the SHA-256 check. An unidentified-developer Gatekeeper
-warning is expected. Use Finder's one-time **Open** action or the matching
-**Privacy & Security → Open Anyway** action only for the exact verified DMG.
-Never disable Gatekeeper globally, remove quarantine recursively, or reuse an
-override for bytes with another hash.
+For macOS, first run the SHA-256 check. Before opening the DMG, validate its
+ticket with `xcrun stapler validate` and assess it with `spctl`. After mounting,
+run `codesign --verify --deep --strict`, `spctl`, and `xcrun stapler validate`
+against the application. Any unidentified-developer warning, missing ticket,
+invalid signature, or Gatekeeper rejection stops the run. Never bypass or
+disable Gatekeeper, remove quarantine recursively, or reuse an override for
+bytes with another hash.
 
 For Windows, first run the SHA-256 check. An unknown-publisher or SmartScreen
 warning is expected. Use **More info → Run anyway** only for the exact verified

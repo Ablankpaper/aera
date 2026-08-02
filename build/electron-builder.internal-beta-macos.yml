@@ -1,8 +1,9 @@
 extends: electron-builder.yml
 
 # This configuration is used only after the workflow has required protected
-# Developer ID credentials. Beta.20 deliberately defers Apple notarization but
-# must never fall back to an ad-hoc or unsigned macOS candidate.
+# Developer ID credentials. The workflow performs explicit two-round Apple
+# notarization around a prepackaged app, so electron-builder must not submit a
+# hidden duplicate request or fall back to ad-hoc signing.
 forceCodeSigning: true
 publish: []
 

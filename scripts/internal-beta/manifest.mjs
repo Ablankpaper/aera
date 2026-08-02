@@ -14,9 +14,9 @@ import {
 
 export { canonicalJSONStringify };
 
-export const INTERNAL_BETA_VERSION = "0.7.4-internal-beta.20";
+export const INTERNAL_BETA_VERSION = "0.7.4-internal-beta.21";
 export const INTERNAL_BETA_SIGNING_STATUS =
-  "macos_developer_id_signed_notarization_deferred_windows_unsigned";
+  "macos_developer_id_notarized_windows_unsigned";
 export const INTERNAL_BETA_RUNTIME_SOURCE_SHA =
   "dcb0f0bc6a0e2d18c55beedc6517dbc41d8b01e0";
 export const INTERNAL_BETA_WORKFLOW_IDENTITY =
@@ -57,6 +57,8 @@ const SHA512_PATTERN = /^[0-9a-f]{128}$/u;
 const KEY_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{2,63}$/u;
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/u;
 const ISO_SECONDS_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 const TOP_LEVEL_KEYS = [
   "artifacts",
@@ -126,13 +128,13 @@ const MACOS_EVIDENCE_KEYS = [
   "dmgStapled",
   "gatekeeperAccepted",
   "nativeModuleArchitecture",
-  "notarizationMode",
   "notarizations",
   "runtimeSeedManifest",
   "runtimeSeedVerifiedArtifacts",
   "signingIdentity",
   "teamId",
 ];
+const MACOS_NOTARIZATION_KEYS = ["artifact", "id", "status"];
 const MACOS_RUNTIME_MANIFEST_KEYS = ["manifest", "manifestSha256"];
 const MACOS_ARTIFACT_KEYS = [...ARTIFACT_KEYS, "sha512"];
 
@@ -348,16 +350,15 @@ function validateMacosEvidence(
   ) {
     throw new Error("macOS Developer ID signing evidence is invalid");
   }
-  if (evidence.codesignVerified !== true) {
-    throw new Error("macOS Developer ID codesign evidence is invalid");
-  }
   if (
-    evidence.notarizationMode !== "deferred" ||
-    evidence.gatekeeperAccepted !== false ||
-    evidence.appStapled !== false ||
-    evidence.dmgStapled !== false
+    evidence.codesignVerified !== true ||
+    evidence.gatekeeperAccepted !== true ||
+    evidence.appStapled !== true ||
+    evidence.dmgStapled !== true
   ) {
-    throw new Error("macOS deferred notarization evidence is invalid");
+    throw new Error(
+      "macOS codesign, Gatekeeper, or stapled notarization evidence is invalid",
+    );
   }
 
   const macArtifacts = artifacts.filter(({ platform }) => platform === "macos");
@@ -374,9 +375,23 @@ function validateMacosEvidence(
 
   if (
     !Array.isArray(evidence.notarizations) ||
-    evidence.notarizations.length !== 0
+    evidence.notarizations.length !== requiredNames.length
   ) {
-    throw new Error("macOS deferred notarization evidence must be empty");
+    throw new Error("macOS notarization evidence is incomplete");
+  }
+  for (let index = 0; index < requiredNames.length; index += 1) {
+    const notarization = exactObject(
+      evidence.notarizations[index],
+      MACOS_NOTARIZATION_KEYS,
+      `macOS notarization ${index}`,
+    );
+    if (
+      notarization.artifact !== requiredNames[index] ||
+      notarization.status !== "Accepted" ||
+      !UUID_PATTERN.test(notarization.id ?? "")
+    ) {
+      throw new Error("macOS notarization evidence is missing or rejected");
+    }
   }
 
   if (
