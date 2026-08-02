@@ -286,6 +286,33 @@ describe("Aera startup gate", () => {
     },
   );
 
+  // @lat: [[agentera-app-authentication#Startup gate#Renderer state machine#Latest authentication event wins startup routing]]
+  it("routes with an authentication event that supersedes a stale startup snapshot", async () => {
+    const { auth } = installWindowMocks({
+      target: "welcome",
+      authState: { status: "checking" },
+    });
+    let finishStaleRead: (() => void) | undefined;
+    auth.getState.mockImplementationOnce(
+      () =>
+        new Promise<AgenteraAuthPublicState>((resolve) => {
+          finishStaleRead = () => resolve({ status: "checking" });
+        }),
+    );
+    render(<App />);
+
+    await act(async () => undefined);
+    expect(auth.getState).toHaveBeenCalledOnce();
+    await act(async () => {
+      authListener?.(authenticated);
+      finishStaleRead?.();
+    });
+    await finishSplash();
+
+    expect(screen.getByTestId("screen-installing")).toBeInTheDocument();
+    expect(screen.queryByTestId("screen-auth")).toBeNull();
+  });
+
   it("fails closed if main-process account-space resolution remains unresolved", async () => {
     const { runtime } = installWindowMocks({
       target: "setup",
@@ -430,9 +457,7 @@ describe("Aera startup gate", () => {
     await act(async () => undefined);
 
     expect(runtime.createFreshProfile).toHaveBeenCalledOnce();
-    expect(runtime.createFreshProfile.mock.calls[0][0]).toMatch(
-      /^Aera Space /,
-    );
+    expect(runtime.createFreshProfile.mock.calls[0][0]).toMatch(/^Aera Space /);
     expect(runtime.bindActiveProfile).not.toHaveBeenCalled();
     expect(screen.getByTestId("screen-main")).toBeInTheDocument();
     expect(screen.queryByTestId("screen-setup")).toBeNull();

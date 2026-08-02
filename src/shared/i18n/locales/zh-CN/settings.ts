@@ -237,7 +237,7 @@ export default {
   latestVersion: "已是最新版本",
   autoUpgradeDesktop: "自动升级桌面应用",
   autoUpgradeDesktopHint:
-    "应用启动时自动从 GitHub 下载新版 Aera。关闭后，启动时仍会显示升级按钮，但只有点击后才会下载。",
+    "应用启动时自动从 Aera 签名更新通道下载新版。关闭后仍会检查并显示升级按钮，但只有点击后才会下载。",
   runningDiagnosis: "运行中...",
   runDiagnosis: "运行诊断",
   running: "运行中...",
@@ -316,8 +316,7 @@ export default {
   linkX: "X",
   linkTelegram: "Telegram",
   supportTitle: "支持开发者",
-  supportHint:
-    "Aera 免费且开源。如果它对你有帮助，欢迎支持项目继续开发。",
+  supportHint: "Aera 免费且开源。如果它对你有帮助，欢迎支持项目继续开发。",
   supportKofi: "通过 Ko-fi 支持",
 
   modeSsh: "SSH 隧道",

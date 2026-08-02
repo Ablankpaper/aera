@@ -68,6 +68,12 @@ The separate `window.agenteraRuntimeDistribution` lifecycle namespace is authent
 
 [[src/renderer/src/App.tsx#App]] applies the sanitized startup target only after signed account access and Runtime ownership checks.
 
+#### Latest authentication event wins startup routing
+
+If an authentication refresh event arrives while the sanitized startup preflight or splash delay is still pending, the renderer routes from that latest event instead of overwriting it with an older `getState` snapshot.
+
+This closes the restored-session race without weakening fail-closed behavior: a newer blocked, revoked, disabled, expired, or unauthenticated event also takes precedence before any Runtime or Profile screen mounts.
+
 The three-second branded splash remains unchanged. A missing Runtime proceeds to bundled installation only after account access. `main` additionally requires the current local Profile to match the signed account owner; remote and SSH contexts remain account-only. A legacy `setup` target is normalized to `main` after that ownership check.
 
 [[src/renderer/src/screens/AuthGate/AuthGate.tsx#AuthGate]] is the explicit sign-in/recovery surface and presents the product-owned `src/renderer/src/assets/aila.glb` as Aila's native Three.js 3D character. While that asset loads, the surface shows only a neutral progress indicator and never substitutes a different avatar or flat “A” identity. It opens registration, sign-in, and recovery only in the system browser, never renders password, email, phone, verification-code, WebView, or local-bypass inputs, and explains fail-closed platform secure-storage errors.

@@ -15,6 +15,7 @@ import type {
   AgenteraAgentControlResult,
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
+  AgentRuntimeModelRoute,
   ExperienceCandidateDetail,
   ExperienceCandidateImportPreview,
   ExperienceCandidateSummary,
@@ -928,6 +929,62 @@ describe("AgentControlPanel", () => {
           modelSelection: {
             sourceProfileId: "account-home",
             modelLibraryId: selectedLibraryId,
+          },
+        },
+        undefined,
+      ),
+    );
+  });
+
+  it("uses the visible replacement route when the model catalog refreshes while confirmation is open", async () => {
+    const api = installAPI({
+      listDrafts: vi.fn(async () => success([publishedDraft() as AgentDraft])),
+      listDefinitions: vi.fn(async () => success([])),
+      installVersion: vi.fn(async () => success(installation("active"))),
+    });
+    const originalLibraryId = "55555555-5555-4555-8555-555555555555";
+    const replacementLibraryId = "77777777-5555-4555-8555-555555555555";
+    const route = (modelLibraryId: string): AgentRuntimeModelRoute => ({
+      id: ["account-home", modelLibraryId].join("\0"),
+      sourceProfileId: "account-home",
+      modelLibraryId,
+      provider: "custom:petoi",
+      providerLabel: "Petoi",
+      model: "gpt-5.6-sol",
+      displayName: "GPT 5.6",
+      baseUrl: "https://api.petoi.cn/v1",
+    });
+    const renderPanel = (modelLibraryId: string): React.JSX.Element => (
+      <AgentControlPanel
+        profiles={[configuredModelProfile("account-home")]}
+        modelProfileId="account-home"
+        runtimeModelRoutes={[route(modelLibraryId)]}
+      />
+    );
+    const view = render(renderPanel(originalLibraryId));
+
+    fireEvent.click(
+      (await screen.findByText("Workspace Research Agent")).closest("button")!,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.hub.useAgent" }),
+    );
+    expect(
+      screen.getByRole("option", { name: "gpt-5.6-sol · Petoi" }),
+    ).toBeTruthy();
+
+    view.rerender(renderPanel(replacementLibraryId));
+    confirmRuntimeModel();
+
+    await waitFor(() =>
+      expect(api.installVersion).toHaveBeenCalledWith(
+        {
+          definitionId: DEFINITION_ID,
+          versionId: VERSION_ID,
+          profileName: "aera-agent-11111111-111",
+          modelSelection: {
+            sourceProfileId: "account-home",
+            modelLibraryId: replacementLibraryId,
           },
         },
         undefined,

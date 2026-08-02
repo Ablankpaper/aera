@@ -243,7 +243,7 @@ export default {
   latestVersion: "Already up to date",
   autoUpgradeDesktop: "Auto-upgrade desktop app",
   autoUpgradeDesktopHint:
-    "Automatically download new Aera releases from GitHub when the app starts. Turn this off to show the startup upgrade button without downloading until you click it.",
+    "Automatically download new releases from Aera's signed update channel when the app starts. Turn this off to keep checking and show the upgrade button without downloading until you click it.",
   runningDiagnosis: "Running diagnosis...",
   runDiagnosis: "Run Diagnosis",
   running: "Running...",

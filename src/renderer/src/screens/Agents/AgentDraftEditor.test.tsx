@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AgentDraftDetail,
@@ -830,6 +836,68 @@ describe("AgentDraftEditor", () => {
         name: "agents.control.confirmPublish",
       }),
     ).toBeNull();
+  });
+
+  it("deduplicates a repeated publish-and-use action before the first request settles", async () => {
+    Object.defineProperty(window, "hermesAPI", {
+      configurable: true,
+      value: {
+        getModelConfig: vi.fn(async () => ({
+          provider: "custom",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://api.example.test/v1",
+        })),
+        listModels: vi.fn(async () => []),
+      },
+    });
+    const published = {
+      draftId: DRAFT_ID,
+      revision: 2,
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      versionNumber: 1,
+      contentDigest: "b".repeat(64),
+      publishedAt: "2026-07-19T01:00:00.000Z",
+      replayed: false,
+    };
+    const api = installAPI({
+      preparePublication: vi.fn(async () =>
+        success({
+          publicationHandle: HANDLE_ID,
+          draftId: DRAFT_ID,
+          revision: 2,
+          targetScope: "USER" as const,
+          assetCounts: { skill: 0, sop: 0, knowledge: 1 },
+          totalBytes: 8,
+        }),
+      ),
+      confirmPublication: vi.fn(async () => success(published)),
+    });
+    const onRequestInstall = vi.fn();
+    render(
+      <AgentDraftEditor
+        open
+        draft={detail()}
+        modelProfileId="account-home"
+        onClose={() => undefined}
+        onSaved={() => undefined}
+        onPublished={() => undefined}
+        onRequestInstall={onRequestInstall}
+      />,
+    );
+
+    const publishAndUse = await screen.findByRole("button", {
+      name: "agents.control.publishAndUse",
+    });
+    await act(async () => {
+      publishAndUse.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      publishAndUse.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    await waitFor(() => expect(onRequestInstall).toHaveBeenCalled());
+    expect(api.preparePublication).toHaveBeenCalledTimes(1);
+    expect(api.confirmPublication).toHaveBeenCalledTimes(1);
+    expect(onRequestInstall).toHaveBeenCalledTimes(1);
   });
 
   it("moves a stale named custom draft onto the current Runtime provider identity", async () => {
