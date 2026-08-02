@@ -38,6 +38,7 @@ import {
   removeRuntimeOwnedPath,
   type CandidatePointer,
   type RuntimeDistributionState,
+  type RuntimePointer,
 } from "./state-store";
 import {
   checkStableRuntimeUpdate,
@@ -180,6 +181,20 @@ function createExternalState(): RuntimeDistributionPublicState {
   };
 }
 
+function sameRuntimePointer(
+  left: RuntimePointer | null,
+  right: RuntimePointer | null,
+): boolean {
+  if (left === null || right === null) return left === right;
+  return (
+    left.runtimeVersion === right.runtimeVersion &&
+    left.sourceCommit === right.sourceCommit &&
+    left.versionDirectory === right.versionDirectory &&
+    left.manifestSha256 === right.manifestSha256 &&
+    left.installedAt === right.installedAt
+  );
+}
+
 async function readCandidateFailureCode(
   paths: RuntimeDistributionPaths,
   candidate: CandidatePointer | null,
@@ -260,6 +275,7 @@ export function createRuntimeDistributionManager(
   const randomId = options.randomId ?? randomUUID;
   const listeners = new Set<(state: RuntimeDistributionPublicState) => void>();
   let state: RuntimeDistributionPublicState | null = null;
+  let observedCurrent: RuntimePointer | null | undefined;
   let offer: RuntimeUpdateOffer | null = null;
   let downloadController: AbortController | null = null;
   let operation: Promise<void> = Promise.resolve();
@@ -299,6 +315,7 @@ export function createRuntimeDistributionManager(
       return publish(createExternalState());
     }
     const journal = await store.recover();
+    observedCurrent = journal.current;
     return publish(
       createBaseState(
         journal,
@@ -577,6 +594,29 @@ export function createRuntimeDistributionManager(
     exclusive(async () => {
       let currentState = await getState();
       let journal = await store.readState();
+      const currentPointerChanged =
+        observedCurrent !== undefined &&
+        !sameRuntimePointer(observedCurrent, journal.current);
+
+      // @lat: [[agentera-runtime-distribution#Offline Seed installation and repair]]
+      // The authenticated welcome installer publishes through its own state
+      // store before asking this long-lived manager to synchronize. Rebuild
+      // from the exact journal pointer so a cached newer Runtime cannot make a
+      // successful packaged Seed repair look like an activation failure. The
+      // exact pointer comparison also catches a same-version repair directory.
+      if (currentPointerChanged) {
+        observedCurrent = journal.current;
+        offer = null;
+        currentState = publish({
+          ...createBaseState(
+            journal,
+            await readCandidateFailureCode(options.paths, journal.candidate),
+          ),
+          packagedSeedVersion: journal.current?.runtimeVersion ?? null,
+        });
+      } else if (observedCurrent !== undefined) {
+        observedCurrent = journal.current;
+      }
 
       if (currentState.phase === "rollback" && journal.candidate !== null) {
         const failedCandidate = journal.candidate;
@@ -599,9 +639,19 @@ export function createRuntimeDistributionManager(
         }
         offer = null;
         journal = await store.readState();
-        currentState = publish(createBaseState(journal, null));
+        observedCurrent = journal.current;
+        currentState = publish({
+          ...createBaseState(journal, null),
+          packagedSeedVersion:
+            currentPointerChanged && journal.current !== null
+              ? journal.current.runtimeVersion
+              : null,
+        });
         if (journal.current !== null) return currentState;
       }
+
+      if (currentPointerChanged && journal.current !== null)
+        return currentState;
 
       if (
         currentState.phase !== "missing" &&
@@ -641,6 +691,7 @@ export function createRuntimeDistributionManager(
           });
         }
         const recovered = await store.recover();
+        observedCurrent = recovered.current;
         if (recovered.current === null) {
           return publish({
             ...currentState,
