@@ -924,6 +924,15 @@ export default function AgentControlPanel({
       modelProfileId: profile.id,
     }));
   }, [runtimeModelRoutes, selectableModelProfiles]);
+  const effectiveSelectedModelSource = useMemo(
+    () =>
+      selectableModelSources.find(
+        (candidate) => candidate.id === selectedModelSourceId,
+      ) ??
+      selectableModelSources[0] ??
+      null,
+    [selectableModelSources, selectedModelSourceId],
+  );
 
   const requestInstall = (target: {
     definitionId: string;
@@ -1596,7 +1605,7 @@ export default function AgentControlPanel({
               <select
                 className="input"
                 aria-label={t("agents.hub.runtimeModelChoice")}
-                value={selectedModelSourceId}
+                value={effectiveSelectedModelSource?.id ?? ""}
                 onChange={(event) =>
                   setSelectedModelSourceId(event.target.value)
                 }
@@ -1619,12 +1628,12 @@ export default function AgentControlPanel({
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={!selectedModelSourceId || busyPersonalKey !== null}
+                disabled={
+                  !effectiveSelectedModelSource || busyPersonalKey !== null
+                }
                 onClick={() => {
                   const target = pendingModelSelection;
-                  const source = selectableModelSources.find(
-                    (candidate) => candidate.id === selectedModelSourceId,
-                  );
+                  const source = effectiveSelectedModelSource;
                   if (!source) return;
                   setPendingModelSelection(null);
                   void activateAgent({

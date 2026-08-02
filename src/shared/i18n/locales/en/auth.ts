@@ -21,6 +21,8 @@ const auth = {
     retry: "Retry",
     retrying: "Checking again…",
     loginFailed: "Browser sign-in did not finish. Please try again.",
+    deviceLimitReached:
+      "This account already has five active devices. Revoke an unused device in the Aera account center, then sign in again.",
     retryFailed: "Aera could not verify your session. Please try again.",
     cancelled: "Sign-in was cancelled.",
     legalPrefix: "By continuing, you agree to the",
@@ -30,8 +32,7 @@ const auth = {
     secureStorageDescription:
       "Aera cannot safely store this device session. Enable your system keychain or credential service, then retry. Plaintext storage is never used.",
     reasons: {
-      sign_in_required:
-        "Sign in or create an account before using Aera.",
+      sign_in_required: "Sign in or create an account before using Aera.",
       offline_expired:
         "Your seven-day offline access has expired. Connect to the internet and sign in again.",
       clock_rollback:
@@ -110,8 +111,7 @@ const auth = {
       "If you sign out while the control plane is unreachable, this device may still count toward the five-device limit until the signed self-revocation is delivered automatically.",
     profile: {
       title: "Personal details",
-      description:
-        "Choose the name and personal details shown in Aera.",
+      description: "Choose the name and personal details shown in Aera.",
       loading: "Loading details…",
       displayName: "Username",
       displayNamePlaceholder: "For example: Aera user",

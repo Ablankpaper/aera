@@ -94,6 +94,7 @@ function App(): React.JSX.Element {
 
   const runIdRef = useRef(0);
   const routeIdRef = useRef(0);
+  const authEventVersionRef = useRef(0);
   const preflightRef = useRef<AgenteraStartupPreflightPublicResult | null>(
     null,
   );
@@ -189,6 +190,7 @@ function App(): React.JSX.Element {
 
   const runInstallCheck = useCallback(async (): Promise<void> => {
     const myRun = ++runIdRef.current;
+    const authEventVersionAtStart = authEventVersionRef.current;
     ++routeIdRef.current;
     preflightRef.current = null;
     const startedAt = Date.now();
@@ -238,11 +240,17 @@ function App(): React.JSX.Element {
     setSplashStatus(undefined);
     preflightRef.current = preflight;
     setVerifyWarning(preflight.verifyWarning);
-    await routeAfterAuthentication(nextAuthState, preflight);
+    await routeAfterAuthentication(
+      authEventVersionRef.current === authEventVersionAtStart
+        ? nextAuthState
+        : authStateRef.current,
+      preflight,
+    );
   }, [routeAfterAuthentication, t]);
 
   useEffect(() => {
     return window.agenteraAuth.onStateChanged((state) => {
+      ++authEventVersionRef.current;
       const previous = authStateRef.current;
       authStateRef.current = state;
       setAuthState(state);

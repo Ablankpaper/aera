@@ -21,6 +21,8 @@ const auth = {
     retry: "重试",
     retrying: "正在重新检查…",
     loginFailed: "浏览器登录未完成，请重试。",
+    deviceLimitReached:
+      "此账户已达到 5 台活跃设备上限。请在 Aera 账户中心撤销不再使用的设备，然后重新登录。",
     retryFailed: "Aera 无法验证当前会话，请重试。",
     cancelled: "已取消登录。",
     legalPrefix: "继续即表示你同意",
@@ -35,8 +37,7 @@ const auth = {
       clock_rollback: "系统时间出现异常变化，请联网验证此设备。",
       device_revoked: "此设备登录已失效，请重新登录。",
       account_disabled: "此 Aera 账户目前已停用，请前往网页账户中心处理。",
-      account_pending_deletion:
-        "此账户正在等待注销，无法登录 Aera。",
+      account_pending_deletion: "此账户正在等待注销，无法登录 Aera。",
       secure_storage_unavailable: "Aera 会话必须使用系统安全存储。",
     },
   },

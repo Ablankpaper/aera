@@ -118,6 +118,35 @@ describe("AuthGate", () => {
     await act(async () => finishRestart?.());
   });
 
+  it("explains the device limit instead of collapsing it into a generic browser-login failure", async () => {
+    const onOpenBrowser = vi
+      .fn()
+      .mockRejectedValue(
+        new Error(
+          "Error invoking remote method 'agentera-auth:start-login': Aera cloud request failed: device_limit_reached",
+        ),
+      );
+
+    render(
+      <AuthGate
+        state={unauthenticated}
+        onOpenBrowser={onOpenBrowser}
+        onCopyLoginLink={vi.fn().mockResolvedValue(undefined)}
+        onRestartLogin={vi.fn().mockResolvedValue(undefined)}
+        onRetry={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "auth.gate.openBrowser" }),
+    );
+
+    expect(
+      await screen.findByText("auth.gate.deviceLimitReached"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("auth.gate.loginFailed")).toBeNull();
+  });
+
   it("explains secure-storage failure and supports an explicit retry", () => {
     const onRetry = vi.fn().mockResolvedValue(undefined);
 

@@ -212,6 +212,7 @@ export default function AgentDraftEditor({
 }: AgentDraftEditorProps): React.JSX.Element {
   const { t } = useI18n();
   const identityFileInputRef = useRef<HTMLInputElement | null>(null);
+  const prepareInFlightRef = useRef(false);
   const [current, setCurrent] = useState<AgentDraftDetail | null>(draft);
   const [name, setName] = useState(draft?.displayName ?? "");
   const [systemPrompt, setSystemPrompt] = useState(
@@ -597,40 +598,44 @@ export default function AgentDraftEditor({
   };
 
   const prepare = async (andUse: boolean): Promise<void> => {
-    if (readOnly || alreadyPublished) return;
-    const saved = await persist();
-    if (!saved) return;
-    setBusy(true);
-    setError(null);
-    if (publicationTarget === "ORGANIZATION") {
-      const result = await window.agenteraAgents.prepareOrganizationSubmission(
+    if (readOnly || alreadyPublished || prepareInFlightRef.current) return;
+    prepareInFlightRef.current = true;
+    try {
+      const saved = await persist();
+      if (!saved) return;
+      setBusy(true);
+      setError(null);
+      if (publicationTarget === "ORGANIZATION") {
+        const result =
+          await window.agenteraAgents.prepareOrganizationSubmission(saved.id);
+        setBusy(false);
+        if (!result.ok) {
+          setError(errorKey(result.errorCode));
+          return;
+        }
+        setPublishAndUse(false);
+        setOrganizationPreview(result.data);
+        return;
+      }
+      const result = await window.agenteraAgents.preparePublication(
         saved.id,
+        operationScope,
       );
       setBusy(false);
       if (!result.ok) {
         setError(errorKey(result.errorCode));
         return;
       }
-      setPublishAndUse(false);
-      setOrganizationPreview(result.data);
-      return;
+      if (result.data.targetScope === "USER") {
+        await publishPrepared(result.data, andUse, saved);
+        return;
+      }
+      setPublishAndUse(andUse);
+      setPublicationDraft(saved);
+      setPreview(result.data);
+    } finally {
+      prepareInFlightRef.current = false;
     }
-    const result = await window.agenteraAgents.preparePublication(
-      saved.id,
-      operationScope,
-    );
-    setBusy(false);
-    if (!result.ok) {
-      setError(errorKey(result.errorCode));
-      return;
-    }
-    if (result.data.targetScope === "USER") {
-      await publishPrepared(result.data, andUse, saved);
-      return;
-    }
-    setPublishAndUse(andUse);
-    setPublicationDraft(saved);
-    setPreview(result.data);
   };
 
   const confirmOrganizationSubmission = async (): Promise<void> => {

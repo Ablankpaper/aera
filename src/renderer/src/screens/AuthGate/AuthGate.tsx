@@ -13,6 +13,16 @@ interface AuthGateProps {
 
 type PendingAction = "browser" | "retry" | null;
 
+function loginFailureKey(
+  error: unknown,
+  fallback: "auth.gate.loginFailed" | "auth.gate.restartFailed",
+): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("device_limit_reached")
+    ? "auth.gate.deviceLimitReached"
+    : fallback;
+}
+
 function stateMessageKey(state: AgenteraAuthPublicState): string {
   switch (state.status) {
     case "checking":
@@ -69,9 +79,9 @@ function AuthGate({
     setPending("browser");
     try {
       await onOpenBrowser();
-    } catch {
+    } catch (error) {
       if (requestId !== loginRequestRef.current) return;
-      setErrorKey("auth.gate.loginFailed");
+      setErrorKey(loginFailureKey(error, "auth.gate.loginFailed"));
     } finally {
       if (requestId === loginRequestRef.current) setPending(null);
     }
@@ -102,9 +112,9 @@ function AuthGate({
     setCopied(false);
     try {
       await onRestartLogin();
-    } catch {
+    } catch (error) {
       if (requestId !== loginRequestRef.current) return;
-      setErrorKey("auth.gate.restartFailed");
+      setErrorKey(loginFailureKey(error, "auth.gate.restartFailed"));
     } finally {
       if (requestId === loginRequestRef.current) setPending(null);
     }
