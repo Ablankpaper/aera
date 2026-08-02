@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
@@ -74,9 +74,17 @@ export async function verifyMacCandidate(options) {
   let mounted = false;
   try {
     await run("ditto", ["-x", "-k", zip, zipRoot]);
-    const zipSeed = await findSeed(zipRoot);
+    const zipApp = await findApp(zipRoot);
+    await verifyDistributedApp(zipApp, notarizationMode);
+    const zipSeed = join(
+      zipApp,
+      "Contents",
+      "Resources",
+      "agentera-runtime-seed",
+    );
     await verifyRuntimeSeed(zipSeed, reference, desktopVersion);
 
+    await run("hdiutil", ["verify", dmg]);
     await run("hdiutil", [
       "attach",
       "-nobrowse",
@@ -86,7 +94,14 @@ export async function verifyMacCandidate(options) {
       dmg,
     ]);
     mounted = true;
-    const dmgSeed = await findSeed(mountRoot);
+    const dmgApp = await findApp(mountRoot);
+    await verifyDistributedApp(dmgApp, notarizationMode);
+    const dmgSeed = join(
+      dmgApp,
+      "Contents",
+      "Resources",
+      "agentera-runtime-seed",
+    );
     await verifyRuntimeSeed(dmgSeed, reference, desktopVersion);
   } finally {
     if (mounted) {
@@ -179,21 +194,22 @@ async function verifyRuntimeSeed(directory, reference, desktopVersion) {
   ]);
 }
 
-async function findSeed(root) {
-  const result = await run("find", [
-    root,
-    "-type",
-    "d",
-    "-path",
-    "*/Contents/Resources/agentera-runtime-seed",
-    "-print",
-    "-quit",
-  ]);
-  const found = result.stdout.trim();
-  if (found.length === 0) {
-    throw new Error("Packaged macOS Runtime Seed is missing");
+async function findApp(root) {
+  const apps = (await readdir(root, { withFileTypes: true })).filter(
+    (entry) => entry.isDirectory() && entry.name.endsWith(".app"),
+  );
+  if (apps.length !== 1) {
+    throw new Error("Packaged macOS payload must contain exactly one app");
   }
-  return found;
+  return join(root, apps[0].name);
+}
+
+async function verifyDistributedApp(app, notarizationMode) {
+  await run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", app]);
+  if (notarizationMode === "required") {
+    await run("spctl", ["--assess", "--type", "execute", "--verbose=4", app]);
+    await run("xcrun", ["stapler", "validate", app]);
+  }
 }
 
 async function run(command, arguments_, options = {}) {
