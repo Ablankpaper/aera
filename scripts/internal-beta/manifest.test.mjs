@@ -6,8 +6,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 
+import { hashArtifact } from "../release/candidate-manifest.mjs";
+
 import {
   INTERNAL_BETA_ARTIFACTS,
+  INTERNAL_BETA_SIGNING_STATUS,
   buildInternalBetaManifest,
   canonicalJSONStringify,
   parseAndValidateInternalBetaManifest,
@@ -15,7 +18,7 @@ import {
   verifyInternalBetaManifestFiles,
 } from "./manifest.mjs";
 
-const VERSION = "0.7.4-internal-beta.19";
+const VERSION = "0.7.4-internal-beta.20";
 const SOURCE_SHA = "a".repeat(40);
 const RUNTIME_SHA = "dcb0f0bc6a0e2d18c55beedc6517dbc41d8b01e0";
 const ORIGIN = "https://203.0.113.10";
@@ -42,6 +45,7 @@ async function createFixture(runtimePatch = {}) {
   const runtimeManifestsDirectory = join(root, "runtime-seed");
   const packageJson = join(root, "package.json");
   const runtimeLock = join(root, "runtime-lock.json");
+  const macosEvidence = join(root, "macos-evidence.json");
   const sbom = join(root, "internal-beta.spdx.json");
   const provenance = join(root, "internal-beta.provenance.json");
   await Promise.all([
@@ -104,6 +108,43 @@ async function createFixture(runtimePatch = {}) {
     ),
   );
   await writeFile(sbom, '{"spdxVersion":"SPDX-2.3"}\n');
+  const macArtifacts = await Promise.all(
+    INTERNAL_BETA_ARTIFACTS.slice(0, 2).map(async (artifact, index) => ({
+      name: artifact.name,
+      platform: artifact.platform,
+      arch: artifact.arch,
+      kind: index === 0 ? "macos_dmg" : "macos_zip",
+      ...(await hashArtifact(join(artifactsDirectory, artifact.name))),
+    })),
+  );
+  const darwinManifest = runtimeDocument.assets["darwin-arm64"].manifest;
+  const darwinManifestDigest = await hashArtifact(
+    join(runtimeManifestsDirectory, darwinManifest),
+  );
+  await writeFile(
+    macosEvidence,
+    canonicalJSONStringify({
+      arch: "arm64",
+      signingIdentity: "Developer ID Application: Aera Test (AERA123456)",
+      teamId: "AERA123456",
+      codesignVerified: true,
+      gatekeeperAccepted: true,
+      appStapled: true,
+      dmgStapled: true,
+      notarizations: macArtifacts.map(({ name }, index) => ({
+        artifact: name,
+        id: `00000000-0000-4000-8000-00000000000${index}`,
+        status: "Accepted",
+      })),
+      runtimeSeedVerifiedArtifacts: macArtifacts.map(({ name }) => name),
+      nativeModuleArchitecture: "arm64",
+      runtimeSeedManifest: {
+        manifest: darwinManifest,
+        manifestSha256: darwinManifestDigest.sha256,
+      },
+      artifacts: macArtifacts,
+    }),
+  );
   await writeFile(
     provenance,
     '{"predicateType":"https://slsa.dev/provenance/v1"}\n',
@@ -114,6 +155,7 @@ async function createFixture(runtimePatch = {}) {
     buildRunUrl: BUILD_RUN_URL,
     ciRunUrl: CI_RUN_URL,
     createdAt: "2026-07-24T02:00:00Z",
+    macosEvidence,
     offlineKeyId: KEY_ID,
     offlinePublicKey: PUBLIC_KEY,
     origin: ORIGIN,
@@ -130,7 +172,7 @@ async function createFixture(runtimePatch = {}) {
   return { root, options };
 }
 
-// @lat: [[agentera-post-official-delivery#Production readiness and release#Unsigned internal-Beta candidate boundary]]
+// @lat: [[agentera-post-official-delivery#Production readiness and release#Platform-signed internal-Beta candidate boundary]]
 test("builds one canonical internal-Beta manifest with exact identities and hashes", async () => {
   const { options } = await createFixture();
   const document = await buildInternalBetaManifest(options);
@@ -147,7 +189,10 @@ test("builds one canonical internal-Beta manifest with exact identities and hash
     keyId: KEY_ID,
     publicKey: PUBLIC_KEY,
   });
-  assert.equal(document.signingStatus, "internal_only_unsigned");
+  assert.equal(document.schemaVersion, 2);
+  assert.equal(document.signingStatus, INTERNAL_BETA_SIGNING_STATUS);
+  assert.equal(document.supplyChain.macosEvidence.name, "macos-evidence.json");
+  assert.match(document.supplyChain.macosEvidence.sha256, /^[0-9a-f]{64}$/u);
   assert.match(document.runtimeSeed.lockSha256, /^[0-9a-f]{64}$/u);
   assert.equal(document.runtimeSeed.sourceCommit, RUNTIME_SHA);
   assert.equal(document.runtimeSeed.channel, "candidate");
@@ -276,4 +321,42 @@ test("rejects noncanonical manifest JSON and changed artifact bytes", async () =
     () => verifyInternalBetaManifestFiles(document, options),
     /differs|digest|size/iu,
   );
+});
+
+test("rejects changed macOS signing evidence bytes", async () => {
+  const { options } = await createFixture();
+  const document = await buildInternalBetaManifest(options);
+  await writeFile(options.macosEvidence, '{"codesignVerified":false}');
+
+  await assert.rejects(
+    () => verifyInternalBetaManifestFiles(document, options),
+    /differs|digest|evidence/iu,
+  );
+});
+
+test("rejects semantic macOS evidence that is unsigned or mismatched", async () => {
+  for (const mutate of [
+    (evidence) => {
+      evidence.codesignVerified = false;
+    },
+    (evidence) => {
+      evidence.notarizations[0].status = "Invalid";
+    },
+    (evidence) => {
+      evidence.artifacts[0].sha256 = "f".repeat(64);
+    },
+    (evidence) => {
+      evidence.runtimeSeedManifest.manifestSha256 = "e".repeat(64);
+    },
+  ]) {
+    const { options } = await createFixture();
+    const evidence = JSON.parse(await readFile(options.macosEvidence, "utf8"));
+    mutate(evidence);
+    await writeFile(options.macosEvidence, canonicalJSONStringify(evidence));
+
+    await assert.rejects(
+      () => buildInternalBetaManifest(options),
+      /macOS.*(evidence|bytes|Seed|notarization|codesign|Gatekeeper)/u,
+    );
+  }
 });

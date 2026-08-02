@@ -14,7 +14,9 @@ import {
 
 export { canonicalJSONStringify };
 
-export const INTERNAL_BETA_VERSION = "0.7.4-internal-beta.19";
+export const INTERNAL_BETA_VERSION = "0.7.4-internal-beta.20";
+export const INTERNAL_BETA_SIGNING_STATUS =
+  "macos_developer_id_notarized_windows_unsigned";
 export const INTERNAL_BETA_RUNTIME_SOURCE_SHA =
   "dcb0f0bc6a0e2d18c55beedc6517dbc41d8b01e0";
 export const INTERNAL_BETA_WORKFLOW_IDENTITY =
@@ -51,9 +53,12 @@ export const INTERNAL_BETA_ARTIFACTS = Object.freeze([
 
 const SHA1_PATTERN = /^[0-9a-f]{40}$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
+const SHA512_PATTERN = /^[0-9a-f]{128}$/u;
 const KEY_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{2,63}$/u;
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/u;
 const ISO_SECONDS_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 const TOP_LEVEL_KEYS = [
   "artifacts",
@@ -90,6 +95,7 @@ const RUNTIME_TARGET_KEYS = [
   "signature",
 ];
 const SUPPLY_CHAIN_KEYS = [
+  "macosEvidence",
   "manifestBundle",
   "oidcIssuer",
   "provenance",
@@ -114,6 +120,23 @@ const RUNTIME_ASSET_KEYS = [
   "platform",
   "signature",
 ];
+const MACOS_EVIDENCE_KEYS = [
+  "appStapled",
+  "arch",
+  "artifacts",
+  "codesignVerified",
+  "dmgStapled",
+  "gatekeeperAccepted",
+  "nativeModuleArchitecture",
+  "notarizations",
+  "runtimeSeedManifest",
+  "runtimeSeedVerifiedArtifacts",
+  "signingIdentity",
+  "teamId",
+];
+const MACOS_NOTARIZATION_KEYS = ["artifact", "id", "status"];
+const MACOS_RUNTIME_MANIFEST_KEYS = ["manifest", "manifestSha256"];
+const MACOS_ARTIFACT_KEYS = [...ARTIFACT_KEYS, "sha512"];
 
 function exactObject(value, expectedKeys, label) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -306,15 +329,128 @@ function validateSupplyFile(value, expectedName, label) {
   requiredPositiveInteger(value.size, label);
 }
 
+function validateMacosEvidence(
+  evidence,
+  artifacts,
+  artifactDigests,
+  runtimeTargets,
+) {
+  exactObject(evidence, MACOS_EVIDENCE_KEYS, "macOS signing evidence");
+  if (
+    evidence.arch !== "arm64" ||
+    evidence.nativeModuleArchitecture !== "arm64"
+  ) {
+    throw new Error("macOS signing evidence architecture is invalid");
+  }
+  if (
+    typeof evidence.signingIdentity !== "string" ||
+    !evidence.signingIdentity.startsWith("Developer ID Application: ") ||
+    !/^[A-Z0-9]{10}$/u.test(evidence.teamId ?? "") ||
+    !evidence.signingIdentity.includes(`(${evidence.teamId})`)
+  ) {
+    throw new Error("macOS Developer ID signing evidence is invalid");
+  }
+  if (
+    evidence.codesignVerified !== true ||
+    evidence.gatekeeperAccepted !== true ||
+    evidence.appStapled !== true ||
+    evidence.dmgStapled !== true
+  ) {
+    throw new Error(
+      "macOS codesign, Gatekeeper, or stapled notarization evidence is invalid",
+    );
+  }
+
+  const macArtifacts = artifacts.filter(({ platform }) => platform === "macos");
+  const requiredNames = macArtifacts.map(({ name }) => name);
+  if (
+    !Array.isArray(evidence.runtimeSeedVerifiedArtifacts) ||
+    evidence.runtimeSeedVerifiedArtifacts.length !== requiredNames.length ||
+    evidence.runtimeSeedVerifiedArtifacts.some(
+      (name, index) => name !== requiredNames[index],
+    )
+  ) {
+    throw new Error("macOS Runtime Seed artifact evidence is invalid");
+  }
+
+  if (
+    !Array.isArray(evidence.notarizations) ||
+    evidence.notarizations.length !== requiredNames.length
+  ) {
+    throw new Error("macOS notarization evidence is incomplete");
+  }
+  for (let index = 0; index < requiredNames.length; index += 1) {
+    const notarization = exactObject(
+      evidence.notarizations[index],
+      MACOS_NOTARIZATION_KEYS,
+      `macOS notarization ${index}`,
+    );
+    if (
+      notarization.artifact !== requiredNames[index] ||
+      notarization.status !== "Accepted" ||
+      !UUID_PATTERN.test(notarization.id ?? "")
+    ) {
+      throw new Error("macOS notarization evidence is missing or rejected");
+    }
+  }
+
+  if (
+    !Array.isArray(evidence.artifacts) ||
+    evidence.artifacts.length !== macArtifacts.length
+  ) {
+    throw new Error("macOS artifact signing evidence is incomplete");
+  }
+  const expectedEvidenceKinds = ["macos_dmg", "macos_zip"];
+  for (let index = 0; index < macArtifacts.length; index += 1) {
+    const actual = exactObject(
+      evidence.artifacts[index],
+      MACOS_ARTIFACT_KEYS,
+      `macOS signing artifact ${index}`,
+    );
+    const expected = macArtifacts[index];
+    const digest = artifactDigests.get(expected.name);
+    if (
+      actual.name !== expected.name ||
+      actual.platform !== expected.platform ||
+      actual.arch !== expected.arch ||
+      actual.kind !== expectedEvidenceKinds[index] ||
+      actual.sha256 !== expected.sha256 ||
+      actual.size !== expected.size ||
+      !SHA512_PATTERN.test(actual.sha512 ?? "") ||
+      actual.sha512 !== digest?.sha512
+    ) {
+      throw new Error("macOS signing evidence differs from candidate bytes");
+    }
+  }
+
+  const runtimeManifest = exactObject(
+    evidence.runtimeSeedManifest,
+    MACOS_RUNTIME_MANIFEST_KEYS,
+    "macOS Runtime Seed manifest evidence",
+  );
+  const darwinTarget = runtimeTargets.find(
+    ({ platform, arch }) => platform === "darwin" && arch === "arm64",
+  );
+  if (
+    runtimeManifest.manifest !== darwinTarget?.manifest ||
+    runtimeManifest.manifestSha256 !== darwinTarget?.manifestSha256
+  ) {
+    throw new Error(
+      "macOS Runtime Seed manifest evidence differs from Seed bytes",
+    );
+  }
+  return evidence;
+}
+
 export function validateInternalBetaManifest(document) {
   exactObject(document, TOP_LEVEL_KEYS, "Internal Beta manifest");
   if (
-    document.schemaVersion !== 1 ||
+    document.schemaVersion !== 2 ||
     document.repository !== "bignormal/aera" ||
     typeof document.sourceSha !== "string" ||
     !SHA1_PATTERN.test(document.sourceSha) ||
     document.version !== INTERNAL_BETA_VERSION ||
-    document.signingStatus !== "internal_only_unsigned"
+    document.signingStatus !== INTERNAL_BETA_SIGNING_STATUS
   ) {
     throw new Error("Internal Beta manifest identity or schema is invalid");
   }
@@ -424,6 +560,11 @@ export function validateInternalBetaManifest(document) {
     throw new Error("Internal Beta supply-chain identity is invalid");
   }
   validateSupplyFile(
+    document.supplyChain.macosEvidence,
+    "macos-evidence.json",
+    "macOS signing evidence",
+  );
+  validateSupplyFile(
     document.supplyChain.sbom,
     "internal-beta.spdx.json",
     "Internal Beta SBOM",
@@ -476,10 +617,12 @@ export async function buildInternalBetaManifest(options) {
   );
 
   const artifacts = [];
+  const artifactDigests = new Map();
   for (const specification of INTERNAL_BETA_ARTIFACTS) {
     const digest = await hashArtifact(
       join(options.artifactsDirectory, specification.name),
     );
+    artifactDigests.set(specification.name, digest);
     artifacts.push({
       ...specification,
       sha256: digest.sha256,
@@ -501,14 +644,22 @@ export async function buildInternalBetaManifest(options) {
       manifestSha256: manifestDigest.sha256,
     });
   }
-  const [runtimeLockDigest, sbomDigest, provenanceDigest] = await Promise.all([
-    hashArtifact(options.runtimeLock),
-    hashArtifact(options.sbom),
-    hashArtifact(options.provenance),
-  ]);
+  validateMacosEvidence(
+    await readJson(options.macosEvidence, "macOS signing evidence"),
+    artifacts,
+    artifactDigests,
+    runtimeTargets,
+  );
+  const [runtimeLockDigest, macosEvidenceDigest, sbomDigest, provenanceDigest] =
+    await Promise.all([
+      hashArtifact(options.runtimeLock),
+      hashArtifact(options.macosEvidence),
+      hashArtifact(options.sbom),
+      hashArtifact(options.provenance),
+    ]);
 
   const document = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     repository: options.repository,
     sourceSha: options.sourceSha,
     version: options.version,
@@ -524,7 +675,7 @@ export async function buildInternalBetaManifest(options) {
       runUrl: githubRunUrl(options.buildRunUrl, "Internal Beta build run"),
       ciRunUrl: githubRunUrl(options.ciRunUrl, "Internal Beta CI run"),
     },
-    signingStatus: "internal_only_unsigned",
+    signingStatus: INTERNAL_BETA_SIGNING_STATUS,
     runtimeSeed: {
       repository: runtime.repository,
       sourceCommit: runtime.source_commit,
@@ -536,6 +687,11 @@ export async function buildInternalBetaManifest(options) {
     },
     artifacts,
     supplyChain: {
+      macosEvidence: {
+        name: "macos-evidence.json",
+        sha256: macosEvidenceDigest.sha256,
+        size: macosEvidenceDigest.size,
+      },
       sbom: {
         name: "internal-beta.spdx.json",
         sha256: sbomDigest.sha256,
@@ -662,6 +818,7 @@ function buildOptions(values) {
     buildRunUrl: values.build_run_url,
     ciRunUrl: values.ci_run_url,
     createdAt: values.created_at,
+    macosEvidence: values.macos_evidence,
     offlineKeyId: values.offline_key_id,
     offlinePublicKey: values.offline_public_key,
     origin: values.origin,

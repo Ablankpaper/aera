@@ -11,6 +11,7 @@ import {
   INTERNAL_BETA_ARTIFACTS,
   INTERNAL_BETA_OIDC_ISSUER,
   INTERNAL_BETA_RUNTIME_SOURCE_SHA,
+  INTERNAL_BETA_SIGNING_STATUS,
   INTERNAL_BETA_VERSION,
   INTERNAL_BETA_WORKFLOW_IDENTITY,
   canonicalJSONStringify,
@@ -75,7 +76,7 @@ async function fixture() {
   }
 
   const desktopManifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     repository: "bignormal/aera",
     sourceSha: DESKTOP_SHA,
     version: INTERNAL_BETA_VERSION,
@@ -91,7 +92,7 @@ async function fixture() {
       runUrl: DESKTOP_CANDIDATE,
       ciRunUrl: DESKTOP_CI,
     },
-    signingStatus: "internal_only_unsigned",
+    signingStatus: INTERNAL_BETA_SIGNING_STATUS,
     runtimeSeed: {
       repository: "bignormal/aera-runtime",
       sourceCommit: INTERNAL_BETA_RUNTIME_SOURCE_SHA,
@@ -124,6 +125,11 @@ async function fixture() {
     },
     artifacts,
     supplyChain: {
+      macosEvidence: {
+        name: "macos-evidence.json",
+        sha256: "f".repeat(64),
+        size: 10,
+      },
       sbom: {
         name: "internal-beta.spdx.json",
         sha256: "6".repeat(64),
