@@ -29,15 +29,54 @@ describe("AgenteraAccountMenu", () => {
     avatarDataUrl: "data:image/png;base64,YXZhdGFy",
     updatedAt: "2026-07-25T02:00:00.000Z",
   };
+  let startLogin: ReturnType<typeof vi.fn>;
+  let logout: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    startLogin = vi.fn().mockResolvedValue(undefined);
+    logout = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(window, "agenteraAuth", {
       configurable: true,
       value: {
+        startLogin,
+        logout,
         getUserProfile: vi.fn().mockResolvedValue(profile),
         updateUserProfile: vi.fn(),
         onUserProfileChanged: vi.fn(() => vi.fn()),
       },
+    });
+  });
+
+  it("forces account selection for the default guest sign-in action", async () => {
+    render(
+      <AgenteraAccountMenu
+        state={{ status: "unauthenticated", reason: "sign_in_required" }}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "auth.account.signIn" }),
+    );
+    await waitFor(() =>
+      expect(startLogin).toHaveBeenCalledWith({
+        forceAccountSelection: true,
+      }),
+    );
+  });
+
+  it("keeps account selection enabled for the default switch-account action", async () => {
+    render(<AgenteraAccountMenu state={offlineState} />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "auth.account.openMenu" }),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "auth.account.switch" }),
+    );
+
+    await waitFor(() => expect(logout).toHaveBeenCalledOnce());
+    expect(startLogin).toHaveBeenCalledWith({
+      forceAccountSelection: true,
     });
   });
 

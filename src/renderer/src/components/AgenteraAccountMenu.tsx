@@ -63,7 +63,11 @@ function AgenteraGuestLogin({
     setBusy(true);
     setError(false);
     void Promise.resolve()
-      .then(onSignIn ?? (() => window.agenteraAuth.startLogin()))
+      .then(
+        onSignIn ??
+          (() =>
+            window.agenteraAuth.startLogin({ forceAccountSelection: true })),
+      )
       .catch(() => setError(true))
       .finally(() => setBusy(false));
   };

@@ -272,7 +272,7 @@ describe("Aera startup gate", () => {
   it.each([authenticated, offline])(
     "automatically prepares the bundled Runtime for a valid $status session",
     async (state) => {
-      const { runtime } = installWindowMocks({
+      const { runtime, auth } = installWindowMocks({
         target: "welcome",
         authState: state,
       });
@@ -283,6 +283,7 @@ describe("Aera startup gate", () => {
       expect(screen.getByTestId("screen-installing")).toBeInTheDocument();
       expect(screen.queryByTestId("screen-welcome")).toBeNull();
       expect(runtime.resolveAccountProfile).not.toHaveBeenCalled();
+      expect(auth.startLogin).not.toHaveBeenCalled();
     },
   );
 
@@ -426,7 +427,9 @@ describe("Aera startup gate", () => {
       screen.getByRole("button", { name: "auth.gate.openBrowser" }),
     );
     await act(async () => undefined);
-    expect(auth.startLogin).toHaveBeenCalledOnce();
+    expect(auth.startLogin).toHaveBeenCalledWith({
+      forceAccountSelection: true,
+    });
     expect(screen.getByTestId("screen-installing")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("screen-installing"));
@@ -504,6 +507,36 @@ describe("Aera startup gate", () => {
     expect(auth.startLogin).toHaveBeenCalledOnce();
   });
 
+  it("forces account selection when restarting a pending browser login", async () => {
+    const { auth } = installWindowMocks({
+      target: "main",
+      authState: {
+        status: "unauthenticated",
+        reason: "sign_in_required",
+      },
+    });
+    auth.startLogin.mockImplementation(() => new Promise(() => undefined));
+    render(<App />);
+    await finishSplash();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "auth.gate.openBrowser" }),
+    );
+    await act(async () => undefined);
+    expect(auth.startLogin).toHaveBeenCalledWith({
+      forceAccountSelection: true,
+    });
+    expect(screen.getByTestId("browser-login-waiting")).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "auth.gate.restartLogin" }),
+    );
+    await act(async () => undefined);
+    expect(auth.restartLogin).toHaveBeenCalledWith({
+      forceAccountSelection: true,
+    });
+  });
+
   it("does not interrupt an in-progress screen for a same-owner session refresh", async () => {
     installWindowMocks({ target: "welcome", authState: authenticated });
     render(<App />);
@@ -574,6 +607,44 @@ describe("Aera startup gate", () => {
     );
     await act(async () => undefined);
     expect(auth.startLogin).toHaveBeenCalledWith({
+      forceAccountSelection: true,
+    });
+  });
+
+  it("forces account selection after logout even when the renderer restarts", async () => {
+    const first = installWindowMocks({
+      target: "main",
+      mode: "remote",
+    });
+    first.runtime.inspectCurrentConnection.mockResolvedValue({
+      status: "owned",
+      isCurrentOwner: false,
+    });
+    const firstRender = render(<App />);
+    await finishSplash();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "auth.profile.differentAccount" }),
+    );
+    await act(async () => undefined);
+    expect(first.auth.logout).toHaveBeenCalledOnce();
+    firstRender.unmount();
+
+    const restarted = installWindowMocks({
+      target: "main",
+      authState: {
+        status: "unauthenticated",
+        reason: "sign_in_required",
+      },
+    });
+    render(<App />);
+    await finishSplash();
+    fireEvent.click(
+      screen.getByRole("button", { name: "auth.gate.openBrowser" }),
+    );
+    await act(async () => undefined);
+
+    expect(restarted.auth.startLogin).toHaveBeenCalledWith({
       forceAccountSelection: true,
     });
   });

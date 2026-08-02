@@ -88,9 +88,13 @@ The splash local-mode escape is retained, but its configuration mutation is queu
 
 The user-facing path is one sign-in flow: the desktop opens the system browser, the user signs in or registers, and the one-use loopback callback returns automatically. No separate consent or "allow and return" step appears.
 
+Every user-initiated desktop sign-in requests explicit account selection. The account gate's normal and restarted attempts, the unauthenticated sidebar action, and the switch-account action all send `forceAccountSelection: true`, which the main-process client serializes only as `prompt=select_account`. A persistent system-browser credential therefore cannot silently approve the previously used account after desktop sign-out or a renderer restart. The browser presents the ordinary sign-in form; the desktop does not promise that the service supplies a multi-account chooser.
+
+Automatic startup restoration remains separate: a valid encrypted local product session resumes without opening the browser or requiring account selection. Desktop sign-out still clears the local product session and performs the existing device self-revocation only. It does not call the browser logout endpoint, clear system-browser cookies, or broaden sign-out to other web sessions.
+
 The underlying transport still uses Authorization Code with PKCE. Only a two-minute authorization code and state return through `127.0.0.1`; access, refresh, and offline tokens never appear in the callback URL. Passwords and verification codes never enter the Electron renderer or main process.
 
-Successful registration creates the browser session immediately and continues the same pending desktop sign-in request. The Cloud account center keeps a short browser session for active requests and a separate 30-day HttpOnly persistent credential for app relaunches. When the short session expires, the persistent credential restores account and desktop sign-in access; signing out revokes both credentials.
+Successful registration creates the browser session immediately and continues the same pending desktop sign-in request. The Cloud account center keeps a short browser session for active requests and a separate 30-day HttpOnly persistent credential for app relaunches. When the short session expires, the persistent credential restores account and desktop sign-in access; Cloud browser sign-out revokes both browser credentials.
 
 ### Loopback callback
 
