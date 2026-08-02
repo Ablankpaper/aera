@@ -12,16 +12,20 @@ const builderPath = new URL(
   "../../build/electron-builder.internal-beta.yml",
   import.meta.url,
 );
+const macBuilderPath = new URL(
+  "../../build/electron-builder.internal-beta-macos.yml",
+  import.meta.url,
+);
 const baseBuilderPath = new URL("../../electron-builder.yml", import.meta.url);
 
-test("internal-Beta workflow is exact-SHA, OS-unsigned, update-signed, published, and Sigstore-bound", async () => {
+test("internal-Beta workflow is exact-SHA, macOS-signed, update-signed, published, and Sigstore-bound", async () => {
   const raw = await readFile(workflowPath, "utf8");
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.19"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.20"/u);
   assert.match(
     raw,
-    /--release-notes "Beta\.19 修复干净设备登录状态竞态、智能体开始使用无响应、设备上限提示与内测更新通道说明。"/u,
+    /--release-notes "Beta\.20 增加 macOS Developer ID 签名、公证与严格候选验证，并完成 Runtime 稳定更新闭环。"/u,
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
@@ -86,26 +90,40 @@ test("internal-Beta workflow is exact-SHA, OS-unsigned, update-signed, published
     raw,
     /curl[\s\S]*\/desktop-updates\/internal-beta|base_url=.*\/desktop-updates\/internal-beta/iu,
   );
+  for (const secret of [
+    "CSC_LINK",
+    "CSC_KEY_PASSWORD",
+    "ASC_API_KEY",
+    "ASC_KEY_ID",
+    "ASC_ISSUER_ID",
+  ]) {
+    assert.match(raw, new RegExp(`secrets\\.${secret}`, "u"));
+  }
+  assert.match(raw, /-c\.forceCodeSigning=true/u);
+  assert.match(raw, /-c\.mac\.notarize=true/u);
+  assert.match(raw, /xcrun notarytool submit[\s\S]*--wait/iu);
+  assert.match(raw, /xcrun stapler (?:staple|validate)/iu);
+  assert.match(raw, /node scripts\/release\/verify-macos\.mjs/iu);
+  assert.match(raw, /candidate\/evidence\/macos-evidence\.json/u);
 
   assert.doesNotMatch(raw, /actions\/attest/iu);
   assert.doesNotMatch(raw, /attestations:\s*write/iu);
   assert.doesNotMatch(raw, /\bgh\s+release\b|create[-_ ]tag|refs\/tags/iu);
-  assert.doesNotMatch(
-    raw,
-    /CSC_LINK|CSC_KEY_PASSWORD|WIN_CSC|signtool|notarytool|codesign/iu,
-  );
+  assert.doesNotMatch(raw, /WIN_CSC|signtool/iu);
   assert.doesNotMatch(
     raw,
     /repository:\s*bignormal\/aera-runtime|git\s+clone[\s\S]*aera-runtime/iu,
   );
 });
 
-test("internal-Beta Electron Builder overlay stays unsigned while preserving Windows resources", async () => {
-  const [raw, baseRaw] = await Promise.all([
+test("internal-Beta overlays separate unsigned Windows from strict macOS signing", async () => {
+  const [raw, macRaw, baseRaw] = await Promise.all([
     readFile(builderPath, "utf8"),
+    readFile(macBuilderPath, "utf8"),
     readFile(baseBuilderPath, "utf8"),
   ]);
   const config = parseYAML(raw);
+  const macConfig = parseYAML(macRaw);
   const baseConfig = parseYAML(baseRaw);
 
   assert.equal(config.extends, "electron-builder.yml");
@@ -135,5 +153,19 @@ test("internal-Beta Electron Builder overlay stays unsigned while preserving Win
   assert.equal(
     config.portable.artifactName,
     "Aera-Internal-Beta-${version}-windows-${arch}-portable.${ext}",
+  );
+  assert.equal(macConfig.extends, "electron-builder.yml");
+  assert.equal(macConfig.forceCodeSigning, true);
+  assert.deepEqual(macConfig.publish, []);
+  assert.equal(macConfig.mac.identity, undefined);
+  assert.equal(macConfig.mac.notarize, true);
+  assert.equal(macConfig.mac.hardenedRuntime, true);
+  assert.equal(
+    macConfig.mac.artifactName,
+    "Aera-Internal-Beta-${version}-macos-${arch}.${ext}",
+  );
+  assert.equal(
+    macConfig.dmg.artifactName,
+    "Aera-Internal-Beta-${version}-macos-${arch}.${ext}",
   );
 });

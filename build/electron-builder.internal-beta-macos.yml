@@ -1,0 +1,16 @@
+extends: electron-builder.yml
+
+# This configuration is used only after the workflow has required protected
+# Developer ID and App Store Connect credentials. It must never fall back to an
+# ad-hoc or unsigned macOS candidate.
+forceCodeSigning: true
+publish: []
+
+mac:
+  notarize: true
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  artifactName: Aera-Internal-Beta-${version}-macos-${arch}.${ext}
+
+dmg:
+  artifactName: Aera-Internal-Beta-${version}-macos-${arch}.${ext}
