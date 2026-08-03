@@ -252,7 +252,7 @@ Because the contract hash is byte-based, `.gitattributes` forces the pinned Open
 
 [[tests/e2e/agentera-auth.e2e.ts]] exercises the real browser, cloud, and Electron lifecycle only against isolated services and a synthetic Hermes boundary fixture. Hashes prove authentication never modifies the fixture, and the same suite can target the unpacked macOS application.
 
-Desktop CI compiles, type-checks, tests, and validates the contract on macOS, Windows, and Linux. CI success is not a substitute for physical Windows/Linux secure-storage, firewall, loopback-return, install, update, and uninstall evidence.
+Desktop CI compiles, type-checks, tests, and validates the contract on macOS, Windows, and Linux. Filesystem-backed SQLite and condition-based Gateway recovery tests retain the default five-second budget on POSIX while using explicit bounded Windows budgets for slower hosted runners; the suite-wide timeout is not relaxed. CI success is not a substitute for physical Windows/Linux secure-storage, firewall, loopback-return, install, update, and uninstall evidence.
 
 Agent sync, client-side encrypted backup, workspace/organization scopes, and official Agent evolution pipelines remain later independently designed projects. Every authentication release remains blocked by the Hermes compatibility gate.
 
