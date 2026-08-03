@@ -245,6 +245,49 @@ describe("verified immutable Agent version cache", () => {
     );
   });
 
+  it("recovers a verified directory that has no SQLite row after cold restart", () => {
+    cache().cacheVerifiedVersion(version);
+    database.sqlite
+      .prepare(
+        `DELETE FROM cached_agent_versions
+         WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
+      )
+      .run(version.id, owner.tenantId, owner.ownerId);
+
+    const restarted = cache();
+    expect(restarted.getVerifiedVersion(version.id)).toEqual(version);
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT count(*) AS count FROM cached_agent_versions
+           WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
+        )
+        .get(version.id, owner.tenantId, owner.ownerId),
+    ).toEqual({ count: 1 });
+  });
+
+  it("rebuilds a missing immutable directory from a verified SQLite row", () => {
+    cache().cacheVerifiedVersion(version);
+    const row = database.sqlite
+      .prepare(
+        `SELECT cache_relative_path FROM cached_agent_versions
+         WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
+      )
+      .get(version.id, owner.tenantId, owner.ownerId) as {
+      cache_relative_path: string;
+    };
+    const directory = join(
+      database.paths.versionsPath,
+      ...row.cache_relative_path.split("/"),
+    );
+    makeTreeWritable(directory);
+    rmSync(directory, { recursive: true, force: true });
+
+    const restarted = cache();
+    expect(restarted.getVerifiedVersion(version.id)).toEqual(version);
+    expect(lstatSync(directory).mode & 0o222).toBe(0);
+  });
+
   it("does not expose a verified USER version cache across account switches", () => {
     cache().cacheVerifiedVersion(version);
     const other = new AgentVersionCache({
