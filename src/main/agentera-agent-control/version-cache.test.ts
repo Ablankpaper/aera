@@ -249,6 +249,7 @@ describe("verified immutable Agent version cache", () => {
     );
   });
 
+  // @lat: [[agentera-agent-control-plane#Immutable publication#Durable local version cache]]
   it("recovers a verified directory that has no SQLite row after cold restart", () => {
     cache().cacheVerifiedVersion(version);
     database.sqlite

@@ -208,6 +208,18 @@ Publication uses an allowlisted canonical manifest, content digest, platform Ed2
 
 The current Desktop contract requires `display_name` and rejects a publication response that returns a stale name. During a Cloud-first rolling upgrade, an older Desktop that omits the field keeps the existing definition name. Organization next-version submissions retain their separate reviewed governance contract and do not gain an implicit rename path.
 
+### Durable local version cache
+
+The account-scoped local cache treats its signed SQLite row and read-only version directory as two re-verifiable representations so interrupted writes converge without clearing user state.
+
+[[src/main/agentera-agent-control/version-cache.ts#AgentVersionCache#getVerifiedVersion]] revalidates stored JSON, signature, canonical digest, owner tuple, cache-relative path, and immutable bytes on every read. A valid row can rebuild a missing directory; one valid current-account digest directory can recreate a missing row after cold restart. Legacy paths remain readable only when an existing owner-scoped row names them.
+
+[[src/main/agentera-agent-control/version-cache.ts#AgentVersionCache#cacheVerifiedVersion]] retains a fully verified destination when the later SQLite commit fails. A retry adopts those bytes and finishes only the local row. Recognized staging trees are removable cache artifacts, while rename losers verify the winning destination and converge through an idempotent `BEGIN IMMEDIATE` row transaction.
+
+Multiple digest directories, row and directory disagreement, mutable or corrupt stored bytes, invalid signatures, path escape, and cross-account lookup remain fail-closed. A freshly verified Cloud candidate may replace only its exact cache-owned incomplete destination; recovery never deletes arbitrary siblings or asks the user to clear a cache.
+
+Publisher and IPC boundaries expose distinct bounded conflict, corruption, permission, filesystem, database, and recovery codes. Draft failure summaries and renderer guidance never include filesystem paths, SQLite messages, signed payloads, credentials, or owner identifiers.
+
 ## Installation and binding
 
 An Agent Installation selects one immutable version for one device/Profile pair and maps to one physically isolated writable `HERMES_HOME` through the existing encrypted Profile binding store.
