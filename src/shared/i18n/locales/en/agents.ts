@@ -534,6 +534,20 @@ export default {
         "The Agent version content or digest returned by Cloud did not match this draft, so publication closed safely.",
       publication_cache_failed:
         "The Agent version was verified but could not be cached safely on this device, so publication did not complete.",
+      publication_cache_conflict:
+        "Conflicting local cache state was found for this Agent version, so Aera stopped using it. Retry; if it persists, restart Aera and try again.",
+      publication_cache_corrupt:
+        "The local Agent version cache failed its integrity check and was not used. Retry so Aera can attempt a safe recovery.",
+      publication_cache_permissions_invalid:
+        "The local Agent version cache is no longer read-only and was rejected. Retry so Aera can attempt a safe recovery.",
+      publication_cache_filesystem_denied:
+        "The operating system denied the Agent version cache operation. Confirm that disk space is available, then retry.",
+      publication_cache_filesystem_failed:
+        "The local filesystem could not complete the Agent version cache operation. Confirm that disk space is available, then retry.",
+      publication_cache_database_failed:
+        "The local cache index could not be committed. The verified version was retained for automatic recovery; retry or restart Aera.",
+      publication_cache_recovery_failed:
+        "The local Agent version cache could not complete automatic recovery, so publication stopped safely. Retry or restart Aera.",
       runtime_incompatible:
         "This Agent version is not compatible with this device's local environment.",
       profile_model_configuration_failed:

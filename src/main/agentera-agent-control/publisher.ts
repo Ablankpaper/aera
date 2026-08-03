@@ -179,8 +179,19 @@ function stableFailureSummary(code: string): string {
     case "published_content_mismatch":
       return "Published Agent content did not match the draft.";
     case "cache_conflict":
+      return "Verified Agent version cache state conflicted.";
     case "cache_corrupt":
+      return "Verified Agent version cache content was invalid.";
     case "cache_permissions_invalid":
+      return "Verified Agent version cache permissions were invalid.";
+    case "cache_filesystem_denied":
+      return "The operating system denied the verified Agent version cache operation.";
+    case "cache_filesystem_failed":
+      return "The verified Agent version cache filesystem operation failed.";
+    case "cache_database_failed":
+      return "The verified Agent version cache database operation failed.";
+    case "cache_recovery_failed":
+      return "Verified Agent version cache recovery did not complete.";
     case "publication_cache_failed":
       return "Verified Agent version cache failed.";
     default:
@@ -210,6 +221,49 @@ function boundedFailureCode(error: unknown, fallback: string): string {
       ? (error as { code: string }).code
       : "";
   return /^[a-z][a-z0-9_]{0,63}$/.test(code) ? code : fallback;
+}
+
+function publicationCacheFailure(error: unknown): {
+  recordedCode: string;
+  publicCode: string;
+} {
+  const recordedCode = boundedFailureCode(error, "publication_cache_failed");
+  switch (recordedCode) {
+    case "cache_conflict":
+      return { recordedCode, publicCode: "publication_cache_conflict" };
+    case "cache_corrupt":
+      return { recordedCode, publicCode: "publication_cache_corrupt" };
+    case "cache_permissions_invalid":
+      return {
+        recordedCode,
+        publicCode: "publication_cache_permissions_invalid",
+      };
+    case "cache_filesystem_denied":
+      return {
+        recordedCode,
+        publicCode: "publication_cache_filesystem_denied",
+      };
+    case "cache_filesystem_failed":
+      return {
+        recordedCode,
+        publicCode: "publication_cache_filesystem_failed",
+      };
+    case "cache_database_failed":
+      return {
+        recordedCode,
+        publicCode: "publication_cache_database_failed",
+      };
+    case "cache_recovery_failed":
+      return {
+        recordedCode,
+        publicCode: "publication_cache_recovery_failed",
+      };
+    default:
+      return {
+        recordedCode: "publication_cache_failed",
+        publicCode: "publication_cache_failed",
+      };
+  }
 }
 
 function publicationVerificationFailureCode(error: unknown): string {
@@ -371,11 +425,9 @@ export class AgentPublisher {
     try {
       this.cache.cacheVerifiedVersion(publication.version);
     } catch (error) {
-      this.recordFailure(
-        prepared,
-        boundedFailureCode(error, "publication_cache_failed"),
-      );
-      throw new AgentPublisherError("publication_cache_failed");
+      const failure = publicationCacheFailure(error);
+      this.recordFailure(prepared, failure.recordedCode);
+      throw new AgentPublisherError(failure.publicCode);
     }
 
     try {

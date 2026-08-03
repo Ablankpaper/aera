@@ -495,6 +495,20 @@ export default {
         "Cloud 返回的智能体版本内容或摘要与本次草稿不一致，本次发布已安全关闭。",
       publication_cache_failed:
         "智能体版本已通过验证，但本机无法安全缓存，本次发布未完成。",
+      publication_cache_conflict:
+        "本机检测到同一智能体版本的缓存状态冲突，已停止使用该版本。请重试；若仍失败，请重启 Aera 后再试。",
+      publication_cache_corrupt:
+        "本机智能体版本缓存未通过完整性校验，系统未使用该缓存。请重试，系统会尝试安全恢复。",
+      publication_cache_permissions_invalid:
+        "本机智能体版本缓存不再是只读状态，系统已拒绝使用。请重试，系统会尝试安全恢复。",
+      publication_cache_filesystem_denied:
+        "操作系统拒绝完成智能体版本缓存操作。请确认磁盘空间可用后重试。",
+      publication_cache_filesystem_failed:
+        "本机文件系统未能完成智能体版本缓存。请确认磁盘空间可用后重试。",
+      publication_cache_database_failed:
+        "本机缓存索引暂时无法提交；已验证的版本会保留并在重试时自动恢复。请重试或重启 Aera。",
+      publication_cache_recovery_failed:
+        "本机智能体版本缓存未能完成自动恢复，本次发布已安全停止。请重试或重启 Aera。",
       runtime_incompatible: "该智能体版本暂不支持此电脑上的本地运行环境。",
       profile_model_configuration_failed:
         "当前模型与该智能体的签名版本不兼容。请配置版本允许的模型，或由发布者发布兼容当前模型的新版本。",

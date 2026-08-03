@@ -14,6 +14,15 @@ const DEFINITION_ID = "11111111-1111-4111-8111-111111111111";
 const VERSION_ID = "22222222-2222-4222-8222-222222222222";
 const INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
 const MODEL_LIBRARY_ID = "44444444-4444-4444-8444-444444444444";
+const CACHE_FAILURES = [
+  ["cache_conflict", "publication_cache_conflict"],
+  ["cache_corrupt", "publication_cache_corrupt"],
+  ["cache_permissions_invalid", "publication_cache_permissions_invalid"],
+  ["cache_filesystem_denied", "publication_cache_filesystem_denied"],
+  ["cache_filesystem_failed", "publication_cache_filesystem_failed"],
+  ["cache_database_failed", "publication_cache_database_failed"],
+  ["cache_recovery_failed", "publication_cache_recovery_failed"],
+] as const;
 
 describe("Agent control IPC operation scope", () => {
   it.each([
@@ -21,7 +30,6 @@ describe("Agent control IPC operation scope", () => {
     ["signature_verification_failed", "signature_verification_failed"],
     ["digest_mismatch", "published_content_mismatch"],
     ["published_content_mismatch", "published_content_mismatch"],
-    ["cache_corrupt", "publication_cache_failed"],
     ["publication_cache_failed", "publication_cache_failed"],
   ] as const)(
     "maps %s to the exact safe publication failure %s",
@@ -30,6 +38,20 @@ describe("Agent control IPC operation scope", () => {
         throw Object.assign(new Error("private failure details"), { code });
       });
       expect(result).toEqual({ ok: false, errorCode: expected });
+    },
+  );
+
+  it.each(CACHE_FAILURES)(
+    "maps lower cache failure %s and public failure %s to the same safe code",
+    async (lowerCode, publicCode) => {
+      for (const code of [lowerCode, publicCode]) {
+        const result = await executeAgentControlIpc(() => {
+          throw Object.assign(new Error("private cache and SQLite details"), {
+            code,
+          });
+        });
+        expect(result).toEqual({ ok: false, errorCode: publicCode });
+      }
     },
   );
 
