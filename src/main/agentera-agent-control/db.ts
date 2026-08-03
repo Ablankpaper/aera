@@ -9,7 +9,81 @@ import {
   resolve,
 } from "node:path";
 
-export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 8;
+export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 9;
+
+const INSTALLATION_OPERATIONS_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS installation_operations (
+    operation_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    device_installation_id TEXT NOT NULL,
+    agent_installation_id TEXT NOT NULL,
+    target_kind TEXT NOT NULL CHECK (target_kind IN ('fresh', 'claim')),
+    target_profile_id TEXT NOT NULL
+      CHECK (length(target_profile_id) BETWEEN 1 AND 64),
+    display_name TEXT CHECK (
+      display_name IS NULL OR length(display_name) BETWEEN 1 AND 256
+    ),
+    model_source_profile_id TEXT CHECK (
+      model_source_profile_id IS NULL
+      OR length(model_source_profile_id) BETWEEN 1 AND 64
+    ),
+    model_source_model_id TEXT CHECK (
+      model_source_model_id IS NULL
+      OR length(model_source_model_id) BETWEEN 1 AND 512
+    ),
+    runtime_profile_id TEXT,
+    phase TEXT NOT NULL CHECK (
+      phase IN (
+        'prepared',
+        'profile_bound',
+        'profile_attached',
+        'projection_active',
+        'cloud_activated',
+        'committed',
+        'repair_required'
+      )
+    ),
+    retry_code TEXT CHECK (
+      retry_code IS NULL OR length(retry_code) BETWEEN 1 AND 128
+    ),
+    revision INTEGER NOT NULL CHECK (revision >= 1),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (
+      tenant_id, owner_id, device_installation_id, agent_installation_id
+    ),
+    CHECK (
+      (target_kind = 'fresh' AND display_name IS NOT NULL)
+      OR
+      (target_kind = 'claim' AND display_name IS NULL
+        AND model_source_profile_id IS NULL
+        AND model_source_model_id IS NULL)
+    ),
+    CHECK (
+      model_source_model_id IS NULL OR model_source_profile_id IS NOT NULL
+    ),
+    CHECK (
+      (phase = 'prepared' AND runtime_profile_id IS NULL)
+      OR phase = 'repair_required'
+      OR (phase IN (
+        'profile_bound',
+        'profile_attached',
+        'projection_active',
+        'cloud_activated',
+        'committed'
+      ) AND runtime_profile_id IS NOT NULL)
+    ),
+    CHECK (
+      (phase = 'repair_required' AND retry_code IS NOT NULL)
+      OR (phase <> 'repair_required' AND retry_code IS NULL)
+    )
+  );
+  CREATE INDEX IF NOT EXISTS installation_operations_owner_phase_idx
+    ON installation_operations (
+      tenant_id, owner_id, device_installation_id, phase, updated_at
+    );
+`;
 
 export type AgentAssetContext =
   | { scope: "USER" }
@@ -104,9 +178,7 @@ function assertOutsideHermesHome(controlPlaneRoot: string): void {
       canonicalPotentialPath(controlPlaneRoot),
     )
   ) {
-    throw new Error(
-      "Aera control-plane path must remain outside HERMES_HOME.",
-    );
+    throw new Error("Aera control-plane path must remain outside HERMES_HOME.");
   }
 }
 
@@ -130,7 +202,8 @@ export function resolveAgenteraControlPlanePaths(
 
 function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
   const current = sqlite.prepare("PRAGMA user_version").get() as
-    Record<string, unknown> | undefined;
+    | Record<string, unknown>
+    | undefined;
   const currentVersion = current ? Number(Object.values(current)[0]) : 0;
   if (
     !Number.isSafeInteger(currentVersion) ||
@@ -308,6 +381,8 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
             AND official_release_id IS NOT NULL AND selected_release_revision_id IS NOT NULL AND update_policy = 'managed')
         )
       );
+
+      ${INSTALLATION_OPERATIONS_SCHEMA}
 
       CREATE TABLE IF NOT EXISTS runtime_bindings (
         id TEXT PRIMARY KEY,
@@ -1055,6 +1130,12 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
           ON conversation_boundaries (
             tenant_id, actor_user_id, scope_type, scope_id, created_at
           );
+        PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
+      `);
+    }
+    if (currentVersion >= 1 && currentVersion <= 8) {
+      sqlite.exec(`
+        ${INSTALLATION_OPERATIONS_SCHEMA}
         PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
       `);
     }

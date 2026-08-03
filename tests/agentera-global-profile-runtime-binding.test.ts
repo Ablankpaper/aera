@@ -20,8 +20,9 @@ describe("global-profile transport at the RuntimeBinding boundary", () => {
     expect(handler).toContain("binding.agentInstallationId !== null");
     expect(handler).toContain("identityConversationKey !== runId");
     expect(handler).toContain("requiresBoundApiTransport:");
-    expect(handler).toContain("prepareHermesTurn({");
-    expect(handler).toContain("prepareConversationBoundary({");
+    expect(handler).toContain("prepareConversationRuntime({");
+    expect(handler).not.toContain("prepareHermesTurn({");
+    expect(handler).not.toContain("prepareConversationBoundary({");
     expect(handler).toContain("conversationBoundary,");
   });
 

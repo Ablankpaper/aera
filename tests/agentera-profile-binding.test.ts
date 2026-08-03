@@ -17,6 +17,7 @@ import { basename, dirname, join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AgenteraProfileBindingStore,
+  createAccountSpaceProfileOperationId,
   createAgenteraGuestRuntimeOwner,
   discoverProfilesForCurrentOwner,
   hasMeaningfulHermesProfileData,
@@ -49,6 +50,7 @@ const otherOwner: AgenteraRuntimeOwner = {
 };
 const AGENT_INSTALLATION_ID = "77777777-7777-4777-8777-777777777777";
 const OTHER_AGENT_INSTALLATION_ID = "88888888-8888-4888-8888-888888888888";
+const OTHER_RUNTIME_PROFILE_ID = "99999999-9999-4999-8999-999999999999";
 
 function hashTree(root: string): Record<string, string> {
   const result: Record<string, string> = {};
@@ -117,6 +119,19 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
     );
     expect(first.tenantId).not.toBe(first.ownerId);
     expect(otherDevice.ownerId).not.toBe(first.ownerId);
+  });
+
+  it("derives a stable domain-separated account-space operation id", () => {
+    const operationId = createAccountSpaceProfileOperationId(owner);
+
+    expect(operationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(createAccountSpaceProfileOperationId(owner)).toBe(operationId);
+    expect(createAccountSpaceProfileOperationId(otherOwner)).not.toBe(
+      operationId,
+    );
+    expect(operationId).not.toBe(owner.ownerId);
   });
 
   // @lat: [[agentera-app-authentication#Startup gate#Guest Profile isolation#Profile discovery owner freshness]]
@@ -207,8 +222,10 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
     const activateProfile = vi.fn();
 
     const created = store.createAndBindFreshProfile({
+      operationId: AGENT_INSTALLATION_ID,
       name: "Fresh Space",
       owner,
+      profileId: "fresh-space",
       createProfile,
       resolveProfilePath: (id) => {
         expect(id).toBe("fresh-space");
@@ -218,7 +235,11 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
     });
 
     expect(createProfile).toHaveBeenCalledOnce();
-    expect(createProfile).toHaveBeenCalledWith("Fresh Space", null);
+    expect(createProfile).toHaveBeenCalledWith(
+      "Fresh Space",
+      null,
+      "fresh-space",
+    );
     expect(activateProfile).toHaveBeenCalledOnce();
     expect(activateProfile).toHaveBeenCalledWith("fresh-space");
     expect(created.profileId).toBe("fresh-space");
@@ -230,6 +251,282 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
       created.binding,
     );
     expect(hashTree(profilePath)).toEqual(before);
+  });
+
+  it("recovers one exact reserved Profile after creation is interrupted", () => {
+    const reservedPath = join(root, "profiles", "reserved-fresh");
+    const reservation = store.reserveFreshProfile({
+      operationId: AGENT_INSTALLATION_ID,
+      name: "Reserved Fresh",
+      owner,
+      profileId: "reserved-fresh",
+      activate: false,
+    });
+    expect(reservation).toMatchObject({
+      operationId: AGENT_INSTALLATION_ID,
+      profileId: "reserved-fresh",
+      runtimeProfileId: "66666666-6666-4666-8666-666666666666",
+    });
+
+    const interruptedCreate = vi.fn(
+      (name: string, cloneFrom: string | null, reservedProfileId?: string) => {
+        expect(name).toBe("Reserved Fresh");
+        expect(cloneFrom).toBeNull();
+        expect(reservedProfileId).toBe("reserved-fresh");
+        mkdirSync(reservedPath, { recursive: true });
+        throw new Error("injected creation interruption");
+      },
+    );
+    expect(() =>
+      store.reconcileFreshProfile(AGENT_INSTALLATION_ID, {
+        owner,
+        createProfile: interruptedCreate,
+        resolveProfilePath: () => reservedPath,
+        activateProfile: vi.fn(),
+      }),
+    ).toThrow("injected creation interruption");
+
+    const restarted = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage: new FakeSecureStorage(),
+      now: () => new Date("2026-07-18T03:00:00.000Z"),
+      randomUUID: () => OTHER_RUNTIME_PROFILE_ID,
+    });
+    const duplicateCreate = vi.fn(() => {
+      throw new Error("must not create a second Profile");
+    });
+    const recovered = restarted.reconcileFreshProfile(AGENT_INSTALLATION_ID, {
+      owner,
+      createProfile: duplicateCreate,
+      resolveProfilePath: (profileId) => {
+        expect(profileId).toBe("reserved-fresh");
+        return reservedPath;
+      },
+      activateProfile: vi.fn(),
+    });
+
+    expect(duplicateCreate).not.toHaveBeenCalled();
+    expect(recovered).toMatchObject({
+      profileId: "reserved-fresh",
+      binding: {
+        runtimeProfileId: "66666666-6666-4666-8666-666666666666",
+        ownerId: owner.ownerId,
+      },
+    });
+    expect(restarted.verifyProfileBinding(reservedPath, owner)).toEqual(
+      recovered.binding,
+    );
+  });
+
+  it("rejects immutable reservation replay drift", () => {
+    store.reserveFreshProfile({
+      operationId: AGENT_INSTALLATION_ID,
+      name: "Reserved Fresh",
+      owner,
+      profileId: "reserved-fresh",
+      activate: false,
+    });
+
+    expect(() =>
+      store.reserveFreshProfile({
+        operationId: AGENT_INSTALLATION_ID,
+        name: "Reserved Fresh",
+        owner: otherOwner,
+        profileId: "reserved-fresh",
+        activate: false,
+      }),
+    ).toThrow(/reservation conflict/i);
+    expect(() =>
+      store.reserveFreshProfile({
+        operationId: AGENT_INSTALLATION_ID,
+        name: "Reserved Fresh",
+        owner,
+        profileId: "reserved-fresh-2",
+        activate: false,
+      }),
+    ).toThrow(/reservation conflict/i);
+    expect(() =>
+      store.reserveFreshProfile({
+        operationId: OTHER_AGENT_INSTALLATION_ID,
+        name: "Reserved Fresh",
+        owner,
+        profileId: "reserved-fresh",
+        activate: false,
+      }),
+    ).toThrow(/reservation conflict/i);
+  });
+
+  it("looks up a reservation only for its exact owner and operation", () => {
+    const reservation = store.reserveFreshProfile({
+      operationId: AGENT_INSTALLATION_ID,
+      name: "Reserved Fresh",
+      owner,
+      profileId: "reserved-fresh",
+      activate: false,
+    });
+
+    expect(
+      store.getFreshProfileReservation(AGENT_INSTALLATION_ID, owner),
+    ).toEqual(reservation);
+    expect(
+      store.getFreshProfileReservation(OTHER_AGENT_INSTALLATION_ID, owner),
+    ).toBeNull();
+    expect(() =>
+      store.getFreshProfileReservation(AGENT_INSTALLATION_ID, otherOwner),
+    ).toThrow(/reservation conflict/i);
+  });
+
+  it("retries activating reservations after restart and completes them only after activation", () => {
+    const reservedPath = join(root, "profiles", "activate-after-restart");
+    store.reserveFreshProfile({
+      operationId: AGENT_INSTALLATION_ID,
+      name: "Activate After Restart",
+      owner,
+      profileId: "activate-after-restart",
+    });
+    const failedActivation = vi.fn(() => {
+      throw new Error("injected activation interruption");
+    });
+
+    expect(() =>
+      store.reconcileFreshProfile(AGENT_INSTALLATION_ID, {
+        owner,
+        createProfile: (_name, _cloneFrom, reservedProfileId) => {
+          expect(reservedProfileId).toBe("activate-after-restart");
+          mkdirSync(reservedPath, { recursive: true });
+          return { success: true, id: reservedProfileId };
+        },
+        resolveProfilePath: () => reservedPath,
+        activateProfile: failedActivation,
+      }),
+    ).toThrow("injected activation interruption");
+    expect(
+      store.getFreshProfileReservation(AGENT_INSTALLATION_ID, owner),
+    ).not.toBeNull();
+
+    const restarted = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage: new FakeSecureStorage(),
+      randomUUID: () => OTHER_RUNTIME_PROFILE_ID,
+    });
+    const activateProfile = vi.fn();
+    expect(
+      restarted.reconcileActivatingFreshProfiles({
+        owner,
+        createProfile: vi.fn(),
+        resolveProfilePath: () => reservedPath,
+        activateProfile,
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        profileId: "activate-after-restart",
+        binding: expect.objectContaining({
+          runtimeProfileId: "66666666-6666-4666-8666-666666666666",
+        }),
+      }),
+    ]);
+    expect(activateProfile).toHaveBeenCalledWith("activate-after-restart");
+    expect(
+      restarted.getFreshProfileReservation(AGENT_INSTALLATION_ID, owner),
+    ).toBeNull();
+  });
+
+  it("completes a non-activating reservation only for its exact Runtime Profile", () => {
+    const reservedPath = join(root, "profiles", "installation-reserved");
+    store.reserveFreshProfile({
+      operationId: AGENT_INSTALLATION_ID,
+      name: "Installation Reserved",
+      owner,
+      profileId: "installation-reserved",
+      activate: false,
+    });
+    const reconciled = store.reconcileFreshProfile(AGENT_INSTALLATION_ID, {
+      owner,
+      createProfile: (_name, _cloneFrom, reservedProfileId) => {
+        mkdirSync(reservedPath, { recursive: true });
+        return { success: true, id: reservedProfileId };
+      },
+      resolveProfilePath: () => reservedPath,
+      activateProfile: vi.fn(),
+    });
+
+    expect(() =>
+      store.completeFreshProfileReservation(
+        AGENT_INSTALLATION_ID,
+        owner,
+        OTHER_RUNTIME_PROFILE_ID,
+      ),
+    ).toThrow(/reservation conflict/i);
+    expect(
+      store.completeFreshProfileReservation(
+        AGENT_INSTALLATION_ID,
+        owner,
+        reconciled.binding.runtimeProfileId,
+      ),
+    ).toBe(true);
+    expect(
+      store.completeFreshProfileReservation(
+        AGENT_INSTALLATION_ID,
+        owner,
+        reconciled.binding.runtimeProfileId,
+      ),
+    ).toBe(false);
+  });
+
+  it("does not claim a reserved path already bound to another owner", () => {
+    const reservedPath = join(root, "profiles", "foreign-reserved");
+    mkdirSync(reservedPath, { recursive: true });
+    store.bindExistingProfile(reservedPath, otherOwner);
+    store = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage: new FakeSecureStorage(),
+      now: () => new Date("2026-07-18T03:00:00.000Z"),
+      randomUUID: () => OTHER_RUNTIME_PROFILE_ID,
+    });
+    store.reserveFreshProfile({
+      operationId: AGENT_INSTALLATION_ID,
+      name: "Foreign Reserved",
+      owner,
+      profileId: "foreign-reserved",
+      activate: false,
+    });
+
+    expect(() =>
+      store.reconcileFreshProfile(AGENT_INSTALLATION_ID, {
+        owner,
+        createProfile: vi.fn(),
+        resolveProfilePath: () => reservedPath,
+        activateProfile: vi.fn(),
+      }),
+    ).toThrow(/another Aera owner|cannot be reassigned/i);
+    expect(store.verifyProfileBinding(reservedPath, otherOwner).ownerId).toBe(
+      otherOwner.ownerId,
+    );
+  });
+
+  it("fails closed when an interrupted reserved Profile contains private markers", () => {
+    const reservedPath = join(root, "profiles", "private-reserved");
+    mkdirSync(reservedPath, { recursive: true });
+    writeFileSync(join(reservedPath, "MEMORY.md"), "private memory\n");
+    store.reserveFreshProfile({
+      operationId: AGENT_INSTALLATION_ID,
+      name: "Private Reserved",
+      owner,
+      profileId: "private-reserved",
+      activate: false,
+    });
+
+    expect(() =>
+      store.reconcileFreshProfile(AGENT_INSTALLATION_ID, {
+        owner,
+        createProfile: vi.fn(),
+        resolveProfilePath: () => reservedPath,
+        activateProfile: vi.fn(),
+      }),
+    ).toThrow(/private data/i);
+    expect(() => store.verifyProfileBinding(reservedPath, owner)).toThrow(
+      /binding is required/i,
+    );
   });
 
   it("reuses one stable account Profile and prefers its currently active Profile", () => {
@@ -282,8 +579,10 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
   it("allows only the immediate Runtime scaffold on the fresh Profile path", () => {
     const freshPath = join(root, "profiles", "runtime-scaffold");
     const created = store.createAndBindFreshProfile({
+      operationId: AGENT_INSTALLATION_ID,
       name: "Runtime Scaffold",
       owner,
+      profileId: "runtime-scaffold",
       createProfile: (_name, cloneFrom) => {
         expect(cloneFrom).toBeNull();
         mkdirSync(freshPath, { recursive: true });
@@ -305,10 +604,18 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
     expect(hasMeaningfulHermesProfileData(freshPath)).toBe(true);
 
     const unsafePath = join(root, "profiles", "unsafe-fresh");
+    store = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage: new FakeSecureStorage(),
+      now: () => new Date("2026-07-18T03:00:00.000Z"),
+      randomUUID: () => OTHER_RUNTIME_PROFILE_ID,
+    });
     expect(() =>
       store.createAndBindFreshProfile({
+        operationId: OTHER_AGENT_INSTALLATION_ID,
         name: "Unsafe Fresh",
         owner,
+        profileId: "unsafe-fresh",
         createProfile: (_name, cloneFrom) => {
           expect(cloneFrom).toBeNull();
           mkdirSync(unsafePath, { recursive: true });
@@ -336,7 +643,7 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
     expect(hashTree(profilePath)).toEqual(before);
   });
 
-  it("losslessly migrates a real encrypted V1 envelope to V2 without touching the Profile", () => {
+  it("losslessly migrates a real encrypted V1 envelope to V3 without touching the Profile", () => {
     const before = hashTree(profilePath);
     const secureStorage = new FakeSecureStorage();
     const legacyPlaintext = JSON.stringify([
@@ -381,19 +688,73 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
     const migratedEnvelope = JSON.parse(
       readFileSync(store.filePath, "utf8"),
     ) as { version: number; encryptedBindings: string };
-    expect(migratedEnvelope.version).toBe(2);
+    expect(migratedEnvelope.version).toBe(3);
     expect(readFileSync(store.filePath, "utf8")).not.toContain(profilePath);
     const migratedPlaintext = JSON.parse(
       secureStorage.decryptString(
         Buffer.from(migratedEnvelope.encryptedBindings, "base64"),
       ),
-    ) as Array<{ binding: Record<string, unknown> }>;
-    expect(migratedPlaintext[0].binding).not.toHaveProperty("installationId");
-    expect(migratedPlaintext[0].binding).toMatchObject({
+    ) as {
+      bindings: Array<{ binding: Record<string, unknown> }>;
+      freshProfileOperations: unknown[];
+    };
+    expect(migratedPlaintext.bindings[0].binding).not.toHaveProperty(
+      "installationId",
+    );
+    expect(migratedPlaintext.bindings[0].binding).toMatchObject({
       deviceInstallationId: owner.deviceInstallationId,
       agentInstallationId: null,
     });
+    expect(migratedPlaintext.freshProfileOperations).toEqual([]);
     expect(hashTree(profilePath)).toEqual(before);
+  });
+
+  it("migrates an encrypted V2 binding array to V3 state", () => {
+    const secureStorage = new FakeSecureStorage();
+    const binding: RuntimeOwnerBinding = {
+      tenantId: owner.tenantId,
+      ownerScope: "USER",
+      ownerId: owner.ownerId,
+      deviceInstallationId: owner.deviceInstallationId,
+      agentInstallationId: null,
+      runtimeProfileId: "66666666-6666-4666-8666-666666666666",
+      boundAt: "2026-07-18T02:00:00.000Z",
+    };
+    const legacyPlaintext = JSON.stringify([
+      { profilePath: realpathSync.native(profilePath), binding },
+    ]);
+    mkdirSync(dirname(store.filePath), { recursive: true });
+    writeFileSync(
+      store.filePath,
+      `${JSON.stringify({
+        schema: "agentera-runtime-profile-bindings",
+        version: 2,
+        encryptedBindings: secureStorage
+          .encryptString(legacyPlaintext)
+          .toString("base64"),
+      })}\n`,
+    );
+
+    const migrated = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage,
+    });
+    expect(migrated.verifyProfileBinding(profilePath, owner)).toEqual(binding);
+    const envelope = JSON.parse(readFileSync(store.filePath, "utf8")) as {
+      version: number;
+      encryptedBindings: string;
+    };
+    expect(envelope.version).toBe(3);
+    expect(
+      JSON.parse(
+        secureStorage.decryptString(
+          Buffer.from(envelope.encryptedBindings, "base64"),
+        ),
+      ),
+    ).toEqual({
+      bindings: [{ profilePath: realpathSync.native(profilePath), binding }],
+      freshProfileOperations: [],
+    });
   });
 
   it("does not rewrite an encrypted V1 envelope unless decryption and validation finish", () => {

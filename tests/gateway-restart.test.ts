@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
+import { ChildProcess, spawn as spawnChild } from "child_process";
 const {
   TEST_HOME,
   TEST_REPO,
   connModeRef,
   healthStatuses,
   aliveGatewayPids,
+  realGatewayPids,
+  pidAliveProbeRef,
   ensureLocalApiServerKeySpy,
   healthRequests,
   restartScript,
@@ -28,6 +31,10 @@ const {
     connModeRef: { mode: "local" as "local" | "remote" | "ssh" },
     healthStatuses: [] as number[],
     aliveGatewayPids: new Set<number>(),
+    realGatewayPids: new Set<number>(),
+    pidAliveProbeRef: {
+      onProbe: null as ((pid: number) => void) | null,
+    },
     ensureLocalApiServerKeySpy: vi.fn(() => ({
       generated: false,
       key: "unit-test-internal-token",
@@ -80,7 +87,18 @@ vi.mock("../src/main/ssh-tunnel", () => ({
 
 vi.mock("../src/main/utils", () => ({
   stripAnsi: (s: string) => s,
-  pidIsAliveAs: (pid: number) => aliveGatewayPids.has(pid),
+  pidIsAliveAs: (pid: number) => {
+    pidAliveProbeRef.onProbe?.(pid);
+    if (!aliveGatewayPids.has(pid)) return false;
+    if (!realGatewayPids.has(pid)) return true;
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      aliveGatewayPids.delete(pid);
+      return false;
+    }
+  },
   getActiveProfileNameSync: () => "default",
   normalizeProfileName: (profile?: string) =>
     !profile || profile === "default" ? undefined : profile,
@@ -138,15 +156,19 @@ vi.mock("http", () => {
 });
 
 import {
+  configureGatewayProcessOwnership,
   isGatewayHealthy,
   isGatewayRunning,
+  recoverAeraOwnedGatewaysFromPreviousRun,
   restartGateway,
   restartGatewayViaCli,
   startGateway,
   startGatewayWithRecovery,
+  stopAeraOwnedGateways,
   stopGateway,
   stopHealthPolling,
 } from "../src/main/hermes";
+import { GatewayProcessOwnershipLedger } from "../src/main/gateway-process-ownership";
 
 const queuedRestartHealthTimeoutMs = process.platform === "win32" ? 1000 : 50;
 
@@ -192,16 +214,20 @@ describe("restartGatewayViaCli", () => {
     mkdirSync(join(TEST_HOME, "profiles", "work"), { recursive: true });
     mkdirSync(join(TEST_HOME, "profiles", "personal"), { recursive: true });
     mkdirSync(TEST_REPO, { recursive: true });
+    configureGatewayProcessOwnership(TEST_HOME);
     connModeRef.mode = "local";
     healthStatuses.length = 0;
     healthRequests.length = 0;
     aliveGatewayPids.clear();
+    realGatewayPids.clear();
+    pidAliveProbeRef.onProbe = null;
     ensureLocalApiServerKeySpy.mockClear();
     hermesCliArgsSpy.mockReset();
     hermesCliArgsSpy.mockImplementation(() => ["-e", restartScript]);
   });
 
   afterEach(async () => {
+    stopAeraOwnedGateways();
     stopGateway(true);
     stopGateway("work", true);
     stopGateway("personal", true);
@@ -245,6 +271,432 @@ describe("restartGatewayViaCli", () => {
       "unit-test-internal-token",
     );
     expect(ensureLocalApiServerKeySpy).toHaveBeenCalledWith("work");
+  });
+
+  it("clears the durable launch intent when spawn setup fails", () => {
+    hermesCliArgsSpy.mockImplementation(() => {
+      throw new Error("injected spawn setup failure");
+    });
+
+    expect(startGateway("work")).toBe(false);
+    expect(
+      JSON.parse(
+        readFileSync(join(TEST_HOME, "gateway-process-ownership.json"), "utf8"),
+      ).entries,
+    ).toEqual([]);
+  });
+
+  it("clears ownership when the spawned gateway exits before writing its PID", async () => {
+    hermesCliArgsSpy.mockImplementation(() => ["-e", "process.exit(1)"]);
+
+    expect(startGateway("work")).toBe(true);
+    await vi.waitFor(() => {
+      expect(
+        JSON.parse(
+          readFileSync(
+            join(TEST_HOME, "gateway-process-ownership.json"),
+            "utf8",
+          ),
+        ).entries,
+      ).toEqual([]);
+    });
+  });
+
+  it("persists launch ownership and stops every Aera-started Profile", async () => {
+    hermesCliArgsSpy.mockImplementation((args: string[]) => {
+      const profile = args[0] === "--profile" ? args[1] : "default";
+      const pidFile =
+        profile === "default"
+          ? join(TEST_HOME, "gateway.pid")
+          : profilePidFile(profile);
+      return [
+        "-e",
+        `require("fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));setInterval(() => {}, 1000)`,
+      ];
+    });
+
+    expect(startGateway()).toBe(true);
+    expect(startGateway("work")).toBe(true);
+    expect(await waitForFile(join(TEST_HOME, "gateway.pid"))).toBe(true);
+    expect(await waitForFile(profilePidFile("work"))).toBe(true);
+    const defaultPid = Number(
+      readFileSync(join(TEST_HOME, "gateway.pid"), "utf8"),
+    );
+    const workPid = Number(readFileSync(profilePidFile("work"), "utf8"));
+    expect(
+      JSON.parse(
+        readFileSync(join(TEST_HOME, "gateway-process-ownership.json"), "utf8"),
+      ).entries,
+    ).toEqual([
+      expect.objectContaining({ profileId: "default", spawnedPid: defaultPid }),
+      expect.objectContaining({ profileId: "work", spawnedPid: workPid }),
+    ]);
+
+    stopAeraOwnedGateways();
+
+    expect(await waitForProcessExit(defaultPid, 3000)).toBe(true);
+    expect(await waitForProcessExit(workPid, 3000)).toBe(true);
+  });
+
+  it("does not kill a changed PID that replaced an Aera-started Profile", async () => {
+    hermesCliArgsSpy.mockImplementation(() => [
+      "-e",
+      `require("fs").writeFileSync(${JSON.stringify(profilePidFile("work"))}, String(process.pid));setInterval(() => {}, 1000)`,
+    ]);
+    expect(startGateway("work")).toBe(true);
+    expect(await waitForFile(profilePidFile("work"))).toBe(true);
+    const aeraPid = Number(readFileSync(profilePidFile("work"), "utf8"));
+    const external = spawnChild(process.execPath, [
+      "-e",
+      "setInterval(() => {}, 1000)",
+    ]);
+    const externalPid = external.pid as number;
+    writeFileSync(profilePidFile("work"), String(externalPid), "utf8");
+    aliveGatewayPids.add(externalPid);
+
+    try {
+      stopAeraOwnedGateways();
+
+      expect(await waitForProcessExit(aeraPid, 3000)).toBe(true);
+      expect(() => process.kill(externalPid, 0)).not.toThrow();
+      expect(
+        JSON.parse(
+          readFileSync(
+            join(TEST_HOME, "gateway-process-ownership.json"),
+            "utf8",
+          ),
+        ).entries,
+      ).toEqual([expect.objectContaining({ profileId: "work" })]);
+    } finally {
+      external.kill("SIGTERM");
+      await waitForProcessExit(externalPid, 3000);
+    }
+  });
+
+  it("does not let forced restart cleanup signal a replacement Profile PID", async () => {
+    hermesCliArgsSpy.mockImplementation(() => [
+      "-e",
+      `require("fs").writeFileSync(${JSON.stringify(profilePidFile("work"))}, String(process.pid));setInterval(() => {}, 1000)`,
+    ]);
+    expect(startGateway("work")).toBe(true);
+    expect(await waitForFile(profilePidFile("work"))).toBe(true);
+    const aeraPid = Number(readFileSync(profilePidFile("work"), "utf8"));
+    const replacement = spawnChild(process.execPath, [
+      "-e",
+      "setInterval(() => {}, 1000)",
+    ]);
+    const replacementPid = replacement.pid as number;
+    writeFileSync(profilePidFile("work"), String(replacementPid), "utf8");
+    aliveGatewayPids.add(replacementPid);
+
+    try {
+      stopGateway("work", true);
+
+      expect(await waitForProcessExit(aeraPid, 3000)).toBe(true);
+      expect(await waitForProcessExit(replacementPid, 200)).toBe(false);
+    } finally {
+      replacement.kill("SIGTERM");
+      await waitForProcessExit(replacementPid, 3000);
+    }
+  });
+
+  it("retains durable ownership until a SIGTERM-ignoring gateway is confirmed stopped", async () => {
+    const readyFile = join(TEST_HOME, "work-ignore-sigterm-ready");
+    hermesCliArgsSpy.mockImplementation(() => [
+      "-e",
+      `process.on("SIGTERM",()=>{});require("fs").writeFileSync(${JSON.stringify(profilePidFile("work"))},String(process.pid));require("fs").writeFileSync(${JSON.stringify(readyFile)},"ready");setInterval(()=>{},1000)`,
+    ]);
+    expect(startGateway("work")).toBe(true);
+    expect(await waitForFile(readyFile)).toBe(true);
+    const spawnedPid = Number(readFileSync(profilePidFile("work"), "utf8"));
+    aliveGatewayPids.add(spawnedPid);
+    realGatewayPids.add(spawnedPid);
+    const originalChildKill = ChildProcess.prototype.kill;
+    const childKillSpy = vi
+      .spyOn(ChildProcess.prototype, "kill")
+      .mockImplementation(function (
+        this: ChildProcess,
+        signal?: number | NodeJS.Signals,
+      ): boolean {
+        if (this.pid === spawnedPid && signal === "SIGTERM") return true;
+        return originalChildKill.call(this, signal);
+      });
+    const originalKill = process.kill.bind(process);
+    let forceAttempts = 0;
+    const killSpy = vi
+      .spyOn(process, "kill")
+      .mockImplementation((pid, signal) => {
+        if (pid === spawnedPid && signal === "SIGTERM") return true;
+        if (pid === spawnedPid && signal === "SIGKILL") {
+          forceAttempts += 1;
+          if (forceAttempts === 1) {
+            const error = new Error("injected transient force failure");
+            Object.assign(error, { code: "EPERM" });
+            throw error;
+          }
+        }
+        return originalKill(pid, signal);
+      });
+
+    try {
+      stopGateway("work", true);
+
+      expect(() => process.kill(spawnedPid, 0)).not.toThrow();
+      expect(
+        JSON.parse(
+          readFileSync(
+            join(TEST_HOME, "gateway-process-ownership.json"),
+            "utf8",
+          ),
+        ).entries,
+      ).toEqual([expect.objectContaining({ profileId: "work", spawnedPid })]);
+      expect(await waitForProcessExit(spawnedPid, 4000)).toBe(true);
+      await vi.waitFor(() => {
+        expect(
+          JSON.parse(
+            readFileSync(
+              join(TEST_HOME, "gateway-process-ownership.json"),
+              "utf8",
+            ),
+          ).entries,
+        ).toEqual([]);
+      });
+      expect(forceAttempts).toBeGreaterThanOrEqual(2);
+    } finally {
+      childKillSpy.mockRestore();
+      killSpy.mockRestore();
+      try {
+        process.kill(spawnedPid, "SIGKILL");
+      } catch {
+        // already stopped
+      }
+      await waitForProcessExit(spawnedPid, 3000);
+    }
+  });
+
+  it("terminates and then clears a prior recorded gateway after cold recovery", async () => {
+    hermesCliArgsSpy.mockImplementation(() => [
+      "-e",
+      `require("fs").writeFileSync(${JSON.stringify(profilePidFile("work"))}, String(process.pid));setInterval(() => {}, 1000)`,
+    ]);
+    expect(startGateway("work")).toBe(true);
+    expect(await waitForFile(profilePidFile("work"))).toBe(true);
+    const spawnedPid = Number(readFileSync(profilePidFile("work"), "utf8"));
+    aliveGatewayPids.add(spawnedPid);
+    realGatewayPids.add(spawnedPid);
+
+    configureGatewayProcessOwnership(TEST_HOME);
+    expect(recoverAeraOwnedGatewaysFromPreviousRun()).toEqual({
+      reapedProfiles: [],
+      ambiguousProfiles: ["work"],
+    });
+
+    expect(await waitForProcessExit(spawnedPid, 3000)).toBe(true);
+    await vi.waitFor(() => {
+      expect(
+        JSON.parse(
+          readFileSync(
+            join(TEST_HOME, "gateway-process-ownership.json"),
+            "utf8",
+          ),
+        ).entries,
+      ).toEqual([]);
+    });
+  });
+
+  it("keeps cold-recovery ownership until the recorded process actually exits", async () => {
+    const readyFile = join(TEST_HOME, "cold-ignore-sigterm-ready");
+    hermesCliArgsSpy.mockImplementation(() => [
+      "-e",
+      `process.on("SIGTERM",()=>{});require("fs").writeFileSync(${JSON.stringify(profilePidFile("work"))},String(process.pid));require("fs").writeFileSync(${JSON.stringify(readyFile)},"ready");setInterval(()=>{},1000)`,
+    ]);
+    expect(startGateway("work")).toBe(true);
+    expect(await waitForFile(readyFile)).toBe(true);
+    const spawnedPid = Number(readFileSync(profilePidFile("work"), "utf8"));
+    aliveGatewayPids.add(spawnedPid);
+    realGatewayPids.add(spawnedPid);
+    configureGatewayProcessOwnership(TEST_HOME);
+    const originalKill = process.kill.bind(process);
+    let ignoredSigterm = false;
+    const killSpy = vi
+      .spyOn(process, "kill")
+      .mockImplementation((pid, signal) => {
+        if (pid === spawnedPid && signal === "SIGTERM") {
+          ignoredSigterm = true;
+          return true;
+        }
+        return originalKill(pid, signal);
+      });
+
+    try {
+      expect(recoverAeraOwnedGatewaysFromPreviousRun()).toEqual({
+        reapedProfiles: [],
+        ambiguousProfiles: ["work"],
+      });
+      expect(() => process.kill(spawnedPid, 0)).not.toThrow();
+      expect(
+        JSON.parse(
+          readFileSync(
+            join(TEST_HOME, "gateway-process-ownership.json"),
+            "utf8",
+          ),
+        ).entries,
+      ).toEqual([expect.objectContaining({ profileId: "work", spawnedPid })]);
+      expect(ignoredSigterm).toBe(true);
+      expect(await waitForProcessExit(spawnedPid, 4000)).toBe(true);
+      await vi.waitFor(() => {
+        expect(
+          JSON.parse(
+            readFileSync(
+              join(TEST_HOME, "gateway-process-ownership.json"),
+              "utf8",
+            ),
+          ).entries,
+        ).toEqual([]);
+      });
+    } finally {
+      killSpy.mockRestore();
+      try {
+        process.kill(spawnedPid, "SIGKILL");
+      } catch {
+        // already stopped
+      }
+      await waitForProcessExit(spawnedPid, 3000);
+    }
+  });
+
+  it("reports corrupt ownership state with a stable error code", () => {
+    writeFileSync(
+      join(TEST_HOME, "gateway-process-ownership.json"),
+      "{not valid json",
+      "utf8",
+    );
+    configureGatewayProcessOwnership(TEST_HOME);
+
+    expect(recoverAeraOwnedGatewaysFromPreviousRun()).toEqual({
+      reapedProfiles: [],
+      ambiguousProfiles: [],
+      errorCode: "invalid_ownership",
+    });
+  });
+
+  it("keeps startup alive when ownership reconciliation cannot persist", () => {
+    const previous = new GatewayProcessOwnershipLedger({
+      userDataPath: TEST_HOME,
+      desktopPid: 9001,
+    });
+    const intent = previous.beginLaunch({
+      profileId: "work",
+      preLaunchPid: null,
+    });
+    previous.markSpawned({
+      profileId: "work",
+      launchId: intent.launchId,
+      spawnedPid: 987654,
+    });
+    configureGatewayProcessOwnership(TEST_HOME);
+    mkdirSync(join(TEST_HOME, "gateway-process-ownership.pending.json"));
+
+    expect(recoverAeraOwnedGatewaysFromPreviousRun()).toEqual({
+      reapedProfiles: [],
+      ambiguousProfiles: ["work"],
+      errorCode: "ownership_persistence_failed",
+    });
+  });
+
+  it("does not signal any process when the Profile PID changes during cold recovery", async () => {
+    const recorded = spawnChild(process.execPath, [
+      "-e",
+      "setInterval(() => {}, 1000)",
+    ]);
+    const replacement = spawnChild(process.execPath, [
+      "-e",
+      "setInterval(() => {}, 1000)",
+    ]);
+    const recordedPid = recorded.pid as number;
+    const replacementPid = replacement.pid as number;
+    writeFileSync(profilePidFile("work"), String(recordedPid), "utf8");
+    aliveGatewayPids.add(recordedPid);
+    aliveGatewayPids.add(replacementPid);
+
+    const previous = new GatewayProcessOwnershipLedger({
+      userDataPath: TEST_HOME,
+      desktopPid: 9001,
+    });
+    const intent = previous.beginLaunch({
+      profileId: "work",
+      preLaunchPid: null,
+    });
+    previous.markSpawned({
+      profileId: "work",
+      launchId: intent.launchId,
+      spawnedPid: recordedPid,
+    });
+    configureGatewayProcessOwnership(TEST_HOME);
+    let swapped = false;
+    pidAliveProbeRef.onProbe = (pid) => {
+      if (!swapped && pid === recordedPid) {
+        swapped = true;
+        writeFileSync(profilePidFile("work"), String(replacementPid), "utf8");
+      }
+    };
+
+    try {
+      expect(recoverAeraOwnedGatewaysFromPreviousRun()).toEqual({
+        reapedProfiles: [],
+        ambiguousProfiles: ["work"],
+      });
+      expect(await waitForProcessExit(recordedPid, 200)).toBe(false);
+      expect(await waitForProcessExit(replacementPid, 200)).toBe(false);
+    } finally {
+      pidAliveProbeRef.onProbe = null;
+      recorded.kill("SIGTERM");
+      replacement.kill("SIGTERM");
+      await waitForProcessExit(recordedPid, 3000);
+      await waitForProcessExit(replacementPid, 3000);
+    }
+  });
+
+  it("never stops an unrecorded pre-existing gateway during recovery", async () => {
+    const external = spawnChild(process.execPath, [
+      "-e",
+      "setInterval(() => {}, 1000)",
+    ]);
+    const externalPid = external.pid;
+    expect(externalPid).toBeTypeOf("number");
+    writeFileSync(profilePidFile("personal"), String(externalPid), "utf8");
+    aliveGatewayPids.add(externalPid as number);
+
+    try {
+      expect(recoverAeraOwnedGatewaysFromPreviousRun()).toEqual({
+        reapedProfiles: [],
+        ambiguousProfiles: [],
+      });
+      expect(() => process.kill(externalPid as number, 0)).not.toThrow();
+    } finally {
+      external.kill("SIGTERM");
+      await waitForProcessExit(externalPid as number, 3000);
+    }
+  });
+
+  it("configures cold recovery before IPC and stops all owned gateways on context teardown", () => {
+    const start = readFileSync(
+      join(__dirname, "../src/main/app/start.ts"),
+      "utf8",
+    );
+    const configure = start.indexOf("configureGatewayProcessOwnership(");
+    const recover = start.indexOf("recoverAeraOwnedGatewaysFromPreviousRun()");
+    const register = start.indexOf("registerIpcHandlers({");
+    expect(configure).toBeGreaterThan(-1);
+    expect(recover).toBeGreaterThan(configure);
+    expect(register).toBeGreaterThan(recover);
+
+    const teardown = start.slice(
+      start.indexOf("export function stopActiveRuntimeContext"),
+      start.indexOf("function notifyConnectionConfigChanged"),
+    );
+    expect(teardown).toContain("stopAeraOwnedGateways()");
+    expect(teardown).not.toContain("stopGateway(undefined, true)");
   });
 
   it("uses a bearer-authenticated endpoint for local gateway readiness", async () => {

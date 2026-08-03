@@ -315,12 +315,21 @@ export async function listLocalProfileLocations(): Promise<
 export function createProfile(
   name: string,
   cloneFrom: string | null,
+  reservedProfileId?: string,
 ): CreateProfileResult {
   const agentName = normalizeAgentName(name);
   if (!agentName) {
     return { success: false, error: "Agent name is required" };
   }
-  const id = profileIdForAgentName(agentName);
+  const availableProfileId = profileIdForAgentName(agentName);
+  if (
+    reservedProfileId !== undefined &&
+    (reservedProfileId !== availableProfileId ||
+      !isValidNamedProfileName(reservedProfileId))
+  ) {
+    return { success: false, error: "Reserved Profile ID is unavailable." };
+  }
+  const id = reservedProfileId ?? availableProfileId;
   // `cloneFrom` may be "default" (not a "named" profile) or any valid named
   // profile; reject anything else so it can't reach the CLI as an argument.
   if (

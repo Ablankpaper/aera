@@ -265,9 +265,11 @@ import {
   listLocalProfileLocations,
   createProfile,
   deleteProfile,
+  profileIdForAgentName,
   setActiveProfile,
 } from "../profiles";
 import {
+  createAccountSpaceProfileOperationId,
   discoverProfilesForCurrentOwner,
   hasMeaningfulHermesProfileData,
   type AgenteraProfileBindingStore,
@@ -2192,21 +2194,14 @@ export function registerIpcHandlers(context: IpcContext): void {
         null;
       if (hasSignedInAccess) {
         const control = requireAgentControl();
-        const preparedAgentTurn = await control.prepareHermesTurn({
-          conversationKey: identityConversationKey,
-          profilePath: profileHome(identityProfileId),
-          owner: turnOwner,
-          resumeSessionId: identityResumeSessionId || null,
-        });
-        const boundary = control.prepareConversationBoundary({
-          conversationKey: identityConversationKey,
-          owner: turnOwner,
-          resumeSessionId:
-            preparedAgentTurn?.resumeSessionId ??
-            identityResumeSessionId ??
-            null,
-          runtimeBinding: preparedAgentTurn?.binding ?? null,
-        });
+        const preparedConversationRuntime =
+          await control.prepareConversationRuntime({
+            conversationKey: identityConversationKey,
+            profilePath: profileHome(identityProfileId),
+            owner: turnOwner,
+            resumeSessionId: identityResumeSessionId || null,
+          });
+        const boundary = preparedConversationRuntime.conversationBoundary;
         const matchingOption = productSpaceState?.options.find((option) => {
           if (
             boundary.scopeType === "WORKSPACE" &&
@@ -2366,6 +2361,29 @@ export function registerIpcHandlers(context: IpcContext): void {
         discoverProfiles: listLocalProfileLocations,
         getCurrentOwner: getAgenteraRuntimeOwner,
       });
+    const recoveredFreshProfiles =
+      agenteraProfileBindings.reconcileActivatingFreshProfiles({
+        owner,
+        createProfile,
+        resolveProfilePath: (profileId) => profileHome(profileId),
+        activateProfile: (profileId) => {
+          setActiveProfile(profileId);
+          if (getActiveProfileNameSync() !== profileId) {
+            throw new Error(
+              "The recovered account space could not be activated.",
+            );
+          }
+          notifyProfileSwitched();
+        },
+      });
+    const recoveredFreshProfile = recoveredFreshProfiles.at(-1);
+    if (recoveredFreshProfile) {
+      return {
+        status: "bound",
+        profileId: recoveredFreshProfile.profileId,
+        runtimeProfileId: recoveredFreshProfile.binding.runtimeProfileId,
+      };
+    }
     const preferred = agenteraProfileBindings.findPreferredOwnedProfile(
       locations,
       owner,
@@ -2412,9 +2430,19 @@ export function registerIpcHandlers(context: IpcContext): void {
       };
     }
 
+    const operationId = createAccountSpaceProfileOperationId(owner);
+    const pendingReservation =
+      agenteraProfileBindings.getFreshProfileReservation(operationId, owner);
+    const name =
+      pendingReservation?.displayName ??
+      `Aera Space ${Date.now().toString(36)}`;
+    const profileId =
+      pendingReservation?.profileId ?? profileIdForAgentName(name);
     const created = agenteraProfileBindings.createAndBindFreshProfile({
-      name: `Aera Space ${Date.now().toString(36)}`,
+      operationId,
+      name,
       owner,
+      profileId,
       createProfile,
       resolveProfilePath: (profileId) => profileHome(profileId),
       activateProfile: (profileId) => {
@@ -2468,8 +2496,10 @@ export function registerIpcHandlers(context: IpcContext): void {
       throw new Error("Fresh local Profiles require local Runtime mode.");
     }
     const created = agenteraProfileBindings.createAndBindFreshProfile({
+      operationId: randomUUID(),
       name,
       owner: getAgenteraRuntimeOwner(),
+      profileId: profileIdForAgentName(name),
       createProfile,
       resolveProfilePath: (profileId) => profileHome(profileId),
       activateProfile: (profileId) => {
@@ -3347,9 +3377,9 @@ export function registerIpcHandlers(context: IpcContext): void {
           // sufficient proof of current membership or role.
           await requireProductSpace().getState();
         }
-        const preparedAgentTurn =
+        const preparedConversationRuntime =
           agenteraAgentControl && hasSignedInAccess
-            ? await agenteraAgentControl.prepareHermesTurn({
+            ? await agenteraAgentControl.prepareConversationRuntime({
                 conversationKey: identityConversationKey,
                 profilePath: profileHome(profile),
                 owner: turnOwner,
@@ -3359,16 +3389,10 @@ export function registerIpcHandlers(context: IpcContext): void {
         if (!agenteraAgentControl && hasSignedInAccess) {
           throw new Error("Aera conversation boundary is unavailable.");
         }
+        const preparedAgentTurn =
+          preparedConversationRuntime?.preparedAgentTurn ?? null;
         const conversationBoundary =
-          agenteraAgentControl?.prepareConversationBoundary({
-            conversationKey: identityConversationKey,
-            owner: turnOwner,
-            resumeSessionId:
-              preparedAgentTurn?.resumeSessionId ??
-              identityResumeSessionId ??
-              null,
-            runtimeBinding: preparedAgentTurn?.binding ?? null,
-          }) ?? null;
+          preparedConversationRuntime?.conversationBoundary ?? null;
         let conversationEnvelope = preparedAgentTurn?.envelope;
         try {
           const globalSnapshot =
@@ -3467,29 +3491,18 @@ export function registerIpcHandlers(context: IpcContext): void {
         const abortThisRun = (): void => {
           runtimeActivity.abortRun(chatRunId);
         };
-        let boundRuntimeSessionId: string | null =
-          preparedAgentTurn?.binding.hermesSessionId ?? null;
-        let boundConversationBoundarySessionId: string | null =
+        let boundControlPlaneSessionId: string | null =
           conversationBoundary?.hermesSessionId ?? null;
         const bindControlPlaneSession = (sessionId: string): void => {
-          if (preparedAgentTurn && boundRuntimeSessionId !== sessionId) {
-            agenteraAgentControl?.attachHermesSession(
-              preparedAgentTurn.binding.id,
-              sessionId,
-            );
-            boundRuntimeSessionId = sessionId;
-          }
-          if (
-            conversationBoundary &&
-            boundConversationBoundarySessionId !== sessionId
-          ) {
-            agenteraAgentControl?.attachConversationBoundarySession(
-              conversationBoundary.id,
-              sessionId,
-              turnOwner,
-            );
-            boundConversationBoundarySessionId = sessionId;
-          }
+          if (!conversationBoundary || boundControlPlaneSessionId === sessionId)
+            return;
+          agenteraAgentControl?.attachConversationRuntimeSession({
+            runtimeBindingId: preparedAgentTurn?.binding.id ?? null,
+            boundaryId: conversationBoundary.id,
+            sessionId,
+            owner: turnOwner,
+          });
+          boundControlPlaneSessionId = sessionId;
         };
         let boundGlobalProfileSessionId: string | null = null;
         const bindGlobalProfileSnapshotToSession = (

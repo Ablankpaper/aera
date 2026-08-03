@@ -1,6 +1,6 @@
 import { EventEmitter } from "events";
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { mkdirSync, rmSync } from "fs";
+import { mkdirSync, readFileSync, rmSync } from "fs";
 
 const {
   spawned,
@@ -13,6 +13,8 @@ const {
   modelConfig,
   profileEnv,
   modelRows,
+  ownershipMarkSpawnFailureRef,
+  deferGatewayCloseRef,
 } = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const path = require("path");
@@ -23,6 +25,9 @@ const {
       EventEmitter & {
         stdout: EventEmitter;
         stderr: EventEmitter;
+        pid: number;
+        exitCode: number | null;
+        signalCode: NodeJS.Signals | null;
         killed: boolean;
         kill: ReturnType<typeof vi.fn>;
         unref: ReturnType<typeof vi.fn>;
@@ -54,6 +59,8 @@ const {
       providerLabel?: string;
       createdAt: number;
     }>,
+    ownershipMarkSpawnFailureRef: { fail: false },
+    deferGatewayCloseRef: { value: false },
   };
 });
 
@@ -226,11 +233,22 @@ vi.mock("child_process", () => ({
       const proc = Object.assign(new EventEmitter(), {
         stdout: new EventEmitter(),
         stderr: new EventEmitter(),
+        pid: process.pid,
+        exitCode: null,
+        signalCode: null,
         killed: false,
         kill: vi.fn(),
         unref: vi.fn(),
         spawnArgs: args,
         spawnOptions: options,
+      });
+      proc.kill = vi.fn((signal: NodeJS.Signals = "SIGTERM") => {
+        proc.killed = true;
+        if (!deferGatewayCloseRef.value) {
+          proc.signalCode = signal;
+          queueMicrotask(() => proc.emit("close", null, signal));
+        }
+        return true;
       });
       proc.stderr.pipe = vi.fn();
       spawned.push(proc);
@@ -241,11 +259,22 @@ vi.mock("child_process", () => ({
     const proc = Object.assign(new EventEmitter(), {
       stdout: new EventEmitter(),
       stderr: new EventEmitter(),
+      pid: process.pid,
+      exitCode: null,
+      signalCode: null,
       killed: false,
       kill: vi.fn(),
       unref: vi.fn(),
       spawnArgs: args,
       spawnOptions: options,
+    });
+    proc.kill = vi.fn((signal: NodeJS.Signals = "SIGTERM") => {
+      proc.killed = true;
+      if (!deferGatewayCloseRef.value) {
+        proc.signalCode = signal;
+        queueMicrotask(() => proc.emit("close", null, signal));
+      }
+      return true;
     });
     proc.stderr.pipe = vi.fn();
     spawned.push(proc);
@@ -314,7 +343,38 @@ vi.mock("../src/main/process-options", () => ({
   HIDDEN_SUBPROCESS_OPTIONS: {},
 }));
 
+vi.mock("../src/main/gateway-process-ownership", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../src/main/gateway-process-ownership")
+    >();
+  return {
+    ...actual,
+    GatewayProcessOwnershipLedger: class
+      extends actual.GatewayProcessOwnershipLedger
+    {
+      override markSpawned(
+        input: Parameters<
+          InstanceType<
+            typeof actual.GatewayProcessOwnershipLedger
+          >["markSpawned"]
+        >[0],
+      ): ReturnType<
+        InstanceType<typeof actual.GatewayProcessOwnershipLedger>["markSpawned"]
+      > {
+        if (ownershipMarkSpawnFailureRef.fail) {
+          throw new actual.GatewayProcessOwnershipError(
+            "ownership_persistence_failed",
+          );
+        }
+        return super.markSpawned(input);
+      }
+    },
+  };
+});
+
 import {
+  configureGatewayProcessOwnership,
   sendMessage,
   startGateway,
   stopGateway,
@@ -323,6 +383,9 @@ import {
 
 describe("CLI fallback session id propagation", () => {
   beforeEach(() => {
+    rmSync(TEST_HOME, { recursive: true, force: true });
+    mkdirSync(TEST_HOME, { recursive: true });
+    configureGatewayProcessOwnership(TEST_HOME);
     healthStatuses.length = 0;
     apiRequests.length = 0;
     apiRequestErrors.length = 0;
@@ -334,7 +397,37 @@ describe("CLI fallback session id propagation", () => {
       delete profileEnv[key];
     }
     modelRows.length = 0;
+    ownershipMarkSpawnFailureRef.fail = false;
+    deferGatewayCloseRef.value = false;
     rmSync(TEST_REPO, { recursive: true, force: true });
+  });
+
+  it("keeps a failed spawned-PID commit until the child exit is confirmed", async () => {
+    mkdirSync(TEST_REPO, { recursive: true });
+    ownershipMarkSpawnFailureRef.fail = true;
+    deferGatewayCloseRef.value = true;
+
+    expect(startGateway()).toBe(false);
+    expect(spawned).toHaveLength(1);
+    const proc = spawned[0];
+    expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(
+      JSON.parse(
+        readFileSync(`${TEST_HOME}/gateway-process-ownership.json`, "utf8"),
+      ).entries,
+    ).toEqual([
+      expect.objectContaining({ profileId: "default", spawnedPid: null }),
+    ]);
+
+    proc.signalCode = "SIGTERM";
+    proc.emit("close", null, "SIGTERM");
+    await vi.waitFor(() => {
+      expect(
+        JSON.parse(
+          readFileSync(`${TEST_HOME}/gateway-process-ownership.json`, "utf8"),
+        ).entries,
+      ).toEqual([]);
+    });
   });
 
   afterEach(() => {

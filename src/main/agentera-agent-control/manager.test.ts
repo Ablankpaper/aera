@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AgenteraAuthPublicState } from "../../shared/agentera-auth";
 import type {
   AgenteraAgentControlContext,
   CreateAgentDraftInput,
@@ -12,6 +13,7 @@ import type {
 } from "../../shared/agentera-agent-control";
 import type { AgenteraAgentControlClient } from "./client";
 import type { AgenteraHermesAdapter } from "./hermes-adapter";
+import { AgentInstallationManager } from "./installation-manager";
 import { RuntimeBindingStore } from "./runtime-binding-store";
 import {
   openAgenteraControlPlaneDatabase,
@@ -90,6 +92,14 @@ describe("Agent control Organization Foundation context", () => {
   function fullManager(
     getContext: () => AgenteraAgentControlContext,
     clientOverrides: Record<string, unknown> = {},
+    runtimeOverrides: Partial<{
+      getOwner: () => typeof OWNER;
+      getAuthState: () => AgenteraAuthPublicState;
+      getRuntimeVersion: () => string | Promise<string>;
+      getConnectionMode: () => "local" | "remote" | "ssh";
+      hermesAdapter: AgenteraHermesAdapter;
+      verifyProfileBinding: () => { agentInstallationId: string | null };
+    }> = {},
   ): {
     manager: AgenteraAgentControlManager;
     database: AgenteraControlPlaneDatabase;
@@ -114,30 +124,37 @@ describe("Agent control Organization Foundation context", () => {
           ...clientOverrides,
         } as unknown as AgenteraAgentControlClient,
         profileBindings: {
-          verifyProfileBinding: vi.fn(),
+          verifyProfileBinding:
+            runtimeOverrides.verifyProfileBinding ?? vi.fn(),
           bindFreshProfile: vi.fn(),
           claimProfile: vi.fn(),
         } as never,
         profiles: {
+          profileIdForAgentName: vi.fn(() => "fresh-agent"),
           createProfile: vi.fn(),
           deleteProfile: vi.fn(() => ({ success: true })),
           resolveProfilePath: vi.fn(),
           activateProfile: vi.fn(),
         },
         userDataPath,
-        getOwner: () => OWNER,
+        getOwner: runtimeOverrides.getOwner ?? (() => OWNER),
         getAgentContext: getContext,
-        getAuthState: () => ({
-          status: "authenticated",
-          userId: OWNER.ownerId,
-          personalSpaceId: OWNER.tenantId,
-          deviceId: OWNER.deviceInstallationId,
-          offlineExpiresAt: "2026-07-28T00:00:00.000Z",
-          cloudAvailable: true,
-        }),
-        getRuntimeVersion: () => "v0.18.2-agentera.1",
-        getConnectionMode: () => "local",
+        getAuthState:
+          runtimeOverrides.getAuthState ??
+          (() => ({
+            status: "authenticated",
+            userId: OWNER.ownerId,
+            personalSpaceId: OWNER.tenantId,
+            deviceId: OWNER.deviceInstallationId,
+            offlineExpiresAt: "2026-07-28T00:00:00.000Z",
+            cloudAvailable: true,
+          })),
+        getRuntimeVersion:
+          runtimeOverrides.getRuntimeVersion ?? (() => "v0.18.2-agentera.1"),
+        getConnectionMode:
+          runtimeOverrides.getConnectionMode ?? (() => "local"),
         assertEntitled: () => undefined,
+        hermesAdapter: runtimeOverrides.hermesAdapter,
       }),
     };
   }
@@ -282,6 +299,99 @@ describe("Agent control Organization Foundation context", () => {
     });
   });
 
+  it("prepares one installed turn and ConversationBoundary through the durable coordinator", async () => {
+    const bindingInput = {
+      conversationKey: "durable-installed-conversation",
+      tenantId: OWNER.tenantId,
+      ownerScope: "USER" as const,
+      ownerId: OWNER.ownerId,
+      deviceId: OWNER.deviceInstallationId,
+      agentDefinitionId: OFFICIAL_DEFINITION_ID,
+      agentVersionId: PERSONAL_VERSION_ID,
+      agentInstallationId: PERSONAL_INSTALLATION_ID,
+      runtimeProfileId: PERSONAL_PROFILE_ID,
+      runtimeVersion: "v0.18.2-agentera.1",
+      modelRoute: { provider: "openai", model: "gpt-5.6", baseUrl: "" },
+      policySnapshotId: PERSONAL_POLICY_ID,
+      officialReleaseRevisionId: null,
+      toolPermissionDigest: "1".repeat(64),
+      publishedBaseDigest: "2".repeat(64),
+    };
+    const plan = { bindingInput };
+    const prepareInstalledTurnPlan = vi.fn(async () => plan);
+    const finalizeInstalledTurn = vi.fn(
+      (_plan: typeof plan, binding: { id: string }) => ({
+        binding,
+        profilePath: "/isolated/profile",
+        resumeSessionId: undefined,
+        envelope: {
+          instructions: "fixed",
+          requireBoundApiTransport: true,
+        },
+        modelOverride: bindingInput.modelRoute,
+      }),
+    );
+    const { manager, database } = fullManager(
+      () => ({
+        scope: "ORGANIZATION",
+        organizationId: ORGANIZATION_ID,
+        role: "member",
+      }),
+      {},
+      {
+        verifyProfileBinding: () => ({
+          agentInstallationId: PERSONAL_INSTALLATION_ID,
+        }),
+        hermesAdapter: {
+          prepareInstalledTurnPlan,
+          finalizeInstalledTurn,
+        } as unknown as AgenteraHermesAdapter,
+      },
+    );
+    const input = {
+      conversationKey: bindingInput.conversationKey,
+      profilePath: "/isolated/profile",
+      owner: OWNER,
+      resumeSessionId: null,
+    };
+
+    const prepared = await manager.prepareConversationRuntime(input);
+
+    expect(prepareInstalledTurnPlan).toHaveBeenCalledWith(input);
+    expect(finalizeInstalledTurn).toHaveBeenCalledOnce();
+    expect(prepared.preparedAgentTurn?.binding.id).toBe(
+      prepared.conversationBoundary.runtimeBindingId,
+    );
+    expect(prepared.conversationBoundary).toMatchObject({
+      conversationKey: bindingInput.conversationKey,
+      scopeType: "ORGANIZATION",
+      scopeId: ORGANIZATION_ID,
+      agentInstallationId: PERSONAL_INSTALLATION_ID,
+      runtimeProfileId: PERSONAL_PROFILE_ID,
+    });
+    expect(
+      database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM runtime_bindings")
+        .get(),
+    ).toEqual({ count: 1 });
+    expect(
+      database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM conversation_boundaries")
+        .get(),
+    ).toEqual({ count: 1 });
+
+    const attached = manager.attachConversationRuntimeSession({
+      runtimeBindingId: prepared.preparedAgentTurn?.binding.id ?? null,
+      boundaryId: prepared.conversationBoundary.id,
+      sessionId: "hermes-durable-session",
+      owner: OWNER,
+    });
+    expect(attached.runtimeBinding?.hermesSessionId).toBe(
+      "hermes-durable-session",
+    );
+    expect(attached.boundary.hermesSessionId).toBe("hermes-durable-session");
+  });
+
   it.each([
     ["owner", true],
     ["admin", true],
@@ -412,6 +522,62 @@ describe("Agent control Organization Foundation context", () => {
     expect(runtimeComponentKey(OWNER)).toBe(
       [OWNER.tenantId, OWNER.ownerId, OWNER.deviceInstallationId].join("\0"),
     );
+  });
+
+  it("single-flights installation reconciliation only for authenticated online local Runtime access", async () => {
+    let authState: AgenteraAuthPublicState = { status: "unauthenticated" };
+    let connectionMode: "local" | "remote" | "ssh" = "local";
+    let finishReconciliation!: () => void;
+    const reconciliation = new Promise<never[]>((resolve) => {
+      finishReconciliation = () => resolve([]);
+    });
+    const reconcilePendingInstallations = vi
+      .spyOn(
+        AgentInstallationManager.prototype,
+        "reconcilePendingInstallations",
+      )
+      .mockReturnValue(reconciliation);
+    const { manager } = fullManager(
+      () => ({ scope: "USER" }),
+      {},
+      {
+        getAuthState: () => authState,
+        getConnectionMode: () => connectionMode,
+      },
+    );
+
+    manager.notifyAccessStateChanged();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reconcilePendingInstallations).not.toHaveBeenCalled();
+
+    authState = {
+      status: "offline",
+      userId: OWNER.ownerId,
+      personalSpaceId: OWNER.tenantId,
+      deviceId: OWNER.deviceInstallationId,
+      offlineExpiresAt: "2026-07-28T00:00:00.000Z",
+      cloudAvailable: false,
+    };
+    manager.notifyAccessStateChanged();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reconcilePendingInstallations).not.toHaveBeenCalled();
+
+    authState = { ...authState, status: "authenticated", cloudAvailable: true };
+    connectionMode = "remote";
+    manager.notifyAccessStateChanged();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reconcilePendingInstallations).not.toHaveBeenCalled();
+
+    connectionMode = "local";
+    manager.notifyAccessStateChanged();
+    manager.notifyAccessStateChanged();
+    await vi.waitFor(() => {
+      expect(reconcilePendingInstallations).toHaveBeenCalledTimes(1);
+    });
+
+    finishReconciliation();
+    await reconciliation;
+    await Promise.resolve();
   });
 
   it("does not interrupt an already installed Hermes Profile turn", async () => {

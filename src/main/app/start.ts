@@ -16,7 +16,12 @@ import {
   getModelConfig,
   getPublicConnectionConfig,
 } from "../config";
-import { stopGateway, stopHealthPolling } from "../hermes";
+import {
+  configureGatewayProcessOwnership,
+  recoverAeraOwnedGatewaysFromPreviousRun,
+  stopAeraOwnedGateways,
+  stopHealthPolling,
+} from "../hermes";
 import { stopAllDashboards } from "../dashboard";
 import { cleanupTempMediaFiles } from "../media";
 import { closeDbConnection } from "../db";
@@ -103,7 +108,12 @@ import {
   type AgenteraProductSpaceDatabase,
 } from "../agentera-product-space/db";
 import { AgenteraProductSpaceManager } from "../agentera-product-space/manager";
-import { createProfile, deleteProfile, setActiveProfile } from "../profiles";
+import {
+  createProfile,
+  deleteProfile,
+  profileIdForAgentName,
+  setActiveProfile,
+} from "../profiles";
 import { seedAgentModelProfile } from "../agentera-agent-control/model-profile-seed";
 import { AgentIdentityService } from "../agent-identity";
 import { AgentUserMemoryRepairService } from "../agent-user-memory-repair";
@@ -145,6 +155,18 @@ export interface StartMainProcessOptions {
 export function startMainProcess(options: StartMainProcessOptions = {}): void {
   const workspaceInvitationInbox =
     options.workspaceInvitationInbox ?? new WorkspaceInvitationInbox();
+  configureGatewayProcessOwnership(app.getPath("userData"));
+  const gatewayRecovery = recoverAeraOwnedGatewaysFromPreviousRun();
+  if (gatewayRecovery.errorCode) {
+    console.warn(
+      `[gateway-ownership] Recovery degraded: ${gatewayRecovery.errorCode}.`,
+    );
+  }
+  if (gatewayRecovery.ambiguousProfiles.length > 0) {
+    console.warn(
+      `[gateway-ownership] ${gatewayRecovery.ambiguousProfiles.length} prior launch record(s) remain ambiguous.`,
+    );
+  }
   process.on("uncaughtException", (err) => {
     console.error("[MAIN UNCAUGHT]", err);
   });
@@ -425,6 +447,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
       client: agentControlClient,
       profileBindings: agenteraProfileBindings,
       profiles: {
+        profileIdForAgentName,
         createProfile,
         deleteProfile,
         resolveProfilePath: (profileId) => profileHome(profileId),
@@ -700,7 +723,7 @@ export function stopActiveRuntimeContext(): void {
   // A Profile or connection context must never remain mounted across an
   // Aera owner transition. Stop local execution, remote/SSH transport,
   // and cached SQLite access before the next owner can claim a context.
-  stopGateway(undefined, true);
+  stopAeraOwnedGateways();
   stopSshTunnel();
   closeDbConnection();
 }

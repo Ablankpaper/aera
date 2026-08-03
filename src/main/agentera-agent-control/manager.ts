@@ -69,6 +69,7 @@ import {
   ConversationBoundaryStore,
   type ConversationBoundary,
 } from "./conversation-boundary-store";
+import { ConversationRuntimeCoordinator } from "./conversation-runtime-coordinator";
 import { ExperienceCandidateService } from "./experience-candidate-service";
 import { ExperienceCandidateImporter } from "./experience-candidate-importer";
 import { ExperienceCandidateStore } from "./experience-candidate-store";
@@ -100,6 +101,18 @@ export interface PrepareAgenteraConversationBoundaryInput {
   owner: AgenteraRuntimeOwner;
   resumeSessionId: string | null;
   runtimeBinding: LocalRuntimeBinding | null;
+}
+
+export interface PreparedAgenteraConversationRuntime {
+  preparedAgentTurn: PreparedInstalledHermesTurn | null;
+  conversationBoundary: ConversationBoundary;
+}
+
+export interface AttachAgenteraConversationRuntimeSessionInput {
+  runtimeBindingId: string | null;
+  boundaryId: string;
+  sessionId: string;
+  owner: AgenteraRuntimeOwner;
 }
 
 interface FullAgentControlOptions {
@@ -374,6 +387,10 @@ export class AgenteraAgentControlManager {
   >();
   private runtimeBindingDeliveryInFlight = false;
   private runtimeBindingDeliveryRequested = false;
+  private readonly installationReconciliationFlights = new Map<
+    string,
+    Promise<void>
+  >();
 
   constructor(options: AgenteraAgentControlManagerOptions) {
     this.options = options;
@@ -491,6 +508,7 @@ export class AgenteraAgentControlManager {
     this.publicationOwners.clear();
     this.emitState();
     this.queueRuntimeBindingDelivery();
+    this.queueInstallationReconciliation();
   }
 
   notifyAgentContextChanged(): void {
@@ -1122,6 +1140,87 @@ export class AgenteraAgentControlManager {
     return prepared;
   }
 
+  async prepareConversationRuntime(
+    input: PrepareAgenteraHermesTurnInput,
+  ): Promise<PreparedAgenteraConversationRuntime> {
+    const full = this.requireFull();
+    const profile = this.profileBindings.verifyProfileBinding(
+      input.profilePath,
+      input.owner,
+    );
+    let adapter: AgenteraHermesAdapter | null = null;
+    let bindingStore: RuntimeBindingStore;
+    let plan: Awaited<
+      ReturnType<AgenteraHermesAdapter["prepareInstalledTurnPlan"]>
+    > | null = null;
+    if (profile.agentInstallationId === null) {
+      bindingStore = new RuntimeBindingStore({
+        database: full.database,
+        owner: input.owner,
+        now: this.options.now,
+        randomUUID: this.options.randomUUID,
+      });
+    } else if (this.runtimeOnlyHermes) {
+      adapter = this.runtimeOnlyHermes;
+      bindingStore = new RuntimeBindingStore({
+        database: full.database,
+        owner: input.owner,
+        now: this.options.now,
+        randomUUID: this.options.randomUUID,
+      });
+      plan = await adapter.prepareInstalledTurnPlan(input);
+    } else {
+      const runtime = await this.ensureRuntimeComponents();
+      adapter = runtime.hermes;
+      bindingStore = runtime.bindingStore;
+      plan = await adapter.prepareInstalledTurnPlan(input);
+    }
+
+    const coordinator = new ConversationRuntimeCoordinator({
+      database: full.database,
+      bindingStore,
+      boundaryStore: this.conversationBoundaryStore(input.owner),
+    });
+    const prepared = coordinator.prepare({
+      conversationKey: input.conversationKey,
+      resumeSessionId: input.resumeSessionId,
+      context: this.assetContext(),
+      bindingInput: plan?.bindingInput ?? null,
+    });
+    const preparedAgentTurn =
+      plan && adapter && prepared.runtimeBinding
+        ? adapter.finalizeInstalledTurn(plan, prepared.runtimeBinding)
+        : null;
+    if (prepared.runtimeBinding) this.queueRuntimeBindingDelivery();
+    return {
+      preparedAgentTurn,
+      conversationBoundary: prepared.boundary,
+    };
+  }
+
+  attachConversationRuntimeSession(
+    input: AttachAgenteraConversationRuntimeSessionInput,
+  ): ReturnType<ConversationRuntimeCoordinator["attachHermesSession"]> {
+    const full = this.requireFull();
+    const coordinator = new ConversationRuntimeCoordinator({
+      database: full.database,
+      bindingStore: new RuntimeBindingStore({
+        database: full.database,
+        owner: input.owner,
+        now: this.options.now,
+        randomUUID: this.options.randomUUID,
+      }),
+      boundaryStore: this.conversationBoundaryStore(input.owner),
+    });
+    const attached = coordinator.attachHermesSession({
+      runtimeBindingId: input.runtimeBindingId,
+      boundaryId: input.boundaryId,
+      sessionId: input.sessionId,
+    });
+    if (attached.runtimeBinding) this.queueRuntimeBindingDelivery();
+    return attached;
+  }
+
   attachHermesSession(bindingId: string, sessionId: string): void {
     const adapter = this.runtimeOnlyHermes ?? this.runtime?.hermes;
     if (!adapter) throw codedError("binding_required");
@@ -1653,6 +1752,64 @@ export class AgenteraAgentControlManager {
       if (this.runtimeBindingDeliveryRequested) {
         this.queueRuntimeBindingDelivery();
       }
+    });
+  }
+
+  private queueInstallationReconciliation(): void {
+    let full: FullAgentControlOptions;
+    try {
+      full = this.requireFull();
+    } catch {
+      return;
+    }
+    const state = full.getAuthState();
+    if (
+      state.status !== "authenticated" ||
+      !state.cloudAvailable ||
+      full.getConnectionMode() !== "local"
+    ) {
+      return;
+    }
+    const ownerKey = runtimeComponentKey(full.getOwner());
+    void (async () => {
+      const runtimeVersion = requireRuntimeVersion(
+        await full.getRuntimeVersion(),
+      );
+      const key = `${ownerKey}\0${runtimeVersion}`;
+      if (this.installationReconciliationFlights.has(key)) return;
+      const flight = (async (): Promise<void> => {
+        const currentState = full.getAuthState();
+        if (
+          currentState.status !== "authenticated" ||
+          !currentState.cloudAvailable ||
+          full.getConnectionMode() !== "local" ||
+          runtimeComponentKey(full.getOwner()) !== ownerKey
+        ) {
+          return;
+        }
+        const components = await this.ensureRuntimeComponents();
+        if (components.key !== key) return;
+        const readyState = full.getAuthState();
+        if (
+          readyState.status !== "authenticated" ||
+          !readyState.cloudAvailable ||
+          full.getConnectionMode() !== "local" ||
+          runtimeComponentKey(full.getOwner()) !== ownerKey
+        ) {
+          return;
+        }
+        await components.installations.reconcilePendingInstallations();
+      })();
+      this.installationReconciliationFlights.set(key, flight);
+      try {
+        await flight;
+      } finally {
+        if (this.installationReconciliationFlights.get(key) === flight) {
+          this.installationReconciliationFlights.delete(key);
+        }
+      }
+    })().catch(() => {
+      console.error("[AGENTERA_INSTALLATION_RECONCILIATION] failed");
     });
   }
 }

@@ -9,7 +9,10 @@ const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 
 export type ConversationBoundaryScope = "USER" | "WORKSPACE" | "ORGANIZATION";
 export type ConversationBoundaryVisibility =
-  "PRIVATE" | "WORKSPACE_SHARED" | "ORGANIZATION_SHARED" | "ARTIFACT_ONLY";
+  | "PRIVATE"
+  | "WORKSPACE_SHARED"
+  | "ORGANIZATION_SHARED"
+  | "ARTIFACT_ONLY";
 export type ConversationBoundaryOrigin = "NEW_CONVERSATION" | "LEGACY_DEFAULT";
 
 export interface ConversationBoundary {
@@ -35,7 +38,8 @@ export interface ConversationBoundary {
   policySnapshotId: string | null;
   officialReleaseRevisionId: string | null;
   toolPermissionSnapshot:
-    { kind: "PROFILE_DEFAULT" } | { kind: "AGENT_DIGEST"; digest: string };
+    | { kind: "PROFILE_DEFAULT" }
+    | { kind: "AGENT_DIGEST"; digest: string };
   origin: ConversationBoundaryOrigin;
   createdAt: string;
 }
@@ -495,6 +499,24 @@ export class ConversationBoundaryStore {
   }
 
   prepare(input: PrepareConversationBoundaryInput): ConversationBoundary {
+    this.database.sqlite.exec("BEGIN IMMEDIATE");
+    try {
+      const boundary = this.prepareInTransaction(input);
+      this.database.sqlite.exec("COMMIT");
+      return boundary;
+    } catch (error) {
+      try {
+        this.database.sqlite.exec("ROLLBACK");
+      } catch {
+        // Preserve the primary SQLite or validation failure.
+      }
+      throw error;
+    }
+  }
+
+  prepareInTransaction(
+    input: PrepareConversationBoundaryInput,
+  ): ConversationBoundary {
     const conversationKey = boundedText(
       input.conversationKey,
       256,
@@ -533,7 +555,10 @@ export class ConversationBoundaryStore {
         if (!sameRuntimeSnapshot(byConversation, input.runtimeBinding)) {
           throw new ConversationBoundaryStoreError("boundary_conflict");
         }
-        return this.attachHermesSession(byConversation.id, resumeSessionId);
+        return this.attachHermesSessionInTransaction(
+          byConversation.id,
+          resumeSessionId,
+        );
       }
       return this.create({
         conversationKey,
@@ -562,6 +587,28 @@ export class ConversationBoundaryStore {
   }
 
   attachHermesSession(
+    boundaryIdValue: string,
+    sessionIdValue: string,
+  ): ConversationBoundary {
+    this.database.sqlite.exec("BEGIN IMMEDIATE");
+    try {
+      const boundary = this.attachHermesSessionInTransaction(
+        boundaryIdValue,
+        sessionIdValue,
+      );
+      this.database.sqlite.exec("COMMIT");
+      return boundary;
+    } catch (error) {
+      try {
+        this.database.sqlite.exec("ROLLBACK");
+      } catch {
+        // Preserve the primary SQLite or validation failure.
+      }
+      throw error;
+    }
+  }
+
+  attachHermesSessionInTransaction(
     boundaryIdValue: string,
     sessionIdValue: string,
   ): ConversationBoundary {

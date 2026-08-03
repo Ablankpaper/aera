@@ -27,7 +27,7 @@ afterEach(() => {
 
 describe("Aera control-plane schema", () => {
   it(
-    "creates the encrypted restore and conversation ownership boundaries in a fresh database",
+    "creates durable Installation, restore, and conversation ownership boundaries in a fresh database",
     () => {
       const root = mkdtempSync(join(tmpdir(), "agentera-control-schema-"));
       roots.push(root);
@@ -57,6 +57,56 @@ describe("Aera control-plane schema", () => {
             )
             .get(),
         ).toEqual({ name: "conversation_boundaries" });
+        expect(
+          database.sqlite
+            .prepare(
+              `SELECT name FROM sqlite_master
+               WHERE type = 'table' AND name = 'installation_operations'`,
+            )
+            .get(),
+        ).toEqual({ name: "installation_operations" });
+      } finally {
+        database.close();
+      }
+    },
+    databaseTestTimeoutMs,
+  );
+
+  it(
+    "adds the Installation operation journal to an existing v8 database",
+    () => {
+      const root = mkdtempSync(join(tmpdir(), "agentera-control-v8-"));
+      roots.push(root);
+      const userDataPath = join(root, "user-data");
+      const paths = resolveAgenteraControlPlanePaths(userDataPath);
+      mkdirSync(paths.rootPath, { recursive: true });
+      const legacy = new DatabaseSync(paths.databasePath);
+      legacy.exec("PRAGMA user_version = 8");
+      legacy.close();
+
+      const database = openAgenteraControlPlaneDatabase(userDataPath, {
+        databaseFactory: nodeSqliteFactory,
+      });
+      try {
+        expect(database.sqlite.prepare("PRAGMA user_version").get()).toEqual({
+          user_version: AGENTERA_CONTROL_PLANE_SCHEMA_VERSION,
+        });
+        expect(
+          database.sqlite
+            .prepare("PRAGMA table_info(installation_operations)")
+            .all()
+            .map((column) => (column as { name: string }).name),
+        ).toEqual(
+          expect.arrayContaining([
+            "operation_id",
+            "agent_installation_id",
+            "target_kind",
+            "target_profile_id",
+            "runtime_profile_id",
+            "phase",
+            "revision",
+          ]),
+        );
       } finally {
         database.close();
       }

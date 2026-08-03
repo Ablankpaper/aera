@@ -435,6 +435,20 @@ function immutableInputOf(
   };
 }
 
+function matchesImmutableInput(
+  binding: LocalRuntimeBinding,
+  input: CreateLocalRuntimeBindingInput,
+): boolean {
+  const existing = immutableInputOf(binding);
+  return (
+    JSON.stringify(
+      existing.modelRoute === null
+        ? { ...existing, modelRoute: input.modelRoute }
+        : existing,
+    ) === JSON.stringify(input)
+  );
+}
+
 export class RuntimeBindingStore {
   private readonly database: AgenteraControlPlaneDatabase;
   private readonly now: () => Date;
@@ -458,6 +472,24 @@ export class RuntimeBindingStore {
   getOrCreateForConversation(
     inputValue: CreateLocalRuntimeBindingInput,
   ): LocalRuntimeBinding {
+    this.database.sqlite.exec("BEGIN IMMEDIATE");
+    try {
+      const binding = this.getOrCreateForConversationInTransaction(inputValue);
+      this.database.sqlite.exec("COMMIT");
+      return binding;
+    } catch (error) {
+      try {
+        this.database.sqlite.exec("ROLLBACK");
+      } catch {
+        // Preserve the primary SQLite or validation failure.
+      }
+      throw error;
+    }
+  }
+
+  getOrCreateForConversationInTransaction(
+    inputValue: CreateLocalRuntimeBindingInput,
+  ): LocalRuntimeBinding {
     const input = normalizeInput(inputValue);
     if (
       input.tenantId !== this.tenantId ||
@@ -468,9 +500,7 @@ export class RuntimeBindingStore {
     }
     const existing = this.getByConversationKey(input.conversationKey);
     if (existing) {
-      if (
-        JSON.stringify(immutableInputOf(existing)) !== JSON.stringify(input)
-      ) {
+      if (!matchesImmutableInput(existing, input)) {
         throw new RuntimeBindingStoreError("binding_conflict");
       }
       return existing;
@@ -484,7 +514,6 @@ export class RuntimeBindingStore {
       createdAt: createTimestamp(this.now),
     };
     const pendingBody = cloudBody(binding);
-    this.database.sqlite.exec("BEGIN IMMEDIATE");
     try {
       this.database.sqlite
         .prepare(
@@ -519,20 +548,7 @@ export class RuntimeBindingStore {
           binding.createdAt,
           binding.createdAt,
         );
-      this.database.sqlite.exec("COMMIT");
     } catch {
-      try {
-        this.database.sqlite.exec("ROLLBACK");
-      } catch {
-        // Preserve the primary SQLite failure.
-      }
-      const raced = this.getByConversationKey(input.conversationKey);
-      if (
-        raced &&
-        JSON.stringify(immutableInputOf(raced)) === JSON.stringify(input)
-      ) {
-        return raced;
-      }
       throw new RuntimeBindingStoreError("binding_conflict");
     }
     return parseBinding(binding);
@@ -630,6 +646,28 @@ export class RuntimeBindingStore {
   }
 
   attachHermesSession(
+    bindingIdValue: string,
+    sessionIdValue: string,
+  ): LocalRuntimeBinding {
+    this.database.sqlite.exec("BEGIN IMMEDIATE");
+    try {
+      const binding = this.attachHermesSessionInTransaction(
+        bindingIdValue,
+        sessionIdValue,
+      );
+      this.database.sqlite.exec("COMMIT");
+      return binding;
+    } catch (error) {
+      try {
+        this.database.sqlite.exec("ROLLBACK");
+      } catch {
+        // Preserve the primary SQLite or validation failure.
+      }
+      throw error;
+    }
+  }
+
+  attachHermesSessionInTransaction(
     bindingIdValue: string,
     sessionIdValue: string,
   ): LocalRuntimeBinding {

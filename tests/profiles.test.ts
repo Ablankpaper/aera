@@ -49,6 +49,7 @@ import {
   createProfile,
   deleteProfile,
   listProfiles,
+  profileIdForAgentName,
   setActiveProfile,
 } from "../src/main/profiles";
 import { setProfileName } from "../src/main/profile-meta";
@@ -227,6 +228,30 @@ describe("listProfiles", () => {
     const profiles = await listProfiles();
     const created = profiles.find((p) => p.id === "agent");
     expect(created?.name).toBe("卢姐");
+  });
+
+  it("creates a fresh Profile with the exact pre-reserved id", () => {
+    execFileSyncMock.mockReturnValue(Buffer.from(""));
+    expect(profileIdForAgentName("Fresh Agent")).toBe("fresh-agent");
+
+    const result = createProfile("Fresh Agent", null, "fresh-agent");
+
+    expect(result).toEqual({ success: true, id: "fresh-agent" });
+    expect(execFileSyncMock).toHaveBeenCalledWith(
+      "/usr/bin/python3",
+      ["-m", "hermes_cli.main", "profile", "create", "fresh-agent"],
+      expect.objectContaining({ timeout: 30000 }),
+    );
+  });
+
+  it("rejects a reserved Profile id that is not the current safe id", () => {
+    execFileSyncMock.mockReturnValue(Buffer.from(""));
+
+    expect(createProfile("Fresh Agent", null, "different-id")).toEqual({
+      success: false,
+      error: "Reserved Profile ID is unavailable.",
+    });
+    expect(execFileSyncMock).not.toHaveBeenCalled();
   });
 
   it("keeps a successful CLI-created profile when metadata cannot be written", async () => {

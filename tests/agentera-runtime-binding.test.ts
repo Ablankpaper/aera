@@ -134,15 +134,17 @@ describe("RuntimeBinding integration at the main-process conversation boundary",
       source.indexOf('ipcMain.handle(\n    "send-message"'),
       source.indexOf('ipcMain.handle("abort-chat"'),
     );
-    expect(handler.indexOf("prepareHermesTurn")).toBeGreaterThan(-1);
-    expect(handler.indexOf("prepareHermesTurn")).toBeLessThan(
+    expect(handler.indexOf("prepareConversationRuntime")).toBeGreaterThan(-1);
+    expect(handler.indexOf("prepareConversationRuntime")).toBeLessThan(
       handler.indexOf("startGateway(profile)"),
     );
-    expect(handler.indexOf("prepareHermesTurn")).toBeLessThan(
+    expect(handler.indexOf("prepareConversationRuntime")).toBeLessThan(
       handler.indexOf("await sendMessage("),
     );
+    expect(handler).not.toContain("prepareHermesTurn(");
+    expect(handler).not.toContain("prepareConversationBoundary(");
     expect(handler).toContain("preparedAgentTurn?.resumeSessionId");
     expect(handler).toContain("preparedAgentTurn?.envelope");
-    expect(handler).toContain("attachHermesSession(");
+    expect(handler).toContain("attachConversationRuntimeSession(");
   });
 });

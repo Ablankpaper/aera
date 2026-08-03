@@ -5,6 +5,7 @@ import type { AgenteraControlPlaneDatabase } from "./db";
 import type { HermesVersionProjection } from "./hermes-projection";
 import {
   RuntimeBindingStoreError,
+  type CreateLocalRuntimeBindingInput,
   type LocalRuntimeBinding,
   type RuntimeBindingStore,
 } from "./runtime-binding-store";
@@ -104,6 +105,15 @@ export interface PreparedInstalledHermesTurn {
   resumeSessionId: string | undefined;
   envelope: HermesConversationEnvelope;
   modelOverride: SessionModelOverride;
+}
+
+export interface PreparedInstalledHermesTurnPlan {
+  bindingInput: CreateLocalRuntimeBindingInput;
+  profilePath: string;
+  modelOverride: SessionModelOverride;
+  version: AgentVersion;
+  policy: AgentPolicySnapshot;
+  projection: HermesVersionProjection;
 }
 
 interface LocalInstallationRow {
@@ -432,6 +442,16 @@ export class AgenteraHermesAdapter {
   async prepareInstalledTurn(
     input: PrepareInstalledHermesTurnInput,
   ): Promise<PreparedInstalledHermesTurn> {
+    const plan = await this.prepareInstalledTurnPlan(input);
+    const binding = this.options.bindingStore.getOrCreateForConversation(
+      plan.bindingInput,
+    );
+    return this.finalizeInstalledTurn(plan, binding);
+  }
+
+  async prepareInstalledTurnPlan(
+    input: PrepareInstalledHermesTurnInput,
+  ): Promise<PreparedInstalledHermesTurnPlan> {
     if (this.options.getConnectionMode() !== "local") {
       throw new AgenteraHermesAdapterError("local_runtime_required");
     }
@@ -611,37 +631,73 @@ export class AgenteraHermesAdapter {
       throw new AgenteraHermesAdapterError("projection_invalid");
     }
 
-    const binding =
-      existing ??
-      this.options.bindingStore.getOrCreateForConversation({
-        conversationKey: input.conversationKey,
-        tenantId: input.owner.tenantId,
-        ownerScope: "USER",
-        ownerId: input.owner.ownerId,
-        deviceId: input.owner.deviceInstallationId,
-        agentDefinitionId: definitionId,
-        agentVersionId: versionId,
-        agentInstallationId: installation.agentInstallationId,
-        runtimeProfileId: installation.runtimeProfileId,
-        runtimeVersion,
-        modelRoute: currentModelRoute,
-        policySnapshotId: policyId,
-        officialReleaseRevisionId: installation.selectedReleaseRevisionId,
-        toolPermissionDigest: currentToolDigest,
-        publishedBaseDigest: version.content_digest,
-      });
-    const instructions = composePublishedInstructions({
-      binding,
+    const bindingInput: CreateLocalRuntimeBindingInput = {
+      conversationKey: existing?.conversationKey ?? input.conversationKey,
+      tenantId: input.owner.tenantId,
+      ownerScope: "USER",
+      ownerId: input.owner.ownerId,
+      deviceId: input.owner.deviceInstallationId,
+      agentDefinitionId: definitionId,
+      agentVersionId: versionId,
+      agentInstallationId: installation.agentInstallationId,
+      runtimeProfileId: installation.runtimeProfileId,
+      runtimeVersion,
+      modelRoute: selectedModelRoute,
+      policySnapshotId: policyId,
+      officialReleaseRevisionId:
+        existing?.officialReleaseRevisionId ??
+        installation.selectedReleaseRevisionId,
+      toolPermissionDigest: currentToolDigest,
+      publishedBaseDigest: version.content_digest,
+    };
+    return {
+      bindingInput,
+      profilePath: input.profilePath,
+      modelOverride: selectedModelRoute,
       version,
       policy,
       projection,
+    };
+  }
+
+  finalizeInstalledTurn(
+    plan: PreparedInstalledHermesTurnPlan,
+    binding: LocalRuntimeBinding,
+  ): PreparedInstalledHermesTurn {
+    if (
+      binding.conversationKey !== plan.bindingInput.conversationKey ||
+      binding.tenantId !== plan.bindingInput.tenantId ||
+      binding.ownerScope !== plan.bindingInput.ownerScope ||
+      binding.ownerId !== plan.bindingInput.ownerId ||
+      binding.deviceId !== plan.bindingInput.deviceId ||
+      binding.agentDefinitionId !== plan.bindingInput.agentDefinitionId ||
+      binding.agentVersionId !== plan.bindingInput.agentVersionId ||
+      binding.agentInstallationId !== plan.bindingInput.agentInstallationId ||
+      binding.runtimeProfileId !== plan.bindingInput.runtimeProfileId ||
+      binding.runtimeVersion !== plan.bindingInput.runtimeVersion ||
+      (binding.modelRoute !== null &&
+        JSON.stringify(binding.modelRoute) !==
+          JSON.stringify(plan.bindingInput.modelRoute)) ||
+      binding.policySnapshotId !== plan.bindingInput.policySnapshotId ||
+      binding.officialReleaseRevisionId !==
+        plan.bindingInput.officialReleaseRevisionId ||
+      binding.toolPermissionDigest !== plan.bindingInput.toolPermissionDigest ||
+      binding.publishedBaseDigest !== plan.bindingInput.publishedBaseDigest
+    ) {
+      throw new AgenteraHermesAdapterError("binding_conflict");
+    }
+    const instructions = composePublishedInstructions({
+      binding,
+      version: plan.version,
+      policy: plan.policy,
+      projection: plan.projection,
     });
     return {
       binding,
-      profilePath: input.profilePath,
+      profilePath: plan.profilePath,
       resumeSessionId: binding.hermesSessionId ?? undefined,
       envelope: { instructions, requireBoundApiTransport: true },
-      modelOverride: selectedModelRoute,
+      modelOverride: plan.modelOverride,
     };
   }
 
