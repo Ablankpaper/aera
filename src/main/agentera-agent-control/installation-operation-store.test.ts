@@ -14,6 +14,7 @@ import {
 import {
   InstallationOperationStore,
   InstallationOperationStoreError,
+  type InstallationOperationRecord,
 } from "./installation-operation-store";
 
 const OPERATION_ID = "11111111-1111-4111-8111-111111111111";
@@ -62,7 +63,7 @@ describe("durable Agent Installation operation journal", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  function beginFresh() {
+  function beginFresh(): InstallationOperationRecord {
     return store.begin({
       operationId: OPERATION_ID,
       agentInstallationId: INSTALLATION_ID,
