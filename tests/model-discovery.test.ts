@@ -361,22 +361,15 @@ describe("model-discovery", () => {
 
     const { discoverProviderModels } = await loadDiscovery();
     const result = await discoverProviderModels(
-      "custom",
-      "https://api.deepseek.com/v1",
+      "deepseek",
+      baseUrl,
       undefined,
       undefined,
     );
-    // The fetch shouldn't reach our server because the canonical URL
-    // isn't loopback — but the resolver should still produce the right
-    // shape.  Since the canonical URL is unreachable in tests, status
-    // ends up "ok" with an empty list (network failure → empty).
-    // What we *do* care about is that the resolver picked up the .env
-    // key (not that the request succeeded against the real DeepSeek).
-    expect(["ok"]).toContain(result.status);
-    // No assertion on receivedAuth — the real call goes to the canonical
-    // URL which isn't our loopback server.  Sanity check the .env load
-    // path separately:
-    expect(receivedAuth).toBe(""); // confirms the canonical URL was used, not our test server
+
+    expect(result.status).toBe("ok");
+    expect(result.models).toEqual(["m"]);
+    expect(receivedAuth).toBe("Bearer sk-from-dotenv");
   });
 
   // Issue #367 — Nous Portal model discovery routes through the
