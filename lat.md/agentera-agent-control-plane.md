@@ -246,6 +246,8 @@ Installation activation is fail-closed until model projection succeeds. A pendin
 
 Fresh Installation materialization reserves the exact local Profile ID and opaque Runtime Profile ID under the stable Agent Installation ID before Hermes creates any Profile bytes. If creation is interrupted, the next attempt reads that encrypted reservation and adopts only the same Owner's safe scaffold; it never chooses a suffixed replacement or claims private or foreign data.
 
+Desktop schema v9 adds the narrow `installation_operations` journal. It stores only the exact Owner/device/Installation and bounded target/model identifiers, opaque Runtime Profile ID, phase, retry code, CAS revision, and timestamps; it contains no physical path, credential, token, Profile bytes, or Cloud body. Phases advance in order from `prepared` through `committed`, while ambiguous ownership can become terminal `repair_required`; stale revisions and cross-Owner reads fail closed.
+
 Manual selection downloads and verifies the immutable version, calls the cloud selection transaction, retrieves the newly signed policy through `GET /api/v1/policy-snapshots/{policy_snapshot_id}`, and only then atomically activates the read-only projection for later conversations. A missing or invalid policy leaves the last local version selected.
 
 [[src/main/agentera-agent-control/runtime-binding-store.ts#RuntimeBindingStore]] commits a complete local binding before queuing its sanitized cloud record. [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] retries that outbox after installed turns, session attachment, and authentication changes, but delivery failure cannot delay or roll back Hermes.

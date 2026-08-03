@@ -39,8 +39,8 @@ afterEach(() => {
 });
 
 describe("Aera control-plane database", () => {
-  it("pins the Official Agent, encrypted-backup, and conversation-boundary local schema at version 8", () => {
-    expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(8);
+  it("pins the durable Installation operation schema at version 9", () => {
+    expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(9);
   });
 
   it("opens exactly below Electron userData and never below HERMES_HOME", () => {
@@ -115,6 +115,7 @@ describe("Aera control-plane database", () => {
         "conversation_boundaries",
         "draft_assets",
         "encrypted_backup_restores",
+        "installation_operations",
         "local_agent_installations",
         "local_experience_candidate_imports",
         "local_experience_candidates",
@@ -126,6 +127,7 @@ describe("Aera control-plane database", () => {
       for (const table of [
         "agent_drafts",
         "cached_agent_versions",
+        "installation_operations",
         "local_agent_installations",
         "runtime_bindings",
         "pending_sanitized_records",

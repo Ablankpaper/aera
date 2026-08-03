@@ -102,7 +102,7 @@ Expected: PASS; a restart reuses one reserved Profile and one Runtime Profile ID
 - Create: `src/main/agentera-agent-control/installation-operation-store.ts`
 - Create: `src/main/agentera-agent-control/installation-operation-store.test.ts`
 
-- [ ] **Step 1: Write failing schema and owner-partition tests**
+- [x] **Step 1: Write failing schema and owner-partition tests**
 
 Pin schema version 9 and require `installation_operations` to be created for new databases and forward migrations. Test idempotent begin, immutable target conflict, owner/device partitioning, revision CAS, restart reads, and terminal committed records.
 
@@ -119,7 +119,7 @@ type InstallationOperationPhase =
 
 The record stores only owner/device/Installation IDs, target kind, Profile ID, bounded display name/model-source IDs, phase, retry code, revision, and timestamps. It stores no credential, physical path, Profile content, token, or Cloud response body.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run:
 
@@ -129,11 +129,11 @@ npm test -- src/main/agentera-agent-control/db.test.ts tests/agentera-agent-cont
 
 Expected: FAIL at schema version and missing store.
 
-- [ ] **Step 3: Implement schema 9 and the store**
+- [x] **Step 3: Implement schema 9 and the store**
 
 Add a forward-only table with a unique owner/device/Installation tuple and exact `CHECK` constraints for target kind and phase. `begin`, `advance`, `markRepairRequired`, `commit`, `get`, and `listIncomplete` use owner-scoped queries and CAS revisions.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run the focused command from Step 2, `npm run typecheck:node`, and `git diff --check`. Expected: PASS.
 
