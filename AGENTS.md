@@ -3,6 +3,12 @@
 - Run `lat search` to find sections relevant to your task. Read them to understand the design intent before writing code.
 - Run `lat expand` on user prompts to expand any `[[refs]]` — this resolves section names to file locations and provides context.
 
+# Desktop workspace discipline (REQUIRED)
+
+- Always start Aera Desktop development from `/Users/zizimutou/Desktop/aera/aera`. Do not use the parent `/Users/zizimutou/Desktop/aera` directory as the Desktop Git or build root.
+- Before editing, verify that the clean baseline is `aera/beta23-mainline` or the latest `main`, synchronized with its upstream branch.
+- Use one temporary branch or worktree for each bug fix, feature, or UI change. After its PR is merged and the merged-main result is confirmed, immediately remove the temporary worktree and retire the temporary branch before starting the next item.
+
 # Post-task checklist (REQUIRED — do not skip)
 
 After EVERY task, before responding to the user:
