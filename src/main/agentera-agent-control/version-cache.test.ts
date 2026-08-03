@@ -494,6 +494,28 @@ describe("verified immutable Agent version cache", () => {
     },
   );
 
+  it.skipIf(process.platform === "win32")(
+    "maps an account-directory creation denial to the bounded filesystem code",
+    () => {
+      chmodSync(database.paths.versionsPath, 0o500);
+
+      let failure: unknown;
+      try {
+        cache().cacheVerifiedVersion(version);
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toEqual(
+        expect.objectContaining<Partial<AgentVersionCacheError>>({
+          code: "cache_filesystem_denied",
+        }),
+      );
+      expect((failure as Error).message).not.toContain(
+        database.paths.versionsPath,
+      );
+    },
+  );
+
   it("converges when another cache instance wins the destination rename", () => {
     const winner = new AgentVersionCache({
       database,

@@ -358,6 +358,15 @@ function databaseFailure(error: unknown): AgentVersionCacheError {
   return new AgentVersionCacheError("cache_database_failed");
 }
 
+function filesystemOperation<T>(operation: () => T): T {
+  try {
+    return operation();
+  } catch (error) {
+    if (error instanceof AgentVersionCacheError) throw error;
+    throw filesystemFailure(error);
+  }
+}
+
 export class AgentVersionCache {
   private readonly database: AgenteraControlPlaneDatabase;
   private readonly trust: AgentVersionCacheTrust;
@@ -423,10 +432,8 @@ export class AgentVersionCache {
     }
 
     const relativePath = this.relativePath(version);
-    const finalized = this.ensureImmutableDirectory(
-      version,
-      relativePath,
-      true,
+    const finalized = filesystemOperation(() =>
+      this.ensureImmutableDirectory(version, relativePath, true),
     );
     this.persistVersionRow(version, relativePath, null);
     return finalized;
@@ -438,8 +445,12 @@ export class AgentVersionCache {
     }
     const versionId = versionIdInput.toLowerCase();
     const row = this.readRow(versionId);
-    if (!row) return this.recoverDirectoryOnly(versionId);
-    return this.ensureImmutableDirectory(row.version, row.relativePath, false);
+    if (!row) {
+      return filesystemOperation(() => this.recoverDirectoryOnly(versionId));
+    }
+    return filesystemOperation(() =>
+      this.ensureImmutableDirectory(row.version, row.relativePath, false),
+    );
   }
 
   private readRow(versionId: string): ValidatedCachedVersionRow | null {
@@ -560,7 +571,14 @@ export class AgentVersionCache {
       } catch (error) {
         if (!replaceInvalid) {
           if (error instanceof AgentVersionCacheError) throw error;
-          throw new AgentVersionCacheError("cache_corrupt");
+          throw filesystemFailure(error);
+        }
+        if (
+          !(error instanceof AgentVersionCacheError) ||
+          (error.code !== "cache_corrupt" &&
+            error.code !== "cache_permissions_invalid")
+        ) {
+          throw filesystemFailure(error);
         }
         removeOwnedCacheTree(directory);
       }
