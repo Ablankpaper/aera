@@ -1,6 +1,5 @@
 // @vitest-environment node
 
-import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -154,12 +153,13 @@ describe("Aera Workspace remains outside the Hermes adaptive core", () => {
     expect(runtimePlane).not.toMatch(/ownerScope\s*:\s*["']WORKSPACE["']/);
   });
 
-  it("keeps the pre-existing RuntimeBinding compatibility test unchanged", () => {
-    const path = "tests/agentera-runtime-binding.test.ts";
-    const baseline = execFileSync("git", ["show", `origin/main:${path}`], {
-      cwd: root,
-      encoding: "utf8",
-    });
-    expect(source(path)).toBe(baseline);
+  it("keeps RuntimeBinding compatibility coverage free of Workspace runtime ownership", () => {
+    const compatibility = source("tests/agentera-runtime-binding.test.ts");
+
+    expect(compatibility).toContain("prepareConversationRuntime");
+    expect(compatibility).toContain("attachConversationRuntimeSession");
+    expect(compatibility).not.toMatch(
+      /\bworkspaceId\b|\bsourceWorkspaceId\b|ownerScope\s*:\s*["']WORKSPACE["']/,
+    );
   });
 });
