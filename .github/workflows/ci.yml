@@ -85,11 +85,15 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # Hosted Windows runners can starve one of two filesystem-heavy Vitest
-      # workers; serialize files there without weakening any test timeout.
-      - name: Test unit (non-Windows)
-        if: matrix.os != 'windows-latest'
+      # Hosted Ubuntu and Windows runners have both dropped a filesystem-heavy
+      # Vitest fork; serialize files there without weakening any test timeout.
+      - name: Test unit (macOS parallel)
+        if: matrix.os == 'macos-latest'
         run: npm test -- --maxWorkers=2
+
+      - name: Test unit (Ubuntu serial)
+        if: matrix.os == 'ubuntu-latest'
+        run: npm test -- --maxWorkers=1
 
       - name: Test unit (Windows serial)
         if: matrix.os == 'windows-latest'
