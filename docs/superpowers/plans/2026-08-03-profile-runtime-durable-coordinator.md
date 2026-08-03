@@ -276,11 +276,11 @@ Run the focused command from Step 2, `npm run typecheck`, and `git diff --check`
 - Modify: `lat.md/agentera-app-authentication.md`
 - Modify: `lat.md/agentera-agent-control-plane.md`
 
-- [ ] **Step 1: Write failure-first ownership-ledger tests**
+- [x] **Step 1: Write failure-first ownership-ledger tests**
 
-Prove launch intent is durable before spawn, spawn failure clears it, normal exit stops every Aera-started named/default gateway, cold startup reaps a prior owned entry, and an unrecorded or unchanged pre-existing gateway is never stopped. The ledger stores Profile IDs and PID-file identity metadata only; no credential or physical path.
+Prove launch intent is durable before spawn, failed writes do not advance memory, interrupted canonical replacement recovers, spawn failure clears its intent, normal exit stops every Aera-started named/default gateway, and cold startup reaps only exact prior ownership. Replacement, corrupt, unrecorded, or unchanged process evidence must not be signalled. The ledger stores Profile and process identities only; no credential or physical path.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run:
 
@@ -290,11 +290,11 @@ npm test -- src/main/gateway-process-ownership.test.ts src/main/hermes.test.ts t
 
 Expected: FAIL because only the current active Profile is stopped today.
 
-- [ ] **Step 3: Implement owned gateway recovery and shutdown**
+- [x] **Step 3: Implement owned gateway recovery and shutdown**
 
-Configure the ledger from Electron `userData` before gateway use. Record only launches initiated by `startGatewayDetailed`; never claim an already-running gateway. On normal exit and account transition, stop all current-process owned profiles. On cold startup, compare the recorded pre-launch PID identity to the current exact Profile PID record and invoke the existing Runtime Profile-specific stop path only when the record proves a new Aera-owned launch. Clear dead/completed entries; retain ambiguous entries without killing a process.
+Configure the ledger from Electron `userData` before gateway use. Record only launches initiated by `startGatewayDetailed`; never claim an already-running gateway. Commit fsynced pending bytes before canonical replacement and keep memory transactional. On normal exit and account transition, stop all current-process owned profiles. Cold recovery signals only an exact recorded spawned PID, retains ownership until confirmed exit, and uses a second exact PID check before bounded escalation. Clear dead/completed entries; retain and report ambiguous or failed-persistence evidence without crashing Desktop startup.
 
-- [ ] **Step 4: Update LAT and run all Desktop gates**
+- [x] **Step 4: Update LAT and run all Desktop gates**
 
 Document journal phases, atomic conversation snapshots, owner partitioning, and gateway ownership cleanup. Run:
 

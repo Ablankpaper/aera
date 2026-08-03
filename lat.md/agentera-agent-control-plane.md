@@ -276,6 +276,10 @@ Hermes remains the sole execution and self-learning engine while AgentEra suppli
 
 Published assets never overwrite private Profile paths. Native Memory, USER, background review, agent-created Skill learning, Curator, sessions, files, and credentials continue under [[agentera-self-evolution|the Hermes compatibility contract]].
 
+Local Gateway lifecycle is coordinated outside Hermes private state. [[src/main/hermes.ts#startGatewayDetailed]] durably records an Aera launch before spawn and records the spawned PID before exposing it as started. The ledger commits fsynced pending bytes before platform-specific canonical replacement, recovers an interrupted replacement without deleting the last valid state, and advances memory only after the durable commit.
+
+[[src/main/hermes.ts#recoverAeraOwnedGatewaysFromPreviousRun]] and [[src/main/hermes.ts#stopAeraOwnedGateways]] act only on exact recorded Profile/PID evidence. SIGTERM retains ownership until exit is confirmed; bounded escalation rechecks the Profile PID immediately before signalling, while a missing, unchanged, replaced, corrupt, or otherwise ambiguous identity is never claimed or killed. Stable recovery error codes are logged without paths or private data.
+
 ## Cloud boundary
 
 Cloud data is limited to Agent definitions, immutable versions, installations, policy snapshots, sanitized binding metadata, and audit evidence.

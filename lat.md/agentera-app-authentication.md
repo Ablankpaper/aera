@@ -170,6 +170,10 @@ The retained legacy guest edge still requires the explicit guest-capable policy 
 
 [[src/main/ipc/auth-guard.ts#createProductAccessGuard]] calls the controller's synchronous entitlement assertion before Profile ownership checks. Expiry, rollback, revocation, account disablement, or deletion publishes a blocked state; the existing owner-switch coordinator then aborts active runs and closes Gateway, SSH, dashboard, and SQLite state without editing Hermes files.
 
+[[src/main/gateway-process-ownership.ts#GatewayProcessOwnershipLedger]] persists a narrow launch intent under Electron `userData` before Aera spawns a local Gateway. An fsynced pending file is the durable commit point and is promoted without an unlink-first window; valid pending/previous state survives interrupted replacement. The ledger stores only Profile and process identities plus timestamps, never paths, credentials, model configuration, or private Hermes content.
+
+[[src/main/app/start.ts#stopActiveRuntimeContext]] stops every default or named Gateway launched by the current Aera instance during sign-out, account switching, and shutdown, while leaving unrecorded pre-existing Gateways untouched. Cold recovery requires the Profile PID to equal the recorded spawned PID and differ from the pre-launch PID. Termination keeps the record until confirmed exit, uses a second PID check before bounded escalation, and preserves replacement, corrupt, or persistence-failed evidence as ambiguous without blocking Desktop startup.
+
 ## Device and account lifecycle
 
 Each account has at most five active devices and receives one personal space during the registration transaction.

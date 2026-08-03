@@ -82,6 +82,12 @@ import {
   shouldPruneOpenRouterApiKey,
 } from "./host-derived-env";
 import { hydrateProfileRuntimeEnv } from "./profile-runtime-env";
+import {
+  GatewayProcessOwnershipError,
+  GatewayProcessOwnershipLedger,
+  type GatewayProcessOwnershipErrorCode,
+  type GatewayLaunchOwnershipRecord,
+} from "./gateway-process-ownership";
 
 /**
  * Resolve which profile a gateway call targets. An explicit profile always
@@ -3122,6 +3128,21 @@ export function stopHealthPolling(): void {
 // hermes model: one gateway per profile, bound to that profile's own port.
 const gatewayProcesses = new Map<string, ChildProcess>();
 const appStartedProfiles = new Set<string>();
+const gatewayOwnershipTerminationTimers = new Map<
+  string,
+  ReturnType<typeof setTimeout>
+>();
+let gatewayProcessOwnership: GatewayProcessOwnershipLedger | null = null;
+
+export function configureGatewayProcessOwnership(userDataPath: string): void {
+  for (const timer of gatewayOwnershipTerminationTimers.values()) {
+    clearTimeout(timer);
+  }
+  gatewayOwnershipTerminationTimers.clear();
+  gatewayProcessOwnership = new GatewayProcessOwnershipLedger({
+    userDataPath,
+  });
+}
 
 export interface GatewayStartResult {
   success: boolean;
@@ -3304,8 +3325,16 @@ export function startGatewayDetailed(profile?: string): GatewayStartResult {
   // HERMES_HOME at the profile's dir internally; the shared repo/venv stay
   // put. The default profile takes no flag.
   const cliArgs = gatewayCliCommandArgs(profile, ["gateway"]);
-  let proc: ChildProcess;
+  let proc: ChildProcess | null = null;
+  let ownership: GatewayLaunchOwnershipRecord | null = null;
   try {
+    if (gatewayProcessOwnership === null) {
+      throw new Error("Aera gateway ownership is unavailable.");
+    }
+    ownership = gatewayProcessOwnership.beginLaunch({
+      profileId: key,
+      preLaunchPid: readPidFile(profile),
+    });
     proc = spawn(invocation.python, invocation.cliArgs(cliArgs), {
       cwd: invocation.workingDirectory,
       env: gatewayEnv,
@@ -3313,7 +3342,30 @@ export function startGatewayDetailed(profile?: string): GatewayStartResult {
       detached: true,
       ...HIDDEN_SUBPROCESS_OPTIONS,
     });
+    if (typeof proc.pid !== "number") {
+      throw new Error("The gateway process identity is unavailable.");
+    }
+    gatewayProcessOwnership.markSpawned({
+      profileId: key,
+      launchId: ownership.launchId,
+      spawnedPid: proc.pid,
+    });
   } catch (err) {
+    if (ownership !== null && proc !== null && typeof proc.pid === "number") {
+      retainFailedSpawnOwnershipUntilExit(profile, proc, ownership);
+    } else if (ownership !== null) {
+      try {
+        gatewayProcessOwnership?.clearLaunch(key, ownership.launchId);
+      } catch {
+        // Preserve the bounded launch failure.
+      }
+    } else if (proc !== null) {
+      try {
+        proc.kill("SIGTERM");
+      } catch {
+        // best-effort cleanup after ownership persistence failure
+      }
+    }
     if (stderrFd >= 0) {
       try {
         closeSync(stderrFd);
@@ -3325,6 +3377,14 @@ export function startGatewayDetailed(profile?: string): GatewayStartResult {
     const error = `Failed to start the gateway process: ${message}`;
     console.error(`[gateway:${key}] ${error}`);
     return { success: false, running: false, error, logPath };
+  }
+  if (proc === null) {
+    return {
+      success: false,
+      running: false,
+      error: "The gateway process identity is unavailable.",
+      logPath,
+    };
   }
   // The child has inherited (dup'd) the fd; close our copy so we don't leak a
   // descriptor on every gateway (re)start.
@@ -3343,6 +3403,13 @@ export function startGatewayDetailed(profile?: string): GatewayStartResult {
     );
     if (gatewayProcesses.get(key) === proc) gatewayProcesses.delete(key);
     appStartedProfiles.delete(key);
+    if (ownership !== null) {
+      try {
+        gatewayProcessOwnership?.clearLaunch(key, ownership.launchId);
+      } catch {
+        // A later cold start will reconcile the durable intent.
+      }
+    }
     invalidateApiCacheFor(profile);
   });
 
@@ -3355,6 +3422,7 @@ export function startGatewayDetailed(profile?: string): GatewayStartResult {
     }
     if (gatewayProcesses.get(key) === proc) gatewayProcesses.delete(key);
     appStartedProfiles.delete(key);
+    reconcileCompletedGatewayOwnership(profile, ownership);
     invalidateApiCacheFor(profile);
     // Restart health polling to detect if gateway comes back
     startHealthPolling();
@@ -3417,6 +3485,70 @@ function readPidFileEntry(
   return pid === null ? null : { path: pidFile, pid };
 }
 
+function reconcileCompletedGatewayOwnership(
+  profile: string | undefined,
+  ownership: GatewayLaunchOwnershipRecord | null,
+): void {
+  if (ownership === null || gatewayProcessOwnership === null) return;
+  const currentPid = readPidFile(profile);
+  if (
+    currentPid !== null &&
+    currentPid !== ownership.preLaunchPid &&
+    pidIsAliveAs(currentPid, GATEWAY_IMAGE_PREFIXES)
+  ) {
+    return;
+  }
+  try {
+    gatewayProcessOwnership.clearLaunch(
+      ownership.profileId,
+      ownership.launchId,
+    );
+  } catch {
+    // A later cold start will re-evaluate the bounded record.
+  }
+}
+
+function retainFailedSpawnOwnershipUntilExit(
+  profile: string | undefined,
+  proc: ChildProcess,
+  ownership: GatewayLaunchOwnershipRecord,
+): void {
+  if (typeof proc.pid !== "number") return;
+  const key = ownership.profileId;
+  const trackedOwnership = { ...ownership, spawnedPid: proc.pid };
+  let completed = false;
+  const complete = (): void => {
+    if (completed) return;
+    completed = true;
+    const timer = gatewayOwnershipTerminationTimers.get(key);
+    if (timer) clearTimeout(timer);
+    gatewayOwnershipTerminationTimers.delete(key);
+    if (gatewayProcesses.get(key) === proc) gatewayProcesses.delete(key);
+    appStartedProfiles.delete(key);
+    clearCompletedGatewayOwnership(profile, trackedOwnership);
+    invalidateApiCacheFor(profile);
+  };
+  proc.once("close", complete);
+  proc.once("error", () => {
+    if (!isChildProcessAlive(proc)) complete();
+  });
+  gatewayProcesses.set(key, proc);
+  appStartedProfiles.add(key);
+  try {
+    proc.kill("SIGTERM");
+  } catch {
+    // The bounded liveness check below decides whether evidence can be cleared.
+  }
+  if (!isChildProcessAlive(proc)) {
+    complete();
+    return;
+  }
+  scheduleGatewayOwnershipTermination(profile, trackedOwnership, 0, {
+    trackedProcess: proc,
+    acceptUncommittedSpawnedPid: true,
+  });
+}
+
 /**
  * Stop a single profile's gateway. Defaults to the active profile. By design
  * this only touches the named profile — switching profiles, app exit, etc.
@@ -3433,34 +3565,349 @@ export function stopGateway(
   const key = profileKey(profile);
   if (!shouldForce && !appStartedProfiles.has(key)) return;
 
+  let ownership: GatewayLaunchOwnershipRecord | null = null;
+  try {
+    ownership = gatewayProcessOwnership?.get(key) ?? null;
+  } catch {
+    // Without valid durable evidence, retain the legacy exact-profile stop.
+  }
+
   const proc = gatewayProcesses.get(key);
   if (proc && isChildProcessAlive(proc)) {
     proc.kill("SIGTERM");
   }
-  gatewayProcesses.delete(key);
+  const trackedProcessStillAlive = proc ? isChildProcessAlive(proc) : false;
+  if (!trackedProcessStillAlive) gatewayProcesses.delete(key);
 
   const pid = readPidFile(profile);
-  if (pid) {
+  const canSignalPid =
+    ownership === null ||
+    (ownership.spawnedPid !== null &&
+      pid === ownership.spawnedPid &&
+      pid !== ownership.preLaunchPid);
+  if (pid && canSignalPid) {
     try {
       process.kill(pid, "SIGTERM");
     } catch {
       // already dead
     }
   }
-  // Always clear the PID file once we've signalled it. Leaving a stale PID
-  // around means the next isGatewayRunning() / stopGateway() call can hit
-  // an unrelated process that the OS has since assigned the same PID.
-  const pidFile = gatewayPidPath(profile);
-  if (existsSync(pidFile)) {
+  appStartedProfiles.delete(key);
+  if (
+    ownership !== null &&
+    ownership.spawnedPid !== null &&
+    ((proc?.pid === ownership.spawnedPid && trackedProcessStillAlive) ||
+      (pid === ownership.spawnedPid &&
+        pidIsAliveAs(ownership.spawnedPid, GATEWAY_IMAGE_PREFIXES)))
+  ) {
+    scheduleGatewayOwnershipTermination(profile, ownership);
+  } else if (ownership !== null) {
+    clearCompletedGatewayOwnership(profile, ownership);
+  } else {
+    clearPidFileBestEffort(profile);
+  }
+  invalidateApiCacheFor(profile);
+  stopTuiGatewayClient(profile);
+}
+
+export function stopAeraOwnedGateways(): void {
+  const profiles = new Set<string>(appStartedProfiles);
+  for (const profile of gatewayProcessOwnership?.listCurrentProcessProfiles() ??
+    []) {
+    profiles.add(profile);
+  }
+  for (const profile of [...profiles].sort()) {
+    stopAeraOwnedGateway(profile);
+  }
+}
+
+function stopAeraOwnedGateway(profile: string): void {
+  const key = profileKey(profile);
+  const proc = gatewayProcesses.get(key) ?? null;
+  let ownership: GatewayLaunchOwnershipRecord | null = null;
+  try {
+    ownership = gatewayProcessOwnership?.get(key) ?? null;
+  } catch {
+    // Without a valid durable record, only the exact in-memory child is owned.
+  }
+
+  if (proc && isChildProcessAlive(proc)) {
     try {
-      unlinkSync(pidFile);
+      proc.kill("SIGTERM");
     } catch {
-      // best-effort; will be overwritten on next gateway start
+      // A later cold start can retry only with exact persisted PID proof.
     }
   }
+  if (!proc || !isChildProcessAlive(proc)) gatewayProcesses.delete(key);
+
+  const pidEntry = readPidFileEntry(profile);
+  if (
+    ownership !== null &&
+    ownership.spawnedPid !== null &&
+    pidEntry !== null &&
+    pidEntry.pid === ownership.spawnedPid &&
+    pidEntry.pid !== ownership.preLaunchPid &&
+    pidEntry.pid !== proc?.pid &&
+    pidIsAliveAs(pidEntry.pid, GATEWAY_IMAGE_PREFIXES)
+  ) {
+    try {
+      process.kill(pidEntry.pid, "SIGTERM");
+    } catch {
+      // already dead
+    }
+  }
+
   appStartedProfiles.delete(key);
   invalidateApiCacheFor(profile);
   stopTuiGatewayClient(profile);
+  if (ownership !== null) {
+    reconcileCompletedGatewayOwnership(profile, ownership);
+    try {
+      if (gatewayProcessOwnership?.get(ownership.profileId) !== null) {
+        scheduleGatewayOwnershipTermination(profile, ownership);
+      }
+    } catch {
+      // Keep the durable record for a later cold-start reconciliation.
+    }
+  }
+}
+
+export function recoverAeraOwnedGatewaysFromPreviousRun(): {
+  reapedProfiles: string[];
+  ambiguousProfiles: string[];
+  errorCode?: GatewayProcessOwnershipErrorCode;
+} {
+  if (gatewayProcessOwnership === null) {
+    return { reapedProfiles: [], ambiguousProfiles: [] };
+  }
+  const initialLoadIssue = gatewayProcessOwnership.getLoadIssue();
+  let recovery: {
+    ownedProfiles: string[];
+    ambiguousProfiles: string[];
+  };
+  try {
+    recovery = gatewayProcessOwnership.reconcileColdStart({
+      readCurrentPid: (profileId) => readPidFile(profileId),
+      isAlive: (pid) => pidIsAliveAs(pid, GATEWAY_IMAGE_PREFIXES),
+    });
+  } catch (error) {
+    const errorCode =
+      error instanceof GatewayProcessOwnershipError
+        ? error.code
+        : "ownership_persistence_failed";
+    return {
+      reapedProfiles: [],
+      ambiguousProfiles: gatewayProcessOwnership.listProfiles(),
+      errorCode,
+    };
+  }
+  const reapedProfiles: string[] = [];
+  const ambiguousProfiles = new Set(recovery.ambiguousProfiles);
+  for (const profile of recovery.ownedProfiles) {
+    const result = reapRecoveredAeraOwnedGateway(profile);
+    if (result === "reaped") reapedProfiles.push(profile);
+    if (result === "ambiguous") ambiguousProfiles.add(profile);
+  }
+  const result: {
+    reapedProfiles: string[];
+    ambiguousProfiles: string[];
+    errorCode?: GatewayProcessOwnershipErrorCode;
+  } = {
+    reapedProfiles: reapedProfiles.sort(),
+    ambiguousProfiles: [...ambiguousProfiles].sort(),
+  };
+  const loadIssue = gatewayProcessOwnership.getLoadIssue() ?? initialLoadIssue;
+  if (loadIssue !== null) result.errorCode = loadIssue;
+  return result;
+}
+
+function reapRecoveredAeraOwnedGateway(
+  profile: string,
+): "reaped" | "inactive" | "ambiguous" {
+  if (gatewayProcessOwnership === null) return "ambiguous";
+  let ownership: GatewayLaunchOwnershipRecord | null;
+  try {
+    ownership = gatewayProcessOwnership.get(profile);
+  } catch {
+    return "ambiguous";
+  }
+  if (ownership === null || ownership.spawnedPid === null) {
+    return "ambiguous";
+  }
+
+  const currentPid = readPidFile(profile);
+  if (currentPid !== ownership.spawnedPid) {
+    if (
+      currentPid === null &&
+      !pidIsAliveAs(ownership.spawnedPid, GATEWAY_IMAGE_PREFIXES)
+    ) {
+      try {
+        gatewayProcessOwnership.clearLaunch(profile, ownership.launchId);
+        return "inactive";
+      } catch {
+        return "ambiguous";
+      }
+    }
+    return "ambiguous";
+  }
+  if (
+    currentPid === ownership.preLaunchPid ||
+    !pidIsAliveAs(currentPid, GATEWAY_IMAGE_PREFIXES)
+  ) {
+    try {
+      gatewayProcessOwnership.clearLaunch(profile, ownership.launchId);
+      return "inactive";
+    } catch {
+      return "ambiguous";
+    }
+  }
+
+  try {
+    process.kill(currentPid, "SIGTERM");
+  } catch {
+    if (pidIsAliveAs(currentPid, GATEWAY_IMAGE_PREFIXES)) {
+      return "ambiguous";
+    }
+    try {
+      gatewayProcessOwnership.clearLaunch(profile, ownership.launchId);
+      return "inactive";
+    } catch {
+      return "ambiguous";
+    }
+  }
+
+  gatewayProcesses.delete(profileKey(profile));
+  appStartedProfiles.delete(profileKey(profile));
+  invalidateApiCacheFor(profile);
+  stopTuiGatewayClient(profile);
+  scheduleGatewayOwnershipTermination(profile, ownership);
+  return "ambiguous";
+}
+
+const GATEWAY_TERMINATION_RETRY_MS = 100;
+const GATEWAY_TERMINATION_GRACE_ATTEMPTS = 10;
+const GATEWAY_TERMINATION_FORCE_ATTEMPTS = 20;
+
+interface GatewayOwnershipTerminationTracking {
+  trackedProcess?: ChildProcess;
+  acceptUncommittedSpawnedPid?: boolean;
+}
+
+function scheduleGatewayOwnershipTermination(
+  profile: string | undefined,
+  ownership: GatewayLaunchOwnershipRecord,
+  attempt = 0,
+  tracking: GatewayOwnershipTerminationTracking = {},
+): void {
+  if (ownership.spawnedPid === null) return;
+  const spawnedPid = ownership.spawnedPid;
+  const key = ownership.profileId;
+  const existing = gatewayOwnershipTerminationTimers.get(key);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(() => {
+    gatewayOwnershipTerminationTimers.delete(key);
+    if (gatewayProcessOwnership === null) return;
+    let current: GatewayLaunchOwnershipRecord | null;
+    try {
+      current = gatewayProcessOwnership.get(key);
+    } catch {
+      return;
+    }
+    if (
+      current === null ||
+      current.launchId !== ownership.launchId ||
+      (current.spawnedPid !== spawnedPid &&
+        !(
+          tracking.acceptUncommittedSpawnedPid === true &&
+          current.spawnedPid === null
+        ))
+    ) {
+      return;
+    }
+
+    const trackedProcess = tracking.trackedProcess;
+    const alive =
+      trackedProcess?.pid === spawnedPid
+        ? isChildProcessAlive(trackedProcess)
+        : pidIsAliveAs(spawnedPid, GATEWAY_IMAGE_PREFIXES);
+    if (!alive) {
+      clearCompletedGatewayOwnership(profile, ownership);
+      return;
+    }
+
+    if (attempt >= GATEWAY_TERMINATION_GRACE_ATTEMPTS) {
+      if (
+        trackedProcess?.pid === spawnedPid &&
+        isChildProcessAlive(trackedProcess)
+      ) {
+        try {
+          trackedProcess.kill("SIGKILL");
+        } catch {
+          // Preserve the record for the next bounded recovery attempt.
+        }
+      } else {
+        const currentPid = readPidFile(profile);
+        if (currentPid === spawnedPid) {
+          const revalidatedPid = readPidFile(profile);
+          if (
+            revalidatedPid === spawnedPid &&
+            pidIsAliveAs(revalidatedPid, GATEWAY_IMAGE_PREFIXES)
+          ) {
+            try {
+              process.kill(revalidatedPid, "SIGKILL");
+            } catch {
+              // Preserve the record for the next bounded recovery attempt.
+            }
+          }
+        }
+      }
+    }
+
+    if (attempt < GATEWAY_TERMINATION_FORCE_ATTEMPTS) {
+      scheduleGatewayOwnershipTermination(
+        profile,
+        ownership,
+        attempt + 1,
+        tracking,
+      );
+    } else {
+      console.warn(
+        `[gateway-ownership:${key}] termination_unconfirmed; retaining durable ownership.`,
+      );
+    }
+  }, GATEWAY_TERMINATION_RETRY_MS);
+  gatewayOwnershipTerminationTimers.set(key, timer);
+}
+
+function clearCompletedGatewayOwnership(
+  profile: string | undefined,
+  ownership: GatewayLaunchOwnershipRecord,
+): void {
+  if (ownership.spawnedPid !== null) {
+    clearPidFileBestEffort(profile, ownership.spawnedPid);
+  }
+  try {
+    gatewayProcessOwnership?.clearLaunch(
+      ownership.profileId,
+      ownership.launchId,
+    );
+  } catch {
+    // A later cold start will retry the exact durable record.
+  }
+}
+
+function clearPidFileBestEffort(
+  profile: string | undefined,
+  expectedPid?: number,
+): void {
+  const pidEntry = readPidFileEntry(profile);
+  if (pidEntry === null) return;
+  if (expectedPid !== undefined && pidEntry.pid !== expectedPid) return;
+  try {
+    unlinkSync(pidEntry.path);
+  } catch {
+    // A stale exact PID is still guarded by process-image verification.
+  }
 }
 
 // Python image prefixes covering both native Windows (pythonw.exe / python.exe)
@@ -3540,6 +3987,36 @@ async function waitForApiServerStopped(
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (!(await isApiServerReady(profile))) return true;
+    await delay(pollMs);
+  }
+  return false;
+}
+
+async function waitForGatewayOwnershipReleased(
+  profile?: string,
+  timeoutMs = 5000,
+  pollMs = 250,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  const key = profileKey(profile);
+  while (Date.now() < deadline) {
+    let ownership: GatewayLaunchOwnershipRecord | null = null;
+    try {
+      ownership = gatewayProcessOwnership?.get(key) ?? null;
+    } catch {
+      return false;
+    }
+    if (ownership === null) return true;
+
+    const proc = gatewayProcesses.get(key);
+    if (!proc || !isChildProcessAlive(proc)) {
+      reconcileCompletedGatewayOwnership(profile, ownership);
+      try {
+        if (gatewayProcessOwnership?.get(key) === null) return true;
+      } catch {
+        return false;
+      }
+    }
     await delay(pollMs);
   }
   return false;
@@ -3630,6 +4107,23 @@ async function restartGatewayLocallyOnce(
     if (!stopped) {
       console.error(
         `[gateway:${key}] Native restart failed: gateway did not stop before restart`,
+      );
+      restoreGatewayAfterRestartFailure(
+        profile,
+        previousProcess,
+        previousStartedByApp,
+        previousPidEntry,
+      );
+      return false;
+    }
+    const ownershipReleased = await waitForGatewayOwnershipReleased(
+      profile,
+      stopTimeoutMs,
+      healthPollMs,
+    );
+    if (!ownershipReleased) {
+      console.error(
+        `[gateway:${key}] Native restart failed: prior gateway ownership remains active`,
       );
       restoreGatewayAfterRestartFailure(
         profile,
