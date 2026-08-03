@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
-import { spawn as spawnChild } from "child_process";
+import { ChildProcess, spawn as spawnChild } from "child_process";
 const {
   TEST_HOME,
   TEST_REPO,
@@ -411,11 +411,22 @@ describe("restartGatewayViaCli", () => {
     const spawnedPid = Number(readFileSync(profilePidFile("work"), "utf8"));
     aliveGatewayPids.add(spawnedPid);
     realGatewayPids.add(spawnedPid);
+    const originalChildKill = ChildProcess.prototype.kill;
+    const childKillSpy = vi
+      .spyOn(ChildProcess.prototype, "kill")
+      .mockImplementation(function (
+        this: ChildProcess,
+        signal?: number | NodeJS.Signals,
+      ): boolean {
+        if (this.pid === spawnedPid && signal === "SIGTERM") return true;
+        return originalChildKill.call(this, signal);
+      });
     const originalKill = process.kill.bind(process);
     let forceAttempts = 0;
     const killSpy = vi
       .spyOn(process, "kill")
       .mockImplementation((pid, signal) => {
+        if (pid === spawnedPid && signal === "SIGTERM") return true;
         if (pid === spawnedPid && signal === "SIGKILL") {
           forceAttempts += 1;
           if (forceAttempts === 1) {
@@ -452,6 +463,7 @@ describe("restartGatewayViaCli", () => {
       });
       expect(forceAttempts).toBeGreaterThanOrEqual(2);
     } finally {
+      childKillSpy.mockRestore();
       killSpy.mockRestore();
       try {
         process.kill(spawnedPid, "SIGKILL");
@@ -504,6 +516,17 @@ describe("restartGatewayViaCli", () => {
     aliveGatewayPids.add(spawnedPid);
     realGatewayPids.add(spawnedPid);
     configureGatewayProcessOwnership(TEST_HOME);
+    const originalKill = process.kill.bind(process);
+    let ignoredSigterm = false;
+    const killSpy = vi
+      .spyOn(process, "kill")
+      .mockImplementation((pid, signal) => {
+        if (pid === spawnedPid && signal === "SIGTERM") {
+          ignoredSigterm = true;
+          return true;
+        }
+        return originalKill(pid, signal);
+      });
 
     try {
       expect(recoverAeraOwnedGatewaysFromPreviousRun()).toEqual({
@@ -519,6 +542,7 @@ describe("restartGatewayViaCli", () => {
           ),
         ).entries,
       ).toEqual([expect.objectContaining({ profileId: "work", spawnedPid })]);
+      expect(ignoredSigterm).toBe(true);
       expect(await waitForProcessExit(spawnedPid, 4000)).toBe(true);
       await vi.waitFor(() => {
         expect(
@@ -531,6 +555,7 @@ describe("restartGatewayViaCli", () => {
         ).toEqual([]);
       });
     } finally {
+      killSpy.mockRestore();
       try {
         process.kill(spawnedPid, "SIGKILL");
       } catch {

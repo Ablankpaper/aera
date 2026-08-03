@@ -256,18 +256,19 @@ describe("GatewayProcessOwnershipLedger", () => {
 
     const blockedRoot = join(root, "blocked");
     mkdirSync(blockedRoot);
-    mkdirSync(join(blockedRoot, "gateway-process-ownership.json"));
     const pendingPath = join(
       blockedRoot,
       "gateway-process-ownership.pending.json",
     );
     writeFileSync(pendingPath, durableBytes, "utf8");
+    renameFailureRef.nextCode = "EIO";
     const current = new GatewayProcessOwnershipLedger({
       userDataPath: blockedRoot,
       desktopPid: 101,
     });
     expect(current.get("existing")).toEqual(intent);
 
+    renameFailureRef.nextCode = "EIO";
     expect(() =>
       current.beginLaunch({ profileId: "research", preLaunchPid: null }),
     ).toThrow(
@@ -417,7 +418,7 @@ describe("GatewayProcessOwnershipLedger", () => {
     );
   });
 
-  it.each(["EACCES", "EBUSY"])(
+  it.each(["EACCES", "EBUSY", "EEXIST", "EPERM"])(
     "uses the recoverable replacement path after Windows %s",
     (code) => {
       renameFailureRef.nextCode = code;
