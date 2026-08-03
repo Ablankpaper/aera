@@ -124,6 +124,8 @@ The executable CI, staging, signing, promotion, device-evidence, and rollback se
 
 `scripts/verify-ci-checkpoint.mjs` accepts only exact expected repository SHAs whose required platform jobs completed successfully after the commit and executed real steps.
 
+Desktop CI keeps two Vitest workers on macOS but serializes test files on hosted Ubuntu and Windows runners after both platforms emitted worker-level failures under filesystem-heavy parallel load. This changes scheduling only: individual test timeouts, assertions, and required platform gates remain unchanged.
+
 The manual `rerun-ci-checkpoint.yml` workflow dispatches the existing repository CI workflows and records their GitHub URLs and job facts without carrying production secrets or changing a failed result.
 
 On 2026-07-23 the three pushed feature-branch checkpoints completed exact-SHA CI successfully:
