@@ -194,7 +194,7 @@ When no account session exists, the sidebar and main layout do not mount. The fu
 
 Switching accounts completes safe sign-out first and then opens browser authorization with explicit account selection. The UI warns that a pending offline revocation may temporarily count toward the five-device limit and that cloud account deletion cannot erase local Hermes data.
 
-The Agent control plane applies the same switch at its own storage boundary. [[src/main/agentera-agent-control/db.ts#AGENTERA_CONTROL_PLANE_SCHEMA_VERSION]] schema v2 and [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] prevent the next account from listing or reopening another personal space's drafts, cached versions, installations, RuntimeBindings, or pending sanitized records.
+The Agent control plane applies the same switch at its own storage boundary. [[src/main/agentera-agent-control/db.ts#AGENTERA_CONTROL_PLANE_SCHEMA_VERSION]] schema v9 and [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] prevent the next account from listing or reopening another personal space's drafts, cached versions, installation operations, RuntimeBindings, ConversationBoundaries, or pending sanitized records.
 
 The cloud may transfer an installation to another AgentEra account only after the previous owner has revoked that device and the installation presents the identical public key. Active devices and changed keys remain owner-conflicted.
 

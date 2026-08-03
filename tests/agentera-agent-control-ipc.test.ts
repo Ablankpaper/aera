@@ -804,4 +804,31 @@ describe("Agent control IPC contract", () => {
       expect(register.match(new RegExp(`"${channel}"`, "g"))).toHaveLength(1);
     }
   });
+
+  it("routes conversation setup and session attachment through the durable coordinator", () => {
+    const register = readFileSync(
+      join(__dirname, "../src/main/ipc/register.ts"),
+      "utf8",
+    );
+    const contextHandler = register.slice(
+      register.indexOf('"agentera-global-profile-conversation-context"'),
+      register.indexOf('ipcMain.handle("stop-ssh-tunnel"'),
+    );
+    expect(contextHandler).toContain("prepareConversationRuntime");
+    expect(contextHandler).not.toContain("prepareHermesTurn");
+    expect(contextHandler).not.toContain("prepareConversationBoundary");
+
+    const sendMessageHandler = register.slice(
+      register.indexOf('ipcMain.handle(\n    "send-message"'),
+      register.indexOf('ipcMain.handle(\n    "abort-chat"'),
+    );
+    expect(sendMessageHandler).toContain("prepareConversationRuntime");
+    expect(sendMessageHandler).toContain("attachConversationRuntimeSession");
+    expect(sendMessageHandler).not.toContain("prepareHermesTurn");
+    expect(sendMessageHandler).not.toContain("prepareConversationBoundary");
+    expect(sendMessageHandler).not.toContain("attachHermesSession(");
+    expect(sendMessageHandler).not.toContain(
+      "attachConversationBoundarySession(",
+    );
+  });
 });

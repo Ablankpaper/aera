@@ -256,7 +256,7 @@ Foreign ownership, immutable reservation drift, Runtime Profile ID collision, an
 
 Manual selection downloads and verifies the immutable version, calls the cloud selection transaction, retrieves the newly signed policy through `GET /api/v1/policy-snapshots/{policy_snapshot_id}`, and only then atomically activates the read-only projection for later conversations. A missing or invalid policy leaves the last local version selected.
 
-[[src/main/agentera-agent-control/runtime-binding-store.ts#RuntimeBindingStore]] commits a complete local binding before queuing its sanitized cloud record. [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] retries that outbox after installed turns, session attachment, and authentication changes, but delivery failure cannot delay or roll back Hermes.
+[[src/main/agentera-agent-control/runtime-binding-store.ts#RuntimeBindingStore]] persists a complete local binding and its sanitized cloud outbox record in one transaction. [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] retries that outbox after installed turns, session attachment, and authentication changes, but delivery failure cannot delay or roll back Hermes.
 
 ### Conversation boundary
 
@@ -264,7 +264,11 @@ Every authenticated conversation freezes data ownership, visibility, and the com
 
 [[src/main/agentera-agent-control/conversation-boundary-store.ts#ConversationBoundaryStore]] persists an actor-partitioned immutable boundary containing scope, scope id, private-by-default visibility, Installation, Definition, Version, Runtime, policy, Memory/files/Artifact ownership, and tool-permission snapshot. A resumed unbound legacy session defaults to USER and PRIVATE; selecting another work context cannot mutate an existing boundary or silently migrate history.
 
-The conversation-context IPC first refreshes the trusted product context and prepares any installed-Agent RuntimeBinding, then creates the boundary. The send path repeats the same idempotent check and fails closed if the trusted coordinator is unavailable. [[src/renderer/src/screens/Chat/ConversationBoundaryIndicator.tsx#ConversationBoundaryIndicator]] displays “运行于” independently from “可见性”, so an Organization or team/project run remains “仅自己” until a future explicit share action changes visibility.
+[[src/main/agentera-agent-control/hermes-adapter.ts#AgenteraHermesAdapter#prepareInstalledTurnPlan]] completes entitlement, ownership, immutable version/policy, Runtime, tool, model-route, revocation, and projection validation without writing a RuntimeBinding. [[src/main/agentera-agent-control/conversation-runtime-coordinator.ts#ConversationRuntimeCoordinator]] then creates or adopts the binding, its sanitized outbox row, and the matching ConversationBoundary under one `BEGIN IMMEDIATE` transaction. A binding-only interrupted state is completed on retry or cold restart, while a boundary conflict rolls back every new binding byte and outbox row.
+
+Hermes session attachment also runs through the coordinator and updates RuntimeBinding plus ConversationBoundary in one transaction. A failed second update rolls back the first, and all reads and writes remain partitioned by the exact tenant, actor, and device owner tuple. A non-installed Profile creates only a `PROFILE_DEFAULT` boundary and never a synthetic RuntimeBinding.
+
+The conversation-context and send-message IPC paths first refresh trusted product context, then call the same durable manager operation. The send path fails closed if that coordinator is unavailable and attaches the returned Hermes session through one atomic manager call. [[src/renderer/src/screens/Chat/ConversationBoundaryIndicator.tsx#ConversationBoundaryIndicator]] displays “运行于” independently from “可见性”, so an Organization or team/project run remains “仅自己” until a future explicit share action changes visibility.
 
 ## Hermes integration
 
@@ -324,7 +328,7 @@ Organization definitions and versions are shared control-plane assets, but every
 
 [[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager]] records `sourceScope=ORGANIZATION` only as catalog provenance while retaining USER tenant, owner, device, policy overlay, and Runtime Profile ownership. [[src/main/agentera-agent-control/hermes-projection.ts#HermesProjectionManager]] materializes signed Knowledge, Skill, and SOP bytes read-only outside `HERMES_HOME`.
 
-[[src/main/agentera-agent-control/hermes-adapter.ts#AgenteraHermesAdapter#prepareInstalledTurn]] freezes Version, policy, Runtime, Profile, and tool digest per conversation. [[src/main/agentera-agent-control/hermes-adapter.ts#assertNewConversationContext]] rejects only a new Organization conversation after trusted context removal; an existing RuntimeBinding remains stable.
+[[src/main/agentera-agent-control/hermes-adapter.ts#AgenteraHermesAdapter#prepareInstalledTurnPlan]] freezes the planned Version, policy, Runtime, Profile, model route, and tool digest per conversation before the atomic local snapshot commit. [[src/main/agentera-agent-control/hermes-adapter.ts#assertNewConversationContext]] rejects only a new Organization conversation after trusted context removal; an existing RuntimeBinding remains stable.
 
 [[tests/e2e/agentera-organization-agent.e2e.ts]] proves the four-role approval and installation flow, v1/v2 binding stability, offline verified use, reconnect removal gate, read-only projection, and byte-identical employee-private Memory and Skills. Run it with `npm run test:e2e:organization-agent`.
 

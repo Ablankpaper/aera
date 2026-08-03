@@ -2194,21 +2194,14 @@ export function registerIpcHandlers(context: IpcContext): void {
         null;
       if (hasSignedInAccess) {
         const control = requireAgentControl();
-        const preparedAgentTurn = await control.prepareHermesTurn({
-          conversationKey: identityConversationKey,
-          profilePath: profileHome(identityProfileId),
-          owner: turnOwner,
-          resumeSessionId: identityResumeSessionId || null,
-        });
-        const boundary = control.prepareConversationBoundary({
-          conversationKey: identityConversationKey,
-          owner: turnOwner,
-          resumeSessionId:
-            preparedAgentTurn?.resumeSessionId ??
-            identityResumeSessionId ??
-            null,
-          runtimeBinding: preparedAgentTurn?.binding ?? null,
-        });
+        const preparedConversationRuntime =
+          await control.prepareConversationRuntime({
+            conversationKey: identityConversationKey,
+            profilePath: profileHome(identityProfileId),
+            owner: turnOwner,
+            resumeSessionId: identityResumeSessionId || null,
+          });
+        const boundary = preparedConversationRuntime.conversationBoundary;
         const matchingOption = productSpaceState?.options.find((option) => {
           if (
             boundary.scopeType === "WORKSPACE" &&
@@ -3384,9 +3377,9 @@ export function registerIpcHandlers(context: IpcContext): void {
           // sufficient proof of current membership or role.
           await requireProductSpace().getState();
         }
-        const preparedAgentTurn =
+        const preparedConversationRuntime =
           agenteraAgentControl && hasSignedInAccess
-            ? await agenteraAgentControl.prepareHermesTurn({
+            ? await agenteraAgentControl.prepareConversationRuntime({
                 conversationKey: identityConversationKey,
                 profilePath: profileHome(profile),
                 owner: turnOwner,
@@ -3396,16 +3389,10 @@ export function registerIpcHandlers(context: IpcContext): void {
         if (!agenteraAgentControl && hasSignedInAccess) {
           throw new Error("Aera conversation boundary is unavailable.");
         }
+        const preparedAgentTurn =
+          preparedConversationRuntime?.preparedAgentTurn ?? null;
         const conversationBoundary =
-          agenteraAgentControl?.prepareConversationBoundary({
-            conversationKey: identityConversationKey,
-            owner: turnOwner,
-            resumeSessionId:
-              preparedAgentTurn?.resumeSessionId ??
-              identityResumeSessionId ??
-              null,
-            runtimeBinding: preparedAgentTurn?.binding ?? null,
-          }) ?? null;
+          preparedConversationRuntime?.conversationBoundary ?? null;
         let conversationEnvelope = preparedAgentTurn?.envelope;
         try {
           const globalSnapshot =
@@ -3504,29 +3491,18 @@ export function registerIpcHandlers(context: IpcContext): void {
         const abortThisRun = (): void => {
           runtimeActivity.abortRun(chatRunId);
         };
-        let boundRuntimeSessionId: string | null =
-          preparedAgentTurn?.binding.hermesSessionId ?? null;
-        let boundConversationBoundarySessionId: string | null =
+        let boundControlPlaneSessionId: string | null =
           conversationBoundary?.hermesSessionId ?? null;
         const bindControlPlaneSession = (sessionId: string): void => {
-          if (preparedAgentTurn && boundRuntimeSessionId !== sessionId) {
-            agenteraAgentControl?.attachHermesSession(
-              preparedAgentTurn.binding.id,
-              sessionId,
-            );
-            boundRuntimeSessionId = sessionId;
-          }
-          if (
-            conversationBoundary &&
-            boundConversationBoundarySessionId !== sessionId
-          ) {
-            agenteraAgentControl?.attachConversationBoundarySession(
-              conversationBoundary.id,
-              sessionId,
-              turnOwner,
-            );
-            boundConversationBoundarySessionId = sessionId;
-          }
+          if (!conversationBoundary || boundControlPlaneSessionId === sessionId)
+            return;
+          agenteraAgentControl?.attachConversationRuntimeSession({
+            runtimeBindingId: preparedAgentTurn?.binding.id ?? null,
+            boundaryId: conversationBoundary.id,
+            sessionId,
+            owner: turnOwner,
+          });
+          boundControlPlaneSessionId = sessionId;
         };
         let boundGlobalProfileSessionId: string | null = null;
         const bindGlobalProfileSnapshotToSession = (

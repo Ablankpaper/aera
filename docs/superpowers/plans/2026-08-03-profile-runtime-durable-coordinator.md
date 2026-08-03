@@ -233,11 +233,11 @@ Expected: PASS with one durable operation and no duplicate Profile across retrie
 - Modify: `src/main/ipc/register.ts`
 - Modify: `tests/agentera-agent-control-ipc.test.ts`
 
-- [ ] **Step 1: Write rollback, restart, resume, concurrency, and owner-isolation tests**
+- [x] **Step 1: Write rollback, restart, resume, concurrency, and owner-isolation tests**
 
 Use real SQLite. Prove a boundary conflict rolls back a newly inserted binding and its pending Cloud record; an old binding-only crash is repaired by creating the matching boundary; concurrent prepares return one matching pair; and session attachment either updates both records or neither. Use two owners to prove no lookup returns the other owner’s binding or boundary.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run:
 
@@ -247,19 +247,19 @@ npm test -- src/main/agentera-agent-control/conversation-runtime-coordinator.tes
 
 Expected: FAIL because production still performs separate writes.
 
-- [ ] **Step 3: Separate asynchronous validation from persistence**
+- [x] **Step 3: Separate asynchronous validation from persistence**
 
 `AgenteraHermesAdapter.prepareInstalledTurnPlan` validates entitlement, Profile/Installation ownership, immutable version/policy, Runtime, tools, model route, revocation, and projection without inserting a binding. The plan contains a normalized binding input and the data needed to compose the final envelope.
 
-- [ ] **Step 4: Commit both snapshots and attach the session atomically**
+- [x] **Step 4: Commit both snapshots and attach the session atomically**
 
 `ConversationRuntimeCoordinator.prepare` runs one `BEGIN IMMEDIATE`, calls transaction-aware RuntimeBinding and ConversationBoundary store methods, asserts matching owner/Installation/Profile/Version/policy/tool fields, and commits. `attachHermesSession` wraps both conditional updates in one transaction. Existing non-installed Profiles still receive only a Profile-default ConversationBoundary.
 
-- [ ] **Step 5: Route both IPC entry points through the coordinator**
+- [x] **Step 5: Route both IPC entry points through the coordinator**
 
 Replace the production sequence `prepareHermesTurn()` then `prepareConversationBoundary()` in conversation context and `send-message` with one manager method. Replace the two session-attachment calls with one manager coordinator call.
 
-- [ ] **Step 6: Verify GREEN**
+- [x] **Step 6: Verify GREEN**
 
 Run the focused command from Step 2, `npm run typecheck`, and `git diff --check`. Expected: PASS; every installed conversation has both matching snapshots or neither.
 

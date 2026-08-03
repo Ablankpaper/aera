@@ -97,6 +97,8 @@ describe("Agent control Organization Foundation context", () => {
       getAuthState: () => AgenteraAuthPublicState;
       getRuntimeVersion: () => string | Promise<string>;
       getConnectionMode: () => "local" | "remote" | "ssh";
+      hermesAdapter: AgenteraHermesAdapter;
+      verifyProfileBinding: () => { agentInstallationId: string | null };
     }> = {},
   ): {
     manager: AgenteraAgentControlManager;
@@ -122,7 +124,8 @@ describe("Agent control Organization Foundation context", () => {
           ...clientOverrides,
         } as unknown as AgenteraAgentControlClient,
         profileBindings: {
-          verifyProfileBinding: vi.fn(),
+          verifyProfileBinding:
+            runtimeOverrides.verifyProfileBinding ?? vi.fn(),
           bindFreshProfile: vi.fn(),
           claimProfile: vi.fn(),
         } as never,
@@ -151,6 +154,7 @@ describe("Agent control Organization Foundation context", () => {
         getConnectionMode:
           runtimeOverrides.getConnectionMode ?? (() => "local"),
         assertEntitled: () => undefined,
+        hermesAdapter: runtimeOverrides.hermesAdapter,
       }),
     };
   }
@@ -293,6 +297,99 @@ describe("Agent control Organization Foundation context", () => {
       organizationId: ORGANIZATION_ID,
       role: "owner",
     });
+  });
+
+  it("prepares one installed turn and ConversationBoundary through the durable coordinator", async () => {
+    const bindingInput = {
+      conversationKey: "durable-installed-conversation",
+      tenantId: OWNER.tenantId,
+      ownerScope: "USER" as const,
+      ownerId: OWNER.ownerId,
+      deviceId: OWNER.deviceInstallationId,
+      agentDefinitionId: OFFICIAL_DEFINITION_ID,
+      agentVersionId: PERSONAL_VERSION_ID,
+      agentInstallationId: PERSONAL_INSTALLATION_ID,
+      runtimeProfileId: PERSONAL_PROFILE_ID,
+      runtimeVersion: "v0.18.2-agentera.1",
+      modelRoute: { provider: "openai", model: "gpt-5.6", baseUrl: "" },
+      policySnapshotId: PERSONAL_POLICY_ID,
+      officialReleaseRevisionId: null,
+      toolPermissionDigest: "1".repeat(64),
+      publishedBaseDigest: "2".repeat(64),
+    };
+    const plan = { bindingInput };
+    const prepareInstalledTurnPlan = vi.fn(async () => plan);
+    const finalizeInstalledTurn = vi.fn(
+      (_plan: typeof plan, binding: { id: string }) => ({
+        binding,
+        profilePath: "/isolated/profile",
+        resumeSessionId: undefined,
+        envelope: {
+          instructions: "fixed",
+          requireBoundApiTransport: true,
+        },
+        modelOverride: bindingInput.modelRoute,
+      }),
+    );
+    const { manager, database } = fullManager(
+      () => ({
+        scope: "ORGANIZATION",
+        organizationId: ORGANIZATION_ID,
+        role: "member",
+      }),
+      {},
+      {
+        verifyProfileBinding: () => ({
+          agentInstallationId: PERSONAL_INSTALLATION_ID,
+        }),
+        hermesAdapter: {
+          prepareInstalledTurnPlan,
+          finalizeInstalledTurn,
+        } as unknown as AgenteraHermesAdapter,
+      },
+    );
+    const input = {
+      conversationKey: bindingInput.conversationKey,
+      profilePath: "/isolated/profile",
+      owner: OWNER,
+      resumeSessionId: null,
+    };
+
+    const prepared = await manager.prepareConversationRuntime(input);
+
+    expect(prepareInstalledTurnPlan).toHaveBeenCalledWith(input);
+    expect(finalizeInstalledTurn).toHaveBeenCalledOnce();
+    expect(prepared.preparedAgentTurn?.binding.id).toBe(
+      prepared.conversationBoundary.runtimeBindingId,
+    );
+    expect(prepared.conversationBoundary).toMatchObject({
+      conversationKey: bindingInput.conversationKey,
+      scopeType: "ORGANIZATION",
+      scopeId: ORGANIZATION_ID,
+      agentInstallationId: PERSONAL_INSTALLATION_ID,
+      runtimeProfileId: PERSONAL_PROFILE_ID,
+    });
+    expect(
+      database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM runtime_bindings")
+        .get(),
+    ).toEqual({ count: 1 });
+    expect(
+      database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM conversation_boundaries")
+        .get(),
+    ).toEqual({ count: 1 });
+
+    const attached = manager.attachConversationRuntimeSession({
+      runtimeBindingId: prepared.preparedAgentTurn?.binding.id ?? null,
+      boundaryId: prepared.conversationBoundary.id,
+      sessionId: "hermes-durable-session",
+      owner: OWNER,
+    });
+    expect(attached.runtimeBinding?.hermesSessionId).toBe(
+      "hermes-durable-session",
+    );
+    expect(attached.boundary.hermesSessionId).toBe("hermes-durable-session");
   });
 
   it.each([

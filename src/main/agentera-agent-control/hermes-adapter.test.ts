@@ -308,6 +308,28 @@ describe("Aera adapter around the real Hermes transport", () => {
     });
   }
 
+  it("validates an installed turn without persisting its RuntimeBinding", async () => {
+    const subject = adapter();
+
+    const plan = await subject.prepareInstalledTurnPlan({
+      conversationKey: "run-agent-plan",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+    });
+
+    expect(bindingStore.getByConversationKey("run-agent-plan")).toBeNull();
+    expect(bindingStore.listPendingCloudRecords()).toEqual([]);
+
+    const binding = bindingStore.getOrCreateForConversation(plan.bindingInput);
+    const prepared = subject.finalizeInstalledTurn(plan, binding);
+    expect(prepared.binding).toEqual(binding);
+    expect(prepared.profilePath).toBe(PROFILE_PATH);
+    expect(prepared.resumeSessionId).toBeUndefined();
+    expect(prepared.modelOverride).toEqual(currentModelRoute);
+    expect(prepared.envelope.requireBoundApiTransport).toBe(true);
+  });
+
   it("freezes one published base, Profile, Runtime, policy and session across turns", async () => {
     const subject = adapter();
     const first = await subject.prepareInstalledTurn({
@@ -373,6 +395,31 @@ describe("Aera adapter around the real Hermes transport", () => {
     expect(cache.getVerifiedVersion).toHaveBeenCalledTimes(2);
     expect(cache.getVerifiedPolicySnapshot).toHaveBeenCalledTimes(2);
     expect(assertEntitled).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a pre-model-route RuntimeBinding resumable", async () => {
+    const subject = adapter();
+    const first = await subject.prepareInstalledTurn({
+      conversationKey: "legacy-model-route-conversation",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+    });
+    const legacy = { ...first.binding } as Partial<typeof first.binding>;
+    delete legacy.modelRoute;
+    database.sqlite
+      .prepare("UPDATE runtime_bindings SET binding_json = ? WHERE id = ?")
+      .run(JSON.stringify(legacy), first.binding.id);
+
+    const resumed = await subject.prepareInstalledTurn({
+      conversationKey: first.binding.conversationKey,
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+    });
+
+    expect(resumed.binding.modelRoute).toBeNull();
+    expect(resumed.modelOverride).toEqual(currentModelRoute);
   });
 
   it("pins each official release revision so v1, v2, and rollback conversations remain immutable", async () => {
