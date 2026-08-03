@@ -280,7 +280,7 @@ Local Gateway lifecycle is coordinated outside Hermes private state. [[src/main/
 
 [[src/main/hermes.ts#recoverAeraOwnedGatewaysFromPreviousRun]] and [[src/main/hermes.ts#stopAeraOwnedGateways]] act only on exact recorded Profile/PID evidence. SIGTERM retains ownership until exit is confirmed; bounded escalation rechecks the Profile PID immediately before signalling, while a missing, unchanged, replaced, corrupt, or otherwise ambiguous identity is never claimed or killed. Stable recovery error codes are logged without paths or private data.
 
-Cross-platform regression tests inject a non-terminating SIGTERM and deterministic rename failures instead of relying on platform signal or directory-replacement semantics. They cover the Windows `EACCES`, `EBUSY`, `EEXIST`, and `EPERM` canonical-replacement fallback while preserving the fsynced pending commit point.
+Cross-platform regression tests inject a non-terminating SIGTERM and deterministic rename failures instead of relying on platform signal or directory-replacement semantics. They cover the Windows `EACCES`, `EBUSY`, `EEXIST`, and `EPERM` canonical-replacement fallback while preserving the fsynced pending commit point. A queued restart for another Profile uses the same bounded platform-aware health budget after an earlier setup failure, so Windows scheduling cannot hide that the queued command ran.
 
 ## Cloud boundary
 
