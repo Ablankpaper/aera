@@ -20,19 +20,24 @@ function unitTestSteps(): WorkflowStep[] {
 }
 
 describe("CI workflow policy", () => {
-  it("runs Windows unit tests with one worker", () => {
-    expect(unitTestSteps()).toContainEqual({
-      name: "Test unit (Windows serial)",
-      if: "matrix.os == 'windows-latest'",
-      run: "npm test -- --maxWorkers=1",
-    });
-  });
-
-  it("keeps two unit-test workers on non-Windows runners", () => {
-    expect(unitTestSteps()).toContainEqual({
-      name: "Test unit (non-Windows)",
-      if: "matrix.os != 'windows-latest'",
-      run: "npm test -- --maxWorkers=2",
-    });
+  // @lat: [[agentera-post-official-delivery#Production readiness and release#Remote CI safety checkpoint]]
+  it("uses one explicit unit-test worker policy per platform", () => {
+    expect(unitTestSteps()).toEqual([
+      {
+        name: "Test unit (macOS parallel)",
+        if: "matrix.os == 'macos-latest'",
+        run: "npm test -- --maxWorkers=2",
+      },
+      {
+        name: "Test unit (Ubuntu serial)",
+        if: "matrix.os == 'ubuntu-latest'",
+        run: "npm test -- --maxWorkers=1",
+      },
+      {
+        name: "Test unit (Windows serial)",
+        if: "matrix.os == 'windows-latest'",
+        run: "npm test -- --maxWorkers=1",
+      },
+    ]);
   });
 });
