@@ -265,9 +265,11 @@ import {
   listLocalProfileLocations,
   createProfile,
   deleteProfile,
+  profileIdForAgentName,
   setActiveProfile,
 } from "../profiles";
 import {
+  createAccountSpaceProfileOperationId,
   discoverProfilesForCurrentOwner,
   hasMeaningfulHermesProfileData,
   type AgenteraProfileBindingStore,
@@ -2366,6 +2368,29 @@ export function registerIpcHandlers(context: IpcContext): void {
         discoverProfiles: listLocalProfileLocations,
         getCurrentOwner: getAgenteraRuntimeOwner,
       });
+    const recoveredFreshProfiles =
+      agenteraProfileBindings.reconcileActivatingFreshProfiles({
+        owner,
+        createProfile,
+        resolveProfilePath: (profileId) => profileHome(profileId),
+        activateProfile: (profileId) => {
+          setActiveProfile(profileId);
+          if (getActiveProfileNameSync() !== profileId) {
+            throw new Error(
+              "The recovered account space could not be activated.",
+            );
+          }
+          notifyProfileSwitched();
+        },
+      });
+    const recoveredFreshProfile = recoveredFreshProfiles.at(-1);
+    if (recoveredFreshProfile) {
+      return {
+        status: "bound",
+        profileId: recoveredFreshProfile.profileId,
+        runtimeProfileId: recoveredFreshProfile.binding.runtimeProfileId,
+      };
+    }
     const preferred = agenteraProfileBindings.findPreferredOwnedProfile(
       locations,
       owner,
@@ -2412,9 +2437,19 @@ export function registerIpcHandlers(context: IpcContext): void {
       };
     }
 
+    const operationId = createAccountSpaceProfileOperationId(owner);
+    const pendingReservation =
+      agenteraProfileBindings.getFreshProfileReservation(operationId, owner);
+    const name =
+      pendingReservation?.displayName ??
+      `Aera Space ${Date.now().toString(36)}`;
+    const profileId =
+      pendingReservation?.profileId ?? profileIdForAgentName(name);
     const created = agenteraProfileBindings.createAndBindFreshProfile({
-      name: `Aera Space ${Date.now().toString(36)}`,
+      operationId,
+      name,
       owner,
+      profileId,
       createProfile,
       resolveProfilePath: (profileId) => profileHome(profileId),
       activateProfile: (profileId) => {
@@ -2468,8 +2503,10 @@ export function registerIpcHandlers(context: IpcContext): void {
       throw new Error("Fresh local Profiles require local Runtime mode.");
     }
     const created = agenteraProfileBindings.createAndBindFreshProfile({
+      operationId: randomUUID(),
       name,
       owner: getAgenteraRuntimeOwner(),
+      profileId: profileIdForAgentName(name),
       createProfile,
       resolveProfilePath: (profileId) => profileHome(profileId),
       activateProfile: (profileId) => {

@@ -302,6 +302,9 @@ describe("Agent installation orchestration", () => {
   let activateForProfile: Mock<
     AgentInstallationProjection["activateForProfile"]
   >;
+  let profileIdForAgentName: Mock<
+    AgentInstallationProfileAdapter["profileIdForAgentName"]
+  >;
   let createProfile: Mock<AgentInstallationProfileAdapter["createProfile"]>;
   let deleteProfile: Mock<
     NonNullable<AgentInstallationProfileAdapter["deleteProfile"]>
@@ -452,10 +455,14 @@ describe("Agent installation orchestration", () => {
         } satisfies ActivatedHermesProjection;
       });
     projection = { materializeVersion, activateForProfile };
+    profileIdForAgentName = vi
+      .fn<AgentInstallationProfileAdapter["profileIdForAgentName"]>()
+      .mockReturnValue("fresh-agent");
     createProfile = vi
       .fn<AgentInstallationProfileAdapter["createProfile"]>()
-      .mockImplementation((name, cloneFrom) => {
+      .mockImplementation((name, cloneFrom, reservedProfileId) => {
         events.push(`profile:create:${String(cloneFrom)}`);
+        void reservedProfileId;
         expect(name).toBe("Fresh Agent");
         mkdirSync(freshProfilePath, { recursive: true });
         return { success: true, id: "fresh-agent" };
@@ -466,6 +473,7 @@ describe("Agent installation orchestration", () => {
       return { success: true };
     });
     profiles = {
+      profileIdForAgentName,
       createProfile,
       deleteProfile,
       resolveProfilePath: (id) => {
@@ -535,7 +543,12 @@ describe("Agent installation orchestration", () => {
       } satisfies CreateAgentInstallationRequest,
       OPERATION_ID,
     );
-    expect(createProfile).toHaveBeenCalledWith("Fresh Agent", null);
+    expect(profileIdForAgentName).toHaveBeenCalledWith("Fresh Agent");
+    expect(createProfile).toHaveBeenCalledWith(
+      "Fresh Agent",
+      null,
+      "fresh-agent",
+    );
     expect(events).toEqual([
       "cloud:create-pending",
       "cloud:get-version",
@@ -1180,7 +1193,11 @@ describe("Agent installation orchestration", () => {
       } satisfies CreateAgentInstallationRequest,
       OPERATION_ID,
     );
-    expect(createProfile).toHaveBeenCalledWith("Fresh Agent", null);
+    expect(createProfile).toHaveBeenCalledWith(
+      "Fresh Agent",
+      null,
+      "fresh-agent",
+    );
     expect(installed).toMatchObject({
       sourceScope: "PLATFORM",
       sourceWorkspaceId: null,

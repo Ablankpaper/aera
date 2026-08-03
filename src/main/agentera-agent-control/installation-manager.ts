@@ -165,7 +165,12 @@ export interface AgentInstallationProjection {
 }
 
 export interface AgentInstallationProfileAdapter {
-  createProfile(name: string, cloneFrom: string | null): ProfileCreationResult;
+  profileIdForAgentName(name: string): string;
+  createProfile(
+    name: string,
+    cloneFrom: string | null,
+    reservedProfileId?: string,
+  ): ProfileCreationResult;
   deleteProfile(profileId: string): { success: boolean; error?: string };
   resolveProfilePath(profileId: string): string;
   activateProfile(profileId: string): void;
@@ -1936,9 +1941,19 @@ export class AgentInstallationManager {
             this.owner,
           );
         }
+        const existingReservation =
+          this.profileBindings.getFreshProfileReservation(
+            local.agentInstallationId,
+            this.owner,
+          );
+        const profileId =
+          existingReservation?.profileId ??
+          this.profiles.profileIdForAgentName(target.name);
         const created = this.profileBindings.createAndBindFreshProfile({
+          operationId: local.agentInstallationId,
           name: target.name,
           owner: this.owner,
+          profileId,
           createProfile: this.profiles.createProfile,
           resolveProfilePath: this.profiles.resolveProfilePath,
           activateProfile: this.profiles.activateProfile,

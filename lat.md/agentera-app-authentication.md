@@ -210,6 +210,8 @@ Binding never copies, uploads, or rewrites Memory, USER, skills, sessions, files
 
 [[src/main/agentera-profile-binding.ts#AgenteraProfileBindingStore]] stores encrypted, versioned ownership metadata under Electron `userData`, keyed by the canonical physical Profile path and a stable random Runtime Profile ID.
 
+Fresh creation writes an encrypted V3 reservation containing only stable operation, owner, Profile, Runtime Profile, display-name, activation, and timestamp fields before invoking Hermes. A retry or cold restart reuses the exact reserved identities and existing safe scaffold; a foreign binding, immutable replay drift, or unexpected private marker remains fail-closed. Valid V1 and V2 binding arrays migrate to V3 only after complete decryption and validation.
+
 Account-space resolution considers only still-present Profiles matching the exact tenant, user, and installation; it keeps the active match or deterministically selects the earliest binding. There is no ordinary unbind or reassignment operation.
 
 [[src/main/agentera-profile-binding.ts#hasMeaningfulHermesProfileData]] uses only approved filenames, file types, sizes, and directory entry presence. Existing data is bound in place, while fresh creation always calls the Hermes Profile API with `cloneFrom` set to `null` and refuses unexpectedly copied private markers.

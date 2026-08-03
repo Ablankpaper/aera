@@ -103,7 +103,12 @@ import {
   type AgenteraProductSpaceDatabase,
 } from "../agentera-product-space/db";
 import { AgenteraProductSpaceManager } from "../agentera-product-space/manager";
-import { createProfile, deleteProfile, setActiveProfile } from "../profiles";
+import {
+  createProfile,
+  deleteProfile,
+  profileIdForAgentName,
+  setActiveProfile,
+} from "../profiles";
 import { seedAgentModelProfile } from "../agentera-agent-control/model-profile-seed";
 import { AgentIdentityService } from "../agent-identity";
 import { AgentUserMemoryRepairService } from "../agent-user-memory-repair";
@@ -425,6 +430,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
       client: agentControlClient,
       profileBindings: agenteraProfileBindings,
       profiles: {
+        profileIdForAgentName,
         createProfile,
         deleteProfile,
         resolveProfilePath: (profileId) => profileHome(profileId),

@@ -14,7 +14,8 @@ import { safeWriteFile } from "./utils";
 
 const PROFILE_BINDING_SCHEMA = "agentera-runtime-profile-bindings" as const;
 const PROFILE_BINDING_VERSION_V1 = 1 as const;
-const PROFILE_BINDING_VERSION = 2 as const;
+const PROFILE_BINDING_VERSION_V2 = 2 as const;
+const PROFILE_BINDING_VERSION = 3 as const;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -53,6 +54,23 @@ interface StoredProfileBindingV1 {
   binding: RuntimeOwnerBindingV1;
 }
 
+export interface FreshProfileReservation {
+  operationId: string;
+  tenantId: string;
+  ownerId: string;
+  deviceInstallationId: string;
+  profileId: string;
+  runtimeProfileId: string;
+  displayName: string;
+  activate: boolean;
+  createdAt: string;
+}
+
+interface RuntimeProfileBindingStateV3 {
+  bindings: StoredProfileBinding[];
+  freshProfileOperations: FreshProfileReservation[];
+}
+
 interface BindingEnvelope {
   schema: typeof PROFILE_BINDING_SCHEMA;
   version: typeof PROFILE_BINDING_VERSION;
@@ -62,6 +80,12 @@ interface BindingEnvelope {
 interface BindingEnvelopeV1 {
   schema: typeof PROFILE_BINDING_SCHEMA;
   version: typeof PROFILE_BINDING_VERSION_V1;
+  encryptedBindings: string;
+}
+
+interface BindingEnvelopeV2 {
+  schema: typeof PROFILE_BINDING_SCHEMA;
+  version: typeof PROFILE_BINDING_VERSION_V2;
   encryptedBindings: string;
 }
 
@@ -80,15 +104,37 @@ export interface ProfileCreationResult {
 }
 
 export interface FreshProfileBindingRequest {
+  operationId: string;
   name: string;
   owner: AgenteraRuntimeOwner;
+  profileId: string;
   createProfile: (
     name: string,
     cloneFrom: string | null,
+    reservedProfileId?: string,
   ) => ProfileCreationResult;
   resolveProfilePath: (profileId: string) => string;
   activateProfile: (profileId: string) => void;
   activate?: boolean;
+}
+
+export interface FreshProfileReservationRequest {
+  operationId: string;
+  name: string;
+  owner: AgenteraRuntimeOwner;
+  profileId: string;
+  activate?: boolean;
+}
+
+export interface FreshProfileReconciliationAdapters {
+  owner: AgenteraRuntimeOwner;
+  createProfile: (
+    name: string,
+    cloneFrom: string | null,
+    reservedProfileId?: string,
+  ) => ProfileCreationResult;
+  resolveProfilePath: (profileId: string) => string;
+  activateProfile: (profileId: string) => void;
 }
 
 export type ProfileClaimInspection =
@@ -119,12 +165,9 @@ function validUuid(value: unknown): value is string {
   return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
-function deterministicGuestUuid(
-  scope: "tenant" | "owner",
-  deviceInstallationId: string,
-): string {
+function deterministicUuid(input: string): string {
   const bytes = createHash("sha256")
-    .update(`agentera-local-guest:${scope}:${deviceInstallationId}`, "utf8")
+    .update(input, "utf8")
     .digest()
     .subarray(0, 16);
   bytes[6] = (bytes[6] & 0x0f) | 0x40;
@@ -137,6 +180,15 @@ function deterministicGuestUuid(
     hex.slice(16, 20),
     hex.slice(20),
   ].join("-");
+}
+
+function deterministicGuestUuid(
+  scope: "tenant" | "owner",
+  deviceInstallationId: string,
+): string {
+  return deterministicUuid(
+    `agentera-local-guest:${scope}:${deviceInstallationId}`,
+  );
 }
 
 /**
@@ -155,6 +207,20 @@ export function createAgenteraGuestRuntimeOwner(
     ownerId: deterministicGuestUuid("owner", deviceInstallationId),
     deviceInstallationId,
   };
+}
+
+export function createAccountSpaceProfileOperationId(
+  owner: AgenteraRuntimeOwner,
+): string {
+  assertOwner(owner);
+  return deterministicUuid(
+    [
+      "agentera-account-space-profile-operation",
+      owner.tenantId,
+      owner.ownerId,
+      owner.deviceInstallationId,
+    ].join(":"),
+  );
 }
 
 /**
@@ -241,6 +307,51 @@ function validBindingV1(value: unknown): value is RuntimeOwnerBindingV1 {
   );
 }
 
+function validProfileId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value !== "default" &&
+    /^[a-z0-9_][a-z0-9_-]{0,63}$/.test(value)
+  );
+}
+
+function validDisplayName(value: unknown): value is string {
+  return (
+    typeof value === "string" && value.trim().length > 0 && value.length <= 256
+  );
+}
+
+function validFreshProfileReservation(
+  value: unknown,
+): value is FreshProfileReservation {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Partial<FreshProfileReservation>;
+  return (
+    exactKeys(value, [
+      "operationId",
+      "tenantId",
+      "ownerId",
+      "deviceInstallationId",
+      "profileId",
+      "runtimeProfileId",
+      "displayName",
+      "activate",
+      "createdAt",
+    ]) &&
+    validUuid(record.operationId) &&
+    validUuid(record.tenantId) &&
+    validUuid(record.ownerId) &&
+    validUuid(record.deviceInstallationId) &&
+    validProfileId(record.profileId) &&
+    validUuid(record.runtimeProfileId) &&
+    validDisplayName(record.displayName) &&
+    typeof record.activate === "boolean" &&
+    validBoundAt(record.createdAt)
+  );
+}
+
 function canonicalProfilePath(profilePath: string): string {
   if (typeof profilePath !== "string" || !isAbsolute(profilePath)) {
     throw new Error("Aera Runtime Profile path must be absolute.");
@@ -300,6 +411,30 @@ function sameOwner(
     binding.tenantId === owner.tenantId &&
     binding.ownerId === owner.ownerId &&
     binding.deviceInstallationId === owner.deviceInstallationId
+  );
+}
+
+function reservationHasOwner(
+  reservation: FreshProfileReservation,
+  owner: AgenteraRuntimeOwner,
+): boolean {
+  return (
+    reservation.tenantId === owner.tenantId &&
+    reservation.ownerId === owner.ownerId &&
+    reservation.deviceInstallationId === owner.deviceInstallationId
+  );
+}
+
+function reservationMatchesRequest(
+  reservation: FreshProfileReservation,
+  request: FreshProfileReservationRequest,
+): boolean {
+  return (
+    reservation.operationId === request.operationId &&
+    reservationHasOwner(reservation, request.owner) &&
+    reservation.profileId === request.profileId &&
+    reservation.displayName === request.name &&
+    reservation.activate === (request.activate !== false)
   );
 }
 
@@ -436,20 +571,143 @@ export class AgenteraProfileBindingStore {
     return { ...binding };
   }
 
-  createAndBindFreshProfile(request: FreshProfileBindingRequest): {
+  reserveFreshProfile(
+    request: FreshProfileReservationRequest,
+  ): FreshProfileReservation {
+    assertOwner(request.owner);
+    if (
+      !validUuid(request.operationId) ||
+      !validDisplayName(request.name) ||
+      !validProfileId(request.profileId)
+    ) {
+      throw new Error("Aera fresh Profile reservation identity is invalid.");
+    }
+    const state = this.readState();
+    const existing = state.freshProfileOperations.find(
+      (candidate) => candidate.operationId === request.operationId,
+    );
+    if (existing) {
+      if (!reservationMatchesRequest(existing, request)) {
+        throw new Error("Aera fresh Profile reservation conflict.");
+      }
+      return { ...existing };
+    }
+    if (
+      state.freshProfileOperations.some(
+        (candidate) => candidate.profileId === request.profileId,
+      )
+    ) {
+      throw new Error("Aera fresh Profile reservation conflict.");
+    }
+    const runtimeProfileId = this.randomUUID();
+    if (
+      !validUuid(runtimeProfileId) ||
+      state.bindings.some(
+        (entry) => entry.binding.runtimeProfileId === runtimeProfileId,
+      ) ||
+      state.freshProfileOperations.some(
+        (candidate) => candidate.runtimeProfileId === runtimeProfileId,
+      )
+    ) {
+      throw new Error("Aera Runtime Profile ID generation failed.");
+    }
+    const reservation: FreshProfileReservation = {
+      operationId: request.operationId,
+      tenantId: request.owner.tenantId,
+      ownerId: request.owner.ownerId,
+      deviceInstallationId: request.owner.deviceInstallationId,
+      profileId: request.profileId,
+      runtimeProfileId,
+      displayName: request.name,
+      activate: request.activate !== false,
+      createdAt: this.now().toISOString(),
+    };
+    if (!validFreshProfileReservation(reservation)) {
+      throw new Error("Aera fresh Profile reservation identity is invalid.");
+    }
+    state.freshProfileOperations.push(reservation);
+    this.persistState(state);
+    return { ...reservation };
+  }
+
+  getFreshProfileReservation(
+    operationId: string,
+    owner: AgenteraRuntimeOwner,
+  ): FreshProfileReservation | null {
+    assertOwner(owner);
+    if (!validUuid(operationId)) {
+      throw new Error("Aera fresh Profile reservation identity is invalid.");
+    }
+    const reservation = this.readState().freshProfileOperations.find(
+      (candidate) => candidate.operationId === operationId,
+    );
+    if (!reservation) return null;
+    if (!reservationHasOwner(reservation, owner)) {
+      throw new Error("Aera fresh Profile reservation conflict.");
+    }
+    return { ...reservation };
+  }
+
+  reconcileActivatingFreshProfiles(
+    adapters: FreshProfileReconciliationAdapters,
+  ): Array<{ profileId: string; binding: RuntimeOwnerBinding }> {
+    assertOwner(adapters.owner);
+    const operationIds = this.readState()
+      .freshProfileOperations.filter(
+        (reservation) =>
+          reservation.activate &&
+          reservationHasOwner(reservation, adapters.owner),
+      )
+      .sort(
+        (left, right) =>
+          left.createdAt.localeCompare(right.createdAt) ||
+          left.operationId.localeCompare(right.operationId),
+      )
+      .map((reservation) => reservation.operationId);
+    return operationIds.map((operationId) =>
+      this.reconcileFreshProfile(operationId, adapters),
+    );
+  }
+
+  reconcileFreshProfile(
+    operationId: string,
+    adapters: FreshProfileReconciliationAdapters,
+  ): {
     profileId: string;
     binding: RuntimeOwnerBinding;
   } {
-    assertOwner(request.owner);
-    // This is deliberately the only call shape: no source Profile or private
-    // path can enter the generic Hermes cloning argument.
-    const created = request.createProfile(request.name, null);
-    if (!created.success || !created.id) {
-      throw new Error(
-        created.error || "Fresh Runtime Profile creation failed.",
-      );
+    assertOwner(adapters.owner);
+    if (!validUuid(operationId)) {
+      throw new Error("Aera fresh Profile reservation identity is invalid.");
     }
-    const profilePath = request.resolveProfilePath(created.id);
+    let state = this.readState();
+    let reservation = state.freshProfileOperations.find(
+      (candidate) => candidate.operationId === operationId,
+    );
+    if (!reservation) {
+      throw new Error("Aera fresh Profile reservation is required.");
+    }
+    if (!reservationHasOwner(reservation, adapters.owner)) {
+      throw new Error("Aera fresh Profile reservation conflict.");
+    }
+    const profilePath = adapters.resolveProfilePath(reservation.profileId);
+    if (!existsSync(profilePath)) {
+      // This is deliberately the only call shape: no source Profile or
+      // private path can enter the generic Hermes cloning argument. The
+      // reservation reached durable encrypted storage before this callback.
+      const created = adapters.createProfile(
+        reservation.displayName,
+        null,
+        reservation.profileId,
+      );
+      if (
+        !created.success ||
+        !created.id ||
+        created.id !== reservation.profileId
+      ) {
+        throw new Error("Fresh Runtime Profile creation failed.");
+      }
+    }
     // Hermes creates .env, sessions, and built-in Skill scaffolding even when
     // cloneFrom is null. They belong to this newly-created physical Profile;
     // none is read or copied here. Memory, USER, files, auth, and Curator
@@ -459,14 +717,104 @@ export class AgenteraProfileBindingStore {
         "Fresh Runtime Profile creation unexpectedly produced private data.",
       );
     }
-    const result = {
-      profileId: created.id,
-      binding: this.bindExistingProfile(profilePath, request.owner),
-    };
-    if (request.activate !== false) {
-      request.activateProfile(created.id);
+    const canonical = canonicalProfilePath(profilePath);
+    state = this.readState();
+    reservation = state.freshProfileOperations.find(
+      (candidate) => candidate.operationId === operationId,
+    );
+    if (!reservation || !reservationHasOwner(reservation, adapters.owner)) {
+      throw new Error("Aera fresh Profile reservation conflict.");
     }
-    return result;
+    let stored = state.bindings.find(
+      (entry) => entry.profilePath === canonical,
+    );
+    if (stored) {
+      if (!sameOwner(stored.binding, adapters.owner)) {
+        throw new Error(
+          "This physical Runtime Profile cannot be reassigned to another Aera owner.",
+        );
+      }
+      if (stored.binding.runtimeProfileId !== reservation.runtimeProfileId) {
+        throw new Error("Aera fresh Profile reservation conflict.");
+      }
+    } else {
+      if (
+        state.bindings.some(
+          (entry) =>
+            entry.binding.runtimeProfileId === reservation.runtimeProfileId,
+        )
+      ) {
+        throw new Error("Aera fresh Profile reservation conflict.");
+      }
+      stored = {
+        profilePath: canonical,
+        binding: {
+          tenantId: reservation.tenantId,
+          ownerScope: "USER",
+          ownerId: reservation.ownerId,
+          deviceInstallationId: reservation.deviceInstallationId,
+          agentInstallationId: null,
+          runtimeProfileId: reservation.runtimeProfileId,
+          boundAt: reservation.createdAt,
+        },
+      };
+      state.bindings.push(stored);
+      // Keep the operation as an idempotency record. The installation journal
+      // can safely finish later phases and a cold retry still resolves the
+      // exact same physical and Runtime Profile identities.
+      this.persistState(state);
+    }
+    if (reservation.activate) {
+      adapters.activateProfile(reservation.profileId);
+      const completedState = this.readState();
+      const operationIndex = completedState.freshProfileOperations.findIndex(
+        (candidate) => candidate.operationId === operationId,
+      );
+      if (operationIndex < 0) {
+        throw new Error("Aera fresh Profile reservation conflict.");
+      }
+      const completedReservation =
+        completedState.freshProfileOperations[operationIndex];
+      const completedBinding = completedState.bindings.find(
+        (entry) => entry.profilePath === canonical,
+      );
+      if (
+        !reservationHasOwner(completedReservation, adapters.owner) ||
+        completedReservation.runtimeProfileId !==
+          reservation.runtimeProfileId ||
+        !completedBinding ||
+        !sameOwner(completedBinding.binding, adapters.owner) ||
+        completedBinding.binding.runtimeProfileId !==
+          reservation.runtimeProfileId
+      ) {
+        throw new Error("Aera fresh Profile reservation conflict.");
+      }
+      completedState.freshProfileOperations.splice(operationIndex, 1);
+      this.persistState(completedState);
+    }
+    return {
+      profileId: reservation.profileId,
+      binding: { ...stored.binding },
+    };
+  }
+
+  createAndBindFreshProfile(request: FreshProfileBindingRequest): {
+    profileId: string;
+    binding: RuntimeOwnerBinding;
+  } {
+    this.reserveFreshProfile({
+      operationId: request.operationId,
+      name: request.name,
+      owner: request.owner,
+      profileId: request.profileId,
+      activate: request.activate,
+    });
+    return this.reconcileFreshProfile(request.operationId, {
+      owner: request.owner,
+      createProfile: request.createProfile,
+      resolveProfilePath: request.resolveProfilePath,
+      activateProfile: request.activateProfile,
+    });
   }
 
   listUnboundProfiles<T extends { path: string }>(profiles: T[]): T[] {
@@ -495,9 +843,7 @@ export class AgenteraProfileBindingStore {
       throw new Error("Aera Runtime Profile binding is required.");
     }
     if (!sameOwner(stored.binding, owner)) {
-      throw new Error(
-        "This Runtime Profile belongs to another Aera owner.",
-      );
+      throw new Error("This Runtime Profile belongs to another Aera owner.");
     }
     return { ...stored.binding };
   }
@@ -518,9 +864,7 @@ export class AgenteraProfileBindingStore {
       throw new Error("Aera Runtime Profile binding is required.");
     }
     if (!sameOwner(stored.binding, owner)) {
-      throw new Error(
-        "This Runtime Profile belongs to another Aera owner.",
-      );
+      throw new Error("This Runtime Profile belongs to another Aera owner.");
     }
     if (stored.binding.agentInstallationId === agentInstallationId) {
       return { ...stored.binding };
@@ -605,7 +949,16 @@ export class AgenteraProfileBindingStore {
   }
 
   private readBindings(): StoredProfileBinding[] {
-    if (!existsSync(this.filePath)) return [];
+    return this.readState().bindings.map((entry) => ({
+      profilePath: entry.profilePath,
+      binding: { ...entry.binding },
+    }));
+  }
+
+  private readState(): RuntimeProfileBindingStateV3 {
+    if (!existsSync(this.filePath)) {
+      return { bindings: [], freshProfileOperations: [] };
+    }
     let envelope: unknown;
     try {
       envelope = JSON.parse(readFileSync(this.filePath, "utf8"));
@@ -615,11 +968,14 @@ export class AgenteraProfileBindingStore {
     if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) {
       throw new Error("Aera Runtime Profile binding store is corrupt.");
     }
-    const candidate = envelope as Partial<BindingEnvelope | BindingEnvelopeV1>;
+    const candidate = envelope as Partial<
+      BindingEnvelope | BindingEnvelopeV1 | BindingEnvelopeV2
+    >;
     if (
       !exactKeys(envelope, ["schema", "version", "encryptedBindings"]) ||
       candidate.schema !== PROFILE_BINDING_SCHEMA ||
       (candidate.version !== PROFILE_BINDING_VERSION_V1 &&
+        candidate.version !== PROFILE_BINDING_VERSION_V2 &&
         candidate.version !== PROFILE_BINDING_VERSION) ||
       typeof candidate.encryptedBindings !== "string"
     ) {
@@ -650,11 +1006,32 @@ export class AgenteraProfileBindingStore {
         (isV1 ? validBindingV1(stored.binding) : validBinding(stored.binding))
       );
     };
-    if (!Array.isArray(parsed) || parsed.some((entry) => !validEntry(entry))) {
+    const parsedBindings =
+      candidate.version === PROFILE_BINDING_VERSION
+        ? (parsed as Partial<RuntimeProfileBindingStateV3> | null)?.bindings
+        : parsed;
+    const parsedOperations =
+      candidate.version === PROFILE_BINDING_VERSION
+        ? (parsed as Partial<RuntimeProfileBindingStateV3> | null)
+            ?.freshProfileOperations
+        : [];
+    if (
+      (candidate.version === PROFILE_BINDING_VERSION &&
+        (!parsed ||
+          typeof parsed !== "object" ||
+          Array.isArray(parsed) ||
+          !exactKeys(parsed, ["bindings", "freshProfileOperations"]))) ||
+      !Array.isArray(parsedBindings) ||
+      parsedBindings.some((entry) => !validEntry(entry)) ||
+      !Array.isArray(parsedOperations) ||
+      parsedOperations.some(
+        (operation) => !validFreshProfileReservation(operation),
+      )
+    ) {
       throw new Error("Aera Runtime Profile binding store is corrupt.");
     }
     const bindings: StoredProfileBinding[] = isV1
-      ? (parsed as StoredProfileBindingV1[]).map((entry) => ({
+      ? (parsedBindings as StoredProfileBindingV1[]).map((entry) => ({
           profilePath: entry.profilePath,
           binding: {
             tenantId: entry.binding.tenantId,
@@ -666,7 +1043,9 @@ export class AgenteraProfileBindingStore {
             boundAt: entry.binding.boundAt,
           },
         }))
-      : (parsed as StoredProfileBinding[]);
+      : (parsedBindings as StoredProfileBinding[]);
+    const freshProfileOperations =
+      parsedOperations as FreshProfileReservation[];
     if (
       new Set(bindings.map((entry) => entry.profilePath)).size !==
         bindings.length ||
@@ -678,22 +1057,62 @@ export class AgenteraProfileBindingStore {
           .filter((value): value is string => value !== null),
       ).size !==
         bindings.filter((entry) => entry.binding.agentInstallationId !== null)
-          .length
+          .length ||
+      new Set(freshProfileOperations.map((operation) => operation.operationId))
+        .size !== freshProfileOperations.length ||
+      new Set(freshProfileOperations.map((operation) => operation.profileId))
+        .size !== freshProfileOperations.length ||
+      new Set(
+        freshProfileOperations.map((operation) => operation.runtimeProfileId),
+      ).size !== freshProfileOperations.length ||
+      freshProfileOperations.some((operation) => {
+        const matchingBinding = bindings.find(
+          (entry) =>
+            entry.binding.runtimeProfileId === operation.runtimeProfileId,
+        );
+        return (
+          matchingBinding !== undefined &&
+          !sameOwner(matchingBinding.binding, {
+            tenantId: operation.tenantId,
+            ownerId: operation.ownerId,
+            deviceInstallationId: operation.deviceInstallationId,
+          })
+        );
+      })
     ) {
       throw new Error("Aera Runtime Profile binding store is corrupt.");
     }
-    const result = bindings.map((entry) => ({
-      profilePath: entry.profilePath,
-      binding: { ...entry.binding },
-    }));
-    if (isV1) this.persistBindings(result);
+    const result: RuntimeProfileBindingStateV3 = {
+      bindings: bindings.map((entry) => ({
+        profilePath: entry.profilePath,
+        binding: { ...entry.binding },
+      })),
+      freshProfileOperations: freshProfileOperations.map((operation) => ({
+        ...operation,
+      })),
+    };
+    if (candidate.version !== PROFILE_BINDING_VERSION) {
+      this.persistState(result);
+    }
     return result;
   }
 
   private persistBindings(bindings: StoredProfileBinding[]): void {
+    const state = this.readState();
+    state.bindings = bindings.map((entry) => ({
+      profilePath: entry.profilePath,
+      binding: { ...entry.binding },
+    }));
+    this.persistState(state);
+  }
+
+  private persistState(state: RuntimeProfileBindingStateV3): void {
     this.requireEncryption();
     const encrypted = this.secureStorage.encryptString(
-      JSON.stringify(bindings),
+      JSON.stringify({
+        bindings: state.bindings,
+        freshProfileOperations: state.freshProfileOperations,
+      } satisfies RuntimeProfileBindingStateV3),
     );
     const envelope: BindingEnvelope = {
       schema: PROFILE_BINDING_SCHEMA,

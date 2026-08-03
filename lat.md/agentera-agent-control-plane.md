@@ -244,6 +244,8 @@ When the active installed Agent Profile is also the selected model source, repai
 
 Installation activation is fail-closed until model projection succeeds. A pending Installation that already owns a prepared Profile is retried by explicitly claiming that Profile, not by opening chat or creating a second Profile. A profile-less pending Installation for an older version is archived before installing the newly published version. An active Profile whose selected version differs from the requested version must select the new immutable version and re-seed its signed model route before chat.
 
+Fresh Installation materialization reserves the exact local Profile ID and opaque Runtime Profile ID under the stable Agent Installation ID before Hermes creates any Profile bytes. If creation is interrupted, the next attempt reads that encrypted reservation and adopts only the same Owner's safe scaffold; it never chooses a suffixed replacement or claims private or foreign data.
+
 Manual selection downloads and verifies the immutable version, calls the cloud selection transaction, retrieves the newly signed policy through `GET /api/v1/policy-snapshots/{policy_snapshot_id}`, and only then atomically activates the read-only projection for later conversations. A missing or invalid policy leaves the last local version selected.
 
 [[src/main/agentera-agent-control/runtime-binding-store.ts#RuntimeBindingStore]] commits a complete local binding before queuing its sanitized cloud record. [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] retries that outbox after installed turns, session attachment, and authentication changes, but delivery failure cannot delay or roll back Hermes.
