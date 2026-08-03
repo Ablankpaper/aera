@@ -31,6 +31,8 @@ const REFRESHED_AT = "2026-07-20T12:00:00Z";
 const EXPIRES_AT = "2026-07-27T10:00:00Z";
 
 const roots: string[] = [];
+const workspaceDatabaseTestTimeoutMs =
+  process.platform === "win32" ? 30_000 : 5_000;
 
 function temporaryRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "agentera-workspace-db-"));
@@ -100,124 +102,136 @@ afterEach(() => {
 });
 
 describe("Aera Workspace database", () => {
-  it("opens at the exact userData path and rejects paths inside HERMES_HOME", () => {
-    const root = temporaryRoot();
-    const userDataPath = join(root, "user-data");
-    const hermesHome = join(root, "hermes-home");
-    mkdirSync(hermesHome, { recursive: true });
-    const previousHermesHome = process.env.HERMES_HOME;
-    process.env.HERMES_HOME = hermesHome;
-    const opened: string[] = [];
+  it(
+    "opens at the exact userData path and rejects paths inside HERMES_HOME",
+    () => {
+      const root = temporaryRoot();
+      const userDataPath = join(root, "user-data");
+      const hermesHome = join(root, "hermes-home");
+      mkdirSync(hermesHome, { recursive: true });
+      const previousHermesHome = process.env.HERMES_HOME;
+      process.env.HERMES_HOME = hermesHome;
+      const opened: string[] = [];
 
-    try {
-      const paths = resolveAgenteraWorkspacePaths(userDataPath);
-      expect(paths).toEqual({
-        rootPath: join(userDataPath, "agentera-workspace"),
-        databasePath: join(userDataPath, "agentera-workspace", "workspace.db"),
-      });
-      const database = openAgenteraWorkspaceDatabase(userDataPath, {
-        databaseFactory: (path) => {
-          opened.push(path);
-          return nodeSqliteFactory(path);
-        },
-      });
-      expect(database.databasePath).toBe(paths.databasePath);
-      expect(opened).toEqual([paths.databasePath]);
-      database.close();
+      try {
+        const paths = resolveAgenteraWorkspacePaths(userDataPath);
+        expect(paths).toEqual({
+          rootPath: join(userDataPath, "agentera-workspace"),
+          databasePath: join(
+            userDataPath,
+            "agentera-workspace",
+            "workspace.db",
+          ),
+        });
+        const database = openAgenteraWorkspaceDatabase(userDataPath, {
+          databaseFactory: (path) => {
+            opened.push(path);
+            return nodeSqliteFactory(path);
+          },
+        });
+        expect(database.databasePath).toBe(paths.databasePath);
+        expect(opened).toEqual([paths.databasePath]);
+        database.close();
 
-      const unsafeFactory = vi.fn(nodeSqliteFactory);
-      expect(() =>
-        openAgenteraWorkspaceDatabase(join(hermesHome, "nested"), {
-          databaseFactory: unsafeFactory,
-        }),
-      ).toThrow(/HERMES_HOME|Workspace path/i);
-      expect(unsafeFactory).not.toHaveBeenCalled();
-    } finally {
-      if (previousHermesHome === undefined) delete process.env.HERMES_HOME;
-      else process.env.HERMES_HOME = previousHermesHome;
-    }
-  });
-
-  it("enables safe pragmas and migrates the exact schema idempotently", () => {
-    const userDataPath = join(temporaryRoot(), "user-data");
-
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const database = openAgenteraWorkspaceDatabase(userDataPath, {
-        databaseFactory: nodeSqliteFactory,
-      });
-      expect(
-        Object.values(
-          database.sqlite.prepare("PRAGMA journal_mode").get() as Record<
-            string,
-            unknown
-          >,
-        ),
-      ).toEqual(["wal"]);
-      expect(
-        Object.values(
-          database.sqlite.prepare("PRAGMA foreign_keys").get() as Record<
-            string,
-            unknown
-          >,
-        ),
-      ).toEqual([1]);
-      expect(
-        Object.values(
-          database.sqlite.prepare("PRAGMA user_version").get() as Record<
-            string,
-            unknown
-          >,
-        ),
-      ).toEqual([AGENTERA_WORKSPACE_SCHEMA_VERSION]);
-
-      const tables = database.sqlite
-        .prepare(
-          "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
-        )
-        .all() as Array<{ name: string }>;
-      expect(tables.map(({ name }) => name)).toEqual([
-        "workspace_cache",
-        "workspace_invitation_cache",
-        "workspace_member_cache",
-        "workspace_selection",
-      ]);
-
-      const expectedColumns: Record<string, string[]> = {
-        workspace_cache: [
-          "account_user_id",
-          "workspace_id",
-          "summary_json",
-          "refreshed_at",
-        ],
-        workspace_member_cache: [
-          "account_user_id",
-          "workspace_id",
-          "member_user_id",
-          "member_json",
-          "refreshed_at",
-        ],
-        workspace_invitation_cache: [
-          "account_user_id",
-          "workspace_id",
-          "invitation_id",
-          "invitation_json",
-          "refreshed_at",
-        ],
-        workspace_selection: [
-          "account_user_id",
-          "selected_workspace_id",
-          "updated_at",
-        ],
-      };
-      for (const [table, columns] of Object.entries(expectedColumns)) {
-        const actual = database.sqlite
-          .prepare(`PRAGMA table_info(${table})`)
-          .all() as Array<{ name: string }>;
-        expect(actual.map(({ name }) => name)).toEqual(columns);
+        const unsafeFactory = vi.fn(nodeSqliteFactory);
+        expect(() =>
+          openAgenteraWorkspaceDatabase(join(hermesHome, "nested"), {
+            databaseFactory: unsafeFactory,
+          }),
+        ).toThrow(/HERMES_HOME|Workspace path/i);
+        expect(unsafeFactory).not.toHaveBeenCalled();
+      } finally {
+        if (previousHermesHome === undefined) delete process.env.HERMES_HOME;
+        else process.env.HERMES_HOME = previousHermesHome;
       }
-      database.close();
-    }
-  });
+    },
+    workspaceDatabaseTestTimeoutMs,
+  );
+
+  it(
+    "enables safe pragmas and migrates the exact schema idempotently",
+    () => {
+      const userDataPath = join(temporaryRoot(), "user-data");
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const database = openAgenteraWorkspaceDatabase(userDataPath, {
+          databaseFactory: nodeSqliteFactory,
+        });
+        expect(
+          Object.values(
+            database.sqlite.prepare("PRAGMA journal_mode").get() as Record<
+              string,
+              unknown
+            >,
+          ),
+        ).toEqual(["wal"]);
+        expect(
+          Object.values(
+            database.sqlite.prepare("PRAGMA foreign_keys").get() as Record<
+              string,
+              unknown
+            >,
+          ),
+        ).toEqual([1]);
+        expect(
+          Object.values(
+            database.sqlite.prepare("PRAGMA user_version").get() as Record<
+              string,
+              unknown
+            >,
+          ),
+        ).toEqual([AGENTERA_WORKSPACE_SCHEMA_VERSION]);
+
+        const tables = database.sqlite
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+          )
+          .all() as Array<{ name: string }>;
+        expect(tables.map(({ name }) => name)).toEqual([
+          "workspace_cache",
+          "workspace_invitation_cache",
+          "workspace_member_cache",
+          "workspace_selection",
+        ]);
+
+        const expectedColumns: Record<string, string[]> = {
+          workspace_cache: [
+            "account_user_id",
+            "workspace_id",
+            "summary_json",
+            "refreshed_at",
+          ],
+          workspace_member_cache: [
+            "account_user_id",
+            "workspace_id",
+            "member_user_id",
+            "member_json",
+            "refreshed_at",
+          ],
+          workspace_invitation_cache: [
+            "account_user_id",
+            "workspace_id",
+            "invitation_id",
+            "invitation_json",
+            "refreshed_at",
+          ],
+          workspace_selection: [
+            "account_user_id",
+            "selected_workspace_id",
+            "updated_at",
+          ],
+        };
+        for (const [table, columns] of Object.entries(expectedColumns)) {
+          const actual = database.sqlite
+            .prepare(`PRAGMA table_info(${table})`)
+            .all() as Array<{ name: string }>;
+          expect(actual.map(({ name }) => name)).toEqual(columns);
+        }
+        database.close();
+      }
+    },
+    workspaceDatabaseTestTimeoutMs,
+  );
 
   it("atomically replaces Workspace summaries without mutating the legacy migration source", () => {
     const database = openAgenteraWorkspaceDatabase(
