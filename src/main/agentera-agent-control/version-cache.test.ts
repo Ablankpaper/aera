@@ -5,8 +5,10 @@ import {
   chmodSync,
   existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -35,6 +37,8 @@ const DEFINITION_ID = "11111111-1111-4111-8111-111111111111";
 const VERSION_ID = "22222222-2222-4222-8222-222222222222";
 const OTHER_VERSION_ID = "33333333-3333-4333-8333-333333333333";
 const STAGING_ID = "44444444-4444-4444-8444-444444444444";
+const STALE_STAGING_ID = "99999999-9999-4999-8999-999999999999";
+const WINNER_STAGING_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const INSTALLATION_ID = "55555555-5555-4555-8555-555555555555";
 const OTHER_INSTALLATION_ID = "66666666-6666-4666-8666-666666666666";
 const POLICY_ID = "77777777-7777-4777-8777-777777777777";
@@ -245,6 +249,418 @@ describe("verified immutable Agent version cache", () => {
     );
   });
 
+  // @lat: [[agentera-agent-control-plane#Immutable publication#Durable local version cache]]
+  it("recovers a verified directory that has no SQLite row after cold restart", () => {
+    cache().cacheVerifiedVersion(version);
+    database.sqlite
+      .prepare(
+        `DELETE FROM cached_agent_versions
+         WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
+      )
+      .run(version.id, owner.tenantId, owner.ownerId);
+
+    const restarted = cache();
+    expect(restarted.getVerifiedVersion(version.id)).toEqual(version);
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT count(*) AS count FROM cached_agent_versions
+           WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
+        )
+        .get(version.id, owner.tenantId, owner.ownerId),
+    ).toEqual({ count: 1 });
+  });
+
+  it("rebuilds a missing immutable directory from a verified SQLite row", () => {
+    cache().cacheVerifiedVersion(version);
+    const row = database.sqlite
+      .prepare(
+        `SELECT cache_relative_path FROM cached_agent_versions
+         WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
+      )
+      .get(version.id, owner.tenantId, owner.ownerId) as {
+      cache_relative_path: string;
+    };
+    const directory = join(
+      database.paths.versionsPath,
+      ...row.cache_relative_path.split("/"),
+    );
+    makeTreeWritable(directory);
+    rmSync(directory, { recursive: true, force: true });
+
+    const restarted = cache();
+    expect(restarted.getVerifiedVersion(version.id)).toEqual(version);
+    expect(lstatSync(directory).mode & 0o222).toBe(0);
+  });
+
+  it("reports an incomplete row-backed reconstruction with a bounded recovery code", () => {
+    cache().cacheVerifiedVersion(version);
+    const row = database.sqlite
+      .prepare(
+        `SELECT cache_relative_path FROM cached_agent_versions
+         WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
+      )
+      .get(version.id, owner.tenantId, owner.ownerId) as {
+      cache_relative_path: string;
+    };
+    const destination = join(
+      database.paths.versionsPath,
+      ...row.cache_relative_path.split("/"),
+    );
+    makeTreeWritable(destination);
+    rmSync(destination, { recursive: true, force: true });
+    const restarted = new AgentVersionCache({
+      database,
+      owner,
+      trust,
+      origin: ORIGIN,
+      runtimeVersion: "v0.18.2-agentera.1",
+      now: () => NOW,
+      randomUUID: () => STAGING_ID,
+      rename: (source, target) => {
+        renameSync(source, target);
+        makeTreeWritable(target);
+        rmSync(join(target, "bundle.json"), { force: true });
+      },
+    });
+
+    let failure: unknown;
+    try {
+      restarted.getVerifiedVersion(version.id);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toEqual(
+      expect.objectContaining<Partial<AgentVersionCacheError>>({
+        code: "cache_recovery_failed",
+      }),
+    );
+    expect((failure as Error).message).not.toContain(destination);
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT version_id FROM cached_agent_versions
+           WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
+        )
+        .get(version.id, owner.tenantId, owner.ownerId),
+    ).toBeDefined();
+    expect(existsSync(destination)).toBe(false);
+    expect(cache().getVerifiedVersion(version.id)).toEqual(version);
+  });
+
+  it("retains verified bytes when a deferred SQLite commit fails and recovers on retry", () => {
+    database.sqlite.exec(`
+      CREATE TABLE cache_commit_parent (id INTEGER PRIMARY KEY);
+      CREATE TABLE cache_commit_child (
+        id INTEGER,
+        FOREIGN KEY (id) REFERENCES cache_commit_parent(id)
+          DEFERRABLE INITIALLY DEFERRED
+      );
+      CREATE TRIGGER fail_cache_commit
+      AFTER INSERT ON cached_agent_versions
+      BEGIN
+        INSERT INTO cache_commit_child (id) VALUES (1);
+      END;
+    `);
+    const rename = vi.fn(renameSync);
+    const store = new AgentVersionCache({
+      database,
+      owner,
+      trust,
+      origin: ORIGIN,
+      runtimeVersion: "v0.18.2-agentera.1",
+      now: () => NOW,
+      randomUUID: () => STAGING_ID,
+      rename,
+    });
+    const destination = join(
+      database.paths.versionsPath,
+      "accounts",
+      owner.tenantId,
+      owner.ownerId,
+      version.id,
+      version.content_digest,
+    );
+
+    let failure: unknown;
+    try {
+      store.cacheVerifiedVersion(version);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toEqual(
+      expect.objectContaining<Partial<AgentVersionCacheError>>({
+        code: "cache_database_failed",
+      }),
+    );
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT version_id FROM cached_agent_versions
+           WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
+        )
+        .get(version.id, owner.tenantId, owner.ownerId),
+    ).toBeUndefined();
+    expect(existsSync(destination)).toBe(true);
+
+    database.sqlite.exec("DROP TRIGGER fail_cache_commit");
+    expect(store.cacheVerifiedVersion(version)).toEqual(version);
+    expect(rename).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes only a recognized stale staging tree before retrying the cache write", () => {
+    const versionRoot = join(
+      database.paths.versionsPath,
+      "accounts",
+      owner.tenantId,
+      owner.ownerId,
+      version.id,
+    );
+    const stale = join(versionRoot, `.staging-${STALE_STAGING_ID}`);
+    mkdirSync(stale, { recursive: true });
+    writeFileSync(join(stale, "partial.json"), "partial");
+
+    expect(cache().cacheVerifiedVersion(version)).toEqual(version);
+    expect(existsSync(stale)).toBe(false);
+    expect(readdirSync(versionRoot)).toEqual([version.content_digest]);
+  });
+
+  it("replaces an incomplete cache-owned destination from a freshly verified version", () => {
+    const destination = join(
+      database.paths.versionsPath,
+      "accounts",
+      owner.tenantId,
+      owner.ownerId,
+      version.id,
+      version.content_digest,
+    );
+    mkdirSync(destination, { recursive: true });
+    writeFileSync(join(destination, "partial.json"), "partial");
+
+    expect(cache().cacheVerifiedVersion(version)).toEqual(version);
+    expect(readdirSync(destination).sort()).toEqual([
+      "bundle.json",
+      "manifest.json",
+      "version.json",
+    ]);
+    expect(cache().getVerifiedVersion(version.id)).toEqual(version);
+  });
+
+  it.each(["EACCES", "EPERM"] as const)(
+    "maps %s rename denial to a bounded filesystem code and removes staging",
+    (code) => {
+      const store = new AgentVersionCache({
+        database,
+        owner,
+        trust,
+        origin: ORIGIN,
+        runtimeVersion: "v0.18.2-agentera.1",
+        now: () => NOW,
+        randomUUID: () => STAGING_ID,
+        rename: () => {
+          throw Object.assign(new Error("private filesystem detail"), { code });
+        },
+      });
+
+      let failure: unknown;
+      try {
+        store.cacheVerifiedVersion(version);
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toEqual(
+        expect.objectContaining<Partial<AgentVersionCacheError>>({
+          code: "cache_filesystem_denied",
+        }),
+      );
+      expect((failure as Error).message).not.toContain(
+        "private filesystem detail",
+      );
+      const versionRoot = join(
+        database.paths.versionsPath,
+        "accounts",
+        owner.tenantId,
+        owner.ownerId,
+        version.id,
+      );
+      expect(existsSync(versionRoot) ? readdirSync(versionRoot) : []).toEqual(
+        [],
+      );
+      expect(
+        database.sqlite
+          .prepare("SELECT version_id FROM cached_agent_versions")
+          .get(),
+      ).toBeUndefined();
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "maps an account-directory creation denial to the bounded filesystem code",
+    () => {
+      chmodSync(database.paths.versionsPath, 0o500);
+
+      let failure: unknown;
+      try {
+        cache().cacheVerifiedVersion(version);
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toEqual(
+        expect.objectContaining<Partial<AgentVersionCacheError>>({
+          code: "cache_filesystem_denied",
+        }),
+      );
+      expect((failure as Error).message).not.toContain(
+        database.paths.versionsPath,
+      );
+    },
+  );
+
+  it("converges when another cache instance wins the destination rename", () => {
+    const winner = new AgentVersionCache({
+      database,
+      owner,
+      trust,
+      origin: ORIGIN,
+      runtimeVersion: "v0.18.2-agentera.1",
+      now: () => NOW,
+      randomUUID: () => WINNER_STAGING_ID,
+    });
+    const losingRename = vi.fn(() => {
+      expect(winner.cacheVerifiedVersion(version)).toEqual(version);
+      throw Object.assign(new Error("private destination collision"), {
+        code: "EEXIST",
+      });
+    });
+    const loser = new AgentVersionCache({
+      database,
+      owner,
+      trust,
+      origin: ORIGIN,
+      runtimeVersion: "v0.18.2-agentera.1",
+      now: () => NOW,
+      randomUUID: () => STAGING_ID,
+      rename: losingRename,
+    });
+
+    expect(loser.cacheVerifiedVersion(version)).toEqual(version);
+    expect(losingRename).toHaveBeenCalledTimes(1);
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT count(*) AS count FROM cached_agent_versions
+           WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
+        )
+        .get(version.id, owner.tenantId, owner.ownerId),
+    ).toEqual({ count: 1 });
+    const versionRoot = join(
+      database.paths.versionsPath,
+      "accounts",
+      owner.tenantId,
+      owner.ownerId,
+      version.id,
+    );
+    expect(readdirSync(versionRoot)).toEqual([version.content_digest]);
+  });
+
+  it("converges when the winner removes the losing staging tree before rename", () => {
+    const winner = new AgentVersionCache({
+      database,
+      owner,
+      trust,
+      origin: ORIGIN,
+      runtimeVersion: "v0.18.2-agentera.1",
+      now: () => NOW,
+      randomUUID: () => WINNER_STAGING_ID,
+    });
+    const losingRename = vi.fn((source: string, destination: string) => {
+      expect(winner.cacheVerifiedVersion(version)).toEqual(version);
+      expect(existsSync(source)).toBe(false);
+      renameSync(source, destination);
+    });
+    const loser = new AgentVersionCache({
+      database,
+      owner,
+      trust,
+      origin: ORIGIN,
+      runtimeVersion: "v0.18.2-agentera.1",
+      now: () => NOW,
+      randomUUID: () => STAGING_ID,
+      rename: losingRename,
+    });
+
+    expect(loser.cacheVerifiedVersion(version)).toEqual(version);
+    expect(losingRename).toHaveBeenCalledTimes(1);
+    expect(cache().getVerifiedVersion(version.id)).toEqual(version);
+  });
+
+  it("fails closed without deleting either directory when multiple digests exist", () => {
+    cache().cacheVerifiedVersion(version);
+    database.sqlite
+      .prepare(
+        `DELETE FROM cached_agent_versions
+         WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
+      )
+      .run(version.id, owner.tenantId, owner.ownerId);
+    const versionRoot = join(
+      database.paths.versionsPath,
+      "accounts",
+      owner.tenantId,
+      owner.ownerId,
+      version.id,
+    );
+    const conflictingDigest = "ef".repeat(32);
+    mkdirSync(join(versionRoot, conflictingDigest));
+
+    expect(() => cache().getVerifiedVersion(version.id)).toThrowError(
+      expect.objectContaining<Partial<AgentVersionCacheError>>({
+        code: "cache_conflict",
+      }),
+    );
+    expect(readdirSync(versionRoot).sort()).toEqual(
+      [version.content_digest, conflictingDigest].sort(),
+    );
+  });
+
+  it("rejects a second digest directory even when the SQLite row is valid", () => {
+    cache().cacheVerifiedVersion(version);
+    const versionRoot = join(
+      database.paths.versionsPath,
+      "accounts",
+      owner.tenantId,
+      owner.ownerId,
+      version.id,
+    );
+    const conflictingDigest = "ef".repeat(32);
+    mkdirSync(join(versionRoot, conflictingDigest));
+
+    expect(() => cache().getVerifiedVersion(version.id)).toThrowError(
+      expect.objectContaining<Partial<AgentVersionCacheError>>({
+        code: "cache_conflict",
+      }),
+    );
+    expect(readdirSync(versionRoot).sort()).toEqual(
+      [version.content_digest, conflictingDigest].sort(),
+    );
+  });
+
+  it("maps SQLite read failures to a bounded database code", () => {
+    database.sqlite.exec("DROP TABLE cached_agent_versions");
+
+    let failure: unknown;
+    try {
+      cache().getVerifiedVersion(version.id);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toEqual(
+      expect.objectContaining<Partial<AgentVersionCacheError>>({
+        code: "cache_database_failed",
+      }),
+    );
+    expect((failure as Error).message).not.toContain("cached_agent_versions");
+  });
+
   it("does not expose a verified USER version cache across account switches", () => {
     cache().cacheVerifiedVersion(version);
     const other = new AgentVersionCache({
@@ -440,10 +856,23 @@ describe("verified immutable Agent version cache", () => {
       now: () => NOW,
       randomUUID: () => STAGING_ID,
       rename: () => {
-        throw new Error("simulated rename failure");
+        throw Object.assign(new Error("private rename failure"), {
+          code: "EIO",
+        });
       },
     });
-    expect(() => store.cacheVerifiedVersion(version)).toThrow(/rename failure/);
+    let failure: unknown;
+    try {
+      store.cacheVerifiedVersion(version);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toEqual(
+      expect.objectContaining<Partial<AgentVersionCacheError>>({
+        code: "cache_filesystem_failed",
+      }),
+    );
+    expect((failure as Error).message).not.toContain("private rename failure");
     const parent = join(
       database.paths.versionsPath,
       "accounts",

@@ -55,6 +55,43 @@ const WORKSPACE_ID = "66666666-6666-4666-8666-666666666666";
 const NOW = new Date("2026-07-19T18:00:00.000Z");
 const KEY_ID = "agent-publisher-test-v1";
 const SPKI_PREFIX_LENGTH = 12;
+const CACHE_FAILURES = [
+  [
+    "cache_conflict",
+    "publication_cache_conflict",
+    "Verified Agent version cache state conflicted.",
+  ],
+  [
+    "cache_corrupt",
+    "publication_cache_corrupt",
+    "Verified Agent version cache content was invalid.",
+  ],
+  [
+    "cache_permissions_invalid",
+    "publication_cache_permissions_invalid",
+    "Verified Agent version cache permissions were invalid.",
+  ],
+  [
+    "cache_filesystem_denied",
+    "publication_cache_filesystem_denied",
+    "The operating system denied the verified Agent version cache operation.",
+  ],
+  [
+    "cache_filesystem_failed",
+    "publication_cache_filesystem_failed",
+    "The verified Agent version cache filesystem operation failed.",
+  ],
+  [
+    "cache_database_failed",
+    "publication_cache_database_failed",
+    "The verified Agent version cache database operation failed.",
+  ],
+  [
+    "cache_recovery_failed",
+    "publication_cache_recovery_failed",
+    "Verified Agent version cache recovery did not complete.",
+  ],
+] as const;
 
 function nodeSqliteFactory(path: string): AgenteraSqliteDatabase {
   return new DatabaseSync(path) as unknown as AgenteraSqliteDatabase;
@@ -596,11 +633,34 @@ describe("explicit Agent publication", () => {
     });
   });
 
-  it("reports a verified-version cache failure separately from signature and content failures", async () => {
-    cacheVersion.mockImplementationOnce(() => {
-      throw Object.assign(new Error("private cache path"), {
-        code: "cache_corrupt",
+  it.each(CACHE_FAILURES)(
+    "preserves bounded cache failure %s as public code %s",
+    async (cacheCode, publicCode, summary) => {
+      cacheVersion.mockImplementationOnce(() => {
+        throw Object.assign(new Error("private cache path"), {
+          code: cacheCode,
+        });
       });
+      const service = publisher();
+      const preview = service.preparePublication(DRAFT_ID);
+
+      await expect(
+        service.confirmPublication(preview.publicationHandle),
+      ).rejects.toMatchObject({ code: publicCode });
+      expect(drafts.getDraft(DRAFT_ID).publishedRevision).toBeNull();
+      expect(drafts.getDraft(DRAFT_ID).lastPublicationAttempt).toMatchObject({
+        errorCode: cacheCode,
+        errorSummary: summary,
+      });
+      expect(
+        drafts.getDraft(DRAFT_ID).lastPublicationAttempt?.errorSummary,
+      ).not.toContain("private cache path");
+    },
+  );
+
+  it("keeps an unknown cache exception behind the generic publication cache boundary", async () => {
+    cacheVersion.mockImplementationOnce(() => {
+      throw new Error("private unknown cache failure");
     });
     const service = publisher();
     const preview = service.preparePublication(DRAFT_ID);
@@ -608,9 +668,8 @@ describe("explicit Agent publication", () => {
     await expect(
       service.confirmPublication(preview.publicationHandle),
     ).rejects.toMatchObject({ code: "publication_cache_failed" });
-    expect(drafts.getDraft(DRAFT_ID).publishedRevision).toBeNull();
     expect(drafts.getDraft(DRAFT_ID).lastPublicationAttempt).toMatchObject({
-      errorCode: "cache_corrupt",
+      errorCode: "publication_cache_failed",
       errorSummary: "Verified Agent version cache failed.",
     });
   });

@@ -14,7 +14,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { AgenteraRuntimeOwner } from "../agentera-profile-binding";
 import type { AgentPolicySnapshot, AgentVersion } from "./client";
 import type { AgenteraControlPlaneDatabase } from "./db";
@@ -28,7 +28,11 @@ export type AgentVersionCacheErrorCode =
   | "cache_not_found"
   | "cache_conflict"
   | "cache_corrupt"
-  | "cache_permissions_invalid";
+  | "cache_permissions_invalid"
+  | "cache_filesystem_denied"
+  | "cache_filesystem_failed"
+  | "cache_database_failed"
+  | "cache_recovery_failed";
 
 export class AgentVersionCacheError extends Error {
   readonly code: AgentVersionCacheErrorCode;
@@ -73,6 +77,13 @@ interface CachedVersionRow {
   verified_at: unknown;
 }
 
+interface ValidatedCachedVersionRow {
+  relativePath: string;
+  version: AgentVersion;
+  verifiedAt: string;
+  policySnapshotJson: string | null;
+}
+
 interface CachedPolicyCollection {
   schema_version: 1;
   snapshots: AgentPolicySnapshot[];
@@ -85,6 +96,8 @@ const KEY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SIGNATURE_PATTERN = /^[A-Za-z0-9_-]{86}$/;
 const RFC3339_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+const STAGING_DIRECTORY_PATTERN =
+  /^\.staging-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_VERSION_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_MANIFEST_FILE_BYTES = 256 * 1024;
 const MAX_BUNDLE_FILE_BYTES = 3 * 1024 * 1024;
@@ -322,6 +335,38 @@ function stableJson(value: unknown): string {
   return JSON.stringify(normalize(value));
 }
 
+function systemErrorCode(error: unknown): string {
+  if (!error || typeof error !== "object") return "";
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code.toUpperCase() : "";
+}
+
+function filesystemFailure(error: unknown): AgentVersionCacheError {
+  if (error instanceof AgentVersionCacheError) return error;
+  const code = systemErrorCode(error);
+  if (code === "EACCES" || code === "EPERM" || code === "EROFS") {
+    return new AgentVersionCacheError("cache_filesystem_denied");
+  }
+  if (code === "EEXIST" || code === "ENOTEMPTY") {
+    return new AgentVersionCacheError("cache_conflict");
+  }
+  return new AgentVersionCacheError("cache_filesystem_failed");
+}
+
+function databaseFailure(error: unknown): AgentVersionCacheError {
+  if (error instanceof AgentVersionCacheError) return error;
+  return new AgentVersionCacheError("cache_database_failed");
+}
+
+function filesystemOperation<T>(operation: () => T): T {
+  try {
+    return operation();
+  } catch (error) {
+    if (error instanceof AgentVersionCacheError) throw error;
+    throw filesystemFailure(error);
+  }
+}
+
 export class AgentVersionCache {
   private readonly database: AgenteraControlPlaneDatabase;
   private readonly trust: AgentVersionCacheTrust;
@@ -375,95 +420,23 @@ export class AgentVersionCache {
       throw new AgenteraAgentTrustError("digest_mismatch");
     }
 
-    const existing = this.database.sqlite
-      .prepare(
-        `SELECT content_digest FROM cached_agent_versions
-         WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
-      )
-      .get(version.id, this.tenantId, this.ownerId) as
-      | { content_digest?: unknown }
-      | undefined;
+    const existing = this.readRow(version.id);
     if (existing) {
-      if (existing.content_digest !== version.content_digest) {
+      if (
+        existing.version.content_digest !== version.content_digest ||
+        JSON.stringify(existing.version) !== JSON.stringify(version)
+      ) {
         throw new AgentVersionCacheError("cache_conflict");
       }
       return this.getVerifiedVersion(version.id);
     }
 
-    const relativeVersionRoot = `accounts/${this.tenantId}/${this.ownerId}/${version.id}`;
-    const versionRoot = join(
-      this.database.paths.versionsPath,
-      ...relativeVersionRoot.split("/"),
+    const relativePath = this.relativePath(version);
+    const finalized = filesystemOperation(() =>
+      this.ensureImmutableDirectory(version, relativePath, true),
     );
-    const destination = join(versionRoot, version.content_digest);
-    if (existsSync(destination)) {
-      throw new AgentVersionCacheError("cache_conflict");
-    }
-    mkdirSync(versionRoot, { recursive: true, mode: 0o700 });
-    const stagingId = this.randomUUID();
-    if (!validUuid(stagingId)) {
-      throw new AgentVersionCacheError("cache_corrupt");
-    }
-    const staging = join(versionRoot, `.staging-${stagingId.toLowerCase()}`);
-    mkdirSync(staging, { mode: 0o700 });
-    let renamed = false;
-    try {
-      const versionBytes = Buffer.from(JSON.stringify(version), "utf8");
-      writeAndSync(join(staging, "version.json"), versionBytes);
-      writeAndSync(join(staging, "manifest.json"), canonical.manifestBytes);
-      writeAndSync(join(staging, "bundle.json"), canonical.bundleBytes);
-      this.verifyDirectory(staging, version.id, version.content_digest, false);
-      fsyncDirectory(staging);
-      for (const name of ["version.json", "manifest.json", "bundle.json"]) {
-        chmodSync(join(staging, name), 0o400);
-      }
-      chmodSync(staging, 0o500);
-      this.rename(staging, destination);
-      renamed = true;
-      fsyncDirectory(versionRoot);
-      const finalized = this.verifyDirectory(
-        destination,
-        version.id,
-        version.content_digest,
-        true,
-      );
-
-      const relativePath = `${relativeVersionRoot}/${version.content_digest}`;
-      this.database.sqlite.exec("BEGIN IMMEDIATE");
-      try {
-        this.database.sqlite
-          .prepare(
-            `INSERT INTO cached_agent_versions (
-               version_id, tenant_id, owner_id, definition_id, version_number, content_digest,
-               version_json, policy_snapshot_json, cache_relative_path,
-               verified_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
-          )
-          .run(
-            version.id,
-            this.tenantId,
-            this.ownerId,
-            version.definition_id,
-            version.version_number,
-            version.content_digest,
-            JSON.stringify(version),
-            relativePath,
-            nowTimestamp(this.now),
-          );
-        this.database.sqlite.exec("COMMIT");
-      } catch (error) {
-        try {
-          this.database.sqlite.exec("ROLLBACK");
-        } catch {
-          // Preserve the primary database failure.
-        }
-        throw error;
-      }
-      return finalized;
-    } catch (error) {
-      removeOwnedCacheTree(renamed ? destination : staging);
-      throw error;
-    }
+    this.persistVersionRow(version, relativePath, null);
+    return finalized;
   }
 
   getVerifiedVersion(versionIdInput: string): AgentVersion {
@@ -471,15 +444,30 @@ export class AgentVersionCache {
       throw new AgentVersionCacheError("cache_not_found");
     }
     const versionId = versionIdInput.toLowerCase();
-    const row = this.database.sqlite
-      .prepare(
-        `SELECT * FROM cached_agent_versions
-         WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
-      )
-      .get(versionId, this.tenantId, this.ownerId) as
-      | CachedVersionRow
-      | undefined;
-    if (!row) throw new AgentVersionCacheError("cache_not_found");
+    const row = this.readRow(versionId);
+    if (!row) {
+      return filesystemOperation(() => this.recoverDirectoryOnly(versionId));
+    }
+    return filesystemOperation(() =>
+      this.ensureImmutableDirectory(row.version, row.relativePath, false),
+    );
+  }
+
+  private readRow(versionId: string): ValidatedCachedVersionRow | null {
+    let row: CachedVersionRow | undefined;
+    try {
+      row = this.database.sqlite
+        .prepare(
+          `SELECT * FROM cached_agent_versions
+           WHERE version_id = ? AND tenant_id = ? AND owner_id = ?`,
+        )
+        .get(versionId, this.tenantId, this.ownerId) as
+        | CachedVersionRow
+        | undefined;
+    } catch (error) {
+      throw databaseFailure(error);
+    }
+    if (!row) return null;
     const accountRelativePath = `accounts/${this.tenantId}/${this.ownerId}/${versionId}/${row.content_digest}`;
     const legacyRelativePath = `${versionId}/${row.content_digest}`;
     if (
@@ -490,6 +478,8 @@ export class AgentVersionCache {
       typeof row.content_digest !== "string" ||
       !DIGEST_PATTERN.test(row.content_digest) ||
       typeof row.version_json !== "string" ||
+      (row.policy_snapshot_json !== null &&
+        typeof row.policy_snapshot_json !== "string") ||
       typeof row.cache_relative_path !== "string" ||
       (row.cache_relative_path !== accountRelativePath &&
         row.cache_relative_path !== legacyRelativePath) ||
@@ -497,26 +487,300 @@ export class AgentVersionCache {
     ) {
       throw new AgentVersionCacheError("cache_corrupt");
     }
-    const directory = join(
-      this.database.paths.versionsPath,
-      ...row.cache_relative_path.split("/"),
-    );
     let version: AgentVersion;
     try {
-      version = this.verifyDirectory(
-        directory,
-        versionId,
-        row.content_digest,
-        true,
-      );
-      if (JSON.stringify(version) !== row.version_json) {
+      version = parseStoredVersion(Buffer.from(row.version_json, "utf8"));
+      const canonical = canonicalizeAgentVersionContent(version);
+      const verified = this.trust.verifyVersion(version, {
+        issuer: this.origin,
+        runtimeVersion: this.runtimeVersion,
+      });
+      if (
+        version.id !== versionId ||
+        version.definition_id !== row.definition_id ||
+        version.version_number !== row.version_number ||
+        version.content_digest !== row.content_digest ||
+        JSON.stringify(version) !== row.version_json ||
+        canonical.contentDigest !== row.content_digest ||
+        verified.contentDigest !== row.content_digest
+      ) {
         throw new AgentVersionCacheError("cache_corrupt");
+      }
+      if (row.policy_snapshot_json !== null) {
+        parsePolicyCollection(row.policy_snapshot_json);
       }
     } catch (error) {
       if (error instanceof AgentVersionCacheError) throw error;
       throw new AgentVersionCacheError("cache_corrupt");
     }
-    return version;
+    return {
+      relativePath: row.cache_relative_path,
+      version,
+      verifiedAt: row.verified_at,
+      policySnapshotJson: row.policy_snapshot_json,
+    };
+  }
+
+  private accountVersionRoot(versionId: string): string {
+    return join(
+      this.database.paths.versionsPath,
+      "accounts",
+      this.tenantId,
+      this.ownerId,
+      versionId,
+    );
+  }
+
+  private relativePath(version: AgentVersion): string {
+    return `accounts/${this.tenantId}/${this.ownerId}/${version.id}/${version.content_digest}`;
+  }
+
+  private ensureImmutableDirectory(
+    version: AgentVersion,
+    relativePath: string,
+    replaceInvalid: boolean,
+  ): AgentVersion {
+    const directory = join(
+      this.database.paths.versionsPath,
+      ...relativePath.split("/"),
+    );
+    const parent = dirname(directory);
+    mkdirSync(parent, { recursive: true, mode: 0o700 });
+    const cacheRoot = realpathSync.native(this.database.paths.versionsPath);
+    const canonicalParent = realpathSync.native(parent);
+    if (!isContained(cacheRoot, canonicalParent)) {
+      throw new AgentVersionCacheError("cache_corrupt");
+    }
+    this.assertNoConflictingDestinations(
+      canonicalParent,
+      version.content_digest,
+    );
+    if (existsSync(directory)) {
+      try {
+        const existing = this.verifyDirectory(
+          directory,
+          version.id,
+          version.content_digest,
+          true,
+        );
+        if (JSON.stringify(existing) !== JSON.stringify(version)) {
+          throw new AgentVersionCacheError("cache_corrupt");
+        }
+        this.removeRecognizedStagingTrees(dirname(directory));
+        return existing;
+      } catch (error) {
+        if (!replaceInvalid) {
+          if (error instanceof AgentVersionCacheError) throw error;
+          throw filesystemFailure(error);
+        }
+        if (
+          !(error instanceof AgentVersionCacheError) ||
+          (error.code !== "cache_corrupt" &&
+            error.code !== "cache_permissions_invalid")
+        ) {
+          throw filesystemFailure(error);
+        }
+        removeOwnedCacheTree(directory);
+      }
+    }
+    const stagingId = this.randomUUID();
+    if (!validUuid(stagingId)) {
+      throw new AgentVersionCacheError("cache_corrupt");
+    }
+    const staging = join(parent, `.staging-${stagingId.toLowerCase()}`);
+    mkdirSync(staging, { mode: 0o700 });
+    let renamed = false;
+    let destinationVerified = false;
+    try {
+      const canonical = canonicalizeAgentVersionContent(version);
+      writeAndSync(
+        join(staging, "version.json"),
+        Buffer.from(JSON.stringify(version), "utf8"),
+      );
+      writeAndSync(join(staging, "manifest.json"), canonical.manifestBytes);
+      writeAndSync(join(staging, "bundle.json"), canonical.bundleBytes);
+      this.verifyDirectory(staging, version.id, version.content_digest, false);
+      fsyncDirectory(staging);
+      for (const name of ["version.json", "manifest.json", "bundle.json"]) {
+        chmodSync(join(staging, name), 0o400);
+      }
+      chmodSync(staging, 0o500);
+      try {
+        this.rename(staging, directory);
+      } catch (error) {
+        const code = systemErrorCode(error);
+        if (
+          (code === "EEXIST" || code === "ENOTEMPTY" || code === "ENOENT") &&
+          existsSync(directory)
+        ) {
+          let winner: AgentVersion;
+          try {
+            winner = this.verifyDirectory(
+              directory,
+              version.id,
+              version.content_digest,
+              true,
+            );
+            if (JSON.stringify(winner) !== JSON.stringify(version)) {
+              throw new AgentVersionCacheError("cache_conflict");
+            }
+          } catch {
+            throw new AgentVersionCacheError("cache_conflict");
+          }
+          try {
+            this.removeRecognizedStagingTrees(parent);
+          } catch (cleanupError) {
+            throw filesystemFailure(cleanupError);
+          }
+          return winner;
+        }
+        throw filesystemFailure(error);
+      }
+      renamed = true;
+      fsyncDirectory(parent);
+      const finalized = this.verifyDirectory(
+        directory,
+        version.id,
+        version.content_digest,
+        true,
+      );
+      if (JSON.stringify(finalized) !== JSON.stringify(version)) {
+        throw new AgentVersionCacheError("cache_corrupt");
+      }
+      destinationVerified = true;
+      this.removeRecognizedStagingTrees(parent);
+      return finalized;
+    } catch (error) {
+      try {
+        removeOwnedCacheTree(
+          renamed && !destinationVerified ? directory : staging,
+        );
+      } catch (cleanupError) {
+        throw filesystemFailure(cleanupError);
+      }
+      if (
+        renamed &&
+        error instanceof AgentVersionCacheError &&
+        (error.code === "cache_corrupt" ||
+          error.code === "cache_permissions_invalid")
+      ) {
+        throw new AgentVersionCacheError("cache_recovery_failed");
+      }
+      if (error instanceof AgentVersionCacheError) throw error;
+      throw filesystemFailure(error);
+    }
+  }
+
+  private recoverDirectoryOnly(versionId: string): AgentVersion {
+    const versionRoot = this.accountVersionRoot(versionId);
+    if (!existsSync(versionRoot)) {
+      throw new AgentVersionCacheError("cache_not_found");
+    }
+    const stats = lstatSync(versionRoot);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      throw new AgentVersionCacheError("cache_corrupt");
+    }
+    const cacheRoot = realpathSync.native(this.database.paths.versionsPath);
+    const canonicalVersionRoot = realpathSync.native(versionRoot);
+    if (!isContained(cacheRoot, canonicalVersionRoot)) {
+      throw new AgentVersionCacheError("cache_corrupt");
+    }
+    const entries = readdirSync(canonicalVersionRoot);
+    const unexpected = entries.filter(
+      (name) =>
+        !DIGEST_PATTERN.test(name) && !STAGING_DIRECTORY_PATTERN.test(name),
+    );
+    if (unexpected.length > 0) {
+      throw new AgentVersionCacheError("cache_corrupt");
+    }
+    const digests = entries.filter((name) => DIGEST_PATTERN.test(name));
+    if (digests.length === 0) {
+      throw new AgentVersionCacheError("cache_not_found");
+    }
+    if (digests.length > 1) {
+      throw new AgentVersionCacheError("cache_conflict");
+    }
+    const digest = digests[0];
+    const directory = join(canonicalVersionRoot, digest);
+    const version = this.verifyDirectory(directory, versionId, digest, true);
+    this.removeRecognizedStagingTrees(canonicalVersionRoot);
+    const relativePath = this.relativePath(version);
+    this.persistVersionRow(version, relativePath, null);
+    return this.getVerifiedVersion(versionId);
+  }
+
+  private persistVersionRow(
+    version: AgentVersion,
+    relativePath: string,
+    policySnapshotJson: string | null,
+  ): void {
+    let began = false;
+    try {
+      this.database.sqlite.exec("BEGIN IMMEDIATE");
+      began = true;
+      const existing = this.readRow(version.id);
+      if (existing) {
+        if (
+          existing.relativePath !== relativePath ||
+          JSON.stringify(existing.version) !== JSON.stringify(version)
+        ) {
+          throw new AgentVersionCacheError("cache_conflict");
+        }
+      } else {
+        this.database.sqlite
+          .prepare(
+            `INSERT INTO cached_agent_versions (
+               version_id, tenant_id, owner_id, definition_id, version_number, content_digest,
+               version_json, policy_snapshot_json, cache_relative_path,
+               verified_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            version.id,
+            this.tenantId,
+            this.ownerId,
+            version.definition_id,
+            version.version_number,
+            version.content_digest,
+            JSON.stringify(version),
+            policySnapshotJson,
+            relativePath,
+            nowTimestamp(this.now),
+          );
+      }
+      this.database.sqlite.exec("COMMIT");
+    } catch (error) {
+      if (began) {
+        try {
+          this.database.sqlite.exec("ROLLBACK");
+        } catch {
+          // Preserve the primary database failure.
+        }
+      }
+      throw databaseFailure(error);
+    }
+  }
+
+  private removeRecognizedStagingTrees(versionRoot: string): void {
+    for (const name of readdirSync(versionRoot)) {
+      if (STAGING_DIRECTORY_PATTERN.test(name)) {
+        removeOwnedCacheTree(join(versionRoot, name));
+      }
+    }
+  }
+
+  private assertNoConflictingDestinations(
+    versionRoot: string,
+    expectedDigest: string,
+  ): void {
+    for (const name of readdirSync(versionRoot)) {
+      if (name === expectedDigest || STAGING_DIRECTORY_PATTERN.test(name)) {
+        continue;
+      }
+      throw new AgentVersionCacheError(
+        DIGEST_PATTERN.test(name) ? "cache_conflict" : "cache_corrupt",
+      );
+    }
   }
 
   cacheVerifiedPolicySnapshot(

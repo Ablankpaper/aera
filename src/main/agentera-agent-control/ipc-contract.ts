@@ -631,6 +631,42 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
   }
   if (code === "official_install_handle_invalid") return "invalid_request";
   if (code === "official_release_changed") return "conflict";
+  if (code === "cache_conflict" || code === "publication_cache_conflict") {
+    return "publication_cache_conflict";
+  }
+  if (code === "cache_corrupt" || code === "publication_cache_corrupt") {
+    return "publication_cache_corrupt";
+  }
+  if (
+    code === "cache_permissions_invalid" ||
+    code === "publication_cache_permissions_invalid"
+  ) {
+    return "publication_cache_permissions_invalid";
+  }
+  if (
+    code === "cache_filesystem_denied" ||
+    code === "publication_cache_filesystem_denied"
+  ) {
+    return "publication_cache_filesystem_denied";
+  }
+  if (
+    code === "cache_filesystem_failed" ||
+    code === "publication_cache_filesystem_failed"
+  ) {
+    return "publication_cache_filesystem_failed";
+  }
+  if (
+    code === "cache_database_failed" ||
+    code === "publication_cache_database_failed"
+  ) {
+    return "publication_cache_database_failed";
+  }
+  if (
+    code === "cache_recovery_failed" ||
+    code === "publication_cache_recovery_failed"
+  ) {
+    return "publication_cache_recovery_failed";
+  }
   if (
     code.includes("conflict") ||
     code === "draft_conflict" ||
@@ -645,11 +681,7 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
   ) {
     return "published_content_mismatch";
   }
-  if (
-    code === "publication_cache_failed" ||
-    code === "cache_corrupt" ||
-    code === "cache_permissions_invalid"
-  ) {
+  if (code === "publication_cache_failed") {
     return "publication_cache_failed";
   }
   if (code === "signature_verification_failed" || code.includes("signature")) {
