@@ -868,7 +868,11 @@ describe("restartGatewayViaCli", () => {
     healthStatuses.push(503, 200, 503, 503, 503, 200, 200, 200);
 
     const first = restartGatewayViaCli("work", 5, 1);
-    const second = restartGatewayViaCli("personal", 50, 1);
+    const second = restartGatewayViaCli(
+      "personal",
+      queuedRestartHealthTimeoutMs,
+      1,
+    );
 
     await expect(Promise.all([first, second])).resolves.toEqual([false, true]);
     expect(hermesCliArgsSpy).toHaveBeenCalledTimes(2);
