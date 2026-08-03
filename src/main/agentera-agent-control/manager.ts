@@ -374,6 +374,10 @@ export class AgenteraAgentControlManager {
   >();
   private runtimeBindingDeliveryInFlight = false;
   private runtimeBindingDeliveryRequested = false;
+  private readonly installationReconciliationFlights = new Map<
+    string,
+    Promise<void>
+  >();
 
   constructor(options: AgenteraAgentControlManagerOptions) {
     this.options = options;
@@ -491,6 +495,7 @@ export class AgenteraAgentControlManager {
     this.publicationOwners.clear();
     this.emitState();
     this.queueRuntimeBindingDelivery();
+    this.queueInstallationReconciliation();
   }
 
   notifyAgentContextChanged(): void {
@@ -1653,6 +1658,64 @@ export class AgenteraAgentControlManager {
       if (this.runtimeBindingDeliveryRequested) {
         this.queueRuntimeBindingDelivery();
       }
+    });
+  }
+
+  private queueInstallationReconciliation(): void {
+    let full: FullAgentControlOptions;
+    try {
+      full = this.requireFull();
+    } catch {
+      return;
+    }
+    const state = full.getAuthState();
+    if (
+      state.status !== "authenticated" ||
+      !state.cloudAvailable ||
+      full.getConnectionMode() !== "local"
+    ) {
+      return;
+    }
+    const ownerKey = runtimeComponentKey(full.getOwner());
+    void (async () => {
+      const runtimeVersion = requireRuntimeVersion(
+        await full.getRuntimeVersion(),
+      );
+      const key = `${ownerKey}\0${runtimeVersion}`;
+      if (this.installationReconciliationFlights.has(key)) return;
+      const flight = (async (): Promise<void> => {
+        const currentState = full.getAuthState();
+        if (
+          currentState.status !== "authenticated" ||
+          !currentState.cloudAvailable ||
+          full.getConnectionMode() !== "local" ||
+          runtimeComponentKey(full.getOwner()) !== ownerKey
+        ) {
+          return;
+        }
+        const components = await this.ensureRuntimeComponents();
+        if (components.key !== key) return;
+        const readyState = full.getAuthState();
+        if (
+          readyState.status !== "authenticated" ||
+          !readyState.cloudAvailable ||
+          full.getConnectionMode() !== "local" ||
+          runtimeComponentKey(full.getOwner()) !== ownerKey
+        ) {
+          return;
+        }
+        await components.installations.reconcilePendingInstallations();
+      })();
+      this.installationReconciliationFlights.set(key, flight);
+      try {
+        await flight;
+      } finally {
+        if (this.installationReconciliationFlights.get(key) === flight) {
+          this.installationReconciliationFlights.delete(key);
+        }
+      }
+    })().catch(() => {
+      console.error("[AGENTERA_INSTALLATION_RECONCILIATION] failed");
     });
   }
 }

@@ -146,9 +146,11 @@ Run the focused command from Step 2, `npm run typecheck:node`, and `git diff --c
 - Modify: `src/main/agentera-agent-control/manager.ts`
 - Modify: `src/main/app/start.ts`
 
-- [ ] **Step 1: Write failure-first crash-window tests**
+- [x] **Step 1: Write failure-first crash-window tests**
 
 Cover restart/retry after each durable edge: reserved Profile created before callback return, base owner binding written before SQLite Runtime Profile ID, Runtime Profile ID written before Agent Installation attachment, attachment before projection activation, Cloud activation before local active commit, duplicate retry, and two concurrent retries. Assert the same Installation/Profile/binding is reused and a claimed existing Profile is never deleted.
+
+Also cover Cloud create success before the local Installation/journal, immutable creation-target replay, authenticated-online-local scheduling, and terminal repair for foreign ownership, reservation drift, Runtime Profile ID collision, and unexpected private markers.
 
 ```ts
 activateInstallation.mockResolvedValue(activeInstallation);
@@ -170,7 +172,7 @@ expect(restarted.getLocalInstallation(AGENT_INSTALLATION_ID).status).toBe(
 );
 ```
 
-- [ ] **Step 2: Run the manager tests and verify RED**
+- [x] **Step 2: Run the manager tests and verify RED**
 
 Run:
 
@@ -180,7 +182,7 @@ npm test -- src/main/agentera-agent-control/installation-manager.test.ts src/mai
 
 Expected: FAIL because no materialization journal or startup reconciliation exists.
 
-- [ ] **Step 3: Implement the minimum durable saga**
+- [x] **Step 3: Implement the minimum durable saga**
 
 For each pending Installation, serialize work by Installation ID and execute:
 
@@ -199,11 +201,11 @@ journal prepared
 
 Retries re-read physical/binding/SQLite postconditions instead of creating a second Profile. Ambiguous ownership, private data in an unbound reserved Profile, or cross-owner state becomes `repair_required` and is never deleted or reassigned. Cloud activation is safely replayed with the same idempotency key after an ambiguous network result or crash.
 
-- [ ] **Step 4: Reconcile after authenticated startup and owner changes**
+- [x] **Step 4: Reconcile after authenticated startup and owner changes**
 
 `AgenteraAgentControlManager` uses one in-process single-flight per owner/runtime key. An authenticated online access-state event schedules `reconcilePendingInstallations`; offline/signed-out states do not call Cloud. Errors are logged by stable code only and leave the journal retryable.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 Run:
 

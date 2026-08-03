@@ -146,6 +146,22 @@ export type ProfileClaimInspection =
       binding: RuntimeOwnerBinding;
     };
 
+export type AgenteraProfileBindingRepairCode =
+  | "profile_owner_conflict"
+  | "profile_reservation_conflict"
+  | "runtime_profile_conflict"
+  | "profile_private_data_conflict";
+
+export class AgenteraProfileBindingRepairError extends Error {
+  readonly code: AgenteraProfileBindingRepairCode;
+
+  constructor(code: AgenteraProfileBindingRepairCode, message: string) {
+    super(message);
+    this.name = "AgenteraProfileBindingRepairError";
+    this.code = code;
+  }
+}
+
 const PRIVATE_PROFILE_MARKERS = [
   ".env",
   "auth.json",
@@ -543,7 +559,8 @@ export class AgenteraProfileBindingStore {
     const existing = bindings.find((entry) => entry.profilePath === canonical);
     if (existing) {
       if (sameOwner(existing.binding, owner)) return { ...existing.binding };
-      throw new Error(
+      throw new AgenteraProfileBindingRepairError(
+        "profile_owner_conflict",
         "This physical Runtime Profile cannot be reassigned to another Aera owner.",
       );
     }
@@ -588,7 +605,10 @@ export class AgenteraProfileBindingStore {
     );
     if (existing) {
       if (!reservationMatchesRequest(existing, request)) {
-        throw new Error("Aera fresh Profile reservation conflict.");
+        throw new AgenteraProfileBindingRepairError(
+          "profile_reservation_conflict",
+          "Aera fresh Profile reservation conflict.",
+        );
       }
       return { ...existing };
     }
@@ -597,7 +617,10 @@ export class AgenteraProfileBindingStore {
         (candidate) => candidate.profileId === request.profileId,
       )
     ) {
-      throw new Error("Aera fresh Profile reservation conflict.");
+      throw new AgenteraProfileBindingRepairError(
+        "profile_reservation_conflict",
+        "Aera fresh Profile reservation conflict.",
+      );
     }
     const runtimeProfileId = this.randomUUID();
     if (
@@ -646,6 +669,37 @@ export class AgenteraProfileBindingStore {
       throw new Error("Aera fresh Profile reservation conflict.");
     }
     return { ...reservation };
+  }
+
+  completeFreshProfileReservation(
+    operationId: string,
+    owner: AgenteraRuntimeOwner,
+    runtimeProfileId: string,
+  ): boolean {
+    assertOwner(owner);
+    if (!validUuid(operationId) || !validUuid(runtimeProfileId)) {
+      throw new Error("Aera fresh Profile reservation identity is invalid.");
+    }
+    const state = this.readState();
+    const operationIndex = state.freshProfileOperations.findIndex(
+      (candidate) => candidate.operationId === operationId,
+    );
+    if (operationIndex < 0) return false;
+    const reservation = state.freshProfileOperations[operationIndex];
+    const binding = state.bindings.find(
+      (entry) => entry.binding.runtimeProfileId === runtimeProfileId,
+    );
+    if (
+      !reservationHasOwner(reservation, owner) ||
+      reservation.runtimeProfileId !== runtimeProfileId ||
+      !binding ||
+      !sameOwner(binding.binding, owner)
+    ) {
+      throw new Error("Aera fresh Profile reservation conflict.");
+    }
+    state.freshProfileOperations.splice(operationIndex, 1);
+    this.persistState(state);
+    return true;
   }
 
   reconcileActivatingFreshProfiles(
@@ -713,7 +767,8 @@ export class AgenteraProfileBindingStore {
     // none is read or copied here. Memory, USER, files, auth, and Curator
     // markers remain forbidden before activation can start local adaptation.
     if (freshProfileHasPrivateData(profilePath)) {
-      throw new Error(
+      throw new AgenteraProfileBindingRepairError(
+        "profile_private_data_conflict",
         "Fresh Runtime Profile creation unexpectedly produced private data.",
       );
     }
@@ -730,12 +785,16 @@ export class AgenteraProfileBindingStore {
     );
     if (stored) {
       if (!sameOwner(stored.binding, adapters.owner)) {
-        throw new Error(
+        throw new AgenteraProfileBindingRepairError(
+          "profile_owner_conflict",
           "This physical Runtime Profile cannot be reassigned to another Aera owner.",
         );
       }
       if (stored.binding.runtimeProfileId !== reservation.runtimeProfileId) {
-        throw new Error("Aera fresh Profile reservation conflict.");
+        throw new AgenteraProfileBindingRepairError(
+          "runtime_profile_conflict",
+          "Aera fresh Profile reservation conflict.",
+        );
       }
     } else {
       if (
@@ -744,7 +803,10 @@ export class AgenteraProfileBindingStore {
             entry.binding.runtimeProfileId === reservation.runtimeProfileId,
         )
       ) {
-        throw new Error("Aera fresh Profile reservation conflict.");
+        throw new AgenteraProfileBindingRepairError(
+          "runtime_profile_conflict",
+          "Aera fresh Profile reservation conflict.",
+        );
       }
       stored = {
         profilePath: canonical,

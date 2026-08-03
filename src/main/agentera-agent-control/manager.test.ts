@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AgenteraAuthPublicState } from "../../shared/agentera-auth";
 import type {
   AgenteraAgentControlContext,
   CreateAgentDraftInput,
@@ -12,6 +13,7 @@ import type {
 } from "../../shared/agentera-agent-control";
 import type { AgenteraAgentControlClient } from "./client";
 import type { AgenteraHermesAdapter } from "./hermes-adapter";
+import { AgentInstallationManager } from "./installation-manager";
 import { RuntimeBindingStore } from "./runtime-binding-store";
 import {
   openAgenteraControlPlaneDatabase,
@@ -90,6 +92,12 @@ describe("Agent control Organization Foundation context", () => {
   function fullManager(
     getContext: () => AgenteraAgentControlContext,
     clientOverrides: Record<string, unknown> = {},
+    runtimeOverrides: Partial<{
+      getOwner: () => typeof OWNER;
+      getAuthState: () => AgenteraAuthPublicState;
+      getRuntimeVersion: () => string | Promise<string>;
+      getConnectionMode: () => "local" | "remote" | "ssh";
+    }> = {},
   ): {
     manager: AgenteraAgentControlManager;
     database: AgenteraControlPlaneDatabase;
@@ -126,18 +134,22 @@ describe("Agent control Organization Foundation context", () => {
           activateProfile: vi.fn(),
         },
         userDataPath,
-        getOwner: () => OWNER,
+        getOwner: runtimeOverrides.getOwner ?? (() => OWNER),
         getAgentContext: getContext,
-        getAuthState: () => ({
-          status: "authenticated",
-          userId: OWNER.ownerId,
-          personalSpaceId: OWNER.tenantId,
-          deviceId: OWNER.deviceInstallationId,
-          offlineExpiresAt: "2026-07-28T00:00:00.000Z",
-          cloudAvailable: true,
-        }),
-        getRuntimeVersion: () => "v0.18.2-agentera.1",
-        getConnectionMode: () => "local",
+        getAuthState:
+          runtimeOverrides.getAuthState ??
+          (() => ({
+            status: "authenticated",
+            userId: OWNER.ownerId,
+            personalSpaceId: OWNER.tenantId,
+            deviceId: OWNER.deviceInstallationId,
+            offlineExpiresAt: "2026-07-28T00:00:00.000Z",
+            cloudAvailable: true,
+          })),
+        getRuntimeVersion:
+          runtimeOverrides.getRuntimeVersion ?? (() => "v0.18.2-agentera.1"),
+        getConnectionMode:
+          runtimeOverrides.getConnectionMode ?? (() => "local"),
         assertEntitled: () => undefined,
       }),
     };
@@ -413,6 +425,62 @@ describe("Agent control Organization Foundation context", () => {
     expect(runtimeComponentKey(OWNER)).toBe(
       [OWNER.tenantId, OWNER.ownerId, OWNER.deviceInstallationId].join("\0"),
     );
+  });
+
+  it("single-flights installation reconciliation only for authenticated online local Runtime access", async () => {
+    let authState: AgenteraAuthPublicState = { status: "unauthenticated" };
+    let connectionMode: "local" | "remote" | "ssh" = "local";
+    let finishReconciliation!: () => void;
+    const reconciliation = new Promise<never[]>((resolve) => {
+      finishReconciliation = () => resolve([]);
+    });
+    const reconcilePendingInstallations = vi
+      .spyOn(
+        AgentInstallationManager.prototype,
+        "reconcilePendingInstallations",
+      )
+      .mockReturnValue(reconciliation);
+    const { manager } = fullManager(
+      () => ({ scope: "USER" }),
+      {},
+      {
+        getAuthState: () => authState,
+        getConnectionMode: () => connectionMode,
+      },
+    );
+
+    manager.notifyAccessStateChanged();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reconcilePendingInstallations).not.toHaveBeenCalled();
+
+    authState = {
+      status: "offline",
+      userId: OWNER.ownerId,
+      personalSpaceId: OWNER.tenantId,
+      deviceId: OWNER.deviceInstallationId,
+      offlineExpiresAt: "2026-07-28T00:00:00.000Z",
+      cloudAvailable: false,
+    };
+    manager.notifyAccessStateChanged();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reconcilePendingInstallations).not.toHaveBeenCalled();
+
+    authState = { ...authState, status: "authenticated", cloudAvailable: true };
+    connectionMode = "remote";
+    manager.notifyAccessStateChanged();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reconcilePendingInstallations).not.toHaveBeenCalled();
+
+    connectionMode = "local";
+    manager.notifyAccessStateChanged();
+    manager.notifyAccessStateChanged();
+    await vi.waitFor(() => {
+      expect(reconcilePendingInstallations).toHaveBeenCalledTimes(1);
+    });
+
+    finishReconciliation();
+    await reconciliation;
+    await Promise.resolve();
   });
 
   it("does not interrupt an already installed Hermes Profile turn", async () => {

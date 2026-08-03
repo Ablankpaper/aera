@@ -431,6 +431,48 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
     ).toBeNull();
   });
 
+  it("completes a non-activating reservation only for its exact Runtime Profile", () => {
+    const reservedPath = join(root, "profiles", "installation-reserved");
+    store.reserveFreshProfile({
+      operationId: AGENT_INSTALLATION_ID,
+      name: "Installation Reserved",
+      owner,
+      profileId: "installation-reserved",
+      activate: false,
+    });
+    const reconciled = store.reconcileFreshProfile(AGENT_INSTALLATION_ID, {
+      owner,
+      createProfile: (_name, _cloneFrom, reservedProfileId) => {
+        mkdirSync(reservedPath, { recursive: true });
+        return { success: true, id: reservedProfileId };
+      },
+      resolveProfilePath: () => reservedPath,
+      activateProfile: vi.fn(),
+    });
+
+    expect(() =>
+      store.completeFreshProfileReservation(
+        AGENT_INSTALLATION_ID,
+        owner,
+        OTHER_RUNTIME_PROFILE_ID,
+      ),
+    ).toThrow(/reservation conflict/i);
+    expect(
+      store.completeFreshProfileReservation(
+        AGENT_INSTALLATION_ID,
+        owner,
+        reconciled.binding.runtimeProfileId,
+      ),
+    ).toBe(true);
+    expect(
+      store.completeFreshProfileReservation(
+        AGENT_INSTALLATION_ID,
+        owner,
+        reconciled.binding.runtimeProfileId,
+      ),
+    ).toBe(false);
+  });
+
   it("does not claim a reserved path already bound to another owner", () => {
     const reservedPath = join(root, "profiles", "foreign-reserved");
     mkdirSync(reservedPath, { recursive: true });

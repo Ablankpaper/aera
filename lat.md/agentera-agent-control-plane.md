@@ -248,6 +248,12 @@ Fresh Installation materialization reserves the exact local Profile ID and opaqu
 
 Desktop schema v9 adds the narrow `installation_operations` journal. It stores only the exact Owner/device/Installation and bounded target/model identifiers, opaque Runtime Profile ID, phase, retry code, CAS revision, and timestamps; it contains no physical path, credential, token, Profile bytes, or Cloud body. Phases advance in order from `prepared` through `committed`, while ambiguous ownership can become terminal `repair_required`; stale revisions and cross-Owner reads fail closed.
 
+Before the Cloud create request, `pending_sanitized_records` durably stores the stable idempotency key and a bounded Profile target with no physical path or credential. A cold restart replays that exact create key, verifies the returned pending Installation and policy, persists the local row and journal before deleting the intent, then resumes materialization.
+
+Materialization rechecks each durable postcondition and serializes concurrent work by Agent Installation. The local Runtime Profile ID and `profile_bound` phase share one SQLite transaction; Cloud activation uses one stable key; the local active row and `committed` phase share another transaction. Profile attachment and projection are idempotently verified between those edges.
+
+Foreign ownership, immutable reservation drift, Runtime Profile ID collision, and unexpected private fresh-Profile markers become `repair_required` with bounded stable codes. Recovery never deletes, reassigns, or retries those Profiles. [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#notifyAccessStateChanged]] schedules one reconciliation flight per Owner/Runtime only for authenticated online local access; offline, signed-out, Remote, and SSH states do not start Cloud recovery.
+
 Manual selection downloads and verifies the immutable version, calls the cloud selection transaction, retrieves the newly signed policy through `GET /api/v1/policy-snapshots/{policy_snapshot_id}`, and only then atomically activates the read-only projection for later conversations. A missing or invalid policy leaves the last local version selected.
 
 [[src/main/agentera-agent-control/runtime-binding-store.ts#RuntimeBindingStore]] commits a complete local binding before queuing its sanitized cloud record. [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] retries that outbox after installed turns, session attachment, and authentication changes, but delivery failure cannot delay or roll back Hermes.

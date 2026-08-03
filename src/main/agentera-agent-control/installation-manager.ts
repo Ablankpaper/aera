@@ -40,13 +40,21 @@ import type {
   ActivatedHermesProjection,
   HermesVersionProjection,
 } from "./hermes-projection";
-import type {
-  AgenteraProfileBindingStore,
-  AgenteraRuntimeOwner,
-  ProfileCreationResult,
-  RuntimeOwnerBinding,
+import {
+  AgenteraProfileBindingRepairError,
+  type AgenteraProfileBindingRepairCode,
+  type AgenteraProfileBindingStore,
+  type AgenteraRuntimeOwner,
+  type ProfileCreationResult,
+  type RuntimeOwnerBinding,
 } from "../agentera-profile-binding";
 import type { SessionModelOverride } from "../../shared/model-override";
+import {
+  InstallationOperationStore,
+  InstallationOperationStoreError,
+  type InstallationOperationRecord,
+  type InstallationOperationTarget,
+} from "./installation-operation-store";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -71,6 +79,7 @@ export type AgentInstallationManagerErrorCode =
 
 type AgentInstallationRetryCode =
   | AgentInstallationManagerErrorCode
+  | AgenteraProfileBindingRepairCode
   | "materialization_version_failed"
   | "materialization_policy_failed"
   | "materialization_projection_failed"
@@ -283,6 +292,7 @@ interface InstallationCreationIntent {
   officialReleaseId: string | null;
   selectedReleaseRevisionId: string | null;
   updatePolicy: "manual" | "managed";
+  profileTarget: InstallationOperationTarget | null;
 }
 
 interface ManagedUpdateIntent {
@@ -301,6 +311,162 @@ interface NormalizedInstallationSource {
   officialReleaseId: string | null;
   selectedReleaseRevisionId: string | null;
   updatePolicy: "manual" | "managed";
+}
+
+type CreationIntentValidationCode =
+  | "invalid_installation_request"
+  | "installation_conflict";
+
+function creationProfileId(
+  value: unknown,
+  code: CreationIntentValidationCode,
+): string {
+  if (typeof value !== "string" || !PROFILE_ID_PATTERN.test(value)) {
+    throw new AgentInstallationManagerError(code);
+  }
+  return value;
+}
+
+function creationText(
+  value: unknown,
+  maximumBytes: number,
+  code: CreationIntentValidationCode,
+): string {
+  if (
+    typeof value !== "string" ||
+    value.trim().length === 0 ||
+    Buffer.byteLength(value, "utf8") > maximumBytes ||
+    /[\0\r\n]/.test(value)
+  ) {
+    throw new AgentInstallationManagerError(code);
+  }
+  return value.trim();
+}
+
+function serializeCreationProfileTarget(
+  target: InstallationOperationTarget,
+): Record<string, string | null> {
+  return target.kind === "fresh"
+    ? {
+        kind: "fresh",
+        profile_id: target.profileId,
+        display_name: target.displayName,
+        model_source_profile_id: target.modelSourceProfileId ?? null,
+        model_source_model_id: target.modelSourceModelId ?? null,
+      }
+    : {
+        kind: "claim",
+        profile_id: target.profileId,
+        display_name: null,
+        model_source_profile_id: null,
+        model_source_model_id: null,
+      };
+}
+
+function parseCreationProfileTarget(
+  value: unknown,
+): InstallationOperationTarget {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new AgentInstallationManagerError("installation_conflict");
+  }
+  const record = value as Record<string, unknown>;
+  const expectedKeys = [
+    "display_name",
+    "kind",
+    "model_source_model_id",
+    "model_source_profile_id",
+    "profile_id",
+  ].sort();
+  if (Object.keys(record).sort().join("\0") !== expectedKeys.join("\0")) {
+    throw new AgentInstallationManagerError("installation_conflict");
+  }
+  const profileId = creationProfileId(
+    record.profile_id,
+    "installation_conflict",
+  );
+  if (record.kind === "claim") {
+    if (
+      record.display_name !== null ||
+      record.model_source_profile_id !== null ||
+      record.model_source_model_id !== null
+    ) {
+      throw new AgentInstallationManagerError("installation_conflict");
+    }
+    return { kind: "claim", profileId };
+  }
+  if (record.kind !== "fresh") {
+    throw new AgentInstallationManagerError("installation_conflict");
+  }
+  const displayName = creationText(
+    record.display_name,
+    256,
+    "installation_conflict",
+  );
+  const modelSourceProfileId =
+    record.model_source_profile_id === null
+      ? null
+      : creationProfileId(
+          record.model_source_profile_id,
+          "installation_conflict",
+        );
+  const modelSourceModelId =
+    record.model_source_model_id === null
+      ? null
+      : creationText(
+          record.model_source_model_id,
+          512,
+          "installation_conflict",
+        );
+  if (modelSourceModelId !== null && modelSourceProfileId === null) {
+    throw new AgentInstallationManagerError("installation_conflict");
+  }
+  return {
+    kind: "fresh",
+    profileId,
+    displayName,
+    ...(modelSourceProfileId ? { modelSourceProfileId } : {}),
+    ...(modelSourceModelId ? { modelSourceModelId } : {}),
+  };
+}
+
+function creationProfileTargetMatchesInput(
+  stored: InstallationOperationTarget,
+  input: AgentInstallationProfileTarget,
+): boolean {
+  if (stored.kind === "claim") {
+    return (
+      input.kind === "claim" &&
+      creationProfileId(input.profileId, "invalid_installation_request") ===
+        stored.profileId &&
+      basename(resolve(input.profilePath)) === stored.profileId
+    );
+  }
+  if (input.kind !== "fresh") return false;
+  const displayName = creationText(
+    input.name,
+    256,
+    "invalid_installation_request",
+  );
+  const modelSourceProfileId =
+    input.modelSourceProfileId === undefined
+      ? null
+      : creationProfileId(
+          input.modelSourceProfileId,
+          "invalid_installation_request",
+        );
+  const modelSourceModelId =
+    input.modelSourceModelId === undefined
+      ? null
+      : creationText(
+          input.modelSourceModelId,
+          512,
+          "invalid_installation_request",
+        );
+  return (
+    stored.displayName === displayName &&
+    (stored.modelSourceProfileId ?? null) === modelSourceProfileId &&
+    (stored.modelSourceModelId ?? null) === modelSourceModelId
+  );
 }
 
 function uuid(value: unknown): string {
@@ -989,6 +1155,12 @@ export class AgentInstallationManager {
   private readonly runtimeVersion: string;
   private readonly now: () => Date;
   private readonly randomUUID: () => string;
+  private readonly operations: InstallationOperationStore;
+  private readonly materializationFlights = new Map<
+    string,
+    Promise<LocalAgentInstallation>
+  >();
+  private reconciliationFlight: Promise<LocalAgentInstallation[]> | null = null;
 
   constructor(options: AgentInstallationManagerOptions) {
     if (
@@ -1015,6 +1187,11 @@ export class AgentInstallationManager {
     this.runtimeVersion = options.runtimeVersion;
     this.now = options.now ?? (() => new Date());
     this.randomUUID = options.randomUUID ?? nodeRandomUUID;
+    this.operations = new InstallationOperationStore({
+      database: this.database,
+      owner: this.owner,
+      now: this.now,
+    });
   }
 
   getLocalInstallation(
@@ -1266,18 +1443,40 @@ export class AgentInstallationManager {
     if (source.scope === "PLATFORM" && input.profile.kind !== "fresh") {
       throw new AgentInstallationManagerError("invalid_installation_request");
     }
-    const intent = this.beginCreationIntent(definitionId, versionId, source);
+    const intent = this.beginCreationIntent(
+      definitionId,
+      versionId,
+      source,
+      input.profile,
+    );
+    return this.executeCreationIntent(intent);
+  }
+
+  private async executeCreationIntent(
+    intent: InstallationCreationIntent,
+  ): Promise<LocalAgentInstallation> {
+    if (intent.profileTarget === null) {
+      throw new AgentInstallationManagerError("installation_conflict");
+    }
+    const source: NormalizedInstallationSource = {
+      scope: intent.sourceScope,
+      workspaceId: intent.sourceWorkspaceId,
+      organizationId: intent.sourceOrganizationId,
+      officialReleaseId: intent.officialReleaseId,
+      selectedReleaseRevisionId: intent.selectedReleaseRevisionId,
+      updatePolicy: intent.updatePolicy,
+    };
     let creation: AgentInstallationCreation;
     try {
       const request: CreateAgentInstallationRequest = {
-        definition_id: definitionId,
+        definition_id: intent.definitionId,
         ...(source.scope === "PLATFORM"
           ? {
               official_release_revision_id:
                 source.selectedReleaseRevisionId as string,
             }
           : {
-              version_id: versionId,
+              version_id: intent.versionId,
               ...(source.scope === "WORKSPACE"
                 ? { workspace_id: source.workspaceId as string }
                 : source.scope === "ORGANIZATION"
@@ -1291,8 +1490,8 @@ export class AgentInstallationManager {
       );
       assertPendingCreation(
         creation,
-        definitionId,
-        versionId,
+        intent.definitionId,
+        intent.versionId,
         this.client.origin,
         source,
         this.owner,
@@ -1322,8 +1521,8 @@ export class AgentInstallationManager {
       if (existing) {
         const parsed = parseLocalRow(existing);
         if (
-          parsed.definitionId !== definitionId ||
-          parsed.selectedVersionId !== versionId ||
+          parsed.definitionId !== intent.definitionId ||
+          parsed.selectedVersionId !== intent.versionId ||
           parsed.policySnapshotId !== policyId ||
           parsed.sourceScope !== source.scope ||
           parsed.sourceWorkspaceId !== source.workspaceId ||
@@ -1359,24 +1558,29 @@ export class AgentInstallationManager {
             source.officialReleaseId,
             source.selectedReleaseRevisionId,
             source.updatePolicy,
-            definitionId,
-            versionId,
+            intent.definitionId,
+            intent.versionId,
             policyId,
             createdAt,
             createdAt,
           );
       }
+      const local = this.getLocalInstallation(installationId);
+      const operation = this.operations.begin({
+        operationId: installationId,
+        agentInstallationId: installationId,
+        target: intent.profileTarget,
+      });
       this.completeCreationIntent(intent.id);
+      return this.runMaterialization(
+        local,
+        operation,
+        creation.policy_snapshot,
+      );
     } catch (error) {
       if (error instanceof AgentInstallationManagerError) throw error;
       throw new AgentInstallationManagerError("installation_conflict");
     }
-
-    return this.materializeAndActivate(
-      this.getLocalInstallation(installationId),
-      input.profile,
-      creation.policy_snapshot,
-    );
   }
 
   async retryPendingInstallation(input: {
@@ -1406,6 +1610,52 @@ export class AgentInstallationManager {
       throw new AgentInstallationManagerError("materialization_failed");
     }
     return this.materializeAndActivate(local, input.profile, policy);
+  }
+
+  async reconcilePendingInstallations(): Promise<LocalAgentInstallation[]> {
+    if (this.reconciliationFlight) return this.reconciliationFlight;
+    const flight = this.reconcilePendingInstallationsOnce();
+    this.reconciliationFlight = flight;
+    const clear = (): void => {
+      if (this.reconciliationFlight === flight) {
+        this.reconciliationFlight = null;
+      }
+    };
+    void flight.then(clear, clear);
+    return flight;
+  }
+
+  private async reconcilePendingInstallationsOnce(): Promise<
+    LocalAgentInstallation[]
+  > {
+    const results: LocalAgentInstallation[] = [];
+    for (const intent of this.readCreationIntents()) {
+      if (intent.profileTarget === null) continue;
+      results.push(await this.executeCreationIntent(intent));
+    }
+    for (const operation of this.operations.listIncomplete()) {
+      if (operation.phase === "repair_required") continue;
+      const local = this.getLocalInstallation(operation.agentInstallationId);
+      if (local.status !== "pending") {
+        throw new AgentInstallationManagerError("installation_conflict");
+      }
+      let policy: AgentPolicySnapshot;
+      try {
+        if (local.policySnapshotId === null) {
+          throw new AgentInstallationManagerError("installation_conflict");
+        }
+        policy = await this.client.getPolicySnapshot(local.policySnapshotId);
+      } catch (error) {
+        this.recordFailure(
+          local.agentInstallationId,
+          "materialization_policy_failed",
+        );
+        if (error instanceof AgentInstallationManagerError) throw error;
+        throw new AgentInstallationManagerError("materialization_failed");
+      }
+      results.push(await this.runMaterialization(local, operation, policy));
+    }
+    return results;
   }
 
   async selectInstallationVersion(input: {
@@ -1880,11 +2130,165 @@ export class AgentInstallationManager {
     return this.getLocalInstallation(local.agentInstallationId);
   }
 
-  private async materializeAndActivate(
+  private getOrBeginInstallationOperation(
+    local: LocalAgentInstallation,
+    target: AgentInstallationProfileTarget,
+  ): InstallationOperationRecord {
+    const existing = this.operations.get(local.agentInstallationId);
+    if (existing) {
+      if (existing.agentInstallationId !== local.agentInstallationId) {
+        throw new InstallationOperationStoreError("operation_conflict");
+      }
+      if (existing.targetKind === "fresh") {
+        const sameFreshTarget =
+          target.kind === "fresh" &&
+          existing.displayName === target.name.trim() &&
+          existing.modelSourceProfileId ===
+            (target.modelSourceProfileId ?? null) &&
+          existing.modelSourceModelId === (target.modelSourceModelId ?? null);
+        const sameResumeClaim =
+          target.kind === "claim" &&
+          existing.profileId === target.profileId &&
+          basename(resolve(target.profilePath)) === target.profileId;
+        if (!sameFreshTarget && !sameResumeClaim) {
+          throw new InstallationOperationStoreError("operation_conflict");
+        }
+      } else {
+        if (
+          target.kind !== "claim" ||
+          existing.profileId !== target.profileId ||
+          basename(resolve(target.profilePath)) !== target.profileId
+        ) {
+          throw new InstallationOperationStoreError("operation_conflict");
+        }
+      }
+      return existing;
+    }
+
+    if (target.kind === "claim") {
+      if (basename(resolve(target.profilePath)) !== target.profileId) {
+        throw new InstallationOperationStoreError("operation_conflict");
+      }
+      return this.operations.begin({
+        operationId: local.agentInstallationId,
+        agentInstallationId: local.agentInstallationId,
+        target: { kind: "claim", profileId: target.profileId },
+      });
+    }
+    if (local.runtimeProfileId !== null) {
+      throw new InstallationOperationStoreError("operation_conflict");
+    }
+    const reservation = this.profileBindings.getFreshProfileReservation(
+      local.agentInstallationId,
+      this.owner,
+    );
+    const profileId =
+      reservation?.profileId ??
+      this.profiles.profileIdForAgentName(target.name);
+    return this.operations.begin({
+      operationId: local.agentInstallationId,
+      agentInstallationId: local.agentInstallationId,
+      target: {
+        kind: "fresh",
+        profileId,
+        displayName: target.name,
+        ...(target.modelSourceProfileId
+          ? { modelSourceProfileId: target.modelSourceProfileId }
+          : {}),
+        ...(target.modelSourceModelId
+          ? { modelSourceModelId: target.modelSourceModelId }
+          : {}),
+      },
+    });
+  }
+
+  private targetFromOperation(
+    operation: InstallationOperationRecord,
+  ): AgentInstallationProfileTarget {
+    if (operation.targetKind === "claim") {
+      return {
+        kind: "claim",
+        profileId: operation.profileId,
+        profilePath: this.profiles.resolveProfilePath(operation.profileId),
+      };
+    }
+    if (operation.displayName === null) {
+      throw new InstallationOperationStoreError("operation_corrupt");
+    }
+    return {
+      kind: "fresh",
+      name: operation.displayName,
+      ...(operation.modelSourceProfileId
+        ? { modelSourceProfileId: operation.modelSourceProfileId }
+        : {}),
+      ...(operation.modelSourceModelId
+        ? { modelSourceModelId: operation.modelSourceModelId }
+        : {}),
+    };
+  }
+
+  private materializeAndActivate(
     local: LocalAgentInstallation,
     target: AgentInstallationProfileTarget,
     policy: AgentPolicySnapshot,
   ): Promise<LocalAgentInstallation> {
+    let operation: InstallationOperationRecord;
+    try {
+      operation = this.getOrBeginInstallationOperation(local, target);
+    } catch (error) {
+      reportStageFailure("operation-prepare", error);
+      throw new AgentInstallationManagerError(
+        error instanceof InstallationOperationStoreError &&
+          error.code === "invalid_operation"
+          ? "invalid_installation_request"
+          : "installation_conflict",
+      );
+    }
+    return this.runMaterialization(local, operation, policy);
+  }
+
+  private runMaterialization(
+    local: LocalAgentInstallation,
+    operation: InstallationOperationRecord,
+    policy: AgentPolicySnapshot,
+  ): Promise<LocalAgentInstallation> {
+    const existing = this.materializationFlights.get(
+      operation.agentInstallationId,
+    );
+    if (existing) return existing;
+    const flight = this.materializeAndActivateOnce(local, operation, policy);
+    this.materializationFlights.set(operation.agentInstallationId, flight);
+    const clear = (): void => {
+      if (
+        this.materializationFlights.get(operation.agentInstallationId) ===
+        flight
+      ) {
+        this.materializationFlights.delete(operation.agentInstallationId);
+      }
+    };
+    void flight.then(clear, clear);
+    return flight;
+  }
+
+  private async materializeAndActivateOnce(
+    local: LocalAgentInstallation,
+    initialOperation: InstallationOperationRecord,
+    policy: AgentPolicySnapshot,
+  ): Promise<LocalAgentInstallation> {
+    let operation = initialOperation;
+    if (operation.phase === "repair_required") {
+      throw new AgentInstallationManagerError("profile_binding_failed");
+    }
+    if (operation.phase === "committed") {
+      const completed = this.getLocalInstallation(
+        operation.agentInstallationId,
+      );
+      if (completed.status !== "active") {
+        throw new AgentInstallationManagerError("installation_conflict");
+      }
+      return completed;
+    }
+    const target = this.targetFromOperation(operation);
     let version: AgentVersion;
     let projection: HermesVersionProjection;
     let materializationStage: AgentInstallationRetryCode =
@@ -1922,153 +2326,155 @@ export class AgentInstallationManager {
       throw new AgentInstallationManagerError("materialization_failed");
     }
 
-    let profilePath: string;
+    const profilePath = this.profiles.resolveProfilePath(operation.profileId);
     let binding: RuntimeOwnerBinding;
-    let createdFreshProfile: {
-      id: string;
-      path: string;
-      runtimeProfileId: string;
-    } | null = null;
     let profileStage: AgentInstallationRetryCode = "profile_creation_failed";
     try {
-      if (local.runtimeProfileId !== null && target.kind !== "claim") {
-        throw new AgentInstallationManagerError("installation_conflict");
-      }
-      if (target.kind === "fresh") {
-        if (target.modelSourceProfileId) {
-          this.profileBindings.verifyProfileBinding(
-            this.profiles.resolveProfilePath(target.modelSourceProfileId),
-            this.owner,
-          );
-        }
-        const existingReservation =
-          this.profileBindings.getFreshProfileReservation(
-            local.agentInstallationId,
-            this.owner,
-          );
-        const profileId =
-          existingReservation?.profileId ??
-          this.profiles.profileIdForAgentName(target.name);
-        const created = this.profileBindings.createAndBindFreshProfile({
-          operationId: local.agentInstallationId,
-          name: target.name,
-          owner: this.owner,
-          profileId,
-          createProfile: this.profiles.createProfile,
-          resolveProfilePath: this.profiles.resolveProfilePath,
-          activateProfile: this.profiles.activateProfile,
-          activate: false,
-        });
-        profilePath = this.profiles.resolveProfilePath(created.profileId);
-        binding = created.binding;
-        createdFreshProfile = {
-          id: created.profileId,
-          path: profilePath,
-          runtimeProfileId: binding.runtimeProfileId,
-        };
-        if (target.modelSourceProfileId) {
-          profileStage = "profile_model_configuration_failed";
-          if (!this.profiles.configureFreshProfileModel) {
-            throw new Error(
-              "Fresh Profile model configuration is unavailable.",
+      operation =
+        this.operations.get(operation.operationId) ??
+        (() => {
+          throw new AgentInstallationManagerError("installation_conflict");
+        })();
+      if (operation.phase === "prepared") {
+        if (target.kind === "fresh") {
+          if (target.modelSourceProfileId) {
+            this.profileBindings.verifyProfileBinding(
+              this.profiles.resolveProfilePath(target.modelSourceProfileId),
+              this.owner,
             );
           }
-          this.profiles.configureFreshProfileModel({
-            sourceProfileId: target.modelSourceProfileId,
-            targetProfileId: created.profileId,
-            version,
-            policy,
-            ...(target.modelSourceModelId
-              ? { sourceModelId: target.modelSourceModelId }
-              : {}),
+          const created = this.profileBindings.createAndBindFreshProfile({
+            operationId: operation.operationId,
+            name: target.name,
+            owner: this.owner,
+            profileId: operation.profileId,
+            createProfile: this.profiles.createProfile,
+            resolveProfilePath: this.profiles.resolveProfilePath,
+            activateProfile: this.profiles.activateProfile,
+            activate: false,
           });
-        }
-      } else {
-        profilePath = target.profilePath;
-        binding = this.profileBindings.bindExistingProfile(
-          profilePath,
-          this.owner,
-        );
-      }
-      if (
-        local.runtimeProfileId !== null &&
-        binding.runtimeProfileId !== local.runtimeProfileId
-      ) {
-        throw new AgentInstallationManagerError("installation_conflict");
-      }
-      profileStage = "profile_attachment_failed";
-      this.database.sqlite
-        .prepare(
-          `UPDATE local_agent_installations
-           SET runtime_profile_id = ?, updated_at = ?
-           WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
-             AND device_installation_id = ? AND status = 'pending'`,
-        )
-        .run(
-          binding.runtimeProfileId,
-          timestamp(this.now),
-          local.agentInstallationId,
-          this.owner.tenantId,
-          this.owner.ownerId,
-          this.owner.deviceInstallationId,
-        );
-      binding = this.profileBindings.attachAgentInstallation(
-        profilePath,
-        this.owner,
-        local.agentInstallationId,
-      );
-      profileStage = "profile_projection_failed";
-      this.projection.activateForProfile({ projection, profilePath });
-    } catch (error) {
-      if (createdFreshProfile !== null) {
-        let bindingRemoved = false;
-        try {
-          const currentBinding = this.profileBindings.verifyProfileBinding(
-            createdFreshProfile.path,
-            this.owner,
-          );
-          bindingRemoved = this.profileBindings.removeProfileBinding(
-            createdFreshProfile.path,
-            this.owner,
-            {
-              runtimeProfileId: currentBinding.runtimeProfileId,
-              agentInstallationId: currentBinding.agentInstallationId,
-            },
-          );
-        } catch (cleanupError) {
-          reportStageFailure("fresh-profile-binding-cleanup", cleanupError);
-        }
-        if (bindingRemoved) {
-          try {
-            const deleted = this.profiles.deleteProfile(createdFreshProfile.id);
-            if (!deleted.success) {
+          binding = created.binding;
+          if (target.modelSourceProfileId) {
+            profileStage = "profile_model_configuration_failed";
+            if (!this.profiles.configureFreshProfileModel) {
               throw new Error(
-                deleted.error || "Fresh Profile deletion failed.",
+                "Fresh Profile model configuration is unavailable.",
               );
             }
-          } catch (cleanupError) {
-            reportStageFailure("fresh-profile-delete", cleanupError);
+            this.profiles.configureFreshProfileModel({
+              sourceProfileId: target.modelSourceProfileId,
+              targetProfileId: created.profileId,
+              version,
+              policy,
+              ...(target.modelSourceModelId
+                ? { sourceModelId: target.modelSourceModelId }
+                : {}),
+            });
           }
-          this.database.sqlite
+        } else {
+          binding = this.profileBindings.bindExistingProfile(
+            profilePath,
+            this.owner,
+          );
+        }
+        if (
+          (local.runtimeProfileId !== null &&
+            binding.runtimeProfileId !== local.runtimeProfileId) ||
+          binding.agentInstallationId !== null
+        ) {
+          throw new AgentInstallationManagerError("installation_conflict");
+        }
+        this.database.sqlite.exec("BEGIN IMMEDIATE");
+        try {
+          const updated = this.database.sqlite
             .prepare(
               `UPDATE local_agent_installations
-               SET runtime_profile_id = NULL, updated_at = ?
+               SET runtime_profile_id = ?, updated_at = ?
                WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
                  AND device_installation_id = ? AND status = 'pending'
                  AND (runtime_profile_id IS NULL OR runtime_profile_id = ?)`,
             )
             .run(
+              binding.runtimeProfileId,
               timestamp(this.now),
               local.agentInstallationId,
               this.owner.tenantId,
               this.owner.ownerId,
               this.owner.deviceInstallationId,
-              createdFreshProfile.runtimeProfileId,
+              binding.runtimeProfileId,
             );
+          if (Number(updated.changes) !== 1) {
+            throw new AgentInstallationManagerError("installation_conflict");
+          }
+          operation = this.operations.advance({
+            operationId: operation.operationId,
+            expectedRevision: operation.revision,
+            phase: "profile_bound",
+            runtimeProfileId: binding.runtimeProfileId,
+          });
+          this.database.sqlite.exec("COMMIT");
+        } catch (error) {
+          try {
+            this.database.sqlite.exec("ROLLBACK");
+          } catch {
+            // Preserve the interrupted durable edge.
+          }
+          throw error;
         }
       }
+
+      binding = this.profileBindings.verifyProfileBinding(
+        profilePath,
+        this.owner,
+      );
+      if (
+        operation.runtimeProfileId === null ||
+        binding.runtimeProfileId !== operation.runtimeProfileId ||
+        (local.runtimeProfileId !== null &&
+          local.runtimeProfileId !== binding.runtimeProfileId)
+      ) {
+        throw new AgentInstallationManagerError("installation_conflict");
+      }
+      if (operation.phase === "profile_bound") {
+        profileStage = "profile_attachment_failed";
+        binding = this.profileBindings.attachAgentInstallation(
+          profilePath,
+          this.owner,
+          local.agentInstallationId,
+        );
+        operation = this.operations.advance({
+          operationId: operation.operationId,
+          expectedRevision: operation.revision,
+          phase: "profile_attached",
+          runtimeProfileId: binding.runtimeProfileId,
+        });
+      }
+      if (operation.phase === "profile_attached") {
+        profileStage = "profile_projection_failed";
+        this.projection.activateForProfile({ projection, profilePath });
+        operation = this.operations.advance({
+          operationId: operation.operationId,
+          expectedRevision: operation.revision,
+          phase: "projection_active",
+          runtimeProfileId: binding.runtimeProfileId,
+        });
+      }
+    } catch (error) {
       reportStageFailure("profile", error);
-      this.recordFailure(local.agentInstallationId, profileStage);
+      if (error instanceof AgenteraProfileBindingRepairError) {
+        try {
+          operation = this.operations.markRepairRequired({
+            operationId: operation.operationId,
+            expectedRevision: operation.revision,
+            retryCode: error.code,
+          });
+        } catch (repairError) {
+          reportStageFailure("profile-repair-journal", repairError);
+        }
+        this.recordFailure(local.agentInstallationId, error.code);
+      } else {
+        this.recordFailure(local.agentInstallationId, profileStage);
+      }
       throw new AgentInstallationManagerError(
         profileStage === "profile_model_configuration_failed"
           ? "profile_model_configuration_failed"
@@ -2077,55 +2483,97 @@ export class AgentInstallationManager {
     }
 
     try {
-      const activated = await this.client.activateInstallation(
-        local.agentInstallationId,
-        binding.runtimeProfileId,
-        version.content_digest,
-        operationKey("activate", local.agentInstallationId),
-      );
-      assertCloudState(
-        activated,
-        { ...local, runtimeProfileId: binding.runtimeProfileId },
-        "active",
-        local.selectedVersionId,
-        binding.runtimeProfileId,
-      );
-      if (
-        local.policySnapshotId === null ||
-        activated.policy_snapshot_id === undefined ||
-        uuid(activated.policy_snapshot_id) !== local.policySnapshotId
-      ) {
-        throw new AgentInstallationManagerError("installation_conflict");
-      }
-      this.database.sqlite
-        .prepare(
-          `UPDATE local_agent_installations
-           SET runtime_profile_id = ?, policy_snapshot_id = ?, status = 'active',
-               retry_code = NULL, updated_at = ?
-           WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
-             AND device_installation_id = ? AND status = 'pending'`,
-        )
-        .run(
-          binding.runtimeProfileId,
-          activated.policy_snapshot_id,
-          timestamp(this.now),
+      if (operation.phase === "projection_active") {
+        const activated = await this.client.activateInstallation(
           local.agentInstallationId,
-          this.owner.tenantId,
-          this.owner.ownerId,
-          this.owner.deviceInstallationId,
+          binding.runtimeProfileId,
+          version.content_digest,
+          operationKey("activate", local.agentInstallationId),
         );
-      if (createdFreshProfile !== null) {
+        assertCloudState(
+          activated,
+          { ...local, runtimeProfileId: binding.runtimeProfileId },
+          "active",
+          local.selectedVersionId,
+          binding.runtimeProfileId,
+        );
+        if (
+          local.policySnapshotId === null ||
+          activated.policy_snapshot_id === undefined ||
+          uuid(activated.policy_snapshot_id) !== local.policySnapshotId
+        ) {
+          throw new AgentInstallationManagerError("installation_conflict");
+        }
+        operation = this.operations.advance({
+          operationId: operation.operationId,
+          expectedRevision: operation.revision,
+          phase: "cloud_activated",
+          runtimeProfileId: binding.runtimeProfileId,
+        });
+      }
+      if (operation.phase === "cloud_activated") {
+        this.database.sqlite.exec("BEGIN IMMEDIATE");
         try {
-          this.profiles.activateProfile(createdFreshProfile.id);
+          const updated = this.database.sqlite
+            .prepare(
+              `UPDATE local_agent_installations
+               SET runtime_profile_id = ?, status = 'active', retry_code = NULL,
+                 updated_at = ?
+               WHERE agent_installation_id = ? AND tenant_id = ? AND owner_id = ?
+                 AND device_installation_id = ? AND status = 'pending'
+                 AND policy_snapshot_id = ?
+                 AND runtime_profile_id = ?`,
+            )
+            .run(
+              binding.runtimeProfileId,
+              timestamp(this.now),
+              local.agentInstallationId,
+              this.owner.tenantId,
+              this.owner.ownerId,
+              this.owner.deviceInstallationId,
+              local.policySnapshotId,
+              binding.runtimeProfileId,
+            );
+          if (Number(updated.changes) !== 1) {
+            throw new AgentInstallationManagerError("installation_conflict");
+          }
+          operation = this.operations.commit({
+            operationId: operation.operationId,
+            expectedRevision: operation.revision,
+          });
+          this.database.sqlite.exec("COMMIT");
         } catch (error) {
-          reportStageFailure("fresh-profile-activation", error);
+          try {
+            this.database.sqlite.exec("ROLLBACK");
+          } catch {
+            // Preserve Cloud success and the journal phase for retry.
+          }
+          throw error;
         }
       }
-    } catch {
+    } catch (error) {
+      reportStageFailure("activation", error);
       this.recordFailure(local.agentInstallationId, "activation_failed");
       throw new AgentInstallationManagerError("activation_failed");
     }
-    return this.getLocalInstallation(local.agentInstallationId);
+    const result = this.getLocalInstallation(local.agentInstallationId);
+    if (target.kind === "fresh" && result.runtimeProfileId !== null) {
+      try {
+        this.profileBindings.completeFreshProfileReservation(
+          operation.operationId,
+          this.owner,
+          result.runtimeProfileId,
+        );
+      } catch (error) {
+        reportStageFailure("fresh-profile-reservation-completion", error);
+      }
+      try {
+        this.profiles.activateProfile(operation.profileId);
+      } catch (error) {
+        reportStageFailure("fresh-profile-activation", error);
+      }
+    }
+    return result;
   }
 
   private async rollbackVerifiedRestore(input: {
@@ -2420,10 +2868,205 @@ export class AgentInstallationManager {
     }
   }
 
+  private normalizeCreationProfileTarget(
+    target: AgentInstallationProfileTarget,
+  ): InstallationOperationTarget {
+    if (target.kind === "claim") {
+      const profileId = creationProfileId(
+        target.profileId,
+        "invalid_installation_request",
+      );
+      if (basename(resolve(target.profilePath)) !== profileId) {
+        throw new AgentInstallationManagerError("invalid_installation_request");
+      }
+      return { kind: "claim", profileId };
+    }
+    const displayName = creationText(
+      target.name,
+      256,
+      "invalid_installation_request",
+    );
+    const modelSourceProfileId =
+      target.modelSourceProfileId === undefined
+        ? null
+        : creationProfileId(
+            target.modelSourceProfileId,
+            "invalid_installation_request",
+          );
+    const modelSourceModelId =
+      target.modelSourceModelId === undefined
+        ? null
+        : creationText(
+            target.modelSourceModelId,
+            512,
+            "invalid_installation_request",
+          );
+    if (modelSourceModelId !== null && modelSourceProfileId === null) {
+      throw new AgentInstallationManagerError("invalid_installation_request");
+    }
+    const profileId = creationProfileId(
+      this.profiles.profileIdForAgentName(displayName),
+      "invalid_installation_request",
+    );
+    return {
+      kind: "fresh",
+      profileId,
+      displayName,
+      ...(modelSourceProfileId ? { modelSourceProfileId } : {}),
+      ...(modelSourceModelId ? { modelSourceModelId } : {}),
+    };
+  }
+
+  private serializeCreationIntent(intent: InstallationCreationIntent): string {
+    if (intent.profileTarget === null) {
+      throw new AgentInstallationManagerError("installation_conflict");
+    }
+    return JSON.stringify(
+      intent.sourceScope === "PLATFORM"
+        ? {
+            definition_id: intent.definitionId,
+            version_id: intent.versionId,
+            idempotency_key: intent.idempotencyKey,
+            source_scope: intent.sourceScope,
+            source_workspace_id: null,
+            source_organization_id: null,
+            official_release_id: intent.officialReleaseId,
+            selected_release_revision_id: intent.selectedReleaseRevisionId,
+            update_policy: "managed",
+            profile_target: serializeCreationProfileTarget(
+              intent.profileTarget,
+            ),
+          }
+        : {
+            definition_id: intent.definitionId,
+            version_id: intent.versionId,
+            idempotency_key: intent.idempotencyKey,
+            source_scope: intent.sourceScope,
+            source_workspace_id: intent.sourceWorkspaceId,
+            source_organization_id: intent.sourceOrganizationId,
+            profile_target: serializeCreationProfileTarget(
+              intent.profileTarget,
+            ),
+          },
+    );
+  }
+
+  private readCreationIntents(): InstallationCreationIntent[] {
+    const rows = this.database.sqlite
+      .prepare(
+        `SELECT id, payload_json
+         FROM pending_sanitized_records
+         WHERE record_type = 'agent_installation_create' AND tenant_id = ?
+           AND owner_id = ? AND device_installation_id = ?
+         ORDER BY created_at ASC`,
+      )
+      .all(
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+      ) as Array<{ id?: unknown; payload_json?: unknown }>;
+    const recoverable: InstallationCreationIntent[] = [];
+    for (const row of rows) {
+      if (typeof row.id !== "string" || typeof row.payload_json !== "string") {
+        throw new AgentInstallationManagerError("installation_conflict");
+      }
+      try {
+        const payload = JSON.parse(row.payload_json) as unknown;
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+          throw new AgentInstallationManagerError("installation_conflict");
+        }
+        const record = payload as Record<string, unknown>;
+        if (!Object.hasOwn(record, "profile_target")) continue;
+        const target = parseCreationProfileTarget(record.profile_target);
+        let source: NormalizedInstallationSource;
+        if (
+          record.source_scope === "USER" &&
+          record.source_workspace_id === null &&
+          record.source_organization_id === null
+        ) {
+          source = normalizeInstallationSource({ scope: "USER" });
+        } else if (
+          record.source_scope === "WORKSPACE" &&
+          record.source_workspace_id !== null &&
+          record.source_organization_id === null
+        ) {
+          source = normalizeInstallationSource({
+            scope: "WORKSPACE",
+            workspaceId: uuid(record.source_workspace_id),
+            role: "member",
+          });
+        } else if (
+          record.source_scope === "ORGANIZATION" &&
+          record.source_workspace_id === null &&
+          record.source_organization_id !== null
+        ) {
+          source = normalizeInstallationSource({
+            scope: "ORGANIZATION",
+            organizationId: uuid(record.source_organization_id),
+            role: "member",
+          });
+        } else if (
+          record.source_scope === "PLATFORM" &&
+          record.source_workspace_id === null &&
+          record.source_organization_id === null &&
+          record.update_policy === "managed"
+        ) {
+          source = normalizeInstallationSource({
+            scope: "PLATFORM",
+            officialReleaseId: uuid(record.official_release_id),
+            selectedReleaseRevisionId: uuid(
+              record.selected_release_revision_id,
+            ),
+            updatePolicy: "managed",
+          });
+        } else {
+          throw new AgentInstallationManagerError("installation_conflict");
+        }
+        const publicTarget: AgentInstallationProfileTarget =
+          target.kind === "fresh"
+            ? {
+                kind: "fresh",
+                name: target.displayName,
+                ...(target.modelSourceProfileId
+                  ? { modelSourceProfileId: target.modelSourceProfileId }
+                  : {}),
+                ...(target.modelSourceModelId
+                  ? { modelSourceModelId: target.modelSourceModelId }
+                  : {}),
+              }
+            : {
+                kind: "claim",
+                profileId: target.profileId,
+                profilePath: this.profiles.resolveProfilePath(target.profileId),
+              };
+        const intent = this.beginCreationIntent(
+          uuid(record.definition_id),
+          uuid(record.version_id),
+          source,
+          publicTarget,
+        );
+        if (uuid(row.id) !== intent.id) {
+          throw new AgentInstallationManagerError("installation_conflict");
+        }
+        recoverable.push(intent);
+      } catch (error) {
+        if (
+          error instanceof AgentInstallationManagerError &&
+          error.code === "installation_conflict"
+        ) {
+          throw error;
+        }
+        throw new AgentInstallationManagerError("installation_conflict");
+      }
+    }
+    return recoverable;
+  }
+
   private beginCreationIntent(
     definitionId: string,
     versionId: string,
     source: NormalizedInstallationSource,
+    target: AgentInstallationProfileTarget,
   ): InstallationCreationIntent {
     const rows = this.database.sqlite
       .prepare(
@@ -2453,7 +3096,13 @@ export class AgentInstallationManager {
         throw new AgentInstallationManagerError("installation_conflict");
       }
       const record = payload as Record<string, unknown>;
-      const keys = Object.keys(record).sort().join("\0");
+      const storedTarget = Object.hasOwn(record, "profile_target")
+        ? parseCreationProfileTarget(record.profile_target)
+        : null;
+      const keys = Object.keys(record)
+        .filter((key) => key !== "profile_target")
+        .sort()
+        .join("\0");
       const legacyKeys = ["definition_id", "idempotency_key", "version_id"]
         .sort()
         .join("\0");
@@ -2566,7 +3215,7 @@ export class AgentInstallationManager {
       } else {
         throw new AgentInstallationManagerError("installation_conflict");
       }
-      if (
+      const sameIntent =
         uuid(record.definition_id) === definitionId &&
         uuid(record.version_id) === versionId &&
         storedSource.scope === source.scope &&
@@ -2575,8 +3224,15 @@ export class AgentInstallationManager {
         storedSource.officialReleaseId === source.officialReleaseId &&
         storedSource.selectedReleaseRevisionId ===
           source.selectedReleaseRevisionId &&
-        storedSource.updatePolicy === source.updatePolicy
+        storedSource.updatePolicy === source.updatePolicy;
+      if (
+        sameIntent &&
+        storedTarget !== null &&
+        !creationProfileTargetMatchesInput(storedTarget, target)
       ) {
+        throw new AgentInstallationManagerError("installation_conflict");
+      }
+      if (sameIntent) {
         matches.push({
           id: row.id,
           definitionId,
@@ -2588,38 +3244,54 @@ export class AgentInstallationManager {
           officialReleaseId: storedSource.officialReleaseId,
           selectedReleaseRevisionId: storedSource.selectedReleaseRevisionId,
           updatePolicy: storedSource.updatePolicy,
+          profileTarget: storedTarget,
         });
       }
     }
     if (matches.length > 1) {
       throw new AgentInstallationManagerError("installation_conflict");
     }
-    if (matches.length === 1) return matches[0];
+    if (matches.length === 1) {
+      const existing = matches[0];
+      if (existing.profileTarget !== null) return existing;
+      const requestedTarget = this.normalizeCreationProfileTarget(target);
+      const upgraded = { ...existing, profileTarget: requestedTarget };
+      this.database.sqlite
+        .prepare(
+          `UPDATE pending_sanitized_records
+           SET payload_json = ?, updated_at = ?
+           WHERE id = ? AND tenant_id = ? AND owner_id = ?
+             AND device_installation_id = ?
+             AND record_type = 'agent_installation_create'`,
+        )
+        .run(
+          this.serializeCreationIntent(upgraded),
+          timestamp(this.now),
+          upgraded.id,
+          this.owner.tenantId,
+          this.owner.ownerId,
+          this.owner.deviceInstallationId,
+        );
+      return upgraded;
+    }
 
+    const requestedTarget = this.normalizeCreationProfileTarget(target);
     const id = uuid(this.randomUUID());
     const createdAt = timestamp(this.now);
-    const payload = JSON.stringify(
-      source.scope === "PLATFORM"
-        ? {
-            definition_id: definitionId,
-            version_id: versionId,
-            idempotency_key: id,
-            source_scope: source.scope,
-            source_workspace_id: null,
-            source_organization_id: null,
-            official_release_id: source.officialReleaseId,
-            selected_release_revision_id: source.selectedReleaseRevisionId,
-            update_policy: "managed",
-          }
-        : {
-            definition_id: definitionId,
-            version_id: versionId,
-            idempotency_key: id,
-            source_scope: source.scope,
-            source_workspace_id: source.workspaceId,
-            source_organization_id: source.organizationId,
-          },
-    );
+    const created: InstallationCreationIntent = {
+      id,
+      definitionId,
+      versionId,
+      idempotencyKey: id,
+      sourceScope: source.scope,
+      sourceWorkspaceId: source.workspaceId,
+      sourceOrganizationId: source.organizationId,
+      officialReleaseId: source.officialReleaseId,
+      selectedReleaseRevisionId: source.selectedReleaseRevisionId,
+      updatePolicy: source.updatePolicy,
+      profileTarget: requestedTarget,
+    };
+    const payload = this.serializeCreationIntent(created);
     this.database.sqlite
       .prepare(
         `INSERT INTO pending_sanitized_records (
@@ -2637,18 +3309,7 @@ export class AgentInstallationManager {
         createdAt,
         createdAt,
       );
-    return {
-      id,
-      definitionId,
-      versionId,
-      idempotencyKey: id,
-      sourceScope: source.scope,
-      sourceWorkspaceId: source.workspaceId,
-      sourceOrganizationId: source.organizationId,
-      officialReleaseId: source.officialReleaseId,
-      selectedReleaseRevisionId: source.selectedReleaseRevisionId,
-      updatePolicy: source.updatePolicy,
-    };
+    return created;
   }
 
   private completeCreationIntent(id: string): void {

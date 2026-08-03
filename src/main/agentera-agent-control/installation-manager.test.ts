@@ -270,6 +270,11 @@ const owner: AgenteraRuntimeOwner = {
   ownerId: "99999999-9999-4999-8999-999999999999",
   deviceInstallationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 };
+const otherOwner: AgenteraRuntimeOwner = {
+  tenantId: "10101010-1010-4010-8010-101010101010",
+  ownerId: "11111111-2222-4222-8222-222222222222",
+  deviceInstallationId: owner.deviceInstallationId,
+};
 
 describe("Agent installation orchestration", () => {
   let root = "";
@@ -505,6 +510,37 @@ describe("Agent installation orchestration", () => {
     });
   }
 
+  function coldRestartManager(): AgentInstallationManager {
+    database.close();
+    database = openAgenteraControlPlaneDatabase(userDataPath, {
+      databaseFactory: nodeSqliteFactory,
+    });
+    bindings = new AgenteraProfileBindingStore({
+      userDataPath,
+      secureStorage: new FakeSecureStorage(),
+      now: () => NOW,
+      randomUUID: () => RUNTIME_PROFILE_ID,
+    });
+    return manager();
+  }
+
+  function failJournalAdvanceTo(phase: string): void {
+    database.sqlite.exec(`
+      CREATE TRIGGER injected_installation_operation_failure
+      BEFORE UPDATE OF phase ON installation_operations
+      WHEN NEW.phase = '${phase}'
+      BEGIN
+        SELECT RAISE(ABORT, 'injected journal failure');
+      END;
+    `);
+  }
+
+  function clearJournalFailure(): void {
+    database.sqlite.exec(
+      "DROP TRIGGER IF EXISTS injected_installation_operation_failure",
+    );
+  }
+
   async function installOfficialV1(): Promise<void> {
     policy = makeOfficialPolicy(v1);
     getPolicySnapshot.mockResolvedValue(policy);
@@ -571,6 +607,49 @@ describe("Agent installation orchestration", () => {
       VERSION_ID,
       policy,
     );
+    expect(
+      bindings.verifyProfileBinding(freshProfilePath, owner),
+    ).toMatchObject({
+      agentInstallationId: AGENT_INSTALLATION_ID,
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+    });
+  });
+
+  it("recovers a reserved Profile after creation is interrupted and Desktop cold-restarts", async () => {
+    createProfile.mockImplementationOnce(
+      (_name, _cloneFrom, reservedProfileId) => {
+        expect(reservedProfileId).toBe("fresh-agent");
+        mkdirSync(freshProfilePath, { recursive: true });
+        throw new Error("injected creation interruption");
+      },
+    );
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "profile_binding_failed" });
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT phase FROM installation_operations WHERE operation_id = ?",
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({ phase: "prepared" });
+
+    const recovered =
+      await coldRestartManager().reconcilePendingInstallations();
+
+    expect(recovered).toEqual([
+      expect.objectContaining({
+        agentInstallationId: AGENT_INSTALLATION_ID,
+        runtimeProfileId: RUNTIME_PROFILE_ID,
+        status: "active",
+      }),
+    ]);
+    expect(createProfile).toHaveBeenCalledOnce();
     expect(
       bindings.verifyProfileBinding(freshProfilePath, owner),
     ).toMatchObject({
@@ -648,7 +727,7 @@ describe("Agent installation orchestration", () => {
     ]);
   });
 
-  it("removes a fresh Profile and binding when signed model configuration fails", async () => {
+  it("preserves and reconciles the reserved Profile when signed model configuration fails", async () => {
     const sourceProfilePath = join(profilesRoot, "source-profile");
     mkdirSync(sourceProfilePath, { recursive: true });
     const originalResolveProfilePath = profiles.resolveProfilePath;
@@ -657,22 +736,19 @@ describe("Agent installation orchestration", () => {
         ? sourceProfilePath
         : originalResolveProfilePath(id),
     );
-    const originalVerifyProfileBinding =
-      bindings.verifyProfileBinding.bind(bindings);
-    vi.spyOn(bindings, "verifyProfileBinding").mockImplementation(
-      (profilePath, requestedOwner) =>
-        profilePath === sourceProfilePath
-          ? {
-              tenantId: requestedOwner.tenantId,
-              ownerScope: "USER",
-              ownerId: requestedOwner.ownerId,
-              deviceInstallationId: requestedOwner.deviceInstallationId,
-              agentInstallationId: null,
-              runtimeProfileId: "19191919-1919-4919-8919-191919191919",
-              boundAt: NOW.toISOString(),
-            }
-          : originalVerifyProfileBinding(profilePath, requestedOwner),
-    );
+    bindings = new AgenteraProfileBindingStore({
+      userDataPath,
+      secureStorage: new FakeSecureStorage(),
+      now: () => NOW,
+      randomUUID: () => "19191919-1919-4919-8919-191919191919",
+    });
+    bindings.bindExistingProfile(sourceProfilePath, owner);
+    bindings = new AgenteraProfileBindingStore({
+      userDataPath,
+      secureStorage: new FakeSecureStorage(),
+      now: () => NOW,
+      randomUUID: () => RUNTIME_PROFILE_ID,
+    });
     profiles.configureFreshProfileModel = vi.fn(() => {
       events.push("profile:model:failed");
       throw new Error(
@@ -694,11 +770,14 @@ describe("Agent installation orchestration", () => {
       code: "profile_model_configuration_failed",
     });
 
-    expect(deleteProfile).toHaveBeenCalledWith("fresh-agent");
-    expect(existsSync(freshProfilePath)).toBe(false);
-    expect(() =>
+    expect(deleteProfile).not.toHaveBeenCalled();
+    expect(existsSync(freshProfilePath)).toBe(true);
+    expect(
       bindings.verifyProfileBinding(freshProfilePath, owner),
-    ).toThrow();
+    ).toMatchObject({
+      agentInstallationId: null,
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+    });
     expect(events).not.toContain("profile:activate:fresh-agent");
     expect(
       database.sqlite
@@ -713,6 +792,17 @@ describe("Agent installation orchestration", () => {
       retry_code: "profile_model_configuration_failed",
       runtime_profile_id: null,
     });
+
+    profiles.configureFreshProfileModel = vi.fn();
+    await expect(
+      coldRestartManager().reconcilePendingInstallations(),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        agentInstallationId: AGENT_INSTALLATION_ID,
+        status: "active",
+      }),
+    ]);
+    expect(createProfile).toHaveBeenCalledOnce();
   });
 
   it("repairs an active installation model only from a verified current-owner Profile", async () => {
@@ -1063,6 +1153,12 @@ describe("Agent installation orchestration", () => {
 
   it("binds an Organization source while keeping the local Installation USER-owned", async () => {
     const organizationProfilePath = join(profilesRoot, "organization-existing");
+    const originalResolveProfilePath = profiles.resolveProfilePath;
+    profiles.resolveProfilePath = vi.fn((id: string) =>
+      id === "organization-existing"
+        ? organizationProfilePath
+        : originalResolveProfilePath(id),
+    );
     const memoryPath = join(organizationProfilePath, "MEMORY.md");
     const privateSkillPath = join(
       organizationProfilePath,
@@ -1643,6 +1739,10 @@ describe("Agent installation orchestration", () => {
 
   it("uses only an explicit same-owner claim for an existing Profile", async () => {
     const claimed = join(profilesRoot, "existing");
+    const originalResolveProfilePath = profiles.resolveProfilePath;
+    profiles.resolveProfilePath = vi.fn((id: string) =>
+      id === "existing" ? claimed : originalResolveProfilePath(id),
+    );
     mkdirSync(join(claimed, "skills", "learned"), { recursive: true });
     writeFileSync(
       join(claimed, "skills", "learned", "SKILL.md"),
@@ -1686,6 +1786,21 @@ describe("Agent installation orchestration", () => {
         )
         .get(),
     ).toEqual({ count: 1 });
+    const pendingIntent = database.sqlite
+      .prepare(
+        "SELECT payload_json FROM pending_sanitized_records WHERE record_type = 'agent_installation_create'",
+      )
+      .get() as { payload_json: string };
+    expect(JSON.parse(pendingIntent.payload_json)).toMatchObject({
+      profile_target: {
+        kind: "fresh",
+        profile_id: "fresh-agent",
+        display_name: "Fresh Agent",
+        model_source_profile_id: null,
+        model_source_model_id: null,
+      },
+    });
+    expect(pendingIntent.payload_json).not.toContain(freshProfilePath);
 
     await expect(manager().install(request)).resolves.toMatchObject({
       status: "active",
@@ -1699,6 +1814,111 @@ describe("Agent installation orchestration", () => {
         )
         .get(),
     ).toEqual({ count: 0 });
+  });
+
+  it("cold-restarts after Cloud creation succeeds before the local Installation journal", async () => {
+    database.sqlite.exec(`
+      CREATE TRIGGER injected_local_installation_insert_failure
+      BEFORE INSERT ON local_agent_installations
+      BEGIN
+        SELECT RAISE(ABORT, 'injected local Installation insert failure');
+      END;
+    `);
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "installation_conflict" });
+    expect(createInstallation).toHaveBeenCalledOnce();
+    expect(createProfile).not.toHaveBeenCalled();
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT COUNT(*) AS count FROM pending_sanitized_records WHERE record_type = 'agent_installation_create'",
+        )
+        .get(),
+    ).toEqual({ count: 1 });
+
+    database.sqlite.exec(
+      "DROP TRIGGER injected_local_installation_insert_failure",
+    );
+    const recovered =
+      await coldRestartManager().reconcilePendingInstallations();
+
+    expect(recovered).toEqual([
+      expect.objectContaining({
+        agentInstallationId: AGENT_INSTALLATION_ID,
+        runtimeProfileId: RUNTIME_PROFILE_ID,
+        status: "active",
+      }),
+    ]);
+    expect(createInstallation).toHaveBeenCalledTimes(2);
+    expect(createInstallation.mock.calls[0][1]).toBe(OPERATION_ID);
+    expect(createInstallation.mock.calls[1][1]).toBe(OPERATION_ID);
+    expect(createProfile).toHaveBeenCalledOnce();
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT COUNT(*) AS count FROM pending_sanitized_records WHERE record_type = 'agent_installation_create'",
+        )
+        .get(),
+    ).toEqual({ count: 0 });
+  });
+
+  it("rejects a different Profile target for an existing Cloud creation intent", async () => {
+    createInstallation.mockRejectedValueOnce(new Error("response lost"));
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "creation_failed" });
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: { kind: "fresh", name: "Renamed Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "installation_conflict" });
+    expect(createInstallation).toHaveBeenCalledOnce();
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT COUNT(*) AS count FROM pending_sanitized_records WHERE record_type = 'agent_installation_create'",
+        )
+        .get(),
+    ).toEqual({ count: 1 });
+  });
+
+  it("reuses the exact persisted fresh Profile ID when local slug availability changes", async () => {
+    createInstallation.mockRejectedValueOnce(new Error("response lost"));
+    const request = {
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      profile: { kind: "fresh" as const, name: "Fresh Agent" },
+    };
+    await expect(manager().install(request)).rejects.toMatchObject({
+      code: "creation_failed",
+    });
+    profileIdForAgentName.mockReturnValue("fresh-agent-2");
+
+    await expect(manager().install(request)).resolves.toMatchObject({
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+      status: "active",
+    });
+    expect(createInstallation).toHaveBeenCalledTimes(2);
+    expect(createInstallation.mock.calls[0][1]).toBe(OPERATION_ID);
+    expect(createInstallation.mock.calls[1][1]).toBe(OPERATION_ID);
+    expect(createProfile).toHaveBeenCalledWith(
+      "Fresh Agent",
+      null,
+      "fresh-agent",
+    );
   });
 
   it("leaves a failed download pending and retries without creating another cloud installation", async () => {
@@ -1726,6 +1946,271 @@ describe("Agent installation orchestration", () => {
     expect(retried.status).toBe("active");
     expect(createInstallation).toHaveBeenCalledOnce();
     expect(getPolicySnapshot).toHaveBeenCalledWith(POLICY_ID);
+  });
+
+  it.each([
+    ["profile_bound", "prepared", "profile_binding_failed", 1],
+    ["profile_attached", "profile_bound", "profile_binding_failed", 1],
+    ["projection_active", "profile_attached", "profile_binding_failed", 1],
+    ["cloud_activated", "projection_active", "activation_failed", 2],
+  ] as const)(
+    "cold-restarts after the durable %s edge without creating another Profile",
+    async (failedPhase, retainedPhase, expectedCode, cloudActivationCalls) => {
+      failJournalAdvanceTo(failedPhase);
+
+      await expect(
+        manager().install({
+          definitionId: DEFINITION_ID,
+          versionId: VERSION_ID,
+          profile: { kind: "fresh", name: "Fresh Agent" },
+        }),
+      ).rejects.toMatchObject({ code: expectedCode });
+      expect(
+        database.sqlite
+          .prepare(
+            "SELECT phase FROM installation_operations WHERE operation_id = ?",
+          )
+          .get(AGENT_INSTALLATION_ID),
+      ).toEqual({ phase: retainedPhase });
+
+      clearJournalFailure();
+      const recovered =
+        await coldRestartManager().reconcilePendingInstallations();
+
+      expect(recovered).toEqual([
+        expect.objectContaining({
+          agentInstallationId: AGENT_INSTALLATION_ID,
+          runtimeProfileId: RUNTIME_PROFILE_ID,
+          status: "active",
+        }),
+      ]);
+      expect(createProfile).toHaveBeenCalledOnce();
+      expect(activateInstallation).toHaveBeenCalledTimes(cloudActivationCalls);
+      expect(
+        new Set(activateInstallation.mock.calls.map((call) => call[3])),
+      ).toEqual(new Set([`agentera:activate:${AGENT_INSTALLATION_ID}`]));
+      expect(
+        database.sqlite
+          .prepare(
+            "SELECT phase FROM installation_operations WHERE operation_id = ?",
+          )
+          .get(AGENT_INSTALLATION_ID),
+      ).toEqual({ phase: "committed" });
+    },
+  );
+
+  it("commits Cloud success once after a crash before the local active transaction", async () => {
+    database.sqlite.exec(`
+      CREATE TRIGGER injected_local_active_failure
+      BEFORE UPDATE OF status ON local_agent_installations
+      WHEN NEW.status = 'active'
+      BEGIN
+        SELECT RAISE(ABORT, 'injected local active failure');
+      END;
+    `);
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "activation_failed" });
+    expect(activateInstallation).toHaveBeenCalledOnce();
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT phase FROM installation_operations WHERE operation_id = ?",
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({ phase: "cloud_activated" });
+
+    database.sqlite.exec("DROP TRIGGER injected_local_active_failure");
+    const recovered =
+      await coldRestartManager().reconcilePendingInstallations();
+
+    expect(recovered[0]).toMatchObject({ status: "active" });
+    expect(activateInstallation).toHaveBeenCalledOnce();
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT phase FROM installation_operations WHERE operation_id = ?",
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({ phase: "committed" });
+  });
+
+  it("single-flights two concurrent reconciliation requests", async () => {
+    activateInstallation.mockRejectedValueOnce(new Error("response lost"));
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "activation_failed" });
+    const restarted = coldRestartManager();
+
+    const [first, second] = await Promise.all([
+      restarted.reconcilePendingInstallations(),
+      restarted.reconcilePendingInstallations(),
+    ]);
+
+    expect(first[0]).toMatchObject({ status: "active" });
+    expect(second[0]).toMatchObject({ status: "active" });
+    expect(createProfile).toHaveBeenCalledOnce();
+    expect(activateInstallation).toHaveBeenCalledTimes(2);
+    expect(
+      new Set(activateInstallation.mock.calls.map((call) => call[3])),
+    ).toEqual(new Set([`agentera:activate:${AGENT_INSTALLATION_ID}`]));
+  });
+
+  it("marks a cross-owner claimed Profile as repair_required without reassigning it", async () => {
+    const claimed = join(profilesRoot, "foreign-owned");
+    mkdirSync(claimed, { recursive: true });
+    bindings.bindExistingProfile(claimed, otherOwner);
+    const originalResolveProfilePath = profiles.resolveProfilePath;
+    profiles.resolveProfilePath = vi.fn((id: string) =>
+      id === "foreign-owned" ? claimed : originalResolveProfilePath(id),
+    );
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: {
+          kind: "claim",
+          profileId: "foreign-owned",
+          profilePath: claimed,
+        },
+      }),
+    ).rejects.toMatchObject({ code: "profile_binding_failed" });
+
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT phase, retry_code FROM installation_operations WHERE operation_id = ?",
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({
+      phase: "repair_required",
+      retry_code: "profile_owner_conflict",
+    });
+    expect(bindings.verifyProfileBinding(claimed, otherOwner)).toMatchObject({
+      ownerId: otherOwner.ownerId,
+      agentInstallationId: null,
+    });
+    expect(() => bindings.verifyProfileBinding(claimed, owner)).toThrow(
+      /another Aera owner/i,
+    );
+    expect(deleteProfile).not.toHaveBeenCalled();
+  });
+
+  it("marks a foreign fresh-Profile reservation as repair_required without reclaiming it", async () => {
+    const reservation = bindings.reserveFreshProfile({
+      operationId: AGENT_INSTALLATION_ID,
+      name: "Fresh Agent",
+      owner: otherOwner,
+      profileId: "fresh-agent",
+      activate: false,
+    });
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "profile_binding_failed" });
+
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT phase, retry_code FROM installation_operations WHERE operation_id = ?",
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({
+      phase: "repair_required",
+      retry_code: "profile_reservation_conflict",
+    });
+    expect(
+      bindings.getFreshProfileReservation(AGENT_INSTALLATION_ID, otherOwner),
+    ).toEqual(reservation);
+    expect(createProfile).not.toHaveBeenCalled();
+    expect(deleteProfile).not.toHaveBeenCalled();
+  });
+
+  it("marks a reserved Runtime Profile ID collision as repair_required without deleting either Profile", async () => {
+    bindings.reserveFreshProfile({
+      operationId: AGENT_INSTALLATION_ID,
+      name: "Fresh Agent",
+      owner,
+      profileId: "fresh-agent",
+      activate: false,
+    });
+    const occupied = join(profilesRoot, "occupied");
+    mkdirSync(occupied, { recursive: true });
+    bindings.bindExistingProfile(occupied, owner);
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "profile_binding_failed" });
+
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT phase, retry_code FROM installation_operations WHERE operation_id = ?",
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({
+      phase: "repair_required",
+      retry_code: "runtime_profile_conflict",
+    });
+    expect(bindings.verifyProfileBinding(occupied, owner)).toMatchObject({
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+      agentInstallationId: null,
+    });
+    expect(existsSync(freshProfilePath)).toBe(true);
+    expect(deleteProfile).not.toHaveBeenCalled();
+  });
+
+  it("marks unexpected private data in a reserved fresh Profile as repair_required without deleting it", async () => {
+    createProfile.mockImplementationOnce((_name, _cloneFrom, profileId) => {
+      mkdirSync(freshProfilePath, { recursive: true });
+      writeFileSync(join(freshProfilePath, "MEMORY.md"), "private marker\n");
+      return { success: true, id: profileId };
+    });
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "profile_binding_failed" });
+
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT phase, retry_code FROM installation_operations WHERE operation_id = ?",
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({
+      phase: "repair_required",
+      retry_code: "profile_private_data_conflict",
+    });
+    expect(readFileSync(join(freshProfilePath, "MEMORY.md"), "utf8")).toBe(
+      "private marker\n",
+    );
+    expect(deleteProfile).not.toHaveBeenCalled();
+    await expect(
+      coldRestartManager().reconcilePendingInstallations(),
+    ).resolves.toEqual([]);
+    expect(createProfile).toHaveBeenCalledOnce();
   });
 
   it("preserves and reuses an attached Profile after activation failure", async () => {
