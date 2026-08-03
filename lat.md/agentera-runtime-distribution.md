@@ -80,11 +80,11 @@ The desktop checks for stable Runtime updates automatically but downloads only a
 
 Downloads are resumable and must pass repository, platform, architecture, compatibility, Ed25519 signature, and SHA-256 checks. A candidate is staged outside the current Runtime and failed health checks restore the previous version.
 
-[[src/main/agentera-runtime-distribution/update-client.ts#checkStableRuntimeUpdate]] obtains only the reviewed stable-index redirect, its signature, and the selected target's manifest and signature. It verifies both signed layers against the production trust set, cross-checks repository, full commit, version, target, names, and archive hash, and returns an offer without requesting archive bytes. Older, equal, or desktop-incompatible versions produce no offer; transport failure leaves the current Runtime usable with a bounded public error code.
+[[src/main/agentera-runtime-distribution/update-client.ts#checkStableRuntimeUpdate]] obtains only the reviewed stable index, its signature, and the selected target's manifest and signature. The configured Aera Cloud origin's exact `/runtime-updates/stable/` route is the primary transport, with the public GitHub stable channel retained as a fallback only when the complete primary-source attempt has a transport failure. A signature, schema, URL, or cross-check failure is terminal and never triggers source fallback; metadata from two sources is never mixed. The client verifies both signed layers against the production trust set, cross-checks repository, full commit, version, target, names, and archive hash, and returns an offer without requesting archive bytes. Older, equal, or desktop-incompatible versions produce no offer; failure of every available transport leaves the current Runtime usable with a bounded public error code.
 
-Logical update URLs are restricted to the public `bignormal/aera-runtime` GitHub stable-index redirect and immutable release-asset paths. Redirect hostnames are transport only: signatures and hashes remain the trust boundary, and no GitHub token is stored or exposed by the desktop.
+Logical update URLs are restricted to either the configured HTTPS Aera origin's exact stable metadata and immutable `releases/<tag>/<asset>` paths or the public `bignormal/aera-runtime` GitHub stable-index redirect and immutable release-asset paths. Loopback HTTP remains available only for isolated development. Redirect hostnames are transport only: signatures and hashes remain the trust boundary, and no GitHub token is stored or exposed by the desktop. Main-process diagnostics record only the source, bounded request/verification stage, and stable failure class; they never include redirect URLs, response bodies, local paths, credentials, or raw exceptions.
 
-Runtime metadata and archive traffic use Electron's Chromium network stack so the updater honors the operating system's proxy configuration. Metadata follows the reviewed GitHub redirect inside Chromium. Before an archive stream starts, [[src/main/agentera-runtime-distribution/electron-transport.ts#createElectronRuntimeDownloadUrlResolver]] uses `net.request` to validate every redirect synchronously, enforce the redirect limit and HTTPS anti-downgrade rule, and resolve the final transport URL; [[src/main/agentera-runtime-distribution/downloader.ts#downloadWithResume]] then streams that exact URL through `net.fetch` with further redirects disabled. The final signed manifest, expected size, and SHA-256 remain authoritative even when GitHub's transport hostname changes.
+Runtime metadata and archive traffic use Electron's Chromium network stack so the updater honors the operating system's proxy configuration. First-party metadata is requested directly; GitHub fallback metadata follows the reviewed redirect inside Chromium. Before an archive stream starts, [[src/main/agentera-runtime-distribution/electron-transport.ts#createElectronRuntimeDownloadUrlResolver]] uses `net.request` to validate every redirect synchronously, enforce the redirect limit and HTTPS anti-downgrade rule, and resolve the final transport URL; [[src/main/agentera-runtime-distribution/downloader.ts#downloadWithResume]] then streams that exact URL through `net.fetch` with further redirects disabled. The final signed manifest, expected size, and SHA-256 remain authoritative even when GitHub's transport hostname changes.
 
 [[src/main/agentera-runtime-distribution/downloader.ts#downloadWithResume]] writes only to a destination `.part` plus `.part.json` below the caller-owned Runtime downloads directory. Resume requires the same URL, expected size, expected SHA-256, unexpired metadata, exact local byte count, valid `Content-Range`, and matching ETag and Last-Modified validators when present. A server that ignores Range safely restarts from byte zero.
 
@@ -105,6 +105,26 @@ The launch that installs or repairs from the exact packaged Seed does not immedi
 The card claims “up to date” only after a successful metadata check with no offer. If the stable channel cannot be reached or its metadata is rejected, the current signed Runtime remains active but is labeled only as usable; the bounded update error remains visible so transport failure cannot be mistaken for freshness proof.
 
 [[src/main/agentera-runtime-distribution/bootstrap.ts#bootstrapRuntimeDistribution]] runs before `app/start` is dynamically imported. An approved candidate's signature, pointer binding, complete extracted inventory, and isolated offline health are checked again below `userData/runtime/health`; only then does the journal move current to previous and candidate to current. Failure keeps the existing current version, records only an error code, numeric exit code, version, short commit, and timestamp, and durably suppresses the failed candidate until a newer staging action replaces it. No path, credential, Profile, Memory, session, learned Skill, or raw exception enters the diagnostic.
+
+### Stable update test specifications
+
+These focused tests lock the source-authority and supported-platform behavior of signed stable Runtime update checks.
+
+#### Primary stable source
+
+The configured Aera stable origin can produce a verified offer without consulting GitHub, so GitHub availability is not required for the primary update path.
+
+#### Transport-only fallback
+
+A complete first-party transport failure may restart metadata retrieval from GitHub while recording a bounded diagnostic and never mixing metadata across sources.
+
+#### Invalid metadata fails closed
+
+Invalid first-party signatures or metadata terminate the check without consulting GitHub, preventing an authority downgrade after verification failure.
+
+#### Seed point-one to stable point-three
+
+macOS ARM64 and Windows x64 both offer the signed Runtime `.3` release when the installed packaged Seed is `.1`.
 
 ## Release gate
 

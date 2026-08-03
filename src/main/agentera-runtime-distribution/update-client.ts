@@ -19,6 +19,22 @@ export type RuntimeUpdateErrorCode =
 
 export type RuntimeUpdateUrlKind = "stable-index" | "release-asset";
 
+export type RuntimeUpdateSource = "first-party" | "github";
+
+export type RuntimeUpdateStage =
+  | "stable-index"
+  | "stable-index-signature"
+  | "stable-index-verification"
+  | "manifest"
+  | "manifest-signature"
+  | "manifest-verification";
+
+export interface RuntimeUpdateDiagnostic {
+  source: RuntimeUpdateSource;
+  stage: RuntimeUpdateStage;
+  code: "transport_failed" | "metadata_invalid";
+}
+
 export interface RuntimeMetadataTransport {
   get(url: URL, signal: AbortSignal): Promise<Buffer>;
 }
@@ -33,7 +49,9 @@ export interface RuntimeUpdateContext {
   trustedPublicKeys: ReadonlyMap<string, string>;
   signal: AbortSignal;
   transport?: RuntimeMetadataTransport;
+  firstPartyBaseUrl?: URL;
   onCheckError?: (code: RuntimeUpdateErrorCode) => void;
+  onDiagnostic?: (diagnostic: RuntimeUpdateDiagnostic) => void;
 }
 
 export interface RuntimeUpdateOffer {
@@ -82,6 +100,7 @@ const APPROVED_REPOSITORY = "bignormal/aera-runtime";
 const GITHUB_ORIGIN = "https://github.com";
 const RELEASE_PATH_PREFIX = `/${APPROVED_REPOSITORY}/releases/download/`;
 const LATEST_PATH_PREFIX = `/${APPROVED_REPOSITORY}/releases/latest/download/`;
+const FIRST_PARTY_PATH_PREFIX = "/runtime-updates/stable/";
 const INDEX_NAME = "agentera-runtime-stable.index.json";
 const INDEX_SIGNATURE_NAME = "agentera-runtime-stable.index.sig";
 const INDEX_FIELDS = [
@@ -119,6 +138,13 @@ const CREATED_AT_PATTERN =
 const DEFAULT_METADATA_LIMIT = 32 * 1024 * 1024;
 const DEFAULT_METADATA_TIMEOUT_MS = 30_000;
 
+interface RuntimeUpdateSourceDescriptor {
+  id: RuntimeUpdateSource;
+  firstPartyBaseUrl?: URL;
+  indexUrl: URL;
+  indexSignatureUrl: URL;
+}
+
 export class RuntimeUpdateError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -151,6 +177,20 @@ export class RuntimeUpdateCheckCancelledError extends RuntimeUpdateError {
   constructor() {
     super("Runtime update check was cancelled");
     this.name = "RuntimeUpdateCheckCancelledError";
+  }
+}
+
+class RuntimeUpdateSourceAttemptError extends RuntimeUpdateError {
+  constructor(
+    readonly source: RuntimeUpdateSource,
+    readonly stage: RuntimeUpdateStage,
+    readonly originalError: unknown,
+  ) {
+    super(
+      `Runtime update ${source} ${stage} failed`,
+      originalError instanceof Error ? { cause: originalError } : undefined,
+    );
+    this.name = "RuntimeUpdateSourceAttemptError";
   }
 }
 
@@ -229,18 +269,80 @@ export function compareRuntimeVersions(left: string, right: string): number {
   return 0;
 }
 
+function isLoopbackHostname(hostname: string): boolean {
+  return (
+    hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]"
+  );
+}
+
+function validateFirstPartyBaseUrl(url: URL): void {
+  if (
+    (url.protocol !== "https:" &&
+      !(url.protocol === "http:" && isLoopbackHostname(url.hostname))) ||
+    url.origin === GITHUB_ORIGIN ||
+    url.username.length > 0 ||
+    url.password.length > 0 ||
+    url.search.length > 0 ||
+    url.hash.length > 0 ||
+    url.pathname !== FIRST_PARTY_PATH_PREFIX
+  ) {
+    throw new RuntimeUpdateUrlError(
+      "Runtime first-party update base URL is not allowed",
+    );
+  }
+}
+
+function matchesFirstPartyUpdateUrl(
+  url: URL,
+  kind: RuntimeUpdateUrlKind,
+  firstPartyBaseUrl: URL,
+): boolean {
+  validateFirstPartyBaseUrl(firstPartyBaseUrl);
+  if (url.origin !== firstPartyBaseUrl.origin) return false;
+  if (kind === "stable-index") {
+    return (
+      url.pathname === `${FIRST_PARTY_PATH_PREFIX}${INDEX_NAME}` ||
+      url.pathname === `${FIRST_PARTY_PATH_PREFIX}${INDEX_SIGNATURE_NAME}`
+    );
+  }
+  if (!url.pathname.startsWith(`${FIRST_PARTY_PATH_PREFIX}releases/`)) {
+    return false;
+  }
+  const remainder = url.pathname.slice(
+    `${FIRST_PARTY_PATH_PREFIX}releases/`.length,
+  );
+  const parts = remainder.split("/");
+  return (
+    parts.length === 2 &&
+    /^runtime-v[0-9A-Za-z][0-9A-Za-z._-]{0,191}$/.test(parts[0]) &&
+    !/latest/i.test(parts[0]) &&
+    FILE_NAME_PATTERN.test(parts[1]) &&
+    parts[1] !== "." &&
+    parts[1] !== ".."
+  );
+}
+
 export function assertAllowedRuntimeUpdateUrl(
   url: URL,
   kind: RuntimeUpdateUrlKind,
+  firstPartyBaseUrl?: URL,
 ): void {
   if (
-    url.origin !== GITHUB_ORIGIN ||
     url.username.length > 0 ||
     url.password.length > 0 ||
     url.search.length > 0 ||
     url.hash.length > 0 ||
     url.pathname.includes("%")
   ) {
+    throw new RuntimeUpdateUrlError("Runtime update URL origin is not allowed");
+  }
+  if (
+    firstPartyBaseUrl !== undefined &&
+    matchesFirstPartyUpdateUrl(url, kind, firstPartyBaseUrl)
+  ) {
+    return;
+  }
+  if (url.origin !== GITHUB_ORIGIN) {
     throw new RuntimeUpdateUrlError("Runtime update URL origin is not allowed");
   }
   if (kind === "stable-index") {
@@ -548,11 +650,39 @@ function verifyChannelIndex(
   return { ...value, targets } as RuntimeChannelIndex;
 }
 
-function releaseAssetUrl(releaseTag: string, name: string): URL {
-  const url = new URL(
-    `${GITHUB_ORIGIN}${RELEASE_PATH_PREFIX}${releaseTag}/${name}`,
-  );
-  assertAllowedRuntimeUpdateUrl(url, "release-asset");
+function githubUpdateSource(): RuntimeUpdateSourceDescriptor {
+  return {
+    id: "github",
+    indexUrl: new URL(`${GITHUB_ORIGIN}${LATEST_PATH_PREFIX}${INDEX_NAME}`),
+    indexSignatureUrl: new URL(
+      `${GITHUB_ORIGIN}${LATEST_PATH_PREFIX}${INDEX_SIGNATURE_NAME}`,
+    ),
+  };
+}
+
+function firstPartyUpdateSource(
+  firstPartyBaseUrl: URL,
+): RuntimeUpdateSourceDescriptor {
+  const baseUrl = new URL(firstPartyBaseUrl.href);
+  validateFirstPartyBaseUrl(baseUrl);
+  return {
+    id: "first-party",
+    firstPartyBaseUrl: baseUrl,
+    indexUrl: new URL(INDEX_NAME, baseUrl),
+    indexSignatureUrl: new URL(INDEX_SIGNATURE_NAME, baseUrl),
+  };
+}
+
+function releaseAssetUrl(
+  source: RuntimeUpdateSourceDescriptor,
+  releaseTag: string,
+  name: string,
+): URL {
+  const url =
+    source.id === "first-party"
+      ? new URL(`releases/${releaseTag}/${name}`, source.firstPartyBaseUrl)
+      : new URL(`${GITHUB_ORIGIN}${RELEASE_PATH_PREFIX}${releaseTag}/${name}`);
+  assertAllowedRuntimeUpdateUrl(url, "release-asset", source.firstPartyBaseUrl);
   return url;
 }
 
@@ -561,8 +691,9 @@ async function getMetadata(
   url: URL,
   kind: RuntimeUpdateUrlKind,
   signal: AbortSignal,
+  firstPartyBaseUrl?: URL,
 ): Promise<Buffer> {
-  assertAllowedRuntimeUpdateUrl(url, kind);
+  assertAllowedRuntimeUpdateUrl(url, kind, firstPartyBaseUrl);
   try {
     const result = await transport.get(url, signal);
     if (!Buffer.isBuffer(result)) {
@@ -615,33 +746,40 @@ function reportCheckError(
   }
 }
 
-export async function checkStableRuntimeUpdate(
-  context: RuntimeUpdateContext,
-): Promise<RuntimeUpdateOffer | null> {
-  if (context.repository !== APPROVED_REPOSITORY) {
-    reportCheckError(context.onCheckError, "runtime_update_metadata_invalid");
-    return null;
+function reportDiagnostic(
+  callback: RuntimeUpdateContext["onDiagnostic"],
+  diagnostic: RuntimeUpdateDiagnostic,
+): void {
+  try {
+    callback?.(diagnostic);
+  } catch {
+    // Diagnostic logging cannot change the safe update-check result.
   }
-  const transport = context.transport ?? new FetchRuntimeMetadataTransport();
-  const indexUrl = new URL(
-    `${GITHUB_ORIGIN}${LATEST_PATH_PREFIX}${INDEX_NAME}`,
-  );
-  const indexSignatureUrl = new URL(
-    `${GITHUB_ORIGIN}${LATEST_PATH_PREFIX}${INDEX_SIGNATURE_NAME}`,
-  );
+}
+
+async function checkStableRuntimeUpdateFromSource(
+  context: RuntimeUpdateContext,
+  transport: RuntimeMetadataTransport,
+  source: RuntimeUpdateSourceDescriptor,
+): Promise<RuntimeUpdateOffer | null> {
+  let stage: RuntimeUpdateStage = "stable-index";
   try {
     const indexBytes = await getMetadata(
       transport,
-      indexUrl,
+      source.indexUrl,
       "stable-index",
       context.signal,
+      source.firstPartyBaseUrl,
     );
+    stage = "stable-index-signature";
     const indexSignatureBytes = await getMetadata(
       transport,
-      indexSignatureUrl,
+      source.indexSignatureUrl,
       "stable-index",
       context.signal,
+      source.firstPartyBaseUrl,
     );
+    stage = "stable-index-verification";
     const index = verifyChannelIndex(
       indexBytes,
       indexSignatureBytes,
@@ -674,25 +812,32 @@ export async function checkStableRuntimeUpdate(
       );
     }
     const manifestUrl = releaseAssetUrl(
+      source,
       index.release_tag,
       target.manifest_name,
     );
     const signatureUrl = releaseAssetUrl(
+      source,
       index.release_tag,
       target.signature_name,
     );
+    stage = "manifest";
     const manifestBytes = await getMetadata(
       transport,
       manifestUrl,
       "release-asset",
       context.signal,
+      source.firstPartyBaseUrl,
     );
+    stage = "manifest-signature";
     const signatureBytes = await getMetadata(
       transport,
       signatureUrl,
       "release-asset",
       context.signal,
+      source.firstPartyBaseUrl,
     );
+    stage = "manifest-verification";
     let manifest: RuntimeManifest;
     try {
       manifest = verifyRuntimeManifestSignature({
@@ -717,7 +862,11 @@ export async function checkStableRuntimeUpdate(
       throw error;
     }
     crossCheckManifest(manifest, index, target);
-    const archiveUrl = releaseAssetUrl(index.release_tag, target.archive_name);
+    const archiveUrl = releaseAssetUrl(
+      source,
+      index.release_tag,
+      target.archive_name,
+    );
     return {
       runtimeVersion: manifest.runtime_version,
       sourceCommit: manifest.source_commit,
@@ -738,12 +887,70 @@ export async function checkStableRuntimeUpdate(
     ) {
       throw new RuntimeUpdateCheckCancelledError();
     }
-    reportCheckError(
-      context.onCheckError,
-      error instanceof RuntimeUpdateTransportError
-        ? "runtime_update_unavailable"
-        : "runtime_update_metadata_invalid",
-    );
+    throw new RuntimeUpdateSourceAttemptError(source.id, stage, error);
+  }
+}
+
+export async function checkStableRuntimeUpdate(
+  context: RuntimeUpdateContext,
+): Promise<RuntimeUpdateOffer | null> {
+  if (context.repository !== APPROVED_REPOSITORY) {
+    reportCheckError(context.onCheckError, "runtime_update_metadata_invalid");
     return null;
   }
+  const transport = context.transport ?? new FetchRuntimeMetadataTransport();
+  let sources: RuntimeUpdateSourceDescriptor[];
+  try {
+    sources = context.firstPartyBaseUrl
+      ? [
+          firstPartyUpdateSource(context.firstPartyBaseUrl),
+          githubUpdateSource(),
+        ]
+      : [githubUpdateSource()];
+  } catch {
+    reportDiagnostic(context.onDiagnostic, {
+      source: "first-party",
+      stage: "stable-index",
+      code: "metadata_invalid",
+    });
+    reportCheckError(context.onCheckError, "runtime_update_metadata_invalid");
+    return null;
+  }
+
+  for (const [index, source] of sources.entries()) {
+    try {
+      return await checkStableRuntimeUpdateFromSource(
+        context,
+        transport,
+        source,
+      );
+    } catch (error) {
+      if (
+        context.signal.aborted ||
+        error instanceof RuntimeUpdateCheckCancelledError
+      ) {
+        throw new RuntimeUpdateCheckCancelledError();
+      }
+      const attempt =
+        error instanceof RuntimeUpdateSourceAttemptError ? error : null;
+      const originalError = attempt?.originalError ?? error;
+      const isTransport = originalError instanceof RuntimeUpdateTransportError;
+      reportDiagnostic(context.onDiagnostic, {
+        source: attempt?.source ?? source.id,
+        stage: attempt?.stage ?? "stable-index",
+        code: isTransport ? "transport_failed" : "metadata_invalid",
+      });
+      if (isTransport && index + 1 < sources.length) {
+        continue;
+      }
+      reportCheckError(
+        context.onCheckError,
+        isTransport
+          ? "runtime_update_unavailable"
+          : "runtime_update_metadata_invalid",
+      );
+      return null;
+    }
+  }
+  return null;
 }
