@@ -3128,6 +3128,10 @@ export function stopHealthPolling(): void {
 // hermes model: one gateway per profile, bound to that profile's own port.
 const gatewayProcesses = new Map<string, ChildProcess>();
 const appStartedProfiles = new Set<string>();
+const gatewayReadinessProbeTimers = new Map<
+  string,
+  ReturnType<typeof setTimeout>
+>();
 const gatewayOwnershipTerminationTimers = new Map<
   string,
   ReturnType<typeof setTimeout>
@@ -3135,6 +3139,10 @@ const gatewayOwnershipTerminationTimers = new Map<
 let gatewayProcessOwnership: GatewayProcessOwnershipLedger | null = null;
 
 export function configureGatewayProcessOwnership(userDataPath: string): void {
+  for (const timer of gatewayReadinessProbeTimers.values()) {
+    clearTimeout(timer);
+  }
+  gatewayReadinessProbeTimers.clear();
   for (const timer of gatewayOwnershipTerminationTimers.values()) {
     clearTimeout(timer);
   }
@@ -3162,6 +3170,33 @@ function invalidateApiCacheFor(profile?: string): void {
   if (profileKey(profile) === profileKey(undefined)) {
     apiServerAvailable = false;
   }
+}
+
+function cancelGatewayReadinessProbe(profile?: string): void {
+  const key = profileKey(profile);
+  const timer = gatewayReadinessProbeTimers.get(key);
+  if (timer) clearTimeout(timer);
+  gatewayReadinessProbeTimers.delete(key);
+}
+
+function scheduleGatewayReadinessProbe(profile?: string): void {
+  const key = profileKey(profile);
+  cancelGatewayReadinessProbe(profile);
+  const timer = setTimeout(async () => {
+    if (gatewayReadinessProbeTimers.get(key) !== timer) return;
+    if (key !== profileKey(undefined)) {
+      gatewayReadinessProbeTimers.delete(key);
+      return;
+    }
+    const ready = await isApiServerReady(profile);
+    if (gatewayReadinessProbeTimers.get(key) !== timer) return;
+    gatewayReadinessProbeTimers.delete(key);
+    if (key === profileKey(undefined)) {
+      apiServerAvailable = ready;
+    }
+  }, 3000);
+  timer.unref?.();
+  gatewayReadinessProbeTimers.set(key, timer);
 }
 
 function getGatewaySpawnError(): string | null {
@@ -3401,8 +3436,11 @@ export function startGatewayDetailed(profile?: string): GatewayStartResult {
       `[gateway:${key}] Failed to spawn gateway process:`,
       err.message,
     );
-    if (gatewayProcesses.get(key) === proc) gatewayProcesses.delete(key);
-    appStartedProfiles.delete(key);
+    if (gatewayProcesses.get(key) === proc) {
+      gatewayProcesses.delete(key);
+      cancelGatewayReadinessProbe(profile);
+      appStartedProfiles.delete(key);
+    }
     if (ownership !== null) {
       try {
         gatewayProcessOwnership?.clearLaunch(key, ownership.launchId);
@@ -3420,8 +3458,11 @@ export function startGatewayDetailed(profile?: string): GatewayStartResult {
           `Check ${logPath} for details.`,
       );
     }
-    if (gatewayProcesses.get(key) === proc) gatewayProcesses.delete(key);
-    appStartedProfiles.delete(key);
+    if (gatewayProcesses.get(key) === proc) {
+      gatewayProcesses.delete(key);
+      cancelGatewayReadinessProbe(profile);
+      appStartedProfiles.delete(key);
+    }
     reconcileCompletedGatewayOwnership(profile, ownership);
     invalidateApiCacheFor(profile);
     // Restart health polling to detect if gateway comes back
@@ -3433,13 +3474,10 @@ export function startGatewayDetailed(profile?: string): GatewayStartResult {
   appStartedProfiles.add(key);
   warmTuiGatewayClient(profile);
 
-  // Wait a bit then check if API server came up (only meaningful for the
-  // active profile, whose URL getApiUrl() resolves to).
-  setTimeout(async () => {
-    if (profileKey(profile) === profileKey(undefined)) {
-      apiServerAvailable = await isApiServerReady(profile);
-    }
-  }, 3000);
+  // Re-check startup readiness only while this launch still owns the profile.
+  // A stopped or replaced gateway must not leave a delayed probe that can
+  // overwrite the active cache after its lifecycle has ended.
+  scheduleGatewayReadinessProbe(profile);
 
   return { success: true, running: true, logPath };
 }
@@ -3563,6 +3601,7 @@ export function stopGateway(
   const shouldForce =
     typeof profileOrForce === "boolean" ? profileOrForce : force;
   const key = profileKey(profile);
+  cancelGatewayReadinessProbe(profile);
   if (!shouldForce && !appStartedProfiles.has(key)) return;
 
   let ownership: GatewayLaunchOwnershipRecord | null = null;
@@ -3623,6 +3662,7 @@ export function stopAeraOwnedGateways(): void {
 
 function stopAeraOwnedGateway(profile: string): void {
   const key = profileKey(profile);
+  cancelGatewayReadinessProbe(profile);
   const proc = gatewayProcesses.get(key) ?? null;
   let ownership: GatewayLaunchOwnershipRecord | null = null;
   try {
@@ -3778,6 +3818,7 @@ function reapRecoveredAeraOwnedGateway(
 
   gatewayProcesses.delete(profileKey(profile));
   appStartedProfiles.delete(profileKey(profile));
+  cancelGatewayReadinessProbe(profile);
   invalidateApiCacheFor(profile);
   stopTuiGatewayClient(profile);
   scheduleGatewayOwnershipTermination(profile, ownership);
@@ -4031,6 +4072,7 @@ const gatewayRestartByProfile = new Map<string, Promise<boolean>>();
 
 function markGatewayRestartFailed(profile?: string): void {
   const key = profileKey(profile);
+  cancelGatewayReadinessProbe(profile);
   gatewayProcesses.delete(key);
   appStartedProfiles.delete(key);
   invalidateApiCacheFor(profile);

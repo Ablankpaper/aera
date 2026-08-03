@@ -280,7 +280,19 @@ Local Gateway lifecycle is coordinated outside Hermes private state. [[src/main/
 
 [[src/main/hermes.ts#recoverAeraOwnedGatewaysFromPreviousRun]] and [[src/main/hermes.ts#stopAeraOwnedGateways]] act only on exact recorded Profile/PID evidence. SIGTERM retains ownership until exit is confirmed; bounded escalation rechecks the Profile PID immediately before signalling, while a missing, unchanged, replaced, corrupt, or otherwise ambiguous identity is never claimed or killed. Stable recovery error codes are logged without paths or private data.
 
-Cross-platform regression tests inject a non-terminating SIGTERM and deterministic rename failures instead of relying on platform signal or directory-replacement semantics. They cover the Windows `EACCES`, `EBUSY`, `EEXIST`, and `EPERM` canonical-replacement fallback while preserving the fsynced pending commit point. A queued restart for another Profile uses the same bounded platform-aware health budget after an earlier setup failure, so Windows scheduling cannot hide that the queued command ran.
+Cross-platform regression tests inject a non-terminating SIGTERM and deterministic rename failures instead of relying on platform signal or directory-replacement semantics. They cover the Windows `EACCES`, `EBUSY`, `EEXIST`, and `EPERM` canonical-replacement fallback while preserving the fsynced pending commit point. A queued restart for another Profile uses the same bounded platform-aware health budget after an earlier setup failure, and fake time proves that a stopped launch cannot issue a stale readiness request.
+
+### Gateway readiness lifecycle tests
+
+Deterministic lifecycle tests keep delayed readiness work and child events bound to the exact gateway generation that created them.
+
+#### Stopped gateways cancel deferred readiness
+
+Stopping, replacing, failing, or reconfiguring a Profile cancels its delayed readiness probe, and an in-flight probe may update the active cache only while it still owns the current generation.
+
+#### Superseded events preserve replacement ownership
+
+A superseded child's late error or close event cannot detach its replacement, leave its readiness probe active, or bypass the replacement's normal stop path.
 
 ## Cloud boundary
 

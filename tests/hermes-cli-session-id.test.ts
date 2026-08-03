@@ -606,6 +606,60 @@ describe("CLI fallback session id propagation", () => {
     });
   });
 
+  // @lat: [[lat.md/agentera-agent-control-plane#Hermes integration#Gateway readiness lifecycle tests#Stopped gateways cancel deferred readiness]]
+  it("cancels the deferred readiness probe when its gateway stops", async () => {
+    mkdirSync(TEST_REPO, { recursive: true });
+    stopHealthPolling();
+    vi.useFakeTimers();
+
+    try {
+      expect(startGateway()).toBe(true);
+      expect(spawned).toHaveLength(1);
+
+      stopGateway(undefined, true);
+      await vi.advanceTimersByTimeAsync(3000);
+
+      expect(requestEvents).toEqual([]);
+    } finally {
+      stopHealthPolling();
+      vi.useRealTimers();
+    }
+  });
+
+  // @lat: [[lat.md/agentera-agent-control-plane#Hermes integration#Gateway readiness lifecycle tests#Superseded events preserve replacement ownership]]
+  it.each(["close", "error"] as const)(
+    "keeps a replacement gateway owned when the prior child emits a late %s",
+    async (event) => {
+      mkdirSync(TEST_REPO, { recursive: true });
+      stopHealthPolling();
+      vi.useFakeTimers();
+
+      try {
+        expect(startGateway()).toBe(true);
+        const prior = spawned[0];
+        prior.signalCode = "SIGTERM";
+        stopGateway(undefined, true);
+
+        expect(startGateway()).toBe(true);
+        const replacement = spawned[1];
+        if (event === "close") {
+          prior.emit("close", null, "SIGTERM");
+        } else {
+          prior.emit("error", new Error("late prior gateway error"));
+        }
+
+        stopGateway();
+        await vi.advanceTimersByTimeAsync(3000);
+
+        expect.soft(replacement.kill).toHaveBeenCalledWith("SIGTERM");
+        expect(requestEvents).toEqual([]);
+      } finally {
+        stopHealthPolling();
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it("recovers a stopped local gateway before sending via the API", async () => {
     mkdirSync(TEST_REPO, { recursive: true });
     healthStatuses.push(503, 503, 200);
