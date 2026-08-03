@@ -29,6 +29,7 @@ describe("Workspace Agent assets remain outside Hermes private runtime state", (
     const allowed = new Set([
       "src/main/agentera-agent-control/client.ts",
       "src/main/agentera-agent-control/conversation-boundary-store.ts",
+      "src/main/agentera-agent-control/conversation-runtime-coordinator.ts",
       "src/main/agentera-agent-control/db.ts",
       "src/main/agentera-agent-control/draft-store.ts",
       "src/main/agentera-agent-control/experience-candidate-importer.ts",
