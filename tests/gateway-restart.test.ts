@@ -204,6 +204,21 @@ async function waitForFile(
   return false;
 }
 
+async function waitForPidFile(
+  filePath: string,
+  timeoutMs = 1000,
+): Promise<number> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(filePath)) {
+      const parsed = Number(readFileSync(filePath, "utf8").trim());
+      if (Number.isInteger(parsed) && parsed > 0) return parsed;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("PID file did not contain a positive integer before timeout");
+}
+
 describe("restartGatewayViaCli", () => {
   beforeEach(() => {
     stopGateway(true);
@@ -309,20 +324,18 @@ describe("restartGatewayViaCli", () => {
         profile === "default"
           ? join(TEST_HOME, "gateway.pid")
           : profilePidFile(profile);
+      const writeDelayMs = profile === "work" ? 250 : 0;
       return [
         "-e",
-        `require("fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));setInterval(() => {}, 1000)`,
+        `setTimeout(() => require("fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)), ${writeDelayMs});setInterval(() => {}, 1000)`,
       ];
     });
 
+    writeFileSync(profilePidFile("work"), "", "utf8");
     expect(startGateway()).toBe(true);
     expect(startGateway("work")).toBe(true);
-    expect(await waitForFile(join(TEST_HOME, "gateway.pid"))).toBe(true);
-    expect(await waitForFile(profilePidFile("work"))).toBe(true);
-    const defaultPid = Number(
-      readFileSync(join(TEST_HOME, "gateway.pid"), "utf8"),
-    );
-    const workPid = Number(readFileSync(profilePidFile("work"), "utf8"));
+    const defaultPid = await waitForPidFile(join(TEST_HOME, "gateway.pid"));
+    const workPid = await waitForPidFile(profilePidFile("work"));
     expect(
       JSON.parse(
         readFileSync(join(TEST_HOME, "gateway-process-ownership.json"), "utf8"),
