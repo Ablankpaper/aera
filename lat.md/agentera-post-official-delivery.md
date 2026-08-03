@@ -86,6 +86,20 @@ The complete contract is `docs/superpowers/specs/2026-07-23-agentera-end-to-end-
 
 The executable Cloud/Desktop implementation sequence is `docs/superpowers/plans/2026-07-23-agentera-end-to-end-encrypted-backup-migration-v1.md`.
 
+### Snapshot byte-stability boundary
+
+Snapshot acceptance compares captured bytes as well as file identity so coarse filesystem timestamps cannot turn a concurrent same-length rewrite into a false stable result.
+
+[[src/main/agentera-encrypted-backup/snapshot.ts#captureStableFile]] and [[src/main/agentera-encrypted-backup/snapshot.ts#readStableFile]] stream the opened source a second time and require its exact SHA-256 and size to match the captured bytes. Metadata equality remains an additional link, type, size, mode, and identity defense rather than the only change detector.
+
+#### Copied files detect same-identity byte changes
+
+An allowlisted copied file that changes after capture exhausts the bounded retries and returns `unstable_file`, even when every observable identity field remains unchanged.
+
+#### Sanitized config detects same-identity byte changes
+
+Profile configuration is rejected before sanitization when its source bytes keep changing behind an unchanged observable identity, so sanitized output never legitimizes a torn read.
+
 ### Local encrypted-backup acceptance evidence
 
 The production Desktop application, a real Cloud process, PostgreSQL, Redis, MinIO, and three isolated Electron device homes completed the encrypted-backup acceptance flow on 2026-07-23.

@@ -261,6 +261,34 @@ function ensurePrivateParent(path: string): void {
   chmodSync(parent, 0o700);
 }
 
+async function hashOpenFileContents(input: {
+  file: Awaited<ReturnType<typeof openFile>>;
+  maximumBytes: number;
+  signal?: AbortSignal;
+}): Promise<{ size: number; sha256: string }> {
+  const digest = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  let size = 0;
+  try {
+    for (;;) {
+      throwIfCancelled(input.signal);
+      const { bytesRead } = await input.file.read(
+        buffer,
+        0,
+        buffer.byteLength,
+        size,
+      );
+      if (bytesRead === 0) break;
+      size += bytesRead;
+      if (size > input.maximumBytes) fail("snapshot_too_large");
+      digest.update(buffer.subarray(0, bytesRead));
+    }
+    return { size, sha256: digest.digest("hex") };
+  } finally {
+    buffer.fill(0);
+  }
+}
+
 async function captureStableFile(input: {
   sourcePath: string;
   destinationPath: string;
@@ -319,11 +347,19 @@ async function captureStableFile(input: {
         }
       }
       buffer.fill(0);
+      const copiedSha256 = digest.digest("hex");
       input.hooks?.afterRead?.(input.sourcePath, attempt);
+      const verification = await hashOpenFileContents({
+        file: source,
+        maximumBytes: input.remainingBytes,
+        signal: input.signal,
+      });
       const afterHandle = await source.stat({ bigint: true });
       const afterPath = inspectRegularFile(input.sourcePath);
       if (
         position !== Number(before.size) ||
+        verification.size !== position ||
+        verification.sha256 !== copiedSha256 ||
         !sameIdentity(before, afterHandle) ||
         !sameIdentity(before, afterPath)
       ) {
@@ -338,7 +374,7 @@ async function captureStableFile(input: {
       chmodSync(input.destinationPath, 0o600);
       return {
         size: position,
-        sha256: digest.digest("hex"),
+        sha256: copiedSha256,
         sourceIdentity: identityToken(afterPath),
       };
     } catch (error) {
@@ -388,10 +424,18 @@ async function readStableFile(input: {
         position += result.bytesRead;
       }
       input.hooks?.afterRead?.(input.sourcePath, attempt);
+      const verification = await hashOpenFileContents({
+        file,
+        maximumBytes: input.maximumBytes,
+        signal: input.signal,
+      });
       const afterHandle = await file.stat({ bigint: true });
       const afterPath = inspectRegularFile(input.sourcePath);
       if (
         position !== content.byteLength ||
+        verification.size !== content.byteLength ||
+        verification.sha256 !==
+          createHash("sha256").update(content).digest("hex") ||
         !sameIdentity(before, afterHandle) ||
         !sameIdentity(before, afterPath)
       ) {

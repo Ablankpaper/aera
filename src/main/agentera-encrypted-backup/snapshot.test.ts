@@ -8,6 +8,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -16,7 +17,85 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const coarseMetadataState = vi.hoisted(() => {
+  type FileIdentity = {
+    dev: bigint;
+    ino: bigint;
+    size: bigint;
+    mode: bigint;
+    mtimeNs: bigint;
+    ctimeNs: bigint;
+    nlink: bigint;
+  };
+  const paths = new Set<string>();
+  const identities = new Map<string, FileIdentity>();
+  return {
+    paths,
+    identities,
+    wrap<T extends object>(path: string, stats: T): T {
+      const fileStats = stats as T & FileIdentity;
+      const identity = identities.get(path) ?? {
+        dev: fileStats.dev,
+        ino: fileStats.ino,
+        size: fileStats.size,
+        mode: fileStats.mode,
+        mtimeNs: fileStats.mtimeNs,
+        ctimeNs: fileStats.ctimeNs,
+        nlink: fileStats.nlink,
+      };
+      identities.set(path, identity);
+      return new Proxy(stats, {
+        get(target, property, receiver) {
+          if (property in identity) {
+            return identity[property as keyof FileIdentity];
+          }
+          const value = Reflect.get(target, property, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    },
+  };
+});
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    lstatSync: ((...args: Parameters<typeof actual.lstatSync>) => {
+      const stats = actual.lstatSync(...args);
+      if (stats === undefined) return stats;
+      const path = String(args[0]);
+      if (!coarseMetadataState.paths.has(path)) return stats;
+      return coarseMetadataState.wrap(path, stats);
+    }) as typeof actual.lstatSync,
+  };
+});
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    open: (async (...args: Parameters<typeof actual.open>) => {
+      const handle = await actual.open(...args);
+      const path = String(args[0]);
+      if (!coarseMetadataState.paths.has(path)) return handle;
+      return new Proxy(handle, {
+        get(target, property) {
+          if (property === "stat") {
+            return async (...statArgs: Parameters<typeof target.stat>) => {
+              const stats = await target.stat(...statArgs);
+              return coarseMetadataState.wrap(path, stats);
+            };
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    }) as typeof actual.open,
+  };
+});
 import { RuntimeActivityCoordinator } from "../runtime-activity";
 import {
   assertUniqueSnapshotPaths,
@@ -114,6 +193,8 @@ function fileDigest(path: string): string {
 }
 
 afterEach(() => {
+  coarseMetadataState.paths.clear();
+  coarseMetadataState.identities.clear();
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -381,6 +462,67 @@ describe("allowlisted encrypted-backup snapshot", () => {
         join(unstable.transactionsRoot, "70000000-0000-4000-8000-000000000001"),
       ),
     ).toBe(false);
+  });
+
+  // @lat: [[agentera-post-official-delivery#End-to-end encrypted backup V1#Snapshot byte-stability boundary#Copied files detect same-identity byte changes]]
+  it("fails closed when changed bytes retain the same observable file identity", async () => {
+    const fixture = temporaryFixture();
+    write(fixture.profilePath, "files/changing.txt", "0000");
+    const sourcePath = realpathSync.native(
+      join(fixture.profilePath, "files", "changing.txt"),
+    );
+    coarseMetadataState.paths.add(sourcePath);
+    let mutations = 0;
+
+    await expect(
+      withEncryptedBackupSnapshot(
+        {
+          ...snapshotInput(fixture.profilePath, fixture.transactionsRoot),
+          fileHooks: {
+            afterRead: (path) => {
+              if (path === sourcePath) {
+                mutations += 1;
+                writeFileSync(path, String(mutations).padStart(4, "0"));
+              }
+            },
+          },
+        },
+        async () => undefined,
+      ),
+    ).rejects.toMatchObject({ code: "unstable_file" });
+    expect(mutations).toBe(3);
+  });
+
+  // @lat: [[agentera-post-official-delivery#End-to-end encrypted backup V1#Snapshot byte-stability boundary#Sanitized config detects same-identity byte changes]]
+  it("fails closed when sanitized config changes behind coarse metadata", async () => {
+    const fixture = temporaryFixture();
+    write(fixture.profilePath, "config.yaml", "model: a\n");
+    const sourcePath = realpathSync.native(
+      join(fixture.profilePath, "config.yaml"),
+    );
+    coarseMetadataState.paths.add(sourcePath);
+    let mutations = 0;
+
+    await expect(
+      withEncryptedBackupSnapshot(
+        {
+          ...snapshotInput(fixture.profilePath, fixture.transactionsRoot),
+          fileHooks: {
+            afterRead: (path) => {
+              if (path === sourcePath) {
+                mutations += 1;
+                writeFileSync(
+                  path,
+                  `model: ${String.fromCharCode(97 + mutations)}\n`,
+                );
+              }
+            },
+          },
+        },
+        async () => undefined,
+      ),
+    ).rejects.toMatchObject({ code: "unstable_file" });
+    expect(mutations).toBe(3);
   });
 
   it("bounds total bytes, honors cancellation, and always removes staging", async () => {
