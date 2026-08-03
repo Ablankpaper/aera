@@ -2,6 +2,9 @@ import { EventEmitter } from "events";
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { mkdirSync, readFileSync, rmSync } from "fs";
 
+const gatewayRecoveryTestTimeoutMs =
+  process.platform === "win32" ? 20_000 : 5_000;
+
 const {
   spawned,
   TEST_HOME,
@@ -812,46 +815,50 @@ describe("CLI fallback session id propagation", () => {
     });
   });
 
-  it("recovers an accepted timed-out request without replaying the user message", async () => {
-    mkdirSync(TEST_REPO, { recursive: true });
-    healthStatuses.push(200);
+  it(
+    "recovers an accepted timed-out request without replaying the user message",
+    async () => {
+      mkdirSync(TEST_REPO, { recursive: true });
+      healthStatuses.push(200);
 
-    await expect(
-      new Promise<string | undefined>((resolve, reject) => {
-        sendMessage("warmup", {
-          onChunk: () => {},
-          onDone: resolve,
-          onError: reject,
-        }).catch(reject);
-      }),
-    ).resolves.toBe("desk-cold-gateway");
-    expect(requestEvents).toEqual(["health", "chat"]);
+      await expect(
+        new Promise<string | undefined>((resolve, reject) => {
+          sendMessage("warmup", {
+            onChunk: () => {},
+            onDone: resolve,
+            onError: reject,
+          }).catch(reject);
+        }),
+      ).resolves.toBe("desk-cold-gateway");
+      expect(requestEvents).toEqual(["health", "chat"]);
 
-    apiRequestErrors.push("TIMEOUT_ACCEPTED");
-    healthStatuses.push(503, 503, 200);
-    const secondSendStart = requestEvents.length;
+      apiRequestErrors.push("TIMEOUT_ACCEPTED");
+      healthStatuses.push(503, 503, 200);
+      const secondSendStart = requestEvents.length;
 
-    const chunks: string[] = [];
-    await expect(
-      new Promise<string | undefined>((resolve, reject) => {
-        sendMessage("hi after hung gateway", {
-          onChunk: (chunk) => chunks.push(chunk),
-          onDone: resolve,
-          onError: reject,
-        }).catch(reject);
-      }),
-    ).rejects.toThrow(
-      "API request timed out. Check the SSH tunnel and remote Aera Runtime gateway.",
-    );
+      const chunks: string[] = [];
+      await expect(
+        new Promise<string | undefined>((resolve, reject) => {
+          sendMessage("hi after hung gateway", {
+            onChunk: (chunk) => chunks.push(chunk),
+            onDone: resolve,
+            onError: reject,
+          }).catch(reject);
+        }),
+      ).rejects.toThrow(
+        "API request timed out. Check the SSH tunnel and remote Aera Runtime gateway.",
+      );
 
-    expect(chunks).toEqual([]);
-    expect(spawned).toHaveLength(1);
-    expect(apiRequests).toHaveLength(2);
-    expect(requestEvents[secondSendStart]).toBe("chat");
-    expect(requestEvents.slice(secondSendStart + 1)).toContain("health");
-    expect(JSON.parse(apiRequests[1].body)).toMatchObject({
-      messages: [{ role: "user", content: "hi after hung gateway" }],
-      stream: true,
-    });
-  });
+      expect(chunks).toEqual([]);
+      expect(spawned).toHaveLength(1);
+      expect(apiRequests).toHaveLength(2);
+      expect(requestEvents[secondSendStart]).toBe("chat");
+      expect(requestEvents.slice(secondSendStart + 1)).toContain("health");
+      expect(JSON.parse(apiRequests[1].body)).toMatchObject({
+        messages: [{ role: "user", content: "hi after hung gateway" }],
+        stream: true,
+      });
+    },
+    gatewayRecoveryTestTimeoutMs,
+  );
 });
