@@ -470,50 +470,53 @@ export default function ModelCenter({
     [activeModel.provider, activeModel.baseUrl],
   );
 
-  const customBaseUrls = useMemo(
+  const activeCustomProvider = useMemo(
     () =>
-      new Set(
-        customProviders.map((provider) => normalizeUrl(provider.baseUrl)),
-      ),
-    [customProviders],
+      customProviders.find((provider) => {
+        if (
+          activeModel.provider === customProviderRuntimeRoute(provider.name)
+        ) {
+          return true;
+        }
+        if (
+          normalizeUrl(provider.baseUrl) !== normalizeUrl(activeModel.baseUrl)
+        ) {
+          return false;
+        }
+        return models.some(
+          (model) =>
+            model.model === activeModel.model &&
+            modelBelongsToCustomProvider(model, provider),
+        );
+      }),
+    [
+      customProviders,
+      models,
+      activeModel.provider,
+      activeModel.baseUrl,
+      activeModel.model,
+    ],
   );
 
   const configuredPresets = useMemo(
     () =>
       MODEL_PROVIDER_PRESETS.filter((preset) => {
         if (preset.envKey && env[preset.envKey]?.trim()) return true;
-        if (activePreset?.id === preset.id) return true;
-        return (
-          preset.keyOptional && customBaseUrls.has(normalizeUrl(preset.baseUrl))
-        );
+        if (!activeCustomProvider && activePreset?.id === preset.id)
+          return true;
+        return false;
       }),
-    [env, activePreset, customBaseUrls],
+    [env, activePreset, activeCustomProvider],
   );
 
-  const userCustomProviders = useMemo(
-    () =>
-      customProviders.filter(
-        (provider) =>
-          !MODEL_PROVIDER_PRESETS.some(
-            (preset) =>
-              normalizeUrl(preset.baseUrl) === normalizeUrl(provider.baseUrl),
-          ),
-      ),
-    [customProviders],
-  );
-
-  const activeCustomProvider = useMemo(
-    () =>
-      userCustomProviders.find(
-        (provider) =>
-          normalizeUrl(provider.baseUrl) === normalizeUrl(activeModel.baseUrl),
-      ),
-    [userCustomProviders, activeModel.baseUrl],
-  );
+  // A named provider is a first-class identity even when it intentionally
+  // uses the same endpoint as a curated preset. Keep it as a custom card so
+  // refresh/edit/delete continue using its CUSTOM_PROVIDER_* credential.
+  const userCustomProviders = customProviders;
 
   const activeLabel =
-    activePreset?.label ||
     activeCustomProvider?.name ||
+    activePreset?.label ||
     activeModel.provider ||
     t("providers.center.notConfigured");
 
@@ -534,12 +537,8 @@ export default function ModelCenter({
           keyOptional: Boolean(preset.keyOptional),
           apiMode: preset.apiMode,
           models: providerModels,
-          isActive: activePreset?.id === preset.id,
+          isActive: !activeCustomProvider && activePreset?.id === preset.id,
           preset,
-          customProvider: customProviders.find(
-            (provider) =>
-              normalizeUrl(provider.baseUrl) === normalizeUrl(preset.baseUrl),
-          ),
         };
       }),
       ...userCustomProviders.map((provider): ModelService => {
@@ -559,9 +558,7 @@ export default function ModelCenter({
           apiMode: apiMode ? (apiMode as ModelApiMode) : undefined,
           providerLabel: provider.name,
           models: providerModels,
-          isActive:
-            normalizeUrl(activeModel.baseUrl) ===
-            normalizeUrl(provider.baseUrl),
+          isActive: activeCustomProvider?.id === provider.id,
           customProvider: provider,
         };
       }),
@@ -570,9 +567,8 @@ export default function ModelCenter({
       configuredPresets,
       models,
       activePreset,
-      customProviders,
       userCustomProviders,
-      activeModel.baseUrl,
+      activeCustomProvider,
     ],
   );
 

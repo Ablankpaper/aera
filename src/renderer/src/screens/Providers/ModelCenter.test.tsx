@@ -452,6 +452,153 @@ describe("ModelCenter", () => {
     );
   });
 
+  it("keeps a named custom provider's credential when its URL matches a preset", async () => {
+    listModels.mockResolvedValue([
+      {
+        id: "model-1",
+        name: "gpt-5.6-sol",
+        provider: "custom",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://api.petoi.cn/v1",
+        providerLabel: "Petoi Acceptance",
+        apiMode: "chat_completions",
+        createdAt: 1,
+      },
+    ]);
+    listCustomProviders.mockResolvedValue([
+      {
+        id: "petoi-acceptance",
+        name: "Petoi Acceptance",
+        baseUrl: "https://api.petoi.cn/v1",
+        createdAt: 1,
+      },
+    ]);
+
+    const { container } = render(
+      <ModelCenter
+        profile="acceptance"
+        env={{ CUSTOM_PROVIDER_PETOI_ACCEPTANCE_KEY: "configured" }}
+        activeModel={{
+          provider: "custom:petoi-acceptance",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://api.petoi.cn/v1",
+        }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    const serviceCard = await waitFor(() => {
+      const card = container.querySelector(
+        '[data-service-key="custom:petoi-acceptance"]',
+      );
+      expect(card).toBeInTheDocument();
+      return card as HTMLElement;
+    });
+    expect(
+      within(serviceCard).getByText("Petoi Acceptance"),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector('[data-service-key="preset:petoi"]'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "providers.center.refreshModels",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(discoverProviderModels).toHaveBeenCalledWith(
+        "custom",
+        "https://api.petoi.cn/v1",
+        "configured",
+        "acceptance",
+      ),
+    );
+    expect(addModel).toHaveBeenCalledWith(
+      "gpt-5.6-sol",
+      "custom",
+      "gpt-5.6-sol",
+      "https://api.petoi.cn/v1",
+      undefined,
+      "Petoi Acceptance",
+      "chat_completions",
+    );
+  });
+
+  it("deletes the named custom identity and key instead of the matching preset key", async () => {
+    listModels.mockResolvedValue([
+      {
+        id: "model-1",
+        name: "gpt-5.6-sol",
+        provider: "custom",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://api.petoi.cn/v1",
+        providerLabel: "Petoi Acceptance",
+        apiMode: "chat_completions",
+        createdAt: 1,
+      },
+    ]);
+    listCustomProviders.mockResolvedValue([
+      {
+        id: "petoi-acceptance",
+        name: "Petoi Acceptance",
+        baseUrl: "https://api.petoi.cn/v1",
+        createdAt: 1,
+      },
+    ]);
+    const onSaveKey = vi.fn().mockResolvedValue(undefined);
+
+    const { container } = render(
+      <ModelCenter
+        profile="acceptance"
+        env={{ CUSTOM_PROVIDER_PETOI_ACCEPTANCE_KEY: "configured" }}
+        activeModel={{
+          provider: "custom:petoi-acceptance",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://api.petoi.cn/v1",
+        }}
+        onSaveKey={onSaveKey}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    const serviceCard = await waitFor(() => {
+      const card = container.querySelector(
+        '[data-service-key="custom:petoi-acceptance"]',
+      );
+      expect(card).toBeInTheDocument();
+      return card as HTMLElement;
+    });
+    fireEvent.click(
+      within(serviceCard).getByRole("button", {
+        name: "providers.center.deleteService",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "providers.center.confirmDelete",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(removeCustomProvider).toHaveBeenCalledWith(
+        "acceptance",
+        "Petoi Acceptance",
+      ),
+    );
+    expect(onSaveKey).toHaveBeenCalledWith(
+      "CUSTOM_PROVIDER_PETOI_ACCEPTANCE_KEY",
+      "",
+    );
+    expect(onSaveKey).not.toHaveBeenCalledWith("PETOI_API_KEY", "");
+  });
+
   it("opens the existing service in the edit dialog", async () => {
     listModels.mockResolvedValue([
       {
