@@ -295,6 +295,15 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     const runtimeMetadataTransport = new FetchRuntimeMetadataTransport(
       runtimeFetch,
     );
+    let runtimeUpdateFirstPartyBaseUrl: URL | undefined;
+    try {
+      runtimeUpdateFirstPartyBaseUrl = new URL(
+        "/runtime-updates/stable/",
+        getAgenteraCloudOrigin(),
+      );
+    } catch {
+      // Development without a configured Cloud origin retains GitHub-only checks.
+    }
     const runtimeDownloadTransport = new FetchRuntimeDownloadTransport(
       runtimeFetch,
       createElectronRuntimeDownloadUrlResolver((requestOptions) =>
@@ -307,6 +316,12 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
         checkStableRuntimeUpdate({
           ...context,
           transport: runtimeMetadataTransport,
+          firstPartyBaseUrl: runtimeUpdateFirstPartyBaseUrl,
+          onDiagnostic: ({ source, stage, code }) => {
+            console.warn(
+              `[AGENTERA_RUNTIME_UPDATE] source=${source} stage=${stage} code=${code}`,
+            );
+          },
         }),
       download: (request) =>
         downloadWithResume({

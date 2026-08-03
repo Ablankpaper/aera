@@ -31,10 +31,14 @@ const INDEX_SIGNATURE_NAME = "agentera-runtime-stable.index.sig";
 const LATEST_INDEX_URL = `https://github.com/${REPOSITORY}/releases/latest/download/${INDEX_NAME}`;
 const LATEST_INDEX_SIGNATURE_URL = `https://github.com/${REPOSITORY}/releases/latest/download/${INDEX_SIGNATURE_NAME}`;
 const RELEASE_PREFIX = `https://github.com/${REPOSITORY}/releases/download/${RELEASE_TAG}`;
+const FIRST_PARTY_RUNTIME_BASE_URL =
+  "https://updates.example.test/runtime-updates/stable/";
 
 interface UpdateFixtureOptions {
   runtimeVersion?: string;
   sourceCommit?: string;
+  currentVersion?: string;
+  platform?: "darwin" | "windows";
   minimumDesktopVersion?: string;
   tamperIndexSignature?: boolean;
   manifestOverrides?: Record<string, unknown>;
@@ -48,8 +52,8 @@ interface UpdateFixture {
     currentVersion: string;
     currentSourceCommit: string;
     repository: string;
-    platform: "darwin";
-    arch: "arm64";
+    platform: "darwin" | "windows";
+    arch: "arm64" | "x64";
     desktopVersion: string;
     trustedPublicKeys: ReadonlyMap<string, string>;
     signal: AbortSignal;
@@ -71,14 +75,19 @@ function createUpdateFixture(
 ): UpdateFixture {
   const runtimeVersion = options.runtimeVersion ?? TEST_RUNTIME_VERSION;
   const sourceCommit = options.sourceCommit ?? TEST_SOURCE_COMMIT;
+  const platform = options.platform ?? "darwin";
+  const arch = platform === "darwin" ? "arm64" : "x64";
+  const target = `${platform}-${arch}`;
   const releaseTag = `runtime-v${runtimeVersion}`;
-  const archiveName = `agentera-runtime-${runtimeVersion}-darwin-arm64.tar.zst`;
-  const manifestName = `agentera-runtime-${runtimeVersion}-darwin-arm64.manifest.json`;
-  const signatureName = `agentera-runtime-${runtimeVersion}-darwin-arm64.manifest.sig`;
+  const archiveName = `agentera-runtime-${runtimeVersion}-${target}.${platform === "darwin" ? "tar.zst" : "zip"}`;
+  const manifestName = `agentera-runtime-${runtimeVersion}-${target}.manifest.json`;
+  const signatureName = `agentera-runtime-${runtimeVersion}-${target}.manifest.sig`;
   const manifest = createFixtureManifest({
     runtime_version: runtimeVersion,
     source_commit: sourceCommit,
     channel: "stable",
+    platform,
+    arch,
     archive_name: archiveName,
     minimum_desktop_version: options.minimumDesktopVersion ?? "0.7.3",
     ...options.manifestOverrides,
@@ -97,10 +106,11 @@ function createUpdateFixture(
       {
         platform: "darwin",
         arch: "arm64",
-        archive_name: archiveName,
-        manifest_name: manifestName,
-        signature_name: signatureName,
-        archive_sha256: manifest.archive_sha256,
+        archive_name: `agentera-runtime-${runtimeVersion}-darwin-arm64.tar.zst`,
+        manifest_name: `agentera-runtime-${runtimeVersion}-darwin-arm64.manifest.json`,
+        signature_name: `agentera-runtime-${runtimeVersion}-darwin-arm64.manifest.sig`,
+        archive_sha256:
+          platform === "darwin" ? manifest.archive_sha256 : "b".repeat(64),
       },
       {
         platform: "windows",
@@ -108,7 +118,8 @@ function createUpdateFixture(
         archive_name: `agentera-runtime-${runtimeVersion}-windows-x64.zip`,
         manifest_name: `agentera-runtime-${runtimeVersion}-windows-x64.manifest.json`,
         signature_name: `agentera-runtime-${runtimeVersion}-windows-x64.manifest.sig`,
-        archive_sha256: "c".repeat(64),
+        archive_sha256:
+          platform === "windows" ? manifest.archive_sha256 : "c".repeat(64),
       },
     ],
   });
@@ -136,11 +147,11 @@ function createUpdateFixture(
     requests,
     archiveUrl: `${releasePrefix}/${archiveName}`,
     context: {
-      currentVersion: "0.18.1",
+      currentVersion: options.currentVersion ?? "0.18.1",
       currentSourceCommit: "e".repeat(40),
       repository: REPOSITORY,
-      platform: "darwin",
-      arch: "arm64",
+      platform,
+      arch,
       desktopVersion: "0.7.3",
       trustedPublicKeys: new Map([
         ["agentera-runtime-test-01", TEST_PUBLIC_KEY],
@@ -149,6 +160,20 @@ function createUpdateFixture(
       transport,
     },
   };
+}
+
+function firstPartyToGithubUrl(url: URL): URL {
+  const relative = url.href.slice(FIRST_PARTY_RUNTIME_BASE_URL.length);
+  if (relative === INDEX_NAME) return new URL(LATEST_INDEX_URL);
+  if (relative === INDEX_SIGNATURE_NAME) {
+    return new URL(LATEST_INDEX_SIGNATURE_URL);
+  }
+  if (relative.startsWith("releases/")) {
+    return new URL(
+      `https://github.com/${REPOSITORY}/releases/download/${relative.slice("releases/".length)}`,
+    );
+  }
+  return url;
 }
 
 describe("Runtime stable update client", () => {
@@ -204,6 +229,141 @@ describe("Runtime stable update client", () => {
     ]);
     expect(fixture.requests).not.toContain(fixture.archiveUrl);
   });
+
+  // @lat: [[agentera-runtime-distribution#Update policy#Stable update test specifications#Primary stable source]]
+  it("uses the trusted first-party Runtime channel when GitHub is unreachable", async () => {
+    const fixture = createUpdateFixture();
+    const requests: string[] = [];
+    const transport: RuntimeMetadataTransport = {
+      async get(url, signal): Promise<Buffer> {
+        requests.push(url.href);
+        if (url.origin === "https://github.com") {
+          throw new Error("GitHub unavailable");
+        }
+        return fixture.transport.get(firstPartyToGithubUrl(url), signal);
+      },
+    };
+
+    const offer = await checkStableRuntimeUpdate({
+      ...fixture.context,
+      transport,
+      firstPartyBaseUrl: new URL(FIRST_PARTY_RUNTIME_BASE_URL),
+    });
+
+    expect(offer).toMatchObject({
+      runtimeVersion: TEST_RUNTIME_VERSION,
+      archiveUrl: new URL(
+        `${FIRST_PARTY_RUNTIME_BASE_URL}releases/${RELEASE_TAG}/${TEST_ARCHIVE_NAME}`,
+      ),
+    });
+    expect(requests).toEqual([
+      `${FIRST_PARTY_RUNTIME_BASE_URL}${INDEX_NAME}`,
+      `${FIRST_PARTY_RUNTIME_BASE_URL}${INDEX_SIGNATURE_NAME}`,
+      `${FIRST_PARTY_RUNTIME_BASE_URL}releases/${RELEASE_TAG}/${MANIFEST_NAME}`,
+      `${FIRST_PARTY_RUNTIME_BASE_URL}releases/${RELEASE_TAG}/${SIGNATURE_NAME}`,
+    ]);
+  });
+
+  // @lat: [[agentera-runtime-distribution#Update policy#Stable update test specifications#Transport-only fallback]]
+  it("falls back to GitHub only after a first-party transport failure", async () => {
+    const fixture = createUpdateFixture();
+    const requests: string[] = [];
+    const diagnostics: unknown[] = [];
+    const errors: string[] = [];
+    const transport: RuntimeMetadataTransport = {
+      async get(url, signal): Promise<Buffer> {
+        requests.push(url.href);
+        if (url.href.startsWith(FIRST_PARTY_RUNTIME_BASE_URL)) {
+          throw new Error("first-party transport unavailable");
+        }
+        return fixture.transport.get(url, signal);
+      },
+    };
+
+    const offer = await checkStableRuntimeUpdate({
+      ...fixture.context,
+      transport,
+      firstPartyBaseUrl: new URL(FIRST_PARTY_RUNTIME_BASE_URL),
+      onCheckError: (code) => errors.push(code),
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
+
+    expect(offer?.archiveUrl).toEqual(new URL(fixture.archiveUrl));
+    expect(errors).toEqual([]);
+    expect(diagnostics).toEqual([
+      {
+        source: "first-party",
+        stage: "stable-index",
+        code: "transport_failed",
+      },
+    ]);
+    expect(requests).toEqual([
+      `${FIRST_PARTY_RUNTIME_BASE_URL}${INDEX_NAME}`,
+      LATEST_INDEX_URL,
+      LATEST_INDEX_SIGNATURE_URL,
+      `${RELEASE_PREFIX}/${MANIFEST_NAME}`,
+      `${RELEASE_PREFIX}/${SIGNATURE_NAME}`,
+    ]);
+  });
+
+  // @lat: [[agentera-runtime-distribution#Update policy#Stable update test specifications#Invalid metadata fails closed]]
+  it("fails closed on invalid first-party metadata without consulting GitHub", async () => {
+    const fixture = createUpdateFixture({ tamperIndexSignature: true });
+    const requests: string[] = [];
+    const diagnostics: unknown[] = [];
+    const errors: string[] = [];
+    const transport: RuntimeMetadataTransport = {
+      async get(url, signal): Promise<Buffer> {
+        requests.push(url.href);
+        if (url.origin === "https://github.com") {
+          throw new Error("GitHub must not be consulted");
+        }
+        return fixture.transport.get(firstPartyToGithubUrl(url), signal);
+      },
+    };
+
+    await expect(
+      checkStableRuntimeUpdate({
+        ...fixture.context,
+        transport,
+        firstPartyBaseUrl: new URL(FIRST_PARTY_RUNTIME_BASE_URL),
+        onCheckError: (code) => errors.push(code),
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      }),
+    ).resolves.toBeNull();
+    expect(errors).toEqual(["runtime_update_metadata_invalid"]);
+    expect(diagnostics).toEqual([
+      {
+        source: "first-party",
+        stage: "stable-index-verification",
+        code: "metadata_invalid",
+      },
+    ]);
+    expect(requests).toEqual([
+      `${FIRST_PARTY_RUNTIME_BASE_URL}${INDEX_NAME}`,
+      `${FIRST_PARTY_RUNTIME_BASE_URL}${INDEX_SIGNATURE_NAME}`,
+    ]);
+  });
+
+  // @lat: [[agentera-runtime-distribution#Update policy#Stable update test specifications#Seed point-one to stable point-three]]
+  it.each([
+    { platform: "darwin" as const, arch: "arm64" },
+    { platform: "windows" as const, arch: "x64" },
+  ])(
+    "offers the signed stable .3 update from Seed .1 on $platform-$arch",
+    async ({ platform }) => {
+      const fixture = createUpdateFixture({
+        runtimeVersion: "0.18.2-agentera.3",
+        currentVersion: "0.18.2-agentera.1",
+        platform,
+      });
+      const offer = await checkStableRuntimeUpdate(fixture.context);
+      expect(offer).toMatchObject({
+        runtimeVersion: "0.18.2-agentera.3",
+        archiveUrl: new URL(fixture.archiveUrl),
+      });
+    },
+  );
 
   it.each([
     { name: "equal", currentVersion: TEST_RUNTIME_VERSION },
@@ -284,5 +444,29 @@ describe("Runtime stable update client", () => {
         "release-asset",
       ),
     ).not.toThrow();
+    const firstPartyBaseUrl = new URL(FIRST_PARTY_RUNTIME_BASE_URL);
+    expect(() =>
+      assertAllowedRuntimeUpdateUrl(
+        new URL(`${FIRST_PARTY_RUNTIME_BASE_URL}${INDEX_NAME}`),
+        "stable-index",
+        firstPartyBaseUrl,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertAllowedRuntimeUpdateUrl(
+        new URL(
+          `${FIRST_PARTY_RUNTIME_BASE_URL}releases/${RELEASE_TAG}/${MANIFEST_NAME}`,
+        ),
+        "release-asset",
+        firstPartyBaseUrl,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertAllowedRuntimeUpdateUrl(
+        new URL(`${FIRST_PARTY_RUNTIME_BASE_URL}unexpected/${MANIFEST_NAME}`),
+        "release-asset",
+        firstPartyBaseUrl,
+      ),
+    ).toThrow(RuntimeUpdateUrlError);
   });
 });
