@@ -22,10 +22,10 @@ test("internal-Beta workflow is exact-SHA, Developer-ID-notarized, update-signed
   const raw = await readFile(workflowPath, "utf8");
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.21"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.22"/u);
   assert.match(
     raw,
-    /--release-notes "Beta\.21 修复主动退出后的账户重新选择与 Runtime Seed 重装状态同步，并恢复 macOS Apple 公证、装订与 Gatekeeper 验证。"/u,
+    /--release-notes "Beta\.22 修复命名自定义供应商与预设共用 URL 时的 Profile Key、模型归属、刷新、编辑和删除身份，并延续 macOS Apple 公证、装订与 Gatekeeper 验证。"/u,
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [

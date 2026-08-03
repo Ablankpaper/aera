@@ -86,7 +86,7 @@ node scripts/internal-beta/verify-live-evidence.mjs \
 
 ## 4. Install the platform-verified internal-only packages
 
-The Beta.21 macOS package requires Developer ID signing, accepted Apple
+The Beta.22 macOS package requires Developer ID signing, accepted Apple
 notarization, application and DMG stapling, strict signature verification, and
 Gatekeeper acceptance. The Windows package remains explicitly unsigned and
 makes no Authenticode or SmartScreen-reputation claim.
