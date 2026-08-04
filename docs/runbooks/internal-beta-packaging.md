@@ -6,7 +6,9 @@ This runbook creates one checksummed, internal-only Desktop candidate for truste
 
 The dedicated `internal-beta.yml` workflow builds Apple Silicon macOS and Windows x64 packages from one exact Desktop commit whose three-platform `CI` run already succeeded.
 
-The Beta.22 macOS packages require Developer ID signing, accepted Apple notarization, application and DMG stapling, strict code-signature verification, and Gatekeeper acceptance. The Windows packages remain explicitly unsigned until the independent Authenticode gate is enabled. The manifest and provenance are also keyless-signed by the GitHub Actions workflow through Sigstore, but those evidence signatures are separate from platform signing.
+The Beta.23 macOS packages require Developer ID signing, accepted Apple notarization, application and DMG stapling, strict code-signature verification, and Gatekeeper acceptance. The Windows packages remain explicitly unsigned until the independent Authenticode gate is enabled. The manifest and provenance are also keyless-signed by the GitHub Actions workflow through Sigstore, but those evidence signatures are separate from platform signing.
+
+Beta.22 was canceled before publication. Its version identity, notarization records, and candidate bytes must never be reused or promoted; this runbook permits only the immutable Beta.23 identity.
 
 The separate Desktop update manifest is signed with an offline Ed25519 key whose public half is pinned in the app. This authenticates the exact ZIP/NSIS bytes but likewise does not turn them into platform-signed packages.
 
@@ -46,16 +48,16 @@ gh workflow run internal-beta.yml \
   -f ci_run_id=30100000001
 ```
 
-The workflow refuses a non-`main` workflow identity, a source mismatch, a failed or incomplete CI matrix, a version other than `0.7.4-internal-beta.22`, malformed public trust, missing protected macOS signing/notarization credentials, or an unapproved Runtime Seed lock.
+The workflow refuses a non-`main` workflow identity, a source mismatch, a failed or incomplete CI matrix, a version other than `0.7.4-internal-beta.23`, malformed public trust, missing protected macOS signing/notarization credentials, or an unapproved Runtime Seed lock.
 
 ## Built bytes
 
 The platform jobs prepare and independently verify Runtime Seed candidate `dcb0f0bc6a0e2d18c55beedc6517dbc41d8b01e0` (`runtime-v0.18.2-agentera.1-rc.4`), rebuild native modules for the target architecture, compile the baked Beta trust, and package:
 
-- `Aera-Internal-Beta-0.7.4-internal-beta.22-macos-arm64.dmg`
-- `Aera-Internal-Beta-0.7.4-internal-beta.22-macos-arm64.zip`
-- `Aera-Internal-Beta-0.7.4-internal-beta.22-windows-x64-setup.exe`
-- `Aera-Internal-Beta-0.7.4-internal-beta.22-windows-x64-portable.exe`
+- `Aera-Internal-Beta-0.7.4-internal-beta.23-macos-arm64.dmg`
+- `Aera-Internal-Beta-0.7.4-internal-beta.23-macos-arm64.zip`
+- `Aera-Internal-Beta-0.7.4-internal-beta.23-windows-x64-setup.exe`
+- `Aera-Internal-Beta-0.7.4-internal-beta.23-windows-x64-portable.exe`
 
 The macOS Electron Builder overlay requires code signing and keeps `notarize: false` only because the workflow performs an explicit two-round Apple ceremony: sign the application, submit and wait on one recorded application submission ID, staple the accepted application, package final containers from that prepackaged application, then submit and wait on the recorded final DMG and ZIP IDs. This prevents an unrecorded duplicate submission or ad-hoc fallback. Windows keeps identity discovery disabled and remains unsigned. Every packaging command passes `--publish never`; publication occurs only after evidence assembly.
 
@@ -129,6 +131,6 @@ Windows testers may verify `SHA256SUMS` with `Get-FileHash -Algorithm SHA256`; t
 
 Do not distribute a package until its workflow completed every real step and the live operator record binds the same manifest hash, source SHA, CI/build run URLs, Origin, deployed Cloud/Admin digests, and package hashes.
 
-The Beta.22 macOS package must pass ordinary Gatekeeper assessment and must not require an unidentified-developer override. Windows testers may still see an unknown-publisher or SmartScreen warning because Windows remains unsigned; use only the documented per-package override after checksum verification. Never disable Gatekeeper, SmartScreen, antivirus, or system-wide security controls. A failed or replaced package receives a higher reviewed Beta version and new hashes rather than swapped bytes under the same filename.
+The Beta.23 macOS package must pass ordinary Gatekeeper assessment and must not require an unidentified-developer override. Windows testers may still see an unknown-publisher or SmartScreen warning because Windows remains unsigned; use only the documented per-package override after checksum verification. Never disable Gatekeeper, SmartScreen, antivirus, or system-wide security controls. A failed or replaced package receives a higher reviewed Beta version and new hashes rather than swapped bytes under the same filename.
 
 `0.7.4-internal-beta.6` does not contain the online-update client. Testers must install `0.7.4-internal-beta.7` once through the existing manual handoff; subsequent Internal Beta versions use the signed online channel.

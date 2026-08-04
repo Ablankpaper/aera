@@ -1,6 +1,6 @@
 {
   "name": "agentera-studio",
-  "version": "0.7.4-internal-beta.22",
+  "version": "0.7.4-internal-beta.23",
   "description": "Aera — private AI agent desktop",
   "main": "./out/main/index.js",
   "author": "Aera",
