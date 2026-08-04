@@ -8,6 +8,10 @@ const workflowPath = new URL(
   "../../.github/workflows/internal-beta.yml",
   import.meta.url,
 );
+const promotionWorkflowPath = new URL(
+  "../../.github/workflows/internal-beta-promote.yml",
+  import.meta.url,
+);
 const builderPath = new URL(
   "../../build/electron-builder.internal-beta.yml",
   import.meta.url,
@@ -18,14 +22,14 @@ const macBuilderPath = new URL(
 );
 const baseBuilderPath = new URL("../../electron-builder.yml", import.meta.url);
 
-test("internal-Beta workflow is exact-SHA, Developer-ID-notarized, update-signed, published, and Sigstore-bound", async () => {
+test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublished, and Sigstore-bound", async () => {
   const raw = await readFile(workflowPath, "utf8");
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.22"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.23"/u);
   assert.match(
     raw,
-    /--release-notes "Beta\.22 修复命名自定义供应商与预设共用 URL 时的 Profile Key、模型归属、刷新、编辑和删除身份，并延续 macOS Apple 公证、装订与 Gatekeeper 验证。"/u,
+    /--release-notes "Beta\.23 修复 Agent 版本缓存与安装事务恢复、Profile\/Runtime 绑定、旧 Gateway 接管和 Runtime 稳定更新通道，并保留模型中心修复与 macOS Apple 公证、装订及 Gatekeeper 验证。"/u,
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
@@ -82,14 +86,10 @@ test("internal-Beta workflow is exact-SHA, Developer-ID-notarized, update-signed
   assert.match(raw, /retention-days:\s*30/u);
   assert.match(raw, /--publish never/u);
   assert.match(raw, /AERA_DESKTOP_UPDATE_SIGNING_PRIVATE_KEY/u);
-  assert.match(raw, /AERA_DESKTOP_UPDATE_PUBLISH_SSH_PRIVATE_KEY/u);
-  assert.match(raw, /AERA_DESKTOP_UPDATE_PUBLISH_SSH_KNOWN_HOSTS/u);
   assert.match(raw, /node scripts\/internal-beta\/desktop-update\.mjs build/iu);
-  assert.match(raw, /"aera-updates@\$PUBLISH_HOST" publish/u);
-  assert.match(
-    raw,
-    /curl[\s\S]*\/desktop-updates\/internal-beta|base_url=.*\/desktop-updates\/internal-beta/iu,
-  );
+  assert.doesNotMatch(raw, /AERA_DESKTOP_UPDATE_PUBLISH_SSH_PRIVATE_KEY/u);
+  assert.doesNotMatch(raw, /AERA_DESKTOP_UPDATE_PUBLISH_SSH_KNOWN_HOSTS/u);
+  assert.doesNotMatch(raw, /"aera-updates@\$PUBLISH_HOST" publish/u);
   for (const secret of ["CSC_LINK", "CSC_KEY_PASSWORD"]) {
     assert.match(raw, new RegExp(`secrets\\.${secret}`, "u"));
   }
@@ -128,6 +128,41 @@ test("internal-Beta workflow is exact-SHA, Developer-ID-notarized, update-signed
     raw,
     /repository:\s*bignormal\/aera-runtime|git\s+clone[\s\S]*aera-runtime/iu,
   );
+});
+
+test("internal-Beta promotion publishes one verified candidate without rebuilding or resigning", async () => {
+  const raw = await readFile(promotionWorkflowPath, "utf8");
+  const workflow = parseYAML(raw);
+
+  assert.equal(workflow.name, "Promote Desktop internal Beta");
+  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
+    "candidate_run_id",
+    "source_sha",
+  ]);
+  assert.deepEqual(workflow.permissions, {
+    actions: "read",
+    contents: "read",
+  });
+  assert.deepEqual(Object.keys(workflow.jobs), ["promote"]);
+  assert.equal(workflow.jobs.promote.environment, "internal-beta");
+  assert.match(raw, /test "\$GITHUB_REF" = "refs\/heads\/main"/u);
+  assert.match(
+    raw,
+    /internal-beta-promote\.yml@refs\/heads\/main/u,
+  );
+  assert.match(raw, /gh run view "\$CANDIDATE_RUN_ID"/u);
+  assert.match(raw, /Desktop internal Beta candidate/u);
+  assert.match(raw, /run\.headSha !== process\.env\.SOURCE_SHA/u);
+  assert.match(raw, /run\.conclusion !== "success"/u);
+  assert.match(raw, /run-id:\s*\$\{\{ inputs\.candidate_run_id \}\}/u);
+  assert.match(raw, /sha256sum --check SHA256SUMS/u);
+  assert.match(raw, /desktop-update\.mjs verify/u);
+  assert.match(raw, /AERA_DESKTOP_UPDATE_PUBLISH_SSH_PRIVATE_KEY/u);
+  assert.match(raw, /AERA_DESKTOP_UPDATE_PUBLISH_SSH_KNOWN_HOSTS/u);
+  assert.match(raw, /"aera-updates@\$PUBLISH_HOST" publish/u);
+  assert.match(raw, /cmp candidate\/desktop-update\/manifest\.json/u);
+  assert.doesNotMatch(raw, /desktop-update\.mjs build/u);
+  assert.doesNotMatch(raw, /electron-builder|notarytool|cosign sign-blob/iu);
 });
 
 test("internal-Beta overlays separate unsigned Windows from strict macOS signing", async () => {

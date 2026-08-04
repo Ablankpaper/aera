@@ -1,0 +1,240 @@
+name: Promote Desktop internal Beta
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact successful internal-Beta candidate source SHA
+        required: true
+        type: string
+      candidate_run_id:
+        description: Successful Desktop internal Beta candidate run ID
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: desktop-internal-beta-promotion-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Verify and publish immutable internal Beta
+    runs-on: ubuntu-24.04
+    environment: internal-beta
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact candidate source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Verify exact source and successful candidate run
+        shell: bash
+        env:
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_WORKFLOW_REF" = \
+            "$GITHUB_REPOSITORY/.github/workflows/internal-beta-promote.yml@refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1)"
+          VERSION=$(node -p "require('./package.json').version")
+          test "$VERSION" = "0.7.4-internal-beta.23"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+          gh run view "$CANDIDATE_RUN_ID" --repo bignormal/aera \
+            --json conclusion,event,headSha,jobs,url,workflowName \
+            > "$RUNNER_TEMP/candidate-run.json"
+          CANDIDATE_RUN_JSON="$RUNNER_TEMP/candidate-run.json" \
+            node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+
+          const run = JSON.parse(
+            await readFile(process.env.CANDIDATE_RUN_JSON, "utf8"),
+          );
+          if (run.workflowName !== "Desktop internal Beta candidate") {
+            throw new Error("Supplied run is not an internal-Beta candidate");
+          }
+          if (run.event !== "workflow_dispatch") {
+            throw new Error("Candidate run was not manually dispatched");
+          }
+          if (run.headSha !== process.env.SOURCE_SHA) {
+            throw new Error("Candidate source SHA differs");
+          }
+          if (run.conclusion !== "success") {
+            throw new Error("Candidate run did not succeed");
+          }
+          const expectedJobs = new Set([
+            "Validate exact source, CI, and public Beta trust",
+            "Build, sign, and notarize macOS arm64 internal Beta",
+            "Build unsigned Windows x64 internal Beta",
+            "Assemble and sign immutable internal Beta candidate",
+          ]);
+          if (!Array.isArray(run.jobs) || run.jobs.length !== expectedJobs.size) {
+            throw new Error("Candidate job set is incomplete");
+          }
+          for (const job of run.jobs) {
+            const executed = job.steps?.filter(
+              (step) => step.conclusion !== "skipped",
+            ) ?? [];
+            if (!expectedJobs.delete(job.name)) {
+              throw new Error(`Unexpected candidate job: ${job.name}`);
+            }
+            if (job.conclusion !== "success" || executed.length === 0) {
+              throw new Error(`Candidate job did not succeed: ${job.name}`);
+            }
+          }
+          if (expectedJobs.size !== 0) {
+            throw new Error("Candidate job set is incomplete");
+          }
+          NODE
+
+      - name: Install verification dependencies only
+        run: npm ci --ignore-scripts
+
+      - name: Download the exact immutable candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-internal-beta-${{ inputs.source_sha }}
+          path: candidate
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.candidate_run_id }}
+
+      - name: Verify candidate identity, checksums, and update signature
+        shell: bash
+        env:
+          BETA_ORIGIN: ${{ vars.AERA_INTERNAL_BETA_ORIGIN }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test -f candidate/SHA256SUMS
+          (
+            cd candidate
+            sha256sum --check SHA256SUMS
+          )
+
+          CANDIDATE_MANIFEST=candidate/internal-beta-manifest.json \
+            BETA_ORIGIN="$BETA_ORIGIN" \
+            CANDIDATE_RUN_ID="$CANDIDATE_RUN_ID" \
+            SOURCE_SHA="$SOURCE_SHA" \
+            VERSION="$VERSION" \
+            node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+          import { parseAndValidateInternalBetaManifest } from \
+            "./scripts/internal-beta/manifest.mjs";
+
+          const document = parseAndValidateInternalBetaManifest(
+            await readFile(process.env.CANDIDATE_MANIFEST, "utf8"),
+          );
+          const expectedRunUrl =
+            `https://github.com/bignormal/aera/actions/runs/${process.env.CANDIDATE_RUN_ID}`;
+          if (document.sourceSha !== process.env.SOURCE_SHA) {
+            throw new Error("Candidate manifest source SHA differs");
+          }
+          if (document.version !== process.env.VERSION) {
+            throw new Error("Candidate manifest version differs");
+          }
+          if (document.origin !== process.env.BETA_ORIGIN) {
+            throw new Error("Candidate manifest Origin differs");
+          }
+          if (document.build.runUrl !== expectedRunUrl) {
+            throw new Error("Candidate manifest build run differs");
+          }
+          NODE
+
+          base_url="$BETA_ORIGIN/desktop-updates/internal-beta"
+          node scripts/internal-beta/desktop-update.mjs verify \
+            --artifacts-dir candidate/artifacts \
+            --base-url "$base_url" \
+            --manifest candidate/desktop-update/manifest.json \
+            --public-key build/desktop-update-signing-public.pem \
+            --signature candidate/desktop-update/manifest.sig \
+            --version "$VERSION"
+
+      - name: Publish the signed Desktop update channel
+        shell: bash
+        env:
+          BETA_ORIGIN: ${{ vars.AERA_INTERNAL_BETA_ORIGIN }}
+          PUBLISH_HOST: ${{ vars.AERA_DESKTOP_UPDATE_PUBLISH_HOST }}
+          PUBLISH_SSH_PRIVATE_KEY: ${{ secrets.AERA_DESKTOP_UPDATE_PUBLISH_SSH_PRIVATE_KEY }}
+          PUBLISH_SSH_KNOWN_HOSTS: ${{ secrets.AERA_DESKTOP_UPDATE_PUBLISH_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ "$PUBLISH_HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test -n "$PUBLISH_SSH_PRIVATE_KEY"
+          test -n "$PUBLISH_SSH_KNOWN_HOSTS"
+          key="$RUNNER_TEMP/desktop-update-publisher"
+          known_hosts="$RUNNER_TEMP/desktop-update-known-hosts"
+          install -m 0700 -d "$RUNNER_TEMP/desktop-update-ssh"
+          printf '%s\n' "$PUBLISH_SSH_PRIVATE_KEY" > "$key"
+          printf '%s\n' "$PUBLISH_SSH_KNOWN_HOSTS" > "$known_hosts"
+          chmod 0600 "$key" "$known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+          publish_root="$RUNNER_TEMP/desktop-update-publish"
+          release_dir="$publish_root/releases/$VERSION"
+          mkdir -p "$release_dir"
+          cp candidate/desktop-update/manifest.json "$publish_root/manifest.json"
+          cp candidate/desktop-update/manifest.sig "$publish_root/manifest.sig"
+          for name in \
+            "Aera-Internal-Beta-$VERSION-macos-arm64.zip" \
+            "Aera-Internal-Beta-$VERSION-windows-x64-setup.exe"
+          do
+            cp "candidate/artifacts/$name" "$release_dir/$name"
+          done
+          (
+            cd "$publish_root"
+            tar -cf - \
+              manifest.json \
+              manifest.sig \
+              "releases/$VERSION/Aera-Internal-Beta-$VERSION-macos-arm64.zip" \
+              "releases/$VERSION/Aera-Internal-Beta-$VERSION-windows-x64-setup.exe"
+          ) | ssh \
+            -i "$key" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$known_hosts" \
+            "aera-updates@$PUBLISH_HOST" publish
+
+          base_url="$BETA_ORIGIN/desktop-updates/internal-beta"
+          curl --fail --silent --show-error \
+            --proto '=https' --tlsv1.2 \
+            "$base_url/manifest.json" \
+            --output "$RUNNER_TEMP/live-update-manifest.json"
+          curl --fail --silent --show-error \
+            --proto '=https' --tlsv1.2 \
+            "$base_url/manifest.sig" \
+            --output "$RUNNER_TEMP/live-update-manifest.sig"
+          cmp candidate/desktop-update/manifest.json \
+            "$RUNNER_TEMP/live-update-manifest.json"
+          cmp candidate/desktop-update/manifest.sig \
+            "$RUNNER_TEMP/live-update-manifest.sig"
+          for name in \
+            "Aera-Internal-Beta-$VERSION-macos-arm64.zip" \
+            "Aera-Internal-Beta-$VERSION-windows-x64-setup.exe"
+          do
+            curl --fail --silent --show-error \
+              --proto '=https' --tlsv1.2 \
+              --range 0-0 \
+              "$base_url/releases/$VERSION/$name" \
+              --output /dev/null
+          done

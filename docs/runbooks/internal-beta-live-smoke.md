@@ -17,8 +17,8 @@ Before inviting a tester, record and reverify:
 - successful exact-SHA main CI run URLs;
 - Cloud/Admin candidate workflow URLs and canonical manifest hashes;
 - immutable GHCR `@sha256` image digests and Sigstore verification;
-- the Desktop internal-Beta workflow URL and manifest/provenance Sigstore
-  verification;
+- the Desktop internal-Beta candidate and promotion workflow URLs plus
+  manifest/provenance Sigstore verification;
 - all four package names, sizes, and SHA-256 values; and
 - the deployed issuer, offline-entitlement key ID/public key, and Runtime lock.
 
