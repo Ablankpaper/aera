@@ -246,6 +246,18 @@ Installation activation is fail-closed until model projection succeeds. A pendin
 
 Fresh Installation materialization reserves the exact local Profile ID and opaque Runtime Profile ID under the stable Agent Installation ID before Hermes creates any Profile bytes. If creation is interrupted, the next attempt reads that encrypted reservation and adopts only the same Owner's safe scaffold; it never chooses a suffixed replacement or claims private or foreign data.
 
+### Atomic fresh Profile allocation
+
+Creation-intent persistence uses one immediate SQLite transaction and excludes fresh Profile IDs held by pending intents or Installation journals, so concurrent same-name installs persist distinct IDs before Cloud work begins.
+
+#### Pending intent exclusion
+
+Two same-name creation intents that overlap before either Cloud response persist different Profile IDs while keeping each original idempotency key stable.
+
+#### Operation handoff exclusion
+
+After an intent becomes a prepared Installation journal but before Profile bytes exist, its reserved Profile ID remains unavailable to later same-name creation intents.
+
 Desktop schema v9 adds the narrow `installation_operations` journal. It stores only the exact Owner/device/Installation and bounded target/model identifiers, opaque Runtime Profile ID, phase, retry code, CAS revision, and timestamps; it contains no physical path, credential, token, Profile bytes, or Cloud body. Phases advance in order from `prepared` through `committed`, while ambiguous ownership can become terminal `repair_required`; stale revisions and cross-Owner reads fail closed.
 
 Before the Cloud create request, `pending_sanitized_records` durably stores the stable idempotency key and a bounded Profile target with no physical path or credential. A cold restart replays that exact create key, verifies the returned pending Installation and policy, persists the local row and journal before deleting the intent, then resumes materialization.
