@@ -139,6 +139,7 @@ export default {
   dropToAttach: "拖放文件以添加附件",
   dashboardUnavailableFallback:
     "当前连接无法使用控制台聊天，已切换到基础聊天。智能体切换和会话历史功能将受到限制。",
+  streamIntegrityError: "回复流完整性校验失败，请重试。",
   attachUnsupported: "{{name}}：不支持的文件类型",
   attachImageTooLarge: "{{name}}：图片过大（最大 50 MB）",
   attachImageUncompressible:
@@ -269,8 +270,7 @@ export default {
   hideWorktree: "隐藏文件浏览器",
   followUs: {
     title: "在 X 上关注我们",
-    description:
-      "关注 Aera 的最新功能、技巧和动态，欢迎在 X 上关注我们！",
+    description: "关注 Aera 的最新功能、技巧和动态，欢迎在 X 上关注我们！",
     follow: "关注",
     notNow: "暂不",
   },

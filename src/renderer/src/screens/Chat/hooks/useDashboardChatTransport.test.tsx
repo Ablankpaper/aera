@@ -1,4 +1,6 @@
 import { act, render, waitFor } from "@testing-library/react";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import {
   useEffect,
   useRef,
@@ -71,6 +73,12 @@ const activeRecoveryTurn: ActiveTurn = {
   turnId: "turn-recovery",
   userId: "u-recovery",
 };
+
+const STREAM_ID = "019fcf6e-e7d8-74a5-bdb5-a2d7800b090e";
+
+function streamDigest(text: string): string {
+  return bytesToHex(sha256(new TextEncoder().encode(text)));
+}
 
 function Harness({
   api,
@@ -922,6 +930,200 @@ describe("useDashboardChatTransport unavailable fallback (issue #667)", () => {
     });
     // Local dashboard may still be spawning, so each send re-checks.
     expect(startDashboard).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("useDashboardChatTransport stream integrity", () => {
+  beforeEach(() => {
+    dashboardMock.close.mockClear();
+    dashboardMock.connect.mockClear();
+    dashboardMock.instances.length = 0;
+    dashboardMock.onEvent = null;
+    dashboardMock.request.mockReset();
+    dashboardMock.request.mockImplementation(async (method: string) => {
+      if (method === "session.create") {
+        return { session_id: "live-1", stored_session_id: "stored-1" };
+      }
+      return {};
+    });
+    Object.defineProperty(window, "hermesAPI", {
+      configurable: true,
+      value: {
+        freshDashboardWsUrl: vi.fn(async () => "ws://fresh-dashboard"),
+        recordSessionContinuation: vi.fn(async () => true),
+        recordSessionLocalError: vi.fn(async () => true),
+        startDashboard: vi.fn(async () => ({
+          connection: { wsUrl: "ws://127.0.0.1:12345" },
+          running: true,
+        })),
+      },
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const connect = async (api: HarnessApi): Promise<void> => {
+    await act(async () => {
+      await api.send?.("hello");
+    });
+    expect(dashboardMock.onEvent).toBeTypeOf("function");
+  };
+
+  it("applies only ordered unique deltas and repairs a gap from completion", async () => {
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    await connect(api);
+
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        payload: { stream_id: STREAM_ID, seq: 0 },
+        session_id: "live-1",
+        type: "message.start",
+      });
+      dashboardMock.onEvent?.({
+        payload: { stream_id: STREAM_ID, seq: 1, text: "第一段" },
+        session_id: "live-1",
+        type: "message.delta",
+      });
+      dashboardMock.onEvent?.({
+        payload: { stream_id: STREAM_ID, seq: 1, text: "第一段" },
+        session_id: "live-1",
+        type: "message.delta",
+      });
+      dashboardMock.onEvent?.({
+        payload: { stream_id: STREAM_ID, seq: 3, text: "第三段。" },
+        session_id: "live-1",
+        type: "message.delta",
+      });
+    });
+
+    const liveBubble = api.messages?.find(
+      (message) => message.role === "agent" && "content" in message,
+    );
+    expect(liveBubble).toMatchObject({ content: "第一段", pending: true });
+
+    const finalText = "第一段第二段第三段。重复短语，重复短语。🙂";
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        payload: {
+          stream_id: STREAM_ID,
+          final_seq: 3,
+          status: "completed",
+          text: finalText,
+          text_sha256: streamDigest(finalText),
+        },
+        session_id: "live-1",
+        type: "message.complete",
+      });
+    });
+
+    const finalBubble = api.messages?.find(
+      (message) => message.role === "agent" && "content" in message,
+    );
+    expect(finalBubble).toMatchObject({
+      content: finalText,
+      pending: false,
+    });
+  });
+
+  it("fails a sequenced turn when the final digest does not match", async () => {
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    await connect(api);
+
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        payload: { stream_id: STREAM_ID, seq: 0 },
+        session_id: "live-1",
+        type: "message.start",
+      });
+      dashboardMock.onEvent?.({
+        payload: { stream_id: STREAM_ID, seq: 1, text: "局部内容" },
+        session_id: "live-1",
+        type: "message.delta",
+      });
+      dashboardMock.onEvent?.({
+        payload: {
+          stream_id: STREAM_ID,
+          final_seq: 1,
+          status: "completed",
+          text: "完整内容",
+          text_sha256: streamDigest("另一个内容"),
+        },
+        session_id: "live-1",
+        type: "message.complete",
+      });
+    });
+
+    const failedBubble = api.messages?.find(
+      (message) => message.role === "agent" && "content" in message,
+    );
+    expect(failedBubble).toMatchObject({
+      error: "The response stream could not be verified. Please retry.",
+      pending: false,
+    });
+  });
+
+  it("does not accept an unsequenced completion after a sequenced start", async () => {
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    await connect(api);
+
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        payload: { stream_id: STREAM_ID, seq: 0 },
+        session_id: "live-1",
+        type: "message.start",
+      });
+      dashboardMock.onEvent?.({
+        payload: { status: "completed", text: "无协议完成" },
+        session_id: "live-1",
+        type: "message.complete",
+      });
+    });
+
+    const failedBubble = api.messages?.find(
+      (message) => message.role === "agent" && "content" in message,
+    );
+    expect(failedBubble).toMatchObject({
+      error: "The response stream could not be verified. Please retry.",
+      pending: false,
+    });
+  });
+
+  it("retains legacy completion reconciliation when start has no stream id", async () => {
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    await connect(api);
+
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        payload: {},
+        session_id: "live-1",
+        type: "message.start",
+      });
+      dashboardMock.onEvent?.({
+        payload: { text: "旧版增量" },
+        session_id: "live-1",
+        type: "message.delta",
+      });
+      dashboardMock.onEvent?.({
+        payload: { status: "completed", text: "旧版增量与完整结尾" },
+        session_id: "live-1",
+        type: "message.complete",
+      });
+    });
+
+    const bubble = api.messages?.find(
+      (message) => message.role === "agent" && "content" in message,
+    );
+    expect(bubble).toMatchObject({
+      content: "旧版增量与完整结尾",
+      pending: false,
+    });
+    expect(bubble).not.toHaveProperty("error");
   });
 });
 

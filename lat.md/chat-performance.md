@@ -51,3 +51,33 @@ The fixed heights are an invariant shared with the `.slash-menu-item` and `.slas
 Arrow-key selection does not query or measure command DOM nodes. [[src/renderer/src/screens/Chat/ChatInput.tsx]] computes the selected row's offset and adjusts the list scroll position only when that row leaves the viewport, including wraparound from the first command to the last.
 
 The searchable name and description are normalized once when the command catalog changes rather than once per command on every keystroke. The virtual canvas uses layout and paint containment, and the modal overlay avoids backdrop blur so opening the palette does not trigger a full-window blur pass.
+
+## Chat stream integrity
+
+Assistant text is progressively rendered only when its Runtime envelope is ordered and attributable to the current turn; the complete text remains the final authority.
+
+[[src/renderer/src/screens/Chat/streamIntegrity.ts#StreamIntegrityTracker]] tracks the current `stream_id`, expected `seq`, accepted chunks, and degraded state without logging reply content. Exact duplicate frames are ignored. Conflicting duplicates, gaps, stale streams, invalid completion metadata, and digest mismatches cannot silently complete a partial answer.
+
+[[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts#useDashboardChatTransport]] resets the tracker when the stored session, Profile, connection snapshot, or Electron hook lifetime changes. A valid sequenced completion passes exact full text to [[src/renderer/src/screens/Chat/dashboardEventAdapter.ts#applyDashboardStreamEvent]] as authoritative content, replacing the live bubble byte-for-byte instead of applying the legacy seam merge.
+
+### Runtime-first capability boundary
+
+`message.start.payload.stream_id` advertises sequencing for one turn, so Runtime must land before the Desktop consumer while older Runtime turns remain compatible.
+
+A start without the field stays on legacy completion reconciliation. Once a present `stream_id` enters sequenced mode, missing stream metadata on a later delta or completion is a protocol failure; that turn cannot silently downgrade.
+
+### Sequenced completion boundary
+
+A sequenced completion succeeds only with the active `stream_id`, a safe `final_seq`, full string `text`, and matching SHA-256 of its UTF-8 bytes.
+
+Gapped or duplicated live display can be repaired only by that verified full completion. Invalid completion marks the active turn failed with a localized retryable error, leaves no partial answer presented as complete, and records no raw reply text in diagnostics.
+
+### Real Electron release gate
+
+Mocked transport tests and CI are necessary but do not close the missing-character report; the merged Runtime and Desktop must also pass an isolated Electron journey.
+
+[[tests/e2e/chat-stream-integrity.e2e.ts]] uses temporary Electron user-data and `HERMES_HOME`, a disposable local Cloud account, and a loopback OpenAI-compatible service that emits one Unicode code point per SSE chunk. At least 20 long Chinese turns include repeated phrases, punctuation, combining marks, and emoji.
+
+The gate fails closed when any exact Runtime/Desktop identity or isolated dependency root is absent or malformed. It proves the exact temporary Runtime root has no process before launch, records the processes created by launch, and requires no process under that root after close; fallback cleanup may signal only that validated harness-owned root.
+
+For every turn, the gate records only SHA-256 and UTF-8 byte length and requires visible text, the `message.complete` text, and the assistant row in `state.db` to match exactly. The first matching row binds the session id, and every later query is restricted to that session without putting the id or reply text in evidence. The gate must never use or mutate the daily Electron client, Profile, account device, credentials, or cache.
