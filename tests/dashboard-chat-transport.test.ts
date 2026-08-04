@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import {
   dashboardChatEnabledForConnection,
   dashboardChatEnabledFromEnv,
@@ -17,6 +18,41 @@ import {
   syncDashboardAttachmentsForSubmit,
   submitDashboardPromptWithRecovery,
 } from "../src/renderer/src/screens/Chat/hooks/useDashboardChatTransport";
+import { StreamIntegrityTracker } from "../src/renderer/src/screens/Chat/streamIntegrity";
+
+const RELEASE_STREAM_ID = "019fcf90-d32a-75df-b047-742ab757ae38";
+
+function releaseDigest(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+describe("dashboard stream-integrity release boundary", () => {
+  // @lat: [[chat-performance#Chat stream integrity#Runtime-first capability boundary]]
+  it("uses message.start stream_id as the per-turn capability advertisement", () => {
+    const legacy = new StreamIntegrityTracker();
+    expect(legacy.begin({ seq: 0 })).toEqual({ mode: "legacy" });
+
+    const sequenced = new StreamIntegrityTracker();
+    expect(sequenced.begin({ stream_id: RELEASE_STREAM_ID, seq: 0 })).toEqual({
+      mode: "sequenced",
+      streamId: RELEASE_STREAM_ID,
+    });
+  });
+
+  // @lat: [[chat-performance#Chat stream integrity#Sequenced completion boundary]]
+  it("rejects a legacy-shaped completion only after sequenced mode begins", () => {
+    const tracker = new StreamIntegrityTracker();
+    tracker.begin({ stream_id: RELEASE_STREAM_ID, seq: 0 });
+
+    expect(
+      tracker.complete({
+        final_seq: 0,
+        text: "不能静默降级",
+        text_sha256: releaseDigest("不能静默降级"),
+      }),
+    ).toEqual({ kind: "degraded", code: "stream_stale" });
+  });
+});
 
 describe("dashboardChatEnabledFromEnv", () => {
   it("defaults dashboard chat on", () => {
