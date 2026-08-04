@@ -166,4 +166,34 @@ describe("applyDashboardStreamEvent — message.complete text reconciliation", (
     expect(bubble).toBeDefined();
     expect((bubble as { content: string }).content).toBe("Remote answer");
   });
+
+  it("replaces streamed text exactly for an integrity-verified completion", () => {
+    const state: DashboardEventState = {
+      messages: [
+        userTurn(),
+        {
+          id: "a1",
+          role: "agent",
+          kind: "assistant",
+          content: "先导说明。缺字",
+          pending: true,
+        },
+      ],
+      reasoningSegmentClosed: false,
+    };
+
+    const next = applyDashboardStreamEvent(
+      state,
+      { type: "message.complete", payload: { text: "完整答案。" } },
+      { authoritativeCompletionText: true },
+    );
+
+    expect(
+      (
+        next.messages.find((message) => message.id === "a1") as {
+          content: string;
+        }
+      ).content,
+    ).toBe("完整答案。");
+  });
 });

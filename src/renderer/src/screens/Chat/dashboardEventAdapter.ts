@@ -14,6 +14,7 @@ export interface DashboardEventState {
 
 interface ApplyDashboardEventOptions {
   activeTurn?: ActiveTurn | null;
+  authoritativeCompletionText?: boolean;
   now?: number;
   renderAssistantDeltas?: boolean;
 }
@@ -580,8 +581,11 @@ function completeAssistantWithFinalText(
   finalText: string,
   activeTurn?: ActiveTurn | null,
   now = Date.now(),
+  authoritative = false,
 ): ChatMessage[] {
-  if (!finalText.trim()) return completeAssistantBubbles(messages);
+  if (!authoritative && !finalText.trim()) {
+    return completeAssistantBubbles(messages);
+  }
 
   const messagesWithoutDuplicateReasoning = removeDuplicateReasoning(
     messages,
@@ -598,7 +602,9 @@ function completeAssistantWithFinalText(
     // Merge streamed text with finalText so content streamed before tool
     // calls is preserved rather than clobbered by a last-turn-only
     // final_response (#746).
-    const merged = mergeStreamedWithFinal(msg.content, finalText);
+    const merged = authoritative
+      ? finalText
+      : mergeStreamedWithFinal(msg.content, finalText);
 
     return [
       ...messagesWithoutDuplicateReasoning.slice(0, i),
@@ -708,6 +714,7 @@ export function applyDashboardStreamEvent(
           finalText,
           options.activeTurn,
           now,
+          options.authoritativeCompletionText,
         ),
         reasoningSegmentClosed: false,
       };

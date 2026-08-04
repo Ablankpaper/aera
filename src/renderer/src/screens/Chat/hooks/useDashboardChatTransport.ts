@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import i18n from "i18next";
 import { LOCAL_PRESETS } from "../../../constants";
 import {
   isBubbleMessage,
@@ -11,6 +12,10 @@ import {
 } from "../dashboardEventAdapter";
 import { DashboardGatewayClient } from "../dashboardGatewayClient";
 import { executeSlash, type SlashExecOutcome } from "../slashExec";
+import {
+  StreamIntegrityTracker,
+  type StreamIntegrityDegradedCode,
+} from "../streamIntegrity";
 import type { AgentCommandsCatalogResponse } from "../slash/types";
 import type { ActiveTurn, Attachment, ChatMessage, UsageState } from "../types";
 import type { DesktopSessionContinuationItem } from "../../../../../shared/session-continuation";
@@ -819,9 +824,17 @@ export function completionFailed(payload: unknown): boolean {
 function completionErrorMessage(payload: unknown): string {
   const row = asRecord(payload);
   const raw = String(row.error || row.text || row.rendered || "").trim();
-  return (
-    raw.replace(/^error\s*:\s*/i, "") || "Aera Runtime reported an error"
-  );
+  return raw.replace(/^error\s*:\s*/i, "") || "Aera Runtime reported an error";
+}
+
+function streamIntegrityErrorMessage(): string {
+  const fallback = "The response stream could not be verified. Please retry.";
+  const translated = i18n.t("chat.streamIntegrityError", {
+    defaultValue: fallback,
+  });
+  return typeof translated === "string" && translated.trim()
+    ? translated
+    : fallback;
 }
 
 function userContentById(
@@ -1003,6 +1016,7 @@ export function useDashboardChatTransport({
   const storedSessionIdRef = useRef<string | null>(hermesSessionId);
   const messagesRef = useRef<ChatMessage[]>(messages);
   const reasoningSegmentClosedRef = useRef(false);
+  const streamIntegrityRef = useRef(new StreamIntegrityTracker());
   const appliedModelRef = useRef<string | null>(null);
   const runtimeModelSelectionRef = useRef<string | null>(null);
   const lastRuntimeSessionWasCreatedRef = useRef(false);
@@ -1034,6 +1048,7 @@ export function useDashboardChatTransport({
     storedSessionIdRef.current = hermesSessionId;
     runtimeSessionIdRef.current = null;
     reasoningSegmentClosedRef.current = false;
+    streamIntegrityRef.current.reset();
     appliedModelRef.current = null;
     runtimeModelSelectionRef.current = null;
     lastRuntimeSessionWasCreatedRef.current = false;
@@ -1054,6 +1069,7 @@ export function useDashboardChatTransport({
     connectingRef.current = null;
     runtimeSessionIdRef.current = null;
     reasoningSegmentClosedRef.current = false;
+    streamIntegrityRef.current.reset();
     appliedModelRef.current = null;
     runtimeModelSelectionRef.current = null;
     lastRuntimeSessionWasCreatedRef.current = false;
@@ -1099,24 +1115,64 @@ export function useDashboardChatTransport({
         return;
       }
 
+      let eventForAdapter = event;
+      let authoritativeCompletionText = false;
+      let integrityFailure: StreamIntegrityDegradedCode | null = null;
+
+      if (event.type === "message.start") {
+        streamIntegrityRef.current.begin(event.payload);
+      } else if (
+        event.type === "message.delta" &&
+        streamIntegrityRef.current.mode === "sequenced"
+      ) {
+        const decision = streamIntegrityRef.current.delta(event.payload);
+        if (decision.kind !== "apply") return;
+        eventForAdapter = {
+          ...event,
+          payload: { ...asRecord(event.payload), text: decision.text },
+        };
+      } else if (
+        event.type === "message.complete" &&
+        streamIntegrityRef.current.mode === "sequenced"
+      ) {
+        const decision = streamIntegrityRef.current.complete(event.payload);
+        if (decision.kind === "complete") {
+          authoritativeCompletionText = true;
+          eventForAdapter = {
+            ...event,
+            payload: { ...asRecord(event.payload), text: decision.text },
+          };
+        } else if (decision.kind === "degraded") {
+          integrityFailure = decision.code;
+        } else {
+          integrityFailure = "stream_conflict";
+        }
+      }
+
       const failed =
-        event.type === "message.complete" && completionFailed(event.payload);
-      const next = applyDashboardStreamEvent(
-        {
-          messages: messagesRef.current,
-          reasoningSegmentClosed: reasoningSegmentClosedRef.current,
-        },
-        event,
-        {
-          activeTurn: activeTurnRef.current,
-          renderAssistantDeltas: connectionMode === "local",
-        },
-      );
+        event.type === "message.complete" &&
+        (integrityFailure !== null || completionFailed(event.payload));
+      const currentState = {
+        messages: messagesRef.current,
+        reasoningSegmentClosed: reasoningSegmentClosedRef.current,
+      };
+      const next = integrityFailure
+        ? currentState
+        : applyDashboardStreamEvent(currentState, eventForAdapter, {
+            activeTurn: activeTurnRef.current,
+            authoritativeCompletionText,
+            renderAssistantDeltas: connectionMode === "local",
+          });
       reasoningSegmentClosedRef.current = next.reasoningSegmentClosed;
+      const failureMessage = failed
+        ? integrityFailure
+          ? streamIntegrityErrorMessage()
+          : completionErrorMessage(event.payload)
+        : "";
       const nextMessages = failed
         ? markActiveTurnFailed(
             next.messages,
-            completionErrorMessage(event.payload),
+            failureMessage,
             activeTurnRef.current,
           )
         : next.messages;
@@ -1124,6 +1180,7 @@ export function useDashboardChatTransport({
       setMessages(nextMessages);
 
       if (event.type === "message.complete") {
+        streamIntegrityRef.current.reset();
         if (failed) {
           appliedModelRef.current = null;
           runtimeModelSelectionRef.current = null;
@@ -1141,7 +1198,7 @@ export function useDashboardChatTransport({
           ) {
             void recordLocalError(storedSessionId, {
               userContent,
-              error: completionErrorMessage(event.payload),
+              error: failureMessage,
             }).catch(() => undefined);
           }
         }
@@ -1230,9 +1287,7 @@ export function useDashboardChatTransport({
         for (let attempt = 0; attempt < 3; attempt++) {
           const status = await window.hermesAPI.startDashboard(profile);
           if (clientGenerationRef.current !== generation) {
-            throw new Error(
-              "Aera Runtime dashboard connection was superseded",
-            );
+            throw new Error("Aera Runtime dashboard connection was superseded");
           }
           if (!status.running || !status.connection) {
             if (status.needsOAuthLogin) {
@@ -1256,8 +1311,7 @@ export function useDashboardChatTransport({
               );
             }
             throw new Error(
-              status.error ||
-                "Aera Runtime dashboard transport is unavailable",
+              status.error || "Aera Runtime dashboard transport is unavailable",
             );
           }
           const client: DashboardGatewayClient = new DashboardGatewayClient({
@@ -1271,6 +1325,7 @@ export function useDashboardChatTransport({
                 // reconnects and uses Hermes' native session.resume path.
                 runtimeSessionIdRef.current = null;
                 reasoningSegmentClosedRef.current = false;
+                streamIntegrityRef.current.reset();
                 appliedModelRef.current = null;
                 runtimeModelSelectionRef.current = null;
                 lastRuntimeSessionWasCreatedRef.current = false;
@@ -1304,9 +1359,7 @@ export function useDashboardChatTransport({
           }
           if (clientGenerationRef.current !== generation) {
             client.close();
-            throw new Error(
-              "Aera Runtime dashboard connection was superseded",
-            );
+            throw new Error("Aera Runtime dashboard connection was superseded");
           }
           clientRef.current = client;
           return client;
@@ -1901,6 +1954,7 @@ export function useDashboardChatTransport({
     () => () => {
       clientRef.current?.close();
       clientRef.current = null;
+      streamIntegrityRef.current.reset();
     },
     [],
   );
