@@ -1635,7 +1635,28 @@ export class AgentInstallationManager {
     }
     for (const operation of this.operations.listIncomplete()) {
       if (operation.phase === "repair_required") continue;
-      const local = this.getLocalInstallation(operation.agentInstallationId);
+      let local: LocalAgentInstallation;
+      try {
+        local = this.getLocalInstallation(operation.agentInstallationId);
+      } catch (error) {
+        if (
+          !(error instanceof AgentInstallationManagerError) ||
+          error.code !== "installation_not_found"
+        ) {
+          throw error;
+        }
+        reportStageFailure("reconciliation-operation", error);
+        try {
+          this.operations.markRepairRequired({
+            operationId: operation.operationId,
+            expectedRevision: operation.revision,
+            retryCode: error.code,
+          });
+        } catch (repairError) {
+          reportStageFailure("reconciliation-operation-journal", repairError);
+        }
+        continue;
+      }
       if (local.status !== "pending") {
         throw new AgentInstallationManagerError("installation_conflict");
       }

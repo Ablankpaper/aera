@@ -254,6 +254,10 @@ Materialization rechecks each durable postcondition and serializes concurrent wo
 
 Foreign ownership, immutable reservation drift, Runtime Profile ID collision, and unexpected private fresh-Profile markers become `repair_required` with bounded stable codes. Recovery never deletes, reassigns, or retries those Profiles. [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#notifyAccessStateChanged]] schedules one reconciliation flight per Owner/Runtime only for authenticated online local access; offline, signed-out, Remote, and SSH states do not start Cloud recovery.
 
+### Installation reconciliation isolation
+
+A structurally orphaned journal operation whose Installation is missing becomes terminal `repair_required`; it cannot block later healthy operations from recovering during the same reconciliation flight.
+
 Manual selection downloads and verifies the immutable version, calls the cloud selection transaction, retrieves the newly signed policy through `GET /api/v1/policy-snapshots/{policy_snapshot_id}`, and only then atomically activates the read-only projection for later conversations. A missing or invalid policy leaves the last local version selected.
 
 [[src/main/agentera-agent-control/runtime-binding-store.ts#RuntimeBindingStore]] persists a complete local binding and its sanitized cloud outbox record in one transaction. [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] retries that outbox after installed turns, session attachment, and authentication changes, but delivery failure cannot delay or roll back Hermes.

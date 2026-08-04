@@ -59,6 +59,7 @@ import { canonicalizeEditableAgent } from "./manifest";
 const DEFINITION_ID = "11111111-1111-4111-8111-111111111111";
 const VERSION_ID = "22222222-2222-4222-8222-222222222222";
 const AGENT_INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
+const MISSING_AGENT_INSTALLATION_ID = "20202020-2020-4020-8020-202020202020";
 const POLICY_ID = "44444444-4444-4444-8444-444444444444";
 const RUNTIME_PROFILE_ID = "55555555-5555-4555-8555-555555555555";
 const OPERATION_ID = "66666666-6666-4666-8666-666666666666";
@@ -655,6 +656,68 @@ describe("Agent installation orchestration", () => {
     ).toMatchObject({
       agentInstallationId: AGENT_INSTALLATION_ID,
       runtimeProfileId: RUNTIME_PROFILE_ID,
+    });
+  });
+
+  // @lat: [[lat.md/agentera-agent-control-plane#Installation and binding#Installation reconciliation isolation]]
+  it("does not let a missing-installation operation block later recovery", async () => {
+    createProfile.mockImplementationOnce(
+      (_name, _cloneFrom, reservedProfileId) => {
+        expect(reservedProfileId).toBe("fresh-agent");
+        mkdirSync(freshProfilePath, { recursive: true });
+        throw new Error("injected creation interruption");
+      },
+    );
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "profile_binding_failed" });
+
+    database.sqlite
+      .prepare(
+        `INSERT INTO installation_operations (
+           operation_id, tenant_id, owner_id, device_installation_id,
+           agent_installation_id, target_kind, target_profile_id,
+           display_name, model_source_profile_id, model_source_model_id,
+           runtime_profile_id, phase, retry_code, revision,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, 'fresh', 'missing-agent',
+           'Missing Agent', NULL, NULL, NULL, 'prepared', NULL, 1, ?, ?)`,
+      )
+      .run(
+        MISSING_AGENT_INSTALLATION_ID,
+        owner.tenantId,
+        owner.ownerId,
+        owner.deviceInstallationId,
+        MISSING_AGENT_INSTALLATION_ID,
+        NOW.toISOString(),
+        NOW.toISOString(),
+      );
+
+    const recovered =
+      await coldRestartManager().reconcilePendingInstallations();
+
+    expect(recovered).toEqual([
+      expect.objectContaining({
+        agentInstallationId: AGENT_INSTALLATION_ID,
+        runtimeProfileId: RUNTIME_PROFILE_ID,
+        status: "active",
+      }),
+    ]);
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT phase, retry_code FROM installation_operations
+           WHERE operation_id = ?`,
+        )
+        .get(MISSING_AGENT_INSTALLATION_ID),
+    ).toEqual({
+      phase: "repair_required",
+      retry_code: "installation_not_found",
     });
   });
 
