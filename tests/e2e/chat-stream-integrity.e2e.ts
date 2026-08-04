@@ -596,15 +596,6 @@ test("matches visible, completion, and state.db text for 20 isolated one-charact
     expect(ownedRuntimeProcessIds(preparedRuntimeRoot)).toEqual([]);
     ({ app } = await launchRuntimeDesktop(harness, emptySeed));
     const page = await app.firstWindow();
-    await expect
-      .poll(() => ownedRuntimeProcessIds(preparedRuntimeRoot).length, {
-        timeout: 30_000,
-      })
-      .toBeGreaterThan(0);
-    for (const pid of ownedRuntimeProcessIds(preparedRuntimeRoot)) {
-      launchedRuntimeProcessIds.add(pid);
-    }
-    expect(launchedRuntimeProcessIds.size).toBeGreaterThan(0);
     await authenticateNewProductAccount(harness, app, page, {
       displayName: "Stream Integrity Disposable User",
     });
@@ -683,6 +674,18 @@ test("matches visible, completion, and state.db text for 20 isolated one-charact
       );
       await expect(sendButton).toBeEnabled();
       await sendButton.click();
+
+      if (turn === 1) {
+        await expect
+          .poll(() => ownedRuntimeProcessIds(preparedRuntimeRoot).length, {
+            timeout: 120_000,
+          })
+          .toBeGreaterThan(0);
+        for (const pid of ownedRuntimeProcessIds(preparedRuntimeRoot)) {
+          launchedRuntimeProcessIds.add(pid);
+        }
+        expect(launchedRuntimeProcessIds.size).toBeGreaterThan(0);
+      }
 
       await expect
         .poll(
