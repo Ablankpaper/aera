@@ -258,6 +258,10 @@ Foreign ownership, immutable reservation drift, Runtime Profile ID collision, an
 
 A structurally orphaned journal operation whose Installation is missing becomes terminal `repair_required`; it cannot block later healthy operations from recovering during the same reconciliation flight.
 
+#### Legacy creation intent migration
+
+A Beta.21 creation intent without `profile_target` is replayed with its original idempotency key into a profile-less pending Installation, then awaits explicit same-owner Profile selection instead of guessing or being skipped.
+
 Manual selection downloads and verifies the immutable version, calls the cloud selection transaction, retrieves the newly signed policy through `GET /api/v1/policy-snapshots/{policy_snapshot_id}`, and only then atomically activates the read-only projection for later conversations. A missing or invalid policy leaves the last local version selected.
 
 [[src/main/agentera-agent-control/runtime-binding-store.ts#RuntimeBindingStore]] persists a complete local binding and its sanitized cloud outbox record in one transaction. [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] retries that outbox after installed turns, session attachment, and authentication changes, but delivery failure cannot delay or roll back Hermes.

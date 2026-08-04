@@ -1931,6 +1931,67 @@ describe("Agent installation orchestration", () => {
     ).toEqual({ count: 0 });
   });
 
+  // @lat: [[lat.md/agentera-agent-control-plane#Installation and binding#Installation reconciliation isolation#Legacy creation intent migration]]
+  it("migrates a legacy creation intent into an explicit pending Profile retry", async () => {
+    database.sqlite
+      .prepare(
+        `INSERT INTO pending_sanitized_records (
+           id, tenant_id, owner_id, device_installation_id,
+           record_type, payload_json, attempt_count, next_attempt_at,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 'agent_installation_create', ?, 0, NULL, ?, ?)`,
+      )
+      .run(
+        OPERATION_ID,
+        owner.tenantId,
+        owner.ownerId,
+        owner.deviceInstallationId,
+        JSON.stringify({
+          definition_id: DEFINITION_ID,
+          version_id: VERSION_ID,
+          idempotency_key: OPERATION_ID,
+          source_scope: "USER",
+          source_workspace_id: null,
+          source_organization_id: null,
+        }),
+        NOW.toISOString(),
+        NOW.toISOString(),
+      );
+
+    const recovered =
+      await coldRestartManager().reconcilePendingInstallations();
+
+    expect(recovered).toEqual([
+      expect.objectContaining({
+        agentInstallationId: AGENT_INSTALLATION_ID,
+        runtimeProfileId: null,
+        status: "pending",
+      }),
+    ]);
+    expect(createInstallation).toHaveBeenCalledWith(
+      {
+        definition_id: DEFINITION_ID,
+        version_id: VERSION_ID,
+      } satisfies CreateAgentInstallationRequest,
+      OPERATION_ID,
+    );
+    expect(createProfile).not.toHaveBeenCalled();
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT COUNT(*) AS count FROM pending_sanitized_records
+           WHERE record_type = 'agent_installation_create'`,
+        )
+        .get(),
+    ).toEqual({ count: 0 });
+    expect(manager().getLocalInstallation(AGENT_INSTALLATION_ID)).toMatchObject(
+      {
+        runtimeProfileId: null,
+        status: "pending",
+      },
+    );
+  });
+
   it("rejects a different Profile target for an existing Cloud creation intent", async () => {
     createInstallation.mockRejectedValueOnce(new Error("response lost"));
     await expect(

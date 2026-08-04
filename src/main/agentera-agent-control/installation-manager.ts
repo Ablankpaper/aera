@@ -1455,9 +1455,6 @@ export class AgentInstallationManager {
   private async executeCreationIntent(
     intent: InstallationCreationIntent,
   ): Promise<LocalAgentInstallation> {
-    if (intent.profileTarget === null) {
-      throw new AgentInstallationManagerError("installation_conflict");
-    }
     const source: NormalizedInstallationSource = {
       scope: intent.sourceScope,
       workspaceId: intent.sourceWorkspaceId,
@@ -1566,6 +1563,10 @@ export class AgentInstallationManager {
           );
       }
       const local = this.getLocalInstallation(installationId);
+      if (intent.profileTarget === null) {
+        this.completeCreationIntent(intent.id);
+        return local;
+      }
       const operation = this.operations.begin({
         operationId: installationId,
         agentInstallationId: installationId,
@@ -1630,7 +1631,6 @@ export class AgentInstallationManager {
   > {
     const results: LocalAgentInstallation[] = [];
     for (const intent of this.readCreationIntents()) {
-      if (intent.profileTarget === null) continue;
       results.push(await this.executeCreationIntent(intent));
     }
     for (const operation of this.operations.listIncomplete()) {
@@ -2997,8 +2997,9 @@ export class AgentInstallationManager {
           throw new AgentInstallationManagerError("installation_conflict");
         }
         const record = payload as Record<string, unknown>;
-        if (!Object.hasOwn(record, "profile_target")) continue;
-        const target = parseCreationProfileTarget(record.profile_target);
+        const target = Object.hasOwn(record, "profile_target")
+          ? parseCreationProfileTarget(record.profile_target)
+          : null;
         let source: NormalizedInstallationSource;
         if (
           record.source_scope === "USER" &&
@@ -3043,23 +3044,27 @@ export class AgentInstallationManager {
         } else {
           throw new AgentInstallationManagerError("installation_conflict");
         }
-        const publicTarget: AgentInstallationProfileTarget =
-          target.kind === "fresh"
-            ? {
-                kind: "fresh",
-                name: target.displayName,
-                ...(target.modelSourceProfileId
-                  ? { modelSourceProfileId: target.modelSourceProfileId }
-                  : {}),
-                ...(target.modelSourceModelId
-                  ? { modelSourceModelId: target.modelSourceModelId }
-                  : {}),
-              }
-            : {
-                kind: "claim",
-                profileId: target.profileId,
-                profilePath: this.profiles.resolveProfilePath(target.profileId),
-              };
+        const publicTarget: AgentInstallationProfileTarget | null =
+          target === null
+            ? null
+            : target.kind === "fresh"
+              ? {
+                  kind: "fresh",
+                  name: target.displayName,
+                  ...(target.modelSourceProfileId
+                    ? { modelSourceProfileId: target.modelSourceProfileId }
+                    : {}),
+                  ...(target.modelSourceModelId
+                    ? { modelSourceModelId: target.modelSourceModelId }
+                    : {}),
+                }
+              : {
+                  kind: "claim",
+                  profileId: target.profileId,
+                  profilePath: this.profiles.resolveProfilePath(
+                    target.profileId,
+                  ),
+                };
         const intent = this.beginCreationIntent(
           uuid(record.definition_id),
           uuid(record.version_id),
@@ -3087,7 +3092,7 @@ export class AgentInstallationManager {
     definitionId: string,
     versionId: string,
     source: NormalizedInstallationSource,
-    target: AgentInstallationProfileTarget,
+    target: AgentInstallationProfileTarget | null,
   ): InstallationCreationIntent {
     const rows = this.database.sqlite
       .prepare(
@@ -3249,6 +3254,7 @@ export class AgentInstallationManager {
       if (
         sameIntent &&
         storedTarget !== null &&
+        target !== null &&
         !creationProfileTargetMatchesInput(storedTarget, target)
       ) {
         throw new AgentInstallationManagerError("installation_conflict");
@@ -3274,7 +3280,7 @@ export class AgentInstallationManager {
     }
     if (matches.length === 1) {
       const existing = matches[0];
-      if (existing.profileTarget !== null) return existing;
+      if (existing.profileTarget !== null || target === null) return existing;
       const requestedTarget = this.normalizeCreationProfileTarget(target);
       const upgraded = { ...existing, profileTarget: requestedTarget };
       this.database.sqlite
@@ -3296,6 +3302,9 @@ export class AgentInstallationManager {
       return upgraded;
     }
 
+    if (target === null) {
+      throw new AgentInstallationManagerError("installation_conflict");
+    }
     const requestedTarget = this.normalizeCreationProfileTarget(target);
     const id = uuid(this.randomUUID());
     const createdAt = timestamp(this.now);
