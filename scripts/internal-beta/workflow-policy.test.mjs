@@ -11,6 +11,10 @@ const workflowPath = new URL(
   "../../.github/workflows/internal-beta.yml",
   import.meta.url,
 );
+const productionCandidatePath = new URL(
+  "../../.github/workflows/release-candidate.yml",
+  import.meta.url,
+);
 const promotionWorkflowPath = new URL(
   "../../.github/workflows/internal-beta-promote.yml",
   import.meta.url,
@@ -31,13 +35,16 @@ const windowsVerifierPath = new URL(
 const execFileAsync = promisify(execFile);
 
 test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublished, and Sigstore-bound", async () => {
-  const raw = await readFile(workflowPath, "utf8");
+  const [raw, productionRaw] = await Promise.all([
+    readFile(workflowPath, "utf8"),
+    readFile(productionCandidatePath, "utf8"),
+  ]);
   const workflow = parseYAML(raw);
 
   assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.23"/u);
   assert.match(
     raw,
-    /--release-notes "Beta\.23 修复 Agent 版本缓存与安装事务恢复、Profile\/Runtime 绑定、旧 Gateway 接管和 Runtime 稳定更新通道，并保留模型中心修复、macOS Apple 公证与 Windows Authenticode 验证。"/u,
+    /--release-notes "Beta\.23 修复 Agent 版本缓存与安装事务恢复、Profile\/Runtime 绑定、旧 Gateway 接管和 Runtime 稳定更新通道，并保留模型中心修复与 macOS Apple 公证、装订及 Gatekeeper 验证。"/u,
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
@@ -127,18 +134,24 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   assert.doesNotMatch(raw, /--notarization-mode deferred/u);
   assert.match(raw, /node scripts\/release\/verify-macos\.mjs/iu);
   assert.match(raw, /candidate\/evidence\/macos-evidence\.json/u);
-  for (const secret of ["WIN_CSC_LINK", "WIN_CSC_KEY_PASSWORD"]) {
-    assert.match(raw, new RegExp(`secrets\\.${secret}`, "u"));
-  }
-  assert.match(raw, /Package Authenticode-signed Windows artifacts/iu);
-  assert.match(raw, /scripts\/release\/verify-windows\.ps1/iu);
-  assert.match(raw, /-SetupArtifactName/iu);
-  assert.match(raw, /-PortableArtifactName/iu);
-  assert.match(raw, /candidate\/evidence\/windows-evidence\.json/u);
+  assert.match(raw, /Build unsigned Windows x64 internal Beta/u);
+  assert.match(raw, /CSC_IDENTITY_AUTO_DISCOVERY:\s*"false"/u);
+  assert.match(raw, /Package unsigned Windows setup and portable executables/u);
+  assert.doesNotMatch(
+    raw,
+    /secrets\.WIN_CSC_LINK|secrets\.WIN_CSC_KEY_PASSWORD/u,
+  );
+  assert.doesNotMatch(raw, /candidate\/evidence\/windows-evidence\.json/u);
+
+  assert.match(productionRaw, /Build and Authenticode-sign Windows x64/u);
+  assert.match(productionRaw, /secrets\.WIN_CSC_LINK/u);
+  assert.match(productionRaw, /secrets\.WIN_CSC_KEY_PASSWORD/u);
+  assert.match(productionRaw, /scripts\/release\/verify-windows\.ps1/u);
 
   assert.doesNotMatch(raw, /actions\/attest/iu);
   assert.doesNotMatch(raw, /attestations:\s*write/iu);
   assert.doesNotMatch(raw, /\bgh\s+release\b|create[-_ ]tag|refs\/tags/iu);
+  assert.doesNotMatch(raw, /WIN_CSC|signtool/iu);
   assert.doesNotMatch(
     raw,
     /repository:\s*bignormal\/aera-runtime|git\s+clone[\s\S]*aera-runtime/iu,
@@ -177,7 +190,7 @@ test("internal-Beta promotion publishes one verified candidate without rebuildin
   assert.doesNotMatch(raw, /electron-builder|notarytool|cosign sign-blob/iu);
 });
 
-test("internal-Beta overlays preserve fixed package names and strict macOS signing", async () => {
+test("internal-Beta overlays separate unsigned Windows from strict macOS signing", async () => {
   const [raw, macRaw, baseRaw] = await Promise.all([
     readFile(builderPath, "utf8"),
     readFile(macBuilderPath, "utf8"),
@@ -232,7 +245,7 @@ test("internal-Beta overlays preserve fixed package names and strict macOS signi
 });
 
 test(
-  "Windows runner accepts the Authenticode verifier PowerShell syntax",
+  "Windows runner accepts the production Authenticode verifier PowerShell syntax",
   { skip: process.platform !== "win32" },
   async () => {
     await execFileAsync(

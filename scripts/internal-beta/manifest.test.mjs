@@ -46,7 +46,6 @@ async function createFixture(runtimePatch = {}) {
   const packageJson = join(root, "package.json");
   const runtimeLock = join(root, "runtime-lock.json");
   const macosEvidence = join(root, "macos-evidence.json");
-  const windowsEvidence = join(root, "windows-evidence.json");
   const sbom = join(root, "internal-beta.spdx.json");
   const provenance = join(root, "internal-beta.provenance.json");
   await Promise.all([
@@ -146,36 +145,6 @@ async function createFixture(runtimePatch = {}) {
       artifacts: macArtifacts,
     }),
   );
-  const windowsArtifacts = await Promise.all(
-    INTERNAL_BETA_ARTIFACTS.slice(2).map(async (artifact, index) => ({
-      name: artifact.name,
-      platform: artifact.platform,
-      arch: artifact.arch,
-      kind: index === 0 ? "windows_setup" : "windows_portable",
-      ...(await hashArtifact(join(artifactsDirectory, artifact.name))),
-    })),
-  );
-  const windowsManifest = runtimeDocument.assets["windows-x64"].manifest;
-  const windowsManifestDigest = await hashArtifact(
-    join(runtimeManifestsDirectory, windowsManifest),
-  );
-  await writeFile(
-    windowsEvidence,
-    canonicalJSONStringify({
-      arch: "x64",
-      signerSubject: "CN=Aera Test",
-      signerThumbprint: "A".repeat(40),
-      authenticodeVerifiedArtifacts: windowsArtifacts.map(({ name }) => name),
-      timestampVerifiedArtifacts: windowsArtifacts.map(({ name }) => name),
-      runtimeSeedVerifiedArtifacts: windowsArtifacts.map(({ name }) => name),
-      nativeModuleArchitecture: "x64",
-      runtimeSeedManifest: {
-        manifest: windowsManifest,
-        manifestSha256: windowsManifestDigest.sha256,
-      },
-      artifacts: windowsArtifacts,
-    }),
-  );
   await writeFile(
     provenance,
     '{"predicateType":"https://slsa.dev/provenance/v1"}\n',
@@ -199,7 +168,6 @@ async function createFixture(runtimePatch = {}) {
     sourceSha: SOURCE_SHA,
     trustIssuer: ORIGIN,
     version: VERSION,
-    windowsEvidence,
   };
   return { root, options };
 }
@@ -222,14 +190,14 @@ test("builds one canonical internal-Beta manifest with exact identities and hash
     publicKey: PUBLIC_KEY,
   });
   assert.equal(document.schemaVersion, 2);
+  assert.equal(
+    INTERNAL_BETA_SIGNING_STATUS,
+    "macos_developer_id_notarized_windows_unsigned",
+  );
   assert.equal(document.signingStatus, INTERNAL_BETA_SIGNING_STATUS);
   assert.equal(document.supplyChain.macosEvidence.name, "macos-evidence.json");
   assert.match(document.supplyChain.macosEvidence.sha256, /^[0-9a-f]{64}$/u);
-  assert.equal(
-    document.supplyChain.windowsEvidence.name,
-    "windows-evidence.json",
-  );
-  assert.match(document.supplyChain.windowsEvidence.sha256, /^[0-9a-f]{64}$/u);
+  assert.equal(Object.hasOwn(document.supplyChain, "windowsEvidence"), false);
   assert.match(document.runtimeSeed.lockSha256, /^[0-9a-f]{64}$/u);
   assert.equal(document.runtimeSeed.sourceCommit, RUNTIME_SHA);
   assert.equal(document.runtimeSeed.channel, "candidate");
@@ -371,17 +339,6 @@ test("rejects changed macOS signing evidence bytes", async () => {
   );
 });
 
-test("rejects changed Windows Authenticode evidence bytes", async () => {
-  const { options } = await createFixture();
-  const document = await buildInternalBetaManifest(options);
-  await writeFile(options.windowsEvidence, '{"signerThumbprint":"invalid"}');
-
-  await assert.rejects(
-    () => verifyInternalBetaManifestFiles(document, options),
-    /differs|digest|evidence/iu,
-  );
-});
-
 test("rejects semantic macOS evidence that is unsigned or mismatched", async () => {
   for (const mutate of [
     (evidence) => {
@@ -405,35 +362,6 @@ test("rejects semantic macOS evidence that is unsigned or mismatched", async () 
     await assert.rejects(
       () => buildInternalBetaManifest(options),
       /macOS.*(evidence|bytes|Seed|notarization|codesign|Gatekeeper)/u,
-    );
-  }
-});
-
-test("rejects semantic Windows evidence without Authenticode, timestamp, or matching bytes", async () => {
-  for (const mutate of [
-    (evidence) => {
-      evidence.signerThumbprint = "invalid";
-    },
-    (evidence) => {
-      evidence.timestampVerifiedArtifacts.pop();
-    },
-    (evidence) => {
-      evidence.artifacts[0].sha256 = "f".repeat(64);
-    },
-    (evidence) => {
-      evidence.runtimeSeedManifest.manifestSha256 = "e".repeat(64);
-    },
-  ]) {
-    const { options } = await createFixture();
-    const evidence = JSON.parse(
-      await readFile(options.windowsEvidence, "utf8"),
-    );
-    mutate(evidence);
-    await writeFile(options.windowsEvidence, canonicalJSONStringify(evidence));
-
-    await assert.rejects(
-      () => buildInternalBetaManifest(options),
-      /Windows.*(Authenticode|timestamp|evidence|bytes|Seed)/u,
     );
   }
 });

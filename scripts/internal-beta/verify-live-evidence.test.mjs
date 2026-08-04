@@ -130,11 +130,6 @@ async function fixture() {
         sha256: "f".repeat(64),
         size: 10,
       },
-      windowsEvidence: {
-        name: "windows-evidence.json",
-        sha256: "e".repeat(64),
-        size: 10,
-      },
       sbom: {
         name: "internal-beta.spdx.json",
         sha256: "6".repeat(64),

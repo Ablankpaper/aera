@@ -503,7 +503,7 @@ jobs:
           compression-level: 0
 
   windows:
-    name: Build and Authenticode-sign Windows x64 internal Beta
+    name: Build unsigned Windows x64 internal Beta
     needs: validate
     runs-on: windows-2025
     environment: internal-beta
@@ -558,64 +558,47 @@ jobs:
             {"issuer":"${{ vars.AERA_INTERNAL_BETA_ORIGIN }}","keys":[{"keyId":"${{ vars.AERA_INTERNAL_BETA_OFFLINE_KEY_ID }}","publicKey":"${{ vars.AERA_INTERNAL_BETA_OFFLINE_PUBLIC_KEY }}"}]}
         run: npm run build
 
-      - name: Require Authenticode credentials
+      - name: Package unsigned Windows setup and portable executables
         shell: pwsh
         env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK)) {
-            throw "WIN_CSC_LINK is missing"
-          }
-          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_KEY_PASSWORD)) {
-            throw "WIN_CSC_KEY_PASSWORD is missing"
-          }
-
-      - name: Package Authenticode-signed Windows artifacts
-        shell: pwsh
-        env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
           npx electron-builder `
             --config build/electron-builder.internal-beta.yml `
-            --win nsis portable --x64 --publish never `
-            -c.forceCodeSigning=true
+            --win nsis portable --x64 --publish never
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Verify Authenticode, timestamp, x64, and Runtime Seed evidence
+      - name: Verify packaged Runtime Seed and stage immutable bytes
         shell: pwsh
         env:
           VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          $names = @(
-            "Aera-Internal-Beta-$env:VERSION-windows-x64-setup.exe",
-            "Aera-Internal-Beta-$env:VERSION-windows-x64-portable.exe"
-          )
-          $manifests = @(Get-ChildItem resources/agentera-runtime-seed -File -Filter "*.manifest.json")
-          if ($manifests.Count -ne 1) { throw "Expected one Runtime Seed manifest" }
-          $windowsEvidence = Join-Path $env:RUNNER_TEMP "windows-evidence.json"
-          ./scripts/release/verify-windows.ps1 `
-            -DistDirectory "dist" `
-            -RuntimeSeedReference "resources/agentera-runtime-seed" `
-            -RuntimeSeedManifest $manifests[0].FullName `
-            -DesktopVersion $env:VERSION `
-            -Output $windowsEvidence `
-            -SetupArtifactName $names[0] `
-            -PortableArtifactName $names[1]
+          $unpacked = @(Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*unpacked" })
+          if ($unpacked.Count -ne 1) { throw "Expected exactly one unpacked Windows app" }
+          $packagedSeed = Join-Path $unpacked[0].FullName "resources/agentera-runtime-seed"
+          npm run verify:packaged-runtime-seed -- `
+            $packagedSeed `
+            --reference-dir resources/agentera-runtime-seed `
+            --desktop-version $env:VERSION
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $destination = Join-Path $env:RUNNER_TEMP "internal-beta-windows"
           New-Item -ItemType Directory -Force -Path `
             (Join-Path $destination "artifacts"), `
-            (Join-Path $destination "evidence"), `
             (Join-Path $destination "runtime-seed") | Out-Null
+          $names = @(
+            "Aera-Internal-Beta-$env:VERSION-windows-x64-setup.exe",
+            "Aera-Internal-Beta-$env:VERSION-windows-x64-portable.exe"
+          )
           foreach ($name in $names) {
             $source = Join-Path "dist" $name
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+              throw "Missing expected internal-Beta artifact: $name"
+            }
             Copy-Item -LiteralPath $source -Destination (Join-Path $destination "artifacts")
           }
-          Copy-Item -LiteralPath $windowsEvidence -Destination `
-            (Join-Path $destination "evidence/windows-evidence.json")
+          $manifests = @(Get-ChildItem resources/agentera-runtime-seed -File -Filter "*.manifest.json")
+          if ($manifests.Count -ne 1) { throw "Expected one Runtime Seed manifest" }
           Copy-Item $manifests[0].FullName -Destination (Join-Path $destination "runtime-seed")
 
       - name: Upload Windows internal-Beta bytes
@@ -703,9 +686,6 @@ jobs:
           test -f "$RUNNER_TEMP/internal-beta-macos/evidence/macos-evidence.json"
           cp "$RUNNER_TEMP/internal-beta-macos/evidence/macos-evidence.json" \
             candidate/evidence/
-          test -f "$RUNNER_TEMP/internal-beta-windows/evidence/windows-evidence.json"
-          cp "$RUNNER_TEMP/internal-beta-windows/evidence/windows-evidence.json" \
-            candidate/evidence/
           cp build/agentera-runtime-seed.lock.json \
             candidate/evidence/agentera-runtime-seed.lock.json
 
@@ -765,7 +745,7 @@ jobs:
             --manifest candidate/desktop-update/manifest.json \
             --private-key-env DESKTOP_UPDATE_SIGNING_PRIVATE_KEY \
             --published-at "$CREATED_AT" \
-            --release-notes "Beta.23 修复 Agent 版本缓存与安装事务恢复、Profile/Runtime 绑定、旧 Gateway 接管和 Runtime 稳定更新通道，并保留模型中心修复、macOS Apple 公证与 Windows Authenticode 验证。" \
+            --release-notes "Beta.23 修复 Agent 版本缓存与安装事务恢复、Profile/Runtime 绑定、旧 Gateway 接管和 Runtime 稳定更新通道，并保留模型中心修复与 macOS Apple 公证、装订及 Gatekeeper 验证。" \
             --signature candidate/desktop-update/manifest.sig \
             --version "$VERSION"
           node scripts/internal-beta/desktop-update.mjs verify \
@@ -806,7 +786,6 @@ jobs:
             --source-sha "$SOURCE_SHA"
             --trust-issuer "$BETA_ORIGIN"
             --version "$VERSION"
-            --windows-evidence candidate/evidence/windows-evidence.json
           )
           node scripts/internal-beta/manifest.mjs build \
             "${common_args[@]}" \

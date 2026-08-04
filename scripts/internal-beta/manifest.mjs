@@ -16,7 +16,7 @@ export { canonicalJSONStringify };
 
 export const INTERNAL_BETA_VERSION = "0.7.4-internal-beta.23";
 export const INTERNAL_BETA_SIGNING_STATUS =
-  "macos_developer_id_notarized_windows_authenticode";
+  "macos_developer_id_notarized_windows_unsigned";
 export const INTERNAL_BETA_RUNTIME_SOURCE_SHA =
   "dcb0f0bc6a0e2d18c55beedc6517dbc41d8b01e0";
 export const INTERNAL_BETA_WORKFLOW_IDENTITY =
@@ -59,7 +59,6 @@ const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/u;
 const ISO_SECONDS_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const CERTIFICATE_THUMBPRINT_PATTERN = /^[0-9A-F]{40}$/u;
 
 const TOP_LEVEL_KEYS = [
   "artifacts",
@@ -103,7 +102,6 @@ const SUPPLY_CHAIN_KEYS = [
   "provenanceBundle",
   "sbom",
   "signerIdentity",
-  "windowsEvidence",
 ];
 const SUPPLY_FILE_KEYS = ["name", "sha256", "size"];
 const RUNTIME_LOCK_KEYS = [
@@ -139,19 +137,6 @@ const MACOS_EVIDENCE_KEYS = [
 const MACOS_NOTARIZATION_KEYS = ["artifact", "id", "status"];
 const MACOS_RUNTIME_MANIFEST_KEYS = ["manifest", "manifestSha256"];
 const MACOS_ARTIFACT_KEYS = [...ARTIFACT_KEYS, "sha512"];
-const WINDOWS_EVIDENCE_KEYS = [
-  "arch",
-  "artifacts",
-  "authenticodeVerifiedArtifacts",
-  "nativeModuleArchitecture",
-  "runtimeSeedManifest",
-  "runtimeSeedVerifiedArtifacts",
-  "signerSubject",
-  "signerThumbprint",
-  "timestampVerifiedArtifacts",
-];
-const WINDOWS_RUNTIME_MANIFEST_KEYS = ["manifest", "manifestSha256"];
-const WINDOWS_ARTIFACT_KEYS = [...ARTIFACT_KEYS, "sha512"];
 
 function exactObject(value, expectedKeys, label) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -457,88 +442,6 @@ function validateMacosEvidence(
   return evidence;
 }
 
-function validateWindowsEvidence(
-  evidence,
-  artifacts,
-  artifactDigests,
-  runtimeTargets,
-) {
-  exactObject(evidence, WINDOWS_EVIDENCE_KEYS, "Windows signing evidence");
-  if (evidence.arch !== "x64" || evidence.nativeModuleArchitecture !== "x64") {
-    throw new Error("Windows signing evidence architecture is invalid");
-  }
-  requiredString(evidence.signerSubject, "Windows Authenticode signer");
-  if (!CERTIFICATE_THUMBPRINT_PATTERN.test(evidence.signerThumbprint ?? "")) {
-    throw new Error("Windows Authenticode signer evidence is invalid");
-  }
-
-  const windowsArtifacts = artifacts.filter(
-    ({ platform }) => platform === "windows",
-  );
-  const requiredNames = windowsArtifacts.map(({ name }) => name);
-  for (const [field, label] of [
-    ["authenticodeVerifiedArtifacts", "Authenticode"],
-    ["timestampVerifiedArtifacts", "timestamp"],
-    ["runtimeSeedVerifiedArtifacts", "Runtime Seed"],
-  ]) {
-    const actual = evidence[field];
-    if (
-      !Array.isArray(actual) ||
-      actual.length !== requiredNames.length ||
-      actual.some((name, index) => name !== requiredNames[index])
-    ) {
-      throw new Error(`Windows ${label} evidence is incomplete`);
-    }
-  }
-
-  if (
-    !Array.isArray(evidence.artifacts) ||
-    evidence.artifacts.length !== windowsArtifacts.length
-  ) {
-    throw new Error("Windows artifact signing evidence is incomplete");
-  }
-  const expectedEvidenceKinds = ["windows_setup", "windows_portable"];
-  for (let index = 0; index < windowsArtifacts.length; index += 1) {
-    const actual = exactObject(
-      evidence.artifacts[index],
-      WINDOWS_ARTIFACT_KEYS,
-      `Windows signing artifact ${index}`,
-    );
-    const expected = windowsArtifacts[index];
-    const digest = artifactDigests.get(expected.name);
-    if (
-      actual.name !== expected.name ||
-      actual.platform !== expected.platform ||
-      actual.arch !== expected.arch ||
-      actual.kind !== expectedEvidenceKinds[index] ||
-      actual.sha256 !== expected.sha256 ||
-      actual.size !== expected.size ||
-      !SHA512_PATTERN.test(actual.sha512 ?? "") ||
-      actual.sha512 !== digest?.sha512
-    ) {
-      throw new Error("Windows signing evidence differs from candidate bytes");
-    }
-  }
-
-  const runtimeManifest = exactObject(
-    evidence.runtimeSeedManifest,
-    WINDOWS_RUNTIME_MANIFEST_KEYS,
-    "Windows Runtime Seed manifest evidence",
-  );
-  const windowsTarget = runtimeTargets.find(
-    ({ platform, arch }) => platform === "windows" && arch === "x64",
-  );
-  if (
-    runtimeManifest.manifest !== windowsTarget?.manifest ||
-    runtimeManifest.manifestSha256 !== windowsTarget?.manifestSha256
-  ) {
-    throw new Error(
-      "Windows Runtime Seed manifest evidence differs from Seed bytes",
-    );
-  }
-  return evidence;
-}
-
 export function validateInternalBetaManifest(document) {
   exactObject(document, TOP_LEVEL_KEYS, "Internal Beta manifest");
   if (
@@ -662,11 +565,6 @@ export function validateInternalBetaManifest(document) {
     "macOS signing evidence",
   );
   validateSupplyFile(
-    document.supplyChain.windowsEvidence,
-    "windows-evidence.json",
-    "Windows signing evidence",
-  );
-  validateSupplyFile(
     document.supplyChain.sbom,
     "internal-beta.spdx.json",
     "Internal Beta SBOM",
@@ -752,25 +650,13 @@ export async function buildInternalBetaManifest(options) {
     artifactDigests,
     runtimeTargets,
   );
-  validateWindowsEvidence(
-    await readJson(options.windowsEvidence, "Windows signing evidence"),
-    artifacts,
-    artifactDigests,
-    runtimeTargets,
-  );
-  const [
-    runtimeLockDigest,
-    macosEvidenceDigest,
-    windowsEvidenceDigest,
-    sbomDigest,
-    provenanceDigest,
-  ] = await Promise.all([
-    hashArtifact(options.runtimeLock),
-    hashArtifact(options.macosEvidence),
-    hashArtifact(options.windowsEvidence),
-    hashArtifact(options.sbom),
-    hashArtifact(options.provenance),
-  ]);
+  const [runtimeLockDigest, macosEvidenceDigest, sbomDigest, provenanceDigest] =
+    await Promise.all([
+      hashArtifact(options.runtimeLock),
+      hashArtifact(options.macosEvidence),
+      hashArtifact(options.sbom),
+      hashArtifact(options.provenance),
+    ]);
 
   const document = {
     schemaVersion: 2,
@@ -805,11 +691,6 @@ export async function buildInternalBetaManifest(options) {
         name: "macos-evidence.json",
         sha256: macosEvidenceDigest.sha256,
         size: macosEvidenceDigest.size,
-      },
-      windowsEvidence: {
-        name: "windows-evidence.json",
-        sha256: windowsEvidenceDigest.sha256,
-        size: windowsEvidenceDigest.size,
       },
       sbom: {
         name: "internal-beta.spdx.json",
@@ -950,7 +831,6 @@ function buildOptions(values) {
     sourceSha: values.source_sha,
     trustIssuer: values.trust_issuer,
     version: values.version,
-    windowsEvidence: values.windows_evidence,
   };
 }
 
