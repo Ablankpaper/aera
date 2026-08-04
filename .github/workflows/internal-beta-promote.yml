@@ -138,8 +138,7 @@ jobs:
             VERSION="$VERSION" \
             node --input-type=module <<'NODE'
           import { readFile } from "node:fs/promises";
-          import { parseAndValidateInternalBetaManifest } from \
-            "./scripts/internal-beta/manifest.mjs";
+          import { parseAndValidateInternalBetaManifest } from "./scripts/internal-beta/manifest.mjs";
 
           const document = parseAndValidateInternalBetaManifest(
             await readFile(process.env.CANDIDATE_MANIFEST, "utf8"),

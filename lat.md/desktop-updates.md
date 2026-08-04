@@ -41,6 +41,7 @@ The release contract covers signed metadata, exact artifact bytes, persisted sta
 - A macOS swap without a healthy-start marker restores the previous application.
 - Script and application trust roots must remain byte-identical.
 - Server publication is atomic and idempotent only for the exact same signed bytes.
+- Promotion workflow inline Node modules must pass a real syntax check before publication can be accepted.
 - Login/render timing cannot hide an already available or downloaded update.
 - macOS extraction writes the staged `app.asar` with Electron ASAR interception disabled and restores the previous process setting after success or failure.
 - Packaged `app.asar` is produced from an explicit application allowlist and excludes local source, tests, worktrees, caches, evidence, and build output.

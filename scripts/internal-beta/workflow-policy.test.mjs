@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -188,6 +188,31 @@ test("internal-Beta promotion publishes one verified candidate without rebuildin
   assert.match(raw, /cmp candidate\/desktop-update\/manifest\.json/u);
   assert.doesNotMatch(raw, /desktop-update\.mjs build/u);
   assert.doesNotMatch(raw, /electron-builder|notarytool|cosign sign-blob/iu);
+});
+
+test("internal-Beta promotion inline Node modules parse before publication", async () => {
+  const raw = await readFile(promotionWorkflowPath, "utf8");
+  const workflow = parseYAML(raw);
+  const modules = workflow.jobs.promote.steps.flatMap((step) =>
+    [
+      ...(step.run ?? "").matchAll(
+        /node --input-type=module <<'NODE'\n([\s\S]*?)\nNODE/gu,
+      ),
+    ].map((match) => match[1]),
+  );
+
+  assert.equal(modules.length, 2);
+  for (const module of modules) {
+    const result = spawnSync(
+      process.execPath,
+      ["--check", "--input-type=module"],
+      {
+        encoding: "utf8",
+        input: module,
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+  }
 });
 
 test("internal-Beta overlays separate unsigned Windows from strict macOS signing", async () => {
