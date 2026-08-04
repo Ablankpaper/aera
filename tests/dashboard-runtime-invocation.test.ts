@@ -7,6 +7,7 @@ const {
   TEST_HOME,
   TEST_RUNTIME,
   httpRequestSpy,
+  killProcessTreeSpy,
   spawnSpy,
   modelConfig,
   profileEnv,
@@ -21,6 +22,7 @@ const {
   const { EventEmitter } = require("events");
   const home = path.join(os.tmpdir(), `dashboard-runtime-${Date.now()}`);
   const runtime = path.join(home, "runtime");
+  const killProcessTreeSpy = vi.fn();
 
   const spawnSpy = vi.fn(() => {
     const proc = new EventEmitter();
@@ -70,6 +72,7 @@ const {
     TEST_HOME: home,
     TEST_RUNTIME: runtime,
     httpRequestSpy,
+    killProcessTreeSpy,
     spawnSpy,
     modelConfig: {
       provider: "auto",
@@ -93,6 +96,10 @@ const {
 vi.mock("child_process", () => ({
   spawn: spawnSpy,
   default: { spawn: spawnSpy },
+}));
+
+vi.mock("../src/main/process-tree", () => ({
+  killProcessTree: killProcessTreeSpy,
 }));
 
 vi.mock("http", () => ({
@@ -183,6 +190,7 @@ describe("Dashboard Runtime invocation", () => {
   beforeEach(() => {
     spawnSpy.mockClear();
     httpRequestSpy.mockClear();
+    killProcessTreeSpy.mockClear();
     modelConfig.provider = "auto";
     modelConfig.model = "";
     modelConfig.baseUrl = "";
@@ -221,6 +229,20 @@ describe("Dashboard Runtime invocation", () => {
         }),
       }),
     );
+  });
+
+  it("does not signal a host process while disposing the mocked Runtime", async () => {
+    const processKillSpy = vi.spyOn(process, "kill").mockReturnValue(true);
+    try {
+      const result = await startDashboard("work");
+
+      expect(result.running).toBe(true);
+      stopAllDashboards();
+      expect(killProcessTreeSpy).toHaveBeenCalledOnce();
+      expect(processKillSpy).not.toHaveBeenCalled();
+    } finally {
+      processKillSpy.mockRestore();
+    }
   });
 
   it("bridges the active named custom-provider key into the Dashboard Runtime host slot", async () => {
