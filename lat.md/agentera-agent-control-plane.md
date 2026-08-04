@@ -246,11 +246,23 @@ Installation activation is fail-closed until model projection succeeds. A pendin
 
 Fresh Installation materialization reserves the exact local Profile ID and opaque Runtime Profile ID under the stable Agent Installation ID before Hermes creates any Profile bytes. If creation is interrupted, the next attempt reads that encrypted reservation and adopts only the same Owner's safe scaffold; it never chooses a suffixed replacement or claims private or foreign data.
 
+### Atomic fresh Profile allocation
+
+Creation-intent persistence uses one immediate SQLite transaction and excludes fresh Profile IDs held by pending intents or Installation journals, so concurrent same-name installs persist distinct IDs before Cloud work begins.
+
+#### Pending intent exclusion
+
+Two same-name creation intents that overlap before either Cloud response persist different Profile IDs while keeping each original idempotency key stable.
+
+#### Operation handoff exclusion
+
+After an intent becomes a prepared Installation journal but before Profile bytes exist, its reserved Profile ID remains unavailable to later same-name creation intents.
+
 Desktop schema v9 adds the narrow `installation_operations` journal. It stores only the exact Owner/device/Installation and bounded target/model identifiers, opaque Runtime Profile ID, phase, retry code, CAS revision, and timestamps; it contains no physical path, credential, token, Profile bytes, or Cloud body. Phases advance in order from `prepared` through `committed`, while ambiguous ownership can become terminal `repair_required`; stale revisions and cross-Owner reads fail closed.
 
 Before the Cloud create request, `pending_sanitized_records` durably stores the stable idempotency key and a bounded Profile target with no physical path or credential. A cold restart replays that exact create key, verifies the returned pending Installation and policy, persists the local row and journal before deleting the intent, then resumes materialization.
 
-Materialization rechecks each durable postcondition and serializes concurrent work by Agent Installation. The local Runtime Profile ID and `profile_bound` phase share one SQLite transaction; Cloud activation uses one stable key; the local active row and `committed` phase share another transaction. Profile attachment and projection are idempotently verified between those edges.
+Materialization rechecks each durable postcondition and serializes concurrent work by Agent Installation. The local Runtime Profile ID and `profile_bound` phase share one SQLite transaction; Cloud activation uses one stable key; the local active row and `committed` phase share another transaction. Fresh reservation completion and Profile activation must succeed before that final transaction, so either failure remains recoverable at `cloud_activated`. Profile attachment and projection are idempotently verified between those edges.
 
 Foreign ownership, immutable reservation drift, Runtime Profile ID collision, and unexpected private fresh-Profile markers become `repair_required` with bounded stable codes. Recovery never deletes, reassigns, or retries those Profiles. [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#notifyAccessStateChanged]] schedules one reconciliation flight per Owner/Runtime only for authenticated online local access; offline, signed-out, Remote, and SSH states do not start Cloud recovery.
 
@@ -261,6 +273,14 @@ A structurally orphaned journal operation whose Installation is missing becomes 
 #### Legacy creation intent migration
 
 A Beta.21 creation intent without `profile_target` is replayed with its original idempotency key into a profile-less pending Installation, then awaits explicit same-owner Profile selection instead of guessing or being skipped.
+
+#### Fresh reservation finalization recovery
+
+If fresh Profile reservation completion fails after Cloud activation, the local Installation remains pending at `cloud_activated`; cold restart retries finalization without repeating Cloud activation.
+
+#### Fresh Profile activation recovery
+
+If local Profile activation fails after its reservation is completed, the same `cloud_activated` journal resumes activation on cold restart before committing the local Installation.
 
 Manual selection downloads and verifies the immutable version, calls the cloud selection transaction, retrieves the newly signed policy through `GET /api/v1/policy-snapshots/{policy_snapshot_id}`, and only then atomically activates the read-only projection for later conversations. A missing or invalid policy leaves the last local version selected.
 

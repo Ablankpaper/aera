@@ -2533,6 +2533,14 @@ export class AgentInstallationManager {
         });
       }
       if (operation.phase === "cloud_activated") {
+        if (target.kind === "fresh") {
+          this.profileBindings.completeFreshProfileReservation(
+            operation.operationId,
+            this.owner,
+            binding.runtimeProfileId,
+          );
+          this.profiles.activateProfile(operation.profileId);
+        }
         this.database.sqlite.exec("BEGIN IMMEDIATE");
         try {
           const updated = this.database.sqlite
@@ -2577,24 +2585,7 @@ export class AgentInstallationManager {
       this.recordFailure(local.agentInstallationId, "activation_failed");
       throw new AgentInstallationManagerError("activation_failed");
     }
-    const result = this.getLocalInstallation(local.agentInstallationId);
-    if (target.kind === "fresh" && result.runtimeProfileId !== null) {
-      try {
-        this.profileBindings.completeFreshProfileReservation(
-          operation.operationId,
-          this.owner,
-          result.runtimeProfileId,
-        );
-      } catch (error) {
-        reportStageFailure("fresh-profile-reservation-completion", error);
-      }
-      try {
-        this.profiles.activateProfile(operation.profileId);
-      } catch (error) {
-        reportStageFailure("fresh-profile-activation", error);
-      }
-    }
-    return result;
+    return this.getLocalInstallation(local.agentInstallationId);
   }
 
   private async rollbackVerifiedRestore(input: {
@@ -2891,6 +2882,7 @@ export class AgentInstallationManager {
 
   private normalizeCreationProfileTarget(
     target: AgentInstallationProfileTarget,
+    unavailableFreshProfileIds: ReadonlySet<string> = new Set(),
   ): InstallationOperationTarget {
     if (target.kind === "claim") {
       const profileId = creationProfileId(
@@ -2925,10 +2917,22 @@ export class AgentInstallationManager {
     if (modelSourceModelId !== null && modelSourceProfileId === null) {
       throw new AgentInstallationManagerError("invalid_installation_request");
     }
-    const profileId = creationProfileId(
-      this.profiles.profileIdForAgentName(displayName),
-      "invalid_installation_request",
-    );
+    let profileId: string | null = null;
+    for (let candidateIndex = 1; candidateIndex < 1_000; candidateIndex += 1) {
+      const candidateName =
+        candidateIndex === 1 ? displayName : `${displayName} ${candidateIndex}`;
+      const candidate = creationProfileId(
+        this.profiles.profileIdForAgentName(candidateName),
+        "invalid_installation_request",
+      );
+      if (!unavailableFreshProfileIds.has(candidate)) {
+        profileId = candidate;
+        break;
+      }
+    }
+    if (profileId === null) {
+      throw new AgentInstallationManagerError("installation_conflict");
+    }
     return {
       kind: "fresh",
       profileId,
@@ -3094,6 +3098,32 @@ export class AgentInstallationManager {
     source: NormalizedInstallationSource,
     target: AgentInstallationProfileTarget | null,
   ): InstallationCreationIntent {
+    this.database.sqlite.exec("BEGIN IMMEDIATE");
+    try {
+      const intent = this.beginCreationIntentInTransaction(
+        definitionId,
+        versionId,
+        source,
+        target,
+      );
+      this.database.sqlite.exec("COMMIT");
+      return intent;
+    } catch (error) {
+      try {
+        this.database.sqlite.exec("ROLLBACK");
+      } catch {
+        // Preserve the creation-intent allocation failure.
+      }
+      throw error;
+    }
+  }
+
+  private beginCreationIntentInTransaction(
+    definitionId: string,
+    versionId: string,
+    source: NormalizedInstallationSource,
+    target: AgentInstallationProfileTarget | null,
+  ): InstallationCreationIntent {
     const rows = this.database.sqlite
       .prepare(
         `SELECT id, payload_json
@@ -3107,6 +3137,27 @@ export class AgentInstallationManager {
         this.owner.ownerId,
         this.owner.deviceInstallationId,
       ) as Array<{ id?: unknown; payload_json?: unknown }>;
+    const unavailableFreshProfileIds = new Set<string>();
+    const operationRows = this.database.sqlite
+      .prepare(
+        `SELECT target_profile_id
+         FROM installation_operations
+         WHERE tenant_id = ? AND owner_id = ? AND device_installation_id = ?
+           AND target_kind = 'fresh'`,
+      )
+      .all(
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+      ) as Array<{ target_profile_id?: unknown }>;
+    for (const operationRow of operationRows) {
+      unavailableFreshProfileIds.add(
+        creationProfileId(
+          operationRow.target_profile_id,
+          "installation_conflict",
+        ),
+      );
+    }
     const matches: InstallationCreationIntent[] = [];
     for (const row of rows) {
       if (typeof row.id !== "string" || typeof row.payload_json !== "string") {
@@ -3125,6 +3176,9 @@ export class AgentInstallationManager {
       const storedTarget = Object.hasOwn(record, "profile_target")
         ? parseCreationProfileTarget(record.profile_target)
         : null;
+      if (storedTarget?.kind === "fresh") {
+        unavailableFreshProfileIds.add(storedTarget.profileId);
+      }
       const keys = Object.keys(record)
         .filter((key) => key !== "profile_target")
         .sort()
@@ -3281,7 +3335,10 @@ export class AgentInstallationManager {
     if (matches.length === 1) {
       const existing = matches[0];
       if (existing.profileTarget !== null || target === null) return existing;
-      const requestedTarget = this.normalizeCreationProfileTarget(target);
+      const requestedTarget = this.normalizeCreationProfileTarget(
+        target,
+        unavailableFreshProfileIds,
+      );
       const upgraded = { ...existing, profileTarget: requestedTarget };
       this.database.sqlite
         .prepare(
@@ -3305,7 +3362,10 @@ export class AgentInstallationManager {
     if (target === null) {
       throw new AgentInstallationManagerError("installation_conflict");
     }
-    const requestedTarget = this.normalizeCreationProfileTarget(target);
+    const requestedTarget = this.normalizeCreationProfileTarget(
+      target,
+      unavailableFreshProfileIds,
+    );
     const id = uuid(this.randomUUID());
     const createdAt = timestamp(this.now);
     const created: InstallationCreationIntent = {

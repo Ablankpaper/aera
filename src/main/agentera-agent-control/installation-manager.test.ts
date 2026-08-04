@@ -63,6 +63,9 @@ const MISSING_AGENT_INSTALLATION_ID = "20202020-2020-4020-8020-202020202020";
 const POLICY_ID = "44444444-4444-4444-8444-444444444444";
 const RUNTIME_PROFILE_ID = "55555555-5555-4555-8555-555555555555";
 const OPERATION_ID = "66666666-6666-4666-8666-666666666666";
+const SECOND_DEFINITION_ID = "21212121-2121-4121-8121-212121212121";
+const SECOND_VERSION_ID = "23232323-2323-4323-8323-232323232323";
+const SECOND_OPERATION_ID = "24242424-2424-4424-8424-242424242424";
 const VERSION_2_ID = "77777777-7777-4777-8777-777777777777";
 const POLICY_2_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const POLICY_3_ID = "15151515-1515-4515-8515-151515151515";
@@ -495,7 +498,10 @@ describe("Agent installation orchestration", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  function manager(ownerOverride = owner): AgentInstallationManager {
+  function manager(
+    ownerOverride = owner,
+    randomUUID: () => string = () => OPERATION_ID,
+  ): AgentInstallationManager {
     return new AgentInstallationManager({
       database,
       client,
@@ -507,7 +513,7 @@ describe("Agent installation orchestration", () => {
       owner: ownerOverride,
       runtimeVersion: "v0.18.2-agentera.1",
       now: () => NOW,
-      randomUUID: () => OPERATION_ID,
+      randomUUID,
     });
   }
 
@@ -614,6 +620,125 @@ describe("Agent installation orchestration", () => {
       agentInstallationId: AGENT_INSTALLATION_ID,
       runtimeProfileId: RUNTIME_PROFILE_ID,
     });
+  });
+
+  // @lat: [[lat.md/agentera-agent-control-plane#Installation and binding#Installation reconciliation isolation#Fresh reservation finalization recovery]]
+  it("cold-restarts finalization when fresh Profile reservation completion fails", async () => {
+    vi.spyOn(
+      bindings,
+      "completeFreshProfileReservation",
+    ).mockImplementationOnce(() => {
+      throw new Error("injected reservation completion failure");
+    });
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "activation_failed" });
+
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT phase FROM installation_operations
+           WHERE operation_id = ?`,
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({ phase: "cloud_activated" });
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT status, retry_code FROM local_agent_installations
+           WHERE agent_installation_id = ?`,
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({ status: "pending", retry_code: "activation_failed" });
+    expect(
+      bindings.getFreshProfileReservation(AGENT_INSTALLATION_ID, owner),
+    ).not.toBeNull();
+    expect(events).not.toContain("profile:activate:fresh-agent");
+
+    await expect(
+      coldRestartManager().reconcilePendingInstallations(),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        agentInstallationId: AGENT_INSTALLATION_ID,
+        status: "active",
+      }),
+    ]);
+    expect(activateInstallation).toHaveBeenCalledOnce();
+    expect(
+      bindings.getFreshProfileReservation(AGENT_INSTALLATION_ID, owner),
+    ).toBeNull();
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT phase FROM installation_operations
+           WHERE operation_id = ?`,
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({ phase: "committed" });
+  });
+
+  // @lat: [[lat.md/agentera-agent-control-plane#Installation and binding#Installation reconciliation isolation#Fresh Profile activation recovery]]
+  it("cold-restarts finalization when fresh Profile activation fails", async () => {
+    const activateProfile = vi
+      .fn<AgentInstallationProfileAdapter["activateProfile"]>()
+      .mockImplementationOnce((id) => {
+        events.push(`profile:activate:${id}:failed`);
+        throw new Error("injected Profile activation failure");
+      })
+      .mockImplementation((id) => events.push(`profile:activate:${id}`));
+    profiles.activateProfile = activateProfile;
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "activation_failed" });
+
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT phase FROM installation_operations
+           WHERE operation_id = ?`,
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({ phase: "cloud_activated" });
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT status, retry_code FROM local_agent_installations
+           WHERE agent_installation_id = ?`,
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({ status: "pending", retry_code: "activation_failed" });
+    expect(
+      bindings.getFreshProfileReservation(AGENT_INSTALLATION_ID, owner),
+    ).toBeNull();
+
+    await expect(
+      coldRestartManager().reconcilePendingInstallations(),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        agentInstallationId: AGENT_INSTALLATION_ID,
+        status: "active",
+      }),
+    ]);
+    expect(activateInstallation).toHaveBeenCalledOnce();
+    expect(activateProfile).toHaveBeenCalledTimes(2);
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT phase FROM installation_operations
+           WHERE operation_id = ?`,
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({ phase: "committed" });
   });
 
   it("recovers a reserved Profile after creation is interrupted and Desktop cold-restarts", async () => {
@@ -1877,6 +2002,137 @@ describe("Agent installation orchestration", () => {
         )
         .get(),
     ).toEqual({ count: 0 });
+  });
+
+  // @lat: [[lat.md/agentera-agent-control-plane#Installation and binding#Atomic fresh Profile allocation#Pending intent exclusion]]
+  it("atomically allocates distinct Profile IDs for concurrent same-name creation intents", async () => {
+    const rejectCreations: Array<(reason?: unknown) => void> = [];
+    profileIdForAgentName.mockImplementation((name) =>
+      name === "Fresh Agent 2" ? "fresh-agent-2" : "fresh-agent",
+    );
+    createInstallation.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectCreations.push(reject);
+        }),
+    );
+
+    const first = manager(owner, () => OPERATION_ID).install({
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      profile: { kind: "fresh", name: "Fresh Agent" },
+    });
+    const second = manager(owner, () => SECOND_OPERATION_ID).install({
+      definitionId: SECOND_DEFINITION_ID,
+      versionId: SECOND_VERSION_ID,
+      profile: { kind: "fresh", name: "Fresh Agent" },
+    });
+    const settled = Promise.allSettled([first, second]);
+
+    expect(rejectCreations).toHaveLength(2);
+    const profileIds = (
+      database.sqlite
+        .prepare(
+          `SELECT payload_json FROM pending_sanitized_records
+           WHERE record_type = 'agent_installation_create'`,
+        )
+        .all() as Array<{ payload_json: string }>
+    )
+      .map((row) => {
+        const payload = JSON.parse(row.payload_json) as {
+          profile_target: { profile_id: string };
+        };
+        return payload.profile_target.profile_id;
+      })
+      .sort();
+
+    for (const reject of rejectCreations) {
+      reject(new Error("injected concurrent creation pause"));
+    }
+    expect(await settled).toEqual([
+      expect.objectContaining({
+        status: "rejected",
+        reason: expect.objectContaining({ code: "creation_failed" }),
+      }),
+      expect.objectContaining({
+        status: "rejected",
+        reason: expect.objectContaining({ code: "creation_failed" }),
+      }),
+    ]);
+    expect(profileIds).toEqual(["fresh-agent", "fresh-agent-2"]);
+  });
+
+  // @lat: [[lat.md/agentera-agent-control-plane#Installation and binding#Atomic fresh Profile allocation#Operation handoff exclusion]]
+  it("keeps an operation-reserved Profile ID unavailable to a concurrent same-name intent", async () => {
+    const rejectVersions: Array<(reason?: unknown) => void> = [];
+    profileIdForAgentName.mockImplementation((name) =>
+      name === "Fresh Agent 2" ? "fresh-agent-2" : "fresh-agent",
+    );
+    getVersion.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectVersions.push(reject);
+        }),
+    );
+
+    const first = manager(owner, () => OPERATION_ID).install({
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      profile: { kind: "fresh", name: "Fresh Agent" },
+    });
+    await vi.waitFor(() => expect(rejectVersions).toHaveLength(1));
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT target_profile_id, phase FROM installation_operations
+           WHERE operation_id = ?`,
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({ target_profile_id: "fresh-agent", phase: "prepared" });
+
+    const rejectCreations: Array<(reason?: unknown) => void> = [];
+    createInstallation.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectCreations.push(reject);
+        }),
+    );
+    const second = manager(owner, () => SECOND_OPERATION_ID).install({
+      definitionId: SECOND_DEFINITION_ID,
+      versionId: SECOND_VERSION_ID,
+      profile: { kind: "fresh", name: "Fresh Agent" },
+    });
+    const settled = Promise.allSettled([first, second]);
+    expect(rejectCreations).toHaveLength(1);
+    const pendingIntent = database.sqlite
+      .prepare(
+        `SELECT payload_json FROM pending_sanitized_records
+         WHERE record_type = 'agent_installation_create'`,
+      )
+      .get() as { payload_json: string };
+    const profileId = (
+      JSON.parse(pendingIntent.payload_json) as {
+        profile_target: { profile_id: string };
+      }
+    ).profile_target.profile_id;
+
+    for (const reject of rejectVersions) {
+      reject(new Error("injected materialization pause"));
+    }
+    for (const reject of rejectCreations) {
+      reject(new Error("injected concurrent creation pause"));
+    }
+    expect(await settled).toEqual([
+      expect.objectContaining({
+        status: "rejected",
+        reason: expect.objectContaining({ code: "materialization_failed" }),
+      }),
+      expect.objectContaining({
+        status: "rejected",
+        reason: expect.objectContaining({ code: "creation_failed" }),
+      }),
+    ]);
+    expect(profileId).toBe("fresh-agent-2");
   });
 
   it("cold-restarts after Cloud creation succeeds before the local Installation journal", async () => {
