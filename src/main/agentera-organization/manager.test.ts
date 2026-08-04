@@ -64,7 +64,10 @@ const managers: AgenteraOrganizationManager[] = [];
 const managerDatabaseLifecycleTestTimeoutMs =
   process.platform === "win32" ? 30_000 : 5_000;
 
-function test(name: string, run: () => Promise<void>): void {
+function itWithDatabaseLifecycleTimeout(
+  name: string,
+  run: () => Promise<void>,
+): void {
   it(name, run, managerDatabaseLifecycleTestTimeoutMs);
 }
 
@@ -733,7 +736,8 @@ describe("AgenteraOrganizationManager", () => {
     ).toBeNull();
   });
 
-  test("applies the complete online lifecycle to safe local projections", async () => {
+  // prettier-ignore
+  itWithDatabaseLifecycleTimeout("applies the complete online lifecycle to safe local projections", async () => {
     const database = databaseFor();
     database.replaceOrganizations(
       ACCOUNT_A,
@@ -837,7 +841,8 @@ describe("AgenteraOrganizationManager", () => {
     expect(database.readOrganizations(ACCOUNT_A).organizations).toEqual([]);
   });
 
-  test("accepts an invitation without persisting its raw token", async () => {
+  // prettier-ignore
+  itWithDatabaseLifecycleTimeout("accepts an invitation without persisting its raw token", async () => {
     const database = databaseFor();
     const client = cloudClient();
     const manager = managerFor({
