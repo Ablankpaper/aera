@@ -1,9 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { mkdir, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import {
@@ -31,6 +31,10 @@ const PROVIDER_ENV_KEY = customProviderEnvKey(PROVIDER_NAME);
 interface TextMetrics {
   sha256: string;
   utf8Bytes: number;
+}
+
+interface StateDbMetrics extends TextMetrics {
+  sessionId: string;
 }
 
 interface CompletionMetrics {
@@ -73,12 +77,41 @@ function command(
     encoding: "utf8",
     stdio: "pipe",
   });
+  if (result.error) {
+    throw new Error(`${executable} could not be started.`);
+  }
+  if (result.signal) {
+    throw new Error(`${executable} was terminated by ${result.signal}.`);
+  }
+  if (result.status === null) {
+    throw new Error(`${executable} completed without an exit status.`);
+  }
   if (result.status !== 0) {
-    throw new Error(
-      `${executable} failed with exit ${String(result.status)}: ${result.stderr.trim()}`,
-    );
+    throw new Error(`${executable} failed with exit ${String(result.status)}.`);
   }
   return result.stdout.trim();
+}
+
+function requiredEnvironment(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name} is required.`);
+  return value;
+}
+
+function requiredAbsolutePathEnvironment(name: string): string {
+  const value = requiredEnvironment(name);
+  if (!isAbsolute(value) || value.includes("\0")) {
+    throw new Error(`${name} must be an absolute path.`);
+  }
+  return resolve(value);
+}
+
+function requiredShaEnvironment(name: string): string {
+  const value = requiredEnvironment(name);
+  if (!/^[0-9a-f]{40}$/u.test(value)) {
+    throw new Error(`${name} must be a lowercase 40-character Git SHA.`);
+  }
+  return value;
 }
 
 function cloneDirectory(source: string, destination: string): void {
@@ -115,7 +148,7 @@ async function prepareExternalRuntime(
     `${runtimeSha}^{commit}`,
   ]);
 
-  const runtimeRoot = join(harness.hermesHome, "hermes-agent");
+  const runtimeRoot = isolatedRuntimeRoot(harness);
   command("git", [
     "clone",
     "--shared",
@@ -357,47 +390,140 @@ async function visibleMetrics(page: Page): Promise<TextMetrics | null> {
   });
 }
 
-function latestStateDbMetrics(databasePath: string): TextMetrics | null {
+function latestStateDbMetrics(
+  databasePath: string,
+  sessionId: string | null,
+): StateDbMetrics | null {
   if (!existsSync(databasePath)) return null;
   const database = new DatabaseSync(databasePath, { readOnly: true });
   try {
-    const row = database
-      .prepare(
-        `SELECT content
-           FROM messages
-          WHERE role = 'assistant'
-          ORDER BY timestamp DESC, id DESC
-          LIMIT 1`,
-      )
-      .get() as { content?: unknown } | undefined;
-    return typeof row?.content === "string" ? metrics(row.content) : null;
+    const statement = database.prepare(
+      sessionId
+        ? `SELECT session_id, content
+             FROM messages
+            WHERE role = 'assistant' AND session_id = ?
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 1`
+        : `SELECT session_id, content
+             FROM messages
+            WHERE role = 'assistant'
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 1`,
+    );
+    const row = (sessionId ? statement.get(sessionId) : statement.get()) as
+      | { content?: unknown; session_id?: unknown }
+      | undefined;
+    if (
+      typeof row?.content !== "string" ||
+      typeof row.session_id !== "string" ||
+      row.session_id.length === 0
+    ) {
+      return null;
+    }
+    return { ...metrics(row.content), sessionId: row.session_id };
   } finally {
     database.close();
   }
 }
 
-function runtimeProcessIds(hermesHome: string): number[] {
-  const result = spawnSync("ps", ["-axo", "pid=,command="], {
+function textMetrics(value: StateDbMetrics | null): TextMetrics | null {
+  return value ? { sha256: value.sha256, utf8Bytes: value.utf8Bytes } : null;
+}
+
+function assertDescendant(parent: string, candidate: string): void {
+  const pathFromParent = relative(parent, candidate);
+  if (
+    !pathFromParent ||
+    pathFromParent === ".." ||
+    pathFromParent.startsWith(`..${sep}`) ||
+    isAbsolute(pathFromParent)
+  ) {
+    throw new Error("The isolated Runtime root is outside its test harness.");
+  }
+}
+
+function isolatedRuntimeRoot(harness: ProductAuthHarness): string {
+  const harnessRoot = resolve(harness.root);
+  const runtimeRoot = resolve(harness.hermesHome, "hermes-agent");
+  assertDescendant(harnessRoot, runtimeRoot);
+  return runtimeRoot;
+}
+
+function validateOwnedRuntimeRoot(
+  harness: ProductAuthHarness,
+  runtimeRoot: string,
+): void {
+  const expectedRuntimeRoot = isolatedRuntimeRoot(harness);
+  if (runtimeRoot !== expectedRuntimeRoot) {
+    throw new Error("The isolated Runtime root does not match this harness.");
+  }
+  if (existsSync(runtimeRoot)) {
+    assertDescendant(realpathSync(harness.root), realpathSync(runtimeRoot));
+  }
+}
+
+function regexEscape(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+function ownedRuntimeProcessIds(runtimeRoot: string): number[] {
+  if (!isAbsolute(runtimeRoot) || resolve(runtimeRoot) !== runtimeRoot) {
+    throw new Error("The isolated Runtime root must be an absolute path.");
+  }
+  const result = spawnSync("ps", ["-ww", "-axo", "pid=,command="], {
     encoding: "utf8",
     stdio: "pipe",
   });
-  if (result.status !== 0) return [];
+  if (result.error) {
+    throw new Error("Unable to enumerate isolated Runtime processes.");
+  }
+  if (result.signal) {
+    throw new Error(
+      `Runtime process enumeration was terminated by ${result.signal}.`,
+    );
+  }
+  if (result.status === null) {
+    throw new Error("Runtime process enumeration returned no exit status.");
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      `Runtime process enumeration failed with exit ${String(result.status)}.`,
+    );
+  }
+  const exactRoot = new RegExp(
+    `(?:^|[\\s"'=])${regexEscape(runtimeRoot)}(?:$|[\\s/"'])`,
+    "u",
+  );
   return result.stdout
     .split(/\r?\n/u)
     .map((line) => line.trim())
-    .filter((line) => line.includes(hermesHome))
-    .map((line) => Number.parseInt(line.split(/\s+/u)[0] || "", 10))
+    .map((line): { commandLine: string; pid: number } | null => {
+      const match = /^(\d+)\s+(.+)$/u.exec(line);
+      if (!match) return null;
+      const pid = Number.parseInt(match[1], 10);
+      const commandLine = match[2];
+      return Number.isSafeInteger(pid) && pid > 0 && pid !== process.pid
+        ? { commandLine, pid }
+        : null;
+    })
     .filter(
-      (pid) => Number.isSafeInteger(pid) && pid > 0 && pid !== process.pid,
-    );
+      (processRow): processRow is { commandLine: string; pid: number } =>
+        processRow !== null,
+    )
+    .filter((processRow) => exactRoot.test(processRow.commandLine))
+    .map((processRow) => processRow.pid);
 }
 
-function terminateOwnedRuntimeProcesses(hermesHome: string): void {
-  for (const pid of runtimeProcessIds(hermesHome)) {
+function terminateOwnedRuntimeProcesses(
+  harness: ProductAuthHarness,
+  runtimeRoot: string,
+): void {
+  validateOwnedRuntimeRoot(harness, runtimeRoot);
+  for (const pid of ownedRuntimeProcessIds(runtimeRoot)) {
     try {
       process.kill(pid, "SIGTERM");
-    } catch {
-      // The isolated process may already have exited.
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
     }
   }
 }
@@ -408,23 +534,20 @@ test.setTimeout(1_200_000);
 // Playwright requires its fixtures argument to use object destructuring.
 // eslint-disable-next-line no-empty-pattern
 test("matches visible, completion, and state.db text for 20 isolated one-character Chinese streams", async ({}, testInfo) => {
-  const runtimeRepository =
-    process.env.AERA_STREAM_INTEGRITY_RUNTIME_REPO?.trim() ?? "";
-  const runtimeSha =
-    process.env.AERA_STREAM_INTEGRITY_RUNTIME_SHA?.trim() ?? "";
-  const runtimeVenv =
-    process.env.AERA_STREAM_INTEGRITY_RUNTIME_VENV?.trim() ?? "";
-  const runtimeNodeModules =
-    process.env.AERA_STREAM_INTEGRITY_RUNTIME_NODE_MODULES?.trim() ?? "";
-  const expectedDesktopSha =
-    process.env.AERA_STREAM_INTEGRITY_DESKTOP_SHA?.trim() ?? "";
-  test.skip(
-    !runtimeRepository ||
-      !/^[0-9a-f]{40}$/u.test(runtimeSha) ||
-      !runtimeVenv ||
-      !runtimeNodeModules ||
-      !/^[0-9a-f]{40}$/u.test(expectedDesktopSha),
-    "Set exact merged Runtime/Desktop identities plus isolated Runtime dependency roots.",
+  const runtimeRepository = requiredAbsolutePathEnvironment(
+    "AERA_STREAM_INTEGRITY_RUNTIME_REPO",
+  );
+  const runtimeSha = requiredShaEnvironment(
+    "AERA_STREAM_INTEGRITY_RUNTIME_SHA",
+  );
+  const runtimeVenv = requiredAbsolutePathEnvironment(
+    "AERA_STREAM_INTEGRITY_RUNTIME_VENV",
+  );
+  const runtimeNodeModules = requiredAbsolutePathEnvironment(
+    "AERA_STREAM_INTEGRITY_RUNTIME_NODE_MODULES",
+  );
+  const expectedDesktopSha = requiredShaEnvironment(
+    "AERA_STREAM_INTEGRITY_DESKTOP_SHA",
   );
 
   const desktopSha = command("git", ["rev-parse", "HEAD"], {
@@ -438,6 +561,8 @@ test("matches visible, completion, and state.db text for 20 isolated one-charact
   let harness: ProductAuthHarness | null = null;
   let app: ElectronApplication | null = null;
   let providerServer: Server | null = null;
+  let runtimeRoot: string | null = null;
+  const launchedRuntimeProcessIds = new Set<number>();
   const previousProviderKey = process.env[PROVIDER_ENV_KEY];
   const evidence: Array<{
     completionSha256: string;
@@ -455,6 +580,7 @@ test("matches visible, completion, and state.db text for 20 isolated one-charact
     process.env[PROVIDER_ENV_KEY] = "isolated-loopback-e2e-only";
 
     harness = await createProductAuthHarness();
+    runtimeRoot = isolatedRuntimeRoot(harness);
     await prepareExternalRuntime(
       harness,
       runtimeRepository,
@@ -465,8 +591,20 @@ test("matches visible, completion, and state.db text for 20 isolated one-charact
     const emptySeed = join(harness.root, "unused-runtime-seed");
     await mkdir(emptySeed, { recursive: true });
 
+    const preparedRuntimeRoot = runtimeRoot;
+    validateOwnedRuntimeRoot(harness, preparedRuntimeRoot);
+    expect(ownedRuntimeProcessIds(preparedRuntimeRoot)).toEqual([]);
     ({ app } = await launchRuntimeDesktop(harness, emptySeed));
     const page = await app.firstWindow();
+    await expect
+      .poll(() => ownedRuntimeProcessIds(preparedRuntimeRoot).length, {
+        timeout: 30_000,
+      })
+      .toBeGreaterThan(0);
+    for (const pid of ownedRuntimeProcessIds(preparedRuntimeRoot)) {
+      launchedRuntimeProcessIds.add(pid);
+    }
+    expect(launchedRuntimeProcessIds.size).toBeGreaterThan(0);
     await authenticateNewProductAccount(harness, app, page, {
       displayName: "Stream Integrity Disposable User",
     });
@@ -536,6 +674,7 @@ test("matches visible, completion, and state.db text for 20 isolated one-charact
     const sendButton = page.locator("button.chat-send-btn:visible");
     await expect(chatInput).toBeVisible({ timeout: 180_000 });
     const stateDatabase = join(activeProfile.path, "state.db");
+    let stateDbSessionId: string | null = null;
 
     for (let turn = 1; turn <= TURN_COUNT; turn += 1) {
       const expected = metrics(replyForTurn(turn));
@@ -561,11 +700,30 @@ test("matches visible, completion, and state.db text for 20 isolated one-charact
         .poll(() => visibleMetrics(page), { timeout: 120_000 })
         .toEqual(expected);
       await expect
-        .poll(() => latestStateDbMetrics(stateDatabase), { timeout: 120_000 })
+        .poll(
+          () => {
+            const stateDb = latestStateDbMetrics(
+              stateDatabase,
+              stateDbSessionId,
+            );
+            if (
+              turn === 1 &&
+              stateDb?.sha256 === expected.sha256 &&
+              stateDb.utf8Bytes === expected.utf8Bytes
+            ) {
+              stateDbSessionId = stateDb.sessionId;
+            }
+            return textMetrics(stateDb);
+          },
+          { timeout: 120_000 },
+        )
         .toEqual(expected);
+      if (!stateDbSessionId) {
+        throw new Error("The isolated state.db session could not be bound.");
+      }
 
       const visible = await visibleMetrics(page);
-      const stateDb = latestStateDbMetrics(stateDatabase);
+      const stateDb = latestStateDbMetrics(stateDatabase, stateDbSessionId);
       expect(visible).not.toBeNull();
       expect(stateDb).not.toBeNull();
 
@@ -595,13 +753,16 @@ test("matches visible, completion, and state.db text for 20 isolated one-charact
 
     expect(provider.state.requestCount).toBe(TURN_COUNT);
     expect(provider.state.nonStreamingRequests).toBe(0);
-    expect(runtimeProcessIds(harness.hermesHome).length).toBeGreaterThan(0);
+    expect(
+      ownedRuntimeProcessIds(preparedRuntimeRoot).some((pid) =>
+        launchedRuntimeProcessIds.has(pid),
+      ),
+    ).toBe(true);
 
-    const isolatedHermesHome = harness.hermesHome;
     await app.close();
     app = null;
     await expect
-      .poll(() => runtimeProcessIds(isolatedHermesHome), {
+      .poll(() => ownedRuntimeProcessIds(preparedRuntimeRoot), {
         timeout: 30_000,
       })
       .toEqual([]);
@@ -625,14 +786,25 @@ test("matches visible, completion, and state.db text for 20 isolated one-charact
       contentType: "application/json",
     });
   } finally {
-    await app?.close().catch(() => undefined);
-    if (harness) terminateOwnedRuntimeProcesses(harness.hermesHome);
-    await closeServer(providerServer);
-    await closeProductAuthHarness(harness);
-    if (previousProviderKey === undefined) {
-      delete process.env[PROVIDER_ENV_KEY];
-    } else {
-      process.env[PROVIDER_ENV_KEY] = previousProviderKey;
+    try {
+      try {
+        await app?.close().catch(() => undefined);
+        if (harness && runtimeRoot) {
+          terminateOwnedRuntimeProcesses(harness, runtimeRoot);
+        }
+      } finally {
+        await closeServer(providerServer);
+      }
+    } finally {
+      try {
+        await closeProductAuthHarness(harness);
+      } finally {
+        if (previousProviderKey === undefined) {
+          delete process.env[PROVIDER_ENV_KEY];
+        } else {
+          process.env[PROVIDER_ENV_KEY] = previousProviderKey;
+        }
+      }
     }
   }
 });

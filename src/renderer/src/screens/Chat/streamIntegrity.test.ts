@@ -142,6 +142,22 @@ describe("StreamIntegrityTracker", () => {
     ).toEqual({ kind: "complete", text: finalText, repaired: true });
   });
 
+  it("repairs a missing tail delta when final sequence advances past the highest seen sequence", () => {
+    const tracker = new StreamIntegrityTracker();
+    const finalText = "第一段第二段";
+    start(tracker);
+    tracker.delta({ stream_id: STREAM_A, seq: 1, text: "第一段" });
+
+    expect(
+      tracker.complete({
+        stream_id: STREAM_A,
+        final_seq: 2,
+        text: finalText,
+        text_sha256: digest(finalText),
+      }),
+    ).toEqual({ kind: "complete", text: finalText, repaired: true });
+  });
+
   it("keeps a legacy Runtime turn on the legacy reconciliation path", () => {
     const tracker = new StreamIntegrityTracker();
 
