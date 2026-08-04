@@ -88,8 +88,8 @@ node scripts/internal-beta/verify-live-evidence.mjs \
 
 The Beta.23 macOS package requires Developer ID signing, accepted Apple
 notarization, application and DMG stapling, strict signature verification, and
-Gatekeeper acceptance. The Windows package remains explicitly unsigned and
-makes no Authenticode or SmartScreen-reputation claim.
+Gatekeeper acceptance. The Windows package requires valid Authenticode,
+trusted timestamp, x64, and packaged Runtime Seed verification.
 
 For macOS, first run the SHA-256 check. Before opening the DMG, validate its
 ticket with `xcrun stapler validate` and assess it with `spctl`. After mounting,
@@ -99,10 +99,11 @@ invalid signature, or Gatekeeper rejection stops the run. Never bypass or
 disable Gatekeeper, remove quarantine recursively, or reuse an override for
 bytes with another hash.
 
-For Windows, first run the SHA-256 check. An unknown-publisher or SmartScreen
-warning is expected. Use **More info → Run anyway** only for the exact verified
-installer. Never disable SmartScreen, lower organization policy, or describe
-the executable as Authenticode-signed.
+For Windows, first run the SHA-256 check, then require both `signtool verify
+/pa /all /v` and `signtool verify /pa /all /tw /v` to succeed for the exact
+installer. An unknown-publisher result stops the run. SmartScreen reputation
+is independent of signature validity; never disable SmartScreen or lower
+organization policy.
 
 Record only the coarse roles `macos_arm64` and `windows_x64`, coarse versions
 such as `macOS 15` or `Windows 11`, the installed package role, and its hash. Do

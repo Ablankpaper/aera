@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { test } from "node:test";
 
 import { parse as parseYAML } from "yaml";
@@ -21,6 +24,11 @@ const macBuilderPath = new URL(
   import.meta.url,
 );
 const baseBuilderPath = new URL("../../electron-builder.yml", import.meta.url);
+const windowsVerifierPath = new URL(
+  "../release/verify-windows.ps1",
+  import.meta.url,
+);
+const execFileAsync = promisify(execFile);
 
 test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublished, and Sigstore-bound", async () => {
   const raw = await readFile(workflowPath, "utf8");
@@ -29,7 +37,7 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.23"/u);
   assert.match(
     raw,
-    /--release-notes "Beta\.23 修复 Agent 版本缓存与安装事务恢复、Profile\/Runtime 绑定、旧 Gateway 接管和 Runtime 稳定更新通道，并保留模型中心修复与 macOS Apple 公证、装订及 Gatekeeper 验证。"/u,
+    /--release-notes "Beta\.23 修复 Agent 版本缓存与安装事务恢复、Profile\/Runtime 绑定、旧 Gateway 接管和 Runtime 稳定更新通道，并保留模型中心修复、macOS Apple 公证与 Windows Authenticode 验证。"/u,
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
@@ -119,11 +127,18 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   assert.doesNotMatch(raw, /--notarization-mode deferred/u);
   assert.match(raw, /node scripts\/release\/verify-macos\.mjs/iu);
   assert.match(raw, /candidate\/evidence\/macos-evidence\.json/u);
+  for (const secret of ["WIN_CSC_LINK", "WIN_CSC_KEY_PASSWORD"]) {
+    assert.match(raw, new RegExp(`secrets\\.${secret}`, "u"));
+  }
+  assert.match(raw, /Package Authenticode-signed Windows artifacts/iu);
+  assert.match(raw, /scripts\/release\/verify-windows\.ps1/iu);
+  assert.match(raw, /-SetupArtifactName/iu);
+  assert.match(raw, /-PortableArtifactName/iu);
+  assert.match(raw, /candidate\/evidence\/windows-evidence\.json/u);
 
   assert.doesNotMatch(raw, /actions\/attest/iu);
   assert.doesNotMatch(raw, /attestations:\s*write/iu);
   assert.doesNotMatch(raw, /\bgh\s+release\b|create[-_ ]tag|refs\/tags/iu);
-  assert.doesNotMatch(raw, /WIN_CSC|signtool/iu);
   assert.doesNotMatch(
     raw,
     /repository:\s*bignormal\/aera-runtime|git\s+clone[\s\S]*aera-runtime/iu,
@@ -146,10 +161,7 @@ test("internal-Beta promotion publishes one verified candidate without rebuildin
   assert.deepEqual(Object.keys(workflow.jobs), ["promote"]);
   assert.equal(workflow.jobs.promote.environment, "internal-beta");
   assert.match(raw, /test "\$GITHUB_REF" = "refs\/heads\/main"/u);
-  assert.match(
-    raw,
-    /internal-beta-promote\.yml@refs\/heads\/main/u,
-  );
+  assert.match(raw, /internal-beta-promote\.yml@refs\/heads\/main/u);
   assert.match(raw, /gh run view "\$CANDIDATE_RUN_ID"/u);
   assert.match(raw, /Desktop internal Beta candidate/u);
   assert.match(raw, /run\.headSha !== process\.env\.SOURCE_SHA/u);
@@ -165,7 +177,7 @@ test("internal-Beta promotion publishes one verified candidate without rebuildin
   assert.doesNotMatch(raw, /electron-builder|notarytool|cosign sign-blob/iu);
 });
 
-test("internal-Beta overlays separate unsigned Windows from strict macOS signing", async () => {
+test("internal-Beta overlays preserve fixed package names and strict macOS signing", async () => {
   const [raw, macRaw, baseRaw] = await Promise.all([
     readFile(builderPath, "utf8"),
     readFile(macBuilderPath, "utf8"),
@@ -218,3 +230,24 @@ test("internal-Beta overlays separate unsigned Windows from strict macOS signing
     "Aera-Internal-Beta-${version}-macos-${arch}.${ext}",
   );
 });
+
+test(
+  "Windows runner accepts the Authenticode verifier PowerShell syntax",
+  { skip: process.platform !== "win32" },
+  async () => {
+    await execFileAsync(
+      "pwsh",
+      [
+        "-NoProfile",
+        "-Command",
+        "$tokens = $null; $errors = $null; [System.Management.Automation.Language.Parser]::ParseFile($env:VERIFY_WINDOWS_PATH, [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }",
+      ],
+      {
+        env: {
+          ...process.env,
+          VERIFY_WINDOWS_PATH: fileURLToPath(windowsVerifierPath),
+        },
+      },
+    );
+  },
+);

@@ -3,7 +3,9 @@ param(
   [Parameter(Mandatory = $true)][string]$RuntimeSeedReference,
   [Parameter(Mandatory = $true)][string]$RuntimeSeedManifest,
   [Parameter(Mandatory = $true)][string]$DesktopVersion,
-  [Parameter(Mandatory = $true)][string]$Output
+  [Parameter(Mandatory = $true)][string]$Output,
+  [Parameter(Mandatory = $false)][string]$SetupArtifactName = "",
+  [Parameter(Mandatory = $false)][string]$PortableArtifactName = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -62,14 +64,34 @@ function Find-ExtractedSeed([string]$Root) {
 $dist = (Resolve-Path $DistDirectory).Path
 $reference = (Resolve-Path $RuntimeSeedReference).Path
 $manifest = Get-Item (Resolve-Path $RuntimeSeedManifest).Path
-$setup = @(Get-ChildItem $dist -File -Filter "Aera-$DesktopVersion-setup.exe")
-$portable = @(Get-ChildItem $dist -File -Filter "Aera-$DesktopVersion-portable.exe")
-if ($setup.Count -ne 1 -or $portable.Count -ne 1) {
-  throw "Expected one NSIS setup and one portable Windows executable"
+
+function Resolve-ArtifactFile(
+  [string]$ProvidedName,
+  [string]$DefaultName,
+  [string]$Label
+) {
+  $name = if ([string]::IsNullOrWhiteSpace($ProvidedName)) {
+    $DefaultName
+  }
+  else {
+    $ProvidedName
+  }
+  if ([System.IO.Path]::GetFileName($name) -ne $name) {
+    throw "$Label artifact name must be a filename"
+  }
+  $path = Join-Path $dist $name
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+    throw "$Label artifact is missing: $name"
+  }
+  return (Get-Item -LiteralPath $path)
 }
+$setup = Resolve-ArtifactFile `
+  $SetupArtifactName "Aera-$DesktopVersion-setup.exe" "Windows setup"
+$portable = Resolve-ArtifactFile `
+  $PortableArtifactName "Aera-$DesktopVersion-portable.exe" "Windows portable"
 $artifacts = @(
-  [ordered]@{ file = $setup[0]; kind = "windows_setup" },
-  [ordered]@{ file = $portable[0]; kind = "windows_portable" }
+  [ordered]@{ file = $setup; kind = "windows_setup" },
+  [ordered]@{ file = $portable; kind = "windows_portable" }
 )
 
 $signerSubject = $null
