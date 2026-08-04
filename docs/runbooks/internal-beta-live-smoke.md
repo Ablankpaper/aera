@@ -17,8 +17,8 @@ Before inviting a tester, record and reverify:
 - successful exact-SHA main CI run URLs;
 - Cloud/Admin candidate workflow URLs and canonical manifest hashes;
 - immutable GHCR `@sha256` image digests and Sigstore verification;
-- the Desktop internal-Beta workflow URL and manifest/provenance Sigstore
-  verification;
+- the Desktop internal-Beta candidate and promotion workflow URLs plus
+  manifest/provenance Sigstore verification;
 - all four package names, sizes, and SHA-256 values; and
 - the deployed issuer, offline-entitlement key ID/public key, and Runtime lock.
 
@@ -86,7 +86,7 @@ node scripts/internal-beta/verify-live-evidence.mjs \
 
 ## 4. Install the platform-verified internal-only packages
 
-The Beta.22 macOS package requires Developer ID signing, accepted Apple
+The Beta.23 macOS package requires Developer ID signing, accepted Apple
 notarization, application and DMG stapling, strict signature verification, and
 Gatekeeper acceptance. The Windows package remains explicitly unsigned and
 makes no Authenticode or SmartScreen-reputation claim.

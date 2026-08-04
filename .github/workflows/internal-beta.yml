@@ -59,7 +59,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain=v1)"
           VERSION=$(node -p "require('./package.json').version")
-          test "$VERSION" = "0.7.4-internal-beta.22"
+          test "$VERSION" = "0.7.4-internal-beta.23"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Verify successful CI belongs to the exact source
@@ -611,7 +611,7 @@ jobs:
           compression-level: 0
 
   assemble:
-    name: Assemble, sign, and publish internal Beta
+    name: Assemble and sign immutable internal Beta candidate
     needs: [validate, macos, windows]
     runs-on: ubuntu-24.04
     environment: internal-beta
@@ -745,7 +745,7 @@ jobs:
             --manifest candidate/desktop-update/manifest.json \
             --private-key-env DESKTOP_UPDATE_SIGNING_PRIVATE_KEY \
             --published-at "$CREATED_AT" \
-            --release-notes "Beta.22 修复命名自定义供应商与预设共用 URL 时的 Profile Key、模型归属、刷新、编辑和删除身份，并延续 macOS Apple 公证、装订与 Gatekeeper 验证。" \
+            --release-notes "Beta.23 修复 Agent 版本缓存与安装事务恢复、Profile/Runtime 绑定、旧 Gateway 接管和 Runtime 稳定更新通道，并保留模型中心修复与 macOS Apple 公证、装订及 Gatekeeper 验证。" \
             --signature candidate/desktop-update/manifest.sig \
             --version "$VERSION"
           node scripts/internal-beta/desktop-update.mjs verify \
@@ -842,74 +842,3 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
-
-      - name: Publish the signed Desktop update channel
-        shell: bash
-        env:
-          BETA_ORIGIN: ${{ vars.AERA_INTERNAL_BETA_ORIGIN }}
-          PUBLISH_HOST: ${{ vars.AERA_DESKTOP_UPDATE_PUBLISH_HOST }}
-          PUBLISH_SSH_PRIVATE_KEY: ${{ secrets.AERA_DESKTOP_UPDATE_PUBLISH_SSH_PRIVATE_KEY }}
-          PUBLISH_SSH_KNOWN_HOSTS: ${{ secrets.AERA_DESKTOP_UPDATE_PUBLISH_SSH_KNOWN_HOSTS }}
-          VERSION: ${{ needs.validate.outputs.version }}
-        run: |
-          set -euo pipefail
-          [[ "$PUBLISH_HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          test -n "$PUBLISH_SSH_PRIVATE_KEY"
-          test -n "$PUBLISH_SSH_KNOWN_HOSTS"
-          key="$RUNNER_TEMP/desktop-update-publisher"
-          known_hosts="$RUNNER_TEMP/desktop-update-known-hosts"
-          install -m 0700 -d "$RUNNER_TEMP/desktop-update-ssh"
-          printf '%s\n' "$PUBLISH_SSH_PRIVATE_KEY" > "$key"
-          printf '%s\n' "$PUBLISH_SSH_KNOWN_HOSTS" > "$known_hosts"
-          chmod 0600 "$key" "$known_hosts"
-          ssh-keygen -y -f "$key" >/dev/null
-
-          publish_root="$RUNNER_TEMP/desktop-update-publish"
-          release_dir="$publish_root/releases/$VERSION"
-          mkdir -p "$release_dir"
-          cp candidate/desktop-update/manifest.json "$publish_root/manifest.json"
-          cp candidate/desktop-update/manifest.sig "$publish_root/manifest.sig"
-          for name in \
-            "Aera-Internal-Beta-$VERSION-macos-arm64.zip" \
-            "Aera-Internal-Beta-$VERSION-windows-x64-setup.exe"
-          do
-            cp "candidate/artifacts/$name" "$release_dir/$name"
-          done
-          (
-            cd "$publish_root"
-            tar -cf - \
-              manifest.json \
-              manifest.sig \
-              "releases/$VERSION/Aera-Internal-Beta-$VERSION-macos-arm64.zip" \
-              "releases/$VERSION/Aera-Internal-Beta-$VERSION-windows-x64-setup.exe"
-          ) | ssh \
-            -i "$key" \
-            -o BatchMode=yes \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o "UserKnownHostsFile=$known_hosts" \
-            "aera-updates@$PUBLISH_HOST" publish
-
-          base_url="$BETA_ORIGIN/desktop-updates/internal-beta"
-          curl --fail --silent --show-error \
-            --proto '=https' --tlsv1.2 \
-            "$base_url/manifest.json" \
-            --output "$RUNNER_TEMP/live-update-manifest.json"
-          curl --fail --silent --show-error \
-            --proto '=https' --tlsv1.2 \
-            "$base_url/manifest.sig" \
-            --output "$RUNNER_TEMP/live-update-manifest.sig"
-          cmp candidate/desktop-update/manifest.json \
-            "$RUNNER_TEMP/live-update-manifest.json"
-          cmp candidate/desktop-update/manifest.sig \
-            "$RUNNER_TEMP/live-update-manifest.sig"
-          for name in \
-            "Aera-Internal-Beta-$VERSION-macos-arm64.zip" \
-            "Aera-Internal-Beta-$VERSION-windows-x64-setup.exe"
-          do
-            curl --fail --silent --show-error \
-              --proto '=https' --tlsv1.2 \
-              --range 0-0 \
-              "$base_url/releases/$VERSION/$name" \
-              --output /dev/null
-          done
