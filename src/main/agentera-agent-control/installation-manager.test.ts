@@ -616,6 +616,125 @@ describe("Agent installation orchestration", () => {
     });
   });
 
+  // @lat: [[lat.md/agentera-agent-control-plane#Installation and binding#Installation reconciliation isolation#Fresh reservation finalization recovery]]
+  it("cold-restarts finalization when fresh Profile reservation completion fails", async () => {
+    vi.spyOn(
+      bindings,
+      "completeFreshProfileReservation",
+    ).mockImplementationOnce(() => {
+      throw new Error("injected reservation completion failure");
+    });
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "activation_failed" });
+
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT phase FROM installation_operations
+           WHERE operation_id = ?`,
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({ phase: "cloud_activated" });
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT status, retry_code FROM local_agent_installations
+           WHERE agent_installation_id = ?`,
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({ status: "pending", retry_code: "activation_failed" });
+    expect(
+      bindings.getFreshProfileReservation(AGENT_INSTALLATION_ID, owner),
+    ).not.toBeNull();
+    expect(events).not.toContain("profile:activate:fresh-agent");
+
+    await expect(
+      coldRestartManager().reconcilePendingInstallations(),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        agentInstallationId: AGENT_INSTALLATION_ID,
+        status: "active",
+      }),
+    ]);
+    expect(activateInstallation).toHaveBeenCalledOnce();
+    expect(
+      bindings.getFreshProfileReservation(AGENT_INSTALLATION_ID, owner),
+    ).toBeNull();
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT phase FROM installation_operations
+           WHERE operation_id = ?`,
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({ phase: "committed" });
+  });
+
+  // @lat: [[lat.md/agentera-agent-control-plane#Installation and binding#Installation reconciliation isolation#Fresh Profile activation recovery]]
+  it("cold-restarts finalization when fresh Profile activation fails", async () => {
+    const activateProfile = vi
+      .fn<AgentInstallationProfileAdapter["activateProfile"]>()
+      .mockImplementationOnce((id) => {
+        events.push(`profile:activate:${id}:failed`);
+        throw new Error("injected Profile activation failure");
+      })
+      .mockImplementation((id) => events.push(`profile:activate:${id}`));
+    profiles.activateProfile = activateProfile;
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "activation_failed" });
+
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT phase FROM installation_operations
+           WHERE operation_id = ?`,
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({ phase: "cloud_activated" });
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT status, retry_code FROM local_agent_installations
+           WHERE agent_installation_id = ?`,
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({ status: "pending", retry_code: "activation_failed" });
+    expect(
+      bindings.getFreshProfileReservation(AGENT_INSTALLATION_ID, owner),
+    ).toBeNull();
+
+    await expect(
+      coldRestartManager().reconcilePendingInstallations(),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        agentInstallationId: AGENT_INSTALLATION_ID,
+        status: "active",
+      }),
+    ]);
+    expect(activateInstallation).toHaveBeenCalledOnce();
+    expect(activateProfile).toHaveBeenCalledTimes(2);
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT phase FROM installation_operations
+           WHERE operation_id = ?`,
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({ phase: "committed" });
+  });
+
   it("recovers a reserved Profile after creation is interrupted and Desktop cold-restarts", async () => {
     createProfile.mockImplementationOnce(
       (_name, _cloneFrom, reservedProfileId) => {

@@ -2533,6 +2533,14 @@ export class AgentInstallationManager {
         });
       }
       if (operation.phase === "cloud_activated") {
+        if (target.kind === "fresh") {
+          this.profileBindings.completeFreshProfileReservation(
+            operation.operationId,
+            this.owner,
+            binding.runtimeProfileId,
+          );
+          this.profiles.activateProfile(operation.profileId);
+        }
         this.database.sqlite.exec("BEGIN IMMEDIATE");
         try {
           const updated = this.database.sqlite
@@ -2577,24 +2585,7 @@ export class AgentInstallationManager {
       this.recordFailure(local.agentInstallationId, "activation_failed");
       throw new AgentInstallationManagerError("activation_failed");
     }
-    const result = this.getLocalInstallation(local.agentInstallationId);
-    if (target.kind === "fresh" && result.runtimeProfileId !== null) {
-      try {
-        this.profileBindings.completeFreshProfileReservation(
-          operation.operationId,
-          this.owner,
-          result.runtimeProfileId,
-        );
-      } catch (error) {
-        reportStageFailure("fresh-profile-reservation-completion", error);
-      }
-      try {
-        this.profiles.activateProfile(operation.profileId);
-      } catch (error) {
-        reportStageFailure("fresh-profile-activation", error);
-      }
-    }
-    return result;
+    return this.getLocalInstallation(local.agentInstallationId);
   }
 
   private async rollbackVerifiedRestore(input: {
