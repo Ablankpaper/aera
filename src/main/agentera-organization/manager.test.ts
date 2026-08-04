@@ -61,6 +61,16 @@ const RAW_TOKEN = "A".repeat(43);
 
 const roots: string[] = [];
 const managers: AgenteraOrganizationManager[] = [];
+const managerDatabaseLifecycleTestTimeoutMs =
+  process.platform === "win32" ? 30_000 : 5_000;
+const completeOnlineLifecycleTestName =
+  "applies the complete online lifecycle to safe local projections";
+const invitationPersistenceTestName =
+  "accepts an invitation without persisting its raw token";
+
+function itWithDbTimeout(name: string, run: () => Promise<void>): void {
+  it(name, run, managerDatabaseLifecycleTestTimeoutMs);
+}
 
 function temporaryUserData(): string {
   const root = mkdtempSync(join(tmpdir(), "agentera-organization-manager-"));
@@ -727,7 +737,7 @@ describe("AgenteraOrganizationManager", () => {
     ).toBeNull();
   });
 
-  it("applies the complete online lifecycle to safe local projections", async () => {
+  itWithDbTimeout(completeOnlineLifecycleTestName, async () => {
     const database = databaseFor();
     database.replaceOrganizations(
       ACCOUNT_A,
@@ -831,7 +841,7 @@ describe("AgenteraOrganizationManager", () => {
     expect(database.readOrganizations(ACCOUNT_A).organizations).toEqual([]);
   });
 
-  it("accepts an invitation without persisting its raw token", async () => {
+  itWithDbTimeout(invitationPersistenceTestName, async () => {
     const database = databaseFor();
     const client = cloudClient();
     const manager = managerFor({

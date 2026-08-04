@@ -137,7 +137,17 @@ describe("ExperiencePromotionDialog", () => {
   beforeEach(() => vi.restoreAllMocks());
 
   it("lists only eligible Skill names and prepares the explicitly selected Skill", async () => {
-    const api = installAPI();
+    let resolvePrepared!: (
+      result: AgenteraAgentControlResult<ExperienceCandidatePreview>,
+    ) => void;
+    const prepared = new Promise<
+      AgenteraAgentControlResult<ExperienceCandidatePreview>
+    >((resolve) => {
+      resolvePrepared = resolve;
+    });
+    const api = installAPI({
+      prepareExperienceCandidate: vi.fn(() => prepared),
+    });
     renderDialog();
 
     expect(
@@ -145,8 +155,12 @@ describe("ExperiencePromotionDialog", () => {
         name: "agents.control.experience.promotionTitle",
       }),
     ).toBeTruthy();
-    expect(screen.getByText("research-notes")).toBeTruthy();
-    expect(screen.getByText("release-helper")).toBeTruthy();
+    expect(
+      await screen.findByRole("option", { name: "research-notes" }),
+    ).toBeTruthy();
+    expect(
+      await screen.findByRole("option", { name: "release-helper" }),
+    ).toBeTruthy();
     expect(document.body.textContent).not.toContain("/.hermes/profiles/");
     expect(document.body.textContent).not.toContain("private skill content");
     expect(api.prepareExperienceCandidate).not.toHaveBeenCalled();
@@ -169,7 +183,9 @@ describe("ExperiencePromotionDialog", () => {
         skillName: "research-notes",
       }),
     );
-    expect(screen.getByText("Workspace Research Agent")).toBeTruthy();
+    expect(screen.queryByText("Workspace Research Agent")).toBeNull();
+    resolvePrepared(success(preview()));
+    expect(await screen.findByText("Workspace Research Agent")).toBeTruthy();
     expect(screen.getByText(VERSION_ID)).toBeTruthy();
     expect(screen.getByText("skills/research-notes/SKILL.md")).toBeTruthy();
     expect(

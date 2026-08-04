@@ -10,6 +10,7 @@ const {
   TEST_HOME,
   TEST_REPO,
   healthStatuses,
+  healthSteadyStatusRef,
   apiRequests,
   apiRequestErrors,
   requestEvents,
@@ -41,6 +42,7 @@ const {
     TEST_HOME: path.join(os.tmpdir(), `hermes-cli-session-test-${Date.now()}`),
     TEST_REPO: path.join(os.tmpdir(), `hermes-cli-session-repo-${Date.now()}`),
     healthStatuses: [] as number[],
+    healthSteadyStatusRef: { value: 503 },
     apiRequests: [] as Array<{
       body: string;
       headers: Record<string, string>;
@@ -91,7 +93,7 @@ vi.mock("http", () => ({
               _url.endsWith("/health") || _options.timeout === 1500;
             if (isReadinessProbe) requestEvents.push("health");
             const statusCode = isReadinessProbe
-              ? (healthStatuses.shift() ?? 503)
+              ? (healthStatuses.shift() ?? healthSteadyStatusRef.value)
               : 200;
             const res = Object.assign(new EventEmitter(), {
               statusCode,
@@ -390,6 +392,7 @@ describe("CLI fallback session id propagation", () => {
     mkdirSync(TEST_HOME, { recursive: true });
     configureGatewayProcessOwnership(TEST_HOME);
     healthStatuses.length = 0;
+    healthSteadyStatusRef.value = 503;
     apiRequests.length = 0;
     apiRequestErrors.length = 0;
     requestEvents.length = 0;
@@ -833,7 +836,8 @@ describe("CLI fallback session id propagation", () => {
       expect(requestEvents).toEqual(["health", "chat"]);
 
       apiRequestErrors.push("TIMEOUT_ACCEPTED");
-      healthStatuses.push(503, 503, 200);
+      healthStatuses.push(503, 503);
+      healthSteadyStatusRef.value = 200;
       const secondSendStart = requestEvents.length;
 
       const chunks: string[] = [];
