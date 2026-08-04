@@ -174,6 +174,18 @@ The retained legacy guest edge still requires the explicit guest-capable policy 
 
 [[src/main/app/start.ts#stopActiveRuntimeContext]] stops every default or named Gateway launched by the current Aera instance during sign-out, account switching, and shutdown, while leaving unrecorded pre-existing Gateways untouched. Cold recovery requires the Profile PID to equal the recorded spawned PID and differ from the pre-launch PID. Termination keeps the record until confirmed exit, uses a second PID check before bounded escalation, and preserves replacement, corrupt, or persistence-failed evidence as ambiguous without blocking Desktop startup.
 
+#### Legacy Gateway takeover
+
+The first Aera use of a running Profile Gateway that predates the ledger performs a bounded restart, and only the replacement receives a launch record.
+
+[[src/main/hermes.ts#startGatewayWithRecovery]] never adopts the unverifiable PID. After the replacement is recorded, sign-out, account switching, and shutdown can reap that exact Aera-owned Gateway.
+
+#### Invalid ownership blocks takeover
+
+Missing or damaged ownership state leaves an unrecorded running Gateway untouched and reports local Runtime startup unavailable.
+
+This fail-closed boundary prevents Aera from signaling a process when it cannot durably prove which replacement it owns.
+
 ## Device and account lifecycle
 
 Each account has at most five active devices and receives one personal space during the registration transaction.

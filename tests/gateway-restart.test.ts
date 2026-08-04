@@ -692,6 +692,94 @@ describe("restartGatewayViaCli", () => {
     }
   });
 
+  // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Sessions and offline use#Runtime edge enforcement#Legacy Gateway takeover]]
+  it("restarts a healthy unrecorded legacy gateway before Aera uses it", async () => {
+    const legacy = spawnChild(process.execPath, [
+      "-e",
+      "setInterval(() => {}, 1000)",
+    ]);
+    const legacyPid = legacy.pid as number;
+    expect(legacyPid).toBeTypeOf("number");
+    writeFileSync(profilePidFile("work"), String(legacyPid), "utf8");
+    aliveGatewayPids.add(legacyPid);
+    realGatewayPids.add(legacyPid);
+
+    hermesCliArgsSpy.mockImplementation(() => [
+      "-e",
+      `require("fs").writeFileSync(${JSON.stringify(profilePidFile("work"))},String(process.pid));setInterval(()=>{},1000)`,
+    ]);
+    healthStatuses.push(200, 503, 200);
+
+    let replacementPid: number | null = null;
+    try {
+      await expect(
+        startGatewayWithRecovery("work", 1000, 25, 15000, 1000, 1000),
+      ).resolves.toBe(true);
+
+      expect(await waitForProcessExit(legacyPid, 3000)).toBe(true);
+      replacementPid = await waitForPidFile(profilePidFile("work"));
+      expect(replacementPid).not.toBe(legacyPid);
+      expect(
+        JSON.parse(
+          readFileSync(
+            join(TEST_HOME, "gateway-process-ownership.json"),
+            "utf8",
+          ),
+        ).entries,
+      ).toEqual([
+        expect.objectContaining({
+          profileId: "work",
+          preLaunchPid: null,
+          spawnedPid: replacementPid,
+        }),
+      ]);
+
+      stopAeraOwnedGateways();
+      expect(await waitForProcessExit(replacementPid, 3000)).toBe(true);
+    } finally {
+      legacy.kill("SIGTERM");
+      if (replacementPid !== null) {
+        try {
+          process.kill(replacementPid, "SIGTERM");
+        } catch {
+          // already stopped
+        }
+      }
+      await waitForProcessExit(legacyPid, 3000);
+    }
+  });
+
+  // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Sessions and offline use#Runtime edge enforcement#Invalid ownership blocks takeover]]
+  it("does not restart an unrecorded gateway when ownership state is corrupt", async () => {
+    const external = spawnChild(process.execPath, [
+      "-e",
+      "setInterval(() => {}, 1000)",
+    ]);
+    const externalPid = external.pid as number;
+    expect(externalPid).toBeTypeOf("number");
+    writeFileSync(profilePidFile("work"), String(externalPid), "utf8");
+    aliveGatewayPids.add(externalPid);
+    realGatewayPids.add(externalPid);
+    writeFileSync(
+      join(TEST_HOME, "gateway-process-ownership.json"),
+      "{not valid json",
+      "utf8",
+    );
+    configureGatewayProcessOwnership(TEST_HOME);
+    healthStatuses.push(200);
+
+    try {
+      await expect(startGatewayWithRecovery("work", 1000, 25)).resolves.toBe(
+        false,
+      );
+      expect(hermesCliArgsSpy).not.toHaveBeenCalled();
+      expect(() => process.kill(externalPid, 0)).not.toThrow();
+    } finally {
+      external.kill("SIGTERM");
+      await waitForProcessExit(externalPid, 3000);
+    }
+  });
+
   it("configures cold recovery before IPC and stops all owned gateways on context teardown", () => {
     const start = readFileSync(
       join(__dirname, "../src/main/app/start.ts"),
@@ -992,7 +1080,7 @@ describe("restartGatewayViaCli", () => {
     const gatewayPid = 2147483647;
     aliveGatewayPids.add(gatewayPid);
     writeFileSync(profilePidFile(), String(gatewayPid), "utf-8");
-    healthStatuses.push(503, ...Array(100).fill(200));
+    healthStatuses.push(...Array(100).fill(200));
 
     await expect(
       startGatewayWithRecovery("work", 50, 75, 15000, 25, 25),

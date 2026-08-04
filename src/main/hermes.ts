@@ -4220,6 +4220,33 @@ export async function startGatewayWithRecovery(
   if (isRemoteMode()) return false;
 
   if (isGatewayRunning(profile)) {
+    const key = profileKey(profile);
+    if (
+      gatewayProcessOwnership === null ||
+      gatewayProcessOwnership.getLoadIssue() !== null
+    ) {
+      console.warn(
+        `[gateway:${key}] Refusing to reconcile an unowned gateway because ownership state is unavailable.`,
+      );
+      return false;
+    }
+    let ownership: GatewayLaunchOwnershipRecord | null;
+    try {
+      ownership = gatewayProcessOwnership.get(key);
+    } catch {
+      console.warn(
+        `[gateway:${key}] Refusing to reconcile an unowned gateway because ownership state is invalid.`,
+      );
+      return false;
+    }
+    if (ownership === null) {
+      return restartGateway(
+        profile,
+        restartHealthTimeoutMs,
+        healthPollMs,
+        restartStopTimeoutMs,
+      );
+    }
     return (
       (await isGatewayHealthy(profile)) ||
       restartGateway(
