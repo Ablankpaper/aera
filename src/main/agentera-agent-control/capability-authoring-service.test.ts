@@ -217,6 +217,17 @@ describe("CapabilityAuthoringService", () => {
         description: "Local research workflow",
       },
     ]);
+    expect(
+      authoring.prepareInstalledSkillSnapshot({
+        profileId: "profile-a",
+        skillName: "research",
+      }),
+    ).toMatchObject({
+      profileHandle: "profile-a",
+      skillName: "research",
+      category: "",
+      fileCount: 1,
+    });
   });
 
   it("prepares an immutable Skill snapshot and consumes its handle once", async () => {

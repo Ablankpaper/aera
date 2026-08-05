@@ -218,6 +218,8 @@ Installed capability selection is a main-process preparation flow that exposes s
 
 Local MCP discovery uses the Runtime's structured server-test response through [[src/main/mcp-servers.ts#testMcpServer]] so capability authoring does not normally depend on human-readable CLI formatting. An unavailable or failed local gateway probe falls back to the CLI with the requested Profile passed explicitly, preventing a sticky `active_profile` from redirecting capability discovery.
 
+[[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] keeps one capability-authoring service instance while access and Product Space notifications invalidate its inventory. This prevents an in-flight asynchronous discovery from returning an inventory on a detached service; the operation-context key still rejects a real owner or context change.
+
 [[src/main/agentera-agent-control/capability-authoring-service.ts#CapabilityAuthoringService#prepareInstalledSkillSnapshot]] rejects links, path escape, hidden/cache entries, invalid UTF-8, duplicate targets, oversize content, and local DLP findings before retaining an immutable in-memory snapshot. Confirmation consumes its owner- and Profile-bound handle once, while MCP confirmation returns only a validated [[src/shared/agentera-agent-control.ts#AgentMcpRequirementV3]].
 
 ### Guided capability picker

@@ -429,7 +429,6 @@ export class AgenteraAgentControlManager {
     null;
   private officialAgentComponents: OfficialAgentComponents | null = null;
   private capabilityAuthoringService: CapabilityAuthoringService | null;
-  private readonly injectedCapabilityAuthoringService: boolean;
   private readonly publicationOwners = new Map<string, string>();
   private readonly listeners = new Set<
     (state: AgenteraAgentControlPublicState) => void
@@ -447,8 +446,6 @@ export class AgenteraAgentControlManager {
     this.runtimeOnlyHermes = options.hermesAdapter ?? null;
     this.capabilityAuthoringService =
       options.capabilityAuthoringService ?? null;
-    this.injectedCapabilityAuthoringService =
-      options.capabilityAuthoringService !== undefined;
     if (options.database) {
       this.trust = new AgenteraAgentTrustStore({
         cache: loadTrustCache(options.database),
@@ -1601,9 +1598,6 @@ export class AgenteraAgentControlManager {
 
   private invalidateCapabilityAuthoring(): void {
     this.capabilityAuthoringService?.invalidate();
-    if (!this.injectedCapabilityAuthoringService) {
-      this.capabilityAuthoringService = null;
-    }
   }
 
   private assertNoPendingSubmission(

@@ -11,6 +11,7 @@ import type {
   CreateAgentDraftInput,
   OfficialAgentSummary,
 } from "../../shared/agentera-agent-control";
+import { CapabilityAuthoringService } from "./capability-authoring-service";
 import type { AgenteraAgentControlClient } from "./client";
 import type { AgenteraHermesAdapter } from "./hermes-adapter";
 import { AgentInstallationManager } from "./installation-manager";
@@ -309,6 +310,62 @@ describe("Agent control Organization Foundation context", () => {
     ).toHaveBeenCalledWith("profile-a");
     manager.notifyAgentContextChanged();
     expect(capabilityAuthoringService.invalidate).toHaveBeenCalledOnce();
+  });
+
+  it("does not detach an in-flight capability inventory during a same-context refresh", async () => {
+    let manager!: AgenteraAgentControlManager;
+    let listedService: CapabilityAuthoringService | null = null;
+    let preparedService: CapabilityAuthoringService | null = null;
+    vi.spyOn(
+      CapabilityAuthoringService.prototype,
+      "listAuthoringCapabilities",
+    ).mockImplementation(async function (this: CapabilityAuthoringService) {
+      listedService = this;
+      manager.notifyAgentContextChanged();
+      return {
+        profile: { profileHandle: "default", displayName: "Default" },
+        skills: [
+          {
+            name: "research",
+            category: "",
+            description: "Research",
+          },
+        ],
+        mcpServers: [],
+      };
+    });
+    vi.spyOn(
+      CapabilityAuthoringService.prototype,
+      "prepareInstalledSkillSnapshot",
+    ).mockImplementation(function (this: CapabilityAuthoringService) {
+      preparedService = this;
+      return {
+        snapshotHandle: "snapshot-handle",
+        profileHandle: "default",
+        skillName: "research",
+        category: "",
+        description: "Research",
+        files: [],
+        fileCount: 0,
+        totalBytes: 0,
+        contentDigest: "0".repeat(64),
+        findings: [],
+        expiresAt: "2026-08-06T00:10:00.000Z",
+      };
+    });
+    ({ manager } = fullManager(() => ({
+      scope: "ORGANIZATION",
+      organizationId: ORGANIZATION_ID,
+      role: "owner",
+    })));
+
+    await manager.listAuthoringCapabilities("default");
+    manager.prepareInstalledSkillSnapshot({
+      profileId: "default",
+      skillName: "research",
+    });
+
+    expect(preparedService).toBe(listedService);
   });
 
   it("routes explicit Organization experience preparation through trusted Installation and Profile state", async () => {
