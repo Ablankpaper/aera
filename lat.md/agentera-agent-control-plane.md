@@ -198,6 +198,8 @@ One Electron userData root may outlive several product logins, so every local Ag
 
 [[src/main/agentera-agent-control/db.ts#AGENTERA_CONTROL_PLANE_SCHEMA_VERSION]] schema v3 adds account ownership plus exact draft target and installation source variants. Verified versions use account-partitioned rows and paths, while migrated v2 USER rows retain their legacy cache paths.
 
+The filesystem-backed legacy migration proof keeps the default five-second budget on POSIX and uses the established bounded 30-second Windows budget for slower hosted runners; the suite-wide timeout remains unchanged.
+
 [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] resolves the current owner for each local operation and rebuilds Runtime components after an owner change. [[tests/agentera-agent-owner-isolation.test.ts]] proves that one long-lived manager cannot list, count, or open the previous account's draft; store-level tests cover versions, installations, bindings, and pending delivery.
 
 ## Immutable publication
