@@ -111,6 +111,7 @@ describe("Agent control Organization Foundation context", () => {
         confirmInstalledSkillSnapshot: (...args: unknown[]) => unknown;
         prepareMcpRequirement: (...args: unknown[]) => unknown;
         confirmMcpRequirement: (...args: unknown[]) => unknown;
+        notifyContextChanged: () => void;
         invalidate: () => void;
       };
     }> = {},
@@ -370,6 +371,34 @@ describe("Agent control Organization Foundation context", () => {
     });
 
     expect(preparedService).toBe(listedService);
+  });
+
+  it("keeps capability inventory during an authenticated same-owner access refresh", () => {
+    const capabilityAuthoringService = {
+      listAuthoringCapabilities: vi.fn(),
+      prepareInstalledSkillSnapshot: vi.fn(),
+      confirmInstalledSkillSnapshot: vi.fn(),
+      prepareMcpRequirement: vi.fn(),
+      confirmMcpRequirement: vi.fn(),
+      notifyContextChanged: vi.fn(),
+      invalidate: vi.fn(),
+    };
+    const { manager } = fullManager(
+      () => ({
+        scope: "ORGANIZATION",
+        organizationId: ORGANIZATION_ID,
+        role: "owner",
+      }),
+      {},
+      { capabilityAuthoringService },
+    );
+
+    manager.notifyAccessStateChanged();
+
+    expect(
+      capabilityAuthoringService.notifyContextChanged,
+    ).toHaveBeenCalledOnce();
+    expect(capabilityAuthoringService.invalidate).not.toHaveBeenCalled();
   });
 
   it("routes explicit Organization experience preparation through trusted Installation and Profile state", async () => {

@@ -557,7 +557,7 @@ export class AgenteraAgentControlManager {
     this.organizationExperienceCandidateComponents = null;
     this.officialAgentComponents?.service.invalidate();
     this.officialAgentComponents = null;
-    this.invalidateCapabilityAuthoring();
+    this.refreshCapabilityAuthoringAccess();
     this.runtime?.capabilityBindingService.invalidate();
     this.publicationOwners.clear();
     this.emitState();
@@ -1596,8 +1596,14 @@ export class AgenteraAgentControlManager {
     return this.capabilityAuthoringService;
   }
 
-  private invalidateCapabilityAuthoring(): void {
-    this.capabilityAuthoringService?.invalidate();
+  private refreshCapabilityAuthoringAccess(): void {
+    if (this.capabilityAuthoringService === null) return;
+    try {
+      this.assertAuthoringAccess();
+      this.capabilityAuthoringService.notifyContextChanged();
+    } catch {
+      this.capabilityAuthoringService.invalidate();
+    }
   }
 
   private assertNoPendingSubmission(
