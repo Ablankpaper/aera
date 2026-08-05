@@ -87,6 +87,34 @@ describe("chat stream integrity supplemental boundary provider", () => {
     ).toEqual({ kind: "invalid" });
   });
 
+  it("recognizes a current scenario prompt wrapped by runtime context", () => {
+    expect(
+      classifyStreamIntegrityBoundaryRequest({
+        stream: true,
+        messages: [
+          {
+            role: "user",
+            content:
+              "AERA_STREAM_INTEGRITY_BOUNDARY_RECONNECT\n\n<runtime-context>isolated</runtime-context>",
+          },
+        ],
+      }),
+    ).toEqual({ kind: "reconnect" });
+
+    expect(
+      classifyStreamIntegrityBoundaryRequest({
+        stream: true,
+        messages: [
+          {
+            role: "user",
+            content:
+              "<runtime-context>isolated</runtime-context>\n\nAERA_STREAM_INTEGRITY_BOUNDARY_RECONNECT",
+          },
+        ],
+      }),
+    ).toEqual({ kind: "reconnect" });
+  });
+
   it("builds distinct long Unicode replies for all three supplemental inputs", () => {
     const replies = [
       streamIntegrityBoundaryReply("tool"),

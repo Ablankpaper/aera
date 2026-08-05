@@ -51,6 +51,12 @@ function hasBoundaryToolResult(messages: unknown[]): boolean {
   );
 }
 
+function isCurrentPrompt(content: string, prompt: string): boolean {
+  return content
+    .split(/\r?\n/u)
+    .some((line) => line.trim() === prompt);
+}
+
 export function streamIntegrityBoundaryToolCall(): StreamIntegrityBoundaryToolCall {
   return {
     id: BOUNDARY_TOOL_CALL_ID,
@@ -90,13 +96,15 @@ export function classifyStreamIntegrityBoundaryRequest(
 
   if (value.stream !== true) return { kind: "auxiliary" };
 
-  if (prompt === "AERA_STREAM_INTEGRITY_BOUNDARY_TOOL") {
+  if (isCurrentPrompt(prompt, "AERA_STREAM_INTEGRITY_BOUNDARY_TOOL")) {
     return {
       kind: "tool",
       phase: hasBoundaryToolResult(value.messages) ? "final" : "call",
     };
   }
 
-  const scenario = SCENARIO_BY_PROMPT[prompt];
+  const scenario = Object.entries(SCENARIO_BY_PROMPT).find(([marker]) =>
+    isCurrentPrompt(prompt, marker),
+  )?.[1];
   return scenario ? { kind: scenario } : { kind: "invalid" };
 }
