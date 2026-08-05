@@ -703,6 +703,16 @@ export class CapabilityAuthoringService {
           }
           const normalizedName = name.normalize("NFC");
           if (stat.isDirectory()) {
+            const nestedEntries = this.io.readdir(source);
+            if (nestedEntries.includes("SKILL.md")) {
+              const nestedSkillStat = this.io.lstat(join(source, "SKILL.md"));
+              if (
+                nestedSkillStat.isFile() &&
+                !nestedSkillStat.isSymbolicLink()
+              ) {
+                continue;
+              }
+            }
             visit(source, [...segments, normalizedName]);
             continue;
           }

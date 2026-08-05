@@ -306,6 +306,57 @@ describe("CapabilityAuthoringService", () => {
     );
   });
 
+  it("copies only the selected parent Skill and skips independent child Skills", async () => {
+    const parentSkill = writeSkill(profileA, "", "research", {
+      description: "Parent research workflow",
+      files: {
+        "notes.md": "# Parent notes\n",
+        "arxiv/SKILL.md":
+          "---\nname: arxiv\ndescription: Independent arXiv Skill\n---\n",
+        "arxiv/reference.pdf": Buffer.from([0x25, 0x50, 0x44, 0x46, 0xff]),
+      },
+    });
+    const authoring = service({
+      skills: () => [
+        {
+          name: "research",
+          category: "",
+          description: "Parent research workflow",
+          path: parentSkill,
+        },
+      ],
+    });
+    await authoring.listAuthoringCapabilities("profile-a");
+
+    const preview = authoring.prepareInstalledSkillSnapshot({
+      profileId: "profile-a",
+      skillName: "research",
+    });
+
+    expect(preview).toMatchObject({
+      skillName: "research",
+      fileCount: 2,
+      files: [
+        expect.objectContaining({
+          draftLocation: "skills/research/SKILL.md",
+        }),
+        expect.objectContaining({
+          draftLocation: "skills/research/notes.md",
+        }),
+      ],
+    });
+    expect(JSON.stringify(preview)).not.toContain("arxiv");
+    expect(
+      authoring.confirmInstalledSkillSnapshot({
+        snapshotHandle: preview.snapshotHandle,
+        confirmation: "copy-selected-skill-to-draft",
+      }),
+    ).toEqual([
+      expect.objectContaining({ path: "skills/research/SKILL.md" }),
+      expect.objectContaining({ path: "skills/research/notes.md" }),
+    ]);
+  });
+
   it("rejects path escape, symlinks, invalid UTF-8, hidden/cache files, duplicate normalized paths, and local DLP findings", async () => {
     const outside = writeSkill(profileB, "outside", "outside-skill");
     const cases: Array<{ name: string; skillPath: () => string }> = [

@@ -43,4 +43,35 @@ describe("listInstalledSkills", () => {
       },
     ]);
   });
+
+  it("lists both a parent Skill and independent child Skills in a mixed Hermes layout", () => {
+    const parentSkillPath = join(testState.hermesHome, "skills", "research");
+    const childSkillPath = join(parentSkillPath, "arxiv");
+    mkdirSync(childSkillPath, { recursive: true });
+    writeFileSync(
+      join(parentSkillPath, "SKILL.md"),
+      "---\nname: research\ndescription: Parent research workflow\n---\n",
+      "utf8",
+    );
+    writeFileSync(
+      join(childSkillPath, "SKILL.md"),
+      "---\nname: arxiv\ndescription: Search arXiv papers\n---\n",
+      "utf8",
+    );
+
+    expect(listInstalledSkills("default")).toEqual([
+      {
+        name: "research",
+        category: "",
+        description: "Parent research workflow",
+        path: parentSkillPath,
+      },
+      {
+        name: "arxiv",
+        category: "research",
+        description: "Search arXiv papers",
+        path: childSkillPath,
+      },
+    ]);
+  });
 });

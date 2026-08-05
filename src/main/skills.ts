@@ -101,7 +101,6 @@ export function listInstalledSkills(profile?: string): InstalledSkill[] {
             path: categoryPath,
           });
         }
-        continue;
       }
 
       const entries = readdirSync(categoryPath);
