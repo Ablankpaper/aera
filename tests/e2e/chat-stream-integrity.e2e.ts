@@ -22,6 +22,7 @@ import {
   launchRuntimeDesktop,
   type ProductAuthHarness,
 } from "./support/agentera-product-auth-harness";
+import { classifyStreamIntegrityProviderRequest } from "./support/chat-stream-integrity-provider";
 
 const TURN_COUNT = 20;
 const MODEL = "aera-stream-integrity-e2e";
@@ -46,8 +47,9 @@ interface CompletionMetrics {
 }
 
 interface ProviderState {
-  nonStreamingRequests: number;
-  requestCount: number;
+  auxiliaryRequestCount: number;
+  chatRequestCount: number;
+  invalidRequestCount: number;
 }
 
 function sha256(text: string): string {
@@ -193,8 +195,9 @@ async function startProvider(): Promise<{
   state: ProviderState;
 }> {
   const state: ProviderState = {
-    nonStreamingRequests: 0,
-    requestCount: 0,
+    auxiliaryRequestCount: 0,
+    chatRequestCount: 0,
+    invalidRequestCount: 0,
   };
   const server = createServer((request, response) => {
     void (async () => {
@@ -219,30 +222,46 @@ async function startProvider(): Promise<{
 
       let requestBody = "";
       for await (const chunk of request) requestBody += String(chunk);
-      const payload = JSON.parse(requestBody) as { stream?: unknown };
-      state.requestCount += 1;
-      if (payload.stream !== true) state.nonStreamingRequests += 1;
-      const text = replyForTurn(state.requestCount);
-      const id = `chatcmpl-stream-integrity-${state.requestCount}`;
+      const payload = JSON.parse(requestBody) as unknown;
+      const classified = classifyStreamIntegrityProviderRequest(payload);
 
-      if (payload.stream !== true) {
+      if (classified.kind === "invalid") {
+        state.invalidRequestCount += 1;
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            error: {
+              message: "Unclassified stream-integrity provider request",
+              type: "invalid_request_error",
+            },
+          }),
+        );
+        return;
+      }
+
+      if (classified.kind === "auxiliary") {
+        state.auxiliaryRequestCount += 1;
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
           JSON.stringify({
-            id,
+            id: `chatcmpl-stream-integrity-aux-${state.auxiliaryRequestCount}`,
             object: "chat.completion",
             model: MODEL,
             choices: [
               {
                 index: 0,
                 finish_reason: "stop",
-                message: { role: "assistant", content: text },
+                message: { role: "assistant", content: "流完整性验收" },
               },
             ],
           }),
         );
         return;
       }
+
+      state.chatRequestCount += 1;
+      const text = replyForTurn(classified.turn);
+      const id = `chatcmpl-stream-integrity-${classified.turn}`;
 
       response.writeHead(200, {
         "cache-control": "no-cache",
@@ -754,8 +773,8 @@ test("matches visible, completion, and state.db text for 20 isolated one-charact
       });
     }
 
-    expect(provider.state.requestCount).toBe(TURN_COUNT);
-    expect(provider.state.nonStreamingRequests).toBe(0);
+    expect(provider.state.chatRequestCount).toBe(TURN_COUNT);
+    expect(provider.state.invalidRequestCount).toBe(0);
     expect(
       ownedRuntimeProcessIds(preparedRuntimeRoot).some((pid) =>
         launchedRuntimeProcessIds.has(pid),
@@ -777,7 +796,9 @@ test("matches visible, completion, and state.db text for 20 isolated one-charact
             desktopSha,
             runtimeSha,
             turnCount: TURN_COUNT,
-            providerRequests: provider.state.requestCount,
+            providerAuxiliaryRequests: provider.state.auxiliaryRequestCount,
+            providerChatRequests: provider.state.chatRequestCount,
+            providerInvalidRequests: provider.state.invalidRequestCount,
             oneCharacterSseChunks: true,
             evidence,
           },
