@@ -22,6 +22,7 @@ import type {
   OfficialAgentDetail,
   OfficialAgentSummary,
   OfficialManagedUpdate,
+  OrganizationAgentSubmissionSummary,
 } from "../../../../shared/agentera-agent-control";
 import AgentControlPanel, {
   type AgentControlProfileOption,
@@ -37,6 +38,8 @@ const NEXT_VERSION_ID = "aaaaaaaa-2222-4222-8222-222222222222";
 const INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
 const WORKSPACE_ID = "66666666-6666-4666-8666-666666666666";
 const ORGANIZATION_ID = "99999999-9999-4999-8999-999999999999";
+const DRAFT_ID = "77777777-7777-4777-8777-777777777777";
+const SUBMISSION_ID = "88888888-8888-4888-8888-888888888888";
 const OFFICIAL_RELEASE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const OFFICIAL_REVISION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
@@ -98,6 +101,44 @@ function publishedDraft(): AgentDraftDetail {
       definitionId: DEFINITION_ID,
       versionId: VERSION_ID,
     },
+  };
+}
+
+function organizationSubmission(
+  status: OrganizationAgentSubmissionSummary["status"],
+  localDraftRevision = 1,
+): OrganizationAgentSubmissionSummary {
+  return {
+    id: SUBMISSION_ID,
+    organizationId: ORGANIZATION_ID,
+    kind: "initial",
+    definitionId: DEFINITION_ID,
+    baseVersionId: null,
+    publishedVersionId: status === "approved" ? VERSION_ID : null,
+    localDraftId: DRAFT_ID,
+    localDraftRevision,
+    submittedByUserId: "55555555-5555-4555-8555-555555555555",
+    contentDigest: "a".repeat(64),
+    status,
+    revision: status === "pending" ? 1 : 2,
+    submittedAt: "2026-07-21T01:00:00.000Z",
+    terminalAt:
+      status === "pending" ? null : "2026-07-21T02:00:00.000Z",
+    review:
+      status === "approved"
+        ? {
+            id: "66666666-6666-4666-8666-666666666666",
+            reviewerUserId: "55555555-5555-4555-8555-555555555555",
+            decision: "approve",
+            reasonCode: null,
+            safeNote: null,
+            organizationPolicySnapshotId:
+              "99999999-9999-4999-8999-999999999998",
+            organizationPolicyVersion: 1,
+            reviewedContentDigest: "a".repeat(64),
+            reviewedAt: "2026-07-21T02:00:00.000Z",
+          }
+        : null,
   };
 }
 
@@ -268,6 +309,7 @@ function installAPI(
     createDraft: vi.fn(),
     updateDraft: vi.fn(),
     deleteDraft: vi.fn(),
+    discardUnpublishedDraft: vi.fn(),
     preparePublication: vi.fn(),
     confirmPublication: vi.fn(),
     prepareOrganizationSubmission: vi.fn(),
@@ -770,6 +812,223 @@ describe("AgentControlPanel", () => {
       );
     },
   );
+
+  it("reconciles Organization submissions before drafts and renders one dirty published card", async () => {
+    const dirtyDraft = {
+      ...publishedDraft(),
+      revision: 2,
+      updatedAt: "2026-07-21T03:00:00.000Z",
+    };
+    const api = installAPI({
+      getState: vi.fn(async () =>
+        success(
+          controlState({
+            scope: "ORGANIZATION",
+            organizationId: ORGANIZATION_ID,
+            role: "owner",
+          }),
+        ),
+      ),
+      listOrganizationSubmissions: vi.fn(async () =>
+        success([organizationSubmission("approved")]),
+      ),
+      listDrafts: vi.fn(async () => success([dirtyDraft as AgentDraft])),
+      listDefinitions: vi.fn(async () => success([definition()])),
+    });
+
+    render(
+      <AgentControlPanel
+        profiles={[]}
+        initialTab="enterprise"
+        advancedOpenByDefault={false}
+      />,
+    );
+
+    const grid = await screen.findByTestId("personal-agent-grid");
+    expect(within(grid).getAllByText("Research Agent")).toHaveLength(1);
+    expect(
+      within(grid).getByText(
+        "agents.control.organization.lifecycle.approvedDirty",
+      ),
+    ).toBeVisible();
+    expect(
+      api.listOrganizationSubmissions.mock.invocationCallOrder[0],
+    ).toBeLessThan(api.listDrafts.mock.invocationCallOrder[0]);
+  });
+
+  it("deletes only a local Organization draft after its own confirmation", async () => {
+    const api = installAPI({
+      getState: vi.fn(async () =>
+        success(
+          controlState({
+            scope: "ORGANIZATION",
+            organizationId: ORGANIZATION_ID,
+            role: "owner",
+          }),
+        ),
+      ),
+      listOrganizationSubmissions: vi.fn(async () => success([])),
+      listDrafts: vi.fn(async () => success([draft() as AgentDraft])),
+      listDefinitions: vi.fn(async () => success([])),
+      deleteDraft: vi.fn(async () => success(true as const)),
+    });
+
+    render(
+      <AgentControlPanel
+        profiles={[]}
+        initialTab="enterprise"
+        advancedOpenByDefault={false}
+      />,
+    );
+
+    fireEvent.click(
+      (await screen.findByText("Workspace Research Agent")).closest("button")!,
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.control.organization.deleteDraft",
+      }),
+    );
+    expect(
+      screen.getByRole("dialog", {
+        name: "agents.control.organization.deleteDraftTitle",
+      }),
+    ).toHaveTextContent("agents.control.organization.deleteDraftBoundary");
+    expect(api.deleteDraft).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.control.organization.confirmDeleteDraft",
+      }),
+    );
+    await waitFor(() => expect(api.deleteDraft).toHaveBeenCalledWith(DRAFT_ID));
+    expect(api.archiveInstallation).not.toHaveBeenCalled();
+    expect(api.discardUnpublishedDraft).not.toHaveBeenCalled();
+  });
+
+  it("discards only unpublished edits from a dirty published card", async () => {
+    const dirtyDraft = { ...publishedDraft(), revision: 2 };
+    const api = installAPI({
+      getState: vi.fn(async () =>
+        success(
+          controlState({
+            scope: "ORGANIZATION",
+            organizationId: ORGANIZATION_ID,
+            role: "owner",
+          }),
+        ),
+      ),
+      listOrganizationSubmissions: vi.fn(async () =>
+        success([organizationSubmission("approved")]),
+      ),
+      listDrafts: vi.fn(async () => success([dirtyDraft as AgentDraft])),
+      discardUnpublishedDraft: vi.fn(async () => success(true as const)),
+    });
+
+    render(
+      <AgentControlPanel
+        profiles={[]}
+        initialTab="enterprise"
+        advancedOpenByDefault={false}
+      />,
+    );
+
+    fireEvent.click((await screen.findByText("Research Agent")).closest("button")!);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.control.organization.discardUnpublished",
+      }),
+    );
+    expect(
+      screen.getByRole("dialog", {
+        name: "agents.control.organization.discardUnpublishedTitle",
+      }),
+    ).toHaveTextContent(
+      "agents.control.organization.discardUnpublishedBoundary",
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.control.organization.confirmDiscardUnpublished",
+      }),
+    );
+    await waitFor(() =>
+      expect(api.discardUnpublishedDraft).toHaveBeenCalledWith(DRAFT_ID),
+    );
+    expect(api.deleteDraft).not.toHaveBeenCalled();
+    expect(api.archiveInstallation).not.toHaveBeenCalled();
+  });
+
+  it("withdraws a pending card without exposing draft deletion", async () => {
+    const pending = organizationSubmission("pending");
+    const withdrawn = {
+      ...pending,
+      status: "withdrawn" as const,
+      terminalAt: "2026-07-21T02:00:00.000Z",
+    };
+    const api = installAPI({
+      getState: vi.fn(async () =>
+        success(
+          controlState({
+            scope: "ORGANIZATION",
+            organizationId: ORGANIZATION_ID,
+            role: "owner",
+          }),
+        ),
+      ),
+      listOrganizationSubmissions: vi.fn(async () => success([pending])),
+      listDrafts: vi.fn(async () => success([draft() as AgentDraft])),
+      listDefinitions: vi.fn(async () => success([])),
+      prepareOrganizationWithdrawal: vi.fn(async () =>
+        success({
+          withdrawalHandle: "aaaaaaaa-8888-4888-8888-888888888888",
+          submission: pending,
+          revision: pending.revision,
+          contentDigest: pending.contentDigest,
+          expiresAt: "2026-07-21T02:00:00.000Z",
+        }),
+      ),
+      confirmOrganizationWithdrawal: vi.fn(async () => success(withdrawn)),
+    });
+
+    render(
+      <AgentControlPanel
+        profiles={[]}
+        initialTab="enterprise"
+        advancedOpenByDefault={false}
+      />,
+    );
+
+    fireEvent.click(
+      (await screen.findByText("Workspace Research Agent")).closest("button")!,
+    );
+    expect(
+      screen.queryByRole("button", {
+        name: "agents.control.organization.deleteDraft",
+      }),
+    ).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.control.organization.withdraw",
+      }),
+    );
+    expect(
+      await screen.findByRole("dialog", {
+        name: "agents.control.organization.withdraw",
+      }),
+    ).toHaveTextContent("agents.control.organization.withdrawalBoundary");
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.control.organization.confirmWithdrawal",
+      }),
+    );
+    await waitFor(() =>
+      expect(api.confirmOrganizationWithdrawal).toHaveBeenCalledWith({
+        withdrawalHandle: "aaaaaaaa-8888-4888-8888-888888888888",
+        confirmation: "withdraw-organization-agent",
+      }),
+    );
+    expect(api.deleteDraft).not.toHaveBeenCalled();
+    expect(api.discardUnpublishedDraft).not.toHaveBeenCalled();
+  });
 
   it("keeps the selected Organization while My Agents explicitly operates on USER assets", async () => {
     const context: AgenteraAgentControlPublicState["context"] = {

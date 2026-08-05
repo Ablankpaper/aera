@@ -28,6 +28,8 @@ import {
 const DRAFT_ID = "11111111-1111-4111-8111-111111111111";
 const DEFINITION_ID = "22222222-2222-4222-8222-222222222222";
 const VERSION_ID = "33333333-3333-4333-8333-333333333333";
+const PUBLISHED_VERSION_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const NEXT_PUBLISHED_VERSION_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const NOW = new Date("2026-07-19T17:00:00.000Z");
 const OWNER = { tenantId: DEFINITION_ID, ownerId: VERSION_ID } as const;
 const OTHER_OWNER = {
@@ -186,6 +188,150 @@ describe("Aera desktop-local Agent drafts", () => {
       assets: assets("third"),
     });
     expect(revisionThree.revision).toBe(3);
+  });
+
+  it("records an older published revision without rewriting the newer working copy", () => {
+    store.createDraft({
+      sourceAgentDefinitionId: null,
+      baseAgentVersionId: null,
+      displayName: "Research Agent",
+      icon: null,
+      manifest: manifest(),
+      assets: assets("revision one"),
+    });
+    store.updateDraft({
+      id: DRAFT_ID,
+      expectedRevision: 1,
+      displayName: "Research Agent 2",
+      icon: null,
+      manifest: manifest("Submitted revision"),
+      assets: assets("revision two"),
+    });
+    const current = store.updateDraft({
+      id: DRAFT_ID,
+      expectedRevision: 2,
+      displayName: "Research Agent 3",
+      icon: null,
+      manifest: manifest("Unpublished revision"),
+      assets: assets("revision three"),
+    });
+
+    const reconciled = store.recordPublishedRevision({
+      id: DRAFT_ID,
+      publishedRevision: 2,
+      definitionId: DEFINITION_ID,
+      versionId: PUBLISHED_VERSION_ID,
+    });
+
+    expect(reconciled).toMatchObject({
+      revision: 3,
+      sourceAgentDefinitionId: DEFINITION_ID,
+      baseAgentVersionId: PUBLISHED_VERSION_ID,
+      publishedRevision: {
+        revision: 2,
+        definitionId: DEFINITION_ID,
+        versionId: PUBLISHED_VERSION_ID,
+      },
+    });
+    expect(reconciled.displayName).toBe(current.displayName);
+    expect(reconciled.manifest.identity.systemPrompt).toBe(
+      "Unpublished revision",
+    );
+    expect(store.readAsset(DRAFT_ID, "knowledge/notes.md").toString()).toBe(
+      "revision three",
+    );
+    expect(
+      store.recordPublishedRevision({
+        id: DRAFT_ID,
+        publishedRevision: 2,
+        definitionId: DEFINITION_ID,
+        versionId: PUBLISHED_VERSION_ID,
+      }),
+    ).toEqual(reconciled);
+  });
+
+  it("keeps published identity monotonic and scoped to the current owner", () => {
+    store.createDraft({
+      sourceAgentDefinitionId: null,
+      baseAgentVersionId: null,
+      displayName: "Research Agent",
+      icon: null,
+      manifest: manifest(),
+      assets: assets(),
+    });
+    store.updateDraft({
+      id: DRAFT_ID,
+      expectedRevision: 1,
+      displayName: "Research Agent 2",
+      icon: null,
+      manifest: manifest("Second revision"),
+      assets: assets("second"),
+    });
+    store.recordPublishedRevision({
+      id: DRAFT_ID,
+      publishedRevision: 1,
+      definitionId: DEFINITION_ID,
+      versionId: PUBLISHED_VERSION_ID,
+    });
+
+    expect(() =>
+      store.recordPublishedRevision({
+        id: DRAFT_ID,
+        publishedRevision: 1,
+        definitionId: DEFINITION_ID,
+        versionId: NEXT_PUBLISHED_VERSION_ID,
+      }),
+    ).toThrowError(
+      expect.objectContaining<Partial<AgentDraftStoreError>>({
+        code: "draft_conflict",
+      }),
+    );
+    expect(() =>
+      store.recordPublishedRevision({
+        id: DRAFT_ID,
+        publishedRevision: 2,
+        definitionId: OTHER_WORKSPACE_ID,
+        versionId: NEXT_PUBLISHED_VERSION_ID,
+      }),
+    ).toThrowError(
+      expect.objectContaining<Partial<AgentDraftStoreError>>({
+        code: "draft_conflict",
+      }),
+    );
+
+    const advanced = store.recordPublishedRevision({
+      id: DRAFT_ID,
+      publishedRevision: 2,
+      definitionId: DEFINITION_ID,
+      versionId: NEXT_PUBLISHED_VERSION_ID,
+    });
+    expect(advanced.publishedRevision).toEqual({
+      revision: 2,
+      definitionId: DEFINITION_ID,
+      versionId: NEXT_PUBLISHED_VERSION_ID,
+    });
+    expect(
+      store.recordPublishedRevision({
+        id: DRAFT_ID,
+        publishedRevision: 1,
+        definitionId: DEFINITION_ID,
+        versionId: PUBLISHED_VERSION_ID,
+      }),
+    ).toEqual(advanced);
+
+    const otherOwner = new AgentDraftStore({ database, owner: OTHER_OWNER });
+    expect(() =>
+      otherOwner.recordPublishedRevision({
+        id: DRAFT_ID,
+        publishedRevision: 2,
+        definitionId: DEFINITION_ID,
+        versionId: NEXT_PUBLISHED_VERSION_ID,
+      }),
+    ).toThrowError(
+      expect.objectContaining<Partial<AgentDraftStoreError>>({
+        code: "draft_not_found",
+      }),
+    );
   });
 
   it("keeps the last good revision when an asset write fails", () => {

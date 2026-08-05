@@ -28,6 +28,21 @@ describe("Organization Agent renderer boundary", () => {
     }
   });
 
+  // @lat: [[agentera-organizations#AgentEra Organization and Organization Agent V1#Organization Agent approval#Draft working-copy lifecycle]]
+  it("keeps restart-safe draft lifecycle actions in the real Electron gate", () => {
+    const e2e = source("tests/e2e/agentera-organization-agent.e2e.ts");
+    for (const required of [
+      '"updateDraft"',
+      "UNPUBLISHED_AFTER_SUBMISSION",
+      "Published with unpublished changes",
+      '"deleteDraft"',
+      '"archiveInstallation"',
+    ]) {
+      expect(e2e).toContain(required);
+    }
+    expect(e2e).toContain("await owner.device.app.close()");
+  });
+
   it("does not accept renderer assertions of Organization ownership or runtime state", () => {
     const contract = source("src/main/agentera-agent-control/ipc-contract.ts");
     const start = contract.indexOf(

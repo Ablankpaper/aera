@@ -364,11 +364,15 @@ Organization definitions and versions are shared control-plane assets, but every
 
 [[src/main/agentera-agent-control/organization-publication-service.ts#OrganizationPublicationService]] keeps editable drafts local and uses one-use handles for immutable submission, review, and withdrawal. Renderer calls never supply Organization role, account authority, Profile paths, or cloud credentials.
 
+An approved submission carries its exact immutable Version ID. The service joins it only to the trusted local submission reference, while [[src/main/agentera-agent-control/draft-store.ts#AgentDraftStore#recordPublishedRevision]] records the submitted revision without overwriting newer draft content; digest, Definition, Version, or owner conflicts fail closed.
+
+[[src/renderer/src/screens/Agents/agentLifecycle.ts#deriveAgentLifecycle]] merges the Definition, trusted local draft, linked submission, and Installation into one lifecycle card. Pending work can only be edited or withdrawn; deleting a local draft, discarding unpublished edits, withdrawing a Cloud submission, and archiving a USER-owned Installation remain four distinct confirmations and main-process operations.
+
 [[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager]] records `sourceScope=ORGANIZATION` only as catalog provenance while retaining USER tenant, owner, device, policy overlay, and Runtime Profile ownership. [[src/main/agentera-agent-control/hermes-projection.ts#HermesProjectionManager]] materializes signed Knowledge, Skill, and SOP bytes read-only outside `HERMES_HOME`.
 
 [[src/main/agentera-agent-control/hermes-adapter.ts#AgenteraHermesAdapter#prepareInstalledTurnPlan]] freezes the planned Version, policy, Runtime, Profile, model route, and tool digest per conversation before the atomic local snapshot commit. [[src/main/agentera-agent-control/hermes-adapter.ts#assertNewConversationContext]] rejects only a new Organization conversation after trusted context removal; an existing RuntimeBinding remains stable.
 
-[[tests/e2e/agentera-organization-agent.e2e.ts]] proves the four-role approval and installation flow, v1/v2 binding stability, offline verified use, reconnect removal gate, read-only projection, and byte-identical employee-private Memory and Skills. Run it with `npm run test:e2e:organization-agent`.
+[[tests/e2e/agentera-organization-agent.e2e.ts]] proves the four-role approval and installation flow, restart-safe dirty-draft reconciliation and one-card presentation, withdrawal, local draft deletion, Installation archive, v1/v2 binding stability, offline verified use, reconnect removal gate, read-only projection, and byte-identical employee-private Memory and Skills. Run it with `npm run test:e2e:organization-agent`.
 
 ### Workspace Agent isolation
 

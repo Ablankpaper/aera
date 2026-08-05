@@ -115,6 +115,15 @@ export default {
         withdrawn: "取り下げ済み",
         superseded: "新しい提出に置換済み",
       },
+      lifecycle: {
+        localOnly: "Local draft",
+        pending: "Pending review",
+        rejected: "Review rejected",
+        withdrawn: "Withdrawn",
+        superseded: "Superseded",
+        approvedCurrent: "Published",
+        approvedDirty: "Published with unpublished changes",
+      },
       contentDigest: "コンテンツダイジェスト",
       baseVersion: "基準バージョン",
       initialVersion: "初回バージョン",
@@ -126,6 +135,16 @@ export default {
       confirmWithdrawal: "取り下げを確定",
       withdrawalBoundary:
         "取り下げはこの保留中の提出だけを閉じます。ローカルドラフトと Aera Runtime データは変更されません。",
+      deleteDraft: "Delete draft",
+      deleteDraftTitle: "Delete local draft",
+      deleteDraftBoundary:
+        "Only the current account's local working copy is deleted. Enterprise submissions, published versions, installations, Memory, and Profiles remain unchanged.",
+      confirmDeleteDraft: "Delete draft",
+      discardUnpublished: "Discard unpublished changes",
+      discardUnpublishedTitle: "Discard unpublished changes",
+      discardUnpublishedBoundary:
+        "The current local working copy is removed. The published enterprise Agent, installation, Memory, and Profile remain unchanged.",
+      confirmDiscardUnpublished: "Discard changes",
       draftReadOnly:
         "この企業ドラフトは読み取り専用です。オーナーまたは管理者として再接続してから変更してください。",
     },

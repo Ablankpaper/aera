@@ -82,6 +82,14 @@ Pending submissions terminate as approved, rejected, withdrawn, or superseded; a
 
 `aera-cloud/internal/agentcontrol/organization_submission_repository.go:markOrganizationSubmissionSuperseded` implements the terminal transition, proven by `organization_submission_repository_test.go:TestOrganizationNextApprovalCommitsSupersededWithoutVersion`.
 
+### Draft working-copy lifecycle
+
+One Organization Definition, its trusted local draft, latest linked submission, and local Installation render as one card with state-specific local actions.
+
+Approval records the exact submitted revision without overwriting newer edits, so the card reads “Published” when current and “Published with unpublished changes” when the working copy is newer. Pending submissions allow withdrawal but block deletion; local-only or terminal drafts may be deleted, dirty published working copies may be discarded, and Installations are archived separately without deleting immutable Cloud history, Profile, Memory, or private learning.
+
+[[src/renderer/src/screens/Agents/agentLifecycle.ts#deriveAgentLifecycle]] owns the state/action matrix. [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#deleteDraft]] enforces the pending guard in main, and the isolated Electron gate in [[tests/e2e/agentera-organization-agent.e2e.ts]] proves reconciliation after a main-process restart, one-card presentation, disposable draft deletion, withdrawal, and Installation archive.
+
 ### Role, policy, and DLP recheck
 
 Owner/Admin may submit and review, Auditor is read-only, and Member may discover and install; policy and DLP are rechecked at review time.

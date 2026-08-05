@@ -2476,6 +2476,15 @@ const agenteraAgentsAPI = {
     scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentControlResult<true>> =>
     ipcRenderer.invoke("agentera-agents-delete-draft", id, scope),
+  discardUnpublishedDraft: (
+    id: string,
+    scope?: AgenteraAgentOperationScope,
+  ): Promise<AgenteraAgentControlResult<true>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-discard-unpublished-draft",
+      id,
+      scope,
+    ),
   preparePublication: (
     id: string,
     scope?: AgenteraAgentOperationScope,

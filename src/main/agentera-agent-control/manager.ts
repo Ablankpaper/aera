@@ -564,7 +564,28 @@ export class AgenteraAgentControlManager {
   deleteDraft(id: string, scope?: AgenteraAgentOperationScope): true {
     const context = this.operationAssetContext(scope);
     this.assertAuthoringAccess(context);
+    this.assertNoPendingSubmission(id, context);
     this.requireDrafts(context).deleteDraft(id);
+    this.emitState();
+    return true;
+  }
+
+  discardUnpublishedDraft(
+    id: string,
+    scope?: AgenteraAgentOperationScope,
+  ): true {
+    const context = this.operationAssetContext(scope);
+    this.assertAuthoringAccess(context);
+    const drafts = this.requireDrafts(context);
+    const draft = drafts.getDraft(id);
+    if (
+      draft.publishedRevision === null ||
+      draft.revision <= draft.publishedRevision.revision
+    ) {
+      throw codedError("draft_conflict");
+    }
+    this.assertNoPendingSubmission(id, context);
+    drafts.deleteDraft(id);
     this.emitState();
     return true;
   }
@@ -1331,6 +1352,43 @@ export class AgenteraAgentControlManager {
     context: AgentAssetContext = this.assetContext(),
   ): string {
     return `${runtimeComponentKey(this.owner())}\0${contextKey(context)}`;
+  }
+
+  private assertNoPendingSubmission(
+    id: string,
+    context: AgentAssetContext,
+  ): void {
+    const database = this.options.database;
+    if (!database) throw codedError("invalid_request");
+    const owner = this.owner();
+    const workspaceId =
+      context.scope === "WORKSPACE" ? context.workspaceId : null;
+    const organizationId =
+      context.scope === "ORGANIZATION" ? context.organizationId : null;
+    const pending = database.sqlite
+      .prepare(
+        `SELECT 1 AS pending
+         FROM organization_agent_submission_refs AS reference
+         INNER JOIN agent_drafts AS draft
+           ON draft.id = reference.local_draft_id
+         WHERE reference.local_draft_id = ?
+           AND reference.cloud_status = 'pending'
+           AND draft.tenant_id = ? AND draft.owner_id = ?
+           AND draft.target_scope = ? AND draft.workspace_id IS ?
+           AND draft.organization_id IS ?
+         LIMIT 1`,
+      )
+      .get(
+        id,
+        owner.tenantId,
+        owner.ownerId,
+        context.scope,
+        workspaceId,
+        organizationId,
+      );
+    if (pending !== undefined) {
+      throw codedError("organization_submission_conflict");
+    }
   }
 
   private assertWorkspacePublicationRole(

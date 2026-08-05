@@ -225,6 +225,7 @@ const ORGANIZATION_AGENT_SCHEMA_PROPERTIES = {
     "id",
     "kind",
     "organization_id",
+    "published_version_id",
     "review",
     "revision",
     "status",

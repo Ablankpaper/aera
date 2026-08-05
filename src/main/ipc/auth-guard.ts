@@ -191,6 +191,7 @@ const AUTHENTICATED_CHANNELS = [
   "agentera-encrypted-backup-set-daily-schedule",
   "agentera-agents-create-draft",
   "agentera-agents-delete-draft",
+  "agentera-agents-discard-unpublished-draft",
   "agentera-agents-get-draft",
   "agentera-agents-get-state",
   "agentera-agents-list-drafts",

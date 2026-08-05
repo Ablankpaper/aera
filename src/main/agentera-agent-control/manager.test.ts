@@ -35,6 +35,9 @@ const PERSONAL_VERSION_ID = "40000000-0000-4000-8000-000000000002";
 const PERSONAL_PROFILE_ID = "40000000-0000-4000-8000-000000000003";
 const PERSONAL_POLICY_ID = "40000000-0000-4000-8000-000000000004";
 const PERSONAL_BINDING_ID = "40000000-0000-4000-8000-000000000005";
+const ORGANIZATION_SUBMISSION_ID = "50000000-0000-4000-8000-000000000001";
+const ORGANIZATION_DEFINITION_ID = "50000000-0000-4000-8000-000000000002";
+const ORGANIZATION_VERSION_ID = "50000000-0000-4000-8000-000000000003";
 
 function officialSummary(): OfficialAgentSummary {
   return {
@@ -466,6 +469,85 @@ describe("Agent control Organization Foundation context", () => {
       }
     },
   );
+
+  it("requires a pending Organization submission to be withdrawn before draft deletion", () => {
+    const { manager, database } = fullManager(() => ({
+      scope: "ORGANIZATION",
+      organizationId: ORGANIZATION_ID,
+      role: "owner",
+    }));
+    const draft = manager.createDraft(draftInput());
+    database.sqlite
+      .prepare(
+        `INSERT INTO organization_agent_submission_refs (
+           local_draft_id, local_draft_revision, organization_id,
+           cloud_submission_id, content_digest, cloud_status, cloud_revision,
+           submitted_at, last_verified_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        draft.id,
+        draft.revision,
+        ORGANIZATION_ID,
+        ORGANIZATION_SUBMISSION_ID,
+        "ab".repeat(32),
+        "pending",
+        1,
+        "2026-08-05T10:00:00.000Z",
+        "2026-08-05T10:00:00.000Z",
+      );
+
+    expect(() => manager.deleteDraft(draft.id)).toThrowError(
+      expect.objectContaining({ code: "organization_submission_conflict" }),
+    );
+    expect(manager.listDrafts()).toHaveLength(1);
+
+    database.sqlite
+      .prepare(
+        `UPDATE organization_agent_submission_refs
+         SET cloud_status = 'withdrawn' WHERE cloud_submission_id = ?`,
+      )
+      .run(ORGANIZATION_SUBMISSION_ID);
+    expect(manager.deleteDraft(draft.id)).toBe(true);
+    expect(manager.listDrafts()).toEqual([]);
+  });
+
+  it("discards only a newer unpublished working copy through its own action", () => {
+    const { manager, database } = fullManager(() => ({
+      scope: "ORGANIZATION",
+      organizationId: ORGANIZATION_ID,
+      role: "admin",
+    }));
+    const draft = manager.createDraft(draftInput());
+    expect(() => manager.discardUnpublishedDraft(draft.id)).toThrowError(
+      expect.objectContaining({ code: "draft_conflict" }),
+    );
+
+    manager.updateDraft({
+      id: draft.id,
+      expectedRevision: 1,
+      ...draftInput(),
+      displayName: "Organization Research Agent 2",
+    });
+    database.sqlite
+      .prepare(
+        `UPDATE agent_drafts
+         SET source_agent_definition_id = ?, base_agent_version_id = ?,
+             published_definition_id = ?, published_version_id = ?,
+             published_revision = 1
+         WHERE id = ?`,
+      )
+      .run(
+        ORGANIZATION_DEFINITION_ID,
+        ORGANIZATION_VERSION_ID,
+        ORGANIZATION_DEFINITION_ID,
+        ORGANIZATION_VERSION_ID,
+        draft.id,
+      );
+
+    expect(manager.discardUnpublishedDraft(draft.id)).toBe(true);
+    expect(manager.listDrafts()).toEqual([]);
+  });
 
   it("invalidates Organization submission handles on trusted context changes", async () => {
     let context: AgenteraAgentControlContext = {

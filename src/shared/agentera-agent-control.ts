@@ -266,6 +266,9 @@ export interface OrganizationAgentSubmissionSummary {
   kind: "initial" | "next";
   definitionId: string;
   baseVersionId: string | null;
+  publishedVersionId: string | null;
+  localDraftId: string | null;
+  localDraftRevision: number | null;
   submittedByUserId: string;
   contentDigest: string;
   status: OrganizationAgentSubmissionStatus;

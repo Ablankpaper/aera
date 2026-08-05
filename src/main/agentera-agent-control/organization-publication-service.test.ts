@@ -42,6 +42,10 @@ const DRAFT_ID = "66666666-6666-4666-8666-666666666666";
 const HANDLE_ID = "77777777-7777-4777-8777-777777777777";
 const SUBMISSION_ID = "88888888-8888-4888-8888-888888888888";
 const DEFINITION_ID = "99999999-9999-4999-8999-999999999999";
+const VERSION_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const OTHER_DEFINITION_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const OTHER_DRAFT_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+const OTHER_SUBMISSION_ID = "ffffffff-ffff-4fff-8fff-ffffffffffff";
 const REVIEW_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const POLICY_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const NOW = new Date("2026-07-21T04:00:00.000Z");
@@ -80,12 +84,14 @@ function submissionDetail(
   const canonical = canonicalizeEditableAgent(manifest(), [
     { path: "knowledge/notes.md", content: "# Notes\n" },
   ]);
+  const status = overrides.status ?? "pending";
   return {
     id: SUBMISSION_ID,
     organization_id: ORGANIZATION_ID,
     kind: "initial",
     definition_id: DEFINITION_ID,
     base_version_id: null,
+    published_version_id: status === "approved" ? VERSION_ID : null,
     submitted_by_user_id: USER_ID,
     content_digest: canonical.contentDigest,
     status: "pending",
@@ -101,6 +107,31 @@ function submissionDetail(
     bundle_digest: canonical.bundleDigest,
     ...overrides,
   };
+}
+
+function approvedDetail(
+  overrides: Partial<OrganizationAgentSubmissionDetailRecord> = {},
+): OrganizationAgentSubmissionDetailRecord {
+  const contentDigest =
+    overrides.content_digest ?? submissionDetail().content_digest;
+  return submissionDetail({
+    status: "approved",
+    revision: 2,
+    terminal_at: NOW.toISOString(),
+    published_version_id: VERSION_ID,
+    review: {
+      id: REVIEW_ID,
+      reviewer_user_id: OTHER_USER_ID,
+      decision: "approve",
+      reason_code: null,
+      safe_note: null,
+      organization_policy_snapshot_id: POLICY_ID,
+      organization_policy_version: 1,
+      reviewed_content_digest: contentDigest,
+      reviewed_at: NOW.toISOString(),
+    },
+    ...overrides,
+  });
 }
 
 describe("Organization publication service", () => {
@@ -276,6 +307,156 @@ describe("Organization publication service", () => {
         last_verified_at: NOW.toISOString(),
       },
     ]);
+  });
+
+  it("reconciles an approved older revision without overwriting newer edits", async () => {
+    const publication = service();
+    const preview = publication.prepareSubmission(DRAFT_ID);
+    await publication.submitPrepared({
+      publicationHandle: preview.publicationHandle,
+      confirmation: "submit-organization-agent",
+    });
+    drafts.updateDraft({
+      id: DRAFT_ID,
+      expectedRevision: 1,
+      displayName: "Organization Research Agent 2",
+      icon: null,
+      manifest: manifest("Unpublished revision"),
+      assets: [{ path: "knowledge/notes.md", content: "# New notes\n" }],
+    });
+    listSubmissions.mockResolvedValue([approvedDetail()]);
+
+    const summaries = await publication.listSubmissions();
+    expect(summaries[0]).toMatchObject({
+      id: SUBMISSION_ID,
+      status: "approved",
+      publishedVersionId: VERSION_ID,
+      localDraftId: DRAFT_ID,
+      localDraftRevision: 1,
+    });
+    const reconciled = drafts.getDraft(DRAFT_ID);
+    expect(reconciled).toMatchObject({
+      revision: 2,
+      sourceAgentDefinitionId: DEFINITION_ID,
+      baseAgentVersionId: VERSION_ID,
+      publishedRevision: {
+        revision: 1,
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+      },
+    });
+    expect(reconciled.manifest.identity.systemPrompt).toBe(
+      "Unpublished revision",
+    );
+    expect(drafts.readAsset(DRAFT_ID, "knowledge/notes.md").toString()).toBe(
+      "# New notes\n",
+    );
+
+    await expect(publication.listSubmissions()).resolves.toHaveLength(1);
+    expect(drafts.getDraft(DRAFT_ID)).toEqual(reconciled);
+  });
+
+  it("fails closed for missing Version, mismatched digest, or changed Definition", async () => {
+    const publication = service();
+    const preview = publication.prepareSubmission(DRAFT_ID);
+    await publication.submitPrepared({
+      publicationHandle: preview.publicationHandle,
+      confirmation: "submit-organization-agent",
+    });
+
+    listSubmissions.mockResolvedValue([
+      approvedDetail({ published_version_id: null }),
+    ]);
+    await expect(publication.listSubmissions()).rejects.toMatchObject({
+      code: "verification_failed",
+    });
+
+    const wrongDigest = "12".repeat(32);
+    listSubmissions.mockResolvedValue([
+      approvedDetail({
+        content_digest: wrongDigest,
+        review: {
+          ...approvedDetail().review!,
+          reviewed_content_digest: wrongDigest,
+        },
+      }),
+    ]);
+    await expect(publication.listSubmissions()).rejects.toMatchObject({
+      code: "organization_submission_conflict",
+    });
+
+    listSubmissions.mockResolvedValue([approvedDetail()]);
+    await publication.listSubmissions();
+    listSubmissions.mockResolvedValue([
+      approvedDetail({ definition_id: OTHER_DEFINITION_ID }),
+    ]);
+    await expect(publication.listSubmissions()).rejects.toMatchObject({
+      code: "organization_submission_conflict",
+    });
+    expect(drafts.getDraft(DRAFT_ID).publishedRevision).toEqual({
+      revision: 1,
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+    });
+  });
+
+  it("does not reconcile a submission reference owned by another account", async () => {
+    const otherDrafts = new AgentDraftStore({
+      database,
+      owner: { tenantId: TENANT_ID, ownerId: OTHER_USER_ID },
+      context,
+      now: () => NOW,
+      randomUUID: () => OTHER_DRAFT_ID,
+    });
+    otherDrafts.createDraft({
+      sourceAgentDefinitionId: null,
+      baseAgentVersionId: null,
+      displayName: "Other account Agent",
+      icon: null,
+      manifest: manifest(),
+      assets: [{ path: "knowledge/notes.md", content: "# Notes\n" }],
+    });
+    const response = approvedDetail({
+      id: OTHER_SUBMISSION_ID,
+      submitted_by_user_id: OTHER_USER_ID,
+    });
+    database.sqlite
+      .prepare(
+        `INSERT INTO organization_agent_submission_refs (
+           local_draft_id, local_draft_revision, organization_id,
+           cloud_submission_id, content_digest, cloud_status, cloud_revision,
+           submitted_at, last_verified_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        OTHER_DRAFT_ID,
+        1,
+        ORGANIZATION_ID,
+        OTHER_SUBMISSION_ID,
+        response.content_digest,
+        "pending",
+        1,
+        NOW.toISOString(),
+        NOW.toISOString(),
+      );
+    listSubmissions.mockResolvedValue([response]);
+
+    await expect(service().listSubmissions()).resolves.toEqual([
+      expect.objectContaining({
+        id: OTHER_SUBMISSION_ID,
+        localDraftId: null,
+        localDraftRevision: null,
+      }),
+    ]);
+    expect(otherDrafts.getDraft(OTHER_DRAFT_ID).publishedRevision).toBeNull();
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT cloud_status FROM organization_agent_submission_refs
+           WHERE cloud_submission_id = ?`,
+        )
+        .get(OTHER_SUBMISSION_ID),
+    ).toEqual({ cloud_status: "pending" });
   });
 
   it("binds withdrawal to the fetched pending revision and consumes its handle", async () => {

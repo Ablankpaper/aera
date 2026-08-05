@@ -258,6 +258,15 @@ export default {
         withdrawn: "已撤回",
         superseded: "已被新提交替代",
       },
+      lifecycle: {
+        localOnly: "仅本地草稿",
+        pending: "等待审核",
+        rejected: "审核未通过",
+        withdrawn: "已撤回",
+        superseded: "已被新提交替代",
+        approvedCurrent: "已发布",
+        approvedDirty: "已发布，有未发布修改",
+      },
       contentDigest: "内容摘要",
       baseVersion: "基线版本",
       initialVersion: "首个版本",
@@ -269,6 +278,16 @@ export default {
       confirmWithdrawal: "确认撤回",
       withdrawalBoundary:
         "撤回只会关闭这条待审核提交；本地草稿与 Aera Runtime 数据保持不变。",
+      deleteDraft: "删除草稿",
+      deleteDraftTitle: "删除本地草稿",
+      deleteDraftBoundary:
+        "只删除当前账号的本地工作副本；企业提交、已发布版本、安装、Memory 与 Profile 均不会删除。",
+      confirmDeleteDraft: "确认删除草稿",
+      discardUnpublished: "放弃未发布修改",
+      discardUnpublishedTitle: "放弃未发布修改",
+      discardUnpublishedBoundary:
+        "删除当前本地工作副本；已发布的企业智能体版本、安装、Memory 与 Profile 均保持不变。",
+      confirmDiscardUnpublished: "确认放弃修改",
       draftReadOnly:
         "此企业草稿当前只读；请重新联网并使用 Owner 或 Admin 角色后再修改或提交。",
     },
