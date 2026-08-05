@@ -1053,6 +1053,8 @@ function isOrganizationSubmissionCore(value: unknown): boolean {
     !isCanonicalUUID(value.definition_id) ||
     (value.base_version_id !== null &&
       !isCanonicalUUID(value.base_version_id)) ||
+    (value.published_version_id !== null &&
+      !isCanonicalUUID(value.published_version_id)) ||
     !isCanonicalUUID(value.submitted_by_user_id) ||
     !isDigest(value.content_digest) ||
     (value.status !== "pending" &&
@@ -1071,7 +1073,8 @@ function isOrganizationSubmissionCore(value: unknown): boolean {
   }
   if (
     (value.kind === "initial" && value.base_version_id !== null) ||
-    (value.kind === "next" && value.base_version_id === null)
+    (value.kind === "next" && value.base_version_id === null) ||
+    (value.status === "approved") !== (value.published_version_id !== null)
   ) {
     return false;
   }
@@ -1101,6 +1104,7 @@ function isOrganizationSubmission(
       "id",
       "kind",
       "organization_id",
+      "published_version_id",
       "review",
       "revision",
       "status",
@@ -1129,6 +1133,7 @@ function isOrganizationSubmissionDetail(
         "manifest",
         "manifest_digest",
         "organization_id",
+        "published_version_id",
         "review",
         "revision",
         "status",
@@ -1257,6 +1262,7 @@ function detachOrganizationSubmission(
     kind: value.kind,
     definition_id: value.definition_id,
     base_version_id: value.base_version_id,
+    published_version_id: value.published_version_id,
     submitted_by_user_id: value.submitted_by_user_id,
     content_digest: value.content_digest,
     status: value.status,

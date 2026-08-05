@@ -311,6 +311,7 @@ function organizationSubmissionDetail(
     kind: "initial" as const,
     definition_id: DEFINITION_ID,
     base_version_id: null,
+    published_version_id: reviewed ? VERSION_ID : null,
     submitted_by_user_id: USER_ID,
     content_digest: VERSION_DIGEST,
     status: reviewed ? ("approved" as const) : ("pending" as const),
@@ -348,6 +349,7 @@ function organizationSubmissionSummary(
     kind: detail.kind,
     definition_id: detail.definition_id,
     base_version_id: detail.base_version_id,
+    published_version_id: detail.published_version_id,
     submitted_by_user_id: detail.submitted_by_user_id,
     content_digest: detail.content_digest,
     status: detail.status,
@@ -503,6 +505,39 @@ describe("AgenteraAgentControlClient", () => {
       display_name: "Organization Research Agent",
       ...pkg,
     });
+  });
+
+  it("requires an immutable Version only for approved Organization submissions", async () => {
+    const approvedWithoutVersion = {
+      ...organizationSubmissionSummary(true),
+      published_version_id: null,
+    };
+    const pendingWithVersion = {
+      ...organizationSubmissionSummary(),
+      published_version_id: VERSION_ID,
+    };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ submissions: [approvedWithoutVersion] }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ submissions: [pendingWithVersion] }),
+      );
+    const client = new AgenteraAgentControlClient({
+      origin: "http://127.0.0.1:8086",
+      getAccessToken: () => "agentera-product-access",
+      getInstallationIdentity: () => deviceIdentity(),
+      fetch: fetcher as typeof fetch,
+      now: () => NOW,
+    });
+
+    await expect(
+      client.listOrganizationAgentSubmissions(ORGANIZATION_ID),
+    ).rejects.toMatchObject({ code: "invalid_response" });
+    await expect(
+      client.listOrganizationAgentSubmissions(ORGANIZATION_ID),
+    ).rejects.toMatchObject({ code: "invalid_response" });
   });
 
   it("validates canonical Organization identifiers before dispatch", async () => {

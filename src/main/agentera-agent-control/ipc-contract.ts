@@ -787,6 +787,10 @@ export function serializeOrganizationAgentSubmission(
       value.baseVersionId === null
         ? null
         : parseAgentControlId(value.baseVersionId),
+    publishedVersionId:
+      value.publishedVersionId === null
+        ? null
+        : parseAgentControlId(value.publishedVersionId),
     submittedByUserId: parseAgentControlId(value.submittedByUserId),
     contentDigest: safeDigest(value.contentDigest),
     status: value.status,

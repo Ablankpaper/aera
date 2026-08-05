@@ -46,6 +46,13 @@ export interface AgentDraftStoreOptions {
   writeFile?: (path: string, content: Buffer) => void;
 }
 
+export interface RecordPublishedRevisionInput {
+  id: string;
+  publishedRevision: number;
+  definitionId: string;
+  versionId: string;
+}
+
 interface DraftRow {
   id: unknown;
   source_agent_definition_id: unknown;
@@ -652,6 +659,99 @@ export class AgentDraftStore {
         this.workspaceId,
         this.organizationId,
         revision,
+      );
+    if (changes(result) !== 1) {
+      throw new AgentDraftStoreError("draft_conflict");
+    }
+    return this.getDraft(id);
+  }
+
+  recordPublishedRevision(input: RecordPublishedRevisionInput): AgentDraft {
+    const id = requireUuid(input.id);
+    const definitionId = requireUuid(input.definitionId);
+    const versionId = requireUuid(input.versionId);
+    if (
+      !Number.isSafeInteger(input.publishedRevision) ||
+      input.publishedRevision < 1
+    ) {
+      throw new AgentDraftStoreError("invalid_draft");
+    }
+    const current = this.getDraft(id);
+    if (input.publishedRevision > current.revision) {
+      throw new AgentDraftStoreError("draft_conflict");
+    }
+    const recorded = current.publishedRevision;
+    if (recorded !== null) {
+      if (input.publishedRevision < recorded.revision) return current;
+      if (input.publishedRevision === recorded.revision) {
+        if (
+          recorded.definitionId !== definitionId ||
+          recorded.versionId !== versionId
+        ) {
+          throw new AgentDraftStoreError("draft_conflict");
+        }
+        return current;
+      }
+      if (recorded.definitionId !== definitionId) {
+        throw new AgentDraftStoreError("draft_conflict");
+      }
+    }
+    if (
+      current.sourceAgentDefinitionId !== null &&
+      current.sourceAgentDefinitionId !== definitionId
+    ) {
+      throw new AgentDraftStoreError("draft_conflict");
+    }
+
+    const updatedAt = nowTimestamp(this.now);
+    const result = this.database.sqlite
+      .prepare(
+        `UPDATE agent_drafts
+         SET source_agent_definition_id = ?, base_agent_version_id = ?,
+             published_definition_id = ?, published_version_id = ?,
+             published_revision = ?,
+             publication_attempt_revision = CASE
+               WHEN publication_attempt_revision = ? THEN NULL
+               ELSE publication_attempt_revision END,
+             publication_attempted_at = CASE
+               WHEN publication_attempt_revision = ? THEN NULL
+               ELSE publication_attempted_at END,
+             publication_idempotency_key = CASE
+               WHEN publication_attempt_revision = ? THEN NULL
+               ELSE publication_idempotency_key END,
+             publication_error_code = CASE
+               WHEN publication_attempt_revision = ? THEN NULL
+               ELSE publication_error_code END,
+             publication_error_summary = CASE
+               WHEN publication_attempt_revision = ? THEN NULL
+               ELSE publication_error_summary END,
+             updated_at = ?
+         WHERE id = ? AND tenant_id = ? AND owner_id = ?
+           AND target_scope = ? AND workspace_id IS ? AND organization_id IS ?
+           AND revision = ? AND (
+             published_revision IS NULL OR published_revision < ?
+           )`,
+      )
+      .run(
+        definitionId,
+        versionId,
+        definitionId,
+        versionId,
+        input.publishedRevision,
+        input.publishedRevision,
+        input.publishedRevision,
+        input.publishedRevision,
+        input.publishedRevision,
+        input.publishedRevision,
+        updatedAt,
+        id,
+        this.tenantId,
+        this.ownerId,
+        this.targetScope,
+        this.workspaceId,
+        this.organizationId,
+        current.revision,
+        input.publishedRevision,
       );
     if (changes(result) !== 1) {
       throw new AgentDraftStoreError("draft_conflict");

@@ -364,6 +364,8 @@ Organization definitions and versions are shared control-plane assets, but every
 
 [[src/main/agentera-agent-control/organization-publication-service.ts#OrganizationPublicationService]] keeps editable drafts local and uses one-use handles for immutable submission, review, and withdrawal. Renderer calls never supply Organization role, account authority, Profile paths, or cloud credentials.
 
+An approved submission carries its exact immutable Version ID. The service joins it only to the trusted local submission reference, while [[src/main/agentera-agent-control/draft-store.ts#AgentDraftStore#recordPublishedRevision]] records the submitted revision without overwriting newer draft content; digest, Definition, Version, or owner conflicts fail closed.
+
 [[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager]] records `sourceScope=ORGANIZATION` only as catalog provenance while retaining USER tenant, owner, device, policy overlay, and Runtime Profile ownership. [[src/main/agentera-agent-control/hermes-projection.ts#HermesProjectionManager]] materializes signed Knowledge, Skill, and SOP bytes read-only outside `HERMES_HOME`.
 
 [[src/main/agentera-agent-control/hermes-adapter.ts#AgenteraHermesAdapter#prepareInstalledTurnPlan]] freezes the planned Version, policy, Runtime, Profile, model route, and tool digest per conversation before the atomic local snapshot commit. [[src/main/agentera-agent-control/hermes-adapter.ts#assertNewConversationContext]] rejects only a new Organization conversation after trusted context removal; an existing RuntimeBinding remains stable.
