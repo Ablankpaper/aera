@@ -1,3 +1,4 @@
+import { basename, normalize } from "node:path";
 import type { AgenteraAuthPublicState } from "../../shared/agentera-auth";
 import type {
   AgentDraft,
@@ -232,6 +233,31 @@ function codedError(code: string): Error {
   return Object.assign(new Error(`Aera Agent control failed: ${code}.`), {
     code,
   });
+}
+
+export function localProfileHandleForPath(
+  profilePath: string,
+  resolveProfilePath: (profileHandle: string) => string,
+): string {
+  if (typeof profilePath !== "string" || profilePath.length === 0) {
+    throw codedError("profile_capability_configuration_required");
+  }
+  const attachedPath = normalize(profilePath);
+  try {
+    if (normalize(resolveProfilePath("default")) === attachedPath) {
+      return "default";
+    }
+    const profileHandle = basename(attachedPath);
+    if (
+      !isValidProfileName(profileHandle) ||
+      normalize(resolveProfilePath(profileHandle)) !== attachedPath
+    ) {
+      throw codedError("profile_capability_configuration_required");
+    }
+    return profileHandle;
+  } catch {
+    throw codedError("profile_capability_configuration_required");
+  }
 }
 
 export function runtimeComponentKey(owner: AgenteraRuntimeOwner): string {
@@ -1806,13 +1832,17 @@ export class AgenteraAgentControlManager {
       owner,
     });
     const getProfileMcpCapabilities = async (profilePath: string) => {
-      const servers = await listMcpServers(profilePath);
+      const profileHandle = localProfileHandleForPath(
+        profilePath,
+        (candidate) => full.profiles.resolveProfilePath(candidate),
+      );
+      const servers = await listMcpServers(profileHandle);
       return Promise.all(
         servers.map(async (server) => {
           if (!server.enabled) {
             return { name: server.name, enabled: false, tools: [] };
           }
-          const result = await testMcpServer(server.name, profilePath);
+          const result = await testMcpServer(server.name, profileHandle);
           return {
             name: server.name,
             enabled: result.success,

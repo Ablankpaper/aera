@@ -21,7 +21,11 @@ import {
   type AgenteraControlPlaneDatabase,
   type AgenteraSqliteDatabase,
 } from "./db";
-import { AgenteraAgentControlManager, runtimeComponentKey } from "./manager";
+import {
+  AgenteraAgentControlManager,
+  localProfileHandleForPath,
+  runtimeComponentKey,
+} from "./manager";
 
 const OWNER = {
   tenantId: "10000000-0000-4000-8000-000000000001",
@@ -185,6 +189,34 @@ describe("Agent control Organization Foundation context", () => {
     for (const root of roots.splice(0)) {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("maps an attached Profile path back to the exact local MCP handle", () => {
+    const profileRoot = join(tmpdir(), "agentera-mcp-profile-root");
+    const resolveProfilePath = (profileHandle: string): string =>
+      profileHandle === "default"
+        ? profileRoot
+        : join(profileRoot, "profiles", profileHandle);
+
+    expect(localProfileHandleForPath(profileRoot, resolveProfilePath)).toBe(
+      "default",
+    );
+    expect(
+      localProfileHandleForPath(
+        join(profileRoot, "profiles", "organization-member-agent"),
+        resolveProfilePath,
+      ),
+    ).toBe("organization-member-agent");
+    expect(() =>
+      localProfileHandleForPath(
+        join(tmpdir(), "unbound-profile"),
+        resolveProfilePath,
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        code: "profile_capability_configuration_required",
+      }),
+    );
   });
 
   it("derives Organization catalog access from the trusted coordinator only", async () => {
