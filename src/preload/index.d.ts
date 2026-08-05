@@ -85,7 +85,9 @@ import type {
 import type { RuntimeDistributionPublicState } from "../shared/agentera-runtime-distribution";
 import type {
   AgentDraft,
+  AgentDraftAssetInput,
   AgentDraftDetail,
+  AgentMcpRequirementV3,
   AgenteraAgentControlPublicState,
   AgenteraAgentControlResult,
   AgenteraAgentDefinitionSummary,
@@ -99,12 +101,15 @@ import type {
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
+  ConfirmInstalledSkillSnapshotInput,
+  ConfirmMcpRequirementInput,
   ConfirmOfficialAgentInstallInput,
   ConfirmOrganizationExperienceCandidateImportInput,
   ConfirmOrganizationReviewInput,
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
   CreateAgentDraftInput,
+  AuthoringCapabilitySummary,
   EligibleExperienceSkill,
   ExperienceCandidateDetail,
   ExperienceCandidateImportPreview,
@@ -119,15 +124,19 @@ import type {
   OrganizationReviewPreview,
   OrganizationSubmissionPreview,
   OrganizationWithdrawalPreview,
+  McpRequirementPreview,
   OfficialAgentDetail,
   OfficialAgentInstallPreview,
   OfficialAgentSummary,
   OfficialManagedUpdate,
   PrepareExperienceCandidateInput,
+  PrepareInstalledSkillSnapshotInput,
+  PrepareMcpRequirementInput,
   PrepareOrganizationExperienceCandidateInput,
   PrepareOrganizationReviewInput,
   PublicationPreview,
   PublishedRevision,
+  SkillSnapshotPreview,
   ReviewExperienceCandidateInput,
   ReviewOrganizationExperienceCandidateInput,
   SubmitOrganizationExperienceCandidateInput,
@@ -526,6 +535,21 @@ interface AgenteraAgentsAPI {
     id: string,
     scope?: AgenteraAgentOperationScope,
   ) => Promise<AgenteraAgentControlResult<true>>;
+  listAuthoringCapabilities: (
+    profileId: string,
+  ) => Promise<AgenteraAgentControlResult<AuthoringCapabilitySummary>>;
+  prepareInstalledSkillSnapshot: (
+    input: PrepareInstalledSkillSnapshotInput,
+  ) => Promise<AgenteraAgentControlResult<SkillSnapshotPreview>>;
+  confirmInstalledSkillSnapshot: (
+    input: ConfirmInstalledSkillSnapshotInput,
+  ) => Promise<AgenteraAgentControlResult<AgentDraftAssetInput[]>>;
+  prepareMcpRequirement: (
+    input: PrepareMcpRequirementInput,
+  ) => Promise<AgenteraAgentControlResult<McpRequirementPreview>>;
+  confirmMcpRequirement: (
+    input: ConfirmMcpRequirementInput,
+  ) => Promise<AgenteraAgentControlResult<AgentMcpRequirementV3>>;
   preparePublication: (
     id: string,
     scope?: AgenteraAgentOperationScope,

@@ -303,6 +303,8 @@ import {
   parseAgentControlId,
   parseAgentOperationScope,
   parseClaimVersionInput,
+  parseConfirmInstalledSkillSnapshotInput,
+  parseConfirmMcpRequirementInput,
   parseConfirmExperienceCandidateImportInput,
   parseConfirmOfficialAgentInstallInput,
   parseConfirmOrganizationExperienceCandidateImportInput,
@@ -311,7 +313,10 @@ import {
   parseConfirmOrganizationWithdrawalInput,
   parseCreateDraftInput,
   parseInstallVersionInput,
+  parseListAuthoringCapabilitiesInput,
   parsePrepareExperienceCandidateInput,
+  parsePrepareInstalledSkillSnapshotInput,
+  parsePrepareMcpRequirementInput,
   parsePrepareOrganizationExperienceCandidateInput,
   parsePrepareOrganizationReviewInput,
   parseRepairInstallationModelInput,
@@ -1724,6 +1729,41 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
   registerAgentControlHandler("agentera-agents-list-drafts", (_event, scope) =>
     requireAgentControl().listDrafts(parseAgentOperationScope(scope)),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-list-authoring-capabilities",
+    (_event, profileId: unknown) =>
+      requireAgentControl().listAuthoringCapabilities(
+        parseListAuthoringCapabilitiesInput(profileId),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-prepare-installed-skill-snapshot",
+    (_event, input: unknown) =>
+      requireAgentControl().prepareInstalledSkillSnapshot(
+        parsePrepareInstalledSkillSnapshotInput(input),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-confirm-installed-skill-snapshot",
+    (_event, input: unknown) =>
+      requireAgentControl().confirmInstalledSkillSnapshot(
+        parseConfirmInstalledSkillSnapshotInput(input),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-prepare-mcp-requirement",
+    (_event, input: unknown) =>
+      requireAgentControl().prepareMcpRequirement(
+        parsePrepareMcpRequirementInput(input),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-confirm-mcp-requirement",
+    (_event, input: unknown) =>
+      requireAgentControl().confirmMcpRequirement(
+        parseConfirmMcpRequirementInput(input),
+      ),
   );
   registerAgentControlHandler(
     "agentera-agents-get-draft",

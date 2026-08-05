@@ -13,6 +13,8 @@ import type {
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
+  ConfirmInstalledSkillSnapshotInput,
+  ConfirmMcpRequirementInput,
   ConfirmOfficialAgentInstallInput,
   ConfirmOrganizationReviewInput,
   ConfirmOrganizationSubmissionInput,
@@ -25,6 +27,8 @@ import type {
   OrganizationSubmissionPreview,
   OrganizationWithdrawalPreview,
   PrepareExperienceCandidateInput,
+  PrepareInstalledSkillSnapshotInput,
+  PrepareMcpRequirementInput,
   PrepareOrganizationExperienceCandidateInput,
   PrepareOrganizationReviewInput,
   ReviewOrganizationExperienceCandidateInput,
@@ -222,6 +226,99 @@ export function parseClaimVersionInput(
     versionId: parseAgentControlId(value.versionId),
     localProfileId: parseProfileId(value.localProfileId),
     confirmation: "claim-existing-profile",
+  };
+}
+
+export function parseListAuthoringCapabilitiesInput(value: unknown): string {
+  return parseProfileId(value);
+}
+
+export function parsePrepareInstalledSkillSnapshotInput(
+  value: unknown,
+): PrepareInstalledSkillSnapshotInput {
+  if (
+    !exactObject(value, ["profileId", "skillName"]) ||
+    typeof value.skillName !== "string" ||
+    !SKILL_NAME_PATTERN.test(value.skillName)
+  ) {
+    return invalidRequest();
+  }
+  return {
+    profileId: parseProfileId(value.profileId),
+    skillName: value.skillName,
+  };
+}
+
+export function parseConfirmInstalledSkillSnapshotInput(
+  value: unknown,
+): ConfirmInstalledSkillSnapshotInput {
+  if (
+    !exactObject(value, ["snapshotHandle", "confirmation"]) ||
+    value.confirmation !== "copy-selected-skill-to-draft"
+  ) {
+    return invalidRequest();
+  }
+  return {
+    snapshotHandle: parseAgentControlId(value.snapshotHandle),
+    confirmation: "copy-selected-skill-to-draft",
+  };
+}
+
+function parseCapabilityLabel(value: unknown, maximumLength: number): string {
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > maximumLength ||
+    value !== value.trim() ||
+    /[\r\n\0]/.test(value) ||
+    value.includes("://")
+  ) {
+    return invalidRequest();
+  }
+  return value;
+}
+
+export function parsePrepareMcpRequirementInput(
+  value: unknown,
+): PrepareMcpRequirementInput {
+  if (
+    !exactObject(value, [
+      "profileId",
+      "logicalName",
+      "tools",
+      "required",
+      "permissionReason",
+    ]) ||
+    !Array.isArray(value.tools) ||
+    value.tools.length < 1 ||
+    value.tools.length > 128 ||
+    typeof value.required !== "boolean"
+  ) {
+    return invalidRequest();
+  }
+  const tools = value.tools.map((tool) => parseCapabilityLabel(tool, 128));
+  if (new Set(tools).size !== tools.length) return invalidRequest();
+  return {
+    profileId: parseProfileId(value.profileId),
+    logicalName: parseCapabilityLabel(value.logicalName, 128),
+    tools,
+    required: value.required,
+    permissionReason: parseCapabilityLabel(value.permissionReason, 300),
+  };
+}
+
+export function parseConfirmMcpRequirementInput(
+  value: unknown,
+): ConfirmMcpRequirementInput {
+  if (
+    !exactObject(value, ["requirementHandle", "confirmation"]) ||
+    value.confirmation !== "add-logical-mcp-requirement"
+  ) {
+    return invalidRequest();
+  }
+  return {
+    requirementHandle: parseAgentControlId(value.requirementHandle),
+    confirmation: "add-logical-mcp-requirement",
   };
 }
 

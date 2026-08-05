@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
+  AgentDraftAssetInput,
   AgentDraftAssetKind,
   AgentDraftDetail,
   AgentEditableManifest,
+  AgentMcpRequirementV3,
   AgentModelSelectionMode,
   AgentRuntimeModelRoute,
   AgenteraAgentControlErrorCode,
   AgenteraAgentOperationScope,
+  AuthoringCapabilityProfileSummary,
   OrganizationAgentSubmissionSummary,
   OrganizationSubmissionPreview,
   PublicationPreview,
@@ -16,6 +19,7 @@ import { runtimeModelPolicyForEditableManifest } from "../../../../shared/agente
 import { Plus, X } from "../../assets/icons";
 import { AppModal, AppModalTitle } from "../../components/modal/AppModal";
 import { useI18n } from "../../components/useI18n";
+import AgentCapabilityPicker from "./AgentCapabilityPicker";
 import { createDefaultAgentManifest } from "./agentDraftDefaults";
 
 interface EditableAssetRow {
@@ -53,6 +57,7 @@ export interface AgentDraftEditorProps {
   }) => void;
   modelProfileId?: string;
   runtimeModelRoutes?: AgentRuntimeModelRoute[];
+  capabilityProfiles?: readonly AuthoringCapabilityProfileSummary[];
 }
 
 const MAX_UPLOAD_BYTES = 256 * 1024;
@@ -73,6 +78,17 @@ function assetRows(draft: AgentDraftDetail | null): EditableAssetRow[] {
       draft.editableAssets.find((asset) => asset.path === metadata.path)
         ?.content ?? "",
   }));
+}
+
+function draftMcpRequirements(
+  draft: AgentDraftDetail | null,
+): AgentMcpRequirementV3[] {
+  return draft?.manifest.schemaVersion === 3
+    ? draft.manifest.mcpRequirements.map((requirement) => ({
+        ...requirement,
+        tools: [...requirement.tools],
+      }))
+    : [];
 }
 
 function modelKey(provider: string, model: string): string {
@@ -209,6 +225,7 @@ export default function AgentDraftEditor({
   onRequestInstall,
   modelProfileId,
   runtimeModelRoutes,
+  capabilityProfiles = [],
 }: AgentDraftEditorProps): React.JSX.Element {
   const { t } = useI18n();
   const identityFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -229,6 +246,10 @@ export default function AgentDraftEditor({
   const [modelPolicyMode, setModelPolicyMode] =
     useState<AgentModelSelectionMode>(currentModelPolicyMode(draft));
   const [assets, setAssets] = useState<EditableAssetRow[]>(assetRows(draft));
+  const [mcpRequirements, setMcpRequirements] = useState<
+    AgentMcpRequirementV3[]
+  >(() => draftMcpRequirements(draft));
+  const [capabilityBusy, setCapabilityBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -251,6 +272,8 @@ export default function AgentDraftEditor({
     setModelChoices([]);
     setModelPolicyMode(currentModelPolicyMode(draft));
     setAssets(assetRows(draft));
+    setMcpRequirements(draftMcpRequirements(draft));
+    setCapabilityBusy(false);
     setBusy(false);
     setError(null);
     setNotice(null);
@@ -426,6 +449,7 @@ export default function AgentDraftEditor({
 
   const canSave =
     !readOnly &&
+    !capabilityBusy &&
     name.trim().length > 0 &&
     systemPrompt.trim().length > 0 &&
     (!requiresModelSelection ||
@@ -445,7 +469,7 @@ export default function AgentDraftEditor({
         mediaType: "text/markdown" as const,
       })),
     };
-    if (base.schemaVersion === 1) {
+    if (base.schemaVersion === 1 && mcpRequirements.length === 0) {
       return {
         ...base,
         ...common,
@@ -455,40 +479,69 @@ export default function AgentDraftEditor({
         },
       };
     }
+    const modelPolicy = {
+      mode: modelPolicyMode,
+      allowedProviders:
+        modelPolicyMode === "user_select"
+          ? []
+          : modelPolicyMode === "allowlist"
+            ? [
+                ...new Set(
+                  selectedAllowlistModels.map((choice) => choice.provider),
+                ),
+              ]
+            : selectedModel
+              ? [selectedModel.provider]
+              : [],
+      allowedModels:
+        modelPolicyMode === "user_select"
+          ? []
+          : modelPolicyMode === "allowlist"
+            ? [
+                ...new Set(
+                  selectedAllowlistModels.map((choice) => choice.model),
+                ),
+              ]
+            : selectedModel
+              ? [selectedModel.model]
+              : [],
+    };
+    if (base.schemaVersion !== 3 && mcpRequirements.length === 0) {
+      return {
+        ...base,
+        ...common,
+        modelPolicy,
+      };
+    }
+    const priorRequirementTools = new Set(
+      base.schemaVersion === 3
+        ? base.mcpRequirements.flatMap((requirement) => requirement.tools)
+        : [],
+    );
+    const nonMcpAllowedTools = base.tools.allowed.filter(
+      (tool) => !priorRequirementTools.has(tool),
+    );
     return {
-      ...base,
       ...common,
-      modelPolicy: {
-        mode: modelPolicyMode,
-        allowedProviders:
-          modelPolicyMode === "user_select"
-            ? []
-            : modelPolicyMode === "allowlist"
-              ? [
-                  ...new Set(
-                    selectedAllowlistModels.map((choice) => choice.provider),
-                  ),
-                ]
-              : selectedModel
-                ? [selectedModel.provider]
-                : [],
-        allowedModels:
-          modelPolicyMode === "user_select"
-            ? []
-            : modelPolicyMode === "allowlist"
-              ? [
-                  ...new Set(
-                    selectedAllowlistModels.map((choice) => choice.model),
-                  ),
-                ]
-              : selectedModel
-                ? [selectedModel.model]
-                : [],
+      schemaVersion: 3,
+      modelPolicy,
+      mcpRequirements,
+      tools: {
+        ...base.tools,
+        allowed: [
+          ...new Set([
+            ...nonMcpAllowedTools,
+            ...mcpRequirements.flatMap((requirement) => requirement.tools),
+          ]),
+        ],
       },
+      dependencies: [...base.dependencies],
+      runtimeCompatibility: { ...base.runtimeCompatibility },
     };
   }, [
     assets,
     current?.manifest,
+    mcpRequirements,
     modelPolicyMode,
     selectedAllowlistModels,
     selectedModel,
@@ -503,6 +556,44 @@ export default function AgentDraftEditor({
       })),
     [assets],
   );
+  const existingSkillPrefixes = useMemo(
+    () => [
+      ...new Set(
+        assets.flatMap((asset) => {
+          const match = /^skills\/([^/]+)\//.exec(asset.path);
+          return match ? [`skills/${match[1]}/`] : [];
+        }),
+      ),
+    ],
+    [assets],
+  );
+
+  const applySkillSnapshot = (
+    skillName: string,
+    snapshotAssets: AgentDraftAssetInput[],
+  ): void => {
+    const prefix = `skills/${skillName}/`;
+    if (
+      snapshotAssets.length === 0 ||
+      snapshotAssets.some(
+        (asset) => !asset.path.startsWith(prefix) || !asset.content,
+      )
+    ) {
+      setError("agents.control.errors.invalid_request");
+      return;
+    }
+    setError(null);
+    setAssets((currentAssets) => [
+      ...currentAssets.filter((asset) => !asset.path.startsWith(prefix)),
+      ...snapshotAssets.map((asset) => ({
+        key: `${asset.path}\0${crypto.randomUUID()}`,
+        path: asset.path,
+        kind: "skill" as const,
+        content: asset.content,
+        fileName: asset.path.split("/").pop() ?? asset.path,
+      })),
+    ]);
+  };
   const alreadyPublished =
     current !== null &&
     current.publishedRevision?.revision === current.revision &&
@@ -916,6 +1007,31 @@ export default function AgentDraftEditor({
               {t("agents.control.runtimeModelChosenOnUse")}
             </p>
           )}
+
+          {!readOnly ? (
+            <AgentCapabilityPicker
+              profiles={capabilityProfiles}
+              initialProfileId={modelProfileId}
+              existingSkillPrefixes={existingSkillPrefixes}
+              existingRequirements={mcpRequirements}
+              onApplySkillSnapshot={applySkillSnapshot}
+              onAddMcpRequirement={(requirement) =>
+                setMcpRequirements((currentRequirements) => [
+                  ...currentRequirements,
+                  requirement,
+                ])
+              }
+              onRemoveMcpRequirement={(logicalName) =>
+                setMcpRequirements((currentRequirements) =>
+                  currentRequirements.filter(
+                    (requirement) => requirement.logicalName !== logicalName,
+                  ),
+                )
+              }
+              onError={(code) => setError(errorKey(code))}
+              onBusyChange={setCapabilityBusy}
+            />
+          ) : null}
 
           <section className="agent-control-assets agent-control-wide-field">
             <div className="agent-control-assets-header">

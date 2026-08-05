@@ -218,6 +218,14 @@ Installed capability selection is a main-process preparation flow that exposes s
 
 [[src/main/agentera-agent-control/capability-authoring-service.ts#CapabilityAuthoringService#prepareInstalledSkillSnapshot]] rejects links, path escape, hidden/cache entries, invalid UTF-8, duplicate targets, oversize content, and local DLP findings before retaining an immutable in-memory snapshot. Confirmation consumes its owner- and Profile-bound handle once, while MCP confirmation returns only a validated [[src/shared/agentera-agent-control.ts#AgentMcpRequirementV3]].
 
+### Guided capability picker
+
+The draft editor makes installed Skill and MCP selection the primary capability action while retaining advanced manual Skill, SOP, and Knowledge uploads.
+
+[[src/renderer/src/screens/Agents/AgentCapabilityPicker.tsx#AgentCapabilityPicker]] accepts only safe Profile handles and display names. It previews and explicitly replaces a selected Skill snapshot, blocks duplicate logical MCP requirements, and captures selected tool names, required or optional behavior, and a bounded permission reason without rendering connection data.
+
+[[src/main/agentera-agent-control/ipc-contract.ts#parsePrepareInstalledSkillSnapshotInput]] and [[src/main/agentera-agent-control/ipc-contract.ts#parsePrepareMcpRequirementInput]] enforce exact renderer fields before the main-process manager uses one-use preparation handles. [[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] stores confirmed Skill files in the ordinary immutable draft asset list and confirmed MCP metadata in Manifest V3; later saves create a new draft revision rather than changing an approved Version.
+
 [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] owns service construction and invalidates preparation state when access or selected product context changes. [[src/main/mcp-servers.ts#normalizeMcpDiscoveredTools]] normalizes tool discovery before the service applies its display-metadata privacy filter.
 
 ## Immutable publication

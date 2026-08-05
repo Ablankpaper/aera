@@ -1070,6 +1070,14 @@ export default function AgentControlPanel({
     );
     return ownerConfigured.length > 0 ? ownerConfigured : runnable;
   }, [profiles]);
+  const capabilityProfiles = useMemo(
+    () =>
+      profiles.map((profile) => ({
+        profileHandle: profile.id,
+        displayName: profile.name,
+      })),
+    [profiles],
+  );
 
   const selectableModelSources = useMemo<AgentRuntimeModelOption[]>(() => {
     if (runtimeModelRoutes !== undefined) {
@@ -1838,6 +1846,7 @@ export default function AgentControlPanel({
         operationScope={personalOperationScope}
         modelProfileId={modelProfileId}
         runtimeModelRoutes={runtimeModelRoutes}
+        capabilityProfiles={capabilityProfiles}
         onClose={() => setEditor(null)}
         onSaved={() => void load()}
         onPublished={() => void load()}
