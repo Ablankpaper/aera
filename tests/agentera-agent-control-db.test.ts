@@ -20,6 +20,7 @@ import {
 } from "../src/main/agentera-agent-control/db";
 
 const roots: string[] = [];
+const migrationTestTimeoutMs = process.platform === "win32" ? 30_000 : 5_000;
 
 function temporaryRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "agentera-control-db-"));
@@ -389,6 +390,7 @@ describe("Aera control-plane database", () => {
     database.close();
   });
 
+  // prettier-ignore
   it("migrates v4 rows unchanged and enforces exact v8 Organization variants", () => {
     const userDataPath = join(temporaryRoot(), "user-data");
     const paths = resolveAgenteraControlPlanePaths(userDataPath);
@@ -608,7 +610,7 @@ describe("Aera control-plane database", () => {
       expect(readFileSync(draftFile, "utf8")).toBe("legacy-v4-bytes");
       database.close();
     }
-  });
+  }, migrationTestTimeoutMs);
 
   it("migrates schema v3 without changing existing draft rows or files", () => {
     const userDataPath = join(temporaryRoot(), "user-data");
