@@ -115,6 +115,15 @@ export default {
         withdrawn: "Wycofane",
         superseded: "Zastąpione",
       },
+      lifecycle: {
+        localOnly: "Local draft",
+        pending: "Pending review",
+        rejected: "Review rejected",
+        withdrawn: "Withdrawn",
+        superseded: "Superseded",
+        approvedCurrent: "Published",
+        approvedDirty: "Published with unpublished changes",
+      },
       contentDigest: "Skrót treści",
       baseVersion: "Wersja bazowa",
       initialVersion: "Wersja początkowa",
@@ -126,6 +135,16 @@ export default {
       confirmWithdrawal: "Potwierdź wycofanie",
       withdrawalBoundary:
         "Wycofanie zamyka tylko to oczekujące zgłoszenie; lokalne szkice i dane Aera Runtime pozostają bez zmian.",
+      deleteDraft: "Delete draft",
+      deleteDraftTitle: "Delete local draft",
+      deleteDraftBoundary:
+        "Only the current account's local working copy is deleted. Enterprise submissions, published versions, installations, Memory, and Profiles remain unchanged.",
+      confirmDeleteDraft: "Delete draft",
+      discardUnpublished: "Discard unpublished changes",
+      discardUnpublishedTitle: "Discard unpublished changes",
+      discardUnpublishedBoundary:
+        "The current local working copy is removed. The published enterprise Agent, installation, Memory, and Profile remain unchanged.",
+      confirmDiscardUnpublished: "Discard changes",
       draftReadOnly:
         "Ten szkic firmowy jest tylko do odczytu. Połącz się ponownie jako Właściciel lub Administrator, aby go zmienić.",
     },

@@ -2,8 +2,7 @@ import enAgents from "../en/agents";
 
 export default {
   title: "סוכנים",
-  subtitle:
-    "כל סוכן פועל בסביבת Aera מבודדת עם הגדרות, זיכרון ומיומנויות משלו",
+  subtitle: "כל סוכן פועל בסביבת Aera מבודדת עם הגדרות, זיכרון ומיומנויות משלו",
   newAgent: "סוכן חדש",
   namePlaceholder: "שם הסוכן (לדוגמה: coder)",
   createTitle: "סוכן חדש",
@@ -115,6 +114,15 @@ export default {
         withdrawn: "נמשך",
         superseded: "הוחלף",
       },
+      lifecycle: {
+        localOnly: "Local draft",
+        pending: "Pending review",
+        rejected: "Review rejected",
+        withdrawn: "Withdrawn",
+        superseded: "Superseded",
+        approvedCurrent: "Published",
+        approvedDirty: "Published with unpublished changes",
+      },
       contentDigest: "תקציר תוכן",
       baseVersion: "גרסת בסיס",
       initialVersion: "גרסה ראשונה",
@@ -126,6 +134,16 @@ export default {
       confirmWithdrawal: "אישור משיכה",
       withdrawalBoundary:
         "המשיכה סוגרת רק את ההגשה הממתינה; טיוטות מקומיות ונתוני Aera Runtime אינם משתנים.",
+      deleteDraft: "Delete draft",
+      deleteDraftTitle: "Delete local draft",
+      deleteDraftBoundary:
+        "Only the current account's local working copy is deleted. Enterprise submissions, published versions, installations, Memory, and Profiles remain unchanged.",
+      confirmDeleteDraft: "Delete draft",
+      discardUnpublished: "Discard unpublished changes",
+      discardUnpublishedTitle: "Discard unpublished changes",
+      discardUnpublishedBoundary:
+        "The current local working copy is removed. The published enterprise Agent, installation, Memory, and Profile remain unchanged.",
+      confirmDiscardUnpublished: "Discard changes",
       draftReadOnly:
         "הטיוטה הארגונית היא לקריאה בלבד. התחברו מחדש כבעלים או מנהל כדי לשנותה.",
     },

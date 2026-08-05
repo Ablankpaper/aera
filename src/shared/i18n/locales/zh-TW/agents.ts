@@ -109,6 +109,15 @@ export default {
         withdrawn: "已撤回",
         superseded: "已被新提交取代",
       },
+      lifecycle: {
+        localOnly: "Local draft",
+        pending: "Pending review",
+        rejected: "Review rejected",
+        withdrawn: "Withdrawn",
+        superseded: "Superseded",
+        approvedCurrent: "Published",
+        approvedDirty: "Published with unpublished changes",
+      },
       contentDigest: "內容摘要",
       baseVersion: "基準版本",
       initialVersion: "首個版本",
@@ -120,6 +129,16 @@ export default {
       confirmWithdrawal: "確認撤回",
       withdrawalBoundary:
         "撤回只會關閉這筆待審核提交；本機草稿與 Aera Runtime 資料維持不變。",
+      deleteDraft: "Delete draft",
+      deleteDraftTitle: "Delete local draft",
+      deleteDraftBoundary:
+        "Only the current account's local working copy is deleted. Enterprise submissions, published versions, installations, Memory, and Profiles remain unchanged.",
+      confirmDeleteDraft: "Delete draft",
+      discardUnpublished: "Discard unpublished changes",
+      discardUnpublishedTitle: "Discard unpublished changes",
+      discardUnpublishedBoundary:
+        "The current local working copy is removed. The published enterprise Agent, installation, Memory, and Profile remain unchanged.",
+      confirmDiscardUnpublished: "Discard changes",
       draftReadOnly:
         "此企業草稿目前為唯讀；請重新連線並使用 Owner 或 Admin 角色後再修改或提交。",
     },

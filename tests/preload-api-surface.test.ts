@@ -358,6 +358,7 @@ describe("Aera Agent-control preload namespace", () => {
     "createDraft",
     "updateDraft",
     "deleteDraft",
+    "discardUnpublishedDraft",
     "preparePublication",
     "confirmPublication",
     "prepareOrganizationSubmission",

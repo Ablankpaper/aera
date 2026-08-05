@@ -119,6 +119,15 @@ export default {
         withdrawn: "Geri çekildi",
         superseded: "Yerine yenisi geçti",
       },
+      lifecycle: {
+        localOnly: "Local draft",
+        pending: "Pending review",
+        rejected: "Review rejected",
+        withdrawn: "Withdrawn",
+        superseded: "Superseded",
+        approvedCurrent: "Published",
+        approvedDirty: "Published with unpublished changes",
+      },
       contentDigest: "İçerik özeti",
       baseVersion: "Temel sürüm",
       initialVersion: "İlk sürüm",
@@ -130,6 +139,16 @@ export default {
       confirmWithdrawal: "Geri çekmeyi doğrula",
       withdrawalBoundary:
         "Geri çekme yalnızca bu bekleyen gönderimi kapatır; yerel taslaklar ve Aera Runtime verileri değişmez.",
+      deleteDraft: "Delete draft",
+      deleteDraftTitle: "Delete local draft",
+      deleteDraftBoundary:
+        "Only the current account's local working copy is deleted. Enterprise submissions, published versions, installations, Memory, and Profiles remain unchanged.",
+      confirmDeleteDraft: "Delete draft",
+      discardUnpublished: "Discard unpublished changes",
+      discardUnpublishedTitle: "Discard unpublished changes",
+      discardUnpublishedBoundary:
+        "The current local working copy is removed. The published enterprise Agent, installation, Memory, and Profile remain unchanged.",
+      confirmDiscardUnpublished: "Discard changes",
       draftReadOnly:
         "Bu kurumsal taslak salt okunurdur. Değiştirmek için Sahip veya Yönetici olarak yeniden bağlanın.",
     },

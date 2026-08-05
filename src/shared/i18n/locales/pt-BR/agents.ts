@@ -115,6 +115,15 @@ export default {
         withdrawn: "Retirado",
         superseded: "Substituído",
       },
+      lifecycle: {
+        localOnly: "Local draft",
+        pending: "Pending review",
+        rejected: "Review rejected",
+        withdrawn: "Withdrawn",
+        superseded: "Superseded",
+        approvedCurrent: "Published",
+        approvedDirty: "Published with unpublished changes",
+      },
       contentDigest: "Resumo do conteúdo",
       baseVersion: "Versão base",
       initialVersion: "Versão inicial",
@@ -126,6 +135,16 @@ export default {
       confirmWithdrawal: "Confirmar retirada",
       withdrawalBoundary:
         "A retirada só encerra este envio pendente; rascunhos locais e dados do Aera Runtime não mudam.",
+      deleteDraft: "Delete draft",
+      deleteDraftTitle: "Delete local draft",
+      deleteDraftBoundary:
+        "Only the current account's local working copy is deleted. Enterprise submissions, published versions, installations, Memory, and Profiles remain unchanged.",
+      confirmDeleteDraft: "Delete draft",
+      discardUnpublished: "Discard unpublished changes",
+      discardUnpublishedTitle: "Discard unpublished changes",
+      discardUnpublishedBoundary:
+        "The current local working copy is removed. The published enterprise Agent, installation, Memory, and Profile remain unchanged.",
+      confirmDiscardUnpublished: "Discard changes",
       draftReadOnly:
         "Este rascunho empresarial é somente leitura. Reconecte-se como Proprietário ou Administrador para alterá-lo.",
     },
