@@ -312,6 +312,20 @@ function organizationDraft(
     required: true,
     permissionReason: "Read explicitly approved enterprise documents",
   };
+  const skillAssets = selectedCapabilities?.skillAssets ?? [
+    {
+      path: "skills/research/SKILL.md",
+      content: [
+        "---",
+        "name: research",
+        "description: Approved Organization research skill",
+        "---",
+        "",
+        marker,
+        "",
+      ].join("\n"),
+    },
+  ];
   return {
     sourceAgentDefinitionId: source?.definitionId ?? null,
     baseAgentVersionId: source?.baseVersionId ?? null,
@@ -323,11 +337,13 @@ function organizationDraft(
         systemPrompt: `Use only the approved Organization base: ${marker}`,
       },
       assets: [
-        {
-          path: "skills/research/SKILL.md",
+        ...skillAssets.map((asset) => ({
+          path: asset.path,
           kind: "skill",
-          mediaType: "text/markdown",
-        },
+          mediaType: asset.path.toLowerCase().endsWith(".md")
+            ? ("text/markdown" as const)
+            : ("text/plain" as const),
+        })),
         {
           path: "sop/research.md",
           kind: "sop",
@@ -353,20 +369,7 @@ function organizationDraft(
       },
     },
     assets: [
-      ...(selectedCapabilities?.skillAssets ?? [
-        {
-          path: "skills/research/SKILL.md",
-          content: [
-            "---",
-            "name: research",
-            "description: Approved Organization research skill",
-            "---",
-            "",
-            marker,
-            "",
-          ].join("\n"),
-        },
-      ]),
+      ...skillAssets,
       { path: "sop/research.md", content: `# Approved SOP\n${marker}\n` },
       {
         path: "knowledge/research.md",
