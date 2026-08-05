@@ -859,6 +859,25 @@ export async function testMcpServer(
 ): Promise<McpOperationResult> {
   try {
     if (!isRemoteMode()) {
+      try {
+        const data = await mcpApi<{
+          ok?: boolean;
+          error?: string;
+          tools?: Array<{ name: string; description: string }>;
+        }>(
+          `/api/mcp/servers/${encodeURIComponent(name)}/test`,
+          { method: "POST" },
+          profile,
+        );
+        return {
+          success: data.ok !== false,
+          error: data.error,
+          tools: data.tools || [],
+        };
+      } catch {
+        // Older or stopped local gateways may not expose the structured test
+        // endpoint. Keep the CLI path as a compatibility fallback.
+      }
       const result = await runHermesMcpCli(["test", name], profile);
       return {
         success: true,

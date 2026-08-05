@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { execFileSpy, stdinEndSpy } = vi.hoisted(() => {
   const stdinEndSpy = vi.fn();
@@ -33,6 +33,10 @@ vi.mock("../src/main/hermes", () => ({
   isRemoteMode: () => false,
 }));
 
+vi.mock("../src/main/config", () => ({
+  getApiServerKey: () => "",
+}));
+
 vi.mock("../src/main/utils", () => ({
   profilePaths: () => ({ configFile: "config.yaml", home: "/tmp/profile" }),
   safeWriteFile: vi.fn(),
@@ -65,10 +69,98 @@ import {
   listMcpCatalog,
   removeMcpServerFromConfig,
   setMcpServerEnabledInConfig,
+  testMcpServer,
   upsertMcpServerInConfig,
 } from "../src/main/mcp-servers";
 
 describe("MCP server config management", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("uses the structured local Runtime endpoint for tool discovery", async () => {
+    const fetchSpy = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            tools: [
+              {
+                name: "docs.read",
+                description: "Read approved documents",
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    execFileSpy.mockClear();
+
+    const result = await testMcpServer("author-docs", "default");
+
+    expect(result).toEqual({
+      success: true,
+      error: undefined,
+      tools: [
+        {
+          name: "docs.read",
+          description: "Read approved documents",
+        },
+      ],
+    });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "http://127.0.0.1:8642/api/mcp/servers/author-docs/test",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(execFileSpy).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the local Runtime CLI when its gateway is unavailable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("gateway unavailable");
+      }),
+    );
+    execFileSpy.mockClear();
+    execFileSpy.mockImplementationOnce(
+      (
+        _file: string,
+        _args: string[],
+        _options: Record<string, unknown>,
+        callback: (error: Error | null, stdout: string, stderr: string) => void,
+      ) => {
+        callback(
+          null,
+          "Connected (12ms)\nTools discovered: 1\n\n    docs.read                            Read approved documents\n",
+          "",
+        );
+        return { stdin: { end: stdinEndSpy } };
+      },
+    );
+
+    const result = await testMcpServer("author-docs", "default");
+
+    expect(result).toEqual({
+      success: true,
+      tools: [
+        {
+          name: "docs.read",
+          description: "Read approved documents",
+        },
+      ],
+    });
+    expect(execFileSpy).toHaveBeenCalledWith(
+      "/tmp/runtime/test/python/bin/python3",
+      ["-m", "hermes_cli.main", "mcp", "test", "author-docs"],
+      expect.objectContaining({
+        cwd: "/tmp/runtime/test/python/lib/python3.11/site-packages",
+      }),
+      expect.any(Function),
+    );
+  });
+
   it("executes the local catalog through the live Runtime invocation", async () => {
     execFileSpy.mockClear();
     stdinEndSpy.mockClear();
