@@ -193,6 +193,32 @@ describe("CapabilityAuthoringService", () => {
     );
   });
 
+  it("keeps a flat Hermes Skill that has no category directory", async () => {
+    const flatSkill = writeSkill(profileA, "", "research", {
+      description: "Local research workflow",
+    });
+    const authoring = service({
+      skills: () => [
+        {
+          name: "research",
+          category: "",
+          description: "Local research workflow",
+          path: flatSkill,
+        },
+      ],
+    });
+
+    const summary = await authoring.listAuthoringCapabilities("profile-a");
+
+    expect(summary.skills).toEqual([
+      {
+        name: "research",
+        category: "",
+        description: "Local research workflow",
+      },
+    ]);
+  });
+
   it("prepares an immutable Skill snapshot and consumes its handle once", async () => {
     const authoring = service();
     await authoring.listAuthoringCapabilities("profile-a");

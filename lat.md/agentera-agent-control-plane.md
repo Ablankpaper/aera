@@ -214,7 +214,7 @@ New drafts use V3 with an empty requirement list through [[src/renderer/src/scre
 
 Installed capability selection is a main-process preparation flow that exposes safe metadata and one-use handles without exposing a Profile path or MCP connection configuration.
 
-[[src/main/agentera-agent-control/capability-authoring-service.ts#CapabilityAuthoringService#listAuthoringCapabilities]] returns only an opaque Profile handle, display names, Skill metadata, logical MCP names, enabled state, and discovered tool metadata. URL, command, arguments, environment, auth, token, headers, local paths, and secret-like descriptions stay out of renderer DTOs.
+[[src/main/skills.ts#listInstalledSkills]] accepts both Hermes flat `skills/<skill>` and categorized `skills/<category>/<skill>` layouts. [[src/main/agentera-agent-control/capability-authoring-service.ts#CapabilityAuthoringService#listAuthoringCapabilities]] returns only an opaque Profile handle, display names, Skill metadata, logical MCP names, enabled state, and discovered tool metadata; an absent category remains empty. URL, command, arguments, environment, auth, token, headers, local paths, and secret-like descriptions stay out of renderer DTOs.
 
 [[src/main/agentera-agent-control/capability-authoring-service.ts#CapabilityAuthoringService#prepareInstalledSkillSnapshot]] rejects links, path escape, hidden/cache entries, invalid UTF-8, duplicate targets, oversize content, and local DLP findings before retaining an immutable in-memory snapshot. Confirmation consumes its owner- and Profile-bound handle once, while MCP confirmation returns only a validated [[src/shared/agentera-agent-control.ts#AgentMcpRequirementV3]].
 

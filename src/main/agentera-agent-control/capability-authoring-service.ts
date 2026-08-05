@@ -326,7 +326,6 @@ export class CapabilityAuthoringService {
           public: AuthoringInstalledSkillSummary;
         } =>
           !!skill.public.name &&
-          !!skill.public.category &&
           typeof skill.path === "string" &&
           isAbsolute(skill.path) &&
           this.skillRootIsSafe(profile.profilePath, skill.path),
