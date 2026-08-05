@@ -19,6 +19,10 @@ import {
   type AgenteraHermesProfileBindings,
   type AgenteraHermesVerifiedCache,
 } from "./hermes-adapter";
+import {
+  CapabilityBindingStore,
+  type LocalMcpCapabilityServer,
+} from "./capability-binding-store";
 import { RuntimeBindingStore } from "./runtime-binding-store";
 import type { AgenteraRuntimeOwner } from "../agentera-profile-binding";
 import type { AgenteraAgentControlContext } from "../../shared/agentera-agent-control";
@@ -139,6 +143,70 @@ function policy(
   };
 }
 
+function versionV3(input: {
+  required: boolean;
+  logicalName?: string;
+  localTool?: string;
+}): AgentVersion {
+  const base = version();
+  const logicalName = input.logicalName ?? "private-docs";
+  const localTool = input.localTool ?? "docs.read";
+  return {
+    ...base,
+    manifest: {
+      schema_version: 3,
+      identity: base.manifest.identity,
+      assets: base.manifest.assets,
+      model_policy: {
+        mode: "allowlist",
+        allowed_models: ["gpt-5.6"],
+        allowed_providers: ["openai"],
+      },
+      mcp_requirements: [
+        {
+          logical_name: logicalName,
+          tools: [localTool],
+          required: input.required,
+          permission_reason: "Read approved private documents",
+        },
+      ],
+      tools: { allowed: [localTool], denied: [] },
+      dependencies: base.manifest.dependencies,
+      runtime_compatibility: base.manifest.runtime_compatibility,
+    },
+    content_digest: "ce".repeat(32),
+  };
+}
+
+function policyV3(agentVersion: AgentVersion): AgentPolicySnapshot {
+  if (agentVersion.manifest.schema_version !== 3) {
+    throw new Error("V3 policy fixture requires a V3 manifest");
+  }
+  return {
+    id: POLICY_ID,
+    installation_id: INSTALLATION_ID,
+    agent_version_id: agentVersion.id,
+    issuer: "http://127.0.0.1:8086",
+    policy_version: 1,
+    document: {
+      schema_version: 3,
+      agent_definition_id: DEFINITION_ID,
+      agent_version_id: agentVersion.id,
+      version_digest: agentVersion.content_digest,
+      model_policy: agentVersion.manifest.model_policy,
+      mcp_requirements: agentVersion.manifest.mcp_requirements,
+      runtime_compatibility: agentVersion.manifest.runtime_compatibility,
+      tools: agentVersion.manifest.tools,
+      deny_rules: ["no-secret-export"],
+      publication_allowed: false,
+    },
+    content_digest: "df".repeat(32),
+    signing_key_id: "policy-test-key",
+    signature: "B".repeat(86),
+    created_at: NOW.toISOString(),
+  };
+}
+
 function officialPolicy(
   agentVersion: AgentVersion,
   policyId: string,
@@ -185,6 +253,7 @@ describe("Aera adapter around the real Hermes transport", () => {
   let root = "";
   let database: AgenteraControlPlaneDatabase;
   let bindingStore: RuntimeBindingStore;
+  let capabilityBindingStore: CapabilityBindingStore;
   let cache: AgenteraHermesVerifiedCache;
   let profileBindings: AgenteraHermesProfileBindings;
   let getRuntimeVersion: ReturnType<typeof vi.fn<() => string>>;
@@ -206,6 +275,10 @@ describe("Aera adapter around the real Hermes transport", () => {
         version: AgentVersion;
       }) => HermesVersionProjection
     >
+  >;
+  let profileMcpCapabilities: LocalMcpCapabilityServer[];
+  let getProfileMcpCapabilities: ReturnType<
+    typeof vi.fn<(profilePath: string) => LocalMcpCapabilityServer[]>
   >;
 
   beforeEach(() => {
@@ -250,6 +323,11 @@ describe("Aera adapter around the real Hermes transport", () => {
       now: () => NOW,
       randomUUID: () => ids.shift() ?? ADAPTIVE_ID,
     });
+    capabilityBindingStore = new CapabilityBindingStore({
+      database,
+      owner,
+      now: () => NOW,
+    });
     const agentVersion = version();
     const snapshot = policy(agentVersion);
     cache = {
@@ -282,6 +360,8 @@ describe("Aera adapter around the real Hermes transport", () => {
       baseUrl: "",
     };
     materializeVersion = vi.fn(() => projection(agentVersion));
+    profileMcpCapabilities = [];
+    getProfileMcpCapabilities = vi.fn(() => profileMcpCapabilities);
   });
 
   afterEach(() => {
@@ -295,6 +375,7 @@ describe("Aera adapter around the real Hermes transport", () => {
     return new AgenteraHermesAdapter({
       database,
       bindingStore,
+      capabilityBindingStore,
       profileBindings,
       cache,
       projection: { materializeVersion },
@@ -302,6 +383,7 @@ describe("Aera adapter around the real Hermes transport", () => {
       getRuntimeVersion,
       getCurrentToolPermissionDigest,
       getProfileModelConfig: () => currentModelRoute,
+      getProfileMcpCapabilities,
       isVersionRevoked,
       assertEntitled,
       getAgentContext: () => agentContext,
@@ -395,6 +477,158 @@ describe("Aera adapter around the real Hermes transport", () => {
     expect(cache.getVerifiedVersion).toHaveBeenCalledTimes(2);
     expect(cache.getVerifiedPolicySnapshot).toHaveBeenCalledTimes(2);
     expect(assertEntitled).toHaveBeenCalledTimes(2);
+  });
+
+  function useV3(agentVersion: AgentVersion): void {
+    const snapshot = policyV3(agentVersion);
+    vi.mocked(cache.getVerifiedVersion).mockReturnValue(agentVersion);
+    vi.mocked(cache.getVerifiedPolicySnapshot).mockReturnValue(snapshot);
+    materializeVersion.mockReturnValue(projection(agentVersion));
+  }
+
+  it("blocks a new V3 conversation when a required MCP requirement is not mapped", async () => {
+    useV3(versionV3({ required: true }));
+
+    await expect(
+      adapter().prepareInstalledTurn({
+        conversationKey: "required-mcp-missing",
+        profilePath: PROFILE_PATH,
+        owner,
+        resumeSessionId: null,
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<AgenteraHermesAdapterError>>({
+        code: "profile_capability_configuration_required",
+      }),
+    );
+    expect(
+      bindingStore.getByConversationKey("required-mcp-missing"),
+    ).toBeNull();
+  });
+
+  it.each([
+    {
+      name: "disabled server",
+      servers: [
+        { name: "employee-docs", enabled: false, tools: ["docs.read"] },
+      ],
+    },
+    {
+      name: "tool drift",
+      servers: [
+        { name: "employee-docs", enabled: true, tools: ["docs.search"] },
+      ],
+    },
+  ])("blocks a required V3 requirement after $name", async ({ servers }) => {
+    useV3(versionV3({ required: true }));
+    capabilityBindingStore.upsert({
+      agentInstallationId: INSTALLATION_ID,
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+      requirementLogicalName: "private-docs",
+      localMcpName: "employee-docs",
+      verifiedTools: ["docs.read"],
+      expectedRevision: null,
+    });
+    profileMcpCapabilities = servers;
+
+    await expect(
+      adapter().prepareInstalledTurn({
+        conversationKey: `required-mcp-${servers[0]?.enabled ? "drift" : "disabled"}`,
+        profilePath: PROFILE_PATH,
+        owner,
+        resumeSessionId: null,
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<AgenteraHermesAdapterError>>({
+        code: "profile_capability_configuration_required",
+      }),
+    );
+  });
+
+  it("allows an optional missing MCP requirement in a bounded degraded state", async () => {
+    useV3(versionV3({ required: false, logicalName: "calendar-optional" }));
+
+    const prepared = await adapter().prepareInstalledTurn({
+      conversationKey: "optional-mcp-missing",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+    });
+
+    expect(prepared.binding.capabilityBindings).toEqual([]);
+    expect(prepared.binding.degradedMcpRequirements).toEqual([
+      "calendar-optional",
+    ]);
+    expect(prepared.envelope.instructions).toContain("calendar-optional");
+  });
+
+  it("uses a remap only for a new conversation and keeps the old frozen mapping", async () => {
+    useV3(versionV3({ required: true }));
+    const firstMapping = capabilityBindingStore.upsert({
+      agentInstallationId: INSTALLATION_ID,
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+      requirementLogicalName: "private-docs",
+      localMcpName: "employee-docs-v1",
+      verifiedTools: ["docs.read"],
+      expectedRevision: null,
+    });
+    profileMcpCapabilities = [
+      { name: "employee-docs-v1", enabled: true, tools: ["docs.read"] },
+    ];
+    const subject = adapter();
+    const first = await subject.prepareInstalledTurn({
+      conversationKey: "mapped-mcp-v1",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+    });
+
+    capabilityBindingStore.upsert({
+      agentInstallationId: INSTALLATION_ID,
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+      requirementLogicalName: "private-docs",
+      localMcpName: "employee-docs-v2",
+      verifiedTools: ["docs.read"],
+      expectedRevision: firstMapping.revision,
+    });
+    profileMcpCapabilities = [
+      { name: "employee-docs-v2", enabled: true, tools: ["docs.read"] },
+    ];
+
+    const resumed = await subject.prepareInstalledTurn({
+      conversationKey: "mapped-mcp-v1",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+    });
+    const next = await subject.prepareInstalledTurn({
+      conversationKey: "mapped-mcp-v2",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+    });
+
+    expect(resumed.binding.capabilityBindings).toEqual(
+      first.binding.capabilityBindings,
+    );
+    expect(resumed.binding.toolPermissionDigest).toBe(
+      first.binding.toolPermissionDigest,
+    );
+    expect(next.binding.capabilityBindings).toEqual([
+      {
+        logicalName: "private-docs",
+        localMcpName: "employee-docs-v2",
+        tools: ["docs.read"],
+        revision: 2,
+      },
+    ]);
+    expect(next.binding.toolPermissionDigest).not.toBe(
+      first.binding.toolPermissionDigest,
+    );
+    expect(next.envelope.instructions).toContain("employee-docs-v2");
+    expect(next.envelope.instructions).not.toMatch(
+      /https?:\/\/|command|args|env|header|token|auth/i,
+    );
   });
 
   it("keeps a pre-model-route RuntimeBinding resumable", async () => {

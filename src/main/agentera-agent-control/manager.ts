@@ -107,8 +107,13 @@ import {
   CapabilityAuthoringService,
   type CapabilityAuthoringServiceOptions,
 } from "./capability-authoring-service";
+import { CapabilityBindingStore } from "./capability-binding-store";
 import { listInstalledSkills } from "../skills";
-import { listMcpServers, testMcpServer } from "../mcp-servers";
+import {
+  listMcpServers,
+  normalizeMcpDiscoveredTools,
+  testMcpServer,
+} from "../mcp-servers";
 import { readProfileMeta } from "../profile-meta";
 import { isValidProfileName } from "../utils";
 import {
@@ -1756,6 +1761,30 @@ export class AgenteraAgentControlManager {
       origin: full.client.origin,
       runtimeVersion,
     });
+    const capabilityBindingStore = new CapabilityBindingStore({
+      database: full.database,
+      owner,
+    });
+    const getProfileMcpCapabilities = async (profilePath: string) => {
+      const servers = await listMcpServers(profilePath);
+      return Promise.all(
+        servers.map(async (server) => {
+          if (!server.enabled) {
+            return { name: server.name, enabled: false, tools: [] };
+          }
+          const result = await testMcpServer(server.name, profilePath);
+          return {
+            name: server.name,
+            enabled: result.success,
+            tools: result.success
+              ? normalizeMcpDiscoveredTools(result.tools).map(
+                  (tool) => tool.name,
+                )
+              : [],
+          };
+        }),
+      );
+    };
     const installations = new AgentInstallationManager({
       database: full.database,
       client: full.client,
@@ -1766,6 +1795,8 @@ export class AgenteraAgentControlManager {
       profiles: full.profiles,
       owner,
       runtimeVersion,
+      capabilityBindingStore,
+      getProfileMcpCapabilities,
     });
     const bindingStore = new RuntimeBindingStore({
       database: full.database,
@@ -1774,6 +1805,7 @@ export class AgenteraAgentControlManager {
     const hermes = new AgenteraHermesAdapter({
       database: full.database,
       bindingStore,
+      capabilityBindingStore,
       profileBindings: this.profileBindings,
       cache,
       projection: this.projection,
@@ -1785,6 +1817,7 @@ export class AgenteraAgentControlManager {
         }
         return full.profiles.readProfileModelConfig(profilePath);
       },
+      getProfileMcpCapabilities,
       isVersionRevoked: full.isVersionRevoked ?? (() => false),
       assertEntitled: full.assertEntitled,
       getAgentContext: () => this.context(),

@@ -21,6 +21,13 @@ import {
   modelPolicyForManifest,
   modelPolicyForPolicyDocument,
 } from "./model-policy";
+import {
+  CapabilityBindingStoreError,
+  type CapabilityBindingStore,
+  type FrozenCapabilityBinding,
+  type LocalMcpCapabilityServer,
+  type ResolvedCapabilityBindings,
+} from "./capability-binding-store";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -38,6 +45,7 @@ export type AgenteraHermesAdapterErrorCode =
   | "policy_invalid"
   | "runtime_drift"
   | "tool_policy_drift"
+  | "profile_capability_configuration_required"
   | "model_policy_drift"
   | "version_revoked"
   | "projection_invalid";
@@ -77,6 +85,7 @@ export interface AgenteraHermesProjection {
 export interface AgenteraHermesAdapterOptions {
   database: AgenteraControlPlaneDatabase;
   bindingStore: RuntimeBindingStore;
+  capabilityBindingStore: CapabilityBindingStore;
   profileBindings: AgenteraHermesProfileBindings;
   cache: AgenteraHermesVerifiedCache;
   projection: AgenteraHermesProjection;
@@ -87,6 +96,9 @@ export interface AgenteraHermesAdapterOptions {
     policy: AgentPolicySnapshot,
   ) => string | Promise<string>;
   getProfileModelConfig: (profilePath: string) => SessionModelOverride;
+  getProfileMcpCapabilities: (
+    profilePath: string,
+  ) => LocalMcpCapabilityServer[] | Promise<LocalMcpCapabilityServer[]>;
   isVersionRevoked: (versionId: string) => boolean | Promise<boolean>;
   assertEntitled: () => void | Promise<void>;
   getAgentContext: () => AgenteraAgentControlContext;
@@ -191,6 +203,38 @@ export function digestToolPermissionDeclaration(
       "utf8",
     )
     .digest("hex");
+}
+
+function digestBoundToolPermissions(
+  publishedDigest: string,
+  bindings: FrozenCapabilityBinding[],
+  degradedRequirements: string[],
+): string {
+  return createHash("sha256")
+    .update(
+      stableJson({
+        publishedDigest,
+        capabilityBindings: bindings,
+        degradedRequirements,
+      }),
+      "utf8",
+    )
+    .digest("hex");
+}
+
+function manifestMcpRequirements(version: AgentVersion): Array<{
+  logicalName: string;
+  tools: string[];
+  required: boolean;
+  permissionReason: string;
+}> {
+  if (version.manifest.schema_version !== 3) return [];
+  return version.manifest.mcp_requirements.map((requirement) => ({
+    logicalName: requirement.logical_name,
+    tools: [...requirement.tools],
+    required: requirement.required,
+    permissionReason: requirement.permission_reason,
+  }));
 }
 
 function parseInstallation(
@@ -412,6 +456,21 @@ function composePublishedInstructions(input: {
       path: join(projection.versionRoot, "skills", skill.scopedName),
     }))
     .sort((left, right) => left.name.localeCompare(right.name));
+  const mcpCapabilityContext =
+    version.manifest.schema_version === 3
+      ? [
+          `Local MCP requirement mappings (immutable for this conversation): ${stableJson(
+            binding.capabilityBindings.map((capability) => ({
+              logicalName: capability.logicalName,
+              localMcpName: capability.localMcpName,
+              tools: capability.tools,
+            })),
+          )}.`,
+          `Degraded optional MCP requirements: ${stableJson(
+            binding.degradedMcpRequirements,
+          )}.`,
+        ]
+      : [];
 
   return [
     "Aera installed Agent published base (immutable for this conversation).",
@@ -427,6 +486,7 @@ function composePublishedInstructions(input: {
       denyRules: policy.document.deny_rules,
       publicationAllowed: policy.document.publication_allowed,
     })}.`,
+    ...mcpCapabilityContext,
     "Profile-local SOUL and Skills take precedence when they conflict with this published base.",
     "Aera Runtime remains the sole execution and adaptive-learning engine; keep all local adaptive state private and do not treat it as part of this published base.",
   ].join("\n\n");
@@ -587,14 +647,64 @@ export class AgenteraHermesAdapter {
       throw new AgenteraHermesAdapterError("runtime_drift");
     }
     const expectedToolDigest = digestToolPermissionDeclaration(version, policy);
-    const currentToolDigest = digest(
+    const currentPublishedToolDigest = digest(
       await (this.options.getCurrentToolPermissionDigest?.(version, policy) ??
         expectedToolDigest),
       "tool_policy_drift",
     );
+    if (currentPublishedToolDigest !== expectedToolDigest) {
+      throw new AgenteraHermesAdapterError("tool_policy_drift");
+    }
+    const requirements = manifestMcpRequirements(version);
     if (
-      currentToolDigest !== expectedToolDigest ||
-      (existing !== null && currentToolDigest !== existing.toolPermissionDigest)
+      version.manifest.schema_version === 3 &&
+      (policy.document.schema_version !== 3 ||
+        stableJson(policy.document.mcp_requirements) !==
+          stableJson(version.manifest.mcp_requirements))
+    ) {
+      throw new AgenteraHermesAdapterError("tool_policy_drift");
+    }
+    let capabilities: ResolvedCapabilityBindings;
+    if (existing) {
+      capabilities = {
+        bindings: existing.capabilityBindings,
+        degradedRequirements: existing.degradedMcpRequirements,
+      };
+    } else if (requirements.length > 0) {
+      try {
+        capabilities = this.options.capabilityBindingStore.resolve({
+          agentInstallationId: installation.agentInstallationId,
+          runtimeProfileId: installation.runtimeProfileId,
+          requirements,
+          servers: await this.options.getProfileMcpCapabilities(
+            input.profilePath,
+          ),
+        });
+      } catch (error) {
+        if (
+          error instanceof CapabilityBindingStoreError &&
+          error.code === "profile_capability_configuration_required"
+        ) {
+          throw new AgenteraHermesAdapterError(
+            "profile_capability_configuration_required",
+          );
+        }
+        throw new AgenteraHermesAdapterError("binding_conflict");
+      }
+    } else {
+      capabilities = { bindings: [], degradedRequirements: [] };
+    }
+    const currentToolDigest =
+      version.manifest.schema_version === 3
+        ? digestBoundToolPermissions(
+            currentPublishedToolDigest,
+            capabilities.bindings,
+            capabilities.degradedRequirements,
+          )
+        : currentPublishedToolDigest;
+    if (
+      existing !== null &&
+      currentToolDigest !== existing.toolPermissionDigest
     ) {
       throw new AgenteraHermesAdapterError("tool_policy_drift");
     }
@@ -649,6 +759,8 @@ export class AgenteraHermesAdapter {
         installation.selectedReleaseRevisionId,
       toolPermissionDigest: currentToolDigest,
       publishedBaseDigest: version.content_digest,
+      capabilityBindings: capabilities.bindings,
+      degradedMcpRequirements: capabilities.degradedRequirements,
     };
     return {
       bindingInput,
@@ -682,7 +794,11 @@ export class AgenteraHermesAdapter {
       binding.officialReleaseRevisionId !==
         plan.bindingInput.officialReleaseRevisionId ||
       binding.toolPermissionDigest !== plan.bindingInput.toolPermissionDigest ||
-      binding.publishedBaseDigest !== plan.bindingInput.publishedBaseDigest
+      binding.publishedBaseDigest !== plan.bindingInput.publishedBaseDigest ||
+      JSON.stringify(binding.capabilityBindings) !==
+        JSON.stringify(plan.bindingInput.capabilityBindings ?? []) ||
+      JSON.stringify(binding.degradedMcpRequirements) !==
+        JSON.stringify(plan.bindingInput.degradedMcpRequirements ?? [])
     ) {
       throw new AgenteraHermesAdapterError("binding_conflict");
     }

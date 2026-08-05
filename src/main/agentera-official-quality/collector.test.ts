@@ -59,6 +59,8 @@ function binding(
     officialReleaseRevisionId: RELEASE_REVISION_ID,
     toolPermissionDigest: "ab".repeat(32),
     publishedBaseDigest: "cd".repeat(32),
+    capabilityBindings: [],
+    degradedMcpRequirements: [],
     localAdaptiveStateRevision: "d0000000-0000-4000-8000-000000000001",
     createdAt: "2026-07-23T12:00:00.000Z",
     ...overrides,

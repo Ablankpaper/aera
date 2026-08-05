@@ -117,6 +117,8 @@ describe("immutable local RuntimeBinding store", () => {
       officialReleaseRevisionId: null,
       toolPermissionDigest: TOOL_DIGEST,
       publishedBaseDigest: BASE_DIGEST,
+      capabilityBindings: [],
+      degradedMcpRequirements: [],
       localAdaptiveStateRevision: ADAPTIVE_REVISION,
       createdAt: NOW.toISOString(),
     });
@@ -173,6 +175,34 @@ describe("immutable local RuntimeBinding store", () => {
     });
     expect(JSON.stringify(store.listPendingCloudRecords())).not.toMatch(
       /petoi|gpt-5\.6-sol|baseUrl|modelRoute/i,
+    );
+  });
+
+  it("freezes sanitized MCP requirement mappings locally without adding them to the cloud outbox", () => {
+    const binding = store.getOrCreateForConversation({
+      ...bindingInput({ conversationKey: "capability-bound-conversation" }),
+      capabilityBindings: [
+        {
+          logicalName: "private-docs",
+          localMcpName: "employee-docs",
+          tools: ["docs.read"],
+          revision: 2,
+        },
+      ],
+      degradedMcpRequirements: ["calendar-optional"],
+    });
+
+    expect(binding.capabilityBindings).toEqual([
+      {
+        logicalName: "private-docs",
+        localMcpName: "employee-docs",
+        tools: ["docs.read"],
+        revision: 2,
+      },
+    ]);
+    expect(binding.degradedMcpRequirements).toEqual(["calendar-optional"]);
+    expect(JSON.stringify(store.listPendingCloudRecords())).not.toMatch(
+      /private-docs|employee-docs|docs\.read|calendar-optional|capabilityBindings/i,
     );
   });
 
@@ -255,6 +285,8 @@ describe("immutable local RuntimeBinding store", () => {
       ...legacy,
       modelRoute: null,
       officialReleaseRevisionId: null,
+      capabilityBindings: [],
+      degradedMcpRequirements: [],
     });
   });
 

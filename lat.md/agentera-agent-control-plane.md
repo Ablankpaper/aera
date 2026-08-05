@@ -256,6 +256,14 @@ An Agent Installation selects one immutable version for one device/Profile pair 
 
 The authentication installation ID is not reused as the Agent Installation ID. New Agent installations create a fresh Profile with `cloneFrom=null`; existing learned Profiles require explicit same-owner claim. A RuntimeBinding freezes version, Profile, Runtime, policy, and tools for one conversation.
 
+### Local MCP requirement binding
+
+Manifest V3 MCP requirements are satisfied only by a local, owner/device/Installation-scoped mapping in the employee's selected Profile; shared manifests and Cloud records never receive connection configuration.
+
+Schema v11 adds `agent_mcp_requirement_bindings` through [[src/main/agentera-agent-control/db.ts#AGENTERA_CONTROL_PLANE_SCHEMA_VERSION]]. [[src/main/agentera-agent-control/capability-binding-store.ts#CapabilityBindingStore]] stores only the logical requirement, local MCP name, verified tools, revision, and timestamps, then requires the live server to remain enabled and expose every requested tool.
+
+A required missing, disabled, or drifted mapping leaves installation pending with `profile_capability_configuration_required`; an optional failure becomes a bounded degraded list. [[src/main/agentera-agent-control/hermes-adapter.ts#AgenteraHermesAdapter#prepareInstalledTurnPlan]] freezes the resolved names, tools, and revisions into the local RuntimeBinding and its tool digest for a new conversation. A later remap affects only a new ConversationBoundary, while the sanitized Cloud outbox excludes all local mapping bytes.
+
 ### Model policy and runtime selection
 
 An immutable AgentVersion signs a model policy, while the user's Installation selects the concrete local route that satisfies it.

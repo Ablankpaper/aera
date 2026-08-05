@@ -55,6 +55,10 @@ import {
   type AgentInstallationVersionCache,
 } from "./installation-manager";
 import { canonicalizeEditableAgent } from "./manifest";
+import {
+  CapabilityBindingStore,
+  type LocalMcpCapabilityServer,
+} from "./capability-binding-store";
 
 const DEFINITION_ID = "11111111-1111-4111-8111-111111111111";
 const VERSION_ID = "22222222-2222-4222-8222-222222222222";
@@ -147,6 +151,51 @@ function makeVersion(id = VERSION_ID, number = 1): AgentVersion {
   };
 }
 
+function makeVersionV3(): AgentVersion {
+  const editable: AgentEditableManifest = {
+    schemaVersion: 3,
+    identity: { systemPrompt: "Installed capability-bound base." },
+    assets: [],
+    modelPolicy: {
+      mode: "allowlist",
+      allowedProviders: ["openai"],
+      allowedModels: ["gpt-5.6"],
+    },
+    mcpRequirements: [
+      {
+        logicalName: "private-docs",
+        tools: ["docs.read"],
+        required: true,
+        permissionReason: "Read approved private documents",
+      },
+    ],
+    tools: { allowed: ["docs.read"], denied: [] },
+    dependencies: [],
+    runtimeCompatibility: {
+      minimumVersion: "v0.18.2-agentera.1",
+      maximumVersionExclusive: "v0.19.0",
+    },
+  };
+  const canonical = canonicalizeEditableAgent(editable, []);
+  return {
+    id: VERSION_ID,
+    definition_id: DEFINITION_ID,
+    version_number: 1,
+    manifest: JSON.parse(
+      canonical.manifestBytes.toString("utf8"),
+    ) as AgentVersion["manifest"],
+    bundle: JSON.parse(
+      canonical.bundleBytes.toString("utf8"),
+    ) as AgentVersion["bundle"],
+    content_digest: canonical.contentDigest,
+    signing_key_id: "installation-test-key",
+    signature: "A".repeat(86),
+    runtime_minimum_version: "v0.18.2-agentera.1",
+    runtime_maximum_version_exclusive: "v0.19.0",
+    published_at: NOW.toISOString(),
+  };
+}
+
 function makePolicy(
   version: AgentVersion,
   id = POLICY_ID,
@@ -172,6 +221,35 @@ function makePolicy(
       publication_allowed: false,
     },
     content_digest: "ab".repeat(32),
+    signing_key_id: "installation-policy-test-key",
+    signature: "B".repeat(86),
+    created_at: NOW.toISOString(),
+  };
+}
+
+function makePolicyV3(version: AgentVersion): AgentPolicySnapshot {
+  if (version.manifest.schema_version !== 3) {
+    throw new Error("V3 policy fixture requires a V3 manifest");
+  }
+  return {
+    id: POLICY_ID,
+    installation_id: AGENT_INSTALLATION_ID,
+    agent_version_id: version.id,
+    issuer: ORIGIN,
+    policy_version: 1,
+    document: {
+      schema_version: 3,
+      agent_definition_id: DEFINITION_ID,
+      agent_version_id: version.id,
+      version_digest: version.content_digest,
+      model_policy: version.manifest.model_policy,
+      mcp_requirements: version.manifest.mcp_requirements,
+      runtime_compatibility: version.manifest.runtime_compatibility,
+      tools: version.manifest.tools,
+      deny_rules: [],
+      publication_allowed: false,
+    },
+    content_digest: "ac".repeat(32),
     signing_key_id: "installation-policy-test-key",
     signature: "B".repeat(86),
     created_at: NOW.toISOString(),
@@ -501,6 +579,12 @@ describe("Agent installation orchestration", () => {
   function manager(
     ownerOverride = owner,
     randomUUID: () => string = () => OPERATION_ID,
+    capabilityOptions: {
+      capabilityBindingStore: CapabilityBindingStore;
+      getProfileMcpCapabilities: (
+        profilePath: string,
+      ) => LocalMcpCapabilityServer[];
+    } | null = null,
   ): AgentInstallationManager {
     return new AgentInstallationManager({
       database,
@@ -514,6 +598,7 @@ describe("Agent installation orchestration", () => {
       runtimeVersion: "v0.18.2-agentera.1",
       now: () => NOW,
       randomUUID,
+      ...(capabilityOptions ?? {}),
     });
   }
 
@@ -620,6 +705,66 @@ describe("Agent installation orchestration", () => {
       agentInstallationId: AGENT_INSTALLATION_ID,
       runtimeProfileId: RUNTIME_PROFILE_ID,
     });
+  });
+
+  it("keeps a V3 installation pending until required Profile capability mapping is configured", async () => {
+    v1 = makeVersionV3();
+    policy = makePolicyV3(v1);
+    createInstallation.mockResolvedValue({
+      installation: pendingInstallation(),
+      policy_snapshot: policy,
+      replayed: false,
+    });
+    getPolicySnapshot.mockResolvedValue(policy);
+    const capabilityBindingStore = new CapabilityBindingStore({
+      database,
+      owner,
+      now: () => NOW,
+    });
+    let capabilities: LocalMcpCapabilityServer[] = [];
+    const capabilityOptions = {
+      capabilityBindingStore,
+      getProfileMcpCapabilities: () => capabilities,
+    };
+    const subject = manager(owner, () => OPERATION_ID, capabilityOptions);
+
+    await expect(
+      subject.install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({
+      code: "profile_capability_configuration_required",
+    });
+    const pending = subject.getLocalInstallation(AGENT_INSTALLATION_ID);
+    expect(pending).toMatchObject({
+      status: "pending",
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+      retryCode: "profile_capability_configuration_required",
+    });
+    expect(activateInstallation).not.toHaveBeenCalled();
+
+    capabilityBindingStore.upsert({
+      agentInstallationId: AGENT_INSTALLATION_ID,
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+      requirementLogicalName: "private-docs",
+      localMcpName: "employee-docs",
+      verifiedTools: ["docs.read"],
+      expectedRevision: null,
+    });
+    capabilities = [
+      { name: "employee-docs", enabled: true, tools: ["docs.read"] },
+    ];
+
+    await expect(
+      subject.retryPendingInstallation({
+        agentInstallationId: AGENT_INSTALLATION_ID,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).resolves.toMatchObject({ status: "active", retryCode: null });
+    expect(createInstallation).toHaveBeenCalledOnce();
+    expect(activateInstallation).toHaveBeenCalledOnce();
   });
 
   // @lat: [[lat.md/agentera-agent-control-plane#Installation and binding#Installation reconciliation isolation#Fresh reservation finalization recovery]]

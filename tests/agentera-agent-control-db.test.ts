@@ -40,8 +40,8 @@ afterEach(() => {
 });
 
 describe("Aera control-plane database", () => {
-  it("pins Organization experience receipts at schema version 10", () => {
-    expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(10);
+  it("pins local MCP requirement bindings at schema version 11", () => {
+    expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(11);
   });
 
   it("opens exactly below Electron userData and never below HERMES_HOME", () => {
@@ -112,6 +112,7 @@ describe("Aera control-plane database", () => {
         .all() as Array<{ name: string }>;
       expect(tables.map(({ name }) => name)).toEqual([
         "agent_drafts",
+        "agent_mcp_requirement_bindings",
         "cached_agent_versions",
         "conversation_boundaries",
         "draft_assets",

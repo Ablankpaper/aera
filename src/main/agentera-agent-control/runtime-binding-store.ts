@@ -3,6 +3,7 @@ import type { AgenteraRuntimeOwner } from "../agentera-profile-binding";
 import type { SessionModelOverride } from "../../shared/model-override";
 import type { CreateRuntimeBindingRecordRequest } from "./client";
 import type { AgenteraControlPlaneDatabase } from "./db";
+import type { FrozenCapabilityBinding } from "./capability-binding-store";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -25,6 +26,8 @@ const BINDING_FIELDS = [
   "officialReleaseRevisionId",
   "toolPermissionDigest",
   "publishedBaseDigest",
+  "capabilityBindings",
+  "degradedMcpRequirements",
   "localAdaptiveStateRevision",
   "createdAt",
 ] as const;
@@ -37,6 +40,20 @@ const PRE_MODEL_BINDING_FIELDS = BINDING_FIELDS.filter(
 const PRE_MODEL_LEGACY_BINDING_FIELDS = PRE_MODEL_BINDING_FIELDS.filter(
   (field) => field !== "officialReleaseRevisionId",
 );
+const PRE_CAPABILITY_BINDING_FIELDS = BINDING_FIELDS.filter(
+  (field) =>
+    field !== "capabilityBindings" && field !== "degradedMcpRequirements",
+);
+const PRE_CAPABILITY_LEGACY_BINDING_FIELDS =
+  PRE_CAPABILITY_BINDING_FIELDS.filter(
+    (field) => field !== "officialReleaseRevisionId",
+  );
+const PRE_CAPABILITY_MODEL_BINDING_FIELDS =
+  PRE_CAPABILITY_BINDING_FIELDS.filter((field) => field !== "modelRoute");
+const PRE_CAPABILITY_MODEL_LEGACY_BINDING_FIELDS =
+  PRE_CAPABILITY_MODEL_BINDING_FIELDS.filter(
+    (field) => field !== "officialReleaseRevisionId",
+  );
 const CLOUD_FIELDS = [
   "binding_id",
   "agent_installation_id",
@@ -69,6 +86,8 @@ export interface LocalRuntimeBinding {
   officialReleaseRevisionId: string | null;
   toolPermissionDigest: string;
   publishedBaseDigest: string;
+  capabilityBindings: FrozenCapabilityBinding[];
+  degradedMcpRequirements: string[];
   localAdaptiveStateRevision: string;
   createdAt: string;
 }
@@ -80,7 +99,28 @@ export type CreateLocalRuntimeBindingInput = Omit<
   | "localAdaptiveStateRevision"
   | "createdAt"
   | "modelRoute"
-> & { modelRoute: SessionModelOverride };
+  | "capabilityBindings"
+  | "degradedMcpRequirements"
+> & {
+  modelRoute: SessionModelOverride;
+  capabilityBindings?: FrozenCapabilityBinding[];
+  degradedMcpRequirements?: string[];
+};
+
+type NormalizedLocalRuntimeBindingInput = Omit<
+  CreateLocalRuntimeBindingInput,
+  "capabilityBindings" | "degradedMcpRequirements"
+> & {
+  capabilityBindings: FrozenCapabilityBinding[];
+  degradedMcpRequirements: string[];
+};
+
+type ImmutableLocalRuntimeBindingInput = Omit<
+  NormalizedLocalRuntimeBindingInput,
+  "modelRoute"
+> & {
+  modelRoute: SessionModelOverride | null;
+};
 
 export interface PendingRuntimeBindingCloudRecord {
   id: string;
@@ -198,6 +238,109 @@ function modelRoute(
   return { provider, model, baseUrl: record.baseUrl.trim() };
 }
 
+function capabilityName(
+  value: unknown,
+  error: RuntimeBindingStoreErrorCode,
+): string {
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > 128 ||
+    value !== value.trim() ||
+    /[\0\r\n]/.test(value) ||
+    value.includes("://")
+  ) {
+    throw new RuntimeBindingStoreError(error);
+  }
+  return value;
+}
+
+function capabilityTools(
+  value: unknown,
+  error: RuntimeBindingStoreErrorCode,
+): string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > 128 ||
+    !value.every(
+      (tool) =>
+        typeof tool === "string" &&
+        /^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,127}$/.test(tool),
+    )
+  ) {
+    throw new RuntimeBindingStoreError(error);
+  }
+  const tools = [...value].sort((left, right) =>
+    Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8")),
+  );
+  if (new Set(tools).size !== tools.length) {
+    throw new RuntimeBindingStoreError(error);
+  }
+  return tools;
+}
+
+function capabilityBindings(
+  value: unknown,
+  error: RuntimeBindingStoreErrorCode,
+): FrozenCapabilityBinding[] {
+  if (!Array.isArray(value) || value.length > 32) {
+    throw new RuntimeBindingStoreError(error);
+  }
+  const result = value.map((binding) => {
+    if (
+      binding === null ||
+      typeof binding !== "object" ||
+      Array.isArray(binding) ||
+      !exactKeys(binding, ["logicalName", "localMcpName", "tools", "revision"])
+    ) {
+      throw new RuntimeBindingStoreError(error);
+    }
+    const record = binding as Record<string, unknown>;
+    if (
+      !Number.isSafeInteger(record.revision) ||
+      (record.revision as number) < 1
+    ) {
+      throw new RuntimeBindingStoreError(error);
+    }
+    return {
+      logicalName: capabilityName(record.logicalName, error),
+      localMcpName: capabilityName(record.localMcpName, error),
+      tools: capabilityTools(record.tools, error),
+      revision: record.revision as number,
+    };
+  });
+  result.sort((left, right) =>
+    Buffer.compare(
+      Buffer.from(left.logicalName, "utf8"),
+      Buffer.from(right.logicalName, "utf8"),
+    ),
+  );
+  if (
+    new Set(result.map(({ logicalName }) => logicalName)).size !== result.length
+  ) {
+    throw new RuntimeBindingStoreError(error);
+  }
+  return result;
+}
+
+function degradedRequirements(
+  value: unknown,
+  error: RuntimeBindingStoreErrorCode,
+): string[] {
+  if (!Array.isArray(value) || value.length > 32) {
+    throw new RuntimeBindingStoreError(error);
+  }
+  const result = value.map((name) => capabilityName(name, error));
+  result.sort((left, right) =>
+    Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8")),
+  );
+  if (new Set(result).size !== result.length) {
+    throw new RuntimeBindingStoreError(error);
+  }
+  return result;
+}
+
 function isoTimestamp(
   value: unknown,
   error: RuntimeBindingStoreErrorCode,
@@ -220,11 +363,11 @@ function createTimestamp(now: () => Date): string {
 
 function normalizeInput(
   input: CreateLocalRuntimeBindingInput,
-): CreateLocalRuntimeBindingInput {
+): NormalizedLocalRuntimeBindingInput {
   if (
     input === null ||
     typeof input !== "object" ||
-    !exactKeys(input, [
+    (!exactKeys(input, [
       "conversationKey",
       "tenantId",
       "ownerScope",
@@ -240,7 +383,26 @@ function normalizeInput(
       "officialReleaseRevisionId",
       "toolPermissionDigest",
       "publishedBaseDigest",
-    ]) ||
+    ]) &&
+      !exactKeys(input, [
+        "conversationKey",
+        "tenantId",
+        "ownerScope",
+        "ownerId",
+        "deviceId",
+        "agentDefinitionId",
+        "agentVersionId",
+        "agentInstallationId",
+        "runtimeProfileId",
+        "runtimeVersion",
+        "modelRoute",
+        "policySnapshotId",
+        "officialReleaseRevisionId",
+        "toolPermissionDigest",
+        "publishedBaseDigest",
+        "capabilityBindings",
+        "degradedMcpRequirements",
+      ])) ||
     input.ownerScope !== "USER"
   ) {
     throw new RuntimeBindingStoreError("invalid_binding");
@@ -264,6 +426,14 @@ function normalizeInput(
         : uuid(input.officialReleaseRevisionId, "invalid_binding"),
     toolPermissionDigest: digest(input.toolPermissionDigest, "invalid_binding"),
     publishedBaseDigest: digest(input.publishedBaseDigest, "invalid_binding"),
+    capabilityBindings: capabilityBindings(
+      input.capabilityBindings ?? [],
+      "invalid_binding",
+    ),
+    degradedMcpRequirements: degradedRequirements(
+      input.degradedMcpRequirements ?? [],
+      "invalid_binding",
+    ),
   };
 }
 
@@ -275,7 +445,11 @@ function parseBinding(value: unknown): LocalRuntimeBinding {
     (!exactKeys(value, BINDING_FIELDS) &&
       !exactKeys(value, LEGACY_BINDING_FIELDS) &&
       !exactKeys(value, PRE_MODEL_BINDING_FIELDS) &&
-      !exactKeys(value, PRE_MODEL_LEGACY_BINDING_FIELDS))
+      !exactKeys(value, PRE_MODEL_LEGACY_BINDING_FIELDS) &&
+      !exactKeys(value, PRE_CAPABILITY_BINDING_FIELDS) &&
+      !exactKeys(value, PRE_CAPABILITY_LEGACY_BINDING_FIELDS) &&
+      !exactKeys(value, PRE_CAPABILITY_MODEL_BINDING_FIELDS) &&
+      !exactKeys(value, PRE_CAPABILITY_MODEL_LEGACY_BINDING_FIELDS))
   ) {
     throw new RuntimeBindingStoreError("binding_corrupt");
   }
@@ -320,6 +494,12 @@ function parseBinding(value: unknown): LocalRuntimeBinding {
       "binding_corrupt",
     ),
     publishedBaseDigest: digest(record.publishedBaseDigest, "binding_corrupt"),
+    capabilityBindings: Object.hasOwn(record, "capabilityBindings")
+      ? capabilityBindings(record.capabilityBindings, "binding_corrupt")
+      : [],
+    degradedMcpRequirements: Object.hasOwn(record, "degradedMcpRequirements")
+      ? degradedRequirements(record.degradedMcpRequirements, "binding_corrupt")
+      : [],
     localAdaptiveStateRevision: uuid(
       record.localAdaptiveStateRevision,
       "binding_corrupt",
@@ -412,10 +592,7 @@ function parseCloudBody(value: unknown): CreateRuntimeBindingRecordRequest {
 
 function immutableInputOf(
   binding: LocalRuntimeBinding,
-): Omit<
-  LocalRuntimeBinding,
-  "id" | "hermesSessionId" | "localAdaptiveStateRevision" | "createdAt"
-> {
+): ImmutableLocalRuntimeBindingInput {
   return {
     conversationKey: binding.conversationKey,
     tenantId: binding.tenantId,
@@ -432,6 +609,8 @@ function immutableInputOf(
     officialReleaseRevisionId: binding.officialReleaseRevisionId,
     toolPermissionDigest: binding.toolPermissionDigest,
     publishedBaseDigest: binding.publishedBaseDigest,
+    capabilityBindings: binding.capabilityBindings,
+    degradedMcpRequirements: binding.degradedMcpRequirements,
   };
 }
 
@@ -439,13 +618,14 @@ function matchesImmutableInput(
   binding: LocalRuntimeBinding,
   input: CreateLocalRuntimeBindingInput,
 ): boolean {
+  const normalized = normalizeInput(input);
   const existing = immutableInputOf(binding);
   return (
     JSON.stringify(
       existing.modelRoute === null
-        ? { ...existing, modelRoute: input.modelRoute }
+        ? { ...existing, modelRoute: normalized.modelRoute }
         : existing,
-    ) === JSON.stringify(input)
+    ) === JSON.stringify(normalized)
   );
 }
 

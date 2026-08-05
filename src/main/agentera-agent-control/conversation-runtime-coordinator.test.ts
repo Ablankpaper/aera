@@ -47,6 +47,7 @@ function nodeSqliteFactory(path: string): AgenteraSqliteDatabase {
 function bindingInput(
   owner = OWNER,
   conversationKey = "installed-conversation",
+  overrides: Partial<CreateLocalRuntimeBindingInput> = {},
 ): CreateLocalRuntimeBindingInput {
   return {
     conversationKey,
@@ -68,6 +69,7 @@ function bindingInput(
     officialReleaseRevisionId: null,
     toolPermissionDigest: "a".repeat(64),
     publishedBaseDigest: "b".repeat(64),
+    ...overrides,
   };
 }
 
@@ -286,5 +288,55 @@ describe("ConversationRuntimeCoordinator", () => {
       ),
     ).toBeNull();
     expect(first.boundaryStore.getById(otherPair.boundary.id)).toBeNull();
+  });
+
+  it("keeps the current ConversationBoundary immutable when a later mapping changes", () => {
+    const current = stores();
+    const firstInput = bindingInput(OWNER, "mapped-conversation", {
+      capabilityBindings: [
+        {
+          logicalName: "private-docs",
+          localMcpName: "employee-docs-v1",
+          tools: ["docs.read"],
+          revision: 1,
+        },
+      ],
+      degradedMcpRequirements: [],
+      toolPermissionDigest: "c".repeat(64),
+    });
+    const prepared = current.coordinator.prepare({
+      conversationKey: "mapped-conversation",
+      resumeSessionId: null,
+      context: { scope: "USER" },
+      bindingInput: firstInput,
+    });
+    expect(prepared.boundary.toolPermissionSnapshot).toEqual({
+      kind: "AGENT_DIGEST",
+      digest: "c".repeat(64),
+    });
+
+    expect(() =>
+      current.coordinator.prepare({
+        conversationKey: "mapped-conversation",
+        resumeSessionId: null,
+        context: { scope: "USER" },
+        bindingInput: bindingInput(OWNER, "mapped-conversation", {
+          capabilityBindings: [
+            {
+              logicalName: "private-docs",
+              localMcpName: "employee-docs-v2",
+              tools: ["docs.read"],
+              revision: 2,
+            },
+          ],
+          degradedMcpRequirements: [],
+          toolPermissionDigest: "d".repeat(64),
+        }),
+      }),
+    ).toThrow();
+    expect(
+      current.boundaryStore.getByConversationKey("mapped-conversation")
+        ?.toolPermissionSnapshot,
+    ).toEqual({ kind: "AGENT_DIGEST", digest: "c".repeat(64) });
   });
 });
