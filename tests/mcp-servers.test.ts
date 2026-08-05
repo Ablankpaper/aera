@@ -153,12 +153,61 @@ describe("MCP server config management", () => {
     });
     expect(execFileSpy).toHaveBeenCalledWith(
       "/tmp/runtime/test/python/bin/python3",
-      ["-m", "hermes_cli.main", "mcp", "test", "author-docs"],
+      [
+        "-m",
+        "hermes_cli.main",
+        "--profile",
+        "default",
+        "mcp",
+        "test",
+        "author-docs",
+      ],
       expect.objectContaining({
         cwd: "/tmp/runtime/test/python/lib/python3.11/site-packages",
       }),
       expect.any(Function),
     );
+  });
+
+  it("falls back to the explicit Profile CLI when the local gateway probe fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              ok: false,
+              error: "profile MCP probe failed",
+              tools: [],
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    execFileSpy.mockClear();
+    execFileSpy.mockImplementationOnce(
+      (
+        _file: string,
+        _args: string[],
+        _options: Record<string, unknown>,
+        callback: (error: Error | null, stdout: string, stderr: string) => void,
+      ) => {
+        callback(
+          null,
+          "Connected (12ms)\nTools discovered: 1\n\n    docs.read                            Read approved documents\n",
+          "",
+        );
+        return { stdin: { end: stdinEndSpy } };
+      },
+    );
+
+    const result = await testMcpServer("author-docs", "default");
+
+    expect(result).toMatchObject({
+      success: true,
+      tools: [expect.objectContaining({ name: "docs.read" })],
+    });
+    expect(execFileSpy).toHaveBeenCalledOnce();
   });
 
   it("executes the local catalog through the live Runtime invocation", async () => {
@@ -170,7 +219,7 @@ describe("MCP server config management", () => {
     expect(result.error).toBeUndefined();
     expect(execFileSpy).toHaveBeenCalledWith(
       "/tmp/runtime/test/python/bin/python3",
-      ["-m", "hermes_cli.main", "mcp", "catalog"],
+      ["-m", "hermes_cli.main", "--profile", "work", "mcp", "catalog"],
       expect.objectContaining({
         cwd: "/tmp/runtime/test/python/lib/python3.11/site-packages",
       }),

@@ -157,9 +157,10 @@ function runHermesMcpCli(
     return Promise.reject(new Error("Aera Runtime is not prepared."));
   }
   return new Promise((resolve, reject) => {
+    const profileArgs = profile ? ["--profile", profile] : [];
     const child = execFile(
       invocation.python,
-      invocation.cliArgs(["mcp", ...args]),
+      invocation.cliArgs([...profileArgs, "mcp", ...args]),
       {
         cwd: invocation.workingDirectory,
         env: invocation.environment({
@@ -859,6 +860,7 @@ export async function testMcpServer(
 ): Promise<McpOperationResult> {
   try {
     if (!isRemoteMode()) {
+      let structuredFailure: McpOperationResult | null = null;
       try {
         const data = await mcpApi<{
           ok?: boolean;
@@ -869,8 +871,15 @@ export async function testMcpServer(
           { method: "POST" },
           profile,
         );
-        return {
-          success: data.ok !== false,
+        if (data.ok !== false) {
+          return {
+            success: true,
+            error: data.error,
+            tools: data.tools || [],
+          };
+        }
+        structuredFailure = {
+          success: false,
           error: data.error,
           tools: data.tools || [],
         };
@@ -879,9 +888,13 @@ export async function testMcpServer(
         // endpoint. Keep the CLI path as a compatibility fallback.
       }
       const result = await runHermesMcpCli(["test", name], profile);
+      const tools = parseMcpTestTools(result.stdout);
+      if (tools.length === 0 && structuredFailure !== null) {
+        return structuredFailure;
+      }
       return {
         success: true,
-        tools: parseMcpTestTools(result.stdout),
+        tools,
       };
     }
 
