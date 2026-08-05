@@ -848,6 +848,16 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
   }
   if (code === "official_install_handle_invalid") return "invalid_request";
   if (code === "official_release_changed") return "conflict";
+  if (
+    code === "capability_profile_unavailable" ||
+    code === "capability_source_unsafe" ||
+    code === "capability_dlp_blocked" ||
+    code === "capability_handle_invalid" ||
+    code === "capability_handle_expired" ||
+    code === "capability_requirement_invalid"
+  ) {
+    return code;
+  }
   if (code === "cache_conflict" || code === "publication_cache_conflict") {
     return "publication_cache_conflict";
   }
@@ -951,7 +961,10 @@ export async function executeAgentControlIpc<T>(
     return { ok: true, data: await task() };
   } catch (error) {
     const errorCode = mappedCode(error);
-    if (errorCode === "candidate_dlp_blocked") {
+    if (
+      errorCode === "candidate_dlp_blocked" ||
+      errorCode === "capability_dlp_blocked"
+    ) {
       const findings = sanitizeExperienceCandidateFindings(error);
       if (findings.length > 0) {
         return { ok: false, errorCode, findings };

@@ -652,6 +652,17 @@ export default {
         "This Agent version is not compatible with this device's local environment.",
       profile_model_configuration_failed:
         "The current model is incompatible with this signed Agent version. Configure a model allowed by the version, or ask the publisher to release a version compatible with the current model.",
+      capability_profile_unavailable:
+        "The selected local Profile is unavailable. Refresh and try again.",
+      capability_source_unsafe:
+        "The selected capability contains local content that cannot be copied safely.",
+      capability_dlp_blocked: "The local privacy scan blocked this capability.",
+      capability_handle_invalid:
+        "The capability preview is no longer valid. Select it again.",
+      capability_handle_expired:
+        "The capability preview expired. Select it again.",
+      capability_requirement_invalid:
+        "The selected MCP capability or tool changed. Refresh and try again.",
       local_runtime_required:
         "The local Agent service is not ready yet. Try again shortly; setup is automatic.",
       cloud_unavailable: "Aera Cloud is temporarily unavailable.",

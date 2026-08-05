@@ -610,6 +610,14 @@ export default {
       runtime_incompatible: "该智能体版本暂不支持此电脑上的本地运行环境。",
       profile_model_configuration_failed:
         "当前模型与该智能体的签名版本不兼容。请配置版本允许的模型，或由发布者发布兼容当前模型的新版本。",
+      capability_profile_unavailable:
+        "所选本地 Profile 当前不可用，请刷新后重试。",
+      capability_source_unsafe: "所选能力包含无法安全复制的本地内容。",
+      capability_dlp_blocked: "本地隐私扫描阻止了该能力。",
+      capability_handle_invalid: "能力预览已失效，请重新选择。",
+      capability_handle_expired: "能力预览已过期，请重新选择。",
+      capability_requirement_invalid:
+        "所选 MCP 能力或工具已发生变化，请刷新后重试。",
       local_runtime_required:
         "本地智能体服务尚未就绪，请稍后重试，系统会自动完成准备。",
       cloud_unavailable: "Aera Cloud 暂时不可用。",
