@@ -1,4 +1,5 @@
-import { basename, normalize } from "node:path";
+import { realpathSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import type { AgenteraAuthPublicState } from "../../shared/agentera-auth";
 import type {
   AgentDraft,
@@ -242,15 +243,19 @@ export function localProfileHandleForPath(
   if (typeof profilePath !== "string" || profilePath.length === 0) {
     throw codedError("profile_capability_configuration_required");
   }
-  const attachedPath = normalize(profilePath);
   try {
-    if (normalize(resolveProfilePath("default")) === attachedPath) {
+    const attachedPath = resolve(realpathSync.native(profilePath));
+    if (
+      resolve(realpathSync.native(resolveProfilePath("default"))) ===
+      attachedPath
+    ) {
       return "default";
     }
     const profileHandle = basename(attachedPath);
     if (
       !isValidProfileName(profileHandle) ||
-      normalize(resolveProfilePath(profileHandle)) !== attachedPath
+      resolve(realpathSync.native(resolveProfilePath(profileHandle))) !==
+        attachedPath
     ) {
       throw codedError("profile_capability_configuration_required");
     }

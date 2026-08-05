@@ -1,6 +1,12 @@
 // @vitest-environment node
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -192,26 +198,39 @@ describe("Agent control Organization Foundation context", () => {
   });
 
   it("maps an attached Profile path back to the exact local MCP handle", () => {
-    const profileRoot = join(tmpdir(), "agentera-mcp-profile-root");
+    const profileRoot = mkdtempSync(
+      join(tmpdir(), "agentera-mcp-profile-root-"),
+    );
+    roots.push(profileRoot);
+    const namedProfile = join(
+      profileRoot,
+      "profiles",
+      "organization-member-agent",
+    );
+    mkdirSync(namedProfile, { recursive: true });
+    const aliasRoot = join(profileRoot, "profile-root-alias");
+    symlinkSync(
+      profileRoot,
+      aliasRoot,
+      process.platform === "win32" ? "junction" : "dir",
+    );
     const resolveProfilePath = (profileHandle: string): string =>
       profileHandle === "default"
-        ? profileRoot
-        : join(profileRoot, "profiles", profileHandle);
+        ? aliasRoot
+        : join(aliasRoot, "profiles", profileHandle);
 
     expect(localProfileHandleForPath(profileRoot, resolveProfilePath)).toBe(
       "default",
     );
-    expect(
-      localProfileHandleForPath(
-        join(profileRoot, "profiles", "organization-member-agent"),
-        resolveProfilePath,
-      ),
-    ).toBe("organization-member-agent");
+    expect(localProfileHandleForPath(namedProfile, resolveProfilePath)).toBe(
+      "organization-member-agent",
+    );
+    const unboundRoot = mkdtempSync(
+      join(tmpdir(), "agentera-unbound-profile-"),
+    );
+    roots.push(unboundRoot);
     expect(() =>
-      localProfileHandleForPath(
-        join(tmpdir(), "unbound-profile"),
-        resolveProfilePath,
-      ),
+      localProfileHandleForPath(unboundRoot, resolveProfilePath),
     ).toThrowError(
       expect.objectContaining({
         code: "profile_capability_configuration_required",
