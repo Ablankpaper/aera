@@ -658,7 +658,7 @@ test("organization agent needs one current reviewer and keeps every employee run
     await invokeOrganization(auditor.device, "acceptInvitation", {
       token: adminInvitation.token,
     }),
-  ).toEqual({ ok: false, errorCode: "invitation_unavailable" });
+  ).toEqual({ ok: false, errorCode: "invitation_used" });
   const auditorInvitation = await createInvitationAndAccept(
     owner.device,
     auditor.device,
@@ -668,7 +668,7 @@ test("organization agent needs one current reviewer and keeps every employee run
     await invokeOrganization(member.device, "acceptInvitation", {
       token: auditorInvitation.token,
     }),
-  ).toEqual({ ok: false, errorCode: "invitation_unavailable" });
+  ).toEqual({ ok: false, errorCode: "invitation_used" });
   const revokedMemberInvitation = unwrapOrganization(
     await invokeOrganization<OrganizationInvitationCreation>(
       owner.device,
@@ -686,7 +686,7 @@ test("organization agent needs one current reviewer and keeps every employee run
     await invokeOrganization(member.device, "acceptInvitation", {
       token: revokedMemberInvitation.token,
     }),
-  ).toEqual({ ok: false, errorCode: "invitation_unavailable" });
+  ).toEqual({ ok: false, errorCode: "invitation_revoked" });
   const memberInvitation = await createInvitationAndAccept(
     owner.device,
     member.device,
@@ -696,7 +696,7 @@ test("organization agent needs one current reviewer and keeps every employee run
     await invokeOrganization(admin.device, "acceptInvitation", {
       token: memberInvitation.token,
     }),
-  ).toEqual({ ok: false, errorCode: "invitation_unavailable" });
+  ).toEqual({ ok: false, errorCode: "invitation_used" });
 
   let members = await organizationMembers(owner.device, organization.id);
   const adminMember = members.find(
