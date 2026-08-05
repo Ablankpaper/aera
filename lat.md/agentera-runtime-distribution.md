@@ -106,6 +106,8 @@ The card claims “up to date” only after a successful metadata check with no 
 
 [[src/main/agentera-runtime-distribution/bootstrap.ts#bootstrapRuntimeDistribution]] runs before `app/start` is dynamically imported. An approved candidate's signature, pointer binding, complete extracted inventory, and isolated offline health are checked again below `userData/runtime/health`; only then does the journal move current to previous and candidate to current. Failure keeps the existing current version, records only an error code, numeric exit code, version, short commit, and timestamp, and durably suppresses the failed candidate until a newer staging action replaces it. No path, credential, Profile, Memory, session, learned Skill, or raw exception enters the diagnostic.
 
+The crash-recovery test preserves all real temporary-file and pointer assertions while allowing a Windows-specific I/O budget; other platforms retain the default five-second bound.
+
 ### Stable update test specifications
 
 These focused tests lock the source-authority and supported-platform behavior of signed stable Runtime update checks.
