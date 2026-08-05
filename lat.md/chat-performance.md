@@ -85,3 +85,15 @@ The isolated registration helper accepts the direct login continuation required 
 The gate fails closed when any exact Runtime/Desktop identity or isolated dependency root is absent or malformed. It proves the exact temporary Runtime root has no process before Electron launch, records the harness-owned Runtime processes observed by the first local send, and requires no process under that root after close; fallback cleanup may signal only that validated harness-owned root.
 
 For every turn, the gate records only SHA-256 and UTF-8 byte length and requires visible text, the `message.complete` text, and the assistant row in `state.db` to match exactly. The first matching row binds the session id, and every later query is restricted to that session without putting the id or reply text in evidence. The gate must never use or mutate the daily Electron client, Profile, account device, credentials, or cache.
+
+### Supplemental real Electron boundaries
+
+[[tests/e2e/chat-stream-integrity-boundaries.e2e.ts]] covers tool-call replies, stale streams after a real reconnect, and same-session continuity after a cold restart. It uses a separate isolated input and never reruns the existing `CASE_01..20` key.
+
+The supplemental harness creates a disposable account, user-data, `HERMES_HOME`, Cloud stack, and loopback provider solely for this gate.
+
+The first turn returns a real OpenAI-compatible `terminal` tool call for a fixed, side-effect-free `printf`, waits for Runtime to execute and persist the matching tool result, then streams a long Unicode final reply one code point at a time. The gate requires a rendered tool activity group, matching assistant tool-call and tool-result rows in `state.db`, and exact visible/completion/database reply metrics.
+
+The second turn closes the actual captured dashboard WebSocket, waits for a different socket and `stream_id`, and holds the new provider response after its first character. While that new stream is active, the old closed socket dispatches a late delta carrying the prior `stream_id`; the synthetic sentinel must never enter the new reply. Releasing the provider must still yield exact visible/completion/database metrics.
+
+The gate then closes Electron and requires every process under the validated harness-owned Runtime root to exit. It relaunches with the same temporary user-data and `HERMES_HOME`, opens the sole persisted session, requires its last reply to match `state.db`, and sends one more deterministic Unicode turn on that same session. A second close must again leave no harness-owned Runtime process. Evidence contains only exact source identities, counts, booleans, UTF-8 byte lengths, and SHA-256 values; it excludes reply text, session/account identifiers, credentials, Profile content, and private paths.
