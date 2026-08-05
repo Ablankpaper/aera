@@ -22,6 +22,30 @@ const cloudRoot = resolve(
 export const productAuthCloudOrigin = "http://127.0.0.1:8086";
 const password = "Aera Runtime E2E battery staple 2026";
 
+export function productAuthorizationLanding(
+  url: URL,
+): "authorize" | "login" | null {
+  if (url.origin !== productAuthCloudOrigin) return null;
+  if (url.pathname === "/authorize") {
+    return url.searchParams.get("request_id") ? "authorize" : null;
+  }
+  if (url.pathname !== "/login") return null;
+
+  const next = url.searchParams.get("next");
+  if (!next) return null;
+  let continuation: URL;
+  try {
+    continuation = new URL(next, productAuthCloudOrigin);
+  } catch {
+    return null;
+  }
+  return continuation.origin === productAuthCloudOrigin &&
+    continuation.pathname === "/authorize" &&
+    continuation.searchParams.get("request_id")
+    ? "login"
+    : null;
+}
+
 type SMSDelivery = {
   to: string;
   code: string;
@@ -540,8 +564,19 @@ export async function authenticateNewProductAccount(
 
   const page = harness.browserPage;
   await page.goto(authorizationURL);
-  await page.waitForURL(/\/authorize\?request_id=/);
-  await page.locator('a[href^="/login?next="]').click();
+  await page.waitForURL((url) => productAuthorizationLanding(url) !== null, {
+    timeout: 30_000,
+  });
+  const landing = productAuthorizationLanding(new URL(page.url()));
+  if (landing === "authorize") {
+    await page.locator('a[href^="/login?next="]').click();
+    await page.waitForURL(
+      (url) => productAuthorizationLanding(url) === "login",
+      { timeout: 30_000 },
+    );
+  } else if (landing !== "login") {
+    throw new Error("Aera E2E authorization landing is invalid.");
+  }
   await page.locator('a[href^="/register?next="]').click();
   await page.locator('input[name="kind"]').nth(1).check();
   await page.locator('input[type="tel"]').fill(accountPhone);
