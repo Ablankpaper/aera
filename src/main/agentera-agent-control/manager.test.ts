@@ -1,6 +1,12 @@
 // @vitest-environment node
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -11,6 +17,7 @@ import type {
   CreateAgentDraftInput,
   OfficialAgentSummary,
 } from "../../shared/agentera-agent-control";
+import { CapabilityAuthoringService } from "./capability-authoring-service";
 import type { AgenteraAgentControlClient } from "./client";
 import type { AgenteraHermesAdapter } from "./hermes-adapter";
 import { AgentInstallationManager } from "./installation-manager";
@@ -20,7 +27,11 @@ import {
   type AgenteraControlPlaneDatabase,
   type AgenteraSqliteDatabase,
 } from "./db";
-import { AgenteraAgentControlManager, runtimeComponentKey } from "./manager";
+import {
+  AgenteraAgentControlManager,
+  localProfileHandleForPath,
+  runtimeComponentKey,
+} from "./manager";
 
 const OWNER = {
   tenantId: "10000000-0000-4000-8000-000000000001",
@@ -104,6 +115,15 @@ describe("Agent control Organization Foundation context", () => {
       verifyProfileBinding: () => { agentInstallationId: string | null };
       resolveAttachedProfilePath: () => string;
       randomUUID: () => string;
+      capabilityAuthoringService: {
+        listAuthoringCapabilities: (...args: unknown[]) => unknown;
+        prepareInstalledSkillSnapshot: (...args: unknown[]) => unknown;
+        confirmInstalledSkillSnapshot: (...args: unknown[]) => unknown;
+        prepareMcpRequirement: (...args: unknown[]) => unknown;
+        confirmMcpRequirement: (...args: unknown[]) => unknown;
+        notifyContextChanged: () => void;
+        invalidate: () => void;
+      };
     }> = {},
   ): {
     manager: AgenteraAgentControlManager;
@@ -163,6 +183,8 @@ describe("Agent control Organization Foundation context", () => {
         assertEntitled: () => undefined,
         hermesAdapter: runtimeOverrides.hermesAdapter,
         randomUUID: runtimeOverrides.randomUUID,
+        capabilityAuthoringService:
+          runtimeOverrides.capabilityAuthoringService as never,
       }),
     };
   }
@@ -173,6 +195,47 @@ describe("Agent control Organization Foundation context", () => {
     for (const root of roots.splice(0)) {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("maps an attached Profile path back to the exact local MCP handle", () => {
+    const profileRoot = mkdtempSync(
+      join(tmpdir(), "agentera-mcp-profile-root-"),
+    );
+    roots.push(profileRoot);
+    const namedProfile = join(
+      profileRoot,
+      "profiles",
+      "organization-member-agent",
+    );
+    mkdirSync(namedProfile, { recursive: true });
+    const aliasRoot = join(profileRoot, "profile-root-alias");
+    symlinkSync(
+      profileRoot,
+      aliasRoot,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    const resolveProfilePath = (profileHandle: string): string =>
+      profileHandle === "default"
+        ? aliasRoot
+        : join(aliasRoot, "profiles", profileHandle);
+
+    expect(localProfileHandleForPath(profileRoot, resolveProfilePath)).toBe(
+      "default",
+    );
+    expect(localProfileHandleForPath(namedProfile, resolveProfilePath)).toBe(
+      "organization-member-agent",
+    );
+    const unboundRoot = mkdtempSync(
+      join(tmpdir(), "agentera-unbound-profile-"),
+    );
+    roots.push(unboundRoot);
+    expect(() =>
+      localProfileHandleForPath(unboundRoot, resolveProfilePath),
+    ).toThrowError(
+      expect.objectContaining({
+        code: "profile_capability_configuration_required",
+      }),
+    );
   });
 
   it("derives Organization catalog access from the trusted coordinator only", async () => {
@@ -232,6 +295,161 @@ describe("Agent control Organization Foundation context", () => {
       organizationId: ORGANIZATION_ID,
       role: "member",
     });
+  });
+
+  it("routes capability authoring through the narrow main-process service", async () => {
+    const capabilityAuthoringService = {
+      listAuthoringCapabilities: vi.fn(async () => ({
+        profile: {
+          profileHandle: "profile-a",
+          displayName: "Research Profile",
+        },
+        skills: [],
+        mcpServers: [],
+      })),
+      prepareInstalledSkillSnapshot: vi.fn(() => ({
+        snapshotHandle: "snapshot-handle",
+      })),
+      confirmInstalledSkillSnapshot: vi.fn(() => [
+        { path: "skills/research/SKILL.md", content: "# Research\n" },
+      ]),
+      prepareMcpRequirement: vi.fn(() => ({
+        requirementHandle: "requirement-handle",
+      })),
+      confirmMcpRequirement: vi.fn(() => ({
+        logicalName: "docs",
+        tools: ["docs.read"],
+        required: true,
+        permissionReason: "Read selected documents",
+      })),
+      notifyContextChanged: vi.fn(),
+      invalidate: vi.fn(),
+    };
+    const { manager } = fullManager(
+      () => ({
+        scope: "ORGANIZATION",
+        organizationId: ORGANIZATION_ID,
+        role: "owner",
+      }),
+      {},
+      { capabilityAuthoringService },
+    );
+
+    await expect(
+      manager.listAuthoringCapabilities("profile-a"),
+    ).resolves.toMatchObject({ profile: { profileHandle: "profile-a" } });
+    manager.prepareInstalledSkillSnapshot({
+      profileId: "profile-a",
+      skillName: "research",
+    });
+    manager.confirmInstalledSkillSnapshot({
+      snapshotHandle: "snapshot-handle",
+      confirmation: "copy-selected-skill-to-draft",
+    });
+    manager.prepareMcpRequirement({
+      profileId: "profile-a",
+      logicalName: "docs",
+      tools: ["docs.read"],
+      required: true,
+      permissionReason: "Read selected documents",
+    });
+    manager.confirmMcpRequirement({
+      requirementHandle: "requirement-handle",
+      confirmation: "add-logical-mcp-requirement",
+    });
+
+    expect(
+      capabilityAuthoringService.listAuthoringCapabilities,
+    ).toHaveBeenCalledWith("profile-a");
+    manager.notifyAgentContextChanged();
+    expect(
+      capabilityAuthoringService.notifyContextChanged,
+    ).toHaveBeenCalledOnce();
+    expect(capabilityAuthoringService.invalidate).not.toHaveBeenCalled();
+  });
+
+  it("does not detach an in-flight capability inventory during a same-context refresh", async () => {
+    let manager!: AgenteraAgentControlManager;
+    let listedService: CapabilityAuthoringService | null = null;
+    let preparedService: CapabilityAuthoringService | null = null;
+    vi.spyOn(
+      CapabilityAuthoringService.prototype,
+      "listAuthoringCapabilities",
+    ).mockImplementation(async function (this: CapabilityAuthoringService) {
+      listedService = this;
+      manager.notifyAgentContextChanged();
+      return {
+        profile: { profileHandle: "default", displayName: "Default" },
+        skills: [
+          {
+            name: "research",
+            category: "",
+            description: "Research",
+          },
+        ],
+        mcpServers: [],
+      };
+    });
+    vi.spyOn(
+      CapabilityAuthoringService.prototype,
+      "prepareInstalledSkillSnapshot",
+    ).mockImplementation(function (this: CapabilityAuthoringService) {
+      preparedService = this;
+      return {
+        snapshotHandle: "snapshot-handle",
+        profileHandle: "default",
+        skillName: "research",
+        category: "",
+        description: "Research",
+        files: [],
+        fileCount: 0,
+        totalBytes: 0,
+        contentDigest: "0".repeat(64),
+        findings: [],
+        expiresAt: "2026-08-06T00:10:00.000Z",
+      };
+    });
+    ({ manager } = fullManager(() => ({
+      scope: "ORGANIZATION",
+      organizationId: ORGANIZATION_ID,
+      role: "owner",
+    })));
+
+    await manager.listAuthoringCapabilities("default");
+    manager.prepareInstalledSkillSnapshot({
+      profileId: "default",
+      skillName: "research",
+    });
+
+    expect(preparedService).toBe(listedService);
+  });
+
+  it("keeps capability inventory during an authenticated same-owner access refresh", () => {
+    const capabilityAuthoringService = {
+      listAuthoringCapabilities: vi.fn(),
+      prepareInstalledSkillSnapshot: vi.fn(),
+      confirmInstalledSkillSnapshot: vi.fn(),
+      prepareMcpRequirement: vi.fn(),
+      confirmMcpRequirement: vi.fn(),
+      notifyContextChanged: vi.fn(),
+      invalidate: vi.fn(),
+    };
+    const { manager } = fullManager(
+      () => ({
+        scope: "ORGANIZATION",
+        organizationId: ORGANIZATION_ID,
+        role: "owner",
+      }),
+      {},
+      { capabilityAuthoringService },
+    );
+
+    manager.notifyAccessStateChanged();
+
+    expect(
+      capabilityAuthoringService.notifyContextChanged,
+    ).toHaveBeenCalledOnce();
+    expect(capabilityAuthoringService.invalidate).not.toHaveBeenCalled();
   });
 
   it("routes explicit Organization experience preparation through trusted Installation and Profile state", async () => {

@@ -224,14 +224,28 @@ function editableManifest(version: AgentVersion): AgentEditableManifest {
       },
     };
   }
+  const modelPolicy = {
+    mode: version.manifest.model_policy.mode,
+    allowedProviders: [...version.manifest.model_policy.allowed_providers],
+    allowedModels: [...version.manifest.model_policy.allowed_models],
+  };
+  if (version.manifest.schema_version === 2) {
+    return {
+      schemaVersion: 2,
+      ...common,
+      modelPolicy,
+    };
+  }
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     ...common,
-    modelPolicy: {
-      mode: version.manifest.model_policy.mode,
-      allowedProviders: [...version.manifest.model_policy.allowed_providers],
-      allowedModels: [...version.manifest.model_policy.allowed_models],
-    },
+    modelPolicy,
+    mcpRequirements: version.manifest.mcp_requirements.map((requirement) => ({
+      logicalName: requirement.logical_name,
+      tools: [...requirement.tools],
+      required: requirement.required,
+      permissionReason: requirement.permission_reason,
+    })),
   };
 }
 

@@ -296,6 +296,184 @@ describe("AgentDraftEditor", () => {
     );
   });
 
+  it("saves installed Skill and MCP choices as a later V3 draft revision and reopens them", async () => {
+    const source = detail();
+    source.manifest = {
+      schemaVersion: 3,
+      identity: { systemPrompt: "Research carefully" },
+      assets: [...source.manifest.assets],
+      modelPolicy: {
+        mode: "user_select",
+        allowedProviders: [],
+        allowedModels: [],
+      },
+      mcpRequirements: [],
+      tools: { allowed: ["docs.read"], denied: [] },
+      dependencies: [],
+      runtimeCompatibility: {
+        minimumVersion: "v0.18.2-agentera.1",
+        maximumVersionExclusive: null,
+      },
+    };
+    source.publishedRevision = {
+      revision: source.revision,
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+    };
+    const saved = structuredClone(source);
+    saved.revision = 2;
+    if (saved.manifest.schemaVersion !== 3) throw new Error("V3 required");
+    saved.manifest.assets.push({
+      path: "skills/weekly-summary/SKILL.md",
+      kind: "skill",
+      mediaType: "text/markdown",
+    });
+    saved.manifest.mcpRequirements = [
+      {
+        logicalName: "private-docs",
+        tools: ["docs.read"],
+        required: true,
+        permissionReason: "Read employee-selected documents",
+      },
+    ];
+    saved.assets.push({
+      path: "skills/weekly-summary/SKILL.md",
+      kind: "skill",
+      mediaType: "text/markdown",
+      sizeBytes: 17,
+      sha256: "b".repeat(64),
+    });
+    saved.editableAssets.push({
+      path: "skills/weekly-summary/SKILL.md",
+      content: "# Weekly summary\n",
+    });
+    const api = installAPI({
+      listAuthoringCapabilities: vi.fn(async () =>
+        success({
+          profile: {
+            profileHandle: "profile-a",
+            displayName: "Profile A",
+          },
+          skills: [
+            {
+              name: "weekly-summary",
+              category: "writing",
+              description: "Draft summaries",
+            },
+          ],
+          mcpServers: [],
+        }),
+      ),
+      prepareInstalledSkillSnapshot: vi.fn(async () =>
+        success({
+          snapshotHandle: HANDLE_ID,
+          profileHandle: "profile-a",
+          skillName: "weekly-summary",
+          category: "writing",
+          description: "Draft summaries",
+          files: [
+            {
+              draftLocation: "skills/weekly-summary/SKILL.md",
+              mediaType: "text/markdown" as const,
+              sizeBytes: 17,
+              sha256: "b".repeat(64),
+            },
+          ],
+          fileCount: 1,
+          totalBytes: 17,
+          contentDigest: "c".repeat(64),
+          findings: [],
+          expiresAt: "2026-08-06T00:10:00.000Z",
+        }),
+      ),
+      confirmInstalledSkillSnapshot: vi.fn(async () =>
+        success([
+          {
+            path: "skills/weekly-summary/SKILL.md",
+            content: "# Weekly summary\n",
+          },
+        ]),
+      ),
+      updateDraft: vi.fn(async () => success(saved)),
+    });
+    const { rerender } = render(
+      <AgentDraftEditor
+        open
+        draft={source}
+        capabilityProfiles={[
+          { profileHandle: "profile-a", displayName: "Profile A" },
+        ]}
+        modelProfileId="profile-a"
+        onClose={() => undefined}
+        onSaved={() => undefined}
+        onPublished={() => undefined}
+        onRequestInstall={() => undefined}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.control.capabilities.chooseInstalled",
+      }),
+    );
+    fireEvent.change(
+      await screen.findByLabelText(
+        "agents.control.capabilities.installedSkill",
+      ),
+      { target: { value: "weekly-summary" } },
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.control.capabilities.previewSkill",
+      }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "agents.control.capabilities.addSkill",
+      }),
+    );
+    await waitFor(() =>
+      expect(api.confirmInstalledSkillSnapshot).toHaveBeenCalledTimes(1),
+    );
+    const saveButton = screen.getByRole("button", {
+      name: "agents.control.saveLocal",
+    });
+    await waitFor(() => expect(saveButton).toBeEnabled());
+    fireEvent.click(saveButton);
+    await waitFor(() => expect(api.updateDraft).toHaveBeenCalledTimes(1));
+    expect(api.updateDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedRevision: 1,
+        manifest: expect.objectContaining({
+          schemaVersion: 3,
+          assets: expect.arrayContaining([
+            expect.objectContaining({
+              path: "skills/weekly-summary/SKILL.md",
+            }),
+          ]),
+        }),
+      }),
+      undefined,
+    );
+
+    rerender(
+      <AgentDraftEditor
+        open
+        draft={saved}
+        capabilityProfiles={[
+          { profileHandle: "profile-a", displayName: "Profile A" },
+        ]}
+        modelProfileId="profile-a"
+        onClose={() => undefined}
+        onSaved={() => undefined}
+        onPublished={() => undefined}
+        onRequestInstall={() => undefined}
+      />,
+    );
+    expect(
+      screen.getByText("agents.control.capabilities.selectedCapabilities"),
+    ).toBeInTheDocument();
+  });
+
   it("lists every model from the active named custom service and excludes other routes", async () => {
     const catalogModels = [
       "gpt-5.6-sol",

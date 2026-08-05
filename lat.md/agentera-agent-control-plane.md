@@ -202,6 +202,36 @@ The filesystem-backed legacy migration proof keeps the default five-second budge
 
 [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] resolves the current owner for each local operation and rebuilds Runtime components after an owner change. [[tests/agentera-agent-owner-isolation.test.ts]] proves that one long-lived manager cannot list, count, or open the previous account's draft; store-level tests cover versions, installations, bindings, and pending delivery.
 
+## Agent Manifest V3 capability contract
+
+Manifest V3 keeps the V2 model policy and adds only portable logical MCP requirements so an Agent can declare capabilities without publishing a local connection.
+
+Each requirement contains a logical name, selected tool names, required or optional behavior, and a bounded permission reason. URL, command, arguments, environment, headers, token, auth, credential references, Profile paths, and local paths are rejected; V1 and V2 remain compatible. [[src/main/agentera-agent-control/manifest.ts#canonicalizeEditableAgent]] creates stable canonical bytes, [[src/shared/agentera-agent-control.ts#runtimeModelPolicyForEditableManifest]] preserves V2 model behavior, and [[src/main/agentera-agent-control/trust.ts#canonicalizeAgentVersionContent]] independently reconstructs trusted V3 content.
+
+New drafts use V3 with an empty requirement list through [[src/renderer/src/screens/Agents/agentDraftDefaults.ts#createDefaultAgentManifest]]. An approved experience import retains requirements from its verified base through [[src/main/agentera-agent-control/experience-candidate-importer.ts#editableManifest]], while later capability changes remain ordinary draft revisions and next immutable Versions.
+
+## Installed capability authoring boundary
+
+Installed capability selection is a main-process preparation flow that exposes safe metadata and one-use handles without exposing a Profile path or MCP connection configuration.
+
+[[src/main/skills.ts#listInstalledSkills]] accepts both Hermes flat `skills/<skill>` and categorized `skills/<category>/<skill>` layouts, including mixed parents and independent children. [[src/main/agentera-agent-control/capability-authoring-service.ts#CapabilityAuthoringService#listAuthoringCapabilities]] returns only an opaque Profile handle, display names, Skill metadata, logical MCP names, enabled state, and discovered tool metadata; an absent category remains empty. URL, command, arguments, environment, auth, token, headers, local paths, and secret-like descriptions stay out of renderer DTOs.
+
+Local MCP discovery uses the Runtime's structured server-test response through [[src/main/mcp-servers.ts#testMcpServer]] so capability authoring does not normally depend on human-readable CLI formatting. An unavailable or failed local gateway probe falls back to the CLI with the requested Profile passed explicitly, preventing a sticky `active_profile` from redirecting capability discovery.
+
+[[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] keeps one capability-authoring service instance while access and Product Space notifications invalidate its inventory. This prevents an in-flight asynchronous discovery from returning an inventory on a detached service; the operation-context key still rejects a real owner or context change.
+
+[[src/main/agentera-agent-control/capability-authoring-service.ts#CapabilityAuthoringService#prepareInstalledSkillSnapshot]] rejects links, path escape, hidden/cache entries, invalid UTF-8, duplicate targets, oversize content, and local DLP findings before retaining an immutable in-memory snapshot. A selected parent skips nested directories that declare an independent `SKILL.md`, so confirmation copies only that explicit Skill through its owner- and Profile-bound one-use handle; MCP confirmation returns only a validated [[src/shared/agentera-agent-control.ts#AgentMcpRequirementV3]].
+
+### Guided capability picker
+
+The draft editor makes installed Skill and MCP selection the primary capability action while retaining advanced manual Skill, SOP, and Knowledge uploads.
+
+[[src/renderer/src/screens/Agents/AgentCapabilityPicker.tsx#AgentCapabilityPicker]] accepts only safe Profile handles and display names. It previews and explicitly replaces a selected Skill snapshot, blocks duplicate logical MCP requirements, and captures selected tool names, required or optional behavior, and a bounded permission reason without rendering connection data.
+
+[[src/main/agentera-agent-control/ipc-contract.ts#parsePrepareInstalledSkillSnapshotInput]] and [[src/main/agentera-agent-control/ipc-contract.ts#parsePrepareMcpRequirementInput]] enforce exact renderer fields before the main-process manager uses one-use preparation handles. [[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] stores confirmed Skill files in the ordinary immutable draft asset list and confirmed MCP metadata in Manifest V3; later saves create a new draft revision rather than changing an approved Version.
+
+[[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] owns service construction and invalidates preparation state when access or selected product context changes. [[src/main/mcp-servers.ts#normalizeMcpDiscoveredTools]] normalizes tool discovery before the service applies its display-metadata privacy filter.
+
 ## Immutable publication
 
 An explicit publish action turns one local draft revision into an immutable cloud AgentVersion under a stable AgentDefinition.
@@ -229,6 +259,16 @@ Publisher and IPC boundaries expose distinct bounded conflict, corruption, permi
 An Agent Installation selects one immutable version for one device/Profile pair and maps to one physically isolated writable `HERMES_HOME` through the existing encrypted Profile binding store.
 
 The authentication installation ID is not reused as the Agent Installation ID. New Agent installations create a fresh Profile with `cloneFrom=null`; existing learned Profiles require explicit same-owner claim. A RuntimeBinding freezes version, Profile, Runtime, policy, and tools for one conversation.
+
+### Local MCP requirement binding
+
+Manifest V3 MCP requirements are satisfied only by a local, owner/device/Installation-scoped mapping in the employee's selected Profile; shared manifests and Cloud records never receive connection configuration.
+
+Schema v11 adds `agent_mcp_requirement_bindings` through [[src/main/agentera-agent-control/db.ts#AGENTERA_CONTROL_PLANE_SCHEMA_VERSION]]. [[src/main/agentera-agent-control/capability-binding-store.ts#CapabilityBindingStore]] stores only the logical requirement, local MCP name, verified tools, revision, and timestamps, then requires the live server to remain enabled and expose every requested tool.
+
+[[src/main/agentera-agent-control/capability-binding-service.ts#CapabilityBindingService]] gives the renderer only logical requirements, safe local MCP display names, and expiring opaque mapping handles. [[src/main/agentera-agent-control/manager.ts#localProfileHandleForPath]] maps the trusted canonical attached path back to the exact local Profile handle and re-resolves the same physical directory before MCP discovery. Confirmation rechecks the current owner, device, Installation, Profile, Version, requirement tools, live server, and binding revision before any local mapping changes. [[src/renderer/src/screens/Agents/AgentCapabilityBindingDialog.tsx#AgentCapabilityBindingDialog]] lets employees satisfy required mappings or skip optional ones without receiving connection configuration.
+
+A required missing, disabled, or drifted mapping leaves installation pending with `profile_capability_configuration_required`; an optional failure becomes a bounded degraded list. [[src/main/agentera-agent-control/hermes-adapter.ts#AgenteraHermesAdapter#prepareInstalledTurnPlan]] freezes the resolved names, tools, and revisions into the local RuntimeBinding and its tool digest for a new conversation. A later remap affects only a new ConversationBoundary, while the sanitized Cloud outbox excludes all local mapping bytes.
 
 ### Model policy and runtime selection
 
@@ -372,7 +412,7 @@ An approved submission carries its exact immutable Version ID. The service joins
 
 [[src/main/agentera-agent-control/hermes-adapter.ts#AgenteraHermesAdapter#prepareInstalledTurnPlan]] freezes the planned Version, policy, Runtime, Profile, model route, and tool digest per conversation before the atomic local snapshot commit. [[src/main/agentera-agent-control/hermes-adapter.ts#assertNewConversationContext]] rejects only a new Organization conversation after trusted context removal; an existing RuntimeBinding remains stable.
 
-[[tests/e2e/agentera-organization-agent.e2e.ts]] proves the four-role approval and installation flow, restart-safe dirty-draft reconciliation and one-card presentation, withdrawal, local draft deletion, Installation archive, v1/v2 binding stability, offline verified use, reconnect removal gate, read-only projection, and byte-identical employee-private Memory and Skills. Run it with `npm run test:e2e:organization-agent`.
+[[tests/e2e/agentera-organization-agent.e2e.ts]] proves the four-role approval and installation flow, Manifest V3 author Skill/MCP selection, employee-local opaque capability mapping to a different MCP, one real allowed tool reply, restart-safe dirty-draft reconciliation, one-card presentation, withdrawal, archive, version binding stability, offline verified use, reconnect removal, read-only projection, and private-state preservation. Run it with `npm run test:e2e:organization-agent`.
 
 ### Workspace Agent isolation
 

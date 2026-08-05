@@ -66,7 +66,8 @@ function parseSkillFrontmatter(content: string): {
 
 /**
  * Walk the skills directory to find all installed skills.
- * Structure: skills/<category>/<skill-name>/SKILL.md
+ * Structure: skills/<skill-name>/SKILL.md or
+ * skills/<category>/<skill-name>/SKILL.md
  */
 export function listInstalledSkills(profile?: string): InstalledSkill[] {
   const skillsDir = join(profileHome(profile), "skills");
@@ -80,6 +81,27 @@ export function listInstalledSkills(profile?: string): InstalledSkill[] {
     for (const category of categories) {
       const categoryPath = join(skillsDir, category);
       if (!statSync(categoryPath).isDirectory()) continue;
+
+      const directSkillFile = join(categoryPath, "SKILL.md");
+      if (existsSync(directSkillFile)) {
+        try {
+          const content = readFileSync(directSkillFile, "utf-8").slice(0, 4000);
+          const meta = parseSkillFrontmatter(content);
+          skills.push({
+            name: meta.name || category,
+            category: "",
+            description: meta.description || "",
+            path: categoryPath,
+          });
+        } catch {
+          skills.push({
+            name: category,
+            category: "",
+            description: "",
+            path: categoryPath,
+          });
+        }
+      }
 
       const entries = readdirSync(categoryPath);
       for (const entry of entries) {

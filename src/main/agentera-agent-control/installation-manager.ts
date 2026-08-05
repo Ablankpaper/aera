@@ -55,6 +55,11 @@ import {
   type InstallationOperationRecord,
   type InstallationOperationTarget,
 } from "./installation-operation-store";
+import {
+  CapabilityBindingStore,
+  CapabilityBindingStoreError,
+  type LocalMcpCapabilityServer,
+} from "./capability-binding-store";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -72,6 +77,7 @@ export type AgentInstallationManagerErrorCode =
   | "materialization_failed"
   | "profile_binding_failed"
   | "profile_model_configuration_failed"
+  | "profile_capability_configuration_required"
   | "activation_failed"
   | "update_failed"
   | "archive_failed"
@@ -241,6 +247,10 @@ export interface AgentInstallationManagerOptions {
   profiles: AgentInstallationProfileAdapter;
   owner: AgenteraRuntimeOwner;
   runtimeVersion: string;
+  capabilityBindingStore?: CapabilityBindingStore;
+  getProfileMcpCapabilities?: (
+    profilePath: string,
+  ) => LocalMcpCapabilityServer[] | Promise<LocalMcpCapabilityServer[]>;
   now?: () => Date;
   randomUUID?: () => string;
 }
@@ -1156,6 +1166,10 @@ export class AgentInstallationManager {
   private readonly now: () => Date;
   private readonly randomUUID: () => string;
   private readonly operations: InstallationOperationStore;
+  private readonly capabilityBindingStore: CapabilityBindingStore;
+  private readonly getProfileMcpCapabilities: (
+    profilePath: string,
+  ) => LocalMcpCapabilityServer[] | Promise<LocalMcpCapabilityServer[]>;
   private readonly materializationFlights = new Map<
     string,
     Promise<LocalAgentInstallation>
@@ -1192,6 +1206,15 @@ export class AgentInstallationManager {
       owner: this.owner,
       now: this.now,
     });
+    this.capabilityBindingStore =
+      options.capabilityBindingStore ??
+      new CapabilityBindingStore({
+        database: this.database,
+        owner: this.owner,
+        now: this.now,
+      });
+    this.getProfileMcpCapabilities =
+      options.getProfileMcpCapabilities ?? (() => []);
   }
 
   getLocalInstallation(
@@ -2501,6 +2524,42 @@ export class AgentInstallationManager {
           ? "profile_model_configuration_failed"
           : "profile_binding_failed",
       );
+    }
+
+    if (
+      operation.phase === "projection_active" &&
+      version.manifest.schema_version === 3 &&
+      version.manifest.mcp_requirements.length > 0
+    ) {
+      try {
+        this.capabilityBindingStore.resolve({
+          agentInstallationId: local.agentInstallationId,
+          runtimeProfileId: binding.runtimeProfileId,
+          requirements: version.manifest.mcp_requirements.map(
+            (requirement) => ({
+              logicalName: requirement.logical_name,
+              tools: [...requirement.tools],
+              required: requirement.required,
+              permissionReason: requirement.permission_reason,
+            }),
+          ),
+          servers: await this.getProfileMcpCapabilities(profilePath),
+        });
+      } catch (error) {
+        if (
+          error instanceof CapabilityBindingStoreError &&
+          error.code !== "profile_capability_configuration_required"
+        ) {
+          throw new AgentInstallationManagerError("installation_conflict");
+        }
+        this.recordFailure(
+          local.agentInstallationId,
+          "profile_capability_configuration_required",
+        );
+        throw new AgentInstallationManagerError(
+          "profile_capability_configuration_required",
+        );
+      }
     }
 
     try {

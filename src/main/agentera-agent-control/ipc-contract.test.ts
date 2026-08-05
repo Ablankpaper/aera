@@ -23,6 +23,14 @@ const CACHE_FAILURES = [
   ["cache_database_failed", "publication_cache_database_failed"],
   ["cache_recovery_failed", "publication_cache_recovery_failed"],
 ] as const;
+const CAPABILITY_FAILURES = [
+  "capability_profile_unavailable",
+  "capability_source_unsafe",
+  "capability_dlp_blocked",
+  "capability_handle_invalid",
+  "capability_handle_expired",
+  "capability_requirement_invalid",
+] as const;
 
 describe("Agent control IPC operation scope", () => {
   it.each([
@@ -67,6 +75,19 @@ describe("Agent control IPC operation scope", () => {
       errorCode: "profile_model_configuration_failed",
     });
   });
+
+  it.each(CAPABILITY_FAILURES)(
+    "preserves the bounded capability failure %s without private details",
+    async (code) => {
+      const result = await executeAgentControlIpc(() => {
+        throw Object.assign(new Error("private capability path and details"), {
+          code,
+        });
+      });
+
+      expect(result).toEqual({ ok: false, errorCode: code });
+    },
+  );
 
   it("accepts only the private USER override and never arbitrary tenant input", () => {
     expect(parseAgentOperationScope(undefined)).toBeUndefined();

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AgentDraft,
   AgentDraftDetail,
+  AgentCapabilityBindingConfiguration,
+  ConfirmCapabilityBindingsInput,
   AgentRuntimeModelRoute,
   AgentRuntimeModelSelection,
   AgenteraAgentControlErrorCode,
@@ -31,6 +33,7 @@ import AgentHubDetailDialog, {
   type AgentHubDetailAction,
 } from "./AgentHubDetailDialog";
 import AgentDraftEditor from "./AgentDraftEditor";
+import AgentCapabilityBindingDialog from "./AgentCapabilityBindingDialog";
 import ExperienceCandidatePanel from "./ExperienceCandidatePanel";
 import ExperiencePromotionDialog from "./ExperiencePromotionDialog";
 import OrganizationExperienceCandidatePanel from "./OrganizationExperienceCandidatePanel";
@@ -258,6 +261,9 @@ export default function AgentControlPanel({
   const [archiving, setArchiving] = useState(false);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [busyPersonalKey, setBusyPersonalKey] = useState<string | null>(null);
+  const [capabilityBinding, setCapabilityBinding] =
+    useState<AgentCapabilityBindingConfiguration | null>(null);
+  const [capabilityBindingBusy, setCapabilityBindingBusy] = useState(false);
   const [activeTab, setActiveTab] = useState<
     "official" | "mine" | "enterprise"
   >(initialTab);
@@ -401,6 +407,8 @@ export default function AgentControlPanel({
         setPromotionTarget(null);
         setOfficialInstallPreview(null);
         setBusyOfficialInstallationId(null);
+        setCapabilityBinding(null);
+        setCapabilityBindingBusy(false);
       }
       selectedContextKey.current = nextContextKey;
       setState(nextState);
@@ -429,6 +437,8 @@ export default function AgentControlPanel({
       setPromotionTarget(null);
       setOfficialInstallPreview(null);
       setBusyOfficialInstallationId(null);
+      setCapabilityBinding(null);
+      setCapabilityBindingBusy(false);
       setCandidateRefreshToken((value) => value + 1);
       setOrganizationRefreshToken((value) => value + 1);
       void load();
@@ -627,6 +637,41 @@ export default function AgentControlPanel({
     },
     [onAgentReady, onProfilesChanged],
   );
+
+  const openCapabilityBinding = async (
+    installationId: string,
+  ): Promise<void> => {
+    if (capabilityBindingBusy) return;
+    setCapabilityBindingBusy(true);
+    setError(null);
+    const result =
+      await window.agenteraAgents.listCapabilityBindings(installationId);
+    setCapabilityBindingBusy(false);
+    if (!result.ok) {
+      setError(errorKey(result.errorCode));
+      return;
+    }
+    setCapabilityBinding(result.data);
+  };
+
+  const confirmCapabilityBindings = async (
+    input: ConfirmCapabilityBindingsInput,
+  ): Promise<void> => {
+    if (capabilityBindingBusy) return;
+    setCapabilityBindingBusy(true);
+    setError(null);
+    const result = await window.agenteraAgents.confirmCapabilityBindings(input);
+    setCapabilityBindingBusy(false);
+    if (!result.ok) {
+      setError(errorKey(result.errorCode));
+      return;
+    }
+    setCapabilityBinding(null);
+    await load();
+    await finishAgentActivation(result.data.installation.id, {
+      forceNewRun: true,
+    });
+  };
 
   const activateAgent = async (
     target: AgentActivationTarget & {
@@ -942,14 +987,17 @@ export default function AgentControlPanel({
         name: definition.displayName,
         description:
           installation?.status === "pending" &&
-          installation.retryCode === "profile_model_configuration_failed"
-            ? t("agents.hub.modelCompatibilityPendingCardDescription")
-            : draft
-              ? plainSummary(
-                  draft.manifest.identity.systemPrompt,
-                  t("agents.hub.personalCardFallback"),
-                )
-              : t("agents.hub.publishedCardDescription"),
+          installation.retryCode === "profile_capability_configuration_required"
+            ? t("agents.capabilityBinding.requiredState")
+            : installation?.status === "pending" &&
+                installation.retryCode === "profile_model_configuration_failed"
+              ? t("agents.hub.modelCompatibilityPendingCardDescription")
+              : draft
+                ? plainSummary(
+                    draft.manifest.identity.systemPrompt,
+                    t("agents.hub.personalCardFallback"),
+                  )
+                : t("agents.hub.publishedCardDescription"),
         tags: tags.slice(0, 4),
         draft,
         definition,
@@ -1001,7 +1049,10 @@ export default function AgentControlPanel({
         description:
           installation.status === "active"
             ? t("agents.hub.installedCardDescription")
-            : t("agents.hub.pendingCardDescription"),
+            : installation.retryCode ===
+                "profile_capability_configuration_required"
+              ? t("agents.capabilityBinding.requiredState")
+              : t("agents.hub.pendingCardDescription"),
         tags: [
           sourceTag(installation),
           installation.status === "active"
@@ -1070,6 +1121,14 @@ export default function AgentControlPanel({
     );
     return ownerConfigured.length > 0 ? ownerConfigured : runnable;
   }, [profiles]);
+  const capabilityProfiles = useMemo(
+    () =>
+      profiles.map((profile) => ({
+        profileHandle: profile.id,
+        displayName: profile.name,
+      })),
+    [profiles],
+  );
 
   const selectableModelSources = useMemo<AgentRuntimeModelOption[]>(() => {
     if (runtimeModelRoutes !== undefined) {
@@ -1240,6 +1299,23 @@ export default function AgentControlPanel({
         label: t("agents.control.edit"),
         onClick: () => {
           void editDraft(selectedPersonal.draft!.id);
+          setSelectedPersonalKey(null);
+        },
+      };
+    } else if (
+      selectedPersonal.installation?.status === "pending" &&
+      selectedPersonal.installation.retryCode ===
+        "profile_capability_configuration_required"
+    ) {
+      selectedPersonalPrimary = {
+        label: t("agents.capabilityBinding.configure"),
+        disabled:
+          capabilityBindingBusy ||
+          (isOrganization &&
+            activeTab === "enterprise" &&
+            !organizationCanInstall),
+        onClick: () => {
+          void openCapabilityBinding(selectedPersonal.installation!.id);
           setSelectedPersonalKey(null);
         },
       };
@@ -1826,6 +1902,17 @@ export default function AgentControlPanel({
         />
       ) : null}
 
+      {capabilityBinding ? (
+        <AgentCapabilityBindingDialog
+          open
+          configuration={capabilityBinding}
+          online={state?.access === "online" && state.cloudAvailable === true}
+          busy={capabilityBindingBusy}
+          onClose={() => setCapabilityBinding(null)}
+          onConfirm={(input) => void confirmCapabilityBindings(input)}
+        />
+      ) : null}
+
       <AgentDraftEditor
         open={editor !== null}
         draft={editor === "new" ? null : editor}
@@ -1838,6 +1925,7 @@ export default function AgentControlPanel({
         operationScope={personalOperationScope}
         modelProfileId={modelProfileId}
         runtimeModelRoutes={runtimeModelRoutes}
+        capabilityProfiles={capabilityProfiles}
         onClose={() => setEditor(null)}
         onSaved={() => void load()}
         onPublished={() => void load()}

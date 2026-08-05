@@ -160,6 +160,8 @@ Organization owns control-plane metadata plus immutable enterprise Agent definit
 
 Switching Organization context does not select, create, clone, move, merge, or delete a Profile or RuntimeBinding. Only an explicit “使用智能体” action may ask the existing Installation path to prepare that Agent's isolated local runtime. [[agentera-self-evolution#AgentEra self-evolution compatibility#Runtime isolation|Every Installation maps to an independent writable Profile]], and Memory, USER, sessions, files, credentials, learned Skills, Curator, and private learning remain local.
 
+Manifest V3 enterprise Agents publish only logical MCP requirements. Each employee explicitly maps those requirements to compatible MCP names in their own Profile through [[agentera-agent-control-plane#Installation and binding#Local MCP requirement binding]]; author URLs, commands, environment values, headers, tokens, and credentials are never copied to the employee or Cloud.
+
 ## Relationship to Workspace and Agent control
 
 Organization reuses security primitives without becoming a Workspace type or extending legacy sync.

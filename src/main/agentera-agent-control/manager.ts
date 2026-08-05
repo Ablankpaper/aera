@@ -1,25 +1,35 @@
+import { realpathSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import type { AgenteraAuthPublicState } from "../../shared/agentera-auth";
 import type {
   AgentDraft,
+  AgentDraftAssetInput,
   AgentDraftDetail,
+  AgentCapabilityBindingConfiguration,
   AgenteraAgentControlPublicState,
   AgenteraAgentControlContext,
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
   AgenteraAgentOperationScope,
   AgenteraAgentVersionSummary,
+  AgentMcpRequirementV3,
   AgenteraClaimVersionInput,
   AgenteraInstallVersionInput,
   AgenteraRepairInstallationModelInput,
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
+  ConfirmCapabilityBindingsInput,
+  ConfirmCapabilityBindingsResult,
+  ConfirmInstalledSkillSnapshotInput,
+  ConfirmMcpRequirementInput,
   ConfirmOfficialAgentInstallInput,
   ConfirmOrganizationExperienceCandidateImportInput,
   ConfirmOrganizationReviewInput,
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
   CreateAgentDraftInput,
+  AuthoringCapabilitySummary,
   ExperienceCandidateDetail,
   ExperienceCandidateImportPreview,
   ExperienceCandidatePreview,
@@ -44,6 +54,10 @@ import type {
   OfficialAgentInstallPreview,
   OfficialAgentSummary,
   OfficialManagedUpdate,
+  McpRequirementPreview,
+  PrepareInstalledSkillSnapshotInput,
+  PrepareMcpRequirementInput,
+  SkillSnapshotPreview,
 } from "../../shared/agentera-agent-control";
 import type {
   AgenteraProfileBindingStore,
@@ -94,6 +108,20 @@ import {
 } from "./organization-publication-service";
 import { OfficialAgentService } from "./official-agent-service";
 import { modelPolicyForManifest } from "./model-policy";
+import {
+  CapabilityAuthoringService,
+  type CapabilityAuthoringServiceOptions,
+} from "./capability-authoring-service";
+import { CapabilityBindingStore } from "./capability-binding-store";
+import { CapabilityBindingService } from "./capability-binding-service";
+import { listInstalledSkills } from "../skills";
+import {
+  listMcpServers,
+  normalizeMcpDiscoveredTools,
+  testMcpServer,
+} from "../mcp-servers";
+import { readProfileMeta } from "../profile-meta";
+import { isValidProfileName } from "../utils";
 import {
   serializeDefinition,
   serializeInstallation,
@@ -148,6 +176,8 @@ export interface AgenteraAgentControlManagerOptions extends Partial<FullAgentCon
   hermesAdapter?: AgenteraHermesAdapter;
   /** Test seam for proving that cloud outbox delivery never blocks Hermes. */
   retryPendingRuntimeBindings?: () => Promise<unknown>;
+  /** Focused-test seam; production constructs the local-only service lazily. */
+  capabilityAuthoringService?: CapabilityAuthoringService;
 }
 
 export interface AgenteraEncryptedBackupUserSource {
@@ -169,6 +199,7 @@ interface RuntimeComponents {
   installations: AgentInstallationManager;
   hermes: AgenteraHermesAdapter;
   bindingStore: RuntimeBindingStore;
+  capabilityBindingService: CapabilityBindingService<LocalAgentInstallation>;
 }
 
 interface ContextComponents {
@@ -203,6 +234,35 @@ function codedError(code: string): Error {
   return Object.assign(new Error(`Aera Agent control failed: ${code}.`), {
     code,
   });
+}
+
+export function localProfileHandleForPath(
+  profilePath: string,
+  resolveProfilePath: (profileHandle: string) => string,
+): string {
+  if (typeof profilePath !== "string" || profilePath.length === 0) {
+    throw codedError("profile_capability_configuration_required");
+  }
+  try {
+    const attachedPath = resolve(realpathSync.native(profilePath));
+    if (
+      resolve(realpathSync.native(resolveProfilePath("default"))) ===
+      attachedPath
+    ) {
+      return "default";
+    }
+    const profileHandle = basename(attachedPath);
+    if (
+      !isValidProfileName(profileHandle) ||
+      resolve(realpathSync.native(resolveProfilePath(profileHandle))) !==
+        attachedPath
+    ) {
+      throw codedError("profile_capability_configuration_required");
+    }
+    return profileHandle;
+  } catch {
+    throw codedError("profile_capability_configuration_required");
+  }
 }
 
 export function runtimeComponentKey(owner: AgenteraRuntimeOwner): string {
@@ -399,6 +459,7 @@ export class AgenteraAgentControlManager {
   private organizationExperienceCandidateComponents: OrganizationExperienceCandidateComponents | null =
     null;
   private officialAgentComponents: OfficialAgentComponents | null = null;
+  private capabilityAuthoringService: CapabilityAuthoringService | null;
   private readonly publicationOwners = new Map<string, string>();
   private readonly listeners = new Set<
     (state: AgenteraAgentControlPublicState) => void
@@ -414,6 +475,8 @@ export class AgenteraAgentControlManager {
     this.options = options;
     this.profileBindings = options.profileBindings;
     this.runtimeOnlyHermes = options.hermesAdapter ?? null;
+    this.capabilityAuthoringService =
+      options.capabilityAuthoringService ?? null;
     if (options.database) {
       this.trust = new AgenteraAgentTrustStore({
         cache: loadTrustCache(options.database),
@@ -525,6 +588,8 @@ export class AgenteraAgentControlManager {
     this.organizationExperienceCandidateComponents = null;
     this.officialAgentComponents?.service.invalidate();
     this.officialAgentComponents = null;
+    this.refreshCapabilityAuthoringAccess();
+    this.runtime?.capabilityBindingService.invalidate();
     this.publicationOwners.clear();
     this.emitState();
     this.queueRuntimeBindingDelivery();
@@ -541,6 +606,8 @@ export class AgenteraAgentControlManager {
     this.organizationExperienceCandidateComponents = null;
     this.officialAgentComponents?.service.invalidate();
     this.officialAgentComponents = null;
+    this.capabilityAuthoringService?.notifyContextChanged();
+    this.runtime?.capabilityBindingService.invalidate();
     this.publicationOwners.clear();
     this.emitState();
   }
@@ -568,6 +635,47 @@ export class AgenteraAgentControlManager {
     const result = drafts.getDraftDetail(created.id);
     this.emitState();
     return result;
+  }
+
+  async listAuthoringCapabilities(
+    profileId: string,
+  ): Promise<AuthoringCapabilitySummary> {
+    this.assertAuthoringAccess();
+    return this.ensureCapabilityAuthoringService().listAuthoringCapabilities(
+      profileId,
+    );
+  }
+
+  prepareInstalledSkillSnapshot(
+    input: PrepareInstalledSkillSnapshotInput,
+  ): SkillSnapshotPreview {
+    this.assertAuthoringAccess();
+    return this.ensureCapabilityAuthoringService().prepareInstalledSkillSnapshot(
+      input,
+    );
+  }
+
+  confirmInstalledSkillSnapshot(
+    input: ConfirmInstalledSkillSnapshotInput,
+  ): AgentDraftAssetInput[] {
+    this.assertAuthoringAccess();
+    return this.ensureCapabilityAuthoringService().confirmInstalledSkillSnapshot(
+      input,
+    );
+  }
+
+  prepareMcpRequirement(
+    input: PrepareMcpRequirementInput,
+  ): McpRequirementPreview {
+    this.assertAuthoringAccess();
+    return this.ensureCapabilityAuthoringService().prepareMcpRequirement(input);
+  }
+
+  confirmMcpRequirement(
+    input: ConfirmMcpRequirementInput,
+  ): AgentMcpRequirementV3 {
+    this.assertAuthoringAccess();
+    return this.ensureCapabilityAuthoringService().confirmMcpRequirement(input);
   }
 
   updateDraft(
@@ -854,6 +962,38 @@ export class AgenteraAgentControlManager {
       ...installationManager.listLocalInstallations(context),
       ...installationManager.listManagedInstallations(),
     ].map(serializeInstallation);
+  }
+
+  async listCapabilityBindings(
+    installationId: string,
+  ): Promise<AgentCapabilityBindingConfiguration> {
+    const context = this.assetContext();
+    this.assertInstallationRole(context);
+    const runtime = await this.ensureRuntimeComponents();
+    this.assertInstallationInContext(
+      runtime.installations.getLocalInstallation(installationId),
+      context,
+    );
+    return runtime.capabilityBindingService.list(installationId);
+  }
+
+  async confirmCapabilityBindings(
+    input: ConfirmCapabilityBindingsInput,
+  ): Promise<ConfirmCapabilityBindingsResult> {
+    const context = this.assetContext();
+    this.assertInstallationRole(context);
+    await this.assertOnlineLocalRuntimeAccess();
+    const runtime = await this.ensureRuntimeComponents();
+    this.assertInstallationInContext(
+      runtime.installations.getLocalInstallation(input.installationId),
+      context,
+    );
+    const result = await runtime.capabilityBindingService.confirm(input);
+    this.emitState();
+    return {
+      installation: serializeInstallation(result.installation),
+      forceNewConversation: true,
+    };
   }
 
   async resolveEncryptedBackupUserSource(
@@ -1454,6 +1594,49 @@ export class AgenteraAgentControlManager {
     return `${runtimeComponentKey(this.owner())}\0${contextKey(context)}`;
   }
 
+  private ensureCapabilityAuthoringService(): CapabilityAuthoringService {
+    if (this.capabilityAuthoringService !== null) {
+      return this.capabilityAuthoringService;
+    }
+    const options: CapabilityAuthoringServiceOptions = {
+      getOwnerKey: () => this.operationContextKey(),
+      resolveProfile: async (profileHandle) => {
+        if (!isValidProfileName(profileHandle)) {
+          throw codedError("invalid_request");
+        }
+        const profilePath =
+          this.requireFull().profiles.resolveProfilePath(profileHandle);
+        const metadata = await readProfileMeta(profileHandle);
+        return {
+          profileHandle,
+          displayName: metadata.name ?? profileHandle,
+          profilePath,
+        };
+      },
+      listInstalledSkills: (profileHandle) =>
+        listInstalledSkills(profileHandle),
+      listMcpServers: (profileHandle) => listMcpServers(profileHandle),
+      discoverMcpTools: async (logicalName, profileHandle) => {
+        const result = await testMcpServer(logicalName, profileHandle);
+        return result.success ? (result.tools ?? []) : [];
+      },
+      now: this.options.now,
+      randomUUID: this.options.randomUUID,
+    };
+    this.capabilityAuthoringService = new CapabilityAuthoringService(options);
+    return this.capabilityAuthoringService;
+  }
+
+  private refreshCapabilityAuthoringAccess(): void {
+    if (this.capabilityAuthoringService === null) return;
+    try {
+      this.assertAuthoringAccess();
+      this.capabilityAuthoringService.notifyContextChanged();
+    } catch {
+      this.capabilityAuthoringService.invalidate();
+    }
+  }
+
   private assertNoPendingSubmission(
     id: string,
     context: AgentAssetContext,
@@ -1633,6 +1816,7 @@ export class AgenteraAgentControlManager {
     );
     const key = `${runtimeComponentKey(owner)}\0${runtimeVersion}`;
     if (this.runtime?.key === key) return this.runtime;
+    this.runtime?.capabilityBindingService.invalidate();
     this.publicationOwners.clear();
     this.contextComponents = null;
     this.experienceCandidateComponents?.service.clearPreparedImports();
@@ -1648,6 +1832,34 @@ export class AgenteraAgentControlManager {
       origin: full.client.origin,
       runtimeVersion,
     });
+    const capabilityBindingStore = new CapabilityBindingStore({
+      database: full.database,
+      owner,
+    });
+    const getProfileMcpCapabilities = async (profilePath: string) => {
+      const profileHandle = localProfileHandleForPath(
+        profilePath,
+        (candidate) => full.profiles.resolveProfilePath(candidate),
+      );
+      const servers = await listMcpServers(profileHandle);
+      return Promise.all(
+        servers.map(async (server) => {
+          if (!server.enabled) {
+            return { name: server.name, enabled: false, tools: [] };
+          }
+          const result = await testMcpServer(server.name, profileHandle);
+          return {
+            name: server.name,
+            enabled: result.success,
+            tools: result.success
+              ? normalizeMcpDiscoveredTools(result.tools).map(
+                  (tool) => tool.name,
+                )
+              : [],
+          };
+        }),
+      );
+    };
     const installations = new AgentInstallationManager({
       database: full.database,
       client: full.client,
@@ -1658,7 +1870,30 @@ export class AgenteraAgentControlManager {
       profiles: full.profiles,
       owner,
       runtimeVersion,
+      capabilityBindingStore,
+      getProfileMcpCapabilities,
     });
+    const capabilityBindingService =
+      new CapabilityBindingService<LocalAgentInstallation>({
+        getOwnerKey: () => runtimeComponentKey(owner),
+        getInstallation: (installationId) =>
+          installations.getLocalInstallation(installationId),
+        getVerifiedVersion: (versionId) => cache.getVerifiedVersion(versionId),
+        resolveProfilePath: (runtimeProfileId, installationId) =>
+          this.profileBindings.resolveAttachedProfilePath(
+            runtimeProfileId,
+            installationId,
+            owner,
+          ),
+        listCapabilityServers: getProfileMcpCapabilities,
+        bindingStore: capabilityBindingStore,
+        resumePendingInstallation: async (installationId) => {
+          await installations.reconcilePendingInstallations();
+          return installations.getLocalInstallation(installationId);
+        },
+        now: full.now,
+        randomUUID: full.randomUUID,
+      });
     const bindingStore = new RuntimeBindingStore({
       database: full.database,
       owner,
@@ -1666,6 +1901,7 @@ export class AgenteraAgentControlManager {
     const hermes = new AgenteraHermesAdapter({
       database: full.database,
       bindingStore,
+      capabilityBindingStore,
       profileBindings: this.profileBindings,
       cache,
       projection: this.projection,
@@ -1677,6 +1913,7 @@ export class AgenteraAgentControlManager {
         }
         return full.profiles.readProfileModelConfig(profilePath);
       },
+      getProfileMcpCapabilities,
       isVersionRevoked: full.isVersionRevoked ?? (() => false),
       assertEntitled: full.assertEntitled,
       getAgentContext: () => this.context(),
@@ -1688,6 +1925,7 @@ export class AgenteraAgentControlManager {
       installations,
       hermes,
       bindingStore,
+      capabilityBindingService,
     };
     return this.runtime;
   }

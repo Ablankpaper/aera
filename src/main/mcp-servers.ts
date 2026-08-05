@@ -52,6 +52,73 @@ export interface McpOperationResult {
   tools?: Array<{ name: string; description: string }>;
 }
 
+export interface McpDiscoveredTool {
+  name: string;
+  description: string;
+}
+
+function displayText(value: unknown, maximum: number): string {
+  if (typeof value !== "string") return "";
+  const normalized = value.replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
+  return Array.from(normalized).slice(0, maximum).join("");
+}
+
+export function normalizeMcpDiscoveredTools(
+  value: unknown,
+): McpDiscoveredTool[] {
+  const candidates: Array<{ name: unknown; description: unknown }> = [];
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      if (typeof entry === "string") {
+        candidates.push({ name: entry, description: "" });
+      } else if (entry !== null && typeof entry === "object") {
+        const record = entry as Record<string, unknown>;
+        candidates.push({
+          name: record.name,
+          description: record.description,
+        });
+      }
+    }
+  } else if (value !== null && typeof value === "object") {
+    for (const [name, raw] of Object.entries(
+      value as Record<string, unknown>,
+    )) {
+      const description =
+        raw !== null && typeof raw === "object"
+          ? (raw as Record<string, unknown>).description
+          : raw;
+      candidates.push({ name, description });
+    }
+  }
+
+  const seen = new Set<string>();
+  const result: McpDiscoveredTool[] = [];
+  for (const candidate of candidates) {
+    const name = displayText(candidate.name, 256);
+    if (
+      !name ||
+      name !== candidate.name ||
+      !/^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,255}$/.test(name) ||
+      seen.has(name)
+    ) {
+      continue;
+    }
+    seen.add(name);
+    result.push({
+      name,
+      description: displayText(candidate.description, 512),
+    });
+  }
+  return result
+    .sort((left, right) =>
+      Buffer.compare(
+        Buffer.from(left.name, "utf8"),
+        Buffer.from(right.name, "utf8"),
+      ),
+    )
+    .slice(0, 128);
+}
+
 interface McpBlock {
   startLine: number;
   endLine: number;
@@ -90,9 +157,10 @@ function runHermesMcpCli(
     return Promise.reject(new Error("Aera Runtime is not prepared."));
   }
   return new Promise((resolve, reject) => {
+    const profileArgs = profile ? ["--profile", profile] : [];
     const child = execFile(
       invocation.python,
-      invocation.cliArgs(["mcp", ...args]),
+      invocation.cliArgs([...profileArgs, "mcp", ...args]),
       {
         cwd: invocation.workingDirectory,
         env: invocation.environment({
@@ -792,10 +860,41 @@ export async function testMcpServer(
 ): Promise<McpOperationResult> {
   try {
     if (!isRemoteMode()) {
+      let structuredFailure: McpOperationResult | null = null;
+      try {
+        const data = await mcpApi<{
+          ok?: boolean;
+          error?: string;
+          tools?: Array<{ name: string; description: string }>;
+        }>(
+          `/api/mcp/servers/${encodeURIComponent(name)}/test`,
+          { method: "POST" },
+          profile,
+        );
+        if (data.ok !== false) {
+          return {
+            success: true,
+            error: data.error,
+            tools: data.tools || [],
+          };
+        }
+        structuredFailure = {
+          success: false,
+          error: data.error,
+          tools: data.tools || [],
+        };
+      } catch {
+        // Older or stopped local gateways may not expose the structured test
+        // endpoint. Keep the CLI path as a compatibility fallback.
+      }
       const result = await runHermesMcpCli(["test", name], profile);
+      const tools = parseMcpTestTools(result.stdout);
+      if (tools.length === 0 && structuredFailure !== null) {
+        return structuredFailure;
+      }
       return {
         success: true,
-        tools: parseMcpTestTools(result.stdout),
+        tools,
       };
     }
 

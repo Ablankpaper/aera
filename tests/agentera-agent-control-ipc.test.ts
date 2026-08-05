@@ -10,6 +10,9 @@ import {
   executeAgentControlIpc,
   parseAgentControlId,
   parseClaimVersionInput,
+  parseConfirmInstalledSkillSnapshotInput,
+  parseConfirmMcpRequirementInput,
+  parseConfirmCapabilityBindingsInput,
   parseConfirmExperienceCandidateImportInput,
   parseConfirmOfficialAgentInstallInput,
   parseConfirmOrganizationExperienceCandidateImportInput,
@@ -18,6 +21,9 @@ import {
   parseConfirmOrganizationWithdrawalInput,
   parseCreateDraftInput,
   parseInstallVersionInput,
+  parseListAuthoringCapabilitiesInput,
+  parsePrepareInstalledSkillSnapshotInput,
+  parsePrepareMcpRequirementInput,
   parsePrepareExperienceCandidateInput,
   parsePrepareOrganizationExperienceCandidateInput,
   parsePrepareOrganizationReviewInput,
@@ -67,6 +73,12 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-delete-draft",
       "agentera-agents-discard-unpublished-draft",
       "agentera-agents-list-installations",
+      "agentera-agents-list-authoring-capabilities",
+      "agentera-agents-prepare-installed-skill-snapshot",
+      "agentera-agents-confirm-installed-skill-snapshot",
+      "agentera-agents-prepare-mcp-requirement",
+      "agentera-agents-confirm-mcp-requirement",
+      "agentera-agents-list-capability-bindings",
       "agentera-agents-list-eligible-experience-skills",
       "agentera-agents-list-eligible-organization-experience-skills",
       "agentera-agents-prepare-experience-candidate",
@@ -84,6 +96,7 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-install-version",
       "agentera-agents-claim-version",
       "agentera-agents-retry-installation",
+      "agentera-agents-confirm-capability-bindings",
       "agentera-agents-select-version",
       "agentera-agents-archive-installation",
       "agentera-agents-submit-experience-candidate",
@@ -247,6 +260,112 @@ describe("Agent control IPC contract", () => {
         workspaceId: "33333333-3333-4333-8333-333333333333",
       }),
     ).toThrow();
+  });
+
+  it("accepts only handle-based installed capability authoring inputs", () => {
+    expect(parseListAuthoringCapabilitiesInput("profile-a")).toBe("profile-a");
+    expect(
+      parsePrepareInstalledSkillSnapshotInput({
+        profileId: "profile-a",
+        skillName: "weekly-summary",
+      }),
+    ).toEqual({ profileId: "profile-a", skillName: "weekly-summary" });
+    expect(
+      parseConfirmInstalledSkillSnapshotInput({
+        snapshotHandle: UUID,
+        confirmation: "copy-selected-skill-to-draft",
+      }),
+    ).toEqual({
+      snapshotHandle: UUID,
+      confirmation: "copy-selected-skill-to-draft",
+    });
+    expect(
+      parsePrepareMcpRequirementInput({
+        profileId: "profile-a",
+        logicalName: "private-docs",
+        tools: ["docs.search", "docs.read"],
+        required: true,
+        permissionReason: "Read employee-selected documents",
+      }),
+    ).toEqual({
+      profileId: "profile-a",
+      logicalName: "private-docs",
+      tools: ["docs.search", "docs.read"],
+      required: true,
+      permissionReason: "Read employee-selected documents",
+    });
+    expect(
+      parseConfirmMcpRequirementInput({
+        requirementHandle: UUID,
+        confirmation: "add-logical-mcp-requirement",
+      }),
+    ).toEqual({
+      requirementHandle: UUID,
+      confirmation: "add-logical-mcp-requirement",
+    });
+
+    for (const forged of [
+      { profileId: "../other", skillName: "weekly-summary" },
+      {
+        profileId: "profile-a",
+        skillName: "weekly-summary",
+        profilePath: "/private/profile",
+      },
+      {
+        profileId: "profile-a",
+        logicalName: "private-docs",
+        tools: ["docs.read"],
+        required: true,
+        permissionReason: "Read documents",
+        url: "https://private.example.test",
+      },
+      {
+        requirementHandle: UUID,
+        confirmation: "yes",
+      },
+    ]) {
+      expect(() =>
+        Object.hasOwn(forged, "skillName")
+          ? parsePrepareInstalledSkillSnapshotInput(forged)
+          : Object.hasOwn(forged, "logicalName")
+            ? parsePrepareMcpRequirementInput(forged)
+            : parseConfirmMcpRequirementInput(forged),
+      ).toThrow();
+    }
+  });
+
+  it("accepts only opaque local capability binding handles", () => {
+    expect(
+      parseConfirmCapabilityBindingsInput({
+        installationId: UUID,
+        mappingHandles: [VERSION_ID],
+        confirmation: "bind-profile-capabilities",
+      }),
+    ).toEqual({
+      installationId: UUID,
+      mappingHandles: [VERSION_ID],
+      confirmation: "bind-profile-capabilities",
+    });
+    for (const forged of [
+      {
+        installationId: UUID,
+        mappingHandles: [VERSION_ID],
+        confirmation: "yes",
+      },
+      {
+        installationId: UUID,
+        mappingHandles: [VERSION_ID],
+        confirmation: "bind-profile-capabilities",
+        localMcpName: "private-server",
+      },
+      {
+        installationId: UUID,
+        mappingHandles: [VERSION_ID, VERSION_ID],
+        confirmation: "bind-profile-capabilities",
+      },
+    ]) {
+      expect(() => parseConfirmCapabilityBindingsInput(forged)).toThrow();
+    }
   });
 
   it("accepts only the reviewed ExperienceCandidate IPC fields", () => {
@@ -891,6 +1010,13 @@ describe("Agent control IPC contract", () => {
     expect(registrations).not.toContain("ipcMain.handle");
     for (const channel of [
       "agentera-agents-list-eligible-experience-skills",
+      "agentera-agents-list-authoring-capabilities",
+      "agentera-agents-prepare-installed-skill-snapshot",
+      "agentera-agents-confirm-installed-skill-snapshot",
+      "agentera-agents-prepare-mcp-requirement",
+      "agentera-agents-confirm-mcp-requirement",
+      "agentera-agents-list-capability-bindings",
+      "agentera-agents-confirm-capability-bindings",
       "agentera-agents-prepare-experience-candidate",
       "agentera-agents-submit-experience-candidate",
       "agentera-agents-list-my-experience-candidates",

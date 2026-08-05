@@ -728,20 +728,47 @@ function isToolPolicy(value: unknown): boolean {
   );
 }
 
+function isMcpRequirements(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length <= 32 &&
+    value.every(
+      (requirement) =>
+        hasExactFields(requirement, [
+          "logical_name",
+          "tools",
+          "required",
+          "permission_reason",
+        ]) &&
+        isBoundedString(requirement.logical_name, 1, 128) &&
+        Array.isArray(requirement.tools) &&
+        requirement.tools.length > 0 &&
+        requirement.tools.length <= 128 &&
+        requirement.tools.every((tool) => isBoundedString(tool, 1, 128)) &&
+        typeof requirement.required === "boolean" &&
+        typeof requirement.permission_reason === "string" &&
+        Buffer.byteLength(requirement.permission_reason, "utf8") >= 1 &&
+        Buffer.byteLength(requirement.permission_reason, "utf8") <= 300,
+    )
+  );
+}
+
 function isManifest(value: unknown): boolean {
   if (!isObject(value)) return false;
   const modelField =
     value.schema_version === 1
       ? "model_constraints"
-      : value.schema_version === 2
+      : value.schema_version === 2 || value.schema_version === 3
         ? "model_policy"
         : null;
+  const mcpFields = value.schema_version === 3 ? ["mcp_requirements"] : [];
   if (
     modelField === null ||
     !hasExactFields(value, [
       "assets",
       "dependencies",
       "identity",
+      ...mcpFields,
       modelField,
       "runtime_compatibility",
       "schema_version",
@@ -752,6 +779,8 @@ function isManifest(value: unknown): boolean {
     (value.schema_version === 1
       ? !isModelConstraints(value.model_constraints)
       : !isModelPolicy(value.model_policy)) ||
+    (value.schema_version === 3 &&
+      !isMcpRequirements(value.mcp_requirements)) ||
     !isRuntimeCompatibility(value.runtime_compatibility) ||
     !isToolPolicy(value.tools) ||
     !Array.isArray(value.assets) ||
@@ -1017,9 +1046,10 @@ function isPolicyDocument(value: unknown): boolean {
   const modelField =
     value.schema_version === 1
       ? "model_constraints"
-      : value.schema_version === 2
+      : value.schema_version === 2 || value.schema_version === 3
         ? "model_policy"
         : null;
+  const mcpFields = value.schema_version === 3 ? ["mcp_requirements"] : [];
   return (
     modelField !== null &&
     hasExactFields(
@@ -1028,6 +1058,7 @@ function isPolicyDocument(value: unknown): boolean {
         "agent_definition_id",
         "agent_version_id",
         "deny_rules",
+        ...mcpFields,
         modelField,
         "publication_allowed",
         "runtime_compatibility",
@@ -1043,6 +1074,7 @@ function isPolicyDocument(value: unknown): boolean {
     (value.schema_version === 1
       ? isModelConstraints(value.model_constraints)
       : isModelPolicy(value.model_policy)) &&
+    (value.schema_version !== 3 || isMcpRequirements(value.mcp_requirements)) &&
     isToolPolicy(value.tools) &&
     isRuntimeCompatibility(value.runtime_compatibility) &&
     value.publication_allowed === false &&

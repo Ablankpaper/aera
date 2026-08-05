@@ -359,6 +359,13 @@ describe("Aera Agent-control preload namespace", () => {
     "updateDraft",
     "deleteDraft",
     "discardUnpublishedDraft",
+    "listAuthoringCapabilities",
+    "prepareInstalledSkillSnapshot",
+    "confirmInstalledSkillSnapshot",
+    "prepareMcpRequirement",
+    "confirmMcpRequirement",
+    "listCapabilityBindings",
+    "confirmCapabilityBindings",
     "preparePublication",
     "confirmPublication",
     "prepareOrganizationSubmission",
@@ -434,7 +441,7 @@ describe("Aera Agent-control preload namespace", () => {
     )?.[1];
     expect(namespace).toBeDefined();
     expect(namespace).not.toMatch(
-      /accessToken|refreshToken|offlineEntitlement|privateKey|publicKey|signature|ownerId|tenantId|deviceId|workspaceId|profilePath|runtimeProfileId|sourceRelativePath|snapshot|filePath|remoteUrl|environment|rawResponse|responseText/i,
+      /accessToken|refreshToken|offlineEntitlement|privateKey|publicKey|signature|ownerId|tenantId|deviceId|workspaceId|profilePath|runtimeProfileId|sourceRelativePath|\bsnapshot\b|filePath|remoteUrl|environment|rawResponse|responseText/i,
     );
   });
 });

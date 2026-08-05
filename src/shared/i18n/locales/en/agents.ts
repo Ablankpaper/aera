@@ -192,6 +192,22 @@ export default {
     advancedSubtitle:
       "Experience promotion, enterprise review, and access governance",
   },
+  capabilityBinding: {
+    title: "Configure local capabilities",
+    requiredState:
+      "This Agent needs a local MCP capability mapping before it can be used.",
+    configure: "Configure capabilities",
+    privateBoundary:
+      "Choose compatible MCP servers from this device. Connection details and credentials stay in your local Profile.",
+    required: "Required",
+    optional: "Optional",
+    localMcp: "Compatible local MCP",
+    chooseRequired: "Choose a compatible MCP",
+    skipOptional: "Skip this optional capability",
+    noCompatibleServer: "No compatible enabled MCP is available.",
+    onlineRequired: "Reconnect to save the mapping and finish setup.",
+    save: "Save capability mapping",
+  },
   sync: "Sync",
   syncing: "Syncing…",
   syncSignedOut: "Not synced",
@@ -422,6 +438,27 @@ export default {
       sop: "SOP",
       knowledge: "Knowledge",
     },
+    capabilities: {
+      title: "Installed capabilities",
+      hint: "Choose an installed Skill or MCP capability. Aera copies Skill content, but only publishes logical MCP requirements.",
+      chooseInstalled: "Choose installed Skill / MCP",
+      selectedCapabilities: "Selected capabilities",
+      profile: "Source Profile",
+      installedSkill: "Installed Skill",
+      chooseSkill: "Choose a Skill",
+      previewSkill: "Preview Skill snapshot",
+      addSkill: "Add Skill snapshot",
+      replaceSkill: "Replace Skill snapshot",
+      mcpServer: "Configured MCP",
+      chooseMcp: "Choose an MCP",
+      mcpTools: "Allowed MCP tools",
+      required: "Required capability",
+      permissionReason: "Permission reason",
+      previewMcp: "Preview MCP requirement",
+      addMcp: "Add MCP requirement",
+      removeMcp: "Remove MCP requirement",
+      duplicateMcp: "This logical MCP requirement is already selected.",
+    },
     savedLocally: "Draft saved.",
     saveLocal: "Save draft",
     publish: "Publish",
@@ -615,6 +652,17 @@ export default {
         "This Agent version is not compatible with this device's local environment.",
       profile_model_configuration_failed:
         "The current model is incompatible with this signed Agent version. Configure a model allowed by the version, or ask the publisher to release a version compatible with the current model.",
+      capability_profile_unavailable:
+        "The selected local Profile is unavailable. Refresh and try again.",
+      capability_source_unsafe:
+        "The selected capability contains local content that cannot be copied safely.",
+      capability_dlp_blocked: "The local privacy scan blocked this capability.",
+      capability_handle_invalid:
+        "The capability preview is no longer valid. Select it again.",
+      capability_handle_expired:
+        "The capability preview expired. Select it again.",
+      capability_requirement_invalid:
+        "The selected MCP capability or tool changed. Refresh and try again.",
       local_runtime_required:
         "The local Agent service is not ready yet. Try again shortly; setup is automatic.",
       cloud_unavailable: "Aera Cloud is temporarily unavailable.",

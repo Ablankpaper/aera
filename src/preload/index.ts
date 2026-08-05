@@ -79,7 +79,12 @@ import type {
 import type { RuntimeDistributionPublicState } from "../shared/agentera-runtime-distribution";
 import type {
   AgentDraft,
+  AgentDraftAssetInput,
   AgentDraftDetail,
+  AgentCapabilityBindingConfiguration,
+  ConfirmCapabilityBindingsInput,
+  ConfirmCapabilityBindingsResult,
+  AgentMcpRequirementV3,
   AgenteraAgentControlPublicState,
   AgenteraAgentControlResult,
   AgenteraAgentDefinitionSummary,
@@ -93,12 +98,15 @@ import type {
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
+  ConfirmInstalledSkillSnapshotInput,
+  ConfirmMcpRequirementInput,
   ConfirmOfficialAgentInstallInput,
   ConfirmOrganizationExperienceCandidateImportInput,
   ConfirmOrganizationReviewInput,
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
   CreateAgentDraftInput,
+  AuthoringCapabilitySummary,
   EligibleExperienceSkill,
   ExperienceCandidateDetail,
   ExperienceCandidateImportPreview,
@@ -113,15 +121,19 @@ import type {
   OrganizationReviewPreview,
   OrganizationSubmissionPreview,
   OrganizationWithdrawalPreview,
+  McpRequirementPreview,
   OfficialAgentDetail,
   OfficialAgentInstallPreview,
   OfficialAgentSummary,
   OfficialManagedUpdate,
   PrepareExperienceCandidateInput,
+  PrepareInstalledSkillSnapshotInput,
+  PrepareMcpRequirementInput,
   PrepareOrganizationExperienceCandidateInput,
   PrepareOrganizationReviewInput,
   PublicationPreview,
   PublishedRevision,
+  SkillSnapshotPreview,
   ReviewExperienceCandidateInput,
   ReviewOrganizationExperienceCandidateInput,
   SubmitOrganizationExperienceCandidateInput,
@@ -2489,6 +2501,46 @@ const agenteraAgentsAPI = {
     scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentControlResult<true>> =>
     ipcRenderer.invoke("agentera-agents-discard-unpublished-draft", id, scope),
+  listAuthoringCapabilities: (
+    profileId: string,
+  ): Promise<AgenteraAgentControlResult<AuthoringCapabilitySummary>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-list-authoring-capabilities",
+      profileId,
+    ),
+  prepareInstalledSkillSnapshot: (
+    input: PrepareInstalledSkillSnapshotInput,
+  ): Promise<AgenteraAgentControlResult<SkillSnapshotPreview>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-prepare-installed-skill-snapshot",
+      input,
+    ),
+  confirmInstalledSkillSnapshot: (
+    input: ConfirmInstalledSkillSnapshotInput,
+  ): Promise<AgenteraAgentControlResult<AgentDraftAssetInput[]>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-confirm-installed-skill-snapshot",
+      input,
+    ),
+  prepareMcpRequirement: (
+    input: PrepareMcpRequirementInput,
+  ): Promise<AgenteraAgentControlResult<McpRequirementPreview>> =>
+    ipcRenderer.invoke("agentera-agents-prepare-mcp-requirement", input),
+  confirmMcpRequirement: (
+    input: ConfirmMcpRequirementInput,
+  ): Promise<AgenteraAgentControlResult<AgentMcpRequirementV3>> =>
+    ipcRenderer.invoke("agentera-agents-confirm-mcp-requirement", input),
+  listCapabilityBindings: (
+    installationId: string,
+  ): Promise<AgenteraAgentControlResult<AgentCapabilityBindingConfiguration>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-list-capability-bindings",
+      installationId,
+    ),
+  confirmCapabilityBindings: (
+    input: ConfirmCapabilityBindingsInput,
+  ): Promise<AgenteraAgentControlResult<ConfirmCapabilityBindingsResult>> =>
+    ipcRenderer.invoke("agentera-agents-confirm-capability-bindings", input),
   preparePublication: (
     id: string,
     scope?: AgenteraAgentOperationScope,

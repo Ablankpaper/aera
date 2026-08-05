@@ -104,9 +104,136 @@ export interface AgentEditableManifestV2 extends AgentEditableManifestBase {
   };
 }
 
+export interface AgentMcpRequirementV3 {
+  logicalName: string;
+  tools: string[];
+  required: boolean;
+  permissionReason: string;
+}
+
+export interface AuthoringCapabilityProfileSummary {
+  profileHandle: string;
+  displayName: string;
+}
+
+export interface AuthoringInstalledSkillSummary {
+  name: string;
+  category: string;
+  description: string;
+}
+
+export interface AuthoringMcpToolSummary {
+  name: string;
+  description: string;
+}
+
+export interface AuthoringMcpServerSummary {
+  logicalName: string;
+  enabled: boolean;
+  tools: AuthoringMcpToolSummary[];
+}
+
+export interface AuthoringCapabilitySummary {
+  profile: AuthoringCapabilityProfileSummary;
+  skills: AuthoringInstalledSkillSummary[];
+  mcpServers: AuthoringMcpServerSummary[];
+}
+
+export interface SkillSnapshotFilePreview {
+  draftLocation: string;
+  mediaType: AgentDraftAssetMediaType;
+  sizeBytes: number;
+  sha256: string;
+}
+
+export interface SkillSnapshotPreview {
+  snapshotHandle: string;
+  profileHandle: string;
+  skillName: string;
+  category: string;
+  description: string;
+  files: SkillSnapshotFilePreview[];
+  fileCount: number;
+  totalBytes: number;
+  contentDigest: string;
+  findings: ExperienceCandidateFinding[];
+  expiresAt: string;
+}
+
+export interface PrepareInstalledSkillSnapshotInput {
+  profileId: string;
+  skillName: string;
+}
+
+export interface ConfirmInstalledSkillSnapshotInput {
+  snapshotHandle: string;
+  confirmation: "copy-selected-skill-to-draft";
+}
+
+export interface McpRequirementPreview {
+  requirementHandle: string;
+  profileHandle: string;
+  logicalName: string;
+  tools: AuthoringMcpToolSummary[];
+  required: boolean;
+  permissionReason: string;
+  expiresAt: string;
+}
+
+export interface PrepareMcpRequirementInput {
+  profileId: string;
+  logicalName: string;
+  tools: string[];
+  required: boolean;
+  permissionReason: string;
+}
+
+export interface ConfirmMcpRequirementInput {
+  requirementHandle: string;
+  confirmation: "add-logical-mcp-requirement";
+}
+
+export interface AgentCapabilityBindingCompatibleServer {
+  mappingHandle: string;
+  displayName: string;
+  current: boolean;
+}
+
+export interface AgentCapabilityBindingRequirement {
+  logicalName: string;
+  tools: string[];
+  required: boolean;
+  permissionReason: string;
+  mappedLocalMcpName: string | null;
+  compatibleServers: AgentCapabilityBindingCompatibleServer[];
+}
+
+export interface AgentCapabilityBindingConfiguration {
+  installationId: string;
+  requirements: AgentCapabilityBindingRequirement[];
+}
+
+export interface ConfirmCapabilityBindingsInput {
+  installationId: string;
+  mappingHandles: string[];
+  confirmation: "bind-profile-capabilities";
+}
+
+export interface ConfirmCapabilityBindingsResult {
+  installation: AgenteraAgentInstallationSummary;
+  forceNewConversation: true;
+}
+
+export interface AgentEditableManifestV3 extends AgentEditableManifestBase {
+  schemaVersion: 3;
+  modelPolicy: AgentEditableManifestV2["modelPolicy"];
+  mcpRequirements: AgentMcpRequirementV3[];
+}
+
 export type AgentEditableManifest =
   | AgentEditableManifestV1
-  | AgentEditableManifestV2;
+  | AgentEditableManifestV2
+  | AgentEditableManifestV3;
 
 export interface AgentRuntimeModelPolicy {
   mode: AgentModelSelectionMode;
@@ -117,7 +244,7 @@ export interface AgentRuntimeModelPolicy {
 export function runtimeModelPolicyForEditableManifest(
   manifest: AgentEditableManifest,
 ): AgentRuntimeModelPolicy {
-  if (manifest.schemaVersion === 2) return manifest.modelPolicy;
+  if (manifest.schemaVersion !== 1) return manifest.modelPolicy;
   return {
     mode: "allowlist",
     allowedProviders: manifest.modelConstraints.allowedProviders,
@@ -400,6 +527,13 @@ export type AgenteraAgentControlErrorCode =
   | "publication_cache_recovery_failed"
   | "runtime_incompatible"
   | "profile_model_configuration_failed"
+  | "profile_capability_configuration_required"
+  | "capability_profile_unavailable"
+  | "capability_source_unsafe"
+  | "capability_dlp_blocked"
+  | "capability_handle_invalid"
+  | "capability_handle_expired"
+  | "capability_requirement_invalid"
   | "local_runtime_required"
   | "cloud_unavailable"
   | "workspace_forbidden"

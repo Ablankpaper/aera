@@ -9,7 +9,7 @@ import {
   resolve,
 } from "node:path";
 
-export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 10;
+export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 11;
 
 const INSTALLATION_OPERATIONS_SCHEMA = `
   CREATE TABLE IF NOT EXISTS installation_operations (
@@ -144,6 +144,39 @@ const ORGANIZATION_EXPERIENCE_RECEIPTS_SCHEMA = `
       organization_id, candidate_id
     )
   );
+`;
+
+const CAPABILITY_BINDINGS_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS agent_mcp_requirement_bindings (
+    tenant_id TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    device_installation_id TEXT NOT NULL,
+    agent_installation_id TEXT NOT NULL
+      REFERENCES local_agent_installations(agent_installation_id)
+      ON DELETE CASCADE,
+    requirement_logical_name TEXT NOT NULL
+      CHECK (length(requirement_logical_name) BETWEEN 1 AND 128),
+    local_mcp_name TEXT NOT NULL
+      CHECK (length(local_mcp_name) BETWEEN 1 AND 128),
+    verified_tool_names_json TEXT NOT NULL
+      CHECK (
+        length(verified_tool_names_json) BETWEEN 3 AND 32768
+        AND json_valid(verified_tool_names_json)
+        AND json_type(verified_tool_names_json) = 'array'
+      ),
+    revision INTEGER NOT NULL CHECK (revision >= 1),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (
+      tenant_id, owner_id, device_installation_id,
+      agent_installation_id, requirement_logical_name
+    )
+  );
+  CREATE INDEX IF NOT EXISTS agent_mcp_requirement_bindings_installation_idx
+    ON agent_mcp_requirement_bindings (
+      tenant_id, owner_id, device_installation_id,
+      agent_installation_id, updated_at
+    );
 `;
 
 export type AgentAssetContext =
@@ -614,6 +647,8 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
       );
 
       ${ORGANIZATION_EXPERIENCE_RECEIPTS_SCHEMA}
+
+      ${CAPABILITY_BINDINGS_SCHEMA}
 
       CREATE TABLE IF NOT EXISTS organization_agent_submission_refs (
         local_draft_id TEXT NOT NULL,
@@ -1205,6 +1240,12 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
     if (currentVersion >= 1 && currentVersion <= 9) {
       sqlite.exec(`
         ${ORGANIZATION_EXPERIENCE_RECEIPTS_SCHEMA}
+        PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
+      `);
+    }
+    if (currentVersion >= 1 && currentVersion <= 10) {
+      sqlite.exec(`
+        ${CAPABILITY_BINDINGS_SCHEMA}
         PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
       `);
     }
