@@ -210,6 +210,16 @@ Each requirement contains a logical name, selected tool names, required or optio
 
 New drafts use V3 with an empty requirement list through [[src/renderer/src/screens/Agents/agentDraftDefaults.ts#createDefaultAgentManifest]]. An approved experience import retains requirements from its verified base through [[src/main/agentera-agent-control/experience-candidate-importer.ts#editableManifest]], while later capability changes remain ordinary draft revisions and next immutable Versions.
 
+## Installed capability authoring boundary
+
+Installed capability selection is a main-process preparation flow that exposes safe metadata and one-use handles without exposing a Profile path or MCP connection configuration.
+
+[[src/main/agentera-agent-control/capability-authoring-service.ts#CapabilityAuthoringService#listAuthoringCapabilities]] returns only an opaque Profile handle, display names, Skill metadata, logical MCP names, enabled state, and discovered tool metadata. URL, command, arguments, environment, auth, token, headers, local paths, and secret-like descriptions stay out of renderer DTOs.
+
+[[src/main/agentera-agent-control/capability-authoring-service.ts#CapabilityAuthoringService#prepareInstalledSkillSnapshot]] rejects links, path escape, hidden/cache entries, invalid UTF-8, duplicate targets, oversize content, and local DLP findings before retaining an immutable in-memory snapshot. Confirmation consumes its owner- and Profile-bound handle once, while MCP confirmation returns only a validated [[src/shared/agentera-agent-control.ts#AgentMcpRequirementV3]].
+
+[[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] owns service construction and invalidates preparation state when access or selected product context changes. [[src/main/mcp-servers.ts#normalizeMcpDiscoveredTools]] normalizes tool discovery before the service applies its display-metadata privacy filter.
+
 ## Immutable publication
 
 An explicit publish action turns one local draft revision into an immutable cloud AgentVersion under a stable AgentDefinition.

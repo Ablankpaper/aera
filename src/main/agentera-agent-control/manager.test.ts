@@ -104,6 +104,14 @@ describe("Agent control Organization Foundation context", () => {
       verifyProfileBinding: () => { agentInstallationId: string | null };
       resolveAttachedProfilePath: () => string;
       randomUUID: () => string;
+      capabilityAuthoringService: {
+        listAuthoringCapabilities: (...args: unknown[]) => unknown;
+        prepareInstalledSkillSnapshot: (...args: unknown[]) => unknown;
+        confirmInstalledSkillSnapshot: (...args: unknown[]) => unknown;
+        prepareMcpRequirement: (...args: unknown[]) => unknown;
+        confirmMcpRequirement: (...args: unknown[]) => unknown;
+        invalidate: () => void;
+      };
     }> = {},
   ): {
     manager: AgenteraAgentControlManager;
@@ -163,6 +171,8 @@ describe("Agent control Organization Foundation context", () => {
         assertEntitled: () => undefined,
         hermesAdapter: runtimeOverrides.hermesAdapter,
         randomUUID: runtimeOverrides.randomUUID,
+        capabilityAuthoringService:
+          runtimeOverrides.capabilityAuthoringService as never,
       }),
     };
   }
@@ -232,6 +242,73 @@ describe("Agent control Organization Foundation context", () => {
       organizationId: ORGANIZATION_ID,
       role: "member",
     });
+  });
+
+  it("routes capability authoring through the narrow main-process service", async () => {
+    const capabilityAuthoringService = {
+      listAuthoringCapabilities: vi.fn(async () => ({
+        profile: {
+          profileHandle: "profile-a",
+          displayName: "Research Profile",
+        },
+        skills: [],
+        mcpServers: [],
+      })),
+      prepareInstalledSkillSnapshot: vi.fn(() => ({
+        snapshotHandle: "snapshot-handle",
+      })),
+      confirmInstalledSkillSnapshot: vi.fn(() => [
+        { path: "skills/research/SKILL.md", content: "# Research\n" },
+      ]),
+      prepareMcpRequirement: vi.fn(() => ({
+        requirementHandle: "requirement-handle",
+      })),
+      confirmMcpRequirement: vi.fn(() => ({
+        logicalName: "docs",
+        tools: ["docs.read"],
+        required: true,
+        permissionReason: "Read selected documents",
+      })),
+      invalidate: vi.fn(),
+    };
+    const { manager } = fullManager(
+      () => ({
+        scope: "ORGANIZATION",
+        organizationId: ORGANIZATION_ID,
+        role: "owner",
+      }),
+      {},
+      { capabilityAuthoringService },
+    );
+
+    await expect(
+      manager.listAuthoringCapabilities("profile-a"),
+    ).resolves.toMatchObject({ profile: { profileHandle: "profile-a" } });
+    manager.prepareInstalledSkillSnapshot({
+      profileId: "profile-a",
+      skillName: "research",
+    });
+    manager.confirmInstalledSkillSnapshot({
+      snapshotHandle: "snapshot-handle",
+      confirmation: "copy-selected-skill-to-draft",
+    });
+    manager.prepareMcpRequirement({
+      profileId: "profile-a",
+      logicalName: "docs",
+      tools: ["docs.read"],
+      required: true,
+      permissionReason: "Read selected documents",
+    });
+    manager.confirmMcpRequirement({
+      requirementHandle: "requirement-handle",
+      confirmation: "add-logical-mcp-requirement",
+    });
+
+    expect(
+      capabilityAuthoringService.listAuthoringCapabilities,
+    ).toHaveBeenCalledWith("profile-a");
+    manager.notifyAgentContextChanged();
+    expect(capabilityAuthoringService.invalidate).toHaveBeenCalledOnce();
   });
 
   it("routes explicit Organization experience preparation through trusted Installation and Profile state", async () => {

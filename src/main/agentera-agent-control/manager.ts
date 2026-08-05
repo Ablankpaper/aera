@@ -1,6 +1,7 @@
 import type { AgenteraAuthPublicState } from "../../shared/agentera-auth";
 import type {
   AgentDraft,
+  AgentDraftAssetInput,
   AgentDraftDetail,
   AgenteraAgentControlPublicState,
   AgenteraAgentControlContext,
@@ -8,18 +9,22 @@ import type {
   AgenteraAgentInstallationSummary,
   AgenteraAgentOperationScope,
   AgenteraAgentVersionSummary,
+  AgentMcpRequirementV3,
   AgenteraClaimVersionInput,
   AgenteraInstallVersionInput,
   AgenteraRepairInstallationModelInput,
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
+  ConfirmInstalledSkillSnapshotInput,
+  ConfirmMcpRequirementInput,
   ConfirmOfficialAgentInstallInput,
   ConfirmOrganizationExperienceCandidateImportInput,
   ConfirmOrganizationReviewInput,
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
   CreateAgentDraftInput,
+  AuthoringCapabilitySummary,
   ExperienceCandidateDetail,
   ExperienceCandidateImportPreview,
   ExperienceCandidatePreview,
@@ -44,6 +49,10 @@ import type {
   OfficialAgentInstallPreview,
   OfficialAgentSummary,
   OfficialManagedUpdate,
+  McpRequirementPreview,
+  PrepareInstalledSkillSnapshotInput,
+  PrepareMcpRequirementInput,
+  SkillSnapshotPreview,
 } from "../../shared/agentera-agent-control";
 import type {
   AgenteraProfileBindingStore,
@@ -94,6 +103,14 @@ import {
 } from "./organization-publication-service";
 import { OfficialAgentService } from "./official-agent-service";
 import { modelPolicyForManifest } from "./model-policy";
+import {
+  CapabilityAuthoringService,
+  type CapabilityAuthoringServiceOptions,
+} from "./capability-authoring-service";
+import { listInstalledSkills } from "../skills";
+import { listMcpServers, testMcpServer } from "../mcp-servers";
+import { readProfileMeta } from "../profile-meta";
+import { isValidProfileName } from "../utils";
 import {
   serializeDefinition,
   serializeInstallation,
@@ -148,6 +165,8 @@ export interface AgenteraAgentControlManagerOptions extends Partial<FullAgentCon
   hermesAdapter?: AgenteraHermesAdapter;
   /** Test seam for proving that cloud outbox delivery never blocks Hermes. */
   retryPendingRuntimeBindings?: () => Promise<unknown>;
+  /** Focused-test seam; production constructs the local-only service lazily. */
+  capabilityAuthoringService?: CapabilityAuthoringService;
 }
 
 export interface AgenteraEncryptedBackupUserSource {
@@ -399,6 +418,8 @@ export class AgenteraAgentControlManager {
   private organizationExperienceCandidateComponents: OrganizationExperienceCandidateComponents | null =
     null;
   private officialAgentComponents: OfficialAgentComponents | null = null;
+  private capabilityAuthoringService: CapabilityAuthoringService | null;
+  private readonly injectedCapabilityAuthoringService: boolean;
   private readonly publicationOwners = new Map<string, string>();
   private readonly listeners = new Set<
     (state: AgenteraAgentControlPublicState) => void
@@ -414,6 +435,10 @@ export class AgenteraAgentControlManager {
     this.options = options;
     this.profileBindings = options.profileBindings;
     this.runtimeOnlyHermes = options.hermesAdapter ?? null;
+    this.capabilityAuthoringService =
+      options.capabilityAuthoringService ?? null;
+    this.injectedCapabilityAuthoringService =
+      options.capabilityAuthoringService !== undefined;
     if (options.database) {
       this.trust = new AgenteraAgentTrustStore({
         cache: loadTrustCache(options.database),
@@ -525,6 +550,7 @@ export class AgenteraAgentControlManager {
     this.organizationExperienceCandidateComponents = null;
     this.officialAgentComponents?.service.invalidate();
     this.officialAgentComponents = null;
+    this.invalidateCapabilityAuthoring();
     this.publicationOwners.clear();
     this.emitState();
     this.queueRuntimeBindingDelivery();
@@ -541,6 +567,7 @@ export class AgenteraAgentControlManager {
     this.organizationExperienceCandidateComponents = null;
     this.officialAgentComponents?.service.invalidate();
     this.officialAgentComponents = null;
+    this.invalidateCapabilityAuthoring();
     this.publicationOwners.clear();
     this.emitState();
   }
@@ -568,6 +595,47 @@ export class AgenteraAgentControlManager {
     const result = drafts.getDraftDetail(created.id);
     this.emitState();
     return result;
+  }
+
+  async listAuthoringCapabilities(
+    profileId: string,
+  ): Promise<AuthoringCapabilitySummary> {
+    this.assertAuthoringAccess();
+    return this.ensureCapabilityAuthoringService().listAuthoringCapabilities(
+      profileId,
+    );
+  }
+
+  prepareInstalledSkillSnapshot(
+    input: PrepareInstalledSkillSnapshotInput,
+  ): SkillSnapshotPreview {
+    this.assertAuthoringAccess();
+    return this.ensureCapabilityAuthoringService().prepareInstalledSkillSnapshot(
+      input,
+    );
+  }
+
+  confirmInstalledSkillSnapshot(
+    input: ConfirmInstalledSkillSnapshotInput,
+  ): AgentDraftAssetInput[] {
+    this.assertAuthoringAccess();
+    return this.ensureCapabilityAuthoringService().confirmInstalledSkillSnapshot(
+      input,
+    );
+  }
+
+  prepareMcpRequirement(
+    input: PrepareMcpRequirementInput,
+  ): McpRequirementPreview {
+    this.assertAuthoringAccess();
+    return this.ensureCapabilityAuthoringService().prepareMcpRequirement(input);
+  }
+
+  confirmMcpRequirement(
+    input: ConfirmMcpRequirementInput,
+  ): AgentMcpRequirementV3 {
+    this.assertAuthoringAccess();
+    return this.ensureCapabilityAuthoringService().confirmMcpRequirement(input);
   }
 
   updateDraft(
@@ -1452,6 +1520,46 @@ export class AgenteraAgentControlManager {
     context: AgentAssetContext = this.assetContext(),
   ): string {
     return `${runtimeComponentKey(this.owner())}\0${contextKey(context)}`;
+  }
+
+  private ensureCapabilityAuthoringService(): CapabilityAuthoringService {
+    if (this.capabilityAuthoringService !== null) {
+      return this.capabilityAuthoringService;
+    }
+    const options: CapabilityAuthoringServiceOptions = {
+      getOwnerKey: () => this.operationContextKey(),
+      resolveProfile: async (profileHandle) => {
+        if (!isValidProfileName(profileHandle)) {
+          throw codedError("invalid_request");
+        }
+        const profilePath =
+          this.requireFull().profiles.resolveProfilePath(profileHandle);
+        const metadata = await readProfileMeta(profileHandle);
+        return {
+          profileHandle,
+          displayName: metadata.name ?? profileHandle,
+          profilePath,
+        };
+      },
+      listInstalledSkills: (profileHandle) =>
+        listInstalledSkills(profileHandle),
+      listMcpServers: (profileHandle) => listMcpServers(profileHandle),
+      discoverMcpTools: async (logicalName, profileHandle) => {
+        const result = await testMcpServer(logicalName, profileHandle);
+        return result.success ? (result.tools ?? []) : [];
+      },
+      now: this.options.now,
+      randomUUID: this.options.randomUUID,
+    };
+    this.capabilityAuthoringService = new CapabilityAuthoringService(options);
+    return this.capabilityAuthoringService;
+  }
+
+  private invalidateCapabilityAuthoring(): void {
+    this.capabilityAuthoringService?.invalidate();
+    if (!this.injectedCapabilityAuthoringService) {
+      this.capabilityAuthoringService = null;
+    }
   }
 
   private assertNoPendingSubmission(
