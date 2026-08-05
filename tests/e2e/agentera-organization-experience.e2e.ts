@@ -67,6 +67,7 @@ let harness: AgentControlHarness | null = null;
 let ownerDevice: AgentControlDevice | null = null;
 let employeeDevice: AgentControlDevice | null = null;
 let modelServer: Server | null = null;
+let completedModelResponses = 0;
 
 test.setTimeout(360_000);
 
@@ -292,6 +293,9 @@ async function startModelServer(): Promise<string> {
         response.writeHead(404).end();
         return;
       }
+      response.once("finish", () => {
+        completedModelResponses += 1;
+      });
       const stream =
         typeof body === "object" &&
         body !== null &&
@@ -482,6 +486,7 @@ test("an employee contributes one Skill and an Owner publishes it only through t
         }),
       ]),
     );
+  await expect.poll(() => completedModelResponses).toBeGreaterThan(0);
 
   const privateBefore = await privateProfileSnapshot(
     employeeProfile,
