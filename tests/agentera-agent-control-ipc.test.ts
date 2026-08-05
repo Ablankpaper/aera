@@ -12,14 +12,18 @@ import {
   parseClaimVersionInput,
   parseConfirmExperienceCandidateImportInput,
   parseConfirmOfficialAgentInstallInput,
+  parseConfirmOrganizationExperienceCandidateImportInput,
   parseConfirmOrganizationReviewInput,
   parseConfirmOrganizationSubmissionInput,
   parseConfirmOrganizationWithdrawalInput,
   parseCreateDraftInput,
   parseInstallVersionInput,
   parsePrepareExperienceCandidateInput,
+  parsePrepareOrganizationExperienceCandidateInput,
   parsePrepareOrganizationReviewInput,
+  parseReviewOrganizationExperienceCandidateInput,
   parseReviewExperienceCandidateInput,
+  parseSubmitOrganizationExperienceCandidateInput,
   parseSubmitExperienceCandidateInput,
   parseUpdateDraftInput,
   serializeOrganizationSubmissionDetail,
@@ -64,8 +68,11 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-discard-unpublished-draft",
       "agentera-agents-list-installations",
       "agentera-agents-list-eligible-experience-skills",
+      "agentera-agents-list-eligible-organization-experience-skills",
       "agentera-agents-prepare-experience-candidate",
+      "agentera-agents-prepare-organization-experience-candidate",
       "agentera-agents-list-my-experience-candidates",
+      "agentera-agents-list-my-organization-experience-candidates",
     ]) {
       expect(AGENTERA_IPC_CHANNEL_POLICY[channel]).toBe("authenticated");
     }
@@ -85,6 +92,12 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-review-experience-candidate",
       "agentera-agents-prepare-experience-candidate-import",
       "agentera-agents-confirm-experience-candidate-import",
+      "agentera-agents-submit-organization-experience-candidate",
+      "agentera-agents-list-organization-experience-review-queue",
+      "agentera-agents-get-organization-experience-candidate",
+      "agentera-agents-review-organization-experience-candidate",
+      "agentera-agents-prepare-organization-experience-import",
+      "agentera-agents-confirm-organization-experience-import",
       "agentera-agents-prepare-organization-submission",
       "agentera-agents-confirm-organization-submission",
       "agentera-agents-list-organization-submissions",
@@ -349,6 +362,101 @@ describe("Agent control IPC contract", () => {
         }),
       ).toThrow();
     }
+  });
+
+  it("accepts only handle-based Organization experience mutations and trusted source selection", () => {
+    expect(
+      parsePrepareOrganizationExperienceCandidateInput({
+        installationId: UUID,
+        skillName: "weekly-summary",
+      }),
+    ).toEqual({ installationId: UUID, skillName: "weekly-summary" });
+    expect(
+      parseSubmitOrganizationExperienceCandidateInput({
+        candidateHandle: UUID,
+        confirmation: "submit-selected-organization-skill",
+      }),
+    ).toEqual({
+      candidateHandle: UUID,
+      confirmation: "submit-selected-organization-skill",
+    });
+    expect(
+      parseReviewOrganizationExperienceCandidateInput({
+        reviewHandle: UUID,
+        confirmation: "approve-organization-experience",
+        reasonCode: null,
+        safeNote: null,
+      }),
+    ).toEqual({
+      reviewHandle: UUID,
+      confirmation: "approve-organization-experience",
+      reasonCode: null,
+      safeNote: null,
+    });
+    expect(
+      parseReviewOrganizationExperienceCandidateInput({
+        reviewHandle: UUID,
+        confirmation: "reject-organization-experience",
+        reasonCode: "not_reusable",
+        safeNote: "Needs a reusable template.",
+      }),
+    ).toEqual({
+      reviewHandle: UUID,
+      confirmation: "reject-organization-experience",
+      reasonCode: "not_reusable",
+      safeNote: "Needs a reusable template.",
+    });
+    expect(
+      parseConfirmOrganizationExperienceCandidateImportInput({
+        importHandle: UUID,
+        confirmation: "apply-approved-skill-to-organization-draft",
+      }),
+    ).toEqual({
+      importHandle: UUID,
+      confirmation: "apply-approved-skill-to-organization-draft",
+    });
+
+    for (const privateField of [
+      "organizationId",
+      "ownerId",
+      "deviceId",
+      "role",
+      "profilePath",
+      "runtimeProfileId",
+      "sourceRelativePath",
+      "bundle",
+      "memory",
+      "token",
+    ]) {
+      expect(() =>
+        parsePrepareOrganizationExperienceCandidateInput({
+          installationId: UUID,
+          skillName: "weekly-summary",
+          [privateField]: "private",
+        }),
+      ).toThrow();
+    }
+    expect(() =>
+      parseSubmitOrganizationExperienceCandidateInput({
+        candidateHandle: UUID,
+        confirmation: "yes",
+      }),
+    ).toThrow();
+    expect(() =>
+      parseReviewOrganizationExperienceCandidateInput({
+        reviewHandle: UUID,
+        confirmation: "approve-organization-experience",
+        reasonCode: "unexpected",
+        safeNote: null,
+      }),
+    ).toThrow();
+    expect(() =>
+      parseConfirmOrganizationExperienceCandidateImportInput({
+        importHandle: UUID,
+        confirmation: "apply-approved-skill-to-organization-draft",
+        candidateSnapshot: "private",
+      }),
+    ).toThrow();
   });
 
   it("accepts only handle-based Organization submission mutations", () => {

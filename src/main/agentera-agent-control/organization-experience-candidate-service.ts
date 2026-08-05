@@ -359,7 +359,7 @@ export class OrganizationExperienceCandidateService {
   }
 
   async listMine(): Promise<OrganizationExperienceCandidateSummary[]> {
-    const context = this.requireOrganizationContext();
+    const context = this.requireContributorContext();
     this.assertLocalAccess();
     const locals = this.options.store.listForOrganization(
       context.organizationId,
@@ -397,7 +397,8 @@ export class OrganizationExperienceCandidateService {
   }
 
   async listReviewQueue(): Promise<OrganizationExperienceCandidateSummary[]> {
-    const context = this.requireReviewer();
+    const context = this.requireReviewReader();
+    const canReview = context.role === "owner" || context.role === "admin";
     try {
       const clouds =
         await this.options.client.listOrganizationExperienceCandidates(
@@ -405,7 +406,9 @@ export class OrganizationExperienceCandidateService {
         );
       return clouds.map((cloud) => {
         const reviewHandle =
-          cloud.review === undefined ? uuid(this.randomUUID()) : null;
+          canReview && cloud.review === undefined
+            ? uuid(this.randomUUID())
+            : null;
         if (reviewHandle) this.reviewHandles.set(reviewHandle, cloud.id);
         return this.mergedSummary(cloud, null, null, reviewHandle);
       });
@@ -514,12 +517,22 @@ export class OrganizationExperienceCandidateService {
     const context = this.options.getContext();
     if (
       context.scope !== "ORGANIZATION" ||
-      !UUID_PATTERN.test(context.organizationId) ||
-      context.role === "auditor"
+      !UUID_PATTERN.test(context.organizationId)
     ) {
       return serviceError("organization_agent_forbidden");
     }
     return { ...context, organizationId: context.organizationId.toLowerCase() };
+  }
+
+  private requireContributorContext(): Extract<
+    AgenteraAgentControlContext,
+    { scope: "ORGANIZATION" }
+  > {
+    const context = this.requireOrganizationContext();
+    if (context.role === "auditor") {
+      return serviceError("organization_agent_forbidden");
+    }
+    return context;
   }
 
   private requireOnlineOrganization(): Extract<
@@ -543,12 +556,23 @@ export class OrganizationExperienceCandidateService {
     return context;
   }
 
+  private requireReviewReader(): Extract<
+    AgenteraAgentControlContext,
+    { scope: "ORGANIZATION" }
+  > {
+    const context = this.requireOnlineOrganization();
+    if (context.role === "member") {
+      return serviceError("organization_agent_forbidden");
+    }
+    return context;
+  }
+
   private resolveEligibleInstallation(installationId: string): {
     installation: LocalAgentInstallation;
     context: Extract<AgenteraAgentControlContext, { scope: "ORGANIZATION" }>;
     profilePath: string;
   } {
-    const context = this.requireOrganizationContext();
+    const context = this.requireContributorContext();
     let installation: LocalAgentInstallation;
     try {
       installation = this.options.getInstallation(installationId);

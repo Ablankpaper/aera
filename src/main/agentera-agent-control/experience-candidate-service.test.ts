@@ -280,6 +280,7 @@ beforeEach(() => {
       { skillName: "weekly-summary", description: "Weekly summary" },
     ]),
     readCandidate: vi.fn((_profilePath, skillName) => ({
+      provenance: { kind: "agent-created" as const },
       sourceRelativePath: `skills/${skillName}`,
       bundle: safeBundle(skillName),
     })),
@@ -357,6 +358,7 @@ describe("ExperienceCandidateService", () => {
     source = {
       ...source,
       readCandidate: vi.fn(() => ({
+        provenance: { kind: "agent-created" as const },
         sourceRelativePath: "skills/unsafe",
         bundle: {
           schemaVersion: 1 as const,
@@ -521,6 +523,7 @@ describe("ExperienceCandidateService", () => {
     source = {
       ...source,
       readCandidate: vi.fn((_profilePath, skillName) => ({
+        provenance: { kind: "agent-created" as const },
         sourceRelativePath: `skills/${skillName}`,
         bundle: safeBundle(skillName),
       })),

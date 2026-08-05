@@ -30,6 +30,7 @@ import type {
   OrganizationExperienceCandidatePreview,
   OrganizationExperienceCandidateSummary,
   PrepareExperienceCandidateInput,
+  PrepareOrganizationExperienceCandidateInput,
   PrepareOrganizationReviewInput,
   PublicationPreview,
   PublishedRevision,
@@ -1175,10 +1176,9 @@ export class AgenteraAgentControlManager {
     ).service.listEligibleSkills(installationId);
   }
 
-  async prepareOrganizationExperienceCandidate(input: {
-    installationId: string;
-    skillName: string;
-  }): Promise<OrganizationExperienceCandidatePreview> {
+  async prepareOrganizationExperienceCandidate(
+    input: PrepareOrganizationExperienceCandidateInput,
+  ): Promise<OrganizationExperienceCandidatePreview> {
     return (
       await this.ensureOrganizationExperienceCandidateComponents()
     ).service.prepare(input);
@@ -1190,6 +1190,30 @@ export class AgenteraAgentControlManager {
     return (
       await this.ensureOrganizationExperienceCandidateComponents()
     ).service.submit(input);
+  }
+
+  async listMyOrganizationExperienceCandidates(): Promise<
+    OrganizationExperienceCandidateSummary[]
+  > {
+    return (
+      await this.ensureOrganizationExperienceCandidateComponents()
+    ).service.listMine();
+  }
+
+  async listOrganizationExperienceReviewQueue(): Promise<
+    OrganizationExperienceCandidateSummary[]
+  > {
+    return (
+      await this.ensureOrganizationExperienceCandidateComponents()
+    ).service.listReviewQueue();
+  }
+
+  async getOrganizationExperienceCandidate(
+    candidateId: string,
+  ): Promise<OrganizationExperienceCandidateDetail> {
+    return (
+      await this.ensureOrganizationExperienceCandidateComponents()
+    ).service.get(candidateId);
   }
 
   async reviewOrganizationExperienceCandidate(

@@ -305,18 +305,22 @@ import {
   parseClaimVersionInput,
   parseConfirmExperienceCandidateImportInput,
   parseConfirmOfficialAgentInstallInput,
+  parseConfirmOrganizationExperienceCandidateImportInput,
   parseConfirmOrganizationReviewInput,
   parseConfirmOrganizationSubmissionInput,
   parseConfirmOrganizationWithdrawalInput,
   parseCreateDraftInput,
   parseInstallVersionInput,
   parsePrepareExperienceCandidateInput,
+  parsePrepareOrganizationExperienceCandidateInput,
   parsePrepareOrganizationReviewInput,
   parseRepairInstallationModelInput,
   parseRetryPendingInstallationInput,
   parseReviewExperienceCandidateInput,
+  parseReviewOrganizationExperienceCandidateInput,
   parseSelectInstallationVersionInput,
   parseSubmitExperienceCandidateInput,
+  parseSubmitOrganizationExperienceCandidateInput,
   parseUpdateDraftInput,
   serializeOrganizationAgentSubmission,
   serializeOrganizationReviewPreview,
@@ -2002,6 +2006,63 @@ export function registerIpcHandlers(context: IpcContext): void {
     (_event, input: unknown) =>
       requireAgentControl().confirmExperienceCandidateImport(
         parseConfirmExperienceCandidateImportInput(input),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-list-eligible-organization-experience-skills",
+    (_event, installationId: unknown) =>
+      requireAgentControl().listEligibleOrganizationExperienceSkills(
+        parseAgentControlId(installationId),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-prepare-organization-experience-candidate",
+    (_event, input: unknown) =>
+      requireAgentControl().prepareOrganizationExperienceCandidate(
+        parsePrepareOrganizationExperienceCandidateInput(input),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-submit-organization-experience-candidate",
+    (_event, input: unknown) =>
+      requireAgentControl().submitOrganizationExperienceCandidate(
+        parseSubmitOrganizationExperienceCandidateInput(input),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-list-my-organization-experience-candidates",
+    () => requireAgentControl().listMyOrganizationExperienceCandidates(),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-list-organization-experience-review-queue",
+    () => requireAgentControl().listOrganizationExperienceReviewQueue(),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-get-organization-experience-candidate",
+    (_event, candidateId: unknown) =>
+      requireAgentControl().getOrganizationExperienceCandidate(
+        parseAgentControlId(candidateId),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-review-organization-experience-candidate",
+    (_event, input: unknown) =>
+      requireAgentControl().reviewOrganizationExperienceCandidate(
+        parseReviewOrganizationExperienceCandidateInput(input),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-prepare-organization-experience-import",
+    (_event, candidateId: unknown) =>
+      requireAgentControl().prepareOrganizationExperienceImport(
+        parseAgentControlId(candidateId),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-confirm-organization-experience-import",
+    (_event, input: unknown) =>
+      requireAgentControl().confirmOrganizationExperienceImport(
+        parseConfirmOrganizationExperienceCandidateImportInput(input),
       ),
   );
   const mainWindow = getMainWindow();

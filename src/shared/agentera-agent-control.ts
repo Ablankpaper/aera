@@ -633,6 +633,11 @@ export interface OrganizationExperienceCandidatePreview {
   findings: ExperienceCandidateFinding[];
 }
 
+export interface PrepareOrganizationExperienceCandidateInput {
+  installationId: string;
+  skillName: string;
+}
+
 export interface SubmitOrganizationExperienceCandidateInput {
   candidateHandle: string;
   confirmation: "submit-selected-organization-skill";

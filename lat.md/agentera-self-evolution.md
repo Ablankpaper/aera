@@ -30,6 +30,16 @@ The first promotion slice treats one explicitly selected Hermes agent-created Sk
 
 The desktop reads the Skill through a trusted read-only adapter, snapshots it outside `HERMES_HOME`, and requires explicit user consent before submission. The locked design is `docs/superpowers/specs/2026-07-20-agentera-experience-candidate-v1-design.md`.
 
+### Organization experience contribution
+
+An employee may explicitly contribute one agent-created Skill from an active Organization Agent Installation without sharing the surrounding Profile or publishing automatically.
+
+[[src/main/agentera-agent-control/organization-experience-candidate-service.ts#OrganizationExperienceCandidateService]] resolves the Organization, Definition, Version, USER-owned Installation, device, Profile, and immutable local snapshot in trusted main-process state. Renderer calls contain only one Installation ID and Skill name, then one-use submit, review, and import handles with exact confirmations.
+
+Local and Cloud DLP both reject Memory, USER, sessions, conversations, credentials, MCP configuration, Profile paths, unrelated Skills, and matched secret evidence. Owner/Admin approval remains terminal Cloud review state; [[src/main/agentera-agent-control/organization-experience-candidate-importer.ts#OrganizationExperienceCandidateImporter]] applies only the approved Skill directory to the verified latest Organization Version as a device-local `kind=next` draft. Ordinary Organization submission and approval are still required before employees can select the new immutable Version.
+
+[[tests/e2e/agentera-organization-experience.e2e.ts]] uses two disposable isolated accounts to prove contribution, review, local import, next-version publication, explicit employee selection, a real new reply, source-byte preservation, and the absence of private runtime data from captured Cloud requests.
+
 ### Candidate privacy gate
 
 Local and cloud scanners enforce the same versioned canonical-package and DLP contract before candidate content becomes cloud state.
