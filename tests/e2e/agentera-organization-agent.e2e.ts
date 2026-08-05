@@ -774,8 +774,19 @@ test("organization agent needs one current reviewer and keeps every employee run
     timeout: 180_000,
   });
   await expect
-    .poll(() => owner.device.page.evaluate(() => window.agenteraAuth.getState()))
+    .poll(() =>
+      owner.device.page.evaluate(() => window.agenteraAuth.getState()),
+    )
     .toMatchObject({ status: "authenticated", cloudAvailable: true });
+  const startupModelPrompt = owner.device.page.locator(".startup-model-prompt");
+  await startupModelPrompt
+    .waitFor({ state: "visible", timeout: 10_000 })
+    .catch(() => undefined);
+  if (await startupModelPrompt.isVisible()) {
+    await startupModelPrompt
+      .getByRole("button", { name: /^(Later|稍后)$/u })
+      .click();
+  }
   await selectOrganization(owner.device, organization.id, "owner");
 
   const selfReview = await prepareApproval(owner.device, initial.submission.id);
