@@ -453,6 +453,7 @@ test("an employee contributes one Skill and an Owner publishes it only through t
     selectedVersionId: versionOne.id,
   });
   const employeeProfile = deviceProfilePath(employeeDevice, EMPLOYEE_PROFILE);
+  const fixture = await seedExperienceCandidateProfile(employeeProfile);
   const modelOrigin = await startModelServer();
   await writeFile(
     join(employeeProfile, "config.yaml"),
@@ -482,12 +483,6 @@ test("an employee contributes one Skill and an Owner publishes it only through t
       ]),
     );
 
-  const fixture = await seedExperienceCandidateProfile(employeeProfile);
-  await appendFile(
-    join(employeeProfile, ".env"),
-    "CUSTOM_API_KEY=e2e-loopback-only\n",
-    "utf8",
-  );
   const privateBefore = await privateProfileSnapshot(
     employeeProfile,
     fixture.privateMarkers,
