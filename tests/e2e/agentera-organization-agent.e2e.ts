@@ -14,6 +14,7 @@ import { dirname, join } from "node:path";
 import { expect, test } from "playwright/test";
 
 import type {
+  AgentDraft,
   AgentDraftDetail,
   AgenteraAgentControlPublicState,
   AgenteraAgentControlResult,
@@ -71,6 +72,8 @@ const MEMBER_MEMORY_SECRET = "ORGANIZATION_MEMBER_MEMORY_2026_07_21";
 const MEMBER_SKILL_SECRET = "ORGANIZATION_MEMBER_SKILL_2026_07_21";
 const LOCKED_V1_MARKER = "ORGANIZATION_LOCKED_SKILL_V1_2026_07_21";
 const LOCKED_V2_MARKER = "ORGANIZATION_LOCKED_SKILL_V2_2026_07_21";
+const UNPUBLISHED_AFTER_SUBMISSION =
+  "ORGANIZATION_UNPUBLISHED_AFTER_SUBMISSION_2026_08_05";
 const DEFAULT_PRIVATE_MARKERS = [
   ".env",
   "MEMORY.md",
@@ -610,7 +613,7 @@ test("organization agent needs one current reviewer and keeps every employee run
   if (!harness)
     throw new Error("Organization Agent E2E harness is unavailable.");
 
-  const owner = await launchAccount(harness, "A", OWNER_PHONE, false);
+  let owner = await launchAccount(harness, "A", OWNER_PHONE, false);
   ownerDevice = owner.device;
   const admin = await launchAccount(harness, "B", ADMIN_PHONE, true);
   adminDevice = admin.device;
@@ -747,6 +750,34 @@ test("organization agent needs one current reviewer and keeps every employee run
     owner.device,
     organizationDraft(LOCKED_V1_MARKER),
   );
+  const unpublishedInput = organizationDraft(UNPUBLISHED_AFTER_SUBMISSION);
+  const editedWhilePending = unwrapAgent(
+    await invokeAgentera<AgentDraftDetail>(owner.device, "updateDraft", {
+      id: initial.draft.id,
+      expectedRevision: initial.draft.revision,
+      displayName: unpublishedInput.displayName,
+      icon: unpublishedInput.icon,
+      manifest: unpublishedInput.manifest,
+      assets: unpublishedInput.assets,
+    }),
+  );
+  expect(editedWhilePending).toMatchObject({
+    id: initial.draft.id,
+    revision: 2,
+    publishedRevision: null,
+  });
+
+  await owner.device.app.close();
+  ownerDevice = await launchAgentControlDevice(harness, "A");
+  owner = { ...owner, device: ownerDevice };
+  await expect(owner.device.page.locator(".layout")).toBeVisible({
+    timeout: 180_000,
+  });
+  await expect
+    .poll(() => owner.device.page.evaluate(() => window.agenteraAuth.getState()))
+    .toMatchObject({ status: "authenticated", cloudAvailable: true });
+  await selectOrganization(owner.device, organization.id, "owner");
+
   const selfReview = await prepareApproval(owner.device, initial.submission.id);
   expect(selfReview).toMatchObject({
     selfReview: true,
@@ -782,6 +813,78 @@ test("organization agent needs one current reviewer and keeps every employee run
     ),
   );
   expect(approvedInitial.status).toBe("approved");
+  expect(approvedInitial).toMatchObject({
+    localDraftId: initial.draft.id,
+    localDraftRevision: 1,
+  });
+  const reconciledHistory = unwrapAgent(
+    await invokeAgentera<OrganizationAgentSubmissionSummary[]>(
+      owner.device,
+      "listOrganizationSubmissions",
+    ),
+  );
+  expect(reconciledHistory).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id: initial.submission.id,
+        status: "approved",
+        localDraftId: initial.draft.id,
+        localDraftRevision: 1,
+      }),
+    ]),
+  );
+  const reconciledDraft = unwrapAgent(
+    await invokeAgentera<AgentDraftDetail>(
+      owner.device,
+      "getDraft",
+      initial.draft.id,
+    ),
+  );
+  expect(reconciledDraft).toMatchObject({
+    id: initial.draft.id,
+    revision: 2,
+    publishedRevision: {
+      revision: 1,
+      definitionId: approvedInitial.definitionId,
+      versionId: approvedInitial.publishedVersionId,
+    },
+  });
+
+  await owner.device.page
+    .getByRole("button", { name: /^(Agents|智能体)$/ })
+    .click();
+  await owner.device.page
+    .getByRole("tab", { name: /^(Enterprise Agents|企业智能体)$/ })
+    .click();
+  const lifecycleCard = owner.device.page
+    .locator('[data-testid="personal-agent-grid"] .agent-hub-card')
+    .filter({ hasText: "Enterprise Research" });
+  await expect(lifecycleCard).toHaveCount(1);
+  await expect(lifecycleCard).toContainText(
+    /Published with unpublished changes|已发布，有未发布修改/,
+  );
+
+  const disposableDraft = unwrapAgent(
+    await invokeAgentera<AgentDraftDetail>(
+      owner.device,
+      "createDraft",
+      organizationDraft("DISPOSABLE_LOCAL_DRAFT"),
+    ),
+  );
+  expect(
+    unwrapAgent(
+      await invokeAgentera<true>(
+        owner.device,
+        "deleteDraft",
+        disposableDraft.id,
+      ),
+    ),
+  ).toBe(true);
+  expect(
+    unwrapAgent(
+      await invokeAgentera<AgentDraft[]>(owner.device, "listDrafts"),
+    ).some(({ id }) => id === disposableDraft.id),
+  ).toBe(false);
   const definitions = unwrapAgent(
     await invokeAgentera<AgenteraAgentDefinitionSummary[]>(
       member.device,
@@ -1235,6 +1338,23 @@ test("organization agent needs one current reviewer and keeps every employee run
   expect(
     (await localAgentControlState(memberDevice)).installations,
   ).toHaveLength(1);
+  expect(
+    await privateProfileSnapshot(memberProfile, MEMBER_PRIVATE_MARKERS),
+  ).toEqual(memberPrivate);
+
+  const archivedInstallation = unwrapAgent(
+    await invokeAgentera<AgenteraAgentInstallationSummary>(
+      memberDevice,
+      "archiveInstallation",
+      installation.id,
+    ),
+  );
+  expect(archivedInstallation.status).toBe("archived");
+  expect(
+    (await localAgentControlState(memberDevice)).installations.find(
+      ({ id }) => id === installation.id,
+    ),
+  ).toMatchObject({ id: installation.id, status: "archived" });
   expect(
     await privateProfileSnapshot(memberProfile, MEMBER_PRIVATE_MARKERS),
   ).toEqual(memberPrivate);
