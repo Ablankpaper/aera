@@ -1754,6 +1754,14 @@ export function registerIpcHandlers(context: IpcContext): void {
       ),
   );
   registerAgentControlHandler(
+    "agentera-agents-discard-unpublished-draft",
+    (_event, id: unknown, scope: unknown) =>
+      requireAgentControl().discardUnpublishedDraft(
+        parseAgentControlId(id),
+        parseAgentOperationScope(scope),
+      ),
+  );
+  registerAgentControlHandler(
     "agentera-agents-prepare-publication",
     (_event, id: unknown, scope: unknown) =>
       requireAgentControl().preparePublication(

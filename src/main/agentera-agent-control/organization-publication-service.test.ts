@@ -331,6 +331,8 @@ describe("Organization publication service", () => {
       id: SUBMISSION_ID,
       status: "approved",
       publishedVersionId: VERSION_ID,
+      localDraftId: DRAFT_ID,
+      localDraftRevision: 1,
     });
     const reconciled = drafts.getDraft(DRAFT_ID);
     expect(reconciled).toMatchObject({
@@ -439,7 +441,13 @@ describe("Organization publication service", () => {
       );
     listSubmissions.mockResolvedValue([response]);
 
-    await expect(service().listSubmissions()).resolves.toHaveLength(1);
+    await expect(service().listSubmissions()).resolves.toEqual([
+      expect.objectContaining({
+        id: OTHER_SUBMISSION_ID,
+        localDraftId: null,
+        localDraftRevision: null,
+      }),
+    ]);
     expect(otherDrafts.getDraft(OTHER_DRAFT_ID).publishedRevision).toBeNull();
     expect(
       database.sqlite

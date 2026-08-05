@@ -514,6 +514,10 @@ interface AgenteraAgentsAPI {
     id: string,
     scope?: AgenteraAgentOperationScope,
   ) => Promise<AgenteraAgentControlResult<true>>;
+  discardUnpublishedDraft: (
+    id: string,
+    scope?: AgenteraAgentOperationScope,
+  ) => Promise<AgenteraAgentControlResult<true>>;
   preparePublication: (
     id: string,
     scope?: AgenteraAgentOperationScope,

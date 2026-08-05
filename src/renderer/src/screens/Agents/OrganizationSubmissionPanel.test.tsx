@@ -24,6 +24,9 @@ function submission(): OrganizationAgentSubmissionSummary {
     kind: "initial",
     definitionId: "44444444-4444-4444-8444-444444444444",
     baseVersionId: null,
+    publishedVersionId: null,
+    localDraftId: null,
+    localDraftRevision: null,
     submittedByUserId: "55555555-5555-4555-8555-555555555555",
     contentDigest: `sha256:${"a".repeat(64)}`,
     status: "pending",
@@ -37,6 +40,7 @@ function submission(): OrganizationAgentSubmissionSummary {
 function approvedSubmission(): OrganizationAgentSubmissionSummary {
   return {
     ...submission(),
+    publishedVersionId: "99999999-9999-4999-8999-999999999999",
     status: "approved",
     terminalAt: "2026-07-21T02:00:00.000Z",
     review: {

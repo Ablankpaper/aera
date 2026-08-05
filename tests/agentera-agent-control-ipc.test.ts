@@ -61,6 +61,7 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-create-draft",
       "agentera-agents-update-draft",
       "agentera-agents-delete-draft",
+      "agentera-agents-discard-unpublished-draft",
       "agentera-agents-list-installations",
       "agentera-agents-list-eligible-experience-skills",
       "agentera-agents-prepare-experience-candidate",
@@ -435,6 +436,9 @@ describe("Agent control IPC contract", () => {
         kind: "initial",
         definitionId: "33333333-3333-4333-8333-333333333333",
         baseVersionId: null,
+        publishedVersionId: null,
+        localDraftId: null,
+        localDraftRevision: null,
         submittedByUserId: "44444444-4444-4444-8444-444444444444",
         contentDigest: "ab".repeat(32),
         status: "pending",
@@ -795,6 +799,7 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-confirm-organization-review",
       "agentera-agents-prepare-organization-withdrawal",
       "agentera-agents-confirm-organization-withdrawal",
+      "agentera-agents-discard-unpublished-draft",
       "agentera-agents-list-official",
       "agentera-agents-prepare-official-install",
       "agentera-agents-confirm-official-install",
@@ -803,6 +808,10 @@ describe("Agent control IPC contract", () => {
     ]) {
       expect(register.match(new RegExp(`"${channel}"`, "g"))).toHaveLength(1);
     }
+    expect(namespace).toMatch(
+      /ipcRenderer\.invoke\(\s*"agentera-agents-discard-unpublished-draft"/,
+    );
+    expect(registrations).toContain("discardUnpublishedDraft");
   });
 
   it("routes conversation setup and session attachment through the durable coordinator", () => {

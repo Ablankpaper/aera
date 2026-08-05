@@ -12,6 +12,8 @@ import type {
   OfficialAgentInstallPreview,
   OfficialAgentSummary,
   OfficialManagedUpdate,
+  OrganizationAgentSubmissionSummary,
+  OrganizationWithdrawalPreview,
 } from "../../../../shared/agentera-agent-control";
 import { runtimeModelPolicyForEditableManifest } from "../../../../shared/agentera-agent-control";
 import {
@@ -34,6 +36,10 @@ import ExperiencePromotionDialog from "./ExperiencePromotionDialog";
 import OrganizationSubmissionPanel from "./OrganizationSubmissionPanel";
 import OfficialAgentInstallDialog from "./OfficialAgentInstallDialog";
 import OfficialAgentSection from "./OfficialAgentSection";
+import {
+  deriveAgentLifecycle,
+  type AgentLifecycle,
+} from "./agentLifecycle";
 
 export interface AgentControlProfileOption {
   id: string;
@@ -78,6 +84,8 @@ interface PersonalAgentCard {
   definition: AgenteraAgentDefinitionSummary | null;
   installation: AgenteraAgentInstallationSummary | null;
   profile: AgentControlProfileOption | null;
+  submission: OrganizationAgentSubmissionSummary | null;
+  lifecycle: AgentLifecycle | null;
   iconSrc: string | null;
   origin: "definition" | "draft" | "installation" | "profile";
 }
@@ -219,6 +227,9 @@ export default function AgentControlPanel({
   const [installations, setInstallations] = useState<
     AgenteraAgentInstallationSummary[]
   >([]);
+  const [organizationSubmissions, setOrganizationSubmissions] = useState<
+    OrganizationAgentSubmissionSummary[]
+  >([]);
   const [officialAgents, setOfficialAgents] = useState<OfficialAgentSummary[]>(
     [],
   );
@@ -236,11 +247,18 @@ export default function AgentControlPanel({
   const [editor, setEditor] = useState<AgentDraftDetail | "new" | null>(null);
   const [archiveTarget, setArchiveTarget] =
     useState<AgenteraAgentInstallationSummary | null>(null);
+  const [draftActionTarget, setDraftActionTarget] = useState<{
+    kind: "delete" | "discard";
+    draftId: string;
+  } | null>(null);
+  const [withdrawal, setWithdrawal] =
+    useState<OrganizationWithdrawalPreview | null>(null);
   const [promotionTarget, setPromotionTarget] =
     useState<AgenteraAgentInstallationSummary | null>(null);
   const [candidateRefreshToken, setCandidateRefreshToken] = useState(0);
   const [organizationRefreshToken, setOrganizationRefreshToken] = useState(0);
   const [archiving, setArchiving] = useState(false);
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [busyPersonalKey, setBusyPersonalKey] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
     "official" | "mine" | "enterprise"
@@ -300,6 +318,24 @@ export default function AgentControlPanel({
       const workspaceMemberInstallOnly =
         nextState.context.scope === "WORKSPACE" &&
         nextState.context.role === "member";
+      let nextOrganizationSubmissions: OrganizationAgentSubmissionSummary[] =
+        [];
+      const canReadOrganizationSubmissions =
+        nextState.context.scope === "ORGANIZATION" &&
+        activeTab === "enterprise" &&
+        nextState.context.role !== "member" &&
+        nextState.access === "online" &&
+        nextState.cloudAvailable;
+      if (canReadOrganizationSubmissions) {
+        const submissionResult =
+          await window.agenteraAgents.listOrganizationSubmissions();
+        if (epoch !== loadEpoch.current) return;
+        if (!submissionResult.ok) {
+          setError(errorKey(submissionResult.errorCode));
+          return;
+        }
+        nextOrganizationSubmissions = submissionResult.data;
+      }
       const organizationCanReadDrafts =
         nextState.context.scope === "ORGANIZATION" &&
         (nextState.context.role === "owner" ||
@@ -362,6 +398,8 @@ export default function AgentControlPanel({
       ) {
         setEditor(null);
         setArchiveTarget(null);
+        setDraftActionTarget(null);
+        setWithdrawal(null);
         setPromotionTarget(null);
         setOfficialInstallPreview(null);
         setBusyOfficialInstallationId(null);
@@ -370,6 +408,7 @@ export default function AgentControlPanel({
       setState(nextState);
       setDrafts(nextDrafts);
       setInstallations(nextInstallations);
+      setOrganizationSubmissions(nextOrganizationSubmissions);
       setDefinitions(nextDefinitions);
       setOfficialAgents(nextOfficialAgents);
       setOfficialUpdates(nextOfficialUpdates);
@@ -387,6 +426,8 @@ export default function AgentControlPanel({
     void load();
     return window.agenteraAgents.onStateChanged(() => {
       setArchiveTarget(null);
+      setDraftActionTarget(null);
+      setWithdrawal(null);
       setPromotionTarget(null);
       setOfficialInstallPreview(null);
       setBusyOfficialInstallationId(null);
@@ -422,6 +463,61 @@ export default function AgentControlPanel({
       setError(errorKey(result.errorCode));
       return;
     }
+    await load();
+  };
+
+  const confirmDraftAction = async (): Promise<void> => {
+    if (!draftActionTarget || lifecycleBusy) return;
+    setLifecycleBusy(true);
+    setError(null);
+    const result =
+      draftActionTarget.kind === "delete"
+        ? await window.agenteraAgents.deleteDraft(draftActionTarget.draftId)
+        : await window.agenteraAgents.discardUnpublishedDraft(
+            draftActionTarget.draftId,
+          );
+    setLifecycleBusy(false);
+    setDraftActionTarget(null);
+    if (!result.ok) {
+      setError(errorKey(result.errorCode));
+      return;
+    }
+    setSelectedPersonalKey(null);
+    await load();
+  };
+
+  const prepareCardWithdrawal = async (
+    submissionId: string,
+  ): Promise<void> => {
+    if (lifecycleBusy) return;
+    setLifecycleBusy(true);
+    setError(null);
+    const result =
+      await window.agenteraAgents.prepareOrganizationWithdrawal(submissionId);
+    setLifecycleBusy(false);
+    if (!result.ok) {
+      setError(errorKey(result.errorCode));
+      return;
+    }
+    setSelectedPersonalKey(null);
+    setWithdrawal(result.data);
+  };
+
+  const confirmCardWithdrawal = async (): Promise<void> => {
+    if (!withdrawal || lifecycleBusy) return;
+    setLifecycleBusy(true);
+    setError(null);
+    const result = await window.agenteraAgents.confirmOrganizationWithdrawal({
+      withdrawalHandle: withdrawal.withdrawalHandle,
+      confirmation: "withdraw-organization-agent",
+    });
+    setLifecycleBusy(false);
+    setWithdrawal(null);
+    if (!result.ok) {
+      setError(errorKey(result.errorCode));
+      return;
+    }
+    setOrganizationRefreshToken((value) => value + 1);
     await load();
   };
 
@@ -750,6 +846,63 @@ export default function AgentControlPanel({
         draft.publishedRevision?.definitionId ?? draft.sourceAgentDefinitionId;
       if (definitionId) draftByDefinition.set(definitionId, draft);
     }
+    const submissionByDraft = new Map<
+      string,
+      OrganizationAgentSubmissionSummary
+    >();
+    for (const submission of organizationSubmissions) {
+      if (submission.localDraftId === null) continue;
+      const current = submissionByDraft.get(submission.localDraftId);
+      if (
+        current === undefined ||
+        (submission.localDraftRevision ?? 0) >
+          (current.localDraftRevision ?? 0) ||
+        ((submission.localDraftRevision ?? 0) ===
+          (current.localDraftRevision ?? 0) &&
+          submission.revision > current.revision)
+      ) {
+        submissionByDraft.set(submission.localDraftId, submission);
+      }
+    }
+
+    const lifecycleFor = (
+      draft: AgentDraft | null,
+      installation: AgenteraAgentInstallationSummary | null,
+    ): {
+      submission: OrganizationAgentSubmissionSummary | null;
+      lifecycle: AgentLifecycle | null;
+    } => {
+      if (draft === null) return { submission: null, lifecycle: null };
+      const submission = submissionByDraft.get(draft.id) ?? null;
+      return {
+        submission,
+        lifecycle: deriveAgentLifecycle({
+          draftRevision: draft.revision,
+          publishedRevision: draft.publishedRevision?.revision ?? null,
+          submissionStatus: submission?.status ?? null,
+          hasInstallation: installation !== null,
+        }),
+      };
+    };
+
+    const lifecycleTag = (lifecycle: AgentLifecycle): string => {
+      switch (lifecycle.state) {
+        case "approved_current":
+          return t("agents.control.organization.lifecycle.approvedCurrent");
+        case "approved_dirty":
+          return t("agents.control.organization.lifecycle.approvedDirty");
+        case "local_only":
+          return t("agents.control.organization.lifecycle.localOnly");
+        case "pending":
+          return t("agents.control.organization.lifecycle.pending");
+        case "rejected":
+          return t("agents.control.organization.lifecycle.rejected");
+        case "withdrawn":
+          return t("agents.control.organization.lifecycle.withdrawn");
+        case "superseded":
+          return t("agents.control.organization.lifecycle.superseded");
+      }
+    };
 
     const sourceTag = (
       installation: AgenteraAgentInstallationSummary | null,
@@ -775,7 +928,13 @@ export default function AgentControlPanel({
       if (draft) representedDrafts.add(draft.id);
       if (installation) representedInstallations.add(installation.id);
       if (profile) representedProfiles.add(profile.id);
-      const tags = [sourceTag(installation), t("agents.hub.published")];
+      const { submission, lifecycle } = lifecycleFor(draft, installation);
+      const tags = [
+        sourceTag(installation),
+        isOrganization && activeTab === "enterprise" && lifecycle
+          ? lifecycleTag(lifecycle)
+          : t("agents.hub.published"),
+      ];
       if (installation?.status === "active")
         tags.push(t("agents.hub.installed"));
       if (installation?.status === "pending")
@@ -800,6 +959,8 @@ export default function AgentControlPanel({
         definition,
         installation,
         profile,
+        submission,
+        lifecycle,
         iconSrc: draftIconDataUrl(draft),
         origin: "definition",
       });
@@ -807,6 +968,7 @@ export default function AgentControlPanel({
 
     for (const draft of drafts) {
       if (representedDrafts.has(draft.id)) continue;
+      const { submission, lifecycle } = lifecycleFor(draft, null);
       result.push({
         key: `draft:${draft.id}`,
         name: draft.displayName,
@@ -816,7 +978,9 @@ export default function AgentControlPanel({
         ),
         tags: [
           sourceTag(null),
-          draft.publishedRevision
+          isOrganization && activeTab === "enterprise" && lifecycle
+            ? lifecycleTag(lifecycle)
+            : draft.publishedRevision
             ? t("agents.hub.published")
             : t("agents.hub.localDraft"),
         ],
@@ -824,6 +988,8 @@ export default function AgentControlPanel({
         definition: null,
         installation: null,
         profile: null,
+        submission,
+        lifecycle,
         iconSrc: draftIconDataUrl(draft),
         origin: "draft",
       });
@@ -850,6 +1016,8 @@ export default function AgentControlPanel({
         definition: null,
         installation,
         profile,
+        submission: null,
+        lifecycle: null,
         iconSrc: null,
         origin: "installation",
       });
@@ -877,6 +1045,8 @@ export default function AgentControlPanel({
         definition: null,
         installation: null,
         profile,
+        submission: null,
+        lifecycle: null,
         iconSrc: null,
         origin: "profile",
       });
@@ -884,12 +1054,14 @@ export default function AgentControlPanel({
 
     return result;
   }, [
+    activeTab,
     definitions,
     definitionName,
     drafts,
     isOrganization,
     isPersonalAgentView,
     isWorkspace,
+    organizationSubmissions,
     profiles,
     scopedInstallations,
     t,
@@ -1160,6 +1332,56 @@ export default function AgentControlPanel({
         },
       });
     }
+    const organizationLifecycle =
+      isOrganization && activeTab === "enterprise"
+        ? selectedPersonal.lifecycle
+        : null;
+    if (
+      organizationLifecycle?.actions.includes("withdraw") &&
+      selectedPersonal.submission?.status === "pending"
+    ) {
+      selectedPersonalExtra.push({
+        label: t("agents.control.organization.withdraw"),
+        disabled: !organizationOnline || lifecycleBusy,
+        onClick: () => {
+          void prepareCardWithdrawal(selectedPersonal.submission!.id);
+        },
+      });
+    }
+    if (
+      organizationLifecycle?.actions.includes("delete_draft") &&
+      selectedPersonal.draft &&
+      !draftReadOnly
+    ) {
+      selectedPersonalExtra.push({
+        label: t("agents.control.organization.deleteDraft"),
+        disabled: lifecycleBusy,
+        onClick: () => {
+          setDraftActionTarget({
+            kind: "delete",
+            draftId: selectedPersonal.draft!.id,
+          });
+          setSelectedPersonalKey(null);
+        },
+      });
+    }
+    if (
+      organizationLifecycle?.actions.includes("discard_unpublished") &&
+      selectedPersonal.draft &&
+      !draftReadOnly
+    ) {
+      selectedPersonalExtra.push({
+        label: t("agents.control.organization.discardUnpublished"),
+        disabled: lifecycleBusy,
+        onClick: () => {
+          setDraftActionTarget({
+            kind: "discard",
+            draftId: selectedPersonal.draft!.id,
+          });
+          setSelectedPersonalKey(null);
+        },
+      });
+    }
     if (selectedPersonal.installation?.status === "active") {
       if (isWorkspace) {
         selectedPersonalExtra.push({
@@ -1192,6 +1414,11 @@ export default function AgentControlPanel({
             }),
         });
       }
+    }
+    if (
+      selectedPersonal.installation &&
+      selectedPersonal.installation.status !== "archived"
+    ) {
       selectedPersonalExtra.push({
         label: t("agents.control.archive"),
         disabled: !state?.cloudAvailable,
@@ -1675,6 +1902,88 @@ export default function AgentControlPanel({
             setCandidateRefreshToken((value) => value + 1);
           }}
         />
+      ) : null}
+
+      {draftActionTarget ? (
+        <div className="agent-control-dialog-backdrop">
+          <div
+            className="agent-control-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="organization-draft-action-title"
+          >
+            <h3 id="organization-draft-action-title">
+              {t(
+                draftActionTarget.kind === "delete"
+                  ? "agents.control.organization.deleteDraftTitle"
+                  : "agents.control.organization.discardUnpublishedTitle",
+              )}
+            </h3>
+            <p>
+              {t(
+                draftActionTarget.kind === "delete"
+                  ? "agents.control.organization.deleteDraftBoundary"
+                  : "agents.control.organization.discardUnpublishedBoundary",
+              )}
+            </p>
+            <div className="agent-control-dialog-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setDraftActionTarget(null)}
+                disabled={lifecycleBusy}
+              >
+                {t("agents.control.cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void confirmDraftAction()}
+                disabled={lifecycleBusy}
+              >
+                {t(
+                  draftActionTarget.kind === "delete"
+                    ? "agents.control.organization.confirmDeleteDraft"
+                    : "agents.control.organization.confirmDiscardUnpublished",
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {withdrawal ? (
+        <div className="agent-control-dialog-backdrop">
+          <div
+            className="agent-control-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="organization-card-withdrawal-title"
+          >
+            <h3 id="organization-card-withdrawal-title">
+              {t("agents.control.organization.withdraw")}
+            </h3>
+            <p>{t("agents.control.organization.withdrawalBoundary")}</p>
+            <div className="agent-control-dialog-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setWithdrawal(null)}
+                disabled={lifecycleBusy}
+              >
+                {t("agents.control.cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void confirmCardWithdrawal()}
+                disabled={lifecycleBusy}
+              >
+                {t("agents.control.organization.confirmWithdrawal")}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {archiveTarget && (

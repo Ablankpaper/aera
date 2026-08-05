@@ -37,6 +37,11 @@ type OrganizationContext = Extract<
   { scope: "ORGANIZATION" }
 >;
 
+interface TrustedLocalSubmissionReference {
+  draftId: string;
+  draftRevision: number;
+}
+
 export interface OrganizationPublicationDraftStore {
   getDraft(id: string): AgentDraft;
   readAsset(id: string, path: string): Buffer;
@@ -317,6 +322,7 @@ function reviewSummary(
 
 function summaryFromRecord(
   value: OrganizationAgentSubmissionRecord,
+  localReference: TrustedLocalSubmissionReference | null = null,
 ): OrganizationAgentSubmissionSummary {
   return {
     id: value.id,
@@ -325,6 +331,8 @@ function summaryFromRecord(
     definitionId: value.definition_id,
     baseVersionId: value.base_version_id,
     publishedVersionId: value.published_version_id,
+    localDraftId: localReference?.draftId ?? null,
+    localDraftRevision: localReference?.draftRevision ?? null,
     submittedByUserId: value.submitted_by_user_id,
     contentDigest: value.content_digest,
     status: value.status,
@@ -431,9 +439,10 @@ function validateSubmissionDetail(
 
 function publicDetail(
   value: OrganizationAgentSubmissionDetailRecord,
+  localReference: TrustedLocalSubmissionReference | null = null,
 ): OrganizationAgentSubmissionDetail {
   return {
-    summary: summaryFromRecord(value),
+    summary: summaryFromRecord(value, localReference),
     displayName: value.display_name ?? null,
     icon:
       value.icon_media_type === undefined
@@ -566,7 +575,8 @@ export class OrganizationPublicationService {
       validateSubmissionDetail(response, context.organizationId);
       this.assertSubmittedResponse(response, prepared, actor);
       this.recordSubmissionReference(response, prepared);
-      return summaryFromRecord(response);
+      const localReference = this.refreshSubmissionReference(response);
+      return summaryFromRecord(response, localReference);
     } catch (error) {
       throw serviceError(error);
     }
@@ -581,8 +591,8 @@ export class OrganizationPublicationService {
       );
       return values.map((value) => {
         validateSubmissionRecord(value, context.organizationId);
-        this.refreshSubmissionReference(value);
-        return summaryFromRecord(value);
+        const localReference = this.refreshSubmissionReference(value);
+        return summaryFromRecord(value, localReference);
       });
     } catch (error) {
       throw serviceError(error);
@@ -601,8 +611,8 @@ export class OrganizationPublicationService {
         submissionId,
       );
       validateSubmissionDetail(value, context.organizationId, submissionId);
-      this.refreshSubmissionReference(value);
-      return publicDetail(value);
+      const localReference = this.refreshSubmissionReference(value);
+      return publicDetail(value, localReference);
     } catch (error) {
       throw serviceError(error);
     }
@@ -626,7 +636,7 @@ export class OrganizationPublicationService {
         command.submissionId,
       );
       if (value.status !== "pending") throw terminalConflict(value);
-      this.refreshSubmissionReference(value);
+      const localReference = this.refreshSubmissionReference(value);
       const handle = this.newHandle(this.reviews);
       const expiresAt = this.nowMilliseconds() + this.handleTtlMs;
       this.reviews.set(handle, {
@@ -646,7 +656,7 @@ export class OrganizationPublicationService {
         decision: command.decision,
         reasonCode: command.reasonCode,
         safeNote: command.safeNote,
-        detail: publicDetail(value),
+        detail: publicDetail(value, localReference),
         expiresAt: new Date(expiresAt).toISOString(),
       };
     } catch (error) {
@@ -720,8 +730,8 @@ export class OrganizationPublicationService {
       ) {
         throw codedError("verification_failed");
       }
-      this.refreshSubmissionReference(response);
-      return summaryFromRecord(response);
+      const localReference = this.refreshSubmissionReference(response);
+      return summaryFromRecord(response, localReference);
     } catch (error) {
       throw serviceError(error);
     }
@@ -754,10 +764,10 @@ export class OrganizationPublicationService {
         contentDigest: value.content_digest,
         expiresAt,
       });
-      this.refreshSubmissionReference(value);
+      const localReference = this.refreshSubmissionReference(value);
       return {
         withdrawalHandle: handle,
-        submission: summaryFromRecord(value),
+        submission: summaryFromRecord(value, localReference),
         revision: value.revision,
         contentDigest: value.content_digest,
         expiresAt: new Date(expiresAt).toISOString(),
@@ -818,8 +828,8 @@ export class OrganizationPublicationService {
       ) {
         throw codedError("verification_failed");
       }
-      this.refreshSubmissionReference(response);
-      return summaryFromRecord(response);
+      const localReference = this.refreshSubmissionReference(response);
+      return summaryFromRecord(response, localReference);
     } catch (error) {
       throw serviceError(error);
     }
@@ -1144,7 +1154,7 @@ export class OrganizationPublicationService {
 
   private refreshSubmissionReference(
     response: OrganizationAgentSubmissionRecord,
-  ): void {
+  ): TrustedLocalSubmissionReference | null {
     const reference = this.database.sqlite
       .prepare(
         `SELECT local_draft_id, local_draft_revision, content_digest
@@ -1158,7 +1168,7 @@ export class OrganizationPublicationService {
           content_digest?: unknown;
         }
       | undefined;
-    if (reference === undefined || this.drafts === null) return;
+    if (reference === undefined || this.drafts === null) return null;
     if (
       typeof reference.local_draft_id !== "string" ||
       !UUID_PATTERN.test(reference.local_draft_id) ||
@@ -1177,7 +1187,7 @@ export class OrganizationPublicationService {
         error instanceof AgentDraftStoreError &&
         error.code === "draft_not_found"
       ) {
-        return;
+        return null;
       }
       throw codedError("organization_submission_conflict");
     }
@@ -1221,5 +1231,9 @@ export class OrganizationPublicationService {
     if (Number(result.changes) !== 1) {
       throw codedError("organization_submission_conflict");
     }
+    return {
+      draftId: reference.local_draft_id,
+      draftRevision: Number(reference.local_draft_revision),
+    };
   }
 }
