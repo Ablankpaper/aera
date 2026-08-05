@@ -27,7 +27,7 @@ const KEY_ID = "agent-control-test-v1";
 const FETCHED_AT = "2026-07-19T16:00:00.000Z";
 const SPKI_PREFIX_LENGTH = 12;
 
-function fixture(schemaVersion: 1 | 2 = 1): TrustFixture {
+function fixture(schemaVersion: 1 | 2 | 3 = 1): TrustFixture {
   const pair = generateKeyPairSync("ed25519");
   const publicDer = Buffer.from(
     pair.publicKey.export({ format: "der", type: "spki" }),
@@ -74,22 +74,47 @@ function fixture(schemaVersion: 1 | 2 = 1): TrustFixture {
           schema_version: 1,
           tools: { allowed: ["files.read"], denied: [] },
         }
-      : {
-          assets: [],
-          dependencies: [],
-          identity: { system_prompt: "Research safely" },
-          model_policy: {
-            allowed_models: [],
-            allowed_providers: [],
-            mode: "user_select",
-          },
-          runtime_compatibility: {
-            maximum_version_exclusive: "v0.19.0",
-            minimum_version: "v0.18.2-agentera.1",
-          },
-          schema_version: 2,
-          tools: { allowed: ["files.read"], denied: [] },
-        };
+      : schemaVersion === 2
+        ? {
+            assets: [],
+            dependencies: [],
+            identity: { system_prompt: "Research safely" },
+            model_policy: {
+              allowed_models: [],
+              allowed_providers: [],
+              mode: "user_select",
+            },
+            runtime_compatibility: {
+              maximum_version_exclusive: "v0.19.0",
+              minimum_version: "v0.18.2-agentera.1",
+            },
+            schema_version: 2,
+            tools: { allowed: ["files.read"], denied: [] },
+          }
+        : {
+            assets: [],
+            dependencies: [],
+            identity: { system_prompt: "Research safely" },
+            mcp_requirements: [
+              {
+                logical_name: "docs-read",
+                permission_reason: "Read selected documents",
+                required: true,
+                tools: ["files.read"],
+              },
+            ],
+            model_policy: {
+              allowed_models: [],
+              allowed_providers: [],
+              mode: "user_select",
+            },
+            runtime_compatibility: {
+              maximum_version_exclusive: "v0.19.0",
+              minimum_version: "v0.18.2-agentera.1",
+            },
+            schema_version: 3,
+            tools: { allowed: ["files.read"], denied: [] },
+          };
   const bundle = { assets: [] };
   const manifestBytes = Buffer.from(JSON.stringify(manifest));
   const bundleBytes = Buffer.from(JSON.stringify(bundle));
@@ -133,17 +158,30 @@ function fixture(schemaVersion: 1 | 2 = 1): TrustFixture {
           publication_allowed: false,
           deny_rules: [],
         }
-      : {
-          schema_version: 2,
-          agent_definition_id: DEFINITION_ID,
-          agent_version_id: VERSION_ID,
-          version_digest: contentDigest,
-          model_policy: manifest.model_policy,
-          tools: manifest.tools,
-          runtime_compatibility: manifest.runtime_compatibility,
-          publication_allowed: false,
-          deny_rules: [],
-        };
+      : manifest.schema_version === 2
+        ? {
+            schema_version: 2,
+            agent_definition_id: DEFINITION_ID,
+            agent_version_id: VERSION_ID,
+            version_digest: contentDigest,
+            model_policy: manifest.model_policy,
+            tools: manifest.tools,
+            runtime_compatibility: manifest.runtime_compatibility,
+            publication_allowed: false,
+            deny_rules: [],
+          }
+        : {
+            schema_version: 3,
+            agent_definition_id: DEFINITION_ID,
+            agent_version_id: VERSION_ID,
+            version_digest: contentDigest,
+            mcp_requirements: manifest.mcp_requirements,
+            model_policy: manifest.model_policy,
+            tools: manifest.tools,
+            runtime_compatibility: manifest.runtime_compatibility,
+            publication_allowed: false,
+            deny_rules: [],
+          };
   const documentDigest = createHash("sha256")
     .update(JSON.stringify(document))
     .digest("hex");
@@ -234,6 +272,40 @@ describe("AgenteraAgentTrustStore", () => {
     expect(trust.verifyPolicy(policy, { runtimeVersion: "v0.18.9" })).toEqual({
       contentDigest: policy.content_digest,
     });
+  });
+
+  it("verifies V3 requirements and rejects secret-bearing unknown fields", () => {
+    const { keys, version, policy } = fixture(3);
+    const trust = new AgenteraAgentTrustStore();
+    trust.replaceKeys(ORIGIN, keys, FETCHED_AT);
+
+    expect(
+      trust.verifyVersion(version, {
+        issuer: ORIGIN,
+        runtimeVersion: "v0.18.2-agentera.1",
+      }),
+    ).toEqual({ contentDigest: version.content_digest });
+    expect(trust.verifyPolicy(policy, { runtimeVersion: "v0.18.9" })).toEqual({
+      contentDigest: policy.content_digest,
+    });
+
+    const leaked = structuredClone(version) as unknown as Record<
+      string,
+      unknown
+    >;
+    const leakedManifest = leaked.manifest as Record<string, unknown>;
+    const requirement = (
+      leakedManifest.mcp_requirements as Array<Record<string, unknown>>
+    )[0];
+    requirement.credential_ref = "private-profile-secret";
+    expectTrustCode(
+      () =>
+        trust.verifyVersion(leaked as unknown as AgentVersion, {
+          issuer: ORIGIN,
+          runtimeVersion: "v0.18.9",
+        }),
+      "digest_mismatch",
+    );
   });
 
   it("verifies a signed official policy with a canonical UUIDv7 platform context", () => {

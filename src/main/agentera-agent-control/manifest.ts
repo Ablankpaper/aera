@@ -9,6 +9,7 @@ import type {
   AgentDraftAssetMetadata,
   AgentDraftIconMediaType,
   AgentEditableManifest,
+  AgentMcpRequirementV3,
 } from "../../shared/agentera-agent-control";
 
 export const MAX_AGENT_ASSET_COUNT = 128;
@@ -292,7 +293,18 @@ function copyEditableManifest(value: unknown): AgentEditableManifest {
             "dependencies",
             "runtimeCompatibility",
           ]
-        : [];
+        : schemaVersion === 3
+          ? [
+              "schemaVersion",
+              "identity",
+              "assets",
+              "modelPolicy",
+              "mcpRequirements",
+              "tools",
+              "dependencies",
+              "runtimeCompatibility",
+            ]
+          : [];
   if (
     fields.length === 0 ||
     !exactObject(value, fields) ||
@@ -325,7 +337,7 @@ function copyEditableManifest(value: unknown): AgentEditableManifest {
     return invalidContent();
   }
   if (
-    schemaVersion === 2 &&
+    (schemaVersion === 2 || schemaVersion === 3) &&
     (!exactObject(value.modelPolicy, [
       "mode",
       "allowedProviders",
@@ -336,6 +348,26 @@ function copyEditableManifest(value: unknown): AgentEditableManifest {
         value.modelPolicy.mode !== "fixed") ||
       !Array.isArray(value.modelPolicy.allowedProviders) ||
       !Array.isArray(value.modelPolicy.allowedModels))
+  ) {
+    return invalidContent();
+  }
+  if (
+    schemaVersion === 3 &&
+    (!Array.isArray(value.mcpRequirements) ||
+      !value.mcpRequirements.every(
+        (requirement) =>
+          exactObject(requirement, [
+            "logicalName",
+            "tools",
+            "required",
+            "permissionReason",
+          ]) &&
+          typeof requirement.logicalName === "string" &&
+          Array.isArray(requirement.tools) &&
+          requirement.tools.every((tool) => typeof tool === "string") &&
+          typeof requirement.required === "boolean" &&
+          typeof requirement.permissionReason === "string",
+      ))
   ) {
     return invalidContent();
   }
@@ -408,14 +440,30 @@ function copyEditableManifest(value: unknown): AgentEditableManifest {
     };
   }
   const modelPolicy = value.modelPolicy as JsonObject;
+  const copiedModelPolicy = {
+    mode: modelPolicy.mode as "user_select" | "allowlist" | "fixed",
+    allowedProviders: copyStringArray(modelPolicy.allowedProviders),
+    allowedModels: copyStringArray(modelPolicy.allowedModels),
+  };
+  if (schemaVersion === 2) {
+    return {
+      schemaVersion: 2,
+      ...common,
+      modelPolicy: copiedModelPolicy,
+    };
+  }
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     ...common,
-    modelPolicy: {
-      mode: modelPolicy.mode as "user_select" | "allowlist" | "fixed",
-      allowedProviders: copyStringArray(modelPolicy.allowedProviders),
-      allowedModels: copyStringArray(modelPolicy.allowedModels),
-    },
+    modelPolicy: copiedModelPolicy,
+    mcpRequirements: (value.mcpRequirements as JsonObject[]).map(
+      (requirement) => ({
+        logicalName: requirement.logicalName as string,
+        tools: copyStringArray(requirement.tools),
+        required: requirement.required as boolean,
+        permissionReason: requirement.permissionReason as string,
+      }),
+    ),
   };
 }
 
@@ -509,6 +557,68 @@ function canonicalStringSet(values: readonly string[]): string[] {
     result.push(value);
   }
   return result.sort(utf8Compare);
+}
+
+function canonicalMcpRequirements(
+  requirements: readonly AgentMcpRequirementV3[],
+  allowedTools: readonly string[],
+  deniedTools: readonly string[],
+): Array<{
+  logical_name: string;
+  permission_reason: string;
+  required: boolean;
+  tools: string[];
+}> {
+  if (!Array.isArray(requirements) || requirements.length > 32) {
+    return invalidContent();
+  }
+  const allowed = new Set(allowedTools);
+  const denied = new Set(deniedTools);
+  const names = new Set<string>();
+  const canonical = requirements.map((requirement) => {
+    if (
+      !exactObject(requirement, [
+        "logicalName",
+        "tools",
+        "required",
+        "permissionReason",
+      ]) ||
+      !validString(requirement.logicalName, 1, 128) ||
+      requirement.logicalName !== requirement.logicalName.trim() ||
+      /[\r\n]/.test(requirement.logicalName) ||
+      requirement.logicalName.includes("://") ||
+      names.has(requirement.logicalName) ||
+      !Array.isArray(requirement.tools) ||
+      !requirement.tools.every((tool) => typeof tool === "string") ||
+      typeof requirement.required !== "boolean" ||
+      !validString(requirement.permissionReason, 1, 300) ||
+      requirement.permissionReason !== requirement.permissionReason.trim() ||
+      /[\r\n]/.test(requirement.permissionReason)
+    ) {
+      return invalidContent();
+    }
+    if (containsHighConfidenceSecret(requirement.permissionReason)) {
+      throw new AgentManifestValidationError("secret_detected");
+    }
+    names.add(requirement.logicalName);
+    const tools = canonicalStringSet(requirement.tools);
+    if (
+      tools.length === 0 ||
+      tools.length > 128 ||
+      tools.some((tool) => !allowed.has(tool) || denied.has(tool))
+    ) {
+      return invalidContent();
+    }
+    return {
+      logical_name: requirement.logicalName,
+      permission_reason: requirement.permissionReason,
+      required: requirement.required,
+      tools,
+    };
+  });
+  return canonical.sort((left, right) =>
+    utf8Compare(left.logical_name, right.logical_name),
+  );
 }
 
 function parseSemanticVersion(raw: string): ParsedSemanticVersion {
@@ -688,6 +798,14 @@ export function canonicalizeEditableAgent(
   if (deniedTools.some((tool) => allowedTools.includes(tool))) {
     return invalidContent();
   }
+  const mcpRequirements =
+    manifest.schemaVersion === 3
+      ? canonicalMcpRequirements(
+          manifest.mcpRequirements,
+          allowedTools,
+          deniedTools,
+        )
+      : [];
 
   const dependencyKeys = new Set<string>();
   const dependencies = manifest.dependencies.map((dependency) => {
@@ -753,22 +871,40 @@ export function canonicalizeEditableAgent(
           schema_version: 1,
           tools: { allowed: allowedTools, denied: deniedTools },
         }
-      : {
-          assets: canonicalAssets,
-          dependencies,
-          identity: { system_prompt: manifest.identity.systemPrompt },
-          model_policy: {
-            allowed_models: models,
-            allowed_providers: providers,
-            mode: modelPolicy.mode,
-          },
-          runtime_compatibility: {
-            maximum_version_exclusive: maximum?.normalized ?? null,
-            minimum_version: minimum.normalized,
-          },
-          schema_version: 2,
-          tools: { allowed: allowedTools, denied: deniedTools },
-        };
+      : manifest.schemaVersion === 2
+        ? {
+            assets: canonicalAssets,
+            dependencies,
+            identity: { system_prompt: manifest.identity.systemPrompt },
+            model_policy: {
+              allowed_models: models,
+              allowed_providers: providers,
+              mode: modelPolicy.mode,
+            },
+            runtime_compatibility: {
+              maximum_version_exclusive: maximum?.normalized ?? null,
+              minimum_version: minimum.normalized,
+            },
+            schema_version: 2,
+            tools: { allowed: allowedTools, denied: deniedTools },
+          }
+        : {
+            assets: canonicalAssets,
+            dependencies,
+            identity: { system_prompt: manifest.identity.systemPrompt },
+            mcp_requirements: mcpRequirements,
+            model_policy: {
+              allowed_models: models,
+              allowed_providers: providers,
+              mode: modelPolicy.mode,
+            },
+            runtime_compatibility: {
+              maximum_version_exclusive: maximum?.normalized ?? null,
+              minimum_version: minimum.normalized,
+            },
+            schema_version: 3,
+            tools: { allowed: allowedTools, denied: deniedTools },
+          };
   const manifestBytes = canonicalJsonBytes(canonicalManifest);
   if (manifestBytes.length > MAX_AGENT_MANIFEST_BYTES) return invalidContent();
   const bundleBytes = canonicalJsonBytes({ assets: bundleAssets });
@@ -809,15 +945,31 @@ export function canonicalizeEditableAgent(
             allowedModels: models,
           },
         }
-      : {
-          schemaVersion: 2,
-          ...normalizedCommon,
-          modelPolicy: {
-            mode: modelPolicy.mode,
-            allowedProviders: providers,
-            allowedModels: models,
-          },
-        };
+      : manifest.schemaVersion === 2
+        ? {
+            schemaVersion: 2,
+            ...normalizedCommon,
+            modelPolicy: {
+              mode: modelPolicy.mode,
+              allowedProviders: providers,
+              allowedModels: models,
+            },
+          }
+        : {
+            schemaVersion: 3,
+            ...normalizedCommon,
+            modelPolicy: {
+              mode: modelPolicy.mode,
+              allowedProviders: providers,
+              allowedModels: models,
+            },
+            mcpRequirements: mcpRequirements.map((requirement) => ({
+              logicalName: requirement.logical_name,
+              tools: [...requirement.tools],
+              required: requirement.required,
+              permissionReason: requirement.permission_reason,
+            })),
+          };
 
   return {
     normalizedManifest,

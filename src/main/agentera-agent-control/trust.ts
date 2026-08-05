@@ -98,6 +98,13 @@ interface CanonicalModelPolicyV2 extends CanonicalModelConstraints {
   mode: "user_select" | "allowlist" | "fixed";
 }
 
+interface CanonicalMcpRequirementV3 {
+  logical_name: string;
+  permission_reason: string;
+  required: boolean;
+  tools: string[];
+}
+
 interface CanonicalTools {
   allowed: string[];
   denied: string[];
@@ -256,6 +263,83 @@ function canonicalTools(value: unknown): CanonicalTools {
   };
 }
 
+function utf8Compare(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
+}
+
+function canonicalMcpRequirements(
+  value: unknown,
+  tools: CanonicalTools,
+): CanonicalMcpRequirementV3[] {
+  if (!Array.isArray(value) || value.length > 32) {
+    throw new AgenteraAgentTrustError("digest_mismatch");
+  }
+  const allowed = new Set(tools.allowed);
+  const denied = new Set(tools.denied);
+  const names = new Set<string>();
+  const requirements = value.map((requirement) => {
+    if (
+      !exactObject(requirement, [
+        "logical_name",
+        "permission_reason",
+        "required",
+        "tools",
+      ]) ||
+      typeof requirement.logical_name !== "string" ||
+      Buffer.byteLength(requirement.logical_name, "utf8") < 1 ||
+      Buffer.byteLength(requirement.logical_name, "utf8") > 128 ||
+      requirement.logical_name !== requirement.logical_name.trim() ||
+      /[\r\n]/.test(requirement.logical_name) ||
+      requirement.logical_name.includes("://") ||
+      names.has(requirement.logical_name) ||
+      typeof requirement.permission_reason !== "string" ||
+      Buffer.byteLength(requirement.permission_reason, "utf8") < 1 ||
+      Buffer.byteLength(requirement.permission_reason, "utf8") > 300 ||
+      requirement.permission_reason !== requirement.permission_reason.trim() ||
+      /[\r\n]/.test(requirement.permission_reason) ||
+      typeof requirement.required !== "boolean" ||
+      !Array.isArray(requirement.tools) ||
+      requirement.tools.length === 0 ||
+      requirement.tools.length > 128
+    ) {
+      throw new AgenteraAgentTrustError("digest_mismatch");
+    }
+    names.add(requirement.logical_name);
+    const requirementTools = requirement.tools.map((tool) =>
+      requireString(tool, 128),
+    );
+    if (
+      new Set(requirementTools).size !== requirementTools.length ||
+      requirementTools.some((tool) => !allowed.has(tool) || denied.has(tool)) ||
+      requirementTools.some(
+        (tool, index) =>
+          index > 0 && utf8Compare(requirementTools[index - 1], tool) >= 0,
+      )
+    ) {
+      throw new AgenteraAgentTrustError("digest_mismatch");
+    }
+    return {
+      logical_name: requirement.logical_name,
+      permission_reason: requirement.permission_reason,
+      required: requirement.required,
+      tools: requirementTools,
+    };
+  });
+  if (
+    requirements.some(
+      (requirement, index) =>
+        index > 0 &&
+        utf8Compare(
+          requirements[index - 1].logical_name,
+          requirement.logical_name,
+        ) >= 0,
+    )
+  ) {
+    throw new AgenteraAgentTrustError("digest_mismatch");
+  }
+  return requirements;
+}
+
 function canonicalRuntimeCompatibility(
   value: unknown,
 ): CanonicalRuntimeCompatibility {
@@ -284,15 +368,17 @@ function canonicalManifestBytes(value: unknown): Buffer {
   const modelField =
     value.schema_version === 1
       ? "model_constraints"
-      : value.schema_version === 2
+      : value.schema_version === 2 || value.schema_version === 3
         ? "model_policy"
         : null;
+  const mcpFields = value.schema_version === 3 ? ["mcp_requirements"] : [];
   if (
     modelField === null ||
     !exactObject(value, [
       "assets",
       "dependencies",
       "identity",
+      ...mcpFields,
       modelField,
       "runtime_compatibility",
       "schema_version",
@@ -361,15 +447,29 @@ function canonicalManifestBytes(value: unknown): Buffer {
           schema_version: 1,
           tools: common.tools,
         }
-      : {
-          assets: common.assets,
-          dependencies: common.dependencies,
-          identity: common.identity,
-          model_policy: canonicalModelPolicyV2(value.model_policy),
-          runtime_compatibility: common.runtime_compatibility,
-          schema_version: 2,
-          tools: common.tools,
-        };
+      : value.schema_version === 2
+        ? {
+            assets: common.assets,
+            dependencies: common.dependencies,
+            identity: common.identity,
+            model_policy: canonicalModelPolicyV2(value.model_policy),
+            runtime_compatibility: common.runtime_compatibility,
+            schema_version: 2,
+            tools: common.tools,
+          }
+        : {
+            assets: common.assets,
+            dependencies: common.dependencies,
+            identity: common.identity,
+            mcp_requirements: canonicalMcpRequirements(
+              value.mcp_requirements,
+              common.tools,
+            ),
+            model_policy: canonicalModelPolicyV2(value.model_policy),
+            runtime_compatibility: common.runtime_compatibility,
+            schema_version: 3,
+            tools: common.tools,
+          };
   return goCanonicalJsonBytes(canonical);
 }
 
@@ -489,9 +589,10 @@ function canonicalPolicyDocumentBytes(value: unknown): Buffer {
   const modelField =
     value.schema_version === 1
       ? "model_constraints"
-      : value.schema_version === 2
+      : value.schema_version === 2 || value.schema_version === 3
         ? "model_policy"
         : null;
+  const mcpFields = value.schema_version === 3 ? ["mcp_requirements"] : [];
   if (
     modelField === null ||
     !exactObject(
@@ -500,6 +601,7 @@ function canonicalPolicyDocumentBytes(value: unknown): Buffer {
         "agent_definition_id",
         "agent_version_id",
         "deny_rules",
+        ...mcpFields,
         modelField,
         "publication_allowed",
         "runtime_compatibility",
@@ -550,20 +652,39 @@ function canonicalPolicyDocumentBytes(value: unknown): Buffer {
             ? {}
             : { official_context: common.official_context }),
         }
-      : {
-          schema_version: 2,
-          agent_definition_id: common.agent_definition_id,
-          agent_version_id: common.agent_version_id,
-          version_digest: common.version_digest,
-          model_policy: canonicalModelPolicyV2(value.model_policy),
-          tools: common.tools,
-          runtime_compatibility: common.runtime_compatibility,
-          publication_allowed: common.publication_allowed,
-          deny_rules: common.deny_rules,
-          ...(common.official_context === undefined
-            ? {}
-            : { official_context: common.official_context }),
-        };
+      : value.schema_version === 2
+        ? {
+            schema_version: 2,
+            agent_definition_id: common.agent_definition_id,
+            agent_version_id: common.agent_version_id,
+            version_digest: common.version_digest,
+            model_policy: canonicalModelPolicyV2(value.model_policy),
+            tools: common.tools,
+            runtime_compatibility: common.runtime_compatibility,
+            publication_allowed: common.publication_allowed,
+            deny_rules: common.deny_rules,
+            ...(common.official_context === undefined
+              ? {}
+              : { official_context: common.official_context }),
+          }
+        : {
+            schema_version: 3,
+            agent_definition_id: common.agent_definition_id,
+            agent_version_id: common.agent_version_id,
+            version_digest: common.version_digest,
+            mcp_requirements: canonicalMcpRequirements(
+              value.mcp_requirements,
+              common.tools,
+            ),
+            model_policy: canonicalModelPolicyV2(value.model_policy),
+            tools: common.tools,
+            runtime_compatibility: common.runtime_compatibility,
+            publication_allowed: common.publication_allowed,
+            deny_rules: common.deny_rules,
+            ...(common.official_context === undefined
+              ? {}
+              : { official_context: common.official_context }),
+          };
   return goCanonicalJsonBytes(canonical);
 }
 

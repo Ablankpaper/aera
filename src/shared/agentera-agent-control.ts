@@ -104,9 +104,23 @@ export interface AgentEditableManifestV2 extends AgentEditableManifestBase {
   };
 }
 
+export interface AgentMcpRequirementV3 {
+  logicalName: string;
+  tools: string[];
+  required: boolean;
+  permissionReason: string;
+}
+
+export interface AgentEditableManifestV3 extends AgentEditableManifestBase {
+  schemaVersion: 3;
+  modelPolicy: AgentEditableManifestV2["modelPolicy"];
+  mcpRequirements: AgentMcpRequirementV3[];
+}
+
 export type AgentEditableManifest =
   | AgentEditableManifestV1
-  | AgentEditableManifestV2;
+  | AgentEditableManifestV2
+  | AgentEditableManifestV3;
 
 export interface AgentRuntimeModelPolicy {
   mode: AgentModelSelectionMode;
@@ -117,7 +131,7 @@ export interface AgentRuntimeModelPolicy {
 export function runtimeModelPolicyForEditableManifest(
   manifest: AgentEditableManifest,
 ): AgentRuntimeModelPolicy {
-  if (manifest.schemaVersion === 2) return manifest.modelPolicy;
+  if (manifest.schemaVersion !== 1) return manifest.modelPolicy;
   return {
     mode: "allowlist",
     allowedProviders: manifest.modelConstraints.allowedProviders,

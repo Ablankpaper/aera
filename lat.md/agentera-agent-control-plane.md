@@ -202,6 +202,14 @@ The filesystem-backed legacy migration proof keeps the default five-second budge
 
 [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] resolves the current owner for each local operation and rebuilds Runtime components after an owner change. [[tests/agentera-agent-owner-isolation.test.ts]] proves that one long-lived manager cannot list, count, or open the previous account's draft; store-level tests cover versions, installations, bindings, and pending delivery.
 
+## Agent Manifest V3 capability contract
+
+Manifest V3 keeps the V2 model policy and adds only portable logical MCP requirements so an Agent can declare capabilities without publishing a local connection.
+
+Each requirement contains a logical name, selected tool names, required or optional behavior, and a bounded permission reason. URL, command, arguments, environment, headers, token, auth, credential references, Profile paths, and local paths are rejected; V1 and V2 remain compatible. [[src/main/agentera-agent-control/manifest.ts#canonicalizeEditableAgent]] creates stable canonical bytes, [[src/shared/agentera-agent-control.ts#runtimeModelPolicyForEditableManifest]] preserves V2 model behavior, and [[src/main/agentera-agent-control/trust.ts#canonicalizeAgentVersionContent]] independently reconstructs trusted V3 content.
+
+New drafts use V3 with an empty requirement list through [[src/renderer/src/screens/Agents/agentDraftDefaults.ts#createDefaultAgentManifest]]. An approved experience import retains requirements from its verified base through [[src/main/agentera-agent-control/experience-candidate-importer.ts#editableManifest]], while later capability changes remain ordinary draft revisions and next immutable Versions.
+
 ## Immutable publication
 
 An explicit publish action turns one local draft revision into an immutable cloud AgentVersion under a stable AgentDefinition.

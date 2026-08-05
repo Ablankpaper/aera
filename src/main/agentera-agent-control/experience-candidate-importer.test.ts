@@ -15,6 +15,7 @@ import {
   type Mock,
 } from "vitest";
 import type { AgenteraRuntimeOwner } from "../agentera-profile-binding";
+import type { AgentEditableManifestV3 } from "../../shared/agentera-agent-control";
 import type {
   AgentDefinition,
   AgentVersion,
@@ -137,6 +138,58 @@ function baseVersion(id = LATEST_VERSION_ID, number = 3): AgentVersion {
     runtime_minimum_version: "v0.18.2-agentera.1",
     runtime_maximum_version_exclusive: "v0.19.0",
     published_at: NOW.toISOString(),
+  };
+}
+
+function baseVersionV3(): AgentVersion {
+  const base = baseVersion();
+  const manifest: AgentEditableManifestV3 = {
+    schemaVersion: 3,
+    identity: { systemPrompt: "Keep the stable Workspace identity." },
+    assets: base.manifest.assets.map((asset) => ({
+      path: asset.path,
+      kind: asset.kind,
+      mediaType: asset.media_type,
+    })),
+    modelPolicy: {
+      mode: "user_select",
+      allowedProviders: [],
+      allowedModels: [],
+    },
+    mcpRequirements: [
+      {
+        logicalName: "docs-read",
+        tools: ["files.read"],
+        required: true,
+        permissionReason: "Read selected documents",
+      },
+    ],
+    tools: { allowed: ["files.read"], denied: ["shell.exec"] },
+    dependencies: [
+      {
+        agentDefinitionId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        agentVersionId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      },
+    ],
+    runtimeCompatibility: {
+      minimumVersion: "v0.18.2-agentera.1",
+      maximumVersionExclusive: "v0.19.0",
+    },
+  };
+  const assets = base.bundle.assets.map((asset) => ({
+    path: asset.path,
+    content: asset.content,
+  }));
+  const canonical = canonicalizeEditableAgent(manifest, assets);
+  return {
+    ...base,
+    manifest: JSON.parse(
+      canonical.manifestBytes.toString("utf8"),
+    ) as AgentVersion["manifest"],
+    bundle: JSON.parse(
+      canonical.bundleBytes.toString("utf8"),
+    ) as AgentVersion["bundle"],
+    content_digest: canonical.contentDigest,
   };
 }
 
@@ -454,6 +507,33 @@ describe("ExperienceCandidateImporter", () => {
     });
     expect(reopened).toEqual(created);
     expect(drafts.listDrafts()).toHaveLength(1);
+  });
+
+  it("preserves a V3 base manifest while importing an approved Skill", async () => {
+    currentVersion = baseVersionV3();
+    const subject = importer();
+    const preview = await subject.prepare(WORKSPACE_ID, CANDIDATE_ID);
+    const created = await subject.confirm(WORKSPACE_ID, {
+      importHandle: preview.importHandle,
+      confirmation: "apply-approved-skill-to-latest",
+    });
+
+    expect(created.manifest).toMatchObject({
+      schemaVersion: 3,
+      modelPolicy: {
+        mode: "user_select",
+        allowedProviders: [],
+        allowedModels: [],
+      },
+      mcpRequirements: [
+        {
+          logicalName: "docs-read",
+          tools: ["files.read"],
+          required: true,
+          permissionReason: "Read selected documents",
+        },
+      ],
+    });
   });
 
   it("rejects an advanced latest base before opening a SQLite transaction", async () => {

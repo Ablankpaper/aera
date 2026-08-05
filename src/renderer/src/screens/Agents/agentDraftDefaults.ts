@@ -6,7 +6,7 @@ export function createDefaultAgentManifest(
   systemPrompt: string,
 ): AgentEditableManifest {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     identity: { systemPrompt },
     assets: [],
     modelPolicy: {
@@ -14,6 +14,7 @@ export function createDefaultAgentManifest(
       allowedProviders: [],
       allowedModels: [],
     },
+    mcpRequirements: [],
     tools: { allowed: [], denied: [] },
     dependencies: [],
     runtimeCompatibility: {

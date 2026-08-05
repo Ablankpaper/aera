@@ -11,7 +11,7 @@ export interface AgentModelPolicy {
 export function modelPolicyForManifest(
   manifest: AgentVersion["manifest"],
 ): AgentModelPolicy {
-  if (manifest.schema_version === 2) {
+  if (manifest.schema_version === 2 || manifest.schema_version === 3) {
     return {
       mode: manifest.model_policy.mode,
       allowedProviders: manifest.model_policy.allowed_providers,
@@ -28,7 +28,7 @@ export function modelPolicyForManifest(
 export function modelPolicyForPolicyDocument(
   document: AgentPolicySnapshot["document"],
 ): AgentModelPolicy {
-  if (document.schema_version === 2) {
+  if (document.schema_version === 2 || document.schema_version === 3) {
     return {
       mode: document.model_policy.mode,
       allowedProviders: document.model_policy.allowed_providers,
