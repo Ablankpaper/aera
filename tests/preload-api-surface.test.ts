@@ -393,6 +393,15 @@ describe("Aera Agent-control preload namespace", () => {
     "reviewExperienceCandidate",
     "prepareExperienceCandidateImport",
     "confirmExperienceCandidateImport",
+    "listEligibleOrganizationExperienceSkills",
+    "prepareOrganizationExperienceCandidate",
+    "submitOrganizationExperienceCandidate",
+    "listMyOrganizationExperienceCandidates",
+    "listOrganizationExperienceReviewQueue",
+    "getOrganizationExperienceCandidate",
+    "reviewOrganizationExperienceCandidate",
+    "prepareOrganizationExperienceImport",
+    "confirmOrganizationExperienceImport",
     "onStateChanged",
   ];
 
