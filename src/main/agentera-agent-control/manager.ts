@@ -3,6 +3,7 @@ import type {
   AgentDraft,
   AgentDraftAssetInput,
   AgentDraftDetail,
+  AgentCapabilityBindingConfiguration,
   AgenteraAgentControlPublicState,
   AgenteraAgentControlContext,
   AgenteraAgentDefinitionSummary,
@@ -16,6 +17,8 @@ import type {
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
+  ConfirmCapabilityBindingsInput,
+  ConfirmCapabilityBindingsResult,
   ConfirmInstalledSkillSnapshotInput,
   ConfirmMcpRequirementInput,
   ConfirmOfficialAgentInstallInput,
@@ -108,6 +111,7 @@ import {
   type CapabilityAuthoringServiceOptions,
 } from "./capability-authoring-service";
 import { CapabilityBindingStore } from "./capability-binding-store";
+import { CapabilityBindingService } from "./capability-binding-service";
 import { listInstalledSkills } from "../skills";
 import {
   listMcpServers,
@@ -193,6 +197,7 @@ interface RuntimeComponents {
   installations: AgentInstallationManager;
   hermes: AgenteraHermesAdapter;
   bindingStore: RuntimeBindingStore;
+  capabilityBindingService: CapabilityBindingService<LocalAgentInstallation>;
 }
 
 interface ContextComponents {
@@ -556,6 +561,7 @@ export class AgenteraAgentControlManager {
     this.officialAgentComponents?.service.invalidate();
     this.officialAgentComponents = null;
     this.invalidateCapabilityAuthoring();
+    this.runtime?.capabilityBindingService.invalidate();
     this.publicationOwners.clear();
     this.emitState();
     this.queueRuntimeBindingDelivery();
@@ -573,6 +579,7 @@ export class AgenteraAgentControlManager {
     this.officialAgentComponents?.service.invalidate();
     this.officialAgentComponents = null;
     this.invalidateCapabilityAuthoring();
+    this.runtime?.capabilityBindingService.invalidate();
     this.publicationOwners.clear();
     this.emitState();
   }
@@ -927,6 +934,38 @@ export class AgenteraAgentControlManager {
       ...installationManager.listLocalInstallations(context),
       ...installationManager.listManagedInstallations(),
     ].map(serializeInstallation);
+  }
+
+  async listCapabilityBindings(
+    installationId: string,
+  ): Promise<AgentCapabilityBindingConfiguration> {
+    const context = this.assetContext();
+    this.assertInstallationRole(context);
+    const runtime = await this.ensureRuntimeComponents();
+    this.assertInstallationInContext(
+      runtime.installations.getLocalInstallation(installationId),
+      context,
+    );
+    return runtime.capabilityBindingService.list(installationId);
+  }
+
+  async confirmCapabilityBindings(
+    input: ConfirmCapabilityBindingsInput,
+  ): Promise<ConfirmCapabilityBindingsResult> {
+    const context = this.assetContext();
+    this.assertInstallationRole(context);
+    await this.assertOnlineLocalRuntimeAccess();
+    const runtime = await this.ensureRuntimeComponents();
+    this.assertInstallationInContext(
+      runtime.installations.getLocalInstallation(input.installationId),
+      context,
+    );
+    const result = await runtime.capabilityBindingService.confirm(input);
+    this.emitState();
+    return {
+      installation: serializeInstallation(result.installation),
+      forceNewConversation: true,
+    };
   }
 
   async resolveEncryptedBackupUserSource(
@@ -1746,6 +1785,7 @@ export class AgenteraAgentControlManager {
     );
     const key = `${runtimeComponentKey(owner)}\0${runtimeVersion}`;
     if (this.runtime?.key === key) return this.runtime;
+    this.runtime?.capabilityBindingService.invalidate();
     this.publicationOwners.clear();
     this.contextComponents = null;
     this.experienceCandidateComponents?.service.clearPreparedImports();
@@ -1798,6 +1838,27 @@ export class AgenteraAgentControlManager {
       capabilityBindingStore,
       getProfileMcpCapabilities,
     });
+    const capabilityBindingService =
+      new CapabilityBindingService<LocalAgentInstallation>({
+        getOwnerKey: () => runtimeComponentKey(owner),
+        getInstallation: (installationId) =>
+          installations.getLocalInstallation(installationId),
+        getVerifiedVersion: (versionId) => cache.getVerifiedVersion(versionId),
+        resolveProfilePath: (runtimeProfileId, installationId) =>
+          this.profileBindings.resolveAttachedProfilePath(
+            runtimeProfileId,
+            installationId,
+            owner,
+          ),
+        listCapabilityServers: getProfileMcpCapabilities,
+        bindingStore: capabilityBindingStore,
+        resumePendingInstallation: async (installationId) => {
+          await installations.reconcilePendingInstallations();
+          return installations.getLocalInstallation(installationId);
+        },
+        now: full.now,
+        randomUUID: full.randomUUID,
+      });
     const bindingStore = new RuntimeBindingStore({
       database: full.database,
       owner,
@@ -1829,6 +1890,7 @@ export class AgenteraAgentControlManager {
       installations,
       hermes,
       bindingStore,
+      capabilityBindingService,
     };
     return this.runtime;
   }

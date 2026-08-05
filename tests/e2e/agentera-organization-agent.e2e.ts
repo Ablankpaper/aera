@@ -14,18 +14,24 @@ import { dirname, join } from "node:path";
 import { expect, test } from "playwright/test";
 
 import type {
+  AgentCapabilityBindingConfiguration,
   AgentDraft,
+  AgentDraftAssetInput,
   AgentDraftDetail,
+  AgentMcpRequirementV3,
   AgenteraAgentControlPublicState,
   AgenteraAgentControlResult,
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
   AgenteraAgentVersionSummary,
+  AuthoringCapabilitySummary,
   CreateAgentDraftInput,
   OrganizationAgentSubmissionSummary,
   OrganizationReviewPreview,
   OrganizationSubmissionPreview,
   OrganizationWithdrawalPreview,
+  SkillSnapshotPreview,
+  McpRequirementPreview,
 } from "../../src/shared/agentera-agent-control";
 import type {
   AgenteraOrganizationResult,
@@ -70,6 +76,11 @@ const MEMBER_PROFILE = "organization-member-agent";
 const OWNER_PRIVATE_SECRET = "ORGANIZATION_OWNER_PRIVATE_2026_07_21";
 const MEMBER_MEMORY_SECRET = "ORGANIZATION_MEMBER_MEMORY_2026_07_21";
 const MEMBER_SKILL_SECRET = "ORGANIZATION_MEMBER_SKILL_2026_07_21";
+const AUTHOR_MCP_SECRET = "AUTHOR_MCP_TOKEN_SHOULD_NOT_LEAVE_2026_08_06";
+const MEMBER_MCP_SECRET = "MEMBER_MCP_TOKEN_SHOULD_STAY_LOCAL_2026_08_06";
+const MCP_TOOL_RESULT = "EMPLOYEE_MCP_TOOL_OK_2026_08_06";
+const CAPABILITY_TOOL_PROMPT = "CAPABILITY_BINDING_E2E_USE_DOCS_READ";
+const CAPABILITY_TOOL_REPLY = "CAPABILITY_TOOL_REPLY_2026_08_06";
 const LOCKED_V1_MARKER = "ORGANIZATION_LOCKED_SKILL_V1_2026_07_21";
 const LOCKED_V2_MARKER = "ORGANIZATION_LOCKED_SKILL_V2_2026_07_21";
 const UNPUBLISHED_AFTER_SUBMISSION =
@@ -290,14 +301,24 @@ async function selectOrganization(
 function organizationDraft(
   marker: string,
   source?: { definitionId: string; baseVersionId: string },
+  selectedCapabilities?: {
+    skillAssets: AgentDraftAssetInput[];
+    mcpRequirement: AgentMcpRequirementV3;
+  },
 ): CreateAgentDraftInput {
+  const mcpRequirement = selectedCapabilities?.mcpRequirement ?? {
+    logicalName: "author-docs",
+    tools: ["docs.read"],
+    required: true,
+    permissionReason: "Read explicitly approved enterprise documents",
+  };
   return {
     sourceAgentDefinitionId: source?.definitionId ?? null,
     baseAgentVersionId: source?.baseVersionId ?? null,
     displayName: "Enterprise Research",
     icon: null,
     manifest: {
-      schemaVersion: 2,
+      schemaVersion: 3,
       identity: {
         systemPrompt: `Use only the approved Organization base: ${marker}`,
       },
@@ -323,7 +344,8 @@ function organizationDraft(
         allowedProviders: [],
         allowedModels: [],
       },
-      tools: { allowed: [], denied: [] },
+      tools: { allowed: ["docs.read"], denied: [] },
+      mcpRequirements: [mcpRequirement],
       dependencies: [],
       runtimeCompatibility: {
         minimumVersion: "v0.18.2-agentera.1",
@@ -331,18 +353,20 @@ function organizationDraft(
       },
     },
     assets: [
-      {
-        path: "skills/research/SKILL.md",
-        content: [
-          "---",
-          "name: research",
-          "description: Approved Organization research skill",
-          "---",
-          "",
-          marker,
-          "",
-        ].join("\n"),
-      },
+      ...(selectedCapabilities?.skillAssets ?? [
+        {
+          path: "skills/research/SKILL.md",
+          content: [
+            "---",
+            "name: research",
+            "description: Approved Organization research skill",
+            "---",
+            "",
+            marker,
+            "",
+          ].join("\n"),
+        },
+      ]),
       { path: "sop/research.md", content: `# Approved SOP\n${marker}\n` },
       {
         path: "knowledge/research.md",
@@ -350,6 +374,164 @@ function organizationDraft(
       },
     ],
   };
+}
+
+function mcpServerScript(toolResult: string): string {
+  return [
+    '"use strict";',
+    'process.stdin.setEncoding("utf8");',
+    'let buffered = "";',
+    "const send = (payload) => process.stdout.write(`${JSON.stringify(payload)}\\n`);",
+    'process.stdin.on("data", (chunk) => {',
+    "  buffered += chunk;",
+    "  for (;;) {",
+    '    const newline = buffered.indexOf("\\n");',
+    "    if (newline < 0) break;",
+    "    const line = buffered.slice(0, newline).trim();",
+    "    buffered = buffered.slice(newline + 1);",
+    "    if (!line) continue;",
+    "    const message = JSON.parse(line);",
+    "    if (message.id === undefined) continue;",
+    '    if (message.method === "initialize") {',
+    '      send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: message.params?.protocolVersion || "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "aera-e2e-docs", version: "1.0.0" } } });',
+    '    } else if (message.method === "tools/list") {',
+    '      send({ jsonrpc: "2.0", id: message.id, result: { tools: [{ name: "docs.read", description: "Read the selected enterprise document", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false } }] } });',
+    '    } else if (message.method === "tools/call") {',
+    `      send({ jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text: ${JSON.stringify(
+      toolResult,
+    )} }] } });`,
+    "    } else {",
+    '      send({ jsonrpc: "2.0", id: message.id, result: {} });',
+    "    }",
+    "  }",
+    "});",
+    "",
+  ].join("\n");
+}
+
+function mcpConfigBlock(input: {
+  serverName: string;
+  scriptPath: string;
+  secretName: string;
+  secretValue: string;
+}): string {
+  return [
+    "mcp_servers:",
+    `  ${input.serverName}:`,
+    `    command: ${JSON.stringify(process.execPath)}`,
+    "    args:",
+    `      - ${JSON.stringify(input.scriptPath)}`,
+    "    env:",
+    `      ${input.secretName}: ${JSON.stringify(input.secretValue)}`,
+    "    enabled: true",
+    "",
+  ].join("\n");
+}
+
+async function prepareAuthorCapabilities(
+  harnessValue: AgentControlHarness,
+  owner: AgentControlDevice,
+): Promise<{
+  skillAssets: AgentDraftAssetInput[];
+  mcpRequirement: AgentMcpRequirementV3;
+  scriptPath: string;
+}> {
+  const profilePath = deviceProfilePath(owner, "default");
+  const skillPath = join(profilePath, "skills", "research", "SKILL.md");
+  const scriptPath = join(harnessValue.root, "author-docs-mcp.cjs");
+  await mkdir(dirname(skillPath), { recursive: true });
+  await writeFile(
+    skillPath,
+    [
+      "---",
+      "name: research",
+      "description: Approved Organization research skill",
+      "---",
+      "",
+      LOCKED_V1_MARKER,
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    scriptPath,
+    mcpServerScript("AUTHOR_MCP_TOOL_RESULT"),
+    "utf8",
+  );
+  await appendFile(
+    join(profilePath, "config.yaml"),
+    mcpConfigBlock({
+      serverName: "author-docs",
+      scriptPath,
+      secretName: "AUTHOR_PRIVATE_TOKEN",
+      secretValue: AUTHOR_MCP_SECRET,
+    }),
+    "utf8",
+  );
+
+  const summary = unwrapAgent(
+    await invokeAgentera<AuthoringCapabilitySummary>(
+      owner,
+      "listAuthoringCapabilities",
+      "default",
+    ),
+  );
+  expect(summary.skills.map(({ name }) => name)).toContain("research");
+  expect(summary.mcpServers).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        logicalName: "author-docs",
+        enabled: true,
+        tools: expect.arrayContaining([
+          expect.objectContaining({ name: "docs.read" }),
+        ]),
+      }),
+    ]),
+  );
+  expect(JSON.stringify(summary)).not.toContain(AUTHOR_MCP_SECRET);
+  expect(JSON.stringify(summary)).not.toContain(scriptPath);
+
+  const skillPreview = unwrapAgent(
+    await invokeAgentera<SkillSnapshotPreview>(
+      owner,
+      "prepareInstalledSkillSnapshot",
+      { profileId: "default", skillName: "research" },
+    ),
+  );
+  const skillAssets = unwrapAgent(
+    await invokeAgentera<AgentDraftAssetInput[]>(
+      owner,
+      "confirmInstalledSkillSnapshot",
+      {
+        snapshotHandle: skillPreview.snapshotHandle,
+        confirmation: "copy-selected-skill-to-draft",
+      },
+    ),
+  );
+  const requirementPreview = unwrapAgent(
+    await invokeAgentera<McpRequirementPreview>(
+      owner,
+      "prepareMcpRequirement",
+      {
+        profileId: "default",
+        logicalName: "author-docs",
+        tools: ["docs.read"],
+        required: true,
+        permissionReason: "Read explicitly approved enterprise documents",
+      },
+    ),
+  );
+  const mcpRequirement = unwrapAgent(
+    await invokeAgentera<AgentMcpRequirementV3>(
+      owner,
+      "confirmMcpRequirement",
+      {
+        requirementHandle: requirementPreview.requirementHandle,
+        confirmation: "add-logical-mcp-requirement",
+      },
+    ),
+  );
+  return { skillAssets, mcpRequirement, scriptPath };
 }
 
 async function createAndSubmit(
@@ -534,6 +716,97 @@ async function startVisionModelServer(): Promise<string> {
         typeof body === "object" &&
         body !== null &&
         (body as { stream?: unknown }).stream === true;
+      const requestBody =
+        typeof body === "object" && body !== null
+          ? (body as {
+              messages?: Array<{ role?: unknown; content?: unknown }>;
+              tools?: Array<{
+                function?: { name?: unknown };
+              }>;
+            })
+          : {};
+      const capabilityTurn = JSON.stringify(
+        requestBody.messages ?? [],
+      ).includes(CAPABILITY_TOOL_PROMPT);
+      const hasCapabilityToolResult = (requestBody.messages ?? []).some(
+        (message) =>
+          message.role === "tool" &&
+          JSON.stringify(message.content).includes(MCP_TOOL_RESULT),
+      );
+      const capabilityToolName = requestBody.tools
+        ?.map((tool) => tool.function?.name)
+        .find(
+          (name): name is string =>
+            typeof name === "string" &&
+            name.startsWith("mcp__employee_docs__") &&
+            name.endsWith("docs_read"),
+        );
+      if (capabilityTurn && !hasCapabilityToolResult) {
+        if (!capabilityToolName) {
+          response.writeHead(400).end("compatible MCP tool is missing");
+          return;
+        }
+        const toolCall = {
+          index: 0,
+          id: "capability-binding-e2e-call",
+          type: "function",
+          function: {
+            name: capabilityToolName,
+            arguments: JSON.stringify({ query: "approved enterprise docs" }),
+          },
+        };
+        if (!stream) {
+          response.writeHead(200, { "Content-Type": "application/json" });
+          response.end(
+            JSON.stringify({
+              id: "capability-binding-e2e",
+              object: "chat.completion",
+              choices: [
+                {
+                  index: 0,
+                  message: {
+                    role: "assistant",
+                    content: null,
+                    tool_calls: [toolCall],
+                  },
+                  finish_reason: "tool_calls",
+                },
+              ],
+            }),
+          );
+          return;
+        }
+        response.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        });
+        response.write(
+          `data: ${JSON.stringify({
+            id: "capability-binding-e2e",
+            object: "chat.completion.chunk",
+            choices: [
+              {
+                index: 0,
+                delta: { role: "assistant", tool_calls: [toolCall] },
+                finish_reason: null,
+              },
+            ],
+          })}\n\n`,
+        );
+        response.write(
+          `data: ${JSON.stringify({
+            id: "capability-binding-e2e",
+            object: "chat.completion.chunk",
+            choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+          })}\n\n`,
+        );
+        response.end("data: [DONE]\n\n");
+        return;
+      }
+      const responseText = capabilityTurn
+        ? CAPABILITY_TOOL_REPLY
+        : "IMAGE_TRANSPORT_RECOVERED";
       if (!stream) {
         response.writeHead(200, { "Content-Type": "application/json" });
         response.end(
@@ -545,7 +818,7 @@ async function startVisionModelServer(): Promise<string> {
                 index: 0,
                 message: {
                   role: "assistant",
-                  content: "IMAGE_TRANSPORT_RECOVERED",
+                  content: responseText,
                 },
                 finish_reason: "stop",
               },
@@ -568,7 +841,7 @@ async function startVisionModelServer(): Promise<string> {
               index: 0,
               delta: {
                 role: "assistant",
-                content: "IMAGE_TRANSPORT_RECOVERED",
+                content: responseText,
               },
               finish_reason: null,
             },
@@ -731,6 +1004,11 @@ test("organization agent needs one current reviewer and keeps every employee run
   await selectOrganization(auditor.device, organization.id, "auditor");
   await selectOrganization(member.device, organization.id, "member");
 
+  const selectedCapabilities = await prepareAuthorCapabilities(
+    harness,
+    owner.device,
+  );
+
   expect(
     await invokeAgentera(
       member.device,
@@ -748,7 +1026,7 @@ test("organization agent needs one current reviewer and keeps every employee run
 
   const initial = await createAndSubmit(
     owner.device,
-    organizationDraft(LOCKED_V1_MARKER),
+    organizationDraft(LOCKED_V1_MARKER, undefined, selectedCapabilities),
   );
   const unpublishedInput = organizationDraft(UNPUBLISHED_AFTER_SUBMISSION);
   const editedWhilePending = unwrapAgent(
@@ -942,7 +1220,7 @@ test("organization agent needs one current reviewer and keeps every employee run
     ),
   ).toEqual([]);
 
-  const installation = unwrapAgent(
+  expect(
     await invokeAgentera<AgenteraAgentInstallationSummary>(
       member.device,
       "installVersion",
@@ -952,7 +1230,24 @@ test("organization agent needs one current reviewer and keeps every employee run
         profileName: MEMBER_PROFILE,
       },
     ),
-  );
+  ).toEqual({
+    ok: false,
+    errorCode: "profile_capability_configuration_required",
+  });
+  let installation = unwrapAgent(
+    await invokeAgentera<AgenteraAgentInstallationSummary[]>(
+      member.device,
+      "listInstallations",
+    ),
+  ).find(({ definitionId }) => definitionId === definition.id);
+  if (!installation) {
+    throw new Error("Pending capability Installation is missing.");
+  }
+  expect(installation).toMatchObject({
+    status: "pending",
+    retryCode: "profile_capability_configuration_required",
+    runtimeProfileId: expect.any(String),
+  });
   const installationOwner = localInstallationOwner(
     member.device,
     installation.id,
@@ -971,6 +1266,8 @@ test("organization agent needs one current reviewer and keeps every employee run
 
   const memberProfile = deviceProfilePath(member.device, MEMBER_PROFILE);
   const visionModelOrigin = await startVisionModelServer();
+  const memberMcpScript = join(harness.root, "employee-docs-mcp.cjs");
+  await writeFile(memberMcpScript, mcpServerScript(MCP_TOOL_RESULT), "utf8");
   await writeFile(
     join(memberProfile, "config.yaml"),
     [
@@ -979,6 +1276,12 @@ test("organization agent needs one current reviewer and keeps every employee run
       "  default: e2e-vision",
       `  base_url: "${visionModelOrigin}/v1"`,
       "",
+      mcpConfigBlock({
+        serverName: "employee-docs",
+        scriptPath: memberMcpScript,
+        secretName: "MEMBER_PRIVATE_TOKEN",
+        secretValue: MEMBER_MCP_SECRET,
+      }),
     ].join("\n"),
     "utf8",
   );
@@ -987,6 +1290,56 @@ test("organization agent needs one current reviewer and keeps every employee run
     "CUSTOM_API_KEY=e2e-loopback-only\n",
     "utf8",
   );
+  const bindingConfiguration = unwrapAgent(
+    await invokeAgentera<AgentCapabilityBindingConfiguration>(
+      member.device,
+      "listCapabilityBindings",
+      installation.id,
+    ),
+  );
+  expect(bindingConfiguration).toMatchObject({
+    installationId: installation.id,
+    requirements: [
+      {
+        logicalName: "author-docs",
+        tools: ["docs.read"],
+        required: true,
+        mappedLocalMcpName: null,
+        compatibleServers: [
+          {
+            displayName: "employee-docs",
+            current: false,
+            mappingHandle: expect.any(String),
+          },
+        ],
+      },
+    ],
+  });
+  const safeBindingJson = JSON.stringify(bindingConfiguration);
+  expect(safeBindingJson).not.toContain(AUTHOR_MCP_SECRET);
+  expect(safeBindingJson).not.toContain(MEMBER_MCP_SECRET);
+  expect(safeBindingJson).not.toContain(selectedCapabilities.scriptPath);
+  expect(safeBindingJson).not.toContain(memberMcpScript);
+  const mappingHandle =
+    bindingConfiguration.requirements[0]?.compatibleServers[0]?.mappingHandle;
+  if (!mappingHandle) {
+    throw new Error("Employee capability mapping handle is missing.");
+  }
+  const confirmedBinding = unwrapAgent(
+    await invokeAgentera<{
+      installation: AgenteraAgentInstallationSummary;
+      forceNewConversation: true;
+    }>(member.device, "confirmCapabilityBindings", {
+      installationId: installation.id,
+      mappingHandles: [mappingHandle],
+      confirmation: "bind-profile-capabilities",
+    }),
+  );
+  installation = confirmedBinding.installation;
+  expect(confirmedBinding).toMatchObject({
+    installation: { status: "active", retryCode: null },
+    forceNewConversation: true,
+  });
   const imageTurn = await member.device.page.evaluate(
     async ({ profile, attachment }) => {
       try {
@@ -1027,6 +1380,37 @@ test("organization agent needs one current reviewer and keeps every employee run
   expect(JSON.stringify(visionModelRequests)).toContain(
     "data:image/png;base64,",
   );
+  const capabilityTurn = await member.device.page.evaluate(
+    async ({ profile, prompt }) => {
+      try {
+        const result = await window.hermesAPI.sendMessage(
+          prompt,
+          profile,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          "member-capability-tool",
+        );
+        return { ok: true as const, result };
+      } catch (error) {
+        return {
+          ok: false as const,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    { profile: MEMBER_PROFILE, prompt: CAPABILITY_TOOL_PROMPT },
+  );
+  expect(capabilityTurn).toMatchObject({
+    ok: true,
+    result: { response: expect.stringContaining(CAPABILITY_TOOL_REPLY) },
+  });
+  const capabilityModelTraffic = JSON.stringify(visionModelRequests);
+  expect(capabilityModelTraffic).toContain("mcp__employee_docs__docs_read");
+  expect(capabilityModelTraffic).toContain(MCP_TOOL_RESULT);
+  expect(capabilityModelTraffic).not.toContain(AUTHOR_MCP_SECRET);
+  expect(capabilityModelTraffic).not.toContain(MEMBER_MCP_SECRET);
   await stopVisionModelServer();
   await writeMemberLearning(memberProfile);
   const memberPrivate = await privateProfileSnapshot(
@@ -1454,6 +1838,10 @@ test("organization agent needs one current reviewer and keeps every employee run
     OWNER_PRIVATE_SECRET,
     MEMBER_MEMORY_SECRET,
     MEMBER_SKILL_SECRET,
+    AUTHOR_MCP_SECRET,
+    MEMBER_MCP_SECRET,
+    selectedCapabilities.scriptPath,
+    memberMcpScript,
     createHash("sha256").update(OWNER_PRIVATE_SECRET).digest("hex"),
     createHash("sha256").update(MEMBER_MEMORY_SECRET).digest("hex"),
     createHash("sha256").update(MEMBER_SKILL_SECRET).digest("hex"),

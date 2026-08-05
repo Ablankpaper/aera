@@ -81,6 +81,9 @@ import type {
   AgentDraft,
   AgentDraftAssetInput,
   AgentDraftDetail,
+  AgentCapabilityBindingConfiguration,
+  ConfirmCapabilityBindingsInput,
+  ConfirmCapabilityBindingsResult,
   AgentMcpRequirementV3,
   AgenteraAgentControlPublicState,
   AgenteraAgentControlResult,
@@ -2527,6 +2530,17 @@ const agenteraAgentsAPI = {
     input: ConfirmMcpRequirementInput,
   ): Promise<AgenteraAgentControlResult<AgentMcpRequirementV3>> =>
     ipcRenderer.invoke("agentera-agents-confirm-mcp-requirement", input),
+  listCapabilityBindings: (
+    installationId: string,
+  ): Promise<AgenteraAgentControlResult<AgentCapabilityBindingConfiguration>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-list-capability-bindings",
+      installationId,
+    ),
+  confirmCapabilityBindings: (
+    input: ConfirmCapabilityBindingsInput,
+  ): Promise<AgenteraAgentControlResult<ConfirmCapabilityBindingsResult>> =>
+    ipcRenderer.invoke("agentera-agents-confirm-capability-bindings", input),
   preparePublication: (
     id: string,
     scope?: AgenteraAgentOperationScope,

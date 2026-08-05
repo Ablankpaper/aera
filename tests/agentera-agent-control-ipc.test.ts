@@ -12,6 +12,7 @@ import {
   parseClaimVersionInput,
   parseConfirmInstalledSkillSnapshotInput,
   parseConfirmMcpRequirementInput,
+  parseConfirmCapabilityBindingsInput,
   parseConfirmExperienceCandidateImportInput,
   parseConfirmOfficialAgentInstallInput,
   parseConfirmOrganizationExperienceCandidateImportInput,
@@ -77,6 +78,7 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-confirm-installed-skill-snapshot",
       "agentera-agents-prepare-mcp-requirement",
       "agentera-agents-confirm-mcp-requirement",
+      "agentera-agents-list-capability-bindings",
       "agentera-agents-list-eligible-experience-skills",
       "agentera-agents-list-eligible-organization-experience-skills",
       "agentera-agents-prepare-experience-candidate",
@@ -94,6 +96,7 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-install-version",
       "agentera-agents-claim-version",
       "agentera-agents-retry-installation",
+      "agentera-agents-confirm-capability-bindings",
       "agentera-agents-select-version",
       "agentera-agents-archive-installation",
       "agentera-agents-submit-experience-candidate",
@@ -328,6 +331,40 @@ describe("Agent control IPC contract", () => {
             ? parsePrepareMcpRequirementInput(forged)
             : parseConfirmMcpRequirementInput(forged),
       ).toThrow();
+    }
+  });
+
+  it("accepts only opaque local capability binding handles", () => {
+    expect(
+      parseConfirmCapabilityBindingsInput({
+        installationId: UUID,
+        mappingHandles: [VERSION_ID],
+        confirmation: "bind-profile-capabilities",
+      }),
+    ).toEqual({
+      installationId: UUID,
+      mappingHandles: [VERSION_ID],
+      confirmation: "bind-profile-capabilities",
+    });
+    for (const forged of [
+      {
+        installationId: UUID,
+        mappingHandles: [VERSION_ID],
+        confirmation: "yes",
+      },
+      {
+        installationId: UUID,
+        mappingHandles: [VERSION_ID],
+        confirmation: "bind-profile-capabilities",
+        localMcpName: "private-server",
+      },
+      {
+        installationId: UUID,
+        mappingHandles: [VERSION_ID, VERSION_ID],
+        confirmation: "bind-profile-capabilities",
+      },
+    ]) {
+      expect(() => parseConfirmCapabilityBindingsInput(forged)).toThrow();
     }
   });
 
@@ -978,6 +1015,8 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-confirm-installed-skill-snapshot",
       "agentera-agents-prepare-mcp-requirement",
       "agentera-agents-confirm-mcp-requirement",
+      "agentera-agents-list-capability-bindings",
+      "agentera-agents-confirm-capability-bindings",
       "agentera-agents-prepare-experience-candidate",
       "agentera-agents-submit-experience-candidate",
       "agentera-agents-list-my-experience-candidates",

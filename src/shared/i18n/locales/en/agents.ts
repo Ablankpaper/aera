@@ -192,6 +192,22 @@ export default {
     advancedSubtitle:
       "Experience promotion, enterprise review, and access governance",
   },
+  capabilityBinding: {
+    title: "Configure local capabilities",
+    requiredState:
+      "This Agent needs a local MCP capability mapping before it can be used.",
+    configure: "Configure capabilities",
+    privateBoundary:
+      "Choose compatible MCP servers from this device. Connection details and credentials stay in your local Profile.",
+    required: "Required",
+    optional: "Optional",
+    localMcp: "Compatible local MCP",
+    chooseRequired: "Choose a compatible MCP",
+    skipOptional: "Skip this optional capability",
+    noCompatibleServer: "No compatible enabled MCP is available.",
+    onlineRequired: "Reconnect to save the mapping and finish setup.",
+    save: "Save capability mapping",
+  },
   sync: "Sync",
   syncing: "Syncing…",
   syncSignedOut: "Not synced",

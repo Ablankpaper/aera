@@ -303,6 +303,7 @@ import {
   parseAgentControlId,
   parseAgentOperationScope,
   parseClaimVersionInput,
+  parseConfirmCapabilityBindingsInput,
   parseConfirmInstalledSkillSnapshotInput,
   parseConfirmMcpRequirementInput,
   parseConfirmExperienceCandidateImportInput,
@@ -1763,6 +1764,20 @@ export function registerIpcHandlers(context: IpcContext): void {
     (_event, input: unknown) =>
       requireAgentControl().confirmMcpRequirement(
         parseConfirmMcpRequirementInput(input),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-list-capability-bindings",
+    (_event, installationId: unknown) =>
+      requireAgentControl().listCapabilityBindings(
+        parseAgentControlId(installationId),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-confirm-capability-bindings",
+    (_event, input: unknown) =>
+      requireAgentControl().confirmCapabilityBindings(
+        parseConfirmCapabilityBindingsInput(input),
       ),
   );
   registerAgentControlHandler(

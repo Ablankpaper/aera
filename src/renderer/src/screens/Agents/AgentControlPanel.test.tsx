@@ -13,6 +13,7 @@ import type {
   AgenteraAgentControlContext,
   AgenteraAgentControlPublicState,
   AgenteraAgentControlResult,
+  AgentCapabilityBindingConfiguration,
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
   AgentRuntimeModelRoute,
@@ -122,8 +123,7 @@ function organizationSubmission(
     status,
     revision: status === "pending" ? 1 : 2,
     submittedAt: "2026-07-21T01:00:00.000Z",
-    terminalAt:
-      status === "pending" ? null : "2026-07-21T02:00:00.000Z",
+    terminalAt: status === "pending" ? null : "2026-07-21T02:00:00.000Z",
     review:
       status === "approved"
         ? {
@@ -171,6 +171,36 @@ function installation(
     retryCode: status === "pending" ? "materialization_failed" : null,
     createdAt: "2026-07-19T00:00:00.000Z",
     updatedAt: "2026-07-19T00:00:00.000Z",
+  };
+}
+
+function capabilityPendingInstallation(): AgenteraAgentInstallationSummary {
+  return {
+    ...installation("pending"),
+    runtimeProfileId: "44444444-4444-4444-8444-444444444444",
+    retryCode: "profile_capability_configuration_required",
+  };
+}
+
+function capabilityBindingConfiguration(): AgentCapabilityBindingConfiguration {
+  return {
+    installationId: INSTALLATION_ID,
+    requirements: [
+      {
+        logicalName: "private-docs",
+        tools: ["docs.read"],
+        required: true,
+        permissionReason: "Read employee-approved documents",
+        mappedLocalMcpName: null,
+        compatibleServers: [
+          {
+            mappingHandle: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            displayName: "employee-docs",
+            current: false,
+          },
+        ],
+      },
+    ],
   };
 }
 
@@ -332,6 +362,8 @@ function installAPI(
     installVersion: vi.fn(),
     claimVersion: vi.fn(),
     retryPendingInstallation: vi.fn(),
+    listCapabilityBindings: vi.fn(),
+    confirmCapabilityBindings: vi.fn(),
     selectInstallationVersion: vi.fn(),
     repairInstallationModel: vi.fn(),
     archiveInstallation: vi.fn(),
@@ -527,6 +559,80 @@ describe("AgentControlPanel", () => {
     fireEvent.click(action);
 
     expect(api.retryPendingInstallation).not.toHaveBeenCalled();
+  });
+
+  it("opens required capability mapping instead of retrying the pending installation blindly", async () => {
+    const completed = {
+      ...capabilityPendingInstallation(),
+      status: "active" as const,
+      retryCode: null,
+    };
+    const api = installAPI({
+      listDefinitions: vi.fn(async () => success([definition()])),
+      listInstallations: vi.fn(async () =>
+        success([capabilityPendingInstallation()]),
+      ),
+      listCapabilityBindings: vi.fn(async () =>
+        success(capabilityBindingConfiguration()),
+      ),
+      confirmCapabilityBindings: vi.fn(async () =>
+        success({
+          installation: completed,
+          forceNewConversation: true as const,
+        }),
+      ),
+    });
+    const onAgentReady = vi.fn(async () => true);
+    render(
+      <AgentControlPanel
+        profiles={[
+          {
+            id: "employee-agent",
+            name: "Employee Agent",
+            provider: "openai",
+            model: "gpt-5.6",
+            agentInstallationId: INSTALLATION_ID,
+            runtimeProfileId: capabilityPendingInstallation().runtimeProfileId,
+          },
+        ]}
+        onAgentReady={onAgentReady}
+      />,
+    );
+
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    const detail = screen.getByRole("dialog", { name: "Research Agent" });
+    expect(detail).toHaveTextContent("agents.capabilityBinding.requiredState");
+    fireEvent.click(
+      within(detail).getByRole("button", {
+        name: "agents.capabilityBinding.configure",
+      }),
+    );
+    const bindingDialog = await screen.findByRole("dialog", {
+      name: "agents.capabilityBinding.title",
+    });
+    fireEvent.change(
+      within(bindingDialog).getByRole("combobox", { name: "private-docs" }),
+      { target: { value: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" } },
+    );
+    fireEvent.click(
+      within(bindingDialog).getByRole("button", {
+        name: "agents.capabilityBinding.save",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(api.confirmCapabilityBindings).toHaveBeenCalledWith({
+        installationId: INSTALLATION_ID,
+        mappingHandles: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"],
+        confirmation: "bind-profile-capabilities",
+      }),
+    );
+    expect(api.retryPendingInstallation).not.toHaveBeenCalled();
+    expect(onAgentReady).toHaveBeenCalledWith(INSTALLATION_ID, {
+      forceNewRun: true,
+    });
   });
 
   it("distinguishes an empty filter from a truly empty My Agents catalog", async () => {
@@ -932,7 +1038,9 @@ describe("AgentControlPanel", () => {
       />,
     );
 
-    fireEvent.click((await screen.findByText("Research Agent")).closest("button")!);
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
     fireEvent.click(
       screen.getByRole("button", {
         name: "agents.control.organization.discardUnpublished",

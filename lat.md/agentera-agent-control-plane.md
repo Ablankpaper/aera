@@ -262,6 +262,8 @@ Manifest V3 MCP requirements are satisfied only by a local, owner/device/Install
 
 Schema v11 adds `agent_mcp_requirement_bindings` through [[src/main/agentera-agent-control/db.ts#AGENTERA_CONTROL_PLANE_SCHEMA_VERSION]]. [[src/main/agentera-agent-control/capability-binding-store.ts#CapabilityBindingStore]] stores only the logical requirement, local MCP name, verified tools, revision, and timestamps, then requires the live server to remain enabled and expose every requested tool.
 
+[[src/main/agentera-agent-control/capability-binding-service.ts#CapabilityBindingService]] gives the renderer only logical requirements, safe local MCP display names, and expiring opaque mapping handles. Confirmation rechecks the current owner, device, Installation, Profile, Version, requirement tools, live server, and binding revision before any local mapping changes. [[src/renderer/src/screens/Agents/AgentCapabilityBindingDialog.tsx#AgentCapabilityBindingDialog]] lets employees satisfy required mappings or skip optional ones without receiving connection configuration.
+
 A required missing, disabled, or drifted mapping leaves installation pending with `profile_capability_configuration_required`; an optional failure becomes a bounded degraded list. [[src/main/agentera-agent-control/hermes-adapter.ts#AgenteraHermesAdapter#prepareInstalledTurnPlan]] freezes the resolved names, tools, and revisions into the local RuntimeBinding and its tool digest for a new conversation. A later remap affects only a new ConversationBoundary, while the sanitized Cloud outbox excludes all local mapping bytes.
 
 ### Model policy and runtime selection
@@ -406,7 +408,7 @@ An approved submission carries its exact immutable Version ID. The service joins
 
 [[src/main/agentera-agent-control/hermes-adapter.ts#AgenteraHermesAdapter#prepareInstalledTurnPlan]] freezes the planned Version, policy, Runtime, Profile, model route, and tool digest per conversation before the atomic local snapshot commit. [[src/main/agentera-agent-control/hermes-adapter.ts#assertNewConversationContext]] rejects only a new Organization conversation after trusted context removal; an existing RuntimeBinding remains stable.
 
-[[tests/e2e/agentera-organization-agent.e2e.ts]] proves the four-role approval and installation flow, restart-safe dirty-draft reconciliation and one-card presentation, withdrawal, local draft deletion, Installation archive, v1/v2 binding stability, offline verified use, reconnect removal gate, read-only projection, and byte-identical employee-private Memory and Skills. Run it with `npm run test:e2e:organization-agent`.
+[[tests/e2e/agentera-organization-agent.e2e.ts]] proves the four-role approval and installation flow, Manifest V3 author Skill/MCP selection, employee-local opaque capability mapping to a different MCP, one real allowed tool reply, restart-safe dirty-draft reconciliation, one-card presentation, withdrawal, archive, version binding stability, offline verified use, reconnect removal, read-only projection, and private-state preservation. Run it with `npm run test:e2e:organization-agent`.
 
 ### Workspace Agent isolation
 

@@ -13,6 +13,7 @@ import type {
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
+  ConfirmCapabilityBindingsInput,
   ConfirmInstalledSkillSnapshotInput,
   ConfirmMcpRequirementInput,
   ConfirmOfficialAgentInstallInput,
@@ -319,6 +320,28 @@ export function parseConfirmMcpRequirementInput(
   return {
     requirementHandle: parseAgentControlId(value.requirementHandle),
     confirmation: "add-logical-mcp-requirement",
+  };
+}
+
+export function parseConfirmCapabilityBindingsInput(
+  value: unknown,
+): ConfirmCapabilityBindingsInput {
+  if (
+    !exactObject(value, ["installationId", "mappingHandles", "confirmation"]) ||
+    value.confirmation !== "bind-profile-capabilities" ||
+    !Array.isArray(value.mappingHandles) ||
+    value.mappingHandles.length > 32
+  ) {
+    return invalidRequest();
+  }
+  const mappingHandles = value.mappingHandles.map(parseAgentControlId);
+  if (new Set(mappingHandles).size !== mappingHandles.length) {
+    return invalidRequest();
+  }
+  return {
+    installationId: parseAgentControlId(value.installationId),
+    mappingHandles,
+    confirmation: "bind-profile-capabilities",
   };
 }
 
@@ -887,6 +910,9 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
   }
   if (code === "profile_model_configuration_failed") {
     return "profile_model_configuration_failed";
+  }
+  if (code === "profile_capability_configuration_required") {
+    return "profile_capability_configuration_required";
   }
   if (
     code === "service_unavailable" ||

@@ -193,6 +193,37 @@ export interface ConfirmMcpRequirementInput {
   confirmation: "add-logical-mcp-requirement";
 }
 
+export interface AgentCapabilityBindingCompatibleServer {
+  mappingHandle: string;
+  displayName: string;
+  current: boolean;
+}
+
+export interface AgentCapabilityBindingRequirement {
+  logicalName: string;
+  tools: string[];
+  required: boolean;
+  permissionReason: string;
+  mappedLocalMcpName: string | null;
+  compatibleServers: AgentCapabilityBindingCompatibleServer[];
+}
+
+export interface AgentCapabilityBindingConfiguration {
+  installationId: string;
+  requirements: AgentCapabilityBindingRequirement[];
+}
+
+export interface ConfirmCapabilityBindingsInput {
+  installationId: string;
+  mappingHandles: string[];
+  confirmation: "bind-profile-capabilities";
+}
+
+export interface ConfirmCapabilityBindingsResult {
+  installation: AgenteraAgentInstallationSummary;
+  forceNewConversation: true;
+}
+
 export interface AgentEditableManifestV3 extends AgentEditableManifestBase {
   schemaVersion: 3;
   modelPolicy: AgentEditableManifestV2["modelPolicy"];
@@ -496,6 +527,7 @@ export type AgenteraAgentControlErrorCode =
   | "publication_cache_recovery_failed"
   | "runtime_incompatible"
   | "profile_model_configuration_failed"
+  | "profile_capability_configuration_required"
   | "local_runtime_required"
   | "cloud_unavailable"
   | "workspace_forbidden"

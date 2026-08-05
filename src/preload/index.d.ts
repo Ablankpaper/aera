@@ -87,6 +87,9 @@ import type {
   AgentDraft,
   AgentDraftAssetInput,
   AgentDraftDetail,
+  AgentCapabilityBindingConfiguration,
+  ConfirmCapabilityBindingsInput,
+  ConfirmCapabilityBindingsResult,
   AgentMcpRequirementV3,
   AgenteraAgentControlPublicState,
   AgenteraAgentControlResult,
@@ -550,6 +553,12 @@ interface AgenteraAgentsAPI {
   confirmMcpRequirement: (
     input: ConfirmMcpRequirementInput,
   ) => Promise<AgenteraAgentControlResult<AgentMcpRequirementV3>>;
+  listCapabilityBindings: (
+    installationId: string,
+  ) => Promise<AgenteraAgentControlResult<AgentCapabilityBindingConfiguration>>;
+  confirmCapabilityBindings: (
+    input: ConfirmCapabilityBindingsInput,
+  ) => Promise<AgenteraAgentControlResult<ConfirmCapabilityBindingsResult>>;
   preparePublication: (
     id: string,
     scope?: AgenteraAgentOperationScope,

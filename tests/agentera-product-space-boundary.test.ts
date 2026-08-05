@@ -89,6 +89,34 @@ describe("Product Space selection is metadata, never a Hermes Profile switch", (
     }
   });
 
+  it("keeps local MCP connection details outside the capability binding bridge", () => {
+    const shared = source("src/shared/agentera-agent-control.ts");
+    const bindingContract = shared.slice(
+      shared.indexOf("export interface AgentCapabilityBindingCompatibleServer"),
+      shared.indexOf("export interface AgentEditableManifestV3"),
+    );
+    expect(bindingContract).toContain("mappingHandle: string");
+    expect(bindingContract).toContain("displayName: string");
+    expect(bindingContract).toContain("mappingHandles: string[]");
+    expect(bindingContract).not.toMatch(
+      /\burl\b|command|args|env|header|token|auth|credential|profilePath|localPath/i,
+    );
+
+    const preload = source("src/preload/index.ts");
+    const bridge = preload.slice(
+      preload.indexOf("listCapabilityBindings:"),
+      preload.indexOf(
+        "preparePublication:",
+        preload.indexOf("listCapabilityBindings:"),
+      ),
+    );
+    expect(bridge).toContain("agentera-agents-list-capability-bindings");
+    expect(bridge).toContain("agentera-agents-confirm-capability-bindings");
+    expect(bridge).not.toMatch(
+      /\burl\b|command|args|env|header|token|auth|credential|profilePath|localPath/i,
+    );
+  });
+
   it("keeps startup composition passive and legacy Workspace selection delegated", () => {
     const startup = source("src/main/app/start.ts");
     const composition = startup.slice(

@@ -211,6 +211,21 @@ export default {
     advancedTitle: "智能体治理",
     advancedSubtitle: "经验提升、企业审核与权限治理",
   },
+  capabilityBinding: {
+    title: "配置本机能力",
+    requiredState: "此智能体还需要映射本机 MCP 能力，完成后才能使用。",
+    configure: "配置能力",
+    privateBoundary:
+      "只选择本机兼容的 MCP；连接地址、命令、环境变量和凭据始终留在你的本地 Profile。",
+    required: "必需能力",
+    optional: "可选能力",
+    localMcp: "兼容的本机 MCP",
+    chooseRequired: "选择一个兼容 MCP",
+    skipOptional: "跳过此可选能力",
+    noCompatibleServer: "当前没有已启用且兼容的 MCP。",
+    onlineRequired: "重新联网后才能保存映射并完成准备。",
+    save: "保存能力映射",
+  },
   control: {
     personalSpace: "我的",
     personalSpaceTitle: "我的智能体",
