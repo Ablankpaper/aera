@@ -1,6 +1,12 @@
 // @vitest-environment node
 
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -26,6 +32,112 @@ afterEach(() => {
 });
 
 describe("Aera control-plane schema", () => {
+  it(
+    "migrates v9 Organization experience receipts without changing Workspace rows or files",
+    () => {
+      expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(10);
+      const root = mkdtempSync(join(tmpdir(), "agentera-control-v9-"));
+      roots.push(root);
+      const userDataPath = join(root, "user-data");
+      const paths = resolveAgenteraControlPlanePaths(userDataPath);
+      const workspaceSnapshotPath = join(
+        paths.candidatesPath,
+        "legacy-workspace-candidate.json",
+      );
+      mkdirSync(paths.candidatesPath, { recursive: true });
+      writeFileSync(workspaceSnapshotPath, "workspace-candidate-bytes", {
+        mode: 0o600,
+      });
+      const legacy = new DatabaseSync(paths.databasePath);
+      legacy.exec(`
+        CREATE TABLE local_experience_candidates (
+          id TEXT PRIMARY KEY,
+          tenant_id TEXT NOT NULL,
+          owner_id TEXT NOT NULL,
+          device_installation_id TEXT NOT NULL,
+          agent_installation_id TEXT NOT NULL,
+          workspace_id TEXT NOT NULL,
+          agent_definition_id TEXT NOT NULL,
+          source_agent_version_id TEXT NOT NULL,
+          runtime_profile_id TEXT NOT NULL,
+          skill_name TEXT NOT NULL,
+          source_relative_path TEXT NOT NULL,
+          content_digest TEXT NOT NULL,
+          dlp_contract_version TEXT NOT NULL,
+          snapshot_relative_path TEXT NOT NULL,
+          status TEXT NOT NULL,
+          cloud_candidate_id TEXT,
+          last_error_code TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          submitted_at TEXT
+        );
+        INSERT INTO local_experience_candidates (
+          id, tenant_id, owner_id, device_installation_id,
+          agent_installation_id, workspace_id, agent_definition_id,
+          source_agent_version_id, runtime_profile_id, skill_name,
+          source_relative_path, content_digest, dlp_contract_version,
+          snapshot_relative_path, status, created_at, updated_at
+        ) VALUES (
+          '11111111-1111-4111-8111-111111111111',
+          '22222222-2222-4222-8222-222222222222',
+          '33333333-3333-4333-8333-333333333333',
+          '44444444-4444-4444-8444-444444444444',
+          '55555555-5555-4555-8555-555555555555',
+          '66666666-6666-4666-8666-666666666666',
+          '77777777-7777-4777-8777-777777777777',
+          '88888888-8888-4888-8888-888888888888',
+          '99999999-9999-4999-8999-999999999999',
+          'weekly-summary', 'skills/weekly-summary',
+          '${"ab".repeat(32)}', 'experience-candidate-dlp-v1',
+          'legacy-workspace-candidate.json', 'PREPARED',
+          '2026-08-05T00:00:00.000Z', '2026-08-05T00:00:00.000Z'
+        );
+        PRAGMA user_version = 9;
+      `);
+      legacy.close();
+
+      const database = openAgenteraControlPlaneDatabase(userDataPath, {
+        databaseFactory: nodeSqliteFactory,
+      });
+      try {
+        expect(database.sqlite.prepare("PRAGMA user_version").get()).toEqual({
+          user_version: 10,
+        });
+        const tables = database.sqlite
+          .prepare(
+            `SELECT name FROM sqlite_master
+             WHERE type = 'table' AND name LIKE 'local_organization_experience_candidate%'
+             ORDER BY name`,
+          )
+          .all();
+        expect(tables).toEqual([
+          { name: "local_organization_experience_candidate_imports" },
+          { name: "local_organization_experience_candidates" },
+        ]);
+        expect(
+          database.sqlite
+            .prepare(
+              `SELECT id, workspace_id, content_digest, status
+               FROM local_experience_candidates`,
+            )
+            .get(),
+        ).toEqual({
+          id: "11111111-1111-4111-8111-111111111111",
+          workspace_id: "66666666-6666-4666-8666-666666666666",
+          content_digest: "ab".repeat(32),
+          status: "PREPARED",
+        });
+        expect(readFileSync(workspaceSnapshotPath, "utf8")).toBe(
+          "workspace-candidate-bytes",
+        );
+      } finally {
+        database.close();
+      }
+    },
+    databaseTestTimeoutMs,
+  );
+
   it(
     "creates durable Installation, restore, and conversation ownership boundaries in a fresh database",
     () => {

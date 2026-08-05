@@ -539,6 +539,50 @@ export default {
         "Apply this approved Skill to the verified latest version as a new local draft.",
       createDraft: "Create draft",
     },
+    organizationExperience: {
+      contribute: "Contribute experience",
+      contributionTitle: "Contribute Organization experience",
+      privateBoundary:
+        "Only the explicitly selected learned Skill is prepared. Memory, USER data, conversations, sessions, credentials, MCP configuration, Profile paths, and unrelated Skills stay on this computer.",
+      skill: "Learned Skill",
+      chooseSkill: "Choose one eligible Skill",
+      preparePreview: "Prepare local preview",
+      sourceAgent: "Source Organization Agent",
+      sourceVersion: "Source version",
+      dlpPassed: "Local privacy scan passed.",
+      onlineToSubmit:
+        "The immutable preview remains local. Reconnect to submit it for Organization review.",
+      submitConfirmation:
+        "I explicitly contribute this selected Skill and understand that approval does not publish an Agent version.",
+      submitForReview: "Submit for Organization review",
+      myCandidates: "My Organization experience",
+      noCandidates: "No Organization experience candidates yet.",
+      reviewQueue: "Organization experience governance",
+      onlineToReview: "Reconnect to review or inspect Organization experience.",
+      noReviewItems: "No Organization experience candidates are available.",
+      retryUpload: "Retry upload",
+      review: "Review",
+      view: "View",
+      reviewTitle: "Review Organization experience",
+      reviewBoundary:
+        "Review only this immutable Skill snapshot. Approval does not publish or modify the employee's source Profile.",
+      approve: "Approve",
+      reject: "Reject",
+      rejectionReason: "Rejection reason",
+      reason: {
+        not_reusable: "Not reusable across the Organization",
+        insufficient_quality: "Needs more quality work",
+        wrong_scope: "Belongs to another Agent or Organization",
+        policy_blocked: "Blocked by Organization policy",
+      },
+      safeNote: "Optional safe note",
+      commitReview: "Commit review",
+      replacementWarning:
+        "The latest published version already contains this Skill. Confirming creates or reopens a local next-version draft and changes only this Skill directory.",
+      importConfirmation:
+        "Apply this approved Skill to the verified latest Organization version as a local next-version draft.",
+      createDraft: "Create Organization draft",
+    },
     errors: {
       invalid_request: "The Agent request is invalid.",
       sign_in_required: "Sign in to Aera to continue.",

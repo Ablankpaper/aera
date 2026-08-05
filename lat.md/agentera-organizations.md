@@ -90,6 +90,14 @@ Approval records the exact submitted revision without overwriting newer edits, s
 
 [[src/renderer/src/screens/Agents/agentLifecycle.ts#deriveAgentLifecycle]] owns the state/action matrix. [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#deleteDraft]] enforces the pending guard in main, and the isolated Electron gate in [[tests/e2e/agentera-organization-agent.e2e.ts]] proves reconciliation after a main-process restart, one-card presentation, disposable draft deletion, withdrawal, and Installation archive.
 
+### Experience contribution and next-version import
+
+Employees may explicitly offer one agent-created Skill from an active Organization Agent Installation; the enterprise never receives surrounding private runtime state.
+
+Member, Admin, and Owner contribution begins with one selected local Skill and dual DLP. Owner/Admin terminal review can import an approved immutable snapshot into a device-local Organization draft based on the latest exact Version, while Auditor receives only read-only history. Approval never publishes, and a stale base fails before SQLite mutation.
+
+[[src/renderer/src/screens/Agents/OrganizationExperienceCandidatePanel.tsx#OrganizationExperienceCandidatePanel]] exposes explicit selection, preview, submission, governance, and local import without accepting renderer-supplied Organization, role, owner, device, Profile path, cloud origin, or snapshot bytes. [[tests/e2e/agentera-organization-experience.e2e.ts]] proves the two-account contribution-to-next-Version chain and private source-byte preservation.
+
 ### Role, policy, and DLP recheck
 
 Owner/Admin may submit and review, Auditor is read-only, and Member may discover and install; policy and DLP are rechecked at review time.

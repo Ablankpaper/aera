@@ -64,6 +64,12 @@ export type SubmitExperienceCandidateRequest =
   components["schemas"]["SubmitExperienceCandidateRequest"];
 export type ReviewExperienceCandidateRequest =
   components["schemas"]["ReviewExperienceCandidateRequest"];
+export type CloudOrganizationExperienceCandidateSummary =
+  components["schemas"]["OrganizationExperienceCandidateSummary"];
+export type CloudOrganizationExperienceCandidateDetail =
+  components["schemas"]["OrganizationExperienceCandidateDetail"];
+export type SubmitOrganizationExperienceCandidateRequest =
+  components["schemas"]["SubmitOrganizationExperienceCandidateRequest"];
 export type SubmitOrganizationAgentRequest =
   components["schemas"]["SubmitOrganizationAgentRequest"];
 export type ReviewOrganizationAgentRequest =
@@ -512,6 +518,148 @@ function detachExperienceCandidateDetail(
 ): CloudExperienceCandidateDetail {
   return {
     ...detachExperienceCandidateSummary(value),
+    bundle: {
+      schema_version: value.bundle.schema_version,
+      skill_name: value.bundle.skill_name,
+      assets: value.bundle.assets.map((asset) => ({
+        path: asset.path,
+        media_type: asset.media_type,
+        content: asset.content,
+      })),
+    },
+  };
+}
+
+function isOrganizationExperienceCandidateCore(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    isUUID(value.id) &&
+    isUUID(value.organization_id) &&
+    isUUID(value.agent_definition_id) &&
+    isUUID(value.source_agent_version_id) &&
+    (value.submitted_by_user_id === null ||
+      isUUID(value.submitted_by_user_id)) &&
+    isBoundedString(value.skill_name, 1, 100) &&
+    /^[a-z0-9](?:[a-z0-9_-]{0,98}[a-z0-9])?$/.test(value.skill_name) &&
+    value.dlp_contract_version === "experience-candidate-dlp-v1" &&
+    isDigest(value.content_digest) &&
+    isTimestamp(value.created_at) &&
+    (value.review === undefined || isExperienceCandidateReview(value.review))
+  );
+}
+
+function isOrganizationExperienceCandidateSummary(
+  value: unknown,
+): value is CloudOrganizationExperienceCandidateSummary {
+  return (
+    hasExactFields(
+      value,
+      [
+        "agent_definition_id",
+        "content_digest",
+        "created_at",
+        "dlp_contract_version",
+        "id",
+        "organization_id",
+        "skill_name",
+        "source_agent_version_id",
+        "submitted_by_user_id",
+      ],
+      ["review"],
+    ) && isOrganizationExperienceCandidateCore(value)
+  );
+}
+
+function canonicalDigestForCloudBundle(
+  bundle: CloudExperienceCandidateBundle,
+): string | null {
+  try {
+    return canonicalizeExperienceCandidate({
+      schemaVersion: 1,
+      skillName: bundle.skill_name,
+      assets: bundle.assets.map((asset) => ({
+        path: asset.path,
+        mediaType: asset.media_type,
+        content: asset.content,
+      })),
+    }).contentDigest;
+  } catch {
+    return null;
+  }
+}
+
+function isOrganizationExperienceCandidateDetail(
+  value: unknown,
+): value is CloudOrganizationExperienceCandidateDetail {
+  return (
+    hasExactFields(
+      value,
+      [
+        "agent_definition_id",
+        "bundle",
+        "content_digest",
+        "created_at",
+        "dlp_contract_version",
+        "id",
+        "organization_id",
+        "skill_name",
+        "source_agent_version_id",
+        "submitted_by_user_id",
+      ],
+      ["review"],
+    ) &&
+    isOrganizationExperienceCandidateCore(value) &&
+    isExperienceCandidateBundle(value.bundle) &&
+    value.bundle.skill_name === value.skill_name &&
+    canonicalDigestForCloudBundle(value.bundle) === value.content_digest
+  );
+}
+
+function isSubmitOrganizationExperienceCandidateRequest(
+  value: unknown,
+): value is SubmitOrganizationExperienceCandidateRequest {
+  return (
+    hasExactFields(value, [
+      "bundle",
+      "dlp_contract_version",
+      "schema_version",
+      "skill_name",
+      "source_version_id",
+    ]) &&
+    isUUID(value.source_version_id) &&
+    value.schema_version === 1 &&
+    value.dlp_contract_version === "experience-candidate-dlp-v1" &&
+    isBoundedString(value.skill_name, 1, 100) &&
+    /^[a-z0-9](?:[a-z0-9_-]{0,98}[a-z0-9])?$/.test(value.skill_name) &&
+    isExperienceCandidateBundle(value.bundle) &&
+    value.bundle.skill_name === value.skill_name
+  );
+}
+
+function detachOrganizationExperienceCandidateSummary(
+  value: CloudOrganizationExperienceCandidateSummary,
+): CloudOrganizationExperienceCandidateSummary {
+  return {
+    id: value.id,
+    organization_id: value.organization_id,
+    agent_definition_id: value.agent_definition_id,
+    source_agent_version_id: value.source_agent_version_id,
+    submitted_by_user_id: value.submitted_by_user_id,
+    skill_name: value.skill_name,
+    dlp_contract_version: value.dlp_contract_version,
+    content_digest: value.content_digest,
+    created_at: value.created_at,
+    ...(value.review === undefined
+      ? {}
+      : { review: detachExperienceCandidateReview(value.review) }),
+  };
+}
+
+function detachOrganizationExperienceCandidateDetail(
+  value: CloudOrganizationExperienceCandidateDetail,
+): CloudOrganizationExperienceCandidateDetail {
+  return {
+    ...detachOrganizationExperienceCandidateSummary(value),
     bundle: {
       schema_version: value.bundle.schema_version,
       skill_name: value.bundle.skill_name,
@@ -2276,6 +2424,129 @@ export class AgenteraAgentControlClient {
       isExperienceCandidateDetail,
     );
     return detachExperienceCandidateDetail(value);
+  }
+
+  async submitOrganizationExperienceCandidate(
+    organizationId: string,
+    definitionId: string,
+    body: SubmitOrganizationExperienceCandidateRequest,
+    idempotencyKey: string,
+  ): Promise<CloudOrganizationExperienceCandidateDetail> {
+    requireUUID(organizationId);
+    requireUUID(definitionId);
+    requireIdempotencyKey(idempotencyKey);
+    if (!isSubmitOrganizationExperienceCandidateRequest(body)) {
+      throw new AgenteraAgentControlClientError(0, "invalid_request");
+    }
+    const expectedDigest = canonicalDigestForCloudBundle(body.bundle);
+    if (expectedDigest === null) {
+      throw new AgenteraAgentControlClientError(0, "invalid_request");
+    }
+    const value = await this.requestJSON(
+      `/api/v1/organizations/${organizationId}/agent-definitions/${definitionId}/experience-candidates`,
+      { method: "POST", body, idempotencyKey, expectedStatus: 201 },
+      (candidate): candidate is CloudOrganizationExperienceCandidateDetail =>
+        isOrganizationExperienceCandidateDetail(candidate) &&
+        candidate.organization_id === organizationId &&
+        candidate.agent_definition_id === definitionId &&
+        candidate.source_agent_version_id === body.source_version_id &&
+        candidate.skill_name === body.skill_name &&
+        candidate.content_digest === expectedDigest &&
+        candidate.review === undefined,
+    );
+    return detachOrganizationExperienceCandidateDetail(value);
+  }
+
+  async listOwnOrganizationExperienceCandidates(
+    organizationId: string,
+  ): Promise<CloudOrganizationExperienceCandidateSummary[]> {
+    requireUUID(organizationId);
+    const value = await this.requestJSON(
+      `/api/v1/organizations/${organizationId}/experience-candidates/mine`,
+      { expectedStatus: 200 },
+      (
+        candidate,
+      ): candidate is {
+        candidates: readonly CloudOrganizationExperienceCandidateSummary[];
+      } =>
+        hasExactFields(candidate, ["candidates"]) &&
+        Array.isArray(candidate.candidates) &&
+        candidate.candidates.every(
+          (item) =>
+            isOrganizationExperienceCandidateSummary(item) &&
+            item.organization_id === organizationId,
+        ),
+    );
+    return value.candidates.map(detachOrganizationExperienceCandidateSummary);
+  }
+
+  async listOrganizationExperienceCandidates(
+    organizationId: string,
+  ): Promise<CloudOrganizationExperienceCandidateSummary[]> {
+    requireUUID(organizationId);
+    const value = await this.requestJSON(
+      `/api/v1/organizations/${organizationId}/experience-candidates`,
+      { expectedStatus: 200 },
+      (
+        candidate,
+      ): candidate is {
+        candidates: readonly CloudOrganizationExperienceCandidateSummary[];
+      } =>
+        hasExactFields(candidate, ["candidates"]) &&
+        Array.isArray(candidate.candidates) &&
+        candidate.candidates.every(
+          (item) =>
+            isOrganizationExperienceCandidateSummary(item) &&
+            item.organization_id === organizationId,
+        ),
+    );
+    return value.candidates.map(detachOrganizationExperienceCandidateSummary);
+  }
+
+  async getOrganizationExperienceCandidate(
+    organizationId: string,
+    candidateId: string,
+  ): Promise<CloudOrganizationExperienceCandidateDetail> {
+    requireUUID(organizationId);
+    requireUUID(candidateId);
+    const value = await this.requestJSON(
+      `/api/v1/organizations/${organizationId}/experience-candidates/${candidateId}`,
+      { expectedStatus: 200 },
+      (candidate): candidate is CloudOrganizationExperienceCandidateDetail =>
+        isOrganizationExperienceCandidateDetail(candidate) &&
+        candidate.organization_id === organizationId &&
+        candidate.id === candidateId,
+    );
+    return detachOrganizationExperienceCandidateDetail(value);
+  }
+
+  async reviewOrganizationExperienceCandidate(
+    organizationId: string,
+    candidateId: string,
+    body: ReviewExperienceCandidateRequest,
+    idempotencyKey: string,
+  ): Promise<CloudOrganizationExperienceCandidateDetail> {
+    requireUUID(organizationId);
+    requireUUID(candidateId);
+    requireIdempotencyKey(idempotencyKey);
+    if (!isReviewExperienceCandidateRequest(body)) {
+      throw new AgenteraAgentControlClientError(0, "invalid_request");
+    }
+    const value = await this.requestJSON(
+      `/api/v1/organizations/${organizationId}/experience-candidates/${candidateId}/review`,
+      { method: "POST", body, idempotencyKey, expectedStatus: 200 },
+      (candidate): candidate is CloudOrganizationExperienceCandidateDetail =>
+        isOrganizationExperienceCandidateDetail(candidate) &&
+        candidate.organization_id === organizationId &&
+        candidate.id === candidateId &&
+        candidate.review !== undefined &&
+        candidate.review.decision === body.decision &&
+        (candidate.review.reason_code ?? undefined) ===
+          (body.reason_code ?? undefined) &&
+        (candidate.review.safe_note ?? undefined) ===
+          (body.safe_note ?? undefined),
+    );
+    return detachOrganizationExperienceCandidateDetail(value);
   }
 
   getSigningKeys(): Promise<AgentSigningKeySet> {

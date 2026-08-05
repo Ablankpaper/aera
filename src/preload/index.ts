@@ -94,6 +94,7 @@ import type {
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
   ConfirmOfficialAgentInstallInput,
+  ConfirmOrganizationExperienceCandidateImportInput,
   ConfirmOrganizationReviewInput,
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
@@ -103,6 +104,10 @@ import type {
   ExperienceCandidateImportPreview,
   ExperienceCandidatePreview,
   ExperienceCandidateSummary,
+  OrganizationExperienceCandidateDetail,
+  OrganizationExperienceCandidateImportPreview,
+  OrganizationExperienceCandidatePreview,
+  OrganizationExperienceCandidateSummary,
   OrganizationAgentSubmissionDetail,
   OrganizationAgentSubmissionSummary,
   OrganizationReviewPreview,
@@ -113,10 +118,13 @@ import type {
   OfficialAgentSummary,
   OfficialManagedUpdate,
   PrepareExperienceCandidateInput,
+  PrepareOrganizationExperienceCandidateInput,
   PrepareOrganizationReviewInput,
   PublicationPreview,
   PublishedRevision,
   ReviewExperienceCandidateInput,
+  ReviewOrganizationExperienceCandidateInput,
+  SubmitOrganizationExperienceCandidateInput,
   SubmitExperienceCandidateInput,
   UpdateAgentDraftInput,
 } from "../shared/agentera-agent-control";
@@ -2480,11 +2488,7 @@ const agenteraAgentsAPI = {
     id: string,
     scope?: AgenteraAgentOperationScope,
   ): Promise<AgenteraAgentControlResult<true>> =>
-    ipcRenderer.invoke(
-      "agentera-agents-discard-unpublished-draft",
-      id,
-      scope,
-    ),
+    ipcRenderer.invoke("agentera-agents-discard-unpublished-draft", id, scope),
   preparePublication: (
     id: string,
     scope?: AgenteraAgentOperationScope,
@@ -2658,6 +2662,77 @@ const agenteraAgentsAPI = {
   ): Promise<AgenteraAgentControlResult<AgentDraftDetail>> =>
     ipcRenderer.invoke(
       "agentera-agents-confirm-experience-candidate-import",
+      input,
+    ),
+  listEligibleOrganizationExperienceSkills: (
+    installationId: string,
+  ): Promise<AgenteraAgentControlResult<EligibleExperienceSkill[]>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-list-eligible-organization-experience-skills",
+      installationId,
+    ),
+  prepareOrganizationExperienceCandidate: (
+    input: PrepareOrganizationExperienceCandidateInput,
+  ): Promise<
+    AgenteraAgentControlResult<OrganizationExperienceCandidatePreview>
+  > =>
+    ipcRenderer.invoke(
+      "agentera-agents-prepare-organization-experience-candidate",
+      input,
+    ),
+  submitOrganizationExperienceCandidate: (
+    input: SubmitOrganizationExperienceCandidateInput,
+  ): Promise<
+    AgenteraAgentControlResult<OrganizationExperienceCandidateSummary>
+  > =>
+    ipcRenderer.invoke(
+      "agentera-agents-submit-organization-experience-candidate",
+      input,
+    ),
+  listMyOrganizationExperienceCandidates: (): Promise<
+    AgenteraAgentControlResult<OrganizationExperienceCandidateSummary[]>
+  > =>
+    ipcRenderer.invoke(
+      "agentera-agents-list-my-organization-experience-candidates",
+    ),
+  listOrganizationExperienceReviewQueue: (): Promise<
+    AgenteraAgentControlResult<OrganizationExperienceCandidateSummary[]>
+  > =>
+    ipcRenderer.invoke(
+      "agentera-agents-list-organization-experience-review-queue",
+    ),
+  getOrganizationExperienceCandidate: (
+    candidateId: string,
+  ): Promise<
+    AgenteraAgentControlResult<OrganizationExperienceCandidateDetail>
+  > =>
+    ipcRenderer.invoke(
+      "agentera-agents-get-organization-experience-candidate",
+      candidateId,
+    ),
+  reviewOrganizationExperienceCandidate: (
+    input: ReviewOrganizationExperienceCandidateInput,
+  ): Promise<
+    AgenteraAgentControlResult<OrganizationExperienceCandidateDetail>
+  > =>
+    ipcRenderer.invoke(
+      "agentera-agents-review-organization-experience-candidate",
+      input,
+    ),
+  prepareOrganizationExperienceImport: (
+    candidateId: string,
+  ): Promise<
+    AgenteraAgentControlResult<OrganizationExperienceCandidateImportPreview>
+  > =>
+    ipcRenderer.invoke(
+      "agentera-agents-prepare-organization-experience-import",
+      candidateId,
+    ),
+  confirmOrganizationExperienceImport: (
+    input: ConfirmOrganizationExperienceCandidateImportInput,
+  ): Promise<AgenteraAgentControlResult<AgentDraftDetail>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-confirm-organization-experience-import",
       input,
     ),
   onStateChanged: (

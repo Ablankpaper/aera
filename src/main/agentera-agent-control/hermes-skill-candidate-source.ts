@@ -41,6 +41,7 @@ const FORBIDDEN_ENTRY_NAMES = new Set([
 ]);
 
 export interface HermesSkillCandidateRead {
+  provenance: { kind: "agent-created" };
   sourceRelativePath: string;
   bundle: ExperienceCandidateBundleV1;
 }
@@ -238,6 +239,7 @@ export class ReadOnlyHermesSkillCandidateSource implements HermesSkillCandidateS
       const descriptor = matches[0];
       const bundle = this.readBundle(root, descriptor);
       return {
+        provenance: { kind: "agent-created" },
         sourceRelativePath: `skills/${descriptor.directoryRelativePath}`,
         bundle,
       };

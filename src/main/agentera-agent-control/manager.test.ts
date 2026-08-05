@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -102,6 +102,8 @@ describe("Agent control Organization Foundation context", () => {
       getConnectionMode: () => "local" | "remote" | "ssh";
       hermesAdapter: AgenteraHermesAdapter;
       verifyProfileBinding: () => { agentInstallationId: string | null };
+      resolveAttachedProfilePath: () => string;
+      randomUUID: () => string;
     }> = {},
   ): {
     manager: AgenteraAgentControlManager;
@@ -131,6 +133,8 @@ describe("Agent control Organization Foundation context", () => {
             runtimeOverrides.verifyProfileBinding ?? vi.fn(),
           bindFreshProfile: vi.fn(),
           claimProfile: vi.fn(),
+          resolveAttachedProfilePath:
+            runtimeOverrides.resolveAttachedProfilePath ?? vi.fn(),
         } as never,
         profiles: {
           profileIdForAgentName: vi.fn(() => "fresh-agent"),
@@ -158,6 +162,7 @@ describe("Agent control Organization Foundation context", () => {
           runtimeOverrides.getConnectionMode ?? (() => "local"),
         assertEntitled: () => undefined,
         hermesAdapter: runtimeOverrides.hermesAdapter,
+        randomUUID: runtimeOverrides.randomUUID,
       }),
     };
   }
@@ -227,6 +232,83 @@ describe("Agent control Organization Foundation context", () => {
       organizationId: ORGANIZATION_ID,
       role: "member",
     });
+  });
+
+  it("routes explicit Organization experience preparation through trusted Installation and Profile state", async () => {
+    const profileRoot = mkdtempSync(
+      join(tmpdir(), "agentera-organization-experience-profile-"),
+    );
+    roots.push(profileRoot);
+    const skillRoot = join(profileRoot, "skills", "weekly-summary");
+    mkdirSync(skillRoot, { recursive: true });
+    writeFileSync(
+      join(profileRoot, "skills", ".usage.json"),
+      JSON.stringify({ "weekly-summary": { created_by: "agent" } }),
+    );
+    writeFileSync(
+      join(skillRoot, "SKILL.md"),
+      "---\nname: weekly-summary\ndescription: Weekly summary\n---\n# Weekly summary\n",
+    );
+    const ids = [
+      "60000000-0000-4000-8000-000000000001",
+      "60000000-0000-4000-8000-000000000002",
+      "60000000-0000-4000-8000-000000000003",
+      "60000000-0000-4000-8000-000000000004",
+    ];
+    const { manager, database } = fullManager(
+      () => ({
+        scope: "ORGANIZATION",
+        organizationId: ORGANIZATION_ID,
+        role: "member",
+      }),
+      {},
+      {
+        resolveAttachedProfilePath: () => profileRoot,
+        randomUUID: () => ids.shift()!,
+      },
+    );
+    const installationId = "60000000-0000-4000-8000-000000000005";
+    const profileId = "60000000-0000-4000-8000-000000000006";
+    database.sqlite
+      .prepare(
+        `INSERT INTO local_agent_installations (
+           agent_installation_id, tenant_id, owner_id, device_installation_id,
+           source_scope, source_workspace_id, source_organization_id,
+           official_release_id, selected_release_revision_id, update_policy,
+           definition_id, selected_version_id, runtime_profile_id,
+           policy_snapshot_id, status, retry_code, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 'ORGANIZATION', NULL, ?, NULL, NULL, 'manual',
+                   ?, ?, ?, NULL, 'active', NULL, ?, ?)`,
+      )
+      .run(
+        installationId,
+        OWNER.tenantId,
+        OWNER.ownerId,
+        OWNER.deviceInstallationId,
+        ORGANIZATION_ID,
+        ORGANIZATION_DEFINITION_ID,
+        ORGANIZATION_VERSION_ID,
+        profileId,
+        "2026-08-05T00:00:00.000Z",
+        "2026-08-05T00:00:00.000Z",
+      );
+
+    await expect(
+      manager.listEligibleOrganizationExperienceSkills(installationId),
+    ).resolves.toEqual([
+      { skillName: "weekly-summary", description: "Weekly summary" },
+    ]);
+    const preview = await manager.prepareOrganizationExperienceCandidate({
+      installationId,
+      skillName: "weekly-summary",
+    });
+    expect(preview).toMatchObject({
+      installationId,
+      sourceAgentVersionId: ORGANIZATION_VERSION_ID,
+      skillName: "weekly-summary",
+      candidateHandle: expect.any(String),
+    });
+    expect(JSON.stringify(preview)).not.toMatch(/profile|sourceRelativePath/i);
   });
 
   it("keeps an installed personal Agent conversation in the selected Organization run scope", () => {

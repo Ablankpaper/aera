@@ -25,9 +25,13 @@ import type {
   OrganizationSubmissionPreview,
   OrganizationWithdrawalPreview,
   PrepareExperienceCandidateInput,
+  PrepareOrganizationExperienceCandidateInput,
   PrepareOrganizationReviewInput,
+  ReviewOrganizationExperienceCandidateInput,
   ReviewExperienceCandidateInput,
+  SubmitOrganizationExperienceCandidateInput,
   SubmitExperienceCandidateInput,
+  ConfirmOrganizationExperienceCandidateImportInput,
   UpdateAgentDraftInput,
 } from "../../shared/agentera-agent-control";
 import type { AgentDefinition, AgentVersion } from "./client";
@@ -407,6 +411,99 @@ export function parseConfirmExperienceCandidateImportInput(
   return {
     importHandle: parseAgentControlId(value.importHandle),
     confirmation: "apply-approved-skill-to-latest",
+  };
+}
+
+export function parsePrepareOrganizationExperienceCandidateInput(
+  value: unknown,
+): PrepareOrganizationExperienceCandidateInput {
+  if (!exactObject(value, ["installationId", "skillName"])) {
+    return invalidRequest();
+  }
+  if (
+    typeof value.skillName !== "string" ||
+    !SKILL_NAME_PATTERN.test(value.skillName)
+  ) {
+    return invalidRequest();
+  }
+  return {
+    installationId: parseAgentControlId(value.installationId),
+    skillName: value.skillName,
+  };
+}
+
+export function parseSubmitOrganizationExperienceCandidateInput(
+  value: unknown,
+): SubmitOrganizationExperienceCandidateInput {
+  if (
+    !exactObject(value, ["candidateHandle", "confirmation"]) ||
+    value.confirmation !== "submit-selected-organization-skill"
+  ) {
+    return invalidRequest();
+  }
+  return {
+    candidateHandle: parseAgentControlId(value.candidateHandle),
+    confirmation: "submit-selected-organization-skill",
+  };
+}
+
+export function parseReviewOrganizationExperienceCandidateInput(
+  value: unknown,
+): ReviewOrganizationExperienceCandidateInput {
+  if (
+    !exactObject(value, [
+      "reviewHandle",
+      "confirmation",
+      "reasonCode",
+      "safeNote",
+    ])
+  ) {
+    return invalidRequest();
+  }
+  const reviewHandle = parseAgentControlId(value.reviewHandle);
+  if (value.confirmation === "approve-organization-experience") {
+    if (value.reasonCode !== null || value.safeNote !== null) {
+      return invalidRequest();
+    }
+    return {
+      reviewHandle,
+      confirmation: "approve-organization-experience",
+      reasonCode: null,
+      safeNote: null,
+    };
+  }
+  if (
+    value.confirmation !== "reject-organization-experience" ||
+    typeof value.reasonCode !== "string" ||
+    !REASON_CODE_PATTERN.test(value.reasonCode) ||
+    (value.safeNote !== null &&
+      (typeof value.safeNote !== "string" ||
+        value.safeNote.length < 1 ||
+        value.safeNote.length > MAX_SAFE_NOTE_LENGTH ||
+        /[\r\n\0]/.test(value.safeNote)))
+  ) {
+    return invalidRequest();
+  }
+  return {
+    reviewHandle,
+    confirmation: "reject-organization-experience",
+    reasonCode: value.reasonCode,
+    safeNote: value.safeNote,
+  };
+}
+
+export function parseConfirmOrganizationExperienceCandidateImportInput(
+  value: unknown,
+): ConfirmOrganizationExperienceCandidateImportInput {
+  if (
+    !exactObject(value, ["importHandle", "confirmation"]) ||
+    value.confirmation !== "apply-approved-skill-to-organization-draft"
+  ) {
+    return invalidRequest();
+  }
+  return {
+    importHandle: parseAgentControlId(value.importHandle),
+    confirmation: "apply-approved-skill-to-organization-draft",
   };
 }
 

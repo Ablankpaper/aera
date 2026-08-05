@@ -229,6 +229,7 @@ describe("ReadOnlyHermesSkillCandidateSource", () => {
     const before = treeDigest(root);
     const source = new ReadOnlyHermesSkillCandidateSource();
     const flat = source.readCandidate(profilePath, "flat-skill");
+    expect(flat.provenance).toEqual({ kind: "agent-created" });
     expect(flat.sourceRelativePath).toBe("skills/flat-skill");
     expect(flat.bundle.skillName).toBe("flat-skill");
     expect(

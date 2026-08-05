@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import type { components } from "../../shared/agentera-cloud-api.generated";
 import type { InstallationIdentity } from "../agentera-auth/store";
+import { canonicalizeExperienceCandidate } from "./experience-candidate-contract";
 import {
   AgenteraAgentControlClient,
   AgenteraAgentControlClientError,
@@ -21,6 +22,8 @@ import {
   type CloudExperienceCandidateBundle,
   type CloudExperienceCandidateDetail,
   type CloudExperienceCandidateSummary,
+  type CloudOrganizationExperienceCandidateDetail,
+  type CloudOrganizationExperienceCandidateSummary,
   type OrganizationAgentSubmissionDetailRecord,
   type OrganizationAgentSubmissionRecord,
   type SubmitOrganizationAgentRequest,
@@ -266,6 +269,37 @@ function experienceSummary(reviewed = false): CloudExperienceCandidateSummary {
 
 function experienceDetail(reviewed = false): CloudExperienceCandidateDetail {
   return { ...experienceSummary(reviewed), bundle: experienceBundle() };
+}
+
+function organizationExperienceSummary(
+  reviewed = false,
+): CloudOrganizationExperienceCandidateSummary {
+  const { workspace_id: _workspaceId, ...summary } =
+    experienceSummary(reviewed);
+  return {
+    ...summary,
+    organization_id: ORGANIZATION_ID,
+    content_digest: canonicalizeExperienceCandidate({
+      schemaVersion: 1,
+      skillName: "weekly-summary",
+      assets: [
+        {
+          path: "skills/weekly-summary/SKILL.md",
+          mediaType: "text/markdown",
+          content: "# Weekly summary\n",
+        },
+      ],
+    }).contentDigest,
+  };
+}
+
+function organizationExperienceDetail(
+  reviewed = false,
+): CloudOrganizationExperienceCandidateDetail {
+  return {
+    ...organizationExperienceSummary(reviewed),
+    bundle: experienceBundle(),
+  };
 }
 
 function organizationAgentPackage(): Pick<
@@ -1177,6 +1211,124 @@ describe("AgenteraAgentControlClient", () => {
         ).rejects.toMatchObject({ status, code });
       },
     );
+  });
+
+  describe("Organization ExperienceCandidate cloud contract", () => {
+    it("uses the five exact Organization routes and strict canonical bodies", async () => {
+      const fetcher = vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse(organizationExperienceDetail(), 201),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({ candidates: [organizationExperienceSummary()] }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({ candidates: [organizationExperienceSummary()] }),
+        )
+        .mockResolvedValueOnce(jsonResponse(organizationExperienceDetail()))
+        .mockResolvedValueOnce(
+          jsonResponse(organizationExperienceDetail(true)),
+        );
+      const client = new AgenteraAgentControlClient({
+        origin: "http://127.0.0.1:8086",
+        getAccessToken: () => "agentera-product-access",
+        getInstallationIdentity: () => deviceIdentity(),
+        fetch: fetcher as typeof fetch,
+      });
+      const submitBody = {
+        source_version_id: VERSION_ID,
+        skill_name: "weekly-summary",
+        schema_version: 1 as const,
+        dlp_contract_version: "experience-candidate-dlp-v1" as const,
+        bundle: experienceBundle(),
+      };
+
+      await expect(
+        client.submitOrganizationExperienceCandidate(
+          ORGANIZATION_ID,
+          DEFINITION_ID,
+          submitBody,
+          "organization-candidate-submit-once",
+        ),
+      ).resolves.toEqual(organizationExperienceDetail());
+      await expect(
+        client.listOwnOrganizationExperienceCandidates(ORGANIZATION_ID),
+      ).resolves.toEqual([organizationExperienceSummary()]);
+      await expect(
+        client.listOrganizationExperienceCandidates(ORGANIZATION_ID),
+      ).resolves.toEqual([organizationExperienceSummary()]);
+      await expect(
+        client.getOrganizationExperienceCandidate(
+          ORGANIZATION_ID,
+          CANDIDATE_ID,
+        ),
+      ).resolves.toEqual(organizationExperienceDetail());
+      await expect(
+        client.reviewOrganizationExperienceCandidate(
+          ORGANIZATION_ID,
+          CANDIDATE_ID,
+          {
+            decision: "REJECTED",
+            reason_code: "not_reusable",
+            safe_note: "Needs a reusable template.",
+          },
+          "organization-candidate-review-once",
+        ),
+      ).resolves.toEqual(organizationExperienceDetail(true));
+
+      expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual([
+        `http://127.0.0.1:8086/api/v1/organizations/${ORGANIZATION_ID}/agent-definitions/${DEFINITION_ID}/experience-candidates`,
+        `http://127.0.0.1:8086/api/v1/organizations/${ORGANIZATION_ID}/experience-candidates/mine`,
+        `http://127.0.0.1:8086/api/v1/organizations/${ORGANIZATION_ID}/experience-candidates`,
+        `http://127.0.0.1:8086/api/v1/organizations/${ORGANIZATION_ID}/experience-candidates/${CANDIDATE_ID}`,
+        `http://127.0.0.1:8086/api/v1/organizations/${ORGANIZATION_ID}/experience-candidates/${CANDIDATE_ID}/review`,
+      ]);
+      expect(fetcher.mock.calls[0][1]?.headers).toMatchObject({
+        "idempotency-key": "organization-candidate-submit-once",
+      });
+      expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toEqual(
+        submitBody,
+      );
+      expect(JSON.stringify(fetcher.mock.calls[0][1]?.body)).not.toMatch(
+        /workspace|profile|token|memory|user\.md/i,
+      );
+    });
+
+    it("fails closed on cross-Organization, candidate, digest, and review mismatches", async () => {
+      const otherOrganizationId = "14141414-1414-4414-8414-141414141414";
+      const otherCandidateId = "15151515-1515-4515-8515-151515151515";
+      const mismatches = [
+        {
+          ...organizationExperienceDetail(),
+          organization_id: otherOrganizationId,
+        },
+        { ...organizationExperienceDetail(), id: otherCandidateId },
+        { ...organizationExperienceDetail(), content_digest: "cd".repeat(32) },
+        {
+          ...organizationExperienceDetail(true),
+          review: {
+            ...organizationExperienceDetail(true).review!,
+            decision: "APPROVED" as const,
+            reason_code: "unexpected",
+          },
+        },
+      ];
+      for (const response of mismatches) {
+        const client = new AgenteraAgentControlClient({
+          origin: "http://127.0.0.1:8086",
+          getAccessToken: () => "agentera-product-access",
+          getInstallationIdentity: () => deviceIdentity(),
+          fetch: vi.fn(async () => jsonResponse(response)) as typeof fetch,
+        });
+        await expect(
+          client.getOrganizationExperienceCandidate(
+            ORGANIZATION_ID,
+            CANDIDATE_ID,
+          ),
+        ).rejects.toMatchObject({ code: "invalid_response" });
+      }
+    });
   });
 
   it("uses only trusted main-process headers for the official catalog", async () => {

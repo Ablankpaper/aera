@@ -100,6 +100,7 @@ import type {
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
   ConfirmOfficialAgentInstallInput,
+  ConfirmOrganizationExperienceCandidateImportInput,
   ConfirmOrganizationReviewInput,
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
@@ -109,6 +110,10 @@ import type {
   ExperienceCandidateImportPreview,
   ExperienceCandidatePreview,
   ExperienceCandidateSummary,
+  OrganizationExperienceCandidateDetail,
+  OrganizationExperienceCandidateImportPreview,
+  OrganizationExperienceCandidatePreview,
+  OrganizationExperienceCandidateSummary,
   OrganizationAgentSubmissionDetail,
   OrganizationAgentSubmissionSummary,
   OrganizationReviewPreview,
@@ -119,10 +124,13 @@ import type {
   OfficialAgentSummary,
   OfficialManagedUpdate,
   PrepareExperienceCandidateInput,
+  PrepareOrganizationExperienceCandidateInput,
   PrepareOrganizationReviewInput,
   PublicationPreview,
   PublishedRevision,
   ReviewExperienceCandidateInput,
+  ReviewOrganizationExperienceCandidateInput,
+  SubmitOrganizationExperienceCandidateInput,
   SubmitExperienceCandidateInput,
   UpdateAgentDraftInput,
 } from "../shared/agentera-agent-control";
@@ -628,6 +636,43 @@ interface AgenteraAgentsAPI {
   ) => Promise<AgenteraAgentControlResult<ExperienceCandidateImportPreview>>;
   confirmExperienceCandidateImport: (
     input: ConfirmExperienceCandidateImportInput,
+  ) => Promise<AgenteraAgentControlResult<AgentDraftDetail>>;
+  listEligibleOrganizationExperienceSkills: (
+    installationId: string,
+  ) => Promise<AgenteraAgentControlResult<EligibleExperienceSkill[]>>;
+  prepareOrganizationExperienceCandidate: (
+    input: PrepareOrganizationExperienceCandidateInput,
+  ) => Promise<
+    AgenteraAgentControlResult<OrganizationExperienceCandidatePreview>
+  >;
+  submitOrganizationExperienceCandidate: (
+    input: SubmitOrganizationExperienceCandidateInput,
+  ) => Promise<
+    AgenteraAgentControlResult<OrganizationExperienceCandidateSummary>
+  >;
+  listMyOrganizationExperienceCandidates: () => Promise<
+    AgenteraAgentControlResult<OrganizationExperienceCandidateSummary[]>
+  >;
+  listOrganizationExperienceReviewQueue: () => Promise<
+    AgenteraAgentControlResult<OrganizationExperienceCandidateSummary[]>
+  >;
+  getOrganizationExperienceCandidate: (
+    candidateId: string,
+  ) => Promise<
+    AgenteraAgentControlResult<OrganizationExperienceCandidateDetail>
+  >;
+  reviewOrganizationExperienceCandidate: (
+    input: ReviewOrganizationExperienceCandidateInput,
+  ) => Promise<
+    AgenteraAgentControlResult<OrganizationExperienceCandidateDetail>
+  >;
+  prepareOrganizationExperienceImport: (
+    candidateId: string,
+  ) => Promise<
+    AgenteraAgentControlResult<OrganizationExperienceCandidateImportPreview>
+  >;
+  confirmOrganizationExperienceImport: (
+    input: ConfirmOrganizationExperienceCandidateImportInput,
   ) => Promise<AgenteraAgentControlResult<AgentDraftDetail>>;
   onStateChanged: (
     callback: (state: AgenteraAgentControlPublicState) => void,

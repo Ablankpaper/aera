@@ -9,7 +9,7 @@ import {
   resolve,
 } from "node:path";
 
-export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 9;
+export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 10;
 
 const INSTALLATION_OPERATIONS_SCHEMA = `
   CREATE TABLE IF NOT EXISTS installation_operations (
@@ -83,6 +83,67 @@ const INSTALLATION_OPERATIONS_SCHEMA = `
     ON installation_operations (
       tenant_id, owner_id, device_installation_id, phase, updated_at
     );
+`;
+
+const ORGANIZATION_EXPERIENCE_RECEIPTS_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS local_organization_experience_candidates (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    device_installation_id TEXT NOT NULL,
+    agent_installation_id TEXT NOT NULL,
+    organization_id TEXT NOT NULL,
+    agent_definition_id TEXT NOT NULL,
+    source_agent_version_id TEXT NOT NULL,
+    runtime_profile_id TEXT NOT NULL,
+    skill_name TEXT NOT NULL,
+    source_relative_path TEXT NOT NULL,
+    content_digest TEXT NOT NULL,
+    dlp_contract_version TEXT NOT NULL,
+    snapshot_relative_path TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+      status IN ('PREPARED', 'UPLOAD_FAILED', 'SUBMITTED')
+    ),
+    cloud_candidate_id TEXT,
+    last_error_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    submitted_at TEXT,
+    UNIQUE (
+      tenant_id, owner_id, device_installation_id,
+      organization_id, agent_definition_id, content_digest
+    ),
+    CHECK (
+      (status IN ('PREPARED', 'UPLOAD_FAILED')
+        AND cloud_candidate_id IS NULL AND submitted_at IS NULL)
+      OR
+      (status = 'SUBMITTED'
+        AND cloud_candidate_id IS NOT NULL AND submitted_at IS NOT NULL)
+    )
+  );
+
+  CREATE INDEX IF NOT EXISTS local_org_experience_candidates_context_idx
+    ON local_organization_experience_candidates (
+      tenant_id, owner_id, device_installation_id,
+      organization_id, created_at, id
+    );
+
+  CREATE TABLE IF NOT EXISTS local_organization_experience_candidate_imports (
+    tenant_id TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    device_installation_id TEXT NOT NULL,
+    organization_id TEXT NOT NULL,
+    candidate_id TEXT NOT NULL,
+    agent_definition_id TEXT NOT NULL,
+    base_agent_version_id TEXT NOT NULL,
+    candidate_content_digest TEXT NOT NULL,
+    draft_id TEXT NOT NULL REFERENCES agent_drafts(id) ON DELETE CASCADE,
+    imported_at TEXT NOT NULL,
+    PRIMARY KEY (
+      tenant_id, owner_id, device_installation_id,
+      organization_id, candidate_id
+    )
+  );
 `;
 
 export type AgentAssetContext =
@@ -551,6 +612,8 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
         imported_at TEXT NOT NULL,
         PRIMARY KEY (tenant_id, owner_id, device_installation_id, candidate_id)
       );
+
+      ${ORGANIZATION_EXPERIENCE_RECEIPTS_SCHEMA}
 
       CREATE TABLE IF NOT EXISTS organization_agent_submission_refs (
         local_draft_id TEXT NOT NULL,
@@ -1136,6 +1199,12 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
     if (currentVersion >= 1 && currentVersion <= 8) {
       sqlite.exec(`
         ${INSTALLATION_OPERATIONS_SCHEMA}
+        PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
+      `);
+    }
+    if (currentVersion >= 1 && currentVersion <= 9) {
+      sqlite.exec(`
+        ${ORGANIZATION_EXPERIENCE_RECEIPTS_SCHEMA}
         PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
       `);
     }

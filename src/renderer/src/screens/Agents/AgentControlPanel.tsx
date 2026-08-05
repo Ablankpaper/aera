@@ -33,13 +33,11 @@ import AgentHubDetailDialog, {
 import AgentDraftEditor from "./AgentDraftEditor";
 import ExperienceCandidatePanel from "./ExperienceCandidatePanel";
 import ExperiencePromotionDialog from "./ExperiencePromotionDialog";
+import OrganizationExperienceCandidatePanel from "./OrganizationExperienceCandidatePanel";
 import OrganizationSubmissionPanel from "./OrganizationSubmissionPanel";
 import OfficialAgentInstallDialog from "./OfficialAgentInstallDialog";
 import OfficialAgentSection from "./OfficialAgentSection";
-import {
-  deriveAgentLifecycle,
-  type AgentLifecycle,
-} from "./agentLifecycle";
+import { deriveAgentLifecycle, type AgentLifecycle } from "./agentLifecycle";
 
 export interface AgentControlProfileOption {
   id: string;
@@ -486,9 +484,7 @@ export default function AgentControlPanel({
     await load();
   };
 
-  const prepareCardWithdrawal = async (
-    submissionId: string,
-  ): Promise<void> => {
+  const prepareCardWithdrawal = async (submissionId: string): Promise<void> => {
     if (lifecycleBusy) return;
     setLifecycleBusy(true);
     setError(null);
@@ -981,8 +977,8 @@ export default function AgentControlPanel({
           isOrganization && activeTab === "enterprise" && lifecycle
             ? lifecycleTag(lifecycle)
             : draft.publishedRevision
-            ? t("agents.hub.published")
-            : t("agents.hub.localDraft"),
+              ? t("agents.hub.published")
+              : t("agents.hub.localDraft"),
         ],
         draft,
         definition: null,
@@ -1392,6 +1388,20 @@ export default function AgentControlPanel({
             setSelectedPersonalKey(null);
           },
         });
+      } else if (
+        isOrganization &&
+        selectedPersonal.installation.sourceScope === "ORGANIZATION" &&
+        context.role !== "auditor"
+      ) {
+        selectedPersonalExtra.push({
+          label: t("agents.control.organizationExperience.contribute"),
+          disabled: false,
+          onClick: () => {
+            setAdvancedOpen(true);
+            setPromotionTarget(selectedPersonal.installation!);
+            setSelectedPersonalKey(null);
+          },
+        });
       }
       if (
         selectedPersonal.profile &&
@@ -1709,10 +1719,7 @@ export default function AgentControlPanel({
             </div>
           )}
 
-          {isWorkspace ||
-          (isOrganization &&
-            activeTab === "enterprise" &&
-            organizationCanReadReview) ? (
+          {isWorkspace || (isOrganization && activeTab === "enterprise") ? (
             <section
               className={`agent-hub-advanced ${advancedOpen ? "open" : ""}`}
             >
@@ -1736,6 +1743,31 @@ export default function AgentControlPanel({
                       canReview={!isWorkspaceMember}
                       contextKey={contextKey(state)}
                       refreshToken={candidateRefreshToken}
+                      onDraftReady={(draft) => {
+                        setEditor(draft);
+                        setCandidateRefreshToken((value) => value + 1);
+                        void load();
+                      }}
+                    />
+                  ) : null}
+
+                  {isOrganization && activeTab === "enterprise" && state ? (
+                    <OrganizationExperienceCandidatePanel
+                      online={organizationOnline}
+                      role={context.role}
+                      contextKey={contextKey(state)}
+                      refreshToken={candidateRefreshToken}
+                      contributionTarget={
+                        promotionTarget
+                          ? {
+                              installation: promotionTarget,
+                              agentName: definitionName(
+                                promotionTarget.definitionId,
+                              ),
+                            }
+                          : null
+                      }
+                      onCloseContribution={() => setPromotionTarget(null)}
                       onDraftReady={(draft) => {
                         setEditor(draft);
                         setCandidateRefreshToken((value) => value + 1);
@@ -1890,7 +1922,7 @@ export default function AgentControlPanel({
         />
       ) : null}
 
-      {promotionTarget ? (
+      {promotionTarget && !isOrganization ? (
         <ExperiencePromotionDialog
           open
           installation={promotionTarget}
