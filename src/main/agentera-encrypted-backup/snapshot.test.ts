@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
@@ -368,7 +368,10 @@ describe("allowlisted encrypted-backup snapshot", () => {
           fileHooks: {
             afterRead: (path, attempt) => {
               if (path.endsWith("changing.txt")) {
-                writeFileSync(path, `changed-${attempt}-${randomUUID()}`);
+                writeFileSync(
+                  path,
+                  `changed-${attempt}-${"x".repeat(attempt)}`,
+                );
               }
             },
           },

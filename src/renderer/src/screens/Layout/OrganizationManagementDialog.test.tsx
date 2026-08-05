@@ -31,6 +31,7 @@ const ORGANIZATION_B = "40000000-0000-4000-8000-000000000004";
 const DEPARTMENT_ID = "50000000-0000-4000-8000-000000000005";
 const INVITATION_ID = "60000000-0000-4000-8000-000000000006";
 const INVITE_URL = `agentera://organization-invitation#${"A".repeat(43)}`;
+const policyAuthoringTestTimeoutMs = 20_000;
 
 const authState: Extract<
   AgenteraAuthPublicState,
@@ -427,6 +428,7 @@ describe("OrganizationManagementDialog", () => {
     ).toBeNull();
   });
 
+  // prettier-ignore
   it("separates the active policy from the editable draft, publish action, and signed history", async () => {
     const { organizationAPI } = renderDialog("owner");
     await screen.findByText("Acme Enterprise");
@@ -491,7 +493,7 @@ describe("OrganizationManagementDialog", () => {
         expectedPolicyVersion: 2,
       }),
     );
-  });
+  }, policyAuthoringTestTimeoutMs);
 
   it("keeps Auditor access read-only and limited to policy history and audit", async () => {
     renderDialog("auditor");

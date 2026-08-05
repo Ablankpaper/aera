@@ -94,6 +94,8 @@ The proof refused backup while a Profile had a running chat, then created and se
 
 The same flow rejected a wrong phrase, resumed after a forced first-chunk upload failure, rejected a revoked device, and detected tampered ciphertext without changing the restored Profile. Deletion destroyed recovery material, wrapped keys, and device envelopes before retrying unavailable object-store cleanup to zero remaining objects. The source Profile's Memory, USER state, private Skills, environment file bytes, session rows, and RuntimeBindings remained unchanged throughout.
 
+The changing-file snapshot regression forces a different byte length on every retry so fail-closed identity detection remains deterministic even on filesystems whose timestamp updates may share one clock tick.
+
 Key-store regression tests retain the production Argon2id parameters and give KDF-bearing cases explicit runtime budgets. Slower CI runners must not weaken the KDF or bypass fail-closed secure-storage assertions.
 
 The recovery-envelope regression performs one wrap and two unwrap operations, so its case budget covers three full production-cost Argon2id derivations without changing the cryptographic parameters.
