@@ -182,7 +182,7 @@ function initialDraft() {
     displayName: "Evolving Organization Agent",
     icon: null,
     manifest: {
-      schemaVersion: 1 as const,
+      schemaVersion: 2 as const,
       identity: { systemPrompt: "Use approved Organization assets only." },
       assets: [
         {
@@ -191,7 +191,11 @@ function initialDraft() {
           mediaType: "text/markdown" as const,
         },
       ],
-      modelConstraints: { allowedProviders: [], allowedModels: [] },
+      modelPolicy: {
+        mode: "user_select" as const,
+        allowedProviders: [],
+        allowedModels: [],
+      },
       tools: { allowed: [], denied: [] },
       dependencies: [],
       runtimeCompatibility: {
