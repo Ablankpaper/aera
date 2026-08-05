@@ -617,6 +617,65 @@ export interface OrganizationExperienceCandidateImportReceipt {
   importedAt: string;
 }
 
+export interface OrganizationExperienceCandidatePreview {
+  candidateHandle: string;
+  installationId: string;
+  sourceAgentVersionId: string;
+  skillName: string;
+  assets: Array<{
+    path: string;
+    mediaType: "text/markdown" | "text/plain";
+    sizeBytes: number;
+  }>;
+  fileCount: number;
+  totalBytes: number;
+  contentDigest: string;
+  findings: ExperienceCandidateFinding[];
+}
+
+export interface SubmitOrganizationExperienceCandidateInput {
+  candidateHandle: string;
+  confirmation: "submit-selected-organization-skill";
+}
+
+export interface ReviewOrganizationExperienceCandidateInput {
+  reviewHandle: string;
+  confirmation:
+    | "approve-organization-experience"
+    | "reject-organization-experience";
+  reasonCode: string | null;
+  safeNote: string | null;
+}
+
+export interface OrganizationExperienceCandidateSummary {
+  candidateHandle: string | null;
+  reviewHandle: string | null;
+  cloudCandidateId: string | null;
+  organizationId: string;
+  agentDefinitionId: string;
+  sourceAgentVersionId: string;
+  skillName: string;
+  contentDigest: string;
+  localStatus: ExperienceCandidateLocalStatus | null;
+  reviewStatus: ExperienceCandidateReviewStatus | null;
+  lastErrorCode: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
+}
+
+export interface OrganizationExperienceCandidateDetail extends OrganizationExperienceCandidateSummary {
+  bundle: ExperienceCandidateBundleV1;
+  decisionReasonCode: string | null;
+  safeNote: string | null;
+}
+
+export interface OrganizationExperienceCandidateImportPreview extends ExperienceCandidateImportPreview {}
+
+export interface ConfirmOrganizationExperienceCandidateImportInput {
+  importHandle: string;
+  confirmation: "apply-approved-skill-to-organization-draft";
+}
+
 export interface ExperienceCandidateAssetV1 {
   path: string;
   mediaType: "text/markdown" | "text/plain";

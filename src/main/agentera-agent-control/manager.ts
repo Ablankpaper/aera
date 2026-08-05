@@ -15,6 +15,7 @@ import type {
   AgenteraSelectInstallationVersionInput,
   ConfirmExperienceCandidateImportInput,
   ConfirmOfficialAgentInstallInput,
+  ConfirmOrganizationExperienceCandidateImportInput,
   ConfirmOrganizationReviewInput,
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
@@ -24,11 +25,17 @@ import type {
   ExperienceCandidatePreview,
   ExperienceCandidateSummary,
   EligibleExperienceSkill,
+  OrganizationExperienceCandidateDetail,
+  OrganizationExperienceCandidateImportPreview,
+  OrganizationExperienceCandidatePreview,
+  OrganizationExperienceCandidateSummary,
   PrepareExperienceCandidateInput,
   PrepareOrganizationReviewInput,
   PublicationPreview,
   PublishedRevision,
+  ReviewOrganizationExperienceCandidateInput,
   ReviewExperienceCandidateInput,
+  SubmitOrganizationExperienceCandidateInput,
   SubmitExperienceCandidateInput,
   UpdateAgentDraftInput,
   OrganizationAgentSubmissionSummary,
@@ -74,6 +81,9 @@ import { ExperienceCandidateService } from "./experience-candidate-service";
 import { ExperienceCandidateImporter } from "./experience-candidate-importer";
 import { ExperienceCandidateStore } from "./experience-candidate-store";
 import { ReadOnlyHermesSkillCandidateSource } from "./hermes-skill-candidate-source";
+import { OrganizationExperienceCandidateImporter } from "./organization-experience-candidate-importer";
+import { OrganizationExperienceCandidateService } from "./organization-experience-candidate-service";
+import { OrganizationExperienceCandidateStore } from "./organization-experience-candidate-store";
 import {
   OrganizationPublicationService,
   type OrganizationAgentSubmissionDetail,
@@ -173,6 +183,11 @@ interface OrganizationPublicationComponents {
 interface ExperienceCandidateComponents {
   key: string;
   service: ExperienceCandidateService;
+}
+
+interface OrganizationExperienceCandidateComponents {
+  key: string;
+  service: OrganizationExperienceCandidateService;
 }
 
 interface OfficialAgentComponents {
@@ -380,6 +395,8 @@ export class AgenteraAgentControlManager {
     null;
   private experienceCandidateComponents: ExperienceCandidateComponents | null =
     null;
+  private organizationExperienceCandidateComponents: OrganizationExperienceCandidateComponents | null =
+    null;
   private officialAgentComponents: OfficialAgentComponents | null = null;
   private readonly publicationOwners = new Map<string, string>();
   private readonly listeners = new Set<
@@ -503,6 +520,8 @@ export class AgenteraAgentControlManager {
     this.organizationPublicationComponents = null;
     this.experienceCandidateComponents?.service.clearPreparedImports();
     this.experienceCandidateComponents = null;
+    this.organizationExperienceCandidateComponents?.service.clearPrepared();
+    this.organizationExperienceCandidateComponents = null;
     this.officialAgentComponents?.service.invalidate();
     this.officialAgentComponents = null;
     this.publicationOwners.clear();
@@ -517,6 +536,8 @@ export class AgenteraAgentControlManager {
     this.organizationPublicationComponents = null;
     this.experienceCandidateComponents?.service.clearPreparedImports();
     this.experienceCandidateComponents = null;
+    this.organizationExperienceCandidateComponents?.service.clearPrepared();
+    this.organizationExperienceCandidateComponents = null;
     this.officialAgentComponents?.service.invalidate();
     this.officialAgentComponents = null;
     this.publicationOwners.clear();
@@ -1146,6 +1167,61 @@ export class AgenteraAgentControlManager {
     return draft;
   }
 
+  async listEligibleOrganizationExperienceSkills(
+    installationId: string,
+  ): Promise<EligibleExperienceSkill[]> {
+    return (
+      await this.ensureOrganizationExperienceCandidateComponents()
+    ).service.listEligibleSkills(installationId);
+  }
+
+  async prepareOrganizationExperienceCandidate(input: {
+    installationId: string;
+    skillName: string;
+  }): Promise<OrganizationExperienceCandidatePreview> {
+    return (
+      await this.ensureOrganizationExperienceCandidateComponents()
+    ).service.prepare(input);
+  }
+
+  async submitOrganizationExperienceCandidate(
+    input: SubmitOrganizationExperienceCandidateInput,
+  ): Promise<OrganizationExperienceCandidateSummary> {
+    return (
+      await this.ensureOrganizationExperienceCandidateComponents()
+    ).service.submit(input);
+  }
+
+  async reviewOrganizationExperienceCandidate(
+    input: ReviewOrganizationExperienceCandidateInput,
+  ): Promise<OrganizationExperienceCandidateDetail> {
+    return (
+      await this.ensureOrganizationExperienceCandidateComponents()
+    ).service.review(input);
+  }
+
+  async prepareOrganizationExperienceImport(
+    candidateId: string,
+  ): Promise<OrganizationExperienceCandidateImportPreview> {
+    this.assertOrganizationPublicationRole();
+    await this.assertOnlineAccess(true);
+    return (
+      await this.ensureOrganizationExperienceCandidateComponents()
+    ).service.prepareImport(candidateId);
+  }
+
+  async confirmOrganizationExperienceImport(
+    input: ConfirmOrganizationExperienceCandidateImportInput,
+  ): Promise<AgentDraftDetail> {
+    this.assertOrganizationPublicationRole();
+    await this.assertOnlineAccess(false);
+    const draft = await (
+      await this.ensureOrganizationExperienceCandidateComponents()
+    ).service.confirmImport(input);
+    this.emitState();
+    return draft;
+  }
+
   async prepareHermesTurn(
     input: PrepareAgenteraHermesTurnInput,
   ): Promise<PreparedInstalledHermesTurn | null> {
@@ -1537,6 +1613,8 @@ export class AgenteraAgentControlManager {
     this.contextComponents = null;
     this.experienceCandidateComponents?.service.clearPreparedImports();
     this.experienceCandidateComponents = null;
+    this.organizationExperienceCandidateComponents?.service.clearPrepared();
+    this.organizationExperienceCandidateComponents = null;
     this.officialAgentComponents?.service.invalidate();
     this.officialAgentComponents = null;
     const cache = new AgentVersionCache({
@@ -1755,6 +1833,79 @@ export class AgenteraAgentControlManager {
     });
     this.experienceCandidateComponents = { key, service };
     return this.experienceCandidateComponents;
+  }
+
+  private async ensureOrganizationExperienceCandidateComponents(): Promise<OrganizationExperienceCandidateComponents> {
+    const full = this.requireFull();
+    const runtime = await this.ensureRuntimeComponents();
+    const owner = full.getOwner();
+    const context = this.assetContext();
+    if (context.scope !== "ORGANIZATION") {
+      throw codedError("organization_agent_forbidden");
+    }
+    const key = `${runtime.key}\0${contextKey(context)}`;
+    if (this.organizationExperienceCandidateComponents?.key === key) {
+      return this.organizationExperienceCandidateComponents;
+    }
+    this.organizationExperienceCandidateComponents?.service.clearPrepared();
+    const candidates = new OrganizationExperienceCandidateStore({
+      database: full.database,
+      owner,
+      now: full.now,
+      randomUUID: full.randomUUID,
+    });
+    const importer =
+      context.role === "owner" || context.role === "admin"
+        ? new OrganizationExperienceCandidateImporter({
+            database: full.database,
+            client: full.client,
+            candidates,
+            drafts: new AgentDraftStore({
+              database: full.database,
+              owner,
+              context,
+              now: full.now,
+              randomUUID: full.randomUUID,
+            }),
+            cache: runtime.cache,
+            owner,
+            now: full.now,
+            randomUUID: full.randomUUID,
+          })
+        : {
+            prepare: async () => {
+              throw codedError("organization_agent_forbidden");
+            },
+            confirm: async () => {
+              throw codedError("organization_agent_forbidden");
+            },
+            clearPreparedImports: () => undefined,
+          };
+    const service = new OrganizationExperienceCandidateService({
+      client: full.client,
+      store: candidates,
+      source: new ReadOnlyHermesSkillCandidateSource(),
+      getInstallation: (id) => runtime.installations.getLocalInstallation(id),
+      resolveProfilePath: (runtimeProfileId, agentInstallationId) =>
+        this.profileBindings.resolveAttachedProfilePath(
+          runtimeProfileId,
+          agentInstallationId,
+          owner,
+        ),
+      getContext: () => {
+        const current = this.context();
+        if (current.scope !== "ORGANIZATION") {
+          throw codedError("organization_agent_forbidden");
+        }
+        return current;
+      },
+      getAuthState: full.getAuthState,
+      importer,
+      now: full.now,
+      randomUUID: full.randomUUID,
+    });
+    this.organizationExperienceCandidateComponents = { key, service };
+    return this.organizationExperienceCandidateComponents;
   }
 
   private emitState(): void {

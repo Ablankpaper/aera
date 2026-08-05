@@ -51,11 +51,19 @@ export interface OrganizationExperienceCandidateStoreOptions {
   randomUUID?: () => string;
 }
 
+export interface OrganizationExperienceCandidateMutationIntent {
+  idempotencyKey: string;
+  operation: "SUBMIT" | "REVIEW";
+  candidateId: string;
+  requestHash: string;
+}
+
 export type OrganizationExperienceCandidateStoreErrorCode =
   | "invalid_candidate"
   | "candidate_not_found"
   | "candidate_conflict"
-  | "snapshot_invalid";
+  | "snapshot_invalid"
+  | "mutation_conflict";
 
 interface CandidateRow {
   id: unknown;
@@ -631,6 +639,99 @@ export class OrganizationExperienceCandidateStore {
     const recorded = this.findImport(organizationId, candidateId);
     if (recorded === null) return storeError("candidate_conflict");
     return recorded;
+  }
+
+  getOrCreateMutationIntent(
+    operation: "SUBMIT" | "REVIEW",
+    candidateIdInput: string,
+    requestHashInput: string,
+  ): OrganizationExperienceCandidateMutationIntent {
+    const candidateId = uuid(candidateIdInput);
+    const requestHash = digest(requestHashInput);
+    if (operation === "SUBMIT") this.get(candidateId);
+    const recordType =
+      operation === "SUBMIT"
+        ? "organization_experience_candidate_submit"
+        : "organization_experience_candidate_review";
+    const rows = this.database.sqlite
+      .prepare(
+        `SELECT id, payload_json FROM pending_sanitized_records
+         WHERE tenant_id = ? AND owner_id = ? AND device_installation_id = ?
+           AND record_type = ? ORDER BY created_at, id`,
+      )
+      .all(
+        this.tenantId,
+        this.ownerId,
+        this.deviceInstallationId,
+        recordType,
+      ) as Array<{ id?: unknown; payload_json?: unknown }>;
+    for (const row of rows) {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(String(row.payload_json));
+      } catch {
+        return storeError("mutation_conflict");
+      }
+      if (
+        !exactObject(payload, ["candidateId", "requestHash"]) ||
+        payload.candidateId !== candidateId
+      ) {
+        continue;
+      }
+      if (payload.requestHash !== requestHash) {
+        return storeError("mutation_conflict");
+      }
+      return {
+        idempotencyKey: uuid(row.id),
+        operation,
+        candidateId,
+        requestHash,
+      };
+    }
+    const idempotencyKey = uuid(this.randomUUID());
+    const createdAt = nowTimestamp(this.now);
+    try {
+      this.database.sqlite
+        .prepare(
+          `INSERT INTO pending_sanitized_records (
+             id, tenant_id, owner_id, device_installation_id, record_type,
+             payload_json, attempt_count, next_attempt_at, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)`,
+        )
+        .run(
+          idempotencyKey,
+          this.tenantId,
+          this.ownerId,
+          this.deviceInstallationId,
+          recordType,
+          JSON.stringify({ candidateId, requestHash }),
+          createdAt,
+          createdAt,
+        );
+    } catch {
+      return storeError("mutation_conflict");
+    }
+    return { idempotencyKey, operation, candidateId, requestHash };
+  }
+
+  completeMutationIntent(idempotencyKeyInput: string): void {
+    const idempotencyKey = uuid(idempotencyKeyInput);
+    this.database.sqlite
+      .prepare(
+        `DELETE FROM pending_sanitized_records
+         WHERE id = ? AND tenant_id = ? AND owner_id = ?
+           AND device_installation_id = ?
+           AND record_type IN (
+             'organization_experience_candidate_submit',
+             'organization_experience_candidate_review'
+           )`,
+      )
+      .run(
+        idempotencyKey,
+        this.tenantId,
+        this.ownerId,
+        this.deviceInstallationId,
+      );
   }
 
   private markRetryState(
