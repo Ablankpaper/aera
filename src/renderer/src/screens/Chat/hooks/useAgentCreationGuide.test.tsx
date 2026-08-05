@@ -69,7 +69,7 @@ describe("useAgentCreationGuide", () => {
         icon: null,
         assets: [],
         manifest: expect.objectContaining({
-          schemaVersion: 2,
+          schemaVersion: 3,
           identity: {
             systemPrompt: expect.stringContaining("整理客户资料"),
           },
@@ -78,6 +78,7 @@ describe("useAgentCreationGuide", () => {
             allowedProviders: [],
             allowedModels: [],
           },
+          mcpRequirements: [],
         }),
       }),
     );
