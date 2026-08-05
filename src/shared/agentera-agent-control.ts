@@ -586,6 +586,37 @@ export type ExperienceCandidateLocalStatus =
   | "UPLOAD_FAILED"
   | "SUBMITTED";
 
+/**
+ * Renderer-safe receipt for a local Organization experience snapshot. Runtime
+ * Profile IDs, source paths, snapshot paths, and private bytes remain in the
+ * main-process SQLite partition and are absent by construction.
+ */
+export interface OrganizationExperienceCandidateLocalReceipt {
+  id: string;
+  agentInstallationId: string;
+  organizationId: string;
+  agentDefinitionId: string;
+  sourceAgentVersionId: string;
+  skillName: string;
+  contentDigest: string;
+  status: ExperienceCandidateLocalStatus;
+  cloudCandidateId: string | null;
+  lastErrorCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+  submittedAt: string | null;
+}
+
+export interface OrganizationExperienceCandidateImportReceipt {
+  candidateId: string;
+  organizationId: string;
+  agentDefinitionId: string;
+  baseAgentVersionId: string;
+  candidateContentDigest: string;
+  draftId: string;
+  importedAt: string;
+}
+
 export interface ExperienceCandidateAssetV1 {
   path: string;
   mediaType: "text/markdown" | "text/plain";

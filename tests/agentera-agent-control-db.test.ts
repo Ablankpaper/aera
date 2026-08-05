@@ -40,8 +40,8 @@ afterEach(() => {
 });
 
 describe("Aera control-plane database", () => {
-  it("pins the durable Installation operation schema at version 9", () => {
-    expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(9);
+  it("pins Organization experience receipts at schema version 10", () => {
+    expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(10);
   });
 
   it("opens exactly below Electron userData and never below HERMES_HOME", () => {
@@ -120,6 +120,8 @@ describe("Aera control-plane database", () => {
         "local_agent_installations",
         "local_experience_candidate_imports",
         "local_experience_candidates",
+        "local_organization_experience_candidate_imports",
+        "local_organization_experience_candidates",
         "organization_agent_submission_refs",
         "pending_sanitized_records",
         "runtime_bindings",
@@ -192,6 +194,36 @@ describe("Aera control-plane database", () => {
       expect(normalizedCandidateSchema).toContain(
         "status = 'SUBMITTED' AND cloud_candidate_id IS NOT NULL AND submitted_at IS NOT NULL",
       );
+      const organizationCandidateSchema = database.sqlite
+        .prepare(
+          "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'local_organization_experience_candidates'",
+        )
+        .get() as { sql: string };
+      const normalizedOrganizationCandidateSchema =
+        organizationCandidateSchema.sql.replace(/\s+/g, " ");
+      expect(normalizedOrganizationCandidateSchema).toContain(
+        "status IN ('PREPARED', 'UPLOAD_FAILED', 'SUBMITTED')",
+      );
+      expect(normalizedOrganizationCandidateSchema).toContain(
+        "tenant_id, owner_id, device_installation_id, organization_id, agent_definition_id, content_digest",
+      );
+      const organizationImportPrimaryKey = database.sqlite
+        .prepare(
+          "PRAGMA table_info(local_organization_experience_candidate_imports)",
+        )
+        .all() as Array<{ name: string; pk: number }>;
+      expect(
+        organizationImportPrimaryKey
+          .filter(({ pk }) => pk > 0)
+          .sort((left, right) => left.pk - right.pk)
+          .map(({ name }) => name),
+      ).toEqual([
+        "tenant_id",
+        "owner_id",
+        "device_installation_id",
+        "organization_id",
+        "candidate_id",
+      ]);
       const importForeignKeys = database.sqlite
         .prepare("PRAGMA foreign_key_list(local_experience_candidate_imports)")
         .all() as Array<{
@@ -647,12 +679,18 @@ describe("Aera control-plane database", () => {
     expect(
       database.sqlite
         .prepare(
-          "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'local_experience_candidate%' ORDER BY name",
+          `SELECT name FROM sqlite_master
+           WHERE type = 'table'
+             AND (name LIKE 'local_experience_candidate%'
+               OR name LIKE 'local_organization_experience_candidate%')
+           ORDER BY name`,
         )
         .all(),
     ).toEqual([
       { name: "local_experience_candidate_imports" },
       { name: "local_experience_candidates" },
+      { name: "local_organization_experience_candidate_imports" },
+      { name: "local_organization_experience_candidates" },
     ]);
     database.close();
   });
