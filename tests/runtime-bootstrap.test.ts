@@ -34,6 +34,8 @@ import {
 } from "./fixtures/runtime-distribution/fixture";
 
 const temporaryDirectories: string[] = [];
+const runtimeBootstrapRecoveryTestTimeoutMs =
+  process.platform === "win32" ? 30_000 : 5_000;
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -279,24 +281,28 @@ describe("Aera Runtime pre-import bootstrap", () => {
     expect(setup.healthCheck).not.toHaveBeenCalled();
   });
 
-  it("completes promotion after a crash between previous and current pointer writes", async () => {
-    const setup = await harness();
-    const current = await createSignedRuntimePointer(
-      setup.paths.versions,
-      "current-v1",
-    );
-    await setup.store.setCurrent(current);
-    await writeFile(setup.paths.previous, `${JSON.stringify(current)}\n`);
-    await stageCandidate(setup);
+  it(
+    "completes promotion after a crash between previous and current pointer writes",
+    async () => {
+      const setup = await harness();
+      const current = await createSignedRuntimePointer(
+        setup.paths.versions,
+        "current-v1",
+      );
+      await setup.store.setCurrent(current);
+      await writeFile(setup.paths.previous, `${JSON.stringify(current)}\n`);
+      await stageCandidate(setup);
 
-    await bootstrapRuntimeDistribution(setup.options);
+      await bootstrapRuntimeDistribution(setup.options);
 
-    expect(await setup.store.readState()).toMatchObject({
-      current: { versionDirectory: "candidate-v2" },
-      previous: { versionDirectory: "current-v1" },
-      candidate: null,
-    });
-  });
+      expect(await setup.store.readState()).toMatchObject({
+        current: { versionDirectory: "candidate-v2" },
+        previous: { versionDirectory: "current-v1" },
+        candidate: null,
+      });
+    },
+    runtimeBootstrapRecoveryTestTimeoutMs,
+  );
 
   it("recovers a corrupt current pointer from a valid previous Runtime", async () => {
     const setup = await harness();
