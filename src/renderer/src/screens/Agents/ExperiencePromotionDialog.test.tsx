@@ -1,5 +1,11 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AgenteraAgentControlResult,
   AgenteraAgentInstallationSummary,
@@ -134,6 +140,14 @@ async function selectEligibleSkill(
 }
 
 describe("ExperiencePromotionDialog", () => {
+  afterEach(async () => {
+    // Radix FocusScope defers its unmount autofocus event with setTimeout(0).
+    // Drain it before Vitest replaces this jsdom realm so the old element and
+    // its CustomEvent always come from the same Event implementation.
+    cleanup();
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+  });
+
   beforeEach(() => vi.restoreAllMocks());
 
   it("lists only eligible Skill names and prepares the explicitly selected Skill", async () => {
