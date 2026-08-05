@@ -1,4 +1,8 @@
 import { createHash } from "node:crypto";
+import { appendFile, writeFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { join } from "node:path";
 
 import { expect, test } from "playwright/test";
 
@@ -62,6 +66,7 @@ type OrganizationMethod =
 let harness: AgentControlHarness | null = null;
 let ownerDevice: AgentControlDevice | null = null;
 let employeeDevice: AgentControlDevice | null = null;
+let modelServer: Server | null = null;
 
 test.setTimeout(360_000);
 
@@ -271,11 +276,91 @@ function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
+async function startModelServer(): Promise<string> {
+  modelServer = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      let body: unknown = null;
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      } catch {
+        response.writeHead(400).end();
+        return;
+      }
+      if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
+        response.writeHead(404).end();
+        return;
+      }
+      const stream =
+        typeof body === "object" &&
+        body !== null &&
+        (body as { stream?: unknown }).stream === true;
+      if (!stream) {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(
+          JSON.stringify({
+            id: "organization-experience-e2e",
+            object: "chat.completion",
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "ORGANIZATION_EXPERIENCE_MODEL_REPLY",
+                },
+                finish_reason: "stop",
+              },
+            ],
+          }),
+        );
+        return;
+      }
+      response.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+      response.write(
+        `data: ${JSON.stringify({
+          id: "organization-experience-e2e",
+          object: "chat.completion.chunk",
+          choices: [
+            {
+              index: 0,
+              delta: {
+                role: "assistant",
+                content: "ORGANIZATION_EXPERIENCE_MODEL_REPLY",
+              },
+              finish_reason: null,
+            },
+          ],
+        })}\n\n`,
+      );
+      response.end("data: [DONE]\n\n");
+    });
+  });
+  await new Promise<void>((resolveListen, rejectListen) => {
+    modelServer!.once("error", rejectListen);
+    modelServer!.listen(0, "127.0.0.1", () => resolveListen());
+  });
+  const address = modelServer.address() as AddressInfo;
+  return `http://127.0.0.1:${address.port}`;
+}
+
+async function stopModelServer(): Promise<void> {
+  const server = modelServer;
+  modelServer = null;
+  if (!server) return;
+  await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+}
+
 test.beforeAll(async () => {
   harness = await createAgentControlHarness();
 });
 
 test.afterAll(async () => {
+  await stopModelServer();
   await closeAgentControlHarness(harness);
   harness = null;
   ownerDevice = null;
@@ -367,6 +452,24 @@ test("an employee contributes one Skill and an Owner publishes it only through t
     status: "active",
     selectedVersionId: versionOne.id,
   });
+  const employeeProfile = deviceProfilePath(employeeDevice, EMPLOYEE_PROFILE);
+  const modelOrigin = await startModelServer();
+  await writeFile(
+    join(employeeProfile, "config.yaml"),
+    [
+      "model:",
+      "  provider: custom",
+      "  default: organization-experience-e2e",
+      `  base_url: "${modelOrigin}/v1"`,
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await appendFile(
+    join(employeeProfile, ".env"),
+    "CUSTOM_API_KEY=e2e-loopback-only\n",
+    "utf8",
+  );
   await startBoundConversation(employeeDevice, EMPLOYEE_PROFILE, "org-exp-v1");
   await expect
     .poll(async () => (await localAgentControlState(employeeDevice!)).bindings)
@@ -379,8 +482,12 @@ test("an employee contributes one Skill and an Owner publishes it only through t
       ]),
     );
 
-  const employeeProfile = deviceProfilePath(employeeDevice, EMPLOYEE_PROFILE);
   const fixture = await seedExperienceCandidateProfile(employeeProfile);
+  await appendFile(
+    join(employeeProfile, ".env"),
+    "CUSTOM_API_KEY=e2e-loopback-only\n",
+    "utf8",
+  );
   const privateBefore = await privateProfileSnapshot(
     employeeProfile,
     fixture.privateMarkers,
@@ -582,7 +689,7 @@ test("an employee contributes one Skill and an Owner publishes it only through t
       ),
     { profile: EMPLOYEE_PROFILE, runId: "org-exp-v2" },
   );
-  expect(reply.response.length).toBeGreaterThan(0);
+  expect(reply.response).toContain("ORGANIZATION_EXPERIENCE_MODEL_REPLY");
   await expect
     .poll(async () => (await localAgentControlState(employeeDevice!)).bindings)
     .toEqual(
