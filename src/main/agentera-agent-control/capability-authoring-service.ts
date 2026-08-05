@@ -282,6 +282,12 @@ export class CapabilityAuthoringService {
     this.requirements.clear();
   }
 
+  notifyContextChanged(): void {
+    if (this.active?.ownerKey !== this.ownerKey()) {
+      this.invalidate();
+    }
+  }
+
   async listAuthoringCapabilities(
     profileId: string,
   ): Promise<AuthoringCapabilitySummary> {

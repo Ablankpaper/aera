@@ -230,6 +230,24 @@ describe("CapabilityAuthoringService", () => {
     });
   });
 
+  it("keeps the current capability inventory during a same-owner context notification", async () => {
+    const authoring = service();
+    await authoring.listAuthoringCapabilities("profile-a");
+
+    authoring.notifyContextChanged();
+
+    expect(
+      authoring.prepareInstalledSkillSnapshot({
+        profileId: "profile-a",
+        skillName: "weekly-summary",
+      }),
+    ).toMatchObject({
+      profileHandle: "profile-a",
+      skillName: "weekly-summary",
+      fileCount: 2,
+    });
+  });
+
   it("prepares an immutable Skill snapshot and consumes its handle once", async () => {
     const authoring = service();
     await authoring.listAuthoringCapabilities("profile-a");

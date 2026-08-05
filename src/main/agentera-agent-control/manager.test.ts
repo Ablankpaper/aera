@@ -270,6 +270,7 @@ describe("Agent control Organization Foundation context", () => {
         required: true,
         permissionReason: "Read selected documents",
       })),
+      notifyContextChanged: vi.fn(),
       invalidate: vi.fn(),
     };
     const { manager } = fullManager(
@@ -309,7 +310,10 @@ describe("Agent control Organization Foundation context", () => {
       capabilityAuthoringService.listAuthoringCapabilities,
     ).toHaveBeenCalledWith("profile-a");
     manager.notifyAgentContextChanged();
-    expect(capabilityAuthoringService.invalidate).toHaveBeenCalledOnce();
+    expect(
+      capabilityAuthoringService.notifyContextChanged,
+    ).toHaveBeenCalledOnce();
+    expect(capabilityAuthoringService.invalidate).not.toHaveBeenCalled();
   });
 
   it("does not detach an in-flight capability inventory during a same-context refresh", async () => {

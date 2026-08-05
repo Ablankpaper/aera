@@ -575,7 +575,7 @@ export class AgenteraAgentControlManager {
     this.organizationExperienceCandidateComponents = null;
     this.officialAgentComponents?.service.invalidate();
     this.officialAgentComponents = null;
-    this.invalidateCapabilityAuthoring();
+    this.capabilityAuthoringService?.notifyContextChanged();
     this.runtime?.capabilityBindingService.invalidate();
     this.publicationOwners.clear();
     this.emitState();
