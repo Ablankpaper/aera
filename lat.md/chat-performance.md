@@ -78,6 +78,8 @@ Mocked transport tests and CI are necessary but do not close the missing-charact
 
 [[tests/e2e/chat-stream-integrity.e2e.ts]] uses temporary Electron user-data and `HERMES_HOME`, a disposable local Cloud account, and a loopback OpenAI-compatible service that emits one Unicode code point per SSE chunk. At least 20 long Chinese turns include repeated phrases, punctuation, combining marks, and emoji.
 
+The loopback service maps numbered replies only from an exact synthetic `CASE_XX` user message. Background non-streaming requests such as automatic title generation are answered and counted separately, so they cannot consume or renumber a chat case.
+
 The isolated registration helper accepts the direct login continuation required by `prompt=select_account` and the compatible authorization intermediate page. Both landings must retain the same Cloud authorization request before registration proceeds, and navigation waits fail within a bounded interval.
 
 The gate fails closed when any exact Runtime/Desktop identity or isolated dependency root is absent or malformed. It proves the exact temporary Runtime root has no process before Electron launch, records the harness-owned Runtime processes observed by the first local send, and requires no process under that root after close; fallback cleanup may signal only that validated harness-owned root.
