@@ -1304,6 +1304,24 @@ test("organization agent needs one current reviewer and keeps every employee run
   await new Promise((resolveWait) => setTimeout(resolveWait, 1_100));
   await owner.device.page.evaluate(() => window.agenteraAuth.retryOnline());
   await memberDevice.page.evaluate(() => window.agenteraAuth.retryOnline());
+
+  const archivedInstallation = unwrapAgent(
+    await invokeAgentera<AgenteraAgentInstallationSummary>(
+      memberDevice,
+      "archiveInstallation",
+      installation.id,
+    ),
+  );
+  expect(archivedInstallation.status).toBe("archived");
+  expect(
+    (await localAgentControlState(memberDevice)).installations.find(
+      ({ id }) => id === installation.id,
+    ),
+  ).toMatchObject({ id: installation.id, status: "archived" });
+  expect(
+    await privateProfileSnapshot(memberProfile, MEMBER_PRIVATE_MARKERS),
+  ).toEqual(memberPrivate);
+
   members = await organizationMembers(owner.device, organization.id);
   const removable = members.find(
     ({ userId }) => userId === member.identity.userId,
@@ -1349,23 +1367,6 @@ test("organization agent needs one current reviewer and keeps every employee run
   expect(
     (await localAgentControlState(memberDevice)).installations,
   ).toHaveLength(1);
-  expect(
-    await privateProfileSnapshot(memberProfile, MEMBER_PRIVATE_MARKERS),
-  ).toEqual(memberPrivate);
-
-  const archivedInstallation = unwrapAgent(
-    await invokeAgentera<AgenteraAgentInstallationSummary>(
-      memberDevice,
-      "archiveInstallation",
-      installation.id,
-    ),
-  );
-  expect(archivedInstallation.status).toBe("archived");
-  expect(
-    (await localAgentControlState(memberDevice)).installations.find(
-      ({ id }) => id === installation.id,
-    ),
-  ).toMatchObject({ id: installation.id, status: "archived" });
   expect(
     await privateProfileSnapshot(memberProfile, MEMBER_PRIVATE_MARKERS),
   ).toEqual(memberPrivate);
