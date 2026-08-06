@@ -6,7 +6,7 @@ Public releases continue to use `electron-updater` with the GitHub publisher met
 
 [[src/main/app/updater.ts#setupUpdater]] registers one IPC contract for both channels, persists the auto-upgrade preference under Electron `userData`, performs the first packaged-app check after five seconds, and repeats checks every six hours. It also retains a current snapshot so a renderer created after a background check can recover the `available`, `downloading`, `ready`, or `error` state through `getDesktopUpdateState`.
 
-The production dependency gate runs `npm audit --omit=dev --audit-level=high`. The public update path therefore stays on `electron-updater` 6.8.9 or newer, and shipped archive handling stays on `tar` 7.5.22 or newer.
+The production dependency gate runs `npm audit --omit=dev --audit-level=high`. Electron is pinned to 39.8.10 within the reviewed major, excluding the vulnerable `<=39.8.9` range; the public update path stays on `electron-updater` 6.8.9 or newer, and shipped archive handling stays on `tar` 7.5.22 or newer.
 
 When a newer release is available, [[src/renderer/src/screens/Layout/Layout.tsx#Layout]] shows an upgrade button in the sidebar footer. The button downloads the update when needed, shows progress, and becomes a restart action after verified bytes are ready.
 
