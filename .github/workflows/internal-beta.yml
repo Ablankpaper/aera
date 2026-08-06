@@ -59,7 +59,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain=v1)"
           VERSION=$(node -p "require('./package.json').version")
-          test "$VERSION" = "0.7.4-internal-beta.23"
+          test "$VERSION" = "0.7.4-internal-beta.24"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Verify successful CI belongs to the exact source
@@ -745,7 +745,7 @@ jobs:
             --manifest candidate/desktop-update/manifest.json \
             --private-key-env DESKTOP_UPDATE_SIGNING_PRIVATE_KEY \
             --published-at "$CREATED_AT" \
-            --release-notes "Beta.23 修复 Agent 版本缓存与安装事务恢复、Profile/Runtime 绑定、旧 Gateway 接管和 Runtime 稳定更新通道，并保留模型中心修复与 macOS Apple 公证、装订及 Gatekeeper 验证。" \
+            --release-notes "Beta.24 将随包 Runtime 升级到 0.20.0-agentera.1，保留 Agent 安装恢复、Profile/Runtime 绑定与稳定更新通道；macOS 继续通过 Apple 公证、装订及 Gatekeeper 验证，Windows 内测包仍明确未签名。" \
             --signature candidate/desktop-update/manifest.sig \
             --version "$VERSION"
           node scripts/internal-beta/desktop-update.mjs verify \
