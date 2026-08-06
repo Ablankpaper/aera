@@ -86,9 +86,9 @@ node scripts/internal-beta/verify-live-evidence.mjs \
 
 ## 4. Install the platform-verified internal-only packages
 
-The Beta.23 macOS package requires Developer ID signing, accepted Apple
+The Beta.24 macOS package requires Developer ID signing, accepted Apple
 notarization, application and DMG stapling, strict signature verification, and
-Gatekeeper acceptance. The Beta.23 Internal Beta Windows setup and portable
+Gatekeeper acceptance. The Beta.24 Internal Beta Windows setup and portable
 packages are intentionally unsigned and make no Authenticode or
 SmartScreen-reputation claim. The production release-candidate workflow remains
 Authenticode fail-closed.

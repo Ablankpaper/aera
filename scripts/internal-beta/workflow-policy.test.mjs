@@ -41,10 +41,10 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   ]);
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.23"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.24"/u);
   assert.match(
     raw,
-    /--release-notes "Beta\.23 修复 Agent 版本缓存与安装事务恢复、Profile\/Runtime 绑定、旧 Gateway 接管和 Runtime 稳定更新通道，并保留模型中心修复与 macOS Apple 公证、装订及 Gatekeeper 验证。"/u,
+    /--release-notes "Beta\.24 将随包 Runtime 升级到 0\.20\.0-agentera\.1，保留 Agent 安装恢复、Profile\/Runtime 绑定与稳定更新通道；macOS 继续通过 Apple 公证、装订及 Gatekeeper 验证，Windows 内测包仍明确未签名。"/u,
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
