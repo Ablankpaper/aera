@@ -64,7 +64,7 @@ The promotion workflow rejects a failed, incomplete, differently sourced, or dif
 
 ## Built bytes
 
-The platform jobs prepare and independently verify Runtime Seed candidate `dcb0f0bc6a0e2d18c55beedc6517dbc41d8b01e0` (`runtime-v0.18.2-agentera.1-rc.4`), rebuild native modules for the target architecture, compile the baked Beta trust, and package:
+The platform jobs prepare and independently verify Runtime Seed candidate `ae746df6556f1d496f9dd49c850cc6133997e317` (`runtime-v0.20.0-agentera.1-rc.1`), rebuild native modules for the target architecture, compile the baked Beta trust, and package:
 
 - `Aera-Internal-Beta-0.7.4-internal-beta.23-macos-arm64.dmg`
 - `Aera-Internal-Beta-0.7.4-internal-beta.23-macos-arm64.zip`

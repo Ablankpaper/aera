@@ -18,7 +18,7 @@ export const INTERNAL_BETA_VERSION = "0.7.4-internal-beta.23";
 export const INTERNAL_BETA_SIGNING_STATUS =
   "macos_developer_id_notarized_windows_unsigned";
 export const INTERNAL_BETA_RUNTIME_SOURCE_SHA =
-  "dcb0f0bc6a0e2d18c55beedc6517dbc41d8b01e0";
+  "ae746df6556f1d496f9dd49c850cc6133997e317";
 export const INTERNAL_BETA_WORKFLOW_IDENTITY =
   "https://github.com/bignormal/aera/.github/workflows/internal-beta.yml@refs/heads/main";
 export const INTERNAL_BETA_OIDC_ISSUER =
@@ -288,8 +288,8 @@ function validateRuntimeLock(lock) {
     lock.repository !== "bignormal/aera-runtime" ||
     lock.source_commit !== INTERNAL_BETA_RUNTIME_SOURCE_SHA ||
     lock.channel !== "candidate" ||
-    lock.runtime_version !== "0.18.2-agentera.1" ||
-    lock.release_tag !== "runtime-v0.18.2-agentera.1-rc.4"
+    lock.runtime_version !== "0.20.0-agentera.1" ||
+    lock.release_tag !== "runtime-v0.20.0-agentera.1-rc.1"
   ) {
     throw new Error(
       "Runtime Seed commit, channel, version, or release is not approved for internal Beta",
@@ -509,8 +509,8 @@ export function validateInternalBetaManifest(document) {
     document.runtimeSeed.repository !== "bignormal/aera-runtime" ||
     document.runtimeSeed.sourceCommit !== INTERNAL_BETA_RUNTIME_SOURCE_SHA ||
     document.runtimeSeed.channel !== "candidate" ||
-    document.runtimeSeed.runtimeVersion !== "0.18.2-agentera.1" ||
-    document.runtimeSeed.releaseTag !== "runtime-v0.18.2-agentera.1-rc.4"
+    document.runtimeSeed.runtimeVersion !== "0.20.0-agentera.1" ||
+    document.runtimeSeed.releaseTag !== "runtime-v0.20.0-agentera.1-rc.1"
   ) {
     throw new Error("Runtime Seed identity is not approved for internal Beta");
   }

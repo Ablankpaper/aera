@@ -96,29 +96,29 @@ async function fixture() {
     runtimeSeed: {
       repository: "bignormal/aera-runtime",
       sourceCommit: INTERNAL_BETA_RUNTIME_SOURCE_SHA,
-      runtimeVersion: "0.18.2-agentera.1",
-      releaseTag: "runtime-v0.18.2-agentera.1-rc.4",
+      runtimeVersion: "0.20.0-agentera.1",
+      releaseTag: "runtime-v0.20.0-agentera.1-rc.1",
       channel: "candidate",
       lockSha256: "3".repeat(64),
       targets: [
         {
           platform: "darwin",
           arch: "arm64",
-          archive: "agentera-runtime-0.18.2-agentera.1-darwin-arm64.tar.zst",
+          archive: "agentera-runtime-0.20.0-agentera.1-darwin-arm64.tar.zst",
           manifest:
-            "agentera-runtime-0.18.2-agentera.1-darwin-arm64.manifest.json",
+            "agentera-runtime-0.20.0-agentera.1-darwin-arm64.manifest.json",
           signature:
-            "agentera-runtime-0.18.2-agentera.1-darwin-arm64.manifest.sig",
+            "agentera-runtime-0.20.0-agentera.1-darwin-arm64.manifest.sig",
           manifestSha256: "4".repeat(64),
         },
         {
           platform: "windows",
           arch: "x64",
-          archive: "agentera-runtime-0.18.2-agentera.1-windows-x64.zip",
+          archive: "agentera-runtime-0.20.0-agentera.1-windows-x64.zip",
           manifest:
-            "agentera-runtime-0.18.2-agentera.1-windows-x64.manifest.json",
+            "agentera-runtime-0.20.0-agentera.1-windows-x64.manifest.json",
           signature:
-            "agentera-runtime-0.18.2-agentera.1-windows-x64.manifest.sig",
+            "agentera-runtime-0.20.0-agentera.1-windows-x64.manifest.sig",
           manifestSha256: "5".repeat(64),
         },
       ],
