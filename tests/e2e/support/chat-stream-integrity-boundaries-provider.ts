@@ -52,9 +52,7 @@ function hasBoundaryToolResult(messages: unknown[]): boolean {
 }
 
 function isCurrentPrompt(content: string, prompt: string): boolean {
-  return content
-    .split(/\r?\n/u)
-    .some((line) => line.trim() === prompt);
+  return content.split(/\r?\n/u).some((line) => line.trim() === prompt);
 }
 
 export function streamIntegrityBoundaryToolCall(): StreamIntegrityBoundaryToolCall {
