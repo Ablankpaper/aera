@@ -20,6 +20,7 @@ import {
   configureGatewayProcessOwnership,
   recoverAeraOwnedGatewaysFromPreviousRun,
   stopAeraOwnedGateways,
+  stopAllTuiGatewayClients,
   stopHealthPolling,
 } from "../hermes";
 import { stopAllDashboards } from "../dashboard";
@@ -39,6 +40,7 @@ import { setGatewayPromptParent } from "../gatewayPrompt";
 import { showChatContextMenu } from "./context-menu";
 import { buildMenu } from "./menu";
 import { setupUpdater } from "./updater";
+import { createQuitBarrier } from "./quit-barrier";
 import { DESKTOP_APP_ID, DESKTOP_PRODUCT_NAME } from "../../shared/branding";
 import { getAgenteraCloudOrigin } from "../agentera-auth/config";
 import { AgenteraCloudClient } from "../agentera-auth/client";
@@ -716,31 +718,42 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     if (process.platform !== "darwin") app.quit();
   });
 
-  app.on("before-quit", () => {
-    unsubscribeAgenteraAuth();
-    unsubscribeProductSpace();
-    agenteraAuth.dispose();
-    agenteraProductSpace?.close();
-    agenteraOrganization?.close();
-    agenteraWorkspace?.close();
-    agenteraOfficialQualityDatabase?.close();
-    agenteraEncryptedBackup?.close();
-    agenteraAgentControlDatabase?.close();
-    stopActiveRuntimeContext();
-  });
+  app.on(
+    "before-quit",
+    createQuitBarrier(
+      async () => {
+        unsubscribeAgenteraAuth();
+        unsubscribeProductSpace();
+        agenteraAuth.dispose();
+        agenteraProductSpace?.close();
+        agenteraOrganization?.close();
+        agenteraWorkspace?.close();
+        agenteraOfficialQualityDatabase?.close();
+        agenteraEncryptedBackup?.close();
+        agenteraAgentControlDatabase?.close();
+        await stopActiveRuntimeContext();
+      },
+      () => app.quit(),
+      (error) => {
+        console.error("[APP_QUIT_CLEANUP] failed", error);
+      },
+    ),
+  );
 }
 
-export function stopActiveRuntimeContext(): void {
+export async function stopActiveRuntimeContext(): Promise<void> {
   stopHealthPolling();
   runtimeActivity.abortAll();
   cleanupTempMediaFiles();
   stopAllDashboards();
+  const tuiShutdown = stopAllTuiGatewayClients();
   // A Profile or connection context must never remain mounted across an
   // Aera owner transition. Stop local execution, remote/SSH transport,
   // and cached SQLite access before the next owner can claim a context.
   stopAeraOwnedGateways();
   stopSshTunnel();
   closeDbConnection();
+  await tuiShutdown;
 }
 
 function notifyConnectionConfigChanged(): void {
