@@ -1230,8 +1230,14 @@ test("organization agent needs one current reviewer and keeps every employee run
       expect.objectContaining({
         id: initial.submission.id,
         status: "approved",
-        localDraftId: initial.draft.id,
-        localDraftRevision: 1,
+        // Discard removes the device-local working copy and therefore its
+        // trusted local reference; the immutable approved submission remains.
+        localDraftId: null,
+        localDraftRevision: null,
+        definitionId: approvedInitial.definitionId,
+        publishedVersionId: approvedInitial.publishedVersionId,
+        contentDigest: approvedInitial.contentDigest,
+        revision: approvedInitial.revision,
       }),
     ]),
   );
