@@ -66,6 +66,34 @@ Callers continue to supply the existing physical `HERMES_HOME` or Profile home. 
 
 Chat and Gateway, Dashboard, Skills, Profiles, Cron, model discovery, MCP, account authentication, Kanban, compatibility probing, and startup preflight all consume the live invocation rather than module-level executable paths. [[src/main/agentera-runtime-distribution/invocation.ts#refreshRuntimeInvocation]] re-resolves the selection after seed installation or activation.
 
+## Desktop TUI backend lifecycle
+
+Desktop owns every local headless TUI backend independently from the ordinary Gateway ownership ledger, including backends warmed only by a named Profile switch.
+
+### Runtime 0.20 headless contract
+
+The Desktop TUI transport launches Runtime through `hermes serve` with `HERMES_DESKTOP=1`, retaining per-Profile state and JSON-RPC/WebSocket support without machine-dashboard routing or a browser SPA.
+
+### Exact process-tree shutdown
+
+Graceful shutdown starts from the exact `ChildProcess` returned by Desktop and the child-first descendant list captured from its PID; it never selects processes by name, port, or Profile label.
+
+### Bounded force escalation
+
+SIGTERM receives a fixed grace window. Only captured PIDs still alive at the deadline may receive SIGKILL, and a shared Electron process group is never signalled as a unit.
+
+### Cancelled startup cannot outlive Desktop
+
+Every asynchronous TUI start belongs to one generation. Stop invalidates that generation before releasing ownership, so a pending port or readiness continuation cannot publish a late process.
+
+### Pool-wide App shutdown
+
+App and owner transitions snapshot, clear, and await every TUI client directly; ordinary Gateway ownership cannot hide a TUI-only named Profile from cleanup.
+
+### Awaited Electron quit barrier
+
+The first quit request pauses Electron once, awaits the bounded Runtime cleanup, and then reissues quit; repeated requests reuse that cleanup and cannot start duplicate shutdown work.
+
 ## Explicit external compatibility
 
 External Runtime use is retained only as a legacy persisted compatibility mode for existing developer installations; packaged managed mode is the only first-install product path.

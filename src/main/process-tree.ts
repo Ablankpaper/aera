@@ -1,10 +1,29 @@
-import { execFileSync, type ChildProcess } from "child_process";
+import { execFileSync, type ChildProcess } from "node:child_process";
 
 export interface KillProcessTreeOptions {
   /** POSIX children must have been spawned with `detached: true` before their
    *  negative PID can safely identify a dedicated process group. */
   detachedProcessGroup?: boolean;
   forceAfterMs?: number;
+}
+
+export interface TerminateProcessTreeOptions extends KillProcessTreeOptions {
+  pollIntervalMs?: number;
+  forceSettleMs?: number;
+  /** Deterministic process seams used by focused lifecycle tests. */
+  operations?: Partial<ProcessTreeTerminationOperations>;
+}
+
+export interface ProcessTreeTerminationResult {
+  forced: boolean;
+  remainingPids: number[];
+}
+
+export interface ProcessTreeTerminationOperations {
+  descendantPids(rootPid: number): number[];
+  pidIsAlive(pid: number): boolean;
+  signalPid(pid: number, signal: NodeJS.Signals): void;
+  wait(delayMs: number): Promise<void>;
 }
 
 function descendantPids(rootPid: number): number[] {
@@ -44,6 +63,154 @@ function signalPid(pid: number, signal: NodeJS.Signals): void {
   } catch {
     // Already dead.
   }
+}
+
+function pidIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function childProcessIsAlive(
+  proc: ChildProcess,
+  isPidAlive: (pid: number) => boolean,
+): boolean {
+  return (
+    typeof proc.pid === "number" &&
+    proc.exitCode === null &&
+    proc.signalCode === null &&
+    isPidAlive(proc.pid)
+  );
+}
+
+function remainingOwnedPids(
+  proc: ChildProcess,
+  descendants: readonly number[],
+  isPidAlive: (pid: number) => boolean,
+): number[] {
+  const remaining = descendants.filter(isPidAlive);
+  if (childProcessIsAlive(proc, isPidAlive) && proc.pid) {
+    remaining.push(proc.pid);
+  }
+  return remaining;
+}
+
+function wait(delayMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+async function waitForOwnedTreeExit(
+  proc: ChildProcess,
+  descendants: readonly number[],
+  timeoutMs: number,
+  pollIntervalMs: number,
+  operations: ProcessTreeTerminationOperations,
+): Promise<number[]> {
+  const deadline = Date.now() + timeoutMs;
+  let remaining = remainingOwnedPids(proc, descendants, operations.pidIsAlive);
+  while (remaining.length > 0 && Date.now() < deadline) {
+    await operations.wait(
+      Math.min(pollIntervalMs, Math.max(1, deadline - Date.now())),
+    );
+    remaining = remainingOwnedPids(proc, descendants, operations.pidIsAlive);
+  }
+  return remaining;
+}
+
+function signalOwnedRoot(
+  proc: ChildProcess,
+  signal: NodeJS.Signals,
+  detachedProcessGroup: boolean,
+): void {
+  if (!proc.pid) return;
+  try {
+    if (detachedProcessGroup) {
+      process.kill(-proc.pid, signal);
+    } else {
+      proc.kill(signal);
+    }
+  } catch {
+    try {
+      proc.kill(signal);
+    } catch {
+      // Already dead.
+    }
+  }
+}
+
+/**
+ * Gracefully terminate one exact Desktop-owned child tree, then force only
+ * the still-live PIDs captured from that root. Callers must opt in explicitly
+ * before a POSIX process group can be signalled.
+ */
+export async function terminateProcessTree(
+  proc: ChildProcess,
+  options: TerminateProcessTreeOptions = {},
+): Promise<ProcessTreeTerminationResult> {
+  if (!proc.pid) return { forced: false, remainingPids: [] };
+
+  const rootPid = proc.pid;
+  const operations: ProcessTreeTerminationOperations = {
+    descendantPids,
+    pidIsAlive,
+    signalPid,
+    wait,
+    ...options.operations,
+  };
+  const descendants = operations.descendantPids(rootPid);
+  const detachedProcessGroup = options.detachedProcessGroup ?? false;
+  const forceAfterMs = Math.max(0, options.forceAfterMs ?? 3000);
+  const pollIntervalMs = Math.max(1, options.pollIntervalMs ?? 50);
+  const forceSettleMs = Math.max(0, options.forceSettleMs ?? 500);
+
+  for (const childPid of descendants) {
+    operations.signalPid(childPid, "SIGTERM");
+  }
+  signalOwnedRoot(proc, "SIGTERM", detachedProcessGroup);
+
+  let remaining = await waitForOwnedTreeExit(
+    proc,
+    descendants,
+    forceAfterMs,
+    pollIntervalMs,
+    operations,
+  );
+  if (remaining.length === 0) {
+    return { forced: false, remainingPids: [] };
+  }
+
+  if (process.platform === "win32") {
+    try {
+      execFileSync("taskkill", ["/F", "/T", "/PID", String(rootPid)], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+    } catch {
+      signalOwnedRoot(proc, "SIGKILL", false);
+    }
+  } else {
+    const remainingSet = new Set(remaining);
+    for (const childPid of descendants) {
+      if (remainingSet.has(childPid)) {
+        operations.signalPid(childPid, "SIGKILL");
+      }
+    }
+    if (remainingSet.has(rootPid)) {
+      signalOwnedRoot(proc, "SIGKILL", detachedProcessGroup);
+    }
+  }
+
+  remaining = await waitForOwnedTreeExit(
+    proc,
+    descendants,
+    forceSettleMs,
+    pollIntervalMs,
+    operations,
+  );
+  return { forced: true, remainingPids: remaining };
 }
 
 /**
