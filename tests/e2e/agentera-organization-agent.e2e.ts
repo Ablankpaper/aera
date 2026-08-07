@@ -1171,16 +1171,22 @@ test("organization agent needs one current reviewer and keeps every employee run
   });
   await expect(lifecycleDetail).toBeVisible();
   await lifecycleDetail
-    .getByRole("button", { name: "Discard unpublished changes" })
+    .getByRole("button", {
+      name: /^(Discard unpublished changes|放弃未发布修改)$/,
+    })
     .click();
 
   const discardDialog = owner.device.page.getByRole("dialog", {
-    name: "Discard unpublished changes",
+    name: /^(Discard unpublished changes|放弃未发布修改)$/,
   });
   await expect(discardDialog).toContainText(
-    /current local working copy is removed.*published enterprise Agent.*remain unchanged/s,
+    /current local working copy is removed.*published enterprise Agent.*remain unchanged|删除当前本地工作副本.*已发布的企业智能体版本.*均保持不变/s,
   );
-  await discardDialog.getByRole("button", { name: "Discard changes" }).click();
+  await discardDialog
+    .getByRole("button", {
+      name: /^(Discard changes|确认放弃修改)$/,
+    })
+    .click();
   await expect(discardDialog).toBeHidden();
 
   const discardedDrafts = unwrapAgent(
@@ -1195,7 +1201,7 @@ test("organization agent needs one current reviewer and keeps every employee run
     ),
   ).toEqual({ ok: false, errorCode: "not_found" });
 
-  await expect(lifecycleCard).toContainText(/\bPublished\b/);
+  await expect(lifecycleCard).toContainText(/\bPublished\b|已发布/);
   await expect(lifecycleCard).not.toContainText(
     /Published with unpublished changes|已发布，有未发布修改/,
   );
@@ -1206,7 +1212,7 @@ test("organization agent needs one current reviewer and keeps every employee run
   await expect(cleanLifecycleDetail).toBeVisible();
   await expect(
     cleanLifecycleDetail.getByRole("button", {
-      name: "Discard unpublished changes",
+      name: /^(Discard unpublished changes|放弃未发布修改)$/,
     }),
   ).toHaveCount(0);
   await cleanLifecycleDetail
