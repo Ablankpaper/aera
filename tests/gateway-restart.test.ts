@@ -792,8 +792,12 @@ describe("restartGatewayViaCli", () => {
     expect(recover).toBeGreaterThan(configure);
     expect(register).toBeGreaterThan(recover);
 
+    const teardownStart = start.indexOf(
+      "export async function stopActiveRuntimeContext",
+    );
+    expect(teardownStart).toBeGreaterThan(-1);
     const teardown = start.slice(
-      start.indexOf("export function stopActiveRuntimeContext"),
+      teardownStart,
       start.indexOf("function notifyConnectionConfigChanged"),
     );
     expect(teardown).toContain("stopAeraOwnedGateways()");

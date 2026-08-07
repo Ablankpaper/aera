@@ -20,6 +20,7 @@ import {
   configureGatewayProcessOwnership,
   recoverAeraOwnedGatewaysFromPreviousRun,
   stopAeraOwnedGateways,
+  stopAllTuiGatewayClients,
   stopHealthPolling,
 } from "../hermes";
 import { stopAllDashboards } from "../dashboard";
@@ -39,6 +40,7 @@ import { setGatewayPromptParent } from "../gatewayPrompt";
 import { showChatContextMenu } from "./context-menu";
 import { buildMenu } from "./menu";
 import { setupUpdater } from "./updater";
+import { createQuitBarrier } from "./quit-barrier";
 import { DESKTOP_APP_ID, DESKTOP_PRODUCT_NAME } from "../../shared/branding";
 import { getAgenteraCloudOrigin } from "../agentera-auth/config";
 import { AgenteraCloudClient } from "../agentera-auth/client";
@@ -589,7 +591,14 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
       agenteraAgentControl?.notifyAgentContextChanged();
     }) ?? (() => undefined);
   const ownerSwitchCoordinator = createAgenteraOwnerSwitchCoordinator({
-    stopRuntimeContext: stopActiveRuntimeContext,
+    stopRuntimeContext: () => {
+      void stopActiveRuntimeContext().catch((error) => {
+        console.error(
+          "[AGENTERA_RUNTIME_OWNER_TRANSITION] cleanup failed",
+          error instanceof Error ? error.message : String(error),
+        );
+      });
+    },
   });
   let runtimeUpdateCheckedUserId: string | null = null;
   const unsubscribeAgenteraAuth = agenteraAuth.subscribe((state) => {
@@ -716,21 +725,40 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     if (process.platform !== "darwin") app.quit();
   });
 
-  app.on("before-quit", () => {
-    unsubscribeAgenteraAuth();
-    unsubscribeProductSpace();
-    agenteraAuth.dispose();
-    agenteraProductSpace?.close();
-    agenteraOrganization?.close();
-    agenteraWorkspace?.close();
-    agenteraOfficialQualityDatabase?.close();
-    agenteraEncryptedBackup?.close();
-    agenteraAgentControlDatabase?.close();
-    stopActiveRuntimeContext();
-  });
+  app.on(
+    "before-quit",
+    createQuitBarrier(
+      async () => {
+        unsubscribeAgenteraAuth();
+        unsubscribeProductSpace();
+        const runtimeCleanup = stopActiveRuntimeContext({
+          closeTuiGatewayPool: true,
+        });
+        agenteraAuth.dispose();
+        agenteraProductSpace?.close();
+        agenteraOrganization?.close();
+        agenteraWorkspace?.close();
+        agenteraOfficialQualityDatabase?.close();
+        agenteraEncryptedBackup?.close();
+        agenteraAgentControlDatabase?.close();
+        await runtimeCleanup;
+      },
+      () => app.quit(),
+      (error) => {
+        console.error("[APP_QUIT_CLEANUP] failed", error);
+      },
+    ),
+  );
 }
 
-export function stopActiveRuntimeContext(): void {
+export async function stopActiveRuntimeContext(
+  options: {
+    closeTuiGatewayPool?: boolean;
+  } = {},
+): Promise<void> {
+  const tuiShutdown = stopAllTuiGatewayClients({
+    closePool: options.closeTuiGatewayPool,
+  });
   stopHealthPolling();
   runtimeActivity.abortAll();
   cleanupTempMediaFiles();
@@ -741,6 +769,7 @@ export function stopActiveRuntimeContext(): void {
   stopAeraOwnedGateways();
   stopSshTunnel();
   closeDbConnection();
+  await tuiShutdown;
 }
 
 function notifyConnectionConfigChanged(): void {

@@ -48,6 +48,10 @@ import { getSecret } from "./secrets";
 import { readModels } from "./models";
 import { providerListSafe } from "./secrets";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
+import {
+  terminateProcessTree,
+  type ProcessTreeTerminationResult,
+} from "./process-tree";
 import { type Attachment, escapeXmlAttr } from "../shared/attachments";
 import { type SessionModelOverride } from "../shared/model-override";
 import {
@@ -554,23 +558,107 @@ async function waitForDashboardReady(
   throw new Error("Aera Runtime dashboard gateway did not become ready");
 }
 
-class TuiGatewayClient {
+const TUI_GATEWAY_STOPPED_MESSAGE =
+  "Aera Runtime dashboard gateway stream stopped";
+
+export interface TuiGatewayClientDependencies {
+  pickDashboardPort: () => Promise<number>;
+  spawnBackend: typeof spawn;
+  waitForDashboardReady: typeof waitForDashboardReady;
+  terminateProcessTree: (
+    proc: ChildProcess,
+    options: {
+      detachedProcessGroup: boolean;
+      forceAfterMs: number;
+    },
+  ) => Promise<ProcessTreeTerminationResult>;
+}
+
+const defaultTuiGatewayClientDependencies: TuiGatewayClientDependencies = {
+  pickDashboardPort,
+  spawnBackend: spawn,
+  waitForDashboardReady,
+  terminateProcessTree,
+};
+
+class TuiGatewayStoppedError extends Error {
+  constructor(message = TUI_GATEWAY_STOPPED_MESSAGE) {
+    super(message);
+    this.name = "TuiGatewayStoppedError";
+  }
+}
+
+let tuiGatewayPoolClosed = false;
+let tuiGatewayPoolStopping = false;
+let tuiGatewayShutdownRequests = 0;
+let tuiGatewayShutdownQueue: Promise<void> = Promise.resolve();
+const tuiGatewayStopsInFlight = new Set<Promise<void>>();
+const tuiGatewayFailedClientKeys = new Set<string>();
+
+function assertTuiGatewayPoolAdmissionOpen(): void {
+  if (
+    tuiGatewayPoolClosed ||
+    tuiGatewayPoolStopping ||
+    tuiGatewayFailedClientKeys.size > 0
+  ) {
+    throw new TuiGatewayStoppedError(
+      "Aera Runtime dashboard gateway pool is shutting down",
+    );
+  }
+}
+
+function trackTuiGatewayStop(stopping: Promise<void>): Promise<void> {
+  tuiGatewayStopsInFlight.add(stopping);
+  void stopping
+    .finally(() => tuiGatewayStopsInFlight.delete(stopping))
+    .catch(() => {
+      // The owning shutdown path reports its own cleanup error.
+    });
+  return stopping;
+}
+
+export async function waitForTuiGatewayShutdowns(): Promise<void> {
+  for (;;) {
+    const queue = tuiGatewayShutdownQueue;
+    const inFlight = [...tuiGatewayStopsInFlight];
+    await Promise.allSettled([...inFlight, queue]);
+    if (
+      queue === tuiGatewayShutdownQueue &&
+      tuiGatewayStopsInFlight.size === 0
+    ) {
+      break;
+    }
+  }
+  if (tuiGatewayFailedClientKeys.size > 0) {
+    throw new Error("Aera Runtime dashboard gateway cleanup is incomplete");
+  }
+}
+
+export class TuiGatewayClient {
+  private readonly dependencies: TuiGatewayClientDependencies;
+  private admissionClosed = false;
+  private generation = 0;
   private handlers = new Set<GatewayEventHandler>();
   private nextId = 0;
   private pending = new Map<string, GatewayPending>();
-  private port = 0;
   private proc: ChildProcess | null = null;
   private recentEvents: GatewayEvent[] = [];
   private ready: Promise<void> | null = null;
   private readyReject: ((error: Error) => void) | null = null;
   private readyResolve: (() => void) | null = null;
-  private token = "";
+  private stopPromise: Promise<void> | null = null;
   private ws: WebSocket | null = null;
 
   constructor(
     private readonly key: string,
     private readonly env: Record<string, string>,
-  ) {}
+    dependencies: Partial<TuiGatewayClientDependencies> = {},
+  ) {
+    this.dependencies = {
+      ...defaultTuiGatewayClientDependencies,
+      ...dependencies,
+    };
+  }
 
   onEvent(handler: GatewayEventHandler): () => void {
     this.handlers.add(handler);
@@ -621,79 +709,163 @@ class TuiGatewayClient {
   }
 
   async start(): Promise<void> {
+    if (this.admissionClosed) {
+      throw new TuiGatewayStoppedError(
+        "Aera Runtime dashboard gateway pool is shutting down",
+      );
+    }
+    assertTuiGatewayPoolAdmissionOpen();
+    if (this.stopPromise) await this.stopPromise;
+    if (this.admissionClosed) {
+      throw new TuiGatewayStoppedError(
+        "Aera Runtime dashboard gateway pool is shutting down",
+      );
+    }
+    assertTuiGatewayPoolAdmissionOpen();
     if (this.ready) return this.ready;
+    if (this.proc) {
+      throw new TuiGatewayStoppedError(
+        "Aera Runtime dashboard gateway cleanup is incomplete",
+      );
+    }
 
-    this.ready = new Promise<void>((resolve, reject) => {
+    const generation = ++this.generation;
+    const ready = new Promise<void>((resolve, reject) => {
       this.readyResolve = resolve;
       this.readyReject = reject;
     });
+    this.ready = ready;
 
-    void this.startDashboardBackend()
-      .then(() => this.readyResolve?.())
+    void this.startDashboardBackend(generation)
+      .then(() => {
+        if (this.generation === generation && this.ready === ready) {
+          this.readyResolve?.();
+        }
+      })
       .catch((error) => {
+        if (this.generation !== generation) return;
         const err = error instanceof Error ? error : new Error(String(error));
         this.readyReject?.(err);
         this.rejectPending(err);
-        this.reset();
+        void this.stop(err).catch((cleanupError) => {
+          console.error(
+            `[dashboard-gateway:${this.key}] Runtime process cleanup failed:`,
+            cleanupError instanceof Error
+              ? cleanupError.message
+              : String(cleanupError),
+          );
+        });
       });
 
-    return this.ready;
+    return ready;
   }
 
-  stop(): void {
-    this.ws?.close();
-    this.proc?.kill("SIGTERM");
-    this.rejectPending(
-      new Error("Aera Runtime dashboard gateway stream stopped"),
-    );
-    this.reset();
+  async stop(reason: Error = new TuiGatewayStoppedError()): Promise<void> {
+    if (this.stopPromise) return this.stopPromise;
+
+    ++this.generation;
+    const proc = this.proc;
+    const readyReject = this.readyReject;
+    this.rejectPending(reason);
+    this.resetTransportState();
+    readyReject?.(reason);
+
+    const stopping = this.terminateOwnedProcess(proc);
+    this.stopPromise = stopping;
+    try {
+      await stopping;
+      if (this.proc === proc) this.proc = null;
+    } finally {
+      if (this.stopPromise === stopping) this.stopPromise = null;
+    }
   }
 
-  private async startDashboardBackend(): Promise<void> {
+  closeAdmission(): void {
+    this.admissionClosed = true;
+    ++this.generation;
+  }
+
+  private assertGeneration(generation: number): void {
+    if (this.generation !== generation) {
+      throw new TuiGatewayStoppedError();
+    }
+  }
+
+  private async startDashboardBackend(generation: number): Promise<void> {
     const invocation = getRuntimeInvocation();
     if (!invocation) {
       throw new Error("Aera Runtime is not prepared.");
     }
 
-    this.port = await pickDashboardPort();
-    this.token = randomUUID();
+    const port = await this.dependencies.pickDashboardPort();
+    this.assertGeneration(generation);
+    const token = randomUUID();
     const dashboardEnv = invocation.environment({
       ...this.env,
-      HERMES_DASHBOARD_SESSION_TOKEN: this.token,
+      HERMES_DASHBOARD_SESSION_TOKEN: token,
       HERMES_DASHBOARD_TUI: "1",
+      HERMES_DESKTOP: "1",
     });
-    // NB: no `--tui` flag here. It's a *global* hermes option (valid only
-    // before a subcommand), not a `dashboard` subcommand option, so passing
-    // `dashboard --tui` makes argparse exit 2 ("unrecognized arguments:
-    // --tui") and the warmup fails. The JSON-RPC gateway this client talks to
-    // (`/api/ws`) is always served by a plain `hermes dashboard` and is gated
-    // only by HERMES_DASHBOARD_SESSION_TOKEN (set in `dashboardEnv`).
+    // Runtime 0.20 reserves `dashboard` for the browser management surface.
+    // Desktop owns a Profile-scoped, headless JSON-RPC/WebSocket backend.
     const args = invocation.cliArgs([
-      "dashboard",
+      "serve",
       "--no-open",
       "--host",
       "127.0.0.1",
       "--port",
-      String(this.port),
+      String(port),
     ]);
-    const proc = spawn(invocation.python, args, {
+    const proc = this.dependencies.spawnBackend(invocation.python, args, {
       cwd: invocation.workingDirectory,
       env: dashboardEnv,
       stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
       ...HIDDEN_SUBPROCESS_OPTIONS,
     });
     this.proc = proc;
+    if (this.generation !== generation) {
+      await this.stop();
+      throw new TuiGatewayStoppedError();
+    }
 
+    let rejectEarlyExit!: (error: Error) => void;
     const exitBeforeReady = new Promise<never>((_resolve, reject) => {
-      proc.once("error", reject);
-      proc.once("exit", (code, signal) => {
-        reject(
-          new Error(
-            `Aera Runtime dashboard gateway exited before ready (${signal || code})`,
-          ),
+      rejectEarlyExit = reject;
+    });
+    let backendReady = false;
+    const handleProcessFailure = (error: Error): void => {
+      if (this.generation !== generation || this.proc !== proc) return;
+      this.rejectPending(error);
+      this.readyReject?.(error);
+      void this.stop(error).catch((cleanupError) => {
+        console.error(
+          `[dashboard-gateway:${this.key}] Runtime process cleanup failed:`,
+          cleanupError instanceof Error
+            ? cleanupError.message
+            : String(cleanupError),
         );
       });
-    });
+    };
+    const onProcessError = (error: Error): void => {
+      if (!backendReady) {
+        rejectEarlyExit(error);
+        return;
+      }
+      handleProcessFailure(error);
+    };
+    const onEarlyExit = (
+      code: number | null,
+      signal: NodeJS.Signals | null,
+    ): void => {
+      rejectEarlyExit(
+        new Error(
+          `Aera Runtime dashboard gateway exited before ready (${signal || code})`,
+        ),
+      );
+    };
+    proc.on("error", onProcessError);
+    proc.once("exit", onEarlyExit);
 
     proc.stdout?.on("data", (chunk: Buffer) => {
       const line = stripAnsi(chunk.toString()).trim();
@@ -704,30 +876,35 @@ class TuiGatewayClient {
       if (line) console.warn(`[dashboard-gateway:${this.key}] ${line}`);
     });
 
-    const baseUrl = `http://127.0.0.1:${this.port}`;
+    const baseUrl = `http://127.0.0.1:${port}`;
     await Promise.race([
-      waitForDashboardReady(baseUrl, this.token, 45_000),
+      this.dependencies.waitForDashboardReady(baseUrl, token, 45_000),
       exitBeforeReady,
     ]);
+    this.assertGeneration(generation);
+    if (this.proc !== proc) throw new TuiGatewayStoppedError();
     await Promise.race([
       this.connectWebSocket(
-        `ws://127.0.0.1:${this.port}/api/ws?token=${encodeURIComponent(this.token)}`,
+        `ws://127.0.0.1:${port}/api/ws?token=${encodeURIComponent(token)}`,
+        generation,
       ),
       exitBeforeReady,
     ]);
+    this.assertGeneration(generation);
+    if (this.proc !== proc) throw new TuiGatewayStoppedError();
 
-    proc.removeAllListeners("exit");
+    backendReady = true;
+    proc.removeListener("exit", onEarlyExit);
     proc.once("exit", (code, signal) => {
-      const error = new Error(
-        `Aera Runtime dashboard gateway exited (${signal || code})`,
+      handleProcessFailure(
+        new Error(`Aera Runtime dashboard gateway exited (${signal || code})`),
       );
-      this.rejectPending(error);
-      this.reset();
     });
   }
 
-  private connectWebSocket(url: string): Promise<void> {
+  private connectWebSocket(url: string, generation: number): Promise<void> {
     return new Promise((resolve, reject) => {
+      this.assertGeneration(generation);
       const ws = new WebSocket(url);
       this.ws = ws;
       const timer = setTimeout(() => {
@@ -738,22 +915,74 @@ class TuiGatewayClient {
 
       ws.on("open", () => {
         clearTimeout(timer);
-        resolve();
+        try {
+          this.assertGeneration(generation);
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
       });
-      ws.on("message", (data) => this.handleFrame(wsDataToString(data)));
+      ws.on("message", (data) => {
+        if (this.generation === generation) {
+          this.handleFrame(wsDataToString(data));
+        }
+      });
       ws.on("error", (error) => {
         clearTimeout(timer);
         reject(error instanceof Error ? error : new Error(String(error)));
       });
       ws.on("close", () => {
-        if (this.ws !== ws) return;
+        if (this.generation !== generation || this.ws !== ws) return;
         const error = new Error(
           "Aera Runtime dashboard gateway WebSocket closed",
         );
         this.rejectPending(error);
-        this.reset();
+        void this.stop(error).catch((cleanupError) => {
+          console.error(
+            `[dashboard-gateway:${this.key}] Runtime process cleanup failed:`,
+            cleanupError instanceof Error
+              ? cleanupError.message
+              : String(cleanupError),
+          );
+        });
       });
     });
+  }
+
+  private async terminateOwnedProcess(
+    proc: ChildProcess | null,
+  ): Promise<void> {
+    if (!proc) return;
+    const result = await this.dependencies.terminateProcessTree(proc, {
+      detachedProcessGroup: process.platform !== "win32",
+      forceAfterMs: 3_000,
+    });
+    if (result.remainingPids.length > 0) {
+      throw new Error(
+        `Runtime process tree did not fully exit: ${result.remainingPids.join(",")}`,
+      );
+    }
+  }
+
+  private resetTransportState(): void {
+    const ws = this.ws;
+    this.ws = null;
+    try {
+      ws?.removeAllListeners();
+      if (
+        ws &&
+        (ws.readyState === WebSocket.OPEN ||
+          ws.readyState === WebSocket.CONNECTING)
+      ) {
+        ws.close();
+      }
+    } catch {
+      // best-effort cleanup
+    }
+    this.recentEvents = [];
+    this.ready = null;
+    this.readyReject = null;
+    this.readyResolve = null;
   }
 
   private handleFrame(raw: string): void {
@@ -798,30 +1027,6 @@ class TuiGatewayClient {
       pending.reject(error);
     }
     this.pending.clear();
-  }
-
-  private reset(): void {
-    const ws = this.ws;
-    const proc = this.proc;
-    this.ws = null;
-    try {
-      ws?.removeAllListeners();
-      if (ws && ws.readyState === WebSocket.OPEN) ws.close();
-    } catch {
-      // best-effort cleanup
-    }
-    this.proc = null;
-    try {
-      if (proc && !proc.killed && proc.exitCode === null) proc.kill("SIGTERM");
-    } catch {
-      // best-effort cleanup
-    }
-    this.port = 0;
-    this.recentEvents = [];
-    this.ready = null;
-    this.readyReject = null;
-    this.readyResolve = null;
-    this.token = "";
   }
 }
 
@@ -887,11 +1092,15 @@ export function tuiGatewayEnv(profile?: string): Record<string, string> {
   return env;
 }
 
-function getTuiGatewayClient(profile?: string): TuiGatewayClient {
+export function getTuiGatewayClient(
+  profile?: string,
+  dependencies: Partial<TuiGatewayClientDependencies> = {},
+): TuiGatewayClient {
+  assertTuiGatewayPoolAdmissionOpen();
   const key = profileKey(profile);
   let client = tuiGatewayClients.get(key);
   if (!client) {
-    client = new TuiGatewayClient(key, tuiGatewayEnv(profile));
+    client = new TuiGatewayClient(key, tuiGatewayEnv(profile), dependencies);
     tuiGatewayClients.set(key, client);
   }
   return client;
@@ -908,22 +1117,99 @@ function shouldUseTuiGatewayClient(): boolean {
 function warmTuiGatewayClient(profile?: string): void {
   if (isRemoteMode()) return;
   if (!shouldUseTuiGatewayClient()) return;
-  void getTuiGatewayClient(profile)
-    .start()
-    .catch((error) => {
-      console.warn(
-        `[dashboard-gateway:${profileKey(profile)}] warmup failed:`,
-        error instanceof Error ? error.message : String(error),
-      );
-    });
+  try {
+    void getTuiGatewayClient(profile)
+      .start()
+      .catch((error) => {
+        console.warn(
+          `[dashboard-gateway:${profileKey(profile)}] warmup failed:`,
+          error instanceof Error ? error.message : String(error),
+        );
+      });
+  } catch (error) {
+    console.warn(
+      `[dashboard-gateway:${profileKey(profile)}] warmup skipped:`,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 }
 
 function stopTuiGatewayClient(profile?: string): void {
   const key = profileKey(profile);
   const client = tuiGatewayClients.get(key);
   if (!client) return;
-  client.stop();
-  tuiGatewayClients.delete(key);
+  client.closeAdmission();
+  const stopping = trackTuiGatewayStop(client.stop());
+  void stopping.then(
+    () => {
+      tuiGatewayFailedClientKeys.delete(key);
+      if (tuiGatewayClients.get(key) === client) {
+        tuiGatewayClients.delete(key);
+      }
+    },
+    (error) => {
+      tuiGatewayFailedClientKeys.add(key);
+      console.error(
+        `[dashboard-gateway:${key}] Runtime process cleanup failed:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    },
+  );
+}
+
+export async function stopAllTuiGatewayClients(
+  options: {
+    closePool?: boolean;
+  } = {},
+): Promise<void> {
+  if (options.closePool) tuiGatewayPoolClosed = true;
+  tuiGatewayPoolStopping = true;
+  tuiGatewayShutdownRequests += 1;
+
+  const shutdown = tuiGatewayShutdownQueue.then(async () => {
+    const clients = [...tuiGatewayClients.entries()];
+    for (const [, client] of clients) client.closeAdmission();
+    const results = await Promise.allSettled(
+      clients.map(([, client]) => trackTuiGatewayStop(client.stop())),
+    );
+    const errors: unknown[] = [];
+    results.forEach((result, index) => {
+      const [key, client] = clients[index] ?? [];
+      if (result.status === "fulfilled") {
+        if (key !== undefined) tuiGatewayFailedClientKeys.delete(key);
+        if (key !== undefined && tuiGatewayClients.get(key) === client) {
+          tuiGatewayClients.delete(key);
+        }
+      } else {
+        if (key !== undefined) tuiGatewayFailedClientKeys.add(key);
+        errors.push(result.reason);
+      }
+    });
+    if (errors.length > 0) {
+      const details = errors
+        .map((error) =>
+          error instanceof Error ? error.message : String(error),
+        )
+        .join("; ");
+      throw new AggregateError(
+        errors,
+        `Aera Runtime dashboard gateway cleanup is incomplete: ${details}`,
+      );
+    }
+  });
+  const settled = shutdown.finally(() => {
+    tuiGatewayShutdownRequests -= 1;
+    if (
+      tuiGatewayShutdownRequests === 0 &&
+      !tuiGatewayPoolClosed &&
+      tuiGatewayFailedClientKeys.size === 0 &&
+      tuiGatewayClients.size === 0
+    ) {
+      tuiGatewayPoolStopping = false;
+    }
+  });
+  tuiGatewayShutdownQueue = settled.catch(() => undefined);
+  await settled;
 }
 
 const CAPABILITIES_TIMEOUT_MS = 350;

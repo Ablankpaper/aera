@@ -79,6 +79,7 @@ describe("Agent control local USER ownership", () => {
   });
 
   // @lat: [[agentera-agent-control-plane#Local account isolation]]
+  // This file-backed SQLite test can exceed 5s on a cold hosted Windows runner.
   it("switches one long-lived manager without exposing the previous account", () => {
     const root = mkdtempSync(join(tmpdir(), "agentera-owner-isolation-"));
     roots.push(root);
@@ -142,7 +143,7 @@ describe("Agent control local USER ownership", () => {
     owner = OWNER_A;
     expect(manager.listDrafts().map(({ id }) => id)).toEqual([created.id]);
     database.close();
-  });
+  }, 20_000);
 
   // @lat: [[agentera-agent-control-plane#Trusted Workspace Agent context#Local context partitions]]
   it("partitions drafts, discovery, and installation lists by trusted selected context", async () => {

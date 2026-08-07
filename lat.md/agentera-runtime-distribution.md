@@ -66,6 +66,42 @@ Callers continue to supply the existing physical `HERMES_HOME` or Profile home. 
 
 Chat and Gateway, Dashboard, Skills, Profiles, Cron, model discovery, MCP, account authentication, Kanban, compatibility probing, and startup preflight all consume the live invocation rather than module-level executable paths. [[src/main/agentera-runtime-distribution/invocation.ts#refreshRuntimeInvocation]] re-resolves the selection after seed installation or activation.
 
+## Desktop TUI backend lifecycle
+
+Desktop owns every local headless TUI backend independently from the ordinary Gateway ownership ledger, including backends warmed only by a named Profile switch.
+
+### Runtime 0.20 headless contract
+
+The Desktop TUI transport launches Runtime through `hermes serve` with `HERMES_DESKTOP=1`, retaining per-Profile state and JSON-RPC/WebSocket support without machine-dashboard routing or a browser SPA.
+
+### Exact process-tree shutdown
+
+Desktop starts each POSIX TUI child as a dedicated process-group leader and records that exact PGID. The shared Electron process group is never signalled.
+
+Shutdown targets only that dedicated group. Windows instead captures the exact root and child tree with invariant UTC file-time identities. No path selects processes by name, port, Profile label, command line, or environment.
+
+### Bounded force escalation
+
+SIGTERM receives a fixed grace window. A still-live owned group or verified Windows tree is force-stopped only after that window; missing or changed ownership evidence fails closed.
+
+POSIX force targets only the same dedicated PGID, including when its leader already exited. Windows refreshes invariant process identities before escalation. Query timeout, parse failure, or identity mismatch never falls back to a positive PID kill.
+
+Windows uses an exact-root tree kill while the root remains alive and individually terminates captured descendants when the root exits before escalation.
+
+### Cancelled startup cannot outlive Desktop
+
+Every asynchronous TUI start belongs to one generation. Stop invalidates that generation before releasing ownership, so a pending port or readiness continuation cannot publish a late process.
+
+### Pool-wide App shutdown
+
+Pool shutdown closes admission before it awaits every mapped or in-flight TUI client. App quit closes admission permanently; ordinary Runtime cleanup reopens it only after a clean drain.
+
+Failed clients retain their exact child ownership for a later bounded retry. Concurrent cleanup requests serialize, wait for all clients with `allSettled`, and propagate any remaining process or termination error instead of reporting a clean drain.
+
+### Awaited Electron quit barrier
+
+The first quit request pauses Electron once and reissues quit only after bounded Runtime cleanup succeeds. Repeated in-flight requests reuse one cleanup; failure keeps Electron open and a later explicit quit may retry.
+
 ## Explicit external compatibility
 
 External Runtime use is retained only as a legacy persisted compatibility mode for existing developer installations; packaged managed mode is the only first-install product path.
