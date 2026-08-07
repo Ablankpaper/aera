@@ -722,6 +722,9 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     "before-quit",
     createQuitBarrier(
       async () => {
+        const runtimeCleanup = stopActiveRuntimeContext({
+          closeTuiGatewayPool: true,
+        });
         unsubscribeAgenteraAuth();
         unsubscribeProductSpace();
         agenteraAuth.dispose();
@@ -731,7 +734,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
         agenteraOfficialQualityDatabase?.close();
         agenteraEncryptedBackup?.close();
         agenteraAgentControlDatabase?.close();
-        await stopActiveRuntimeContext();
+        await runtimeCleanup;
       },
       () => app.quit(),
       (error) => {
@@ -741,12 +744,18 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
   );
 }
 
-export async function stopActiveRuntimeContext(): Promise<void> {
+export async function stopActiveRuntimeContext(
+  options: {
+    closeTuiGatewayPool?: boolean;
+  } = {},
+): Promise<void> {
+  const tuiShutdown = stopAllTuiGatewayClients({
+    closePool: options.closeTuiGatewayPool,
+  });
   stopHealthPolling();
   runtimeActivity.abortAll();
   cleanupTempMediaFiles();
   stopAllDashboards();
-  const tuiShutdown = stopAllTuiGatewayClients();
   // A Profile or connection context must never remain mounted across an
   // Aera owner transition. Stop local execution, remote/SSH transport,
   // and cached SQLite access before the next owner can claim a context.

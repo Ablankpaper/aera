@@ -76,11 +76,13 @@ The Desktop TUI transport launches Runtime through `hermes serve` with `HERMES_D
 
 ### Exact process-tree shutdown
 
-Graceful shutdown starts from the exact `ChildProcess` returned by Desktop and the child-first descendant list captured from its PID; it never selects processes by name, port, or Profile label.
+Graceful shutdown starts from the exact `ChildProcess` returned by Desktop and a child-first descendant list carrying each process start identity; it never selects processes by name, port, or Profile label.
 
 ### Bounded force escalation
 
-SIGTERM receives a fixed grace window. Only captured PIDs still alive at the deadline may receive SIGKILL, and a shared Electron process group is never signalled as a unit.
+SIGTERM receives a fixed grace window. Only captured PIDs whose start identity still matches may receive SIGKILL, and a shared Electron process group is never signalled as a unit.
+
+Windows uses an exact-root tree kill while the root remains alive and individually terminates captured descendants when the root exits before escalation.
 
 ### Cancelled startup cannot outlive Desktop
 
@@ -88,7 +90,7 @@ Every asynchronous TUI start belongs to one generation. Stop invalidates that ge
 
 ### Pool-wide App shutdown
 
-App and owner transitions snapshot, clear, and await every TUI client directly; ordinary Gateway ownership cannot hide a TUI-only named Profile from cleanup.
+App and owner transitions snapshot, clear, and await every TUI client directly; App quit closes new-client admission before taking the snapshot, so ordinary Gateway ownership cannot hide a TUI-only named Profile or admit a late orphan.
 
 ### Awaited Electron quit barrier
 

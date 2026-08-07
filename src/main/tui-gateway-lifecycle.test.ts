@@ -212,4 +212,17 @@ describe("TuiGatewayClient lifecycle", () => {
     expect(stopFirst).toHaveBeenCalledOnce();
     expect(stopSecond).toHaveBeenCalledOnce();
   });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Pool-wide App shutdown]]
+  it("closes TUI admission before App shutdown snapshots the pool", async () => {
+    const existing = getTuiGatewayClient("existing");
+    await stopAllTuiGatewayClients({ closePool: true });
+
+    await expect(existing.start()).rejects.toThrow(
+      "dashboard gateway pool is shutting down",
+    );
+    expect(() => getTuiGatewayClient("late")).toThrow(
+      "dashboard gateway pool is shutting down",
+    );
+  });
 });

@@ -582,14 +582,15 @@ const defaultTuiGatewayClientDependencies: TuiGatewayClientDependencies = {
 };
 
 class TuiGatewayStoppedError extends Error {
-  constructor() {
-    super(TUI_GATEWAY_STOPPED_MESSAGE);
+  constructor(message = TUI_GATEWAY_STOPPED_MESSAGE) {
+    super(message);
     this.name = "TuiGatewayStoppedError";
   }
 }
 
 export class TuiGatewayClient {
   private readonly dependencies: TuiGatewayClientDependencies;
+  private admissionClosed = false;
   private generation = 0;
   private handlers = new Set<GatewayEventHandler>();
   private nextId = 0;
@@ -662,6 +663,11 @@ export class TuiGatewayClient {
   }
 
   async start(): Promise<void> {
+    if (this.admissionClosed) {
+      throw new TuiGatewayStoppedError(
+        "Aera Runtime dashboard gateway pool is shutting down",
+      );
+    }
     if (this.stopPromise) await this.stopPromise;
     if (this.ready) return this.ready;
 
@@ -706,6 +712,11 @@ export class TuiGatewayClient {
     } finally {
       if (this.stopPromise === stopping) this.stopPromise = null;
     }
+  }
+
+  closeAdmission(): void {
+    this.admissionClosed = true;
+    ++this.generation;
   }
 
   private assertGeneration(generation: number): void {
@@ -971,6 +982,7 @@ function wsDataToString(
 }
 
 const tuiGatewayClients = new Map<string, TuiGatewayClient>();
+let tuiGatewayPoolClosed = false;
 
 export function tuiGatewayEnv(profile?: string): Record<string, string> {
   const resolved = resolveProfile(profile);
@@ -1003,6 +1015,11 @@ export function getTuiGatewayClient(
   profile?: string,
   dependencies: Partial<TuiGatewayClientDependencies> = {},
 ): TuiGatewayClient {
+  if (tuiGatewayPoolClosed) {
+    throw new TuiGatewayStoppedError(
+      "Aera Runtime dashboard gateway pool is shutting down",
+    );
+  }
   const key = profileKey(profile);
   let client = tuiGatewayClients.get(key);
   if (!client) {
@@ -1023,14 +1040,21 @@ function shouldUseTuiGatewayClient(): boolean {
 function warmTuiGatewayClient(profile?: string): void {
   if (isRemoteMode()) return;
   if (!shouldUseTuiGatewayClient()) return;
-  void getTuiGatewayClient(profile)
-    .start()
-    .catch((error) => {
-      console.warn(
-        `[dashboard-gateway:${profileKey(profile)}] warmup failed:`,
-        error instanceof Error ? error.message : String(error),
-      );
-    });
+  try {
+    void getTuiGatewayClient(profile)
+      .start()
+      .catch((error) => {
+        console.warn(
+          `[dashboard-gateway:${profileKey(profile)}] warmup failed:`,
+          error instanceof Error ? error.message : String(error),
+        );
+      });
+  } catch (error) {
+    console.warn(
+      `[dashboard-gateway:${profileKey(profile)}] warmup skipped:`,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 }
 
 function stopTuiGatewayClient(profile?: string): void {
@@ -1041,8 +1065,16 @@ function stopTuiGatewayClient(profile?: string): void {
   void client.stop();
 }
 
-export async function stopAllTuiGatewayClients(): Promise<void> {
+export async function stopAllTuiGatewayClients(
+  options: {
+    closePool?: boolean;
+  } = {},
+): Promise<void> {
+  if (options.closePool) tuiGatewayPoolClosed = true;
   const clients = [...tuiGatewayClients.values()];
+  if (options.closePool) {
+    for (const client of clients) client.closeAdmission();
+  }
   tuiGatewayClients.clear();
   await Promise.all(clients.map((client) => client.stop()));
 }
