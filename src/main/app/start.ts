@@ -591,7 +591,14 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
       agenteraAgentControl?.notifyAgentContextChanged();
     }) ?? (() => undefined);
   const ownerSwitchCoordinator = createAgenteraOwnerSwitchCoordinator({
-    stopRuntimeContext: stopActiveRuntimeContext,
+    stopRuntimeContext: () => {
+      void stopActiveRuntimeContext().catch((error) => {
+        console.error(
+          "[AGENTERA_RUNTIME_OWNER_TRANSITION] cleanup failed",
+          error instanceof Error ? error.message : String(error),
+        );
+      });
+    },
   });
   let runtimeUpdateCheckedUserId: string | null = null;
   const unsubscribeAgenteraAuth = agenteraAuth.subscribe((state) => {
@@ -722,11 +729,11 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     "before-quit",
     createQuitBarrier(
       async () => {
+        unsubscribeAgenteraAuth();
+        unsubscribeProductSpace();
         const runtimeCleanup = stopActiveRuntimeContext({
           closeTuiGatewayPool: true,
         });
-        unsubscribeAgenteraAuth();
-        unsubscribeProductSpace();
         agenteraAuth.dispose();
         agenteraProductSpace?.close();
         agenteraOrganization?.close();

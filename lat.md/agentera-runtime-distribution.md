@@ -76,11 +76,15 @@ The Desktop TUI transport launches Runtime through `hermes serve` with `HERMES_D
 
 ### Exact process-tree shutdown
 
-Graceful shutdown starts from the exact `ChildProcess` returned by Desktop and a child-first descendant list carrying each process start identity; it never selects processes by name, port, or Profile label.
+Desktop starts each POSIX TUI child as a dedicated process-group leader and records that exact PGID. The shared Electron process group is never signalled.
+
+Shutdown targets only that dedicated group. Windows instead captures the exact root and child tree with invariant UTC file-time identities. No path selects processes by name, port, Profile label, command line, or environment.
 
 ### Bounded force escalation
 
-SIGTERM receives a fixed grace window. Only captured PIDs whose start identity still matches may receive SIGKILL, and a shared Electron process group is never signalled as a unit.
+SIGTERM receives a fixed grace window. A still-live owned group or verified Windows tree is force-stopped only after that window; missing or changed ownership evidence fails closed.
+
+POSIX force targets only the same dedicated PGID, including when its leader already exited. Windows refreshes invariant process identities before escalation. Query timeout, parse failure, or identity mismatch never falls back to a positive PID kill.
 
 Windows uses an exact-root tree kill while the root remains alive and individually terminates captured descendants when the root exits before escalation.
 
@@ -90,11 +94,13 @@ Every asynchronous TUI start belongs to one generation. Stop invalidates that ge
 
 ### Pool-wide App shutdown
 
-App and owner transitions snapshot, clear, and await every TUI client directly; App quit closes new-client admission before taking the snapshot, so ordinary Gateway ownership cannot hide a TUI-only named Profile or admit a late orphan.
+Pool shutdown closes admission before it awaits every mapped or in-flight TUI client. App quit closes admission permanently; ordinary Runtime cleanup reopens it only after a clean drain.
+
+Failed clients retain their exact child ownership for a later bounded retry. Concurrent cleanup requests serialize, wait for all clients with `allSettled`, and propagate any remaining process or termination error instead of reporting a clean drain.
 
 ### Awaited Electron quit barrier
 
-The first quit request pauses Electron once, awaits the bounded Runtime cleanup, and then reissues quit; repeated requests reuse that cleanup and cannot start duplicate shutdown work.
+The first quit request pauses Electron once and reissues quit only after bounded Runtime cleanup succeeds. Repeated in-flight requests reuse one cleanup; failure keeps Electron open and a later explicit quit may retry.
 
 ## Explicit external compatibility
 

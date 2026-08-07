@@ -15,11 +15,22 @@ export function createQuitBarrier(
     event.preventDefault();
     if (inFlight) return;
 
-    inFlight = cleanup()
-      .catch(onError)
-      .then(() => {
+    const fail = (error: unknown): void => {
+      try {
+        onError(error);
+      } finally {
+        // Cleanup failures keep Electron open. A later explicit quit request
+        // may retry the same bounded ownership cleanup.
+        inFlight = null;
+      }
+    };
+    try {
+      inFlight = Promise.resolve(cleanup()).then(() => {
         complete = true;
         quit();
-      });
+      }, fail);
+    } catch (error) {
+      fail(error);
+    }
   };
 }

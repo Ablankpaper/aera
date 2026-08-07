@@ -68,6 +68,7 @@ vi.mock("./secrets", () => ({ providerListSafe: vi.fn(() => ({})) }));
 import {
   TuiGatewayClient,
   getTuiGatewayClient,
+  stopGateway,
   stopAllTuiGatewayClients,
   type TuiGatewayClientDependencies,
 } from "./hermes";
@@ -172,11 +173,15 @@ describe("TuiGatewayClient lifecycle", () => {
       HERMES_DESKTOP: "1",
       HERMES_HOME: "/tmp/hermes-test-home/profiles/work",
     });
+    expect(options.detached).toBe(process.platform !== "win32");
 
     const stopped = client.stop();
     await expect(started).rejects.toThrow("stopped");
     await stopped;
     expect(terminate).toHaveBeenCalledOnce();
+    expect(terminate.mock.calls[0]?.[1]).toMatchObject({
+      detachedProcessGroup: process.platform !== "win32",
+    });
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Cancelled startup cannot outlive Desktop]]
@@ -197,6 +202,86 @@ describe("TuiGatewayClient lifecycle", () => {
     expect(spawnBackend).not.toHaveBeenCalled();
   });
 
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Cancelled startup cannot outlive Desktop]]
+  it("keeps Runtime process errors handled after readiness", async () => {
+    const { dependencies, child, terminate } = lifecycleDependencies({
+      waitForDashboardReady: vi.fn(async () => undefined),
+    });
+    const client = new TuiGatewayClient("work", {}, dependencies);
+    (
+      client as unknown as {
+        connectWebSocket: () => Promise<void>;
+      }
+    ).connectWebSocket = vi.fn(async () => undefined);
+
+    await client.start();
+
+    expect(child.listenerCount("error")).toBeGreaterThan(0);
+    expect(() =>
+      child.emit("error", new Error("Runtime pipe failed")),
+    ).not.toThrow();
+    await vi.waitFor(() => expect(terminate).toHaveBeenCalledOnce());
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Cancelled startup cannot outlive Desktop]]
+  it("does not spawn when admission closes while waiting for an older stop", async () => {
+    const stopGate = deferred<void>();
+    const child = fakeChildProcess(4130);
+    const spawnBackend = vi.fn(() => child);
+    const terminate = vi.fn(async () => {
+      await stopGate.promise;
+      return { forced: false, remainingPids: [] };
+    });
+    const client = new TuiGatewayClient(
+      "work",
+      {},
+      {
+        pickDashboardPort: vi.fn(async () => 9120),
+        spawnBackend:
+          spawnBackend as TuiGatewayClientDependencies["spawnBackend"],
+        waitForDashboardReady: vi.fn(async () => {
+          throw new Error("late spawn");
+        }),
+        terminateProcessTree:
+          terminate as TuiGatewayClientDependencies["terminateProcessTree"],
+      },
+    );
+
+    (client as unknown as { proc: ChildProcess | null }).proc = child;
+    const stopping = client.stop();
+    const starting = client.start();
+    client.closeAdmission();
+    stopGate.resolve();
+
+    await expect(starting).rejects.toThrow(/shutting down|stopped/i);
+    await stopping;
+    expect(spawnBackend).not.toHaveBeenCalled();
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
+  it("rejects a stop with a remaining owned process and retries the exact child", async () => {
+    const { dependencies, spawnBackend, child } = lifecycleDependencies({
+      terminateProcessTree: vi
+        .fn()
+        .mockResolvedValueOnce({ forced: false, remainingPids: [4120] })
+        .mockResolvedValueOnce({
+          forced: false,
+          remainingPids: [],
+        }) as TuiGatewayClientDependencies["terminateProcessTree"],
+    });
+    const client = new TuiGatewayClient("work", {}, dependencies);
+
+    const started = client.start();
+    await vi.waitFor(() => expect(spawnBackend).toHaveBeenCalledOnce());
+    const firstStop = client.stop();
+
+    await expect(started).rejects.toThrow("stopped");
+    await expect(firstStop).rejects.toThrow(/did not fully exit/i);
+    await expect(client.stop()).resolves.toBeUndefined();
+    expect(dependencies.terminateProcessTree).toHaveBeenCalledTimes(2);
+    expect(child.pid).toBe(4120);
+  });
+
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Pool-wide App shutdown]]
   it("stops every TUI-only Profile independently of Gateway ownership", async () => {
     const first = getTuiGatewayClient("default");
@@ -214,14 +299,83 @@ describe("TuiGatewayClient lifecycle", () => {
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Pool-wide App shutdown]]
-  it("closes TUI admission before App shutdown snapshots the pool", async () => {
+  it("serializes pool cleanup and temporarily blocks late TUI admission", async () => {
     const existing = getTuiGatewayClient("existing");
-    await stopAllTuiGatewayClients({ closePool: true });
+    const stopGate = deferred<void>();
+    vi.spyOn(existing, "stop").mockImplementation(() => stopGate.promise);
+
+    const first = stopAllTuiGatewayClients();
+    await Promise.resolve();
+    expect(() => getTuiGatewayClient("late")).toThrow(/shutting down/i);
+
+    let secondFinished = false;
+    const second = stopAllTuiGatewayClients().then(() => {
+      secondFinished = true;
+    });
+    await Promise.resolve();
+    expect(secondFinished).toBe(false);
+
+    stopGate.resolve();
+    await first;
+    await second;
+    expect(() => getTuiGatewayClient("after-cleanup")).not.toThrow();
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Pool-wide App shutdown]]
+  it("drains a profile stop registered while pool shutdown is already waiting", async () => {
+    const existing = getTuiGatewayClient("existing");
+    const late = getTuiGatewayClient("late");
+    const firstGate = deferred<void>();
+    const lateGate = deferred<void>();
+    vi.spyOn(existing, "stop").mockImplementation(() => firstGate.promise);
+    vi.spyOn(late, "stop").mockImplementation(() => lateGate.promise);
+
+    stopGateway("existing", true);
+    await Promise.resolve();
+    let settled = false;
+    const shutdown = stopAllTuiGatewayClients().then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+
+    stopGateway("late", true);
+    firstGate.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    lateGate.resolve();
+    await shutdown;
+    expect(settled).toBe(true);
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Pool-wide App shutdown]]
+  it("retains a failed TUI stop for a later fail-closed retry", async () => {
+    const existing = getTuiGatewayClient("retry");
+    const stop = vi
+      .spyOn(existing, "stop")
+      .mockRejectedValueOnce(new Error("owned Runtime remained"))
+      .mockResolvedValueOnce();
+
+    await expect(stopAllTuiGatewayClients()).rejects.toThrow(
+      "owned Runtime remained",
+    );
+    await stopAllTuiGatewayClients();
+    expect(stop).toHaveBeenCalledTimes(2);
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Pool-wide App shutdown]]
+  it("closes TUI admission before App shutdown snapshots the pool", async () => {
+    vi.resetModules();
+    const freshHermes = await import("./hermes");
+    const existing = freshHermes.getTuiGatewayClient("existing");
+    await freshHermes.stopAllTuiGatewayClients({ closePool: true });
 
     await expect(existing.start()).rejects.toThrow(
       "dashboard gateway pool is shutting down",
     );
-    expect(() => getTuiGatewayClient("late")).toThrow(
+    expect(() => freshHermes.getTuiGatewayClient("late")).toThrow(
       "dashboard gateway pool is shutting down",
     );
   });

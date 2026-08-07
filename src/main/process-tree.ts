@@ -1,4 +1,4 @@
-import { execFileSync, type ChildProcess } from "node:child_process";
+import { execFile, execFileSync, type ChildProcess } from "node:child_process";
 
 export interface KillProcessTreeOptions {
   /** POSIX children must have been spawned with `detached: true` before their
@@ -10,6 +10,8 @@ export interface KillProcessTreeOptions {
 export interface TerminateProcessTreeOptions extends KillProcessTreeOptions {
   pollIntervalMs?: number;
   forceSettleMs?: number;
+  snapshotTimeoutMs?: number;
+  commandTimeoutMs?: number;
   /** Deterministic process seams used by focused lifecycle tests. */
   operations?: Partial<ProcessTreeTerminationOperations>;
 }
@@ -24,20 +26,38 @@ export interface ProcessTreeTerminationResult {
   remainingPids: number[];
 }
 
+export interface ProcessSnapshotRecord extends CapturedProcessIdentity {
+  parentPid: number;
+}
+
+export interface ProcessSnapshotRequest {
+  rootPid: number;
+  candidatePids?: readonly number[];
+  timeoutMs: number;
+}
+
 export interface ProcessTreeTerminationOperations {
+  captureSnapshot(
+    request: ProcessSnapshotRequest,
+  ): Promise<readonly ProcessSnapshotRecord[] | null>;
+  /** Legacy deterministic seams retained for existing focused unit tests. */
   descendantPids(rootPid: number): number[];
   descendantProcesses(rootPid: number): CapturedProcessIdentity[];
   processIdentity(pid: number): string | null;
   pidIsAlive(pid: number): boolean;
   signalPid(pid: number, signal: NodeJS.Signals): void;
-  gracefulWindowsTree(rootPid: number): void;
-  forceWindowsTree(rootPid: number): void;
+  gracefulWindowsTree(rootPid: number, timeoutMs: number): void | Promise<void>;
+  forceWindowsTree(rootPid: number, timeoutMs: number): void | Promise<void>;
+  processGroupIsAlive(processGroupId: number): boolean;
+  processGroupPids(
+    processGroupId: number,
+    timeoutMs: number,
+  ): Promise<readonly number[] | null>;
+  signalProcessGroup(processGroupId: number, signal: NodeJS.Signals): void;
   wait(delayMs: number): Promise<void>;
 }
 
-interface ProcessRecord extends CapturedProcessIdentity {
-  parentPid: number;
-}
+type ProcessRecord = ProcessSnapshotRecord;
 
 function processRecords(): ProcessRecord[] {
   if (process.platform === "win32") {
@@ -109,6 +129,161 @@ function processRecords(): ProcessRecord[] {
   }
 }
 
+const DEFAULT_SNAPSHOT_TIMEOUT_MS = 750;
+const DEFAULT_COMMAND_TIMEOUT_MS = 750;
+const MAX_PROCESS_SNAPSHOT_BYTES = 8 * 1024 * 1024;
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T | null> {
+  const boundedTimeout = Math.max(1, timeoutMs);
+  return new Promise<T | null>((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(null);
+    }, boundedTimeout);
+    timer.unref?.();
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(null);
+      },
+    );
+  });
+}
+
+function execFileText(
+  command: string,
+  args: readonly string[],
+  timeoutMs: number,
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile(
+      command,
+      [...args],
+      {
+        encoding: "utf8",
+        timeout: Math.max(1, timeoutMs),
+        maxBuffer: MAX_PROCESS_SNAPSHOT_BYTES,
+        windowsHide: true,
+      },
+      (error, stdout) => {
+        if (error) {
+          resolve(null);
+          return;
+        }
+        resolve(typeof stdout === "string" ? stdout : String(stdout));
+      },
+    );
+  });
+}
+
+function treePidsFromRows(
+  rows: readonly { pid: number; parentPid: number }[],
+  rootPid: number,
+): number[] {
+  const children = new Map<number, number[]>();
+  for (const row of rows) {
+    const siblings = children.get(row.parentPid) ?? [];
+    siblings.push(row.pid);
+    children.set(row.parentPid, siblings);
+  }
+  const result: number[] = [];
+  const visited = new Set<number>();
+  const visit = (parentPid: number): void => {
+    for (const childPid of children.get(parentPid) ?? []) {
+      if (visited.has(childPid)) continue;
+      visited.add(childPid);
+      visit(childPid);
+      result.push(childPid);
+    }
+  };
+  visit(rootPid);
+  return result;
+}
+
+function normalizeWindowsFileTime(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return /^\d{15,20}$/.test(normalized) ? normalized : null;
+}
+
+export function parseWindowsSnapshot(
+  raw: string,
+): ProcessSnapshotRecord[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const rows = Array.isArray(parsed) ? parsed : [parsed];
+  return rows.flatMap((row): ProcessSnapshotRecord[] => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return [];
+    const value = row as Record<string, unknown>;
+    const pid = Number(value.ProcessId);
+    const parentPid = Number(value.ParentProcessId);
+    const identity = normalizeWindowsFileTime(value.CreationFileTimeUtc);
+    if (
+      !Number.isSafeInteger(pid) ||
+      pid <= 0 ||
+      !Number.isSafeInteger(parentPid) ||
+      parentPid < 0
+    ) {
+      return [];
+    }
+    return [
+      {
+        pid,
+        parentPid,
+        identity: identity === null ? "" : `windows:${identity}`,
+      },
+    ];
+  });
+}
+
+async function captureWindowsSnapshot(
+  request: ProcessSnapshotRequest,
+): Promise<readonly ProcessSnapshotRecord[] | null> {
+  const script =
+    "$ErrorActionPreference='Stop'; " +
+    "Get-CimInstance Win32_Process | " +
+    "Select-Object ProcessId,ParentProcessId," +
+    "@{Name='CreationFileTimeUtc';Expression={" +
+    "$_.CreationDate.ToFileTimeUtc().ToString(" +
+    "[Globalization.CultureInfo]::InvariantCulture)}} | " +
+    "ConvertTo-Json -Compress";
+  const output = await execFileText(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", script],
+    request.timeoutMs,
+  );
+  if (output === null) return null;
+  const records = parseWindowsSnapshot(output);
+  if (records === null) return null;
+  if (!request.candidatePids) return records;
+  const candidates = new Set(request.candidatePids);
+  return records.filter((record) => candidates.has(record.pid));
+}
+
+export async function captureProcessSnapshot(
+  request: ProcessSnapshotRequest,
+): Promise<readonly ProcessSnapshotRecord[] | null> {
+  if (process.platform === "win32") return captureWindowsSnapshot(request);
+  return null;
+}
+
 function descendantProcesses(rootPid: number): CapturedProcessIdentity[] {
   const children = new Map<number, ProcessRecord[]>();
   for (const record of processRecords()) {
@@ -169,6 +344,56 @@ function pidIsAlive(pid: number): boolean {
   }
 }
 
+function processGroupIsAlive(processGroupId: number): boolean {
+  if (!Number.isSafeInteger(processGroupId) || processGroupId <= 0)
+    return false;
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function signalProcessGroup(
+  processGroupId: number,
+  signal: NodeJS.Signals,
+): void {
+  if (!Number.isSafeInteger(processGroupId) || processGroupId <= 0) {
+    throw new Error("Invalid Desktop-owned process group");
+  }
+  try {
+    process.kill(-processGroupId, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+}
+
+async function processGroupPids(
+  processGroupId: number,
+  timeoutMs: number,
+): Promise<readonly number[] | null> {
+  if (!Number.isSafeInteger(processGroupId) || processGroupId <= 0) return null;
+  const command = process.platform === "darwin" ? "/bin/ps" : "ps";
+  const output = await execFileText(command, ["-axo", "pid=,pgid="], timeoutMs);
+  if (output === null) return null;
+  const pids: number[] = [];
+  for (const line of output.split("\n")) {
+    const match = line.trim().match(/^(\d+)\s+(\d+)$/);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    const processGroup = Number(match[2]);
+    if (
+      Number.isSafeInteger(pid) &&
+      pid > 0 &&
+      processGroup === processGroupId
+    ) {
+      pids.push(pid);
+    }
+  }
+  return [...new Set(pids)].sort((left, right) => left - right);
+}
+
 function childProcessIsAlive(
   proc: ChildProcess,
   isPidAlive: (pid: number) => boolean,
@@ -181,98 +406,260 @@ function childProcessIsAlive(
   );
 }
 
-function remainingOwnedPids(
-  proc: ChildProcess,
-  rootIdentity: string | null,
-  descendants: readonly CapturedProcessIdentity[],
-  operations: ProcessTreeTerminationOperations,
-  verifyIdentity: boolean,
-): number[] {
-  const remaining = descendants
-    .filter((captured) =>
-      capturedProcessIsAlive(captured, operations, verifyIdentity),
-    )
-    .map(({ pid }) => pid);
-  const rootAlive = childProcessIsAlive(proc, operations.pidIsAlive);
-  const rootOwned =
-    rootAlive &&
-    (!verifyIdentity ||
-      !rootIdentity ||
-      operations.processIdentity(proc.pid!) === rootIdentity);
-  if (rootOwned && proc.pid) {
-    remaining.push(proc.pid);
-  }
-  return remaining;
-}
-
 function wait(delayMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
-function forceWindowsTree(rootPid: number): void {
-  execFileSync("taskkill", ["/F", "/T", "/PID", String(rootPid)], {
-    stdio: "ignore",
-    windowsHide: true,
-  });
-}
-
-function gracefulWindowsTree(rootPid: number): void {
-  execFileSync("taskkill", ["/T", "/PID", String(rootPid)], {
-    stdio: "ignore",
-    windowsHide: true,
-  });
-}
-
-function capturedProcessIsAlive(
-  captured: CapturedProcessIdentity,
-  operations: ProcessTreeTerminationOperations,
-  verifyIdentity: boolean,
-): boolean {
-  if (!operations.pidIsAlive(captured.pid)) return false;
-  if (!verifyIdentity) return true;
-  return operations.processIdentity(captured.pid) === captured.identity;
-}
-
-function rootProcessIsOwnedAlive(
-  proc: ChildProcess,
-  rootIdentity: string | null,
-  operations: ProcessTreeTerminationOperations,
-): boolean {
-  if (!childProcessIsAlive(proc, operations.pidIsAlive)) return false;
-  return (
-    !rootIdentity || operations.processIdentity(proc.pid!) === rootIdentity
+async function forceWindowsTree(
+  rootPid: number,
+  timeoutMs: number,
+): Promise<void> {
+  const output = await execFileText(
+    "taskkill",
+    ["/F", "/T", "/PID", String(rootPid)],
+    timeoutMs,
   );
+  if (output === null) throw new Error("taskkill force timed out or failed");
 }
 
-async function waitForOwnedTreeExit(
+async function gracefulWindowsTree(
+  rootPid: number,
+  timeoutMs: number,
+): Promise<void> {
+  const output = await execFileText(
+    "taskkill",
+    ["/T", "/PID", String(rootPid)],
+    timeoutMs,
+  );
+  if (output === null) {
+    throw new Error("taskkill graceful stop timed out or failed");
+  }
+}
+
+interface CapturedProcessTree {
+  root: ProcessSnapshotRecord;
+  descendants: CapturedProcessIdentity[];
+}
+
+function buildCapturedProcessTree(
+  snapshot: readonly ProcessSnapshotRecord[],
+  rootPid: number,
+): CapturedProcessTree | null {
+  const root = snapshot.find(
+    (record) => record.pid === rootPid && record.identity.trim().length > 0,
+  );
+  if (!root) return null;
+
+  const children = new Map<number, ProcessSnapshotRecord[]>();
+  for (const record of snapshot) {
+    const siblings = children.get(record.parentPid) ?? [];
+    siblings.push(record);
+    children.set(record.parentPid, siblings);
+  }
+  const descendants: CapturedProcessIdentity[] = [];
+  let unknownDescendant = false;
+  const visited = new Set<number>([rootPid]);
+  const visit = (parentPid: number): void => {
+    for (const child of children.get(parentPid) ?? []) {
+      if (visited.has(child.pid)) continue;
+      visited.add(child.pid);
+      visit(child.pid);
+      if (!child.identity.trim()) {
+        unknownDescendant = true;
+        continue;
+      }
+      descendants.push({ pid: child.pid, identity: child.identity });
+    }
+  };
+  visit(rootPid);
+  if (unknownDescendant) return null;
+  return { root, descendants };
+}
+
+function legacySnapshot(
+  request: ProcessSnapshotRequest,
+  operations: ProcessTreeTerminationOperations,
+  customOperations: Partial<ProcessTreeTerminationOperations>,
+): readonly ProcessSnapshotRecord[] | null {
+  const rootIdentity = operations.processIdentity(request.rootPid);
+  if (!rootIdentity) return null;
+  const capturedByPid = new Map(
+    (customOperations.descendantProcesses?.(request.rootPid) ?? []).map(
+      (record) => [record.pid, record.identity] as const,
+    ),
+  );
+  const descendantPids = request.candidatePids
+    ? [...new Set(request.candidatePids)].filter(
+        (pid) => pid !== request.rootPid,
+      )
+    : customOperations.descendantPids
+      ? customOperations.descendantPids(request.rootPid)
+      : [...capturedByPid.keys()];
+  const records: ProcessSnapshotRecord[] = [
+    { pid: request.rootPid, parentPid: 0, identity: rootIdentity },
+  ];
+  for (const pid of descendantPids) {
+    const identity = operations.processIdentity(pid) ?? capturedByPid.get(pid);
+    if (identity) records.push({ pid, parentPid: request.rootPid, identity });
+  }
+  return records;
+}
+
+async function captureForPhase(
+  request: ProcessSnapshotRequest,
+  operations: ProcessTreeTerminationOperations,
+  customOperations: Partial<ProcessTreeTerminationOperations> | undefined,
+): Promise<readonly ProcessSnapshotRecord[] | null> {
+  if (customOperations?.captureSnapshot) {
+    return withTimeout(
+      customOperations.captureSnapshot(request),
+      request.timeoutMs,
+    );
+  }
+  if (
+    customOperations?.descendantProcesses ||
+    customOperations?.descendantPids ||
+    customOperations?.processIdentity
+  ) {
+    return legacySnapshot(request, operations, customOperations);
+  }
+  return operations.captureSnapshot(request);
+}
+
+function capturedPidsAlive(
   proc: ChildProcess,
-  rootIdentity: string | null,
+  descendants: readonly CapturedProcessIdentity[],
+  operations: ProcessTreeTerminationOperations,
+): number[] {
+  const remaining = descendants
+    .filter((captured) => operations.pidIsAlive(captured.pid))
+    .map(({ pid }) => pid);
+  if (childProcessIsAlive(proc, operations.pidIsAlive) && proc.pid) {
+    remaining.push(proc.pid);
+  }
+  return [...new Set(remaining)];
+}
+
+async function waitForCapturedTreeExit(
+  proc: ChildProcess,
   descendants: readonly CapturedProcessIdentity[],
   timeoutMs: number,
   pollIntervalMs: number,
   operations: ProcessTreeTerminationOperations,
 ): Promise<number[]> {
   const deadline = Date.now() + timeoutMs;
-  let remaining = remainingOwnedPids(
-    proc,
-    rootIdentity,
-    descendants,
-    operations,
-    true,
-  );
+  let remaining = capturedPidsAlive(proc, descendants, operations);
   while (remaining.length > 0 && Date.now() < deadline) {
     await operations.wait(
       Math.min(pollIntervalMs, Math.max(1, deadline - Date.now())),
     );
-    remaining = remainingOwnedPids(
-      proc,
-      rootIdentity,
-      descendants,
-      operations,
-      false,
+    remaining = capturedPidsAlive(proc, descendants, operations);
+  }
+  return capturedPidsAlive(proc, descendants, operations);
+}
+
+async function waitForProcessGroupExit(
+  processGroupId: number,
+  timeoutMs: number,
+  pollIntervalMs: number,
+  operations: ProcessTreeTerminationOperations,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  let alive = operations.processGroupIsAlive(processGroupId);
+  while (alive && Date.now() < deadline) {
+    await operations.wait(
+      Math.min(pollIntervalMs, Math.max(1, deadline - Date.now())),
+    );
+    alive = operations.processGroupIsAlive(processGroupId);
+  }
+  return operations.processGroupIsAlive(processGroupId);
+}
+
+async function terminateDedicatedProcessGroup(
+  proc: ChildProcess,
+  processGroupId: number,
+  forceAfterMs: number,
+  forceSettleMs: number,
+  pollIntervalMs: number,
+  commandTimeoutMs: number,
+  operations: ProcessTreeTerminationOperations,
+): Promise<ProcessTreeTerminationResult> {
+  if (!operations.processGroupIsAlive(processGroupId)) {
+    if (childProcessIsAlive(proc, operations.pidIsAlive)) {
+      throw new Error(
+        `Desktop-owned process group ${processGroupId} is unavailable while its child is still alive`,
+      );
+    }
+    return { forced: false, remainingPids: [] };
+  }
+  const initialPids = await operations.processGroupPids(
+    processGroupId,
+    commandTimeoutMs,
+  );
+  if (initialPids === null) {
+    throw new Error(
+      `Desktop-owned process group ${processGroupId} could not be verified`,
     );
   }
-  return remainingOwnedPids(proc, rootIdentity, descendants, operations, true);
+  if (initialPids.length === 0) {
+    if (
+      !operations.processGroupIsAlive(processGroupId) &&
+      !childProcessIsAlive(proc, operations.pidIsAlive)
+    ) {
+      return { forced: false, remainingPids: [] };
+    }
+    throw new Error(
+      `Desktop-owned process group ${processGroupId} could not be verified`,
+    );
+  }
+  if (
+    childProcessIsAlive(proc, operations.pidIsAlive) &&
+    !initialPids.includes(processGroupId)
+  ) {
+    throw new Error(
+      `Desktop-owned child ${processGroupId} is not in its dedicated process group`,
+    );
+  }
+
+  operations.signalProcessGroup(processGroupId, "SIGTERM");
+  let alive = await waitForProcessGroupExit(
+    processGroupId,
+    forceAfterMs,
+    pollIntervalMs,
+    operations,
+  );
+  if (!alive) return { forced: false, remainingPids: [] };
+
+  operations.signalProcessGroup(processGroupId, "SIGKILL");
+  alive = await waitForProcessGroupExit(
+    processGroupId,
+    forceSettleMs,
+    pollIntervalMs,
+    operations,
+  );
+  if (!alive) return { forced: true, remainingPids: [] };
+
+  const remainingPids = await operations.processGroupPids(
+    processGroupId,
+    commandTimeoutMs,
+  );
+  if (remainingPids === null) {
+    throw new Error(
+      `Desktop-owned process group ${processGroupId} exit could not be verified`,
+    );
+  }
+  if (remainingPids.length === 0) {
+    if (
+      !operations.processGroupIsAlive(processGroupId) &&
+      !childProcessIsAlive(proc, operations.pidIsAlive)
+    ) {
+      return { forced: true, remainingPids: [] };
+    }
+    throw new Error(
+      `Desktop-owned process group ${processGroupId} exit could not be verified`,
+    );
+  }
+  return { forced: true, remainingPids: [...remainingPids] };
 }
 
 function signalOwnedRoot(
@@ -309,6 +696,7 @@ export async function terminateProcessTree(
 
   const rootPid = proc.pid;
   const operations: ProcessTreeTerminationOperations = {
+    captureSnapshot: captureProcessSnapshot,
     descendantPids,
     descendantProcesses,
     processIdentity,
@@ -316,29 +704,70 @@ export async function terminateProcessTree(
     signalPid,
     gracefulWindowsTree,
     forceWindowsTree,
+    processGroupIsAlive,
+    processGroupPids,
+    signalProcessGroup,
     wait,
     ...options.operations,
   };
   const customOperations = options.operations;
-  const descendants = customOperations?.descendantProcesses
-    ? customOperations.descendantProcesses(rootPid)
-    : customOperations?.descendantPids
-      ? customOperations.descendantPids(rootPid).map((pid) => ({
-          pid,
-          identity: operations.processIdentity(pid) ?? "",
-        }))
-      : operations.descendantProcesses(rootPid);
-  const rootIdentity = operations.processIdentity(rootPid);
   const detachedProcessGroup = options.detachedProcessGroup ?? false;
   const forceAfterMs = Math.max(0, options.forceAfterMs ?? 3000);
   const pollIntervalMs = Math.max(1, options.pollIntervalMs ?? 50);
   const forceSettleMs = Math.max(0, options.forceSettleMs ?? 500);
+  const snapshotTimeoutMs = Math.max(
+    1,
+    options.snapshotTimeoutMs ?? DEFAULT_SNAPSHOT_TIMEOUT_MS,
+  );
+  const commandTimeoutMs = Math.max(
+    1,
+    options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
+  );
 
-  const rootOwned = rootProcessIsOwnedAlive(proc, rootIdentity, operations);
+  if (detachedProcessGroup && process.platform !== "win32") {
+    return terminateDedicatedProcessGroup(
+      proc,
+      rootPid,
+      forceAfterMs,
+      forceSettleMs,
+      pollIntervalMs,
+      commandTimeoutMs,
+      operations,
+    );
+  }
+
+  const initialSnapshot = await captureForPhase(
+    {
+      rootPid,
+      timeoutMs: snapshotTimeoutMs,
+    },
+    operations,
+    customOperations,
+  );
+  const capturedTree = initialSnapshot
+    ? buildCapturedProcessTree(initialSnapshot, rootPid)
+    : null;
+  if (!capturedTree) {
+    const reachablePids = initialSnapshot
+      ? [...treePidsFromRows(initialSnapshot, rootPid), rootPid]
+      : [rootPid];
+    return {
+      forced: false,
+      remainingPids: [...new Set(reachablePids)].filter((pid) =>
+        pid === rootPid
+          ? childProcessIsAlive(proc, operations.pidIsAlive)
+          : operations.pidIsAlive(pid),
+      ),
+    };
+  }
+
+  const { root, descendants } = capturedTree;
+  const rootAlive = childProcessIsAlive(proc, operations.pidIsAlive);
+
   let windowsTreeSignalled = false;
-  if (process.platform === "win32" && rootOwned) {
+  if (process.platform === "win32" && rootAlive) {
     try {
-      operations.gracefulWindowsTree(rootPid);
+      await operations.gracefulWindowsTree(rootPid, commandTimeoutMs);
       windowsTreeSignalled = true;
     } catch {
       // Fall through to exact captured PID signalling.
@@ -346,18 +775,17 @@ export async function terminateProcessTree(
   }
   if (!windowsTreeSignalled) {
     for (const child of descendants) {
-      if (capturedProcessIsAlive(child, operations, true)) {
+      if (operations.pidIsAlive(child.pid)) {
         operations.signalPid(child.pid, "SIGTERM");
       }
     }
   }
-  if (rootOwned && !windowsTreeSignalled) {
+  if (rootAlive && !windowsTreeSignalled) {
     signalOwnedRoot(proc, "SIGTERM", detachedProcessGroup);
   }
 
-  let remaining = await waitForOwnedTreeExit(
+  let remaining = await waitForCapturedTreeExit(
     proc,
-    rootIdentity,
     descendants,
     forceAfterMs,
     pollIntervalMs,
@@ -367,17 +795,47 @@ export async function terminateProcessTree(
     return { forced: false, remainingPids: [] };
   }
 
+  const refreshSnapshot = await captureForPhase(
+    {
+      rootPid,
+      candidatePids: remaining,
+      timeoutMs: snapshotTimeoutMs,
+    },
+    operations,
+    customOperations,
+  );
+  if (!refreshSnapshot) {
+    return { forced: false, remainingPids: remaining };
+  }
+  const refreshedByPid = new Map(
+    refreshSnapshot.map((record) => [record.pid, record.identity]),
+  );
+  const capturedByPid = new Map([
+    [root.pid, root.identity] as const,
+    ...descendants.map((record) => [record.pid, record.identity] as const),
+  ]);
+  const verifiedRemaining = remaining.filter(
+    (pid) => refreshedByPid.get(pid) === capturedByPid.get(pid),
+  );
+  const verifiedSet = new Set(verifiedRemaining);
+  let forced = false;
   const remainingSet = new Set(remaining);
   if (process.platform === "win32") {
     if (
       remainingSet.has(rootPid) &&
-      rootProcessIsOwnedAlive(proc, rootIdentity, operations)
+      verifiedSet.has(rootPid) &&
+      childProcessIsAlive(proc, operations.pidIsAlive)
     ) {
       try {
-        operations.forceWindowsTree(rootPid);
+        await operations.forceWindowsTree(rootPid, commandTimeoutMs);
+        forced = true;
       } catch {
-        if (rootProcessIsOwnedAlive(proc, rootIdentity, operations)) {
+        if (
+          verifiedSet.has(rootPid) &&
+          childProcessIsAlive(proc, operations.pidIsAlive)
+        ) {
           signalOwnedRoot(proc, "SIGKILL", false);
+          forced = true;
         }
       }
     }
@@ -385,28 +843,31 @@ export async function terminateProcessTree(
   for (const child of descendants) {
     if (
       remainingSet.has(child.pid) &&
-      capturedProcessIsAlive(child, operations, true)
+      verifiedSet.has(child.pid) &&
+      operations.pidIsAlive(child.pid)
     ) {
       operations.signalPid(child.pid, "SIGKILL");
+      forced = true;
     }
   }
   if (
     process.platform !== "win32" &&
     remainingSet.has(rootPid) &&
-    rootProcessIsOwnedAlive(proc, rootIdentity, operations)
+    verifiedSet.has(rootPid) &&
+    childProcessIsAlive(proc, operations.pidIsAlive)
   ) {
     signalOwnedRoot(proc, "SIGKILL", detachedProcessGroup);
+    forced = true;
   }
 
-  remaining = await waitForOwnedTreeExit(
+  remaining = await waitForCapturedTreeExit(
     proc,
-    rootIdentity,
     descendants,
     forceSettleMs,
     pollIntervalMs,
     operations,
   );
-  return { forced: true, remainingPids: remaining };
+  return { forced, remainingPids: remaining };
 }
 
 /**

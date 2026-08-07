@@ -25,6 +25,7 @@ This repair changes Desktop production code and focused Desktop tests only.
 - Do not modify the blocked Beta.24 candidate, artifact, Runtime source, Runtime Seed lock, Cloud source, frozen evidence, or daily-use Aera/Hermes data.
 - Do not add a Runtime parent watchdog or change Runtime 0.20 behavior.
 - Do not redesign chat transport, ordinary Gateway ownership, Dashboard UI lifecycle, or release infrastructure.
+- Do not add a global Runtime IPC/Owner admission gate. This repair may close only the TUI client pool while its own cleanup is in flight.
 
 ## Runtime 0.20 Backend Contract
 
@@ -47,21 +48,22 @@ Stopping is idempotent and performs this order:
 
 1. invalidate the generation so no old startup continuation can publish a process;
 2. close the WebSocket and reject pending RPC calls;
-3. snapshot and clear the exact owned child reference;
-4. send SIGTERM to that child and its captured descendants;
+3. snapshot the exact owned child reference and retain it until termination is verified;
+4. on POSIX, send SIGTERM to the dedicated process group created by that child; on Windows, stop the exact captured tree;
 5. wait a fixed grace window for exit;
-6. if still alive, send SIGKILL only to the captured exact PID and captured descendants;
-7. settle the startup and stop promises before reporting completion.
+6. if still alive, send SIGKILL only to that same dedicated POSIX group or the Windows PIDs whose invariant creation identities still match;
+7. report any query, identity, timeout, or remaining-process failure to the caller and preserve the child for an explicit retry;
+8. settle the startup and stop promises before reporting completion.
 
-On Windows, the existing exact-PID `taskkill /T /F` boundary remains the process-tree mechanism. On POSIX the TUI child currently shares a process group with Electron, so shutdown must not signal a negative PGID. Ownership is established only by the `ChildProcess` returned from this Desktop spawn and descendants captured from that PID.
+On POSIX, Desktop spawns every TUI backend with `detached: true`, making the returned child the leader of a dedicated session and process group. Shutdown targets only that saved PGID, including when the leader has exited but group descendants remain; it never falls back to a positive PID or the shared Electron group. On Windows, `CreationFileTimeUtc` is the invariant process identity used before forced tree termination.
 
 ## Pool-Wide Shutdown
 
-`stopAllTuiGatewayClients()` snapshots and clears the complete TUI client map, then awaits every client stop. It is independent of `appStartedProfiles` and the ordinary Gateway ownership ledger.
+`stopAllTuiGatewayClients()` closes TUI admission, serializes cleanup requests, and awaits every mapped or already-running TUI stop with `allSettled`. Successful clients are removed; failed clients and their exact child references remain available for a later bounded retry. A fixed-point drain prevents a late stop from being mistaken for a clean pool.
 
-`stopActiveRuntimeContext()` includes this pool-wide stop. Electron's `before-quit` handler uses one idempotent bounded quit barrier: the first event prevents exit, performs existing resource disposal plus awaited Runtime cleanup, marks cleanup complete, and calls `app.quit()` once. Repeated quit events reuse the same cleanup and cannot launch duplicate shutdown work.
+`stopActiveRuntimeContext()` includes this pool-wide stop. The TUI-local admission flag is set synchronously, so an Owner transition cannot launch another TUI backend while the previous TUI pool drains. The existing Owner coordinator remains otherwise unchanged; asynchronous cleanup rejection is logged explicitly and no global Runtime IPC admission queue is introduced.
 
-Cleanup errors are logged, but the fixed termination bounds ensure the App cannot wait indefinitely. The barrier never enumerates or signals processes by product name, port, Profile display name, or global process scan.
+Electron's `before-quit` handler uses one idempotent bounded quit barrier. The first event prevents exit and awaits Runtime cleanup; cleanup success reissues `app.quit()` once. Cleanup failure is logged and keeps Electron open, and only a later explicit quit request may retry. The barrier never selects a process by product name, port, Profile display name, command line, or environment.
 
 ## Test Design
 
@@ -69,7 +71,9 @@ Focused TDD coverage proves three product regressions:
 
 - **TUI-only App exit:** a named Profile client present only in the TUI map is stopped by pool-wide shutdown even when ordinary Gateway ownership is empty.
 - **Startup/stop race:** stopping while port preparation is pending invalidates that generation; resolving the preparation later cannot leave a newly spawned or registered child.
-- **Bounded escalation:** an exact owned child first receives SIGTERM; only after the grace window does the same captured PID/tree receive SIGKILL, and an early exit prevents escalation.
+- **Bounded escalation:** a dedicated POSIX group first receives SIGTERM; only after the grace window may that same group receive SIGKILL, and an early exit prevents escalation. Windows refreshes invariant creation identities before forcing its exact tree.
+- **Fail-closed cleanup:** ownership-query failures and remaining PIDs reject cleanup, retain the exact client for retry, and prevent Electron from quitting.
+- **Stable drain:** concurrent and late TUI stops settle before pool cleanup reports success; no Owner-wide IPC gate is added.
 
 Additional assertions bind the Runtime 0.20 launch contract to `serve` plus `HERMES_DESKTOP=1`, and bind App quit to the awaited idempotent cleanup barrier.
 
