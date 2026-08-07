@@ -52,6 +52,10 @@ const password = "Aera Runtime E2E battery staple 2026";
 const REQUEST_BODY_LIMIT = 8 * 1024 * 1024;
 const DEVICE_SHUTDOWN_TIMEOUT_MS = 10_000;
 const DEVICE_SHUTDOWN_POLL_MS = 250;
+export const RUNTIME_INSTALL_WAIT_OPTIONS = {
+  timeout: 180_000,
+  intervals: [250, 500, 1_000],
+};
 
 type SMSDelivery = {
   to: string;
@@ -1873,8 +1877,12 @@ export async function claimDefaultProfile(
   );
 
   await expect
-    .poll(() =>
-      device.page.evaluate(() => window.agenteraRuntimeDistribution.getState()),
+    .poll(
+      () =>
+        device.page.evaluate(() =>
+          window.agenteraRuntimeDistribution.getState(),
+        ),
+      RUNTIME_INSTALL_WAIT_OPTIONS,
     )
     .toMatchObject({ phase: "current" });
 

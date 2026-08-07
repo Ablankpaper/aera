@@ -22,7 +22,13 @@ import {
   launchRuntimeDesktop,
   type ProductAuthHarness,
 } from "./support/agentera-product-auth-harness";
-import { classifyStreamIntegrityProviderRequest } from "./support/chat-stream-integrity-provider";
+import {
+  appendBoundedInvalidRequestEvidence,
+  buildInvalidRequestEvidence,
+  classifyStreamIntegrityProviderRequestDetailed,
+  type DetailedStreamIntegrityProviderRequest,
+  type InvalidRequestEvidence,
+} from "./support/chat-stream-integrity-provider";
 
 const TURN_COUNT = 20;
 const MODEL = "aera-stream-integrity-e2e";
@@ -50,6 +56,7 @@ interface ProviderState {
   auxiliaryRequestCount: number;
   chatRequestCount: number;
   invalidRequestCount: number;
+  invalidRequestEvidence: InvalidRequestEvidence[];
 }
 
 function sha256(text: string): string {
@@ -198,6 +205,7 @@ async function startProvider(): Promise<{
     auxiliaryRequestCount: 0,
     chatRequestCount: 0,
     invalidRequestCount: 0,
+    invalidRequestEvidence: [],
   };
   const server = createServer((request, response) => {
     void (async () => {
@@ -222,11 +230,31 @@ async function startProvider(): Promise<{
 
       let requestBody = "";
       for await (const chunk of request) requestBody += String(chunk);
-      const payload = JSON.parse(requestBody) as unknown;
-      const classified = classifyStreamIntegrityProviderRequest(payload);
+      let classified: DetailedStreamIntegrityProviderRequest;
+      try {
+        classified = classifyStreamIntegrityProviderRequestDetailed(
+          JSON.parse(requestBody) as unknown,
+        );
+      } catch {
+        classified = { kind: "invalid", rule: "invalid-json" };
+      }
 
       if (classified.kind === "invalid") {
         state.invalidRequestCount += 1;
+        appendBoundedInvalidRequestEvidence(
+          state.invalidRequestEvidence,
+          buildInvalidRequestEvidence({
+            requestId: `stream-invalid-${String(
+              state.invalidRequestCount,
+            ).padStart(4, "0")}`,
+            receivedAt: new Date().toISOString(),
+            method: request.method ?? "",
+            url: request.url ?? "/",
+            body: requestBody,
+            classificationRule: classified.rule,
+            headers: request.headers,
+          }),
+        );
         response.writeHead(400, { "content-type": "application/json" });
         response.end(
           JSON.stringify({
@@ -774,7 +802,12 @@ test("matches visible, completion, and state.db text for 20 isolated one-charact
     }
 
     expect(provider.state.chatRequestCount).toBe(TURN_COUNT);
-    expect(provider.state.invalidRequestCount).toBe(0);
+    expect(
+      provider.state.invalidRequestCount,
+      `Invalid request evidence: ${JSON.stringify(
+        provider.state.invalidRequestEvidence,
+      )}`,
+    ).toBe(0);
     expect(
       ownedRuntimeProcessIds(preparedRuntimeRoot).some((pid) =>
         launchedRuntimeProcessIds.has(pid),
@@ -799,6 +832,8 @@ test("matches visible, completion, and state.db text for 20 isolated one-charact
             providerAuxiliaryRequests: provider.state.auxiliaryRequestCount,
             providerChatRequests: provider.state.chatRequestCount,
             providerInvalidRequests: provider.state.invalidRequestCount,
+            providerInvalidRequestEvidence:
+              provider.state.invalidRequestEvidence,
             oneCharacterSseChunks: true,
             evidence,
           },
