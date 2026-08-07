@@ -147,7 +147,7 @@ describe("Runtime resumable downloader", () => {
       await expect(
         request(new URL("https://updates.example/runtime"), fixture, {
           transport,
-          timeouts: { connectMs: 100, readMs: 20, overallMs: 200 },
+          timeouts: { connectMs: 100, readMs: 20, overallMs: 30_000 },
         }),
       ).rejects.toThrow(/read timeout/i);
     } finally {
@@ -424,13 +424,14 @@ describe("Runtime resumable downloader", () => {
   it("retains a cancellable partial for a later retry", async () => {
     const fixture = createDownloadFixture();
     const controller = new AbortController();
+    const drop = progressDropController(7);
     const server = createServer((_incoming, response) => {
       response.writeHead(200, {
         "Content-Length": BODY.length,
         ETag: '"fixture-v1"',
       });
+      drop.capture(response);
       response.write(BODY.subarray(0, 7));
-      setTimeout(() => response.end(BODY.subarray(7)), 500);
     });
     try {
       const port = await listen(server);
@@ -440,7 +441,10 @@ describe("Runtime resumable downloader", () => {
         {
           signal: controller.signal,
           onProgress: (received: number) => {
-            if (received >= 7) controller.abort();
+            if (received >= 7) {
+              controller.abort();
+              drop.onProgress(received);
+            }
           },
         },
       );

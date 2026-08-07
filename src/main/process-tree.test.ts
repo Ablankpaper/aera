@@ -67,6 +67,9 @@ describe("terminateProcessTree", () => {
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Bounded force escalation]]
   it("forces only the captured live tree after the grace window", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("darwin");
     vi.useFakeTimers();
     const alive = new Set([100, 101, 999]);
     const root = fakeChildProcess(100, alive);
@@ -74,34 +77,39 @@ describe("terminateProcessTree", () => {
       if (pid === 101 && signal === "SIGKILL") alive.delete(101);
     });
 
-    const stopping = terminateProcessTree(root.child, {
-      detachedProcessGroup: false,
-      forceAfterMs: 100,
-      pollIntervalMs: 10,
-      forceSettleMs: 50,
-      operations: {
-        descendantProcesses: () => [{ pid: 101, identity: "child-start" }],
-        processIdentity: (pid) => (pid === 100 ? "root-start" : "child-start"),
-        pidIsAlive: (pid) => alive.has(pid),
-        signalPid,
-      },
-    });
-    await vi.advanceTimersByTimeAsync(100);
-    await vi.runAllTimersAsync();
+    try {
+      const stopping = terminateProcessTree(root.child, {
+        detachedProcessGroup: false,
+        forceAfterMs: 100,
+        pollIntervalMs: 10,
+        forceSettleMs: 50,
+        operations: {
+          descendantProcesses: () => [{ pid: 101, identity: "child-start" }],
+          processIdentity: (pid) =>
+            pid === 100 ? "root-start" : "child-start",
+          pidIsAlive: (pid) => alive.has(pid),
+          signalPid,
+        },
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.runAllTimersAsync();
 
-    await expect(stopping).resolves.toEqual({
-      forced: true,
-      remainingPids: [],
-    });
-    expect(root.kill.mock.calls.map(([signal]) => signal)).toEqual([
-      "SIGTERM",
-      "SIGKILL",
-    ]);
-    expect(signalPid).toHaveBeenCalledWith(101, "SIGTERM");
-    expect(signalPid).toHaveBeenCalledWith(101, "SIGKILL");
-    expect(signalPid).not.toHaveBeenCalledWith(999, "SIGTERM");
-    expect(signalPid).not.toHaveBeenCalledWith(999, "SIGKILL");
-    vi.useRealTimers();
+      await expect(stopping).resolves.toEqual({
+        forced: true,
+        remainingPids: [],
+      });
+      expect(root.kill.mock.calls.map(([signal]) => signal)).toEqual([
+        "SIGTERM",
+        "SIGKILL",
+      ]);
+      expect(signalPid).toHaveBeenCalledWith(101, "SIGTERM");
+      expect(signalPid).toHaveBeenCalledWith(101, "SIGKILL");
+      expect(signalPid).not.toHaveBeenCalledWith(999, "SIGTERM");
+      expect(signalPid).not.toHaveBeenCalledWith(999, "SIGKILL");
+    } finally {
+      platform.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
@@ -586,6 +594,9 @@ describe("terminateProcessTree", () => {
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Bounded force escalation]]
   it("fails closed when the escalation identity refresh times out", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("darwin");
     vi.useFakeTimers();
     const alive = new Set([100, 101]);
     const root = fakeChildProcess(100, alive);
@@ -597,30 +608,34 @@ describe("terminateProcessTree", () => {
       ])
       .mockImplementationOnce(() => new Promise<never>(() => undefined));
     const signalPid = vi.fn();
-    const stopping = terminateProcessTree(root.child, {
-      detachedProcessGroup: false,
-      forceAfterMs: 10,
-      forceSettleMs: 0,
-      pollIntervalMs: 5,
-      snapshotTimeoutMs: 25,
-      operations: {
-        captureSnapshot,
-        pidIsAlive: (pid) => alive.has(pid),
-        signalPid,
-      } as never,
-    });
+    try {
+      const stopping = terminateProcessTree(root.child, {
+        detachedProcessGroup: false,
+        forceAfterMs: 10,
+        forceSettleMs: 0,
+        pollIntervalMs: 5,
+        snapshotTimeoutMs: 25,
+        operations: {
+          captureSnapshot,
+          pidIsAlive: (pid) => alive.has(pid),
+          signalPid,
+        } as never,
+      });
 
-    await vi.advanceTimersByTimeAsync(10);
-    await vi.advanceTimersByTimeAsync(25);
-    await expect(stopping).resolves.toEqual({
-      forced: false,
-      remainingPids: [101, 100],
-    });
-    expect(root.kill).toHaveBeenCalledWith("SIGTERM");
-    expect(root.kill).not.toHaveBeenCalledWith("SIGKILL");
-    expect(signalPid).toHaveBeenCalledWith(101, "SIGTERM");
-    expect(signalPid).not.toHaveBeenCalledWith(101, "SIGKILL");
-    vi.useRealTimers();
+      await vi.advanceTimersByTimeAsync(10);
+      await vi.advanceTimersByTimeAsync(25);
+      await expect(stopping).resolves.toEqual({
+        forced: false,
+        remainingPids: [101, 100],
+      });
+      expect(root.kill).toHaveBeenCalledWith("SIGTERM");
+      expect(root.kill).not.toHaveBeenCalledWith("SIGKILL");
+      expect(signalPid).toHaveBeenCalledWith(101, "SIGTERM");
+      expect(signalPid).not.toHaveBeenCalledWith(101, "SIGKILL");
+    } finally {
+      platform.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Bounded force escalation]]
@@ -669,6 +684,9 @@ describe("terminateProcessTree", () => {
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
   it("does not force a PID whose identity changes before escalation", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("darwin");
     vi.useFakeTimers();
     const alive = new Set([100, 101]);
     const root = fakeChildProcess(100, alive);
@@ -684,27 +702,31 @@ describe("terminateProcessTree", () => {
       ]);
     const signalPid = vi.fn();
 
-    const stopping = terminateProcessTree(root.child, {
-      detachedProcessGroup: false,
-      forceAfterMs: 10,
-      forceSettleMs: 0,
-      pollIntervalMs: 5,
-      operations: {
-        captureSnapshot,
-        descendantProcesses: () => [],
-        processIdentity: vi.fn(() => "legacy"),
-        pidIsAlive: (pid) => alive.has(pid),
-        signalPid,
-      } as never,
-    });
-    await vi.advanceTimersByTimeAsync(10);
-    await vi.runAllTimersAsync();
-    const result = await stopping;
+    try {
+      const stopping = terminateProcessTree(root.child, {
+        detachedProcessGroup: false,
+        forceAfterMs: 10,
+        forceSettleMs: 0,
+        pollIntervalMs: 5,
+        operations: {
+          captureSnapshot,
+          descendantProcesses: () => [],
+          processIdentity: vi.fn(() => "legacy"),
+          pidIsAlive: (pid) => alive.has(pid),
+          signalPid,
+        } as never,
+      });
+      await vi.advanceTimersByTimeAsync(10);
+      await vi.runAllTimersAsync();
+      const result = await stopping;
 
-    expect(captureSnapshot).toHaveBeenCalledTimes(2);
-    expect(signalPid).not.toHaveBeenCalledWith(101, "SIGKILL");
-    expect(result.remainingPids).toContain(101);
-    vi.useRealTimers();
+      expect(captureSnapshot).toHaveBeenCalledTimes(2);
+      expect(signalPid).not.toHaveBeenCalledWith(101, "SIGKILL");
+      expect(result.remainingPids).toContain(101);
+    } finally {
+      platform.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("parses invariant Windows process identities", () => {
