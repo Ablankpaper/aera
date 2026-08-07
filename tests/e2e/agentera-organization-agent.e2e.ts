@@ -744,8 +744,12 @@ async function startVisionModelServer(): Promise<string> {
             name.startsWith("mcp__employee_docs__") &&
             name.endsWith("docs_read"),
         );
+      const capabilityBridgeName = requestBody.tools
+        ?.map((tool) => tool.function?.name)
+        .find((name): name is string => name === "tool_call");
       if (capabilityTurn && !hasCapabilityToolResult) {
-        if (!capabilityToolName) {
+        const callableToolName = capabilityToolName ?? capabilityBridgeName;
+        if (!callableToolName) {
           response.writeHead(400).end("compatible MCP tool is missing");
           return;
         }
@@ -754,8 +758,15 @@ async function startVisionModelServer(): Promise<string> {
           id: "capability-binding-e2e-call",
           type: "function",
           function: {
-            name: capabilityToolName,
-            arguments: JSON.stringify({ query: "approved enterprise docs" }),
+            name: callableToolName,
+            arguments: JSON.stringify(
+              capabilityToolName
+                ? { query: "approved enterprise docs" }
+                : {
+                    name: "mcp__employee_docs__docs_read",
+                    arguments: { query: "approved enterprise docs" },
+                  },
+            ),
           },
         };
         if (!stream) {
