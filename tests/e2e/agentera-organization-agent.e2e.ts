@@ -50,6 +50,7 @@ import {
   agentControlRequests,
   authenticateFirstAgentControlDevice,
   claimDefaultProfile,
+  closeAgentControlDevice,
   closeAgentControlHarness,
   cloudAgentControlCounts,
   createAgentControlHarness,
@@ -1059,7 +1060,7 @@ test("organization agent needs one current reviewer and keeps every employee run
     publishedRevision: null,
   });
 
-  await owner.device.app.close();
+  await closeAgentControlDevice(owner.device);
   ownerDevice = await launchAgentControlDevice(harness, "A");
   owner = { ...owner, device: ownerDevice };
   await expect(owner.device.page.locator(".layout")).toBeVisible({
@@ -1773,7 +1774,7 @@ test("organization agent needs one current reviewer and keeps every employee run
   expect(await treeContains(projectionRoot, MEMBER_SKILL_SECRET)).toBe(false);
 
   await stopAgentControlCloud(harness);
-  await member.device.app.close();
+  await closeAgentControlDevice(member.device);
   memberDevice = await launchAgentControlDevice(harness, "D");
   await expect(memberDevice.page.locator(".layout")).toBeVisible({
     timeout: 180_000,

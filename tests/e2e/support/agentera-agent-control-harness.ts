@@ -50,6 +50,8 @@ const defaultCloudRoot = resolve(
 const cloudPublicOrigin = "http://127.0.0.1:8086";
 const password = "Aera Runtime E2E battery staple 2026";
 const REQUEST_BODY_LIMIT = 8 * 1024 * 1024;
+const DEVICE_SHUTDOWN_TIMEOUT_MS = 10_000;
+const DEVICE_SHUTDOWN_POLL_MS = 250;
 
 type SMSDelivery = {
   to: string;
@@ -79,6 +81,8 @@ export interface AgentControlDevice {
   page: Page;
   processOutput: string;
 }
+
+const closedAgentControlDevices = new WeakSet<AgentControlDevice>();
 
 export interface AgentControlHarness {
   root: string;
@@ -1327,65 +1331,302 @@ export async function closeAgentControlHarness(
   harness: AgentControlHarness | null,
 ): Promise<void> {
   if (!harness) return;
+  const cleanupErrors: Error[] = [];
+  let deviceProcessCleanupFailed = false;
+  const captureCleanup = async (
+    label: string,
+    operation: () => Promise<void>,
+  ): Promise<void> => {
+    try {
+      await operation();
+    } catch (error) {
+      cleanupErrors.push(
+        new Error(
+          `${label}: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+    }
+  };
+
   for (const device of harness.devices.splice(0).reverse()) {
-    await device.page
-      .evaluate(async () => {
-        const profiles = await window.hermesAPI.listProfiles();
-        await Promise.all(
-          profiles.map(({ id }) =>
-            window.hermesAPI.stopDashboard(id).catch(() => false),
-          ),
-        );
-        await window.hermesAPI.stopGateway().catch(() => false);
-      })
-      .catch(() => undefined);
-    await device.app.close().catch(() => undefined);
+    if (!closedAgentControlDevices.has(device)) {
+      await captureCleanup(`device ${device.name} Runtime stop`, async () => {
+        await device.page.evaluate(async () => {
+          const profiles = await window.hermesAPI.listProfiles();
+          const dashboardResults = await Promise.all(
+            profiles.map(async ({ id }) => {
+              try {
+                return {
+                  id,
+                  result: await window.hermesAPI.stopDashboard(id),
+                };
+              } catch (error) {
+                return { id, error: String(error) };
+              }
+            }),
+          );
+          let gatewayResult: boolean | null = null;
+          let gatewayError: string | null = null;
+          try {
+            gatewayResult = await window.hermesAPI.stopGateway();
+          } catch (error) {
+            gatewayError = String(error);
+          }
+          const failedDashboards = dashboardResults.filter(
+            (result) => result.result !== true,
+          );
+          if (
+            failedDashboards.length > 0 ||
+            gatewayResult !== true ||
+            gatewayError !== null
+          ) {
+            throw new Error(
+              JSON.stringify({
+                failedDashboards,
+                gatewayResult,
+                gatewayError,
+              }),
+            );
+          }
+        });
+      });
+    }
+    await captureCleanup(`device ${device.name} close`, async () => {
+      try {
+        await closeAgentControlDevice(device);
+      } catch (error) {
+        deviceProcessCleanupFailed = true;
+        throw error;
+      }
+    });
   }
-  await stopOfficialAdmin(harness).catch(() => undefined);
-  await stopCloud(harness).catch(() => undefined);
-  await harness.browser.close().catch(() => undefined);
-  await closeServer(harness.proxyServer).catch(() => undefined);
-  await closeServer(harness.captureServer).catch(() => undefined);
+  await captureCleanup("official Admin stop", () => stopOfficialAdmin(harness));
+  await captureCleanup("Cloud stop", () => stopCloud(harness));
+  await captureCleanup("browser close", () => harness.browser.close());
+  await captureCleanup("proxy server close", () =>
+    closeServer(harness.proxyServer),
+  );
+  await captureCleanup("capture server close", () =>
+    closeServer(harness.captureServer),
+  );
   if (harness.official?.adminComposeStarted) {
-    command(
-      "docker",
-      [
-        "compose",
-        "-p",
-        harness.official.adminComposeProject,
-        "down",
-        "-v",
-        "--remove-orphans",
-      ],
-      {
-        cwd: harness.official.adminRoot,
-        env: adminComposeEnvironment(harness.official),
-      },
-    );
-    harness.official.adminComposeStarted = false;
+    await captureCleanup("official Admin Compose down", async () => {
+      command(
+        "docker",
+        [
+          "compose",
+          "-p",
+          harness.official!.adminComposeProject,
+          "down",
+          "-v",
+          "--remove-orphans",
+        ],
+        {
+          cwd: harness.official!.adminRoot,
+          env: adminComposeEnvironment(harness.official!),
+        },
+      );
+      harness.official!.adminComposeStarted = false;
+    });
   }
   if (harness.composeStarted) {
-    command(
-      "docker",
-      [
-        "compose",
-        "-p",
-        harness.composeProject,
-        "down",
-        "-v",
-        "--remove-orphans",
-      ],
-      { cwd: harness.cloudRoot, env: composeEnvironment(harness) },
-    );
-    harness.composeStarted = false;
+    await captureCleanup("Cloud Compose down", async () => {
+      command(
+        "docker",
+        [
+          "compose",
+          "-p",
+          harness.composeProject,
+          "down",
+          "-v",
+          "--remove-orphans",
+        ],
+        { cwd: harness.cloudRoot, env: composeEnvironment(harness) },
+      );
+      harness.composeStarted = false;
+    });
   }
-  await makeTreeWritable(harness.root).catch(() => undefined);
-  await rm(harness.root, {
-    recursive: true,
-    force: true,
-    maxRetries: 20,
-    retryDelay: 100,
+  await captureCleanup("run-owned harness processes exit", async () => {
+    try {
+      await waitForRunOwnedHarnessExit(harness.root);
+    } catch (error) {
+      deviceProcessCleanupFailed = true;
+      throw error;
+    }
   });
+  if (!deviceProcessCleanupFailed) {
+    await captureCleanup("harness tree writable", () =>
+      makeTreeWritable(harness.root),
+    );
+    await captureCleanup("harness root removal", () =>
+      rm(harness.root, {
+        recursive: true,
+        force: true,
+        maxRetries: 20,
+        retryDelay: 100,
+      }),
+    );
+  } else {
+    cleanupErrors.push(
+      new Error(
+        `harness root retained after device process cleanup failure: ${harness.root}`,
+      ),
+    );
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(
+      cleanupErrors,
+      "Agent control harness cleanup failed.",
+    );
+  }
+}
+
+type AgentControlProcessIdentity = {
+  pid: number;
+  ppid: number;
+  pgid: number;
+  startedAt: string;
+  command: string;
+};
+
+function agentControlProcessRows(): AgentControlProcessIdentity[] {
+  const output = command(
+    "ps",
+    ["-ww", "-axo", "pid=,ppid=,pgid=,lstart=,command="],
+    {
+      cwd: desktopRoot,
+    },
+  );
+  const nonEmptyLines = output
+    .split(/\r?\n/u)
+    .filter((line) => line.trim() !== "");
+  if (nonEmptyLines.length === 0) {
+    throw new Error("ps returned no process rows.");
+  }
+  const rows = nonEmptyLines
+    .map((line): AgentControlProcessIdentity | null => {
+      const match = line.match(
+        /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\S+\s+\d+)\s+(.+)$/u,
+      );
+      if (!match) return null;
+      return {
+        pid: Number(match[1]),
+        ppid: Number(match[2]),
+        pgid: Number(match[3]),
+        startedAt: match[4],
+        command: match[5],
+      };
+    })
+    .filter((row): row is AgentControlProcessIdentity => row !== null);
+  if (!rows.some((row) => row.pid === process.pid)) {
+    throw new Error(
+      `ps process rows could not be parsed reliably; current PID ${process.pid} was absent.`,
+    );
+  }
+  return rows;
+}
+
+function capturedDeviceProcessTree(
+  device: AgentControlDevice,
+): AgentControlProcessIdentity[] {
+  const electronPid = device.app.process().pid;
+  if (!Number.isSafeInteger(electronPid) || !electronPid || electronPid <= 0) {
+    throw new Error(`Device ${device.name} has no valid Electron PID.`);
+  }
+  const rows = agentControlProcessRows();
+  const descendants = new Set<number>([electronPid]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const row of rows) {
+      if (!descendants.has(row.pid) && descendants.has(row.ppid)) {
+        descendants.add(row.pid);
+        changed = true;
+      }
+    }
+  }
+  return rows.filter((row) => descendants.has(row.pid));
+}
+
+function sameAgentControlProcess(
+  left: AgentControlProcessIdentity,
+  right: AgentControlProcessIdentity,
+): boolean {
+  return (
+    left.pid === right.pid &&
+    left.startedAt === right.startedAt &&
+    left.command === right.command
+  );
+}
+
+function remainingRunOwnedDeviceProcesses(
+  device: AgentControlDevice,
+  captured: AgentControlProcessIdentity[],
+): AgentControlProcessIdentity[] {
+  return agentControlProcessRows().filter(
+    (row) =>
+      row.command.includes(device.userData) ||
+      row.command.includes(device.hermesHome) ||
+      captured.some((identity) => sameAgentControlProcess(identity, row)),
+  );
+}
+
+async function waitForRunOwnedDeviceExit(
+  device: AgentControlDevice,
+  captured: AgentControlProcessIdentity[],
+): Promise<void> {
+  const deadline = Date.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
+  let remaining = remainingRunOwnedDeviceProcesses(device, captured);
+  while (remaining.length > 0 && Date.now() < deadline) {
+    await new Promise((resolveWait) =>
+      setTimeout(resolveWait, DEVICE_SHUTDOWN_POLL_MS),
+    );
+    remaining = remainingRunOwnedDeviceProcesses(device, captured);
+  }
+  if (remaining.length > 0) {
+    throw new Error(
+      `Run-owned Electron/Runtime processes did not exit within ${DEVICE_SHUTDOWN_TIMEOUT_MS}ms for device ${device.name}:\n${remaining.map((row) => JSON.stringify(row)).join("\n")}`,
+    );
+  }
+}
+
+async function waitForRunOwnedHarnessExit(harnessRoot: string): Promise<void> {
+  const deadline = Date.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
+  let remaining = agentControlProcessRows().filter((row) =>
+    row.command.includes(harnessRoot),
+  );
+  while (remaining.length > 0 && Date.now() < deadline) {
+    await new Promise((resolveWait) =>
+      setTimeout(resolveWait, DEVICE_SHUTDOWN_POLL_MS),
+    );
+    remaining = agentControlProcessRows().filter((row) =>
+      row.command.includes(harnessRoot),
+    );
+  }
+  if (remaining.length > 0) {
+    throw new Error(
+      `Run-owned harness processes did not exit within ${DEVICE_SHUTDOWN_TIMEOUT_MS}ms:\n${remaining.map((row) => JSON.stringify(row)).join("\n")}`,
+    );
+  }
+}
+
+export async function closeAgentControlDevice(
+  device: AgentControlDevice,
+): Promise<void> {
+  if (closedAgentControlDevices.has(device)) {
+    await waitForRunOwnedDeviceExit(device, []);
+    return;
+  }
+  const captured = capturedDeviceProcessTree(device);
+  closedAgentControlDevices.add(device);
+  let closeError: unknown = null;
+  try {
+    await device.app.close();
+  } catch (error) {
+    closeError = error;
+  }
+  await waitForRunOwnedDeviceExit(device, captured);
+  if (closeError) throw closeError;
 }
 
 async function makeTreeWritable(path: string): Promise<void> {
