@@ -1156,6 +1156,114 @@ test("organization agent needs one current reviewer and keeps every employee run
     /Published with unpublished changes|已发布，有未发布修改/,
   );
 
+  const ownerPrivateBeforeDiscard = await privateProfileSnapshot(
+    deviceProfilePath(owner.device, "default"),
+    DEFAULT_PRIVATE_MARKERS,
+  );
+  const cloudCountsBeforeDiscard = await cloudAgentControlCounts(harness);
+  const mutationCountBeforeDiscard = agentControlRequests(harness).filter(
+    ({ method }) => ["POST", "PATCH", "DELETE"].includes(method),
+  ).length;
+
+  await lifecycleCard.click();
+  const lifecycleDetail = owner.device.page.getByRole("dialog", {
+    name: /Enterprise Research/,
+  });
+  await expect(lifecycleDetail).toBeVisible();
+  await lifecycleDetail
+    .getByRole("button", { name: "Discard unpublished changes" })
+    .click();
+
+  const discardDialog = owner.device.page.getByRole("dialog", {
+    name: "Discard unpublished changes",
+  });
+  await expect(discardDialog).toContainText(
+    /current local working copy is removed.*published enterprise Agent.*remain unchanged/s,
+  );
+  await discardDialog.getByRole("button", { name: "Discard changes" }).click();
+  await expect(discardDialog).toBeHidden();
+
+  const discardedDrafts = unwrapAgent(
+    await invokeAgentera<AgentDraft[]>(owner.device, "listDrafts"),
+  );
+  expect(discardedDrafts.some(({ id }) => id === initial.draft.id)).toBe(false);
+  expect(
+    await invokeAgentera<AgentDraftDetail>(
+      owner.device,
+      "getDraft",
+      initial.draft.id,
+    ),
+  ).toEqual({ ok: false, errorCode: "not_found" });
+
+  await expect(lifecycleCard).toContainText(/\bPublished\b/);
+  await expect(lifecycleCard).not.toContainText(
+    /Published with unpublished changes|已发布，有未发布修改/,
+  );
+  await lifecycleCard.click();
+  const cleanLifecycleDetail = owner.device.page.getByRole("dialog", {
+    name: /Enterprise Research/,
+  });
+  await expect(cleanLifecycleDetail).toBeVisible();
+  await expect(
+    cleanLifecycleDetail.getByRole("button", {
+      name: "Discard unpublished changes",
+    }),
+  ).toHaveCount(0);
+  await cleanLifecycleDetail
+    .getByRole("button", { name: /^(Close|关闭)$/ })
+    .click();
+
+  const submissionsAfterDiscard = unwrapAgent(
+    await invokeAgentera<OrganizationAgentSubmissionSummary[]>(
+      owner.device,
+      "listOrganizationSubmissions",
+    ),
+  );
+  expect(submissionsAfterDiscard).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id: initial.submission.id,
+        status: "approved",
+        localDraftId: initial.draft.id,
+        localDraftRevision: 1,
+      }),
+    ]),
+  );
+  const definitionsAfterDiscard = unwrapAgent(
+    await invokeAgentera<AgenteraAgentDefinitionSummary[]>(
+      member.device,
+      "listDefinitions",
+    ),
+  );
+  expect(definitionsAfterDiscard).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: approvedInitial.definitionId }),
+    ]),
+  );
+  const versionAfterDiscard = await latestVersion(
+    member.device,
+    approvedInitial.definitionId,
+  );
+  expect(versionAfterDiscard).toMatchObject({
+    id: approvedInitial.publishedVersionId,
+    versionNumber: 1,
+  });
+  expect(
+    await privateProfileSnapshot(
+      deviceProfilePath(owner.device, "default"),
+      DEFAULT_PRIVATE_MARKERS,
+    ),
+  ).toEqual(ownerPrivateBeforeDiscard);
+  expect(await readFile(ownerPrivatePath, "utf8")).toBe(OWNER_PRIVATE_SECRET);
+  await expect
+    .poll(() => cloudAgentControlCounts(harness))
+    .toEqual(cloudCountsBeforeDiscard);
+  expect(
+    agentControlRequests(harness).filter(({ method }) =>
+      ["POST", "PATCH", "DELETE"].includes(method),
+    ),
+  ).toHaveLength(mutationCountBeforeDiscard);
+
   const disposableDraft = unwrapAgent(
     await invokeAgentera<AgentDraftDetail>(
       owner.device,
