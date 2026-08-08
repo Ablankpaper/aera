@@ -200,4 +200,35 @@ describe("ordinary gateway shutdown lifecycle", () => {
     await shutdown;
     expect(settled).toBe(true);
   });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
+  it("allows the bounded Windows process query to outlive the default command budget", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
+    const child = fakeChildProcess(process.pid);
+    spawnRef.value.mockReturnValue(child);
+    terminateRef.value.mockImplementation(async () => {
+      child.emit("close", 0, null);
+      return { forced: false, remainingPids: [] };
+    });
+
+    try {
+      configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+      expect(startGatewayDetailed("research").success).toBe(true);
+
+      await stopAeraOwnedGateways();
+
+      expect(terminateRef.value).toHaveBeenCalledWith(
+        child,
+        expect.objectContaining({
+          commandTimeoutMs: 3_000,
+          detachedProcessGroup: false,
+          snapshotTimeoutMs: 3_000,
+        }),
+      );
+    } finally {
+      platform.mockRestore();
+    }
+  });
 });

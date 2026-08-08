@@ -3941,6 +3941,12 @@ async function stopAeraOwnedGateway(profile: string): Promise<void> {
     const result = await terminateProcessTree(proc!, {
       detachedProcessGroup: process.platform !== "win32",
       forceAfterMs: 3_000,
+      ...(process.platform === "win32"
+        ? {
+            commandTimeoutMs: 3_000,
+            snapshotTimeoutMs: 3_000,
+          }
+        : {}),
     });
     if (result.remainingPids.length > 0) {
       throw new Error(
