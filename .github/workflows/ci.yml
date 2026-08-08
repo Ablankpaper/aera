@@ -99,7 +99,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         env:
           AERA_PROCESS_TREE_DIAGNOSTICS: "1"
-        run: npm test -- tests/gateway-restart.test.ts --maxWorkers=1
+        run: npm test -- src/main/process-tree.test.ts --maxWorkers=1
 
       - name: Test official quality privacy flow
         run: npm run test:e2e:official-quality
