@@ -71,7 +71,14 @@ export interface CapturedAgentControlRequest {
 
 interface CapturedRequest extends CapturedAgentControlRequest {
   contentType: string | null;
+  receivedAt: string;
+  responseSource:
+    | "pending"
+    | "harness_injection"
+    | "upstream"
+    | "proxy_exception";
   responseStatus?: number;
+  responseDurationMs?: number;
   responseBody?: unknown;
 }
 
@@ -400,23 +407,24 @@ async function forwardPublicRequest(
   requests: CapturedRequest[],
   failures: string[],
 ): Promise<void> {
+  const startedAt = Date.now();
+  const pathWithQuery = request.url ?? "/";
+  const path = new URL(pathWithQuery, cloudPublicOrigin).pathname;
+  const contentType = request.headers["content-type"] ?? null;
+  const captured: CapturedRequest = {
+    method: request.method ?? "GET",
+    path,
+    contentType: Array.isArray(contentType)
+      ? (contentType[0] ?? null)
+      : contentType,
+    body: null,
+    receivedAt: new Date().toISOString(),
+    responseSource: "pending",
+  };
+  requests.push(captured);
   try {
-    const pathWithQuery = request.url ?? "/";
-    const path = new URL(pathWithQuery, cloudPublicOrigin).pathname;
     const body = await requestBody(request);
-    const contentType = request.headers["content-type"] ?? null;
-    const captured: CapturedRequest = {
-      method: request.method ?? "GET",
-      path,
-      contentType: Array.isArray(contentType)
-        ? (contentType[0] ?? null)
-        : contentType,
-      body: parseCapturedBody(
-        body,
-        Array.isArray(contentType) ? (contentType[0] ?? null) : contentType,
-      ),
-    };
-    requests.push(captured);
+    captured.body = parseCapturedBody(body, captured.contentType);
 
     const failureIndex = failures.findIndex(
       (candidate) =>
@@ -429,7 +437,9 @@ async function forwardPublicRequest(
     );
     if (failureIndex >= 0) {
       failures.splice(failureIndex, 1);
+      captured.responseSource = "harness_injection";
       captured.responseStatus = 503;
+      captured.responseDurationMs = Date.now() - startedAt;
       captured.responseBody = { error: { code: "service_unavailable" } };
       response.writeHead(503, { "content-type": "application/json" });
       response.end('{"error":{"code":"service_unavailable"}}');
@@ -448,7 +458,9 @@ async function forwardPublicRequest(
       redirect: "manual",
     });
     const upstreamBytes = Buffer.from(await upstream.arrayBuffer());
+    captured.responseSource = "upstream";
     captured.responseStatus = upstream.status;
+    captured.responseDurationMs = Date.now() - startedAt;
     captured.responseBody = parseCapturedBody(
       upstreamBytes,
       upstream.headers.get("content-type"),
@@ -457,6 +469,10 @@ async function forwardPublicRequest(
     response.statusCode = upstream.status;
     response.end(upstreamBytes);
   } catch {
+    captured.responseSource = "proxy_exception";
+    captured.responseStatus = 502;
+    captured.responseDurationMs = Date.now() - startedAt;
+    captured.responseBody = { error: { code: "proxy_unavailable" } };
     if (!response.headersSent) {
       response.writeHead(502, { "content-type": "text/plain" });
     }
@@ -1996,6 +2012,56 @@ export function agentControlExchangeDiagnostics(
       responseStatus: request.responseStatus,
       responseBody: request.responseBody,
     }));
+}
+
+const organizationMemberPathPattern =
+  /^\/api\/v1\/organizations\/[0-9a-f-]{36}\/members(?:\/[0-9a-f-]{36})?$/u;
+const diagnosticCodePattern = /^[a-z][a-z0-9_]{0,63}$/u;
+const diagnosticRequestIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+
+export function organizationRequestDiagnostics(
+  harness: AgentControlHarness,
+): unknown[] {
+  return harness.requests
+    .filter((request) => organizationMemberPathPattern.test(request.path))
+    .slice(-8)
+    .map((request) => {
+      const response =
+        request.responseBody !== null &&
+        typeof request.responseBody === "object" &&
+        !Array.isArray(request.responseBody)
+          ? (request.responseBody as Record<string, unknown>)
+          : null;
+      const error =
+        response?.error !== null &&
+        typeof response?.error === "object" &&
+        !Array.isArray(response.error)
+          ? (response.error as Record<string, unknown>)
+          : null;
+      const errorCode =
+        typeof error?.code === "string" &&
+        diagnosticCodePattern.test(error.code)
+          ? error.code
+          : null;
+      const requestId =
+        typeof error?.request_id === "string" &&
+        diagnosticRequestIdPattern.test(error.request_id)
+          ? error.request_id
+          : null;
+      return {
+        method: request.method,
+        path: request.path.includes("/members/")
+          ? "/api/v1/organizations/{organizationId}/members/{userId}"
+          : "/api/v1/organizations/{organizationId}/members",
+        receivedAt: request.receivedAt,
+        responseSource: request.responseSource,
+        responseStatus: request.responseStatus ?? null,
+        responseDurationMs: request.responseDurationMs ?? null,
+        errorCode,
+        requestId,
+      };
+    });
 }
 
 export async function cloudAgentControlCounts(

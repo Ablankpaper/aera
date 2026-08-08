@@ -414,6 +414,8 @@ An approved submission carries its exact immutable Version ID. The service joins
 
 [[tests/e2e/agentera-organization-agent.e2e.ts]] proves the four-role approval and installation flow, Manifest V3 author Skill/MCP selection, employee-local opaque capability mapping to a different MCP, one real allowed tool reply, restart-safe dirty-draft reconciliation, one-card presentation, withdrawal, archive, version binding stability, offline verified use, reconnect removal, read-only projection, and private-state preservation. Run it with `npm run test:e2e:organization-agent`.
 
+Failure diagnostics for Organization member requests retain only a bounded, redacted source/status/request-ID timeline, so proxy injection, upstream Cloud responses, and proxy exceptions remain distinguishable without recording request bodies or credentials.
+
 ### Workspace Agent isolation
 
 The Workspace Agent gate extends the release proof from USER assets to WORKSPACE-owned definitions and versions without changing USER ownership of installations, Profiles, RuntimeBindings, or adaptive data.

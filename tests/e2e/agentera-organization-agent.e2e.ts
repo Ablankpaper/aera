@@ -60,6 +60,7 @@ import {
   launchAgentControlDevice,
   localAgentControlState,
   localInstallationOwner,
+  organizationRequestDiagnostics,
   privateProfileSnapshot,
   startAgentControlCloud,
   startBoundConversation,
@@ -141,6 +142,16 @@ test.setTimeout(360_000);
 function diagnostics(): string {
   return JSON.stringify({
     exchanges: harness ? agentControlExchangeDiagnostics(harness) : [],
+    organizationRequests: harness
+      ? organizationRequestDiagnostics(harness)
+      : [],
+    cloudProcess: harness?.cloudProcess
+      ? {
+          running: harness.cloudProcess.exitCode === null,
+          exitCode: harness.cloudProcess.exitCode,
+          signalCode: harness.cloudProcess.signalCode,
+        }
+      : null,
     processes: [
       ...deviceProcessDiagnostics(ownerDevice),
       ...deviceProcessDiagnostics(adminDevice),
