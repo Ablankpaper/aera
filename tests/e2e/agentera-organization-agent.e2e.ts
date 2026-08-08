@@ -53,6 +53,7 @@ import {
   closeAgentControlDevice,
   closeAgentControlHarness,
   cloudAgentControlCounts,
+  cloudOutputDiagnostics,
   createAgentControlHarness,
   deviceProcessDiagnostics,
   deviceProfilePath,
@@ -61,6 +62,7 @@ import {
   localAgentControlState,
   localInstallationOwner,
   organizationRequestDiagnostics,
+  postgresFailureDiagnostics,
   privateProfileSnapshot,
   startAgentControlCloud,
   startBoundConversation,
@@ -152,6 +154,8 @@ function diagnostics(): string {
           signalCode: harness.cloudProcess.signalCode,
         }
       : null,
+    postgresFailures: harness ? postgresFailureDiagnostics(harness) : null,
+    cloudOutput: harness ? cloudOutputDiagnostics(harness) : null,
     processes: [
       ...deviceProcessDiagnostics(ownerDevice),
       ...deviceProcessDiagnostics(adminDevice),

@@ -414,7 +414,7 @@ An approved submission carries its exact immutable Version ID. The service joins
 
 [[tests/e2e/agentera-organization-agent.e2e.ts]] proves the four-role approval and installation flow, Manifest V3 author Skill/MCP selection, employee-local opaque capability mapping to a different MCP, one real allowed tool reply, restart-safe dirty-draft reconciliation, one-card presentation, withdrawal, archive, version binding stability, offline verified use, reconnect removal, read-only projection, and private-state preservation. Run it with `npm run test:e2e:organization-agent`.
 
-Failure diagnostics for Organization member requests retain only a bounded, redacted source/status/request-ID timeline, so proxy injection, upstream Cloud responses, and proxy exceptions remain distinguishable without recording request bodies or credentials.
+Failure diagnostics for Organization member requests retain only a bounded, redacted source/status/request-ID timeline, so proxy injection, upstream Cloud responses, and proxy exceptions remain distinguishable without recording request bodies or credentials. The same failure payload also carries a bounded Cloud stdout/stderr tail and a bounded Postgres container log tail (captured via `docker compose logs --follow`, stopped during teardown), each filtered to signal lines such as `deadlock detected`/`ERROR:`/`FATAL:`/`STATEMENT:` and scrubbed of ANSI escapes, connection strings, and passwords, so a database-layer service_unavailable can be attributed without persisting full service logs.
 
 ### Workspace Agent isolation
 
