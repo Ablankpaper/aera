@@ -3902,9 +3902,22 @@ export async function stopAeraOwnedGateways(): Promise<void> {
     []) {
     profiles.add(profile);
   }
-  const results = await Promise.allSettled(
-    [...profiles].sort().map((profile) => stopAeraOwnedGateway(profile)),
-  );
+  const sortedProfiles = [...profiles].sort();
+  const results: PromiseSettledResult<void>[] = [];
+  if (process.platform === "win32") {
+    for (const profile of sortedProfiles) {
+      const [result] = await Promise.allSettled([
+        stopAeraOwnedGateway(profile),
+      ]);
+      results.push(result);
+    }
+  } else {
+    results.push(
+      ...(await Promise.allSettled(
+        sortedProfiles.map((profile) => stopAeraOwnedGateway(profile)),
+      )),
+    );
+  }
   const errors = results.flatMap((result) =>
     result.status === "rejected" ? [result.reason] : [],
   );

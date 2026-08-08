@@ -231,4 +231,46 @@ describe("ordinary gateway shutdown lifecycle", () => {
       platform.mockRestore();
     }
   });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
+  it("serializes Windows process snapshots across owned Profiles", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
+    const defaultChild = fakeChildProcess(process.pid);
+    const researchChild = fakeChildProcess(process.pid);
+    const releases: Array<() => void> = [];
+    spawnRef.value
+      .mockReturnValueOnce(defaultChild)
+      .mockReturnValueOnce(researchChild);
+    terminateRef.value.mockImplementation(
+      (child: ChildProcess) =>
+        new Promise((resolve) => {
+          releases.push(() => {
+            child.emit("close", 0, null);
+            resolve({ forced: false, remainingPids: [] });
+          });
+        }),
+    );
+
+    try {
+      configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+      expect(startGatewayDetailed().success).toBe(true);
+      expect(startGatewayDetailed("research").success).toBe(true);
+
+      const shutdown = stopAeraOwnedGateways();
+      await Promise.resolve();
+      expect(terminateRef.value).toHaveBeenCalledTimes(1);
+
+      releases.shift()?.();
+      await vi.waitFor(() => {
+        expect(terminateRef.value).toHaveBeenCalledTimes(2);
+      });
+
+      releases.shift()?.();
+      await shutdown;
+    } finally {
+      platform.mockRestore();
+    }
+  });
 });
