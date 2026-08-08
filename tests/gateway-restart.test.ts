@@ -171,6 +171,8 @@ import {
 import { GatewayProcessOwnershipLedger } from "../src/main/gateway-process-ownership";
 
 const queuedRestartHealthTimeoutMs = process.platform === "win32" ? 1000 : 50;
+const multiProfileShutdownTestTimeoutMs =
+  process.platform === "win32" ? 15_000 : 5_000;
 
 function profilePidFile(profile = "work"): string {
   return join(TEST_HOME, "profiles", profile, "gateway.pid");
@@ -242,7 +244,7 @@ describe("restartGatewayViaCli", () => {
   });
 
   afterEach(async () => {
-    stopAeraOwnedGateways();
+    await stopAeraOwnedGateways().catch(() => undefined);
     stopGateway(true);
     stopGateway("work", true);
     stopGateway("personal", true);
@@ -317,39 +319,49 @@ describe("restartGatewayViaCli", () => {
     });
   });
 
-  it("persists launch ownership and stops every Aera-started Profile", async () => {
-    hermesCliArgsSpy.mockImplementation((args: string[]) => {
-      const profile = args[0] === "--profile" ? args[1] : "default";
-      const pidFile =
-        profile === "default"
-          ? join(TEST_HOME, "gateway.pid")
-          : profilePidFile(profile);
-      const writeDelayMs = profile === "work" ? 250 : 0;
-      return [
-        "-e",
-        `setTimeout(() => require("fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)), ${writeDelayMs});setInterval(() => {}, 1000)`,
-      ];
-    });
+  it(
+    "persists launch ownership and stops every Aera-started Profile",
+    async () => {
+      hermesCliArgsSpy.mockImplementation((args: string[]) => {
+        const profile = args[0] === "--profile" ? args[1] : "default";
+        const pidFile =
+          profile === "default"
+            ? join(TEST_HOME, "gateway.pid")
+            : profilePidFile(profile);
+        const writeDelayMs = profile === "work" ? 250 : 0;
+        return [
+          "-e",
+          `setTimeout(() => require("fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)), ${writeDelayMs});setInterval(() => {}, 1000)`,
+        ];
+      });
 
-    writeFileSync(profilePidFile("work"), "", "utf8");
-    expect(startGateway()).toBe(true);
-    expect(startGateway("work")).toBe(true);
-    const defaultPid = await waitForPidFile(join(TEST_HOME, "gateway.pid"));
-    const workPid = await waitForPidFile(profilePidFile("work"));
-    expect(
-      JSON.parse(
-        readFileSync(join(TEST_HOME, "gateway-process-ownership.json"), "utf8"),
-      ).entries,
-    ).toEqual([
-      expect.objectContaining({ profileId: "default", spawnedPid: defaultPid }),
-      expect.objectContaining({ profileId: "work", spawnedPid: workPid }),
-    ]);
+      writeFileSync(profilePidFile("work"), "", "utf8");
+      expect(startGateway()).toBe(true);
+      expect(startGateway("work")).toBe(true);
+      const defaultPid = await waitForPidFile(join(TEST_HOME, "gateway.pid"));
+      const workPid = await waitForPidFile(profilePidFile("work"));
+      expect(
+        JSON.parse(
+          readFileSync(
+            join(TEST_HOME, "gateway-process-ownership.json"),
+            "utf8",
+          ),
+        ).entries,
+      ).toEqual([
+        expect.objectContaining({
+          profileId: "default",
+          spawnedPid: defaultPid,
+        }),
+        expect.objectContaining({ profileId: "work", spawnedPid: workPid }),
+      ]);
 
-    stopAeraOwnedGateways();
+      await stopAeraOwnedGateways();
 
-    expect(await waitForProcessExit(defaultPid, 3000)).toBe(true);
-    expect(await waitForProcessExit(workPid, 3000)).toBe(true);
-  });
+      expect(await waitForProcessExit(defaultPid, 3000)).toBe(true);
+      expect(await waitForProcessExit(workPid, 3000)).toBe(true);
+    },
+    multiProfileShutdownTestTimeoutMs,
+  );
 
   it("does not kill a changed PID that replaced an Aera-started Profile", async () => {
     hermesCliArgsSpy.mockImplementation(() => [
@@ -368,7 +380,7 @@ describe("restartGatewayViaCli", () => {
     aliveGatewayPids.add(externalPid);
 
     try {
-      stopAeraOwnedGateways();
+      await stopAeraOwnedGateways();
 
       expect(await waitForProcessExit(aeraPid, 3000)).toBe(true);
       expect(() => process.kill(externalPid, 0)).not.toThrow();
@@ -734,7 +746,7 @@ describe("restartGatewayViaCli", () => {
         }),
       ]);
 
-      stopAeraOwnedGateways();
+      await stopAeraOwnedGateways();
       expect(await waitForProcessExit(replacementPid, 3000)).toBe(true);
     } finally {
       legacy.kill("SIGTERM");
@@ -800,7 +812,9 @@ describe("restartGatewayViaCli", () => {
       teardownStart,
       start.indexOf("function notifyConnectionConfigChanged"),
     );
-    expect(teardown).toContain("stopAeraOwnedGateways()");
+    expect(teardown).toContain(
+      "const gatewayShutdown = stopAeraOwnedGateways()",
+    );
     expect(teardown).not.toContain("stopGateway(undefined, true)");
   });
 

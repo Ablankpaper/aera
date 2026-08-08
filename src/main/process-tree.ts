@@ -258,7 +258,8 @@ async function captureWindowsSnapshot(
 ): Promise<readonly ProcessSnapshotRecord[] | null> {
   const script =
     "$ErrorActionPreference='Stop'; " +
-    "Get-CimInstance Win32_Process | " +
+    "Get-CimInstance Win32_Process " +
+    "-Property ProcessId,ParentProcessId,CreationDate | " +
     "Select-Object ProcessId,ParentProcessId," +
     "@{Name='CreationFileTimeUtc';Expression={" +
     "$_.CreationDate.ToFileTimeUtc().ToString(" +
@@ -736,7 +737,7 @@ export async function terminateProcessTree(
     );
   }
 
-  const initialSnapshot = await captureForPhase(
+  let initialSnapshot = await captureForPhase(
     {
       rootPid,
       timeoutMs: snapshotTimeoutMs,
@@ -744,6 +745,16 @@ export async function terminateProcessTree(
     operations,
     customOperations,
   );
+  if (initialSnapshot === null && process.platform === "win32") {
+    initialSnapshot = await captureForPhase(
+      {
+        rootPid,
+        timeoutMs: snapshotTimeoutMs,
+      },
+      operations,
+      customOperations,
+    );
+  }
   const capturedTree = initialSnapshot
     ? buildCapturedProcessTree(initialSnapshot, rootPid)
     : null;

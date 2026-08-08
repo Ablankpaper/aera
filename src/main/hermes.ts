@@ -3625,7 +3625,7 @@ export function startGatewayDetailed(profile?: string): GatewayStartResult {
       cwd: invocation.workingDirectory,
       env: gatewayEnv,
       stdio: ["ignore", "ignore", stderrFd >= 0 ? stderrFd : "ignore"],
-      detached: true,
+      detached: process.platform !== "win32",
       ...HIDDEN_SUBPROCESS_OPTIONS,
     });
     if (typeof proc.pid !== "number") {
@@ -3896,18 +3896,40 @@ export function stopGateway(
   stopTuiGatewayClient(profile);
 }
 
-export function stopAeraOwnedGateways(): void {
+export async function stopAeraOwnedGateways(): Promise<void> {
   const profiles = new Set<string>(appStartedProfiles);
   for (const profile of gatewayProcessOwnership?.listCurrentProcessProfiles() ??
     []) {
     profiles.add(profile);
   }
-  for (const profile of [...profiles].sort()) {
-    stopAeraOwnedGateway(profile);
+  const sortedProfiles = [...profiles].sort();
+  const results: PromiseSettledResult<void>[] = [];
+  if (process.platform === "win32") {
+    for (const profile of sortedProfiles) {
+      const [result] = await Promise.allSettled([
+        stopAeraOwnedGateway(profile),
+      ]);
+      results.push(result);
+    }
+  } else {
+    results.push(
+      ...(await Promise.allSettled(
+        sortedProfiles.map((profile) => stopAeraOwnedGateway(profile)),
+      )),
+    );
+  }
+  const errors = results.flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : [],
+  );
+  if (errors.length > 0) {
+    const details = errors
+      .map((error) => (error instanceof Error ? error.message : String(error)))
+      .join("; ");
+    throw new AggregateError(errors, `Aera gateway cleanup failed: ${details}`);
   }
 }
 
-function stopAeraOwnedGateway(profile: string): void {
+async function stopAeraOwnedGateway(profile: string): Promise<void> {
   const key = profileKey(profile);
   const proc = gatewayProcesses.get(key) ?? null;
   let ownership: GatewayLaunchOwnershipRecord | null = null;
@@ -3917,11 +3939,32 @@ function stopAeraOwnedGateway(profile: string): void {
     // Without a valid durable record, only the exact in-memory child is owned.
   }
 
-  if (proc && isChildProcessAlive(proc)) {
-    try {
-      proc.kill("SIGTERM");
-    } catch {
-      // A later cold start can retry only with exact persisted PID proof.
+  stopTuiGatewayClient(profile);
+  const trackedProcessWasAlive = proc !== null && isChildProcessAlive(proc);
+  if (trackedProcessWasAlive) {
+    if (
+      ownership?.spawnedPid !== null &&
+      ownership?.spawnedPid !== undefined &&
+      proc?.pid !== ownership.spawnedPid
+    ) {
+      throw new Error(
+        `Aera gateway ownership identity changed for ${key}; refusing an unverified process stop.`,
+      );
+    }
+    const result = await terminateProcessTree(proc!, {
+      detachedProcessGroup: process.platform !== "win32",
+      forceAfterMs: 3_000,
+      ...(process.platform === "win32"
+        ? {
+            commandTimeoutMs: 3_000,
+            snapshotTimeoutMs: 3_000,
+          }
+        : {}),
+    });
+    if (result.remainingPids.length > 0) {
+      throw new Error(
+        `Aera gateway process tree did not fully exit: ${result.remainingPids.join(",")}`,
+      );
     }
   }
   if (!proc || !isChildProcessAlive(proc)) gatewayProcesses.delete(key);
@@ -3945,16 +3988,41 @@ function stopAeraOwnedGateway(profile: string): void {
 
   appStartedProfiles.delete(key);
   invalidateApiCacheFor(profile);
-  stopTuiGatewayClient(profile);
   if (ownership !== null) {
+    const spawnedPid = ownership.spawnedPid;
+    const replacementPid =
+      spawnedPid !== null && pidEntry !== null && pidEntry.pid !== spawnedPid;
+    if (replacementPid) {
+      if (
+        trackedProcessWasAlive ||
+        !pidIsAliveAs(spawnedPid, GATEWAY_IMAGE_PREFIXES)
+      ) {
+        // The exact process this instance launched is gone. Preserve the
+        // durable record because a different PID now occupies the Profile;
+        // cold recovery must classify that replacement before any signal.
+        return;
+      }
+      throw new Error(
+        `Aera gateway replacement PID could not be disambiguated for ${key}.`,
+      );
+    }
     reconcileCompletedGatewayOwnership(profile, ownership);
     try {
       if (gatewayProcessOwnership?.get(ownership.profileId) !== null) {
         scheduleGatewayOwnershipTermination(profile, ownership);
+        await waitForGatewayOwnershipTermination(ownership);
       }
-    } catch {
+    } catch (error) {
       // Keep the durable record for a later cold-start reconciliation.
+      throw new Error(
+        `Aera gateway ownership cleanup could not be confirmed for ${key}.`,
+        {
+          cause: error,
+        },
+      );
     }
+  } else {
+    clearPidFileBestEffort(profile);
   }
 }
 
@@ -4073,6 +4141,23 @@ function reapRecoveredAeraOwnedGateway(
 const GATEWAY_TERMINATION_RETRY_MS = 100;
 const GATEWAY_TERMINATION_GRACE_ATTEMPTS = 10;
 const GATEWAY_TERMINATION_FORCE_ATTEMPTS = 20;
+
+async function waitForGatewayOwnershipTermination(
+  ownership: GatewayLaunchOwnershipRecord,
+): Promise<void> {
+  const deadline =
+    Date.now() +
+    GATEWAY_TERMINATION_RETRY_MS * (GATEWAY_TERMINATION_FORCE_ATTEMPTS + 3);
+  while (Date.now() < deadline) {
+    const current = gatewayProcessOwnership?.get(ownership.profileId) ?? null;
+    if (current === null) return;
+    if (current.launchId !== ownership.launchId) {
+      throw new Error("Aera gateway ownership changed during cleanup.");
+    }
+    await delay(GATEWAY_TERMINATION_RETRY_MS);
+  }
+  throw new Error("Aera gateway ownership cleanup did not finish in time.");
+}
 
 interface GatewayOwnershipTerminationTracking {
   trackedProcess?: ChildProcess;
