@@ -490,30 +490,37 @@ describe("terminateProcessTree", () => {
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
-  it("fails closed when ownership snapshot capture is unavailable", async () => {
+  it("fails closed when both Windows ownership snapshot attempts are unavailable", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
     const alive = new Set([100, 101]);
     const root = fakeChildProcess(100, alive);
     const signalPid = vi.fn();
     const captureSnapshot = vi.fn(async () => null);
 
-    const result = await terminateProcessTree(root.child, {
-      detachedProcessGroup: false,
-      forceAfterMs: 0,
-      forceSettleMs: 0,
-      operations: {
-        captureSnapshot,
-        descendantProcesses: () => [{ pid: 101, identity: "child@boot:43" }],
-        processIdentity: (pid) =>
-          pid === 100 ? "root@boot:42" : "child@boot:43",
-        pidIsAlive: (pid) => alive.has(pid),
-        signalPid,
-      } as never,
-    });
+    try {
+      const result = await terminateProcessTree(root.child, {
+        detachedProcessGroup: false,
+        forceAfterMs: 0,
+        forceSettleMs: 0,
+        operations: {
+          captureSnapshot,
+          descendantProcesses: () => [{ pid: 101, identity: "child@boot:43" }],
+          processIdentity: (pid) =>
+            pid === 100 ? "root@boot:42" : "child@boot:43",
+          pidIsAlive: (pid) => alive.has(pid),
+          signalPid,
+        } as never,
+      });
 
-    expect(captureSnapshot).toHaveBeenCalledOnce();
-    expect(signalPid).not.toHaveBeenCalled();
-    expect(root.kill).not.toHaveBeenCalled();
-    expect(result.remainingPids).toContain(100);
+      expect(captureSnapshot).toHaveBeenCalledTimes(2);
+      expect(signalPid).not.toHaveBeenCalled();
+      expect(root.kill).not.toHaveBeenCalled();
+      expect(result.remainingPids).toContain(100);
+    } finally {
+      platform.mockRestore();
+    }
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
@@ -606,7 +613,10 @@ describe("terminateProcessTree", () => {
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
-  it("bounds a hanging ownership snapshot and never falls back to PID-only force", async () => {
+  it("bounds two hanging Windows ownership snapshots and never falls back to PID-only force", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
     vi.useFakeTimers();
     const alive = new Set([100]);
     const root = fakeChildProcess(100, alive);
@@ -622,14 +632,18 @@ describe("terminateProcessTree", () => {
       } as never,
     });
 
-    await vi.advanceTimersByTimeAsync(25);
-    await expect(stopping).resolves.toEqual({
-      forced: false,
-      remainingPids: [100],
-    });
-    expect(signalPid).not.toHaveBeenCalled();
-    expect(root.kill).not.toHaveBeenCalled();
-    vi.useRealTimers();
+    try {
+      await vi.advanceTimersByTimeAsync(50);
+      await expect(stopping).resolves.toEqual({
+        forced: false,
+        remainingPids: [100],
+      });
+      expect(signalPid).not.toHaveBeenCalled();
+      expect(root.kill).not.toHaveBeenCalled();
+    } finally {
+      platform.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Bounded force escalation]]
