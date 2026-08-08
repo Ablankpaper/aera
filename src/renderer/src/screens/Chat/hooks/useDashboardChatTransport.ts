@@ -1017,6 +1017,11 @@ export function useDashboardChatTransport({
   const messagesRef = useRef<ChatMessage[]>(messages);
   const reasoningSegmentClosedRef = useRef(false);
   const streamIntegrityRef = useRef(new StreamIntegrityTracker());
+  const dashboardTurnRef = useRef<{
+    turnId: string | null;
+    sawToolEvent: boolean;
+    completionAccepted: boolean;
+  }>({ turnId: null, sawToolEvent: false, completionAccepted: false });
   const appliedModelRef = useRef<string | null>(null);
   const runtimeModelSelectionRef = useRef<string | null>(null);
   const lastRuntimeSessionWasCreatedRef = useRef(false);
@@ -1025,6 +1030,14 @@ export function useDashboardChatTransport({
     DesktopSessionContinuationItem[]
   >([]);
   const lastSyncedCwdRef = useRef<string | null>(null);
+
+  const resetDashboardTurn = useCallback(() => {
+    dashboardTurnRef.current = {
+      turnId: activeTurnRef.current?.turnId ?? null,
+      sawToolEvent: false,
+      completionAccepted: false,
+    };
+  }, [activeTurnRef]);
 
   useEffect(() => {
     // `messagesRef` is the synchronous source of truth for `handleGatewayEvent`:
@@ -1049,12 +1062,13 @@ export function useDashboardChatTransport({
     runtimeSessionIdRef.current = null;
     reasoningSegmentClosedRef.current = false;
     streamIntegrityRef.current.reset();
+    resetDashboardTurn();
     appliedModelRef.current = null;
     runtimeModelSelectionRef.current = null;
     lastRuntimeSessionWasCreatedRef.current = false;
     pendingClarifyRequestIdRef.current = null;
     lastSyncedCwdRef.current = null;
-  }, [hermesSessionId]);
+  }, [hermesSessionId, resetDashboardTurn]);
 
   useEffect(() => {
     appliedModelRef.current = null;
@@ -1070,13 +1084,14 @@ export function useDashboardChatTransport({
     runtimeSessionIdRef.current = null;
     reasoningSegmentClosedRef.current = false;
     streamIntegrityRef.current.reset();
+    resetDashboardTurn();
     appliedModelRef.current = null;
     runtimeModelSelectionRef.current = null;
     lastRuntimeSessionWasCreatedRef.current = false;
     pendingClarifyRequestIdRef.current = null;
     pendingRecoveredContinuationRef.current = [];
     lastSyncedCwdRef.current = null;
-  }, [connectionMode, profile, runtimeConnectionRevision]);
+  }, [connectionMode, profile, resetDashboardTurn, runtimeConnectionRevision]);
 
   const handleGatewayEvent = useCallback(
     (event: DashboardStreamEvent): void => {
@@ -1119,6 +1134,29 @@ export function useDashboardChatTransport({
       let authoritativeCompletionText = false;
       let integrityFailure: StreamIntegrityDegradedCode | null = null;
 
+      const activeTurnId = activeTurnRef.current?.turnId ?? null;
+      const eventTurnId =
+        asRecord(event.payload).turn_id ?? asRecord(event.payload).turnId;
+      const lifecycleTurnId =
+        typeof eventTurnId === "string" && eventTurnId.trim()
+          ? eventTurnId.trim()
+          : (activeTurnId ?? dashboardTurnRef.current.turnId);
+      if (dashboardTurnRef.current.turnId !== lifecycleTurnId) {
+        dashboardTurnRef.current = {
+          turnId: lifecycleTurnId,
+          sawToolEvent: false,
+          completionAccepted: false,
+        };
+      }
+
+      if (
+        event.type === "message.complete" &&
+        dashboardTurnRef.current.completionAccepted
+      ) {
+        logDashboardEvent(event, "dropped", runtimeSessionId);
+        return;
+      }
+
       if (event.type === "message.start") {
         streamIntegrityRef.current.begin(event.payload);
       } else if (
@@ -1147,6 +1185,31 @@ export function useDashboardChatTransport({
         } else {
           integrityFailure = "stream_conflict";
         }
+      } else if (
+        event.type === "message.complete" &&
+        streamIntegrityRef.current.mode !== "sequenced"
+      ) {
+        const payload = asRecord(event.payload);
+        const finalText =
+          typeof payload.text === "string"
+            ? payload.text
+            : typeof payload.rendered === "string"
+              ? payload.rendered
+              : "";
+        // Legacy streams expose both incremental text and a complete snapshot.
+        // With no tool rows in this turn, the snapshot is authoritative; tool
+        // turns still need the existing pre-tool + final reconciliation.
+        authoritativeCompletionText =
+          !!finalText.trim() && !dashboardTurnRef.current.sawToolEvent;
+      }
+
+      if (
+        event.type === "tool.start" ||
+        event.type === "tool.progress" ||
+        event.type === "tool.generating" ||
+        event.type === "tool.complete"
+      ) {
+        dashboardTurnRef.current.sawToolEvent = true;
       }
 
       const failed =
@@ -1180,6 +1243,7 @@ export function useDashboardChatTransport({
       setMessages(nextMessages);
 
       if (event.type === "message.complete") {
+        dashboardTurnRef.current.completionAccepted = true;
         streamIntegrityRef.current.reset();
         if (failed) {
           appliedModelRef.current = null;
@@ -1326,6 +1390,7 @@ export function useDashboardChatTransport({
                 runtimeSessionIdRef.current = null;
                 reasoningSegmentClosedRef.current = false;
                 streamIntegrityRef.current.reset();
+                resetDashboardTurn();
                 appliedModelRef.current = null;
                 runtimeModelSelectionRef.current = null;
                 lastRuntimeSessionWasCreatedRef.current = false;
@@ -1390,6 +1455,7 @@ export function useDashboardChatTransport({
       connectionMode,
       fallbackOnUnavailable,
       onDashboardUnavailable,
+      resetDashboardTurn,
     ]);
 
   const ensureRuntimeSession = useCallback(
@@ -1683,6 +1749,7 @@ export function useDashboardChatTransport({
         text,
         attachments,
       );
+      resetDashboardTurn();
       const mergePendingRecoveredContinuation = (
         existing: DesktopSessionContinuationItem[],
       ): DesktopSessionContinuationItem[] => {
@@ -1867,6 +1934,7 @@ export function useDashboardChatTransport({
       ensureRuntimeSession,
       ensureSelectedModel,
       syncDashboardAttachments,
+      resetDashboardTurn,
       setIsLoading,
       setMessages,
       setToolProgress,
@@ -1955,8 +2023,9 @@ export function useDashboardChatTransport({
       clientRef.current?.close();
       clientRef.current = null;
       streamIntegrityRef.current.reset();
+      resetDashboardTurn();
     },
-    [],
+    [resetDashboardTurn],
   );
 
   return {

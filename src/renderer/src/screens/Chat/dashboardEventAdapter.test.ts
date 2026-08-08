@@ -196,4 +196,55 @@ describe("applyDashboardStreamEvent — message.complete text reconciliation", (
       ).content,
     ).toBe("完整答案。");
   });
+
+  it("uses the legacy completion as the whole answer when no tool ran", () => {
+    const state: DashboardEventState = {
+      messages: [
+        userTurn(),
+        {
+          id: "a1",
+          role: "agent",
+          kind: "assistant",
+          content: "Nous Research 助手身份介绍。",
+          pending: true,
+        },
+      ],
+      reasoningSegmentClosed: false,
+    };
+
+    const next = applyDashboardStreamEvent(
+      state,
+      {
+        type: "message.complete",
+        payload: { text: "Hermes Agent 助手身份介绍。" },
+      },
+      {
+        authoritativeCompletionText: true,
+      },
+    );
+
+    const bubble = next.messages.find((message) => message.id === "a1");
+    expect(bubble).toMatchObject({
+      content: "Hermes Agent 助手身份介绍。",
+      pending: false,
+    });
+  });
+
+  it("keeps reasoning in its own row instead of adding it to the assistant bubble", () => {
+    const afterReasoning = applyDashboardStreamEvent(
+      { messages: [userTurn()], reasoningSegmentClosed: false },
+      { type: "reasoning.delta", payload: { text: "先思考一下。" } },
+    );
+
+    const next = applyDashboardStreamEvent(afterReasoning, {
+      type: "message.complete",
+      payload: { text: "最终回答。", reasoning: "先思考一下。" },
+    });
+
+    expect(next.messages).toEqual([
+      expect.objectContaining({ role: "user", content: "weather?" }),
+      expect.objectContaining({ kind: "reasoning", text: "先思考一下。" }),
+      expect.objectContaining({ role: "agent", content: "最终回答。" }),
+    ]);
+  });
 });

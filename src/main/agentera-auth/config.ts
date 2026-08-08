@@ -67,9 +67,7 @@ function parseCanonicalHttpsIpIssuer(raw: unknown): string {
   const parsed = new URL(issuer);
   const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
   if (parsed.protocol !== "https:" || isIP(hostname) === 0) {
-    throw new Error(
-      "Aera offline issuer must be a canonical HTTPS IP origin.",
-    );
+    throw new Error("Aera offline issuer must be a canonical HTTPS IP origin.");
   }
   if (raw.trim() !== issuer) {
     throw new Error("Aera offline issuer must be a canonical origin.");
@@ -79,15 +77,11 @@ function parseCanonicalHttpsIpIssuer(raw: unknown): string {
 
 function parseEd25519PublicKey(raw: unknown): string {
   if (typeof raw !== "string" || !CANONICAL_BASE64URL_PATTERN.test(raw)) {
-    throw new Error(
-      "Aera offline public key must use canonical base64url.",
-    );
+    throw new Error("Aera offline public key must use canonical base64url.");
   }
   const decoded = Buffer.from(raw, "base64url");
   if (decoded.length !== 32 || decoded.toString("base64url") !== raw) {
-    throw new Error(
-      "Aera offline public key must be a 32-byte Ed25519 key.",
-    );
+    throw new Error("Aera offline public key must be a 32-byte Ed25519 key.");
   }
   return raw;
 }
@@ -256,12 +250,27 @@ export function parseAgenteraRechargePublicUrl(raw: string): string {
   return parsed.href;
 }
 
-export function getAgenteraRechargePublicUrl(): string | null {
+export interface AgenteraRechargePublicUrlSources {
+  runtimePublicUrl?: string;
+  buildPublicUrl?: string;
+}
+
+export function resolveAgenteraRechargePublicUrl(
+  sources: AgenteraRechargePublicUrlSources,
+): string {
   const configured =
-    process.env.AGENTERA_RECHARGE_PUBLIC_URL?.trim() ||
-    process.env.MAIN_VITE_AGENTERA_RECHARGE_PUBLIC_URL?.trim() ||
-    import.meta.env.MAIN_VITE_AGENTERA_RECHARGE_PUBLIC_URL?.trim();
-  return configured ? parseAgenteraRechargePublicUrl(configured) : null;
+    sources.runtimePublicUrl?.trim() || sources.buildPublicUrl?.trim();
+  return parseAgenteraRechargePublicUrl(configured || "https://petoi.cn");
+}
+
+export function getAgenteraRechargePublicUrl(): string | null {
+  return resolveAgenteraRechargePublicUrl({
+    runtimePublicUrl:
+      process.env.AGENTERA_RECHARGE_PUBLIC_URL?.trim() ||
+      process.env.MAIN_VITE_AGENTERA_RECHARGE_PUBLIC_URL?.trim(),
+    buildPublicUrl:
+      import.meta.env.MAIN_VITE_AGENTERA_RECHARGE_PUBLIC_URL?.trim(),
+  });
 }
 
 export function agenteraCloudUrl(origin: string, path: string): URL {

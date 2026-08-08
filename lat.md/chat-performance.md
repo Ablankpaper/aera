@@ -66,6 +66,8 @@ Assistant text is progressively rendered only when its Runtime envelope is order
 
 A start without the field stays on legacy completion reconciliation. Once a present `stream_id` enters sequenced mode, missing stream metadata on a later delta or completion is a protocol failure; that turn cannot silently downgrade.
 
+Legacy compatibility is turn-scoped rather than text-similarity-scoped. [[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts#useDashboardChatTransport]] treats a non-empty no-tool completion as the authoritative whole answer, retains pre-tool merge behavior after any tool event, and ignores a second completion for the same renderer `turnId`. A fresh prompt resets that lifecycle, so legitimately identical answers on separate turns remain valid. No language-, brand-, or identity-phrase heuristic is involved.
+
 ### Sequenced completion boundary
 
 A sequenced completion succeeds only with the active `stream_id`, a safe `final_seq`, full string `text`, and matching SHA-256 of its UTF-8 bytes.

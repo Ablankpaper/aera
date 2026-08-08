@@ -99,6 +99,7 @@ export default {
   boundary: {
     label: "Conversation data boundary",
     runningIn: "Running in:",
+    agent: "Agent:",
     visibility: "Visibility:",
     scope: {
       USER: "My",
