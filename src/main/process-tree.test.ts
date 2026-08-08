@@ -517,6 +517,46 @@ describe("terminateProcessTree", () => {
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
+  it("retries one unavailable initial Windows snapshot before failing closed", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
+    const alive = new Set([100]);
+    const root = fakeChildProcess(100, alive);
+    const captureSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce([
+        { pid: 100, parentPid: 1, identity: "windows:root-start" },
+      ]);
+    const gracefulWindowsTree = vi.fn(() => {
+      alive.delete(100);
+      Object.defineProperty(root.child, "exitCode", {
+        configurable: true,
+        value: 0,
+      });
+    });
+
+    try {
+      const result = await terminateProcessTree(root.child, {
+        detachedProcessGroup: false,
+        forceAfterMs: 0,
+        operations: {
+          captureSnapshot,
+          gracefulWindowsTree,
+          pidIsAlive: (pid) => alive.has(pid),
+        } as never,
+      });
+
+      expect(captureSnapshot).toHaveBeenCalledTimes(2);
+      expect(gracefulWindowsTree).toHaveBeenCalledOnce();
+      expect(result).toEqual({ forced: false, remainingPids: [] });
+    } finally {
+      platform.mockRestore();
+    }
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
   it("fails closed when the captured root has no usable identity", async () => {
     const alive = new Set([100]);
     const root = fakeChildProcess(100, alive);

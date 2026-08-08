@@ -754,7 +754,7 @@ export async function terminateProcessTree(
   }
 
   const initialSnapshotStartedAt = Date.now();
-  const initialSnapshot = await captureForPhase(
+  let initialSnapshot = await captureForPhase(
     {
       rootPid,
       timeoutMs: snapshotTimeoutMs,
@@ -762,6 +762,16 @@ export async function terminateProcessTree(
     operations,
     customOperations,
   );
+  if (initialSnapshot === null && process.platform === "win32") {
+    initialSnapshot = await captureForPhase(
+      {
+        rootPid,
+        timeoutMs: snapshotTimeoutMs,
+      },
+      operations,
+      customOperations,
+    );
+  }
   const capturedTree = initialSnapshot
     ? buildCapturedProcessTree(initialSnapshot, rootPid)
     : null;
