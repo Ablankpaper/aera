@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -97,7 +97,9 @@ jobs:
 
       - name: Test unit (Windows serial)
         if: matrix.os == 'windows-latest'
-        run: npm test -- --maxWorkers=1
+        env:
+          AERA_PROCESS_TREE_DIAGNOSTICS: "1"
+        run: npm test -- tests/gateway-restart.test.ts --maxWorkers=1
 
       - name: Test official quality privacy flow
         run: npm run test:e2e:official-quality

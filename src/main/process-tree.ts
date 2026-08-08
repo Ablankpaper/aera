@@ -407,6 +407,21 @@ function childProcessIsAlive(
   );
 }
 
+function traceWindowsTermination(
+  rootPid: number,
+  stage: string,
+  details: Record<string, unknown>,
+): void {
+  if (process.env.AERA_PROCESS_TREE_DIAGNOSTICS !== "1") return;
+  console.error(
+    `[AERA_PROCESS_TREE_DIAGNOSTIC] ${JSON.stringify({
+      rootPid,
+      stage,
+      ...details,
+    })}`,
+  );
+}
+
 function wait(delayMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
@@ -724,6 +739,7 @@ export async function terminateProcessTree(
     1,
     options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
   );
+  const terminationStartedAt = Date.now();
 
   if (detachedProcessGroup && process.platform !== "win32") {
     return terminateDedicatedProcessGroup(
@@ -737,6 +753,7 @@ export async function terminateProcessTree(
     );
   }
 
+  const initialSnapshotStartedAt = Date.now();
   const initialSnapshot = await captureForPhase(
     {
       rootPid,
@@ -748,6 +765,18 @@ export async function terminateProcessTree(
   const capturedTree = initialSnapshot
     ? buildCapturedProcessTree(initialSnapshot, rootPid)
     : null;
+  if (process.platform === "win32") {
+    traceWindowsTermination(rootPid, "initial-snapshot", {
+      elapsedMs: Date.now() - initialSnapshotStartedAt,
+      outcome: initialSnapshot === null ? "unavailable" : "captured",
+      rowCount: initialSnapshot?.length ?? 0,
+      capturedTree: capturedTree !== null,
+      descendantPids: capturedTree?.descendants.map(({ pid }) => pid) ?? [],
+      exitCode: proc.exitCode,
+      signalCode: proc.signalCode,
+      killed: proc.killed,
+    });
+  }
   if (!capturedTree) {
     const reachablePids = initialSnapshot
       ? [...treePidsFromRows(initialSnapshot, rootPid), rootPid]
@@ -767,10 +796,19 @@ export async function terminateProcessTree(
 
   let windowsTreeSignalled = false;
   if (process.platform === "win32" && rootAlive) {
+    const gracefulStartedAt = Date.now();
     try {
       await operations.gracefulWindowsTree(rootPid, commandTimeoutMs);
       windowsTreeSignalled = true;
+      traceWindowsTermination(rootPid, "graceful-taskkill", {
+        elapsedMs: Date.now() - gracefulStartedAt,
+        outcome: "success",
+      });
     } catch {
+      traceWindowsTermination(rootPid, "graceful-taskkill", {
+        elapsedMs: Date.now() - gracefulStartedAt,
+        outcome: "failed",
+      });
       // Fall through to exact captured PID signalling.
     }
   }
@@ -792,10 +830,20 @@ export async function terminateProcessTree(
     pollIntervalMs,
     operations,
   );
+  if (process.platform === "win32") {
+    traceWindowsTermination(rootPid, "after-grace-window", {
+      elapsedMs: Date.now() - terminationStartedAt,
+      remainingPids: remaining,
+      exitCode: proc.exitCode,
+      signalCode: proc.signalCode,
+      killed: proc.killed,
+    });
+  }
   if (remaining.length === 0) {
     return { forced: false, remainingPids: [] };
   }
 
+  const refreshSnapshotStartedAt = Date.now();
   const refreshSnapshot = await captureForPhase(
     {
       rootPid,
@@ -818,6 +866,21 @@ export async function terminateProcessTree(
   const verifiedRemaining = remaining.filter(
     (pid) => refreshedByPid.get(pid) === capturedByPid.get(pid),
   );
+  if (process.platform === "win32") {
+    traceWindowsTermination(rootPid, "identity-refresh", {
+      elapsedMs: Date.now() - refreshSnapshotStartedAt,
+      outcome: "captured",
+      candidatePids: remaining,
+      returnedPids: refreshSnapshot.map(({ pid }) => pid),
+      verifiedPids: verifiedRemaining,
+      unverifiedPids: remaining.filter(
+        (pid) => !verifiedRemaining.includes(pid),
+      ),
+      exitCode: proc.exitCode,
+      signalCode: proc.signalCode,
+      killed: proc.killed,
+    });
+  }
   const verifiedSet = new Set(verifiedRemaining);
   let forced = false;
   const remainingSet = new Set(remaining);
@@ -827,16 +890,28 @@ export async function terminateProcessTree(
       verifiedSet.has(rootPid) &&
       childProcessIsAlive(proc, operations.pidIsAlive)
     ) {
+      const forceStartedAt = Date.now();
       try {
         await operations.forceWindowsTree(rootPid, commandTimeoutMs);
         forced = true;
+        traceWindowsTermination(rootPid, "force-taskkill", {
+          elapsedMs: Date.now() - forceStartedAt,
+          outcome: "success",
+        });
       } catch {
+        traceWindowsTermination(rootPid, "force-taskkill", {
+          elapsedMs: Date.now() - forceStartedAt,
+          outcome: "failed",
+        });
         if (
           verifiedSet.has(rootPid) &&
           childProcessIsAlive(proc, operations.pidIsAlive)
         ) {
           signalOwnedRoot(proc, "SIGKILL", false);
           forced = true;
+          traceWindowsTermination(rootPid, "force-root-fallback", {
+            outcome: "signalled",
+          });
         }
       }
     }
@@ -868,6 +943,16 @@ export async function terminateProcessTree(
     pollIntervalMs,
     operations,
   );
+  if (process.platform === "win32") {
+    traceWindowsTermination(rootPid, "after-force-settle", {
+      elapsedMs: Date.now() - terminationStartedAt,
+      remainingPids: remaining,
+      forced,
+      exitCode: proc.exitCode,
+      signalCode: proc.signalCode,
+      killed: proc.killed,
+    });
+  }
   return { forced, remainingPids: remaining };
 }
 
