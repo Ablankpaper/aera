@@ -100,7 +100,9 @@ Failed clients retain their exact child ownership for a later bounded retry. Con
 
 ### Awaited Electron quit barrier
 
-The first quit request pauses Electron once and reissues quit only after bounded Runtime cleanup succeeds. Repeated in-flight requests reuse one cleanup; failure keeps Electron open and a later explicit quit may retry.
+The first quit request pauses Electron and retries only after bounded Runtime cleanup succeeds. Cleanup awaits the TUI pool and every Aera-owned ordinary Gateway process tree.
+
+Repeated in-flight requests reuse one cleanup; unresolved ownership or termination keeps Electron open and a later explicit quit may retry.
 
 ## Explicit external compatibility
 

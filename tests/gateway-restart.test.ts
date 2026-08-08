@@ -242,7 +242,7 @@ describe("restartGatewayViaCli", () => {
   });
 
   afterEach(async () => {
-    stopAeraOwnedGateways();
+    await stopAeraOwnedGateways().catch(() => undefined);
     stopGateway(true);
     stopGateway("work", true);
     stopGateway("personal", true);
@@ -345,7 +345,7 @@ describe("restartGatewayViaCli", () => {
       expect.objectContaining({ profileId: "work", spawnedPid: workPid }),
     ]);
 
-    stopAeraOwnedGateways();
+    await stopAeraOwnedGateways();
 
     expect(await waitForProcessExit(defaultPid, 3000)).toBe(true);
     expect(await waitForProcessExit(workPid, 3000)).toBe(true);
@@ -368,7 +368,7 @@ describe("restartGatewayViaCli", () => {
     aliveGatewayPids.add(externalPid);
 
     try {
-      stopAeraOwnedGateways();
+      await stopAeraOwnedGateways();
 
       expect(await waitForProcessExit(aeraPid, 3000)).toBe(true);
       expect(() => process.kill(externalPid, 0)).not.toThrow();
@@ -734,7 +734,7 @@ describe("restartGatewayViaCli", () => {
         }),
       ]);
 
-      stopAeraOwnedGateways();
+      await stopAeraOwnedGateways();
       expect(await waitForProcessExit(replacementPid, 3000)).toBe(true);
     } finally {
       legacy.kill("SIGTERM");
@@ -800,7 +800,9 @@ describe("restartGatewayViaCli", () => {
       teardownStart,
       start.indexOf("function notifyConnectionConfigChanged"),
     );
-    expect(teardown).toContain("stopAeraOwnedGateways()");
+    expect(teardown).toContain(
+      "const gatewayShutdown = stopAeraOwnedGateways()",
+    );
     expect(teardown).not.toContain("stopGateway(undefined, true)");
   });
 

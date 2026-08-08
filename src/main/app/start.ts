@@ -766,10 +766,16 @@ export async function stopActiveRuntimeContext(
   // A Profile or connection context must never remain mounted across an
   // Aera owner transition. Stop local execution, remote/SSH transport,
   // and cached SQLite access before the next owner can claim a context.
-  stopAeraOwnedGateways();
+  const gatewayShutdown = stopAeraOwnedGateways();
   stopSshTunnel();
   closeDbConnection();
-  await tuiShutdown;
+  const results = await Promise.allSettled([tuiShutdown, gatewayShutdown]);
+  const errors = results.flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : [],
+  );
+  if (errors.length > 0) {
+    throw new AggregateError(errors, "Aera Runtime cleanup failed.");
+  }
 }
 
 function notifyConnectionConfigChanged(): void {
