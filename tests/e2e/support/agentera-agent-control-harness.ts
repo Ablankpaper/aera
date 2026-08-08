@@ -110,9 +110,6 @@ export interface AgentControlHarness {
   deliveries: SMSDelivery[];
   phone: string;
   cloudProcess: ChildProcess | null;
-  cloudOutputTail: string;
-  postgresLogTail: string;
-  postgresLogProcess: ChildProcess | null;
   browser: Browser;
   browserPage: Page;
   composeStarted: boolean;
@@ -570,7 +567,6 @@ async function startCloud(harness: AgentControlHarness): Promise<void> {
   const base = parseDevelopmentEnvironment(
     await readFile(join(harness.cloudRoot, ".env.example"), "utf8"),
   );
-  harness.cloudOutputTail = "";
   const child = spawn(harness.cloudBinary, [], {
     cwd: harness.cloudRoot,
     env: {
@@ -602,7 +598,6 @@ async function startCloud(harness: AgentControlHarness): Promise<void> {
   let output = "";
   const append = (chunk: Buffer): void => {
     output = `${output}${chunk.toString("utf8")}`.slice(-128 * 1024);
-    harness.cloudOutputTail = output;
     if (harness.official) {
       appendFileSync(harness.official.cloudLogFile, chunk);
     }
@@ -646,55 +641,6 @@ export async function startAgentControlCloud(
 ): Promise<void> {
   if (harness.cloudProcess?.exitCode === null) return;
   await startCloud(harness);
-}
-
-const POSTGRES_LOG_TAIL_LIMIT = 64 * 1024;
-
-function startPostgresLogCapture(harness: AgentControlHarness): void {
-  harness.postgresLogTail = "";
-  harness.postgresLogProcess = null;
-  let child: ChildProcess;
-  try {
-    child = spawn(
-      "docker",
-      [
-        "compose",
-        "-p",
-        harness.composeProject,
-        "logs",
-        "--no-color",
-        "--follow",
-        "--tail=0",
-        "postgres",
-      ],
-      {
-        cwd: harness.cloudRoot,
-        env: composeEnvironment(harness),
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-  } catch {
-    return;
-  }
-  harness.postgresLogProcess = child;
-  const append = (chunk: Buffer): void => {
-    harness.postgresLogTail =
-      `${harness.postgresLogTail}${chunk.toString("utf8")}`.slice(
-        -POSTGRES_LOG_TAIL_LIMIT,
-      );
-  };
-  child.stdout?.on("data", append);
-  child.stderr?.on("data", append);
-  child.on("error", () => {
-    if (harness.postgresLogProcess === child) harness.postgresLogProcess = null;
-  });
-}
-
-function stopPostgresLogCapture(harness: AgentControlHarness): void {
-  const child = harness.postgresLogProcess;
-  harness.postgresLogProcess = null;
-  if (!child || child.exitCode !== null) return;
-  child.kill("SIGTERM");
 }
 
 async function writePrivateFixture(
@@ -1265,9 +1211,6 @@ export async function createAgentControlHarness(
     deliveries: capture.deliveries,
     phone: "+8613900000031",
     cloudProcess: null,
-    cloudOutputTail: "",
-    postgresLogTail: "",
-    postgresLogProcess: null,
     browser,
     browserPage,
     composeStarted: false,
@@ -1301,7 +1244,6 @@ export async function createAgentControlHarness(
       { cwd: harness.cloudRoot, env: composeEnvironment(harness) },
     );
     harness.composeStarted = true;
-    startPostgresLogCapture(harness);
     if (harness.encryptedBackupEnabled) {
       command(
         "docker",
@@ -1507,9 +1449,6 @@ export async function closeAgentControlHarness(
       harness.official!.adminComposeStarted = false;
     });
   }
-  await captureCleanup("postgres log capture stop", async () => {
-    stopPostgresLogCapture(harness);
-  });
   if (harness.composeStarted) {
     await captureCleanup("Cloud Compose down", async () => {
       command(
@@ -2125,55 +2064,80 @@ export function organizationRequestDiagnostics(
     });
 }
 
-const DIAGNOSTIC_LINE_LIMIT = 16;
-const DIAGNOSTIC_LINE_LENGTH = 240;
+const POSTGRES_DIAGNOSTIC_LINE_LIMIT = 16;
+const POSTGRES_DIAGNOSTIC_LINE_LENGTH = 240;
+const postgresSignalPattern =
+  /deadlock detected|SQLSTATE\s*40P01|waits for|relation "/u;
 const diagnosticCredentialPatterns: Array<[RegExp, string]> = [
   [/postgres(?:ql)?:\/\/\S*/giu, "postgres://[redacted]"],
   [/password[=:]\s*\S+/giu, "password=[redacted]"],
 ];
-const postgresSignalPattern =
-  /deadlock detected|ERROR:|FATAL:|waits for|relation "|STATEMENT:/u;
 
-function sanitizeDiagnosticLine(line: string): string {
-  // eslint-disable-next-line no-control-regex -- intentionally strip ANSI escapes from captured logs
+function sanitizePostgresDiagnosticLine(line: string): string {
+  // eslint-disable-next-line no-control-regex -- captured Docker output may contain ANSI escapes
   let sanitized = line.replace(/\u001b\[[0-9;]*m/gu, "");
   for (const [pattern, replacement] of diagnosticCredentialPatterns) {
     sanitized = sanitized.replace(pattern, replacement);
   }
-  return sanitized.trim().slice(0, DIAGNOSTIC_LINE_LENGTH);
+  return sanitized.trim().slice(0, POSTGRES_DIAGNOSTIC_LINE_LENGTH);
 }
 
-export function postgresFailureDiagnostics(harness: AgentControlHarness): {
-  capture: "active" | "unavailable";
+function readPostgresFailureLog(harness: AgentControlHarness): string | null {
+  const result = spawnSync(
+    "docker",
+    [
+      "compose",
+      "-p",
+      harness.composeProject,
+      "logs",
+      "--no-color",
+      "--tail=200",
+      "postgres",
+    ],
+    {
+      cwd: harness.cloudRoot,
+      env: composeEnvironment(harness),
+      encoding: "utf8",
+      stdio: "pipe",
+      timeout: 3_000,
+      maxBuffer: 128 * 1024,
+    },
+  );
+  if (result.status !== 0 || result.error) return null;
+  return `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+}
+
+export function postgresFailureDiagnostics(
+  harness: AgentControlHarness,
+  readLogs: () => string | null = () => readPostgresFailureLog(harness),
+): {
+  capture: "captured" | "unavailable";
   deadlockDetected: boolean;
   lines: string[];
 } {
-  const lines = harness.postgresLogTail
+  if (!harness.composeStarted) {
+    return { capture: "unavailable", deadlockDetected: false, lines: [] };
+  }
+  let output: string | null;
+  try {
+    output = readLogs();
+  } catch {
+    output = null;
+  }
+  if (output === null) {
+    return { capture: "unavailable", deadlockDetected: false, lines: [] };
+  }
+  const lines = output
     .split("\n")
     .filter((line) => postgresSignalPattern.test(line))
-    .map(sanitizeDiagnosticLine)
+    .map(sanitizePostgresDiagnosticLine)
     .filter((line) => line.length > 0)
-    .slice(-DIAGNOSTIC_LINE_LIMIT);
+    .slice(-POSTGRES_DIAGNOSTIC_LINE_LIMIT);
   return {
-    capture:
-      harness.postgresLogProcess !== null || harness.postgresLogTail.length > 0
-        ? "active"
-        : "unavailable",
+    capture: "captured",
     deadlockDetected: lines.some((line) => line.includes("deadlock detected")),
     lines,
   };
-}
-
-export function cloudOutputDiagnostics(harness: AgentControlHarness): {
-  captured: boolean;
-  tail: string[];
-} {
-  const tail = harness.cloudOutputTail
-    .split("\n")
-    .map(sanitizeDiagnosticLine)
-    .filter((line) => line.length > 0)
-    .slice(-DIAGNOSTIC_LINE_LIMIT);
-  return { captured: tail.length > 0, tail };
 }
 
 export async function cloudAgentControlCounts(

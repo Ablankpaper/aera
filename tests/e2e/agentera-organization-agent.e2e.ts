@@ -53,7 +53,6 @@ import {
   closeAgentControlDevice,
   closeAgentControlHarness,
   cloudAgentControlCounts,
-  cloudOutputDiagnostics,
   createAgentControlHarness,
   deviceProcessDiagnostics,
   deviceProfilePath,
@@ -155,7 +154,6 @@ function diagnostics(): string {
         }
       : null,
     postgresFailures: harness ? postgresFailureDiagnostics(harness) : null,
-    cloudOutput: harness ? cloudOutputDiagnostics(harness) : null,
     processes: [
       ...deviceProcessDiagnostics(ownerDevice),
       ...deviceProcessDiagnostics(adminDevice),
