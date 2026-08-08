@@ -258,7 +258,8 @@ async function captureWindowsSnapshot(
 ): Promise<readonly ProcessSnapshotRecord[] | null> {
   const script =
     "$ErrorActionPreference='Stop'; " +
-    "Get-CimInstance Win32_Process | " +
+    "Get-CimInstance Win32_Process " +
+    "-Property ProcessId,ParentProcessId,CreationDate | " +
     "Select-Object ProcessId,ParentProcessId," +
     "@{Name='CreationFileTimeUtc';Expression={" +
     "$_.CreationDate.ToFileTimeUtc().ToString(" +
