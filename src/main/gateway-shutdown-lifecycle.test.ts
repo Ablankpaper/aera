@@ -135,6 +135,28 @@ describe("ordinary gateway shutdown lifecycle", () => {
     rmSync(TEST_HOME, { recursive: true, force: true });
   });
 
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
+  it("keeps the Windows root attached for exact captured-tree shutdown", () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
+    const child = fakeChildProcess(process.pid);
+    spawnRef.value.mockReturnValue(child);
+
+    try {
+      configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+      expect(startGatewayDetailed("research").success).toBe(true);
+      expect(spawnRef.value).toHaveBeenCalledWith(
+        invocation.python,
+        expect.any(Array),
+        expect.objectContaining({ detached: false }),
+      );
+    } finally {
+      child.emit("close", 0, null);
+      platform.mockRestore();
+    }
+  });
+
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Awaited Electron quit barrier]]
   it("awaits exact ordinary gateway process-tree termination before resolving", async () => {
     const child = fakeChildProcess(process.pid);

@@ -3625,7 +3625,7 @@ export function startGatewayDetailed(profile?: string): GatewayStartResult {
       cwd: invocation.workingDirectory,
       env: gatewayEnv,
       stdio: ["ignore", "ignore", stderrFd >= 0 ? stderrFd : "ignore"],
-      detached: true,
+      detached: process.platform !== "win32",
       ...HIDDEN_SUBPROCESS_OPTIONS,
     });
     if (typeof proc.pid !== "number") {
