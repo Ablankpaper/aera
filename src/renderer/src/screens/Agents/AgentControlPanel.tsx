@@ -297,6 +297,32 @@ export default function AgentControlPanel({
       }
       const nextState = stateResult.data;
       const nextContextKey = contextKey(nextState);
+      const contextChanged =
+        selectedContextKey.current !== null &&
+        selectedContextKey.current !== nextContextKey;
+      if (contextChanged) {
+        selectedContextKey.current = nextContextKey;
+        setState(nextState);
+        setDrafts([]);
+        setDefinitions([]);
+        setInstallations([]);
+        setOrganizationSubmissions([]);
+        setOfficialAgents([]);
+        setOfficialUpdates([]);
+        setEditor(null);
+        setArchiveTarget(null);
+        setDraftActionTarget(null);
+        setWithdrawal(null);
+        setPromotionTarget(null);
+        setOfficialInstallPreview(null);
+        setBusyOfficialInstallationId(null);
+        setCapabilityBinding(null);
+        setCapabilityBindingBusy(false);
+        setSelectedPersonalKey(null);
+        setPendingModelSelection(null);
+        setSelectedModelSourceId("");
+      }
+      let nextError: string | null = null;
       const operationScope: AgenteraAgentOperationScope | undefined =
         nextState.context.scope === "ORGANIZATION" && activeTab === "mine"
           ? "USER"
@@ -314,10 +340,10 @@ export default function AgentControlPanel({
           await window.agenteraAgents.listInstallations(operationScope);
         if (epoch !== loadEpoch.current) return;
         if (!installationResult.ok) {
-          setError(errorKey(installationResult.errorCode));
-          return;
+          nextError ??= errorKey(installationResult.errorCode);
+        } else {
+          nextInstallations = installationResult.data;
         }
-        nextInstallations = installationResult.data;
       }
       const workspaceMemberInstallOnly =
         nextState.context.scope === "WORKSPACE" &&
@@ -335,10 +361,10 @@ export default function AgentControlPanel({
           await window.agenteraAgents.listOrganizationSubmissions();
         if (epoch !== loadEpoch.current) return;
         if (!submissionResult.ok) {
-          setError(errorKey(submissionResult.errorCode));
-          return;
+          nextError ??= errorKey(submissionResult.errorCode);
+        } else {
+          nextOrganizationSubmissions = submissionResult.data;
         }
-        nextOrganizationSubmissions = submissionResult.data;
       }
       const organizationCanReadDrafts =
         nextState.context.scope === "ORGANIZATION" &&
@@ -356,22 +382,21 @@ export default function AgentControlPanel({
           await window.agenteraAgents.listDrafts(operationScope);
         if (epoch !== loadEpoch.current) return;
         if (!draftResult.ok) {
-          setError(errorKey(draftResult.errorCode));
-          return;
+          nextError ??= errorKey(draftResult.errorCode);
+        } else {
+          nextDrafts = draftResult.data;
         }
-        nextDrafts = draftResult.data;
       }
 
       let nextDefinitions: AgenteraAgentDefinitionSummary[] = [];
       let nextOfficialAgents: OfficialAgentSummary[] = [];
       let nextOfficialUpdates: OfficialManagedUpdate[] = [];
-      let nextError: string | null = null;
       if (nextState.access === "online" && nextState.cloudAvailable) {
         const definitionResult =
           await window.agenteraAgents.listDefinitions(operationScope);
         if (epoch !== loadEpoch.current) return;
         if (!definitionResult.ok) {
-          nextError = errorKey(definitionResult.errorCode);
+          nextError ??= errorKey(definitionResult.errorCode);
         } else {
           nextDefinitions = definitionResult.data;
         }
@@ -380,7 +405,7 @@ export default function AgentControlPanel({
             await window.agenteraAgents.listOfficialAgents();
           if (epoch !== loadEpoch.current) return;
           if (!officialResult.ok) {
-            nextError = errorKey(officialResult.errorCode);
+            nextError ??= errorKey(officialResult.errorCode);
           } else {
             nextOfficialAgents = officialResult.data;
           }
@@ -388,7 +413,7 @@ export default function AgentControlPanel({
             await window.agenteraAgents.refreshOfficialUpdates();
           if (epoch !== loadEpoch.current) return;
           if (!updateResult.ok) {
-            nextError = errorKey(updateResult.errorCode);
+            nextError ??= errorKey(updateResult.errorCode);
           } else {
             nextOfficialUpdates = updateResult.data;
           }
@@ -396,20 +421,6 @@ export default function AgentControlPanel({
       }
       if (epoch !== loadEpoch.current) return;
 
-      if (
-        selectedContextKey.current !== null &&
-        selectedContextKey.current !== nextContextKey
-      ) {
-        setEditor(null);
-        setArchiveTarget(null);
-        setDraftActionTarget(null);
-        setWithdrawal(null);
-        setPromotionTarget(null);
-        setOfficialInstallPreview(null);
-        setBusyOfficialInstallationId(null);
-        setCapabilityBinding(null);
-        setCapabilityBindingBusy(false);
-      }
       selectedContextKey.current = nextContextKey;
       setState(nextState);
       setDrafts(nextDrafts);

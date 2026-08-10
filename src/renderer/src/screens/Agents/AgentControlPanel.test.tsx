@@ -39,6 +39,7 @@ const NEXT_VERSION_ID = "aaaaaaaa-2222-4222-8222-222222222222";
 const INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
 const WORKSPACE_ID = "66666666-6666-4666-8666-666666666666";
 const ORGANIZATION_ID = "99999999-9999-4999-8999-999999999999";
+const NEXT_ORGANIZATION_ID = "99999999-9999-4999-8999-999999999998";
 const DRAFT_ID = "77777777-7777-4777-8777-777777777777";
 const SUBMISSION_ID = "88888888-8888-4888-8888-888888888888";
 const OFFICIAL_RELEASE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -918,6 +919,40 @@ describe("AgentControlPanel", () => {
       );
     },
   );
+
+  // @lat: [[agentera-agent-control-plane#Trusted Workspace Agent context#Context-only refresh#Independent catalog reads]]
+  it("keeps successful Organization definitions visible when submission history fails", async () => {
+    const api = installAPI({
+      getState: vi.fn(async () =>
+        success(
+          controlState({
+            scope: "ORGANIZATION",
+            organizationId: ORGANIZATION_ID,
+            role: "owner",
+          }),
+        ),
+      ),
+      listOrganizationSubmissions: vi.fn(async () => ({
+        ok: false as const,
+        errorCode: "cloud_unavailable" as const,
+      })),
+      listDefinitions: vi.fn(async () => success([definition()])),
+    });
+
+    render(
+      <AgentControlPanel
+        profiles={[]}
+        initialTab="enterprise"
+        advancedOpenByDefault={false}
+      />,
+    );
+
+    expect(await screen.findByText("Research Agent")).toBeVisible();
+    expect(
+      screen.getByText("agents.control.errors.cloud_unavailable"),
+    ).toBeVisible();
+    expect(api.listDefinitions).toHaveBeenCalledTimes(1);
+  });
 
   it("reconciles Organization submissions before drafts and renders one dirty published card", async () => {
     const dirtyDraft = {
@@ -1971,6 +2006,86 @@ describe("AgentControlPanel", () => {
         }),
       ).toBeNull(),
     );
+  });
+
+  // @lat: [[agentera-agent-control-plane#Trusted Workspace Agent context#Context-only refresh#Context change clearing]]
+  it("clears stale Organization cards and role before the next peer read settles", async () => {
+    let current = controlState({
+      scope: "ORGANIZATION",
+      organizationId: ORGANIZATION_ID,
+      role: "owner",
+    });
+    let notify: (() => void) | null = null;
+    let settleSecondSubmission:
+      | ((
+          result: AgenteraAgentControlResult<
+            OrganizationAgentSubmissionSummary[]
+          >,
+        ) => void)
+      | null = null;
+    const api = installAPI({
+      getState: vi.fn(async () => success(current)),
+      listOrganizationSubmissions: vi
+        .fn()
+        .mockResolvedValueOnce(success([]))
+        .mockImplementationOnce(
+          () =>
+            new Promise<
+              AgenteraAgentControlResult<OrganizationAgentSubmissionSummary[]>
+            >((resolve) => {
+              settleSecondSubmission = resolve;
+            }),
+        ),
+      listDefinitions: vi
+        .fn()
+        .mockResolvedValueOnce(success([definition()]))
+        .mockResolvedValueOnce(success([])),
+      onStateChanged: vi.fn((listener) => {
+        notify = () => listener(current);
+        return () => undefined;
+      }),
+    });
+    render(
+      <AgentControlPanel
+        profiles={[]}
+        initialTab="enterprise"
+        advancedOpenByDefault={false}
+      />,
+    );
+
+    expect(await screen.findByText("Research Agent")).toBeVisible();
+    expect(
+      screen.getByRole("button", {
+        name: "agents.control.organization.newDraft",
+      }),
+    ).toBeVisible();
+
+    current = controlState({
+      scope: "ORGANIZATION",
+      organizationId: NEXT_ORGANIZATION_ID,
+      role: "auditor",
+    });
+    await act(async () => notify?.());
+    await waitFor(() =>
+      expect(api.listOrganizationSubmissions).toHaveBeenCalledTimes(2),
+    );
+
+    expect(screen.queryByText("Research Agent")).toBeNull();
+    expect(
+      screen.queryByRole("button", {
+        name: "agents.control.organization.newDraft",
+      }),
+    ).toBeNull();
+
+    await act(async () =>
+      settleSecondSubmission?.({
+        ok: false,
+        errorCode: "cloud_unavailable",
+      }),
+    );
+    expect(
+      await screen.findByText("agents.control.errors.cloud_unavailable"),
+    ).toBeVisible();
   });
 
   // @lat: [[agentera-agent-control-plane#AgentEra Agent control plane V1#Trusted Workspace Agent context#Context-only refresh]]

@@ -96,7 +96,7 @@ Employees may explicitly offer one agent-created Skill from an active Organizati
 
 Member, Admin, and Owner contribution begins with one selected local Skill and dual DLP. Owner/Admin terminal review can import an approved immutable snapshot into a device-local Organization draft based on the latest exact Version, while Auditor receives only read-only history. Approval never publishes, and a stale base fails before SQLite mutation.
 
-[[src/renderer/src/screens/Agents/OrganizationExperienceCandidatePanel.tsx#OrganizationExperienceCandidatePanel]] exposes explicit selection, preview, submission, governance, and local import without accepting renderer-supplied Organization, role, owner, device, Profile path, cloud origin, or snapshot bytes. [[tests/e2e/agentera-organization-experience.e2e.ts]] proves the two-account contribution-to-next-Version chain and private source-byte preservation.
+[[src/renderer/src/screens/Agents/OrganizationExperienceCandidatePanel.tsx#OrganizationExperienceCandidatePanel]] exposes explicit selection, preview, submission, governance, and local import without accepting renderer-supplied Organization, role, owner, device, Profile path, cloud origin, or snapshot bytes. [[tests/e2e/agentera-organization-experience.e2e.ts]] configures its isolated loopback model through the desktop's saved named-provider APIs, then proves the two-account contribution-to-next-Version chain and private source-byte preservation.
 
 ### Role, policy, and DLP recheck
 

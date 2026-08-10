@@ -744,9 +744,15 @@ async function startVisionModelServer(): Promise<string> {
             name.startsWith("mcp__employee_docs__") &&
             name.endsWith("docs_read"),
         );
+      const deferredCapabilityToolName = "mcp__employee_docs__docs_read";
+      const capabilityToolCallBridge = requestBody.tools
+        ?.map((tool) => tool.function?.name)
+        .find((name): name is string => name === "tool_call");
       if (capabilityTurn && !hasCapabilityToolResult) {
-        if (!capabilityToolName) {
-          response.writeHead(400).end("compatible MCP tool is missing");
+        if (!capabilityToolName && !capabilityToolCallBridge) {
+          response
+            .writeHead(400)
+            .end("compatible MCP tool or deferred tool bridge is missing");
           return;
         }
         const toolCall = {
@@ -754,8 +760,15 @@ async function startVisionModelServer(): Promise<string> {
           id: "capability-binding-e2e-call",
           type: "function",
           function: {
-            name: capabilityToolName,
-            arguments: JSON.stringify({ query: "approved enterprise docs" }),
+            name: capabilityToolName ?? capabilityToolCallBridge,
+            arguments: JSON.stringify(
+              capabilityToolName
+                ? { query: "approved enterprise docs" }
+                : {
+                    name: deferredCapabilityToolName,
+                    arguments: { query: "approved enterprise docs" },
+                  },
+            ),
           },
         };
         if (!stream) {
@@ -1405,7 +1418,63 @@ test("organization agent needs one current reviewer and keeps every employee run
     },
     { profile: MEMBER_PROFILE, prompt: CAPABILITY_TOOL_PROMPT },
   );
-  expect(capabilityTurn).toMatchObject({
+  const capabilityRequestDiagnostics = visionModelRequests.map(
+    ({ method, path, body }) => {
+      const requestBody =
+        typeof body === "object" && body !== null
+          ? (body as {
+              stream?: unknown;
+              messages?: Array<{ role?: unknown; content?: unknown }>;
+              tools?: Array<{ function?: { name?: unknown } }>;
+            })
+          : {};
+      const messages = requestBody.messages ?? [];
+      const toolNames = (requestBody.tools ?? []).map(
+        (tool) => tool.function?.name,
+      );
+      return {
+        method,
+        path,
+        stream: requestBody.stream === true,
+        messageRoles: messages.map(({ role }) => role),
+        hasCapabilityPrompt: JSON.stringify(messages).includes(
+          CAPABILITY_TOOL_PROMPT,
+        ),
+        hasCapabilityToolResult: messages.some(
+          (message) =>
+            message.role === "tool" &&
+            JSON.stringify(message.content).includes(MCP_TOOL_RESULT),
+        ),
+        toolCount: toolNames.length,
+        hasDirectCapabilityTool: toolNames.some(
+          (name) =>
+            typeof name === "string" &&
+            name.startsWith("mcp__employee_docs__") &&
+            name.endsWith("docs_read"),
+        ),
+        hasDeferredToolBridge: toolNames.includes("tool_call"),
+      };
+    },
+  );
+  const safeCapabilityTurn = capabilityTurn.ok
+    ? { ok: true }
+    : {
+        ok: false,
+        error: capabilityTurn.error
+          .replaceAll(AUTHOR_MCP_SECRET, "[redacted]")
+          .replaceAll(MEMBER_MCP_SECRET, "[redacted]"),
+      };
+  expect(
+    capabilityTurn,
+    JSON.stringify(
+      {
+        capabilityTurn: safeCapabilityTurn,
+        modelRequests: capabilityRequestDiagnostics,
+      },
+      null,
+      2,
+    ),
+  ).toMatchObject({
     ok: true,
     result: { response: expect.stringContaining(CAPABILITY_TOOL_REPLY) },
   });
