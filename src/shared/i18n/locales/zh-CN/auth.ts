@@ -102,6 +102,24 @@ const auth = {
       "充值会打开独立的模型 API 网站；该网站的账户、余额、API Key、Cookie 与 Token 均不和 Aera 账户共用。",
     pendingRevocationWarning:
       "若控制服务不可达时退出，此设备在签名撤销请求自动补发成功前，仍可能暂时占用最多 5 台设备的名额。",
+    desktopControl: {
+      title: "桌面端连接状态",
+      lastHeartbeat: "最近心跳",
+      lastHealth: "最近健康检查",
+      notAvailable: "尚未连接",
+      notChecked: "尚未检查",
+      error: "连接状态码：{{code}}",
+      privacy:
+        "仅上报在线状态和固定健康结果，不包含提示词、对话、文件、路径、日志、凭据或私有 Memory。",
+      status: {
+        unregistered: "等待登录",
+        connecting: "正在连接",
+        online: "在线",
+        offline: "离线",
+        needs_reauth: "需要重新登录",
+        degraded: "连接异常",
+      },
+    },
     profile: {
       title: "个人资料",
       description: "设置你在 Aera 中显示的名称和个人信息。",

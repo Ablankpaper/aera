@@ -109,6 +109,24 @@ const auth = {
       "Recharge opens the independent model API website. Its accounts, balances, API keys, cookies, and tokens are separate from this Aera account.",
     pendingRevocationWarning:
       "If you sign out while the control plane is unreachable, this device may still count toward the five-device limit until the signed self-revocation is delivered automatically.",
+    desktopControl: {
+      title: "Desktop connection",
+      lastHeartbeat: "Last heartbeat",
+      lastHealth: "Last health check",
+      notAvailable: "Not connected yet",
+      notChecked: "Not checked yet",
+      error: "Connection code: {{code}}",
+      privacy:
+        "Only connection state and a fixed health result are reported. Prompts, conversations, files, paths, logs, credentials, and private Memory are never included.",
+      status: {
+        unregistered: "Waiting for sign-in",
+        connecting: "Connecting",
+        online: "Online",
+        offline: "Offline",
+        needs_reauth: "Sign-in required",
+        degraded: "Connection degraded",
+      },
+    },
     profile: {
       title: "Personal details",
       description: "Choose the name and personal details shown in Aera.",

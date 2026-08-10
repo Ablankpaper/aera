@@ -16,6 +16,7 @@ This directory defines the high-level concepts, business logic, and architecture
 - [[multi-agent-memory]] — per-Agent identity and private Hermes learning, the account-wide behavior profile, and durable conversation snapshot rules.
 - [[agentera-runtime-distribution]] — the signed platform-specific Runtime seed, offline first installation, user-confirmed updates, rollback, and Profile-data isolation.
 - [[agentera-app-authentication]] — the independent AgentEra APP account gate, browser PKCE flow, device-bound offline entitlement, and existing-Profile ownership rules.
+- [[agentera-desktop-control]] — authenticated Desktop heartbeat, fixed health checks, idempotent result delivery, and the renderer privacy boundary used by internal fleet operations.
 - [[agentera-agent-control-plane]] — USER-owned local Agent drafts, immutable stable-version publication, per-device Agent installation, and conversation-scoped RuntimeBinding rules.
 - [[agentera-post-official-delivery]] — the approved content-free official quality pipeline, client-encrypted Profile backup, cross-device restore, and production release gates.
 - [[agentera-workspaces]] — fixed-owner Workspace lifecycle, memberships, one-time invitations, desktop context switching, and offline read-only boundaries.
