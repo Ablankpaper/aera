@@ -28,15 +28,25 @@ Relaxing Beta.25 validators or hiding unsupported routes would require another c
 
 ### Restore Cloud and isolate Desktop reads
 
-The selected approach deploys the exact immutable Cloud candidate required by Beta.25, then lands a narrow Desktop resilience fix on a separate branch. It restores current users without weakening the wire contract and prevents a single optional subdomain from blanking the core Organization catalog.
+The selected approach uses a schema-compatible bridge candidate before deploying the immutable Cloud contract required by Beta.25, then lands a narrow Desktop resilience fix on a separate branch. It restores current users without weakening the wire contract and prevents a single optional subdomain from blanking the core Organization catalog.
 
 ## Cloud operational recovery
 
-The Cloud source target is exactly `aba165d256cd447abcd43ce4c397041c2bf802d1`, which already passed the repository CI used by Desktop Beta.25. A new immutable `candidate.yml` workflow run must build, sign, attest, and publish one digest for that exact source.
+The functional Cloud source target is `aba165d256cd447abcd43ce4c397041c2bf802d1`, which already passed the repository CI used by Desktop Beta.25. That source includes migration 22, but its candidate workflow incorrectly declares both `schema.maximum` and `schema.highestMigration` as 21. The live candidate also declares maximum 21, so the checked-in rollback guard correctly rejects a direct deployment whose honest highest migration is 22.
+
+### Schema-safe two-candidate sequence
+
+Recovery therefore uses two separately reviewed, signed, and immutable candidates. No manifest is falsified and no rollback guard is bypassed.
+
+The compatibility bridge is based on deployed application source `1d2fbc99662bdfc10d4ff3669c7eb47d63dc2034`. It changes only release assertions so its manifest declares `schema.maximum=22` while keeping `schema.highestMigration=21`. Before this promise is signed or deployed, the exact bridge application must start and pass health and representative read/write checks against a disposable database that has been migrated through the exact migration 22 from the recovery source. The compatibility proof records both source SHAs and database migration state.
+
+The recovery candidate is based on `aba165d256cd447abcd43ce4c397041c2bf802d1` and changes its release assertions to the truthful `schema.maximum=22` and `schema.highestMigration=22`. A new `candidate.yml` run must build, sign, attest, and publish one digest for each reviewed candidate source. The bridge is deployed first while the live database remains at schema 21. Only after bridge health, smoke, and exposure checks pass may the recovery candidate run migration 22.
+
+Before migration 22, the pre-bridge live candidate remains the rollback target. After migration 22, only the verified bridge candidate is an eligible previous application rollback target because its signed maximum includes schema 22. The original maximum-21 candidate must not be selected against schema 22.
 
 Before deployment, the candidate manifest, Sigstore bundle, provenance, SBOM, source SHA, image digest, and workflow identity must pass the checked-in verifier. The internal-beta deployment script must verify the recorded current candidate, preserve PostgreSQL, Redis, and MinIO volumes, run forward migrations, test public HTTPS health and exposure, and retain the recorded previous digest as the rollback target.
 
-The rollout order is `deploy` with features disabled, health and schema verification, then `enable` for the exact same candidate. Failure must use the checked-in automatic or recorded-candidate rollback path; no volume deletion, down migration, mutable image tag, or direct repository checkout is allowed on the host.
+The rollout order is bridge `deploy` with features disabled and verification, followed by recovery `deploy` with features disabled, migration and verification, then `enable` for the exact recovery candidate. Failure must use the checked-in automatic or recorded-candidate rollback path; no volume deletion, down migration, mutable image tag, direct repository checkout, or unsigned manifest edit is allowed on the host.
 
 ## Desktop catalog recovery
 
@@ -71,7 +81,7 @@ Cloud acceptance must verify the deployed state SHA and immutable digest, `/heal
 
 The repair is complete only when all of the following are true:
 
-- Live internal-beta Cloud records the exact reviewed `aba165d` candidate and all health/exposure checks pass.
+- Live internal-beta Cloud records the reviewed schema-22 recovery candidate derived from `aba165d`, with a separately signed bridge candidate retained as its schema-compatible rollback target, and all health/exposure checks pass.
 - Installed Beta.25 loads the existing Owner Organization catalog without “智能体请求无效” or “Aera Cloud 暂时不可用”.
 - Organization experience and publication-review panels read their live routes successfully.
 - Switching Organizations never displays the previous Organization's role, definitions, drafts, installations, or submissions.
