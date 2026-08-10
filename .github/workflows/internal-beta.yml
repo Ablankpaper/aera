@@ -59,7 +59,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain=v1)"
           VERSION=$(node -p "require('./package.json').version")
-          test "$VERSION" = "0.7.4-internal-beta.25"
+          test "$VERSION" = "0.7.4-internal-beta.26"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Verify successful CI belongs to the exact source
@@ -745,7 +745,7 @@ jobs:
             --manifest candidate/desktop-update/manifest.json \
             --private-key-env DESKTOP_UPDATE_SIGNING_PRIVATE_KEY \
             --published-at "$CREATED_AT" \
-            --release-notes "Beta.25 修复 Desktop 退出后命名 Profile 的 Runtime Dashboard 孤儿进程，并保留 Runtime 0.20.0-agentera.1、Agent 安装恢复、Profile/Runtime 绑定与稳定更新通道；macOS 继续通过 Apple 公证、装订及 Gatekeeper 验证，Windows 内测包仍明确未签名。" \
+            --release-notes "Beta.26 修复企业域部分 Cloud 请求失败导致整页空白和聊天重复回复，新增会话智能体名称，更新“工具社区 / 任务看板”及充值入口，移除模型高级配置中的 Hermes One 登录；保留 Runtime 0.20.0-agentera.1，macOS 继续公证，Windows 内测包仍未签名。" \
             --signature candidate/desktop-update/manifest.sig \
             --version "$VERSION"
           node scripts/internal-beta/desktop-update.mjs verify \

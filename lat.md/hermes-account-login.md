@@ -27,7 +27,7 @@ The backend base URL is resolved fresh on every call by
 backends is an env edit + relaunch (no rebuild): `HERMES_API_URL` (explicit
 override) → `MAIN_VITE_HERMES_API_URL` from `process.env` → the build-time
 baked `import.meta.env.MAIN_VITE_HERMES_API_URL` → `http://localhost:3002`.
-Because Vite inlines `import.meta.env` at *build* time, the `process.env` reads
+Because Vite inlines `import.meta.env` at _build_ time, the `process.env` reads
 are what make it truly env-driven in dev — [[src/main/load-env.ts#loadDotEnvForDev]]
 copies the project `.env` into `process.env` at startup (dev only; called from
 [[src/main/index.ts]]), and packaged/CI builds carry the value baked in by the
