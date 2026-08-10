@@ -13,6 +13,7 @@
 ### Task 1: Prove a submission failure currently blanks definitions
 
 **Files:**
+
 - Modify: `src/renderer/src/screens/Agents/AgentControlPanel.test.tsx`
 - Modify: `lat.md/agentera-agent-control-plane.md`
 
@@ -37,6 +38,7 @@ Expected: FAIL because the current loader returns before `listDefinitions`.
 ### Task 2: Prove a context switch currently retains stale cards and role
 
 **Files:**
+
 - Modify: `src/renderer/src/screens/Agents/AgentControlPanel.test.tsx`
 - Modify: `lat.md/agentera-agent-control-plane.md`
 
@@ -61,6 +63,7 @@ Expected: FAIL because the current component commits the new context only after 
 ### Task 3: Implement minimal independent reads and early context invalidation
 
 **Files:**
+
 - Modify: `src/renderer/src/screens/Agents/AgentControlPanel.tsx`
 
 - [ ] **Step 1: Introduce one first-error accumulator before peer reads**
@@ -90,6 +93,7 @@ Keep same-context dialog behavior unchanged and ensure the final commit still se
 ### Task 4: Verify RED to GREEN and protect ordering
 
 **Files:**
+
 - Verify: `src/renderer/src/screens/Agents/AgentControlPanel.tsx`
 - Verify: `src/renderer/src/screens/Agents/AgentControlPanel.test.tsx`
 
@@ -136,6 +140,7 @@ Expected: one focused implementation commit after the design and plan commits.
 ### Task 5: Run isolated Electron acceptance
 
 **Files:**
+
 - Verify: installed Beta.25 and the repair build using isolated user data.
 
 - [ ] **Step 1: Build the repair branch**
@@ -155,4 +160,3 @@ Expected: the isolated Organization Agent journey passes without using daily Ele
 After the Cloud recovery candidate is enabled, launch installed Beta.25 and verify the existing Owner Organization definitions, publication history, and ExperienceCandidate panels. Then switch Organizations and verify that no previous card or role is visible during the next load.
 
 Expected: no `service_unavailable`, no `invalid_request`, no whole-page blank state, and no cross-Organization stale content.
-

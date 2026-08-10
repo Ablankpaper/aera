@@ -13,6 +13,7 @@
 ### Task 1: Make the bridge manifest contract fail first
 
 **Files:**
+
 - Modify: `.github/workflows/candidate.yml`
 - Modify: `scripts/tests/delivery-contract.test.sh`
 
@@ -50,6 +51,7 @@ Expected: `delivery contract tests passed`.
 ### Task 2: Add a reproducible schema-22 compatibility proof
 
 **Files:**
+
 - Create: `scripts/tests/schema-22-compatibility.test.sh`
 - Modify: `.github/workflows/ci.yml`
 
@@ -147,6 +149,7 @@ Expected: selected old-application repository tests and `TestSmokeAuthLifecycle`
 ### Task 3: Verify and freeze the bridge source
 
 **Files:**
+
 - Verify: `.github/workflows/candidate.yml`
 - Verify: `.github/workflows/ci.yml`
 - Verify: `scripts/tests/delivery-contract.test.sh`
@@ -188,6 +191,7 @@ Expected: one commit whose parent is `1d2fbc99662bdfc10d4ff3669c7eb47d63dc2034`.
 ### Task 4: Build, verify, and deploy the bridge candidate
 
 **Files:**
+
 - Operational evidence only; no repository edits.
 
 - [ ] **Step 1: Push the exact temporary ref and wait for exact-head CI**
@@ -224,6 +228,7 @@ Expected: health, smoke, exposure, current-manifest persistence, and disabled fe
 ### Task 5: Advance the same ref to the truthful recovery candidate
 
 **Files:**
+
 - Modify: `.github/workflows/candidate.yml`
 - Modify: `scripts/tests/delivery-contract.test.sh`
 
@@ -254,6 +259,7 @@ Expected: all gates pass and migration 22 is the highest embedded migration.
 ### Task 6: Deploy and enable the recovery candidate
 
 **Files:**
+
 - Operational evidence only; no repository edits.
 
 - [ ] **Step 1: Push the advanced same ref, wait for exact-head CI, and build a new immutable candidate**
@@ -273,4 +279,3 @@ Expected: the guard accepts the recorded bridge maximum 22, the application appl
 Run the checked-in `enable` command for the same manifest, then test Organization definitions, publication submissions, own/review ExperienceCandidate lists, and an installed Beta.25 Owner Organization journey without exporting application credentials.
 
 Expected: no 404 on the ExperienceCandidate routes, publication responses include `published_version_id`, and Beta.25 renders the existing Organization catalog.
-
