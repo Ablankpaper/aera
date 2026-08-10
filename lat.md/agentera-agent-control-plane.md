@@ -138,6 +138,14 @@ The startup composition subscribes the Agent manager only to [[src/main/agentera
 
 A same-context state notification refreshes lists without closing the draft editor or interrupting its save-and-publish workflow. A real scope, owner, or role change still closes context-bound editors and one-use dialogs before later mutation.
 
+#### Independent catalog reads
+
+Organization catalog reads fail independently: the first load-order error remains visible while successful peer reads, including definitions, still render without a background retry.
+
+#### Context change clearing
+
+A changed trusted scope, owner, or role commits the new state and clears context-bound collections and selections before peer reads settle. Load epochs prevent an older request from restoring stale data.
+
 ### Role-aware presentation
 
 The main process returns the trusted USER or WORKSPACE context with Agent control state. The Agent screen follows that state instead of reading Workspace authorization independently or accepting scope fields in mutation calls.
