@@ -42,6 +42,8 @@ The compatibility bridge is based on deployed application source `1d2fbc99662bdf
 
 The recovery candidate is based on `aba165d256cd447abcd43ce4c397041c2bf802d1` and changes its release assertions to the truthful `schema.maximum=22` and `schema.highestMigration=22`. A new `candidate.yml` run must build, sign, attest, and publish one digest for each reviewed candidate source. The bridge is deployed first while the live database remains at schema 21. Only after bridge health, smoke, and exposure checks pass may the recovery candidate run migration 22.
 
+Both candidates must be signed from the same exact temporary Git ref so the deployment verifier can authenticate the new candidate and its recorded rollback candidate with one narrow workflow identity. After the bridge is recorded, that ref incorporates the reviewed `aba165d` functional source and advances the truthful highest migration to 22. It is never widened to accept arbitrary branches or workflows.
+
 Before migration 22, the pre-bridge live candidate remains the rollback target. After migration 22, only the verified bridge candidate is an eligible previous application rollback target because its signed maximum includes schema 22. The original maximum-21 candidate must not be selected against schema 22.
 
 Before deployment, the candidate manifest, Sigstore bundle, provenance, SBOM, source SHA, image digest, and workflow identity must pass the checked-in verifier. The internal-beta deployment script must verify the recorded current candidate, preserve PostgreSQL, Redis, and MinIO volumes, run forward migrations, test public HTTPS health and exposure, and retain the recorded previous digest as the rollback target.
