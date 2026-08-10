@@ -112,9 +112,13 @@ interface ChatProps {
   onSessionIdChange?: (runId: string, sessionId: string | null) => void;
   /** Reports the first user message as a best-effort conversation title. */
   onTitleChange?: (runId: string, title: string) => void;
-  /** Resolved avatar/colour of `profile`, so idle agent avatars in the
+  /** Resolved name/avatar/colour of `profile`, so idle agent avatars in the
    *  transcript show the agent's profile picture instead of the loading gif. */
-  agentAppearance?: { color?: string | null; avatar?: string | null };
+  agentAppearance?: {
+    name?: string | null;
+    color?: string | null;
+    avatar?: string | null;
+  };
   /** Guest sessions stay local and must not read account-owned Remote/SSH
    *  connection configuration. */
   allowAccountConnection?: boolean;
@@ -148,6 +152,8 @@ function Chat({
     }),
     [profile, agentAppearance?.color, agentAppearance?.avatar],
   );
+  const agentName =
+    agentAppearance?.name?.trim() || profile?.trim() || "default";
   const [messages, setMessages] = useState<ChatMessage[]>(
     initialMessages ?? [],
   );
@@ -1119,7 +1125,10 @@ function Chat({
     >
       <ConfigHealthBanner profile={profile} onOpenDiagnose={onOpenDiagnose} />
       {conversationBoundary && (
-        <ConversationBoundaryIndicator boundary={conversationBoundary} />
+        <ConversationBoundaryIndicator
+          agentName={agentName}
+          boundary={conversationBoundary}
+        />
       )}
 
       <div className="chat-body">

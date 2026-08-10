@@ -16,7 +16,7 @@ import {
   runIdAtOrdinal,
   loadingSessionIds as deriveLoadingSessionIds,
 } from "./chatRuns";
-import { ActiveSessionsBar } from "./ActiveSessionsBar";
+import { ActiveSessionsBar, type ProfileAppearance } from "./ActiveSessionsBar";
 import Sessions from "../Sessions/Sessions";
 import Agents from "../Agents/Agents";
 import Discover from "../Discover/Discover";
@@ -218,7 +218,7 @@ function Layout({
   // run's profile name) can render real avatars. Refreshed when the selected
   // profile or the current view changes — e.g. after editing on the Agents page.
   const [profileAppearance, setProfileAppearance] = useState<
-    Record<string, { color?: string | null; avatar?: string | null }>
+    Record<string, ProfileAppearance>
   >({});
   useEffect(() => {
     let cancelled = false;
@@ -226,9 +226,10 @@ function Layout({
       .listProfiles()
       .then((list) => {
         if (cancelled) return;
-        const map: Record<string, { color?: string; avatar?: string | null }> =
-          {};
-        for (const p of list) map[p.id] = { color: p.color, avatar: p.avatar };
+        const map: Record<string, ProfileAppearance> = {};
+        for (const p of list) {
+          map[p.id] = { name: p.name, color: p.color, avatar: p.avatar };
+        }
         setProfileAppearance(map);
       })
       .catch(() => {

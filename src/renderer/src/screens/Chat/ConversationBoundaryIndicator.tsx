@@ -4,6 +4,7 @@ import { useI18n } from "../../components/useI18n";
 
 interface ConversationBoundaryIndicatorProps {
   boundary: AgenteraConversationBoundarySummary;
+  agentName?: string | null;
 }
 
 function scopeLabel(
@@ -16,8 +17,10 @@ function scopeLabel(
 
 export function ConversationBoundaryIndicator({
   boundary,
+  agentName,
 }: ConversationBoundaryIndicatorProps): React.JSX.Element {
   const { t } = useI18n();
+  const displayAgentName = agentName?.trim() || "default";
 
   return (
     <div
@@ -28,6 +31,10 @@ export function ConversationBoundaryIndicator({
       <span>
         {t("chat.boundary.runningIn")}{" "}
         <strong>{scopeLabel(boundary, t)}</strong>
+      </span>
+      <span className="chat-conversation-boundary-divider" aria-hidden="true" />
+      <span>
+        {t("chat.boundary.agent")} <strong>{displayAgentName}</strong>
       </span>
       <span className="chat-conversation-boundary-divider" aria-hidden="true" />
       <span>

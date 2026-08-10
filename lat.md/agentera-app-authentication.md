@@ -204,7 +204,7 @@ Logout, revocation, and retry never delete, move, upload, hash for upload, or un
 
 The sidebar account menu and Settings account pane expose only online/offline status, truncated identifiers, expiry, and allowlisted actions.
 
-[[src/renderer/src/components/AgenteraAccountMenu.tsx#AgenteraAccountMenu]] and [[src/renderer/src/components/settings/AgenteraAccountPane.tsx#AgenteraAccountPane]] open account and device management on the configured cloud Origin. Recharge opens the separately configured URL validated by [[src/main/agentera-auth/config.ts#parseAgenteraRechargePublicUrl]] and shares no AgentEra APP credential.
+[[src/renderer/src/components/AgenteraAccountMenu.tsx#AgenteraAccountMenu]] and [[src/renderer/src/components/settings/AgenteraAccountPane.tsx#AgenteraAccountPane]] open account and device management on the configured cloud Origin. Recharge opens the separately validated public URL and shares no AgentEra APP credential. [[src/main/agentera-auth/config.ts#resolveAgenteraRechargePublicUrl]] preserves runtime/build override precedence and otherwise defaults to `https://petoi.cn`; [[src/main/agentera-auth/config.ts#parseAgenteraRechargePublicUrl]] still requires HTTPS except for loopback development and rejects credentials or fragments before the main process opens it.
 
 When no account session exists, the sidebar and main layout do not mount. The full-screen account gate does not probe account Profile data or open a browser until the user activates its explicit login control.
 

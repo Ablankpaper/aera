@@ -1125,6 +1125,161 @@ describe("useDashboardChatTransport stream integrity", () => {
     });
     expect(bubble).not.toHaveProperty("error");
   });
+
+  it("replaces a legacy streamed identity with the authoritative completion", async () => {
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    await connect(api);
+
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        payload: {},
+        session_id: "live-1",
+        type: "message.start",
+      });
+      dashboardMock.onEvent?.({
+        payload: { text: "Nous Research 助手身份介绍。" },
+        session_id: "live-1",
+        type: "message.delta",
+      });
+      dashboardMock.onEvent?.({
+        payload: { status: "completed", text: "Hermes Agent 助手身份介绍。" },
+        session_id: "live-1",
+        type: "message.complete",
+      });
+    });
+
+    const bubble = api.messages?.find(
+      (message) => message.role === "agent" && "content" in message,
+    );
+    expect(bubble).toMatchObject({
+      content: "Hermes Agent 助手身份介绍。",
+      pending: false,
+    });
+  });
+
+  it("does not apply a second completion for the same turn", async () => {
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    await connect(api);
+
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        payload: {},
+        session_id: "live-1",
+        type: "message.start",
+      });
+      dashboardMock.onEvent?.({
+        payload: { text: "第一次完整回答。" },
+        session_id: "live-1",
+        type: "message.complete",
+      });
+      dashboardMock.onEvent?.({
+        payload: { text: "重复的第二份回答。" },
+        session_id: "live-1",
+        type: "message.complete",
+      });
+    });
+
+    expect(
+      api.messages?.filter(
+        (message) => message.role === "agent" && "content" in message,
+      ),
+    ).toHaveLength(1);
+    expect(
+      api.messages?.find((message) => message.role === "agent"),
+    ).toMatchObject({
+      content: "第一次完整回答。",
+    });
+  });
+
+  it("accepts the same completion text for a new turn", async () => {
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    await connect(api);
+
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        payload: {},
+        session_id: "live-1",
+        type: "message.start",
+      });
+      dashboardMock.onEvent?.({
+        payload: { text: "相同回答。" },
+        session_id: "live-1",
+        type: "message.complete",
+      });
+      api.activeTurnRef!.current = {
+        startIndex: api.messages?.length ?? 0,
+        status: "running",
+        turnId: "turn-next",
+        userId: "u-next",
+      };
+      api.setMessages?.((prev) => [
+        ...prev,
+        {
+          id: "u-next",
+          role: "user",
+          content: "next",
+          turnId: "turn-next",
+        },
+      ]);
+    });
+
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        payload: { text: "相同回答。" },
+        session_id: "live-1",
+        type: "message.complete",
+      });
+    });
+
+    expect(
+      api.messages?.filter(
+        (message) => message.role === "agent" && "content" in message,
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("preserves text before a tool call in a legacy turn", async () => {
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+    await connect(api);
+
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        payload: {},
+        session_id: "live-1",
+        type: "message.start",
+      });
+      dashboardMock.onEvent?.({
+        payload: { text: "先查一下天气。" },
+        session_id: "live-1",
+        type: "message.delta",
+      });
+      dashboardMock.onEvent?.({
+        payload: { tool_id: "weather-1", name: "weather" },
+        session_id: "live-1",
+        type: "tool.start",
+      });
+      dashboardMock.onEvent?.({
+        payload: { tool_id: "weather-1", name: "weather", result: "晴天" },
+        session_id: "live-1",
+        type: "tool.complete",
+      });
+      dashboardMock.onEvent?.({
+        payload: { text: "现在是晴天。" },
+        session_id: "live-1",
+        type: "message.complete",
+      });
+    });
+
+    expect(api.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ content: "先查一下天气。\n\n现在是晴天。" }),
+      ]),
+    );
+  });
 });
 
 describe("useDashboardChatTransport messagesRef sync", () => {

@@ -10,13 +10,12 @@ import {
 import { useI18n } from "../../components/useI18n";
 import BrandLogo from "../../components/common/BrandLogo";
 import OAuthLoginModal from "../../components/OAuthLoginModal";
-import HermesAccountModal from "../../components/HermesAccountModal";
 import ProviderKeysSection from "../../components/ProviderKeysSection";
 import RegistryBrowserModal from "../../components/RegistryBrowserModal";
 import AuxiliaryTasksSection from "../../components/AuxiliaryTasksSection";
 import ModelCenter from "./ModelCenter";
 import { useDiscoveredModels } from "../../hooks/useDiscoveredModels";
-import { KeyRound, Workflow, User, Sparkles } from "../../assets/icons";
+import { KeyRound, Workflow, Sparkles } from "../../assets/icons";
 import { ChevronDown, Settings2, X } from "lucide-react";
 import { customProviderEnvKey } from "../../../../shared/url-key-map";
 import {
@@ -24,7 +23,6 @@ import {
   isCustomProviderRoute,
   namedCustomProviderRuntimeName,
 } from "../../../../shared/custom-providers";
-import type { HermesAccount } from "../../../../shared/account";
 
 // A library model as returned by `listModels()`.
 interface LibModel {
@@ -176,19 +174,6 @@ function Providers({
   const [oauthModal, setOauthModal] = useState<
     (typeof OAUTH_PROVIDERS)[number] | null
   >(null);
-
-  // Hermes account (device login). `account` is the signed-in profile or null.
-  const [account, setAccount] = useState<HermesAccount | null>(null);
-  const [showAccountModal, setShowAccountModal] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    void window.hermesAPI.getAccount(profile).then((a) => {
-      if (!cancelled) setAccount(a);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [profile]);
 
   // Per-key debounce timers for env auto-save on change. Previously env
   // values were persisted only on input blur, so users who clicked the
@@ -711,69 +696,6 @@ function Providers({
       {activeTab === "advanced" && (
         <>
           <div className="settings-section">
-            <div className="settings-section-title">
-              {t("providers.hermesAccount.sectionTitle")}
-            </div>
-            <p className="settings-section-hint">
-              {t("providers.hermesAccount.sectionHint")}
-            </p>
-            {account ? (
-              <div className="hermes-account-card">
-                {account.user.avatarUrl ? (
-                  <img
-                    className="hermes-account-avatar"
-                    src={account.user.avatarUrl}
-                    alt=""
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <span
-                    className="hermes-account-avatar hermes-account-avatar-letter"
-                    aria-hidden="true"
-                  >
-                    {(account.user.name || account.user.email || "?")
-                      .charAt(0)
-                      .toUpperCase()}
-                  </span>
-                )}
-                <span className="hermes-account-who">
-                  <span className="hermes-account-name">
-                    {account.user.name || account.user.email || account.user.id}
-                  </span>
-                  {account.user.name && account.user.email && (
-                    <span className="hermes-account-email">
-                      {account.user.email}
-                    </span>
-                  )}
-                  <span className="hermes-account-state">
-                    <span className="hermes-account-dot" aria-hidden="true" />
-                    {t("providers.hermesAccount.connected")}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={async () => {
-                    await window.hermesAPI.accountLogout(profile);
-                    setAccount(null);
-                  }}
-                >
-                  {t("providers.hermesAccount.signOut")}
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() => setShowAccountModal(true)}
-              >
-                <User size={14} />
-                {t("providers.hermesAccount.signIn")}
-              </button>
-            )}
-          </div>
-
-          <div className="settings-section">
             <div className="settings-section-title settings-section-title-row">
               <span>
                 {t("common.model")}
@@ -1045,17 +967,6 @@ function Providers({
               providerLabel={oauthModal.name}
               profile={profile}
               onClose={() => setOauthModal(null)}
-            />
-          )}
-
-          {showAccountModal && (
-            <HermesAccountModal
-              profile={profile}
-              onClose={() => setShowAccountModal(false)}
-              onSignedIn={() => {
-                // Refetch to get the full stored account (apiUrl + user).
-                void window.hermesAPI.getAccount(profile).then(setAccount);
-              }}
             />
           )}
         </>

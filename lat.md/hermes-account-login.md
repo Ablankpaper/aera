@@ -8,7 +8,8 @@ code, opens the browser to approve it, and polls for a token — so it can then 
 on the user's behalf.
 
 The backend serves the grant (see the backend's `lat.md/device-login.md`); this
-document covers the desktop half — the client, secure storage, IPC, and UI.
+document covers the retained desktop compatibility client, secure storage, IPC,
+and reusable modal. It is not a current Providers-screen account entry.
 The stored token's first consumer is [[agent-sync|cloud agent sync]].
 
 ## Device login client
@@ -26,7 +27,7 @@ The backend base URL is resolved fresh on every call by
 backends is an env edit + relaunch (no rebuild): `HERMES_API_URL` (explicit
 override) → `MAIN_VITE_HERMES_API_URL` from `process.env` → the build-time
 baked `import.meta.env.MAIN_VITE_HERMES_API_URL` → `http://localhost:3002`.
-Because Vite inlines `import.meta.env` at *build* time, the `process.env` reads
+Because Vite inlines `import.meta.env` at _build_ time, the `process.env` reads
 are what make it truly env-driven in dev — [[src/main/load-env.ts#loadDotEnvForDev]]
 copies the project `.env` into `process.env` at startup (dev only; called from
 [[src/main/index.ts]]), and packaged/CI builds carry the value baked in by the
@@ -85,12 +86,13 @@ profile — switching agents must not read as signed out just because
 every profile home holding an account file (two sign-ins on different
 profiles leave two), so signing out signs the whole device out.
 
-In the renderer, [[src/renderer/src/components/HermesAccountModal.tsx]] shows the
-`user_code` to confirm and reports the result, and
-[[src/renderer/src/screens/Providers/Providers.tsx]] hosts the "Hermes One
-account" card that opens it; once signed in it renders an identity card —
-avatar (or letter fallback), name/email, a "Connected" status line — with a
-Sign out action.
+The reusable [[src/renderer/src/components/HermesAccountModal.tsx]] can still
+show the `user_code` and report the result for compatibility consumers.
+[[src/renderer/src/screens/Providers/Providers.tsx]] no longer imports or opens
+that modal and no longer reads, renders, or signs out the legacy Hermes One
+account under Model > Advanced. Provider OAuth, Aera product account controls,
+agent sync, wallet compatibility, and the main-process account IPC contract are
+unchanged.
 
 ## Tests
 
