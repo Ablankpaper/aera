@@ -420,7 +420,7 @@ An approved submission carries its exact immutable Version ID. The service joins
 
 [[src/main/agentera-agent-control/hermes-adapter.ts#AgenteraHermesAdapter#prepareInstalledTurnPlan]] freezes the planned Version, policy, Runtime, Profile, model route, and tool digest per conversation before the atomic local snapshot commit. [[src/main/agentera-agent-control/hermes-adapter.ts#assertNewConversationContext]] rejects only a new Organization conversation after trusted context removal; an existing RuntimeBinding remains stable.
 
-[[tests/e2e/agentera-organization-agent.e2e.ts]] proves the four-role approval and installation flow, Manifest V3 author Skill/MCP selection, employee-local opaque capability mapping to a different MCP, one real allowed tool reply, restart-safe dirty-draft reconciliation, one-card presentation, withdrawal, archive, version binding stability, offline verified use, reconnect removal, read-only projection, and private-state preservation. Run it with `npm run test:e2e:organization-agent`.
+[[tests/e2e/agentera-organization-agent.e2e.ts]] proves the four-role approval and installation flow, Manifest V3 author Skill/MCP selection, employee-local opaque capability mapping to a different MCP, and one real allowed tool reply through either a direct MCP schema or the Runtime's deferred `tool_call` bridge. It also covers restart-safe dirty-draft reconciliation, one-card presentation, withdrawal, archive, version binding stability, offline verified use, reconnect removal, read-only projection, and private-state preservation. Run it with `npm run test:e2e:organization-agent`.
 
 ### Workspace Agent isolation
 

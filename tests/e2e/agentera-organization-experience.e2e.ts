@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { appendFile, writeFile } from "node:fs/promises";
+import { appendFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -32,6 +32,7 @@ import type {
   ProductSpacePublicState,
   ProductSpaceResult,
 } from "../../src/shared/agentera-product-space";
+import { customProviderRuntimeRoute } from "../../src/shared/custom-providers";
 import {
   agentControlExchangeDiagnostics,
   agentControlRequests,
@@ -459,17 +460,41 @@ test("an employee contributes one Skill and an Owner publishes it only through t
   const employeeProfile = deviceProfilePath(employeeDevice, EMPLOYEE_PROFILE);
   const fixture = await seedExperienceCandidateProfile(employeeProfile);
   const modelOrigin = await startModelServer();
-  await writeFile(
-    join(employeeProfile, "config.yaml"),
-    [
-      "model:",
-      "  provider: custom",
-      "  default: organization-experience-e2e",
-      `  base_url: "${modelOrigin}/v1"`,
-      "",
-    ].join("\n"),
-    "utf8",
+  const configuredModel = await employeeDevice.page.evaluate(
+    async ({ baseUrl, model, profileId, providerName }) => {
+      await window.hermesAPI.upsertCustomProvider(profileId, {
+        name: providerName,
+        baseUrl,
+      });
+      await window.hermesAPI.addModel(
+        model,
+        "custom",
+        model,
+        baseUrl,
+        64_000,
+        providerName,
+        "chat_completions",
+      );
+      await window.hermesAPI.setModelConfig(
+        "custom",
+        model,
+        baseUrl,
+        profileId,
+      );
+      return window.hermesAPI.getModelConfig(profileId);
+    },
+    {
+      baseUrl: `${modelOrigin}/v1`,
+      model: "organization-experience-e2e",
+      profileId: EMPLOYEE_PROFILE,
+      providerName: "organization-experience-e2e",
+    },
   );
+  expect(configuredModel).toEqual({
+    provider: customProviderRuntimeRoute("organization-experience-e2e"),
+    model: "organization-experience-e2e",
+    baseUrl: `${modelOrigin}/v1`,
+  });
   await appendFile(
     join(employeeProfile, ".env"),
     "CUSTOM_API_KEY=e2e-loopback-only\n",
