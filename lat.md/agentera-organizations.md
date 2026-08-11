@@ -90,6 +90,50 @@ Approval records the exact submitted revision without overwriting newer edits, s
 
 [[src/renderer/src/screens/Agents/agentLifecycle.ts#deriveAgentLifecycle]] owns the state/action matrix. [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#deleteDraft]] enforces the pending guard in main, and the isolated Electron gate in [[tests/e2e/agentera-organization-agent.e2e.ts]] proves reconciliation after a main-process restart, one-card presentation, disposable draft deletion, withdrawal, and Installation archive.
 
+### Submission reference recovery
+
+A Cloud submission and its optional device-local draft link are independent records; local drift must not hide unrelated enterprise submissions or rewrite Cloud history.
+
+#### Per-record list isolation
+
+The trusted Cloud envelope and Organization identity remain batch-fatal, while each exact submission row is validated and reconciled independently.
+
+[[src/main/agentera-agent-control/organization-publication-service.ts#OrganizationPublicationService#listSubmissionList]] owns the per-row boundary and returns one renderer-safe envelope.
+
+##### Healthy and conflicted rows coexist
+
+A valid Cloud row remains visible when another valid row has a conflicting local reference.
+
+A local-link conflict is returned as `quarantined`, while a missing local link or draft is `remote_only`; neither state hides healthy submissions.
+
+##### Malformed row omission
+
+One malformed Cloud row is omitted without hiding independently valid rows.
+
+The envelope reports only a bounded `cloud_record_invalid` issue for that row. A malformed top-level envelope or mismatched trusted Organization identity still fails the whole read closed.
+
+#### Six-stage quarantine and exact repair
+
+Reconciliation quarantines every inexact local link and repairs only the exact approved revision without rewriting newer draft work.
+
+##### Six-stage conflict classification
+
+Local-link drift is classified as `reference_shape`, `content_digest`, `definition`, `published_version`, `draft_publication`, or `compare_and_set` without changing the Cloud submission.
+
+Every classified mismatch preserves the reference and nulls its public local-draft fields.
+
+##### Exact automatic repair
+
+An approved older revision is repaired only when every owner, digest, Definition, Version, publication, and compare-and-set check agrees.
+
+[[src/main/agentera-agent-control/organization-publication-service.ts#OrganizationPublicationService#reconcileSubmissionReference]] repairs only an exact same-owner reference: digest and Definition must match, an approved Version must not conflict, published-revision recording and reference status/revision update must commit atomically, and the compare-and-set must affect one row. Only that exact success clears the quarantine; every classified mismatch preserves the reference and nulls its public local-draft fields.
+
+#### Confirmed local-link detach
+
+Only an online Owner or Admin may detach a still-quarantined link after an exact confirmation and fresh Cloud-detail recheck.
+
+[[src/main/agentera-agent-control/organization-submission-reference-store.ts#OrganizationSubmissionReferenceStore#detach]] uses `BEGIN IMMEDIATE` and the expected reference revision to mark the conflict detached and delete exactly one local link. It preserves the Cloud submission, local draft, publication rows, Version, Installation, RuntimeBinding, Profile, Memory, sessions, and Hermes state; a changed reference fails closed.
+
 ### Experience contribution and next-version import
 
 Employees may explicitly offer one agent-created Skill from an active Organization Agent Installation; the enterprise never receives surrounding private runtime state.

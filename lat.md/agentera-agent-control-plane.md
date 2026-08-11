@@ -422,6 +422,30 @@ An approved submission carries its exact immutable Version ID. The service joins
 
 [[src/main/agentera-agent-control/hermes-adapter.ts#AgenteraHermesAdapter#prepareInstalledTurnPlan]] freezes the planned Version, policy, Runtime, Profile, model route, and tool digest per conversation before the atomic local snapshot commit. [[src/main/agentera-agent-control/hermes-adapter.ts#assertNewConversationContext]] rejects only a new Organization conversation after trusted context removal; an existing RuntimeBinding remains stable.
 
+#### Single-list renderer ownership
+
+[[src/renderer/src/screens/Agents/AgentControlPanel.tsx#AgentControlPanel]] owns the only resilient Organization submission-list request for each load or refresh.
+
+The parent stores both submissions and bounded issues, reconciles submissions before drafts, and passes them to [[src/renderer/src/screens/Agents/OrganizationSubmissionPanel.tsx#OrganizationSubmissionPanel]]. The child never invokes either list bridge; it renders one warning only on the quarantined card, keeps Cloud review/withdraw controls status-driven, and sends the exact detach confirmation through the parent. A successful detach updates only that card to `remote_only` without a second list request. The Beta.26 array bridge remains available only for older callers.
+
+#### Conflict persistence and public privacy
+
+Schema v12 records only the owner tuple, Organization/submission IDs, conflict stage/state, reference revision, and timestamps for submission-link conflicts.
+
+[[src/main/agentera-agent-control/organization-submission-reference-store.ts#OrganizationSubmissionReferenceStore]] persists no local draft ID, content digest, prompt, message body, credential, secret, or Profile path in the conflict journal. [[src/main/agentera-agent-control/ipc-contract.ts#publicOrganizationSubmissionList]] rebuilds every public row and forces `localDraftId` and `localDraftRevision` to null for `quarantined` and `remote_only`; malformed-row issues contain only a canonical submission ID or null plus `cloud_record_invalid`.
+
+##### Conflict journal allowlist
+
+The account-scoped conflict journal stores only the bounded fields needed to classify, compare, and resolve one link.
+
+Its schema and store projections exclude local draft identity, content bytes and digests, credentials, prompts, messages, Profile paths, and Hermes state.
+
+##### Public conflict serialization
+
+The IPC serializer rebuilds the envelope from Main-owned values and exposes no conflicting local-link bytes.
+
+Only a `verified` reference may project its local draft ID and revision. `quarantined` and `remote_only` always project both legacy fields as null, while the Beta.26 serializer remains unchanged.
+
 [[tests/e2e/agentera-organization-agent.e2e.ts]] proves the four-role approval and installation flow, Manifest V3 author Skill/MCP selection, employee-local opaque capability mapping to a different MCP, and one real allowed tool reply through either a direct MCP schema or the Runtime's deferred `tool_call` bridge. It also covers restart-safe dirty-draft reconciliation, one-card presentation, withdrawal, archive, version binding stability, offline verified use, reconnect removal, read-only projection, and private-state preservation. Run it with `npm run test:e2e:organization-agent`.
 
 ### Workspace Agent isolation

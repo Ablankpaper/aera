@@ -942,6 +942,7 @@ describe("AgentControlPanel", () => {
     },
   );
 
+  // @lat: [[agentera-agent-control-plane#Release gate#Organization Agent isolation#Single-list renderer ownership]]
   it("lists once and renders one warning on only the quarantined card", async () => {
     const healthySubmission: OrganizationAgentSubmissionListItem = {
       ...organizationSubmission("pending"),

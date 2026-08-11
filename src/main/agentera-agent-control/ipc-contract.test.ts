@@ -42,6 +42,7 @@ const CAPABILITY_FAILURES = [
 ] as const;
 
 describe("Agent control IPC operation scope", () => {
+  // @lat: [[agentera-agent-control-plane#Release gate#Organization Agent isolation#Conflict persistence and public privacy#Public conflict serialization]]
   it("serializes a quarantined reference without conflicting local bytes", () => {
     const unsafeList = {
       submissions: [

@@ -338,6 +338,7 @@ describe("Organization publication service", () => {
     ]);
   });
 
+  // @lat: [[agentera-organizations#Organization Agent approval#Submission reference recovery#Six-stage quarantine and exact repair#Exact automatic repair]]
   it("reconciles an approved older revision without overwriting newer edits", async () => {
     const publication = service();
     const preview = publication.prepareSubmission(DRAFT_ID);
@@ -385,6 +386,7 @@ describe("Organization publication service", () => {
     expect(drafts.getDraft(DRAFT_ID)).toEqual(reconciled);
   });
 
+  // @lat: [[agentera-organizations#Organization Agent approval#Submission reference recovery#Per-record list isolation#Healthy and conflicted rows coexist]]
   it("returns healthy and digest-conflicted submissions together", async () => {
     const publication = service();
     const preview = publication.prepareSubmission(DRAFT_ID);
@@ -421,6 +423,7 @@ describe("Organization publication service", () => {
     ).toMatchObject({ referenceState: { kind: "remote_only" } });
   });
 
+  // @lat: [[agentera-organizations#Organization Agent approval#Submission reference recovery#Per-record list isolation#Malformed row omission]]
   it("omits one malformed Cloud row without hiding valid rows", async () => {
     listSubmissions.mockResolvedValue([
       submissionRecord(submissionDetail()),
@@ -441,6 +444,7 @@ describe("Organization publication service", () => {
     ]);
   });
 
+  // @lat: [[agentera-organizations#Organization Agent approval#Submission reference recovery#Six-stage quarantine and exact repair#Six-stage conflict classification]]
   it.each([
     {
       stage: "reference_shape" as const,

@@ -842,6 +842,7 @@ describe("Agent control Organization Foundation context", () => {
     },
   );
 
+  // @lat: [[agentera-organizations#Organization Agent approval#Submission reference recovery#Confirmed local-link detach]]
   it("requires exact confirmation and detaches only the local submission reference", async () => {
     const getOrganizationAgentSubmission = vi.fn(async () =>
       organizationSubmissionDetail(),

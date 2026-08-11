@@ -127,6 +127,7 @@ describe("OrganizationSubmissionReferenceStore", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  // @lat: [[agentera-agent-control-plane#Release gate#Organization Agent isolation#Conflict persistence and public privacy#Conflict journal allowlist]]
   it("quarantines idempotently and clears only the current owner's conflict", () => {
     const input = {
       organizationId: ORGANIZATION_ID,
