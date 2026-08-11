@@ -180,6 +180,7 @@ describe("Agent control IPC operation scope", () => {
     const modelSelection = {
       sourceProfileId: "configured-source",
       modelLibraryId: MODEL_LIBRARY_ID,
+      catalogRevision: "a".repeat(64),
     };
     expect(
       parseInstallVersionInput({
@@ -212,6 +213,20 @@ describe("Agent control IPC operation scope", () => {
         profileName: "fresh-agent",
         modelProfileId: "configured-source",
         modelSelection,
+      }),
+    ).toThrow("Aera Agent control request is invalid.");
+  });
+
+  it("rejects a Beta.26 two-field model selection from new IPC callers", () => {
+    expect(() =>
+      parseInstallVersionInput({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profileName: "fresh-agent",
+        modelSelection: {
+          sourceProfileId: "configured-source",
+          modelLibraryId: MODEL_LIBRARY_ID,
+        },
       }),
     ).toThrow("Aera Agent control request is invalid.");
   });

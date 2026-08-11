@@ -179,6 +179,8 @@ export default {
     chooseRuntimeModelHint:
       "这里只使用你当前账号的模型与凭据；不会把模型配置写入共享智能体。",
     runtimeModelChoice: "本次运行模型",
+    legacyInstalledModelSource:
+      "该路由来自现有已安装智能体的 Profile，当前账户仍可继续使用。",
     confirmRuntimeModel: "确认并开始使用",
     personalAgent: "我的智能体",
     workspaceAgent: "团队 / 项目智能体",
@@ -610,6 +612,10 @@ export default {
       runtime_incompatible: "该智能体版本暂不支持此电脑上的本地运行环境。",
       profile_model_configuration_failed:
         "当前模型与该智能体的签名版本不兼容。请配置版本允许的模型，或由发布者发布兼容当前模型的新版本。",
+      model_route_stale:
+        "准备智能体期间所选模型已发生变化，请刷新模型列表后重新选择。",
+      model_route_unavailable:
+        "所选模型已不再对当前账户可用，请刷新模型列表并选择其他已配置路由。",
       capability_profile_unavailable:
         "所选本地 Profile 当前不可用，请刷新后重试。",
       capability_source_unsafe: "所选能力包含无法安全复制的本地内容。",

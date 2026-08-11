@@ -159,6 +159,8 @@ export default {
     chooseRuntimeModelHint:
       "Only your current account's model and credential are used. They are never written into the shared Agent.",
     runtimeModelChoice: "Runtime model for this use",
+    legacyInstalledModelSource:
+      "This route comes from an existing installed Agent Profile and remains available to this account.",
     confirmRuntimeModel: "Confirm and start",
     personalAgent: "My Agent",
     workspaceAgent: "Team / project Agent",
@@ -652,6 +654,10 @@ export default {
         "This Agent version is not compatible with this device's local environment.",
       profile_model_configuration_failed:
         "The current model is incompatible with this signed Agent version. Configure a model allowed by the version, or ask the publisher to release a version compatible with the current model.",
+      model_route_stale:
+        "The selected model changed while this Agent was being prepared. Refresh the model list and select it again.",
+      model_route_unavailable:
+        "The selected model is no longer available for this account. Refresh the model list and choose another configured route.",
       capability_profile_unavailable:
         "The selected local Profile is unavailable. Refresh and try again.",
       capability_source_unsafe:

@@ -24,6 +24,12 @@ A **Configure** button is pinned at the bottom of the provider rail (below the s
 
 The override is a `SessionModelOverride` (`{provider, model, baseUrl}`), not a bare model string — because switching across providers must change routing, not only the `model` field.
 
+## Installed-Agent route selection uses an owner catalog
+
+An installed Agent's model picker reads the same Main-owned catalog as Providers, while the selected opaque route is revalidated before installation or repair.
+
+The catalog selection carries `sourceProfileId`, `modelLibraryId`, and `catalogRevision`; renderer code never receives a credential reference or Profile path. A route saved on an active installed Profile remains visible beside account routes, and a Beta.26 pending operation is converted through a fresh catalog snapshot before another write. A stale revision produces localized retry guidance instead of “please configure a model.”
+
 The picker builds it via [[src/renderer/src/screens/Chat/hooks/useModelConfig.ts#effectiveOverrideBaseUrl]], the same baseUrl rule `selectModel` applies (keep the URL only for `custom`/`ollama-cloud`; clear it for named providers that have a canonical base URL), so the session pick and a persisted save can't drift. It is threaded renderer → preload IPC → main `sendMessage` as `modelOverride`.
 
 ## Desktop-only persistence

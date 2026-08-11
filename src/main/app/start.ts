@@ -148,6 +148,7 @@ import {
 } from "../agentera-desktop-control/health";
 import { DesktopControlJournal } from "../agentera-desktop-control/store";
 import { prepareModelConfigurationRuntime } from "../model-configuration-runtime";
+import type { OwnerModelRouteCatalog } from "../agentera-agent-control/owner-model-route-catalog";
 
 const APP_NAME =
   process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
@@ -433,6 +434,7 @@ export async function startMainProcess(
   let agenteraProductSpace: AgenteraProductSpaceManager | null = null;
   let agenteraAgentControlDatabase: AgenteraControlPlaneDatabase | null = null;
   let agenteraAgentControl: AgenteraAgentControlManager | null = null;
+  let ownerModelRouteCatalog: OwnerModelRouteCatalog | null = null;
   let agenteraOfficialQualityDatabase: AgenteraOfficialQualityDatabase | null =
     null;
   let agenteraOfficialQuality: AgenteraOfficialQualityManager | null = null;
@@ -550,6 +552,7 @@ export async function startMainProcess(
       },
       getConnectionMode: () => getConnectionConfig().mode,
       assertEntitled: () => agenteraAuth.assertCanStartNewTask(),
+      getOwnerModelRouteCatalog: () => ownerModelRouteCatalog,
     });
   } catch {
     agenteraAgentControlDatabase?.close();
@@ -709,6 +712,7 @@ export async function startMainProcess(
     notifyModelLibraryChanged,
     notifyCustomProvidersChanged,
   });
+  ownerModelRouteCatalog = modelConfigurationRuntime.catalog;
 
   registerIpcHandlers({
     runtimeActivity,

@@ -1,3 +1,8 @@
+import type {
+  OwnerModelRouteSelection,
+  OwnerModelRouteSummary,
+} from "./model-configuration";
+
 export type AgentDraftAssetKind = "skill" | "sop" | "knowledge";
 export type AgentDraftAssetMediaType = "text/markdown" | "text/plain";
 export type AgentDraftIconMediaType = "image/png" | "image/webp";
@@ -527,6 +532,8 @@ export type AgenteraAgentControlErrorCode =
   | "publication_cache_recovery_failed"
   | "runtime_incompatible"
   | "profile_model_configuration_failed"
+  | "model_route_stale"
+  | "model_route_unavailable"
   | "profile_capability_configuration_required"
   | "capability_profile_unavailable"
   | "capability_source_unsafe"
@@ -625,11 +632,16 @@ export interface AgentRuntimeModelRoute {
   apiMode?: string | null;
 }
 
+/**
+ * Main may expose either the Beta.26 route projection or the revision-bearing
+ * owner catalog summary while mixed-version renderer surfaces converge.
+ */
+export type AgentRuntimeModelRouteSource =
+  | AgentRuntimeModelRoute
+  | OwnerModelRouteSummary;
+
 /** Renderer selection revalidated by Main before any Runtime Profile write. */
-export interface AgentRuntimeModelSelection {
-  sourceProfileId: string;
-  modelLibraryId: string;
-}
+export type AgentRuntimeModelSelection = OwnerModelRouteSelection;
 
 export interface AgenteraInstallVersionInput {
   definitionId: string;

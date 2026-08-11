@@ -66,20 +66,18 @@ function subject(
 
 describe("OwnerModelRouteCatalog", () => {
   it("preserves NUL-delimited route IDs in public catalog snapshots", () => {
-    const { catalog } = subject(
-      [profile("default", { isDefault: true })],
-      {
-        default: [
-          route("default", "fixture", {
-            id: "default\0model-row",
-          }),
-        ],
-      },
-    );
+    const { catalog } = subject([profile("default", { isDefault: true })], {
+      default: [
+        route("default", "fixture", {
+          id: "default\0model-row",
+        }),
+      ],
+    });
 
     expect(catalog.snapshot().routes[0].id).toBe("default\0model-row");
   });
 
+  // @lat: [[provider-setup#Owner-scoped model route catalog]]
   it("keeps an active installed-Profile route visible beside account Profiles", () => {
     const { catalog } = subject(
       [
@@ -144,6 +142,19 @@ describe("OwnerModelRouteCatalog", () => {
     expect(resolveRoute).not.toHaveBeenCalled();
   });
 
+  it("resolves a selection issued for a non-default requested account Profile", () => {
+    const { catalog } = subject(
+      [profile("default", { isDefault: true }), profile("secondary")],
+      {
+        default: [route("default", "default-model")],
+        secondary: [route("secondary", "secondary-model")],
+      },
+    );
+    const issued = catalog.snapshot("secondary");
+
+    expect(() => catalog.resolve(issued.routes[0].selection)).not.toThrow();
+  });
+
   it("rejects a foreign profile before exposing its route", () => {
     const { catalog } = subject(
       [
@@ -161,17 +172,14 @@ describe("OwnerModelRouteCatalog", () => {
   });
 
   it("does not treat a public IP endpoint as credential-free local", () => {
-    const { catalog } = subject(
-      [profile("default", { isDefault: true })],
-      {
-        default: [
-          route("default", "public-ip", {
-            baseUrl: "https://8.8.8.8/v1",
-            credentialRef: null,
-          }),
-        ],
-      },
-    );
+    const { catalog } = subject([profile("default", { isDefault: true })], {
+      default: [
+        route("default", "public-ip", {
+          baseUrl: "https://8.8.8.8/v1",
+          credentialRef: null,
+        }),
+      ],
+    });
 
     expect(catalog.snapshot().routes).toEqual([]);
   });

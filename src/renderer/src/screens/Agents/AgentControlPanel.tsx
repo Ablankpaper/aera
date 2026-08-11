@@ -4,7 +4,7 @@ import type {
   AgentDraftDetail,
   AgentCapabilityBindingConfiguration,
   ConfirmCapabilityBindingsInput,
-  AgentRuntimeModelRoute,
+  AgentRuntimeModelRouteSource,
   AgentRuntimeModelSelection,
   AgenteraAgentControlErrorCode,
   AgenteraAgentControlPublicState,
@@ -61,7 +61,7 @@ export interface AgentChatOpenOptions {
 
 export interface AgentControlPanelProps {
   profiles: AgentControlProfileOption[];
-  runtimeModelRoutes?: AgentRuntimeModelRoute[];
+  runtimeModelRoutes?: AgentRuntimeModelRouteSource[];
   initialTab?: "official" | "mine" | "enterprise";
   advancedOpenByDefault?: boolean;
   onChatWithProfile?: (
@@ -107,6 +107,7 @@ interface AgentRuntimeModelOption {
   model: string;
   modelProfileId?: string;
   modelSelection?: AgentRuntimeModelSelection;
+  sourceKind?: "account" | "legacy_agent";
 }
 
 function errorKey(code: AgenteraAgentControlErrorCode): string {
@@ -1148,10 +1149,10 @@ export default function AgentControlPanel({
         provider: route.provider,
         providerLabel: route.providerLabel,
         model: route.model,
-        modelSelection: {
-          sourceProfileId: route.sourceProfileId,
-          modelLibraryId: route.modelLibraryId,
-        },
+        ...("sourceKind" in route ? { sourceKind: route.sourceKind } : {}),
+        ...("selection" in route
+          ? { modelSelection: route.selection }
+          : { modelProfileId: route.sourceProfileId }),
       }));
     }
     return selectableModelProfiles.map((profile) => ({
@@ -1177,6 +1178,7 @@ export default function AgentControlPanel({
     versionId: string;
     displayName?: string;
     modelProfileId?: string;
+    modelSelection?: AgentRuntimeModelSelection;
   }): void => {
     const installation =
       scopedInstallations.find(
@@ -1197,10 +1199,11 @@ export default function AgentControlPanel({
       installation,
       profile,
     };
-    if (target.modelProfileId) {
+    if (target.modelProfileId || target.modelSelection) {
       void activateAgent({
         ...activationTarget,
         modelProfileId: target.modelProfileId,
+        modelSelection: target.modelSelection,
       });
       return;
     }
@@ -1974,6 +1977,9 @@ export default function AgentControlPanel({
                   </option>
                 ))}
               </select>
+              {effectiveSelectedModelSource?.sourceKind === "legacy_agent" ? (
+                <small>{t("agents.hub.legacyInstalledModelSource")}</small>
+              ) : null}
             </label>
             <div className="agent-control-dialog-actions">
               <button

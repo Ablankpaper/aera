@@ -16,7 +16,7 @@ import type {
   AgentCapabilityBindingConfiguration,
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
-  AgentRuntimeModelRoute,
+  AgentRuntimeModelRouteSource,
   ExperienceCandidateDetail,
   ExperienceCandidateImportPreview,
   ExperienceCandidateSummary,
@@ -44,6 +44,7 @@ const DRAFT_ID = "77777777-7777-4777-8777-777777777777";
 const SUBMISSION_ID = "88888888-8888-4888-8888-888888888888";
 const OFFICIAL_RELEASE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const OFFICIAL_REVISION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const CATALOG_REVISION = "a".repeat(64);
 
 function success<T>(data: T): AgenteraAgentControlResult<T> {
   return { ok: true, data };
@@ -1296,6 +1297,12 @@ describe("AgentControlPanel", () => {
             model: "gpt-5.6-sol",
             displayName: "GPT 5.6",
             baseUrl: "https://api.petoi.cn/v1",
+            sourceKind: "account",
+            selection: {
+              sourceProfileId: "account-home",
+              modelLibraryId: selectedLibraryId,
+              catalogRevision: CATALOG_REVISION,
+            },
           },
           {
             id: yunduRouteId,
@@ -1306,6 +1313,12 @@ describe("AgentControlPanel", () => {
             model: "claude-sonnet-4-6",
             displayName: "Claude Sonnet",
             baseUrl: "https://yundu.lat/v1",
+            sourceKind: "account",
+            selection: {
+              sourceProfileId: "account-home",
+              modelLibraryId: "66666666-6666-4666-8666-666666666666",
+              catalogRevision: CATALOG_REVISION,
+            },
           },
         ]}
       />,
@@ -1331,6 +1344,7 @@ describe("AgentControlPanel", () => {
           modelSelection: {
             sourceProfileId: "account-home",
             modelLibraryId: selectedLibraryId,
+            catalogRevision: CATALOG_REVISION,
           },
         },
         undefined,
@@ -1346,7 +1360,7 @@ describe("AgentControlPanel", () => {
     });
     const originalLibraryId = "55555555-5555-4555-8555-555555555555";
     const replacementLibraryId = "77777777-5555-4555-8555-555555555555";
-    const route = (modelLibraryId: string): AgentRuntimeModelRoute => ({
+    const route = (modelLibraryId: string): AgentRuntimeModelRouteSource => ({
       id: ["account-home", modelLibraryId].join("\0"),
       sourceProfileId: "account-home",
       modelLibraryId,
@@ -1355,6 +1369,13 @@ describe("AgentControlPanel", () => {
       model: "gpt-5.6-sol",
       displayName: "GPT 5.6",
       baseUrl: "https://api.petoi.cn/v1",
+      // The catalog revision is carried alongside the legacy route fields in
+      // this focused fixture to prove the renderer forwards the full handle.
+      selection: {
+        sourceProfileId: "account-home",
+        modelLibraryId,
+        catalogRevision: CATALOG_REVISION,
+      },
     });
     const renderPanel = (modelLibraryId: string): React.JSX.Element => (
       <AgentControlPanel
@@ -1387,6 +1408,7 @@ describe("AgentControlPanel", () => {
           modelSelection: {
             sourceProfileId: "account-home",
             modelLibraryId: replacementLibraryId,
+            catalogRevision: CATALOG_REVISION,
           },
         },
         undefined,
@@ -1487,6 +1509,12 @@ describe("AgentControlPanel", () => {
             model: "gpt-5.6-sol",
             displayName: "gpt-5.6-sol",
             baseUrl: "https://api.petoi.cn/v1",
+            sourceKind: "account",
+            selection: {
+              sourceProfileId: "account-home",
+              modelLibraryId: "66666666-6666-4666-8666-666666666666",
+              catalogRevision: CATALOG_REVISION,
+            },
           },
         ]}
         onChatWithProfile={onChatWithProfile}
@@ -1513,6 +1541,7 @@ describe("AgentControlPanel", () => {
           modelSelection: {
             sourceProfileId: "account-home",
             modelLibraryId: "66666666-6666-4666-8666-666666666666",
+            catalogRevision: CATALOG_REVISION,
           },
         },
         undefined,

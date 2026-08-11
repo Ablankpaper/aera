@@ -17,6 +17,7 @@ import type {
   CreateAgentDraftInput,
   OfficialAgentSummary,
 } from "../../shared/agentera-agent-control";
+import type { OwnerModelRouteSelection } from "../../shared/model-configuration";
 import { CapabilityAuthoringService } from "./capability-authoring-service";
 import type { AgenteraAgentControlClient } from "./client";
 import type { AgenteraHermesAdapter } from "./hermes-adapter";
@@ -30,8 +31,10 @@ import {
 import {
   AgenteraAgentControlManager,
   localProfileHandleForPath,
+  resolveInstallationModelSelection,
   runtimeComponentKey,
 } from "./manager";
+import type { OwnerModelRouteCatalog } from "./owner-model-route-catalog";
 
 const OWNER = {
   tenantId: "10000000-0000-4000-8000-000000000001",
@@ -195,6 +198,33 @@ describe("Agent control Organization Foundation context", () => {
     for (const root of roots.splice(0)) {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  // @lat: [[agentera-agent-control-plane#Installation and binding#Model policy and runtime selection]]
+  it("rejects a stale owner-catalog selection before an installation write", () => {
+    const selection: OwnerModelRouteSelection = {
+      sourceProfileId: "account-home",
+      modelLibraryId: "60000000-0000-4000-8000-000000000001",
+      catalogRevision: "a".repeat(64),
+    };
+    const resolve = vi.fn(() => {
+      throw Object.assign(new Error("stale"), {
+        code: "model_switch_route_stale",
+      });
+    });
+    const writeInstallation = vi.fn();
+
+    expect(() => {
+      const route = resolveInstallationModelSelection(
+        { resolve } as unknown as OwnerModelRouteCatalog,
+        selection,
+      );
+      writeInstallation(route);
+    }).toThrowError(
+      expect.objectContaining({ code: "model_switch_route_stale" }),
+    );
+    expect(resolve).toHaveBeenCalledWith(selection);
+    expect(writeInstallation).not.toHaveBeenCalled();
   });
 
   it("maps an attached Profile path back to the exact local MCP handle", () => {

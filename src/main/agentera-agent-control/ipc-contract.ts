@@ -7,6 +7,7 @@ import type {
   AgenteraAgentInstallationSummary,
   AgenteraAgentOperationScope,
   AgenteraAgentVersionSummary,
+  AgentRuntimeModelSelection,
   AgenteraClaimVersionInput,
   AgenteraInstallVersionInput,
   AgenteraRepairInstallationModelInput,
@@ -124,16 +125,26 @@ function parseProfileId(value: unknown): string {
   return value;
 }
 
-function parseRuntimeModelSelection(value: unknown): {
-  sourceProfileId: string;
-  modelLibraryId: string;
-} {
-  if (!exactObject(value, ["sourceProfileId", "modelLibraryId"])) {
+function parseRuntimeModelSelection(
+  value: unknown,
+): AgentRuntimeModelSelection {
+  if (
+    !exactObject(value, [
+      "sourceProfileId",
+      "modelLibraryId",
+      "catalogRevision",
+    ])
+  ) {
     return invalidRequest();
   }
   return {
     sourceProfileId: parseProfileId(value.sourceProfileId),
     modelLibraryId: parseAgentControlId(value.modelLibraryId),
+    catalogRevision:
+      typeof value.catalogRevision === "string" &&
+      SHA256_PATTERN.test(value.catalogRevision)
+        ? value.catalogRevision
+        : invalidRequest(),
   };
 }
 
@@ -920,6 +931,15 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
   }
   if (code === "profile_model_configuration_failed") {
     return "profile_model_configuration_failed";
+  }
+  if (code === "model_switch_route_stale") return "model_route_stale";
+  if (
+    code === "model_switch_route_unavailable" ||
+    code === "model_switch_route_owner_mismatch" ||
+    code === "model_switch_credential_unavailable" ||
+    code === "model_catalog_empty"
+  ) {
+    return "model_route_unavailable";
   }
   if (code === "profile_capability_configuration_required") {
     return "profile_capability_configuration_required";

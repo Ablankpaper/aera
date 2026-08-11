@@ -18,6 +18,7 @@ import type {
   AgenteraRepairInstallationModelInput,
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
+  AgentRuntimeModelSelection,
   ConfirmExperienceCandidateImportInput,
   ConfirmCapabilityBindingsInput,
   ConfirmCapabilityBindingsResult,
@@ -127,6 +128,7 @@ import {
   serializeInstallation,
   serializeVersion,
 } from "./ipc-contract";
+import type { OwnerModelRouteCatalog } from "./owner-model-route-catalog";
 
 export interface PrepareAgenteraHermesTurnInput {
   conversationKey: string;
@@ -172,6 +174,8 @@ interface FullAgentControlOptions {
 
 export interface AgenteraAgentControlManagerOptions extends Partial<FullAgentControlOptions> {
   profileBindings: AgenteraProfileBindingStore;
+  /** Shared Main-owned catalog used to revalidate every model route handle. */
+  getOwnerModelRouteCatalog?: () => OwnerModelRouteCatalog | null;
   /** Task-12 compatibility seam used by focused manager tests. */
   hermesAdapter?: AgenteraHermesAdapter;
   /** Test seam for proving that cloud outbox delivery never blocks Hermes. */
@@ -190,6 +194,17 @@ export interface AgenteraEncryptedBackupUserSource {
     baseOwnerScope: "USER";
   };
   runtimeBindingProvenance: Uint8Array;
+}
+
+export function resolveInstallationModelSelection(
+  catalog: Pick<OwnerModelRouteCatalog, "resolve">,
+  selection: AgentRuntimeModelSelection,
+): { sourceProfileId: string; modelLibraryId: string } {
+  const route = catalog.resolve(selection);
+  return {
+    sourceProfileId: route.sourceProfileId,
+    modelLibraryId: route.modelLibraryId,
+  };
 }
 
 interface RuntimeComponents {
@@ -489,6 +504,35 @@ export class AgenteraAgentControlManager {
       this.trust = null;
       this.projection = null;
     }
+  }
+
+  private resolveModelSelection(selection: AgentRuntimeModelSelection): {
+    sourceProfileId: string;
+    modelLibraryId: string;
+  } {
+    const catalog = this.options.getOwnerModelRouteCatalog?.() ?? null;
+    if (!catalog) throw codedError("model_route_unavailable");
+    return resolveInstallationModelSelection(catalog, selection);
+  }
+
+  /**
+   * Convert a Beta.26 persisted two-field operation into a fresh, revisioned
+   * catalog selection before any new Profile bytes are written.
+   */
+  private resolvePersistedModelSelection(
+    sourceProfileId: string,
+    modelLibraryId: string,
+  ): { sourceProfileId: string; modelLibraryId: string } {
+    const catalog = this.options.getOwnerModelRouteCatalog?.() ?? null;
+    if (!catalog) throw codedError("model_route_unavailable");
+    const snapshot = catalog.snapshot();
+    const route = snapshot.routes.find(
+      (candidate) =>
+        candidate.selection.sourceProfileId === sourceProfileId &&
+        candidate.selection.modelLibraryId === modelLibraryId,
+    );
+    if (!route) throw codedError("model_route_unavailable");
+    return this.resolveModelSelection(route.selection);
   }
 
   getState(): AgenteraAgentControlPublicState {
@@ -1061,6 +1105,9 @@ export class AgenteraAgentControlManager {
     const source = this.operationAssetContext(scope);
     this.assertInstallationRole(source);
     await this.assertOnlineLocalRuntimeAccess();
+    const selectedRoute = input.modelSelection
+      ? this.resolveModelSelection(input.modelSelection)
+      : null;
     const result = await (
       await this.ensureRuntimeComponents()
     ).installations.install({
@@ -1071,8 +1118,8 @@ export class AgenteraAgentControlManager {
         kind: "fresh",
         name: input.profileName,
         modelSourceProfileId:
-          input.modelSelection?.sourceProfileId ?? input.modelProfileId,
-        modelSourceModelId: input.modelSelection?.modelLibraryId,
+          selectedRoute?.sourceProfileId ?? input.modelProfileId,
+        modelSourceModelId: selectedRoute?.modelLibraryId,
       },
     });
     this.emitState();
@@ -1135,6 +1182,10 @@ export class AgenteraAgentControlManager {
     const context = this.operationAssetContext(scope);
     this.assertInstallationRole(context);
     await this.assertOnlineLocalRuntimeAccess();
+    const selectedRoute =
+      input.target.kind === "fresh" && input.target.modelSelection
+        ? this.resolveModelSelection(input.target.modelSelection)
+        : null;
     const profiles = this.requireFull().profiles;
     const components = await this.ensureRuntimeComponents();
     this.assertInstallationInContext(
@@ -1147,9 +1198,8 @@ export class AgenteraAgentControlManager {
             kind: "fresh",
             name: input.target.profileName,
             modelSourceProfileId:
-              input.target.modelSelection?.sourceProfileId ??
-              input.target.modelProfileId,
-            modelSourceModelId: input.target.modelSelection?.modelLibraryId,
+              selectedRoute?.sourceProfileId ?? input.target.modelProfileId,
+            modelSourceModelId: selectedRoute?.modelLibraryId,
           } as const)
         : ({
             kind: "claim",
@@ -1196,13 +1246,16 @@ export class AgenteraAgentControlManager {
     const context = this.operationAssetContext(scope);
     this.assertInstallationRole(context);
     await this.assertOnlineLocalRuntimeAccess();
+    const selectedRoute = input.modelSelection
+      ? this.resolveModelSelection(input.modelSelection)
+      : null;
     const components = await this.ensureRuntimeComponents();
     this.assertInstallationInContext(
       components.installations.getLocalInstallation(input.id),
       context,
     );
     const modelSourceProfileId =
-      input.modelSelection?.sourceProfileId ?? input.modelProfileId;
+      selectedRoute?.sourceProfileId ?? input.modelProfileId;
     if (!modelSourceProfileId) throw codedError("invalid_request");
     const result = await components.installations.repairInstallationModel({
       agentInstallationId: input.id,
@@ -1211,7 +1264,7 @@ export class AgenteraAgentControlManager {
       ),
       localProfileId: input.localProfileId,
       modelSourceProfileId,
-      modelSourceModelId: input.modelSelection?.modelLibraryId,
+      modelSourceModelId: selectedRoute?.modelLibraryId,
     });
     this.emitState();
     return serializeInstallation(result);
@@ -1860,6 +1913,26 @@ export class AgenteraAgentControlManager {
         }),
       );
     };
+    const installationProfiles: AgentInstallationProfileAdapter = full.profiles
+      .configureFreshProfileModel
+      ? {
+          ...full.profiles,
+          configureFreshProfileModel: (input) => {
+            const resolved = input.sourceModelId
+              ? this.resolvePersistedModelSelection(
+                  input.sourceProfileId,
+                  input.sourceModelId,
+                )
+              : null;
+            full.profiles.configureFreshProfileModel?.({
+              ...input,
+              sourceProfileId:
+                resolved?.sourceProfileId ?? input.sourceProfileId,
+              ...(resolved ? { sourceModelId: resolved.modelLibraryId } : {}),
+            });
+          },
+        }
+      : full.profiles;
     const installations = new AgentInstallationManager({
       database: full.database,
       client: full.client,
@@ -1867,7 +1940,7 @@ export class AgenteraAgentControlManager {
       cache,
       projection: this.projection,
       profileBindings: this.profileBindings,
-      profiles: full.profiles,
+      profiles: installationProfiles,
       owner,
       runtimeVersion,
       capabilityBindingStore,

@@ -147,6 +147,7 @@ function publicRoute(
 export class OwnerModelRouteCatalog {
   private readonly dependencies: OwnerModelRouteCatalogDependencies;
   private readonly defaultRequestedProfileId: string | undefined;
+  private readonly revisionTargets = new Map<string, string>();
 
   constructor(
     dependencies: OwnerModelRouteCatalogDependencies,
@@ -211,7 +212,7 @@ export class OwnerModelRouteCatalog {
     }
 
     const revision = this.revision(ownerKey, targetProfileId, candidates);
-    return {
+    const snapshot = {
       revision,
       targetProfileId,
       routes: candidates.map((candidate) => {
@@ -225,10 +226,14 @@ export class OwnerModelRouteCatalog {
         );
       }),
     };
+    this.revisionTargets.set(revision, targetProfileId);
+    return snapshot;
   }
 
   resolve(selection: OwnerModelRouteSelection): ResolvedOwnerModelRoute {
-    const snapshot = this.snapshot();
+    const snapshot = this.snapshot(
+      this.revisionTargets.get(selection.catalogRevision),
+    );
     if (selection.catalogRevision !== snapshot.revision) {
       throw codedError("model_switch_route_stale");
     }

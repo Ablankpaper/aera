@@ -14,6 +14,7 @@ import {
 import {
   InstallationOperationStore,
   InstallationOperationStoreError,
+  parseBeta26PersistedRuntimeModelSelection,
   type InstallationOperationRecord,
 } from "./installation-operation-store";
 
@@ -61,6 +62,26 @@ describe("durable Agent Installation operation journal", () => {
   afterEach(() => {
     database.close();
     rmSync(root, { recursive: true, force: true });
+  });
+
+  // @lat: [[provider-setup#Owner-scoped model route catalog]]
+  it("parses Beta.26 persisted model handles only for recovery migration", () => {
+    expect(
+      parseBeta26PersistedRuntimeModelSelection(
+        "model-source",
+        "custom:model-one",
+      ),
+    ).toEqual({
+      sourceProfileId: "model-source",
+      modelLibraryId: "custom:model-one",
+    });
+    expect(() =>
+      parseBeta26PersistedRuntimeModelSelection("../foreign", "model-one"),
+    ).toThrow(
+      expect.objectContaining<Partial<InstallationOperationStoreError>>({
+        code: "operation_corrupt",
+      }),
+    );
   });
 
   function beginFresh(): InstallationOperationRecord {

@@ -180,6 +180,34 @@ function optionalBoundedText(
     : boundedText(value, maximumBytes, code);
 }
 
+/**
+ * Beta.26 journals persisted only the source Profile and model-library
+ * handles. This parser is intentionally internal/recovery-only; new IPC
+ * callers must provide a catalog revision and never call this compatibility
+ * boundary.
+ */
+export function parseBeta26PersistedRuntimeModelSelection(
+  sourceProfileId: unknown,
+  modelLibraryId: unknown,
+): { sourceProfileId: string; modelLibraryId: string } {
+  const parsedProfileId = optionalProfileId(
+    sourceProfileId,
+    "operation_corrupt",
+  );
+  const parsedModelLibraryId = optionalBoundedText(
+    modelLibraryId,
+    512,
+    "operation_corrupt",
+  );
+  if (parsedProfileId === null || parsedModelLibraryId === null) {
+    throw new InstallationOperationStoreError("operation_corrupt");
+  }
+  return {
+    sourceProfileId: parsedProfileId,
+    modelLibraryId: parsedModelLibraryId,
+  };
+}
+
 function timestamp(
   value: unknown,
   code: InstallationOperationStoreErrorCode,
@@ -318,15 +346,22 @@ function parseRow(row: unknown): InstallationOperationRecord {
     value.display_name === null
       ? null
       : boundedText(value.display_name, 256, "operation_corrupt");
-  const modelSourceProfileId = optionalProfileId(
-    value.model_source_profile_id,
-    "operation_corrupt",
-  );
-  const modelSourceModelId = optionalBoundedText(
-    value.model_source_model_id,
-    512,
-    "operation_corrupt",
-  );
+  const hasPersistedModelSelection =
+    value.model_source_profile_id !== null &&
+    value.model_source_profile_id !== undefined;
+  const hasPersistedModelHandle =
+    hasPersistedModelSelection ||
+    (value.model_source_model_id !== null &&
+      value.model_source_model_id !== undefined);
+  const parsedPersistedSelection = hasPersistedModelHandle
+    ? parseBeta26PersistedRuntimeModelSelection(
+        value.model_source_profile_id,
+        value.model_source_model_id,
+      )
+    : null;
+  const modelSourceProfileId =
+    parsedPersistedSelection?.sourceProfileId ?? null;
+  const modelSourceModelId = parsedPersistedSelection?.modelLibraryId ?? null;
   if (
     (targetKind !== "fresh" && targetKind !== "claim") ||
     (targetKind === "fresh" && displayName === null) ||
