@@ -1,7 +1,10 @@
 // @vitest-environment node
 
 import { describe, expect, it, vi } from "vitest";
-import { listAgentRuntimeModelRoutes } from "./runtime-model-routes";
+import {
+  listAgentRuntimeModelRoutes,
+  listResolvedAgentRuntimeModelRoutes,
+} from "./runtime-model-routes";
 
 type RouteDependencies = NonNullable<
   Parameters<typeof listAgentRuntimeModelRoutes>[1]
@@ -93,5 +96,44 @@ describe("Agent runtime model routes", () => {
         model: "claude-sonnet-4-6",
       }),
     ]);
+  });
+
+  it("keeps API mode and a private credential reference in the Main-only route", () => {
+    const dependencies: RouteDependencies = {
+      readModels: vi.fn(() => [
+        {
+          id: "petoi-gpt",
+          name: "GPT 5.6",
+          provider: "custom",
+          providerLabel: "Petoi",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://api.petoi.cn/v1",
+          apiMode: "codex_responses",
+          createdAt: 1,
+        },
+      ]),
+      listCustomProviders: vi.fn(() => [
+        {
+          id: "petoi",
+          name: "Petoi",
+          baseUrl: "https://api.petoi.cn/v1",
+          createdAt: 1,
+        },
+      ]),
+      getSecret: vi.fn(() => "configured"),
+      hasOAuthCredentials: vi.fn(() => false),
+    };
+
+    expect(
+      listResolvedAgentRuntimeModelRoutes("account-home", dependencies),
+    ).toEqual([
+      expect.objectContaining({
+        apiMode: "codex_responses",
+        credentialRef: "CUSTOM_PROVIDER_PETOI_KEY",
+      }),
+    ]);
+    expect(
+      listAgentRuntimeModelRoutes("account-home", dependencies)[0],
+    ).not.toHaveProperty("credentialRef");
   });
 });

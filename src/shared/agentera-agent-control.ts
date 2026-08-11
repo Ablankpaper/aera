@@ -621,6 +621,8 @@ export interface AgentRuntimeModelRoute {
   model: string;
   displayName: string;
   baseUrl: string;
+  /** Wire protocol used by Main; absent only for Beta.26 serialized routes. */
+  apiMode?: string | null;
 }
 
 /** Renderer selection revalidated by Main before any Runtime Profile write. */
