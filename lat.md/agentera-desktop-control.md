@@ -27,6 +27,8 @@ The allowed terminal codes are `HEALTHY`, `DESKTOP_UNHEALTHY`, `RUNTIME_UNAVAILA
 
 Only account/device isolation keys, command ID, running or terminal state, fixed result fields, and timestamps are persisted. Corrupt or oversized files fail closed to an empty journal.
 
+POSIX platforms verify `0600` mode bits directly; Windows stores the same bounded journal inside Electron's per-user data directory and relies on that directory's user ACL because Node's POSIX mode bits are not authoritative there.
+
 ## Renderer privacy boundary
 
 The preload exposes only `getState` and `onStateChanged`; [[src/shared/agentera-desktop-control.ts#serializeDesktopControlPublicState]] reconstructs status, last heartbeat, fixed error code, and fixed health result from allowlists.
@@ -37,6 +39,6 @@ The preload exposes only `getState` and `onStateChanged`; [[src/shared/agentera-
 
 The delivery gate drives one real Electron Desktop through isolated Cloud and Admin services; its temporary Admin files are restored during teardown.
 
-Harness boundary tests use Vitest's Node environment because they exercise filesystem, process, and SQLite-backed test infrastructure.
+Harness boundary tests use Vitest's Node environment and platform-native paths because they exercise filesystem, process, and SQLite-backed test infrastructure on macOS, Linux, and Windows.
 
 [[tests/e2e/support/agentera-agent-control-harness.ts#buildDesktopFleetAdminSeedScript]] wraps Payload initialization in an async entrypoint so `tsx` can compile the temporary Admin seed under CommonJS rules. The Runtime-unavailable leg clears only the selected run-owned device installation and test seed. [[tests/e2e/agentera-desktop-fleet.e2e.ts]] remains the end-to-end proof owner.

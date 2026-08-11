@@ -58,8 +58,9 @@ describe("Desktop Fleet E2E harness boundaries", () => {
     ).desktopFleetAdminSeedPath;
 
     expect(seedPath).toBeTypeOf("function");
-    expect(seedPath!("/tmp/aera-desktop-fleet-e2e-123")).toBe(
-      "/tmp/aera-desktop-fleet-e2e-123/seed-desktop-fleet-admin.mts",
+    const runRoot = join(tmpdir(), "aera-desktop-fleet-e2e-123");
+    expect(seedPath!(runRoot)).toBe(
+      join(runRoot, "seed-desktop-fleet-admin.mts"),
     );
   });
 
@@ -74,10 +75,11 @@ describe("Desktop Fleet E2E harness boundaries", () => {
     ).desktopFleetAdminServerInvocation;
 
     expect(invocation).toBeTypeOf("function");
-    const result = invocation!("/tmp/aera-admin", "http://127.0.0.1:45678");
+    const adminRoot = join(tmpdir(), "aera-admin");
+    const result = invocation!(adminRoot, "http://127.0.0.1:45678");
     expect(result.executable).toBe(process.execPath);
     expect(result.args).toEqual([
-      "/tmp/aera-admin/node_modules/next/dist/bin/next",
+      join(adminRoot, "node_modules", "next", "dist", "bin", "next"),
       "dev",
       "--port",
       "45678",
@@ -99,13 +101,17 @@ describe("Desktop Fleet E2E harness boundaries", () => {
     ).desktopFleetAdminEnvironmentDiagnostics;
 
     expect(diagnostics).toBeTypeOf("function");
+    const pkiRoot = join(tmpdir(), "aera-admin-control-pki");
     expect(
       diagnostics!({
         AGENTERA_CLOUD_ADMIN_BASE_URL: "https://127.0.0.1:1234",
-        AGENTERA_CLOUD_ADMIN_CA_FILE: "/tmp/ca.pem",
-        AGENTERA_CLOUD_ADMIN_CLIENT_CERT_FILE: "/tmp/client.pem",
-        AGENTERA_CLOUD_ADMIN_CLIENT_KEY_FILE: "/tmp/client-key.pem",
-        AGENTERA_CLOUD_ADMIN_JWT_SIGNING_KEY_FILE: "/tmp/service-key.pem",
+        AGENTERA_CLOUD_ADMIN_CA_FILE: join(pkiRoot, "ca.pem"),
+        AGENTERA_CLOUD_ADMIN_CLIENT_CERT_FILE: join(pkiRoot, "client.pem"),
+        AGENTERA_CLOUD_ADMIN_CLIENT_KEY_FILE: join(pkiRoot, "client-key.pem"),
+        AGENTERA_CLOUD_ADMIN_JWT_SIGNING_KEY_FILE: join(
+          pkiRoot,
+          "service-key.pem",
+        ),
         AGENTERA_CLOUD_ADMIN_JWT_ISSUER: "aera-admin",
         AGENTERA_CLOUD_ADMIN_JWT_SUBJECT: "aera-admin-e2e",
         AGENTERA_CLOUD_ADMIN_SCOPES: '["desktop_control:read"]',
@@ -173,11 +179,12 @@ describe("Desktop Fleet E2E harness boundaries", () => {
   });
 
   it("returns only run-owned device and PKI paths", () => {
-    expect(desktopFleetOwnedPaths("/tmp/aera-desktop-fleet-e2e-123")).toEqual(
+    const runRoot = join(tmpdir(), "aera-desktop-fleet-e2e-123");
+    expect(desktopFleetOwnedPaths(runRoot)).toEqual(
       expect.arrayContaining([
-        "/tmp/aera-desktop-fleet-e2e-123/pki",
-        "/tmp/aera-desktop-fleet-e2e-123/device-a/electron-user-data",
-        "/tmp/aera-desktop-fleet-e2e-123/device-a/hermes-home",
+        join(runRoot, "pki"),
+        join(runRoot, "device-a", "electron-user-data"),
+        join(runRoot, "device-a", "hermes-home"),
       ]),
     );
   });

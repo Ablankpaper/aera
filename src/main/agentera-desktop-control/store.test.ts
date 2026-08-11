@@ -7,7 +7,7 @@ import { DesktopControlJournal } from "./store";
 
 describe("DesktopControlJournal", () => {
   // @lat: [[lat.md/agentera-desktop-control#Idempotent receipt journal]]
-  it("persists bounded running and terminal receipts with owner-only permissions", async () => {
+  it("persists bounded running and terminal receipts with owner-only POSIX permissions", async () => {
     const root = join(tmpdir(), `aera-desktop-control-${randomUUID()}`);
     await mkdir(root, { recursive: true });
     const journal = new DesktopControlJournal(root);
@@ -29,18 +29,13 @@ describe("DesktopControlJournal", () => {
     const record = journal.get(principal, "command-a");
     expect(record?.state).toBe("terminal");
     expect(record?.result?.code).toBe("RUNTIME_UNAVAILABLE");
-    expect(
-      (await stat(join(root, "agentera-desktop-control", "state.json"))).mode &
-        0o777,
-    ).toBe(0o600);
-    expect(
-      JSON.stringify(
-        await readFile(
-          join(root, "agentera-desktop-control", "state.json"),
-          "utf8",
-        ),
-      ),
-    ).not.toMatch(/path|log|secret/i);
+    const journalFile = join(root, "agentera-desktop-control", "state.json");
+    if (process.platform !== "win32") {
+      expect((await stat(journalFile)).mode & 0o777).toBe(0o600);
+    }
+    expect(JSON.stringify(await readFile(journalFile, "utf8"))).not.toMatch(
+      /path|log|secret/i,
+    );
   });
 
   it("fails closed for corrupt or oversized journals", async () => {
