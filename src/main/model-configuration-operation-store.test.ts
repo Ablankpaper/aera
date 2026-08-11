@@ -89,6 +89,10 @@ describe("ModelConfigurationOperationStore", () => {
       /api[_-]?key|secret|fileBody|absolutePath/i,
     );
     expect(JSON.stringify(record)).not.toContain(paths.config);
+    expect(record.oldRouteKey).toBe("openai\0gpt-5.6\0\0chat_completions");
+    expect(record.newRouteKey).toBe(
+      "custom:petoi\0gpt-5.6-sol\0https://api.petoi.cn/v1\0codex_responses",
+    );
     const columns = database.sqlite
       .prepare("PRAGMA table_info(desktop_model_configuration_operations)")
       .all() as Array<{ name: string }>;

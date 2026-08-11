@@ -107,6 +107,8 @@ interface OperationRow {
   stage?: unknown;
   old_route_key?: unknown;
   new_route_key?: unknown;
+  old_route_key_hex?: unknown;
+  new_route_key_hex?: unknown;
   file_manifest_json?: unknown;
   before_digest_json?: unknown;
   after_digest_json?: unknown;
@@ -175,6 +177,64 @@ function bounded(value: unknown, label: string, maximum: number): string {
     throw new Error(`Invalid model configuration ${label}.`);
   }
   return value;
+}
+
+const ROUTE_STORAGE_PREFIX = "b64v1:";
+
+function canonicalRouteKey(value: unknown, label: string): string {
+  const route = bounded(value, label, 4096);
+  if (route.split("\0").length !== 4) {
+    throw new Error(`Invalid model configuration ${label}.`);
+  }
+  return route;
+}
+
+function encodeRouteKey(value: unknown, label: string): string {
+  const route = canonicalRouteKey(value, label);
+  const encoded = `${ROUTE_STORAGE_PREFIX}${Buffer.from(route, "utf8").toString("base64url")}`;
+  if (encoded.length > 4096) {
+    throw new Error(`Invalid model configuration ${label}.`);
+  }
+  return encoded;
+}
+
+function decodeRouteKeyHex(value: unknown, label: string): string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > 16_384 ||
+    value.length % 2 !== 0 ||
+    !/^[0-9A-F]+$/i.test(value)
+  ) {
+    throw new Error(`Model configuration operation ${label} is corrupt.`);
+  }
+  const storedBytes = Buffer.from(value, "hex");
+  if (storedBytes.toString("hex").toUpperCase() !== value.toUpperCase()) {
+    throw new Error(`Model configuration operation ${label} is corrupt.`);
+  }
+  const stored = storedBytes.toString("utf8");
+  if (!storedBytes.equals(Buffer.from(stored, "utf8"))) {
+    throw new Error(`Model configuration operation ${label} is corrupt.`);
+  }
+  if (!stored.startsWith(ROUTE_STORAGE_PREFIX)) {
+    // Compatibility for operations written by the unreleased v1 coordinator:
+    // SQLite TEXT readers stop at NUL, while hex() preserves the complete
+    // canonical identity needed for deterministic recovery.
+    return canonicalRouteKey(stored, label);
+  }
+  const payload = stored.slice(ROUTE_STORAGE_PREFIX.length);
+  if (!payload || !/^[A-Za-z0-9_-]+$/.test(payload)) {
+    throw new Error(`Model configuration operation ${label} is corrupt.`);
+  }
+  const decodedBytes = Buffer.from(payload, "base64url");
+  if (decodedBytes.toString("base64url") !== payload) {
+    throw new Error(`Model configuration operation ${label} is corrupt.`);
+  }
+  const decoded = decodedBytes.toString("utf8");
+  if (!decodedBytes.equals(Buffer.from(decoded, "utf8"))) {
+    throw new Error(`Model configuration operation ${label} is corrupt.`);
+  }
+  return canonicalRouteKey(decoded, label);
 }
 
 function isoDate(value: unknown): string {
@@ -266,8 +326,8 @@ function parseOperationRow(
     profileId: profileId(row.profile_id),
     state,
     stage,
-    oldRouteKey: bounded(row.old_route_key, "old route", 4096),
-    newRouteKey: bounded(row.new_route_key, "new route", 4096),
+    oldRouteKey: decodeRouteKeyHex(row.old_route_key_hex, "old route"),
+    newRouteKey: decodeRouteKeyHex(row.new_route_key_hex, "new route"),
     files: parseFiles(parseJson(row.file_manifest_json, "manifest")),
     beforeDigests: parseDigests(
       parseJson(row.before_digest_json, "before digests"),
@@ -491,8 +551,8 @@ export class ModelConfigurationOperationStore {
         id,
         bounded(input.ownerHandle, "owner handle", 512),
         targetProfileId,
-        bounded(input.oldRouteKey, "old route", 4096),
-        bounded(input.newRouteKey, "new route", 4096),
+        encodeRouteKey(input.oldRouteKey, "old route"),
+        encodeRouteKey(input.newRouteKey, "new route"),
         JSON.stringify(files),
         JSON.stringify(beforeDigests),
         timestamp,
@@ -506,7 +566,9 @@ export class ModelConfigurationOperationStore {
       this.database.sqlite
         .prepare(
           `SELECT operation_id, owner_handle, profile_id, state, stage,
-                  old_route_key, new_route_key, file_manifest_json,
+                  old_route_key, new_route_key,
+                  hex(old_route_key) AS old_route_key_hex,
+                  hex(new_route_key) AS new_route_key_hex, file_manifest_json,
                   before_digest_json, after_digest_json, created_at, updated_at
            FROM desktop_model_configuration_operations
            WHERE operation_id = ?`,
@@ -586,7 +648,9 @@ export class ModelConfigurationOperationStore {
       this.database.sqlite
         .prepare(
           `SELECT operation_id, owner_handle, profile_id, state, stage,
-                  old_route_key, new_route_key, file_manifest_json,
+                  old_route_key, new_route_key,
+                  hex(old_route_key) AS old_route_key_hex,
+                  hex(new_route_key) AS new_route_key_hex, file_manifest_json,
                   before_digest_json, after_digest_json, created_at, updated_at
            FROM desktop_model_configuration_operations
            WHERE state NOT IN ('committed', 'rolled_back')
