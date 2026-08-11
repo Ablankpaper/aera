@@ -1,5 +1,6 @@
 import { getRuntimeInvocation } from "../agentera-runtime-distribution/invocation";
 import { runConfigHealthCheck } from "../config-health";
+import { getDashboardStatus } from "../dashboard";
 import { getActiveProfileNameSync } from "../utils";
 import { isGatewayHealthy } from "../hermes";
 import type {
@@ -157,7 +158,15 @@ export async function runDesktopControlHealthProbe(
 export function createDefaultDesktopHealthDependencies(): DesktopHealthDependencies {
   return {
     getRuntimeInvocation,
-    isGatewayHealthy: () => isGatewayHealthy(getActiveProfileNameSync()),
+    isGatewayHealthy: async () => {
+      const profile = getActiveProfileNameSync();
+      try {
+        if ((await getDashboardStatus(profile)).running) return true;
+      } catch {
+        // The legacy API Gateway remains a valid fallback health target.
+      }
+      return isGatewayHealthy(profile);
+    },
     runConfigHealthCheck: () =>
       runConfigHealthCheck(getActiveProfileNameSync()),
   };

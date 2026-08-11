@@ -27,6 +27,7 @@
     "test:e2e:workspace-agent": "npm run build && playwright test tests/e2e/agentera-workspace-agent.e2e.ts",
     "test:e2e:experience-candidate": "npm run build && playwright test tests/e2e/agentera-experience-candidate.e2e.ts",
     "test:e2e:official-managed-agent": "npm run build && playwright test tests/e2e/agentera-official-managed-agent.e2e.ts",
+    "test:e2e:desktop-fleet": "npm run build && playwright test tests/e2e/agentera-desktop-fleet.e2e.ts",
     "test:e2e:official-quality": "playwright test tests/e2e/agentera-official-quality.e2e.ts",
     "test:e2e:encrypted-backup": "npm run build && playwright test tests/e2e/agentera-encrypted-backup.e2e.ts",
     "test:e2e:runtime-seed": "npm run build && playwright test tests/e2e/agentera-runtime-seed.e2e.ts",

@@ -177,6 +177,7 @@ const GUEST_CHANNELS = [
 const AUTHENTICATED_CHANNELS = [
   "adopt-hermes-home",
   "agentera-auth-open-portal",
+  "agentera-desktop-control-get-state",
   "agentera-user-profile-get",
   "agentera-user-profile-update",
   "agentera-global-profile-get",

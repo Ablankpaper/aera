@@ -1,7 +1,39 @@
 import { describe, expect, it, vi } from "vitest";
-import { runDesktopControlHealthProbe } from "./health";
+
+const gatewayMocks = vi.hoisted(() => ({
+  dashboardStatus: vi.fn(),
+  legacyGatewayHealthy: vi.fn(),
+}));
+
+vi.mock("../dashboard", () => ({
+  getDashboardStatus: gatewayMocks.dashboardStatus,
+}));
+vi.mock("../hermes", () => ({
+  isGatewayHealthy: gatewayMocks.legacyGatewayHealthy,
+}));
+vi.mock("../utils", () => ({
+  getActiveProfileNameSync: () => "default",
+}));
+
+import {
+  createDefaultDesktopHealthDependencies,
+  runDesktopControlHealthProbe,
+} from "./health";
 
 describe("Desktop control health probe", () => {
+  it("accepts the active Dashboard Gateway without requiring the legacy API Gateway", async () => {
+    gatewayMocks.dashboardStatus.mockResolvedValue({
+      supported: true,
+      running: true,
+    });
+    gatewayMocks.legacyGatewayHealthy.mockResolvedValue(false);
+
+    const dependencies = createDefaultDesktopHealthDependencies();
+
+    await expect(dependencies.isGatewayHealthy()).resolves.toBe(true);
+    expect(gatewayMocks.legacyGatewayHealthy).not.toHaveBeenCalled();
+  });
+
   // @lat: [[lat.md/agentera-desktop-control#Fixed health check]]
   it("returns runtime unavailable without running the gateway probe", async () => {
     const gateway = vi.fn(async () => true);

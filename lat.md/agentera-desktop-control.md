@@ -17,6 +17,8 @@ The main process obtains the bearer immediately before each request through [[sr
 
 Cloud may claim only `health_check`; [[src/main/agentera-desktop-control/health.ts#runDesktopControlHealthProbe]] maps Runtime availability, configuration health, and Gateway reachability to fixed codes without serializing issue text, profiles, paths, logs, or exceptions.
 
+Gateway reachability accepts the active Dashboard Gateway first and falls back to the legacy API Gateway probe; neither branch starts or restarts a service.
+
 The allowed terminal codes are `HEALTHY`, `DESKTOP_UNHEALTHY`, `RUNTIME_UNAVAILABLE`, `GATEWAY_UNAVAILABLE`, `HEALTH_CHECK_TIMEOUT`, and `CLIENT_INTERRUPTED`. Restart, upgrade, rollback, configuration delivery, arbitrary commands, and log upload are outside V1.
 
 ## Idempotent receipt journal
@@ -30,3 +32,9 @@ Only account/device isolation keys, command ID, running or terminal state, fixed
 The preload exposes only `getState` and `onStateChanged`; [[src/shared/agentera-desktop-control.ts#serializeDesktopControlPublicState]] reconstructs status, last heartbeat, fixed error code, and fixed health result from allowlists.
 
 [[src/renderer/src/components/settings/DesktopControlStatusCard.tsx#DesktopControlStatusCard]] reuses the existing Settings card system. It never receives Cloud tokens, account/device identifiers, raw responses, paths, logs, or detailed health issues.
+
+## Real cross-repository delivery gate
+
+The delivery gate drives one real Electron Desktop through isolated Cloud and Admin services; its temporary Admin files are restored during teardown.
+
+[[tests/e2e/support/agentera-agent-control-harness.ts#buildDesktopFleetAdminSeedScript]] wraps Payload initialization in an async entrypoint so `tsx` can compile the temporary Admin seed under CommonJS rules. The Runtime-unavailable leg clears only the selected run-owned device installation and test seed. [[tests/e2e/agentera-desktop-fleet.e2e.ts]] remains the end-to-end proof owner.
