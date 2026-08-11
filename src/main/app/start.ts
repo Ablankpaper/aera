@@ -140,6 +140,13 @@ import {
 } from "../agentera-auth/device-key";
 import { AgenteraEncryptedBackupClient } from "../agentera-encrypted-backup/client";
 import { AgenteraEncryptedBackupController } from "../agentera-encrypted-backup/controller";
+import { AgenteraDesktopControlClient } from "../agentera-desktop-control/client";
+import { AgenteraDesktopControlCoordinator } from "../agentera-desktop-control/coordinator";
+import {
+  createDefaultDesktopHealthDependencies,
+  runDesktopControlHealthProbe,
+} from "../agentera-desktop-control/health";
+import { DesktopControlJournal } from "../agentera-desktop-control/store";
 
 const APP_NAME =
   process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
@@ -231,6 +238,55 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
       appVersion: (app.getVersion().trim() || "unknown").slice(0, 64),
     }),
   });
+  let agenteraDesktopControl: AgenteraDesktopControlCoordinator | null = null;
+  try {
+    const desktopControlFetch: typeof fetch = (url, init) =>
+      net.fetch(url, {
+        ...init,
+        bypassCustomProtocolHandlers: true,
+      });
+    const desktopControlClient = new AgenteraDesktopControlClient({
+      origin: getAgenteraCloudOrigin(),
+      getAccessToken: () => agenteraAuth.getAccessTokenForCloudRequest(),
+      fetch: desktopControlFetch,
+    });
+    const healthDependencies = createDefaultDesktopHealthDependencies();
+    agenteraDesktopControl = new AgenteraDesktopControlCoordinator({
+      auth: agenteraAuth,
+      client: desktopControlClient,
+      journal: new DesktopControlJournal(app.getPath("userData")),
+      health: {
+        run: () => runDesktopControlHealthProbe(healthDependencies),
+      },
+      getHeartbeatMetadata: () => {
+        if (process.arch !== "arm64" && process.arch !== "x64") {
+          throw new Error(
+            "Desktop control does not support this architecture.",
+          );
+        }
+        return {
+          display_name: (hostname().trim() || "Aera device").slice(0, 100),
+          client_version: (app.getVersion().trim() || "unknown").slice(0, 64),
+          platform:
+            process.platform === "win32"
+              ? "windows"
+              : process.platform === "darwin"
+                ? "darwin"
+                : "linux",
+          arch: process.arch,
+          capabilities: ["diagnostics.health.read"],
+          uptime_seconds: Math.max(
+            0,
+            Math.min(604_800, Math.floor(process.uptime())),
+          ),
+        };
+      },
+    });
+    agenteraDesktopControl.start();
+  } catch {
+    agenteraDesktopControl = null;
+    console.error("[AGENTERA_DESKTOP_CONTROL] unavailable");
+  }
   const getAgenteraRuntimeOwner = (): AgenteraRuntimeOwner => {
     const state = agenteraAuth.getPublicState();
     if (!hasAgenteraSignedInAccess(state) && !hasAgenteraGuestAccess(state)) {
@@ -667,6 +723,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     runtimeDistribution,
     agenteraOfficialQuality,
     agenteraEncryptedBackup,
+    agenteraDesktopControl,
   });
 
   setupUpdater({ getMainWindow: () => mainWindow });
@@ -731,6 +788,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
       async () => {
         unsubscribeAgenteraAuth();
         unsubscribeProductSpace();
+        await agenteraDesktopControl?.close();
         const runtimeCleanup = stopActiveRuntimeContext({
           closeTuiGatewayPool: true,
         });

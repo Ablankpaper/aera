@@ -77,6 +77,7 @@ import type {
   AgenteraUnboundProfilePublicState,
 } from "../shared/agentera-runtime-access";
 import type { RuntimeDistributionPublicState } from "../shared/agentera-runtime-distribution";
+import type { DesktopControlPublicState } from "../shared/agentera-desktop-control";
 import type {
   AgentDraft,
   AgentDraftAssetInput,
@@ -2157,6 +2158,25 @@ const agenteraRuntimeDistributionAPI = {
   },
 };
 
+const agenteraDesktopControlAPI = {
+  getState: (): Promise<DesktopControlPublicState> =>
+    ipcRenderer.invoke("agentera-desktop-control-get-state"),
+  onStateChanged: (
+    callback: (state: DesktopControlPublicState) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      state: DesktopControlPublicState,
+    ): void => callback(state);
+    ipcRenderer.on("agentera-desktop-control-state-changed", handler);
+    return () =>
+      ipcRenderer.removeListener(
+        "agentera-desktop-control-state-changed",
+        handler,
+      );
+  },
+};
+
 const agenteraProductSpaceAPI = {
   getState: (): Promise<ProductSpaceResult<ProductSpacePublicState>> =>
     ipcRenderer.invoke("agentera-product-space-get-state"),
@@ -2835,6 +2855,10 @@ if (process.contextIsolated) {
       "agenteraRuntimeDistribution",
       agenteraRuntimeDistributionAPI,
     );
+    contextBridge.exposeInMainWorld(
+      "agenteraDesktopControl",
+      agenteraDesktopControlAPI,
+    );
   } catch (error) {
     console.error(error);
   }
@@ -2863,4 +2887,6 @@ if (process.contextIsolated) {
   window.agenteraRuntimeAccess = agenteraRuntimeAccessAPI;
   // @ts-ignore (define in dts)
   window.agenteraRuntimeDistribution = agenteraRuntimeDistributionAPI;
+  // @ts-ignore (define in dts)
+  window.agenteraDesktopControl = agenteraDesktopControlAPI;
 }

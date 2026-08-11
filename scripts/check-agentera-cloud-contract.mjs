@@ -38,6 +38,8 @@ const REQUIRED_PATHS = [
   "/api/v1/browser/logout",
   "/api/v1/devices",
   "/api/v1/devices/current/logout",
+  "/api/v1/devices/current/desktop-control/heartbeat",
+  "/api/v1/devices/current/desktop-control/commands/{commandID}/result",
   "/api/v1/devices/self-revoke",
   "/api/v1/devices/{device_id}",
   "/api/v1/legal/current",
@@ -121,6 +123,8 @@ const ERROR_CODES = [
   "candidate_already_reviewed",
   "candidate_dlp_blocked",
   "cloud_unavailable",
+  "desktop_command_conflict",
+  "desktop_command_not_found",
   "definition_archived",
   "deletion_window_expired",
   "device_limit_reached",
@@ -892,6 +896,21 @@ function validateCriticalContract(document) {
   for (const path of REQUIRED_PATHS) {
     if (!Object.hasOwn(paths, path))
       fail(`required endpoint ${path} is missing`);
+  }
+
+  const desktopOperations = [
+    "submitCurrentDesktopHeartbeat",
+    "submitCurrentDesktopCommandResult",
+  ];
+  const operationIds = Object.values(paths)
+    .flatMap((path) => Object.values(path ?? {}))
+    .filter((operation) => operation && typeof operation === "object")
+    .map((operation) => operation.operationId)
+    .filter((operationId) => typeof operationId === "string");
+  for (const operationId of desktopOperations) {
+    if (!operationIds.includes(operationId)) {
+      fail(`required Desktop operation ${operationId} is missing`);
+    }
   }
 
   const schemas = object(

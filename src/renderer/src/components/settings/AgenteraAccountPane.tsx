@@ -25,6 +25,7 @@ import type { AgenteraAccountActions } from "../AgenteraAccountMenu";
 import ProfileAvatar from "../common/ProfileAvatar";
 import { useAgenteraUserProfile } from "../useAgenteraUserProfile";
 import { fileToAvatarDataUrl } from "../../utils/imageResize";
+import DesktopControlStatusCard from "./DesktopControlStatusCard";
 
 type ProfileFeedback =
   | "saved"
@@ -374,6 +375,8 @@ export default function AgenteraAccountPane({
           )}
         </form>
       </section>
+
+      <DesktopControlStatusCard />
 
       <section className="settings-card">
         <header className="settings-card-head">

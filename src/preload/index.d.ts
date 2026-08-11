@@ -83,6 +83,7 @@ import type {
   AgenteraUnboundProfilePublicState,
 } from "../shared/agentera-runtime-access";
 import type { RuntimeDistributionPublicState } from "../shared/agentera-runtime-distribution";
+import type { DesktopControlPublicState } from "../shared/agentera-desktop-control";
 import type {
   AgentDraft,
   AgentDraftAssetInput,
@@ -212,6 +213,13 @@ interface AgenteraAuthAPI {
   ) => () => void;
   onStateChanged: (
     callback: (state: AgenteraAuthPublicState) => void,
+  ) => () => void;
+}
+
+interface AgenteraDesktopControlAPI {
+  getState: () => Promise<DesktopControlPublicState>;
+  onStateChanged: (
+    callback: (state: DesktopControlPublicState) => void,
   ) => () => void;
 }
 
@@ -2037,5 +2045,6 @@ declare global {
     agenteraAgents: AgenteraAgentsAPI;
     agenteraRuntimeAccess: AgenteraRuntimeAccessAPI;
     agenteraRuntimeDistribution: AgenteraRuntimeDistributionAPI;
+    agenteraDesktopControl: AgenteraDesktopControlAPI;
   }
 }

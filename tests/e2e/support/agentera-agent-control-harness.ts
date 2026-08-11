@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import {
   createServer,
   type IncomingHttpHeaders,
@@ -8,8 +8,10 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import { createRequire } from "node:module";
 import {
   chmod,
+  cp,
   lstat,
   mkdir,
   mkdtemp,
@@ -20,7 +22,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import {
@@ -50,6 +52,12 @@ const defaultCloudRoot = resolve(
 const cloudPublicOrigin = "http://127.0.0.1:8086";
 const password = "Aera Runtime E2E battery staple 2026";
 const REQUEST_BODY_LIMIT = 8 * 1024 * 1024;
+
+export const desktopFleetAdminScopes = Object.freeze([
+  "users:read",
+  "desktop_control:read",
+  "desktop_control:command",
+]);
 
 type SMSDelivery = {
   to: string;
@@ -99,6 +107,8 @@ export interface AgentControlHarness {
   browserPage: Page;
   composeStarted: boolean;
   runtimeSeedDirectory: string;
+  desktopControlClockFile: string | null;
+  desktopFleet: boolean;
   deviceRoots: Record<
     AgentControlDeviceName,
     { userData: string; hermesHome: string }
@@ -111,23 +121,30 @@ export interface AgentControlHarness {
 }
 
 export interface OfficialManagedAgentHarnessState {
+  mode: "legacy" | "desktopFleet";
   adminRoot: string;
   adminBinary: string;
   adminBootstrapBinary: string;
   cloudE2EBinary: string;
   adminBaseURL: string;
+  payloadBaseURL: string | null;
   cloudInternalOrigin: string;
   adminPostgresPort: number;
   adminRedisPort: number;
   adminComposeProject: string;
   adminComposeStarted: boolean;
   adminProcess: ChildProcess | null;
+  adminWebProcess: ChildProcess | null;
+  adminDatabaseFile: string | null;
   adminFixtureFile: string;
   cloudFixtureFile: string;
   cloudLogFile: string;
   adminLogFile: string;
   cloudPIDFile: string;
   pkiDirectory: string;
+  adminNextDistDirectory: string | null;
+  adminTsconfigSnapshot: string | null;
+  adminNextEnvSnapshot: string | null;
   environment: NodeJS.ProcessEnv;
 }
 
@@ -827,8 +844,7 @@ function officialEnvironment(
   const serviceKey = join(official.pkiDirectory, "service-key.pem");
   const servicePublic = join(official.pkiDirectory, "service-public.pem");
   const adminDatabase = `postgres://aera_admin:aera-admin-dev-only@127.0.0.1:${official.adminPostgresPort}/aera_admin?sslmode=disable`;
-
-  return {
+  const base: NodeJS.ProcessEnv = {
     ...process.env,
     AGENTERA_CLOUD_ENVIRONMENT: "test",
     AGENTERA_CLOUD_LISTEN_ADDR: new URL(harness.cloudBackendOrigin).host,
@@ -875,6 +891,12 @@ function officialEnvironment(
     AGENTERA_CLOUD_PLATFORM_DISPLAY_NAME: "Aera Official E2E",
     AGENTERA_CLOUD_OFFICIAL_ROLLOUT_HMAC_ACTIVE_KEY_ID: "official-e2e-v1",
     AGENTERA_CLOUD_OFFICIAL_ROLLOUT_HMAC_KEYS: cloudKeyRing(randomKey()),
+    ...(harness.desktopControlClockFile
+      ? {
+          AGENTERA_CLOUD_DESKTOP_CONTROL_TEST_CLOCK_FILE:
+            harness.desktopControlClockFile,
+        }
+      : {}),
     AERA_ADMIN_ENVIRONMENT: "test",
     AERA_ADMIN_LISTEN_ADDR: new URL(official.adminBaseURL).host,
     AERA_ADMIN_PUBLIC_URL: official.adminBaseURL,
@@ -910,32 +932,87 @@ function officialEnvironment(
     AERA_ADMIN_E2E_CLOUD_BINARY: harness.cloudBinary,
     AERA_ADMIN_E2E_CLOUD_PID_FILE: official.cloudPIDFile,
   };
+  if (official.mode === "desktopFleet") {
+    const databaseFile = official.adminDatabaseFile;
+    if (!databaseFile || !official.payloadBaseURL) {
+      throw new Error(
+        "Desktop Fleet Admin database and Payload origin are missing.",
+      );
+    }
+    return {
+      ...base,
+      DATABASE_URL: `file:${databaseFile}`,
+      PAYLOAD_SECRET: "aera-desktop-fleet-admin-secret",
+      NEXT_PUBLIC_SERVER_URL: official.payloadBaseURL,
+      ADMIN_WEB_URL: official.adminBaseURL,
+      AGENTERA_CLOUD_ADMIN_BASE_URL: official.cloudInternalOrigin,
+      AGENTERA_CLOUD_ADMIN_CA_FILE: caCertificate,
+      AGENTERA_CLOUD_ADMIN_CLIENT_CERT_FILE: clientCertificate,
+      AGENTERA_CLOUD_ADMIN_CLIENT_KEY_FILE: clientKey,
+      AGENTERA_CLOUD_ADMIN_JWT_SIGNING_KEY_FILE: serviceKey,
+      AGENTERA_CLOUD_ADMIN_JWT_ISSUER: "aera-admin",
+      AGENTERA_CLOUD_ADMIN_JWT_SUBJECT: "aera-admin-official-e2e",
+      AGENTERA_CLOUD_ADMIN_SCOPES: JSON.stringify(desktopFleetAdminScopes),
+      AGENTERA_CLOUD_ADMIN_TIMEOUT_MS: "5000",
+    };
+  }
+  return base;
 }
 
 async function createOfficialState(
   harness: AgentControlHarness,
   adminRoot: string,
+  mode: "legacy" | "desktopFleet" = "legacy",
 ): Promise<OfficialManagedAgentHarnessState> {
   const internalPort = await freePort();
   const adminPort = await freePort();
+  const payloadPort = mode === "desktopFleet" ? await freePort() : adminPort;
+  const adminNextDistDirectory =
+    mode === "desktopFleet"
+      ? join(adminRoot, `.next-desktop-fleet-${process.pid}`)
+      : null;
+  const adminTsconfigSnapshot =
+    mode === "desktopFleet"
+      ? readFileSync(join(adminRoot, "tsconfig.json"), "utf8")
+      : null;
+  let adminNextEnvSnapshot: string | null = null;
+  if (mode === "desktopFleet") {
+    try {
+      adminNextEnvSnapshot = readFileSync(
+        join(adminRoot, "next-env.d.ts"),
+        "utf8",
+      );
+    } catch {
+      adminNextEnvSnapshot = null;
+    }
+  }
   const official: OfficialManagedAgentHarnessState = {
+    mode,
     adminRoot,
     adminBinary: join(harness.root, "aera-admin"),
     adminBootstrapBinary: join(harness.root, "aera-admin-bootstrap"),
     cloudE2EBinary: join(harness.root, "aera-cloud-e2e"),
     adminBaseURL: `http://localhost:${adminPort}`,
+    payloadBaseURL:
+      mode === "desktopFleet" ? `http://127.0.0.1:${payloadPort}` : null,
     cloudInternalOrigin: `https://127.0.0.1:${internalPort}`,
     adminPostgresPort: await freePort(),
     adminRedisPort: await freePort(),
     adminComposeProject: `agentera-official-admin-e2e-${process.pid}`,
     adminComposeStarted: false,
     adminProcess: null,
+    adminWebProcess: null,
+    adminDatabaseFile:
+      mode === "desktopFleet" ? join(harness.root, "admin.sqlite") : null,
     adminFixtureFile: join(harness.root, "admin-fixtures.json"),
     cloudFixtureFile: join(harness.root, "cloud-fixture.json"),
     cloudLogFile: join(harness.root, "cloud.log"),
     adminLogFile: join(harness.root, "admin.log"),
     cloudPIDFile: join(harness.root, "cloud.pid"),
     pkiDirectory: join(harness.root, "pki"),
+    adminNextDistDirectory,
+    adminTsconfigSnapshot,
+    adminNextEnvSnapshot,
     environment: {},
   };
   await generateOfficialPKI(official);
@@ -998,12 +1075,54 @@ async function waitForInternalCloud(
 async function startOfficialAdmin(harness: AgentControlHarness): Promise<void> {
   const official = harness.official;
   if (!official) return;
-  const child = spawn(official.adminBinary, [], {
-    cwd: official.adminRoot,
-    env: official.environment,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const desktopFleetServer =
+    official.mode === "desktopFleet"
+      ? desktopFleetAdminServerInvocation(
+          official.adminRoot,
+          official.payloadBaseURL!,
+        )
+      : null;
+  const child =
+    official.mode === "desktopFleet"
+      ? spawn(desktopFleetServer!.executable, desktopFleetServer!.args, {
+          cwd: official.adminRoot,
+          env: {
+            ...official.environment,
+            NODE_OPTIONS: "--no-deprecation",
+            NEXT_DIST_DIR: `.next-desktop-fleet-${process.pid}`,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        })
+      : spawn(official.adminBinary, [], {
+          cwd: official.adminRoot,
+          env: official.environment,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+  const webChild =
+    official.mode === "desktopFleet"
+      ? spawn(
+          "pnpm",
+          [
+            "--dir",
+            "admin-web",
+            "dev",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            new URL(official.adminBaseURL).port,
+          ],
+          {
+            cwd: official.adminRoot,
+            env: {
+              ...official.environment,
+              VITE_PAYLOAD_PROXY_TARGET: official.payloadBaseURL!,
+            },
+            stdio: ["ignore", "pipe", "pipe"],
+          },
+        )
+      : null;
   official.adminProcess = child;
+  official.adminWebProcess = webChild;
   let output = "";
   const append = (chunk: Buffer): void => {
     output = `${output}${chunk.toString("utf8")}`.slice(-128 * 1024);
@@ -1011,28 +1130,120 @@ async function startOfficialAdmin(harness: AgentControlHarness): Promise<void> {
   };
   child.stdout?.on("data", append);
   child.stderr?.on("data", append);
-  const deadline = Date.now() + 30_000;
+  webChild?.stdout?.on("data", append);
+  webChild?.stderr?.on("data", append);
+  const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
+    if (child.exitCode !== null || webChild?.exitCode !== null) {
       throw new Error(`Aera Admin stopped before readiness.\n${output}`);
     }
     try {
-      const response = await fetch(`${official.adminBaseURL}/health/ready`);
-      if (response.ok) {
-        return;
-      }
+      const url =
+        official.mode === "desktopFleet"
+          ? `${official.adminBaseURL}/admin/login`
+          : `${official.adminBaseURL}/health/ready`;
+      const response = await fetch(url);
+      if (response.ok) return;
     } catch {
       // The Admin listener is still starting.
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 250));
   }
   child.kill("SIGTERM");
+  webChild?.kill("SIGTERM");
   throw new Error(`Aera Admin did not become ready.\n${output}`);
 }
 
-async function stopOfficialAdmin(harness: AgentControlHarness): Promise<void> {
-  const child = harness.official?.adminProcess;
-  if (harness.official) harness.official.adminProcess = null;
+export function desktopFleetAdminServerInvocation(
+  adminRoot: string,
+  payloadBaseURL: string,
+): { executable: string; args: string[] } {
+  return {
+    executable: process.execPath,
+    args: [
+      join(adminRoot, "node_modules", "next", "dist", "bin", "next"),
+      "dev",
+      "--port",
+      new URL(payloadBaseURL).port,
+    ],
+  };
+}
+
+export function desktopFleetAdminEnvironmentDiagnostics(
+  env: NodeJS.ProcessEnv,
+): {
+  allRequiredPresent: boolean;
+  baseURL: string | null;
+  baseURLValid: boolean;
+  filesValid: boolean;
+  identityValid: boolean;
+  scopesValid: boolean;
+} {
+  const required = [
+    "AGENTERA_CLOUD_ADMIN_BASE_URL",
+    "AGENTERA_CLOUD_ADMIN_CA_FILE",
+    "AGENTERA_CLOUD_ADMIN_CLIENT_CERT_FILE",
+    "AGENTERA_CLOUD_ADMIN_CLIENT_KEY_FILE",
+    "AGENTERA_CLOUD_ADMIN_JWT_SIGNING_KEY_FILE",
+    "AGENTERA_CLOUD_ADMIN_JWT_ISSUER",
+    "AGENTERA_CLOUD_ADMIN_JWT_SUBJECT",
+    "AGENTERA_CLOUD_ADMIN_SCOPES",
+  ] as const;
+  const values = required.map((key) => env[key]?.trim() || "");
+  const [
+    baseURL,
+    caFile,
+    clientCertFile,
+    clientKeyFile,
+    jwtKey,
+    issuer,
+    subject,
+    scopes,
+  ] = values;
+  let parsedURL: URL | null = null;
+  try {
+    parsedURL = new URL(baseURL);
+  } catch {
+    parsedURL = null;
+  }
+  let parsedScopes: unknown = null;
+  try {
+    parsedScopes = JSON.parse(scopes);
+  } catch {
+    parsedScopes = null;
+  }
+  return {
+    allRequiredPresent: required.every((key) => Boolean(env[key]?.trim())),
+    baseURL: baseURL || null,
+    baseURLValid:
+      parsedURL !== null &&
+      parsedURL.protocol === "https:" &&
+      parsedURL.host !== "" &&
+      parsedURL.username === "" &&
+      parsedURL.password === "" &&
+      parsedURL.search === "" &&
+      parsedURL.hash === "" &&
+      (parsedURL.pathname === "" || parsedURL.pathname === "/"),
+    filesValid: [caFile, clientCertFile, clientKeyFile, jwtKey].every(
+      (value) => isAbsolute(value) && normalize(value) === value,
+    ),
+    identityValid:
+      /^[a-z][a-z0-9._-]{2,63}$/.test(issuer) &&
+      /^[a-z][a-z0-9._-]{2,63}$/.test(subject),
+    scopesValid:
+      Array.isArray(parsedScopes) &&
+      parsedScopes.length > 0 &&
+      parsedScopes.length <= 16 &&
+      new Set(parsedScopes).size === parsedScopes.length &&
+      parsedScopes.every(
+        (value) =>
+          typeof value === "string" &&
+          /^[a-z][a-z0-9_]*(?::[a-z][a-z0-9_]*)?$/.test(value),
+      ),
+  };
+}
+
+async function stopChild(child: ChildProcess | null): Promise<void> {
   if (!child || child.exitCode !== null) return;
   child.kill("SIGTERM");
   await Promise.race([
@@ -1046,11 +1257,92 @@ async function stopOfficialAdmin(harness: AgentControlHarness): Promise<void> {
   ]);
 }
 
+async function stopOfficialAdmin(harness: AgentControlHarness): Promise<void> {
+  const official = harness.official;
+  if (!official) return;
+  const child = official.adminProcess;
+  const webChild = official.adminWebProcess;
+  official.adminProcess = null;
+  official.adminWebProcess = null;
+  await stopChild(webChild);
+  await stopChild(child);
+  if (official.mode === "desktopFleet") {
+    if (official.adminNextDistDirectory) {
+      await rm(official.adminNextDistDirectory, {
+        recursive: true,
+        force: true,
+        maxRetries: 20,
+        retryDelay: 100,
+      });
+    }
+    if (official.adminTsconfigSnapshot !== null) {
+      await writeFile(
+        join(official.adminRoot, "tsconfig.json"),
+        official.adminTsconfigSnapshot,
+        { encoding: "utf8", mode: 0o600 },
+      );
+    }
+    const nextEnvPath = join(official.adminRoot, "next-env.d.ts");
+    if (official.adminNextEnvSnapshot === null) {
+      await rm(nextEnvPath, { force: true });
+    } else {
+      await writeFile(nextEnvPath, official.adminNextEnvSnapshot, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+    }
+  }
+}
+
+export function buildDesktopFleetAdminSeedScript(
+  configPath: string,
+  payloadModulePath: string,
+): string {
+  return `import { getPayload } from ${JSON.stringify(payloadModulePath)};
+import config from ${JSON.stringify(configPath)};
+
+async function main() {
+  const payload = await getPayload({ config });
+  await payload.delete({ collection: "admins", where: { email: { equals: "desktop-fleet-operator@agentera.local" } }, overrideAccess: true });
+  await payload.create({ collection: "admins", overrideAccess: true, data: { displayName: "Desktop Fleet Operator", email: "desktop-fleet-operator@agentera.local", password: "Aera Desktop Fleet E2E operator 2026", role: "super_admin", active: true } });
+  await payload.destroy();
+}
+
+void main().catch((error: unknown) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+`;
+}
+
+export function desktopFleetAdminSeedPath(runRoot: string): string {
+  return join(runRoot, "seed-desktop-fleet-admin.mts");
+}
+
 async function bootstrapOfficialAdminFixtures(
   harness: AgentControlHarness,
 ): Promise<void> {
   const official = harness.official;
   if (!official) return;
+  if (official.mode === "desktopFleet") {
+    const seedScript = desktopFleetAdminSeedPath(harness.root);
+    const adminRequire = createRequire(
+      join(official.adminRoot, "package.json"),
+    );
+    await writeFile(
+      seedScript,
+      buildDesktopFleetAdminSeedScript(
+        join(official.adminRoot, "src/payload.config.ts"),
+        adminRequire.resolve("payload"),
+      ),
+      { encoding: "utf8", mode: 0o600 },
+    );
+    command("pnpm", ["exec", "tsx", seedScript], {
+      cwd: official.adminRoot,
+      env: official.environment,
+    });
+    return;
+  }
   const configPath = join(
     harness.root,
     "admin-bootstrap.playwright.config.mjs",
@@ -1088,13 +1380,64 @@ async function bootstrapOfficialAdminFixtures(
   );
 }
 
+function requireCleanDesktopFleetRepository(
+  environmentName: string,
+  markerPath: string,
+  expectedMarker: string,
+): string {
+  const configured = process.env[environmentName]?.trim();
+  if (!configured) throw new Error(`${environmentName} is required.`);
+  const repository = resolve(configured);
+  const topLevel = command(
+    "git",
+    ["-C", repository, "rev-parse", "--show-toplevel"],
+    {
+      cwd: desktopRoot,
+    },
+  ).trim();
+  if (resolve(topLevel) !== repository)
+    throw new Error(`${environmentName} must name the checkout root.`);
+  const status = command("git", ["-C", repository, "status", "--porcelain"], {
+    cwd: desktopRoot,
+  }).trim();
+  if (status) throw new Error(`${environmentName} checkout must be clean.`);
+  const marker = readFileSync(join(repository, markerPath), "utf8");
+  if (!marker.includes(expectedMarker))
+    throw new Error(
+      `${environmentName} has an unexpected repository identity.`,
+    );
+  return repository;
+}
+
 export async function createAgentControlHarness(
-  options: { officialManagedAgent?: boolean; encryptedBackup?: boolean } = {},
+  options: {
+    officialManagedAgent?: boolean;
+    desktopFleet?: boolean;
+    encryptedBackup?: boolean;
+  } = {},
 ): Promise<AgentControlHarness> {
   await assertPublicPortAvailable();
   let selectedCloudRoot = defaultCloudRoot;
   let selectedAdminRoot: string | null = null;
-  if (options.officialManagedAgent) {
+  if (options.desktopFleet) {
+    selectedCloudRoot = requireCleanDesktopFleetRepository(
+      "AERA_DESKTOP_FLEET_E2E_CLOUD_REPO",
+      "go.mod",
+      "module github.com/bignormal/aera-cloud",
+    );
+    selectedAdminRoot = requireCleanDesktopFleetRepository(
+      "AERA_DESKTOP_FLEET_E2E_ADMIN_REPO",
+      "package.json",
+      '"name": "agentera-admin"',
+    );
+    try {
+      await lstat(join(selectedAdminRoot, "admin-web"));
+    } catch {
+      throw new Error(
+        "AERA_DESKTOP_FLEET_E2E_ADMIN_REPO must contain admin-web.",
+      );
+    }
+  } else if (options.officialManagedAgent) {
     selectedCloudRoot = requireCleanE2ERepository({
       environmentName: "AERA_OFFICIAL_AGENT_E2E_CLOUD_REPO",
       markerPath: "go.mod",
@@ -1113,11 +1456,11 @@ export async function createAgentControlHarness(
       throw new Error("Aera Admin and Cloud Internal Admin contracts differ.");
     }
   }
-  const runtimeSeedDirectory = resolve(
+  const runtimeSeedSource = resolve(
     process.env.AGENTERA_RUNTIME_SEED_DIR?.trim() ||
       join(desktopRoot, "resources", "agentera-runtime-seed"),
   );
-  const seedEntries = (await readdir(runtimeSeedDirectory)).filter(
+  const seedEntries = (await readdir(runtimeSeedSource)).filter(
     (entry) => entry !== ".gitkeep",
   );
   if (seedEntries.length !== 3) {
@@ -1126,7 +1469,20 @@ export async function createAgentControlHarness(
     );
   }
 
-  const root = await mkdtemp(join(tmpdir(), "agentera-agent-control-e2e-"));
+  const root = await mkdtemp(
+    join(
+      tmpdir(),
+      options.desktopFleet
+        ? "aera-desktop-fleet-e2e-"
+        : "agentera-agent-control-e2e-",
+    ),
+  );
+  const runtimeSeedDirectory = options.desktopFleet
+    ? join(root, "runtime-seed")
+    : runtimeSeedSource;
+  if (options.desktopFleet) {
+    await cp(runtimeSeedSource, runtimeSeedDirectory, { recursive: true });
+  }
   const deviceRoots = createDeviceRoots(root);
   for (const name of ["A", "B", "C", "D"] as const) {
     await mkdir(deviceRoots[name].userData, { recursive: true });
@@ -1191,6 +1547,10 @@ export async function createAgentControlHarness(
     browserPage,
     composeStarted: false,
     runtimeSeedDirectory,
+    desktopControlClockFile: options.desktopFleet
+      ? join(root, "desktop-control-clock.txt")
+      : null,
+    desktopFleet: options.desktopFleet === true,
     deviceRoots,
     devices: [],
     requests,
@@ -1200,7 +1560,21 @@ export async function createAgentControlHarness(
   };
   try {
     if (selectedAdminRoot) {
-      harness.official = await createOfficialState(harness, selectedAdminRoot);
+      harness.official = await createOfficialState(
+        harness,
+        selectedAdminRoot,
+        options.desktopFleet ? "desktopFleet" : "legacy",
+      );
+      if (harness.desktopControlClockFile) {
+        await writeFile(
+          harness.desktopControlClockFile,
+          `${new Date().toISOString()}\n`,
+          {
+            encoding: "utf8",
+            mode: 0o600,
+          },
+        );
+      }
     }
     const cloudDependencies = ["postgres", "redis"];
     if (harness.encryptedBackupEnabled) {
@@ -1235,7 +1609,7 @@ export async function createAgentControlHarness(
         { cwd: harness.cloudRoot, env: composeEnvironment(harness) },
       );
     }
-    if (harness.official) {
+    if (harness.official?.mode === "legacy") {
       command(
         "docker",
         [
@@ -1272,34 +1646,36 @@ export async function createAgentControlHarness(
         ],
         { cwd: harness.cloudRoot },
       );
-      command("pnpm", ["--filter", "@aera/admin-web", "build"], {
-        cwd: harness.official.adminRoot,
-        env: harness.official.environment,
-      });
-      command(
-        "go",
-        [
-          "build",
-          "-tags",
-          "release",
-          "-trimpath",
-          "-o",
-          harness.official.adminBinary,
-          "./cmd/aera-admin",
-        ],
-        { cwd: harness.official.adminRoot },
-      );
-      command(
-        "go",
-        [
-          "build",
-          "-trimpath",
-          "-o",
-          harness.official.adminBootstrapBinary,
-          "./cmd/aera-admin-bootstrap",
-        ],
-        { cwd: harness.official.adminRoot },
-      );
+      if (harness.official.mode === "legacy") {
+        command("pnpm", ["--filter", "@aera/admin-web", "build"], {
+          cwd: harness.official.adminRoot,
+          env: harness.official.environment,
+        });
+        command(
+          "go",
+          [
+            "build",
+            "-tags",
+            "release",
+            "-trimpath",
+            "-o",
+            harness.official.adminBinary,
+            "./cmd/aera-admin",
+          ],
+          { cwd: harness.official.adminRoot },
+        );
+        command(
+          "go",
+          [
+            "build",
+            "-trimpath",
+            "-o",
+            harness.official.adminBootstrapBinary,
+            "./cmd/aera-admin-bootstrap",
+          ],
+          { cwd: harness.official.adminRoot },
+        );
+      }
       command(
         harness.official.cloudE2EBinary,
         ["seed", "--output", harness.official.cloudFixtureFile],
@@ -1309,8 +1685,13 @@ export async function createAgentControlHarness(
     await startCloud(harness);
     if (harness.official) {
       await waitForInternalCloud(harness);
-      await startOfficialAdmin(harness);
-      await bootstrapOfficialAdminFixtures(harness);
+      if (harness.official.mode === "desktopFleet") {
+        await bootstrapOfficialAdminFixtures(harness);
+        await startOfficialAdmin(harness);
+      } else {
+        await startOfficialAdmin(harness);
+        await bootstrapOfficialAdminFixtures(harness);
+      }
     }
     return harness;
   } catch (error) {
@@ -1569,7 +1950,20 @@ export async function authenticateExistingAgentControlDevice(
   device: AgentControlDevice,
 ): Promise<void> {
   const authGate = device.page.locator('[data-testid="screen-auth"]');
-  await expect(authGate).toBeVisible();
+  const isAuthenticated = async (): Promise<boolean> =>
+    (await device.page.evaluate(() => window.agenteraAuth.getState()))
+      .status === "authenticated";
+  await expect
+    .poll(
+      async () => (await isAuthenticated()) || (await authGate.isVisible()),
+      {
+        timeout: 20_000,
+      },
+    )
+    .toBe(true);
+  // A same-userData relaunch normally restores the existing Cloud session.
+  // Only an expired or absent session should open a new browser OAuth flow.
+  if (await isAuthenticated()) return;
   const loginButton = authGate.locator(".agentera-gate-primary");
   await expect(loginButton).toBeVisible();
   await expect(loginButton).toBeEnabled();

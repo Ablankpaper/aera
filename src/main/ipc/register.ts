@@ -284,6 +284,11 @@ import {
   parseOfficialQualityFeedbackInput,
 } from "../agentera-official-quality/ipc-contract";
 import type { AgenteraEncryptedBackupController } from "../agentera-encrypted-backup/controller";
+import type { AgenteraDesktopControlCoordinator } from "../agentera-desktop-control/coordinator";
+import {
+  serializeDesktopControlPublicState,
+  type DesktopControlPublicState,
+} from "../../shared/agentera-desktop-control";
 import {
   parseAuthorizeEncryptedBackupDeviceInput,
   parseCancelEncryptedBackupInput,
@@ -608,6 +613,7 @@ export interface IpcContext {
   runtimeDistribution: RuntimeDistributionManager | null;
   agenteraOfficialQuality?: AgenteraOfficialQualityManager | null;
   agenteraEncryptedBackup?: AgenteraEncryptedBackupController | null;
+  agenteraDesktopControl?: AgenteraDesktopControlCoordinator | null;
 }
 
 const RUNTIME_DISTRIBUTION_UNAVAILABLE_STATE: RuntimeDistributionPublicState = {
@@ -1011,6 +1017,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     runtimeDistribution,
     agenteraOfficialQuality,
     agenteraEncryptedBackup,
+    agenteraDesktopControl,
   } = context;
   const globalProfileChangedChannel = "agentera-global-profile-changed";
   const notifyGlobalProfileChanged = (profile: unknown): void => {
@@ -2460,6 +2467,28 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
   ipcMain.handle("agentera-runtime-retry-repair", () =>
     runtimeState((manager) => manager.retryRepair()),
+  );
+
+  const desktopControlUnavailableState: DesktopControlPublicState = {
+    status: "unregistered",
+    lastHeartbeatAt: null,
+    lastErrorCode: null,
+    lastHealth: null,
+  };
+  agenteraDesktopControl?.subscribe((state) => {
+    const window = getMainWindow();
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed())
+      return;
+    window.webContents.send(
+      "agentera-desktop-control-state-changed",
+      serializeDesktopControlPublicState(state),
+    );
+  });
+  ipcMain.handle("agentera-desktop-control-get-state", () =>
+    serializeDesktopControlPublicState(
+      agenteraDesktopControl?.getPublicState() ??
+        desktopControlUnavailableState,
+    ),
   );
 
   ipcMain.handle("agentera-install-file-probe", () => ({
