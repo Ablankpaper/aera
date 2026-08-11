@@ -58,6 +58,7 @@ export interface AdoptConversationSegmentInput {
 
 export interface PrepareConversationSegmentInput {
   threadId: string;
+  segmentId?: string;
   expectedThreadRevision: number;
   ordinal: number;
   segmentConversationKey: string;
@@ -671,7 +672,10 @@ export class ConversationThreadStore {
       hermesSessionId: null,
       modelRoute,
     });
-    const segmentId = uuid(this.randomUUID(), "invalid_model_switch_segment");
+    const segmentId = uuid(
+      input?.segmentId ?? this.randomUUID(),
+      "invalid_model_switch_segment",
+    );
     const createdAt = currentTimestamp(this.now);
     try {
       this.database.sqlite

@@ -326,6 +326,14 @@ Segment snapshots expose only [[model-selection#Full identity, not just the mode
 
 Every segment read reparses the frozen route and rejects malformed or inconsistent rows with a bounded corruption code.
 
+##### Atomic binding-boundary-segment preparation
+
+[[src/main/agentera-agent-control/conversation-runtime-coordinator.ts#ConversationRuntimeCoordinator#prepareSegment]] creates the candidate RuntimeBinding, ConversationBoundary, and preparing segment in one immediate SQLite transaction; a boundary failure rolls all three back.
+
+##### Derived segment key and session attachment
+
+[[src/main/agentera-agent-control/conversation-runtime-coordinator.ts#ConversationRuntimeCoordinator#attachSegmentSession]] derives `aera-segment:<threadId>:<segmentId>` in Main and attaches Binding, Boundary, and Segment together without accepting renderer text, model labels, or NUL delimiters.
+
 An installed or shared Agent never treats an empty successful transport as a usable response. If the Runs API reports completion without text, reasoning, or tool activity, the main process performs the bounded Chat Completions compatibility fallback; any observed tool activity suppresses replay so side effects cannot run twice. If the compatibility path also returns no content, the turn fails instead of rendering a false success.
 
 Creating a Hermes Runtime Profile directly is not equivalent to creating a product Agent. A usable Agent additionally requires a verified immutable AgentVersion, USER-owned Installation, Profile binding, and RuntimeBinding. [[src/main/agentera-agent-control/model-profile-seed.ts#seedAgentModelProfile]] copies only the selected provider route and same-owner credential into the isolated target Profile after validating the signed model policy.
