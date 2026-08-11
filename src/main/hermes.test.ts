@@ -74,15 +74,20 @@ import {
 import type { ConnectionConfig } from "./config";
 import { providerListSafe } from "./secrets";
 import {
+  buildAgentModelRequestBody,
+  buildAgentModelTransportRoute,
+  assertHermesAgentModelRouteSupported,
   conversationSystemMessage,
   getRemoteAuthHeader,
   sendMessage,
+  supportsHermesAgentModelRoute,
+  shouldProbeAgentModelTransport,
   shouldFallbackFromEmptyRunCompletion,
   shouldForceCliForSessionOverride,
   stopHealthPolling,
   transcribeAudio,
 } from "./hermes";
-import type { ChatCallbacks } from "./hermes";
+import type { ChatCallbacks, HermesAgentModelExecution } from "./hermes";
 
 const mockedGetModelConfig = vi.mocked(getModelConfig);
 const mockedGetApiServerKey = vi.mocked(getApiServerKey);
@@ -120,6 +125,99 @@ describe("Hermes Runs empty completion handling", () => {
     expect(shouldFallbackFromEmptyRunCompletion(false, "   ")).toBe(true);
     expect(shouldFallbackFromEmptyRunCompletion(false, "answer")).toBe(false);
     expect(shouldFallbackFromEmptyRunCompletion(true, "")).toBe(false);
+  });
+});
+
+describe("installed-Agent model transport route", () => {
+  const execution: HermesAgentModelExecution = {
+    modelOverride: {
+      provider: "custom:petoi",
+      model: "gpt-5.6-sol",
+      baseUrl: "https://api.petoi.cn/v1",
+    },
+    apiMode: "codex_responses",
+    credential: "petoi-secret-value",
+    routeMode: "dynamic",
+    disableTransportReplay: true,
+  };
+
+  it("copies the candidate provider, endpoint, API mode, and credential into the internal request route", () => {
+    expect(buildAgentModelTransportRoute(execution)).toEqual({
+      provider: "custom:petoi",
+      model: "gpt-5.6-sol",
+      base_url: "https://api.petoi.cn/v1",
+      api_mode: "codex_responses",
+      api_key: "petoi-secret-value",
+    });
+  });
+
+  it("requires an explicit Runtime capability before sending a dynamic route", () => {
+    expect(
+      supportsHermesAgentModelRoute({
+        features: { request_model_route: true },
+        endpoints: {
+          chat_completions: { path: "/v1/chat/completions" },
+        },
+      }),
+    ).toBe(true);
+    expect(
+      supportsHermesAgentModelRoute({
+        features: {},
+        endpoints: {
+          chat_completions: { path: "/v1/chat/completions" },
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it("places a dynamic route in the internal request body without persisting binding metadata", () => {
+    const body = buildAgentModelRequestBody({
+      message: "continue",
+      history: [{ role: "user", content: "earlier" }],
+      sessionId: "hermes-segment-2",
+      execution,
+    });
+
+    expect(body).toMatchObject({
+      model: "gpt-5.6-sol",
+      session_id: "hermes-segment-2",
+      aera_model_route: {
+        provider: "custom:petoi",
+        model: "gpt-5.6-sol",
+        base_url: "https://api.petoi.cn/v1",
+        api_mode: "codex_responses",
+        api_key: "petoi-secret-value",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("credentialRef");
+  });
+
+  it("does not request an empty-stream probe when replay is disabled", () => {
+    expect(execution.disableTransportReplay).toBe(true);
+    expect(shouldProbeAgentModelTransport(execution)).toBe(false);
+    expect(
+      shouldProbeAgentModelTransport({
+        ...execution,
+        disableTransportReplay: false,
+      }),
+    ).toBe(true);
+    expect(
+      buildAgentModelRequestBody({ message: "continue", execution }),
+    ).not.toHaveProperty("replay");
+  });
+
+  it("fails closed with a bounded code when Runtime lacks request-route support", () => {
+    try {
+      assertHermesAgentModelRouteSupported({
+        features: {},
+        endpoints: { chat_completions: { path: "/v1/chat/completions" } },
+      });
+      throw new Error("expected bounded route error");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "model_switch_runtime_route_unsupported",
+      });
+    }
   });
 });
 

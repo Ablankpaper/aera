@@ -130,6 +130,7 @@ import {
   setSshRemoteApiKey,
   resolvePendingClarify,
 } from "../hermes";
+import type { ChatCallbacks } from "../hermes";
 import { ensureProfilePortAvailable } from "../gateway-ports";
 import {
   freshDashboardWebSocketUrl,
@@ -194,6 +195,17 @@ import {
   invalidateSecretsCache,
   type ConnectionConfig,
 } from "../config";
+import { getSecret } from "../secrets";
+import type { OwnerModelRouteSelection } from "../../shared/model-configuration";
+import {
+  createAgentModelExecutionLease,
+  composeAgentModelSegmentCallbacks,
+  createAgentModelSegmentLifecycle,
+} from "../agent-model-execution-lease";
+import {
+  classifyAgentModelRoute,
+  prepareAgentModelSend,
+} from "./agent-model-send";
 import {
   getAuxiliaryConfig,
   setAuxiliaryTask,
@@ -441,6 +453,7 @@ import type {
 } from "../../shared/agentera-global-profile";
 import type { ConversationBoundary } from "../agentera-agent-control/conversation-boundary-store";
 import { listAgentRuntimeModelRoutes } from "../agentera-agent-control/runtime-model-routes";
+import { freezeResolvedOwnerModelRoute } from "../agentera-agent-control/frozen-agent-model-route";
 import {
   createWallet,
   deleteWallet,
@@ -2387,6 +2400,8 @@ export function registerIpcHandlers(context: IpcContext): void {
       );
       let conversationBoundary: AgenteraConversationBoundarySummary | null =
         null;
+      let agentConversation =
+        null as AgenteraGlobalProfileConversationContext["agentConversation"];
       if (hasSignedInAccess) {
         const control = requireAgentControl();
         const preparedConversationRuntime =
@@ -2396,6 +2411,7 @@ export function registerIpcHandlers(context: IpcContext): void {
             owner: turnOwner,
             resumeSessionId: identityResumeSessionId || null,
           });
+        agentConversation = preparedConversationRuntime.agentConversation;
         const boundary = preparedConversationRuntime.conversationBoundary;
         const matchingOption = productSpaceState?.options.find((option) => {
           if (
@@ -2446,6 +2462,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       return {
         ...context,
         conversationBoundary,
+        agentConversation,
         requiresBoundApiTransport:
           context.requiresBoundApiTransport ||
           binding.agentInstallationId !== null ||
@@ -3565,6 +3582,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       contextFolder?: string,
       runId?: string,
       modelOverride?: SessionModelOverride,
+      agentModelSelection?: OwnerModelRouteSelection,
     ) => {
       // Each conversation has a stable runId minted by the renderer. Fall back
       // to a generated id for legacy callers so the run is still tracked.
@@ -3596,11 +3614,14 @@ export function registerIpcHandlers(context: IpcContext): void {
         }
         const preparedConversationRuntime =
           agenteraAgentControl && hasSignedInAccess
-            ? await agenteraAgentControl.prepareConversationRuntime({
+            ? await prepareAgentModelSend({
+                control: agenteraAgentControl,
                 conversationKey: identityConversationKey,
                 profilePath: profileHome(profile),
                 owner: turnOwner,
                 resumeSessionId: identityResumeSessionId || null,
+                history,
+                requestedModelSelection: agentModelSelection,
               })
             : null;
         if (!agenteraAgentControl && hasSignedInAccess) {
@@ -3696,6 +3717,64 @@ export function registerIpcHandlers(context: IpcContext): void {
             return false;
           }
         };
+        const segmentTransition =
+          preparedConversationRuntime?.segmentTransition ?? null;
+        const segmentLifecycle =
+          segmentTransition && agenteraAgentControl
+            ? createAgentModelSegmentLifecycle({
+                transition: segmentTransition,
+                owner: turnOwner,
+                control: agenteraAgentControl,
+                emit: (segmentEvent) => {
+                  safeSend("chat-agent-segment", segmentEvent);
+                },
+              })
+            : null;
+        segmentLifecycle?.emitPreparing();
+
+        let executionLease: ReturnType<
+          typeof createAgentModelExecutionLease
+        > | null = null;
+        const frozenRoute = preparedAgentTurn?.binding.modelRoute ?? null;
+        if (frozenRoute) {
+          try {
+            const configuredRoute = getModelConfig(
+              profile,
+            ) as SessionModelOverride;
+            const routeMode = classifyAgentModelRoute(
+              frozenRoute,
+              configuredRoute,
+            );
+            const resolveSourceRoute = ownerModelRouteCatalog
+              ? (sourceProfileId: string, modelLibraryId: string) => {
+                  try {
+                    const revision = ownerModelRouteCatalog.snapshot().revision;
+                    const resolved = ownerModelRouteCatalog.resolve({
+                      sourceProfileId,
+                      modelLibraryId,
+                      catalogRevision: revision,
+                    });
+                    return freezeResolvedOwnerModelRoute(resolved);
+                  } catch {
+                    return null;
+                  }
+                }
+              : undefined;
+            executionLease = createAgentModelExecutionLease({
+              route: frozenRoute,
+              mode: conn.mode,
+              routeMode,
+              disableTransportReplay: segmentTransition !== null,
+              resolveSourceRoute,
+              getSecret,
+              routeAvailable:
+                conn.mode === "local" ? true : routeMode === "configured",
+            });
+          } catch (error) {
+            segmentLifecycle?.fail(error);
+            throw error;
+          }
+        }
         const officialQualityObserver = createOfficialQualityChatObserver({
           binding: preparedAgentTurn?.binding ?? null,
           startedAt: chatStartTime,
@@ -3711,6 +3790,11 @@ export function registerIpcHandlers(context: IpcContext): void {
         let boundControlPlaneSessionId: string | null =
           conversationBoundary?.hermesSessionId ?? null;
         const bindControlPlaneSession = (sessionId: string): void => {
+          // Candidate segments are attached transactionally by the segment
+          // lifecycle. Re-running the legacy binding/boundary attach here
+          // would race the same rows and could detach the candidate session
+          // from its segment.
+          if (segmentTransition) return;
           if (!conversationBoundary || boundControlPlaneSessionId === sessionId)
             return;
           agenteraAgentControl?.attachConversationRuntimeSession({
@@ -3743,83 +3827,31 @@ export function registerIpcHandlers(context: IpcContext): void {
           }
         };
 
-        const handle = await sendMessage(
-          message,
-          {
-            onChunk: (chunk) => {
-              fullResponse += chunk;
-              if (!safeSend("chat-chunk", chunk)) {
-                // Renderer is gone — stop generating and resolve with what we
-                // have so the awaiting promise doesn't leak.
-                abortThisRun();
-              }
-            },
-            onReasoningChunk: (chunk) => {
-              // Forward reasoning/thinking tokens on a dedicated channel so
-              // the renderer can render the thinking bubble live during the
-              // stream rather than waiting for a focus-change refresh (#352).
-              // Same renderer-gone abort guard as the content channel.
-              if (!safeSend("chat-reasoning-chunk", chunk)) {
-                abortThisRun();
-              }
-            },
-            onDone: (sessionId) => {
-              runtimeRun.finish();
-              officialQualityObserver.onDone();
-              if (sessionId) {
-                try {
-                  bindControlPlaneSession(sessionId);
-                } catch {
-                  const message =
-                    "Aera conversation boundary session attachment failed.";
-                  safeSend("chat-error", message);
-                  rejectChat(new Error(message));
-                  return;
-                }
-                bindGlobalProfileSnapshotToSession(sessionId);
-                const recorded = agentIdentity.recordSessionRevision(
-                  identityProfileId,
-                  sessionId,
-                );
-                if (!recorded.success) {
-                  console.warn(
-                    "[agent-identity] Failed to record completed session:",
-                    recorded.error,
-                  );
-                }
-              }
-              try {
-                persistPromptImageAttachments(sessionId, message, attachments);
-              } catch (err) {
-                console.warn(
-                  "[sessions] Failed to persist prompt image attachments:",
-                  err,
-                );
-              }
-              safeSend("chat-done", sessionId || "");
-              resolveChat({ response: fullResponse, sessionId });
-              // Desktop notification when window is not focused and response took >10s
-              if (
-                mainWindow &&
-                !mainWindow.isFocused() &&
-                Date.now() - chatStartTime > 10000
-              ) {
-                const preview = fullResponse
-                  .replace(/[#*_`~\n]+/g, " ")
-                  .trim()
-                  .slice(0, 80);
-                new Notification({
-                  title: APP_NAME,
-                  body: preview || "Response ready",
-                }).show();
-              }
-            },
-            onSessionStarted: (sessionId) => {
+        const baseCallbacks: ChatCallbacks = {
+          onChunk: (chunk) => {
+            fullResponse += chunk;
+            if (!safeSend("chat-chunk", chunk)) {
+              // Renderer is gone — stop generating and resolve with what we
+              // have so the awaiting promise doesn't leak.
+              abortThisRun();
+            }
+          },
+          onReasoningChunk: (chunk) => {
+            // Forward reasoning/thinking tokens on a dedicated channel so
+            // the renderer can render the thinking bubble live during the
+            // stream rather than waiting for a focus-change refresh (#352).
+            // Same renderer-gone abort guard as the content channel.
+            if (!safeSend("chat-reasoning-chunk", chunk)) {
+              abortThisRun();
+            }
+          },
+          onDone: (sessionId) => {
+            runtimeRun.finish();
+            officialQualityObserver.onDone();
+            if (sessionId) {
               try {
                 bindControlPlaneSession(sessionId);
               } catch {
-                runtimeRun.finish();
-                abortThisRun();
                 const message =
                   "Aera conversation boundary session attachment failed.";
                 safeSend("chat-error", message);
@@ -3833,47 +3865,125 @@ export function registerIpcHandlers(context: IpcContext): void {
               );
               if (!recorded.success) {
                 console.warn(
-                  "[agent-identity] Failed to record new session:",
+                  "[agent-identity] Failed to record completed session:",
                   recorded.error,
                 );
               }
-              safeSend("chat-session-started", sessionId);
-            },
-            onError: (error) => {
-              runtimeRun.finish();
-              officialQualityObserver.onError(error);
-              safeSend("chat-error", error);
-              rejectChat(new Error(error));
-              // Notify on error too if window not focused
-              if (mainWindow && !mainWindow.isFocused()) {
-                new Notification({
-                  title: `${APP_NAME} — Error`,
-                  body: error.slice(0, 100),
-                }).show();
-              }
-            },
-            onToolProgress: (tool) => {
-              safeSend("chat-tool-progress", tool);
-            },
-            onToolEvent: (toolEvent) => {
-              safeSend("chat-tool-event", toolEvent);
-            },
-            onUsage: (usage) => {
-              officialQualityObserver.onUsage(usage);
-              safeSend("chat-usage", usage);
-            },
-            onClarify: (req) => {
-              safeSend("chat-clarify-request", req);
-            },
+            }
+            try {
+              persistPromptImageAttachments(sessionId, message, attachments);
+            } catch (err) {
+              console.warn(
+                "[sessions] Failed to persist prompt image attachments:",
+                err,
+              );
+            }
+            safeSend("chat-done", sessionId || "");
+            resolveChat({ response: fullResponse, sessionId });
+            // Desktop notification when window is not focused and response took >10s
+            if (
+              mainWindow &&
+              !mainWindow.isFocused() &&
+              Date.now() - chatStartTime > 10000
+            ) {
+              const preview = fullResponse
+                .replace(/[#*_`~\n]+/g, " ")
+                .trim()
+                .slice(0, 80);
+              new Notification({
+                title: APP_NAME,
+                body: preview || "Response ready",
+              }).show();
+            }
           },
-          profile,
-          preparedAgentTurn?.resumeSessionId ?? identityResumeSessionId,
-          history,
-          attachments,
-          contextFolder,
-          preparedAgentTurn?.modelOverride ?? modelOverride,
-          conversationEnvelope,
+          onSessionStarted: (sessionId) => {
+            try {
+              bindControlPlaneSession(sessionId);
+            } catch {
+              runtimeRun.finish();
+              abortThisRun();
+              const message =
+                "Aera conversation boundary session attachment failed.";
+              safeSend("chat-error", message);
+              rejectChat(new Error(message));
+              return;
+            }
+            bindGlobalProfileSnapshotToSession(sessionId);
+            const recorded = agentIdentity.recordSessionRevision(
+              identityProfileId,
+              sessionId,
+            );
+            if (!recorded.success) {
+              console.warn(
+                "[agent-identity] Failed to record new session:",
+                recorded.error,
+              );
+            }
+            safeSend("chat-session-started", sessionId);
+          },
+          onError: (error) => {
+            runtimeRun.finish();
+            officialQualityObserver.onError(error);
+            safeSend("chat-error", error);
+            rejectChat(new Error(error));
+            // Notify on error too if window not focused
+            if (mainWindow && !mainWindow.isFocused()) {
+              new Notification({
+                title: `${APP_NAME} — Error`,
+                body: error.slice(0, 100),
+              }).show();
+            }
+          },
+          onToolProgress: (tool) => {
+            safeSend("chat-tool-progress", tool);
+          },
+          onToolEvent: (toolEvent) => {
+            safeSend("chat-tool-event", toolEvent);
+          },
+          onUsage: (usage) => {
+            officialQualityObserver.onUsage(usage);
+            safeSend("chat-usage", usage);
+          },
+          onClarify: (req) => {
+            safeSend("chat-clarify-request", req);
+          },
+        };
+        const transportCallbacks = composeAgentModelSegmentCallbacks(
+          baseCallbacks,
+          segmentLifecycle,
         );
+        let handle;
+        try {
+          handle = executionLease
+            ? await executionLease.run((execution) =>
+                sendMessage(
+                  message,
+                  transportCallbacks,
+                  profile,
+                  preparedAgentTurn?.resumeSessionId ?? identityResumeSessionId,
+                  history,
+                  attachments,
+                  contextFolder,
+                  preparedAgentTurn?.modelOverride ?? modelOverride,
+                  conversationEnvelope,
+                  execution,
+                ),
+              )
+            : await sendMessage(
+                message,
+                transportCallbacks,
+                profile,
+                preparedAgentTurn?.resumeSessionId ?? identityResumeSessionId,
+                history,
+                attachments,
+                contextFolder,
+                preparedAgentTurn?.modelOverride ?? modelOverride,
+                conversationEnvelope,
+              );
+        } catch (error) {
+          segmentLifecycle?.fail(error);
+          throw error;
+        }
 
         runtimeRun.attachAbort(handle.abort);
         return promise;

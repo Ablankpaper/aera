@@ -342,6 +342,18 @@ Every segment read reparses the frozen route and rejects malformed or inconsiste
 
 [[src/main/agentera-agent-control/conversation-runtime-coordinator.ts#ConversationRuntimeCoordinator#attachSegmentSession]] derives `aera-segment:<threadId>:<segmentId>` in Main and attaches Binding, Boundary, and Segment together without accepting renderer text, model labels, or NUL delimiters.
 
+##### Just-in-time route and credential lease
+
+[[src/main/agent-model-execution-lease.ts#createAgentModelExecutionLease]] re-resolves the frozen source route and credential only inside the real send callback. Unsupported remote routes and bounded validation failures occur before activation and never expose the secret to preload or renderer state.
+
+##### Real transport activation boundary
+
+[[src/main/agent-model-execution-lease.ts#composeAgentModelSegmentCallbacks]] activates a candidate before forwarding the first content, reasoning, or tool event, or on empty successful completion. A pre-activation failure retains the old segment; a later error is forwarded without replay.
+
+##### Renderer acknowledgement without prompt mutation
+
+[[model-selection#Installed-Agent switch policy and immutable resume#Policy-filtered staged selection]] keeps selection opaque until Main validates it, and [[model-selection#Installed-Agent switch policy and immutable resume#Main-acknowledged local marker]] displays the transition only after activation without adding instructions to model history.
+
 An installed or shared Agent never treats an empty successful transport as a usable response. If the Runs API reports completion without text, reasoning, or tool activity, the main process performs the bounded Chat Completions compatibility fallback; any observed tool activity suppresses replay so side effects cannot run twice. If the compatibility path also returns no content, the turn fails instead of rendering a false success.
 
 Creating a Hermes Runtime Profile directly is not equivalent to creating a product Agent. A usable Agent additionally requires a verified immutable AgentVersion, USER-owned Installation, Profile binding, and RuntimeBinding. [[src/main/agentera-agent-control/model-profile-seed.ts#seedAgentModelProfile]] copies only the selected provider route and same-owner credential into the isolated target Profile after validating the signed model policy.

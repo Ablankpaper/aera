@@ -1415,8 +1415,79 @@ export interface HermesConversationEnvelope {
   requireBoundApiTransport: boolean;
 }
 
+/**
+ * Main-only, turn-scoped route resolved by the installed-Agent execution
+ * lease. Credential values must never cross preload IPC or persistence.
+ */
+export interface HermesAgentModelExecution {
+  modelOverride: SessionModelOverride;
+  apiMode: string | null;
+  credential: string | null;
+  routeMode: "configured" | "dynamic";
+  disableTransportReplay: boolean;
+}
+
+export interface HermesAgentModelTransportRoute {
+  provider: string;
+  model: string;
+  base_url: string;
+  api_mode: string | null;
+  api_key: string | null;
+}
+
+/** Build the short-lived upstream route consumed only by a transport request. */
+export function buildAgentModelTransportRoute(
+  execution: HermesAgentModelExecution,
+): HermesAgentModelTransportRoute {
+  return {
+    provider: execution.modelOverride.provider,
+    model: execution.modelOverride.model,
+    base_url: execution.modelOverride.baseUrl,
+    api_mode: execution.apiMode,
+    api_key: execution.credential,
+  };
+}
+
+/**
+ * Dynamic routes are sent only to a Runtime that explicitly advertises the
+ * request-scoped route contract; unknown/older Runtimes stay fail-closed.
+ */
+export function supportsHermesAgentModelRoute(
+  capabilities: HermesApiCapabilities | null | undefined,
+): boolean {
+  const endpoint = capabilities?.endpoints?.chat_completions;
+  const path =
+    endpoint && typeof endpoint === "object"
+      ? (endpoint as { path?: unknown }).path
+      : null;
+  return (
+    capabilities?.features?.request_model_route === true &&
+    path === "/v1/chat/completions"
+  );
+}
+
+export function assertHermesAgentModelRouteSupported(
+  capabilities: HermesApiCapabilities | null | undefined,
+): void {
+  if (supportsHermesAgentModelRoute(capabilities)) return;
+  throw Object.assign(
+    new Error(
+      "The connected Aera Runtime does not support request-scoped Agent model routes.",
+    ),
+    { code: "model_switch_runtime_route_unsupported" },
+  );
+}
+
+export function shouldProbeAgentModelTransport(
+  execution: HermesAgentModelExecution | null | undefined,
+): boolean {
+  return execution?.disableTransportReplay !== true;
+}
+
 const BOUND_API_TRANSPORT_UNAVAILABLE =
   "Aera bound runtime connection is unavailable.";
+const AGENT_MODEL_EMPTY_RESPONSE =
+  "Aera Agent model route returned no output; the candidate segment was not replayed.";
 
 type ChatContent =
   | string
@@ -1520,6 +1591,56 @@ export function conversationSystemMessage(
   };
 }
 
+export interface HermesAgentModelRequestBodyInput {
+  message: string;
+  history?: Array<{ role: string; content: string }>;
+  attachments?: Attachment[];
+  contextFolder?: string;
+  envelope?: HermesConversationEnvelope;
+  sessionId?: string;
+  model?: string;
+  reasoningEffort?: string | null;
+  execution?: HermesAgentModelExecution;
+}
+
+/**
+ * Build the JSON body for the short-lived Agent model transport. The route is
+ * deliberately nested under an internal request field and is only supplied
+ * when Main has already proven Runtime request-route capability. Nothing here
+ * is written to a binding, transcript, or renderer-facing object.
+ */
+export function buildAgentModelRequestBody(
+  input: HermesAgentModelRequestBodyInput,
+): Record<string, unknown> {
+  const messages: Array<{ role: string; content: ChatContent }> = [];
+  for (const msg of input.history ?? []) {
+    messages.push({
+      role: msg.role === "agent" ? "assistant" : msg.role,
+      content: msg.content,
+    });
+  }
+  messages.push({
+    role: "user",
+    content: buildUserContent(input.message, input.attachments),
+  });
+  const system = conversationSystemMessage(input.contextFolder, input.envelope);
+  if (system) messages.unshift(system);
+
+  const model =
+    input.execution?.modelOverride.model || input.model || "hermes-agent";
+  const body: Record<string, unknown> = {
+    model,
+    messages,
+    stream: true,
+    ...(input.sessionId ? { session_id: input.sessionId } : {}),
+  };
+  if (input.reasoningEffort) body.reasoning_effort = input.reasoningEffort;
+  if (input.execution?.routeMode === "dynamic") {
+    body.aera_model_route = buildAgentModelTransportRoute(input.execution);
+  }
+  return body;
+}
+
 function reasoningEffortForProfile(
   profile?: string,
 ): "minimal" | "low" | "medium" | "high" | "xhigh" | null {
@@ -1546,6 +1667,7 @@ function sendMessageViaApi(
   contextFolder?: string,
   override?: SessionModelOverride,
   envelope?: HermesConversationEnvelope,
+  execution?: HermesAgentModelExecution,
 ): ChatHandle {
   const mc = effectiveModelConfig(profile, override);
   const controller = new AbortController();
@@ -1580,6 +1702,9 @@ function sendMessageViaApi(
     stream: true,
     ...(_resumeSessionId ? { session_id: _resumeSessionId } : {}),
   };
+  if (execution?.routeMode === "dynamic") {
+    bodyObj.aera_model_route = buildAgentModelTransportRoute(execution);
+  }
   if (reasoningEffort) bodyObj.reasoning_effort = reasoningEffort;
   const body = JSON.stringify(bodyObj);
 
@@ -1662,6 +1787,10 @@ function sendMessageViaApi(
   }
 
   function probeRealError(): void {
+    if (!shouldProbeAgentModelTransport(execution)) {
+      finish(AGENT_MODEL_EMPTY_RESPONSE);
+      return;
+    }
     // When streaming returns empty, make a non-streaming request to surface the real error
     const probeBodyObj: Record<string, unknown> = {
       model: mc.model || "hermes-agent",
@@ -3268,8 +3397,42 @@ export async function sendMessage(
   contextFolder?: string,
   override?: SessionModelOverride,
   envelope?: HermesConversationEnvelope,
+  execution?: HermesAgentModelExecution,
 ): Promise<ChatHandle> {
   ensureInitialized();
+
+  // A candidate Agent segment must never silently fall back to a different
+  // transport or replay the prompt. Dynamic routes additionally require an
+  // explicit Runtime capability before their short-lived route is serialized.
+  if (execution?.routeMode === "dynamic") {
+    assertHermesAgentModelRouteSupported(await getApiCapabilities(profile));
+    return sendMessageViaApi(
+      message,
+      cb,
+      profile,
+      resumeSessionId,
+      history,
+      attachments,
+      contextFolder,
+      override,
+      envelope,
+      execution,
+    );
+  }
+  if (execution?.disableTransportReplay) {
+    return sendMessageViaApi(
+      message,
+      cb,
+      profile,
+      resumeSessionId,
+      history,
+      attachments,
+      contextFolder,
+      override,
+      envelope,
+      execution,
+    );
+  }
 
   // Remote mode: always use API, no CLI fallback. Cross-provider session
   // overrides are limited to the model string here (no CLI transport remotely).

@@ -14,9 +14,11 @@ import type {
 import type { TokenBalancesResponse } from "../shared/tokens";
 import type { CustomProviderRecord } from "../shared/custom-providers";
 import type {
+  AgentConversationSegmentEvent,
   ModelConfigurationMutationRequest,
   ModelConfigurationMutationResult,
   OwnerModelRouteCatalogSnapshot,
+  OwnerModelRouteSelection,
 } from "../shared/model-configuration";
 import type {
   DeviceCodeInfo,
@@ -1120,6 +1122,7 @@ interface HermesAPI {
     contextFolder?: string,
     runId?: string,
     modelOverride?: SessionModelOverride,
+    agentModelSelection?: OwnerModelRouteSelection,
   ) => Promise<{ response: string; sessionId?: string }>;
   abortChat: (runId?: string) => Promise<void>;
   transcribeAudio: (
@@ -1204,6 +1207,9 @@ interface HermesAPI {
     ) => void,
   ) => () => void;
   onChatError: (callback: (runId: string, error: string) => void) => () => void;
+  onChatAgentSegment: (
+    callback: (runId: string, event: AgentConversationSegmentEvent) => void,
+  ) => () => void;
   onClarifyRequest: (
     callback: (
       runId: string,

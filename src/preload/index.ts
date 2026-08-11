@@ -15,9 +15,11 @@ import type {
 import type { TokenBalancesResponse } from "../shared/tokens";
 import type { CustomProviderRecord } from "../shared/custom-providers";
 import type {
+  AgentConversationSegmentEvent,
   ModelConfigurationMutationRequest,
   ModelConfigurationMutationResult,
   OwnerModelRouteCatalogSnapshot,
+  OwnerModelRouteSelection,
 } from "../shared/model-configuration";
 import type {
   MessagingPlatformsResponse,
@@ -638,6 +640,7 @@ const hermesAPI = {
     contextFolder?: string,
     runId?: string,
     modelOverride?: SessionModelOverride,
+    agentModelSelection?: OwnerModelRouteSelection,
   ): Promise<{ response: string; sessionId?: string }> =>
     ipcRenderer.invoke(
       "send-message",
@@ -649,6 +652,7 @@ const hermesAPI = {
       contextFolder,
       runId,
       modelOverride,
+      agentModelSelection,
     ),
 
   abortChat: (runId?: string): Promise<void> =>
@@ -879,6 +883,18 @@ const hermesAPI = {
     ): void => callback(runId, error);
     ipcRenderer.on("chat-error", handler);
     return () => ipcRenderer.removeListener("chat-error", handler);
+  },
+
+  onChatAgentSegment: (
+    callback: (runId: string, event: AgentConversationSegmentEvent) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      runId: string,
+      segmentEvent: AgentConversationSegmentEvent,
+    ): void => callback(runId, segmentEvent);
+    ipcRenderer.on("chat-agent-segment", handler);
+    return () => ipcRenderer.removeListener("chat-agent-segment", handler);
   },
 
   /** The agent asked a clarifying question mid-turn. The renderer shows an
