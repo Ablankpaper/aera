@@ -18,6 +18,7 @@ This directory defines the high-level concepts, business logic, and architecture
 - [[agentera-app-authentication]] — the independent AgentEra APP account gate, browser PKCE flow, device-bound offline entitlement, and existing-Profile ownership rules.
 - [[agentera-desktop-control]] — authenticated Desktop heartbeat, fixed health checks, idempotent result delivery, and the renderer privacy boundary used by internal fleet operations.
 - [[agentera-agent-control-plane]] — USER-owned local Agent drafts, immutable stable-version publication, per-device Agent installation, and conversation-scoped RuntimeBinding rules.
+- [[beta27-reliability-plan]] — approved Beta.27 reliability boundaries and isolated acceptance evidence; planned behavior is not a release claim.
 - [[agentera-post-official-delivery]] — the approved content-free official quality pipeline, client-encrypted Profile backup, cross-device restore, and production release gates.
 - [[agentera-workspaces]] — fixed-owner Workspace lifecycle, memberships, one-time invitations, desktop context switching, and offline read-only boundaries.
 - [[agentera-organizations]] — transferable enterprise ownership, Organization roles and Departments, signed policy snapshots, audit, product-context switching, and Hermes isolation.
