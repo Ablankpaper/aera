@@ -117,6 +117,7 @@ import type {
   ConfirmOrganizationReviewInput,
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
+  DisconnectOrganizationSubmissionReferenceInput,
   CreateAgentDraftInput,
   AuthoringCapabilitySummary,
   EligibleExperienceSkill,
@@ -129,6 +130,8 @@ import type {
   OrganizationExperienceCandidatePreview,
   OrganizationExperienceCandidateSummary,
   OrganizationAgentSubmissionDetail,
+  OrganizationAgentSubmissionList,
+  OrganizationAgentSubmissionListItem,
   OrganizationAgentSubmissionSummary,
   OrganizationReviewPreview,
   OrganizationSubmissionPreview,
@@ -586,9 +589,15 @@ interface AgenteraAgentsAPI {
   confirmOrganizationSubmission: (
     input: ConfirmOrganizationSubmissionInput,
   ) => Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionSummary>>;
+  listOrganizationSubmissionList: () => Promise<
+    AgenteraAgentControlResult<OrganizationAgentSubmissionList>
+  >;
   listOrganizationSubmissions: () => Promise<
     AgenteraAgentControlResult<OrganizationAgentSubmissionSummary[]>
   >;
+  disconnectOrganizationSubmissionReference: (
+    input: DisconnectOrganizationSubmissionReferenceInput,
+  ) => Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionListItem>>;
   getOrganizationSubmission: (
     submissionId: string,
   ) => Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionDetail>>;

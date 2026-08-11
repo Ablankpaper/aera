@@ -317,6 +317,7 @@ import {
   parseConfirmOrganizationReviewInput,
   parseConfirmOrganizationSubmissionInput,
   parseConfirmOrganizationWithdrawalInput,
+  parseDisconnectOrganizationSubmissionReferenceInput,
   parseCreateDraftInput,
   parseInstallVersionInput,
   parseListAuthoringCapabilitiesInput,
@@ -334,6 +335,7 @@ import {
   parseSubmitOrganizationExperienceCandidateInput,
   parseUpdateDraftInput,
   serializeOrganizationAgentSubmission,
+  publicOrganizationSubmissionList,
   serializeOrganizationReviewPreview,
   serializeOrganizationSubmissionDetail,
   serializeOrganizationSubmissionPreview,
@@ -1910,6 +1912,25 @@ export function registerIpcHandlers(context: IpcContext): void {
       (await requireAgentControl().listOrganizationSubmissions()).map(
         serializeOrganizationAgentSubmission,
       ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-list-organization-submission-list",
+    async () =>
+      publicOrganizationSubmissionList(
+        await requireAgentControl().listOrganizationSubmissionList(),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-disconnect-organization-submission-reference",
+    async (_event, input: unknown) =>
+      publicOrganizationSubmissionList({
+        submissions: [
+          await requireAgentControl().disconnectOrganizationSubmissionReference(
+            parseDisconnectOrganizationSubmissionReferenceInput(input),
+          ),
+        ],
+        issues: [],
+      }).submissions[0],
   );
   registerAgentControlHandler(
     "agentera-agents-get-organization-submission",

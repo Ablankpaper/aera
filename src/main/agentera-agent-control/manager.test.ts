@@ -817,6 +817,20 @@ describe("Agent control Organization Foundation context", () => {
         });
       }
 
+      const submissionList = Promise.resolve().then(() =>
+        manager.listOrganizationSubmissionList(),
+      );
+      if (canReadHistory) {
+        await expect(submissionList).resolves.toEqual({
+          submissions: [],
+          issues: [],
+        });
+      } else {
+        await expect(submissionList).rejects.toMatchObject({
+          code: "organization_agent_forbidden",
+        });
+      }
+
       const installations = manager.listInstallations();
       if (canUseInstallations) {
         await expect(installations).resolves.toEqual([]);

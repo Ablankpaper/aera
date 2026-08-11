@@ -111,6 +111,7 @@ import type {
   ConfirmOrganizationReviewInput,
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
+  DisconnectOrganizationSubmissionReferenceInput,
   CreateAgentDraftInput,
   AuthoringCapabilitySummary,
   EligibleExperienceSkill,
@@ -123,6 +124,8 @@ import type {
   OrganizationExperienceCandidatePreview,
   OrganizationExperienceCandidateSummary,
   OrganizationAgentSubmissionDetail,
+  OrganizationAgentSubmissionList,
+  OrganizationAgentSubmissionListItem,
   OrganizationAgentSubmissionSummary,
   OrganizationReviewPreview,
   OrganizationSubmissionPreview,
@@ -2604,9 +2607,19 @@ const agenteraAgentsAPI = {
       "agentera-agents-confirm-organization-submission",
       input,
     ),
+  listOrganizationSubmissionList: (): Promise<
+    AgenteraAgentControlResult<OrganizationAgentSubmissionList>
+  > => ipcRenderer.invoke("agentera-agents-list-organization-submission-list"),
   listOrganizationSubmissions: (): Promise<
     AgenteraAgentControlResult<OrganizationAgentSubmissionSummary[]>
   > => ipcRenderer.invoke("agentera-agents-list-organization-submissions"),
+  disconnectOrganizationSubmissionReference: (
+    input: DisconnectOrganizationSubmissionReferenceInput,
+  ): Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionListItem>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-disconnect-organization-submission-reference",
+      input,
+    ),
   getOrganizationSubmission: (
     submissionId: string,
   ): Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionDetail>> =>

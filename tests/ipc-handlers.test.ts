@@ -59,6 +59,14 @@ describe("IPC Handler ↔ Preload Consistency", () => {
     const missing = mainChannels.filter((ch) => !preloadChannels.includes(ch));
     expect(missing).toEqual([]);
   });
+
+  it.each([
+    "agentera-agents-list-organization-submission-list",
+    "agentera-agents-disconnect-organization-submission-reference",
+  ])("keeps the Beta.27 Organization bridge paired for %s", (channel) => {
+    expect(mainChannels).toContain(channel);
+    expect(preloadChannels).toContain(channel);
+  });
 });
 
 // ─── New feature handlers registered ────────────────────

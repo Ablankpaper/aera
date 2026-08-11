@@ -52,6 +52,7 @@ import type {
   SubmitExperienceCandidateInput,
   UpdateAgentDraftInput,
   OrganizationAgentSubmissionSummary,
+  OrganizationAgentSubmissionList,
   OrganizationAgentSubmissionListItem,
   OfficialAgentDetail,
   OfficialAgentInstallPreview,
@@ -830,6 +831,12 @@ export class AgenteraAgentControlManager {
     this.assertOrganizationHistoryRole();
     await this.assertOnlineAccess(false);
     return this.ensureOrganizationPublicationComponents().service.listSubmissions();
+  }
+
+  async listOrganizationSubmissionList(): Promise<OrganizationAgentSubmissionList> {
+    this.assertOrganizationHistoryRole();
+    await this.assertOnlineAccess(false);
+    return this.ensureOrganizationPublicationComponents().service.listSubmissionList();
   }
 
   async disconnectOrganizationSubmissionReference(

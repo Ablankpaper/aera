@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import type {
   AgenteraAgentControlErrorCode,
+  AgenteraAgentControlResult,
+  DisconnectOrganizationSubmissionReferenceInput,
   OrganizationAgentSubmissionDetail,
-  OrganizationAgentSubmissionSummary,
+  OrganizationAgentSubmissionListItem,
+  OrganizationSubmissionListIssue,
   OrganizationWithdrawalPreview,
 } from "../../../../shared/agentera-agent-control";
 import { useI18n } from "../../components/useI18n";
@@ -12,9 +15,13 @@ export interface OrganizationSubmissionPanelProps {
   online: boolean;
   canAuthor: boolean;
   canReview: boolean;
-  contextKey: string;
-  refreshToken?: number;
-  onChanged?: () => void;
+  submissions: OrganizationAgentSubmissionListItem[];
+  issues: OrganizationSubmissionListIssue[];
+  loading: boolean;
+  onRefresh: () => void | Promise<void>;
+  onDisconnect: (
+    input: DisconnectOrganizationSubmissionReferenceInput,
+  ) => Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionListItem>>;
 }
 
 function errorKey(code: AgenteraAgentControlErrorCode): string {
@@ -25,40 +32,22 @@ export default function OrganizationSubmissionPanel({
   online,
   canAuthor,
   canReview,
-  contextKey,
-  refreshToken = 0,
-  onChanged = () => undefined,
+  submissions,
+  issues,
+  loading,
+  onRefresh,
+  onDisconnect,
 }: OrganizationSubmissionPanelProps): React.JSX.Element {
   const { t } = useI18n();
-  const [submissions, setSubmissions] = useState<
-    OrganizationAgentSubmissionSummary[]
-  >([]);
   const [reviewDetail, setReviewDetail] =
     useState<OrganizationAgentSubmissionDetail | null>(null);
   const [reviewChanged, setReviewChanged] = useState(false);
   const [withdrawal, setWithdrawal] =
     useState<OrganizationWithdrawalPreview | null>(null);
+  const [disconnectTarget, setDisconnectTarget] =
+    useState<OrganizationAgentSubmissionListItem | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async (): Promise<void> => {
-    if (!online) return;
-    setError(null);
-    const result = await window.agenteraAgents.listOrganizationSubmissions();
-    if (!result.ok) {
-      setError(errorKey(result.errorCode));
-      return;
-    }
-    setSubmissions(result.data);
-  }, [online]);
-
-  useEffect(() => {
-    setReviewDetail(null);
-    setReviewChanged(false);
-    setWithdrawal(null);
-    setSubmissions([]);
-    void load();
-  }, [contextKey, load, refreshToken]);
 
   const openReview = async (submissionId: string): Promise<void> => {
     if (!online || !canReview || busy) return;
@@ -103,10 +92,23 @@ export default function OrganizationSubmissionPanel({
       setError(errorKey(result.errorCode));
       return;
     }
-    setSubmissions((current) =>
-      current.map((item) => (item.id === result.data.id ? result.data : item)),
-    );
-    onChanged();
+    await onRefresh();
+  };
+
+  const confirmDisconnect = async (): Promise<void> => {
+    if (!disconnectTarget || busy) return;
+    setBusy(true);
+    setError(null);
+    const result = await onDisconnect({
+      submissionId: disconnectTarget.id,
+      confirmation: "disconnect-local-draft-link",
+    });
+    setBusy(false);
+    if (!result.ok) {
+      setError(errorKey(result.errorCode));
+      return;
+    }
+    setDisconnectTarget(null);
   };
 
   return (
@@ -121,13 +123,22 @@ export default function OrganizationSubmissionPanel({
         </div>
       ) : null}
       {error ? <div className="agents-create-error">{t(error)}</div> : null}
-      {online && submissions.length === 0 ? (
+      {issues.length > 0 ? (
+        <div className="agent-control-notice">
+          {t("agents.control.organization.submissionRecordUnavailable")}
+        </div>
+      ) : null}
+      {online && !loading && submissions.length === 0 ? (
         <p className="agent-control-empty">
           {t("agents.control.organization.noSubmissions")}
         </p>
       ) : null}
       {submissions.map((submission) => (
-        <article key={submission.id} className="agent-control-card">
+        <article
+          key={submission.id}
+          className="agent-control-card"
+          data-submission-id={submission.id}
+        >
           <div>
             <strong>
               {t(
@@ -162,10 +173,20 @@ export default function OrganizationSubmissionPanel({
                 </p>
               </>
             ) : null}
+            {submission.referenceState.kind === "quarantined" ? (
+              <div
+                className="agent-control-notice"
+                data-testid={`submission-reference-conflict:${submission.id}`}
+              >
+                {t("agents.control.organization.referenceConflict")}
+              </div>
+            ) : null}
           </div>
-          {online && submission.status === "pending" ? (
+          {online &&
+          ((submission.status === "pending" && (canReview || canAuthor)) ||
+            (canAuthor && submission.referenceState.kind === "quarantined")) ? (
             <div className="agent-control-inline-actions">
-              {canReview ? (
+              {submission.status === "pending" && canReview ? (
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -175,7 +196,7 @@ export default function OrganizationSubmissionPanel({
                   {t("agents.control.organization.review")}
                 </button>
               ) : null}
-              {canAuthor ? (
+              {submission.status === "pending" && canAuthor ? (
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -183,6 +204,16 @@ export default function OrganizationSubmissionPanel({
                   onClick={() => void prepareWithdrawal(submission.id)}
                 >
                   {t("agents.control.organization.withdraw")}
+                </button>
+              ) : null}
+              {canAuthor && submission.referenceState.kind === "quarantined" ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={busy}
+                  onClick={() => setDisconnectTarget(submission)}
+                >
+                  {t("agents.control.organization.disconnectReference")}
                 </button>
               ) : null}
             </div>
@@ -196,14 +227,9 @@ export default function OrganizationSubmissionPanel({
           detail={reviewDetail}
           onClose={() => {
             setReviewDetail(null);
-            if (reviewChanged) onChanged();
+            if (reviewChanged) void onRefresh();
           }}
-          onCompleted={(submission) => {
-            setSubmissions((current) =>
-              current.map((item) =>
-                item.id === submission.id ? submission : item,
-              ),
-            );
+          onCompleted={() => {
             setReviewChanged(true);
           }}
         />
@@ -238,6 +264,43 @@ export default function OrganizationSubmissionPanel({
                 disabled={busy}
               >
                 {t("agents.control.organization.confirmWithdrawal")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {disconnectTarget ? (
+        <div className="agent-control-dialog-backdrop">
+          <div
+            className="agent-control-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="organization-disconnect-reference-title"
+          >
+            <h3 id="organization-disconnect-reference-title">
+              {t("agents.control.organization.disconnectReferenceTitle")}
+            </h3>
+            <p>{disconnectTarget.contentDigest}</p>
+            <p>
+              {t("agents.control.organization.disconnectReferenceBoundary")}
+            </p>
+            <div className="agent-control-dialog-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setDisconnectTarget(null)}
+                disabled={busy}
+              >
+                {t("agents.control.cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void confirmDisconnect()}
+                disabled={busy}
+              >
+                {t("agents.control.organization.confirmDisconnectReference")}
               </button>
             </div>
           </div>

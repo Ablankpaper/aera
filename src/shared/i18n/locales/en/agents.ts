@@ -320,6 +320,15 @@ export default {
       reviewedBy: "Reviewed by",
       policyVersion: "Policy version",
       noSubmissions: "No enterprise submissions yet.",
+      submissionRecordUnavailable:
+        "Some enterprise submission records could not be displayed safely. Other submissions remain available.",
+      referenceConflict:
+        "This submission's local draft link conflicts with Cloud and has been quarantined. Other enterprise submissions are unaffected.",
+      disconnectReference: "Disconnect local draft link",
+      disconnectReferenceTitle: "Disconnect conflicting local draft link",
+      disconnectReferenceBoundary:
+        "Only this Cloud submission's link to the local draft is removed. The Cloud submission, local draft, published versions, installations, Memory, and Profiles remain unchanged.",
+      confirmDisconnectReference: "Disconnect link",
       withdraw: "Withdraw submission",
       confirmWithdrawal: "Confirm withdrawal",
       withdrawalBoundary:
@@ -686,6 +695,8 @@ export default {
         "This Organization is archived. Its Agent assets are read-only.",
       organization_submission_conflict:
         "This enterprise submission changed. Refresh before retrying.",
+      organization_submission_reference_detach_failed:
+        "The local draft link changed, so it was not disconnected. Refresh and confirm again.",
       organization_submission_superseded:
         "A newer enterprise submission replaced this one.",
       organization_publication_policy_blocked:
