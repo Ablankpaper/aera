@@ -302,6 +302,30 @@ Unknown fields, partial current shapes, paths, raw secrets, invalid endpoints, a
 
 The API mode, source identities, credential reference, and legacy marker remain Main-only binding state, and none of those local route fields enter the Cloud outbox.
 
+#### Immutable Agent conversation segments
+
+One visible Agent conversation owns an ordered local thread while each model route and Hermes session remains an immutable segment.
+
+##### Owner-scoped thread adoption
+
+[[src/main/agentera-agent-control/conversation-thread-store.ts#ConversationThreadStore#adopt]] adopts one verified legacy binding/boundary idempotently under the exact tenant, account, and device tuple.
+
+##### Candidate lifecycle and CAS activation
+
+[[src/main/agentera-agent-control/conversation-thread-store.ts#ConversationThreadStore#prepareCandidate]] creates only a preparing segment; [[src/main/agentera-agent-control/conversation-thread-store.ts#ConversationThreadStore#activate]] advances the thread with one revision compare-and-set and supersedes the prior active segment.
+
+##### Failure retention and owner-safe lookup
+
+[[src/main/agentera-agent-control/conversation-thread-store.ts#ConversationThreadStore#fail]] retains a failed candidate without changing the active segment, while lookups by root key or any Hermes session recheck the same owner/device scope.
+
+##### Public route projection
+
+Segment snapshots expose only [[model-selection#Full identity, not just the model name|the public route identity]]; route JSON, credential references, and private binding bytes are parsed in Main and never returned.
+
+##### Corrupt row fail-closed
+
+Every segment read reparses the frozen route and rejects malformed or inconsistent rows with a bounded corruption code.
+
 An installed or shared Agent never treats an empty successful transport as a usable response. If the Runs API reports completion without text, reasoning, or tool activity, the main process performs the bounded Chat Completions compatibility fallback; any observed tool activity suppresses replay so side effects cannot run twice. If the compatibility path also returns no content, the turn fails instead of rendering a false success.
 
 Creating a Hermes Runtime Profile directly is not equivalent to creating a product Agent. A usable Agent additionally requires a verified immutable AgentVersion, USER-owned Installation, Profile binding, and RuntimeBinding. [[src/main/agentera-agent-control/model-profile-seed.ts#seedAgentModelProfile]] copies only the selected provider route and same-owner credential into the isolated target Profile after validating the signed model policy.
