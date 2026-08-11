@@ -37,4 +37,6 @@ The preload exposes only `getState` and `onStateChanged`; [[src/shared/agentera-
 
 The delivery gate drives one real Electron Desktop through isolated Cloud and Admin services; its temporary Admin files are restored during teardown.
 
+Harness boundary tests use Vitest's Node environment because they exercise filesystem, process, and SQLite-backed test infrastructure.
+
 [[tests/e2e/support/agentera-agent-control-harness.ts#buildDesktopFleetAdminSeedScript]] wraps Payload initialization in an async entrypoint so `tsx` can compile the temporary Admin seed under CommonJS rules. The Runtime-unavailable leg clears only the selected run-owned device installation and test seed. [[tests/e2e/agentera-desktop-fleet.e2e.ts]] remains the end-to-end proof owner.
