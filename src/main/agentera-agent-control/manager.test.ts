@@ -19,7 +19,11 @@ import type {
 } from "../../shared/agentera-agent-control";
 import type { OwnerModelRouteSelection } from "../../shared/model-configuration";
 import { CapabilityAuthoringService } from "./capability-authoring-service";
-import type { AgenteraAgentControlClient } from "./client";
+import type {
+  AgenteraAgentControlClient,
+  AgentPolicySnapshot,
+  AgentVersion,
+} from "./client";
 import type { AgenteraHermesAdapter } from "./hermes-adapter";
 import { AgentInstallationManager } from "./installation-manager";
 import { RuntimeBindingStore } from "./runtime-binding-store";
@@ -34,7 +38,10 @@ import {
   resolveInstallationModelSelection,
   runtimeComponentKey,
 } from "./manager";
-import type { OwnerModelRouteCatalog } from "./owner-model-route-catalog";
+import type {
+  OwnerModelRouteCatalog,
+  ResolvedOwnerModelRoute,
+} from "./owner-model-route-catalog";
 import { canonicalizeEditableAgent } from "./manifest";
 
 const OWNER = {
@@ -53,6 +60,31 @@ const PERSONAL_BINDING_ID = "40000000-0000-4000-8000-000000000005";
 const ORGANIZATION_SUBMISSION_ID = "50000000-0000-4000-8000-000000000001";
 const ORGANIZATION_DEFINITION_ID = "50000000-0000-4000-8000-000000000002";
 const ORGANIZATION_VERSION_ID = "50000000-0000-4000-8000-000000000003";
+const ACCOUNT_MODEL_ROUTE: ResolvedOwnerModelRoute = {
+  id: "account-home\0openai-gpt",
+  sourceProfileId: "account-home",
+  modelLibraryId: "openai-gpt",
+  provider: "openai",
+  providerLabel: "OpenAI",
+  model: "gpt-5.6",
+  displayName: "GPT-5.6",
+  baseUrl: "",
+  apiMode: "responses",
+  credentialRef: "OPENAI_API_KEY",
+  credentialAvailable: true,
+};
+const PETOI_MODEL_ROUTE: ResolvedOwnerModelRoute = {
+  ...ACCOUNT_MODEL_ROUTE,
+  id: "account-home\0petoi-gpt",
+  modelLibraryId: "petoi-gpt",
+  provider: "custom:petoi",
+  providerLabel: "Petoi",
+  model: "gpt-5.6-sol",
+  displayName: "GPT-5.6 Sol",
+  baseUrl: "https://api.petoi.cn/v1",
+  apiMode: "codex_responses",
+  credentialRef: "CUSTOM_PROVIDER_PETOI_KEY",
+};
 
 function organizationSubmissionDetail(): Record<string, unknown> {
   const input = draftInput();
@@ -146,6 +178,7 @@ describe("Agent control Organization Foundation context", () => {
       verifyProfileBinding: () => { agentInstallationId: string | null };
       resolveAttachedProfilePath: () => string;
       randomUUID: () => string;
+      getOwnerModelRouteCatalog: () => OwnerModelRouteCatalog | null;
       capabilityAuthoringService: {
         listAuthoringCapabilities: (...args: unknown[]) => unknown;
         prepareInstalledSkillSnapshot: (...args: unknown[]) => unknown;
@@ -213,6 +246,7 @@ describe("Agent control Organization Foundation context", () => {
           runtimeOverrides.getConnectionMode ?? (() => "local"),
         assertEntitled: () => undefined,
         hermesAdapter: runtimeOverrides.hermesAdapter,
+        getOwnerModelRouteCatalog: runtimeOverrides.getOwnerModelRouteCatalog,
         randomUUID: runtimeOverrides.randomUUID,
         capabilityAuthoringService:
           runtimeOverrides.capabilityAuthoringService as never,
@@ -751,6 +785,501 @@ describe("Agent control Organization Foundation context", () => {
       "hermes-durable-session",
     );
     expect(attached.boundary.hermesSessionId).toBe("hermes-durable-session");
+  });
+
+  // @lat: [[model-selection#Installed-Agent switch policy and immutable resume#Manager thread adoption and candidate preparation]]
+  it("adopts the first installed-Agent runtime as one active conversation segment", async () => {
+    const modelRoute = {
+      provider: ACCOUNT_MODEL_ROUTE.provider,
+      model: ACCOUNT_MODEL_ROUTE.model,
+      baseUrl: ACCOUNT_MODEL_ROUTE.baseUrl,
+      apiMode: ACCOUNT_MODEL_ROUTE.apiMode,
+      sourceProfileId: ACCOUNT_MODEL_ROUTE.sourceProfileId,
+      modelLibraryId: ACCOUNT_MODEL_ROUTE.modelLibraryId,
+      credentialRef: ACCOUNT_MODEL_ROUTE.credentialRef,
+      legacy: false,
+    };
+    const bindingInput = {
+      conversationKey: "agent-thread-root",
+      tenantId: OWNER.tenantId,
+      ownerScope: "USER" as const,
+      ownerId: OWNER.ownerId,
+      deviceId: OWNER.deviceInstallationId,
+      agentDefinitionId: OFFICIAL_DEFINITION_ID,
+      agentVersionId: PERSONAL_VERSION_ID,
+      agentInstallationId: PERSONAL_INSTALLATION_ID,
+      runtimeProfileId: PERSONAL_PROFILE_ID,
+      runtimeVersion: "v0.18.2-agentera.1",
+      modelRoute,
+      policySnapshotId: PERSONAL_POLICY_ID,
+      officialReleaseRevisionId: null,
+      toolPermissionDigest: "1".repeat(64),
+      publishedBaseDigest: "2".repeat(64),
+    };
+    const agentVersion = {
+      manifest: {
+        schema_version: 2,
+        model_policy: {
+          mode: "user_select",
+          allowed_providers: [],
+          allowed_models: [],
+        },
+      },
+    } as unknown as AgentVersion;
+    const policy = {
+      document: {
+        schema_version: 2,
+        model_policy: {
+          mode: "user_select",
+          allowed_providers: [],
+          allowed_models: [],
+        },
+      },
+    } as unknown as AgentPolicySnapshot;
+    const plan = { bindingInput, version: agentVersion, policy };
+    const prepareInstalledTurnPlan = vi.fn(async () => plan);
+    const finalizeInstalledTurn = vi.fn(
+      (_plan: typeof plan, binding: { id: string }) => ({
+        binding,
+        profilePath: "/isolated/profile",
+        resumeSessionId: undefined,
+        envelope: { instructions: "fixed", requireBoundApiTransport: true },
+        modelOverride: {
+          provider: modelRoute.provider,
+          model: modelRoute.model,
+          baseUrl: modelRoute.baseUrl,
+        },
+      }),
+    );
+    const catalog = {
+      snapshot: vi.fn(() => ({
+        revision: "a".repeat(64),
+        targetProfileId: ACCOUNT_MODEL_ROUTE.sourceProfileId,
+        routes: [
+          {
+            id: ACCOUNT_MODEL_ROUTE.id,
+            provider: ACCOUNT_MODEL_ROUTE.provider,
+            model: ACCOUNT_MODEL_ROUTE.model,
+            baseUrl: ACCOUNT_MODEL_ROUTE.baseUrl,
+            apiMode: ACCOUNT_MODEL_ROUTE.apiMode,
+            providerLabel: ACCOUNT_MODEL_ROUTE.providerLabel,
+            displayName: ACCOUNT_MODEL_ROUTE.displayName,
+            sourceProfileId: ACCOUNT_MODEL_ROUTE.sourceProfileId,
+            sourceKind: "account" as const,
+            selection: {
+              sourceProfileId: ACCOUNT_MODEL_ROUTE.sourceProfileId,
+              modelLibraryId: ACCOUNT_MODEL_ROUTE.modelLibraryId,
+              catalogRevision: "a".repeat(64),
+            },
+          },
+        ],
+      })),
+      resolve: vi.fn(() => ACCOUNT_MODEL_ROUTE),
+    } as unknown as OwnerModelRouteCatalog;
+    const { manager, database } = fullManager(
+      () => ({ scope: "USER" }),
+      {},
+      {
+        verifyProfileBinding: () => ({
+          agentInstallationId: PERSONAL_INSTALLATION_ID,
+        }),
+        hermesAdapter: {
+          prepareInstalledTurnPlan,
+          finalizeInstalledTurn,
+        } as unknown as AgenteraHermesAdapter,
+        getOwnerModelRouteCatalog: () => catalog,
+      },
+    );
+
+    const prepared = await manager.prepareConversationRuntime({
+      conversationKey: bindingInput.conversationKey,
+      profilePath: "/isolated/profile",
+      owner: OWNER,
+      resumeSessionId: null,
+      visibleHistoryCount: 0,
+    });
+
+    expect(prepared.agentConversation).toMatchObject({
+      policyMode: "user_select",
+      activeRoute: {
+        provider: ACCOUNT_MODEL_ROUTE.provider,
+        model: ACCOUNT_MODEL_ROUTE.model,
+        apiMode: ACCOUNT_MODEL_ROUTE.apiMode,
+      },
+      activeSegmentOrdinal: 1,
+      switchDisabledCode: null,
+    });
+    expect(
+      database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM conversation_threads")
+        .get(),
+    ).toEqual({ count: 1 });
+    expect(
+      database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM conversation_segments")
+        .get(),
+    ).toEqual({ count: 1 });
+  });
+
+  it("resolves a different opaque selection into a preparing candidate segment", async () => {
+    const routeToFrozen = (route: ResolvedOwnerModelRoute) => ({
+      provider: route.provider,
+      model: route.model,
+      baseUrl: route.baseUrl,
+      apiMode: route.apiMode,
+      sourceProfileId: route.sourceProfileId,
+      modelLibraryId: route.modelLibraryId,
+      credentialRef: route.credentialRef,
+      legacy: false,
+    });
+    const initialBindingInput = {
+      conversationKey: "switching-agent-thread",
+      tenantId: OWNER.tenantId,
+      ownerScope: "USER" as const,
+      ownerId: OWNER.ownerId,
+      deviceId: OWNER.deviceInstallationId,
+      agentDefinitionId: OFFICIAL_DEFINITION_ID,
+      agentVersionId: PERSONAL_VERSION_ID,
+      agentInstallationId: PERSONAL_INSTALLATION_ID,
+      runtimeProfileId: PERSONAL_PROFILE_ID,
+      runtimeVersion: "v0.18.2-agentera.1",
+      modelRoute: routeToFrozen(ACCOUNT_MODEL_ROUTE),
+      policySnapshotId: PERSONAL_POLICY_ID,
+      officialReleaseRevisionId: null,
+      toolPermissionDigest: "1".repeat(64),
+      publishedBaseDigest: "2".repeat(64),
+    };
+    const candidateBindingInput = {
+      ...initialBindingInput,
+      conversationKey: "candidate-placeholder",
+      modelRoute: routeToFrozen(PETOI_MODEL_ROUTE),
+    };
+    const agentVersion = {
+      manifest: {
+        schema_version: 2,
+        model_policy: {
+          mode: "user_select",
+          allowed_providers: [],
+          allowed_models: [],
+        },
+      },
+    } as unknown as AgentVersion;
+    const policy = {
+      document: {
+        schema_version: 2,
+        model_policy: {
+          mode: "user_select",
+          allowed_providers: [],
+          allowed_models: [],
+        },
+      },
+    } as unknown as AgentPolicySnapshot;
+    const prepareInstalledTurnPlan = vi.fn(
+      async (turnInput: {
+        existingBinding?: { conversationKey: string };
+        requestedModelRoute?: ResolvedOwnerModelRoute;
+      }) => {
+        if (turnInput.requestedModelRoute?.model === PETOI_MODEL_ROUTE.model) {
+          expect(turnInput.existingBinding?.conversationKey).toBe(
+            initialBindingInput.conversationKey,
+          );
+          return {
+            bindingInput: candidateBindingInput,
+            version: agentVersion,
+            policy,
+          };
+        }
+        return {
+          bindingInput: initialBindingInput,
+          version: agentVersion,
+          policy,
+        };
+      },
+    );
+    const finalizeInstalledTurn = vi.fn(
+      (_plan: unknown, binding: { id: string }) => ({
+        binding,
+        profilePath: "/isolated/profile",
+        resumeSessionId: undefined,
+        envelope: { instructions: "fixed", requireBoundApiTransport: true },
+        modelOverride: {
+          provider: "openai",
+          model: "gpt-5.6",
+          baseUrl: "",
+        },
+      }),
+    );
+    const snapshot = {
+      revision: "b".repeat(64),
+      targetProfileId: "account-home",
+      routes: [
+        {
+          id: ACCOUNT_MODEL_ROUTE.id,
+          provider: ACCOUNT_MODEL_ROUTE.provider,
+          model: ACCOUNT_MODEL_ROUTE.model,
+          baseUrl: ACCOUNT_MODEL_ROUTE.baseUrl,
+          apiMode: ACCOUNT_MODEL_ROUTE.apiMode,
+          providerLabel: ACCOUNT_MODEL_ROUTE.providerLabel,
+          displayName: ACCOUNT_MODEL_ROUTE.displayName,
+          sourceProfileId: ACCOUNT_MODEL_ROUTE.sourceProfileId,
+          sourceKind: "account" as const,
+          selection: {
+            sourceProfileId: ACCOUNT_MODEL_ROUTE.sourceProfileId,
+            modelLibraryId: ACCOUNT_MODEL_ROUTE.modelLibraryId,
+            catalogRevision: "b".repeat(64),
+          },
+        },
+        {
+          id: PETOI_MODEL_ROUTE.id,
+          provider: PETOI_MODEL_ROUTE.provider,
+          model: PETOI_MODEL_ROUTE.model,
+          baseUrl: PETOI_MODEL_ROUTE.baseUrl,
+          apiMode: PETOI_MODEL_ROUTE.apiMode,
+          providerLabel: PETOI_MODEL_ROUTE.providerLabel,
+          displayName: PETOI_MODEL_ROUTE.displayName,
+          sourceProfileId: PETOI_MODEL_ROUTE.sourceProfileId,
+          sourceKind: "account" as const,
+          selection: {
+            sourceProfileId: PETOI_MODEL_ROUTE.sourceProfileId,
+            modelLibraryId: PETOI_MODEL_ROUTE.modelLibraryId,
+            catalogRevision: "b".repeat(64),
+          },
+        },
+      ],
+    };
+    const catalog = {
+      snapshot: vi.fn(() => snapshot),
+      resolve: vi.fn((selection: OwnerModelRouteSelection) =>
+        selection.modelLibraryId === ACCOUNT_MODEL_ROUTE.modelLibraryId
+          ? ACCOUNT_MODEL_ROUTE
+          : PETOI_MODEL_ROUTE,
+      ),
+    } as unknown as OwnerModelRouteCatalog;
+    const { manager, database } = fullManager(
+      () => ({ scope: "USER" }),
+      {},
+      {
+        verifyProfileBinding: () => ({
+          agentInstallationId: PERSONAL_INSTALLATION_ID,
+        }),
+        hermesAdapter: {
+          prepareInstalledTurnPlan,
+          finalizeInstalledTurn,
+        } as unknown as AgenteraHermesAdapter,
+        getOwnerModelRouteCatalog: () => catalog,
+      },
+    );
+    const first = await manager.prepareConversationRuntime({
+      conversationKey: initialBindingInput.conversationKey,
+      profilePath: "/isolated/profile",
+      owner: OWNER,
+      resumeSessionId: null,
+    });
+    const attachedFirst = manager.attachConversationRuntimeSession({
+      runtimeBindingId: first.preparedAgentTurn?.binding.id ?? null,
+      boundaryId: first.conversationBoundary.id,
+      segmentId: first.agentSegmentId,
+      sessionId: "hermes-first-segment",
+      owner: OWNER,
+    });
+    if (!("segment" in attachedFirst)) {
+      throw new Error("segment attachment was not returned");
+    }
+    expect(attachedFirst.segment.hermesSessionId).toBe("hermes-first-segment");
+    expect(
+      database.sqlite
+        .prepare("SELECT hermes_session_id, state FROM conversation_segments")
+        .all(),
+    ).toEqual([{ hermes_session_id: "hermes-first-segment", state: "active" }]);
+    const resumedByOldSession = await manager.prepareConversationRuntime({
+      conversationKey: "renderer-reopened-with-new-root-label",
+      profilePath: "/isolated/profile",
+      owner: OWNER,
+      resumeSessionId: "hermes-first-segment",
+    });
+    expect(resumedByOldSession.agentSegmentId).toBe(first.agentSegmentId);
+    const sameRoute = await manager.prepareConversationRuntime({
+      conversationKey: initialBindingInput.conversationKey,
+      profilePath: "/isolated/profile",
+      owner: OWNER,
+      resumeSessionId: null,
+      requestedModelSelection: {
+        sourceProfileId: ACCOUNT_MODEL_ROUTE.sourceProfileId,
+        modelLibraryId: ACCOUNT_MODEL_ROUTE.modelLibraryId,
+        catalogRevision: snapshot.revision,
+      },
+    });
+    expect(sameRoute.segmentTransition).toBeNull();
+    expect(sameRoute.agentSegmentId).toBe(first.agentSegmentId);
+    expect(
+      database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM conversation_segments")
+        .get(),
+    ).toEqual({ count: 1 });
+    const next = await manager.prepareConversationRuntime({
+      conversationKey: initialBindingInput.conversationKey,
+      profilePath: "/isolated/profile",
+      owner: OWNER,
+      resumeSessionId: null,
+      requestedModelSelection: {
+        sourceProfileId: PETOI_MODEL_ROUTE.sourceProfileId,
+        modelLibraryId: PETOI_MODEL_ROUTE.modelLibraryId,
+        catalogRevision: snapshot.revision,
+      },
+      visibleHistoryCount: 8,
+    });
+
+    expect(first.agentConversation?.activeSegmentOrdinal).toBe(1);
+    expect(next.segmentTransition).toMatchObject({
+      kind: "candidate",
+      from: { model: ACCOUNT_MODEL_ROUTE.model },
+      to: { model: PETOI_MODEL_ROUTE.model },
+      historyBoundaryCount: 8,
+    });
+    expect(next.agentConversation?.activeSegmentOrdinal).toBe(1);
+    expect(
+      database.sqlite
+        .prepare("SELECT state FROM conversation_segments ORDER BY ordinal ASC")
+        .all(),
+    ).toEqual([{ state: "active" }, { state: "preparing" }]);
+
+    await expect(
+      manager.prepareConversationRuntime({
+        conversationKey: initialBindingInput.conversationKey,
+        profilePath: "/isolated/profile",
+        owner: OWNER,
+        resumeSessionId: null,
+        requestedModelSelection: {
+          sourceProfileId: PETOI_MODEL_ROUTE.sourceProfileId,
+          modelLibraryId: PETOI_MODEL_ROUTE.modelLibraryId,
+          catalogRevision: snapshot.revision,
+        },
+      }),
+    ).rejects.toMatchObject({ code: "model_switch_segment_conflict" });
+
+    const transition = next.segmentTransition;
+    if (!transition) throw new Error("candidate transition missing");
+    const attachedCandidate = manager.attachConversationRuntimeSession({
+      runtimeBindingId: transition.runtimeBindingId,
+      boundaryId: transition.boundaryId,
+      segmentId: transition.segmentId,
+      sessionId: "hermes-candidate-segment",
+      owner: OWNER,
+    });
+    if (!("segment" in attachedCandidate)) {
+      throw new Error("candidate segment attachment missing");
+    }
+    const activated = manager.activateConversationSegment({
+      threadId: transition.threadId,
+      segmentId: transition.segmentId,
+      expectedThreadRevision: transition.expectedThreadRevision,
+      owner: OWNER,
+    });
+    expect(activated.segment.state).toBe("active");
+    expect(activated.thread.revision).toBe(
+      transition.expectedThreadRevision + 1,
+    );
+  });
+
+  it.each([
+    ["model_switch_route_stale", "stale catalog revision"],
+    ["model_switch_credential_unavailable", "missing selected credential"],
+  ] as const)("fails before a write on %s (%s)", async (code, _label) => {
+    const catalog = {
+      snapshot: vi.fn(() => ({
+        revision: "c".repeat(64),
+        targetProfileId: "account-home",
+        routes: [],
+      })),
+      resolve: vi.fn(() => {
+        throw Object.assign(new Error(code), { code });
+      }),
+    } as unknown as OwnerModelRouteCatalog;
+    const { manager, database } = fullManager(
+      () => ({ scope: "USER" }),
+      {},
+      {
+        verifyProfileBinding: () => ({
+          agentInstallationId: PERSONAL_INSTALLATION_ID,
+        }),
+        hermesAdapter: {
+          prepareInstalledTurnPlan: vi.fn(),
+        } as unknown as AgenteraHermesAdapter,
+        getOwnerModelRouteCatalog: () => catalog,
+      },
+    );
+
+    await expect(
+      manager.prepareConversationRuntime({
+        conversationKey: "selection-rejected-before-write",
+        profilePath: "/isolated/profile",
+        owner: OWNER,
+        resumeSessionId: null,
+        requestedModelSelection: {
+          sourceProfileId: "account-home",
+          modelLibraryId: "petoi-gpt",
+          catalogRevision: "c".repeat(64),
+        },
+      }),
+    ).rejects.toMatchObject({ code });
+    expect(
+      database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM runtime_bindings")
+        .get(),
+    ).toEqual({ count: 0 });
+    expect(
+      database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM conversation_threads")
+        .get(),
+    ).toEqual({ count: 0 });
+  });
+
+  it("propagates a fixed-policy denial without preparing a candidate", async () => {
+    const catalog = {
+      snapshot: vi.fn(() => ({
+        revision: "d".repeat(64),
+        targetProfileId: "account-home",
+        routes: [],
+      })),
+      resolve: vi.fn(() => ACCOUNT_MODEL_ROUTE),
+    } as unknown as OwnerModelRouteCatalog;
+    const prepareInstalledTurnPlan = vi.fn(async () => {
+      throw Object.assign(new Error("fixed"), {
+        code: "model_switch_fixed_policy",
+      });
+    });
+    const { manager, database } = fullManager(
+      () => ({ scope: "USER" }),
+      {},
+      {
+        verifyProfileBinding: () => ({
+          agentInstallationId: PERSONAL_INSTALLATION_ID,
+        }),
+        hermesAdapter: {
+          prepareInstalledTurnPlan,
+        } as unknown as AgenteraHermesAdapter,
+        getOwnerModelRouteCatalog: () => catalog,
+      },
+    );
+
+    await expect(
+      manager.prepareConversationRuntime({
+        conversationKey: "fixed-policy-no-candidate",
+        profilePath: "/isolated/profile",
+        owner: OWNER,
+        resumeSessionId: null,
+        requestedModelSelection: {
+          sourceProfileId: ACCOUNT_MODEL_ROUTE.sourceProfileId,
+          modelLibraryId: ACCOUNT_MODEL_ROUTE.modelLibraryId,
+          catalogRevision: "d".repeat(64),
+        },
+      }),
+    ).rejects.toMatchObject({ code: "model_switch_fixed_policy" });
+    expect(
+      database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM conversation_segments")
+        .get(),
+    ).toEqual({ count: 0 });
   });
 
   it.each([

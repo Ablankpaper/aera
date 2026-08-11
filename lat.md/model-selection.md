@@ -48,6 +48,10 @@ Installed-Agent model changes use a Main-resolved route and a new immutable Runt
 
 A current full route must still resolve to the exact source Profile/model row and usable credential before resume. Exact Beta.26 three-field routes skip unavailable source metadata checks but still pass signed Manifest and tenant policy checks.
 
+### Manager thread adoption and candidate preparation
+
+[[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#prepareConversationRuntime]] adopts the first verified binding as ordinal 1, resolves opaque selections in the same Main turn, reuses an identical route, and returns a redacted active context while a different route remains `preparing`.
+
 ## Desktop-only persistence
 
 The selected model/provider is saved in a desktop-owned table keyed by session id, without storing API keys.

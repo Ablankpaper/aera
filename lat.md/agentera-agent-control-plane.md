@@ -292,6 +292,8 @@ Candidate selection and current-segment validation are separate Main operations.
 
 [[model-selection#Installed-Agent switch policy and immutable resume]] intersects Manifest and tenant policy, never rewrites an old RuntimeBinding, reuses an identical full route, and fails closed when a current full route's source model or credential disappears.
 
+[[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#prepareConversationRuntime]] adopts the first active segment, resolves opaque selections only through the owner catalog, and exposes only public route identity, thread/segment state, and bounded transition metadata to later IPC layers.
+
 #### Complete local route freeze
 
 Each current RuntimeBinding stores the complete Main-owned execution identity locally while its sanitized Cloud record remains unchanged.

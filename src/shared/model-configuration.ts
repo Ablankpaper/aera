@@ -31,6 +31,27 @@ export interface OwnerModelRouteCatalogSnapshot {
   routes: OwnerModelRouteSummary[];
 }
 
+/** Renderer-safe model context for an installed Agent conversation. */
+export interface AgentConversationModelContext {
+  threadId: string;
+  policyMode: "user_select" | "allowlist" | "fixed";
+  activeRoute: PublicModelRouteIdentity;
+  activeSegmentOrdinal: number;
+  catalog: OwnerModelRouteCatalogSnapshot;
+  switchDisabledCode: "model_switch_fixed_policy" | null;
+}
+
+/** Main-to-renderer lifecycle notification for a candidate Agent segment. */
+export interface AgentConversationSegmentEvent {
+  state: "preparing" | "active" | "failed";
+  threadId: string;
+  segmentId: string;
+  from: PublicModelRouteIdentity;
+  to: PublicModelRouteIdentity;
+  historyBoundaryCount: number;
+  code: string | null;
+}
+
 export type ModelConfigurationStage =
   | "validation"
   | "credential"
