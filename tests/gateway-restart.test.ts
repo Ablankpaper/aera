@@ -818,6 +818,17 @@ describe("restartGatewayViaCli", () => {
     expect(teardown).not.toContain("stopGateway(undefined, true)");
   });
 
+  it("completes model-configuration recovery before coordinated IPC registration", () => {
+    const start = readFileSync(
+      join(__dirname, "../src/main/app/start.ts"),
+      "utf8",
+    );
+    const recovery = start.indexOf("await prepareModelConfigurationRuntime(");
+    const register = start.indexOf("registerIpcHandlers({");
+    expect(recovery).toBeGreaterThan(-1);
+    expect(register).toBeGreaterThan(recovery);
+  });
+
   it("uses a bearer-authenticated endpoint for local gateway readiness", async () => {
     healthStatuses.push(200);
 

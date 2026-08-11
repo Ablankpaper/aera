@@ -288,6 +288,40 @@ afterEach(() => {
 });
 
 describe("ModelConfigurationCoordinator", () => {
+  it("accepts opaque owner handles with NUL separators", async () => {
+    const fixture = makeFixture();
+    const ownerHandle = "tenant\0owner\0device";
+    const dependencies: ModelConfigurationCoordinatorDependencies = {
+      catalog: fixture.catalog,
+      ownerHandle: () => ownerHandle,
+      operationStore: fixture.store,
+      fileAdapter: {
+        paths: () => fixture.paths,
+        capture: captureModelConfigurationFiles,
+        persistBackups: persistModelConfigurationBackups,
+        restore: (snapshot) => {
+          return import("./model-configuration-operation-store").then(
+            ({ restoreModelConfigurationFiles }) =>
+              restoreModelConfigurationFiles(snapshot),
+          );
+        },
+        removeBackups: (snapshot) => {
+          return import("./model-configuration-operation-store").then(
+            ({ removeModelConfigurationBackups }) =>
+              removeModelConfigurationBackups(snapshot),
+          );
+        },
+        readDigests: readModelConfigurationFileDigests,
+      },
+      mutationAdapter: fixture.adapter,
+      isProfileOwned: () => true,
+    };
+
+    await expect(
+      new ModelConfigurationCoordinator(dependencies).mutate(request()),
+    ).resolves.toMatchObject({ status: "committed" });
+  });
+
   it.each([
     "credential",
     "provider",

@@ -14,6 +14,11 @@ import type {
 import type { TokenBalancesResponse } from "../shared/tokens";
 import type { CustomProviderRecord } from "../shared/custom-providers";
 import type {
+  ModelConfigurationMutationRequest,
+  ModelConfigurationMutationResult,
+  OwnerModelRouteCatalogSnapshot,
+} from "../shared/model-configuration";
+import type {
   DeviceCodeInfo,
   HermesAccount,
   HermesAccountUser,
@@ -996,6 +1001,12 @@ interface HermesAPI {
   listAgentRuntimeModelRoutes: (
     profile: string,
   ) => Promise<AgentRuntimeModelRoute[]>;
+  getOwnerModelRouteCatalog: (
+    requestedProfileId?: string,
+  ) => Promise<OwnerModelRouteCatalogSnapshot>;
+  mutateModelConfiguration: (
+    request: ModelConfigurationMutationRequest,
+  ) => Promise<ModelConfigurationMutationResult>;
   getAuxiliaryConfig: (
     profile?: string,
   ) => Promise<

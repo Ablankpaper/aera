@@ -180,6 +180,7 @@ function bounded(value: unknown, label: string, maximum: number): string {
 }
 
 const ROUTE_STORAGE_PREFIX = "b64v1:";
+const OWNER_STORAGE_PREFIX = "nulv1:";
 
 function canonicalRouteKey(value: unknown, label: string): string {
   const route = bounded(value, label, 4096);
@@ -196,6 +197,34 @@ function encodeRouteKey(value: unknown, label: string): string {
     throw new Error(`Invalid model configuration ${label}.`);
   }
   return encoded;
+}
+
+/**
+ * SQLite TEXT is binary-safe, but the Node SQLite bindings used by the
+ * Desktop truncate a bound/read TEXT value at the first NUL byte. Runtime
+ * owner handles deliberately use NUL-separated fields, so encode only that
+ * delimiter while retaining a reversible, bounded journal value. Older rows
+ * without the prefix remain readable.
+ */
+function encodeOwnerHandle(value: unknown): string {
+  const owner = bounded(value, "owner handle", 512);
+  if (!owner.includes("\0")) return owner;
+  const encoded = `${OWNER_STORAGE_PREFIX}${owner.replaceAll("\0", "\x1f")}`;
+  if (encoded.length > 512 || encoded.includes("\0")) {
+    throw new Error("Invalid model configuration owner handle.");
+  }
+  return encoded;
+}
+
+function decodeOwnerHandle(value: unknown): string {
+  const stored = bounded(value, "owner handle", 512);
+  if (!stored.startsWith(OWNER_STORAGE_PREFIX)) return stored;
+  const payload = stored.slice(OWNER_STORAGE_PREFIX.length);
+  if (!payload || payload.includes("\0")) {
+    throw new Error("Model configuration operation owner handle is corrupt.");
+  }
+  const decoded = payload.replaceAll("\x1f", "\0");
+  return bounded(decoded, "owner handle", 512);
 }
 
 function decodeRouteKeyHex(value: unknown, label: string): string {
@@ -322,7 +351,7 @@ function parseOperationRow(
   }
   return {
     operationId: operationId(row.operation_id),
-    ownerHandle: bounded(row.owner_handle, "owner handle", 512),
+    ownerHandle: decodeOwnerHandle(row.owner_handle),
     profileId: profileId(row.profile_id),
     state,
     stage,
@@ -549,7 +578,7 @@ export class ModelConfigurationOperationStore {
       )
       .run(
         id,
-        bounded(input.ownerHandle, "owner handle", 512),
+        encodeOwnerHandle(input.ownerHandle),
         targetProfileId,
         encodeRouteKey(input.oldRouteKey, "old route"),
         encodeRouteKey(input.newRouteKey, "new route"),

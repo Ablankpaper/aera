@@ -16,9 +16,11 @@ Provider/model edits will cross one typed Main mutation instead of several indep
 
 The non-secret operation journal will live at Electron `userData/model-configuration/model-configuration.db`, outside the active Profile `state.db`. Short-lived exact sibling backups enable verified crash rollback; the journal contains only symbolic roles and digests, never keys, paths, or raw bodies.
 
-The implemented core [[src/main/model-configuration-coordinator.ts#ModelConfigurationCoordinator]] serializes one owner/target Profile, commits dependency stages before activation, returns a distinct post-commit refresh warning, and recognizes only a fully verified commit or an exact backup restore during cold recovery. Startup and IPC wiring remain a later slice.
+The implemented core [[src/main/model-configuration-coordinator.ts#ModelConfigurationCoordinator]] serializes one owner/target Profile, commits dependency stages before activation, returns a distinct post-commit refresh warning, and recognizes only a fully verified commit or an exact backup restore during cold recovery. [[src/main/model-configuration-runtime.ts#prepareModelConfigurationRuntime]] opens the independent journal and completes recovery before coordinated IPC registration; a recovery failure leaves mutation IPC fail-closed while read-only surfaces remain available.
 
 Canonical route identities contain NUL separators, so [[src/main/model-configuration-operation-store.ts#ModelConfigurationOperationStore]] writes them as bounded `b64v1` text and reconstructs the exact UTF-8 identity through SQLite `hex()` reads. This avoids driver truncation without adding a credential, path, or file body to the journal.
+
+The NUL-delimited owner handle and composite route ID are opaque Main-only identities. Their validation permits the delimiter while still bounding length and rejecting line controls, so a real runtime owner can reach the journal and an owner catalog can expose route selections without leaking credentials.
 
 ## Organization submission isolation
 

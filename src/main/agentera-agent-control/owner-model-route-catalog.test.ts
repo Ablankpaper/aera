@@ -65,6 +65,21 @@ function subject(
 }
 
 describe("OwnerModelRouteCatalog", () => {
+  it("preserves NUL-delimited route IDs in public catalog snapshots", () => {
+    const { catalog } = subject(
+      [profile("default", { isDefault: true })],
+      {
+        default: [
+          route("default", "fixture", {
+            id: "default\0model-row",
+          }),
+        ],
+      },
+    );
+
+    expect(catalog.snapshot().routes[0].id).toBe("default\0model-row");
+  });
+
   it("keeps an active installed-Profile route visible beside account Profiles", () => {
     const { catalog } = subject(
       [

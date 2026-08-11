@@ -69,6 +69,21 @@ function boundedString(
   return value;
 }
 
+function boundedRouteId(value: unknown): string {
+  // Route IDs are Main-generated composite identities (`profile\0row`). NUL
+  // is the delimiter, not user content, so it is valid in this one field;
+  // retain the length and line-control protections used for public strings.
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > MAX_ROUTE_ID_LENGTH ||
+    /[\r\n]/.test(value)
+  ) {
+    throw codedError("model_switch_route_unavailable");
+  }
+  return value;
+}
+
 function routeIsUsable(route: ResolvedOwnerModelRoute): boolean {
   if (route.credentialAvailable === false) return false;
   return route.credentialRef !== null || isLocalBaseUrl(route.baseUrl);
@@ -100,7 +115,7 @@ function publicRoute(
   sourceKind: "account" | "legacy_agent",
 ): OwnerModelRouteSummary {
   return {
-    id: boundedString(route.id, MAX_ROUTE_ID_LENGTH),
+    id: boundedRouteId(route.id),
     provider: boundedString(route.provider, MAX_MODEL_ID_LENGTH),
     model: boundedString(route.model, MAX_MODEL_ID_LENGTH),
     baseUrl: boundedString(route.baseUrl, MAX_MODEL_ID_LENGTH),

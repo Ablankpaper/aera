@@ -101,6 +101,32 @@ describe("ModelConfigurationOperationStore", () => {
     );
   });
 
+  it("round-trips the three-part owner handle without NUL truncation", () => {
+    const { database, paths } = fixture();
+    const snapshot = captureModelConfigurationFiles({
+      profileId: "default",
+      operationId: OPERATION_ID,
+      paths,
+    });
+    const store = new ModelConfigurationOperationStore(database);
+    const ownerHandle = [
+      "10000000-0000-4000-8000-000000000001",
+      "20000000-0000-4000-8000-000000000002",
+      "30000000-0000-4000-8000-000000000003",
+    ].join("\0");
+
+    const record = store.begin({
+      operationId: OPERATION_ID,
+      ownerHandle,
+      profileId: "default",
+      oldRouteKey: "auto\0old\0\0",
+      newRouteKey: "openai\0new\0https://example.invalid/v1\0responses",
+      snapshot,
+    });
+
+    expect(record.ownerHandle).toBe(ownerHandle);
+  });
+
   it("restores exact comments, CRLF bytes, modes, and absence", () => {
     const { paths } = fixture();
     const original = Buffer.from(

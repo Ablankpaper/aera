@@ -413,6 +413,12 @@ import {
   type ProductAccessGuard,
 } from "./auth-guard";
 import {
+  createModelConfigurationIpcBridge,
+  type ModelConfigurationIpcBridgeDependencies,
+} from "./model-configuration-bridge";
+import type { ModelConfigurationCoordinator } from "../model-configuration-coordinator";
+import type { OwnerModelRouteCatalog } from "../agentera-agent-control/owner-model-route-catalog";
+import {
   setProfileColor,
   setProfileAvatar,
   removeProfileAvatar,
@@ -589,10 +595,10 @@ import {
 export interface IpcContext {
   runtimeActivity: RuntimeActivityCoordinator;
   getMainWindow: () => BrowserWindow | null;
-  notifyConnectionConfigChanged: () => void;
-  notifyRuntimeSnapshotChanged: () => void;
-  notifyModelLibraryChanged: () => void;
-  notifyCustomProvidersChanged: () => void;
+  notifyConnectionConfigChanged: (catalogRevision?: string) => void;
+  notifyRuntimeSnapshotChanged: (catalogRevision?: string) => void;
+  notifyModelLibraryChanged: (catalogRevision?: string) => void;
+  notifyCustomProvidersChanged: (catalogRevision?: string) => void;
   openExternalUrl: (rawUrl: unknown) => void;
   agenteraAuth: AgenteraAuthController;
   agenteraUserProfiles: AgenteraUserProfileStore;
@@ -614,6 +620,8 @@ export interface IpcContext {
   agenteraOfficialQuality?: AgenteraOfficialQualityManager | null;
   agenteraEncryptedBackup?: AgenteraEncryptedBackupController | null;
   agenteraDesktopControl?: AgenteraDesktopControlCoordinator | null;
+  modelConfigurationCoordinator?: ModelConfigurationCoordinator | null;
+  ownerModelRouteCatalog?: OwnerModelRouteCatalog | null;
 }
 
 const RUNTIME_DISTRIBUTION_UNAVAILABLE_STATE: RuntimeDistributionPublicState = {
@@ -1018,6 +1026,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     agenteraOfficialQuality,
     agenteraEncryptedBackup,
     agenteraDesktopControl,
+    modelConfigurationCoordinator,
+    ownerModelRouteCatalog,
   } = context;
   const globalProfileChangedChannel = "agentera-global-profile-changed";
   const notifyGlobalProfileChanged = (profile: unknown): void => {
@@ -1191,6 +1201,39 @@ export function registerIpcHandlers(context: IpcContext): void {
     electronIpcMain,
     productAccessGuard,
     assertChannelProfileTarget,
+  );
+  const modelConfigurationBridge = createModelConfigurationIpcBridge({
+    catalog: ownerModelRouteCatalog ?? {
+      snapshot: () => {
+        throw Object.assign(
+          new Error("Model configuration catalog is unavailable."),
+          { code: "service_unavailable" },
+        );
+      },
+    },
+    coordinator: modelConfigurationCoordinator ?? {
+      mutate: async () => ({
+        status: "rejected" as const,
+        stage: "recovery" as const,
+        code: "model_configuration_recovery_required" as const,
+        rollback: "recovery_required" as const,
+      }),
+    },
+    assertRequestedProfile: (profile) => {
+      const connection = getConnectionConfig();
+      if (connection.mode === "local") {
+        agenteraProfileBindings.verifyProfileBinding(
+          profileHome(profile),
+          getAgenteraRuntimeOwner(),
+        );
+      }
+    },
+  } satisfies ModelConfigurationIpcBridgeDependencies);
+  ipcMain.handle("get-owner-model-route-catalog", (_event, profile?: string) =>
+    modelConfigurationBridge.getOwnerModelRouteCatalog(profile),
+  );
+  ipcMain.handle("mutate-model-configuration", (_event, request: unknown) =>
+    modelConfigurationBridge.mutateModelConfiguration(request),
   );
   ipcMain.handle("agentera-official-quality-get-consent", () =>
     requireOfficialQuality().getConsent(),

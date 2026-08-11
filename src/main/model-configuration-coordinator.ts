@@ -242,7 +242,21 @@ function validateMutationRequest(
 }
 
 function validateOwnerHandle(value: unknown): string {
-  return boundedString(value, 512);
+  // Owner handles are opaque Main-only keys. The runtime deliberately uses
+  // NUL separators between the tenant, owner, and installation identities so
+  // concatenation cannot be ambiguous; unlike user/model fields, NUL is
+  // therefore valid here. Keep the other bounded-string protections so an
+  // owner key can never carry line-oriented or unbounded data into the
+  // journal/lock paths.
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > 512 ||
+    /[\r\n]/.test(value)
+  ) {
+    throw new Error("Invalid model configuration owner handle.");
+  }
+  return value;
 }
 
 function boundedRouteKey(value: unknown): string {

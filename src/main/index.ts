@@ -45,7 +45,7 @@ async function bootstrapAndStartMainProcess(): Promise<void> {
     console.error("[AGENTERA_RUNTIME_BOOTSTRAP] repair required");
   }
   const { startMainProcess } = await import("./app/start");
-  startMainProcess({ workspaceInvitationInbox });
+  await startMainProcess({ workspaceInvitationInbox });
 }
 
 const workspaceInvitationInbox = new WorkspaceInvitationInbox();

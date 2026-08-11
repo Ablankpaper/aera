@@ -15,6 +15,11 @@ import type {
 import type { TokenBalancesResponse } from "../shared/tokens";
 import type { CustomProviderRecord } from "../shared/custom-providers";
 import type {
+  ModelConfigurationMutationRequest,
+  ModelConfigurationMutationResult,
+  OwnerModelRouteCatalogSnapshot,
+} from "../shared/model-configuration";
+import type {
   MessagingPlatformsResponse,
   MessagingPlatformTestResponse,
   MessagingPlatformUpdate,
@@ -431,6 +436,16 @@ const hermesAPI = {
     profile: string,
   ): Promise<AgentRuntimeModelRoute[]> =>
     ipcRenderer.invoke("list-agent-runtime-model-routes", profile),
+
+  getOwnerModelRouteCatalog: (
+    requestedProfileId?: string,
+  ): Promise<OwnerModelRouteCatalogSnapshot> =>
+    ipcRenderer.invoke("get-owner-model-route-catalog", requestedProfileId),
+
+  mutateModelConfiguration: (
+    request: ModelConfigurationMutationRequest,
+  ): Promise<ModelConfigurationMutationResult> =>
+    ipcRenderer.invoke("mutate-model-configuration", request),
 
   setModelConfig: (
     provider: string,
