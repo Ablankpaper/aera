@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { isIP } from "node:net";
 import {
   canonicalPublicRouteKey,
   type OwnerModelRouteCatalogSnapshot,
@@ -7,6 +6,7 @@ import {
   type OwnerModelRouteSummary,
   type PublicModelRouteIdentity,
 } from "../../shared/model-configuration";
+import { isLocalBaseUrl } from "../../shared/url-key-map";
 
 const MAX_PROFILE_ID_LENGTH = 64;
 const MAX_MODEL_ID_LENGTH = 512;
@@ -69,24 +69,9 @@ function boundedString(
   return value;
 }
 
-function localEndpoint(value: string): boolean {
-  try {
-    const parsed = new URL(value);
-    const hostname = parsed.hostname.toLowerCase();
-    return (
-      hostname === "localhost" ||
-      hostname.endsWith(".localhost") ||
-      isIP(hostname) !== 0 ||
-      hostname === "[::1]"
-    );
-  } catch {
-    return false;
-  }
-}
-
 function routeIsUsable(route: ResolvedOwnerModelRoute): boolean {
   if (route.credentialAvailable === false) return false;
-  return route.credentialRef !== null || localEndpoint(route.baseUrl);
+  return route.credentialRef !== null || isLocalBaseUrl(route.baseUrl);
 }
 
 function profileSort(

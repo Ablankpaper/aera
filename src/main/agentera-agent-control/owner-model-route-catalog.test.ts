@@ -144,4 +144,20 @@ describe("OwnerModelRouteCatalog", () => {
       catalog.snapshot().routes.map((candidate) => candidate.model),
     ).toEqual(["safe"]);
   });
+
+  it("does not treat a public IP endpoint as credential-free local", () => {
+    const { catalog } = subject(
+      [profile("default", { isDefault: true })],
+      {
+        default: [
+          route("default", "public-ip", {
+            baseUrl: "https://8.8.8.8/v1",
+            credentialRef: null,
+          }),
+        ],
+      },
+    );
+
+    expect(catalog.snapshot().routes).toEqual([]);
+  });
 });
