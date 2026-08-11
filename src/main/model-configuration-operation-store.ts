@@ -1,0 +1,598 @@
+import { createHash } from "node:crypto";
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import type { ModelConfigurationStage } from "../shared/model-configuration";
+import { HERMES_HOME } from "./installer";
+import type { ModelConfigurationDatabase } from "./model-configuration-database";
+import { profilePaths } from "./utils";
+
+const OPERATION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const PROFILE_ID_PATTERN = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
+const ABSENT_DIGEST = createHash("sha256")
+  .update("aera-model-configuration-absent-v1", "utf8")
+  .digest("hex");
+
+export type ModelConfigurationFileRole =
+  | "env"
+  | "providers"
+  | "models"
+  | "modelDefinitions"
+  | "config";
+
+export interface ModelConfigurationFilePaths {
+  env: string;
+  providers: string;
+  models: string;
+  modelDefinitions: string;
+  config: string;
+}
+
+export interface ModelConfigurationFileSnapshot {
+  role: ModelConfigurationFileRole;
+  path: string;
+  backupPath: string;
+  existed: boolean;
+  mode: number;
+  bytes: Buffer;
+  digest: string;
+}
+
+export interface ModelConfigurationFilesSnapshot {
+  operationId: string;
+  profileId: string;
+  files: Record<ModelConfigurationFileRole, ModelConfigurationFileSnapshot>;
+}
+
+export type ModelConfigurationOperationState =
+  | "prepared"
+  | "credential"
+  | "provider"
+  | "model_library"
+  | "native_route"
+  | "activation"
+  | "verification"
+  | "committed"
+  | "rolled_back"
+  | "recovery_required";
+
+export interface ModelConfigurationJournalFile {
+  role: ModelConfigurationFileRole;
+  existed: boolean;
+  mode: number;
+}
+
+export interface ModelConfigurationOperationRecord {
+  operationId: string;
+  ownerHandle: string;
+  profileId: string;
+  state: ModelConfigurationOperationState;
+  stage: ModelConfigurationStage;
+  oldRouteKey: string;
+  newRouteKey: string;
+  files: ModelConfigurationJournalFile[];
+  beforeDigests: Partial<Record<ModelConfigurationFileRole, string>>;
+  afterDigests: Partial<Record<ModelConfigurationFileRole, string>>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BeginModelConfigurationOperationInput {
+  operationId: string;
+  ownerHandle: string;
+  profileId: string;
+  oldRouteKey: string;
+  newRouteKey: string;
+  snapshot: ModelConfigurationFilesSnapshot;
+}
+
+interface OperationRow {
+  operation_id?: unknown;
+  owner_handle?: unknown;
+  profile_id?: unknown;
+  state?: unknown;
+  stage?: unknown;
+  old_route_key?: unknown;
+  new_route_key?: unknown;
+  file_manifest_json?: unknown;
+  before_digest_json?: unknown;
+  after_digest_json?: unknown;
+  created_at?: unknown;
+  updated_at?: unknown;
+}
+
+const FILE_ROLES: readonly ModelConfigurationFileRole[] = [
+  "env",
+  "providers",
+  "models",
+  "modelDefinitions",
+  "config",
+];
+
+const OPERATION_STATES: readonly ModelConfigurationOperationState[] = [
+  "prepared",
+  "credential",
+  "provider",
+  "model_library",
+  "native_route",
+  "activation",
+  "verification",
+  "committed",
+  "rolled_back",
+  "recovery_required",
+];
+
+const OPERATION_STAGES: readonly ModelConfigurationStage[] = [
+  "validation",
+  "credential",
+  "provider",
+  "model_library",
+  "native_route",
+  "activation",
+  "verification",
+  "rollback",
+  "recovery",
+];
+
+function digest(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function operationId(value: unknown): string {
+  if (typeof value !== "string" || !OPERATION_ID_PATTERN.test(value)) {
+    throw new Error("Invalid model configuration operation id.");
+  }
+  return value.toLowerCase();
+}
+
+function profileId(value: unknown): string {
+  if (typeof value !== "string" || !PROFILE_ID_PATTERN.test(value)) {
+    throw new Error("Invalid model configuration Profile id.");
+  }
+  return value;
+}
+
+function bounded(value: unknown, label: string, maximum: number): string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > maximum ||
+    /[\r\n]/.test(value)
+  ) {
+    throw new Error(`Invalid model configuration ${label}.`);
+  }
+  return value;
+}
+
+function isoDate(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new Error("Model configuration operation timestamp is corrupt.");
+  }
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== value) {
+    throw new Error("Model configuration operation timestamp is corrupt.");
+  }
+  return value;
+}
+
+function parseFiles(value: unknown): ModelConfigurationJournalFile[] {
+  if (!Array.isArray(value) || value.length !== FILE_ROLES.length) {
+    throw new Error("Model configuration operation manifest is corrupt.");
+  }
+  const files = value.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error("Model configuration operation manifest is corrupt.");
+    }
+    const record = entry as Record<string, unknown>;
+    if (
+      Object.keys(record).sort().join("\0") !==
+        ["existed", "mode", "role"].sort().join("\0") ||
+      !FILE_ROLES.includes(record.role as ModelConfigurationFileRole) ||
+      typeof record.existed !== "boolean" ||
+      !Number.isSafeInteger(record.mode) ||
+      (record.mode as number) < 0 ||
+      (record.mode as number) > 0o777
+    ) {
+      throw new Error("Model configuration operation manifest is corrupt.");
+    }
+    return {
+      role: record.role as ModelConfigurationFileRole,
+      existed: record.existed,
+      mode: record.mode as number,
+    };
+  });
+  if (new Set(files.map(({ role }) => role)).size !== FILE_ROLES.length) {
+    throw new Error("Model configuration operation manifest is corrupt.");
+  }
+  return files;
+}
+
+function parseDigests(
+  value: unknown,
+): Partial<Record<ModelConfigurationFileRole, string>> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Model configuration operation digests are corrupt.");
+  }
+  const result: Partial<Record<ModelConfigurationFileRole, string>> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (
+      !FILE_ROLES.includes(key as ModelConfigurationFileRole) ||
+      typeof item !== "string" ||
+      !/^[0-9a-f]{64}$/.test(item)
+    ) {
+      throw new Error("Model configuration operation digests are corrupt.");
+    }
+    result[key as ModelConfigurationFileRole] = item;
+  }
+  return result;
+}
+
+function parseJson(value: unknown, label: string): unknown {
+  if (typeof value !== "string") {
+    throw new Error(`Model configuration operation ${label} is corrupt.`);
+  }
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    throw new Error(`Model configuration operation ${label} is corrupt.`);
+  }
+}
+
+function parseOperationRow(
+  row: OperationRow | undefined,
+): ModelConfigurationOperationRecord | null {
+  if (!row) return null;
+  const state = row.state as ModelConfigurationOperationState;
+  const stage = row.stage as ModelConfigurationStage;
+  if (!OPERATION_STATES.includes(state) || !OPERATION_STAGES.includes(stage)) {
+    throw new Error("Model configuration operation state is corrupt.");
+  }
+  return {
+    operationId: operationId(row.operation_id),
+    ownerHandle: bounded(row.owner_handle, "owner handle", 512),
+    profileId: profileId(row.profile_id),
+    state,
+    stage,
+    oldRouteKey: bounded(row.old_route_key, "old route", 4096),
+    newRouteKey: bounded(row.new_route_key, "new route", 4096),
+    files: parseFiles(parseJson(row.file_manifest_json, "manifest")),
+    beforeDigests: parseDigests(
+      parseJson(row.before_digest_json, "before digests"),
+    ),
+    afterDigests: parseDigests(
+      parseJson(row.after_digest_json, "after digests"),
+    ),
+    createdAt: isoDate(row.created_at),
+    updatedAt: isoDate(row.updated_at),
+  };
+}
+
+export function defaultModelConfigurationFilePaths(
+  profile: string,
+): ModelConfigurationFilePaths {
+  const resolvedProfile = profileId(profile);
+  const paths = profilePaths(resolvedProfile);
+  return {
+    env: paths.envFile,
+    providers: join(paths.home, "providers.json"),
+    config: paths.configFile,
+    models: join(HERMES_HOME, "models.json"),
+    modelDefinitions: join(HERMES_HOME, "model-definitions.json"),
+  };
+}
+
+function normalizedPaths(
+  paths: ModelConfigurationFilePaths,
+): ModelConfigurationFilePaths {
+  const normalized = Object.fromEntries(
+    FILE_ROLES.map((role) => {
+      const value = paths[role];
+      if (typeof value !== "string" || !isAbsolute(value)) {
+        throw new Error("Model configuration file path must be absolute.");
+      }
+      return [role, resolve(value)];
+    }),
+  ) as unknown as ModelConfigurationFilePaths;
+  if (new Set(Object.values(normalized)).size !== FILE_ROLES.length) {
+    throw new Error("Model configuration file paths must be distinct.");
+  }
+  return normalized;
+}
+
+export function captureModelConfigurationFiles(input: {
+  profileId: string;
+  operationId: string;
+  paths?: ModelConfigurationFilePaths;
+}): ModelConfigurationFilesSnapshot {
+  const id = operationId(input.operationId);
+  const targetProfileId = profileId(input.profileId);
+  const paths = normalizedPaths(
+    input.paths ?? defaultModelConfigurationFilePaths(targetProfileId),
+  );
+  const entries = FILE_ROLES.map((role) => {
+    const path = paths[role];
+    const existed = existsSync(path);
+    if (existed && lstatSync(path).isSymbolicLink()) {
+      throw new Error("Model configuration files cannot be symbolic links.");
+    }
+    const bytes = existed ? readFileSync(path) : Buffer.alloc(0);
+    const mode = existed ? statSync(path).mode & 0o777 : 0o600;
+    const file: ModelConfigurationFileSnapshot = {
+      role,
+      path,
+      backupPath: `${path}.aera-model-config-backup.${id}`,
+      existed,
+      mode,
+      bytes,
+      digest: existed ? digest(bytes) : ABSENT_DIGEST,
+    };
+    return [role, file] as const;
+  });
+  return {
+    operationId: id,
+    profileId: targetProfileId,
+    files: Object.fromEntries(entries) as Record<
+      ModelConfigurationFileRole,
+      ModelConfigurationFileSnapshot
+    >,
+  };
+}
+
+function writeExclusive(path: string, bytes: Buffer, mode: number): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const descriptor = openSync(path, "wx", mode);
+  try {
+    writeFileSync(descriptor, bytes);
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+  chmodSync(path, mode);
+}
+
+export function persistModelConfigurationBackups(
+  snapshot: ModelConfigurationFilesSnapshot,
+): void {
+  for (const role of FILE_ROLES) {
+    const file = snapshot.files[role];
+    if (!file.existed) continue;
+    if (existsSync(file.backupPath)) {
+      if (digest(readFileSync(file.backupPath)) !== file.digest) {
+        throw new Error("Model configuration backup digest mismatch.");
+      }
+      continue;
+    }
+    writeExclusive(file.backupPath, file.bytes, 0o600);
+  }
+}
+
+function atomicWriteBytes(path: string, bytes: Buffer, mode: number): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const temporary = join(
+    dirname(path),
+    `.${basename(path)}.${process.pid}.${Date.now()}.model-config.tmp`,
+  );
+  writeExclusive(temporary, bytes, mode || 0o600);
+  try {
+    renameSync(temporary, path);
+    chmodSync(path, mode || 0o600);
+  } catch (error) {
+    if (existsSync(temporary)) unlinkSync(temporary);
+    throw error;
+  }
+}
+
+export function restoreModelConfigurationFiles(
+  snapshot: ModelConfigurationFilesSnapshot,
+): void {
+  for (const role of [...FILE_ROLES].reverse()) {
+    const file = snapshot.files[role];
+    if (!file.existed) {
+      if (existsSync(file.path)) unlinkSync(file.path);
+      continue;
+    }
+    if (!existsSync(file.backupPath)) {
+      throw new Error("Model configuration backup is missing.");
+    }
+    const bytes = readFileSync(file.backupPath);
+    if (digest(bytes) !== file.digest) {
+      throw new Error("Model configuration backup digest mismatch.");
+    }
+    atomicWriteBytes(file.path, bytes, file.mode);
+  }
+  for (const role of FILE_ROLES) {
+    const file = snapshot.files[role];
+    const current = existsSync(file.path)
+      ? digest(readFileSync(file.path))
+      : ABSENT_DIGEST;
+    if (current !== file.digest) {
+      throw new Error("Model configuration restore verification failed.");
+    }
+  }
+}
+
+export function removeModelConfigurationBackups(
+  snapshot: ModelConfigurationFilesSnapshot,
+): void {
+  for (const role of FILE_ROLES) {
+    const path = snapshot.files[role].backupPath;
+    if (existsSync(path)) unlinkSync(path);
+  }
+}
+
+export function readModelConfigurationFileDigests(
+  paths: ModelConfigurationFilePaths,
+): Record<ModelConfigurationFileRole, string> {
+  const normalized = normalizedPaths(paths);
+  return Object.fromEntries(
+    FILE_ROLES.map((role) => [
+      role,
+      existsSync(normalized[role])
+        ? digest(readFileSync(normalized[role]))
+        : ABSENT_DIGEST,
+    ]),
+  ) as Record<ModelConfigurationFileRole, string>;
+}
+
+export class ModelConfigurationOperationStore {
+  private readonly database: ModelConfigurationDatabase;
+  private readonly now: () => Date;
+
+  constructor(
+    database: ModelConfigurationDatabase,
+    options: { now?: () => Date } = {},
+  ) {
+    this.database = database;
+    this.now = options.now ?? (() => new Date());
+  }
+
+  begin(
+    input: BeginModelConfigurationOperationInput,
+  ): ModelConfigurationOperationRecord {
+    const id = operationId(input.operationId);
+    const targetProfileId = profileId(input.profileId);
+    if (
+      input.snapshot.operationId !== id ||
+      input.snapshot.profileId !== targetProfileId
+    ) {
+      throw new Error("Model configuration snapshot identity mismatch.");
+    }
+    const files = FILE_ROLES.map((role) => ({
+      role,
+      existed: input.snapshot.files[role].existed,
+      mode: input.snapshot.files[role].mode,
+    }));
+    const beforeDigests = Object.fromEntries(
+      FILE_ROLES.map((role) => [role, input.snapshot.files[role].digest]),
+    );
+    const timestamp = this.now().toISOString();
+    this.database.sqlite
+      .prepare(
+        `INSERT INTO desktop_model_configuration_operations (
+          operation_id, owner_handle, profile_id, state, stage,
+          old_route_key, new_route_key, file_manifest_json,
+          before_digest_json, after_digest_json, created_at, updated_at
+        ) VALUES (?, ?, ?, 'prepared', 'validation', ?, ?, ?, ?, '{}', ?, ?)`,
+      )
+      .run(
+        id,
+        bounded(input.ownerHandle, "owner handle", 512),
+        targetProfileId,
+        bounded(input.oldRouteKey, "old route", 4096),
+        bounded(input.newRouteKey, "new route", 4096),
+        JSON.stringify(files),
+        JSON.stringify(beforeDigests),
+        timestamp,
+        timestamp,
+      );
+    return this.require(id);
+  }
+
+  get(id: string): ModelConfigurationOperationRecord | null {
+    return parseOperationRow(
+      this.database.sqlite
+        .prepare(
+          `SELECT operation_id, owner_handle, profile_id, state, stage,
+                  old_route_key, new_route_key, file_manifest_json,
+                  before_digest_json, after_digest_json, created_at, updated_at
+           FROM desktop_model_configuration_operations
+           WHERE operation_id = ?`,
+        )
+        .get(operationId(id)) as OperationRow | undefined,
+    );
+  }
+
+  require(id: string): ModelConfigurationOperationRecord {
+    const record = this.get(id);
+    if (!record) throw new Error("Model configuration operation is missing.");
+    return record;
+  }
+
+  advance(input: {
+    operationId: string;
+    state: Exclude<
+      ModelConfigurationOperationState,
+      "prepared" | "committed" | "rolled_back" | "recovery_required"
+    >;
+    stage: ModelConfigurationStage;
+    afterDigests?: Partial<Record<ModelConfigurationFileRole, string>>;
+  }): ModelConfigurationOperationRecord {
+    const id = operationId(input.operationId);
+    if (!OPERATION_STATES.includes(input.state)) {
+      throw new Error("Invalid model configuration operation state.");
+    }
+    if (!OPERATION_STAGES.includes(input.stage)) {
+      throw new Error("Invalid model configuration operation stage.");
+    }
+    const current = this.require(id);
+    const afterDigests = {
+      ...current.afterDigests,
+      ...(input.afterDigests ?? {}),
+    };
+    parseDigests(afterDigests);
+    this.database.sqlite
+      .prepare(
+        `UPDATE desktop_model_configuration_operations
+         SET state = ?, stage = ?, after_digest_json = ?, updated_at = ?
+         WHERE operation_id = ?`,
+      )
+      .run(
+        input.state,
+        input.stage,
+        JSON.stringify(afterDigests),
+        this.now().toISOString(),
+        id,
+      );
+    return this.require(id);
+  }
+
+  finish(
+    idInput: string,
+    state: "committed" | "rolled_back" | "recovery_required",
+  ): ModelConfigurationOperationRecord {
+    const id = operationId(idInput);
+    const stage: ModelConfigurationStage =
+      state === "committed"
+        ? "verification"
+        : state === "rolled_back"
+          ? "rollback"
+          : "recovery";
+    this.require(id);
+    this.database.sqlite
+      .prepare(
+        `UPDATE desktop_model_configuration_operations
+         SET state = ?, stage = ?, updated_at = ?
+         WHERE operation_id = ?`,
+      )
+      .run(state, stage, this.now().toISOString(), id);
+    return this.require(id);
+  }
+
+  listIncomplete(): ModelConfigurationOperationRecord[] {
+    return (
+      this.database.sqlite
+        .prepare(
+          `SELECT operation_id, owner_handle, profile_id, state, stage,
+                  old_route_key, new_route_key, file_manifest_json,
+                  before_digest_json, after_digest_json, created_at, updated_at
+           FROM desktop_model_configuration_operations
+           WHERE state NOT IN ('committed', 'rolled_back')
+           ORDER BY created_at, operation_id`,
+        )
+        .all() as OperationRow[]
+    ).map((row) => parseOperationRow(row)!);
+  }
+}
