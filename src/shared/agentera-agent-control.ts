@@ -410,6 +410,36 @@ export interface OrganizationAgentSubmissionSummary {
   review: OrganizationAgentReview | null;
 }
 
+export type SubmissionReferenceConflictStage =
+  | "reference_shape"
+  | "content_digest"
+  | "definition"
+  | "published_version"
+  | "draft_publication"
+  | "compare_and_set";
+
+export type SubmissionReferenceState =
+  | { kind: "verified"; draftId: string; draftRevision: number }
+  | { kind: "remote_only" }
+  | {
+      kind: "quarantined";
+      stage: SubmissionReferenceConflictStage;
+    };
+
+export interface OrganizationSubmissionListIssue {
+  submissionId: string | null;
+  code: "cloud_record_invalid";
+}
+
+export interface OrganizationAgentSubmissionListItem extends OrganizationAgentSubmissionSummary {
+  referenceState: SubmissionReferenceState;
+}
+
+export interface OrganizationAgentSubmissionList {
+  submissions: OrganizationAgentSubmissionListItem[];
+  issues: OrganizationSubmissionListIssue[];
+}
+
 export interface OrganizationSubmissionPreview {
   publicationHandle: string;
   draftId: string;
@@ -510,6 +540,11 @@ export interface ConfirmOrganizationReviewInput {
 export interface ConfirmOrganizationWithdrawalInput {
   withdrawalHandle: string;
   confirmation: "withdraw-organization-agent";
+}
+
+export interface DisconnectOrganizationSubmissionReferenceInput {
+  submissionId: string;
+  confirmation: "disconnect-local-draft-link";
 }
 
 export type AgenteraAgentControlErrorCode =

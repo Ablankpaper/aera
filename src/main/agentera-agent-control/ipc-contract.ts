@@ -24,6 +24,8 @@ import type {
   CreateAgentDraftInput,
   ExperienceCandidateFinding,
   OrganizationAgentSubmissionDetail,
+  OrganizationAgentSubmissionList,
+  OrganizationAgentSubmissionListItem,
   OrganizationAgentSubmissionSummary,
   OrganizationReviewPreview,
   OrganizationSubmissionPreview,
@@ -35,6 +37,8 @@ import type {
   PrepareOrganizationReviewInput,
   ReviewOrganizationExperienceCandidateInput,
   ReviewExperienceCandidateInput,
+  SubmissionReferenceConflictStage,
+  SubmissionReferenceState,
   SubmitOrganizationExperienceCandidateInput,
   SubmitExperienceCandidateInput,
   ConfirmOrganizationExperienceCandidateImportInput,
@@ -1073,6 +1077,90 @@ export function serializeOrganizationAgentSubmission(
             ),
             reviewedAt: value.review.reviewedAt,
           },
+  };
+}
+
+function serializeSubmissionReferenceState(
+  value: unknown,
+): SubmissionReferenceState {
+  if (exactObject(value, ["kind"]) && value.kind === "remote_only") {
+    return { kind: "remote_only" };
+  }
+  if (exactObject(value, ["kind", "draftId", "draftRevision"])) {
+    const draftRevision = value.draftRevision;
+    if (
+      value.kind !== "verified" ||
+      typeof draftRevision !== "number" ||
+      !Number.isSafeInteger(draftRevision) ||
+      draftRevision < 1
+    ) {
+      return invalidRequest();
+    }
+    return {
+      kind: "verified",
+      draftId: parseAgentControlId(value.draftId),
+      draftRevision,
+    };
+  }
+  if (exactObject(value, ["kind", "stage"])) {
+    const stages: readonly SubmissionReferenceConflictStage[] = [
+      "reference_shape",
+      "content_digest",
+      "definition",
+      "published_version",
+      "draft_publication",
+      "compare_and_set",
+    ];
+    if (
+      value.kind !== "quarantined" ||
+      typeof value.stage !== "string" ||
+      !stages.includes(value.stage as SubmissionReferenceConflictStage)
+    ) {
+      return invalidRequest();
+    }
+    return {
+      kind: "quarantined",
+      stage: value.stage as SubmissionReferenceConflictStage,
+    };
+  }
+  return invalidRequest();
+}
+
+export function publicOrganizationSubmissionList(
+  value: OrganizationAgentSubmissionList,
+): OrganizationAgentSubmissionList {
+  return {
+    submissions: value.submissions.map((item) => {
+      const referenceState = serializeSubmissionReferenceState(
+        item.referenceState,
+      );
+      const verifiedReference =
+        referenceState.kind === "verified" ? referenceState : null;
+      const summary = serializeOrganizationAgentSubmission({
+        ...item,
+        localDraftId: verifiedReference?.draftId ?? null,
+        localDraftRevision: verifiedReference?.draftRevision ?? null,
+      });
+      return {
+        ...summary,
+        referenceState,
+      } satisfies OrganizationAgentSubmissionListItem;
+    }),
+    issues: value.issues.map((issue) => {
+      if (
+        !exactObject(issue, ["submissionId", "code"]) ||
+        issue.code !== "cloud_record_invalid"
+      ) {
+        return invalidRequest();
+      }
+      return {
+        submissionId:
+          issue.submissionId === null
+            ? null
+            : parseAgentControlId(issue.submissionId),
+        code: "cloud_record_invalid" as const,
+      };
+    }),
   };
 }
 
