@@ -28,6 +28,12 @@ import {
   customProviderEnvKey,
   isLocalBaseUrl,
 } from "../../../../shared/url-key-map";
+import type {
+  ModelConfigurationMutationResult,
+  OwnerModelRouteCatalogSnapshot,
+  OwnerModelRouteSummary,
+  UpsertModelServiceRequest,
+} from "../../../../shared/model-configuration";
 import BrandLogo from "../../components/common/BrandLogo";
 import { useI18n } from "../../components/useI18n";
 import {
@@ -420,6 +426,7 @@ export default function ModelCenter({
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("idle");
   const [formError, setFormError] = useState("");
+  const [formWarning, setFormWarning] = useState("");
   const [saving, setSaving] = useState(false);
   const [editingService, setEditingService] = useState<string | null>(null);
   const [busyService, setBusyService] = useState<{
@@ -433,22 +440,34 @@ export default function ModelCenter({
   const [serviceFeedback, setServiceFeedback] = useState<
     Record<string, ServiceFeedback>
   >({});
+  const [ownerCatalog, setOwnerCatalog] =
+    useState<OwnerModelRouteCatalogSnapshot | null>(null);
+
+  const hasCoordinatedModelConfiguration =
+    typeof window.hermesAPI.getOwnerModelRouteCatalog === "function" &&
+    typeof window.hermesAPI.mutateModelConfiguration === "function";
 
   const reload = useCallback(
     async (showLoading = true): Promise<void> => {
       if (showLoading) setLoading(true);
       try {
-        const [nextModels, nextProviders] = await Promise.all([
+        const [nextModels, nextProviders, nextCatalog] = await Promise.all([
           window.hermesAPI.listModels() as Promise<LibraryModel[]>,
           window.hermesAPI.listCustomProviders(profile).catch(() => []),
+          hasCoordinatedModelConfiguration
+            ? window.hermesAPI
+                .getOwnerModelRouteCatalog(profile)
+                .catch(() => null)
+            : Promise.resolve(null),
         ]);
         setModels(nextModels);
         setCustomProviders(nextProviders);
+        if (nextCatalog) setOwnerCatalog(nextCatalog);
       } finally {
         if (showLoading) setLoading(false);
       }
     },
-    [profile],
+    [hasCoordinatedModelConfiguration, profile],
   );
 
   useEffect(() => {
@@ -591,6 +610,7 @@ export default function ModelCenter({
   const resetTransientState = (): void => {
     setConnectionState("idle");
     setFormError("");
+    setFormWarning("");
     setShowKey(false);
   };
 
@@ -788,6 +808,106 @@ export default function ModelCenter({
     });
   };
 
+  const requireOwnerCatalog =
+    async (): Promise<OwnerModelRouteCatalogSnapshot> => {
+      if (ownerCatalog) return ownerCatalog;
+      if (!hasCoordinatedModelConfiguration) {
+        throw new Error("Coordinated model configuration is unavailable.");
+      }
+      const snapshot =
+        await window.hermesAPI.getOwnerModelRouteCatalog(profile);
+      setOwnerCatalog(snapshot);
+      return snapshot;
+    };
+
+  const routeMatchesService = (
+    route: OwnerModelRouteSummary,
+    service: Pick<
+      ModelService,
+      "provider" | "providerLabel" | "label" | "baseUrl"
+    >,
+  ): boolean => {
+    if (normalizeUrl(route.baseUrl) !== normalizeUrl(service.baseUrl)) {
+      return false;
+    }
+    const label = service.providerLabel || service.label;
+    if (service.provider === "custom") {
+      return (
+        route.provider === customProviderRuntimeRoute(label) ||
+        route.providerLabel.toLowerCase() === label.toLowerCase()
+      );
+    }
+    return route.provider.toLowerCase() === service.provider.toLowerCase();
+  };
+
+  const activeModelFromCatalog = (
+    catalog: OwnerModelRouteCatalogSnapshot,
+    expected: {
+      provider: string;
+      providerLabel?: string;
+      model: string;
+      baseUrl: string;
+    },
+  ): ActiveModel => {
+    const route = catalog.routes.find(
+      (candidate) =>
+        candidate.model === expected.model &&
+        normalizeUrl(candidate.baseUrl) === normalizeUrl(expected.baseUrl) &&
+        (expected.provider !== "custom" ||
+          !expected.providerLabel ||
+          candidate.provider ===
+            customProviderRuntimeRoute(expected.providerLabel)),
+    );
+    if (route) {
+      return {
+        provider: route.provider,
+        model: route.model,
+        baseUrl: route.baseUrl,
+      };
+    }
+    return {
+      provider:
+        expected.provider === "custom" && expected.providerLabel
+          ? customProviderRuntimeRoute(expected.providerLabel)
+          : expected.provider,
+      model: expected.model,
+      baseUrl: expected.baseUrl,
+    };
+  };
+
+  const applyCommittedResult = (
+    result: Exclude<ModelConfigurationMutationResult, { status: "rejected" }>,
+    expected: {
+      provider: string;
+      providerLabel?: string;
+      model: string;
+      baseUrl: string;
+    },
+  ): ActiveModel => {
+    setOwnerCatalog(result.catalog);
+    const persisted = activeModelFromCatalog(result.catalog, expected);
+    onActivated(persisted);
+    return persisted;
+  };
+
+  const coordinatedUpsert = async (input: {
+    provider: string;
+    providerLabel: string;
+    baseUrl: string;
+    apiMode: ModelApiMode | null;
+    apiKey: string;
+    models: UpsertModelServiceRequest["models"];
+    activeModel: string;
+  }): Promise<ModelConfigurationMutationResult> => {
+    const catalog = await requireOwnerCatalog();
+    return window.hermesAPI.mutateModelConfiguration({
+      intent: "upsert",
+      expectedCatalogRevision: catalog.revision,
+      requestedProfileId: catalog.targetProfileId,
+      ...input,
+    });
+  };
+
   const persistAndReadActiveModel = async (
     provider: string,
     model: string,
@@ -814,6 +934,52 @@ export default function ModelCenter({
     setBusyService({ key: service.key, action: "activate" });
     updateServiceFeedback(service.key);
     try {
+      if (hasCoordinatedModelConfiguration) {
+        const result = await coordinatedUpsert({
+          provider: service.provider,
+          providerLabel: service.providerLabel || service.label,
+          baseUrl: service.baseUrl,
+          apiMode:
+            (service.models.find((candidate) => candidate.model === model)
+              ?.apiMode as ModelApiMode | null | undefined) ??
+            service.apiMode ??
+            null,
+          apiKey: service.envKey ? env[service.envKey]?.trim() || "" : "",
+          models: service.models.map((candidate) => ({
+            model: candidate.model,
+            displayName: candidate.name || candidate.model,
+            ...(candidate.contextLength
+              ? { contextLength: candidate.contextLength }
+              : {}),
+          })),
+          activeModel: model,
+        });
+        if (result.status === "rejected") {
+          updateServiceFeedback(service.key, {
+            tone: "error",
+            message: t("providers.center.errors.activate"),
+          });
+          return;
+        }
+        applyCommittedResult(result, {
+          provider: service.provider,
+          providerLabel: service.providerLabel || service.label,
+          model,
+          baseUrl: service.baseUrl,
+        });
+        updateServiceFeedback(service.key, {
+          tone:
+            result.status === "committed_refresh_warning"
+              ? "neutral"
+              : "success",
+          message:
+            result.status === "committed_refresh_warning"
+              ? t("providers.center.warnings.refresh")
+              : t("providers.center.defaultUpdated"),
+        });
+        void reload(false);
+        return;
+      }
       const persisted = await persistAndReadActiveModel(
         service.provider,
         model,
@@ -919,6 +1085,48 @@ export default function ModelCenter({
     setBusyService({ key: service.key, action: "delete" });
     setDeleteError("");
     try {
+      if (hasCoordinatedModelConfiguration) {
+        const catalog = await requireOwnerCatalog();
+        const replacement = service.isActive
+          ? (catalog.routes.find(
+              (candidate) =>
+                candidate.sourceProfileId === catalog.targetProfileId &&
+                !routeMatchesService(candidate, service),
+            ) ?? null)
+          : null;
+        const result = await window.hermesAPI.mutateModelConfiguration({
+          intent: "delete",
+          expectedCatalogRevision: catalog.revision,
+          requestedProfileId: catalog.targetProfileId,
+          providerLabel: service.providerLabel || service.label,
+          replacement: replacement?.selection ?? null,
+        });
+        if (result.status === "rejected") {
+          setDeleteError(
+            service.isActive && !replacement
+              ? t("providers.center.errors.replacementRequired")
+              : t("providers.center.errors.delete"),
+          );
+          return;
+        }
+        setOwnerCatalog(result.catalog);
+        if (service.isActive && replacement) {
+          onActivated({
+            provider: replacement.provider,
+            model: replacement.model,
+            baseUrl: replacement.baseUrl,
+          });
+        }
+        if (result.status === "committed_refresh_warning") {
+          updateServiceFeedback(service.key, {
+            tone: "neutral",
+            message: t("providers.center.warnings.refresh"),
+          });
+        }
+        await reload(false);
+        setServiceToDelete(null);
+        return;
+      }
       if (service.isActive) {
         const fallback = services.find(
           (candidate) =>
@@ -989,8 +1197,55 @@ export default function ModelCenter({
 
     setSaving(true);
     setFormError("");
+    setFormWarning("");
     try {
       const providerLabel = form.mode === "custom" ? providerName : undefined;
+      const contextLength = parseInt(form.contextLength.trim(), 10);
+      const modelsToSave = Array.from(
+        new Set([modelId, ...modelOptions].filter(Boolean)),
+      );
+      if (hasCoordinatedModelConfiguration) {
+        const result = await coordinatedUpsert({
+          provider: route.provider,
+          providerLabel: providerLabel || providerName,
+          baseUrl: route.baseUrl,
+          apiMode:
+            form.mode === "custom"
+              ? form.apiMode
+              : (route.preset?.apiMode ?? null),
+          apiKey: form.apiKey.trim(),
+          models: modelsToSave.map((discoveredModel) => ({
+            model: discoveredModel,
+            displayName: discoveredModel.split("/").pop() || discoveredModel,
+            ...(discoveredModel === modelId &&
+            Number.isFinite(contextLength) &&
+            contextLength > 0
+              ? { contextLength }
+              : {}),
+          })),
+          activeModel: modelId,
+        });
+        if (result.status === "rejected") {
+          setFormError(
+            t("providers.center.errors.stage", { stage: result.stage }),
+          );
+          return;
+        }
+        applyCommittedResult(result, {
+          provider: route.provider,
+          providerLabel: providerLabel || providerName,
+          model: modelId,
+          baseUrl: route.baseUrl,
+        });
+        if (result.status === "committed_refresh_warning") {
+          setFormWarning(t("providers.center.warnings.refresh"));
+        }
+        await reload(false);
+        setForm((previous) => ({ ...previous, apiKey: "" }));
+        setShowKey(false);
+        if (result.status === "committed") setDialogOpen(false);
+        return;
+      }
       const envKey =
         form.mode === "custom"
           ? customProviderEnvKey(providerName)
@@ -1014,10 +1269,6 @@ export default function ModelCenter({
         });
       }
 
-      const contextLength = parseInt(form.contextLength.trim(), 10);
-      const modelsToSave = Array.from(
-        new Set([modelId, ...modelOptions].filter(Boolean)),
-      );
       for (const discoveredModel of modelsToSave) {
         await window.hermesAPI.addModel(
           discoveredModel.split("/").pop() || discoveredModel,
@@ -1089,6 +1340,13 @@ export default function ModelCenter({
           <span className="model-center-eyebrow">
             {t("providers.center.defaultModel")}
           </span>
+          {ownerCatalog && (
+            <small className="model-center-target-profile">
+              {t("providers.center.targetProfile", {
+                profile: ownerCatalog.targetProfileId,
+              })}
+            </small>
+          )}
           {activeConfigured ? (
             <div className="model-center-active-main">
               <span className="model-center-logo">
@@ -1512,6 +1770,11 @@ export default function ModelCenter({
               {formError && (
                 <p className="model-provider-error" role="alert">
                   {formError}
+                </p>
+              )}
+              {formWarning && (
+                <p className="model-provider-status" role="status">
+                  {formWarning}
                 </p>
               )}
             </div>

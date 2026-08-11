@@ -18,6 +18,7 @@ export default {
       "Choose a service, enter its API key, and let Aera fetch the models.",
     addModel: "Add model",
     defaultModel: "Default model",
+    targetProfile: "Configuration profile: {{profile}}",
     notConfigured: "Not configured",
     changeDefault: "Change default",
     selectDefault: "Select default",
@@ -91,6 +92,10 @@ export default {
     confirmDelete: "Delete service",
     addAndUse: "Add and use",
     saveAndUse: "Save and use",
+    warnings: {
+      refresh:
+        "The model service was saved, but one screen refresh did not complete. The saved configuration is still active.",
+    },
     errors: {
       selectProvider: "Choose a model provider first.",
       baseUrl: "Enter a valid Base URL.",
@@ -102,6 +107,10 @@ export default {
       activate: "Could not switch the default model. Try again.",
       delete: "Could not delete the service. Its configuration was kept.",
       save: "Could not save the model service. Try again.",
+      stage:
+        "The model service was not saved. No partial configuration was kept.",
+      replacementRequired:
+        "Choose another configured model before deleting the active service.",
     },
   },
   model: {

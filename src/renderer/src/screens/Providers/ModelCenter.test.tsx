@@ -34,6 +34,13 @@ describe("ModelCenter", () => {
   const onModelLibraryChanged = vi.fn();
   const onCustomProvidersChanged = vi.fn();
 
+  const catalogRevision = "a".repeat(64);
+  const emptyCatalog = {
+    revision: catalogRevision,
+    targetProfileId: "acceptance",
+    routes: [],
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     listModels.mockResolvedValue([]);
@@ -84,6 +91,36 @@ describe("ModelCenter", () => {
       },
     });
   });
+
+  async function completePetoiForm(): Promise<void> {
+    await waitFor(() => expect(listModels).toHaveBeenCalled());
+    fireEvent.click(
+      screen.getAllByRole("button", {
+        name: /providers\.center\.addModel/,
+      })[0],
+    );
+    fireEvent.change(screen.getByLabelText(/providers\.center\.provider/), {
+      target: { value: "petoi" },
+    });
+    fireEvent.change(screen.getByLabelText(/providers\.center\.apiKey/), {
+      target: { value: "petoi-test-key" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "providers.center.connect" }),
+    );
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByLabelText(
+            /providers\.center\.defaultModel/,
+          ) as HTMLInputElement
+        ).value,
+      ).toBe("gpt-5.6-sol"),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "providers.center.addAndUse" }),
+    );
+  }
 
   it("uses the Petoi preset to connect, discover, save, and activate a model", async () => {
     const onSaveKey = vi.fn().mockResolvedValue(undefined);
@@ -178,6 +215,140 @@ describe("ModelCenter", () => {
       model: "gpt-5.6-sol",
       baseUrl: "https://api.petoi.cn/v1",
     });
+  });
+
+  it("saves through one coordinator call and trusts its catalog", async () => {
+    const mutateModelConfiguration = vi.fn().mockResolvedValue({
+      status: "committed",
+      catalog: {
+        revision: "b".repeat(64),
+        targetProfileId: "acceptance",
+        routes: [
+          {
+            id: "acceptance\0model-1",
+            provider: "custom:petoi",
+            model: "gpt-5.6-sol",
+            baseUrl: "https://api.petoi.cn/v1",
+            apiMode: "chat_completions",
+            providerLabel: "Petoi",
+            displayName: "gpt-5.6-sol",
+            sourceProfileId: "acceptance",
+            sourceKind: "account",
+            selection: {
+              sourceProfileId: "acceptance",
+              modelLibraryId: "model-1",
+              catalogRevision: "b".repeat(64),
+            },
+          },
+        ],
+      },
+    });
+    Object.assign(window.hermesAPI, {
+      getOwnerModelRouteCatalog: vi.fn().mockResolvedValue(emptyCatalog),
+      mutateModelConfiguration,
+    });
+    const onActivated = vi.fn();
+    render(
+      <ModelCenter
+        profile="acceptance"
+        env={{}}
+        activeModel={{ provider: "auto", model: "", baseUrl: "" }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={onActivated}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    await completePetoiForm();
+
+    await waitFor(() =>
+      expect(mutateModelConfiguration).toHaveBeenCalledTimes(1),
+    );
+    expect(mutateModelConfiguration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intent: "upsert",
+        expectedCatalogRevision: catalogRevision,
+        requestedProfileId: "acceptance",
+        provider: "custom",
+        providerLabel: "Petoi",
+        apiKey: "petoi-test-key",
+        activeModel: "gpt-5.6-sol",
+      }),
+    );
+    expect(addModel).not.toHaveBeenCalled();
+    expect(setModelConfig).not.toHaveBeenCalled();
+    expect(upsertCustomProvider).not.toHaveBeenCalled();
+    expect(onActivated).toHaveBeenCalledWith({
+      provider: "custom:petoi",
+      model: "gpt-5.6-sol",
+      baseUrl: "https://api.petoi.cn/v1",
+    });
+  });
+
+  it("does not call a committed refresh warning a save failure", async () => {
+    const mutateModelConfiguration = vi.fn().mockResolvedValue({
+      status: "committed_refresh_warning",
+      catalog: emptyCatalog,
+      warning: "model_save_refresh_failed",
+    });
+    Object.assign(window.hermesAPI, {
+      getOwnerModelRouteCatalog: vi.fn().mockResolvedValue(emptyCatalog),
+      mutateModelConfiguration,
+    });
+    render(
+      <ModelCenter
+        profile="acceptance"
+        env={{}}
+        activeModel={{ provider: "auto", model: "", baseUrl: "" }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    await completePetoiForm();
+
+    expect(
+      await screen.findByText("providers.center.warnings.refresh"),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("providers.center.errors.save"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the editor open when Main rejects a provider stage", async () => {
+    const mutateModelConfiguration = vi.fn().mockResolvedValue({
+      status: "rejected",
+      stage: "provider",
+      code: "model_save_provider_failed",
+      rollback: "restored",
+    });
+    Object.assign(window.hermesAPI, {
+      getOwnerModelRouteCatalog: vi.fn().mockResolvedValue(emptyCatalog),
+      mutateModelConfiguration,
+    });
+    render(
+      <ModelCenter
+        profile="acceptance"
+        env={{}}
+        activeModel={{ provider: "auto", model: "", baseUrl: "" }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    await completePetoiForm();
+
+    expect(
+      await screen.findByText("providers.center.errors.stage"),
+    ).toBeVisible();
+    expect(screen.getByLabelText(/providers\.center\.apiKey/)).toHaveValue(
+      "petoi-test-key",
+    );
   });
 
   it("shows context length and API mode only in custom mode", async () => {
@@ -770,6 +941,94 @@ describe("ModelCenter", () => {
     expect(
       container.querySelector('[data-service-key="custom:anhepro"]'),
     ).toBeInTheDocument();
+  });
+
+  it("keeps an active service when no replacement route is available", async () => {
+    listModels.mockResolvedValue([
+      {
+        id: "petoi-model",
+        name: "petoi-chat",
+        provider: "custom",
+        model: "petoi-chat",
+        baseUrl: "https://api.petoi.cn/v1",
+        createdAt: 1,
+      },
+    ]);
+    const activeCatalog = {
+      revision: catalogRevision,
+      targetProfileId: "acceptance",
+      routes: [
+        {
+          id: "acceptance\0petoi-model",
+          provider: "custom:petoi",
+          model: "petoi-chat",
+          baseUrl: "https://api.petoi.cn/v1",
+          apiMode: "chat_completions",
+          providerLabel: "Petoi",
+          displayName: "petoi-chat",
+          sourceProfileId: "acceptance",
+          sourceKind: "account",
+          selection: {
+            sourceProfileId: "acceptance",
+            modelLibraryId: "petoi-model",
+            catalogRevision,
+          },
+        },
+      ],
+    };
+    const mutateModelConfiguration = vi.fn().mockResolvedValue({
+      status: "rejected",
+      stage: "validation",
+      code: "model_save_validation_failed",
+      rollback: "not_needed",
+    });
+    Object.assign(window.hermesAPI, {
+      getOwnerModelRouteCatalog: vi.fn().mockResolvedValue(activeCatalog),
+      mutateModelConfiguration,
+    });
+    const { container } = render(
+      <ModelCenter
+        profile="acceptance"
+        env={{ PETOI_API_KEY: "configured" }}
+        activeModel={{
+          provider: "custom",
+          model: "petoi-chat",
+          baseUrl: "https://api.petoi.cn/v1",
+        }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    const petoiCard = await waitFor(() => {
+      const card = container.querySelector('[data-service-key="preset:petoi"]');
+      expect(card).toBeInTheDocument();
+      return card as HTMLElement;
+    });
+    fireEvent.click(
+      within(petoiCard).getByRole("button", {
+        name: "providers.center.deleteService",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "providers.center.confirmDelete",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(mutateModelConfiguration).toHaveBeenCalledOnce(),
+    );
+    expect(mutateModelConfiguration).toHaveBeenCalledWith(
+      expect.objectContaining({ intent: "delete", replacement: null }),
+    );
+    expect(
+      screen.getByText("providers.center.errors.replacementRequired"),
+    ).toBeVisible();
+    expect(removeCustomProvider).not.toHaveBeenCalled();
+    expect(setModelConfig).not.toHaveBeenCalled();
   });
 
   it("deletes a configured service and switches an active service to a safe fallback", async () => {
