@@ -52,6 +52,18 @@ A current full route must still resolve to the exact source Profile/model row an
 
 [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#prepareConversationRuntime]] adopts the first verified binding as ordinal 1, resolves opaque selections in the same Main turn, reuses an identical route, and returns a redacted active context while a different route remains `preparing`.
 
+### Policy-filtered staged selection
+
+[[src/renderer/src/screens/Chat/ModelPicker.tsx#ModelPicker]] uses the installed Agent catalog instead of ordinary model groups, disables fixed or in-flight switches, and stages only the opaque selection for the next send without writing a session override.
+
+### Authoritative resume context
+
+[[src/renderer/src/screens/Chat/Chat.tsx#Chat]] waits for Main's conversation context before restoring an ordinary session override and retains the last verified Agent route while a refresh is pending, preventing model-picker flicker or cross-path persistence.
+
+### Main-acknowledged local marker
+
+[[src/renderer/src/screens/Chat/chatMessages.ts#insertModelSwitchMarker]] inserts and deduplicates a renderer-only marker only after an `active` segment event. The marker is excluded from prompts and transcript export, while duplicate events cannot advance the visible ordinal twice.
+
 ## Desktop-only persistence
 
 The selected model/provider is saved in a desktop-owned table keyed by session id, without storing API keys.

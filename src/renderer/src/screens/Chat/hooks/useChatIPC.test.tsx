@@ -17,6 +17,7 @@ interface ChatIpcCallbacks {
   toolEvent?: Callback<[string, unknown]>;
   usage?: Callback<[string, UsageState]>;
   quality?: Callback<[string, OfficialQualityFeedbackEligibility]>;
+  agentSegment?: Callback<[string, unknown]>;
 }
 
 function installHermesApi(callbacks: ChatIpcCallbacks): {
@@ -54,6 +55,10 @@ function installHermesApi(callbacks: ChatIpcCallbacks): {
       },
       onChatError: (cb: Callback<[string, string]>) => {
         callbacks.error = cb;
+        return vi.fn();
+      },
+      onChatAgentSegment: (cb: Callback<[string, unknown]>) => {
+        callbacks.agentSegment = cb;
         return vi.fn();
       },
       onChatToolProgress: (cb: Callback<[string, string]>) => {
@@ -125,6 +130,36 @@ function QualityHarness(): React.JSX.Element {
   });
 
   return <output data-testid="quality">{JSON.stringify(messages)}</output>;
+}
+
+function SegmentHarness({
+  onEvent,
+}: {
+  onEvent: (event: unknown) => void;
+}): React.JSX.Element {
+  const [, setMessages] = useState<ChatMessage[]>([]);
+  const [, setHermesSessionId] = useState<string | null>(null);
+  const [, setToolProgress] = useState<string | null>(null);
+  const [, setIsLoading] = useState(false);
+  const [, setUsage] = useState<UsageState | null>(null);
+  const activeTurnRef = useRef<ActiveTurn | null>({
+    startIndex: 0,
+    status: "running",
+    turnId: "turn-1",
+    userId: "u-1",
+  });
+  useChatIPC({
+    runId: "run-1",
+    sessionScopeId: null,
+    setMessages,
+    setHermesSessionId,
+    setToolProgress,
+    setIsLoading,
+    setUsage,
+    activeTurnRef,
+    onAgentSegment: (_runId, event) => onEvent(event),
+  });
+  return <output data-testid="segment" />;
 }
 
 function Harness({
@@ -217,5 +252,22 @@ describe("useChatIPC official quality eligibility", () => {
     const rendered = screen.getByTestId("quality").textContent ?? "";
     expect(rendered).toContain(eligibility.eventId);
     expect(rendered).not.toContain("runtimeBindingId");
+  });
+});
+
+describe("useChatIPC Agent segment events", () => {
+  it("forwards only matching-run segment lifecycle events", async () => {
+    const callbacks: ChatIpcCallbacks = {};
+    installHermesApi(callbacks);
+    const onEvent = vi.fn();
+    render(<SegmentHarness onEvent={onEvent} />);
+
+    await act(async () => {
+      callbacks.agentSegment?.("other-run", { state: "active" });
+      callbacks.agentSegment?.("run-1", { state: "preparing" });
+    });
+
+    expect(onEvent).toHaveBeenCalledOnce();
+    expect(onEvent).toHaveBeenCalledWith({ state: "preparing" });
   });
 });

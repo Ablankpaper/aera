@@ -28,10 +28,16 @@ import {
 } from "./hooks/useDashboardChatTransport";
 import { useI18n } from "../../components/useI18n";
 import { buildChatTranscript } from "./transcriptUtils";
+import { insertModelSwitchMarker } from "./chatMessages";
 import { ConfigHealthBanner } from "../../components/ConfigHealthBanner";
 import { ConversationBoundaryIndicator } from "./ConversationBoundaryIndicator";
 import type { Attachment } from "../../../../shared/attachments";
 import type { AgenteraConversationBoundarySummary } from "../../../../shared/agentera-global-profile";
+import type {
+  AgentConversationModelContext,
+  AgentConversationSegmentEvent,
+  OwnerModelRouteSelection,
+} from "../../../../shared/model-configuration";
 import type { SessionModelOverride } from "../../../../shared/model-override";
 import type { ActiveTurn, ChatMessage, UsageState } from "./types";
 import type { ContextUsage } from "./ContextGauge";
@@ -294,11 +300,26 @@ function Chat({
   ] = useState(true);
   const [conversationBoundary, setConversationBoundary] =
     useState<AgenteraConversationBoundarySummary | null>(null);
+  const [agentConversation, setAgentConversation] =
+    useState<AgentConversationModelContext | null>(null);
+  const [agentConversationContextLoaded, setAgentConversationContextLoaded] =
+    useState(false);
+  const [pendingAgentModelSelection, setPendingAgentModelSelection] = useState<
+    OwnerModelRouteSelection | undefined
+  >(undefined);
+  const [agentSwitchState, setAgentSwitchState] = useState<
+    "idle" | "pending" | "preparing" | "active" | "failed"
+  >("idle");
+  const agentConversationRef = useRef<AgentConversationModelContext | null>(
+    null,
+  );
+  agentConversationRef.current = agentConversation;
   const globalProfileContextRequestRef = useRef(0);
   const prepareGlobalProfileConversationContext = useCallback(
     async (resumeSessionId: string | null): Promise<void> => {
       const requestId = ++globalProfileContextRequestRef.current;
       setGlobalProfileRequiresBoundTransport(true);
+      setAgentConversationContextLoaded(false);
       const api = window.agenteraGlobalProfile;
       if (!api?.prepareConversationContext) {
         // Fail closed: an installed Agent must never silently fall back to an
@@ -317,6 +338,8 @@ function Chat({
           setGlobalProfileRequiresBoundTransport(
             context.requiresBoundApiTransport,
           );
+          setAgentConversation(context.agentConversation ?? null);
+          setAgentConversationContextLoaded(true);
         }
       } catch {
         // ConversationBoundary and RuntimeBinding are security/data-boundary
@@ -339,6 +362,8 @@ function Chat({
         // Keep the visible transcript, but force the next turn onto a fresh
         // Hermes session and a new identity-revision-scoped global snapshot.
         setHermesSessionId(null);
+        setPendingAgentModelSelection(undefined);
+        setAgentSwitchState("idle");
         void prepareGlobalProfileConversationContext(null);
       }),
     [profile, prepareGlobalProfileConversationContext],
@@ -434,26 +459,44 @@ function Chat({
   const { containerRef, bottomRef } = useChatScroll(visibleMessages);
   const modelConfig = useModelConfig(profile);
   const chatCurrentModel =
-    sessionModelOverride?.model ?? modelConfig.currentModel;
+    agentConversation?.activeRoute.model ??
+    sessionModelOverride?.model ??
+    modelConfig.currentModel;
   const chatCurrentProvider =
-    sessionModelOverride?.provider ?? modelConfig.currentProvider;
+    agentConversation?.activeRoute.provider ??
+    sessionModelOverride?.provider ??
+    modelConfig.currentProvider;
   const chatCurrentBaseUrl =
-    sessionModelOverride?.baseUrl ?? modelConfig.currentBaseUrl;
-  const chatDisplayModel = sessionModelOverride?.model
-    ? sessionModelOverride.model.split("/").pop() || sessionModelOverride.model
-    : modelConfig.displayModel;
+    agentConversation?.activeRoute.baseUrl ??
+    sessionModelOverride?.baseUrl ??
+    modelConfig.currentBaseUrl;
+  const chatDisplayModel = agentConversation
+    ? agentConversation.activeRoute.model.split("/").pop() ||
+      agentConversation.activeRoute.model
+    : sessionModelOverride?.model
+      ? sessionModelOverride.model.split("/").pop() ||
+        sessionModelOverride.model
+      : modelConfig.displayModel;
 
   // Restore the model/provider linked to a resumed session. The saved value is
   // applied only to this chat's local picker state (`persist:false`) so it never
   // rewrites the global config.yaml default.
   useEffect(() => {
     if (!initialSessionId) return;
+    if (!agentConversationContextLoaded) return;
+    if (agentConversation) {
+      // Installed-Agent conversations use immutable thread/segment state;
+      // never restore or persist the ordinary session override alongside it.
+      setSessionModelOverride(undefined);
+      sessionModelOverrideLoadedRef.current = true;
+      return;
+    }
     let cancelled = false;
     void (async () => {
       try {
         const override =
           await window.hermesAPI.getSessionModelOverride(initialSessionId);
-        if (!cancelled && override) {
+        if (!cancelled && !agentConversationRef.current && override) {
           setSessionModelOverride(override);
           await modelConfig.selectModel(
             override.provider,
@@ -471,18 +514,28 @@ function Chat({
     return () => {
       cancelled = true;
     };
-  }, [initialSessionId, modelConfig.selectModel]);
+  }, [
+    initialSessionId,
+    agentConversation,
+    agentConversationContextLoaded,
+    modelConfig.selectModel,
+  ]);
 
   // Persist the chat-local model/provider once a session exists. This stores
   // only routing identity, never API keys, and is gated so a resumed session's
   // initial undefined state cannot erase its saved model before restore.
   useEffect(() => {
-    if (!hermesSessionId || !sessionModelOverrideLoadedRef.current) return;
+    if (
+      !hermesSessionId ||
+      agentConversationRef.current ||
+      !sessionModelOverrideLoadedRef.current
+    )
+      return;
     void window.hermesAPI.setSessionModelOverride(
       hermesSessionId,
       sessionModelOverride ?? null,
     );
-  }, [hermesSessionId, sessionModelOverride]);
+  }, [hermesSessionId, sessionModelOverride, agentConversation]);
 
   const {
     fastMode,
@@ -551,6 +604,66 @@ function Chat({
 
   const visibleSessionScopeId = messages.length === 0 ? null : hermesSessionId;
 
+  const handleChatSessionStarted = useCallback(
+    (_eventRunId: string, sessionId: string): void => {
+      // Re-read the authoritative Agent context after Main has assigned the
+      // Hermes session. This adopts the same thread on cold resume and makes
+      // the catalog/active route available to the picker for new chats.
+      void prepareGlobalProfileConversationContext(sessionId);
+    },
+    [prepareGlobalProfileConversationContext],
+  );
+
+  const handleAgentSegment = useCallback(
+    (_eventRunId: string, event: AgentConversationSegmentEvent): void => {
+      if (event.state === "preparing") {
+        setAgentSwitchState("preparing");
+        return;
+      }
+      if (event.state === "active") {
+        setMessages((previous) => insertModelSwitchMarker(previous, event));
+        setAgentConversation((previous) =>
+          previous &&
+          !(
+            previous.activeRoute.provider === event.to.provider &&
+            previous.activeRoute.model === event.to.model &&
+            previous.activeRoute.baseUrl === event.to.baseUrl &&
+            previous.activeRoute.apiMode === event.to.apiMode
+          )
+            ? {
+                ...previous,
+                activeRoute: event.to,
+                activeSegmentOrdinal: previous.activeSegmentOrdinal + 1,
+              }
+            : previous,
+        );
+        setPendingAgentModelSelection(undefined);
+        setAgentSwitchState("active");
+        return;
+      }
+      setPendingAgentModelSelection(undefined);
+      setAgentSwitchState("failed");
+      toast(t("chat.modelSwitch.failed"), {
+        id: `model-switch-failed-${event.segmentId}`,
+        duration: 7000,
+      });
+    },
+    [t],
+  );
+
+  const handleAgentSendError = useCallback(
+    (error: unknown): void => {
+      setPendingAgentModelSelection(undefined);
+      setAgentSwitchState("failed");
+      toast(t("chat.modelSwitch.failed"), {
+        id: "model-switch-send-failed",
+        duration: 7000,
+      });
+      void error;
+    },
+    [t],
+  );
+
   useChatIPC({
     runId,
     sessionScopeId: visibleSessionScopeId,
@@ -560,7 +673,20 @@ function Chat({
     setIsLoading,
     setUsage,
     activeTurnRef,
+    onSessionStarted: handleChatSessionStarted,
+    onAgentSegment: handleAgentSegment,
   });
+
+  // Once a successfully switched turn finishes, allow another selection. A
+  // failed transition remains visible until the user chooses a new route.
+  const previousLoadingRef = useRef(isLoading);
+  useEffect(() => {
+    const wasLoading = previousLoadingRef.current;
+    previousLoadingRef.current = isLoading;
+    if (wasLoading && !isLoading && agentSwitchState === "active") {
+      setAgentSwitchState("idle");
+    }
+  }, [agentSwitchState, isLoading]);
 
   // No parent-driven reset effects: each run is its own <Chat key={runId}>
   // instance. A new chat is a fresh mount, and switching sessions just flips
@@ -689,6 +815,10 @@ function Chat({
     setMessages([]);
     setHermesSessionId(null);
     setContextFolder(null);
+    setAgentConversation(null);
+    setAgentConversationContextLoaded(false);
+    setPendingAgentModelSelection(undefined);
+    setAgentSwitchState("idle");
     // Clearing the conversation reverts to the global default model — the
     // session-scoped pick belongs to the conversation being cleared (#688).
     setSessionModelOverride(undefined);
@@ -698,7 +828,14 @@ function Chat({
     setToolProgress(null);
     queueRef.current = [];
     setQueuedMessages([]);
-  }, [isLoading, runId, hermesSessionId, setMessages, modelConfig.reload]);
+  }, [
+    isLoading,
+    runId,
+    hermesSessionId,
+    setMessages,
+    modelConfig.reload,
+    prepareGlobalProfileConversationContext,
+  ]);
 
   const localCommands = useLocalCommands({
     profile,
@@ -838,6 +975,8 @@ function Chat({
     activeTurnRef,
     contextFolder,
     sessionModel: sessionModelOverride,
+    agentModelSelection: pendingAgentModelSelection,
+    onAgentSendError: handleAgentSendError,
     sendViaDashboard: dashboardTransport.enabled
       ? dashboardTransport.sendMessage
       : undefined,
@@ -952,6 +1091,17 @@ function Chat({
       );
     },
     [modelConfig.selectModel],
+  );
+
+  const handleSelectAgentModel = useCallback(
+    (selection: OwnerModelRouteSelection): void => {
+      // Selection is intentionally kept opaque in Renderer state. Main will
+      // resolve the catalog revision and source handles again on the next
+      // send; no ordinary session override is written here.
+      setPendingAgentModelSelection(selection);
+      setAgentSwitchState("pending");
+    },
+    [],
   );
 
   const handleSelectRecentFolder = useCallback((path: string) => {
@@ -1202,6 +1352,10 @@ function Chat({
                 displayModel={chatDisplayModel}
                 onOpen={modelConfig.reload}
                 onSelectModel={handleSelectModel}
+                agentConversation={agentConversation}
+                onSelectAgentModel={handleSelectAgentModel}
+                agentSwitchState={agentSwitchState}
+                disabled={isLoading || !agentConversationContextLoaded}
               />
               <ReasoningEffortPicker
                 value={reasoningEffort}

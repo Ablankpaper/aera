@@ -26,6 +26,31 @@ const chatActions = vi.hoisted(() => ({
   handleAbort: vi.fn(),
 }));
 
+interface CapturedChatIpcArgs {
+  onSessionStarted?: (runId: string, sessionId: string) => void;
+  onAgentSegment?: (runId: string, event: unknown) => void;
+}
+
+interface CapturedModelPickerProps {
+  agentConversation?: {
+    activeRoute?: { model?: string };
+    activeSegmentOrdinal?: number;
+  } | null;
+  agentSwitchState?: string;
+  onSelectAgentModel?: (selection: unknown) => void;
+}
+
+interface CapturedMessageListProps {
+  messages?: Array<{ kind?: string; segmentId?: string }>;
+}
+
+const chatHarness = vi.hoisted(() => ({
+  ipcArgs: [] as CapturedChatIpcArgs[],
+  actionArgs: [] as Array<Record<string, unknown>>,
+  modelPickerProps: [] as CapturedModelPickerProps[],
+  messageListProps: [] as CapturedMessageListProps[],
+}));
+
 vi.mock("./hooks/useDashboardChatTransport", () => ({
   dashboardChatEnabledForConnection: () => true,
   useDashboardChatTransport: (input: { enabled: boolean }) => {
@@ -45,10 +70,17 @@ vi.mock("./hooks/useModelConfig", () => ({
   effectiveOverrideBaseUrl: () => "",
   useModelConfig: () => modelConfig,
 }));
-vi.mock("./hooks/useChatIPC", () => ({ useChatIPC: vi.fn() }));
+vi.mock("./hooks/useChatIPC", () => ({
+  useChatIPC: (input: CapturedChatIpcArgs) => {
+    chatHarness.ipcArgs.push(input);
+  },
+}));
 vi.mock("./hooks/useChatActions", () => ({
   parseBackgroundCommand: () => null,
-  useChatActions: () => chatActions,
+  useChatActions: (input: Record<string, unknown>) => {
+    chatHarness.actionArgs.push(input);
+    return chatActions;
+  },
 }));
 vi.mock("./hooks/useChatScroll", () => ({
   useChatScroll: () => ({
@@ -72,11 +104,23 @@ vi.mock("../../components/useI18n", () => ({
 vi.mock("react-hot-toast", () => ({ default: vi.fn() }));
 
 vi.mock("./ChatInput", () => ({
-  ChatInput: () => <div data-testid="input" />,
+  ChatInput: ({ toolbarExtras }: { toolbarExtras?: React.ReactNode }) => (
+    <div data-testid="input">{toolbarExtras}</div>
+  ),
 }));
 vi.mock("./ChatEmptyState", () => ({ ChatEmptyState: () => <div /> }));
-vi.mock("./MessageList", () => ({ MessageList: () => <div /> }));
-vi.mock("./ModelPicker", () => ({ ModelPicker: () => <div /> }));
+vi.mock("./MessageList", () => ({
+  MessageList: (props: CapturedMessageListProps) => {
+    chatHarness.messageListProps.push(props);
+    return <div data-testid="message-list" />;
+  },
+}));
+vi.mock("./ModelPicker", () => ({
+  ModelPicker: (props: CapturedModelPickerProps) => {
+    chatHarness.modelPickerProps.push(props);
+    return <div data-testid="model-picker" />;
+  },
+}));
 vi.mock("./ReasoningEffortPicker", () => ({
   ReasoningEffortPicker: () => <div />,
 }));
@@ -97,6 +141,10 @@ describe("Chat global-profile transport freeze", () => {
   beforeEach(() => {
     dashboard.enabledValues.length = 0;
     dashboard.getCommandCatalog.mockClear();
+    chatHarness.ipcArgs.length = 0;
+    chatHarness.actionArgs.length = 0;
+    chatHarness.modelPickerProps.length = 0;
+    chatHarness.messageListProps.length = 0;
     emitIdentityChanged = null;
     emitGlobalProfileChanged = null;
     prepareConversationContext = vi.fn(async () => ({
@@ -143,6 +191,7 @@ describe("Chat global-profile transport freeze", () => {
         getConnectionConfig: vi.fn(async () => ({ mode: "local" })),
         onConnectionConfigChanged: vi.fn(() => vi.fn()),
         validateChatReadiness: vi.fn(async () => ({ ok: true })),
+        getModelContextWindow: vi.fn(async () => null),
         getSessionContextFolder: vi.fn(async () => null),
         getSessionModelOverride: vi.fn(async () => null),
         setSessionContextFolder: vi.fn(async () => true),
@@ -244,6 +293,190 @@ describe("Chat global-profile transport freeze", () => {
       });
       expect(dashboard.enabledValues.at(-1)).toBe(false);
     });
+  });
+
+  // @lat: [[model-selection#Installed-Agent switch policy and immutable resume#Authoritative resume context]]
+  it("waits for authoritative Agent context before reading an ordinary session override and keeps it visible during refresh", async () => {
+    let resolveInitial!: (value: Record<string, unknown>) => void;
+    let resolveRefresh!: (value: Record<string, unknown>) => void;
+    const agentConversation = {
+      threadId: "thread-1",
+      policyMode: "user_select",
+      activeRoute: {
+        provider: "openai",
+        model: "gpt-5.6",
+        baseUrl: "https://api.openai.com/v1",
+        apiMode: "responses",
+      },
+      activeSegmentOrdinal: 1,
+      catalog: {
+        revision: "a".repeat(64),
+        targetProfileId: "account",
+        routes: [],
+      },
+      switchDisabledCode: null,
+    };
+    prepareConversationContext
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveInitial = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRefresh = resolve;
+          }),
+      );
+    const getSessionModelOverride = window.hermesAPI
+      .getSessionModelOverride as ReturnType<typeof vi.fn>;
+
+    render(
+      <Chat
+        runId="agent-resume"
+        profile="installed-agent"
+        initialSessionId="segment-old"
+      />,
+    );
+
+    await waitFor(() => expect(prepareConversationContext).toHaveBeenCalled());
+    expect(getSessionModelOverride).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveInitial({
+        globalProfileVersion: 3,
+        requiresBoundApiTransport: true,
+        degraded: false,
+        conversationBoundary: null,
+        agentConversation,
+      });
+    });
+    await waitFor(() =>
+      expect(chatHarness.modelPickerProps.at(-1)?.agentConversation).toEqual(
+        agentConversation,
+      ),
+    );
+    expect(getSessionModelOverride).not.toHaveBeenCalled();
+
+    await act(async () => {
+      chatHarness.ipcArgs
+        .at(-1)
+        ?.onSessionStarted?.("agent-resume", "segment-active");
+    });
+    await waitFor(() =>
+      expect(prepareConversationContext).toHaveBeenLastCalledWith({
+        runId: "agent-resume",
+        profile: "installed-agent",
+        resumeSessionId: "segment-active",
+      }),
+    );
+    expect(chatHarness.modelPickerProps.at(-1)?.agentConversation).toEqual(
+      agentConversation,
+    );
+    expect(getSessionModelOverride).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveRefresh({
+        globalProfileVersion: 3,
+        requiresBoundApiTransport: true,
+        degraded: false,
+        conversationBoundary: null,
+        agentConversation,
+      });
+    });
+  });
+
+  // @lat: [[model-selection#Installed-Agent switch policy and immutable resume#Main-acknowledged local marker]]
+  it("inserts and deduplicates a marker only after Main activates the staged route", async () => {
+    const selection = {
+      sourceProfileId: "account",
+      modelLibraryId: "petoi-gpt",
+      catalogRevision: "a".repeat(64),
+    };
+    const agentConversation = {
+      threadId: "thread-1",
+      policyMode: "user_select",
+      activeRoute: {
+        provider: "openai",
+        model: "gpt-5.6",
+        baseUrl: "https://api.openai.com/v1",
+        apiMode: "responses",
+      },
+      activeSegmentOrdinal: 1,
+      catalog: {
+        revision: "a".repeat(64),
+        targetProfileId: "account",
+        routes: [],
+      },
+      switchDisabledCode: null,
+    };
+    prepareConversationContext.mockResolvedValueOnce({
+      globalProfileVersion: 3,
+      requiresBoundApiTransport: true,
+      degraded: false,
+      conversationBoundary: null,
+      agentConversation,
+    });
+    render(
+      <Chat
+        runId="agent-switch"
+        profile="installed-agent"
+        initialMessages={[
+          { id: "u1", role: "user", content: "hello" },
+          { id: "a1", role: "agent", content: "hi" },
+        ]}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(chatHarness.modelPickerProps.at(-1)?.agentConversation).toEqual(
+        agentConversation,
+      ),
+    );
+    await act(async () => {
+      chatHarness.modelPickerProps.at(-1)?.onSelectAgentModel?.(selection);
+    });
+    await waitFor(() =>
+      expect(chatHarness.actionArgs.at(-1)?.agentModelSelection).toEqual(
+        selection,
+      ),
+    );
+    expect(
+      chatHarness.messageListProps
+        .at(-1)
+        ?.messages?.filter((message) => message.kind === "model_switch"),
+    ).toHaveLength(0);
+
+    const activeEvent = {
+      state: "active",
+      threadId: "thread-1",
+      segmentId: "segment-2",
+      from: agentConversation.activeRoute,
+      to: {
+        provider: "custom:petoi",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://api.petoi.cn/v1",
+        apiMode: "codex_responses",
+      },
+      historyBoundaryCount: 2,
+      code: null,
+    };
+    await act(async () => {
+      chatHarness.ipcArgs.at(-1)?.onAgentSegment?.("agent-switch", activeEvent);
+      chatHarness.ipcArgs.at(-1)?.onAgentSegment?.("agent-switch", activeEvent);
+    });
+
+    expect(
+      chatHarness.messageListProps
+        .at(-1)
+        ?.messages?.filter((message) => message.kind === "model_switch"),
+    ).toEqual([expect.objectContaining({ segmentId: "segment-2" })]);
+    expect(chatHarness.actionArgs.at(-1)?.agentModelSelection).toBeUndefined();
+    expect(
+      chatHarness.modelPickerProps.at(-1)?.agentConversation
+        ?.activeSegmentOrdinal,
+    ).toBe(2);
   });
 
   // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Account-required routing#Chat transport privacy]]

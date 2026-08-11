@@ -1,4 +1,10 @@
-import type { ActiveTurn, ChatBubbleMessage, ChatMessage } from "./types";
+import type { AgentConversationSegmentEvent } from "../../../../shared/model-configuration";
+import type {
+  ActiveTurn,
+  ChatBubbleMessage,
+  ChatMessage,
+  ModelSwitchMessage,
+} from "./types";
 
 export function isBubbleMessage(m: ChatMessage): m is ChatBubbleMessage {
   const kind = (m as { kind?: string }).kind;
@@ -29,6 +35,43 @@ export function shouldCopyToTranscript(m: ChatMessage): m is ChatBubbleMessage {
     isBubbleMessage(m) &&
     (!!m.error || normalizeMessageText(m.content).length > 0)
   );
+}
+
+/**
+ * Insert a renderer-only acknowledgement for an activated Agent model
+ * segment. `historyBoundaryCount` is measured against the visible transcript
+ * before the current turn, so the marker belongs immediately before the new
+ * turn. The segment id is the durable de-duplication key.
+ */
+export function insertModelSwitchMarker(
+  messages: ReadonlyArray<ChatMessage>,
+  event: AgentConversationSegmentEvent,
+): ChatMessage[] {
+  if (event.state !== "active" || !event.segmentId) return [...messages];
+  if (
+    messages.some(
+      (message): message is ModelSwitchMessage =>
+        message.kind === "model_switch" &&
+        message.segmentId === event.segmentId,
+    )
+  ) {
+    return messages as ChatMessage[];
+  }
+
+  const marker: ModelSwitchMessage = {
+    id: `switch-${event.segmentId}`,
+    kind: "model_switch",
+    role: "agent",
+    from: event.from,
+    to: event.to,
+    segmentId: event.segmentId,
+    localOnly: true,
+  };
+  const boundary = Math.max(
+    0,
+    Math.min(messages.length, Math.floor(event.historyBoundaryCount)),
+  );
+  return [...messages.slice(0, boundary), marker, ...messages.slice(boundary)];
 }
 
 export function displayTextForTranscript(m: ChatBubbleMessage): string {
