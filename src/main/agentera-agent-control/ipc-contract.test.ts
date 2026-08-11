@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { AGENTERA_IPC_CHANNEL_POLICY } from "../ipc/auth-guard";
 import {
   executeAgentControlIpc,
+  parseDisconnectOrganizationSubmissionReferenceInput,
   parseAgentOperationScope,
   parseInstallVersionInput,
   parseRepairInstallationModelInput,
@@ -83,6 +84,41 @@ describe("Agent control IPC operation scope", () => {
     });
     expect(JSON.stringify(output)).not.toContain(LOCAL_DIGEST);
     expect(JSON.stringify(output)).not.toContain(DATABASE_PATH);
+  });
+
+  it("accepts only the exact confirmed submission-reference detach payload", async () => {
+    expect(
+      parseDisconnectOrganizationSubmissionReferenceInput({
+        submissionId: SUBMISSION_ID,
+        confirmation: "disconnect-local-draft-link",
+      }),
+    ).toEqual({
+      submissionId: SUBMISSION_ID,
+      confirmation: "disconnect-local-draft-link",
+    });
+    expect(() =>
+      parseDisconnectOrganizationSubmissionReferenceInput({
+        submissionId: SUBMISSION_ID,
+        confirmation: "disconnect",
+      }),
+    ).toThrow("Aera Agent control request is invalid.");
+    expect(() =>
+      parseDisconnectOrganizationSubmissionReferenceInput({
+        submissionId: SUBMISSION_ID,
+        confirmation: "disconnect-local-draft-link",
+        organizationId: ORGANIZATION_ID,
+      }),
+    ).toThrow("Aera Agent control request is invalid.");
+
+    const result = await executeAgentControlIpc(() => {
+      throw Object.assign(new Error("private SQLite compare-and-set details"), {
+        code: "organization_submission_reference_detach_failed",
+      });
+    });
+    expect(result).toEqual({
+      ok: false,
+      errorCode: "organization_submission_reference_detach_failed",
+    });
   });
 
   it.each([

@@ -585,6 +585,7 @@ export type AgenteraAgentControlErrorCode =
   | "organization_agent_forbidden"
   | "organization_archived"
   | "organization_submission_conflict"
+  | "organization_submission_reference_detach_failed"
   | "organization_submission_superseded"
   | "organization_publication_policy_blocked"
   | "organization_publication_dlp_blocked"

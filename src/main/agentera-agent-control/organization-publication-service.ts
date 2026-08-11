@@ -7,6 +7,7 @@ import type {
   ConfirmOrganizationReviewInput,
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
+  DisconnectOrganizationSubmissionReferenceInput,
   ExperienceCandidateFinding,
   OrganizationAgentSubmissionList,
   OrganizationAgentSubmissionListItem,
@@ -30,7 +31,10 @@ import {
   canonicalizeEditableAgent,
   type CanonicalEditableAgent,
 } from "./manifest";
-import { OrganizationSubmissionReferenceStore } from "./organization-submission-reference-store";
+import {
+  OrganizationSubmissionReferenceStore,
+  OrganizationSubmissionReferenceStoreError,
+} from "./organization-submission-reference-store";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -737,6 +741,55 @@ export class OrganizationPublicationService {
 
   async listSubmissions(): Promise<OrganizationAgentSubmissionSummary[]> {
     return (await this.listSubmissionList()).submissions;
+  }
+
+  async disconnectSubmissionReference(
+    input: DisconnectOrganizationSubmissionReferenceInput,
+  ): Promise<OrganizationAgentSubmissionListItem> {
+    try {
+      const context = this.publisherContext();
+      if (input?.confirmation !== "disconnect-local-draft-link") {
+        throw codedError("invalid_request");
+      }
+      const submissionId = requireCanonicalUuid(input.submissionId);
+      this.assertOnline();
+      const value = await this.client.getOrganizationAgentSubmission(
+        context.organizationId,
+        submissionId,
+      );
+      validateSubmissionDetail(value, context.organizationId, submissionId);
+      const state = this.referenceStateForRecord(value);
+      const conflict = this.referenceStore.get(
+        context.organizationId,
+        submissionId,
+      );
+      if (
+        state.kind !== "quarantined" ||
+        conflict === null ||
+        conflict.state !== "quarantined" ||
+        conflict.stage !== state.stage
+      ) {
+        throw codedError("organization_submission_reference_detach_failed");
+      }
+      try {
+        this.referenceStore.detach({
+          organizationId: context.organizationId,
+          submissionId,
+          expectedReferenceRevision: conflict.referenceRevision,
+        });
+      } catch (error) {
+        if (error instanceof OrganizationSubmissionReferenceStoreError) {
+          throw codedError("organization_submission_reference_detach_failed");
+        }
+        throw error;
+      }
+      return listItemFromRecord(value, { kind: "remote_only" });
+    } catch (error) {
+      if (error instanceof OrganizationSubmissionReferenceStoreError) {
+        throw codedError("organization_submission_reference_detach_failed");
+      }
+      throw serviceError(error);
+    }
   }
 
   async getSubmission(

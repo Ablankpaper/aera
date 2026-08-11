@@ -30,6 +30,7 @@ import type {
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
   CreateAgentDraftInput,
+  DisconnectOrganizationSubmissionReferenceInput,
   AuthoringCapabilitySummary,
   ExperienceCandidateDetail,
   ExperienceCandidateImportPreview,
@@ -51,6 +52,7 @@ import type {
   SubmitExperienceCandidateInput,
   UpdateAgentDraftInput,
   OrganizationAgentSubmissionSummary,
+  OrganizationAgentSubmissionListItem,
   OfficialAgentDetail,
   OfficialAgentInstallPreview,
   OfficialAgentSummary,
@@ -828,6 +830,16 @@ export class AgenteraAgentControlManager {
     this.assertOrganizationHistoryRole();
     await this.assertOnlineAccess(false);
     return this.ensureOrganizationPublicationComponents().service.listSubmissions();
+  }
+
+  async disconnectOrganizationSubmissionReference(
+    input: DisconnectOrganizationSubmissionReferenceInput,
+  ): Promise<OrganizationAgentSubmissionListItem> {
+    this.assertOrganizationPublicationRole();
+    await this.assertOnlineAccess(false);
+    return this.ensureOrganizationPublicationComponents().service.disconnectSubmissionReference(
+      input,
+    );
   }
 
   async getOrganizationSubmission(

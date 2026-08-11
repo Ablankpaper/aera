@@ -35,6 +35,7 @@ import {
   runtimeComponentKey,
 } from "./manager";
 import type { OwnerModelRouteCatalog } from "./owner-model-route-catalog";
+import { canonicalizeEditableAgent } from "./manifest";
 
 const OWNER = {
   tenantId: "10000000-0000-4000-8000-000000000001",
@@ -52,6 +53,33 @@ const PERSONAL_BINDING_ID = "40000000-0000-4000-8000-000000000005";
 const ORGANIZATION_SUBMISSION_ID = "50000000-0000-4000-8000-000000000001";
 const ORGANIZATION_DEFINITION_ID = "50000000-0000-4000-8000-000000000002";
 const ORGANIZATION_VERSION_ID = "50000000-0000-4000-8000-000000000003";
+
+function organizationSubmissionDetail(): Record<string, unknown> {
+  const input = draftInput();
+  const canonical = canonicalizeEditableAgent(input.manifest, input.assets);
+  const timestamp = "2026-08-05T10:00:00.000Z";
+  return {
+    id: ORGANIZATION_SUBMISSION_ID,
+    organization_id: ORGANIZATION_ID,
+    kind: "initial",
+    definition_id: ORGANIZATION_DEFINITION_ID,
+    base_version_id: null,
+    published_version_id: null,
+    submitted_by_user_id: OWNER.ownerId,
+    content_digest: canonical.contentDigest,
+    status: "pending",
+    revision: 1,
+    submitted_at: timestamp,
+    terminal_at: null,
+    updated_at: timestamp,
+    review: null,
+    display_name: input.displayName,
+    manifest: JSON.parse(canonical.manifestBytes.toString("utf8")),
+    bundle: JSON.parse(canonical.bundleBytes.toString("utf8")),
+    manifest_digest: canonical.manifestDigest,
+    bundle_digest: canonical.bundleDigest,
+  };
+}
 
 function officialSummary(): OfficialAgentSummary {
   return {
@@ -799,6 +827,73 @@ describe("Agent control Organization Foundation context", () => {
       }
     },
   );
+
+  it("requires exact confirmation and detaches only the local submission reference", async () => {
+    const getOrganizationAgentSubmission = vi.fn(async () =>
+      organizationSubmissionDetail(),
+    );
+    const { manager, database } = fullManager(
+      () => ({
+        scope: "ORGANIZATION",
+        organizationId: ORGANIZATION_ID,
+        role: "owner",
+      }),
+      { getOrganizationAgentSubmission },
+    );
+    const draft = manager.createDraft(draftInput());
+    database.sqlite
+      .prepare(
+        `INSERT INTO organization_agent_submission_refs (
+           local_draft_id, local_draft_revision, organization_id,
+           cloud_submission_id, content_digest, cloud_status, cloud_revision,
+           submitted_at, last_verified_at
+         ) VALUES (?, ?, ?, ?, ?, 'pending', 1, ?, ?)`,
+      )
+      .run(
+        draft.id,
+        draft.revision,
+        ORGANIZATION_ID,
+        ORGANIZATION_SUBMISSION_ID,
+        "ab".repeat(32),
+        "2026-08-05T10:00:00.000Z",
+        "2026-08-05T10:00:00.000Z",
+      );
+    const beforeDraft = manager.getDraft(draft.id);
+
+    await expect(
+      manager.disconnectOrganizationSubmissionReference({
+        submissionId: ORGANIZATION_SUBMISSION_ID,
+        confirmation: "wrong" as never,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    expect(getOrganizationAgentSubmission).not.toHaveBeenCalled();
+
+    const result = await manager.disconnectOrganizationSubmissionReference({
+      submissionId: ORGANIZATION_SUBMISSION_ID,
+      confirmation: "disconnect-local-draft-link",
+    });
+
+    expect(result.referenceState).toEqual({ kind: "remote_only" });
+    expect(result.localDraftId).toBeNull();
+    expect(manager.getDraft(draft.id)).toEqual(beforeDraft);
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT cloud_submission_id
+           FROM organization_agent_submission_refs
+           WHERE cloud_submission_id = ?`,
+        )
+        .get(ORGANIZATION_SUBMISSION_ID),
+    ).toBeUndefined();
+    await expect(
+      manager.disconnectOrganizationSubmissionReference({
+        submissionId: ORGANIZATION_SUBMISSION_ID,
+        confirmation: "disconnect-local-draft-link",
+      }),
+    ).rejects.toMatchObject({
+      code: "organization_submission_reference_detach_failed",
+    });
+  });
 
   it("requires a pending Organization submission to be withdrawn before draft deletion", () => {
     const { manager, database } = fullManager(() => ({

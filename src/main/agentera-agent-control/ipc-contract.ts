@@ -22,6 +22,7 @@ import type {
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
   CreateAgentDraftInput,
+  DisconnectOrganizationSubmissionReferenceInput,
   ExperienceCandidateFinding,
   OrganizationAgentSubmissionDetail,
   OrganizationAgentSubmissionList,
@@ -728,6 +729,21 @@ export function parseConfirmOrganizationWithdrawalInput(
   };
 }
 
+export function parseDisconnectOrganizationSubmissionReferenceInput(
+  value: unknown,
+): DisconnectOrganizationSubmissionReferenceInput {
+  if (
+    !exactObject(value, ["submissionId", "confirmation"]) ||
+    value.confirmation !== "disconnect-local-draft-link"
+  ) {
+    return invalidRequest();
+  }
+  return {
+    submissionId: parseAgentControlId(value.submissionId),
+    confirmation: "disconnect-local-draft-link",
+  };
+}
+
 function safeFindingPath(value: unknown): value is string {
   if (
     typeof value !== "string" ||
@@ -847,6 +863,7 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
     code === "organization_agent_forbidden" ||
     code === "organization_archived" ||
     code === "organization_submission_conflict" ||
+    code === "organization_submission_reference_detach_failed" ||
     code === "organization_submission_superseded" ||
     code === "organization_publication_policy_blocked" ||
     code === "organization_publication_dlp_blocked"
