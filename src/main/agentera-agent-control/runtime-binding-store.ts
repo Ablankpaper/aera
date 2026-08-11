@@ -4,6 +4,10 @@ import type { SessionModelOverride } from "../../shared/model-override";
 import type { CreateRuntimeBindingRecordRequest } from "./client";
 import type { AgenteraControlPlaneDatabase } from "./db";
 import type { FrozenCapabilityBinding } from "./capability-binding-store";
+import {
+  parseFrozenAgentModelRoute,
+  type FrozenAgentModelRoute,
+} from "./frozen-agent-model-route";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -81,7 +85,7 @@ export interface LocalRuntimeBinding {
   agentInstallationId: string;
   runtimeProfileId: string;
   runtimeVersion: string;
-  modelRoute: SessionModelOverride | null;
+  modelRoute: FrozenAgentModelRoute | null;
   policySnapshotId: string;
   officialReleaseRevisionId: string | null;
   toolPermissionDigest: string;
@@ -102,15 +106,16 @@ export type CreateLocalRuntimeBindingInput = Omit<
   | "capabilityBindings"
   | "degradedMcpRequirements"
 > & {
-  modelRoute: SessionModelOverride;
+  modelRoute: FrozenAgentModelRoute | SessionModelOverride;
   capabilityBindings?: FrozenCapabilityBinding[];
   degradedMcpRequirements?: string[];
 };
 
 type NormalizedLocalRuntimeBindingInput = Omit<
   CreateLocalRuntimeBindingInput,
-  "capabilityBindings" | "degradedMcpRequirements"
+  "modelRoute" | "capabilityBindings" | "degradedMcpRequirements"
 > & {
+  modelRoute: FrozenAgentModelRoute;
   capabilityBindings: FrozenCapabilityBinding[];
   degradedMcpRequirements: string[];
 };
@@ -119,7 +124,7 @@ type ImmutableLocalRuntimeBindingInput = Omit<
   NormalizedLocalRuntimeBindingInput,
   "modelRoute"
 > & {
-  modelRoute: SessionModelOverride | null;
+  modelRoute: FrozenAgentModelRoute | null;
 };
 
 export interface PendingRuntimeBindingCloudRecord {
@@ -215,27 +220,12 @@ function boundedText(
 function modelRoute(
   value: unknown,
   error: RuntimeBindingStoreErrorCode,
-): SessionModelOverride {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+): FrozenAgentModelRoute {
+  try {
+    return parseFrozenAgentModelRoute(value);
+  } catch {
     throw new RuntimeBindingStoreError(error);
   }
-  if (!exactKeys(value, ["provider", "model", "baseUrl"])) {
-    throw new RuntimeBindingStoreError(error);
-  }
-  const record = value as Record<string, unknown>;
-  const provider = boundedText(record.provider, 128, error).trim();
-  const model = boundedText(record.model, 512, error).trim();
-  if (
-    !provider ||
-    provider.toLowerCase() === "auto" ||
-    !model ||
-    typeof record.baseUrl !== "string" ||
-    Buffer.byteLength(record.baseUrl, "utf8") > 2_048 ||
-    /[\0\r\n]/.test(record.baseUrl)
-  ) {
-    throw new RuntimeBindingStoreError(error);
-  }
-  return { provider, model, baseUrl: record.baseUrl.trim() };
 }
 
 function capabilityName(

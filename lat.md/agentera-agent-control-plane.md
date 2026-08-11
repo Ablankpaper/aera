@@ -286,6 +286,22 @@ Manifest V1 remains byte-for-byte compatible and keeps its required provider/mod
 
 The concrete route is resolved only when the user starts using or repairs an Agent. The main process validates the selected route against the signed model policy and effective tenant policy, copies only that route and its same-owner credential into the isolated target Profile, and freezes the resolved route in each new RuntimeBinding. Changing the user's selected model affects only later conversations.
 
+#### Complete local route freeze
+
+Each current RuntimeBinding stores the complete Main-owned execution identity locally while its sanitized Cloud record remains unchanged.
+
+##### Strict current and legacy parsing
+
+[[src/main/agentera-agent-control/frozen-agent-model-route.ts#freezeResolvedOwnerModelRoute]] freezes provider, model, endpoint, API mode, source Profile/model rows, and only the credential reference.
+
+Unknown fields, partial current shapes, paths, raw secrets, invalid endpoints, and control characters fail closed. An exact Beta.26 three-field route remains readable as immutable legacy data.
+
+##### Ordinary transport projection
+
+[[src/main/agentera-agent-control/frozen-agent-model-route.ts#sessionModelOverrideFromFrozenRoute]] returns only provider, model, and Base URL to the ordinary Hermes override boundary.
+
+The API mode, source identities, credential reference, and legacy marker remain Main-only binding state, and none of those local route fields enter the Cloud outbox.
+
 An installed or shared Agent never treats an empty successful transport as a usable response. If the Runs API reports completion without text, reasoning, or tool activity, the main process performs the bounded Chat Completions compatibility fallback; any observed tool activity suppresses replay so side effects cannot run twice. If the compatibility path also returns no content, the turn fails instead of rendering a false success.
 
 Creating a Hermes Runtime Profile directly is not equivalent to creating a product Agent. A usable Agent additionally requires a verified immutable AgentVersion, USER-owned Installation, Profile binding, and RuntimeBinding. [[src/main/agentera-agent-control/model-profile-seed.ts#seedAgentModelProfile]] copies only the selected provider route and same-owner credential into the isolated target Profile after validating the signed model policy.

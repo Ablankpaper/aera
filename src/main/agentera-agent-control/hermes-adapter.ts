@@ -28,6 +28,10 @@ import {
   type LocalMcpCapabilityServer,
   type ResolvedCapabilityBindings,
 } from "./capability-binding-store";
+import {
+  parseFrozenAgentModelRoute,
+  sessionModelOverrideFromFrozenRoute,
+} from "./frozen-agent-model-route";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -765,7 +769,9 @@ export class AgenteraHermesAdapter {
     return {
       bindingInput,
       profilePath: input.profilePath,
-      modelOverride: selectedModelRoute,
+      modelOverride: sessionModelOverrideFromFrozenRoute(
+        parseFrozenAgentModelRoute(selectedModelRoute),
+      ),
       version,
       policy,
       projection,
@@ -789,7 +795,9 @@ export class AgenteraHermesAdapter {
       binding.runtimeVersion !== plan.bindingInput.runtimeVersion ||
       (binding.modelRoute !== null &&
         JSON.stringify(binding.modelRoute) !==
-          JSON.stringify(plan.bindingInput.modelRoute)) ||
+          JSON.stringify(
+            parseFrozenAgentModelRoute(plan.bindingInput.modelRoute),
+          )) ||
       binding.policySnapshotId !== plan.bindingInput.policySnapshotId ||
       binding.officialReleaseRevisionId !==
         plan.bindingInput.officialReleaseRevisionId ||
