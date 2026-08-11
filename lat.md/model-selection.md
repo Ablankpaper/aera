@@ -32,6 +32,22 @@ The catalog selection carries `sourceProfileId`, `modelLibraryId`, and `catalogR
 
 The picker builds it via [[src/renderer/src/screens/Chat/hooks/useModelConfig.ts#effectiveOverrideBaseUrl]], the same baseUrl rule `selectModel` applies (keep the URL only for `custom`/`ollama-cloud`; clear it for named providers that have a canonical base URL), so the session pick and a persisted save can't drift. It is threaded renderer → preload IPC → main `sendMessage` as `modelOverride`.
 
+## Installed-Agent switch policy and immutable resume
+
+Installed-Agent model changes use a Main-resolved route and a new immutable RuntimeBinding; an existing segment is validated and reused without route mutation.
+
+### Policy intersection and bounded denials
+
+[[src/main/agentera-agent-control/model-policy.ts#decideAgentModelRoute]] applies the signed Manifest policy and effective tenant policy independently. `fixed` rejects a real switch, while allowlist provider/model failures keep distinct bounded codes; `custom` permits a configured `custom:<name>` route.
+
+### Candidate route versus current segment
+
+[[src/main/agentera-agent-control/hermes-adapter.ts#AgenteraHermesAdapter#prepareInstalledTurnPlan]] freezes only a same-turn [[src/main/agentera-agent-control/owner-model-route-catalog.ts#ResolvedOwnerModelRoute]] for a candidate. An identical full route reuses the active Binding, while a different route keeps the old Binding immutable and targets the Main-derived segment key.
+
+### Current full-route and legacy validation
+
+A current full route must still resolve to the exact source Profile/model row and usable credential before resume. Exact Beta.26 three-field routes skip unavailable source metadata checks but still pass signed Manifest and tenant policy checks.
+
 ## Desktop-only persistence
 
 The selected model/provider is saved in a desktop-owned table keyed by session id, without storing API keys.

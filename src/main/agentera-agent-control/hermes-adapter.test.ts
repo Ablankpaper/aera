@@ -27,6 +27,8 @@ import { RuntimeBindingStore } from "./runtime-binding-store";
 import type { AgenteraRuntimeOwner } from "../agentera-profile-binding";
 import type { AgenteraAgentControlContext } from "../../shared/agentera-agent-control";
 import type { SessionModelOverride } from "../../shared/model-override";
+import { freezeResolvedOwnerModelRoute } from "./frozen-agent-model-route";
+import type { ResolvedOwnerModelRoute } from "./owner-model-route-catalog";
 
 const TENANT_ID = "11111111-1111-4111-8111-111111111111";
 const OWNER_ID = "22222222-2222-4222-8222-222222222222";
@@ -57,6 +59,34 @@ const VERSION_ROOT = `/tmp/agentera-control/versions/${VERSION_ID}`;
 const BACKUP_ID = "b3b3b3b3-b3b3-43b3-83b3-b3b3b3b3b3b3";
 const SOURCE_INSTALLATION_ID = "b4b4b4b4-b4b4-44b4-84b4-b4b4b4b4b4b4";
 const PROFILE_LINEAGE_ID = "b5b5b5b5-b5b5-45b5-85b5-b5b5b5b5b5b5";
+
+const OPENAI_ROUTE: ResolvedOwnerModelRoute = {
+  id: "account-home\0openai-gpt",
+  sourceProfileId: "account-home",
+  modelLibraryId: "openai-gpt",
+  provider: "openai",
+  providerLabel: "OpenAI",
+  model: "gpt-5.6",
+  displayName: "GPT-5.6",
+  baseUrl: "",
+  apiMode: "responses",
+  credentialRef: "OPENAI_API_KEY",
+  credentialAvailable: true,
+};
+
+const PETOI_ROUTE: ResolvedOwnerModelRoute = {
+  id: "account-home\0petoi-gpt",
+  sourceProfileId: "account-home",
+  modelLibraryId: "petoi-gpt",
+  provider: "custom:petoi",
+  providerLabel: "Petoi",
+  model: "gpt-5.6-sol",
+  displayName: "GPT-5.6 Sol",
+  baseUrl: "https://api.petoi.cn/v1",
+  apiMode: "codex_responses",
+  credentialRef: "CUSTOM_PROVIDER_PETOI_KEY",
+  credentialAvailable: true,
+};
 
 const owner: AgenteraRuntimeOwner = {
   tenantId: TENANT_ID,
@@ -207,6 +237,59 @@ function policyV3(agentVersion: AgentVersion): AgentPolicySnapshot {
   };
 }
 
+function versionV2(
+  mode: "user_select" | "allowlist" | "fixed",
+  allowedProviders: string[] = [],
+  allowedModels: string[] = [],
+): AgentVersion {
+  const base = version();
+  return {
+    ...base,
+    manifest: {
+      schema_version: 2,
+      identity: base.manifest.identity,
+      assets: base.manifest.assets,
+      model_policy: {
+        mode,
+        allowed_providers: allowedProviders,
+        allowed_models: allowedModels,
+      },
+      tools: base.manifest.tools,
+      dependencies: base.manifest.dependencies,
+      runtime_compatibility: base.manifest.runtime_compatibility,
+    },
+    content_digest: "cf".repeat(32),
+  };
+}
+
+function policyV2(agentVersion: AgentVersion): AgentPolicySnapshot {
+  if (agentVersion.manifest.schema_version !== 2) {
+    throw new Error("V2 policy fixture requires a V2 manifest");
+  }
+  return {
+    id: POLICY_ID,
+    installation_id: INSTALLATION_ID,
+    agent_version_id: agentVersion.id,
+    issuer: "http://127.0.0.1:8086",
+    policy_version: 1,
+    document: {
+      schema_version: 2,
+      agent_definition_id: DEFINITION_ID,
+      agent_version_id: agentVersion.id,
+      version_digest: agentVersion.content_digest,
+      model_policy: agentVersion.manifest.model_policy,
+      runtime_compatibility: agentVersion.manifest.runtime_compatibility,
+      tools: agentVersion.manifest.tools,
+      deny_rules: ["no-secret-export"],
+      publication_allowed: false,
+    },
+    content_digest: "e0".repeat(32),
+    signing_key_id: "policy-test-key",
+    signature: "B".repeat(86),
+    created_at: NOW.toISOString(),
+  };
+}
+
 function officialPolicy(
   agentVersion: AgentVersion,
   policyId: string,
@@ -279,6 +362,15 @@ describe("Aera adapter around the real Hermes transport", () => {
   let profileMcpCapabilities: LocalMcpCapabilityServer[];
   let getProfileMcpCapabilities: ReturnType<
     typeof vi.fn<(profilePath: string) => LocalMcpCapabilityServer[]>
+  >;
+  let resolvedModelRoutes: ResolvedOwnerModelRoute[];
+  let resolveCurrentModelRoute: ReturnType<
+    typeof vi.fn<
+      (
+        sourceProfileId: string,
+        modelLibraryId: string,
+      ) => ResolvedOwnerModelRoute | null
+    >
   >;
 
   beforeEach(() => {
@@ -362,6 +454,15 @@ describe("Aera adapter around the real Hermes transport", () => {
     materializeVersion = vi.fn(() => projection(agentVersion));
     profileMcpCapabilities = [];
     getProfileMcpCapabilities = vi.fn(() => profileMcpCapabilities);
+    resolvedModelRoutes = [OPENAI_ROUTE, PETOI_ROUTE];
+    resolveCurrentModelRoute = vi.fn(
+      (sourceProfileId, modelLibraryId) =>
+        resolvedModelRoutes.find(
+          (route) =>
+            route.sourceProfileId === sourceProfileId &&
+            route.modelLibraryId === modelLibraryId,
+        ) ?? null,
+    );
   });
 
   afterEach(() => {
@@ -383,6 +484,7 @@ describe("Aera adapter around the real Hermes transport", () => {
       getRuntimeVersion,
       getCurrentToolPermissionDigest,
       getProfileModelConfig: () => currentModelRoute,
+      resolveCurrentModelRoute,
       getProfileMcpCapabilities,
       isVersionRevoked,
       assertEntitled,
@@ -485,6 +587,185 @@ describe("Aera adapter around the real Hermes transport", () => {
     vi.mocked(cache.getVerifiedPolicySnapshot).mockReturnValue(snapshot);
     materializeVersion.mockReturnValue(projection(agentVersion));
   }
+
+  function useV2(
+    agentVersion: AgentVersion,
+    snapshot = policyV2(agentVersion),
+  ): void {
+    vi.mocked(cache.getVerifiedVersion).mockReturnValue(agentVersion);
+    vi.mocked(cache.getVerifiedPolicySnapshot).mockReturnValue(snapshot);
+    materializeVersion.mockReturnValue(projection(agentVersion));
+  }
+
+  it("accepts a Main-resolved requested route under user_select", async () => {
+    useV2(versionV2("user_select"));
+
+    const plan = await adapter().prepareInstalledTurnPlan({
+      conversationKey: "requested-user-select",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+      requestedModelRoute: PETOI_ROUTE,
+    });
+
+    expect(plan.bindingInput.modelRoute).toEqual(
+      freezeResolvedOwnerModelRoute(PETOI_ROUTE),
+    );
+    expect(plan.modelOverride).toEqual({
+      provider: PETOI_ROUTE.provider,
+      model: PETOI_ROUTE.model,
+      baseUrl: PETOI_ROUTE.baseUrl,
+    });
+  });
+
+  it("accepts the custom provider family under an allowlist", async () => {
+    useV2(versionV2("allowlist", ["custom"], [PETOI_ROUTE.model]));
+
+    const plan = await adapter().prepareInstalledTurnPlan({
+      conversationKey: "requested-allowlist",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+      requestedModelRoute: PETOI_ROUTE,
+    });
+
+    expect(plan.bindingInput.modelRoute).toEqual(
+      freezeResolvedOwnerModelRoute(PETOI_ROUTE),
+    );
+  });
+
+  it("applies the effective tenant model policy after the Manifest policy", async () => {
+    const agentVersion = versionV2("user_select");
+    const baseTenantPolicy = policyV2(agentVersion);
+    if (baseTenantPolicy.document.schema_version !== 2) {
+      throw new Error("fixture mismatch");
+    }
+    const tenantPolicy: AgentPolicySnapshot = {
+      ...baseTenantPolicy,
+      document: {
+        ...baseTenantPolicy.document,
+        model_policy: {
+          mode: "allowlist",
+          allowed_providers: ["openai"],
+          allowed_models: ["gpt-5.6"],
+        },
+      },
+    };
+    useV2(agentVersion, tenantPolicy);
+
+    await expect(
+      adapter().prepareInstalledTurnPlan({
+        conversationKey: "tenant-policy-denied",
+        profilePath: PROFILE_PATH,
+        owner,
+        resumeSessionId: null,
+        requestedModelRoute: PETOI_ROUTE,
+      }),
+    ).rejects.toMatchObject({ code: "model_switch_provider_denied" });
+  });
+
+  // @lat: [[model-selection#Installed-Agent switch policy and immutable resume#Candidate route versus current segment]]
+  it("rejects a requested route when the active Agent policy is fixed", async () => {
+    useV2(versionV2("fixed", ["openai"], ["gpt-5.6"]));
+    const subject = adapter();
+    const first = await subject.prepareInstalledTurn({
+      conversationKey: "fixed-policy-root",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+      requestedModelRoute: OPENAI_ROUTE,
+    });
+
+    await expect(
+      subject.prepareInstalledTurnPlan({
+        conversationKey:
+          "aera-segment:11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222",
+        profilePath: PROFILE_PATH,
+        owner,
+        resumeSessionId: null,
+        existingBinding: first.binding,
+        requestedModelRoute: PETOI_ROUTE,
+      }),
+    ).rejects.toMatchObject({ code: "model_switch_fixed_policy" });
+  });
+
+  // @lat: [[model-selection#Installed-Agent switch policy and immutable resume#Current full-route and legacy validation]]
+  it("fails closed when a full frozen route loses its source model", async () => {
+    useV2(versionV2("user_select"));
+    const subject = adapter();
+    await subject.prepareInstalledTurn({
+      conversationKey: "full-route-source-drift",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+      requestedModelRoute: OPENAI_ROUTE,
+    });
+    resolvedModelRoutes = [];
+
+    await expect(
+      subject.prepareInstalledTurn({
+        conversationKey: "full-route-source-drift",
+        profilePath: PROFILE_PATH,
+        owner,
+        resumeSessionId: null,
+      }),
+    ).rejects.toMatchObject({ code: "model_policy_drift" });
+  });
+
+  it("fails closed when a full frozen route loses its credential", async () => {
+    useV2(versionV2("user_select"));
+    const subject = adapter();
+    await subject.prepareInstalledTurn({
+      conversationKey: "full-route-credential-drift",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+      requestedModelRoute: OPENAI_ROUTE,
+    });
+    resolvedModelRoutes = [{ ...OPENAI_ROUTE, credentialAvailable: false }];
+
+    await expect(
+      subject.prepareInstalledTurn({
+        conversationKey: "full-route-credential-drift",
+        profilePath: PROFILE_PATH,
+        owner,
+        resumeSessionId: null,
+      }),
+    ).rejects.toMatchObject({ code: "model_policy_drift" });
+  });
+
+  it("reuses the immutable binding when the requested full route is unchanged", async () => {
+    useV2(versionV2("user_select"));
+    const subject = adapter();
+    const first = await subject.prepareInstalledTurn({
+      conversationKey: "same-full-route",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+      requestedModelRoute: OPENAI_ROUTE,
+    });
+
+    const plan = await subject.prepareInstalledTurnPlan({
+      conversationKey:
+        "aera-segment:33333333-3333-4333-8333-333333333333:44444444-4444-4444-8444-444444444444",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+      existingBinding: first.binding,
+      requestedModelRoute: OPENAI_ROUTE,
+    });
+    const reused = bindingStore.getOrCreateForConversation(plan.bindingInput);
+
+    expect(plan.bindingInput.conversationKey).toBe(
+      first.binding.conversationKey,
+    );
+    expect(reused.id).toBe(first.binding.id);
+    expect(
+      database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM runtime_bindings")
+        .get(),
+    ).toEqual({ count: 1 });
+  });
 
   it("blocks a new V3 conversation when a required MCP requirement is not mapped", async () => {
     useV3(versionV3({ required: true }));

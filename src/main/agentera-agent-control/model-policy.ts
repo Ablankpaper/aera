@@ -8,6 +8,16 @@ export interface AgentModelPolicy {
   allowedModels: readonly string[];
 }
 
+export type AgentModelRouteDecisionReason =
+  | "model_switch_fixed_policy"
+  | "model_switch_provider_denied"
+  | "model_switch_model_denied";
+
+export interface AgentModelRouteDecision {
+  allowed: boolean;
+  reason: AgentModelRouteDecisionReason | null;
+}
+
 export function modelPolicyForManifest(
   manifest: AgentVersion["manifest"],
 ): AgentModelPolicy {
@@ -47,8 +57,22 @@ export function agentModelPolicyAllowsRoute(
   provider: string,
   model: string,
 ): boolean {
-  if (policy.mode === "user_select") return true;
-  const normalizedProvider = provider.trim().toLowerCase();
+  return decideAgentModelRoute(policy, { provider, model }, "continue").allowed;
+}
+
+export function decideAgentModelRoute(
+  policy: AgentModelPolicy,
+  route: { provider: string; model: string },
+  intent: "continue" | "switch",
+): AgentModelRouteDecision {
+  if (policy.mode === "user_select") {
+    return { allowed: true, reason: null };
+  }
+  if (policy.mode === "fixed" && intent === "switch") {
+    return { allowed: false, reason: "model_switch_fixed_policy" };
+  }
+
+  const normalizedProvider = route.provider.trim().toLowerCase();
   const providerAllowed = policy.allowedProviders.some((allowed) => {
     const normalizedAllowed = allowed.trim().toLowerCase();
     return (
@@ -57,5 +81,11 @@ export function agentModelPolicyAllowsRoute(
         normalizedProvider.startsWith("custom:"))
     );
   });
-  return providerAllowed && policy.allowedModels.includes(model.trim());
+  if (!providerAllowed) {
+    return { allowed: false, reason: "model_switch_provider_denied" };
+  }
+  if (!policy.allowedModels.includes(route.model.trim())) {
+    return { allowed: false, reason: "model_switch_model_denied" };
+  }
+  return { allowed: true, reason: null };
 }
