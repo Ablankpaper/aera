@@ -598,7 +598,7 @@ describe("AgenteraAgentControlClient", () => {
     });
   });
 
-  it("requires an immutable Version only for approved Organization submissions", async () => {
+  it("leaves approved Version invariants to per-item Organization reconciliation", async () => {
     const approvedWithoutVersion = {
       ...organizationSubmissionSummary(true),
       published_version_id: null,
@@ -625,7 +625,36 @@ describe("AgenteraAgentControlClient", () => {
 
     await expect(
       client.listOrganizationAgentSubmissions(ORGANIZATION_ID),
-    ).rejects.toMatchObject({ code: "invalid_response" });
+    ).resolves.toEqual([approvedWithoutVersion]);
+    await expect(
+      client.listOrganizationAgentSubmissions(ORGANIZATION_ID),
+    ).resolves.toEqual([pendingWithVersion]);
+  });
+
+  it("defers malformed Organization list items while rejecting an invalid top-level envelope", async () => {
+    const malformed = {
+      ...organizationSubmissionSummary(),
+      revision: 0,
+    };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          submissions: [organizationSubmissionSummary(), malformed],
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ submissions: "not-an-array" }));
+    const client = new AgenteraAgentControlClient({
+      origin: "http://127.0.0.1:8086",
+      getAccessToken: () => "agentera-product-access",
+      getInstallationIdentity: () => deviceIdentity(),
+      fetch: fetcher as typeof fetch,
+      now: () => NOW,
+    });
+
+    await expect(
+      client.listOrganizationAgentSubmissions(ORGANIZATION_ID),
+    ).resolves.toEqual([organizationSubmissionSummary(), malformed]);
     await expect(
       client.listOrganizationAgentSubmissions(ORGANIZATION_ID),
     ).rejects.toMatchObject({ code: "invalid_response" });

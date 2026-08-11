@@ -225,8 +225,10 @@ export class OrganizationSubmissionReferenceStore {
 
     this.database.sqlite.exec("BEGIN IMMEDIATE");
     try {
-      const reference = this.activeReference(organizationId, submissionId);
-      if (reference.cloudRevision !== referenceRevision) {
+      if (
+        this.ownedReferenceRevision(organizationId, submissionId) !==
+        referenceRevision
+      ) {
         throw storeError("organization_submission_reference_conflict");
       }
       this.database.sqlite
@@ -398,6 +400,39 @@ export class OrganizationSubmissionReferenceStore {
         "organization_submission_reference_conflict",
       ),
     };
+  }
+
+  private ownedReferenceRevision(
+    organizationId: string,
+    submissionId: string,
+  ): number {
+    const row = this.database.sqlite
+      .prepare(
+        `SELECT reference.cloud_revision
+         FROM organization_agent_submission_refs AS reference
+         INNER JOIN agent_drafts AS draft
+           ON draft.id = reference.local_draft_id
+          AND draft.tenant_id = ?
+          AND draft.owner_id = ?
+          AND draft.target_scope = 'ORGANIZATION'
+          AND draft.organization_id = ?
+         WHERE reference.organization_id = ?
+           AND reference.cloud_submission_id = ?`,
+      )
+      .get(
+        this.tenantId,
+        this.ownerId,
+        organizationId,
+        organizationId,
+        submissionId,
+      ) as { cloud_revision?: unknown } | undefined;
+    if (row === undefined) {
+      throw storeError("organization_submission_reference_conflict");
+    }
+    return positiveRevision(
+      row.cloud_revision,
+      "organization_submission_reference_conflict",
+    );
   }
 
   private rollback(): void {

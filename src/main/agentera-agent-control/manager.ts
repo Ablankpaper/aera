@@ -2044,6 +2044,7 @@ export class AgenteraAgentControlManager {
     this.organizationPublicationComponents?.service.invalidate();
     const service = new OrganizationPublicationService({
       database: full.database,
+      owner,
       ...(context.role === "owner" || context.role === "admin"
         ? {
             drafts: new AgentDraftStore({

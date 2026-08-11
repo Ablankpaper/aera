@@ -1967,25 +1967,19 @@ export class AgenteraAgentControlClient {
 
   async listOrganizationAgentSubmissions(
     organizationId: string,
-  ): Promise<OrganizationAgentSubmissionRecord[]> {
+  ): Promise<unknown[]> {
     requireCanonicalUUID(organizationId);
     const value = await this.requestJSON(
       `/api/v1/organizations/${organizationId}/agent-publication-submissions`,
       { expectedStatus: 200 },
-      (
-        candidate,
-      ): candidate is {
-        submissions: readonly OrganizationAgentSubmissionRecord[];
-      } =>
+      (candidate): candidate is { submissions: readonly unknown[] } =>
         hasExactFields(candidate, ["submissions"]) &&
         Array.isArray(candidate.submissions) &&
-        candidate.submissions.every(
-          (submission) =>
-            isOrganizationSubmission(submission) &&
-            submission.organization_id === organizationId,
-        ),
+        candidate.submissions.length <= 1_000,
     );
-    return value.submissions.map(detachOrganizationSubmission);
+    // Each item is validated and detached independently by the Organization
+    // publication service so one malformed record cannot hide valid rows.
+    return [...value.submissions];
   }
 
   async getOrganizationAgentSubmission(
