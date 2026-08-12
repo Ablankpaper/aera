@@ -230,7 +230,7 @@ test("configures and previews one relay-backed image in an isolated Electron Pro
     ).toHaveAttribute("type", "password");
 
     const disclosure = settingsPage.getByRole("button", {
-      name: /^Image Generation$|^图像生成$/u,
+      name: /^Image generation service$|^图像生成服务$/u,
     });
     const configBody = settingsPage.locator(".image-generation-body");
     await expect(disclosure).toHaveAttribute("aria-expanded", "true");
