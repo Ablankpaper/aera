@@ -122,7 +122,7 @@ interface ChatProps {
   /** Resolved name/avatar/colour of `profile`, so idle agent avatars in the
    *  transcript show the agent's profile picture instead of the loading gif. */
   agentAppearance?: {
-    name?: string | null;
+    displayName?: string | null;
     color?: string | null;
     avatar?: string | null;
   };
@@ -159,8 +159,6 @@ function Chat({
     }),
     [profile, agentAppearance?.color, agentAppearance?.avatar],
   );
-  const agentName =
-    agentAppearance?.name?.trim() || profile?.trim() || "default";
   const [messages, setMessages] = useState<ChatMessage[]>(
     initialMessages ?? [],
   );
@@ -1278,7 +1276,8 @@ function Chat({
       <ConfigHealthBanner profile={profile} onOpenDiagnose={onOpenDiagnose} />
       {conversationBoundary && (
         <ConversationBoundaryIndicator
-          agentName={agentName}
+          profileId={profile?.trim() || "default"}
+          agentDisplayName={agentAppearance?.displayName}
           boundary={conversationBoundary}
         />
       )}

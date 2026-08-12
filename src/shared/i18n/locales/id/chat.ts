@@ -22,6 +22,7 @@ export default {
   suggestionAnalyze: "Analisis data",
   approve: "Setujui",
   deny: "Tolak",
+  boundary: { unnamedAgent: "Agen tanpa nama" },
   newChat: "Chat baru (Cmd+N)",
   clearChat: "Bersihkan chat",
   setContextFolder: "Atur folder konteks",

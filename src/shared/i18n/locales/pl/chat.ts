@@ -22,6 +22,7 @@ export default {
   suggestionAnalyze: "Przeanalizuj dane",
   approve: "Zatwierdź",
   deny: "Odrzuć",
+  boundary: { unnamedAgent: "Agent bez nazwy" },
   thinking: "Myślenie",
   toolCall: "Wywołanie narzędzia",
   toolResult: "Wynik narzędzia",

@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -13,17 +14,32 @@ import Layout from "./Layout";
 const testState = vi.hoisted(() => ({
   openSettings: vi.fn(),
   chatConnectionAccess: [] as boolean[],
+  chatProps: [] as Array<{
+    profile?: string;
+    agentAppearance?: { displayName?: string | null };
+  }>,
+  identityListener: null as null | ((identity: {
+    profileId: string;
+    displayName: string;
+    revision: number;
+    updatedAt: string;
+  }) => void),
 }));
 
 vi.mock("../Chat/Chat", () => ({
   default: ({
     allowAccountConnection,
     onOpenMyAgents,
+    profile,
+    agentAppearance,
   }: {
     allowAccountConnection?: boolean;
     onOpenMyAgents?: () => void;
+    profile?: string;
+    agentAppearance?: { displayName?: string | null };
   }) => {
     testState.chatConnectionAccess.push(allowAccountConnection ?? true);
+    testState.chatProps.push({ profile, agentAppearance });
     return (
       <div data-testid="chat-surface">
         <button type="button" onClick={onOpenMyAgents}>
@@ -95,6 +111,7 @@ type HermesAPIMockName =
   | "onUpdateError"
   | "onMenuNewChat"
   | "onMenuSearchSessions"
+  | "onAgentIdentityChanged"
   | "abortChat"
   | "getSessionMessages";
 
@@ -123,6 +140,12 @@ function installHermesAPI(model = "", provider = "auto"): InstalledHermesAPI {
     onUpdateError: vi.fn(() => vi.fn()),
     onMenuNewChat: vi.fn(() => vi.fn()),
     onMenuSearchSessions: vi.fn(() => vi.fn()),
+    onAgentIdentityChanged: vi.fn(
+      (listener: NonNullable<typeof testState.identityListener>) => {
+        testState.identityListener = listener;
+        return vi.fn();
+      },
+    ),
     abortChat: vi.fn(),
     getSessionMessages: vi.fn().mockResolvedValue([]),
   };
@@ -149,6 +172,8 @@ describe("startup model setup prompt", () => {
     localStorage.clear();
     testState.openSettings.mockReset();
     testState.chatConnectionAccess.length = 0;
+    testState.chatProps.length = 0;
+    testState.identityListener = null;
     vi.stubGlobal(
       "ResizeObserver",
       class {
@@ -272,6 +297,54 @@ describe("startup model setup prompt", () => {
     ).toBeInTheDocument();
     expect(api.getModelConfig).toHaveBeenCalledWith("assistant");
     expect(api.getModelConfig).not.toHaveBeenCalledWith("default");
+  });
+
+  it("refreshes the active conversation display name without changing its Profile id", async () => {
+    const api = installHermesAPI("gpt-5.6-sol", "custom");
+    api.listProfiles.mockResolvedValue([
+      {
+        id: "video-agent",
+        name: "智能短视频分析",
+        displayName: "智能短视频分析",
+        isActive: true,
+        color: "#777777",
+        avatar: null,
+      },
+    ]);
+
+    render(<Layout authState={authenticated} />);
+
+    await waitFor(() =>
+      expect(testState.chatProps).toContainEqual(
+        expect.objectContaining({
+          profile: "video-agent",
+          agentAppearance: expect.objectContaining({
+            displayName: "智能短视频分析",
+          }),
+        }),
+      ),
+    );
+    expect(testState.identityListener).not.toBeNull();
+
+    act(() => {
+      testState.identityListener?.({
+        profileId: "video-agent",
+        displayName: "短视频增长分析",
+        revision: 2,
+        updatedAt: "2026-08-13T00:00:00.000Z",
+      });
+    });
+
+    await waitFor(() =>
+      expect(testState.chatProps.at(-1)).toEqual(
+        expect.objectContaining({
+          profile: "video-agent",
+          agentAppearance: expect.objectContaining({
+            displayName: "短视频增长分析",
+          }),
+        }),
+      ),
+    );
   });
 
   it("stays quiet when model configuration cannot be inspected safely", async () => {

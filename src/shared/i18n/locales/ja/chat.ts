@@ -20,6 +20,7 @@ export default {
   suggestionAnalyze: "データを分析",
   approve: "承認",
   deny: "拒否",
+  boundary: { unnamedAgent: "名前のないエージェント" },
   newChat: "新規チャット (Cmd+N)",
   clearChat: "チャットをクリア",
   setContextFolder: "コンテキストフォルダを設定",
