@@ -113,7 +113,9 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-confirm-organization-experience-import",
       "agentera-agents-prepare-organization-submission",
       "agentera-agents-confirm-organization-submission",
+      "agentera-agents-list-organization-submission-list",
       "agentera-agents-list-organization-submissions",
+      "agentera-agents-disconnect-organization-submission-reference",
       "agentera-agents-get-organization-submission",
       "agentera-agents-prepare-organization-review",
       "agentera-agents-confirm-organization-review",
@@ -982,6 +984,40 @@ describe("Agent control IPC contract", () => {
     expect(start).toContain("notifyAgentContextChanged");
   });
 
+  it("keeps the Beta.26 list and adds one strict resilient Organization bridge", () => {
+    const register = readFileSync(
+      join(__dirname, "../src/main/ipc/register.ts"),
+      "utf8",
+    );
+    const preload = readFileSync(
+      join(__dirname, "../src/preload/index.ts"),
+      "utf8",
+    );
+    const registrations = register.slice(
+      register.indexOf('"agentera-agents-list-organization-submissions"'),
+      register.indexOf('"agentera-agents-get-organization-submission"'),
+    );
+
+    expect(register).toContain(
+      '"agentera-agents-list-organization-submissions"',
+    );
+    for (const channel of [
+      "agentera-agents-list-organization-submission-list",
+      "agentera-agents-disconnect-organization-submission-reference",
+    ]) {
+      expect(register.match(new RegExp(`"${channel}"`, "g"))).toHaveLength(1);
+      expect(preload.match(new RegExp(`"${channel}"`, "g"))).toHaveLength(1);
+    }
+    expect(registrations).toContain("publicOrganizationSubmissionList");
+    expect(registrations).toContain("listOrganizationSubmissionList");
+    expect(registrations).toContain(
+      "parseDisconnectOrganizationSubmissionReferenceInput",
+    );
+    expect(registrations).toContain(
+      "disconnectOrganizationSubmissionReference",
+    );
+  });
+
   it("uses a removable event listener and suppresses delivery to destroyed renderers", () => {
     const preload = readFileSync(
       join(__dirname, "../src/preload/index.ts"),
@@ -1027,7 +1063,9 @@ describe("Agent control IPC contract", () => {
       "agentera-agents-confirm-experience-candidate-import",
       "agentera-agents-prepare-organization-submission",
       "agentera-agents-confirm-organization-submission",
+      "agentera-agents-list-organization-submission-list",
       "agentera-agents-list-organization-submissions",
+      "agentera-agents-disconnect-organization-submission-reference",
       "agentera-agents-get-organization-submission",
       "agentera-agents-prepare-organization-review",
       "agentera-agents-confirm-organization-review",

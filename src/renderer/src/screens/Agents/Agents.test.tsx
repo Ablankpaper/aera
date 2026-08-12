@@ -12,6 +12,7 @@ import type {
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
 } from "../../../../shared/agentera-agent-control";
+import type { OwnerModelRouteCatalogSnapshot } from "../../../../shared/model-configuration";
 
 vi.mock("../../components/useI18n", () => ({
   useI18n: () => ({
@@ -238,6 +239,82 @@ function installAgenteraAPI(
 }
 
 describe("Agents unified product surface", () => {
+  // @lat: [[provider-setup#Owner-scoped model route catalog]]
+  it("offers a model saved on the active installed Profile from the owner catalog", async () => {
+    const hermes = installHermesAPI();
+    const accountProfile = {
+      ...profile("account", { isDefault: true, name: "Account" }),
+      model: "old-model",
+      provider: "openai",
+    };
+    const installedProfile = {
+      ...profile("installed", {
+        name: "Research Agent",
+        agentInstallationId: INSTALLATION_ID,
+      }),
+      model: "",
+      provider: "auto",
+    };
+    const modelLibraryId = "66666666-6666-4666-8666-666666666666";
+    const catalog: OwnerModelRouteCatalogSnapshot = {
+      revision: "a".repeat(64),
+      targetProfileId: "account",
+      routes: [
+        {
+          id: ["installed", modelLibraryId].join("\0"),
+          provider: "custom:petoi",
+          model: "new-model",
+          baseUrl: "https://api.petoi.cn/v1",
+          apiMode: "chat_completions",
+          providerLabel: "Petoi",
+          displayName: "New model",
+          sourceProfileId: "installed",
+          sourceKind: "legacy_agent",
+          selection: {
+            sourceProfileId: "installed",
+            modelLibraryId,
+            catalogRevision: "a".repeat(64),
+          },
+        },
+      ],
+    };
+    Object.assign(window.hermesAPI, {
+      getOwnerModelRouteCatalog: vi.fn(
+        async (): Promise<OwnerModelRouteCatalogSnapshot> => catalog,
+      ),
+    });
+    installAgenteraAPI({
+      listDefinitions: vi.fn(async () => ({
+        ok: true as const,
+        data: [definition()],
+      })),
+      listInstallations: vi.fn(async () => ({
+        ok: true as const,
+        data: [installation()],
+      })),
+    });
+    hermes.listProfiles.mockResolvedValue([accountProfile, installedProfile]);
+
+    render(<Agents activeProfile="installed" onChatWith={vi.fn()} />);
+
+    fireEvent.click(
+      await screen.findByRole("tab", { name: "agents.hub.mineTab" }),
+    );
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.hub.useAgent" }),
+    );
+
+    expect(
+      await screen.findByRole("option", {
+        name: "new-model · Petoi",
+      }),
+    ).toBeVisible();
+    expect(screen.queryByText("agents.hub.modelRequired")).toBeNull();
+  });
+
   it("uses the active configured Profile even when it belongs to an installed Agent", () => {
     const accountProfile = {
       ...profile("account-home", { name: "Account home" }),

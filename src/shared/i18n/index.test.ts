@@ -74,6 +74,17 @@ describe("shared i18n", () => {
     expect(t("welcome.title", "zh-CN")).toBe("欢迎使用 Aera");
   });
 
+  it("provides localized Agent model-switch states and marker copy", () => {
+    expect(t("chat.modelSwitch.marker", "en")).toBe("Model changed");
+    expect(t("chat.modelSwitch.fixedPolicy", "en")).toBe(
+      "This Agent uses a fixed model policy.",
+    );
+    expect(t("chat.modelSwitch.marker", "zh-CN")).toBe("模型已切换");
+    expect(t("chat.modelSwitch.fixedPolicy", "zh-CN")).toBe(
+      "此智能体使用固定模型策略，无法切换模型。",
+    );
+  });
+
   it("provides complete Simplified Chinese copy for every source key", () => {
     const source = new Map(leafEntries(resources.en.translation));
     const simplifiedChinese = new Map(

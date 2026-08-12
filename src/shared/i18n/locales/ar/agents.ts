@@ -140,6 +140,15 @@ export default {
       reviewedBy: "راجعه",
       policyVersion: "إصدار السياسة",
       noSubmissions: "لا توجد إرسالات مؤسسة بعد.",
+      submissionRecordUnavailable:
+        "تعذر عرض بعض سجلات إرسالات المؤسسة بأمان؛ تظل الإرسالات الأخرى متاحة.",
+      referenceConflict:
+        "يتعارض رابط المسودة المحلية لهذا الإرسال مع Cloud وتم عزله. لا تتأثر إرسالات المؤسسة الأخرى.",
+      disconnectReference: "فصل رابط المسودة المحلية",
+      disconnectReferenceTitle: "فصل رابط المسودة المحلية المتعارض",
+      disconnectReferenceBoundary:
+        "تتم إزالة رابط هذا الإرسال السحابي بالمسودة المحلية فقط؛ تظل الإرسالات السحابية والمسودات والإصدارات المنشورة والتثبيتات وMemory وProfiles دون تغيير.",
+      confirmDisconnectReference: "فصل الرابط",
       withdraw: "سحب الإرسال",
       confirmWithdrawal: "تأكيد السحب",
       withdrawalBoundary:

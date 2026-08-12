@@ -10,6 +10,7 @@ import type {
 } from "../../../../shared/agentera-agent-control";
 import type { AgenteraMemoryCandidateBatch } from "../../../../shared/agentera-memory-candidate";
 import type { OfficialQualityFeedbackEligibility } from "../../../../shared/agentera-official-quality";
+import type { PublicModelRouteIdentity } from "../../../../shared/model-configuration";
 
 /**
  * Visible chat bubble (user or assistant). Used for live streaming and as
@@ -116,9 +117,22 @@ export interface AgentCreationGuideMessage {
   target: AgenteraAgentControlContext | null;
   status: "resolving" | "pending" | "creating" | "created" | "error";
   errorCode?:
-    AgenteraAgentControlErrorCode | "context_changed" | "service_unavailable";
+    | AgenteraAgentControlErrorCode
+    | "context_changed"
+    | "service_unavailable";
   draftId?: string;
   createdName?: string;
+}
+
+/** Renderer-only acknowledgement of an activated Agent model segment. */
+export interface ModelSwitchMessage {
+  id: string;
+  kind: "model_switch";
+  role: "agent";
+  from: PublicModelRouteIdentity;
+  to: PublicModelRouteIdentity;
+  segmentId: string;
+  localOnly: true;
 }
 
 export type ChatMessage =
@@ -128,7 +142,8 @@ export type ChatMessage =
   | ToolResultMessage
   | ClarifyMessage
   | MemoryCandidateMessage
-  | AgentCreationGuideMessage;
+  | AgentCreationGuideMessage
+  | ModelSwitchMessage;
 
 export interface ActiveTurn {
   turnId: string;

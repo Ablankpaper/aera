@@ -135,6 +135,15 @@ export default {
       reviewedBy: "İnceleyen",
       policyVersion: "Politika sürümü",
       noSubmissions: "Henüz kurumsal gönderim yok.",
+      submissionRecordUnavailable:
+        "Bazı kurumsal gönderim kayıtları güvenle görüntülenemedi; diğer gönderimler kullanılabilir durumda.",
+      referenceConflict:
+        "Bu gönderimin yerel taslak bağlantısı Cloud ile çakışıyor ve karantinaya alındı. Diğer kurumsal gönderimler etkilenmedi.",
+      disconnectReference: "Yerel taslak bağlantısını kes",
+      disconnectReferenceTitle: "Çakışan yerel taslak bağlantısını kes",
+      disconnectReferenceBoundary:
+        "Yalnızca bu Cloud gönderiminin yerel taslağa bağlantısı kaldırılır; Cloud gönderimi, yerel taslak, yayımlanan sürümler, kurulumlar, Memory ve Profile değişmeden kalır.",
+      confirmDisconnectReference: "Bağlantıyı kes",
       withdraw: "Gönderimi geri çek",
       confirmWithdrawal: "Geri çekmeyi doğrula",
       withdrawalBoundary:

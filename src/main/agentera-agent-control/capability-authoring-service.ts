@@ -151,6 +151,7 @@ function utf8Compare(left: string, right: string): number {
 
 function safeDisplayText(value: unknown, maximum: number): string {
   if (typeof value !== "string") return "";
+  // eslint-disable-next-line no-control-regex -- Display metadata must strip the complete ASCII control range.
   const normalized = value.replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
   return Array.from(normalized).slice(0, maximum).join("");
 }

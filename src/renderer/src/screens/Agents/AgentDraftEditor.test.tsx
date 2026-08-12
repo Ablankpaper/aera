@@ -944,6 +944,7 @@ describe("AgentDraftEditor", () => {
     expect(api.preparePublication).not.toHaveBeenCalled();
   });
 
+  // @lat: [[model-selection#Installed-Agent route selection uses an owner catalog]]
   it("publishes and starts personal Agent setup in one explicit action", async () => {
     Object.defineProperty(window, "hermesAPI", {
       configurable: true,
@@ -986,6 +987,24 @@ describe("AgentDraftEditor", () => {
         open
         draft={detail()}
         modelProfileId="account-home"
+        runtimeModelRoutes={[
+          {
+            id: "account-home\0petoi-model",
+            sourceProfileId: "account-home",
+            provider: "custom:petoi",
+            providerLabel: "Petoi",
+            model: "gpt-5.6-sol",
+            displayName: "gpt-5.6-sol",
+            baseUrl: "https://api.petoi.cn/v1",
+            apiMode: "chat_completions",
+            sourceKind: "account",
+            selection: {
+              sourceProfileId: "account-home",
+              modelLibraryId: "66666666-6666-4666-8666-666666666666",
+              catalogRevision: "a".repeat(64),
+            },
+          },
+        ]}
         onClose={onClose}
         onSaved={() => undefined}
         onPublished={() => undefined}
@@ -1006,6 +1025,11 @@ describe("AgentDraftEditor", () => {
         definitionId: DEFINITION_ID,
         versionId: VERSION_ID,
         displayName: "Research Agent",
+        modelSelection: {
+          sourceProfileId: "account-home",
+          modelLibraryId: "66666666-6666-4666-8666-666666666666",
+          catalogRevision: "a".repeat(64),
+        },
       }),
     );
     expect(onClose).toHaveBeenCalledOnce();

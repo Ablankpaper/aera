@@ -147,6 +147,8 @@ import {
   runDesktopControlHealthProbe,
 } from "../agentera-desktop-control/health";
 import { DesktopControlJournal } from "../agentera-desktop-control/store";
+import { prepareModelConfigurationRuntime } from "../model-configuration-runtime";
+import type { OwnerModelRouteCatalog } from "../agentera-agent-control/owner-model-route-catalog";
 
 const APP_NAME =
   process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
@@ -161,7 +163,9 @@ export interface StartMainProcessOptions {
   workspaceInvitationInbox?: WorkspaceInvitationInbox;
 }
 
-export function startMainProcess(options: StartMainProcessOptions = {}): void {
+export async function startMainProcess(
+  options: StartMainProcessOptions = {},
+): Promise<void> {
   const workspaceInvitationInbox =
     options.workspaceInvitationInbox ?? new WorkspaceInvitationInbox();
   configureGatewayProcessOwnership(app.getPath("userData"));
@@ -430,6 +434,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
   let agenteraProductSpace: AgenteraProductSpaceManager | null = null;
   let agenteraAgentControlDatabase: AgenteraControlPlaneDatabase | null = null;
   let agenteraAgentControl: AgenteraAgentControlManager | null = null;
+  let ownerModelRouteCatalog: OwnerModelRouteCatalog | null = null;
   let agenteraOfficialQualityDatabase: AgenteraOfficialQualityDatabase | null =
     null;
   let agenteraOfficialQuality: AgenteraOfficialQualityManager | null = null;
@@ -547,6 +552,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
       },
       getConnectionMode: () => getConnectionConfig().mode,
       assertEntitled: () => agenteraAuth.assertCanStartNewTask(),
+      getOwnerModelRouteCatalog: () => ownerModelRouteCatalog,
     });
   } catch {
     agenteraAgentControlDatabase?.close();
@@ -696,6 +702,18 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     mainWindow.webContents.send("agentera-auth-state-changed", state);
   });
 
+  const modelConfigurationRuntime = await prepareModelConfigurationRuntime({
+    userDataPath: app.getPath("userData"),
+    getOwner: getAgenteraRuntimeOwner,
+    profileBindings: agenteraProfileBindings,
+    getConnectionConfig,
+    notifyConnectionConfigChanged,
+    notifyRuntimeSnapshotChanged,
+    notifyModelLibraryChanged,
+    notifyCustomProvidersChanged,
+  });
+  ownerModelRouteCatalog = modelConfigurationRuntime.catalog;
+
   registerIpcHandlers({
     runtimeActivity,
     getMainWindow: () => mainWindow,
@@ -724,6 +742,8 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
     agenteraOfficialQuality,
     agenteraEncryptedBackup,
     agenteraDesktopControl,
+    modelConfigurationCoordinator: modelConfigurationRuntime.coordinator,
+    ownerModelRouteCatalog: modelConfigurationRuntime.catalog,
   });
 
   setupUpdater({ getMainWindow: () => mainWindow });
@@ -799,6 +819,7 @@ export function startMainProcess(options: StartMainProcessOptions = {}): void {
         agenteraOfficialQualityDatabase?.close();
         agenteraEncryptedBackup?.close();
         agenteraAgentControlDatabase?.close();
+        modelConfigurationRuntime.close();
         await runtimeCleanup;
       },
       () => app.quit(),
@@ -836,22 +857,38 @@ export async function stopActiveRuntimeContext(
   }
 }
 
-function notifyConnectionConfigChanged(): void {
-  mainWindow?.webContents.send(
-    "connection-config-changed",
-    getPublicConnectionConfig(),
-  );
+function notifyConnectionConfigChanged(catalogRevision?: string): void {
+  mainWindow?.webContents.send("connection-config-changed", {
+    ...getPublicConnectionConfig(),
+    ...(catalogRevision ? { catalogRevision } : {}),
+  });
 }
 
-function notifyRuntimeSnapshotChanged(): void {
+function notifyRuntimeSnapshotChanged(catalogRevision?: string): void {
+  if (catalogRevision) {
+    mainWindow?.webContents.send("runtime-snapshot-changed", {
+      catalogRevision,
+    });
+    return;
+  }
   mainWindow?.webContents.send("runtime-snapshot-changed");
 }
 
-function notifyModelLibraryChanged(): void {
+function notifyModelLibraryChanged(catalogRevision?: string): void {
+  if (catalogRevision) {
+    mainWindow?.webContents.send("model-library-changed", { catalogRevision });
+    return;
+  }
   mainWindow?.webContents.send("model-library-changed");
 }
 
-function notifyCustomProvidersChanged(): void {
+function notifyCustomProvidersChanged(catalogRevision?: string): void {
+  if (catalogRevision) {
+    mainWindow?.webContents.send("custom-providers-changed", {
+      catalogRevision,
+    });
+    return;
+  }
   mainWindow?.webContents.send("custom-providers-changed");
 }
 

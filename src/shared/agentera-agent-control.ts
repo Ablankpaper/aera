@@ -1,3 +1,8 @@
+import type {
+  OwnerModelRouteSelection,
+  OwnerModelRouteSummary,
+} from "./model-configuration";
+
 export type AgentDraftAssetKind = "skill" | "sop" | "knowledge";
 export type AgentDraftAssetMediaType = "text/markdown" | "text/plain";
 export type AgentDraftIconMediaType = "image/png" | "image/webp";
@@ -405,6 +410,36 @@ export interface OrganizationAgentSubmissionSummary {
   review: OrganizationAgentReview | null;
 }
 
+export type SubmissionReferenceConflictStage =
+  | "reference_shape"
+  | "content_digest"
+  | "definition"
+  | "published_version"
+  | "draft_publication"
+  | "compare_and_set";
+
+export type SubmissionReferenceState =
+  | { kind: "verified"; draftId: string; draftRevision: number }
+  | { kind: "remote_only" }
+  | {
+      kind: "quarantined";
+      stage: SubmissionReferenceConflictStage;
+    };
+
+export interface OrganizationSubmissionListIssue {
+  submissionId: string | null;
+  code: "cloud_record_invalid";
+}
+
+export interface OrganizationAgentSubmissionListItem extends OrganizationAgentSubmissionSummary {
+  referenceState: SubmissionReferenceState;
+}
+
+export interface OrganizationAgentSubmissionList {
+  submissions: OrganizationAgentSubmissionListItem[];
+  issues: OrganizationSubmissionListIssue[];
+}
+
 export interface OrganizationSubmissionPreview {
   publicationHandle: string;
   draftId: string;
@@ -507,6 +542,11 @@ export interface ConfirmOrganizationWithdrawalInput {
   confirmation: "withdraw-organization-agent";
 }
 
+export interface DisconnectOrganizationSubmissionReferenceInput {
+  submissionId: string;
+  confirmation: "disconnect-local-draft-link";
+}
+
 export type AgenteraAgentControlErrorCode =
   | "invalid_request"
   | "sign_in_required"
@@ -527,6 +567,8 @@ export type AgenteraAgentControlErrorCode =
   | "publication_cache_recovery_failed"
   | "runtime_incompatible"
   | "profile_model_configuration_failed"
+  | "model_route_stale"
+  | "model_route_unavailable"
   | "profile_capability_configuration_required"
   | "capability_profile_unavailable"
   | "capability_source_unsafe"
@@ -543,6 +585,7 @@ export type AgenteraAgentControlErrorCode =
   | "organization_agent_forbidden"
   | "organization_archived"
   | "organization_submission_conflict"
+  | "organization_submission_reference_detach_failed"
   | "organization_submission_superseded"
   | "organization_publication_policy_blocked"
   | "organization_publication_dlp_blocked"
@@ -621,13 +664,20 @@ export interface AgentRuntimeModelRoute {
   model: string;
   displayName: string;
   baseUrl: string;
+  /** Wire protocol used by Main; absent only for Beta.26 serialized routes. */
+  apiMode?: string | null;
 }
 
+/**
+ * Main may expose either the Beta.26 route projection or the revision-bearing
+ * owner catalog summary while mixed-version renderer surfaces converge.
+ */
+export type AgentRuntimeModelRouteSource =
+  | AgentRuntimeModelRoute
+  | OwnerModelRouteSummary;
+
 /** Renderer selection revalidated by Main before any Runtime Profile write. */
-export interface AgentRuntimeModelSelection {
-  sourceProfileId: string;
-  modelLibraryId: string;
-}
+export type AgentRuntimeModelSelection = OwnerModelRouteSelection;
 
 export interface AgenteraInstallVersionInput {
   definitionId: string;

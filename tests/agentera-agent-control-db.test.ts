@@ -40,8 +40,8 @@ afterEach(() => {
 });
 
 describe("Aera control-plane database", () => {
-  it("pins local MCP requirement bindings at schema version 11", () => {
-    expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(11);
+  it("pins Beta.27 reliability storage at schema version 12", () => {
+    expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(12);
   });
 
   it("opens exactly below Electron userData and never below HERMES_HOME", () => {
@@ -115,6 +115,8 @@ describe("Aera control-plane database", () => {
         "agent_mcp_requirement_bindings",
         "cached_agent_versions",
         "conversation_boundaries",
+        "conversation_segments",
+        "conversation_threads",
         "draft_assets",
         "encrypted_backup_restores",
         "installation_operations",
@@ -123,6 +125,7 @@ describe("Aera control-plane database", () => {
         "local_experience_candidates",
         "local_organization_experience_candidate_imports",
         "local_organization_experience_candidates",
+        "organization_agent_submission_ref_conflicts",
         "organization_agent_submission_refs",
         "pending_sanitized_records",
         "runtime_bindings",

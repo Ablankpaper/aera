@@ -16,13 +16,15 @@ import type {
   AgentCapabilityBindingConfiguration,
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
-  AgentRuntimeModelRoute,
+  AgentRuntimeModelRouteSource,
   ExperienceCandidateDetail,
   ExperienceCandidateImportPreview,
   ExperienceCandidateSummary,
   OfficialAgentDetail,
   OfficialAgentSummary,
   OfficialManagedUpdate,
+  OrganizationAgentSubmissionList,
+  OrganizationAgentSubmissionListItem,
   OrganizationAgentSubmissionSummary,
 } from "../../../../shared/agentera-agent-control";
 import AgentControlPanel, {
@@ -44,6 +46,7 @@ const DRAFT_ID = "77777777-7777-4777-8777-777777777777";
 const SUBMISSION_ID = "88888888-8888-4888-8888-888888888888";
 const OFFICIAL_RELEASE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const OFFICIAL_REVISION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const CATALOG_REVISION = "a".repeat(64);
 
 function success<T>(data: T): AgenteraAgentControlResult<T> {
   return { ok: true, data };
@@ -109,7 +112,7 @@ function publishedDraft(): AgentDraftDetail {
 function organizationSubmission(
   status: OrganizationAgentSubmissionSummary["status"],
   localDraftRevision = 1,
-): OrganizationAgentSubmissionSummary {
+): OrganizationAgentSubmissionListItem {
   return {
     id: SUBMISSION_ID,
     organizationId: ORGANIZATION_ID,
@@ -140,7 +143,18 @@ function organizationSubmission(
             reviewedAt: "2026-07-21T02:00:00.000Z",
           }
         : null,
+    referenceState: {
+      kind: "verified",
+      draftId: DRAFT_ID,
+      draftRevision: localDraftRevision,
+    },
   };
+}
+
+function organizationSubmissionList(
+  submissions: OrganizationAgentSubmissionListItem[] = [],
+): OrganizationAgentSubmissionList {
+  return { submissions, issues: [] };
 }
 
 function definition(): AgenteraAgentDefinitionSummary {
@@ -325,13 +339,17 @@ function candidateImportPreview(): ExperienceCandidateImportPreview {
 type MockedPanelAgenteraAPI = Window["agenteraAgents"] & {
   listDefinitions: ReturnType<typeof vi.fn>;
   listDrafts: ReturnType<typeof vi.fn>;
+  listOrganizationSubmissionList: ReturnType<typeof vi.fn>;
   listOrganizationSubmissions: ReturnType<typeof vi.fn>;
+  disconnectOrganizationSubmissionReference: ReturnType<typeof vi.fn>;
   archiveInstallation: ReturnType<typeof vi.fn>;
   installVersion: ReturnType<typeof vi.fn>;
 };
 
+type PanelAgenteraAPIOverrides = Partial<MockedPanelAgenteraAPI>;
+
 function installAPI(
-  overrides: Partial<Window["agenteraAgents"]> = {},
+  overrides: PanelAgenteraAPIOverrides = {},
 ): MockedPanelAgenteraAPI {
   const api = {
     getState: vi.fn(async () => success(controlState())),
@@ -345,7 +363,11 @@ function installAPI(
     confirmPublication: vi.fn(),
     prepareOrganizationSubmission: vi.fn(),
     confirmOrganizationSubmission: vi.fn(),
+    listOrganizationSubmissionList: vi.fn(async () =>
+      success(organizationSubmissionList()),
+    ),
     listOrganizationSubmissions: vi.fn(async () => success([])),
+    disconnectOrganizationSubmissionReference: vi.fn(),
     getOrganizationSubmission: vi.fn(),
     prepareOrganizationReview: vi.fn(),
     confirmOrganizationReview: vi.fn(),
@@ -914,11 +936,138 @@ describe("AgentControlPanel", () => {
       expect(
         api.listDrafts.mock.calls.some(([scope]) => scope === undefined),
       ).toBe(author);
-      expect(api.listOrganizationSubmissions.mock.calls.length > 0).toBe(
+      expect(api.listOrganizationSubmissionList.mock.calls.length > 0).toBe(
         history,
       );
     },
   );
+
+  // @lat: [[agentera-agent-control-plane#Release gate#Organization Agent isolation#Single-list renderer ownership]]
+  it("lists once and renders one warning on only the quarantined card", async () => {
+    const healthySubmission: OrganizationAgentSubmissionListItem = {
+      ...organizationSubmission("pending"),
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+      contentDigest: `sha256:${"b".repeat(64)}`,
+      localDraftId: null,
+      localDraftRevision: null,
+      referenceState: { kind: "remote_only" },
+    };
+    const quarantinedSubmission: OrganizationAgentSubmissionListItem = {
+      ...organizationSubmission("pending"),
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
+      contentDigest: `sha256:${"c".repeat(64)}`,
+      localDraftId: null,
+      localDraftRevision: null,
+      referenceState: {
+        kind: "quarantined",
+        stage: "content_digest",
+      },
+    };
+    const api = installAPI({
+      getState: vi.fn(async () =>
+        success(
+          controlState({
+            scope: "ORGANIZATION",
+            organizationId: ORGANIZATION_ID,
+            role: "owner",
+          }),
+        ),
+      ),
+      listOrganizationSubmissionList: vi.fn(async () =>
+        success(
+          organizationSubmissionList([
+            healthySubmission,
+            quarantinedSubmission,
+          ]),
+        ),
+      ),
+    });
+
+    render(<AgentControlPanel profiles={[]} initialTab="enterprise" />);
+
+    expect(
+      await screen.findByText(healthySubmission.contentDigest),
+    ).toBeVisible();
+    expect(screen.getByText(quarantinedSubmission.contentDigest)).toBeVisible();
+    expect(
+      screen.getAllByText("agents.control.organization.referenceConflict"),
+    ).toHaveLength(1);
+    expect(
+      screen.getByTestId(
+        `submission-reference-conflict:${quarantinedSubmission.id}`,
+      ),
+    ).toBeVisible();
+    expect(api.listOrganizationSubmissionList).toHaveBeenCalledTimes(1);
+    expect(api.listOrganizationSubmissions).not.toHaveBeenCalled();
+  });
+
+  it("disconnects one quarantined card without issuing another list request", async () => {
+    const quarantinedSubmission: OrganizationAgentSubmissionListItem = {
+      ...organizationSubmission("approved"),
+      localDraftId: null,
+      localDraftRevision: null,
+      referenceState: {
+        kind: "quarantined",
+        stage: "published_version",
+      },
+    };
+    const remoteOnlySubmission: OrganizationAgentSubmissionListItem = {
+      ...quarantinedSubmission,
+      referenceState: { kind: "remote_only" },
+    };
+    const api = installAPI({
+      getState: vi.fn(async () =>
+        success(
+          controlState({
+            scope: "ORGANIZATION",
+            organizationId: ORGANIZATION_ID,
+            role: "owner",
+          }),
+        ),
+      ),
+      listOrganizationSubmissionList: vi.fn(async () =>
+        success(organizationSubmissionList([quarantinedSubmission])),
+      ),
+      disconnectOrganizationSubmissionReference: vi.fn(async () =>
+        success(remoteOnlySubmission),
+      ),
+    });
+
+    render(<AgentControlPanel profiles={[]} initialTab="enterprise" />);
+
+    expect(
+      await screen.findByTestId(
+        `submission-reference-conflict:${quarantinedSubmission.id}`,
+      ),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.control.organization.disconnectReference",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.control.organization.confirmDisconnectReference",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(
+        api.disconnectOrganizationSubmissionReference,
+      ).toHaveBeenCalledWith({
+        submissionId: quarantinedSubmission.id,
+        confirmation: "disconnect-local-draft-link",
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId(
+          `submission-reference-conflict:${quarantinedSubmission.id}`,
+        ),
+      ).toBeNull(),
+    );
+    expect(api.listOrganizationSubmissionList).toHaveBeenCalledTimes(1);
+  });
 
   // @lat: [[agentera-agent-control-plane#Trusted Workspace Agent context#Context-only refresh#Independent catalog reads]]
   it("keeps successful Organization definitions visible when submission history fails", async () => {
@@ -932,7 +1081,7 @@ describe("AgentControlPanel", () => {
           }),
         ),
       ),
-      listOrganizationSubmissions: vi.fn(async () => ({
+      listOrganizationSubmissionList: vi.fn(async () => ({
         ok: false as const,
         errorCode: "cloud_unavailable" as const,
       })),
@@ -970,8 +1119,10 @@ describe("AgentControlPanel", () => {
           }),
         ),
       ),
-      listOrganizationSubmissions: vi.fn(async () =>
-        success([organizationSubmission("approved")]),
+      listOrganizationSubmissionList: vi.fn(async () =>
+        success(
+          organizationSubmissionList([organizationSubmission("approved")]),
+        ),
       ),
       listDrafts: vi.fn(async () => success([dirtyDraft as AgentDraft])),
       listDefinitions: vi.fn(async () => success([definition()])),
@@ -993,7 +1144,7 @@ describe("AgentControlPanel", () => {
       ),
     ).toBeVisible();
     expect(
-      api.listOrganizationSubmissions.mock.invocationCallOrder[0],
+      api.listOrganizationSubmissionList.mock.invocationCallOrder[0],
     ).toBeLessThan(api.listDrafts.mock.invocationCallOrder[0]);
   });
 
@@ -1008,7 +1159,9 @@ describe("AgentControlPanel", () => {
           }),
         ),
       ),
-      listOrganizationSubmissions: vi.fn(async () => success([])),
+      listOrganizationSubmissionList: vi.fn(async () =>
+        success(organizationSubmissionList()),
+      ),
       listDrafts: vi.fn(async () => success([draft() as AgentDraft])),
       listDefinitions: vi.fn(async () => success([])),
       deleteDraft: vi.fn(async () => success(true as const)),
@@ -1058,8 +1211,10 @@ describe("AgentControlPanel", () => {
           }),
         ),
       ),
-      listOrganizationSubmissions: vi.fn(async () =>
-        success([organizationSubmission("approved")]),
+      listOrganizationSubmissionList: vi.fn(async () =>
+        success(
+          organizationSubmissionList([organizationSubmission("approved")]),
+        ),
       ),
       listDrafts: vi.fn(async () => success([dirtyDraft as AgentDraft])),
       discardUnpublishedDraft: vi.fn(async () => success(true as const)),
@@ -1117,7 +1272,9 @@ describe("AgentControlPanel", () => {
           }),
         ),
       ),
-      listOrganizationSubmissions: vi.fn(async () => success([pending])),
+      listOrganizationSubmissionList: vi.fn(async () =>
+        success(organizationSubmissionList([pending])),
+      ),
       listDrafts: vi.fn(async () => success([draft() as AgentDraft])),
       listDefinitions: vi.fn(async () => success([])),
       prepareOrganizationWithdrawal: vi.fn(async () =>
@@ -1296,6 +1453,12 @@ describe("AgentControlPanel", () => {
             model: "gpt-5.6-sol",
             displayName: "GPT 5.6",
             baseUrl: "https://api.petoi.cn/v1",
+            sourceKind: "account",
+            selection: {
+              sourceProfileId: "account-home",
+              modelLibraryId: selectedLibraryId,
+              catalogRevision: CATALOG_REVISION,
+            },
           },
           {
             id: yunduRouteId,
@@ -1306,6 +1469,12 @@ describe("AgentControlPanel", () => {
             model: "claude-sonnet-4-6",
             displayName: "Claude Sonnet",
             baseUrl: "https://yundu.lat/v1",
+            sourceKind: "account",
+            selection: {
+              sourceProfileId: "account-home",
+              modelLibraryId: "66666666-6666-4666-8666-666666666666",
+              catalogRevision: CATALOG_REVISION,
+            },
           },
         ]}
       />,
@@ -1331,6 +1500,7 @@ describe("AgentControlPanel", () => {
           modelSelection: {
             sourceProfileId: "account-home",
             modelLibraryId: selectedLibraryId,
+            catalogRevision: CATALOG_REVISION,
           },
         },
         undefined,
@@ -1346,7 +1516,7 @@ describe("AgentControlPanel", () => {
     });
     const originalLibraryId = "55555555-5555-4555-8555-555555555555";
     const replacementLibraryId = "77777777-5555-4555-8555-555555555555";
-    const route = (modelLibraryId: string): AgentRuntimeModelRoute => ({
+    const route = (modelLibraryId: string): AgentRuntimeModelRouteSource => ({
       id: ["account-home", modelLibraryId].join("\0"),
       sourceProfileId: "account-home",
       modelLibraryId,
@@ -1355,6 +1525,13 @@ describe("AgentControlPanel", () => {
       model: "gpt-5.6-sol",
       displayName: "GPT 5.6",
       baseUrl: "https://api.petoi.cn/v1",
+      // The catalog revision is carried alongside the legacy route fields in
+      // this focused fixture to prove the renderer forwards the full handle.
+      selection: {
+        sourceProfileId: "account-home",
+        modelLibraryId,
+        catalogRevision: CATALOG_REVISION,
+      },
     });
     const renderPanel = (modelLibraryId: string): React.JSX.Element => (
       <AgentControlPanel
@@ -1387,6 +1564,7 @@ describe("AgentControlPanel", () => {
           modelSelection: {
             sourceProfileId: "account-home",
             modelLibraryId: replacementLibraryId,
+            catalogRevision: CATALOG_REVISION,
           },
         },
         undefined,
@@ -1487,6 +1665,12 @@ describe("AgentControlPanel", () => {
             model: "gpt-5.6-sol",
             displayName: "gpt-5.6-sol",
             baseUrl: "https://api.petoi.cn/v1",
+            sourceKind: "account",
+            selection: {
+              sourceProfileId: "account-home",
+              modelLibraryId: "66666666-6666-4666-8666-666666666666",
+              catalogRevision: CATALOG_REVISION,
+            },
           },
         ]}
         onChatWithProfile={onChatWithProfile}
@@ -1513,6 +1697,7 @@ describe("AgentControlPanel", () => {
           modelSelection: {
             sourceProfileId: "account-home",
             modelLibraryId: "66666666-6666-4666-8666-666666666666",
+            catalogRevision: CATALOG_REVISION,
           },
         },
         undefined,
@@ -1876,7 +2061,7 @@ describe("AgentControlPanel", () => {
       screen.queryByRole("button", { name: "agents.hub.useAgent" }),
     ).toBeNull();
     expect(api.listDefinitions).not.toHaveBeenCalled();
-    expect(api.listOrganizationSubmissions).not.toHaveBeenCalled();
+    expect(api.listOrganizationSubmissionList).not.toHaveBeenCalled();
   });
 
   it("offers explicit local experience promotion only for an active selected-Workspace installation", async () => {
@@ -2018,20 +2203,18 @@ describe("AgentControlPanel", () => {
     let notify: (() => void) | null = null;
     let settleSecondSubmission:
       | ((
-          result: AgenteraAgentControlResult<
-            OrganizationAgentSubmissionSummary[]
-          >,
+          result: AgenteraAgentControlResult<OrganizationAgentSubmissionList>,
         ) => void)
       | null = null;
     const api = installAPI({
       getState: vi.fn(async () => success(current)),
-      listOrganizationSubmissions: vi
+      listOrganizationSubmissionList: vi
         .fn()
-        .mockResolvedValueOnce(success([]))
+        .mockResolvedValueOnce(success(organizationSubmissionList()))
         .mockImplementationOnce(
           () =>
             new Promise<
-              AgenteraAgentControlResult<OrganizationAgentSubmissionSummary[]>
+              AgenteraAgentControlResult<OrganizationAgentSubmissionList>
             >((resolve) => {
               settleSecondSubmission = resolve;
             }),
@@ -2067,7 +2250,7 @@ describe("AgentControlPanel", () => {
     });
     await act(async () => notify?.());
     await waitFor(() =>
-      expect(api.listOrganizationSubmissions).toHaveBeenCalledTimes(2),
+      expect(api.listOrganizationSubmissionList).toHaveBeenCalledTimes(2),
     );
 
     expect(screen.queryByText("Research Agent")).toBeNull();

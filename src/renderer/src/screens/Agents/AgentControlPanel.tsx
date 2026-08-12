@@ -4,7 +4,7 @@ import type {
   AgentDraftDetail,
   AgentCapabilityBindingConfiguration,
   ConfirmCapabilityBindingsInput,
-  AgentRuntimeModelRoute,
+  AgentRuntimeModelRouteSource,
   AgentRuntimeModelSelection,
   AgenteraAgentControlErrorCode,
   AgenteraAgentControlPublicState,
@@ -14,7 +14,9 @@ import type {
   OfficialAgentInstallPreview,
   OfficialAgentSummary,
   OfficialManagedUpdate,
-  OrganizationAgentSubmissionSummary,
+  DisconnectOrganizationSubmissionReferenceInput,
+  OrganizationAgentSubmissionListItem,
+  OrganizationSubmissionListIssue,
   OrganizationWithdrawalPreview,
 } from "../../../../shared/agentera-agent-control";
 import { runtimeModelPolicyForEditableManifest } from "../../../../shared/agentera-agent-control";
@@ -61,7 +63,7 @@ export interface AgentChatOpenOptions {
 
 export interface AgentControlPanelProps {
   profiles: AgentControlProfileOption[];
-  runtimeModelRoutes?: AgentRuntimeModelRoute[];
+  runtimeModelRoutes?: AgentRuntimeModelRouteSource[];
   initialTab?: "official" | "mine" | "enterprise";
   advancedOpenByDefault?: boolean;
   onChatWithProfile?: (
@@ -85,7 +87,7 @@ interface PersonalAgentCard {
   definition: AgenteraAgentDefinitionSummary | null;
   installation: AgenteraAgentInstallationSummary | null;
   profile: AgentControlProfileOption | null;
-  submission: OrganizationAgentSubmissionSummary | null;
+  submission: OrganizationAgentSubmissionListItem | null;
   lifecycle: AgentLifecycle | null;
   iconSrc: string | null;
   origin: "definition" | "draft" | "installation" | "profile";
@@ -107,6 +109,7 @@ interface AgentRuntimeModelOption {
   model: string;
   modelProfileId?: string;
   modelSelection?: AgentRuntimeModelSelection;
+  sourceKind?: "account" | "legacy_agent";
 }
 
 function errorKey(code: AgenteraAgentControlErrorCode): string {
@@ -229,8 +232,10 @@ export default function AgentControlPanel({
     AgenteraAgentInstallationSummary[]
   >([]);
   const [organizationSubmissions, setOrganizationSubmissions] = useState<
-    OrganizationAgentSubmissionSummary[]
+    OrganizationAgentSubmissionListItem[]
   >([]);
+  const [organizationSubmissionIssues, setOrganizationSubmissionIssues] =
+    useState<OrganizationSubmissionListIssue[]>([]);
   const [officialAgents, setOfficialAgents] = useState<OfficialAgentSummary[]>(
     [],
   );
@@ -257,7 +262,6 @@ export default function AgentControlPanel({
   const [promotionTarget, setPromotionTarget] =
     useState<AgenteraAgentInstallationSummary | null>(null);
   const [candidateRefreshToken, setCandidateRefreshToken] = useState(0);
-  const [organizationRefreshToken, setOrganizationRefreshToken] = useState(0);
   const [archiving, setArchiving] = useState(false);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [busyPersonalKey, setBusyPersonalKey] = useState<string | null>(null);
@@ -307,6 +311,7 @@ export default function AgentControlPanel({
         setDefinitions([]);
         setInstallations([]);
         setOrganizationSubmissions([]);
+        setOrganizationSubmissionIssues([]);
         setOfficialAgents([]);
         setOfficialUpdates([]);
         setEditor(null);
@@ -348,7 +353,9 @@ export default function AgentControlPanel({
       const workspaceMemberInstallOnly =
         nextState.context.scope === "WORKSPACE" &&
         nextState.context.role === "member";
-      let nextOrganizationSubmissions: OrganizationAgentSubmissionSummary[] =
+      let nextOrganizationSubmissions: OrganizationAgentSubmissionListItem[] =
+        [];
+      let nextOrganizationSubmissionIssues: OrganizationSubmissionListIssue[] =
         [];
       const canReadOrganizationSubmissions =
         nextState.context.scope === "ORGANIZATION" &&
@@ -358,12 +365,13 @@ export default function AgentControlPanel({
         nextState.cloudAvailable;
       if (canReadOrganizationSubmissions) {
         const submissionResult =
-          await window.agenteraAgents.listOrganizationSubmissions();
+          await window.agenteraAgents.listOrganizationSubmissionList();
         if (epoch !== loadEpoch.current) return;
         if (!submissionResult.ok) {
           nextError ??= errorKey(submissionResult.errorCode);
         } else {
-          nextOrganizationSubmissions = submissionResult.data;
+          nextOrganizationSubmissions = submissionResult.data.submissions;
+          nextOrganizationSubmissionIssues = submissionResult.data.issues;
         }
       }
       const organizationCanReadDrafts =
@@ -426,6 +434,7 @@ export default function AgentControlPanel({
       setDrafts(nextDrafts);
       setInstallations(nextInstallations);
       setOrganizationSubmissions(nextOrganizationSubmissions);
+      setOrganizationSubmissionIssues(nextOrganizationSubmissionIssues);
       setDefinitions(nextDefinitions);
       setOfficialAgents(nextOfficialAgents);
       setOfficialUpdates(nextOfficialUpdates);
@@ -451,7 +460,6 @@ export default function AgentControlPanel({
       setCapabilityBinding(null);
       setCapabilityBindingBusy(false);
       setCandidateRefreshToken((value) => value + 1);
-      setOrganizationRefreshToken((value) => value + 1);
       void load();
     });
   }, [load]);
@@ -534,8 +542,26 @@ export default function AgentControlPanel({
       setError(errorKey(result.errorCode));
       return;
     }
-    setOrganizationRefreshToken((value) => value + 1);
     await load();
+  };
+
+  const disconnectOrganizationSubmissionReference = async (
+    input: DisconnectOrganizationSubmissionReferenceInput,
+  ): ReturnType<
+    typeof window.agenteraAgents.disconnectOrganizationSubmissionReference
+  > => {
+    const result =
+      await window.agenteraAgents.disconnectOrganizationSubmissionReference(
+        input,
+      );
+    if (result.ok) {
+      setOrganizationSubmissions((current) =>
+        current.map((submission) =>
+          submission.id === result.data.id ? result.data : submission,
+        ),
+      );
+    }
+    return result;
   };
 
   const requestOfficialInstall = async (
@@ -900,7 +926,7 @@ export default function AgentControlPanel({
     }
     const submissionByDraft = new Map<
       string,
-      OrganizationAgentSubmissionSummary
+      OrganizationAgentSubmissionListItem
     >();
     for (const submission of organizationSubmissions) {
       if (submission.localDraftId === null) continue;
@@ -921,7 +947,7 @@ export default function AgentControlPanel({
       draft: AgentDraft | null,
       installation: AgenteraAgentInstallationSummary | null,
     ): {
-      submission: OrganizationAgentSubmissionSummary | null;
+      submission: OrganizationAgentSubmissionListItem | null;
       lifecycle: AgentLifecycle | null;
     } => {
       if (draft === null) return { submission: null, lifecycle: null };
@@ -1148,10 +1174,10 @@ export default function AgentControlPanel({
         provider: route.provider,
         providerLabel: route.providerLabel,
         model: route.model,
-        modelSelection: {
-          sourceProfileId: route.sourceProfileId,
-          modelLibraryId: route.modelLibraryId,
-        },
+        ...("sourceKind" in route ? { sourceKind: route.sourceKind } : {}),
+        ...("selection" in route
+          ? { modelSelection: route.selection }
+          : { modelProfileId: route.sourceProfileId }),
       }));
     }
     return selectableModelProfiles.map((profile) => ({
@@ -1177,6 +1203,7 @@ export default function AgentControlPanel({
     versionId: string;
     displayName?: string;
     modelProfileId?: string;
+    modelSelection?: AgentRuntimeModelSelection;
   }): void => {
     const installation =
       scopedInstallations.find(
@@ -1197,10 +1224,11 @@ export default function AgentControlPanel({
       installation,
       profile,
     };
-    if (target.modelProfileId) {
+    if (target.modelProfileId || target.modelSelection) {
       void activateAgent({
         ...activationTarget,
         modelProfileId: target.modelProfileId,
+        modelSelection: target.modelSelection,
       });
       return;
     }
@@ -1868,12 +1896,15 @@ export default function AgentControlPanel({
                   organizationCanReadReview &&
                   state ? (
                     <OrganizationSubmissionPanel
+                      key={contextKey(state)}
                       online={organizationOnline}
                       canAuthor={organizationCanAuthor}
                       canReview={organizationCanReview}
-                      contextKey={contextKey(state)}
-                      refreshToken={organizationRefreshToken}
-                      onChanged={() => void load()}
+                      submissions={organizationSubmissions}
+                      issues={organizationSubmissionIssues}
+                      loading={loading}
+                      onRefresh={load}
+                      onDisconnect={disconnectOrganizationSubmissionReference}
                     />
                   ) : null}
                 </div>
@@ -1940,10 +1971,7 @@ export default function AgentControlPanel({
         onClose={() => setEditor(null)}
         onSaved={() => void load()}
         onPublished={() => void load()}
-        onOrganizationSubmitted={() => {
-          setOrganizationRefreshToken((value) => value + 1);
-          void load();
-        }}
+        onOrganizationSubmitted={() => void load()}
         onRequestInstall={requestInstall}
       />
       {pendingModelSelection ? (
@@ -1974,6 +2002,9 @@ export default function AgentControlPanel({
                   </option>
                 ))}
               </select>
+              {effectiveSelectedModelSource?.sourceKind === "legacy_agent" ? (
+                <small>{t("agents.hub.legacyInstalledModelSource")}</small>
+              ) : null}
             </label>
             <div className="agent-control-dialog-actions">
               <button

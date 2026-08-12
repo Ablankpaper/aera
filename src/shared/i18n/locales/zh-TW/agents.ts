@@ -125,6 +125,15 @@ export default {
       reviewedBy: "審核者",
       policyVersion: "政策版本",
       noSubmissions: "尚無企業智慧體提交。",
+      submissionRecordUnavailable:
+        "部分企業提交記錄無法安全顯示；其他提交仍可使用。",
+      referenceConflict:
+        "此提交的本機草稿連結與 Cloud 衝突，已隔離該連結；其他企業提交不受影響。",
+      disconnectReference: "中斷本機草稿連結",
+      disconnectReferenceTitle: "中斷衝突的本機草稿連結",
+      disconnectReferenceBoundary:
+        "只會移除此 Cloud 提交與本機草稿的連結；Cloud 提交、本機草稿、已發佈版本、安裝、Memory 與 Profile 均維持不變。",
+      confirmDisconnectReference: "中斷連結",
       withdraw: "撤回提交",
       confirmWithdrawal: "確認撤回",
       withdrawalBoundary:

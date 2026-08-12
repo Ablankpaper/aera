@@ -14,6 +14,14 @@ import type {
 import type { TokenBalancesResponse } from "../shared/tokens";
 import type { CustomProviderRecord } from "../shared/custom-providers";
 import type {
+  AgentConversationSegmentEvent,
+  AgentConversationThreadResumeProjection,
+  ModelConfigurationMutationRequest,
+  ModelConfigurationMutationResult,
+  OwnerModelRouteCatalogSnapshot,
+  OwnerModelRouteSelection,
+} from "../shared/model-configuration";
+import type {
   DeviceCodeInfo,
   HermesAccount,
   HermesAccountUser,
@@ -112,6 +120,7 @@ import type {
   ConfirmOrganizationReviewInput,
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
+  DisconnectOrganizationSubmissionReferenceInput,
   CreateAgentDraftInput,
   AuthoringCapabilitySummary,
   EligibleExperienceSkill,
@@ -124,6 +133,8 @@ import type {
   OrganizationExperienceCandidatePreview,
   OrganizationExperienceCandidateSummary,
   OrganizationAgentSubmissionDetail,
+  OrganizationAgentSubmissionList,
+  OrganizationAgentSubmissionListItem,
   OrganizationAgentSubmissionSummary,
   OrganizationReviewPreview,
   OrganizationSubmissionPreview,
@@ -581,9 +592,15 @@ interface AgenteraAgentsAPI {
   confirmOrganizationSubmission: (
     input: ConfirmOrganizationSubmissionInput,
   ) => Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionSummary>>;
+  listOrganizationSubmissionList: () => Promise<
+    AgenteraAgentControlResult<OrganizationAgentSubmissionList>
+  >;
   listOrganizationSubmissions: () => Promise<
     AgenteraAgentControlResult<OrganizationAgentSubmissionSummary[]>
   >;
+  disconnectOrganizationSubmissionReference: (
+    input: DisconnectOrganizationSubmissionReferenceInput,
+  ) => Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionListItem>>;
   getOrganizationSubmission: (
     submissionId: string,
   ) => Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionDetail>>;
@@ -996,6 +1013,12 @@ interface HermesAPI {
   listAgentRuntimeModelRoutes: (
     profile: string,
   ) => Promise<AgentRuntimeModelRoute[]>;
+  getOwnerModelRouteCatalog: (
+    requestedProfileId?: string,
+  ) => Promise<OwnerModelRouteCatalogSnapshot>;
+  mutateModelConfiguration: (
+    request: ModelConfigurationMutationRequest,
+  ) => Promise<ModelConfigurationMutationResult>;
   getAuxiliaryConfig: (
     profile?: string,
   ) => Promise<
@@ -1100,6 +1123,7 @@ interface HermesAPI {
     contextFolder?: string,
     runId?: string,
     modelOverride?: SessionModelOverride,
+    agentModelSelection?: OwnerModelRouteSelection,
   ) => Promise<{ response: string; sessionId?: string }>;
   abortChat: (runId?: string) => Promise<void>;
   transcribeAudio: (
@@ -1184,6 +1208,9 @@ interface HermesAPI {
     ) => void,
   ) => () => void;
   onChatError: (callback: (runId: string, error: string) => void) => () => void;
+  onChatAgentSegment: (
+    callback: (runId: string, event: AgentConversationSegmentEvent) => void,
+  ) => () => void;
   onClarifyRequest: (
     callback: (
       runId: string,
@@ -1240,8 +1267,13 @@ interface HermesAPI {
       model: string;
       title: string | null;
       preview: string;
+      threadId?: string;
+      segmentCount?: number;
     }>
   >;
+  resolveSessionThread: (
+    sessionId: string,
+  ) => Promise<AgentConversationThreadResumeProjection | null>;
   getSessionMessages: (sessionId: string) => Promise<
     Array<
       | {

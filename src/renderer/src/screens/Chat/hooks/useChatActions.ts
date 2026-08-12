@@ -13,6 +13,7 @@ import type {
 } from "../slash/types";
 import type { ActiveTurn, Attachment, ChatMessage } from "../types";
 import type { SessionModelOverride } from "../../../../../shared/model-override";
+import type { OwnerModelRouteSelection } from "../../../../../shared/model-configuration";
 
 /** Slash commands the desktop handles through its own renderer flow rather
  *  than the gateway slash pipeline: the approval responses, which the gateway
@@ -61,6 +62,11 @@ interface UseChatActionsArgs {
    *  persisting to config.yaml (issue #688). Carries the full identity so a
    *  cross-provider switch routes to the right backend, not just the model. */
   sessionModel?: SessionModelOverride;
+  /** Opaque Main-resolved selection for an installed Agent model switch. */
+  agentModelSelection?: OwnerModelRouteSelection;
+  /** Called when Main rejects a pending Agent selection before lifecycle
+   *  events can be emitted. */
+  onAgentSendError?: (error: unknown) => void;
   sendViaDashboard?: (
     text: string,
     attachments?: Attachment[],
@@ -135,6 +141,8 @@ export function useChatActions({
   activeTurnRef,
   contextFolder,
   sessionModel,
+  agentModelSelection,
+  onAgentSendError,
   sendViaDashboard,
   execSlashViaDashboard,
   runBackgroundViaDashboard,
@@ -147,10 +155,12 @@ export function useChatActions({
   const messagesRef = useRef(messages);
   const isLoadingRef = useRef(isLoading);
   const sessionModelRef = useRef(sessionModel);
+  const agentModelSelectionRef = useRef(agentModelSelection);
   useEffect(() => {
     messagesRef.current = messages;
     isLoadingRef.current = isLoading;
     sessionModelRef.current = sessionModel;
+    agentModelSelectionRef.current = agentModelSelection;
   });
 
   const pushUser = useCallback(
@@ -174,7 +184,12 @@ export function useChatActions({
   const sendToAgent = useCallback(
     async (text: string, attachments?: Attachment[]): Promise<void> => {
       try {
-        if (sendViaDashboard) {
+        const pendingAgentSelection = agentModelSelectionRef.current;
+        // Dashboard transport has no segment-selection bridge. Installed
+        // Agent turns carrying an opaque selection must stay on Main's bound
+        // transport so the selection is revalidated before credentials are
+        // touched.
+        if (sendViaDashboard && !pendingAgentSelection) {
           const handled = await sendViaDashboard(text, attachments);
           if (handled) return;
         }
@@ -190,12 +205,21 @@ export function useChatActions({
           contextFolder ?? undefined,
           runId,
           sessionModelRef.current || undefined,
+          pendingAgentSelection,
         );
-      } catch {
+      } catch (error) {
+        if (agentModelSelectionRef.current) onAgentSendError?.(error);
         // onChatError IPC already surfaces this to the user
       }
     },
-    [runId, profile, hermesSessionId, contextFolder, sendViaDashboard],
+    [
+      runId,
+      profile,
+      hermesSessionId,
+      contextFolder,
+      sendViaDashboard,
+      onAgentSendError,
+    ],
   );
 
   // Shared "side question" flow (the 💭 quick-ask button and a typed `/btw`).

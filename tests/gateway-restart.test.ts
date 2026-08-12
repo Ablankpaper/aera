@@ -200,7 +200,7 @@ async function waitForFile(
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (existsSync(filePath)) return true;
+    if (existsSync(filePath) && readFileSync(filePath).length > 0) return true;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   return false;
@@ -279,7 +279,7 @@ describe("restartGatewayViaCli", () => {
     const authProofFile = join(TEST_HOME, "spawn-auth-proof.txt");
     hermesCliArgsSpy.mockImplementation(() => [
       "-e",
-      `require("fs").writeFileSync(${JSON.stringify(authProofFile)}, process.env.API_SERVER_KEY || "")`,
+      `const fs=require("fs");fs.writeFileSync(${JSON.stringify(authProofFile)},"");setTimeout(()=>fs.writeFileSync(${JSON.stringify(authProofFile)},process.env.API_SERVER_KEY||""),50)`,
     ]);
 
     expect(startGateway("work")).toBe(true);
@@ -816,6 +816,17 @@ describe("restartGatewayViaCli", () => {
       "const gatewayShutdown = stopAeraOwnedGateways()",
     );
     expect(teardown).not.toContain("stopGateway(undefined, true)");
+  });
+
+  it("completes model-configuration recovery before coordinated IPC registration", () => {
+    const start = readFileSync(
+      join(__dirname, "../src/main/app/start.ts"),
+      "utf8",
+    );
+    const recovery = start.indexOf("await prepareModelConfigurationRuntime(");
+    const register = start.indexOf("registerIpcHandlers({");
+    expect(recovery).toBeGreaterThan(-1);
+    expect(register).toBeGreaterThan(recovery);
   });
 
   it("uses a bearer-authenticated endpoint for local gateway readiness", async () => {

@@ -9,7 +9,7 @@ import {
   resolve,
 } from "node:path";
 
-export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 11;
+export const AGENTERA_CONTROL_PLANE_SCHEMA_VERSION = 12;
 
 const INSTALLATION_OPERATIONS_SCHEMA = `
   CREATE TABLE IF NOT EXISTS installation_operations (
@@ -177,6 +177,102 @@ const CAPABILITY_BINDINGS_SCHEMA = `
       tenant_id, owner_id, device_installation_id,
       agent_installation_id, updated_at
     );
+`;
+
+const BETA27_RELIABILITY_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS organization_agent_submission_ref_conflicts (
+    tenant_id TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    organization_id TEXT NOT NULL,
+    cloud_submission_id TEXT NOT NULL,
+    stage TEXT NOT NULL CHECK (stage IN (
+      'reference_shape',
+      'content_digest',
+      'definition',
+      'published_version',
+      'draft_publication',
+      'compare_and_set'
+    )),
+    state TEXT NOT NULL CHECK (state IN ('quarantined', 'detached')),
+    reference_revision INTEGER NOT NULL CHECK (reference_revision >= 1),
+    first_observed_at TEXT NOT NULL,
+    last_observed_at TEXT NOT NULL,
+    resolved_at TEXT,
+    PRIMARY KEY (
+      tenant_id, owner_id, organization_id, cloud_submission_id
+    )
+  );
+  CREATE INDEX IF NOT EXISTS organization_submission_ref_conflicts_lookup_idx
+    ON organization_agent_submission_ref_conflicts (
+      tenant_id, owner_id, organization_id,
+      state, last_observed_at, cloud_submission_id
+    );
+
+  CREATE TABLE IF NOT EXISTS conversation_threads (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    device_installation_id TEXT NOT NULL,
+    root_conversation_key TEXT NOT NULL,
+    active_segment_id TEXT,
+    revision INTEGER NOT NULL CHECK (revision >= 1),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (active_segment_id)
+      REFERENCES conversation_segments(id) ON DELETE RESTRICT,
+    UNIQUE (
+      tenant_id, owner_id, device_installation_id, root_conversation_key
+    )
+  );
+
+  CREATE TABLE IF NOT EXISTS conversation_segments (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL
+      REFERENCES conversation_threads(id) ON DELETE RESTRICT,
+    ordinal INTEGER NOT NULL CHECK (ordinal >= 1),
+    segment_conversation_key TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (
+      state IN ('preparing', 'active', 'superseded', 'failed')
+    ),
+    route_json TEXT NOT NULL CHECK (length(route_json) BETWEEN 2 AND 8192),
+    source_profile_id TEXT CHECK (
+      source_profile_id IS NULL
+      OR length(source_profile_id) BETWEEN 1 AND 64
+    ),
+    source_model_id TEXT CHECK (
+      source_model_id IS NULL
+      OR length(source_model_id) BETWEEN 1 AND 512
+    ),
+    runtime_binding_id TEXT NOT NULL
+      REFERENCES runtime_bindings(id) ON DELETE RESTRICT,
+    conversation_boundary_id TEXT NOT NULL
+      REFERENCES conversation_boundaries(id) ON DELETE RESTRICT,
+    hermes_session_id TEXT,
+    history_boundary_count INTEGER NOT NULL
+      CHECK (history_boundary_count >= 0),
+    created_at TEXT NOT NULL,
+    activated_at TEXT,
+    failed_at TEXT,
+    failure_code TEXT,
+    CHECK (
+      (source_profile_id IS NULL AND source_model_id IS NULL)
+      OR (source_profile_id IS NOT NULL AND source_model_id IS NOT NULL)
+    ),
+    UNIQUE (thread_id, ordinal),
+    UNIQUE (segment_conversation_key),
+    UNIQUE (hermes_session_id)
+  );
+  CREATE INDEX IF NOT EXISTS conversation_threads_active_segment_idx
+    ON conversation_threads (
+      tenant_id, owner_id, device_installation_id, active_segment_id
+    );
+  CREATE INDEX IF NOT EXISTS conversation_segments_thread_state_idx
+    ON conversation_segments (thread_id, state, ordinal);
+  CREATE INDEX IF NOT EXISTS conversation_segments_thread_session_idx
+    ON conversation_segments (thread_id, hermes_session_id);
+  CREATE UNIQUE INDEX IF NOT EXISTS conversation_segments_one_active_per_thread
+    ON conversation_segments(thread_id)
+    WHERE state = 'active';
 `;
 
 export type AgentAssetContext =
@@ -664,6 +760,8 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
         last_verified_at TEXT NOT NULL,
         PRIMARY KEY (local_draft_id, local_draft_revision, organization_id)
       );
+
+      ${BETA27_RELIABILITY_SCHEMA}
 
       CREATE TABLE IF NOT EXISTS encrypted_backup_restores (
         backup_id TEXT NOT NULL,
@@ -1246,6 +1344,12 @@ function initializeSchema(sqlite: AgenteraSqliteDatabase): void {
     if (currentVersion >= 1 && currentVersion <= 10) {
       sqlite.exec(`
         ${CAPABILITY_BINDINGS_SCHEMA}
+        PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
+      `);
+    }
+    if (currentVersion >= 1 && currentVersion <= 11) {
+      sqlite.exec(`
+        ${BETA27_RELIABILITY_SCHEMA}
         PRAGMA user_version = ${AGENTERA_CONTROL_PLANE_SCHEMA_VERSION};
       `);
     }

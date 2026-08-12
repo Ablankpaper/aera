@@ -68,6 +68,11 @@ function binding(
       provider: "openai",
       model: "gpt-5.6",
       baseUrl: "",
+      apiMode: null,
+      sourceProfileId: null,
+      modelLibraryId: null,
+      credentialRef: null,
+      legacy: true,
     },
   };
 }

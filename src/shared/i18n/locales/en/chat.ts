@@ -3,6 +3,13 @@ export default {
   sessionTitle: "Session {{id}}",
   noModel: "No model set",
   auto: "Auto",
+  modelSwitch: {
+    pending: "Switching on the next message…",
+    failed:
+      "The model switch failed. The previous model remains active; check the model configuration and try again.",
+    marker: "Model changed",
+    fixedPolicy: "This Agent uses a fixed model policy.",
+  },
   commandsTitle: "Commands",
   typeMessage: "Ask anything",
   quickAskTitle:

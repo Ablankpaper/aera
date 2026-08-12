@@ -180,6 +180,34 @@ function optionalBoundedText(
     : boundedText(value, maximumBytes, code);
 }
 
+/**
+ * Beta.26 journals persisted only the source Profile and model-library
+ * handles. This parser is intentionally internal/recovery-only; new IPC
+ * callers must provide a catalog revision and never call this compatibility
+ * boundary.
+ */
+export function parseBeta26PersistedRuntimeModelSelection(
+  sourceProfileId: unknown,
+  modelLibraryId: unknown,
+): { sourceProfileId: string; modelLibraryId: string } {
+  const parsedProfileId = optionalProfileId(
+    sourceProfileId,
+    "operation_corrupt",
+  );
+  const parsedModelLibraryId = optionalBoundedText(
+    modelLibraryId,
+    512,
+    "operation_corrupt",
+  );
+  if (parsedProfileId === null || parsedModelLibraryId === null) {
+    throw new InstallationOperationStoreError("operation_corrupt");
+  }
+  return {
+    sourceProfileId: parsedProfileId,
+    modelLibraryId: parsedModelLibraryId,
+  };
+}
+
 function timestamp(
   value: unknown,
   code: InstallationOperationStoreErrorCode,
@@ -318,6 +346,10 @@ function parseRow(row: unknown): InstallationOperationRecord {
     value.display_name === null
       ? null
       : boundedText(value.display_name, 256, "operation_corrupt");
+  // A fresh target may intentionally select only a source Profile and inherit
+  // that Profile's current/default model. Beta.26 model-library handles are
+  // validated when both are present, but a missing model handle is valid legacy
+  // state and must survive a cold recovery.
   const modelSourceProfileId = optionalProfileId(
     value.model_source_profile_id,
     "operation_corrupt",

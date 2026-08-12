@@ -3,6 +3,12 @@ export default {
   sessionTitle: "会话 {{id}}",
   noModel: "未设置模型",
   auto: "自动",
+  modelSwitch: {
+    pending: "将在下一条消息中切换模型…",
+    failed: "模型切换失败，之前的模型仍然有效。请检查模型配置后重试。",
+    marker: "模型已切换",
+    fixedPolicy: "此智能体使用固定模型策略，无法切换模型。",
+  },
   commandsTitle: "命令",
   typeMessage: "输入消息...（Shift+Enter 换行）",
   quickAskTitle: "快速提问（/btw）—— 不会影响当前对话上下文的旁支问题",

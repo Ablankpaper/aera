@@ -17,7 +17,7 @@ import type { HermesConversationEnvelope } from "../hermes";
 import type { AgenteraAgentControlContext } from "../../shared/agentera-agent-control";
 import type { SessionModelOverride } from "../../shared/model-override";
 import {
-  agentModelPolicyAllowsRoute,
+  decideAgentModelRoute,
   modelPolicyForManifest,
   modelPolicyForPolicyDocument,
 } from "./model-policy";
@@ -28,6 +28,12 @@ import {
   type LocalMcpCapabilityServer,
   type ResolvedCapabilityBindings,
 } from "./capability-binding-store";
+import {
+  freezeResolvedOwnerModelRoute,
+  parseFrozenAgentModelRoute,
+  sessionModelOverrideFromFrozenRoute,
+} from "./frozen-agent-model-route";
+import type { ResolvedOwnerModelRoute } from "./owner-model-route-catalog";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -47,6 +53,9 @@ export type AgenteraHermesAdapterErrorCode =
   | "tool_policy_drift"
   | "profile_capability_configuration_required"
   | "model_policy_drift"
+  | "model_switch_fixed_policy"
+  | "model_switch_provider_denied"
+  | "model_switch_model_denied"
   | "version_revoked"
   | "projection_invalid";
 
@@ -96,6 +105,10 @@ export interface AgenteraHermesAdapterOptions {
     policy: AgentPolicySnapshot,
   ) => string | Promise<string>;
   getProfileModelConfig: (profilePath: string) => SessionModelOverride;
+  resolveCurrentModelRoute?: (
+    sourceProfileId: string,
+    modelLibraryId: string,
+  ) => ResolvedOwnerModelRoute | null;
   getProfileMcpCapabilities: (
     profilePath: string,
   ) => LocalMcpCapabilityServer[] | Promise<LocalMcpCapabilityServer[]>;
@@ -109,6 +122,8 @@ export interface PrepareInstalledHermesTurnInput {
   profilePath: string;
   owner: AgenteraRuntimeOwner;
   resumeSessionId: string | null;
+  requestedModelRoute?: ResolvedOwnerModelRoute;
+  existingBinding?: LocalRuntimeBinding;
 }
 
 export interface PreparedInstalledHermesTurn {
@@ -558,9 +573,9 @@ export class AgenteraHermesAdapter {
       throw new AgenteraHermesAdapterError("installation_invalid");
     }
 
-    let existing: LocalRuntimeBinding | null;
+    let existingForConversation: LocalRuntimeBinding | null;
     try {
-      existing = input.resumeSessionId
+      existingForConversation = input.resumeSessionId
         ? this.options.bindingStore.resolveInstalledResume(
             input.conversationKey,
             input.resumeSessionId,
@@ -575,6 +590,26 @@ export class AgenteraHermesAdapter {
       }
       throw new AgenteraHermesAdapterError("binding_conflict");
     }
+    let suppliedExisting: LocalRuntimeBinding | null = null;
+    if (input.existingBinding) {
+      try {
+        suppliedExisting = this.options.bindingStore.getById(
+          input.existingBinding.id,
+        );
+      } catch {
+        throw new AgenteraHermesAdapterError("binding_conflict");
+      }
+      if (!suppliedExisting) {
+        throw new AgenteraHermesAdapterError("binding_required");
+      }
+      if (
+        existingForConversation &&
+        existingForConversation.id !== suppliedExisting.id
+      ) {
+        throw new AgenteraHermesAdapterError("binding_conflict");
+      }
+    }
+    const existing = existingForConversation ?? suppliedExisting;
     if (existing) assertExistingBinding(existing, input.owner, profile);
     if (
       existing &&
@@ -715,20 +750,54 @@ export class AgenteraHermesAdapter {
     } catch {
       throw new AgenteraHermesAdapterError("model_policy_drift");
     }
-    const selectedModelRoute = existing?.modelRoute ?? currentModelRoute;
-    if (
-      !agentModelPolicyAllowsRoute(
-        modelPolicyForManifest(version.manifest),
-        selectedModelRoute.provider,
-        selectedModelRoute.model,
-      ) ||
-      !agentModelPolicyAllowsRoute(
-        modelPolicyForPolicyDocument(policy.document),
-        selectedModelRoute.provider,
-        selectedModelRoute.model,
-      )
-    ) {
-      throw new AgenteraHermesAdapterError("model_policy_drift");
+    const requestedModelRoute = input.requestedModelRoute
+      ? freezeResolvedOwnerModelRoute(input.requestedModelRoute)
+      : null;
+    const selectedModelRoute =
+      requestedModelRoute ?? existing?.modelRoute ?? currentModelRoute;
+    const changesExistingRoute = Boolean(
+      requestedModelRoute &&
+      existing &&
+      (existing.modelRoute === null ||
+        JSON.stringify(parseFrozenAgentModelRoute(requestedModelRoute)) !==
+          JSON.stringify(parseFrozenAgentModelRoute(existing.modelRoute))),
+    );
+    if (existing?.modelRoute && !changesExistingRoute) {
+      const frozenExistingRoute = parseFrozenAgentModelRoute(
+        existing.modelRoute,
+      );
+      if (!frozenExistingRoute.legacy) {
+        try {
+          const resolved = this.options.resolveCurrentModelRoute?.(
+            frozenExistingRoute.sourceProfileId!,
+            frozenExistingRoute.modelLibraryId!,
+          );
+          if (
+            !resolved ||
+            JSON.stringify(freezeResolvedOwnerModelRoute(resolved)) !==
+              JSON.stringify(frozenExistingRoute)
+          ) {
+            throw new Error("model route drift");
+          }
+        } catch {
+          throw new AgenteraHermesAdapterError("model_policy_drift");
+        }
+      }
+    }
+    for (const candidatePolicy of [
+      modelPolicyForManifest(version.manifest),
+      modelPolicyForPolicyDocument(policy.document),
+    ]) {
+      const decision = decideAgentModelRoute(
+        candidatePolicy,
+        selectedModelRoute,
+        changesExistingRoute ? "switch" : "continue",
+      );
+      if (!decision.allowed) {
+        throw new AgenteraHermesAdapterError(
+          decision.reason ?? "model_policy_drift",
+        );
+      }
     }
 
     let projection: HermesVersionProjection;
@@ -742,7 +811,10 @@ export class AgenteraHermesAdapter {
     }
 
     const bindingInput: CreateLocalRuntimeBindingInput = {
-      conversationKey: existing?.conversationKey ?? input.conversationKey,
+      conversationKey:
+        existing && !changesExistingRoute
+          ? existing.conversationKey
+          : input.conversationKey,
       tenantId: input.owner.tenantId,
       ownerScope: "USER",
       ownerId: input.owner.ownerId,
@@ -765,7 +837,9 @@ export class AgenteraHermesAdapter {
     return {
       bindingInput,
       profilePath: input.profilePath,
-      modelOverride: selectedModelRoute,
+      modelOverride: sessionModelOverrideFromFrozenRoute(
+        parseFrozenAgentModelRoute(selectedModelRoute),
+      ),
       version,
       policy,
       projection,
@@ -789,7 +863,9 @@ export class AgenteraHermesAdapter {
       binding.runtimeVersion !== plan.bindingInput.runtimeVersion ||
       (binding.modelRoute !== null &&
         JSON.stringify(binding.modelRoute) !==
-          JSON.stringify(plan.bindingInput.modelRoute)) ||
+          JSON.stringify(
+            parseFrozenAgentModelRoute(plan.bindingInput.modelRoute),
+          )) ||
       binding.policySnapshotId !== plan.bindingInput.policySnapshotId ||
       binding.officialReleaseRevisionId !==
         plan.bindingInput.officialReleaseRevisionId ||

@@ -18,6 +18,7 @@ import type {
   AgenteraRepairInstallationModelInput,
   AgenteraRetryPendingInstallationInput,
   AgenteraSelectInstallationVersionInput,
+  AgentRuntimeModelSelection,
   ConfirmExperienceCandidateImportInput,
   ConfirmCapabilityBindingsInput,
   ConfirmCapabilityBindingsResult,
@@ -29,6 +30,7 @@ import type {
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
   CreateAgentDraftInput,
+  DisconnectOrganizationSubmissionReferenceInput,
   AuthoringCapabilitySummary,
   ExperienceCandidateDetail,
   ExperienceCandidateImportPreview,
@@ -50,6 +52,8 @@ import type {
   SubmitExperienceCandidateInput,
   UpdateAgentDraftInput,
   OrganizationAgentSubmissionSummary,
+  OrganizationAgentSubmissionList,
+  OrganizationAgentSubmissionListItem,
   OfficialAgentDetail,
   OfficialAgentInstallPreview,
   OfficialAgentSummary,
@@ -59,6 +63,12 @@ import type {
   PrepareMcpRequirementInput,
   SkillSnapshotPreview,
 } from "../../shared/agentera-agent-control";
+import type {
+  AgentConversationModelContext,
+  OwnerModelRouteCatalogSnapshot,
+  OwnerModelRouteSelection,
+  PublicModelRouteIdentity,
+} from "../../shared/model-configuration";
 import type {
   AgenteraProfileBindingStore,
   AgenteraRuntimeOwner,
@@ -74,7 +84,12 @@ import {
 } from "./installation-manager";
 import type { AgentAssetContext, AgenteraControlPlaneDatabase } from "./db";
 import { AgentDraftStore } from "./draft-store";
-import { AgenteraAgentControlClient, type AgentSigningKeySet } from "./client";
+import {
+  AgenteraAgentControlClient,
+  type AgentPolicySnapshot,
+  type AgentSigningKeySet,
+  type AgentVersion,
+} from "./client";
 import { AgentPublisher } from "./publisher";
 import { AgenteraAgentTrustStore, type AgenteraAgentTrustCache } from "./trust";
 import { AgentVersionCache } from "./version-cache";
@@ -91,7 +106,15 @@ import {
   ConversationBoundaryStore,
   type ConversationBoundary,
 } from "./conversation-boundary-store";
-import { ConversationRuntimeCoordinator } from "./conversation-runtime-coordinator";
+import {
+  ConversationRuntimeCoordinator,
+  type PreparedConversationSegment,
+} from "./conversation-runtime-coordinator";
+import {
+  ConversationThreadStore,
+  type ConversationThreadSnapshot,
+} from "./conversation-thread-store";
+import { ConversationThreadSessionProjection } from "./conversation-thread-session-projection";
 import { ExperienceCandidateService } from "./experience-candidate-service";
 import { ExperienceCandidateImporter } from "./experience-candidate-importer";
 import { ExperienceCandidateStore } from "./experience-candidate-store";
@@ -107,12 +130,19 @@ import {
   type OrganizationWithdrawalPreview,
 } from "./organization-publication-service";
 import { OfficialAgentService } from "./official-agent-service";
-import { modelPolicyForManifest } from "./model-policy";
+import {
+  decideAgentModelRoute,
+  modelPolicyForManifest,
+  modelPolicyForPolicyDocument,
+} from "./model-policy";
 import {
   CapabilityAuthoringService,
   type CapabilityAuthoringServiceOptions,
 } from "./capability-authoring-service";
-import { CapabilityBindingStore } from "./capability-binding-store";
+import {
+  CapabilityBindingStore,
+  type LocalMcpCapabilityServer,
+} from "./capability-binding-store";
 import { CapabilityBindingService } from "./capability-binding-service";
 import { listInstalledSkills } from "../skills";
 import {
@@ -127,12 +157,18 @@ import {
   serializeInstallation,
   serializeVersion,
 } from "./ipc-contract";
+import type {
+  OwnerModelRouteCatalog,
+  ResolvedOwnerModelRoute,
+} from "./owner-model-route-catalog";
 
 export interface PrepareAgenteraHermesTurnInput {
   conversationKey: string;
   profilePath: string;
   owner: AgenteraRuntimeOwner;
   resumeSessionId: string | null;
+  requestedModelSelection?: OwnerModelRouteSelection;
+  visibleHistoryCount?: number;
 }
 
 export interface PrepareAgenteraConversationBoundaryInput {
@@ -145,6 +181,21 @@ export interface PrepareAgenteraConversationBoundaryInput {
 export interface PreparedAgenteraConversationRuntime {
   preparedAgentTurn: PreparedInstalledHermesTurn | null;
   conversationBoundary: ConversationBoundary;
+  agentConversation: AgentConversationModelContext | null;
+  agentSegmentId: string | null;
+  segmentTransition: PreparedAgenteraConversationSegmentTransition | null;
+}
+
+export interface PreparedAgenteraConversationSegmentTransition {
+  kind: "candidate";
+  threadId: string;
+  segmentId: string;
+  runtimeBindingId: string;
+  boundaryId: string;
+  expectedThreadRevision: number;
+  from: PublicModelRouteIdentity;
+  to: PublicModelRouteIdentity;
+  historyBoundaryCount: number;
 }
 
 export interface AttachAgenteraConversationRuntimeSessionInput {
@@ -152,6 +203,18 @@ export interface AttachAgenteraConversationRuntimeSessionInput {
   boundaryId: string;
   sessionId: string;
   owner: AgenteraRuntimeOwner;
+  segmentId?: string | null;
+}
+
+export interface AgenteraConversationSegmentLifecycleInput {
+  threadId: string;
+  segmentId: string;
+  expectedThreadRevision: number;
+  owner: AgenteraRuntimeOwner;
+}
+
+export interface FailAgenteraConversationSegmentInput extends AgenteraConversationSegmentLifecycleInput {
+  code: string;
 }
 
 interface FullAgentControlOptions {
@@ -172,6 +235,8 @@ interface FullAgentControlOptions {
 
 export interface AgenteraAgentControlManagerOptions extends Partial<FullAgentControlOptions> {
   profileBindings: AgenteraProfileBindingStore;
+  /** Shared Main-owned catalog used to revalidate every model route handle. */
+  getOwnerModelRouteCatalog?: () => OwnerModelRouteCatalog | null;
   /** Task-12 compatibility seam used by focused manager tests. */
   hermesAdapter?: AgenteraHermesAdapter;
   /** Test seam for proving that cloud outbox delivery never blocks Hermes. */
@@ -190,6 +255,17 @@ export interface AgenteraEncryptedBackupUserSource {
     baseOwnerScope: "USER";
   };
   runtimeBindingProvenance: Uint8Array;
+}
+
+export function resolveInstallationModelSelection(
+  catalog: Pick<OwnerModelRouteCatalog, "resolve">,
+  selection: AgentRuntimeModelSelection,
+): { sourceProfileId: string; modelLibraryId: string } {
+  const route = catalog.resolve(selection);
+  return {
+    sourceProfileId: route.sourceProfileId,
+    modelLibraryId: route.modelLibraryId,
+  };
 }
 
 interface RuntimeComponents {
@@ -491,6 +567,35 @@ export class AgenteraAgentControlManager {
     }
   }
 
+  private resolveModelSelection(selection: AgentRuntimeModelSelection): {
+    sourceProfileId: string;
+    modelLibraryId: string;
+  } {
+    const catalog = this.options.getOwnerModelRouteCatalog?.() ?? null;
+    if (!catalog) throw codedError("model_route_unavailable");
+    return resolveInstallationModelSelection(catalog, selection);
+  }
+
+  /**
+   * Convert a Beta.26 persisted two-field operation into a fresh, revisioned
+   * catalog selection before any new Profile bytes are written.
+   */
+  private resolvePersistedModelSelection(
+    sourceProfileId: string,
+    modelLibraryId: string,
+  ): { sourceProfileId: string; modelLibraryId: string } {
+    const catalog = this.options.getOwnerModelRouteCatalog?.() ?? null;
+    if (!catalog) throw codedError("model_route_unavailable");
+    const snapshot = catalog.snapshot();
+    const route = snapshot.routes.find(
+      (candidate) =>
+        candidate.selection.sourceProfileId === sourceProfileId &&
+        candidate.selection.modelLibraryId === modelLibraryId,
+    );
+    if (!route) throw codedError("model_route_unavailable");
+    return this.resolveModelSelection(route.selection);
+  }
+
   getState(): AgenteraAgentControlPublicState {
     this.assertProductAccess();
     const state = this.requireFull().getAuthState();
@@ -786,6 +891,22 @@ export class AgenteraAgentControlManager {
     return this.ensureOrganizationPublicationComponents().service.listSubmissions();
   }
 
+  async listOrganizationSubmissionList(): Promise<OrganizationAgentSubmissionList> {
+    this.assertOrganizationHistoryRole();
+    await this.assertOnlineAccess(false);
+    return this.ensureOrganizationPublicationComponents().service.listSubmissionList();
+  }
+
+  async disconnectOrganizationSubmissionReference(
+    input: DisconnectOrganizationSubmissionReferenceInput,
+  ): Promise<OrganizationAgentSubmissionListItem> {
+    this.assertOrganizationPublicationRole();
+    await this.assertOnlineAccess(false);
+    return this.ensureOrganizationPublicationComponents().service.disconnectSubmissionReference(
+      input,
+    );
+  }
+
   async getOrganizationSubmission(
     submissionId: string,
   ): Promise<OrganizationAgentSubmissionDetail> {
@@ -1061,6 +1182,9 @@ export class AgenteraAgentControlManager {
     const source = this.operationAssetContext(scope);
     this.assertInstallationRole(source);
     await this.assertOnlineLocalRuntimeAccess();
+    const selectedRoute = input.modelSelection
+      ? this.resolveModelSelection(input.modelSelection)
+      : null;
     const result = await (
       await this.ensureRuntimeComponents()
     ).installations.install({
@@ -1071,8 +1195,8 @@ export class AgenteraAgentControlManager {
         kind: "fresh",
         name: input.profileName,
         modelSourceProfileId:
-          input.modelSelection?.sourceProfileId ?? input.modelProfileId,
-        modelSourceModelId: input.modelSelection?.modelLibraryId,
+          selectedRoute?.sourceProfileId ?? input.modelProfileId,
+        modelSourceModelId: selectedRoute?.modelLibraryId,
       },
     });
     this.emitState();
@@ -1135,6 +1259,10 @@ export class AgenteraAgentControlManager {
     const context = this.operationAssetContext(scope);
     this.assertInstallationRole(context);
     await this.assertOnlineLocalRuntimeAccess();
+    const selectedRoute =
+      input.target.kind === "fresh" && input.target.modelSelection
+        ? this.resolveModelSelection(input.target.modelSelection)
+        : null;
     const profiles = this.requireFull().profiles;
     const components = await this.ensureRuntimeComponents();
     this.assertInstallationInContext(
@@ -1147,9 +1275,8 @@ export class AgenteraAgentControlManager {
             kind: "fresh",
             name: input.target.profileName,
             modelSourceProfileId:
-              input.target.modelSelection?.sourceProfileId ??
-              input.target.modelProfileId,
-            modelSourceModelId: input.target.modelSelection?.modelLibraryId,
+              selectedRoute?.sourceProfileId ?? input.target.modelProfileId,
+            modelSourceModelId: selectedRoute?.modelLibraryId,
           } as const)
         : ({
             kind: "claim",
@@ -1196,13 +1323,16 @@ export class AgenteraAgentControlManager {
     const context = this.operationAssetContext(scope);
     this.assertInstallationRole(context);
     await this.assertOnlineLocalRuntimeAccess();
+    const selectedRoute = input.modelSelection
+      ? this.resolveModelSelection(input.modelSelection)
+      : null;
     const components = await this.ensureRuntimeComponents();
     this.assertInstallationInContext(
       components.installations.getLocalInstallation(input.id),
       context,
     );
     const modelSourceProfileId =
-      input.modelSelection?.sourceProfileId ?? input.modelProfileId;
+      selectedRoute?.sourceProfileId ?? input.modelProfileId;
     if (!modelSourceProfileId) throw codedError("invalid_request");
     const result = await components.installations.repairInstallationModel({
       agentInstallationId: input.id,
@@ -1211,7 +1341,7 @@ export class AgenteraAgentControlManager {
       ),
       localProfileId: input.localProfileId,
       modelSourceProfileId,
-      modelSourceModelId: input.modelSelection?.modelLibraryId,
+      modelSourceModelId: selectedRoute?.modelLibraryId,
     });
     this.emitState();
     return serializeInstallation(result);
@@ -1401,6 +1531,74 @@ export class AgenteraAgentControlManager {
     return prepared;
   }
 
+  private conversationThreadStore(
+    owner: AgenteraRuntimeOwner,
+  ): ConversationThreadStore {
+    return new ConversationThreadStore({
+      database: this.requireFull().database,
+      owner,
+      now: this.options.now,
+      randomUUID: this.options.randomUUID,
+    });
+  }
+
+  private visibleHistoryCount(value: number | undefined): number {
+    if (value === undefined) return 0;
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw codedError("invalid_request");
+    }
+    return value;
+  }
+
+  private installedAgentConversationContext(input: {
+    thread: ConversationThreadSnapshot;
+    version: AgentVersion;
+    policy: AgentPolicySnapshot;
+  }): AgentConversationModelContext {
+    const manifestPolicy = modelPolicyForManifest(input.version.manifest);
+    const tenantPolicy = modelPolicyForPolicyDocument(input.policy.document);
+    const policyMode =
+      manifestPolicy.mode === "fixed" || tenantPolicy.mode === "fixed"
+        ? "fixed"
+        : manifestPolicy.mode === "allowlist" ||
+            tenantPolicy.mode === "allowlist"
+          ? "allowlist"
+          : "user_select";
+    const catalogOwner = this.options.getOwnerModelRouteCatalog?.() ?? null;
+    let catalog: OwnerModelRouteCatalogSnapshot = {
+      revision: "",
+      targetProfileId: "",
+      routes: [],
+    };
+    if (catalogOwner) {
+      try {
+        const snapshot = catalogOwner.snapshot();
+        catalog = {
+          ...snapshot,
+          routes: snapshot.routes.filter(
+            (route) =>
+              decideAgentModelRoute(manifestPolicy, route, "continue")
+                .allowed &&
+              decideAgentModelRoute(tenantPolicy, route, "continue").allowed,
+          ),
+        };
+      } catch {
+        // A legacy binding remains resumable even while the current catalog
+        // is unavailable; switching stays unavailable until Main can resolve
+        // a fresh opaque selection.
+      }
+    }
+    return {
+      threadId: input.thread.thread.id,
+      policyMode,
+      activeRoute: input.thread.segment.route,
+      activeSegmentOrdinal: input.thread.segment.ordinal,
+      catalog,
+      switchDisabledCode:
+        policyMode === "fixed" ? "model_switch_fixed_policy" : null,
+    };
+  }
+
   async prepareConversationRuntime(
     input: PrepareAgenteraHermesTurnInput,
   ): Promise<PreparedAgenteraConversationRuntime> {
@@ -1410,59 +1608,235 @@ export class AgenteraAgentControlManager {
       input.owner,
     );
     let adapter: AgenteraHermesAdapter | null = null;
-    let bindingStore: RuntimeBindingStore;
+    const bindingStore = new RuntimeBindingStore({
+      database: full.database,
+      owner: input.owner,
+      now: this.options.now,
+      randomUUID: this.options.randomUUID,
+    });
     let plan: Awaited<
       ReturnType<AgenteraHermesAdapter["prepareInstalledTurnPlan"]>
     > | null = null;
-    if (profile.agentInstallationId === null) {
-      bindingStore = new RuntimeBindingStore({
-        database: full.database,
-        owner: input.owner,
-        now: this.options.now,
-        randomUUID: this.options.randomUUID,
+    let requestedModelRoute: ResolvedOwnerModelRoute | undefined;
+    if (input.requestedModelSelection) {
+      const catalog = this.options.getOwnerModelRouteCatalog?.() ?? null;
+      if (!catalog) throw codedError("model_route_unavailable");
+      requestedModelRoute = catalog.resolve(input.requestedModelSelection);
+    }
+    const historyBoundaryCount = this.visibleHistoryCount(
+      input.visibleHistoryCount,
+    );
+    const threadStore =
+      profile.agentInstallationId === null
+        ? null
+        : this.conversationThreadStore(input.owner);
+    let existingThread: ConversationThreadSnapshot | null = null;
+    let activeBindingForPlan: LocalRuntimeBinding | null = null;
+    if (threadStore) {
+      existingThread = threadStore.getByRootConversationKey(
+        input.conversationKey,
+      );
+      if (!existingThread && input.resumeSessionId) {
+        const bySession = threadStore.getByHermesSessionId(
+          input.resumeSessionId,
+        );
+        if (bySession) {
+          const activeThread = bySession.thread;
+          const activeSegment = threadStore.getSegment(
+            activeThread.activeSegmentId,
+          );
+          if (activeSegment) {
+            existingThread = { thread: activeThread, segment: activeSegment };
+          }
+        }
+      }
+      if (existingThread) {
+        activeBindingForPlan = bindingStore.getById(
+          existingThread.segment.runtimeBindingId,
+        );
+        if (!activeBindingForPlan) throw codedError("binding_required");
+      }
+    }
+
+    if (profile.agentInstallationId !== null) {
+      if (this.runtimeOnlyHermes) {
+        adapter = this.runtimeOnlyHermes;
+      } else {
+        const runtime = await this.ensureRuntimeComponents();
+        adapter = runtime.hermes;
+      }
+      if (!adapter) throw codedError("binding_required");
+      const candidatePlanningKey =
+        requestedModelRoute && existingThread
+          ? `aera-segment:candidate:${existingThread.segment.id}`
+          : activeBindingForPlan?.conversationKey;
+      plan = await adapter.prepareInstalledTurnPlan({
+        ...input,
+        conversationKey: candidatePlanningKey ?? input.conversationKey,
+        resumeSessionId:
+          activeBindingForPlan?.hermesSessionId ?? input.resumeSessionId,
+        requestedModelRoute,
+        existingBinding: activeBindingForPlan ?? undefined,
       });
-    } else if (this.runtimeOnlyHermes) {
-      adapter = this.runtimeOnlyHermes;
-      bindingStore = new RuntimeBindingStore({
-        database: full.database,
-        owner: input.owner,
-        now: this.options.now,
-        randomUUID: this.options.randomUUID,
-      });
-      plan = await adapter.prepareInstalledTurnPlan(input);
-    } else {
-      const runtime = await this.ensureRuntimeComponents();
-      adapter = runtime.hermes;
-      bindingStore = runtime.bindingStore;
-      plan = await adapter.prepareInstalledTurnPlan(input);
     }
 
     const coordinator = new ConversationRuntimeCoordinator({
       database: full.database,
       bindingStore,
       boundaryStore: this.conversationBoundaryStore(input.owner),
+      threadStore: threadStore ?? undefined,
     });
+
+    if (threadStore === null) {
+      const prepared = coordinator.prepare({
+        conversationKey: input.conversationKey,
+        resumeSessionId: input.resumeSessionId,
+        context: this.assetContext(),
+        bindingInput: null,
+      });
+      return {
+        preparedAgentTurn: null,
+        conversationBoundary: prepared.boundary,
+        agentConversation: null,
+        agentSegmentId: null,
+        segmentTransition: null,
+      };
+    }
+
+    if (existingThread === null) {
+      if (!plan || !adapter) {
+        throw codedError("binding_required");
+      }
+      const prepared = coordinator.prepare({
+        conversationKey: input.conversationKey,
+        resumeSessionId: input.resumeSessionId,
+        context: this.assetContext(),
+        bindingInput: plan.bindingInput,
+      });
+      if (
+        !prepared.runtimeBinding ||
+        prepared.runtimeBinding.modelRoute === null
+      ) {
+        throw codedError("binding_required");
+      }
+      const adopted = threadStore.adopt({
+        rootConversationKey: input.conversationKey,
+        runtimeBindingId: prepared.runtimeBinding.id,
+        conversationBoundaryId: prepared.boundary.id,
+        hermesSessionId: prepared.runtimeBinding.hermesSessionId,
+        modelRoute: prepared.runtimeBinding.modelRoute,
+        historyBoundaryCount,
+      });
+      const preparedAgentTurn = adapter.finalizeInstalledTurn(
+        plan,
+        prepared.runtimeBinding,
+      );
+      if (prepared.runtimeBinding) this.queueRuntimeBindingDelivery();
+      const version = (plan as { version?: AgentVersion }).version;
+      const policy = (plan as { policy?: AgentPolicySnapshot }).policy;
+      return {
+        preparedAgentTurn,
+        conversationBoundary: prepared.boundary,
+        agentConversation:
+          version && policy
+            ? this.installedAgentConversationContext({
+                thread: adopted,
+                version,
+                policy,
+              })
+            : null,
+        agentSegmentId: adopted.segment.id,
+        segmentTransition: null,
+      };
+    }
+
+    const activeBinding = activeBindingForPlan;
+    if (!activeBinding) throw codedError("binding_required");
+    const activeBoundary = this.conversationBoundaryStore(input.owner).getById(
+      existingThread.segment.conversationBoundaryId,
+    );
+    if (!activeBoundary) throw codedError("binding_required");
+    if (!plan || !adapter) throw codedError("binding_required");
+
+    const candidate =
+      plan.bindingInput.conversationKey !== activeBinding.conversationKey;
+    if (candidate) {
+      const preparedCandidate = coordinator.prepareSegment({
+        rootConversationKey: existingThread.thread.rootConversationKey,
+        context: this.assetContext(),
+        bindingInput: plan.bindingInput,
+        historyBoundaryCount,
+      });
+      const preparedAgentTurn = adapter.finalizeInstalledTurn(
+        plan,
+        preparedCandidate.runtimeBinding,
+      );
+      if (preparedCandidate.runtimeBinding) this.queueRuntimeBindingDelivery();
+      const version = (plan as { version?: AgentVersion }).version;
+      const policy = (plan as { policy?: AgentPolicySnapshot }).policy;
+      return {
+        preparedAgentTurn,
+        conversationBoundary: preparedCandidate.boundary,
+        agentConversation:
+          version && policy
+            ? this.installedAgentConversationContext({
+                thread: existingThread,
+                version,
+                policy,
+              })
+            : null,
+        agentSegmentId: preparedCandidate.segment.id,
+        segmentTransition: {
+          kind: "candidate",
+          threadId: preparedCandidate.thread.id,
+          segmentId: preparedCandidate.segment.id,
+          runtimeBindingId: preparedCandidate.runtimeBinding.id,
+          boundaryId: preparedCandidate.boundary.id,
+          expectedThreadRevision: preparedCandidate.thread.revision,
+          from: existingThread.segment.route,
+          to: preparedCandidate.segment.route,
+          historyBoundaryCount,
+        },
+      };
+    }
+
     const prepared = coordinator.prepare({
-      conversationKey: input.conversationKey,
-      resumeSessionId: input.resumeSessionId,
+      conversationKey: activeBinding.conversationKey,
+      resumeSessionId: activeBinding.hermesSessionId,
       context: this.assetContext(),
-      bindingInput: plan?.bindingInput ?? null,
+      bindingInput: plan.bindingInput,
     });
-    const preparedAgentTurn =
-      plan && adapter && prepared.runtimeBinding
-        ? adapter.finalizeInstalledTurn(plan, prepared.runtimeBinding)
-        : null;
+    const preparedAgentTurn = prepared.runtimeBinding
+      ? adapter.finalizeInstalledTurn(plan, prepared.runtimeBinding)
+      : null;
     if (prepared.runtimeBinding) this.queueRuntimeBindingDelivery();
+    const version = (plan as { version?: AgentVersion }).version;
+    const policy = (plan as { policy?: AgentPolicySnapshot }).policy;
     return {
       preparedAgentTurn,
       conversationBoundary: prepared.boundary,
+      agentConversation:
+        version && policy
+          ? this.installedAgentConversationContext({
+              thread: existingThread,
+              version,
+              policy,
+            })
+          : null,
+      agentSegmentId: existingThread.segment.id,
+      segmentTransition: null,
     };
   }
 
   attachConversationRuntimeSession(
     input: AttachAgenteraConversationRuntimeSessionInput,
-  ): ReturnType<ConversationRuntimeCoordinator["attachHermesSession"]> {
+  ):
+    | ReturnType<ConversationRuntimeCoordinator["attachHermesSession"]>
+    | PreparedConversationSegment {
     const full = this.requireFull();
+    const threadStore = input.segmentId
+      ? this.conversationThreadStore(input.owner)
+      : undefined;
     const coordinator = new ConversationRuntimeCoordinator({
       database: full.database,
       bindingStore: new RuntimeBindingStore({
@@ -1472,14 +1846,65 @@ export class AgenteraAgentControlManager {
         randomUUID: this.options.randomUUID,
       }),
       boundaryStore: this.conversationBoundaryStore(input.owner),
+      threadStore,
     });
-    const attached = coordinator.attachHermesSession({
-      runtimeBindingId: input.runtimeBindingId,
-      boundaryId: input.boundaryId,
-      sessionId: input.sessionId,
-    });
+    const attached = input.segmentId
+      ? coordinator.attachSegmentSession({
+          segmentId: input.segmentId,
+          runtimeBindingId: input.runtimeBindingId ?? "",
+          boundaryId: input.boundaryId,
+          sessionId: input.sessionId,
+        })
+      : coordinator.attachHermesSession({
+          runtimeBindingId: input.runtimeBindingId,
+          boundaryId: input.boundaryId,
+          sessionId: input.sessionId,
+        });
     if (attached.runtimeBinding) this.queueRuntimeBindingDelivery();
     return attached;
+  }
+
+  activateConversationSegment(
+    input: AgenteraConversationSegmentLifecycleInput,
+  ): ConversationThreadSnapshot {
+    const coordinator = new ConversationRuntimeCoordinator({
+      database: this.requireFull().database,
+      bindingStore: new RuntimeBindingStore({
+        database: this.requireFull().database,
+        owner: input.owner,
+        now: this.options.now,
+        randomUUID: this.options.randomUUID,
+      }),
+      boundaryStore: this.conversationBoundaryStore(input.owner),
+      threadStore: this.conversationThreadStore(input.owner),
+    });
+    return coordinator.activateSegment({
+      threadId: input.threadId,
+      segmentId: input.segmentId,
+      expectedThreadRevision: input.expectedThreadRevision,
+    });
+  }
+
+  failConversationSegment(
+    input: FailAgenteraConversationSegmentInput,
+  ): ConversationThreadSnapshot {
+    const coordinator = new ConversationRuntimeCoordinator({
+      database: this.requireFull().database,
+      bindingStore: new RuntimeBindingStore({
+        database: this.requireFull().database,
+        owner: input.owner,
+        now: this.options.now,
+        randomUUID: this.options.randomUUID,
+      }),
+      boundaryStore: this.conversationBoundaryStore(input.owner),
+      threadStore: this.conversationThreadStore(input.owner),
+    });
+    return coordinator.failSegment({
+      threadId: input.threadId,
+      segmentId: input.segmentId,
+      expectedThreadRevision: input.expectedThreadRevision,
+      code: input.code,
+    });
   }
 
   attachHermesSession(bindingId: string, sessionId: string): void {
@@ -1525,6 +1950,23 @@ export class AgenteraAgentControlManager {
     owner: AgenteraRuntimeOwner,
   ): number {
     return this.conversationBoundaryStore(owner).deleteForHermesSessions(
+      sessionIds,
+    );
+  }
+
+  getConversationThreadSessionProjection(
+    owner: AgenteraRuntimeOwner,
+  ): ConversationThreadSessionProjection {
+    return new ConversationThreadSessionProjection(
+      this.conversationThreadStore(owner).listSessionProjectionRecords(),
+    );
+  }
+
+  deleteConversationThreadsForSessions(
+    sessionIds: readonly string[],
+    owner: AgenteraRuntimeOwner,
+  ): { deletedThreads: number; deletedSegments: number } {
+    return this.conversationThreadStore(owner).deleteThreadsForHermesSessions(
       sessionIds,
     );
   }
@@ -1836,7 +2278,9 @@ export class AgenteraAgentControlManager {
       database: full.database,
       owner,
     });
-    const getProfileMcpCapabilities = async (profilePath: string) => {
+    const getProfileMcpCapabilities = async (
+      profilePath: string,
+    ): Promise<LocalMcpCapabilityServer[]> => {
       const profileHandle = localProfileHandleForPath(
         profilePath,
         (candidate) => full.profiles.resolveProfilePath(candidate),
@@ -1860,6 +2304,26 @@ export class AgenteraAgentControlManager {
         }),
       );
     };
+    const installationProfiles: AgentInstallationProfileAdapter = full.profiles
+      .configureFreshProfileModel
+      ? {
+          ...full.profiles,
+          configureFreshProfileModel: (input) => {
+            const resolved = input.sourceModelId
+              ? this.resolvePersistedModelSelection(
+                  input.sourceProfileId,
+                  input.sourceModelId,
+                )
+              : null;
+            full.profiles.configureFreshProfileModel?.({
+              ...input,
+              sourceProfileId:
+                resolved?.sourceProfileId ?? input.sourceProfileId,
+              ...(resolved ? { sourceModelId: resolved.modelLibraryId } : {}),
+            });
+          },
+        }
+      : full.profiles;
     const installations = new AgentInstallationManager({
       database: full.database,
       client: full.client,
@@ -1867,7 +2331,7 @@ export class AgenteraAgentControlManager {
       cache,
       projection: this.projection,
       profileBindings: this.profileBindings,
-      profiles: full.profiles,
+      profiles: installationProfiles,
       owner,
       runtimeVersion,
       capabilityBindingStore,
@@ -1912,6 +2376,22 @@ export class AgenteraAgentControlManager {
           throw codedError("operation_failed");
         }
         return full.profiles.readProfileModelConfig(profilePath);
+      },
+      resolveCurrentModelRoute: (sourceProfileId, modelLibraryId) => {
+        const catalog = this.options.getOwnerModelRouteCatalog?.() ?? null;
+        if (!catalog) return null;
+        try {
+          const route = catalog
+            .snapshot()
+            .routes.find(
+              (candidate) =>
+                candidate.selection.sourceProfileId === sourceProfileId &&
+                candidate.selection.modelLibraryId === modelLibraryId,
+            );
+          return route ? catalog.resolve(route.selection) : null;
+        } catch {
+          return null;
+        }
       },
       getProfileMcpCapabilities,
       isVersionRevoked: full.isVersionRevoked ?? (() => false),
@@ -1971,6 +2451,7 @@ export class AgenteraAgentControlManager {
     this.organizationPublicationComponents?.service.invalidate();
     const service = new OrganizationPublicationService({
       database: full.database,
+      owner,
       ...(context.role === "owner" || context.role === "admin"
         ? {
             drafts: new AgentDraftStore({

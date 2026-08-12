@@ -7,6 +7,7 @@ import type {
   AgenteraAgentInstallationSummary,
   AgenteraAgentOperationScope,
   AgenteraAgentVersionSummary,
+  AgentRuntimeModelSelection,
   AgenteraClaimVersionInput,
   AgenteraInstallVersionInput,
   AgenteraRepairInstallationModelInput,
@@ -21,8 +22,11 @@ import type {
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
   CreateAgentDraftInput,
+  DisconnectOrganizationSubmissionReferenceInput,
   ExperienceCandidateFinding,
   OrganizationAgentSubmissionDetail,
+  OrganizationAgentSubmissionList,
+  OrganizationAgentSubmissionListItem,
   OrganizationAgentSubmissionSummary,
   OrganizationReviewPreview,
   OrganizationSubmissionPreview,
@@ -34,6 +38,8 @@ import type {
   PrepareOrganizationReviewInput,
   ReviewOrganizationExperienceCandidateInput,
   ReviewExperienceCandidateInput,
+  SubmissionReferenceConflictStage,
+  SubmissionReferenceState,
   SubmitOrganizationExperienceCandidateInput,
   SubmitExperienceCandidateInput,
   ConfirmOrganizationExperienceCandidateImportInput,
@@ -124,16 +130,26 @@ function parseProfileId(value: unknown): string {
   return value;
 }
 
-function parseRuntimeModelSelection(value: unknown): {
-  sourceProfileId: string;
-  modelLibraryId: string;
-} {
-  if (!exactObject(value, ["sourceProfileId", "modelLibraryId"])) {
+function parseRuntimeModelSelection(
+  value: unknown,
+): AgentRuntimeModelSelection {
+  if (
+    !exactObject(value, [
+      "sourceProfileId",
+      "modelLibraryId",
+      "catalogRevision",
+    ])
+  ) {
     return invalidRequest();
   }
   return {
     sourceProfileId: parseProfileId(value.sourceProfileId),
     modelLibraryId: parseAgentControlId(value.modelLibraryId),
+    catalogRevision:
+      typeof value.catalogRevision === "string" &&
+      SHA256_PATTERN.test(value.catalogRevision)
+        ? value.catalogRevision
+        : invalidRequest(),
   };
 }
 
@@ -713,6 +729,21 @@ export function parseConfirmOrganizationWithdrawalInput(
   };
 }
 
+export function parseDisconnectOrganizationSubmissionReferenceInput(
+  value: unknown,
+): DisconnectOrganizationSubmissionReferenceInput {
+  if (
+    !exactObject(value, ["submissionId", "confirmation"]) ||
+    value.confirmation !== "disconnect-local-draft-link"
+  ) {
+    return invalidRequest();
+  }
+  return {
+    submissionId: parseAgentControlId(value.submissionId),
+    confirmation: "disconnect-local-draft-link",
+  };
+}
+
 function safeFindingPath(value: unknown): value is string {
   if (
     typeof value !== "string" ||
@@ -832,6 +863,7 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
     code === "organization_agent_forbidden" ||
     code === "organization_archived" ||
     code === "organization_submission_conflict" ||
+    code === "organization_submission_reference_detach_failed" ||
     code === "organization_submission_superseded" ||
     code === "organization_publication_policy_blocked" ||
     code === "organization_publication_dlp_blocked"
@@ -920,6 +952,15 @@ function mappedCode(error: unknown): AgenteraAgentControlErrorCode {
   }
   if (code === "profile_model_configuration_failed") {
     return "profile_model_configuration_failed";
+  }
+  if (code === "model_switch_route_stale") return "model_route_stale";
+  if (
+    code === "model_switch_route_unavailable" ||
+    code === "model_switch_route_owner_mismatch" ||
+    code === "model_switch_credential_unavailable" ||
+    code === "model_catalog_empty"
+  ) {
+    return "model_route_unavailable";
   }
   if (code === "profile_capability_configuration_required") {
     return "profile_capability_configuration_required";
@@ -1053,6 +1094,90 @@ export function serializeOrganizationAgentSubmission(
             ),
             reviewedAt: value.review.reviewedAt,
           },
+  };
+}
+
+function serializeSubmissionReferenceState(
+  value: unknown,
+): SubmissionReferenceState {
+  if (exactObject(value, ["kind"]) && value.kind === "remote_only") {
+    return { kind: "remote_only" };
+  }
+  if (exactObject(value, ["kind", "draftId", "draftRevision"])) {
+    const draftRevision = value.draftRevision;
+    if (
+      value.kind !== "verified" ||
+      typeof draftRevision !== "number" ||
+      !Number.isSafeInteger(draftRevision) ||
+      draftRevision < 1
+    ) {
+      return invalidRequest();
+    }
+    return {
+      kind: "verified",
+      draftId: parseAgentControlId(value.draftId),
+      draftRevision,
+    };
+  }
+  if (exactObject(value, ["kind", "stage"])) {
+    const stages: readonly SubmissionReferenceConflictStage[] = [
+      "reference_shape",
+      "content_digest",
+      "definition",
+      "published_version",
+      "draft_publication",
+      "compare_and_set",
+    ];
+    if (
+      value.kind !== "quarantined" ||
+      typeof value.stage !== "string" ||
+      !stages.includes(value.stage as SubmissionReferenceConflictStage)
+    ) {
+      return invalidRequest();
+    }
+    return {
+      kind: "quarantined",
+      stage: value.stage as SubmissionReferenceConflictStage,
+    };
+  }
+  return invalidRequest();
+}
+
+export function publicOrganizationSubmissionList(
+  value: OrganizationAgentSubmissionList,
+): OrganizationAgentSubmissionList {
+  return {
+    submissions: value.submissions.map((item) => {
+      const referenceState = serializeSubmissionReferenceState(
+        item.referenceState,
+      );
+      const verifiedReference =
+        referenceState.kind === "verified" ? referenceState : null;
+      const summary = serializeOrganizationAgentSubmission({
+        ...item,
+        localDraftId: verifiedReference?.draftId ?? null,
+        localDraftRevision: verifiedReference?.draftRevision ?? null,
+      });
+      return {
+        ...summary,
+        referenceState,
+      } satisfies OrganizationAgentSubmissionListItem;
+    }),
+    issues: value.issues.map((issue) => {
+      if (
+        !exactObject(issue, ["submissionId", "code"]) ||
+        issue.code !== "cloud_record_invalid"
+      ) {
+        return invalidRequest();
+      }
+      return {
+        submissionId:
+          issue.submissionId === null
+            ? null
+            : parseAgentControlId(issue.submissionId),
+        code: "cloud_record_invalid" as const,
+      };
+    }),
   };
 }
 

@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import type { AgentPolicySnapshot, AgentVersion } from "./client";
 import {
+  decideAgentModelRoute,
   modelPolicyForManifest,
   modelPolicyForPolicyDocument,
 } from "./model-policy";
@@ -61,5 +62,63 @@ describe("Manifest V3 model policy", () => {
       allowedProviders: ["custom:corp"],
       allowedModels: ["gpt-5.6-sol"],
     });
+  });
+});
+
+describe("Agent model route decisions", () => {
+  // @lat: [[model-selection#Installed-Agent switch policy and immutable resume#Policy intersection and bounded denials]]
+  it.each([
+    {
+      mode: "user_select" as const,
+      allowedProviders: [] as string[],
+      allowedModels: [] as string[],
+      allowed: true,
+      reason: null,
+    },
+    {
+      mode: "allowlist" as const,
+      allowedProviders: ["custom"] as string[],
+      allowedModels: ["gpt-5.6-sol"] as string[],
+      allowed: true,
+      reason: null,
+    },
+    {
+      mode: "fixed" as const,
+      allowedProviders: ["openai"] as string[],
+      allowedModels: ["gpt-5.6"] as string[],
+      allowed: false,
+      reason: "model_switch_fixed_policy",
+    },
+  ])("applies $mode when switching a route", (policy) => {
+    expect(
+      decideAgentModelRoute(
+        policy,
+        { provider: "custom:petoi", model: "gpt-5.6-sol" },
+        "switch",
+      ),
+    ).toEqual({ allowed: policy.allowed, reason: policy.reason });
+  });
+
+  it("returns bounded provider and model denial reasons", () => {
+    const policy = {
+      mode: "allowlist" as const,
+      allowedProviders: ["openai"],
+      allowedModels: ["gpt-5.6"],
+    };
+
+    expect(
+      decideAgentModelRoute(
+        policy,
+        { provider: "custom:petoi", model: "gpt-5.6" },
+        "switch",
+      ),
+    ).toEqual({ allowed: false, reason: "model_switch_provider_denied" });
+    expect(
+      decideAgentModelRoute(
+        policy,
+        { provider: "openai", model: "gpt-5.6-sol" },
+        "continue",
+      ),
+    ).toEqual({ allowed: false, reason: "model_switch_model_denied" });
   });
 });

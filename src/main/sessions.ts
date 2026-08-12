@@ -260,6 +260,10 @@ function getDb(readonly = true): Database.Database | null {
   return getDbConnection(readonly);
 }
 
+export function isSessionDatabaseAvailable(): boolean {
+  return getDb(false) !== null;
+}
+
 export function listSessions(limit = 30, offset = 0): SessionSummary[] {
   const db = getDb();
   if (!db) return [];

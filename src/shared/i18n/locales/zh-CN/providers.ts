@@ -25,6 +25,7 @@ export default {
     generalSubtitle: "选择服务商、填写 API Key，即可自动获取并使用模型。",
     addModel: "添加模型",
     defaultModel: "默认模型",
+    targetProfile: "配置作用于：{{profile}}",
     notConfigured: "尚未配置",
     changeDefault: "更换默认模型",
     selectDefault: "选择默认模型",
@@ -92,6 +93,9 @@ export default {
     confirmDelete: "确认删除",
     addAndUse: "添加并使用",
     saveAndUse: "保存并使用",
+    warnings: {
+      refresh: "模型服务已经保存，但页面刷新未完整完成；已保存的配置仍然有效。",
+    },
     errors: {
       selectProvider: "请先选择模型服务商。",
       baseUrl: "请填写有效的 Base URL。",
@@ -102,6 +106,9 @@ export default {
       activate: "默认模型切换失败，请稍后重试。",
       delete: "删除失败，原配置已保留，请稍后重试。",
       save: "保存失败，请稍后重试。",
+      stage: "模型服务未保存，系统没有保留任何部分配置。",
+      replacementRequired:
+        "请先选择另一个已配置模型，再删除当前正在使用的服务。",
     },
   },
   keys: {

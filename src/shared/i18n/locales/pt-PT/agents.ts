@@ -131,6 +131,16 @@ export default {
       reviewedBy: "Revisto por",
       policyVersion: "Versão da política",
       noSubmissions: "Ainda não existem submissões empresariais.",
+      submissionRecordUnavailable:
+        "Não foi possível apresentar com segurança alguns registos de submissões empresariais; as restantes continuam disponíveis.",
+      referenceConflict:
+        "A ligação do rascunho local desta submissão entra em conflito com a Cloud e foi colocada em quarentena. As restantes submissões empresariais não foram afetadas.",
+      disconnectReference: "Desligar ligação do rascunho local",
+      disconnectReferenceTitle:
+        "Desligar ligação de rascunho local em conflito",
+      disconnectReferenceBoundary:
+        "Apenas a ligação desta submissão da Cloud ao rascunho local será removida; a submissão, o rascunho, as versões publicadas, as instalações, a Memory e os Profiles permanecem inalterados.",
+      confirmDisconnectReference: "Desligar ligação",
       withdraw: "Retirar submissão",
       confirmWithdrawal: "Confirmar retirada",
       withdrawalBoundary:

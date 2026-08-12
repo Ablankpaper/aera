@@ -1,5 +1,10 @@
 import type { Attachment } from "../../../../shared/attachments";
+import type {
+  AgentConversationModelSwitchMarker,
+  AgentConversationThreadResumeProjection,
+} from "../../../../shared/model-configuration";
 import {
+  insertModelSwitchMarker,
   isAssistantError,
   isBubbleMessage,
   normalizeMessageText,
@@ -103,6 +108,42 @@ export function dbItemsToChatMessages(
       }
     })
     .filter((m): m is ChatMessage => m !== null);
+}
+
+/** Reconstruct renderer-only model markers after a cold session resume. */
+export function mergeConversationThreadMarkers(
+  messages: ReadonlyArray<ChatMessage>,
+  markers: ReadonlyArray<AgentConversationModelSwitchMarker>,
+): ChatMessage[] {
+  return [...markers]
+    .sort(
+      (left, right) =>
+        left.historyBoundaryCount - right.historyBoundaryCount ||
+        left.segmentId.localeCompare(right.segmentId),
+    )
+    .reduce(
+      (current, marker) =>
+        insertModelSwitchMarker(current, {
+          ...marker,
+          state: "active",
+          code: null,
+        }),
+      [...messages],
+    );
+}
+
+export function buildConversationThreadResume(
+  requestedSessionId: string,
+  items: ReadonlyArray<DbHistoryItem>,
+  resolution: AgentConversationThreadResumeProjection | null,
+): { sessionId: string; messages: ChatMessage[] } {
+  const messages = dbItemsToChatMessages(items);
+  return {
+    sessionId: resolution?.activeSessionId ?? requestedSessionId,
+    messages: resolution
+      ? mergeConversationThreadMarkers(messages, resolution.markers)
+      : messages,
+  };
 }
 
 /**

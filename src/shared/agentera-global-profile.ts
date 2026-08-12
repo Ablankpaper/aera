@@ -35,7 +35,8 @@ export interface SetAgenteraGlobalProfileEntryInput {
 }
 
 export type AgenteraGlobalProfileResult<T> =
-  { success: true; value: T } | { success: false; error: string };
+  | { success: true; value: T }
+  | { success: false; error: string };
 
 export interface PrepareAgenteraGlobalProfileConversationContextInput {
   runId: string;
@@ -48,7 +49,10 @@ export interface AgenteraConversationBoundarySummary {
   scopeId: string;
   scopeDisplayName: string | null;
   visibility:
-    "PRIVATE" | "WORKSPACE_SHARED" | "ORGANIZATION_SHARED" | "ARTIFACT_ONLY";
+    | "PRIVATE"
+    | "WORKSPACE_SHARED"
+    | "ORGANIZATION_SHARED"
+    | "ARTIFACT_ONLY";
   origin: "NEW_CONVERSATION" | "LEGACY_DEFAULT";
 }
 
@@ -57,6 +61,7 @@ export interface AgenteraGlobalProfileConversationContext {
   requiresBoundApiTransport: boolean;
   degraded: boolean;
   conversationBoundary: AgenteraConversationBoundarySummary | null;
+  agentConversation?: AgentConversationModelContext | null;
 }
 
 export interface AgenteraGlobalProfileHistoryItem {
@@ -64,3 +69,4 @@ export interface AgenteraGlobalProfileHistoryItem {
   updatedAt: string | null;
   entryCount: number;
 }
+import type { AgentConversationModelContext } from "./model-configuration";

@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import Chat from "../Chat/Chat";
 import {
-  dbItemsToChatMessages,
+  buildConversationThreadResume,
   type DbHistoryItem,
 } from "../Chat/sessionHistory";
 import {
@@ -659,12 +659,6 @@ function Layout({
 
   const handleResumeSession = useCallback(
     async (sessionId: string) => {
-      // Already open as a live run? Re-attach to it (keeps live streaming).
-      const live = findRunBySession(runs, sessionId);
-      if (live) {
-        handleActivateRun(live.runId);
-        return;
-      }
       // Guard against a double-click resuming the same session twice: the live
       // check above and the setRuns below straddle an await, so without this a
       // second click would pass the stale guard and mount a duplicate tab.
@@ -672,11 +666,28 @@ function Layout({
       resumingRef.current.add(sessionId);
       setResumingSessionId(sessionId);
       try {
+        const resolution =
+          await window.hermesAPI.resolveSessionThread(sessionId);
+        const resolvedSessionId = resolution?.activeSessionId ?? sessionId;
+        // Already open as a live run? Re-attach to it (keeps live streaming),
+        // including when the user selected an old immutable segment id.
+        const live =
+          findRunBySession(runs, resolvedSessionId) ??
+          findRunBySession(runs, sessionId);
+        if (live) {
+          handleActivateRun(live.runId);
+          return;
+        }
         const items = (await window.hermesAPI.getSessionMessages(
-          sessionId,
+          resolvedSessionId,
         )) as DbHistoryItem[];
-        const run = mintRun(activeProfile, dbItemsToChatMessages(items));
-        run.sessionId = sessionId;
+        const resumed = buildConversationThreadResume(
+          sessionId,
+          items,
+          resolution,
+        );
+        const run = mintRun(activeProfile, resumed.messages);
+        run.sessionId = resumed.sessionId;
         setRuns(
           (prev) => openSessionRunTransition(prev, activeRunId, run).runs,
         );

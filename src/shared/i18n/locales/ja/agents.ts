@@ -131,6 +131,15 @@ export default {
       reviewedBy: "レビュー担当",
       policyVersion: "ポリシーバージョン",
       noSubmissions: "企業提出はまだありません。",
+      submissionRecordUnavailable:
+        "一部の企業提出記録を安全に表示できませんでした。他の提出は引き続き利用できます。",
+      referenceConflict:
+        "この提出のローカルドラフトリンクが Cloud と競合したため隔離しました。他の企業提出には影響ありません。",
+      disconnectReference: "ローカルドラフトリンクを切断",
+      disconnectReferenceTitle: "競合するローカルドラフトリンクを切断",
+      disconnectReferenceBoundary:
+        "この Cloud 提出とローカルドラフトのリンクだけを削除します。Cloud 提出、ローカルドラフト、公開済みバージョン、インストール、Memory、Profile は変更されません。",
+      confirmDisconnectReference: "リンクを切断",
       withdraw: "提出を取り下げ",
       confirmWithdrawal: "取り下げを確定",
       withdrawalBoundary:

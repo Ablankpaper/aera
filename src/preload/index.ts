@@ -15,6 +15,14 @@ import type {
 import type { TokenBalancesResponse } from "../shared/tokens";
 import type { CustomProviderRecord } from "../shared/custom-providers";
 import type {
+  AgentConversationSegmentEvent,
+  AgentConversationThreadResumeProjection,
+  ModelConfigurationMutationRequest,
+  ModelConfigurationMutationResult,
+  OwnerModelRouteCatalogSnapshot,
+  OwnerModelRouteSelection,
+} from "../shared/model-configuration";
+import type {
   MessagingPlatformsResponse,
   MessagingPlatformTestResponse,
   MessagingPlatformUpdate,
@@ -106,6 +114,7 @@ import type {
   ConfirmOrganizationReviewInput,
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
+  DisconnectOrganizationSubmissionReferenceInput,
   CreateAgentDraftInput,
   AuthoringCapabilitySummary,
   EligibleExperienceSkill,
@@ -118,6 +127,8 @@ import type {
   OrganizationExperienceCandidatePreview,
   OrganizationExperienceCandidateSummary,
   OrganizationAgentSubmissionDetail,
+  OrganizationAgentSubmissionList,
+  OrganizationAgentSubmissionListItem,
   OrganizationAgentSubmissionSummary,
   OrganizationReviewPreview,
   OrganizationSubmissionPreview,
@@ -432,6 +443,16 @@ const hermesAPI = {
   ): Promise<AgentRuntimeModelRoute[]> =>
     ipcRenderer.invoke("list-agent-runtime-model-routes", profile),
 
+  getOwnerModelRouteCatalog: (
+    requestedProfileId?: string,
+  ): Promise<OwnerModelRouteCatalogSnapshot> =>
+    ipcRenderer.invoke("get-owner-model-route-catalog", requestedProfileId),
+
+  mutateModelConfiguration: (
+    request: ModelConfigurationMutationRequest,
+  ): Promise<ModelConfigurationMutationResult> =>
+    ipcRenderer.invoke("mutate-model-configuration", request),
+
   setModelConfig: (
     provider: string,
     model: string,
@@ -620,6 +641,7 @@ const hermesAPI = {
     contextFolder?: string,
     runId?: string,
     modelOverride?: SessionModelOverride,
+    agentModelSelection?: OwnerModelRouteSelection,
   ): Promise<{ response: string; sessionId?: string }> =>
     ipcRenderer.invoke(
       "send-message",
@@ -631,6 +653,7 @@ const hermesAPI = {
       contextFolder,
       runId,
       modelOverride,
+      agentModelSelection,
     ),
 
   abortChat: (runId?: string): Promise<void> =>
@@ -863,6 +886,18 @@ const hermesAPI = {
     return () => ipcRenderer.removeListener("chat-error", handler);
   },
 
+  onChatAgentSegment: (
+    callback: (runId: string, event: AgentConversationSegmentEvent) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      runId: string,
+      segmentEvent: AgentConversationSegmentEvent,
+    ): void => callback(runId, segmentEvent);
+    ipcRenderer.on("chat-agent-segment", handler);
+    return () => ipcRenderer.removeListener("chat-agent-segment", handler);
+  },
+
   /** The agent asked a clarifying question mid-turn. The renderer shows an
    *  inline card and answers via `respondClarify`. */
   onClarifyRequest: (
@@ -944,8 +979,15 @@ const hermesAPI = {
       model: string;
       title: string | null;
       preview: string;
+      threadId?: string;
+      segmentCount?: number;
     }>
   > => ipcRenderer.invoke("list-sessions", limit, offset),
+
+  resolveSessionThread: (
+    sessionId: string,
+  ): Promise<AgentConversationThreadResumeProjection | null> =>
+    ipcRenderer.invoke("resolve-session-thread", sessionId),
 
   getSessionMessages: (
     sessionId: string,
@@ -2589,9 +2631,19 @@ const agenteraAgentsAPI = {
       "agentera-agents-confirm-organization-submission",
       input,
     ),
+  listOrganizationSubmissionList: (): Promise<
+    AgenteraAgentControlResult<OrganizationAgentSubmissionList>
+  > => ipcRenderer.invoke("agentera-agents-list-organization-submission-list"),
   listOrganizationSubmissions: (): Promise<
     AgenteraAgentControlResult<OrganizationAgentSubmissionSummary[]>
   > => ipcRenderer.invoke("agentera-agents-list-organization-submissions"),
+  disconnectOrganizationSubmissionReference: (
+    input: DisconnectOrganizationSubmissionReferenceInput,
+  ): Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionListItem>> =>
+    ipcRenderer.invoke(
+      "agentera-agents-disconnect-organization-submission-reference",
+      input,
+    ),
   getOrganizationSubmission: (
     submissionId: string,
   ): Promise<AgenteraAgentControlResult<OrganizationAgentSubmissionDetail>> =>

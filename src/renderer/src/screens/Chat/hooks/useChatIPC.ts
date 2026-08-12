@@ -13,6 +13,7 @@ import {
 import { upsertLiveReasoningChunk } from "../liveReasoningEvents";
 import { attachOfficialQualityEligibility } from "./useDashboardChatTransport";
 import type { OfficialQualityFeedbackEligibility } from "../../../../../shared/agentera-official-quality";
+import type { AgentConversationSegmentEvent } from "../../../../../shared/model-configuration";
 
 interface UseChatIPCArgs {
   /** This conversation's run id. Events tagged with a different runId belong
@@ -26,6 +27,13 @@ interface UseChatIPCArgs {
   setIsLoading: (loading: boolean) => void;
   setUsage: React.Dispatch<React.SetStateAction<UsageState | null>>;
   activeTurnRef: React.MutableRefObject<ActiveTurn | null>;
+  /** Called after Main accepts a session id for this run. */
+  onSessionStarted?: (runId: string, sessionId: string) => void;
+  /** Receives only segment lifecycle events tagged for this mounted run. */
+  onAgentSegment?: (
+    runId: string,
+    event: AgentConversationSegmentEvent,
+  ) => void;
 }
 
 /**
@@ -53,6 +61,8 @@ export function useChatIPC({
   setIsLoading,
   setUsage,
   activeTurnRef,
+  onSessionStarted,
+  onAgentSegment,
 }: UseChatIPCArgs): void {
   const reasoningSegmentClosedRef = useRef(false);
   const dbPollRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
@@ -126,9 +136,16 @@ export function useChatIPC({
         if (!eventMatchesRun(eventRunId, runId) || !sessionId) return;
         acceptedSessionIdRef.current = sessionId;
         setHermesSessionId(sessionId);
+        onSessionStarted?.(eventRunId, sessionId);
         startDbPolling(sessionId);
       },
     );
+
+    const cleanupAgentSegment =
+      window.hermesAPI.onChatAgentSegment?.((eventRunId, segmentEvent) => {
+        if (!eventMatchesRun(eventRunId, runId)) return;
+        onAgentSegment?.(eventRunId, segmentEvent);
+      }) ?? (() => undefined);
 
     const cleanupChunk = window.hermesAPI.onChatChunk((eventRunId, chunk) => {
       if (!eventMatchesRun(eventRunId, runId)) return;
@@ -388,6 +405,7 @@ export function useChatIPC({
       disposed = true;
       stopDbPolling();
       cleanupSessionStarted();
+      cleanupAgentSegment();
       cleanupChunk();
       cleanupReasoning();
       cleanupDone();
@@ -407,5 +425,7 @@ export function useChatIPC({
     setUsage,
     activeTurnRef,
     stopDbPolling,
+    onAgentSegment,
+    onSessionStarted,
   ]);
 }

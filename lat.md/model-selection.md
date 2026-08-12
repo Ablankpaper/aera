@@ -24,7 +24,63 @@ A **Configure** button is pinned at the bottom of the provider rail (below the s
 
 The override is a `SessionModelOverride` (`{provider, model, baseUrl}`), not a bare model string — because switching across providers must change routing, not only the `model` field.
 
+## Installed-Agent route selection uses an owner catalog
+
+An installed Agent's model picker reads the same Main-owned catalog as Providers, while the selected opaque route is revalidated before installation or repair.
+
+The catalog selection carries `sourceProfileId`, `modelLibraryId`, and `catalogRevision`; renderer code never receives a credential reference or Profile path. A route saved on an active installed Profile remains visible beside account routes, and a Beta.26 pending operation is converted through a fresh catalog snapshot before another write. A stale revision produces localized retry guidance instead of “please configure a model.”
+
 The picker builds it via [[src/renderer/src/screens/Chat/hooks/useModelConfig.ts#effectiveOverrideBaseUrl]], the same baseUrl rule `selectModel` applies (keep the URL only for `custom`/`ollama-cloud`; clear it for named providers that have a canonical base URL), so the session pick and a persisted save can't drift. It is threaded renderer → preload IPC → main `sendMessage` as `modelOverride`.
+
+## Installed-Agent switch policy and immutable resume
+
+Installed-Agent model changes use a Main-resolved route and a new immutable RuntimeBinding; an existing segment is validated and reused without route mutation.
+
+### Policy intersection and bounded denials
+
+[[src/main/agentera-agent-control/model-policy.ts#decideAgentModelRoute]] applies the signed Manifest policy and effective tenant policy independently. `fixed` rejects a real switch, while allowlist provider/model failures keep distinct bounded codes; `custom` permits a configured `custom:<name>` route.
+
+### Candidate route versus current segment
+
+[[src/main/agentera-agent-control/hermes-adapter.ts#AgenteraHermesAdapter#prepareInstalledTurnPlan]] freezes only a same-turn [[src/main/agentera-agent-control/owner-model-route-catalog.ts#ResolvedOwnerModelRoute]] for a candidate. An identical full route reuses the active Binding, while a different route keeps the old Binding immutable and targets the Main-derived segment key.
+
+### Current full-route and legacy validation
+
+A current full route must still resolve to the exact source Profile/model row and usable credential before resume. Exact Beta.26 three-field routes skip unavailable source metadata checks but still pass signed Manifest and tenant policy checks.
+
+### Manager thread adoption and candidate preparation
+
+[[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#prepareConversationRuntime]] adopts the first verified binding as ordinal 1, resolves opaque selections in the same Main turn, reuses an identical route, and returns a redacted active context while a different route remains `preparing`.
+
+### Policy-filtered staged selection
+
+[[src/renderer/src/screens/Chat/ModelPicker.tsx#ModelPicker]] uses the installed Agent catalog instead of ordinary model groups, disables fixed or in-flight switches, and stages only the opaque selection for the next send without writing a session override.
+
+### Authoritative resume context
+
+[[src/renderer/src/screens/Chat/Chat.tsx#Chat]] waits for Main's conversation context before restoring an ordinary session override and retains the last verified Agent route while a refresh is pending, preventing model-picker flicker or cross-path persistence.
+
+### Main-acknowledged local marker
+
+[[src/renderer/src/screens/Chat/chatMessages.ts#insertModelSwitchMarker]] inserts and deduplicates a renderer-only marker only after an `active` segment event. The marker is excluded from prompts and transcript export, while duplicate events cannot advance the visible ordinal twice.
+
+### Cold resume projects the active segment
+
+Session history presents one Agent thread even though each accepted model switch owns a separate immutable Hermes session.
+
+[[src/main/agentera-agent-control/conversation-thread-session-projection.ts#projectSessionSummaries]] replaces activated segment rows with the active session summary and leaves ordinary sessions unchanged. Resuming any known segment first resolves the active session through Main, then [[src/renderer/src/screens/Chat/sessionHistory.ts#buildConversationThreadResume]] restores its history and local switch markers.
+
+### Whole-thread cleanup
+
+Deleting one projected Agent session expands to every attached Hermes segment before owner-scoped control metadata is removed.
+
+[[src/main/ipc/conversation-session-deletion.ts#deleteConversationSessions]] preserves metadata when Hermes deletion fails or its local database is unavailable, and stops before boundary cleanup if thread cleanup conflicts.
+
+### Dynamic Runtime route capability
+
+Cross-provider and cross-endpoint Agent switches stay fail-closed until Runtime advertises the exact request-scoped route contract.
+
+[[src/main/hermes.ts#supportsHermesAgentModelRoute]] requires `request_model_route` plus `/v1/chat/completions`; [[src/main/hermes.ts#buildAgentModelRequestBody]] adds the short-lived `aera_model_route` only for a Main-approved dynamic execution lease. Unsupported Runtime versions return `model_switch_runtime_route_unsupported` without replaying the prompt.
 
 ## Desktop-only persistence
 

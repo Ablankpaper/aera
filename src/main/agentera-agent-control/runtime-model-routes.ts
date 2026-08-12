@@ -11,11 +11,17 @@ import { canonicalProviderBaseUrl } from "../provider-registry";
 import { listCustomProviders } from "../providers-store";
 import { getSecret } from "../secrets";
 
-interface RuntimeModelRouteDependencies {
+export interface RuntimeModelRouteDependencies {
   readModels: typeof readModels;
   listCustomProviders: typeof listCustomProviders;
   getSecret: typeof getSecret;
   hasOAuthCredentials: typeof hasOAuthCredentials;
+}
+
+/** Main-only route with the non-secret credential anchor needed for resolve. */
+export interface ResolvedAgentRuntimeModelRoute extends AgentRuntimeModelRoute {
+  apiMode: string | null;
+  credentialRef: string | null;
 }
 
 const DEFAULT_DEPENDENCIES: RuntimeModelRouteDependencies = {
@@ -47,12 +53,12 @@ function hasSecret(
  * model-library rows supply the concrete models; the secret store supplies
  * credential evidence without exposing credential values to the renderer.
  */
-export function listAgentRuntimeModelRoutes(
+export function listResolvedAgentRuntimeModelRoutes(
   sourceProfileId: string,
   dependencies: RuntimeModelRouteDependencies = DEFAULT_DEPENDENCIES,
-): AgentRuntimeModelRoute[] {
+): ResolvedAgentRuntimeModelRoute[] {
   const providers = dependencies.listCustomProviders(sourceProfileId);
-  const result: AgentRuntimeModelRoute[] = [];
+  const result: ResolvedAgentRuntimeModelRoute[] = [];
 
   for (const row of dependencies.readModels()) {
     const rowProvider = row.provider.trim();
@@ -92,6 +98,8 @@ export function listAgentRuntimeModelRoutes(
         model: row.model,
         displayName: row.name || row.model,
         baseUrl: provider.baseUrl,
+        apiMode: row.apiMode ?? null,
+        credentialRef: customProviderEnvKey(provider.name),
       });
       continue;
     }
@@ -120,8 +128,20 @@ export function listAgentRuntimeModelRoutes(
       model: row.model,
       displayName: row.name || row.model,
       baseUrl,
+      apiMode: row.apiMode ?? null,
+      credentialRef: expectedEnvKeyForModel(rowProvider, baseUrl),
     });
   }
 
   return result;
+}
+
+/** Renderer-safe projection; credential anchors never cross this boundary. */
+export function listAgentRuntimeModelRoutes(
+  sourceProfileId: string,
+  dependencies: RuntimeModelRouteDependencies = DEFAULT_DEPENDENCIES,
+): AgentRuntimeModelRoute[] {
+  return listResolvedAgentRuntimeModelRoutes(sourceProfileId, dependencies).map(
+    ({ credentialRef: _credentialRef, ...route }) => route,
+  );
 }

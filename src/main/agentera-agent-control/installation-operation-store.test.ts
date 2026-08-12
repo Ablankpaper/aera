@@ -14,6 +14,7 @@ import {
 import {
   InstallationOperationStore,
   InstallationOperationStoreError,
+  parseBeta26PersistedRuntimeModelSelection,
   type InstallationOperationRecord,
 } from "./installation-operation-store";
 
@@ -63,6 +64,26 @@ describe("durable Agent Installation operation journal", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  // @lat: [[provider-setup#Owner-scoped model route catalog]]
+  it("parses Beta.26 persisted model handles only for recovery migration", () => {
+    expect(
+      parseBeta26PersistedRuntimeModelSelection(
+        "model-source",
+        "custom:model-one",
+      ),
+    ).toEqual({
+      sourceProfileId: "model-source",
+      modelLibraryId: "custom:model-one",
+    });
+    expect(() =>
+      parseBeta26PersistedRuntimeModelSelection("../foreign", "model-one"),
+    ).toThrow(
+      expect.objectContaining<Partial<InstallationOperationStoreError>>({
+        code: "operation_corrupt",
+      }),
+    );
+  });
+
   function beginFresh(): InstallationOperationRecord {
     return store.begin({
       operationId: OPERATION_ID,
@@ -76,6 +97,27 @@ describe("durable Agent Installation operation journal", () => {
       },
     });
   }
+
+  it("restores a legacy fresh target that selects a source Profile without a model handle", () => {
+    const prepared = store.begin({
+      operationId: OTHER_OPERATION_ID,
+      agentInstallationId: OTHER_INSTALLATION_ID,
+      target: {
+        kind: "fresh",
+        profileId: "legacy-agent",
+        displayName: "Legacy Agent",
+        modelSourceProfileId: "model-source",
+      },
+    });
+
+    expect(prepared).toMatchObject({
+      operationId: OTHER_OPERATION_ID,
+      modelSourceProfileId: "model-source",
+      modelSourceModelId: null,
+      phase: "prepared",
+    });
+    expect(store.get(OTHER_OPERATION_ID)).toEqual(prepared);
+  });
 
   it("begins idempotently and rejects immutable operation or target drift", () => {
     const first = beginFresh();

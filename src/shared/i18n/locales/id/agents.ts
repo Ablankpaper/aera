@@ -131,6 +131,15 @@ export default {
       reviewedBy: "Ditinjau oleh",
       policyVersion: "Versi kebijakan",
       noSubmissions: "Belum ada pengajuan perusahaan.",
+      submissionRecordUnavailable:
+        "Sebagian catatan pengajuan perusahaan tidak dapat ditampilkan dengan aman; pengajuan lain tetap tersedia.",
+      referenceConflict:
+        "Tautan draf lokal untuk pengajuan ini bertentangan dengan Cloud dan telah dikarantina. Pengajuan perusahaan lain tidak terpengaruh.",
+      disconnectReference: "Putuskan tautan draf lokal",
+      disconnectReferenceTitle: "Putuskan tautan draf lokal yang bertentangan",
+      disconnectReferenceBoundary:
+        "Hanya tautan pengajuan Cloud ini ke draf lokal yang dihapus; pengajuan Cloud, draf lokal, versi terbit, instalasi, Memory, dan Profile tetap tidak berubah.",
+      confirmDisconnectReference: "Putuskan tautan",
       withdraw: "Tarik pengajuan",
       confirmWithdrawal: "Konfirmasi penarikan",
       withdrawalBoundary:

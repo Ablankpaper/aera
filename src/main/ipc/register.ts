@@ -130,6 +130,7 @@ import {
   setSshRemoteApiKey,
   resolvePendingClarify,
 } from "../hermes";
+import type { ChatCallbacks } from "../hermes";
 import { ensureProfilePortAvailable } from "../gateway-ports";
 import {
   freshDashboardWebSocketUrl,
@@ -194,6 +195,18 @@ import {
   invalidateSecretsCache,
   type ConnectionConfig,
 } from "../config";
+import { getSecret } from "../secrets";
+import type { OwnerModelRouteSelection } from "../../shared/model-configuration";
+import {
+  createAgentModelExecutionLease,
+  composeAgentModelSegmentCallbacks,
+  createAgentModelSegmentLifecycle,
+} from "../agent-model-execution-lease";
+import {
+  classifyAgentModelRoute,
+  prepareConversationRuntime,
+} from "./agent-model-send";
+import { deleteConversationSessions } from "./conversation-session-deletion";
 import {
   getAuxiliaryConfig,
   setAuxiliaryTask,
@@ -204,16 +217,16 @@ import {
   listSessions,
   getSessionMessages,
   searchSessions,
-  deleteSession,
   deleteSessions,
+  isSessionDatabaseAvailable,
 } from "../sessions";
+import { projectSessionSummaries } from "../agentera-agent-control/conversation-thread-session-projection";
 import {
   syncSessionCache,
   listCachedSessions,
   updateSessionTitle,
 } from "../session-cache";
 import {
-  remoteDeleteSession,
   remoteDeleteSessions,
   remoteGetSessionMessages,
   remoteListCachedSessions,
@@ -317,6 +330,7 @@ import {
   parseConfirmOrganizationReviewInput,
   parseConfirmOrganizationSubmissionInput,
   parseConfirmOrganizationWithdrawalInput,
+  parseDisconnectOrganizationSubmissionReferenceInput,
   parseCreateDraftInput,
   parseInstallVersionInput,
   parseListAuthoringCapabilitiesInput,
@@ -334,6 +348,7 @@ import {
   parseSubmitOrganizationExperienceCandidateInput,
   parseUpdateDraftInput,
   serializeOrganizationAgentSubmission,
+  publicOrganizationSubmissionList,
   serializeOrganizationReviewPreview,
   serializeOrganizationSubmissionDetail,
   serializeOrganizationSubmissionPreview,
@@ -413,6 +428,12 @@ import {
   type ProductAccessGuard,
 } from "./auth-guard";
 import {
+  createModelConfigurationIpcBridge,
+  type ModelConfigurationIpcBridgeDependencies,
+} from "./model-configuration-bridge";
+import type { ModelConfigurationCoordinator } from "../model-configuration-coordinator";
+import type { OwnerModelRouteCatalog } from "../agentera-agent-control/owner-model-route-catalog";
+import {
   setProfileColor,
   setProfileAvatar,
   removeProfileAvatar,
@@ -433,6 +454,7 @@ import type {
 } from "../../shared/agentera-global-profile";
 import type { ConversationBoundary } from "../agentera-agent-control/conversation-boundary-store";
 import { listAgentRuntimeModelRoutes } from "../agentera-agent-control/runtime-model-routes";
+import { freezeResolvedOwnerModelRoute } from "../agentera-agent-control/frozen-agent-model-route";
 import {
   createWallet,
   deleteWallet,
@@ -589,10 +611,10 @@ import {
 export interface IpcContext {
   runtimeActivity: RuntimeActivityCoordinator;
   getMainWindow: () => BrowserWindow | null;
-  notifyConnectionConfigChanged: () => void;
-  notifyRuntimeSnapshotChanged: () => void;
-  notifyModelLibraryChanged: () => void;
-  notifyCustomProvidersChanged: () => void;
+  notifyConnectionConfigChanged: (catalogRevision?: string) => void;
+  notifyRuntimeSnapshotChanged: (catalogRevision?: string) => void;
+  notifyModelLibraryChanged: (catalogRevision?: string) => void;
+  notifyCustomProvidersChanged: (catalogRevision?: string) => void;
   openExternalUrl: (rawUrl: unknown) => void;
   agenteraAuth: AgenteraAuthController;
   agenteraUserProfiles: AgenteraUserProfileStore;
@@ -614,6 +636,8 @@ export interface IpcContext {
   agenteraOfficialQuality?: AgenteraOfficialQualityManager | null;
   agenteraEncryptedBackup?: AgenteraEncryptedBackupController | null;
   agenteraDesktopControl?: AgenteraDesktopControlCoordinator | null;
+  modelConfigurationCoordinator?: ModelConfigurationCoordinator | null;
+  ownerModelRouteCatalog?: OwnerModelRouteCatalog | null;
 }
 
 const RUNTIME_DISTRIBUTION_UNAVAILABLE_STATE: RuntimeDistributionPublicState = {
@@ -1018,6 +1042,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     agenteraOfficialQuality,
     agenteraEncryptedBackup,
     agenteraDesktopControl,
+    modelConfigurationCoordinator,
+    ownerModelRouteCatalog,
   } = context;
   const globalProfileChangedChannel = "agentera-global-profile-changed";
   const notifyGlobalProfileChanged = (profile: unknown): void => {
@@ -1191,6 +1217,39 @@ export function registerIpcHandlers(context: IpcContext): void {
     electronIpcMain,
     productAccessGuard,
     assertChannelProfileTarget,
+  );
+  const modelConfigurationBridge = createModelConfigurationIpcBridge({
+    catalog: ownerModelRouteCatalog ?? {
+      snapshot: () => {
+        throw Object.assign(
+          new Error("Model configuration catalog is unavailable."),
+          { code: "service_unavailable" },
+        );
+      },
+    },
+    coordinator: modelConfigurationCoordinator ?? {
+      mutate: async () => ({
+        status: "rejected" as const,
+        stage: "recovery" as const,
+        code: "model_configuration_recovery_required" as const,
+        rollback: "recovery_required" as const,
+      }),
+    },
+    assertRequestedProfile: (profile) => {
+      const connection = getConnectionConfig();
+      if (connection.mode === "local") {
+        agenteraProfileBindings.verifyProfileBinding(
+          profileHome(profile),
+          getAgenteraRuntimeOwner(),
+        );
+      }
+    },
+  } satisfies ModelConfigurationIpcBridgeDependencies);
+  ipcMain.handle("get-owner-model-route-catalog", (_event, profile?: string) =>
+    modelConfigurationBridge.getOwnerModelRouteCatalog(profile),
+  );
+  ipcMain.handle("mutate-model-configuration", (_event, request: unknown) =>
+    modelConfigurationBridge.mutateModelConfiguration(request),
   );
   ipcMain.handle("agentera-official-quality-get-consent", () =>
     requireOfficialQuality().getConsent(),
@@ -1869,6 +1928,25 @@ export function registerIpcHandlers(context: IpcContext): void {
       ),
   );
   registerAgentControlHandler(
+    "agentera-agents-list-organization-submission-list",
+    async () =>
+      publicOrganizationSubmissionList(
+        await requireAgentControl().listOrganizationSubmissionList(),
+      ),
+  );
+  registerAgentControlHandler(
+    "agentera-agents-disconnect-organization-submission-reference",
+    async (_event, input: unknown) =>
+      publicOrganizationSubmissionList({
+        submissions: [
+          await requireAgentControl().disconnectOrganizationSubmissionReference(
+            parseDisconnectOrganizationSubmissionReferenceInput(input),
+          ),
+        ],
+        issues: [],
+      }).submissions[0],
+  );
+  registerAgentControlHandler(
     "agentera-agents-get-organization-submission",
     async (_event, submissionId: unknown) =>
       serializeOrganizationSubmissionDetail(
@@ -2323,6 +2401,8 @@ export function registerIpcHandlers(context: IpcContext): void {
       );
       let conversationBoundary: AgenteraConversationBoundarySummary | null =
         null;
+      let agentConversation =
+        null as AgenteraGlobalProfileConversationContext["agentConversation"];
       if (hasSignedInAccess) {
         const control = requireAgentControl();
         const preparedConversationRuntime =
@@ -2332,6 +2412,7 @@ export function registerIpcHandlers(context: IpcContext): void {
             owner: turnOwner,
             resumeSessionId: identityResumeSessionId || null,
           });
+        agentConversation = preparedConversationRuntime.agentConversation;
         const boundary = preparedConversationRuntime.conversationBoundary;
         const matchingOption = productSpaceState?.options.find((option) => {
           if (
@@ -2382,6 +2463,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       return {
         ...context,
         conversationBoundary,
+        agentConversation,
         requiresBoundApiTransport:
           context.requiresBoundApiTransport ||
           binding.agentInstallationId !== null ||
@@ -3501,6 +3583,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       contextFolder?: string,
       runId?: string,
       modelOverride?: SessionModelOverride,
+      agentModelSelection?: OwnerModelRouteSelection,
     ) => {
       // Each conversation has a stable runId minted by the renderer. Fall back
       // to a generated id for legacy callers so the run is still tracked.
@@ -3532,11 +3615,14 @@ export function registerIpcHandlers(context: IpcContext): void {
         }
         const preparedConversationRuntime =
           agenteraAgentControl && hasSignedInAccess
-            ? await agenteraAgentControl.prepareConversationRuntime({
+            ? await prepareConversationRuntime({
+                control: agenteraAgentControl,
                 conversationKey: identityConversationKey,
                 profilePath: profileHome(profile),
                 owner: turnOwner,
                 resumeSessionId: identityResumeSessionId || null,
+                history,
+                requestedModelSelection: agentModelSelection,
               })
             : null;
         if (!agenteraAgentControl && hasSignedInAccess) {
@@ -3632,6 +3718,64 @@ export function registerIpcHandlers(context: IpcContext): void {
             return false;
           }
         };
+        const segmentTransition =
+          preparedConversationRuntime?.segmentTransition ?? null;
+        const segmentLifecycle =
+          segmentTransition && agenteraAgentControl
+            ? createAgentModelSegmentLifecycle({
+                transition: segmentTransition,
+                owner: turnOwner,
+                control: agenteraAgentControl,
+                emit: (segmentEvent) => {
+                  safeSend("chat-agent-segment", segmentEvent);
+                },
+              })
+            : null;
+        segmentLifecycle?.emitPreparing();
+
+        let executionLease: ReturnType<
+          typeof createAgentModelExecutionLease
+        > | null = null;
+        const frozenRoute = preparedAgentTurn?.binding.modelRoute ?? null;
+        if (frozenRoute) {
+          try {
+            const configuredRoute = getModelConfig(
+              profile,
+            ) as SessionModelOverride;
+            const routeMode = classifyAgentModelRoute(
+              frozenRoute,
+              configuredRoute,
+            );
+            const resolveSourceRoute = ownerModelRouteCatalog
+              ? (sourceProfileId: string, modelLibraryId: string) => {
+                  try {
+                    const revision = ownerModelRouteCatalog.snapshot().revision;
+                    const resolved = ownerModelRouteCatalog.resolve({
+                      sourceProfileId,
+                      modelLibraryId,
+                      catalogRevision: revision,
+                    });
+                    return freezeResolvedOwnerModelRoute(resolved);
+                  } catch {
+                    return null;
+                  }
+                }
+              : undefined;
+            executionLease = createAgentModelExecutionLease({
+              route: frozenRoute,
+              mode: conn.mode,
+              routeMode,
+              disableTransportReplay: segmentTransition !== null,
+              resolveSourceRoute,
+              getSecret,
+              routeAvailable:
+                conn.mode === "local" ? true : routeMode === "configured",
+            });
+          } catch (error) {
+            segmentLifecycle?.fail(error);
+            throw error;
+          }
+        }
         const officialQualityObserver = createOfficialQualityChatObserver({
           binding: preparedAgentTurn?.binding ?? null,
           startedAt: chatStartTime,
@@ -3647,6 +3791,11 @@ export function registerIpcHandlers(context: IpcContext): void {
         let boundControlPlaneSessionId: string | null =
           conversationBoundary?.hermesSessionId ?? null;
         const bindControlPlaneSession = (sessionId: string): void => {
+          // Candidate segments are attached transactionally by the segment
+          // lifecycle. Re-running the legacy binding/boundary attach here
+          // would race the same rows and could detach the candidate session
+          // from its segment.
+          if (segmentTransition) return;
           if (!conversationBoundary || boundControlPlaneSessionId === sessionId)
             return;
           agenteraAgentControl?.attachConversationRuntimeSession({
@@ -3679,83 +3828,31 @@ export function registerIpcHandlers(context: IpcContext): void {
           }
         };
 
-        const handle = await sendMessage(
-          message,
-          {
-            onChunk: (chunk) => {
-              fullResponse += chunk;
-              if (!safeSend("chat-chunk", chunk)) {
-                // Renderer is gone — stop generating and resolve with what we
-                // have so the awaiting promise doesn't leak.
-                abortThisRun();
-              }
-            },
-            onReasoningChunk: (chunk) => {
-              // Forward reasoning/thinking tokens on a dedicated channel so
-              // the renderer can render the thinking bubble live during the
-              // stream rather than waiting for a focus-change refresh (#352).
-              // Same renderer-gone abort guard as the content channel.
-              if (!safeSend("chat-reasoning-chunk", chunk)) {
-                abortThisRun();
-              }
-            },
-            onDone: (sessionId) => {
-              runtimeRun.finish();
-              officialQualityObserver.onDone();
-              if (sessionId) {
-                try {
-                  bindControlPlaneSession(sessionId);
-                } catch {
-                  const message =
-                    "Aera conversation boundary session attachment failed.";
-                  safeSend("chat-error", message);
-                  rejectChat(new Error(message));
-                  return;
-                }
-                bindGlobalProfileSnapshotToSession(sessionId);
-                const recorded = agentIdentity.recordSessionRevision(
-                  identityProfileId,
-                  sessionId,
-                );
-                if (!recorded.success) {
-                  console.warn(
-                    "[agent-identity] Failed to record completed session:",
-                    recorded.error,
-                  );
-                }
-              }
-              try {
-                persistPromptImageAttachments(sessionId, message, attachments);
-              } catch (err) {
-                console.warn(
-                  "[sessions] Failed to persist prompt image attachments:",
-                  err,
-                );
-              }
-              safeSend("chat-done", sessionId || "");
-              resolveChat({ response: fullResponse, sessionId });
-              // Desktop notification when window is not focused and response took >10s
-              if (
-                mainWindow &&
-                !mainWindow.isFocused() &&
-                Date.now() - chatStartTime > 10000
-              ) {
-                const preview = fullResponse
-                  .replace(/[#*_`~\n]+/g, " ")
-                  .trim()
-                  .slice(0, 80);
-                new Notification({
-                  title: APP_NAME,
-                  body: preview || "Response ready",
-                }).show();
-              }
-            },
-            onSessionStarted: (sessionId) => {
+        const baseCallbacks: ChatCallbacks = {
+          onChunk: (chunk) => {
+            fullResponse += chunk;
+            if (!safeSend("chat-chunk", chunk)) {
+              // Renderer is gone — stop generating and resolve with what we
+              // have so the awaiting promise doesn't leak.
+              abortThisRun();
+            }
+          },
+          onReasoningChunk: (chunk) => {
+            // Forward reasoning/thinking tokens on a dedicated channel so
+            // the renderer can render the thinking bubble live during the
+            // stream rather than waiting for a focus-change refresh (#352).
+            // Same renderer-gone abort guard as the content channel.
+            if (!safeSend("chat-reasoning-chunk", chunk)) {
+              abortThisRun();
+            }
+          },
+          onDone: (sessionId) => {
+            runtimeRun.finish();
+            officialQualityObserver.onDone();
+            if (sessionId) {
               try {
                 bindControlPlaneSession(sessionId);
               } catch {
-                runtimeRun.finish();
-                abortThisRun();
                 const message =
                   "Aera conversation boundary session attachment failed.";
                 safeSend("chat-error", message);
@@ -3769,47 +3866,125 @@ export function registerIpcHandlers(context: IpcContext): void {
               );
               if (!recorded.success) {
                 console.warn(
-                  "[agent-identity] Failed to record new session:",
+                  "[agent-identity] Failed to record completed session:",
                   recorded.error,
                 );
               }
-              safeSend("chat-session-started", sessionId);
-            },
-            onError: (error) => {
-              runtimeRun.finish();
-              officialQualityObserver.onError(error);
-              safeSend("chat-error", error);
-              rejectChat(new Error(error));
-              // Notify on error too if window not focused
-              if (mainWindow && !mainWindow.isFocused()) {
-                new Notification({
-                  title: `${APP_NAME} — Error`,
-                  body: error.slice(0, 100),
-                }).show();
-              }
-            },
-            onToolProgress: (tool) => {
-              safeSend("chat-tool-progress", tool);
-            },
-            onToolEvent: (toolEvent) => {
-              safeSend("chat-tool-event", toolEvent);
-            },
-            onUsage: (usage) => {
-              officialQualityObserver.onUsage(usage);
-              safeSend("chat-usage", usage);
-            },
-            onClarify: (req) => {
-              safeSend("chat-clarify-request", req);
-            },
+            }
+            try {
+              persistPromptImageAttachments(sessionId, message, attachments);
+            } catch (err) {
+              console.warn(
+                "[sessions] Failed to persist prompt image attachments:",
+                err,
+              );
+            }
+            safeSend("chat-done", sessionId || "");
+            resolveChat({ response: fullResponse, sessionId });
+            // Desktop notification when window is not focused and response took >10s
+            if (
+              mainWindow &&
+              !mainWindow.isFocused() &&
+              Date.now() - chatStartTime > 10000
+            ) {
+              const preview = fullResponse
+                .replace(/[#*_`~\n]+/g, " ")
+                .trim()
+                .slice(0, 80);
+              new Notification({
+                title: APP_NAME,
+                body: preview || "Response ready",
+              }).show();
+            }
           },
-          profile,
-          preparedAgentTurn?.resumeSessionId ?? identityResumeSessionId,
-          history,
-          attachments,
-          contextFolder,
-          preparedAgentTurn?.modelOverride ?? modelOverride,
-          conversationEnvelope,
+          onSessionStarted: (sessionId) => {
+            try {
+              bindControlPlaneSession(sessionId);
+            } catch {
+              runtimeRun.finish();
+              abortThisRun();
+              const message =
+                "Aera conversation boundary session attachment failed.";
+              safeSend("chat-error", message);
+              rejectChat(new Error(message));
+              return;
+            }
+            bindGlobalProfileSnapshotToSession(sessionId);
+            const recorded = agentIdentity.recordSessionRevision(
+              identityProfileId,
+              sessionId,
+            );
+            if (!recorded.success) {
+              console.warn(
+                "[agent-identity] Failed to record new session:",
+                recorded.error,
+              );
+            }
+            safeSend("chat-session-started", sessionId);
+          },
+          onError: (error) => {
+            runtimeRun.finish();
+            officialQualityObserver.onError(error);
+            safeSend("chat-error", error);
+            rejectChat(new Error(error));
+            // Notify on error too if window not focused
+            if (mainWindow && !mainWindow.isFocused()) {
+              new Notification({
+                title: `${APP_NAME} — Error`,
+                body: error.slice(0, 100),
+              }).show();
+            }
+          },
+          onToolProgress: (tool) => {
+            safeSend("chat-tool-progress", tool);
+          },
+          onToolEvent: (toolEvent) => {
+            safeSend("chat-tool-event", toolEvent);
+          },
+          onUsage: (usage) => {
+            officialQualityObserver.onUsage(usage);
+            safeSend("chat-usage", usage);
+          },
+          onClarify: (req) => {
+            safeSend("chat-clarify-request", req);
+          },
+        };
+        const transportCallbacks = composeAgentModelSegmentCallbacks(
+          baseCallbacks,
+          segmentLifecycle,
         );
+        let handle;
+        try {
+          handle = executionLease
+            ? await executionLease.run((execution) =>
+                sendMessage(
+                  message,
+                  transportCallbacks,
+                  profile,
+                  preparedAgentTurn?.resumeSessionId ?? identityResumeSessionId,
+                  history,
+                  attachments,
+                  contextFolder,
+                  preparedAgentTurn?.modelOverride ?? modelOverride,
+                  conversationEnvelope,
+                  execution,
+                ),
+              )
+            : await sendMessage(
+                message,
+                transportCallbacks,
+                profile,
+                preparedAgentTurn?.resumeSessionId ?? identityResumeSessionId,
+                history,
+                attachments,
+                contextFolder,
+                preparedAgentTurn?.modelOverride ?? modelOverride,
+                conversationEnvelope,
+              );
+        } catch (error) {
+          segmentLifecycle?.fail(error);
+          throw error;
+        }
 
         runtimeRun.attachAbort(handle.abort);
         return promise;
@@ -4164,17 +4339,87 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
 
   // Sessions
-  ipcMain.handle("list-sessions", (_event, limit?: number, offset?: number) => {
-    const conn = getConnectionConfig();
-    if (conn.mode === "remote") return remoteListSessions(conn, limit, offset);
-    if (conn.mode === "ssh" && conn.ssh)
-      return withSshDashboardSessions(
-        conn,
-        (config) => remoteListSessions(config, limit, offset),
-        () => sshListSessions(conn.ssh, limit, offset),
-        activeSshProfile(),
+  const currentConversationSessionProjection = (): {
+    owner: AgenteraRuntimeOwner;
+    projection: ReturnType<
+      AgenteraAgentControlManager["getConversationThreadSessionProjection"]
+    >;
+  } | null => {
+    if (!agenteraAgentControl) return null;
+    try {
+      const owner = getAgenteraRuntimeOwner();
+      return {
+        owner,
+        projection:
+          agenteraAgentControl.getConversationThreadSessionProjection(owner),
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  ipcMain.handle(
+    "list-sessions",
+    async (_event, limit?: number, offset?: number) => {
+      const conn = getConnectionConfig();
+      const projectionState = currentConversationSessionProjection();
+      const pageLimit =
+        typeof limit === "number" && Number.isSafeInteger(limit) && limit >= 0
+          ? limit
+          : 30;
+      const pageOffset =
+        typeof offset === "number" &&
+        Number.isSafeInteger(offset) &&
+        offset >= 0
+          ? offset
+          : 0;
+      const projectionFetchLimit = Math.min(
+        Math.max(pageOffset + pageLimit * 8, 200),
+        5000,
       );
-    return listSessions(limit, offset);
+      const sessions =
+        conn.mode === "remote"
+          ? await remoteListSessions(
+              conn,
+              projectionState ? projectionFetchLimit : limit,
+              projectionState ? 0 : offset,
+            )
+          : conn.mode === "ssh" && conn.ssh
+            ? await withSshDashboardSessions(
+                conn,
+                (config) =>
+                  remoteListSessions(
+                    config,
+                    projectionState ? projectionFetchLimit : limit,
+                    projectionState ? 0 : offset,
+                  ),
+                () =>
+                  sshListSessions(
+                    conn.ssh!,
+                    projectionState ? projectionFetchLimit : limit,
+                    projectionState ? 0 : offset,
+                  ),
+                activeSshProfile(),
+              )
+            : listSessions(
+                projectionState ? -1 : limit,
+                projectionState ? 0 : offset,
+              );
+      if (!projectionState) return sessions;
+      return projectSessionSummaries({
+        sessions,
+        threads: projectionState.projection.records(),
+      }).slice(pageOffset, pageOffset + pageLimit);
+    },
+  );
+
+  ipcMain.handle("resolve-session-thread", (_event, sessionId: string) => {
+    if (typeof sessionId !== "string" || !sessionId.trim()) return null;
+    return (
+      currentConversationSessionProjection()?.projection.resolveResume(
+        sessionId,
+      ) ?? null
+    );
   });
 
   ipcMain.handle("get-session-messages", (_event, sessionId: string) => {
@@ -4270,32 +4515,49 @@ export function registerIpcHandlers(context: IpcContext): void {
     } catch {
       owner = null;
     }
+    const projectionState = owner
+      ? currentConversationSessionProjection()
+      : null;
     const conn = getConnectionConfig();
-    const result =
-      conn.mode === "remote"
-        ? await remoteDeleteSession(conn, sessionId)
-        : conn.mode === "ssh" && conn.ssh
-          ? await withSshDashboardSessions(
-              conn,
-              (config) => remoteDeleteSession(config, sessionId),
-              undefined,
-              activeSshProfile(),
-            )
-          : deleteSession(sessionId);
-    if (owner) {
-      try {
+    const metadataDeletionAvailable =
+      conn.mode !== "local" || isSessionDatabaseAvailable();
+    await deleteConversationSessions({
+      sessionIds: [sessionId],
+      projection: projectionState?.projection ?? null,
+      metadataDeletionAvailable: owner !== null && metadataDeletionAvailable,
+      deleteHermesSessions: async (resolvedIds) => {
+        if (conn.mode === "remote") {
+          return remoteDeleteSessions(conn, resolvedIds);
+        }
+        if (conn.mode === "ssh" && conn.ssh) {
+          return withSshDashboardSessions(
+            conn,
+            (config) => remoteDeleteSessions(config, resolvedIds),
+            undefined,
+            activeSshProfile(),
+          );
+        }
+        return deleteSessions(resolvedIds);
+      },
+      deleteThreadMetadata: (resolvedIds) =>
+        agenteraAgentControl?.deleteConversationThreadsForSessions(
+          resolvedIds,
+          owner!,
+        ),
+      deleteBoundaryMetadata: (resolvedIds) =>
         agenteraAgentControl?.deleteConversationBoundariesForSessions(
-          [sessionId],
-          owner,
-        );
-      } catch (error) {
+          resolvedIds,
+          owner!,
+        ),
+      onMetadataError: (kind) => {
         console.warn(
-          "[agentera-conversation-boundary] Failed to remove deleted session boundary:",
-          error,
+          kind === "thread"
+            ? "[agentera-conversation-thread] Failed to remove deleted thread metadata."
+            : "[agentera-conversation-boundary] Failed to remove deleted session boundary.",
         );
-      }
-    }
-    return result;
+      },
+    });
+    return undefined;
   });
 
   ipcMain.handle("delete-sessions", async (_event, sessionIds: string[]) => {
@@ -4306,32 +4568,48 @@ export function registerIpcHandlers(context: IpcContext): void {
     } catch {
       owner = null;
     }
+    const projectionState = owner
+      ? currentConversationSessionProjection()
+      : null;
     const conn = getConnectionConfig();
-    const result =
-      conn.mode === "remote"
-        ? await remoteDeleteSessions(conn, ids)
-        : conn.mode === "ssh" && conn.ssh
-          ? await withSshDashboardSessions(
-              conn,
-              (config) => remoteDeleteSessions(config, ids),
-              undefined,
-              activeSshProfile(),
-            )
-          : deleteSessions(ids);
-    if (owner) {
-      try {
+    const metadataDeletionAvailable =
+      conn.mode !== "local" || isSessionDatabaseAvailable();
+    return deleteConversationSessions({
+      sessionIds: ids,
+      projection: projectionState?.projection ?? null,
+      metadataDeletionAvailable: owner !== null && metadataDeletionAvailable,
+      deleteHermesSessions: async (resolvedIds) => {
+        if (conn.mode === "remote") {
+          return remoteDeleteSessions(conn, resolvedIds);
+        }
+        if (conn.mode === "ssh" && conn.ssh) {
+          return withSshDashboardSessions(
+            conn,
+            (config) => remoteDeleteSessions(config, resolvedIds),
+            undefined,
+            activeSshProfile(),
+          );
+        }
+        return deleteSessions(resolvedIds);
+      },
+      deleteThreadMetadata: (resolvedIds) =>
+        agenteraAgentControl?.deleteConversationThreadsForSessions(
+          resolvedIds,
+          owner!,
+        ),
+      deleteBoundaryMetadata: (resolvedIds) =>
         agenteraAgentControl?.deleteConversationBoundariesForSessions(
-          ids,
-          owner,
-        );
-      } catch (error) {
+          resolvedIds,
+          owner!,
+        ),
+      onMetadataError: (kind) => {
         console.warn(
-          "[agentera-conversation-boundary] Failed to remove deleted session boundaries:",
-          error,
+          kind === "thread"
+            ? "[agentera-conversation-thread] Failed to remove deleted thread metadata."
+            : "[agentera-conversation-boundary] Failed to remove deleted session boundaries.",
         );
-      }
-    }
-    return result;
+      },
+    });
   });
 
   // Profiles

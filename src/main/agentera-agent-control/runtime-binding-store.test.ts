@@ -112,6 +112,11 @@ describe("immutable local RuntimeBinding store", () => {
         provider: "openai",
         model: "gpt-5.6",
         baseUrl: "",
+        apiMode: null,
+        sourceProfileId: null,
+        modelLibraryId: null,
+        credentialRef: null,
+        legacy: true,
       },
       policySnapshotId: POLICY_ID,
       officialReleaseRevisionId: null,
@@ -158,23 +163,33 @@ describe("immutable local RuntimeBinding store", () => {
     }
   });
 
-  it("freezes the credential-free model route locally without adding it to the cloud outbox", () => {
+  it("freezes API mode and credential reference locally without adding them to the cloud outbox", () => {
     const binding = store.getOrCreateForConversation({
       ...bindingInput({ conversationKey: "route-bound-conversation" }),
       modelRoute: {
         provider: "custom:petoi",
         model: "gpt-5.6-sol",
         baseUrl: "https://api.petoi.cn/v1",
+        apiMode: "codex_responses",
+        sourceProfileId: "account-home",
+        modelLibraryId: "petoi-gpt",
+        credentialRef: "CUSTOM_PROVIDER_PETOI_KEY",
+        legacy: false,
       },
-    } as CreateLocalRuntimeBindingInput);
+    });
 
     expect(binding.modelRoute).toEqual({
       provider: "custom:petoi",
       model: "gpt-5.6-sol",
       baseUrl: "https://api.petoi.cn/v1",
+      apiMode: "codex_responses",
+      sourceProfileId: "account-home",
+      modelLibraryId: "petoi-gpt",
+      credentialRef: "CUSTOM_PROVIDER_PETOI_KEY",
+      legacy: false,
     });
     expect(JSON.stringify(store.listPendingCloudRecords())).not.toMatch(
-      /petoi|gpt-5\.6-sol|baseUrl|modelRoute/i,
+      /petoi|gpt-5\.6-sol|responses|credentialRef|CUSTOM_PROVIDER|baseUrl|modelRoute/i,
     );
   });
 
@@ -258,6 +273,11 @@ describe("immutable local RuntimeBinding store", () => {
       agentInstallationId: INSTALLATION_ID,
       runtimeProfileId: RUNTIME_PROFILE_ID,
       runtimeVersion: "v0.18.2-agentera.1",
+      modelRoute: {
+        provider: "openai",
+        model: "gpt-5.6",
+        baseUrl: "https://api.openai.com/v1",
+      },
       policySnapshotId: POLICY_ID,
       toolPermissionDigest: TOOL_DIGEST,
       publishedBaseDigest: BASE_DIGEST,
@@ -283,7 +303,14 @@ describe("immutable local RuntimeBinding store", () => {
 
     expect(store.getByConversationKey(legacy.conversationKey)).toEqual({
       ...legacy,
-      modelRoute: null,
+      modelRoute: {
+        ...legacy.modelRoute,
+        apiMode: null,
+        sourceProfileId: null,
+        modelLibraryId: null,
+        credentialRef: null,
+        legacy: true,
+      },
       officialReleaseRevisionId: null,
       capabilityBindings: [],
       degradedMcpRequirements: [],

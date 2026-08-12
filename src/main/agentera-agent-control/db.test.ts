@@ -32,10 +32,60 @@ afterEach(() => {
 });
 
 describe("Aera control-plane schema", () => {
+  it.each(["fresh", "v11"] as const)(
+    "creates Beta.27 local reliability tables from %s",
+    (source) => {
+      const root = mkdtempSync(join(tmpdir(), `agentera-control-${source}-`));
+      roots.push(root);
+      const userDataPath = join(root, "user-data");
+      if (source === "v11") {
+        const paths = resolveAgenteraControlPlanePaths(userDataPath);
+        mkdirSync(paths.rootPath, { recursive: true });
+        const legacy = new DatabaseSync(paths.databasePath);
+        legacy.exec("PRAGMA user_version = 11");
+        legacy.close();
+      }
+
+      const database = openAgenteraControlPlaneDatabase(userDataPath, {
+        databaseFactory: nodeSqliteFactory,
+      });
+      try {
+        expect(database.sqlite.prepare("PRAGMA user_version").get()).toEqual({
+          user_version: 12,
+        });
+        const tableNames = database.sqlite
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+          )
+          .all()
+          .map((row) => (row as { name: string }).name);
+        const reliabilityTables = [
+          "organization_agent_submission_ref_conflicts",
+          "conversation_threads",
+          "conversation_segments",
+        ];
+        expect(tableNames).toEqual(expect.arrayContaining(reliabilityTables));
+        for (const table of reliabilityTables) {
+          const columns = database.sqlite
+            .prepare(`PRAGMA table_info(${table})`)
+            .all()
+            .map((row) => (row as { name: string }).name)
+            .join(" ");
+          expect(columns).not.toMatch(
+            /api_key|secret_value|prompt|message_body|profile_path/i,
+          );
+        }
+      } finally {
+        database.close();
+      }
+    },
+    databaseTestTimeoutMs,
+  );
+
   it(
     "migrates v10 MCP requirement bindings without changing an existing Installation",
     () => {
-      expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(11);
+      expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(12);
       const root = mkdtempSync(join(tmpdir(), "agentera-control-v10-"));
       roots.push(root);
       const userDataPath = join(root, "user-data");
@@ -68,7 +118,7 @@ describe("Aera control-plane schema", () => {
       });
       try {
         expect(database.sqlite.prepare("PRAGMA user_version").get()).toEqual({
-          user_version: 11,
+          user_version: 12,
         });
         expect(
           database.sqlite
@@ -106,7 +156,7 @@ describe("Aera control-plane schema", () => {
   it(
     "migrates v9 Organization experience receipts without changing Workspace rows or files",
     () => {
-      expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(11);
+      expect(AGENTERA_CONTROL_PLANE_SCHEMA_VERSION).toBe(12);
       const root = mkdtempSync(join(tmpdir(), "agentera-control-v9-"));
       roots.push(root);
       const userDataPath = join(root, "user-data");
@@ -173,7 +223,7 @@ describe("Aera control-plane schema", () => {
       });
       try {
         expect(database.sqlite.prepare("PRAGMA user_version").get()).toEqual({
-          user_version: 11,
+          user_version: 12,
         });
         const tables = database.sqlite
           .prepare(

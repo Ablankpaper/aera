@@ -90,6 +90,46 @@ function registeredProfileArguments(): Record<string, number> {
 }
 
 describe("Aera central IPC product-access guard", () => {
+  it("protects the coordinated model catalog and mutation as bound-profile IPC", () => {
+    expect(AGENTERA_IPC_CHANNEL_POLICY["get-owner-model-route-catalog"]).toBe(
+      "bound-profile",
+    );
+    expect(AGENTERA_IPC_CHANNEL_POLICY["mutate-model-configuration"]).toBe(
+      "bound-profile",
+    );
+    // Only the optional catalog argument is a direct Profile target. The
+    // mutation's requestedProfileId is nested and must be re-resolved by Main.
+    expect(
+      AGENTERA_PROFILE_ARGUMENT_INDEX["get-owner-model-route-catalog"],
+    ).toBe(0);
+    expect(
+      AGENTERA_PROFILE_ARGUMENT_INDEX["mutate-model-configuration"],
+    ).toBeUndefined();
+  });
+
+  it("guards the resilient Organization list and confirmed detach as online Main operations", () => {
+    expect(
+      AGENTERA_IPC_CHANNEL_POLICY[
+        "agentera-agents-list-organization-submission-list"
+      ],
+    ).toBe("online");
+    expect(
+      AGENTERA_IPC_CHANNEL_POLICY[
+        "agentera-agents-disconnect-organization-submission-reference"
+      ],
+    ).toBe("online");
+
+    const manager = readFileSync(
+      join(__dirname, "../src/main/agentera-agent-control/manager.ts"),
+      "utf8",
+    );
+    const detach = manager.slice(
+      manager.indexOf("async disconnectOrganizationSubmissionReference"),
+      manager.indexOf("async getOrganizationSubmission"),
+    );
+    expect(detach).toContain("this.assertOrganizationPublicationRole()");
+  });
+
   it("assigns exactly one explicit access level to every IPC channel", () => {
     const channels = registeredChannels();
     expect(channels.length).toBeGreaterThan(100);

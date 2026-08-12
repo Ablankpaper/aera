@@ -179,6 +179,8 @@ export default {
     chooseRuntimeModelHint:
       "这里只使用你当前账号的模型与凭据；不会把模型配置写入共享智能体。",
     runtimeModelChoice: "本次运行模型",
+    legacyInstalledModelSource:
+      "该路由来自现有已安装智能体的 Profile，当前账户仍可继续使用。",
     confirmRuntimeModel: "确认并开始使用",
     personalAgent: "我的智能体",
     workspaceAgent: "团队 / 项目智能体",
@@ -289,6 +291,15 @@ export default {
       reviewedBy: "审核人",
       policyVersion: "策略版本",
       noSubmissions: "暂无企业智能体提交。",
+      submissionRecordUnavailable:
+        "部分企业提交记录暂时无法安全显示；其余提交仍可正常查看。",
+      referenceConflict:
+        "此提交的本地草稿关联与云端记录不一致，已隔离该关联；其他企业提交不受影响。",
+      disconnectReference: "断开本地草稿关联",
+      disconnectReferenceTitle: "断开冲突的本地草稿关联",
+      disconnectReferenceBoundary:
+        "仅断开此云端提交与本地草稿的关联；不会删除云端提交、本地草稿、已发布版本、安装、Memory 或 Profile。",
+      confirmDisconnectReference: "确认断开关联",
       withdraw: "撤回提交",
       confirmWithdrawal: "确认撤回",
       withdrawalBoundary:
@@ -610,6 +621,10 @@ export default {
       runtime_incompatible: "该智能体版本暂不支持此电脑上的本地运行环境。",
       profile_model_configuration_failed:
         "当前模型与该智能体的签名版本不兼容。请配置版本允许的模型，或由发布者发布兼容当前模型的新版本。",
+      model_route_stale:
+        "准备智能体期间所选模型已发生变化，请刷新模型列表后重新选择。",
+      model_route_unavailable:
+        "所选模型已不再对当前账户可用，请刷新模型列表并选择其他已配置路由。",
       capability_profile_unavailable:
         "所选本地 Profile 当前不可用，请刷新后重试。",
       capability_source_unsafe: "所选能力包含无法安全复制的本地内容。",
@@ -629,6 +644,8 @@ export default {
       organization_agent_forbidden: "当前企业角色不允许执行此智能体操作。",
       organization_archived: "该企业组织已归档，智能体资产处于只读状态。",
       organization_submission_conflict: "企业提交已发生变化，请刷新后重试。",
+      organization_submission_reference_detach_failed:
+        "本地草稿关联已发生变化，未执行断开。请刷新后重新确认。",
       organization_submission_superseded: "此提交已被更新的企业提交替代。",
       organization_publication_policy_blocked: "企业策略阻止了此智能体提交。",
       organization_publication_dlp_blocked: "企业隐私扫描阻止了此智能体提交。",

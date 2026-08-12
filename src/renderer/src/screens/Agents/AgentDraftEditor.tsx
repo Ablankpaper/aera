@@ -6,7 +6,8 @@ import type {
   AgentEditableManifest,
   AgentMcpRequirementV3,
   AgentModelSelectionMode,
-  AgentRuntimeModelRoute,
+  AgentRuntimeModelRouteSource,
+  AgentRuntimeModelSelection,
   AgenteraAgentControlErrorCode,
   AgenteraAgentOperationScope,
   AuthoringCapabilityProfileSummary,
@@ -35,6 +36,8 @@ interface ModelChoice {
   provider: string;
   model: string;
   label: string;
+  modelProfileId?: string;
+  modelSelection?: AgentRuntimeModelSelection;
 }
 
 export interface AgentDraftEditorProps {
@@ -54,9 +57,10 @@ export interface AgentDraftEditorProps {
     versionId: string;
     displayName: string;
     modelProfileId?: string;
+    modelSelection?: AgentRuntimeModelSelection;
   }) => void;
   modelProfileId?: string;
-  runtimeModelRoutes?: AgentRuntimeModelRoute[];
+  runtimeModelRoutes?: AgentRuntimeModelRouteSource[];
   capabilityProfiles?: readonly AuthoringCapabilityProfileSummary[];
 }
 
@@ -295,6 +299,9 @@ export default function AgentDraftEditor({
             provider: route.provider,
             model: route.model,
             label: `${route.model} · ${route.providerLabel}`,
+            ...("selection" in route
+              ? { modelSelection: route.selection }
+              : { modelProfileId: route.sourceProfileId }),
           });
         }
       }
@@ -678,10 +685,18 @@ export default function AgentDraftEditor({
     onPublished(result.data);
     if (andUse) {
       onClose();
+      const selectedChoice = modelChoices.find(
+        (choice) => choice.key === selectedModelKey,
+      );
       onRequestInstall({
         definitionId: result.data.definitionId,
         versionId: result.data.versionId,
         displayName: name.trim(),
+        ...(selectedChoice?.modelSelection
+          ? { modelSelection: selectedChoice.modelSelection }
+          : selectedChoice?.modelProfileId
+            ? { modelProfileId: selectedChoice.modelProfileId }
+            : {}),
       });
     } else {
       setNotice("agents.control.publishOnlySuccess");

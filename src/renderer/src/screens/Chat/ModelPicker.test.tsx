@@ -21,6 +21,7 @@ vi.mock("../../components/common/BrandLogo", () => ({
 
 import { ModelPicker } from "./ModelPicker";
 import type { ModelGroup } from "./types";
+import type { AgentConversationModelContext } from "../../../../shared/model-configuration";
 
 const groups: ModelGroup[] = [
   {
@@ -66,6 +67,13 @@ function renderPicker(
     displayModel?: string;
     onOpen?: () => void;
     onSelectModel?: (provider: string, model: string, baseUrl: string) => void;
+    agentConversation?: AgentConversationModelContext | null;
+    onSelectAgentModel?: (selection: {
+      sourceProfileId: string;
+      modelLibraryId: string;
+      catalogRevision: string;
+    }) => void;
+    agentSwitchState?: "idle" | "preparing" | "active" | "failed";
   } = {},
 ): { container: HTMLElement; onOpen: Mock; onSelectModel: Mock } {
   const onOpen = vi.fn();
@@ -80,6 +88,9 @@ function renderPicker(
       displayModel={overrides.displayModel ?? "OWL Alpha"}
       onOpen={overrides.onOpen ?? onOpen}
       onSelectModel={overrides.onSelectModel ?? onSelectModel}
+      agentConversation={overrides.agentConversation}
+      onSelectAgentModel={overrides.onSelectAgentModel}
+      agentSwitchState={overrides.agentSwitchState}
     />,
   );
   return { ...utils, onOpen, onSelectModel };
@@ -96,6 +107,90 @@ function openPicker(container: HTMLElement): HTMLElement {
 }
 
 describe("ModelPicker", () => {
+  const agentContext: AgentConversationModelContext = {
+    threadId: "thread-1",
+    policyMode: "user_select",
+    activeRoute: {
+      provider: "openai",
+      model: "gpt-5.6",
+      baseUrl: "https://api.openai.com/v1",
+      apiMode: "responses",
+    },
+    activeSegmentOrdinal: 1,
+    catalog: {
+      revision: "a".repeat(64),
+      targetProfileId: "account",
+      routes: [
+        {
+          id: "openai\0gpt-5.6",
+          provider: "openai",
+          model: "gpt-5.6",
+          baseUrl: "https://api.openai.com/v1",
+          apiMode: "responses",
+          providerLabel: "providers.openai",
+          displayName: "GPT-5.6",
+          sourceProfileId: "account",
+          sourceKind: "account",
+          selection: {
+            sourceProfileId: "account",
+            modelLibraryId: "openai-gpt-5.6",
+            catalogRevision: "a".repeat(64),
+          },
+        },
+        {
+          id: "petoi\0gpt-5.6-sol",
+          provider: "custom:petoi",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://api.petoi.cn/v1",
+          apiMode: "codex_responses",
+          providerLabel: "Petoi",
+          displayName: "Petoi Sol",
+          sourceProfileId: "account",
+          sourceKind: "account",
+          selection: {
+            sourceProfileId: "account",
+            modelLibraryId: "petoi-gpt",
+            catalogRevision: "a".repeat(64),
+          },
+        },
+      ],
+    },
+    switchDisabledCode: null,
+  };
+
+  // @lat: [[model-selection#Installed-Agent switch policy and immutable resume#Policy-filtered staged selection]]
+  it("stages an installed-Agent selection without invoking ordinary session override selection", () => {
+    const onSelectAgentModel = vi.fn();
+    const { container, onSelectModel } = renderPicker({
+      agentConversation: agentContext,
+      onSelectAgentModel,
+    });
+    const dropdown = openPicker(container);
+
+    fireEvent.click(within(dropdown).getByText("Petoi Sol"));
+
+    expect(onSelectAgentModel).toHaveBeenCalledWith(
+      agentContext.catalog.routes[1].selection,
+    );
+    expect(onSelectModel).not.toHaveBeenCalled();
+  });
+
+  it("disables a fixed-policy Agent picker and explains why", () => {
+    const { container } = renderPicker({
+      agentConversation: {
+        ...agentContext,
+        policyMode: "fixed",
+        switchDisabledCode: "model_switch_fixed_policy",
+      },
+    });
+    const trigger = container.querySelector(
+      ".chat-model-trigger",
+    ) as HTMLButtonElement;
+
+    expect(trigger.disabled).toBe(true);
+    expect(container.textContent).toContain("chat.modelSwitch.fixedPolicy");
+  });
+
   // ── initial render ──────────────────────────────────────────────
   it("renders the display model name in the trigger button", () => {
     const { container } = renderPicker({ displayModel: "OWL Alpha" });

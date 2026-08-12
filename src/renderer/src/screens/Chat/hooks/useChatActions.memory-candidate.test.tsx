@@ -3,6 +3,50 @@ import { describe, expect, it, vi } from "vitest";
 import { useChatActions } from "./useChatActions";
 
 describe("useChatActions memory-candidate ordering", () => {
+  it("passes an opaque installed-Agent selection only on the next send", async () => {
+    const sendMessage = vi.fn(async () => ({ response: "ok" }));
+    Object.defineProperty(window, "hermesAPI", {
+      configurable: true,
+      value: { sendMessage },
+    });
+    const selection = {
+      sourceProfileId: "account",
+      modelLibraryId: "petoi-gpt",
+      catalogRevision: "a".repeat(64),
+    };
+    const { result } = renderHook(() =>
+      useChatActions({
+        runId: "run-agent-switch",
+        profile: "agent-one",
+        hermesSessionId: null,
+        messages: [],
+        isLoading: false,
+        setIsLoading: vi.fn(),
+        setMessages: vi.fn(),
+        chatInputRef: { current: null },
+        localCommands: { executeLocal: vi.fn(async () => false) },
+        slashCatalog: {} as never,
+        activeTurnRef: { current: null },
+        contextFolder: null,
+        agentModelSelection: selection,
+      }),
+    );
+
+    await result.current.handleSend("continue");
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      "continue",
+      "agent-one",
+      undefined,
+      [],
+      undefined,
+      undefined,
+      "run-agent-switch",
+      undefined,
+      selection,
+    );
+  });
+
   it("starts Hermes first and triggers candidate extraction without awaiting it", async () => {
     const order: string[] = [];
     let finishHermes!: (handled: boolean) => void;

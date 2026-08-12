@@ -5,12 +5,14 @@ import { ReasoningRow, ToolActivityGroup } from "./HistoryRow";
 import { ClarifyCard } from "./ClarifyCard";
 import { MemoryCandidateCard } from "./MemoryCandidateCard";
 import { AgentCreationGuideCard } from "./AgentCreationGuideCard";
+import { ModelSwitchMarker } from "./ModelSwitchMarker";
 import type { AgentCreationInput } from "./hooks/useAgentCreationGuide";
 import type {
   AgentCreationGuideMessage,
   ChatMessage,
   ClarifyMessage,
   MemoryCandidateMessage,
+  ModelSwitchMessage,
   ToolCallMessage,
   ToolResultMessage,
 } from "./types";
@@ -192,6 +194,13 @@ export const MessageList = memo(function MessageList({
           onDismiss={onAgentCreationDismiss}
           onOpenMyAgents={onOpenMyAgents}
         />,
+      );
+      continue;
+    }
+
+    if (k === "model_switch") {
+      rows.push(
+        <ModelSwitchMarker key={msg.id} message={msg as ModelSwitchMessage} />,
       );
       continue;
     }

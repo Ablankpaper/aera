@@ -25,6 +25,7 @@ import {
 import { AgentDraftStore } from "./draft-store";
 import type {
   OrganizationAgentSubmissionDetailRecord,
+  OrganizationAgentSubmissionRecord,
   SubmitOrganizationAgentRequest,
 } from "./client";
 import { canonicalizeEditableAgent } from "./manifest";
@@ -35,6 +36,7 @@ import {
 
 const TENANT_ID = "11111111-1111-4111-8111-111111111111";
 const USER_ID = "22222222-2222-4222-8222-222222222222";
+const DEVICE_ID = "12121212-1212-4121-8121-121212121212";
 const OTHER_USER_ID = "33333333-3333-4333-8333-333333333333";
 const ORGANIZATION_ID = "44444444-4444-4444-8444-444444444444";
 const OTHER_ORGANIZATION_ID = "55555555-5555-4555-8555-555555555555";
@@ -134,6 +136,27 @@ function approvedDetail(
   });
 }
 
+function submissionRecord(
+  detail: OrganizationAgentSubmissionDetailRecord,
+): OrganizationAgentSubmissionRecord {
+  return {
+    id: detail.id,
+    organization_id: detail.organization_id,
+    kind: detail.kind,
+    definition_id: detail.definition_id,
+    base_version_id: detail.base_version_id,
+    published_version_id: detail.published_version_id,
+    submitted_by_user_id: detail.submitted_by_user_id,
+    content_digest: detail.content_digest,
+    status: detail.status,
+    revision: detail.revision,
+    submitted_at: detail.submitted_at,
+    terminal_at: detail.terminal_at,
+    updated_at: detail.updated_at,
+    review: detail.review,
+  };
+}
+
 describe("Organization publication service", () => {
   let root = "";
   let database: AgenteraControlPlaneDatabase;
@@ -187,7 +210,7 @@ describe("Organization publication service", () => {
       .mockResolvedValue(submissionDetail());
     listSubmissions = vi
       .fn<OrganizationPublicationClient["listOrganizationAgentSubmissions"]>()
-      .mockResolvedValue([submissionDetail()]);
+      .mockResolvedValue([submissionRecord(submissionDetail())]);
     getSubmission = vi
       .fn<OrganizationPublicationClient["getOrganizationAgentSubmission"]>()
       .mockResolvedValue(submissionDetail());
@@ -232,6 +255,7 @@ describe("Organization publication service", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     database.close();
     rmSync(root, { recursive: true, force: true });
   });
@@ -239,6 +263,11 @@ describe("Organization publication service", () => {
   function service(): OrganizationPublicationService {
     return new OrganizationPublicationService({
       database,
+      owner: {
+        tenantId: TENANT_ID,
+        ownerId: USER_ID,
+        deviceInstallationId: DEVICE_ID,
+      },
       drafts,
       client,
       getContext: () => context,
@@ -309,6 +338,7 @@ describe("Organization publication service", () => {
     ]);
   });
 
+  // @lat: [[agentera-organizations#Organization Agent approval#Submission reference recovery#Six-stage quarantine and exact repair#Exact automatic repair]]
   it("reconciles an approved older revision without overwriting newer edits", async () => {
     const publication = service();
     const preview = publication.prepareSubmission(DRAFT_ID);
@@ -324,7 +354,7 @@ describe("Organization publication service", () => {
       manifest: manifest("Unpublished revision"),
       assets: [{ path: "knowledge/notes.md", content: "# New notes\n" }],
     });
-    listSubmissions.mockResolvedValue([approvedDetail()]);
+    listSubmissions.mockResolvedValue([submissionRecord(approvedDetail())]);
 
     const summaries = await publication.listSubmissions();
     expect(summaries[0]).toMatchObject({
@@ -356,7 +386,201 @@ describe("Organization publication service", () => {
     expect(drafts.getDraft(DRAFT_ID)).toEqual(reconciled);
   });
 
-  it("fails closed for missing Version, mismatched digest, or changed Definition", async () => {
+  // @lat: [[agentera-organizations#Organization Agent approval#Submission reference recovery#Per-record list isolation#Healthy and conflicted rows coexist]]
+  it("returns healthy and digest-conflicted submissions together", async () => {
+    const publication = service();
+    const preview = publication.prepareSubmission(DRAFT_ID);
+    await publication.submitPrepared({
+      publicationHandle: preview.publicationHandle,
+      confirmation: "submit-organization-agent",
+    });
+    const wrongDigest = "12".repeat(32);
+    listSubmissions.mockResolvedValue([
+      submissionRecord(submissionDetail({ id: OTHER_SUBMISSION_ID })),
+      submissionRecord(
+        approvedDetail({
+          content_digest: wrongDigest,
+          review: {
+            ...approvedDetail().review!,
+            reviewed_content_digest: wrongDigest,
+          },
+        }),
+      ),
+    ]);
+
+    const result = await publication.listSubmissionList();
+
+    expect(result.submissions).toHaveLength(2);
+    expect(
+      result.submissions.find((item) => item.id === SUBMISSION_ID),
+    ).toMatchObject({
+      localDraftId: null,
+      localDraftRevision: null,
+      referenceState: { kind: "quarantined", stage: "content_digest" },
+    });
+    expect(
+      result.submissions.find((item) => item.id === OTHER_SUBMISSION_ID),
+    ).toMatchObject({ referenceState: { kind: "remote_only" } });
+  });
+
+  // @lat: [[agentera-organizations#Organization Agent approval#Submission reference recovery#Per-record list isolation#Malformed row omission]]
+  it("omits one malformed Cloud row without hiding valid rows", async () => {
+    listSubmissions.mockResolvedValue([
+      submissionRecord(submissionDetail()),
+      {
+        ...submissionRecord(submissionDetail({ id: OTHER_SUBMISSION_ID })),
+        revision: 0,
+      },
+    ]);
+
+    const result = await service().listSubmissionList();
+
+    expect(result.submissions).toHaveLength(1);
+    expect(result.issues).toEqual([
+      {
+        submissionId: OTHER_SUBMISSION_ID,
+        code: "cloud_record_invalid",
+      },
+    ]);
+  });
+
+  // @lat: [[agentera-organizations#Organization Agent approval#Submission reference recovery#Six-stage quarantine and exact repair#Six-stage conflict classification]]
+  it.each([
+    {
+      stage: "reference_shape" as const,
+      arrange: (): OrganizationAgentSubmissionRecord => {
+        database.sqlite.exec("PRAGMA ignore_check_constraints = ON");
+        database.sqlite
+          .prepare(
+            `UPDATE organization_agent_submission_refs
+             SET local_draft_revision = 'invalid'
+             WHERE cloud_submission_id = ?`,
+          )
+          .run(SUBMISSION_ID);
+        return submissionRecord(approvedDetail());
+      },
+    },
+    {
+      stage: "content_digest" as const,
+      arrange: (): OrganizationAgentSubmissionRecord => {
+        const digest = "34".repeat(32);
+        return submissionRecord(
+          approvedDetail({
+            content_digest: digest,
+            review: {
+              ...approvedDetail().review!,
+              reviewed_content_digest: digest,
+            },
+          }),
+        );
+      },
+    },
+    {
+      stage: "definition" as const,
+      arrange: (): OrganizationAgentSubmissionRecord => {
+        database.sqlite
+          .prepare(
+            `UPDATE agent_drafts
+             SET source_agent_definition_id = ?, base_agent_version_id = ?
+             WHERE id = ?`,
+          )
+          .run(DEFINITION_ID, VERSION_ID, DRAFT_ID);
+        return submissionRecord(
+          approvedDetail({ definition_id: OTHER_DEFINITION_ID }),
+        );
+      },
+    },
+    {
+      stage: "published_version" as const,
+      arrange: (): OrganizationAgentSubmissionRecord => {
+        database.sqlite
+          .prepare(
+            `UPDATE agent_drafts
+             SET source_agent_definition_id = ?, base_agent_version_id = ?,
+                 published_definition_id = ?, published_version_id = ?,
+                 published_revision = 1
+             WHERE id = ?`,
+          )
+          .run(
+            DEFINITION_ID,
+            OTHER_DEFINITION_ID,
+            DEFINITION_ID,
+            OTHER_DEFINITION_ID,
+            DRAFT_ID,
+          );
+        return submissionRecord(approvedDetail());
+      },
+    },
+    {
+      stage: "draft_publication" as const,
+      arrange: (): OrganizationAgentSubmissionRecord => {
+        vi.spyOn(drafts, "recordPublishedRevision").mockImplementation(() => {
+          throw new Error("private draft write failure");
+        });
+        return submissionRecord(approvedDetail());
+      },
+    },
+    {
+      stage: "compare_and_set" as const,
+      arrange: (): OrganizationAgentSubmissionRecord => {
+        database.sqlite.exec(`
+          CREATE TRIGGER ignore_submission_reference_update
+          BEFORE UPDATE OF cloud_status, cloud_revision, last_verified_at
+          ON organization_agent_submission_refs
+          BEGIN
+            SELECT RAISE(IGNORE);
+          END;
+        `);
+        return submissionRecord(approvedDetail());
+      },
+    },
+  ])(
+    "quarantines the $stage reference stage safely",
+    async ({ stage, arrange }) => {
+      const publication = service();
+      const preview = publication.prepareSubmission(DRAFT_ID);
+      await publication.submitPrepared({
+        publicationHandle: preview.publicationHandle,
+        confirmation: "submit-organization-agent",
+      });
+      listSubmissions.mockResolvedValue([arrange()]);
+
+      const result = await publication.listSubmissionList();
+
+      expect(result.submissions).toEqual([
+        expect.objectContaining({
+          id: SUBMISSION_ID,
+          localDraftId: null,
+          localDraftRevision: null,
+          referenceState: { kind: "quarantined", stage },
+        }),
+      ]);
+      expect(
+        database.sqlite
+          .prepare(
+            `SELECT stage, state, reference_revision
+           FROM organization_agent_submission_ref_conflicts
+           WHERE cloud_submission_id = ?`,
+          )
+          .get(SUBMISSION_ID),
+      ).toEqual({
+        stage,
+        state: "quarantined",
+        reference_revision: 1,
+      });
+      expect(
+        database.sqlite
+          .prepare(
+            `SELECT cloud_submission_id
+           FROM organization_agent_submission_refs
+           WHERE cloud_submission_id = ?`,
+          )
+          .get(SUBMISSION_ID),
+      ).toEqual({ cloud_submission_id: SUBMISSION_ID });
+    },
+  );
+
+  it("isolates malformed Cloud rows and classifies local reference drift", async () => {
     const publication = service();
     const preview = publication.prepareSubmission(DRAFT_ID);
     await publication.submitPrepared({
@@ -365,33 +589,52 @@ describe("Organization publication service", () => {
     });
 
     listSubmissions.mockResolvedValue([
-      approvedDetail({ published_version_id: null }),
+      submissionRecord(approvedDetail({ published_version_id: null })),
     ]);
-    await expect(publication.listSubmissions()).rejects.toMatchObject({
-      code: "verification_failed",
+    await expect(publication.listSubmissionList()).resolves.toEqual({
+      submissions: [],
+      issues: [{ submissionId: SUBMISSION_ID, code: "cloud_record_invalid" }],
     });
 
     const wrongDigest = "12".repeat(32);
     listSubmissions.mockResolvedValue([
-      approvedDetail({
-        content_digest: wrongDigest,
-        review: {
-          ...approvedDetail().review!,
-          reviewed_content_digest: wrongDigest,
-        },
-      }),
+      submissionRecord(
+        approvedDetail({
+          content_digest: wrongDigest,
+          review: {
+            ...approvedDetail().review!,
+            reviewed_content_digest: wrongDigest,
+          },
+        }),
+      ),
     ]);
-    await expect(publication.listSubmissions()).rejects.toMatchObject({
-      code: "organization_submission_conflict",
+    await expect(publication.listSubmissionList()).resolves.toMatchObject({
+      submissions: [
+        {
+          id: SUBMISSION_ID,
+          referenceState: {
+            kind: "quarantined",
+            stage: "content_digest",
+          },
+        },
+      ],
     });
 
-    listSubmissions.mockResolvedValue([approvedDetail()]);
+    listSubmissions.mockResolvedValue([submissionRecord(approvedDetail())]);
     await publication.listSubmissions();
     listSubmissions.mockResolvedValue([
-      approvedDetail({ definition_id: OTHER_DEFINITION_ID }),
+      submissionRecord(approvedDetail({ definition_id: OTHER_DEFINITION_ID })),
     ]);
-    await expect(publication.listSubmissions()).rejects.toMatchObject({
-      code: "organization_submission_conflict",
+    await expect(publication.listSubmissionList()).resolves.toMatchObject({
+      submissions: [
+        {
+          id: SUBMISSION_ID,
+          referenceState: {
+            kind: "quarantined",
+            stage: "definition",
+          },
+        },
+      ],
     });
     expect(drafts.getDraft(DRAFT_ID).publishedRevision).toEqual({
       revision: 1,
@@ -439,7 +682,7 @@ describe("Organization publication service", () => {
         NOW.toISOString(),
         NOW.toISOString(),
       );
-    listSubmissions.mockResolvedValue([response]);
+    listSubmissions.mockResolvedValue([submissionRecord(response)]);
 
     await expect(service().listSubmissions()).resolves.toEqual([
       expect.objectContaining({

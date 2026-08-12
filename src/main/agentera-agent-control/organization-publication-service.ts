@@ -7,10 +7,16 @@ import type {
   ConfirmOrganizationReviewInput,
   ConfirmOrganizationSubmissionInput,
   ConfirmOrganizationWithdrawalInput,
+  DisconnectOrganizationSubmissionReferenceInput,
   ExperienceCandidateFinding,
+  OrganizationAgentSubmissionList,
+  OrganizationAgentSubmissionListItem,
   OrganizationAgentSubmissionSummary,
   PrepareOrganizationReviewInput,
+  SubmissionReferenceConflictStage,
+  SubmissionReferenceState,
 } from "../../shared/agentera-agent-control";
+import type { AgenteraRuntimeOwner } from "../agentera-profile-binding";
 import type { AgenteraControlPlaneDatabase } from "./db";
 import type {
   OrganizationAgentSubmissionDetailRecord,
@@ -25,6 +31,10 @@ import {
   canonicalizeEditableAgent,
   type CanonicalEditableAgent,
 } from "./manifest";
+import {
+  OrganizationSubmissionReferenceStore,
+  OrganizationSubmissionReferenceStoreError,
+} from "./organization-submission-reference-store";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -40,6 +50,21 @@ type OrganizationContext = Extract<
 interface TrustedLocalSubmissionReference {
   draftId: string;
   draftRevision: number;
+}
+
+class LocalSubmissionReferenceConflict extends Error {
+  readonly stage: SubmissionReferenceConflictStage;
+  readonly referenceRevision: number;
+
+  constructor(
+    stage: SubmissionReferenceConflictStage,
+    referenceRevision: number,
+  ) {
+    super(`Organization submission reference conflict: ${stage}.`);
+    this.name = "LocalSubmissionReferenceConflict";
+    this.stage = stage;
+    this.referenceRevision = referenceRevision;
+  }
 }
 
 export interface OrganizationPublicationDraftStore {
@@ -63,9 +88,7 @@ export interface OrganizationPublicationClient {
     body: SubmitOrganizationAgentRequest,
     idempotencyKey: string,
   ): Promise<OrganizationAgentSubmissionDetailRecord>;
-  listOrganizationAgentSubmissions(
-    organizationId: string,
-  ): Promise<OrganizationAgentSubmissionRecord[]>;
+  listOrganizationAgentSubmissions(organizationId: string): Promise<unknown[]>;
   getOrganizationAgentSubmission(
     organizationId: string,
     submissionId: string,
@@ -86,6 +109,7 @@ export interface OrganizationPublicationClient {
 
 export interface OrganizationPublicationServiceOptions {
   database: AgenteraControlPlaneDatabase;
+  owner: AgenteraRuntimeOwner;
   drafts?: OrganizationPublicationDraftStore;
   client: OrganizationPublicationClient;
   getContext: () => AgenteraAgentControlContext;
@@ -343,6 +367,83 @@ function summaryFromRecord(
   };
 }
 
+function listItemFromRecord(
+  value: OrganizationAgentSubmissionRecord,
+  referenceState: SubmissionReferenceState,
+): OrganizationAgentSubmissionListItem {
+  const localReference =
+    referenceState.kind === "verified"
+      ? {
+          draftId: referenceState.draftId,
+          draftRevision: referenceState.draftRevision,
+        }
+      : null;
+  return {
+    ...summaryFromRecord(value, localReference),
+    referenceState,
+  };
+}
+
+function localReferenceFromState(
+  state: SubmissionReferenceState,
+): TrustedLocalSubmissionReference | null {
+  return state.kind === "verified"
+    ? { draftId: state.draftId, draftRevision: state.draftRevision }
+    : null;
+}
+
+const ORGANIZATION_SUBMISSION_RECORD_FIELDS = [
+  "base_version_id",
+  "content_digest",
+  "definition_id",
+  "id",
+  "kind",
+  "organization_id",
+  "published_version_id",
+  "review",
+  "revision",
+  "status",
+  "submitted_at",
+  "submitted_by_user_id",
+  "terminal_at",
+  "updated_at",
+] as const;
+
+function hasExactSubmissionRecordFields(
+  value: unknown,
+): value is OrganizationAgentSubmissionRecord {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const keys = Object.keys(value);
+  return (
+    keys.length === ORGANIZATION_SUBMISSION_RECORD_FIELDS.length &&
+    ORGANIZATION_SUBMISSION_RECORD_FIELDS.every((field) =>
+      Object.hasOwn(value, field),
+    )
+  );
+}
+
+function submissionIssueId(value: unknown): string | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const id = (value as { id?: unknown }).id;
+  return typeof id === "string" && UUID_PATTERN.test(id) ? id : null;
+}
+
+function hasTrustedOrganizationIdentity(
+  value: unknown,
+  organizationId: string,
+): boolean {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (value as { organization_id?: unknown }).organization_id === organizationId
+  );
+}
+
 function validateSubmissionRecord(
   value: OrganizationAgentSubmissionRecord,
   organizationId: string,
@@ -410,6 +511,16 @@ function validateSubmissionRecord(
   }
 }
 
+function validateListSubmissionRecord(
+  value: unknown,
+  organizationId: string,
+): asserts value is OrganizationAgentSubmissionRecord {
+  if (!hasExactSubmissionRecordFields(value)) {
+    throw codedError("verification_failed");
+  }
+  validateSubmissionRecord(value, organizationId);
+}
+
 function validateSubmissionDetail(
   value: OrganizationAgentSubmissionDetailRecord,
   organizationId: string,
@@ -474,6 +585,7 @@ export class OrganizationPublicationService {
   private readonly database: AgenteraControlPlaneDatabase;
   private readonly drafts: OrganizationPublicationDraftStore | null;
   private readonly client: OrganizationPublicationClient;
+  private readonly referenceStore: OrganizationSubmissionReferenceStore;
   private readonly getContext: () => AgenteraAgentControlContext;
   private readonly getActorUserId: () => string;
   private readonly isOnline: () => boolean;
@@ -503,6 +615,11 @@ export class OrganizationPublicationService {
     this.getActorUserId = options.getActorUserId;
     this.isOnline = options.isOnline;
     this.now = options.now ?? (() => new Date());
+    this.referenceStore = new OrganizationSubmissionReferenceStore({
+      database: options.database,
+      owner: options.owner,
+      now: this.now,
+    });
     this.randomUUID = options.randomUUID ?? nodeRandomUUID;
     this.handleTtlMs = ttl;
   }
@@ -575,26 +692,102 @@ export class OrganizationPublicationService {
       validateSubmissionDetail(response, context.organizationId);
       this.assertSubmittedResponse(response, prepared, actor);
       this.recordSubmissionReference(response, prepared);
-      const localReference = this.refreshSubmissionReference(response);
+      const localReference = localReferenceFromState(
+        this.referenceStateForRecord(response),
+      );
       return summaryFromRecord(response, localReference);
     } catch (error) {
       throw serviceError(error);
     }
   }
 
-  async listSubmissions(): Promise<OrganizationAgentSubmissionSummary[]> {
+  async listSubmissionList(): Promise<OrganizationAgentSubmissionList> {
     try {
       const context = this.historyContext();
       this.assertOnline();
       const values = await this.client.listOrganizationAgentSubmissions(
         context.organizationId,
       );
-      return values.map((value) => {
-        validateSubmissionRecord(value, context.organizationId);
-        const localReference = this.refreshSubmissionReference(value);
-        return summaryFromRecord(value, localReference);
-      });
+      const submissions: OrganizationAgentSubmissionListItem[] = [];
+      const issues: OrganizationAgentSubmissionList["issues"] = [];
+      for (const value of values) {
+        if (!hasTrustedOrganizationIdentity(value, context.organizationId)) {
+          throw codedError("verification_failed");
+        }
+        try {
+          validateListSubmissionRecord(value, context.organizationId);
+        } catch (error) {
+          if (
+            error instanceof OrganizationPublicationServiceError &&
+            error.code === "verification_failed"
+          ) {
+            issues.push({
+              submissionId: submissionIssueId(value),
+              code: "cloud_record_invalid",
+            });
+            continue;
+          }
+          throw error;
+        }
+        submissions.push(
+          listItemFromRecord(value, this.referenceStateForRecord(value)),
+        );
+      }
+      return { submissions, issues };
     } catch (error) {
+      throw serviceError(error);
+    }
+  }
+
+  async listSubmissions(): Promise<OrganizationAgentSubmissionSummary[]> {
+    return (await this.listSubmissionList()).submissions;
+  }
+
+  async disconnectSubmissionReference(
+    input: DisconnectOrganizationSubmissionReferenceInput,
+  ): Promise<OrganizationAgentSubmissionListItem> {
+    try {
+      const context = this.publisherContext();
+      if (input?.confirmation !== "disconnect-local-draft-link") {
+        throw codedError("invalid_request");
+      }
+      const submissionId = requireCanonicalUuid(input.submissionId);
+      this.assertOnline();
+      const value = await this.client.getOrganizationAgentSubmission(
+        context.organizationId,
+        submissionId,
+      );
+      validateSubmissionDetail(value, context.organizationId, submissionId);
+      const state = this.referenceStateForRecord(value);
+      const conflict = this.referenceStore.get(
+        context.organizationId,
+        submissionId,
+      );
+      if (
+        state.kind !== "quarantined" ||
+        conflict === null ||
+        conflict.state !== "quarantined" ||
+        conflict.stage !== state.stage
+      ) {
+        throw codedError("organization_submission_reference_detach_failed");
+      }
+      try {
+        this.referenceStore.detach({
+          organizationId: context.organizationId,
+          submissionId,
+          expectedReferenceRevision: conflict.referenceRevision,
+        });
+      } catch (error) {
+        if (error instanceof OrganizationSubmissionReferenceStoreError) {
+          throw codedError("organization_submission_reference_detach_failed");
+        }
+        throw error;
+      }
+      return listItemFromRecord(value, { kind: "remote_only" });
+    } catch (error) {
+      if (error instanceof OrganizationSubmissionReferenceStoreError) {
+        throw codedError("organization_submission_reference_detach_failed");
+      }
       throw serviceError(error);
     }
   }
@@ -611,7 +804,9 @@ export class OrganizationPublicationService {
         submissionId,
       );
       validateSubmissionDetail(value, context.organizationId, submissionId);
-      const localReference = this.refreshSubmissionReference(value);
+      const localReference = localReferenceFromState(
+        this.referenceStateForRecord(value),
+      );
       return publicDetail(value, localReference);
     } catch (error) {
       throw serviceError(error);
@@ -636,7 +831,9 @@ export class OrganizationPublicationService {
         command.submissionId,
       );
       if (value.status !== "pending") throw terminalConflict(value);
-      const localReference = this.refreshSubmissionReference(value);
+      const localReference = localReferenceFromState(
+        this.referenceStateForRecord(value),
+      );
       const handle = this.newHandle(this.reviews);
       const expiresAt = this.nowMilliseconds() + this.handleTtlMs;
       this.reviews.set(handle, {
@@ -730,7 +927,9 @@ export class OrganizationPublicationService {
       ) {
         throw codedError("verification_failed");
       }
-      const localReference = this.refreshSubmissionReference(response);
+      const localReference = localReferenceFromState(
+        this.referenceStateForRecord(response),
+      );
       return summaryFromRecord(response, localReference);
     } catch (error) {
       throw serviceError(error);
@@ -764,7 +963,9 @@ export class OrganizationPublicationService {
         contentDigest: value.content_digest,
         expiresAt,
       });
-      const localReference = this.refreshSubmissionReference(value);
+      const localReference = localReferenceFromState(
+        this.referenceStateForRecord(value),
+      );
       return {
         withdrawalHandle: handle,
         submission: summaryFromRecord(value, localReference),
@@ -828,7 +1029,9 @@ export class OrganizationPublicationService {
       ) {
         throw codedError("verification_failed");
       }
-      const localReference = this.refreshSubmissionReference(response);
+      const localReference = localReferenceFromState(
+        this.referenceStateForRecord(response),
+      );
       return summaryFromRecord(response, localReference);
     } catch (error) {
       throw serviceError(error);
@@ -1152,31 +1355,36 @@ export class OrganizationPublicationService {
       );
   }
 
-  private refreshSubmissionReference(
+  private referenceStateForRecord(
     response: OrganizationAgentSubmissionRecord,
-  ): TrustedLocalSubmissionReference | null {
-    const reference = this.database.sqlite
-      .prepare(
-        `SELECT local_draft_id, local_draft_revision, content_digest
-         FROM organization_agent_submission_refs
-         WHERE organization_id = ? AND cloud_submission_id = ?`,
-      )
-      .get(response.organization_id, response.id) as
-      | {
-          local_draft_id?: unknown;
-          local_draft_revision?: unknown;
-          content_digest?: unknown;
-        }
-      | undefined;
-    if (reference === undefined || this.drafts === null) return null;
+  ): SubmissionReferenceState {
+    try {
+      return this.reconcileSubmissionReference(response);
+    } catch (error) {
+      if (!(error instanceof LocalSubmissionReferenceConflict)) throw error;
+      this.referenceStore.quarantine({
+        organizationId: response.organization_id,
+        submissionId: response.id,
+        stage: error.stage,
+        referenceRevision: error.referenceRevision,
+      });
+      return { kind: "quarantined", stage: error.stage };
+    }
+  }
+
+  private reconcileSubmissionReference(
+    response: OrganizationAgentSubmissionRecord,
+  ): SubmissionReferenceState {
+    const reference = this.readSubmissionReference(response);
+    if (reference === null || this.drafts === null) {
+      return { kind: "remote_only" };
+    }
+    const referenceRevision = this.referenceRevision(reference.cloud_revision);
     if (
       typeof reference.local_draft_id !== "string" ||
-      !UUID_PATTERN.test(reference.local_draft_id) ||
-      !Number.isSafeInteger(reference.local_draft_revision) ||
-      Number(reference.local_draft_revision) < 1 ||
-      reference.content_digest !== response.content_digest
+      !UUID_PATTERN.test(reference.local_draft_id)
     ) {
-      throw codedError("organization_submission_conflict");
+      return { kind: "remote_only" };
     }
 
     let draft: AgentDraft;
@@ -1185,55 +1393,174 @@ export class OrganizationPublicationService {
     } catch (error) {
       if (
         error instanceof AgentDraftStoreError &&
-        error.code === "draft_not_found"
+        (error.code === "draft_not_found" || error.code === "invalid_draft")
       ) {
-        return null;
+        return { kind: "remote_only" };
       }
-      throw codedError("organization_submission_conflict");
+      throw new LocalSubmissionReferenceConflict(
+        "draft_publication",
+        referenceRevision,
+      );
+    }
+
+    const draftRevision = this.localDraftRevision(
+      reference.local_draft_revision,
+      referenceRevision,
+    );
+    if (
+      typeof reference.content_digest !== "string" ||
+      !DIGEST_PATTERN.test(reference.content_digest)
+    ) {
+      throw new LocalSubmissionReferenceConflict(
+        "reference_shape",
+        referenceRevision,
+      );
+    }
+    if (reference.content_digest !== response.content_digest) {
+      throw new LocalSubmissionReferenceConflict(
+        "content_digest",
+        referenceRevision,
+      );
     }
     if (
       draft.sourceAgentDefinitionId !== null &&
       draft.sourceAgentDefinitionId !== response.definition_id
     ) {
-      throw codedError("organization_submission_conflict");
+      throw new LocalSubmissionReferenceConflict(
+        "definition",
+        referenceRevision,
+      );
     }
-    if (response.status === "approved") {
-      if (response.published_version_id === null) {
-        throw codedError("verification_failed");
-      }
-      try {
-        this.drafts.recordPublishedRevision({
-          id: reference.local_draft_id,
-          publishedRevision: Number(reference.local_draft_revision),
-          definitionId: response.definition_id,
-          versionId: response.published_version_id,
-        });
-      } catch {
-        throw codedError("organization_submission_conflict");
-      }
+    if (
+      response.status === "approved" &&
+      draft.publishedRevision?.revision === draftRevision &&
+      (draft.publishedRevision.definitionId !== response.definition_id ||
+        draft.publishedRevision.versionId !== response.published_version_id)
+    ) {
+      throw new LocalSubmissionReferenceConflict(
+        "published_version",
+        referenceRevision,
+      );
     }
 
-    const result = this.database.sqlite
+    this.database.sqlite.exec("BEGIN IMMEDIATE");
+    try {
+      const current = this.readSubmissionReference(response);
+      if (
+        current === null ||
+        current.local_draft_id !== reference.local_draft_id ||
+        current.local_draft_revision !== reference.local_draft_revision ||
+        current.content_digest !== reference.content_digest ||
+        current.cloud_revision !== reference.cloud_revision
+      ) {
+        throw new LocalSubmissionReferenceConflict(
+          "compare_and_set",
+          referenceRevision,
+        );
+      }
+      if (response.status === "approved") {
+        if (response.published_version_id === null) {
+          throw codedError("verification_failed");
+        }
+        try {
+          this.drafts.recordPublishedRevision({
+            id: reference.local_draft_id,
+            publishedRevision: draftRevision,
+            definitionId: response.definition_id,
+            versionId: response.published_version_id,
+          });
+        } catch {
+          throw new LocalSubmissionReferenceConflict(
+            "draft_publication",
+            referenceRevision,
+          );
+        }
+      }
+      const result = this.database.sqlite
+        .prepare(
+          `UPDATE organization_agent_submission_refs
+           SET cloud_status = ?, cloud_revision = ?, last_verified_at = ?
+           WHERE local_draft_id = ? AND local_draft_revision = ?
+             AND organization_id = ? AND cloud_submission_id = ?
+             AND content_digest = ? AND cloud_revision = ?`,
+        )
+        .run(
+          response.status,
+          response.revision,
+          new Date(this.nowMilliseconds()).toISOString(),
+          reference.local_draft_id,
+          draftRevision,
+          response.organization_id,
+          response.id,
+          response.content_digest,
+          referenceRevision,
+        );
+      if (Number(result.changes) !== 1) {
+        throw new LocalSubmissionReferenceConflict(
+          "compare_and_set",
+          referenceRevision,
+        );
+      }
+      this.database.sqlite.exec("COMMIT");
+    } catch (error) {
+      try {
+        this.database.sqlite.exec("ROLLBACK");
+      } catch {
+        // Preserve the bounded reconciliation error.
+      }
+      throw error;
+    }
+    this.referenceStore.clear(response.organization_id, response.id);
+    return {
+      kind: "verified",
+      draftId: reference.local_draft_id,
+      draftRevision,
+    };
+  }
+
+  private readSubmissionReference(
+    response: OrganizationAgentSubmissionRecord,
+  ): {
+    local_draft_id?: unknown;
+    local_draft_revision?: unknown;
+    content_digest?: unknown;
+    cloud_revision?: unknown;
+  } | null {
+    const row = this.database.sqlite
       .prepare(
-        `UPDATE organization_agent_submission_refs
-         SET cloud_status = ?, cloud_revision = ?, last_verified_at = ?
-         WHERE organization_id = ? AND cloud_submission_id = ?
-           AND content_digest = ?`,
+        `SELECT local_draft_id, local_draft_revision,
+                content_digest, cloud_revision
+         FROM organization_agent_submission_refs
+         WHERE organization_id = ? AND cloud_submission_id = ?`,
       )
-      .run(
-        response.status,
-        response.revision,
-        new Date(this.nowMilliseconds()).toISOString(),
-        response.organization_id,
-        response.id,
-        response.content_digest,
-      );
-    if (Number(result.changes) !== 1) {
+      .get(response.organization_id, response.id) as
+      | {
+          local_draft_id?: unknown;
+          local_draft_revision?: unknown;
+          content_digest?: unknown;
+          cloud_revision?: unknown;
+        }
+      | undefined;
+    return row ?? null;
+  }
+
+  private referenceRevision(value: unknown): number {
+    if (!Number.isSafeInteger(value) || Number(value) < 1) {
       throw codedError("organization_submission_conflict");
     }
-    return {
-      draftId: reference.local_draft_id,
-      draftRevision: Number(reference.local_draft_revision),
-    };
+    return Number(value);
+  }
+
+  private localDraftRevision(
+    value: unknown,
+    referenceRevision: number,
+  ): number {
+    if (!Number.isSafeInteger(value) || Number(value) < 1) {
+      throw new LocalSubmissionReferenceConflict(
+        "reference_shape",
+        referenceRevision,
+      );
+    }
+    return Number(value);
   }
 }

@@ -159,6 +159,8 @@ export default {
     chooseRuntimeModelHint:
       "Only your current account's model and credential are used. They are never written into the shared Agent.",
     runtimeModelChoice: "Runtime model for this use",
+    legacyInstalledModelSource:
+      "This route comes from an existing installed Agent Profile and remains available to this account.",
     confirmRuntimeModel: "Confirm and start",
     personalAgent: "My Agent",
     workspaceAgent: "Team / project Agent",
@@ -318,6 +320,15 @@ export default {
       reviewedBy: "Reviewed by",
       policyVersion: "Policy version",
       noSubmissions: "No enterprise submissions yet.",
+      submissionRecordUnavailable:
+        "Some enterprise submission records could not be displayed safely. Other submissions remain available.",
+      referenceConflict:
+        "This submission's local draft link conflicts with Cloud and has been quarantined. Other enterprise submissions are unaffected.",
+      disconnectReference: "Disconnect local draft link",
+      disconnectReferenceTitle: "Disconnect conflicting local draft link",
+      disconnectReferenceBoundary:
+        "Only this Cloud submission's link to the local draft is removed. The Cloud submission, local draft, published versions, installations, Memory, and Profiles remain unchanged.",
+      confirmDisconnectReference: "Disconnect link",
       withdraw: "Withdraw submission",
       confirmWithdrawal: "Confirm withdrawal",
       withdrawalBoundary:
@@ -652,6 +663,10 @@ export default {
         "This Agent version is not compatible with this device's local environment.",
       profile_model_configuration_failed:
         "The current model is incompatible with this signed Agent version. Configure a model allowed by the version, or ask the publisher to release a version compatible with the current model.",
+      model_route_stale:
+        "The selected model changed while this Agent was being prepared. Refresh the model list and select it again.",
+      model_route_unavailable:
+        "The selected model is no longer available for this account. Refresh the model list and choose another configured route.",
       capability_profile_unavailable:
         "The selected local Profile is unavailable. Refresh and try again.",
       capability_source_unsafe:
@@ -680,6 +695,8 @@ export default {
         "This Organization is archived. Its Agent assets are read-only.",
       organization_submission_conflict:
         "This enterprise submission changed. Refresh before retrying.",
+      organization_submission_reference_detach_failed:
+        "The local draft link changed, so it was not disconnected. Refresh and confirm again.",
       organization_submission_superseded:
         "A newer enterprise submission replaced this one.",
       organization_publication_policy_blocked:

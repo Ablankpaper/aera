@@ -134,6 +134,16 @@ export default {
       reviewedBy: "Revisado por",
       policyVersion: "Versión de la política",
       noSubmissions: "Aún no hay envíos empresariales.",
+      submissionRecordUnavailable:
+        "Algunos registros de envíos empresariales no se pudieron mostrar de forma segura; los demás siguen disponibles.",
+      referenceConflict:
+        "El enlace del borrador local de este envío entra en conflicto con Cloud y se ha puesto en cuarentena. Los demás envíos empresariales no se ven afectados.",
+      disconnectReference: "Desconectar enlace del borrador local",
+      disconnectReferenceTitle:
+        "Desconectar enlace de borrador local en conflicto",
+      disconnectReferenceBoundary:
+        "Solo se elimina el enlace entre este envío de Cloud y el borrador local; el envío, el borrador, las versiones publicadas, las instalaciones, Memory y los Profiles permanecen sin cambios.",
+      confirmDisconnectReference: "Desconectar enlace",
       withdraw: "Retirar envío",
       confirmWithdrawal: "Confirmar retirada",
       withdrawalBoundary:

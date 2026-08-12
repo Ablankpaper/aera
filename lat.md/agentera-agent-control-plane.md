@@ -268,6 +268,12 @@ An Agent Installation selects one immutable version for one device/Profile pair 
 
 The authentication installation ID is not reused as the Agent Installation ID. New Agent installations create a fresh Profile with `cloneFrom=null`; existing learned Profiles require explicit same-owner claim. A RuntimeBinding freezes version, Profile, Runtime, policy, and tools for one conversation.
 
+### Legacy source-Profile operation recovery
+
+A pending fresh-Profile operation may name a source Profile without pinning a model-library row when it inherits that Profile's current or default model.
+
+[[src/main/agentera-agent-control/installation-operation-store.ts#InstallationOperationStore]] preserves this Beta.26 row shape across cold restart. An explicit model-library handle still requires a source Profile, so malformed partial handles remain fail-closed while valid legacy operations no longer surface as an installation conflict.
+
 ### Local MCP requirement binding
 
 Manifest V3 MCP requirements are satisfied only by a local, owner/device/Installation-scoped mapping in the employee's selected Profile; shared manifests and Cloud records never receive connection configuration.
@@ -286,11 +292,93 @@ Manifest V1 remains byte-for-byte compatible and keeps its required provider/mod
 
 The concrete route is resolved only when the user starts using or repairs an Agent. The main process validates the selected route against the signed model policy and effective tenant policy, copies only that route and its same-owner credential into the isolated target Profile, and freezes the resolved route in each new RuntimeBinding. Changing the user's selected model affects only later conversations.
 
+#### Signed switch decisions and immutable resume
+
+Candidate selection and current-segment validation are separate Main operations.
+
+[[model-selection#Installed-Agent switch policy and immutable resume]] intersects Manifest and tenant policy, never rewrites an old RuntimeBinding, reuses an identical full route, and fails closed when a current full route's source model or credential disappears.
+
+[[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#prepareConversationRuntime]] adopts the first active segment, resolves opaque selections only through the owner catalog, and exposes only public route identity, thread/segment state, and bounded transition metadata to later IPC layers.
+
+#### Complete local route freeze
+
+Each current RuntimeBinding stores the complete Main-owned execution identity locally while its sanitized Cloud record remains unchanged.
+
+##### Strict current and legacy parsing
+
+[[src/main/agentera-agent-control/frozen-agent-model-route.ts#freezeResolvedOwnerModelRoute]] freezes provider, model, endpoint, API mode, source Profile/model rows, and only the credential reference.
+
+Unknown fields, partial current shapes, paths, raw secrets, invalid endpoints, and control characters fail closed. An exact Beta.26 three-field route remains readable as immutable legacy data.
+
+##### Ordinary transport projection
+
+[[src/main/agentera-agent-control/frozen-agent-model-route.ts#sessionModelOverrideFromFrozenRoute]] returns only provider, model, and Base URL to the ordinary Hermes override boundary.
+
+The API mode, source identities, credential reference, and legacy marker remain Main-only binding state, and none of those local route fields enter the Cloud outbox.
+
+#### Immutable Agent conversation segments
+
+One visible Agent conversation owns an ordered local thread while each model route and Hermes session remains an immutable segment.
+
+##### Owner-scoped thread adoption
+
+[[src/main/agentera-agent-control/conversation-thread-store.ts#ConversationThreadStore#adopt]] adopts one verified legacy binding/boundary idempotently under the exact tenant, account, and device tuple.
+
+##### Candidate lifecycle and CAS activation
+
+[[src/main/agentera-agent-control/conversation-thread-store.ts#ConversationThreadStore#prepareCandidate]] creates only a preparing segment; [[src/main/agentera-agent-control/conversation-thread-store.ts#ConversationThreadStore#activate]] advances the thread with one revision compare-and-set and supersedes the prior active segment.
+
+##### Failure retention and owner-safe lookup
+
+[[src/main/agentera-agent-control/conversation-thread-store.ts#ConversationThreadStore#fail]] retains a failed candidate without changing the active segment, while lookups by root key or any Hermes session recheck the same owner/device scope.
+
+##### Public route projection
+
+Segment snapshots expose only [[model-selection#Full identity, not just the model name|the public route identity]]; route JSON, credential references, and private binding bytes are parsed in Main and never returned.
+
+##### Corrupt row fail-closed
+
+Every segment read reparses the frozen route and rejects malformed or inconsistent rows with a bounded corruption code.
+
+##### Cold session projection
+
+Owner-scoped thread metadata reconstructs one visible session and an authoritative active resume target after Desktop restarts.
+
+[[src/main/agentera-agent-control/conversation-thread-store.ts#ConversationThreadStore#listSessionProjectionRecords]] emits only public segment route identities and history boundaries. [[src/main/agentera-agent-control/conversation-thread-session-projection.ts#ConversationThreadSessionProjection]] hides candidate rows, resolves old segments to the active Hermes session, and derives model-switch markers without exposing credentials or owner identifiers.
+
+##### Whole-thread deletion ordering
+
+Deleting any segment removes every attached Hermes session before the thread, segment, and boundary rows are cleaned up.
+
+[[src/main/ipc/conversation-session-deletion.ts#deleteConversationSessions]] preserves all control metadata on a Hermes failure or unavailable local session database. [[src/main/agentera-agent-control/conversation-thread-store.ts#ConversationThreadStore#deleteThreadsForHermesSessions]] then requires the complete attached-session set before deleting an owner-scoped thread.
+
+##### Atomic binding-boundary-segment preparation
+
+[[src/main/agentera-agent-control/conversation-runtime-coordinator.ts#ConversationRuntimeCoordinator#prepareSegment]] creates the candidate RuntimeBinding, ConversationBoundary, and preparing segment in one immediate SQLite transaction; a boundary failure rolls all three back.
+
+##### Derived segment key and session attachment
+
+[[src/main/agentera-agent-control/conversation-runtime-coordinator.ts#ConversationRuntimeCoordinator#attachSegmentSession]] derives `aera-segment:<threadId>:<segmentId>` in Main and attaches Binding, Boundary, and Segment together without accepting renderer text, model labels, or NUL delimiters.
+
+##### Just-in-time route and credential lease
+
+[[src/main/agent-model-execution-lease.ts#createAgentModelExecutionLease]] re-resolves the frozen source route and credential only inside the real send callback. Unsupported remote routes and bounded validation failures occur before activation and never expose the secret to preload or renderer state.
+
+##### Real transport activation boundary
+
+[[src/main/agent-model-execution-lease.ts#composeAgentModelSegmentCallbacks]] activates a candidate before forwarding the first content, reasoning, or tool event, or on empty successful completion. A pre-activation failure retains the old segment; a later error is forwarded without replay.
+
+##### Renderer acknowledgement without prompt mutation
+
+[[model-selection#Installed-Agent switch policy and immutable resume#Policy-filtered staged selection]] keeps selection opaque until Main validates it, and [[model-selection#Installed-Agent switch policy and immutable resume#Main-acknowledged local marker]] displays the transition only after activation without adding instructions to model history.
+
 An installed or shared Agent never treats an empty successful transport as a usable response. If the Runs API reports completion without text, reasoning, or tool activity, the main process performs the bounded Chat Completions compatibility fallback; any observed tool activity suppresses replay so side effects cannot run twice. If the compatibility path also returns no content, the turn fails instead of rendering a false success.
 
 Creating a Hermes Runtime Profile directly is not equivalent to creating a product Agent. A usable Agent additionally requires a verified immutable AgentVersion, USER-owned Installation, Profile binding, and RuntimeBinding. [[src/main/agentera-agent-control/model-profile-seed.ts#seedAgentModelProfile]] copies only the selected provider route and same-owner credential into the isolated target Profile after validating the signed model policy.
 
 When the active installed Agent Profile is also the selected model source, repair verifies the same-owner binding, credential availability, and signed model constraints in place. An already compatible route is not copied onto itself; a different allowed signed model is reconfigured on that Profile, while an unavailable credential or incompatible route still fails closed. After a version change, [[src/renderer/src/screens/Layout/chatRuns.ts#openProfileRunTransition]] forces a new run even for a same-Profile blank tab, so the previous conversation keeps its original RuntimeBinding and only the new run can freeze the selected version.
+
+Every installation and repair model choice now crosses the owner-scoped [[src/main/agentera-agent-control/owner-model-route-catalog.ts#OwnerModelRouteCatalog]]. Renderer selections carry a revision-bearing opaque handle; [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#resolveModelSelection]] re-resolves it before delegating to [[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager#install]], retry, or repair. This keeps a model saved on an installed Profile available without trusting renderer Profile arbitration.
 
 [[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager#install]] and [[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager#repairInstallationModel]] preserve `profile_model_configuration_failed` when the signed provider/model constraints cannot be projected. [[src/main/agentera-agent-control/ipc-contract.ts#mappedCode]] exposes only that allowlisted reason, and [[src/renderer/src/screens/Agents/AgentControlPanel.tsx#AgentControlPanel]] keeps the pending Agent non-runnable while showing model-compatibility guidance instead of a generic safety error or “published and usable” claim.
 
@@ -419,6 +507,30 @@ An approved submission carries its exact immutable Version ID. The service joins
 [[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager]] records `sourceScope=ORGANIZATION` only as catalog provenance while retaining USER tenant, owner, device, policy overlay, and Runtime Profile ownership. [[src/main/agentera-agent-control/hermes-projection.ts#HermesProjectionManager]] materializes signed Knowledge, Skill, and SOP bytes read-only outside `HERMES_HOME`.
 
 [[src/main/agentera-agent-control/hermes-adapter.ts#AgenteraHermesAdapter#prepareInstalledTurnPlan]] freezes the planned Version, policy, Runtime, Profile, model route, and tool digest per conversation before the atomic local snapshot commit. [[src/main/agentera-agent-control/hermes-adapter.ts#assertNewConversationContext]] rejects only a new Organization conversation after trusted context removal; an existing RuntimeBinding remains stable.
+
+#### Single-list renderer ownership
+
+[[src/renderer/src/screens/Agents/AgentControlPanel.tsx#AgentControlPanel]] owns the only resilient Organization submission-list request for each load or refresh.
+
+The parent stores both submissions and bounded issues, reconciles submissions before drafts, and passes them to [[src/renderer/src/screens/Agents/OrganizationSubmissionPanel.tsx#OrganizationSubmissionPanel]]. The child never invokes either list bridge; it renders one warning only on the quarantined card, keeps Cloud review/withdraw controls status-driven, and sends the exact detach confirmation through the parent. A successful detach updates only that card to `remote_only` without a second list request. The Beta.26 array bridge remains available only for older callers.
+
+#### Conflict persistence and public privacy
+
+Schema v12 records only the owner tuple, Organization/submission IDs, conflict stage/state, reference revision, and timestamps for submission-link conflicts.
+
+[[src/main/agentera-agent-control/organization-submission-reference-store.ts#OrganizationSubmissionReferenceStore]] persists no local draft ID, content digest, prompt, message body, credential, secret, or Profile path in the conflict journal. [[src/main/agentera-agent-control/ipc-contract.ts#publicOrganizationSubmissionList]] rebuilds every public row and forces `localDraftId` and `localDraftRevision` to null for `quarantined` and `remote_only`; malformed-row issues contain only a canonical submission ID or null plus `cloud_record_invalid`.
+
+##### Conflict journal allowlist
+
+The account-scoped conflict journal stores only the bounded fields needed to classify, compare, and resolve one link.
+
+Its schema and store projections exclude local draft identity, content bytes and digests, credentials, prompts, messages, Profile paths, and Hermes state.
+
+##### Public conflict serialization
+
+The IPC serializer rebuilds the envelope from Main-owned values and exposes no conflicting local-link bytes.
+
+Only a `verified` reference may project its local draft ID and revision. `quarantined` and `remote_only` always project both legacy fields as null, while the Beta.26 serializer remains unchanged.
 
 [[tests/e2e/agentera-organization-agent.e2e.ts]] proves the four-role approval and installation flow, Manifest V3 author Skill/MCP selection, employee-local opaque capability mapping to a different MCP, and one real allowed tool reply through either a direct MCP schema or the Runtime's deferred `tool_call` bridge. It also covers restart-safe dirty-draft reconciliation, one-card presentation, withdrawal, archive, version binding stability, offline verified use, reconnect removal, read-only projection, and private-state preservation. Run it with `npm run test:e2e:organization-agent`.
 

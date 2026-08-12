@@ -3,6 +3,25 @@ import { ChevronDown, Check, Asterisk } from "lucide-react";
 import { useI18n } from "../../components/useI18n";
 import BrandLogo from "../../components/common/BrandLogo";
 import type { ModelGroup } from "./types";
+import type {
+  AgentConversationModelContext,
+  OwnerModelRouteSelection,
+} from "../../../../shared/model-configuration";
+
+interface PickerModel {
+  provider: string;
+  model: string;
+  label: string;
+  baseUrl: string;
+  apiMode?: string | null;
+  selection?: OwnerModelRouteSelection;
+}
+
+interface PickerGroup {
+  provider: string;
+  providerLabel: string;
+  models: PickerModel[];
+}
 
 interface ModelPickerProps {
   active?: boolean;
@@ -13,6 +32,12 @@ interface ModelPickerProps {
   displayModel: string;
   onOpen: () => void;
   onSelectModel: (provider: string, model: string, baseUrl: string) => void;
+  /** Installed-Agent context uses Main-owned opaque selections instead of the
+   * ordinary session override bridge. */
+  agentConversation?: AgentConversationModelContext | null;
+  onSelectAgentModel?: (selection: OwnerModelRouteSelection) => void;
+  agentSwitchState?: "idle" | "pending" | "preparing" | "active" | "failed";
+  disabled?: boolean;
 }
 
 export const ModelPicker = memo(function ModelPicker({
@@ -24,6 +49,10 @@ export const ModelPicker = memo(function ModelPicker({
   displayModel,
   onOpen,
   onSelectModel,
+  agentConversation = null,
+  onSelectAgentModel,
+  agentSwitchState = "idle",
+  disabled = false,
 }: ModelPickerProps): React.JSX.Element {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
@@ -73,9 +102,35 @@ export const ModelPicker = memo(function ModelPicker({
       window.removeEventListener("model-picker:open", handleExternalOpen);
   }, [active]);
 
+  const agentGroups: PickerGroup[] = agentConversation
+    ? Array.from(
+        agentConversation.catalog.routes
+          .reduce((groups, route) => {
+            const group = groups.get(route.provider) ?? {
+              provider: route.provider,
+              providerLabel: route.providerLabel,
+              models: [],
+            };
+            group.models.push({
+              provider: route.provider,
+              model: route.model,
+              label: route.displayName || route.model,
+              baseUrl: route.baseUrl,
+              apiMode: route.apiMode,
+              selection: route.selection,
+            });
+            groups.set(route.provider, group);
+            return groups;
+          }, new Map<string, PickerGroup>())
+          .values(),
+      )
+    : [];
+  const sourceGroups: PickerGroup[] = agentConversation
+    ? agentGroups
+    : modelGroups;
   const searchQuery = searchInput.trim().toLowerCase();
   const filteredGroups = searchQuery
-    ? modelGroups
+    ? sourceGroups
         .map((group) => ({
           ...group,
           models: group.models.filter(
@@ -85,7 +140,7 @@ export const ModelPicker = memo(function ModelPicker({
           ),
         }))
         .filter((group) => group.models.length > 0)
-    : modelGroups;
+    : sourceGroups;
 
   // Left rail: one entry per provider brand present (post-search) + counts.
   const railProviders = filteredGroups.map((g) => ({
@@ -114,8 +169,23 @@ export const ModelPicker = memo(function ModelPicker({
   // Surface the current selection first. Rank: exact match (provider+model+URL)
   // → same provider+model → everything else, keeping the original order within
   // each rank so the rest of the list is unchanged.
-  const isSelected = (m: { provider: string; model: string }): boolean =>
-    currentModel === m.model && currentProvider === m.provider;
+  const isSelected = (m: {
+    provider: string;
+    model: string;
+    baseUrl?: string;
+    apiMode?: string | null;
+  }): boolean => {
+    if (agentConversation) {
+      const active = agentConversation.activeRoute;
+      return (
+        active.model === m.model &&
+        active.provider === m.provider &&
+        (active.baseUrl || "") === (m.baseUrl || "") &&
+        (active.apiMode || null) === (m.apiMode || null)
+      );
+    }
+    return currentModel === m.model && currentProvider === m.provider;
+  };
   const rank = (m: {
     provider: string;
     model: string;
@@ -129,15 +199,27 @@ export const ModelPicker = memo(function ModelPicker({
     .sort((a, b) => rank(a.m) - rank(b.m) || a.i - b.i)
     .map((x) => x.m);
 
+  const fixedPolicy = agentConversation?.policyMode === "fixed";
+  const pickerDisabled =
+    disabled ||
+    fixedPolicy ||
+    agentSwitchState === "preparing" ||
+    agentSwitchState === "active";
+
   function toggle(): void {
+    if (pickerDisabled) return;
     if (!isOpen) onOpen();
     setIsOpen((v) => !v);
     setSearchInput("");
     setSelectedBrand(null);
   }
 
-  function select(provider: string, model: string, baseUrl: string): void {
-    onSelectModel(provider, model, baseUrl);
+  function select(model: PickerModel): void {
+    if (agentConversation) {
+      if (model.selection) onSelectAgentModel?.(model.selection);
+    } else {
+      onSelectModel(model.provider, model.model, model.baseUrl);
+    }
     setIsOpen(false);
     setSearchInput("");
     setSelectedBrand(null);
@@ -153,10 +235,31 @@ export const ModelPicker = memo(function ModelPicker({
 
   return (
     <div className="chat-model-bar" ref={pickerRef}>
-      <button className="chat-model-trigger" onClick={toggle}>
+      <button
+        className="chat-model-trigger"
+        onClick={toggle}
+        disabled={pickerDisabled}
+        aria-disabled={pickerDisabled}
+      >
         <span className="chat-model-name">{displayModel}</span>
         <ChevronDown size={12} />
       </button>
+
+      {fixedPolicy && (
+        <span className="chat-model-policy-hint">
+          {t("chat.modelSwitch.fixedPolicy")}
+        </span>
+      )}
+      {(agentSwitchState === "pending" || agentSwitchState === "preparing") && (
+        <span className="chat-model-switch-state">
+          {t("chat.modelSwitch.pending")}
+        </span>
+      )}
+      {agentSwitchState === "failed" && (
+        <span className="chat-model-switch-state chat-model-switch-state-error">
+          {t("chat.modelSwitch.failed")}
+        </span>
+      )}
 
       {isOpen && (
         <div
@@ -244,7 +347,7 @@ export const ModelPicker = memo(function ModelPicker({
                       type="button"
                       key={`${m.provider}:${m.model}:${m.baseUrl}`}
                       className={`chat-model-row ${isActive ? "active" : ""}`}
-                      onClick={() => select(m.provider, m.model, m.baseUrl)}
+                      onClick={() => select(m)}
                     >
                       <span className="chat-model-row-body">
                         <span className="chat-model-row-title">{m.label}</span>
