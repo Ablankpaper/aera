@@ -36,7 +36,7 @@ describe("CI workflow policy", () => {
       {
         name: "Test unit (Windows serial)",
         if: "matrix.os == 'windows-latest'",
-        run: "npm test -- --maxWorkers=1",
+        run: "npm test -- --maxWorkers=1 --testTimeout=20000",
       },
     ]);
   });
