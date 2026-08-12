@@ -24,6 +24,12 @@ The NUL-delimited owner handle and composite route ID are opaque Main-only ident
 
 [[src/renderer/src/screens/Providers/ModelCenter.tsx#ModelCenter]] uses the coordinated mutation whenever the Beta.27 bridge is present: one request saves dependencies and activation, a rejected stage keeps the editor open, and a post-commit refresh warning is shown as a warning rather than a failed save. The returned catalog supplies the canonical active route and target Profile. A feature-detected Beta.26 low-level bridge remains only as an older-client compatibility fallback.
 
+## Legacy installation recovery
+
+Cold recovery accepts a fresh Installation operation that names only its source Profile and intentionally inherits that Profile's current or default model.
+
+[[src/main/agentera-agent-control/installation-operation-store.ts#InstallationOperationStore]] parses the source Profile and optional model handle independently. A model handle still requires its source Profile, while a Profile-only legacy row no longer becomes `operation_corrupt` and then `installation_conflict` after restart.
+
 ## Organization submission isolation
 
 One stale local draft reference will be quarantined per Cloud submission instead of failing the full [[agentera-organizations]] list.
@@ -35,6 +41,24 @@ The parent Agent control panel will own one list request, while the child panel 
 Installed-Agent model changes will keep one visible thread while creating immutable local segments in [[agentera-agent-control-plane]].
 
 Each segment freezes one resolved route, RuntimeBinding, ConversationBoundary, and Hermes session. Activation occurs at the first output or tool event; a pre-output failure leaves the previous segment active, and a post-output failure is never replayed automatically.
+
+### Cold projection and resume
+
+Cold startup reconstructs one visible conversation from all owner-scoped immutable Hermes segments without exposing frozen-route or credential metadata.
+
+[[src/main/agentera-agent-control/conversation-thread-session-projection.ts#ConversationThreadSessionProjection]] collapses activated segments onto the active session, hides preparing and failed candidates, and resolves any historical segment ID to the active session. [[src/renderer/src/screens/Chat/sessionHistory.ts#mergeConversationThreadMarkers]] rebuilds renderer-only model markers from persisted history boundaries.
+
+### Whole-thread deletion
+
+Deleting any session belonging to a projected Agent thread removes the whole local thread rather than leaving hidden immutable segments behind.
+
+[[src/main/ipc/conversation-session-deletion.ts#deleteConversationSessions]] expands the request and deletes Hermes sessions before thread and boundary metadata. If the local Hermes database is unavailable, control metadata is retained so a partial cleanup cannot create an unrecoverable split state.
+
+### Runtime capability negotiation
+
+A dynamic provider or endpoint switch is admitted only when the connected Runtime explicitly supports request-scoped Agent routes.
+
+[[src/main/hermes.ts#supportsHermesAgentModelRoute]] requires both `features.request_model_route=true` and the canonical `/v1/chat/completions` endpoint. [[src/main/hermes.ts#sendMessage]] rejects an unsupported dynamic route before serializing `aera_model_route`, while an already configured frozen route stays on the ordinary bound transport.
 
 ## Acceptance and release boundary
 

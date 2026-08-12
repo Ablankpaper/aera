@@ -15,6 +15,7 @@ import type { TokenBalancesResponse } from "../shared/tokens";
 import type { CustomProviderRecord } from "../shared/custom-providers";
 import type {
   AgentConversationSegmentEvent,
+  AgentConversationThreadResumeProjection,
   ModelConfigurationMutationRequest,
   ModelConfigurationMutationResult,
   OwnerModelRouteCatalogSnapshot,
@@ -1266,8 +1267,13 @@ interface HermesAPI {
       model: string;
       title: string | null;
       preview: string;
+      threadId?: string;
+      segmentCount?: number;
     }>
   >;
+  resolveSessionThread: (
+    sessionId: string,
+  ) => Promise<AgentConversationThreadResumeProjection | null>;
   getSessionMessages: (sessionId: string) => Promise<
     Array<
       | {

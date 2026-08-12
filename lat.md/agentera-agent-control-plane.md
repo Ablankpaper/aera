@@ -268,6 +268,12 @@ An Agent Installation selects one immutable version for one device/Profile pair 
 
 The authentication installation ID is not reused as the Agent Installation ID. New Agent installations create a fresh Profile with `cloneFrom=null`; existing learned Profiles require explicit same-owner claim. A RuntimeBinding freezes version, Profile, Runtime, policy, and tools for one conversation.
 
+### Legacy source-Profile operation recovery
+
+A pending fresh-Profile operation may name a source Profile without pinning a model-library row when it inherits that Profile's current or default model.
+
+[[src/main/agentera-agent-control/installation-operation-store.ts#InstallationOperationStore]] preserves this Beta.26 row shape across cold restart. An explicit model-library handle still requires a source Profile, so malformed partial handles remain fail-closed while valid legacy operations no longer surface as an installation conflict.
+
 ### Local MCP requirement binding
 
 Manifest V3 MCP requirements are satisfied only by a local, owner/device/Installation-scoped mapping in the employee's selected Profile; shared manifests and Cloud records never receive connection configuration.
@@ -333,6 +339,18 @@ Segment snapshots expose only [[model-selection#Full identity, not just the mode
 ##### Corrupt row fail-closed
 
 Every segment read reparses the frozen route and rejects malformed or inconsistent rows with a bounded corruption code.
+
+##### Cold session projection
+
+Owner-scoped thread metadata reconstructs one visible session and an authoritative active resume target after Desktop restarts.
+
+[[src/main/agentera-agent-control/conversation-thread-store.ts#ConversationThreadStore#listSessionProjectionRecords]] emits only public segment route identities and history boundaries. [[src/main/agentera-agent-control/conversation-thread-session-projection.ts#ConversationThreadSessionProjection]] hides candidate rows, resolves old segments to the active Hermes session, and derives model-switch markers without exposing credentials or owner identifiers.
+
+##### Whole-thread deletion ordering
+
+Deleting any segment removes every attached Hermes session before the thread, segment, and boundary rows are cleaned up.
+
+[[src/main/ipc/conversation-session-deletion.ts#deleteConversationSessions]] preserves all control metadata on a Hermes failure or unavailable local session database. [[src/main/agentera-agent-control/conversation-thread-store.ts#ConversationThreadStore#deleteThreadsForHermesSessions]] then requires the complete attached-session set before deleting an owner-scoped thread.
 
 ##### Atomic binding-boundary-segment preparation
 

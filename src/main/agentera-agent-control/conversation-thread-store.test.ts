@@ -461,4 +461,45 @@ describe("owner-scoped conversation thread store", () => {
         .get(),
     ).toEqual({ count: 1 });
   });
+
+  it("deletes only complete owner-scoped thread metadata and retains audit bindings and boundaries", () => {
+    const active = store.adopt(adoption());
+    const candidate = store.prepareCandidate(
+      candidateInput(active.thread.id, active.thread.revision),
+    );
+    coordinator.attachHermesSession({
+      runtimeBindingId: candidate.segment.runtimeBindingId,
+      boundaryId: candidate.segment.conversationBoundaryId,
+      sessionId: "hermes-new",
+    });
+    store.attachSession(candidate.segment.id, "hermes-new");
+    store.activate({
+      threadId: active.thread.id,
+      segmentId: candidate.segment.id,
+      expectedThreadRevision: active.thread.revision,
+    });
+
+    expect(() =>
+      store.deleteThreadsForHermesSessions(["hermes-old"]),
+    ).toThrowError(
+      expect.objectContaining<Partial<ConversationThreadStoreError>>({
+        code: "model_switch_segment_conflict",
+      }),
+    );
+
+    expect(
+      store.deleteThreadsForHermesSessions(["hermes-old", "hermes-new"]),
+    ).toEqual({ deletedThreads: 1, deletedSegments: 2 });
+    expect(store.listSessionProjectionRecords()).toEqual([]);
+    expect(
+      database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM runtime_bindings")
+        .get(),
+    ).toEqual({ count: 2 });
+    expect(
+      database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM conversation_boundaries")
+        .get(),
+    ).toEqual({ count: 2 });
+  });
 });

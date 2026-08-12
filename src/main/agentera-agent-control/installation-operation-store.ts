@@ -346,22 +346,19 @@ function parseRow(row: unknown): InstallationOperationRecord {
     value.display_name === null
       ? null
       : boundedText(value.display_name, 256, "operation_corrupt");
-  const hasPersistedModelSelection =
-    value.model_source_profile_id !== null &&
-    value.model_source_profile_id !== undefined;
-  const hasPersistedModelHandle =
-    hasPersistedModelSelection ||
-    (value.model_source_model_id !== null &&
-      value.model_source_model_id !== undefined);
-  const parsedPersistedSelection = hasPersistedModelHandle
-    ? parseBeta26PersistedRuntimeModelSelection(
-        value.model_source_profile_id,
-        value.model_source_model_id,
-      )
-    : null;
-  const modelSourceProfileId =
-    parsedPersistedSelection?.sourceProfileId ?? null;
-  const modelSourceModelId = parsedPersistedSelection?.modelLibraryId ?? null;
+  // A fresh target may intentionally select only a source Profile and inherit
+  // that Profile's current/default model. Beta.26 model-library handles are
+  // validated when both are present, but a missing model handle is valid legacy
+  // state and must survive a cold recovery.
+  const modelSourceProfileId = optionalProfileId(
+    value.model_source_profile_id,
+    "operation_corrupt",
+  );
+  const modelSourceModelId = optionalBoundedText(
+    value.model_source_model_id,
+    512,
+    "operation_corrupt",
+  );
   if (
     (targetKind !== "fresh" && targetKind !== "claim") ||
     (targetKind === "fresh" && displayName === null) ||

@@ -3,14 +3,23 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LocalCapabilityBinding } from "./capability-binding-store";
 import { CapabilityBindingService } from "./capability-binding-service";
-import type { CapabilityBindingInstallation } from "./capability-binding-service";
+import type {
+  CapabilityBindingInstallation,
+  CapabilityBindingServiceOptions,
+} from "./capability-binding-service";
 
 const INSTALLATION_ID = "10000000-0000-4000-8000-000000000001";
 const PROFILE_ID = "10000000-0000-4000-8000-000000000002";
 const VERSION_ID = "10000000-0000-4000-8000-000000000003";
 const MAPPING_HANDLE = "10000000-0000-4000-8000-000000000004";
 
-function serviceOptions() {
+function serviceOptions(): {
+  bindings: LocalCapabilityBinding[];
+  upsert: ReturnType<typeof vi.fn>;
+  getInstallation: ReturnType<typeof vi.fn>;
+  resumePendingInstallation: ReturnType<typeof vi.fn>;
+  options: CapabilityBindingServiceOptions;
+} {
   const bindings: LocalCapabilityBinding[] = [];
   const upsert = vi.fn((input) => {
     const binding: LocalCapabilityBinding = {

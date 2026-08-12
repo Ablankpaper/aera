@@ -64,6 +64,24 @@ A current full route must still resolve to the exact source Profile/model row an
 
 [[src/renderer/src/screens/Chat/chatMessages.ts#insertModelSwitchMarker]] inserts and deduplicates a renderer-only marker only after an `active` segment event. The marker is excluded from prompts and transcript export, while duplicate events cannot advance the visible ordinal twice.
 
+### Cold resume projects the active segment
+
+Session history presents one Agent thread even though each accepted model switch owns a separate immutable Hermes session.
+
+[[src/main/agentera-agent-control/conversation-thread-session-projection.ts#projectSessionSummaries]] replaces activated segment rows with the active session summary and leaves ordinary sessions unchanged. Resuming any known segment first resolves the active session through Main, then [[src/renderer/src/screens/Chat/sessionHistory.ts#buildConversationThreadResume]] restores its history and local switch markers.
+
+### Whole-thread cleanup
+
+Deleting one projected Agent session expands to every attached Hermes segment before owner-scoped control metadata is removed.
+
+[[src/main/ipc/conversation-session-deletion.ts#deleteConversationSessions]] preserves metadata when Hermes deletion fails or its local database is unavailable, and stops before boundary cleanup if thread cleanup conflicts.
+
+### Dynamic Runtime route capability
+
+Cross-provider and cross-endpoint Agent switches stay fail-closed until Runtime advertises the exact request-scoped route contract.
+
+[[src/main/hermes.ts#supportsHermesAgentModelRoute]] requires `request_model_route` plus `/v1/chat/completions`; [[src/main/hermes.ts#buildAgentModelRequestBody]] adds the short-lived `aera_model_route` only for a Main-approved dynamic execution lease. Unsupported Runtime versions return `model_switch_runtime_route_unsupported` without replaying the prompt.
+
 ## Desktop-only persistence
 
 The selected model/provider is saved in a desktop-owned table keyed by session id, without storing API keys.

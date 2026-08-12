@@ -63,7 +63,7 @@ function visibleHistoryCount(
  * Keep the real send handler's Manager input construction in one testable
  * boundary. Renderer selections remain opaque until Manager resolves them.
  */
-export function prepareAgentModelSend(
+export function prepareConversationRuntime(
   input: PrepareAgentModelSendInput,
 ): Promise<PreparedAgenteraConversationRuntime> {
   return input.control.prepareConversationRuntime({
@@ -77,3 +77,6 @@ export function prepareAgentModelSend(
     visibleHistoryCount: visibleHistoryCount(input.history),
   });
 }
+
+/** Backward-compatible name for focused send-boundary tests and callers. */
+export const prepareAgentModelSend = prepareConversationRuntime;

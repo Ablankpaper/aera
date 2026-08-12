@@ -648,7 +648,9 @@ export class OrganizationExperienceCandidateService {
   private markAmbiguous(candidateId: string): void {
     try {
       this.options.store.markUploadFailed(candidateId, "cloud_unavailable");
-    } catch {}
+    } catch {
+      // Preserve the original ambiguous Cloud outcome if local recovery fails.
+    }
   }
 
   private markDeterministic(candidateId: string, code: string): void {
@@ -657,7 +659,9 @@ export class OrganizationExperienceCandidateService {
         candidateId,
         /^[a-z][a-z0-9_]{0,63}$/.test(code) ? code : "request_failed",
       );
-    } catch {}
+    } catch {
+      // Preserve the original deterministic Cloud outcome if local recovery fails.
+    }
   }
 
   private matches(

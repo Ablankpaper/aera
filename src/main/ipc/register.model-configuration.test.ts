@@ -54,7 +54,13 @@ function upsertRequest(
   };
 }
 
-function subject() {
+function subject(): {
+  bridge: ReturnType<typeof createModelConfigurationIpcBridge>;
+  coordinator: ModelConfigurationIpcBridgeDependencies["coordinator"];
+  assertRequestedProfile: NonNullable<
+    ModelConfigurationIpcBridgeDependencies["assertRequestedProfile"]
+  >;
+} {
   const coordinator = {
     mutate: vi.fn(async () => ({
       status: "committed" as const,

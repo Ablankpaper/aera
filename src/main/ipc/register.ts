@@ -204,8 +204,9 @@ import {
 } from "../agent-model-execution-lease";
 import {
   classifyAgentModelRoute,
-  prepareAgentModelSend,
+  prepareConversationRuntime,
 } from "./agent-model-send";
+import { deleteConversationSessions } from "./conversation-session-deletion";
 import {
   getAuxiliaryConfig,
   setAuxiliaryTask,
@@ -216,16 +217,16 @@ import {
   listSessions,
   getSessionMessages,
   searchSessions,
-  deleteSession,
   deleteSessions,
+  isSessionDatabaseAvailable,
 } from "../sessions";
+import { projectSessionSummaries } from "../agentera-agent-control/conversation-thread-session-projection";
 import {
   syncSessionCache,
   listCachedSessions,
   updateSessionTitle,
 } from "../session-cache";
 import {
-  remoteDeleteSession,
   remoteDeleteSessions,
   remoteGetSessionMessages,
   remoteListCachedSessions,
@@ -3614,7 +3615,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         }
         const preparedConversationRuntime =
           agenteraAgentControl && hasSignedInAccess
-            ? await prepareAgentModelSend({
+            ? await prepareConversationRuntime({
                 control: agenteraAgentControl,
                 conversationKey: identityConversationKey,
                 profilePath: profileHome(profile),
@@ -4338,17 +4339,87 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
 
   // Sessions
-  ipcMain.handle("list-sessions", (_event, limit?: number, offset?: number) => {
-    const conn = getConnectionConfig();
-    if (conn.mode === "remote") return remoteListSessions(conn, limit, offset);
-    if (conn.mode === "ssh" && conn.ssh)
-      return withSshDashboardSessions(
-        conn,
-        (config) => remoteListSessions(config, limit, offset),
-        () => sshListSessions(conn.ssh, limit, offset),
-        activeSshProfile(),
+  const currentConversationSessionProjection = (): {
+    owner: AgenteraRuntimeOwner;
+    projection: ReturnType<
+      AgenteraAgentControlManager["getConversationThreadSessionProjection"]
+    >;
+  } | null => {
+    if (!agenteraAgentControl) return null;
+    try {
+      const owner = getAgenteraRuntimeOwner();
+      return {
+        owner,
+        projection:
+          agenteraAgentControl.getConversationThreadSessionProjection(owner),
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  ipcMain.handle(
+    "list-sessions",
+    async (_event, limit?: number, offset?: number) => {
+      const conn = getConnectionConfig();
+      const projectionState = currentConversationSessionProjection();
+      const pageLimit =
+        typeof limit === "number" && Number.isSafeInteger(limit) && limit >= 0
+          ? limit
+          : 30;
+      const pageOffset =
+        typeof offset === "number" &&
+        Number.isSafeInteger(offset) &&
+        offset >= 0
+          ? offset
+          : 0;
+      const projectionFetchLimit = Math.min(
+        Math.max(pageOffset + pageLimit * 8, 200),
+        5000,
       );
-    return listSessions(limit, offset);
+      const sessions =
+        conn.mode === "remote"
+          ? await remoteListSessions(
+              conn,
+              projectionState ? projectionFetchLimit : limit,
+              projectionState ? 0 : offset,
+            )
+          : conn.mode === "ssh" && conn.ssh
+            ? await withSshDashboardSessions(
+                conn,
+                (config) =>
+                  remoteListSessions(
+                    config,
+                    projectionState ? projectionFetchLimit : limit,
+                    projectionState ? 0 : offset,
+                  ),
+                () =>
+                  sshListSessions(
+                    conn.ssh!,
+                    projectionState ? projectionFetchLimit : limit,
+                    projectionState ? 0 : offset,
+                  ),
+                activeSshProfile(),
+              )
+            : listSessions(
+                projectionState ? -1 : limit,
+                projectionState ? 0 : offset,
+              );
+      if (!projectionState) return sessions;
+      return projectSessionSummaries({
+        sessions,
+        threads: projectionState.projection.records(),
+      }).slice(pageOffset, pageOffset + pageLimit);
+    },
+  );
+
+  ipcMain.handle("resolve-session-thread", (_event, sessionId: string) => {
+    if (typeof sessionId !== "string" || !sessionId.trim()) return null;
+    return (
+      currentConversationSessionProjection()?.projection.resolveResume(
+        sessionId,
+      ) ?? null
+    );
   });
 
   ipcMain.handle("get-session-messages", (_event, sessionId: string) => {
@@ -4444,32 +4515,49 @@ export function registerIpcHandlers(context: IpcContext): void {
     } catch {
       owner = null;
     }
+    const projectionState = owner
+      ? currentConversationSessionProjection()
+      : null;
     const conn = getConnectionConfig();
-    const result =
-      conn.mode === "remote"
-        ? await remoteDeleteSession(conn, sessionId)
-        : conn.mode === "ssh" && conn.ssh
-          ? await withSshDashboardSessions(
-              conn,
-              (config) => remoteDeleteSession(config, sessionId),
-              undefined,
-              activeSshProfile(),
-            )
-          : deleteSession(sessionId);
-    if (owner) {
-      try {
+    const metadataDeletionAvailable =
+      conn.mode !== "local" || isSessionDatabaseAvailable();
+    await deleteConversationSessions({
+      sessionIds: [sessionId],
+      projection: projectionState?.projection ?? null,
+      metadataDeletionAvailable: owner !== null && metadataDeletionAvailable,
+      deleteHermesSessions: async (resolvedIds) => {
+        if (conn.mode === "remote") {
+          return remoteDeleteSessions(conn, resolvedIds);
+        }
+        if (conn.mode === "ssh" && conn.ssh) {
+          return withSshDashboardSessions(
+            conn,
+            (config) => remoteDeleteSessions(config, resolvedIds),
+            undefined,
+            activeSshProfile(),
+          );
+        }
+        return deleteSessions(resolvedIds);
+      },
+      deleteThreadMetadata: (resolvedIds) =>
+        agenteraAgentControl?.deleteConversationThreadsForSessions(
+          resolvedIds,
+          owner!,
+        ),
+      deleteBoundaryMetadata: (resolvedIds) =>
         agenteraAgentControl?.deleteConversationBoundariesForSessions(
-          [sessionId],
-          owner,
-        );
-      } catch (error) {
+          resolvedIds,
+          owner!,
+        ),
+      onMetadataError: (kind) => {
         console.warn(
-          "[agentera-conversation-boundary] Failed to remove deleted session boundary:",
-          error,
+          kind === "thread"
+            ? "[agentera-conversation-thread] Failed to remove deleted thread metadata."
+            : "[agentera-conversation-boundary] Failed to remove deleted session boundary.",
         );
-      }
-    }
-    return result;
+      },
+    });
+    return undefined;
   });
 
   ipcMain.handle("delete-sessions", async (_event, sessionIds: string[]) => {
@@ -4480,32 +4568,48 @@ export function registerIpcHandlers(context: IpcContext): void {
     } catch {
       owner = null;
     }
+    const projectionState = owner
+      ? currentConversationSessionProjection()
+      : null;
     const conn = getConnectionConfig();
-    const result =
-      conn.mode === "remote"
-        ? await remoteDeleteSessions(conn, ids)
-        : conn.mode === "ssh" && conn.ssh
-          ? await withSshDashboardSessions(
-              conn,
-              (config) => remoteDeleteSessions(config, ids),
-              undefined,
-              activeSshProfile(),
-            )
-          : deleteSessions(ids);
-    if (owner) {
-      try {
+    const metadataDeletionAvailable =
+      conn.mode !== "local" || isSessionDatabaseAvailable();
+    return deleteConversationSessions({
+      sessionIds: ids,
+      projection: projectionState?.projection ?? null,
+      metadataDeletionAvailable: owner !== null && metadataDeletionAvailable,
+      deleteHermesSessions: async (resolvedIds) => {
+        if (conn.mode === "remote") {
+          return remoteDeleteSessions(conn, resolvedIds);
+        }
+        if (conn.mode === "ssh" && conn.ssh) {
+          return withSshDashboardSessions(
+            conn,
+            (config) => remoteDeleteSessions(config, resolvedIds),
+            undefined,
+            activeSshProfile(),
+          );
+        }
+        return deleteSessions(resolvedIds);
+      },
+      deleteThreadMetadata: (resolvedIds) =>
+        agenteraAgentControl?.deleteConversationThreadsForSessions(
+          resolvedIds,
+          owner!,
+        ),
+      deleteBoundaryMetadata: (resolvedIds) =>
         agenteraAgentControl?.deleteConversationBoundariesForSessions(
-          ids,
-          owner,
-        );
-      } catch (error) {
+          resolvedIds,
+          owner!,
+        ),
+      onMetadataError: (kind) => {
         console.warn(
-          "[agentera-conversation-boundary] Failed to remove deleted session boundaries:",
-          error,
+          kind === "thread"
+            ? "[agentera-conversation-thread] Failed to remove deleted thread metadata."
+            : "[agentera-conversation-boundary] Failed to remove deleted session boundaries.",
         );
-      }
-    }
-    return result;
+      },
+    });
   });
 
   // Profiles

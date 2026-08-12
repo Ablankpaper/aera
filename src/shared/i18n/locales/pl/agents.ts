@@ -131,6 +131,15 @@ export default {
       reviewedBy: "Recenzent",
       policyVersion: "Wersja zasad",
       noSubmissions: "Brak zgłoszeń firmowych.",
+      submissionRecordUnavailable:
+        "Nie można bezpiecznie wyświetlić części zgłoszeń firmowych; pozostałe zgłoszenia są nadal dostępne.",
+      referenceConflict:
+        "Link lokalnego szkicu tego zgłoszenia jest sprzeczny z Cloud i został odizolowany. Inne zgłoszenia firmowe nie zostały naruszone.",
+      disconnectReference: "Odłącz link lokalnego szkicu",
+      disconnectReferenceTitle: "Odłącz sprzeczny link lokalnego szkicu",
+      disconnectReferenceBoundary:
+        "Usuwany jest tylko link tego zgłoszenia Cloud do lokalnego szkicu; zgłoszenie Cloud, szkic, opublikowane wersje, instalacje, Memory i Profile pozostają bez zmian.",
+      confirmDisconnectReference: "Odłącz link",
       withdraw: "Wycofaj zgłoszenie",
       confirmWithdrawal: "Potwierdź wycofanie",
       withdrawalBoundary:

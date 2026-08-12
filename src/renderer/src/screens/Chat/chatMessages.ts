@@ -67,10 +67,21 @@ export function insertModelSwitchMarker(
     segmentId: event.segmentId,
     localOnly: true,
   };
-  const boundary = Math.max(
-    0,
-    Math.min(messages.length, Math.floor(event.historyBoundaryCount)),
-  );
+  const wantedBoundary = Math.max(0, Math.floor(event.historyBoundaryCount));
+  let countedHistory = 0;
+  let boundary = messages.length;
+  if (wantedBoundary === 0) {
+    boundary = 0;
+  } else {
+    for (let index = 0; index < messages.length; index++) {
+      if (!shouldSendToAgent(messages[index])) continue;
+      countedHistory += 1;
+      if (countedHistory >= wantedBoundary) {
+        boundary = index + 1;
+        break;
+      }
+    }
+  }
   return [...messages.slice(0, boundary), marker, ...messages.slice(boundary)];
 }
 

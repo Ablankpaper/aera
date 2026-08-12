@@ -16,6 +16,7 @@ import type { TokenBalancesResponse } from "../shared/tokens";
 import type { CustomProviderRecord } from "../shared/custom-providers";
 import type {
   AgentConversationSegmentEvent,
+  AgentConversationThreadResumeProjection,
   ModelConfigurationMutationRequest,
   ModelConfigurationMutationResult,
   OwnerModelRouteCatalogSnapshot,
@@ -978,8 +979,15 @@ const hermesAPI = {
       model: string;
       title: string | null;
       preview: string;
+      threadId?: string;
+      segmentCount?: number;
     }>
   > => ipcRenderer.invoke("list-sessions", limit, offset),
+
+  resolveSessionThread: (
+    sessionId: string,
+  ): Promise<AgentConversationThreadResumeProjection | null> =>
+    ipcRenderer.invoke("resolve-session-thread", sessionId),
 
   getSessionMessages: (
     sessionId: string,

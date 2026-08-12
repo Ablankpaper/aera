@@ -33,7 +33,15 @@ const transition: AgentModelSegmentTransition = {
   historyBoundaryCount: 2,
 };
 
-function lifecycleHarness() {
+function lifecycleHarness(): {
+  control: {
+    attachConversationRuntimeSession: ReturnType<typeof vi.fn>;
+    activateConversationSegment: ReturnType<typeof vi.fn>;
+    failConversationSegment: ReturnType<typeof vi.fn>;
+  };
+  events: unknown[];
+  lifecycle: ReturnType<typeof createAgentModelSegmentLifecycle>;
+} {
   const control = {
     attachConversationRuntimeSession: vi.fn(),
     activateConversationSegment: vi.fn(),

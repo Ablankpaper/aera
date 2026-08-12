@@ -46,7 +46,9 @@ function nodeSqliteFactory(path: string): AgenteraSqliteDatabase {
   return new DatabaseSync(path) as unknown as AgenteraSqliteDatabase;
 }
 
-function canonicalCandidate() {
+function canonicalCandidate(): ReturnType<
+  typeof canonicalizeExperienceCandidate
+> {
   return canonicalizeExperienceCandidate({
     schemaVersion: 1,
     skillName: "weekly-summary",

@@ -114,6 +114,7 @@ import {
   ConversationThreadStore,
   type ConversationThreadSnapshot,
 } from "./conversation-thread-store";
+import { ConversationThreadSessionProjection } from "./conversation-thread-session-projection";
 import { ExperienceCandidateService } from "./experience-candidate-service";
 import { ExperienceCandidateImporter } from "./experience-candidate-importer";
 import { ExperienceCandidateStore } from "./experience-candidate-store";
@@ -138,7 +139,10 @@ import {
   CapabilityAuthoringService,
   type CapabilityAuthoringServiceOptions,
 } from "./capability-authoring-service";
-import { CapabilityBindingStore } from "./capability-binding-store";
+import {
+  CapabilityBindingStore,
+  type LocalMcpCapabilityServer,
+} from "./capability-binding-store";
 import { CapabilityBindingService } from "./capability-binding-service";
 import { listInstalledSkills } from "../skills";
 import {
@@ -1950,6 +1954,23 @@ export class AgenteraAgentControlManager {
     );
   }
 
+  getConversationThreadSessionProjection(
+    owner: AgenteraRuntimeOwner,
+  ): ConversationThreadSessionProjection {
+    return new ConversationThreadSessionProjection(
+      this.conversationThreadStore(owner).listSessionProjectionRecords(),
+    );
+  }
+
+  deleteConversationThreadsForSessions(
+    sessionIds: readonly string[],
+    owner: AgenteraRuntimeOwner,
+  ): { deletedThreads: number; deletedSegments: number } {
+    return this.conversationThreadStore(owner).deleteThreadsForHermesSessions(
+      sessionIds,
+    );
+  }
+
   private requireFull(): FullAgentControlOptions {
     const options = this.options as AgenteraAgentControlManagerOptions &
       Partial<FullAgentControlOptions>;
@@ -2257,7 +2278,9 @@ export class AgenteraAgentControlManager {
       database: full.database,
       owner,
     });
-    const getProfileMcpCapabilities = async (profilePath: string) => {
+    const getProfileMcpCapabilities = async (
+      profilePath: string,
+    ): Promise<LocalMcpCapabilityServer[]> => {
       const profileHandle = localProfileHandleForPath(
         profilePath,
         (candidate) => full.profiles.resolveProfilePath(candidate),

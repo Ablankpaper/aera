@@ -547,7 +547,9 @@ export default function AgentControlPanel({
 
   const disconnectOrganizationSubmissionReference = async (
     input: DisconnectOrganizationSubmissionReferenceInput,
-  ) => {
+  ): ReturnType<
+    typeof window.agenteraAgents.disconnectOrganizationSubmissionReference
+  > => {
     const result =
       await window.agenteraAgents.disconnectOrganizationSubmissionReference(
         input,

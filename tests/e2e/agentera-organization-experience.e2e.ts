@@ -13,6 +13,7 @@ import type {
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
   AgenteraAgentVersionSummary,
+  CreateAgentDraftInput,
   EligibleExperienceSkill,
   OrganizationAgentSubmissionSummary,
   OrganizationExperienceCandidateDetail,
@@ -182,7 +183,7 @@ async function selectOrganization(
     .toEqual({ scope: "ORGANIZATION", organizationId, role });
 }
 
-function initialDraft() {
+function initialDraft(): CreateAgentDraftInput {
   return {
     sourceAgentDefinitionId: null,
     baseAgentVersionId: null,

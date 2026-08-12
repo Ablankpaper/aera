@@ -42,6 +42,7 @@ import type {
   OwnerModelRouteCatalog,
   ResolvedOwnerModelRoute,
 } from "./owner-model-route-catalog";
+import type { FrozenAgentModelRoute } from "./frozen-agent-model-route";
 import { canonicalizeEditableAgent } from "./manifest";
 
 const OWNER = {
@@ -461,13 +462,18 @@ describe("Agent control Organization Foundation context", () => {
   });
 
   it("does not detach an in-flight capability inventory during a same-context refresh", async () => {
-    let manager!: AgenteraAgentControlManager;
+    const { manager } = fullManager(() => ({
+      scope: "ORGANIZATION",
+      organizationId: ORGANIZATION_ID,
+      role: "owner",
+    }));
     let listedService: CapabilityAuthoringService | null = null;
     let preparedService: CapabilityAuthoringService | null = null;
     vi.spyOn(
       CapabilityAuthoringService.prototype,
       "listAuthoringCapabilities",
     ).mockImplementation(async function (this: CapabilityAuthoringService) {
+      // eslint-disable-next-line @typescript-eslint/no-this-alias -- The assertion verifies both calls use the exact same service instance.
       listedService = this;
       manager.notifyAgentContextChanged();
       return {
@@ -486,6 +492,7 @@ describe("Agent control Organization Foundation context", () => {
       CapabilityAuthoringService.prototype,
       "prepareInstalledSkillSnapshot",
     ).mockImplementation(function (this: CapabilityAuthoringService) {
+      // eslint-disable-next-line @typescript-eslint/no-this-alias -- The assertion verifies both calls use the exact same service instance.
       preparedService = this;
       return {
         snapshotHandle: "snapshot-handle",
@@ -501,12 +508,6 @@ describe("Agent control Organization Foundation context", () => {
         expiresAt: "2026-08-06T00:10:00.000Z",
       };
     });
-    ({ manager } = fullManager(() => ({
-      scope: "ORGANIZATION",
-      organizationId: ORGANIZATION_ID,
-      role: "owner",
-    })));
-
     await manager.listAuthoringCapabilities("default");
     manager.prepareInstalledSkillSnapshot({
       profileId: "default",
@@ -922,7 +923,9 @@ describe("Agent control Organization Foundation context", () => {
   });
 
   it("resolves a different opaque selection into a preparing candidate segment", async () => {
-    const routeToFrozen = (route: ResolvedOwnerModelRoute) => ({
+    const routeToFrozen = (
+      route: ResolvedOwnerModelRoute,
+    ): FrozenAgentModelRoute => ({
       provider: route.provider,
       model: route.model,
       baseUrl: route.baseUrl,

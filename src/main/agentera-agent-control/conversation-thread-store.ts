@@ -2,6 +2,7 @@ import { randomUUID as nodeRandomUUID } from "node:crypto";
 import type { PublicModelRouteIdentity } from "../../shared/model-configuration";
 import type { AgenteraRuntimeOwner } from "../agentera-profile-binding";
 import type { AgenteraControlPlaneDatabase } from "./db";
+import type { ConversationThreadProjectionRecord } from "./conversation-thread-session-projection";
 import {
   parseFrozenAgentModelRoute,
   serializeFrozenAgentModelRoute,
@@ -1010,6 +1011,116 @@ export class ConversationThreadStore {
         this.owner.deviceInstallationId,
       ) as SegmentRow[];
     return rows.map((row) => parseSegment(row, this.owner));
+  }
+
+  /**
+   * Return only the owner-scoped, renderer-safe metadata needed to collapse
+   * Hermes sessions. Frozen route JSON and credential references are parsed in
+   * this store and never leave Main through this projection.
+   */
+  listSessionProjectionRecords(): ConversationThreadProjectionRecord[] {
+    const rows = this.database.sqlite
+      .prepare(
+        `${SELECT_THREAD}
+         WHERE tenant_id = ? AND owner_id = ? AND device_installation_id = ?
+         ORDER BY updated_at DESC, id ASC`,
+      )
+      .all(
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+      ) as ThreadRow[];
+    return rows.map((row) => {
+      const thread = parseThread(row, this.owner);
+      return {
+        threadId: thread.id,
+        activeSegmentId: thread.activeSegmentId,
+        segments: this.listSegments(thread.id).map((segment) => ({
+          segmentId: segment.id,
+          ordinal: segment.ordinal,
+          state: segment.state,
+          hermesSessionId: segment.hermesSessionId,
+          route: segment.route,
+          historyBoundaryCount: segment.historyBoundaryCount,
+        })),
+      };
+    });
+  }
+
+  deleteThreadsForHermesSessions(sessionIdValues: ReadonlyArray<string>): {
+    deletedThreads: number;
+    deletedSegments: number;
+  } {
+    const sessionIds = Array.from(
+      new Set(
+        sessionIdValues.map((value) =>
+          boundedText(value, 512, "invalid_model_switch_segment"),
+        ),
+      ),
+    );
+    if (sessionIds.length === 0) {
+      return { deletedThreads: 0, deletedSegments: 0 };
+    }
+    return this.transaction(() => {
+      const requested = new Set(sessionIds);
+      const threadIds = new Set<string>();
+      for (const sessionId of sessionIds) {
+        const projection = this.getByHermesSessionId(sessionId);
+        if (projection) threadIds.add(projection.thread.id);
+      }
+
+      let deletedThreads = 0;
+      let deletedSegments = 0;
+      for (const threadId of threadIds) {
+        const segments = this.listSegments(threadId);
+        const attachedSessionIds = segments.flatMap((segment) =>
+          segment.hermesSessionId ? [segment.hermesSessionId] : [],
+        );
+        if (attachedSessionIds.some((sessionId) => !requested.has(sessionId))) {
+          throw storeError("model_switch_segment_conflict");
+        }
+        const detached = this.database.sqlite
+          .prepare(
+            `UPDATE conversation_threads
+             SET active_segment_id = NULL
+             WHERE id = ? AND tenant_id = ? AND owner_id = ?
+               AND device_installation_id = ?`,
+          )
+          .run(
+            threadId,
+            this.owner.tenantId,
+            this.owner.ownerId,
+            this.owner.deviceInstallationId,
+          );
+        if (Number(detached.changes) !== 1) {
+          throw storeError("model_switch_segment_conflict");
+        }
+        const removedSegments = this.database.sqlite
+          .prepare("DELETE FROM conversation_segments WHERE thread_id = ?")
+          .run(threadId);
+        if (Number(removedSegments.changes) !== segments.length) {
+          throw storeError("model_switch_segment_conflict");
+        }
+        const removedThread = this.database.sqlite
+          .prepare(
+            `DELETE FROM conversation_threads
+             WHERE id = ? AND tenant_id = ? AND owner_id = ?
+               AND device_installation_id = ? AND active_segment_id IS NULL`,
+          )
+          .run(
+            threadId,
+            this.owner.tenantId,
+            this.owner.ownerId,
+            this.owner.deviceInstallationId,
+          );
+        if (Number(removedThread.changes) !== 1) {
+          throw storeError("model_switch_segment_conflict");
+        }
+        deletedSegments += Number(removedSegments.changes);
+        deletedThreads += 1;
+      }
+      return { deletedThreads, deletedSegments };
+    }, "model_switch_segment_conflict");
   }
 
   private requiredSnapshot(

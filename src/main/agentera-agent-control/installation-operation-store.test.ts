@@ -98,6 +98,27 @@ describe("durable Agent Installation operation journal", () => {
     });
   }
 
+  it("restores a legacy fresh target that selects a source Profile without a model handle", () => {
+    const prepared = store.begin({
+      operationId: OTHER_OPERATION_ID,
+      agentInstallationId: OTHER_INSTALLATION_ID,
+      target: {
+        kind: "fresh",
+        profileId: "legacy-agent",
+        displayName: "Legacy Agent",
+        modelSourceProfileId: "model-source",
+      },
+    });
+
+    expect(prepared).toMatchObject({
+      operationId: OTHER_OPERATION_ID,
+      modelSourceProfileId: "model-source",
+      modelSourceModelId: null,
+      phase: "prepared",
+    });
+    expect(store.get(OTHER_OPERATION_ID)).toEqual(prepared);
+  });
+
   it("begins idempotently and rejects immutable operation or target drift", () => {
     const first = beginFresh();
     expect(first).toEqual({

@@ -65,7 +65,7 @@ function nodeSqliteFactory(path: string): AgenteraSqliteDatabase {
   return new DatabaseSync(path) as unknown as AgenteraSqliteDatabase;
 }
 
-function bundle() {
+function bundle(): ReturnType<typeof canonicalizeExperienceCandidate> {
   return canonicalizeExperienceCandidate({
     schemaVersion: 1,
     skillName: "weekly-summary",

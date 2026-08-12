@@ -130,6 +130,15 @@ export default {
       reviewedBy: "נבדק על ידי",
       policyVersion: "גרסת מדיניות",
       noSubmissions: "אין עדיין הגשות ארגוניות.",
+      submissionRecordUnavailable:
+        "לא ניתן להציג בבטחה חלק מרשומות ההגשות הארגוניות; הגשות אחרות עדיין זמינות.",
+      referenceConflict:
+        "קישור הטיוטה המקומית של הגשה זו מתנגש עם Cloud והוכנס להסגר. הגשות ארגוניות אחרות לא הושפעו.",
+      disconnectReference: "ניתוק קישור הטיוטה המקומית",
+      disconnectReferenceTitle: "ניתוק קישור טיוטה מקומית מתנגש",
+      disconnectReferenceBoundary:
+        "רק הקישור בין הגשת Cloud זו לטיוטה המקומית יוסר; ההגשה, הטיוטה, הגרסאות שפורסמו, ההתקנות, Memory וה-Profile יישארו ללא שינוי.",
+      confirmDisconnectReference: "ניתוק הקישור",
       withdraw: "משיכת הגשה",
       confirmWithdrawal: "אישור משיכה",
       withdrawalBoundary:

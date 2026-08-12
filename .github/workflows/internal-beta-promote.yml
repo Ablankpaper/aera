@@ -56,7 +56,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain=v1)"
           VERSION=$(node -p "require('./package.json').version")
-          test "$VERSION" = "0.7.4-internal-beta.26"
+          test "$VERSION" = "0.7.4-internal-beta.27"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
           gh run view "$CANDIDATE_RUN_ID" --repo bignormal/aera \

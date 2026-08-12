@@ -52,6 +52,22 @@ export interface AgentConversationSegmentEvent {
   code: string | null;
 }
 
+/** Renderer-safe cold-resume marker derived from activated segment metadata. */
+export interface AgentConversationModelSwitchMarker {
+  threadId: string;
+  segmentId: string;
+  from: PublicModelRouteIdentity;
+  to: PublicModelRouteIdentity;
+  historyBoundaryCount: number;
+}
+
+/** Safe Main result for resolving any historical segment during cold resume. */
+export interface AgentConversationThreadResumeProjection {
+  activeSessionId: string;
+  threadId: string;
+  markers: AgentConversationModelSwitchMarker[];
+}
+
 export type ModelConfigurationStage =
   | "validation"
   | "credential"

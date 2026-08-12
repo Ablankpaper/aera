@@ -152,7 +152,12 @@ describe("ConversationRuntimeCoordinator segment lifecycle", () => {
     return { threadId: adopted.thread.id, revision: adopted.thread.revision };
   }
 
-  function candidateInput() {
+  function candidateInput(): {
+    rootConversationKey: string;
+    context: { scope: "USER" };
+    bindingInput: CreateLocalRuntimeBindingInput;
+    historyBoundaryCount: number;
+  } {
     return {
       rootConversationKey: "visible-root",
       context: { scope: "USER" as const },

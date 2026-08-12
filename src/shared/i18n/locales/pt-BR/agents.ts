@@ -131,6 +131,16 @@ export default {
       reviewedBy: "Revisado por",
       policyVersion: "Versão da política",
       noSubmissions: "Ainda não há envios empresariais.",
+      submissionRecordUnavailable:
+        "Alguns registros de envios empresariais não puderam ser exibidos com segurança; os demais continuam disponíveis.",
+      referenceConflict:
+        "O link do rascunho local deste envio entra em conflito com a Cloud e foi colocado em quarentena. Os demais envios empresariais não foram afetados.",
+      disconnectReference: "Desconectar link do rascunho local",
+      disconnectReferenceTitle:
+        "Desconectar link de rascunho local em conflito",
+      disconnectReferenceBoundary:
+        "Somente o link deste envio da Cloud para o rascunho local será removido; o envio, o rascunho, as versões publicadas, as instalações, a Memory e os Profiles permanecem inalterados.",
+      confirmDisconnectReference: "Desconectar link",
       withdraw: "Retirar envio",
       confirmWithdrawal: "Confirmar retirada",
       withdrawalBoundary:

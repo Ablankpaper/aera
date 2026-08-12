@@ -145,8 +145,6 @@ function makeFixture(): Fixture {
   databases.push(database);
   const store = new ModelConfigurationOperationStore(database);
   const stageLog: string[] = [];
-  let failAt: FailureStage = null;
-  let failPresentationRefresh = false;
   const preparedTargets: string[] = [];
 
   const catalog = {
@@ -166,8 +164,8 @@ function makeFixture(): Fixture {
 
   const adapter = {
     stageLog,
-    failAt,
-    failPresentationRefresh,
+    failAt: null as FailureStage,
+    failPresentationRefresh: false,
     preparedTargets,
     getActiveRouteKey,
     prepare: vi.fn<

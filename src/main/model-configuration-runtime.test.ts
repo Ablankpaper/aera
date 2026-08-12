@@ -1,17 +1,17 @@
 // @vitest-environment node
 
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UpsertModelServiceRequest } from "../shared/model-configuration";
 import type { ModelConfigurationSqliteDatabase } from "./model-configuration-database";
+
+// This suite dynamically imports modules that transitively use installer.
+// Clear any worker-level installer mock left by another test file before the
+// import graph is evaluated.
+vi.unmock("./installer");
 
 const OWNER = {
   tenantId: "10000000-0000-4000-8000-000000000001",
@@ -41,6 +41,13 @@ describe("model-configuration runtime", () => {
     mkdirSync(hermesHome, { recursive: true });
     process.env.HERMES_HOME = hermesHome;
     vi.resetModules();
+    // The dynamic graph imports installer after another worker-local suite may
+    // have registered a mock; clear that registry at the actual import boundary.
+    vi.doUnmock("./installer");
+    const actualInstaller = await vi.importActual<typeof import("./installer")>(
+      "./installer",
+    );
+    vi.doMock("./installer", () => actualInstaller);
 
     const [
       { AgenteraProfileBindingStore },
@@ -48,14 +55,13 @@ describe("model-configuration runtime", () => {
       config,
       routeReader,
       modelDatabase,
-    ] =
-      await Promise.all([
-        import("./agentera-profile-binding"),
-        import("./model-configuration-runtime"),
-        import("./config"),
-        import("./agentera-agent-control/runtime-model-routes"),
-        import("./model-configuration-database"),
-      ]);
+    ] = await Promise.all([
+      import("./agentera-profile-binding"),
+      import("./model-configuration-runtime"),
+      import("./config"),
+      import("./agentera-agent-control/runtime-model-routes"),
+      import("./model-configuration-database"),
+    ]);
     const bindings = new AgenteraProfileBindingStore({
       userDataPath: userData,
       secureStorage: {

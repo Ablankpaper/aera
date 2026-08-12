@@ -167,7 +167,7 @@ describe("CapabilityBindingStore", () => {
     ];
     const resolve = (
       servers: Array<{ name: string; enabled: boolean; tools: string[] }>,
-    ) =>
+    ): ReturnType<CapabilityBindingStore["resolve"]> =>
       store.resolve({
         agentInstallationId: INSTALLATION_ID,
         runtimeProfileId: PROFILE_ID,

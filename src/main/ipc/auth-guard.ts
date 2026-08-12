@@ -385,6 +385,7 @@ const BOUND_PROFILE_CHANNELS = [
   "get-platform-enabled",
   "get-session-context-folder",
   "get-session-messages",
+  "resolve-session-thread",
   "get-session-model-override",
   "get-skill-content",
   "get-token-balances",
