@@ -17,6 +17,8 @@ Desktop commits the YAML document through its atomic safe writer and rolls it ba
 
 Saving settings performs no paid generation. Model discovery is read-only, while Test generation requires a second confirmation and makes one bounded request with no application retry. The Runtime provider also constructs the OpenAI-compatible SDK client with retries disabled.
 
+The Desktop configuration disclosure starts expanded. Its native title-and-arrow button controls only the body visibility, while the enabled switch remains an independent sibling control. Collapsing keeps the mounted draft, status, confirmation, and preview state intact, and the disclosure state is never persisted.
+
 An installed Agent turn freezes the verified policy's exact Runtime tool names into an immutable `allowed` and `denied` request policy. Runtime requires the `request_tool_policy` capability, computes `Profile tools ∩ allowed − denied`, applies the result to initial, Memory, Context Engine, MCP, and Tool Search schemas, then checks the same policy again immediately before execution.
 
 Runtime image failures expose stable public categories only. SDK client construction, generation, editing, source-image loading, and caching failures must not copy raw provider bodies, credentials, signed URLs, filesystem paths, or exception text into tool results or logs.
@@ -46,6 +48,10 @@ The isolated Desktop journey verifies that a saved relay key remains masked in t
 ## One paid test request
 
 The test command requires explicit confirmation, sends one generation request, and renders the returned fixture image without coupling Save to generation.
+
+## Local configuration disclosure
+
+The title button exposes native keyboard behavior and `aria-expanded`; collapsing and reopening preserves unsaved field values without changing the enabled switch or issuing a provider request.
 
 ## Runtime snapshot refresh
 

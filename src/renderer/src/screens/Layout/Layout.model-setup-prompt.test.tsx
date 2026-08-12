@@ -18,12 +18,14 @@ const testState = vi.hoisted(() => ({
     profile?: string;
     agentAppearance?: { displayName?: string | null };
   }>,
-  identityListener: null as null | ((identity: {
-    profileId: string;
-    displayName: string;
-    revision: number;
-    updatedAt: string;
-  }) => void),
+  identityListener: null as
+    | null
+    | ((identity: {
+        profileId: string;
+        displayName: string;
+        revision: number;
+        updatedAt: string;
+      }) => void),
 }));
 
 vi.mock("../Chat/Chat", () => ({
@@ -357,7 +359,7 @@ describe("startup model setup prompt", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-    // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Account-required routing#Layout connection privacy]]
+  // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Account-required routing#Layout connection privacy]]
   it("keeps guest startup local without reading account connection state", async () => {
     const api = installHermesAPI();
 
@@ -369,7 +371,7 @@ describe("startup model setup prompt", () => {
     expect(testState.chatConnectionAccess).toContain(false);
   });
 
-    // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Account-required routing#Layout connection privacy#Account connection lookup fallback]]
+  // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Account-required routing#Layout connection privacy#Account connection lookup fallback]]
   it("falls back to local presentation when account connection state is unavailable", async () => {
     const api = installHermesAPI();
     api.isRemoteOnlyMode.mockRejectedValue(
