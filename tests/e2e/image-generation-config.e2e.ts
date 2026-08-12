@@ -223,6 +223,26 @@ test("configures and previews one relay-backed image in an isolated Electron Pro
       settingsPage.locator("#image-generation-api-key"),
     ).toHaveAttribute("type", "password");
 
+    const disclosure = settingsPage.getByRole("button", {
+      name: /^Image Generation$|^图像生成$/u,
+    });
+    const configBody = settingsPage.locator(".image-generation-body");
+    await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    await settingsPage
+      .locator("#image-generation-model")
+      .fill("unsaved-image-model");
+    await disclosure.click();
+    await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    await expect(configBody).toBeHidden();
+    await expect(serviceToggle).toBeVisible();
+    await expect(serviceToggleInput).toBeChecked();
+    await disclosure.click();
+    await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    await expect(configBody).toBeVisible();
+    await expect(settingsPage.locator("#image-generation-model")).toHaveValue(
+      "unsaved-image-model",
+    );
+
     await settingsPage
       .locator("#image-generation-base-url")
       .fill(relay.baseUrl);

@@ -61,6 +61,47 @@ describe("ImageGenerationConfig", () => {
     ).toBeInTheDocument();
   });
 
+  it("collapses from the title button without changing enablement or unsaved values", async () => {
+    render(<ImageGenerationConfig profile="design" />);
+    const model = await screen.findByLabelText("tools.imageGeneration.model");
+    const disclosure = screen.getByRole("button", {
+      name: "tools.imageGeneration.title",
+    });
+    const enabled = screen.getByLabelText("tools.imageGeneration.enabled");
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    expect(disclosure.querySelector(".lucide-chevron-down")).not.toBeNull();
+    expect(model).toBeVisible();
+    fireEvent.change(model, { target: { value: "unsaved-image-model" } });
+
+    fireEvent.click(disclosure);
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(disclosure.querySelector(".lucide-chevron-right")).not.toBeNull();
+    expect(model).not.toBeVisible();
+    expect(enabled).toBeChecked();
+
+    fireEvent.click(disclosure);
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    expect(model).toBeVisible();
+    expect(model).toHaveValue("unsaved-image-model");
+  });
+
+  it("keeps the enabled switch independent from disclosure", async () => {
+    render(<ImageGenerationConfig profile="design" />);
+    await screen.findByLabelText("tools.imageGeneration.model");
+    const disclosure = screen.getByRole("button", {
+      name: "tools.imageGeneration.title",
+    });
+    const enabled = screen.getByLabelText("tools.imageGeneration.enabled");
+
+    fireEvent.click(enabled);
+
+    expect(enabled).not.toBeChecked();
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("saves the current draft without discovering or testing", async () => {
     render(<ImageGenerationConfig profile="design" />);
     await screen.findByDisplayValue("gpt-image-1.5");

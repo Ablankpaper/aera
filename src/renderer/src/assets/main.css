@@ -14948,31 +14948,65 @@ body {
 
 .image-generation-heading {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 20px;
-  margin-bottom: 18px;
 }
 
-.image-generation-heading h2 {
+.image-generation-disclosure {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
   margin: 0;
+  padding: 3px 4px 3px 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.image-generation-disclosure:hover {
+  color: var(--text-secondary);
+}
+
+.image-generation-disclosure:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.image-generation-disclosure h2 {
+  margin: 0;
+  color: inherit;
   font-size: 16px;
   font-weight: 650;
   letter-spacing: 0;
 }
 
-.image-generation-heading p {
+.image-generation-body {
+  padding-top: 18px;
+}
+
+.image-generation-subtitle {
   max-width: 680px;
-  margin: 4px 0 0;
+  margin: 0 0 18px;
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.5;
 }
 
+.image-generation-remote .image-generation-heading {
+  margin-bottom: 18px;
+}
+
 .image-generation-form {
   display: grid;
-  grid-template-columns: minmax(200px, 1.4fr) minmax(150px, 0.8fr) minmax(150px, 0.8fr);
+  grid-template-columns: minmax(200px, 1.4fr) minmax(150px, 0.8fr) minmax(
+      150px,
+      0.8fr
+    );
   gap: 14px;
   margin-bottom: 16px;
 }
