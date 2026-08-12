@@ -73,19 +73,31 @@ export const SETTINGS_MANAGED_VIEWS = [
 type SettingsManagedView = (typeof SETTINGS_MANAGED_VIEWS)[number];
 type NavigationTarget = View | SettingsManagedView;
 
-export const PINNED_NAV_ITEMS: {
+interface PinnedNavItem {
   view: View;
   icon: LucideIcon;
   labelKey: string;
-}[] = [
+  hidden?: boolean;
+}
+
+export const PINNED_NAV_CATALOG: PinnedNavItem[] = [
   { view: "discover", icon: Compass, labelKey: "navigation.discover" },
-  { view: "office", icon: Building, labelKey: "navigation.office" },
+  {
+    view: "office",
+    icon: Building,
+    labelKey: "navigation.office",
+    hidden: true,
+  },
   { view: "kanban", icon: KanbanIcon, labelKey: "navigation.kanban" },
   // "skills" lives under the Discover tab (installed + community), so it's no
   // longer a top-level nav item.
   { view: "schedules", icon: Timer, labelKey: "navigation.schedules" },
   { view: "agents", icon: Bot, labelKey: "navigation.agents" },
 ];
+
+export const PINNED_NAV_ITEMS = PINNED_NAV_CATALOG.filter(
+  (item) => !item.hidden,
+);
 
 const SIDEBAR_COLLAPSED_KEY = "hermes.sidebar.collapsed";
 const SIDEBAR_SCROLLBAR_HIDE_MS = 700;
