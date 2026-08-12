@@ -32,8 +32,10 @@ function commandErrorMessage(err: unknown): string {
 export interface ProfileInfo {
   /** Stable internal profile id used for CLI, paths, routing, and persistence. */
   id: string;
-  /** User-facing agent/profile name. */
+  /** Compatibility name used by existing Profile management surfaces. */
   name: string;
+  /** Explicit metadata display name, or null when the Profile is unnamed. */
+  displayName: string | null;
   path: string;
   isDefault: boolean;
   isActive: boolean;
@@ -206,6 +208,7 @@ export async function listProfiles(
     profiles.push({
       id: "default",
       name: defaultMeta.name || "default",
+      displayName: defaultMeta.name || null,
       path: HERMES_HOME,
       isDefault: true,
       isActive: activeName === "default",
@@ -251,6 +254,7 @@ export async function listProfiles(
         return {
           id: name,
           name: meta.name || name,
+          displayName: meta.name || null,
           path: profilePath,
           isDefault: false,
           isActive: activeName === name,

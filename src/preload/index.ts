@@ -1056,6 +1056,7 @@ const hermesAPI = {
     Array<{
       id: string;
       name: string;
+      displayName: string | null;
       path: string;
       isDefault: boolean;
       isActive: boolean;

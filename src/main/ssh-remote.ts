@@ -1647,6 +1647,8 @@ conn.close()
 
 export interface SshProfileInfo {
   name: string;
+  /** Remote Profile metadata is not exposed by the current SSH contract. */
+  displayName?: string | null;
   path: string;
   isDefault: boolean;
   isActive: boolean;

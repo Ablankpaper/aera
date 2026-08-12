@@ -77,6 +77,7 @@ describe("listProfiles", () => {
     const fresh = profiles.find((p) => p.id === "fresh");
     expect(fresh).toBeDefined();
     expect(fresh?.name).toBe("fresh");
+    expect(fresh?.displayName).toBeNull();
     expect(fresh?.isDefault).toBe(false);
     expect(fresh?.hasEnv).toBe(false);
   });
@@ -176,7 +177,9 @@ describe("listProfiles", () => {
     const work = profiles.find((p) => p.id === "work");
 
     expect(def?.name).toBe("Hermes CN");
+    expect(def?.displayName).toBe("Hermes CN");
     expect(work?.name).toBe("Work Agent");
+    expect(work?.displayName).toBe("Work Agent");
     expect(work?.id).toBe("work");
   });
 
