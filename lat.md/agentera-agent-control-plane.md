@@ -78,6 +78,16 @@ The executable gate proves employee governance, user eligibility, local installa
 
 Run `AERA_OFFICIAL_AGENT_E2E_CLOUD_REPO=/Users/zizimutou/Desktop/aera/aera-cloud AERA_OFFICIAL_AGENT_E2E_ADMIN_REPO=/Users/zizimutou/Desktop/aera/aera-admin npm run test:e2e:official-managed-agent`. The harness requires explicit clean sibling repositories, creates isolated temporary databases and process roots, and never authorizes a push, merge, deploy, or release.
 
+### Admin-to-Desktop content delivery gate
+
+The isolated content-delivery gate proves that one Payload-managed official Agent can traverse reviewed Cloud publication and become a verified Desktop installation without using existing operator or user state.
+
+[[tests/e2e/agentera-content-delivery.e2e.ts]] starts isolated Payload Admin, Admin Web, Cloud, PostgreSQL, Redis, and Electron processes. A Publisher syncs and submits the Admin draft, a different Super Admin approves it, and an Operations Admin activates the internal allowlisted release. The authenticated Desktop then discovers the exact release, verifies its signature and compatibility, installs and activates it, and returns only the allowlisted metadata receipt stages until Admin reconciles `desktop_verified`.
+
+The harness keeps content delivery on dedicated least-privilege Cloud scopes and a synthetic Payload secret distinct from the Desktop Fleet gate. It requires explicit clean Admin and Cloud checkout roots, creates fresh databases, identities, keys, ports, Profile data, and process roots for each run, and removes only those run-owned resources.
+
+Run `AERA_CONTENT_DELIVERY_E2E_CLOUD_REPO=/Users/zizimutou/Desktop/aera/aera-cloud AERA_CONTENT_DELIVERY_E2E_ADMIN_REPO=/Users/zizimutou/Desktop/aera/aera-admin npm run test:e2e:content-delivery`. A pass is local integration evidence only; it does not prove an Internal Beta deployment, authorize a push or release, configure the separate Aera API business upstream, or complete plugin delivery.
+
 ### Local verification evidence (2026-07-23)
 
 The locally verified executable tips were Cloud `16ee99a`, Admin `b184e25`, and Desktop `ed6685a`; each preserves the documented PLATFORM control-plane and USER-owned runtime boundary.

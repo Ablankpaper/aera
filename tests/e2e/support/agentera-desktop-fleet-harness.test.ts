@@ -140,6 +140,98 @@ describe("Desktop Fleet E2E harness boundaries", () => {
     ]);
   });
 
+  it("keeps the Desktop Fleet Payload session secret isolated from content delivery", () => {
+    const payloadSecretForOfficialMode = (
+      agentControlHarness as typeof agentControlHarness & {
+        payloadSecretForOfficialMode?: (
+          mode: "desktopFleet" | "contentDelivery",
+        ) => string;
+      }
+    ).payloadSecretForOfficialMode;
+
+    expect(payloadSecretForOfficialMode).toBeTypeOf("function");
+    expect(payloadSecretForOfficialMode!("desktopFleet")).toBe(
+      "aera-desktop-fleet-admin-secret",
+    );
+    expect(payloadSecretForOfficialMode!("contentDelivery")).toBe(
+      "aera-content-delivery-admin-e2e-secret",
+    );
+  });
+
+  it("keeps content delivery on its own least-privilege Cloud scopes", () => {
+    const scopes = (
+      agentControlHarness as typeof agentControlHarness & {
+        contentDeliveryAdminScopes?: readonly string[];
+      }
+    ).contentDeliveryAdminScopes;
+
+    expect(scopes).toEqual([
+      "official_agents:read",
+      "official_agent_drafts:write",
+      "official_agent_reviews:write",
+      "official_agent_releases:write",
+      "official_agent_audit:read",
+    ]);
+    expect(scopes).not.toContain("desktop_control:command");
+  });
+
+  it("seeds separate publisher reviewer and operator Admin identities", () => {
+    const buildSeedScript = (
+      agentControlHarness as typeof agentControlHarness & {
+        buildContentDeliveryAdminSeedScript?: (
+          configPath: string,
+          payloadModulePath: string,
+          fixturePath: string,
+        ) => string;
+      }
+    ).buildContentDeliveryAdminSeedScript;
+
+    expect(buildSeedScript).toBeTypeOf("function");
+    const script = buildSeedScript!(
+      "/tmp/aera-admin/src/payload.config.ts",
+      "/tmp/aera-admin/node_modules/payload/dist/index.js",
+      "/tmp/aera-content-delivery-fixture.json",
+    );
+    expect(script).toContain('role: "publisher"');
+    expect(script).toContain('role: "super_admin"');
+    expect(script).toContain('role: "operations_admin"');
+    expect(script).toContain("content-delivery-publisher@agentera.local");
+    expect(script).toContain("content-delivery-reviewer@agentera.local");
+    expect(script).toContain("content-delivery-operator@agentera.local");
+    expect(script).toContain("aera-content-delivery-fixture.json");
+  });
+
+  it("exposes a dedicated Payload Admin content-delivery harness mode", () => {
+    const createHarness = (
+      agentControlHarness as typeof agentControlHarness & {
+        createContentDeliveryHarness?: () => Promise<AgentControlHarness>;
+      }
+    ).createContentDeliveryHarness;
+
+    expect(createHarness).toBeTypeOf("function");
+  });
+
+  it("captures the singular official delivery verification endpoint", () => {
+    const requests = agentControlHarness.agentControlRequests({
+      requests: [
+        {
+          method: "POST",
+          path: "/api/v1/official-agent-delivery-verifications",
+          body: { verification_status: "activated" },
+          contentType: "application/json",
+        },
+      ],
+    } as unknown as AgentControlHarness);
+
+    expect(requests).toEqual([
+      {
+        method: "POST",
+        path: "/api/v1/official-agent-delivery-verifications",
+        body: { verification_status: "activated" },
+      },
+    ]);
+  });
+
   it("ignores an in-flight heartbeat until Cloud returns bounded identity", () => {
     const acceptedHeartbeat = (
       desktopFleetHarness as typeof desktopFleetHarness & {
