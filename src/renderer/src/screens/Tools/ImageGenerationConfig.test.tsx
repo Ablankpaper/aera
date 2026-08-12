@@ -61,6 +61,7 @@ describe("ImageGenerationConfig", () => {
     ).toBeInTheDocument();
   });
 
+  // @lat: [[image-generation#Local configuration disclosure]]
   it("collapses from the title button without changing enablement or unsaved values", async () => {
     render(<ImageGenerationConfig profile="design" />);
     const model = await screen.findByLabelText("tools.imageGeneration.model");

@@ -179,6 +179,7 @@ test.setTimeout(1_200_000);
 
 // @lat: [[image-generation#Secret-free Desktop configuration]]
 // @lat: [[image-generation#Responsive UI acceptance]]
+// @lat: [[image-generation#Local configuration disclosure]]
 // Playwright requires its fixtures argument to use object destructuring.
 // eslint-disable-next-line no-empty-pattern
 test("configures and previews one relay-backed image in an isolated Electron Profile", async ({}, testInfo) => {
@@ -202,6 +203,11 @@ test("configures and previews one relay-backed image in an isolated Electron Pro
     });
     await enterMainLayout(page);
     await dismissStartupModelPrompt(page);
+    await expect(
+      page
+        .locator(".sidebar-nav-pinned")
+        .getByRole("button", { name: /^Office$|^工作区$/u }),
+    ).toHaveCount(0);
     const activeProfile = await page.evaluate(async () => {
       const profiles = await window.hermesAPI.listProfiles();
       return profiles.find((profile) => profile.isActive) ?? null;
