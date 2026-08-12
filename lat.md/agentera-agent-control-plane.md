@@ -86,6 +86,8 @@ The isolated content-delivery gate proves that one Payload-managed official Agen
 
 The harness keeps content delivery on dedicated least-privilege Cloud scopes and a synthetic Payload secret distinct from the Desktop Fleet gate. It requires explicit clean Admin and Cloud checkout roots, creates fresh databases, identities, keys, ports, Profile data, and process roots for each run, and removes only those run-owned resources.
 
+Desktop CI pins the exact Cloud content-delivery commit that owns the mirrored public contract and reuses that checkout for the encrypted-backup privacy boundary. A contract change therefore cannot pass against unrelated or moving Cloud bytes.
+
 Run `AERA_CONTENT_DELIVERY_E2E_CLOUD_REPO=/Users/zizimutou/Desktop/aera/aera-cloud AERA_CONTENT_DELIVERY_E2E_ADMIN_REPO=/Users/zizimutou/Desktop/aera/aera-admin npm run test:e2e:content-delivery`. A pass is local integration evidence only; it does not prove an Internal Beta deployment, authorize a push or release, configure the separate Aera API business upstream, or complete plugin delivery.
 
 ### Local verification evidence (2026-07-23)
