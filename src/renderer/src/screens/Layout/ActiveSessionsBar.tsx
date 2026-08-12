@@ -6,7 +6,7 @@ import { defaultColorForName } from "../../../../shared/profileColors";
 import type { ChatRun } from "./chatRuns";
 
 export interface ProfileAppearance {
-  name?: string | null;
+  displayName?: string | null;
   color?: string | null;
   avatar?: string | null;
 }

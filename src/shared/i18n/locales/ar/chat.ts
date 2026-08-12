@@ -37,6 +37,7 @@ export default {
   suggestionAnalyze: "تحليل البيانات",
   approve: "موافقة",
   deny: "رفض",
+  boundary: { unnamedAgent: "وكيل بلا اسم" },
   clarify: {
     defaultQuestion: "يحتاج Aera إلى مدخلاتك.",
     placeholder: "اكتب إجابتك… (Ctrl+Enter للإرسال)",

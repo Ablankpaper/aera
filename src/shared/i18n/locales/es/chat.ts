@@ -22,6 +22,7 @@ export default {
   suggestionAnalyze: "Analizar datos",
   approve: "Aprobar",
   deny: "Rechazar",
+  boundary: { unnamedAgent: "Agente sin nombre" },
   thinking: "Pensando…",
   thought: "Pensamiento",
   toolCall: "Llamada a herramienta",

@@ -21,6 +21,7 @@ export default {
   suggestionAnalyze: "Veri analizi yap",
   approve: "Onayla",
   deny: "Reddet",
+  boundary: { unnamedAgent: "İsimsiz Ajan" },
   thinking: "Düşünüyor…",
   thought: "Düşünce",
   toolCall: "Araç çağrısı",

@@ -102,6 +102,7 @@ export default {
     label: "会话数据边界",
     runningIn: "运行于：",
     agent: "智能体：",
+    unnamedAgent: "未命名智能体",
     visibility: "可见性：",
     scope: {
       USER: "我的",

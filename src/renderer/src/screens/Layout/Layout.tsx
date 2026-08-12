@@ -228,7 +228,11 @@ function Layout({
         if (cancelled) return;
         const map: Record<string, ProfileAppearance> = {};
         for (const p of list) {
-          map[p.id] = { name: p.name, color: p.color, avatar: p.avatar };
+          map[p.id] = {
+            displayName: p.displayName,
+            color: p.color,
+            avatar: p.avatar,
+          };
         }
         setProfileAppearance(map);
       })
@@ -239,6 +243,19 @@ function Layout({
       cancelled = true;
     };
   }, [activeProfile, view]);
+  useEffect(
+    () =>
+      window.hermesAPI.onAgentIdentityChanged?.((identity) => {
+        setProfileAppearance((current) => ({
+          ...current,
+          [identity.profileId]: {
+            ...current[identity.profileId],
+            displayName: identity.displayName.trim() || null,
+          },
+        }));
+      }),
+    [],
+  );
   const getAppearance = useCallback(
     (profile: string) => profileAppearance[profile] ?? {},
     [profileAppearance],
