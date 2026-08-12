@@ -4635,6 +4635,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       return list.map((p) => ({
         ...p,
         id: p.name,
+        displayName: p.displayName ?? null,
         isActive: p.name === active,
         agentInstallationId: null,
         runtimeProfileId: null,

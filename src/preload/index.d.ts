@@ -1359,6 +1359,8 @@ interface HermesAPI {
       id: string;
       /** User-facing agent/profile name. */
       name: string;
+      /** Explicit metadata name, or null when the Profile is unnamed. */
+      displayName: string | null;
       path: string;
       isDefault: boolean;
       isActive: boolean;
