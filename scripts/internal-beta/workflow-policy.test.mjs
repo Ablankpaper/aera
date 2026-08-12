@@ -41,10 +41,10 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   ]);
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.26"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.27"/u);
   assert.match(
     raw,
-    /--release-notes "Beta\.26 修复企业域部分 Cloud 请求失败导致整页空白和聊天重复回复，新增会话智能体名称，更新“工具社区 \/ 任务看板”及充值入口，移除模型高级配置中的 Hermes One 登录；保留 Runtime 0\.20\.0-agentera\.1，macOS 继续公证，Windows 内测包仍未签名。"/u,
+    /--release-notes "Beta\.27 修复模型配置保存与企业提交冲突，恢复企业智能体页面和会话连续性；支持已配置智能体在模型变更后继续对话，并增强冷启动恢复与失败候选隔离；保留 Runtime 0\.20\.0-agentera\.1，macOS 继续公证，Windows 内测包仍未签名。"/u,
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
@@ -162,7 +162,7 @@ test("internal-Beta promotion publishes one verified candidate without rebuildin
   const raw = await readFile(promotionWorkflowPath, "utf8");
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.26"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.27"/u);
 
   assert.equal(workflow.name, "Promote Desktop internal Beta");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
