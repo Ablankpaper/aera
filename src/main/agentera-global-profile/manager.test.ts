@@ -425,6 +425,10 @@ describe("AgenteraGlobalProfileManager", () => {
     const existing = {
       instructions: "SIGNED OFFICIAL AGENT INSTRUCTIONS\n",
       requireBoundApiTransport: true,
+      toolPolicy: {
+        allowed: ["files.read"],
+        denied: ["image_generate"],
+      },
     };
     const composed = composeGlobalProfileEnvelope(
       existing,
@@ -436,6 +440,7 @@ describe("AgenteraGlobalProfileManager", () => {
       `${existing.instructions}\n\n[System note: Aera global user behavior profile]\n[/System note]`,
     );
     expect(composed.requireBoundApiTransport).toBe(true);
+    expect(composed.toolPolicy).toBe(existing.toolPolicy);
   });
 
   it("exposes only the transport decision and degradation state to the renderer", () => {

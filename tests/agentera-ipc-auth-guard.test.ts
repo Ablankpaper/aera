@@ -90,6 +90,24 @@ function registeredProfileArguments(): Record<string, number> {
 }
 
 describe("Aera central IPC product-access guard", () => {
+  it("binds every image generation configuration channel to its requested Profile", () => {
+    const channels = [
+      "get-image-generation-config",
+      "save-image-generation-config",
+      "discover-image-generation-models",
+      "test-image-generation",
+    ];
+    for (const channel of channels) {
+      expect(AGENTERA_IPC_CHANNEL_POLICY[channel]).toBe("bound-profile");
+    }
+    expect(AGENTERA_PROFILE_ARGUMENT_INDEX).toMatchObject({
+      "get-image-generation-config": 0,
+      "save-image-generation-config": 1,
+      "discover-image-generation-models": 1,
+      "test-image-generation": 1,
+    });
+  });
+
   it("protects the coordinated model catalog and mutation as bound-profile IPC", () => {
     expect(AGENTERA_IPC_CHANNEL_POLICY["get-owner-model-route-catalog"]).toBe(
       "bound-profile",

@@ -8,6 +8,10 @@ const preloadTypes = readFileSync(
   join(ROOT, "src/preload/index.d.ts"),
   "utf-8",
 );
+const imageGenerationTypes = readFileSync(
+  join(ROOT, "src/shared/image-generation.ts"),
+  "utf-8",
+);
 
 /**
  * Extract method names from the hermesAPI object in preload/index.ts.
@@ -225,6 +229,23 @@ describe("Preload API Surface", () => {
   it("every type declaration has a preload implementation", () => {
     const missing = typeMethods.filter((m) => !preloadMethods.includes(m));
     expect(missing).toEqual([]);
+  });
+
+  it("exposes the secret-free Profile image generation configuration bridge", () => {
+    const expected = [
+      "getImageGenerationConfig",
+      "saveImageGenerationConfig",
+      "discoverImageGenerationModels",
+      "testImageGeneration",
+    ];
+    expect(preloadMethods).toEqual(expect.arrayContaining(expected));
+    expect(typeMethods).toEqual(expect.arrayContaining(expected));
+    const publicConfig = imageGenerationTypes.match(
+      /interface ImageGenerationPublicConfig \{([\s\S]*?)^\}/m,
+    )?.[1];
+    expect(publicConfig).toBeDefined();
+    expect(publicConfig).not.toMatch(/^\s*apiKey\s*:/im);
+    expect(publicConfig).toContain("hasApiKey: boolean");
   });
 });
 

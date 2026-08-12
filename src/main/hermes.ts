@@ -1134,27 +1134,32 @@ function warmTuiGatewayClient(profile?: string): void {
   }
 }
 
-function stopTuiGatewayClient(profile?: string): void {
+export async function retireTuiGatewayClient(profile?: string): Promise<void> {
   const key = profileKey(profile);
   const client = tuiGatewayClients.get(key);
   if (!client) return;
   client.closeAdmission();
   const stopping = trackTuiGatewayStop(client.stop());
-  void stopping.then(
-    () => {
-      tuiGatewayFailedClientKeys.delete(key);
-      if (tuiGatewayClients.get(key) === client) {
-        tuiGatewayClients.delete(key);
-      }
-    },
-    (error) => {
-      tuiGatewayFailedClientKeys.add(key);
-      console.error(
-        `[dashboard-gateway:${key}] Runtime process cleanup failed:`,
-        error instanceof Error ? error.message : String(error),
-      );
-    },
-  );
+  try {
+    await stopping;
+    tuiGatewayFailedClientKeys.delete(key);
+    if (tuiGatewayClients.get(key) === client) {
+      tuiGatewayClients.delete(key);
+    }
+  } catch (error) {
+    tuiGatewayFailedClientKeys.add(key);
+    console.error(
+      `[dashboard-gateway:${key}] Runtime process cleanup failed:`,
+      error instanceof Error ? error.message : String(error),
+    );
+    throw error;
+  }
+}
+
+function stopTuiGatewayClient(profile?: string): void {
+  void retireTuiGatewayClient(profile).catch(() => {
+    // The exact-profile retirement path records and reports cleanup failure.
+  });
 }
 
 export async function stopAllTuiGatewayClients(
@@ -1413,6 +1418,10 @@ export interface ChatCallbacks {
 export interface HermesConversationEnvelope {
   instructions: string;
   requireBoundApiTransport: boolean;
+  toolPolicy?: Readonly<{
+    allowed: readonly string[];
+    denied: readonly string[];
+  }>;
 }
 
 /**
@@ -1475,6 +1484,25 @@ export function assertHermesAgentModelRouteSupported(
       "The connected Aera Runtime does not support request-scoped Agent model routes.",
     ),
     { code: "model_switch_runtime_route_unsupported" },
+  );
+}
+
+/** Signed Agent turns require Runtime-side, request-scoped tool enforcement. */
+export function supportsHermesAgentToolPolicy(
+  capabilities: HermesApiCapabilities | null | undefined,
+): boolean {
+  return capabilities?.features?.request_tool_policy === true;
+}
+
+export function assertHermesAgentToolPolicySupported(
+  capabilities: HermesApiCapabilities | null | undefined,
+): void {
+  if (supportsHermesAgentToolPolicy(capabilities)) return;
+  throw Object.assign(
+    new Error(
+      "The connected Aera Runtime does not support request-scoped Agent tool policy.",
+    ),
+    { code: "agent_tool_policy_runtime_unsupported" },
   );
 }
 
@@ -1638,6 +1666,9 @@ export function buildAgentModelRequestBody(
   if (input.execution?.routeMode === "dynamic") {
     body.aera_model_route = buildAgentModelTransportRoute(input.execution);
   }
+  if (input.envelope?.toolPolicy) {
+    body.aera_tool_policy = input.envelope.toolPolicy;
+  }
   return body;
 }
 
@@ -1704,6 +1735,9 @@ function sendMessageViaApi(
   };
   if (execution?.routeMode === "dynamic") {
     bodyObj.aera_model_route = buildAgentModelTransportRoute(execution);
+  }
+  if (envelope?.toolPolicy) {
+    bodyObj.aera_tool_policy = envelope.toolPolicy;
   }
   if (reasoningEffort) bodyObj.reasoning_effort = reasoningEffort;
   const body = JSON.stringify(bodyObj);
@@ -2113,6 +2147,9 @@ function sendMessageViaRuns(
   if (reasoningEffort) bodyObj.reasoning_effort = reasoningEffort;
   if (sessionId) bodyObj.session_id = sessionId;
   if (ctxSystem) bodyObj.instructions = ctxSystem.content;
+  if (envelope?.toolPolicy) {
+    bodyObj.aera_tool_policy = envelope.toolPolicy;
+  }
   const bodyBuf = Buffer.from(JSON.stringify(bodyObj), "utf-8");
   const headers = getJsonApiHeaders(profile, bodyBuf);
   if (sessionId) {
@@ -3401,11 +3438,19 @@ export async function sendMessage(
 ): Promise<ChatHandle> {
   ensureInitialized();
 
+  const capabilities =
+    envelope?.toolPolicy || execution?.routeMode === "dynamic"
+      ? await getApiCapabilities(profile)
+      : null;
+  if (envelope?.toolPolicy) {
+    assertHermesAgentToolPolicySupported(capabilities);
+  }
+
   // A candidate Agent segment must never silently fall back to a different
   // transport or replay the prompt. Dynamic routes additionally require an
   // explicit Runtime capability before their short-lived route is serialized.
   if (execution?.routeMode === "dynamic") {
-    assertHermesAgentModelRouteSupported(await getApiCapabilities(profile));
+    assertHermesAgentModelRouteSupported(capabilities);
     return sendMessageViaApi(
       message,
       cb,

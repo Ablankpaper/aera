@@ -126,6 +126,7 @@ import {
   isGatewayRunning,
   testRemoteConnection,
   restartGateway,
+  retireTuiGatewayClient,
   notifyProfileSwitched,
   setSshRemoteApiKey,
   resolvePendingClarify,
@@ -495,6 +496,12 @@ import {
   setMessagingPlatformToolsetEnabled,
   setToolsetEnabled,
 } from "../tools";
+import { imageGenerationConfigService } from "../image-generation-config";
+import {
+  saveImageGenerationConfigAndRefresh,
+  setToolsetEnabledAndRefreshImageGeneration,
+} from "../image-generation-runtime";
+import type { ImageGenerationConfigDraft } from "../../shared/image-generation";
 import {
   fetchRegistry,
   fetchModelRegistry,
@@ -612,7 +619,10 @@ export interface IpcContext {
   runtimeActivity: RuntimeActivityCoordinator;
   getMainWindow: () => BrowserWindow | null;
   notifyConnectionConfigChanged: (catalogRevision?: string) => void;
-  notifyRuntimeSnapshotChanged: (catalogRevision?: string) => void;
+  notifyRuntimeSnapshotChanged: (
+    catalogRevision?: string,
+    profile?: string,
+  ) => void;
   notifyModelLibraryChanged: (catalogRevision?: string) => void;
   notifyCustomProvidersChanged: (catalogRevision?: string) => void;
   openExternalUrl: (rawUrl: unknown) => void;
@@ -4969,11 +4979,77 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
   ipcMain.handle(
     "set-toolset-enabled",
-    (_event, key: string, enabled: boolean, profile?: string) => {
+    async (_event, key: string, enabled: boolean, profile?: string) => {
       const conn = getConnectionConfig();
       if (conn.mode === "ssh" && conn.ssh)
         return sshSetToolsetEnabled(conn.ssh, key, enabled, profile);
-      return setToolsetEnabled(key, enabled, profile);
+      if (conn.mode !== "local") return false;
+      return setToolsetEnabledAndRefreshImageGeneration(key, enabled, profile, {
+        setToolsetEnabled,
+        stopDashboard,
+        retireTuiGatewayClient,
+        notifyRuntimeSnapshotChanged: (targetProfile) =>
+          notifyRuntimeSnapshotChanged(undefined, targetProfile),
+        isGatewayRunning,
+        restartGateway,
+      });
+    },
+  );
+  ipcMain.handle("get-image-generation-config", (_event, profile?: string) => {
+    if (getConnectionConfig().mode !== "local") {
+      return {
+        success: false as const,
+        errorCode: "remote_unsupported" as const,
+      };
+    }
+    return {
+      success: true as const,
+      config: imageGenerationConfigService.get(profile),
+    };
+  });
+  ipcMain.handle(
+    "save-image-generation-config",
+    async (_event, request: ImageGenerationConfigDraft, profile?: string) => {
+      if (getConnectionConfig().mode !== "local") {
+        return {
+          success: false as const,
+          errorCode: "remote_unsupported" as const,
+        };
+      }
+      return saveImageGenerationConfigAndRefresh(profile, request, {
+        save: (targetProfile, draft) =>
+          imageGenerationConfigService.save(targetProfile, draft),
+        stopDashboard,
+        retireTuiGatewayClient,
+        notifyRuntimeSnapshotChanged: (targetProfile) =>
+          notifyRuntimeSnapshotChanged(undefined, targetProfile),
+        isGatewayRunning,
+        restartGateway,
+      });
+    },
+  );
+  ipcMain.handle(
+    "discover-image-generation-models",
+    (_event, request: ImageGenerationConfigDraft, profile?: string) => {
+      if (getConnectionConfig().mode !== "local") {
+        return {
+          success: false as const,
+          errorCode: "remote_unsupported" as const,
+        };
+      }
+      return imageGenerationConfigService.discover(profile, request);
+    },
+  );
+  ipcMain.handle(
+    "test-image-generation",
+    (_event, request: ImageGenerationConfigDraft, profile?: string) => {
+      if (getConnectionConfig().mode !== "local") {
+        return {
+          success: false as const,
+          errorCode: "remote_unsupported" as const,
+        };
+      }
+      return imageGenerationConfigService.testGeneration(profile, request);
     },
   );
 
