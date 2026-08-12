@@ -1479,6 +1479,55 @@ describe("AgenteraAgentControlClient", () => {
     expect(headers.has("x-agentera-product-context-id")).toBe(false);
   });
 
+  it("posts a strict content-free official delivery verification receipt", async () => {
+    const requestId = "14141414-1414-4414-8414-141414141414";
+    const receivedAt = "2026-08-12T10:00:01.000Z";
+    const fetcher = vi.fn(async () =>
+      jsonResponse({ request_id: requestId, status: "accepted", received_at: receivedAt }, 201),
+    );
+    const client = new AgenteraAgentControlClient({
+      origin: "http://127.0.0.1:8086",
+      getAccessToken: () => "agentera-product-access",
+      getInstallationIdentity: () => deviceIdentity(),
+      officialAgentChannel: "internal",
+      desktopVersion: "0.7.3",
+      getAgentContext: () => ({ scope: "USER" }),
+      fetch: fetcher as typeof fetch,
+    });
+
+    expect(client.getOfficialDesktopVersion()).toBe("0.7.3");
+
+    await expect(
+      client.recordOfficialAgentDeliveryVerification({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        releaseRevisionId: RELEASE_REVISION_ID,
+        contentDigest: VERSION_DIGEST,
+        verificationStatus: "activated",
+        runtimeVersion: "v0.18.2-agentera.1",
+        desktopVersion: "0.7.3",
+        occurredAt: NOW.toISOString(),
+        requestId,
+      }),
+    ).resolves.toEqual({ request_id: requestId, status: "accepted", received_at: receivedAt });
+
+    const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+    expect(String(url)).toBe(
+      "http://127.0.0.1:8086/api/v1/official-agent-delivery-verifications",
+    );
+    expect(JSON.parse(String(init.body))).toEqual({
+      definition_id: DEFINITION_ID,
+      version_id: VERSION_ID,
+      release_revision_id: RELEASE_REVISION_ID,
+      content_digest: VERSION_DIGEST,
+      verification_status: "activated",
+      runtime_version: "v0.18.2-agentera.1",
+      desktop_version: "0.7.3",
+      occurred_at: NOW.toISOString(),
+      request_id: requestId,
+    });
+  });
+
   it("binds official requests to the selected shared context and rejects private response fields", async () => {
     const fetcher = vi
       .fn()

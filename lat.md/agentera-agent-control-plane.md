@@ -60,6 +60,14 @@ An authenticated device may read a PLATFORM version through the existing version
 
 This rule keeps failed installation and ambiguous managed-update retries recoverable after a release head changes. A new v2 or rollback target is prepared from the current eligible official detail and must match the exact release, revision, Definition, and Version before local verification; arbitrary PLATFORM version enumeration remains unavailable.
 
+### Content-free Desktop delivery verification
+
+Official Agent delivery stages use an authenticated, strict metadata-only receipt from the Desktop main process.
+
+[[src/main/agentera-agent-control/verification-receipt.ts#serializeOfficialAgentDeliveryVerification]] admits only Definition, Version, Release revision, content digest, closed verification status, Desktop and Runtime versions, timestamp, request ID, and an optional stable redacted error code. Prompts, bundles, local paths, credentials, logs, conversations, and user files have no contract field and cannot cross this boundary.
+
+[[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager]] queues `catalog_visible`, `signature_verified`, `compatible`, `installed`, and `activated` only for managed PLATFORM Installations. The local outbox is written before best-effort delivery, uses a deterministic request identity bound to Installation, Version, Release revision, stage, and error code, and never rolls back local materialization or activation when Cloud is unavailable. Cloud independently rechecks the authenticated user and device, active managed Installation, exact official Version and Release revision, and content digest before persisting an immutable replay-safe receipt.
+
 The signed official policy binds platform, release, immutable release revision, user, device-installation identity, Agent Installation, and selected product context. Desktop verification reconstructs the same canonical policy bytes, accepts canonical UUIDv7 platform IDs, and still enforces digest, signature, issuer, Runtime compatibility, and exact-field checks.
 
 ### Executable lifecycle gate
