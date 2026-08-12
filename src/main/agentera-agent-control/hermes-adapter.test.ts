@@ -512,6 +512,16 @@ describe("Aera adapter around the real Hermes transport", () => {
     expect(prepared.resumeSessionId).toBeUndefined();
     expect(prepared.modelOverride).toEqual(currentModelRoute);
     expect(prepared.envelope.requireBoundApiTransport).toBe(true);
+    expect(prepared.envelope.toolPolicy).toEqual({
+      allowed: ["files.read"],
+      denied: ["shell.root"],
+    });
+    const toolPolicy = prepared.envelope.toolPolicy;
+    expect(toolPolicy).toBeDefined();
+    if (!toolPolicy) throw new Error("expected a frozen tool policy");
+    expect(Object.isFrozen(toolPolicy)).toBe(true);
+    expect(Object.isFrozen(toolPolicy.allowed)).toBe(true);
+    expect(Object.isFrozen(toolPolicy.denied)).toBe(true);
   });
 
   it("freezes one published base, Profile, Runtime, policy and session across turns", async () => {

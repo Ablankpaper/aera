@@ -12,13 +12,14 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "fs";
  * block.  The stale file means toolsets appear disabled on every read.
  */
 
-const { TEST_HOME } = vi.hoisted(() => {
+const { TEST_HOME, WRITE_CONTROL } = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const path = require("path");
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const os = require("os");
   return {
     TEST_HOME: path.join(os.tmpdir(), `hermes-toolset-test-${Date.now()}`),
+    WRITE_CONTROL: { count: 0, failAt: 0 },
   };
 });
 
@@ -30,10 +31,21 @@ vi.mock("../src/main/installer", () => ({
   getEnhancedPath: () => process.env.PATH || "",
 }));
 
-vi.mock("../src/main/utils", () => {
+vi.mock("../src/main/utils", async () => {
   const actual =
-    vi.importActual<typeof import("../src/main/utils")>("../src/main/utils");
-  return actual;
+    await vi.importActual<typeof import("../src/main/utils")>(
+      "../src/main/utils",
+    );
+  return {
+    ...actual,
+    safeWriteFile: (...args: Parameters<typeof actual.safeWriteFile>) => {
+      WRITE_CONTROL.count += 1;
+      if (WRITE_CONTROL.failAt === WRITE_CONTROL.count) {
+        throw new Error("fixture write failure");
+      }
+      return actual.safeWriteFile(...args);
+    },
+  };
 });
 
 vi.mock("../src/shared/i18n", () => ({
@@ -54,6 +66,8 @@ import {
 const CONFIG_FILE = join(TEST_HOME, "config.yaml");
 
 beforeEach(() => {
+  WRITE_CONTROL.count = 0;
+  WRITE_CONTROL.failAt = 0;
   mkdirSync(TEST_HOME, { recursive: true });
 });
 
@@ -142,7 +156,7 @@ describe("setToolsetEnabled — platform_toolsets without cli subsection", () =>
 
     expect(webTs?.enabled).toBe(true);
     expect(fileTs?.enabled).toBe(true);
-    expect(memTs?.enabled).toBe(false);
+    expect(memTs?.enabled).toBe(true);
   });
 
   it("round-trips disable after enable when cli was initially missing", () => {
@@ -168,6 +182,60 @@ describe("setToolsetEnabled — no config file", () => {
 });
 
 describe("setToolsetEnabled — no platform_toolsets section (C1)", () => {
+  // @lat: [[image-generation#Default conversation admission]]
+  it("keeps image generation enabled when a first unrelated toggle materializes cli", () => {
+    writeConfig("model:\n  default: gpt-4o\n");
+
+    expect(setToolsetEnabled("web", false)).toBe(true);
+
+    const toolsets = getToolsets();
+    expect(toolsets.find((tool) => tool.key === "web")?.enabled).toBe(false);
+    expect(toolsets.find((tool) => tool.key === "image_gen")?.enabled).toBe(
+      true,
+    );
+    expect(toolsets.find((tool) => tool.key === "memory")?.enabled).toBe(true);
+  });
+
+  it("honors an explicit Profile image generation disable without a cli list", () => {
+    writeConfig("image_gen:\n  enabled: false\n");
+
+    const toolsets = getToolsets();
+
+    expect(toolsets.find((tool) => tool.key === "image_gen")?.enabled).toBe(
+      false,
+    );
+    expect(toolsets.find((tool) => tool.key === "web")?.enabled).toBe(true);
+  });
+
+  // @lat: [[image-generation#Explicit Profile opt-out]]
+  it("persists the image generation card toggle as the Profile override", () => {
+    writeConfig("model:\n  default: gpt-4o\n");
+
+    expect(setToolsetEnabled("image_gen", false)).toBe(true);
+    expect(readConfig()).toContain("image_gen:");
+    expect(readConfig()).toContain("enabled: false");
+    expect(
+      getToolsets().find((tool) => tool.key === "image_gen")?.enabled,
+    ).toBe(false);
+
+    expect(setToolsetEnabled("image_gen", true)).toBe(true);
+    expect(readConfig()).toContain("enabled: true");
+    expect(
+      getToolsets().find((tool) => tool.key === "image_gen")?.enabled,
+    ).toBe(true);
+  });
+
+  it("leaves both image settings unchanged when their one atomic write fails", () => {
+    writeConfig("model:\n  default: gpt-4o\n");
+    const before = readConfig();
+    WRITE_CONTROL.failAt = 1;
+
+    expect(setToolsetEnabled("image_gen", false)).toBe(false);
+
+    expect(readConfig()).toBe(before);
+    expect(WRITE_CONTROL.count).toBe(1);
+  });
+
   it("appends platform_toolsets.cli when the key is totally absent", () => {
     writeConfig("model:\n  default: gpt-4o\n");
 

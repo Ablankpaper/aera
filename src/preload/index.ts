@@ -87,6 +87,13 @@ import type {
 import type { RuntimeDistributionPublicState } from "../shared/agentera-runtime-distribution";
 import type { DesktopControlPublicState } from "../shared/agentera-desktop-control";
 import type {
+  ImageGenerationConfigDraft,
+  ImageGenerationConfigReadResult,
+  ImageGenerationModelsResult,
+  ImageGenerationSaveResult,
+  ImageGenerationTestResult,
+} from "../shared/image-generation";
+import type {
   AgentDraft,
   AgentDraftAssetInput,
   AgentDraftDetail,
@@ -565,8 +572,16 @@ const hermesAPI = {
       ipcRenderer.removeListener("connection-config-changed", handler);
   },
 
-  onRuntimeSnapshotChanged: (callback: () => void): (() => void) => {
-    const handler = (): void => callback();
+  onRuntimeSnapshotChanged: (
+    callback: (change?: {
+      catalogRevision?: string;
+      profile?: string;
+    }) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      change?: { catalogRevision?: string; profile?: string },
+    ): void => callback(change);
     ipcRenderer.on("runtime-snapshot-changed", handler);
     return () =>
       ipcRenderer.removeListener("runtime-snapshot-changed", handler);
@@ -1265,6 +1280,25 @@ const hermesAPI = {
     profile?: string,
   ): Promise<boolean> =>
     ipcRenderer.invoke("set-toolset-enabled", key, enabled, profile),
+  getImageGenerationConfig: (
+    profile?: string,
+  ): Promise<ImageGenerationConfigReadResult> =>
+    ipcRenderer.invoke("get-image-generation-config", profile),
+  saveImageGenerationConfig: (
+    request: ImageGenerationConfigDraft,
+    profile?: string,
+  ): Promise<ImageGenerationSaveResult> =>
+    ipcRenderer.invoke("save-image-generation-config", request, profile),
+  discoverImageGenerationModels: (
+    request: ImageGenerationConfigDraft,
+    profile?: string,
+  ): Promise<ImageGenerationModelsResult> =>
+    ipcRenderer.invoke("discover-image-generation-models", request, profile),
+  testImageGeneration: (
+    request: ImageGenerationConfigDraft,
+    profile?: string,
+  ): Promise<ImageGenerationTestResult> =>
+    ipcRenderer.invoke("test-image-generation", request, profile),
 
   // Skills
   listInstalledSkills: (

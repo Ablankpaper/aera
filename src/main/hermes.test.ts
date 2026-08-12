@@ -77,10 +77,12 @@ import {
   buildAgentModelRequestBody,
   buildAgentModelTransportRoute,
   assertHermesAgentModelRouteSupported,
+  assertHermesAgentToolPolicySupported,
   conversationSystemMessage,
   getRemoteAuthHeader,
   sendMessage,
   supportsHermesAgentModelRoute,
+  supportsHermesAgentToolPolicy,
   shouldProbeAgentModelTransport,
   shouldFallbackFromEmptyRunCompletion,
   shouldForceCliForSessionOverride,
@@ -218,6 +220,49 @@ describe("installed-Agent model transport route", () => {
         code: "model_switch_runtime_route_unsupported",
       });
     }
+  });
+
+  it("requires an explicit Runtime capability for signed Agent tool policy", () => {
+    expect(
+      supportsHermesAgentToolPolicy({
+        features: { request_tool_policy: true },
+      }),
+    ).toBe(true);
+    expect(
+      supportsHermesAgentToolPolicy({
+        features: {},
+      }),
+    ).toBe(false);
+
+    try {
+      assertHermesAgentToolPolicySupported({ features: {} });
+      throw new Error("expected bounded tool-policy error");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "agent_tool_policy_runtime_unsupported",
+      });
+    }
+  });
+
+  it("places the signed Agent tool policy in the internal request body", () => {
+    const body = buildAgentModelRequestBody({
+      message: "draw a lighthouse",
+      envelope: {
+        instructions: "SIGNED AGENT BASE",
+        requireBoundApiTransport: true,
+        toolPolicy: {
+          allowed: ["files.read"],
+          denied: ["image_generate"],
+        },
+      },
+    });
+
+    expect(body).toMatchObject({
+      aera_tool_policy: {
+        allowed: ["files.read"],
+        denied: ["image_generate"],
+      },
+    });
   });
 });
 

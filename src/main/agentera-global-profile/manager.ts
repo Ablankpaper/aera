@@ -679,6 +679,7 @@ export function composeGlobalProfileEnvelope(
       ? `${existing.instructions}\n\n${renderedSnapshot}`
       : renderedSnapshot,
     requireBoundApiTransport: true,
+    ...(existing?.toolPolicy ? { toolPolicy: existing.toolPolicy } : {}),
   };
 }
 
