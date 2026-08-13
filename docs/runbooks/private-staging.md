@@ -38,7 +38,7 @@ Deploy Cloud first with every new feature disabled. Use exact candidate workflow
 
 ```bash
 gh workflow run deploy-staging.yml \
-  --repo bignormal/aera-cloud \
+  --repo Ablankpaper/aera-cloud \
   --ref CLOUD_SOURCE_REF \
   -f candidate_run_id=CLOUD_CANDIDATE_RUN_ID \
   -f source_sha=CLOUD_SOURCE_SHA \
@@ -53,7 +53,7 @@ Deploy Admin second with mutations disabled:
 
 ```bash
 gh workflow run deploy-staging.yml \
-  --repo bignormal/aera-admin \
+  --repo Ablankpaper/aera-admin \
   --ref ADMIN_SOURCE_REF \
   -f candidate_run_id=ADMIN_CANDIDATE_RUN_ID \
   -f source_sha=ADMIN_SOURCE_SHA \
@@ -150,7 +150,7 @@ After disabled-state and rollback checks pass, rerun the exact Cloud candidate d
 
 ```bash
 gh workflow run deploy-staging.yml \
-  --repo bignormal/aera-cloud \
+  --repo Ablankpaper/aera-cloud \
   --ref CLOUD_SOURCE_REF \
   -f candidate_run_id=CLOUD_CANDIDATE_RUN_ID \
   -f source_sha=CLOUD_SOURCE_SHA \
@@ -163,7 +163,7 @@ Enable Admin mutations only for the approved exercise and only after the same-di
 
 ```bash
 gh workflow run deploy-staging.yml \
-  --repo bignormal/aera-admin \
+  --repo Ablankpaper/aera-admin \
   --ref ADMIN_SOURCE_REF \
   -f candidate_run_id=ADMIN_CANDIDATE_RUN_ID \
   -f source_sha=ADMIN_SOURCE_SHA \

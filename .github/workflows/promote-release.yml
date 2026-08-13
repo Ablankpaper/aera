@@ -145,12 +145,12 @@ jobs:
             cloud: validate(
               process.env.CLOUD_JSON,
               "Cloud",
-              "bignormal/aera-cloud",
+              "Ablankpaper/aera-cloud",
             ),
             admin: validate(
               process.env.ADMIN_JSON,
               "Admin",
-              "bignormal/aera-admin",
+              "Ablankpaper/aera-admin",
             ),
           };
           const lines = [];
@@ -174,7 +174,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/release-evidence"
-          gh run view "$EVIDENCE_RUN_ID" --repo bignormal/aera \
+          gh run view "$EVIDENCE_RUN_ID" --repo Ablankpaper/aera \
             --json conclusion,headSha,jobs,url,workflowName \
             > "$RUNNER_TEMP/evidence-run.json"
           EVIDENCE_RUN_JSON="$RUNNER_TEMP/evidence-run.json" \
@@ -200,7 +200,7 @@ jobs:
             }
           }
           NODE
-          gh run download "$EVIDENCE_RUN_ID" --repo bignormal/aera \
+          gh run download "$EVIDENCE_RUN_ID" --repo Ablankpaper/aera \
             --name "$EVIDENCE_ARTIFACT_NAME" \
             --dir "$RUNNER_TEMP/release-evidence"
           for file in \
@@ -325,14 +325,14 @@ jobs:
             throw new Error("Image candidate supply-chain bytes differ");
           }
           if (
-            process.env.EXPECTED_REPOSITORY === "bignormal/aera-cloud" &&
+            process.env.EXPECTED_REPOSITORY === "Ablankpaper/aera-cloud" &&
             (manifest.features?.officialQualityEnabledByDefault !== false ||
               manifest.features?.encryptedBackupEnabledByDefault !== false)
           ) {
             throw new Error("Cloud candidate enables new features by default");
           }
           if (
-            process.env.EXPECTED_REPOSITORY === "bignormal/aera-admin" &&
+            process.env.EXPECTED_REPOSITORY === "Ablankpaper/aera-admin" &&
             manifest.mutationsEnabledByDefault !== false
           ) {
             throw new Error("Admin candidate enables mutations by default");
@@ -370,11 +370,11 @@ jobs:
           }
 
           verify_candidate \
-            bignormal/aera-cloud cloud "Cloud candidate" \
+            Ablankpaper/aera-cloud cloud "Cloud candidate" \
             "$CLOUD_CANDIDATE_RUN_ID" "$CLOUD_SOURCE_SHA" \
             "$CLOUD_IMAGE_DIGEST" "$CLOUD_MANIFEST_SHA256"
           verify_candidate \
-            bignormal/aera-admin admin "Admin candidate" \
+            Ablankpaper/aera-admin admin "Admin candidate" \
             "$ADMIN_CANDIDATE_RUN_ID" "$ADMIN_SOURCE_SHA" \
             "$ADMIN_IMAGE_DIGEST" "$ADMIN_MANIFEST_SHA256"
 
@@ -398,13 +398,13 @@ jobs:
               --json conclusion,headSha,jobs,startedTime,updatedAt,url,workflowName \
               > "$destination"
           }
-          fetch_run bignormal/aera-cloud "$CLOUD_DISABLED_RUN_ID" \
+          fetch_run Ablankpaper/aera-cloud "$CLOUD_DISABLED_RUN_ID" \
             "$RUNNER_TEMP/cloud-disabled.json"
-          fetch_run bignormal/aera-admin "$ADMIN_DISABLED_RUN_ID" \
+          fetch_run Ablankpaper/aera-admin "$ADMIN_DISABLED_RUN_ID" \
             "$RUNNER_TEMP/admin-disabled.json"
-          fetch_run bignormal/aera-cloud "$CLOUD_ENABLED_RUN_ID" \
+          fetch_run Ablankpaper/aera-cloud "$CLOUD_ENABLED_RUN_ID" \
             "$RUNNER_TEMP/cloud-enabled.json"
-          fetch_run bignormal/aera-admin "$ADMIN_ENABLED_RUN_ID" \
+          fetch_run Ablankpaper/aera-admin "$ADMIN_ENABLED_RUN_ID" \
             "$RUNNER_TEMP/admin-enabled.json"
 
           node --input-type=module <<'NODE'
@@ -494,13 +494,13 @@ jobs:
             test -s "$destination/current-manifest.json"
           }
           root="$RUNNER_TEMP/production-deployment-evidence"
-          download_state bignormal/aera-cloud "$CLOUD_DISABLED_RUN_ID" \
+          download_state Ablankpaper/aera-cloud "$CLOUD_DISABLED_RUN_ID" \
             "cloud-production-disabled-$CLOUD_SOURCE_SHA" "$root/cloud-disabled"
-          download_state bignormal/aera-admin "$ADMIN_DISABLED_RUN_ID" \
+          download_state Ablankpaper/aera-admin "$ADMIN_DISABLED_RUN_ID" \
             "admin-production-disabled-$ADMIN_SOURCE_SHA" "$root/admin-disabled"
-          download_state bignormal/aera-cloud "$CLOUD_ENABLED_RUN_ID" \
+          download_state Ablankpaper/aera-cloud "$CLOUD_ENABLED_RUN_ID" \
             "cloud-production-enabled-$CLOUD_SOURCE_SHA" "$root/cloud-enabled"
-          download_state bignormal/aera-admin "$ADMIN_ENABLED_RUN_ID" \
+          download_state Ablankpaper/aera-admin "$ADMIN_ENABLED_RUN_ID" \
             "admin-production-enabled-$ADMIN_SOURCE_SHA" "$root/admin-enabled"
 
           EVIDENCE_ROOT="$root" node --input-type=module <<'NODE'

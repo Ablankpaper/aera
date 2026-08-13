@@ -20,7 +20,7 @@ describe("Aera visible branding", () => {
       name: "agentera-studio",
       description: "Aera — private AI agent desktop",
       author: "Aera",
-      homepage: "https://github.com/bignormal/aera",
+      homepage: "https://github.com/Ablankpaper/aera",
     });
 
     const builder = read("electron-builder.yml");
@@ -105,7 +105,7 @@ describe("Aera visible branding", () => {
     for (const path of [...readmes, ...contributorGuides]) {
       const content = read(path);
       expect(content, path).toContain("Aera");
-      expect(content, path).toContain("https://github.com/bignormal/aera");
+      expect(content, path).toContain("https://github.com/Ablankpaper/aera");
       expect(content, path).not.toMatch(
         /\b(?:AgentEra|WorkBuddy|AionUI)\b|Aera Studio|Hermes One|Hermes Desktop|Hermes Agent|Nous Research|fathah/,
       );

@@ -23,7 +23,7 @@ import {
 } from "./fixtures/runtime-distribution/fixture";
 
 const context = {
-  repository: "bignormal/aera-runtime",
+  repository: "Ablankpaper/aera-runtime",
   platform: "darwin" as const,
   arch: "arm64" as const,
   desktopVersion: "0.7.3",

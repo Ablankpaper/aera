@@ -48,7 +48,7 @@ afterEach(async () => {
 });
 
 const manifestContext: RuntimeManifestValidationContext = {
-  repository: "bignormal/aera-runtime",
+  repository: "Ablankpaper/aera-runtime",
   platform: "darwin",
   arch: "arm64",
   desktopVersion: "0.7.3",
@@ -116,13 +116,13 @@ async function harness(
     archiveSize: TEST_ARCHIVE_BYTES.length,
     archiveSha256: manifest.archive_sha256,
     archiveUrl: new URL(
-      `https://github.com/bignormal/aera-runtime/releases/download/runtime-v${TEST_RUNTIME_VERSION}/${TEST_ARCHIVE_NAME}`,
+      `https://github.com/Ablankpaper/aera-runtime/releases/download/runtime-v${TEST_RUNTIME_VERSION}/${TEST_ARCHIVE_NAME}`,
     ),
     manifestUrl: new URL(
-      `https://github.com/bignormal/aera-runtime/releases/download/runtime-v${TEST_RUNTIME_VERSION}/${TEST_ARCHIVE_NAME}.manifest.json`,
+      `https://github.com/Ablankpaper/aera-runtime/releases/download/runtime-v${TEST_RUNTIME_VERSION}/${TEST_ARCHIVE_NAME}.manifest.json`,
     ),
     signatureUrl: new URL(
-      `https://github.com/bignormal/aera-runtime/releases/download/runtime-v${TEST_RUNTIME_VERSION}/${TEST_ARCHIVE_NAME}.manifest.sig`,
+      `https://github.com/Ablankpaper/aera-runtime/releases/download/runtime-v${TEST_RUNTIME_VERSION}/${TEST_ARCHIVE_NAME}.manifest.sig`,
     ),
     manifestBytes: signed.manifestBytes,
     signatureBytes: signed.signatureBytes,

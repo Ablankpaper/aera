@@ -96,7 +96,7 @@ interface SignatureEnvelope extends Record<string, unknown> {
   signature_base64: string;
 }
 
-const APPROVED_REPOSITORY = "bignormal/aera-runtime";
+const APPROVED_REPOSITORY = "Ablankpaper/aera-runtime";
 const GITHUB_ORIGIN = "https://github.com";
 const RELEASE_PATH_PREFIX = `/${APPROVED_REPOSITORY}/releases/download/`;
 const LATEST_PATH_PREFIX = `/${APPROVED_REPOSITORY}/releases/latest/download/`;

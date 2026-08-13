@@ -150,7 +150,7 @@ export function createRuntimeBootstrapOptions(
     ),
     trustedPublicKeys: loadRuntimeTrustFile(runtimeTrustPath(environment)),
     manifestContext: {
-      repository: "bignormal/aera-runtime",
+      repository: "Ablankpaper/aera-runtime",
       platform: target.platform,
       arch: target.arch,
       desktopVersion: environment.desktopVersion,

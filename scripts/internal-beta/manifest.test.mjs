@@ -24,9 +24,9 @@ const RUNTIME_SHA = "ae746df6556f1d496f9dd49c850cc6133997e317";
 const ORIGIN = "https://203.0.113.10";
 const KEY_ID = "offline-beta-2026-07";
 const PUBLIC_KEY = Buffer.alloc(32, 73).toString("base64url");
-const CI_RUN_URL = "https://github.com/bignormal/aera/actions/runs/30100000001";
+const CI_RUN_URL = "https://github.com/Ablankpaper/aera/actions/runs/30100000001";
 const BUILD_RUN_URL =
-  "https://github.com/bignormal/aera/actions/runs/30100000002";
+  "https://github.com/Ablankpaper/aera/actions/runs/30100000002";
 
 const temporaryRoots = [];
 
@@ -59,7 +59,7 @@ async function createFixture(runtimePatch = {}) {
   );
   const runtimeDocument = {
     schema_version: 1,
-    repository: "bignormal/aera-runtime",
+    repository: "Ablankpaper/aera-runtime",
     release_tag: "runtime-v0.20.0-agentera.1-rc.1",
     source_commit: RUNTIME_SHA,
     runtime_version: "0.20.0-agentera.1",
@@ -161,7 +161,7 @@ async function createFixture(runtimePatch = {}) {
     origin: ORIGIN,
     packageJson,
     provenance,
-    repository: "bignormal/aera",
+    repository: "Ablankpaper/aera",
     runtimeLock,
     runtimeManifestsDirectory,
     sbom,
@@ -177,7 +177,7 @@ test("builds one canonical internal-Beta manifest with exact identities and hash
   const { options } = await createFixture();
   const document = await buildInternalBetaManifest(options);
 
-  assert.equal(document.repository, "bignormal/aera");
+  assert.equal(document.repository, "Ablankpaper/aera");
   assert.equal(document.sourceSha, SOURCE_SHA);
   assert.equal(document.version, VERSION);
   assert.equal(document.build.ciRunUrl, CI_RUN_URL);

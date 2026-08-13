@@ -62,9 +62,9 @@ export const REQUIRED_STAGING_SCENARIOS = Object.freeze([
 ]);
 
 const REPOSITORIES = new Set([
-  "bignormal/aera",
-  "bignormal/aera-cloud",
-  "bignormal/aera-admin",
+  "Ablankpaper/aera",
+  "Ablankpaper/aera-cloud",
+  "Ablankpaper/aera-admin",
 ]);
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
@@ -162,13 +162,13 @@ export function validateStagingEvidence(document, options) {
 function validateReleaseInputs(inputs, expected) {
   exactFields(inputs, ["cloud", "admin", "desktop"], "staging release inputs");
   validateImageInput(inputs.cloud, {
-    repository: "bignormal/aera-cloud",
+    repository: "Ablankpaper/aera-cloud",
     sourceSha: expected?.cloudSourceSha,
     imageDigest: expected?.cloudImageDigest,
     label: "Cloud",
   });
   validateImageInput(inputs.admin, {
-    repository: "bignormal/aera-admin",
+    repository: "Ablankpaper/aera-admin",
     sourceSha: expected?.adminSourceSha,
     imageDigest: expected?.adminImageDigest,
     label: "Admin",
@@ -179,7 +179,7 @@ function validateReleaseInputs(inputs, expected) {
     "Desktop staging input",
   );
   if (
-    inputs.desktop.repository !== "bignormal/aera" ||
+    inputs.desktop.repository !== "Ablankpaper/aera" ||
     !SHA_PATTERN.test(inputs.desktop.sourceSha ?? "") ||
     inputs.desktop.sourceSha !== expected?.desktopSourceSha ||
     !DIGEST_PATTERN.test(inputs.desktop.candidateManifestSha256 ?? "") ||
@@ -321,9 +321,9 @@ function validateSuiteRuns(suiteRuns, releaseInputs, completedAt) {
       throw new Error(`Staging suite repository is invalid: ${suite}`);
     }
     const expectedSourceSha =
-      run.repository === "bignormal/aera-cloud"
+      run.repository === "Ablankpaper/aera-cloud"
         ? releaseInputs.cloud.sourceSha
-        : run.repository === "bignormal/aera-admin"
+        : run.repository === "Ablankpaper/aera-admin"
           ? releaseInputs.admin.sourceSha
           : releaseInputs.desktop.sourceSha;
     if (

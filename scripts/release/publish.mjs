@@ -42,7 +42,7 @@ const APPROVER_PATTERN =
   /^(?:employee|contractor):[A-Za-z0-9][A-Za-z0-9._-]{1,99}$/u;
 const CANDIDATE_WORKFLOW = "Desktop signed candidate";
 const CANDIDATE_SIGNER_WORKFLOW =
-  "github.com/bignormal/aera/.github/workflows/release-candidate.yml";
+  "github.com/Ablankpaper/aera/.github/workflows/release-candidate.yml";
 
 export async function promoteDesktopRelease(options, dependencies = {}) {
   validatePromotionOptions(options);
@@ -350,7 +350,7 @@ export function validateProductionRunSequence(sequence, expected) {
     [
       "cloudDisabled",
       {
-        repository: "bignormal/aera-cloud",
+        repository: "Ablankpaper/aera-cloud",
         workflowName: "Promote Cloud candidate to production",
         sourceSha: expected.cloudSourceSha,
         runId: expected.cloudDisabledRunId,
@@ -362,7 +362,7 @@ export function validateProductionRunSequence(sequence, expected) {
     [
       "adminDisabled",
       {
-        repository: "bignormal/aera-admin",
+        repository: "Ablankpaper/aera-admin",
         workflowName: "Promote Admin candidate to production",
         sourceSha: expected.adminSourceSha,
         runId: expected.adminDisabledRunId,
@@ -374,7 +374,7 @@ export function validateProductionRunSequence(sequence, expected) {
     [
       "cloudEnabled",
       {
-        repository: "bignormal/aera-cloud",
+        repository: "Ablankpaper/aera-cloud",
         workflowName: "Promote Cloud candidate to production",
         sourceSha: expected.cloudSourceSha,
         runId: expected.cloudEnabledRunId,
@@ -386,7 +386,7 @@ export function validateProductionRunSequence(sequence, expected) {
     [
       "adminEnabled",
       {
-        repository: "bignormal/aera-admin",
+        repository: "Ablankpaper/aera-admin",
         workflowName: "Promote Admin candidate to production",
         sourceSha: expected.adminSourceSha,
         runId: expected.adminEnabledRunId,
@@ -496,7 +496,7 @@ function validateDeploymentEvidencePair(value, expected) {
     value.manifestRaw,
     `production ${expected.kind} current manifest`,
   );
-  const repository = `bignormal/aera-${expected.kind}`;
+  const repository = `Ablankpaper/aera-${expected.kind}`;
   const imageReference = `ghcr.io/${repository}@${expected.imageDigest}`;
   if (
     sha256(Buffer.from(value.manifestRaw)) !==
@@ -676,7 +676,7 @@ function validateDesktopGate(value, expected) {
     "production Desktop gate",
   );
   if (
-    value.repository !== "bignormal/aera" ||
+    value.repository !== "Ablankpaper/aera" ||
     value.sourceSha !== expected.desktopSourceSha ||
     value.version !== expected.desktopVersion ||
     value.candidateManifestSha256 !== expected.desktopCandidateManifestSha256 ||
@@ -696,7 +696,7 @@ function validateImageGate(value, expected, kind) {
     `production ${title} gate`,
   );
   if (
-    value.repository !== `bignormal/aera-${kind}` ||
+    value.repository !== `Ablankpaper/aera-${kind}` ||
     value.sourceSha !== expected[`${kind}SourceSha`] ||
     value.imageDigest !== expected[`${kind}ImageDigest`] ||
     value.candidateManifestSha256 !==
@@ -964,7 +964,7 @@ function validatePromotionOptions(options) {
     "publication options",
   );
   if (
-    options.repository !== "bignormal/aera" ||
+    options.repository !== "Ablankpaper/aera" ||
     !RUN_ID_PATTERN.test(options.candidateRunId ?? "") ||
     !SHA_PATTERN.test(options.sourceSha ?? "") ||
     !DIGEST_PATTERN.test(options.candidateManifestSha256 ?? "") ||
@@ -1390,7 +1390,7 @@ async function runCLI(argv) {
   const values = parseOptions(argv);
   if (
     process.env.GITHUB_ACTIONS !== "true" ||
-    process.env.GITHUB_REPOSITORY !== "bignormal/aera" ||
+    process.env.GITHUB_REPOSITORY !== "Ablankpaper/aera" ||
     values.confirm_production_publication !==
       "EXACT_BYTES_APPROVED_FOR_PUBLICATION"
   ) {
@@ -1399,7 +1399,7 @@ async function runCLI(argv) {
     );
   }
   const result = await promoteDesktopRelease({
-    repository: "bignormal/aera",
+    repository: "Ablankpaper/aera",
     candidateRunId: values.candidate_run_id,
     sourceSha: values.source_sha,
     candidateManifestSha256: values.candidate_manifest_sha256,

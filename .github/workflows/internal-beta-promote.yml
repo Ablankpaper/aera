@@ -59,7 +59,7 @@ jobs:
           test "$VERSION" = "0.7.4-internal-beta.27"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
-          gh run view "$CANDIDATE_RUN_ID" --repo bignormal/aera \
+          gh run view "$CANDIDATE_RUN_ID" --repo Ablankpaper/aera \
             --json conclusion,event,headSha,jobs,url,workflowName \
             > "$RUNNER_TEMP/candidate-run.json"
           CANDIDATE_RUN_JSON="$RUNNER_TEMP/candidate-run.json" \
@@ -144,7 +144,7 @@ jobs:
             await readFile(process.env.CANDIDATE_MANIFEST, "utf8"),
           );
           const expectedRunUrl =
-            `https://github.com/bignormal/aera/actions/runs/${process.env.CANDIDATE_RUN_ID}`;
+            `https://github.com/Ablankpaper/aera/actions/runs/${process.env.CANDIDATE_RUN_ID}`;
           if (document.sourceSha !== process.env.SOURCE_SHA) {
             throw new Error("Candidate manifest source SHA differs");
           }

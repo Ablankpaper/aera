@@ -32,7 +32,7 @@ function runVerifier(
       "--trust",
       bundle.trustPath,
       "--repository",
-      "bignormal/aera-runtime",
+      "Ablankpaper/aera-runtime",
       "--platform",
       "darwin",
       "--arch",
@@ -53,7 +53,7 @@ describe("independent Runtime build verifier", () => {
       const result = runVerifier(bundle);
       expect(result.status, result.stderr).toBe(0);
       expect(JSON.parse(result.stdout)).toMatchObject({
-        repository: "bignormal/aera-runtime",
+        repository: "Ablankpaper/aera-runtime",
         platform: "darwin",
         arch: "arm64",
         verified: true,
@@ -110,7 +110,7 @@ describe("independent Runtime build verifier", () => {
     );
     expect(lock).toMatchObject({
       schema_version: 1,
-      repository: "bignormal/aera-runtime",
+      repository: "Ablankpaper/aera-runtime",
       release_tag: "runtime-v0.20.0-agentera.1-rc.1",
       source_commit: "ae746df6556f1d496f9dd49c850cc6133997e317",
       runtime_version: "0.20.0-agentera.1",

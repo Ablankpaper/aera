@@ -27,7 +27,7 @@ export AERA_CANDIDATE_RUN_ID="12345678901"
 test "$(git rev-parse HEAD)" = "$AERA_SOURCE_SHA"
 
 gh run download "$AERA_CANDIDATE_RUN_ID" \
-  --repo bignormal/aera \
+  --repo Ablankpaper/aera \
   --name "desktop-candidate-$AERA_SOURCE_SHA" \
   --dir "$PWD/.device-evidence-candidate"
 
@@ -40,14 +40,14 @@ fi
 find artifacts -type f -print0 |
   while IFS= read -r -d '' artifact; do
     gh attestation verify "$artifact" \
-      --repo bignormal/aera \
+      --repo Ablankpaper/aera \
       --signer-workflow \
-      github.com/bignormal/aera/.github/workflows/release-candidate.yml
+      github.com/Ablankpaper/aera/.github/workflows/release-candidate.yml
   done
 gh attestation verify candidate-manifest.json \
-  --repo bignormal/aera \
+  --repo Ablankpaper/aera \
   --signer-workflow \
-  github.com/bignormal/aera/.github/workflows/release-candidate.yml
+  github.com/Ablankpaper/aera/.github/workflows/release-candidate.yml
 
 node ../scripts/release/verify-candidate.mjs candidate-manifest.json \
   --artifacts-dir artifacts \

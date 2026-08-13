@@ -80,9 +80,9 @@ jobs:
             test "$actual_sha" = "$expected_sha"
             gh workflow run "$workflow" --repo "$repository" --ref "$ref"
           }
-          dispatch bignormal/aera ci.yml "$DESKTOP_REF" "$DESKTOP_SHA"
-          dispatch bignormal/aera-cloud ci.yml "$CLOUD_REF" "$CLOUD_SHA"
-          dispatch bignormal/aera-admin ci.yml "$ADMIN_REF" "$ADMIN_SHA"
+          dispatch Ablankpaper/aera ci.yml "$DESKTOP_REF" "$DESKTOP_SHA"
+          dispatch Ablankpaper/aera-cloud ci.yml "$CLOUD_REF" "$CLOUD_SHA"
+          dispatch Ablankpaper/aera-admin ci.yml "$ADMIN_REF" "$ADMIN_SHA"
 
       - name: Wait for real jobs and capture run metadata
         shell: bash
@@ -117,11 +117,11 @@ jobs:
             gh run view "$run_id" --repo "$repository" \
               --json conclusion,headSha,jobs,url,workflowName,updatedAt > "$output"
           }
-          capture bignormal/aera ci.yml "$DESKTOP_REF" "$DESKTOP_SHA" \
+          capture Ablankpaper/aera ci.yml "$DESKTOP_REF" "$DESKTOP_SHA" \
             "$RUNNER_TEMP/ci-checkpoint/desktop.json"
-          capture bignormal/aera-cloud ci.yml "$CLOUD_REF" "$CLOUD_SHA" \
+          capture Ablankpaper/aera-cloud ci.yml "$CLOUD_REF" "$CLOUD_SHA" \
             "$RUNNER_TEMP/ci-checkpoint/cloud.json"
-          capture bignormal/aera-admin ci.yml "$ADMIN_REF" "$ADMIN_SHA" \
+          capture Ablankpaper/aera-admin ci.yml "$ADMIN_REF" "$ADMIN_SHA" \
             "$RUNNER_TEMP/ci-checkpoint/admin.json"
 
       - name: Build and verify checkpoint manifest
@@ -139,9 +139,9 @@ jobs:
           import { execFileSync } from "node:child_process";
 
           const specs = [
-            ["desktop", "bignormal/aera", process.env.DESKTOP_SHA],
-            ["cloud", "bignormal/aera-cloud", process.env.CLOUD_SHA],
-            ["admin", "bignormal/aera-admin", process.env.ADMIN_SHA],
+            ["desktop", "Ablankpaper/aera", process.env.DESKTOP_SHA],
+            ["cloud", "Ablankpaper/aera-cloud", process.env.CLOUD_SHA],
+            ["admin", "Ablankpaper/aera-admin", process.env.ADMIN_SHA],
           ];
           const repositories = [];
           for (const [name, repository, expectedSha] of specs) {
@@ -168,7 +168,7 @@ jobs:
                 name: job.name,
                 platform:
                   job.name.match(/\(([^)]+)\)$/u)?.[1] ??
-                  (repository === "bignormal/aera" ? "" : "ubuntu-24.04"),
+                  (repository === "Ablankpaper/aera" ? "" : "ubuntu-24.04"),
                 conclusion: job.conclusion,
                 stepsExecuted: job.steps.filter(
                   (step) => step.conclusion !== "skipped",
@@ -188,9 +188,9 @@ jobs:
           NODE
           node scripts/verify-ci-checkpoint.mjs \
             "$RUNNER_TEMP/ci-checkpoint/checkpoint.json" \
-            --expect "bignormal/aera=$DESKTOP_SHA" \
-            --expect "bignormal/aera-cloud=$CLOUD_SHA" \
-            --expect "bignormal/aera-admin=$ADMIN_SHA"
+            --expect "Ablankpaper/aera=$DESKTOP_SHA" \
+            --expect "Ablankpaper/aera-cloud=$CLOUD_SHA" \
+            --expect "Ablankpaper/aera-admin=$ADMIN_SHA"
 
       - name: Upload exact-SHA checkpoint evidence
         uses: actions/upload-artifact@v4
