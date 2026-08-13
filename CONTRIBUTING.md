@@ -62,7 +62,7 @@ A maintainer will review your PR and may request changes. Once approved, it will
 
 ## Reporting Bugs
 
-Found a bug? [Open an issue](https://github.com/bignormal/aera/issues/new) with:
+Found a bug? [Open an issue](https://github.com/Ablankpaper/aera/issues/new) with:
 
 - A clear title and description.
 - Steps to reproduce the issue.
@@ -71,7 +71,7 @@ Found a bug? [Open an issue](https://github.com/bignormal/aera/issues/new) with:
 
 ## Requesting Features
 
-Have an idea? [Open an issue](https://github.com/bignormal/aera/issues/new) and describe:
+Have an idea? [Open an issue](https://github.com/Ablankpaper/aera/issues/new) and describe:
 
 - The problem you're trying to solve.
 - How you'd like it to work.
@@ -96,7 +96,7 @@ build/                   Packaging resources
 
 ## Community
 
-- Use [GitHub Issues](https://github.com/bignormal/aera/issues) for bugs, feature requests, and contributor discussion.
+- Use [GitHub Issues](https://github.com/Ablankpaper/aera/issues) for bugs, feature requests, and contributor discussion.
 
 ## License
 

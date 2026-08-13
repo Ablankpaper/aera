@@ -178,7 +178,7 @@ export function buildSpdxDocument({
     },
     dataLicense: "CC0-1.0",
     documentDescribes: [rootID, runtimeID],
-    documentNamespace: `https://github.com/bignormal/aera/candidate/${sourceSha}`,
+    documentNamespace: `https://github.com/Ablankpaper/aera/candidate/${sourceSha}`,
     name: `Aera Desktop ${rootVersion} candidate SBOM`,
     packages,
     relationships: [
@@ -226,8 +226,8 @@ export async function buildCandidateManifest(options) {
   );
   const createdAt = requiredISO(options.createdAt, "candidate creation time");
   const repository = requiredString(options.repository, "repository");
-  if (repository !== "bignormal/aera") {
-    throw new Error("Candidate repository must be bignormal/aera");
+  if (repository !== "Ablankpaper/aera") {
+    throw new Error("Candidate repository must be Ablankpaper/aera");
   }
 
   const packageDocument = await readJSON(options.packageJson);
@@ -369,7 +369,7 @@ export async function buildCandidateManifest(options) {
       githubAttestation: {
         required: true,
         signerWorkflow:
-          "github.com/bignormal/aera/.github/workflows/release-candidate.yml",
+          "github.com/Ablankpaper/aera/.github/workflows/release-candidate.yml",
       },
     },
     linuxReleasable: false,
@@ -592,7 +592,7 @@ function requiredURL(value, label) {
     if (
       parsed.protocol !== "https:" ||
       parsed.hostname !== "github.com" ||
-      !/^\/bignormal\/aera\/actions\/runs\/[1-9][0-9]*$/u.test(
+      !/^\/Ablankpaper\/aera\/actions\/runs\/[1-9][0-9]*$/u.test(
         parsed.pathname,
       ) ||
       parsed.search !== "" ||

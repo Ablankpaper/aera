@@ -4,7 +4,7 @@
 // installer URL, and SHA256 of the NSIS installer in dist/, and writes
 // the result under dist/winget/manifests/b/Bignormal/AgentEraStudio/<version>/.
 //
-// Run from CLI: VERSION=0.2.3 PUBLISH_OWNER=bignormal node scripts/generate-winget-manifests.mjs
+// Run from CLI: VERSION=0.2.3 PUBLISH_OWNER=Ablankpaper node scripts/generate-winget-manifests.mjs
 // The PackageIdentifier and output directory intentionally retain their legacy
 // values so existing WinGet installations upgrade in place.
 
@@ -101,7 +101,7 @@ if (isCli) {
     rootDir,
     version: process.env.VERSION || pkg.version,
     artifactBaseName: "Aera",
-    publishOwner: process.env.PUBLISH_OWNER || "bignormal",
+    publishOwner: process.env.PUBLISH_OWNER || "Ablankpaper",
   });
   console.log(`Winget manifests generated in ${result.outDir}`);
   console.log(`InstallerSha256: ${result.sha256}`);

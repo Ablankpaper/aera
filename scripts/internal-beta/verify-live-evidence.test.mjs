@@ -28,17 +28,17 @@ const CLOUD_SHA = "b".repeat(40);
 const ADMIN_SHA = "c".repeat(40);
 const CLOUD_DIGEST = `sha256:${"1".repeat(64)}`;
 const ADMIN_DIGEST = `sha256:${"2".repeat(64)}`;
-const DESKTOP_CI = "https://github.com/bignormal/aera/actions/runs/30100000001";
+const DESKTOP_CI = "https://github.com/Ablankpaper/aera/actions/runs/30100000001";
 const DESKTOP_CANDIDATE =
-  "https://github.com/bignormal/aera/actions/runs/30100000002";
+  "https://github.com/Ablankpaper/aera/actions/runs/30100000002";
 const CLOUD_CI =
-  "https://github.com/bignormal/aera-cloud/actions/runs/30100000003";
+  "https://github.com/Ablankpaper/aera-cloud/actions/runs/30100000003";
 const CLOUD_CANDIDATE =
-  "https://github.com/bignormal/aera-cloud/actions/runs/30100000004";
+  "https://github.com/Ablankpaper/aera-cloud/actions/runs/30100000004";
 const ADMIN_CI =
-  "https://github.com/bignormal/aera-admin/actions/runs/30100000005";
+  "https://github.com/Ablankpaper/aera-admin/actions/runs/30100000005";
 const ADMIN_CANDIDATE =
-  "https://github.com/bignormal/aera-admin/actions/runs/30100000006";
+  "https://github.com/Ablankpaper/aera-admin/actions/runs/30100000006";
 const CREATED_AT = "2026-07-24T02:00:00Z";
 const COMPLETED_AT = "2026-07-24T04:00:00Z";
 const NOW = new Date("2026-07-24T05:00:00Z");
@@ -77,7 +77,7 @@ async function fixture() {
 
   const desktopManifest = {
     schemaVersion: 2,
-    repository: "bignormal/aera",
+    repository: "Ablankpaper/aera",
     sourceSha: DESKTOP_SHA,
     version: INTERNAL_BETA_VERSION,
     origin: `https://${[203, 0, 113, 10].join(".")}`,
@@ -94,7 +94,7 @@ async function fixture() {
     },
     signingStatus: INTERNAL_BETA_SIGNING_STATUS,
     runtimeSeed: {
-      repository: "bignormal/aera-runtime",
+      repository: "Ablankpaper/aera-runtime",
       sourceCommit: INTERNAL_BETA_RUNTIME_SOURCE_SHA,
       runtimeVersion: "0.20.0-agentera.1",
       releaseTag: "runtime-v0.20.0-agentera.1-rc.1",
@@ -149,10 +149,10 @@ async function fixture() {
   };
   const cloudManifest = {
     schemaVersion: 1,
-    repository: "bignormal/aera-cloud",
+    repository: "Ablankpaper/aera-cloud",
     commitSha: CLOUD_SHA,
     image: {
-      reference: `ghcr.io/bignormal/aera-cloud@${CLOUD_DIGEST}`,
+      reference: `ghcr.io/ablankpaper/aera-cloud@${CLOUD_DIGEST}`,
       digest: CLOUD_DIGEST,
     },
     build: {
@@ -172,10 +172,10 @@ async function fixture() {
   };
   const adminManifest = {
     schemaVersion: 1,
-    repository: "bignormal/aera-admin",
+    repository: "Ablankpaper/aera-admin",
     commitSha: ADMIN_SHA,
     image: {
-      reference: `ghcr.io/bignormal/aera-admin@${ADMIN_DIGEST}`,
+      reference: `ghcr.io/ablankpaper/aera-admin@${ADMIN_DIGEST}`,
       digest: ADMIN_DIGEST,
     },
     build: {

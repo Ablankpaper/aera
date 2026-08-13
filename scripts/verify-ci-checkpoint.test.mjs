@@ -17,11 +17,11 @@ function checkpoint(overrides = {}) {
     generatedAt: completedAt,
     repositories: [
       {
-        repository: "bignormal/aera",
+        repository: "Ablankpaper/aera",
         commitSha: sha("a"),
         commitCommittedAt: committedAt,
         workflowName: "CI",
-        runUrl: "https://github.com/bignormal/aera/actions/runs/1001",
+        runUrl: "https://github.com/Ablankpaper/aera/actions/runs/1001",
         conclusion: "success",
         completedAt,
         jobs: [
@@ -46,11 +46,11 @@ function checkpoint(overrides = {}) {
         ],
       },
       {
-        repository: "bignormal/aera-cloud",
+        repository: "Ablankpaper/aera-cloud",
         commitSha: sha("b"),
         commitCommittedAt: committedAt,
         workflowName: "Aera cloud CI",
-        runUrl: "https://github.com/bignormal/aera-cloud/actions/runs/1002",
+        runUrl: "https://github.com/Ablankpaper/aera-cloud/actions/runs/1002",
         conclusion: "success",
         completedAt,
         jobs: [
@@ -63,11 +63,11 @@ function checkpoint(overrides = {}) {
         ],
       },
       {
-        repository: "bignormal/aera-admin",
+        repository: "Ablankpaper/aera-admin",
         commitSha: sha("c"),
         commitCommittedAt: committedAt,
         workflowName: "Aera Admin CI",
-        runUrl: "https://github.com/bignormal/aera-admin/actions/runs/1003",
+        runUrl: "https://github.com/Ablankpaper/aera-admin/actions/runs/1003",
         conclusion: "success",
         completedAt,
         jobs: [
@@ -92,11 +92,11 @@ async function verify(manifest, expected = {}) {
     script.pathname,
     path,
     "--expect",
-    `bignormal/aera=${expected.desktop ?? sha("a")}`,
+    `Ablankpaper/aera=${expected.desktop ?? sha("a")}`,
     "--expect",
-    `bignormal/aera-cloud=${expected.cloud ?? sha("b")}`,
+    `Ablankpaper/aera-cloud=${expected.cloud ?? sha("b")}`,
     "--expect",
-    `bignormal/aera-admin=${expected.admin ?? sha("c")}`,
+    `Ablankpaper/aera-admin=${expected.admin ?? sha("c")}`,
   ];
   return spawnSync(process.execPath, args, { encoding: "utf8" });
 }
@@ -150,7 +150,7 @@ test("rejects runs completed before the source commit", async () => {
 test("rejects malformed run URLs and duplicate repository records", async () => {
   const malformed = checkpoint();
   malformed.repositories[2].runUrl =
-    "https://example.invalid/bignormal/aera-admin/actions/runs/1003";
+    "https://example.invalid/Ablankpaper/aera-admin/actions/runs/1003";
   let result = await verify(malformed);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /run URL/u);

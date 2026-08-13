@@ -19,8 +19,8 @@ An approval permits the exact operation recorded in the canonical production gat
 Freeze and record:
 
 - Desktop source SHA, signed-candidate run ID, candidate-manifest SHA-256, version, notarized macOS hashes, Authenticode Windows hashes, update-metadata hashes, Runtime Seed lock hash, SBOM, provenance, and GitHub attestations;
-- Cloud source SHA, candidate run ID, candidate-manifest SHA-256, `ghcr.io/bignormal/aera-cloud@sha256:...`, signature, provenance, schema range, and highest migration;
-- Admin source SHA, candidate run ID, candidate-manifest SHA-256, `ghcr.io/bignormal/aera-admin@sha256:...`, signature, provenance, Admin schema range, and Cloud compatibility range;
+- Cloud source SHA, candidate run ID, candidate-manifest SHA-256, `ghcr.io/ablankpaper/aera-cloud@sha256:...`, signature, provenance, schema range, and highest migration;
+- Admin source SHA, candidate run ID, candidate-manifest SHA-256, `ghcr.io/ablankpaper/aera-admin@sha256:...`, signature, provenance, Admin schema range, and Cloud compatibility range;
 - canonical device evidence and SHA-256;
 - canonical private-staging evidence, detached Ed25519 signature, public key, and their SHA-256 values;
 - final DNS HTTPS production origin and identity issuer;
@@ -50,7 +50,7 @@ Use the existing protected workflows in the Cloud and Admin repositories. Record
 
 ### 1. Cloud exact digest, all new features disabled
 
-Dispatch `bignormal/aera-cloud/.github/workflows/promote-production.yml` with the exact candidate run ID and source SHA:
+Dispatch `Ablankpaper/aera-cloud/.github/workflows/promote-production.yml` with the exact candidate run ID and source SHA:
 
 - `enable_rollout=false`
 - `enable_public_registration=false`
@@ -64,7 +64,7 @@ Stop on elevated 5xx/auth failure, migration discrepancy, queue backlog, object-
 
 ### 2. Admin exact digest, mutations disabled
 
-After the Cloud disabled run and its monitoring window complete, dispatch `bignormal/aera-admin/.github/workflows/promote-production.yml` with:
+After the Cloud disabled run and its monitoring window complete, dispatch `Ablankpaper/aera-admin/.github/workflows/promote-production.yml` with:
 
 - the exact Admin candidate run ID and source SHA;
 - `enable_mutations=false`.
@@ -160,13 +160,13 @@ The production gate is canonical JSON with the exact shape below. Evidence URLs 
   "admin": {
     "candidateManifestSha256": "ADMIN_MANIFEST_SHA256",
     "imageDigest": "sha256:ADMIN_DIGEST",
-    "repository": "bignormal/aera-admin",
+    "repository": "Ablankpaper/aera-admin",
     "sourceSha": "ADMIN_SOURCE_SHA"
   },
   "approval": {
     "approvedAt": "2026-07-23T10:00:00Z",
     "approverIdentityRef": "employee:release-owner",
-    "changeTicketUrl": "https://github.com/bignormal/aera/actions/runs/RUN_ID",
+    "changeTicketUrl": "https://github.com/Ablankpaper/aera/actions/runs/RUN_ID",
     "productionDeployApproved": true,
     "publicDesktopReleaseApproved": true,
     "responsibility": "release_approver"
@@ -174,7 +174,7 @@ The production gate is canonical JSON with the exact shape below. Evidence URLs 
   "cloud": {
     "candidateManifestSha256": "CLOUD_MANIFEST_SHA256",
     "imageDigest": "sha256:CLOUD_DIGEST",
-    "repository": "bignormal/aera-cloud",
+    "repository": "Ablankpaper/aera-cloud",
     "sourceSha": "CLOUD_SOURCE_SHA"
   },
   "decision": "approved",
@@ -186,14 +186,14 @@ The production gate is canonical JSON with the exact shape below. Evidence URLs 
   },
   "desktop": {
     "candidateManifestSha256": "DESKTOP_MANIFEST_SHA256",
-    "repository": "bignormal/aera",
+    "repository": "Ablankpaper/aera",
     "sourceSha": "DESKTOP_SOURCE_SHA",
     "version": "DESKTOP_VERSION"
   },
   "domain": {
     "dnsApproved": true,
     "evidenceSha256": "DOMAIN_EVIDENCE_SHA256",
-    "evidenceUrl": "https://github.com/bignormal/aera/actions/runs/RUN_ID/artifacts/ARTIFACT_ID",
+    "evidenceUrl": "https://github.com/Ablankpaper/aera/actions/runs/RUN_ID/artifacts/ARTIFACT_ID",
     "identityIssuer": "https://identity.example.com",
     "productionOrigin": "https://api.example.com",
     "tlsValidated": true
@@ -206,14 +206,14 @@ The production gate is canonical JSON with the exact shape below. Evidence URLs 
   "legal": {
     "dataProcessingApproved": true,
     "evidenceSha256": "LEGAL_EVIDENCE_SHA256",
-    "evidenceUrl": "https://github.com/bignormal/aera/actions/runs/RUN_ID/artifacts/ARTIFACT_ID",
+    "evidenceUrl": "https://github.com/Ablankpaper/aera/actions/runs/RUN_ID/artifacts/ARTIFACT_ID",
     "privacyPolicyApproved": true,
     "termsApproved": true
   },
   "providers": {
     "emailReady": true,
     "evidenceSha256": "PROVIDER_EVIDENCE_SHA256",
-    "evidenceUrl": "https://github.com/bignormal/aera/actions/runs/RUN_ID/artifacts/ARTIFACT_ID",
+    "evidenceUrl": "https://github.com/Ablankpaper/aera/actions/runs/RUN_ID/artifacts/ARTIFACT_ID",
     "identityReady": true,
     "objectStorageReady": true,
     "observabilityReady": true,

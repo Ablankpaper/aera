@@ -112,7 +112,7 @@ function runUrl(value, repository, label) {
       parsed.hash !== "" ||
       parsed.href !== value ||
       parsed.pathname !==
-        `/bignormal/${repository}/actions/runs/${parsed.pathname
+        `/Ablankpaper/${repository}/actions/runs/${parsed.pathname
           .split("/")
           .at(-1)}` ||
       !/^[1-9][0-9]*$/u.test(parsed.pathname.split("/").at(-1) ?? "")
@@ -148,7 +148,7 @@ function parseCanonicalJson(raw, label) {
 function validateImage(image, repository, label) {
   exactObject(image, ["reference", "digest"], label);
   exactString(image.digest, IMAGE_DIGEST, `${label} digest`);
-  if (image.reference !== `ghcr.io/bignormal/${repository}@${image.digest}`) {
+  if (image.reference !== `ghcr.io/ablankpaper/${repository}@${image.digest}`) {
     fail(`${label} reference is not its immutable GHCR digest`);
   }
 }
@@ -188,7 +188,7 @@ function validateCloudManifest(raw) {
   );
   if (
     document.schemaVersion !== 1 ||
-    document.repository !== "bignormal/aera-cloud"
+    document.repository !== "Ablankpaper/aera-cloud"
   ) {
     fail("Cloud candidate schema or repository is invalid");
   }
@@ -249,7 +249,7 @@ function validateAdminManifest(raw, cloud) {
   );
   if (
     document.schemaVersion !== 1 ||
-    document.repository !== "bignormal/aera-admin"
+    document.repository !== "Ablankpaper/aera-admin"
   ) {
     fail("Admin candidate schema or repository is invalid");
   }

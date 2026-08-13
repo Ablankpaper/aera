@@ -7,7 +7,7 @@ describe("Aera composed application surfaces", () => {
   it("uses Aera-owned menu and support links", () => {
     const menu = read("src/main/app/menu.ts");
     expect(menu).toContain("Aera Runtime on GitHub");
-    expect(menu).toContain("https://github.com/bignormal/aera/issues");
+    expect(menu).toContain("https://github.com/Ablankpaper/aera/issues");
     expect(menu).not.toContain("fathah/hermes-desktop");
   });
 

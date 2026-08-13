@@ -157,7 +157,7 @@ function validateCandidateIdentity(identity, candidate, expectedDigest) {
     "device evidence candidate",
   );
   if (
-    identity.repository !== "bignormal/aera" ||
+    identity.repository !== "Ablankpaper/aera" ||
     identity.repository !== candidate.repository ||
     !SHA_PATTERN.test(identity.sourceSha ?? "") ||
     identity.sourceSha !== candidate.sourceSha ||
@@ -481,7 +481,7 @@ export function validateDeviceEvidenceSchema(schema) {
   ];
   if (
     schema?.$id !==
-      "https://github.com/bignormal/aera/release/evidence.schema.json" ||
+      "https://github.com/Ablankpaper/aera/release/evidence.schema.json" ||
     schema?.properties?.schemaVersion?.const !== 1 ||
     schema?.additionalProperties !== false ||
     !sameNames(schema.required, topLevelFields) ||

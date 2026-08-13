@@ -4,7 +4,7 @@ AgentEra Studio requires its own product session after the splash while keeping 
 
 ## Product boundary
 
-The private `bignormal/aera-cloud` service owns AgentEra APP users, identities, devices, personal spaces, sessions, and offline entitlements.
+The private `Ablankpaper/aera-cloud` service owns AgentEra APP users, identities, devices, personal spaces, sessions, and offline entitlements.
 
 The existing Hermes account client remains a separate compatibility feature. The `agentera-claw-api` recharge site keeps separate users, cookies, tokens, balances, and identifiers; the desktop recharge action only opens its configured web page.
 
