@@ -56,6 +56,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@electron-internal/extract-zip": "^1.0.5",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@hpke/core": "1.9.0",
@@ -71,7 +72,6 @@
     "date-fns": "^4.4.0",
     "electron-updater": "^6.8.9",
     "ethers": "^6.17.0",
-    "extract-zip": "^2.0.1",
     "highlight.js": "^11.11.1",
     "i18next": "^25.6.0",
     "lucide-react": "^1.7.0",
@@ -87,7 +87,8 @@
     "three": "^0.183.2",
     "troika-three-text": "^0.52.4",
     "vscode-material-icons": "^0.1.1",
-    "ws": "^8.20.0"
+    "ws": "^8.20.0",
+    "yauzl": "^3.4.0"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
@@ -102,6 +103,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.183.1",
+    "@types/yauzl": "^3.4.0",
     "@vitejs/plugin-react": "^5.1.1",
     "@vitest/coverage-v8": "^4.1.8",
     "@wesbos/code-icons": "^1.2.4",
@@ -126,6 +128,7 @@
     "yaml": "^2.9.0"
   },
   "overrides": {
+    "extract-zip": "npm:@electron-internal/extract-zip@1.0.5",
     "js-yaml": "4.3.1"
   }
 }
