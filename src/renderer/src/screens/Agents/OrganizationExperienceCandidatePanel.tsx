@@ -426,7 +426,6 @@ function OrganizationExperienceContributionDialog({
   const [skillName, setSkillName] = useState("");
   const [preview, setPreview] =
     useState<OrganizationExperienceCandidatePreview | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -435,7 +434,6 @@ function OrganizationExperienceContributionDialog({
     setSkills([]);
     setSkillName("");
     setPreview(null);
-    setConfirmed(false);
     setError(null);
     if (
       target.installation.status !== "active" ||
@@ -468,42 +466,30 @@ function OrganizationExperienceContributionDialog({
     target.installation.status,
   ]);
 
-  const prepare = async (): Promise<void> => {
+  const share = async (): Promise<void> => {
     if (!skillName || busy) return;
     setBusy(true);
     setPreview(null);
-    setConfirmed(false);
     setError(null);
     try {
-      const result =
+      const prepared =
         await window.agenteraAgents.prepareOrganizationExperienceCandidate({
           installationId: target.installation.id,
           skillName,
         });
-      if (!result.ok) {
-        setError(errorKey(result.errorCode));
+      if (!prepared.ok) {
+        setError(errorKey(prepared.errorCode));
         return;
       }
-      setPreview(result.data);
-    } catch {
-      setError("agents.control.errors.operation_failed");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const submit = async (): Promise<void> => {
-    if (!preview || !confirmed || !online || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const result =
+      setPreview(prepared.data);
+      if (!online || prepared.data.findings.length > 0) return;
+      const submitted =
         await window.agenteraAgents.submitOrganizationExperienceCandidate({
-          candidateHandle: preview.candidateHandle,
+          candidateHandle: prepared.data.candidateHandle,
           confirmation: "submit-selected-organization-skill",
         });
-      if (!result.ok) {
-        setError(errorKey(result.errorCode));
+      if (!submitted.ok) {
+        setError(errorKey(submitted.errorCode));
         return;
       }
       onSubmitted();
@@ -543,7 +529,6 @@ function OrganizationExperienceContributionDialog({
             onChange={(event) => {
               setSkillName(event.target.value);
               setPreview(null);
-              setConfirmed(false);
             }}
           >
             <option value="">
@@ -558,65 +543,32 @@ function OrganizationExperienceContributionDialog({
         </label>
         <button
           type="button"
-          className="btn btn-secondary"
+          className="btn btn-primary"
           disabled={!skillName || busy}
-          onClick={() => void prepare()}
+          onClick={() => void share()}
         >
-          {t("agents.control.organizationExperience.preparePreview")}
+          {t(
+            busy
+              ? "agents.control.organizationExperience.shareInProgress"
+              : "agents.control.organizationExperience.share",
+          )}
         </button>
         {preview ? (
           <section>
-            <dl className="agent-control-preview-grid">
-              <div>
-                <dt>
-                  {t("agents.control.organizationExperience.sourceAgent")}
-                </dt>
-                <dd>{target.agentName}</dd>
+            {preview.findings.length > 0 ? (
+              <div className="agents-create-error">
+                <p>
+                  {t("agents.control.organizationExperience.dlpBlockedUser")}
+                </p>
+                <p>
+                  {t("agents.control.organizationExperience.dlpChooseAnother")}
+                </p>
               </div>
-              <div>
-                <dt>
-                  {t("agents.control.organizationExperience.sourceVersion")}
-                </dt>
-                <dd>{preview.sourceAgentVersionId}</dd>
-              </div>
-              <div>
-                <dt>{t("agents.control.totalBytes")}</dt>
-                <dd>{preview.totalBytes}</dd>
-              </div>
-            </dl>
-            <ul>
-              {preview.assets.map((asset) => (
-                <li key={asset.path}>{asset.path}</li>
-              ))}
-            </ul>
-            <p>{t("agents.control.organizationExperience.dlpPassed")}</p>
-            {!online ? (
+            ) : !online ? (
               <p className="agent-control-notice">
-                {t("agents.control.organizationExperience.onlineToSubmit")}
+                {t("agents.control.organizationExperience.onlineToShare")}
               </p>
             ) : null}
-            <label className="agent-control-confirm-row">
-              <input
-                type="checkbox"
-                checked={confirmed}
-                disabled={busy || preview.findings.length > 0}
-                aria-label={t(
-                  "agents.control.organizationExperience.submitConfirmation",
-                )}
-                onChange={(event) => setConfirmed(event.target.checked)}
-              />
-              <span>
-                {t("agents.control.organizationExperience.submitConfirmation")}
-              </span>
-            </label>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={!online || !confirmed || busy}
-              onClick={() => void submit()}
-            >
-              {t("agents.control.organizationExperience.submitForReview")}
-            </button>
           </section>
         ) : null}
         {error ? <div className="agents-create-error">{t(error)}</div> : null}

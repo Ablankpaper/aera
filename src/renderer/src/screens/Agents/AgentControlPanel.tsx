@@ -11,7 +11,6 @@ import type {
   AgenteraAgentDefinitionSummary,
   AgenteraAgentInstallationSummary,
   AgenteraAgentOperationScope,
-  OfficialAgentInstallPreview,
   OfficialAgentSummary,
   OfficialManagedUpdate,
   DisconnectOrganizationSubmissionReferenceInput,
@@ -40,7 +39,6 @@ import ExperienceCandidatePanel from "./ExperienceCandidatePanel";
 import ExperiencePromotionDialog from "./ExperiencePromotionDialog";
 import OrganizationExperienceCandidatePanel from "./OrganizationExperienceCandidatePanel";
 import OrganizationSubmissionPanel from "./OrganizationSubmissionPanel";
-import OfficialAgentInstallDialog from "./OfficialAgentInstallDialog";
 import OfficialAgentSection from "./OfficialAgentSection";
 import { deriveAgentLifecycle, type AgentLifecycle } from "./agentLifecycle";
 
@@ -75,6 +73,7 @@ export interface AgentControlPanelProps {
     installationId: string,
     options?: AgentChatOpenOptions,
   ) => boolean | Promise<boolean>;
+  onConfigureModels?: () => void;
   modelProfileId?: string;
 }
 
@@ -114,6 +113,35 @@ interface AgentRuntimeModelOption {
 
 function errorKey(code: AgenteraAgentControlErrorCode): string {
   return `agents.control.errors.${code}`;
+}
+
+export type AgentControlErrorAction = "retry" | "configure_model" | null;
+
+const RETRYABLE_ERROR_KEYS = new Set([
+  "agents.control.errors.cloud_unavailable",
+  "agents.control.errors.online_required",
+  "agents.control.errors.operation_failed",
+  "agents.control.errors.model_route_stale",
+  "agents.control.errors.capability_profile_unavailable",
+  "agents.control.errors.local_runtime_required",
+  "agents.control.errors.publication_cache_failed",
+  "agents.control.errors.publication_cache_filesystem_denied",
+  "agents.control.errors.publication_cache_filesystem_failed",
+  "agents.control.errors.publication_cache_database_failed",
+  "agents.control.errors.publication_cache_recovery_failed",
+]);
+
+export function agentControlErrorAction(
+  error: string | null,
+): AgentControlErrorAction {
+  if (
+    error === "agents.control.errors.profile_model_configuration_failed" ||
+    error === "agents.control.errors.model_route_unavailable" ||
+    error === "agents.hub.modelRequired"
+  ) {
+    return "configure_model";
+  }
+  return error !== null && RETRYABLE_ERROR_KEYS.has(error) ? "retry" : null;
 }
 
 function contextKey(state: AgenteraAgentControlPublicState): string {
@@ -214,10 +242,11 @@ export default function AgentControlPanel({
   profiles,
   runtimeModelRoutes,
   initialTab = "mine",
-  advancedOpenByDefault = true,
+  advancedOpenByDefault = false,
   onChatWithProfile,
   onProfilesChanged,
   onAgentReady,
+  onConfigureModels,
   modelProfileId,
 }: AgentControlPanelProps): React.JSX.Element {
   const { t } = useI18n();
@@ -242,11 +271,10 @@ export default function AgentControlPanel({
   const [officialUpdates, setOfficialUpdates] = useState<
     OfficialManagedUpdate[]
   >([]);
-  const [officialInstallPreview, setOfficialInstallPreview] =
-    useState<OfficialAgentInstallPreview | null>(null);
   const [busyOfficialInstallationId, setBusyOfficialInstallationId] = useState<
     string | null
   >(null);
+  const [officialInstallBusy, setOfficialInstallBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -282,9 +310,6 @@ export default function AgentControlPanel({
   const [selectedPersonalKey, setSelectedPersonalKey] = useState<string | null>(
     null,
   );
-  const [pendingModelSelection, setPendingModelSelection] =
-    useState<AgentActivationTarget | null>(null);
-  const [selectedModelSourceId, setSelectedModelSourceId] = useState("");
   const loadEpoch = useRef(0);
   const selectedContextKey = useRef<string | null>(null);
 
@@ -319,13 +344,10 @@ export default function AgentControlPanel({
         setDraftActionTarget(null);
         setWithdrawal(null);
         setPromotionTarget(null);
-        setOfficialInstallPreview(null);
         setBusyOfficialInstallationId(null);
         setCapabilityBinding(null);
         setCapabilityBindingBusy(false);
         setSelectedPersonalKey(null);
-        setPendingModelSelection(null);
-        setSelectedModelSourceId("");
       }
       let nextError: string | null = null;
       const operationScope: AgenteraAgentOperationScope | undefined =
@@ -455,7 +477,6 @@ export default function AgentControlPanel({
       setDraftActionTarget(null);
       setWithdrawal(null);
       setPromotionTarget(null);
-      setOfficialInstallPreview(null);
       setBusyOfficialInstallationId(null);
       setCapabilityBinding(null);
       setCapabilityBindingBusy(false);
@@ -567,14 +588,31 @@ export default function AgentControlPanel({
   const requestOfficialInstall = async (
     definitionId: string,
   ): Promise<void> => {
+    if (officialInstallBusy) return;
+    setOfficialInstallBusy(true);
     setError(null);
-    const result =
-      await window.agenteraAgents.prepareOfficialInstall(definitionId);
-    if (!result.ok) {
-      setError(errorKey(result.errorCode));
-      return;
+    try {
+      const preview =
+        await window.agenteraAgents.prepareOfficialInstall(definitionId);
+      if (!preview.ok) {
+        setError(errorKey(preview.errorCode));
+        return;
+      }
+      const result = await window.agenteraAgents.confirmOfficialInstall({
+        installHandle: preview.data.installHandle,
+        confirmation: "install-official-agent",
+      });
+      if (!result.ok) {
+        setError(errorKey(result.errorCode));
+        return;
+      }
+      await load();
+      await finishAgentActivation(result.data.id);
+    } catch {
+      setError("agents.control.errors.operation_failed");
+    } finally {
+      setOfficialInstallBusy(false);
     }
-    setOfficialInstallPreview(result.data);
   };
 
   const applyOfficialUpdate = async (installationId: string): Promise<void> => {
@@ -652,6 +690,10 @@ export default function AgentControlPanel({
     state?.access === "online" &&
     state.cloudAvailable === true &&
     organizationCanSeeInstallations;
+  const errorAction = agentControlErrorAction(error);
+  const canSeeGovernance =
+    (isWorkspace && !isWorkspaceMember) ||
+    (isOrganization && activeTab === "enterprise" && context.role !== "member");
 
   useEffect(() => {
     if (state && !isOrganization && activeTab === "enterprise") {
@@ -1188,16 +1230,6 @@ export default function AgentControlPanel({
       modelProfileId: profile.id,
     }));
   }, [runtimeModelRoutes, selectableModelProfiles]);
-  const effectiveSelectedModelSource = useMemo(
-    () =>
-      selectableModelSources.find(
-        (candidate) => candidate.id === selectedModelSourceId,
-      ) ??
-      selectableModelSources[0] ??
-      null,
-    [selectableModelSources, selectedModelSourceId],
-  );
-
   const requestInstall = (target: {
     definitionId: string;
     versionId: string;
@@ -1245,13 +1277,18 @@ export default function AgentControlPanel({
       setError("agents.hub.modelRequired");
       return;
     }
-    const preferred = selectableModelSources.find(
-      (candidate) =>
-        candidate.modelSelection?.sourceProfileId === modelProfileId ||
-        candidate.modelProfileId === modelProfileId,
-    );
-    setSelectedModelSourceId(preferred?.id ?? selectableModelSources[0].id);
-    setPendingModelSelection(activationTarget);
+    const preferred =
+      selectableModelSources.find(
+        (candidate) =>
+          candidate.modelSelection?.sourceProfileId === modelProfileId ||
+          candidate.modelProfileId === modelProfileId,
+      ) ?? selectableModelSources[0];
+    void activateAgent({
+      ...activationTarget,
+      ...(preferred.modelSelection
+        ? { modelSelection: preferred.modelSelection }
+        : { modelProfileId: preferred.modelProfileId }),
+    });
   };
 
   const visiblePersonalCards = useMemo(() => {
@@ -1376,48 +1413,58 @@ export default function AgentControlPanel({
       definitionId &&
       versionId
     ) {
+      const requiresModelConfiguration = selectableModelSources.length === 0;
       selectedPersonalPrimary = {
         label: t(
-          selectableModelSources.length > 0
-            ? "agents.control.retryAgent"
-            : "agents.hub.configureModelFirst",
+          requiresModelConfiguration
+            ? "agents.hub.configureModel"
+            : "agents.control.retryAgent",
         ),
-        disabled:
-          !state?.cloudAvailable ||
-          selectableModelSources.length === 0 ||
-          (isOrganization &&
-            activeTab === "enterprise" &&
-            !organizationCanInstall) ||
-          busyPersonalKey === selectedPersonal.key,
+        disabled: requiresModelConfiguration
+          ? !onConfigureModels
+          : !state?.cloudAvailable ||
+            (isOrganization &&
+              activeTab === "enterprise" &&
+              !organizationCanInstall) ||
+            busyPersonalKey === selectedPersonal.key,
         onClick: () => {
-          requestInstall({
-            displayName: selectedPersonal.name,
-            definitionId,
-            versionId,
-          });
+          if (requiresModelConfiguration) {
+            onConfigureModels?.();
+          } else {
+            requestInstall({
+              displayName: selectedPersonal.name,
+              definitionId,
+              versionId,
+            });
+          }
           setSelectedPersonalKey(null);
         },
       };
     } else if (definitionId && versionId) {
+      const requiresModelConfiguration = selectableModelSources.length === 0;
       selectedPersonalPrimary = {
         label: t(
-          selectableModelSources.length === 0
-            ? "agents.hub.configureModelFirst"
+          requiresModelConfiguration
+            ? "agents.hub.configureModel"
             : "agents.hub.useAgent",
         ),
-        disabled:
-          !state?.cloudAvailable ||
-          selectableModelSources.length === 0 ||
-          (isOrganization &&
-            activeTab === "enterprise" &&
-            !organizationCanInstall) ||
-          busyPersonalKey === selectedPersonal.key,
+        disabled: requiresModelConfiguration
+          ? !onConfigureModels
+          : !state?.cloudAvailable ||
+            (isOrganization &&
+              activeTab === "enterprise" &&
+              !organizationCanInstall) ||
+            busyPersonalKey === selectedPersonal.key,
         onClick: () => {
-          requestInstall({
-            displayName: selectedPersonal.name,
-            definitionId,
-            versionId,
-          });
+          if (requiresModelConfiguration) {
+            onConfigureModels?.();
+          } else {
+            requestInstall({
+              displayName: selectedPersonal.name,
+              definitionId,
+              versionId,
+            });
+          }
           setSelectedPersonalKey(null);
         },
       };
@@ -1659,7 +1706,29 @@ export default function AgentControlPanel({
           </div>
         </div>
       ) : null}
-      {error ? <div className="agents-create-error">{t(error)}</div> : null}
+      {error ? (
+        <div className="agent-control-error-action">
+          <div className="agents-create-error">{t(error)}</div>
+          {errorAction === "retry" ? (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={loading}
+              onClick={() => void load()}
+            >
+              {t("agents.control.tryAgain")}
+            </button>
+          ) : errorAction === "configure_model" && onConfigureModels ? (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={onConfigureModels}
+            >
+              {t("agents.hub.configureModel")}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {notice ? <div className="agent-control-success">{t(notice)}</div> : null}
 
       {loading ? (
@@ -1699,6 +1768,7 @@ export default function AgentControlPanel({
               query={query}
               filter={officialFilter}
               busyInstallationId={busyOfficialInstallationId}
+              installBusy={officialInstallBusy}
               onInstall={(definitionId) =>
                 void requestOfficialInstall(definitionId)
               }
@@ -1834,7 +1904,7 @@ export default function AgentControlPanel({
             </div>
           )}
 
-          {isWorkspace || (isOrganization && activeTab === "enterprise") ? (
+          {canSeeGovernance ? (
             <section
               className={`agent-hub-advanced ${advancedOpen ? "open" : ""}`}
             >
@@ -1974,84 +2044,6 @@ export default function AgentControlPanel({
         onOrganizationSubmitted={() => void load()}
         onRequestInstall={requestInstall}
       />
-      {pendingModelSelection ? (
-        <div className="agent-control-dialog-backdrop">
-          <div
-            className="agent-control-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="agent-model-selection-title"
-          >
-            <h3 id="agent-model-selection-title">
-              {t("agents.hub.chooseRuntimeModel")}
-            </h3>
-            <p>{t("agents.hub.chooseRuntimeModelHint")}</p>
-            <label className="agents-create-field">
-              <span>{t("agents.control.runtimeModel")}</span>
-              <select
-                className="input"
-                aria-label={t("agents.hub.runtimeModelChoice")}
-                value={effectiveSelectedModelSource?.id ?? ""}
-                onChange={(event) =>
-                  setSelectedModelSourceId(event.target.value)
-                }
-              >
-                {selectableModelSources.map((source) => (
-                  <option key={source.id} value={source.id}>
-                    {`${source.model} · ${source.providerLabel}`}
-                  </option>
-                ))}
-              </select>
-              {effectiveSelectedModelSource?.sourceKind === "legacy_agent" ? (
-                <small>{t("agents.hub.legacyInstalledModelSource")}</small>
-              ) : null}
-            </label>
-            <div className="agent-control-dialog-actions">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setPendingModelSelection(null)}
-              >
-                {t("agents.control.cancel")}
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={
-                  !effectiveSelectedModelSource || busyPersonalKey !== null
-                }
-                onClick={() => {
-                  const target = pendingModelSelection;
-                  const source = effectiveSelectedModelSource;
-                  if (!source) return;
-                  setPendingModelSelection(null);
-                  void activateAgent({
-                    ...target,
-                    ...(source.modelSelection
-                      ? { modelSelection: source.modelSelection }
-                      : { modelProfileId: source.modelProfileId }),
-                  });
-                }}
-              >
-                {t("agents.hub.confirmRuntimeModel")}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-      {officialInstallPreview ? (
-        <OfficialAgentInstallDialog
-          open
-          preview={officialInstallPreview}
-          onClose={() => setOfficialInstallPreview(null)}
-          onCompleted={() => {
-            setOfficialInstallPreview(null);
-            void load();
-            void onProfilesChanged?.();
-          }}
-        />
-      ) : null}
-
       {promotionTarget && !isOrganization ? (
         <ExperiencePromotionDialog
           open

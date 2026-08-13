@@ -29,6 +29,7 @@ interface ProfileInfo {
 interface AgentsProps {
   activeProfile: string;
   onChatWith: (name: string, options?: AgentChatOpenOptions) => void;
+  onConfigureModels?: () => void;
 }
 
 export function selectAgentModelProfileId(
@@ -53,7 +54,11 @@ export function selectAgentModelProfileId(
   return profiles.find(isConfigured)?.id;
 }
 
-function Agents({ activeProfile, onChatWith }: AgentsProps): React.JSX.Element {
+function Agents({
+  activeProfile,
+  onChatWith,
+  onConfigureModels,
+}: AgentsProps): React.JSX.Element {
   const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
   const [runtimeModelRoutes, setRuntimeModelRoutes] = useState<
     AgentRuntimeModelRouteSource[] | undefined
@@ -250,6 +255,7 @@ function Agents({ activeProfile, onChatWith }: AgentsProps): React.JSX.Element {
         }
         onProfilesChanged={loadProfiles}
         onAgentReady={handleAgentReady}
+        onConfigureModels={onConfigureModels}
         modelProfileId={modelProfileId}
       />
     </div>

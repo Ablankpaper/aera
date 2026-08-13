@@ -38,7 +38,13 @@ vi.mock("./ActiveSessionsBar", () => ({
 }));
 vi.mock("../Sessions/Sessions", () => ({ default: () => null }));
 vi.mock("../Agents/Agents", () => ({
-  default: () => <div data-testid="agents-surface" />,
+  default: ({ onConfigureModels }: { onConfigureModels?: () => void }) => (
+    <div data-testid="agents-surface">
+      <button type="button" onClick={onConfigureModels}>
+        configure-agent-model
+      </button>
+    </div>
+  ),
 }));
 vi.mock("../Discover/Discover", () => ({ default: () => null }));
 vi.mock("./ProductSpaceSwitcher", () => ({ default: () => null }));
@@ -251,6 +257,22 @@ describe("startup model setup prompt", () => {
     });
   });
 
+  it("opens model settings for the active Agent user without exposing profile choices", async () => {
+    installHermesAPI("gpt-5.6-sol", "custom");
+    render(<Layout authState={authenticated} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "navigation.agents" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "configure-agent-model" }),
+    );
+
+    expect(testState.openSettings).toHaveBeenCalledWith("providers", {
+      profile: "default",
+    });
+  });
+
   it("waits for the restored active profile before checking configuration", async () => {
     const api = installHermesAPI();
     api.listProfiles.mockResolvedValue([
@@ -284,7 +306,7 @@ describe("startup model setup prompt", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-    // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Account-required routing#Layout connection privacy]]
+  // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Account-required routing#Layout connection privacy]]
   it("keeps guest startup local without reading account connection state", async () => {
     const api = installHermesAPI();
 
@@ -296,7 +318,7 @@ describe("startup model setup prompt", () => {
     expect(testState.chatConnectionAccess).toContain(false);
   });
 
-    // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Account-required routing#Layout connection privacy#Account connection lookup fallback]]
+  // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Account-required routing#Layout connection privacy#Account connection lookup fallback]]
   it("falls back to local presentation when account connection state is unavailable", async () => {
     const api = installHermesAPI();
     api.isRemoteOnlyMode.mockRejectedValue(
