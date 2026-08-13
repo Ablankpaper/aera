@@ -4,7 +4,7 @@
 
 **Goal:** Deliver an AgentEra-only cloud account service and a post-splash desktop authentication gate with browser PKCE login, five-device enforcement, rolling seven-day offline access, personal-space ownership, and non-destructive local Hermes Profile binding.
 
-**Architecture:** Build `bignormal/aera-cloud` as a private Go modular monolith that serves a React/Vite account center and versioned JSON API over one origin, with PostgreSQL as the source of truth and Redis for expiring challenges, leases, and rate limits. Integrate it into AgentEra Studio through a main-process-only authentication subsystem, a loopback OAuth callback, platform secure storage, a renderer-safe public session view, and an ownership sidecar that never reads or changes Hermes content. Keep the recharge gateway, Hermes Account, Remote Dashboard OAuth, and AgentEra Runtime internals as separate security domains.
+**Architecture:** Build `Ablankpaper/aera-cloud` as a private Go modular monolith that serves a React/Vite account center and versioned JSON API over one origin, with PostgreSQL as the source of truth and Redis for expiring challenges, leases, and rate limits. Integrate it into AgentEra Studio through a main-process-only authentication subsystem, a loopback OAuth callback, platform secure storage, a renderer-safe public session view, and an ownership sidecar that never reads or changes Hermes content. Keep the recharge gateway, Hermes Account, Remote Dashboard OAuth, and AgentEra Runtime internals as separate security domains.
 
 **Tech Stack:** Go 1.26, `net/http`, Chi, pgx/v5, go-redis/v9, PostgreSQL 17, Redis 7.4, Argon2id, AES-256-GCM, HMAC-SHA-256, Ed25519, React 19, Vite 7, TypeScript 5.9, Electron 39, Vitest, Playwright, Docker Compose, GitHub Actions.
 
@@ -20,7 +20,7 @@ export CLOUD=/Users/zizimutou/Desktop/aera/aera-cloud
 export RUNTIME=/Users/zizimutou/Desktop/aera/aera-runtime
 ```
 
-Repository ownership remains explicit: `$DESKTOP` is `bignormal/aera`, `$CLOUD` is the private `bignormal/aera-cloud`, and `$RUNTIME` is `bignormal/aera-runtime`. `/Users/zizimutou/Desktop/aera/agentera-claw-api` (`bignormal/agentera-claw-api`) remains the independent recharge/model-relay product and is not modified by this plan.
+Repository ownership remains explicit: `$DESKTOP` is `Ablankpaper/aera`, `$CLOUD` is the private `Ablankpaper/aera-cloud`, and `$RUNTIME` is `Ablankpaper/aera-runtime`. `/Users/zizimutou/Desktop/aera/agentera-claw-api` (`bignormal/agentera-claw-api`) remains the independent recharge/model-relay product and is not modified by this plan.
 
 The following rules are release blockers, not implementation preferences:
 
@@ -58,8 +58,8 @@ This phase does not implement Hermes session/Memory/file sync, end-to-end encryp
 
 ```bash
 cd /Users/zizimutou/Desktop/aera
-gh repo view bignormal/aera-cloud --json nameWithOwner,visibility,defaultBranchRef
-git clone git@github.com:bignormal/aera-cloud.git "$CLOUD"
+gh repo view Ablankpaper/aera-cloud --json nameWithOwner,visibility,defaultBranchRef
+git clone git@github.com:Ablankpaper/aera-cloud.git "$CLOUD"
 cd "$CLOUD"
 git branch -M main
 ```

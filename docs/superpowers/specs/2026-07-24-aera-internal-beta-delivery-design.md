@@ -4,7 +4,7 @@
 
 **Status:** Approved design, amended to defer SMTP
 
-**Coordinator repository:** `bignormal/aera`
+**Coordinator repository:** `Ablankpaper/aera`
 
 ## Goal
 

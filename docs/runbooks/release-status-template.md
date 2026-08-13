@@ -143,11 +143,11 @@ A command that did not execute, a job with zero steps, a cached design result, o
 remote_ci_manifest_url=
 remote_ci_manifest_sha256=
 
-last_desktop_remote_observation_url=https://github.com/bignormal/aera/actions/runs/30011233373
+last_desktop_remote_observation_url=https://github.com/Ablankpaper/aera/actions/runs/30011233373
 last_desktop_remote_observation=success at e4ba6bbd98ac2ab5484e2e213645368c079ecd97; Ubuntu, Windows, and macOS jobs executed typecheck, tests, official-quality E2E, and build; Ubuntu also executed exact Cloud contract, privacy, production dependency audit, and informational lint gates
-last_cloud_remote_observation_url=https://github.com/bignormal/aera-cloud/actions/runs/30006310907
+last_cloud_remote_observation_url=https://github.com/Ablankpaper/aera-cloud/actions/runs/30006310907
 last_cloud_remote_observation=success at 92632048a5261f02d06f132d22854dda1b513345; delivery/secret boundaries, Go and Web verification, service integration/auth smoke, encrypted backup/disposable restore, and application image build executed
-last_admin_remote_observation_url=https://github.com/bignormal/aera-admin/actions/runs/30010245066
+last_admin_remote_observation_url=https://github.com/Ablankpaper/aera-admin/actions/runs/30010245066
 last_admin_remote_observation=success at 57d637412470fc5c86524e40bd717399a9936162; exact Cloud contract, full verify, release image build, and real Cloud mTLS/service-JWT E2E executed
 
 device_evidence_url=

@@ -89,7 +89,7 @@ if [[ -n ${AERA_SCHEMA22_MIGRATION_FILE:-} ]]; then
   cp "$AERA_SCHEMA22_MIGRATION_FILE" "$migration_file"
 else
   curl --fail --silent --show-error --location \
-    "https://raw.githubusercontent.com/bignormal/aera-cloud/$migration_source_sha/migrations/$migration_name" \
+    "https://raw.githubusercontent.com/Ablankpaper/aera-cloud/$migration_source_sha/migrations/$migration_name" \
     --output "$migration_file"
 fi
 [[ $(shasum -a 256 "$migration_file" | awk '{print $1}') == "$migration_sha256" ]]

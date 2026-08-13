@@ -47,4 +47,4 @@ Document that provider setup is now an in-desktop choice, that the startup state
 
 ## Task 5: Verify and publish
 
-Run targeted Vitest coverage, both TypeScript projects, ESLint for changed source files, and `npx --yes lat.md check`. Restart the Electron dev app, inspect the sidebar and Agents page, then commit the source changes and push `aera/desktop-model-bypass-agent-nav` to `bignormal/aera`.
+Run targeted Vitest coverage, both TypeScript projects, ESLint for changed source files, and `npx --yes lat.md check`. Restart the Electron dev app, inspect the sidebar and Agents page, then commit the source changes and push `aera/desktop-model-bypass-agent-nav` to `Ablankpaper/aera`.
