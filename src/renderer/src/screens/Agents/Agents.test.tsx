@@ -108,14 +108,6 @@ function installation(): AgenteraAgentInstallationSummary {
   };
 }
 
-function confirmRuntimeModelSelection(): void {
-  fireEvent.click(
-    screen.getByRole("button", {
-      name: "agents.hub.confirmRuntimeModel",
-    }),
-  );
-}
-
 function installHermesAPI(): {
   listProfiles: ReturnType<typeof vi.fn>;
   createProfile: ReturnType<typeof vi.fn>;
@@ -207,6 +199,7 @@ function installAgenteraAPI(
     claimVersion: vi.fn(),
     retryPendingInstallation: vi.fn(),
     selectInstallationVersion: vi.fn(),
+    repairInstallationModel: vi.fn(),
     archiveInstallation: vi.fn(),
     listEligibleExperienceSkills: vi.fn(async () => ({
       ok: true as const,
@@ -283,7 +276,7 @@ describe("Agents unified product surface", () => {
         async (): Promise<OwnerModelRouteCatalogSnapshot> => catalog,
       ),
     });
-    installAgenteraAPI({
+    const agentera = installAgenteraAPI({
       listDefinitions: vi.fn(async () => ({
         ok: true as const,
         data: [definition()],
@@ -291,6 +284,10 @@ describe("Agents unified product surface", () => {
       listInstallations: vi.fn(async () => ({
         ok: true as const,
         data: [installation()],
+      })),
+      repairInstallationModel: vi.fn(async () => ({
+        ok: true as const,
+        data: installation(),
       })),
     });
     hermes.listProfiles.mockResolvedValue([accountProfile, installedProfile]);
@@ -308,11 +305,25 @@ describe("Agents unified product surface", () => {
     );
 
     expect(
-      await screen.findByRole("option", {
-        name: "new-model · Petoi",
+      screen.queryByRole("dialog", {
+        name: "agents.hub.chooseRuntimeModel",
       }),
-    ).toBeVisible();
+    ).toBeNull();
     expect(screen.queryByText("agents.hub.modelRequired")).toBeNull();
+    await waitFor(() =>
+      expect(agentera.repairInstallationModel).toHaveBeenCalledWith(
+        {
+          id: INSTALLATION_ID,
+          localProfileId: "installed",
+          modelSelection: {
+            sourceProfileId: "installed",
+            modelLibraryId,
+            catalogRevision: "a".repeat(64),
+          },
+        },
+        undefined,
+      ),
+    );
   });
 
   it("uses the active configured Profile even when it belongs to an installed Agent", () => {
@@ -430,7 +441,6 @@ describe("Agents unified product surface", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "agents.hub.useAgent" }),
     );
-    confirmRuntimeModelSelection();
 
     await waitFor(() =>
       expect(agentera.installVersion).toHaveBeenCalledWith(
@@ -448,6 +458,111 @@ describe("Agents unified product surface", () => {
     );
     expect(onChatWith).toHaveBeenCalledWith("research-agent");
     expect(hermes.createProfile).not.toHaveBeenCalled();
+  });
+
+  it("starts a newly used Agent with the preferred model without asking the user to choose runtime details", async () => {
+    const hermes = installHermesAPI();
+    const defaultProfile = profile("default", {
+      isDefault: true,
+      name: "Default Agent",
+    });
+    const installedProfile = profile("research-agent", {
+      name: "Research Agent",
+      agentInstallationId: INSTALLATION_ID,
+    });
+    hermes.listProfiles
+      .mockResolvedValueOnce([defaultProfile])
+      .mockResolvedValue([defaultProfile, installedProfile]);
+    const agentera = installAgenteraAPI({
+      listDefinitions: vi.fn(async () => ({
+        ok: true as const,
+        data: [definition()],
+      })),
+      installVersion: vi.fn(async () => ({
+        ok: true as const,
+        data: installation(),
+      })),
+    });
+    const onChatWith = vi.fn();
+
+    render(<Agents activeProfile="default" onChatWith={onChatWith} />);
+
+    fireEvent.click(
+      await screen.findByRole("tab", { name: "agents.hub.mineTab" }),
+    );
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.hub.useAgent" }),
+    );
+
+    expect(
+      screen.queryByRole("dialog", {
+        name: "agents.hub.chooseRuntimeModel",
+      }),
+    ).toBeNull();
+    await waitFor(() =>
+      expect(agentera.installVersion).toHaveBeenCalledWith(
+        {
+          definitionId: DEFINITION_ID,
+          versionId: VERSION_ID,
+          profileName: "aera-agent-11111111-111",
+          modelProfileId: "default",
+        },
+        undefined,
+      ),
+    );
+    await waitFor(() =>
+      expect(hermes.setActiveProfile).toHaveBeenCalledWith("research-agent"),
+    );
+    expect(onChatWith).toHaveBeenCalledWith("research-agent");
+  });
+
+  it("opens model configuration when an Agent cannot be started yet", async () => {
+    const hermes = installHermesAPI();
+    hermes.listProfiles.mockResolvedValue([
+      {
+        ...profile("default", {
+          isDefault: true,
+          name: "Default Agent",
+        }),
+        model: "",
+        provider: "auto",
+      },
+    ]);
+    const agentera = installAgenteraAPI({
+      listDefinitions: vi.fn(async () => ({
+        ok: true as const,
+        data: [definition()],
+      })),
+    });
+    const onConfigureModels = vi.fn();
+
+    render(
+      <Agents
+        activeProfile="default"
+        onChatWith={vi.fn()}
+        onConfigureModels={onConfigureModels}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("tab", { name: "agents.hub.mineTab" }),
+    );
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    const configure = screen.getByRole("button", {
+      name: "agents.hub.configureModel",
+    });
+    expect(configure).toBeEnabled();
+    fireEvent.click(configure);
+
+    expect(onConfigureModels).toHaveBeenCalledTimes(1);
+    expect(agentera.installVersion).not.toHaveBeenCalled();
+    expect(agentera.retryPendingInstallation).not.toHaveBeenCalled();
+    expect(agentera.repairInstallationModel).not.toHaveBeenCalled();
   });
 
   it("forwards a forced fresh run after selecting a new version on the active Agent Profile", async () => {
@@ -494,7 +609,6 @@ describe("Agents unified product surface", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "agents.hub.useAgent" }),
     );
-    confirmRuntimeModelSelection();
 
     await waitFor(() => expect(repairInstallationModel).toHaveBeenCalled());
     expect(agentera.selectInstallationVersion).toHaveBeenCalledWith(
@@ -550,7 +664,6 @@ describe("Agents unified product surface", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "agents.hub.useAgent" }),
     );
-    confirmRuntimeModelSelection();
 
     await waitFor(() =>
       expect(agentera.installVersion).toHaveBeenCalledWith(

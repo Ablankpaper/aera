@@ -28,13 +28,13 @@ Selected learning becomes a minimal candidate, passes owner-scope authorization 
 
 The first promotion slice treats one explicitly selected Hermes agent-created Skill as a reviewable Workspace Agent contribution.
 
-The desktop reads the Skill through a trusted read-only adapter, snapshots it outside `HERMES_HOME`, and requires explicit user consent before submission. The locked design is `docs/superpowers/specs/2026-07-20-agentera-experience-candidate-v1-design.md`.
+The desktop reads the Skill through a trusted read-only adapter and snapshots it outside `HERMES_HOME`. The user chooses one saved capability and clicks **Share with team** once; that named action supplies the existing fixed confirmation only after local preparation and DLP pass. Technical candidate identifiers, digests, paths, and confirmation checkboxes stay outside the ordinary-user journey. The locked design is `docs/superpowers/specs/2026-07-20-agentera-experience-candidate-v1-design.md`.
 
 ### Organization experience contribution
 
 An employee may explicitly contribute one agent-created Skill from an active Organization Agent Installation without sharing the surrounding Profile or publishing automatically.
 
-[[src/main/agentera-agent-control/organization-experience-candidate-service.ts#OrganizationExperienceCandidateService]] resolves the Organization, Definition, Version, USER-owned Installation, device, Profile, and immutable local snapshot in trusted main-process state. Renderer calls contain only one Installation ID and Skill name, then one-use submit, review, and import handles with exact confirmations.
+[[src/main/agentera-agent-control/organization-experience-candidate-service.ts#OrganizationExperienceCandidateService]] resolves the Organization, Definition, Version, USER-owned Installation, device, Profile, and immutable local snapshot in trusted main-process state. Renderer calls contain only one Installation ID and Skill name, then one-use submit, review, and import handles with exact confirmations. One **Share with organization** click performs prepare, checks the returned privacy findings, and submits only when the scan is clean and the client is online; any finding stops before submission and leaves the saved capability unchanged.
 
 Local and Cloud DLP both reject Memory, USER, sessions, conversations, credentials, MCP configuration, Profile paths, unrelated Skills, and matched secret evidence. Owner/Admin approval remains terminal Cloud review state; [[src/main/agentera-agent-control/organization-experience-candidate-importer.ts#OrganizationExperienceCandidateImporter]] applies only the approved Skill directory to the verified latest Organization Version as a device-local `kind=next` draft. Ordinary Organization submission and approval are still required before employees can select the new immutable Version.
 

@@ -159,7 +159,7 @@ function installAPI(
 describe("OrganizationExperienceCandidatePanel", () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it("prepares and submits exactly one selected Skill only after explicit Member actions", async () => {
+  it("prepares and submits exactly one selected Skill after one Member action", async () => {
     const api = installAPI();
     render(
       <OrganizationExperienceCandidatePanel
@@ -186,24 +186,13 @@ describe("OrganizationExperienceCandidatePanel", () => {
     );
     fireEvent.click(
       screen.getByRole("button", {
-        name: "agents.control.organizationExperience.preparePreview",
+        name: "agents.control.organizationExperience.share",
       }),
     );
-    expect(
-      await screen.findByText("skills/weekly-summary/SKILL.md"),
-    ).toBeTruthy();
-    expect(api.prepareOrganizationExperienceCandidate).toHaveBeenCalledWith({
-      installationId: INSTALLATION_ID,
-      skillName: "weekly-summary",
-    });
-    fireEvent.click(
-      screen.getByLabelText(
-        "agents.control.organizationExperience.submitConfirmation",
-      ),
-    );
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "agents.control.organizationExperience.submitForReview",
+    await waitFor(() =>
+      expect(api.prepareOrganizationExperienceCandidate).toHaveBeenCalledWith({
+        installationId: INSTALLATION_ID,
+        skillName: "weekly-summary",
       }),
     );
     await waitFor(() =>
@@ -383,6 +372,108 @@ describe("OrganizationExperienceCandidatePanel", () => {
         candidateHandle: CANDIDATE_HANDLE,
         confirmation: "submit-selected-organization-skill",
       }),
+    );
+  });
+
+  // @lat: [[agentera-self-evolution#AgentEra self-evolution compatibility#Candidate promotion loop#Organization experience contribution]]
+  it("shares one selected Skill with one click and keeps technical details hidden", async () => {
+    const api = installAPI();
+    const onCloseContribution = vi.fn();
+    render(
+      <OrganizationExperienceCandidatePanel
+        online
+        role="member"
+        contextKey="organization-member"
+        refreshToken={0}
+        contributionTarget={{ installation, agentName: "Research Agent" }}
+        onCloseContribution={onCloseContribution}
+        onDraftReady={vi.fn()}
+      />,
+    );
+
+    await screen.findByRole("option", { name: "weekly-summary" });
+    fireEvent.change(
+      screen.getByLabelText("agents.control.organizationExperience.skill"),
+      { target: { value: "weekly-summary" } },
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.control.organizationExperience.share",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(api.prepareOrganizationExperienceCandidate).toHaveBeenCalledWith({
+        installationId: INSTALLATION_ID,
+        skillName: "weekly-summary",
+      }),
+    );
+    await waitFor(() =>
+      expect(api.submitOrganizationExperienceCandidate).toHaveBeenCalledWith({
+        candidateHandle: CANDIDATE_HANDLE,
+        confirmation: "submit-selected-organization-skill",
+      }),
+    );
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(document.body.textContent).not.toContain(VERSION_ID);
+    expect(document.body.textContent).not.toContain("a".repeat(64));
+    expect(document.body.textContent).not.toContain("skills/weekly-summary/");
+    expect(onCloseContribution).toHaveBeenCalled();
+  });
+
+  it("blocks organization sharing when the local privacy scan finds sensitive data", async () => {
+    const api = installAPI({
+      prepareOrganizationExperienceCandidate: vi.fn(async () =>
+        success({
+          candidateHandle: CANDIDATE_HANDLE,
+          installationId: INSTALLATION_ID,
+          sourceAgentVersionId: VERSION_ID,
+          skillName: "weekly-summary",
+          assets: [],
+          fileCount: 1,
+          totalBytes: 12,
+          contentDigest: "a".repeat(64),
+          findings: [
+            {
+              code: "credential_api_key",
+              path: "skills/weekly-summary/SKILL.md",
+              line: 4,
+            },
+          ],
+        }),
+      ),
+    });
+    render(
+      <OrganizationExperienceCandidatePanel
+        online
+        role="member"
+        contextKey="organization-member"
+        refreshToken={0}
+        contributionTarget={{ installation, agentName: "Research Agent" }}
+        onCloseContribution={vi.fn()}
+        onDraftReady={vi.fn()}
+      />,
+    );
+
+    await screen.findByRole("option", { name: "weekly-summary" });
+    fireEvent.change(
+      screen.getByLabelText("agents.control.organizationExperience.skill"),
+      { target: { value: "weekly-summary" } },
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.control.organizationExperience.share",
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        "agents.control.organizationExperience.dlpBlockedUser",
+      ),
+    ).toBeTruthy();
+    expect(api.submitOrganizationExperienceCandidate).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain(
+      "skills/weekly-summary/SKILL.md:4",
     );
   });
 });

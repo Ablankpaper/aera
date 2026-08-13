@@ -26,6 +26,7 @@ export interface OfficialAgentSectionProps {
   query?: string;
   filter?: OfficialAgentFilter;
   busyInstallationId: string | null;
+  installBusy?: boolean;
   onInstall: (definitionId: string) => void;
   onApplyUpdate: (installationId: string) => void;
   onChatWithProfile?: (profileId: string) => void;
@@ -58,6 +59,7 @@ export default function OfficialAgentSection({
   query = "",
   filter = "all",
   busyInstallationId,
+  installBusy = false,
   onInstall,
   onApplyUpdate,
   onChatWithProfile,
@@ -324,7 +326,7 @@ export default function OfficialAgentSection({
               : !selected.installation && selected.agent
                 ? {
                     label: t("agents.hub.installAgent"),
-                    disabled: !online,
+                    disabled: !online || installBusy,
                     onClick: () => {
                       onInstall(selected.agent!.definitionId);
                       closeDetail();

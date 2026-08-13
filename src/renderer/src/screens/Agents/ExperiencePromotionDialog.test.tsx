@@ -150,18 +150,8 @@ describe("ExperiencePromotionDialog", () => {
 
   beforeEach(() => vi.restoreAllMocks());
 
-  it("lists only eligible Skill names and prepares the explicitly selected Skill", async () => {
-    let resolvePrepared!: (
-      result: AgenteraAgentControlResult<ExperienceCandidatePreview>,
-    ) => void;
-    const prepared = new Promise<
-      AgenteraAgentControlResult<ExperienceCandidatePreview>
-    >((resolve) => {
-      resolvePrepared = resolve;
-    });
-    const api = installAPI({
-      prepareExperienceCandidate: vi.fn(() => prepared),
-    });
+  it("lists eligible saved capabilities without exposing local private data", async () => {
+    const api = installAPI();
     renderDialog();
 
     expect(
@@ -179,99 +169,31 @@ describe("ExperiencePromotionDialog", () => {
     expect(document.body.textContent).not.toContain("private skill content");
     expect(api.prepareExperienceCandidate).not.toHaveBeenCalled();
 
-    fireEvent.change(
-      screen.getByRole("combobox", {
-        name: "agents.control.experience.skill",
-      }),
-      { target: { value: "research-notes" } },
-    );
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "agents.control.experience.preparePreview",
-      }),
-    );
-
-    await waitFor(() =>
-      expect(api.prepareExperienceCandidate).toHaveBeenCalledWith({
-        installationId: INSTALLATION_ID,
-        skillName: "research-notes",
-      }),
-    );
-    expect(screen.queryByText("Workspace Research Agent")).toBeNull();
-    resolvePrepared(success(preview()));
-    expect(await screen.findByText("Workspace Research Agent")).toBeTruthy();
-    expect(screen.getByText(VERSION_ID)).toBeTruthy();
-    expect(screen.getByText("skills/research-notes/SKILL.md")).toBeTruthy();
-    expect(
-      screen.getByText("skills/research-notes/references/checklist.md"),
-    ).toBeTruthy();
-    expect(screen.getByText("2")).toBeTruthy();
-    expect(screen.getByText("400")).toBeTruthy();
-    expect(screen.getByText(`sha256:${"a".repeat(64)}`)).toBeTruthy();
-    expect(
-      screen.getByText("agents.control.experience.dlpPassed"),
-    ).toBeTruthy();
     expect(
       screen.getByText("agents.control.experience.privateBoundary"),
     ).toBeTruthy();
+    expect(api.prepareExperienceCandidate).not.toHaveBeenCalled();
+    expect(api.submitExperienceCandidate).not.toHaveBeenCalled();
   });
 
-  it("prepares offline but disables upload with explicit online guidance", async () => {
+  it("prepares offline but never uploads and gives simple reconnect guidance", async () => {
     const api = installAPI();
     renderDialog(false);
 
     await selectEligibleSkill();
     fireEvent.click(
       screen.getByRole("button", {
-        name: "agents.control.experience.preparePreview",
+        name: "agents.control.experience.share",
       }),
     );
     expect(
-      await screen.findByText("agents.control.experience.onlineToSubmit"),
+      await screen.findByText("agents.control.experience.onlineToShare"),
     ).toBeTruthy();
     expect(api.prepareExperienceCandidate).toHaveBeenCalled();
-    expect(
-      screen.getByRole("button", {
-        name: "agents.control.experience.submitForReview",
-      }),
-    ).toBeDisabled();
     expect(api.submitExperienceCandidate).not.toHaveBeenCalled();
   });
 
-  it("requires explicit confirmation and never uploads on open or preview", async () => {
-    const api = installAPI();
-    const onSubmitted = vi.fn();
-    renderDialog(true, onSubmitted);
-
-    await selectEligibleSkill();
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "agents.control.experience.preparePreview",
-      }),
-    );
-    const submit = await screen.findByRole("button", {
-      name: "agents.control.experience.submitForReview",
-    });
-    expect(submit).toBeDisabled();
-    expect(api.submitExperienceCandidate).not.toHaveBeenCalled();
-
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: "agents.control.experience.submitConfirmation",
-      }),
-    );
-    fireEvent.click(submit);
-
-    await waitFor(() =>
-      expect(api.submitExperienceCandidate).toHaveBeenCalledWith({
-        candidateId: CANDIDATE_ID,
-        confirmation: "submit-selected-skill",
-      }),
-    );
-    expect(onSubmitted).toHaveBeenCalledWith(submitted());
-  });
-
-  it("shows safe localized DLP locations without rendering evidence", async () => {
+  it("blocks sharing on DLP findings without exposing technical paths", async () => {
     installAPI({
       prepareExperienceCandidate: vi.fn(async () =>
         success(
@@ -290,25 +212,23 @@ describe("ExperiencePromotionDialog", () => {
     await selectEligibleSkill();
     fireEvent.click(
       screen.getByRole("button", {
-        name: "agents.control.experience.preparePreview",
+        name: "agents.control.experience.share",
       }),
     );
 
     expect(
-      await screen.findByText(
-        "agents.control.experience.dlp.credential_api_key",
-      ),
+      await screen.findByText("agents.control.experience.dlpBlockedUser"),
     ).toBeTruthy();
-    expect(screen.getByText("skills/research-notes/SKILL.md:12")).toBeTruthy();
+    expect(document.body.textContent).not.toContain(
+      "skills/research-notes/SKILL.md:12",
+    );
     expect(document.body.textContent).not.toMatch(/sk-[A-Za-z0-9]+/);
     expect(
-      screen.getByRole("button", {
-        name: "agents.control.experience.submitForReview",
-      }),
-    ).toBeDisabled();
+      window.agenteraAgents.submitExperienceCandidate,
+    ).not.toHaveBeenCalled();
   });
 
-  it("keeps failed uploads as an explicit manual retry without a timer", async () => {
+  it("keeps failed sharing as an explicit retry without a timer", async () => {
     const submitExperienceCandidate = vi
       .fn()
       .mockResolvedValueOnce({
@@ -322,17 +242,7 @@ describe("ExperiencePromotionDialog", () => {
     await selectEligibleSkill();
     fireEvent.click(
       screen.getByRole("button", {
-        name: "agents.control.experience.preparePreview",
-      }),
-    );
-    fireEvent.click(
-      await screen.findByRole("checkbox", {
-        name: "agents.control.experience.submitConfirmation",
-      }),
-    );
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "agents.control.experience.submitForReview",
+        name: "agents.control.experience.share",
       }),
     );
 
@@ -340,7 +250,7 @@ describe("ExperiencePromotionDialog", () => {
       await screen.findByText("agents.control.errors.cloud_unavailable"),
     ).toBeTruthy();
     const retry = screen.getByRole("button", {
-      name: "agents.control.experience.retryUpload",
+      name: "agents.control.experience.retryShare",
     });
     expect(submitExperienceCandidate).toHaveBeenCalledTimes(1);
 
@@ -348,5 +258,37 @@ describe("ExperiencePromotionDialog", () => {
     await waitFor(() =>
       expect(api.submitExperienceCandidate).toHaveBeenCalledTimes(2),
     );
+  });
+
+  // @lat: [[agentera-self-evolution#AgentEra self-evolution compatibility#Candidate promotion loop#ExperienceCandidate V1]]
+  it("shares one selected Skill with one click after the local privacy scan", async () => {
+    const api = installAPI();
+    const onSubmitted = vi.fn();
+    renderDialog(true, onSubmitted);
+
+    await selectEligibleSkill();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "agents.control.experience.share",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(api.prepareExperienceCandidate).toHaveBeenCalledWith({
+        installationId: INSTALLATION_ID,
+        skillName: "research-notes",
+      }),
+    );
+    await waitFor(() =>
+      expect(api.submitExperienceCandidate).toHaveBeenCalledWith({
+        candidateId: CANDIDATE_ID,
+        confirmation: "submit-selected-skill",
+      }),
+    );
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(document.body.textContent).not.toContain(VERSION_ID);
+    expect(document.body.textContent).not.toContain("sha256:");
+    expect(document.body.textContent).not.toContain("skills/research-notes/");
+    expect(onSubmitted).toHaveBeenCalledWith(submitted());
   });
 });
