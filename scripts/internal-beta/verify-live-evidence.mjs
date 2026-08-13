@@ -112,7 +112,7 @@ function runUrl(value, repository, label) {
       parsed.hash !== "" ||
       parsed.href !== value ||
       parsed.pathname !==
-        `/bignormal/${repository}/actions/runs/${parsed.pathname
+        `/Ablankpaper/${repository}/actions/runs/${parsed.pathname
           .split("/")
           .at(-1)}` ||
       !/^[1-9][0-9]*$/u.test(parsed.pathname.split("/").at(-1) ?? "")

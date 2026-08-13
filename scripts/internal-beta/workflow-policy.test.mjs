@@ -90,7 +90,7 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   assert.match(raw, /cosign sign-blob[\s\S]*internal-beta\.provenance\.json/iu);
   assert.match(
     raw,
-    /identity="\^https:\/\/github\\\\\.com\/bignormal\/aera\/\\\\\.github\/workflows\/internal-beta\\\\\.yml@refs\/heads\/main\$"/u,
+    /identity="\^https:\/\/github\\\\\.com\/Ablankpaper\/aera\/\\\\\.github\/workflows\/internal-beta\\\\\.yml@refs\/heads\/main\$"/u,
   );
   assert.match(raw, /--certificate-identity-regexp "\$identity"/u);
   assert.match(
@@ -154,7 +154,7 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   assert.doesNotMatch(raw, /WIN_CSC|signtool/iu);
   assert.doesNotMatch(
     raw,
-    /repository:\s*bignormal\/aera-runtime|git\s+clone[\s\S]*aera-runtime/iu,
+    /repository:\s*Ablankpaper\/aera-runtime|git\s+clone[\s\S]*aera-runtime/iu,
   );
 });
 

@@ -79,5 +79,5 @@ rpm:
 npmRebuild: false
 publish:
   provider: github
-  owner: bignormal
+  owner: Ablankpaper
   repo: aera

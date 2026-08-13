@@ -2,7 +2,7 @@
 
 Aera は、Aera Runtime のインストール、設定、利用を行う Aera のデスクトップアプリです。チャット、セッション、エージェント、メモリ、スキル、ツール、スケジュール、メッセージングゲートウェイ、プロバイダー、3D オフィスを 1 つのネイティブ UI に統合します。
 
-[リリース](https://github.com/bignormal/aera/releases) · [Issue](https://github.com/bignormal/aera/issues) · [ライセンス](LICENSE)
+[リリース](https://github.com/Ablankpaper/aera/releases) · [Issue](https://github.com/Ablankpaper/aera/issues) · [ライセンス](LICENSE)
 
 [English](README.md) · [简体中文](README.zh-CN.md) · 日本語 · [Español (LATAM)](README.es-LATAM.md)
 
@@ -22,7 +22,7 @@ Aera は、Aera Runtime のインストール、設定、利用を行う Aera �
 
 ## インストール
 
-最新の macOS、Windows、Linux ビルドは [GitHub Releases](https://github.com/bignormal/aera/releases) からダウンロードできます。
+最新の macOS、Windows、Linux ビルドは [GitHub Releases](https://github.com/Ablankpaper/aera/releases) からダウンロードできます。
 
 ### Windows
 

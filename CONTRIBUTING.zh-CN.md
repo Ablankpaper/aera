@@ -62,7 +62,7 @@
 
 ## 报告 Bug
 
-如果你发现了 bug，请在 GitHub 上 [提交 issue](https://github.com/bignormal/aera/issues/new)，并尽量包含：
+如果你发现了 bug，请在 GitHub 上 [提交 issue](https://github.com/Ablankpaper/aera/issues/new)，并尽量包含：
 
 - 清晰的标题和描述
 - 复现步骤
@@ -71,7 +71,7 @@
 
 ## 功能请求
 
-如果你有新想法，也欢迎 [提交 issue](https://github.com/bignormal/aera/issues/new)，并描述：
+如果你有新想法，也欢迎 [提交 issue](https://github.com/Ablankpaper/aera/issues/new)，并描述：
 
 - 你想解决的问题
 - 你希望它如何工作
@@ -96,7 +96,7 @@ build/                   打包配置资源
 
 ## 社区
 
-- Bug、功能建议和贡献者讨论请统一使用 [GitHub Issues](https://github.com/bignormal/aera/issues)。
+- Bug、功能建议和贡献者讨论请统一使用 [GitHub Issues](https://github.com/Ablankpaper/aera/issues)。
 
 ## 许可证
 

@@ -2,7 +2,7 @@
 
 Aera is the Aera desktop application for installing, configuring, and using Aera Runtime. It combines chat, sessions, agents, memory, skills, tools, schedules, messaging gateways, providers, and a live 3D office in one native interface.
 
-[Releases](https://github.com/bignormal/aera/releases) · [Issues](https://github.com/bignormal/aera/issues) · [License](LICENSE)
+[Releases](https://github.com/Ablankpaper/aera/releases) · [Issues](https://github.com/Ablankpaper/aera/issues) · [License](LICENSE)
 
 English · [简体中文](README.zh-CN.md) · [日本語](README.ja-JP.md) · [Español (LATAM)](README.es-LATAM.md)
 
@@ -22,7 +22,7 @@ English · [简体中文](README.zh-CN.md) · [日本語](README.ja-JP.md) · [E
 
 ## Install
 
-Download the latest macOS, Windows, or Linux build from [GitHub Releases](https://github.com/bignormal/aera/releases).
+Download the latest macOS, Windows, or Linux build from [GitHub Releases](https://github.com/Ablankpaper/aera/releases).
 
 ### Windows
 
