@@ -11,6 +11,7 @@ import {
   safeWriteFile,
 } from "./utils";
 import { getYamlPath } from "./yaml-path";
+import { migrateModelConfigFormat } from "./config-model-migration";
 // NOTE: ./secrets imports back into this module (getConfigValue / readEnv), so
 // this is a static import that closes a cycle (config -> secrets ->
 // commandProvider -> config). It is safe ONLY because BOTH sides defer all work
@@ -1039,6 +1040,11 @@ export function setModelConfig(
   // as needed; `upsertBlockChild` produces a valid minimal YAML doc
   // from an empty starting string.
   let content = existsSync(configFile) ? readFileSync(configFile, "utf-8") : "";
+
+  // Migrate legacy scalar `model: value` format before writing.
+  // Prevents duplicate `model:` keys that cause native_route stage failures.
+  const migrated = migrateModelConfigFormat(content);
+  content = migrated.content;
 
   content = upsertBlockChild(content, "model", "provider", provider);
   content = upsertBlockChild(content, "model", "default", model);
