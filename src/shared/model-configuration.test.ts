@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   canonicalPublicRouteKey,
+  isSafeToRetryStaleRevision,
+  type ModelConfigurationMutationResult,
+  type ModelConfigurationStage,
   type OwnerModelRouteCatalogSnapshot,
 } from "./model-configuration";
 
@@ -30,5 +33,89 @@ describe("model configuration contract", () => {
     expect(JSON.stringify(snapshot)).not.toMatch(
       /apiKey|credentialRef|secret/i,
     );
+  });
+});
+
+/**
+ * A save rejected for a stale catalog revision wrote nothing, so replaying it
+ * against a fresh catalog is safe. Every other rejection has already entered a
+ * write stage and must never be replayed.
+ *
+ * @lat: [[legacy-model-config-migration#Stale catalog retry policy]]
+ */
+describe("stale catalog revision retry policy", () => {
+  const rejected = (
+    stage: ModelConfigurationStage,
+    rollback: "not_needed" | "restored" | "recovery_required",
+    reason?: "stale_catalog_revision",
+  ): ModelConfigurationMutationResult => ({
+    status: "rejected",
+    stage,
+    code: `model_save_${stage}_failed`,
+    rollback,
+    ...(reason ? { reason } : {}),
+  });
+
+  // @lat: [[legacy-model-config-migration#Stale catalog retry policy#Retries a pre-write validation rejection]]
+  it("permits a retry only when the rejection names a stale revision", () => {
+    expect(
+      isSafeToRetryStaleRevision(
+        rejected("validation", "not_needed", "stale_catalog_revision"),
+      ),
+    ).toBe(true);
+    // The stage/rollback pair alone is shared with refusals a replay cannot fix.
+    expect(
+      isSafeToRetryStaleRevision(rejected("validation", "not_needed")),
+    ).toBe(false);
+  });
+
+  // @lat: [[legacy-model-config-migration#Stale catalog retry policy#Never retries a stage that already wrote]]
+  it("refuses to replay any stage that already touched disk", () => {
+    const writeStages: ModelConfigurationStage[] = [
+      "credential",
+      "provider",
+      "model_library",
+      "native_route",
+      "activation",
+    ];
+    // Each case carries the stale-revision reason, so only the stage and
+    // rollback checks can be what refuses the replay.
+    const stale = "stale_catalog_revision" as const;
+    for (const stage of writeStages) {
+      expect(
+        isSafeToRetryStaleRevision(rejected(stage, "restored", stale)),
+      ).toBe(false);
+      expect(
+        isSafeToRetryStaleRevision(rejected(stage, "not_needed", stale)),
+      ).toBe(false);
+    }
+    // A validation rejection that did roll back a write is also off limits.
+    expect(
+      isSafeToRetryStaleRevision(rejected("validation", "restored", stale)),
+    ).toBe(false);
+    expect(
+      isSafeToRetryStaleRevision(
+        rejected("validation", "recovery_required", stale),
+      ),
+    ).toBe(false);
+  });
+
+  // @lat: [[legacy-model-config-migration#Stale catalog retry policy#Never retries a committed save]]
+  it("never retries a committed save", () => {
+    const catalog: OwnerModelRouteCatalogSnapshot = {
+      revision: "revision-2",
+      targetProfileId: "default",
+      routes: [],
+    };
+    expect(isSafeToRetryStaleRevision({ status: "committed", catalog })).toBe(
+      false,
+    );
+    expect(
+      isSafeToRetryStaleRevision({
+        status: "committed_refresh_warning",
+        catalog,
+        warning: "model_save_refresh_failed",
+      }),
+    ).toBe(false);
   });
 });

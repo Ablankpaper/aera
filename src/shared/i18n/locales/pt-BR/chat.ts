@@ -22,6 +22,7 @@ export default {
   suggestionAnalyze: "Analisar dados",
   approve: "Aprovar",
   deny: "Negar",
+  boundary: { unnamedAgent: "Agente sem nome" },
   newChat: "Novo chat (Cmd+N)",
   clearChat: "Limpar chat",
   setContextFolder: "Definir pasta de contexto",

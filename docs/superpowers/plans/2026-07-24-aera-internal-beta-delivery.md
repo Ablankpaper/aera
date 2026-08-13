@@ -420,7 +420,7 @@ SMTP and SMS values are intentionally absent in this delivery. Do not configure 
 
 - [ ] After the Desktop merge and successful main CI, dispatch `internal-beta.yml` with exact Desktop SHA and CI run ID.
 - [ ] Wait for native macOS arm64, Windows x64, and assembly jobs to complete.
-- [ ] Download the artifact and verify manifest/provenance Sigstore bundles against `github.com/bignormal/aera/.github/workflows/internal-beta.yml@refs/heads/main` and `https://token.actions.githubusercontent.com`.
+- [ ] Download the artifact and verify manifest/provenance Sigstore bundles against `github.com/Ablankpaper/aera/.github/workflows/internal-beta.yml@refs/heads/main` and `https://token.actions.githubusercontent.com`.
 - [ ] Verify package SHA-256 values, Runtime Seed lock/manifest/signature for both platforms, exact Cloud origin, exact offline key ID/public key, version, SBOM, and unsigned internal-only label.
 - [ ] Copy the artifact into the external operator handoff directory; retain the immutable Actions URL and checksums.
 - [ ] Do not create a tag, GitHub Release, updater metadata publication, or production signing claim.

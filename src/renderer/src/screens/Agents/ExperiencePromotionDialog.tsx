@@ -26,7 +26,6 @@ function errorKey(code: AgenteraAgentControlErrorCode): string {
 export default function ExperiencePromotionDialog({
   open,
   installation,
-  agentName,
   online,
   onClose,
   onSubmitted,
@@ -37,7 +36,6 @@ export default function ExperiencePromotionDialog({
   const [preview, setPreview] = useState<ExperienceCandidatePreview | null>(
     null,
   );
-  const [confirmed, setConfirmed] = useState(false);
   const [loadingSkills, setLoadingSkills] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -50,7 +48,6 @@ export default function ExperiencePromotionDialog({
     setSkills([]);
     setSkillName("");
     setPreview(null);
-    setConfirmed(false);
     setUploadFailed(false);
     setError(null);
     setLoadingSkills(true);
@@ -75,68 +72,44 @@ export default function ExperiencePromotionDialog({
     };
   }, [installation.id, open]);
 
-  const prepare = async (): Promise<void> => {
-    if (!skillName || preparing) return;
+  const share = async (): Promise<void> => {
+    if (!skillName || preparing || submitting) return;
     setPreparing(true);
-    setError(null);
     setPreview(null);
-    setConfirmed(false);
+    setError(null);
     setUploadFailed(false);
     try {
-      const result = await window.agenteraAgents.prepareExperienceCandidate({
+      const prepared = await window.agenteraAgents.prepareExperienceCandidate({
         installationId: installation.id,
         skillName,
       });
-      if (!result.ok) {
-        setError(errorKey(result.errorCode));
+      if (!prepared.ok) {
+        setError(errorKey(prepared.errorCode));
         return;
       }
-      setPreview(result.data);
-    } catch {
-      setError("agents.control.errors.operation_failed");
-    } finally {
+      setPreview(prepared.data);
+      if (!online || prepared.data.findings.length > 0) return;
       setPreparing(false);
-    }
-  };
-
-  const submit = async (): Promise<void> => {
-    if (
-      !preview ||
-      !online ||
-      preview.findings.length > 0 ||
-      !confirmed ||
-      submitting
-    ) {
-      return;
-    }
-    setSubmitting(true);
-    setUploadFailed(false);
-    setError(null);
-    try {
-      const result = await window.agenteraAgents.submitExperienceCandidate({
-        candidateId: preview.localCandidateId,
+      setSubmitting(true);
+      const submitted = await window.agenteraAgents.submitExperienceCandidate({
+        candidateId: prepared.data.localCandidateId,
         confirmation: "submit-selected-skill",
       });
-      if (!result.ok) {
-        setError(errorKey(result.errorCode));
+      if (!submitted.ok) {
+        setError(errorKey(submitted.errorCode));
         setUploadFailed(true);
         return;
       }
-      onSubmitted(result.data);
+      setPreview(null);
+      onSubmitted(submitted.data);
     } catch {
       setError("agents.control.errors.operation_failed");
       setUploadFailed(true);
     } finally {
+      setPreparing(false);
       setSubmitting(false);
     }
   };
-
-  const canSubmit =
-    preview !== null &&
-    preview.findings.length === 0 &&
-    online &&
-    confirmed &&
-    !submitting;
 
   return (
     <AppModal
@@ -180,7 +153,6 @@ export default function ExperiencePromotionDialog({
             onChange={(event) => {
               setSkillName(event.target.value);
               setPreview(null);
-              setConfirmed(false);
               setUploadFailed(false);
               setError(null);
             }}
@@ -198,81 +170,31 @@ export default function ExperiencePromotionDialog({
 
         <button
           type="button"
-          className="btn btn-secondary"
+          className="btn btn-primary"
           disabled={!skillName || loadingSkills || preparing || submitting}
-          onClick={() => void prepare()}
+          onClick={() => void share()}
         >
-          {t("agents.control.experience.preparePreview")}
+          {t(
+            preparing || submitting
+              ? "agents.control.experience.shareInProgress"
+              : uploadFailed
+                ? "agents.control.experience.retryShare"
+                : "agents.control.experience.share",
+          )}
         </button>
 
         {preview ? (
-          <section aria-label={t("agents.control.experience.previewTitle")}>
-            <dl className="agent-control-preview-grid">
-              <div>
-                <dt>{t("agents.control.experience.sourceAgent")}</dt>
-                <dd>{agentName}</dd>
-              </div>
-              <div>
-                <dt>{t("agents.control.experience.sourceVersion")}</dt>
-                <dd>{preview.sourceAgentVersionId}</dd>
-              </div>
-              <div>
-                <dt>{t("agents.control.experience.fileCount")}</dt>
-                <dd>{preview.fileCount}</dd>
-              </div>
-              <div>
-                <dt>{t("agents.control.totalBytes")}</dt>
-                <dd>{preview.totalBytes}</dd>
-              </div>
-              <div>
-                <dt>{t("agents.control.experience.digest")}</dt>
-                <dd>{preview.contentDigest}</dd>
-              </div>
-            </dl>
-
-            <ul>
-              {preview.assets.map((asset) => (
-                <li key={asset.path}>{asset.path}</li>
-              ))}
-            </ul>
-
-            {preview.findings.length === 0 ? (
-              <p>{t("agents.control.experience.dlpPassed")}</p>
-            ) : (
+          <section aria-label={t("agents.control.experience.shareStatus")}>
+            {preview.findings.length > 0 ? (
               <div className="agents-create-error">
-                <p>{t("agents.control.experience.dlpBlocked")}</p>
-                <ul>
-                  {preview.findings.map((finding, index) => (
-                    <li key={`${finding.code}-${finding.path}-${index}`}>
-                      <span>
-                        {t(`agents.control.experience.dlp.${finding.code}`)}
-                      </span>{" "}
-                      <span>
-                        {finding.path}
-                        {finding.line === null ? "" : `:${finding.line}`}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                <p>{t("agents.control.experience.dlpBlockedUser")}</p>
+                <p>{t("agents.control.experience.dlpChooseAnother")}</p>
               </div>
-            )}
-
-            {!online ? (
+            ) : !online ? (
               <p className="agent-control-notice">
-                {t("agents.control.experience.onlineToSubmit")}
+                {t("agents.control.experience.onlineToShare")}
               </p>
             ) : null}
-
-            <label className="agent-control-confirm-row">
-              <input
-                type="checkbox"
-                checked={confirmed}
-                disabled={preview.findings.length > 0 || submitting}
-                aria-label={t("agents.control.experience.submitConfirmation")}
-                onChange={(event) => setConfirmed(event.target.checked)}
-              />
-              <span>{t("agents.control.experience.submitConfirmation")}</span>
-            </label>
           </section>
         ) : null}
 
@@ -288,20 +210,6 @@ export default function ExperiencePromotionDialog({
         >
           {t("agents.control.cancel")}
         </button>
-        {preview ? (
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={!canSubmit}
-            onClick={() => void submit()}
-          >
-            {t(
-              uploadFailed
-                ? "agents.control.experience.retryUpload"
-                : "agents.control.experience.submitForReview",
-            )}
-          </button>
-        ) : null}
       </footer>
     </AppModal>
   );

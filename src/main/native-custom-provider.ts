@@ -6,6 +6,7 @@ import {
 } from "../shared/custom-providers";
 import { customProviderEnvKey } from "../shared/url-key-map";
 import { profilePaths, safeWriteFile } from "./utils";
+import { migrateModelConfigFormat } from "./config-model-migration";
 
 export interface NativeCustomProviderInput {
   name: string;
@@ -38,7 +39,10 @@ function configDocument(content: string): {
   document: ReturnType<typeof parseDocument>;
   root: UnknownRecord;
 } {
-  const document = parseDocument(content.trim() ? content : "{}");
+  // Migrate legacy model: format before parsing to prevent duplicate key errors
+  const migrated = migrateModelConfigFormat(content.trim() || "{}");
+
+  const document = parseDocument(migrated.content);
   if (document.errors.length > 0) {
     throw new Error(
       `Cannot update Aera Runtime custom provider: ${document.errors[0].message}`,

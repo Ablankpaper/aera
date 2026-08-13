@@ -42,7 +42,7 @@ Use the merged Desktop `main` SHA and its successful `CI` run ID:
 
 ```bash
 gh workflow run internal-beta.yml \
-  --repo bignormal/aera \
+  --repo Ablankpaper/aera \
   --ref main \
   -f source_sha=0123456789abcdef0123456789abcdef01234567 \
   -f ci_run_id=30100000001
@@ -54,7 +54,7 @@ This dispatch ends after uploading `desktop-internal-beta-SOURCE_SHA`; it cannot
 
 ```bash
 gh workflow run internal-beta-promote.yml \
-  --repo bignormal/aera \
+  --repo Ablankpaper/aera \
   --ref main \
   -f source_sha=0123456789abcdef0123456789abcdef01234567 \
   -f candidate_run_id=30100000002
@@ -112,7 +112,7 @@ Download the final artifact without rebuilding:
 
 ```bash
 gh run download RUN_ID \
-  --repo bignormal/aera \
+  --repo Ablankpaper/aera \
   --name desktop-internal-beta-SOURCE_SHA \
   --dir ./desktop-internal-beta
 ```
@@ -125,14 +125,14 @@ sha256sum --check SHA256SUMS
 cosign verify-blob \
   --bundle evidence/internal-beta-provenance.cosign.bundle.json \
   --certificate-identity-regexp \
-  '^https://github\.com/bignormal/aera/\.github/workflows/internal-beta\.yml@refs/heads/main$' \
+  '^https://github\.com/Ablankpaper/aera/\.github/workflows/internal-beta\.yml@refs/heads/main$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   evidence/internal-beta.provenance.json
 
 cosign verify-blob \
   --bundle evidence/internal-beta-manifest.cosign.bundle.json \
   --certificate-identity-regexp \
-  '^https://github\.com/bignormal/aera/\.github/workflows/internal-beta\.yml@refs/heads/main$' \
+  '^https://github\.com/Ablankpaper/aera/\.github/workflows/internal-beta\.yml@refs/heads/main$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   internal-beta-manifest.json
 ```

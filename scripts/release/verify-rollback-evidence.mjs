@@ -161,7 +161,7 @@ export function validateRollbackEvidence(document, options) {
 function validateReleaseInputs(inputs, options) {
   exactFields(inputs, ["cloud", "admin", "desktop"], "rollback release inputs");
   validateServiceCandidates(inputs.cloud, {
-    repository: "bignormal/aera-cloud",
+    repository: "Ablankpaper/aera-cloud",
     currentSourceSha: options?.cloudCurrentSourceSha,
     currentImageDigest: options?.cloudCurrentImageDigest,
     previousSourceSha: options?.cloudPreviousSourceSha,
@@ -169,7 +169,7 @@ function validateReleaseInputs(inputs, options) {
     label: "Cloud",
   });
   validateServiceCandidates(inputs.admin, {
-    repository: "bignormal/aera-admin",
+    repository: "Ablankpaper/aera-admin",
     currentSourceSha: options?.adminCurrentSourceSha,
     currentImageDigest: options?.adminCurrentImageDigest,
     previousSourceSha: options?.adminPreviousSourceSha,
@@ -182,7 +182,7 @@ function validateReleaseInputs(inputs, options) {
     "Desktop rollback input",
   );
   if (
-    inputs.desktop.repository !== "bignormal/aera" ||
+    inputs.desktop.repository !== "Ablankpaper/aera" ||
     inputs.desktop.sourceSha !== options?.desktopSourceSha ||
     !SHA_PATTERN.test(inputs.desktop.sourceSha ?? "") ||
     !VERSION_PATTERN.test(inputs.desktop.version ?? "") ||
@@ -321,7 +321,7 @@ function validateObjectProtection(value) {
 function validateServices(services, releaseInputs, window) {
   exactFields(services, ["cloud", "admin"], "rollback service drills");
   validateServiceDrill(services.cloud, {
-    repository: "bignormal/aera-cloud",
+    repository: "Ablankpaper/aera-cloud",
     sourceSha: releaseInputs.cloud.current.sourceSha,
     currentDigest: releaseInputs.cloud.current.imageDigest,
     previousDigest: releaseInputs.cloud.previous.imageDigest,
@@ -335,7 +335,7 @@ function validateServices(services, releaseInputs, window) {
     window,
   });
   validateServiceDrill(services.admin, {
-    repository: "bignormal/aera-admin",
+    repository: "Ablankpaper/aera-admin",
     sourceSha: releaseInputs.admin.current.sourceSha,
     currentDigest: releaseInputs.admin.current.imageDigest,
     previousDigest: releaseInputs.admin.previous.imageDigest,
@@ -495,7 +495,7 @@ function validateDesktopResponse(value, desktopInput, window) {
     "Desktop rollback response",
   );
   validateSuccessfulRun(value.run, {
-    repository: "bignormal/aera",
+    repository: "Ablankpaper/aera",
     sourceSha: desktopInput.sourceSha,
     label: "Desktop",
     window,

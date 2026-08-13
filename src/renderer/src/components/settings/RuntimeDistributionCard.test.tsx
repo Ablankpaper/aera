@@ -129,7 +129,7 @@ describe("RuntimeDistributionCard", () => {
     );
     const dialog = screen.getByRole("dialog");
     expect(dialog).toHaveTextContent("0.19.0-agentera.1");
-    expect(dialog).toHaveTextContent("bignormal/aera-runtime");
+    expect(dialog).toHaveTextContent("Ablankpaper/aera-runtime");
     expect(dialog).toHaveTextContent("25 MB");
     expect(mocked.downloadConfirmed).not.toHaveBeenCalled();
 

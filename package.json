@@ -1,10 +1,10 @@
 {
   "name": "agentera-studio",
-  "version": "0.7.4-internal-beta.27",
+  "version": "0.7.4-internal-beta.28",
   "description": "Aera — private AI agent desktop",
   "main": "./out/main/index.js",
   "author": "Aera",
-  "homepage": "https://github.com/bignormal/aera",
+  "homepage": "https://github.com/Ablankpaper/aera",
   "scripts": {
     "prepare:runtime-seed": "node scripts/prepare-agentera-runtime-seed.mjs",
     "verify:packaged-runtime-seed": "node scripts/verify-packaged-runtime-seed.mjs",
@@ -34,6 +34,7 @@
     "test:e2e:runtime-seed": "npm run build && playwright test tests/e2e/agentera-runtime-seed.e2e.ts",
     "test:e2e:chat-stream-integrity": "npm run build && playwright test tests/e2e/chat-stream-integrity.e2e.ts",
     "test:e2e:chat-stream-integrity-boundaries": "npm run build && playwright test tests/e2e/chat-stream-integrity-boundaries.e2e.ts",
+    "test:e2e:image-generation": "npm run build && playwright test tests/e2e/image-generation-config.e2e.ts",
     "test:coverage": "vitest run --coverage",
     "test:sandbox": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/hermes-sandbox.ps1 test",
     "test:live-visual": "node scripts/drive-live-regression-suite.js",
@@ -56,6 +57,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@electron-internal/extract-zip": "^1.0.5",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@hpke/core": "1.9.0",
@@ -71,7 +73,6 @@
     "date-fns": "^4.4.0",
     "electron-updater": "^6.8.9",
     "ethers": "^6.17.0",
-    "extract-zip": "^2.0.1",
     "highlight.js": "^11.11.1",
     "i18next": "^25.6.0",
     "lucide-react": "^1.7.0",
@@ -87,7 +88,8 @@
     "three": "^0.183.2",
     "troika-three-text": "^0.52.4",
     "vscode-material-icons": "^0.1.1",
-    "ws": "^8.20.0"
+    "ws": "^8.20.0",
+    "yauzl": "^3.4.0"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
@@ -102,10 +104,11 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.183.1",
+    "@types/yauzl": "^3.4.0",
     "@vitejs/plugin-react": "^5.1.1",
     "@vitest/coverage-v8": "^4.1.8",
     "@wesbos/code-icons": "^1.2.4",
-    "electron": "39.8.10",
+    "electron": "41.10.5",
     "electron-builder": "^26.0.12",
     "electron-vite": "^5.0.0",
     "eslint": "^9.39.1",
@@ -126,6 +129,7 @@
     "yaml": "^2.9.0"
   },
   "overrides": {
+    "extract-zip": "npm:@electron-internal/extract-zip@1.0.5",
     "js-yaml": "4.3.1"
   }
 }

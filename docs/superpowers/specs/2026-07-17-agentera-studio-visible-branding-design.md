@@ -19,7 +19,7 @@ The change is deliberately limited to brand names, brand assets, product metadat
 - Electron bundle/application id: `com.bignormal.agentera.studio`.
 - Windows executable name: `agentera-studio`.
 - Windows package identifier: `Bignormal.AgentEraStudio`.
-- Source, issue, release, and desktop-update repository: `bignormal/aera`.
+- Source, issue, release, and desktop-update repository: `Ablankpaper/aera`.
 
 Functional suffixes such as `Studio` and `Runtime` describe product roles; `AgentEra` remains the only first-party brand.
 
@@ -35,7 +35,7 @@ The following desktop-owned surfaces use `AgentEra Studio`, `AgentEra`, or `Agen
 - Desktop-owned repository, issue, release, update, community, social, donation, and analytics explanations.
 - Active public product documentation and README branding where it describes this desktop product.
 
-The existing upstream follow-on-X prompt, donation link, and upstream community links are removed because no AgentEra-owned replacements have been supplied. Source, issue, release, and update links point to `https://github.com/bignormal/aera`. No new analytics, community, social, or donation endpoint is invented.
+The existing upstream follow-on-X prompt, donation link, and upstream community links are removed because no AgentEra-owned replacements have been supplied. Source, issue, release, and update links point to `https://github.com/Ablankpaper/aera`. No new analytics, community, social, or donation endpoint is invented.
 
 Third-party provider and service names such as OpenAI remain factual provider labels. Functional third-party integrations remain available and are not relabeled as AgentEra. Upstream surfaces that only promote the former desktop brand, rather than provide a product function, are removed.
 

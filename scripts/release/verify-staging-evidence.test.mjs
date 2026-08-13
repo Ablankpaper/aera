@@ -115,7 +115,7 @@ test("requires every successful real run URL with executed steps", () => {
 
   const searchURL = evidence(keys.publicKey);
   searchURL.suiteRuns.auth_device_offline.runUrl =
-    "https://github.com/bignormal/aera/actions?query=staging";
+    "https://github.com/Ablankpaper/aera/actions?query=staging";
   assert.throws(() => validate(searchURL), /run URL/u);
 });
 
@@ -171,33 +171,33 @@ function validate(document) {
 
 function evidence(publicKey) {
   const suiteRepositories = {
-    auth_device_offline: "bignormal/aera",
-    workspace_organization: "bignormal/aera",
-    official_managed_agent: "bignormal/aera",
-    quality_governance: "bignormal/aera-admin",
-    encrypted_backup_migration: "bignormal/aera",
-    admin_dual_auth_rbac_audit: "bignormal/aera-admin",
-    database_restore_object_reconciliation: "bignormal/aera-cloud",
-    release_control_rollback: "bignormal/aera-cloud",
+    auth_device_offline: "Ablankpaper/aera",
+    workspace_organization: "Ablankpaper/aera",
+    official_managed_agent: "Ablankpaper/aera",
+    quality_governance: "Ablankpaper/aera-admin",
+    encrypted_backup_migration: "Ablankpaper/aera",
+    admin_dual_auth_rbac_audit: "Ablankpaper/aera-admin",
+    database_restore_object_reconciliation: "Ablankpaper/aera-cloud",
+    release_control_rollback: "Ablankpaper/aera-cloud",
   };
   return {
     schemaVersion: 1,
     environment: "private_staging",
     releaseInputs: {
       cloud: {
-        repository: "bignormal/aera-cloud",
+        repository: "Ablankpaper/aera-cloud",
         sourceSha: CLOUD_SOURCE_SHA,
         imageDigest: CLOUD_DIGEST,
         candidateManifestSha256: "4".repeat(64),
       },
       admin: {
-        repository: "bignormal/aera-admin",
+        repository: "Ablankpaper/aera-admin",
         sourceSha: ADMIN_SOURCE_SHA,
         imageDigest: ADMIN_DIGEST,
         candidateManifestSha256: "5".repeat(64),
       },
       desktop: {
-        repository: "bignormal/aera",
+        repository: "Ablankpaper/aera",
         sourceSha: DESKTOP_SOURCE_SHA,
         candidateManifestSha256: DESKTOP_MANIFEST_DIGEST,
       },
@@ -239,9 +239,9 @@ function evidence(publicKey) {
             repository,
             runUrl: `https://github.com/${repository}/actions/runs/${3000 + index}`,
             sourceSha:
-              repository === "bignormal/aera-cloud"
+              repository === "Ablankpaper/aera-cloud"
                 ? CLOUD_SOURCE_SHA
-                : repository === "bignormal/aera-admin"
+                : repository === "Ablankpaper/aera-admin"
                   ? ADMIN_SOURCE_SHA
                   : DESKTOP_SOURCE_SHA,
             conclusion: "success",

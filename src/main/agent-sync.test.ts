@@ -114,6 +114,7 @@ function fakeProfile(name: string, color = "#123456", id = name): ProfileInfo {
   return {
     id,
     name,
+    displayName: name || null,
     // The on-disk directory is keyed by the stable id, not the display name.
     path:
       id === "default" ? mockState.home : join(mockState.home, "profiles", id),

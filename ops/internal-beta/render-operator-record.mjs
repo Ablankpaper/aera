@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 const SHA = /^[0-9a-f]{40}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const ACTION_RUN =
-  /^https:\/\/github\.com\/bignormal\/(aera|aera-cloud|aera-admin)\/actions\/runs\/[1-9][0-9]*$/u;
+  /^https:\/\/github\.com\/Ablankpaper\/(aera|aera-cloud|aera-admin)\/actions\/runs\/[1-9][0-9]*$/u;
 const TIMESTAMP =
   /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$/u;
 
@@ -180,7 +180,7 @@ function validateCandidate(entry, index) {
   const expectedRepository =
     entry.role === "cloud" ? "aera-cloud" : "aera-admin";
   const digestPattern = new RegExp(
-    `^ghcr\\.io/bignormal/${expectedRepository}@sha256:[0-9a-f]{64}$`,
+    `^ghcr\\.io/ablankpaper/${expectedRepository}@sha256:[0-9a-f]{64}$`,
     "u",
   );
   exactString(entry.imageDigest, digestPattern, `${label}.imageDigest`);

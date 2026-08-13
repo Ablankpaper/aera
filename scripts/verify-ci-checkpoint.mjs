@@ -6,11 +6,11 @@ const RUN_URL_PATTERN =
   /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/actions\/runs\/[1-9][0-9]*$/u;
 const REQUIRED_PLATFORMS = new Map([
   [
-    "bignormal/aera",
+    "Ablankpaper/aera",
     new Set(["ubuntu-latest", "macos-latest", "windows-latest"]),
   ],
-  ["bignormal/aera-cloud", new Set(["ubuntu-24.04"])],
-  ["bignormal/aera-admin", new Set(["ubuntu-24.04"])],
+  ["Ablankpaper/aera-cloud", new Set(["ubuntu-24.04"])],
+  ["Ablankpaper/aera-admin", new Set(["ubuntu-24.04"])],
 ]);
 
 function fail(message) {

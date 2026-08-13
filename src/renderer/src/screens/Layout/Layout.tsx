@@ -73,19 +73,31 @@ export const SETTINGS_MANAGED_VIEWS = [
 type SettingsManagedView = (typeof SETTINGS_MANAGED_VIEWS)[number];
 type NavigationTarget = View | SettingsManagedView;
 
-export const PINNED_NAV_ITEMS: {
+interface PinnedNavItem {
   view: View;
   icon: LucideIcon;
   labelKey: string;
-}[] = [
+  hidden?: boolean;
+}
+
+export const PINNED_NAV_CATALOG: PinnedNavItem[] = [
   { view: "discover", icon: Compass, labelKey: "navigation.discover" },
-  { view: "office", icon: Building, labelKey: "navigation.office" },
+  {
+    view: "office",
+    icon: Building,
+    labelKey: "navigation.office",
+    hidden: true,
+  },
   { view: "kanban", icon: KanbanIcon, labelKey: "navigation.kanban" },
   // "skills" lives under the Discover tab (installed + community), so it's no
   // longer a top-level nav item.
   { view: "schedules", icon: Timer, labelKey: "navigation.schedules" },
   { view: "agents", icon: Bot, labelKey: "navigation.agents" },
 ];
+
+export const PINNED_NAV_ITEMS = PINNED_NAV_CATALOG.filter(
+  (item) => !item.hidden,
+);
 
 const SIDEBAR_COLLAPSED_KEY = "hermes.sidebar.collapsed";
 const SIDEBAR_SCROLLBAR_HIDE_MS = 700;
@@ -228,7 +240,11 @@ function Layout({
         if (cancelled) return;
         const map: Record<string, ProfileAppearance> = {};
         for (const p of list) {
-          map[p.id] = { name: p.name, color: p.color, avatar: p.avatar };
+          map[p.id] = {
+            displayName: p.displayName,
+            color: p.color,
+            avatar: p.avatar,
+          };
         }
         setProfileAppearance(map);
       })
@@ -239,6 +255,19 @@ function Layout({
       cancelled = true;
     };
   }, [activeProfile, view]);
+  useEffect(
+    () =>
+      window.hermesAPI.onAgentIdentityChanged?.((identity) => {
+        setProfileAppearance((current) => ({
+          ...current,
+          [identity.profileId]: {
+            ...current[identity.profileId],
+            displayName: identity.displayName.trim() || null,
+          },
+        }));
+      }),
+    [],
+  );
   const getAppearance = useCallback(
     (profile: string) => profileAppearance[profile] ?? {},
     [profileAppearance],
@@ -722,6 +751,10 @@ function Layout({
     openSettings("providers", { profile: startupProfile });
   }, [openSettings, startupProfile]);
 
+  const handleConfigureAgentModels = useCallback(() => {
+    openSettings("providers", { profile: activeProfile });
+  }, [activeProfile, openSettings]);
+
   return (
     <div className={`layout ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
@@ -898,38 +931,39 @@ function Layout({
           />
         )}
         <div style={paneStyle("chat")}>
-          {runs.map((run) => (
-            <div
-              key={run.runId}
-              style={{
-                display:
-                  view === "chat" && run.runId === activeRunId
-                    ? "flex"
-                    : "none",
-                flex: 1,
-                flexDirection: "column",
-                overflow: "hidden",
-              }}
-            >
-              <Chat
-                runId={run.runId}
-                initialMessages={run.seed}
-                initialSessionId={run.sessionId}
-                active={run.runId === activeRunId}
-                profile={run.profile}
-                onNewChat={handleNewChat}
-                onOpenDiagnose={(section?: string) =>
-                  openSettings(section, { profile: run.profile })
-                }
-                onOpenMyAgents={() => goTo("agents")}
-                onLoadingChange={handleRunLoading}
-                onSessionIdChange={handleRunSessionId}
-                onTitleChange={handleRunTitle}
-                agentAppearance={getAppearance(run.profile)}
-                allowAccountConnection={signedInState !== null}
-              />
-            </div>
-          ))}
+          {startupProfile &&
+            runs.map((run) => (
+              <div
+                key={run.runId}
+                style={{
+                  display:
+                    view === "chat" && run.runId === activeRunId
+                      ? "flex"
+                      : "none",
+                  flex: 1,
+                  flexDirection: "column",
+                  overflow: "hidden",
+                }}
+              >
+                <Chat
+                  runId={run.runId}
+                  initialMessages={run.seed}
+                  initialSessionId={run.sessionId}
+                  active={run.runId === activeRunId}
+                  profile={run.profile}
+                  onNewChat={handleNewChat}
+                  onOpenDiagnose={(section?: string) =>
+                    openSettings(section, { profile: run.profile })
+                  }
+                  onOpenMyAgents={() => goTo("agents")}
+                  onLoadingChange={handleRunLoading}
+                  onSessionIdChange={handleRunSessionId}
+                  onTitleChange={handleRunTitle}
+                  agentAppearance={getAppearance(run.profile)}
+                  allowAccountConnection={signedInState !== null}
+                />
+              </div>
+            ))}
         </div>
 
         {sessionsModalOpen && (
@@ -979,6 +1013,7 @@ function Layout({
               <Agents
                 activeProfile={activeProfile}
                 onChatWith={handleChatWithProfile}
+                onConfigureModels={handleConfigureAgentModels}
               />
             )}
           </div>

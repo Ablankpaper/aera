@@ -1121,4 +1121,256 @@ describe("ModelCenter", () => {
       baseUrl: "https://api.petoi.cn/v1",
     });
   });
+
+  function renderAt(profile: string): ReturnType<typeof render> {
+    return render(
+      <ModelCenter
+        profile={profile}
+        env={{}}
+        activeModel={{ provider: "auto", model: "", baseUrl: "" }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+  }
+
+  const rejection = (
+    reason?: string,
+  ): {
+    status: string;
+    stage: string;
+    code: string;
+    rollback: string;
+    reason?: string;
+  } => ({
+    status: "rejected",
+    stage: "validation",
+    code: "model_save_validation_failed",
+    rollback: "not_needed",
+    ...(reason ? { reason } : {}),
+  });
+
+  // @lat: [[legacy-model-config-migration#Stale catalog retry policy#Refreshes and retries once]]
+  it("refreshes the catalog and retries a stale revision exactly once", async () => {
+    const freshCatalog = {
+      revision: "c".repeat(64),
+      targetProfileId: "acceptance",
+      routes: [],
+    };
+    const getOwnerModelRouteCatalog = vi
+      .fn()
+      .mockResolvedValueOnce(emptyCatalog)
+      .mockResolvedValue(freshCatalog);
+    const mutateModelConfiguration = vi
+      .fn()
+      .mockResolvedValueOnce(rejection("stale_catalog_revision"))
+      .mockResolvedValue({ status: "committed", catalog: freshCatalog });
+    Object.assign(window.hermesAPI, {
+      getOwnerModelRouteCatalog,
+      mutateModelConfiguration,
+    });
+
+    renderAt("acceptance");
+    await completePetoiForm();
+
+    await waitFor(() =>
+      expect(mutateModelConfiguration).toHaveBeenCalledTimes(2),
+    );
+    // The replay carries the refreshed revision, never the rejected one.
+    expect(mutateModelConfiguration.mock.calls[0][0]).toMatchObject({
+      expectedCatalogRevision: catalogRevision,
+    });
+    expect(mutateModelConfiguration.mock.calls[1][0]).toMatchObject({
+      expectedCatalogRevision: "c".repeat(64),
+    });
+    // Exactly once: a second stale rejection would not be replayed again.
+    expect(mutateModelConfiguration).toHaveBeenCalledTimes(2);
+  });
+
+  // @lat: [[legacy-model-config-migration#Stale catalog retry policy#Never retries an unrelated validation rejection]]
+  it("does not retry a validation rejection that is not a stale revision", async () => {
+    const cases = [
+      undefined,
+      "invalid_request",
+      "no_replacement_model",
+      "profile_owner_mismatch",
+    ];
+    for (const reason of cases) {
+      vi.clearAllMocks();
+      const mutateModelConfiguration = vi
+        .fn()
+        .mockResolvedValue(rejection(reason));
+      // The refresh deliberately returns a *different* revision, so a replay
+      // is mechanically possible here. The declared reason is then the only
+      // thing that may hold it back.
+      Object.assign(window.hermesAPI, {
+        getOwnerModelRouteCatalog: vi
+          .fn()
+          .mockResolvedValueOnce(emptyCatalog)
+          .mockResolvedValue({
+            revision: "9".repeat(64),
+            targetProfileId: "acceptance",
+            routes: [],
+          }),
+        mutateModelConfiguration,
+      });
+
+      const view = renderAt("acceptance");
+      await completePetoiForm();
+
+      await waitFor(() =>
+        expect(mutateModelConfiguration).toHaveBeenCalledTimes(1),
+      );
+      // No replay for any cause other than an actual revision mismatch.
+      expect(mutateModelConfiguration).toHaveBeenCalledTimes(1);
+      view.unmount();
+    }
+  });
+
+  // @lat: [[legacy-model-config-migration#Profile target cache#Drops a previous profile's catalog on switch]]
+  it("never saves against a previous profile's catalog after a switch", async () => {
+    const acceptanceCatalog = emptyCatalog;
+    const installedCatalog = {
+      revision: "d".repeat(64),
+      targetProfileId: "installed",
+      routes: [],
+    };
+    // The switched-to profile's first catalog read fails, which is the exact
+    // window the bug lived in: the reload swallows the error, so nothing
+    // overwrites the cache. A profile-blind cache would hand the save the
+    // previous profile's revision and write target.
+    let installedAttempts = 0;
+    const getOwnerModelRouteCatalog = vi
+      .fn()
+      .mockImplementation(async (profile: string) => {
+        if (profile !== "installed") return acceptanceCatalog;
+        installedAttempts += 1;
+        if (installedAttempts === 1) throw new Error("catalog unavailable");
+        return installedCatalog;
+      });
+    const mutateModelConfiguration = vi
+      .fn()
+      .mockResolvedValue({ status: "committed", catalog: installedCatalog });
+    Object.assign(window.hermesAPI, {
+      getOwnerModelRouteCatalog,
+      mutateModelConfiguration,
+    });
+
+    const view = renderAt("acceptance");
+    await waitFor(() =>
+      expect(getOwnerModelRouteCatalog).toHaveBeenCalledWith("acceptance"),
+    );
+
+    view.rerender(
+      <ModelCenter
+        profile="installed"
+        env={{}}
+        activeModel={{ provider: "auto", model: "", baseUrl: "" }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+    await waitFor(() =>
+      expect(getOwnerModelRouteCatalog).toHaveBeenCalledWith("installed"),
+    );
+
+    await completePetoiForm();
+    await waitFor(() => expect(mutateModelConfiguration).toHaveBeenCalled());
+    // The switched-to profile's revision and target — never the stale pair.
+    expect(mutateModelConfiguration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestedProfileId: "installed",
+        expectedCatalogRevision: "d".repeat(64),
+      }),
+    );
+    expect(mutateModelConfiguration).not.toHaveBeenCalledWith(
+      expect.objectContaining({ expectedCatalogRevision: catalogRevision }),
+    );
+    view.unmount();
+  });
+
+  // @lat: [[legacy-model-config-migration#Profile target cache#Ignores a late response from a previous profile]]
+  it("ignores a slow catalog response that arrives after a profile switch", async () => {
+    const gate = { release: () => {} };
+    const acceptanceLate = new Promise<void>((resolve) => {
+      gate.release = resolve;
+    });
+    const staleCatalog = {
+      revision: "e".repeat(64),
+      targetProfileId: "acceptance",
+      routes: [],
+    };
+    const installedCatalog = {
+      revision: "f".repeat(64),
+      targetProfileId: "installed",
+      routes: [],
+    };
+    const getOwnerModelRouteCatalog = vi
+      .fn()
+      .mockImplementation(async (profile: string) => {
+        if (profile === "acceptance") {
+          await acceptanceLate;
+          return staleCatalog;
+        }
+        return installedCatalog;
+      });
+    const mutateModelConfiguration = vi
+      .fn()
+      .mockResolvedValue({ status: "committed", catalog: installedCatalog });
+    Object.assign(window.hermesAPI, {
+      getOwnerModelRouteCatalog,
+      mutateModelConfiguration,
+    });
+
+    const view = renderAt("acceptance");
+    view.rerender(
+      <ModelCenter
+        profile="installed"
+        env={{}}
+        activeModel={{ provider: "auto", model: "", baseUrl: "" }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+    await waitFor(() =>
+      expect(getOwnerModelRouteCatalog).toHaveBeenCalledWith("installed"),
+    );
+    // The first profile's fetch lands only now, after the switch.
+    gate.release();
+    await acceptanceLate;
+
+    await completePetoiForm();
+    await waitFor(() => expect(mutateModelConfiguration).toHaveBeenCalled());
+    expect(mutateModelConfiguration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestedProfileId: "installed",
+        expectedCatalogRevision: "f".repeat(64),
+      }),
+    );
+    // The late acceptance snapshot must never become the write target.
+    expect(mutateModelConfiguration).not.toHaveBeenCalledWith(
+      expect.objectContaining({ expectedCatalogRevision: "e".repeat(64) }),
+    );
+    // Nor may it poison the profile-scoped reads that run off the write-target
+    // ref: discovery ran after the late snapshot landed.
+    expect(discoverProviderModels).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      "installed",
+    );
+    expect(discoverProviderModels).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      "acceptance",
+    );
+    view.unmount();
+  });
 });

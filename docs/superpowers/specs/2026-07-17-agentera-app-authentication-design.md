@@ -14,9 +14,9 @@
 
 本设计涉及以下独立边界：
 
-- `bignormal/aera`：AgentEra Studio 桌面客户端；本规格存放于此。
-- `bignormal/aera-cloud`：私有仓库，作为 AgentEra APP 的专用云端后端和网页账户中心。
-- `bignormal/aera-runtime`：AgentEra Runtime；第一阶段不修改其核心学习和执行逻辑。
+- `Ablankpaper/aera`：AgentEra Studio 桌面客户端；本规格存放于此。
+- `Ablankpaper/aera-cloud`：私有仓库，作为 AgentEra APP 的专用云端后端和网页账户中心。
+- `Ablankpaper/aera-runtime`：AgentEra Runtime；第一阶段不修改其核心学习和执行逻辑。
 - `bignormal/agentera-claw-api`：独立的充值与模型 API 中转网站，不是 AgentEra APP 的账户后端。
 
 `aera-cloud` 可以与充值网站共用同一台物理服务器、PostgreSQL 进程、Redis 进程和反向代理，但必须使用独立数据库、数据库角色、Redis 凭据与命名空间、域名、Cookie、签名密钥和加密密钥。

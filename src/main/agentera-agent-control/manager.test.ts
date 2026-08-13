@@ -922,7 +922,7 @@ describe("Agent control Organization Foundation context", () => {
     ).toEqual({ count: 1 });
   });
 
-  it("resolves a different opaque selection into a preparing candidate segment", async () => {
+  it("fails a candidate that cannot finalize and permits a later switch retry", async () => {
     const routeToFrozen = (
       route: ResolvedOwnerModelRoute,
     ): FrozenAgentModelRoute => ({
@@ -999,18 +999,32 @@ describe("Agent control Organization Foundation context", () => {
         };
       },
     );
+    const finalizeFailure = new Error("injected candidate finalization failure");
+    let failNextCandidateFinalization = true;
     const finalizeInstalledTurn = vi.fn(
-      (_plan: unknown, binding: { id: string }) => ({
-        binding,
-        profilePath: "/isolated/profile",
-        resumeSessionId: undefined,
-        envelope: { instructions: "fixed", requireBoundApiTransport: true },
-        modelOverride: {
-          provider: "openai",
-          model: "gpt-5.6",
-          baseUrl: "",
-        },
-      }),
+      (
+        turnPlan: { bindingInput: typeof initialBindingInput },
+        binding: { id: string },
+      ) => {
+        if (
+          turnPlan.bindingInput.modelRoute.model === PETOI_MODEL_ROUTE.model &&
+          failNextCandidateFinalization
+        ) {
+          failNextCandidateFinalization = false;
+          throw finalizeFailure;
+        }
+        return {
+          binding,
+          profilePath: "/isolated/profile",
+          resumeSessionId: undefined,
+          envelope: { instructions: "fixed", requireBoundApiTransport: true },
+          modelOverride: {
+            provider: "openai",
+            model: "gpt-5.6",
+            baseUrl: "",
+          },
+        };
+      },
     );
     const snapshot = {
       revision: "b".repeat(64),
@@ -1119,7 +1133,7 @@ describe("Agent control Organization Foundation context", () => {
         .prepare("SELECT COUNT(*) AS count FROM conversation_segments")
         .get(),
     ).toEqual({ count: 1 });
-    const next = await manager.prepareConversationRuntime({
+    const switchInput = {
       conversationKey: initialBindingInput.conversationKey,
       profilePath: "/isolated/profile",
       owner: OWNER,
@@ -1130,7 +1144,32 @@ describe("Agent control Organization Foundation context", () => {
         catalogRevision: snapshot.revision,
       },
       visibleHistoryCount: 8,
-    });
+    };
+    await expect(manager.prepareConversationRuntime(switchInput)).rejects.toBe(
+      finalizeFailure,
+    );
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT state, failure_code FROM conversation_segments ORDER BY ordinal ASC",
+        )
+        .all(),
+    ).toEqual([
+      { state: "active", failure_code: null },
+      {
+        state: "failed",
+        failure_code: "model_switch_candidate_setup_failed",
+      },
+    ]);
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT active_segment_id, revision FROM conversation_threads",
+        )
+        .get(),
+    ).toEqual({ active_segment_id: first.agentSegmentId, revision: 1 });
+
+    const next = await manager.prepareConversationRuntime(switchInput);
 
     expect(first.agentConversation?.activeSegmentOrdinal).toBe(1);
     expect(next.segmentTransition).toMatchObject({
@@ -1144,7 +1183,11 @@ describe("Agent control Organization Foundation context", () => {
       database.sqlite
         .prepare("SELECT state FROM conversation_segments ORDER BY ordinal ASC")
         .all(),
-    ).toEqual([{ state: "active" }, { state: "preparing" }]);
+    ).toEqual([
+      { state: "active" },
+      { state: "failed" },
+      { state: "preparing" },
+    ]);
 
     await expect(
       manager.prepareConversationRuntime({

@@ -50,7 +50,15 @@ A current full route must still resolve to the exact source Profile/model row an
 
 ### Manager thread adoption and candidate preparation
 
-[[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#prepareConversationRuntime]] adopts the first verified binding as ordinal 1, resolves opaque selections in the same Main turn, reuses an identical route, and returns a redacted active context while a different route remains `preparing`.
+[[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#prepareConversationRuntime]] adopts the first verified binding, resolves opaque selections in Main, reuses an identical route, and leaves a different route `preparing`.
+
+If durable candidate finalization fails, Main marks that candidate `failed`, preserves the prior active Segment, and permits a later retry.
+
+### Send initialization failure boundary
+
+A candidate must leave `preparing` when any pre-output send initialization fails.
+
+[[src/main/ipc/agent-model-send.ts#runAgentModelSegmentPreflight]] emits the preparing event and fails the candidate when local Gateway startup or SSH tunnel preparation rejects. Execution-lease creation and synchronous transport setup use the same idempotent lifecycle fallback in [[src/main/ipc/register.ts#registerIpcHandlers]], so the old active Segment remains authoritative and the user can retry the switch.
 
 ### Policy-filtered staged selection
 

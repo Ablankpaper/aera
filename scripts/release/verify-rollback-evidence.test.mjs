@@ -154,7 +154,7 @@ test("requires successful real runs and ordered timestamps", () => {
 
   const searchURL = evidence(keys.publicKey);
   searchURL.desktopResponse.run.runUrl =
-    "https://github.com/bignormal/aera/actions?query=rollback";
+    "https://github.com/Ablankpaper/aera/actions?query=rollback";
   assert.throws(() => validate(searchURL), /run URL/iu);
 
   const future = evidence(keys.publicKey);
@@ -236,13 +236,13 @@ function evidence(publicKey) {
   const releaseInputs = {
     cloud: {
       current: imageCandidate(
-        "bignormal/aera-cloud",
+        "Ablankpaper/aera-cloud",
         CLOUD_CURRENT_SHA,
         CLOUD_CURRENT_DIGEST,
         "6",
       ),
       previous: imageCandidate(
-        "bignormal/aera-cloud",
+        "Ablankpaper/aera-cloud",
         CLOUD_PREVIOUS_SHA,
         CLOUD_PREVIOUS_DIGEST,
         "7",
@@ -250,20 +250,20 @@ function evidence(publicKey) {
     },
     admin: {
       current: imageCandidate(
-        "bignormal/aera-admin",
+        "Ablankpaper/aera-admin",
         ADMIN_CURRENT_SHA,
         ADMIN_CURRENT_DIGEST,
         "8",
       ),
       previous: imageCandidate(
-        "bignormal/aera-admin",
+        "Ablankpaper/aera-admin",
         ADMIN_PREVIOUS_SHA,
         ADMIN_PREVIOUS_DIGEST,
         "9",
       ),
     },
     desktop: {
-      repository: "bignormal/aera",
+      repository: "Ablankpaper/aera",
       sourceSha: DESKTOP_SHA,
       version: "0.7.4",
       candidateManifestSha256: DESKTOP_MANIFEST_SHA256,
@@ -300,7 +300,7 @@ function evidence(publicKey) {
     },
     services: {
       cloud: serviceDrill({
-        repository: "bignormal/aera-cloud",
+        repository: "Ablankpaper/aera-cloud",
         sourceSha: CLOUD_CURRENT_SHA,
         runId: "4101",
         currentDigest: CLOUD_CURRENT_DIGEST,
@@ -313,7 +313,7 @@ function evidence(publicKey) {
         },
       }),
       admin: serviceDrill({
-        repository: "bignormal/aera-admin",
+        repository: "Ablankpaper/aera-admin",
         sourceSha: ADMIN_CURRENT_SHA,
         runId: "4102",
         currentDigest: ADMIN_CURRENT_DIGEST,
@@ -342,7 +342,7 @@ function evidence(publicKey) {
     },
     desktopResponse: {
       run: successfulRun(
-        "bignormal/aera",
+        "Ablankpaper/aera",
         DESKTOP_SHA,
         "4103",
         "2026-07-23T22:48:00Z",

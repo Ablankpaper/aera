@@ -890,7 +890,7 @@ export async function runPackagedSeedInstall(
     paths,
     trustedPublicKeys: loadRuntimeTrustFile(runtimeTrustFile()),
     manifestContext: {
-      repository: "bignormal/aera-runtime",
+      repository: "Ablankpaper/aera-runtime",
       platform: target.platform,
       arch: target.arch,
       desktopVersion: app.getVersion(),

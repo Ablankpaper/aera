@@ -3,6 +3,7 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -28,7 +29,9 @@ import {
   customProviderEnvKey,
   isLocalBaseUrl,
 } from "../../../../shared/url-key-map";
+import { isSafeToRetryStaleRevision } from "../../../../shared/model-configuration";
 import type {
+  ModelConfigurationMutationRequest,
   ModelConfigurationMutationResult,
   OwnerModelRouteCatalogSnapshot,
   OwnerModelRouteSummary,
@@ -411,6 +414,28 @@ export default function ModelCenter({
   onBrowseRegistry,
 }: ModelCenterProps): React.JSX.Element {
   const { t } = useI18n();
+  // The active chat `profile` (a named/installed agent profile) is not
+  // necessarily where the coordinated catalog writes model configuration.
+  // `canonicalTargetProfileId` resolves an installed profile down to the
+  // account-default profile when one exists, so `ownerCatalog.targetProfileId`
+  // is the authoritative write target. Keep it in a ref so every read and
+  // fallback write in the model center routes to the same profile the
+  // transaction writes to, instead of mixing the raw `profile` prop with the
+  // normalized write target.
+  const targetProfileRef = useRef<string | undefined>(profile);
+  // Bumped whenever the `profile` prop changes. Every catalog fetch captures
+  // the value at call time and refuses to commit its result if the profile
+  // moved on while it was in flight, so a slow response for the old profile
+  // can never overwrite the new profile's catalog.
+  const catalogGenerationRef = useRef(0);
+  const lastProfileRef = useRef<string | undefined>(profile);
+  if (lastProfileRef.current !== profile) {
+    lastProfileRef.current = profile;
+    catalogGenerationRef.current += 1;
+    // Reset synchronously during render rather than in an effect: an effect
+    // would leave one render where writes still route to the old profile.
+    targetProfileRef.current = profile;
+  }
   const [models, setModels] = useState<LibraryModel[]>([]);
   const [customProviders, setCustomProviders] = useState<
     CustomProviderRecord[]
@@ -440,8 +465,51 @@ export default function ModelCenter({
   const [serviceFeedback, setServiceFeedback] = useState<
     Record<string, ServiceFeedback>
   >({});
-  const [ownerCatalog, setOwnerCatalog] =
-    useState<OwnerModelRouteCatalogSnapshot | null>(null);
+  // The cache records which `profile` prop asked for it. `ownerCatalog` below
+  // is derived, so a profile switch drops the previous catalog in the very same
+  // render — no window where a save could reuse the old profile's revision or
+  // write target.
+  const [catalogCache, setCatalogCache] = useState<{
+    requestedProfile: string | undefined;
+    snapshot: OwnerModelRouteCatalogSnapshot;
+  } | null>(null);
+  const ownerCatalog =
+    catalogCache && catalogCache.requestedProfile === profile
+      ? catalogCache.snapshot
+      : null;
+
+  /**
+   * Store a freshly fetched catalog, unless the profile changed while the
+   * request was in flight. Also advances the write-target ref, keeping the
+   * cached snapshot and the target profile in lockstep.
+   */
+  const commitCatalog = useCallback(
+    (
+      requestedProfile: string | undefined,
+      snapshot: OwnerModelRouteCatalogSnapshot,
+      generation: number,
+    ): boolean => {
+      if (generation !== catalogGenerationRef.current) return false;
+      targetProfileRef.current = snapshot.targetProfileId;
+      setCatalogCache({ requestedProfile, snapshot });
+      return true;
+    },
+    [],
+  );
+
+  /**
+   * Adopt the catalog a committed mutation returned. `profile` here is the value
+   * captured when the handler's render ran; if it no longer matches the newest
+   * profile, the user switched mid-save and this catalog belongs to the profile
+   * they left.
+   */
+  const commitCatalogFromMutation = useCallback(
+    (snapshot: OwnerModelRouteCatalogSnapshot): void => {
+      if (lastProfileRef.current !== profile) return;
+      commitCatalog(profile, snapshot, catalogGenerationRef.current);
+    },
+    [commitCatalog, profile],
+  );
 
   const hasCoordinatedModelConfiguration =
     typeof window.hermesAPI.getOwnerModelRouteCatalog === "function" &&
@@ -451,23 +519,38 @@ export default function ModelCenter({
     async (showLoading = true): Promise<void> => {
       if (showLoading) setLoading(true);
       try {
-        const [nextModels, nextProviders, nextCatalog] = await Promise.all([
+        // Fetch the catalog first: it establishes the authoritative write
+        // target profile. Model/library reads below then read from that same
+        // target so the UI never mixes the active chat profile with the
+        // account profile the transaction actually mutates.
+        const generation = catalogGenerationRef.current;
+        const requestedProfile = profile;
+        let catalogProfile = targetProfileRef.current;
+        const nextCatalog = hasCoordinatedModelConfiguration
+          ? ((await window.hermesAPI
+              .getOwnerModelRouteCatalog(requestedProfile)
+              .catch(() => null)) ?? null)
+          : null;
+        // A catalog that arrived after a profile switch is discarded, and the
+        // reads below must not adopt its target profile either.
+        const accepted =
+          nextCatalog !== null &&
+          commitCatalog(requestedProfile, nextCatalog, generation);
+        if (accepted && nextCatalog) {
+          catalogProfile = nextCatalog.targetProfileId;
+        }
+        const [nextModels, nextProviders] = await Promise.all([
           window.hermesAPI.listModels() as Promise<LibraryModel[]>,
-          window.hermesAPI.listCustomProviders(profile).catch(() => []),
-          hasCoordinatedModelConfiguration
-            ? window.hermesAPI
-                .getOwnerModelRouteCatalog(profile)
-                .catch(() => null)
-            : Promise.resolve(null),
+          window.hermesAPI.listCustomProviders(catalogProfile).catch(() => []),
         ]);
+        if (generation !== catalogGenerationRef.current) return;
         setModels(nextModels);
         setCustomProviders(nextProviders);
-        if (nextCatalog) setOwnerCatalog(nextCatalog);
       } finally {
         if (showLoading) setLoading(false);
       }
     },
-    [hasCoordinatedModelConfiguration, profile],
+    [commitCatalog, hasCoordinatedModelConfiguration, profile],
   );
 
   useEffect(() => {
@@ -766,7 +849,7 @@ export default function ModelCenter({
         route.provider,
         route.baseUrl || undefined,
         form.apiKey.trim() || undefined,
-        profile,
+        targetProfileRef.current ?? profile,
       );
       if (result.status === "ok") {
         const nextOptions = Array.from(
@@ -808,17 +891,57 @@ export default function ModelCenter({
     });
   };
 
-  const requireOwnerCatalog =
-    async (): Promise<OwnerModelRouteCatalogSnapshot> => {
-      if (ownerCatalog) return ownerCatalog;
-      if (!hasCoordinatedModelConfiguration) {
-        throw new Error("Coordinated model configuration is unavailable.");
-      }
-      const snapshot =
-        await window.hermesAPI.getOwnerModelRouteCatalog(profile);
-      setOwnerCatalog(snapshot);
-      return snapshot;
-    };
+  const requireOwnerCatalog = async (options?: {
+    refresh?: boolean;
+  }): Promise<OwnerModelRouteCatalogSnapshot> => {
+    // `ownerCatalog` is null unless the cache was fetched for the current
+    // `profile`, so a switched profile always forces a fresh fetch here.
+    if (ownerCatalog && !options?.refresh) return ownerCatalog;
+    if (!hasCoordinatedModelConfiguration) {
+      throw new Error("Coordinated model configuration is unavailable.");
+    }
+    const generation = catalogGenerationRef.current;
+    const requestedProfile = profile;
+    const snapshot =
+      await window.hermesAPI.getOwnerModelRouteCatalog(requestedProfile);
+    if (!commitCatalog(requestedProfile, snapshot, generation)) {
+      // The profile changed mid-flight. Returning this snapshot would let the
+      // caller write to the profile the user just navigated away from.
+      throw new Error("Model configuration profile changed; retry the save.");
+    }
+    return snapshot;
+  };
+
+  /**
+   * Run a coordinated mutation, retrying once when the coordinator rejects a
+   * stale `expectedCatalogRevision`.
+   *
+   * The replay is gated on [[src/shared/model-configuration.ts#isSafeToRetryStaleRevision]],
+   * which demands the coordinator's explicit `stale_catalog_revision` reason on
+   * top of a `validation` stage and `rollback: "not_needed"`. That triple is the
+   * only refusal a replay can fix: the catalog moved under the open screen, and
+   * nothing was written. Every other validation refusal — illegal parameters, an
+   * unowned profile, a delete with no legal replacement — would fail again
+   * identically, and any later stage has already written something a replay
+   * could double-apply.
+   *
+   * The refreshed revision is compared before replaying, so an unchanged
+   * catalog returns the original rejection instead of a pointless second call.
+   */
+  const mutateWithRevisionRetry = async (
+    build: (
+      catalog: OwnerModelRouteCatalogSnapshot,
+    ) => ModelConfigurationMutationRequest,
+  ): Promise<ModelConfigurationMutationResult> => {
+    const catalog = await requireOwnerCatalog();
+    const result = await window.hermesAPI.mutateModelConfiguration(
+      build(catalog),
+    );
+    if (!isSafeToRetryStaleRevision(result)) return result;
+    const refreshed = await requireOwnerCatalog({ refresh: true });
+    if (refreshed.revision === catalog.revision) return result;
+    return window.hermesAPI.mutateModelConfiguration(build(refreshed));
+  };
 
   const routeMatchesService = (
     route: OwnerModelRouteSummary,
@@ -884,7 +1007,7 @@ export default function ModelCenter({
       baseUrl: string;
     },
   ): ActiveModel => {
-    setOwnerCatalog(result.catalog);
+    commitCatalogFromMutation(result.catalog);
     const persisted = activeModelFromCatalog(result.catalog, expected);
     onActivated(persisted);
     return persisted;
@@ -898,26 +1021,30 @@ export default function ModelCenter({
     apiKey: string;
     models: UpsertModelServiceRequest["models"];
     activeModel: string;
-  }): Promise<ModelConfigurationMutationResult> => {
-    const catalog = await requireOwnerCatalog();
-    return window.hermesAPI.mutateModelConfiguration({
+  }): Promise<ModelConfigurationMutationResult> =>
+    mutateWithRevisionRetry((catalog) => ({
       intent: "upsert",
       expectedCatalogRevision: catalog.revision,
       requestedProfileId: catalog.targetProfileId,
       ...input,
-    });
-  };
+    }));
 
   const persistAndReadActiveModel = async (
     provider: string,
     model: string,
     baseUrl: string,
   ): Promise<ActiveModel> => {
-    await window.hermesAPI.setModelConfig(provider, model, baseUrl, profile);
+    const targetProfile = targetProfileRef.current ?? profile;
+    await window.hermesAPI.setModelConfig(
+      provider,
+      model,
+      baseUrl,
+      targetProfile,
+    );
     // Main owns provider canonicalisation (`custom` library attachment →
     // `custom:<name>` Hermes route). Read that result back instead of
     // reconstructing a second provider identity in the Renderer.
-    const persisted = await window.hermesAPI.getModelConfig(profile);
+    const persisted = await window.hermesAPI.getModelConfig(targetProfile);
     return {
       provider: persisted.provider,
       model: persisted.model,
@@ -1017,7 +1144,7 @@ export default function ModelCenter({
         service.provider,
         service.baseUrl || undefined,
         apiKey || undefined,
-        profile,
+        targetProfileRef.current ?? profile,
       );
       if (result.status === "ok") {
         for (const modelId of result.models) {
@@ -1086,35 +1213,45 @@ export default function ModelCenter({
     setDeleteError("");
     try {
       if (hasCoordinatedModelConfiguration) {
-        const catalog = await requireOwnerCatalog();
-        const replacement = service.isActive
-          ? (catalog.routes.find(
-              (candidate) =>
-                candidate.sourceProfileId === catalog.targetProfileId &&
-                !routeMatchesService(candidate, service),
-            ) ?? null)
-          : null;
-        const result = await window.hermesAPI.mutateModelConfiguration({
-          intent: "delete",
-          expectedCatalogRevision: catalog.revision,
-          requestedProfileId: catalog.targetProfileId,
-          providerLabel: service.providerLabel || service.label,
-          replacement: replacement?.selection ?? null,
+        // Recomputed per attempt: a refreshed catalog can offer a different
+        // replacement route than the stale one did.
+        const replacementFor = (
+          catalog: OwnerModelRouteCatalogSnapshot,
+        ): OwnerModelRouteSummary | null =>
+          service.isActive
+            ? (catalog.routes.find(
+                (candidate) =>
+                  candidate.sourceProfileId === catalog.targetProfileId &&
+                  !routeMatchesService(candidate, service),
+              ) ?? null)
+            : null;
+        const attempt: { replacement: OwnerModelRouteSummary | null } = {
+          replacement: null,
+        };
+        const result = await mutateWithRevisionRetry((catalog) => {
+          attempt.replacement = replacementFor(catalog);
+          return {
+            intent: "delete",
+            expectedCatalogRevision: catalog.revision,
+            requestedProfileId: catalog.targetProfileId,
+            providerLabel: service.providerLabel || service.label,
+            replacement: attempt.replacement?.selection ?? null,
+          };
         });
         if (result.status === "rejected") {
           setDeleteError(
-            service.isActive && !replacement
+            service.isActive && !attempt.replacement
               ? t("providers.center.errors.replacementRequired")
               : t("providers.center.errors.delete"),
           );
           return;
         }
-        setOwnerCatalog(result.catalog);
-        if (service.isActive && replacement) {
+        commitCatalogFromMutation(result.catalog);
+        if (service.isActive && attempt.replacement) {
           onActivated({
-            provider: replacement.provider,
-            model: replacement.model,
-            baseUrl: replacement.baseUrl,
+            provider: attempt.replacement.provider,
+            model: attempt.replacement.model,
+            baseUrl: attempt.replacement.baseUrl,
           });
         }
         if (result.status === "committed_refresh_warning") {
@@ -1150,7 +1287,7 @@ export default function ModelCenter({
 
       if (service.customProvider) {
         await window.hermesAPI.removeCustomProvider(
-          profile,
+          targetProfileRef.current ?? profile,
           service.customProvider.name,
         );
       }
@@ -1255,18 +1392,24 @@ export default function ModelCenter({
       }
 
       if (form.mode === "custom") {
-        await window.hermesAPI.upsertCustomProvider(profile, {
-          name: providerName,
-          baseUrl: route.baseUrl,
-        });
+        await window.hermesAPI.upsertCustomProvider(
+          targetProfileRef.current ?? profile,
+          {
+            name: providerName,
+            baseUrl: route.baseUrl,
+          },
+        );
       } else if (route.preset?.keyOptional) {
         // Local providers often have no API key. Persist a lightweight identity
         // record so their configured card remains visible after another model
         // becomes active.
-        await window.hermesAPI.upsertCustomProvider(profile, {
-          name: providerName,
-          baseUrl: route.baseUrl,
-        });
+        await window.hermesAPI.upsertCustomProvider(
+          targetProfileRef.current ?? profile,
+          {
+            name: providerName,
+            baseUrl: route.baseUrl,
+          },
+        );
       }
 
       for (const discoveredModel of modelsToSave) {

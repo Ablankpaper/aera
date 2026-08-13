@@ -257,7 +257,7 @@ Wait for the automatically created exact-head run. Do not rerun it. If successfu
 - [ ] **Step 1: Resolve the exact successful main evidence**
 
 ```bash
-AERA_BETA23_SOURCE_SHA=$(gh api repos/bignormal/aera/commits/main --jq .sha)
+AERA_BETA23_SOURCE_SHA=$(gh api repos/Ablankpaper/aera/commits/main --jq .sha)
 AERA_BETA23_CI_RUN_ID=$(gh run list --workflow ci.yml --branch main --event push --limit 20 \
   --json databaseId,headSha,status,conclusion \
   --jq ".[] | select(.headSha == \"$AERA_BETA23_SOURCE_SHA\" and .status == \"completed\" and .conclusion == \"success\") | .databaseId" | head -n 1)

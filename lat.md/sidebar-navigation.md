@@ -2,7 +2,7 @@
 
 The sidebar starts with New Chat, keeps app destinations pinned, then gives conversations and projects their own scroll area.
 
-[[src/renderer/src/screens/Layout/Layout.tsx#Layout]] renders a New Chat action before Discover, Office, Kanban, Schedules, and Agents from `PINNED_NAV_ITEMS`; Simplified Chinese labels the existing Discover and Kanban views “工具社区” and “任务看板” without changing those internal ids or routes. Agents sits directly after Schedules and before the chat history. It then renders [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] inside a flexible `.sidebar-chat-section`. New Chat is active when the visible Chat view has no session id yet. The standalone `sessions` view is still absent from the `View` union; the full list opens from the Cmd/Ctrl+K menu action.
+[[src/renderer/src/screens/Layout/Layout.tsx#Layout]] renders a New Chat action before Discover, Kanban, Schedules, and Agents from `PINNED_NAV_ITEMS`; Simplified Chinese labels Discover and Kanban “工具社区” and “任务看板” without changing their internal ids or routes. The retained `PINNED_NAV_CATALOG` still contains Office with `hidden: true`, so only its “工作区” menu entry is disabled: the `office` view, component, rendering branch, Workspace data, dialogs, IPC, and permissions remain available for low-cost restoration. Agents sits directly after Schedules and before the chat history. Layout then renders [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] inside a flexible `.sidebar-chat-section`. New Chat is active when the visible Chat view has no session id yet. The standalone `sessions` view is still absent from the `View` union; the full list opens from the Cmd/Ctrl+K menu action.
 
 ## Collapse toggle brand mark
 
@@ -68,7 +68,13 @@ The switcher trigger preserves the old app-brand label for an unrenamed default 
 
 Opening the active entry shows only product-level Agent settings. Provider routing, gateway state, internal Profile IDs, Installation records, and RuntimeBindings are not rendered; switching and routing continue to use the stable Profile ID internally.
 
-The same per-profile appearance also drives the agent avatar inside the transcript. [[src/renderer/src/screens/Layout/Layout.tsx#Layout]] passes `getAppearance(run.profile)` to each [[src/renderer/src/screens/Chat/Chat.tsx]] as `agentAppearance`, which forwards `{ name, color, avatar }` through [[src/renderer/src/screens/Chat/MessageList.tsx]] to every [[src/renderer/src/screens/Chat/MessageRow.tsx#HermesAvatar]] (and the reasoning/tool-activity rows in [[src/renderer/src/screens/Chat/HistoryRow.tsx]]). `HermesAvatar` plays the looping `loadingo.gif` only while a turn is generating (`active`); once generation stops it runs out the current gif loop, then swaps to the agent's [[src/renderer/src/components/common/ProfileAvatar.tsx]] so idle turns are identified by who produced them. The live typing indicator has no resolved agent yet, so it falls back to the gif.
+The same per-profile appearance also drives the agent avatar inside the transcript. [[src/renderer/src/screens/Layout/Layout.tsx#Layout]] passes `getAppearance(run.profile)` to each [[src/renderer/src/screens/Chat/Chat.tsx]] as `agentAppearance`, which forwards colour and avatar through [[src/renderer/src/screens/Chat/MessageList.tsx]] to every [[src/renderer/src/screens/Chat/MessageRow.tsx#HermesAvatar]] (and the reasoning/tool-activity rows in [[src/renderer/src/screens/Chat/HistoryRow.tsx]]). `HermesAvatar` plays the looping `loadingo.gif` only while a turn is generating (`active`); once generation stops it runs out the current gif loop, then swaps to the agent's [[src/renderer/src/components/common/ProfileAvatar.tsx]] so idle turns are identified by who produced them. The live typing indicator has no resolved agent yet, so it falls back to the gif.
+
+### Conversation boundary Agent name
+
+The conversation boundary shows a safe user-facing Agent name while keeping Profile routing identifiers internal.
+
+It receives the stable Profile id separately from nullable `ProfileInfo.displayName`. Profile `default` always renders the literal `default`; a named non-default Profile renders its trimmed metadata name; and an unnamed non-default Profile renders localized “未命名智能体” rather than a UUID, directory name, numbered id, or Runtime Profile id. [[src/renderer/src/screens/Layout/Layout.tsx#Layout]] listens to the existing `onAgentIdentityChanged` event and updates only display metadata, so a successful rename refreshes mounted headers without changing session routing, RuntimeBinding selection, ownership, or permissions.
 
 ### SSH tunnel profile routing
 
@@ -98,13 +104,15 @@ The Agents page is a catalog-first surface with Official Agents, My Agents, and 
 
 [[src/renderer/src/screens/Agents/Agents.tsx]] opens [[src/renderer/src/screens/Agents/AgentControlPanel.tsx#AgentControlPanel]] on the Official Agents tab. The toolbar keeps tab selection, search, refresh, and context-appropriate creation together. Official, personal, Workspace, and Organization entries use the same compact card anatomy; search and small status filters change the visible card set without changing the trusted scope.
 
-Opening a card uses [[src/renderer/src/screens/Agents/AgentHubDetailDialog.tsx#AgentHubDetailDialog]] to show capability text, expertise tags, example prompts, and one primary action. **Start using** internally performs the verified install/retry, immutable-version selection, local preparation, activation, and chat transition. Official installation and managed update retain their dedicated confirmation/API paths, but their product labels remain Agent-level.
+Opening a card uses [[src/renderer/src/screens/Agents/AgentHubDetailDialog.tsx#AgentHubDetailDialog]] to show capability text, expertise tags, example prompts, and one primary action. **Start using** automatically selects the preferred live model route and internally performs the verified install/retry, immutable-version selection, local preparation, activation, and chat transition. When no model route exists, the same primary-action position becomes **Configure model** and opens the active user's Models settings without attempting installation or exposing Profile and Runtime records. Official installation still performs its dedicated one-use prepare and confirm API calls, but the same click supplies the fixed confirmation and opens the resulting Agent without a second user dialog.
 
 My Agents joins actual drafts, published definitions, pending or active Installations, and unmatched local Profiles into one Agent-card projection. An unmatched Profile appears as a ready local Agent rather than a second management list. Search misses and status-filter misses use their own recovery hints, so an existing Agent hidden by a query or filter is never reported as an empty catalog.
 
 [[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] creates Agents from a name, identity instructions or imported Markdown, an optional advanced model policy, and optional Skill/SOP/knowledge Markdown. **Start using** selects a current live model route, while publish-and-use keeps publication, route selection, preparation, activation, and chat in one explicit product flow.
 
 Agent and chat model selectors read the current credential-backed model library. Deleting a custom provider removes its provider and global-model rows together and clears an active model that referenced the removed route, so historical provider configuration cannot reappear in later Agent editors or chat selectors.
+
+Governance is progressive disclosure rather than a prerequisite for Agent use. It starts collapsed for authorized Owner, Admin, and Auditor roles and is absent for ordinary Workspace or Organization Members. Recoverable availability, stale-state, local-preparation, and bounded cache failures show one **Try again** action that reloads authoritative state; model-route failures show **Configure model**. Authorization, privacy, signature, verification, conflict, and destructive failures remain informational and fail closed.
 
 ## Office Agent labels
 

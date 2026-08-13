@@ -140,6 +140,21 @@ function rejected(
   };
 }
 
+/**
+ * A refusal the caller can act on: their catalog revision is behind ours, so
+ * re-reading it and replaying once may succeed. Kept separate from [[rejected]]
+ * so no other validation path can accidentally claim retryability.
+ */
+function rejectedStaleRevision(): ModelConfigurationMutationResult {
+  return {
+    status: "rejected",
+    stage: "validation",
+    code: "model_save_validation_failed",
+    rollback: "not_needed",
+    reason: "stale_catalog_revision",
+  };
+}
+
 function boundedString(
   value: unknown,
   maximum: number,
@@ -418,12 +433,24 @@ export class ModelConfigurationCoordinator {
           return rejected("recovery", "recovery_required", true);
         }
         const catalog = this.catalog.snapshot(request.requestedProfileId);
+        // The profile the caller resolved to must still be the profile we would
+        // write. A mismatch means the caller is looking at another profile, and
+        // replaying the same request would resolve the same wrong way.
+        if (catalog.targetProfileId !== targetProfileId) {
+          return rejected("validation", "not_needed");
+        }
+        // Checked before the replacement below: when the revision is stale the
+        // replacement's revision is stale too, and reporting that as a plain
+        // rejection would deny the caller its one legitimate retry.
+        if (catalog.revision !== request.expectedCatalogRevision) {
+          return rejectedStaleRevision();
+        }
+        // Revision matches, so a replacement pinned to a different revision is
+        // an internally inconsistent request rather than staleness.
         if (
-          catalog.targetProfileId !== targetProfileId ||
-          catalog.revision !== request.expectedCatalogRevision ||
-          (request.intent === "delete" &&
-            request.replacement !== null &&
-            request.replacement.catalogRevision !== catalog.revision)
+          request.intent === "delete" &&
+          request.replacement !== null &&
+          request.replacement.catalogRevision !== catalog.revision
         ) {
           return rejected("validation", "not_needed");
         }

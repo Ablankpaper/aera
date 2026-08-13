@@ -20,6 +20,7 @@ export default {
   suggestionAnalyze: "分析資料",
   approve: "批准",
   deny: "拒絕",
+  boundary: { unnamedAgent: "未命名智能體" },
   newChat: "新聊天 (Cmd+N)",
   clearChat: "清除聊天",
   setContextFolder: "設定上下文資料夾",

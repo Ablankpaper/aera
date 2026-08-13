@@ -4,7 +4,8 @@ import { useI18n } from "../../components/useI18n";
 
 interface ConversationBoundaryIndicatorProps {
   boundary: AgenteraConversationBoundarySummary;
-  agentName?: string | null;
+  profileId: string;
+  agentDisplayName?: string | null;
 }
 
 function scopeLabel(
@@ -17,10 +18,14 @@ function scopeLabel(
 
 export function ConversationBoundaryIndicator({
   boundary,
-  agentName,
+  profileId,
+  agentDisplayName,
 }: ConversationBoundaryIndicatorProps): React.JSX.Element {
   const { t } = useI18n();
-  const displayAgentName = agentName?.trim() || "default";
+  const displayAgentName =
+    profileId === "default"
+      ? "default"
+      : agentDisplayName?.trim() || t("chat.boundary.unnamedAgent");
 
   return (
     <div

@@ -2,7 +2,7 @@
 
 Aera 是 Aera 的桌面应用，用于安装、配置和使用 Aera Runtime。它在一个原生桌面界面中整合了聊天、会话、智能体、记忆、技能、工具、计划任务、消息网关、模型提供商和实时 3D 办公室。
 
-[版本下载](https://github.com/bignormal/aera/releases) · [问题反馈](https://github.com/bignormal/aera/issues) · [许可证](LICENSE)
+[版本下载](https://github.com/Ablankpaper/aera/releases) · [问题反馈](https://github.com/Ablankpaper/aera/issues) · [许可证](LICENSE)
 
 [English](README.md) · 简体中文 · [日本語](README.ja-JP.md) · [Español (LATAM)](README.es-LATAM.md)
 
@@ -22,7 +22,7 @@ Aera 是 Aera 的桌面应用，用于安装、配置和使用 Aera Runtime。�
 
 ## 安装
 
-请从 [GitHub Releases](https://github.com/bignormal/aera/releases) 下载最新的 macOS、Windows 或 Linux 安装包。
+请从 [GitHub Releases](https://github.com/Ablankpaper/aera/releases) 下载最新的 macOS、Windows 或 Linux 安装包。
 
 ### Windows
 

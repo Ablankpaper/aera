@@ -84,7 +84,7 @@ jobs:
           CI_RUN_ID: ${{ inputs.ci_run_id }}
         run: |
           set -euo pipefail
-          gh run view "$CI_RUN_ID" --repo bignormal/aera \
+          gh run view "$CI_RUN_ID" --repo Ablankpaper/aera \
             --json conclusion,headSha,jobs,url,workflowName \
             > "$RUNNER_TEMP/ci-run.json"
           CI_RUN_JSON="$RUNNER_TEMP/ci-run.json" node --input-type=module <<'NODE'
@@ -497,10 +497,10 @@ jobs:
           ]);
           const document = {
             schemaVersion: 1,
-            repository: "bignormal/aera",
+            repository: "Ablankpaper/aera",
             sourceSha: process.env.SOURCE_SHA,
             version: process.env.VERSION,
-            builder: "github.com/bignormal/aera/.github/workflows/release-candidate.yml",
+            builder: "github.com/Ablankpaper/aera/.github/workflows/release-candidate.yml",
             buildRunUrl: process.env.CANDIDATE_RUN_URL,
             ciRunUrl: process.env.CI_RUN_URL,
             createdAt: process.env.CREATED_AT,
@@ -539,7 +539,7 @@ jobs:
             --provenance candidate/evidence/provenance.json \
             --source-sha "$SOURCE_SHA" \
             --version "$VERSION" \
-            --repository bignormal/aera \
+            --repository Ablankpaper/aera \
             --workflow "Desktop signed candidate" \
             --run-url "$CANDIDATE_RUN_URL" \
             --ci-run-url "$CI_RUN_URL" \
@@ -588,9 +588,9 @@ jobs:
           test -f "$ATTESTATION_BUNDLE"
           cp "$ATTESTATION_BUNDLE" candidate/evidence/github-attestation.json
           while IFS= read -r -d '' file; do
-            gh attestation verify "$file" --repo bignormal/aera \
+            gh attestation verify "$file" --repo Ablankpaper/aera \
               --signer-workflow \
-              github.com/bignormal/aera/.github/workflows/release-candidate.yml
+              github.com/Ablankpaper/aera/.github/workflows/release-candidate.yml
           done < <(
             find candidate/artifacts -type f -print0
             printf '%s\0' candidate/candidate-manifest.json

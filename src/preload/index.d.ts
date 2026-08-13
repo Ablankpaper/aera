@@ -93,6 +93,13 @@ import type {
 import type { RuntimeDistributionPublicState } from "../shared/agentera-runtime-distribution";
 import type { DesktopControlPublicState } from "../shared/agentera-desktop-control";
 import type {
+  ImageGenerationConfigDraft,
+  ImageGenerationConfigReadResult,
+  ImageGenerationModelsResult,
+  ImageGenerationSaveResult,
+  ImageGenerationTestResult,
+} from "../shared/image-generation";
+import type {
   AgentDraft,
   AgentDraftAssetInput,
   AgentDraftDetail,
@@ -1086,7 +1093,12 @@ interface HermesAPI {
       };
     }) => void,
   ) => () => void;
-  onRuntimeSnapshotChanged: (callback: () => void) => () => void;
+  onRuntimeSnapshotChanged: (
+    callback: (change?: {
+      catalogRevision?: string;
+      profile?: string;
+    }) => void,
+  ) => () => void;
   setSshConfig: (
     host: string,
     port: number,
@@ -1347,6 +1359,8 @@ interface HermesAPI {
       id: string;
       /** User-facing agent/profile name. */
       name: string;
+      /** Explicit metadata name, or null when the Profile is unnamed. */
+      displayName: string | null;
       path: string;
       isDefault: boolean;
       isActive: boolean;
@@ -1503,6 +1517,21 @@ interface HermesAPI {
     enabled: boolean,
     profile?: string,
   ) => Promise<boolean>;
+  getImageGenerationConfig: (
+    profile?: string,
+  ) => Promise<ImageGenerationConfigReadResult>;
+  saveImageGenerationConfig: (
+    request: ImageGenerationConfigDraft,
+    profile?: string,
+  ) => Promise<ImageGenerationSaveResult>;
+  discoverImageGenerationModels: (
+    request: ImageGenerationConfigDraft,
+    profile?: string,
+  ) => Promise<ImageGenerationModelsResult>;
+  testImageGeneration: (
+    request: ImageGenerationConfigDraft,
+    profile?: string,
+  ) => Promise<ImageGenerationTestResult>;
 
   // Skills
   listInstalledSkills: (

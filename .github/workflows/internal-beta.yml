@@ -59,7 +59,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain=v1)"
           VERSION=$(node -p "require('./package.json').version")
-          test "$VERSION" = "0.7.4-internal-beta.27"
+          test "$VERSION" = "0.7.4-internal-beta.28"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Verify successful CI belongs to the exact source
@@ -71,7 +71,7 @@ jobs:
           CI_RUN_ID: ${{ inputs.ci_run_id }}
         run: |
           set -euo pipefail
-          gh run view "$CI_RUN_ID" --repo bignormal/aera \
+          gh run view "$CI_RUN_ID" --repo Ablankpaper/aera \
             --json conclusion,headSha,jobs,url,workflowName \
             > "$RUNNER_TEMP/ci-run.json"
           CI_RUN_JSON="$RUNNER_TEMP/ci-run.json" node --input-type=module <<'NODE'
@@ -745,7 +745,7 @@ jobs:
             --manifest candidate/desktop-update/manifest.json \
             --private-key-env DESKTOP_UPDATE_SIGNING_PRIVATE_KEY \
             --published-at "$CREATED_AT" \
-            --release-notes "Beta.27 修复模型配置保存与企业提交冲突，恢复企业智能体页面和会话连续性；支持已配置智能体在模型变更后继续对话，并增强冷启动恢复与失败候选隔离；保留 Runtime 0.20.0-agentera.1，macOS 继续公证，Windows 内测包仍未签名。" \
+            --release-notes "Beta.28 整合新账号迁移、图像生成和 Agent 用户体验更新；Runtime 采用 0.20.0-agentera.2 签名候选，macOS 继续公证，Windows 提供内测包。" \
             --signature candidate/desktop-update/manifest.sig \
             --version "$VERSION"
           node scripts/internal-beta/desktop-update.mjs verify \
@@ -779,7 +779,7 @@ jobs:
             --origin "$BETA_ORIGIN"
             --package-json package.json
             --provenance candidate/evidence/internal-beta.provenance.json
-            --repository bignormal/aera
+            --repository Ablankpaper/aera
             --runtime-lock build/agentera-runtime-seed.lock.json
             --runtime-manifests-dir candidate/runtime-seed
             --sbom candidate/evidence/internal-beta.spdx.json
@@ -808,7 +808,7 @@ jobs:
             --bundle candidate/evidence/internal-beta-manifest.cosign.bundle.json \
             candidate/internal-beta-manifest.json
 
-          identity="^https://github\\.com/bignormal/aera/\\.github/workflows/internal-beta\\.yml@refs/heads/main$"
+          identity="^https://github\\.com/Ablankpaper/aera/\\.github/workflows/internal-beta\\.yml@refs/heads/main$"
           issuer="https://token.actions.githubusercontent.com"
           cosign verify-blob \
             --bundle candidate/evidence/internal-beta-provenance.cosign.bundle.json \

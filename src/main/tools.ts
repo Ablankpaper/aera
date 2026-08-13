@@ -4,6 +4,8 @@ import { profileHome, safeWriteFile } from "./utils";
 import { t } from "../shared/i18n";
 import { getAppLocale } from "./locale";
 import { DEFAULT_MESSAGING_PLATFORM_TOOLSETS } from "../shared/messaging-platforms";
+import { getYamlPath } from "./yaml-path";
+import { parseDocument } from "yaml";
 
 export interface ToolsetInfo {
   key: string;
@@ -114,6 +116,8 @@ const TOOLSET_DEFS: {
   },
 ];
 
+const IMPLICIT_CLI_TOOLSETS = TOOLSET_DEFS.map(({ key }) => key);
+
 function localizeToolDefs(
   enabled: boolean | ((key: string) => boolean),
 ): ToolsetInfo[] {
@@ -182,15 +186,12 @@ function parsePlatformToolsets(
   return toolsets;
 }
 
-function parseEnabledToolsets(
-  configContent: string,
-  platform = "cli",
-): Set<string> {
-  return parsePlatformToolsets(configContent)[platform] ?? new Set<string>();
-}
-
 function validatePlatformToolsetKey(platform: string): boolean {
   return /^[A-Za-z0-9_-]+$/.test(platform);
+}
+
+function imageGenerationEnabled(configContent: string): boolean {
+  return getYamlPath(configContent, "image_gen.enabled") !== "false";
 }
 
 export function getPlatformToolsets(
@@ -220,14 +221,19 @@ export function getToolsets(profile?: string): ToolsetInfo[] {
 
   try {
     const content = readFileSync(configFile, "utf-8");
-    const enabledSet = parseEnabledToolsets(content);
+    const parsed = parsePlatformToolsets(content);
+    const hasCliSelection = Object.prototype.hasOwnProperty.call(parsed, "cli");
+    const enabledSet = parsed.cli ?? new Set<string>();
+    const imageEnabled = imageGenerationEnabled(content);
 
     // If no platform_toolsets.cli section exists, all are enabled by default
-    if (enabledSet.size === 0 && !content.includes("platform_toolsets")) {
-      return localizeToolDefs(true);
+    if (!hasCliSelection) {
+      return localizeToolDefs((key) => key !== "image_gen" || imageEnabled);
     }
 
-    return localizeToolDefs((key) => enabledSet.has(key));
+    return localizeToolDefs((key) =>
+      key === "image_gen" ? imageEnabled : enabledSet.has(key),
+    );
   } catch {
     return localizeToolDefs(true);
   }
@@ -238,7 +244,39 @@ export function setToolsetEnabled(
   enabled: boolean,
   profile?: string,
 ): boolean {
-  return setPlatformToolsetEnabled("cli", key, enabled, profile);
+  if (key === "image_gen") {
+    const configFile = join(profileHome(profile), "config.yaml");
+    if (!existsSync(configFile)) return false;
+    try {
+      const content = readFileSync(configFile, "utf-8");
+      const parsed = parsePlatformToolsets(content);
+      const hasCliSelection = Object.prototype.hasOwnProperty.call(
+        parsed,
+        "cli",
+      );
+      const selected = hasCliSelection
+        ? new Set(parsed.cli)
+        : new Set(IMPLICIT_CLI_TOOLSETS);
+      if (enabled) selected.add(key);
+      else selected.delete(key);
+
+      const document = parseDocument(content);
+      if (document.errors.length > 0) return false;
+      document.setIn(["image_gen", "enabled"], enabled);
+      document.setIn(["platform_toolsets", "cli"], Array.from(selected).sort());
+      safeWriteFile(configFile, document.toString());
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return setPlatformToolsetEnabled(
+    "cli",
+    key,
+    enabled,
+    profile,
+    IMPLICIT_CLI_TOOLSETS,
+  );
 }
 
 export function setMessagingPlatformToolsetEnabled(

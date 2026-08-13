@@ -52,7 +52,7 @@ The Desktop presents official Agents as a catalog first, while keeping every ins
 
 [[src/renderer/src/screens/Agents/OfficialAgentSection.tsx#OfficialAgentSection]] renders eligible or verified-offline official Agents as compact cards. Opening a card loads presentation-only detail through `getOfficialAgentDetail`; [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#getOfficialAgentDetail]] returns a sanitized capability summary, aggregate asset counts, allowed model/provider names, and an allowed-tool count. It never returns signed bundle bytes, release inputs, credentials, owner identity, Profile paths, Memory, sessions, or private learned Skills.
 
-[[src/renderer/src/screens/Agents/AgentHubDetailDialog.tsx#AgentHubDetailDialog]] keeps one primary action visible. Uninstalled official Agents continue into the one-use install preview and confirmation flow, installed Agents with a linked local Profile enter chat through that Profile id, and managed updates still call the dedicated official-update API. An offline installation remains visible but cannot browse detail from Cloud, install, or update.
+[[src/renderer/src/screens/Agents/AgentHubDetailDialog.tsx#AgentHubDetailDialog]] keeps one primary action visible. For an uninstalled official Agent, one **Start using** click sequentially prepares a one-use install handle, confirms it with the fixed install token, refreshes local state, and opens the resulting Agent; the renderer never bypasses the two trusted operations or exposes a second technical confirmation dialog. Installed Agents with a linked local Profile enter chat through that Profile id, and managed updates still call the dedicated official-update API. An offline installation remains visible but cannot browse detail from Cloud, install, or update.
 
 ### Installation-bound version access
 
@@ -288,6 +288,12 @@ An Agent Installation selects one immutable version for one device/Profile pair 
 
 The authentication installation ID is not reused as the Agent Installation ID. New Agent installations create a fresh Profile with `cloneFrom=null`; existing learned Profiles require explicit same-owner claim. A RuntimeBinding freezes version, Profile, Runtime, policy, and tools for one conversation.
 
+### Canonical Profile target validation
+
+Claiming an existing Agent Profile compares canonical absolute paths, so the default `HERMES_HOME` Profile is accepted while mismatched or relative paths are rejected before Cloud mutation.
+
+[[src/main/agentera-agent-control/installation-manager.ts#profilePathMatchesId]] is exercised by the production installation orchestration tests for successful default-Profile claims and fail-closed mismatched targets.
+
 ### Legacy source-Profile operation recovery
 
 A pending fresh-Profile operation may name a source Profile without pinning a model-library row when it inherits that Profile's current or default model.
@@ -351,6 +357,8 @@ One visible Agent conversation owns an ordered local thread while each model rou
 ##### Failure retention and owner-safe lookup
 
 [[src/main/agentera-agent-control/conversation-thread-store.ts#ConversationThreadStore#fail]] retains a failed candidate without changing the active segment, while lookups by root key or any Hermes session recheck the same owner/device scope.
+
+Manager finalization, Gateway startup, SSH tunnel preparation, execution-lease creation, and synchronous transport setup all terminate a pre-output candidate through this lifecycle instead of leaving a stale `preparing` row that blocks retry.
 
 ##### Public route projection
 

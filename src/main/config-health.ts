@@ -29,6 +29,11 @@ import {
   upsertBlockChild,
 } from "./config";
 import { safeWriteFile } from "./utils";
+import {
+  inspectModelConfigStructure,
+  migrateModelConfigFormat,
+  validateModelConfiguration,
+} from "./config-model-migration";
 import { HERMES_HOME } from "./installer";
 import { expectedEnvKeyForModel } from "./installer";
 import { expectedEnvKeyForUrl, isLocalBaseUrl } from "../shared/url-key-map";
@@ -51,7 +56,10 @@ export type IssueCode =
   | "UI_RUNTIME_ENVKEY_MISMATCH"
   | "NON_ASCII_CREDENTIAL"
   | "SIBLING_HERMES_HOME_DRIFT"
-  | "LEGACY_TOOLSET_NAME";
+  | "LEGACY_TOOLSET_NAME"
+  | "MODEL_CONFIG_DUPLICATE_KEY"
+  | "MODEL_CONFIG_UNPARSEABLE"
+  | "MODEL_CONFIG_PROVIDERS_NOT_MAPPING";
 
 export interface ConfigHealthIssue {
   code: IssueCode;
@@ -96,6 +104,7 @@ export function runConfigHealthCheck(profile?: string): ConfigHealthReport {
     checkNonAsciiCredentials,
     checkSiblingHermesHomeDrift,
     checkLegacyToolsetName,
+    checkModelConfigStructure,
   ];
 
   for (const check of checks) {
@@ -139,6 +148,8 @@ export function autoFixIssue(
         return fixSiblingHermesHomeDrift(profile, context);
       case "LEGACY_TOOLSET_NAME":
         return fixLegacyToolsetName(profile);
+      case "MODEL_CONFIG_DUPLICATE_KEY":
+        return fixModelConfigDuplicateKey(profile);
       default:
         return { ok: false, message: `No auto-fix available for ${code}` };
     }
@@ -1023,6 +1034,152 @@ function fixLegacyToolsetName(profile?: string): {
 
 // Re-export for tests that exercise the check directly.
 export { checkLegacyToolsetName, fixLegacyToolsetName };
+
+// ───────────────────────────────────────────────────────
+//  config.yaml structural damage — a duplicate top-level `model:`,
+//  invalid YAML, or a non-mapping `providers:` block. Each gets its
+//  own code so the reported cause and offered repair match reality.
+// ───────────────────────────────────────────────────────
+
+/**
+ * Pre-Beta.27 configs wrote the active model as a scalar (`model: gpt-4`).
+ * Beta.27's block-aware writer only recognised the mapping form, so its first
+ * write appended a *second* top-level `model:` instead of replacing the scalar.
+ * The file then fails every subsequent YAML parse with `Map keys must be
+ * unique`, which surfaces as a model save that rejects and rolls back.
+ *
+ * Writes now normalise the block first, but a config already corrupted by an
+ * earlier build stays broken until something writes to it. This check surfaces
+ * that state directly, and auto-fixes the duplicate-key case in place.
+ *
+ * The other two shapes it can find have no safe mechanical repair, so they are
+ * reported under their own codes with no Fix button. Collapsing them into
+ * `MODEL_CONFIG_DUPLICATE_KEY` told users to merge `model:` keys that were
+ * never duplicated.
+ */
+function checkModelConfigStructure(profile?: string): ConfigHealthIssue[] {
+  const { configFile } = profilePaths(profile);
+  if (!existsSync(configFile)) return [];
+
+  let content: string;
+  try {
+    content = readFileSync(configFile, "utf-8");
+  } catch {
+    return [];
+  }
+  if (!content.trim()) return [];
+
+  const problem = inspectModelConfigStructure(content);
+  if (!problem) return [];
+
+  // Only the duplicate-`model:` shape has a mechanical repair. A syntax error or
+  // a non-mapping `providers:` block needs a human, and offering to "merge model
+  // keys" for those would be actively misleading.
+  if (problem.kind !== "duplicate_model_key") {
+    const code: IssueCode =
+      problem.kind === "providers_not_mapping"
+        ? "MODEL_CONFIG_PROVIDERS_NOT_MAPPING"
+        : "MODEL_CONFIG_UNPARSEABLE";
+    return [
+      {
+        code,
+        severity: "error",
+        message:
+          problem.kind === "providers_not_mapping"
+            ? "config.yaml has a malformed `providers:` block — model saves will fail until it is corrected."
+            : "config.yaml is not valid YAML — model saves will fail until it is corrected.",
+        detail:
+          `${problem.detail} Saves refuse to write while the file is in this ` +
+          "state, so nothing has been corrupted, but the file needs a manual " +
+          "edit before model configuration can be saved again.",
+        locations: [configFile],
+        autoFixable: false,
+        fixLocation: "config.yaml",
+      },
+    ];
+  }
+
+  // Offer the in-place repair only when the migration actually produces a valid
+  // file; anything else needs a human, so report without a Fix button.
+  let repairable = false;
+  try {
+    repairable =
+      validateModelConfiguration(migrateModelConfigFormat(content).content) ===
+      true;
+  } catch {
+    repairable = false;
+  }
+
+  return [
+    {
+      code: "MODEL_CONFIG_DUPLICATE_KEY",
+      severity: "error",
+      message:
+        "config.yaml has a malformed top-level `model:` block — model saves will fail until it is repaired.",
+      detail:
+        "A pre-Beta.27 config stored the active model as `model: <name>`. The " +
+        "current writer expects a `model:` mapping, so an earlier save left " +
+        "two top-level `model:` keys in the file. YAML rejects duplicate keys, " +
+        "so every later save fails and rolls back — the symptom is a model " +
+        "service that never persists." +
+        (repairable
+          ? " Auto-fix merges them into a single `model:` mapping and leaves " +
+            "every other block untouched."
+          : " The file needs a manual edit: keep one `model:` mapping and " +
+            "delete the rest."),
+      locations: [configFile],
+      autoFixable: repairable,
+      fixDescription: repairable
+        ? "Merge the duplicate `model:` keys into one mapping."
+        : undefined,
+      fixLocation: "config.yaml",
+    },
+  ];
+}
+
+function fixModelConfigDuplicateKey(profile?: string): {
+  ok: boolean;
+  message?: string;
+} {
+  const { configFile } = profilePaths(profile);
+  if (!existsSync(configFile)) {
+    return { ok: false, message: "config.yaml not found" };
+  }
+  const original = readFileSync(configFile, "utf-8");
+  // This repair only knows how to collapse duplicate `model:` keys. Running it
+  // on a syntax error or a bad `providers:` block would either throw or rewrite
+  // a file the user never agreed to have rewritten.
+  const problem = inspectModelConfigStructure(original);
+  if (!problem) return { ok: false, message: "Nothing to repair." };
+  if (problem.kind !== "duplicate_model_key") {
+    return {
+      ok: false,
+      message: `config.yaml needs a manual edit: ${problem.detail}`,
+    };
+  }
+  const repaired = migrateModelConfigFormat(original);
+  if (!repaired.modified) {
+    return { ok: false, message: "Nothing to repair." };
+  }
+  // Never write a file that still violates the invariant — a failed repair
+  // must leave the original in place for a manual edit.
+  validateModelConfiguration(repaired.content);
+
+  safeWriteFile(configFile, repaired.content);
+  appendConfigFixLog({
+    ts: Date.now(),
+    issueCode: "MODEL_CONFIG_DUPLICATE_KEY",
+    action: "autofix",
+    from: "duplicate top-level model keys",
+    to: "single model mapping",
+    profile: profile || "default",
+    detail: repaired.summary,
+  });
+  return { ok: true, message: repaired.summary };
+}
+
+// Re-export for tests that exercise the check directly.
+export { checkModelConfigStructure, fixModelConfigDuplicateKey };
 
 /**
  * Path to the JSONL audit log of all config fixes. Exposed so the

@@ -172,7 +172,7 @@ Run:
 merged_main_sha=$(git rev-parse origin/main)
 successful_main_ci_run_id=$(
   gh run list \
-    --repo bignormal/aera \
+    --repo Ablankpaper/aera \
     --workflow ci.yml \
     --branch main \
     --event push \
@@ -184,7 +184,7 @@ successful_main_ci_run_id=$(
 )
 test -n "$successful_main_ci_run_id"
 gh workflow run internal-beta.yml \
-  --repo bignormal/aera \
+  --repo Ablankpaper/aera \
   --ref main \
   -f source_sha="$merged_main_sha" \
   -f ci_run_id="$successful_main_ci_run_id"

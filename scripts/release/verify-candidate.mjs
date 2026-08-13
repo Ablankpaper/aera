@@ -41,7 +41,7 @@ export function validateCandidateDocument(document, expected = {}) {
   );
   if (
     document.schemaVersion !== 1 ||
-    document.repository !== "bignormal/aera"
+    document.repository !== "Ablankpaper/aera"
   ) {
     throw new Error("Candidate schema or repository is invalid");
   }
@@ -92,7 +92,7 @@ function validateBuild(build) {
   ]) {
     if (
       typeof value !== "string" ||
-      !/^https:\/\/github\.com\/bignormal\/aera\/actions\/runs\/[1-9][0-9]*$/u.test(
+      !/^https:\/\/github\.com\/Ablankpaper\/aera\/actions\/runs\/[1-9][0-9]*$/u.test(
         value,
       )
     ) {
@@ -375,7 +375,7 @@ function validateSupplyChain(supplyChain) {
   if (
     supplyChain.githubAttestation.required !== true ||
     supplyChain.githubAttestation.signerWorkflow !==
-      "github.com/bignormal/aera/.github/workflows/release-candidate.yml"
+      "github.com/Ablankpaper/aera/.github/workflows/release-candidate.yml"
   ) {
     throw new Error("GitHub artifact attestation policy is invalid");
   }

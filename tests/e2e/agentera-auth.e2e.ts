@@ -27,6 +27,10 @@ const cloudRoot = resolve(
     resolve(desktopRoot, "../aera-cloud"),
 );
 const cloudOrigin = "http://127.0.0.1:8086";
+const runtimeSeedDirectory = resolve(
+  process.env.AGENTERA_RUNTIME_SEED_DIR?.trim() ||
+    join(desktopRoot, "resources", "agentera-runtime-seed"),
+);
 const password = "Aera E2E battery staple 2026";
 const firstPhone = "+8613900000001";
 const secondPhone = "+8613900000002";
@@ -372,6 +376,7 @@ async function launchDesktop(current: Harness): Promise<{
     env: {
       ...process.env,
       AGENTERA_CLOUD_PUBLIC_URL: cloudOrigin,
+      AGENTERA_RUNTIME_SEED_DIR: runtimeSeedDirectory,
       HERMES_HOME: current.hermesHome,
       HERMES_OPEN_DEVTOOLS: "0",
       HERMES_DESKTOP_OPEN_DEVTOOLS: "0",
@@ -576,17 +581,15 @@ test("browser registration, offline renewal, ownership isolation, revoke, and de
   expect(new URL(firstAuthorizationURL).origin).toBe(cloudOrigin);
 
   await browserPage.goto(firstAuthorizationURL);
-  await browserPage.waitForURL(/\/authorize\?request_id=/);
-  const firstApprovalURL = browserPage.url();
-  await browserPage.locator('a[href^="/login?next="]').click();
+  await browserPage.waitForURL(/\/login\?next=/);
+  const firstApprovalPath = new URL(browserPage.url()).searchParams.get("next");
+  expect(firstApprovalPath).toMatch(/^\/authorize\?request_id=/);
   const registrationLink = browserPage.locator('a[href^="/register?next="]');
   await expect(registrationLink).toHaveCount(1);
   const registrationHref = await registrationLink.getAttribute("href");
   expect(
     new URL(registrationHref ?? "", cloudOrigin).searchParams.get("next"),
-  ).toBe(
-    `/authorize?request_id=${new URL(firstApprovalURL).searchParams.get("request_id")}`,
-  );
+  ).toBe(firstApprovalPath);
   await registrationLink.click();
   await registerPhoneAccount(
     browserPage,
@@ -668,6 +671,12 @@ test("browser registration, offline renewal, ownership isolation, revoke, and de
       Promise.resolve(),
   );
   await browserPage.goto(sameAccountAuthorizationURL);
+  await browserPage.waitForURL(/\/login\?next=/);
+  await loginBrowser(browserPage, firstPhone);
+  await browserPage.waitForURL(/\/agentera\/oauth\/callback/);
+  await expect(
+    desktopPage.locator('[data-testid="screen-auth"]'),
+  ).not.toBeVisible();
   await expect(desktopPage.locator(".layout")).toBeVisible();
   expect(
     await boundaryHashes(harness.hermesHome, harness.boundaryFiles),

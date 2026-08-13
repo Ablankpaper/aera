@@ -154,6 +154,7 @@ export default {
       "This local Agent does not have a model configured yet.",
     modelRequired:
       "This account has no usable model configuration. Configure one in Models first.",
+    configureModel: "Configure model",
     configureModelFirst: "Configure a model first",
     chooseRuntimeModel: "Choose a model for this use",
     chooseRuntimeModelHint:
@@ -398,6 +399,7 @@ export default {
     pendingInstallation: "Pending materialization — safe to retry",
     installedLocally: "Installed locally",
     retry: "Retry",
+    tryAgain: "Try again",
     update: "Select version",
     archive: "Archive",
     close: "Close",
@@ -507,14 +509,14 @@ export default {
       "Archiving stops cloud activation for this Agent. Local memory, sessions, files, and learned Skills stay on this computer.",
     confirmArchive: "Confirm archive",
     experience: {
-      promoteLocalExperience: "Promote local experience",
-      promotionTitle: "Promote local experience",
+      promoteLocalExperience: "Share saved capability",
+      promotionTitle: "Share a saved capability with the team",
       promotionSubtitle:
-        "Select one learned Skill, inspect the local privacy scan, then explicitly submit it for team/project review.",
+        "Choose a saved capability. Aera checks it for private information and shares it safely.",
       privateBoundary:
-        "Only the selected Skill files are prepared. Identity, memory, conversations, sessions, credentials, and every unselected local learning result stay on this computer.",
-      skill: "Learned Skill",
-      chooseSkill: "Choose one eligible Skill",
+        "Only the capability you choose can be shared. Your identity, memory, conversations, credentials, and other capabilities stay on this computer.",
+      skill: "Saved capability",
+      chooseSkill: "Choose a saved capability",
       preparePreview: "Prepare local preview",
       previewTitle: "Promotion preview",
       sourceAgent: "Source Agent",
@@ -544,6 +546,15 @@ export default {
       submitConfirmation:
         "I explicitly choose this Skill for team/project review and understand that submission does not publish an Agent version.",
       submitForReview: "Submit for review",
+      share: "Share with team",
+      retryShare: "Retry sharing",
+      shareInProgress: "Sharing…",
+      shareStatus: "Share status",
+      onlineToShare: "Reconnect to share this saved capability.",
+      dlpBlockedUser:
+        "This saved capability contains private information and was not shared.",
+      dlpChooseAnother:
+        "Choose another saved capability or remove the private information, then try again.",
       retryUpload: "Retry upload manually",
       myCandidates: "My candidates",
       noCandidates: "No promoted experience candidates yet.",
@@ -588,12 +599,12 @@ export default {
       createDraft: "Create draft",
     },
     organizationExperience: {
-      contribute: "Contribute experience",
-      contributionTitle: "Contribute Organization experience",
+      contribute: "Share saved capability",
+      contributionTitle: "Share a saved capability with your organization",
       privateBoundary:
-        "Only the explicitly selected learned Skill is prepared. Memory, USER data, conversations, sessions, credentials, MCP configuration, Profile paths, and unrelated Skills stay on this computer.",
-      skill: "Learned Skill",
-      chooseSkill: "Choose one eligible Skill",
+        "Only the capability you choose can be shared. Your memory, conversations, credentials, settings, and other capabilities stay on this computer.",
+      skill: "Saved capability",
+      chooseSkill: "Choose a saved capability",
       preparePreview: "Prepare local preview",
       sourceAgent: "Source Organization Agent",
       sourceVersion: "Source version",
@@ -603,6 +614,13 @@ export default {
       submitConfirmation:
         "I explicitly contribute this selected Skill and understand that approval does not publish an Agent version.",
       submitForReview: "Submit for Organization review",
+      share: "Share with organization",
+      shareInProgress: "Sharing…",
+      onlineToShare: "Reconnect to share this saved capability.",
+      dlpBlockedUser:
+        "This saved capability contains private information and was not shared.",
+      dlpChooseAnother:
+        "Choose another saved capability or remove the private information, then try again.",
       myCandidates: "My Organization experience",
       noCandidates: "No Organization experience candidates yet.",
       reviewQueue: "Organization experience governance",

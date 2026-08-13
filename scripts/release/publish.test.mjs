@@ -188,7 +188,7 @@ test("requires exact legal, provider, domain, rollout, and approval gates", () =
 test("requires disabled Cloud, disabled Admin, enabled Cloud, enabled Admin order", () => {
   const sequence = {
     cloudDisabled: productionRun({
-      repository: "bignormal/aera-cloud",
+      repository: "Ablankpaper/aera-cloud",
       workflowName: "Promote Cloud candidate to production",
       sourceSha: CLOUD_SHA,
       runId: "2101",
@@ -198,7 +198,7 @@ test("requires disabled Cloud, disabled Admin, enabled Cloud, enabled Admin orde
       enableConclusion: "skipped",
     }),
     adminDisabled: productionRun({
-      repository: "bignormal/aera-admin",
+      repository: "Ablankpaper/aera-admin",
       workflowName: "Promote Admin candidate to production",
       sourceSha: ADMIN_SHA,
       runId: "2102",
@@ -208,7 +208,7 @@ test("requires disabled Cloud, disabled Admin, enabled Cloud, enabled Admin orde
       enableConclusion: "skipped",
     }),
     cloudEnabled: productionRun({
-      repository: "bignormal/aera-cloud",
+      repository: "Ablankpaper/aera-cloud",
       workflowName: "Promote Cloud candidate to production",
       sourceSha: CLOUD_SHA,
       runId: "2103",
@@ -218,7 +218,7 @@ test("requires disabled Cloud, disabled Admin, enabled Cloud, enabled Admin orde
       enableConclusion: "success",
     }),
     adminEnabled: productionRun({
-      repository: "bignormal/aera-admin",
+      repository: "Ablankpaper/aera-admin",
       workflowName: "Promote Admin candidate to production",
       sourceSha: ADMIN_SHA,
       runId: "2104",
@@ -331,7 +331,7 @@ function fakeGitHub({ fixture, calls, resolvedTag, existingRelease }) {
         workflowName: "Desktop signed candidate",
         conclusion: "success",
         headSha: SOURCE_SHA,
-        url: "https://github.com/bignormal/aera/actions/runs/1234",
+        url: "https://github.com/Ablankpaper/aera/actions/runs/1234",
         jobs: Array.from({ length: 3 }, () => ({
           conclusion: "success",
           steps: [{ conclusion: "success" }],
@@ -367,7 +367,7 @@ function fakeGitHub({ fixture, calls, resolvedTag, existingRelease }) {
       calls.push(["publish-release", releaseId]);
       return {
         id: releaseId,
-        url: `https://github.com/bignormal/aera/releases/tag/v${VERSION}`,
+        url: `https://github.com/Ablankpaper/aera/releases/tag/v${VERSION}`,
       };
     },
     markProductionGateValidated() {
@@ -396,7 +396,7 @@ function productionRun({
     jobs: [
       {
         name:
-          repository === "bignormal/aera-cloud"
+          repository === "Ablankpaper/aera-cloud"
             ? "Deploy exact digest with every new feature disabled"
             : "Deploy exact digest with mutations disabled",
         conclusion: "success",
@@ -519,13 +519,13 @@ async function promotionFixture() {
 
   const candidate = {
     schemaVersion: 1,
-    repository: "bignormal/aera",
+    repository: "Ablankpaper/aera",
     sourceSha: SOURCE_SHA,
     version: VERSION,
     build: {
       workflow: "Desktop signed candidate",
-      runUrl: "https://github.com/bignormal/aera/actions/runs/1234",
-      ciRunUrl: "https://github.com/bignormal/aera/actions/runs/1200",
+      runUrl: "https://github.com/Ablankpaper/aera/actions/runs/1234",
+      ciRunUrl: "https://github.com/Ablankpaper/aera/actions/runs/1200",
     },
     runtimeSeed: {
       lockSha256: runtimeLock.sha256,
@@ -617,7 +617,7 @@ async function promotionFixture() {
       githubAttestation: {
         required: true,
         signerWorkflow:
-          "github.com/bignormal/aera/.github/workflows/release-candidate.yml",
+          "github.com/Ablankpaper/aera/.github/workflows/release-candidate.yml",
       },
     },
     linuxReleasable: false,
@@ -694,7 +694,7 @@ async function promotionFixture() {
       "sbom.spdx.json",
     ].sort(),
     options: {
-      repository: "bignormal/aera",
+      repository: "Ablankpaper/aera",
       candidateRunId: "1234",
       sourceSha: SOURCE_SHA,
       candidateManifestSha256,
@@ -746,19 +746,19 @@ function productionGate({
     schemaVersion: 1,
     decision: "approved",
     desktop: {
-      repository: "bignormal/aera",
+      repository: "Ablankpaper/aera",
       sourceSha: SOURCE_SHA,
       version: VERSION,
       candidateManifestSha256,
     },
     cloud: {
-      repository: "bignormal/aera-cloud",
+      repository: "Ablankpaper/aera-cloud",
       sourceSha: CLOUD_SHA,
       imageDigest: CLOUD_DIGEST,
       candidateManifestSha256: CLOUD_MANIFEST_SHA256,
     },
     admin: {
-      repository: "bignormal/aera-admin",
+      repository: "Ablankpaper/aera-admin",
       sourceSha: ADMIN_SHA,
       imageDigest: ADMIN_DIGEST,
       candidateManifestSha256: ADMIN_MANIFEST_SHA256,
@@ -779,7 +779,7 @@ function productionGate({
       termsApproved: true,
       dataProcessingApproved: true,
       evidenceUrl:
-        "https://github.com/bignormal/aera/actions/runs/1300/artifacts/1400",
+        "https://github.com/Ablankpaper/aera/actions/runs/1300/artifacts/1400",
       evidenceSha256: "a".repeat(64),
     },
     providers: {
@@ -790,7 +790,7 @@ function productionGate({
       observabilityReady: true,
       productionCredentialsVerified: true,
       evidenceUrl:
-        "https://github.com/bignormal/aera/actions/runs/1300/artifacts/1401",
+        "https://github.com/Ablankpaper/aera/actions/runs/1300/artifacts/1401",
       evidenceSha256: "b".repeat(64),
     },
     domain: {
@@ -799,7 +799,7 @@ function productionGate({
       dnsApproved: true,
       tlsValidated: true,
       evidenceUrl:
-        "https://github.com/bignormal/aera/actions/runs/1300/artifacts/1402",
+        "https://github.com/Ablankpaper/aera/actions/runs/1300/artifacts/1402",
       evidenceSha256: "c".repeat(64),
     },
     rollout: {
@@ -817,7 +817,7 @@ function productionGate({
       approverIdentityRef: "employee:release-owner",
       responsibility: "release_approver",
       approvedAt: "2026-07-23T10:00:00Z",
-      changeTicketUrl: "https://github.com/bignormal/aera/actions/runs/1300",
+      changeTicketUrl: "https://github.com/Ablankpaper/aera/actions/runs/1300",
       productionDeployApproved: true,
       publicDesktopReleaseApproved: true,
     },
@@ -849,19 +849,19 @@ function gateExpectations(gate) {
 function productionDeploymentEvidence() {
   const cloudManifest = canonicalJSONStringify({
     schemaVersion: 1,
-    repository: "bignormal/aera-cloud",
+    repository: "Ablankpaper/aera-cloud",
     commitSha: CLOUD_SHA,
     image: {
-      reference: `ghcr.io/bignormal/aera-cloud@${CLOUD_DIGEST}`,
+      reference: `ghcr.io/ablankpaper/aera-cloud@${CLOUD_DIGEST}`,
       digest: CLOUD_DIGEST,
     },
   });
   const adminManifest = canonicalJSONStringify({
     schemaVersion: 1,
-    repository: "bignormal/aera-admin",
+    repository: "Ablankpaper/aera-admin",
     commitSha: ADMIN_SHA,
     image: {
-      reference: `ghcr.io/bignormal/aera-admin@${ADMIN_DIGEST}`,
+      reference: `ghcr.io/ablankpaper/aera-admin@${ADMIN_DIGEST}`,
       digest: ADMIN_DIGEST,
     },
   });
@@ -870,7 +870,7 @@ function productionDeploymentEvidence() {
       environment: "production",
       current: {
         commitSha: CLOUD_SHA,
-        imageReference: `ghcr.io/bignormal/aera-cloud@${CLOUD_DIGEST}`,
+        imageReference: `ghcr.io/ablankpaper/aera-cloud@${CLOUD_DIGEST}`,
         imageDigest: CLOUD_DIGEST,
         deployedAt: "2026-07-23T10:30:00Z",
       },
@@ -882,7 +882,7 @@ function productionDeploymentEvidence() {
       environment: "production",
       current: {
         commitSha: ADMIN_SHA,
-        imageReference: `ghcr.io/bignormal/aera-admin@${ADMIN_DIGEST}`,
+        imageReference: `ghcr.io/ablankpaper/aera-admin@${ADMIN_DIGEST}`,
         imageDigest: ADMIN_DIGEST,
         deployedAt: "2026-07-23T10:40:00Z",
       },

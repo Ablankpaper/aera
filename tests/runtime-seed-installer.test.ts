@@ -63,7 +63,7 @@ afterEach(async () => {
 });
 
 const manifestContext: RuntimeManifestValidationContext = {
-  repository: "bignormal/aera-runtime",
+  repository: "Ablankpaper/aera-runtime",
   platform: "darwin",
   arch: "arm64",
   desktopVersion: "0.7.3",

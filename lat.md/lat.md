@@ -27,6 +27,8 @@ This directory defines the high-level concepts, business logic, and architecture
 - [[main-process]] — the Electron main-process entrypoint, app lifecycle modules, and centralized IPC registry.
 - [[remote-dashboard-oauth]] — direct Remote dashboard browser authentication, main-process cookie isolation, and single-use WebSocket ticket handling.
 - [[provider-setup]] — the first-run provider picker; its top grid mirrors the agent's native `CANONICAL_PROVIDERS` while OpenAI-compatible endpoints route through the Local presets.
+- [[legacy-model-config-migration]] — automatic migration of pre-Beta.27 scalar `model:` format to mapping format, preventing duplicate-key YAML errors and native_route stage failures.
+- [[image-generation]] — Profile-default conversation image generation, independent relay credentials, paid-call boundaries, and Runtime refresh behavior.
 - [[hermes-account-login]] — desktop sign-in to a Hermes account via the RFC 8628 device grant; secure token storage, IPC, and the Providers-screen entry point.
 - [[agent-sync]] — transitional bidirectional sync of desktop profiles with cloud agents for persona, color, and model/provider; private `MEMORY.md` and `USER.md` are excluded.
 - [[kanban]] — the JIRA-style multi-agent board tab; a thin client over the `hermes kanban` CLI with canonical status columns, an archived toggle, and focus/poll refresh.

@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useI18n } from "../../components/useI18n";
 import { Wrench, Plug, Puzzle, Search, X } from "../../assets/icons";
 import { TOOL_ICONS, FALLBACK_TOOL_ICON } from "../../components/toolMeta";
 import Skills from "../Skills/Skills";
 import RemoteNotice from "../../components/RemoteNotice";
+import { ImageGenerationConfig } from "./ImageGenerationConfig";
 
 interface ToolsetInfo {
   key: string;
@@ -188,6 +189,8 @@ function Tools({
     showPlatformToolsets ? "tools" : "mcp",
   );
   const [toolsets, setToolsets] = useState<ToolsetInfo[]>([]);
+  const [toolsetError, setToolsetError] = useState("");
+  const toolsetToggleVersions = useRef<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpError, setMcpError] = useState("");
@@ -224,10 +227,37 @@ function Tools({
     key: string,
     currentEnabled: boolean,
   ): Promise<void> {
+    const targetEnabled = !currentEnabled;
+    const version = (toolsetToggleVersions.current[key] ?? 0) + 1;
+    toolsetToggleVersions.current[key] = version;
+    setToolsetError("");
     setToolsets((prev) =>
-      prev.map((t) => (t.key === key ? { ...t, enabled: !currentEnabled } : t)),
+      prev.map((t) => (t.key === key ? { ...t, enabled: targetEnabled } : t)),
     );
-    await window.hermesAPI.setToolsetEnabled(key, !currentEnabled, profile);
+    try {
+      const saved = await window.hermesAPI.setToolsetEnabled(
+        key,
+        targetEnabled,
+        profile,
+      );
+      if (!saved && toolsetToggleVersions.current[key] === version) {
+        setToolsets((prev) =>
+          prev.map((t) =>
+            t.key === key ? { ...t, enabled: currentEnabled } : t,
+          ),
+        );
+        setToolsetError(t("tools.toolsetToggleFailed"));
+      }
+    } catch {
+      if (toolsetToggleVersions.current[key] === version) {
+        setToolsets((prev) =>
+          prev.map((t) =>
+            t.key === key ? { ...t, enabled: currentEnabled } : t,
+          ),
+        );
+        setToolsetError(t("tools.toolsetToggleFailed"));
+      }
+    }
   }
 
   async function reloadMcp(): Promise<void> {
@@ -403,6 +433,9 @@ function Tools({
         <div className="tools-pane">
           {showPlatformToolsets && activeTab === "tools" && (
             <>
+              {toolsetError && (
+                <div className="tools-error">{toolsetError}</div>
+              )}
               <div className="tools-grid">
                 {toolsets.map((t) => (
                   <div
@@ -431,6 +464,21 @@ function Tools({
                   </div>
                 ))}
               </div>
+              {toolsets.find((tool) => tool.key === "image_gen")?.enabled ? (
+                <ImageGenerationConfig
+                  profile={profile}
+                  remoteMode={remoteMode}
+                  onSaved={(config) =>
+                    setToolsets((current) =>
+                      current.map((tool) =>
+                        tool.key === "image_gen"
+                          ? { ...tool, enabled: config.enabled }
+                          : tool,
+                      ),
+                    )
+                  }
+                />
+              ) : null}
             </>
           )}
 

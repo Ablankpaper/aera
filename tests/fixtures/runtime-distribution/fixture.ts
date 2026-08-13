@@ -75,7 +75,7 @@ export function createFixtureManifest(
     schema_version: 1,
     key_id: TEST_KEY_ID,
     runtime_version: TEST_RUNTIME_VERSION,
-    source_repository: "bignormal/aera-runtime",
+    source_repository: "Ablankpaper/aera-runtime",
     source_commit: TEST_SOURCE_COMMIT,
     channel: "candidate",
     platform: "darwin",

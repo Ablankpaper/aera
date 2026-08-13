@@ -68,6 +68,7 @@ vi.mock("./secrets", () => ({ providerListSafe: vi.fn(() => ({})) }));
 import {
   TuiGatewayClient,
   getTuiGatewayClient,
+  retireTuiGatewayClient,
   stopGateway,
   stopAllTuiGatewayClients,
   type TuiGatewayClientDependencies,
@@ -296,6 +297,20 @@ describe("TuiGatewayClient lifecycle", () => {
     await stopAllTuiGatewayClients();
     expect(stopFirst).toHaveBeenCalledOnce();
     expect(stopSecond).toHaveBeenCalledOnce();
+  });
+
+  it("retires only the requested Profile so its next turn gets a fresh Runtime client", async () => {
+    const work = getTuiGatewayClient("work");
+    const personal = getTuiGatewayClient("personal");
+    const stopWork = vi.spyOn(work, "stop").mockResolvedValue();
+    const stopPersonal = vi.spyOn(personal, "stop").mockResolvedValue();
+
+    await retireTuiGatewayClient("work");
+
+    expect(stopWork).toHaveBeenCalledOnce();
+    expect(stopPersonal).not.toHaveBeenCalled();
+    expect(getTuiGatewayClient("work")).not.toBe(work);
+    expect(getTuiGatewayClient("personal")).toBe(personal);
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Pool-wide App shutdown]]

@@ -37,6 +37,7 @@ export default {
   suggestionAnalyze: "ניתוח נתונים",
   approve: "אישור",
   deny: "דחייה",
+  boundary: { unnamedAgent: "סוכן ללא שם" },
   thinking: "חושב…",
   thought: "מחשבה",
   toolCall: "קריאה לכלי",

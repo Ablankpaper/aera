@@ -14,13 +14,13 @@ import {
 
 export { canonicalJSONStringify };
 
-export const INTERNAL_BETA_VERSION = "0.7.4-internal-beta.27";
+export const INTERNAL_BETA_VERSION = "0.7.4-internal-beta.28";
 export const INTERNAL_BETA_SIGNING_STATUS =
   "macos_developer_id_notarized_windows_unsigned";
 export const INTERNAL_BETA_RUNTIME_SOURCE_SHA =
-  "ae746df6556f1d496f9dd49c850cc6133997e317";
+  "b890d7de940c02a06da73f6a421d3867a63db8e6";
 export const INTERNAL_BETA_WORKFLOW_IDENTITY =
-  "https://github.com/bignormal/aera/.github/workflows/internal-beta.yml@refs/heads/main";
+  "https://github.com/Ablankpaper/aera/.github/workflows/internal-beta.yml@refs/heads/main";
 export const INTERNAL_BETA_OIDC_ISSUER =
   "https://token.actions.githubusercontent.com";
 
@@ -188,7 +188,7 @@ function githubRunUrl(value, label) {
     if (
       parsed.protocol !== "https:" ||
       parsed.hostname !== "github.com" ||
-      !/^\/bignormal\/aera\/actions\/runs\/[1-9][0-9]*$/u.test(
+      !/^\/Ablankpaper\/aera\/actions\/runs\/[1-9][0-9]*$/u.test(
         parsed.pathname,
       ) ||
       parsed.search !== "" ||
@@ -285,11 +285,11 @@ function validateRuntimeLock(lock) {
   exactObject(lock, RUNTIME_LOCK_KEYS, "Runtime Seed lock");
   if (
     lock.schema_version !== 1 ||
-    lock.repository !== "bignormal/aera-runtime" ||
+    lock.repository !== "Ablankpaper/aera-runtime" ||
     lock.source_commit !== INTERNAL_BETA_RUNTIME_SOURCE_SHA ||
     lock.channel !== "candidate" ||
-    lock.runtime_version !== "0.20.0-agentera.1" ||
-    lock.release_tag !== "runtime-v0.20.0-agentera.1-rc.1"
+    lock.runtime_version !== "0.20.0-agentera.2" ||
+    lock.release_tag !== "runtime-v0.20.0-agentera.2-rc.1"
   ) {
     throw new Error(
       "Runtime Seed commit, channel, version, or release is not approved for internal Beta",
@@ -446,7 +446,7 @@ export function validateInternalBetaManifest(document) {
   exactObject(document, TOP_LEVEL_KEYS, "Internal Beta manifest");
   if (
     document.schemaVersion !== 2 ||
-    document.repository !== "bignormal/aera" ||
+    document.repository !== "Ablankpaper/aera" ||
     typeof document.sourceSha !== "string" ||
     !SHA1_PATTERN.test(document.sourceSha) ||
     document.version !== INTERNAL_BETA_VERSION ||
@@ -506,11 +506,11 @@ export function validateInternalBetaManifest(document) {
 
   exactObject(document.runtimeSeed, RUNTIME_KEYS, "Runtime Seed evidence");
   if (
-    document.runtimeSeed.repository !== "bignormal/aera-runtime" ||
+    document.runtimeSeed.repository !== "Ablankpaper/aera-runtime" ||
     document.runtimeSeed.sourceCommit !== INTERNAL_BETA_RUNTIME_SOURCE_SHA ||
     document.runtimeSeed.channel !== "candidate" ||
-    document.runtimeSeed.runtimeVersion !== "0.20.0-agentera.1" ||
-    document.runtimeSeed.releaseTag !== "runtime-v0.20.0-agentera.1-rc.1"
+    document.runtimeSeed.runtimeVersion !== "0.20.0-agentera.2" ||
+    document.runtimeSeed.releaseTag !== "runtime-v0.20.0-agentera.2-rc.1"
   ) {
     throw new Error("Runtime Seed identity is not approved for internal Beta");
   }
@@ -592,7 +592,7 @@ export function parseAndValidateInternalBetaManifest(raw) {
 }
 
 export async function buildInternalBetaManifest(options) {
-  if (options.repository !== "bignormal/aera") {
+  if (options.repository !== "Ablankpaper/aera") {
     throw new Error("Internal Beta repository is invalid");
   }
   if (
@@ -744,7 +744,7 @@ export async function buildInternalBetaProvenance(options) {
     predicateType: "https://slsa.dev/provenance/v1",
     predicate: {
       buildDefinition: {
-        buildType: "https://github.com/bignormal/aera/internal-beta/v1",
+        buildType: "https://github.com/Ablankpaper/aera/internal-beta/v1",
         externalParameters: {
           origin: canonicalHttpsIpOrigin(
             options.origin,
@@ -757,7 +757,7 @@ export async function buildInternalBetaProvenance(options) {
         internalParameters: {},
         resolvedDependencies: [
           {
-            uri: `git+https://github.com/bignormal/aera@${options.sourceSha}`,
+            uri: `git+https://github.com/Ablankpaper/aera@${options.sourceSha}`,
             digest: { gitCommit: options.sourceSha },
           },
           {

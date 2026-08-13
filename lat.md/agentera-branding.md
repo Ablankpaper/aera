@@ -10,6 +10,8 @@ First-party product, publisher, installer, and runtime display names are fixed s
 
 The customer-facing desktop product and publisher are Aera. Normal installer and archive filenames use the `Aera-` stem, while the internal npm package name remains `agentera-studio` so existing build, OAuth, and update contracts do not fork.
 
+The active source, release, update, and Runtime Seed repositories are published under `Ablankpaper`; legacy `bignormal` references remain only where they are compatibility identifiers or factual Go module paths.
+
 ### Visible application names
 
 Composed UI surfaces use Aera for the desktop and Aera Runtime for the bundled engine. Account, admin, email, API, About, menu, notification, installer, and release surfaces follow the same names.

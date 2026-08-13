@@ -54,6 +54,7 @@ import type {
   AgentSlashCommand,
 } from "./slash/types";
 import { isSlashCommandInput } from "./slash/parseSlashCommand";
+import { runtimeSnapshotAppliesToProfile } from "../../../../shared/runtime-snapshot";
 
 interface QueuedMessage {
   text: string;
@@ -121,7 +122,7 @@ interface ChatProps {
   /** Resolved name/avatar/colour of `profile`, so idle agent avatars in the
    *  transcript show the agent's profile picture instead of the loading gif. */
   agentAppearance?: {
-    name?: string | null;
+    displayName?: string | null;
     color?: string | null;
     avatar?: string | null;
   };
@@ -158,8 +159,6 @@ function Chat({
     }),
     [profile, agentAppearance?.color, agentAppearance?.avatar],
   );
-  const agentName =
-    agentAppearance?.name?.trim() || profile?.trim() || "default";
   const [messages, setMessages] = useState<ChatMessage[]>(
     initialMessages ?? [],
   );
@@ -448,13 +447,14 @@ function Chat({
   }, [allowAccountConnection]);
 
   useEffect(() => {
-    return window.hermesAPI.onRuntimeSnapshotChanged?.(() => {
+    return window.hermesAPI.onRuntimeSnapshotChanged?.((change) => {
+      if (!runtimeSnapshotAppliesToProfile(change, profile)) return;
       // This notification carries no account connection data, so guest chats
       // can safely retire a local Dashboard snapshot after a model route or
       // credential change without crossing the guest/account boundary.
       setRuntimeConnectionRevision((revision) => revision + 1);
     });
-  }, []);
+  }, [profile]);
 
   const { containerRef, bottomRef } = useChatScroll(visibleMessages);
   const modelConfig = useModelConfig(profile);
@@ -1276,7 +1276,8 @@ function Chat({
       <ConfigHealthBanner profile={profile} onOpenDiagnose={onOpenDiagnose} />
       {conversationBoundary && (
         <ConversationBoundaryIndicator
-          agentName={agentName}
+          profileId={profile?.trim() || "default"}
+          agentDisplayName={agentAppearance?.displayName}
           boundary={conversationBoundary}
         />
       )}

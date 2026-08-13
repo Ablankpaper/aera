@@ -17,7 +17,7 @@
 - Electron bundle/application id is exactly `com.bignormal.agentera.studio`.
 - Windows executable name is exactly `agentera-studio`.
 - Windows package identifier is exactly `Bignormal.AgentEraStudio`.
-- Source, issue, release, and desktop-update repository is exactly `bignormal/aera`.
+- Source, issue, release, and desktop-update repository is exactly `Ablankpaper/aera`.
 - Preserve `HERMES_*`, `.hermes`, `hermes-agent`, `hermes_cli`, IPC bridge names, API headers, routes, schemas, provider ids, model ids, and command syntax.
 - Preserve existing application data, profiles, history, configuration, and update preferences without deleting or overwriting either the legacy or new data directory.
 - Keep the splash timing, status messages, connection checks, local-mode escape hatch, layout, navigation, features, and color system unchanged.
@@ -65,13 +65,13 @@ describe("AgentEra Studio visible branding", () => {
       name: "agentera-studio",
       description: "AgentEra Studio — private AI agent desktop",
       author: "AgentEra",
-      homepage: "https://github.com/bignormal/aera",
+      homepage: "https://github.com/Ablankpaper/aera",
     });
     const builder = read("electron-builder.yml");
     expect(builder).toContain("appId: com.bignormal.agentera.studio");
     expect(builder).toContain("productName: AgentEra Studio");
     expect(builder).toContain("executableName: agentera-studio");
-    expect(builder).toContain("owner: bignormal");
+    expect(builder).toContain("owner: Ablankpaper");
     expect(builder).toContain("repo: aera");
   });
 
@@ -169,7 +169,7 @@ First-party product, publisher, package, and runtime display names are fixed so 
 
 ### Desktop identity
 
-The desktop product is AgentEra Studio, published by AgentEra from `bignormal/aera`, with package stem `agentera-studio`.
+The desktop product is AgentEra Studio, published by AgentEra from `Ablankpaper/aera`, with package stem `agentera-studio`.
 
 ### Visible application names
 
@@ -440,7 +440,7 @@ export const BRAND_NAME = "AgentEra";
 export const DESKTOP_PRODUCT_NAME = "AgentEra Studio";
 export const RUNTIME_DISPLAY_NAME = "AgentEra Runtime";
 export const DESKTOP_APP_ID = "com.bignormal.agentera.studio";
-export const DESKTOP_REPOSITORY_URL = "https://github.com/bignormal/aera";
+export const DESKTOP_REPOSITORY_URL = "https://github.com/Ablankpaper/aera";
 ```
 
 - [ ] **Step 4: Implement non-destructive user-data resolution**
@@ -555,7 +555,7 @@ git commit -m "feat: set AgentEra Studio desktop identity"
 
 - [ ] **Step 1: Update Winget tests to the new package contract and verify RED**
 
-Use `agentera-studio-9.9.9-setup.exe`, `publishOwner: "bignormal"`, output directory:
+Use `agentera-studio-9.9.9-setup.exe`, `publishOwner: "Ablankpaper"`, output directory:
 
 ```ts
 join(
@@ -580,8 +580,8 @@ and filenames:
 Expected URLs are:
 
 ```text
-https://github.com/bignormal/aera/releases/download/v9.9.9/agentera-studio-9.9.9-setup.exe
-https://github.com/bignormal/aera/releases/tag/v9.9.9
+https://github.com/Ablankpaper/aera/releases/download/v9.9.9/agentera-studio-9.9.9-setup.exe
+https://github.com/Ablankpaper/aera/releases/tag/v9.9.9
 ```
 
 Run: `npm test -- --run tests/winget-generator.test.ts`
@@ -597,7 +597,7 @@ Set `package.json` to:
   "name": "agentera-studio",
   "description": "AgentEra Studio — private AI agent desktop",
   "author": "AgentEra",
-  "homepage": "https://github.com/bignormal/aera"
+  "homepage": "https://github.com/Ablankpaper/aera"
 }
 ```
 
@@ -617,7 +617,7 @@ linux:
   vendor: AgentEra
 publish:
   provider: github
-  owner: bignormal
+  owner: Ablankpaper
   repo: aera
 ```
 
@@ -633,7 +633,7 @@ const WINGET_PACKAGE_IDENTIFIER = "Bignormal.AgentEraStudio";
 const WINGET_PACKAGE_PATH = ["b", "Bignormal", "AgentEraStudio"];
 ```
 
-The locale template uses publisher `AgentEra`, package name `AgentEra Studio`, repository/support/license links under `bignormal/aera`, and description text naming `AgentEra Runtime`. Preserve the MIT license field.
+The locale template uses publisher `AgentEra`, package name `AgentEra Studio`, repository/support/license links under `Ablankpaper/aera`, and description text naming `AgentEra Runtime`. Preserve the MIT license field.
 
 - [ ] **Step 5: Update workflow artifact selection and remove the upstream landing deploy**
 
@@ -643,7 +643,7 @@ Change both release workflows to match:
 name.startsWith(`agentera-studio-${version}-`);
 ```
 
-Set `PUBLISH_OWNER: bignormal` and remove the `rebuild_landing_page` job that dispatches `fathah/hermes-landing-page`. Do not add a replacement deployment.
+Set `PUBLISH_OWNER: Ablankpaper` and remove the `rebuild_landing_page` job that dispatches `fathah/hermes-landing-page`. Do not add a replacement deployment.
 
 - [ ] **Step 6: Run packaging metadata tests**
 
@@ -702,7 +702,7 @@ git commit -m "build: rebrand AgentEra Studio packages"
 
 ```ts
 expect(read("src/main/app/menu.ts")).toContain(
-  "https://github.com/bignormal/aera/issues",
+  "https://github.com/Ablankpaper/aera/issues",
 );
 expect(read("src/renderer/src/screens/Layout/Layout.tsx")).toContain(
   'from "../../assets/iconv2.png"',
@@ -740,7 +740,7 @@ Hermes Agent (bundled engine label) -> AgentEra Runtime
 Hermes (pronoun for the bundled engine) -> AgentEra Runtime
 ```
 
-Do not change command tokens, URLs for factual runtime sources, headers, routes, ids, or environment variables. For the Help menu, label the source link `AgentEra Runtime Source` while keeping the factual `NousResearch/hermes-agent` URL; point `Report an Issue` to `https://github.com/bignormal/aera/issues`.
+Do not change command tokens, URLs for factual runtime sources, headers, routes, ids, or environment variables. For the Help menu, label the source link `AgentEra Runtime Source` while keeping the factual `NousResearch/hermes-agent` URL; point `Report an Issue` to `https://github.com/Ablankpaper/aera/issues`.
 
 - [ ] **Step 4: Unmount inherited promotion**
 
@@ -821,11 +821,11 @@ Replace first-party occurrences in `common.ts`, `welcome.ts`, `settings.ts`, `in
 
 - [ ] **Step 3: Replace public repository and product documentation branding**
 
-Use `# AgentEra Studio` as the README heading, point source/issues/releases/license links to `bignormal/aera`, describe the visible engine as `AgentEra Runtime`, and keep literal CLI commands as `hermes ...` where compatibility requires them.
+Use `# AgentEra Studio` as the README heading, point source/issues/releases/license links to `Ablankpaper/aera`, describe the visible engine as `AgentEra Runtime`, and keep literal CLI commands as `hermes ...` where compatibility requires them.
 
-Remove README references that embed `assets/header.webp`, `previews/download.webp`, or the pre-rebrand `previews/*.png` screenshots. Replace the download image with a text link to `https://github.com/bignormal/aera/releases`. Do not delete the historical binary files in this task.
+Remove README references that embed `assets/header.webp`, `previews/download.webp`, or the pre-rebrand `previews/*.png` screenshots. Replace the download image with a text link to `https://github.com/Ablankpaper/aera/releases`. Do not delete the historical binary files in this task.
 
-Update contribution issue links to `https://github.com/bignormal/aera/issues`. Keep the MIT license and factual upstream/runtime source acknowledgements.
+Update contribution issue links to `https://github.com/Ablankpaper/aera/issues`. Keep the MIT license and factual upstream/runtime source acknowledgements.
 
 - [ ] **Step 4: Run locale and visible-brand tests**
 

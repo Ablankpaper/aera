@@ -8,11 +8,11 @@
           "type": "string"
         },
         "candidateRunUrl": {
-          "pattern": "^https://github\\.com/bignormal/aera-admin/actions/runs/[1-9][0-9]*$",
+          "pattern": "^https://github\\.com/Ablankpaper/aera-admin/actions/runs/[1-9][0-9]*$",
           "type": "string"
         },
         "ciRunUrl": {
-          "pattern": "^https://github\\.com/bignormal/aera-admin/actions/runs/[1-9][0-9]*$",
+          "pattern": "^https://github\\.com/Ablankpaper/aera-admin/actions/runs/[1-9][0-9]*$",
           "type": "string"
         },
         "imageDigest": {
@@ -41,11 +41,11 @@
           "type": "string"
         },
         "candidateRunUrl": {
-          "pattern": "^https://github\\.com/bignormal/aera-cloud/actions/runs/[1-9][0-9]*$",
+          "pattern": "^https://github\\.com/Ablankpaper/aera-cloud/actions/runs/[1-9][0-9]*$",
           "type": "string"
         },
         "ciRunUrl": {
-          "pattern": "^https://github\\.com/bignormal/aera-cloud/actions/runs/[1-9][0-9]*$",
+          "pattern": "^https://github\\.com/Ablankpaper/aera-cloud/actions/runs/[1-9][0-9]*$",
           "type": "string"
         },
         "imageDigest": {
@@ -74,11 +74,11 @@
           "type": "string"
         },
         "candidateRunUrl": {
-          "pattern": "^https://github\\.com/bignormal/aera/actions/runs/[1-9][0-9]*$",
+          "pattern": "^https://github\\.com/Ablankpaper/aera/actions/runs/[1-9][0-9]*$",
           "type": "string"
         },
         "ciRunUrl": {
-          "pattern": "^https://github\\.com/bignormal/aera/actions/runs/[1-9][0-9]*$",
+          "pattern": "^https://github\\.com/Ablankpaper/aera/actions/runs/[1-9][0-9]*$",
           "type": "string"
         },
         "sha": {

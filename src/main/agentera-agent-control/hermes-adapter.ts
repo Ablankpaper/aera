@@ -884,11 +884,19 @@ export class AgenteraHermesAdapter {
       policy: plan.policy,
       projection: plan.projection,
     });
+    const toolPolicy = Object.freeze({
+      allowed: Object.freeze([...plan.policy.document.tools.allowed]),
+      denied: Object.freeze([...plan.policy.document.tools.denied]),
+    });
     return {
       binding,
       profilePath: plan.profilePath,
       resumeSessionId: binding.hermesSessionId ?? undefined,
-      envelope: { instructions, requireBoundApiTransport: true },
+      envelope: {
+        instructions,
+        requireBoundApiTransport: true,
+        toolPolicy,
+      },
       modelOverride: plan.modelOverride,
     };
   }

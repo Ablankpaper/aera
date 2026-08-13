@@ -122,7 +122,36 @@ export type ModelConfigurationMutationResult =
         | `model_save_${ModelConfigurationStage}_failed`
         | "model_configuration_recovery_required";
       rollback: "not_needed" | "restored" | "recovery_required";
+      /**
+       * Set only when the caller's `expectedCatalogRevision` did not match the
+       * coordinator's current catalog — the one rejection a caller can fix by
+       * re-reading the catalog. Every other refusal (illegal request, unowned
+       * profile, missing replacement, moved active route) leaves this absent,
+       * because replaying those would fail again in exactly the same way.
+       */
+      reason?: "stale_catalog_revision";
     };
+
+/**
+ * Whether a rejected mutation may be safely replayed against a fresh catalog.
+ *
+ * Requires all three of:
+ *   - an explicit `stale_catalog_revision` reason, so only a revision mismatch
+ *     qualifies and never some other validation refusal;
+ *   - the `validation` stage, which runs before any adapter work;
+ *   - `rollback: "not_needed"`, proving nothing was written and a replay
+ *     therefore cannot double-apply.
+ */
+export function isSafeToRetryStaleRevision(
+  result: ModelConfigurationMutationResult,
+): boolean {
+  return (
+    result.status === "rejected" &&
+    result.reason === "stale_catalog_revision" &&
+    result.stage === "validation" &&
+    result.rollback === "not_needed"
+  );
+}
 
 /**
  * Canonical identity used for deduplication and revision calculation. API

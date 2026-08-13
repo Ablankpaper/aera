@@ -217,7 +217,7 @@ export default function RuntimeDistributionCard({
               </div>
               <div>
                 <dt>{t("settings.runtimeDistribution.confirmSource")}</dt>
-                <dd>bignormal/aera-runtime</dd>
+                <dd>Ablankpaper/aera-runtime</dd>
               </div>
               <div>
                 <dt>{t("settings.runtimeDistribution.confirmSize")}</dt>

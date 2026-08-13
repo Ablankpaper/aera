@@ -4,7 +4,7 @@
 
 **Goal:** Ship a signed, platform-specific AgentEra Runtime inside AgentEra Studio so an authenticated user can prepare and run the local Hermes core without GitHub, Git, system Python, PyPI, or an online install script, then explicitly download a verified update and switch to it on restart with automatic rollback.
 
-**Architecture:** `bignormal/aera-runtime` becomes the artifact producer: it assembles a relocatable CPython 3.11.15 runtime, installs the locked Hermes wheel and `[all]` dependency profile, copies the bundled Skills and built frontend assets, produces deterministic native archives, signs canonical manifests with Ed25519, and publishes only after the existing Hermes compatibility gate and extracted-artifact smoke tests pass. `bignormal/aera` becomes the artifact consumer: its main process verifies and packages an exact Seed, installs program files below Electron `userData/runtime`, resolves every local Runtime invocation through one live abstraction, keeps `HERMES_HOME` physically separate, checks updates without downloading, stages only after user confirmation, and activates a candidate during a clean restart before any Runtime-dependent module is imported.
+**Architecture:** `Ablankpaper/aera-runtime` becomes the artifact producer: it assembles a relocatable CPython 3.11.15 runtime, installs the locked Hermes wheel and `[all]` dependency profile, copies the bundled Skills and built frontend assets, produces deterministic native archives, signs canonical manifests with Ed25519, and publishes only after the existing Hermes compatibility gate and extracted-artifact smoke tests pass. `Ablankpaper/aera` becomes the artifact consumer: its main process verifies and packages an exact Seed, installs program files below Electron `userData/runtime`, resolves every local Runtime invocation through one live abstraction, keeps `HERMES_HOME` physically separate, checks updates without downloading, stages only after user confirmation, and activates a candidate during a clean restart before any Runtime-dependent module is imported.
 
 **Tech Stack:** Python 3.11.15, uv and `uv.lock`, setuptools wheel builds, `cryptography` Ed25519, `zstandard==0.25.0`, deterministic TAR/Zstandard and ZIP archives, GitHub Actions and Releases, Electron 39 / Node 22.22, TypeScript 5.9, Node `crypto`/`fs`/`zlib`, `tar` 7, `extract-zip` 2, React 19, Vitest, Playwright, macOS ARM64, Windows x64.
 
@@ -419,11 +419,11 @@ Expected: clean source worktree; full tests and compatibility gate pass.
 cd "$RUNTIME"
 base64 < "$HOME/.config/agentera/runtime-signing/$RUNTIME_KEY_ID.pem" | \
   gh secret set AGENTERA_RUNTIME_SIGNING_KEY_PEM_B64 \
-    --repo bignormal/aera-runtime \
+    --repo Ablankpaper/aera-runtime \
     --env runtime-production
 git push -u origin aera/runtime-seed-distribution
 gh pr create \
-  --repo bignormal/aera-runtime \
+  --repo Ablankpaper/aera-runtime \
   --base aera/hermes-compatibility-gate \
   --head aera/runtime-seed-distribution \
   --draft \
@@ -435,13 +435,13 @@ gh pr create \
 
 ```bash
 gh workflow run agentera-runtime-release.yml \
-  --repo bignormal/aera-runtime \
+  --repo Ablankpaper/aera-runtime \
   --ref aera/runtime-seed-distribution \
   -f agentera_revision=1 \
   -f channel=candidate \
   -f candidate_number=1 \
   -f publish=false
-gh run list --repo bignormal/aera-runtime --workflow agentera-runtime-release.yml --limit 1
+gh run list --repo Ablankpaper/aera-runtime --workflow agentera-runtime-release.yml --limit 1
 ```
 
 Expected: native macOS ARM64 and Windows x64 jobs, compatibility, signing, and verification pass; publish is skipped.
@@ -850,7 +850,7 @@ export async function checkStableRuntimeUpdate(context: RuntimeUpdateContext): P
 
 - [ ] Build a loopback HTTP test server covering `206`, ignored Range -> `200`, mismatched `Content-Range`, redirect limit, timeout, connection drop, resume, cancel, retry, wrong size, wrong hash, and partial-file retention/expiry.
 
-- [ ] Write update-client tests proving a check downloads only the signed index/manifest/signature metadata, never the archive; older/equal/incompatible versions return no offer; GitHub failure returns current state plus a non-fatal check error; only `https://github.com/bignormal/aera-runtime/releases/download/` and the reviewed latest-channel redirect are accepted.
+- [ ] Write update-client tests proving a check downloads only the signed index/manifest/signature metadata, never the archive; older/equal/incompatible versions return no offer; GitHub failure returns current state plus a non-fatal check error; only `https://github.com/Ablankpaper/aera-runtime/releases/download/` and the reviewed latest-channel redirect are accepted.
 
 - [ ] Run tests and confirm red.
 
@@ -1037,7 +1037,7 @@ git commit -m "feat: manage Runtime updates from Settings"
 
 - [ ] Remove the `raw.githubusercontent.com/NousResearch/.../install.sh` and `install.ps1` first-install branches from the shipped path. Remove any error message instructing the user to execute them. Keep backup/import/migration and explicit external Runtime support.
 
-- [ ] Change the Runtime menu link to `https://github.com/bignormal/aera-runtime`. Do not rename internal `hermes_cli`, `HERMES_HOME`, Profile files, or Hermes compatibility identifiers.
+- [ ] Change the Runtime menu link to `https://github.com/Ablankpaper/aera-runtime`. Do not rename internal `hermes_cli`, `HERMES_HOME`, Profile files, or Hermes compatibility identifiers.
 
 - [ ] Run focused tests and an online-fallback audit.
 

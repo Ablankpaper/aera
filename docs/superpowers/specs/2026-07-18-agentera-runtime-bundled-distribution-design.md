@@ -15,13 +15,13 @@
 - macOS x64、Linux x64 和 Linux ARM64 在首发机制稳定后接入同一分发协议。
 - 首次启动完全使用安装包内 Seed，不访问 GitHub。
 - 自动检查 Runtime 更新，但只有用户确认后才下载；下载完成后由用户重启切换。
-- 更新制品由公开的 `bignormal/aera-runtime` 仓库发布，客户端不携带 GitHub Token。
+- 更新制品由公开的 `Ablankpaper/aera-runtime` 仓库发布，客户端不携带 GitHub Token。
 - Chromium、语音模型、本地模型权重等大型可选资源不进入首版核心 Seed。
 - Runtime 发布必须通过 Hermes 核心机制和自我学习兼容性门禁。
 
 ## 仓库与职责边界
 
-### `bignormal/aera-runtime`
+### `Ablankpaper/aera-runtime`
 
 Runtime 仓库是制品生产者和源码事实来源。
 
@@ -36,7 +36,7 @@ Runtime 仓库是制品生产者和源码事实来源。
 
 Runtime 仓库不存储 AgentEra 用户、设备、Token、Profile 或云端业务数据。
 
-### `bignormal/aera`
+### `Ablankpaper/aera`
 
 桌面仓库是 Runtime Seed 消费者和本机生命周期管理者。
 
@@ -52,7 +52,7 @@ Runtime 仓库不存储 AgentEra 用户、设备、Token、Profile 或云端业�
 
 桌面 Renderer 不读取签名私钥、GitHub 凭据、Runtime 文件系统路径或用户 Profile 私有内容。下载、校验、安装和切换全部由 Electron 主进程完成。
 
-### `bignormal/aera-cloud`
+### `Ablankpaper/aera-cloud`
 
 云端认证服务不参与 Runtime 二进制分发。
 
@@ -125,7 +125,7 @@ agentera-runtime-<version>-windows-x64.manifest.sig
 {
   "schema_version": 1,
   "runtime_version": "0.18.2-agentera.1",
-  "source_repository": "bignormal/aera-runtime",
+  "source_repository": "Ablankpaper/aera-runtime",
   "source_commit": "<full-sha>",
   "channel": "stable",
   "platform": "darwin",
@@ -155,7 +155,7 @@ Runtime 构建在目标操作系统和架构的 CI Runner 上完成，不能在�
 
 稳定发布流程为：
 
-1. 从 `bignormal/aera-runtime` 的审阅提交或稳定标签开始。
+1. 从 `Ablankpaper/aera-runtime` 的审阅提交或稳定标签开始。
 2. 验证工作树、依赖锁和生成文件无漂移。
 3. 创建干净的目标平台 Runtime 根目录。
 4. 安装固定 Python 和锁定依赖。
@@ -265,7 +265,7 @@ Runtime 与桌面应用使用独立版本和独立更新状态。桌面更新不
 
 ## GitHub 与未来国内镜像
 
-第一版更新源使用公开的 `bignormal/aera-runtime` GitHub Release，允许普通客户端匿名下载，且客户端不包含任何 GitHub Token。
+第一版更新源使用公开的 `Ablankpaper/aera-runtime` GitHub Release，允许普通客户端匿名下载，且客户端不包含任何 GitHub Token。
 
 GitHub 在中国大陆可能仍然超时，因此 GitHub 只承担第一版更新源，不承担首次启动可用性。下载失败时继续使用当前 Runtime，并允许用户重试。
 
@@ -425,7 +425,7 @@ macOS ARM64 和 Windows x64 的 Seed 构建、安装、更新、回滚、自动�
 
 - 新设备断网时可以从 AgentEra Studio 安装包准备并启动 Runtime。
 - 首次启动不访问 GitHub、NousResearch、PyPI 或在线安装脚本。
-- Runtime Seed 来自 `bignormal/aera-runtime` 的精确提交并通过签名和哈希验证。
+- Runtime Seed 来自 `Ablankpaper/aera-runtime` 的精确提交并通过签名和哈希验证。
 - macOS ARM64 和 Windows x64 使用各自原生构建的 Seed。
 - 自动检查不会自动下载；只有用户确认后才下载候选版本。
 - Runtime 只在用户重启并且没有活跃任务时切换。

@@ -864,10 +864,14 @@ function notifyConnectionConfigChanged(catalogRevision?: string): void {
   });
 }
 
-function notifyRuntimeSnapshotChanged(catalogRevision?: string): void {
-  if (catalogRevision) {
+function notifyRuntimeSnapshotChanged(
+  catalogRevision?: string,
+  profile?: string,
+): void {
+  if (catalogRevision || profile) {
     mainWindow?.webContents.send("runtime-snapshot-changed", {
-      catalogRevision,
+      ...(catalogRevision ? { catalogRevision } : {}),
+      ...(profile ? { profile } : {}),
     });
     return;
   }
