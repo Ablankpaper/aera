@@ -62,7 +62,7 @@ PR は小さく目的を絞ってください — その方がレビューもマ
 
 ## バグ報告
 
-バグを見つけた場合は、以下の情報を添えて [Issue を作成してください](https://github.com/bignormal/aera/issues/new)。
+バグを見つけた場合は、以下の情報を添えて [Issue を作成してください](https://github.com/Ablankpaper/aera/issues/new)。
 
 - 明確なタイトルと説明
 - 再現手順
@@ -71,7 +71,7 @@ PR は小さく目的を絞ってください — その方がレビューもマ
 
 ## 機能リクエスト
 
-アイデアがある場合は、[Issue を作成して](https://github.com/bignormal/aera/issues/new)以下を記述してください。
+アイデアがある場合は、[Issue を作成して](https://github.com/Ablankpaper/aera/issues/new)以下を記述してください。
 
 - 解決したい問題
 - どのように動作してほしいか
@@ -96,7 +96,7 @@ build/                   パッケージング用リソース
 
 ## コミュニティ
 
-- バグ、機能要望、コントリビューター間の議論には [GitHub Issues](https://github.com/bignormal/aera/issues) を利用してください。
+- バグ、機能要望、コントリビューター間の議論には [GitHub Issues](https://github.com/Ablankpaper/aera/issues) を利用してください。
 
 ## ライセンス
 

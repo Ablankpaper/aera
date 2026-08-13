@@ -69,7 +69,7 @@ describe("generateWingetManifests", () => {
     generateWingetManifests({
       rootDir: TEST_DIR,
       version: "9.9.9",
-      publishOwner: "bignormal",
+      publishOwner: "Ablankpaper",
     });
 
     const outDir = join(
@@ -104,7 +104,7 @@ describe("generateWingetManifests", () => {
     generateWingetManifests({
       rootDir: TEST_DIR,
       version: "9.9.9",
-      publishOwner: "bignormal",
+      publishOwner: "Ablankpaper",
     });
 
     const outFile = join(
@@ -139,7 +139,7 @@ describe("generateWingetManifests", () => {
     generateWingetManifests({
       rootDir: TEST_DIR,
       version: "9.9.9",
-      publishOwner: "bignormal",
+      publishOwner: "Ablankpaper",
     });
 
     const outFile = join(
@@ -167,7 +167,7 @@ describe("generateWingetManifests", () => {
       generateWingetManifests({
         rootDir: TEST_DIR,
         version: "9.9.9",
-        publishOwner: "bignormal",
+        publishOwner: "Ablankpaper",
       }),
     ).toThrow(/installer not found/i);
   });
@@ -185,7 +185,7 @@ describe("generateWingetManifests", () => {
       generateWingetManifests({
         rootDir: TEST_DIR,
         version: "9.9.9",
-        publishOwner: "bignormal",
+        publishOwner: "Ablankpaper",
       }),
     ).toThrow(/templates not found/i);
   });

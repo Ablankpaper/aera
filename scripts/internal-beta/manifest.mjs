@@ -188,7 +188,7 @@ function githubRunUrl(value, label) {
     if (
       parsed.protocol !== "https:" ||
       parsed.hostname !== "github.com" ||
-      !/^\/bignormal\/aera\/actions\/runs\/[1-9][0-9]*$/u.test(
+      !/^\/Ablankpaper\/aera\/actions\/runs\/[1-9][0-9]*$/u.test(
         parsed.pathname,
       ) ||
       parsed.search !== "" ||

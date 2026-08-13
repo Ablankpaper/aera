@@ -30,7 +30,7 @@ describe("Aera visible branding", () => {
     expect(builder).toContain("artifactName: Aera-${version}");
     expect(builder).toContain("- aera");
     expect(builder).toContain("- agentera");
-    expect(builder).toContain("owner: bignormal");
+    expect(builder).toContain("owner: Ablankpaper");
     expect(builder).toContain("repo: aera");
   });
 

@@ -92,7 +92,7 @@ function validateBuild(build) {
   ]) {
     if (
       typeof value !== "string" ||
-      !/^https:\/\/github\.com\/bignormal\/aera\/actions\/runs\/[1-9][0-9]*$/u.test(
+      !/^https:\/\/github\.com\/Ablankpaper\/aera\/actions\/runs\/[1-9][0-9]*$/u.test(
         value,
       )
     ) {
