@@ -6,7 +6,7 @@ Public releases continue to use `electron-updater` with the GitHub publisher met
 
 [[src/main/app/updater.ts#setupUpdater]] registers one IPC contract for both channels, persists the auto-upgrade preference under Electron `userData`, performs the first packaged-app check after five seconds, and repeats checks every six hours. It also retains a current snapshot so a renderer created after a background check can recover the `available`, `downloading`, `ready`, or `error` state through `getDesktopUpdateState`.
 
-The production dependency gate runs `npm audit --omit=dev --audit-level=high`. Electron remains pinned to 39.8.10 within the reviewed major, while its npm `extract-zip` dependency is overridden to Electron's hardened `@electron-internal/extract-zip` implementation so the audit reports no high-severity production vulnerability. The public update path stays on `electron-updater` 6.8.9 or newer, and shipped archive handling stays on `tar` 7.5.22 or newer.
+The production dependency gate runs `npm audit --omit=dev --audit-level=high`. Electron is pinned to 41.10.5, the first reviewed maintained line that uses the hardened `@electron-internal/extract-zip` installer dependency and clears the sandboxed-iframe advisory. Desktop ZIP extraction also calls that hardened implementation directly. The public update path stays on `electron-updater` 6.8.9 or newer, and shipped archive handling stays on `tar` 7.5.22 or newer.
 
 When a newer release is available, [[src/renderer/src/screens/Layout/Layout.tsx#Layout]] shows an upgrade button in the sidebar footer. The button downloads the update when needed, shows progress, and becomes a restart action after verified bytes are ready.
 

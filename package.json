@@ -108,7 +108,7 @@
     "@vitejs/plugin-react": "^5.1.1",
     "@vitest/coverage-v8": "^4.1.8",
     "@wesbos/code-icons": "^1.2.4",
-    "electron": "39.8.10",
+    "electron": "41.10.5",
     "electron-builder": "^26.0.12",
     "electron-vite": "^5.0.0",
     "eslint": "^9.39.1",
