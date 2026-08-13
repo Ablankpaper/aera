@@ -120,7 +120,7 @@ describe("generateWingetManifests", () => {
     const content = readFileSync(outFile, "utf-8");
     expect(content).toContain("Version: 9.9.9");
     expect(content).toContain(
-      "Url: https://github.com/bignormal/aera/releases/download/v9.9.9/Aera-9.9.9-setup.exe",
+      "Url: https://github.com/Ablankpaper/aera/releases/download/v9.9.9/Aera-9.9.9-setup.exe",
     );
     expect(content).toMatch(/Sha: [A-F0-9]{64}/);
     expect(content).toMatch(/Date: \d{4}-\d{2}-\d{2}/);
@@ -154,7 +154,7 @@ describe("generateWingetManifests", () => {
     );
     const content = readFileSync(outFile, "utf-8");
     expect(content).toContain(
-      "Notes: https://github.com/bignormal/aera/releases/tag/v9.9.9",
+      "Notes: https://github.com/Ablankpaper/aera/releases/tag/v9.9.9",
     );
     expect(content).not.toContain("__");
   });

@@ -41,7 +41,7 @@ export function validateCandidateDocument(document, expected = {}) {
   );
   if (
     document.schemaVersion !== 1 ||
-    document.repository !== "bignormal/aera"
+    document.repository !== "Ablankpaper/aera"
   ) {
     throw new Error("Candidate schema or repository is invalid");
   }
@@ -375,7 +375,7 @@ function validateSupplyChain(supplyChain) {
   if (
     supplyChain.githubAttestation.required !== true ||
     supplyChain.githubAttestation.signerWorkflow !==
-      "github.com/bignormal/aera/.github/workflows/release-candidate.yml"
+      "github.com/Ablankpaper/aera/.github/workflows/release-candidate.yml"
   ) {
     throw new Error("GitHub artifact attestation policy is invalid");
   }

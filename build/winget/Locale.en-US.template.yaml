@@ -3,12 +3,12 @@ PackageIdentifier: Bignormal.AgentEraStudio
 PackageVersion: __VERSION__
 PackageLocale: en-US
 Publisher: Aera
-PublisherUrl: https://github.com/bignormal/aera
-PublisherSupportUrl: https://github.com/bignormal/aera/issues
+PublisherUrl: https://github.com/Ablankpaper/aera
+PublisherSupportUrl: https://github.com/Ablankpaper/aera/issues
 PackageName: Aera
-PackageUrl: https://github.com/bignormal/aera
+PackageUrl: https://github.com/Ablankpaper/aera
 License: MIT
-LicenseUrl: https://github.com/bignormal/aera/blob/main/LICENSE
+LicenseUrl: https://github.com/Ablankpaper/aera/blob/main/LICENSE
 ShortDescription: Private AI agent desktop
 Description: |-
   Aera is a native desktop app for installing, configuring, and chatting with

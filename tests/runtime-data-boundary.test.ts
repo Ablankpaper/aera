@@ -324,13 +324,13 @@ function stableOffer(
     archiveSize: manifest.archive_size,
     archiveSha256: manifest.archive_sha256,
     archiveUrl: new URL(
-      `https://github.com/bignormal/aera-runtime/releases/download/${releaseTag}/${archiveName}`,
+      `https://github.com/Ablankpaper/aera-runtime/releases/download/${releaseTag}/${archiveName}`,
     ),
     manifestUrl: new URL(
-      `https://github.com/bignormal/aera-runtime/releases/download/${releaseTag}/${archiveName}.manifest.json`,
+      `https://github.com/Ablankpaper/aera-runtime/releases/download/${releaseTag}/${archiveName}.manifest.json`,
     ),
     signatureUrl: new URL(
-      `https://github.com/bignormal/aera-runtime/releases/download/${releaseTag}/${archiveName}.manifest.sig`,
+      `https://github.com/Ablankpaper/aera-runtime/releases/download/${releaseTag}/${archiveName}.manifest.sig`,
     ),
     manifestBytes: signed.manifestBytes,
     signatureBytes: signed.signatureBytes,
@@ -365,7 +365,7 @@ describe("Aera Runtime preserves Hermes adaptive data", () => {
     });
     const trustedPublicKeys = new Map([[TEST_KEY_ID, TEST_PUBLIC_KEY]]);
     const seedContext: RuntimeManifestValidationContext = {
-      repository: "bignormal/aera-runtime",
+      repository: "Ablankpaper/aera-runtime",
       platform: "darwin",
       arch: "arm64",
       desktopVersion: "0.7.3",

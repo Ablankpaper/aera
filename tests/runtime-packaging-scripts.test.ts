@@ -24,7 +24,7 @@ import {
 import { prepareRuntimeSeed } from "../scripts/prepare-agentera-runtime-seed.mjs";
 import { verifyPackagedRuntimeSeed } from "../scripts/verify-packaged-runtime-seed.mjs";
 
-const REPOSITORY = "bignormal/aera-runtime";
+const REPOSITORY = "Ablankpaper/aera-runtime";
 const RELEASE_TAG = `runtime-v${TEST_RUNTIME_VERSION}-rc.1`;
 const MANIFEST_NAME = TEST_ARCHIVE_NAME.replace(
   /-darwin-arm64\.tar\.zst$/,

@@ -16,8 +16,8 @@ const SHA_A = "a".repeat(40);
 const SHA_B = "b".repeat(40);
 const SHA_C = "c".repeat(40);
 const SHA_D = "d".repeat(40);
-const DIGEST_A = `ghcr.io/bignormal/aera-cloud@sha256:${"1".repeat(64)}`;
-const DIGEST_B = `ghcr.io/bignormal/aera-admin@sha256:${"2".repeat(64)}`;
+const DIGEST_A = `ghcr.io/ablankpaper/aera-cloud@sha256:${"1".repeat(64)}`;
+const DIGEST_B = `ghcr.io/ablankpaper/aera-admin@sha256:${"2".repeat(64)}`;
 const HASH_A = "3".repeat(64);
 
 function validRecord() {
@@ -31,7 +31,7 @@ function validRecord() {
         sha: SHA_A,
         status: "ci_passed",
         verifiedAt: "2026-07-24T07:00:00.000Z",
-        runUrl: "https://github.com/bignormal/aera/actions/runs/30012531355",
+        runUrl: "https://github.com/Ablankpaper/aera/actions/runs/30012531355",
       },
       {
         role: "cloud",
@@ -39,7 +39,7 @@ function validRecord() {
         status: "ci_passed",
         verifiedAt: "2026-07-24T07:05:00.000Z",
         runUrl:
-          "https://github.com/bignormal/aera-cloud/actions/runs/30006310907",
+          "https://github.com/Ablankpaper/aera-cloud/actions/runs/30006310907",
       },
       {
         role: "admin",
@@ -47,7 +47,7 @@ function validRecord() {
         status: "ci_passed",
         verifiedAt: "2026-07-24T07:10:00.000Z",
         runUrl:
-          "https://github.com/bignormal/aera-admin/actions/runs/30010245066",
+          "https://github.com/Ablankpaper/aera-admin/actions/runs/30010245066",
       },
       {
         role: "runtime",
@@ -64,7 +64,7 @@ function validRecord() {
         status: "signature_verified",
         verifiedAt: "2026-07-24T07:20:00.000Z",
         runUrl:
-          "https://github.com/bignormal/aera-cloud/actions/runs/30020000001",
+          "https://github.com/Ablankpaper/aera-cloud/actions/runs/30020000001",
       },
       {
         role: "admin",
@@ -73,7 +73,7 @@ function validRecord() {
         status: "signature_verified",
         verifiedAt: "2026-07-24T07:25:00.000Z",
         runUrl:
-          "https://github.com/bignormal/aera-admin/actions/runs/30020000002",
+          "https://github.com/Ablankpaper/aera-admin/actions/runs/30020000002",
       },
     ],
     packages: [
@@ -207,7 +207,7 @@ test("rejects non-exact identities, mutable links, timestamps, and detailed plat
       record.repositories[0].runUrl = "https://example.invalid/run/1";
     },
     (record) => {
-      record.candidates[0].imageDigest = "ghcr.io/bignormal/aera-cloud:latest";
+      record.candidates[0].imageDigest = "ghcr.io/ablankpaper/aera-cloud:latest";
     },
     (record) => {
       record.packages[0].sha256 = "not-a-hash";

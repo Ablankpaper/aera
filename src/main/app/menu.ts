@@ -99,12 +99,12 @@ export function buildMenu({ getMainWindow, openExternalUrl }: MenuDeps): void {
         {
           label: "Aera Runtime on GitHub",
           click: () =>
-            openExternalUrl("https://github.com/bignormal/aera-runtime"),
+            openExternalUrl("https://github.com/Ablankpaper/aera-runtime"),
         },
         {
           label: "Report an Issue",
           click: () =>
-            openExternalUrl("https://github.com/bignormal/aera/issues"),
+            openExternalUrl("https://github.com/Ablankpaper/aera/issues"),
         },
       ],
     },

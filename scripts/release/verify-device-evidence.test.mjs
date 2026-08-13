@@ -253,7 +253,7 @@ function evidence(candidateDocument) {
   return {
     schemaVersion: 1,
     candidate: {
-      repository: "bignormal/aera",
+      repository: "Ablankpaper/aera",
       sourceSha: candidateDocument.sourceSha,
       version: candidateDocument.version,
       manifestSha256,
@@ -300,7 +300,7 @@ function evidence(candidateDocument) {
       testedAt: `2026-07-23T1${index + 2}:00:00Z`,
       testerIdentityRef: `employee:release-qa-0${index + 1}`,
       evidenceLinks: [
-        `https://github.com/bignormal/aera/actions/runs/1234/artifacts/${2000 + index}`,
+        `https://github.com/Ablankpaper/aera/actions/runs/1234/artifacts/${2000 + index}`,
       ],
     })),
     completedAt: "2026-07-23T16:00:00Z",
@@ -347,13 +347,13 @@ function candidate() {
   const portable = byKind("windows_portable");
   return {
     schemaVersion: 1,
-    repository: "bignormal/aera",
+    repository: "Ablankpaper/aera",
     sourceSha: SOURCE_SHA,
     version: VERSION,
     build: {
       workflow: "Desktop signed candidate",
-      runUrl: "https://github.com/bignormal/aera/actions/runs/1234",
-      ciRunUrl: "https://github.com/bignormal/aera/actions/runs/1200",
+      runUrl: "https://github.com/Ablankpaper/aera/actions/runs/1234",
+      ciRunUrl: "https://github.com/Ablankpaper/aera/actions/runs/1200",
     },
     runtimeSeed: {
       lockSha256: "8".repeat(64),
@@ -426,7 +426,7 @@ function candidate() {
       githubAttestation: {
         required: true,
         signerWorkflow:
-          "github.com/bignormal/aera/.github/workflows/release-candidate.yml",
+          "github.com/Ablankpaper/aera/.github/workflows/release-candidate.yml",
       },
     },
     linuxReleasable: false,

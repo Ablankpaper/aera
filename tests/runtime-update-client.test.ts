@@ -19,7 +19,7 @@ import {
   type RuntimeMetadataTransport,
 } from "../src/main/agentera-runtime-distribution/update-client";
 
-const REPOSITORY = "bignormal/aera-runtime";
+const REPOSITORY = "Ablankpaper/aera-runtime";
 const RELEASE_TAG = `runtime-v${TEST_RUNTIME_VERSION}`;
 const MANIFEST_NAME = TEST_ARCHIVE_NAME.replace(
   /-darwin-arm64\.tar\.zst$/,
@@ -424,10 +424,10 @@ describe("Runtime stable update client", () => {
   });
 
   it.each([
-    "http://github.com/bignormal/aera-runtime/releases/download/runtime-v1/asset",
+    "http://github.com/Ablankpaper/aera-runtime/releases/download/runtime-v1/asset",
     "https://github.com/other/aera-runtime/releases/download/runtime-v1/asset",
-    "https://github.com/bignormal/aera-runtime/releases/latest/download/runtime.zip",
-    "https://github.com/bignormal/aera-runtime/releases/download/runtime-v1/asset?token=secret",
+    "https://github.com/Ablankpaper/aera-runtime/releases/latest/download/runtime.zip",
+    "https://github.com/Ablankpaper/aera-runtime/releases/download/runtime-v1/asset?token=secret",
   ])("rejects an unapproved Runtime update URL: %s", (value) => {
     expect(() =>
       assertAllowedRuntimeUpdateUrl(new URL(value), "release-asset"),

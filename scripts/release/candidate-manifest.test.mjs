@@ -134,7 +134,7 @@ test("builds deterministic update metadata and an SPDX Runtime Seed package", ()
       },
     },
     runtimeLock: {
-      repository: "bignormal/aera-runtime",
+      repository: "Ablankpaper/aera-runtime",
       runtime_version: "0.18.2-agentera.1",
       source_commit: "c".repeat(40),
     },
@@ -200,13 +200,13 @@ function candidate() {
   );
   return {
     schemaVersion: 1,
-    repository: "bignormal/aera",
+    repository: "Ablankpaper/aera",
     sourceSha: SOURCE_SHA,
     version: VERSION,
     build: {
       workflow: "Desktop signed candidate",
-      runUrl: "https://github.com/bignormal/aera/actions/runs/1234",
-      ciRunUrl: "https://github.com/bignormal/aera/actions/runs/1200",
+      runUrl: "https://github.com/Ablankpaper/aera/actions/runs/1234",
+      ciRunUrl: "https://github.com/Ablankpaper/aera/actions/runs/1200",
     },
     runtimeSeed: {
       lockSha256: "8".repeat(64),
@@ -298,7 +298,7 @@ function candidate() {
       githubAttestation: {
         required: true,
         signerWorkflow:
-          "github.com/bignormal/aera/.github/workflows/release-candidate.yml",
+          "github.com/Ablankpaper/aera/.github/workflows/release-candidate.yml",
       },
     },
     linuxReleasable: false,

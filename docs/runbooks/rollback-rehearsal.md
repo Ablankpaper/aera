@@ -38,7 +38,7 @@ Do not start the digest switch if backup, disposable restore, object reconciliat
 
 ## Rehearse Cloud A and restore B
 
-Dispatch `bignormal/aera-cloud/.github/workflows/rollback-production.yml` with:
+Dispatch `Ablankpaper/aera-cloud/.github/workflows/rollback-production.yml` with:
 
 ```text
 target_environment=staging
@@ -66,7 +66,7 @@ Require both `cloud-staging-rollback-<RUN_ID>` and `cloud-staging-rehearsal-rest
 
 ## Rehearse Admin A and restore B
 
-First disable Admin mutations and the affected worker. Then dispatch `bignormal/aera-admin/.github/workflows/rollback-production.yml` with the same input pattern using Admin A/B identities.
+First disable Admin mutations and the affected worker. Then dispatch `Ablankpaper/aera-admin/.github/workflows/rollback-production.yml` with the same input pattern using Admin A/B identities.
 
 The Admin workflow must prove health before change, encrypted backup/disposable restore, A signature and Admin-schema compatibility, mounted mTLS/service-JWT material, real Cloud compatibility, dual authentication, browser/read-only access, RBAC/audit reads, and mutation rejection on A. It then re-verifies and restores exact Admin B with mutations disabled.
 

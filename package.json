@@ -4,7 +4,7 @@
   "description": "Aera — private AI agent desktop",
   "main": "./out/main/index.js",
   "author": "Aera",
-  "homepage": "https://github.com/bignormal/aera",
+  "homepage": "https://github.com/Ablankpaper/aera",
   "scripts": {
     "prepare:runtime-seed": "node scripts/prepare-agentera-runtime-seed.mjs",
     "verify:packaged-runtime-seed": "node scripts/verify-packaged-runtime-seed.mjs",
