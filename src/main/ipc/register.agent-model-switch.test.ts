@@ -9,6 +9,7 @@ import type { PreparedAgenteraConversationRuntime } from "../agentera-agent-cont
 import {
   classifyAgentModelRoute,
   prepareAgentModelSend,
+  runAgentModelSegmentPreflight,
 } from "./agent-model-send";
 
 const transition: AgentModelSegmentTransition = {
@@ -129,6 +130,27 @@ describe("installed-Agent send IPC segment lifecycle", () => {
     const { control, events, lifecycle } = lifecycleHarness();
     lifecycle.emitPreparing();
     lifecycle.callbacks.onError?.("connect failed");
+
+    expect(control.failConversationSegment).toHaveBeenCalledTimes(1);
+    expect(control.activateConversationSegment).not.toHaveBeenCalled();
+    expect(events).toEqual([
+      expect.objectContaining({ state: "preparing" }),
+      expect.objectContaining({
+        state: "failed",
+        code: "model_switch_transport_failed",
+      }),
+    ]);
+  });
+
+  it("fails the candidate when send preflight rejects and preserves the original error", async () => {
+    const { control, events, lifecycle } = lifecycleHarness();
+    const startupError = new Error("gateway startup failed");
+
+    await expect(
+      runAgentModelSegmentPreflight(lifecycle, async () => {
+        throw startupError;
+      }),
+    ).rejects.toBe(startupError);
 
     expect(control.failConversationSegment).toHaveBeenCalledTimes(1);
     expect(control.activateConversationSegment).not.toHaveBeenCalled();

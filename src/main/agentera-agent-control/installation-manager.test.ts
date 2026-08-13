@@ -2100,6 +2100,57 @@ describe("Agent installation orchestration", () => {
     });
   });
 
+  // @lat: [[lat.md/agentera-agent-control-plane#AgentEra Agent control plane V1#Installation and binding#Canonical Profile target validation]]
+  it("claims the default Profile through the production installation path", async () => {
+    const originalResolveProfilePath = profiles.resolveProfilePath;
+    profiles.resolveProfilePath = vi.fn((id: string) =>
+      id === "default" ? profilesRoot : originalResolveProfilePath(id),
+    );
+
+    const installed = await manager().install({
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      profile: {
+        kind: "claim",
+        profileId: "default",
+        profilePath: profilesRoot,
+      },
+    });
+
+    expect(installed).toMatchObject({
+      agentInstallationId: AGENT_INSTALLATION_ID,
+      status: "active",
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+    });
+    expect(createProfile).not.toHaveBeenCalled();
+    expect(createInstallation).toHaveBeenCalledOnce();
+    expect(bindings.verifyProfileBinding(profilesRoot, owner)).toMatchObject({
+      agentInstallationId: AGENT_INSTALLATION_ID,
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+    });
+  });
+
+  // @lat: [[lat.md/agentera-agent-control-plane#AgentEra Agent control plane V1#Installation and binding#Canonical Profile target validation]]
+  it("rejects a mismatched default Profile path before Cloud mutation", async () => {
+    const originalResolveProfilePath = profiles.resolveProfilePath;
+    profiles.resolveProfilePath = vi.fn((id: string) =>
+      id === "default" ? profilesRoot : originalResolveProfilePath(id),
+    );
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: {
+          kind: "claim",
+          profileId: "default",
+          profilePath: join(root, "not-the-hermes-home"),
+        },
+      }),
+    ).rejects.toMatchObject({ code: "invalid_installation_request" });
+    expect(createInstallation).not.toHaveBeenCalled();
+  });
+
   it("reuses a persisted create idempotency key after an ambiguous cloud failure", async () => {
     createInstallation.mockRejectedValueOnce(new Error("response lost"));
     const request = {
