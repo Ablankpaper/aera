@@ -1,4 +1,4 @@
-import { readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -19,7 +19,12 @@ import type {
   AgenteraRuntimeOwner,
   AgenteraProfileBindingStore,
 } from "./agentera-profile-binding";
-import { profileHome, isValidProfileName, getActiveProfileNameSync } from "./utils";
+import {
+  profileHome,
+  profilePaths,
+  isValidProfileName,
+  getActiveProfileNameSync,
+} from "./utils";
 import { HERMES_HOME, expectedEnvKeyForModel } from "./installer";
 import {
   getModelConfig,
@@ -27,6 +32,7 @@ import {
   setEnvValue,
   setModelConfig,
 } from "./config";
+import { validateModelConfiguration } from "./config-model-migration";
 import {
   addModel,
   readModels,
@@ -77,10 +83,7 @@ export interface ModelConfigurationRuntimeConnection {
 export interface ModelConfigurationRuntimeOptions {
   userDataPath: string;
   getOwner: () => AgenteraRuntimeOwner;
-  profileBindings: Pick<
-    AgenteraProfileBindingStore,
-    "verifyProfileBinding"
-  >;
+  profileBindings: Pick<AgenteraProfileBindingStore, "verifyProfileBinding">;
   getConnectionConfig: () => ModelConfigurationRuntimeConnection;
   notifyConnectionConfigChanged?: (catalogRevision?: string) => void;
   notifyRuntimeSnapshotChanged?: (catalogRevision?: string) => void;
@@ -228,8 +231,7 @@ function activeRouteIdentity(profileId: string): PublicModelRouteIdentity {
   return {
     provider: config.provider,
     model: config.model,
-    baseUrl:
-      config.baseUrl || canonicalProviderBaseUrl(config.provider) || "",
+    baseUrl: config.baseUrl || canonicalProviderBaseUrl(config.provider) || "",
     apiMode: library?.apiMode ?? null,
   };
 }
@@ -297,7 +299,9 @@ function createMutationAdapter(
       const connection = options.getConnectionConfig();
       if (connection.mode !== "local") {
         throw Object.assign(
-          new Error("Coordinated local model writes require local Runtime mode."),
+          new Error(
+            "Coordinated local model writes require local Runtime mode.",
+          ),
           { code: "model_configuration_remote_unsupported" },
         );
       }
@@ -378,10 +382,7 @@ function createMutationAdapter(
                 // `addModel` intentionally deduplicates legacy rows without
                 // rewriting their provider label. Repair that identity here so
                 // a cosmetic provider rename cannot leave a stale catalog.
-                if (
-                  custom &&
-                  (saved.providerLabel || "") !== providerLabel
-                ) {
+                if (custom && (saved.providerLabel || "") !== providerLabel) {
                   const row = readModels().find(
                     (candidate) => candidate.id === saved.id,
                   );
@@ -434,9 +435,27 @@ function createMutationAdapter(
                 route.sourceProfileId === context.targetProfileId &&
                 canonicalPublicRouteKey(route) === newRouteKey,
             );
-            return routeExists &&
-              canonicalPublicRouteKey(activeRouteIdentity(context.targetProfileId)) ===
-                newRouteKey;
+            const routeMatches =
+              routeExists &&
+              canonicalPublicRouteKey(
+                activeRouteIdentity(context.targetProfileId),
+              ) === newRouteKey;
+            if (!routeMatches) return false;
+
+            // Final structural guard: the activation stage wrote the profile's
+            // config.yaml. If that write left duplicate `model:` keys or a
+            // broken `providers:` block (e.g. untouched legacy scalar format),
+            // a later read will fail to parse. Reject so the coordinator
+            // restores the snapshot instead of committing corrupt config.
+            const { configFile } = profilePaths(context.targetProfileId);
+            if (existsSync(configFile)) {
+              try {
+                validateModelConfiguration(readFileSync(configFile, "utf-8"));
+              } catch {
+                return false;
+              }
+            }
+            return true;
           },
           refreshPresentation: async () => {
             const revision = catalog.snapshot(context.targetProfileId).revision;
@@ -507,7 +526,10 @@ function createMutationAdapter(
             return;
           case "provider":
             if (providerRecord) {
-              removeCustomProvider(context.targetProfileId, providerRecord.name);
+              removeCustomProvider(
+                context.targetProfileId,
+                providerRecord.name,
+              );
             }
             return;
           case "model_library":
@@ -557,8 +579,9 @@ function createMutationAdapter(
                 route.sourceProfileId === context.targetProfileId &&
                 canonicalPublicRouteKey(route) === newRouteKey,
             ) &&
-            canonicalPublicRouteKey(activeRouteIdentity(context.targetProfileId)) ===
-              newRouteKey
+            canonicalPublicRouteKey(
+              activeRouteIdentity(context.targetProfileId),
+            ) === newRouteKey
           );
         },
         refreshPresentation: async () => {
@@ -624,7 +647,10 @@ export async function prepareModelConfigurationRuntime(
         const owner = ownerFromComponentKey(ownerHandle);
         if (!owner) return false;
         try {
-          options.profileBindings.verifyProfileBinding(profileHome(profileId), owner);
+          options.profileBindings.verifyProfileBinding(
+            profileHome(profileId),
+            owner,
+          );
           return true;
         } catch {
           return false;

@@ -26,6 +26,7 @@ const testState = vi.hoisted(() => ({
         revision: number;
         updatedAt: string;
       }) => void),
+  chatProfiles: [] as string[],
 }));
 
 vi.mock("../Chat/Chat", () => ({
@@ -42,6 +43,7 @@ vi.mock("../Chat/Chat", () => ({
   }) => {
     testState.chatConnectionAccess.push(allowAccountConnection ?? true);
     testState.chatProps.push({ profile, agentAppearance });
+    if (profile) testState.chatProfiles.push(profile);
     return (
       <div data-testid="chat-surface">
         <button type="button" onClick={onOpenMyAgents}>
@@ -176,6 +178,7 @@ describe("startup model setup prompt", () => {
     testState.chatConnectionAccess.length = 0;
     testState.chatProps.length = 0;
     testState.identityListener = null;
+    testState.chatProfiles.length = 0;
     vi.stubGlobal(
       "ResizeObserver",
       class {
@@ -212,6 +215,41 @@ describe("startup model setup prompt", () => {
       }),
     ).toBeInTheDocument();
     expect(api.getModelConfig).toHaveBeenCalledWith("default");
+  });
+
+  it("does not mount Chat against the placeholder default before restoring the active profile", async () => {
+    let resolveProfiles!: (
+      profiles: Array<{
+        id: string;
+        name: string;
+        isActive: boolean;
+        color: string;
+        avatar: null;
+      }>,
+    ) => void;
+    const api = installHermesAPI("gpt-5.6-sol", "custom");
+    api.listProfiles.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveProfiles = resolve;
+        }),
+    );
+
+    render(<Layout authState={authenticated} />);
+
+    await waitFor(() => expect(testState.chatProfiles).toEqual([]));
+    resolveProfiles([
+      {
+        id: "work",
+        name: "Work",
+        isActive: true,
+        color: "#666666",
+        avatar: null,
+      },
+    ]);
+
+    await waitFor(() => expect(testState.chatProfiles).toEqual(["work"]));
+    expect(testState.chatProfiles).not.toContain("default");
   });
 
   it("does not interrupt users whose startup profile already has a model", async () => {

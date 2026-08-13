@@ -927,38 +927,39 @@ function Layout({
           />
         )}
         <div style={paneStyle("chat")}>
-          {runs.map((run) => (
-            <div
-              key={run.runId}
-              style={{
-                display:
-                  view === "chat" && run.runId === activeRunId
-                    ? "flex"
-                    : "none",
-                flex: 1,
-                flexDirection: "column",
-                overflow: "hidden",
-              }}
-            >
-              <Chat
-                runId={run.runId}
-                initialMessages={run.seed}
-                initialSessionId={run.sessionId}
-                active={run.runId === activeRunId}
-                profile={run.profile}
-                onNewChat={handleNewChat}
-                onOpenDiagnose={(section?: string) =>
-                  openSettings(section, { profile: run.profile })
-                }
-                onOpenMyAgents={() => goTo("agents")}
-                onLoadingChange={handleRunLoading}
-                onSessionIdChange={handleRunSessionId}
-                onTitleChange={handleRunTitle}
-                agentAppearance={getAppearance(run.profile)}
-                allowAccountConnection={signedInState !== null}
-              />
-            </div>
-          ))}
+          {startupProfile &&
+            runs.map((run) => (
+              <div
+                key={run.runId}
+                style={{
+                  display:
+                    view === "chat" && run.runId === activeRunId
+                      ? "flex"
+                      : "none",
+                  flex: 1,
+                  flexDirection: "column",
+                  overflow: "hidden",
+                }}
+              >
+                <Chat
+                  runId={run.runId}
+                  initialMessages={run.seed}
+                  initialSessionId={run.sessionId}
+                  active={run.runId === activeRunId}
+                  profile={run.profile}
+                  onNewChat={handleNewChat}
+                  onOpenDiagnose={(section?: string) =>
+                    openSettings(section, { profile: run.profile })
+                  }
+                  onOpenMyAgents={() => goTo("agents")}
+                  onLoadingChange={handleRunLoading}
+                  onSessionIdChange={handleRunSessionId}
+                  onTitleChange={handleRunTitle}
+                  agentAppearance={getAppearance(run.profile)}
+                  allowAccountConnection={signedInState !== null}
+                />
+              </div>
+            ))}
         </div>
 
         {sessionsModalOpen && (

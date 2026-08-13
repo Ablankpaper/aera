@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
+  isSafeToRetryStaleRevision,
   type ModelConfigurationMutationRequest,
   type OwnerModelRouteCatalogSnapshot,
 } from "../shared/model-configuration";
@@ -244,7 +245,10 @@ function makeFixture(): Fixture {
   };
 }
 
-function subject(fixture: Fixture): ModelConfigurationCoordinator {
+function subject(
+  fixture: Fixture,
+  overrides: Partial<ModelConfigurationCoordinatorDependencies> = {},
+): ModelConfigurationCoordinator {
   const dependencies: ModelConfigurationCoordinatorDependencies = {
     catalog: fixture.catalog,
     ownerHandle: () => OWNER,
@@ -275,6 +279,7 @@ function subject(fixture: Fixture): ModelConfigurationCoordinator {
       return () => `10000000-0000-4000-8000-${String(++n).padStart(12, "0")}`;
     })(),
     isProfileOwned: () => true,
+    ...overrides,
   };
   return new ModelConfigurationCoordinator(dependencies);
 }
@@ -370,9 +375,67 @@ describe("ModelConfigurationCoordinator", () => {
       status: "rejected",
       stage: "validation",
       rollback: "not_needed",
+      reason: "stale_catalog_revision",
     });
+    // The reason is what licenses the caller's single replay.
+    expect(isSafeToRetryStaleRevision(result)).toBe(true);
     expect(fixture.snapshotBytes()).toEqual(before);
     expect(fixture.adapter.prepare).not.toHaveBeenCalled();
+  });
+
+  // @lat: [[legacy-model-config-migration#Stale catalog retry policy#Withholds the retry reason from every other refusal]]
+  it("withholds the stale-revision reason from other validation refusals", async () => {
+    // Each of these refusals used to be indistinguishable from a stale
+    // revision — same stage, same rollback — so a caller replaying on that pair
+    // alone would reissue a request that must fail again.
+    const unownedProfile = makeFixture();
+    const foreign = subject(unownedProfile, {
+      isProfileOwned: async () => false,
+    });
+
+    const illegalParams = makeFixture();
+    const noReplacement = makeFixture();
+    const movedActiveRoute = makeFixture();
+    movedActiveRoute.adapter.getActiveRouteKey.mockReturnValue(
+      "custom:fixture\0someone-elses-model\0https://fixture.invalid/v1\0chat_completions",
+    );
+
+    const refusals = [
+      { name: "unowned profile", result: await foreign.mutate(request()) },
+      {
+        name: "illegal parameters",
+        result: await subject(illegalParams).mutate(
+          request({ baseUrl: "file:///etc/passwd" }),
+        ),
+      },
+      {
+        name: "delete with no legal replacement",
+        result: await subject(noReplacement).mutate({
+          intent: "delete",
+          expectedCatalogRevision: REVISION,
+          requestedProfileId: "account",
+          providerLabel: "Fixture",
+          replacement: null,
+        }),
+      },
+      {
+        name: "active route moved",
+        result: await subject(movedActiveRoute).mutate(request()),
+      },
+    ];
+
+    for (const { name, result } of refusals) {
+      expect(result, name).toMatchObject({
+        status: "rejected",
+        stage: "validation",
+        rollback: "not_needed",
+      });
+      expect(
+        "reason" in result ? result.reason : undefined,
+        name,
+      ).toBeUndefined();
+      expect(isSafeToRetryStaleRevision(result), name).toBe(false);
+    }
   });
 
   it("serializes concurrent mutations for one owner and target Profile", async () => {
