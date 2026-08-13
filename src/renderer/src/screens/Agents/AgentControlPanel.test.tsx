@@ -21,6 +21,7 @@ import type {
   ExperienceCandidateImportPreview,
   ExperienceCandidateSummary,
   OfficialAgentDetail,
+  OfficialAgentInstallPreview,
   OfficialAgentSummary,
   OfficialManagedUpdate,
   OrganizationAgentSubmissionList,
@@ -230,23 +231,6 @@ function configuredModelProfile(
   };
 }
 
-function confirmRuntimeModel(profileId?: string): void {
-  const dialog = screen.getByRole("dialog", {
-    name: "agents.hub.chooseRuntimeModel",
-  });
-  const select = within(dialog).getByRole("combobox", {
-    name: "agents.hub.runtimeModelChoice",
-  });
-  if (profileId) {
-    fireEvent.change(select, { target: { value: profileId } });
-  }
-  fireEvent.click(
-    within(dialog).getByRole("button", {
-      name: "agents.hub.confirmRuntimeModel",
-    }),
-  );
-}
-
 function officialAgent(): OfficialAgentSummary {
   return {
     definitionId: DEFINITION_ID,
@@ -412,6 +396,151 @@ function installAPI(
 describe("AgentControlPanel", () => {
   beforeEach(() => vi.restoreAllMocks());
 
+  // @lat: [[sidebar-navigation#Agents page]]
+  it("keeps governance closed by default while allowing an Owner to open it", async () => {
+    installAPI({
+      getState: vi.fn(async () =>
+        success(
+          controlState({
+            scope: "WORKSPACE",
+            workspaceId: WORKSPACE_ID,
+            role: "owner",
+          }),
+        ),
+      ),
+    });
+
+    render(<AgentControlPanel profiles={[]} />);
+
+    const governance = await screen.findByRole("button", {
+      name: "agents.hub.advancedTitle agents.hub.advancedSubtitle",
+    });
+    expect(governance).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByText("agents.control.experience.myCandidates"),
+    ).toBeNull();
+
+    fireEvent.click(governance);
+
+    expect(governance).toHaveAttribute("aria-expanded", "true");
+    expect(
+      await screen.findByText("agents.control.experience.myCandidates"),
+    ).toBeVisible();
+  });
+
+  it("does not show governance controls to a Workspace Member", async () => {
+    installAPI({
+      getState: vi.fn(async () =>
+        success(
+          controlState({
+            scope: "WORKSPACE",
+            workspaceId: WORKSPACE_ID,
+            role: "member",
+          }),
+        ),
+      ),
+    });
+
+    render(<AgentControlPanel profiles={[]} />);
+
+    await screen.findByText("agents.hub.workspaceSubtitle");
+    expect(screen.queryByText("agents.hub.advancedTitle")).toBeNull();
+  });
+
+  it("offers one retry action for a recoverable Cloud error and reloads authoritative state", async () => {
+    const api = installAPI({
+      listDefinitions: vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false as const,
+          errorCode: "cloud_unavailable" as const,
+        })
+        .mockResolvedValueOnce(success([definition()])),
+    });
+
+    render(<AgentControlPanel profiles={[]} />);
+
+    expect(
+      await screen.findByText("agents.control.errors.cloud_unavailable"),
+    ).toBeVisible();
+    const retry = screen.getByRole("button", {
+      name: "agents.control.tryAgain",
+    });
+    expect(
+      screen.getAllByRole("button", { name: "agents.control.tryAgain" }),
+    ).toHaveLength(1);
+
+    fireEvent.click(retry);
+
+    await waitFor(() => expect(api.getState).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Research Agent")).toBeVisible();
+    expect(
+      screen.queryByText("agents.control.errors.cloud_unavailable"),
+    ).toBeNull();
+  });
+
+  it.each([
+    "profile_model_configuration_failed",
+    "model_route_unavailable",
+  ] as const)(
+    "opens model settings for the recoverable %s error",
+    async (errorCode) => {
+      installAPI({
+        listDefinitions: vi.fn(async () => ({
+          ok: false as const,
+          errorCode,
+        })),
+      });
+      const onConfigureModels = vi.fn();
+
+      render(
+        <AgentControlPanel
+          profiles={[]}
+          onConfigureModels={onConfigureModels}
+        />,
+      );
+
+      expect(
+        await screen.findByText(`agents.control.errors.${errorCode}`),
+      ).toBeVisible();
+      fireEvent.click(
+        screen.getByRole("button", { name: "agents.hub.configureModel" }),
+      );
+
+      expect(onConfigureModels).toHaveBeenCalledOnce();
+      expect(
+        screen.queryByRole("button", { name: "agents.control.tryAgain" }),
+      ).toBeNull();
+    },
+  );
+
+  it.each([
+    "capability_dlp_blocked",
+    "organization_agent_forbidden",
+    "conflict",
+  ] as const)("keeps the fail-closed %s error informational", async (errorCode) => {
+    installAPI({
+      listDefinitions: vi.fn(async () => ({
+        ok: false as const,
+        errorCode,
+      })),
+    });
+
+    render(
+      <AgentControlPanel profiles={[]} onConfigureModels={vi.fn()} />,
+    );
+
+    expect(
+      await screen.findByText(`agents.control.errors.${errorCode}`),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "agents.control.tryAgain" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "agents.hub.configureModel" }),
+    ).toBeNull();
+  });
+
   it("keeps local drafts/installations available offline and pauses cloud discovery", async () => {
     const api = installAPI({
       getState: vi.fn(async () =>
@@ -547,41 +676,61 @@ describe("AgentControlPanel", () => {
     expect(screen.getByText("agents.hub.noFilteredResults")).toBeTruthy();
   });
 
-  it("does not install a published Agent before a runnable model source exists", async () => {
+  it("opens model configuration instead of installing a published Agent without a model", async () => {
     const api = installAPI({
       listDefinitions: vi.fn(async () => success([definition()])),
     });
-    render(<AgentControlPanel profiles={[]} advancedOpenByDefault={false} />);
+    const onConfigureModels = vi.fn();
+    render(
+      <AgentControlPanel
+        profiles={[]}
+        advancedOpenByDefault={false}
+        onConfigureModels={onConfigureModels}
+      />,
+    );
 
     fireEvent.click(
       (await screen.findByText("Research Agent")).closest("button")!,
     );
     const action = screen.getByRole("button", {
-      name: "agents.hub.configureModelFirst",
+      name: "agents.hub.configureModel",
     });
-    expect(action).toBeDisabled();
+    expect(action).toBeEnabled();
     fireEvent.click(action);
 
+    expect(onConfigureModels).toHaveBeenCalledTimes(1);
     expect(api.installVersion).not.toHaveBeenCalled();
+    expect(api.retryPendingInstallation).not.toHaveBeenCalled();
+    expect(api.repairInstallationModel).not.toHaveBeenCalled();
   });
 
-  it("does not retry a pending Agent before a runnable model source exists", async () => {
+  it("opens model configuration instead of retrying a pending Agent without a model", async () => {
     const api = installAPI({
       listDefinitions: vi.fn(async () => success([definition()])),
       listInstallations: vi.fn(async () => success([installation("pending")])),
     });
-    render(<AgentControlPanel profiles={[]} advancedOpenByDefault={false} />);
+    const onConfigureModels = vi.fn();
+    render(
+      <AgentControlPanel
+        profiles={[]}
+        advancedOpenByDefault={false}
+        onConfigureModels={onConfigureModels}
+      />,
+    );
 
     fireEvent.click(
       (await screen.findByText("Research Agent")).closest("button")!,
     );
     const action = screen.getByRole("button", {
-      name: "agents.hub.configureModelFirst",
+      name: "agents.hub.configureModel",
     });
-    expect(action).toBeDisabled();
+    expect(action).toBeEnabled();
     fireEvent.click(action);
 
+    expect(onConfigureModels).toHaveBeenCalledTimes(1);
+    expect(api.installVersion).not.toHaveBeenCalled();
     expect(api.retryPendingInstallation).not.toHaveBeenCalled();
+    expect(api.repairInstallationModel).not.toHaveBeenCalled();
   });
 
   it("opens required capability mapping instead of retrying the pending installation blindly", async () => {
@@ -770,6 +919,58 @@ describe("AgentControlPanel", () => {
     expect(api.archiveInstallation).not.toHaveBeenCalled();
   });
 
+  // @lat: [[agentera-agent-control-plane#AgentEra Agent control plane V1#Official Managed Agent V1#Catalog and detail presentation]]
+  it("starts an official Agent with one click through prepare and confirm", async () => {
+    const HANDLE_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const preview: OfficialAgentInstallPreview = {
+      installHandle: HANDLE_ID,
+      agent: officialAgent(),
+      expiresAt: "2026-07-22T00:05:00.000Z",
+    };
+    const api = installAPI({
+      listOfficialAgents: vi.fn(async () => success([officialAgent()])),
+      prepareOfficialInstall: vi.fn(async () => success(preview)),
+      confirmOfficialInstall: vi.fn(async () =>
+        success(officialInstallation()),
+      ),
+    });
+    const onProfilesChanged = vi.fn(async () => undefined);
+    const onAgentReady = vi.fn(async () => true);
+
+    render(
+      <AgentControlPanel
+        profiles={[]}
+        initialTab="official"
+        onProfilesChanged={onProfilesChanged}
+        onAgentReady={onAgentReady}
+      />,
+    );
+
+    fireEvent.click(
+      (await screen.findByText("Official Research Agent")).closest("button")!,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "agents.hub.installAgent" }),
+    );
+
+    await waitFor(() =>
+      expect(api.prepareOfficialInstall).toHaveBeenCalledWith(DEFINITION_ID),
+    );
+    await waitFor(() =>
+      expect(api.confirmOfficialInstall).toHaveBeenCalledWith({
+        installHandle: HANDLE_ID,
+        confirmation: "install-official-agent",
+      }),
+    );
+    expect(onProfilesChanged).toHaveBeenCalledOnce();
+    expect(onAgentReady).toHaveBeenCalledWith(INSTALLATION_ID);
+    expect(
+      screen.queryByRole("dialog", {
+        name: "agents.control.official.installTitle",
+      }),
+    ).toBeNull();
+  });
+
   it("keeps a verified official installation visible offline without remote calls", async () => {
     const api = installAPI({
       getState: vi.fn(async () =>
@@ -906,6 +1107,7 @@ describe("AgentControlPanel", () => {
         <AgentControlPanel
           profiles={[configuredModelProfile()]}
           modelProfileId="configured-source"
+          advancedOpenByDefault={history}
         />,
       );
 
@@ -983,7 +1185,13 @@ describe("AgentControlPanel", () => {
       ),
     });
 
-    render(<AgentControlPanel profiles={[]} initialTab="enterprise" />);
+    render(
+      <AgentControlPanel
+        profiles={[]}
+        initialTab="enterprise"
+        advancedOpenByDefault
+      />,
+    );
 
     expect(
       await screen.findByText(healthySubmission.contentDigest),
@@ -1033,7 +1241,13 @@ describe("AgentControlPanel", () => {
       ),
     });
 
-    render(<AgentControlPanel profiles={[]} initialTab="enterprise" />);
+    render(
+      <AgentControlPanel
+        profiles={[]}
+        initialTab="enterprise"
+        advancedOpenByDefault
+      />,
+    );
 
     expect(
       await screen.findByTestId(
@@ -1405,11 +1619,10 @@ describe("AgentControlPanel", () => {
       }),
     );
     expect(
-      screen.getByRole("option", {
-        name: "gpt-5.6 · openai",
+      screen.queryByRole("dialog", {
+        name: "agents.hub.chooseRuntimeModel",
       }),
-    ).toBeTruthy();
-    confirmRuntimeModel("configured-source");
+    ).toBeNull();
 
     await waitFor(() =>
       expect(api.installVersion).toHaveBeenCalledWith(
@@ -1487,9 +1700,10 @@ describe("AgentControlPanel", () => {
       screen.getByRole("button", { name: "agents.hub.useAgent" }),
     );
     expect(
-      screen.getByRole("option", { name: "gpt-5.6-sol · Petoi" }),
-    ).toBeTruthy();
-    confirmRuntimeModel(selectedRouteId);
+      screen.queryByRole("dialog", {
+        name: "agents.hub.chooseRuntimeModel",
+      }),
+    ).toBeNull();
 
     await waitFor(() =>
       expect(api.installVersion).toHaveBeenCalledWith(
@@ -1508,7 +1722,7 @@ describe("AgentControlPanel", () => {
     );
   });
 
-  it("uses the visible replacement route when the model catalog refreshes while confirmation is open", async () => {
+  it("uses the visible preferred route at the moment the Agent is started", async () => {
     const api = installAPI({
       listDrafts: vi.fn(async () => success([publishedDraft() as AgentDraft])),
       listDefinitions: vi.fn(async () => success([])),
@@ -1545,15 +1759,15 @@ describe("AgentControlPanel", () => {
     fireEvent.click(
       (await screen.findByText("Workspace Research Agent")).closest("button")!,
     );
+    view.rerender(renderPanel(replacementLibraryId));
     fireEvent.click(
       screen.getByRole("button", { name: "agents.hub.useAgent" }),
     );
     expect(
-      screen.getByRole("option", { name: "gpt-5.6-sol · Petoi" }),
-    ).toBeTruthy();
-
-    view.rerender(renderPanel(replacementLibraryId));
-    confirmRuntimeModel();
+      screen.queryByRole("dialog", {
+        name: "agents.hub.chooseRuntimeModel",
+      }),
+    ).toBeNull();
 
     await waitFor(() =>
       expect(api.installVersion).toHaveBeenCalledWith(
@@ -1610,7 +1824,6 @@ describe("AgentControlPanel", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "agents.hub.useAgent" }),
     );
-    confirmRuntimeModel("configured-source");
 
     await waitFor(() =>
       expect(api.repairInstallationModel).toHaveBeenCalledWith(
@@ -1688,7 +1901,6 @@ describe("AgentControlPanel", () => {
     );
 
     expect(onChatWithProfile).not.toHaveBeenCalled();
-    confirmRuntimeModel("petoi-route");
     await waitFor(() =>
       expect(api.repairInstallationModel).toHaveBeenCalledWith(
         {
@@ -1837,7 +2049,6 @@ describe("AgentControlPanel", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "agents.hub.useAgent" }),
     );
-    confirmRuntimeModel("configured-source");
 
     await waitFor(() => expect(api.repairInstallationModel).toHaveBeenCalled());
     expect(calls).toEqual(["select", "repair"]);
@@ -1916,7 +2127,6 @@ describe("AgentControlPanel", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "agents.hub.useAgent" }),
     );
-    confirmRuntimeModel("installed-agent");
 
     await waitFor(() => expect(api.repairInstallationModel).toHaveBeenCalled());
     expect(api.repairInstallationModel).toHaveBeenCalledWith(
@@ -2004,7 +2214,6 @@ describe("AgentControlPanel", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "agents.hub.useAgent" }),
     );
-    confirmRuntimeModel("configured-source");
 
     await waitFor(() => expect(api.repairInstallationModel).toHaveBeenCalled());
     expect(calls).toEqual(["select", "repair"]);
@@ -2123,7 +2332,7 @@ describe("AgentControlPanel", () => {
         success(importedDraft),
       ),
     });
-    render(<AgentControlPanel profiles={[]} />);
+    render(<AgentControlPanel profiles={[]} advancedOpenByDefault />);
 
     fireEvent.click(
       await screen.findByRole("button", {
@@ -2470,7 +2679,6 @@ describe("AgentControlPanel", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "agents.control.retryAgent" }),
     );
-    confirmRuntimeModel("configured-source");
     await waitFor(() =>
       expect(api.retryPendingInstallation).toHaveBeenCalledWith(
         {
@@ -2521,7 +2729,6 @@ describe("AgentControlPanel", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "agents.control.retryAgent" }),
     );
-    confirmRuntimeModel("configured-source");
 
     expect(
       await screen.findByText(
@@ -2652,7 +2859,6 @@ describe("AgentControlPanel", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "agents.control.retryAgent" }),
     );
-    confirmRuntimeModel("configured-source");
 
     await waitFor(() => expect(api.repairInstallationModel).toHaveBeenCalled());
     expect(calls).toEqual(["activate-v1", "select-v2", "seed-v2"]);
@@ -2735,7 +2941,6 @@ describe("AgentControlPanel", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "agents.control.retryAgent" }),
     );
-    confirmRuntimeModel("configured-source");
 
     await waitFor(() => expect(api.installVersion).toHaveBeenCalled());
     expect(calls).toEqual(["archive", "install-v2"]);

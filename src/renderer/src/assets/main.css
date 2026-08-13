@@ -9829,6 +9829,21 @@ body {
   color: var(--error);
 }
 
+.agent-control-error-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-control-error-action .agents-create-error {
+  min-width: 0;
+}
+
+.agent-control-error-action .btn {
+  flex: 0 0 auto;
+}
+
 /* Profiles list — a table-style layout with a shared column grid so the
    header and every row align. The active row is marked by a left green bar. */
 .agents-table {

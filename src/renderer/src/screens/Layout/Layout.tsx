@@ -751,6 +751,10 @@ function Layout({
     openSettings("providers", { profile: startupProfile });
   }, [openSettings, startupProfile]);
 
+  const handleConfigureAgentModels = useCallback(() => {
+    openSettings("providers", { profile: activeProfile });
+  }, [activeProfile, openSettings]);
+
   return (
     <div className={`layout ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
@@ -1009,6 +1013,7 @@ function Layout({
               <Agents
                 activeProfile={activeProfile}
                 onChatWith={handleChatWithProfile}
+                onConfigureModels={handleConfigureAgentModels}
               />
             )}
           </div>

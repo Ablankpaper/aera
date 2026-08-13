@@ -58,7 +58,13 @@ vi.mock("./ActiveSessionsBar", () => ({
 }));
 vi.mock("../Sessions/Sessions", () => ({ default: () => null }));
 vi.mock("../Agents/Agents", () => ({
-  default: () => <div data-testid="agents-surface" />,
+  default: ({ onConfigureModels }: { onConfigureModels?: () => void }) => (
+    <div data-testid="agents-surface">
+      <button type="button" onClick={onConfigureModels}>
+        configure-agent-model
+      </button>
+    </div>
+  ),
 }));
 vi.mock("../Discover/Discover", () => ({ default: () => null }));
 vi.mock("./ProductSpaceSwitcher", () => ({ default: () => null }));
@@ -309,6 +315,22 @@ describe("startup model setup prompt", () => {
       await screen.findByRole("button", {
         name: "providers.setupPrompt.configure",
       }),
+    );
+
+    expect(testState.openSettings).toHaveBeenCalledWith("providers", {
+      profile: "default",
+    });
+  });
+
+  it("opens model settings for the active Agent user without exposing profile choices", async () => {
+    installHermesAPI("gpt-5.6-sol", "custom");
+    render(<Layout authState={authenticated} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "navigation.agents" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "configure-agent-model" }),
     );
 
     expect(testState.openSettings).toHaveBeenCalledWith("providers", {
