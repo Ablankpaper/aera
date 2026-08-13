@@ -1,4 +1,4 @@
-import { randomUUID as nodeRandomUUID } from "node:crypto";
+import { createHash, randomUUID as nodeRandomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -35,7 +35,13 @@ import type {
   AgentPolicySnapshot,
   AgentVersion,
   CreateAgentInstallationRequest,
+  OfficialAgentDeliveryVerificationReceipt,
 } from "./client";
+import type {
+  OfficialAgentDeliveryVerificationErrorCode,
+  OfficialAgentDeliveryVerificationInput,
+  OfficialAgentDeliveryVerificationStatus,
+} from "./verification-receipt";
 import type { AgentAssetContext, AgenteraControlPlaneDatabase } from "./db";
 import type {
   ActivatedHermesProjection,
@@ -147,6 +153,10 @@ export interface AgentInstallationClient {
     installationId: string,
     idempotencyKey: string,
   ): Promise<AgentInstallation>;
+  getOfficialDesktopVersion(): string;
+  recordOfficialAgentDeliveryVerification(
+    input: OfficialAgentDeliveryVerificationInput,
+  ): Promise<OfficialAgentDeliveryVerificationReceipt>;
 }
 
 export interface AgentInstallationTrust {
@@ -720,6 +730,26 @@ function operationKey(kind: string, ...ids: string[]): string {
   return `agentera:${kind}:${ids.join(":")}`;
 }
 
+function deliveryVerificationRequestId(
+  installationId: string,
+  versionId: string,
+  releaseRevisionId: string,
+  status: OfficialAgentDeliveryVerificationStatus,
+  errorCode?: OfficialAgentDeliveryVerificationErrorCode,
+): string {
+  const bytes = createHash("sha256")
+    .update(
+      `aera-official-delivery-verification-v1\0${installationId}\0${versionId}\0${releaseRevisionId}\0${status}\0${errorCode ?? ""}`,
+      "utf8",
+    )
+    .digest()
+    .subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 function reportStageFailure(stage: string, error: unknown): void {
   const candidate = error as { code?: unknown; name?: unknown } | null;
   const code =
@@ -1211,6 +1241,8 @@ export class AgentInstallationManager {
     Promise<LocalAgentInstallation>
   >();
   private reconciliationFlight: Promise<LocalAgentInstallation[]> | null = null;
+  private deliveryVerificationRequested = false;
+  private deliveryVerificationInFlight = false;
 
   constructor(options: AgentInstallationManagerOptions) {
     if (
@@ -1312,6 +1344,179 @@ export class AgentInstallationManager {
         this.owner.deviceInstallationId,
       ) as LocalInstallationRow[];
     return rows.map(parseLocalRow);
+  }
+
+  retryPendingOfficialDeliveryVerifications(): void {
+    this.requestOfficialDeliveryVerificationFlush();
+  }
+
+  private queueOfficialDeliveryVerificationForLocal(
+    local: LocalAgentInstallation,
+    version: AgentVersion,
+    verificationStatus: Exclude<
+      OfficialAgentDeliveryVerificationStatus,
+      "failed"
+    >,
+  ): void {
+    if (
+      local.sourceScope !== "PLATFORM" ||
+      local.selectedReleaseRevisionId === null
+    ) {
+      return;
+    }
+    this.queueOfficialDeliveryVerification({
+      installationId: local.agentInstallationId,
+      definitionId: local.definitionId,
+      versionId: local.selectedVersionId,
+      releaseRevisionId: local.selectedReleaseRevisionId,
+      contentDigest: version.content_digest,
+      verificationStatus,
+    });
+  }
+
+  private queueOfficialDeliveryVerificationFailure(
+    local: LocalAgentInstallation,
+    errorCode: OfficialAgentDeliveryVerificationErrorCode,
+  ): void {
+    if (
+      local.sourceScope !== "PLATFORM" ||
+      local.selectedReleaseRevisionId === null
+    ) {
+      return;
+    }
+    let contentDigest: string;
+    try {
+      contentDigest = this.cache.getVerifiedVersion(
+        local.selectedVersionId,
+      ).content_digest;
+    } catch {
+      return;
+    }
+    this.queueOfficialDeliveryVerification({
+      installationId: local.agentInstallationId,
+      definitionId: local.definitionId,
+      versionId: local.selectedVersionId,
+      releaseRevisionId: local.selectedReleaseRevisionId,
+      contentDigest,
+      verificationStatus: "failed",
+      errorCode,
+    });
+  }
+
+  private queueOfficialDeliveryVerification(input: {
+    installationId: string;
+    definitionId: string;
+    versionId: string;
+    releaseRevisionId: string;
+    contentDigest: string;
+    verificationStatus: OfficialAgentDeliveryVerificationStatus;
+    errorCode?: OfficialAgentDeliveryVerificationErrorCode;
+  }): void {
+    if (!DIGEST_PATTERN.test(input.contentDigest)) return;
+    let desktopVersion: string;
+    try {
+      desktopVersion = this.client.getOfficialDesktopVersion();
+    } catch {
+      return;
+    }
+    const requestId = deliveryVerificationRequestId(
+      input.installationId,
+      input.versionId,
+      input.releaseRevisionId,
+      input.verificationStatus,
+      input.errorCode,
+    );
+    const occurredAt = timestamp(this.now);
+    const receipt: OfficialAgentDeliveryVerificationInput = {
+      definitionId: input.definitionId,
+      versionId: input.versionId,
+      releaseRevisionId: input.releaseRevisionId,
+      contentDigest: input.contentDigest,
+      verificationStatus: input.verificationStatus,
+      runtimeVersion: this.runtimeVersion,
+      desktopVersion,
+      occurredAt,
+      requestId,
+      ...(input.errorCode === undefined ? {} : { errorCode: input.errorCode }),
+    };
+    this.database.sqlite
+      .prepare(
+        `INSERT INTO pending_sanitized_records (
+           id, tenant_id, owner_id, device_installation_id,
+           record_type, payload_json, attempt_count, next_attempt_at,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 'official_delivery_verification', ?, 0, NULL, ?, ?)
+         ON CONFLICT(id) DO NOTHING`,
+      )
+      .run(
+        requestId,
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+        JSON.stringify(receipt),
+        occurredAt,
+        occurredAt,
+      );
+    this.requestOfficialDeliveryVerificationFlush();
+  }
+
+  private requestOfficialDeliveryVerificationFlush(): void {
+    this.deliveryVerificationRequested = true;
+    if (this.deliveryVerificationInFlight) return;
+    this.deliveryVerificationInFlight = true;
+    void (async () => {
+      while (this.deliveryVerificationRequested) {
+        this.deliveryVerificationRequested = false;
+        await this.flushOfficialDeliveryVerifications();
+      }
+    })().finally(() => {
+      this.deliveryVerificationInFlight = false;
+      if (this.deliveryVerificationRequested) {
+        this.requestOfficialDeliveryVerificationFlush();
+      }
+    });
+  }
+
+  private async flushOfficialDeliveryVerifications(): Promise<void> {
+    const rows = this.database.sqlite
+      .prepare(
+        `SELECT id, payload_json FROM pending_sanitized_records
+         WHERE record_type = 'official_delivery_verification'
+           AND tenant_id = ? AND owner_id = ? AND device_installation_id = ?
+         ORDER BY created_at ASC`,
+      )
+      .all(
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+      ) as Array<{ id?: unknown; payload_json?: unknown }>;
+    for (const row of rows) {
+      if (typeof row.id !== "string" || typeof row.payload_json !== "string") {
+        continue;
+      }
+      let receipt: OfficialAgentDeliveryVerificationInput;
+      try {
+        receipt = JSON.parse(
+          row.payload_json,
+        ) as OfficialAgentDeliveryVerificationInput;
+        await this.client.recordOfficialAgentDeliveryVerification(receipt);
+      } catch {
+        continue;
+      }
+      this.database.sqlite
+        .prepare(
+          `DELETE FROM pending_sanitized_records
+           WHERE id = ? AND tenant_id = ? AND owner_id = ?
+             AND device_installation_id = ?
+             AND record_type = 'official_delivery_verification'`,
+        )
+        .run(
+          row.id,
+          this.owner.tenantId,
+          this.owner.ownerId,
+          this.owner.deviceInstallationId,
+        );
+    }
   }
 
   async verifyImmutableUserBase(input: {
@@ -1632,6 +1837,19 @@ export class AgentInstallationManager {
         target: intent.profileTarget,
       });
       this.completeCreationIntent(intent.id);
+      if (
+        source.scope === "PLATFORM" &&
+        source.selectedReleaseRevisionId !== null
+      ) {
+        this.queueOfficialDeliveryVerification({
+          installationId,
+          definitionId: intent.definitionId,
+          versionId: intent.versionId,
+          releaseRevisionId: source.selectedReleaseRevisionId,
+          contentDigest: creation.policy_snapshot.document.version_digest,
+          verificationStatus: "catalog_visible",
+        });
+      }
       return this.runMaterialization(
         local,
         operation,
@@ -1673,6 +1891,7 @@ export class AgentInstallationManager {
   }
 
   async reconcilePendingInstallations(): Promise<LocalAgentInstallation[]> {
+    this.retryPendingOfficialDeliveryVerifications();
     if (this.reconciliationFlight) return this.reconciliationFlight;
     const flight = this.reconcilePendingInstallationsOnce();
     this.reconciliationFlight = flight;
@@ -2392,6 +2611,11 @@ export class AgentInstallationManager {
       assertVersion(downloaded, local.definitionId, local.selectedVersionId);
       version = this.cache.cacheVerifiedVersion(downloaded);
       assertVersion(version, local.definitionId, local.selectedVersionId);
+      this.queueOfficialDeliveryVerificationForLocal(
+        local,
+        version,
+        "signature_verified",
+      );
       materializationStage = "materialization_policy_failed";
       assertPolicy(
         policy,
@@ -2408,15 +2632,33 @@ export class AgentInstallationManager {
       if (verifiedPolicy.contentDigest !== policy.content_digest) {
         throw new AgentInstallationManagerError("installation_conflict");
       }
+      this.queueOfficialDeliveryVerificationForLocal(
+        local,
+        version,
+        "compatible",
+      );
       this.cache.cacheVerifiedPolicySnapshot(version.id, policy);
       materializationStage = "materialization_projection_failed";
       projection = this.projection.materializeVersion({
         agentInstallationId: local.agentInstallationId,
         version,
       });
+      this.queueOfficialDeliveryVerificationForLocal(
+        local,
+        version,
+        "installed",
+      );
     } catch (error) {
       reportStageFailure("materialization", error);
       this.recordFailure(local.agentInstallationId, materializationStage);
+      this.queueOfficialDeliveryVerificationFailure(
+        local,
+        materializationStage === "materialization_version_failed"
+          ? "signature_verification_failed"
+          : materializationStage === "materialization_policy_failed"
+            ? "runtime_incompatible"
+            : "installation_failed",
+      );
       throw new AgentInstallationManagerError("materialization_failed");
     }
 
@@ -2569,6 +2811,10 @@ export class AgentInstallationManager {
       } else {
         this.recordFailure(local.agentInstallationId, profileStage);
       }
+      this.queueOfficialDeliveryVerificationFailure(
+        local,
+        "installation_failed",
+      );
       throw new AgentInstallationManagerError(
         profileStage === "profile_model_configuration_failed"
           ? "profile_model_configuration_failed"
@@ -2689,8 +2935,15 @@ export class AgentInstallationManager {
           throw error;
         }
       }
+      const completed = this.getLocalInstallation(local.agentInstallationId);
+      this.queueOfficialDeliveryVerificationForLocal(
+        completed,
+        version,
+        "activated",
+      );
     } catch (error) {
       reportStageFailure("activation", error);
+      this.queueOfficialDeliveryVerificationFailure(local, "activation_failed");
       this.recordFailure(local.agentInstallationId, "activation_failed");
       throw new AgentInstallationManagerError("activation_failed");
     }

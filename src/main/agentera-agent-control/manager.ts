@@ -2371,6 +2371,8 @@ export class AgenteraAgentControlManager {
       runtimeVersion,
       capabilityBindingStore,
       getProfileMcpCapabilities,
+      now: full.now,
+      randomUUID: full.randomUUID,
     });
     const capabilityBindingService =
       new CapabilityBindingService<LocalAgentInstallation>({
