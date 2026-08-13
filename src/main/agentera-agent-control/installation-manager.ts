@@ -12,6 +12,7 @@ import {
   readFileSync,
   readSync,
   readdirSync,
+  realpathSync,
   renameSync,
   unlinkSync,
   writeSync,
@@ -353,6 +354,36 @@ function creationText(
   return value.trim();
 }
 
+/**
+ * Canonicalize a profile path for comparison. Resolves symlinks if the path
+ * exists, otherwise normalizes via resolve(). This handles case-preserving
+ * filesystems (Windows) and symlinks consistently.
+ */
+function canonicalizePath(path: string): string {
+  try {
+    return resolve(realpathSync.native(path));
+  } catch {
+    return resolve(path);
+  }
+}
+
+/**
+ * Check if a profile path matches the expected standard path for a profile ID.
+ * This replaces the incorrect basename() check that failed for default profiles.
+ */
+function profilePathMatchesId(
+  profilePath: string,
+  profileId: string,
+  resolveProfilePath: (profileId: string) => string,
+): boolean {
+  if (!isAbsolute(profilePath)) return false;
+
+  const requested = canonicalizePath(profilePath);
+  const expected = canonicalizePath(resolveProfilePath(profileId));
+
+  return requested === expected;
+}
+
 function serializeCreationProfileTarget(
   target: InstallationOperationTarget,
 ): Record<string, string | null> {
@@ -442,13 +473,18 @@ function parseCreationProfileTarget(
 function creationProfileTargetMatchesInput(
   stored: InstallationOperationTarget,
   input: AgentInstallationProfileTarget,
+  resolveProfilePath: (profileId: string) => string,
 ): boolean {
   if (stored.kind === "claim") {
     return (
       input.kind === "claim" &&
       creationProfileId(input.profileId, "invalid_installation_request") ===
         stored.profileId &&
-      basename(resolve(input.profilePath)) === stored.profileId
+      profilePathMatchesId(
+        input.profilePath,
+        stored.profileId,
+        resolveProfilePath,
+      )
     );
   }
   if (input.kind !== "fresh") return false;
@@ -2193,7 +2229,11 @@ export class AgentInstallationManager {
         const sameResumeClaim =
           target.kind === "claim" &&
           existing.profileId === target.profileId &&
-          basename(resolve(target.profilePath)) === target.profileId;
+          profilePathMatchesId(
+            target.profilePath,
+            target.profileId,
+            this.profiles.resolveProfilePath,
+          );
         if (!sameFreshTarget && !sameResumeClaim) {
           throw new InstallationOperationStoreError("operation_conflict");
         }
@@ -2201,7 +2241,11 @@ export class AgentInstallationManager {
         if (
           target.kind !== "claim" ||
           existing.profileId !== target.profileId ||
-          basename(resolve(target.profilePath)) !== target.profileId
+          !profilePathMatchesId(
+            target.profilePath,
+            target.profileId,
+            this.profiles.resolveProfilePath,
+          )
         ) {
           throw new InstallationOperationStoreError("operation_conflict");
         }
@@ -2210,7 +2254,13 @@ export class AgentInstallationManager {
     }
 
     if (target.kind === "claim") {
-      if (basename(resolve(target.profilePath)) !== target.profileId) {
+      if (
+        !profilePathMatchesId(
+          target.profilePath,
+          target.profileId,
+          this.profiles.resolveProfilePath,
+        )
+      ) {
         throw new InstallationOperationStoreError("operation_conflict");
       }
       return this.operations.begin({
@@ -2948,7 +2998,13 @@ export class AgentInstallationManager {
         target.profileId,
         "invalid_installation_request",
       );
-      if (basename(resolve(target.profilePath)) !== profileId) {
+      if (
+        !profilePathMatchesId(
+          target.profilePath,
+          profileId,
+          this.profiles.resolveProfilePath,
+        )
+      ) {
         throw new AgentInstallationManagerError("invalid_installation_request");
       }
       return { kind: "claim", profileId };
@@ -3368,7 +3424,11 @@ export class AgentInstallationManager {
         sameIntent &&
         storedTarget !== null &&
         target !== null &&
-        !creationProfileTargetMatchesInput(storedTarget, target)
+        !creationProfileTargetMatchesInput(
+          storedTarget,
+          target,
+          this.profiles.resolveProfilePath,
+        )
       ) {
         throw new AgentInstallationManagerError("installation_conflict");
       }

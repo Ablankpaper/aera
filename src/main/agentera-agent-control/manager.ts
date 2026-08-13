@@ -312,6 +312,19 @@ function codedError(code: string): Error {
   });
 }
 
+function candidateSetupFailureCode(error: unknown): string {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    /^model_switch_[a-z0-9_]{1,96}$/.test(error.code)
+  ) {
+    return error.code;
+  }
+  return "model_switch_candidate_setup_failed";
+}
+
 export function localProfileHandleForPath(
   profilePath: string,
   resolveProfilePath: (profileHandle: string) => string,
@@ -1767,37 +1780,59 @@ export class AgenteraAgentControlManager {
         bindingInput: plan.bindingInput,
         historyBoundaryCount,
       });
-      const preparedAgentTurn = adapter.finalizeInstalledTurn(
-        plan,
-        preparedCandidate.runtimeBinding,
-      );
-      if (preparedCandidate.runtimeBinding) this.queueRuntimeBindingDelivery();
-      const version = (plan as { version?: AgentVersion }).version;
-      const policy = (plan as { policy?: AgentPolicySnapshot }).policy;
-      return {
-        preparedAgentTurn,
-        conversationBoundary: preparedCandidate.boundary,
-        agentConversation:
-          version && policy
-            ? this.installedAgentConversationContext({
-                thread: existingThread,
-                version,
-                policy,
-              })
-            : null,
-        agentSegmentId: preparedCandidate.segment.id,
-        segmentTransition: {
-          kind: "candidate",
-          threadId: preparedCandidate.thread.id,
-          segmentId: preparedCandidate.segment.id,
-          runtimeBindingId: preparedCandidate.runtimeBinding.id,
-          boundaryId: preparedCandidate.boundary.id,
-          expectedThreadRevision: preparedCandidate.thread.revision,
-          from: existingThread.segment.route,
-          to: preparedCandidate.segment.route,
-          historyBoundaryCount,
-        },
-      };
+      try {
+        const preparedAgentTurn = adapter.finalizeInstalledTurn(
+          plan,
+          preparedCandidate.runtimeBinding,
+        );
+        if (preparedCandidate.runtimeBinding)
+          this.queueRuntimeBindingDelivery();
+        const version = (plan as { version?: AgentVersion }).version;
+        const policy = (plan as { policy?: AgentPolicySnapshot }).policy;
+        return {
+          preparedAgentTurn,
+          conversationBoundary: preparedCandidate.boundary,
+          agentConversation:
+            version && policy
+              ? this.installedAgentConversationContext({
+                  thread: existingThread,
+                  version,
+                  policy,
+                })
+              : null,
+          agentSegmentId: preparedCandidate.segment.id,
+          segmentTransition: {
+            kind: "candidate",
+            threadId: preparedCandidate.thread.id,
+            segmentId: preparedCandidate.segment.id,
+            runtimeBindingId: preparedCandidate.runtimeBinding.id,
+            boundaryId: preparedCandidate.boundary.id,
+            expectedThreadRevision: preparedCandidate.thread.revision,
+            from: existingThread.segment.route,
+            to: preparedCandidate.segment.route,
+            historyBoundaryCount,
+          },
+        };
+      } catch (error) {
+        // The candidate is durable before finalizeInstalledTurn runs. If
+        // finalization fails, mark it failed while leaving the prior active
+        // segment untouched; otherwise a stale `preparing` row blocks every
+        // later model switch in the same visible thread.
+        try {
+          coordinator.failSegment({
+            threadId: preparedCandidate.thread.id,
+            segmentId: preparedCandidate.segment.id,
+            expectedThreadRevision: preparedCandidate.thread.revision,
+            code: candidateSetupFailureCode(error),
+          });
+        } catch (cleanupError) {
+          console.warn(
+            "[agentera-agent-control] Failed to mark model candidate as failed:",
+            cleanupError instanceof Error ? cleanupError.message : cleanupError,
+          );
+        }
+        throw error;
+      }
     }
 
     const prepared = coordinator.prepare({

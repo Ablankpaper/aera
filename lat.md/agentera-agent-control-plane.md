@@ -266,6 +266,12 @@ Publisher and IPC boundaries expose distinct bounded conflict, corruption, permi
 
 An Agent Installation selects one immutable version for one device/Profile pair and maps to one physically isolated writable `HERMES_HOME` through the existing encrypted Profile binding store.
 
+### Canonical Profile target validation
+
+Claiming an existing Agent Profile compares canonical absolute paths, so the default `HERMES_HOME` Profile is accepted while mismatched or relative paths are rejected before Cloud mutation.
+
+[[src/main/agentera-agent-control/installation-manager.ts#profilePathMatchesId]] is exercised by the production installation orchestration tests for successful default-Profile claims and fail-closed mismatched targets.
+
 The authentication installation ID is not reused as the Agent Installation ID. New Agent installations create a fresh Profile with `cloneFrom=null`; existing learned Profiles require explicit same-owner claim. A RuntimeBinding freezes version, Profile, Runtime, policy, and tools for one conversation.
 
 ### Legacy source-Profile operation recovery
@@ -330,7 +336,9 @@ One visible Agent conversation owns an ordered local thread while each model rou
 
 ##### Failure retention and owner-safe lookup
 
-[[src/main/agentera-agent-control/conversation-thread-store.ts#ConversationThreadStore#fail]] retains a failed candidate without changing the active segment, while lookups by root key or any Hermes session recheck the same owner/device scope.
+[[src/main/agentera-agent-control/conversation-thread-store.ts#ConversationThreadStore#fail]] retains a failed candidate without changing the active segment, while lookups recheck the same owner/device scope.
+
+Manager finalization, Gateway startup, SSH tunnel preparation, execution-lease creation, and synchronous transport setup all terminate a pre-output candidate through this lifecycle instead of leaving a stale `preparing` row that blocks retry.
 
 ##### Public route projection
 
