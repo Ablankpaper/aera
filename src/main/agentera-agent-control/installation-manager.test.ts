@@ -383,6 +383,9 @@ describe("Agent installation orchestration", () => {
   let archiveInstallation: Mock<AgentInstallationClient["archiveInstallation"]>;
   let getManagedUpdate: Mock<AgentInstallationClient["getManagedUpdate"]>;
   let applyManagedUpdate: Mock<AgentInstallationClient["applyManagedUpdate"]>;
+  let recordDeliveryVerification: Mock<
+    AgentInstallationClient["recordOfficialAgentDeliveryVerification"]
+  >;
   let materializeVersion: Mock<
     AgentInstallationProjection["materializeVersion"]
   >;
@@ -485,6 +488,13 @@ describe("Agent installation orchestration", () => {
       .fn<AgentInstallationClient["getManagedUpdate"]>()
       .mockResolvedValue(null);
     applyManagedUpdate = vi.fn<AgentInstallationClient["applyManagedUpdate"]>();
+    recordDeliveryVerification = vi
+      .fn<AgentInstallationClient["recordOfficialAgentDeliveryVerification"]>()
+      .mockResolvedValue({
+        request_id: OPERATION_ID,
+        status: "accepted",
+        received_at: NOW.toISOString(),
+      });
     client = {
       origin: ORIGIN,
       createInstallation,
@@ -496,6 +506,8 @@ describe("Agent installation orchestration", () => {
       archiveInstallation,
       getManagedUpdate,
       applyManagedUpdate,
+      getOfficialDesktopVersion: () => "v0.7.4",
+      recordOfficialAgentDeliveryVerification: recordDeliveryVerification,
     };
     trust = {
       verifyPolicy: vi.fn(() => {
@@ -1653,6 +1665,63 @@ describe("Agent installation orchestration", () => {
       selected_release_revision_id: OFFICIAL_RELEASE_REVISION_ID,
       update_policy: "managed",
     });
+    await vi.waitFor(() => {
+      expect(recordDeliveryVerification).toHaveBeenCalledTimes(5);
+    });
+    expect(
+      recordDeliveryVerification.mock.calls.map(([receipt]) =>
+        receipt.verificationStatus,
+      ),
+    ).toEqual([
+      "catalog_visible",
+      "signature_verified",
+      "compatible",
+      "installed",
+      "activated",
+    ]);
+    expect(recordDeliveryVerification.mock.calls[4]?.[0]).toMatchObject({
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      releaseRevisionId: OFFICIAL_RELEASE_REVISION_ID,
+      contentDigest: v1.content_digest,
+      runtimeVersion: "v0.18.2-agentera.1",
+      desktopVersion: "v0.7.4",
+    });
+  });
+
+  it("does not roll back an official install when verification delivery is unavailable", async () => {
+    policy = makeOfficialPolicy(v1);
+    createInstallation.mockResolvedValueOnce({
+      installation: pendingOfficialInstallation(),
+      policy_snapshot: policy,
+      replayed: false,
+    });
+    activateInstallation.mockResolvedValueOnce(
+      pendingOfficialInstallation("active"),
+    );
+    recordDeliveryVerification.mockRejectedValue(new Error("cloud unavailable"));
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        source: {
+          scope: "PLATFORM",
+          officialReleaseId: OFFICIAL_RELEASE_ID,
+          selectedReleaseRevisionId: OFFICIAL_RELEASE_REVISION_ID,
+          updatePolicy: "managed",
+        },
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).resolves.toMatchObject({ status: "active" });
+    await vi.waitFor(() => expect(recordDeliveryVerification).toHaveBeenCalled());
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT COUNT(*) AS count FROM pending_sanitized_records WHERE record_type = 'official_delivery_verification'",
+        )
+        .get(),
+    ).toEqual({ count: 5 });
   });
 
   it("rejects claiming an existing Profile for a PLATFORM source before Cloud mutation", async () => {

@@ -59,6 +59,22 @@ export const desktopFleetAdminScopes = Object.freeze([
   "desktop_control:command",
 ]);
 
+export const contentDeliveryAdminScopes = Object.freeze([
+  "official_agents:read",
+  "official_agent_drafts:write",
+  "official_agent_reviews:write",
+  "official_agent_releases:write",
+  "official_agent_audit:read",
+]);
+
+export function payloadSecretForOfficialMode(
+  mode: "desktopFleet" | "contentDelivery",
+): string {
+  return mode === "contentDelivery"
+    ? "aera-content-delivery-admin-e2e-secret"
+    : "aera-desktop-fleet-admin-secret";
+}
+
 type SMSDelivery = {
   to: string;
   code: string;
@@ -121,7 +137,7 @@ export interface AgentControlHarness {
 }
 
 export interface OfficialManagedAgentHarnessState {
-  mode: "legacy" | "desktopFleet";
+  mode: "legacy" | "desktopFleet" | "contentDelivery";
   adminRoot: string;
   adminBinary: string;
   adminBootstrapBinary: string;
@@ -932,17 +948,15 @@ function officialEnvironment(
     AERA_ADMIN_E2E_CLOUD_BINARY: harness.cloudBinary,
     AERA_ADMIN_E2E_CLOUD_PID_FILE: official.cloudPIDFile,
   };
-  if (official.mode === "desktopFleet") {
+  if (official.mode !== "legacy") {
     const databaseFile = official.adminDatabaseFile;
     if (!databaseFile || !official.payloadBaseURL) {
-      throw new Error(
-        "Desktop Fleet Admin database and Payload origin are missing.",
-      );
+      throw new Error("Payload Admin database and origin are missing.");
     }
     return {
       ...base,
       DATABASE_URL: `file:${databaseFile}`,
-      PAYLOAD_SECRET: "aera-desktop-fleet-admin-secret",
+      PAYLOAD_SECRET: payloadSecretForOfficialMode(official.mode),
       NEXT_PUBLIC_SERVER_URL: official.payloadBaseURL,
       ADMIN_WEB_URL: official.adminBaseURL,
       AGENTERA_CLOUD_ADMIN_BASE_URL: official.cloudInternalOrigin,
@@ -952,7 +966,11 @@ function officialEnvironment(
       AGENTERA_CLOUD_ADMIN_JWT_SIGNING_KEY_FILE: serviceKey,
       AGENTERA_CLOUD_ADMIN_JWT_ISSUER: "aera-admin",
       AGENTERA_CLOUD_ADMIN_JWT_SUBJECT: "aera-admin-official-e2e",
-      AGENTERA_CLOUD_ADMIN_SCOPES: JSON.stringify(desktopFleetAdminScopes),
+      AGENTERA_CLOUD_ADMIN_SCOPES: JSON.stringify(
+        official.mode === "contentDelivery"
+          ? contentDeliveryAdminScopes
+          : desktopFleetAdminScopes,
+      ),
       AGENTERA_CLOUD_ADMIN_TIMEOUT_MS: "5000",
     };
   }
@@ -962,21 +980,21 @@ function officialEnvironment(
 async function createOfficialState(
   harness: AgentControlHarness,
   adminRoot: string,
-  mode: "legacy" | "desktopFleet" = "legacy",
+  mode: "legacy" | "desktopFleet" | "contentDelivery" = "legacy",
 ): Promise<OfficialManagedAgentHarnessState> {
   const internalPort = await freePort();
   const adminPort = await freePort();
-  const payloadPort = mode === "desktopFleet" ? await freePort() : adminPort;
+  const payloadPort = mode !== "legacy" ? await freePort() : adminPort;
   const adminNextDistDirectory =
-    mode === "desktopFleet"
+    mode !== "legacy"
       ? join(adminRoot, `.next-desktop-fleet-${process.pid}`)
       : null;
   const adminTsconfigSnapshot =
-    mode === "desktopFleet"
+    mode !== "legacy"
       ? readFileSync(join(adminRoot, "tsconfig.json"), "utf8")
       : null;
   let adminNextEnvSnapshot: string | null = null;
-  if (mode === "desktopFleet") {
+  if (mode !== "legacy") {
     try {
       adminNextEnvSnapshot = readFileSync(
         join(adminRoot, "next-env.d.ts"),
@@ -994,7 +1012,7 @@ async function createOfficialState(
     cloudE2EBinary: join(harness.root, "aera-cloud-e2e"),
     adminBaseURL: `http://localhost:${adminPort}`,
     payloadBaseURL:
-      mode === "desktopFleet" ? `http://127.0.0.1:${payloadPort}` : null,
+      mode !== "legacy" ? `http://127.0.0.1:${payloadPort}` : null,
     cloudInternalOrigin: `https://127.0.0.1:${internalPort}`,
     adminPostgresPort: await freePort(),
     adminRedisPort: await freePort(),
@@ -1003,7 +1021,7 @@ async function createOfficialState(
     adminProcess: null,
     adminWebProcess: null,
     adminDatabaseFile:
-      mode === "desktopFleet" ? join(harness.root, "admin.sqlite") : null,
+      mode !== "legacy" ? join(harness.root, "admin.sqlite") : null,
     adminFixtureFile: join(harness.root, "admin-fixtures.json"),
     cloudFixtureFile: join(harness.root, "cloud-fixture.json"),
     cloudLogFile: join(harness.root, "cloud.log"),
@@ -1075,16 +1093,16 @@ async function waitForInternalCloud(
 async function startOfficialAdmin(harness: AgentControlHarness): Promise<void> {
   const official = harness.official;
   if (!official) return;
-  const desktopFleetServer =
-    official.mode === "desktopFleet"
+  const payloadServer =
+    official.mode !== "legacy"
       ? desktopFleetAdminServerInvocation(
           official.adminRoot,
           official.payloadBaseURL!,
         )
       : null;
   const child =
-    official.mode === "desktopFleet"
-      ? spawn(desktopFleetServer!.executable, desktopFleetServer!.args, {
+    official.mode !== "legacy"
+      ? spawn(payloadServer!.executable, payloadServer!.args, {
           cwd: official.adminRoot,
           env: {
             ...official.environment,
@@ -1099,7 +1117,7 @@ async function startOfficialAdmin(harness: AgentControlHarness): Promise<void> {
           stdio: ["ignore", "pipe", "pipe"],
         });
   const webChild =
-    official.mode === "desktopFleet"
+    official.mode !== "legacy"
       ? spawn(
           "pnpm",
           [
@@ -1139,7 +1157,7 @@ async function startOfficialAdmin(harness: AgentControlHarness): Promise<void> {
     }
     try {
       const url =
-        official.mode === "desktopFleet"
+        official.mode !== "legacy"
           ? `${official.adminBaseURL}/admin/login`
           : `${official.adminBaseURL}/health/ready`;
       const response = await fetch(url);
@@ -1266,7 +1284,7 @@ async function stopOfficialAdmin(harness: AgentControlHarness): Promise<void> {
   official.adminWebProcess = null;
   await stopChild(webChild);
   await stopChild(child);
-  if (official.mode === "desktopFleet") {
+  if (official.mode !== "legacy") {
     if (official.adminNextDistDirectory) {
       await rm(official.adminNextDistDirectory, {
         recursive: true,
@@ -1319,22 +1337,102 @@ export function desktopFleetAdminSeedPath(runRoot: string): string {
   return join(runRoot, "seed-desktop-fleet-admin.mts");
 }
 
+export function buildContentDeliveryAdminSeedScript(
+  configPath: string,
+  payloadModulePath: string,
+  fixturePath: string,
+): string {
+  return `import { writeFile } from "node:fs/promises";
+import { getPayload } from ${JSON.stringify(payloadModulePath)};
+import config from ${JSON.stringify(configPath)};
+
+const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEUlEQVR4nGNQTX79H4QZYAwAUe4JyX4GS0cAAAAASUVORK5CYII=", "base64");
+const admins = [
+  { displayName: "Content Delivery Publisher", email: "content-delivery-publisher@agentera.local", password: "Aera Content Delivery Publisher 2026", role: "publisher" },
+  { displayName: "Content Delivery Reviewer", email: "content-delivery-reviewer@agentera.local", password: "Aera Content Delivery Reviewer 2026", role: "super_admin" },
+  { displayName: "Content Delivery Operator", email: "content-delivery-operator@agentera.local", password: "Aera Content Delivery Operator 2026", role: "operations_admin" },
+];
+
+async function main() {
+  const payload = await getPayload({ config });
+  for (const admin of admins) {
+    await payload.delete({ collection: "admins", where: { email: { equals: admin.email } }, overrideAccess: true });
+    await payload.create({ collection: "admins", overrideAccess: true, data: { ...admin, active: true } });
+  }
+  const avatar = await payload.create({
+    collection: "media",
+    data: { alt: "Content delivery E2E avatar" },
+    file: { data: png, mimetype: "image/png", name: "content-delivery-e2e.png", size: png.length },
+    overrideAccess: true,
+  });
+  const category = await payload.create({
+    collection: "expert-categories",
+    data: { active: true, key: "content-delivery-e2e", name: "Content Delivery E2E", sortOrder: 1 },
+    overrideAccess: true,
+  });
+  const skill = await payload.create({
+    collection: "skill-catalog",
+    data: { active: true, distributionClass: "runtime_public", key: "content-delivery-research", name: "Content Delivery Research", runtimeSkillId: "content-delivery-research" },
+    overrideAccess: true,
+  });
+  const agent = await payload.create({
+    collection: "agent-templates",
+    data: {
+      _status: "draft",
+      avatar: avatar.id,
+      category: category.id,
+      introduction: "Isolated official content delivery acceptance agent.",
+      minimumRuntimeVersion: "0.18.2-agentera.1",
+      minimumStudioVersion: "0.7.0",
+      name: "Content Delivery E2E Agent",
+      rolePrompt: "You are the isolated Aera content delivery acceptance agent.",
+      skills: [skill.id],
+      tags: [{ value: "e2e" }],
+      templateKey: "content-delivery-e2e-agent",
+    },
+    draft: true,
+    overrideAccess: true,
+  });
+  await writeFile(${JSON.stringify(fixturePath)}, JSON.stringify({ agentId: String(agent.id), admins }, null, 2), { mode: 0o600 });
+  await payload.destroy();
+}
+
+void main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+`;
+}
+
+export function contentDeliveryAdminSeedPath(runRoot: string): string {
+  return join(runRoot, "seed-content-delivery-admin.mts");
+}
+
 async function bootstrapOfficialAdminFixtures(
   harness: AgentControlHarness,
 ): Promise<void> {
   const official = harness.official;
   if (!official) return;
-  if (official.mode === "desktopFleet") {
-    const seedScript = desktopFleetAdminSeedPath(harness.root);
+  if (official.mode !== "legacy") {
+    const seedScript =
+      official.mode === "contentDelivery"
+        ? contentDeliveryAdminSeedPath(harness.root)
+        : desktopFleetAdminSeedPath(harness.root);
     const adminRequire = createRequire(
       join(official.adminRoot, "package.json"),
     );
     await writeFile(
       seedScript,
-      buildDesktopFleetAdminSeedScript(
-        join(official.adminRoot, "src/payload.config.ts"),
-        adminRequire.resolve("payload"),
-      ),
+      official.mode === "contentDelivery"
+        ? buildContentDeliveryAdminSeedScript(
+            join(official.adminRoot, "src/payload.config.ts"),
+            adminRequire.resolve("payload"),
+            official.adminFixtureFile,
+          )
+        : buildDesktopFleetAdminSeedScript(
+            join(official.adminRoot, "src/payload.config.ts"),
+            adminRequire.resolve("payload"),
+          ),
       { encoding: "utf8", mode: 0o600 },
     );
     command("pnpm", ["exec", "tsx", seedScript], {
@@ -1413,29 +1511,32 @@ export async function createAgentControlHarness(
   options: {
     officialManagedAgent?: boolean;
     desktopFleet?: boolean;
+    contentDelivery?: boolean;
     encryptedBackup?: boolean;
   } = {},
 ): Promise<AgentControlHarness> {
   await assertPublicPortAvailable();
   let selectedCloudRoot = defaultCloudRoot;
   let selectedAdminRoot: string | null = null;
-  if (options.desktopFleet) {
+  if (options.desktopFleet || options.contentDelivery) {
     selectedCloudRoot = requireCleanDesktopFleetRepository(
-      "AERA_DESKTOP_FLEET_E2E_CLOUD_REPO",
+      options.contentDelivery
+        ? "AERA_CONTENT_DELIVERY_E2E_CLOUD_REPO"
+        : "AERA_DESKTOP_FLEET_E2E_CLOUD_REPO",
       "go.mod",
       "module github.com/bignormal/aera-cloud",
     );
     selectedAdminRoot = requireCleanDesktopFleetRepository(
-      "AERA_DESKTOP_FLEET_E2E_ADMIN_REPO",
+      options.contentDelivery
+        ? "AERA_CONTENT_DELIVERY_E2E_ADMIN_REPO"
+        : "AERA_DESKTOP_FLEET_E2E_ADMIN_REPO",
       "package.json",
       '"name": "agentera-admin"',
     );
     try {
       await lstat(join(selectedAdminRoot, "admin-web"));
     } catch {
-      throw new Error(
-        "AERA_DESKTOP_FLEET_E2E_ADMIN_REPO must contain admin-web.",
-      );
+      throw new Error("Payload Admin E2E repository must contain admin-web.");
     }
   } else if (options.officialManagedAgent) {
     selectedCloudRoot = requireCleanE2ERepository({
@@ -1563,7 +1664,11 @@ export async function createAgentControlHarness(
       harness.official = await createOfficialState(
         harness,
         selectedAdminRoot,
-        options.desktopFleet ? "desktopFleet" : "legacy",
+        options.contentDelivery
+          ? "contentDelivery"
+          : options.desktopFleet
+            ? "desktopFleet"
+            : "legacy",
       );
       if (harness.desktopControlClockFile) {
         await writeFile(
@@ -1702,6 +1807,10 @@ export async function createAgentControlHarness(
 
 export async function createOfficialManagedAgentHarness(): Promise<AgentControlHarness> {
   return createAgentControlHarness({ officialManagedAgent: true });
+}
+
+export async function createContentDeliveryHarness(): Promise<AgentControlHarness> {
+  return createAgentControlHarness({ contentDelivery: true });
 }
 
 export async function closeAgentControlHarness(
@@ -2098,6 +2207,7 @@ export function agentControlRequests(
       (request) =>
         request.path.startsWith("/api/v1/agent-") ||
         request.path.startsWith("/api/v1/official-agents") ||
+        request.path === "/api/v1/official-agent-delivery-verifications" ||
         /^\/api\/v1\/workspaces\/[^/]+\/agent-definitions(?:\/|$)/.test(
           request.path,
         ) ||

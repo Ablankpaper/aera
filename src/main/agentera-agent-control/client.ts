@@ -18,6 +18,10 @@ import {
 import type { InstallationIdentity } from "../agentera-auth/store";
 import { canonicalizeExperienceCandidate } from "./experience-candidate-contract";
 import type { OfficialAgentChannel } from "./official-channel";
+import {
+  serializeOfficialAgentDeliveryVerification,
+  type OfficialAgentDeliveryVerificationInput,
+} from "./verification-receipt";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const RESPONSE_LIMIT = 4 * 1024 * 1024;
@@ -50,6 +54,8 @@ export type CreateAgentInstallationRequest =
   components["schemas"]["CreateAgentInstallationRequest"];
 export type CreateRuntimeBindingRecordRequest =
   components["schemas"]["CreateRuntimeBindingRecordRequest"];
+export type OfficialAgentDeliveryVerificationReceipt =
+  components["schemas"]["OfficialAgentDeliveryVerificationReceipt"];
 export type CloudExperienceCandidateBundle =
   components["schemas"]["ExperienceCandidateBundle"];
 export type CloudExperienceCandidateSummary =
@@ -1312,6 +1318,7 @@ function isOrganizationSubmissionDetail(
         "kind",
         "manifest",
         "manifest_digest",
+        "published_version_id",
         "organization_id",
         "published_version_id",
         "review",
@@ -1570,6 +1577,17 @@ function isRuntimeBinding(value: unknown): value is RuntimeBindingRecord {
     isBoundedString(value.runtime_version, 1, 64) &&
     isDigest(value.tool_permission_digest) &&
     isTimestamp(value.created_at)
+  );
+}
+
+function isOfficialAgentDeliveryVerificationReceipt(
+  value: unknown,
+): value is OfficialAgentDeliveryVerificationReceipt {
+  return (
+    hasExactFields(value, ["received_at", "request_id", "status"]) &&
+    isCanonicalUUID(value.request_id) &&
+    (value.status === "accepted" || value.status === "replayed") &&
+    isCanonicalTimestamp(value.received_at)
   );
 }
 
@@ -2091,6 +2109,10 @@ export class AgenteraAgentControlClient {
     return this.requireOfficialConfiguration().channel;
   }
 
+  getOfficialDesktopVersion(): string {
+    return this.requireOfficialConfiguration().desktopVersion;
+  }
+
   async getOfficialAgent(definitionId: string): Promise<{
     agent: OfficialAgentSummary;
     version: AgentVersion;
@@ -2128,6 +2150,18 @@ export class AgenteraAgentControlClient {
       throw new AgenteraAgentControlClientError(0, "invalid_response");
     }
     return detachOfficialAgentSummary(value);
+  }
+
+  recordOfficialAgentDeliveryVerification(
+    input: OfficialAgentDeliveryVerificationInput,
+  ): Promise<OfficialAgentDeliveryVerificationReceipt> {
+    const body: components["schemas"]["CreateOfficialAgentDeliveryVerificationRequest"] =
+      serializeOfficialAgentDeliveryVerification(input);
+    return this.requestJSON(
+      "/api/v1/official-agent-delivery-verifications",
+      { method: "POST", body, expectedStatus: 201 },
+      isOfficialAgentDeliveryVerificationReceipt,
+    );
   }
 
   async getManagedUpdate(
