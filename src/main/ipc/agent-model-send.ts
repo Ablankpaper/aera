@@ -8,6 +8,7 @@ import type {
   PublicModelRouteIdentity,
 } from "../../shared/model-configuration";
 import type { SessionModelOverride } from "../../shared/model-override";
+import type { AgentModelSegmentLifecycle } from "../agent-model-execution-lease";
 
 export type AgentModelRouteMode = "configured" | "dynamic";
 
@@ -76,6 +77,24 @@ export function prepareConversationRuntime(
       : {}),
     visibleHistoryCount: visibleHistoryCount(input.history),
   });
+}
+
+/**
+ * A candidate Segment exists before the real transport is started. Keep every
+ * setup step after that durable write behind one guard so a gateway, tunnel,
+ * or lease failure cannot leave a stale `preparing` candidate behind.
+ */
+export async function runAgentModelSegmentPreflight<T>(
+  lifecycle: AgentModelSegmentLifecycle | null,
+  operation: () => T | Promise<T>,
+): Promise<T> {
+  lifecycle?.emitPreparing();
+  try {
+    return await operation();
+  } catch (error) {
+    lifecycle?.fail(error);
+    throw error;
+  }
 }
 
 /** Backward-compatible name for focused send-boundary tests and callers. */

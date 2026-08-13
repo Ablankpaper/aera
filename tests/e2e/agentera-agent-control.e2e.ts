@@ -332,7 +332,7 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
   const failedInstall = await invokeAgentera(deviceB, "installVersion", {
     definitionId: versionOne.definitionId,
     versionId: versionOne.versionId,
-    profileName: "failed-installation-probe",
+    profileName: "device-b-agent",
   });
   expect(failedInstall.ok).toBe(false);
   expect(await privateProfileSnapshot(aProfile, PRIVATE_MARKERS)).toEqual(
@@ -345,6 +345,8 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
     ),
   ).toEqual(beforeFailedInstallB);
 
+  // Retry the exact target so the persisted creation intent can safely reuse
+  // its idempotency key after the injected transient Cloud failure.
   const bInstallationResult = await invokeAgentera(deviceB, "installVersion", {
     definitionId: versionOne.definitionId,
     versionId: versionOne.versionId,

@@ -206,6 +206,7 @@ import {
 import {
   classifyAgentModelRoute,
   prepareConversationRuntime,
+  runAgentModelSegmentPreflight,
 } from "./agent-model-send";
 import { deleteConversationSessions } from "./conversation-session-deletion";
 import {
@@ -3613,6 +3614,18 @@ export function registerIpcHandlers(context: IpcContext): void {
       if (runtimeRun === null) {
         throw new Error("Aera Runtime restart is pending.");
       }
+      const safeSend = (channel: string, payload: unknown): boolean => {
+        if (event.sender.isDestroyed()) return false;
+        try {
+          event.sender.send(channel, chatRunId, payload);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      let segmentLifecycle: ReturnType<
+        typeof createAgentModelSegmentLifecycle
+      > | null = null;
       try {
         const hasSignedInAccess = hasAgenteraSignedInAccess(
           agenteraAuth.getPublicState(),
@@ -3642,6 +3655,19 @@ export function registerIpcHandlers(context: IpcContext): void {
           preparedConversationRuntime?.preparedAgentTurn ?? null;
         const conversationBoundary =
           preparedConversationRuntime?.conversationBoundary ?? null;
+        const segmentTransition =
+          preparedConversationRuntime?.segmentTransition ?? null;
+        segmentLifecycle =
+          segmentTransition && agenteraAgentControl
+            ? createAgentModelSegmentLifecycle({
+                transition: segmentTransition,
+                owner: turnOwner,
+                control: agenteraAgentControl,
+                emit: (segmentEvent) => {
+                  safeSend("chat-agent-segment", segmentEvent);
+                },
+              })
+            : null;
         let conversationEnvelope = preparedAgentTurn?.envelope;
         try {
           const globalSnapshot =
@@ -3679,27 +3705,29 @@ export function registerIpcHandlers(context: IpcContext): void {
             error instanceof Error ? error.message : String(error),
           );
         }
-        if (!isRemoteMode() && !isGatewayRunning(profile)) {
-          // A named Agent Profile may inherit a port already occupied by a
-          // different local Aera instance. Reconcile and await the real
-          // profile gateway before beginning a bound Agent turn.
-          await ensureProfilePortAvailable(profile);
-          startGateway(profile);
-          await startGatewayWithRecovery(
-            profile,
-            preparedAgentTurn?.envelope.requireBoundApiTransport
-              ? 30_000
-              : 8_000,
-          );
-        }
-
         const conn = getConnectionConfig();
-        if (conn.mode === "ssh" && conn.ssh) {
-          // Tunnel to the dashboard (/api/* + chat WS; NOT /v1) and cache its
-          // token, else the gateway api_server (/v1) — via the shared preparer
-          // so all SSH paths agree on one tunnel target.
-          await prepareSshTunnel(conn, profile);
-        }
+        await runAgentModelSegmentPreflight(segmentLifecycle, async () => {
+          if (!isRemoteMode() && !isGatewayRunning(profile)) {
+            // A named Agent Profile may inherit a port already occupied by a
+            // different local Aera instance. Reconcile and await the real
+            // profile gateway before beginning a bound Agent turn.
+            await ensureProfilePortAvailable(profile);
+            startGateway(profile);
+            await startGatewayWithRecovery(
+              profile,
+              preparedAgentTurn?.envelope.requireBoundApiTransport
+                ? 30_000
+                : 8_000,
+            );
+          }
+
+          if (conn.mode === "ssh" && conn.ssh) {
+            // Tunnel to the dashboard (/api/* + chat WS; NOT /v1) and cache its
+            // token, else the gateway api_server (/v1) — via the shared preparer
+            // so all SSH paths agree on one tunnel target.
+            await prepareSshTunnel(conn, profile);
+          }
+        });
 
         let fullResponse = "";
         const chatStartTime = Date.now();
@@ -3711,37 +3739,6 @@ export function registerIpcHandlers(context: IpcContext): void {
             rejectChat = rej;
           },
         );
-
-        // Streaming sends to `event.sender` will throw "Object has been
-        // destroyed" if the renderer WebContents goes away mid-response
-        // (window closed, reloaded, navigated away). Guard every send so a
-        // dead sender doesn't crash the IPC handler, and abort the in-flight
-        // chat the first time we see one — there's nobody listening anymore.
-        // Every event carries the runId as its first arg so the renderer can
-        // route it to the right conversation among several running at once.
-        const safeSend = (channel: string, payload: unknown): boolean => {
-          if (event.sender.isDestroyed()) return false;
-          try {
-            event.sender.send(channel, chatRunId, payload);
-            return true;
-          } catch {
-            return false;
-          }
-        };
-        const segmentTransition =
-          preparedConversationRuntime?.segmentTransition ?? null;
-        const segmentLifecycle =
-          segmentTransition && agenteraAgentControl
-            ? createAgentModelSegmentLifecycle({
-                transition: segmentTransition,
-                owner: turnOwner,
-                control: agenteraAgentControl,
-                emit: (segmentEvent) => {
-                  safeSend("chat-agent-segment", segmentEvent);
-                },
-              })
-            : null;
-        segmentLifecycle?.emitPreparing();
 
         let executionLease: ReturnType<
           typeof createAgentModelExecutionLease
@@ -3999,6 +3996,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         runtimeRun.attachAbort(handle.abort);
         return promise;
       } catch (error) {
+        segmentLifecycle?.fail(error);
         runtimeRun.finish();
         throw error;
       }
