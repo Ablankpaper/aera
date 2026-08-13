@@ -28,7 +28,8 @@ const CLOUD_SHA = "b".repeat(40);
 const ADMIN_SHA = "c".repeat(40);
 const CLOUD_DIGEST = `sha256:${"1".repeat(64)}`;
 const ADMIN_DIGEST = `sha256:${"2".repeat(64)}`;
-const DESKTOP_CI = "https://github.com/Ablankpaper/aera/actions/runs/30100000001";
+const DESKTOP_CI =
+  "https://github.com/Ablankpaper/aera/actions/runs/30100000001";
 const DESKTOP_CANDIDATE =
   "https://github.com/Ablankpaper/aera/actions/runs/30100000002";
 const CLOUD_CI =
@@ -96,29 +97,29 @@ async function fixture() {
     runtimeSeed: {
       repository: "Ablankpaper/aera-runtime",
       sourceCommit: INTERNAL_BETA_RUNTIME_SOURCE_SHA,
-      runtimeVersion: "0.20.0-agentera.1",
-      releaseTag: "runtime-v0.20.0-agentera.1-rc.1",
+      runtimeVersion: "0.20.0-agentera.2",
+      releaseTag: "runtime-v0.20.0-agentera.2-rc.1",
       channel: "candidate",
       lockSha256: "3".repeat(64),
       targets: [
         {
           platform: "darwin",
           arch: "arm64",
-          archive: "agentera-runtime-0.20.0-agentera.1-darwin-arm64.tar.zst",
+          archive: "agentera-runtime-0.20.0-agentera.2-darwin-arm64.tar.zst",
           manifest:
-            "agentera-runtime-0.20.0-agentera.1-darwin-arm64.manifest.json",
+            "agentera-runtime-0.20.0-agentera.2-darwin-arm64.manifest.json",
           signature:
-            "agentera-runtime-0.20.0-agentera.1-darwin-arm64.manifest.sig",
+            "agentera-runtime-0.20.0-agentera.2-darwin-arm64.manifest.sig",
           manifestSha256: "4".repeat(64),
         },
         {
           platform: "windows",
           arch: "x64",
-          archive: "agentera-runtime-0.20.0-agentera.1-windows-x64.zip",
+          archive: "agentera-runtime-0.20.0-agentera.2-windows-x64.zip",
           manifest:
-            "agentera-runtime-0.20.0-agentera.1-windows-x64.manifest.json",
+            "agentera-runtime-0.20.0-agentera.2-windows-x64.manifest.json",
           signature:
-            "agentera-runtime-0.20.0-agentera.1-windows-x64.manifest.sig",
+            "agentera-runtime-0.20.0-agentera.2-windows-x64.manifest.sig",
           manifestSha256: "5".repeat(64),
         },
       ],

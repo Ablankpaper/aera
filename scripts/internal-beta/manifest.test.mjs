@@ -18,13 +18,14 @@ import {
   verifyInternalBetaManifestFiles,
 } from "./manifest.mjs";
 
-const VERSION = "0.7.4-internal-beta.27";
+const VERSION = "0.7.4-internal-beta.28";
 const SOURCE_SHA = "a".repeat(40);
-const RUNTIME_SHA = "ae746df6556f1d496f9dd49c850cc6133997e317";
+const RUNTIME_SHA = "b890d7de940c02a06da73f6a421d3867a63db8e6";
 const ORIGIN = "https://203.0.113.10";
 const KEY_ID = "offline-beta-2026-07";
 const PUBLIC_KEY = Buffer.alloc(32, 73).toString("base64url");
-const CI_RUN_URL = "https://github.com/Ablankpaper/aera/actions/runs/30100000001";
+const CI_RUN_URL =
+  "https://github.com/Ablankpaper/aera/actions/runs/30100000001";
 const BUILD_RUN_URL =
   "https://github.com/Ablankpaper/aera/actions/runs/30100000002";
 
@@ -60,28 +61,28 @@ async function createFixture(runtimePatch = {}) {
   const runtimeDocument = {
     schema_version: 1,
     repository: "Ablankpaper/aera-runtime",
-    release_tag: "runtime-v0.20.0-agentera.1-rc.1",
+    release_tag: "runtime-v0.20.0-agentera.2-rc.1",
     source_commit: RUNTIME_SHA,
-    runtime_version: "0.20.0-agentera.1",
+    runtime_version: "0.20.0-agentera.2",
     channel: "candidate",
     assets: {
       "darwin-arm64": {
         platform: "darwin",
         arch: "arm64",
-        archive: "agentera-runtime-0.20.0-agentera.1-darwin-arm64.tar.zst",
+        archive: "agentera-runtime-0.20.0-agentera.2-darwin-arm64.tar.zst",
         manifest:
-          "agentera-runtime-0.20.0-agentera.1-darwin-arm64.manifest.json",
+          "agentera-runtime-0.20.0-agentera.2-darwin-arm64.manifest.json",
         signature:
-          "agentera-runtime-0.20.0-agentera.1-darwin-arm64.manifest.sig",
+          "agentera-runtime-0.20.0-agentera.2-darwin-arm64.manifest.sig",
       },
       "windows-x64": {
         platform: "windows",
         arch: "x64",
-        archive: "agentera-runtime-0.20.0-agentera.1-windows-x64.zip",
+        archive: "agentera-runtime-0.20.0-agentera.2-windows-x64.zip",
         manifest:
-          "agentera-runtime-0.20.0-agentera.1-windows-x64.manifest.json",
+          "agentera-runtime-0.20.0-agentera.2-windows-x64.manifest.json",
         signature:
-          "agentera-runtime-0.20.0-agentera.1-windows-x64.manifest.sig",
+          "agentera-runtime-0.20.0-agentera.2-windows-x64.manifest.sig",
       },
     },
     ...runtimePatch,
