@@ -460,6 +460,53 @@ describe("terminateProcessTree", () => {
     }
   });
 
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Bounded force escalation]]
+  it("waits for a delayed forced Windows root exit within the bounded settle window", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
+    vi.useFakeTimers();
+    const alive = new Set([100]);
+    const root = fakeChildProcess(100, alive);
+    const captureSnapshot = vi.fn(async () => [
+      { pid: 100, parentPid: 1, identity: "windows:root-start" },
+    ]);
+    const forceWindowsTree = vi.fn(() => {
+      setTimeout(() => {
+        alive.delete(100);
+        Object.defineProperty(root.child, "exitCode", {
+          configurable: true,
+          value: 0,
+        });
+      }, 750);
+    });
+
+    try {
+      const stopping = terminateProcessTree(root.child, {
+        detachedProcessGroup: false,
+        forceAfterMs: 0,
+        pollIntervalMs: 50,
+        operations: {
+          captureSnapshot,
+          pidIsAlive: (pid) => alive.has(pid),
+          gracefulWindowsTree: vi.fn(),
+          forceWindowsTree,
+        } as never,
+      });
+
+      await vi.advanceTimersByTimeAsync(750);
+
+      await expect(stopping).resolves.toEqual({
+        forced: true,
+        remainingPids: [],
+      });
+      expect(forceWindowsTree).toHaveBeenCalledOnce();
+    } finally {
+      platform.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
   it("uses one bounded snapshot per verification phase instead of per-PID commands", async () => {
     const alive = new Set([100]);

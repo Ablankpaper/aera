@@ -715,7 +715,10 @@ export async function terminateProcessTree(
   const detachedProcessGroup = options.detachedProcessGroup ?? false;
   const forceAfterMs = Math.max(0, options.forceAfterMs ?? 3000);
   const pollIntervalMs = Math.max(1, options.pollIntervalMs ?? 50);
-  const forceSettleMs = Math.max(0, options.forceSettleMs ?? 500);
+  const forceSettleMs = Math.max(
+    0,
+    options.forceSettleMs ?? (process.platform === "win32" ? 3_000 : 500),
+  );
   const snapshotTimeoutMs = Math.max(
     1,
     options.snapshotTimeoutMs ?? DEFAULT_SNAPSHOT_TIMEOUT_MS,
