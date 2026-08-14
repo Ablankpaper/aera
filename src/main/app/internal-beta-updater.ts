@@ -21,7 +21,7 @@ import { execFile as execFileCallback, spawn } from "node:child_process";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
-import extractZip from "@electron-internal/extract-zip";
+import extractZip from "extract-zip";
 
 import {
   canonicalJsonBytes,
@@ -675,7 +675,9 @@ function safeMacAppPath(path: string | null): string {
     path.includes("/AppTranslocation/") ||
     path.startsWith("/Volumes/")
   ) {
-    throw new DesktopUpdateError("请先将 Aera 安装到“应用程序”目录后再更新。");
+    throw new DesktopUpdateError(
+      "请先将 Aera 安装到“应用程序”目录后再更新。",
+    );
   }
   return resolve(path);
 }
