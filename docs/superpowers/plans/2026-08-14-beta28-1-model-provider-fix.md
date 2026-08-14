@@ -102,3 +102,21 @@ Expected: New tests fail because the upsert request does not carry a Provider id
 - [ ] **Step 4: Dispatch the exact Beta candidate workflow and verify its source SHA, CI run, Runtime Seed, signed macOS app, notarization, and Windows package.**
 - [ ] **Step 5: Run the final DMG App UI launch check, then Promote only the `internal-beta` channel for Beta.28.1.**
 - [ ] **Step 6: Download the live manifest/signature and both published installers through the local proxy, verify byte checksums/range probes, and confirm no formal production Release was created.**
+
+### Task 6: Reissue the unpublished maintenance candidate as Beta.29
+
+**Files:**
+
+- Modify: `package.json`
+- Modify: `package-lock.json`
+- Modify: `.github/workflows/internal-beta.yml`
+- Modify: `.github/workflows/internal-beta-promote.yml`
+- Modify: `scripts/internal-beta/manifest.mjs`
+- Modify: Internal Beta release-contract tests and `lat.md/desktop-updates.md`
+
+- [x] **Step 1: Record the failed Beta.28.1 promotion evidence.** Candidate identity, checksums, and update signature passed, but the server rejected the maintenance-version archive path before publication; the live channel remained Beta.28.
+- [x] **Step 2: Change the immutable release identity to `0.7.4-internal-beta.29` without changing the already verified Provider or Runtime implementation.**
+- [x] **Step 3: Run the focused release-contract tests, `lat check`, and the changed-boundary local checks, then assemble the exact Beta.29 source commit.**
+- [ ] **Step 4: Push and fast-forward `main`, then run one exact-SHA three-platform CI and one immutable Beta.29 candidate build.**
+- [ ] **Step 5: Verify the exact packaged macOS candidate at the version/package boundary, then promote the recorded Beta.29 candidate once.**
+- [ ] **Step 6: Verify the live signed manifest and both versioned package range probes, and confirm no Git tag or GitHub Release was created.**

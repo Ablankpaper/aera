@@ -59,7 +59,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain=v1)"
           VERSION=$(node -p "require('./package.json').version")
-          test "$VERSION" = "0.7.4-internal-beta.28.1"
+          test "$VERSION" = "0.7.4-internal-beta.29"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Verify successful CI belongs to the exact source
@@ -764,7 +764,7 @@ jobs:
             --manifest candidate/desktop-update/manifest.json \
             --private-key-env DESKTOP_UPDATE_SIGNING_PRIVATE_KEY \
             --published-at "$CREATED_AT" \
-            --release-notes "Beta.28.1 修复自定义模型服务改名、地址与密钥更新、重复卡片及删除判定，改善模型目录读取提示，并修复 Windows Runtime Seed 在提取阶段失败；Runtime 仍为 0.20.0-agentera.2 签名候选，macOS 继续公证，Windows 提供内测包。" \
+            --release-notes "Beta.29 修复自定义模型服务改名、地址与密钥更新、重复卡片及删除判定，改善模型目录读取提示，并修复 Windows Runtime Seed 在提取阶段失败；Runtime 仍为 0.20.0-agentera.2 签名候选，macOS 继续公证，Windows 提供内测包。" \
             --signature candidate/desktop-update/manifest.sig \
             --version "$VERSION"
           node scripts/internal-beta/desktop-update.mjs verify \
