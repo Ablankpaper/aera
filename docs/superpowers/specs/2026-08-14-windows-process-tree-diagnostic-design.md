@@ -39,6 +39,12 @@ The diagnostic job name does not match `check (windows-latest)` and the run omit
 
 Push and pull-request events cannot select diagnostic mode. They always run the original full matrix. A branch push used to install this workflow revision carries a GitHub skip directive so it creates no automatic Actions run; the diagnostic is then started explicitly with the exact branch ref and mode.
 
+### Full-CI candidate compatibility
+
+GitHub reports a conditionally disabled top-level job as `skipped`, so a full-mode run contains the three successful `check` matrix jobs plus one skipped `windows-process-tree-diagnostic` job. Both Desktop candidate workflows allow only that exact skipped diagnostic while still requiring the exact Ubuntu, macOS, and Windows matrix names to succeed with executed steps.
+
+A diagnostic-only run, a missing platform, a duplicate job, any other skipped job, or any unexpected executed job remains ineligible for candidate packaging.
+
 ## Acceptance
 
 Local acceptance requires the CI workflow policy test, YAML parsing, formatting, `git diff --check`, and `lat check` to pass.

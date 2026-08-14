@@ -94,14 +94,33 @@ jobs:
           if (run.workflowName !== "CI") throw new Error("The supplied run is not Desktop CI");
           if (run.headSha !== process.env.SOURCE_SHA) throw new Error("CI source SHA differs");
           if (run.conclusion !== "success") throw new Error("CI did not succeed");
-          if (!Array.isArray(run.jobs) || run.jobs.length < 3) {
-            throw new Error("CI platform matrix is incomplete");
-          }
+          if (!Array.isArray(run.jobs)) throw new Error("CI jobs are missing");
+          const requiredJobs = new Set([
+            "check (ubuntu-latest)",
+            "check (macos-latest)",
+            "check (windows-latest)",
+          ]);
+          const allowedSkippedJobs = new Set(["windows-process-tree-diagnostic"]);
           for (const job of run.jobs) {
             const executed = job.steps?.filter((step) => step.conclusion !== "skipped") ?? [];
+            if (
+              job.conclusion === "skipped" &&
+              executed.length === 0 &&
+              allowedSkippedJobs.delete(job.name)
+            ) {
+              continue;
+            }
+            if (!requiredJobs.delete(job.name)) {
+              throw new Error(`Unexpected CI job: ${job.name}`);
+            }
             if (job.conclusion !== "success" || executed.length === 0) {
               throw new Error(`CI job did not execute successfully: ${job.name}`);
             }
+          }
+          if (requiredJobs.size !== 0) {
+            throw new Error(
+              `CI platform matrix is incomplete: ${[...requiredJobs].join(", ")}`,
+            );
           }
           NODE
           echo "run_url=$(node -p "require('$RUNNER_TEMP/ci-run.json').url")" \

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { execFile, spawnSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { test } from "node:test";
@@ -33,6 +35,120 @@ const windowsVerifierPath = new URL(
   import.meta.url,
 );
 const execFileAsync = promisify(execFile);
+const sourceSha = "a".repeat(40);
+
+function ciValidationModule(raw) {
+  const workflow = parseYAML(raw);
+  const step = workflow.jobs.validate.steps.find(
+    (candidate) =>
+      candidate.name === "Verify successful CI belongs to the exact source",
+  );
+  assert.ok(step, "candidate workflow must validate the supplied CI run");
+  const match = step.run.match(
+    /node --input-type=module <<'NODE'\n([\s\S]*?)\nNODE/gu,
+  );
+  assert.equal(match?.length, 1, "candidate CI validator must be one module");
+  return [
+    ...step.run.matchAll(
+      /node --input-type=module <<'NODE'\n([\s\S]*?)\nNODE/gu,
+    ),
+  ][0][1];
+}
+
+async function runCiValidation(raw, jobs) {
+  const root = await mkdtemp(join(tmpdir(), "aera-candidate-ci-"));
+  const runPath = join(root, "ci-run.json");
+  await writeFile(
+    runPath,
+    `${JSON.stringify({
+      workflowName: "CI",
+      headSha: sourceSha,
+      conclusion: "success",
+      jobs,
+    })}\n`,
+    "utf8",
+  );
+  try {
+    return spawnSync(process.execPath, ["--input-type=module"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CI_RUN_JSON: runPath,
+        SOURCE_SHA: sourceSha,
+      },
+      input: ciValidationModule(raw),
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+function successfulJob(name) {
+  return {
+    name,
+    conclusion: "success",
+    steps: [{ name: "Execute gate", conclusion: "success" }],
+  };
+}
+
+const fullMatrixJobs = [
+  successfulJob("check (ubuntu-latest)"),
+  successfulJob("check (macos-latest)"),
+  successfulJob("check (windows-latest)"),
+];
+
+const skippedDiagnosticJob = {
+  name: "windows-process-tree-diagnostic",
+  conclusion: "skipped",
+  steps: [],
+};
+
+test("candidate CI validators accept the full matrix when only the diagnostic job is skipped", async () => {
+  const workflows = await Promise.all([
+    readFile(workflowPath, "utf8"),
+    readFile(productionCandidatePath, "utf8"),
+  ]);
+
+  for (const raw of workflows) {
+    const result = await runCiValidation(raw, [
+      ...fullMatrixJobs,
+      skippedDiagnosticJob,
+    ]);
+    assert.equal(result.status, 0, result.stderr);
+  }
+});
+
+test("candidate CI validators reject a diagnostic-only run", async () => {
+  const workflows = await Promise.all([
+    readFile(workflowPath, "utf8"),
+    readFile(productionCandidatePath, "utf8"),
+  ]);
+
+  for (const raw of workflows) {
+    const result = await runCiValidation(raw, [
+      { name: "check", conclusion: "skipped", steps: [] },
+      successfulJob("windows-process-tree-diagnostic"),
+    ]);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /matrix|job/u);
+  }
+});
+
+test("candidate CI validators reject a missing required platform", async () => {
+  const workflows = await Promise.all([
+    readFile(workflowPath, "utf8"),
+    readFile(productionCandidatePath, "utf8"),
+  ]);
+
+  for (const raw of workflows) {
+    const result = await runCiValidation(raw, [
+      ...fullMatrixJobs.slice(0, 2),
+      skippedDiagnosticJob,
+    ]);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /matrix|job/u);
+  }
+});
 
 test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublished, and Sigstore-bound", async () => {
   const [raw, productionRaw] = await Promise.all([
