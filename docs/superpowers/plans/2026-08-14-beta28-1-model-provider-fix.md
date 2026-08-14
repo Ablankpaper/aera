@@ -98,7 +98,7 @@ Expected: New tests fail because the upsert request does not carry a Provider id
 
 - [x] **Step 1: Run focused tests, then the full unit/typecheck/build/audit gates.**
 - [x] **Step 2: Run an isolated Electron journey covering: edit name + URL, manual model fallback save, duplicate-card absence, delete of the renamed provider, and active-route protection.**
-- [ ] **Step 3: Bump version to `0.7.4-internal-beta.28.1`, commit the tested changes, push the Beta.28.1 source branch, and merge/update the release source according to the checked-in workflow policy.**
+- [x] **Step 3: Bump version to `0.7.4-internal-beta.28.1`, commit the tested changes, push the Beta.28.1 source branch, and merge/update the release source according to the checked-in workflow policy.**
 - [ ] **Step 4: Dispatch the exact Beta candidate workflow and verify its source SHA, CI run, Runtime Seed, signed macOS app, notarization, and Windows package.**
 - [ ] **Step 5: Run the final DMG App UI launch check, then Promote only the `internal-beta` channel for Beta.28.1.**
 - [ ] **Step 6: Download the live manifest/signature and both published installers through the local proxy, verify byte checksums/range probes, and confirm no formal production Release was created.**
