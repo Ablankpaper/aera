@@ -86,7 +86,7 @@ SIGTERM receives a fixed grace window. A still-live owned group or verified Wind
 
 POSIX force targets only the same dedicated PGID, including when its leader already exited. Windows refreshes invariant process identities before escalation. Query timeout, parse failure, or identity mismatch never falls back to a positive PID kill.
 
-Windows uses an exact-root tree kill while the root remains alive and individually terminates captured descendants when the root exits before escalation. After force, it condition-polls the captured tree for up to three seconds; any verified PID still alive at that deadline remains a fail-closed cleanup error.
+Windows uses an exact-root tree kill while the root remains alive and individually terminates captured descendants when the root exits before escalation. After force, it condition-polls the captured tree for up to three seconds, then refreshes the creation identity of every still-live PID that was actually forced so an immediately reused PID is not mistaken for the terminated process. An unavailable final snapshot or creation identity, or any still-matching forced identity, remains a fail-closed cleanup error; an unforced PID is never cleared by this final reuse check.
 
 ### Cancelled startup cannot outlive Desktop
 

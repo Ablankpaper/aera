@@ -833,6 +833,7 @@ export async function terminateProcessTree(
   );
   const verifiedSet = new Set(verifiedRemaining);
   let forced = false;
+  const forcedPids = new Set<number>();
   const remainingSet = new Set(remaining);
   if (process.platform === "win32") {
     if (
@@ -843,6 +844,7 @@ export async function terminateProcessTree(
       try {
         await operations.forceWindowsTree(rootPid, commandTimeoutMs);
         forced = true;
+        for (const pid of verifiedRemaining) forcedPids.add(pid);
       } catch {
         if (
           verifiedSet.has(rootPid) &&
@@ -850,6 +852,7 @@ export async function terminateProcessTree(
         ) {
           signalOwnedRoot(proc, "SIGKILL", false);
           forced = true;
+          forcedPids.add(rootPid);
         }
       }
     }
@@ -862,6 +865,7 @@ export async function terminateProcessTree(
     ) {
       operations.signalPid(child.pid, "SIGKILL");
       forced = true;
+      forcedPids.add(child.pid);
     }
   }
   if (
@@ -872,6 +876,7 @@ export async function terminateProcessTree(
   ) {
     signalOwnedRoot(proc, "SIGKILL", detachedProcessGroup);
     forced = true;
+    forcedPids.add(rootPid);
   }
 
   remaining = await waitForCapturedTreeExit(
@@ -881,6 +886,28 @@ export async function terminateProcessTree(
     pollIntervalMs,
     operations,
   );
+  if (!forced || remaining.length === 0) {
+    return { forced, remainingPids: remaining };
+  }
+
+  const finalSnapshot = await captureForPhase(
+    {
+      rootPid,
+      candidatePids: remaining,
+      timeoutMs: snapshotTimeoutMs,
+    },
+    operations,
+    customOperations,
+  );
+  if (!finalSnapshot) return { forced, remainingPids: remaining };
+  const finalByPid = new Map(
+    finalSnapshot.map((record) => [record.pid, record.identity]),
+  );
+  remaining = remaining.filter((pid) => {
+    if (!forcedPids.has(pid)) return true;
+    const finalIdentity = finalByPid.get(pid);
+    return !finalIdentity || finalIdentity === capturedByPid.get(pid);
+  });
   return { forced, remainingPids: remaining };
 }
 

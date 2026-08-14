@@ -752,7 +752,7 @@ describe("terminateProcessTree", () => {
         { pid: 100, parentPid: 1, identity: "windows:root-1" },
         { pid: 101, parentPid: 100, identity: "windows:child-1" },
       ])
-      .mockResolvedValueOnce([
+      .mockResolvedValue([
         { pid: 100, parentPid: 1, identity: "windows:root-2" },
         { pid: 101, parentPid: 100, identity: "windows:child-1" },
       ]);
@@ -783,6 +783,83 @@ describe("terminateProcessTree", () => {
     }
   });
 
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Bounded force escalation]]
+  it("does not report a Windows PID reused after force as the owned process", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
+    const alive = new Set([100]);
+    const root = fakeChildProcess(100, alive);
+    const captureSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { pid: 100, parentPid: 1, identity: "windows:owned-root" },
+      ])
+      .mockResolvedValueOnce([
+        { pid: 100, parentPid: 1, identity: "windows:owned-root" },
+      ])
+      .mockResolvedValueOnce([
+        { pid: 100, parentPid: 1, identity: "windows:reused-root" },
+      ]);
+    const forceWindowsTree = vi.fn();
+
+    try {
+      const result = await terminateProcessTree(root.child, {
+        detachedProcessGroup: false,
+        forceAfterMs: 0,
+        forceSettleMs: 0,
+        operations: {
+          captureSnapshot,
+          forceWindowsTree,
+          gracefulWindowsTree: vi.fn(),
+          pidIsAlive: (pid) => alive.has(pid),
+        } as never,
+      });
+
+      expect(forceWindowsTree).toHaveBeenCalledOnce();
+      expect(captureSnapshot).toHaveBeenCalledTimes(3);
+      expect(result).toEqual({ forced: true, remainingPids: [] });
+    } finally {
+      platform.mockRestore();
+    }
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Bounded force escalation]]
+  it("fails closed when a forced Windows PID has no final creation identity", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
+    const alive = new Set([100]);
+    const root = fakeChildProcess(100, alive);
+    const captureSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { pid: 100, parentPid: 1, identity: "windows:owned-root" },
+      ])
+      .mockResolvedValueOnce([
+        { pid: 100, parentPid: 1, identity: "windows:owned-root" },
+      ])
+      .mockResolvedValueOnce([{ pid: 100, parentPid: 1, identity: "" }]);
+
+    try {
+      const result = await terminateProcessTree(root.child, {
+        detachedProcessGroup: false,
+        forceAfterMs: 0,
+        forceSettleMs: 0,
+        operations: {
+          captureSnapshot,
+          forceWindowsTree: vi.fn(),
+          gracefulWindowsTree: vi.fn(),
+          pidIsAlive: (pid) => alive.has(pid),
+        } as never,
+      });
+
+      expect(result).toEqual({ forced: true, remainingPids: [100] });
+    } finally {
+      platform.mockRestore();
+    }
+  });
+
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
   it("does not force a PID whose identity changes before escalation", async () => {
     const platform = vi
@@ -797,7 +874,7 @@ describe("terminateProcessTree", () => {
         { pid: 100, parentPid: 1, identity: "root@boot:42" },
         { pid: 101, parentPid: 100, identity: "child@boot:43" },
       ])
-      .mockResolvedValueOnce([
+      .mockResolvedValue([
         { pid: 100, parentPid: 1, identity: "root@boot:42" },
         { pid: 101, parentPid: 100, identity: "child@boot:44" },
       ]);
@@ -821,7 +898,7 @@ describe("terminateProcessTree", () => {
       await vi.runAllTimersAsync();
       const result = await stopping;
 
-      expect(captureSnapshot).toHaveBeenCalledTimes(2);
+      expect(captureSnapshot).toHaveBeenCalledTimes(3);
       expect(signalPid).not.toHaveBeenCalledWith(101, "SIGKILL");
       expect(result.remainingPids).toContain(101);
     } finally {
