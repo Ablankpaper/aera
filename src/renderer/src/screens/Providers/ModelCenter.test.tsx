@@ -697,6 +697,7 @@ describe("ModelCenter", () => {
       undefined,
       "Petoi Acceptance",
       "chat_completions",
+      "petoi-acceptance",
     );
   });
 
@@ -806,6 +807,70 @@ describe("ModelCenter", () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText(/providers\.center\.baseUrl/)).toHaveValue(
       "https://api.petoi.cn/v1",
+    );
+  });
+
+  it("carries the stable custom-provider id when saving a renamed service", async () => {
+    const mutateModelConfiguration = vi.fn().mockResolvedValue({
+      status: "committed",
+      catalog: emptyCatalog,
+    });
+    listModels.mockResolvedValue([
+      {
+        id: "model-1",
+        name: "gpt-5.6-sol",
+        provider: "custom",
+        providerLabel: "petoi.cn",
+        providerId: "provider-1",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://api.petoi.cn/v1",
+        apiMode: "chat_completions",
+        createdAt: 1,
+      },
+    ]);
+    listCustomProviders.mockResolvedValue([
+      {
+        id: "provider-1",
+        name: "petoi.cn",
+        baseUrl: "https://api.petoi.cn/v1",
+        createdAt: 1,
+      },
+    ]);
+    Object.assign(window.hermesAPI, {
+      getOwnerModelRouteCatalog: vi.fn().mockResolvedValue(emptyCatalog),
+      mutateModelConfiguration,
+    });
+
+    render(
+      <ModelCenter
+        profile="acceptance"
+        env={{ CUSTOM_PROVIDER_PETOI_CN_KEY: "configured" }}
+        activeModel={{
+          provider: "custom:petoi.cn",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://api.petoi.cn/v1",
+        }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "common.edit" }));
+    fireEvent.change(screen.getByLabelText(/providers\.center\.name/), {
+      target: { value: "123456" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "providers.center.saveAndUse" }),
+    );
+
+    await waitFor(() => expect(mutateModelConfiguration).toHaveBeenCalled());
+    expect(mutateModelConfiguration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "provider-1",
+        providerLabel: "123456",
+      }),
     );
   });
 

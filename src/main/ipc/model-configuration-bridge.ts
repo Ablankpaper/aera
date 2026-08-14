@@ -95,10 +95,13 @@ function parseMutationRequest(
     if (apiMode !== null && typeof apiMode !== "string") {
       throw invalidRequest();
     }
+    const providerId =
+      value.providerId === undefined ? undefined : text(value.providerId, 128);
     return {
       intent: "upsert",
       expectedCatalogRevision,
       requestedProfileId,
+      ...(providerId ? { providerId } : {}),
       provider: text(value.provider, 256),
       providerLabel: text(value.providerLabel, 256),
       baseUrl: text(value.baseUrl, 2048, true),

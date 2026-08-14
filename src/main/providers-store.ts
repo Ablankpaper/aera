@@ -80,7 +80,7 @@ export function listCustomProviders(profile?: string): CustomProviderRecord[] {
  */
 export function upsertCustomProvider(
   profile: string | undefined,
-  input: { name: string; baseUrl: string },
+  input: { id?: string; name: string; baseUrl: string },
 ): CustomProviderRecord | null {
   const normalized = normalizeProfile(profile);
   const name = (input.name || "").trim();
@@ -89,9 +89,23 @@ export function upsertCustomProvider(
 
   const anchor = customProviderEnvKey(name);
   const data = readProvidersFile(normalized);
-  const existing = data.providers.find(
+  const existingById = input.id
+    ? data.providers.find((provider) => provider.id === input.id)
+    : undefined;
+  if (input.id && !existingById) {
+    throw new Error("Custom provider identity was not found.");
+  }
+  const existingByAnchor = data.providers.find(
     (p) => customProviderEnvKey(p.name) === anchor,
   );
+  if (
+    existingById &&
+    existingByAnchor &&
+    existingByAnchor.id !== existingById.id
+  ) {
+    throw new Error("Custom provider name is already in use.");
+  }
+  const existing = existingById || existingByAnchor;
 
   let record: CustomProviderRecord;
   if (existing) {

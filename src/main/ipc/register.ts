@@ -4798,7 +4798,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     (
       _event,
       profile: string | undefined,
-      input: { name: string; baseUrl: string },
+      input: { id?: string; name: string; baseUrl: string },
     ) => {
       const record = upsertCustomProvider(profile, input);
       notifyCustomProvidersChanged();
@@ -4817,6 +4817,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       const removedModels = removeModelsForCustomProvider(
         provider?.name || name,
         provider?.baseUrl,
+        provider?.id,
       );
       const currentModel = getModelConfig(profile);
       const currentCustomName = namedCustomProviderRuntimeName(
@@ -4827,11 +4828,11 @@ export function registerIpcHandlers(context: IpcContext): void {
       );
       const currentUsesDeletedProvider =
         isCustomProviderRoute(currentModel.provider) &&
-        ((Boolean(currentCustomName) &&
-          currentCustomName === deletedCustomName) ||
-          (Boolean(provider?.baseUrl) &&
+        (currentCustomName
+          ? currentCustomName === deletedCustomName
+          : Boolean(provider?.baseUrl) &&
             normalizedBaseUrl(currentModel.baseUrl) ===
-              normalizedBaseUrl(provider?.baseUrl)));
+              normalizedBaseUrl(provider?.baseUrl));
       if (currentUsesDeletedProvider) {
         setModelConfig("auto", "", "", profile);
       }
@@ -5238,6 +5239,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       contextLength?: number,
       providerLabel?: string,
       apiMode?: string | null,
+      providerId?: string,
     ) => {
       const conn = getConnectionConfig();
       let addedModel: Awaited<ReturnType<typeof addModel>>;
@@ -5266,6 +5268,7 @@ export function registerIpcHandlers(context: IpcContext): void {
           contextLength,
           providerLabel,
           apiMode,
+          providerId,
         );
       }
       notifyModelLibraryChanged();

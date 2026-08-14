@@ -18,7 +18,8 @@ import { canonicalJSONStringify } from "./manifest.mjs";
 export const DESKTOP_UPDATE_CHANNEL = "internal-beta";
 export const DESKTOP_UPDATE_KEY_ID = "desktop-update-2026-07";
 
-const VERSION_PATTERN = /^[0-9]+\.[0-9]+\.[0-9]+-internal-beta\.[1-9][0-9]*$/u;
+const VERSION_PATTERN =
+  /^[0-9]+\.[0-9]+\.[0-9]+-internal-beta\.[1-9][0-9]*(?:\.[1-9][0-9]*)?$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const SHA512_PATTERN = /^[A-Za-z0-9+/]{86}==$/u;
 const FILE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/u;

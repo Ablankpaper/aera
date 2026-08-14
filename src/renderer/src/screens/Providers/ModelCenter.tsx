@@ -55,6 +55,7 @@ interface LibraryModel {
   baseUrl: string;
   apiMode?: string | null;
   providerLabel?: string;
+  providerId?: string;
   contextLength?: number;
   createdAt: number;
 }
@@ -185,6 +186,7 @@ function modelBelongsToCustomProvider(
   provider: CustomProviderRecord,
 ): boolean {
   if (model.provider !== "custom") return false;
+  if (model.providerId) return model.providerId === provider.id;
   if (model.providerLabel === provider.name) return true;
   return (
     !model.providerLabel &&
@@ -1014,6 +1016,7 @@ export default function ModelCenter({
   };
 
   const coordinatedUpsert = async (input: {
+    providerId?: string;
     provider: string;
     providerLabel: string;
     baseUrl: string;
@@ -1148,7 +1151,7 @@ export default function ModelCenter({
       );
       if (result.status === "ok") {
         for (const modelId of result.models) {
-          await window.hermesAPI.addModel(
+          const modelArgs = [
             modelId.split("/").pop() || modelId,
             service.provider,
             modelId,
@@ -1156,7 +1159,15 @@ export default function ModelCenter({
             undefined,
             service.providerLabel,
             service.apiMode,
-          );
+          ] as const;
+          if (service.customProvider?.id) {
+            await window.hermesAPI.addModel(
+              ...modelArgs,
+              service.customProvider.id,
+            );
+          } else {
+            await window.hermesAPI.addModel(...modelArgs);
+          }
         }
         await reload(false);
         updateServiceFeedback(service.key, {
@@ -1337,12 +1348,19 @@ export default function ModelCenter({
     setFormWarning("");
     try {
       const providerLabel = form.mode === "custom" ? providerName : undefined;
+      const editedProvider =
+        form.mode === "custom" && editingService?.startsWith("custom:")
+          ? customProviders.find(
+              (provider) => `custom:${provider.id}` === editingService,
+            )
+          : undefined;
       const contextLength = parseInt(form.contextLength.trim(), 10);
       const modelsToSave = Array.from(
         new Set([modelId, ...modelOptions].filter(Boolean)),
       );
       if (hasCoordinatedModelConfiguration) {
         const result = await coordinatedUpsert({
+          providerId: editedProvider?.id,
           provider: route.provider,
           providerLabel: providerLabel || providerName,
           baseUrl: route.baseUrl,
@@ -1395,6 +1413,7 @@ export default function ModelCenter({
         await window.hermesAPI.upsertCustomProvider(
           targetProfileRef.current ?? profile,
           {
+            id: editedProvider?.id,
             name: providerName,
             baseUrl: route.baseUrl,
           },
@@ -1413,19 +1432,24 @@ export default function ModelCenter({
       }
 
       for (const discoveredModel of modelsToSave) {
-        await window.hermesAPI.addModel(
+        const modelArgs = [
           discoveredModel.split("/").pop() || discoveredModel,
           route.provider,
           discoveredModel,
           route.baseUrl,
           discoveredModel === modelId &&
-            Number.isFinite(contextLength) &&
-            contextLength > 0
+          Number.isFinite(contextLength) &&
+          contextLength > 0
             ? contextLength
             : undefined,
           providerLabel,
           form.mode === "custom" ? form.apiMode : route.preset?.apiMode,
-        );
+        ] as const;
+        if (form.mode === "custom" && editedProvider?.id) {
+          await window.hermesAPI.addModel(...modelArgs, editedProvider.id);
+        } else {
+          await window.hermesAPI.addModel(...modelArgs);
+        }
       }
       const persisted = await persistAndReadActiveModel(
         route.provider,

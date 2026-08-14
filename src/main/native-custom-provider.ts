@@ -11,6 +11,7 @@ import { migrateModelConfigFormat } from "./config-model-migration";
 export interface NativeCustomProviderInput {
   name: string;
   baseUrl: string;
+  previousName?: string;
   model?: string;
   models?: readonly string[];
   apiMode?: string | null;
@@ -99,12 +100,17 @@ export function upsertNativeCustomProvider(
   // providers.json deduplicates names by their env-key anchor. Apply the same
   // rule to Hermes' native map so a cosmetic rename cannot leave two routable
   // entries pointing at one credential.
+  const previousKeyEnv = input.previousName
+    ? customProviderEnvKey(input.previousName)
+    : "";
   for (const [key, value] of Object.entries(providers)) {
     const entry = asRecord(value);
     if (
       key !== providerName &&
       entry &&
-      String(entry.key_env || "").trim() === keyEnv
+      (String(entry.key_env || "").trim() === keyEnv ||
+        (previousKeyEnv &&
+          String(entry.key_env || "").trim() === previousKeyEnv))
     ) {
       document.deleteIn(["providers", key]);
     }

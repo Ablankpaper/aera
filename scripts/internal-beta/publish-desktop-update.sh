@@ -49,7 +49,7 @@ while IFS= read -r path; do
     fail "bundle contains an unsafe path"
   [[ $path == manifest.json ||
     $path == manifest.sig ||
-    $path =~ ^releases/[0-9]+\.[0-9]+\.[0-9]+-internal-beta\.[1-9][0-9]*/Aera-Internal-Beta-[A-Za-z0-9._-]+$ ]] ||
+    $path =~ ^releases/[0-9]+\.[0-9]+\.[0-9]+-internal-beta\.[1-9][0-9]*(\.[1-9][0-9]*)?/Aera-Internal-Beta-[A-Za-z0-9._-]+$ ]] ||
     fail "bundle contains an unexpected path"
 done < "$listing"
 while IFS= read -r mode _rest; do
@@ -82,7 +82,7 @@ output_path = Path(sys.argv[4])
 signature_path = Path(sys.argv[5])
 
 version_pattern = re.compile(
-    r"^[0-9]+\.[0-9]+\.[0-9]+-internal-beta\.[1-9][0-9]*$"
+    r"^[0-9]+\.[0-9]+\.[0-9]+-internal-beta\.[1-9][0-9]*(?:\.[1-9][0-9]*)?$"
 )
 sha256_pattern = re.compile(r"^[0-9a-f]{64}$")
 sha512_pattern = re.compile(r"^[A-Za-z0-9+/]{86}==$")
@@ -243,12 +243,12 @@ import sys
 
 def parts(value):
     match = re.fullmatch(
-        r"([0-9]+)\.([0-9]+)\.([0-9]+)-internal-beta\.([1-9][0-9]*)",
+        r"([0-9]+)\.([0-9]+)\.([0-9]+)-internal-beta\.([1-9][0-9]*)(?:\.([1-9][0-9]*))?",
         value,
     )
     if not match:
         raise SystemExit("stored version is invalid")
-    return tuple(map(int, match.groups()))
+    return tuple(int(part or 0) for part in match.groups())
 
 left, right = parts(sys.argv[1]), parts(sys.argv[2])
 print(-1 if right < left else 0 if right == left else 1)

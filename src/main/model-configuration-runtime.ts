@@ -35,9 +35,11 @@ import {
 import { validateModelConfiguration } from "./config-model-migration";
 import {
   addModel,
+  migrateModelsForCustomProvider,
   readModels,
   removeModel,
   removeModelsForCustomProvider,
+  updateModel,
 } from "./models";
 import {
   listCustomProviders,
@@ -250,7 +252,7 @@ function routeForSelection(
   );
 }
 
-function isActiveProviderRoute(
+export function isActiveProviderRoute(
   active: PublicModelRouteIdentity,
   providerLabel: string,
   providerRecordBaseUrl: string,
@@ -258,6 +260,9 @@ function isActiveProviderRoute(
   const normalizedLabel = normalizeCustomProviderRuntimeName(providerLabel);
   const named = namedCustomProviderRuntimeName(active.provider);
   if (named && named === normalizedLabel) return true;
+  // Named custom routes are distinct identities even when they intentionally
+  // share an endpoint. Endpoint fallback is reserved for legacy bare custom.
+  if (named) return false;
   if (isCustomProviderRoute(active.provider)) {
     return (
       normalizedEndpoint(active.baseUrl) ===
@@ -318,11 +323,37 @@ function createMutationAdapter(
         }
         const baseUrl =
           request.baseUrl.trim() || canonicalProviderBaseUrl(provider) || "";
+        const requestedProviderId = request.providerId?.trim() || "";
+        const providers = custom
+          ? listCustomProviders(context.targetProfileId)
+          : [];
+        const existingProvider = requestedProviderId
+          ? providers.find((candidate) => candidate.id === requestedProviderId)
+          : providers.find(
+              (candidate) =>
+                customProviderEnvKey(candidate.name) ===
+                customProviderEnvKey(providerLabel),
+            );
+        if (requestedProviderId && !existingProvider) {
+          throw new Error("Custom provider identity was not found.");
+        }
+        const previousProviderName = existingProvider?.name || "";
+        const previousProviderBaseUrl = existingProvider?.baseUrl || "";
+        let persistedProviderId = existingProvider?.id;
         const credentialRef = custom
           ? customProviderEnvKey(providerLabel)
           : expectedEnvKeyForModel(provider, baseUrl);
+        const previousCredentialRef = existingProvider
+          ? customProviderEnvKey(existingProvider.name)
+          : "";
         const existingCredential = credentialRef
-          ? getSecret(credentialRef, context.targetProfileId)?.trim() || ""
+          ? getSecret(credentialRef, context.targetProfileId)?.trim() ||
+            (previousCredentialRef && previousCredentialRef !== credentialRef
+              ? getSecret(
+                  previousCredentialRef,
+                  context.targetProfileId,
+                )?.trim() || ""
+              : "")
           : "";
         if (
           !isLocalBaseUrl(baseUrl) &&
@@ -352,23 +383,47 @@ function createMutationAdapter(
         ): Promise<void> => {
           switch (stage) {
             case "credential":
-              if (credentialRef && request.apiKey.trim()) {
+              if (
+                credentialRef &&
+                (request.apiKey.trim() || existingCredential)
+              ) {
                 setEnvValue(
                   credentialRef,
-                  request.apiKey,
+                  request.apiKey.trim() || existingCredential,
                   context.targetProfileId,
                 );
+              }
+              if (
+                previousCredentialRef &&
+                previousCredentialRef !== credentialRef
+              ) {
+                setEnvValue(previousCredentialRef, "", context.targetProfileId);
               }
               return;
             case "provider":
               if (custom) {
-                upsertCustomProvider(context.targetProfileId, {
-                  name: providerLabel,
-                  baseUrl,
-                });
+                const persisted = upsertCustomProvider(
+                  context.targetProfileId,
+                  {
+                    id: existingProvider?.id,
+                    name: providerLabel,
+                    baseUrl,
+                  },
+                );
+                persistedProviderId = persisted?.id;
               }
               return;
             case "model_library":
+              if (custom && persistedProviderId) {
+                migrateModelsForCustomProvider({
+                  providerId: persistedProviderId,
+                  oldName: previousProviderName,
+                  oldBaseUrl: previousProviderBaseUrl,
+                  newName: providerLabel,
+                  newBaseUrl: baseUrl,
+                  apiMode: request.apiMode,
+                });
+              }
               for (const model of request.models) {
                 const saved = addModel(
                   model.displayName.trim() || model.model.trim(),
@@ -378,19 +433,22 @@ function createMutationAdapter(
                   model.contextLength,
                   custom ? providerLabel : undefined,
                   request.apiMode,
+                  persistedProviderId,
                 );
                 // `addModel` intentionally deduplicates legacy rows without
                 // rewriting their provider label. Repair that identity here so
                 // a cosmetic provider rename cannot leave a stale catalog.
-                if (custom && (saved.providerLabel || "") !== providerLabel) {
+                if (
+                  custom &&
+                  ((saved.providerLabel || "") !== providerLabel ||
+                    (saved.providerId || "") !== (persistedProviderId || ""))
+                ) {
                   const row = readModels().find(
                     (candidate) => candidate.id === saved.id,
                   );
                   if (row) {
-                    // Importing updateModel lazily avoids a second read/write
-                    // cycle for the common new-row path.
-                    const { updateModel } = await import("./models");
                     updateModel(saved.id, {
+                      providerId: persistedProviderId,
                       providerLabel,
                       name: model.displayName.trim() || model.model.trim(),
                       apiMode: request.apiMode,
@@ -404,6 +462,7 @@ function createMutationAdapter(
                 upsertNativeCustomProvider(context.targetProfileId, {
                   name: providerLabel,
                   baseUrl,
+                  previousName: previousProviderName || undefined,
                   model: request.activeModel.trim(),
                   models: request.models.map((model) => model.model.trim()),
                   apiMode: request.apiMode,
@@ -537,6 +596,7 @@ function createMutationAdapter(
               removeModelsForCustomProvider(
                 providerRecord.name,
                 providerRecord.baseUrl,
+                providerRecord.id,
               );
             } else {
               for (const row of matchingRows) removeModel(row.id);

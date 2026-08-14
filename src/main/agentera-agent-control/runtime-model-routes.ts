@@ -68,6 +68,7 @@ export function listResolvedAgentRuntimeModelRoutes(
         ? customProviderEnvKey(row.providerLabel)
         : null;
       const provider = providers.find((candidate) => {
+        if (row.providerId) return candidate.id === row.providerId;
         if (
           rowEndpoint &&
           normalizedEndpoint(candidate.baseUrl) !== rowEndpoint

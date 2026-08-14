@@ -33,6 +33,24 @@ afterEach(() => {
 });
 
 describe("model-configuration runtime", () => {
+  it("does not treat a different named provider at the same endpoint as active", async () => {
+    const { isActiveProviderRoute } =
+      await import("./model-configuration-runtime");
+
+    expect(
+      isActiveProviderRoute(
+        {
+          provider: "custom:petoi.cn",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://www.api-codex.cn",
+          apiMode: "chat_completions",
+        },
+        "123456",
+        "https://www.api-codex.cn",
+      ),
+    ).toBe(false);
+  });
+
   it("commits one real local mutation through the owner catalog and journal", async () => {
     const root = mkdtempSync(join(tmpdir(), "aera-model-runtime-"));
     roots.push(root);
@@ -44,9 +62,8 @@ describe("model-configuration runtime", () => {
     // The dynamic graph imports installer after another worker-local suite may
     // have registered a mock; clear that registry at the actual import boundary.
     vi.doUnmock("./installer");
-    const actualInstaller = await vi.importActual<typeof import("./installer")>(
-      "./installer",
-    );
+    const actualInstaller =
+      await vi.importActual<typeof import("./installer")>("./installer");
     vi.doMock("./installer", () => actualInstaller);
 
     const [
@@ -146,6 +163,110 @@ describe("model-configuration runtime", () => {
         expect(listener).toHaveBeenCalledWith(
           expect.stringMatching(/^[0-9a-f]{64}$/),
         );
+        listener.mockClear();
+      }
+
+      const [
+        { listCustomProviders },
+        { readModels },
+        { getSecret },
+        { parse: parseYaml },
+      ] = await Promise.all([
+        import("./providers-store"),
+        import("./models"),
+        import("./secrets"),
+        import("yaml"),
+      ]);
+      const originalProvider = listCustomProviders("default")[0];
+      expect(originalProvider).toMatchObject({ name: "Fixture" });
+
+      const duplicateProvider = listCustomProviders("default").length
+        ? (await import("./providers-store")).upsertCustomProvider("default", {
+            name: "123456",
+            baseUrl: request.baseUrl,
+          })
+        : null;
+      expect(duplicateProvider).toBeTruthy();
+      const { addModel, readModelsRaw } = await import("./models");
+      addModel(
+        "Fixture Model",
+        "custom",
+        "fixture-model",
+        request.baseUrl,
+        undefined,
+        "123456",
+        request.apiMode,
+        duplicateProvider!.id,
+      );
+      const deleteCatalog = handle.catalog!.snapshot("default");
+      const deleteResult = await handle.coordinator!.mutate({
+        intent: "delete",
+        expectedCatalogRevision: deleteCatalog.revision,
+        requestedProfileId: "default",
+        providerLabel: "123456",
+        replacement: null,
+      });
+      expect(deleteResult).toMatchObject({ status: "committed" });
+      expect(listCustomProviders("default")).toEqual([
+        expect.objectContaining({ id: originalProvider.id, name: "Fixture" }),
+      ]);
+      expect(readModelsRaw()).toHaveLength(1);
+      expect(config.getModelConfig("default")).toMatchObject({
+        provider: "custom:fixture",
+      });
+      for (const listener of [
+        notifyModelLibraryChanged,
+        notifyCustomProvidersChanged,
+        notifyConnectionConfigChanged,
+        notifyRuntimeSnapshotChanged,
+      ]) {
+        listener.mockClear();
+      }
+
+      const renameCatalog = handle.catalog!.snapshot("default");
+      const renameResult = await handle.coordinator!.mutate({
+        ...request,
+        expectedCatalogRevision: renameCatalog.revision,
+        providerId: originalProvider.id,
+        providerLabel: "123456",
+        baseUrl: "https://renamed.invalid/v1",
+        apiKey: "",
+      });
+
+      expect(renameResult).toMatchObject({ status: "committed" });
+      expect(listCustomProviders("default")).toEqual([
+        expect.objectContaining({
+          id: originalProvider.id,
+          name: "123456",
+          baseUrl: "https://renamed.invalid/v1",
+        }),
+      ]);
+      expect(readModels()).toEqual([
+        expect.objectContaining({
+          providerId: originalProvider.id,
+          providerLabel: "123456",
+          baseUrl: "https://renamed.invalid/v1",
+        }),
+      ]);
+      expect(getSecret("CUSTOM_PROVIDER_123456_KEY", "default")).toBe(SECRET);
+      expect(getSecret("CUSTOM_PROVIDER_FIXTURE_KEY", "default")).toBeNull();
+      expect(config.getModelConfig("default")).toEqual({
+        provider: "custom:123456",
+        model: "fixture-model",
+        baseUrl: "https://renamed.invalid/v1",
+      });
+      const nativeConfig = parseYaml(
+        readFileSync(join(hermesHome, "config.yaml"), "utf8"),
+      ) as { providers?: Record<string, unknown> };
+      expect(nativeConfig.providers).toHaveProperty("123456");
+      expect(nativeConfig.providers).not.toHaveProperty("fixture");
+      for (const listener of [
+        notifyModelLibraryChanged,
+        notifyCustomProvidersChanged,
+        notifyConnectionConfigChanged,
+        notifyRuntimeSnapshotChanged,
+      ]) {
+        expect(listener).toHaveBeenCalledOnce();
       }
     } finally {
       handle.close();

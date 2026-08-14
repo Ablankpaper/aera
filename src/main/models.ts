@@ -32,6 +32,8 @@ export interface SavedModelRow {
    *  `customProviderEnvKey(providerLabel)` so every model under one provider
    *  shares that provider's key rather than the shared `CUSTOM_API_KEY`. */
   providerLabel?: string;
+  /** Stable providers.json id for named custom-provider attachments. */
+  providerId?: string;
   createdAt: number;
 }
 
@@ -404,6 +406,7 @@ export function addModel(
   contextLength?: number,
   providerLabel?: string,
   apiMode?: string | null,
+  providerId?: string,
 ): SavedModel {
   const models = readModelsRaw();
 
@@ -446,11 +449,89 @@ export function addModel(
       ? { apiMode: (apiMode || "").trim() || null }
       : {}),
     ...(providerLabel ? { providerLabel } : {}),
+    ...(providerId ? { providerId } : {}),
     createdAt: Date.now(),
   };
   models.push(entry);
   writeModels(models);
   return { ...entry, ...(ctx !== undefined ? { contextLength: ctx } : {}) };
+}
+
+function normalizedModelEndpoint(value: string): string {
+  return (value || "").trim().replace(/\/+$/, "").toLocaleLowerCase();
+}
+
+/**
+ * Move legacy and stable-id attachments to an edited named custom provider.
+ * Existing rows are updated before the new catalog is added, so addModel's
+ * normal deduplication keeps one row per model/endpoint/API mode.
+ */
+export function migrateModelsForCustomProvider(input: {
+  providerId: string;
+  oldName: string;
+  oldBaseUrl: string;
+  newName: string;
+  newBaseUrl: string;
+  apiMode?: string | null;
+}): number {
+  const rows = readModelsRaw();
+  const oldAnchor = customProviderEnvKey(input.oldName);
+  const newAnchor = customProviderEnvKey(input.newName);
+  const oldEndpoint = normalizedModelEndpoint(input.oldBaseUrl);
+  const newEndpoint = normalizedModelEndpoint(input.newBaseUrl);
+  const next = rows.map((row) => {
+    if (!isCustomProviderAttachment(row)) return row;
+    const stableMatch = row.providerId === input.providerId;
+    const legacyMatch =
+      !row.providerId &&
+      customProviderEnvKey(row.providerLabel || row.name) === oldAnchor &&
+      normalizedModelEndpoint(row.baseUrl) === oldEndpoint;
+    const targetLegacyMatch =
+      !row.providerId &&
+      customProviderEnvKey(row.providerLabel || row.name) === newAnchor &&
+      normalizedModelEndpoint(row.baseUrl) === newEndpoint;
+    if (!stableMatch && !legacyMatch && !targetLegacyMatch) return row;
+    return {
+      ...row,
+      provider: "custom",
+      providerId: input.providerId,
+      providerLabel: input.newName,
+      baseUrl: input.newBaseUrl,
+      ...(input.apiMode !== undefined ? { apiMode: input.apiMode } : {}),
+    };
+  });
+
+  const deduped: SavedModelRow[] = [];
+  const seen = new Set<string>();
+  for (const row of next) {
+    if (row.providerId !== input.providerId) {
+      deduped.push(row);
+      continue;
+    }
+    const key = [
+      row.provider,
+      row.model,
+      normalizedModelEndpoint(row.baseUrl),
+      (row.apiMode || "").trim().toLocaleLowerCase(),
+    ].join("\0");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(row);
+  }
+  const changed =
+    JSON.stringify(rows) !== JSON.stringify(deduped) ||
+    next.some(
+      (row, index) => JSON.stringify(row) !== JSON.stringify(rows[index]),
+    );
+  if (changed) writeModels(deduped);
+  // Report the number of retained attachments after a rename. Duplicate
+  // legacy rows may have been absorbed into one stable-id row.
+  return deduped.filter((row) => row.providerId === input.providerId).length;
+}
+
+function isCustomProviderAttachment(row: SavedModelRow): boolean {
+  const provider = row.provider.trim().toLocaleLowerCase();
+  return provider === "custom" || provider.startsWith("custom:");
 }
 
 export function removeModel(id: string): boolean {
@@ -472,6 +553,7 @@ export function removeModel(id: string): boolean {
 export function removeModelsForCustomProvider(
   name: string,
   baseUrl?: string,
+  providerId?: string,
 ): number {
   const rows = readModelsRaw();
   const providerAnchor = customProviderEnvKey(name.trim());
@@ -492,7 +574,14 @@ export function removeModelsForCustomProvider(
       provider === "custom" &&
       Boolean(endpoint) &&
       row.baseUrl.trim().replace(/\/+$/, "").toLocaleLowerCase() === endpoint;
-    return !(labelMatches || namedRouteMatches || legacyEndpointMatches);
+    const stableIdMatches =
+      providerId !== undefined && row.providerId === providerId;
+    return !(
+      stableIdMatches ||
+      labelMatches ||
+      namedRouteMatches ||
+      legacyEndpointMatches
+    );
   });
   const removed = rows.length - next.length;
   if (removed > 0) writeModels(next);
@@ -504,7 +593,13 @@ export function updateModel(
   fields: Partial<
     Pick<
       SavedModelRow,
-      "name" | "provider" | "model" | "baseUrl" | "apiMode" | "providerLabel"
+      | "name"
+      | "provider"
+      | "model"
+      | "baseUrl"
+      | "apiMode"
+      | "providerLabel"
+      | "providerId"
     >
   > & { contextLength?: number | null },
 ): boolean {

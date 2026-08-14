@@ -83,6 +83,8 @@ export interface UpsertModelServiceRequest {
   intent: "upsert";
   expectedCatalogRevision: string;
   requestedProfileId: string;
+  /** Stable providers.json id when editing an existing named custom provider. */
+  providerId?: string;
   provider: string;
   providerLabel: string;
   baseUrl: string;

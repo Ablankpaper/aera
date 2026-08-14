@@ -96,6 +96,18 @@ describe("coordinated model configuration IPC bridge", () => {
     expect(result.status).toBe("committed");
   });
 
+  it("preserves the stable custom-provider identity in an edit mutation", async () => {
+    const { bridge, coordinator } = subject();
+    const request = upsertRequest({
+      providerId: "1b3de68f-071f-4d8c-888b-8b3960334011",
+      providerLabel: "Renamed Petoi",
+    });
+
+    await bridge.mutateModelConfiguration(request);
+
+    expect(coordinator.mutate).toHaveBeenCalledWith(request);
+  });
+
   it("checks an explicit catalog Profile target but leaves mutation target resolution in Main", async () => {
     const { bridge, coordinator, assertRequestedProfile } = subject();
     expect(() => bridge.getOwnerModelRouteCatalog("foreign")).toThrow();

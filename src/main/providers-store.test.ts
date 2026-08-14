@@ -68,6 +68,30 @@ describe("providers store", () => {
     expect(list[0].baseUrl).toBe("https://api.faab.ai/v1");
   });
 
+  it("renames an existing provider by stable id instead of creating a second record", async () => {
+    const s = await store();
+    const first = s.upsertCustomProvider("default", {
+      name: "petoi.cn",
+      baseUrl: "https://api.petoi.cn/v1",
+    });
+    const renamed = s.upsertCustomProvider("default", {
+      id: first!.id,
+      name: "123456",
+      baseUrl: "https://www.api-codex.cn",
+    });
+
+    expect(s.listCustomProviders("default")).toHaveLength(1);
+    expect(renamed).toMatchObject({
+      id: first!.id,
+      name: "123456",
+      baseUrl: "https://www.api-codex.cn",
+      createdAt: first!.createdAt,
+    });
+    expect(
+      s.listCustomProviders("default").some((p) => p.name === "petoi.cn"),
+    ).toBe(false);
+  });
+
   it("dedups by the derived env-key anchor, not the raw name", async () => {
     // "faab.ai" and "FAAB_AI" both sanitize to CUSTOM_PROVIDER_FAAB_AI_KEY, so
     // the second save must update the first record rather than duplicate it.

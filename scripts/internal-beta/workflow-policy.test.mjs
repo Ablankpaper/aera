@@ -41,10 +41,10 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   ]);
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.28"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.28\.1"/u);
   assert.match(
     raw,
-    /--release-notes "Beta\.28 整合新账号迁移、图像生成和 Agent 用户体验更新；Runtime 采用 0\.20\.0-agentera\.2 签名候选，macOS 继续公证，Windows 提供内测包。"/u,
+    /--release-notes "Beta\.28\.1 修复自定义模型服务改名、地址与密钥更新、重复卡片和删除判定问题，并改善模型目录读取失败提示；Runtime 继续采用 0\.20\.0-agentera\.2 签名候选，macOS 继续公证，Windows 提供内测包。"/u,
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
@@ -162,7 +162,7 @@ test("internal-Beta promotion publishes one verified candidate without rebuildin
   const raw = await readFile(promotionWorkflowPath, "utf8");
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.28"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.28\.1"/u);
 
   assert.equal(workflow.name, "Promote Desktop internal Beta");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [

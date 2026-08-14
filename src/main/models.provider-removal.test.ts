@@ -62,4 +62,45 @@ describe("custom provider model removal", () => {
       contextLength: 64_000,
     });
   });
+
+  it("migrates a named provider's attachments without duplicating its catalog", async () => {
+    const models = await import("./models");
+    models.addModel(
+      "GPT",
+      "custom",
+      "gpt-5.6-sol",
+      "https://api.petoi.cn/v1",
+      undefined,
+      "petoi.cn",
+      "chat_completions",
+      "provider-old",
+    );
+    models.addModel(
+      "GPT",
+      "custom",
+      "gpt-5.6-sol",
+      "https://www.api-codex.cn",
+      undefined,
+      "123456",
+      "chat_completions",
+    );
+
+    expect(
+      models.migrateModelsForCustomProvider({
+        providerId: "provider-old",
+        oldName: "petoi.cn",
+        oldBaseUrl: "https://api.petoi.cn/v1",
+        newName: "123456",
+        newBaseUrl: "https://www.api-codex.cn",
+        apiMode: "chat_completions",
+      }),
+    ).toBe(1);
+    expect(models.readModelsRaw()).toEqual([
+      expect.objectContaining({
+        providerId: "provider-old",
+        providerLabel: "123456",
+        baseUrl: "https://www.api-codex.cn",
+      }),
+    ]);
+  });
 });

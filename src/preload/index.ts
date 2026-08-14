@@ -1148,7 +1148,7 @@ const hermesAPI = {
     ipcRenderer.invoke("list-custom-providers", profile),
   upsertCustomProvider: (
     profile: string | undefined,
-    input: { name: string; baseUrl: string },
+    input: { id?: string; name: string; baseUrl: string },
   ): Promise<CustomProviderRecord | null> =>
     ipcRenderer.invoke("upsert-custom-provider", profile, input),
   removeCustomProvider: (
@@ -1438,6 +1438,7 @@ const hermesAPI = {
     contextLength?: number,
     providerLabel?: string,
     apiMode?: string | null,
+    providerId?: string,
   ): Promise<{
     id: string;
     name: string;
@@ -1458,6 +1459,7 @@ const hermesAPI = {
       contextLength,
       providerLabel,
       apiMode,
+      providerId,
     ),
 
   removeModel: (id: string): Promise<boolean> =>

@@ -200,6 +200,9 @@ function validateMutationRequest(
     throw new Error("Invalid model configuration request.");
   }
   validateProfileId(request.requestedProfileId);
+  if (request.intent === "upsert" && request.providerId !== undefined) {
+    boundedString(request.providerId.trim(), 128);
+  }
   if (!REVISION_PATTERN.test(request.expectedCatalogRevision)) {
     throw new Error("Invalid model configuration revision.");
   }

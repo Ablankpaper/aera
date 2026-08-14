@@ -60,7 +60,8 @@ export default {
     connecting: "获取中…",
     connected: "已获取",
     connect: "获取",
-    manualModelHint: "这个服务不支持自动读取模型，请在下方填写模型 ID。",
+    manualModelHint:
+      "未检测到可自动读取的模型，请检查 Base URL，或在下方填写模型 ID。",
     modelPlaceholder: "选择或直接输入模型 ID",
     modelsFound: "已找到 {{count}} 个模型",
     modelHint: "连接服务后会自动显示可用模型，也可以手动输入。",

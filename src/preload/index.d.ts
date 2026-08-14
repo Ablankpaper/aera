@@ -1425,7 +1425,7 @@ interface HermesAPI {
   listCustomProviders: (profile?: string) => Promise<CustomProviderRecord[]>;
   upsertCustomProvider: (
     profile: string | undefined,
-    input: { name: string; baseUrl: string },
+    input: { id?: string; name: string; baseUrl: string },
   ) => Promise<CustomProviderRecord | null>;
   removeCustomProvider: (
     profile: string | undefined,
@@ -1634,6 +1634,7 @@ interface HermesAPI {
       baseUrl: string;
       apiMode?: string | null;
       providerLabel?: string;
+      providerId?: string;
       contextLength?: number;
       capabilities?: string[];
       modalities?: { input?: string[]; output?: string[] };
@@ -1648,6 +1649,7 @@ interface HermesAPI {
     contextLength?: number,
     providerLabel?: string,
     apiMode?: string | null,
+    providerId?: string,
   ) => Promise<{
     id: string;
     name: string;
@@ -1657,6 +1659,7 @@ interface HermesAPI {
     apiMode?: string | null;
     contextLength?: number;
     providerLabel?: string;
+    providerId?: string;
     createdAt: number;
   }>;
   removeModel: (id: string) => Promise<boolean>;

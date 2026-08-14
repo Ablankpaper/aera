@@ -152,4 +152,27 @@ describe("Hermes-native named custom-provider routing", () => {
       name: "PETOI_CN",
     });
   });
+
+  it("removes the previous native route when a real rename changes the credential anchor", async () => {
+    const { native } = await loadModules();
+
+    native.upsertNativeCustomProvider(undefined, {
+      baseUrl: "https://api.petoi.cn/v1",
+      name: "petoi.cn",
+    });
+    native.upsertNativeCustomProvider(undefined, {
+      baseUrl: "https://www.api-codex.cn",
+      name: "123456",
+      previousName: "petoi.cn",
+    });
+
+    const parsed = parseYaml(
+      readFileSync(join(testHome, "config.yaml"), "utf8"),
+    ) as { providers: Record<string, Record<string, unknown>> };
+    expect(parsed.providers).not.toHaveProperty("petoi.cn");
+    expect(parsed.providers["123456"]).toMatchObject({
+      api: "https://www.api-codex.cn",
+      key_env: "CUSTOM_PROVIDER_123456_KEY",
+    });
+  });
 });

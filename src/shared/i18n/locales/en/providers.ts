@@ -57,7 +57,7 @@ export default {
     connected: "Fetched",
     connect: "Fetch",
     manualModelHint:
-      "This service does not expose a model catalog. Enter the model ID below.",
+      "No model catalog was detected. Check the Base URL or enter the model ID below.",
     modelPlaceholder: "Select or enter a model ID",
     modelsFound: "{{count}} models found",
     modelHint:

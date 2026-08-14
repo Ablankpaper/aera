@@ -21,6 +21,9 @@ export interface CustomProviderRecord {
   createdAt: number;
 }
 
+/** Stable public identity carried through coordinated model mutations. */
+export type CustomProviderId = string;
+
 /** Versioned on-disk envelope for `providers.json`. */
 export interface CustomProviderFile {
   version: 1;
