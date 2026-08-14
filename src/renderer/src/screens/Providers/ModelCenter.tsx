@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import {
   customProviderRuntimeRoute,
+  namedCustomProviderRuntimeName,
   type CustomProviderRecord,
 } from "../../../../shared/custom-providers";
 import {
@@ -94,6 +95,7 @@ interface ModelCenterProps {
   activeModel: ActiveModel;
   onSaveKey: (key: string, value: string) => Promise<void>;
   onActivated: (model: ActiveModel) => void;
+  onEnvironmentChanged?: () => void | Promise<void>;
   onOpenModelPicker: () => void | Promise<void>;
   onBrowseRegistry: () => void;
 }
@@ -412,6 +414,7 @@ export default function ModelCenter({
   activeModel,
   onSaveKey,
   onActivated,
+  onEnvironmentChanged,
   onOpenModelPicker,
   onBrowseRegistry,
 }: ModelCenterProps): React.JSX.Element {
@@ -574,33 +577,32 @@ export default function ModelCenter({
     [activeModel.provider, activeModel.baseUrl],
   );
 
-  const activeCustomProvider = useMemo(
-    () =>
-      customProviders.find((provider) => {
-        if (
-          activeModel.provider === customProviderRuntimeRoute(provider.name)
-        ) {
-          return true;
-        }
-        if (
-          normalizeUrl(provider.baseUrl) !== normalizeUrl(activeModel.baseUrl)
-        ) {
-          return false;
-        }
-        return models.some(
-          (model) =>
-            model.model === activeModel.model &&
-            modelBelongsToCustomProvider(model, provider),
+  const activeCustomProvider = useMemo(() => {
+    const namedRoute = namedCustomProviderRuntimeName(activeModel.provider);
+    return customProviders.find((provider) => {
+      if (namedRoute !== null) {
+        return (
+          customProviderRuntimeRoute(provider.name) === `custom:${namedRoute}`
         );
-      }),
-    [
-      customProviders,
-      models,
-      activeModel.provider,
-      activeModel.baseUrl,
-      activeModel.model,
-    ],
-  );
+      }
+      if (
+        normalizeUrl(provider.baseUrl) !== normalizeUrl(activeModel.baseUrl)
+      ) {
+        return false;
+      }
+      return models.some(
+        (model) =>
+          model.model === activeModel.model &&
+          modelBelongsToCustomProvider(model, provider),
+      );
+    });
+  }, [
+    customProviders,
+    models,
+    activeModel.provider,
+    activeModel.baseUrl,
+    activeModel.model,
+  ]);
 
   const configuredPresets = useMemo(
     () =>
@@ -893,6 +895,16 @@ export default function ModelCenter({
     });
   };
 
+  const refreshParentEnvironment = async (): Promise<void> => {
+    try {
+      await onEnvironmentChanged?.();
+    } catch {
+      // Main has already committed the coordinated mutation. A failed UI
+      // refresh must not relabel that durable write as a save/delete failure;
+      // the next screen load will read the authoritative environment again.
+    }
+  };
+
   const requireOwnerCatalog = async (options?: {
     refresh?: boolean;
   }): Promise<OwnerModelRouteCatalogSnapshot> => {
@@ -1097,6 +1109,7 @@ export default function ModelCenter({
           model,
           baseUrl: service.baseUrl,
         });
+        await refreshParentEnvironment();
         updateServiceFeedback(service.key, {
           tone:
             result.status === "committed_refresh_warning"
@@ -1265,6 +1278,7 @@ export default function ModelCenter({
             baseUrl: attempt.replacement.baseUrl,
           });
         }
+        await refreshParentEnvironment();
         if (result.status === "committed_refresh_warning") {
           updateServiceFeedback(service.key, {
             tone: "neutral",
@@ -1392,6 +1406,7 @@ export default function ModelCenter({
           model: modelId,
           baseUrl: route.baseUrl,
         });
+        await refreshParentEnvironment();
         if (result.status === "committed_refresh_warning") {
           setFormWarning(t("providers.center.warnings.refresh"));
         }

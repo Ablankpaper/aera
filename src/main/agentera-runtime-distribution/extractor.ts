@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
 import {
   chmod,
   lstat,
@@ -9,14 +9,27 @@ import {
   realpath,
   rename,
   rm,
+  symlink,
 } from "node:fs/promises";
-import { isAbsolute, join, posix, relative, resolve, sep } from "node:path";
+import {
+  dirname,
+  isAbsolute,
+  join,
+  posix,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Writable } from "node:stream";
 import { createZstdDecompress } from "node:zlib";
 
-import extractZip from "extract-zip";
 import { Parser, x as extractTar, type ReadEntry } from "tar";
+import {
+  openPromise as openZip,
+  type Entry as ZipEntry,
+  type ZipFile,
+} from "yauzl";
 
 import {
   RUNTIME_MANIFEST_METADATA_NAME,
@@ -151,6 +164,155 @@ function archiveRelativePath(
 
 function normalizedComparablePath(path: string, windows: boolean): string {
   return windows ? path.normalize("NFKC").toLocaleLowerCase("en-US") : path;
+}
+
+function zipEntryMetadata(entry: {
+  fileName: string;
+  externalFileAttributes: number;
+  versionMadeBy: number;
+  uncompressedSize: number;
+}):
+  | ArchiveInventoryEntry
+  | { root: true; kind: RuntimeInventoryKind; mode: number } {
+  const unixMode = (entry.externalFileAttributes >>> 16) & 0xffff;
+  const fileType = unixMode & 0o170000;
+  const madeBy = entry.versionMadeBy >>> 8;
+  const isDirectory =
+    entry.fileName.endsWith("/") ||
+    fileType === 0o040000 ||
+    (madeBy === 0 && entry.externalFileAttributes === 16);
+  const kind: RuntimeInventoryKind = isDirectory
+    ? "directory"
+    : fileType === 0o120000
+      ? "symlink"
+      : "file";
+  if (
+    !isDirectory &&
+    fileType !== 0 &&
+    fileType !== 0o100000 &&
+    kind !== "symlink"
+  ) {
+    throw new RuntimeExtractionError(
+      `unsupported ZIP member type: ${entry.fileName}`,
+    );
+  }
+  const path = archiveRelativePath(entry.fileName, isDirectory);
+  const mode = unixMode & 0o777;
+  if (path === null) return { root: true, kind, mode };
+  return {
+    path,
+    kind,
+    size: kind === "file" ? entry.uncompressedSize : 0,
+    mode,
+    linkTarget: null,
+  };
+}
+
+async function* zipEntries(
+  zipfile: Awaited<ReturnType<typeof openZip>>,
+  signal?: AbortSignal,
+): AsyncGenerator<ZipEntry> {
+  let next: (() => void) | null = null;
+  let failure: Error | null = null;
+  let closed = false;
+  const pending: ZipEntry[] = [];
+  const onEntry = (entry: ZipEntry): void => {
+    pending.push(entry);
+    next?.();
+    next = null;
+  };
+  const onError = (error: Error): void => {
+    failure = error;
+    next?.();
+    next = null;
+  };
+  const onClose = (): void => {
+    closed = true;
+    next?.();
+    next = null;
+  };
+  zipfile.on("entry", onEntry);
+  zipfile.on("error", onError);
+  zipfile.on("close", onClose);
+  try {
+    zipfile.readEntry();
+    while (pending.length > 0 || (!closed && failure === null)) {
+      throwIfAborted(signal);
+      if (failure) throw failure;
+      const entry = pending.shift();
+      if (entry) {
+        yield entry;
+        zipfile.readEntry();
+      } else {
+        await new Promise<void>((resolvePromise) => {
+          next = resolvePromise;
+        });
+      }
+      if (failure) throw failure;
+      if (!zipfile.isOpen && pending.length === 0) break;
+    }
+  } finally {
+    zipfile.off("entry", onEntry);
+    zipfile.off("error", onError);
+    zipfile.off("close", onClose);
+  }
+}
+
+const openRuntimeZip = (archivePath: string): Promise<ZipFile> =>
+  openZip(archivePath, {
+    lazyEntries: true,
+    decodeStrings: true,
+    validateEntrySizes: true,
+    strictFileNames: true,
+  });
+
+async function readZipSymlinkTarget(
+  zipfile: Awaited<ReturnType<typeof openZip>>,
+  entry: ZipEntry,
+  path: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  if (entry.uncompressedSize > MAX_SYMLINK_TARGET_BYTES) {
+    throw new RuntimeExtractionError(
+      `Runtime symlink target is too large: ${path}`,
+    );
+  }
+  const stream = await zipfile.openReadStreamPromise(entry);
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of stream) {
+    throwIfAborted(signal);
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += bytes.length;
+    if (size > MAX_SYMLINK_TARGET_BYTES) {
+      stream.destroy();
+      throw new RuntimeExtractionError(
+        `Runtime symlink target is too large: ${path}`,
+      );
+    }
+    chunks.push(bytes);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function validateZipArchive(
+  archivePath: string,
+  manifest: RuntimeManifest,
+  maxExtractedBytes: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  const validator = new ArchiveInventoryValidator(manifest, maxExtractedBytes);
+  const zipfile = await openRuntimeZip(archivePath);
+  try {
+    for await (const entry of zipEntries(zipfile, signal)) {
+      const metadata = zipEntryMetadata(entry);
+      if ("root" in metadata) validator.addRoot(metadata.kind, metadata.mode);
+      else validator.add(metadata);
+    }
+    validator.finish();
+  } finally {
+    zipfile.close();
+  }
 }
 
 function validateSymlinkTarget(path: string, target: string): void {
@@ -395,53 +557,6 @@ async function validateTarArchive(
   validator.finish();
 }
 
-function zipEntryMetadata(entry: {
-  fileName: string;
-  externalFileAttributes: number;
-  versionMadeBy: number;
-  uncompressedSize: number;
-}):
-  | ArchiveInventoryEntry
-  | { root: true; kind: RuntimeInventoryKind; mode: number } {
-  const unixMode = (entry.externalFileAttributes >>> 16) & 0xffff;
-  const fileType = unixMode & 0o170000;
-  const madeBy = entry.versionMadeBy >>> 8;
-  const isDirectory =
-    entry.fileName.endsWith("/") ||
-    fileType === 0o040000 ||
-    (madeBy === 0 && entry.externalFileAttributes === 16);
-  const kind: RuntimeInventoryKind = isDirectory
-    ? "directory"
-    : fileType === 0o120000
-      ? "symlink"
-      : "file";
-  if (
-    !isDirectory &&
-    fileType !== 0 &&
-    fileType !== 0o100000 &&
-    kind !== "symlink"
-  ) {
-    throw new RuntimeExtractionError(
-      `unsupported ZIP member type: ${entry.fileName}`,
-    );
-  }
-  const path = archiveRelativePath(entry.fileName, isDirectory);
-  const mode = unixMode & 0o777;
-  if (path === null) return { root: true, kind, mode };
-  if (kind === "symlink" && entry.uncompressedSize > MAX_SYMLINK_TARGET_BYTES) {
-    throw new RuntimeExtractionError(
-      `Runtime symlink target is too large: ${path}`,
-    );
-  }
-  return {
-    path,
-    kind,
-    size: kind === "file" ? entry.uncompressedSize : 0,
-    mode,
-    linkTarget: null,
-  };
-}
-
 async function extractZipArchive(
   archivePath: string,
   destination: string,
@@ -450,44 +565,101 @@ async function extractZipArchive(
   maxExtractedBytes: number,
   signal?: AbortSignal,
 ): Promise<void> {
+  await validateZipArchive(archivePath, manifest, maxExtractedBytes, signal);
   const validator = new ArchiveInventoryValidator(manifest, maxExtractedBytes);
-  let activeZip: { close(): void } | null = null;
-  let rejectAbort: ((error: Error) => void) | null = null;
-  const abortPromise = new Promise<never>((_resolve, reject) => {
-    rejectAbort = reject;
-  });
-  const onAbort = (): void => {
-    activeZip?.close();
-    rejectAbort?.(abortError());
-  };
-  signal?.addEventListener("abort", onAbort, { once: true });
+  const zipfile = await openRuntimeZip(archivePath);
   try {
     throwIfAborted(signal);
-    const extraction = extractZip(archivePath, {
-      dir: workDirectory,
-      onEntry: (entry, zipfile) => {
-        activeZip = zipfile;
-        throwIfAborted(signal);
-        const metadata = zipEntryMetadata(entry);
-        if ("root" in metadata) {
-          validator.addRoot(metadata.kind, metadata.mode);
-        } else {
-          validator.add(metadata);
-        }
-      },
-    });
-    await (signal ? Promise.race([extraction, abortPromise]) : extraction);
+    for await (const entry of zipEntries(zipfile, signal)) {
+      const metadata = zipEntryMetadata(entry);
+      if ("root" in metadata) {
+        validator.addRoot(metadata.kind, metadata.mode);
+        await mkdir(join(workDirectory, ARCHIVE_ROOT), {
+          recursive: true,
+          mode: metadata.mode,
+        });
+        continue;
+      }
+
+      const target = join(
+        workDirectory,
+        ARCHIVE_ROOT,
+        ...metadata.path.split("/"),
+      );
+      if (metadata.kind === "directory") {
+        validator.add(metadata);
+        await mkdir(target, { recursive: true, mode: metadata.mode });
+        continue;
+      }
+
+      await mkdir(dirname(target), { recursive: true, mode: 0o755 });
+      if (metadata.kind === "symlink") {
+        const linkTarget = await readZipSymlinkTarget(
+          zipfile,
+          entry,
+          metadata.path,
+          signal,
+        );
+        const linkedMetadata = { ...metadata, linkTarget };
+        validator.add(linkedMetadata);
+        await symlink(linkTarget, target);
+        continue;
+      }
+
+      validator.add(metadata);
+      const stream = await zipfile.openReadStreamPromise(entry);
+      await pipeline(
+        stream,
+        createWriteStream(target, {
+          flags: "wx",
+          mode: metadata.mode,
+        }),
+        signal ? { signal } : {},
+      );
+    }
     validator.finish();
+    throwIfAborted(signal);
     const children = await readdir(workDirectory);
     if (children.length !== 1 || children[0] !== ARCHIVE_ROOT) {
       throw new RuntimeExtractionError(
         "ZIP extraction produced content outside the Runtime archive root",
       );
     }
+    await verifyExtractedRuntimeInventory(
+      join(workDirectory, ARCHIVE_ROOT),
+      manifest,
+      maxExtractedBytes,
+      signal,
+    );
+    const archiveEntries = await readdir(join(workDirectory, ARCHIVE_ROOT), {
+      recursive: true,
+      withFileTypes: true,
+    });
+    const seenArchivePaths = new Set<string>();
+    for (const entry of archiveEntries) {
+      const entryPath = entry.parentPath
+        ? relative(
+            join(workDirectory, ARCHIVE_ROOT),
+            join(entry.parentPath, entry.name),
+          )
+        : entry.name;
+      const comparable = normalizedComparablePath(
+        entryPath,
+        manifest.platform === "windows",
+      );
+      if (seenArchivePaths.has(comparable)) {
+        throw new RuntimeExtractionError(
+          `ZIP archive contains a duplicate path: ${entryPath}`,
+        );
+      }
+      seenArchivePaths.add(comparable);
+    }
     await rename(join(workDirectory, ARCHIVE_ROOT), destination);
   } finally {
-    signal?.removeEventListener("abort", onAbort);
-    activeZip = null;
+    zipfile.close();
+    await rm(workDirectory, { recursive: true, force: true }).catch(
+      () => undefined,
+    );
   }
 }
 
@@ -561,7 +733,13 @@ export async function verifyExtractedRuntimeInventory(
     hostPlatform,
   );
   const expected = new Map(manifest.files.map((entry) => [entry.path, entry]));
+  const expectedComparable = new Set(
+    manifest.files.map((entry) =>
+      normalizedComparablePath(entry.path, manifest.platform === "windows"),
+    ),
+  );
   const seen = new Set<string>();
+  const comparableSeen = new Set<string>();
   let fileCount = 0;
   let extractedBytes = 0;
 
@@ -592,8 +770,23 @@ export async function verifyExtractedRuntimeInventory(
         ? `${relativeDirectory}/${child.name}`
         : child.name;
       validateRelativePath(relativePath, "extracted Runtime path");
+      const comparablePath = normalizedComparablePath(
+        relativePath,
+        manifest.platform === "windows",
+      );
+      if (comparableSeen.has(comparablePath)) {
+        throw new RuntimeExtractionError(
+          `extracted Runtime contains a duplicate path: ${relativePath}`,
+        );
+      }
+      comparableSeen.add(comparablePath);
       const expectedEntry = expected.get(relativePath);
       if (!expectedEntry) {
+        if (expectedComparable.has(comparablePath)) {
+          throw new RuntimeExtractionError(
+            `extracted Runtime contains a duplicate path: ${relativePath}`,
+          );
+        }
         throw new RuntimeExtractionError(
           `extracted Runtime contains an unexpected path: ${relativePath}`,
         );

@@ -23,7 +23,6 @@ const ORIGINAL_PROVIDER = "Original provider";
 const RENAMED_PROVIDER = "123456";
 const TWIN_PROVIDER = "Twin provider";
 const ORIGINAL_MODEL = "original-model-e2e";
-const TWIN_MODEL = "twin-model-e2e";
 const ORIGINAL_KEY = "provider-lifecycle-original-key";
 const RENAMED_KEY = "provider-lifecycle-renamed-key";
 const UPDATED_KEY = "provider-lifecycle-updated-key";
@@ -163,7 +162,7 @@ async function fillAndFetchCustomProvider(
 test.setTimeout(1_200_000);
 
 // @lat: [[provider-setup#Active model is picked from configured providers]]
-// @lat: [[provider-setup#Named custom providers]]
+// @lat: [[provider-setup#LLM-provider keys are configured-only, via modals#Named custom providers]]
 // Playwright requires its fixtures argument to use object destructuring.
 // eslint-disable-next-line no-empty-pattern
 test("renames, reroutes, and deletes one stable custom provider in Electron", async ({}) => {
@@ -186,6 +185,11 @@ test("renames, reroutes, and deletes one stable custom provider in Electron", as
     await authenticateNewProductAccount(harness, app, page, {
       displayName: "Provider lifecycle E2E User",
     });
+    await page.evaluate(async () => {
+      localStorage.setItem("hermes-locale", "en");
+      await window.hermesAPI.setLocale("en");
+    });
+    await page.reload();
     await expect(page.locator(".layout")).toBeVisible({ timeout: 60_000 });
     await dismissStartupModelPrompt(page);
     await openModelSettings(page);
@@ -221,13 +225,21 @@ test("renames, reroutes, and deletes one stable custom provider in Electron", as
       name: TWIN_PROVIDER,
       baseUrl: relay.baseUrl,
       apiKey: TWIN_KEY,
-      model: TWIN_MODEL,
+      model: ORIGINAL_MODEL,
     });
     await twinDialog
       .getByRole("button", { name: "Add and use", exact: true })
       .click();
     await expect(twinDialog).toBeHidden();
     await expect(page.locator(".model-service-card")).toHaveCount(2);
+    await expect(
+      serviceCard(page, TWIN_PROVIDER).locator(".model-service-badge.current"),
+    ).toBeVisible();
+    await expect(
+      serviceCard(page, ORIGINAL_PROVIDER).locator(
+        ".model-service-badge.current",
+      ),
+    ).toHaveCount(0);
 
     const originalCard = serviceCard(page, ORIGINAL_PROVIDER);
     await originalCard
@@ -356,7 +368,7 @@ test("renames, reroutes, and deletes one stable custom provider in Electron", as
       "",
     );
     expect(finalState.env[customProviderEnvKey(TWIN_PROVIDER)]).toBe(TWIN_KEY);
-    expect(finalState.modelConfig.model).toBe(TWIN_MODEL);
+    expect(finalState.modelConfig.model).toBe(ORIGINAL_MODEL);
     expect(relay.authorizationHeaders).toContain(`Bearer ${ORIGINAL_KEY}`);
     expect(relay.authorizationHeaders).toContain(`Bearer ${RENAMED_KEY}`);
     expect(relay.authorizationHeaders).toContain(`Bearer ${UPDATED_KEY}`);

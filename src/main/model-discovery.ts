@@ -13,6 +13,7 @@
  */
 import http from "http";
 import https from "https";
+import { createHash } from "node:crypto";
 import { URL } from "url";
 import { execFile } from "child_process";
 import { existsSync, readFileSync } from "fs";
@@ -253,7 +254,7 @@ const _cache = new Map<string, CacheEntry>();
 // with the main cache via `_clearCache` for test isolation.
 const _freeCache = new Map<string, string[]>();
 // Parallel cache of per-model context-window sizes (tokens), keyed the same
-// way as `_cache` (provider|baseUrl) and populated from the `/models`
+// way as `_cache` (provider|baseUrl|credential fingerprint) and populated from the `/models`
 // response when the provider advertises a `context_length` (OpenRouter and
 // many OpenAI-compatible gateways do). Drives authoritative context-gauge
 // sizing in the renderer; the static heuristic is only a fallback. Issue #597.
@@ -267,12 +268,24 @@ const LOCAL_NO_KEY_PROVIDERS = new Set([
   "llamacpp",
 ]);
 
-function cacheKey(provider: string, baseUrl: string): string {
-  return `${provider.toLowerCase()}|${baseUrl.replace(/\/+$/, "").toLowerCase()}`;
+function credentialFingerprint(apiKey: string): string {
+  if (!apiKey) return "no-credential";
+  return createHash("sha256")
+    .update("aera-model-discovery-cache\0", "utf8")
+    .update(apiKey, "utf8")
+    .digest("hex");
 }
 
-function fromCache(provider: string, baseUrl: string): string[] | null {
-  const key = cacheKey(provider, baseUrl);
+function cacheKey(provider: string, baseUrl: string, apiKey: string): string {
+  return `${provider.toLowerCase()}|${baseUrl.replace(/\/+$/, "").toLowerCase()}|${credentialFingerprint(apiKey)}`;
+}
+
+function fromCache(
+  provider: string,
+  baseUrl: string,
+  apiKey: string,
+): string[] | null {
+  const key = cacheKey(provider, baseUrl, apiKey);
   const entry = _cache.get(key);
   if (!entry) return null;
   if (Date.now() - entry.ts > CACHE_TTL_MS) {
@@ -282,8 +295,16 @@ function fromCache(provider: string, baseUrl: string): string[] | null {
   return entry.models;
 }
 
-function setCache(provider: string, baseUrl: string, models: string[]): void {
-  _cache.set(cacheKey(provider, baseUrl), { models, ts: Date.now() });
+function setCache(
+  provider: string,
+  baseUrl: string,
+  apiKey: string,
+  models: string[],
+): void {
+  _cache.set(cacheKey(provider, baseUrl, apiKey), {
+    models,
+    ts: Date.now(),
+  });
 }
 
 /** Resolve the canonical base URL for a provider name, or null if we
@@ -527,7 +548,7 @@ export async function discoverProviderModels(
   // OAuth/subscription providers don't have a static-key /v1/models
   // endpoint — route them through hermes-agent's provider_model_ids.
   if (OAUTH_DISCOVERY_PROVIDERS.has(lowerProvider)) {
-    const hit = fromCache(lowerProvider, "");
+    const hit = fromCache(lowerProvider, "", "");
     if (hit) {
       // Re-attach free flags from cache. Pricing is fetched fresh on
       // the next non-cache hit; meanwhile the renderer keeps the
@@ -540,7 +561,7 @@ export async function discoverProviderModels(
       };
     }
     const models = await discoverOAuthModels(lowerProvider);
-    setCache(lowerProvider, "", models);
+    setCache(lowerProvider, "", "", models);
     // Nous Portal exposes pricing in its catalog — enrich with the
     // subset of models that are free, so the renderer can badge them.
     // Other OAuth providers have no equivalent yet.
@@ -570,9 +591,6 @@ export async function discoverProviderModels(
   const baseUrl = explicitBase || canonicalBaseUrl(lowerProvider) || "";
   if (!baseUrl) return { models: [], status: "unknown-host", cached: false };
 
-  const cached = fromCache(lowerProvider, baseUrl);
-  if (cached) return { models: cached, status: "ok", cached: true };
-
   const apiKey =
     (apiKeyOverride || "").trim() ||
     envApiKeyFor(lowerProvider, baseUrl, profile);
@@ -582,6 +600,9 @@ export async function discoverProviderModels(
   if (!apiKey && !canDiscoverWithoutKey) {
     return { models: [], status: "no-key", cached: false };
   }
+
+  const cached = fromCache(lowerProvider, baseUrl, apiKey);
+  if (cached) return { models: cached, status: "ok", cached: true };
 
   const result = await fetchAndCacheModels(lowerProvider, baseUrl, apiKey);
   if (!result.reachable) {
@@ -609,9 +630,9 @@ async function fetchAndCacheModels(
   const headers = authHeaders(lowerProvider, apiKey);
   const result = await fetchModelsHttp(url, headers, 10_000);
   if (result.reachable) {
-    setCache(lowerProvider, baseUrl, result.models);
+    setCache(lowerProvider, baseUrl, apiKey, result.models);
     _ctxCache.set(
-      cacheKey(lowerProvider, baseUrl),
+      cacheKey(lowerProvider, baseUrl, apiKey),
       result.contextLengths ?? {},
     );
   }
@@ -664,7 +685,16 @@ export async function getModelContextWindow(
   const explicitBase = (baseUrlOverride || "").trim().replace(/\/+$/, "");
   const baseUrl = explicitBase || canonicalBaseUrl(lowerProvider) || "";
   if (!baseUrl) return null;
-  const key = cacheKey(lowerProvider, baseUrl);
+
+  const apiKey =
+    (apiKeyOverride || "").trim() ||
+    envApiKeyFor(lowerProvider, baseUrl, profile);
+  const canDiscoverWithoutKey =
+    LOCAL_NO_KEY_PROVIDERS.has(lowerProvider) ||
+    (lowerProvider === "custom" && isLoopbackBaseUrl(baseUrl));
+  if (!apiKey && !canDiscoverWithoutKey) return null;
+
+  const key = cacheKey(lowerProvider, baseUrl, apiKey);
 
   const readCtx = (): number | null => _ctxCache.get(key)?.[modelId] ?? null;
 
@@ -678,14 +708,6 @@ export async function getModelContextWindow(
   // Not fetched yet (e.g. the model picker primed `_cache` but never the ctx
   // map). Fetch directly here rather than via `discoverProviderModels`, whose
   // `_cache`-hit early-return would skip the ctx fetch entirely.
-  const apiKey =
-    (apiKeyOverride || "").trim() ||
-    envApiKeyFor(lowerProvider, baseUrl, profile);
-  const canDiscoverWithoutKey =
-    LOCAL_NO_KEY_PROVIDERS.has(lowerProvider) ||
-    (lowerProvider === "custom" && isLoopbackBaseUrl(baseUrl));
-  if (!apiKey && !canDiscoverWithoutKey) return null;
-
   await fetchAndCacheModels(lowerProvider, baseUrl, apiKey);
   return readCtx();
 }

@@ -333,6 +333,44 @@ describe("model-discovery", () => {
     expect(calls).toBe(1);
   });
 
+  it("does not reuse a model cache entry after the API key changes", async () => {
+    const receivedAuth: string[] = [];
+    server = http.createServer((req, res) => {
+      const auth = String(req.headers["authorization"] || "");
+      receivedAuth.push(auth);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          data: [
+            {
+              id: auth === "Bearer sk-new" ? "new-key-model" : "old-key-model",
+            },
+          ],
+        }),
+      );
+    });
+    await listen();
+    const { discoverProviderModels } = await loadDiscovery();
+
+    const first = await discoverProviderModels(
+      "custom",
+      baseUrl,
+      "sk-old",
+      undefined,
+    );
+    const second = await discoverProviderModels(
+      "custom",
+      baseUrl,
+      "sk-new",
+      undefined,
+    );
+
+    expect(first.models).toEqual(["old-key-model"]);
+    expect(second.cached).toBe(false);
+    expect(second.models).toEqual(["new-key-model"]);
+    expect(receivedAuth).toEqual(["Bearer sk-old", "Bearer sk-new"]);
+  });
+
   it("returns status=unknown-host for non-custom provider without a mapping", async () => {
     const { discoverProviderModels } = await loadDiscovery();
     // "openrouter" has a mapping, "kimi-coding" is unsupported, but a
@@ -534,6 +572,39 @@ describe("model-discovery", () => {
     expect(ctx).toBeNull();
     // Only the discovery call should have hit the server — no re-fetch.
     expect(calls).toBe(1);
+  });
+
+  it("does not reuse a context-window cache entry after the API key changes", async () => {
+    const receivedAuth: string[] = [];
+    server = http.createServer((req, res) => {
+      const auth = String(req.headers["authorization"] || "");
+      receivedAuth.push(auth);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          data: [
+            {
+              id: "shared-model",
+              context_length: auth === "Bearer sk-new" ? 256000 : 128000,
+            },
+          ],
+        }),
+      );
+    });
+    await listen();
+
+    const mod = await loadDiscovery();
+    await mod.discoverProviderModels("custom", baseUrl, "sk-old", undefined);
+    const contextWindow = await mod.getModelContextWindow(
+      "custom",
+      "shared-model",
+      baseUrl,
+      "sk-new",
+      undefined,
+    );
+
+    expect(contextWindow).toBe(256000);
+    expect(receivedAuth).toEqual(["Bearer sk-old", "Bearer sk-new"]);
   });
 
   // A manual `model.context_length` override in config.yaml must win over

@@ -400,6 +400,57 @@ describe("Runtime Seed extractor", () => {
     ).rejects.toThrow(/duplicate/i);
   });
 
+  it("rejects ZIP path traversal before files can escape staging", async () => {
+    const root = await workspace();
+    const value = manifest("windows");
+    const entries = archiveEntries(value.files);
+    entries.push({
+      name: "agentera-runtime/../escape",
+      kind: "file",
+      body: Buffer.from("escape"),
+      mode: 0o644,
+    });
+    const archivePath = await writeZip(root, entries);
+    const destination = join(root, "payload");
+
+    await expect(
+      extractRuntimeArchive({
+        archivePath,
+        destination,
+        manifest: value,
+        maxExtractedBytes: 1024 * 1024,
+      }),
+    ).rejects.toBeInstanceOf(RuntimeExtractionError);
+    await expect(lstat(join(root, "escape"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(lstat(destination)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects a ZIP symlink target that differs from the signed inventory", async () => {
+    const root = await workspace();
+    const files = baseFiles([symlink("runtime/current", "hermes")]);
+    const value = manifest("windows", files);
+    const entries = archiveEntries(files);
+    const link = entries.find((entry) =>
+      entry.name.endsWith("runtime/current"),
+    );
+    if (!link) throw new Error("missing test symlink");
+    link.linkTarget = "../../../escape";
+
+    await expect(
+      extractRuntimeArchive({
+        archivePath: await writeZip(root, entries),
+        destination: join(root, "payload"),
+        manifest: value,
+        maxExtractedBytes: 1024 * 1024,
+      }),
+    ).rejects.toThrow(/symlink|target|escape|relative/i);
+    await expect(lstat(join(root, "escape"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it.each(["/tmp/agentera-escape", "../../../agentera-escape"])(
     "rejects unsafe symlink target %s",
     async (linkTarget) => {

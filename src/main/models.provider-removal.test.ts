@@ -103,4 +103,61 @@ describe("custom provider model removal", () => {
       }),
     ]);
   });
+
+  it("keeps same-endpoint model attachments separate by stable provider id", async () => {
+    const models = await import("./models");
+    const endpoint = "https://shared.example/v1";
+    models.addModel(
+      "Shared model",
+      "custom",
+      "shared-model",
+      endpoint,
+      undefined,
+      "Provider B",
+      "chat_completions",
+      "provider-b",
+    );
+    models.addModel(
+      "Shared model",
+      "custom",
+      "shared-model",
+      endpoint,
+      undefined,
+      "Provider A",
+      "chat_completions",
+      "provider-a",
+    );
+
+    expect(models.readModelsRaw()).toEqual([
+      expect.objectContaining({
+        providerId: "provider-b",
+        providerLabel: "Provider B",
+      }),
+      expect.objectContaining({
+        providerId: "provider-a",
+        providerLabel: "Provider A",
+      }),
+    ]);
+
+    expect(
+      models.migrateModelsForCustomProvider({
+        providerId: "provider-a",
+        oldName: "Provider A",
+        oldBaseUrl: endpoint,
+        newName: "123456",
+        newBaseUrl: endpoint,
+        apiMode: "chat_completions",
+      }),
+    ).toBe(1);
+    expect(models.readModelsRaw()).toEqual([
+      expect.objectContaining({
+        providerId: "provider-b",
+        providerLabel: "Provider B",
+      }),
+      expect.objectContaining({
+        providerId: "provider-a",
+        providerLabel: "123456",
+      }),
+    ]);
+  });
 });

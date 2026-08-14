@@ -26,7 +26,15 @@ vi.mock("../../components/AuxiliaryTasksSection", () => ({
   default: () => <div>auxiliary-tasks</div>,
 }));
 vi.mock("./ModelCenter", () => ({
-  default: () => <div>model-center</div>,
+  default: ({
+    onEnvironmentChanged,
+  }: {
+    onEnvironmentChanged?: () => void | Promise<void>;
+  }) => (
+    <button type="button" onClick={() => void onEnvironmentChanged?.()}>
+      model-center
+    </button>
+  ),
 }));
 vi.mock("../../hooks/useDiscoveredModels", () => ({
   useDiscoveredModels: () => ({
@@ -39,14 +47,17 @@ vi.mock("../../hooks/useDiscoveredModels", () => ({
 
 describe("Providers advanced settings", () => {
   const getAccount = vi.fn();
+  const getEnv = vi.fn();
 
   beforeEach(() => {
     getAccount.mockReset();
+    getEnv.mockReset();
+    getEnv.mockResolvedValue({});
     Object.defineProperty(window, "hermesAPI", {
       configurable: true,
       value: {
         getAccount,
-        getEnv: vi.fn(async () => ({})),
+        getEnv,
         getModelConfig: vi.fn(async () => ({
           provider: "auto",
           model: "",
@@ -81,5 +92,15 @@ describe("Providers advanced settings", () => {
     expect(
       screen.queryByText("providers.hermesAccount.signOut"),
     ).not.toBeInTheDocument();
+  });
+
+  it("reloads environment state after a coordinated model mutation", async () => {
+    render(<Providers profile="fish" visible />);
+
+    await waitFor(() => expect(getEnv).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "model-center" }));
+
+    await waitFor(() => expect(getEnv).toHaveBeenCalledTimes(2));
+    expect(getEnv).toHaveBeenLastCalledWith("fish");
   });
 });

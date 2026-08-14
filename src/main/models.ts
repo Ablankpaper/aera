@@ -416,15 +416,25 @@ export function addModel(
   const ctx = normalizeContextLength(contextLength);
   if (ctx !== undefined) setModelDefinition(model, { contextLength: ctx });
 
-  // Dedup: same model ID + provider + base URL. Base URL is part of the key so
-  // the same model id can live under two different custom endpoints.
+  // Stable named providers remain distinct even when they expose the same
+  // model at the same endpoint. A stable request may absorb only its own row or
+  // a legacy row whose name anchor clearly identifies that provider; ambiguous
+  // legacy rows and rows owned by another stable id remain separate.
   const norm = (u: string): string =>
     (u || "").trim().replace(/\/+$/, "").toLowerCase();
+  const providerAnchor = providerId
+    ? customProviderEnvKey(providerLabel || name)
+    : "";
   const existingIndex = models.findIndex(
     (m) =>
       m.model === model &&
       m.provider === provider &&
-      norm(m.baseUrl) === norm(baseUrl),
+      norm(m.baseUrl) === norm(baseUrl) &&
+      (providerId
+        ? m.providerId === providerId ||
+          (!m.providerId &&
+            customProviderEnvKey(m.providerLabel || m.name) === providerAnchor)
+        : !m.providerId),
   );
   if (existingIndex !== -1) {
     const existing = models[existingIndex];

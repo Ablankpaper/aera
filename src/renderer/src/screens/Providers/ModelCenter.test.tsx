@@ -286,6 +286,39 @@ describe("ModelCenter", () => {
     });
   });
 
+  it("refreshes the parent environment after a coordinated save", async () => {
+    const mutateModelConfiguration = vi.fn().mockResolvedValue({
+      status: "committed",
+      catalog: {
+        revision: "b".repeat(64),
+        targetProfileId: "acceptance",
+        routes: [],
+      },
+    });
+    const onEnvironmentChanged = vi.fn().mockResolvedValue(undefined);
+    Object.assign(window.hermesAPI, {
+      getOwnerModelRouteCatalog: vi.fn().mockResolvedValue(emptyCatalog),
+      mutateModelConfiguration,
+    });
+    render(
+      <ModelCenter
+        profile="acceptance"
+        env={{}}
+        activeModel={{ provider: "auto", model: "", baseUrl: "" }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onEnvironmentChanged={onEnvironmentChanged}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    await completePetoiForm();
+
+    await waitFor(() => expect(mutateModelConfiguration).toHaveBeenCalled());
+    expect(onEnvironmentChanged).toHaveBeenCalledTimes(1);
+  });
+
   it("does not call a committed refresh warning a save failure", async () => {
     const mutateModelConfiguration = vi.fn().mockResolvedValue({
       status: "committed_refresh_warning",
@@ -932,6 +965,76 @@ describe("ModelCenter", () => {
     ).toHaveClass("active");
     expect(
       container.querySelector('[data-service-key="preset:petoi"]'),
+    ).not.toHaveClass("active");
+  });
+
+  it("uses the named route when two custom providers share one endpoint and model", async () => {
+    listModels.mockResolvedValue([
+      {
+        id: "shared-model-b",
+        name: "shared-model",
+        provider: "custom",
+        providerLabel: "Provider B",
+        providerId: "provider-b",
+        model: "shared-model",
+        baseUrl: "https://shared.example/v1",
+        createdAt: 1,
+      },
+      {
+        id: "shared-model-a",
+        name: "shared-model",
+        provider: "custom",
+        providerLabel: "Provider A",
+        providerId: "provider-a",
+        model: "shared-model",
+        baseUrl: "https://shared.example/v1",
+        createdAt: 2,
+      },
+    ]);
+    listCustomProviders.mockResolvedValue([
+      {
+        id: "provider-b",
+        name: "Provider B",
+        baseUrl: "https://shared.example/v1",
+        createdAt: 1,
+      },
+      {
+        id: "provider-a",
+        name: "Provider A",
+        baseUrl: "https://shared.example/v1",
+        createdAt: 2,
+      },
+    ]);
+
+    const { container } = render(
+      <ModelCenter
+        profile="acceptance"
+        env={{
+          CUSTOM_PROVIDER_PROVIDER_A_KEY: "configured-a",
+          CUSTOM_PROVIDER_PROVIDER_B_KEY: "configured-b",
+        }}
+        activeModel={{
+          provider: "custom:provider-a",
+          model: "shared-model",
+          baseUrl: "https://shared.example/v1",
+        }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        container.querySelector('[data-service-key="custom:provider-a"]'),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      container.querySelector('[data-service-key="custom:provider-a"]'),
+    ).toHaveClass("active");
+    expect(
+      container.querySelector('[data-service-key="custom:provider-b"]'),
     ).not.toHaveClass("active");
   });
 

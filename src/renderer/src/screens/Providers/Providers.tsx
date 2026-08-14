@@ -217,6 +217,11 @@ function Providers({
     });
   }, [profile]);
 
+  const reloadEnvironment = useCallback(async (): Promise<void> => {
+    const envData = await window.hermesAPI.getEnv(profile);
+    setEnv(envData);
+  }, [profile]);
+
   useEffect(() => {
     modelLoaded.current = false;
     loadConfig();
@@ -688,6 +693,7 @@ function Providers({
             setModelSaved(true);
             setTimeout(() => setModelSaved(false), 2000);
           }}
+          onEnvironmentChanged={reloadEnvironment}
           onOpenModelPicker={openModelPicker}
           onBrowseRegistry={() => setRegistryOpen(true)}
         />
