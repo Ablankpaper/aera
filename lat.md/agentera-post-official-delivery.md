@@ -128,6 +128,8 @@ The executable CI, staging, signing, promotion, device-evidence, and rollback se
 
 Desktop CI keeps two Vitest workers on macOS but serializes test files on hosted Ubuntu and Windows runners after both platforms emitted worker-level failures under filesystem-heavy parallel load. The Windows full-suite job also gives each case a 20-second ceiling because hosted runner pauses repeatedly moved the default five-second failure across otherwise sub-second SQLite and process tests; assertions and required platform gates remain unchanged.
 
+The CI workflow also exposes a manual `windows-process-tree-diagnostic` mode for one release-isolated hosted-Windows check of the four process-tree lifecycle test files. Its distinct job name and missing macOS/Ubuntu matrix mean `scripts/verify-ci-checkpoint.mjs` cannot accept it as a release checkpoint; push, pull-request, and full manual CI retain the complete matrix.
+
 The manual `rerun-ci-checkpoint.yml` workflow dispatches the existing repository CI workflows and records their GitHub URLs and job facts without carrying production secrets or changing a failed result.
 
 On 2026-07-23 the three pushed feature-branch checkpoints completed exact-SHA CI successfully:

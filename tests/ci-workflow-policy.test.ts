@@ -7,14 +7,35 @@ interface WorkflowStep {
   name?: string;
   if?: string;
   run?: string;
+  uses?: string;
+  with?: Record<string, unknown>;
+}
+
+interface WorkflowJob {
+  if?: string;
+  name?: string;
+  "runs-on"?: string;
+  "timeout-minutes"?: number;
+  environment?: unknown;
+  steps?: WorkflowStep[];
+}
+
+interface WorkflowDocument {
+  on?: {
+    workflow_dispatch?: {
+      inputs?: Record<string, Record<string, unknown>>;
+    };
+  };
+  jobs?: Record<string, WorkflowJob>;
+}
+
+function readWorkflow(): WorkflowDocument {
+  const raw = readFileSync(resolve(".github/workflows/ci.yml"), "utf8");
+  return parseYaml(raw) as WorkflowDocument;
 }
 
 function unitTestSteps(): WorkflowStep[] {
-  const raw = readFileSync(resolve(".github/workflows/ci.yml"), "utf8");
-  const workflow = parseYaml(raw) as {
-    jobs?: { check?: { steps?: WorkflowStep[] } };
-  };
-  return (workflow.jobs?.check?.steps ?? []).filter((step) =>
+  return (readWorkflow().jobs?.check?.steps ?? []).filter((step) =>
     step.name?.startsWith("Test unit"),
   );
 }
@@ -37,6 +58,57 @@ describe("CI workflow policy", () => {
         name: "Test unit (Windows serial)",
         if: "matrix.os == 'windows-latest'",
         run: "npm test -- --maxWorkers=1 --testTimeout=20000",
+      },
+    ]);
+  });
+
+  // @lat: [[agentera-post-official-delivery#Production readiness and release#Remote CI safety checkpoint]]
+  it("isolates the focused Windows diagnostic from release CI", () => {
+    const workflow = readWorkflow();
+
+    expect(workflow.on?.workflow_dispatch?.inputs?.mode).toEqual({
+      description: "Execution mode",
+      required: true,
+      default: "full",
+      type: "choice",
+      options: ["full", "windows-process-tree-diagnostic"],
+    });
+    expect(workflow.jobs?.check?.if).toBe(
+      "github.event_name != 'workflow_dispatch' || inputs.mode == 'full'",
+    );
+
+    const diagnostic = workflow.jobs?.["windows-process-tree-diagnostic"];
+    expect(diagnostic).toMatchObject({
+      if: "github.event_name == 'workflow_dispatch' && inputs.mode == 'windows-process-tree-diagnostic'",
+      name: "windows-process-tree-diagnostic",
+      "runs-on": "windows-latest",
+      "timeout-minutes": 10,
+    });
+    expect(diagnostic?.environment).toBeUndefined();
+    expect(diagnostic?.steps).toEqual([
+      {
+        name: "Checkout",
+        uses: "actions/checkout@v4",
+      },
+      {
+        name: "Set up Node",
+        uses: "actions/setup-node@v4",
+        with: {
+          "node-version": 22,
+          cache: "npm",
+        },
+      },
+      {
+        name: "Install dependencies",
+        run: "npm ci",
+      },
+      {
+        name: "Typecheck Node",
+        run: "npm run typecheck:node",
+      },
+      {
+        name: "Test Windows process-tree boundary",
+        run: "npm test -- src/main/process-tree.test.ts tests/gateway-restart.test.ts src/main/tui-gateway-lifecycle.test.ts src/main/gateway-shutdown-lifecycle.test.ts --maxWorkers=1 --testTimeout=20000 --reporter=verbose",
       },
     ]);
   });

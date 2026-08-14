@@ -13,6 +13,7 @@
 ### Task 1: Lock the diagnostic workflow contract
 
 **Files:**
+
 - Modify: `tests/ci-workflow-policy.test.ts`
 - Test: `tests/ci-workflow-policy.test.ts`
 
@@ -54,6 +55,7 @@ Expected: the new test fails because `workflow_dispatch.inputs.mode` and `window
 ### Task 2: Implement the release-isolated diagnostic
 
 **Files:**
+
 - Modify: `.github/workflows/ci.yml`
 - Modify: `lat.md/agentera-post-official-delivery.md`
 - Test: `tests/ci-workflow-policy.test.ts`
@@ -117,6 +119,7 @@ Expected: both CI workflow-policy tests pass.
 ### Task 3: Verify and push without automatic Actions
 
 **Files:**
+
 - Verify: `.github/workflows/ci.yml`
 - Verify: `tests/ci-workflow-policy.test.ts`
 - Verify: `lat.md/agentera-post-official-delivery.md`
@@ -160,6 +163,7 @@ Expected: the branch is present on origin and no executed push CI run exists for
 ### Task 4: Execute and inspect the one Windows diagnostic
 
 **Files:**
+
 - Execute: `.github/workflows/ci.yml`
 
 - [ ] **Step 1: Dispatch the exact branch and diagnostic mode**

@@ -9,6 +9,15 @@ on:
   push:
     branches: [main, "aera/**"]
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Execution mode
+        required: true
+        default: full
+        type: choice
+        options:
+          - full
+          - windows-process-tree-diagnostic
 
 permissions:
   contents: read
@@ -23,6 +32,7 @@ concurrency:
 
 jobs:
   check:
+    if: github.event_name != 'workflow_dispatch' || inputs.mode == 'full'
     strategy:
       fail-fast: false
       matrix:
@@ -116,3 +126,35 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: npm run lint
         continue-on-error: true
+
+  windows-process-tree-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'windows-process-tree-diagnostic'
+    name: windows-process-tree-diagnostic
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck Node
+        run: npm run typecheck:node
+
+      - name: Test Windows process-tree boundary
+        run: >-
+          npm test --
+          src/main/process-tree.test.ts
+          tests/gateway-restart.test.ts
+          src/main/tui-gateway-lifecycle.test.ts
+          src/main/gateway-shutdown-lifecycle.test.ts
+          --maxWorkers=1
+          --testTimeout=20000
+          --reporter=verbose
