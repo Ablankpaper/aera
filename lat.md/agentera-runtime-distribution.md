@@ -78,7 +78,7 @@ The Desktop TUI transport launches Runtime through `hermes serve` with `HERMES_D
 
 Desktop starts each POSIX TUI child as a dedicated process-group leader and records that exact PGID. The shared Electron process group is never signalled.
 
-Shutdown targets only that dedicated group. Windows instead captures the exact root and child tree with invariant UTC file-time identities. No path selects processes by name, port, Profile label, command line, or environment.
+Shutdown targets only that dedicated group. Windows instead captures the exact root and child tree with invariant UTC file-time identities, using bounded root/parent CIM filters rather than enumerating the machine process table. No path selects processes by name, port, Profile label, command line, or environment.
 
 ### Bounded force escalation
 

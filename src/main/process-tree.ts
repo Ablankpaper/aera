@@ -253,18 +253,70 @@ export function parseWindowsSnapshot(
   });
 }
 
-async function captureWindowsSnapshot(
+export function buildWindowsSnapshotScript(
   request: ProcessSnapshotRequest,
-): Promise<readonly ProcessSnapshotRecord[] | null> {
-  const script =
-    "$ErrorActionPreference='Stop'; " +
-    "Get-CimInstance Win32_Process " +
-    "-Property ProcessId,ParentProcessId,CreationDate | " +
+): string | null {
+  if (!Number.isSafeInteger(request.rootPid) || request.rootPid <= 0) {
+    return null;
+  }
+  const projection =
     "Select-Object ProcessId,ParentProcessId," +
     "@{Name='CreationFileTimeUtc';Expression={" +
     "$_.CreationDate.ToFileTimeUtc().ToString(" +
-    "[Globalization.CultureInfo]::InvariantCulture)}} | " +
-    "ConvertTo-Json -Compress";
+    "[Globalization.CultureInfo]::InvariantCulture)}}";
+  const serialize =
+    "if ($rows.Count -eq 0) { Write-Output '[]' } else { " +
+    `$rows | ${projection} | ConvertTo-Json -Compress }`;
+
+  if (request.candidatePids) {
+    const candidates = [...new Set(request.candidatePids)].sort(
+      (left, right) => left - right,
+    );
+    if (
+      candidates.some(
+        (candidate) => !Number.isSafeInteger(candidate) || candidate <= 0,
+      )
+    ) {
+      return null;
+    }
+    if (candidates.length === 0) return "Write-Output '[]'";
+    const filter = candidates
+      .map((candidate) => `ProcessId = ${candidate}`)
+      .join(" OR ");
+    return (
+      "$ErrorActionPreference='Stop'; " +
+      "$rows = @(Get-CimInstance Win32_Process " +
+      `-Filter '${filter}' ` +
+      "-Property ProcessId,ParentProcessId,CreationDate); " +
+      serialize
+    );
+  }
+
+  return (
+    "$ErrorActionPreference='Stop'; " +
+    "$rows = [Collections.Generic.List[object]]::new(); " +
+    "$seen = [Collections.Generic.HashSet[uint32]]::new(); " +
+    "$queue = [Collections.Generic.Queue[uint32]]::new(); " +
+    `$queue.Enqueue([uint32]${request.rootPid}); ` +
+    "while ($queue.Count -gt 0) { " +
+    "$currentProcessId = $queue.Dequeue(); " +
+    "$filter = ('ProcessId = {0} OR ParentProcessId = {0}' -f $currentProcessId); " +
+    "foreach ($process in @(Get-CimInstance Win32_Process " +
+    "-Filter $filter -Property ProcessId,ParentProcessId,CreationDate)) { " +
+    "$processId = [uint32]$process.ProcessId; " +
+    "if ($seen.Add($processId)) { " +
+    "$rows.Add($process); " +
+    "if ([uint32]$process.ParentProcessId -eq $currentProcessId) { " +
+    "$queue.Enqueue($processId) } } } }; " +
+    serialize
+  );
+}
+
+async function captureWindowsSnapshot(
+  request: ProcessSnapshotRequest,
+): Promise<readonly ProcessSnapshotRecord[] | null> {
+  const script = buildWindowsSnapshotScript(request);
+  if (script === null) return null;
   const output = await execFileText(
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-Command", script],

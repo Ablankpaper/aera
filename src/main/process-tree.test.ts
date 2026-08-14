@@ -907,6 +907,36 @@ describe("terminateProcessTree", () => {
     }
   });
 
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
+  it("builds bounded Windows snapshots from targeted process filters", () => {
+    const buildWindowsSnapshotScript = (
+      processTree as unknown as {
+        buildWindowsSnapshotScript?: (
+          request: processTree.ProcessSnapshotRequest,
+        ) => string | null;
+      }
+    ).buildWindowsSnapshotScript;
+    expect(buildWindowsSnapshotScript).toBeTypeOf("function");
+
+    const treeScript = buildWindowsSnapshotScript?.({
+      rootPid: 456,
+      timeoutMs: 3_000,
+    });
+    expect(treeScript).toContain("ProcessId = {0} OR ParentProcessId = {0}");
+    expect(treeScript).toContain("-Filter $filter");
+    expect(treeScript).not.toMatch(/Get-CimInstance Win32_Process\s+-Property/);
+
+    const candidateScript = buildWindowsSnapshotScript?.({
+      rootPid: 456,
+      candidatePids: [789, 456, 789],
+      timeoutMs: 3_000,
+    });
+    expect(candidateScript).toContain(
+      "-Filter 'ProcessId = 456 OR ProcessId = 789'",
+    );
+    expect(candidateScript).not.toContain("ParentProcessId = {0}");
+  });
+
   it("parses invariant Windows process identities", () => {
     const parseWindowsSnapshot = (
       processTree as unknown as {
