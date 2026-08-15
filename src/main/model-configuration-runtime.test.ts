@@ -88,10 +88,7 @@ describe("model-configuration runtime", () => {
       null,
       "chat_completions",
     );
-    const beforeConfig = readFileSync(
-      join(hermesHome, "config.yaml"),
-      "utf8",
-    );
+    const beforeConfig = readFileSync(join(hermesHome, "config.yaml"), "utf8");
     const bindings = new AgenteraProfileBindingStore({
       userDataPath: userData,
       secureStorage: {

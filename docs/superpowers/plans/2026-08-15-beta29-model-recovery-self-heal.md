@@ -23,6 +23,7 @@
 ### Task 1: Fresh model-config read boundary
 
 **Files:**
+
 - Modify: `tests/config-model-block.test.ts`
 - Modify: `src/main/config.ts:236-259,771-799,1013-1032`
 
@@ -36,7 +37,9 @@ it("reads restored model bytes without waiting for the presentation cache", asyn
   const configPath = join(TEST_DIR, "config.yaml");
   writeFileSync(
     configPath,
-    ["model:", '  default: "attempted"', '  provider: "custom:new"', ""].join("\n"),
+    ["model:", '  default: "attempted"', '  provider: "custom:new"', ""].join(
+      "\n",
+    ),
   );
 
   const { getModelConfig, getModelConfigFresh } =
@@ -45,7 +48,9 @@ it("reads restored model bytes without waiting for the presentation cache", asyn
 
   writeFileSync(
     configPath,
-    ["model:", '  default: "restored"', '  provider: "custom:old"', ""].join("\n"),
+    ["model:", '  default: "restored"', '  provider: "custom:old"', ""].join(
+      "\n",
+    ),
   );
 
   expect(getModelConfig().model).toBe("attempted");
@@ -108,6 +113,7 @@ git commit -m "fix(models): expose fresh transactional config reads"
 ### Task 2: Cache-safe real rollback verification
 
 **Files:**
+
 - Modify: `src/main/model-configuration-runtime.test.ts`
 - Modify: `src/main/model-configuration-runtime.ts:20-28,214-235,295-302`
 
@@ -268,6 +274,7 @@ git commit -m "fix(models): verify rollback routes from disk"
 ### Task 3: Reconcile existing recovery-required rows
 
 **Files:**
+
 - Modify: `src/main/model-configuration-coordinator.test.ts:569-680`
 - Modify: `src/main/model-configuration-coordinator.ts:503-564`
 
@@ -399,6 +406,7 @@ git commit -m "fix(models): reconcile exact recovery-required rows"
 ### Task 4: Architecture contract and complete verification
 
 **Files:**
+
 - Modify: `lat.md/beta27-reliability-plan.md`
 - Verify: all changed production and test files
 

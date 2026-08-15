@@ -169,12 +169,9 @@ describe("getModelConfig — scoped to model: block", () => {
     const configPath = join(TEST_DIR, "config.yaml");
     writeFileSync(
       configPath,
-      [
-        "model:",
-        '  default: "attempted"',
-        '  provider: "custom:new"',
-        "",
-      ].join("\n"),
+      ["model:", '  default: "attempted"', '  provider: "custom:new"', ""].join(
+        "\n",
+      ),
     );
 
     const { getModelConfig, getModelConfigFresh } =
@@ -183,12 +180,9 @@ describe("getModelConfig — scoped to model: block", () => {
 
     writeFileSync(
       configPath,
-      [
-        "model:",
-        '  default: "restored"',
-        '  provider: "custom:old"',
-        "",
-      ].join("\n"),
+      ["model:", '  default: "restored"', '  provider: "custom:old"', ""].join(
+        "\n",
+      ),
     );
 
     expect(getModelConfig().model).toBe("attempted");

@@ -287,10 +287,7 @@ function subject(
 
 function writeAttemptedState(fixture: Fixture): void {
   writeFileSync(fixture.paths.env, `NEW_KEY=${SECRET}\n`);
-  writeFileSync(
-    fixture.paths.providers,
-    '{"version":1,"providers":["new"]}\n',
-  );
+  writeFileSync(fixture.paths.providers, '{"version":1,"providers":["new"]}\n');
   writeFileSync(fixture.paths.models, '[{"model":"new-model"}]\n');
   writeFileSync(
     fixture.paths.modelDefinitions,
