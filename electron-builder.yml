@@ -7,6 +7,7 @@ protocols:
       - agentera
 directories:
   buildResources: build
+afterPack: scripts/release/verify-packaged-native-module.mjs
 files:
   - "out/**/*"
   - "package.json"

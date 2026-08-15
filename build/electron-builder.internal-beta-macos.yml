@@ -1,4 +1,5 @@
 extends: electron-builder.yml
+beforePack: scripts/internal-beta/verify-built-auth-config.mjs
 
 # This configuration is used only after the workflow has required protected
 # Developer ID credentials. The workflow performs explicit two-round Apple

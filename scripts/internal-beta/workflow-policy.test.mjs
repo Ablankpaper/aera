@@ -36,6 +36,7 @@ const windowsVerifierPath = new URL(
   "../release/verify-windows.ps1",
   import.meta.url,
 );
+const macVerifierPath = new URL("../release/verify-macos.mjs", import.meta.url);
 const execFileAsync = promisify(execFile);
 const sourceSha = "a".repeat(40);
 
@@ -153,16 +154,17 @@ test("candidate CI validators reject a missing required platform", async () => {
 });
 
 test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublished, and Sigstore-bound", async () => {
-  const [raw, productionRaw] = await Promise.all([
+  const [raw, productionRaw, macVerifierRaw] = await Promise.all([
     readFile(workflowPath, "utf8"),
     readFile(productionCandidatePath, "utf8"),
+    readFile(macVerifierPath, "utf8"),
   ]);
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.29"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.30"/u);
   assert.match(
     raw,
-    /--release-notes "Beta\.29 修复自定义模型服务改名、地址与密钥更新、重复卡片及删除判定，改善模型目录读取提示，并修复 Windows Runtime Seed 在提取阶段失败；Runtime 仍为 0\.20\.0-agentera\.2 签名候选，macOS 继续公证，Windows 提供内测包。"/u,
+    /--release-notes "Beta\.30 修复异常模型配置事务导致后续保存被阻断的问题，并增加 better-sqlite3 与 Electron ABI 的构建前、应用包、DMG 和 ZIP 四层校验，避免原生模块不兼容包进入发布；Runtime 仍为 0\.20\.0-agentera\.2 签名候选，macOS 继续签名、公证和装订，Windows 提供内测包。"/u,
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
@@ -231,6 +233,10 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   }
   assert.match(raw, /-c\.forceCodeSigning=true/u);
   assert.match(raw, /-c\.mac\.notarize=false/u);
+  assert.match(
+    raw,
+    /npx electron-rebuild --force --only better-sqlite3\s+--version 41\.10\.5 --arch arm64 --build-from-source/u,
+  );
   assert.match(raw, /--prepackaged "\$APP_PATH"/u);
   assert.match(raw, /xcrun notarytool submit[\s\S]*--no-wait/iu);
   assert.match(raw, /xcrun notarytool wait/iu);
@@ -251,6 +257,8 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   assert.match(raw, /timeout-minutes:\s*355/u);
   assert.doesNotMatch(raw, /--notarization-mode deferred/u);
   assert.match(raw, /node scripts\/release\/verify-macos\.mjs/iu);
+  assert.match(macVerifierRaw, /resolvePackagedNativeModule/iu);
+  assert.match(macVerifierRaw, /verifyNativeModuleAbi/iu);
   assert.match(raw, /candidate\/evidence\/macos-evidence\.json/u);
   assert.match(raw, /Build unsigned Windows x64 internal Beta/u);
   assert.match(raw, /CSC_IDENTITY_AUTO_DISCOVERY:\s*"false"/u);
@@ -262,6 +270,10 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   assert.doesNotMatch(raw, /candidate\/evidence\/windows-evidence\.json/u);
 
   assert.match(productionRaw, /Build and Authenticode-sign Windows x64/u);
+  assert.match(
+    productionRaw,
+    /npx electron-rebuild --force --only better-sqlite3\s+--version 41\.10\.5 --arch arm64 --build-from-source/u,
+  );
   assert.match(productionRaw, /secrets\.WIN_CSC_LINK/u);
   assert.match(productionRaw, /secrets\.WIN_CSC_KEY_PASSWORD/u);
   assert.match(productionRaw, /scripts\/release\/verify-windows\.ps1/u);
@@ -280,7 +292,7 @@ test("internal-Beta promotion publishes one verified candidate without rebuildin
   const raw = await readFile(promotionWorkflowPath, "utf8");
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.29"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.30"/u);
 
   assert.equal(workflow.name, "Promote Desktop internal Beta");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
@@ -345,7 +357,15 @@ test("internal-Beta overlays separate unsigned Windows from strict macOS signing
   const macConfig = parseYAML(macRaw);
   const baseConfig = parseYAML(baseRaw);
 
+  assert.equal(
+    baseConfig.afterPack,
+    "scripts/release/verify-packaged-native-module.mjs",
+  );
   assert.equal(config.extends, "electron-builder.yml");
+  assert.equal(
+    config.beforePack,
+    "scripts/internal-beta/verify-built-auth-config.mjs",
+  );
   assert.equal(config.forceCodeSigning, false);
   assert.deepEqual(config.publish, []);
   assert.equal(config.mac.identity, null);
@@ -374,6 +394,10 @@ test("internal-Beta overlays separate unsigned Windows from strict macOS signing
     "Aera-Internal-Beta-${version}-windows-${arch}-portable.${ext}",
   );
   assert.equal(macConfig.extends, "electron-builder.yml");
+  assert.equal(
+    macConfig.beforePack,
+    "scripts/internal-beta/verify-built-auth-config.mjs",
+  );
   assert.equal(macConfig.forceCodeSigning, true);
   assert.deepEqual(macConfig.publish, []);
   assert.equal(macConfig.mac.identity, undefined);
