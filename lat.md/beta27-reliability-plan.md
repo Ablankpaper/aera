@@ -24,6 +24,22 @@ The NUL-delimited owner handle and composite route ID are opaque Main-only ident
 
 [[src/renderer/src/screens/Providers/ModelCenter.tsx#ModelCenter]] uses the coordinated mutation whenever the Beta.27 bridge is present: one request saves dependencies and activation, a rejected stage keeps the editor open, and a post-commit refresh warning is shown as a warning rather than a failed save. The returned catalog supplies the canonical active route and target Profile. A feature-detected Beta.26 low-level bridge remains only as an older-client compatibility fallback.
 
+### Transactional route reads bypass cache
+
+Commit, rollback, and cold-recovery route comparisons read current Profile bytes rather than the five-second presentation cache.
+
+### Rollback verification reads restored route
+
+After exact snapshot restoration, route verification observes the restored route immediately and cannot misclassify it from an attempted cached route.
+
+### Exact restored recovery row self-heals
+
+An owned row whose five files and route exactly equal before/old becomes `rolled_back`; mixed or unverifiable evidence remains locked.
+
+### Exact committed recovery row self-heals
+
+An owned row whose complete files and route exactly equal after/new becomes `committed`; no partial after state is accepted.
+
 ## Legacy installation recovery
 
 Cold recovery accepts a fresh Installation operation that names only its source Profile and intentionally inherits that Profile's current or default model.
