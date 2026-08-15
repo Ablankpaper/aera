@@ -24,6 +24,7 @@ const originalHermesHome = process.env.HERMES_HOME;
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.doUnmock("./agentera-agent-control/runtime-model-routes");
   vi.resetModules();
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
@@ -49,6 +50,103 @@ describe("model-configuration runtime", () => {
         "https://www.api-codex.cn",
       ),
     ).toBe(false);
+  });
+
+  // @lat: [[beta27-reliability-plan#Recoverable model configuration#Rollback verification reads restored route]]
+  it("verifies the restored route instead of the attempted cached route", async () => {
+    const root = mkdtempSync(join(tmpdir(), "aera-model-runtime-rollback-"));
+    roots.push(root);
+    const hermesHome = join(root, "hermes");
+    const userData = join(root, "user-data");
+    mkdirSync(hermesHome, { recursive: true });
+    process.env.HERMES_HOME = hermesHome;
+    vi.resetModules();
+    vi.doUnmock("./installer");
+    const actualInstaller =
+      await vi.importActual<typeof import("./installer")>("./installer");
+    vi.doMock("./installer", () => actualInstaller);
+    const actualRoutes = await vi.importActual<
+      typeof import("./agentera-agent-control/runtime-model-routes")
+    >("./agentera-agent-control/runtime-model-routes");
+    vi.doMock("./agentera-agent-control/runtime-model-routes", () => ({
+      ...actualRoutes,
+      listResolvedAgentRuntimeModelRoutes: vi.fn(() => []),
+    }));
+
+    const [{ AgenteraProfileBindingStore }, runtime, config, modelDatabase] =
+      await Promise.all([
+        import("./agentera-profile-binding"),
+        import("./model-configuration-runtime"),
+        import("./config"),
+        import("./model-configuration-database"),
+      ]);
+    config.setModelConfig(
+      "custom:old",
+      "old-model",
+      "https://old.invalid/v1",
+      "default",
+      null,
+      "chat_completions",
+    );
+    const beforeConfig = readFileSync(
+      join(hermesHome, "config.yaml"),
+      "utf8",
+    );
+    const bindings = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage: {
+        isEncryptionAvailable: () => true,
+        encryptString: (value: string) => Buffer.from(value, "utf8"),
+        decryptString: (value: Buffer) => value.toString("utf8"),
+      },
+    });
+    bindings.bindExistingProfile(hermesHome, OWNER);
+    const handle = await runtime.prepareModelConfigurationRuntime({
+      userDataPath: userData,
+      getOwner: () => OWNER,
+      profileBindings: bindings,
+      getConnectionConfig: () => ({ mode: "local" }),
+      openDatabase: (path) =>
+        modelDatabase.openModelConfigurationDatabase(path, {
+          databaseFactory: (databasePath) =>
+            new DatabaseSync(
+              databasePath,
+            ) as unknown as ModelConfigurationSqliteDatabase,
+        }),
+    });
+
+    try {
+      expect(handle.recoveryError).toBeNull();
+      const before = handle.catalog!.snapshot("default");
+      const result = await handle.coordinator!.mutate({
+        intent: "upsert",
+        expectedCatalogRevision: before.revision,
+        requestedProfileId: "default",
+        provider: "custom",
+        providerLabel: "New",
+        baseUrl: "https://new.invalid/v1",
+        apiMode: "chat_completions",
+        apiKey: SECRET,
+        models: [{ model: "new-model", displayName: "New Model" }],
+        activeModel: "new-model",
+      });
+
+      expect(result).toMatchObject({
+        status: "rejected",
+        stage: "verification",
+        rollback: "restored",
+      });
+      expect(readFileSync(join(hermesHome, "config.yaml"), "utf8")).toBe(
+        beforeConfig,
+      );
+      expect(config.getModelConfigFresh("default")).toMatchObject({
+        provider: "custom:old",
+        model: "old-model",
+      });
+      expect(handle.operationStore!.listIncomplete()).toEqual([]);
+    } finally {
+      handle.close();
+    }
   });
 
   it("commits one real local mutation through the owner catalog and journal", async () => {

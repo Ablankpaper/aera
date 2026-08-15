@@ -28,6 +28,7 @@ import {
 import { HERMES_HOME, expectedEnvKeyForModel } from "./installer";
 import {
   getModelConfig,
+  getModelConfigFresh,
   hasOAuthCredentials,
   setEnvValue,
   setModelConfig,
@@ -211,8 +212,13 @@ function routeMatchesConfig(
   return false;
 }
 
-function activeRouteIdentity(profileId: string): PublicModelRouteIdentity {
-  const config = getModelConfig(profileId);
+function activeRouteIdentity(
+  profileId: string,
+  fresh = false,
+): PublicModelRouteIdentity {
+  const config = fresh
+    ? getModelConfigFresh(profileId)
+    : getModelConfig(profileId);
   const routes = listResolvedAgentRuntimeModelRoutes(profileId);
   const resolved = routes.find((route) => routeMatchesConfig(route, config));
   if (resolved) {
@@ -298,7 +304,7 @@ function createMutationAdapter(
 ): ModelConfigurationMutationAdapter {
   return {
     getActiveRouteKey: (profileId) =>
-      canonicalPublicRouteKey(activeRouteIdentity(profileId)),
+      canonicalPublicRouteKey(activeRouteIdentity(profileId, true)),
 
     prepare: (request, context) => {
       const connection = options.getConnectionConfig();
