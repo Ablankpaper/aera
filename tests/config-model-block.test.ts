@@ -163,6 +163,41 @@ describe("getModelConfig — scoped to model: block", () => {
     expect(mc.provider).toBe("single-quoted");
     expect(mc.baseUrl).toBe("https://example.com");
   });
+
+  // @lat: [[beta27-reliability-plan#Recoverable model configuration#Transactional route reads bypass cache]]
+  it("reads restored model bytes without waiting for the presentation cache", async () => {
+    const configPath = join(TEST_DIR, "config.yaml");
+    writeFileSync(
+      configPath,
+      [
+        "model:",
+        '  default: "attempted"',
+        '  provider: "custom:new"',
+        "",
+      ].join("\n"),
+    );
+
+    const { getModelConfig, getModelConfigFresh } =
+      await importConfigWithHome(TEST_DIR);
+    expect(getModelConfig().model).toBe("attempted");
+
+    writeFileSync(
+      configPath,
+      [
+        "model:",
+        '  default: "restored"',
+        '  provider: "custom:old"',
+        "",
+      ].join("\n"),
+    );
+
+    expect(getModelConfig().model).toBe("attempted");
+    expect(getModelConfigFresh()).toEqual({
+      provider: "custom:old",
+      model: "restored",
+      baseUrl: "",
+    });
+  });
 });
 
 describe("setModelConfig — scoped to model: block", () => {

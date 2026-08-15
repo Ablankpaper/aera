@@ -258,6 +258,10 @@ function invalidateCache(prefix: string): void {
   }
 }
 
+export function invalidateModelConfigCache(profile?: string): void {
+  invalidateCache(`mc:${profile || "default"}`);
+}
+
 /**
  * Drop all secrets-related cache entries (the parsed `env:*` views and the
  * resolved `apiServerKey:*` values, every profile). Call after a vault
@@ -798,6 +802,15 @@ export function getModelConfig(profile?: string): {
   return result;
 }
 
+export function getModelConfigFresh(profile?: string): {
+  provider: string;
+  model: string;
+  baseUrl: string;
+} {
+  invalidateModelConfigCache(profile);
+  return getModelConfig(profile);
+}
+
 /**
  * Read the active model's manual context-window override from config.yaml's
  * `model.context_length`, paired with the active `model.default` so callers can
@@ -1028,7 +1041,7 @@ export function setModelConfig(
   // re-detects the transport from the base URL.
   apiMode?: string | null,
 ): void {
-  invalidateCache(`mc:${profile || "default"}`);
+  invalidateModelConfigCache(profile);
   const { configFile } = profilePaths(profile);
 
   // Bootstrap an empty config.yaml when it's missing — previously this
