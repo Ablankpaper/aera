@@ -27,6 +27,7 @@ import {
   captureModelConfigurationFiles,
   persistModelConfigurationBackups,
   readModelConfigurationFileDigests,
+  removeModelConfigurationBackups,
   type ModelConfigurationFilePaths,
   ModelConfigurationOperationStore,
 } from "./model-configuration-operation-store";
@@ -282,6 +283,20 @@ function subject(
     ...overrides,
   };
   return new ModelConfigurationCoordinator(dependencies);
+}
+
+function writeAttemptedState(fixture: Fixture): void {
+  writeFileSync(fixture.paths.env, `NEW_KEY=${SECRET}\n`);
+  writeFileSync(
+    fixture.paths.providers,
+    '{"version":1,"providers":["new"]}\n',
+  );
+  writeFileSync(fixture.paths.models, '[{"model":"new-model"}]\n');
+  writeFileSync(
+    fixture.paths.modelDefinitions,
+    '{"new-model":{"name":"new"}}\n',
+  );
+  writeFileSync(fixture.paths.config, `route=${NEW_ROUTE}\n# keep me\r\n`);
 }
 
 afterEach(() => {
@@ -646,6 +661,67 @@ describe("ModelConfigurationCoordinator", () => {
     );
   });
 
+  // @lat: [[beta27-reliability-plan#Recoverable model configuration#Exact restored recovery row self-heals]]
+  it("finishes an exact before/old recovery-required row as rolled back", async () => {
+    const fixture = makeFixture();
+    const operationId = "10000000-0000-4000-8000-000000000102";
+    const snapshot = captureModelConfigurationFiles({
+      profileId: "account",
+      operationId,
+      paths: fixture.paths,
+    });
+    persistModelConfigurationBackups(snapshot);
+    fixture.store.begin({
+      operationId,
+      ownerHandle: OWNER,
+      profileId: "account",
+      oldRouteKey: OLD_ROUTE,
+      newRouteKey: NEW_ROUTE,
+      snapshot,
+    });
+    fixture.store.finish(operationId, "recovery_required");
+    removeModelConfigurationBackups(snapshot);
+
+    await subject(fixture).recoverIncompleteOperations();
+
+    expect(fixture.store.require(operationId).state).toBe("rolled_back");
+    expect(fixture.store.listIncomplete()).toEqual([]);
+  });
+
+  // @lat: [[beta27-reliability-plan#Recoverable model configuration#Exact committed recovery row self-heals]]
+  it("finishes an exact after/new recovery-required row as committed", async () => {
+    const fixture = makeFixture();
+    const operationId = "10000000-0000-4000-8000-000000000103";
+    const snapshot = captureModelConfigurationFiles({
+      profileId: "account",
+      operationId,
+      paths: fixture.paths,
+    });
+    persistModelConfigurationBackups(snapshot);
+    fixture.store.begin({
+      operationId,
+      ownerHandle: OWNER,
+      profileId: "account",
+      oldRouteKey: OLD_ROUTE,
+      newRouteKey: NEW_ROUTE,
+      snapshot,
+    });
+    writeAttemptedState(fixture);
+    fixture.store.advance({
+      operationId,
+      state: "verification",
+      stage: "verification",
+      afterDigests: readModelConfigurationFileDigests(fixture.paths),
+    });
+    fixture.store.finish(operationId, "recovery_required");
+    removeModelConfigurationBackups(snapshot);
+
+    await subject(fixture).recoverIncompleteOperations();
+
+    expect(fixture.store.require(operationId).state).toBe("committed");
+    expect(fixture.store.listIncomplete()).toEqual([]);
+  });
+
   it("blocks later mutations when recovery evidence is tampered", async () => {
     const fixture = makeFixture();
     const operationId = "10000000-0000-4000-8000-000000000101";
@@ -666,6 +742,7 @@ describe("ModelConfigurationCoordinator", () => {
     });
     writeFileSync(fixture.paths.config, `route=${NEW_ROUTE}\n`);
 
+    await subject(fixture).recoverIncompleteOperations();
     await subject(fixture).recoverIncompleteOperations();
 
     expect(fixture.store.listIncomplete()).toHaveLength(1);

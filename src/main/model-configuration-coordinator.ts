@@ -505,10 +505,6 @@ export class ModelConfigurationCoordinator {
     for (const record of records) {
       const lockKey = `${record.ownerHandle}\0${record.profileId}`;
       await this.withLock(lockKey, async () => {
-        if (record.state === "recovery_required") {
-          this.recoveryRequired.add(lockKey);
-          return;
-        }
         try {
           validateOwnerHandle(record.ownerHandle);
           validateProfileId(record.profileId);
@@ -529,6 +525,16 @@ export class ModelConfigurationCoordinator {
             activeRouteKey === record.newRouteKey
           ) {
             this.operationStore.finish(record.operationId, "committed");
+            await this.removeBackupsSafely(snapshot);
+            this.recoveryRequired.delete(lockKey);
+            return;
+          }
+
+          if (
+            digestsEqual(currentDigests, record.beforeDigests) &&
+            activeRouteKey === record.oldRouteKey
+          ) {
+            this.operationStore.finish(record.operationId, "rolled_back");
             await this.removeBackupsSafely(snapshot);
             this.recoveryRequired.delete(lockKey);
             return;
