@@ -1,4 +1,5 @@
 extends: electron-builder.yml
+beforePack: scripts/internal-beta/verify-built-auth-config.mjs
 
 # Windows internal-only packages and explicit local rehearsals remain unsigned.
 # The Windows workflow also sets CSC_IDENTITY_AUTO_DISCOVERY=false. The signed

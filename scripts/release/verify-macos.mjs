@@ -9,6 +9,11 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 
 import { canonicalJSONStringify, hashArtifact } from "./candidate-manifest.mjs";
+import {
+  resolveElectronAbi,
+  resolvePackagedNativeModule,
+  verifyNativeModuleAbi,
+} from "./native-module-abi.mjs";
 
 const execFileAsync = promisify(execFile);
 const UUID_PATTERN =
@@ -20,6 +25,7 @@ export async function verifyMacCandidate(options) {
   const zip = resolve(options.zip);
   const reference = resolve(options.runtimeSeedReference);
   const manifest = resolve(options.runtimeSeedManifest);
+  const projectDirectory = resolve(options.projectDirectory ?? process.cwd());
   const desktopVersion = required(options.desktopVersion, "desktop version");
   const notarizationMode = options.notarizationMode ?? "required";
   if (!new Set(["required", "deferred"]).has(notarizationMode)) {
@@ -50,17 +56,9 @@ export async function verifyMacCandidate(options) {
     await run("xcrun", ["stapler", "validate", dmg]);
   }
 
-  const nativeModule = join(
-    app,
-    "Contents",
-    "Resources",
-    "app.asar.unpacked",
-    "node_modules",
-    "better-sqlite3",
-    "build",
-    "Release",
-    "better_sqlite3.node",
-  );
+  const expectedElectronAbi = await resolveElectronAbi(projectDirectory);
+  const nativeModule = resolvePackagedNativeModule(app);
+  await verifyNativeModuleAbi(nativeModule, expectedElectronAbi);
   const architecture = await run("file", [nativeModule]);
   if (!/\barm64\b/u.test(architecture.stdout)) {
     throw new Error("macOS native module is not arm64");
@@ -75,7 +73,7 @@ export async function verifyMacCandidate(options) {
   try {
     await run("ditto", ["-x", "-k", zip, zipRoot]);
     const zipApp = await findApp(zipRoot);
-    await verifyDistributedApp(zipApp, notarizationMode);
+    await verifyDistributedApp(zipApp, notarizationMode, expectedElectronAbi);
     const zipSeed = join(
       zipApp,
       "Contents",
@@ -95,7 +93,7 @@ export async function verifyMacCandidate(options) {
     ]);
     mounted = true;
     const dmgApp = await findApp(mountRoot);
-    await verifyDistributedApp(dmgApp, notarizationMode);
+    await verifyDistributedApp(dmgApp, notarizationMode, expectedElectronAbi);
     const dmgSeed = join(
       dmgApp,
       "Contents",
@@ -204,8 +202,16 @@ async function findApp(root) {
   return join(root, apps[0].name);
 }
 
-async function verifyDistributedApp(app, notarizationMode) {
+async function verifyDistributedApp(
+  app,
+  notarizationMode,
+  expectedElectronAbi,
+) {
   await run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", app]);
+  await verifyNativeModuleAbi(
+    resolvePackagedNativeModule(app),
+    expectedElectronAbi,
+  );
   if (notarizationMode === "required") {
     await run("spctl", ["--assess", "--type", "execute", "--verbose=4", app]);
     await run("xcrun", ["stapler", "validate", app]);
@@ -283,6 +289,7 @@ if (
     desktopVersion: values.desktop_version,
     notarizationMode: values.notarization_mode,
     notarizationEvidence: values.notarization_evidence,
+    projectDirectory: values.project_directory,
   })
     .then(async (evidence) => {
       await writeFile(values.output, canonicalJSONStringify(evidence), {

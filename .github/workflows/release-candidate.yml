@@ -164,7 +164,9 @@ jobs:
         run: npm run prepare:runtime-seed -- --platform darwin --arch arm64
 
       - name: Rebuild native dependencies for arm64
-        run: npx electron-builder install-app-deps --arch=arm64
+        run: >-
+          npx electron-rebuild --force --only better-sqlite3
+          --version 41.10.5 --arch arm64 --build-from-source
 
       - name: Build Desktop
         env:
