@@ -167,10 +167,11 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
     ]);
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.30"/u);
-  assert.match(
-    raw,
-    /--release-notes "Beta\.30 修复异常模型配置事务导致后续保存被阻断的问题，并增加 better-sqlite3 与 Electron ABI 的构建前、应用包、DMG 和 ZIP 四层校验，避免原生模块不兼容包进入发布；Runtime 仍为 0\.20\.0-agentera\.2 签名候选，macOS 继续签名、公证和装订，Windows 提供内测包。"/u,
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.31"/u);
+  assert.ok(
+    raw.includes(
+      '--release-notes "Beta.31 修复 macOS 在线更新在下载完成后的打包模块兼容错误，并新增 app.asar updater 解压最终 ZIP 的发布门禁；Beta.29 和 Beta.30 的 macOS 用户需手动覆盖安装一次 Beta.31，之后恢复在线升级。Beta.30 的模型配置自愈修复继续保留；Runtime 仍为 0.20.0-agentera.2 签名候选，Windows 提供内测包。"',
+    ),
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
@@ -314,7 +315,7 @@ test("internal-Beta promotion publishes one verified candidate without rebuildin
   const raw = await readFile(promotionWorkflowPath, "utf8");
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.30"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.31"/u);
 
   assert.equal(workflow.name, "Promote Desktop internal Beta");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
