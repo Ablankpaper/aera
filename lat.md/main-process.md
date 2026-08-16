@@ -42,7 +42,11 @@ Lifecycle code owns Electron windows, global app events, and shutdown cleanup.
 
 The packaged renderer keeps its meta CSP aligned with the production response CSP so file-backed startup assets load consistently from `file://` before the main-process header can help.
 
-Because electron-vite emits a bundled main file at `out/main/index.js`, packaged renderer loading resolves `../renderer/index.html` from `__dirname` to reach `out/renderer/index.html`.
+### Packaged asset roots
+
+Packaged BrowserWindows resolve renderer and preload assets from Electron's application root so Rollup chunk layout cannot change their runtime paths.
+
+Electron-vite may emit lifecycle code directly in `out/main/index.js` or move it into a nested shared chunk when a second main-process entry is added. Renderer, primary preload, and askpass preload paths therefore anchor at `app.getAppPath()` and target their canonical `out/renderer` or `out/preload` locations instead of depending on the compiled module's `__dirname`.
 
 ## App Chrome Helpers
 

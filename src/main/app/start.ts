@@ -925,7 +925,7 @@ function openAgenteraAuthUrl(rawUrl: string, expectedOrigin: string): void {
 }
 
 function createWindow(): void {
-  const rendererHtmlPath = join(__dirname, "../renderer/index.html");
+  const rendererHtmlPath = join(app.getAppPath(), "out/renderer/index.html");
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 850,
@@ -940,7 +940,7 @@ function createWindow(): void {
       : {}),
     ...(process.platform === "linux" ? { icon } : {}),
     webPreferences: {
-      preload: join(__dirname, "../preload/index.js"),
+      preload: join(app.getAppPath(), "out/preload/index.js"),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,

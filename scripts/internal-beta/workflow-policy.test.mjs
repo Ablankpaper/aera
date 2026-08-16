@@ -167,10 +167,10 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
     ]);
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.31"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.32"/u);
   assert.ok(
     raw.includes(
-      '--release-notes "Beta.31 修复 macOS 在线更新在下载完成后的打包模块兼容错误，并新增 app.asar updater 解压最终 ZIP 的发布门禁；Beta.29 和 Beta.30 的 macOS 用户需手动覆盖安装一次 Beta.31，之后恢复在线升级。Beta.30 的模型配置自愈修复继续保留；Runtime 仍为 0.20.0-agentera.2 签名候选，Windows 提供内测包。"',
+      '--release-notes "Beta.32 修复 Beta.31 多入口打包将主进程启动代码移入 Rollup chunks 后，Renderer 和 Preload 路径失效导致 macOS 启动白屏的问题；Beta.31 用户需手动覆盖安装一次 Beta.32，之后恢复在线升级。Beta.31 的 macOS 更新解压修复与 Beta.30 的模型配置自愈继续保留；Runtime 仍为 0.20.0-agentera.2 签名候选，Windows 提供内测包。"',
     ),
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
@@ -315,7 +315,7 @@ test("internal-Beta promotion publishes one verified candidate without rebuildin
   const raw = await readFile(promotionWorkflowPath, "utf8");
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.31"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.32"/u);
 
   assert.equal(workflow.name, "Promote Desktop internal Beta");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [

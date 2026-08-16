@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, type IpcMainEvent } from "electron";
+import { app, BrowserWindow, ipcMain, type IpcMainEvent } from "electron";
 import { spawn } from "child_process";
 import { join } from "path";
 import { ASKPASS_SUBMIT_CHANNEL } from "../shared/askpass";
@@ -117,7 +117,7 @@ function showSudoDialog(parent: BrowserWindow | null): Promise<string | null> {
       title: "Administrator Password",
       alwaysOnTop: true,
       webPreferences: {
-        preload: join(__dirname, "../preload/askpass.js"),
+        preload: join(app.getAppPath(), "out/preload/askpass.js"),
         nodeIntegration: false,
         contextIsolation: true,
         sandbox: true,

@@ -35,11 +35,16 @@ describe("Electron main process hardening", () => {
     expect(menuSrc).toContain("toggleDevTools()");
   });
 
-  it("loads the packaged renderer next to the bundled main output", () => {
-    expect(mainSrc).toContain('join(__dirname, "../renderer/index.html")');
-    expect(mainSrc).not.toContain(
-      'join(__dirname, "../../renderer/index.html")',
+  it("anchors packaged startup assets to the app root across Rollup chunks", () => {
+    // @lat: [[lat.md/main-process#Main Process#App Lifecycle#Packaged asset roots]]
+    expect(mainSrc).toContain(
+      'join(app.getAppPath(), "out/renderer/index.html")',
     );
+    expect(mainSrc).toContain(
+      'preload: join(app.getAppPath(), "out/preload/index.js")',
+    );
+    expect(mainSrc).not.toContain('join(__dirname, "../renderer/index.html")');
+    expect(mainSrc).not.toContain('join(__dirname, "../preload/index.js")');
   });
 
   it("blocks untrusted top-level navigation and webview attachment", () => {

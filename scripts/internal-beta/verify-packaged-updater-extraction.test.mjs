@@ -12,7 +12,7 @@ import electronPath from "electron";
 
 import { validateExtractedMacApp } from "./verify-packaged-updater-extraction.mjs";
 
-const VERSION = "0.7.4-internal-beta.31";
+const VERSION = "0.7.4-internal-beta.32";
 const probePath = fileURLToPath(
   new URL("./packaged-updater-extraction-probe.cjs", import.meta.url),
 );
@@ -107,7 +107,7 @@ function commandRunner(options = {}) {
   };
 }
 
-test("accepts one signed arm64 Beta.31 app with app.asar", async () => {
+test("accepts one signed arm64 Beta.32 app with app.asar", async () => {
   const fixture = await createFixture();
   try {
     const app = await validateExtractedMacApp(

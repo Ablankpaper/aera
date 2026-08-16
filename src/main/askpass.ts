@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, type IpcMainEvent } from "electron";
+import { app, BrowserWindow, ipcMain, type IpcMainEvent } from "electron";
 import { mkdtempSync, writeFileSync, chmodSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -144,7 +144,7 @@ export async function showPasswordDialog(
       fullscreenable: false,
       title,
       webPreferences: {
-        preload: join(__dirname, "../preload/askpass.js"),
+        preload: join(app.getAppPath(), "out/preload/askpass.js"),
         nodeIntegration: false,
         contextIsolation: true,
         sandbox: true,
