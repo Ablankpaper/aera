@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,6 +10,7 @@ interface Entry {
   name: string;
   body: Buffer;
   mode: number;
+  type: "file" | "symlink";
 }
 
 const workspaces: string[] = [];
@@ -61,7 +62,8 @@ function zipBuffer(entries: Entry[]): Buffer {
     central.writeUInt32LE(body.length, 20);
     central.writeUInt32LE(body.length, 24);
     central.writeUInt16LE(name.length, 28);
-    central.writeUInt32LE(((0o120000 | entry.mode) << 16) >>> 0, 38);
+    const fileType = entry.type === "symlink" ? 0o120000 : 0o100000;
+    central.writeUInt32LE(((fileType | entry.mode) << 16) >>> 0, 38);
     central.writeUInt32LE(offset, 42);
     centrals.push(central, name);
     offset += local.length + name.length + body.length;
@@ -87,12 +89,46 @@ describe("safe ZIP extraction", () => {
     await writeFile(
       archive,
       zipBuffer([
-        { name: "link", body: Buffer.from("../outside"), mode: 0o755 },
+        {
+          name: "link",
+          body: Buffer.from("../outside"),
+          mode: 0o755,
+          type: "symlink",
+        },
       ]),
     );
 
     await expect(
       extractDesktopUpdateZip(archive, destination),
     ).rejects.toThrow();
+  });
+
+  it("extracts a valid archive through the production default extractor", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aera-safe-zip-test-"));
+    workspaces.push(root);
+    const archive = join(root, "valid.zip");
+    const destination = join(root, "destination");
+    await mkdir(destination);
+    await writeFile(
+      archive,
+      zipBuffer([
+        {
+          name: "Aera.app/Contents/Resources/app.asar",
+          body: Buffer.from("asar"),
+          mode: 0o644,
+          type: "file",
+        },
+      ]),
+    );
+
+    await expect(
+      extractDesktopUpdateZip(archive, destination),
+    ).resolves.toBeUndefined();
+    await expect(
+      readFile(
+        join(destination, "Aera.app", "Contents", "Resources", "app.asar"),
+        "utf8",
+      ),
+    ).resolves.toBe("asar");
   });
 });

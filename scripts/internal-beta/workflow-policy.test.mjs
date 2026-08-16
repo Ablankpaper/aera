@@ -37,6 +37,10 @@ const windowsVerifierPath = new URL(
   import.meta.url,
 );
 const macVerifierPath = new URL("../release/verify-macos.mjs", import.meta.url);
+const packagedUpdaterVerifierPath = new URL(
+  "./verify-packaged-updater-extraction.mjs",
+  import.meta.url,
+);
 const execFileAsync = promisify(execFile);
 const sourceSha = "a".repeat(40);
 
@@ -154,17 +158,20 @@ test("candidate CI validators reject a missing required platform", async () => {
 });
 
 test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublished, and Sigstore-bound", async () => {
-  const [raw, productionRaw, macVerifierRaw] = await Promise.all([
-    readFile(workflowPath, "utf8"),
-    readFile(productionCandidatePath, "utf8"),
-    readFile(macVerifierPath, "utf8"),
-  ]);
+  const [raw, productionRaw, macVerifierRaw, packagedUpdaterVerifierRaw] =
+    await Promise.all([
+      readFile(workflowPath, "utf8"),
+      readFile(productionCandidatePath, "utf8"),
+      readFile(macVerifierPath, "utf8"),
+      readFile(packagedUpdaterVerifierPath, "utf8"),
+    ]);
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.30"/u);
-  assert.match(
-    raw,
-    /--release-notes "Beta\.30 修复异常模型配置事务导致后续保存被阻断的问题，并增加 better-sqlite3 与 Electron ABI 的构建前、应用包、DMG 和 ZIP 四层校验，避免原生模块不兼容包进入发布；Runtime 仍为 0\.20\.0-agentera\.2 签名候选，macOS 继续签名、公证和装订，Windows 提供内测包。"/u,
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.31"/u);
+  assert.ok(
+    raw.includes(
+      '--release-notes "Beta.31 修复 macOS 在线更新在下载完成后的打包模块兼容错误，并新增 app.asar updater 解压最终 ZIP 的发布门禁；Beta.29 和 Beta.30 的 macOS 用户需手动覆盖安装一次 Beta.31，之后恢复在线升级。Beta.30 的模型配置自愈修复继续保留；Runtime 仍为 0.20.0-agentera.2 签名候选，Windows 提供内测包。"',
+    ),
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
@@ -238,6 +245,22 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
     /npx electron-rebuild --force --only better-sqlite3\s+--version 41\.10\.5 --arch arm64 --build-from-source/u,
   );
   assert.match(raw, /--prepackaged "\$APP_PATH"/u);
+  const packagedUpdaterGateIndex = workflow.jobs.macos.steps.findIndex(
+    (step) => step.name === "Exercise packaged updater against final macOS ZIP",
+  );
+  const containerSubmissionIndex = workflow.jobs.macos.steps.findIndex(
+    (step) => step.name === "Submit final DMG and ZIP exactly once",
+  );
+  assert.ok(packagedUpdaterGateIndex >= 0);
+  assert.ok(packagedUpdaterGateIndex < containerSubmissionIndex);
+  assert.match(
+    workflow.jobs.macos.steps[packagedUpdaterGateIndex].run,
+    /node scripts\/internal-beta\/verify-packaged-updater-extraction\.mjs\s+--app "\$\{\{ steps\.mac_paths\.outputs\.app \}\}"\s+--zip "\$\{\{ steps\.mac_paths\.outputs\.zip \}\}"\s+--desktop-version "\$VERSION"/u,
+  );
+  assert.match(
+    packagedUpdaterVerifierRaw,
+    /AERA_PACKAGED_UPDATER_EXTRACTION_OK/u,
+  );
   assert.match(raw, /xcrun notarytool submit[\s\S]*--no-wait/iu);
   assert.match(raw, /xcrun notarytool wait/iu);
   assert.match(
@@ -292,7 +315,7 @@ test("internal-Beta promotion publishes one verified candidate without rebuildin
   const raw = await readFile(promotionWorkflowPath, "utf8");
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.30"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.31"/u);
 
   assert.equal(workflow.name, "Promote Desktop internal Beta");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [

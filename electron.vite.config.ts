@@ -10,6 +10,12 @@ export default defineConfig({
     build: {
       rollupOptions: {
         external: ["better-sqlite3"],
+        input: {
+          index: resolve("src/main/index.ts"),
+          "internal-beta-updater": resolve(
+            "src/main/app/internal-beta-updater.ts",
+          ),
+        },
       },
     },
   },

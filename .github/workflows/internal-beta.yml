@@ -59,7 +59,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain=v1)"
           VERSION=$(node -p "require('./package.json').version")
-          test "$VERSION" = "0.7.4-internal-beta.30"
+          test "$VERSION" = "0.7.4-internal-beta.31"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Verify successful CI belongs to the exact source
@@ -354,6 +354,16 @@ jobs:
           echo "zip=$ZIP_PATH" >> "$GITHUB_OUTPUT"
           echo "runtime_manifest=${{ steps.app_paths.outputs.runtime_manifest }}" \
             >> "$GITHUB_OUTPUT"
+
+      - name: Exercise packaged updater against final macOS ZIP
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: >-
+          node scripts/internal-beta/verify-packaged-updater-extraction.mjs
+          --app "${{ steps.mac_paths.outputs.app }}"
+          --zip "${{ steps.mac_paths.outputs.zip }}"
+          --desktop-version "$VERSION"
 
       - name: Submit final DMG and ZIP exactly once
         id: container_notary
@@ -766,7 +776,7 @@ jobs:
             --manifest candidate/desktop-update/manifest.json \
             --private-key-env DESKTOP_UPDATE_SIGNING_PRIVATE_KEY \
             --published-at "$CREATED_AT" \
-            --release-notes "Beta.30 修复异常模型配置事务导致后续保存被阻断的问题，并增加 better-sqlite3 与 Electron ABI 的构建前、应用包、DMG 和 ZIP 四层校验，避免原生模块不兼容包进入发布；Runtime 仍为 0.20.0-agentera.2 签名候选，macOS 继续签名、公证和装订，Windows 提供内测包。" \
+            --release-notes "Beta.31 修复 macOS 在线更新在下载完成后的打包模块兼容错误，并新增 app.asar updater 解压最终 ZIP 的发布门禁；Beta.29 和 Beta.30 的 macOS 用户需手动覆盖安装一次 Beta.31，之后恢复在线升级。Beta.30 的模型配置自愈修复继续保留；Runtime 仍为 0.20.0-agentera.2 签名候选，Windows 提供内测包。" \
             --signature candidate/desktop-update/manifest.sig \
             --version "$VERSION"
           node scripts/internal-beta/desktop-update.mjs verify \
