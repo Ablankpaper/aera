@@ -23,7 +23,7 @@ const electronViteConfigSrc = readFileSync(
 describe("askpass Electron hardening", () => {
   it("keeps the password dialog renderer isolated from Node privileges", () => {
     expect(askpassMainSrc).toContain(
-      'preload: join(__dirname, "../preload/askpass.js")',
+      'preload: join(app.getAppPath(), "out/preload/askpass.js")',
     );
     expect(askpassMainSrc).toContain("nodeIntegration: false");
     expect(askpassMainSrc).toContain("contextIsolation: true");
@@ -37,7 +37,7 @@ describe("askpass Electron hardening", () => {
 
   it("keeps the sudo precache dialog isolated from Node privileges", () => {
     expect(sudoCredsSrc).toContain(
-      'preload: join(__dirname, "../preload/askpass.js")',
+      'preload: join(app.getAppPath(), "out/preload/askpass.js")',
     );
     expect(sudoCredsSrc).toContain("nodeIntegration: false");
     expect(sudoCredsSrc).toContain("contextIsolation: true");
