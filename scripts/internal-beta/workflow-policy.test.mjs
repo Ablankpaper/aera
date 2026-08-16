@@ -37,6 +37,10 @@ const windowsVerifierPath = new URL(
   import.meta.url,
 );
 const macVerifierPath = new URL("../release/verify-macos.mjs", import.meta.url);
+const packagedUpdaterVerifierPath = new URL(
+  "./verify-packaged-updater-extraction.mjs",
+  import.meta.url,
+);
 const execFileAsync = promisify(execFile);
 const sourceSha = "a".repeat(40);
 
@@ -154,11 +158,13 @@ test("candidate CI validators reject a missing required platform", async () => {
 });
 
 test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublished, and Sigstore-bound", async () => {
-  const [raw, productionRaw, macVerifierRaw] = await Promise.all([
-    readFile(workflowPath, "utf8"),
-    readFile(productionCandidatePath, "utf8"),
-    readFile(macVerifierPath, "utf8"),
-  ]);
+  const [raw, productionRaw, macVerifierRaw, packagedUpdaterVerifierRaw] =
+    await Promise.all([
+      readFile(workflowPath, "utf8"),
+      readFile(productionCandidatePath, "utf8"),
+      readFile(macVerifierPath, "utf8"),
+      readFile(packagedUpdaterVerifierPath, "utf8"),
+    ]);
   const workflow = parseYAML(raw);
 
   assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.30"/u);
@@ -238,6 +244,22 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
     /npx electron-rebuild --force --only better-sqlite3\s+--version 41\.10\.5 --arch arm64 --build-from-source/u,
   );
   assert.match(raw, /--prepackaged "\$APP_PATH"/u);
+  const packagedUpdaterGateIndex = workflow.jobs.macos.steps.findIndex(
+    (step) => step.name === "Exercise packaged updater against final macOS ZIP",
+  );
+  const containerSubmissionIndex = workflow.jobs.macos.steps.findIndex(
+    (step) => step.name === "Submit final DMG and ZIP exactly once",
+  );
+  assert.ok(packagedUpdaterGateIndex >= 0);
+  assert.ok(packagedUpdaterGateIndex < containerSubmissionIndex);
+  assert.match(
+    workflow.jobs.macos.steps[packagedUpdaterGateIndex].run,
+    /node scripts\/internal-beta\/verify-packaged-updater-extraction\.mjs\s+--app "\$\{\{ steps\.mac_paths\.outputs\.app \}\}"\s+--zip "\$\{\{ steps\.mac_paths\.outputs\.zip \}\}"\s+--desktop-version "\$VERSION"/u,
+  );
+  assert.match(
+    packagedUpdaterVerifierRaw,
+    /AERA_PACKAGED_UPDATER_EXTRACTION_OK/u,
+  );
   assert.match(raw, /xcrun notarytool submit[\s\S]*--no-wait/iu);
   assert.match(raw, /xcrun notarytool wait/iu);
   assert.match(
