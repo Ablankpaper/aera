@@ -140,6 +140,44 @@ test("internal-Beta packaging accepts the exact baked Cloud and trust pair", asy
   }
 });
 
+test("internal-Beta packaging accepts baked auth config from a nested main chunk", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aera-beta-auth-build-"));
+  const mainDirectory = join(root, "out", "main");
+  const chunksDirectory = join(mainDirectory, "chunks");
+  await mkdir(chunksDirectory, { recursive: true });
+  await Promise.all([
+    writeFile(
+      join(mainDirectory, "internal-beta-updater.js"),
+      'export { startInternalBetaUpdate } from "./chunks/start.js";\n',
+      "utf8",
+    ),
+    writeFile(
+      join(chunksDirectory, "start.js"),
+      `const BUNDLED_AGENTERA_OFFLINE_PUBLIC_KEYS = resolveBundledAgenteraOfflinePublicKeys({
+      buildOfflinePublicKeysJson: '{"issuer":"${testOrigin}","keys":[{"keyId":"offline-internal-beta-v1","publicKey":"${testPublicKey}"}]}',
+      buildPublicUrl: "${testOrigin}"
+    });
+    function getAgenteraCloudOrigin() {
+      return resolveAgenteraCloudOrigin({
+        runtimePublicUrl: process.env.AGENTERA_CLOUD_PUBLIC_URL,
+        buildPublicUrl: "${testOrigin}"?.trim(),
+      });
+}\n`,
+      "utf8",
+    ),
+  ]);
+
+  try {
+    const result = spawnSync(process.execPath, [verifierPath, mainDirectory], {
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, "");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("internal-Beta packaging rejects a native module built for a different Electron ABI", async () => {
   const root = await mkdtemp(join(tmpdir(), "aera-beta-native-build-"));
   const mainDirectory = join(root, "out", "main");
