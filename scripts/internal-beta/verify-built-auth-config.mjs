@@ -12,6 +12,23 @@ import {
   verifyNativeModuleAbi,
 } from "../release/native-module-abi.mjs";
 
+async function readJavaScriptSources(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const sourceGroups = await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        return readJavaScriptSources(entryPath);
+      }
+      if (entry.isFile() && entry.name.endsWith(".js")) {
+        return [await readFile(entryPath, "utf8")];
+      }
+      return [];
+    }),
+  );
+  return sourceGroups.flat();
+}
+
 function parseBakedOfflineTrust(sources) {
   const match = sources
     .join("\n")
@@ -46,12 +63,7 @@ function parseBakedOfflineTrust(sources) {
 }
 
 export async function verifyBuiltAuthConfig(mainDirectory, options = {}) {
-  const entries = await readdir(mainDirectory, { withFileTypes: true });
-  const sources = await Promise.all(
-    entries
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".js"))
-      .map((entry) => readFile(resolve(mainDirectory, entry.name), "utf8")),
-  );
+  const sources = await readJavaScriptSources(mainDirectory);
   const cloudResolver = sources
     .map(
       (source) =>
