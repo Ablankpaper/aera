@@ -21,7 +21,7 @@ import { execFile as execFileCallback, spawn } from "node:child_process";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
-import extractZip from "@electron-internal/extract-zip";
+import { extract as extractZip } from "@electron-internal/extract-zip";
 
 import {
   canonicalJsonBytes,

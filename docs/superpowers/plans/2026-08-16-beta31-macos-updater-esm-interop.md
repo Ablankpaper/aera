@@ -63,7 +63,7 @@ test("the packaged updater entry binds the extractor named export", async () => 
 
   assert.match(
     config,
-    /["']internal-beta-updater["']:\s*resolve\(\s*["']src\/main\/app\/internal-beta-updater\.ts["']\s*\)/u,
+    /["']internal-beta-updater["']:\s*resolve\(\s*["']src\/main\/app\/internal-beta-updater\.ts["']\s*,?\s*\)/u,
   );
   assert.match(
     updater,
