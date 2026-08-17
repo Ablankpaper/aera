@@ -11,7 +11,13 @@ export interface TerminateProcessTreeOptions extends KillProcessTreeOptions {
   pollIntervalMs?: number;
   forceSettleMs?: number;
   snapshotTimeoutMs?: number;
+  /** Total budget shared by the bounded Windows initial-snapshot attempts. */
+  snapshotTotalBudgetMs?: number;
   commandTimeoutMs?: number;
+  /** Stable, non-secret Profile label included in Windows diagnostics. */
+  diagnosticProfileKey?: string;
+  /** Deterministic diagnostic seam used by focused lifecycle tests. */
+  onDiagnostic?: (diagnostic: ProcessTreeTerminationDiagnostic) => void;
   /** Deterministic process seams used by focused lifecycle tests. */
   operations?: Partial<ProcessTreeTerminationOperations>;
 }
@@ -34,7 +40,38 @@ export interface ProcessSnapshotRequest {
   rootPid: number;
   candidatePids?: readonly number[];
   timeoutMs: number;
+  phase?: ProcessTreeDiagnosticPhase;
+  attempt?: number;
+  strategy?: WindowsSnapshotStrategy;
+  profileKey?: string;
+  onDiagnostic?: (diagnostic: ProcessTreeTerminationDiagnostic) => void;
 }
+
+export type ProcessTreeDiagnosticPhase =
+  | "initial-snapshot"
+  | "identity-refresh"
+  | "final-snapshot"
+  | "graceful-taskkill"
+  | "force-taskkill";
+
+export type ProcessTreeDiagnosticOutcome =
+  | "captured"
+  | "success"
+  | "timeout"
+  | "error"
+  | "invalid"
+  | "failed";
+
+export interface ProcessTreeTerminationDiagnostic {
+  phase: ProcessTreeDiagnosticPhase;
+  attempt: number;
+  elapsedMs: number;
+  outcome: ProcessTreeDiagnosticOutcome;
+  profileKey: string;
+  rootPid: number;
+}
+
+type WindowsSnapshotStrategy = "cim" | "wmi";
 
 export interface ProcessTreeTerminationOperations {
   captureSnapshot(
@@ -133,6 +170,53 @@ const DEFAULT_SNAPSHOT_TIMEOUT_MS = 750;
 const DEFAULT_COMMAND_TIMEOUT_MS = 750;
 const MAX_PROCESS_SNAPSHOT_BYTES = 8 * 1024 * 1024;
 
+function sanitizeDiagnosticProfileKey(value: string | undefined): string {
+  const normalized = (value ?? "unknown")
+    .replace(/[^A-Za-z0-9._-]/g, "_")
+    .slice(0, 64);
+  return normalized || "unknown";
+}
+
+function emitDiagnostic(
+  request: Pick<
+    ProcessSnapshotRequest,
+    "rootPid" | "phase" | "attempt" | "profileKey" | "onDiagnostic"
+  >,
+  elapsedMs: number,
+  outcome: ProcessTreeDiagnosticOutcome,
+): void {
+  if (!request.phase) return;
+  const diagnostic: ProcessTreeTerminationDiagnostic = {
+    phase: request.phase,
+    attempt: Math.max(1, request.attempt ?? 1),
+    elapsedMs: Math.max(0, Math.round(elapsedMs)),
+    outcome,
+    profileKey: sanitizeDiagnosticProfileKey(request.profileKey),
+    rootPid: request.rootPid,
+  };
+  const serialized = JSON.stringify(diagnostic);
+  try {
+    request.onDiagnostic?.({ ...diagnostic });
+  } catch {
+    // Diagnostics must never change the fail-closed process lifecycle.
+  }
+  if (process.env.AERA_PROCESS_TREE_DIAGNOSTICS === "1") {
+    console.error(`[AERA_PROCESS_TREE_DIAGNOSTIC] ${serialized}`);
+  }
+}
+
+function emitWindowsTerminationDiagnostic(
+  request: Pick<
+    ProcessSnapshotRequest,
+    "rootPid" | "phase" | "attempt" | "profileKey" | "onDiagnostic"
+  >,
+  elapsedMs: number,
+  outcome: ProcessTreeDiagnosticOutcome,
+): void {
+  if (process.platform !== "win32") return;
+  emitDiagnostic(request, elapsedMs, outcome);
+}
+
 function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -163,11 +247,16 @@ function withTimeout<T>(
   });
 }
 
-function execFileText(
+interface ExecFileTextResult {
+  output: string | null;
+  outcome: "success" | "timeout" | "error";
+}
+
+function execFileTextDetailed(
   command: string,
   args: readonly string[],
   timeoutMs: number,
-): Promise<string | null> {
+): Promise<ExecFileTextResult> {
   return new Promise((resolve) => {
     execFile(
       command,
@@ -180,13 +269,33 @@ function execFileText(
       },
       (error, stdout) => {
         if (error) {
-          resolve(null);
+          const details = error as NodeJS.ErrnoException & { killed?: boolean };
+          resolve({
+            output: null,
+            outcome:
+              details.killed === true || details.code === "ETIMEDOUT"
+                ? "timeout"
+                : "error",
+          });
           return;
         }
-        resolve(typeof stdout === "string" ? stdout : String(stdout));
+        resolve({
+          output: typeof stdout === "string" ? stdout : String(stdout),
+          outcome: "success",
+        });
       },
     );
   });
+}
+
+function execFileText(
+  command: string,
+  args: readonly string[],
+  timeoutMs: number,
+): Promise<string | null> {
+  return execFileTextDetailed(command, args, timeoutMs).then(
+    ({ output }) => output,
+  );
 }
 
 function treePidsFromRows(
@@ -228,9 +337,17 @@ export function parseWindowsSnapshot(
   } catch {
     return null;
   }
+  if (
+    parsed === null ||
+    (typeof parsed !== "object" && !Array.isArray(parsed))
+  ) {
+    return null;
+  }
   const rows = Array.isArray(parsed) ? parsed : [parsed];
-  return rows.flatMap((row): ProcessSnapshotRecord[] => {
-    if (!row || typeof row !== "object" || Array.isArray(row)) return [];
+  const records: ProcessSnapshotRecord[] = [];
+  const seenPids = new Set<number>();
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return null;
     const value = row as Record<string, unknown>;
     const pid = Number(value.ProcessId);
     const parentPid = Number(value.ParentProcessId);
@@ -241,16 +358,17 @@ export function parseWindowsSnapshot(
       !Number.isSafeInteger(parentPid) ||
       parentPid < 0
     ) {
-      return [];
+      return null;
     }
-    return [
-      {
-        pid,
-        parentPid,
-        identity: identity === null ? "" : `windows:${identity}`,
-      },
-    ];
-  });
+    if (seenPids.has(pid)) return null;
+    seenPids.add(pid);
+    records.push({
+      pid,
+      parentPid,
+      identity: identity === null ? "" : `windows:${identity}`,
+    });
+  }
+  return records;
 }
 
 export function buildWindowsSnapshotScript(
@@ -259,10 +377,17 @@ export function buildWindowsSnapshotScript(
   if (!Number.isSafeInteger(request.rootPid) || request.rootPid <= 0) {
     return null;
   }
+  const strategy: WindowsSnapshotStrategy = request.strategy ?? "cim";
+  const processQuery =
+    strategy === "wmi"
+      ? "Get-WmiObject -Class Win32_Process"
+      : "Get-CimInstance Win32_Process";
   const projection =
     "Select-Object ProcessId,ParentProcessId," +
     "@{Name='CreationFileTimeUtc';Expression={" +
-    "$_.CreationDate.ToFileTimeUtc().ToString(" +
+    (strategy === "wmi"
+      ? "[System.Management.ManagementDateTimeConverter]::ToDateTime([string]$_.CreationDate).ToUniversalTime().ToFileTimeUtc().ToString("
+      : "$_.CreationDate.ToFileTimeUtc().ToString(") +
     "[Globalization.CultureInfo]::InvariantCulture)}}";
   const serialize =
     "if ($rows.Count -eq 0) { Write-Output '[]' } else { " +
@@ -285,7 +410,7 @@ export function buildWindowsSnapshotScript(
       .join(" OR ");
     return (
       "$ErrorActionPreference='Stop'; " +
-      "$rows = @(Get-CimInstance Win32_Process " +
+      `$rows = @(${processQuery} ` +
       `-Filter '${filter}' ` +
       "-Property ProcessId,ParentProcessId,CreationDate); " +
       serialize
@@ -301,7 +426,7 @@ export function buildWindowsSnapshotScript(
     "while ($queue.Count -gt 0) { " +
     "$currentProcessId = $queue.Dequeue(); " +
     "$filter = ('ProcessId = {0} OR ParentProcessId = {0}' -f $currentProcessId); " +
-    "foreach ($process in @(Get-CimInstance Win32_Process " +
+    `foreach ($process in @(${processQuery} ` +
     "-Filter $filter -Property ProcessId,ParentProcessId,CreationDate)) { " +
     "$processId = [uint32]$process.ProcessId; " +
     "if ($seen.Add($processId)) { " +
@@ -312,22 +437,45 @@ export function buildWindowsSnapshotScript(
   );
 }
 
-async function captureWindowsSnapshot(
+export async function captureWindowsSnapshot(
   request: ProcessSnapshotRequest,
 ): Promise<readonly ProcessSnapshotRecord[] | null> {
+  const startedAt = Date.now();
   const script = buildWindowsSnapshotScript(request);
-  if (script === null) return null;
-  const output = await execFileText(
+  if (script === null) {
+    emitDiagnostic(request, Date.now() - startedAt, "invalid");
+    return null;
+  }
+  const command = await execFileTextDetailed(
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-Command", script],
     request.timeoutMs,
   );
-  if (output === null) return null;
-  const records = parseWindowsSnapshot(output);
-  if (records === null) return null;
-  if (!request.candidatePids) return records;
-  const candidates = new Set(request.candidatePids);
-  return records.filter((record) => candidates.has(record.pid));
+  if (command.output === null) {
+    emitDiagnostic(request, Date.now() - startedAt, command.outcome);
+    return null;
+  }
+  const records = parseWindowsSnapshot(command.output);
+  if (records === null) {
+    emitDiagnostic(request, Date.now() - startedAt, "invalid");
+    return null;
+  }
+  const candidates = request.candidatePids
+    ? new Set(request.candidatePids)
+    : null;
+  const result = candidates
+    ? records.filter((record) => candidates.has(record.pid))
+    : records;
+  if (result.length === 0) {
+    emitDiagnostic(request, Date.now() - startedAt, "invalid");
+    return null;
+  }
+  if (result.some((record) => !record.identity.trim())) {
+    emitDiagnostic(request, Date.now() - startedAt, "invalid");
+    return null;
+  }
+  emitDiagnostic(request, Date.now() - startedAt, "captured");
+  return result;
 }
 
 export async function captureProcessSnapshot(
@@ -775,6 +923,13 @@ export async function terminateProcessTree(
     1,
     options.snapshotTimeoutMs ?? DEFAULT_SNAPSHOT_TIMEOUT_MS,
   );
+  const snapshotTotalBudgetMs = Math.max(
+    1,
+    Math.min(
+      options.snapshotTotalBudgetMs ?? snapshotTimeoutMs * 2,
+      snapshotTimeoutMs * 2,
+    ),
+  );
   const commandTimeoutMs = Math.max(
     1,
     options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
@@ -792,23 +947,38 @@ export async function terminateProcessTree(
     );
   }
 
-  let initialSnapshot = await captureForPhase(
-    {
-      rootPid,
-      timeoutMs: snapshotTimeoutMs,
-    },
-    operations,
-    customOperations,
-  );
-  if (initialSnapshot === null && process.platform === "win32") {
-    initialSnapshot = await captureForPhase(
+  const initialSnapshotDeadline =
+    Date.now() +
+    (process.platform === "win32" ? snapshotTotalBudgetMs : snapshotTimeoutMs);
+  const captureInitialSnapshot = async (
+    attempt: number,
+    strategy: WindowsSnapshotStrategy,
+  ): Promise<readonly ProcessSnapshotRecord[] | null> => {
+    const remainingBudget = initialSnapshotDeadline - Date.now();
+    if (remainingBudget <= 0) return null;
+    return captureForPhase(
       {
         rootPid,
-        timeoutMs: snapshotTimeoutMs,
+        timeoutMs: Math.max(1, Math.min(snapshotTimeoutMs, remainingBudget)),
+        phase: "initial-snapshot",
+        attempt,
+        strategy,
+        profileKey: options.diagnosticProfileKey,
+        onDiagnostic: options.onDiagnostic,
       },
       operations,
       customOperations,
     );
+  };
+  let initialSnapshot = await captureInitialSnapshot(1, "cim");
+  const primaryTree = initialSnapshot
+    ? buildCapturedProcessTree(initialSnapshot, rootPid)
+    : null;
+  if (
+    process.platform === "win32" &&
+    (initialSnapshot == null || primaryTree === null)
+  ) {
+    initialSnapshot = await captureInitialSnapshot(2, "wmi");
   }
   const capturedTree = initialSnapshot
     ? buildCapturedProcessTree(initialSnapshot, rootPid)
@@ -832,10 +1002,33 @@ export async function terminateProcessTree(
 
   let windowsTreeSignalled = false;
   if (process.platform === "win32" && rootAlive) {
+    const gracefulStartedAt = Date.now();
     try {
       await operations.gracefulWindowsTree(rootPid, commandTimeoutMs);
       windowsTreeSignalled = true;
+      emitWindowsTerminationDiagnostic(
+        {
+          rootPid,
+          phase: "graceful-taskkill",
+          attempt: 1,
+          profileKey: options.diagnosticProfileKey,
+          onDiagnostic: options.onDiagnostic,
+        },
+        Date.now() - gracefulStartedAt,
+        "success",
+      );
     } catch {
+      emitWindowsTerminationDiagnostic(
+        {
+          rootPid,
+          phase: "graceful-taskkill",
+          attempt: 1,
+          profileKey: options.diagnosticProfileKey,
+          onDiagnostic: options.onDiagnostic,
+        },
+        Date.now() - gracefulStartedAt,
+        "failed",
+      );
       // Fall through to exact captured PID signalling.
     }
   }
@@ -866,6 +1059,11 @@ export async function terminateProcessTree(
       rootPid,
       candidatePids: remaining,
       timeoutMs: snapshotTimeoutMs,
+      phase: "identity-refresh",
+      attempt: 1,
+      strategy: "cim",
+      profileKey: options.diagnosticProfileKey,
+      onDiagnostic: options.onDiagnostic,
     },
     operations,
     customOperations,
@@ -893,11 +1091,34 @@ export async function terminateProcessTree(
       verifiedSet.has(rootPid) &&
       childProcessIsAlive(proc, operations.pidIsAlive)
     ) {
+      const forceStartedAt = Date.now();
       try {
         await operations.forceWindowsTree(rootPid, commandTimeoutMs);
         forced = true;
         for (const pid of verifiedRemaining) forcedPids.add(pid);
+        emitWindowsTerminationDiagnostic(
+          {
+            rootPid,
+            phase: "force-taskkill",
+            attempt: 1,
+            profileKey: options.diagnosticProfileKey,
+            onDiagnostic: options.onDiagnostic,
+          },
+          Date.now() - forceStartedAt,
+          "success",
+        );
       } catch {
+        emitWindowsTerminationDiagnostic(
+          {
+            rootPid,
+            phase: "force-taskkill",
+            attempt: 1,
+            profileKey: options.diagnosticProfileKey,
+            onDiagnostic: options.onDiagnostic,
+          },
+          Date.now() - forceStartedAt,
+          "failed",
+        );
         if (
           verifiedSet.has(rootPid) &&
           childProcessIsAlive(proc, operations.pidIsAlive)
@@ -947,6 +1168,11 @@ export async function terminateProcessTree(
       rootPid,
       candidatePids: remaining,
       timeoutMs: snapshotTimeoutMs,
+      phase: "final-snapshot",
+      attempt: 1,
+      strategy: "cim",
+      profileKey: options.diagnosticProfileKey,
+      onDiagnostic: options.onDiagnostic,
     },
     operations,
     customOperations,

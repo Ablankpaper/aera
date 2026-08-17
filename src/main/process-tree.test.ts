@@ -611,6 +611,54 @@ describe("terminateProcessTree", () => {
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
+  it("uses the explicit Windows fallback when the primary tree is incomplete", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
+    const alive = new Set([100]);
+    const root = fakeChildProcess(100, alive);
+    const captureSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce([{ pid: 100, parentPid: 1, identity: "" }])
+      .mockResolvedValueOnce([
+        { pid: 100, parentPid: 1, identity: "windows:root-start" },
+      ]);
+    const requests: Array<{ attempt?: number; strategy?: string }> = [];
+    const gracefulWindowsTree = vi.fn(() => {
+      alive.delete(100);
+      Object.defineProperty(root.child, "exitCode", {
+        configurable: true,
+        value: 0,
+      });
+    });
+
+    try {
+      const result = await terminateProcessTree(root.child, {
+        detachedProcessGroup: false,
+        forceAfterMs: 0,
+        diagnosticProfileKey: "work",
+        operations: {
+          captureSnapshot: (request) => {
+            requests.push(request);
+            return captureSnapshot(request);
+          },
+          gracefulWindowsTree,
+          pidIsAlive: (pid) => alive.has(pid),
+        } as never,
+      });
+
+      expect(requests).toEqual([
+        expect.objectContaining({ attempt: 1, strategy: "cim" }),
+        expect.objectContaining({ attempt: 2, strategy: "wmi" }),
+      ]);
+      expect(gracefulWindowsTree).toHaveBeenCalledOnce();
+      expect(result).toEqual({ forced: false, remainingPids: [] });
+    } finally {
+      platform.mockRestore();
+    }
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
   it("fails closed when the captured root has no usable identity", async () => {
     const alive = new Set([100]);
     const root = fakeChildProcess(100, alive);
@@ -660,27 +708,53 @@ describe("terminateProcessTree", () => {
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
-  it("bounds two hanging Windows ownership snapshots and never falls back to PID-only force", async () => {
+  it("shares one deadline across hanging Windows snapshot attempts and never falls back to PID-only force", async () => {
     const platform = vi
       .spyOn(process, "platform", "get")
       .mockReturnValue("win32");
     vi.useFakeTimers();
     const alive = new Set([100]);
     const root = fakeChildProcess(100, alive);
-    const captureSnapshot = vi.fn(() => new Promise<never>(() => undefined));
+    const requests: Array<{
+      attempt?: number;
+      strategy?: string;
+      timeoutMs: number;
+    }> = [];
+    const captureSnapshot = vi.fn(
+      (request: { attempt?: number; strategy?: string; timeoutMs: number }) => {
+        requests.push(request);
+        return new Promise<never>(() => undefined);
+      },
+    );
     const signalPid = vi.fn();
     const stopping = terminateProcessTree(root.child, {
       detachedProcessGroup: false,
       snapshotTimeoutMs: 25,
+      snapshotTotalBudgetMs: 40,
       operations: {
         captureSnapshot,
         pidIsAlive: (pid) => alive.has(pid),
         signalPid,
       } as never,
-    });
+    } as never);
 
     try {
-      await vi.advanceTimersByTimeAsync(50);
+      await vi.advanceTimersByTimeAsync(39);
+      expect(captureSnapshot).toHaveBeenCalledTimes(2);
+      expect(requests).toEqual([
+        expect.objectContaining({
+          attempt: 1,
+          strategy: "cim",
+          timeoutMs: 25,
+        }),
+        expect.objectContaining({
+          attempt: 2,
+          strategy: "wmi",
+          timeoutMs: 15,
+        }),
+      ]);
+
+      await vi.advanceTimersByTimeAsync(1);
       await expect(stopping).resolves.toEqual({
         forced: false,
         remainingPids: [100],
@@ -935,6 +1009,17 @@ describe("terminateProcessTree", () => {
       "-Filter 'ProcessId = 456 OR ProcessId = 789'",
     );
     expect(candidateScript).not.toContain("ParentProcessId = {0}");
+
+    const fallbackTreeScript = buildWindowsSnapshotScript?.({
+      rootPid: 456,
+      timeoutMs: 3_000,
+      strategy: "wmi",
+    } as never);
+    expect(fallbackTreeScript).toContain("Get-WmiObject -Class Win32_Process");
+    expect(fallbackTreeScript).toContain(
+      "ManagementDateTimeConverter]::ToDateTime",
+    );
+    expect(fallbackTreeScript).not.toContain("Get-CimInstance");
   });
 
   it("parses invariant Windows process identities", () => {

@@ -16,6 +16,7 @@ interface WorkflowJob {
   name?: string;
   "runs-on"?: string;
   "timeout-minutes"?: number;
+  env?: Record<string, string>;
   environment?: unknown;
   steps?: WorkflowStep[];
 }
@@ -83,6 +84,7 @@ describe("CI workflow policy", () => {
       name: "windows-process-tree-diagnostic",
       "runs-on": "windows-latest",
       "timeout-minutes": 10,
+      env: { AERA_PROCESS_TREE_DIAGNOSTICS: "1" },
     });
     expect(diagnostic?.environment).toBeUndefined();
     expect(diagnostic?.steps).toEqual([
