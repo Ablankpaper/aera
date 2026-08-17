@@ -4166,6 +4166,8 @@ async function stopAeraOwnedGateway(profile: string): Promise<void> {
         ? {
             commandTimeoutMs: 3_000,
             snapshotTimeoutMs: 3_000,
+            snapshotTotalBudgetMs: 6_000,
+            diagnosticProfileKey: key,
           }
         : {}),
     });
