@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 
 import { createHash } from "node:crypto";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, join, normalize } from "node:path";
 
 import { redactText } from "./aera-diagnostic-redaction.mjs";
 import { runBoundedCommand } from "./aera-diagnostic-core.mjs";
@@ -9,6 +11,96 @@ function hash(domain, value) {
   return createHash("sha256")
     .update(`${domain}\0${String(value)}`, "utf8")
     .digest("hex");
+}
+
+function inspectNativeFile(path) {
+  try {
+    const bytes = readFileSync(path);
+    const markers = [
+      ...bytes.toString("latin1").matchAll(/node_register_module_v(\d+)/gu),
+    ].map((match) => match[1]);
+    const uniqueMarkers = [...new Set(markers)];
+    return {
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      abi: uniqueMarkers.length === 1 ? uniqueMarkers[0] : null,
+      abiStatus:
+        uniqueMarkers.length === 0
+          ? "not_found"
+          : uniqueMarkers.length === 1
+            ? "collected"
+            : "ambiguous",
+    };
+  } catch {
+    return { sha256: null, abi: null, abiStatus: "unavailable" };
+  }
+}
+
+function nativeRootForApp(appPath, executable) {
+  const candidates = [];
+  const addCandidate = (base, isDirectoryHint = false) => {
+    if (!base) return;
+    let directory = isDirectoryHint;
+    if (!isDirectoryHint) {
+      try {
+        directory = lstatSync(base).isDirectory();
+      } catch {
+        directory = false;
+      }
+    }
+    const root = join(
+      directory ? base : dirname(base),
+      "resources",
+      "app.asar.unpacked",
+    );
+    if (!candidates.includes(root)) candidates.push(root);
+  };
+  addCandidate(appPath);
+  if (executable && executable !== appPath) addCandidate(executable);
+  return (
+    candidates.find((candidate) => existsSync(candidate)) || candidates[0] || ""
+  );
+}
+
+function walkNative(root, entries = []) {
+  if (!root || !existsSync(root) || entries.length >= 500) return entries;
+  let names;
+  try {
+    names = readdirSync(root);
+  } catch {
+    return entries;
+  }
+  for (const name of names.sort()) {
+    if (entries.length >= 500) break;
+    const path = join(root, name);
+    let info;
+    try {
+      info = lstatSync(path);
+    } catch {
+      continue;
+    }
+    if (info.isDirectory()) walkNative(path, entries);
+    else if (info.isFile() && path.toLowerCase().endsWith(".node")) {
+      const native = inspectNativeFile(path);
+      entries.push({
+        pathSha256: hash("aera-diagnostic-native-path-v1", normalize(path)),
+        ...native,
+        size: info.size,
+        architecture: "unknown",
+      });
+    }
+  }
+  return entries;
+}
+
+function collectNativeInventory(appPath, executable) {
+  const root = nativeRootForApp(appPath, executable);
+  const entries = walkNative(root);
+  return {
+    status: entries.length ? "collected" : "missing",
+    reason: entries.length ? null : "native_module_inventory_unavailable",
+    entries,
+    electronModulesAbi: String(process.versions.modules || "unknown"),
+  };
 }
 
 function quotePowerShell(value) {
@@ -109,10 +201,12 @@ export function normalizeWindowsPlatformEvidence(value) {
 export function collectWindowsPlatformEvidence({
   rootPid,
   executable,
+  appPath,
   startedAt,
   endedAt,
   runCommand = runBoundedCommand,
 }) {
+  const nativeInventory = collectNativeInventory(appPath, executable);
   const command = runCommand(
     "powershell.exe",
     [
@@ -135,6 +229,7 @@ export function collectWindowsPlatformEvidence({
       network: { status: "failed", reason, entries: [] },
       events: { status: "failed", reason, entries: [] },
       signature: { status: "failed", reason },
+      nativeInventory,
     };
   }
   try {
@@ -162,6 +257,7 @@ export function collectWindowsPlatformEvidence({
         entries: normalized.events,
       },
       signature: { status: "collected", reason: null },
+      nativeInventory,
     };
   } catch {
     return {
@@ -183,6 +279,7 @@ export function collectWindowsPlatformEvidence({
         entries: [],
       },
       signature: { status: "failed", reason: "windows_evidence_invalid_json" },
+      nativeInventory,
     };
   }
 }

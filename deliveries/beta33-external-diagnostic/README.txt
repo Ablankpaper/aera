@@ -7,6 +7,8 @@ Aera Beta.33 外部诊断采集器 V4
 采集范围
 --------
 一次运行会把 Main/Preload/Renderer/IPC 的稳定脱敏事件、真实 PID/进程树/可执行文件指纹、Runtime 当前日志路径、macOS unified log 精确时间窗口、Windows Application 事件、Electron/native ABI、SQLite DB/WAL/SHM 只读状态、journal、五个受管文件 before/after、route candidates/重复 endpoint、owner transition 关联、updater 阶段和网络端点放进同一个带 schemaVersion=4 的 ZIP。无法读取的部分不会静默消失，而会出现在 manifest.missingEvidence 和对应 section 状态中。
+`native-inventory.json` 同时记录 Electron 运行时 ABI、每个可读 `.node` 的实际内容 SHA-256，以及 `node_register_module_vN` marker（`collected`/`not_found`/`ambiguous`/`unavailable`）；因此 137/145 不匹配可以直接从采集结果核对。
+Windows 会从 Aera.exe 同级的 `resources/app.asar.unpacked`（也兼容传入安装目录）扫描原生模块；目录不存在或不可读时，`native_abi` 会明确出现在 `manifest.missingEvidence`，不会被当成“没有原生模块”。
 
 安全边界
 --------

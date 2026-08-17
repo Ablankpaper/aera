@@ -16,11 +16,25 @@ function hash(domain, value) {
     .digest("hex");
 }
 
-function hashFileContent(path) {
+function inspectNativeFile(path) {
   try {
-    return createHash("sha256").update(readFileSync(path)).digest("hex");
+    const bytes = readFileSync(path);
+    const markers = [
+      ...bytes.toString("latin1").matchAll(/node_register_module_v(\d+)/gu),
+    ].map((match) => match[1]);
+    const uniqueMarkers = [...new Set(markers)];
+    return {
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      abi: uniqueMarkers.length === 1 ? uniqueMarkers[0] : null,
+      abiStatus:
+        uniqueMarkers.length === 0
+          ? "not_found"
+          : uniqueMarkers.length === 1
+            ? "collected"
+            : "ambiguous",
+    };
   } catch {
-    return null;
+    return { sha256: null, abi: null, abiStatus: "unavailable" };
   }
 }
 
@@ -110,9 +124,10 @@ function walkNative(root, entries = []) {
         timeoutMs: 5000,
         maximumBytes: 8192,
       });
+      const native = inspectNativeFile(path);
       entries.push({
         pathSha256: hash("aera-diagnostic-native-path-v1", normalize(path)),
-        sha256: hashFileContent(path),
+        ...native,
         size: info.size,
         architecture: /arm64|aarch64/i.test(fileInfo.stdout)
           ? "arm64"

@@ -191,7 +191,10 @@ test("records the SHA-256 of native module bytes, not path or metadata", () => {
       "native",
     );
     mkdirSync(unpacked, { recursive: true });
-    const bytes = Buffer.from("native module fixture bytes\n", "utf8");
+    const bytes = Buffer.from(
+      "native module fixture node_register_module_v137\n",
+      "utf8",
+    );
     writeFileSync(join(unpacked, "fixture.node"), bytes);
 
     const result = collectMacPlatformEvidence({
@@ -207,6 +210,8 @@ test("records the SHA-256 of native module bytes, not path or metadata", () => {
       entry.sha256,
       createHash("sha256").update(bytes).digest("hex"),
     );
+    assert.equal(entry.abi, "137");
+    assert.equal(entry.abiStatus, "collected");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

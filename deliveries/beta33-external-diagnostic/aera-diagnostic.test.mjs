@@ -217,6 +217,15 @@ test("keeps an unbound Windows capture usable when ProductVersion is unavailable
     );
     assert.equal(manifest.platform, "win32");
     assert.equal(manifest.target.version, "unknown");
+    const nativeSection = manifest.sections.find(
+      (section) => section.name === "native_abi",
+    );
+    assert.deepEqual(nativeSection, {
+      name: "native_abi",
+      status: "missing",
+      reason: "process_not_launched",
+    });
+    assert.ok(manifest.missingEvidence.includes("native_abi"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

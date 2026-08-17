@@ -695,6 +695,7 @@ export async function runDiagnostic(args) {
         ? collectWindowsPlatformEvidence({
             rootPid,
             executable,
+            appPath,
             startedAt,
             endedAt,
           })
