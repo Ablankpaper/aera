@@ -7,8 +7,8 @@ import { join, posix } from "node:path";
 
 import {
   inspectNativeModuleBytes,
-  listUnpackedNativeModules,
   resolveElectronAbi,
+  scanUnpackedNativeModules,
 } from "./native-module-abi.mjs";
 
 const ELECTRON_BUILDER_ARCHITECTURES = new Map([
@@ -83,6 +83,35 @@ function hasVerifiedIdentity(status, identity) {
   );
 }
 
+function hasSameSurfaceIdentity(left, right) {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.size === right.size &&
+    (left.mode & constants.S_IFMT) === (right.mode & constants.S_IFMT)
+  );
+}
+
+function assertStableNativeSurface(initialSurface, finalSurface) {
+  const count = Math.max(initialSurface.length, finalSurface.length);
+  for (let index = 0; index < count; index += 1) {
+    const initial = initialSurface[index];
+    const final = finalSurface[index];
+    if (
+      initial?.relativePath !== final?.relativePath ||
+      !initial ||
+      !final ||
+      !hasSameSurfaceIdentity(initial.identity, final.identity)
+    ) {
+      const relativePath =
+        initial?.relativePath || final?.relativePath || "root";
+      throw new Error(
+        `native module inventory surface changed after module inspection ${relativePath}`,
+      );
+    }
+  }
+}
+
 async function readVerifiedNativeModule(entry, openNativeModule) {
   let handle;
   try {
@@ -140,11 +169,16 @@ export async function verifyPackagedNativeModule(context, options = {}) {
       ? await resolveMacApp(appOutDir, readDirectory)
       : appOutDir;
   const unpackedRoot = resolveUnpackedRoot(app, platform);
-  const modules = await listUnpackedNativeModules(unpackedRoot, {
+  const scanOptions = {
     readdir: readDirectory,
     lstat: inspectPath,
     realpath: resolveCanonicalPath,
-  });
+  };
+  const initialScan = await scanUnpackedNativeModules(
+    unpackedRoot,
+    scanOptions,
+  );
+  const modules = initialScan.modules;
   if (modules.length === 0) {
     throw new Error("packaged native module inventory is empty");
   }
@@ -178,12 +212,15 @@ export async function verifyPackagedNativeModule(context, options = {}) {
     });
   }
 
+  const finalScan = await scanUnpackedNativeModules(unpackedRoot, scanOptions);
+  assertStableNativeSurface(initialScan.surface, finalScan.surface);
+
   const inventoryPath = join(
     appOutDir,
     "..",
     `native-module-inventory-${platform}-${targetArchitecture}.json`,
   );
-  await writeFile(
+  await (options.writeFile ?? writeFile)(
     inventoryPath,
     `${JSON.stringify(
       {

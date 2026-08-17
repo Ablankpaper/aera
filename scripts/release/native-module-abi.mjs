@@ -98,6 +98,34 @@ function rootChangedError() {
   return new Error("native module inventory root changed during validation");
 }
 
+function directoryChangedError(relativePath) {
+  return new Error(
+    `native module inventory directory${relativePath ? ` ${relativePath}` : ""} changed after validation`,
+  );
+}
+
+function entryChangedError(relativePath) {
+  return new Error(
+    `native module inventory entry changed during validation ${relativePath}`,
+  );
+}
+
+function unreadableDirectoryError(relativePath) {
+  return new Error(
+    `native module inventory found an unreadable directory${relativePath ? ` ${relativePath}` : ""}`,
+  );
+}
+
+function sameChildSurface(left, right) {
+  return (
+    left.length === right.length &&
+    left.every(
+      (entry, index) =>
+        entry.name === right[index].name && entry.type === right[index].type,
+    )
+  );
+}
+
 async function assertRootIdentity(path, identity, inspectPath) {
   let status;
   try {
@@ -110,37 +138,100 @@ async function assertRootIdentity(path, identity, inspectPath) {
   }
 }
 
-async function collectNativeModules(
+async function readInventoryDirectory(directory, relativePath, readDirectory) {
+  try {
+    return await readDirectory(directory, { withFileTypes: true });
+  } catch {
+    throw unreadableDirectoryError(relativePath);
+  }
+}
+
+async function inspectInventoryEntry(path, relativePath, inspectPath) {
+  try {
+    return await inspectPath(path);
+  } catch {
+    throw entryChangedError(relativePath);
+  }
+}
+
+async function resolveInventoryEntry(path, relativePath, resolveCanonicalPath) {
+  try {
+    return await resolveCanonicalPath(path);
+  } catch {
+    throw entryChangedError(relativePath);
+  }
+}
+
+async function collectNativeSurface(
   directory,
   prefix,
   canonicalRoot,
-  out,
+  directoryStatus,
+  canonicalDirectory,
+  modules,
+  surface,
+  directorySnapshots,
   readDirectory,
   inspectPath,
   resolveCanonicalPath,
 ) {
-  const entries = await readDirectory(directory, { withFileTypes: true });
+  const directoryIdentity = filesystemIdentity(directoryStatus);
+  const canonicalStatus = await inspectInventoryEntry(
+    canonicalDirectory,
+    prefix,
+    inspectPath,
+  );
+  if (!hasDirectoryIdentity(canonicalStatus, directoryIdentity)) {
+    throw directoryChangedError(prefix);
+  }
+  surface.push({
+    relativePath: prefix,
+    canonicalPath: canonicalDirectory,
+    identity: directoryIdentity,
+  });
+  const entries = await readInventoryDirectory(
+    directory,
+    prefix,
+    readDirectory,
+  );
+  const children = [];
   for (const entry of entries) {
     const absolutePath = join(directory, entry.name);
     const relativePath = prefix ? posix.join(prefix, entry.name) : entry.name;
-    const status = await inspectPath(absolutePath);
+    const status = await inspectInventoryEntry(
+      absolutePath,
+      relativePath,
+      inspectPath,
+    );
+    children.push({
+      name: entry.name,
+      type: status.mode & constants.S_IFMT,
+    });
     if (status.isSymbolicLink()) {
       throw new Error(
         `native module inventory cannot traverse symbolic link ${relativePath}`,
       );
     }
-    const canonicalPath = await resolveCanonicalPath(absolutePath);
+    const canonicalPath = await resolveInventoryEntry(
+      absolutePath,
+      relativePath,
+      resolveCanonicalPath,
+    );
     if (!isCanonicalPathInside(canonicalRoot, canonicalPath)) {
       throw new Error(
         `native module inventory path escapes canonical root ${relativePath}`,
       );
     }
     if (status.isDirectory()) {
-      await collectNativeModules(
+      await collectNativeSurface(
         absolutePath,
         relativePath,
         canonicalRoot,
-        out,
+        status,
+        canonicalPath,
+        modules,
+        surface,
+        directorySnapshots,
         readDirectory,
         inspectPath,
         resolveCanonicalPath,
@@ -148,11 +239,13 @@ async function collectNativeModules(
       continue;
     }
     if (status.isFile()) {
+      const identity = filesystemIdentity(status);
+      surface.push({ relativePath, canonicalPath, identity });
       if (entry.name.endsWith(".node")) {
-        out.push({
+        modules.push({
           absolutePath: canonicalPath,
           relativePath,
-          identity: filesystemIdentity(status),
+          identity,
         });
       }
       continue;
@@ -161,12 +254,81 @@ async function collectNativeModules(
       `native module inventory found an unsupported filesystem entry ${relativePath}`,
     );
   }
+  children.sort((left, right) =>
+    left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+  );
+  directorySnapshots.push({
+    absolutePath: directory,
+    relativePath: prefix,
+    canonicalPath: canonicalDirectory,
+    identity: directoryIdentity,
+    canonicalIdentity: filesystemIdentity(canonicalStatus),
+    children,
+  });
 }
 
-export async function listUnpackedNativeModules(unpackedRoot, options = {}) {
+async function revalidateDirectorySnapshot(
+  snapshot,
+  readDirectory,
+  inspectPath,
+  resolveCanonicalPath,
+) {
+  let status;
+  let canonicalPath;
+  let canonicalStatus;
+  try {
+    status = await inspectPath(snapshot.absolutePath);
+    canonicalPath = await resolveCanonicalPath(snapshot.absolutePath);
+    canonicalStatus = await inspectPath(canonicalPath);
+  } catch {
+    throw directoryChangedError(snapshot.relativePath);
+  }
+  if (
+    !hasDirectoryIdentity(status, snapshot.identity) ||
+    canonicalPath !== snapshot.canonicalPath ||
+    !hasDirectoryIdentity(canonicalStatus, snapshot.canonicalIdentity)
+  ) {
+    throw directoryChangedError(snapshot.relativePath);
+  }
+  let entries;
+  try {
+    entries = await readDirectory(snapshot.absolutePath, {
+      withFileTypes: true,
+    });
+  } catch {
+    throw directoryChangedError(snapshot.relativePath);
+  }
+  const children = [];
+  for (const entry of entries) {
+    let childStatus;
+    try {
+      childStatus = await inspectPath(join(snapshot.absolutePath, entry.name));
+    } catch {
+      throw directoryChangedError(snapshot.relativePath);
+    }
+    children.push({
+      name: entry.name,
+      type: childStatus.mode & constants.S_IFMT,
+    });
+  }
+  children.sort((left, right) =>
+    left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+  );
+  if (!sameChildSurface(children, snapshot.children)) {
+    throw directoryChangedError(snapshot.relativePath);
+  }
+}
+
+export async function scanUnpackedNativeModules(unpackedRoot, options = {}) {
   const inspectPath = options.lstat ?? lstat;
   const resolveCanonicalPath = options.realpath ?? realpath;
-  const rootStatus = await inspectPath(unpackedRoot);
+  const readDirectory = options.readdir ?? readdir;
+  let rootStatus;
+  try {
+    rootStatus = await inspectPath(unpackedRoot);
+  } catch {
+    throw rootChangedError();
+  }
   if (rootStatus.isSymbolicLink()) {
     throw new Error("native module inventory root cannot be a symbolic link");
   }
@@ -182,30 +344,55 @@ export async function listUnpackedNativeModules(unpackedRoot, options = {}) {
   }
   await assertRootIdentity(canonicalRoot, rootIdentity, inspectPath);
   await assertRootIdentity(unpackedRoot, rootIdentity, inspectPath);
-  const found = [];
+  const modules = [];
+  const surface = [];
+  const directorySnapshots = [];
   try {
-    await collectNativeModules(
+    await collectNativeSurface(
       unpackedRoot,
       "",
       canonicalRoot,
-      found,
-      options.readdir ?? readdir,
+      rootStatus,
+      canonicalRoot,
+      modules,
+      surface,
+      directorySnapshots,
+      readDirectory,
       inspectPath,
       resolveCanonicalPath,
     );
+    for (const snapshot of directorySnapshots) {
+      await revalidateDirectorySnapshot(
+        snapshot,
+        readDirectory,
+        inspectPath,
+        resolveCanonicalPath,
+      );
+    }
   } catch (error) {
     await assertRootIdentity(unpackedRoot, rootIdentity, inspectPath);
     throw error;
   }
   await assertRootIdentity(unpackedRoot, rootIdentity, inspectPath);
-  found.sort((left, right) =>
+  modules.sort((left, right) =>
     left.relativePath < right.relativePath
       ? -1
       : left.relativePath > right.relativePath
         ? 1
         : 0,
   );
-  return found;
+  surface.sort((left, right) =>
+    left.relativePath < right.relativePath
+      ? -1
+      : left.relativePath > right.relativePath
+        ? 1
+        : 0,
+  );
+  return { modules, surface };
+}
+
+export async function listUnpackedNativeModules(unpackedRoot, options = {}) {
+  return (await scanUnpackedNativeModules(unpackedRoot, options)).modules;
 }
 
 const MACH_O_MAGICS = new Map([
@@ -290,6 +477,20 @@ function readMachOUInt32(bytes, offset, endian, limit, label, part) {
     : bytes.readUInt32BE(offset);
 }
 
+function readMachOSafeUInt64(bytes, offset, endian, limit, label, field) {
+  requireMachORange(bytes, offset, 8, limit, label, `segment ${field}`);
+  const value =
+    endian === "le"
+      ? bytes.readBigUInt64LE(offset)
+      : bytes.readBigUInt64BE(offset);
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(
+      `native module ${label} Mach-O segment ${field} is not a safe integer`,
+    );
+  }
+  return Number(value);
+}
+
 function parseThinMachO(bytes, offset, size, format, label) {
   const limit = offset + size;
   requireMachORange(bytes, offset, 32, limit, label, "64-bit header");
@@ -346,6 +547,8 @@ function parseThinMachO(bytes, offset, size, format, label) {
     );
   }
   const commandsEnd = commandsStart + commandBytes;
+  const imageRanges = [];
+  const textSegments = [];
   let cursor = commandsStart;
   for (let index = 0; index < commandCount; index += 1) {
     requireMachORange(
@@ -355,6 +558,14 @@ function parseThinMachO(bytes, offset, size, format, label) {
       commandsEnd,
       label,
       "load command header",
+    );
+    const command = readMachOUInt32(
+      bytes,
+      cursor,
+      format.endian,
+      commandsEnd,
+      label,
+      "load command",
     );
     const commandSize = readMachOUInt32(
       bytes,
@@ -377,6 +588,81 @@ function parseThinMachO(bytes, offset, size, format, label) {
       label,
       "load command",
     );
+    if (command === 0x19) {
+      if (commandSize < 72) {
+        throw new Error(
+          `native module ${label} Mach-O segment command size is invalid`,
+        );
+      }
+      const sectionCount = readMachOUInt32(
+        bytes,
+        cursor + 64,
+        format.endian,
+        cursor + commandSize,
+        label,
+        "segment section count",
+      );
+      if (commandSize !== 72 + sectionCount * 80) {
+        throw new Error(
+          `native module ${label} Mach-O segment section count and command size are inconsistent`,
+        );
+      }
+      const nameBytes = bytes.subarray(cursor + 8, cursor + 24);
+      const terminator = nameBytes.indexOf(0);
+      const name = nameBytes
+        .subarray(0, terminator === -1 ? nameBytes.length : terminator)
+        .toString("ascii");
+      const fileOffset = readMachOSafeUInt64(
+        bytes,
+        cursor + 40,
+        format.endian,
+        cursor + commandSize,
+        label,
+        "file offset",
+      );
+      const fileSize = readMachOSafeUInt64(
+        bytes,
+        cursor + 48,
+        format.endian,
+        cursor + commandSize,
+        label,
+        "file size",
+      );
+      const maximumProtection = readMachOUInt32(
+        bytes,
+        cursor + 56,
+        format.endian,
+        cursor + commandSize,
+        label,
+        "segment maximum protection",
+      );
+      const initialProtection = readMachOUInt32(
+        bytes,
+        cursor + 60,
+        format.endian,
+        cursor + commandSize,
+        label,
+        "segment initial protection",
+      );
+      if (fileOffset > size || fileSize > size - fileOffset) {
+        throw new Error(
+          `native module ${label} Mach-O segment file range is outside its slice`,
+        );
+      }
+      if (fileSize > 0) {
+        const segment = {
+          name,
+          fileOffset,
+          fileSize,
+          maximumProtection,
+          initialProtection,
+          offset: offset + fileOffset,
+          end: offset + fileOffset + fileSize,
+        };
+        imageRanges.push({ offset: segment.offset, end: segment.end });
+        if (name === "__TEXT") textSegments.push(segment);
+      }
+    }
     cursor += commandSize;
   }
   if (cursor !== commandsEnd) {
@@ -384,18 +670,52 @@ function parseThinMachO(bytes, offset, size, format, label) {
       `native module ${label} Mach-O load command boundaries are invalid`,
     );
   }
-  return { architecture, cpuType };
+  if (textSegments.length !== 1) {
+    throw new Error(
+      `native module ${label} Mach-O must contain exactly one non-empty __TEXT segment`,
+    );
+  }
+  const textSegment = textSegments[0];
+  if (
+    textSegment.fileOffset !== 0 ||
+    textSegment.fileSize < commandsEnd - offset
+  ) {
+    throw new Error(
+      `native module ${label} Mach-O __TEXT segment must cover the header and load commands`,
+    );
+  }
+  const readExecuteProtection = 1 | 4;
+  if (
+    (textSegment.maximumProtection & readExecuteProtection) !==
+      readExecuteProtection ||
+    (textSegment.initialProtection & readExecuteProtection) !==
+      readExecuteProtection
+  ) {
+    throw new Error(
+      `native module ${label} Mach-O __TEXT segment protections must be readable and executable`,
+    );
+  }
+  const orderedRanges = [...imageRanges].sort(
+    (left, right) => left.offset - right.offset,
+  );
+  for (let index = 1; index < orderedRanges.length; index += 1) {
+    if (orderedRanges[index].offset < orderedRanges[index - 1].end) {
+      throw new Error(
+        `native module ${label} Mach-O mapped segment ranges overlap`,
+      );
+    }
+  }
+  return { architecture, cpuType, imageRanges };
 }
 
 function parseMachOImage(bytes, magic, label) {
   const format = MACH_O_MAGICS.get(magic);
   if (!format) return null;
   if (format.kind === "thin64") {
+    const parsed = parseThinMachO(bytes, 0, bytes.length, format, label);
     return {
-      architectures: [
-        parseThinMachO(bytes, 0, bytes.length, format, label).architecture,
-      ],
-      imageRanges: [{ offset: 0, end: bytes.length }],
+      architectures: [parsed.architecture],
+      imageRanges: parsed.imageRanges,
     };
   }
 
@@ -445,6 +765,7 @@ function parseMachOImage(bytes, magic, label) {
   }
 
   const architectures = [];
+  const imageRanges = [];
   for (const slice of slices) {
     const sliceMagic = readUInt32(bytes, slice.offset, "be", label);
     const sliceFormat = MACH_O_MAGICS.get(sliceMagic);
@@ -467,10 +788,11 @@ function parseMachOImage(bytes, magic, label) {
     }
     const architecture = architectureForCpuType(slice.cpuType, label);
     if (!architectures.includes(architecture)) architectures.push(architecture);
+    imageRanges.push(...parsed.imageRanges);
   }
   return {
     architectures,
-    imageRanges: slices.map(({ offset, end }) => ({ offset, end })),
+    imageRanges,
   };
 }
 
@@ -484,6 +806,15 @@ function requirePeRange(bytes, offset, length, label, part) {
   ) {
     throw new Error(`native module ${label} PE ${part} is truncated`);
   }
+}
+
+function isPowerOfTwo(value) {
+  return value > 0 && (value & (value - 1)) === 0;
+}
+
+function alignUp(value, alignment) {
+  const remainder = value % alignment;
+  return remainder === 0 ? value : value + alignment - remainder;
 }
 
 function parsePeImage(bytes, label) {
@@ -532,6 +863,17 @@ function parsePeImage(bytes, label) {
   if (bytes.readUInt16LE(optionalHeaderOffset) !== 0x20b) {
     throw new Error(`native module ${label} PE optional header must be PE32+`);
   }
+  const sectionAlignment = bytes.readUInt32LE(optionalHeaderOffset + 32);
+  const fileAlignment = bytes.readUInt32LE(optionalHeaderOffset + 36);
+  if (
+    !isPowerOfTwo(sectionAlignment) ||
+    !isPowerOfTwo(fileAlignment) ||
+    sectionAlignment < fileAlignment
+  ) {
+    throw new Error(`native module ${label} PE alignment values are invalid`);
+  }
+  const sizeOfImage = bytes.readUInt32LE(optionalHeaderOffset + 56);
+  const sizeOfHeaders = bytes.readUInt32LE(optionalHeaderOffset + 60);
   const dataDirectoryCount = bytes.readUInt32LE(optionalHeaderOffset + 108);
   const requiredOptionalBytes = 112 + dataDirectoryCount * 8;
   if (
@@ -553,19 +895,71 @@ function parsePeImage(bytes, label) {
     "section table",
   );
   const sectionTableEnd = sectionTableOffset + sectionTableSize;
+  if (
+    sizeOfHeaders < sectionTableEnd ||
+    sizeOfHeaders > bytes.length ||
+    sizeOfHeaders % fileAlignment !== 0
+  ) {
+    throw new Error(
+      `native module ${label} PE headers size or alignment is invalid`,
+    );
+  }
+  const firstSectionAddress = alignUp(sizeOfHeaders, sectionAlignment);
+  if (
+    sizeOfImage === 0 ||
+    sizeOfImage % sectionAlignment !== 0 ||
+    sizeOfImage < firstSectionAddress
+  ) {
+    throw new Error(
+      `native module ${label} PE image size or alignment is invalid`,
+    );
+  }
   const imageRanges = [];
+  const virtualRanges = [];
+  let hasExecutableCode = false;
   for (let index = 0; index < sectionCount; index += 1) {
     const sectionOffset = sectionTableOffset + index * 40;
+    const virtualSize = bytes.readUInt32LE(sectionOffset + 8);
+    const virtualAddress = bytes.readUInt32LE(sectionOffset + 12);
     const rawSize = bytes.readUInt32LE(sectionOffset + 16);
     const rawOffset = bytes.readUInt32LE(sectionOffset + 20);
-    if (rawSize === 0) continue;
-    if (rawOffset < sectionTableEnd) {
+    const sectionCharacteristics = bytes.readUInt32LE(sectionOffset + 36);
+    if (virtualSize === 0 && rawSize === 0) continue;
+    const virtualSpan = Math.max(virtualSize, rawSize);
+    if (
+      virtualAddress % sectionAlignment !== 0 ||
+      virtualAddress < firstSectionAddress ||
+      virtualAddress > sizeOfImage ||
+      virtualSpan > sizeOfImage - virtualAddress
+    ) {
       throw new Error(
-        `native module ${label} PE section overlaps the header table`,
+        `native module ${label} PE section virtual range or alignment is invalid`,
       );
     }
-    requirePeRange(bytes, rawOffset, rawSize, label, "section data");
-    imageRanges.push({ offset: rawOffset, end: rawOffset + rawSize });
+    virtualRanges.push({
+      offset: virtualAddress,
+      end: virtualAddress + virtualSpan,
+    });
+    if (rawSize > 0) {
+      if (
+        rawOffset < sizeOfHeaders ||
+        rawOffset % fileAlignment !== 0 ||
+        rawSize % fileAlignment !== 0
+      ) {
+        throw new Error(
+          `native module ${label} PE section data range or alignment is invalid`,
+        );
+      }
+      requirePeRange(bytes, rawOffset, rawSize, label, "section data");
+      imageRanges.push({ offset: rawOffset, end: rawOffset + rawSize });
+      const requiredCodeCharacteristics = 0x20 | 0x20000000 | 0x40000000;
+      if (
+        (sectionCharacteristics & requiredCodeCharacteristics) ===
+        requiredCodeCharacteristics
+      ) {
+        hasExecutableCode = true;
+      }
+    }
   }
   const orderedRanges = [...imageRanges].sort(
     (left, right) => left.offset - right.offset,
@@ -574,6 +968,23 @@ function parsePeImage(bytes, label) {
     if (orderedRanges[index].offset < orderedRanges[index - 1].end) {
       throw new Error(`native module ${label} PE section data overlaps`);
     }
+  }
+  const orderedVirtualRanges = [...virtualRanges].sort(
+    (left, right) => left.offset - right.offset,
+  );
+  for (let index = 1; index < orderedVirtualRanges.length; index += 1) {
+    if (
+      orderedVirtualRanges[index].offset < orderedVirtualRanges[index - 1].end
+    ) {
+      throw new Error(
+        `native module ${label} PE section virtual ranges overlap`,
+      );
+    }
+  }
+  if (!hasExecutableCode) {
+    throw new Error(
+      `native module ${label} PE must contain a non-empty executable readable code section`,
+    );
   }
   return { architectures: [architecture], imageRanges };
 }

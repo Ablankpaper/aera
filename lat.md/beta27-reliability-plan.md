@@ -102,11 +102,11 @@ Only `model_configuration_recovery_required` projects to the recovery stage with
 
 The afterPack gate rejects unreadable, structurally invalid, platform-incompatible, or ambiguous `.node` input and records deterministic ABI, architecture, and SHA-256 evidence.
 
-Darwin inventory accepts only validated 64-bit Mach-O bundles and slices; win32 accepts only validated PE32+ executable DLL images. ABI markers are read only from those verified images or fat slices, and every in-memory and persisted module record includes the stable `mach-o` or `pe` format.
+Darwin inventory accepts only validated 64-bit Mach-O bundles and slices. Every `LC_SEGMENT_64` has an exact section-table size and a safe in-slice file range, non-empty mapped segments cannot overlap, and exactly one readable/executable `__TEXT` segment starts at file offset zero and covers the header plus load commands. Win32 accepts only PE32+ executable DLL images with power-of-two file and section alignment, bounded aligned headers and image size, non-overlapping aligned raw and virtual section ranges, and at least one non-empty readable executable code section. ABI markers are read only from validated mapped segment or section ranges, and every in-memory and persisted module record includes the stable `mach-o` or `pe` format.
 
-The unpacked root and every descendant are checked with `lstat`, and every resolved path must remain inside the canonical root. Root device, inode, type, and size must match after canonicalization and at traversal entry and completion.
+The unpacked root and every descendant are checked with `lstat`, and every resolved path must remain inside the canonical root. Each traversed directory snapshot retains device, inode, type, size, canonical path and identity, plus its sorted direct child name/type surface, then revalidates those observations bottom-up with `lstat`, `realpath`, and `readdir`.
 
-Collection retains each file's device, inode, type, and size; reading opens that path with no-follow where available, matches `fstat` on the same handle, reads that handle once, and then closes it.
+Collection retains each file's device, inode, type, and size; reading opens that path with no-follow where available, matches `fstat` on the same handle, reads that handle once, and then closes it. After every native module has been read and inspected, the verifier performs a second complete stable scan and compares the entire relative-path surface by device, inode, type, and size before it writes the inventory.
 
 Every shipped native module is inspected through `scripts/release/native-module-abi.mjs` and `scripts/release/verify-packaged-native-module.mjs`.
 

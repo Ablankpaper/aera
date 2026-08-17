@@ -45,7 +45,7 @@ function abiMarkers(...abis) {
   );
 }
 
-function thinMachO(architecture, ...abis) {
+function uuidOnlyThinMachO(architecture, ...abis) {
   const loadCommand = Buffer.alloc(24);
   loadCommand.writeUInt32LE(0x1b, 0);
   loadCommand.writeUInt32LE(loadCommand.length, 4);
@@ -57,6 +57,76 @@ function thinMachO(architecture, ...abis) {
   header.writeUInt32LE(1, 16);
   header.writeUInt32LE(loadCommand.length, 20);
   return Buffer.concat([header, loadCommand, abiMarkers(...abis)]);
+}
+
+const MACH_O_HEADER_SIZE = 32;
+const MACH_O_SEGMENT_COMMAND_SIZE = 72;
+
+function machOSegmentCommand({
+  name,
+  fileOffset,
+  fileSize,
+  maximumProtection = 5,
+  initialProtection = 5,
+}) {
+  const command = Buffer.alloc(MACH_O_SEGMENT_COMMAND_SIZE);
+  command.writeUInt32LE(0x19, 0);
+  command.writeUInt32LE(command.length, 4);
+  command.write(name, 8, 16, "ascii");
+  command.writeBigUInt64LE(BigInt(fileSize), 32);
+  command.writeBigUInt64LE(BigInt(fileOffset), 40);
+  command.writeBigUInt64LE(BigInt(fileSize), 48);
+  command.writeUInt32LE(maximumProtection, 56);
+  command.writeUInt32LE(initialProtection, 60);
+  return command;
+}
+
+function segmentedThinMachO(
+  architecture,
+  segmentCount,
+  segmentFactory,
+  ...abis
+) {
+  const payload = abiMarkers(...abis);
+  const commandsEnd =
+    MACH_O_HEADER_SIZE + segmentCount * MACH_O_SEGMENT_COMMAND_SIZE;
+  const imageSize = commandsEnd + payload.length;
+  const loadCommands = segmentFactory({ commandsEnd, imageSize }).map(
+    machOSegmentCommand,
+  );
+  const header = Buffer.alloc(MACH_O_HEADER_SIZE);
+  header.writeUInt32LE(0xfeedfacf, 0);
+  header.writeUInt32LE(MACH_O_CPU[architecture], 4);
+  header.writeUInt32LE(architecture === "x64" ? 3 : 0, 8);
+  header.writeUInt32LE(8, 12);
+  header.writeUInt32LE(loadCommands.length, 16);
+  header.writeUInt32LE(loadCommands.length * MACH_O_SEGMENT_COMMAND_SIZE, 20);
+  return Buffer.concat([header, ...loadCommands, payload]);
+}
+
+function thinMachO(architecture, ...abis) {
+  return segmentedThinMachO(
+    architecture,
+    1,
+    ({ imageSize }) => [{ name: "__TEXT", fileOffset: 0, fileSize: imageSize }],
+    ...abis,
+  );
+}
+
+function twoSegmentThinMachO(architecture, ...abis) {
+  return segmentedThinMachO(
+    architecture,
+    2,
+    ({ commandsEnd, imageSize }) => [
+      { name: "__TEXT", fileOffset: 0, fileSize: commandsEnd },
+      {
+        name: "__LINKEDIT",
+        fileOffset: commandsEnd,
+        fileSize: imageSize - commandsEnd,
+      },
+    ],
+    ...abis,
+  );
 }
 
 function fatMachOWithKind(kind, architectures, abis) {
@@ -93,9 +163,10 @@ function fat64MachO(architectures, ...abis) {
 }
 
 function peModule(architecture, ...abis) {
-  const rawOffset = PE_SECTION_TABLE_OFFSET + 40;
+  const rawOffset = 0x200;
+  const rawSize = 0x200;
   const payload = Buffer.concat([Buffer.from([0]), abiMarkers(...abis)]);
-  const image = Buffer.alloc(rawOffset + payload.length);
+  const image = Buffer.alloc(rawOffset + rawSize);
   image.write("MZ", 0, "ascii");
   image.writeUInt32LE(PE_OFFSET, 0x3c);
   image.write("PE\0\0", PE_OFFSET, "binary");
@@ -108,13 +179,13 @@ function peModule(architecture, ...abis) {
   image.writeUInt32LE(0x1000, PE_OPTIONAL_HEADER_OFFSET + 32);
   image.writeUInt32LE(0x200, PE_OPTIONAL_HEADER_OFFSET + 36);
   image.writeUInt32LE(0x2000, PE_OPTIONAL_HEADER_OFFSET + 56);
-  image.writeUInt32LE(rawOffset, PE_OPTIONAL_HEADER_OFFSET + 60);
+  image.writeUInt32LE(0x200, PE_OPTIONAL_HEADER_OFFSET + 60);
   image.writeUInt16LE(2, PE_OPTIONAL_HEADER_OFFSET + 68);
   image.writeUInt32LE(16, PE_OPTIONAL_HEADER_OFFSET + 108);
   image.write(".text", PE_SECTION_TABLE_OFFSET, "ascii");
   image.writeUInt32LE(payload.length, PE_SECTION_TABLE_OFFSET + 8);
   image.writeUInt32LE(0x1000, PE_SECTION_TABLE_OFFSET + 12);
-  image.writeUInt32LE(payload.length, PE_SECTION_TABLE_OFFSET + 16);
+  image.writeUInt32LE(rawSize, PE_SECTION_TABLE_OFFSET + 16);
   image.writeUInt32LE(rawOffset, PE_SECTION_TABLE_OFFSET + 20);
   image.writeUInt32LE(0x60000020, PE_SECTION_TABLE_OFFSET + 36);
   payload.copy(image, rawOffset);
@@ -308,6 +379,99 @@ test("rejects malformed thin Mach-O bundle structures", async () => {
     await Promise.all(fixtures.map(removeFixture));
   }
 });
+
+test("rejects a Mach-O bundle with only LC_UUID and an ABI marker", async () => {
+  const fixture = await createPackage({
+    betterBytes: uuidOnlyThinMachO("arm64", "145"),
+  });
+  try {
+    await assert.rejects(
+      verifyPackagedNativeModule(
+        context(fixture),
+        verificationOptions(fixture),
+      ),
+      /better_sqlite3\.node.*Mach-O.*__TEXT/su,
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+for (const { name, createBytes } of [
+  {
+    name: "LC_SEGMENT_64 section count and command size mismatch",
+    createBytes: () => {
+      const bytes = Buffer.from(thinMachO("arm64", "145"));
+      bytes.writeUInt32LE(1, MACH_O_HEADER_SIZE + 64);
+      return bytes;
+    },
+  },
+  {
+    name: "segment range outside its thin slice",
+    createBytes: () => {
+      const bytes = Buffer.from(thinMachO("arm64", "145"));
+      bytes.writeBigUInt64LE(BigInt(bytes.length + 1), MACH_O_HEADER_SIZE + 48);
+      return bytes;
+    },
+  },
+  {
+    name: "overlapping mapped segment ranges",
+    createBytes: () => {
+      const bytes = Buffer.from(twoSegmentThinMachO("arm64", "145"));
+      const secondSegment = MACH_O_HEADER_SIZE + MACH_O_SEGMENT_COMMAND_SIZE;
+      bytes.writeBigUInt64LE(
+        BigInt(MACH_O_HEADER_SIZE + 2 * MACH_O_SEGMENT_COMMAND_SIZE - 1),
+        secondSegment + 40,
+      );
+      return bytes;
+    },
+  },
+  {
+    name: "non-executable __TEXT protections",
+    createBytes: () => {
+      const bytes = Buffer.from(thinMachO("arm64", "145"));
+      bytes.writeUInt32LE(1, MACH_O_HEADER_SIZE + 56);
+      bytes.writeUInt32LE(1, MACH_O_HEADER_SIZE + 60);
+      return bytes;
+    },
+  },
+  {
+    name: "__TEXT that does not cover the load commands",
+    createBytes: () => {
+      const bytes = Buffer.from(thinMachO("arm64", "145"));
+      bytes.writeBigUInt64LE(
+        BigInt(MACH_O_HEADER_SIZE + MACH_O_SEGMENT_COMMAND_SIZE - 1),
+        MACH_O_HEADER_SIZE + 48,
+      );
+      return bytes;
+    },
+  },
+  {
+    name: "duplicate non-empty __TEXT segments",
+    createBytes: () => {
+      const bytes = Buffer.from(twoSegmentThinMachO("arm64", "145"));
+      const secondSegment = MACH_O_HEADER_SIZE + MACH_O_SEGMENT_COMMAND_SIZE;
+      bytes.fill(0, secondSegment + 8, secondSegment + 24);
+      bytes.write("__TEXT", secondSegment + 8, 16, "ascii");
+      return bytes;
+    },
+  },
+]) {
+  test(`rejects a Mach-O bundle with ${name}`, async () => {
+    const fixture = await createPackage({ betterBytes: createBytes() });
+    try {
+      await assert.rejects(
+        verifyPackagedNativeModule(
+          context(fixture),
+          verificationOptions(fixture),
+        ),
+        /better_sqlite3\.node.*Mach-O.*(?:segment|__TEXT|protection)/su,
+      );
+    } finally {
+      await removeFixture(fixture);
+    }
+  });
+}
 
 test("rejects a mixed fat Mach-O in a single-architecture package", async () => {
   const fixture = await createPackage({
@@ -504,6 +668,56 @@ test("rejects truncated or invalid PE32+ DLL structures", async () => {
     await Promise.all(fixtures.map(removeFixture));
   }
 });
+
+for (const { name, mutate } of [
+  {
+    name: "zero section alignment",
+    mutate: (bytes) => bytes.writeUInt32LE(0, PE_OPTIONAL_HEADER_OFFSET + 32),
+  },
+  {
+    name: "non-power-of-two file alignment",
+    mutate: (bytes) =>
+      bytes.writeUInt32LE(0x180, PE_OPTIONAL_HEADER_OFFSET + 36),
+  },
+  {
+    name: "undersized headers",
+    mutate: (bytes) => bytes.writeUInt32LE(1, PE_OPTIONAL_HEADER_OFFSET + 60),
+  },
+  {
+    name: "zero image size",
+    mutate: (bytes) => bytes.writeUInt32LE(0, PE_OPTIONAL_HEADER_OFFSET + 56),
+  },
+  {
+    name: "unaligned section virtual address",
+    mutate: (bytes) => bytes.writeUInt32LE(1, PE_SECTION_TABLE_OFFSET + 12),
+  },
+  {
+    name: "no executable code section",
+    mutate: (bytes) =>
+      bytes.writeUInt32LE(0x40000040, PE_SECTION_TABLE_OFFSET + 36),
+  },
+]) {
+  test(`rejects a PE32+ shell with ${name}`, async () => {
+    const betterBytes = Buffer.from(peModule("x64", "145"));
+    mutate(betterBytes);
+    const fixture = await createPackage({
+      platform: "win32",
+      architecture: "x64",
+      betterBytes,
+    });
+    try {
+      await assert.rejects(
+        verifyPackagedNativeModule(
+          context(fixture),
+          verificationOptions(fixture),
+        ),
+        /better_sqlite3\.node.*PE.*(?:alignment|headers|image|section|executable)/su,
+      );
+    } finally {
+      await removeFixture(fixture);
+    }
+  });
+}
 
 test("rejects an unsupported native binary format", async () => {
   const fixture = await createPackage();
@@ -774,6 +988,148 @@ test("rejects a final native module replaced after realpath validation", async (
         return true;
       },
     );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+test("rejects a native module added after its leaf readdir snapshot", async () => {
+  const fixture = await createPackage();
+  const leafDirectory = dirname(
+    join(fixture.unpackedRoot, fixture.betterRelative),
+  );
+  const lateRelative = join(dirname(fixture.betterRelative), "late.node");
+  const latePath = join(fixture.unpackedRoot, lateRelative);
+  let added = false;
+  try {
+    await assert.rejects(
+      async () => {
+        const result = await verifyPackagedNativeModule(
+          context(fixture),
+          verificationOptions(fixture, {
+            readdir: async (directory, options) => {
+              const entries = await readdir(directory, options);
+              if (directory === leafDirectory && !added) {
+                await writeFile(latePath, thinMachO("arm64", "145"));
+                added = true;
+              }
+              return entries;
+            },
+          }),
+        );
+        assert.equal(
+          result.inventory.some(
+            ({ path }) => path === lateRelative.split("\\").join(posix.sep),
+          ),
+          false,
+          "verification silently omitted a module added after leaf readdir",
+        );
+      },
+      (error) => {
+        const message =
+          error instanceof Error ? error.message : String(error ?? "");
+        assert.match(message, /native module inventory .*changed/u);
+        assert.equal(message.includes(fixture.root), false);
+        assert.equal(added, true);
+        return true;
+      },
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+test("rejects a descendant directory replaced after the first scan", async () => {
+  const fixture = await createPackage();
+  const modulePath = join(fixture.unpackedRoot, fixture.betterRelative);
+  const releaseDirectory = dirname(modulePath);
+  const originalDirectory = join(fixture.root, "first-scan-release");
+  let replaced = false;
+  try {
+    await assert.rejects(
+      async () => {
+        const result = await verifyPackagedNativeModule(
+          context(fixture),
+          verificationOptions(fixture, {
+            resolveElectronAbi: async () => {
+              await rename(releaseDirectory, originalDirectory);
+              await mkdir(releaseDirectory);
+              await rename(
+                join(originalDirectory, "better_sqlite3.node"),
+                modulePath,
+              );
+              replaced = true;
+              return fixture.abi;
+            },
+          }),
+        );
+        assert.equal(result.inventory.length, 1);
+      },
+      (error) => {
+        const message =
+          error instanceof Error ? error.message : String(error ?? "");
+        assert.match(message, /native module inventory .*changed/u);
+        assert.equal(message.includes(fixture.root), false);
+        assert.equal(replaced, true);
+        return true;
+      },
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+test("rescans the stable native surface after reads and before inventory write", async () => {
+  const fixture = await createPackage();
+  let moduleReads = 0;
+  let rootReadsAfterModules = 0;
+  let inventoryWrites = 0;
+  let inventoryWritten = false;
+  try {
+    const result = await verifyPackagedNativeModule(
+      context(fixture),
+      verificationOptions(fixture, {
+        open: async (...args) => {
+          const handle = await openFile(...args);
+          return new Proxy(handle, {
+            get(target, property) {
+              if (property === "readFile") {
+                return async (...readArgs) => {
+                  const bytes = await target.readFile(...readArgs);
+                  moduleReads += 1;
+                  return bytes;
+                };
+              }
+              const value = Reflect.get(target, property, target);
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          });
+        },
+        readdir: async (directory, options) => {
+          const entries = await readdir(directory, options);
+          if (directory === fixture.unpackedRoot && moduleReads === 1) {
+            assert.equal(inventoryWritten, false);
+            rootReadsAfterModules += 1;
+          }
+          return entries;
+        },
+        writeFile: async (...args) => {
+          const path = String(args[0]);
+          if (path.endsWith("native-module-inventory-darwin-arm64.json")) {
+            assert.equal(moduleReads, 1);
+            assert.ok(rootReadsAfterModules >= 1);
+            inventoryWrites += 1;
+            inventoryWritten = true;
+          }
+          return writeFile(...args);
+        },
+      }),
+    );
+
+    assert.equal(result.inventory.length, 1);
+    assert.equal(moduleReads, 1);
+    assert.ok(rootReadsAfterModules >= 1);
+    assert.equal(inventoryWrites, 1);
   } finally {
     await removeFixture(fixture);
   }
