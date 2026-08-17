@@ -1,0 +1,287 @@
+/* eslint-disable @typescript-eslint/explicit-function-return-type */
+
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, normalize } from "node:path";
+import { test } from "node:test";
+
+const cli = new URL("./aera-diagnostic.mjs", import.meta.url).pathname;
+
+function createFixture(root) {
+  const app = join(root, "Aera.app");
+  const executable = join(app, "Contents", "MacOS", "Aera");
+  mkdirSync(join(app, "Contents", "MacOS"), { recursive: true });
+  writeFileSync(executable, "fixture executable");
+  chmodSync(executable, 0o755);
+  writeFileSync(
+    join(app, "Contents", "Info.plist"),
+    `<?xml version="1.0"?><plist><dict><key>CFBundleIdentifier</key><string>com.example.aera</string><key>CFBundleShortVersionString</key><string>0.7.4-internal-beta.32</string><key>CFBundleExecutable</key><string>Aera</string></dict></plist>`,
+  );
+
+  const hermesHome = join(root, "hermes");
+  const profileRoot = join(hermesHome, "profiles", "fault-profile");
+  const userData = join(root, "user-data");
+  mkdirSync(join(profileRoot, "logs"), { recursive: true });
+  mkdirSync(join(userData, "agentera-auth"), { recursive: true });
+  mkdirSync(join(userData, "model-configuration"), { recursive: true });
+  writeFileSync(join(hermesHome, "active_profile"), "fault-profile\n");
+  writeFileSync(join(profileRoot, ".env"), "DEMO_API_KEY=fixture-api-key\n");
+  writeFileSync(
+    join(profileRoot, "providers.json"),
+    JSON.stringify({
+      providers: [
+        { id: "demo", name: "Demo", baseUrl: "https://new.example/v1" },
+      ],
+    }),
+  );
+  writeFileSync(
+    join(hermesHome, "models.json"),
+    JSON.stringify([
+      {
+        id: "one",
+        provider: "custom:demo",
+        model: "gpt-demo",
+        baseUrl: "https://new.example/v1",
+        apiMode: "chat_completions",
+      },
+    ]),
+  );
+  writeFileSync(
+    join(hermesHome, "model-definitions.json"),
+    JSON.stringify({ "gpt-demo": { contextLength: 1000000 } }),
+  );
+  writeFileSync(
+    join(profileRoot, "config.yaml"),
+    'model:\n  default: "gpt-demo"\n  provider: "custom:demo"\n  base_url: "https://new.example/v1"\n',
+  );
+  writeFileSync(
+    join(profileRoot, "logs", "runtime.log"),
+    "[AGENTERA_RUNTIME] runtime_started pid=1\n",
+  );
+  writeFileSync(
+    join(userData, "agentera-auth", "state.json"),
+    JSON.stringify({
+      installation: { installationId: "installation-secret" },
+      productSession: {
+        personalSpaceId: "tenant-secret",
+        userId: "owner-secret",
+        encryptedRefreshToken: "refresh-secret",
+      },
+    }),
+  );
+  const db = join(userData, "model-configuration", "model-configuration.db");
+  execFileSync("sqlite3", [
+    db,
+    "CREATE TABLE desktop_model_configuration_operations (operation_id TEXT, profile_id TEXT, state TEXT, stage TEXT, owner_handle TEXT, old_route_key TEXT, new_route_key TEXT, created_at TEXT, updated_at TEXT);",
+  ]);
+  return { app, hermesHome, userData };
+}
+
+test("creates a V4 bundle with all chain sections and explicit missing evidence", () => {
+  const root = mkdtempSync(join(tmpdir(), "aera-v4-capture-test-"));
+  try {
+    const fixture = createFixture(root);
+    const output = join(root, "output");
+    const result = spawnSync(
+      process.execPath,
+      [
+        cli,
+        "--platform",
+        "macos",
+        "--app",
+        fixture.app,
+        "--hermes-home",
+        fixture.hermesHome,
+        "--user-data",
+        fixture.userData,
+        "--output",
+        output,
+        "--version",
+        "0.7.4-internal-beta.32",
+        "--no-launch",
+        "--timeout-seconds",
+        "10",
+      ],
+      {
+        encoding: "utf8",
+        env: { ...process.env, HERMES_HOME: fixture.hermesHome },
+      },
+    );
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    const zip = readdirSync(output).find((name) => name.endsWith(".zip"));
+    assert.ok(zip, "capture ZIP missing");
+    const quarantine = join(output, `${zip}.quarantine`);
+    const manifest = JSON.parse(
+      readFileSync(join(quarantine, "manifest.json"), "utf8"),
+    );
+    const identity = JSON.parse(
+      readFileSync(join(quarantine, "app-identity.json"), "utf8"),
+    );
+    assert.equal(manifest.schemaVersion, 4);
+    assert.equal(manifest.internal_stage_visibility, "external_only");
+    assert.ok(manifest.target.executableSha256);
+    assert.equal(
+      identity.installed.executablePathSha256,
+      createHash("sha256")
+        .update(
+          `aera-diagnostic-executable-path-v1\0${normalize(join(fixture.app, "Contents", "MacOS", "Aera"))}`,
+        )
+        .digest("hex"),
+    );
+    assert.ok(
+      manifest.sections.some((section) => section.name === "runtime_logs"),
+    );
+    assert.ok(
+      manifest.sections.some((section) => section.name === "model_chain"),
+    );
+    assert.ok(Array.isArray(manifest.missingEvidence));
+    assert.ok(manifest.files.some((entry) => entry.name === "journal.json"));
+    assert.ok(
+      manifest.files.some((entry) => entry.name === "macos-unified-log.txt"),
+    );
+    const all = readdirSync(quarantine)
+      .map((name) => readFileSync(join(quarantine, name)))
+      .join("\n");
+    assert.doesNotMatch(
+      all,
+      /fixture-api-key|refresh-secret|owner-secret|tenant-secret|installation-secret/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects unsupported platform/version before launching", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      cli,
+      "--platform",
+      "linux",
+      "--app",
+      "/tmp/Aera.app",
+      "--version",
+      "0.7.4-internal-beta.32",
+      "--no-launch",
+    ],
+    { encoding: "utf8" },
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(`${result.stdout}\n${result.stderr}`, /platform|macos|windows/i);
+});
+
+test("keeps an unbound Windows capture usable when ProductVersion is unavailable", () => {
+  const root = mkdtempSync(join(tmpdir(), "aera-windows-v4-capture-test-"));
+  try {
+    const fixture = createFixture(root);
+    const executable = join(fixture.app, "Contents", "MacOS", "Aera");
+    const output = join(root, "output");
+    const result = spawnSync(
+      process.execPath,
+      [
+        cli,
+        "--platform",
+        "windows",
+        "--app",
+        executable,
+        "--hermes-home",
+        fixture.hermesHome,
+        "--user-data",
+        fixture.userData,
+        "--output",
+        output,
+        "--no-launch",
+        "--timeout-seconds",
+        "10",
+      ],
+      {
+        encoding: "utf8",
+        env: { ...process.env, HERMES_HOME: fixture.hermesHome },
+      },
+    );
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    const zip = readdirSync(output).find((name) => name.endsWith(".zip"));
+    const manifest = JSON.parse(
+      readFileSync(join(output, `${zip}.quarantine`, "manifest.json"), "utf8"),
+    );
+    assert.equal(manifest.platform, "win32");
+    assert.equal(manifest.target.version, "unknown");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("keeps live PID open-file evidence after the observed process exits", () => {
+  if (process.platform !== "darwin") return;
+  const root = mkdtempSync(join(tmpdir(), "aera-v4-live-process-test-"));
+  try {
+    const fixture = createFixture(root);
+    const executable = join(fixture.app, "Contents", "MacOS", "Aera");
+    const liveLogRoot = join(root, "observed-runtime");
+    const liveLog = join(liveLogRoot, "runtime-live.log");
+    mkdirSync(liveLogRoot, { recursive: true });
+    const source = join(root, "fixture.c");
+    writeFileSync(
+      source,
+      `#include <fcntl.h>\n#include <stdio.h>\n#include <unistd.h>\nint main(void){int fd=open("${liveLog.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}",O_CREAT|O_WRONLY|O_APPEND,0600);dprintf(fd,"runtime-live-marker\\n");printf("[AGENTERA_MAIN] main_started pid=%d\\n",getpid());fflush(stdout);usleep(1200000);close(fd);return 0;}\n`,
+    );
+    const compile = spawnSync("cc", [source, "-o", executable], {
+      encoding: "utf8",
+    });
+    assert.equal(compile.status, 0, compile.stderr);
+    chmodSync(executable, 0o755);
+    const output = join(root, "output");
+    const result = spawnSync(
+      process.execPath,
+      [
+        cli,
+        "--platform",
+        "macos",
+        "--app",
+        fixture.app,
+        "--hermes-home",
+        fixture.hermesHome,
+        "--user-data",
+        fixture.userData,
+        "--output",
+        output,
+        "--timeout-seconds",
+        "10",
+      ],
+      {
+        encoding: "utf8",
+        timeout: 20_000,
+        env: { ...process.env, HERMES_HOME: fixture.hermesHome },
+      },
+    );
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    const zip = readdirSync(output).find((name) => name.endsWith(".zip"));
+    const runtime = JSON.parse(
+      readFileSync(
+        join(output, `${zip}.quarantine`, "runtime-evidence.json"),
+        "utf8",
+      ),
+    );
+    assert.equal(
+      runtime.logs.some((entry) => entry.source === "observed_open_file"),
+      true,
+    );
+    assert.doesNotMatch(
+      JSON.stringify(runtime),
+      new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

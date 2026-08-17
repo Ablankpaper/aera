@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aera-diagnostic-bundle-v4",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "collectorVersion",
+    "captureId",
+    "target",
+    "startedAt",
+    "endedAt",
+    "sections",
+    "missingEvidence",
+    "files"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 4 },
+    "collectorVersion": { "type": "string", "minLength": 1 },
+    "captureId": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$"
+    },
+    "target": { "$ref": "aera-diagnostic-target-v1.schema.json" },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "endedAt": { "type": "string", "format": "date-time" },
+    "platform": { "enum": ["darwin", "win32"] },
+    "mode": { "enum": ["external", "internal"] },
+    "finishReason": { "type": "string" },
+    "reproductionConfirmed": { "type": "boolean" },
+    "processContinuityConfirmed": { "type": "boolean" },
+    "internal_stage_visibility": { "const": "external_only" },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "status", "reason"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["collected", "missing", "failed"] },
+          "reason": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "missingEvidence": { "type": "array", "items": { "type": "string" } },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "size", "sha256"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*(?:^|/)\.\.(?:/|$)).+$"
+          },
+          "size": { "type": "integer", "minimum": 0 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" }
+        }
+      }
+    }
+  }
+}

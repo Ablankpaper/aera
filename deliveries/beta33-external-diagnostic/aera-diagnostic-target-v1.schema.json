@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aera-diagnostic-target-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "platform",
+    "version",
+    "bundleId",
+    "architecture",
+    "executableSha256",
+    "packageSha256",
+    "sourceSha",
+    "candidateManifestSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "platform": { "enum": ["darwin", "win32"] },
+    "version": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "bundleId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "applicationId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "architecture": { "enum": ["arm64", "x64"] },
+    "executableSha256": { "$ref": "#/$defs/sha256" },
+    "packageSha256": { "$ref": "#/$defs/sha256" },
+    "artifactSha256": { "$ref": "#/$defs/sha256" },
+    "appAsarSha256": { "$ref": "#/$defs/sha256" },
+    "mainSha256": { "$ref": "#/$defs/sha256" },
+    "preloadSha256": { "$ref": "#/$defs/sha256" },
+    "rendererSha256": { "$ref": "#/$defs/sha256" },
+    "sourceSha": { "type": "string", "pattern": "^[0-9a-fA-F]{40,64}$" },
+    "candidateManifestSha256": { "$ref": "#/$defs/sha256" },
+    "bindingStatus": { "enum": ["candidate-bound", "runtime-unbound"] }
+  },
+  "$defs": { "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" } }
+}

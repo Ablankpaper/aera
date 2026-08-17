@@ -238,4 +238,34 @@ Collection retains each file's device, inode, type, and size; reading opens that
 
 Every shipped native module is inspected through `scripts/release/native-module-abi.mjs` and `scripts/release/verify-packaged-native-module.mjs`.
 
+### Beta.33 external diagnostic collector V4
+
+The standalone V4 collector records one bounded, redacted session for model-configuration failures without changing Aera state or pretending that external evidence proves an internal IPC call.
+
+#### Evidence contract
+
+V4 uses a closed manifest and a single bounded evidence timeline.
+
+It contains Main/Preload/Renderer/IPC stable events, the verified Aera PID tree, process-owned network endpoints, native-module ABI inventory, SQLite database/WAL/SHM read evidence, journal summaries, five managed model files before and after, route candidates, owner/profile associations, updater events, Runtime logs, and the exact macOS unified-log request.
+
+The collector keeps a section status for every requested source. Any unavailable, failed, stale, or identity-mismatched source is named in `missingEvidence`; an empty file or old log is never presented as current evidence. `internal_stage_visibility=external_only` explicitly limits claims about Renderer-to-Preload-to-Main IPC and Coordinator stages.
+
+#### Candidate binding and launch boundary
+
+The V1 target descriptor prevents a capture from being attributed to the wrong candidate package.
+
+It binds platform, version, architecture, bundle identity, executable/package digests, source revision, and candidate-manifest digest. A mismatched descriptor fails closed. Without it, the manifest is `runtime-unbound` and cannot serve as candidate-package acceptance evidence.
+
+The macOS and Windows wrappers execute the Aera-bundled Electron runtime (`ELECTRON_RUN_AS_NODE=1` on macOS) rather than a global Node installation. They launch one verified application process, reject an already-running Aera instance, stop on one user-confirmed reproduction, and never click, retry, repair, upload, or publish.
+
+Windows ProductVersion is read from the executable when available; an unbound capture records `unknown` rather than inventing a version, while a candidate-bound target rejects that mismatch. Both platform ZIPs can be built on the release host's native archiver without requiring the other platform's shell.
+
+#### Privacy and forensic limits
+
+The shareable ZIP has a fail-closed secret boundary.
+
+It excludes credentials, tokens, cookies, private keys, full `.env` or configuration bodies, raw SQLite pages, chat content, HTTP bodies, and URL queries. Paths, profile/owner/route identities, command lines, and endpoint details are domain-separated hashes or bounded enumerations. A final secret scan is fail-closed; if it fails, no ZIP is produced.
+
+Native inventory records the actual content SHA-256 of each readable `.node` file in addition to a domain-separated path hash. A read failure remains explicit in the inventory rather than being replaced by a metadata-derived digest, so ABI evidence cannot be mistaken for a stale or synthetic fingerprint.
+
 The source-stage inventory is not final-artifact binding. `scripts/release/final-artifact-native-inventory.mjs` independently extracts every final DMG, macOS ZIP, Windows setup, portable, and app ZIP, re-hashes the complete application payload, and binds every native-module ABI, architecture, format, and digest to the exact container bytes. The canonical Internal Beta manifest rejects a missing or substituted inventory and requires every container for one platform to contain the same payload and native inventory.
