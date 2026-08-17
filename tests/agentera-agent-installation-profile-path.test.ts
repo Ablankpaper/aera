@@ -1,8 +1,14 @@
 // @vitest-environment node
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // Mock minimal structures needed to test profile path validation
@@ -25,8 +31,6 @@ function createMockProfileService(hermesHome: string): ProfileService {
 // We'll test them via a simplified test double since they're private functions
 
 function canonicalizePath(path: string): string {
-  const { resolve } = require("node:path");
-  const { realpathSync } = require("node:fs");
   try {
     return resolve(realpathSync.native(path));
   } catch {
@@ -39,7 +43,6 @@ function profilePathMatchesId(
   profileId: string,
   resolveProfilePath: (profileId: string) => string,
 ): boolean {
-  const { isAbsolute, resolve } = require("node:path");
   if (!isAbsolute(profilePath)) return false;
 
   const requested = canonicalizePath(profilePath);
@@ -145,16 +148,15 @@ describe("Agent installation profile path validation", () => {
 
   describe("symlink handling", () => {
     it("resolves symlinks consistently", () => {
-      const { symlinkSync } = require("node:fs");
       const realPath = join(hermesHome, "profiles", "real");
       const linkPath = join(hermesHome, "profiles", "link");
-      
+
       mkdirSync(join(hermesHome, "profiles"), { recursive: true });
       mkdirSync(realPath, { recursive: true });
-      
+
       try {
         symlinkSync(realPath, linkPath, "dir");
-        
+
         // Both real path and link should match if profileId is "real"
         expect(
           profilePathMatchesId(realPath, "real", profiles.resolveProfilePath),
@@ -184,7 +186,7 @@ describe("Agent installation profile path validation", () => {
     it("validates non-existent default profile path", () => {
       const nonExistent = join(testDir, "does-not-exist");
       const profiles = createMockProfileService(nonExistent);
-      
+
       // Should still validate using resolve() fallback
       const result = profilePathMatchesId(
         nonExistent,
@@ -198,7 +200,7 @@ describe("Agent installation profile path validation", () => {
       const nonExistent = join(testDir, "does-not-exist");
       const profiles = createMockProfileService(nonExistent);
       const namedPath = join(nonExistent, "profiles", "work");
-      
+
       const result = profilePathMatchesId(
         namedPath,
         "work",

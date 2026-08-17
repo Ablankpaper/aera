@@ -1,4 +1,10 @@
-import { chmodSync, existsSync, mkdirSync, realpathSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import {
   basename,
@@ -7,9 +13,198 @@ import {
   join,
   relative,
   resolve,
+  sep,
 } from "node:path";
+import type { ModelConfigurationStartupFailureCode } from "../shared/model-configuration";
 
 export const MODEL_CONFIGURATION_SCHEMA_VERSION = 1;
+
+export interface ModelConfigurationNativeStartupEvidence {
+  status: "loading" | "loaded" | "failed";
+  platform: NodeJS.Platform;
+  processArchitecture: string;
+  electronAbi: string | null;
+  electronVersion: string | null;
+  nativeModuleLocator: string;
+  detectedNativeAbi: string | null;
+  failureClass: ModelConfigurationStartupFailureCode | null;
+}
+
+export type ModelConfigurationNativeStartupEvidenceSink = (
+  evidence: ModelConfigurationNativeStartupEvidence,
+) => void;
+
+export class ModelConfigurationRuntimeError extends Error {
+  readonly code: ModelConfigurationStartupFailureCode;
+  readonly evidence: ModelConfigurationNativeStartupEvidence;
+
+  constructor(
+    code: ModelConfigurationStartupFailureCode,
+    evidence: ModelConfigurationNativeStartupEvidence,
+    options?: { cause?: unknown },
+  ) {
+    super(
+      `Aera model configuration runtime is unavailable (${code}).`,
+      options,
+    );
+    this.name = "ModelConfigurationRuntimeError";
+    this.code = code;
+    this.evidence = evidence;
+  }
+}
+
+class UnsupportedModelConfigurationSchemaError extends Error {}
+
+function errorParts(error: unknown): { code: string; message: string } {
+  if (typeof error !== "object" || error === null) {
+    return { code: "", message: String(error ?? "") };
+  }
+  const candidate = error as { code?: unknown; message?: unknown };
+  return {
+    code: typeof candidate.code === "string" ? candidate.code : "",
+    message: typeof candidate.message === "string" ? candidate.message : "",
+  };
+}
+
+function nativeModuleVersions(message: string): string[] {
+  return [...message.matchAll(/NODE_MODULE_VERSION\s+(\d+)/giu)].map(
+    (match) => match[1],
+  );
+}
+
+function nativeBinaryVersions(bytes: Buffer): string[] {
+  return [
+    ...bytes.toString("latin1").matchAll(/node_register_module_v(\d+)/gu),
+  ].map((match) => match[1]);
+}
+
+export function classifyNativeLoadFailure(
+  error: unknown,
+): ModelConfigurationStartupFailureCode | null {
+  const { code, message } = errorParts(error);
+  const versions = nativeModuleVersions(message);
+  if (new Set(versions).size >= 2) return "native_module_abi_mismatch";
+
+  const nativeLoad =
+    code === "ERR_DLOPEN_FAILED" ||
+    /(?:dlopen|\.node(?:\b|['")]))/iu.test(message);
+  if (!nativeLoad) return null;
+  if (
+    /(?:incompatible|wrong) architecture|bad cpu type|not a valid win32 application/iu.test(
+      message,
+    )
+  ) {
+    return "native_module_architecture_mismatch";
+  }
+  if (
+    /library not loaded|cannot open shared object file|image not found|specified module could not be found/iu.test(
+      message,
+    )
+  ) {
+    return "native_module_dependency_missing";
+  }
+  if (
+    code === "EACCES" ||
+    code === "EPERM" ||
+    /permission denied|operation not permitted|access is denied/iu.test(message)
+  ) {
+    return "native_module_load_denied";
+  }
+  return "native_module_load_failed";
+}
+
+interface NativeModuleInspection {
+  locator: string;
+  abi: string | null;
+}
+
+const UNRESOLVED_NATIVE_MODULE_LOCATOR =
+  "better-sqlite3/native-binding-unresolved";
+
+function inspectDefaultNativeModule(): NativeModuleInspection {
+  try {
+    const moduleEntry = localRequire.resolve("better-sqlite3");
+    const moduleRoot = resolve(dirname(moduleEntry), "..");
+    const resolveBinding = localRequire("bindings") as (options: {
+      bindings: string;
+      module_root: string;
+      path: true;
+    }) => unknown;
+    const nativeModulePath = resolveBinding({
+      bindings: "better_sqlite3.node",
+      module_root: moduleRoot,
+      path: true,
+    });
+    if (typeof nativeModulePath !== "string") {
+      return { locator: UNRESOLVED_NATIVE_MODULE_LOCATOR, abi: null };
+    }
+    const moduleRelative = relative(moduleRoot, nativeModulePath);
+    if (
+      moduleRelative === "" ||
+      moduleRelative === ".." ||
+      moduleRelative.startsWith(`..${sep}`) ||
+      isAbsolute(moduleRelative)
+    ) {
+      return { locator: UNRESOLVED_NATIVE_MODULE_LOCATOR, abi: null };
+    }
+    const locator = `better-sqlite3/${moduleRelative.split(sep).join("/")}`;
+    const markers = new Set(
+      nativeBinaryVersions(readFileSync(nativeModulePath)),
+    );
+    return {
+      locator,
+      abi: markers.size === 1 ? [...markers][0] : null,
+    };
+  } catch {
+    return { locator: UNRESOLVED_NATIVE_MODULE_LOCATOR, abi: null };
+  }
+}
+
+function startupEvidence(
+  status: ModelConfigurationNativeStartupEvidence["status"],
+  nativeModule: NativeModuleInspection,
+  failureClass: ModelConfigurationStartupFailureCode | null,
+): ModelConfigurationNativeStartupEvidence {
+  return {
+    status,
+    platform: process.platform,
+    processArchitecture: process.arch,
+    electronAbi: process.versions.modules ?? null,
+    electronVersion: process.versions.electron ?? null,
+    nativeModuleLocator: nativeModule.locator,
+    detectedNativeAbi: nativeModule.abi,
+    failureClass,
+  };
+}
+
+function defaultNativeStartupEvidenceSink(
+  evidence: ModelConfigurationNativeStartupEvidence,
+): void {
+  console.info(
+    "[MODEL_CONFIGURATION_NATIVE_STARTUP]",
+    JSON.stringify(evidence),
+  );
+}
+
+function emitNativeStartupEvidence(
+  sink: ModelConfigurationNativeStartupEvidenceSink,
+  evidence: ModelConfigurationNativeStartupEvidence,
+): void {
+  try {
+    sink(evidence);
+  } catch {
+    // Diagnostics must not change database startup behavior.
+  }
+}
+
+function runtimeError(
+  code: ModelConfigurationStartupFailureCode,
+  cause: unknown,
+  evidence: ModelConfigurationNativeStartupEvidence,
+): ModelConfigurationRuntimeError {
+  if (cause instanceof ModelConfigurationRuntimeError) return cause;
+  return new ModelConfigurationRuntimeError(code, evidence, { cause });
+}
 
 export interface ModelConfigurationSqliteRunResult {
   changes: number | bigint;
@@ -35,6 +230,7 @@ export interface ModelConfigurationDatabasePaths {
 
 export interface OpenModelConfigurationDatabaseOptions {
   databaseFactory?: (path: string) => ModelConfigurationSqliteDatabase;
+  nativeStartupEvidenceSink?: ModelConfigurationNativeStartupEvidenceSink;
 }
 
 const localRequire = createRequire(
@@ -111,18 +307,27 @@ export function resolveModelConfigurationDatabasePaths(
   };
 }
 
-function initializeSchema(sqlite: ModelConfigurationSqliteDatabase): void {
+function readSchemaVersion(sqlite: ModelConfigurationSqliteDatabase): number {
   const current = sqlite.prepare("PRAGMA user_version").get() as
     | Record<string, unknown>
     | undefined;
   const currentVersion = current ? Number(Object.values(current)[0]) : 0;
   if (
-    !Number.isSafeInteger(currentVersion) ||
-    currentVersion < 0 ||
+    Number.isSafeInteger(currentVersion) &&
     currentVersion > MODEL_CONFIGURATION_SCHEMA_VERSION
   ) {
+    throw new UnsupportedModelConfigurationSchemaError();
+  }
+  if (!Number.isSafeInteger(currentVersion) || currentVersion < 0) {
     throw new Error("Unsupported Aera model configuration database version.");
   }
+  return currentVersion;
+}
+
+function initializeSchema(
+  sqlite: ModelConfigurationSqliteDatabase,
+  currentVersion: number,
+): void {
   if (currentVersion === MODEL_CONFIGURATION_SCHEMA_VERSION) return;
 
   sqlite.exec("BEGIN IMMEDIATE");
@@ -194,16 +399,38 @@ export function openModelConfigurationDatabase(
   mkdirSync(paths.rootPath, { recursive: true, mode: 0o700 });
   chmodSync(paths.rootPath, 0o700);
   assertOutsideHermesHome(realpathSync.native(paths.rootPath));
-  const sqlite = (options.databaseFactory ?? defaultDatabaseFactory)(
-    paths.databasePath,
+  const nativeModule = inspectDefaultNativeModule();
+  const evidenceSink =
+    options.nativeStartupEvidenceSink ?? defaultNativeStartupEvidenceSink;
+  emitNativeStartupEvidence(
+    evidenceSink,
+    startupEvidence("loading", nativeModule, null),
   );
+  let sqlite: ModelConfigurationSqliteDatabase;
   try {
+    sqlite = (options.databaseFactory ?? defaultDatabaseFactory)(
+      paths.databasePath,
+    );
+  } catch (error) {
+    const code =
+      classifyNativeLoadFailure(error) ??
+      "model_configuration_database_unavailable";
+    const evidence = startupEvidence("failed", nativeModule, code);
+    emitNativeStartupEvidence(evidenceSink, evidence);
+    throw runtimeError(code, error, evidence);
+  }
+  try {
+    const currentVersion = readSchemaVersion(sqlite);
     sqlite.exec("PRAGMA journal_mode=WAL");
     sqlite.exec("PRAGMA synchronous=FULL");
     sqlite.exec("PRAGMA foreign_keys=ON");
     sqlite.exec("PRAGMA busy_timeout=5000");
-    initializeSchema(sqlite);
+    initializeSchema(sqlite, currentVersion);
     if (existsSync(paths.databasePath)) chmodSync(paths.databasePath, 0o600);
+    emitNativeStartupEvidence(
+      evidenceSink,
+      startupEvidence("loaded", nativeModule, null),
+    );
     return new ModelConfigurationDatabase(paths, sqlite);
   } catch (error) {
     try {
@@ -211,6 +438,12 @@ export function openModelConfigurationDatabase(
     } catch {
       // Preserve the original initialization error.
     }
-    throw error;
+    const code =
+      error instanceof UnsupportedModelConfigurationSchemaError
+        ? "model_configuration_schema_unsupported"
+        : "model_configuration_database_unavailable";
+    const evidence = startupEvidence("failed", nativeModule, code);
+    emitNativeStartupEvidence(evidenceSink, evidence);
+    throw runtimeError(code, error, evidence);
   }
 }

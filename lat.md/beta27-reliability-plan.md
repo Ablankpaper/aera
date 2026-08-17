@@ -81,3 +81,33 @@ A dynamic provider or endpoint switch is admitted only when the connected Runtim
 The planned gate uses fresh Electron/Hermes roots, fixture Cloud state, and two loopback providers to cover save/restart, catalog consistency, A-to-B switching, policy modes, attachments, remote failure, and one Organization conflict.
 
 Focused tests, build, and isolated Electron evidence remain separate from exact-head CI, merged-main CI, artifact publication, updater delivery, and physical internal-client acceptance.
+
+### Native startup failure classification
+
+Native/database startup failures are classified by [[src/main/model-configuration-database.ts#classifyNativeLoadFailure]] into stable secret-free causes; only two distinct `NODE_MODULE_VERSION` values establish an ABI mismatch.
+
+Repeated copies of one ABI value remain a generic native load failure. The journal reads and validates `user_version` before `journal_mode=WAL` or any write-oriented pragma, so a future DELETE-journal schema is rejected without changing bytes, hash, key file stat, journal mode, or directory entries.
+
+Main emits structured `loading` then `loaded` or `failed` evidence around the database/native loading boundary. It records the process ABI, Electron version, platform and architecture, a package-relative native locator, the ABI marker read from the actual binary, and a stable failure class; raw errors and absolute paths remain Main-only causes.
+
+### Database startup identity reaches IPC
+
+[[src/main/model-configuration-runtime.ts#prepareModelConfigurationRuntime]] creates one opaque diagnostic ID and [[src/main/ipc/model-configuration-bridge.ts#coordinatorUnavailableMutation]] preserves the exact cause without exposing raw native or database errors.
+
+The propagation keeps `model_configuration_schema_unsupported` distinct from a general database-unavailable failure while leaving the journal rejection itself fail-closed.
+
+Only `model_configuration_recovery_required` projects to the recovery stage with recovery-required rollback. Native, database, and schema startup failures project to validation with no rollback needed while preserving the same code and diagnostic ID.
+
+### Complete packaged native inventory
+
+The afterPack gate rejects unreadable, structurally invalid, platform-incompatible, or ambiguous `.node` input and records deterministic ABI, architecture, and SHA-256 evidence.
+
+Darwin inventory accepts only validated 64-bit Mach-O bundles and slices. Every `LC_SEGMENT_64` has an exact section-table size and a safe in-slice file range, non-empty mapped segments cannot overlap, and exactly one readable/executable `__TEXT` segment starts at file offset zero and covers the header plus load commands. Win32 accepts only PE32+ executable DLL images with power-of-two file and section alignment, bounded aligned headers and image size, non-overlapping aligned raw and virtual section ranges, and at least one non-empty readable executable code section. ABI markers are read only from validated mapped segment or section ranges, and every in-memory and persisted module record includes the stable `mach-o` or `pe` format.
+
+The unpacked root and every descendant are checked with `lstat`, and every resolved path must remain inside the canonical root. Each traversed directory snapshot retains device, inode, type, size, canonical path and identity, plus its sorted direct child name/type surface, then revalidates those observations bottom-up with `lstat`, `realpath`, and `readdir`.
+
+Collection retains each file's device, inode, type, and size; reading opens that path with no-follow where available, matches `fstat` on the same handle, reads that handle once, and then closes it. After every native module has been read and inspected, the verifier performs a second complete stable scan and compares the entire relative-path surface by device, inode, type, and size before it writes the inventory.
+
+Every shipped native module is inspected through `scripts/release/native-module-abi.mjs` and `scripts/release/verify-packaged-native-module.mjs`.
+
+This source-stage inventory is not final-artifact binding; DMG, updater ZIP, setup, and portable bytes still require independent extraction and binding before a candidate can be accepted.

@@ -110,6 +110,23 @@ export type ModelConfigurationMutationRequest =
   | UpsertModelServiceRequest
   | DeleteModelServiceRequest;
 
+/** Stable, Renderer-safe causes for an unavailable model configuration runtime. */
+export type ModelConfigurationStartupFailureCode =
+  | "native_module_abi_mismatch"
+  | "native_module_architecture_mismatch"
+  | "native_module_dependency_missing"
+  | "native_module_load_denied"
+  | "native_module_load_failed"
+  | "model_configuration_database_unavailable"
+  | "model_configuration_schema_unsupported"
+  | "model_configuration_recovery_required";
+
+/** Public startup failure identity. Raw native/database errors stay in Main. */
+export interface ModelConfigurationStartupFailure {
+  code: ModelConfigurationStartupFailureCode;
+  diagnosticId: string;
+}
+
 export type ModelConfigurationMutationResult =
   | { status: "committed"; catalog: OwnerModelRouteCatalogSnapshot }
   | {
@@ -122,8 +139,10 @@ export type ModelConfigurationMutationResult =
       stage: ModelConfigurationStage;
       code:
         | `model_save_${ModelConfigurationStage}_failed`
-        | "model_configuration_recovery_required";
+        | ModelConfigurationStartupFailureCode;
       rollback: "not_needed" | "restored" | "recovery_required";
+      /** Opaque correlation id for startup/unavailable-runtime failures. */
+      diagnosticId?: string;
       /**
        * Set only when the caller's `expectedCatalogRevision` did not match the
        * coordinator's current catalog — the one rejection a caller can fix by

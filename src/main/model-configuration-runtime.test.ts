@@ -367,4 +367,133 @@ describe("model-configuration runtime", () => {
       handle.close();
     }
   });
+
+  it.each([
+    "native_module_abi_mismatch",
+    "native_module_architecture_mismatch",
+    "native_module_dependency_missing",
+    "native_module_load_denied",
+    "native_module_load_failed",
+    "model_configuration_database_unavailable",
+    "model_configuration_schema_unsupported",
+  ] as const)(
+    "preserves the %s startup cause with one redacted diagnostic id",
+    async (code) => {
+      const root = mkdtempSync(join(tmpdir(), "aera-model-runtime-startup-"));
+      roots.push(root);
+      const runtime = await import("./model-configuration-runtime");
+      const { ModelConfigurationRuntimeError } =
+        await import("./model-configuration-database");
+      const databaseError = new ModelConfigurationRuntimeError(code, {
+        status: "failed",
+        platform: process.platform,
+        processArchitecture: process.arch,
+        electronAbi: process.versions.modules ?? null,
+        electronVersion: process.versions.electron ?? null,
+        nativeModuleLocator: "better-sqlite3/native-binding-unresolved",
+        detectedNativeAbi: null,
+        failureClass: code,
+      });
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const handle = await runtime.prepareModelConfigurationRuntime({
+        userDataPath: join(root, "user-data"),
+        getOwner: () => OWNER,
+        profileBindings: {
+          verifyProfileBinding: () => {
+            throw new Error("not used during startup classification");
+          },
+        },
+        getConnectionConfig: () => ({ mode: "local" }),
+        openDatabase: () => {
+          throw databaseError;
+        },
+      });
+
+      expect(handle.coordinator).toBeNull();
+      expect(handle.startupFailure).toEqual({
+        code,
+        diagnosticId: expect.stringMatching(/^[0-9a-f]{12}$/u),
+      });
+      expect(log).toHaveBeenCalledOnce();
+      expect(log).toHaveBeenCalledWith(
+        "[MODEL_CONFIGURATION] unavailable",
+        handle.startupFailure!.diagnosticId,
+        code,
+      );
+      expect(JSON.stringify(handle.startupFailure)).not.toMatch(
+        /path|\.node|detail|message/iu,
+      );
+      handle.close();
+    },
+  );
+
+  it("classifies a post-open cold recovery failure separately", async () => {
+    const root = mkdtempSync(join(tmpdir(), "aera-model-runtime-recovery-"));
+    roots.push(root);
+    const hermesHome = join(root, "hermes");
+    const userData = join(root, "user-data");
+    mkdirSync(hermesHome, { recursive: true });
+    process.env.HERMES_HOME = hermesHome;
+    vi.resetModules();
+    vi.doUnmock("./installer");
+    const actualInstaller =
+      await vi.importActual<typeof import("./installer")>("./installer");
+    vi.doMock("./installer", () => actualInstaller);
+    const [
+      { AgenteraProfileBindingStore },
+      runtime,
+      modelDatabase,
+      coordinator,
+    ] = await Promise.all([
+      import("./agentera-profile-binding"),
+      import("./model-configuration-runtime"),
+      import("./model-configuration-database"),
+      import("./model-configuration-coordinator"),
+    ]);
+    const bindings = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage: {
+        isEncryptionAvailable: () => true,
+        encryptString: (value: string) => Buffer.from(value, "utf8"),
+        decryptString: (value: Buffer) => value.toString("utf8"),
+      },
+    });
+    bindings.bindExistingProfile(hermesHome, OWNER);
+    const recover = vi
+      .spyOn(
+        coordinator.ModelConfigurationCoordinator.prototype,
+        "recoverIncompleteOperations",
+      )
+      .mockRejectedValue(new Error("private journal read failure"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const handle = await runtime.prepareModelConfigurationRuntime({
+      userDataPath: userData,
+      getOwner: () => OWNER,
+      profileBindings: bindings,
+      getConnectionConfig: () => ({ mode: "local" }),
+      openDatabase: (path) =>
+        modelDatabase.openModelConfigurationDatabase(path, {
+          databaseFactory: (databasePath) =>
+            new DatabaseSync(
+              databasePath,
+            ) as unknown as ModelConfigurationSqliteDatabase,
+        }),
+    });
+    recover.mockRestore();
+
+    expect(handle.coordinator).toBeNull();
+    expect(handle.startupFailure).toEqual({
+      code: "model_configuration_recovery_required",
+      diagnosticId: expect.stringMatching(/^[0-9a-f]{12}$/u),
+    });
+    expect(log).toHaveBeenCalledWith(
+      "[MODEL_CONFIGURATION] unavailable",
+      handle.startupFailure!.diagnosticId,
+      "model_configuration_recovery_required",
+    );
+    expect(JSON.stringify(handle.startupFailure)).not.toContain("journal");
+    handle.close();
+  });
 });

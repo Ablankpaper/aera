@@ -4,6 +4,7 @@ import {
   isSafeToRetryStaleRevision,
   type ModelConfigurationMutationResult,
   type ModelConfigurationStage,
+  type ModelConfigurationStartupFailureCode,
   type OwnerModelRouteCatalogSnapshot,
 } from "./model-configuration";
 
@@ -33,6 +34,29 @@ describe("model configuration contract", () => {
     expect(JSON.stringify(snapshot)).not.toMatch(
       /apiKey|credentialRef|secret/i,
     );
+  });
+
+  it("keeps startup failures distinct from a replayable stale revision", () => {
+    const startupCodes: ModelConfigurationStartupFailureCode[] = [
+      "native_module_abi_mismatch",
+      "native_module_architecture_mismatch",
+      "native_module_dependency_missing",
+      "native_module_load_denied",
+      "native_module_load_failed",
+      "model_configuration_database_unavailable",
+      "model_configuration_schema_unsupported",
+      "model_configuration_recovery_required",
+    ];
+    for (const code of startupCodes) {
+      expect(
+        isSafeToRetryStaleRevision({
+          status: "rejected",
+          stage: "validation",
+          code,
+          rollback: "not_needed",
+        }),
+      ).toBe(false);
+    }
   });
 });
 

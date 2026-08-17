@@ -743,6 +743,7 @@ export async function startMainProcess(
     agenteraEncryptedBackup,
     agenteraDesktopControl,
     modelConfigurationCoordinator: modelConfigurationRuntime.coordinator,
+    modelConfigurationStartupFailure: modelConfigurationRuntime.startupFailure,
     ownerModelRouteCatalog: modelConfigurationRuntime.catalog,
   });
 
