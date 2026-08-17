@@ -106,6 +106,7 @@ describe("ModelConfigurationDatabase", () => {
     );
   });
 
+  // @lat: [[beta27-reliability-plan#Acceptance and release boundary#Native startup failure classification]]
   it.each([
     {
       name: "ABI mismatch",

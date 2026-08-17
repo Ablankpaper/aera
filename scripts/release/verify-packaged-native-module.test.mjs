@@ -324,6 +324,7 @@ test("requires better-sqlite3 in the final unpacked native surface", async () =>
   }
 });
 
+// @lat: [[beta27-reliability-plan#Acceptance and release boundary#Complete packaged native inventory]]
 test("persists a sorted hashed macOS inventory and reads each module once", async () => {
   const fixture = await createPackage();
   const otherRelative = join(

@@ -81,3 +81,19 @@ A dynamic provider or endpoint switch is admitted only when the connected Runtim
 The planned gate uses fresh Electron/Hermes roots, fixture Cloud state, and two loopback providers to cover save/restart, catalog consistency, A-to-B switching, policy modes, attachments, remote failure, and one Organization conflict.
 
 Focused tests, build, and isolated Electron evidence remain separate from exact-head CI, merged-main CI, artifact publication, updater delivery, and physical internal-client acceptance.
+
+### Native startup failure classification
+
+Native/database startup failures are classified by [[src/main/model-configuration-database.ts#classifyNativeLoadFailure]] into stable secret-free causes; a bare loader error is not ABI evidence, and a future journal schema is refused without mutation.
+
+### Database startup identity reaches IPC
+
+[[src/main/model-configuration-runtime.ts#prepareModelConfigurationRuntime]] creates one opaque diagnostic ID and [[src/main/ipc/model-configuration-bridge.ts#coordinatorUnavailableMutation]] preserves the exact cause without exposing raw native or database errors.
+
+### Complete packaged native inventory
+
+The afterPack gate rejects unreadable or ambiguous `.node` input and records deterministic ABI, architecture, and SHA-256 evidence.
+
+Every shipped native module is inspected through `scripts/release/native-module-abi.mjs` and `scripts/release/verify-packaged-native-module.mjs`.
+
+This source-stage inventory is not final-artifact binding; DMG, updater ZIP, setup, and portable bytes still require independent extraction and binding before a candidate can be accepted.

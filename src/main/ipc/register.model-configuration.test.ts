@@ -143,6 +143,7 @@ async function unavailableMutationFactory(): Promise<CoordinatorUnavailableMutat
 }
 
 describe("coordinatorUnavailableMutation", () => {
+  // @lat: [[beta27-reliability-plan#Acceptance and release boundary#Database startup identity reaches IPC]]
   it.each([
     "native_module_abi_mismatch",
     "native_module_architecture_mismatch",
