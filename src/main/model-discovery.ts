@@ -20,12 +20,15 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { readEnv, getModelContextLengthOverride } from "./config";
 import { profileHome } from "./utils";
-import {
-  expectedEnvKeyForModel,
-  HERMES_HOME,
-  getEnhancedPath,
-} from "./installer";
+import { expectedEnvKeyForModel, getEnhancedPath } from "./installer";
 import { getRuntimeInvocation } from "./agentera-runtime-distribution/invocation";
+import {
+  isProviderDiscoverySuccess,
+  providerDiscoveryFailure,
+  providerDiscoverySuccess,
+  type ProviderDiscoveryResultV2,
+  type ProviderDiscoveryFailureStatusV2,
+} from "../shared/provider-model-discovery";
 // PROVIDER_BASE_URLS lives in its own module so `config.ts` can use the
 // same lookup without pulling in this whole file (and triggering a
 // circular import via `model-discovery → config → ...`).
@@ -97,52 +100,140 @@ const PROVIDER_MODELS_SNIPPET =
   "import json,sys; from hermes_cli.models import provider_model_ids; " +
   "print(json.dumps(list(provider_model_ids(sys.argv[1]))))";
 
+type OAuthPythonDiscovery = {
+  models: string[] | null;
+  terminalStatus?: "timeout" | "cancelled";
+};
+
+function isAbortError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { name?: unknown; code?: unknown };
+  return candidate.name === "AbortError" || candidate.code === "ABORT_ERR";
+}
+
+function isTimeoutError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: unknown; killed?: unknown };
+  return candidate.code === "ETIMEDOUT" || candidate.killed === true;
+}
+
 /** Ask hermes-agent's `provider_model_ids` for a provider's models by
- *  running a short Python snippet against the bundled venv. Returns the
- *  parsed list, or null on any failure (so the caller can fall back). */
-function runProviderModelIdsPython(provider: string): Promise<string[] | null> {
+ *  running a short Python snippet against the bundled venv. Generic runtime
+ *  failures return null so the caller can use the curated fallback; explicit
+ *  cancellation and timeout remain typed outcomes and never masquerade as a
+ *  successful fallback catalogue. */
+function runProviderModelIdsPython(
+  provider: string,
+  profile: string | undefined,
+  options: ProviderDiscoveryRequestOptions,
+): Promise<OAuthPythonDiscovery> {
+  if (options.signal?.aborted) {
+    return Promise.resolve({ models: null, terminalStatus: "cancelled" });
+  }
   const invocation = getRuntimeInvocation();
-  if (invocation === null) return Promise.resolve(null);
+  if (invocation === null) return Promise.resolve({ models: null });
+  const timeoutMs = normalizeDiscoveryTimeout(
+    options.timeoutMs ?? DEFAULT_OAUTH_DISCOVERY_TIMEOUT_MS,
+  );
   return new Promise((resolve) => {
-    execFile(
-      invocation.python,
-      ["-c", PROVIDER_MODELS_SNIPPET, provider],
-      {
-        cwd: invocation.workingDirectory,
-        env: invocation.environment({
-          ...process.env,
-          PATH: getEnhancedPath(),
-          HERMES_HOME,
-        }),
-        timeout: 20_000,
-        windowsHide: true,
-      },
-      (err, stdout) => {
-        if (err) {
-          resolve(null);
-          return;
-        }
-        try {
-          const parsed: unknown = JSON.parse(String(stdout).trim());
-          if (Array.isArray(parsed)) {
-            resolve(parsed.filter((x): x is string => typeof x === "string"));
+    let settled = false;
+    let child: ReturnType<typeof execFile> | undefined;
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onAbort);
+    };
+    const finish = (result: OAuthPythonDiscovery): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(result);
+    };
+    const terminate = (): void => {
+      try {
+        child?.kill();
+      } catch {
+        // The process may have exited between classification and kill.
+      }
+    };
+    const onAbort = (): void => {
+      finish({ models: null, terminalStatus: "cancelled" });
+      terminate();
+    };
+
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    const timer = setTimeout(() => {
+      finish({ models: null, terminalStatus: "timeout" });
+      terminate();
+    }, timeoutMs);
+    timer.unref?.();
+
+    try {
+      child = execFile(
+        invocation.python,
+        ["-c", PROVIDER_MODELS_SNIPPET, provider],
+        {
+          cwd: invocation.workingDirectory,
+          env: invocation.environment({
+            ...process.env,
+            PATH: getEnhancedPath(),
+            // Hermes treats HERMES_HOME as the selected profile root. Passing
+            // it explicitly prevents OAuth credentials/model catalogs from
+            // leaking across Desktop profiles.
+            HERMES_HOME: profileHome(profile),
+          }),
+          timeout: timeoutMs,
+          signal: options.signal,
+          windowsHide: true,
+        },
+        (err, stdout) => {
+          if (settled) return;
+          if (options.signal?.aborted || isAbortError(err)) {
+            finish({ models: null, terminalStatus: "cancelled" });
             return;
           }
-        } catch {
-          /* unparseable — fall through */
-        }
-        resolve(null);
-      },
-    );
+          if (isTimeoutError(err)) {
+            finish({ models: null, terminalStatus: "timeout" });
+            return;
+          }
+          if (err) {
+            finish({ models: null });
+            return;
+          }
+          try {
+            const parsed: unknown = JSON.parse(String(stdout).trim());
+            if (Array.isArray(parsed)) {
+              finish({
+                models: parsed.filter(
+                  (x): x is string => typeof x === "string",
+                ),
+              });
+              return;
+            }
+          } catch {
+            /* unparseable — fall through */
+          }
+          finish({ models: null });
+        },
+      );
+    } catch {
+      finish({ models: null });
+    }
   });
 }
 
 /** Resolve an OAuth provider's models: hermes-agent's live list first,
  *  curated fallback when that's unavailable. */
-async function discoverOAuthModels(provider: string): Promise<string[]> {
-  const live = await runProviderModelIdsPython(provider);
-  if (live && live.length > 0) return uniqueSorted(live);
-  return OAUTH_PROVIDER_CURATED[provider] ?? [];
+async function discoverOAuthModels(
+  provider: string,
+  profile: string | undefined,
+  options: ProviderDiscoveryRequestOptions,
+): Promise<OAuthPythonDiscovery> {
+  const live = await runProviderModelIdsPython(provider, profile, options);
+  if (live.terminalStatus) return live;
+  if (live.models && live.models.length > 0) {
+    return { models: uniqueSorted(live.models) };
+  }
+  return { models: OAUTH_PROVIDER_CURATED[provider] ?? [] };
 }
 
 /**
@@ -159,8 +250,10 @@ async function discoverOAuthModels(provider: string): Promise<string[]> {
  */
 async function fetchNousFreeModelIds(
   profile: string | undefined,
+  options: ProviderDiscoveryRequestOptions = {},
 ): Promise<string[]> {
   try {
+    if (options.signal?.aborted) return [];
     const authPath = join(profileHome(profile), "auth.json");
     if (!existsSync(authPath)) return [];
     const auth = JSON.parse(readFileSync(authPath, "utf-8")) as {
@@ -173,70 +266,119 @@ async function fetchNousFreeModelIds(
     if (!token || !base) return [];
 
     const url = `${base.replace(/\/+$/, "")}/models`;
+    const timeoutMs = normalizeDiscoveryTimeout(
+      options.timeoutMs ?? DEFAULT_DISCOVERY_TIMEOUT_MS,
+    );
     return await new Promise<string[]>((resolve) => {
+      let settled = false;
+      let request: http.ClientRequest | null = null;
+      const finish = (models: string[]): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        options.signal?.removeEventListener("abort", onAbort);
+        resolve(models);
+      };
+      const terminate = (): void => {
+        try {
+          request?.destroy();
+        } catch {
+          // The request may already be closed.
+        }
+      };
+      const onAbort = (): void => {
+        finish([]);
+        terminate();
+      };
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+      const timer = setTimeout(() => {
+        finish([]);
+        terminate();
+      }, timeoutMs);
+      timer.unref?.();
       const u = new URL(url);
       const mod = u.protocol === "https:" ? https : http;
-      const req = mod.request(
-        {
-          method: "GET",
-          protocol: u.protocol,
-          hostname: u.hostname,
-          port: u.port || undefined,
-          path: `${u.pathname}${u.search}`,
-          headers: {
-            Accept: "application/json",
-            Authorization: `Bearer ${token}`,
+      try {
+        request = mod.request(
+          {
+            method: "GET",
+            protocol: u.protocol,
+            hostname: u.hostname,
+            port: u.port || undefined,
+            path: `${u.pathname}${u.search}`,
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            timeout: timeoutMs,
           },
-          timeout: 10_000,
-        },
-        (res) => {
-          if (!res.statusCode || res.statusCode >= 400) {
-            res.resume();
-            resolve([]);
-            return;
-          }
-          let body = "";
-          res.setEncoding("utf-8");
-          res.on("data", (chunk) => {
-            body += chunk;
-          });
-          res.on("end", () => {
-            try {
-              const j = JSON.parse(body) as {
-                data?: Array<{
-                  id?: string;
-                  pricing?: { prompt?: string; completion?: string };
-                }>;
-              };
-              const free = (j.data || [])
-                .filter((m) => {
-                  // Free iff both prompt and completion cost zero. The
-                  // Portal returns them as strings like "0.0000000000".
-                  const pr = String(m.pricing?.prompt ?? "").trim();
-                  const co = String(m.pricing?.completion ?? "").trim();
-                  return (
-                    pr !== "" &&
-                    co !== "" &&
-                    parseFloat(pr) === 0 &&
-                    parseFloat(co) === 0
-                  );
-                })
-                .map((m) => String(m.id || "").trim())
-                .filter(Boolean);
-              resolve(uniqueSorted(free));
-            } catch {
-              resolve([]);
+          (res) => {
+            if (settled) {
+              res.resume();
+              return;
             }
-          });
-          res.on("error", () => resolve([]));
-        },
-      );
-      req.on("error", () => resolve([]));
-      req.on("timeout", () => {
-        req.destroy();
-        resolve([]);
-      });
-      req.end();
+            if (!res.statusCode || res.statusCode >= 400) {
+              res.resume();
+              finish([]);
+              return;
+            }
+            let body = "";
+            let bodyBytes = 0;
+            let oversized = false;
+            res.setEncoding("utf-8");
+            res.on("data", (chunk) => {
+              if (settled || oversized) return;
+              bodyBytes += Buffer.byteLength(String(chunk), "utf8");
+              if (bodyBytes > MAX_DISCOVERY_BODY_BYTES) {
+                oversized = true;
+                finish([]);
+                res.destroy();
+                return;
+              }
+              body += chunk;
+            });
+            res.on("end", () => {
+              if (settled || oversized) return;
+              try {
+                const j = JSON.parse(body) as {
+                  data?: Array<{
+                    id?: string;
+                    pricing?: { prompt?: string; completion?: string };
+                  }>;
+                };
+                const free = (j.data || [])
+                  .filter((m) => {
+                    // Free iff both prompt and completion cost zero. The
+                    // Portal returns them as strings like "0.0000000000".
+                    const pr = String(m.pricing?.prompt ?? "").trim();
+                    const co = String(m.pricing?.completion ?? "").trim();
+                    return (
+                      pr !== "" &&
+                      co !== "" &&
+                      parseFloat(pr) === 0 &&
+                      parseFloat(co) === 0
+                    );
+                  })
+                  .map((m) => String(m.id || "").trim())
+                  .filter(Boolean);
+                finish(uniqueSorted(free));
+              } catch {
+                finish([]);
+              }
+            });
+            res.on("aborted", () => finish([]));
+            res.on("error", () => finish([]));
+          },
+        );
+        request.on("error", () => finish([]));
+        request.on("timeout", () => {
+          finish([]);
+          terminate();
+        });
+        request.end();
+      } catch {
+        finish([]);
+      }
     });
   } catch {
     return [];
@@ -276,16 +418,30 @@ function credentialFingerprint(apiKey: string): string {
     .digest("hex");
 }
 
-function cacheKey(provider: string, baseUrl: string, apiKey: string): string {
-  return `${provider.toLowerCase()}|${baseUrl.replace(/\/+$/, "").toLowerCase()}|${credentialFingerprint(apiKey)}`;
+function profileFingerprint(profile: string | undefined): string {
+  const normalized = (profile || "default").trim() || "default";
+  return createHash("sha256")
+    .update("aera-model-discovery-profile\0", "utf8")
+    .update(normalized, "utf8")
+    .digest("hex");
+}
+
+function cacheKey(
+  provider: string,
+  baseUrl: string,
+  apiKey: string,
+  profile?: string,
+): string {
+  return `${provider.toLowerCase()}|${baseUrl.replace(/\/+$/, "").toLowerCase()}|${credentialFingerprint(apiKey)}|${profileFingerprint(profile)}`;
 }
 
 function fromCache(
   provider: string,
   baseUrl: string,
   apiKey: string,
+  profile?: string,
 ): string[] | null {
-  const key = cacheKey(provider, baseUrl, apiKey);
+  const key = cacheKey(provider, baseUrl, apiKey, profile);
   const entry = _cache.get(key);
   if (!entry) return null;
   if (Date.now() - entry.ts > CACHE_TTL_MS) {
@@ -300,8 +456,9 @@ function setCache(
   baseUrl: string,
   apiKey: string,
   models: string[],
+  profile?: string,
 ): void {
-  _cache.set(cacheKey(provider, baseUrl, apiKey), {
+  _cache.set(cacheKey(provider, baseUrl, apiKey, profile), {
     models,
     ts: Date.now(),
   });
@@ -324,11 +481,6 @@ function envApiKeyFor(
   if (!envKey) return "";
   const env = readEnv(profile);
   return (env[envKey] || "").trim().replace(/^["']|["']$/g, "");
-}
-
-interface DiscoveryRawResponse {
-  data?: Array<{ id?: string }>;
-  models?: Array<{ id?: string; name?: string }>;
 }
 
 interface RawModelMeta {
@@ -367,73 +519,43 @@ function extractContextLength(item: RawModelMeta): number | null {
 /** Map of model id -> advertised context-window size from a `/models`
  *  response body. Empty when the body is unparseable or carries no context
  *  metadata (e.g. OpenAI / DeepSeek, which omit it). */
-function parseModelContextLengths(body: string): Record<string, number> {
+interface ParsedModelCatalogue {
+  models: string[];
+  contextLengths: Record<string, number>;
+}
+
+/**
+ * Parse a successful catalogue exactly once. A body-bearing 2xx response is
+ * valid only when it contains a `data` or `models` array; this prevents an
+ * HTML/error envelope from being silently presented as an empty catalogue.
+ */
+function parseModelCatalogue(body: string): ParsedModelCatalogue | null {
   let json: unknown;
   try {
     json = JSON.parse(body);
   } catch {
-    return {};
+    return null;
   }
-  if (!json || typeof json !== "object") return {};
-  const j = json as { data?: RawModelMeta[]; models?: RawModelMeta[] };
+  if (!json || typeof json !== "object" || Array.isArray(json)) return null;
+  const j = json as { data?: unknown; models?: unknown };
   const arr = Array.isArray(j.data)
     ? j.data
     : Array.isArray(j.models)
       ? j.models
       : null;
-  if (!arr) return {};
+  if (!arr) return null;
+  const models: string[] = [];
   const out: Record<string, number> = {};
   for (const item of arr) {
-    if (!item || typeof item !== "object") continue;
-    const id = typeof item.id === "string" ? item.id.trim() : "";
-    if (!id) continue;
-    const ctx = extractContextLength(item);
+    if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+    const model = item as RawModelMeta;
+    const id = typeof model.id === "string" ? model.id.trim() : "";
+    if (!id) return null;
+    models.push(id);
+    const ctx = extractContextLength(model);
     if (ctx) out[id] = ctx;
   }
-  return out;
-}
-
-function parseModelIds(body: string): string[] {
-  let json: unknown;
-  try {
-    json = JSON.parse(body);
-  } catch {
-    return [];
-  }
-  if (!json || typeof json !== "object") return [];
-  const j = json as DiscoveryRawResponse;
-  // OpenAI shape: { data: [{ id: "..." }, ...] }
-  if (Array.isArray(j.data)) {
-    return uniqueSorted(
-      j.data
-        .map((item) =>
-          item && typeof item.id === "string" ? item.id.trim() : "",
-        )
-        .filter(Boolean),
-    );
-  }
-  // Anthropic-style alternative: { models: [{ id, name }, ...] } — defensive.
-  if (Array.isArray(j.models)) {
-    return uniqueSorted(
-      j.models
-        .map((item) =>
-          item && typeof item.id === "string" ? item.id.trim() : "",
-        )
-        .filter(Boolean),
-    );
-  }
-  return [];
-}
-
-function hasModelCatalogue(body: string): boolean {
-  try {
-    const json: unknown = JSON.parse(body);
-    if (!json || typeof json !== "object") return false;
-    const response = json as DiscoveryRawResponse;
-    return Array.isArray(response.data) || Array.isArray(response.models);
-  } catch {
-    return false;
-  }
+  return { models: uniqueSorted(models), contextLengths: out };
 }
 
 function uniqueSorted(values: string[]): string[] {
@@ -446,28 +568,74 @@ function buildUrl(base: string): string {
 }
 
 interface FetchModelsResult {
-  models: string[];
-  status:
-    | "success_with_models"
-    | "success_empty"
-    | "authentication_rejected"
-    | "forbidden"
-    | "not_found"
-    | "rate_limited"
-    | "upstream_error"
-    | "malformed_response"
-    | "timeout"
-    | "network_error";
+  /** Public V2 result; only verified catalogues can be successful. */
+  result: ProviderDiscoveryResultV2;
   /** Per-model context-window sizes parsed from the response, when present. */
   contextLengths?: Record<string, number>;
 }
 
-function failedHttpStatus(statusCode: number): FetchModelsResult["status"] {
-  if (statusCode === 401) return "authentication_rejected";
-  if (statusCode === 403) return "forbidden";
-  if (statusCode === 404) return "not_found";
-  if (statusCode === 429) return "rate_limited";
-  return "upstream_error";
+const MAX_DISCOVERY_BODY_BYTES = 2 * 1024 * 1024;
+const DEFAULT_DISCOVERY_TIMEOUT_MS = 10_000;
+const DEFAULT_OAUTH_DISCOVERY_TIMEOUT_MS = 20_000;
+const MAX_DISCOVERY_TIMEOUT_MS = 120_000;
+
+function normalizeDiscoveryTimeout(timeoutMs: number | undefined): number {
+  if (!Number.isFinite(timeoutMs) || (timeoutMs ?? 0) <= 0) {
+    return DEFAULT_DISCOVERY_TIMEOUT_MS;
+  }
+  return Math.min(
+    MAX_DISCOVERY_TIMEOUT_MS,
+    Math.max(1, Math.floor(timeoutMs!)),
+  );
+}
+
+function statusForHttpFailure(
+  statusCode: number,
+): ProviderDiscoveryFailureStatusV2 {
+  switch (statusCode) {
+    case 401:
+      return "authentication_rejected";
+    case 403:
+      return "forbidden";
+    case 404:
+      return "not_found";
+    case 429:
+      return "rate_limited";
+    default:
+      return "upstream_error";
+  }
+}
+
+function transportStatus(error: unknown): ProviderDiscoveryFailureStatusV2 {
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? String((error as { code?: unknown }).code || "")
+      : "";
+  if (
+    ["ENOTFOUND", "EAI_AGAIN", "EAI_FAIL", "EAI_NODATA", "ENODATA"].includes(
+      code,
+    )
+  ) {
+    return "dns_error";
+  }
+  if (
+    [
+      "CERT_HAS_EXPIRED",
+      "ERR_TLS_CERT_ALTNAME_INVALID",
+      "DEPTH_ZERO_SELF_SIGNED_CERT",
+      "SELF_SIGNED_CERT_IN_CHAIN",
+      "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+      "ERR_TLS_CERT_SIGNATURE_ALGORITHM_UNSUPPORTED",
+      "ERR_TLS_DH_PARAM_SIZE",
+      "ERR_TLS_INVALID_PROTOCOL_VERSION",
+      "EPROTO",
+    ].includes(code) ||
+    code.startsWith("ERR_TLS_") ||
+    code.startsWith("ERR_SSL_")
+  ) {
+    return "tls_error";
+  }
+  return "connection_error";
 }
 
 function authHeaders(provider: string, apiKey: string): Record<string, string> {
@@ -496,76 +664,169 @@ function fetchModelsHttp(
   url: string,
   headers: Record<string, string>,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<FetchModelsResult> {
   return new Promise((resolve) => {
+    let settled = false;
+    let request: http.ClientRequest | null = null;
+    let response: http.IncomingMessage | null = null;
+    let timedOut = false;
+    const finish = (
+      result: ProviderDiscoveryResultV2,
+      contextLengths?: Record<string, number>,
+    ): void => {
+      if (settled) return;
+      settled = true;
+      if (signal) signal.removeEventListener("abort", onAbort);
+      resolve({ result, contextLengths });
+    };
+    const onAbort = (): void => {
+      finish(providerDiscoveryFailure("cancelled"));
+      request?.destroy();
+      response?.destroy();
+    };
+
+    if (signal?.aborted) {
+      finish(providerDiscoveryFailure("cancelled"));
+      return;
+    }
+
     let u: URL;
     try {
       u = new URL(url);
     } catch {
-      resolve({ models: [], status: "network_error" });
+      finish(providerDiscoveryFailure("unknown_endpoint"));
+      return;
+    }
+    if (u.protocol !== "http:" && u.protocol !== "https:") {
+      finish(providerDiscoveryFailure("unknown_endpoint"));
       return;
     }
     const mod = u.protocol === "https:" ? https : http;
-    const req = mod.request(
-      {
-        method: "GET",
-        protocol: u.protocol,
-        hostname: u.hostname,
-        port: u.port || undefined,
-        path: `${u.pathname}${u.search}`,
-        headers: { Accept: "application/json", ...headers },
-        timeout: timeoutMs,
-      },
-      (res) => {
-        if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
-          const status = failedHttpStatus(res.statusCode ?? 0);
-          res.resume();
-          resolve({ models: [], status });
-          return;
-        }
-        let body = "";
-        res.setEncoding("utf-8");
-        res.on("data", (chunk) => {
-          body += chunk;
-        });
-        res.on("end", () => {
-          if (!hasModelCatalogue(body)) {
-            resolve({ models: [], status: "malformed_response" });
+    try {
+      request = mod.request(
+        {
+          method: "GET",
+          protocol: u.protocol,
+          hostname: u.hostname,
+          port: u.port || undefined,
+          path: `${u.pathname}${u.search}`,
+          headers: { Accept: "application/json", ...headers },
+          timeout: timeoutMs,
+        },
+        (res) => {
+          response = res;
+          const statusCode = res.statusCode;
+          if (
+            typeof statusCode !== "number" ||
+            statusCode < 200 ||
+            statusCode >= 300
+          ) {
+            res.resume();
+            finish(
+              typeof statusCode === "number"
+                ? providerDiscoveryFailure(statusForHttpFailure(statusCode), {
+                    statusCode,
+                  })
+                : providerDiscoveryFailure("upstream_error"),
+            );
             return;
           }
-          const models = parseModelIds(body);
-          resolve({
-            models,
-            status: models.length > 0 ? "success_with_models" : "success_empty",
-            contextLengths: parseModelContextLengths(body),
+          let body = "";
+          let bodyBytes = 0;
+          let oversized = false;
+          res.setEncoding("utf-8");
+          res.on("data", (chunk) => {
+            if (oversized || settled) return;
+            bodyBytes += Buffer.byteLength(String(chunk), "utf8");
+            if (bodyBytes > MAX_DISCOVERY_BODY_BYTES) {
+              oversized = true;
+              finish(
+                providerDiscoveryFailure("malformed_response", { statusCode }),
+              );
+              res.destroy();
+              return;
+            }
+            body += chunk;
           });
-        });
-        res.on("error", () => resolve({ models: [], status: "network_error" }));
-      },
-    );
-    req.on("error", () => resolve({ models: [], status: "network_error" }));
-    req.on("timeout", () => {
-      req.destroy();
-      resolve({ models: [], status: "timeout" });
+          res.on("end", () => {
+            if (oversized || settled) return;
+            // A no-body 204 is a valid empty catalogue. Other body-less 2xx
+            // responses are malformed because they do not describe a list.
+            if (statusCode === 204 && body.trim() === "") {
+              finish(providerDiscoverySuccess([], { statusCode }));
+              return;
+            }
+            const parsed = parseModelCatalogue(body);
+            if (!parsed) {
+              finish(
+                providerDiscoveryFailure("malformed_response", { statusCode }),
+              );
+              return;
+            }
+            finish(
+              providerDiscoverySuccess(parsed.models, { statusCode }),
+              parsed.contextLengths,
+            );
+          });
+          res.on("aborted", () => {
+            if (!settled) finish(providerDiscoveryFailure("connection_error"));
+          });
+          res.on("error", (error) => {
+            if (!settled && !timedOut) {
+              finish(providerDiscoveryFailure(transportStatus(error)));
+            }
+          });
+        },
+      );
+    } catch (error) {
+      finish(providerDiscoveryFailure(transportStatus(error)));
+      return;
+    }
+    if (!request) {
+      finish(providerDiscoveryFailure("connection_error"));
+      return;
+    }
+    request.on("error", (error) => {
+      if (settled) return;
+      if (signal?.aborted) {
+        finish(providerDiscoveryFailure("cancelled"));
+        return;
+      }
+      if (timedOut) return;
+      finish(providerDiscoveryFailure(transportStatus(error)));
     });
-    req.end();
+    request.on("timeout", () => {
+      if (settled) return;
+      timedOut = true;
+      // Settle before destroy: the ensuing ECONNRESET must not overwrite the
+      // deterministic timeout classification.
+      finish(providerDiscoveryFailure("timeout"));
+      request?.destroy();
+    });
+    if (signal) {
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+    try {
+      request.end();
+    } catch (error) {
+      finish(providerDiscoveryFailure(transportStatus(error)));
+    }
   });
 }
 
-export interface DiscoverModelsResult {
-  models: string[];
-  status:
-    | FetchModelsResult["status"]
-    | "no-key"
-    | "unsupported"
-    | "unknown-host";
-  /** ``true`` when the result came from the in-memory cache. */
-  cached: boolean;
-  /** Subset of `models` flagged as free (no cost per token). Populated
-   *  for providers whose catalog exposes pricing — Nous Portal today,
-   *  others as we add them. Empty when no pricing info is available
-   *  (everything is treated as paid by default in the UI). */
-  freeModels?: string[];
+/** Main-process return type. Kept as a named alias for existing imports. */
+export type DiscoverModelsResult = ProviderDiscoveryResultV2;
+
+export interface ProviderDiscoveryRequestOptions {
+  /** Per-request timeout; defaults to ten seconds. */
+  timeoutMs?: number;
+  /** Aborting this signal settles the request as `cancelled`. */
+  signal?: AbortSignal;
 }
 
 /** Discover available models for a provider.  Returns an object so the
@@ -575,59 +836,65 @@ export async function discoverProviderModels(
   baseUrlOverride: string | undefined,
   apiKeyOverride: string | undefined,
   profile: string | undefined,
+  options: ProviderDiscoveryRequestOptions = {},
 ): Promise<DiscoverModelsResult> {
   const lowerProvider = (provider || "").trim().toLowerCase();
 
   // OAuth/subscription providers don't have a static-key /v1/models
   // endpoint — route them through hermes-agent's provider_model_ids.
   if (OAUTH_DISCOVERY_PROVIDERS.has(lowerProvider)) {
-    const hit = fromCache(lowerProvider, "", "");
+    const hit = fromCache(lowerProvider, "", "", profile);
     if (hit) {
       // Re-attach free flags from cache. Pricing is fetched fresh on
       // the next non-cache hit; meanwhile the renderer keeps the
       // previous free list.
-      return {
-        models: hit,
-        status: hit.length > 0 ? "success_with_models" : "success_empty",
+      return providerDiscoverySuccess(hit, {
         cached: true,
-        freeModels: _freeCache.get(lowerProvider) || [],
-      };
+        freeModels:
+          _freeCache.get(cacheKey(lowerProvider, "", "", profile)) || [],
+      });
     }
-    const models = await discoverOAuthModels(lowerProvider);
-    setCache(lowerProvider, "", "", models);
+    const discovered = await discoverOAuthModels(
+      lowerProvider,
+      profile,
+      options,
+    );
+    if (discovered.terminalStatus) {
+      return providerDiscoveryFailure(discovered.terminalStatus);
+    }
+    const models = discovered.models ?? [];
+    setCache(lowerProvider, "", "", models, profile);
     // Nous Portal exposes pricing in its catalog — enrich with the
     // subset of models that are free, so the renderer can badge them.
     // Other OAuth providers have no equivalent yet.
     let freeModels: string[] = [];
     if (lowerProvider === "nous") {
-      const allFree = await fetchNousFreeModelIds(profile);
+      const allFree = await fetchNousFreeModelIds(profile, options);
+      if (options.signal?.aborted) {
+        return providerDiscoveryFailure("cancelled");
+      }
       // Keep only the free IDs that are actually in the curated list
       // we're surfacing — avoids confusing the user with names that
       // wouldn't autocomplete anyway. If hermes-agent's list misses
       // some free ones, fall back to the full live list.
       const inCurated = allFree.filter((id) => models.includes(id));
       freeModels = inCurated.length > 0 ? inCurated : allFree;
-      _freeCache.set(lowerProvider, freeModels);
+      _freeCache.set(cacheKey(lowerProvider, "", "", profile), freeModels);
     }
-    return {
-      models,
-      status: models.length > 0 ? "success_with_models" : "success_empty",
-      cached: false,
-      freeModels,
-    };
+    return providerDiscoverySuccess(models, { freeModels });
   }
 
   if (!lowerProvider || NON_DISCOVERABLE_PROVIDERS.has(lowerProvider)) {
     // For "custom", caller must pass baseUrl explicitly — fall through
     // and the canonicalBaseUrl() check below will redirect to that path.
     if (lowerProvider !== "custom") {
-      return { models: [], status: "unsupported", cached: false };
+      return providerDiscoveryFailure("unsupported_provider");
     }
   }
 
   const explicitBase = (baseUrlOverride || "").trim().replace(/\/+$/, "");
   const baseUrl = explicitBase || canonicalBaseUrl(lowerProvider) || "";
-  if (!baseUrl) return { models: [], status: "unknown-host", cached: false };
+  if (!baseUrl) return providerDiscoveryFailure("unknown_endpoint");
 
   const apiKey =
     (apiKeyOverride || "").trim() ||
@@ -636,26 +903,26 @@ export async function discoverProviderModels(
     LOCAL_NO_KEY_PROVIDERS.has(lowerProvider) ||
     (lowerProvider === "custom" && isLoopbackBaseUrl(baseUrl));
   if (!apiKey && !canDiscoverWithoutKey) {
-    return { models: [], status: "no-key", cached: false };
+    return providerDiscoveryFailure("credential_missing");
   }
 
-  const cached = fromCache(lowerProvider, baseUrl, apiKey);
-  if (cached) {
-    return {
-      models: cached,
-      status: cached.length > 0 ? "success_with_models" : "success_empty",
-      cached: true,
-    };
-  }
+  const cached = fromCache(lowerProvider, baseUrl, apiKey, profile);
+  if (cached) return providerDiscoverySuccess(cached, { cached: true });
 
-  const result = await fetchAndCacheModels(lowerProvider, baseUrl, apiKey);
-  return { models: result.models, status: result.status, cached: false };
+  const result = await fetchAndCacheModels(
+    lowerProvider,
+    baseUrl,
+    apiKey,
+    profile,
+    options,
+  );
+  return result.result;
 }
 
 /**
  * Fetch a provider's `/models` over HTTP and populate BOTH caches together.
  *
- * `_ctxCache` is written only for a valid 2xx model catalogue — even when no
+ * `_ctxCache` is always written when the endpoint is reachable — even when no
  * model advertises a `context_length` (OpenAI, DeepSeek) — so an empty map
  * doubles as a "already fetched, none advertised" marker. That lets
  * `getModelContextWindow` tell a genuine miss (don't re-fetch) from a
@@ -666,21 +933,25 @@ async function fetchAndCacheModels(
   lowerProvider: string,
   baseUrl: string,
   apiKey: string,
+  profile: string | undefined,
+  options: ProviderDiscoveryRequestOptions = {},
 ): Promise<FetchModelsResult> {
   const url = buildUrl(baseUrl);
   const headers = authHeaders(lowerProvider, apiKey);
-  const result = await fetchModelsHttp(url, headers, 10_000);
-  if (
-    result.status === "success_with_models" ||
-    result.status === "success_empty"
-  ) {
-    setCache(lowerProvider, baseUrl, apiKey, result.models);
+  const fetched = await fetchModelsHttp(
+    url,
+    headers,
+    normalizeDiscoveryTimeout(options.timeoutMs),
+    options.signal,
+  );
+  if (isProviderDiscoverySuccess(fetched.result)) {
+    setCache(lowerProvider, baseUrl, apiKey, fetched.result.models, profile);
     _ctxCache.set(
-      cacheKey(lowerProvider, baseUrl, apiKey),
-      result.contextLengths ?? {},
+      cacheKey(lowerProvider, baseUrl, apiKey, profile),
+      fetched.contextLengths ?? {},
     );
   }
-  return result;
+  return fetched;
 }
 
 /**
@@ -738,7 +1009,7 @@ export async function getModelContextWindow(
     (lowerProvider === "custom" && isLoopbackBaseUrl(baseUrl));
   if (!apiKey && !canDiscoverWithoutKey) return null;
 
-  const key = cacheKey(lowerProvider, baseUrl, apiKey);
+  const key = cacheKey(lowerProvider, baseUrl, apiKey, profile);
 
   const readCtx = (): number | null => _ctxCache.get(key)?.[modelId] ?? null;
 
@@ -752,7 +1023,7 @@ export async function getModelContextWindow(
   // Not fetched yet (e.g. the model picker primed `_cache` but never the ctx
   // map). Fetch directly here rather than via `discoverProviderModels`, whose
   // `_cache`-hit early-return would skip the ctx fetch entirely.
-  await fetchAndCacheModels(lowerProvider, baseUrl, apiKey);
+  await fetchAndCacheModels(lowerProvider, baseUrl, apiKey, profile);
   return readCtx();
 }
 

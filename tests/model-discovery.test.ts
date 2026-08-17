@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import http from "http";
@@ -616,6 +616,66 @@ describe("model-discovery", () => {
     expect(result.status).toBe(
       result.models.length > 0 ? "success_with_models" : "success_empty",
     );
+  });
+
+  it("does not reuse Nous free-model flags across profiles", async () => {
+    server = http.createServer((req, res) => {
+      const token = String(req.headers.authorization || "");
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          data: [
+            {
+              id: token === "Bearer tok-profile-a" ? "free-a" : "free-b",
+              pricing: { prompt: "0", completion: "0" },
+            },
+          ],
+        }),
+      );
+    });
+    await listen();
+
+    for (const [profile, token] of [
+      ["profile-a", "tok-profile-a"],
+      ["profile-b", "tok-profile-b"],
+    ] as const) {
+      const home = join(testHome, "profiles", profile);
+      mkdirSync(home, { recursive: true });
+      writeFileSync(
+        join(home, "auth.json"),
+        JSON.stringify({
+          providers: {
+            nous: { access_token: token, inference_base_url: baseUrl },
+          },
+        }),
+      );
+    }
+
+    const { discoverProviderModels } = await loadDiscovery();
+    const first = await discoverProviderModels(
+      "nous",
+      undefined,
+      undefined,
+      "profile-a",
+    );
+    const second = await discoverProviderModels(
+      "nous",
+      undefined,
+      undefined,
+      "profile-b",
+    );
+    const firstCached = await discoverProviderModels(
+      "nous",
+      undefined,
+      undefined,
+      "profile-a",
+    );
+
+    expect(first.freeModels).toEqual(["free-a"]);
+    expect(second.cached).toBe(false);
+    expect(second.freeModels).toEqual(["free-b"]);
+    expect(firstCached.cached).toBe(true);
+    expect(firstCached.freeModels).toEqual(["free-a"]);
   });
 
   // Issue #597 — the context gauge reads `getModelContextWindow`, which must

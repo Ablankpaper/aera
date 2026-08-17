@@ -10,13 +10,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * `child_process.execFile`.
  */
 
-const { execFileSpy, behavior } = vi.hoisted(() => {
-  const behavior: { err: Error | null; stdout: string } = {
+const { execFileSpy, behavior, childKillSpy } = vi.hoisted(() => {
+  const behavior: { err: Error | null; stdout: string; hold: boolean } = {
     err: null,
     stdout: "",
+    hold: false,
   };
+  const childKillSpy = vi.fn();
   return {
     behavior,
+    childKillSpy,
     execFileSpy: vi.fn(
       (
         _file: unknown,
@@ -24,7 +27,8 @@ const { execFileSpy, behavior } = vi.hoisted(() => {
         _opts: unknown,
         cb: (e: Error | null, out: string, errOut: string) => void,
       ) => {
-        cb(behavior.err, behavior.stdout, "");
+        if (!behavior.hold) cb(behavior.err, behavior.stdout, "");
+        return { kill: childKillSpy };
       },
     ),
   };
@@ -70,8 +74,10 @@ describe("OAuth provider model discovery", () => {
   beforeEach(() => {
     _clearCache();
     execFileSpy.mockClear();
+    childKillSpy.mockClear();
     behavior.err = null;
     behavior.stdout = "";
+    behavior.hold = false;
   });
 
   it("returns the live provider_model_ids list for an OAuth provider", async () => {
@@ -149,5 +155,106 @@ describe("OAuth provider model discovery", () => {
     expect(second.cached).toBe(true);
     expect(second.models).toEqual(["gpt-5.5"]);
     expect(execFileSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("isolates OAuth and free-model caches by profile", async () => {
+    behavior.stdout = '["profile-a-model"]';
+    const first = await discoverProviderModels(
+      "openai-codex",
+      undefined,
+      undefined,
+      "profile-a",
+    );
+    expect(first.cached).toBe(false);
+
+    behavior.stdout = '["profile-b-model"]';
+    const second = await discoverProviderModels(
+      "openai-codex",
+      undefined,
+      undefined,
+      "profile-b",
+    );
+    expect(second.cached).toBe(false);
+    expect(second.models).toEqual(["profile-b-model"]);
+
+    const profileAAgain = await discoverProviderModels(
+      "openai-codex",
+      undefined,
+      undefined,
+      "profile-a",
+    );
+    expect(profileAAgain.cached).toBe(true);
+    expect(profileAAgain.models).toEqual(["profile-a-model"]);
+    expect(execFileSpy).toHaveBeenCalledTimes(2);
+
+    const firstEnv = (
+      execFileSpy.mock.calls[0][2] as { env: NodeJS.ProcessEnv }
+    ).env;
+    const secondEnv = (
+      execFileSpy.mock.calls[1][2] as {
+        env: NodeJS.ProcessEnv;
+      }
+    ).env;
+    expect(firstEnv.HERMES_HOME).toContain("profiles/profile-a");
+    expect(secondEnv.HERMES_HOME).toContain("profiles/profile-b");
+    expect(firstEnv.HERMES_HOME).not.toBe(secondEnv.HERMES_HOME);
+  });
+
+  it("returns cancelled and terminates an in-flight OAuth discovery", async () => {
+    behavior.hold = true;
+    const controller = new AbortController();
+    const pending = discoverProviderModels(
+      "openai-codex",
+      undefined,
+      undefined,
+      "profile-a",
+      { signal: controller.signal, timeoutMs: 1_000 },
+    );
+    controller.abort();
+
+    await expect(pending).resolves.toMatchObject({
+      status: "cancelled",
+      models: [],
+      cached: false,
+    });
+    expect(childKillSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not spawn OAuth discovery when the signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await discoverProviderModels(
+      "openai-codex",
+      undefined,
+      undefined,
+      "profile-a",
+      { signal: controller.signal },
+    );
+
+    expect(result).toMatchObject({
+      status: "cancelled",
+      models: [],
+      cached: false,
+    });
+    expect(execFileSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns timeout and terminates a hung OAuth discovery", async () => {
+    behavior.hold = true;
+    const result = await discoverProviderModels(
+      "openai-codex",
+      undefined,
+      undefined,
+      "profile-a",
+      { timeoutMs: 10 },
+    );
+
+    expect(result).toMatchObject({
+      status: "timeout",
+      models: [],
+      cached: false,
+    });
+    expect(childKillSpy).toHaveBeenCalledTimes(1);
   });
 });
