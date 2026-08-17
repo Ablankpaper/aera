@@ -157,6 +157,34 @@ describe("OAuth provider model discovery", () => {
     expect(execFileSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("honors cancellation even when an OAuth result is already cached", async () => {
+    behavior.stdout = '["cached-model"]';
+    const first = await discoverProviderModels(
+      "openai-codex",
+      undefined,
+      undefined,
+      "profile-a",
+    );
+    expect(first.cached).toBe(false);
+
+    const controller = new AbortController();
+    controller.abort();
+    const cancelled = await discoverProviderModels(
+      "openai-codex",
+      undefined,
+      undefined,
+      "profile-a",
+      { signal: controller.signal },
+    );
+
+    expect(cancelled).toMatchObject({
+      status: "cancelled",
+      models: [],
+      cached: false,
+    });
+    expect(execFileSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("isolates OAuth and free-model caches by profile", async () => {
     behavior.stdout = '["profile-a-model"]';
     const first = await discoverProviderModels(

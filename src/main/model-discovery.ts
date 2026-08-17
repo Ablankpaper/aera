@@ -266,6 +266,18 @@ async function fetchNousFreeModelIds(
     if (!token || !base) return [];
 
     const url = `${base.replace(/\/+$/, "")}/models`;
+    // Validate the endpoint before installing the timer and abort listener.
+    // A malformed profile URL must not leave those resources registered when
+    // the best-effort enrichment exits early.
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      return [];
+    }
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      return [];
+    }
     const timeoutMs = normalizeDiscoveryTimeout(
       options.timeoutMs ?? DEFAULT_DISCOVERY_TIMEOUT_MS,
     );
@@ -296,7 +308,7 @@ async function fetchNousFreeModelIds(
         terminate();
       }, timeoutMs);
       timer.unref?.();
-      const u = new URL(url);
+      const u = parsedUrl;
       const mod = u.protocol === "https:" ? https : http;
       try {
         request = mod.request(
@@ -618,6 +630,7 @@ function transportStatus(error: unknown): ProviderDiscoveryFailureStatusV2 {
   ) {
     return "dns_error";
   }
+  if (code === "ETIMEDOUT") return "timeout";
   if (
     [
       "CERT_HAS_EXPIRED",
@@ -840,6 +853,13 @@ export async function discoverProviderModels(
 ): Promise<DiscoverModelsResult> {
   const lowerProvider = (provider || "").trim().toLowerCase();
 
+  // Cancellation is terminal for the request, including all fast paths. A
+  // cached catalogue must never turn an already-cancelled UI request into a
+  // successful response.
+  if (options.signal?.aborted) {
+    return providerDiscoveryFailure("cancelled");
+  }
+
   // OAuth/subscription providers don't have a static-key /v1/models
   // endpoint — route them through hermes-agent's provider_model_ids.
   if (OAUTH_DISCOVERY_PROVIDERS.has(lowerProvider)) {
@@ -862,8 +882,10 @@ export async function discoverProviderModels(
     if (discovered.terminalStatus) {
       return providerDiscoveryFailure(discovered.terminalStatus);
     }
+    if (options.signal?.aborted) {
+      return providerDiscoveryFailure("cancelled");
+    }
     const models = discovered.models ?? [];
-    setCache(lowerProvider, "", "", models, profile);
     // Nous Portal exposes pricing in its catalog — enrich with the
     // subset of models that are free, so the renderer can badge them.
     // Other OAuth providers have no equivalent yet.
@@ -879,6 +901,15 @@ export async function discoverProviderModels(
       // some free ones, fall back to the full live list.
       const inCurated = allFree.filter((id) => models.includes(id));
       freeModels = inCurated.length > 0 ? inCurated : allFree;
+    }
+    // Publish only after the complete discovery operation has finished. Nous
+    // pricing is best-effort, but cancellation during enrichment must not
+    // leave a partial catalogue for the next request.
+    if (options.signal?.aborted) {
+      return providerDiscoveryFailure("cancelled");
+    }
+    setCache(lowerProvider, "", "", models, profile);
+    if (lowerProvider === "nous") {
       _freeCache.set(cacheKey(lowerProvider, "", "", profile), freeModels);
     }
     return providerDiscoverySuccess(models, { freeModels });
@@ -944,6 +975,9 @@ async function fetchAndCacheModels(
     normalizeDiscoveryTimeout(options.timeoutMs),
     options.signal,
   );
+  if (options.signal?.aborted) {
+    return { result: providerDiscoveryFailure("cancelled") };
+  }
   if (isProviderDiscoverySuccess(fetched.result)) {
     setCache(lowerProvider, baseUrl, apiKey, fetched.result.models, profile);
     _ctxCache.set(

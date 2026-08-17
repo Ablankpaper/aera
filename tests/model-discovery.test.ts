@@ -447,6 +447,71 @@ describe("model-discovery", () => {
     expect(calls).toBe(1);
   });
 
+  it("does not share a static discovery cache between Profiles", async () => {
+    let calls = 0;
+    server = http.createServer((_req, res) => {
+      calls += 1;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ data: [{ id: `profile-model-${calls}` }] }));
+    });
+    await listen();
+    const { discoverProviderModels } = await loadDiscovery();
+
+    const profileA = await discoverProviderModels(
+      "custom",
+      baseUrl,
+      "sk-shared",
+      "profile-a",
+    );
+    const profileB = await discoverProviderModels(
+      "custom",
+      baseUrl,
+      "sk-shared",
+      "profile-b",
+    );
+
+    expect(profileA.cached).toBe(false);
+    expect(profileB.cached).toBe(false);
+    expect(profileA.models).toEqual(["profile-model-1"]);
+    expect(profileB.models).toEqual(["profile-model-2"]);
+    expect(calls).toBe(2);
+  });
+
+  it("honors cancellation even when a static discovery result is cached", async () => {
+    let calls = 0;
+    server = http.createServer((_req, res) => {
+      calls += 1;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ data: [{ id: "cached-static-model" }] }));
+    });
+    await listen();
+    const { discoverProviderModels } = await loadDiscovery();
+    const first = await discoverProviderModels(
+      "custom",
+      baseUrl,
+      "sk-shared",
+      "profile-a",
+    );
+    expect(first.cached).toBe(false);
+
+    const controller = new AbortController();
+    controller.abort();
+    const cancelled = await discoverProviderModels(
+      "custom",
+      baseUrl,
+      "sk-shared",
+      "profile-a",
+      { signal: controller.signal },
+    );
+
+    expect(cancelled).toMatchObject({
+      status: "cancelled",
+      models: [],
+      cached: false,
+    });
+    expect(calls).toBe(1);
+  });
+
   it("does not reuse a model cache entry after the API key changes", async () => {
     const receivedAuth: string[] = [];
     server = http.createServer((req, res) => {
@@ -616,6 +681,106 @@ describe("model-discovery", () => {
     expect(result.status).toBe(
       result.models.length > 0 ? "success_with_models" : "success_empty",
     );
+  });
+
+  it("does not cache Nous models when pricing enrichment is cancelled", async () => {
+    let pricingStarted: (() => void) | undefined;
+    const pricingReady = new Promise<void>((resolve) => {
+      pricingStarted = resolve;
+    });
+    let pricingResponse: http.ServerResponse | undefined;
+    let calls = 0;
+    server = http.createServer((req, res) => {
+      if (req.url !== "/v1/models" || req.method !== "GET") {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      calls += 1;
+      if (calls > 1) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ data: [] }));
+        return;
+      }
+      pricingResponse = res;
+      pricingStarted?.();
+    });
+    await listen();
+    writeFileSync(
+      join(testHome, "auth.json"),
+      JSON.stringify({
+        providers: {
+          nous: {
+            access_token: "tok-nous-cancel",
+            inference_base_url: baseUrl,
+          },
+        },
+      }),
+    );
+
+    const { discoverProviderModels } = await loadDiscovery();
+    const controller = new AbortController();
+    const pending = discoverProviderModels(
+      "nous",
+      undefined,
+      undefined,
+      undefined,
+      { signal: controller.signal, timeoutMs: 1_000 },
+    );
+    await pricingReady;
+    controller.abort();
+    pricingResponse?.end(
+      JSON.stringify({
+        data: [
+          {
+            id: "free-after-cancel",
+            pricing: { prompt: "0", completion: "0" },
+          },
+        ],
+      }),
+    );
+
+    await expect(pending).resolves.toMatchObject({
+      status: "cancelled",
+      cached: false,
+    });
+
+    const next = await discoverProviderModels(
+      "nous",
+      undefined,
+      undefined,
+      undefined,
+    );
+    expect(next.cached).toBe(false);
+    expect(calls).toBe(2);
+  });
+
+  it("cleans Nous timeout resources when inference_base_url is malformed", async () => {
+    writeFileSync(
+      join(testHome, "auth.json"),
+      JSON.stringify({
+        providers: {
+          nous: {
+            access_token: "tok-nous-invalid-url",
+            inference_base_url: "not a URL",
+          },
+        },
+      }),
+    );
+    const { discoverProviderModels } = await loadDiscovery();
+    vi.useFakeTimers();
+    try {
+      const result = await discoverProviderModels(
+        "nous",
+        undefined,
+        undefined,
+        undefined,
+      );
+      expect(result.status).toBe("success_empty");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not reuse Nous free-model flags across profiles", async () => {
