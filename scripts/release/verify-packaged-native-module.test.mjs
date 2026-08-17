@@ -19,6 +19,7 @@ import { dirname, join, posix } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 
+import { listUnpackedNativeModules } from "./native-module-abi.mjs";
 import { verifyPackagedNativeModule } from "./verify-packaged-native-module.mjs";
 
 const MACH_O_CPU = {
@@ -565,6 +566,115 @@ test("rejects a symbolic-link app.asar.unpacked root", async () => {
   }
 });
 
+test("rejects an unpacked root replaced after its first lstat", async () => {
+  const fixture = await createPackage();
+  const externalRoot = join(fixture.root, "external-unpacked-root");
+  const injectedPath = join(externalRoot, "injected.node");
+  const originalRoot = join(fixture.root, "initially-validated-unpacked-root");
+  await mkdir(externalRoot, { recursive: true });
+  await writeFile(injectedPath, thinMachO("arm64", "145"));
+  let replaced = false;
+  try {
+    await assert.rejects(
+      async () => {
+        const modules = await listUnpackedNativeModules(fixture.unpackedRoot, {
+          lstat: async (path) => {
+            const status = await lstat(path);
+            if (path === fixture.unpackedRoot && !replaced) {
+              await rename(fixture.unpackedRoot, originalRoot);
+              await symlink(externalRoot, fixture.unpackedRoot, "dir");
+              replaced = true;
+            }
+            return status;
+          },
+        });
+        assert.equal(
+          modules.some(({ relativePath }) => relativePath === "injected.node"),
+          false,
+          "inventory accepted a native module from the replacement root",
+        );
+      },
+      (error) => {
+        const message =
+          error instanceof Error ? error.message : String(error ?? "");
+        assert.match(message, /inventory root changed during validation/u);
+        assert.equal(message.includes(fixture.root), false);
+        assert.equal(replaced, true);
+        return true;
+      },
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+test("rejects an unpacked root replaced after realpath", async () => {
+  const fixture = await createPackage();
+  const externalRoot = join(fixture.root, "post-realpath-external-root");
+  const originalRoot = join(fixture.root, "post-realpath-original-root");
+  await mkdir(externalRoot, { recursive: true });
+  let replaced = false;
+  try {
+    await assert.rejects(
+      listUnpackedNativeModules(fixture.unpackedRoot, {
+        realpath: async (path) => {
+          const canonicalPath = await realpath(path);
+          if (path === fixture.unpackedRoot && !replaced) {
+            await rename(fixture.unpackedRoot, originalRoot);
+            await symlink(externalRoot, fixture.unpackedRoot, "dir");
+            replaced = true;
+          }
+          return canonicalPath;
+        },
+      }),
+      (error) => {
+        const message =
+          error instanceof Error ? error.message : String(error ?? "");
+        assert.match(message, /inventory root changed during validation/u);
+        assert.equal(message.includes(fixture.root), false);
+        assert.equal(replaced, true);
+        return true;
+      },
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+test("rejects an unpacked root replaced during traversal", async () => {
+  const fixture = await createPackage();
+  const externalRoot = join(fixture.root, "mid-traversal-external-root");
+  const originalRoot = join(fixture.root, "mid-traversal-original-root");
+  const verifiedModulePath = join(fixture.unpackedRoot, fixture.betterRelative);
+  await mkdir(externalRoot, { recursive: true });
+  let replaced = false;
+  try {
+    await assert.rejects(
+      listUnpackedNativeModules(fixture.unpackedRoot, {
+        realpath: async (path) => {
+          const canonicalPath = await realpath(path);
+          if (path === verifiedModulePath && !replaced) {
+            await rename(fixture.unpackedRoot, originalRoot);
+            await symlink(externalRoot, fixture.unpackedRoot, "dir");
+            replaced = true;
+          }
+          return canonicalPath;
+        },
+      }),
+      (error) => {
+        const message =
+          error instanceof Error ? error.message : String(error ?? "");
+        assert.match(message, /inventory root changed during validation/u);
+        assert.equal(message.includes(fixture.root), false);
+        assert.equal(replaced, true);
+        return true;
+      },
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
 test("rejects a directory changed to a canonical escape after readdir", async () => {
   const fixture = await createPackage();
   const traversedDirectory = join(fixture.unpackedRoot, "node_modules");
@@ -761,12 +871,14 @@ test("persists a sorted hashed macOS inventory and handle-reads each module once
         sha256: sha256(otherBytes),
         abi: "145",
         architecture: "arm64",
+        format: "mach-o",
       },
       {
         path: betterPath,
         sha256: sha256(fixture.betterBytes),
         abi: "145",
         architecture: "arm64",
+        format: "mach-o",
       },
     ]);
     assert.equal(
@@ -807,6 +919,7 @@ test("parses and persists a Windows PE x64 inventory", async () => {
         sha256: sha256(fixture.betterBytes),
         abi: "145",
         architecture: "x64",
+        format: "pe",
       },
     ]);
     assert.equal(

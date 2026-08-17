@@ -3,6 +3,7 @@
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { constants } from "node:fs";
 import { lstat, readdir, readFile, realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { isAbsolute, join, posix, relative, resolve, sep } from "node:path";
@@ -74,6 +75,41 @@ function isCanonicalPathInside(root, candidate) {
   );
 }
 
+function filesystemIdentity(status) {
+  return {
+    dev: status.dev,
+    ino: status.ino,
+    mode: status.mode,
+    size: status.size,
+  };
+}
+
+function hasDirectoryIdentity(status, identity) {
+  return (
+    status.isDirectory() &&
+    status.dev === identity.dev &&
+    status.ino === identity.ino &&
+    status.size === identity.size &&
+    (status.mode & constants.S_IFMT) === (identity.mode & constants.S_IFMT)
+  );
+}
+
+function rootChangedError() {
+  return new Error("native module inventory root changed during validation");
+}
+
+async function assertRootIdentity(path, identity, inspectPath) {
+  let status;
+  try {
+    status = await inspectPath(path);
+  } catch {
+    throw rootChangedError();
+  }
+  if (!hasDirectoryIdentity(status, identity)) {
+    throw rootChangedError();
+  }
+}
+
 async function collectNativeModules(
   directory,
   prefix,
@@ -116,12 +152,7 @@ async function collectNativeModules(
         out.push({
           absolutePath: canonicalPath,
           relativePath,
-          identity: {
-            dev: status.dev,
-            ino: status.ino,
-            mode: status.mode,
-            size: status.size,
-          },
+          identity: filesystemIdentity(status),
         });
       }
       continue;
@@ -142,17 +173,31 @@ export async function listUnpackedNativeModules(unpackedRoot, options = {}) {
   if (!rootStatus.isDirectory()) {
     throw new Error("native module inventory root must be a directory");
   }
-  const canonicalRoot = await resolveCanonicalPath(unpackedRoot);
+  const rootIdentity = filesystemIdentity(rootStatus);
+  let canonicalRoot;
+  try {
+    canonicalRoot = await resolveCanonicalPath(unpackedRoot);
+  } catch {
+    throw rootChangedError();
+  }
+  await assertRootIdentity(canonicalRoot, rootIdentity, inspectPath);
+  await assertRootIdentity(unpackedRoot, rootIdentity, inspectPath);
   const found = [];
-  await collectNativeModules(
-    unpackedRoot,
-    "",
-    canonicalRoot,
-    found,
-    options.readdir ?? readdir,
-    inspectPath,
-    resolveCanonicalPath,
-  );
+  try {
+    await collectNativeModules(
+      unpackedRoot,
+      "",
+      canonicalRoot,
+      found,
+      options.readdir ?? readdir,
+      inspectPath,
+      resolveCanonicalPath,
+    );
+  } catch (error) {
+    await assertRootIdentity(unpackedRoot, rootIdentity, inspectPath);
+    throw error;
+  }
+  await assertRootIdentity(unpackedRoot, rootIdentity, inspectPath);
   found.sort((left, right) =>
     left.relativePath < right.relativePath
       ? -1

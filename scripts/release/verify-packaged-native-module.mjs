@@ -174,6 +174,7 @@ export async function verifyPackagedNativeModule(context, options = {}) {
       sha256: inspected.sha256,
       abi: inspected.abi,
       architecture: inspected.architecture,
+      format: inspected.format,
     });
   }
 

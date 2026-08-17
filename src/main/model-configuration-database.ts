@@ -1,4 +1,10 @@
-import { chmodSync, existsSync, mkdirSync, realpathSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import {
   basename,
@@ -7,19 +13,26 @@ import {
   join,
   relative,
   resolve,
+  sep,
 } from "node:path";
 import type { ModelConfigurationStartupFailureCode } from "../shared/model-configuration";
 
 export const MODEL_CONFIGURATION_SCHEMA_VERSION = 1;
 
 export interface ModelConfigurationNativeStartupEvidence {
-  status: "loaded" | "failed";
+  status: "loading" | "loaded" | "failed";
   platform: NodeJS.Platform;
   processArchitecture: string;
   electronAbi: string | null;
+  electronVersion: string | null;
+  nativeModuleLocator: string;
   detectedNativeAbi: string | null;
   failureClass: ModelConfigurationStartupFailureCode | null;
 }
+
+export type ModelConfigurationNativeStartupEvidenceSink = (
+  evidence: ModelConfigurationNativeStartupEvidence,
+) => void;
 
 export class ModelConfigurationRuntimeError extends Error {
   readonly code: ModelConfigurationStartupFailureCode;
@@ -59,6 +72,12 @@ function nativeModuleVersions(message: string): string[] {
   );
 }
 
+function nativeBinaryVersions(bytes: Buffer): string[] {
+  return [
+    ...bytes.toString("latin1").matchAll(/node_register_module_v(\d+)/gu),
+  ].map((match) => match[1]);
+}
+
 export function classifyNativeLoadFailure(
   error: unknown,
 ): ModelConfigurationStartupFailureCode | null {
@@ -94,33 +113,97 @@ export function classifyNativeLoadFailure(
   return "native_module_load_failed";
 }
 
+interface NativeModuleInspection {
+  locator: string;
+  abi: string | null;
+}
+
+const UNRESOLVED_NATIVE_MODULE_LOCATOR =
+  "better-sqlite3/native-binding-unresolved";
+
+function inspectDefaultNativeModule(): NativeModuleInspection {
+  try {
+    const moduleEntry = localRequire.resolve("better-sqlite3");
+    const moduleRoot = resolve(dirname(moduleEntry), "..");
+    const resolveBinding = localRequire("bindings") as (options: {
+      bindings: string;
+      module_root: string;
+      path: true;
+    }) => unknown;
+    const nativeModulePath = resolveBinding({
+      bindings: "better_sqlite3.node",
+      module_root: moduleRoot,
+      path: true,
+    });
+    if (typeof nativeModulePath !== "string") {
+      return { locator: UNRESOLVED_NATIVE_MODULE_LOCATOR, abi: null };
+    }
+    const moduleRelative = relative(moduleRoot, nativeModulePath);
+    if (
+      moduleRelative === "" ||
+      moduleRelative === ".." ||
+      moduleRelative.startsWith(`..${sep}`) ||
+      isAbsolute(moduleRelative)
+    ) {
+      return { locator: UNRESOLVED_NATIVE_MODULE_LOCATOR, abi: null };
+    }
+    const locator = `better-sqlite3/${moduleRelative.split(sep).join("/")}`;
+    const markers = new Set(
+      nativeBinaryVersions(readFileSync(nativeModulePath)),
+    );
+    return {
+      locator,
+      abi: markers.size === 1 ? [...markers][0] : null,
+    };
+  } catch {
+    return { locator: UNRESOLVED_NATIVE_MODULE_LOCATOR, abi: null };
+  }
+}
+
 function startupEvidence(
-  code: ModelConfigurationStartupFailureCode,
-  error: unknown,
+  status: ModelConfigurationNativeStartupEvidence["status"],
+  nativeModule: NativeModuleInspection,
+  failureClass: ModelConfigurationStartupFailureCode | null,
 ): ModelConfigurationNativeStartupEvidence {
-  const versions = nativeModuleVersions(errorParts(error).message);
   return {
-    status: "failed",
+    status,
     platform: process.platform,
     processArchitecture: process.arch,
     electronAbi: process.versions.modules ?? null,
-    detectedNativeAbi: versions[0] ?? null,
-    failureClass: code,
+    electronVersion: process.versions.electron ?? null,
+    nativeModuleLocator: nativeModule.locator,
+    detectedNativeAbi: nativeModule.abi,
+    failureClass,
   };
+}
+
+function defaultNativeStartupEvidenceSink(
+  evidence: ModelConfigurationNativeStartupEvidence,
+): void {
+  console.info(
+    "[MODEL_CONFIGURATION_NATIVE_STARTUP]",
+    JSON.stringify(evidence),
+  );
+}
+
+function emitNativeStartupEvidence(
+  sink: ModelConfigurationNativeStartupEvidenceSink,
+  evidence: ModelConfigurationNativeStartupEvidence,
+): void {
+  try {
+    sink(evidence);
+  } catch {
+    // Diagnostics must not change database startup behavior.
+  }
 }
 
 function runtimeError(
   code: ModelConfigurationStartupFailureCode,
   cause: unknown,
+  evidence: ModelConfigurationNativeStartupEvidence,
 ): ModelConfigurationRuntimeError {
   if (cause instanceof ModelConfigurationRuntimeError) return cause;
-  return new ModelConfigurationRuntimeError(
-    code,
-    startupEvidence(code, cause),
-    {
-      cause,
-    },
-  );
+  return new ModelConfigurationRuntimeError(code, evidence, { cause });
 }
 
 export interface ModelConfigurationSqliteRunResult {
@@ -147,6 +230,7 @@ export interface ModelConfigurationDatabasePaths {
 
 export interface OpenModelConfigurationDatabaseOptions {
   databaseFactory?: (path: string) => ModelConfigurationSqliteDatabase;
+  nativeStartupEvidenceSink?: ModelConfigurationNativeStartupEvidenceSink;
 }
 
 const localRequire = createRequire(
@@ -315,17 +399,25 @@ export function openModelConfigurationDatabase(
   mkdirSync(paths.rootPath, { recursive: true, mode: 0o700 });
   chmodSync(paths.rootPath, 0o700);
   assertOutsideHermesHome(realpathSync.native(paths.rootPath));
+  const nativeModule = inspectDefaultNativeModule();
+  const evidenceSink =
+    options.nativeStartupEvidenceSink ?? defaultNativeStartupEvidenceSink;
+  emitNativeStartupEvidence(
+    evidenceSink,
+    startupEvidence("loading", nativeModule, null),
+  );
   let sqlite: ModelConfigurationSqliteDatabase;
   try {
     sqlite = (options.databaseFactory ?? defaultDatabaseFactory)(
       paths.databasePath,
     );
   } catch (error) {
-    throw runtimeError(
+    const code =
       classifyNativeLoadFailure(error) ??
-        "model_configuration_database_unavailable",
-      error,
-    );
+      "model_configuration_database_unavailable";
+    const evidence = startupEvidence("failed", nativeModule, code);
+    emitNativeStartupEvidence(evidenceSink, evidence);
+    throw runtimeError(code, error, evidence);
   }
   try {
     const currentVersion = readSchemaVersion(sqlite);
@@ -335,6 +427,10 @@ export function openModelConfigurationDatabase(
     sqlite.exec("PRAGMA busy_timeout=5000");
     initializeSchema(sqlite, currentVersion);
     if (existsSync(paths.databasePath)) chmodSync(paths.databasePath, 0o600);
+    emitNativeStartupEvidence(
+      evidenceSink,
+      startupEvidence("loaded", nativeModule, null),
+    );
     return new ModelConfigurationDatabase(paths, sqlite);
   } catch (error) {
     try {
@@ -342,11 +438,12 @@ export function openModelConfigurationDatabase(
     } catch {
       // Preserve the original initialization error.
     }
-    throw runtimeError(
+    const code =
       error instanceof UnsupportedModelConfigurationSchemaError
         ? "model_configuration_schema_unsupported"
-        : "model_configuration_database_unavailable",
-      error,
-    );
+        : "model_configuration_database_unavailable";
+    const evidence = startupEvidence("failed", nativeModule, code);
+    emitNativeStartupEvidence(evidenceSink, evidence);
+    throw runtimeError(code, error, evidence);
   }
 }

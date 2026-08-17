@@ -88,19 +88,25 @@ Native/database startup failures are classified by [[src/main/model-configuratio
 
 Repeated copies of one ABI value remain a generic native load failure. The journal reads and validates `user_version` before `journal_mode=WAL` or any write-oriented pragma, so a future DELETE-journal schema is rejected without changing bytes, hash, key file stat, journal mode, or directory entries.
 
+Main emits structured `loading` then `loaded` or `failed` evidence around the database/native loading boundary. It records the process ABI, Electron version, platform and architecture, a package-relative native locator, the ABI marker read from the actual binary, and a stable failure class; raw errors and absolute paths remain Main-only causes.
+
 ### Database startup identity reaches IPC
 
 [[src/main/model-configuration-runtime.ts#prepareModelConfigurationRuntime]] creates one opaque diagnostic ID and [[src/main/ipc/model-configuration-bridge.ts#coordinatorUnavailableMutation]] preserves the exact cause without exposing raw native or database errors.
 
 The propagation keeps `model_configuration_schema_unsupported` distinct from a general database-unavailable failure while leaving the journal rejection itself fail-closed.
 
+Only `model_configuration_recovery_required` projects to the recovery stage with recovery-required rollback. Native, database, and schema startup failures project to validation with no rollback needed while preserving the same code and diagnostic ID.
+
 ### Complete packaged native inventory
 
 The afterPack gate rejects unreadable, structurally invalid, platform-incompatible, or ambiguous `.node` input and records deterministic ABI, architecture, and SHA-256 evidence.
 
-Darwin inventory accepts only validated 64-bit Mach-O bundles and slices; win32 accepts only validated PE32+ executable DLL images. ABI markers are read only from those verified images or fat slices.
+Darwin inventory accepts only validated 64-bit Mach-O bundles and slices; win32 accepts only validated PE32+ executable DLL images. ABI markers are read only from those verified images or fat slices, and every in-memory and persisted module record includes the stable `mach-o` or `pe` format.
 
-The unpacked root and every descendant are checked with `lstat`, and every resolved path must remain inside the canonical root. Collection retains each file's device, inode, type, and size; reading opens that path with no-follow where available, matches `fstat` on the same handle, reads that handle once, and then closes it.
+The unpacked root and every descendant are checked with `lstat`, and every resolved path must remain inside the canonical root. Root device, inode, type, and size must match after canonicalization and at traversal entry and completion.
+
+Collection retains each file's device, inode, type, and size; reading opens that path with no-follow where available, matches `fstat` on the same handle, reads that handle once, and then closes it.
 
 Every shipped native module is inspected through `scripts/release/native-module-abi.mjs` and `scripts/release/verify-packaged-native-module.mjs`.
 

@@ -389,6 +389,8 @@ describe("model-configuration runtime", () => {
         platform: process.platform,
         processArchitecture: process.arch,
         electronAbi: process.versions.modules ?? null,
+        electronVersion: process.versions.electron ?? null,
+        nativeModuleLocator: "better-sqlite3/native-binding-unresolved",
         detectedNativeAbi: null,
         failureClass: code,
       });

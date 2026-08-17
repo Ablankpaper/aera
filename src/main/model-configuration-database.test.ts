@@ -12,13 +12,14 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MODEL_CONFIGURATION_SCHEMA_VERSION,
   openModelConfigurationDatabase,
   resolveModelConfigurationDatabasePaths,
   type ModelConfigurationDatabase,
   type ModelConfigurationDatabasePaths,
+  type ModelConfigurationNativeStartupEvidence,
   type ModelConfigurationSqliteDatabase,
 } from "./model-configuration-database";
 
@@ -43,12 +44,18 @@ function databaseFor(
   return database;
 }
 
-function captureDatabaseOpenFailure(error: unknown): unknown {
+function captureDatabaseOpenFailure(
+  error: unknown,
+  nativeStartupEvidenceSink?: (
+    evidence: ModelConfigurationNativeStartupEvidence,
+  ) => void,
+): unknown {
   try {
     openModelConfigurationDatabase(temporaryUserData(), {
       databaseFactory: () => {
         throw error;
       },
+      nativeStartupEvidenceSink,
     });
   } catch (thrown) {
     return thrown;
@@ -177,6 +184,132 @@ describe("ModelConfigurationDatabase", () => {
     );
   });
 
+  it("records loading and loaded evidence for the actual better-sqlite3 binary", () => {
+    const evidence: ModelConfigurationNativeStartupEvidence[] = [];
+    const database = openModelConfigurationDatabase(temporaryUserData(), {
+      databaseFactory: (path) =>
+        new DatabaseSync(path) as unknown as ModelConfigurationSqliteDatabase,
+      nativeStartupEvidenceSink: (event) => evidence.push(event),
+    });
+    databases.push(database);
+
+    expect(evidence.map(({ status }) => status)).toEqual(["loading", "loaded"]);
+    for (const event of evidence) {
+      expect(event).toMatchObject({
+        platform: process.platform,
+        processArchitecture: process.arch,
+        electronAbi: process.versions.modules ?? null,
+        electronVersion: process.versions.electron ?? null,
+        nativeModuleLocator: "better-sqlite3/build/Release/better_sqlite3.node",
+        detectedNativeAbi: "145",
+        failureClass: null,
+      });
+      expect(event.nativeModuleLocator).not.toMatch(
+        /(?:^\/|\/Users\/|[A-Za-z]:[\\/])/u,
+      );
+    }
+  });
+
+  it.each([
+    {
+      name: "ABI mismatch",
+      error: Object.assign(
+        new Error(
+          [
+            `${privateUserPath}/better_sqlite3.node token=private-token`,
+            "NODE_MODULE_VERSION 137 was compiled",
+            "NODE_MODULE_VERSION 145 is required",
+          ].join(" "),
+        ),
+        { code: "ERR_DLOPEN_FAILED" },
+      ),
+      expectedCode: "native_module_abi_mismatch",
+    },
+    {
+      name: "ordinary native load failure",
+      error: Object.assign(
+        new Error(
+          `dlopen(${privateUserPath}/better_sqlite3.node): private-key could not load`,
+        ),
+        { code: "ERR_DLOPEN_FAILED" },
+      ),
+      expectedCode: "native_module_load_failed",
+    },
+    {
+      name: "repeated identical ABI marker",
+      error: Object.assign(
+        new Error(
+          [
+            `dlopen(${privateUserPath}/better_sqlite3.node): secret-token`,
+            "NODE_MODULE_VERSION 145 was observed",
+            "NODE_MODULE_VERSION 145 was observed again",
+          ].join(" "),
+        ),
+        { code: "ERR_DLOPEN_FAILED" },
+      ),
+      expectedCode: "native_module_load_failed",
+    },
+  ] as const)(
+    "records safe loading and failed evidence for $name",
+    ({ error, expectedCode }) => {
+      const evidence: ModelConfigurationNativeStartupEvidence[] = [];
+      const thrown = captureDatabaseOpenFailure(error, (event) =>
+        evidence.push(event),
+      );
+
+      expect(evidence.map(({ status }) => status)).toEqual([
+        "loading",
+        "failed",
+      ]);
+      expect(evidence[1]).toMatchObject({
+        platform: process.platform,
+        processArchitecture: process.arch,
+        electronAbi: process.versions.modules ?? null,
+        electronVersion: process.versions.electron ?? null,
+        nativeModuleLocator: "better-sqlite3/build/Release/better_sqlite3.node",
+        detectedNativeAbi: "145",
+        failureClass: expectedCode,
+      });
+      expect(thrown).toMatchObject({
+        code: expectedCode,
+        evidence: evidence[1],
+        cause: error,
+      });
+      const serialized = JSON.stringify(evidence);
+      expect(serialized).not.toContain(error.message);
+      expect(serialized).not.toContain(privateUserPath);
+      expect(serialized).not.toMatch(/secret|token|private-key/iu);
+      expect(serialized).not.toMatch(/(?:\/Users\/|[A-Za-z]:[\\/])/u);
+    },
+  );
+
+  it("writes default native startup evidence without logging the raw failure", () => {
+    const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const error = Object.assign(
+      new Error(
+        `dlopen(${privateUserPath}/better_sqlite3.node): token=private-token`,
+      ),
+      { code: "ERR_DLOPEN_FAILED" },
+    );
+    try {
+      captureDatabaseOpenFailure(error);
+      expect(log.mock.calls.map(([label]) => label)).toEqual([
+        "[MODEL_CONFIGURATION_NATIVE_STARTUP]",
+        "[MODEL_CONFIGURATION_NATIVE_STARTUP]",
+      ]);
+      const logged = log.mock.calls.map(([, payload]) =>
+        JSON.parse(String(payload)),
+      ) as ModelConfigurationNativeStartupEvidence[];
+      expect(logged.map(({ status }) => status)).toEqual(["loading", "failed"]);
+      const serialized = JSON.stringify(logged);
+      expect(serialized).not.toContain(error.message);
+      expect(serialized).not.toContain(privateUserPath);
+      expect(serialized).not.toMatch(/token|private-key/iu);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   // @lat: [[beta27-reliability-plan#Acceptance and release boundary#Native startup failure classification]]
   it.each([
     {
@@ -282,7 +415,9 @@ describe("ModelConfigurationDatabase", () => {
         message: publicFailure.message,
       });
       expect(serialized).not.toContain(error.message);
-      expect(serialized).not.toContain(".node");
+      expect(serialized).toContain(
+        "better-sqlite3/build/Release/better_sqlite3.node",
+      );
       expect(serialized).not.toContain(`${privateUserPath}/`);
       expect(serialized).not.toMatch(/[A-Za-z]:\\\\/u);
     },

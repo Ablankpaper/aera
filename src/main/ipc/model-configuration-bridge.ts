@@ -34,13 +34,15 @@ export function coordinatorUnavailableMutation(
         ? startupFailure.diagnosticId
         : randomBytes(6).toString("hex"),
   } satisfies ModelConfigurationStartupFailure;
+  const recoveryRequired =
+    failure.code === "model_configuration_recovery_required";
   return {
     async mutate() {
       return {
         status: "rejected",
-        stage: "recovery",
+        stage: recoveryRequired ? "recovery" : "validation",
         code: failure.code,
-        rollback: "recovery_required",
+        rollback: recoveryRequired ? "recovery_required" : "not_needed",
         diagnosticId: failure.diagnosticId,
       };
     },

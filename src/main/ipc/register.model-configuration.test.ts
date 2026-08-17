@@ -152,8 +152,7 @@ describe("coordinatorUnavailableMutation", () => {
     "native_module_load_failed",
     "model_configuration_database_unavailable",
     "model_configuration_schema_unsupported",
-    "model_configuration_recovery_required",
-  ] as const)("returns the exact %s identity", async (code) => {
+  ] as const)("maps the exact %s identity to validation", async (code) => {
     const factory = await unavailableMutationFactory();
     const startupFailure = {
       code,
@@ -163,12 +162,29 @@ describe("coordinatorUnavailableMutation", () => {
 
     expect(result).toMatchObject({
       status: "rejected",
-      stage: "recovery",
+      stage: "validation",
       code,
-      rollback: "recovery_required",
+      rollback: "not_needed",
       diagnosticId: startupFailure.diagnosticId,
     });
     expect(JSON.stringify(result)).not.toMatch(/detail|message|secret/iu);
+  });
+
+  it("maps an explicit recovery-required identity to recovery", async () => {
+    const factory = await unavailableMutationFactory();
+    const startupFailure = {
+      code: "model_configuration_recovery_required",
+      diagnosticId: "abcdef012345",
+    } satisfies ModelConfigurationStartupFailure;
+    const result = await factory(startupFailure).mutate(upsertRequest());
+
+    expect(result).toMatchObject({
+      status: "rejected",
+      stage: "recovery",
+      code: "model_configuration_recovery_required",
+      rollback: "recovery_required",
+      diagnosticId: startupFailure.diagnosticId,
+    });
   });
 
   it("uses one opaque recovery id when the startup record is absent", async () => {
@@ -179,7 +195,9 @@ describe("coordinatorUnavailableMutation", () => {
 
     expect(first).toMatchObject({
       status: "rejected",
+      stage: "recovery",
       code: "model_configuration_recovery_required",
+      rollback: "recovery_required",
       diagnosticId: expect.stringMatching(/^[0-9a-f]{12}$/u),
     });
     expect(second).toMatchObject({
@@ -195,7 +213,9 @@ describe("coordinatorUnavailableMutation", () => {
     }).mutate(upsertRequest());
 
     expect(result).toMatchObject({
+      stage: "validation",
       code: "native_module_load_failed",
+      rollback: "not_needed",
       diagnosticId: expect.stringMatching(/^[0-9a-f]{12}$/u),
     });
     expect(JSON.stringify(result)).not.toContain("private/path/detail");
