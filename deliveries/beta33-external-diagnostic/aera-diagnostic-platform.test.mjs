@@ -15,6 +15,8 @@ import {
   buildProcessTree,
   classifyProcessRole,
   collectMacPlatformEvidence,
+  collectMacSecurityEvidence,
+  collectMacDnsRouteEvidence,
   discoverRuntimeLogEvidence,
   parseLsofNetwork,
 } from "./aera-diagnostic-platform.mjs";
@@ -94,12 +96,15 @@ test("discovers current Runtime logs from open files before known Profile paths"
     const evidence = discoverRuntimeLogEvidence({
       hermesHome,
       userDataPaths: [],
-      openFiles: [{ pid: 103, path: openLog }],
+      openFiles: [{ pid: 103, path: openLog, processRole: "runtime" }],
       startedAt: "2026-08-17T01:00:00.000Z",
       endedAt: "2026-08-17T01:05:00.000Z",
     });
     assert.equal(evidence.status, "collected");
     assert.equal(evidence.logs[0].source, "observed_open_file");
+    assert.equal(evidence.logs[0].pid, 103);
+    assert.equal(evidence.logs[0].processRole, "runtime");
+    assert.equal(evidence.pidCorrelatedCount, 1);
     assert.equal(
       evidence.logs.some((entry) => entry.source === "active_profile"),
       true,
@@ -121,6 +126,35 @@ test("discovers current Runtime logs from open files before known Profile paths"
   }
 });
 
+test("does not mark a current known Runtime log collected without PID correlation", () => {
+  const root = mkdtempSync(join(tmpdir(), "aera-runtime-unbound-log-test-"));
+  try {
+    const hermesHome = join(root, "hermes");
+    const profileRoot = join(hermesHome, "profiles", "fault-profile");
+    mkdirSync(profileRoot, { recursive: true });
+    writeFileSync(join(hermesHome, "active_profile"), "fault-profile\n");
+    const knownLog = join(profileRoot, "gateway-stderr.log");
+    writeFileSync(knownLog, "current but unbound runtime marker\n");
+    const now = new Date("2026-08-17T01:02:00.000Z");
+    utimesSync(knownLog, now, now);
+
+    const evidence = discoverRuntimeLogEvidence({
+      hermesHome,
+      userDataPaths: [],
+      openFiles: [],
+      startedAt: "2026-08-17T01:00:00.000Z",
+      endedAt: "2026-08-17T01:05:00.000Z",
+    });
+
+    assert.equal(evidence.status, "missing");
+    assert.equal(evidence.reason, "current_runtime_log_unavailable");
+    assert.equal(evidence.pidCorrelatedCount, 0);
+    assert.equal(evidence.logs[0].source, "active_profile");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("keeps process-owned log files at opaque Runtime paths", () => {
   const root = mkdtempSync(join(tmpdir(), "zq-"));
   try {
@@ -131,7 +165,7 @@ test("keeps process-owned log files at opaque Runtime paths", () => {
     const evidence = discoverRuntimeLogEvidence({
       hermesHome: join(root, "home"),
       userDataPaths: [],
-      openFiles: [{ pid: 103, path: openLog }],
+      openFiles: [{ pid: 103, path: openLog, processRole: "runtime" }],
       startedAt: "2026-08-17T01:00:00.000Z",
       endedAt: "2026-08-17T01:05:00.000Z",
     });
@@ -140,6 +174,31 @@ test("keeps process-owned log files at opaque Runtime paths", () => {
       evidence.logs.map((entry) => entry.source),
       ["observed_open_file"],
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("keeps Runtime ownership when Main and Runtime share one log path", () => {
+  const root = mkdtempSync(join(tmpdir(), "aera-runtime-shared-log-test-"));
+  try {
+    const openLog = join(root, "shared.log");
+    writeFileSync(openLog, "shared runtime marker\n");
+    const now = new Date("2026-08-17T01:02:00.000Z");
+    utimesSync(openLog, now, now);
+    const evidence = discoverRuntimeLogEvidence({
+      hermesHome: join(root, "home"),
+      userDataPaths: [],
+      openFiles: [
+        { pid: 100, path: openLog, processRole: "main" },
+        { pid: 103, path: openLog, processRole: "runtime" },
+      ],
+      startedAt: "2026-08-17T01:00:00.000Z",
+      endedAt: "2026-08-17T01:05:00.000Z",
+    });
+    assert.equal(evidence.status, "collected");
+    assert.equal(evidence.pidCorrelatedCount, 1);
+    assert.equal(evidence.pidCorrelatedLogs[0].pid, 103);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -215,4 +274,64 @@ test("records the SHA-256 of native module bytes, not path or metadata", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("collects bounded macOS signature, quarantine, DNS and route evidence", () => {
+  const calls = [];
+  const result = collectMacSecurityEvidence({
+    appPath: "/Applications/Aera.app",
+    executable: "/Applications/Aera.app/Contents/MacOS/Aera",
+    runCommand(command, args, options) {
+      calls.push({ command, args, options });
+      if (command === "xattr")
+        return {
+          code: 0,
+          stdout: "com.apple.quarantine\n",
+          stderr: "",
+          stdoutBytes: 23,
+          stderrBytes: 0,
+          stdoutTruncated: false,
+          stderrTruncated: false,
+          timedOut: false,
+        };
+      return {
+        code: 0,
+        stdout: "valid\n",
+        stderr: "",
+        stdoutBytes: 6,
+        stderrBytes: 0,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        timedOut: false,
+      };
+    },
+  });
+  assert.equal(result.signature.status, "collected");
+  assert.equal(result.quarantine.status, "collected");
+  assert.equal(result.quarantine.present, true);
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every((call) => call.options.maximumBytes <= 64 * 1024));
+
+  const network = collectMacDnsRouteEvidence({
+    runCommand(command) {
+      assert.ok(["scutil", "netstat"].includes(command));
+      return {
+        code: 0,
+        stdout:
+          command === "scutil"
+            ? "nameserver[0] : 10.0.0.1\n"
+            : "default 10.0.0.1 en0\n",
+        stderr: "",
+        stdoutBytes: 30,
+        stderrBytes: 0,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        timedOut: false,
+      };
+    },
+  });
+  assert.equal(network.status, "collected");
+  assert.equal(network.dnsServerCount, 1);
+  assert.equal(network.defaultRouteCount, 1);
+  assert.doesNotMatch(JSON.stringify(network), /10\.0\.0\.1/);
 });

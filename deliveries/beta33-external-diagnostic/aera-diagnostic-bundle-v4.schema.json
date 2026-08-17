@@ -12,7 +12,8 @@
     "endedAt",
     "sections",
     "missingEvidence",
-    "files"
+    "files",
+    "redaction"
   ],
   "properties": {
     "schemaVersion": { "const": 4 },
@@ -30,14 +31,68 @@
     "reproductionConfirmed": { "type": "boolean" },
     "processContinuityConfirmed": { "type": "boolean" },
     "internal_stage_visibility": { "const": "external_only" },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "finalScan",
+        "replacements",
+        "dropped",
+        "truncated"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "finalScan": { "const": "passed" },
+        "replacements": { "type": "integer", "minimum": 0 },
+        "dropped": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "integer", "minimum": 0 }
+      }
+    },
     "sections": {
       "type": "array",
+      "minItems": 31,
+      "maxItems": 31,
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": ["name", "status", "reason"],
         "properties": {
-          "name": { "type": "string", "minLength": 1 },
+          "name": {
+            "enum": [
+              "target",
+              "process",
+              "pid_continuity",
+              "network",
+              "dns_routes",
+              "open_files",
+              "signature",
+              "quarantine",
+              "environment",
+              "native_abi",
+              "runtime_logs",
+              "unified_log",
+              "platform_events",
+              "database",
+              "journal",
+              "model_chain",
+              "managed_files",
+              "backups",
+              "model_comparison",
+              "route_catalog",
+              "owner",
+              "cloud_origin",
+              "main_events",
+              "preload_events",
+              "renderer_events",
+              "runtime_events",
+              "owner_events",
+              "updater_events",
+              "updater",
+              "main_renderer_ipc",
+              "redaction"
+            ]
+          },
           "status": { "enum": ["collected", "missing", "failed"] },
           "reason": { "type": ["string", "null"] }
         }
@@ -53,7 +108,7 @@
         "properties": {
           "name": {
             "type": "string",
-            "pattern": "^(?!/)(?!.*(?:^|/)\.\.(?:/|$)).+$"
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
           },
           "size": { "type": "integer", "minimum": 0 },
           "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" }

@@ -7,6 +7,41 @@ const SOURCE_SHA = /^[0-9a-f]{40,64}$/i;
 const CAPTURE_ID =
   /^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
 
+export const REQUIRED_DIAGNOSTIC_SECTIONS = Object.freeze([
+  "target",
+  "process",
+  "pid_continuity",
+  "network",
+  "dns_routes",
+  "open_files",
+  "signature",
+  "quarantine",
+  "environment",
+  "native_abi",
+  "runtime_logs",
+  "unified_log",
+  "platform_events",
+  "database",
+  "journal",
+  "model_chain",
+  "managed_files",
+  "backups",
+  "model_comparison",
+  "route_catalog",
+  "owner",
+  "cloud_origin",
+  "main_events",
+  "preload_events",
+  "renderer_events",
+  "runtime_events",
+  "owner_events",
+  "updater_events",
+  "updater",
+  "main_renderer_ipc",
+  "redaction",
+]);
+const DIAGNOSTIC_SECTION_NAMES = new Set(REQUIRED_DIAGNOSTIC_SECTIONS);
+
 const TARGET_FIELDS = new Set([
   "schemaVersion",
   "platform",
@@ -42,6 +77,15 @@ const BUNDLE_FIELDS = new Set([
   "reproductionConfirmed",
   "processContinuityConfirmed",
   "internal_stage_visibility",
+  "redaction",
+]);
+
+const REDACTION_FIELDS = new Set([
+  "schemaVersion",
+  "finalScan",
+  "replacements",
+  "dropped",
+  "truncated",
 ]);
 
 function assertClosedObject(value, fields, label) {
@@ -121,6 +165,18 @@ export function validateDiagnosticBundleV4(input) {
   if (!Array.isArray(input.missingEvidence))
     throw new Error("missingEvidence must be an array");
   if (!Array.isArray(input.files)) throw new Error("files must be an array");
+  assertClosedObject(input.redaction, REDACTION_FIELDS, "redaction");
+  if (input.redaction.schemaVersion !== 1)
+    throw new Error("redaction schemaVersion must be 1");
+  if (input.redaction.finalScan !== "passed")
+    throw new Error("redaction finalScan must be passed");
+  for (const field of ["replacements", "dropped", "truncated"]) {
+    if (
+      !Number.isSafeInteger(input.redaction[field]) ||
+      input.redaction[field] < 0
+    )
+      throw new Error(`redaction ${field} is invalid`);
+  }
   if (
     input.platform != null &&
     !new Set(["darwin", "win32"]).has(input.platform)
@@ -143,6 +199,8 @@ export function validateDiagnosticBundleV4(input) {
       "section",
     );
     assertString(section.name, "section name", 128);
+    if (!DIAGNOSTIC_SECTION_NAMES.has(section.name))
+      throw new Error(`unknown section: ${section.name}`);
     if (sectionNames.has(section.name))
       throw new Error(`duplicate section: ${section.name}`);
     sectionNames.add(section.name);
@@ -165,6 +223,10 @@ export function validateDiagnosticBundleV4(input) {
     const section = input.sections.find((entry) => entry.name === name);
     if (section.status === "collected")
       throw new Error(`missingEvidence includes collected section: ${name}`);
+  }
+  for (const name of REQUIRED_DIAGNOSTIC_SECTIONS) {
+    if (!sectionNames.has(name))
+      throw new Error(`bundle lacks required section: ${name}`);
   }
 
   const filenames = new Set();

@@ -16,7 +16,23 @@ import { tmpdir } from "node:os";
 import { join, normalize } from "node:path";
 import { test } from "node:test";
 
+import { parseExistingAeraProcessRows } from "./aera-diagnostic.mjs";
+
 const cli = new URL("./aera-diagnostic.mjs", import.meta.url).pathname;
+
+test("existing-process detection ignores tools that only mention Aera paths", () => {
+  const rows = parseExistingAeraProcessRows(
+    [
+      "100 /usr/bin/codesign",
+      "101 /Applications/Aera.app/Contents/MacOS/Aera",
+      "102 /Applications/Aera.app/Contents/Frameworks/Aera Helper.app/Contents/MacOS/Aera Helper",
+      "103 /usr/bin/spctl",
+    ].join("\n"),
+  );
+  assert.deepEqual(rows, [
+    { pid: 101, executable: "/Applications/Aera.app/Contents/MacOS/Aera" },
+  ]);
+});
 
 function createFixture(root) {
   const app = join(root, "Aera.app");
@@ -128,8 +144,48 @@ test("creates a V4 bundle with all chain sections and explicit missing evidence"
     const identity = JSON.parse(
       readFileSync(join(quarantine, "app-identity.json"), "utf8"),
     );
+    const platformDiagnostics = JSON.parse(
+      readFileSync(join(quarantine, "platform-diagnostics.json"), "utf8"),
+    );
     assert.equal(manifest.schemaVersion, 4);
     assert.equal(manifest.internal_stage_visibility, "external_only");
+    assert.deepEqual(manifest.redaction, {
+      schemaVersion: 1,
+      finalScan: "passed",
+      replacements: manifest.redaction.replacements,
+      dropped: manifest.redaction.dropped,
+      truncated: manifest.redaction.truncated,
+    });
+    for (const name of [
+      "signature",
+      "quarantine",
+      "open_files",
+      "environment",
+      "dns_routes",
+      "cloud_origin",
+      "backups",
+      "managed_files",
+      "model_comparison",
+      "main_events",
+      "preload_events",
+      "renderer_events",
+      "runtime_events",
+      "owner_events",
+      "updater_events",
+      "redaction",
+    ]) {
+      assert.ok(
+        manifest.sections.some((entry) => entry.name === name),
+        `missing required section: ${name}`,
+      );
+    }
+    assert.deepEqual(
+      manifest.missingEvidence.sort(),
+      manifest.sections
+        .filter((entry) => entry.status !== "collected")
+        .map((entry) => entry.name)
+        .sort(),
+    );
     assert.ok(manifest.target.executableSha256);
     assert.equal(
       identity.installed.executablePathSha256,
@@ -146,6 +202,33 @@ test("creates a V4 bundle with all chain sections and explicit missing evidence"
       manifest.sections.some((section) => section.name === "model_chain"),
     );
     assert.ok(Array.isArray(manifest.missingEvidence));
+    const unifiedSection = manifest.sections.find(
+      (section) => section.name === "unified_log",
+    );
+    assert.ok(unifiedSection);
+    if (unifiedSection.status !== "collected")
+      assert.ok(manifest.missingEvidence.includes("unified_log"));
+    assert.deepEqual(
+      platformDiagnostics.unifiedLog.map((request) => request.name),
+      ["aera_processes", "macos_policy"],
+    );
+    assert.equal(
+      platformDiagnostics.unifiedLog.every(
+        (request) =>
+          /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(request.start) &&
+          /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(request.end),
+      ),
+      true,
+    );
+    const eventSection = manifest.sections.find(
+      (section) => section.name === "main_renderer_ipc",
+    );
+    assert.deepEqual(eventSection, {
+      name: "main_renderer_ipc",
+      status: "missing",
+      reason: "stable_product_event_families_unavailable",
+    });
+    assert.ok(manifest.missingEvidence.includes("main_renderer_ipc"));
     assert.ok(manifest.files.some((entry) => entry.name === "journal.json"));
     assert.ok(
       manifest.files.some((entry) => entry.name === "macos-unified-log.txt"),

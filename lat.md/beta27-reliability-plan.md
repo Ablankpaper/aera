@@ -246,9 +246,9 @@ The standalone V4 collector records one bounded, redacted session for model-conf
 
 V4 uses a closed manifest and a single bounded evidence timeline.
 
-It contains Main/Preload/Renderer/IPC stable events, the verified Aera PID tree, process-owned network endpoints, native-module ABI inventory, SQLite database/WAL/SHM read evidence, journal summaries, five managed model files before and after, route candidates, owner/profile associations, updater events, Runtime logs, and the exact macOS unified-log request.
+It contains Main/Preload/Renderer/IPC stable events, the verified Aera PID tree, process-owned network endpoints and open-file evidence, native-module ABI inventory, SQLite database/WAL/SHM read evidence, journal summaries, five managed model files before and after plus backups, route candidates, owner/profile associations, updater events, Runtime logs, Cloud-origin observability, bounded environment flags, macOS signature/Quarantine/DNS/route evidence, Windows platform evidence, and both exact macOS unified-log requests.
 
-The collector keeps a section status for every requested source. Any unavailable, failed, stale, or identity-mismatched source is named in `missingEvidence`; an empty file or old log is never presented as current evidence. `internal_stage_visibility=external_only` explicitly limits claims about Renderer-to-Preload-to-Main IPC and Coordinator stages.
+The collector keeps a closed section status for every requested source, including each stable event family and the final redaction scan. Any unavailable, failed, stale, or identity-mismatched source is named in `missingEvidence`; an empty file or old log is never presented as current evidence. Runtime logs are `collected` only when an observed open handle is tied to a Runtime PID. `internal_stage_visibility=external_only` explicitly limits claims about Renderer-to-Preload-to-Main IPC and Coordinator stages.
 
 #### Candidate binding and launch boundary
 

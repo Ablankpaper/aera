@@ -16,6 +16,112 @@ function hash(domain, value) {
     .digest("hex");
 }
 
+function commandSummary(command) {
+  return {
+    code: command.code,
+    timedOut: Boolean(command.timedOut),
+    stdoutBytes: Number(command.stdoutBytes) || 0,
+    stderrBytes: Number(command.stderrBytes) || 0,
+    stdoutTruncated: Boolean(command.stdoutTruncated),
+    stderrTruncated: Boolean(command.stderrTruncated),
+  };
+}
+
+export function collectMacSecurityEvidence({
+  appPath,
+  executable,
+  runCommand = runBoundedCommand,
+}) {
+  const checks = [
+    {
+      name: "codesign",
+      command: runCommand(
+        "codesign",
+        ["--verify", "--deep", "--strict", appPath || executable],
+        { timeoutMs: 10_000, maximumBytes: 64 * 1024 },
+      ),
+    },
+    {
+      name: "gatekeeper",
+      command: runCommand(
+        "spctl",
+        ["--assess", "--type", "execute", appPath || executable],
+        { timeoutMs: 10_000, maximumBytes: 64 * 1024 },
+      ),
+    },
+  ];
+  const xattr = runCommand("xattr", [appPath || executable], {
+    timeoutMs: 5_000,
+    maximumBytes: 32 * 1024,
+  });
+  const signatureFailed = checks.some(({ command }) => command.code !== 0);
+  return {
+    signature: {
+      status: signatureFailed ? "failed" : "collected",
+      reason: signatureFailed ? "macos_signature_verification_failed" : null,
+      checks: checks.map(({ name, command }) => ({
+        name,
+        command: commandSummary(command),
+      })),
+    },
+    quarantine: {
+      status: xattr.code === 0 ? "collected" : "failed",
+      reason: xattr.code === 0 ? null : "macos_quarantine_query_failed",
+      present:
+        xattr.code === 0 &&
+        /(?:^|\n)com\.apple\.quarantine(?:\n|$)/.test(xattr.stdout || ""),
+      command: commandSummary(xattr),
+    },
+  };
+}
+
+function hashedMatches(text, pattern, domain) {
+  return [
+    ...new Set(
+      [...String(text || "").matchAll(pattern)]
+        .map((match) => match[1]?.trim())
+        .filter(Boolean)
+        .map((value) => hash(domain, value)),
+    ),
+  ].sort();
+}
+
+export function collectMacDnsRouteEvidence({
+  runCommand = runBoundedCommand,
+} = {}) {
+  const dns = runCommand("scutil", ["--dns"], {
+    timeoutMs: 10_000,
+    maximumBytes: 512 * 1024,
+  });
+  const routes = runCommand("netstat", ["-rn", "-f", "inet"], {
+    timeoutMs: 10_000,
+    maximumBytes: 512 * 1024,
+  });
+  const dnsServerSha256s = hashedMatches(
+    dns.stdout,
+    /^\s*nameserver\[\d+\]\s*:\s*(\S+)\s*$/gimu,
+    "aera-diagnostic-dns-server-v1",
+  );
+  const routeSha256s = hashedMatches(
+    routes.stdout,
+    /^default\s+(\S+)(?:\s+.*)?$/gimu,
+    "aera-diagnostic-default-route-v1",
+  );
+  const failed = dns.code !== 0 || routes.code !== 0;
+  return {
+    status: failed ? "failed" : "collected",
+    reason: failed ? "dns_route_query_failed" : null,
+    dnsServerCount: dnsServerSha256s.length,
+    dnsServerSha256s,
+    defaultRouteCount: routeSha256s.length,
+    defaultRouteSha256s: routeSha256s,
+    commands: {
+      dns: commandSummary(dns),
+      routes: commandSummary(routes),
+    },
+  };
+}
+
 function inspectNativeFile(path) {
   try {
     const bytes = readFileSync(path);
@@ -145,7 +251,13 @@ function walkNative(root, entries = []) {
   return entries;
 }
 
-export function collectMacPlatformEvidence({ rootPid, executable, appPath }) {
+export function collectMacPlatformEvidence({
+  rootPid,
+  executable,
+  appPath,
+  runCommand = runBoundedCommand,
+  includeStaticEvidence = true,
+}) {
   const ps = runBoundedCommand("ps", ["-axo", "pid=,ppid=,lstart=,command="], {
     timeoutMs: 5000,
     maximumBytes: 2 * 1024 * 1024,
@@ -189,7 +301,22 @@ export function collectMacPlatformEvidence({ rootPid, executable, appPath }) {
     "Resources",
     "app.asar.unpacked",
   );
-  const nativeEntries = walkNative(nativeRoot);
+  const nativeEntries = includeStaticEvidence ? walkNative(nativeRoot) : [];
+  const security = includeStaticEvidence
+    ? collectMacSecurityEvidence({ appPath, executable, runCommand })
+    : {
+        signature: {
+          status: "missing",
+          reason: "static_evidence_deferred",
+        },
+        quarantine: {
+          status: "missing",
+          reason: "static_evidence_deferred",
+        },
+      };
+  const dnsRoutes = includeStaticEvidence
+    ? collectMacDnsRouteEvidence({ runCommand })
+    : { status: "missing", reason: "static_evidence_deferred" };
   return {
     platform: "darwin",
     process: {
@@ -221,6 +348,14 @@ export function collectMacPlatformEvidence({ rootPid, executable, appPath }) {
         : "native_module_inventory_unavailable",
       entries: nativeEntries,
       electronModulesAbi: String(process.versions.modules || "unknown"),
+    },
+    signature: security.signature,
+    quarantine: security.quarantine,
+    dnsRoutes,
+    events: {
+      status: "missing",
+      reason: "macos_platform_events_unavailable",
+      entries: [],
     },
   };
 }

@@ -1,6 +1,11 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 
-import { formatMacLogTimestamp } from "./aera-diagnostic-core.mjs";
+import {
+  buildMacLogQueries,
+  formatMacLogTimestamp,
+  runBoundedCommand,
+} from "./aera-diagnostic-core.mjs";
+import { redactText } from "./aera-diagnostic-redaction.mjs";
 
 const HEX_ID = /^[0-9a-f]{12}$/i;
 const SOURCES = new Set([
@@ -169,7 +174,14 @@ export function parseStableEvents(lines, window = {}) {
       families.add(source);
     }
   }
-  const requiredFamilies = ["main", "preload", "renderer", "owner", "updater"];
+  const requiredFamilies = [
+    "main",
+    "preload",
+    "renderer",
+    "runtime",
+    "owner",
+    "updater",
+  ];
   return {
     events,
     missingFamilies: requiredFamilies.filter((family) => !families.has(family)),
@@ -206,6 +218,79 @@ export function buildMacUnifiedLogRequest({
       "--predicate",
       `((${pidPredicate}) OR subsystem CONTAINS[c] "${bundle}" OR eventMessage CONTAINS[c] "${bundle}")`,
     ],
+  };
+}
+
+function commandSummary(command) {
+  return {
+    code: command.code,
+    timedOut: command.timedOut,
+    stdoutBytes: command.stdoutBytes,
+    stderrBytes: command.stderrBytes,
+    stdoutTruncated: command.stdoutTruncated,
+    stderrTruncated: command.stderrTruncated,
+  };
+}
+
+export function collectMacUnifiedLogEvidence({
+  startedAt,
+  endedAt,
+  pids = [],
+  bundleId,
+  appPath,
+  runCommand = runBoundedCommand,
+}) {
+  const queries = buildMacLogQueries({
+    startedAt,
+    endedAt,
+    pids,
+    bundleId,
+    appPath,
+  });
+  const requests = [];
+  const text = [];
+  for (const query of queries) {
+    let command;
+    try {
+      command = runCommand(query.command, query.args, {
+        timeoutMs: 10_000,
+        maximumBytes: 1024 * 1024,
+      });
+    } catch {
+      command = {
+        code: null,
+        timedOut: false,
+        stdout: "",
+        stderr: "",
+        stdoutBytes: 0,
+        stderrBytes: 0,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      };
+    }
+    const startIndex = query.args.indexOf("--start");
+    const endIndex = query.args.indexOf("--end");
+    requests.push({
+      name: query.name,
+      start: query.args[startIndex + 1] || null,
+      end: query.args[endIndex + 1] || null,
+      pidCount: new Set(pids.map(Number).filter(Number.isInteger)).size,
+      command: commandSummary(command),
+    });
+    text.push(
+      `--- ${query.name} ---\n${command.stdout || command.stderr || ""}`,
+    );
+  }
+  const failed = requests.filter((request) => request.command.code !== 0);
+  return {
+    status: failed.length ? "failed" : "collected",
+    reason: failed.length
+      ? failed.some((request) => request.command.timedOut)
+        ? "unified_log_timeout"
+        : "unified_log_query_failed"
+      : null,
+    requests,
+    text: redactText(text.join("\n"), 2 * 1024 * 1024),
   };
 }
 

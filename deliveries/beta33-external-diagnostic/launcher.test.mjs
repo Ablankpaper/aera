@@ -18,7 +18,9 @@ test("Windows wrappers forward to PowerShell and preserve arguments", () => {
   const bat = readFileSync(join(root, "run-windows.bat"), "utf8");
   assert.match(ps, /ELECTRON_RUN_AS_NODE/);
   assert.match(ps, /aera-diagnostic\.mjs/);
-  assert.match(ps, /@args/);
+  assert.match(ps, /GetUnresolvedProviderPathFromPSPath/);
+  assert.match(ps, /collectorArgs/);
+  assert.doesNotMatch(ps, /--platform windows @args/);
   assert.match(bat, /run-windows\.ps1/);
   assert.doesNotMatch(bat, /node\.exe .*beta29/);
 });

@@ -3,9 +3,12 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
-import { collectMacPlatformEvidence } from "./aera-diagnostic-platform-macos.mjs";
 
-export { collectMacPlatformEvidence };
+export {
+  collectMacDnsRouteEvidence,
+  collectMacPlatformEvidence,
+  collectMacSecurityEvidence,
+} from "./aera-diagnostic-platform-macos.mjs";
 
 function relationHash(domain, value) {
   return createHash("sha256")
@@ -116,16 +119,29 @@ export function findRuntimeLogSources({
   const profileRoot =
     profile === "default" ? hermesHome : join(hermesHome, "profiles", profile);
   const candidates = [];
-  const add = (path, source, pid = null) => {
+  const add = (path, source, pid = null, processRole = null) => {
     if (!path || !/\.(?:log|txt|jsonl|out|err)$/i.test(path)) return;
     const key = normalize(path);
-    if (candidates.some((entry) => entry.path === key)) return;
-    candidates.push({ path: key, source, pid });
+    const observed = source === "observed_open_file";
+    const duplicate = candidates.find(
+      (entry) =>
+        entry.path === key &&
+        (observed
+          ? entry.source === source && entry.pid === pid
+          : entry.source !== "observed_open_file"),
+    );
+    if (duplicate) return;
+    candidates.push({ path: key, source, pid, processRole });
   };
   for (const entry of openFiles) {
     // The Runtime may write to a temporary or opaque path. Process ownership
     // and a bounded log-like suffix are stronger evidence than directory names.
-    add(entry.path, "observed_open_file", Number(entry.pid) || null);
+    add(
+      entry.path,
+      "observed_open_file",
+      Number(entry.pid) || null,
+      entry.processRole || null,
+    );
   }
   add(join(profileRoot, "gateway-stderr.log"), "active_profile");
   for (const path of listLogFiles(profileRoot)) add(path, "active_profile");
@@ -152,6 +168,7 @@ function logEvidence(entry, startedAt, endedAt) {
     return {
       source: entry.source,
       pid: entry.pid,
+      processRole: entry.processRole,
       pathSha256: relationHash(
         "aera-diagnostic-log-path-v1",
         normalize(entry.path),
@@ -171,11 +188,21 @@ export function discoverRuntimeLogEvidence(input) {
     .map((entry) => logEvidence(entry, input.startedAt, input.endedAt))
     .filter(Boolean);
   const logs = evidence.filter((entry) => entry.current);
+  const pidCorrelatedLogs = logs.filter(
+    (entry) =>
+      entry.source === "observed_open_file" &&
+      Number.isInteger(entry.pid) &&
+      entry.pid > 0 &&
+      entry.processRole === "runtime",
+  );
   const stale = evidence.filter((entry) => !entry.current);
   return {
-    status: logs.length > 0 ? "collected" : "missing",
-    reason: logs.length > 0 ? null : "current_runtime_log_unavailable",
+    status: pidCorrelatedLogs.length > 0 ? "collected" : "missing",
+    reason:
+      pidCorrelatedLogs.length > 0 ? null : "current_runtime_log_unavailable",
     logs,
+    pidCorrelatedLogs,
+    pidCorrelatedCount: pidCorrelatedLogs.length,
     stale,
     discoveredCount: evidence.length,
   };

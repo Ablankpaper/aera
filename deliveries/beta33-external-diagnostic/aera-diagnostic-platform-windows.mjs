@@ -107,6 +107,17 @@ function quotePowerShell(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
+function commandSummary(command) {
+  return {
+    code: command.code,
+    timedOut: Boolean(command.timedOut),
+    stdoutBytes: Number(command.stdoutBytes) || 0,
+    stderrBytes: Number(command.stderrBytes) || 0,
+    stdoutTruncated: Boolean(command.stdoutTruncated),
+    stderrTruncated: Boolean(command.stderrTruncated),
+  };
+}
+
 export function buildWindowsEvidenceScript({
   rootPid,
   executable,
@@ -118,14 +129,19 @@ export function buildWindowsEvidenceScript({
   return [
     "$ErrorActionPreference='SilentlyContinue'",
     `$rootPid=${Number(rootPid) || 0}`,
+    `$executable=${quotePowerShell(executable)}`,
     "$all=@(Get-CimInstance Win32_Process)",
     "$ids=@($rootPid)",
     "if($rootPid -gt 0){do{$children=@($all|Where-Object{$ids -contains [int]$_.ParentProcessId -and -not ($ids -contains [int]$_.ProcessId)}|ForEach-Object{[int]$_.ProcessId});if($children.Count -gt 0){$ids+=$children}}while($children.Count -gt 0)}",
     "$processes=@($all|Where-Object{$ids -contains [int]$_.ProcessId}|Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CreationDate)",
     "$connections=@(Get-NetTCPConnection|Where-Object{$ids -contains [int]$_.OwningProcess}|Select-Object OwningProcess,RemoteAddress,RemotePort,State,CreationTime)",
+    "$dns=@(Get-DnsClientServerAddress|Select-Object InterfaceAlias,ServerAddresses)",
+    "$routes=@(Get-NetRoute|Where-Object{$_.DestinationPrefix -in @('0.0.0.0/0','::/0')}|Select-Object NextHop,DestinationPrefix)",
     `$events=@(Get-WinEvent -FilterHashtable @{LogName='Application';StartTime=[datetime]${quotePowerShell(start)};EndTime=[datetime]${quotePowerShell(end)}}|Where-Object{$_.ProviderName -match 'Aera|Electron|agentera'}|Select-Object TimeCreated,ProviderName,Id,LevelDisplayName,Message -First 500)`,
-    `$signature=(Get-AuthenticodeSignature -LiteralPath ${quotePowerShell(executable)}|Select-Object Status,StatusMessage)`,
-    "[pscustomobject]@{processes=$processes;connections=$connections;events=$events;signature=$signature}|ConvertTo-Json -Depth 6 -Compress",
+    `$signatureSource=Get-AuthenticodeSignature -LiteralPath ${quotePowerShell(executable)}`,
+    "$signature=[pscustomobject]@{Status=[string]$signatureSource.Status}",
+    `$quarantine=[pscustomobject]@{present=$null -ne (Get-Item -LiteralPath $executable -Stream Zone.Identifier -ErrorAction SilentlyContinue)}`,
+    "[pscustomobject]@{processes=$processes;connections=$connections;dns=$dns;routes=$routes;events=$events;signature=$signature;quarantine=$quarantine}|ConvertTo-Json -Depth 6 -Compress",
   ].join(";");
 }
 
@@ -195,7 +211,83 @@ export function normalizeWindowsPlatformEvidence(value) {
       redactText(row.Message || ""),
     ),
   }));
-  return { processes, network, events };
+  const dnsRows = Array.isArray(value?.dns)
+    ? value.dns
+    : value?.dns
+      ? [value.dns]
+      : null;
+  const dnsServerSha256s = [
+    ...new Set(
+      (dnsRows || [])
+        .flatMap((row) =>
+          Array.isArray(row?.ServerAddresses)
+            ? row.ServerAddresses
+            : typeof row?.ServerAddresses === "string"
+              ? [row.ServerAddresses]
+              : row?.ServerAddress
+                ? [row.ServerAddress]
+                : [],
+        )
+        .filter((address) => typeof address === "string" && address.length > 0)
+        .map((address) => hash("aera-diagnostic-dns-server-v1", address)),
+    ),
+  ].sort();
+  const routeRows = Array.isArray(value?.routes)
+    ? value.routes
+    : value?.routes
+      ? [value.routes]
+      : null;
+  const defaultRouteSha256s = [
+    ...new Set(
+      (routeRows || [])
+        .filter((row) => ["0.0.0.0/0", "::/0"].includes(row?.DestinationPrefix))
+        .map((row) =>
+          hash("aera-diagnostic-default-route-v1", row.NextHop || ""),
+        ),
+    ),
+  ].sort();
+  const signatureStatus = String(value?.signature?.Status || "");
+  const safeSignatureStatus = /^[A-Za-z]+$/.test(signatureStatus)
+    ? signatureStatus
+    : "unknown";
+  const quarantinePresent = value?.quarantine?.present;
+  return {
+    processes,
+    network,
+    events,
+    signature:
+      value?.signature && signatureStatus
+        ? {
+            status: "collected",
+            reason: null,
+            statusValue: safeSignatureStatus,
+          }
+        : { status: "missing", reason: "windows_signature_unavailable" },
+    quarantine:
+      typeof quarantinePresent === "boolean"
+        ? {
+            status: "collected",
+            reason: null,
+            present: quarantinePresent,
+          }
+        : { status: "missing", reason: "windows_quarantine_unavailable" },
+    dnsRoutes:
+      dnsRows && routeRows
+        ? {
+            status: "collected",
+            reason: null,
+            dnsServerCount: dnsServerSha256s.length,
+            dnsServerSha256s,
+            defaultRouteCount: defaultRouteSha256s.length,
+            defaultRouteSha256s,
+          }
+        : { status: "missing", reason: "windows_dns_route_unavailable" },
+    openFiles: {
+      status: "missing",
+      reason: "windows_open_files_unavailable",
+      entries: [],
+    },
+  };
 }
 
 export function collectWindowsPlatformEvidence({
@@ -229,7 +321,15 @@ export function collectWindowsPlatformEvidence({
       network: { status: "failed", reason, entries: [] },
       events: { status: "failed", reason, entries: [] },
       signature: { status: "failed", reason },
+      quarantine: { status: "failed", reason },
+      dnsRoutes: { status: "failed", reason },
+      openFiles: {
+        status: "missing",
+        reason: "windows_open_files_unavailable",
+        entries: [],
+      },
       nativeInventory,
+      command: commandSummary(command),
     };
   }
   try {
@@ -256,8 +356,12 @@ export function collectWindowsPlatformEvidence({
         reason: normalized.events.length ? null : "windows_events_unavailable",
         entries: normalized.events,
       },
-      signature: { status: "collected", reason: null },
+      signature: normalized.signature,
+      quarantine: normalized.quarantine,
+      dnsRoutes: normalized.dnsRoutes,
+      openFiles: normalized.openFiles,
       nativeInventory,
+      command: commandSummary(command),
     };
   } catch {
     return {
@@ -279,7 +383,21 @@ export function collectWindowsPlatformEvidence({
         entries: [],
       },
       signature: { status: "failed", reason: "windows_evidence_invalid_json" },
+      quarantine: {
+        status: "failed",
+        reason: "windows_evidence_invalid_json",
+      },
+      dnsRoutes: {
+        status: "failed",
+        reason: "windows_evidence_invalid_json",
+      },
+      openFiles: {
+        status: "missing",
+        reason: "windows_open_files_unavailable",
+        entries: [],
+      },
       nativeInventory,
+      command: commandSummary(command),
     };
   }
 }

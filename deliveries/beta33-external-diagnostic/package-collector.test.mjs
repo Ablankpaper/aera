@@ -17,6 +17,7 @@ test("packages a macOS-only collector bundle without product source or legacy CL
     assert.ok(entries.includes("aera-diagnostic.mjs"));
     assert.ok(entries.includes("run-macos.sh"));
     assert.ok(entries.includes("aera-diagnostic-bundle-v4.schema.json"));
+    assert.ok(entries.includes("aera-diagnostic-environment.mjs"));
     assert.ok(!entries.includes("beta29-external-model-save-diagnostic.mjs"));
     assert.ok(!entries.some((name) => name.startsWith("src")));
     assert.ok(readdirSync(output).some((name) => name.endsWith(".zip")));

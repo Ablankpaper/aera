@@ -6,7 +6,7 @@ Aera Beta.33 外部诊断采集器 V4
 
 采集范围
 --------
-一次运行会把 Main/Preload/Renderer/IPC 的稳定脱敏事件、真实 PID/进程树/可执行文件指纹、Runtime 当前日志路径、macOS unified log 精确时间窗口、Windows Application 事件、Electron/native ABI、SQLite DB/WAL/SHM 只读状态、journal、五个受管文件 before/after、route candidates/重复 endpoint、owner transition 关联、updater 阶段和网络端点放进同一个带 schemaVersion=4 的 ZIP。无法读取的部分不会静默消失，而会出现在 manifest.missingEvidence 和对应 section 状态中。
+一次运行会把 Main/Preload/Renderer/IPC 的稳定脱敏事件、真实 PID/进程树/可执行文件指纹、Runtime 当前日志路径、macOS unified log 精确时间窗口、macOS 签名/Quarantine/DNS/路由、Windows Application/签名/Quarantine/DNS/路由事件、Electron/native ABI、SQLite DB/WAL/SHM 只读状态、journal、五个受管文件 before/after、备份和 route candidates/重复 endpoint、owner transition 关联、Cloud origin 可观测性、updater 阶段和网络端点放进同一个带 schemaVersion=4 的 ZIP。无法读取的部分不会静默消失，而会出现在 manifest.missingEvidence 和对应 section 状态中。
 `native-inventory.json` 同时记录 Electron 运行时 ABI、每个可读 `.node` 的实际内容 SHA-256，以及 `node_register_module_vN` marker（`collected`/`not_found`/`ambiguous`/`unavailable`）；因此 137/145 不匹配可以直接从采集结果核对。
 Windows 会从 Aera.exe 同级的 `resources/app.asar.unpacked`（也兼容传入安装目录）扫描原生模块；目录不存在或不可读时，`native_abi` 会明确出现在 `manifest.missingEvidence`，不会被当成“没有原生模块”。
 
@@ -36,7 +36,7 @@ PowerShell：
 
    run-windows.bat -App "C:\Program Files\Aera\Aera.exe" -Target .\target.json
 
-Windows 包装器会调用 Aera 自带的 Electron 运行时，不依赖全局 `node.exe`；PowerShell 退出后会恢复 `ELECTRON_RUN_AS_NODE` 环境变量。
+Windows 包装器会调用 Aera 自带的 Electron 运行时，不依赖全局 `node.exe`；它会把 App/Target/Output/Profile 路径解析成绝对路径、固定传入 `--platform windows`，并在 PowerShell 退出后恢复 `ELECTRON_RUN_AS_NODE` 环境变量。Windows 的 Runtime open-handle 证据目前会显式标为 `windows_open_files_unavailable`，不能把进程树或旧日志当作 PID 绑定日志。
 Windows 采集器优先读取可执行文件的 ProductVersion；若系统无法提供版本且未使用 `--target`，会显式记录 `version=unknown` 并保持 `runtime-unbound`，不会伪造候选版本。提供了候选 target 时，版本缺失会因身份不匹配而 fail-closed。
 
 会话有效性
@@ -45,7 +45,8 @@ manifest 的 `reproductionConfirmed=true` 只有在采集器自己启动的主 P
 
 输出合同
 --------
-ZIP 根目录包含 manifest.json、timeline.json、app-identity.json、process.json、network.json、native-inventory.json、runtime-evidence.json、events.json、journal.json、transaction-evidence.json、profile-evidence.json、route-catalog-evidence.json、updater.json、config-snapshot.json、logs.txt、macos-unified-log.txt、platform-diagnostics.json 和 redaction.json。`internal_stage_visibility` 固定为 `external_only`；采集器不能直接看到 Renderer→Preload→Main IPC 或 Coordinator 内部 stage，分析时不得把外部文件相关性误写成内部调用证明。
+ZIP 根目录包含 manifest.json、timeline.json、app-identity.json、process.json、network.json、open-files.json、security.json、dns-routes.json、environment.json、native-inventory.json、runtime-evidence.json、events.json、journal.json、transaction-evidence.json、profile-evidence.json、route-catalog-evidence.json、updater.json、config-snapshot.json、logs.txt、macos-unified-log.txt、platform-diagnostics.json 和 redaction.json。manifest 的闭合 section registry 会单独登记 signature、quarantine、open_files、environment、dns_routes、cloud_origin、backups、managed_files、model_comparison 及六类稳定事件；`internal_stage_visibility` 固定为 `external_only`；采集器不能直接看到 Renderer→Preload→Main IPC 或 Coordinator 内部 stage，分析时不得把外部文件相关性误写成内部调用证明。
+section 的 `collected` 只表示查询成功，不表示结果一定健康；例如 Windows `signature=collected` 时仍需查看 security.json 的 `statusValue` 是否为 `Valid`。
 
 故障排查
 --------

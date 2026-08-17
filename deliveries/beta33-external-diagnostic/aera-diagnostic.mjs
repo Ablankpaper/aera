@@ -23,8 +23,8 @@ import {
   safeRelativeName,
 } from "./aera-diagnostic-core.mjs";
 import {
+  collectMacUnifiedLogEvidence,
   parseStableEvents,
-  buildMacUnifiedLogRequest,
 } from "./aera-diagnostic-events.mjs";
 import {
   collectModelChain,
@@ -42,7 +42,12 @@ import {
 } from "./aera-diagnostic-platform.mjs";
 import { collectWindowsPlatformEvidence } from "./aera-diagnostic-platform-windows.mjs";
 import {
+  collectCloudOriginEvidence,
+  collectEnvironmentEvidence,
+} from "./aera-diagnostic-environment.mjs";
+import {
   parseDiagnosticTargetV1,
+  REQUIRED_DIAGNOSTIC_SECTIONS,
   validateDiagnosticBundleV4,
 } from "./aera-diagnostic-schema.mjs";
 import {
@@ -165,9 +170,7 @@ function windowsProductVersion(executable) {
   );
   if (result.code !== 0) return null;
   const version = result.stdout.trim().split(/\r?\n/).at(-1)?.trim() || "";
-  return /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(version)
-    ? version
-    : null;
+  return /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(version) ? version : null;
 }
 
 function findExecutable(appPath, platform) {
@@ -312,25 +315,32 @@ function validateTarget(identity, target) {
     throw new Error(`target identity mismatch: ${mismatches.join(",")}`);
 }
 
-function discoverExistingAeraProcesses(appPath) {
+export function parseExistingAeraProcessRows(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map((line) => {
+      const match = line.match(/^\s*(\d+)\s+(.+?)\s*$/);
+      return match ? { pid: Number(match[1]), executable: match[2] } : null;
+    })
+    .filter(
+      (row) =>
+        row &&
+        Number.isInteger(row.pid) &&
+        /(?:^|\/)(?:Aera|Aera 2|agentera-studio)(?:\.exe)?$|\.app\/Contents\/MacOS\/(?:Aera|Aera 2)$/i.test(
+          row.executable,
+        ),
+    );
+}
+
+function discoverExistingAeraProcesses() {
   if (process.platform === "win32") return [];
-  const result = runBoundedCommand("ps", ["-axo", "pid=,command="], {
+  const result = runBoundedCommand("ps", ["-axo", "pid=,comm="], {
     timeoutMs: 5000,
     maximumBytes: 1024 * 1024,
   });
-  return result.stdout
-    .split(/\r?\n/)
-    .filter(
-      (line) =>
-        /(?:^|[\\/ ])(?:Aera|Aera 2)(?:\.app|\.exe|$)|agentera-studio(?:\.exe)?(?:\s|$)/i.test(
-          line,
-        ) &&
-        !/\bnode(?:\.exe)?\b/i.test(line) &&
-        !line.includes(process.argv[1]) &&
-        !line.includes(appPath) &&
-        !line.includes("--app"),
-    )
-    .map((line) => line.trim().slice(0, 256));
+  return parseExistingAeraProcessRows(result.stdout).filter(
+    (row) => row.executable !== process.execPath,
+  );
 }
 
 function readTail(path, maximum = 128 * 1024) {
@@ -464,11 +474,15 @@ async function waitForObservation({
       rootPid: child.pid,
       executable,
       appPath,
+      includeStaticEvidence: false,
     });
     for (const entry of platform.process?.tree || []) {
       observedPids.add(entry.pid);
       for (const file of collectMacOpenFilePaths(entry.pid)) {
-        observedOpenFiles.set(`${file.pid}:${file.path}`, file);
+        observedOpenFiles.set(`${file.pid}:${file.path}`, {
+          ...file,
+          processRole: entry.role,
+        });
       }
     }
   };
@@ -524,46 +538,36 @@ async function waitForObservation({
   };
 }
 
-async function collectUnifiedLog(platform, startedAt, endedAt, pids, bundleId) {
+async function collectUnifiedLog(
+  platform,
+  startedAt,
+  endedAt,
+  pids,
+  bundleId,
+  appPath,
+) {
   if (platform !== "darwin")
     return { status: "missing", reason: "platform_not_macos", text: "" };
-  const request = buildMacUnifiedLogRequest({
+  return collectMacUnifiedLogEvidence({
     startedAt,
     endedAt,
     pids,
     bundleId,
+    appPath,
   });
-  const command = runBoundedCommand(request.command, request.args, {
-    timeoutMs: 10_000,
-    maximumBytes: 2 * 1024 * 1024,
-  });
-  return {
-    status: command.code === 0 ? "collected" : "failed",
-    reason:
-      command.code === 0
-        ? null
-        : command.timedOut
-          ? "unified_log_timeout"
-          : "unified_log_query_failed",
-    request: {
-      start: request.args[request.args.indexOf("--start") + 1],
-      end: request.args[request.args.indexOf("--end") + 1],
-      pidCount: pids.length,
-    },
-    command: {
-      code: command.code,
-      timedOut: command.timedOut,
-      stdoutBytes: command.stdoutBytes,
-      stderrBytes: command.stderrBytes,
-      stdoutTruncated: command.stdoutTruncated,
-      stderrTruncated: command.stderrTruncated,
-    },
-    text: redactText(command.stdout || command.stderr || "", 2 * 1024 * 1024),
-  };
 }
 
 function initialMissingSection(name, reason) {
   return { name, status: "missing", reason };
+}
+
+function eventFamilySection(eventParse, family) {
+  return eventParse.missingFamilies.includes(family)
+    ? {
+        status: "missing",
+        reason: `stable_${family}_events_unavailable`,
+      }
+    : { status: "collected" };
 }
 
 export async function runDiagnostic(args) {
@@ -605,7 +609,7 @@ export async function runDiagnostic(args) {
   if (args.noLaunch && args.version && identity.version !== args.version)
     identity.version = args.version;
   if (!args.noLaunch) {
-    const running = discoverExistingAeraProcesses(appPath);
+    const running = discoverExistingAeraProcesses();
     if (running.length)
       return fail("检测到已有 Aera 进程，请完全退出后再运行采集器");
   }
@@ -690,6 +694,7 @@ export async function runDiagnostic(args) {
           appPath,
           startedAt,
           endedAt,
+          includeStaticEvidence: true,
         })
       : platform === "win32" && rootPid
         ? collectWindowsPlatformEvidence({
@@ -714,6 +719,22 @@ export async function runDiagnostic(args) {
               reason: "process_not_launched",
               entries: [],
             },
+            signature: initialMissingSection(
+              "signature",
+              "process_not_launched",
+            ),
+            quarantine: initialMissingSection(
+              "quarantine",
+              "process_not_launched",
+            ),
+            dnsRoutes: initialMissingSection(
+              "dns_routes",
+              "process_not_launched",
+            ),
+            events: initialMissingSection(
+              "platform_events",
+              "process_not_launched",
+            ),
           };
   const runtimeEvidence = discoverRuntimeLogEvidence({
     hermesHome,
@@ -747,6 +768,15 @@ export async function runDiagnostic(args) {
     startedAt,
     endedAt,
   });
+  const environmentEvidence = collectEnvironmentEvidence(process.env, {
+    platform,
+    arch: identity.architecture,
+    versions: process.versions,
+  });
+  const cloudOriginEvidence = collectCloudOriginEvidence({
+    env: process.env,
+    logText: logsText,
+  });
   const unifiedLog = await collectUnifiedLog(
     platform,
     startedAt,
@@ -759,6 +789,7 @@ export async function runDiagnostic(args) {
       ]),
     ].filter(Boolean),
     identity.bundleId,
+    appPath,
   );
   const afterModel = collectModelChain({
     hermesHome,
@@ -776,6 +807,17 @@ export async function runDiagnostic(args) {
         events: eventParse.events.filter((event) => event.source === "updater"),
       }
     : { status: "missing", reason: "updater_events_unavailable", events: [] };
+  const managedFilesEvidence =
+    beforeModel.missingRoles?.length === 0
+      ? { status: "collected" }
+      : { status: "missing", reason: "managed_files_incomplete" };
+  const modelComparisonEvidence =
+    modelComparison.changes?.length === 5
+      ? { status: "collected" }
+      : { status: "missing", reason: "model_comparison_incomplete" };
+  const routeCatalogEvidence = beforeModel.routeCatalog
+    ? { status: "collected" }
+    : { status: "missing", reason: "route_catalog_unavailable" };
   const sections = [
     section("target", { status: "collected" }),
     section("process", platformEvidence.process),
@@ -787,13 +829,30 @@ export async function runDiagnostic(args) {
         : { status: "collected" },
     ),
     section("network", platformEvidence.network),
+    section("dns_routes", platformEvidence.dnsRoutes),
+    section("open_files", platformEvidence.openFiles),
+    section("signature", platformEvidence.signature),
+    section("quarantine", platformEvidence.quarantine),
+    section("environment", environmentEvidence),
     section("native_abi", platformEvidence.nativeInventory),
     section("runtime_logs", runtimeEvidence),
     section("unified_log", unifiedLog),
+    section(
+      "platform_events",
+      platform === "darwin" ? unifiedLog : platformEvidence.events,
+    ),
     section("model_chain", beforeModel),
     section("database", beforeModel.journal),
     section("journal", beforeModel.journal),
-    section("route_catalog", { status: "collected" }),
+    section("managed_files", managedFilesEvidence),
+    section(
+      "backups",
+      Array.isArray(beforeModel.backups)
+        ? { status: "collected" }
+        : { status: "missing", reason: "backups_unavailable" },
+    ),
+    section("model_comparison", modelComparisonEvidence),
+    section("route_catalog", routeCatalogEvidence),
     section(
       "owner",
       beforeModel.owner?.available
@@ -803,14 +862,29 @@ export async function runDiagnostic(args) {
             reason: beforeModel.owner?.reason || "owner_unavailable",
           },
     ),
+    section("cloud_origin", cloudOriginEvidence),
+    section("main_events", eventFamilySection(eventParse, "main")),
+    section("preload_events", eventFamilySection(eventParse, "preload")),
+    section("renderer_events", eventFamilySection(eventParse, "renderer")),
+    section("runtime_events", eventFamilySection(eventParse, "runtime")),
+    section("owner_events", eventFamilySection(eventParse, "owner")),
+    section("updater_events", eventFamilySection(eventParse, "updater")),
     section("updater", updater),
     section(
       "main_renderer_ipc",
-      eventParse.events.length
+      eventParse.missingFamilies.length === 0
         ? { status: "collected" }
-        : { status: "missing", reason: "stable_product_events_unavailable" },
+        : {
+            status: "missing",
+            reason: "stable_product_event_families_unavailable",
+          },
     ),
+    section("redaction", { status: "collected" }),
   ];
+  for (const requiredName of REQUIRED_DIAGNOSTIC_SECTIONS) {
+    if (!sections.some((entry) => entry.name === requiredName))
+      throw new Error(`collector section registry missing ${requiredName}`);
+  }
   const missingEvidence = sections
     .filter((entry) => entry.status !== "collected")
     .map((entry) => entry.name);
@@ -837,6 +911,13 @@ export async function runDiagnostic(args) {
     },
   });
   writeJson(join(captureDir, "network.json"), platformEvidence.network);
+  writeJson(join(captureDir, "open-files.json"), platformEvidence.openFiles);
+  writeJson(join(captureDir, "security.json"), {
+    signature: platformEvidence.signature,
+    quarantine: platformEvidence.quarantine,
+  });
+  writeJson(join(captureDir, "dns-routes.json"), platformEvidence.dnsRoutes);
+  writeJson(join(captureDir, "environment.json"), environmentEvidence);
   writeJson(
     join(captureDir, "native-inventory.json"),
     platformEvidence.nativeInventory,
@@ -861,6 +942,14 @@ export async function runDiagnostic(args) {
   writeJson(join(captureDir, "events.json"), {
     events: eventParse.events,
     missingFamilies: eventParse.missingFamilies,
+    platform:
+      platform === "darwin"
+        ? {
+            status: unifiedLog.status,
+            reason: unifiedLog.reason,
+            requests: unifiedLog.requests || [],
+          }
+        : platformEvidence.events || null,
   });
   writeJson(join(captureDir, "config-snapshot.json"), {
     before: beforeFiles,
@@ -874,7 +963,10 @@ export async function runDiagnostic(args) {
     platform,
     process: platformEvidence.process?.command || null,
     network: platformEvidence.network?.status || null,
-    unifiedLog: unifiedLog.request || null,
+    dnsRoutes: platformEvidence.dnsRoutes || null,
+    signature: platformEvidence.signature || null,
+    quarantine: platformEvidence.quarantine || null,
+    unifiedLog: unifiedLog.requests || null,
     mode: args.mode,
   });
   const scan = scanCapture(captureDir);
@@ -915,6 +1007,13 @@ export async function runDiagnostic(args) {
       finishReason === "user_enter_with_verified_process" ||
       finishReason === "timeout",
     internal_stage_visibility: "external_only",
+    redaction: {
+      schemaVersion: 1,
+      finalScan: "passed",
+      replacements: redactionCounters.replacements,
+      dropped: redactionCounters.dropped,
+      truncated: redactionCounters.truncated,
+    },
     sections,
     missingEvidence,
     files,

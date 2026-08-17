@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  collectMacUnifiedLogEvidence,
   normalizeDiagnosticEvent,
   parseStableEvents,
   buildMacUnifiedLogRequest,
@@ -45,7 +46,7 @@ test("parses main, renderer, owner and updater events and reports absent familie
     },
   );
   assert.equal(result.events.length, 4);
-  assert.deepEqual(result.missingFamilies, ["preload"]);
+  assert.deepEqual(result.missingFamilies, ["preload", "runtime"]);
   assert.equal(result.events[0].code, "native_module_abi_mismatch");
   assert.equal(result.events[3].stage, "download_completed");
 });
@@ -61,4 +62,72 @@ test("unified-log request never passes ISO-Z timestamps", () => {
   const args = request.args.join(" ");
   assert.doesNotMatch(args, /2026-08-17T/);
   assert.match(args, /--start 2026-08-17 09:00:00|--start 2026-08-17 01:00:00/);
+});
+
+test("collects bounded PID and macOS policy unified-log queries", () => {
+  const calls = [];
+  const result = collectMacUnifiedLogEvidence({
+    startedAt: "2026-08-17T01:00:00.000Z",
+    endedAt: "2026-08-17T01:05:00.000Z",
+    pids: [123, 456],
+    bundleId: "com.example.aera",
+    appPath: "/Applications/Aera.app",
+    runCommand: (command, args, options) => {
+      calls.push({ command, args, options });
+      return {
+        code: 0,
+        timedOut: false,
+        stdout: "log fixture\n",
+        stderr: "",
+        stdoutBytes: 12,
+        stderrBytes: 0,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      };
+    },
+  });
+
+  assert.equal(result.status, "collected");
+  assert.equal(result.reason, null);
+  assert.equal(calls.length, 2);
+  assert.equal(result.requests.length, 2);
+  for (const call of calls) {
+    const start = call.args[call.args.indexOf("--start") + 1];
+    const end = call.args[call.args.indexOf("--end") + 1];
+    assert.match(start, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    assert.match(end, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    assert.doesNotMatch(`${start} ${end}`, /T|Z/);
+    assert.equal(call.options.timeoutMs, 10_000);
+    assert.equal(call.options.maximumBytes, 1024 * 1024);
+  }
+  assert.match(result.text, /aera_processes/);
+  assert.match(result.text, /macos_policy/);
+});
+
+test("marks unified-log evidence failed when one bounded query fails", () => {
+  let callCount = 0;
+  const result = collectMacUnifiedLogEvidence({
+    startedAt: "2026-08-17T01:00:00.000Z",
+    endedAt: "2026-08-17T01:05:00.000Z",
+    pids: [123],
+    bundleId: "com.example.aera",
+    appPath: "/Applications/Aera.app",
+    runCommand: () => {
+      callCount += 1;
+      return {
+        code: callCount === 2 ? 64 : 0,
+        timedOut: false,
+        stdout: "",
+        stderr: callCount === 2 ? "bad timestamp" : "",
+        stdoutBytes: 0,
+        stderrBytes: callCount === 2 ? 13 : 0,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      };
+    },
+  });
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.reason, "unified_log_query_failed");
+  assert.equal(result.requests[1].command.code, 64);
 });

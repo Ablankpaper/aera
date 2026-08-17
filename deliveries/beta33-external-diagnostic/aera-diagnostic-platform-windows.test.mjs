@@ -24,6 +24,8 @@ test("Windows evidence script binds process ancestry and exact event window", ()
   assert.match(script, /Get-NetTCPConnection/);
   assert.match(script, /Get-WinEvent/);
   assert.match(script, /Get-AuthenticodeSignature/);
+  assert.match(script, /\[string\]\$signatureSource\.Status/);
+  assert.doesNotMatch(script, /StatusMessage/);
   assert.match(script, /2026-08-17T01:00:00\.000Z/);
   assert.match(script, /2026-08-17T01:05:00\.000Z/);
   assert.doesNotMatch(script, /Get-ChildItem Env:|ConvertTo-SecureString/);
@@ -57,12 +59,21 @@ test("normalizes Windows evidence without raw command lines or paths", () => {
         Message: "token=fixture-secret",
       },
     ],
+    dns: [{ ServerAddresses: ["10.0.0.1"] }, { ServerAddresses: "8.8.8.8" }],
+    routes: [{ NextHop: "10.0.0.1", DestinationPrefix: "0.0.0.0/0" }],
+    quarantine: { present: true },
+    signature: { Status: "Valid" },
   });
   assert.equal(result.processes[0].pid, 123);
   assert.match(result.processes[0].executablePathSha256, /^[0-9a-f]{64}$/);
   assert.deepEqual(result.network, [
     { pid: 123, endpoint: "47.100.169.193:443", state: "Established" },
   ]);
+  assert.equal(result.signature.status, "collected");
+  assert.equal(result.quarantine.status, "collected");
+  assert.equal(result.dnsRoutes.status, "collected");
+  assert.equal(result.dnsRoutes.dnsServerCount, 2);
+  assert.equal(result.dnsRoutes.defaultRouteCount, 1);
   assert.doesNotMatch(JSON.stringify(result), /alice|fixture-secret|--token/);
 });
 
@@ -94,6 +105,9 @@ function successfulPowerShellResult() {
       connections: [],
       events: [],
       signature: { Status: "Valid" },
+      dns: [{ ServerAddresses: ["10.0.0.1"] }],
+      routes: [{ NextHop: "10.0.0.1", DestinationPrefix: "0.0.0.0/0" }],
+      quarantine: { present: false },
     }),
     stderr: "",
     stdoutBytes: 0,
