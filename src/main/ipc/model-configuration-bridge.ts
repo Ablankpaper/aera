@@ -1,12 +1,15 @@
+import { randomBytes } from "node:crypto";
 import type {
   ModelConfigurationMutationRequest,
   ModelConfigurationMutationResult,
+  ModelConfigurationStartupFailure,
   OwnerModelRouteCatalogSnapshot,
   OwnerModelRouteSummary,
 } from "../../shared/model-configuration";
 
 const PROFILE_ID_PATTERN = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
 const REVISION_PATTERN = /^[0-9a-f]{64}$/i;
+const DIAGNOSTIC_ID_PATTERN = /^[0-9a-f]{12}$/u;
 
 export interface ModelConfigurationIpcBridgeDependencies {
   catalog: {
@@ -19,6 +22,29 @@ export interface ModelConfigurationIpcBridgeDependencies {
   };
   /** Main-only ownership check for the optional catalog target. */
   assertRequestedProfile?(profileId: string): void;
+}
+
+export function coordinatorUnavailableMutation(
+  startupFailure: ModelConfigurationStartupFailure | null,
+): ModelConfigurationIpcBridgeDependencies["coordinator"] {
+  const failure = {
+    code: startupFailure?.code ?? "model_configuration_recovery_required",
+    diagnosticId:
+      startupFailure && DIAGNOSTIC_ID_PATTERN.test(startupFailure.diagnosticId)
+        ? startupFailure.diagnosticId
+        : randomBytes(6).toString("hex"),
+  } satisfies ModelConfigurationStartupFailure;
+  return {
+    async mutate() {
+      return {
+        status: "rejected",
+        stage: "recovery",
+        code: failure.code,
+        rollback: "recovery_required",
+        diagnosticId: failure.diagnosticId,
+      };
+    },
+  };
 }
 
 function invalidRequest(): Error {

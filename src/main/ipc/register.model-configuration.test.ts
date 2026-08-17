@@ -3,6 +3,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
   ModelConfigurationMutationRequest,
+  ModelConfigurationMutationResult,
+  ModelConfigurationStartupFailure,
   OwnerModelRouteCatalogSnapshot,
 } from "../../shared/model-configuration";
 import {
@@ -118,5 +120,83 @@ describe("coordinated model configuration IPC bridge", () => {
     );
     expect(coordinator.mutate).toHaveBeenCalledTimes(1);
     expect(assertRequestedProfile).toHaveBeenCalledTimes(1);
+  });
+});
+
+type CoordinatorUnavailableMutationFactory = (
+  startupFailure: ModelConfigurationStartupFailure | null,
+) => {
+  mutate(
+    request: ModelConfigurationMutationRequest,
+  ): Promise<ModelConfigurationMutationResult>;
+};
+
+async function unavailableMutationFactory(): Promise<CoordinatorUnavailableMutationFactory> {
+  const bridgeModule = await import("./model-configuration-bridge");
+  const factory = (
+    bridgeModule as unknown as {
+      coordinatorUnavailableMutation?: CoordinatorUnavailableMutationFactory;
+    }
+  ).coordinatorUnavailableMutation;
+  expect(factory).toBeTypeOf("function");
+  return factory!;
+}
+
+describe("coordinatorUnavailableMutation", () => {
+  it.each([
+    "native_module_abi_mismatch",
+    "native_module_architecture_mismatch",
+    "native_module_dependency_missing",
+    "native_module_load_denied",
+    "native_module_load_failed",
+    "model_configuration_database_unavailable",
+    "model_configuration_schema_unsupported",
+    "model_configuration_recovery_required",
+  ] as const)("returns the exact %s identity", async (code) => {
+    const factory = await unavailableMutationFactory();
+    const startupFailure = {
+      code,
+      diagnosticId: "abcdef012345",
+    } satisfies ModelConfigurationStartupFailure;
+    const result = await factory(startupFailure).mutate(upsertRequest());
+
+    expect(result).toMatchObject({
+      status: "rejected",
+      stage: "recovery",
+      code,
+      rollback: "recovery_required",
+      diagnosticId: startupFailure.diagnosticId,
+    });
+    expect(JSON.stringify(result)).not.toMatch(/detail|message|secret/iu);
+  });
+
+  it("uses one opaque recovery id when the startup record is absent", async () => {
+    const factory = await unavailableMutationFactory();
+    const stub = factory(null);
+    const first = await stub.mutate(upsertRequest());
+    const second = await stub.mutate(upsertRequest());
+
+    expect(first).toMatchObject({
+      status: "rejected",
+      code: "model_configuration_recovery_required",
+      diagnosticId: expect.stringMatching(/^[0-9a-f]{12}$/u),
+    });
+    expect(second).toMatchObject({
+      diagnosticId: (first as { diagnosticId: string }).diagnosticId,
+    });
+  });
+
+  it("replaces an invalid diagnostic id before returning it", async () => {
+    const factory = await unavailableMutationFactory();
+    const result = await factory({
+      code: "native_module_load_failed",
+      diagnosticId: "private/path/detail",
+    }).mutate(upsertRequest());
+
+    expect(result).toMatchObject({
+      code: "native_module_load_failed",
+      diagnosticId: expect.stringMatching(/^[0-9a-f]{12}$/u),
+    });
+    expect(JSON.stringify(result)).not.toContain("private/path/detail");
   });
 });

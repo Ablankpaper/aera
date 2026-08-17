@@ -1,9 +1,12 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 
 import {
   canonicalPublicRouteKey,
   type ModelConfigurationMutationRequest,
+  type ModelConfigurationStartupFailure,
+  type ModelConfigurationStartupFailureCode,
   type OwnerModelRouteCatalogSnapshot,
   type OwnerModelRouteSelection,
   type PublicModelRouteIdentity,
@@ -72,6 +75,7 @@ import {
   type ModelConfigurationOperationStore as ModelConfigurationOperationStoreType,
 } from "./model-configuration-operation-store";
 import {
+  ModelConfigurationRuntimeError,
   openModelConfigurationDatabase,
   type ModelConfigurationDatabase,
 } from "./model-configuration-database";
@@ -102,6 +106,9 @@ export interface ModelConfigurationRuntimeHandle {
   coordinator: ModelConfigurationCoordinator | null;
   /** Main-only adapter exposed for startup diagnostics/tests; never IPC. */
   mutationAdapter: ModelConfigurationMutationAdapter | null;
+  /** Stable, Renderer-safe identity for an unavailable startup boundary. */
+  startupFailure: ModelConfigurationStartupFailure | null;
+  /** Main-only original failure retained for local diagnostics. */
   recoveryError: unknown | null;
   close(): void;
 }
@@ -681,6 +688,24 @@ function createCatalog(
   });
 }
 
+function modelConfigurationDiagnosticId(): string {
+  return randomBytes(6).toString("hex");
+}
+
+function startupFailure(
+  code: ModelConfigurationStartupFailureCode,
+): ModelConfigurationStartupFailure {
+  return { code, diagnosticId: modelConfigurationDiagnosticId() };
+}
+
+function initializationFailureCode(
+  error: unknown,
+): ModelConfigurationStartupFailureCode {
+  return error instanceof ModelConfigurationRuntimeError
+    ? error.code
+    : "model_configuration_database_unavailable";
+}
+
 /**
  * Open the independent journal and finish crash recovery before the caller
  * registers the coordinated IPC channels. A failure intentionally leaves the
@@ -696,6 +721,7 @@ export async function prepareModelConfigurationRuntime(
   let coordinator: ModelConfigurationCoordinator | null = null;
   let mutationAdapter: ModelConfigurationMutationAdapter | null = null;
   let recoveryError: unknown | null = null;
+  let unavailable: ModelConfigurationStartupFailure | null = null;
 
   try {
     catalog = createCatalog(options);
@@ -723,10 +749,28 @@ export async function prepareModelConfigurationRuntime(
         }
       },
     });
-    await coordinator.recoverIncompleteOperations();
   } catch (error) {
     recoveryError = error;
+    unavailable = startupFailure(initializationFailureCode(error));
     coordinator = null;
+  }
+
+  if (coordinator !== null) {
+    try {
+      await coordinator.recoverIncompleteOperations();
+    } catch (error) {
+      recoveryError = error;
+      unavailable = startupFailure("model_configuration_recovery_required");
+      coordinator = null;
+    }
+  }
+
+  if (unavailable !== null) {
+    console.error(
+      "[MODEL_CONFIGURATION] unavailable",
+      unavailable.diagnosticId,
+      unavailable.code,
+    );
   }
 
   return {
@@ -735,6 +779,7 @@ export async function prepareModelConfigurationRuntime(
     catalog,
     coordinator,
     mutationAdapter,
+    startupFailure: unavailable,
     recoveryError,
     close: () => database?.close(),
   };

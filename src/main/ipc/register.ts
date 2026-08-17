@@ -430,10 +430,12 @@ import {
   type ProductAccessGuard,
 } from "./auth-guard";
 import {
+  coordinatorUnavailableMutation,
   createModelConfigurationIpcBridge,
   type ModelConfigurationIpcBridgeDependencies,
 } from "./model-configuration-bridge";
 import type { ModelConfigurationCoordinator } from "../model-configuration-coordinator";
+import type { ModelConfigurationStartupFailure } from "../../shared/model-configuration";
 import type { OwnerModelRouteCatalog } from "../agentera-agent-control/owner-model-route-catalog";
 import {
   setProfileColor,
@@ -648,6 +650,7 @@ export interface IpcContext {
   agenteraEncryptedBackup?: AgenteraEncryptedBackupController | null;
   agenteraDesktopControl?: AgenteraDesktopControlCoordinator | null;
   modelConfigurationCoordinator?: ModelConfigurationCoordinator | null;
+  modelConfigurationStartupFailure?: ModelConfigurationStartupFailure | null;
   ownerModelRouteCatalog?: OwnerModelRouteCatalog | null;
 }
 
@@ -1054,6 +1057,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     agenteraEncryptedBackup,
     agenteraDesktopControl,
     modelConfigurationCoordinator,
+    modelConfigurationStartupFailure,
     ownerModelRouteCatalog,
   } = context;
   const globalProfileChangedChannel = "agentera-global-profile-changed";
@@ -1238,14 +1242,9 @@ export function registerIpcHandlers(context: IpcContext): void {
         );
       },
     },
-    coordinator: modelConfigurationCoordinator ?? {
-      mutate: async () => ({
-        status: "rejected" as const,
-        stage: "recovery" as const,
-        code: "model_configuration_recovery_required" as const,
-        rollback: "recovery_required" as const,
-      }),
-    },
+    coordinator:
+      modelConfigurationCoordinator ??
+      coordinatorUnavailableMutation(modelConfigurationStartupFailure ?? null),
     assertRequestedProfile: (profile) => {
       const connection = getConnectionConfig();
       if (connection.mode === "local") {

@@ -141,6 +141,8 @@ export type ModelConfigurationMutationResult =
         | `model_save_${ModelConfigurationStage}_failed`
         | ModelConfigurationStartupFailureCode;
       rollback: "not_needed" | "restored" | "recovery_required";
+      /** Opaque correlation id for startup/unavailable-runtime failures. */
+      diagnosticId?: string;
       /**
        * Set only when the caller's `expectedCatalogRevision` did not match the
        * coordinator's current catalog — the one rejection a caller can fix by
