@@ -1,6 +1,14 @@
 // @vitest-environment node
 
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
@@ -10,6 +18,7 @@ import {
   openModelConfigurationDatabase,
   resolveModelConfigurationDatabasePaths,
   type ModelConfigurationDatabase,
+  type ModelConfigurationDatabasePaths,
   type ModelConfigurationSqliteDatabase,
 } from "./model-configuration-database";
 
@@ -45,6 +54,68 @@ function captureDatabaseOpenFailure(error: unknown): unknown {
     return thrown;
   }
   throw new Error("Expected model configuration database startup to fail.");
+}
+
+interface DatabaseFileSnapshot {
+  bytes: Buffer;
+  sha256: string;
+  journalMode: string;
+  directoryEntries: string[];
+  stat: {
+    dev: number;
+    ino: number;
+    mode: number;
+    nlink: number;
+    uid: number;
+    gid: number;
+    size: number;
+    blocks: number;
+    mtimeMs: number;
+    ctimeMs: number;
+    birthtimeMs: number;
+  };
+}
+
+function readJournalMode(databasePath: string): string {
+  const inspection = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    const row = inspection.prepare("PRAGMA journal_mode").get() as
+      | { journal_mode?: unknown }
+      | undefined;
+    if (typeof row?.journal_mode !== "string") {
+      throw new Error("SQLite journal mode is unavailable.");
+    }
+    return row.journal_mode;
+  } finally {
+    inspection.close();
+  }
+}
+
+function snapshotDatabase(
+  paths: ModelConfigurationDatabasePaths,
+): DatabaseFileSnapshot {
+  const journalMode = readJournalMode(paths.databasePath);
+  const bytes = readFileSync(paths.databasePath);
+  const stat = statSync(paths.databasePath);
+  return {
+    bytes,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    journalMode,
+    directoryEntries: readdirSync(paths.rootPath).sort(),
+    stat: {
+      dev: stat.dev,
+      ino: stat.ino,
+      mode: stat.mode,
+      nlink: stat.nlink,
+      uid: stat.uid,
+      gid: stat.gid,
+      size: stat.size,
+      blocks: stat.blocks,
+      mtimeMs: stat.mtimeMs,
+      ctimeMs: stat.ctimeMs,
+      birthtimeMs: stat.birthtimeMs,
+    },
+  };
 }
 
 afterEach(() => {
@@ -122,6 +193,20 @@ describe("ModelConfigurationDatabase", () => {
         { code: "ERR_DLOPEN_FAILED" },
       ),
       expectedCode: "native_module_abi_mismatch",
+    },
+    {
+      name: "repeated identical ABI marker",
+      error: Object.assign(
+        new Error(
+          [
+            `dlopen(${privateUserPath}/better_sqlite3.node): failed to load`,
+            "NODE_MODULE_VERSION 145 was observed before retrying",
+            "NODE_MODULE_VERSION 145.",
+          ].join(" "),
+        ),
+        { code: "ERR_DLOPEN_FAILED" },
+      ),
+      expectedCode: "native_module_load_failed",
     },
     {
       name: "architecture mismatch",
@@ -203,13 +288,32 @@ describe("ModelConfigurationDatabase", () => {
     },
   );
 
-  it("refuses a future schema without changing its version", () => {
+  it("reopens a closed current-schema database", () => {
     const userDataPath = temporaryUserData();
-    const seed = databaseFor(userDataPath);
+    const first = databaseFor(userDataPath);
+    first.close();
+    databases.splice(databases.indexOf(first), 1);
+
+    const reopened = databaseFor(userDataPath);
+    expect(reopened.sqlite.prepare("PRAGMA user_version").get()).toMatchObject({
+      user_version: MODEL_CONFIGURATION_SCHEMA_VERSION,
+    });
+  });
+
+  it("refuses a future DELETE-journal schema without changing filesystem state", () => {
+    const userDataPath = temporaryUserData();
+    const paths = resolveModelConfigurationDatabasePaths(userDataPath);
+    mkdirSync(paths.rootPath, { recursive: true });
     const futureVersion = MODEL_CONFIGURATION_SCHEMA_VERSION + 1;
-    seed.sqlite.exec(`PRAGMA user_version = ${futureVersion}`);
-    seed.close();
-    databases.splice(databases.indexOf(seed), 1);
+    const seed = new DatabaseSync(paths.databasePath);
+    try {
+      seed.exec("PRAGMA journal_mode=DELETE");
+      seed.exec(`PRAGMA user_version = ${futureVersion}`);
+    } finally {
+      seed.close();
+    }
+    const before = snapshotDatabase(paths);
+    expect(before.journalMode).toBe("delete");
 
     let thrown: unknown;
     try {
@@ -222,17 +326,6 @@ describe("ModelConfigurationDatabase", () => {
       name: "ModelConfigurationRuntimeError",
       code: "model_configuration_schema_unsupported",
     });
-
-    const paths = resolveModelConfigurationDatabasePaths(userDataPath);
-    const inspection = new DatabaseSync(paths.databasePath, {
-      readOnly: true,
-    });
-    try {
-      expect(inspection.prepare("PRAGMA user_version").get()).toMatchObject({
-        user_version: futureVersion,
-      });
-    } finally {
-      inspection.close();
-    }
+    expect(snapshotDatabase(paths)).toEqual(before);
   });
 });

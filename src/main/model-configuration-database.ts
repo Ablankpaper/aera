@@ -64,7 +64,7 @@ export function classifyNativeLoadFailure(
 ): ModelConfigurationStartupFailureCode | null {
   const { code, message } = errorParts(error);
   const versions = nativeModuleVersions(message);
-  if (versions.length >= 2) return "native_module_abi_mismatch";
+  if (new Set(versions).size >= 2) return "native_module_abi_mismatch";
 
   const nativeLoad =
     code === "ERR_DLOPEN_FAILED" ||
@@ -223,7 +223,7 @@ export function resolveModelConfigurationDatabasePaths(
   };
 }
 
-function initializeSchema(sqlite: ModelConfigurationSqliteDatabase): void {
+function readSchemaVersion(sqlite: ModelConfigurationSqliteDatabase): number {
   const current = sqlite.prepare("PRAGMA user_version").get() as
     | Record<string, unknown>
     | undefined;
@@ -237,6 +237,13 @@ function initializeSchema(sqlite: ModelConfigurationSqliteDatabase): void {
   if (!Number.isSafeInteger(currentVersion) || currentVersion < 0) {
     throw new Error("Unsupported Aera model configuration database version.");
   }
+  return currentVersion;
+}
+
+function initializeSchema(
+  sqlite: ModelConfigurationSqliteDatabase,
+  currentVersion: number,
+): void {
   if (currentVersion === MODEL_CONFIGURATION_SCHEMA_VERSION) return;
 
   sqlite.exec("BEGIN IMMEDIATE");
@@ -321,11 +328,12 @@ export function openModelConfigurationDatabase(
     );
   }
   try {
+    const currentVersion = readSchemaVersion(sqlite);
     sqlite.exec("PRAGMA journal_mode=WAL");
     sqlite.exec("PRAGMA synchronous=FULL");
     sqlite.exec("PRAGMA foreign_keys=ON");
     sqlite.exec("PRAGMA busy_timeout=5000");
-    initializeSchema(sqlite);
+    initializeSchema(sqlite, currentVersion);
     if (existsSync(paths.databasePath)) chmodSync(paths.databasePath, 0o600);
     return new ModelConfigurationDatabase(paths, sqlite);
   } catch (error) {

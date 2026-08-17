@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  readFile,
+  readdir,
+  realpath,
+  writeFile,
+} from "node:fs/promises";
 import { join, posix } from "node:path";
 
 import {
@@ -79,6 +85,8 @@ export async function verifyPackagedNativeModule(context, options = {}) {
   );
   const readDirectory = options.readdir ?? readdir;
   const readModule = options.readFile ?? readFile;
+  const inspectPath = options.lstat ?? lstat;
+  const resolveCanonicalPath = options.realpath ?? realpath;
   const app =
     platform === "darwin"
       ? await resolveMacApp(appOutDir, readDirectory)
@@ -86,6 +94,8 @@ export async function verifyPackagedNativeModule(context, options = {}) {
   const unpackedRoot = resolveUnpackedRoot(app, platform);
   const modules = await listUnpackedNativeModules(unpackedRoot, {
     readdir: readDirectory,
+    lstat: inspectPath,
+    realpath: resolveCanonicalPath,
   });
   if (modules.length === 0) {
     throw new Error("packaged native module inventory is empty");
@@ -109,6 +119,7 @@ export async function verifyPackagedNativeModule(context, options = {}) {
       label: entry.relativePath,
       expectedElectronAbi,
       expectedArchitecture: targetArchitecture,
+      expectedPlatform: platform,
     });
     inventory.push({
       path: entry.relativePath,

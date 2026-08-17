@@ -84,16 +84,22 @@ Focused tests, build, and isolated Electron evidence remain separate from exact-
 
 ### Native startup failure classification
 
-Native/database startup failures are classified by [[src/main/model-configuration-database.ts#classifyNativeLoadFailure]] into stable secret-free causes; a bare loader error is not ABI evidence, and a future journal schema is refused without mutation.
+Native/database startup failures are classified by [[src/main/model-configuration-database.ts#classifyNativeLoadFailure]] into stable secret-free causes; only two distinct `NODE_MODULE_VERSION` values establish an ABI mismatch.
+
+Repeated copies of one ABI value remain a generic native load failure. The journal reads and validates `user_version` before `journal_mode=WAL` or any write-oriented pragma, so a future DELETE-journal schema is rejected without changing bytes, hash, key file stat, journal mode, or directory entries.
 
 ### Database startup identity reaches IPC
 
 [[src/main/model-configuration-runtime.ts#prepareModelConfigurationRuntime]] creates one opaque diagnostic ID and [[src/main/ipc/model-configuration-bridge.ts#coordinatorUnavailableMutation]] preserves the exact cause without exposing raw native or database errors.
 
+The propagation keeps `model_configuration_schema_unsupported` distinct from a general database-unavailable failure while leaving the journal rejection itself fail-closed.
+
 ### Complete packaged native inventory
 
-The afterPack gate rejects unreadable or ambiguous `.node` input and records deterministic ABI, architecture, and SHA-256 evidence.
+The afterPack gate rejects unreadable, structurally invalid, platform-incompatible, or ambiguous `.node` input and records deterministic ABI, architecture, and SHA-256 evidence.
 
-Every shipped native module is inspected through `scripts/release/native-module-abi.mjs` and `scripts/release/verify-packaged-native-module.mjs`.
+Darwin inventory accepts only validated 64-bit Mach-O bundles and slices; win32 accepts only validated PE32+ executable DLL images. ABI markers are read only from those verified images or fat slices.
+
+The unpacked root and every descendant are checked with `lstat`, every resolved path must remain inside the canonical root, and module reads use the validated canonical path. Every shipped native module is inspected through `scripts/release/native-module-abi.mjs` and `scripts/release/verify-packaged-native-module.mjs`.
 
 This source-stage inventory is not final-artifact binding; DMG, updater ZIP, setup, and portable bytes still require independent extraction and binding before a candidate can be accepted.

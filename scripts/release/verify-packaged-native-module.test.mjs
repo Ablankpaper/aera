@@ -3,10 +3,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -27,6 +29,12 @@ const PE_MACHINE = {
   x64: 0x8664,
 };
 
+const PE_OFFSET = 0x80;
+const PE_OPTIONAL_HEADER_SIZE = 0xf0;
+const PE_OPTIONAL_HEADER_OFFSET = PE_OFFSET + 24;
+const PE_SECTION_TABLE_OFFSET =
+  PE_OPTIONAL_HEADER_OFFSET + PE_OPTIONAL_HEADER_SIZE;
+
 function abiMarkers(...abis) {
   return Buffer.from(
     abis.map((abi) => `\0node_register_module_v${abi}\0`).join(""),
@@ -35,29 +43,79 @@ function abiMarkers(...abis) {
 }
 
 function thinMachO(architecture, ...abis) {
+  const loadCommand = Buffer.alloc(24);
+  loadCommand.writeUInt32LE(0x1b, 0);
+  loadCommand.writeUInt32LE(loadCommand.length, 4);
   const header = Buffer.alloc(32);
   header.writeUInt32LE(0xfeedfacf, 0);
   header.writeUInt32LE(MACH_O_CPU[architecture], 4);
-  return Buffer.concat([header, abiMarkers(...abis)]);
+  header.writeUInt32LE(architecture === "x64" ? 3 : 0, 8);
+  header.writeUInt32LE(8, 12);
+  header.writeUInt32LE(1, 16);
+  header.writeUInt32LE(loadCommand.length, 20);
+  return Buffer.concat([header, loadCommand, abiMarkers(...abis)]);
+}
+
+function fatMachOWithKind(kind, architectures, abis) {
+  const entrySize = kind === "fat64" ? 32 : 20;
+  const slices = architectures.map((architecture) =>
+    thinMachO(architecture, ...abis),
+  );
+  const header = Buffer.alloc(8 + architectures.length * entrySize);
+  header.writeUInt32BE(kind === "fat64" ? 0xcafebabf : 0xcafebabe, 0);
+  header.writeUInt32BE(architectures.length, 4);
+  let sliceOffset = header.length;
+  architectures.forEach((architecture, index) => {
+    const entryOffset = 8 + index * entrySize;
+    header.writeUInt32BE(MACH_O_CPU[architecture], entryOffset);
+    header.writeUInt32BE(architecture === "x64" ? 3 : 0, entryOffset + 4);
+    if (kind === "fat64") {
+      header.writeBigUInt64BE(BigInt(sliceOffset), entryOffset + 8);
+      header.writeBigUInt64BE(BigInt(slices[index].length), entryOffset + 16);
+    } else {
+      header.writeUInt32BE(sliceOffset, entryOffset + 8);
+      header.writeUInt32BE(slices[index].length, entryOffset + 12);
+    }
+    sliceOffset += slices[index].length;
+  });
+  return Buffer.concat([header, ...slices]);
 }
 
 function fatMachO(architectures, ...abis) {
-  const header = Buffer.alloc(8 + architectures.length * 20);
-  header.writeUInt32BE(0xcafebabe, 0);
-  header.writeUInt32BE(architectures.length, 4);
-  architectures.forEach((architecture, index) => {
-    header.writeUInt32BE(MACH_O_CPU[architecture], 8 + index * 20);
-  });
-  return Buffer.concat([header, abiMarkers(...abis)]);
+  return fatMachOWithKind("fat32", architectures, abis);
+}
+
+function fat64MachO(architectures, ...abis) {
+  return fatMachOWithKind("fat64", architectures, abis);
 }
 
 function peModule(architecture, ...abis) {
-  const header = Buffer.alloc(0x58);
-  header.write("MZ", 0, "ascii");
-  header.writeUInt32LE(0x40, 0x3c);
-  header.write("PE\0\0", 0x40, "binary");
-  header.writeUInt16LE(PE_MACHINE[architecture], 0x44);
-  return Buffer.concat([header, abiMarkers(...abis)]);
+  const rawOffset = PE_SECTION_TABLE_OFFSET + 40;
+  const payload = Buffer.concat([Buffer.from([0]), abiMarkers(...abis)]);
+  const image = Buffer.alloc(rawOffset + payload.length);
+  image.write("MZ", 0, "ascii");
+  image.writeUInt32LE(PE_OFFSET, 0x3c);
+  image.write("PE\0\0", PE_OFFSET, "binary");
+  image.writeUInt16LE(PE_MACHINE[architecture], PE_OFFSET + 4);
+  image.writeUInt16LE(1, PE_OFFSET + 6);
+  image.writeUInt16LE(PE_OPTIONAL_HEADER_SIZE, PE_OFFSET + 20);
+  image.writeUInt16LE(0x2022, PE_OFFSET + 22);
+  image.writeUInt16LE(0x20b, PE_OPTIONAL_HEADER_OFFSET);
+  image.writeBigUInt64LE(0x140000000n, PE_OPTIONAL_HEADER_OFFSET + 24);
+  image.writeUInt32LE(0x1000, PE_OPTIONAL_HEADER_OFFSET + 32);
+  image.writeUInt32LE(0x200, PE_OPTIONAL_HEADER_OFFSET + 36);
+  image.writeUInt32LE(0x2000, PE_OPTIONAL_HEADER_OFFSET + 56);
+  image.writeUInt32LE(rawOffset, PE_OPTIONAL_HEADER_OFFSET + 60);
+  image.writeUInt16LE(2, PE_OPTIONAL_HEADER_OFFSET + 68);
+  image.writeUInt32LE(16, PE_OPTIONAL_HEADER_OFFSET + 108);
+  image.write(".text", PE_SECTION_TABLE_OFFSET, "ascii");
+  image.writeUInt32LE(payload.length, PE_SECTION_TABLE_OFFSET + 8);
+  image.writeUInt32LE(0x1000, PE_SECTION_TABLE_OFFSET + 12);
+  image.writeUInt32LE(payload.length, PE_SECTION_TABLE_OFFSET + 16);
+  image.writeUInt32LE(rawOffset, PE_SECTION_TABLE_OFFSET + 20);
+  image.writeUInt32LE(0x60000020, PE_SECTION_TABLE_OFFSET + 36);
+  payload.copy(image, rawOffset);
+  return image;
 }
 
 function sha256(bytes) {
@@ -175,6 +233,79 @@ test("rejects an ABI-matched native module for the wrong architecture", async ()
   }
 });
 
+test("rejects a PE module in a macOS package", async () => {
+  const fixture = await createPackage({
+    platform: "darwin",
+    architecture: "arm64",
+    betterBytes: peModule("arm64", "145"),
+  });
+  try {
+    await assert.rejects(
+      verifyPackagedNativeModule(
+        context(fixture),
+        verificationOptions(fixture),
+      ),
+      /better_sqlite3\.node.*Mach-O.*darwin/su,
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+test("rejects a Mach-O module in a Windows package", async () => {
+  const fixture = await createPackage({
+    platform: "win32",
+    architecture: "x64",
+    betterBytes: thinMachO("x64", "145"),
+  });
+  try {
+    await assert.rejects(
+      verifyPackagedNativeModule(
+        context(fixture),
+        verificationOptions(fixture),
+      ),
+      /better_sqlite3\.node.*PE.*win32/su,
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+test("rejects malformed thin Mach-O bundle structures", async () => {
+  const truncatedHeader = Buffer.concat([
+    thinMachO("arm64", "145").subarray(0, 20),
+    abiMarkers("145"),
+  ]);
+  const wrongFileType = Buffer.from(thinMachO("arm64", "145"));
+  wrongFileType.writeUInt32LE(6, 12);
+  const oversizedCommands = Buffer.from(thinMachO("arm64", "145"));
+  oversizedCommands.writeUInt32LE(oversizedCommands.length, 20);
+  const shortCommand = Buffer.from(thinMachO("arm64", "145"));
+  shortCommand.writeUInt32LE(4, 36);
+  const cases = [
+    truncatedHeader,
+    wrongFileType,
+    oversizedCommands,
+    shortCommand,
+  ];
+  const fixtures = await Promise.all(
+    cases.map((betterBytes) => createPackage({ betterBytes })),
+  );
+  try {
+    for (const fixture of fixtures) {
+      await assert.rejects(
+        verifyPackagedNativeModule(
+          context(fixture),
+          verificationOptions(fixture),
+        ),
+        /better_sqlite3\.node.*Mach-O.*(?:header|bundle|load command)/su,
+      );
+    }
+  } finally {
+    await Promise.all(fixtures.map(removeFixture));
+  }
+});
+
 test("rejects a mixed fat Mach-O in a single-architecture package", async () => {
   const fixture = await createPackage({
     betterBytes: fatMachO(["arm64", "x64"], "145"),
@@ -186,6 +317,77 @@ test("rejects a mixed fat Mach-O in a single-architecture package", async () => 
         verificationOptions(fixture),
       ),
       /better_sqlite3\.node.*mixed architectures arm64,x64/su,
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+test("rejects invalid fat Mach-O slice layouts and identities", async () => {
+  const zeroSize = Buffer.from(fatMachO(["arm64"], "145"));
+  zeroSize.writeUInt32BE(0, 20);
+  const outOfRange = Buffer.from(fatMachO(["arm64"], "145"));
+  outOfRange.writeUInt32BE(outOfRange.length - 1, 16);
+  outOfRange.writeUInt32BE(16, 20);
+  const tableOverlap = Buffer.from(fatMachO(["arm64"], "145"));
+  tableOverlap.writeUInt32BE(8, 16);
+  const sliceOverlap = Buffer.from(fatMachO(["arm64", "arm64"], "145"));
+  sliceOverlap.writeUInt32BE(sliceOverlap.readUInt32BE(16), 36);
+  const unsafeFat64Offset = Buffer.from(fat64MachO(["arm64"], "145"));
+  unsafeFat64Offset.writeBigUInt64BE(BigInt(Number.MAX_SAFE_INTEGER) + 1n, 16);
+  const mismatchedCpu = Buffer.from(fatMachO(["arm64"], "145"));
+  mismatchedCpu.writeUInt32BE(MACH_O_CPU.x64, 8);
+  const cases = [
+    { betterBytes: zeroSize, architecture: "arm64" },
+    { betterBytes: outOfRange, architecture: "arm64" },
+    { betterBytes: tableOverlap, architecture: "arm64" },
+    { betterBytes: sliceOverlap, architecture: "arm64" },
+    { betterBytes: unsafeFat64Offset, architecture: "arm64" },
+    { betterBytes: mismatchedCpu, architecture: "x64" },
+  ];
+  const fixtures = await Promise.all(cases.map(createPackage));
+  try {
+    for (const fixture of fixtures) {
+      await assert.rejects(
+        verifyPackagedNativeModule(
+          context(fixture),
+          verificationOptions(fixture),
+        ),
+        /better_sqlite3\.node.*Mach-O fat.*(?:slice|table|offset|size|CPU)/su,
+      );
+    }
+  } finally {
+    await Promise.all(fixtures.map(removeFixture));
+  }
+});
+
+test("accepts a structurally valid fat64 Mach-O", async () => {
+  const fixture = await createPackage({
+    betterBytes: fat64MachO(["arm64"], "145"),
+  });
+  try {
+    const result = await verifyPackagedNativeModule(
+      context(fixture),
+      verificationOptions(fixture),
+    );
+    assert.equal(result.inventory[0].architecture, "arm64");
+    assert.equal(result.inventory[0].abi, "145");
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+test("rejects an ABI marker outside all validated fat slices", async () => {
+  const fixture = await createPackage({
+    betterBytes: Buffer.concat([fatMachO(["arm64"]), abiMarkers("145")]),
+  });
+  try {
+    await assert.rejects(
+      verifyPackagedNativeModule(
+        context(fixture),
+        verificationOptions(fixture),
+      ),
+      /better_sqlite3\.node.*ABI marker is missing/su,
     );
   } finally {
     await removeFixture(fixture);
@@ -235,6 +437,71 @@ test("rejects a module with multiple ABI markers", async () => {
   }
 });
 
+test("accepts repeated copies of one ABI marker", async () => {
+  const fixture = await createPackage({
+    betterBytes: thinMachO("arm64", "145", "145"),
+  });
+  try {
+    const result = await verifyPackagedNativeModule(
+      context(fixture),
+      verificationOptions(fixture),
+    );
+    assert.equal(result.inventory[0].abi, "145");
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+test("rejects truncated or invalid PE32+ DLL structures", async () => {
+  const truncatedCoffSource = Buffer.from(peModule("x64", "145"));
+  abiMarkers("145").copy(truncatedCoffSource, 0x40);
+  const truncatedCoff = truncatedCoffSource.subarray(0, PE_OFFSET + 14);
+  const truncatedOptional = Buffer.concat([
+    peModule("x64", "145").subarray(0, PE_OPTIONAL_HEADER_OFFSET + 16),
+    abiMarkers("145"),
+  ]);
+  const pe32Optional = Buffer.from(peModule("x64", "145"));
+  pe32Optional.writeUInt16LE(0x10b, PE_OPTIONAL_HEADER_OFFSET);
+  const zeroSections = Buffer.from(peModule("x64", "145"));
+  zeroSections.writeUInt16LE(0, PE_OFFSET + 6);
+  const nonDll = Buffer.from(peModule("x64", "145"));
+  nonDll.writeUInt16LE(0x22, PE_OFFSET + 22);
+  const truncatedSectionTable = Buffer.concat([
+    peModule("x64", "145").subarray(0, PE_SECTION_TABLE_OFFSET + 8),
+    abiMarkers("145"),
+  ]);
+  const cases = [
+    truncatedCoff,
+    truncatedOptional,
+    pe32Optional,
+    zeroSections,
+    nonDll,
+    truncatedSectionTable,
+  ];
+  const fixtures = await Promise.all(
+    cases.map((betterBytes) =>
+      createPackage({
+        platform: "win32",
+        architecture: "x64",
+        betterBytes,
+      }),
+    ),
+  );
+  try {
+    for (const fixture of fixtures) {
+      await assert.rejects(
+        verifyPackagedNativeModule(
+          context(fixture),
+          verificationOptions(fixture),
+        ),
+        /better_sqlite3\.node.*PE.*(?:COFF|optional header|section|characteristics)/su,
+      );
+    }
+  } finally {
+    await Promise.all(fixtures.map(removeFixture));
+  }
+});
+
 test("rejects an unsupported native binary format", async () => {
   const fixture = await createPackage();
   await addNativeModule(
@@ -272,6 +539,80 @@ test("rejects symbolic links inside the native inventory tree", async () => {
         verificationOptions(fixture),
       ),
       /symbolic link/u,
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+test("rejects a symbolic-link app.asar.unpacked root", async () => {
+  const fixture = await createPackage();
+  const target = join(fixture.root, "unpacked-root-target");
+  await rename(fixture.unpackedRoot, target);
+  await symlink(target, fixture.unpackedRoot, "dir");
+  try {
+    await assert.rejects(
+      verifyPackagedNativeModule(
+        context(fixture),
+        verificationOptions(fixture),
+      ),
+      /inventory root.*symbolic link/su,
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+test("rejects a directory changed to a canonical escape after readdir", async () => {
+  const fixture = await createPackage();
+  const traversedDirectory = join(fixture.unpackedRoot, "node_modules");
+  const escapedDirectory = join(fixture.root, "escaped-node_modules");
+  let replaced = false;
+  try {
+    await assert.rejects(
+      verifyPackagedNativeModule(
+        context(fixture),
+        verificationOptions(fixture, {
+          readdir: async (directory, options) => {
+            const entries = await readdir(directory, options);
+            if (directory === fixture.unpackedRoot && !replaced) {
+              await rename(traversedDirectory, escapedDirectory);
+              await symlink(escapedDirectory, traversedDirectory, "dir");
+              replaced = true;
+            }
+            return entries;
+          },
+        }),
+      ),
+      /(?:symbolic link|canonical root)/su,
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+test("rejects a real directory escape introduced after lstat", async () => {
+  const fixture = await createPackage();
+  const traversedDirectory = join(fixture.unpackedRoot, "node_modules");
+  const escapedDirectory = join(fixture.root, "escaped-after-lstat");
+  let replaced = false;
+  try {
+    await assert.rejects(
+      verifyPackagedNativeModule(
+        context(fixture),
+        verificationOptions(fixture, {
+          lstat: async (path) => {
+            const status = await lstat(path);
+            if (path === traversedDirectory && !replaced) {
+              await rename(traversedDirectory, escapedDirectory);
+              await symlink(escapedDirectory, traversedDirectory, "dir");
+              replaced = true;
+            }
+            return status;
+          },
+        }),
+      ),
+      /canonical root/su,
     );
   } finally {
     await removeFixture(fixture);
