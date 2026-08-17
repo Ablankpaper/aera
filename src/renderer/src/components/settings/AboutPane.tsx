@@ -17,6 +17,13 @@ import openaiLogo from "../../assets/logos/openai.svg";
 import { ConfigHealth } from "../../screens/Settings/ConfigHealth";
 import { useSettings } from "./SettingsDataContext";
 import RuntimeDistributionCard from "./RuntimeDistributionCard";
+import {
+  desktopUpdateFeedback,
+  desktopUpdateStageKey,
+} from "./desktop-update-feedback";
+import type { DesktopUpdateStageV2 } from "../../../../shared/desktop-update";
+
+export { desktopUpdateFeedback } from "./desktop-update-feedback";
 
 /**
  * About & Updates. Two clearly-separated cards for the two distinct update
@@ -48,6 +55,7 @@ export default function AboutPane(): React.JSX.Element {
     desktopUpdateVersion,
     desktopUpdatePercent,
     desktopUpdateError,
+    desktopUpdateStageEvent,
     checkDesktopUpdate,
     handleDesktopUpdate,
   } = useSettings();
@@ -203,6 +211,7 @@ export default function AboutPane(): React.JSX.Element {
               state={desktopUpdateState}
               version={desktopUpdateVersion}
               percent={desktopUpdatePercent}
+              stageEvent={desktopUpdateStageEvent}
               onCheck={checkDesktopUpdate}
               onAct={handleDesktopUpdate}
             />
@@ -213,7 +222,7 @@ export default function AboutPane(): React.JSX.Element {
             )}
           </div>
 
-          {desktopUpdateError && (
+          {desktopUpdateError && !desktopUpdateStageEvent && (
             <div className="settings-hermes-result error">
               {desktopUpdateError}
             </div>
@@ -293,10 +302,11 @@ function MetaLogo({
 }
 
 /** The desktop-app update action, driven by the live updater state machine. */
-function DesktopUpdateButton({
+export function DesktopUpdateButton({
   state,
   version,
   percent,
+  stageEvent,
   onCheck,
   onAct,
 }: {
@@ -310,50 +320,104 @@ function DesktopUpdateButton({
     | null;
   version: string | null;
   percent: number | null;
+  stageEvent?: DesktopUpdateStageV2 | null;
   onCheck: () => void;
   onAct: () => void;
 }): React.JSX.Element {
   const { t } = useI18n();
+  const feedback = stageEvent ? desktopUpdateFeedback(stageEvent.code) : null;
+  const rolledBack = stageEvent?.state === "rolled_back";
+
+  const feedbackDetails =
+    stageEvent &&
+    (stageEvent.state === "failed" || stageEvent.state === "rolled_back") ? (
+      <div
+        className="settings-update-feedback"
+        role="status"
+        aria-live="polite"
+      >
+        <strong>
+          {t(
+            rolledBack
+              ? "settings.updateRolledBack"
+              : (feedback?.messageKey ?? "settings.updateUnknownFailure"),
+          )}
+        </strong>
+        <span>{t(desktopUpdateStageKey(stageEvent.stage))}</span>
+        {stageEvent.targetVersion && (
+          <span>
+            {t("settings.updateTargetVersion", {
+              version: stageEvent.targetVersion,
+            })}
+          </span>
+        )}
+        <span>
+          {t(
+            rolledBack
+              ? "settings.updateUseCurrentVersion"
+              : (feedback?.actionKey ?? "settings.updateContactSupport"),
+          )}
+        </span>
+        <code>{stageEvent.diagnosticId}</code>
+      </div>
+    ) : null;
 
   if (state === "downloading") {
     return (
-      <button className="btn btn-primary" disabled>
-        <Loader size={14} className="settings-spin" />
-        {t("common.downloading", { percent: percent ?? 0 })}
-      </button>
+      <>
+        {feedbackDetails}
+        <button className="btn btn-primary" disabled>
+          <Loader size={14} className="settings-spin" />
+          {t("common.downloading", { percent: percent ?? 0 })}
+        </button>
+      </>
     );
   }
   if (state === "ready") {
     return (
-      <button className="btn btn-primary" onClick={onAct}>
-        <RotateCw size={14} />
-        {t("common.restartToUpdate")}
-      </button>
+      <>
+        {feedbackDetails}
+        <button className="btn btn-primary" onClick={onAct}>
+          <RotateCw size={14} />
+          {t("common.restartToUpdate")}
+        </button>
+      </>
     );
   }
   if (state === "available") {
     return (
-      <button className="btn btn-primary" onClick={onAct}>
-        <Download size={14} />
-        {version
-          ? t("common.updateAvailable", { version })
-          : t("settings.downloadUpdate")}
-      </button>
+      <>
+        {feedbackDetails}
+        <button className="btn btn-primary" onClick={onAct}>
+          <Download size={14} />
+          {version
+            ? t("common.updateAvailable", { version })
+            : t("settings.downloadUpdate")}
+        </button>
+      </>
     );
   }
   if (state === "checking") {
     return (
-      <button className="btn btn-secondary" disabled>
-        <Loader size={14} className="settings-spin" />
-        {t("settings.checkingUpdates")}
-      </button>
+      <>
+        {feedbackDetails}
+        <button className="btn btn-secondary" disabled>
+          <Loader size={14} className="settings-spin" />
+          {t("settings.checkingUpdates")}
+        </button>
+      </>
     );
   }
   // null, "uptodate", or "error" → offer a (re)check.
   return (
-    <button className="btn btn-secondary" onClick={onCheck}>
-      <RefreshCw size={14} />
-      {state === "error" ? t("settings.retry") : t("settings.checkForUpdates")}
-    </button>
+    <>
+      {feedbackDetails}
+      <button className="btn btn-secondary" onClick={onCheck}>
+        <RefreshCw size={14} />
+        {state === "error"
+          ? t("settings.retry")
+          : t("settings.checkForUpdates")}
+      </button>
+    </>
   );
 }

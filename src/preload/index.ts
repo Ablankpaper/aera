@@ -1,5 +1,9 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { AppLocale } from "../shared/i18n/types";
+import {
+  isDesktopUpdateStageV2,
+  type DesktopUpdateStageV2,
+} from "../shared/desktop-update";
 import type { Attachment } from "../shared/attachments";
 import type { SessionModelOverride } from "../shared/model-override";
 import type { DesktopSessionContinuationItem } from "../shared/session-continuation";
@@ -254,6 +258,98 @@ const electronAPI = {
     },
   },
 };
+
+type DesktopUpdateStateSnapshot = {
+  state:
+    | "available"
+    | "downloading"
+    | "ready"
+    | "error"
+    | "checking"
+    | "uptodate"
+    | null;
+  version: string | null;
+  releaseNotes: string | null;
+  percent: number | null;
+  error: string | null;
+  errorCode: string | null;
+  stage: string | null;
+  diagnosticId: string | null;
+  stageEvent: DesktopUpdateStageV2 | null;
+};
+
+const DESKTOP_UPDATE_STATES = new Set([
+  "available",
+  "downloading",
+  "ready",
+  "error",
+  "checking",
+  "uptodate",
+]);
+const DESKTOP_UPDATE_SAFE_TOKEN = /^[a-z][a-z0-9_]{0,96}$/u;
+
+function sanitizeDesktopUpdateSnapshot(
+  value: unknown,
+): DesktopUpdateStateSnapshot {
+  const source =
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const state =
+    typeof source.state === "string" && DESKTOP_UPDATE_STATES.has(source.state)
+      ? (source.state as DesktopUpdateStateSnapshot["state"])
+      : null;
+  const version =
+    typeof source.version === "string" && source.version.length <= 128
+      ? source.version
+      : null;
+  const releaseNotes =
+    typeof source.releaseNotes === "string" &&
+    source.releaseNotes.length <= 16_384
+      ? source.releaseNotes
+      : null;
+  const percent =
+    typeof source.percent === "number" &&
+    Number.isFinite(source.percent) &&
+    source.percent >= 0 &&
+    source.percent <= 100
+      ? source.percent
+      : null;
+  const errorCode =
+    typeof source.errorCode === "string" &&
+    DESKTOP_UPDATE_SAFE_TOKEN.test(source.errorCode)
+      ? source.errorCode
+      : null;
+  const stage =
+    typeof source.stage === "string" &&
+    DESKTOP_UPDATE_SAFE_TOKEN.test(source.stage)
+      ? source.stage
+      : null;
+  const diagnosticId =
+    typeof source.diagnosticId === "string" &&
+    /^[0-9a-f]{12}(?:-[0-9a-f-]{36})?$/u.test(source.diagnosticId)
+      ? source.diagnosticId
+      : null;
+  return {
+    state,
+    version,
+    releaseNotes,
+    percent,
+    // Error text is deliberately reduced to a fixed marker. Renderer maps
+    // structured stage/code values to localized copy and never receives raw
+    // exception bodies, paths, URLs, or command lines from this legacy field.
+    error:
+      typeof source.error === "string" && source.error.length > 0
+        ? "update_failed"
+        : null,
+    errorCode,
+    stage,
+    diagnosticId,
+    stageEvent: isDesktopUpdateStageV2(source.stageEvent)
+      ? source.stageEvent
+      : null,
+  };
+}
 
 const hermesAPI = {
   // Installation
@@ -1595,20 +1691,10 @@ const hermesAPI = {
   // Updates
   checkForUpdates: (): Promise<string | null> =>
     ipcRenderer.invoke("check-for-updates"),
-  getDesktopUpdateState: (): Promise<{
-    state:
-      | "available"
-      | "downloading"
-      | "ready"
-      | "error"
-      | "checking"
-      | "uptodate"
-      | null;
-    version: string | null;
-    releaseNotes: string | null;
-    percent: number | null;
-    error: string | null;
-  }> => ipcRenderer.invoke("get-desktop-update-state"),
+  getDesktopUpdateState: (): Promise<DesktopUpdateStateSnapshot> =>
+    ipcRenderer
+      .invoke("get-desktop-update-state")
+      .then((value: unknown) => sanitizeDesktopUpdateSnapshot(value)),
   downloadUpdate: (): Promise<boolean> => ipcRenderer.invoke("download-update"),
   installUpdate: (): Promise<void> => ipcRenderer.invoke("install-update"),
   getAppVersion: (): Promise<string> => ipcRenderer.invoke("get-app-version"),
@@ -1646,9 +1732,25 @@ const hermesAPI = {
     const handler = (
       _event: Electron.IpcRendererEvent,
       message: unknown,
-    ): void => callback(String(message));
+    ): void => {
+      void message;
+      callback("update_failed");
+    };
     ipcRenderer.on("update-error", handler);
     return () => ipcRenderer.removeListener("update-error", handler);
+  },
+
+  onDesktopUpdateStage: (
+    callback: (event: DesktopUpdateStageV2) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      payload: unknown,
+    ): void => {
+      if (isDesktopUpdateStageV2(payload)) callback(payload);
+    };
+    ipcRenderer.on("desktop-update-stage", handler);
+    return () => ipcRenderer.removeListener("desktop-update-stage", handler);
   },
 
   // Menu events (from native menu bar)

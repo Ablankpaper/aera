@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../useI18n";
+import type { DesktopUpdateStageV2 } from "../../../../shared/desktop-update";
+import {
+  desktopUpdateFeedback,
+  projectDesktopUpdateState,
+} from "./desktop-update-feedback";
 import { getAnalyticsConsent } from "../../utils/analytics";
 import {
   CHAT_TRANSPORT_OPTIONS,
@@ -148,6 +153,8 @@ export function useSettingsData(profile?: string) {
   const [desktopUpdateError, setDesktopUpdateError] = useState<string | null>(
     null,
   );
+  const [desktopUpdateStageEvent, setDesktopUpdateStageEvent] =
+    useState<DesktopUpdateStageV2 | null>(null);
 
   const loadConfigRequestRef = useRef(0);
 
@@ -270,6 +277,23 @@ export function useSettingsData(profile?: string) {
   // upgrade button listens to) so the About pane reflects live progress.
   useEffect(() => {
     let cancelled = false;
+    const applyStageEvent = (event: DesktopUpdateStageV2): void => {
+      if (cancelled) return;
+      setDesktopUpdateStageEvent(event);
+      const projectedState = projectDesktopUpdateState(event);
+      if (projectedState !== null) setDesktopUpdateState(projectedState);
+      if (event.state === "failed" || event.state === "rolled_back") {
+        setDesktopUpdateError(
+          t(
+            event.state === "rolled_back"
+              ? "settings.updateRolledBack"
+              : desktopUpdateFeedback(event.code).messageKey,
+          ),
+        );
+      } else if (event.state === "started" || event.state === "succeeded") {
+        setDesktopUpdateError(null);
+      }
+    };
     const cleanupAvailable = window.hermesAPI.onUpdateAvailable((info) => {
       setDesktopUpdateState("available");
       setDesktopUpdateVersion(info.version);
@@ -289,8 +313,13 @@ export function useSettingsData(profile?: string) {
     });
     const cleanupError = window.hermesAPI.onUpdateError((message) => {
       setDesktopUpdateState("error");
-      setDesktopUpdateError(message);
+      // The legacy channel is retained for older Main processes, but its raw
+      // message is not allowed to cross into visible Renderer state.
+      void message;
+      setDesktopUpdateError(t("settings.updateUnknownFailure"));
     });
+    const cleanupStage =
+      window.hermesAPI.onDesktopUpdateStage?.(applyStageEvent);
     const getSnapshot = window.hermesAPI.getDesktopUpdateState;
     if (typeof getSnapshot === "function") {
       void getSnapshot().then((snapshot) => {
@@ -298,7 +327,14 @@ export function useSettingsData(profile?: string) {
         setDesktopUpdateState(snapshot.state);
         setDesktopUpdateVersion(snapshot.version);
         setDesktopUpdatePercent(snapshot.percent);
-        setDesktopUpdateError(snapshot.error);
+        setDesktopUpdateStageEvent(snapshot.stageEvent ?? null);
+        if (snapshot.stageEvent) {
+          applyStageEvent(snapshot.stageEvent);
+        } else {
+          setDesktopUpdateError(
+            snapshot.error ? t("settings.updateUnknownFailure") : null,
+          );
+        }
       });
     }
     return () => {
@@ -307,23 +343,45 @@ export function useSettingsData(profile?: string) {
       cleanupProgress();
       cleanupDownloaded();
       cleanupError();
+      cleanupStage?.();
     };
-  }, []);
+  }, [t]);
 
   async function checkDesktopUpdate(): Promise<void> {
     setDesktopUpdateState("checking");
     setDesktopUpdateError(null);
+    setDesktopUpdateStageEvent(null);
     try {
       const version = await window.hermesAPI.checkForUpdates();
       if (version) {
         setDesktopUpdateState("available");
         setDesktopUpdateVersion(version);
       } else {
-        setDesktopUpdateState("uptodate");
+        const snapshot = await window.hermesAPI.getDesktopUpdateState();
+        setDesktopUpdateStageEvent(snapshot.stageEvent ?? null);
+        if (snapshot.stageEvent) {
+          const projected = projectDesktopUpdateState(snapshot.stageEvent);
+          setDesktopUpdateState(projected === "error" ? "error" : "uptodate");
+          if (
+            snapshot.stageEvent.state === "failed" ||
+            snapshot.stageEvent.state === "rolled_back"
+          ) {
+            setDesktopUpdateError(
+              t(
+                snapshot.stageEvent.state === "rolled_back"
+                  ? "settings.updateRolledBack"
+                  : desktopUpdateFeedback(snapshot.stageEvent.code).messageKey,
+              ),
+            );
+          }
+        } else {
+          setDesktopUpdateState("uptodate");
+        }
       }
     } catch (err) {
+      void err;
       setDesktopUpdateState("error");
-      setDesktopUpdateError(err instanceof Error ? err.message : String(err));
+      setDesktopUpdateError(t("settings.updateUnknownFailure"));
     }
   }
 
@@ -337,11 +395,13 @@ export function useSettingsData(profile?: string) {
     setDesktopUpdateState("downloading");
     setDesktopUpdatePercent(null);
     setDesktopUpdateError(null);
+    setDesktopUpdateStageEvent(null);
     try {
       const ok = await window.hermesAPI.downloadUpdate();
       if (!ok) setDesktopUpdateState("error");
     } catch (err) {
-      setDesktopUpdateError(err instanceof Error ? err.message : String(err));
+      void err;
+      setDesktopUpdateError(t("settings.updateUnknownFailure"));
       setDesktopUpdateState("error");
     }
   }
@@ -854,6 +914,7 @@ export function useSettingsData(profile?: string) {
     desktopUpdateVersion,
     desktopUpdatePercent,
     desktopUpdateError,
+    desktopUpdateStageEvent,
     checkDesktopUpdate,
     handleDesktopUpdate,
     // migration / community

@@ -1,4 +1,5 @@
 import type { AppLocale } from "../shared/i18n/types";
+import type { DesktopUpdateStageV2 } from "../shared/desktop-update";
 import type { Attachment } from "../shared/attachments";
 import type { SessionModelOverride } from "../shared/model-override";
 import type { DesktopSessionContinuationItem } from "../shared/session-continuation";
@@ -1756,6 +1757,10 @@ interface HermesAPI {
     releaseNotes: string | null;
     percent: number | null;
     error: string | null;
+    errorCode: string | null;
+    stage: string | null;
+    diagnosticId: string | null;
+    stageEvent: DesktopUpdateStageV2 | null;
   }>;
   downloadUpdate: () => Promise<boolean>;
   installUpdate: () => Promise<void>;
@@ -1770,6 +1775,9 @@ interface HermesAPI {
   ) => () => void;
   onUpdateDownloaded: (callback: () => void) => () => void;
   onUpdateError: (callback: (message: string) => void) => () => void;
+  onDesktopUpdateStage: (
+    callback: (event: DesktopUpdateStageV2) => void,
+  ) => () => void;
 
   // Menu events
   onMenuNewChat: (callback: () => void) => () => void;

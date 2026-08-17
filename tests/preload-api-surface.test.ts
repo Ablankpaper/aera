@@ -231,6 +231,15 @@ describe("Preload API Surface", () => {
     expect(missing).toEqual([]);
   });
 
+  it("exposes the validated Desktop updater stage event without raw error material", () => {
+    expect(preloadMethods).toContain("onDesktopUpdateStage");
+    expect(typeMethods).toContain("onDesktopUpdateStage");
+    expect(preloadSrc).toContain('"desktop-update-stage"');
+    expect(preloadSrc).toContain("isDesktopUpdateStageV2");
+    expect(preloadSrc).toContain('callback("update_failed")');
+    expect(preloadTypes).toContain("stageEvent");
+  });
+
   it("exposes the secret-free Profile image generation configuration bridge", () => {
     const expected = [
       "getImageGenerationConfig",

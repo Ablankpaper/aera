@@ -53,6 +53,11 @@ import {
   hasAgenteraSignedInAccess,
   type AgenteraDesktopAccessState,
 } from "../../../../shared/agentera-auth";
+import type { DesktopUpdateStageV2 } from "../../../../shared/desktop-update";
+import {
+  desktopUpdateFeedback,
+  projectDesktopUpdateState,
+} from "../../components/settings/desktop-update-feedback";
 
 type View =
   | "chat"
@@ -436,9 +441,34 @@ function Layout({
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
   const [updatePercent, setUpdatePercent] = useState<number | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [updateStageEvent, setUpdateStageEvent] =
+    useState<DesktopUpdateStageV2 | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    const applyStageEvent = (event: DesktopUpdateStageV2): void => {
+      if (cancelled) return;
+      setUpdateStageEvent(event);
+      const projectedState = projectDesktopUpdateState(event);
+      if (
+        projectedState === "downloading" ||
+        projectedState === "ready" ||
+        projectedState === "error"
+      ) {
+        setUpdateState(projectedState);
+      }
+      if (event.state === "failed" || event.state === "rolled_back") {
+        setUpdateError(
+          t(
+            event.state === "rolled_back"
+              ? "settings.updateRolledBack"
+              : desktopUpdateFeedback(event.code).messageKey,
+          ),
+        );
+      } else {
+        setUpdateError(null);
+      }
+    };
     const cleanupAvailable = window.hermesAPI.onUpdateAvailable((info) => {
       setUpdateState("available");
       setUpdateVersion(info.version);
@@ -458,8 +488,11 @@ function Layout({
     });
     const cleanupError = window.hermesAPI.onUpdateError((message) => {
       setUpdateState("error");
-      setUpdateError(message);
+      void message;
+      setUpdateError(t("settings.updateUnknownFailure"));
     });
+    const cleanupStage =
+      window.hermesAPI.onDesktopUpdateStage?.(applyStageEvent);
     const getSnapshot = window.hermesAPI.getDesktopUpdateState;
     if (typeof getSnapshot === "function") {
       void getSnapshot().then((snapshot) => {
@@ -473,7 +506,14 @@ function Layout({
           setUpdateState(snapshot.state);
           setUpdateVersion(snapshot.version);
           setUpdatePercent(snapshot.percent);
-          setUpdateError(snapshot.error);
+          setUpdateStageEvent(snapshot.stageEvent ?? null);
+          if (snapshot.stageEvent) {
+            applyStageEvent(snapshot.stageEvent);
+          } else {
+            setUpdateError(
+              snapshot.error ? t("settings.updateUnknownFailure") : null,
+            );
+          }
         }
       });
     }
@@ -483,8 +523,9 @@ function Layout({
       cleanupProgress();
       cleanupDownloaded();
       cleanupError();
+      cleanupStage?.();
     };
-  }, []);
+  }, [t]);
 
   async function handleUpdate(): Promise<void> {
     if (updateState === "ready") {
@@ -496,19 +537,43 @@ function Layout({
       setUpdateState("downloading");
       setUpdatePercent(null);
       setUpdateError(null);
+      setUpdateStageEvent(null);
       try {
         const ok = await window.hermesAPI.downloadUpdate();
         if (!ok) setUpdateState("error");
         // On success, we wait for the onUpdateDownloaded callback to set "ready"
       } catch (err) {
-        setUpdateError(err instanceof Error ? err.message : String(err));
+        void err;
+        setUpdateError(t("settings.updateUnknownFailure"));
         setUpdateState("error");
       }
     }
   }
 
+  const updateStageFailure =
+    updateStageEvent &&
+    (updateStageEvent.state === "failed" ||
+      updateStageEvent.state === "rolled_back")
+      ? updateStageEvent
+      : null;
+  const updateStageFailureMessage = updateStageFailure
+    ? t(
+        updateStageFailure.state === "rolled_back"
+          ? "settings.updateRolledBack"
+          : desktopUpdateFeedback(updateStageFailure.code).messageKey,
+      )
+    : null;
+  const updateStageFailureAction = updateStageFailure
+    ? t(
+        updateStageFailure.state === "rolled_back"
+          ? "settings.updateUseCurrentVersion"
+          : desktopUpdateFeedback(updateStageFailure.code).actionKey,
+      )
+    : null;
   const updateButtonTitle =
-    updateError ??
+    (updateStageFailure
+      ? `${updateStageFailureMessage} ${updateStageFailureAction} (${updateStageFailure.diagnosticId})`
+      : updateError) ??
     (updateState === "available" && updateVersion
       ? t("common.updateAvailable", { version: updateVersion })
       : updateState === "downloading"
@@ -899,7 +964,13 @@ function Layout({
                 <span>{t("common.restartToUpdate")}</span>
               )}
               {updateState === "error" && (
-                <span>{t("common.updateFailed")}</span>
+                <span>
+                  {updateStageFailureMessage ??
+                    t("settings.updateUnknownFailure")}
+                  {updateStageFailure && (
+                    <code> {updateStageFailure.diagnosticId}</code>
+                  )}
+                </span>
               )}
             </button>
           )}

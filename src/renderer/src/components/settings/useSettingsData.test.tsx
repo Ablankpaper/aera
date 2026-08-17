@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { DesktopUpdateStageV2 } from "../../../../shared/desktop-update";
 import { useSettingsData } from "./useSettingsData";
 
 vi.mock("../useI18n", () => {
@@ -33,7 +34,12 @@ function connectionConfig(): PublicConnectionConfig {
 }
 
 describe("useSettingsData remote OAuth", () => {
+  let desktopUpdateStageListener:
+    | ((event: DesktopUpdateStageV2) => void)
+    | null;
+
   beforeEach(() => {
+    desktopUpdateStageListener = null;
     const values = new Map<string, string>();
     Object.defineProperty(globalThis, "localStorage", {
       configurable: true,
@@ -59,6 +65,12 @@ describe("useSettingsData remote OAuth", () => {
         onUpdateDownloadProgress: vi.fn(() => vi.fn()),
         onUpdateDownloaded: vi.fn(() => vi.fn()),
         onUpdateError: vi.fn(() => vi.fn()),
+        onDesktopUpdateStage: vi.fn(
+          (listener: (event: DesktopUpdateStageV2) => void) => {
+            desktopUpdateStageListener = listener;
+            return vi.fn();
+          },
+        ),
         probeRemoteAuthMode: vi.fn(async () => ({
           authMode: "oauth" as const,
           version: "1.0.0",
@@ -117,5 +129,32 @@ describe("useSettingsData remote OAuth", () => {
 
     expect(result.current.remoteOAuthSignedIn).toBe(false);
     expect(result.current.connStatus).toBe("settings.remoteOAuthCancelled");
+  });
+
+  it("projects a structured updater failure and hides the legacy raw message", async () => {
+    const { result } = renderHook(() => useSettingsData());
+    await waitFor(() => expect(result.current.remoteAuthMode).toBe("oauth"));
+
+    desktopUpdateStageListener?.({
+      schemaVersion: 2,
+      operationId: "op-0123456789ab",
+      stage: "verify",
+      state: "failed",
+      code: "update_signature_invalid",
+      retryability: "not_retryable",
+      diagnosticId: "0123456789ab",
+      targetVersion: "0.7.4-internal-beta.33",
+    });
+
+    await waitFor(() =>
+      expect(result.current.desktopUpdateState).toBe("error"),
+    );
+    expect(result.current.desktopUpdateStageEvent?.code).toBe(
+      "update_signature_invalid",
+    );
+    expect(result.current.desktopUpdateError).toBe(
+      "settings.updateSignatureInvalid",
+    );
+    expect(result.current.desktopUpdateError).not.toContain("https://");
   });
 });
