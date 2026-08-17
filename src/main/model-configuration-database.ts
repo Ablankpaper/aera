@@ -8,8 +8,120 @@ import {
   relative,
   resolve,
 } from "node:path";
+import type { ModelConfigurationStartupFailureCode } from "../shared/model-configuration";
 
 export const MODEL_CONFIGURATION_SCHEMA_VERSION = 1;
+
+export interface ModelConfigurationNativeStartupEvidence {
+  status: "loaded" | "failed";
+  platform: NodeJS.Platform;
+  processArchitecture: string;
+  electronAbi: string | null;
+  detectedNativeAbi: string | null;
+  failureClass: ModelConfigurationStartupFailureCode | null;
+}
+
+export class ModelConfigurationRuntimeError extends Error {
+  readonly code: ModelConfigurationStartupFailureCode;
+  readonly evidence: ModelConfigurationNativeStartupEvidence;
+
+  constructor(
+    code: ModelConfigurationStartupFailureCode,
+    evidence: ModelConfigurationNativeStartupEvidence,
+    options?: { cause?: unknown },
+  ) {
+    super(
+      `Aera model configuration runtime is unavailable (${code}).`,
+      options,
+    );
+    this.name = "ModelConfigurationRuntimeError";
+    this.code = code;
+    this.evidence = evidence;
+  }
+}
+
+class UnsupportedModelConfigurationSchemaError extends Error {}
+
+function errorParts(error: unknown): { code: string; message: string } {
+  if (typeof error !== "object" || error === null) {
+    return { code: "", message: String(error ?? "") };
+  }
+  const candidate = error as { code?: unknown; message?: unknown };
+  return {
+    code: typeof candidate.code === "string" ? candidate.code : "",
+    message: typeof candidate.message === "string" ? candidate.message : "",
+  };
+}
+
+function nativeModuleVersions(message: string): string[] {
+  return [...message.matchAll(/NODE_MODULE_VERSION\s+(\d+)/giu)].map(
+    (match) => match[1],
+  );
+}
+
+export function classifyNativeLoadFailure(
+  error: unknown,
+): ModelConfigurationStartupFailureCode | null {
+  const { code, message } = errorParts(error);
+  const versions = nativeModuleVersions(message);
+  if (versions.length >= 2) return "native_module_abi_mismatch";
+
+  const nativeLoad =
+    code === "ERR_DLOPEN_FAILED" ||
+    /(?:dlopen|\.node(?:\b|['")]))/iu.test(message);
+  if (!nativeLoad) return null;
+  if (
+    /(?:incompatible|wrong) architecture|bad cpu type|not a valid win32 application/iu.test(
+      message,
+    )
+  ) {
+    return "native_module_architecture_mismatch";
+  }
+  if (
+    /library not loaded|cannot open shared object file|image not found|specified module could not be found/iu.test(
+      message,
+    )
+  ) {
+    return "native_module_dependency_missing";
+  }
+  if (
+    code === "EACCES" ||
+    code === "EPERM" ||
+    /permission denied|operation not permitted|access is denied/iu.test(message)
+  ) {
+    return "native_module_load_denied";
+  }
+  return "native_module_load_failed";
+}
+
+function startupEvidence(
+  code: ModelConfigurationStartupFailureCode,
+  error: unknown,
+): ModelConfigurationNativeStartupEvidence {
+  const versions = nativeModuleVersions(errorParts(error).message);
+  return {
+    status: "failed",
+    platform: process.platform,
+    processArchitecture: process.arch,
+    electronAbi: process.versions.modules ?? null,
+    detectedNativeAbi: versions[0] ?? null,
+    failureClass: code,
+  };
+}
+
+function runtimeError(
+  code: ModelConfigurationStartupFailureCode,
+  cause: unknown,
+): ModelConfigurationRuntimeError {
+  if (cause instanceof ModelConfigurationRuntimeError) return cause;
+  return new ModelConfigurationRuntimeError(
+    code,
+    startupEvidence(code, cause),
+    {
+      cause,
+    },
+  );
+}
 
 export interface ModelConfigurationSqliteRunResult {
   changes: number | bigint;
@@ -117,10 +229,12 @@ function initializeSchema(sqlite: ModelConfigurationSqliteDatabase): void {
     | undefined;
   const currentVersion = current ? Number(Object.values(current)[0]) : 0;
   if (
-    !Number.isSafeInteger(currentVersion) ||
-    currentVersion < 0 ||
+    Number.isSafeInteger(currentVersion) &&
     currentVersion > MODEL_CONFIGURATION_SCHEMA_VERSION
   ) {
+    throw new UnsupportedModelConfigurationSchemaError();
+  }
+  if (!Number.isSafeInteger(currentVersion) || currentVersion < 0) {
     throw new Error("Unsupported Aera model configuration database version.");
   }
   if (currentVersion === MODEL_CONFIGURATION_SCHEMA_VERSION) return;
@@ -194,9 +308,18 @@ export function openModelConfigurationDatabase(
   mkdirSync(paths.rootPath, { recursive: true, mode: 0o700 });
   chmodSync(paths.rootPath, 0o700);
   assertOutsideHermesHome(realpathSync.native(paths.rootPath));
-  const sqlite = (options.databaseFactory ?? defaultDatabaseFactory)(
-    paths.databasePath,
-  );
+  let sqlite: ModelConfigurationSqliteDatabase;
+  try {
+    sqlite = (options.databaseFactory ?? defaultDatabaseFactory)(
+      paths.databasePath,
+    );
+  } catch (error) {
+    throw runtimeError(
+      classifyNativeLoadFailure(error) ??
+        "model_configuration_database_unavailable",
+      error,
+    );
+  }
   try {
     sqlite.exec("PRAGMA journal_mode=WAL");
     sqlite.exec("PRAGMA synchronous=FULL");
@@ -211,6 +334,11 @@ export function openModelConfigurationDatabase(
     } catch {
       // Preserve the original initialization error.
     }
-    throw error;
+    throw runtimeError(
+      error instanceof UnsupportedModelConfigurationSchemaError
+        ? "model_configuration_schema_unsupported"
+        : "model_configuration_database_unavailable",
+      error,
+    );
   }
 }
