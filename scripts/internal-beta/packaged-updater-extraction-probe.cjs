@@ -1,5 +1,9 @@
 "use strict";
 
+/* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/explicit-function-return-type --
+   This CommonJS Electron probe loads the packaged updater from a runtime path
+   and intentionally has no TypeScript declarations. */
+
 const { mkdir } = require("node:fs/promises");
 const { isAbsolute, resolve } = require("node:path");
 const { app } = require("electron");
