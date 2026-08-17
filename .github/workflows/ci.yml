@@ -132,6 +132,8 @@ jobs:
     name: windows-process-tree-diagnostic
     runs-on: windows-latest
     timeout-minutes: 10
+    env:
+      AERA_PROCESS_TREE_DIAGNOSTICS: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
