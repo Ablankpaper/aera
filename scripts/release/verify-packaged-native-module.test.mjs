@@ -6,8 +6,10 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  open as openFile,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
   symlink,
@@ -619,6 +621,54 @@ test("rejects a real directory escape introduced after lstat", async () => {
   }
 });
 
+test("rejects a final native module replaced after realpath validation", async () => {
+  const fixture = await createPackage();
+  const verifiedModulePath = join(fixture.unpackedRoot, fixture.betterRelative);
+  const originalModulePath = join(fixture.root, "validated-original.node");
+  const replacementModulePath = join(
+    fixture.root,
+    "post-realpath-replacement.node",
+  );
+  const replacementBytes = thinMachO("arm64", "145", "145");
+  await writeFile(replacementModulePath, replacementBytes);
+  let replaced = false;
+  try {
+    await assert.rejects(
+      async () => {
+        const result = await verifyPackagedNativeModule(
+          context(fixture),
+          verificationOptions(fixture, {
+            realpath: async (path) => {
+              const canonicalPath = await realpath(path);
+              if (path === verifiedModulePath && !replaced) {
+                await rename(verifiedModulePath, originalModulePath);
+                await symlink(replacementModulePath, verifiedModulePath);
+                replaced = true;
+              }
+              return canonicalPath;
+            },
+          }),
+        );
+        assert.notEqual(
+          result.inventory[0].sha256,
+          sha256(replacementBytes),
+          "verification recorded post-realpath replacement bytes",
+        );
+      },
+      (error) => {
+        const message =
+          error instanceof Error ? error.message : String(error ?? "");
+        assert.match(message, /native module .* changed after validation/u);
+        assert.equal(message.includes(fixture.root), false);
+        assert.equal(replaced, true);
+        return true;
+      },
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
 test("rejects an unreadable nested inventory directory", async () => {
   const fixture = await createPackage();
   const blocked = join(fixture.unpackedRoot, "blocked");
@@ -666,7 +716,7 @@ test("requires better-sqlite3 in the final unpacked native surface", async () =>
 });
 
 // @lat: [[beta27-reliability-plan#Acceptance and release boundary#Complete packaged native inventory]]
-test("persists a sorted hashed macOS inventory and reads each module once", async () => {
+test("persists a sorted hashed macOS inventory and handle-reads each module once", async () => {
   const fixture = await createPackage();
   const otherRelative = join(
     "node_modules",
@@ -677,15 +727,28 @@ test("persists a sorted hashed macOS inventory and reads each module once", asyn
   );
   const otherBytes = thinMachO("arm64", "145");
   await addNativeModule(fixture, otherRelative, otherBytes);
-  const reads = new Map();
+  const opens = new Map();
+  const handleReads = new Map();
   try {
     const result = await verifyPackagedNativeModule(
       context(fixture),
       verificationOptions(fixture, {
-        readFile: async (...args) => {
+        open: async (...args) => {
           const path = String(args[0]);
-          reads.set(path, (reads.get(path) ?? 0) + 1);
-          return readFile(...args);
+          opens.set(path, (opens.get(path) ?? 0) + 1);
+          const handle = await openFile(...args);
+          return new Proxy(handle, {
+            get(target, property) {
+              if (property === "readFile") {
+                return async (...readArgs) => {
+                  handleReads.set(path, (handleReads.get(path) ?? 0) + 1);
+                  return target.readFile(...readArgs);
+                };
+              }
+              const value = Reflect.get(target, property, target);
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          });
         },
       }),
     );
@@ -712,7 +775,8 @@ test("persists a sorted hashed macOS inventory and reads each module once", asyn
       ),
       true,
     );
-    assert.deepEqual([...reads.values()], [1, 1]);
+    assert.deepEqual([...opens.values()], [1, 1]);
+    assert.deepEqual([...handleReads.values()], [1, 1]);
 
     const persisted = JSON.parse(await readFile(result.inventoryPath, "utf8"));
     assert.deepEqual(persisted, {

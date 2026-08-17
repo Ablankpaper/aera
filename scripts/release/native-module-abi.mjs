@@ -113,7 +113,16 @@ async function collectNativeModules(
     }
     if (status.isFile()) {
       if (entry.name.endsWith(".node")) {
-        out.push({ absolutePath: canonicalPath, relativePath });
+        out.push({
+          absolutePath: canonicalPath,
+          relativePath,
+          identity: {
+            dev: status.dev,
+            ino: status.ino,
+            mode: status.mode,
+            size: status.size,
+          },
+        });
       }
       continue;
     }

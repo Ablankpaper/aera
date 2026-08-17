@@ -100,6 +100,8 @@ The afterPack gate rejects unreadable, structurally invalid, platform-incompatib
 
 Darwin inventory accepts only validated 64-bit Mach-O bundles and slices; win32 accepts only validated PE32+ executable DLL images. ABI markers are read only from those verified images or fat slices.
 
-The unpacked root and every descendant are checked with `lstat`, every resolved path must remain inside the canonical root, and module reads use the validated canonical path. Every shipped native module is inspected through `scripts/release/native-module-abi.mjs` and `scripts/release/verify-packaged-native-module.mjs`.
+The unpacked root and every descendant are checked with `lstat`, and every resolved path must remain inside the canonical root. Collection retains each file's device, inode, type, and size; reading opens that path with no-follow where available, matches `fstat` on the same handle, reads that handle once, and then closes it.
+
+Every shipped native module is inspected through `scripts/release/native-module-abi.mjs` and `scripts/release/verify-packaged-native-module.mjs`.
 
 This source-stage inventory is not final-artifact binding; DMG, updater ZIP, setup, and portable bytes still require independent extraction and binding before a candidate can be accepted.

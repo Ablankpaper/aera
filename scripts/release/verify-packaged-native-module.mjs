@@ -1,13 +1,8 @@
 #!/usr/bin/env node
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 
-import {
-  lstat,
-  readFile,
-  readdir,
-  realpath,
-  writeFile,
-} from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, readdir, realpath, writeFile } from "node:fs/promises";
 import { join, posix } from "node:path";
 
 import {
@@ -68,6 +63,59 @@ function resolveUnpackedRoot(app, platform) {
     : join(app, "resources", "app.asar.unpacked");
 }
 
+const NATIVE_MODULE_OPEN_FLAGS =
+  constants.O_RDONLY |
+  (process.platform !== "win32" && typeof constants.O_NOFOLLOW === "number"
+    ? constants.O_NOFOLLOW
+    : 0);
+
+function nativeModuleChangedError(relativePath) {
+  return new Error(`native module ${relativePath} changed after validation`);
+}
+
+function hasVerifiedIdentity(status, identity) {
+  return (
+    status.isFile() &&
+    status.dev === identity.dev &&
+    status.ino === identity.ino &&
+    status.size === identity.size &&
+    (status.mode & constants.S_IFMT) === (identity.mode & constants.S_IFMT)
+  );
+}
+
+async function readVerifiedNativeModule(entry, openNativeModule) {
+  let handle;
+  try {
+    handle = await openNativeModule(
+      entry.absolutePath,
+      NATIVE_MODULE_OPEN_FLAGS,
+    );
+  } catch {
+    throw nativeModuleChangedError(entry.relativePath);
+  }
+  let bytes;
+  let changed = false;
+  try {
+    const status = await handle.stat();
+    if (!hasVerifiedIdentity(status, entry.identity)) {
+      changed = true;
+    } else {
+      bytes = await handle.readFile();
+    }
+  } catch {
+    changed = true;
+  }
+  try {
+    await handle.close();
+  } catch {
+    changed = true;
+  }
+  if (changed) {
+    throw nativeModuleChangedError(entry.relativePath);
+  }
+  return bytes;
+}
+
 export async function verifyPackagedNativeModule(context, options = {}) {
   const appOutDir = context?.appOutDir;
   if (typeof appOutDir !== "string" || appOutDir === "") {
@@ -84,7 +132,7 @@ export async function verifyPackagedNativeModule(context, options = {}) {
     options.targetArchitecture,
   );
   const readDirectory = options.readdir ?? readdir;
-  const readModule = options.readFile ?? readFile;
+  const openNativeModule = options.open ?? open;
   const inspectPath = options.lstat ?? lstat;
   const resolveCanonicalPath = options.realpath ?? realpath;
   const app =
@@ -114,7 +162,7 @@ export async function verifyPackagedNativeModule(context, options = {}) {
   )(projectDirectory);
   const inventory = [];
   for (const entry of modules) {
-    const bytes = await readModule(entry.absolutePath);
+    const bytes = await readVerifiedNativeModule(entry, openNativeModule);
     const inspected = inspectNativeModuleBytes(bytes, {
       label: entry.relativePath,
       expectedElectronAbi,
