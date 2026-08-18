@@ -202,6 +202,14 @@ The planned gate uses fresh Electron/Hermes roots, fixture Cloud state, and two 
 
 Focused tests, build, and isolated Electron evidence remain separate from exact-head CI, merged-main CI, artifact publication, updater delivery, and physical internal-client acceptance.
 
+### Beta.33 fault-machine and update ledger
+
+Beta.33 physical acceptance is one canonical ledger tied to the exact candidate, supported upgrade paths, preserved user data, and completed cross-platform rollback drills.
+
+The original Beta.29 macOS fault machine uses a manual DMG bridge because its installed extractor cannot be repaired by publishing different online bytes. Installed Beta.31 and Beta.32 clients must complete the full V2 online-update sequence on macOS arm64 and Windows x64, and an injected post-swap health failure must reach a completed rollback on both platforms. The ledger binds the exact schema-3 candidate manifest, source SHA, package hashes, executable hashes, and unchanged protected-user-data digests.
+
+Every scenario also requires packaged startup and model-save success plus bounded redacted evidence digests. Missing or reordered updater stages, a false rollback, a Beta.28/Beta.29 online-success claim, substituted candidate bytes, arbitrary paths, or free-form evidence fail closed. Code tests, synthetic package smoke, and screenshots do not substitute for this ledger.
+
 ### Native startup failure classification
 
 Native/database startup failures are classified by [[src/main/model-configuration-database.ts#classifyNativeLoadFailure]] into stable secret-free causes; only two distinct `NODE_MODULE_VERSION` values establish an ABI mismatch.

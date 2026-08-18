@@ -1,0 +1,203 @@
+{
+  "$defs": {
+    "candidate": {
+      "additionalProperties": false,
+      "properties": {
+        "manifestSha256": { "pattern": "^[0-9a-f]{64}$", "type": "string" },
+        "repository": { "const": "Ablankpaper/aera" },
+        "sourceSha": { "pattern": "^[0-9a-f]{40}$", "type": "string" },
+        "version": {
+          "pattern": "^0\\.7\\.4-internal-beta\\.33$",
+          "type": "string"
+        }
+      },
+      "required": ["repository", "sourceSha", "version", "manifestSha256"],
+      "type": "object"
+    },
+    "digestSet": {
+      "additionalProperties": false,
+      "properties": {
+        "modelSave": { "pattern": "^[0-9a-f]{64}$", "type": "string" },
+        "processLog": { "pattern": "^[0-9a-f]{64}$", "type": "string" },
+        "updateTimeline": { "pattern": "^[0-9a-f]{64}$", "type": "string" }
+      },
+      "required": ["modelSave", "processLog", "updateTimeline"],
+      "type": "object"
+    },
+    "event": {
+      "additionalProperties": false,
+      "properties": {
+        "at": { "format": "date-time", "type": "string" },
+        "code": {
+          "enum": [null, "update_health_timeout"]
+        },
+        "diagnosticId": { "pattern": "^[0-9a-f]{12}$", "type": "string" },
+        "operationId": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "retryability": {
+          "enum": ["not_retryable", "after_restart"]
+        },
+        "schemaVersion": { "const": 2 },
+        "stage": {
+          "enum": [
+            "metadata",
+            "download",
+            "verify",
+            "extract",
+            "stage",
+            "swap",
+            "launch",
+            "health",
+            "finalize",
+            "rollback"
+          ]
+        },
+        "state": {
+          "enum": ["started", "succeeded", "failed", "rolled_back"]
+        },
+        "targetVersion": {
+          "oneOf": [{ "const": null }, { "const": "0.7.4-internal-beta.33" }]
+        }
+      },
+      "required": [
+        "at",
+        "schemaVersion",
+        "operationId",
+        "stage",
+        "state",
+        "code",
+        "retryability",
+        "diagnosticId",
+        "targetVersion"
+      ],
+      "type": "object"
+    },
+    "installedArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "name": { "maxLength": 200, "minLength": 1, "type": "string" },
+        "sha256": { "pattern": "^[0-9a-f]{64}$", "type": "string" }
+      },
+      "required": ["name", "sha256"],
+      "type": "object"
+    },
+    "scenario": {
+      "additionalProperties": false,
+      "properties": {
+        "architecture": { "enum": ["arm64", "x64"] },
+        "completedAt": { "format": "date-time", "type": "string" },
+        "diagnosticId": {
+          "oneOf": [
+            { "const": null },
+            { "pattern": "^[0-9a-f]{12}$", "type": "string" }
+          ]
+        },
+        "environment": { "enum": ["physical", "isolated_ci"] },
+        "evidenceFileDigests": { "$ref": "#/$defs/digestSet" },
+        "executableSha256": { "pattern": "^[0-9a-f]{64}$", "type": "string" },
+        "installedArtifact": { "$ref": "#/$defs/installedArtifact" },
+        "method": {
+          "enum": [
+            "manual_dmg_bridge",
+            "online_update",
+            "injected_health_failure"
+          ]
+        },
+        "modelSavePassed": { "const": true },
+        "operationId": {
+          "oneOf": [
+            { "const": null },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          ]
+        },
+        "platform": { "enum": ["darwin", "win32"] },
+        "protectedUserDataAfterSha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "protectedUserDataBeforeSha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "sourceVersion": {
+          "pattern": "^0\\.7\\.4-internal-beta\\.(?:29|31|32)$",
+          "type": "string"
+        },
+        "startedAt": { "format": "date-time", "type": "string" },
+        "startupPassed": { "const": true },
+        "targetVersion": { "const": "0.7.4-internal-beta.33" },
+        "timeline": {
+          "items": { "$ref": "#/$defs/event" },
+          "maxItems": 24,
+          "type": "array"
+        }
+      },
+      "required": [
+        "platform",
+        "architecture",
+        "environment",
+        "sourceVersion",
+        "targetVersion",
+        "method",
+        "installedArtifact",
+        "executableSha256",
+        "protectedUserDataBeforeSha256",
+        "protectedUserDataAfterSha256",
+        "startupPassed",
+        "modelSavePassed",
+        "startedAt",
+        "completedAt",
+        "operationId",
+        "diagnosticId",
+        "timeline",
+        "evidenceFileDigests"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/Ablankpaper/aera/scripts/internal-beta/beta33-acceptance-schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "candidate": { "$ref": "#/$defs/candidate" },
+    "completedAt": { "format": "date-time", "type": "string" },
+    "scenarios": {
+      "additionalProperties": false,
+      "properties": {
+        "macos_beta29_manual_bridge": { "$ref": "#/$defs/scenario" },
+        "macos_beta31_online_update": { "$ref": "#/$defs/scenario" },
+        "macos_beta32_online_update": { "$ref": "#/$defs/scenario" },
+        "macos_health_failure_rollback": { "$ref": "#/$defs/scenario" },
+        "windows_beta31_online_update": { "$ref": "#/$defs/scenario" },
+        "windows_beta32_online_update": { "$ref": "#/$defs/scenario" },
+        "windows_health_failure_rollback": { "$ref": "#/$defs/scenario" }
+      },
+      "required": [
+        "macos_beta29_manual_bridge",
+        "macos_beta31_online_update",
+        "macos_beta32_online_update",
+        "windows_beta31_online_update",
+        "windows_beta32_online_update",
+        "macos_health_failure_rollback",
+        "windows_health_failure_rollback"
+      ],
+      "type": "object"
+    },
+    "schemaVersion": { "const": 1 },
+    "status": { "const": "BETA33_ACCEPTED" }
+  },
+  "required": [
+    "schemaVersion",
+    "status",
+    "candidate",
+    "scenarios",
+    "completedAt"
+  ],
+  "title": "Aera Beta.33 acceptance ledger",
+  "type": "object"
+}

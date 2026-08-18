@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { canonicalJSONStringify } from "./candidate-manifest.mjs";
 import { validateCandidateDocument } from "./verify-candidate.mjs";
+import { validateBeta33AcceptanceForRelease } from "../internal-beta/verify-beta33-acceptance.mjs";
 
 export const REQUIRED_DEVICE_ROLES = Object.freeze([
   "macos_current",
@@ -72,6 +73,12 @@ export function validateDeviceEvidence(document, options) {
   const candidate = options?.candidate;
   const expectedManifestSha256 = options?.candidateManifestSha256;
   validateCandidateDocument(candidate);
+  validateBeta33AcceptanceForRelease({
+    acceptanceRaw: options?.beta33AcceptanceRaw,
+    candidateManifestRaw: options?.beta33CandidateManifestRaw,
+    sourceSha: candidate.sourceSha,
+    version: candidate.version,
+  });
   if (!DIGEST_PATTERN.test(expectedManifestSha256 ?? "")) {
     throw new Error("Expected candidate manifest digest is invalid");
   }
@@ -540,7 +547,7 @@ async function runCLI(argv) {
   const [evidencePath, ...rest] = argv;
   if (!evidencePath) {
     throw new Error(
-      "usage: verify-device-evidence.mjs EVIDENCE --candidate-manifest MANIFEST [--schema SCHEMA]",
+      "usage: verify-device-evidence.mjs EVIDENCE --candidate-manifest MANIFEST [--schema SCHEMA] [--beta33-acceptance LEDGER --beta33-candidate-manifest MANIFEST]",
     );
   }
   const options = parseOptions(rest);
@@ -548,6 +555,14 @@ async function runCLI(argv) {
     readFile(evidencePath, "utf8"),
     readFile(options.candidate_manifest, "utf8"),
     readFile(options.schema ?? DEFAULT_SCHEMA, "utf8"),
+  ]);
+  const [beta33AcceptanceRaw, beta33CandidateManifestRaw] = await Promise.all([
+    options.beta33_acceptance
+      ? readFile(options.beta33_acceptance, "utf8")
+      : Promise.resolve(undefined),
+    options.beta33_candidate_manifest
+      ? readFile(options.beta33_candidate_manifest, "utf8")
+      : Promise.resolve(undefined),
   ]);
   const evidence = JSON.parse(evidenceRaw);
   const candidate = JSON.parse(candidateRaw);
@@ -560,6 +575,8 @@ async function runCLI(argv) {
   }
   validateDeviceEvidenceSchema(schema);
   validateDeviceEvidence(evidence, {
+    beta33AcceptanceRaw,
+    beta33CandidateManifestRaw,
     candidate,
     candidateManifestSha256: candidateManifestSha256(candidateRaw),
   });
