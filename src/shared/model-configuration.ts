@@ -132,6 +132,7 @@ export type ModelConfigurationStartupFailureCode =
   | "native_module_load_failed"
   | "model_configuration_database_unavailable"
   | "model_configuration_schema_unsupported"
+  | "route_catalog_repair_required"
   | "model_configuration_recovery_required";
 
 /** Public startup failure identity. Raw native/database errors stay in Main. */

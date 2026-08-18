@@ -50,7 +50,7 @@ The General models path is intentionally beginner-facing. **Add model** opens on
 
 Discovery succeeds only for a valid 2xx model catalog. Authentication, permission, endpoint, rate-limit, upstream, malformed-response, timeout, and network failures remain distinct; failed responses never populate the model cache or expose response bodies.
 
-The editor reports locally saved models separately from the current service fetch, so an old local list cannot make a failed live request look successful. Coordinated save rejection text follows the stable startup code or failed transaction stage and includes only an opaque diagnostic id.
+The editor reports locally saved models separately from the current service fetch, so an old local list cannot make a failed live request look successful. Coordinated save rejection text follows the stable startup code or failed transaction stage and includes only an opaque diagnostic id; ambiguous route-directory recovery keeps its own repair-required code.
 
 [[src/main/model-discovery.ts#discoverProviderModels]] resolves the effective override/profile API key before consulting its in-memory cache. Model catalogs and their advertised context-window metadata share a cache scope made from provider, normalized endpoint, and a domain-separated SHA-256 credential fingerprint; the raw key is never stored in or emitted by the cache. Reusing the same key within the TTL avoids another request, while changing a key at the same endpoint forces a fresh authenticated discovery instead of returning the prior credential's catalog.
 

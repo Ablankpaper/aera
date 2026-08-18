@@ -465,6 +465,9 @@ export default function ModelCenter({
       case "model_configuration_schema_unsupported":
         message = t("providers.center.errors.schema");
         break;
+      case "route_catalog_repair_required":
+        message = t("providers.center.errors.routeCatalog");
+        break;
       case "model_configuration_recovery_required":
         message = t("providers.center.errors.recovery");
         break;

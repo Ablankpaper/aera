@@ -482,6 +482,7 @@ describe("ModelCenter", () => {
       "model_configuration_schema_unsupported",
       "providers.center.errors.schema",
     ],
+    ["route_catalog_repair_required", "providers.center.errors.routeCatalog"],
     [
       "model_configuration_recovery_required",
       "providers.center.errors.recovery",

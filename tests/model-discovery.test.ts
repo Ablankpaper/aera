@@ -279,6 +279,8 @@ describe("model-discovery", () => {
     [404, "not_found"],
     [429, "rate_limited"],
     [500, "upstream_error"],
+    [502, "upstream_error"],
+    [503, "upstream_error"],
   ] as const)(
     "classifies HTTP %i without reporting success",
     async (code, status) => {
@@ -353,6 +355,26 @@ describe("model-discovery", () => {
       undefined,
       undefined,
     );
+    expect(result.status).toBe("network_error");
+    expect(result.models).toEqual([]);
+  });
+
+  it("returns network_error when a real loopback TLS handshake fails", async () => {
+    server = http.createServer(() => {
+      throw new Error("TLS bytes must not reach the HTTP request handler");
+    });
+    server.on("clientError", (_error, socket) => socket.destroy());
+    await listen();
+    const tlsBaseUrl = baseUrl.replace("http://", "https://");
+
+    const { discoverProviderModels } = await loadDiscovery();
+    const result = await discoverProviderModels(
+      "custom",
+      tlsBaseUrl,
+      "sk-test",
+      undefined,
+    );
+
     expect(result.status).toBe("network_error");
     expect(result.models).toEqual([]);
   });

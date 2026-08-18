@@ -128,6 +128,8 @@ export default {
         "The local model configuration database is unavailable. Restart Aera and try again. Diagnostic",
       schema:
         "This model configuration requires a newer Aera version. Diagnostic",
+      routeCatalog:
+        "The local model route catalogue is inconsistent and could not be repaired safely. Diagnostic",
       recovery:
         "Model configuration is being recovered safely. Try again shortly. Diagnostic",
       validation:

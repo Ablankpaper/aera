@@ -1014,11 +1014,14 @@ export async function prepareModelConfigurationRuntime(
   }
 
   if (coordinator !== null && catalog !== null) {
+    let routeStartupFailureCode: ModelConfigurationStartupFailureCode =
+      "model_configuration_recovery_required";
     try {
       const targetProfileId = catalog.canonicalTargetProfileId("default");
       const ownerHandle = runtimeComponentKey(options.getOwner());
       const routeRepair = planFreshRouteRepair(targetProfileId, ownerHandle);
       if (routeRepair?.status === "repair_required") {
+        routeStartupFailureCode = routeRepair.code;
         console.error(
           "[MODEL_CONFIGURATION] route repair required",
           routeRepair.conflict,
@@ -1050,7 +1053,7 @@ export async function prepareModelConfigurationRuntime(
       }
     } catch (error) {
       recoveryError = error;
-      unavailable = startupFailure("model_configuration_recovery_required");
+      unavailable = startupFailure(routeStartupFailureCode);
       coordinator = null;
     }
   }
