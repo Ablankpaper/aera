@@ -30,7 +30,7 @@ function extractIpcHandleChannels(src: string): string[] {
  */
 function extractPreloadInvokeChannels(src: string): string[] {
   const channels: string[] = [];
-  const re = /ipcRenderer\.invoke\(\s*["']([^"']+)["']/g;
+  const re = /ipcRenderer\s*\.\s*invoke\(\s*["']([^"']+)["']/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(src)) !== null) {
     channels.push(m[1]);
