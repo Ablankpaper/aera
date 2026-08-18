@@ -1764,6 +1764,7 @@ interface HermesAPI {
   }>;
   downloadUpdate: () => Promise<boolean>;
   installUpdate: () => Promise<void>;
+  markRendererReady: () => Promise<boolean>;
   getAppVersion: () => Promise<string>;
   getAutoUpgradeEnabled: () => Promise<boolean>;
   setAutoUpgradeEnabled: (enabled: boolean) => Promise<boolean>;

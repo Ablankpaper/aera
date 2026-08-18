@@ -63,6 +63,7 @@ const PACKAGE_ROLES = Object.freeze([
   "macos_arm64_zip",
   "windows_x64_setup",
   "windows_x64_portable",
+  "windows_x64_app_zip",
 ]);
 
 function fail(message) {
@@ -509,8 +510,8 @@ function validateDeployment(deployment, context, completedAt) {
 }
 
 async function validatePackages(packages, context) {
-  if (!Array.isArray(packages) || packages.length !== 4) {
-    fail("package evidence requires exactly four artifacts");
+  if (!Array.isArray(packages) || packages.length !== PACKAGE_ROLES.length) {
+    fail("package evidence requires the complete candidate artifact set");
   }
   if (
     typeof context.artifactsDirectory !== "string" ||

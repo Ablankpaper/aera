@@ -124,6 +124,9 @@ jobs:
           BETA_OFFLINE_PUBLIC_KEY: ${{ vars.AERA_INTERNAL_BETA_OFFLINE_PUBLIC_KEY }}
         run: |
           set -euo pipefail
+          test -n "$BETA_ORIGIN"
+          test -n "$BETA_OFFLINE_KEY_ID"
+          test -n "$BETA_OFFLINE_PUBLIC_KEY"
           node scripts/internal-beta/manifest.mjs trust \
             --origin "$BETA_ORIGIN" \
             --trust-issuer "$BETA_ORIGIN" \
@@ -183,7 +186,10 @@ jobs:
           MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL: ${{ vars.AERA_INTERNAL_BETA_ORIGIN }}
           MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON: >-
             {"issuer":"${{ vars.AERA_INTERNAL_BETA_ORIGIN }}","keys":[{"keyId":"${{ vars.AERA_INTERNAL_BETA_OFFLINE_KEY_ID }}","publicKey":"${{ vars.AERA_INTERNAL_BETA_OFFLINE_PUBLIC_KEY }}"}]}
-        run: npm run build
+        run: |
+          set -euo pipefail
+          test -n "$MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL"
+          npm run build
 
       - name: Require signing and notarization credentials
         shell: bash
@@ -364,6 +370,7 @@ jobs:
           --app "${{ steps.mac_paths.outputs.app }}"
           --zip "${{ steps.mac_paths.outputs.zip }}"
           --desktop-version "$VERSION"
+          --require-runtime-entries
 
       - name: Submit final DMG and ZIP exactly once
         id: container_notary
@@ -587,19 +594,25 @@ jobs:
           MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL: ${{ vars.AERA_INTERNAL_BETA_ORIGIN }}
           MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON: >-
             {"issuer":"${{ vars.AERA_INTERNAL_BETA_ORIGIN }}","keys":[{"keyId":"${{ vars.AERA_INTERNAL_BETA_OFFLINE_KEY_ID }}","publicKey":"${{ vars.AERA_INTERNAL_BETA_OFFLINE_PUBLIC_KEY }}"}]}
-        run: npm run build
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL)) {
+            throw "Internal Beta Cloud origin is missing"
+          }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Package unsigned Windows setup and portable executables
+      - name: Package unsigned Windows setup, portable, and app ZIP payload
         shell: pwsh
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
           npx electron-builder `
             --config build/electron-builder.internal-beta.yml `
-            --win nsis portable --x64 --publish never
+            --win nsis portable dir --x64 --publish never
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Verify packaged Runtime Seed and stage immutable bytes
+      - name: Verify packaged Runtime Seed, app ZIP, and stage immutable bytes
         shell: pwsh
         env:
           VERSION: ${{ needs.validate.outputs.version }}
@@ -613,13 +626,32 @@ jobs:
             --desktop-version $env:VERSION
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+          $appZipName = "Aera-Internal-Beta-$env:VERSION-windows-x64-app.zip"
+          $appZip = Join-Path "dist" $appZipName
+          if (Test-Path -LiteralPath $appZip) {
+            Remove-Item -LiteralPath $appZip -Force
+          }
+          Compress-Archive `
+            -Path (Join-Path $unpacked[0].FullName "*") `
+            -DestinationPath $appZip `
+            -CompressionLevel Optimal
+          if (-not (Test-Path -LiteralPath $appZip -PathType Leaf)) {
+            throw "Windows app ZIP was not created"
+          }
+          node scripts/internal-beta/verify-packaged-windows-app-zip.mjs `
+            --zip $appZip `
+            --desktop-version $env:VERSION `
+            --runtime-seed-reference resources/agentera-runtime-seed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
           $destination = Join-Path $env:RUNNER_TEMP "internal-beta-windows"
           New-Item -ItemType Directory -Force -Path `
             (Join-Path $destination "artifacts"), `
             (Join-Path $destination "runtime-seed") | Out-Null
           $names = @(
             "Aera-Internal-Beta-$env:VERSION-windows-x64-setup.exe",
-            "Aera-Internal-Beta-$env:VERSION-windows-x64-portable.exe"
+            "Aera-Internal-Beta-$env:VERSION-windows-x64-portable.exe",
+            $appZipName
           )
           foreach ($name in $names) {
             $source = Join-Path "dist" $name
@@ -703,7 +735,8 @@ jobs:
           done
           for name in \
             "Aera-Internal-Beta-$VERSION-windows-x64-setup.exe" \
-            "Aera-Internal-Beta-$VERSION-windows-x64-portable.exe"
+            "Aera-Internal-Beta-$VERSION-windows-x64-portable.exe" \
+            "Aera-Internal-Beta-$VERSION-windows-x64-app.zip"
           do
             source="$RUNNER_TEMP/internal-beta-windows/artifacts/$name"
             test -f "$source"

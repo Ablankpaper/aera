@@ -27,7 +27,7 @@ async function fixture() {
   await writeFile(
     join(
       artifactsDirectory,
-      `Aera-Internal-Beta-${VERSION}-windows-x64-setup.exe`,
+      `Aera-Internal-Beta-${VERSION}-windows-x64-app.zip`,
     ),
     "windows-update-bytes",
   );
@@ -66,7 +66,7 @@ async function fixture() {
   };
 }
 
-test("builds and verifies a signed two-platform online update channel", async () => {
+test("builds and verifies a signed macOS ZIP and Windows app ZIP update channel", async () => {
   const setup = await fixture();
   try {
     const manifest = await verifyDesktopUpdateBundle({
@@ -79,8 +79,23 @@ test("builds and verifies a signed two-platform online update channel", async ()
     });
     assert.equal(manifest.version, VERSION);
     assert.deepEqual(
-      manifest.artifacts.map((artifact) => artifact.platform),
-      ["darwin", "win32"],
+      manifest.artifacts.map(({ platform, kind, name }) => ({
+        platform,
+        kind,
+        name,
+      })),
+      [
+        {
+          platform: "darwin",
+          kind: "zip",
+          name: `Aera-Internal-Beta-${VERSION}-macos-arm64.zip`,
+        },
+        {
+          platform: "win32",
+          kind: "app_zip",
+          name: `Aera-Internal-Beta-${VERSION}-windows-x64-app.zip`,
+        },
+      ],
     );
   } finally {
     await rm(setup.root, { recursive: true, force: true });
@@ -113,7 +128,7 @@ test("rejects changed metadata and changed installer bytes", async () => {
       await writeFile(
         join(
           clean.artifactsDirectory,
-          `Aera-Internal-Beta-${VERSION}-windows-x64-setup.exe`,
+          `Aera-Internal-Beta-${VERSION}-windows-x64-app.zip`,
         ),
         "changed-windows-update-bytes",
       );

@@ -205,6 +205,8 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   ]) {
     assert.match(raw, new RegExp(`vars\\.${variable}`, "u"));
   }
+  assert.match(raw, /test -n "\$BETA_ORIGIN"[\s\S]*AERA_INTERNAL_BETA_ORIGIN/u);
+  assert.match(raw, /test -n "\$MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL"/u);
   assert.match(
     raw,
     /go install github\.com\/sigstore\/cosign\/v3\/cmd\/cosign@v3\.0\.6/iu,
@@ -255,7 +257,7 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   assert.ok(packagedUpdaterGateIndex < containerSubmissionIndex);
   assert.match(
     workflow.jobs.macos.steps[packagedUpdaterGateIndex].run,
-    /node scripts\/internal-beta\/verify-packaged-updater-extraction\.mjs\s+--app "\$\{\{ steps\.mac_paths\.outputs\.app \}\}"\s+--zip "\$\{\{ steps\.mac_paths\.outputs\.zip \}\}"\s+--desktop-version "\$VERSION"/u,
+    /node scripts\/internal-beta\/verify-packaged-updater-extraction\.mjs\s+--app "\$\{\{ steps\.mac_paths\.outputs\.app \}\}"\s+--zip "\$\{\{ steps\.mac_paths\.outputs\.zip \}\}"\s+--desktop-version "\$VERSION"\s+--require-runtime-entries/u,
   );
   assert.match(
     packagedUpdaterVerifierRaw,
@@ -285,7 +287,13 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   assert.match(raw, /candidate\/evidence\/macos-evidence\.json/u);
   assert.match(raw, /Build unsigned Windows x64 internal Beta/u);
   assert.match(raw, /CSC_IDENTITY_AUTO_DISCOVERY:\s*"false"/u);
-  assert.match(raw, /Package unsigned Windows setup and portable executables/u);
+  assert.match(
+    raw,
+    /Package unsigned Windows setup, portable, and app ZIP payload/u,
+  );
+  assert.match(raw, /--win nsis portable dir --x64 --publish never/u);
+  assert.match(raw, /Aera-Internal-Beta-\$env:VERSION-windows-x64-app\.zip/u);
+  assert.match(raw, /verify-packaged-windows-app-zip\.mjs/u);
   assert.doesNotMatch(
     raw,
     /secrets\.WIN_CSC_LINK|secrets\.WIN_CSC_KEY_PASSWORD/u,
@@ -337,6 +345,11 @@ test("internal-Beta promotion publishes one verified candidate without rebuildin
   assert.match(raw, /run-id:\s*\$\{\{ inputs\.candidate_run_id \}\}/u);
   assert.match(raw, /sha256sum --check SHA256SUMS/u);
   assert.match(raw, /desktop-update\.mjs verify/u);
+  assert.match(raw, /Aera-Internal-Beta-\$VERSION-windows-x64-app\.zip/u);
+  assert.doesNotMatch(
+    raw,
+    /releases\/\$VERSION\/Aera-Internal-Beta-\$VERSION-windows-x64-setup\.exe/u,
+  );
   assert.match(raw, /AERA_DESKTOP_UPDATE_PUBLISH_SSH_PRIVATE_KEY/u);
   assert.match(raw, /AERA_DESKTOP_UPDATE_PUBLISH_SSH_KNOWN_HOSTS/u);
   assert.match(raw, /"aera-updates@\$PUBLISH_HOST" publish/u);

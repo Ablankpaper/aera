@@ -49,6 +49,12 @@ export const INTERNAL_BETA_ARTIFACTS = Object.freeze([
     arch: "x64",
     kind: "portable",
   }),
+  Object.freeze({
+    name: `Aera-Internal-Beta-${INTERNAL_BETA_VERSION}-windows-x64-app.zip`,
+    platform: "windows",
+    arch: "x64",
+    kind: "app_zip",
+  }),
 ]);
 
 const SHA1_PATTERN = /^[0-9a-f]{40}$/u;

@@ -117,8 +117,8 @@ function artifactSpecifications(version) {
     {
       platform: "win32",
       arch: "x64",
-      kind: "nsis",
-      name: `Aera-Internal-Beta-${version}-windows-x64-setup.exe`,
+      kind: "app_zip",
+      name: `Aera-Internal-Beta-${version}-windows-x64-app.zip`,
     },
   ];
 }

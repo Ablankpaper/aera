@@ -1697,6 +1697,8 @@ const hermesAPI = {
       .then((value: unknown) => sanitizeDesktopUpdateSnapshot(value)),
   downloadUpdate: (): Promise<boolean> => ipcRenderer.invoke("download-update"),
   installUpdate: (): Promise<void> => ipcRenderer.invoke("install-update"),
+  markRendererReady: (): Promise<boolean> =>
+    ipcRenderer.invoke("desktop-renderer-ready"),
   getAppVersion: (): Promise<string> => ipcRenderer.invoke("get-app-version"),
   getAutoUpgradeEnabled: (): Promise<boolean> =>
     ipcRenderer.invoke("get-auto-upgrade-enabled"),

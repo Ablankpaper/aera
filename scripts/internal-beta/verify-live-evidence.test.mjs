@@ -206,6 +206,7 @@ async function fixture() {
     "macos_arm64_zip",
     "windows_x64_setup",
     "windows_x64_portable",
+    "windows_x64_app_zip",
   ];
   const evidence = {
     schemaVersion: 1,

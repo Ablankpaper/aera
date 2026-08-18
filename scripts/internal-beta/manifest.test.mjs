@@ -212,7 +212,15 @@ test("builds one canonical internal-Beta manifest with exact identities and hash
       { platform: "windows", arch: "x64" },
     ],
   );
-  assert.equal(document.artifacts.length, 4);
+  assert.equal(document.artifacts.length, 5);
+  assert.deepEqual(document.artifacts.slice(-1)[0], {
+    name: `Aera-Internal-Beta-${VERSION}-windows-x64-app.zip`,
+    platform: "windows",
+    arch: "x64",
+    kind: "app_zip",
+    sha256: document.artifacts.at(-1).sha256,
+    size: document.artifacts.at(-1).size,
+  });
   assert.deepEqual(
     document.artifacts.map(({ name }) => name),
     INTERNAL_BETA_ARTIFACTS.map(({ name }) => name),

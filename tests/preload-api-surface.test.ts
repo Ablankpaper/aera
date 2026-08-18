@@ -240,6 +240,14 @@ describe("Preload API Surface", () => {
     expect(preloadTypes).toContain("stageEvent");
   });
 
+  it("exposes an explicit renderer-ready health handshake", () => {
+    expect(preloadMethods).toContain("markRendererReady");
+    expect(typeMethods).toContain("markRendererReady");
+    expect(preloadSrc).toContain(
+      'ipcRenderer.invoke("desktop-renderer-ready")',
+    );
+  });
+
   it("exposes the secret-free Profile image generation configuration bridge", () => {
     const expected = [
       "getImageGenerationConfig",

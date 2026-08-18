@@ -10,7 +10,10 @@ import { fileURLToPath } from "node:url";
 
 import electronPath from "electron";
 
-import { validateExtractedMacApp } from "./verify-packaged-updater-extraction.mjs";
+import {
+  validateExtractedMacApp,
+  validatePackagedRuntimeEntries,
+} from "./verify-packaged-updater-extraction.mjs";
 
 const VERSION = "0.7.4-internal-beta.32";
 const probePath = fileURLToPath(
@@ -119,6 +122,41 @@ test("accepts one signed arm64 Beta.32 app with app.asar", async () => {
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
+});
+
+test("requires the packaged main, preload, renderer, and native runtime entries", () => {
+  assert.deepEqual(
+    validatePackagedRuntimeEntries(
+      [
+        "out/main/index.js",
+        "out/preload/index.js",
+        "out/renderer/index.html",
+        "out/renderer/assets/index.js",
+      ],
+      ["node_modules/better-sqlite3/build/Release/better_sqlite3.node"],
+    ),
+    {
+      required: [
+        "out/main/index.js",
+        "out/preload/index.js",
+        "out/renderer/index.html",
+      ],
+      nativeModules: [
+        "node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+      ],
+    },
+  );
+});
+
+test("rejects a packaged app with a missing runtime entry", () => {
+  assert.throws(
+    () =>
+      validatePackagedRuntimeEntries(
+        ["out/main/index.js", "out/renderer/index.html"],
+        [],
+      ),
+    /preload|native/u,
+  );
 });
 
 test("rejects a missing packaged app.asar", async () => {
