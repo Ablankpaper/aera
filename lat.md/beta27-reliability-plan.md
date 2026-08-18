@@ -10,6 +10,14 @@ The public selection is an opaque source Profile/model handle plus catalog revis
 
 Credential-free catalog routes are limited by [[src/shared/url-key-map.ts#isLocalBaseUrl]] to the explicit loopback/private-host policy. A numeric public IP is still remote and remains unavailable without same-Profile credential evidence.
 
+### Owner transition and bounded authentication recovery
+
+Owner changes drain the old Runtime and invalidate its leases before another owner can mount; provider authentication may refresh only a Runtime-owned OAuth credential once and retry one idempotent request.
+
+[[src/main/agentera-connection-owner.ts#createAgenteraOwnerSwitchCoordinator]] serializes owner transitions, aborts the previous epoch, waits for [[src/main/runtime-activity.ts#RuntimeActivityCoordinator#waitForIdle]], and fails closed with a bounded timeout or stable failure code. [[src/main/agent-model-execution-lease.ts#createAgentModelExecutionLease]] upgrades a three-field legacy route only through one same-owner catalog match and checks the owner epoch around transport setup and completion; missing or ambiguous matches never execute anonymously.
+
+[[src/main/provider-credential-refresh.ts#createProviderCredentialRefreshPort]] is the only Desktop-to-Runtime refresh boundary. It admits only `source=runtime_pool`, OAuth, refresh-token-bearing credentials, passes a provider name to Runtime's own pool implementation, bounds process time/output, and returns status words without secrets. [[src/main/provider-authentication-recovery.ts#runProviderAuthenticationRecovery]] caps recovery at one refresh and one retry; static keys, rejected refreshes, owner changes, and a second 401 remain fail-closed.
+
 ## Recoverable model configuration
 
 Provider/model edits will cross one typed Main mutation instead of several independent renderer calls, with dependency writes committed before activation and exact stage-aware outcomes.

@@ -17,6 +17,7 @@ export class RuntimeActivityCoordinator {
   private readonly activeRuns = new Set<RuntimeRunState>();
   private transitionPending = false;
   private snapshotPending = false;
+  private readonly idleWaiters = new Set<() => void>();
 
   get activeRunCount(): number {
     return this.activeRuns.size;
@@ -49,6 +50,7 @@ export class RuntimeActivityCoordinator {
         if (this.currentRuns.get(runId) === state) {
           this.currentRuns.delete(runId);
         }
+        this.resolveIdleWaiters();
       },
     };
   }
@@ -60,6 +62,14 @@ export class RuntimeActivityCoordinator {
 
   abortAll(): void {
     for (const state of this.activeRuns) this.requestAbort(state);
+  }
+
+  /** Resolve only after every aborted run has released its lease. */
+  waitForIdle(): Promise<void> {
+    if (this.activeRuns.size === 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      this.idleWaiters.add(resolve);
+    });
   }
 
   beginTransition(): boolean {
@@ -112,5 +122,12 @@ export class RuntimeActivityCoordinator {
   private requestAbort(state: RuntimeRunState): void {
     state.abortRequested = true;
     state.abort?.();
+  }
+
+  private resolveIdleWaiters(): void {
+    if (this.activeRuns.size !== 0 || this.idleWaiters.size === 0) return;
+    const waiters = [...this.idleWaiters];
+    this.idleWaiters.clear();
+    for (const resolve of waiters) resolve();
   }
 }

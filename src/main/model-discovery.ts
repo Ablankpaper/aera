@@ -18,10 +18,21 @@ import { URL } from "url";
 import { execFile } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { readEnv, getModelContextLengthOverride } from "./config";
+import {
+  readEnv,
+  getModelContextLengthOverride,
+  getRuntimeCredentialRefreshEligibility,
+  getRuntimeProviderCredential,
+} from "./config";
 import { profileHome } from "./utils";
 import { expectedEnvKeyForModel, getEnhancedPath } from "./installer";
 import { getRuntimeInvocation } from "./agentera-runtime-distribution/invocation";
+import type { AgenteraOwnerEpochLease } from "./agentera-connection-owner";
+import { runProviderAuthenticationRecovery } from "./provider-authentication-recovery";
+import {
+  createProviderCredentialRefreshPort,
+  type ProviderCredentialRefreshPort,
+} from "./provider-credential-refresh";
 import {
   isProviderDiscoverySuccess,
   providerDiscoveryFailure,
@@ -842,6 +853,19 @@ export interface ProviderDiscoveryRequestOptions {
   signal?: AbortSignal;
 }
 
+export interface OwnerProviderDiscoveryRequestOptions extends ProviderDiscoveryRequestOptions {
+  ownerLease: AgenteraOwnerEpochLease;
+  /** Test seam; production uses the bounded Runtime bridge. */
+  refreshPort?: ProviderCredentialRefreshPort;
+}
+
+let defaultCredentialRefreshPort: ProviderCredentialRefreshPort | null = null;
+
+function credentialRefreshPort(): ProviderCredentialRefreshPort {
+  defaultCredentialRefreshPort ??= createProviderCredentialRefreshPort();
+  return defaultCredentialRefreshPort;
+}
+
 /** Discover available models for a provider.  Returns an object so the
  *  UI can distinguish "no key set yet" from "no models advertised". */
 export async function discoverProviderModels(
@@ -955,6 +979,123 @@ export async function discoverProviderModels(
     options,
   );
   return result.result;
+}
+
+/**
+ * Owner-scoped discovery with a single bounded recovery for Runtime-owned
+ * OAuth credentials. Explicit Renderer keys and `.env` keys remain static:
+ * they return the first 401 untouched and are never sent to the Runtime
+ * refresh bridge.
+ */
+export async function discoverProviderModelsForOwner(
+  provider: string,
+  baseUrlOverride: string | undefined,
+  apiKeyOverride: string | undefined,
+  profile: string | undefined,
+  options: OwnerProviderDiscoveryRequestOptions,
+): Promise<DiscoverModelsResult> {
+  const { ownerLease, refreshPort, timeoutMs } = options;
+  ownerLease.assertCurrent();
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, ownerLease.signal])
+    : ownerLease.signal;
+  const requestOptions: ProviderDiscoveryRequestOptions = {
+    timeoutMs,
+    signal,
+  };
+  const lowerProvider = (provider || "").trim().toLowerCase();
+
+  // OAuth catalogue providers use their dedicated Runtime/Python path rather
+  // than a static-key `/models` request, so the HTTP 401 policy does not apply.
+  if (OAUTH_DISCOVERY_PROVIDERS.has(lowerProvider)) {
+    return discoverProviderModels(
+      provider,
+      baseUrlOverride,
+      apiKeyOverride,
+      profile,
+      requestOptions,
+    );
+  }
+
+  const explicitBase = (baseUrlOverride || "").trim().replace(/\/+$/, "");
+  const baseUrl = explicitBase || canonicalBaseUrl(lowerProvider) || "";
+  const explicitCredential = (apiKeyOverride || "").trim();
+  const envCredential = baseUrl
+    ? envApiKeyFor(lowerProvider, baseUrl, profile)
+    : "";
+
+  // The credential that actually issued the request determines eligibility.
+  // A Runtime pool for the same provider must never cause a user-entered or
+  // `.env` key to be refreshed or retried.
+  if (explicitCredential || envCredential || !baseUrl) {
+    return discoverProviderModels(
+      provider,
+      baseUrlOverride,
+      apiKeyOverride,
+      profile,
+      requestOptions,
+    );
+  }
+
+  const eligibility = getRuntimeCredentialRefreshEligibility(
+    lowerProvider,
+    profile,
+  );
+  let activeCredential = getRuntimeProviderCredential(lowerProvider, profile);
+  if (
+    eligibility.source !== "runtime_pool" ||
+    eligibility.authType !== "oauth" ||
+    !eligibility.hasRefreshToken ||
+    !activeCredential
+  ) {
+    return discoverProviderModels(
+      provider,
+      baseUrlOverride,
+      apiKeyOverride,
+      profile,
+      requestOptions,
+    );
+  }
+
+  const recovery = await runProviderAuthenticationRecovery({
+    ownerLease,
+    signal,
+    credentialSource: "runtime_refreshable",
+    refreshPort: refreshPort ?? credentialRefreshPort(),
+    refreshInput: {
+      provider: lowerProvider,
+      profile,
+      eligibility,
+    },
+    fetchOnce: () =>
+      discoverProviderModels(
+        provider,
+        baseUrlOverride,
+        activeCredential ?? undefined,
+        profile,
+        requestOptions,
+      ),
+    canRetry: () => {
+      const rotatedCredential = getRuntimeProviderCredential(
+        lowerProvider,
+        profile,
+        activeCredential ?? undefined,
+      );
+      if (!rotatedCredential) return false;
+      activeCredential = rotatedCredential;
+      return true;
+    },
+    isAuthenticationRejected: (result) =>
+      result.status === "authentication_rejected",
+  });
+  ownerLease.assertCurrent();
+  if (recovery.finalAuthenticationRejected) {
+    return providerDiscoveryFailure("authentication_rejected", {
+      statusCode: 401,
+      code: "provider_authentication_rejected",
+    });
+  }
+  return recovery.result;
 }
 
 /**

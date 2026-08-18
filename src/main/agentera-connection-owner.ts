@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { SecureStorageAdapter } from "./agentera-auth/store";
 import type { AgenteraRuntimeOwner } from "./agentera-profile-binding";
@@ -210,9 +211,7 @@ export class AgenteraConnectionOwnerStore {
       throw new Error("Aera connection context binding is required.");
     }
     if (!sameOwner(binding, owner)) {
-      throw new Error(
-        "This connection context belongs to another Aera owner.",
-      );
+      throw new Error("This connection context belongs to another Aera owner.");
     }
     return { ...binding };
   }
@@ -309,20 +308,349 @@ export class AgenteraConnectionOwnerStore {
   }
 }
 
-export interface AgenteraOwnerSwitchCoordinator {
-  transitionTo(ownerId: string | null): void;
+export type AgenteraOwnerTransitionErrorCode =
+  | "model_owner_transition_in_progress"
+  | "model_owner_changed"
+  | "owner_transition_timeout"
+  | "owner_transition_failed";
+
+/**
+ * Stable, Main-only failure raised when owner-scoped work cannot safely run.
+ * The error deliberately carries no owner id, path, or cleanup exception.
+ */
+export class AgenteraOwnerTransitionError extends Error {
+  readonly code: AgenteraOwnerTransitionErrorCode;
+  readonly diagnosticId: string | null;
+
+  constructor(
+    code: AgenteraOwnerTransitionErrorCode,
+    diagnosticId: string | null = null,
+  ) {
+    super(`Aera owner transition failed: ${code}.`);
+    this.name = "AgenteraOwnerTransitionError";
+    this.code = code;
+    this.diagnosticId = diagnosticId;
+  }
 }
 
-export function createAgenteraOwnerSwitchCoordinator(options: {
-  stopRuntimeContext: () => void;
-}): AgenteraOwnerSwitchCoordinator {
+export interface AgenteraOwnerEpochLease {
+  readonly epoch: number;
+  readonly signal: AbortSignal;
+  assertCurrent(): void;
+}
+
+export interface AgenteraOwnerTransitionResult {
+  readonly epoch: number;
+  readonly state: "ready" | "unmounted";
+  readonly diagnosticId: string;
+}
+
+export interface AgenteraOwnerTransitionEvent {
+  readonly phase: "begin" | "ready" | "unmounted" | "timeout" | "failed";
+  readonly epoch: number;
+  readonly diagnosticId: string;
+}
+
+export interface AgenteraOwnerStopContext {
+  readonly signal: AbortSignal;
+  readonly deadlineMs: number;
+  readonly epoch: number;
+  readonly diagnosticId: string;
+}
+
+export interface AgenteraOwnerSwitchCoordinator {
+  transitionTo(ownerId: string | null): Promise<AgenteraOwnerTransitionResult>;
+  acquireLease(): Promise<AgenteraOwnerEpochLease>;
+  snapshot(): Readonly<{
+    epoch: number;
+    state: "ready" | "transitioning" | "blocked" | "unmounted";
+    diagnosticId: string | null;
+  }>;
+}
+
+export interface AgenteraOwnerSwitchCoordinatorOptions {
+  stopRuntimeContext: (
+    context: AgenteraOwnerStopContext,
+  ) => void | Promise<void>;
+  timeoutMs?: number;
+  onEvent?: (event: AgenteraOwnerTransitionEvent) => void;
+}
+
+const DEFAULT_OWNER_TRANSITION_TIMEOUT_MS = 15_000;
+
+function transitionDiagnosticId(): string {
+  return randomBytes(6).toString("hex");
+}
+
+function emitTransitionEvent(
+  callback: ((event: AgenteraOwnerTransitionEvent) => void) | undefined,
+  event: AgenteraOwnerTransitionEvent,
+): void {
+  try {
+    callback?.(event);
+  } catch {
+    // Observability must never change the owner safety decision.
+  }
+}
+
+/**
+ * Serializes owner transitions and exposes a single epoch lease for every
+ * owner-scoped operation. The requested owner is not observable outside Main;
+ * it is installed only after the previous Runtime context has fully drained.
+ */
+export function createAgenteraOwnerSwitchCoordinator(
+  options: AgenteraOwnerSwitchCoordinatorOptions,
+): AgenteraOwnerSwitchCoordinator {
+  const timeoutMs = Math.max(
+    1,
+    Math.floor(options.timeoutMs ?? DEFAULT_OWNER_TRANSITION_TIMEOUT_MS),
+  );
   let activeOwnerId: string | null = null;
-  return {
-    transitionTo(ownerId: string | null): void {
-      if (activeOwnerId !== null && activeOwnerId !== ownerId) {
-        options.stopRuntimeContext();
+  let epoch = 0;
+  let state: "ready" | "transitioning" | "blocked" | "unmounted" = "unmounted";
+  let diagnosticId: string | null = null;
+  let activeController = new AbortController();
+  let queue: Promise<void> = Promise.resolve();
+  let pendingTransitions = 0;
+  let blockedErrorCode:
+    | "owner_transition_timeout"
+    | "owner_transition_failed"
+    | null = null;
+
+  const snapshot = (): Readonly<{
+    epoch: number;
+    state: "ready" | "transitioning" | "blocked" | "unmounted";
+    diagnosticId: string | null;
+  }> => Object.freeze({ epoch, state, diagnosticId });
+
+  interface PendingTransition {
+    requestedOwnerId: string | null;
+    epoch: number;
+    diagnosticId: string;
+    hadMountedContext: boolean;
+  }
+
+  const beginTransition = (
+    requestedOwnerId: string | null,
+  ): PendingTransition => {
+    const hadMountedContext = activeOwnerId !== null || state === "blocked";
+    epoch += 1;
+    const transitionEpoch = epoch;
+    const transitionId = transitionDiagnosticId();
+    diagnosticId = transitionId;
+    state = "transitioning";
+    blockedErrorCode = null;
+    activeController.abort();
+    activeController = new AbortController();
+    emitTransitionEvent(options.onEvent, {
+      phase: "begin",
+      epoch: transitionEpoch,
+      diagnosticId: transitionId,
+    });
+    return {
+      requestedOwnerId,
+      epoch: transitionEpoch,
+      diagnosticId: transitionId,
+      hadMountedContext,
+    };
+  };
+
+  const completeTransition = async (
+    pending: PendingTransition,
+  ): Promise<AgenteraOwnerTransitionResult> => {
+    const {
+      requestedOwnerId,
+      epoch: transitionEpoch,
+      diagnosticId: transitionId,
+      hadMountedContext,
+    } = pending;
+
+    // A transition from the initial unmounted state has no old resources to
+    // drain. A blocked state, however, always retries the drain and remains
+    // fail-closed until that retry succeeds.
+    if (hadMountedContext) {
+      const stopController = new AbortController();
+      const context: AgenteraOwnerStopContext = {
+        signal: stopController.signal,
+        deadlineMs: timeoutMs,
+        epoch: transitionEpoch,
+        diagnosticId: transitionId,
+      };
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let cleanup: Promise<void>;
+      try {
+        cleanup = Promise.resolve(options.stopRuntimeContext(context));
+      } catch (error) {
+        cleanup = Promise.reject(error);
       }
-      activeOwnerId = ownerId;
-    },
+      cleanup.catch(() => undefined);
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new AgenteraOwnerTransitionError(
+                "owner_transition_timeout",
+                transitionId,
+              ),
+            ),
+          timeoutMs,
+        );
+      });
+      try {
+        await Promise.race([cleanup, timeout]);
+      } catch (error) {
+        if (timer !== undefined) clearTimeout(timer);
+        stopController.abort();
+        activeOwnerId = null;
+        state = "blocked";
+        const transitionError =
+          error instanceof AgenteraOwnerTransitionError &&
+          error.code === "owner_transition_timeout"
+            ? error
+            : new AgenteraOwnerTransitionError(
+                "owner_transition_failed",
+                transitionId,
+              );
+        blockedErrorCode =
+          transitionError.code === "owner_transition_timeout"
+            ? "owner_transition_timeout"
+            : "owner_transition_failed";
+        emitTransitionEvent(options.onEvent, {
+          phase:
+            transitionError.code === "owner_transition_timeout"
+              ? "timeout"
+              : "failed",
+          epoch: transitionEpoch,
+          diagnosticId: transitionId,
+        });
+        throw transitionError;
+      }
+      if (timer !== undefined) clearTimeout(timer);
+    }
+
+    activeOwnerId = requestedOwnerId;
+    // A new lease is not observable until teardown has completed. Keeping the
+    // old controller aborted during the drain also makes accidental use fail
+    // closed even if a caller ignores the transition Promise.
+    activeController = new AbortController();
+    blockedErrorCode = null;
+    state = requestedOwnerId === null ? "unmounted" : "ready";
+    emitTransitionEvent(options.onEvent, {
+      phase: requestedOwnerId === null ? "unmounted" : "ready",
+      epoch: transitionEpoch,
+      diagnosticId: transitionId,
+    });
+    return Object.freeze({
+      epoch: transitionEpoch,
+      state: state === "ready" ? ("ready" as const) : ("unmounted" as const),
+      diagnosticId: transitionId,
+    });
+  };
+
+  const transitionTo = (
+    requestedOwnerId: string | null,
+  ): Promise<AgenteraOwnerTransitionResult> => {
+    const isNoop =
+      (state === "ready" && activeOwnerId === requestedOwnerId) ||
+      (state === "unmounted" && requestedOwnerId === null);
+    if (pendingTransitions === 0 && isNoop) {
+      const id = diagnosticId ?? transitionDiagnosticId();
+      diagnosticId = id;
+      return Promise.resolve(
+        Object.freeze({
+          epoch,
+          state:
+            state === "ready" ? ("ready" as const) : ("unmounted" as const),
+          diagnosticId: id,
+        }),
+      );
+    }
+
+    pendingTransitions += 1;
+    const runTransition = async (): Promise<AgenteraOwnerTransitionResult> => {
+      // Re-check after waiting in the queue. A duplicate auth notification can
+      // arrive while an earlier transition is draining; it must not tear down
+      // the freshly mounted owner a second time.
+      const queuedNoop =
+        (state === "ready" && activeOwnerId === requestedOwnerId) ||
+        (state === "unmounted" && requestedOwnerId === null);
+      if (queuedNoop) {
+        const id = diagnosticId ?? transitionDiagnosticId();
+        diagnosticId = id;
+        return Object.freeze({
+          epoch,
+          state:
+            state === "ready" ? ("ready" as const) : ("unmounted" as const),
+          diagnosticId: id,
+        });
+      }
+      const pending = beginTransition(requestedOwnerId);
+      return completeTransition(pending);
+    };
+
+    // Begin synchronously for the first transition so the old epoch is
+    // invalidated before the caller can start another owner-scoped operation.
+    // Later transitions are chained to the current tail and cannot overlap.
+    const next =
+      pendingTransitions === 1
+        ? runTransition()
+        : queue.then(() => runTransition());
+    const tracked = next.then(
+      (result) => {
+        pendingTransitions -= 1;
+        return result;
+      },
+      (error) => {
+        pendingTransitions -= 1;
+        throw error;
+      },
+    );
+    // Keep the queue alive after a failed transition so a caller can inspect
+    // the blocked state or explicitly retry with a later transition.
+    queue = tracked.then(
+      () => undefined,
+      () => undefined,
+    );
+    return tracked;
+  };
+
+  const acquireLease = async (): Promise<AgenteraOwnerEpochLease> => {
+    await queue;
+    if (state !== "ready" || activeOwnerId === null) {
+      throw new AgenteraOwnerTransitionError(
+        state === "blocked"
+          ? (blockedErrorCode ?? "owner_transition_timeout")
+          : "model_owner_transition_in_progress",
+        diagnosticId,
+      );
+    }
+    const leaseEpoch = epoch;
+    const leaseController = activeController;
+    return {
+      epoch: leaseEpoch,
+      signal: leaseController.signal,
+      assertCurrent(): void {
+        if (
+          state !== "ready" ||
+          epoch !== leaseEpoch ||
+          leaseController.signal.aborted
+        ) {
+          throw new AgenteraOwnerTransitionError(
+            state === "ready" && epoch !== leaseEpoch
+              ? "model_owner_changed"
+              : state === "blocked"
+                ? (blockedErrorCode ?? "owner_transition_timeout")
+                : "model_owner_transition_in_progress",
+            diagnosticId,
+          );
+        }
+      },
+    };
+  };
+
+  return {
+    transitionTo,
+    acquireLease,
+    snapshot,
   };
 }
