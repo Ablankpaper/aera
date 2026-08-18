@@ -161,8 +161,8 @@ function parsePs(text) {
   return rows;
 }
 
-function collectOpenFiles(pid) {
-  const result = runBoundedCommand(
+function collectOpenFiles(pid, runCommand = runBoundedCommand) {
+  const result = runCommand(
     "lsof",
     ["-nP", "-a", "-p", String(pid), "-Fn"],
     {
@@ -181,14 +181,16 @@ function collectOpenFiles(pid) {
       code: result.code,
       timedOut: result.timedOut,
       stdoutBytes: result.stdoutBytes,
+      stderrBytes: result.stderrBytes,
       stdoutTruncated: result.stdoutTruncated,
+      stderrTruncated: result.stderrTruncated,
     },
     paths,
   };
 }
 
-function collectNetwork(pid) {
-  const result = runBoundedCommand(
+function collectNetwork(pid, runCommand = runBoundedCommand) {
+  const result = runCommand(
     "lsof",
     ["-nP", "-a", "-p", String(pid), "-i", "-FpcnT"],
     {
@@ -201,9 +203,50 @@ function collectNetwork(pid) {
       code: result.code,
       timedOut: result.timedOut,
       stdoutBytes: result.stdoutBytes,
+      stderrBytes: result.stderrBytes,
       stdoutTruncated: result.stdoutTruncated,
+      stderrTruncated: result.stderrTruncated,
     },
     rows: parseLsofNetwork(result.stdout),
+  };
+}
+
+function collectExecutableIdentity(pid, fallbackPath, runCommand) {
+  const result = runCommand(
+    "lsof",
+    ["-nP", "-a", "-p", String(pid), "-d", "txt", "-Fn"],
+    { timeoutMs: 5000, maximumBytes: 64 * 1024 },
+  );
+  const paths = String(result.stdout || "")
+    .split(/\r?\n/u)
+    .filter((line) => line.startsWith("n"))
+    .map((line) => line.slice(1))
+    .filter((path) => path.startsWith("/"));
+  const candidates = [...new Set([...paths, fallbackPath].filter(Boolean))];
+  for (const path of candidates) {
+    try {
+      const info = statSync(path);
+      if (!info.isFile()) continue;
+      return {
+        sha256: createHash("sha256").update(readFileSync(path)).digest("hex"),
+        pathSha256: hash(
+          "aera-diagnostic-executable-path-v1",
+          normalize(path),
+        ),
+        status: "collected",
+        source: paths.includes(path) ? "lsof_txt_handle" : "verified_fallback",
+        command: commandSummary(result),
+      };
+    } catch {
+      // Continue to the next candidate while retaining command metadata.
+    }
+  }
+  return {
+    sha256: null,
+    pathSha256: null,
+    status: "unavailable",
+    source: "lsof_txt_handle",
+    command: commandSummary(result),
   };
 }
 
@@ -258,35 +301,66 @@ export function collectMacPlatformEvidence({
   runCommand = runBoundedCommand,
   includeStaticEvidence = true,
 }) {
-  const ps = runBoundedCommand("ps", ["-axo", "pid=,ppid=,lstart=,command="], {
+  const ps = runCommand("ps", ["-axo", "pid=,ppid=,lstart=,command="], {
     timeoutMs: 5000,
     maximumBytes: 2 * 1024 * 1024,
   });
-  const rows = parsePs(ps.stdout);
-  if (!rows.some((row) => row.pid === Number(rootPid))) {
-    rows.push({
-      pid: Number(rootPid),
-      ppid: null,
-      startedAt: null,
-      command: executable,
-      executable,
-    });
-  }
-  const tree = buildProcessTree(rows, Number(rootPid));
+  const rows = ps.code === 0 ? parsePs(ps.stdout) : [];
+  const rootObserved = rows.some((row) => row.pid === Number(rootPid));
+  const rawTree = rootObserved ? buildProcessTree(rows, Number(rootPid)) : [];
+  const identityFailures = [];
+  const tree = rawTree.map((entry) => {
+    const sourceRow = rows.find((row) => Number(row.pid) === entry.pid);
+    const identity = collectExecutableIdentity(
+      entry.pid,
+      entry.pid === Number(rootPid) ? executable : null,
+      runCommand,
+    );
+    if (entry.role === "runtime" && identity.status !== "collected")
+      identityFailures.push(entry.pid);
+    return {
+      ...entry,
+      executablePathSha256:
+        identity.pathSha256 || entry.executablePathSha256 || null,
+      executableSha256: identity.sha256,
+      executableIdentityStatus: identity.status,
+      executableIdentitySource: identity.source,
+      executableIdentityCommand: identity.command,
+      commandSha256: sourceRow?.command
+        ? hash("aera-diagnostic-command-v1", sourceRow.command)
+        : entry.commandSha256,
+    };
+  });
   const openFileEvidence = [];
+  const openFileCommands = [];
   const networkRows = [];
+  const networkCommands = [];
   const pids = tree.map((entry) => entry.pid).slice(0, 64);
   for (const pid of pids) {
-    const files = collectOpenFiles(pid);
+    const files = collectOpenFiles(pid, runCommand);
+    openFileCommands.push({ pid, ...files.command });
     for (const path of files.paths) {
       openFileEvidence.push({
         pid,
         pathSha256: hash("aera-diagnostic-open-file-path-v1", normalize(path)),
       });
     }
-    const network = collectNetwork(pid);
+    const network = collectNetwork(pid, runCommand);
+    networkCommands.push({ pid, ...network.command });
     networkRows.push(...network.rows);
   }
+  const openFileFailed = openFileCommands.some(
+    (command) => command.code !== 0 || command.timedOut,
+  );
+  const openFileTimedOut = openFileCommands.some(
+    (command) => command.timedOut,
+  );
+  const networkFailed = networkCommands.some(
+    (command) => command.code !== 0 || command.timedOut,
+  );
+  const networkTimedOut = networkCommands.some(
+    (command) => command.timedOut,
+  );
   const uniqueNetwork = [
     ...new Map(
       networkRows.map((row) => [
@@ -320,26 +394,64 @@ export function collectMacPlatformEvidence({
   return {
     platform: "darwin",
     process: {
-      status: tree.length ? "collected" : "missing",
-      reason: tree.length ? null : "process_tree_unavailable",
+      status:
+        ps.code !== 0 || identityFailures.length > 0
+          ? "failed"
+          : tree.length
+            ? "collected"
+            : "missing",
+      reason:
+        ps.code !== 0
+          ? ps.timedOut
+            ? "process_query_timeout"
+            : "process_query_failed"
+          : identityFailures.length > 0
+            ? "runtime_executable_identity_unavailable"
+            : tree.length
+              ? null
+              : "root_process_unavailable",
       rootPid: Number(rootPid),
       tree,
       command: {
         code: ps.code,
         timedOut: ps.timedOut,
         stdoutBytes: ps.stdoutBytes,
+        stderrBytes: ps.stderrBytes,
         stdoutTruncated: ps.stdoutTruncated,
+        stderrTruncated: ps.stderrTruncated,
       },
     },
     openFiles: {
-      status: openFileEvidence.length ? "collected" : "missing",
-      reason: openFileEvidence.length ? null : "open_files_unavailable",
+      status: openFileFailed
+        ? "failed"
+        : openFileEvidence.length
+          ? "collected"
+          : "missing",
+      reason: openFileFailed
+        ? openFileTimedOut
+          ? "open_file_query_timeout"
+          : "open_file_query_failed"
+        : openFileEvidence.length
+          ? null
+          : "open_files_unavailable",
       entries: openFileEvidence,
+      commands: openFileCommands,
     },
     network: {
-      status: uniqueNetwork.length ? "collected" : "missing",
-      reason: uniqueNetwork.length ? null : "network_endpoints_unavailable",
+      status: networkFailed
+        ? "failed"
+        : uniqueNetwork.length
+          ? "collected"
+          : "missing",
+      reason: networkFailed
+        ? networkTimedOut
+          ? "network_query_timeout"
+          : "network_query_failed"
+        : uniqueNetwork.length
+          ? null
+          : "network_endpoints_unavailable",
       entries: uniqueNetwork,
+      commands: networkCommands,
     },
     nativeInventory: {
       status: nativeEntries.length ? "collected" : "missing",

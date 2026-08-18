@@ -6,14 +6,17 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  realpathSync,
+  rmSync,
   readdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { runBoundedCommand } from "./aera-diagnostic-core.mjs";
 
-const SOURCE_DIR = dirname(new URL(import.meta.url).pathname);
+const SOURCE_DIR = dirname(fileURLToPath(import.meta.url));
 const SHARED_FILES = [
   "aera-diagnostic.mjs",
   "aera-diagnostic-core.mjs",
@@ -45,11 +48,16 @@ function writeSums(staging, destination) {
   writeFileSync(join(destination, "SHASUMS.txt"), text, "utf8");
 }
 
+function quotePowerShell(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
 export function packageCollector({ platform, outputDir, targetPath = null }) {
   if (!new Set(["darwin", "win32"]).has(platform))
     throw new Error("collector platform must be darwin or win32");
   const destination = resolve(outputDir);
   const staging = join(destination, "staging");
+  rmSync(staging, { recursive: true, force: true });
   mkdirSync(staging, { recursive: true, mode: 0o700 });
   for (const name of SHARED_FILES) {
     const source = join(SOURCE_DIR, name);
@@ -70,6 +78,7 @@ export function packageCollector({ platform, outputDir, targetPath = null }) {
   writeSums(staging, destination);
   const captureName = `Aera-Beta33-External-Diagnostic-${platform === "darwin" ? "macos" : "windows"}.zip`;
   const zipPath = join(destination, captureName);
+  rmSync(zipPath, { force: true });
   // Use the host-native archiver so one release host can build both customer
   // bundles. Windows users still receive the PowerShell launcher inside the
   // ZIP; macOS/Linux hosts do not need powershell.exe to package it.
@@ -80,7 +89,7 @@ export function packageCollector({ platform, outputDir, targetPath = null }) {
           [
             "-NoProfile",
             "-Command",
-            `Compress-Archive -LiteralPath ${staging}\\* -DestinationPath ${zipPath} -Force`,
+            `Compress-Archive -Path ${quotePowerShell(join(staging, "*"))} -DestinationPath ${quotePowerShell(zipPath)} -Force`,
           ],
           { timeoutMs: 30_000, maximumBytes: 64 * 1024 },
         )
@@ -94,10 +103,23 @@ export function packageCollector({ platform, outputDir, targetPath = null }) {
   return { platform, staging, zipPath, files: readdirSync(staging).sort() };
 }
 
-if (
-  process.argv[1] &&
-  resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)
-) {
+function isMainModulePath(value) {
+  if (!value) return false;
+  const canonical = (path) => {
+    try {
+      return realpathSync(path);
+    } catch {
+      return resolve(path);
+    }
+  };
+  const left = canonical(value);
+  const right = canonical(fileURLToPath(import.meta.url));
+  return process.platform === "win32"
+    ? left.toLowerCase() === right.toLowerCase()
+    : left === right;
+}
+
+if (isMainModulePath(process.argv[1])) {
   const platform = process.argv.includes("--windows") ? "win32" : "darwin";
   const outputIndex = process.argv.indexOf("--output");
   const outputDir =

@@ -36,3 +36,9 @@ test("fails closed for PEM, JWT and credential assignments", () => {
   assert.equal(result.passed, false);
   assert.ok(result.findings.length >= 2);
 });
+
+test("fails closed when chat transcript content reaches a shareable file", () => {
+  const scan = scanShareableText("CHAT user: my private conversation");
+  assert.equal(scan.passed, false);
+  assert.ok(scan.findings.includes("chat_content"));
+});

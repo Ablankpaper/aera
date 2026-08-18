@@ -3,11 +3,14 @@
   "$id": "aera-diagnostic-target-v1",
   "type": "object",
   "additionalProperties": false,
+  "anyOf": [
+    { "required": ["bundleId"] },
+    { "required": ["applicationId"] }
+  ],
   "required": [
     "schemaVersion",
     "platform",
     "version",
-    "bundleId",
     "architecture",
     "executableSha256",
     "packageSha256",

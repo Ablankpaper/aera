@@ -72,6 +72,42 @@ test("builds the verified Aera descendant tree with stable roles", () => {
   assert.equal(classifyProcessRole("Aera Helper --type=utility"), "utility");
 });
 
+test("binds each process identity to executable content SHA-256", () => {
+  const root = mkdtempSync(join(tmpdir(), "aera-process-identity-test-"));
+  try {
+    const executable = join(root, "runtime.bin");
+    const bytes = Buffer.from("runtime executable bytes", "utf8");
+    writeFileSync(executable, bytes);
+    const tree = buildProcessTree(
+      [
+        {
+          pid: 103,
+          ppid: 100,
+          command: "python -m hermes_cli.main gateway",
+          executable,
+          startedAt: "2026-08-17T01:00:00.000Z",
+        },
+        {
+          pid: 100,
+          ppid: 1,
+          command: "/Applications/Aera.app/Contents/MacOS/Aera",
+          startedAt: "2026-08-17T01:00:00.000Z",
+        },
+      ],
+      100,
+    );
+    const runtime = tree.find((entry) => entry.pid === 103);
+    assert.equal(
+      runtime.executableSha256,
+      createHash("sha256").update(bytes).digest("hex"),
+    );
+    assert.equal(runtime.executableIdentityStatus, "collected");
+    assert.notEqual(runtime.executableSha256, runtime.executablePathSha256);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("discovers current Runtime logs from open files before known Profile paths", () => {
   const root = mkdtempSync(join(tmpdir(), "aera-runtime-log-test-"));
   try {
@@ -120,6 +156,41 @@ test("discovers current Runtime logs from open files before known Profile paths"
     assert.doesNotMatch(
       JSON.stringify(evidence),
       new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("crops Runtime log lines to the session window instead of mtime or tail", () => {
+  const root = mkdtempSync(join(tmpdir(), "aera-runtime-log-window-test-"));
+  try {
+    const logPath = join(root, "runtime.log");
+    writeFileSync(
+      logPath,
+      [
+        "2026-08-16T23:59:59.000Z before-session CHAT user: private-before",
+        "2026-08-17T01:01:00.000Z CHAT user: my private conversation",
+        "2026-08-17T01:02:00.000Z [AGENTERA_RUNTIME] runtime_started pid=103 diagnosticId=0123456789ab",
+        "2026-08-17T01:03:00.000Z after-session CHAT user: private-after",
+      ].join("\n"),
+    );
+    const outsideWindow = new Date("2026-08-16T23:00:00.000Z");
+    utimesSync(logPath, outsideWindow, outsideWindow);
+
+    const evidence = discoverRuntimeLogEvidence({
+      hermesHome: join(root, "home"),
+      userDataPaths: [],
+      openFiles: [{ pid: 103, path: logPath, processRole: "runtime" }],
+      startedAt: "2026-08-17T01:00:00.000Z",
+      endedAt: "2026-08-17T01:02:30.000Z",
+    });
+
+    assert.equal(evidence.status, "collected");
+    assert.match(evidence.text, /runtime_started/);
+    assert.doesNotMatch(
+      evidence.text,
+      /before-session|after-session|private-before|private-after|my private conversation/,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -199,6 +270,227 @@ test("keeps Runtime ownership when Main and Runtime share one log path", () => {
     assert.equal(evidence.status, "collected");
     assert.equal(evidence.pidCorrelatedCount, 1);
     assert.equal(evidence.pidCorrelatedLogs[0].pid, 103);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("marks macOS process evidence failed when ps cannot be queried", () => {
+  const result = collectMacPlatformEvidence({
+    rootPid: 123,
+    executable: "/Applications/Aera.app/Contents/MacOS/Aera",
+    appPath: "/Applications/Aera.app",
+    includeStaticEvidence: false,
+    runCommand(command) {
+      assert.equal(command, "ps");
+      return {
+        code: 1,
+        timedOut: false,
+        stdout: "",
+        stderr: "ps denied",
+        stdoutBytes: 0,
+        stderrBytes: 9,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      };
+    },
+  });
+  assert.equal(result.process.status, "failed");
+  assert.equal(result.process.reason, "process_query_failed");
+  assert.deepEqual(result.process.tree, []);
+  assert.equal(result.process.command.code, 1);
+});
+
+test("uses the macOS Runtime text handle for executable content identity", () => {
+  const root = mkdtempSync(join(tmpdir(), "aera-mac-runtime-identity-test-"));
+  try {
+    const mainExecutable = join(root, "Aera");
+    const runtimeExecutable = join(root, "python-runtime");
+    const runtimeBytes = Buffer.from("actual Runtime binary", "utf8");
+    writeFileSync(mainExecutable, "main executable");
+    writeFileSync(runtimeExecutable, runtimeBytes);
+    const result = collectMacPlatformEvidence({
+      rootPid: 123,
+      executable: mainExecutable,
+      appPath: root,
+      includeStaticEvidence: false,
+      runCommand(command, args) {
+        if (command === "ps") {
+          return {
+            code: 0,
+            timedOut: false,
+            stdout: [
+              `123 1 Sun Aug 17 09:00:00 2026 ${mainExecutable}`,
+              "321 123 Sun Aug 17 09:00:01 2026 python -m hermes_cli.main gateway",
+            ].join("\n"),
+            stderr: "",
+            stdoutBytes: 128,
+            stderrBytes: 0,
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          };
+        }
+        if (command === "lsof" && args.includes("txt")) {
+          const pid = Number(args[args.indexOf("-p") + 1]);
+          return {
+            code: 0,
+            timedOut: false,
+            stdout: `p${pid}\nftxt\nn${pid === 321 ? runtimeExecutable : mainExecutable}\n`,
+            stderr: "",
+            stdoutBytes: 64,
+            stderrBytes: 0,
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          };
+        }
+        return {
+          code: 0,
+          timedOut: false,
+          stdout: "",
+          stderr: "",
+          stdoutBytes: 0,
+          stderrBytes: 0,
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        };
+      },
+    });
+    const runtime = result.process.tree.find((entry) => entry.pid === 321);
+    assert.equal(runtime.role, "runtime");
+    assert.equal(runtime.executableIdentitySource, "lsof_txt_handle");
+    assert.equal(
+      runtime.executableSha256,
+      createHash("sha256").update(runtimeBytes).digest("hex"),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("records macOS lsof exit, timeout and truncation failures", () => {
+  const root = mkdtempSync(join(tmpdir(), "aera-mac-lsof-failure-test-"));
+  try {
+    const executable = join(root, "Aera");
+    writeFileSync(executable, "main executable");
+    const result = collectMacPlatformEvidence({
+      rootPid: 123,
+      executable,
+      appPath: root,
+      includeStaticEvidence: false,
+      runCommand(command, args) {
+        if (command === "ps")
+          return {
+            code: 0,
+            timedOut: false,
+            stdout: `123 1 Sun Aug 17 09:00:00 2026 ${executable}\n`,
+            stderr: "",
+            stdoutBytes: 64,
+            stderrBytes: 0,
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          };
+        if (command === "lsof" && args.includes("txt"))
+          return {
+            code: 0,
+            timedOut: false,
+            stdout: `p123\nftxt\nn${executable}\n`,
+            stderr: "",
+            stdoutBytes: 32,
+            stderrBytes: 0,
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          };
+        return {
+          code: 9,
+          timedOut: true,
+          stdout: args.includes("-i")
+            ? "p123\nn127.0.0.1:50000->203.0.113.1:443\nTST=ESTABLISHED\n"
+            : `p123\nn${join(root, "partial-runtime.log")}\n`,
+          stderr: "bounded failure",
+          stdoutBytes: 300,
+          stderrBytes: 400,
+          stdoutTruncated: true,
+          stderrTruncated: true,
+        };
+      },
+    });
+    assert.equal(result.openFiles.status, "failed");
+    assert.equal(result.openFiles.reason, "open_file_query_timeout");
+    assert.equal(result.openFiles.entries.length, 1);
+    assert.equal(result.openFiles.entries[0].pid, 123);
+    assert.deepEqual(result.openFiles.commands[0], {
+      pid: 123,
+      code: 9,
+      timedOut: true,
+      stdoutBytes: 300,
+      stderrBytes: 400,
+      stdoutTruncated: true,
+      stderrTruncated: true,
+    });
+    assert.equal(result.network.status, "failed");
+    assert.equal(result.network.reason, "network_query_timeout");
+    assert.deepEqual(result.network.entries, [
+      { pid: 123, endpoint: "203.0.113.1:443", state: "ESTABLISHED" },
+    ]);
+    assert.equal(result.network.commands[0].code, 9);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("prefers a timeout reason when a later macOS lsof query times out", () => {
+  const root = mkdtempSync(join(tmpdir(), "aera-mac-lsof-timeout-test-"));
+  try {
+    const executable = join(root, "Aera");
+    writeFileSync(executable, "main executable");
+    const result = collectMacPlatformEvidence({
+      rootPid: 123,
+      executable,
+      appPath: root,
+      includeStaticEvidence: false,
+      runCommand(command, args) {
+        if (command === "ps")
+          return {
+            code: 0,
+            timedOut: false,
+            stdout: [
+              `123 1 Sun Aug 17 09:00:00 2026 ${executable}`,
+              "456 123 Sun Aug 17 09:00:01 2026 Aera Helper (Renderer) --type=renderer",
+            ].join("\n"),
+            stderr: "",
+            stdoutBytes: 128,
+            stderrBytes: 0,
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          };
+        if (command === "lsof" && args.includes("txt"))
+          return {
+            code: 0,
+            timedOut: false,
+            stdout: `p${args[args.indexOf("-p") + 1]}\nftxt\nn${executable}\n`,
+            stderr: "",
+            stdoutBytes: 64,
+            stderrBytes: 0,
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          };
+        const pid = Number(args[args.indexOf("-p") + 1]);
+        return {
+          code: 9,
+          timedOut: pid === 456,
+          stdout: "",
+          stderr: "bounded failure",
+          stdoutBytes: 0,
+          stderrBytes: 15,
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        };
+      },
+    });
+    assert.equal(result.openFiles.commands.length, 2);
+    assert.equal(result.openFiles.reason, "open_file_query_timeout");
+    assert.equal(result.network.commands.length, 2);
+    assert.equal(result.network.reason, "network_query_timeout");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

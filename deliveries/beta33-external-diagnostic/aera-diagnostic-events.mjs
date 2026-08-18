@@ -71,8 +71,16 @@ const CODES = new Set([
   "update_startup_failed",
   "update_health_timeout",
   "update_rollback_failed",
+  "transport_failed",
+  "metadata_invalid",
 ]);
 const UPDATE_STAGES = new Set([
+  "stable-index",
+  "stable-index-signature",
+  "stable-index-verification",
+  "manifest",
+  "manifest-signature",
+  "manifest-verification",
   "checking",
   "manifest_verified",
   "downloading",
@@ -139,27 +147,97 @@ function eventFromLine(line, source) {
   return null;
 }
 
+function timestampOf(line, fallback) {
+  const match = String(line).match(
+    /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z\b/u,
+  );
+  return match?.[0] ?? fallback;
+}
+
+function chatContentPrecedes(text, markerIndex) {
+  const chatIndex = String(text).search(
+    /\bCHAT\s+(?:user|assistant|system)\s*:/iu,
+  );
+  return chatIndex >= 0 && chatIndex < markerIndex;
+}
+
+function realProductEvent(line, startedAt) {
+  const text = String(line);
+  const markerMatch = text.match(
+    /\[(MODEL_CONFIGURATION|AGENTERA_RUNTIME_UPDATE|AGENTERA_RUNTIME_OWNER_TRANSITION)\]/iu,
+  );
+  if (!markerMatch) return null;
+  if (chatContentPrecedes(text, markerMatch.index ?? 0)) return null;
+  const marker = markerMatch[1];
+  if (marker.toUpperCase() === "MODEL_CONFIGURATION") {
+    const body = text.slice((markerMatch.index ?? 0) + markerMatch[0].length);
+    const positional = body.match(
+      /\bunavailable\s+([0-9a-f]{12})\s+([a-z][a-z0-9_]{1,127})\b/iu,
+    );
+    return normalizeDiagnosticEvent({
+      at: timestampOf(line, startedAt),
+      source: "main",
+      event: "model_configuration_unavailable",
+      diagnosticId: valueOf(line, "diagnosticId") || positional?.[1],
+      code: valueOf(line, "code") || positional?.[2],
+    });
+  }
+  if (marker.toUpperCase() === "AGENTERA_RUNTIME_UPDATE") {
+    return normalizeDiagnosticEvent({
+      at: timestampOf(line, startedAt),
+      source: "updater",
+      event: valueOf(line, "code") ? "update_failed" : "update_stage",
+      code: valueOf(line, "code"),
+      stage: valueOf(line, "stage"),
+      diagnosticId: valueOf(line, "diagnosticId"),
+    });
+  }
+  return normalizeDiagnosticEvent({
+    at: timestampOf(line, startedAt),
+    source: "owner",
+    event: /\bfailed\b/iu.test(line)
+      ? "transition_failed"
+      : "transition_started",
+    code: /\bfailed\b/iu.test(line) ? "owner_transition_failed" : undefined,
+    transitionId: valueOf(line, "transitionId"),
+  });
+}
+
 /** Parse only stable, redacted product event fields from arbitrary log lines. */
 export function parseStableEvents(lines, window = {}) {
   const events = [];
   const families = new Set();
+  const coverage = {
+    mainRendererIpc: false,
+    owner: false,
+    updater: false,
+  };
   const startedAt = Number.isFinite(Date.parse(window.startedAt))
     ? new Date(window.startedAt).toISOString()
     : new Date(0).toISOString();
   for (const raw of lines) {
     const line = String(raw);
+    const real = realProductEvent(line, startedAt);
+    if (real) {
+      events.push(real);
+      families.add(real.source);
+      if (/\[MODEL_CONFIGURATION\]/iu.test(line))
+        coverage.mainRendererIpc = true;
+      else if (/\[AGENTERA_RUNTIME_OWNER_TRANSITION\]/iu.test(line))
+        coverage.owner = true;
+      else if (/\[AGENTERA_RUNTIME_UPDATE\]/iu.test(line))
+        coverage.updater = true;
+      continue;
+    }
     const marker = line.match(
       /\[AGENTERA_(MAIN|PRELOAD|RENDERER|RUNTIME|OWNER|UPDATER)\]/i,
     );
-    if (!marker) continue;
+    if (!marker || chatContentPrecedes(line, marker.index ?? 0)) continue;
     const source = marker[1].toLowerCase();
     const event = eventFromLine(line, source);
     if (!event) continue;
-    const atMatch = line.match(
-      /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z\b/,
-    );
     const normalized = normalizeDiagnosticEvent({
-      at: atMatch?.[0] ?? startedAt,
+      at: timestampOf(line, startedAt),
       source,
       pid: Number(valueOf(line, "pid")) || undefined,
       event,
@@ -185,7 +263,52 @@ export function parseStableEvents(lines, window = {}) {
   return {
     events,
     missingFamilies: requiredFamilies.filter((family) => !families.has(family)),
+    coverage,
   };
+}
+
+export function mergeStableEventResults(...results) {
+  const events = [];
+  const seen = new Set();
+  const coverage = {
+    mainRendererIpc: false,
+    owner: false,
+    updater: false,
+  };
+  for (const result of results.filter(Boolean)) {
+    for (const event of result.events || []) {
+      const key = JSON.stringify(event);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      events.push(event);
+    }
+    coverage.mainRendererIpc ||= Boolean(result.coverage?.mainRendererIpc);
+    coverage.owner ||= Boolean(result.coverage?.owner);
+    coverage.updater ||= Boolean(result.coverage?.updater);
+  }
+  const families = new Set(events.map((event) => event.source));
+  const requiredFamilies = [
+    "main",
+    "preload",
+    "renderer",
+    "runtime",
+    "owner",
+    "updater",
+  ];
+  return {
+    events,
+    missingFamilies: requiredFamilies.filter((family) => !families.has(family)),
+    coverage,
+  };
+}
+
+export function serializeDiagnosticEvents(events) {
+  return (events || []).map((event) => JSON.stringify(event)).join("\n");
+}
+
+export function filterShareableDiagnosticText(input, window = {}) {
+  const parsed = parseStableEvents(String(input || "").split(/\r?\n/u), window);
+  return { ...parsed, text: serializeDiagnosticEvents(parsed.events) };
 }
 
 export function buildMacUnifiedLogRequest({
@@ -249,6 +372,7 @@ export function collectMacUnifiedLogEvidence({
   });
   const requests = [];
   const text = [];
+  const eventResults = [];
   for (const query of queries) {
     let command;
     try {
@@ -277,11 +401,24 @@ export function collectMacUnifiedLogEvidence({
       pidCount: new Set(pids.map(Number).filter(Number.isInteger)).size,
       command: commandSummary(command),
     });
+    const filtered = filterShareableDiagnosticText(
+      `${command.stdout || ""}\n${command.stderr || ""}`,
+      { startedAt, endedAt },
+    );
+    eventResults.push(filtered);
+    const queryStatus = {
+      query: query.name,
+      status: command.code === 0 ? "collected" : "failed",
+      command: commandSummary(command),
+    };
     text.push(
-      `--- ${query.name} ---\n${command.stdout || command.stderr || ""}`,
+      `--- ${query.name} ---\n${JSON.stringify(queryStatus)}${
+        filtered.text ? `\n${filtered.text}` : ""
+      }`,
     );
   }
   const failed = requests.filter((request) => request.command.code !== 0);
+  const eventResult = mergeStableEventResults(...eventResults);
   return {
     status: failed.length ? "failed" : "collected",
     reason: failed.length
@@ -291,6 +428,9 @@ export function collectMacUnifiedLogEvidence({
       : null,
     requests,
     text: redactText(text.join("\n"), 2 * 1024 * 1024),
+    events: eventResult.events,
+    missingFamilies: eventResult.missingFamilies,
+    coverage: eventResult.coverage,
   };
 }
 

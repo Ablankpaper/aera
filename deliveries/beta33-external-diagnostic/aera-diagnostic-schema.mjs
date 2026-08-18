@@ -165,6 +165,20 @@ export function validateDiagnosticBundleV4(input) {
   if (!Array.isArray(input.missingEvidence))
     throw new Error("missingEvidence must be an array");
   if (!Array.isArray(input.files)) throw new Error("files must be an array");
+  if (
+    input.finishReason != null &&
+    (typeof input.finishReason !== "string" ||
+      input.finishReason.length === 0 ||
+      input.finishReason.length > 128)
+  )
+    throw new Error("finishReason is invalid");
+  for (const field of [
+    "reproductionConfirmed",
+    "processContinuityConfirmed",
+  ]) {
+    if (input[field] != null && typeof input[field] !== "boolean")
+      throw new Error(`${field} is invalid`);
+  }
   assertClosedObject(input.redaction, REDACTION_FIELDS, "redaction");
   if (input.redaction.schemaVersion !== 1)
     throw new Error("redaction schemaVersion must be 1");
@@ -191,6 +205,8 @@ export function validateDiagnosticBundleV4(input) {
     throw new Error("internal_stage_visibility is invalid");
 
   const sectionNames = new Set();
+  if (new Set(input.missingEvidence).size !== input.missingEvidence.length)
+    throw new Error("missingEvidence contains duplicates");
   const missing = new Set(input.missingEvidence);
   for (const section of input.sections) {
     assertClosedObject(

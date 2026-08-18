@@ -4,6 +4,12 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
 
+import { readBoundedFile } from "./aera-diagnostic-core.mjs";
+import {
+  filterShareableDiagnosticText,
+  mergeStableEventResults,
+} from "./aera-diagnostic-events.mjs";
+
 export {
   collectMacDnsRouteEvidence,
   collectMacPlatformEvidence,
@@ -14,6 +20,18 @@ function relationHash(domain, value) {
   return createHash("sha256")
     .update(`${domain}\0${String(value)}`, "utf8")
     .digest("hex");
+}
+
+function executableIdentity(path) {
+  if (!path) return { sha256: null, status: "unavailable" };
+  try {
+    return {
+      sha256: createHash("sha256").update(readFileSync(path)).digest("hex"),
+      status: "collected",
+    };
+  } catch {
+    return { sha256: null, status: "unavailable" };
+  }
 }
 
 export function classifyProcessRole(command) {
@@ -71,6 +89,8 @@ export function buildProcessTree(rows, rootPid) {
               normalize(String(row.executable)),
             )
           : null,
+        executableSha256: executableIdentity(row.executable).sha256,
+        executableIdentityStatus: executableIdentity(row.executable).status,
       });
     }
     for (const child of (byParent.get(pid) || []).sort(
@@ -182,13 +202,49 @@ function logEvidence(entry, startedAt, endedAt) {
   }
 }
 
+function timestampFromLogLine(line) {
+  const iso = String(line).match(
+    /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[.,]\d{1,6})?(?:Z|[+-]\d{2}:?\d{2})\b/u,
+  )?.[0];
+  if (iso) {
+    const value = Date.parse(iso.replace(",", "."));
+    return Number.isFinite(value) ? value : null;
+  }
+  const local = String(line).match(
+    /(?:^|\s)(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:[.,](\d{1,6}))?/u,
+  );
+  if (!local) return null;
+  const milliseconds = String(local[3] || "0").slice(0, 3).padEnd(3, "0");
+  const value = Date.parse(`${local[1]}T${local[2]}.${milliseconds}`);
+  return Number.isFinite(value) ? value : null;
+}
+
+function readRuntimeWindow(path, startedAt, endedAt) {
+  const lower = Date.parse(startedAt);
+  const upper = Date.parse(endedAt);
+  if (!Number.isFinite(lower) || !Number.isFinite(upper) || upper < lower)
+    throw new Error("runtime_log_window_invalid");
+  const bounded = readBoundedFile(path, 2 * 1024 * 1024);
+  const lines = bounded.text.split(/\r?\n/u);
+  const selected = lines.filter((line) => {
+    const timestamp = timestampFromLogLine(line);
+    return timestamp != null && timestamp >= lower && timestamp <= upper;
+  });
+  return {
+    text: selected.join("\n"),
+    lineCount: selected.length,
+    bytes: bounded.bytes,
+    truncated: bounded.truncated,
+  };
+}
+
 export function discoverRuntimeLogEvidence(input) {
   const entries = findRuntimeLogSources(input);
   const evidence = entries
     .map((entry) => logEvidence(entry, input.startedAt, input.endedAt))
     .filter(Boolean);
-  const logs = evidence.filter((entry) => entry.current);
-  const pidCorrelatedLogs = logs.filter(
+  const logs = evidence;
+  const pidCorrelatedLogs = evidence.filter(
     (entry) =>
       entry.source === "observed_open_file" &&
       Number.isInteger(entry.pid) &&
@@ -196,16 +252,84 @@ export function discoverRuntimeLogEvidence(input) {
       entry.processRole === "runtime",
   );
   const stale = evidence.filter((entry) => !entry.current);
-  return {
-    status: pidCorrelatedLogs.length > 0 ? "collected" : "missing",
+  const windowReads = [];
+  const text = [];
+  const eventResults = [];
+  const seenPaths = new Set();
+  for (const entry of pidCorrelatedLogs) {
+    const source = entries.find(
+      (candidate) =>
+        candidate.pid === entry.pid &&
+        candidate.processRole === entry.processRole &&
+        relationHash(
+          "aera-diagnostic-log-path-v1",
+          normalize(candidate.path),
+        ) === entry.pathSha256,
+    );
+    if (!source || seenPaths.has(source.path)) continue;
+    seenPaths.add(source.path);
+    try {
+      const window = readRuntimeWindow(
+        source.path,
+        input.startedAt,
+        input.endedAt,
+      );
+      const filtered = filterShareableDiagnosticText(window.text, {
+        startedAt: input.startedAt,
+        endedAt: input.endedAt,
+      });
+      eventResults.push(filtered);
+      windowReads.push({
+        pid: entry.pid,
+        pathSha256: entry.pathSha256,
+        status: "collected",
+        reason: null,
+        lineCount: window.lineCount,
+        diagnosticEventCount: filtered.events.length,
+        bytes: window.bytes,
+        truncated: window.truncated,
+      });
+      if (filtered.text) text.push(filtered.text);
+    } catch {
+      windowReads.push({
+        pid: entry.pid,
+        pathSha256: entry.pathSha256,
+        status: "failed",
+        reason: "runtime_log_read_failed",
+        lineCount: 0,
+        bytes: 0,
+        truncated: false,
+      });
+    }
+  }
+  const failedReads = windowReads.filter((entry) => entry.status === "failed");
+  const status =
+    pidCorrelatedLogs.length === 0
+      ? "missing"
+      : failedReads.length > 0
+        ? "failed"
+        : "collected";
+  const eventResult = mergeStableEventResults(...eventResults);
+  const result = {
+    status,
     reason:
-      pidCorrelatedLogs.length > 0 ? null : "current_runtime_log_unavailable",
+      status === "collected"
+        ? null
+        : status === "failed"
+          ? "runtime_log_read_failed"
+          : "current_runtime_log_unavailable",
     logs,
     pidCorrelatedLogs,
     pidCorrelatedCount: pidCorrelatedLogs.length,
     stale,
     discoveredCount: evidence.length,
+    windowReads,
   };
+  Object.defineProperties(result, {
+    text: { value: text.join("\n"), enumerable: false },
+    eventResult: { value: eventResult, enumerable: false },
+  });
+  return result;
 }
 
 export function parseLsofNetwork(text) {

@@ -226,9 +226,25 @@ test("creates a V4 bundle with all chain sections and explicit missing evidence"
     assert.deepEqual(eventSection, {
       name: "main_renderer_ipc",
       status: "missing",
-      reason: "stable_product_event_families_unavailable",
+      reason: "real_model_configuration_event_unavailable",
     });
     assert.ok(manifest.missingEvidence.includes("main_renderer_ipc"));
+    assert.deepEqual(
+      manifest.sections.find((section) => section.name === "owner_events"),
+      {
+        name: "owner_events",
+        status: "missing",
+        reason: "real_owner_transition_event_unavailable",
+      },
+    );
+    assert.deepEqual(
+      manifest.sections.find((section) => section.name === "updater_events"),
+      {
+        name: "updater_events",
+        status: "missing",
+        reason: "real_runtime_update_event_unavailable",
+      },
+    );
     assert.ok(manifest.files.some((entry) => entry.name === "journal.json"));
     assert.ok(
       manifest.files.some((entry) => entry.name === "macos-unified-log.txt"),
@@ -326,7 +342,7 @@ test("keeps live PID open-file evidence after the observed process exits", () =>
     const source = join(root, "fixture.c");
     writeFileSync(
       source,
-      `#include <fcntl.h>\n#include <stdio.h>\n#include <unistd.h>\nint main(void){int fd=open("${liveLog.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}",O_CREAT|O_WRONLY|O_APPEND,0600);dprintf(fd,"runtime-live-marker\\n");printf("[AGENTERA_MAIN] main_started pid=%d\\n",getpid());fflush(stdout);usleep(1200000);close(fd);return 0;}\n`,
+      `#include <fcntl.h>\n#include <stdio.h>\n#include <unistd.h>\nint main(void){int fd=open("${liveLog.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}",O_CREAT|O_WRONLY|O_APPEND,0600);dprintf(fd,"runtime-live-marker CHAT user: my private conversation\\n");printf("CHAT user: my private conversation\\n");printf("[MODEL_CONFIGURATION] unavailable 0123456789ab model_configuration_database_unavailable\\n");printf("[AGENTERA_RUNTIME_UPDATE] source=github stage=manifest code=transport_failed\\n");fflush(stdout);usleep(1200000);close(fd);return 0;}\n`,
     );
     const compile = spawnSync("cc", [source, "-o", executable], {
       encoding: "utf8",
@@ -373,6 +389,30 @@ test("keeps live PID open-file evidence after the observed process exits", () =>
       JSON.stringify(runtime),
       new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
     );
+    const quarantine = join(output, `${zip}.quarantine`);
+    const logs = readFileSync(join(quarantine, "logs.txt"), "utf8");
+    assert.doesNotMatch(logs, /runtime-live-marker|my private conversation/);
+    const events = JSON.parse(
+      readFileSync(join(quarantine, "events.json"), "utf8"),
+    );
+    assert.equal(
+      events.events.some(
+        (event) =>
+          event.code === "model_configuration_database_unavailable" &&
+          event.diagnosticId === "0123456789ab",
+      ),
+      true,
+    );
+    assert.equal(
+      events.events.some(
+        (event) => event.code === "transport_failed" && event.stage === "manifest",
+      ),
+      true,
+    );
+    const allFiles = readdirSync(quarantine)
+      .map((name) => readFileSync(join(quarantine, name), "utf8"))
+      .join("\n");
+    assert.doesNotMatch(allFiles, /CHAT user: my private conversation/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -248,7 +248,15 @@ V4 uses a closed manifest and a single bounded evidence timeline.
 
 It contains Main/Preload/Renderer/IPC stable events, the verified Aera PID tree, process-owned network endpoints and open-file evidence, native-module ABI inventory, SQLite database/WAL/SHM read evidence, journal summaries, five managed model files before and after plus backups, route candidates, owner/profile associations, updater events, Runtime logs, Cloud-origin observability, bounded environment flags, macOS signature/Quarantine/DNS/route evidence, Windows platform evidence, and both exact macOS unified-log requests.
 
-The collector keeps a closed section status for every requested source, including each stable event family and the final redaction scan. Any unavailable, failed, stale, or identity-mismatched source is named in `missingEvidence`; an empty file or old log is never presented as current evidence. Runtime logs are `collected` only when an observed open handle is tied to a Runtime PID. `internal_stage_visibility=external_only` explicitly limits claims about Renderer-to-Preload-to-Main IPC and Coordinator stages.
+Event coverage is admitted only from the emitted `[MODEL_CONFIGURATION]`, `[AGENTERA_RUNTIME_UPDATE]`, and `[AGENTERA_RUNTIME_OWNER_TRANSITION]` labels. A label occurring after a `CHAT user|assistant|system:` marker is treated as chat content and cannot confer coverage. Synthetic family names do not prove IPC, owner, or updater coverage, and `internal_stage_visibility=external_only` still excludes invisible Coordinator stages.
+
+Runtime log eligibility ignores file mtime. Only timestamped lines inside the exact capture window from a log-like file observed open by a verified Runtime PID contribute structured text; known Profile and Desktop paths may be inventoried but cannot supply text without that PID/open-handle binding.
+
+Every readable process executable is identified by a content SHA-256, distinct from its hashed path. macOS Runtime identity must resolve through the process `lsof -d txt` handle, while Windows hashes bytes at the process-reported executable path and keeps an unavailable identity explicit.
+
+The collector keeps a closed section status for every requested source, including each stable event family and the final redaction scan. Missing route JSON is `missing`; invalid or unreadable route evidence and backup traversal are `failed`, and an unavailable, stale, or identity-mismatched source is named in `missingEvidence`.
+
+macOS `ps`/`lsof` and the bounded Windows PowerShell query retain exit, timeout, byte-count, and truncation metadata. Open-file or network command failures are `failed` even when partial entries survive; Windows Runtime handle calls retain PID/exit code, and absent `handle.exe` is `handle_tool_unavailable`, never inferred evidence or an installation request.
 
 #### Candidate binding and launch boundary
 
@@ -264,7 +272,9 @@ Windows ProductVersion is read from the executable when available; an unbound ca
 
 The shareable ZIP has a fail-closed secret boundary.
 
-It excludes credentials, tokens, cookies, private keys, full `.env` or configuration bodies, raw SQLite pages, chat content, HTTP bodies, and URL queries. Paths, profile/owner/route identities, command lines, and endpoint details are domain-separated hashes or bounded enumerations. A final secret scan is fail-closed; if it fails, no ZIP is produced.
+It excludes credentials, tokens, cookies, private keys, full `.env` or configuration bodies, raw SQLite pages, chat content, HTTP bodies, and URL queries. Runtime, unified-log, child-process, and Windows Event Log inputs yield only allowlisted timestamps, labels, stages, stable codes, diagnostic IDs, hashes, and bounded command metadata; raw stdout/stderr and messages are not packaged.
+
+Paths, profile/owner/route identities, command lines, and endpoint details are domain-separated hashes or bounded enumerations. The final scan also rejects `CHAT user:`, `CHAT assistant:`, and `CHAT system:` transcript markers and fails closed before ZIP creation.
 
 Native inventory records the actual content SHA-256 of each readable `.node` file in addition to a domain-separated path hash. A read failure remains explicit in the inventory rather than being replaced by a metadata-derived digest, so ABI evidence cannot be mistaken for a stale or synthetic fingerprint.
 

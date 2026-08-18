@@ -10,12 +10,15 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
+  rmSync,
   renameSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, normalize, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   classifyCollectorError,
@@ -24,6 +27,7 @@ import {
 } from "./aera-diagnostic-core.mjs";
 import {
   collectMacUnifiedLogEvidence,
+  mergeStableEventResults,
   parseStableEvents,
 } from "./aera-diagnostic-events.mjs";
 import {
@@ -38,7 +42,6 @@ import {
 } from "./aera-diagnostic-platform-macos.mjs";
 import {
   discoverRuntimeLogEvidence,
-  findRuntimeLogSources,
 } from "./aera-diagnostic-platform.mjs";
 import { collectWindowsPlatformEvidence } from "./aera-diagnostic-platform-windows.mjs";
 import {
@@ -343,15 +346,6 @@ function discoverExistingAeraProcesses() {
   );
 }
 
-function readTail(path, maximum = 128 * 1024) {
-  try {
-    const content = readFileSync(path, "utf8");
-    return content.length <= maximum ? content : content.slice(-maximum);
-  } catch {
-    return "";
-  }
-}
-
 function writeJson(path, value) {
   writeFileSync(
     path,
@@ -395,6 +389,9 @@ function packageCapture(captureDir, outputDir, platform, captureId) {
   mkdirSync(outputDir, { recursive: true });
   const name = `aera-beta33-${platform === "darwin" ? "macos" : "windows"}-external-diagnostic-${captureId}.zip`;
   const zip = join(outputDir, name);
+  rmSync(zip, { force: true });
+  const quotePowerShell = (value) =>
+    `'${String(value).replaceAll("'", "''")}'`;
   const result =
     process.platform === "win32"
       ? runBoundedCommand(
@@ -402,7 +399,7 @@ function packageCapture(captureDir, outputDir, platform, captureId) {
           [
             "-NoProfile",
             "-Command",
-            `Compress-Archive -LiteralPath ${captureDir}\\* -DestinationPath ${zip} -Force`,
+            `Compress-Archive -Path ${quotePowerShell(join(captureDir, "*"))} -DestinationPath ${quotePowerShell(zip)} -Force`,
           ],
           { timeoutMs: 30_000, maximumBytes: 64 * 1024 },
         )
@@ -739,35 +736,21 @@ export async function runDiagnostic(args) {
   const runtimeEvidence = discoverRuntimeLogEvidence({
     hermesHome,
     userDataPaths,
-    openFiles: observation.observedOpenFiles,
+    openFiles: [
+      ...observation.observedOpenFiles,
+      ...(platformEvidence.runtimeOpenFiles || []),
+    ],
     startedAt,
     endedAt,
   });
-  const runtimeSources = findRuntimeLogSources({
-    hermesHome,
-    userDataPaths,
-    openFiles: observation.observedOpenFiles,
-  });
-  const runtimeText = runtimeSources
-    .filter((entry) =>
-      runtimeEvidence.logs.some(
-        (candidate) =>
-          candidate.pathSha256 ===
-          createHash("sha256")
-            .update(`aera-diagnostic-log-path-v1\0${normalize(entry.path)}`)
-            .digest("hex"),
-      ),
-    )
-    .map((entry) => `--- ${entry.source} ---\n${readTail(entry.path)}`)
-    .join("\n");
-  const logsText = redactText(
-    `${childStdout}\n${childStderr}\n${runtimeText}`,
-    512 * 1024,
+  const logsText = runtimeEvidence.text || "";
+  const childEventParse = parseStableEvents(
+    `${childStdout}\n${childStderr}`.split(/\r?\n/u),
+    {
+      startedAt,
+      endedAt,
+    },
   );
-  const eventParse = parseStableEvents(logsText.split(/\r?\n/), {
-    startedAt,
-    endedAt,
-  });
   const environmentEvidence = collectEnvironmentEvidence(process.env, {
     platform,
     arch: identity.architecture,
@@ -775,7 +758,7 @@ export async function runDiagnostic(args) {
   });
   const cloudOriginEvidence = collectCloudOriginEvidence({
     env: process.env,
-    logText: logsText,
+    logText: `${childStdout}\n${childStderr}`,
   });
   const unifiedLog = await collectUnifiedLog(
     platform,
@@ -791,6 +774,12 @@ export async function runDiagnostic(args) {
     identity.bundleId,
     appPath,
   );
+  const eventParse = mergeStableEventResults(
+    childEventParse,
+    runtimeEvidence.eventResult,
+    unifiedLog,
+    platformEvidence.diagnosticEventResult,
+  );
   const afterModel = collectModelChain({
     hermesHome,
     userData: userDataPaths[0] || join(hermesHome, ".aera-user-data"),
@@ -798,9 +787,7 @@ export async function runDiagnostic(args) {
   });
   const afterFiles = snapshotManagedModelFiles(paths, "after");
   const modelComparison = compareModelSnapshots(beforeFiles, afterFiles);
-  const updater = eventParse.events.filter(
-    (event) => event.source === "updater",
-  ).length
+  const updater = eventParse.coverage.updater
     ? {
         status: "collected",
         reason: null,
@@ -815,9 +802,10 @@ export async function runDiagnostic(args) {
     modelComparison.changes?.length === 5
       ? { status: "collected" }
       : { status: "missing", reason: "model_comparison_incomplete" };
-  const routeCatalogEvidence = beforeModel.routeCatalog
-    ? { status: "collected" }
-    : { status: "missing", reason: "route_catalog_unavailable" };
+  const routeCatalogEvidence = beforeModel.routeCatalog || {
+    status: "missing",
+    reason: "route_catalog_unavailable",
+  };
   const sections = [
     section("target", { status: "collected" }),
     section("process", platformEvidence.process),
@@ -847,9 +835,10 @@ export async function runDiagnostic(args) {
     section("managed_files", managedFilesEvidence),
     section(
       "backups",
-      Array.isArray(beforeModel.backups)
-        ? { status: "collected" }
-        : { status: "missing", reason: "backups_unavailable" },
+      beforeModel.backupEvidence || {
+        status: "missing",
+        reason: "backups_unavailable",
+      },
     ),
     section("model_comparison", modelComparisonEvidence),
     section("route_catalog", routeCatalogEvidence),
@@ -867,16 +856,32 @@ export async function runDiagnostic(args) {
     section("preload_events", eventFamilySection(eventParse, "preload")),
     section("renderer_events", eventFamilySection(eventParse, "renderer")),
     section("runtime_events", eventFamilySection(eventParse, "runtime")),
-    section("owner_events", eventFamilySection(eventParse, "owner")),
-    section("updater_events", eventFamilySection(eventParse, "updater")),
-    section("updater", updater),
     section(
-      "main_renderer_ipc",
-      eventParse.missingFamilies.length === 0
+      "owner_events",
+      eventParse.coverage.owner
         ? { status: "collected" }
         : {
             status: "missing",
-            reason: "stable_product_event_families_unavailable",
+            reason: "real_owner_transition_event_unavailable",
+          },
+    ),
+    section(
+      "updater_events",
+      eventParse.coverage.updater
+        ? { status: "collected" }
+        : {
+            status: "missing",
+            reason: "real_runtime_update_event_unavailable",
+          },
+    ),
+    section("updater", updater),
+    section(
+      "main_renderer_ipc",
+      eventParse.coverage.mainRendererIpc
+        ? { status: "collected" }
+        : {
+            status: "missing",
+            reason: "real_model_configuration_event_unavailable",
           },
     ),
     section("redaction", { status: "collected" }),
@@ -1044,10 +1049,24 @@ export async function main(argv = process.argv.slice(2)) {
   }
 }
 
-if (
-  process.argv[1] &&
-  normalize(process.argv[1]) === normalize(new URL(import.meta.url).pathname)
-) {
+function isMainModulePath(value) {
+  if (!value) return false;
+  const canonical = (path) => {
+    try {
+      return realpathSync(path);
+    } catch {
+      return resolve(path);
+    }
+  };
+  const left = normalize(canonical(value));
+  const right = normalize(canonical(fileURLToPath(import.meta.url)));
+  const pathMatches = process.platform === "win32"
+    ? left.toLowerCase() === right.toLowerCase()
+    : left === right;
+  return pathMatches || pathToFileURL(left).href === import.meta.url;
+}
+
+if (isMainModulePath(process.argv[1])) {
   main().then((code) => {
     if (typeof code === "number") process.exitCode = code;
   });

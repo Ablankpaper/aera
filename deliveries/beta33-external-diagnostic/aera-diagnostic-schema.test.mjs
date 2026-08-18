@@ -32,6 +32,53 @@ test("publishes parseable JSON schemas", () => {
   }
 });
 
+test("publishes the same target identity alternatives as the runtime validator", () => {
+  const schema = JSON.parse(
+    readFileSync(
+      new URL("aera-diagnostic-target-v1.schema.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  assert.equal(schema.required.includes("bundleId"), false);
+  assert.deepEqual(
+    schema.anyOf.map((entry) => entry.required),
+    [["bundleId"], ["applicationId"]],
+  );
+  const applicationTarget = { ...target, applicationId: target.bundleId };
+  delete applicationTarget.bundleId;
+  assert.deepEqual(
+    parseDiagnosticTargetV1(applicationTarget),
+    applicationTarget,
+  );
+  const noIdentity = { ...target };
+  delete noIdentity.bundleId;
+  assert.throws(() => parseDiagnosticTargetV1(noIdentity), /identity/i);
+});
+
+test("requires every one of the 31 section names exactly once in JSON Schema", () => {
+  const schema = JSON.parse(
+    readFileSync(
+      new URL("aera-diagnostic-bundle-v4.schema.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const sections = schema.properties.sections;
+  assert.equal(REQUIRED_DIAGNOSTIC_SECTIONS.length, 31);
+  assert.equal(sections.minItems, 31);
+  assert.equal(sections.maxItems, 31);
+  assert.ok(Array.isArray(sections.allOf));
+  assert.deepEqual(
+    sections.allOf.map((entry) => entry.contains.properties.name.const).sort(),
+    [...REQUIRED_DIAGNOSTIC_SECTIONS].sort(),
+  );
+  assert.equal(
+    sections.allOf.every(
+      (entry) => entry.minContains === 1 && entry.maxContains === 1,
+    ),
+    true,
+  );
+});
+
 test("accepts a closed target descriptor and rejects unsafe values", () => {
   assert.deepEqual(parseDiagnosticTargetV1(target), target);
   assert.throws(
@@ -103,6 +150,26 @@ test("validates a V4 bundle with explicit missing evidence", () => {
         files: [{ ...bundle.files[0], name: "../x" }],
       }),
     /filename/i,
+  );
+  assert.throws(
+    () =>
+      validateDiagnosticBundleV4({
+        ...bundle,
+        reproductionConfirmed: "yes",
+      }),
+    /reproductionConfirmed/i,
+  );
+  assert.throws(
+    () =>
+      validateDiagnosticBundleV4({
+        ...bundle,
+        sections: sections.map((entry) =>
+          entry.name === "cloud_origin"
+            ? { ...entry, name: "runtime_logs" }
+            : entry,
+        ),
+      }),
+    /duplicate section.*runtime_logs/i,
   );
 });
 

@@ -36,7 +36,7 @@ PowerShell：
 
    run-windows.bat -App "C:\Program Files\Aera\Aera.exe" -Target .\target.json
 
-Windows 包装器会调用 Aera 自带的 Electron 运行时，不依赖全局 `node.exe`；它会把 App/Target/Output/Profile 路径解析成绝对路径、固定传入 `--platform windows`，并在 PowerShell 退出后恢复 `ELECTRON_RUN_AS_NODE` 环境变量。Windows 的 Runtime open-handle 证据目前会显式标为 `windows_open_files_unavailable`，不能把进程树或旧日志当作 PID 绑定日志。
+Windows 包装器会调用 Aera 自带的 Electron 运行时，不依赖全局 `node.exe`；它会把 App/Target/Output/Profile 路径解析成绝对路径、固定传入 `--platform windows`，并在 PowerShell 退出后恢复 `ELECTRON_RUN_AS_NODE` 环境变量。若系统已有 Sysinternals `handle.exe`，采集器会查询 Runtime PID 的日志类 open handle，只保留路径哈希、PID、退出码和状态；工具缺失时明确记录 `handle_tool_unavailable`，不能把进程树或旧日志当作 PID 绑定日志，也不会要求用户安装工具。
 Windows 采集器优先读取可执行文件的 ProductVersion；若系统无法提供版本且未使用 `--target`，会显式记录 `version=unknown` 并保持 `runtime-unbound`，不会伪造候选版本。提供了候选 target 时，版本缺失会因身份不匹配而 fail-closed。
 
 会话有效性

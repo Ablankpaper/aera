@@ -51,6 +51,94 @@ test("parses main, renderer, owner and updater events and reports absent familie
   assert.equal(result.events[3].stage, "download_completed");
 });
 
+test("recognizes real product labels and derives coverage only from them", () => {
+  const result = parseStableEvents(
+    [
+      "[MODEL_CONFIGURATION] unavailable 0123456789ab model_configuration_database_unavailable",
+      "[AGENTERA_RUNTIME_UPDATE] source=github stage=stable-index code=transport_failed",
+      "[AGENTERA_RUNTIME_OWNER_TRANSITION] cleanup failed transitionId=0123456789ac private cleanup detail",
+    ],
+    {
+      startedAt: "2026-08-17T01:00:00.000Z",
+      endedAt: "2026-08-17T01:05:00.000Z",
+    },
+  );
+  assert.deepEqual(
+    result.events.map((event) => ({
+      source: event.source,
+      event: event.event,
+      code: event.code,
+      stage: event.stage,
+      diagnosticId: event.diagnosticId,
+      transitionId: event.transitionId,
+    })),
+    [
+      {
+        source: "main",
+        event: "model_configuration_unavailable",
+        code: "model_configuration_database_unavailable",
+        stage: undefined,
+        diagnosticId: "0123456789ab",
+        transitionId: undefined,
+      },
+      {
+        source: "updater",
+        event: "update_failed",
+        code: "transport_failed",
+        stage: "stable-index",
+        diagnosticId: undefined,
+        transitionId: undefined,
+      },
+      {
+        source: "owner",
+        event: "transition_failed",
+        code: "owner_transition_failed",
+        stage: undefined,
+        diagnosticId: undefined,
+        transitionId: "0123456789ac",
+      },
+    ],
+  );
+  assert.deepEqual(result.coverage, {
+    mainRendererIpc: true,
+    owner: true,
+    updater: true,
+  });
+  assert.doesNotMatch(JSON.stringify(result), /private cleanup detail/);
+});
+
+test("does not infer real IPC coverage from six synthetic event families", () => {
+  const result = parseStableEvents([
+    "[AGENTERA_MAIN] main_started",
+    "[AGENTERA_PRELOAD] preload_started",
+    "[AGENTERA_RENDERER] renderer_started",
+    "[AGENTERA_RUNTIME] runtime_started",
+    "[AGENTERA_OWNER] transition_started",
+    "[AGENTERA_UPDATER] stage=download_completed",
+  ]);
+  assert.deepEqual(result.missingFamilies, []);
+  assert.deepEqual(result.coverage, {
+    mainRendererIpc: false,
+    owner: false,
+    updater: false,
+  });
+});
+
+test("does not treat diagnostic labels inside chat content as product evidence", () => {
+  const result = parseStableEvents([
+    "CHAT user: [MODEL_CONFIGURATION] unavailable 0123456789ab model_configuration_database_unavailable",
+    "CHAT assistant: [AGENTERA_RUNTIME_UPDATE] source=github stage=manifest code=transport_failed",
+    "CHAT system: [AGENTERA_RUNTIME_OWNER_TRANSITION] cleanup failed",
+    "CHAT user: [AGENTERA_MAIN] main_started",
+  ]);
+  assert.deepEqual(result.events, []);
+  assert.deepEqual(result.coverage, {
+    mainRendererIpc: false,
+    owner: false,
+    updater: false,
+  });
+});
+
 test("unified-log request never passes ISO-Z timestamps", () => {
   const request = buildMacUnifiedLogRequest({
     startedAt: "2026-08-17T01:00:00.000Z",
@@ -77,7 +165,11 @@ test("collects bounded PID and macOS policy unified-log queries", () => {
       return {
         code: 0,
         timedOut: false,
-        stdout: "log fixture\n",
+        stdout: [
+          "CHAT user: my private conversation",
+          "[MODEL_CONFIGURATION] unavailable 0123456789ab model_configuration_database_unavailable",
+          "[AGENTERA_RUNTIME_UPDATE] source=github stage=manifest code=transport_failed",
+        ].join("\n"),
         stderr: "",
         stdoutBytes: 12,
         stderrBytes: 0,
@@ -102,6 +194,10 @@ test("collects bounded PID and macOS policy unified-log queries", () => {
   }
   assert.match(result.text, /aera_processes/);
   assert.match(result.text, /macos_policy/);
+  assert.match(result.text, /model_configuration_database_unavailable/);
+  assert.match(result.text, /0123456789ab/);
+  assert.match(result.text, /"stage":"manifest"/);
+  assert.doesNotMatch(result.text, /my private conversation/);
 });
 
 test("marks unified-log evidence failed when one bounded query fails", () => {

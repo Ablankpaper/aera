@@ -124,6 +124,65 @@ test("captures all five managed files and dirty route relations without raw bodi
   }
 });
 
+test("does not collect a missing or invalid route JSON catalog", () => {
+  const root = mkdtempSync(join(tmpdir(), "aera-route-catalog-state-test-"));
+  try {
+    const missing = collectModelChain({
+      hermesHome: join(root, "missing-hermes"),
+      userData: join(root, "missing-user-data"),
+      profile: "default",
+    });
+    assert.equal(missing.routeCatalog.status, "missing");
+    assert.equal(missing.routeCatalog.reason, "route_catalog_source_missing");
+
+    const setup = fixture(root);
+    writeFileSync(join(setup.hermesHome, "models.json"), "{not-json");
+    const invalid = collectModelChain(setup);
+    assert.equal(invalid.routeCatalog.status, "failed");
+    assert.equal(invalid.routeCatalog.reason, "route_catalog_source_invalid");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("marks an unreadable route JSON source failed", () => {
+  const root = mkdtempSync(join(tmpdir(), "aera-route-catalog-unreadable-test-"));
+  try {
+    const setup = fixture(root);
+    const providers = join(setup.profileRoot, "providers.json");
+    rmSync(providers);
+    mkdirSync(providers);
+    const result = collectModelChain(setup);
+    assert.equal(result.routeCatalog.status, "failed");
+    assert.equal(
+      result.routeCatalog.reason,
+      "route_catalog_source_unreadable",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("records backup directory traversal failures instead of an empty collection", () => {
+  const root = mkdtempSync(join(tmpdir(), "aera-backup-traversal-test-"));
+  try {
+    const setup = fixture(root);
+    const result = collectModelChain({
+      ...setup,
+      readDirectory() {
+        const error = new Error("permission denied");
+        error.code = "EACCES";
+        throw error;
+      },
+    });
+    assert.deepEqual(result.backups, []);
+    assert.equal(result.backupEvidence?.status, "failed");
+    assert.equal(result.backupEvidence?.reason, "backup_traversal_failed");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("compares before and after snapshots and records exact changed roles", () => {
   const root = mkdtempSync(join(tmpdir(), "aera-model-compare-test-"));
   try {

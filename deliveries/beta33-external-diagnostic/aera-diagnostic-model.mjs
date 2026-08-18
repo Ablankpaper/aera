@@ -126,6 +126,36 @@ function parseJson(path, fallback) {
   }
 }
 
+function readRouteJson(path, validate) {
+  if (!existsSync(path))
+    return {
+      status: "missing",
+      reason: "route_catalog_source_missing",
+      value: null,
+    };
+  let content;
+  try {
+    content = readFileSync(path, "utf8").slice(0, 4 * 1024 * 1024);
+  } catch {
+    return {
+      status: "failed",
+      reason: "route_catalog_source_unreadable",
+      value: null,
+    };
+  }
+  try {
+    const value = JSON.parse(content);
+    if (!validate(value)) throw new Error("invalid route catalog shape");
+    return { status: "collected", reason: null, value };
+  } catch {
+    return {
+      status: "failed",
+      reason: "route_catalog_source_invalid",
+      value: null,
+    };
+  }
+}
+
 function unquote(value) {
   const text = String(value || "").trim();
   if (text.startsWith('"') && text.endsWith('"')) {
@@ -192,7 +222,29 @@ function routeSummary(route, sources) {
 }
 
 function collectRouteCatalog(paths) {
-  const providerDoc = parseJson(paths.providers, {});
+  const providerSource = readRouteJson(
+    paths.providers,
+    (value) =>
+      value != null &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Array.isArray(value.providers),
+  );
+  const modelSource = readRouteJson(paths.models, Array.isArray);
+  const sources = {
+    providers: {
+      status: providerSource.status,
+      reason: providerSource.reason,
+    },
+    models: { status: modelSource.status, reason: modelSource.reason },
+  };
+  const failedSource = [providerSource, modelSource].find(
+    (source) => source.status === "failed",
+  );
+  const missingSource = [providerSource, modelSource].find(
+    (source) => source.status === "missing",
+  );
+  const providerDoc = providerSource.value || {};
   const providerRows = Array.isArray(providerDoc?.providers)
     ? providerDoc.providers
     : [];
@@ -209,7 +261,7 @@ function collectRouteCatalog(paths) {
     }))
     .filter((row) => row.providerSha256 && row.endpointSha256);
 
-  const modelRows = parseJson(paths.models, []);
+  const modelRows = modelSource.value || [];
   const routes = Array.isArray(modelRows)
     ? modelRows
         .map((row) => routeSummary(row, ["models"]))
@@ -252,6 +304,10 @@ function collectRouteCatalog(paths) {
     .sort((left, right) => left.groupSha256.localeCompare(right.groupSha256));
 
   return {
+    status: failedSource ? "failed" : missingSource ? "missing" : "collected",
+    reason:
+      failedSource?.reason || missingSource?.reason || null,
+    sources,
     providerCount: providerRows.length,
     modelRowCount: Array.isArray(modelRows) ? modelRows.length : 0,
     routeCount: routes.length,
@@ -288,14 +344,22 @@ function collectOwner(userData) {
   };
 }
 
-function collectBackups(paths) {
+function collectBackups(paths, readDirectory = readdirSync) {
   const backups = [];
+  const failures = [];
   for (const role of REQUIRED_MODEL_FILE_ROLES) {
     const path = paths[role];
     const parent = dirname(path);
     if (!existsSync(parent)) continue;
     const prefix = `${basename(path)}.aera-model-config-backup.`;
-    for (const name of readdirSync(parent)) {
+    let names;
+    try {
+      names = readDirectory(parent);
+    } catch {
+      failures.push({ role, reason: "backup_traversal_failed" });
+      continue;
+    }
+    for (const name of names) {
       if (!name.startsWith(prefix)) continue;
       const operation = name.slice(prefix.length);
       const backupPath = join(parent, name);
@@ -310,18 +374,28 @@ function collectBackups(paths) {
           sha256: fileHash(backupPath),
         });
       } catch {
-        // A concurrently cleaned backup is represented by its absence.
+        failures.push({ role, reason: "backup_entry_unavailable" });
       }
     }
   }
-  return backups.sort((left, right) =>
-    `${left.role}:${left.operationSha256}`.localeCompare(
-      `${right.role}:${right.operationSha256}`,
+  return {
+    status: failures.length ? "failed" : "collected",
+    reason: failures.length ? failures[0].reason : null,
+    entries: backups.sort((left, right) =>
+      `${left.role}:${left.operationSha256}`.localeCompare(
+        `${right.role}:${right.operationSha256}`,
+      ),
     ),
-  );
+    failures,
+  };
 }
 
-export function collectModelChain({ hermesHome, userData, profile }) {
+export function collectModelChain({
+  hermesHome,
+  userData,
+  profile,
+  readDirectory = readdirSync,
+}) {
   const paths = managedModelPaths(hermesHome, profile);
   const files = snapshotManagedModelFiles(paths, "current");
   const missingRoles = files
@@ -330,6 +404,7 @@ export function collectModelChain({ hermesHome, userData, profile }) {
   const journal = collectModelJournal(
     join(userData, "model-configuration", "model-configuration.db"),
   );
+  const backupEvidence = collectBackups(paths, readDirectory);
   return {
     status:
       missingRoles.length === REQUIRED_MODEL_FILE_ROLES.length
@@ -343,7 +418,8 @@ export function collectModelChain({ hermesHome, userData, profile }) {
     missingRoles,
     profileSha256: hash("aera-diagnostic-profile-v1", profile),
     files,
-    backups: collectBackups(paths),
+    backups: backupEvidence.entries,
+    backupEvidence,
     owner: collectOwner(userData),
     journal,
     routeCatalog: collectRouteCatalog(paths),

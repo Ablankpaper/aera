@@ -104,6 +104,7 @@ export function redactStructured(value, key = "", depth = 0) {
 export function scanShareableText(input) {
   const text = String(input ?? "");
   const patterns = [
+    ["chat_content", /\bCHAT\s+(?:user|assistant|system)\s*:/i],
     ["pem", /-----BEGIN [A-Z0-9 ]*(?:PRIVATE|RSA|EC|OPENSSH) KEY-----/i],
     ["authorization", /\b(?:Bearer|Basic|Digest)\s+[A-Za-z0-9._~+/=-]{12,}/i],
     ["jwt", /\beyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]+){1,2}\b/],
