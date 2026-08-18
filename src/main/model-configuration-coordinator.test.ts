@@ -14,6 +14,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
   isSafeToRetryStaleRevision,
+  routeKeyV2,
   type ModelConfigurationMutationRequest,
   type OwnerModelRouteCatalogSnapshot,
 } from "../shared/model-configuration";
@@ -46,9 +47,21 @@ import { safeWriteFile } from "./utils";
 
 const REVISION = "a".repeat(64);
 const OWNER = "owner-hash";
-const OLD_ROUTE =
+const OLD_ROUTE = routeKeyV2({
+  providerId: "custom:fixture",
+  modelId: "old-model",
+  endpoint: "https://fixture.invalid/v1",
+  apiMode: "chat_completions",
+});
+const NEW_ROUTE = routeKeyV2({
+  providerId: "custom:fixture",
+  modelId: "new-model",
+  endpoint: "https://fixture.invalid/v1",
+  apiMode: "chat_completions",
+});
+const LEGACY_OLD_ROUTE =
   "custom:fixture\0old-model\0https://fixture.invalid/v1\0chat_completions";
-const NEW_ROUTE =
+const LEGACY_NEW_ROUTE =
   "custom:fixture\0new-model\0https://fixture.invalid/v1\0chat_completions";
 const SECRET = "fixture-super-secret-api-key";
 const roots: string[] = [];
@@ -59,6 +72,7 @@ type FailureStage = ModelConfigurationCommitStage | "verification" | null;
 interface Fixture {
   root: string;
   paths: ModelConfigurationFilePaths;
+  database: ModelConfigurationDatabase;
   store: ModelConfigurationOperationStore;
   catalog: {
     snapshot: Mock<
@@ -241,6 +255,7 @@ function makeFixture(): Fixture {
   return {
     root,
     paths,
+    database,
     store,
     catalog,
     adapter,
@@ -312,6 +327,21 @@ function writeAttemptedState(fixture: Fixture): void {
     '{"new-model":{"name":"new"}}\n',
   );
   writeFileSync(fixture.paths.config, `route=${NEW_ROUTE}\n# keep me\r\n`);
+}
+
+function rewriteOperationRoutesAsHistoricalV1(
+  fixture: Fixture,
+  operationId: string,
+): void {
+  const encode = (route: string): string =>
+    `b64v1:${Buffer.from(route, "utf8").toString("base64url")}`;
+  fixture.database.sqlite
+    .prepare(
+      `UPDATE desktop_model_configuration_operations
+       SET old_route_key = ?, new_route_key = ?
+       WHERE operation_id = ?`,
+    )
+    .run(encode(LEGACY_OLD_ROUTE), encode(LEGACY_NEW_ROUTE), operationId);
 }
 
 afterEach(() => {
@@ -1180,6 +1210,37 @@ describe("ModelConfigurationCoordinator", () => {
     await subject(fixture).recoverIncompleteOperations();
 
     expect(fixture.store.require(operationId).state).toBe("rolled_back");
+    expect(fixture.store.listIncomplete()).toEqual([]);
+  });
+
+  it("matches a historical v1 journal route to the current v2 route during recovery", async () => {
+    const fixture = makeFixture();
+    const operationId = "10000000-0000-4000-8000-000000000104";
+    const snapshot = captureModelConfigurationFiles({
+      profileId: "account",
+      operationId,
+      paths: fixture.paths,
+    });
+    persistModelConfigurationBackups(snapshot);
+    fixture.store.begin({
+      operationId,
+      ownerHandle: OWNER,
+      profileId: "account",
+      oldRouteKey: OLD_ROUTE,
+      newRouteKey: NEW_ROUTE,
+      snapshot,
+    });
+    fixture.store.finish(operationId, "recovery_required");
+    rewriteOperationRoutesAsHistoricalV1(fixture, operationId);
+    removeModelConfigurationBackups(snapshot);
+
+    await subject(fixture).recoverIncompleteOperations();
+
+    expect(fixture.store.require(operationId)).toMatchObject({
+      state: "rolled_back",
+      oldRouteKey: LEGACY_OLD_ROUTE,
+      newRouteKey: LEGACY_NEW_ROUTE,
+    });
     expect(fixture.store.listIncomplete()).toEqual([]);
   });
 

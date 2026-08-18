@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import type {
+import {
+  isModelRouteKeyV2,
+  routeKeysMatch,
   ModelConfigurationMutationRequest,
   ModelConfigurationMutationResult,
   ModelConfigurationStage,
@@ -356,7 +358,7 @@ function boundedRouteKey(value: unknown): string {
     value.length === 0 ||
     value.length > 4096 ||
     /[\r\n]/.test(value) ||
-    value.split("\0").length !== 4
+    !isModelRouteKeyV2(value)
   ) {
     throw new Error("Invalid canonical model route.");
   }
@@ -844,7 +846,7 @@ export class ModelConfigurationCoordinator {
               if (
                 completeDigests(record.afterDigests) &&
                 digestsEqual(currentDigests, record.afterDigests) &&
-                activeRouteKey === record.newRouteKey
+                routeKeysMatch(record.newRouteKey, activeRouteKey)
               ) {
                 this.operationStore.finish(record.operationId, "committed");
                 await this.removeBackupsSafely(snapshot);
@@ -854,7 +856,7 @@ export class ModelConfigurationCoordinator {
 
               if (
                 digestsEqual(currentDigests, record.beforeDigests) &&
-                activeRouteKey === record.oldRouteKey
+                routeKeysMatch(record.oldRouteKey, activeRouteKey)
               ) {
                 this.operationStore.finish(record.operationId, "rolled_back");
                 await this.removeBackupsSafely(snapshot);
@@ -870,7 +872,7 @@ export class ModelConfigurationCoordinator {
               );
               if (
                 !digestsEqual(restoredDigests, record.beforeDigests) ||
-                restoredRouteKey !== record.oldRouteKey
+                !routeKeysMatch(record.oldRouteKey, restoredRouteKey)
               ) {
                 throw new Error(
                   "Model configuration recovery verification failed.",

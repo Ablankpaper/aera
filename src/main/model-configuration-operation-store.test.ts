@@ -67,6 +67,63 @@ afterEach(() => {
 });
 
 describe("ModelConfigurationOperationStore", () => {
+  it("accepts only versioned route keys for newly journalled operations", () => {
+    const legacyFixture = fixture();
+    const legacySnapshot = captureModelConfigurationFiles({
+      profileId: "default",
+      operationId: OPERATION_ID,
+      paths: legacyFixture.paths,
+    });
+    const legacyStore = new ModelConfigurationOperationStore(
+      legacyFixture.database,
+    );
+    const legacy = [
+      "custom:fixture",
+      "fixture-model",
+      "https://example.invalid/v1",
+      "chat_completions",
+    ].join("\0");
+
+    expect(() =>
+      legacyStore.begin({
+        operationId: OPERATION_ID,
+        ownerHandle: "owner",
+        profileId: "default",
+        oldRouteKey: legacy,
+        newRouteKey: legacy,
+        snapshot: legacySnapshot,
+      }),
+    ).toThrow();
+
+    const versionedFixture = fixture();
+    const versionedSnapshot = captureModelConfigurationFiles({
+      profileId: "default",
+      operationId: OPERATION_ID,
+      paths: versionedFixture.paths,
+    });
+    const versionedStore = new ModelConfigurationOperationStore(
+      versionedFixture.database,
+    );
+    const versioned = [
+      "v2",
+      "custom:fixture",
+      "fixture-model",
+      "https://example.invalid/v1",
+      "chat_completions",
+    ].join("\0");
+
+    expect(() =>
+      versionedStore.begin({
+        operationId: OPERATION_ID,
+        ownerHandle: "owner",
+        profileId: "default",
+        oldRouteKey: versioned,
+        newRouteKey: versioned,
+        snapshot: versionedSnapshot,
+      }),
+    ).not.toThrow();
+  });
+
   it("journals only bounded non-secret operation metadata", () => {
     const { database, paths } = fixture();
     writeFileSync(paths.config, "model:\n  provider: openai\n");
@@ -76,13 +133,26 @@ describe("ModelConfigurationOperationStore", () => {
       paths,
     });
     const store = new ModelConfigurationOperationStore(database);
+    const oldRouteKey = [
+      "v2",
+      "openai",
+      "gpt-5.6",
+      "",
+      "chat_completions",
+    ].join("\0");
+    const newRouteKey = [
+      "v2",
+      "custom:petoi",
+      "gpt-5.6-sol",
+      "https://api.petoi.cn/v1",
+      "codex_responses",
+    ].join("\0");
     const record = store.begin({
       operationId: OPERATION_ID,
       ownerHandle: "a".repeat(64),
       profileId: "default",
-      oldRouteKey: "openai\0gpt-5.6\0\0chat_completions",
-      newRouteKey:
-        "custom:petoi\0gpt-5.6-sol\0https://api.petoi.cn/v1\0codex_responses",
+      oldRouteKey,
+      newRouteKey,
       snapshot,
     });
 
@@ -90,10 +160,8 @@ describe("ModelConfigurationOperationStore", () => {
       /api[_-]?key|secret|fileBody|absolutePath/i,
     );
     expect(JSON.stringify(record)).not.toContain(paths.config);
-    expect(record.oldRouteKey).toBe("openai\0gpt-5.6\0\0chat_completions");
-    expect(record.newRouteKey).toBe(
-      "custom:petoi\0gpt-5.6-sol\0https://api.petoi.cn/v1\0codex_responses",
-    );
+    expect(record.oldRouteKey).toBe(oldRouteKey);
+    expect(record.newRouteKey).toBe(newRouteKey);
     const columns = database.sqlite
       .prepare("PRAGMA table_info(desktop_model_configuration_operations)")
       .all() as Array<{ name: string }>;
@@ -120,12 +188,48 @@ describe("ModelConfigurationOperationStore", () => {
       operationId: OPERATION_ID,
       ownerHandle,
       profileId: "default",
-      oldRouteKey: "auto\0old\0\0",
-      newRouteKey: "openai\0new\0https://example.invalid/v1\0responses",
+      oldRouteKey: "v2\0auto\0old\0\0",
+      newRouteKey: "v2\0openai\0new\0https://example.invalid/v1\0responses",
       snapshot,
     });
 
     expect(record.ownerHandle).toBe(ownerHandle);
+  });
+
+  it("reads historical v1 route keys without allowing new v1 writes", () => {
+    const { database, paths } = fixture();
+    const snapshot = captureModelConfigurationFiles({
+      profileId: "default",
+      operationId: OPERATION_ID,
+      paths,
+    });
+    const store = new ModelConfigurationOperationStore(database);
+    const versioned =
+      "v2\0custom:fixture\0fixture-model\0https://example.invalid/v1\0chat_completions";
+    store.begin({
+      operationId: OPERATION_ID,
+      ownerHandle: "owner",
+      profileId: "default",
+      oldRouteKey: versioned,
+      newRouteKey: versioned,
+      snapshot,
+    });
+
+    const legacy =
+      "custom:fixture\0fixture-model\0https://example.invalid/v1\0chat_completions";
+    const encodedLegacy = `b64v1:${Buffer.from(legacy, "utf8").toString("base64url")}`;
+    database.sqlite
+      .prepare(
+        `UPDATE desktop_model_configuration_operations
+         SET old_route_key = ?, new_route_key = ?
+         WHERE operation_id = ?`,
+      )
+      .run(encodedLegacy, encodedLegacy, OPERATION_ID);
+
+    expect(store.require(OPERATION_ID)).toMatchObject({
+      oldRouteKey: legacy,
+      newRouteKey: legacy,
+    });
   });
 
   it("restores exact comments, CRLF bytes, modes, and absence", () => {
