@@ -3,11 +3,19 @@ import { useEffect, useRef, useState } from "react";
 export type DiscoveryStatus =
   | "idle"
   | "loading"
-  | "ok"
+  | "success_with_models"
+  | "success_empty"
+  | "authentication_rejected"
+  | "forbidden"
+  | "not_found"
+  | "rate_limited"
+  | "upstream_error"
+  | "malformed_response"
+  | "timeout"
+  | "network_error"
   | "no-key"
   | "unsupported"
-  | "unknown-host"
-  | "error";
+  | "unknown-host";
 
 export interface UseDiscoveredModelsArgs {
   provider: string;
@@ -82,7 +90,7 @@ export function useDiscoveredModels(
         setFreeModels(result.freeModels ?? []);
       } catch {
         if (seq !== cancelRef.current) return;
-        setStatus("error");
+        setStatus("network_error");
         setModels([]);
         setCached(false);
         setFreeModels([]);

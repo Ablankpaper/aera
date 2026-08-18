@@ -64,6 +64,7 @@ describe("model configuration contract", () => {
       "native_module_load_failed",
       "model_configuration_database_unavailable",
       "model_configuration_schema_unsupported",
+      "route_catalog_repair_required",
       "model_configuration_recovery_required",
     ];
     for (const code of startupCodes) {

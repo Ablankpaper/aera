@@ -1094,10 +1094,7 @@ interface HermesAPI {
     }) => void,
   ) => () => void;
   onRuntimeSnapshotChanged: (
-    callback: (change?: {
-      catalogRevision?: string;
-      profile?: string;
-    }) => void,
+    callback: (change?: { catalogRevision?: string; profile?: string }) => void,
   ) => () => void;
   setSshConfig: (
     host: string,
@@ -1177,7 +1174,20 @@ interface HermesAPI {
     profile?: string,
   ) => Promise<{
     models: string[];
-    status: "ok" | "no-key" | "error" | "unsupported" | "unknown-host";
+    status:
+      | "success_with_models"
+      | "success_empty"
+      | "authentication_rejected"
+      | "forbidden"
+      | "not_found"
+      | "rate_limited"
+      | "upstream_error"
+      | "malformed_response"
+      | "timeout"
+      | "network_error"
+      | "no-key"
+      | "unsupported"
+      | "unknown-host";
     cached: boolean;
     /** Subset of `models` flagged as free (Nous Portal today). #367. */
     freeModels?: string[];

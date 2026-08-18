@@ -830,6 +830,77 @@ describe("model-configuration runtime", () => {
     }
   });
 
+  it("preserves an ambiguous route-directory startup cause", async () => {
+    const root = mkdtempSync(join(tmpdir(), "aera-model-runtime-route-"));
+    roots.push(root);
+    const hermesHome = join(root, "hermes");
+    const userData = join(root, "user-data");
+    mkdirSync(hermesHome, { recursive: true });
+    process.env.HERMES_HOME = hermesHome;
+    writeFileSync(
+      join(hermesHome, "providers.json"),
+      `${JSON.stringify({ version: 1, providers: [] }, null, 2)}\n`,
+    );
+    writeFileSync(join(hermesHome, "models.json"), "{not-valid-json\n");
+    writeFileSync(join(hermesHome, "model-definitions.json"), "{}\n");
+    writeFileSync(
+      join(hermesHome, "config.yaml"),
+      ["model: {}", "providers: {}", ""].join("\n"),
+    );
+
+    vi.resetModules();
+    vi.doUnmock("./installer");
+    const actualInstaller =
+      await vi.importActual<typeof import("./installer")>("./installer");
+    vi.doMock("./installer", () => actualInstaller);
+    const [{ AgenteraProfileBindingStore }, runtime, modelDatabase] =
+      await Promise.all([
+        import("./agentera-profile-binding"),
+        import("./model-configuration-runtime"),
+        import("./model-configuration-database"),
+      ]);
+    const bindings = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage: {
+        isEncryptionAvailable: () => true,
+        encryptString: (value: string) => Buffer.from(value, "utf8"),
+        decryptString: (value: Buffer) => value.toString("utf8"),
+      },
+    });
+    bindings.bindExistingProfile(hermesHome, OWNER);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const handle = await runtime.prepareModelConfigurationRuntime({
+      userDataPath: userData,
+      getOwner: () => OWNER,
+      profileBindings: bindings,
+      getConnectionConfig: () => ({ mode: "local" }),
+      openDatabase: (path) =>
+        modelDatabase.openModelConfigurationDatabase(path, {
+          databaseFactory: (databasePath) =>
+            new DatabaseSync(
+              databasePath,
+            ) as unknown as ModelConfigurationSqliteDatabase,
+        }),
+    });
+
+    expect(handle.coordinator).toBeNull();
+    expect(handle.startupFailure).toEqual({
+      code: "route_catalog_repair_required",
+      diagnosticId: expect.stringMatching(/^[0-9a-f]{12}$/u),
+    });
+    expect(log).toHaveBeenCalledWith(
+      "[MODEL_CONFIGURATION] route repair required",
+      "models_json_invalid",
+    );
+    expect(log).toHaveBeenCalledWith(
+      "[MODEL_CONFIGURATION] unavailable",
+      handle.startupFailure!.diagnosticId,
+      "route_catalog_repair_required",
+    );
+    handle.close();
+  });
+
   it.each([
     "native_module_abi_mismatch",
     "native_module_architecture_mismatch",

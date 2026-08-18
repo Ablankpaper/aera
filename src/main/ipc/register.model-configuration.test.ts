@@ -281,6 +281,7 @@ describe("coordinatorUnavailableMutation", () => {
     "native_module_load_failed",
     "model_configuration_database_unavailable",
     "model_configuration_schema_unsupported",
+    "route_catalog_repair_required",
   ] as const)("maps the exact %s identity to validation", async (code) => {
     const factory = await unavailableMutationFactory();
     const startupFailure = {

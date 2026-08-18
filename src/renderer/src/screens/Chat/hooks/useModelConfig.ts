@@ -99,7 +99,7 @@ function mergeLiveOllamaCloudModels(
   liveModels: string[],
   liveStatus: string,
 ): SavedModelForPicker[] {
-  if (liveStatus !== "ok" || liveModels.length === 0) {
+  if (liveStatus !== "success_with_models" || liveModels.length === 0) {
     return savedModels;
   }
 
