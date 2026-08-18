@@ -114,6 +114,18 @@ test("extracts an actual Windows app ZIP and verifies the unpacked native bounda
       archive: `Aera-Internal-Beta-${VERSION}-windows-x64-app.zip`,
     });
     assert.equal(verifiedNative, true);
+
+    await assert.rejects(
+      verifyPackagedWindowsAppZip(
+        {
+          zip: archive,
+          desktopVersion: VERSION,
+          expectedCloudOrigin: "https://203.0.113.10",
+        },
+        { verifyNative: async () => {} },
+      ),
+      /baked Cloud origin is missing/u,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

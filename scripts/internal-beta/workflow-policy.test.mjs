@@ -255,9 +255,13 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   );
   assert.ok(packagedUpdaterGateIndex >= 0);
   assert.ok(packagedUpdaterGateIndex < containerSubmissionIndex);
+  assert.equal(
+    workflow.jobs.macos.steps[packagedUpdaterGateIndex].env.BETA_ORIGIN,
+    "${{ vars.AERA_INTERNAL_BETA_ORIGIN }}",
+  );
   assert.match(
     workflow.jobs.macos.steps[packagedUpdaterGateIndex].run,
-    /node scripts\/internal-beta\/verify-packaged-updater-extraction\.mjs\s+--app "\$\{\{ steps\.mac_paths\.outputs\.app \}\}"\s+--zip "\$\{\{ steps\.mac_paths\.outputs\.zip \}\}"\s+--desktop-version "\$VERSION"\s+--require-runtime-entries/u,
+    /node scripts\/internal-beta\/verify-packaged-updater-extraction\.mjs\s+--app "\$\{\{ steps\.mac_paths\.outputs\.app \}\}"\s+--zip "\$\{\{ steps\.mac_paths\.outputs\.zip \}\}"\s+--desktop-version "\$VERSION"\s+--expected-cloud-origin "\$BETA_ORIGIN"\s+--require-runtime-entries/u,
   );
   assert.match(
     packagedUpdaterVerifierRaw,
@@ -294,6 +298,10 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   assert.match(raw, /--win nsis portable dir --x64 --publish never/u);
   assert.match(raw, /Aera-Internal-Beta-\$env:VERSION-windows-x64-app\.zip/u);
   assert.match(raw, /verify-packaged-windows-app-zip\.mjs/u);
+  assert.match(
+    raw,
+    /verify-packaged-windows-app-zip\.mjs[\s\S]*--expected-cloud-origin \$env:BETA_ORIGIN/u,
+  );
   assert.doesNotMatch(
     raw,
     /secrets\.WIN_CSC_LINK|secrets\.WIN_CSC_KEY_PASSWORD/u,

@@ -365,11 +365,13 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ needs.validate.outputs.version }}
+          BETA_ORIGIN: ${{ vars.AERA_INTERNAL_BETA_ORIGIN }}
         run: >-
           node scripts/internal-beta/verify-packaged-updater-extraction.mjs
           --app "${{ steps.mac_paths.outputs.app }}"
           --zip "${{ steps.mac_paths.outputs.zip }}"
           --desktop-version "$VERSION"
+          --expected-cloud-origin "$BETA_ORIGIN"
           --require-runtime-entries
 
       - name: Submit final DMG and ZIP exactly once
@@ -616,6 +618,7 @@ jobs:
         shell: pwsh
         env:
           VERSION: ${{ needs.validate.outputs.version }}
+          BETA_ORIGIN: ${{ vars.AERA_INTERNAL_BETA_ORIGIN }}
         run: |
           $unpacked = @(Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*unpacked" })
           if ($unpacked.Count -ne 1) { throw "Expected exactly one unpacked Windows app" }
@@ -641,6 +644,7 @@ jobs:
           node scripts/internal-beta/verify-packaged-windows-app-zip.mjs `
             --zip $appZip `
             --desktop-version $env:VERSION `
+            --expected-cloud-origin $env:BETA_ORIGIN `
             --runtime-seed-reference resources/agentera-runtime-seed
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

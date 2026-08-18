@@ -12,6 +12,7 @@ import { extractFile, listPackage } from "@electron/asar";
 
 import { verifyPackagedNativeModule } from "../release/verify-packaged-native-module.mjs";
 import { verifyPackagedRuntimeSeed } from "../verify-packaged-runtime-seed.mjs";
+import { verifyPackagedAsarAuthConfig } from "./verify-built-auth-config.mjs";
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(SCRIPT_DIRECTORY, "..", "..");
@@ -152,6 +153,9 @@ async function validateExtractedWindowsApp(
     extractFile(appAsar, "package.json").toString("utf8"),
   );
   validateWindowsAppAsarEntries(asarEntries, packageDocument, desktopVersion);
+  if (options.expectedCloudOrigin) {
+    verifyPackagedAsarAuthConfig(appAsar, options.expectedCloudOrigin);
+  }
   validateWindowsPeX64(await readFile(executable));
 
   await (dependencies.verifyNative ?? verifyPackagedNativeModule)({
@@ -213,7 +217,12 @@ function parseOptions(arguments_) {
     }
     const key = flag.slice(2).replaceAll("-", "_");
     if (
-      !new Set(["zip", "desktop_version", "runtime_seed_reference"]).has(key)
+      !new Set([
+        "zip",
+        "desktop_version",
+        "runtime_seed_reference",
+        "expected_cloud_origin",
+      ]).has(key)
     ) {
       throw new Error(`Unknown option: ${flag}`);
     }
@@ -230,6 +239,10 @@ async function runCli(arguments_) {
     zip: values.zip,
     desktopVersion: values.desktop_version,
     runtimeSeedReference: values.runtime_seed_reference,
+    expectedCloudOrigin: required(
+      values.expected_cloud_origin,
+      "expected Cloud origin",
+    ),
   });
   process.stdout.write("packaged Windows app ZIP verification passed\n");
 }

@@ -11,6 +11,8 @@ import { promisify } from "node:util";
 import electronPath from "electron";
 import { listPackage } from "@electron/asar";
 
+import { verifyPackagedAsarAuthConfig } from "./verify-built-auth-config.mjs";
+
 const execFileAsync = promisify(execFile);
 const PROBE_PATH = fileURLToPath(
   new URL("./packaged-updater-extraction-probe.cjs", import.meta.url),
@@ -187,6 +189,9 @@ export async function validateExtractedMacApp(
     const nativeEntries = await collectNativeEntries(unpackedRoot);
     validatePackagedRuntimeEntries(asarEntries, nativeEntries);
   }
+  if (options.expectedCloudOrigin) {
+    verifyPackagedAsarAuthConfig(appAsar, options.expectedCloudOrigin);
+  }
   await runCommand("/usr/bin/codesign", [
     "--verify",
     "--deep",
@@ -264,7 +269,10 @@ export async function verifyPackagedUpdaterExtraction(
       staging,
       desktopVersion,
       dependencies.runCommand ?? run,
-      { requireRuntimeEntries: options.requireRuntimeEntries === true },
+      {
+        requireRuntimeEntries: options.requireRuntimeEntries === true,
+        expectedCloudOrigin: options.expectedCloudOrigin,
+      },
     );
     return { version: desktopVersion, archive: basename(zip) };
   } finally {
@@ -276,7 +284,12 @@ function parseOptions(arguments_) {
   if (arguments_.length === 0) {
     throw new Error("Packaged updater options must be flag/value pairs");
   }
-  const allowed = new Set(["app", "zip", "desktop_version"]);
+  const allowed = new Set([
+    "app",
+    "zip",
+    "desktop_version",
+    "expected_cloud_origin",
+  ]);
   const values = {};
   for (let index = 0; index < arguments_.length; index += 1) {
     const flag = arguments_[index];
@@ -309,6 +322,10 @@ async function runCli(arguments_) {
     zip: values.zip,
     desktopVersion: values.desktop_version,
     requireRuntimeEntries: values.require_runtime_entries === true,
+    expectedCloudOrigin: required(
+      values.expected_cloud_origin,
+      "expected Cloud origin",
+    ),
   });
   process.stdout.write("packaged macOS updater extracted the final ZIP\n");
 }
