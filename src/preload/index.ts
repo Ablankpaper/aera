@@ -22,6 +22,7 @@ import type {
   OwnerModelRouteCatalogSnapshot,
   OwnerModelRouteSelection,
 } from "../shared/model-configuration";
+import type { ProviderDiscoveryResultV2 } from "../shared/provider-model-discovery";
 import type {
   MessagingPlatformsResponse,
   MessagingPlatformTestResponse,
@@ -733,35 +734,18 @@ const hermesAPI = {
     baseUrl?: string,
     apiKey?: string,
     profile?: string,
-  ): Promise<{
-    models: string[];
-    status:
-      | "success_with_models"
-      | "success_empty"
-      | "authentication_rejected"
-      | "forbidden"
-      | "not_found"
-      | "rate_limited"
-      | "upstream_error"
-      | "malformed_response"
-      | "timeout"
-      | "network_error"
-      | "no-key"
-      | "unsupported"
-      | "unknown-host";
-    cached: boolean;
-    /** Subset of `models` flagged as free per the provider catalog
-     *  (Nous Portal today). Optional — providers without pricing
-     *  metadata return undefined. Issue #367. */
-    freeModels?: string[];
-  }> =>
+    requestId?: string,
+  ): Promise<ProviderDiscoveryResultV2> =>
     ipcRenderer.invoke(
       "discover-provider-models",
       provider,
       baseUrl,
       apiKey,
       profile,
+      requestId,
     ),
+  cancelProviderModelDiscovery: (requestId: string): Promise<void> =>
+    ipcRenderer.invoke("cancel-provider-model-discovery", requestId),
 
   getModelContextWindow: (
     provider: string,

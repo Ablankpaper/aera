@@ -1262,6 +1262,12 @@ export function registerIpcHandlers(context: IpcContext): void {
     productAccessGuard,
     assertChannelProfileTarget,
   );
+  // Discovery requests are renderer-owned and may outlive a provider/base URL
+  // change. Keep controllers scoped by sender and request id so one renderer
+  // cannot cancel another renderer's request.
+  const discoveryRequests = new Map<string, AbortController>();
+  const discoveryRequestKey = (senderId: number, requestId: string): string =>
+    `${senderId}:${requestId}`;
   const modelConfigurationMutationCoordinator =
     modelConfigurationCoordinator ??
     coordinatorUnavailableMutation(modelConfigurationStartupFailure ?? null);
@@ -4228,13 +4234,36 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle(
     "discover-provider-models",
     (
-      _event,
+      event,
       provider: string,
       baseUrl: string | undefined,
       apiKey: string | undefined,
       profile?: string,
+      requestId?: string,
     ) => {
-      return discoverProviderModels(provider, baseUrl, apiKey, profile);
+      if (!requestId || requestId.length > 128) {
+        return discoverProviderModels(provider, baseUrl, apiKey, profile);
+      }
+      const key = discoveryRequestKey(event.sender.id, requestId);
+      const controller = new AbortController();
+      discoveryRequests.get(key)?.abort();
+      discoveryRequests.set(key, controller);
+      return discoverProviderModels(provider, baseUrl, apiKey, profile, {
+        signal: controller.signal,
+      }).finally(() => {
+        if (discoveryRequests.get(key) === controller) {
+          discoveryRequests.delete(key);
+        }
+      });
+    },
+  );
+  ipcMain.handle(
+    "cancel-provider-model-discovery",
+    (event, requestId: string) => {
+      if (typeof requestId !== "string" || requestId.length > 128) return;
+      const key = discoveryRequestKey(event.sender.id, requestId);
+      discoveryRequests.get(key)?.abort();
+      discoveryRequests.delete(key);
     },
   );
 

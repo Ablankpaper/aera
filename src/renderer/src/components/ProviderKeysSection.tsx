@@ -225,8 +225,8 @@ function ProviderModelsManager({
       : discovery.status === "success_with_models"
         ? { tone: "ok", text: t("providers.keys.status.verified") }
         : discovery.status === "success_empty" ||
-            discovery.status === "unsupported" ||
-            discovery.status === "unknown-host"
+            discovery.status === "unsupported_provider" ||
+            discovery.status === "unknown_endpoint"
           ? { tone: "ok", text: t("providers.keys.status.connected") }
           : { tone: "muted", text: t("providers.keys.status.failed") };
 

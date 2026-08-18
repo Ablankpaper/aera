@@ -5,17 +5,20 @@ export type DiscoveryStatus =
   | "loading"
   | "success_with_models"
   | "success_empty"
+  | "credential_missing"
   | "authentication_rejected"
   | "forbidden"
   | "not_found"
   | "rate_limited"
   | "upstream_error"
   | "malformed_response"
+  | "dns_error"
+  | "connection_error"
+  | "tls_error"
+  | "cancelled"
   | "timeout"
-  | "network_error"
-  | "no-key"
-  | "unsupported"
-  | "unknown-host";
+  | "unsupported_provider"
+  | "unknown_endpoint";
 
 export interface UseDiscoveredModelsArgs {
   provider: string;
@@ -64,6 +67,7 @@ export function useDiscoveredModels(
   const [cached, setCached] = useState(false);
   const [freeModels, setFreeModels] = useState<string[]>([]);
   const cancelRef = useRef(0);
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     if (!enabled || !provider) {
@@ -74,6 +78,7 @@ export function useDiscoveredModels(
       return;
     }
     const seq = ++cancelRef.current;
+    const requestId = `discovery-${++requestIdRef.current}`;
     setStatus("loading");
     const handle = setTimeout(async () => {
       try {
@@ -82,6 +87,7 @@ export function useDiscoveredModels(
           baseUrl,
           apiKey,
           profile,
+          requestId,
         );
         if (seq !== cancelRef.current) return; // a later call superseded us
         setModels(result.models);
@@ -90,7 +96,7 @@ export function useDiscoveredModels(
         setFreeModels(result.freeModels ?? []);
       } catch {
         if (seq !== cancelRef.current) return;
-        setStatus("network_error");
+        setStatus("connection_error");
         setModels([]);
         setCached(false);
         setFreeModels([]);
@@ -98,6 +104,7 @@ export function useDiscoveredModels(
     }, 400);
     return (): void => {
       clearTimeout(handle);
+      void window.hermesAPI.cancelProviderModelDiscovery?.(requestId);
     };
   }, [enabled, provider, baseUrl, apiKey, profile, refreshToken]);
 

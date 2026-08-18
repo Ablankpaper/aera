@@ -868,11 +868,17 @@ export async function discoverProviderModels(
       // Re-attach free flags from cache. Pricing is fetched fresh on
       // the next non-cache hit; meanwhile the renderer keeps the
       // previous free list.
-      return providerDiscoverySuccess(hit, {
+      const cachedResult = providerDiscoverySuccess(hit, {
         cached: true,
         freeModels:
           _freeCache.get(cacheKey(lowerProvider, "", "", profile)) || [],
       });
+      if (lowerProvider === "nous") {
+        cachedResult.freeModels = _freeCache.get(
+          cacheKey(lowerProvider, "", "", profile),
+        ) || [];
+      }
+      return cachedResult;
     }
     const discovered = await discoverOAuthModels(
       lowerProvider,
@@ -912,7 +918,9 @@ export async function discoverProviderModels(
     if (lowerProvider === "nous") {
       _freeCache.set(cacheKey(lowerProvider, "", "", profile), freeModels);
     }
-    return providerDiscoverySuccess(models, { freeModels });
+    const result = providerDiscoverySuccess(models, { freeModels });
+    if (lowerProvider === "nous") result.freeModels = uniqueSorted(freeModels);
+    return result;
   }
 
   if (!lowerProvider || NON_DISCOVERABLE_PROVIDERS.has(lowerProvider)) {

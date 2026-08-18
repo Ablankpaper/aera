@@ -96,7 +96,7 @@ describe("model-discovery", () => {
       undefined,
       undefined,
     );
-    expect(result.status).toBe("no-key");
+    expect(result.status).toBe("credential_missing");
     expect(result.models).toEqual([]);
   });
 
@@ -186,7 +186,7 @@ describe("model-discovery", () => {
         "sk-x",
         undefined,
       );
-      expect(result.status).toBe("unsupported");
+      expect(result.status).toBe("unsupported_provider");
       expect(result.models).toEqual([]);
     }
   });
@@ -355,7 +355,7 @@ describe("model-discovery", () => {
       undefined,
       undefined,
     );
-    expect(result.status).toBe("network_error");
+    expect(result.status).toBe("connection_error");
     expect(result.models).toEqual([]);
   });
 
@@ -375,7 +375,7 @@ describe("model-discovery", () => {
       undefined,
     );
 
-    expect(result.status).toBe("network_error");
+    expect(result.status).toBe("connection_error");
     expect(result.models).toEqual([]);
   });
 
@@ -563,7 +563,7 @@ describe("model-discovery", () => {
       "sk-test",
       undefined,
     );
-    expect(result.status).toBe("unknown-host");
+    expect(result.status).toBe("unknown_endpoint");
   });
 
   it("uses .env API key when caller doesn't pass one explicitly", async () => {

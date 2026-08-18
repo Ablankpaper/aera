@@ -24,6 +24,11 @@ export type ProviderDiscoveryStatusV2 =
   | "unsupported_provider"
   | "unknown_endpoint";
 
+export type ProviderDiscoveryFailureStatusV2 = Exclude<
+  ProviderDiscoveryStatusV2,
+  "success_with_models" | "success_empty"
+>;
+
 export type ProviderDiscoveryHttpStatusV2 =
   | "success_with_models"
   | "success_empty"
@@ -174,9 +179,12 @@ export function providerDiscoverySuccess(
 
 /** Construct a failure result that cannot claim cached or successful data. */
 export function providerDiscoveryFailure(
-  status: Exclude<ProviderDiscoveryStatusV2, "success_with_models" | "success_empty">,
+  status: ProviderDiscoveryStatusV2,
   options: ProviderDiscoveryFailureOptions = {},
 ): ProviderDiscoveryResultV2 {
+  if (status === "success_with_models" || status === "success_empty") {
+    status = "connection_error";
+  }
   const result: ProviderDiscoveryResultV2 = {
     schemaVersion: 2,
     status,
@@ -290,4 +298,3 @@ function invalidDiscoveryResult(): ProviderDiscoveryResultV2 {
     diagnosticId: createProviderDiscoveryDiagnosticId(),
   });
 }
-

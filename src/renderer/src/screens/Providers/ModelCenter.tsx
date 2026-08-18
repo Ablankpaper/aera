@@ -424,7 +424,7 @@ export default function ModelCenter({
   >["status"];
   const discoveryFailureMessage = (status: DiscoveryStatus): string => {
     switch (status) {
-      case "no-key":
+      case "credential_missing":
         return t("providers.center.errors.apiKey");
       case "authentication_rejected":
         return t("providers.center.errors.authentication");
@@ -438,9 +438,16 @@ export default function ModelCenter({
         return t("providers.center.errors.upstream");
       case "malformed_response":
         return t("providers.center.errors.malformed");
+      case "dns_error":
+      case "connection_error":
+      case "tls_error":
+        return t("providers.center.errors.network");
       case "timeout":
         return t("providers.center.errors.timeout");
-      case "network_error":
+      case "cancelled":
+        return t("providers.center.errors.network");
+      case "unsupported_provider":
+      case "unknown_endpoint":
       default:
         return t("providers.center.errors.network");
     }
@@ -961,6 +968,7 @@ export default function ModelCenter({
         route.baseUrl || undefined,
         form.apiKey.trim() || undefined,
         targetProfileRef.current ?? profile,
+        "model-center",
       );
       if (result.status === "success_with_models") {
         setFetchedModelCount(result.models.length);
@@ -980,7 +988,7 @@ export default function ModelCenter({
         setConnectionState("manual");
         return;
       }
-      if (result.status === "unsupported") {
+      if (result.status === "unsupported_provider") {
         setConnectionState("manual");
         return;
       }
@@ -1270,6 +1278,7 @@ export default function ModelCenter({
         service.baseUrl || undefined,
         apiKey || undefined,
         targetProfileRef.current ?? profile,
+        "model-center",
       );
       if (result.status === "success_with_models") {
         for (const modelId of result.models) {
@@ -1310,7 +1319,10 @@ export default function ModelCenter({
         });
         return;
       }
-      if (result.status === "unsupported" || result.status === "unknown-host") {
+      if (
+        result.status === "unsupported_provider" ||
+        result.status === "unknown_endpoint"
+      ) {
         updateServiceFeedback(service.key, {
           tone: "neutral",
           message: t("providers.center.manualModelHint"),
