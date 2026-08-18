@@ -44,7 +44,7 @@ The release contract covers signed metadata, exact artifact bytes, persisted sta
 
 - Metadata changed after signing and artifacts changed after manifest creation are rejected.
 - A completed download restores to `ready` after process restart and invokes only the reviewed platform swap helper.
-- A macOS swap without a healthy-start marker restores the previous application.
+- A macOS swap without a healthy-start marker restores the previous application; a restarted app revalidates the journal binding before acknowledging health and finalizes any already-healthy journal left by a crashed helper.
 - A failed macOS candidate is terminated before its directory is replaced, and backup-creation failure keeps and relaunches the old app.
 - A Windows health failure terminates the candidate process tree before restoring the old app directory and relaunching the restored executable.
 - Only the live main window may acknowledge Renderer readiness; secondary or destroyed-window senders cannot mark an install healthy.

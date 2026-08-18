@@ -873,7 +873,7 @@ describe("Internal Beta desktop updater", () => {
           platform: "darwin",
           source_version: "0.7.4-internal-beta.15",
           target_version: CURRENT_VERSION,
-          artifact_name: artifact.name,
+          artifact_name: `Aera-Internal-Beta-${CURRENT_VERSION}-macos-arm64.zip`,
           artifact_size: artifact.size,
           artifact_sha256: artifact.sha256,
           artifact_sha512: artifact.sha512,
@@ -912,6 +912,134 @@ describe("Internal Beta desktop updater", () => {
       await expect(readFile(marker, "utf8")).resolves.toBe(
         `${CURRENT_VERSION}\n`,
       );
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "rejects a renderer health handshake for a journal bound to another artifact",
+    async () => {
+      const userDataPath = await createUserData();
+      const release = signedRelease();
+      const root = join(userDataPath, "desktop-updates");
+      const marker = join(root, "health-marker-invalid-binding");
+      await mkdir(root, { recursive: true });
+      const artifact = JSON.parse(release.manifestBytes.toString("utf8"))
+        .artifacts[0] as Record<string, unknown>;
+      await writeFile(
+        join(root, "install-journal.json"),
+        JSON.stringify({
+          schema_version: 2,
+          operation_id: "13345678-1234-4234-9234-123456789abc",
+          platform: "darwin",
+          source_version: "0.7.4-internal-beta.15",
+          target_version: CURRENT_VERSION,
+          artifact_name: artifact.name,
+          artifact_size: artifact.size,
+          artifact_sha256: artifact.sha256,
+          artifact_sha512: artifact.sha512,
+          current_app_path: "/Applications/Aera.app",
+          staged_app_path: join(root, "staging", CURRENT_VERSION, "Aera.app"),
+          backup_path: "/Applications/Aera.app.aera-update-backup-2",
+          success_marker: marker,
+          failure_marker: join(root, "install-failure.json"),
+          state: "launched",
+          rollback_state: "not_started",
+          updated_at: "2026-08-18T07:00:00Z",
+        }),
+      );
+      const updater = new InternalBetaDesktopUpdater({
+        currentVersion: CURRENT_VERSION,
+        platform: "darwin",
+        arch: "arm64",
+        userDataPath,
+        currentAppPath: "/Applications/Aera.app",
+        baseUrl: BASE_URL,
+        trustedPublicKeys: new Map([[KEY_ID, release.publicKeyPem]]),
+        autoDownload: false,
+        onState: vi.fn(),
+        log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        metadataTransport: transportFor(
+          release.manifestBytes,
+          release.signatureBytes,
+        ),
+        prepareArtifact: async () => {},
+        installArtifact: async () => {},
+      });
+
+      await updater.initialize();
+      await expect(updater.markRendererReady()).rejects.toThrow(
+        /journal artifact differs/u,
+      );
+      await expect(access(marker)).rejects.toThrow();
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "finalizes a healthy journal left behind after the helper exits",
+    async () => {
+      const userDataPath = await createUserData();
+      const release = signedRelease();
+      const root = join(userDataPath, "desktop-updates");
+      const current = join(userDataPath, "Applications", "Aera.app");
+      const backup = `${current}.aera-update-backup-3`;
+      const staged = join(root, "staging", CURRENT_VERSION, "Aera.app");
+      const marker = join(root, "health-marker-orphaned");
+      await Promise.all([
+        mkdir(current, { recursive: true }),
+        mkdir(backup, { recursive: true }),
+        mkdir(staged, { recursive: true }),
+        mkdir(root, { recursive: true }),
+      ]);
+      const artifact = JSON.parse(release.manifestBytes.toString("utf8"))
+        .artifacts[0] as Record<string, unknown>;
+      await writeFile(
+        join(root, "install-journal.json"),
+        canonicalJsonBytes({
+          schema_version: 2,
+          operation_id: "14345678-1234-4234-9234-123456789abc",
+          platform: "darwin",
+          source_version: "0.7.4-internal-beta.15",
+          target_version: CURRENT_VERSION,
+          artifact_name: `Aera-Internal-Beta-${CURRENT_VERSION}-macos-arm64.zip`,
+          artifact_size: artifact.size,
+          artifact_sha256: artifact.sha256,
+          artifact_sha512: artifact.sha512,
+          current_app_path: current,
+          staged_app_path: staged,
+          backup_path: backup,
+          success_marker: marker,
+          failure_marker: join(root, "install-failure.json"),
+          state: "healthy",
+          rollback_state: "succeeded",
+          updated_at: "2026-08-18T07:00:00Z",
+        }),
+      );
+      const updater = new InternalBetaDesktopUpdater({
+        currentVersion: CURRENT_VERSION,
+        platform: "darwin",
+        arch: "arm64",
+        userDataPath,
+        currentAppPath: current,
+        baseUrl: BASE_URL,
+        trustedPublicKeys: new Map([[KEY_ID, release.publicKeyPem]]),
+        autoDownload: false,
+        onState: vi.fn(),
+        log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        metadataTransport: transportFor(
+          release.manifestBytes,
+          release.signatureBytes,
+        ),
+        prepareArtifact: async () => {},
+        installArtifact: async () => {},
+      });
+
+      await updater.initialize();
+      await updater.markRendererReady();
+      await expect(access(backup)).rejects.toThrow();
+      await expect(
+        access(join(root, "install-journal.json")),
+      ).rejects.toThrow();
+      await expect(access(marker)).rejects.toThrow();
     },
   );
 

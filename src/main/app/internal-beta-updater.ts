@@ -2572,6 +2572,9 @@ export class InternalBetaDesktopUpdater {
       throw error;
     }
     const journal = parseInstallJournal(raw);
+    if (journal.schema_version === 2) {
+      this.validateInstallJournalBinding(journal);
+    }
     if (
       compareInternalBetaVersions(
         journal.target_version,
@@ -2612,6 +2615,14 @@ export class InternalBetaDesktopUpdater {
     }
     this.emitStage("health", "succeeded", null, journal.target_version);
     this.emitStage("finalize", "succeeded", null, journal.target_version);
+    if (journal.schema_version === 2 && journal.state === "healthy") {
+      await Promise.all([
+        rm(journal.backup_path, { recursive: true, force: true }),
+        rm(journal.success_marker, { force: true }),
+        rm(journal.failure_marker, { force: true }),
+        rm(this.installJournalPath(), { force: true }),
+      ]);
+    }
   }
 
   private async loadPending(): Promise<PendingDesktopUpdate | null> {
