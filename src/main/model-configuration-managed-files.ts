@@ -2,8 +2,13 @@ import { safeWriteFile } from "./utils";
 import {
   assertManagedWritePath,
   clearManagedModelFileRoots,
+  currentManagedModelProfileRoot,
+  currentModelConfigurationWritePermit,
   managedModelFileLocation,
+  registerManagedModelProfileRoot,
   registerManagedModelFileRoots,
+  runWithManagedModelProfileRoot,
+  unregisterManagedModelProfileRoot,
   type ModelConfigurationWritePermit,
 } from "./model-configuration-write-authority";
 
@@ -14,8 +19,13 @@ export type {
 } from "./model-configuration-write-authority";
 export {
   clearManagedModelFileRoots,
+  currentManagedModelProfileRoot,
+  currentModelConfigurationWritePermit,
   managedModelFileLocation,
+  registerManagedModelProfileRoot,
   registerManagedModelFileRoots,
+  runWithManagedModelProfileRoot,
+  unregisterManagedModelProfileRoot,
 };
 
 export function writeManagedModelFile(

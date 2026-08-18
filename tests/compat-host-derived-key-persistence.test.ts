@@ -8,6 +8,7 @@ import {
 } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { withManagedModelTestWrite } from "./helpers/managed-model-test-writer";
 
 /**
  * Dual-engine compat: when the desktop seeds a custom-provider key into
@@ -32,33 +33,45 @@ async function freshModels(): Promise<typeof import("../src/main/models")> {
 
 async function initializeExplicitly(): Promise<void> {
   const models = await freshModels();
-  const coordinator: Parameters<typeof models.initializeModelCatalog>[0] = {
-    initializeManagedModelFiles: async (input) => {
-      if (input.changesRequired) {
-        for (const stage of [
-          "credential",
-          "provider",
-          "model_library",
-          "native_route",
-          "activation",
-        ] as const) {
-          await input.applyStage(stage);
-        }
-      }
-      if (!(await input.verify())) throw new Error("initialization verification failed");
-      return {
-        status: "committed",
-        catalog: {
-          revision: "a".repeat(64),
-          targetProfileId: "default",
-          routes: [],
+  await withManagedModelTestWrite(
+    {
+      roots: {
+        globalRoot: testHome,
+        profiles: { default: testHome },
+      },
+      scope: { globalCatalog: true, profileIds: ["default"] },
+    },
+    async (permit) => {
+      const coordinator: Parameters<typeof models.initializeModelCatalog>[0] = {
+        initializeManagedModelFiles: async (input) => {
+          if (input.changesRequired) {
+            for (const stage of [
+              "credential",
+              "provider",
+              "model_library",
+              "native_route",
+              "activation",
+            ] as const) {
+              await input.applyStage(stage, permit);
+            }
+          }
+          if (!(await input.verify()))
+            throw new Error("initialization verification failed");
+          return {
+            status: "committed",
+            catalog: {
+              revision: "a".repeat(64),
+              targetProfileId: "default",
+              routes: [],
+            },
+          };
         },
       };
+      await models.initializeModelCatalog(
+        coordinator,
+        models.planModelCatalogInitialization(["default"]),
+      );
     },
-  };
-  await models.initializeModelCatalog(
-    coordinator,
-    models.planModelCatalogInitialization(["default"]),
   );
 }
 

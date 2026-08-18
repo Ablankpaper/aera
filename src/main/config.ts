@@ -31,6 +31,7 @@ import {
   OPENAI_COMPAT_PROVIDERS,
 } from "../shared/url-key-map";
 import {
+  currentModelConfigurationWritePermit,
   writeManagedModelFile,
   type ManagedModelFileRole,
   type ModelConfigurationWritePermit,
@@ -133,11 +134,7 @@ export function persistConfigWritePlan<T>(
 }
 
 function persistLegacyConfigWritePlan<T>(plan: ConfigWritePlan<T>): T {
-  if (!configBytesEqual(configFileBytes(plan.target), plan.before)) {
-    throw new Error("Managed config write plan is stale.");
-  }
-  if (plan.after !== null) safeWriteFile(plan.target, plan.after, plan.mode);
-  return finishConfigWritePlan(plan);
+  return persistConfigWritePlan(currentModelConfigurationWritePermit(), plan);
 }
 
 // ── Connection Config (local / remote / ssh) ─────────────

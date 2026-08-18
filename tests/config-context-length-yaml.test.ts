@@ -3,6 +3,7 @@ import { load } from "js-yaml";
 import { join } from "path";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
+import { withManagedModelTestWrite } from "./helpers/managed-model-test-writer";
 
 const DIR = join(tmpdir(), `yaml-validity-${Date.now()}`);
 async function load_(
@@ -11,6 +12,18 @@ async function load_(
   vi.resetModules();
   process.env.HERMES_HOME = home;
   return import("../src/main/config");
+}
+
+async function writeDefaultProfile<T>(
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  return await withManagedModelTestWrite(
+    {
+      roots: { globalRoot: DIR, profiles: { default: DIR } },
+      scope: { globalCatalog: false, profileIds: ["default"] },
+    },
+    callback,
+  );
 }
 beforeEach(() => mkdirSync(DIR, { recursive: true }));
 afterEach(() => {
@@ -29,15 +42,21 @@ function parsed(): Record<string, unknown> {
 describe("context_length writes stay valid YAML", () => {
   it("fresh set / re-set / clear", async () => {
     const { setModelConfig } = await load_(DIR);
-    setModelConfig("qwen", "qwen-max", "", undefined, 65536);
+    await writeDefaultProfile(() =>
+      setModelConfig("qwen", "qwen-max", "", undefined, 65536),
+    );
     expect((parsed().model as Record<string, unknown>).context_length).toBe(
       65536,
     );
-    setModelConfig("qwen", "qwen-max", "", undefined, 65536);
+    await writeDefaultProfile(() =>
+      setModelConfig("qwen", "qwen-max", "", undefined, 65536),
+    );
     expect((parsed().model as Record<string, unknown>).context_length).toBe(
       65536,
     );
-    setModelConfig("qwen", "qwen-max", "", undefined, null);
+    await writeDefaultProfile(() =>
+      setModelConfig("qwen", "qwen-max", "", undefined, null),
+    );
     expect(
       "context_length" in (parsed().model as Record<string, unknown>),
     ).toBe(false);
@@ -57,11 +76,15 @@ describe("context_length writes stay valid YAML", () => {
       ].join("\n"),
     );
     const { setModelConfig } = await load_(DIR);
-    setModelConfig("qwen", "qwen-max", "https://x", undefined, 32768);
+    await writeDefaultProfile(() =>
+      setModelConfig("qwen", "qwen-max", "https://x", undefined, 32768),
+    );
     let doc = parsed();
     expect((doc.model as Record<string, unknown>).context_length).toBe(32768);
     expect((doc.agent as Record<string, unknown>).streaming).toBe(true);
-    setModelConfig("qwen", "qwen-max", "https://x", undefined, null);
+    await writeDefaultProfile(() =>
+      setModelConfig("qwen", "qwen-max", "https://x", undefined, null),
+    );
     doc = parsed();
     expect("context_length" in (doc.model as Record<string, unknown>)).toBe(
       false,

@@ -48,6 +48,7 @@ interface ActivePermit extends ModelConfigurationWritePermit {
 
 const activePermits = new WeakSet<object>();
 const permitStorage = new AsyncLocalStorage<ActivePermit>();
+const profileRootStorage = new AsyncLocalStorage<ReadonlyMap<string, string>>();
 let operationSequence = 0;
 
 let registeredRoots: {
@@ -82,6 +83,68 @@ export function clearManagedModelFileRoots(): void {
   registeredRoots = null;
 }
 
+export function currentManagedModelProfileRoot(
+  profileId: string,
+): string | null {
+  const id = profileId.trim();
+  if (!id) return null;
+  return profileRootStorage.getStore()?.get(id) ?? null;
+}
+
+export async function runWithManagedModelProfileRoot<T>(
+  profileId: string,
+  profileRoot: string,
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  const id = profileId.trim();
+  if (!id || !isAbsolute(profileRoot) || typeof callback !== "function") {
+    throw new TypeError("Managed model Profile root override is invalid.");
+  }
+  const root = normalizedPath(profileRoot);
+  const current = profileRootStorage.getStore();
+  const existing = current?.get(id);
+  if (existing && existing !== root) {
+    throw new ModelConfigurationWriteError(
+      "model_configuration_lock_order_violation",
+      "A managed model Profile root override cannot change while active.",
+    );
+  }
+  const next = new Map(current ?? []);
+  next.set(id, root);
+  return profileRootStorage.run(next, callback);
+}
+
+export function registerManagedModelProfileRoot(
+  profileId: string,
+  profileRoot: string,
+): void {
+  const id = profileId.trim();
+  if (!id || !isAbsolute(profileRoot)) {
+    throw new TypeError("Managed model Profile root is invalid.");
+  }
+  if (!registeredRoots) return;
+  const root = normalizedPath(profileRoot);
+  const existing = registeredRoots.profiles.get(id);
+  if (existing && existing !== root) {
+    throw new TypeError(
+      "Managed model Profile root conflicts with an existing root.",
+    );
+  }
+  registeredRoots.profiles.set(id, root);
+}
+
+export function unregisterManagedModelProfileRoot(
+  profileId: string,
+  profileRoot: string,
+): void {
+  if (!registeredRoots) return;
+  const id = profileId.trim();
+  const root = normalizedPath(profileRoot);
+  if (registeredRoots.profiles.get(id) === root) {
+    registeredRoots.profiles.delete(id);
+  }
+}
+
 export interface ManagedModelFileLocation {
   role: ManagedModelFileRole;
   profileId: string | null;
@@ -90,17 +153,23 @@ export interface ManagedModelFileLocation {
 export function managedModelFileLocation(
   path: string,
 ): ManagedModelFileLocation | null {
-  if (!registeredRoots) return null;
   const target = normalizedPath(path);
-  if (target === resolve(registeredRoots.globalRoot, "models.json")) {
-    return { role: "models", profileId: null };
+  if (registeredRoots) {
+    if (target === resolve(registeredRoots.globalRoot, "models.json")) {
+      return { role: "models", profileId: null };
+    }
+    if (
+      target === resolve(registeredRoots.globalRoot, "model-definitions.json")
+    ) {
+      return { role: "modelDefinitions", profileId: null };
+    }
   }
-  if (
-    target === resolve(registeredRoots.globalRoot, "model-definitions.json")
-  ) {
-    return { role: "modelDefinitions", profileId: null };
+  const contextualRoots = profileRootStorage.getStore() ?? new Map();
+  const profileRoots = new Map(registeredRoots?.profiles ?? []);
+  for (const [profileId, profileRoot] of contextualRoots) {
+    profileRoots.set(profileId, profileRoot);
   }
-  for (const [profileId, profileRoot] of registeredRoots.profiles) {
+  for (const [profileId, profileRoot] of profileRoots) {
     if (target === resolve(profileRoot, ".env")) {
       return { role: "env", profileId };
     }
@@ -132,17 +201,19 @@ function assertPermitObject(
   }
 }
 
-export function currentModelConfigurationWritePermit():
-  | ModelConfigurationWritePermit
-  | null {
+export function currentModelConfigurationWritePermit(): ModelConfigurationWritePermit | null {
   const current = permitStorage.getStore();
-  return current && current.active && activePermits.has(current) ? current : null;
+  return current && current.active && activePermits.has(current)
+    ? current
+    : null;
 }
 
 export function assertManagedWritePath(
   path: string,
-  permit: ModelConfigurationWritePermit | null | undefined =
-    currentModelConfigurationWritePermit(),
+  permit:
+    | ModelConfigurationWritePermit
+    | null
+    | undefined = currentModelConfigurationWritePermit(),
 ): void {
   const location = managedModelFileLocation(path);
   if (!location) return;

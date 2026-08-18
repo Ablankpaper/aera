@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { join } from "path";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
+import { withManagedModelTestWrite } from "./helpers/managed-model-test-writer";
 
 /**
  * Explicit startup migration: when getApiServerKey() resolves the key from a
@@ -35,34 +36,50 @@ async function initializeExplicitly(
   profileIds: readonly string[] = ["default"],
 ): Promise<void> {
   const models = await import("../src/main/models");
-  const coordinator: Parameters<typeof models.initializeModelCatalog>[0] = {
-    initializeManagedModelFiles: async (input) => {
-      if (input.changesRequired) {
-        for (const stage of [
-          "credential",
-          "provider",
-          "model_library",
-          "native_route",
-          "activation",
-        ] as const) {
-          await input.applyStage(stage);
-        }
-      }
-      if (!(await input.verify()))
-        throw new Error("initialization verification failed");
-      return {
-        status: "committed",
-        catalog: {
-          revision: "a".repeat(64),
-          targetProfileId: profileIds[0] ?? "default",
-          routes: [],
+  const profiles = Object.fromEntries(
+    profileIds.map((profileId) => [
+      profileId,
+      profileId === "default"
+        ? TEST_DIR
+        : join(TEST_DIR, "profiles", profileId),
+    ]),
+  );
+  await withManagedModelTestWrite(
+    {
+      roots: { globalRoot: TEST_DIR, profiles },
+      scope: { globalCatalog: true, profileIds },
+    },
+    async (permit) => {
+      const coordinator: Parameters<typeof models.initializeModelCatalog>[0] = {
+        initializeManagedModelFiles: async (input) => {
+          if (input.changesRequired) {
+            for (const stage of [
+              "credential",
+              "provider",
+              "model_library",
+              "native_route",
+              "activation",
+            ] as const) {
+              await input.applyStage(stage, permit);
+            }
+          }
+          if (!(await input.verify()))
+            throw new Error("initialization verification failed");
+          return {
+            status: "committed",
+            catalog: {
+              revision: "a".repeat(64),
+              targetProfileId: profileIds[0] ?? "default",
+              routes: [],
+            },
+          };
         },
       };
+      await models.initializeModelCatalog(
+        coordinator,
+        models.planModelCatalogInitialization(profileIds),
+      );
     },
-  };
-  await models.initializeModelCatalog(
-    coordinator,
-    models.planModelCatalogInitialization(profileIds),
   );
 }
 

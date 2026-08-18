@@ -22,6 +22,27 @@ async function importHealthWithHome(
   return await import("../src/main/config-health");
 }
 
+async function withManagedProfileWrite<T>(
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  const [managed, authority] = await Promise.all([
+    import("../src/main/model-configuration-managed-files"),
+    import("../src/main/model-configuration-write-authority"),
+  ]);
+  managed.registerManagedModelFileRoots({
+    globalRoot: TEST_DIR,
+    profiles: { default: TEST_DIR },
+  });
+  try {
+    return await new authority.ModelConfigurationWriteAuthority().run(
+      { globalCatalog: false, profileIds: ["default"] },
+      callback,
+    );
+  } finally {
+    managed.clearManagedModelFileRoots();
+  }
+}
+
 const CORRUPTED = [
   "model: old-model",
   "model:",
@@ -68,7 +89,9 @@ describe("config health — duplicate top-level model key", () => {
     writeFileSync(configFile, CORRUPTED, "utf-8");
     const health = await importHealthWithHome(TEST_DIR);
 
-    const result = health.autoFixIssue("MODEL_CONFIG_DUPLICATE_KEY");
+    const result = await withManagedProfileWrite(() =>
+      health.autoFixIssue("MODEL_CONFIG_DUPLICATE_KEY"),
+    );
     expect(result.ok).toBe(true);
 
     const content = readFileSync(configFile, "utf-8");

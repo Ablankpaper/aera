@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { join } from "path";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
+import { withManagedModelTestWrite } from "./helpers/managed-model-test-writer";
 
 /**
  * End-to-end regression for the Beta.27 legacy-config save failure.
@@ -36,6 +37,24 @@ async function importWithHome(home: string): Promise<{
   };
 }
 
+async function writeProfile<T>(
+  profileId: string,
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  const profileRoot =
+    profileId === "default" ? TEST_DIR : join(TEST_DIR, "profiles", profileId);
+  return await withManagedModelTestWrite(
+    {
+      roots: {
+        globalRoot: TEST_DIR,
+        profiles: { [profileId]: profileRoot },
+      },
+      scope: { globalCatalog: false, profileIds: [profileId] },
+    },
+    callback,
+  );
+}
+
 function topLevelModelKeys(content: string): number {
   return (content.match(/^model:[^\r\n]*$/gm) ?? []).length;
 }
@@ -67,10 +86,12 @@ describe("legacy model config — end-to-end save recovery", () => {
     );
 
     const { config } = await importWithHome(TEST_DIR);
-    config.setModelConfig(
-      "deepseek",
-      "deepseek-v4-pro",
-      "https://api.deepseek.com/v1",
+    await writeProfile("default", () =>
+      config.setModelConfig(
+        "deepseek",
+        "deepseek-v4-pro",
+        "https://api.deepseek.com/v1",
+      ),
     );
 
     const content = readFileSync(configFile, "utf-8");
@@ -106,10 +127,12 @@ describe("legacy model config — end-to-end save recovery", () => {
 
     const { native } = await importWithHome(TEST_DIR);
     // This is the call that used to throw "Map keys must be unique".
-    const route = native.upsertNativeCustomProvider(undefined, {
-      name: "petoi",
-      baseUrl: "https://api.petoi.cn/v2",
-    });
+    const route = await writeProfile("default", () =>
+      native.upsertNativeCustomProvider(undefined, {
+        name: "petoi",
+        baseUrl: "https://api.petoi.cn/v2",
+      }),
+    );
 
     expect(route).toBe("custom:petoi");
     const content = readFileSync(configFile, "utf-8");
@@ -133,11 +156,13 @@ describe("legacy model config — end-to-end save recovery", () => {
     );
 
     const { native } = await importWithHome(TEST_DIR);
-    native.upsertNativeCustomProvider(undefined, {
-      name: "petoi",
-      baseUrl: "https://api.petoi.cn/v1",
-      models: ["old-model", "new-model"],
-    });
+    await writeProfile("default", () =>
+      native.upsertNativeCustomProvider(undefined, {
+        name: "petoi",
+        baseUrl: "https://api.petoi.cn/v1",
+        models: ["old-model", "new-model"],
+      }),
+    );
 
     const content = readFileSync(configFile, "utf-8");
     expect(topLevelModelKeys(content)).toBe(1);
@@ -165,10 +190,12 @@ describe("legacy model config — end-to-end save recovery", () => {
     );
 
     const { native } = await importWithHome(TEST_DIR);
-    native.upsertNativeCustomProvider(undefined, {
-      name: "acme",
-      baseUrl: "https://acme.test/v1",
-    });
+    await writeProfile("default", () =>
+      native.upsertNativeCustomProvider(undefined, {
+        name: "acme",
+        baseUrl: "https://acme.test/v1",
+      }),
+    );
 
     const content = readFileSync(configFile, "utf-8");
     expect(topLevelModelKeys(content)).toBe(1);
@@ -191,7 +218,9 @@ describe("legacy model config — end-to-end save recovery", () => {
     );
 
     const { config } = await importWithHome(TEST_DIR);
-    config.setModelConfig("deepseek", "deepseek-v4-pro", "", "installed");
+    await writeProfile("installed", () =>
+      config.setModelConfig("deepseek", "deepseek-v4-pro", "", "installed"),
+    );
 
     const named = readFileSync(join(namedDir, "config.yaml"), "utf-8");
     expect(topLevelModelKeys(named)).toBe(1);
@@ -209,12 +238,14 @@ describe("legacy model config — end-to-end save recovery", () => {
     writeFileSync(configFile, broken, "utf-8");
 
     const { native } = await importWithHome(TEST_DIR);
-    expect(() =>
-      native.upsertNativeCustomProvider(undefined, {
-        name: "acme",
-        baseUrl: "https://acme.test/v1",
-      }),
-    ).toThrow();
+    await writeProfile("default", () => {
+      expect(() =>
+        native.upsertNativeCustomProvider(undefined, {
+          name: "acme",
+          baseUrl: "https://acme.test/v1",
+        }),
+      ).toThrow();
+    });
     // Disk is untouched: a rejected save never leaves a partial write.
     expect(readFileSync(configFile, "utf-8")).toBe(broken);
   });
@@ -225,10 +256,12 @@ describe("legacy model config — end-to-end save recovery", () => {
     writeFileSync(configFile, "model: old-model\n", "utf-8");
 
     const { native } = await importWithHome(TEST_DIR);
-    native.upsertNativeCustomProvider(undefined, {
-      name: "petoi",
-      baseUrl: "https://api.petoi.cn/v1",
-    });
+    await writeProfile("default", () =>
+      native.upsertNativeCustomProvider(undefined, {
+        name: "petoi",
+        baseUrl: "https://api.petoi.cn/v1",
+      }),
+    );
 
     const content = readFileSync(configFile, "utf-8");
     expect(content).toContain("key_env:");

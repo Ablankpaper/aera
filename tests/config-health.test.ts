@@ -24,6 +24,27 @@ async function freshHealth(
   return await import("../src/main/config-health");
 }
 
+async function withManagedProfileWrite<T>(
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  const [managed, authority] = await Promise.all([
+    import("../src/main/model-configuration-managed-files"),
+    import("../src/main/model-configuration-write-authority"),
+  ]);
+  managed.registerManagedModelFileRoots({
+    globalRoot: TEST_DIR,
+    profiles: { default: TEST_DIR },
+  });
+  try {
+    return await new authority.ModelConfigurationWriteAuthority().run(
+      { globalCatalog: false, profileIds: ["default"] },
+      callback,
+    );
+  } finally {
+    managed.clearManagedModelFileRoots();
+  }
+}
+
 function writeConfig(content: string): void {
   writeFileSync(join(TEST_DIR, "config.yaml"), content);
 }
@@ -312,11 +333,10 @@ describe("autoFixIssue", () => {
       ): { ok: boolean; message?: string };
     };
 
-    const result = deferred(
-      "API_SERVER_KEY_NON_CANONICAL",
-      undefined,
-      undefined,
-      { recordAudit: (entry) => entries.push(entry) },
+    const result = await withManagedProfileWrite(() =>
+      deferred("API_SERVER_KEY_NON_CANONICAL", undefined, undefined, {
+        recordAudit: (entry) => entries.push(entry),
+      }),
     );
 
     expect(result.ok).toBe(true);
@@ -327,7 +347,9 @@ describe("autoFixIssue", () => {
   it("migrates non-canonical API_SERVER_KEY into .env", async () => {
     writeConfig(["api_server:", "  token: sk-migrate-me", ""].join("\n"));
     const { autoFixIssue } = await freshHealth(TEST_DIR);
-    const result = autoFixIssue("API_SERVER_KEY_NON_CANONICAL");
+    const result = await withManagedProfileWrite(() =>
+      autoFixIssue("API_SERVER_KEY_NON_CANONICAL"),
+    );
     expect(result.ok).toBe(true);
     const envFile = join(TEST_DIR, ".env");
     expect(existsSync(envFile)).toBe(true);
@@ -339,10 +361,12 @@ describe("autoFixIssue", () => {
   it("copies misfiled env key to the expected name", async () => {
     writeEnv("GROQ_API_KEY=sk-meant-for-openrouter\n");
     const { autoFixIssue } = await freshHealth(TEST_DIR);
-    const result = autoFixIssue("UI_RUNTIME_ENVKEY_MISMATCH", undefined, {
-      from: "GROQ_API_KEY",
-      to: "OPENROUTER_API_KEY",
-    });
+    const result = await withManagedProfileWrite(() =>
+      autoFixIssue("UI_RUNTIME_ENVKEY_MISMATCH", undefined, {
+        from: "GROQ_API_KEY",
+        to: "OPENROUTER_API_KEY",
+      }),
+    );
     expect(result.ok).toBe(true);
     const env = readFileSync(join(TEST_DIR, ".env"), "utf-8");
     expect(env).toMatch(/^OPENROUTER_API_KEY=sk-meant-for-openrouter/m);
@@ -353,9 +377,11 @@ describe("autoFixIssue", () => {
   it("strips non-ASCII characters from credentials", async () => {
     writeEnv("OPENROUTER_API_KEY=sk-or-test“tail\n");
     const { autoFixIssue } = await freshHealth(TEST_DIR);
-    const result = autoFixIssue("NON_ASCII_CREDENTIAL", undefined, {
-      keys: "OPENROUTER_API_KEY",
-    });
+    const result = await withManagedProfileWrite(() =>
+      autoFixIssue("NON_ASCII_CREDENTIAL", undefined, {
+        keys: "OPENROUTER_API_KEY",
+      }),
+    );
     expect(result.ok).toBe(true);
     const env = readFileSync(join(TEST_DIR, ".env"), "utf-8");
     expect(env).toMatch(/^OPENROUTER_API_KEY=sk-or-testtail/m);
@@ -371,7 +397,9 @@ describe("autoFixIssue", () => {
   it("writes an audit entry to config-fixes.log", async () => {
     writeConfig(["api_server:", "  token: sk-audit-me", ""].join("\n"));
     const { autoFixIssue } = await freshHealth(TEST_DIR);
-    autoFixIssue("API_SERVER_KEY_NON_CANONICAL");
+    await withManagedProfileWrite(() =>
+      autoFixIssue("API_SERVER_KEY_NON_CANONICAL"),
+    );
     const logFile = join(TEST_DIR, "logs", "config-fixes.log");
     expect(existsSync(logFile)).toBe(true);
     const entry = JSON.parse(
@@ -486,7 +514,7 @@ describe("fixLegacyToolsetName", () => {
       ].join("\n"),
     );
     const { fixLegacyToolsetName } = await freshHealth(TEST_DIR);
-    const result = fixLegacyToolsetName();
+    const result = await withManagedProfileWrite(() => fixLegacyToolsetName());
     expect(result.ok).toBe(true);
     const after = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");
     expect(after).toMatch(/^- hermes-cli$/m);
@@ -499,7 +527,9 @@ describe("fixLegacyToolsetName", () => {
   it("preserves quoting style and trailing comment when rewriting", async () => {
     writeConfig(["toolsets:", '  - "hermes"   # legacy alias', ""].join("\n"));
     const { fixLegacyToolsetName } = await freshHealth(TEST_DIR);
-    expect(fixLegacyToolsetName().ok).toBe(true);
+    expect(
+      (await withManagedProfileWrite(() => fixLegacyToolsetName())).ok,
+    ).toBe(true);
     const after = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");
     expect(after).toMatch(/^\s+- "hermes-cli"\s+# legacy alias$/m);
   });
@@ -514,7 +544,7 @@ describe("fixLegacyToolsetName", () => {
   it("writes an audit-log entry recording the rewrite", async () => {
     writeConfig(["toolsets:", "- hermes", ""].join("\n"));
     const { fixLegacyToolsetName } = await freshHealth(TEST_DIR);
-    fixLegacyToolsetName();
+    await withManagedProfileWrite(() => fixLegacyToolsetName());
     const logFile = join(TEST_DIR, "logs", "config-fixes.log");
     expect(existsSync(logFile)).toBe(true);
     const entry = JSON.parse(

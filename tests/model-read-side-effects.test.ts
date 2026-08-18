@@ -13,6 +13,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let home = "";
 
+async function prepareManagedWrites(): Promise<
+  import("../src/main/model-configuration-write-authority").ModelConfigurationWriteAuthority
+> {
+  const [managed, authority] = await Promise.all([
+    import("../src/main/model-configuration-managed-files"),
+    import("../src/main/model-configuration-write-authority"),
+  ]);
+  managed.registerManagedModelFileRoots({
+    globalRoot: home,
+    profiles: { default: home },
+  });
+  return new authority.ModelConfigurationWriteAuthority();
+}
+
 function snapshot(root: string): Record<string, string> {
   const result: Record<string, string> = {};
   const walk = (directory: string): void => {
@@ -32,7 +46,10 @@ beforeEach(() => {
   vi.stubEnv("HERMES_HOME", home);
 });
 
-afterEach(() => {
+afterEach(async () => {
+  const { clearManagedModelFileRoots } =
+    await import("../src/main/model-configuration-managed-files");
+  clearManagedModelFileRoots();
   vi.unstubAllEnvs();
   vi.resetModules();
   rmSync(home, { recursive: true, force: true });
@@ -70,7 +87,7 @@ describe("model configuration reads", () => {
   it("does not migrate a non-canonical API key during a read", async () => {
     writeFileSync(
       join(home, "config.yaml"),
-      "api_server:\n  token: \"legacy-token\"\n",
+      'api_server:\n  token: "legacy-token"\n',
     );
     const config = await import("../src/main/config");
     const before = snapshot(home);
@@ -108,35 +125,47 @@ describe("explicit model catalog initialization", () => {
       ].join("\n"),
     );
     const models = await import("../src/main/models");
+    const writeAuthority = await prepareManagedWrites();
     let journalCount = 0;
     const coordinator = {
       initializeManagedModelFiles: async (input: {
+        targetProfileId: string;
         changesRequired: boolean;
-        applyStage(stage: string): Promise<void> | void;
+        applyStage(
+          stage: string,
+          permit: import("../src/main/model-configuration-managed-files").ModelConfigurationWritePermit,
+        ): Promise<void> | void;
         verify(): Promise<boolean> | boolean;
-      }) => {
-        if (input.changesRequired) {
-          journalCount += 1;
-          for (const stage of [
-            "credential",
-            "provider",
-            "model_library",
-            "native_route",
-            "activation",
-          ]) {
-            await input.applyStage(stage);
-          }
-        }
-        expect(await input.verify()).toBe(true);
-        return {
-          status: "committed" as const,
-          catalog: {
-            revision: "a".repeat(64),
-            targetProfileId: "default",
-            routes: [],
+      }) =>
+        writeAuthority.run(
+          {
+            globalCatalog: true,
+            profileIds: [input.targetProfileId],
           },
-        };
-      },
+          async (permit) => {
+            if (input.changesRequired) {
+              journalCount += 1;
+              for (const stage of [
+                "credential",
+                "provider",
+                "model_library",
+                "native_route",
+                "activation",
+              ]) {
+                await input.applyStage(stage, permit);
+              }
+            }
+            expect(await input.verify()).toBe(true);
+            return {
+              status: "committed" as const,
+              catalog: {
+                revision: "a".repeat(64),
+                targetProfileId: "default",
+                routes: [],
+              },
+            };
+          },
+        ),
     };
 
     const firstPlan = models.planModelCatalogInitialization(["default"]);
@@ -178,6 +207,7 @@ describe("explicit model catalog initialization", () => {
     ];
     writeFileSync(join(home, "models.json"), JSON.stringify(rows));
     const models = await import("../src/main/models");
+    const writeAuthority = await prepareManagedWrites();
     const before = snapshot(home);
 
     models.listModels();
@@ -188,24 +218,32 @@ describe("explicit model catalog initialization", () => {
     await models.initializeModelCatalog(
       {
         initializeManagedModelFiles: async (input) => {
-          for (const stage of [
-            "credential",
-            "provider",
-            "model_library",
-            "native_route",
-            "activation",
-          ] as const) {
-            await input.applyStage(stage);
-          }
-          expect(await input.verify()).toBe(true);
-          return {
-            status: "committed" as const,
-            catalog: {
-              revision: "b".repeat(64),
-              targetProfileId: "default",
-              routes: [],
+          return writeAuthority.run(
+            {
+              globalCatalog: true,
+              profileIds: [input.targetProfileId],
             },
-          };
+            async (permit) => {
+              for (const stage of [
+                "credential",
+                "provider",
+                "model_library",
+                "native_route",
+                "activation",
+              ] as const) {
+                await input.applyStage(stage, permit);
+              }
+              expect(await input.verify()).toBe(true);
+              return {
+                status: "committed" as const,
+                catalog: {
+                  revision: "b".repeat(64),
+                  targetProfileId: "default",
+                  routes: [],
+                },
+              };
+            },
+          );
         },
       },
       plan,
@@ -215,9 +253,9 @@ describe("explicit model catalog initialization", () => {
       JSON.parse(readFileSync(join(home, "models.json"), "utf8"))[0],
     ).not.toHaveProperty("contextLength");
     expect(
-      JSON.parse(
-        readFileSync(join(home, "model-definitions.json"), "utf8"),
-      )["legacy-model"],
+      JSON.parse(readFileSync(join(home, "model-definitions.json"), "utf8"))[
+        "legacy-model"
+      ],
     ).toMatchObject({ contextLength: 32768 });
   });
 

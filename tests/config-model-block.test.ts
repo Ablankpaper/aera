@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { join } from "path";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
+import { withManagedModelTestWrite } from "./helpers/managed-model-test-writer";
 
 // Regression tests for issue #242: a `default:` (or `provider:`, `base_url:`)
 // key under a *sibling* block such as `personalities:` was being picked up
@@ -17,6 +18,24 @@ async function importConfigWithHome(
   vi.resetModules();
   process.env.HERMES_HOME = home;
   return await import("../src/main/config");
+}
+
+async function writeProfile<T>(
+  profileId: string,
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  const profileRoot =
+    profileId === "default" ? TEST_DIR : join(TEST_DIR, "profiles", profileId);
+  return await withManagedModelTestWrite(
+    {
+      roots: {
+        globalRoot: TEST_DIR,
+        profiles: { [profileId]: profileRoot },
+      },
+      scope: { globalCatalog: false, profileIds: [profileId] },
+    },
+    callback,
+  );
 }
 
 beforeEach(() => {
@@ -208,7 +227,9 @@ describe("setModelConfig — scoped to model: block", () => {
     writeFileSync(join(TEST_DIR, "config.yaml"), before);
 
     const { setModelConfig } = await importConfigWithHome(TEST_DIR);
-    setModelConfig("openai", "gpt-4o", "", undefined);
+    await writeProfile("default", () =>
+      setModelConfig("openai", "gpt-4o", "", undefined),
+    );
 
     const after = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");
     expect(after).toContain('default: "gpt-4o"');
@@ -230,7 +251,9 @@ describe("setModelConfig — scoped to model: block", () => {
 
     const { setModelConfig, getModelConfig } =
       await importConfigWithHome(TEST_DIR);
-    setModelConfig("openai", "gpt-4o", "https://api.openai.com/v1");
+    await writeProfile("default", () =>
+      setModelConfig("openai", "gpt-4o", "https://api.openai.com/v1"),
+    );
 
     const after = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");
     // The new keys land inside the model: block, indented like its existing children.
@@ -256,7 +279,9 @@ describe("setModelConfig — scoped to model: block", () => {
 
     const { setModelConfig, getModelConfig } =
       await importConfigWithHome(TEST_DIR);
-    setModelConfig("anthropic", "claude-sonnet", "");
+    await writeProfile("default", () =>
+      setModelConfig("anthropic", "claude-sonnet", ""),
+    );
 
     const after = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");
     // Model block exists with both keys correctly indented under it.
@@ -282,7 +307,7 @@ describe("setModelConfig — scoped to model: block", () => {
     const { getModelConfig, setModelConfig } =
       await importConfigWithHome(TEST_DIR);
     expect(getModelConfig().model).toBe("gpt-3.5");
-    setModelConfig("openai", "gpt-4o", "");
+    await writeProfile("default", () => setModelConfig("openai", "gpt-4o", ""));
     expect(getModelConfig().model).toBe("gpt-4o");
   });
 
@@ -300,7 +325,9 @@ describe("setModelConfig — scoped to model: block", () => {
 
     const { setModelConfig, getModelConfig } =
       await importConfigWithHome(TEST_DIR);
-    setModelConfig("gemini", "gemini-2.5-flash", "");
+    await writeProfile("default", () =>
+      setModelConfig("gemini", "gemini-2.5-flash", ""),
+    );
 
     expect(existsSync(configFile)).toBe(true);
     const after = readFileSync(configFile, "utf-8");
@@ -326,7 +353,9 @@ describe("setModelConfig — scoped to model: block", () => {
 
     const { setModelConfig, getModelConfig } =
       await importConfigWithHome(TEST_DIR);
-    setModelConfig("custom", "qwen-coder-30b", "http://localhost:1234/v1");
+    await writeProfile("default", () =>
+      setModelConfig("custom", "qwen-coder-30b", "http://localhost:1234/v1"),
+    );
 
     expect(existsSync(configFile)).toBe(true);
     const mc = getModelConfig();
@@ -346,7 +375,9 @@ describe("setModelConfig — scoped to model: block", () => {
 
     const { setModelConfig, getModelConfig } =
       await importConfigWithHome(TEST_DIR);
-    setModelConfig("anthropic", "claude-sonnet-4", "", "work");
+    await writeProfile("work", () =>
+      setModelConfig("anthropic", "claude-sonnet-4", "", "work"),
+    );
 
     expect(existsSync(configFile)).toBe(true);
     const mc = getModelConfig("work");
@@ -364,7 +395,9 @@ describe("setModelConfig — context_length override", () => {
 
     const { setModelConfig, getModelContextLengthOverride } =
       await importConfigWithHome(TEST_DIR);
-    setModelConfig("qwen", "qwen-max", "", undefined, 65536);
+    await writeProfile("default", () =>
+      setModelConfig("qwen", "qwen-max", "", undefined, 65536),
+    );
 
     const after = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");
     // Written unquoted so YAML parses it as a number, not a string.
@@ -391,7 +424,7 @@ describe("setModelConfig — context_length override", () => {
     const { setModelConfig, getModelContextLengthOverride } =
       await importConfigWithHome(TEST_DIR);
     // No 5th arg — the override must survive a plain provider/model write.
-    setModelConfig("qwen", "qwen-max", "");
+    await writeProfile("default", () => setModelConfig("qwen", "qwen-max", ""));
 
     expect(getModelContextLengthOverride()?.contextLength).toBe(65536);
   });
@@ -411,7 +444,15 @@ describe("setModelConfig — context_length override", () => {
 
     const { setModelConfig, getModelContextLengthOverride } =
       await importConfigWithHome(TEST_DIR);
-    setModelConfig("qwen", "qwen-max", "https://example.com", undefined, null);
+    await writeProfile("default", () =>
+      setModelConfig(
+        "qwen",
+        "qwen-max",
+        "https://example.com",
+        undefined,
+        null,
+      ),
+    );
 
     const after = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");
     expect(after).not.toContain("context_length");
@@ -451,13 +492,15 @@ describe("setModelConfig — api_mode override", () => {
     );
 
     const { setModelConfig } = await importConfigWithHome(TEST_DIR);
-    setModelConfig(
-      "custom",
-      "claude-sonnet-4",
-      "https://example.com/anthropic",
-      undefined,
-      undefined,
-      "anthropic_messages",
+    await writeProfile("default", () =>
+      setModelConfig(
+        "custom",
+        "claude-sonnet-4",
+        "https://example.com/anthropic",
+        undefined,
+        undefined,
+        "anthropic_messages",
+      ),
     );
 
     const after = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");
@@ -478,7 +521,9 @@ describe("setModelConfig — api_mode override", () => {
 
     const { setModelConfig } = await importConfigWithHome(TEST_DIR);
     // No 6th arg — a plain provider/model write must not disturb api_mode.
-    setModelConfig("custom", "claude-sonnet-4", "");
+    await writeProfile("default", () =>
+      setModelConfig("custom", "claude-sonnet-4", ""),
+    );
 
     const after = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");
     expect(after).toContain('api_mode: "anthropic_messages"');
@@ -502,13 +547,15 @@ describe("setModelConfig — api_mode override", () => {
     // ...then switch to an OpenAI-compatible endpoint that has no explicit
     // mode (apiMode = null). The stale anthropic_messages must be removed so
     // the agent re-detects chat_completions from the new base_url.
-    setModelConfig(
-      "custom",
-      "gpt-4o",
-      "https://api.openai-compatible.example/v1",
-      undefined,
-      undefined,
-      null,
+    await writeProfile("default", () =>
+      setModelConfig(
+        "custom",
+        "gpt-4o",
+        "https://api.openai-compatible.example/v1",
+        undefined,
+        undefined,
+        null,
+      ),
     );
 
     const after = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");

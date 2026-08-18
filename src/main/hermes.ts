@@ -123,7 +123,7 @@ export function configureGatewayManagedConfiguration(
 
 export async function prepareGatewayForLaunch(
   profile?: string,
-): Promise<{ key: string; port: number }> {
+): Promise<PreparedGatewayLaunch> {
   if (!gatewayManagedConfigurationDependencies) {
     throw new Error("model_configuration_mutation_unavailable");
   }
@@ -131,6 +131,11 @@ export async function prepareGatewayForLaunch(
     resolveProfile(profile),
     gatewayManagedConfigurationDependencies,
   );
+}
+
+export interface PreparedGatewayLaunch {
+  readonly key: string;
+  readonly port: number;
 }
 
 /**
@@ -3675,15 +3680,18 @@ function gatewayLogPath(profile?: string): string {
   return join(logDir, "gateway-stderr.log");
 }
 
-export function buildGatewayEnv(profile?: string): Record<string, string> {
+export function buildGatewayEnv(
+  profile?: string,
+  prepared?: PreparedGatewayLaunch,
+): Record<string, string> {
   const resolved = resolveProfile(profile);
-  const apiServerKey = getApiServerKey(resolved).trim();
+  const apiServerKey = (prepared?.key ?? getApiServerKey(resolved)).trim();
   if (!apiServerKey) {
     throw new Error(
       "The local gateway credential must be prepared before process launch.",
     );
   }
-  const port = getProfilePort(resolved);
+  const port = prepared?.port ?? getProfilePort(resolved);
 
   const invocation = getRuntimeInvocation();
   const baseEnv: Record<string, string> = {
@@ -3744,7 +3752,10 @@ function gatewayCliCommandArgs(
   return resolved ? ["--profile", resolved, ...command] : command;
 }
 
-export function startGatewayDetailed(profile?: string): GatewayStartResult {
+export function startGatewayDetailed(
+  profile?: string,
+  prepared?: PreparedGatewayLaunch,
+): GatewayStartResult {
   // Defensive: the local gateway is never the right thing to spawn in
   // remote/SSH mode — the user is pointing at an off-machine server.
   // Callers should already gate, but several IPC handlers historically
@@ -3781,7 +3792,7 @@ export function startGatewayDetailed(profile?: string): GatewayStartResult {
   const key = profileKey(profile);
   let gatewayEnv: Record<string, string>;
   try {
-    gatewayEnv = buildGatewayEnv(profile);
+    gatewayEnv = buildGatewayEnv(profile, prepared);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const error = `Cannot start the local gateway: ${message}`;
@@ -4709,8 +4720,8 @@ async function restartGatewayLocallyOnce(
       return false;
     }
 
-    await prepareGatewayForLaunch(profile);
-    const startResult = startGatewayDetailed(profile);
+    const prepared = await prepareGatewayForLaunch(profile);
+    const startResult = startGatewayDetailed(profile, prepared);
     if (!startResult.success && !startResult.alreadyRunning) {
       setApiCacheFor(profile, false);
       markGatewayRestartFailed(profile);
@@ -4832,8 +4843,8 @@ export async function startGatewayWithRecovery(
     );
   }
 
-  await prepareGatewayForLaunch(profile);
-  const startResult = startGatewayDetailed(profile);
+  const prepared = await prepareGatewayForLaunch(profile);
+  const startResult = startGatewayDetailed(profile, prepared);
   if (!startResult.success && !startResult.alreadyRunning) return false;
 
   const ready = await waitForApiServerReady(
@@ -4894,7 +4905,7 @@ async function restartGatewayViaCliOnce(
     if (!canSpawnGateway()) return false;
     const invocation = getRuntimeInvocation();
     if (!invocation) return false;
-    await prepareGatewayForLaunch(profile);
+    const prepared = await prepareGatewayForLaunch(profile);
 
     const key = profileKey(profile);
     const previousProcess = gatewayProcesses.get(key) ?? null;
@@ -4919,7 +4930,7 @@ async function restartGatewayViaCliOnce(
           ),
           {
             cwd: invocation.workingDirectory,
-            env: buildGatewayEnv(profile),
+            env: buildGatewayEnv(profile, prepared),
             stdio: ["ignore", "ignore", stderrFd >= 0 ? stderrFd : "ignore"],
             detached: true,
             ...HIDDEN_SUBPROCESS_OPTIONS,

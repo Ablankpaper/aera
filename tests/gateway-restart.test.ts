@@ -305,6 +305,48 @@ describe("restartGatewayViaCli", () => {
     expect(ensureLocalApiServerKeySpy).not.toHaveBeenCalled();
   });
 
+  it("spawns with the exact credential and port returned by managed preparation", async () => {
+    const launchProofFile = join(TEST_HOME, "prepared-launch-proof.json");
+    prepareGatewayManagedConfigurationSpy.mockResolvedValueOnce({
+      key: "prepared-launch-key",
+      port: 9123,
+    });
+    hermesCliArgsSpy.mockImplementation(() => [
+      "-e",
+      `require("fs").writeFileSync(${JSON.stringify(launchProofFile)},JSON.stringify({key:process.env.API_SERVER_KEY,port:process.env.API_SERVER_PORT}));setInterval(()=>{},1000)`,
+    ]);
+    healthStatuses.push(200);
+
+    await expect(startGatewayWithRecovery("work", 1000, 25)).resolves.toBe(
+      true,
+    );
+    expect(await waitForFile(launchProofFile)).toBe(true);
+    expect(JSON.parse(readFileSync(launchProofFile, "utf8"))).toEqual({
+      key: "prepared-launch-key",
+      port: "9123",
+    });
+  });
+
+  it("restarts with the exact credential and port returned by managed preparation", async () => {
+    const restartProofFile = join(TEST_HOME, "prepared-restart-proof.json");
+    prepareGatewayManagedConfigurationSpy.mockResolvedValueOnce({
+      key: "prepared-restart-key",
+      port: 9124,
+    });
+    hermesCliArgsSpy.mockImplementation(() => [
+      "-e",
+      `require("fs").writeFileSync(${JSON.stringify(restartProofFile)},JSON.stringify({key:process.env.API_SERVER_KEY,port:process.env.API_SERVER_PORT}))`,
+    ]);
+    healthStatuses.push(503, 200);
+
+    await expect(restartGatewayViaCli("work", 1000, 25)).resolves.toBe(true);
+    expect(await waitForFile(restartProofFile)).toBe(true);
+    expect(JSON.parse(readFileSync(restartProofFile, "utf8"))).toEqual({
+      key: "prepared-restart-key",
+      port: "9124",
+    });
+  });
+
   it("clears the durable launch intent when spawn setup fails", () => {
     hermesCliArgsSpy.mockImplementation(() => {
       throw new Error("injected spawn setup failure");

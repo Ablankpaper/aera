@@ -78,6 +78,35 @@ describe("managed gateway bootstrap", () => {
     expect(configAfter).toContain('host: "127.0.0.1"');
   });
 
+  it("repairs an existing API server block that omits its managed port", async () => {
+    writeFileSync(
+      join(TEST_HOME, "config.yaml"),
+      [
+        "platforms:",
+        "  api_server:",
+        "    enabled: true",
+        "    extra:",
+        '      host: "127.0.0.1"',
+        "",
+      ].join("\n"),
+    );
+    const gatewayManagedConfig = await loadGatewayManagedConfig();
+    const planner = (
+      gatewayManagedConfig as unknown as {
+        planGatewayManagedConfiguration?: PlanGatewayManagedConfiguration;
+      }
+    ).planGatewayManagedConfiguration;
+    expect(planner).toBeTypeOf("function");
+    if (!planner) return;
+
+    const plan = planner(undefined, 9123);
+    const configAfter = plan.configPlan?.after?.toString("utf-8") ?? "";
+
+    expect(plan.configPlan).not.toBeNull();
+    expect(configAfter).toContain("port: 9123");
+    expect(configAfter).toContain('host: "127.0.0.1"');
+  });
+
   it("uses one managed mutation and leaves both files unchanged on recovery refusal", async () => {
     const gatewayManagedConfig = await loadGatewayManagedConfig();
     const prepare = (

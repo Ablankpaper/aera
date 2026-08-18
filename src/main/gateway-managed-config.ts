@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { parseDocument } from "yaml";
 import {
   getConfigValue,
   persistConfigWritePlan,
@@ -58,12 +59,43 @@ platforms:
     );
   } else {
     const configuredPort = getConfigValue(API_SERVER_PORT_PATH, profile);
-    if (configuredPort && configuredPort.trim() !== String(port)) {
-      configPlan = planConfigValueWrite(
-        API_SERVER_PORT_PATH,
-        String(port),
-        profile,
-      );
+    if (configuredPort?.trim() !== String(port)) {
+      configPlan = configuredPort
+        ? planConfigValueWrite(API_SERVER_PORT_PATH, String(port), profile)
+        : planConfigDocumentWrite(
+            profile,
+            (current) => {
+              const document = parseDocument(current);
+              if (document.errors.length > 0) {
+                throw new Error("Cannot repair invalid gateway YAML.");
+              }
+              if (
+                document.getIn(["platforms", "api_server", "enabled"]) ===
+                undefined
+              ) {
+                document.setIn(["platforms", "api_server", "enabled"], true);
+              }
+              if (
+                document.getIn([
+                  "platforms",
+                  "api_server",
+                  "extra",
+                  "host",
+                ]) === undefined
+              ) {
+                document.setIn(
+                  ["platforms", "api_server", "extra", "host"],
+                  "127.0.0.1",
+                );
+              }
+              document.setIn(
+                ["platforms", "api_server", "extra", "port"],
+                port,
+              );
+              return document.toString();
+            },
+            undefined,
+          );
     }
   }
 

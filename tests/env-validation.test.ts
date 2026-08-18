@@ -11,6 +11,7 @@ import {
 } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { withManagedModelTestWrite } from "./helpers/managed-model-test-writer";
 
 let testHome: string;
 
@@ -24,6 +25,27 @@ async function loadConfigModule(): Promise<
 
 function readEnvFile(): string {
   return readFileSync(join(testHome, ".env"), "utf-8");
+}
+
+async function writeProfiles<T>(
+  profileIds: readonly string[],
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  const profiles = Object.fromEntries(
+    profileIds.map((profileId) => [
+      profileId,
+      profileId === "default"
+        ? testHome
+        : join(testHome, "profiles", profileId),
+    ]),
+  );
+  return await withManagedModelTestWrite(
+    {
+      roots: { globalRoot: testHome, profiles },
+      scope: { globalCatalog: false, profileIds },
+    },
+    callback,
+  );
 }
 
 describe("environment variable write validation", () => {
@@ -40,8 +62,10 @@ describe("environment variable write validation", () => {
   it("accepts standard environment variable names and single-line values", async () => {
     const { readEnv, setEnvValue } = await loadConfigModule();
 
-    setEnvValue("OPENAI_API_KEY", "sk-valid");
-    setEnvValue("_CUSTOM_TOKEN_2", "token=value=with=equals");
+    await writeProfiles(["default"], () => {
+      setEnvValue("OPENAI_API_KEY", "sk-valid");
+      setEnvValue("_CUSTOM_TOKEN_2", "token=value=with=equals");
+    });
 
     expect(readEnv()).toEqual({
       OPENAI_API_KEY: "sk-valid",
@@ -68,17 +92,19 @@ describe("environment variable write validation", () => {
   it("rejects newline and NUL characters before rewriting .env", async () => {
     const { setEnvValue } = await loadConfigModule();
 
-    setEnvValue("SAFE_KEY", "original");
+    await writeProfiles(["default"], () => {
+      setEnvValue("SAFE_KEY", "original");
 
-    expect(() => setEnvValue("SAFE_KEY", "next\nINJECTED=value")).toThrow(
-      /single-line/,
-    );
-    expect(() => setEnvValue("SAFE_KEY", "next\rINJECTED=value")).toThrow(
-      /single-line/,
-    );
-    expect(() => setEnvValue("SAFE_KEY", "next\0INJECTED=value")).toThrow(
-      /single-line/,
-    );
+      expect(() => setEnvValue("SAFE_KEY", "next\nINJECTED=value")).toThrow(
+        /single-line/,
+      );
+      expect(() => setEnvValue("SAFE_KEY", "next\rINJECTED=value")).toThrow(
+        /single-line/,
+      );
+      expect(() => setEnvValue("SAFE_KEY", "next\0INJECTED=value")).toThrow(
+        /single-line/,
+      );
+    });
 
     expect(readEnvFile()).toBe("SAFE_KEY=original\n");
   });
@@ -86,8 +112,10 @@ describe("environment variable write validation", () => {
   it("keeps empty values in the read-back dict (valid POSIX env var)", async () => {
     const { readEnv, setEnvValue } = await loadConfigModule();
 
-    setEnvValue("EMPTY_FLAG", "");
-    setEnvValue("WITH_VALUE", "present");
+    await writeProfiles(["default"], () => {
+      setEnvValue("EMPTY_FLAG", "");
+      setEnvValue("WITH_VALUE", "present");
+    });
 
     const env = readEnv();
     expect(env.EMPTY_FLAG).toBe("");
@@ -101,12 +129,14 @@ describe("environment variable write validation", () => {
       const { setEnvValue } = await loadConfigModule();
       const envFile = join(testHome, ".env");
 
-      setEnvValue("API_SERVER_KEY", "internal-token");
-      expect(statSync(envFile).mode & 0o777).toBe(0o600);
+      await writeProfiles(["default"], () => {
+        setEnvValue("API_SERVER_KEY", "internal-token");
+        expect(statSync(envFile).mode & 0o777).toBe(0o600);
 
-      chmodSync(envFile, 0o644);
-      setEnvValue("OPENAI_API_KEY", "provider-token");
-      expect(statSync(envFile).mode & 0o777).toBe(0o600);
+        chmodSync(envFile, 0o644);
+        setEnvValue("OPENAI_API_KEY", "provider-token");
+        expect(statSync(envFile).mode & 0o777).toBe(0o600);
+      });
     },
   );
 
@@ -114,7 +144,9 @@ describe("environment variable write validation", () => {
     writeFileSync(join(testHome, "active_profile"), "work\n", "utf-8");
     const { ensureLocalApiServerKey, readEnv } = await loadConfigModule();
 
-    const result = ensureLocalApiServerKey();
+    const result = await writeProfiles(["work"], () =>
+      ensureLocalApiServerKey(),
+    );
 
     expect(result.generated).toBe(true);
     expect(result.key).toMatch(/^[a-f0-9]{64}$/);
@@ -127,10 +159,11 @@ describe("environment variable write validation", () => {
     const { ensureLocalApiServerKey, setEnvValue } = await loadConfigModule();
     const defaultKey = "default-profile-internal-token";
     const namedKey = "named-profile-internal-token";
-    setEnvValue("API_SERVER_KEY", defaultKey);
-    setEnvValue("API_SERVER_KEY", namedKey, "work");
-
-    const result = ensureLocalApiServerKey();
+    const result = await writeProfiles(["default", "work"], () => {
+      setEnvValue("API_SERVER_KEY", defaultKey);
+      setEnvValue("API_SERVER_KEY", namedKey, "work");
+      return ensureLocalApiServerKey();
+    });
 
     expect(result).toEqual({ generated: false, key: namedKey });
   });

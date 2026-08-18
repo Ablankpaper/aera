@@ -2,21 +2,22 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { HERMES_HOME } from "./installer";
-import { safeWriteFile, profilePaths } from "./utils";
+import { profilePaths } from "./utils";
 import { hostDerivedEnvKeyForUrl } from "./host-derived-env";
 import { customProviderEnvKey } from "../shared/url-key-map";
 import type { ModelConfigurationMutationResult } from "../shared/model-configuration";
 import DEFAULT_MODELS from "./default-models";
 import {
   planApiServerKeyMigration,
-  persistApiServerKeyMigration,
+  planEnvValueWrite,
+  persistConfigWritePlan,
   readEnv,
   recordApiServerKeyMigration,
-  setEnvValue,
   type ApiServerKeyMigrationPlan,
 } from "./config";
 import type { ManagedModelFileInitialization } from "./model-configuration-coordinator";
 import {
+  currentModelConfigurationWritePermit,
   writeManagedModelFile,
   type ManagedModelFileRole,
   type ModelConfigurationWritePermit,
@@ -129,16 +130,10 @@ export function persistModelCatalogWritePlan<T>(
 function persistLegacyModelCatalogWritePlan<T>(
   plan: ModelCatalogWritePlan<T>,
 ): T {
-  for (const patch of plan.patches) {
-    const current = existsSync(patch.target)
-      ? readFileSync(patch.target)
-      : null;
-    if (!modelCatalogBytesEqual(current, patch.before)) {
-      throw new Error("Model catalog write plan is stale.");
-    }
-  }
-  for (const patch of plan.patches) safeWriteFile(patch.target, patch.after);
-  return plan.value;
+  return persistModelCatalogWritePlan(
+    currentModelConfigurationWritePermit(),
+    plan,
+  );
 }
 
 /**
@@ -304,8 +299,11 @@ export function readModels(): SavedModel[] {
   });
 }
 
-function writeModels(models: SavedModelRow[]): void {
-  safeWriteFile(MODELS_FILE, JSON.stringify(models, null, 2));
+function writeModels(
+  permit: ModelConfigurationWritePermit | null,
+  models: SavedModelRow[],
+): void {
+  writeManagedModelFile(permit, MODELS_FILE, JSON.stringify(models, null, 2));
 }
 
 /** Read the definitions map (`{ [modelId]: ModelDefinition }`), tolerant of a
@@ -329,8 +327,15 @@ function readModelDefinitionsStrict(): Record<string, ModelDefinition> {
   return parsed as Record<string, ModelDefinition>;
 }
 
-function writeModelDefinitions(defs: Record<string, ModelDefinition>): void {
-  safeWriteFile(MODEL_DEFS_FILE, JSON.stringify(defs, null, 2));
+function writeModelDefinitions(
+  permit: ModelConfigurationWritePermit | null,
+  defs: Record<string, ModelDefinition>,
+): void {
+  writeManagedModelFile(
+    permit,
+    MODEL_DEFS_FILE,
+    JSON.stringify(defs, null, 2),
+  );
 }
 
 export function listModelDefinitions(): ModelDefinition[] {
@@ -472,8 +477,9 @@ export function ensureModelDefinitionsMigrated(): void {
     readModelDefinitionsStrict(),
   );
   if (!migration) return;
-  writeModelDefinitions(migration.definitions);
-  writeModels(migration.rows);
+  const permit = currentModelConfigurationWritePermit();
+  writeModelDefinitions(permit, migration.definitions);
+  writeModels(permit, migration.rows);
 }
 
 interface CustomProviderEntry {
@@ -700,25 +706,25 @@ function initializationInput(
   return {
     targetProfileId: plan.targetProfileId,
     changesRequired,
-    applyStage: (stage) => {
+    applyStage: (stage, permit) => {
       verifyBefore();
       if (stage === "credential") {
         for (const credential of plan.persistDerivedCredentials) {
-          if (
-            credential.key === "API_SERVER_KEY" &&
-            internal.apiServerKeyMigration?.profileId === credential.profileId
-          ) {
-            persistApiServerKeyMigration(internal.apiServerKeyMigration);
-          } else {
-            setEnvValue(credential.key, credential.value, credential.profileId);
-          }
+          persistConfigWritePlan(
+            permit,
+            planEnvValueWrite(
+              credential.key,
+              credential.value,
+              credential.profileId,
+            ),
+          );
         }
       }
       if (stage === "model_library") {
         if (internal.definitionsAfter) {
-          writeModelDefinitions(internal.definitionsAfter);
+          writeModelDefinitions(permit, internal.definitionsAfter);
         }
-        if (internal.modelsAfter) writeModels(internal.modelsAfter);
+        if (internal.modelsAfter) writeModels(permit, internal.modelsAfter);
       }
     },
     verify: () => {

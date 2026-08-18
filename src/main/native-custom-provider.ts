@@ -5,9 +5,10 @@ import {
   normalizeCustomProviderRuntimeName,
 } from "../shared/custom-providers";
 import { customProviderEnvKey } from "../shared/url-key-map";
-import { profilePaths, safeWriteFile } from "./utils";
+import { profilePaths } from "./utils";
 import { migrateModelConfigFormat } from "./config-model-migration";
 import {
+  currentModelConfigurationWritePermit,
   writeManagedModelFile,
   type ModelConfigurationWritePermit,
 } from "./model-configuration-managed-files";
@@ -135,8 +136,10 @@ export function upsertNativeCustomProvider(
   input: NativeCustomProviderInput,
 ): string {
   const plan = planNativeCustomProviderUpsert(profile, input);
-  if (plan.after !== null) safeWriteFile(plan.target, plan.after);
-  return plan.value;
+  return persistNativeCustomProviderPlan(
+    currentModelConfigurationWritePermit(),
+    plan,
+  );
 }
 
 export function planNativeCustomProviderUpsert(
@@ -215,7 +218,10 @@ export function removeNativeCustomProvider(
   name: string,
 ): void {
   const plan = planNativeCustomProviderRemoval(profile, name);
-  if (plan.after !== null) safeWriteFile(plan.target, plan.after);
+  persistNativeCustomProviderPlan(
+    currentModelConfigurationWritePermit(),
+    plan,
+  );
 }
 
 export function planNativeCustomProviderRemoval(

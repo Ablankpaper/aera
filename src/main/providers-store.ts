@@ -7,8 +7,9 @@ import {
   type CustomProviderRecord,
 } from "../shared/custom-providers";
 import { customProviderEnvKey } from "../shared/url-key-map";
-import { isValidProfileName, profileHome, safeWriteFile } from "./utils";
+import { isValidProfileName, profileHome } from "./utils";
 import {
+  currentModelConfigurationWritePermit,
   writeManagedModelFile,
   type ModelConfigurationWritePermit,
 } from "./model-configuration-managed-files";
@@ -125,10 +126,10 @@ export function upsertCustomProvider(
   input: { id?: string; name: string; baseUrl: string },
 ): CustomProviderRecord | null {
   const plan = planCustomProviderUpsert(profile, input);
-  if (plan.after !== null) {
-    safeWriteFile(plan.target, plan.after);
-  }
-  return plan.value;
+  return persistCustomProviderPlan(
+    currentModelConfigurationWritePermit(),
+    plan,
+  );
 }
 
 export function planCustomProviderUpsert(
@@ -179,7 +180,7 @@ export function removeCustomProvider(
   name: string,
 ): void {
   const plan = planCustomProviderRemoval(profile, name);
-  if (plan.after !== null) safeWriteFile(plan.target, plan.after);
+  persistCustomProviderPlan(currentModelConfigurationWritePermit(), plan);
 }
 
 export function planCustomProviderRemoval(

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { join } from "path";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
+import { withManagedModelTestWrite } from "./helpers/managed-model-test-writer";
 
 // Regression tests for issue #247: getConfigValue/setConfigValue used
 // a loose `^\s*<key>:` regex against the whole file, so:
@@ -24,6 +25,21 @@ async function importConfigWithHome(
   vi.resetModules();
   process.env.HERMES_HOME = home;
   return await import("../src/main/config");
+}
+
+async function writeDefaultProfile<T>(
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  return await withManagedModelTestWrite(
+    {
+      roots: {
+        globalRoot: TEST_DIR,
+        profiles: { default: TEST_DIR },
+      },
+      scope: { globalCatalog: false, profileIds: ["default"] },
+    },
+    callback,
+  );
 }
 
 beforeEach(() => {
@@ -197,7 +213,9 @@ describe("setConfigValue — dotted paths", () => {
 
     const { setConfigValue, getConfigValue } =
       await importConfigWithHome(TEST_DIR);
-    setConfigValue("agent.service_tier", "normal");
+    await writeDefaultProfile(() =>
+      setConfigValue("agent.service_tier", "normal"),
+    );
 
     const after = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");
     expect(after).toContain('service_tier: "normal"');
@@ -221,7 +239,9 @@ describe("setConfigValue — dotted paths", () => {
     );
 
     const { setConfigValue } = await importConfigWithHome(TEST_DIR);
-    setConfigValue("agent.service_tier", "normal");
+    await writeDefaultProfile(() =>
+      setConfigValue("agent.service_tier", "normal"),
+    );
 
     const after = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");
     expect(after).toContain("service_tier: 'leave-me-alone'");
@@ -242,7 +262,9 @@ describe("setConfigValue — dotted paths", () => {
 
     const { setConfigValue, getConfigValue } =
       await importConfigWithHome(TEST_DIR);
-    setConfigValue("network.proxy", "socks5://127.0.0.1:1080");
+    await writeDefaultProfile(() =>
+      setConfigValue("network.proxy", "socks5://127.0.0.1:1080"),
+    );
 
     const after = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");
     expect(after).toContain("network:\n  force_ipv4: false\n");
@@ -256,7 +278,9 @@ describe("setConfigValue — dotted paths", () => {
 
     const { setConfigValue, getConfigValue } =
       await importConfigWithHome(TEST_DIR);
-    setConfigValue("network.proxy", "http://proxy:8080");
+    await writeDefaultProfile(() =>
+      setConfigValue("network.proxy", "http://proxy:8080"),
+    );
 
     const after = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");
     expect(after).toContain("display:\n  compact: true\n");
@@ -268,7 +292,9 @@ describe("setConfigValue — dotted paths", () => {
     writeFileSync(join(TEST_DIR, "config.yaml"), ["network:", ""].join("\n"));
 
     const { setConfigValue } = await importConfigWithHome(TEST_DIR);
-    setConfigValue("network.proxy", 'http://proxy:8080/path?name="quoted"');
+    await writeDefaultProfile(() =>
+      setConfigValue("network.proxy", 'http://proxy:8080/path?name="quoted"'),
+    );
 
     const after = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");
     expect(after).toContain(
@@ -281,7 +307,9 @@ describe("setConfigValue — dotted paths", () => {
     writeFileSync(join(TEST_DIR, "config.yaml"), before);
 
     const { setConfigValue } = await importConfigWithHome(TEST_DIR);
-    setConfigValue("agent.fallback.service_tier", "fast");
+    await writeDefaultProfile(() =>
+      setConfigValue("agent.fallback.service_tier", "fast"),
+    );
 
     const after = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");
     expect(after).toBe(before);
@@ -296,7 +324,9 @@ describe("setConfigValue — dotted paths", () => {
     const { getConfigValue, setConfigValue } =
       await importConfigWithHome(TEST_DIR);
     expect(getConfigValue("agent.service_tier")).toBe("fast");
-    setConfigValue("agent.service_tier", "priority");
+    await writeDefaultProfile(() =>
+      setConfigValue("agent.service_tier", "priority"),
+    );
     expect(getConfigValue("agent.service_tier")).toBe("priority");
   });
 });
@@ -311,7 +341,7 @@ describe("setConfigValue — flat keys", () => {
     );
 
     const { setConfigValue } = await importConfigWithHome(TEST_DIR);
-    setConfigValue("timezone", "UTC");
+    await writeDefaultProfile(() => setConfigValue("timezone", "UTC"));
 
     const after = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");
     expect(after).toContain('timezone: "UTC"');
@@ -326,7 +356,7 @@ describe("setConfigValue — flat keys", () => {
 
     const { setConfigValue, getConfigValue } =
       await importConfigWithHome(TEST_DIR);
-    setConfigValue("timezone", "UTC");
+    await writeDefaultProfile(() => setConfigValue("timezone", "UTC"));
 
     expect(getConfigValue("timezone")).toBe("UTC");
   });
@@ -338,7 +368,7 @@ describe("setConfigValue — flat keys", () => {
     );
 
     const { setConfigValue } = await importConfigWithHome(TEST_DIR);
-    setConfigValue("service_tier", "PROBE");
+    await writeDefaultProfile(() => setConfigValue("service_tier", "PROBE"));
 
     const after = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");
     // Old code would have rewritten `  service_tier: fast` → `  service_tier: "PROBE"`.

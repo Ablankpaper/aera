@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { join } from "path";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
+import { withManagedModelTestWrite } from "./helpers/managed-model-test-writer";
 
 /**
  * `setModelConfig` must write the right `base_url:` into `config.yaml` —
@@ -37,6 +38,21 @@ async function importConfigWithHome(
   return await import("../src/main/config");
 }
 
+async function writeDefaultProfile<T>(
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  return await withManagedModelTestWrite(
+    {
+      roots: {
+        globalRoot: TEST_DIR,
+        profiles: { default: TEST_DIR },
+      },
+      scope: { globalCatalog: false, profileIds: ["default"] },
+    },
+    callback,
+  );
+}
+
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });
 });
@@ -53,7 +69,9 @@ describe("setModelConfig — base_url substitution", () => {
     const { setModelConfig, getModelConfig } =
       await importConfigWithHome(TEST_DIR);
 
-    setModelConfig("deepseek", "deepseek-v4-pro", "");
+    await writeDefaultProfile(() =>
+      setModelConfig("deepseek", "deepseek-v4-pro", ""),
+    );
 
     const mc = getModelConfig();
     expect(mc.provider).toBe("deepseek");
@@ -71,10 +89,12 @@ describe("setModelConfig — base_url substitution", () => {
       await importConfigWithHome(TEST_DIR);
 
     // User configured a self-hosted DeepSeek-compatible proxy on their LAN.
-    setModelConfig(
-      "deepseek",
-      "deepseek-v4-pro",
-      "https://my-llm-proxy.lan/v1",
+    await writeDefaultProfile(() =>
+      setModelConfig(
+        "deepseek",
+        "deepseek-v4-pro",
+        "https://my-llm-proxy.lan/v1",
+      ),
     );
 
     const mc = getModelConfig();
@@ -102,7 +122,9 @@ describe("setModelConfig — base_url substitution", () => {
 
     // Step 2 — user picks DeepSeek's deepseek-v4-pro from the model picker.
     //          The library row has no baseUrl, so the renderer passes "".
-    setModelConfig("deepseek", "deepseek-v4-pro", "");
+    await writeDefaultProfile(() =>
+      setModelConfig("deepseek", "deepseek-v4-pro", ""),
+    );
 
     const mc = getModelConfig();
     expect(mc.provider).toBe("deepseek");
@@ -121,7 +143,9 @@ describe("setModelConfig — base_url substitution", () => {
     // `custom` has no canonical — there's nothing sensible to fill in,
     // and writing a fake URL would be worse than leaving it empty (the
     // user already saw the validation that prompts them for a URL).
-    setModelConfig("custom", "my-local-model", "");
+    await writeDefaultProfile(() =>
+      setModelConfig("custom", "my-local-model", ""),
+    );
 
     const mc = getModelConfig();
     expect(mc.provider).toBe("custom");
@@ -148,7 +172,7 @@ describe("setModelConfig — base_url substitution", () => {
     const { setModelConfig, getModelConfig } =
       await importConfigWithHome(TEST_DIR);
 
-    setModelConfig("auto", "", "");
+    await writeDefaultProfile(() => setModelConfig("auto", "", ""));
 
     const mc = getModelConfig();
     expect(mc.provider).toBe("auto");
@@ -182,7 +206,9 @@ describe("setModelConfig — base_url substitution", () => {
 
       const { setModelConfig, getModelConfig } =
         await importConfigWithHome(TEST_DIR);
-      setModelConfig(provider, "some-model", "");
+      await writeDefaultProfile(() =>
+        setModelConfig(provider, "some-model", ""),
+      );
 
       const mc = getModelConfig();
       expect(mc.baseUrl).toBe(expected);
@@ -204,7 +230,9 @@ describe("setModelConfig — base_url substitution", () => {
 
       const { setModelConfig, getModelConfig } =
         await importConfigWithHome(TEST_DIR);
-      setModelConfig(provider, "some-local-model", "");
+      await writeDefaultProfile(() =>
+        setModelConfig(provider, "some-local-model", ""),
+      );
 
       const mc = getModelConfig();
       expect(mc.provider).toBe(provider);

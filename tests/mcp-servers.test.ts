@@ -64,10 +64,13 @@ vi.mock("../src/main/agentera-runtime-distribution/invocation", () => ({
 }));
 
 import {
+  addMcpServer,
   parseCatalogOutput,
   parseMcpServersFromConfig,
   listMcpCatalog,
+  removeMcpServer,
   removeMcpServerFromConfig,
+  setMcpServerEnabled,
   setMcpServerEnabledInConfig,
   testMcpServer,
   upsertMcpServerInConfig,
@@ -76,6 +79,34 @@ import {
 describe("MCP server config management", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("fails closed for every local managed-config mutation without a coordinator", async () => {
+    await expect(
+      addMcpServer(
+        {
+          name: "local-docs",
+          type: "http",
+          url: "https://mcp.invalid",
+        },
+        "default",
+      ),
+    ).resolves.toMatchObject({
+      success: false,
+      error: "model_configuration_mutation_unavailable",
+    });
+    await expect(
+      removeMcpServer("local-docs", "default"),
+    ).resolves.toMatchObject({
+      success: false,
+      error: "model_configuration_mutation_unavailable",
+    });
+    await expect(
+      setMcpServerEnabled("local-docs", false, "default"),
+    ).resolves.toMatchObject({
+      success: false,
+      error: "model_configuration_mutation_unavailable",
+    });
   });
 
   it("uses the structured local Runtime endpoint for tool discovery", async () => {

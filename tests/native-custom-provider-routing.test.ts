@@ -10,12 +10,24 @@ let testHome = "";
 async function loadModules(): Promise<{
   config: typeof import("../src/main/config");
   native: typeof import("../src/main/native-custom-provider");
+  writeAuthority: import("../src/main/model-configuration-write-authority").ModelConfigurationWriteAuthority;
 }> {
   vi.resetModules();
   vi.stubEnv("HERMES_HOME", testHome);
+  const [config, native, managed, authority] = await Promise.all([
+    import("../src/main/config"),
+    import("../src/main/native-custom-provider"),
+    import("../src/main/model-configuration-managed-files"),
+    import("../src/main/model-configuration-write-authority"),
+  ]);
+  managed.registerManagedModelFileRoots({
+    globalRoot: testHome,
+    profiles: { default: testHome },
+  });
   return {
-    config: await import("../src/main/config"),
-    native: await import("../src/main/native-custom-provider"),
+    config,
+    native,
+    writeAuthority: new authority.ModelConfigurationWriteAuthority(),
   };
 }
 
@@ -48,15 +60,7 @@ describe("Hermes-native named custom-provider routing", () => {
   });
 
   it("plans without writing and requires an explicit Profile permit", async () => {
-    const { native } = await loadModules();
-    const managed =
-      await import("../src/main/model-configuration-managed-files");
-    const authority =
-      await import("../src/main/model-configuration-write-authority");
-    managed.registerManagedModelFileRoots({
-      globalRoot: testHome,
-      profiles: { default: testHome },
-    });
+    const { native, writeAuthority } = await loadModules();
     const configFile = join(testHome, "config.yaml");
     const before = readFileSync(configFile);
 
@@ -71,7 +75,6 @@ describe("Hermes-native named custom-provider routing", () => {
     );
     expect(readFileSync(configFile)).toEqual(before);
 
-    const writeAuthority = new authority.ModelConfigurationWriteAuthority();
     const route = await writeAuthority.run(
       { globalCatalog: false, profileIds: ["default"] },
       (permit) => native.persistNativeCustomProviderPlan(permit, plan),
@@ -85,16 +88,26 @@ describe("Hermes-native named custom-provider routing", () => {
   });
 
   it("persists one native providers entry and activates custom:<name> without inlining the key", async () => {
-    const { config, native } = await loadModules();
+    const { config, native, writeAuthority } = await loadModules();
 
-    const route = native.upsertNativeCustomProvider(undefined, {
-      apiMode: "chat_completions",
-      baseUrl: "https://api.petoi.cn/v1",
-      model: "gpt-5.6-sol",
-      models: ["gpt-5.6-sol", "gpt-5.5"],
-      name: "petoi.cn",
-    });
-    config.setModelConfig(route, "gpt-5.6-sol", "https://api.petoi.cn/v1");
+    const route = await writeAuthority.run(
+      { globalCatalog: false, profileIds: ["default"] },
+      () => {
+        const nextRoute = native.upsertNativeCustomProvider(undefined, {
+          apiMode: "chat_completions",
+          baseUrl: "https://api.petoi.cn/v1",
+          model: "gpt-5.6-sol",
+          models: ["gpt-5.6-sol", "gpt-5.5"],
+          name: "petoi.cn",
+        });
+        config.setModelConfig(
+          nextRoute,
+          "gpt-5.6-sol",
+          "https://api.petoi.cn/v1",
+        );
+        return nextRoute;
+      },
+    );
 
     const saved = readFileSync(join(testHome, "config.yaml"), "utf8");
     const parsed = parseYaml(saved) as {
@@ -129,22 +142,27 @@ describe("Hermes-native named custom-provider routing", () => {
 
   it("composes native provider and model writes into valid block YAML on a brand-new profile", async () => {
     rmSync(join(testHome, "config.yaml"));
-    const { config, native } = await loadModules();
+    const { config, native, writeAuthority } = await loadModules();
 
-    const route = native.upsertNativeCustomProvider(undefined, {
-      apiMode: "codex_responses",
-      baseUrl: "https://api.anhepro.com/v1",
-      model: "gpt-5.6-sol",
-      models: ["gpt-5.6-sol"],
-      name: "anhepro.com",
-    });
-    config.setModelConfig(
-      route,
-      "gpt-5.6-sol",
-      "https://api.anhepro.com/v1",
-      undefined,
-      null,
-      "codex_responses",
+    await writeAuthority.run(
+      { globalCatalog: false, profileIds: ["default"] },
+      () => {
+        const nextRoute = native.upsertNativeCustomProvider(undefined, {
+          apiMode: "codex_responses",
+          baseUrl: "https://api.anhepro.com/v1",
+          model: "gpt-5.6-sol",
+          models: ["gpt-5.6-sol"],
+          name: "anhepro.com",
+        });
+        config.setModelConfig(
+          nextRoute,
+          "gpt-5.6-sol",
+          "https://api.anhepro.com/v1",
+          undefined,
+          null,
+          "codex_responses",
+        );
+      },
     );
 
     const saved = readFileSync(join(testHome, "config.yaml"), "utf8");
@@ -168,16 +186,21 @@ describe("Hermes-native named custom-provider routing", () => {
   });
 
   it("reuses the key_env identity instead of leaving duplicate native routes after a rename", async () => {
-    const { native } = await loadModules();
+    const { native, writeAuthority } = await loadModules();
 
-    native.upsertNativeCustomProvider(undefined, {
-      baseUrl: "https://old.example/v1",
-      name: "Petoi.CN",
-    });
-    native.upsertNativeCustomProvider(undefined, {
-      baseUrl: "https://api.petoi.cn/v1",
-      name: "PETOI_CN",
-    });
+    await writeAuthority.run(
+      { globalCatalog: false, profileIds: ["default"] },
+      () => {
+        native.upsertNativeCustomProvider(undefined, {
+          baseUrl: "https://old.example/v1",
+          name: "Petoi.CN",
+        });
+        native.upsertNativeCustomProvider(undefined, {
+          baseUrl: "https://api.petoi.cn/v1",
+          name: "PETOI_CN",
+        });
+      },
+    );
 
     const parsed = parseYaml(
       readFileSync(join(testHome, "config.yaml"), "utf8"),
@@ -194,17 +217,22 @@ describe("Hermes-native named custom-provider routing", () => {
   });
 
   it("removes the previous native route when a real rename changes the credential anchor", async () => {
-    const { native } = await loadModules();
+    const { native, writeAuthority } = await loadModules();
 
-    native.upsertNativeCustomProvider(undefined, {
-      baseUrl: "https://api.petoi.cn/v1",
-      name: "petoi.cn",
-    });
-    native.upsertNativeCustomProvider(undefined, {
-      baseUrl: "https://www.api-codex.cn",
-      name: "123456",
-      previousName: "petoi.cn",
-    });
+    await writeAuthority.run(
+      { globalCatalog: false, profileIds: ["default"] },
+      () => {
+        native.upsertNativeCustomProvider(undefined, {
+          baseUrl: "https://api.petoi.cn/v1",
+          name: "petoi.cn",
+        });
+        native.upsertNativeCustomProvider(undefined, {
+          baseUrl: "https://www.api-codex.cn",
+          name: "123456",
+          previousName: "petoi.cn",
+        });
+      },
+    );
 
     const parsed = parseYaml(
       readFileSync(join(testHome, "config.yaml"), "utf8"),

@@ -27,7 +27,9 @@ vi.mock("./config", () => ({
     generated: true,
     key: "generated-internal-token",
   })),
-  getApiServerKey: vi.fn(() => null),
+  // buildGatewayEnv is a read-only launch step; the gateway credential is
+  // prepared by the managed bootstrap boundary before it is called.
+  getApiServerKey: vi.fn(() => "generated-internal-token"),
   getConnectionConfig: vi.fn(() => ({})),
   getConfigValue: vi.fn(() => null),
   getModelConfig: vi.fn(() => ({
@@ -256,12 +258,12 @@ describe("gateway env builders consult the secrets provider", () => {
     expect(buildGatewayEnv().ANTHROPIC_API_KEY).toBe("from-process-env");
   });
 
-  it("buildGatewayEnv resolves the active named profile and injects its ensured gateway credential", () => {
+  it("buildGatewayEnv resolves the active named profile using its prepared gateway credential", () => {
     activeProfileRef.value = "work";
 
     const env = buildGatewayEnv();
 
-    expect(ensureLocalApiServerKey).toHaveBeenCalledWith("work");
+    expect(ensureLocalApiServerKey).not.toHaveBeenCalled();
     expect(readEnv).toHaveBeenCalledWith("work");
     expect(providerListSafe).toHaveBeenCalledWith("work");
     expect(env.API_SERVER_KEY).toBe("generated-internal-token");
