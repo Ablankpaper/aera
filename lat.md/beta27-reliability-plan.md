@@ -60,6 +60,16 @@ A recovery or ownership refusal occurs before the feature write callback and the
 
 Installation, managed update, restore, and rollback paths await activation; an asynchronous projection failure cannot be recorded as a successful installation or update.
 
+### Staged Profile activation protects live state
+
+Profile lifecycle operations materialize in app-owned same-volume staging and activate only after validation.
+
+[[src/main/model-configuration-staged-profile.ts#createStagedProfileCandidate]] stages Runtime clones, fresh Agent Profiles, and encrypted-backup restores. It strictly parses every present managed role, rejects escaping links, rechecks the owner reservation and destination collision under the ordered write authority, then publishes the candidate with one directory rename.
+
+The activation journal records only a random transaction id, Profile id, source kind, and terminal state; it stores no filesystem path or file body. A refused candidate removes only its own staging directory, while a committed candidate dynamically registers its live Profile root so later managed writes still require a coordinator permit.
+
+[[src/main/profiles.ts#prepareProfile]] keeps the Runtime subprocess on the staged `HERMES_HOME`. [[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager#activateVerifiedRestore]] merges decrypted backup bytes into that candidate and revalidates it before activation, rather than copying files into an already-live Profile.
+
 ## Legacy installation recovery
 
 Cold recovery accepts a fresh Installation operation that names only its source Profile and intentionally inherits that Profile's current or default model.
