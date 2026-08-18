@@ -15,7 +15,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -1684,14 +1684,13 @@ describe("Internal Beta desktop updater", () => {
       const journal = join(root, "install-journal.json");
       const failure = join(root, "install-failure.json");
       const helper = join(root, "update-helper.ps1");
-      const executable = join(install, "Aera.cmd");
-      const restartLog = join(root, "old-restarted.log");
+      const executable = join(install, "Aera.exe");
+      const shellExecutable = process.env.ComSpec;
+      if (!shellExecutable)
+        throw new Error("Windows command shell is unavailable");
       await mkdir(install, { recursive: true });
       await Promise.all([
-        writeFile(
-          executable,
-          '@echo off\r\necho restarted>>"%AERA_TEST_RESTART_LOG%"\r\n',
-        ),
+        copyFile(shellExecutable, executable),
         writeFile(
           journal,
           JSON.stringify({ state: "prepared", rollback_state: "not_started" }),
@@ -1712,54 +1711,61 @@ describe("Internal Beta desktop updater", () => {
         "powershell.exe",
       );
       await expect(
-        execFile(
-          powershell,
-          [
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            helper,
-            "-ProcessId",
-            "99999999",
-            "-InstallDirectory",
-            install,
-            "-StagedDirectory",
-            missingStaged,
-            "-BackupDirectory",
-            backup,
-            "-TargetExecutable",
-            executable,
-            "-MarkerPath",
-            marker,
-            "-JournalPath",
-            journal,
-            "-FailurePath",
-            failure,
-            "-HelperPath",
-            helper,
-            "-TargetVersion",
-            NEXT_VERSION,
-            "-OperationId",
-            "12345678-1234-4234-9234-123456789abc",
-          ],
-          { env: { ...process.env, AERA_TEST_RESTART_LOG: restartLog } },
-        ),
+        execFile(powershell, [
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          helper,
+          "-ProcessId",
+          "99999999",
+          "-InstallDirectory",
+          install,
+          "-StagedDirectory",
+          missingStaged,
+          "-BackupDirectory",
+          backup,
+          "-TargetExecutable",
+          executable,
+          "-MarkerPath",
+          marker,
+          "-JournalPath",
+          journal,
+          "-FailurePath",
+          failure,
+          "-HelperPath",
+          helper,
+          "-TargetVersion",
+          NEXT_VERSION,
+          "-OperationId",
+          "12345678-1234-4234-9234-123456789abc",
+        ]),
       ).rejects.toThrow();
 
+      let restartedProcessCount = 0;
       for (let attempt = 0; attempt < 20; attempt += 1) {
-        try {
-          await access(restartLog);
-          break;
-        } catch {
-          await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
-        }
+        const { stdout } = await execFile(powershell, [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          `@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq '${executable.replaceAll("'", "''")}' }).Count`,
+        ]);
+        restartedProcessCount = Number(stdout.trim());
+        if (restartedProcessCount > 0) break;
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
       }
-      await expect(readFile(restartLog, "utf8")).resolves.toContain(
-        "restarted",
+      expect(restartedProcessCount).toBeGreaterThan(0);
+      await expect(readFile(failure, "utf8")).resolves.toContain(
+        '"code":"update_staged_identity_invalid"',
       );
       await expect(access(journal)).rejects.toThrow();
+      await execFile(powershell, [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq '${executable.replaceAll("'", "''")}' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`,
+      ]).catch(() => {});
     },
   );
 
@@ -1840,7 +1846,11 @@ describe("Internal Beta desktop updater", () => {
   });
 
   it("checks the sibling-backup parent before the Windows install directory", async () => {
-    const executable = "/opt/Aera/Aera.exe";
+    const executable =
+      process.platform === "win32"
+        ? "C:\\opt\\Aera\\Aera.exe"
+        : "/opt/Aera/Aera.exe";
+    const installDirectory = dirname(resolve(executable));
     const checks: Array<{ path: string; mode: number | undefined }> = [];
 
     await validateWindowsInstallPreflight(executable, async (path, mode) => {
@@ -1848,10 +1858,16 @@ describe("Internal Beta desktop updater", () => {
     });
 
     expect(checks).toEqual([
-      { path: "/opt", mode: expect.any(Number) },
-      { path: "/opt/Aera", mode: expect.any(Number) },
+      { path: dirname(installDirectory), mode: expect.any(Number) },
+      { path: installDirectory, mode: expect.any(Number) },
     ]);
     expect(checks[0]?.mode).toBe(checks[1]?.mode);
+    if (process.platform === "win32") {
+      expect(checks.map((check) => check.path)).toEqual([
+        "C:\\opt",
+        "C:\\opt\\Aera",
+      ]);
+    }
   });
 
   it.skipIf(process.platform === "win32")(
