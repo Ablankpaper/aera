@@ -536,6 +536,29 @@ jobs:
             --notarization-evidence "$RUNNER_TEMP/notarizations.json" \
             --output "$RUNNER_TEMP/macos-evidence.json"
 
+      - name: Bind native inventories to final macOS containers
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          node scripts/release/final-artifact-native-inventory.mjs \
+            --artifact "${{ steps.mac_paths.outputs.dmg }}" \
+            --kind macos_dmg \
+            --platform darwin \
+            --architecture arm64 \
+            --source-sha "${{ inputs.source_sha }}" \
+            --desktop-version "$VERSION" \
+            --output "$RUNNER_TEMP/native-inventory-macos-dmg.json"
+          node scripts/release/final-artifact-native-inventory.mjs \
+            --artifact "${{ steps.mac_paths.outputs.zip }}" \
+            --kind macos_zip \
+            --platform darwin \
+            --architecture arm64 \
+            --source-sha "${{ inputs.source_sha }}" \
+            --desktop-version "$VERSION" \
+            --output "$RUNNER_TEMP/native-inventory-macos-zip.json"
+
       - name: Preserve non-secret notarization diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -561,6 +584,9 @@ jobs:
           cp "$RUNNER_TEMP/macos-evidence.json" "$destination/evidence/"
           cp "$RUNNER_TEMP/packaged-startup-macos.json" \
             "$destination/evidence/"
+          cp "$RUNNER_TEMP/native-inventory-macos-dmg.json" \
+            "$RUNNER_TEMP/native-inventory-macos-zip.json" \
+            "$destination/evidence/"
           cp "${{ steps.mac_paths.outputs.runtime_manifest }}" \
             "$destination/runtime-seed/"
 
@@ -574,7 +600,7 @@ jobs:
           compression-level: 0
 
   windows:
-    name: Build unsigned Windows x64 internal Beta
+    name: Build and Authenticode-sign Windows x64 internal Beta
     needs: validate
     runs-on: windows-2025
     environment: internal-beta
@@ -635,14 +661,29 @@ jobs:
           npm run build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Package unsigned Windows setup, portable, and app ZIP payload
+      - name: Require Authenticode credentials
         shell: pwsh
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK)) {
+            throw "WIN_CSC_LINK is missing"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_KEY_PASSWORD)) {
+            throw "WIN_CSC_KEY_PASSWORD is missing"
+          }
+
+      - name: Package signed Windows setup, portable, and app ZIP payload
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
         run: |
           npx electron-builder `
             --config build/electron-builder.internal-beta.yml `
-            --win nsis portable dir --x64 --publish never
+            --win nsis portable dir --x64 --publish never `
+            -c.forceCodeSigning=true
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify exact packaged application startup
@@ -722,6 +763,62 @@ jobs:
           Copy-Item `
             (Join-Path $env:RUNNER_TEMP "packaged-startup-windows.json") `
             -Destination (Join-Path $destination "evidence")
+
+      - name: Bind native inventories to final Windows containers
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          $artifacts = @(
+            @{
+              Name = "Aera-Internal-Beta-$env:VERSION-windows-x64-setup.exe"
+              Kind = "windows_setup"
+              Output = "native-inventory-windows-setup.json"
+            },
+            @{
+              Name = "Aera-Internal-Beta-$env:VERSION-windows-x64-portable.exe"
+              Kind = "windows_portable"
+              Output = "native-inventory-windows-portable.json"
+            },
+            @{
+              Name = "Aera-Internal-Beta-$env:VERSION-windows-x64-app.zip"
+              Kind = "windows_app_zip"
+              Output = "native-inventory-windows-app-zip.json"
+            }
+          )
+          foreach ($artifact in $artifacts) {
+            node scripts/release/final-artifact-native-inventory.mjs `
+              --artifact (Join-Path "dist" $artifact.Name) `
+              --kind $artifact.Kind `
+              --platform win32 `
+              --architecture x64 `
+              --source-sha "${{ inputs.source_sha }}" `
+              --desktop-version $env:VERSION `
+              --output (Join-Path $env:RUNNER_TEMP $artifact.Output)
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $destination = Join-Path $env:RUNNER_TEMP "internal-beta-windows/evidence"
+          Copy-Item (Join-Path $env:RUNNER_TEMP "native-inventory-windows-*.json") `
+            -Destination $destination
+
+      - name: Verify signed Windows candidate
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          $manifests = @(Get-ChildItem resources/agentera-runtime-seed -File -Filter "*.manifest.json")
+          if ($manifests.Count -ne 1) { throw "Expected one Windows Runtime Seed manifest" }
+          ./scripts/release/verify-windows.ps1 `
+            -DistDirectory "dist" `
+            -RuntimeSeedReference "resources/agentera-runtime-seed" `
+            -RuntimeSeedManifest $manifests[0].FullName `
+            -DesktopVersion $env:VERSION `
+            -SetupArtifactName "Aera-Internal-Beta-$env:VERSION-windows-x64-setup.exe" `
+            -PortableArtifactName "Aera-Internal-Beta-$env:VERSION-windows-x64-portable.exe" `
+            -Output "$env:RUNNER_TEMP/windows-evidence.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item "$env:RUNNER_TEMP/windows-evidence.json" `
+            -Destination "$env:RUNNER_TEMP/internal-beta-windows/evidence"
 
       - name: Exercise Windows install/start/update/rollback smoke
         shell: pwsh
@@ -838,6 +935,21 @@ jobs:
           cp "$RUNNER_TEMP/internal-beta-macos/evidence/packaged-startup-macos.json" \
             "$RUNNER_TEMP/internal-beta-windows/evidence/packaged-startup-windows.json" \
             candidate/evidence/
+          test -f "$RUNNER_TEMP/internal-beta-windows/evidence/windows-evidence.json"
+          cp "$RUNNER_TEMP/internal-beta-windows/evidence/windows-evidence.json" \
+            candidate/evidence/
+          for name in \
+            native-inventory-macos-dmg.json \
+            native-inventory-macos-zip.json \
+            native-inventory-windows-setup.json \
+            native-inventory-windows-portable.json \
+            native-inventory-windows-app-zip.json
+          do
+            source=$(find "$RUNNER_TEMP/internal-beta-macos/evidence" \
+              "$RUNNER_TEMP/internal-beta-windows/evidence" -name "$name" -print)
+            test -f "$source"
+            cp "$source" candidate/evidence/
+          done
           cp build/agentera-runtime-seed.lock.json \
             candidate/evidence/agentera-runtime-seed.lock.json
 
@@ -926,6 +1038,7 @@ jobs:
             --ci-run-url "$CI_RUN_URL"
             --created-at "$CREATED_AT"
             --macos-evidence candidate/evidence/macos-evidence.json
+            --native-evidence-dir candidate/evidence
             --offline-key-id "$BETA_OFFLINE_KEY_ID"
             --offline-public-key "$BETA_OFFLINE_PUBLIC_KEY"
             --origin "$BETA_ORIGIN"
@@ -938,6 +1051,7 @@ jobs:
             --source-sha "$SOURCE_SHA"
             --trust-issuer "$BETA_ORIGIN"
             --version "$VERSION"
+            --windows-evidence candidate/evidence/windows-evidence.json
           )
           node scripts/internal-beta/manifest.mjs build \
             "${common_args[@]}" \

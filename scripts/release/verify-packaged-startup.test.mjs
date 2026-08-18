@@ -25,6 +25,7 @@ test("isolates packaged startup from the daily Hermes home", () => {
   );
 });
 
+// @lat: [[desktop-updates#Desktop Updates#Internal Beta signed update channel#Test specifications]]
 test("accepts one live packaged Main Preload Renderer startup", () => {
   const renderer = validateRendererProbe(
     {

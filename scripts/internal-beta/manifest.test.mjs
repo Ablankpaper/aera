@@ -1,12 +1,21 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 
 import { hashArtifact } from "../release/candidate-manifest.mjs";
+import { buildPackagedStartupEvidence } from "../release/verify-packaged-startup.mjs";
 
 import {
   INTERNAL_BETA_ARTIFACTS,
@@ -28,6 +37,13 @@ const CI_RUN_URL =
   "https://github.com/Ablankpaper/aera/actions/runs/30100000001";
 const BUILD_RUN_URL =
   "https://github.com/Ablankpaper/aera/actions/runs/30100000002";
+const NATIVE_EVIDENCE_NAMES = [
+  "native-inventory-macos-dmg.json",
+  "native-inventory-macos-zip.json",
+  "native-inventory-windows-setup.json",
+  "native-inventory-windows-portable.json",
+  "native-inventory-windows-app-zip.json",
+];
 
 const temporaryRoots = [];
 
@@ -46,12 +62,15 @@ async function createFixture(runtimePatch = {}) {
   const runtimeManifestsDirectory = join(root, "runtime-seed");
   const packageJson = join(root, "package.json");
   const runtimeLock = join(root, "runtime-lock.json");
-  const macosEvidence = join(root, "macos-evidence.json");
+  const evidenceDirectory = join(root, "evidence");
+  const macosEvidence = join(evidenceDirectory, "macos-evidence.json");
+  const windowsEvidence = join(evidenceDirectory, "windows-evidence.json");
   const sbom = join(root, "internal-beta.spdx.json");
   const provenance = join(root, "internal-beta.provenance.json");
   await Promise.all([
     mkdir(artifactsDirectory, { recursive: true }),
     mkdir(runtimeManifestsDirectory, { recursive: true }),
+    mkdir(evidenceDirectory, { recursive: true }),
   ]);
 
   await writeFile(
@@ -146,6 +165,123 @@ async function createFixture(runtimePatch = {}) {
       artifacts: macArtifacts,
     }),
   );
+  const windowsArtifacts = await Promise.all(
+    INTERNAL_BETA_ARTIFACTS.slice(2, 4).map(async (artifact, index) => ({
+      name: artifact.name,
+      platform: artifact.platform,
+      arch: artifact.arch,
+      kind: index === 0 ? "windows_setup" : "windows_portable",
+      ...(await hashArtifact(join(artifactsDirectory, artifact.name))),
+    })),
+  );
+  const windowsManifest = runtimeDocument.assets["windows-x64"].manifest;
+  const windowsManifestDigest = await hashArtifact(
+    join(runtimeManifestsDirectory, windowsManifest),
+  );
+  await writeFile(
+    windowsEvidence,
+    canonicalJSONStringify({
+      arch: "x64",
+      signerSubject: "CN=Aera Test Code Signing",
+      signerThumbprint: "A".repeat(40),
+      authenticodeVerifiedArtifacts: windowsArtifacts.map(({ name }) => name),
+      timestampVerifiedArtifacts: windowsArtifacts.map(({ name }) => name),
+      runtimeSeedVerifiedArtifacts: windowsArtifacts.map(({ name }) => name),
+      nativeModuleArchitecture: "x64",
+      runtimeSeedManifest: {
+        manifest: windowsManifest,
+        manifestSha256: windowsManifestDigest.sha256,
+      },
+      artifacts: windowsArtifacts,
+    }),
+  );
+
+  const inventoryByPlatform = new Map();
+  for (let index = 0; index < INTERNAL_BETA_ARTIFACTS.length; index += 1) {
+    const artifact = INTERNAL_BETA_ARTIFACTS[index];
+    const digest = await hashArtifact(join(artifactsDirectory, artifact.name));
+    const isMacos = artifact.platform === "macos";
+    const modules = [
+      {
+        abi: "145",
+        architecture: isMacos ? "arm64" : "x64",
+        format: isMacos ? "mach-o" : "pe",
+        path: "node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+        sha256: (isMacos ? "1" : "2").repeat(64),
+      },
+    ];
+    const inventorySha256 = createHash("sha256")
+      .update(canonicalJSONStringify(modules))
+      .digest("hex");
+    const platformKey = isMacos ? "macos" : "windows";
+    if (!inventoryByPlatform.has(platformKey)) {
+      inventoryByPlatform.set(platformKey, {
+        inventorySha256,
+        payloadSha256: (isMacos ? "3" : "4").repeat(64),
+      });
+    }
+    const shared = inventoryByPlatform.get(platformKey);
+    const kinds = [
+      "macos_dmg",
+      "macos_zip",
+      "windows_setup",
+      "windows_portable",
+      "windows_app_zip",
+    ];
+    await writeFile(
+      join(evidenceDirectory, NATIVE_EVIDENCE_NAMES[index]),
+      canonicalJSONStringify({
+        schemaVersion: 1,
+        sourceSha: SOURCE_SHA,
+        version: VERSION,
+        platform: isMacos ? "darwin" : "win32",
+        architecture: isMacos ? "arm64" : "x64",
+        kind: kinds[index],
+        electronAbi: "145",
+        artifact: {
+          name: artifact.name,
+          size: digest.size,
+          sha256: digest.sha256,
+          sha512: digest.sha512,
+        },
+        payload: { sha256: shared.payloadSha256 },
+        inventory: { sha256: shared.inventorySha256, modules },
+      }),
+    );
+  }
+
+  for (const [platform, architecture, output] of [
+    ["darwin", "arm64", "packaged-startup-macos.json"],
+    ["win32", "x64", "packaged-startup-windows.json"],
+  ]) {
+    const renderer = {
+      readyState: "complete",
+      visibilityState: "visible",
+      locationProtocol: "file:",
+      bodyTextLength: 14,
+      rendererReadyAccepted: true,
+      appVersion: VERSION,
+    };
+    await writeFile(
+      join(evidenceDirectory, output),
+      canonicalJSONStringify(
+        buildPackagedStartupEvidence({
+          sourceSha: SOURCE_SHA,
+          version: VERSION,
+          platform,
+          architecture,
+          executableSha256: "5".repeat(64),
+          appAsarSha256: "6".repeat(64),
+          entryHashes: {
+            main: "7".repeat(64),
+            preload: "8".repeat(64),
+            renderer: "9".repeat(64),
+          },
+          renderer,
+        }),
+      ),
+    );
+  }
   await writeFile(
     provenance,
     '{"predicateType":"https://slsa.dev/provenance/v1"}\n',
@@ -157,6 +293,7 @@ async function createFixture(runtimePatch = {}) {
     ciRunUrl: CI_RUN_URL,
     createdAt: "2026-07-24T02:00:00Z",
     macosEvidence,
+    nativeEvidenceDirectory: evidenceDirectory,
     offlineKeyId: KEY_ID,
     offlinePublicKey: PUBLIC_KEY,
     origin: ORIGIN,
@@ -169,6 +306,7 @@ async function createFixture(runtimePatch = {}) {
     sourceSha: SOURCE_SHA,
     trustIssuer: ORIGIN,
     version: VERSION,
+    windowsEvidence,
   };
   return { root, options };
 }
@@ -190,15 +328,27 @@ test("builds one canonical internal-Beta manifest with exact identities and hash
     keyId: KEY_ID,
     publicKey: PUBLIC_KEY,
   });
-  assert.equal(document.schemaVersion, 2);
+  assert.equal(document.schemaVersion, 3);
   assert.equal(
     INTERNAL_BETA_SIGNING_STATUS,
-    "macos_developer_id_notarized_windows_unsigned",
+    "macos_developer_id_notarized_windows_authenticode",
   );
   assert.equal(document.signingStatus, INTERNAL_BETA_SIGNING_STATUS);
   assert.equal(document.supplyChain.macosEvidence.name, "macos-evidence.json");
   assert.match(document.supplyChain.macosEvidence.sha256, /^[0-9a-f]{64}$/u);
-  assert.equal(Object.hasOwn(document.supplyChain, "windowsEvidence"), false);
+  assert.equal(
+    document.supplyChain.windowsEvidence.name,
+    "windows-evidence.json",
+  );
+  assert.match(document.supplyChain.windowsEvidence.sha256, /^[0-9a-f]{64}$/u);
+  assert.deepEqual(
+    document.supplyChain.nativeEvidence.map(({ name }) => name),
+    NATIVE_EVIDENCE_NAMES,
+  );
+  assert.deepEqual(
+    document.supplyChain.packagedStartupEvidence.map(({ name }) => name),
+    ["packaged-startup-macos.json", "packaged-startup-windows.json"],
+  );
   assert.match(document.runtimeSeed.lockSha256, /^[0-9a-f]{64}$/u);
   assert.equal(document.runtimeSeed.sourceCommit, RUNTIME_SHA);
   assert.equal(document.runtimeSeed.channel, "candidate");
@@ -371,6 +521,89 @@ test("rejects semantic macOS evidence that is unsigned or mismatched", async () 
     await assert.rejects(
       () => buildInternalBetaManifest(options),
       /macOS.*(evidence|bytes|Seed|notarization|codesign|Gatekeeper)/u,
+    );
+  }
+});
+
+test("rejects unsigned, untimestamped, or byte-mismatched Windows evidence", async () => {
+  for (const mutate of [
+    (evidence) => {
+      evidence.signerThumbprint = "not-a-thumbprint";
+    },
+    (evidence) => {
+      evidence.timestampVerifiedArtifacts = [];
+    },
+    (evidence) => {
+      evidence.artifacts[0].sha256 = "f".repeat(64);
+    },
+  ]) {
+    const { options } = await createFixture();
+    const evidence = JSON.parse(
+      await readFile(options.windowsEvidence, "utf8"),
+    );
+    mutate(evidence);
+    await writeFile(options.windowsEvidence, canonicalJSONStringify(evidence));
+
+    await assert.rejects(
+      () => buildInternalBetaManifest(options),
+      /Windows.*(Authenticode|timestamp|evidence|bytes)/u,
+    );
+  }
+});
+
+test("rejects a missing or substituted final-container native inventory", async () => {
+  {
+    const { options } = await createFixture();
+    await unlink(
+      join(
+        options.nativeEvidenceDirectory,
+        "native-inventory-windows-app-zip.json",
+      ),
+    );
+    await assert.rejects(
+      () => buildInternalBetaManifest(options),
+      /native.*(JSON|missing|inventory)/iu,
+    );
+  }
+  {
+    const { options } = await createFixture();
+    const substituted = await readFile(
+      join(options.nativeEvidenceDirectory, "native-inventory-macos-zip.json"),
+    );
+    await writeFile(
+      join(options.nativeEvidenceDirectory, "native-inventory-macos-dmg.json"),
+      substituted,
+    );
+    await assert.rejects(
+      () => buildInternalBetaManifest(options),
+      /native.*(artifact|bytes|identity)|differs from final artifact/iu,
+    );
+  }
+});
+
+test("rejects missing or unhealthy packaged startup evidence", async () => {
+  {
+    const { options } = await createFixture();
+    await unlink(
+      join(options.nativeEvidenceDirectory, "packaged-startup-windows.json"),
+    );
+    await assert.rejects(
+      () => buildInternalBetaManifest(options),
+      /packaged.*startup.*(JSON|missing)/iu,
+    );
+  }
+  {
+    const { options } = await createFixture();
+    const path = join(
+      options.nativeEvidenceDirectory,
+      "packaged-startup-macos.json",
+    );
+    const evidence = JSON.parse(await readFile(path, "utf8"));
+    evidence.renderer.bodyTextLength = 0;
+    await writeFile(path, canonicalJSONStringify(evidence));
+    await assert.rejects(
+      () => buildInternalBetaManifest(options),
+      /packaged.*startup|Renderer body/iu,
     );
   }
 });

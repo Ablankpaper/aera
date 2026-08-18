@@ -11,12 +11,14 @@ import {
   canonicalJSONStringify,
   hashArtifact,
 } from "../release/candidate-manifest.mjs";
+import { validateFinalArtifactNativeInventoryDocument } from "../release/final-artifact-native-inventory.mjs";
 
 export { canonicalJSONStringify };
 
 export const INTERNAL_BETA_VERSION = "0.7.4-internal-beta.32";
 export const INTERNAL_BETA_SIGNING_STATUS =
-  "macos_developer_id_notarized_windows_unsigned";
+  "macos_developer_id_notarized_windows_authenticode";
+export const INTERNAL_BETA_ELECTRON_ABI = "145";
 export const INTERNAL_BETA_RUNTIME_SOURCE_SHA =
   "b890d7de940c02a06da73f6a421d3867a63db8e6";
 export const INTERNAL_BETA_WORKFLOW_IDENTITY =
@@ -103,11 +105,14 @@ const RUNTIME_TARGET_KEYS = [
 const SUPPLY_CHAIN_KEYS = [
   "macosEvidence",
   "manifestBundle",
+  "nativeEvidence",
   "oidcIssuer",
+  "packagedStartupEvidence",
   "provenance",
   "provenanceBundle",
   "sbom",
   "signerIdentity",
+  "windowsEvidence",
 ];
 const SUPPLY_FILE_KEYS = ["name", "sha256", "size"];
 const RUNTIME_LOCK_KEYS = [
@@ -143,6 +148,94 @@ const MACOS_EVIDENCE_KEYS = [
 const MACOS_NOTARIZATION_KEYS = ["artifact", "id", "status"];
 const MACOS_RUNTIME_MANIFEST_KEYS = ["manifest", "manifestSha256"];
 const MACOS_ARTIFACT_KEYS = [...ARTIFACT_KEYS, "sha512"];
+const WINDOWS_EVIDENCE_KEYS = [
+  "arch",
+  "artifacts",
+  "authenticodeVerifiedArtifacts",
+  "nativeModuleArchitecture",
+  "runtimeSeedManifest",
+  "runtimeSeedVerifiedArtifacts",
+  "signerSubject",
+  "signerThumbprint",
+  "timestampVerifiedArtifacts",
+];
+const WINDOWS_ARTIFACT_KEYS = [...ARTIFACT_KEYS, "sha512"];
+const PACKAGED_STARTUP_KEYS = [
+  "appAsar",
+  "architecture",
+  "entries",
+  "events",
+  "executable",
+  "platform",
+  "renderer",
+  "schemaVersion",
+  "sourceSha",
+  "version",
+];
+const PACKAGED_STARTUP_RENDERER_KEYS = [
+  "appVersion",
+  "bodyTextLength",
+  "locationProtocol",
+  "readyState",
+  "rendererReadyAccepted",
+  "visibilityState",
+];
+const PACKAGED_STARTUP_EVENTS = [
+  "main_loaded",
+  "preload_loaded",
+  "renderer_loaded",
+  "first_window_visible",
+  "health_marked",
+];
+const NATIVE_EVIDENCE = Object.freeze([
+  Object.freeze({
+    name: "native-inventory-macos-dmg.json",
+    artifactIndex: 0,
+    platform: "darwin",
+    architecture: "arm64",
+    kind: "macos_dmg",
+  }),
+  Object.freeze({
+    name: "native-inventory-macos-zip.json",
+    artifactIndex: 1,
+    platform: "darwin",
+    architecture: "arm64",
+    kind: "macos_zip",
+  }),
+  Object.freeze({
+    name: "native-inventory-windows-setup.json",
+    artifactIndex: 2,
+    platform: "win32",
+    architecture: "x64",
+    kind: "windows_setup",
+  }),
+  Object.freeze({
+    name: "native-inventory-windows-portable.json",
+    artifactIndex: 3,
+    platform: "win32",
+    architecture: "x64",
+    kind: "windows_portable",
+  }),
+  Object.freeze({
+    name: "native-inventory-windows-app-zip.json",
+    artifactIndex: 4,
+    platform: "win32",
+    architecture: "x64",
+    kind: "windows_app_zip",
+  }),
+]);
+const PACKAGED_STARTUP_EVIDENCE = Object.freeze([
+  Object.freeze({
+    name: "packaged-startup-macos.json",
+    platform: "darwin",
+    architecture: "arm64",
+  }),
+  Object.freeze({
+    name: "packaged-startup-windows.json",
+    platform: "win32",
+    architecture: "x64",
+  }),
+]);
 
 function exactObject(value, expectedKeys, label) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -335,6 +428,16 @@ function validateSupplyFile(value, expectedName, label) {
   requiredPositiveInteger(value.size, label);
 }
 
+function exactNames(value, expected, label) {
+  if (
+    !Array.isArray(value) ||
+    value.length !== expected.length ||
+    value.some((name, index) => name !== expected[index])
+  ) {
+    throw new Error(`${label} artifact set is incomplete or out of order`);
+  }
+}
+
 function validateMacosEvidence(
   evidence,
   artifacts,
@@ -448,10 +551,223 @@ function validateMacosEvidence(
   return evidence;
 }
 
+function validateWindowsEvidence(
+  evidence,
+  artifacts,
+  artifactDigests,
+  runtimeTargets,
+) {
+  exactObject(evidence, WINDOWS_EVIDENCE_KEYS, "Windows signing evidence");
+  if (evidence.arch !== "x64" || evidence.nativeModuleArchitecture !== "x64") {
+    throw new Error("Windows signing evidence architecture is invalid");
+  }
+  if (
+    typeof evidence.signerSubject !== "string" ||
+    evidence.signerSubject.trim().length === 0 ||
+    !/^[0-9A-F]{40}$/u.test(evidence.signerThumbprint ?? "")
+  ) {
+    throw new Error("Windows Authenticode signer evidence is invalid");
+  }
+
+  const windowsArtifacts = artifacts
+    .filter(
+      ({ platform, kind }) => platform === "windows" && kind !== "app_zip",
+    )
+    .slice(0, 2);
+  const requiredNames = windowsArtifacts.map(({ name }) => name);
+  exactNames(
+    evidence.authenticodeVerifiedArtifacts,
+    requiredNames,
+    "Windows Authenticode",
+  );
+  exactNames(
+    evidence.timestampVerifiedArtifacts,
+    requiredNames,
+    "Windows Authenticode timestamp",
+  );
+  exactNames(
+    evidence.runtimeSeedVerifiedArtifacts,
+    requiredNames,
+    "Windows Runtime Seed",
+  );
+
+  if (
+    !Array.isArray(evidence.artifacts) ||
+    evidence.artifacts.length !== windowsArtifacts.length
+  ) {
+    throw new Error("Windows signing artifact evidence is incomplete");
+  }
+  const evidenceKinds = ["windows_setup", "windows_portable"];
+  for (let index = 0; index < windowsArtifacts.length; index += 1) {
+    const actual = exactObject(
+      evidence.artifacts[index],
+      WINDOWS_ARTIFACT_KEYS,
+      `Windows signing artifact ${index}`,
+    );
+    const expected = windowsArtifacts[index];
+    const digest = artifactDigests.get(expected.name);
+    if (
+      actual.name !== expected.name ||
+      actual.platform !== expected.platform ||
+      actual.arch !== expected.arch ||
+      actual.kind !== evidenceKinds[index] ||
+      actual.sha256 !== expected.sha256 ||
+      actual.size !== expected.size ||
+      !SHA512_PATTERN.test(actual.sha512 ?? "") ||
+      actual.sha512 !== digest?.sha512
+    ) {
+      throw new Error("Windows signing evidence differs from candidate bytes");
+    }
+  }
+
+  const runtimeManifest = exactObject(
+    evidence.runtimeSeedManifest,
+    MACOS_RUNTIME_MANIFEST_KEYS,
+    "Windows Runtime Seed manifest evidence",
+  );
+  const windowsTarget = runtimeTargets.find(
+    ({ platform, arch }) => platform === "windows" && arch === "x64",
+  );
+  if (
+    runtimeManifest.manifest !== windowsTarget?.manifest ||
+    runtimeManifest.manifestSha256 !== windowsTarget?.manifestSha256
+  ) {
+    throw new Error(
+      "Windows Runtime Seed manifest evidence differs from Seed bytes",
+    );
+  }
+  return evidence;
+}
+
+function validatePackagedStartupEvidence(evidence, expected) {
+  exactObject(evidence, PACKAGED_STARTUP_KEYS, "Packaged startup evidence");
+  if (
+    evidence.schemaVersion !== 1 ||
+    evidence.sourceSha !== expected.sourceSha ||
+    evidence.version !== expected.version ||
+    evidence.platform !== expected.platform ||
+    evidence.architecture !== expected.architecture
+  ) {
+    throw new Error("Packaged startup evidence identity is invalid");
+  }
+  for (const [label, value] of [
+    ["executable", evidence.executable],
+    ["app.asar", evidence.appAsar],
+  ]) {
+    exactObject(value, ["sha256"], `Packaged startup ${label}`);
+    requiredDigest(value.sha256, `Packaged startup ${label}`);
+  }
+  exactObject(
+    evidence.entries,
+    ["main", "preload", "renderer"],
+    "Packaged startup entries",
+  );
+  for (const [name, value] of Object.entries(evidence.entries)) {
+    exactObject(value, ["sha256"], `Packaged startup ${name}`);
+    requiredDigest(value.sha256, `Packaged startup ${name}`);
+  }
+  exactNames(evidence.events, PACKAGED_STARTUP_EVENTS, "Packaged startup");
+  const renderer = exactObject(
+    evidence.renderer,
+    PACKAGED_STARTUP_RENDERER_KEYS,
+    "Packaged startup Renderer",
+  );
+  if (
+    !["interactive", "complete"].includes(renderer.readyState) ||
+    renderer.visibilityState !== "visible" ||
+    renderer.locationProtocol !== "file:" ||
+    !Number.isSafeInteger(renderer.bodyTextLength) ||
+    renderer.bodyTextLength <= 0 ||
+    renderer.rendererReadyAccepted !== true ||
+    renderer.appVersion !== expected.version
+  ) {
+    throw new Error("Packaged startup Renderer health evidence is invalid");
+  }
+  return evidence;
+}
+
+async function validateNativeEvidence(options, artifacts, artifactDigests) {
+  const documents = [];
+  const supplyFiles = [];
+  for (const specification of NATIVE_EVIDENCE) {
+    const path = join(options.nativeEvidenceDirectory, specification.name);
+    const artifact = artifacts[specification.artifactIndex];
+    const digest = artifactDigests.get(artifact.name);
+    const evidence = validateFinalArtifactNativeInventoryDocument(
+      await readJson(
+        path,
+        `Final artifact native inventory ${specification.name}`,
+      ),
+      {
+        sourceSha: options.sourceSha,
+        version: options.version,
+        platform: specification.platform,
+        architecture: specification.architecture,
+        kind: specification.kind,
+        electronAbi: INTERNAL_BETA_ELECTRON_ABI,
+        artifact: {
+          name: artifact.name,
+          sha256: artifact.sha256,
+          sha512: digest.sha512,
+          size: artifact.size,
+        },
+      },
+    );
+    documents.push(evidence);
+    const evidenceDigest = await hashArtifact(path);
+    supplyFiles.push({
+      name: specification.name,
+      sha256: evidenceDigest.sha256,
+      size: evidenceDigest.size,
+    });
+  }
+  for (const indexes of [
+    [0, 1],
+    [2, 3, 4],
+  ]) {
+    const [first, ...rest] = indexes.map((index) => documents[index]);
+    if (
+      rest.some(
+        (document) =>
+          document.payload.sha256 !== first.payload.sha256 ||
+          document.inventory.sha256 !== first.inventory.sha256,
+      )
+    ) {
+      throw new Error(
+        "Final artifact native inventory payload differs between platform containers",
+      );
+    }
+  }
+  return supplyFiles;
+}
+
+async function validatePackagedStartupEvidenceFiles(options) {
+  const supplyFiles = [];
+  for (const specification of PACKAGED_STARTUP_EVIDENCE) {
+    const path = join(options.nativeEvidenceDirectory, specification.name);
+    validatePackagedStartupEvidence(
+      await readJson(path, `Packaged startup evidence ${specification.name}`),
+      {
+        sourceSha: options.sourceSha,
+        version: options.version,
+        platform: specification.platform,
+        architecture: specification.architecture,
+      },
+    );
+    const digest = await hashArtifact(path);
+    supplyFiles.push({
+      name: specification.name,
+      sha256: digest.sha256,
+      size: digest.size,
+    });
+  }
+  return supplyFiles;
+}
+
 export function validateInternalBetaManifest(document) {
   exactObject(document, TOP_LEVEL_KEYS, "Internal Beta manifest");
   if (
-    document.schemaVersion !== 2 ||
+    document.schemaVersion !== 3 ||
     document.repository !== "Ablankpaper/aera" ||
     typeof document.sourceSha !== "string" ||
     !SHA1_PATTERN.test(document.sourceSha) ||
@@ -571,6 +887,38 @@ export function validateInternalBetaManifest(document) {
     "macOS signing evidence",
   );
   validateSupplyFile(
+    document.supplyChain.windowsEvidence,
+    "windows-evidence.json",
+    "Windows signing evidence",
+  );
+  if (
+    !Array.isArray(document.supplyChain.nativeEvidence) ||
+    document.supplyChain.nativeEvidence.length !== NATIVE_EVIDENCE.length
+  ) {
+    throw new Error("Final artifact native evidence is incomplete");
+  }
+  for (let index = 0; index < NATIVE_EVIDENCE.length; index += 1) {
+    validateSupplyFile(
+      document.supplyChain.nativeEvidence[index],
+      NATIVE_EVIDENCE[index].name,
+      `Final artifact native evidence ${index}`,
+    );
+  }
+  if (
+    !Array.isArray(document.supplyChain.packagedStartupEvidence) ||
+    document.supplyChain.packagedStartupEvidence.length !==
+      PACKAGED_STARTUP_EVIDENCE.length
+  ) {
+    throw new Error("Packaged startup evidence is incomplete");
+  }
+  for (let index = 0; index < PACKAGED_STARTUP_EVIDENCE.length; index += 1) {
+    validateSupplyFile(
+      document.supplyChain.packagedStartupEvidence[index],
+      PACKAGED_STARTUP_EVIDENCE[index].name,
+      `Packaged startup evidence ${index}`,
+    );
+  }
+  validateSupplyFile(
     document.supplyChain.sbom,
     "internal-beta.spdx.json",
     "Internal Beta SBOM",
@@ -656,16 +1004,32 @@ export async function buildInternalBetaManifest(options) {
     artifactDigests,
     runtimeTargets,
   );
-  const [runtimeLockDigest, macosEvidenceDigest, sbomDigest, provenanceDigest] =
-    await Promise.all([
-      hashArtifact(options.runtimeLock),
-      hashArtifact(options.macosEvidence),
-      hashArtifact(options.sbom),
-      hashArtifact(options.provenance),
-    ]);
+  validateWindowsEvidence(
+    await readJson(options.windowsEvidence, "Windows signing evidence"),
+    artifacts,
+    artifactDigests,
+    runtimeTargets,
+  );
+  const [
+    nativeEvidence,
+    packagedStartupEvidence,
+    runtimeLockDigest,
+    macosEvidenceDigest,
+    windowsEvidenceDigest,
+    sbomDigest,
+    provenanceDigest,
+  ] = await Promise.all([
+    validateNativeEvidence(options, artifacts, artifactDigests),
+    validatePackagedStartupEvidenceFiles(options),
+    hashArtifact(options.runtimeLock),
+    hashArtifact(options.macosEvidence),
+    hashArtifact(options.windowsEvidence),
+    hashArtifact(options.sbom),
+    hashArtifact(options.provenance),
+  ]);
 
   const document = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     repository: options.repository,
     sourceSha: options.sourceSha,
     version: options.version,
@@ -698,6 +1062,13 @@ export async function buildInternalBetaManifest(options) {
         sha256: macosEvidenceDigest.sha256,
         size: macosEvidenceDigest.size,
       },
+      windowsEvidence: {
+        name: "windows-evidence.json",
+        sha256: windowsEvidenceDigest.sha256,
+        size: windowsEvidenceDigest.size,
+      },
+      nativeEvidence,
+      packagedStartupEvidence,
       sbom: {
         name: "internal-beta.spdx.json",
         sha256: sbomDigest.sha256,
@@ -825,6 +1196,7 @@ function buildOptions(values) {
     ciRunUrl: values.ci_run_url,
     createdAt: values.created_at,
     macosEvidence: values.macos_evidence,
+    nativeEvidenceDirectory: values.native_evidence_dir,
     offlineKeyId: values.offline_key_id,
     offlinePublicKey: values.offline_public_key,
     origin: values.origin,
@@ -837,6 +1209,7 @@ function buildOptions(values) {
     sourceSha: values.source_sha,
     trustIssuer: values.trust_issuer,
     version: values.version,
+    windowsEvidence: values.windows_evidence,
   };
 }
 

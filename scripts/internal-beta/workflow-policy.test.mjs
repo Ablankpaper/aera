@@ -290,24 +290,25 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   assert.match(macVerifierRaw, /resolvePackagedNativeModule/iu);
   assert.match(macVerifierRaw, /verifyNativeModuleAbi/iu);
   assert.match(raw, /candidate\/evidence\/macos-evidence\.json/u);
-  assert.match(raw, /Build unsigned Windows x64 internal Beta/u);
-  assert.match(raw, /CSC_IDENTITY_AUTO_DISCOVERY:\s*"false"/u);
+  assert.match(raw, /Build and Authenticode-sign Windows x64 internal Beta/u);
   assert.match(
     raw,
-    /Package unsigned Windows setup, portable, and app ZIP payload/u,
+    /Package signed Windows setup, portable, and app ZIP payload/u,
   );
-  assert.match(raw, /--win nsis portable dir --x64 --publish never/u);
+  assert.match(
+    raw,
+    /--win nsis portable dir --x64 --publish never[\s\\`]*-c\.forceCodeSigning=true/u,
+  );
   assert.match(raw, /Aera-Internal-Beta-\$env:VERSION-windows-x64-app\.zip/u);
   assert.match(raw, /verify-packaged-windows-app-zip\.mjs/u);
   assert.match(
     raw,
     /verify-packaged-windows-app-zip\.mjs[\s\S]*--expected-cloud-origin \$env:BETA_ORIGIN/u,
   );
-  assert.doesNotMatch(
-    raw,
-    /secrets\.WIN_CSC_LINK|secrets\.WIN_CSC_KEY_PASSWORD/u,
-  );
-  assert.doesNotMatch(raw, /candidate\/evidence\/windows-evidence\.json/u);
+  assert.match(raw, /secrets\.WIN_CSC_LINK/u);
+  assert.match(raw, /secrets\.WIN_CSC_KEY_PASSWORD/u);
+  assert.match(raw, /scripts\/release\/verify-windows\.ps1/u);
+  assert.match(raw, /candidate\/evidence\/windows-evidence\.json/u);
 
   assert.match(productionRaw, /Build and Authenticode-sign Windows x64/u);
   assert.match(
@@ -321,7 +322,7 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   assert.doesNotMatch(raw, /actions\/attest/iu);
   assert.doesNotMatch(raw, /attestations:\s*write/iu);
   assert.doesNotMatch(raw, /\bgh\s+release\b|create[-_ ]tag|refs\/tags/iu);
-  assert.doesNotMatch(raw, /WIN_CSC|signtool/iu);
+  assert.match(raw, /WIN_CSC_LINK/u);
   assert.doesNotMatch(
     raw,
     /repository:\s*Ablankpaper\/aera-runtime|git\s+clone[\s\S]*aera-runtime/iu,
@@ -555,4 +556,26 @@ test("Internal Beta candidate proves packaged Main Preload and Renderer startup 
   }
   assert.match(raw, /packaged-startup-macos\.json/u);
   assert.match(raw, /packaged-startup-windows\.json/u);
+});
+
+test("Internal Beta binds native inventories to every final distributable", async () => {
+  const raw = await readFile(workflowPath, "utf8");
+  for (const name of [
+    "native-inventory-macos-dmg.json",
+    "native-inventory-macos-zip.json",
+    "native-inventory-windows-setup.json",
+    "native-inventory-windows-portable.json",
+    "native-inventory-windows-app-zip.json",
+  ]) {
+    assert.match(raw, new RegExp(name.replaceAll(".", "\\."), "u"));
+  }
+  assert.equal(
+    [
+      ...raw.matchAll(
+        /scripts\/release\/final-artifact-native-inventory\.mjs/gu,
+      ),
+    ].length,
+    3,
+  );
+  assert.match(raw, /--native-evidence-dir candidate\/evidence/u);
 });
