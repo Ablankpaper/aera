@@ -5,7 +5,7 @@ import { useModelConfig } from "./useModelConfig";
 vi.mock("../../../hooks/useDiscoveredModels", () => ({
   useDiscoveredModels: () => ({
     models: [],
-    status: "unsupported",
+    status: "unsupported_provider",
   }),
 }));
 

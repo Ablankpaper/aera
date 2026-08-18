@@ -291,7 +291,7 @@ function AuxiliaryTasksSection({
                         }
                         autoComplete="off"
                       />
-                      {auxDiscovery.status !== "unsupported" &&
+                      {auxDiscovery.status !== "unsupported_provider" &&
                         auxDiscovery.status !== "idle" && (
                           <button
                             type="button"
@@ -312,7 +312,7 @@ function AuxiliaryTasksSection({
                       </datalist>
                     )}
                     {auxDiscovery.status !== "idle" &&
-                      auxDiscovery.status !== "unsupported" && (
+                      auxDiscovery.status !== "unsupported_provider" && (
                         <span className="models-modal-hint">
                           {auxDiscovery.status === "loading"
                             ? t("settings.discoveringModels")
@@ -321,7 +321,7 @@ function AuxiliaryTasksSection({
                               ? t("settings.discoveredCount", {
                                   count: auxDiscovery.models.length,
                                 })
-                              : auxDiscovery.status === "no-key"
+                              : auxDiscovery.status === "credential_missing"
                                 ? t("settings.discoveryNoKey")
                                 : t("settings.discoveryError")}
                         </span>

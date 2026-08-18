@@ -134,7 +134,7 @@ describe("ModelCenter", () => {
     ["upstream_error", "providers.center.errors.upstream"],
     ["malformed_response", "providers.center.errors.malformed"],
     ["timeout", "providers.center.errors.timeout"],
-    ["network_error", "providers.center.errors.network"],
+    ["connection_error", "providers.center.errors.network"],
   ])("shows the exact %s discovery failure", async (status, message) => {
     discoverProviderModels.mockResolvedValue({
       models: [],
@@ -254,6 +254,7 @@ describe("ModelCenter", () => {
         "https://api.petoi.cn/v1",
         "petoi-test-key",
         "acceptance",
+        "model-center",
       ),
     );
     await waitFor(() =>
@@ -779,6 +780,7 @@ describe("ModelCenter", () => {
         "https://api.petoi.cn/v1",
         "configured",
         "acceptance",
+        "model-center",
       ),
     );
     await waitFor(() => expect(addModel).toHaveBeenCalledTimes(2));
@@ -898,6 +900,7 @@ describe("ModelCenter", () => {
         "https://api.petoi.cn/v1",
         "configured",
         "acceptance",
+        "model-center",
       ),
     );
     expect(addModel).toHaveBeenCalledWith(
@@ -1803,12 +1806,14 @@ describe("ModelCenter", () => {
       expect.anything(),
       expect.anything(),
       "installed",
+      "model-center",
     );
     expect(discoverProviderModels).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
       expect.anything(),
       "acceptance",
+      "model-center",
     );
     view.unmount();
   });
