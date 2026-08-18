@@ -18,6 +18,10 @@ import {
   type ModelConfigurationOperationRecord,
   type ModelConfigurationOperationStore,
 } from "./model-configuration-operation-store";
+import {
+  defaultModelConfigurationWriteAuthority,
+  type ModelConfigurationWriteAuthority,
+} from "./model-configuration-write-authority";
 
 type Awaitable<T> = T | Promise<T>;
 
@@ -114,6 +118,7 @@ export interface ModelConfigurationCoordinatorDependencies {
     ownerHandle: string,
     profileId: string,
   ) => Awaitable<boolean>;
+  writeAuthority?: ModelConfigurationWriteAuthority;
 }
 
 const DEFAULT_FILE_ADAPTER: ModelConfigurationFileAdapter = {
@@ -391,6 +396,7 @@ export class ModelConfigurationCoordinator {
     ownerHandle: string,
     profileId: string,
   ) => Awaitable<boolean>;
+  private readonly writeAuthority: ModelConfigurationWriteAuthority;
   private readonly locks = new Map<string, Promise<void>>();
   private readonly recoveryRequired = new Set<string>();
 
@@ -402,6 +408,8 @@ export class ModelConfigurationCoordinator {
     this.files = dependencies.fileAdapter ?? DEFAULT_FILE_ADAPTER;
     this.operationId = dependencies.operationId ?? randomUUID;
     this.isProfileOwned = dependencies.isProfileOwned ?? (() => true);
+    this.writeAuthority =
+      dependencies.writeAuthority ?? defaultModelConfigurationWriteAuthority;
   }
 
   async mutate(
@@ -505,71 +513,92 @@ export class ModelConfigurationCoordinator {
     for (const record of records) {
       const lockKey = `${record.ownerHandle}\0${record.profileId}`;
       await this.withLock(lockKey, async () => {
-        try {
-          validateOwnerHandle(record.ownerHandle);
-          validateProfileId(record.profileId);
-          if (
-            !(await this.isProfileOwned(record.ownerHandle, record.profileId))
-          ) {
-            throw new Error("Model configuration recovery owner mismatch.");
-          }
-          const paths = this.files.paths(record.profileId);
-          const snapshot = reconstructSnapshot(record, paths);
-          const currentDigests = await this.files.readDigests(paths);
-          const activeRouteKey = boundedRouteKey(
-            await this.mutationAdapter.getActiveRouteKey(record.profileId),
-          );
-          if (
-            completeDigests(record.afterDigests) &&
-            digestsEqual(currentDigests, record.afterDigests) &&
-            activeRouteKey === record.newRouteKey
-          ) {
-            this.operationStore.finish(record.operationId, "committed");
-            await this.removeBackupsSafely(snapshot);
-            this.recoveryRequired.delete(lockKey);
-            return;
-          }
+        await this.writeAuthority.run(
+          { globalCatalog: true, profileIds: [record.profileId] },
+          async () => {
+            try {
+              validateOwnerHandle(record.ownerHandle);
+              validateProfileId(record.profileId);
+              if (
+                !(await this.isProfileOwned(record.ownerHandle, record.profileId))
+              ) {
+                throw new Error("Model configuration recovery owner mismatch.");
+              }
+              const paths = this.files.paths(record.profileId);
+              const snapshot = reconstructSnapshot(record, paths);
+              const currentDigests = await this.files.readDigests(paths);
+              const activeRouteKey = boundedRouteKey(
+                await this.mutationAdapter.getActiveRouteKey(record.profileId),
+              );
+              if (
+                completeDigests(record.afterDigests) &&
+                digestsEqual(currentDigests, record.afterDigests) &&
+                activeRouteKey === record.newRouteKey
+              ) {
+                this.operationStore.finish(record.operationId, "committed");
+                await this.removeBackupsSafely(snapshot);
+                this.recoveryRequired.delete(lockKey);
+                return;
+              }
 
-          if (
-            digestsEqual(currentDigests, record.beforeDigests) &&
-            activeRouteKey === record.oldRouteKey
-          ) {
-            this.operationStore.finish(record.operationId, "rolled_back");
-            await this.removeBackupsSafely(snapshot);
-            this.recoveryRequired.delete(lockKey);
-            return;
-          }
+              if (
+                digestsEqual(currentDigests, record.beforeDigests) &&
+                activeRouteKey === record.oldRouteKey
+              ) {
+                this.operationStore.finish(record.operationId, "rolled_back");
+                await this.removeBackupsSafely(snapshot);
+                this.recoveryRequired.delete(lockKey);
+                return;
+              }
 
-          await this.files.restore(snapshot);
-          const restoredDigests = await this.files.readDigests(paths);
-          const restoredRouteKey = boundedRouteKey(
-            await this.mutationAdapter.getActiveRouteKey(record.profileId),
-          );
-          if (
-            !digestsEqual(restoredDigests, record.beforeDigests) ||
-            restoredRouteKey !== record.oldRouteKey
-          ) {
-            throw new Error(
-              "Model configuration recovery verification failed.",
-            );
-          }
-          this.operationStore.finish(record.operationId, "rolled_back");
-          await this.removeBackupsSafely(snapshot);
-          this.recoveryRequired.delete(lockKey);
-        } catch {
-          try {
-            this.operationStore.finish(record.operationId, "recovery_required");
-          } catch {
-            // The caller will fail startup closed if even the recovery journal
-            // cannot record the terminal recovery-required state.
-          }
-          this.recoveryRequired.add(lockKey);
-        }
+              await this.files.restore(snapshot);
+              const restoredDigests = await this.files.readDigests(paths);
+              const restoredRouteKey = boundedRouteKey(
+                await this.mutationAdapter.getActiveRouteKey(record.profileId),
+              );
+              if (
+                !digestsEqual(restoredDigests, record.beforeDigests) ||
+                restoredRouteKey !== record.oldRouteKey
+              ) {
+                throw new Error(
+                  "Model configuration recovery verification failed.",
+                );
+              }
+              this.operationStore.finish(record.operationId, "rolled_back");
+              await this.removeBackupsSafely(snapshot);
+              this.recoveryRequired.delete(lockKey);
+            } catch {
+              try {
+                this.operationStore.finish(record.operationId, "recovery_required");
+              } catch {
+                // The caller will fail startup closed if even the recovery journal
+                // cannot record the terminal recovery-required state.
+              }
+              this.recoveryRequired.add(lockKey);
+            }
+          },
+        );
       });
     }
   }
 
   private async executeLocalMutation(
+    prepared: PreparedModelConfigurationMutation,
+    ownerHandle: string,
+    targetProfileId: string,
+  ): Promise<ModelConfigurationMutationResult> {
+    return this.writeAuthority.run(
+      { globalCatalog: true, profileIds: [targetProfileId] },
+      () =>
+        this.executeLocalMutationWithinPermit(
+          prepared,
+          ownerHandle,
+          targetProfileId,
+        ),
+    );
+  }
+
+  private async executeLocalMutationWithinPermit(
     prepared: PreparedModelConfigurationMutation,
     ownerHandle: string,
     targetProfileId: string,

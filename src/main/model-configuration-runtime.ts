@@ -79,6 +79,7 @@ import {
   openModelConfigurationDatabase,
   type ModelConfigurationDatabase,
 } from "./model-configuration-database";
+import { registerManagedModelFileRoots } from "./model-configuration-managed-files";
 
 /** Minimal connection shape needed to fail closed for remote/SSH writes. */
 export interface ModelConfigurationRuntimeConnection {
@@ -724,6 +725,12 @@ export async function prepareModelConfigurationRuntime(
   let unavailable: ModelConfigurationStartupFailure | null = null;
 
   try {
+    registerManagedModelFileRoots({
+      globalRoot: HERMES_HOME,
+      profiles: Object.fromEntries(
+        profileIdsSync().map((profileId) => [profileId, profileHome(profileId)]),
+      ),
+    });
     catalog = createCatalog(options);
     database = (options.openDatabase ?? openModelConfigurationDatabase)(
       options.userDataPath,

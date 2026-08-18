@@ -212,7 +212,7 @@ export function escapeRegex(str: string): string {
  */
 export function safeWriteFile(
   filePath: string,
-  content: string,
+  content: string | Uint8Array,
   mode?: number,
 ): void {
   const dir = dirname(filePath);
