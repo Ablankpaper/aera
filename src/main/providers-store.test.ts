@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { existsSync, mkdtempSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +18,11 @@ describe("providers store", () => {
     vi.resetModules();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    const { clearManagedModelFileRoots } = await import(
+      "./model-configuration-managed-files"
+    );
+    clearManagedModelFileRoots();
     rmSync(mockState.hermesHome, { recursive: true, force: true });
   });
 
@@ -48,6 +52,35 @@ describe("providers store", () => {
     expect(record?.id).toBeTruthy();
     expect(record?.createdAt).toBeGreaterThan(0);
     expect(s.listCustomProviders("default")).toEqual([record]);
+  });
+
+  it("plans without writing and requires the explicit Profile permit to persist", async () => {
+    const managed = await import("./model-configuration-managed-files");
+    const authority = await import("./model-configuration-write-authority");
+    const s = await store();
+    managed.registerManagedModelFileRoots({
+      globalRoot: mockState.hermesHome,
+      profiles: { default: mockState.hermesHome },
+    });
+    const file = join(mockState.hermesHome, "providers.json");
+
+    const plan = s.planCustomProviderUpsert("default", {
+      name: "faab.ai",
+      baseUrl: "https://api.faab.ai/v1",
+    });
+
+    expect(existsSync(file)).toBe(false);
+    expect(() => s.persistCustomProviderPlan(null, plan)).toThrow(/permit/i);
+    expect(existsSync(file)).toBe(false);
+
+    const writeAuthority = new authority.ModelConfigurationWriteAuthority();
+    const record = await writeAuthority.run(
+      { globalCatalog: false, profileIds: ["default"] },
+      (permit) => s.persistCustomProviderPlan(permit, plan),
+    );
+
+    expect(record).toMatchObject({ name: "faab.ai" });
+    expect(JSON.parse(readFileSync(file, "utf8")).providers).toHaveLength(1);
   });
 
   it("updates in place on re-save, preserving id/createdAt", async () => {

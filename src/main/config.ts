@@ -30,6 +30,92 @@ import {
   expectedEnvKeyForUrl,
   OPENAI_COMPAT_PROVIDERS,
 } from "../shared/url-key-map";
+import {
+  writeManagedModelFile,
+  type ManagedModelFileRole,
+  type ModelConfigurationWritePermit,
+} from "./model-configuration-managed-files";
+
+export interface ConfigWritePlan<T> {
+  readonly role: Extract<ManagedModelFileRole, "env" | "config">;
+  readonly profileId: string;
+  readonly target: string;
+  readonly before: Buffer | null;
+  readonly after: Buffer | null;
+  readonly mode?: number;
+  readonly value: T;
+  readonly cacheKeys: readonly string[];
+  readonly verify?: () => void;
+}
+
+export type ConfigWritePlanBase = Pick<
+  ConfigWritePlan<unknown>,
+  "target" | "before" | "after"
+>;
+
+function configFileBytes(path: string): Buffer | null {
+  return existsSync(path) ? readFileSync(path) : null;
+}
+
+function configBytesEqual(left: Buffer | null, right: Buffer | null): boolean {
+  return left === null ? right === null : right !== null && left.equals(right);
+}
+
+function createConfigWritePlan<T>(input: {
+  role: ConfigWritePlan<T>["role"];
+  profile?: string;
+  target: string;
+  before: Buffer | null;
+  after: string | Buffer | null;
+  mode?: number;
+  value: T;
+  cacheKeys?: readonly string[];
+  verify?: () => void;
+}): ConfigWritePlan<T> {
+  return Object.freeze({
+    role: input.role,
+    profileId: input.profile || "default",
+    target: input.target,
+    before: input.before,
+    after:
+      input.after === null
+        ? null
+        : Buffer.isBuffer(input.after)
+          ? input.after
+          : Buffer.from(input.after),
+    ...(input.mode === undefined ? {} : { mode: input.mode }),
+    value: input.value,
+    cacheKeys: Object.freeze([...(input.cacheKeys ?? [])]),
+    ...(input.verify ? { verify: input.verify } : {}),
+  });
+}
+
+function finishConfigWritePlan<T>(plan: ConfigWritePlan<T>): T {
+  for (const key of plan.cacheKeys) invalidateCache(key);
+  plan.verify?.();
+  return plan.value;
+}
+
+export function persistConfigWritePlan<T>(
+  permit: ModelConfigurationWritePermit | null | undefined,
+  plan: ConfigWritePlan<T>,
+): T {
+  if (!configBytesEqual(configFileBytes(plan.target), plan.before)) {
+    throw new Error("Managed config write plan is stale.");
+  }
+  if (plan.after !== null) {
+    writeManagedModelFile(permit, plan.target, plan.after, plan.mode);
+  }
+  return finishConfigWritePlan(plan);
+}
+
+function persistLegacyConfigWritePlan<T>(plan: ConfigWritePlan<T>): T {
+  if (!configBytesEqual(configFileBytes(plan.target), plan.before)) {
+    throw new Error("Managed config write plan is stale.");
+  }
+  if (plan.after !== null) safeWriteFile(plan.target, plan.after, plan.mode);
+  return finishConfigWritePlan(plan);
+}
 
 // ── Connection Config (local / remote / ssh) ─────────────
 
@@ -317,18 +403,40 @@ export function setEnvValue(
   value: string,
   profile?: string,
 ): void {
+  persistLegacyConfigWritePlan(planEnvValueWrite(key, value, profile));
+}
+
+export function planEnvValueWrite(
+  key: string,
+  value: string,
+  profile?: string,
+  basePlan?: ConfigWritePlanBase,
+): ConfigWritePlan<void> {
   validateEnvEntry(key, value);
 
   const { envFile } = profilePaths(profile);
-  invalidateCache(`env:${profile || "default"}`);
-  if (key === "API_SERVER_KEY") invalidateCache("apiServerKey:");
+  if (basePlan && basePlan.target !== envFile) {
+    throw new Error("Environment base plan targets a different file.");
+  }
+  const before = basePlan ? basePlan.before : configFileBytes(envFile);
+  const startingBytes = basePlan ? (basePlan.after ?? basePlan.before) : before;
+  const cacheKeys = [`env:${profile || "default"}`];
+  if (key === "API_SERVER_KEY") cacheKeys.push("apiServerKey:");
 
-  if (!existsSync(envFile)) {
-    safeWriteFile(envFile, `${key}=${value}\n`, 0o600);
-    return;
+  if (startingBytes === null) {
+    return createConfigWritePlan({
+      role: "env",
+      profile,
+      target: envFile,
+      before,
+      after: `${key}=${value}\n`,
+      mode: 0o600,
+      value: undefined,
+      cacheKeys,
+    });
   }
 
-  const content = readFileSync(envFile, "utf-8");
+  const content = startingBytes.toString("utf-8");
   const lines = content.split("\n");
   let found = false;
 
@@ -345,10 +453,18 @@ export function setEnvValue(
     lines.push(`${key}=${value}`);
   }
 
-  // `.env` contains provider credentials as well as the local gateway token.
-  // Keep the rewritten file private to the current OS user, matching the
-  // internal-token storage boundary used by Hermes Studio.
-  safeWriteFile(envFile, lines.join("\n"), 0o600);
+  return createConfigWritePlan({
+    role: "env",
+    profile,
+    target: envFile,
+    before,
+    after: lines.join("\n"),
+    // `.env` contains provider credentials as well as the local gateway token.
+    // Keep the rewritten file private to the current OS user.
+    mode: 0o600,
+    value: undefined,
+    cacheKeys,
+  });
 }
 
 export function validateEnvEntry(key: string, value: string): void {
@@ -618,24 +734,44 @@ export function setConfigValue(
   value: string,
   profile?: string,
 ): void {
+  persistLegacyConfigWritePlan(planConfigValueWrite(key, value, profile));
+}
+
+export function planConfigValueWrite(
+  key: string,
+  value: string,
+  profile?: string,
+): ConfigWritePlan<void> {
   // Invalidate the apiServerKey cache when either of the two canonical
   // gateway-secret locations is written: the legacy top-level
   // `API_SERVER_KEY` *or* the hermes-agent canonical `api_server.token`
   // path. Without the second check, editing `api_server.token` via the
   // desktop would leave the cached value stale for up to the 5s TTL.
+  const cacheKeys: string[] = [];
   if (
     key === "API_SERVER_KEY" ||
     key === "api_server.token" ||
     key.startsWith("api_server.")
   ) {
-    invalidateCache("apiServerKey:");
+    cacheKeys.push("apiServerKey:");
   }
   const { configFile } = profilePaths(profile);
-  if (!existsSync(configFile)) return;
+  const before = configFileBytes(configFile);
+  const plan = (after: string | null): ConfigWritePlan<void> =>
+    createConfigWritePlan({
+      role: "config",
+      profile,
+      target: configFile,
+      before,
+      after,
+      value: undefined,
+      cacheKeys,
+    });
+  if (before === null) return plan(null);
 
-  let content = readFileSync(configFile, "utf-8");
+  let content = before.toString("utf-8");
   const segments = key.split(".").filter(Boolean);
-  if (segments.length === 0) return;
+  if (segments.length === 0) return plan(null);
 
   const hit =
     segments.length === 1
@@ -649,8 +785,7 @@ export function setConfigValue(
       content.slice(0, hit.valueStart) +
       quoteYamlScalar(value) +
       content.slice(hit.valueEnd);
-    safeWriteFile(configFile, content);
-    return;
+    return plan(content);
   }
 
   // Key missing. Top-level single keys are safe to append. Direct
@@ -660,14 +795,11 @@ export function setConfigValue(
   if (segments.length === 1) {
     const sep = content.endsWith("\n") || content === "" ? "" : "\n";
     content = `${content}${sep}${key}: ${quoteYamlScalar(value)}\n`;
-    safeWriteFile(configFile, content);
-    return;
+    return plan(content);
   }
 
   const nextContent = appendDirectNestedYamlValue(content, segments, value);
-  if (nextContent !== null) {
-    safeWriteFile(configFile, nextContent);
-  }
+  return plan(nextContent);
 }
 
 /**
@@ -1041,8 +1173,32 @@ export function setModelConfig(
   // re-detects the transport from the base URL.
   apiMode?: string | null,
 ): void {
-  invalidateModelConfigCache(profile);
+  persistLegacyConfigWritePlan(
+    planModelConfigWrite(
+      provider,
+      model,
+      baseUrl,
+      profile,
+      contextLength,
+      apiMode,
+    ),
+  );
+}
+
+export function planModelConfigWrite(
+  provider: string,
+  model: string,
+  baseUrl: string,
+  profile?: string,
+  contextLength?: number | null,
+  apiMode?: string | null,
+  basePlan?: ConfigWritePlanBase,
+): ConfigWritePlan<void> {
   const { configFile } = profilePaths(profile);
+  if (basePlan && basePlan.target !== configFile) {
+    throw new Error("Model config base plan targets a different file.");
+  }
+  const before = basePlan ? basePlan.before : configFileBytes(configFile);
 
   // Bootstrap an empty config.yaml when it's missing — previously this
   // function early-returned, so users on a custom HERMES_HOME where the
@@ -1052,7 +1208,8 @@ export function setModelConfig(
   // returned 404s. `safeWriteFile` (used below) will create parent dirs
   // as needed; `upsertBlockChild` produces a valid minimal YAML doc
   // from an empty starting string.
-  let content = existsSync(configFile) ? readFileSync(configFile, "utf-8") : "";
+  const startingBytes = basePlan ? (basePlan.after ?? basePlan.before) : before;
+  let content = startingBytes?.toString("utf-8") ?? "";
 
   // Migrate legacy scalar `model: value` format before writing.
   // Prevents duplicate `model:` keys that cause native_route stage failures.
@@ -1195,7 +1352,15 @@ export function setModelConfig(
     }
   }
 
-  safeWriteFile(configFile, content);
+  return createConfigWritePlan({
+    role: "config",
+    profile,
+    target: configFile,
+    before,
+    after: content,
+    value: undefined,
+    cacheKeys: [`mc:${profile || "default"}`],
+  });
 }
 
 export function getHermesHome(profile?: string): string {
@@ -1344,6 +1509,12 @@ export interface EnsureLocalApiServerKeyResult {
 export function ensureLocalApiServerKey(
   profile?: string,
 ): EnsureLocalApiServerKeyResult {
+  return persistLegacyConfigWritePlan(planLocalApiServerKeyWrite(profile));
+}
+
+export function planLocalApiServerKeyWrite(
+  profile?: string,
+): ConfigWritePlan<EnsureLocalApiServerKeyResult> {
   if (getConnectionConfig().mode !== "local") {
     throw new Error(
       "Local gateway credentials can only be prepared in local mode.",
@@ -1363,7 +1534,15 @@ export function ensureLocalApiServerKey(
 
   const current = getApiServerKey(resolvedProfile).trim();
   if (current) {
-    return { generated: false, key: current };
+    const { envFile } = profilePaths(resolvedProfile);
+    return createConfigWritePlan({
+      role: "env",
+      profile: resolvedProfile,
+      target: envFile,
+      before: configFileBytes(envFile),
+      after: null,
+      value: { generated: false, key: current },
+    });
   }
 
   if (providerId === "command") {
@@ -1373,16 +1552,24 @@ export function ensureLocalApiServerKey(
   }
 
   const key = randomBytes(32).toString("hex");
-  setEnvValue("API_SERVER_KEY", key, resolvedProfile);
-
-  // Read back through the same resolver used by authenticated requests. This
-  // catches a failed or mis-scoped write before a gateway is spawned.
-  const persisted = getApiServerKey(resolvedProfile).trim();
-  if (persisted !== key) {
-    throw new Error("The local gateway credential could not be persisted.");
-  }
-
-  return { generated: true, key };
+  const envPlan = planEnvValueWrite("API_SERVER_KEY", key, resolvedProfile);
+  return createConfigWritePlan({
+    role: envPlan.role,
+    profile: resolvedProfile,
+    target: envPlan.target,
+    before: envPlan.before,
+    after: envPlan.after,
+    mode: envPlan.mode,
+    value: { generated: true, key },
+    cacheKeys: envPlan.cacheKeys,
+    // Read back through the same resolver used by authenticated requests.
+    verify: () => {
+      const persisted = getApiServerKey(resolvedProfile).trim();
+      if (persisted !== key) {
+        throw new Error("The local gateway credential could not be persisted.");
+      }
+    },
+  });
 }
 
 /**
@@ -1497,9 +1684,8 @@ export function planApiServerKeyMigration(
   profile?: string,
 ): ApiServerKeyMigrationPlan | null {
   const profileId = profile && profile !== "default" ? profile : "default";
-  const { value, source, envForProfile } = resolveApiServerKeyForProfile(
-    profileId,
-  );
+  const { value, source, envForProfile } =
+    resolveApiServerKeyForProfile(profileId);
   const sourceBelongsToProfile =
     profileId === "default" ||
     source === "configTopLevelProfile" ||
@@ -1792,22 +1978,41 @@ export function setPlatformEnabled(
   enabled: boolean,
   profile?: string,
 ): void {
+  persistLegacyConfigWritePlan(
+    planPlatformEnabledWrite(platform, enabled, profile),
+  );
+}
+
+export function planPlatformEnabledWrite(
+  platform: string,
+  enabled: boolean,
+  profile?: string,
+): ConfigWritePlan<void> {
+  const { configFile } = profilePaths(profile);
+  const before = configFileBytes(configFile);
+  const plan = (after: string | null): ConfigWritePlan<void> =>
+    createConfigWritePlan({
+      role: "config",
+      profile,
+      target: configFile,
+      before,
+      after,
+      value: undefined,
+    });
   const rule = PLATFORM_RULES[platform];
-  if (!rule) return;
+  if (!rule) return plan(null);
   // Use the Python-side YAML key when writing the override, not the
   // desktop's display key (matters for home_assistant → homeassistant).
   const configKey = rule.configKey || platform;
 
-  const { configFile } = profilePaths(profile);
-  if (!existsSync(configFile)) {
+  if (before === null) {
     // Only need to write a file when we're recording a disable override;
     // enabling a platform that has no config is the default.
-    if (enabled) return;
-    safeWriteFile(configFile, `${configKey}:\n  enabled: false\n`);
-    return;
+    if (enabled) return plan(null);
+    return plan(`${configKey}:\n  enabled: false\n`);
   }
 
-  let content = readFileSync(configFile, "utf-8");
+  let content = before.toString("utf-8");
   const enabledLineRe = new RegExp(
     `^([ \\t]+enabled:[ \\t]*)(true|false)\\b([ \\t]*)$`,
     "m",
@@ -1831,8 +2036,7 @@ export function setPlatformEnabled(
       flowStyleRe,
       `${configKey}:\n  enabled: ${enabled}`,
     );
-    safeWriteFile(configFile, content);
-    return;
+    return plan(content);
   }
 
   if (hasBlock && blockMatch?.index !== undefined) {
@@ -1884,16 +2088,16 @@ export function setPlatformEnabled(
     }
     // (enabled=true with no existing override: nothing to do.)
 
-    safeWriteFile(configFile, content);
-    return;
+    return plan(content);
   }
 
   // No block at all — only need to materialize one when recording a disable.
   if (!enabled) {
     const trailingNewline = content.endsWith("\n") ? "" : "\n";
     content += `${trailingNewline}${configKey}:\n  enabled: false\n`;
-    safeWriteFile(configFile, content);
+    return plan(content);
   }
+  return plan(null);
 }
 
 // ── Credential Pool / OAuth store (auth.json) ─────────────────────────

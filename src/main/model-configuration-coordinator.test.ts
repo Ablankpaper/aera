@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
@@ -36,6 +36,13 @@ import {
   type ModelConfigurationDatabase,
   type ModelConfigurationSqliteDatabase,
 } from "./model-configuration-database";
+import {
+  clearManagedModelFileRoots,
+  registerManagedModelFileRoots,
+  writeManagedModelFile,
+  type ModelConfigurationWritePermit,
+} from "./model-configuration-managed-files";
+import { safeWriteFile } from "./utils";
 
 const REVISION = "a".repeat(64);
 const OWNER = "owner-hash";
@@ -308,12 +315,174 @@ function writeAttemptedState(fixture: Fixture): void {
 }
 
 afterEach(() => {
+  clearManagedModelFileRoots();
   for (const database of databases.splice(0)) database.close();
   for (const root of roots.splice(0))
     rmSync(root, { recursive: true, force: true });
 });
 
 describe("ModelConfigurationCoordinator", () => {
+  it("journals a permitted Profile write before committing managed bytes", async () => {
+    const fixture = makeFixture();
+    registerManagedModelFileRoots({
+      globalRoot: dirname(fixture.paths.models),
+      profiles: { account: dirname(fixture.paths.env) },
+    });
+    const before = fixture.snapshotBytes();
+    const coordinator = subject(fixture) as ModelConfigurationCoordinator & {
+      runManagedWrite<T>(
+        request: {
+          requestedProfileId: string;
+          scope: "profile" | "global";
+          stage: ModelConfigurationCommitStage;
+        },
+        prepare: (context: {
+          oldRouteKey: string;
+        }) => {
+          newRouteKey?: string;
+          write(permit: ModelConfigurationWritePermit): T | Promise<T>;
+          verify?(): boolean | Promise<boolean>;
+        },
+      ): Promise<
+        | { status: "executed"; value: T }
+        | { status: "rejected"; code: string }
+      >;
+    };
+
+    const result = await coordinator.runManagedWrite(
+      {
+        requestedProfileId: "account",
+        scope: "profile",
+        stage: "credential",
+      },
+      ({ oldRouteKey }) => ({
+        newRouteKey: oldRouteKey,
+        write: (permit) => {
+          writeManagedModelFile(
+            permit,
+            fixture.paths.env,
+            "MANAGED_KEY=value\n",
+            0o600,
+          );
+          return "saved";
+        },
+        verify: () =>
+          readFileSync(fixture.paths.env, "utf8") === "MANAGED_KEY=value\n",
+      }),
+    );
+
+    expect(result).toMatchObject({ status: "executed", value: "saved" });
+    expect(fixture.operationCount()).toBe(1);
+    expect(readFileSync(fixture.paths.env, "utf8")).toBe(
+      "MANAGED_KEY=value\n",
+    );
+    expect(fixture.snapshotBytes()).not.toEqual(before);
+    expect(fixture.store.listIncomplete()).toEqual([]);
+  });
+
+  it("rejects a planner that attempts managed writes before journalling", async () => {
+    const fixture = makeFixture();
+    registerManagedModelFileRoots({
+      globalRoot: dirname(fixture.paths.models),
+      profiles: { account: dirname(fixture.paths.env) },
+    });
+    const before = fixture.snapshotBytes();
+    const coordinator = subject(fixture) as ModelConfigurationCoordinator & {
+      runManagedWrite<T>(
+        request: {
+          requestedProfileId: string;
+          scope: "profile" | "global";
+          stage: ModelConfigurationCommitStage;
+        },
+        prepare: (context: { oldRouteKey: string }) => {
+          newRouteKey?: string;
+          write(): T;
+        },
+      ): Promise<{ status: string; code?: string }>;
+    };
+
+    const result = await coordinator.runManagedWrite(
+      {
+        requestedProfileId: "account",
+        scope: "profile",
+        stage: "credential",
+      },
+      ({ oldRouteKey }) => {
+        safeWriteFile(fixture.paths.env, "PLANNER_WROTE=value\n", 0o600);
+        return { newRouteKey: oldRouteKey, write: () => "unreachable" };
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "rejected",
+      stage: "validation",
+      rollback: "not_needed",
+    });
+    expect(fixture.snapshotBytes()).toEqual(before);
+    expect(fixture.operationCount()).toBe(0);
+  });
+
+  it("denies a global catalog write from a Profile-only transaction", async () => {
+    const fixture = makeFixture();
+    registerManagedModelFileRoots({
+      globalRoot: dirname(fixture.paths.models),
+      profiles: { account: dirname(fixture.paths.env) },
+    });
+    const before = fixture.snapshotBytes();
+
+    const result = await subject(fixture).runManagedWrite(
+      {
+        requestedProfileId: "account",
+        scope: "profile",
+        stage: "model_library",
+      },
+      ({ oldRouteKey }) => ({
+        newRouteKey: oldRouteKey,
+        write: () => safeWriteFile(fixture.paths.models, "[]\n"),
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: "rejected",
+      stage: "model_library",
+      rollback: "not_needed",
+    });
+    expect(fixture.snapshotBytes()).toEqual(before);
+    expect(fixture.store.listIncomplete()).toEqual([]);
+  });
+
+  it("restores all managed bytes when a permitted focused writer throws", async () => {
+    const fixture = makeFixture();
+    registerManagedModelFileRoots({
+      globalRoot: dirname(fixture.paths.models),
+      profiles: { account: dirname(fixture.paths.env) },
+    });
+    const before = fixture.snapshotBytes();
+
+    const result = await subject(fixture).runManagedWrite(
+      {
+        requestedProfileId: "account",
+        scope: "profile",
+        stage: "credential",
+      },
+      ({ oldRouteKey }) => ({
+        newRouteKey: oldRouteKey,
+        write: () => {
+          safeWriteFile(fixture.paths.env, "PARTIAL_KEY=value\n", 0o600);
+          throw new Error("injected focused writer failure");
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: "rejected",
+      stage: "credential",
+      rollback: "restored",
+    });
+    expect(fixture.snapshotBytes()).toEqual(before);
+    expect(fixture.store.listIncomplete()).toEqual([]);
+  });
+
   it("journals explicit managed-file initialization once and skips a no-op replay", async () => {
     const fixture = makeFixture();
     const coordinator = subject(fixture);
@@ -540,12 +709,12 @@ describe("ModelConfigurationCoordinator", () => {
       if (first) {
         first = false;
         const applyStage = prepared.applyStage;
-        prepared.applyStage = async (stage) => {
+        prepared.applyStage = async (stage, permit) => {
           if (stage === "credential") {
             firstStarted();
             await firstGate;
           }
-          return applyStage(stage);
+          return applyStage(stage, permit);
         };
       }
       return prepared;

@@ -17,15 +17,20 @@ import { join } from "path";
 import { profilePaths } from "./utils";
 import {
   type ApiKeySource,
+  type ConfigFixLogEntry,
   appendConfigFixLog,
   customEndpointKeyResolvable,
   getConfigValue,
   getModelConfig,
   hasOAuthCredentials,
   maskKey,
+  planConfigValueWrite,
+  planEnvValueWrite,
+  persistConfigWritePlan,
   readEnv,
   setConfigValue,
   setEnvValue,
+  type ConfigWritePlan,
   upsertBlockChild,
 } from "./config";
 import { safeWriteFile } from "./utils";
@@ -46,6 +51,7 @@ import { findSiblingHermesHomes } from "./wsl-detection";
 // during a config-only smoke test) is fine — the audit degrades to the .env
 // view.
 import { resolvedSecretMap } from "./secrets";
+import type { ModelConfigurationWritePermit } from "./model-configuration-managed-files";
 
 export type Severity = "error" | "warning" | "info";
 
@@ -81,6 +87,18 @@ export interface ConfigHealthReport {
   issues: ConfigHealthIssue[];
   summary: { errors: number; warnings: number; infos: number };
 }
+
+export interface ConfigHealthAutoFixOptions {
+  recordAudit?(entry: ConfigFixLogEntry): void;
+}
+
+export interface ConfigHealthAutoFixPlan {
+  readonly result: { ok: boolean; message?: string };
+  readonly writePlan: ConfigWritePlan<void> | null;
+  readonly auditEntries: readonly ConfigFixLogEntry[];
+}
+
+type ConfigFixAuditRecorder = (entry: ConfigFixLogEntry) => void;
 
 const EMPTY_REPORT = (profile: string): ConfigHealthReport => ({
   ranAt: Date.now(),
@@ -135,27 +153,377 @@ export function autoFixIssue(
   code: IssueCode,
   profile?: string,
   context?: Record<string, string>,
+  options: ConfigHealthAutoFixOptions = {},
 ): { ok: boolean; message?: string } {
+  const recordAudit = options.recordAudit ?? appendConfigFixLog;
   try {
     switch (code) {
       case "API_SERVER_KEY_NON_CANONICAL":
-        return fixApiServerKeyPlacement(profile);
+        return fixApiServerKeyPlacement(profile, recordAudit);
       case "UI_RUNTIME_ENVKEY_MISMATCH":
-        return fixRuntimeEnvKeyMismatch(profile, context);
+        return fixRuntimeEnvKeyMismatch(profile, context, recordAudit);
       case "NON_ASCII_CREDENTIAL":
-        return fixNonAsciiCredential(profile, context);
+        return fixNonAsciiCredential(profile, context, recordAudit);
       case "SIBLING_HERMES_HOME_DRIFT":
-        return fixSiblingHermesHomeDrift(profile, context);
+        return fixSiblingHermesHomeDrift(profile, context, recordAudit);
       case "LEGACY_TOOLSET_NAME":
-        return fixLegacyToolsetName(profile);
+        return fixLegacyToolsetName(profile, recordAudit);
       case "MODEL_CONFIG_DUPLICATE_KEY":
-        return fixModelConfigDuplicateKey(profile);
+        return fixModelConfigDuplicateKey(profile, recordAudit);
       default:
         return { ok: false, message: `No auto-fix available for ${code}` };
     }
   } catch (err) {
     return { ok: false, message: (err as Error).message };
   }
+}
+
+function configHealthPlan(
+  result: ConfigHealthAutoFixPlan["result"],
+  writePlan: ConfigWritePlan<void> | null = null,
+  auditEntries: readonly ConfigFixLogEntry[] = [],
+): ConfigHealthAutoFixPlan {
+  return Object.freeze({
+    result: Object.freeze({ ...result }),
+    writePlan,
+    auditEntries: Object.freeze([...auditEntries]),
+  });
+}
+
+function rawConfigHealthWritePlan(
+  profile: string | undefined,
+  after: string,
+): ConfigWritePlan<void> {
+  const { configFile } = profilePaths(profile);
+  const before = existsSync(configFile) ? readFileSync(configFile) : null;
+  return Object.freeze({
+    role: "config",
+    profileId: profile || "default",
+    target: configFile,
+    before,
+    after: Buffer.from(after),
+    value: undefined,
+    cacheKeys: Object.freeze([`mc:${profile || "default"}`]),
+  });
+}
+
+/**
+ * Build a byte-pure config-health repair. The plan may contain credentials,
+ * so it remains Main-only and is never returned over IPC. Audit entries are
+ * appended only by the coordinator's post-commit refresh callback.
+ */
+export function planConfigHealthAutoFix(
+  code: IssueCode,
+  profile?: string,
+  context?: Record<string, string>,
+): ConfigHealthAutoFixPlan {
+  try {
+    switch (code) {
+      case "API_SERVER_KEY_NON_CANONICAL": {
+        const topLevel = (
+          getConfigValue("API_SERVER_KEY", profile) ?? ""
+        ).trim();
+        const nested = (
+          getConfigValue("api_server.token", profile) ?? ""
+        ).trim();
+        const value = topLevel || nested;
+        if (!value) {
+          return configHealthPlan({
+            ok: false,
+            message: "Nothing to migrate.",
+          });
+        }
+        if ((readEnv(profile).API_SERVER_KEY ?? "").trim()) {
+          return configHealthPlan({
+            ok: true,
+            message: ".env already has API_SERVER_KEY.",
+          });
+        }
+        return configHealthPlan(
+          { ok: true, message: "Copied API_SERVER_KEY into .env." },
+          planEnvValueWrite("API_SERVER_KEY", value, profile),
+          [
+            {
+              ts: Date.now(),
+              issueCode: "API_SERVER_KEY_NON_CANONICAL",
+              action: "autofix",
+              from: topLevel
+                ? "configTopLevelProfile"
+                : "apiServerTokenProfile",
+              to: profilePaths(profile).envFile,
+              profile: profile || "default",
+              valueMasked: maskKey(value),
+            },
+          ],
+        );
+      }
+      case "UI_RUNTIME_ENVKEY_MISMATCH": {
+        if (!context?.from || !context?.to) {
+          return configHealthPlan({
+            ok: false,
+            message: "Missing fix context (from/to env keys).",
+          });
+        }
+        const env = readEnv(profile);
+        const value = (env[context.from] ?? "").trim();
+        if (!value) {
+          return configHealthPlan({
+            ok: false,
+            message: `${context.from} is empty — nothing to copy.`,
+          });
+        }
+        if ((env[context.to] ?? "").trim()) {
+          return configHealthPlan({
+            ok: true,
+            message: `${context.to} already populated — no copy needed.`,
+          });
+        }
+        return configHealthPlan(
+          { ok: true, message: `Copied ${context.from} → ${context.to}.` },
+          planEnvValueWrite(context.to, value, profile),
+          [
+            {
+              ts: Date.now(),
+              issueCode: "UI_RUNTIME_ENVKEY_MISMATCH",
+              action: "autofix",
+              from: context.from,
+              to: context.to,
+              profile: profile || "default",
+              valueMasked: maskKey(value),
+            },
+          ],
+        );
+      }
+      case "NON_ASCII_CREDENTIAL": {
+        const keys = (context?.keys ?? "").split(",").filter(Boolean);
+        if (keys.length === 0) {
+          return configHealthPlan({ ok: false, message: "No keys to clean." });
+        }
+        const env = readEnv(profile);
+        const cleaned: string[] = [];
+        const auditEntries: ConfigFixLogEntry[] = [];
+        let writePlan: ConfigWritePlan<void> | undefined;
+        for (const key of keys) {
+          const value = env[key] ?? "";
+          const stripped = value.replace(/[^\x20-\x7e]/g, "");
+          if (stripped === value || !stripped) continue;
+          writePlan = planEnvValueWrite(key, stripped, profile, writePlan);
+          cleaned.push(key);
+          auditEntries.push({
+            ts: Date.now(),
+            issueCode: "NON_ASCII_CREDENTIAL",
+            action: "autofix",
+            from: key,
+            to: key,
+            profile: profile || "default",
+            valueMasked: maskKey(stripped),
+          });
+        }
+        if (!writePlan) {
+          return configHealthPlan({ ok: false, message: "Nothing to clean." });
+        }
+        return configHealthPlan(
+          { ok: true, message: `Cleaned: ${cleaned.join(", ")}.` },
+          writePlan,
+          auditEntries,
+        );
+      }
+      case "SIBLING_HERMES_HOME_DRIFT": {
+        const field = context?.field;
+        const wslHome = context?.wslHome;
+        if (!field || !wslHome) {
+          return configHealthPlan({
+            ok: false,
+            message: "Missing fix context (field/wslHome).",
+          });
+        }
+        if (context.direction !== "wsl-to-windows") {
+          return configHealthPlan({
+            ok: false,
+            message:
+              "Only WSL → Windows auto-fix is supported. For the reverse direction, edit the WSL file manually.",
+          });
+        }
+        const value = (readSiblingFields(wslHome).values[field] ?? "").trim();
+        if (!value) {
+          return configHealthPlan({
+            ok: false,
+            message: `WSL value for ${field} is empty.`,
+          });
+        }
+        const fieldDef = DRIFT_FIELDS.find((entry) => entry.field === field);
+        if (!fieldDef) {
+          return configHealthPlan({
+            ok: false,
+            message: `Unknown field ${field}.`,
+          });
+        }
+        let writePlan: ConfigWritePlan<void>;
+        if (fieldDef.source === "env") {
+          writePlan = planEnvValueWrite(field, value, profile);
+        } else {
+          const segments = field.split(".");
+          if (segments.length === 1) {
+            writePlan = planConfigValueWrite(field, value, profile);
+          } else if (segments.length === 2) {
+            const { configFile } = profilePaths(profile);
+            const original = existsSync(configFile)
+              ? readFileSync(configFile, "utf8")
+              : "";
+            writePlan = rawConfigHealthWritePlan(
+              profile,
+              upsertBlockChild(original, segments[0], segments[1], value),
+            );
+          } else {
+            return configHealthPlan({
+              ok: false,
+              message: `Unsupported config.yaml path depth: ${field}`,
+            });
+          }
+        }
+        return configHealthPlan(
+          {
+            ok: true,
+            message: `Copied ${field} from WSL to the Windows-side ${fieldDef.source === "env" ? ".env" : "config.yaml"}.`,
+          },
+          writePlan,
+          [
+            {
+              ts: Date.now(),
+              issueCode: "SIBLING_HERMES_HOME_DRIFT",
+              action: "autofix",
+              from: `wsl:${wslHome}/${fieldDef.source === "env" ? ".env" : "config.yaml"}`,
+              to:
+                fieldDef.source === "env"
+                  ? "%LocalAppData%/hermes/.env"
+                  : "%LocalAppData%/hermes/config.yaml",
+              profile: profile || "default",
+              valueMasked: isSecretField(fieldDef.label)
+                ? maskKey(value)
+                : value,
+              detail: field,
+            },
+          ],
+        );
+      }
+      case "LEGACY_TOOLSET_NAME": {
+        const { configFile } = profilePaths(profile);
+        if (!existsSync(configFile)) {
+          return configHealthPlan({
+            ok: false,
+            message: "config.yaml not found",
+          });
+        }
+        const original = readFileSync(configFile, "utf8");
+        if (!findLegacyToolsetEntry(original)) {
+          return configHealthPlan({
+            ok: false,
+            message: "No legacy toolset entry found.",
+          });
+        }
+        const lines = original.split("\n");
+        let inToolsets = false;
+        let changed = false;
+        const output = lines.map((line) => {
+          if (/^toolsets\s*:/.test(line)) {
+            inToolsets = true;
+            return line;
+          }
+          if (inToolsets && /^[^\s-]/.test(line) && line.trim() !== "") {
+            inToolsets = false;
+            return line;
+          }
+          if (!inToolsets) return line;
+          const match = line.match(/^(\s*-\s+)(["']?)hermes\2(\s*(?:#.*)?)$/);
+          if (!match) return line;
+          changed = true;
+          return `${match[1]}${match[2]}hermes-cli${match[2]}${match[3]}`;
+        });
+        if (!changed) {
+          return configHealthPlan({
+            ok: false,
+            message: "Detected legacy entry but rewrite did not match.",
+          });
+        }
+        return configHealthPlan(
+          {
+            ok: true,
+            message: "Rewrote `- hermes` → `- hermes-cli` in config.yaml.",
+          },
+          rawConfigHealthWritePlan(profile, output.join("\n")),
+          [
+            {
+              ts: Date.now(),
+              issueCode: "LEGACY_TOOLSET_NAME",
+              action: "autofix",
+              from: "hermes",
+              to: "hermes-cli",
+              profile: profile || "default",
+              detail: "toolsets[] entry",
+            },
+          ],
+        );
+      }
+      case "MODEL_CONFIG_DUPLICATE_KEY": {
+        const { configFile } = profilePaths(profile);
+        if (!existsSync(configFile)) {
+          return configHealthPlan({
+            ok: false,
+            message: "config.yaml not found",
+          });
+        }
+        const original = readFileSync(configFile, "utf8");
+        const problem = inspectModelConfigStructure(original);
+        if (!problem) {
+          return configHealthPlan({ ok: false, message: "Nothing to repair." });
+        }
+        if (problem.kind !== "duplicate_model_key") {
+          return configHealthPlan({
+            ok: false,
+            message: `config.yaml needs a manual edit: ${problem.detail}`,
+          });
+        }
+        const repaired = migrateModelConfigFormat(original);
+        if (!repaired.modified) {
+          return configHealthPlan({ ok: false, message: "Nothing to repair." });
+        }
+        validateModelConfiguration(repaired.content);
+        return configHealthPlan(
+          { ok: true, message: repaired.summary },
+          rawConfigHealthWritePlan(profile, repaired.content),
+          [
+            {
+              ts: Date.now(),
+              issueCode: "MODEL_CONFIG_DUPLICATE_KEY",
+              action: "autofix",
+              from: "duplicate top-level model keys",
+              to: "single model mapping",
+              profile: profile || "default",
+              detail: repaired.summary,
+            },
+          ],
+        );
+      }
+      default:
+        return configHealthPlan({
+          ok: false,
+          message: `No auto-fix available for ${code}`,
+        });
+    }
+  } catch (error) {
+    return configHealthPlan({
+      ok: false,
+      message: (error as Error).message,
+    });
+  }
+}
+
+export function persistConfigHealthAutoFix(
+  permit: ModelConfigurationWritePermit | null | undefined,
+  plan: ConfigHealthAutoFixPlan,
+): ConfigHealthAutoFixPlan["result"] {
+  if (plan.writePlan) persistConfigWritePlan(permit, plan.writePlan);
+  return plan.result;
 }
 
 // ───────────────────────────────────────────────────────
@@ -406,7 +774,10 @@ function checkNonAsciiCredentials(profile?: string): ConfigHealthIssue[] {
 //  Auto-fixes
 // ───────────────────────────────────────────────────────
 
-function fixApiServerKeyPlacement(profile?: string): {
+function fixApiServerKeyPlacement(
+  profile: string | undefined,
+  recordAudit: ConfigFixAuditRecorder,
+): {
   ok: boolean;
   message?: string;
 } {
@@ -421,7 +792,7 @@ function fixApiServerKeyPlacement(profile?: string): {
     return { ok: true, message: ".env already has API_SERVER_KEY." };
   }
   setEnvValue("API_SERVER_KEY", value, profile);
-  appendConfigFixLog({
+  recordAudit({
     ts: Date.now(),
     issueCode: "API_SERVER_KEY_NON_CANONICAL",
     action: "autofix",
@@ -436,6 +807,7 @@ function fixApiServerKeyPlacement(profile?: string): {
 function fixRuntimeEnvKeyMismatch(
   profile: string | undefined,
   context: Record<string, string> | undefined,
+  recordAudit: ConfigFixAuditRecorder,
 ): { ok: boolean; message?: string } {
   if (!context?.from || !context?.to) {
     return { ok: false, message: "Missing fix context (from/to env keys)." };
@@ -455,7 +827,7 @@ function fixRuntimeEnvKeyMismatch(
     };
   }
   setEnvValue(context.to, value, profile);
-  appendConfigFixLog({
+  recordAudit({
     ts: Date.now(),
     issueCode: "UI_RUNTIME_ENVKEY_MISMATCH",
     action: "autofix",
@@ -470,6 +842,7 @@ function fixRuntimeEnvKeyMismatch(
 function fixNonAsciiCredential(
   profile: string | undefined,
   context: Record<string, string> | undefined,
+  recordAudit: ConfigFixAuditRecorder,
 ): { ok: boolean; message?: string } {
   const keys = (context?.keys ?? "").split(",").filter(Boolean);
   if (keys.length === 0) {
@@ -484,7 +857,7 @@ function fixNonAsciiCredential(
     if (stripped !== value && stripped) {
       setEnvValue(key, stripped, profile);
       cleaned.push(key);
-      appendConfigFixLog({
+      recordAudit({
         ts: Date.now(),
         issueCode: "NON_ASCII_CREDENTIAL",
         action: "autofix",
@@ -787,6 +1160,7 @@ function checkSiblingHermesHomeDrift(profile?: string): ConfigHealthIssue[] {
 function fixSiblingHermesHomeDrift(
   profile: string | undefined,
   context: Record<string, string> | undefined,
+  recordAudit: ConfigFixAuditRecorder = appendConfigFixLog,
 ): { ok: boolean; message?: string } {
   const field = context?.field;
   const wslHome = context?.wslHome;
@@ -843,7 +1217,7 @@ function fixSiblingHermesHomeDrift(
         };
       }
     }
-    appendConfigFixLog({
+    recordAudit({
       ts: Date.now(),
       issueCode: "SIBLING_HERMES_HOME_DRIFT",
       action: "autofix",
@@ -960,7 +1334,10 @@ function findLegacyToolsetEntry(content: string): boolean {
  * trailing comment. Re-runs `findLegacyToolsetEntry` on the result so
  * the function is a no-op if there's nothing to fix.
  */
-function fixLegacyToolsetName(profile?: string): {
+function fixLegacyToolsetName(
+  profile: string | undefined,
+  recordAudit: ConfigFixAuditRecorder = appendConfigFixLog,
+): {
   ok: boolean;
   message?: string;
 } {
@@ -1014,7 +1391,7 @@ function fixLegacyToolsetName(profile?: string): {
       };
     }
     safeWriteFile(configFile, out.join("\n"));
-    appendConfigFixLog({
+    recordAudit({
       ts: Date.now(),
       issueCode: "LEGACY_TOOLSET_NAME",
       action: "autofix",
@@ -1137,7 +1514,10 @@ function checkModelConfigStructure(profile?: string): ConfigHealthIssue[] {
   ];
 }
 
-function fixModelConfigDuplicateKey(profile?: string): {
+function fixModelConfigDuplicateKey(
+  profile?: string,
+  recordAudit: ConfigFixAuditRecorder = appendConfigFixLog,
+): {
   ok: boolean;
   message?: string;
 } {
@@ -1166,7 +1546,7 @@ function fixModelConfigDuplicateKey(profile?: string): {
   validateModelConfiguration(repaired.content);
 
   safeWriteFile(configFile, repaired.content);
-  appendConfigFixLog({
+  recordAudit({
     ts: Date.now(),
     issueCode: "MODEL_CONFIG_DUPLICATE_KEY",
     action: "autofix",

@@ -257,6 +257,73 @@ describe("runConfigHealthCheck", () => {
 });
 
 describe("autoFixIssue", () => {
+  it("keeps a managed health fix byte-pure until an explicit permit persists it", async () => {
+    writeConfig(["api_server:", "  token: sk-managed-plan", ""].join("\n"));
+    const health = await freshHealth(TEST_DIR);
+    const [managed, authority] = await Promise.all([
+      import("../src/main/model-configuration-managed-files"),
+      import("../src/main/model-configuration-write-authority"),
+    ]);
+    managed.registerManagedModelFileRoots({
+      globalRoot: TEST_DIR,
+      profiles: { default: TEST_DIR },
+    });
+    const envFile = join(TEST_DIR, ".env");
+
+    const plan = health.planConfigHealthAutoFix(
+      "API_SERVER_KEY_NON_CANONICAL",
+      "default",
+    );
+
+    expect(existsSync(envFile)).toBe(false);
+    expect(plan.result).toMatchObject({ ok: true });
+    expect(plan.auditEntries).toHaveLength(1);
+    expect(existsSync(join(TEST_DIR, "logs", "config-fixes.log"))).toBe(false);
+    expect(() => health.persistConfigHealthAutoFix(null, plan)).toThrow(
+      expect.objectContaining({
+        code: "model_configuration_write_permit_required",
+      }),
+    );
+    expect(existsSync(envFile)).toBe(false);
+
+    await new authority.ModelConfigurationWriteAuthority().run(
+      { globalCatalog: false, profileIds: ["default"] },
+      (permit) => health.persistConfigHealthAutoFix(permit, plan),
+    );
+    expect(readFileSync(envFile, "utf8")).toContain(
+      "API_SERVER_KEY=sk-managed-plan",
+    );
+    // Persistence commits managed bytes only. The coordinator's post-commit
+    // refresh callback owns the non-managed audit append.
+    expect(existsSync(join(TEST_DIR, "logs", "config-fixes.log"))).toBe(false);
+    managed.clearManagedModelFileRoots();
+  });
+
+  it("can defer the audit entry until a managed transaction commits", async () => {
+    writeConfig(["api_server:", "  token: sk-deferred-audit", ""].join("\n"));
+    const { autoFixIssue } = await freshHealth(TEST_DIR);
+    const entries: unknown[] = [];
+    const deferred = autoFixIssue as typeof autoFixIssue & {
+      (
+        code: "API_SERVER_KEY_NON_CANONICAL",
+        profile: undefined,
+        context: undefined,
+        options: { recordAudit(entry: unknown): void },
+      ): { ok: boolean; message?: string };
+    };
+
+    const result = deferred(
+      "API_SERVER_KEY_NON_CANONICAL",
+      undefined,
+      undefined,
+      { recordAudit: (entry) => entries.push(entry) },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(entries).toHaveLength(1);
+    expect(existsSync(join(TEST_DIR, "logs", "config-fixes.log"))).toBe(false);
+  });
+
   it("migrates non-canonical API_SERVER_KEY into .env", async () => {
     writeConfig(["api_server:", "  token: sk-migrate-me", ""].join("\n"));
     const { autoFixIssue } = await freshHealth(TEST_DIR);

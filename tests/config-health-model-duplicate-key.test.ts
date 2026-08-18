@@ -83,6 +83,25 @@ describe("config health — duplicate top-level model key", () => {
     expect(rescan).toBeUndefined();
   });
 
+  it("plans the duplicate-key repair without changing the live file", async () => {
+    const configFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(configFile, CORRUPTED, "utf-8");
+    const health = await importHealthWithHome(TEST_DIR);
+
+    const plan = health.planConfigHealthAutoFix(
+      "MODEL_CONFIG_DUPLICATE_KEY",
+      "default",
+    );
+
+    expect(plan.result).toMatchObject({ ok: true });
+    expect(plan.auditEntries).toHaveLength(1);
+    expect(readFileSync(configFile, "utf8")).toBe(CORRUPTED);
+    expect(plan.writePlan?.after?.toString("utf8")).toContain("providers:");
+    expect(
+      plan.writePlan?.after?.toString("utf8").match(/^model:[^\r\n]*$/gm),
+    ).toHaveLength(1);
+  });
+
   // @lat: [[legacy-model-config-migration#Config health repair#Reports invalid YAML under its own code]]
   it("reports unparseable YAML under its own code, with no merge suggestion", async () => {
     writeFileSync(

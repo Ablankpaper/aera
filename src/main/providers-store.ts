@@ -8,6 +8,10 @@ import {
 } from "../shared/custom-providers";
 import { customProviderEnvKey } from "../shared/url-key-map";
 import { isValidProfileName, profileHome, safeWriteFile } from "./utils";
+import {
+  writeManagedModelFile,
+  type ModelConfigurationWritePermit,
+} from "./model-configuration-managed-files";
 
 // Per-profile store of user-configured custom providers. Sits alongside the
 // profile's `.env` (holds the key) and the global `models.json` (holds models);
@@ -58,11 +62,49 @@ function readProvidersFile(profile?: string): CustomProviderFile {
   }
 }
 
-function writeProvidersFile(
+export interface CustomProviderWritePlan<T> {
+  readonly profileId: string;
+  readonly target: string;
+  readonly before: Buffer | null;
+  readonly after: Buffer | null;
+  readonly value: T;
+}
+
+function fileBytes(path: string): Buffer | null {
+  return existsSync(path) ? readFileSync(path) : null;
+}
+
+function sameBytes(left: Buffer | null, right: Buffer | null): boolean {
+  return left === null ? right === null : right !== null && left.equals(right);
+}
+
+function providerPlan<T>(
   profile: string | undefined,
-  data: CustomProviderFile,
-): void {
-  safeWriteFile(providersPath(profile), JSON.stringify(data, null, 2));
+  after: CustomProviderFile | null,
+  value: T,
+): CustomProviderWritePlan<T> {
+  const profileId = profile ?? "default";
+  const target = providersPath(profile);
+  return Object.freeze({
+    profileId,
+    target,
+    before: fileBytes(target),
+    after: after === null ? null : Buffer.from(JSON.stringify(after, null, 2)),
+    value,
+  });
+}
+
+export function persistCustomProviderPlan<T>(
+  permit: ModelConfigurationWritePermit | null | undefined,
+  plan: CustomProviderWritePlan<T>,
+): T {
+  if (!sameBytes(fileBytes(plan.target), plan.before)) {
+    throw new Error("Custom provider write plan is stale.");
+  }
+  if (plan.after !== null) {
+    writeManagedModelFile(permit, plan.target, plan.after);
+  }
+  return plan.value;
 }
 
 /** All custom providers configured for `profile` (empty when none/no file). */
@@ -82,10 +124,21 @@ export function upsertCustomProvider(
   profile: string | undefined,
   input: { id?: string; name: string; baseUrl: string },
 ): CustomProviderRecord | null {
+  const plan = planCustomProviderUpsert(profile, input);
+  if (plan.after !== null) {
+    safeWriteFile(plan.target, plan.after);
+  }
+  return plan.value;
+}
+
+export function planCustomProviderUpsert(
+  profile: string | undefined,
+  input: { id?: string; name: string; baseUrl: string },
+): CustomProviderWritePlan<CustomProviderRecord | null> {
   const normalized = normalizeProfile(profile);
   const name = (input.name || "").trim();
   const baseUrl = (input.baseUrl || "").trim();
-  if (!name || !baseUrl) return null;
+  if (!name || !baseUrl) return providerPlan(normalized, null, null);
 
   const anchor = customProviderEnvKey(name);
   const data = readProvidersFile(normalized);
@@ -117,8 +170,7 @@ export function upsertCustomProvider(
     record = { id: randomUUID(), name, baseUrl, createdAt: Date.now() };
     data.providers.push(record);
   }
-  writeProvidersFile(normalized, data);
-  return record;
+  return providerPlan(normalized, data, record);
 }
 
 /** Remove a custom provider by name (matched via its derived env-key anchor). */
@@ -126,6 +178,14 @@ export function removeCustomProvider(
   profile: string | undefined,
   name: string,
 ): void {
+  const plan = planCustomProviderRemoval(profile, name);
+  if (plan.after !== null) safeWriteFile(plan.target, plan.after);
+}
+
+export function planCustomProviderRemoval(
+  profile: string | undefined,
+  name: string,
+): CustomProviderWritePlan<void> {
   const normalized = normalizeProfile(profile);
   const anchor = customProviderEnvKey((name || "").trim());
   const data = readProvidersFile(normalized);
@@ -133,6 +193,7 @@ export function removeCustomProvider(
     (p) => customProviderEnvKey(p.name) !== anchor,
   );
   if (next.length !== data.providers.length) {
-    writeProvidersFile(normalized, { version: 1, providers: next });
+    return providerPlan(normalized, { version: 1, providers: next }, undefined);
   }
+  return providerPlan(normalized, null, undefined);
 }

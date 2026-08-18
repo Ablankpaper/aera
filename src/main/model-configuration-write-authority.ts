@@ -195,7 +195,10 @@ export class ModelConfigurationWriteAuthority {
     };
   }
 
-  async run<T>(scope: ManagedWriteScope, callback: () => T | Promise<T>): Promise<T> {
+  async run<T>(
+    scope: ManagedWriteScope,
+    callback: (permit: ModelConfigurationWritePermit) => T | Promise<T>,
+  ): Promise<T> {
     if (permitStorage.getStore()) {
       throw new ModelConfigurationWriteError(
         "model_configuration_lock_order_violation",
@@ -217,7 +220,7 @@ export class ModelConfigurationWriteAuthority {
     } as ActivePermit;
     activePermits.add(permit);
     try {
-      return await permitStorage.run(permit, callback);
+      return await permitStorage.run(permit, () => callback(permit));
     } finally {
       permit.active = false;
       activePermits.delete(permit);

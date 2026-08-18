@@ -48,7 +48,8 @@ async function initializeExplicitly(
           await input.applyStage(stage);
         }
       }
-      if (!(await input.verify())) throw new Error("initialization verification failed");
+      if (!(await input.verify()))
+        throw new Error("initialization verification failed");
       return {
         status: "committed",
         catalog: {
@@ -125,7 +126,7 @@ describe("getApiServerKey migration (default profile)", () => {
       join(TEST_DIR, "config.yaml"),
       ["api_server:", "  token: sk-idem", ""].join("\n"),
     );
-    const { getApiServerKey } = await freshConfig(TEST_DIR);
+    await freshConfig(TEST_DIR);
 
     await initializeExplicitly();
     const envAfterFirst = readFileSync(join(TEST_DIR, ".env"), "utf-8");
@@ -163,7 +164,7 @@ describe("getApiServerKey migration (default profile)", () => {
       join(TEST_DIR, "config.yaml"),
       ["api_server:", "  token: sk-audit-trail-test", ""].join("\n"),
     );
-    const { getApiServerKey } = await freshConfig(TEST_DIR);
+    await freshConfig(TEST_DIR);
 
     await initializeExplicitly();
 

@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "fs";
 import { HERMES_HOME } from "./installer";
+import { assertManagedWritePath } from "./model-configuration-write-authority";
 
 const PROFILE_NAME_RE = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
 export const PROFILE_NAME_ERROR =
@@ -215,6 +216,7 @@ export function safeWriteFile(
   content: string | Uint8Array,
   mode?: number,
 ): void {
+  assertManagedWritePath(filePath);
   const dir = dirname(filePath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 

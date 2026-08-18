@@ -39,9 +39,49 @@ describe("Hermes-native named custom-provider routing", () => {
     );
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    const { clearManagedModelFileRoots } =
+      await import("../src/main/model-configuration-managed-files");
+    clearManagedModelFileRoots();
     vi.unstubAllEnvs();
     rmSync(testHome, { recursive: true, force: true });
+  });
+
+  it("plans without writing and requires an explicit Profile permit", async () => {
+    const { native } = await loadModules();
+    const managed =
+      await import("../src/main/model-configuration-managed-files");
+    const authority =
+      await import("../src/main/model-configuration-write-authority");
+    managed.registerManagedModelFileRoots({
+      globalRoot: testHome,
+      profiles: { default: testHome },
+    });
+    const configFile = join(testHome, "config.yaml");
+    const before = readFileSync(configFile);
+
+    const plan = native.planNativeCustomProviderUpsert(undefined, {
+      baseUrl: "https://api.petoi.cn/v1",
+      name: "petoi.cn",
+    });
+
+    expect(readFileSync(configFile)).toEqual(before);
+    expect(() => native.persistNativeCustomProviderPlan(null, plan)).toThrow(
+      /permit/i,
+    );
+    expect(readFileSync(configFile)).toEqual(before);
+
+    const writeAuthority = new authority.ModelConfigurationWriteAuthority();
+    const route = await writeAuthority.run(
+      { globalCatalog: false, profileIds: ["default"] },
+      (permit) => native.persistNativeCustomProviderPlan(permit, plan),
+    );
+
+    expect(route).toBe("custom:petoi.cn");
+    expect(
+      (parseYaml(readFileSync(configFile, "utf8")) as { providers: object })
+        .providers,
+    ).toHaveProperty("petoi.cn");
   });
 
   it("persists one native providers entry and activates custom:<name> without inlining the key", async () => {

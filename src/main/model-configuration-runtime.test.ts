@@ -47,17 +47,13 @@ describe("model-configuration runtime", () => {
     const actualInstaller =
       await vi.importActual<typeof import("./installer")>("./installer");
     vi.doMock("./installer", () => actualInstaller);
-    const [
-      { AgenteraProfileBindingStore },
-      runtime,
-      models,
-      modelDatabase,
-    ] = await Promise.all([
-      import("./agentera-profile-binding"),
-      import("./model-configuration-runtime"),
-      import("./models"),
-      import("./model-configuration-database"),
-    ]);
+    const [{ AgenteraProfileBindingStore }, runtime, models, modelDatabase] =
+      await Promise.all([
+        import("./agentera-profile-binding"),
+        import("./model-configuration-runtime"),
+        import("./models"),
+        import("./model-configuration-database"),
+      ]);
     const bindings = new AgenteraProfileBindingStore({
       userDataPath: userData,
       secureStorage: {
@@ -89,8 +85,8 @@ describe("model-configuration runtime", () => {
       const operationCount = (): number =>
         Number(
           (
-            handle.database!.sqlite
-              .prepare(
+            handle
+              .database!.sqlite.prepare(
                 "SELECT COUNT(*) AS count FROM desktop_model_configuration_operations",
               )
               .get() as { count: number | bigint }
@@ -300,8 +296,44 @@ describe("model-configuration runtime", () => {
         ],
         activeModel: "fixture-model",
       };
+      const [providers, models, nativeProviders] = await Promise.all([
+        import("./providers-store"),
+        import("./models"),
+        import("./native-custom-provider"),
+      ]);
+      const legacyWriters = [
+        vi.spyOn(config, "setEnvValue").mockImplementation(() => {
+          throw new Error("legacy setEnvValue called");
+        }),
+        vi.spyOn(config, "setModelConfig").mockImplementation(() => {
+          throw new Error("legacy setModelConfig called");
+        }),
+        vi.spyOn(providers, "upsertCustomProvider").mockImplementation(() => {
+          throw new Error("legacy upsertCustomProvider called");
+        }),
+        vi
+          .spyOn(models, "migrateModelsForCustomProvider")
+          .mockImplementation(() => {
+            throw new Error("legacy migrateModelsForCustomProvider called");
+          }),
+        vi.spyOn(models, "addModel").mockImplementation(() => {
+          throw new Error("legacy addModel called");
+        }),
+        vi.spyOn(models, "updateModel").mockImplementation(() => {
+          throw new Error("legacy updateModel called");
+        }),
+        vi
+          .spyOn(nativeProviders, "upsertNativeCustomProvider")
+          .mockImplementation(() => {
+            throw new Error("legacy upsertNativeCustomProvider called");
+          }),
+      ];
       const result = await handle.coordinator!.mutate(request);
       expect(result).toMatchObject({ status: "committed" });
+      for (const writer of legacyWriters) {
+        expect(writer).not.toHaveBeenCalled();
+        writer.mockRestore();
+      }
       expect(JSON.stringify(result)).not.toContain(SECRET);
       expect(config.getModelConfig("default")).toEqual({
         provider: "custom:fixture",
@@ -349,24 +381,31 @@ describe("model-configuration runtime", () => {
       const originalProvider = listCustomProviders("default")[0];
       expect(originalProvider).toMatchObject({ name: "Fixture" });
 
-      const duplicateProvider = listCustomProviders("default").length
-        ? (await import("./providers-store")).upsertCustomProvider("default", {
+      const { ModelConfigurationWriteAuthority } =
+        await import("./model-configuration-write-authority");
+      const { addModel, readModelsRaw } = await import("./models");
+      let duplicateProvider: ReturnType<typeof providers.upsertCustomProvider> =
+        null;
+      await new ModelConfigurationWriteAuthority().run(
+        { globalCatalog: true, profileIds: ["default"] },
+        () => {
+          duplicateProvider = providers.upsertCustomProvider("default", {
             name: "123456",
             baseUrl: request.baseUrl,
-          })
-        : null;
-      expect(duplicateProvider).toBeTruthy();
-      const { addModel, readModelsRaw } = await import("./models");
-      addModel(
-        "Fixture Model",
-        "custom",
-        "fixture-model",
-        request.baseUrl,
-        undefined,
-        "123456",
-        request.apiMode,
-        duplicateProvider!.id,
+          });
+          addModel(
+            "Fixture Model",
+            "custom",
+            "fixture-model",
+            request.baseUrl,
+            undefined,
+            "123456",
+            request.apiMode,
+            duplicateProvider!.id,
+          );
+        },
       );
+      expect(duplicateProvider).toBeTruthy();
       const deleteCatalog = handle.catalog!.snapshot("default");
       const deleteResult = await handle.coordinator!.mutate({
         intent: "delete",
@@ -380,9 +419,7 @@ describe("model-configuration runtime", () => {
         expect.objectContaining({ id: originalProvider.id, name: "Fixture" }),
       ]);
       expect(
-        readModelsRaw().filter(
-          (row) => row.providerId === originalProvider.id,
-        ),
+        readModelsRaw().filter((row) => row.providerId === originalProvider.id),
       ).toHaveLength(1);
       expect(config.getModelConfig("default")).toMatchObject({
         provider: "custom:fixture",

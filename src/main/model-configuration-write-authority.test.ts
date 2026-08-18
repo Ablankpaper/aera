@@ -10,13 +10,16 @@ import {
   type ManagedWriteScope,
 } from "./model-configuration-write-authority";
 import {
+  clearManagedModelFileRoots,
   registerManagedModelFileRoots,
   writeManagedModelFile,
 } from "./model-configuration-managed-files";
+import { safeWriteFile } from "./utils";
 
 const roots: string[] = [];
 
 afterEach(() => {
+  clearManagedModelFileRoots();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -110,6 +113,23 @@ describe("ModelConfigurationWriteAuthority", () => {
 });
 
 describe("managed model-file writes", () => {
+  it("blocks the shared low-level writer before it creates managed bytes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "aera-managed-safe-write-"));
+    roots.push(root);
+    const globalRoot = join(root, "hermes");
+    const models = join(globalRoot, "models.json");
+    registerManagedModelFileRoots({ globalRoot, profiles: {} });
+    const authority = new ModelConfigurationWriteAuthority();
+
+    expect(() => safeWriteFile(models, "[]\n")).toThrow(/permit/i);
+    expect(() => readFileSync(models, "utf8")).toThrow();
+
+    await authority.run({ globalCatalog: true, profileIds: [] }, () => {
+      safeWriteFile(models, "[]\n");
+    });
+    expect(readFileSync(models, "utf8")).toBe("[]\n");
+  });
+
   it("requires the active permit and the matching scope", async () => {
     const root = mkdtempSync(join(tmpdir(), "aera-managed-files-"));
     roots.push(root);
@@ -126,6 +146,9 @@ describe("managed model-file writes", () => {
       /permit/i,
     );
     await authority.run({ globalCatalog: true, profileIds: [] }, () => {
+      expect(() =>
+        writeManagedModelFile(undefined, models, "implicit\n"),
+      ).toThrow(/permit/i);
       writeManagedModelFile(currentModelConfigurationWritePermit(), models, "[]\n");
     });
     expect(readFileSync(models, "utf8")).toBe("[]\n");

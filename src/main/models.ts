@@ -16,9 +16,130 @@ import {
   type ApiServerKeyMigrationPlan,
 } from "./config";
 import type { ManagedModelFileInitialization } from "./model-configuration-coordinator";
+import {
+  writeManagedModelFile,
+  type ManagedModelFileRole,
+  type ModelConfigurationWritePermit,
+} from "./model-configuration-managed-files";
 
 const MODELS_FILE = join(HERMES_HOME, "models.json");
 const MODEL_DEFS_FILE = join(HERMES_HOME, "model-definitions.json");
+
+export interface ModelCatalogFilePatch {
+  readonly role: Extract<ManagedModelFileRole, "models" | "modelDefinitions">;
+  readonly target: string;
+  readonly before: Buffer | null;
+  readonly after: Buffer;
+}
+
+export interface ModelCatalogWritePlan<T> {
+  readonly patches: readonly ModelCatalogFilePatch[];
+  readonly value: T;
+}
+
+function modelCatalogPatch(
+  role: ModelCatalogFilePatch["role"],
+  target: string,
+  value: unknown,
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): ModelCatalogFilePatch {
+  const basePatch = basePlan?.patches.find(
+    (candidate) => candidate.role === role,
+  );
+  return Object.freeze({
+    role,
+    target,
+    before: basePatch
+      ? basePatch.before
+      : existsSync(target)
+        ? readFileSync(target)
+        : null,
+    after: Buffer.from(JSON.stringify(value, null, 2)),
+  });
+}
+
+function modelCatalogPlan<T>(
+  patches: readonly ModelCatalogFilePatch[],
+  value: T,
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): ModelCatalogWritePlan<T> {
+  const merged = new Map<
+    ModelCatalogFilePatch["role"],
+    ModelCatalogFilePatch
+  >();
+  for (const patch of basePlan?.patches ?? []) merged.set(patch.role, patch);
+  for (const patch of patches) merged.set(patch.role, patch);
+  return Object.freeze({
+    patches: Object.freeze([...merged.values()]),
+    value,
+  });
+}
+
+function plannedModels(
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): SavedModelRow[] {
+  const patch = basePlan?.patches.find(
+    (candidate) => candidate.role === "models",
+  );
+  if (!patch) return readModelsRaw();
+  const parsed = JSON.parse(patch.after.toString("utf8")) as unknown;
+  if (!Array.isArray(parsed)) throw new Error("Invalid planned model catalog.");
+  return parsed as SavedModelRow[];
+}
+
+function plannedModelDefinitions(
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): Record<string, ModelDefinition> {
+  const patch = basePlan?.patches.find(
+    (candidate) => candidate.role === "modelDefinitions",
+  );
+  if (!patch) return readModelDefinitions();
+  const parsed = JSON.parse(patch.after.toString("utf8")) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Invalid planned model definitions.");
+  }
+  return parsed as Record<string, ModelDefinition>;
+}
+
+function modelCatalogBytesEqual(
+  left: Buffer | null,
+  right: Buffer | null,
+): boolean {
+  return left === null ? right === null : right !== null && left.equals(right);
+}
+
+export function persistModelCatalogWritePlan<T>(
+  permit: ModelConfigurationWritePermit | null | undefined,
+  plan: ModelCatalogWritePlan<T>,
+): T {
+  for (const patch of plan.patches) {
+    const current = existsSync(patch.target)
+      ? readFileSync(patch.target)
+      : null;
+    if (!modelCatalogBytesEqual(current, patch.before)) {
+      throw new Error("Model catalog write plan is stale.");
+    }
+  }
+  for (const patch of plan.patches) {
+    writeManagedModelFile(permit, patch.target, patch.after);
+  }
+  return plan.value;
+}
+
+function persistLegacyModelCatalogWritePlan<T>(
+  plan: ModelCatalogWritePlan<T>,
+): T {
+  for (const patch of plan.patches) {
+    const current = existsSync(patch.target)
+      ? readFileSync(patch.target)
+      : null;
+    if (!modelCatalogBytesEqual(current, patch.before)) {
+      throw new Error("Model catalog write plan is stale.");
+    }
+  }
+  for (const patch of plan.patches) safeWriteFile(patch.target, patch.after);
+  return plan.value;
+}
 
 /**
  * A persisted `models.json` row — a pure *attachment* of a model id to a
@@ -234,7 +355,19 @@ export function setModelDefinition(
     modalities?: { input?: string[]; output?: string[] };
   },
 ): ModelDefinition {
-  const defs = readModelDefinitions();
+  return persistLegacyModelCatalogWritePlan(
+    planSetModelDefinition(model, patch),
+  );
+}
+
+type ModelDefinitionPatch = Parameters<typeof setModelDefinition>[1];
+
+function applyModelDefinitionPatch(
+  definitions: Record<string, ModelDefinition>,
+  model: string,
+  patch: ModelDefinitionPatch,
+): ModelDefinition {
+  const defs = definitions;
   const now = Date.now();
   const prev = defs[model];
   const next: ModelDefinition = prev
@@ -252,16 +385,39 @@ export function setModelDefinition(
       : undefined;
   if (patch.modalities !== undefined) next.modalities = patch.modalities;
   defs[model] = next;
-  writeModelDefinitions(defs);
   return next;
 }
 
+export function planSetModelDefinition(
+  model: string,
+  patch: ModelDefinitionPatch,
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): ModelCatalogWritePlan<ModelDefinition> {
+  const defs = plannedModelDefinitions(basePlan);
+  const next = applyModelDefinitionPatch(defs, model, patch);
+  return modelCatalogPlan(
+    [modelCatalogPatch("modelDefinitions", MODEL_DEFS_FILE, defs, basePlan)],
+    next,
+    basePlan,
+  );
+}
+
 export function removeModelDefinition(model: string): boolean {
-  const defs = readModelDefinitions();
-  if (!(model in defs)) return false;
+  return persistLegacyModelCatalogWritePlan(planRemoveModelDefinition(model));
+}
+
+export function planRemoveModelDefinition(
+  model: string,
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): ModelCatalogWritePlan<boolean> {
+  const defs = plannedModelDefinitions(basePlan);
+  if (!(model in defs)) return modelCatalogPlan([], false, basePlan);
   delete defs[model];
-  writeModelDefinitions(defs);
-  return true;
+  return modelCatalogPlan(
+    [modelCatalogPatch("modelDefinitions", MODEL_DEFS_FILE, defs, basePlan)],
+    true,
+    basePlan,
+  );
 }
 
 /**
@@ -279,9 +435,7 @@ function planModelDefinitionMigration(
   rows: SavedModelRow[];
   definitions: Record<string, ModelDefinition>;
 } | null {
-  const rawRows = rows as Array<
-    SavedModelRow & { contextLength?: number }
-  >;
+  const rawRows = rows as Array<SavedModelRow & { contextLength?: number }>;
   const legacy = rawRows.filter(
     (r) => normalizeContextLength(r.contextLength) !== undefined,
   );
@@ -453,7 +607,9 @@ const PROFILE_ID_PATTERN = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
 function normalizedInitializationProfiles(
   profileIds: readonly string[],
 ): string[] {
-  const normalized = [...new Set(profileIds.map((profileId) => profileId.trim()))]
+  const normalized = [
+    ...new Set(profileIds.map((profileId) => profileId.trim())),
+  ]
     .filter(Boolean)
     .sort();
   if (
@@ -509,7 +665,8 @@ export function planModelCatalogInitialization(
       modelDefinitions: fileBytes(MODEL_DEFS_FILE),
       env: fileBytes(envFile),
     },
-    modelsAfter: definitionMigration?.rows ?? (seedDefaultModels ? seed.rows : null),
+    modelsAfter:
+      definitionMigration?.rows ?? (seedDefaultModels ? seed.rows : null),
     definitionsAfter: definitionMigration?.definitions ?? null,
     apiServerKeyMigration,
   });
@@ -553,11 +710,7 @@ function initializationInput(
           ) {
             persistApiServerKeyMigration(internal.apiServerKeyMigration);
           } else {
-            setEnvValue(
-              credential.key,
-              credential.value,
-              credential.profileId,
-            );
+            setEnvValue(credential.key, credential.value, credential.profileId);
           }
         }
       }
@@ -590,7 +743,9 @@ function initializationInput(
         return bytesEqual(fileBytes(envFile), internal.before.env);
       }
       return plan.persistDerivedCredentials.every((credential) => {
-        return readEnv(credential.profileId)[credential.key] === credential.value;
+        return (
+          readEnv(credential.profileId)[credential.key] === credential.value
+        );
       });
     },
   };
@@ -631,13 +786,50 @@ export function addModel(
   apiMode?: string | null,
   providerId?: string,
 ): SavedModel {
-  const models = readModelsRaw();
+  return persistLegacyModelCatalogWritePlan(
+    planAddModel(
+      name,
+      provider,
+      model,
+      baseUrl,
+      contextLength,
+      providerLabel,
+      apiMode,
+      providerId,
+    ),
+  );
+}
+
+export function planAddModel(
+  name: string,
+  provider: string,
+  model: string,
+  baseUrl: string,
+  contextLength?: number,
+  providerLabel?: string,
+  apiMode?: string | null,
+  providerId?: string,
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): ModelCatalogWritePlan<SavedModel> {
+  const models = plannedModels(basePlan);
+  const patches: ModelCatalogFilePatch[] = [];
 
   // A context-window override is shared metadata keyed by model id — persist it
   // to the definition, not onto this attachment row, so every provider serving
   // this model id reuses it.
   const ctx = normalizeContextLength(contextLength);
-  if (ctx !== undefined) setModelDefinition(model, { contextLength: ctx });
+  if (ctx !== undefined) {
+    const definitions = plannedModelDefinitions(basePlan);
+    applyModelDefinitionPatch(definitions, model, { contextLength: ctx });
+    patches.push(
+      modelCatalogPatch(
+        "modelDefinitions",
+        MODEL_DEFS_FILE,
+        definitions,
+        basePlan,
+      ),
+    );
+  }
 
   // Stable named providers remain distinct even when they expose the same
   // model at the same endpoint. A stable request may absorb only its own row or
@@ -664,12 +856,16 @@ export function addModel(
     if (apiMode !== undefined) {
       const normalizedApiMode = (apiMode || "").trim() || null;
       models[existingIndex] = { ...existing, apiMode: normalizedApiMode };
-      writeModels(models);
+      patches.push(modelCatalogPatch("models", MODELS_FILE, models, basePlan));
     }
-    return {
-      ...models[existingIndex],
-      ...(ctx !== undefined ? { contextLength: ctx } : {}),
-    };
+    return modelCatalogPlan(
+      patches,
+      {
+        ...models[existingIndex],
+        ...(ctx !== undefined ? { contextLength: ctx } : {}),
+      },
+      basePlan,
+    );
   }
 
   const entry: SavedModelRow = {
@@ -686,8 +882,15 @@ export function addModel(
     createdAt: Date.now(),
   };
   models.push(entry);
-  writeModels(models);
-  return { ...entry, ...(ctx !== undefined ? { contextLength: ctx } : {}) };
+  patches.push(modelCatalogPatch("models", MODELS_FILE, models, basePlan));
+  return modelCatalogPlan(
+    patches,
+    {
+      ...entry,
+      ...(ctx !== undefined ? { contextLength: ctx } : {}),
+    },
+    basePlan,
+  );
 }
 
 function normalizedModelEndpoint(value: string): string {
@@ -707,7 +910,23 @@ export function migrateModelsForCustomProvider(input: {
   newBaseUrl: string;
   apiMode?: string | null;
 }): number {
-  const rows = readModelsRaw();
+  return persistLegacyModelCatalogWritePlan(
+    planMigrateModelsForCustomProvider(input),
+  );
+}
+
+export function planMigrateModelsForCustomProvider(
+  input: {
+    providerId: string;
+    oldName: string;
+    oldBaseUrl: string;
+    newName: string;
+    newBaseUrl: string;
+    apiMode?: string | null;
+  },
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): ModelCatalogWritePlan<number> {
+  const rows = plannedModels(basePlan);
   const oldAnchor = customProviderEnvKey(input.oldName);
   const newAnchor = customProviderEnvKey(input.newName);
   const oldEndpoint = normalizedModelEndpoint(input.oldBaseUrl);
@@ -756,10 +975,15 @@ export function migrateModelsForCustomProvider(input: {
     next.some(
       (row, index) => JSON.stringify(row) !== JSON.stringify(rows[index]),
     );
-  if (changed) writeModels(deduped);
   // Report the number of retained attachments after a rename. Duplicate
   // legacy rows may have been absorbed into one stable-id row.
-  return deduped.filter((row) => row.providerId === input.providerId).length;
+  return modelCatalogPlan(
+    changed
+      ? [modelCatalogPatch("models", MODELS_FILE, deduped, basePlan)]
+      : [],
+    deduped.filter((row) => row.providerId === input.providerId).length,
+    basePlan,
+  );
 }
 
 function isCustomProviderAttachment(row: SavedModelRow): boolean {
@@ -768,11 +992,23 @@ function isCustomProviderAttachment(row: SavedModelRow): boolean {
 }
 
 export function removeModel(id: string): boolean {
-  const models = readModelsRaw();
+  return persistLegacyModelCatalogWritePlan(planRemoveModel(id));
+}
+
+export function planRemoveModel(
+  id: string,
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): ModelCatalogWritePlan<boolean> {
+  const models = plannedModels(basePlan);
   const filtered = models.filter((m) => m.id !== id);
-  if (filtered.length === models.length) return false;
-  writeModels(filtered);
-  return true;
+  if (filtered.length === models.length) {
+    return modelCatalogPlan([], false, basePlan);
+  }
+  return modelCatalogPlan(
+    [modelCatalogPatch("models", MODELS_FILE, filtered, basePlan)],
+    true,
+    basePlan,
+  );
 }
 
 /**
@@ -788,7 +1024,18 @@ export function removeModelsForCustomProvider(
   baseUrl?: string,
   providerId?: string,
 ): number {
-  const rows = readModelsRaw();
+  return persistLegacyModelCatalogWritePlan(
+    planRemoveModelsForCustomProvider(name, baseUrl, providerId),
+  );
+}
+
+export function planRemoveModelsForCustomProvider(
+  name: string,
+  baseUrl?: string,
+  providerId?: string,
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): ModelCatalogWritePlan<number> {
+  const rows = plannedModels(basePlan);
   const providerAnchor = customProviderEnvKey(name.trim());
   const endpoint = (baseUrl || "")
     .trim()
@@ -817,8 +1064,13 @@ export function removeModelsForCustomProvider(
     );
   });
   const removed = rows.length - next.length;
-  if (removed > 0) writeModels(next);
-  return removed;
+  return modelCatalogPlan(
+    removed > 0
+      ? [modelCatalogPatch("models", MODELS_FILE, next, basePlan)]
+      : [],
+    removed,
+    basePlan,
+  );
 }
 
 export function updateModel(
@@ -836,20 +1088,50 @@ export function updateModel(
     >
   > & { contextLength?: number | null },
 ): boolean {
-  const models = readModelsRaw();
+  return persistLegacyModelCatalogWritePlan(planUpdateModel(id, fields));
+}
+
+export function planUpdateModel(
+  id: string,
+  fields: Partial<
+    Pick<
+      SavedModelRow,
+      | "name"
+      | "provider"
+      | "model"
+      | "baseUrl"
+      | "apiMode"
+      | "providerLabel"
+      | "providerId"
+    >
+  > & { contextLength?: number | null },
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): ModelCatalogWritePlan<boolean> {
+  const models = plannedModels(basePlan);
   const idx = models.findIndex((m) => m.id === id);
-  if (idx === -1) return false;
+  if (idx === -1) return modelCatalogPlan([], false, basePlan);
 
   const { contextLength, ...rest } = fields;
   const next: SavedModelRow = { ...models[idx], ...rest };
   models[idx] = next;
-  writeModels(models);
+  const patches: ModelCatalogFilePatch[] = [
+    modelCatalogPatch("models", MODELS_FILE, models, basePlan),
+  ];
 
   // `contextLength` is shared metadata: route it to the definition keyed by the
   // (possibly updated) model id, not onto the row. A positive value sets the
   // override; anything else clears it.
   if (contextLength !== undefined) {
-    setModelDefinition(next.model, { contextLength });
+    const definitions = plannedModelDefinitions(basePlan);
+    applyModelDefinitionPatch(definitions, next.model, { contextLength });
+    patches.push(
+      modelCatalogPatch(
+        "modelDefinitions",
+        MODEL_DEFS_FILE,
+        definitions,
+        basePlan,
+      ),
+    );
   }
-  return true;
+  return modelCatalogPlan(patches, true, basePlan);
 }

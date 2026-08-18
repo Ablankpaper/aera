@@ -20,6 +20,7 @@ import {
 } from "./model-configuration-operation-store";
 import {
   defaultModelConfigurationWriteAuthority,
+  type ModelConfigurationWritePermit,
   type ModelConfigurationWriteAuthority,
 } from "./model-configuration-write-authority";
 
@@ -75,7 +76,10 @@ export interface PreparedModelConfigurationMutation {
   location:
     | LocalModelConfigurationMutationLocation
     | RemoteModelConfigurationMutationLocation;
-  applyStage(stage: ModelConfigurationCommitStage): Awaitable<void>;
+  applyStage(
+    stage: ModelConfigurationCommitStage,
+    permit: ModelConfigurationWritePermit | null,
+  ): Awaitable<void>;
   verify(catalog: OwnerModelRouteCatalogSnapshot): Awaitable<boolean>;
   refreshPresentation?(): Awaitable<void>;
 }
@@ -89,10 +93,54 @@ export interface PreparedModelConfigurationMutation {
 export interface ManagedModelFileInitialization {
   targetProfileId: string;
   changesRequired: boolean;
-  applyStage(stage: ModelConfigurationCommitStage): Awaitable<void>;
+  applyStage(
+    stage: ModelConfigurationCommitStage,
+    permit: ModelConfigurationWritePermit | null,
+  ): Awaitable<void>;
   verify(): Awaitable<boolean>;
   refreshPresentation?(): Awaitable<void>;
 }
+
+export type ManagedModelConfigurationWriteScope = "profile" | "global";
+
+/**
+ * Main-only adapter for legacy product surfaces that still expose one focused
+ * config/model command instead of the public multi-stage model-service
+ * mutation. The coordinator still owns admission, snapshotting, journalling,
+ * rollback, verification, and the write permit.
+ */
+export interface ManagedModelConfigurationWriteRequest {
+  requestedProfileId: string;
+  scope: ManagedModelConfigurationWriteScope;
+  stage: ModelConfigurationCommitStage;
+}
+
+export interface ManagedModelConfigurationWriteContext {
+  ownerHandle: string;
+  targetProfileId: string;
+  catalog: OwnerModelRouteCatalogSnapshot;
+  oldRouteKey: string;
+}
+
+export interface ManagedModelConfigurationWritePlan<T> {
+  /** Omit when the focused command must preserve the active route. */
+  newRouteKey?: string;
+  write(permit: ModelConfigurationWritePermit): Awaitable<T>;
+  verify?(
+    catalog: OwnerModelRouteCatalogSnapshot,
+    value: T,
+  ): Awaitable<boolean>;
+  refreshPresentation?(): Awaitable<void>;
+}
+
+export type ManagedModelConfigurationWriteResult<T> =
+  | {
+      status: "executed";
+      value: T;
+      catalog: OwnerModelRouteCatalogSnapshot;
+      warning?: "model_save_refresh_failed";
+    }
+  | Extract<ModelConfigurationMutationResult, { status: "rejected" }>;
 
 export interface ModelConfigurationMutationAdapter {
   prepare(
@@ -148,7 +196,7 @@ function rejected(
   stage: ModelConfigurationStage,
   rollback: "not_needed" | "restored" | "recovery_required",
   recoveryRequired = false,
-): ModelConfigurationMutationResult {
+): Extract<ModelConfigurationMutationResult, { status: "rejected" }> {
   return {
     status: "rejected",
     stage,
@@ -607,6 +655,162 @@ export class ModelConfigurationCoordinator {
     });
   }
 
+  async runManagedWrite<T>(
+    input: ManagedModelConfigurationWriteRequest,
+    prepare: (
+      context: ManagedModelConfigurationWriteContext,
+    ) => Awaitable<ManagedModelConfigurationWritePlan<T>>,
+  ): Promise<ManagedModelConfigurationWriteResult<T>> {
+    let ownerHandle: string;
+    let preliminaryTarget: string;
+    try {
+      if (
+        !input ||
+        typeof input !== "object" ||
+        (input.scope !== "profile" && input.scope !== "global") ||
+        !COMMIT_STAGES.includes(input.stage) ||
+        typeof prepare !== "function"
+      ) {
+        throw new Error("Invalid managed model write request.");
+      }
+      ownerHandle = validateOwnerHandle(this.ownerHandle());
+      preliminaryTarget = validateProfileId(
+        this.catalog.canonicalTargetProfileId(input.requestedProfileId),
+      );
+    } catch {
+      return rejected("validation", "not_needed");
+    }
+
+    const lockKey = `${ownerHandle}\0${preliminaryTarget}`;
+    return this.withLock(lockKey, async () => {
+      try {
+        const currentOwner = validateOwnerHandle(this.ownerHandle());
+        const targetProfileId = validateProfileId(
+          this.catalog.canonicalTargetProfileId(input.requestedProfileId),
+        );
+        if (
+          currentOwner !== ownerHandle ||
+          targetProfileId !== preliminaryTarget ||
+          !(await this.isProfileOwned(ownerHandle, targetProfileId))
+        ) {
+          return rejected("validation", "not_needed");
+        }
+        if (
+          this.profileNeedsRecovery(ownerHandle, targetProfileId) ||
+          (input.scope === "global" && this.anyProfileNeedsRecovery())
+        ) {
+          return rejected("recovery", "recovery_required", true);
+        }
+
+        const paths = this.files.paths(targetProfileId);
+        let catalog: OwnerModelRouteCatalogSnapshot;
+        let oldRouteKey: string;
+        let plannedDigests: Record<ModelConfigurationFileRole, string>;
+        let plan: ManagedModelConfigurationWritePlan<T>;
+        let newRouteKey: string;
+        try {
+          catalog = this.catalog.snapshot(input.requestedProfileId);
+          if (catalog.targetProfileId !== targetProfileId) {
+            return rejected("validation", "not_needed");
+          }
+          oldRouteKey = boundedRouteKey(
+            await this.mutationAdapter.getActiveRouteKey(targetProfileId),
+          );
+          plannedDigests = await this.files.readDigests(paths);
+          // Planning deliberately runs before an authority permit exists. A
+          // planner that calls any protected writer therefore fails before a
+          // backup, journal row, or managed byte can be created.
+          plan = await prepare({
+            ownerHandle,
+            targetProfileId,
+            catalog,
+            oldRouteKey,
+          });
+          if (!plan || typeof plan.write !== "function") {
+            throw new Error("Invalid managed model write plan.");
+          }
+          newRouteKey = boundedRouteKey(plan.newRouteKey ?? oldRouteKey);
+        } catch {
+          return rejected("validation", "not_needed");
+        }
+
+        return this.writeAuthority.run(
+          {
+            globalCatalog: input.scope === "global",
+            profileIds: [targetProfileId],
+          },
+          async (permit): Promise<ManagedModelConfigurationWriteResult<T>> => {
+            // The global authority may have been queued behind another Profile.
+            // Recheck ownership, recovery, catalog, route, and all five byte
+            // digests before journalling the read-only plan.
+            if (
+              this.profileNeedsRecovery(ownerHandle, targetProfileId) ||
+              (input.scope === "global" && this.anyProfileNeedsRecovery())
+            ) {
+              return rejected("recovery", "recovery_required", true);
+            }
+            const admittedOwner = validateOwnerHandle(this.ownerHandle());
+            const admittedTarget = validateProfileId(
+              this.catalog.canonicalTargetProfileId(input.requestedProfileId),
+            );
+            const admittedCatalog = this.catalog.snapshot(
+              input.requestedProfileId,
+            );
+            const admittedRouteKey = boundedRouteKey(
+              await this.mutationAdapter.getActiveRouteKey(targetProfileId),
+            );
+            const admittedDigests = await this.files.readDigests(paths);
+            if (
+              admittedOwner !== ownerHandle ||
+              admittedTarget !== targetProfileId ||
+              !(await this.isProfileOwned(ownerHandle, targetProfileId)) ||
+              admittedCatalog.targetProfileId !== targetProfileId ||
+              admittedCatalog.revision !== catalog.revision ||
+              admittedRouteKey !== oldRouteKey ||
+              !digestsEqual(admittedDigests, plannedDigests)
+            ) {
+              return rejected("validation", "not_needed");
+            }
+            let value!: T;
+            let executed = false;
+            const prepared: PreparedModelConfigurationMutation = {
+              targetProfileId,
+              oldRouteKey,
+              newRouteKey,
+              location: { kind: "local" },
+              applyStage: async (stage) => {
+                if (stage !== input.stage) return;
+                value = await plan.write(permit);
+                executed = true;
+              },
+              verify: async (nextCatalog) =>
+                executed &&
+                (plan.verify ? await plan.verify(nextCatalog, value) : true),
+              refreshPresentation: plan.refreshPresentation,
+            };
+            const result = await this.executeLocalMutationWithinPermit(
+              prepared,
+              ownerHandle,
+              targetProfileId,
+              permit,
+            );
+            if (result.status === "rejected") return result;
+            return {
+              status: "executed",
+              value,
+              catalog: result.catalog,
+              ...(result.status === "committed_refresh_warning"
+                ? { warning: result.warning }
+                : {}),
+            };
+          },
+        );
+      } catch {
+        return rejected("recovery", "recovery_required", true);
+      }
+    });
+  }
+
   async recoverIncompleteOperations(): Promise<void> {
     const records = this.operationStore.listIncomplete();
     for (const record of records) {
@@ -688,11 +892,12 @@ export class ModelConfigurationCoordinator {
   ): Promise<ModelConfigurationMutationResult> {
     return this.writeAuthority.run(
       { globalCatalog: true, profileIds: [targetProfileId] },
-      () =>
+      (permit) =>
         this.executeLocalMutationWithinPermit(
           prepared,
           ownerHandle,
           targetProfileId,
+          permit,
         ),
     );
   }
@@ -701,6 +906,7 @@ export class ModelConfigurationCoordinator {
     prepared: PreparedModelConfigurationMutation,
     ownerHandle: string,
     targetProfileId: string,
+    permit: ModelConfigurationWritePermit,
   ): Promise<ModelConfigurationMutationResult> {
     const operationId = this.operationId();
     const paths = this.files.paths(targetProfileId);
@@ -727,7 +933,7 @@ export class ModelConfigurationCoordinator {
 
     for (const stage of COMMIT_STAGES) {
       try {
-        await prepared.applyStage(stage);
+        await prepared.applyStage(stage, permit);
         const afterDigests = await this.files.readDigests(paths);
         this.operationStore.advance({
           operationId,
@@ -859,7 +1065,7 @@ export class ModelConfigurationCoordinator {
     try {
       for (const stage of COMMIT_STAGES) {
         failedStage = stage;
-        await prepared.applyStage(stage);
+        await prepared.applyStage(stage, null);
       }
       failedStage = "verification";
       const catalog = this.catalog.snapshot(targetProfileId);
@@ -903,6 +1109,15 @@ export class ModelConfigurationCoordinator {
             record.ownerHandle === ownerHandle &&
             record.profileId === profileId,
         );
+    } catch {
+      return true;
+    }
+  }
+
+  private anyProfileNeedsRecovery(): boolean {
+    if (this.recoveryRequired.size > 0) return true;
+    try {
+      return this.operationStore.listIncomplete().length > 0;
     } catch {
       return true;
     }

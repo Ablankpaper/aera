@@ -2,7 +2,6 @@ import { safeWriteFile } from "./utils";
 import {
   assertManagedWritePath,
   clearManagedModelFileRoots,
-  currentModelConfigurationWritePermit,
   managedModelFileLocation,
   registerManagedModelFileRoots,
   type ModelConfigurationWritePermit,
@@ -28,6 +27,6 @@ export function writeManagedModelFile(
   if (!managedModelFileLocation(target)) {
     throw new Error("Target is not a registered managed model file.");
   }
-  assertManagedWritePath(target, permit ?? currentModelConfigurationWritePermit());
+  assertManagedWritePath(target, permit ?? null);
   safeWriteFile(target, bytes, mode);
 }
