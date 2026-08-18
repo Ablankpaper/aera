@@ -42,7 +42,7 @@ An owned row whose complete files and route exactly equal after/new becomes `com
 
 ### Sanitized Beta.29 dirty-route fixture
 
-The immutable fixture preserves only the third capture's route counts, duplicate-endpoint topology, managed roles, and terminal journal states; real credentials, identities, domains, paths, logs, and database pages are excluded.
+The fixture preserves the capture's counts, duplicate endpoints, one unrelated route, managed roles, and journal states; it excludes credentials, identities, domains, paths, logs, and database pages.
 
 ### Strict route repair planning
 

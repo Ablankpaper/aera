@@ -150,6 +150,24 @@ describe("Beta.29 dirty-route fixture", () => {
     ).toEqual(relations.endpointDistribution);
     expect(relations.endpointDistribution).toEqual([11, 8, 1]);
 
+    const rowsByEndpoint = Map.groupBy(routeRows, (row) =>
+      canonicalModelEndpointV2(row.baseUrl),
+    );
+    const endpointGroups = [...rowsByEndpoint.values()].sort(
+      (left, right) => right.length - left.length,
+    );
+    expect(new Set(endpointGroups[0].map((row) => row.provider))).toEqual(
+      new Set(endpointGroups[1].map((row) => row.provider)),
+    );
+    expect(
+      endpointGroups[2].every(
+        (row) =>
+          !endpointGroups[0].some(
+            (dominant) => dominant.provider === row.provider,
+          ),
+      ),
+    ).toBe(true);
+
     expect(relations.managedFileRoles).toEqual([...MANAGED_ROLES]);
     expect(providers.providers).toHaveLength(1);
     expect(Object.keys(definitions)).toHaveLength(2);

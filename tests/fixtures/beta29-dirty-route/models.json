@@ -240,10 +240,9 @@
   {
     "id": "fixture-route-12-alternate",
     "name": "Fixture Model 12",
-    "provider": "custom",
+    "provider": "fixture-standalone",
     "model": "fixture-model-12",
     "baseUrl": "https://alternate.fixture.invalid/v1",
-    "providerLabel": "Fixture",
     "createdAt": 1723507200312
   }
 ]
