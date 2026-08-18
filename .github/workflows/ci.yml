@@ -127,6 +127,41 @@ jobs:
         run: npm run lint
         continue-on-error: true
 
+  windows-model-recovery:
+    name: windows-model-recovery
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run bounded process-crash recovery harness
+        shell: pwsh
+        run: |
+          $harnessRoot = Join-Path $env:RUNNER_TEMP "aera-windows-model-recovery-root"
+          $evidenceRoot = Join-Path $env:RUNNER_TEMP "aera-windows-model-recovery-evidence"
+          New-Item -ItemType Directory -Force -Path $harnessRoot, $evidenceRoot | Out-Null
+          ./scripts/release/windows-model-recovery-harness.ps1 `
+            -ProjectRoot $env:GITHUB_WORKSPACE `
+            -HarnessRoot $harnessRoot
+          Copy-Item `
+            (Join-Path $harnessRoot "windows-recovery-evidence.json") `
+            (Join-Path $evidenceRoot "windows-recovery-evidence.json")
+
+      - name: Upload bounded recovery evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-model-recovery-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/aera-windows-model-recovery-evidence
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
   windows-process-tree-diagnostic:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'windows-process-tree-diagnostic'
     name: windows-process-tree-diagnostic
