@@ -44,6 +44,10 @@ An owned row whose complete files and route exactly equal after/new becomes `com
 
 The immutable fixture preserves only the third capture's route counts, duplicate-endpoint topology, managed roles, and terminal journal states; real credentials, identities, domains, paths, logs, and database pages are excluded.
 
+### Strict route repair planning
+
+[[src/main/model-configuration-reconciler.ts#planModelRouteDirectoryRepair]] parses one in-memory five-file snapshot and either returns deterministic patches or a fail-closed repair code; it never reads disk, resolves secret values, writes files, or opens the operation journal.
+
 ### Managed lock order is deterministic
 
 Mixed model mutations acquire the global catalog before stable-sorted, unique Profile locks, and a nested Profile-to-global acquisition fails before its callback runs.

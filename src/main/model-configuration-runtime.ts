@@ -87,9 +87,14 @@ import {
   type ModelConfigurationDatabase,
 } from "./model-configuration-database";
 import { registerManagedModelFileRoots } from "./model-configuration-managed-files";
-import {
-  recoverStagedProfileActivations as recoverStagedProfileActivationJournal,
-} from "./model-configuration-staged-profile";
+import { recoverStagedProfileActivations as recoverStagedProfileActivationJournal } from "./model-configuration-staged-profile";
+
+export {
+  planModelRouteDirectoryRepair,
+  type ManagedModelFilePatch,
+  type ModelRouteDirectorySnapshot,
+  type RouteRepairPlan,
+} from "./model-configuration-reconciler";
 
 /** Minimal connection shape needed to fail closed for remote/SSH writes. */
 export interface ModelConfigurationRuntimeConnection {
