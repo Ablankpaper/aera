@@ -26,6 +26,10 @@ extraResources:
 win:
   executableName: Aera
   icon: build/icon.ico
+  files:
+    - "!node_modules/@electron-internal/extract-zip/index.darwin-*.node"
+    - "!node_modules/@electron-internal/extract-zip/index.linux-*.node"
+    - "!node_modules/@electron-internal/extract-zip/index.win32-arm64-msvc.node"
   target:
     - nsis
     - portable
@@ -41,6 +45,9 @@ nsis:
 mac:
   artifactName: Aera-${version}-${arch}-${os}.${ext}
   icon: build/icon.icns
+  files:
+    - "!node_modules/@electron-internal/extract-zip/index.linux-*.node"
+    - "!node_modules/@electron-internal/extract-zip/index.win32-*.node"
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.inherit.plist
   extendInfo:

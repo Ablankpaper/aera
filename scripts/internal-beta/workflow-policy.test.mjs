@@ -458,6 +458,19 @@ test("internal-Beta overlays separate unsigned Windows from strict macOS signing
   );
 });
 
+test("packaging excludes foreign extract-zip prebuilds before native verification", async () => {
+  const config = parseYAML(await readFile(baseBuilderPath, "utf8"));
+  assert.deepEqual(config.mac.files, [
+    "!node_modules/@electron-internal/extract-zip/index.linux-*.node",
+    "!node_modules/@electron-internal/extract-zip/index.win32-*.node",
+  ]);
+  assert.deepEqual(config.win.files, [
+    "!node_modules/@electron-internal/extract-zip/index.darwin-*.node",
+    "!node_modules/@electron-internal/extract-zip/index.linux-*.node",
+    "!node_modules/@electron-internal/extract-zip/index.win32-arm64-msvc.node",
+  ]);
+});
+
 test(
   "Windows runner accepts the production Authenticode verifier PowerShell syntax",
   { skip: process.platform !== "win32" },
@@ -524,4 +537,22 @@ test("Internal Beta Windows candidate runs disposable install/start/update/rollb
   assert.match(smokeScript, /rollback|Restore/u);
   assert.match(smokeScript, /synthetic|disposable/u);
   assert.doesNotMatch(smokeScript, /\?\?/u);
+});
+
+test("Internal Beta candidate proves packaged Main Preload and Renderer startup on both platforms", async () => {
+  const raw = await readFile(workflowPath, "utf8");
+  const workflow = parseYAML(raw);
+  for (const jobName of ["macos", "windows"]) {
+    const step = workflow.jobs[jobName].steps.find(
+      (candidate) =>
+        candidate.name === "Verify exact packaged application startup",
+    );
+    assert.ok(step, `${jobName} must verify the exact packaged startup`);
+    assert.match(step.run, /scripts\/release\/verify-packaged-startup\.mjs/u);
+    assert.match(step.run, /--source-sha/u);
+    assert.match(step.run, /--desktop-version/u);
+    assert.match(step.run, /--output/u);
+  }
+  assert.match(raw, /packaged-startup-macos\.json/u);
+  assert.match(raw, /packaged-startup-windows\.json/u);
 });

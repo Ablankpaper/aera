@@ -375,6 +375,21 @@ jobs:
           echo "runtime_manifest=${{ steps.app_paths.outputs.runtime_manifest }}" \
             >> "$GITHUB_OUTPUT"
 
+      - name: Verify exact packaged application startup
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          node scripts/release/verify-packaged-startup.mjs \
+            --app "${{ steps.mac_paths.outputs.app }}" \
+            --platform darwin \
+            --architecture arm64 \
+            --source-sha "${{ inputs.source_sha }}" \
+            --desktop-version "$VERSION" \
+            --output "$RUNNER_TEMP/packaged-startup-macos.json"
+          test -s "$RUNNER_TEMP/packaged-startup-macos.json"
+
       - name: Exercise packaged updater against final macOS ZIP
         shell: bash
         env:
@@ -544,6 +559,8 @@ jobs:
           cp "${{ steps.mac_paths.outputs.dmg }}" "$destination/artifacts/"
           cp "${{ steps.mac_paths.outputs.zip }}" "$destination/artifacts/"
           cp "$RUNNER_TEMP/macos-evidence.json" "$destination/evidence/"
+          cp "$RUNNER_TEMP/packaged-startup-macos.json" \
+            "$destination/evidence/"
           cp "${{ steps.mac_paths.outputs.runtime_manifest }}" \
             "$destination/runtime-seed/"
 
@@ -628,6 +645,26 @@ jobs:
             --win nsis portable dir --x64 --publish never
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Verify exact packaged application startup
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          $unpacked = @(Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*unpacked" })
+          if ($unpacked.Count -ne 1) { throw "Expected exactly one unpacked Windows app" }
+          $output = Join-Path $env:RUNNER_TEMP "packaged-startup-windows.json"
+          node scripts/release/verify-packaged-startup.mjs `
+            --app $unpacked[0].FullName `
+            --platform win32 `
+            --architecture x64 `
+            --source-sha "${{ inputs.source_sha }}" `
+            --desktop-version $env:VERSION `
+            --output $output
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path -LiteralPath $output -PathType Leaf)) {
+            throw "Packaged Windows startup evidence is missing"
+          }
+
       - name: Verify packaged Runtime Seed, app ZIP, and stage immutable bytes
         shell: pwsh
         env:
@@ -665,6 +702,7 @@ jobs:
           $destination = Join-Path $env:RUNNER_TEMP "internal-beta-windows"
           New-Item -ItemType Directory -Force -Path `
             (Join-Path $destination "artifacts"), `
+            (Join-Path $destination "evidence"), `
             (Join-Path $destination "runtime-seed") | Out-Null
           $names = @(
             "Aera-Internal-Beta-$env:VERSION-windows-x64-setup.exe",
@@ -681,6 +719,9 @@ jobs:
           $manifests = @(Get-ChildItem resources/agentera-runtime-seed -File -Filter "*.manifest.json")
           if ($manifests.Count -ne 1) { throw "Expected one Runtime Seed manifest" }
           Copy-Item $manifests[0].FullName -Destination (Join-Path $destination "runtime-seed")
+          Copy-Item `
+            (Join-Path $env:RUNNER_TEMP "packaged-startup-windows.json") `
+            -Destination (Join-Path $destination "evidence")
 
       - name: Exercise Windows install/start/update/rollback smoke
         shell: pwsh
@@ -791,6 +832,11 @@ jobs:
           cp "${mac_manifests[0]}" "${windows_manifests[0]}" candidate/runtime-seed/
           test -f "$RUNNER_TEMP/internal-beta-macos/evidence/macos-evidence.json"
           cp "$RUNNER_TEMP/internal-beta-macos/evidence/macos-evidence.json" \
+            candidate/evidence/
+          test -f "$RUNNER_TEMP/internal-beta-macos/evidence/packaged-startup-macos.json"
+          test -f "$RUNNER_TEMP/internal-beta-windows/evidence/packaged-startup-windows.json"
+          cp "$RUNNER_TEMP/internal-beta-macos/evidence/packaged-startup-macos.json" \
+            "$RUNNER_TEMP/internal-beta-windows/evidence/packaged-startup-windows.json" \
             candidate/evidence/
           cp build/agentera-runtime-seed.lock.json \
             candidate/evidence/agentera-runtime-seed.lock.json

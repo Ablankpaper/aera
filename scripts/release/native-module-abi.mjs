@@ -49,6 +49,19 @@ function abiMarkers(bytes, imageRanges) {
   return matches;
 }
 
+function napiMarkers(bytes, imageRanges) {
+  const matches = new Set();
+  for (const { offset, end } of imageRanges) {
+    for (const match of bytes
+      .subarray(offset, end)
+      .toString("latin1")
+      .matchAll(/napi_register_module_v(\d+)/gu)) {
+      matches.add(match[1]);
+    }
+  }
+  return matches;
+}
+
 export function parseNativeModuleAbi(
   bytes,
   label = "binary",
@@ -511,9 +524,9 @@ function parseThinMachO(bytes, offset, size, format, label) {
     label,
     "file type",
   );
-  if (fileType !== 8) {
+  if (fileType !== 6 && fileType !== 8) {
     throw new Error(
-      `native module ${label} Mach-O bundle file type is required`,
+      `native module ${label} Mach-O bundle or dynamic library file type is required`,
     );
   }
   const commandCount = readMachOUInt32(
@@ -705,7 +718,7 @@ function parseThinMachO(bytes, offset, size, format, label) {
       );
     }
   }
-  return { architecture, cpuType, imageRanges };
+  return { architecture, cpuType, fileType, imageRanges };
 }
 
 function parseMachOImage(bytes, magic, label) {
@@ -715,6 +728,7 @@ function parseMachOImage(bytes, magic, label) {
     const parsed = parseThinMachO(bytes, 0, bytes.length, format, label);
     return {
       architectures: [parsed.architecture],
+      fileTypes: [parsed.fileType],
       imageRanges: parsed.imageRanges,
     };
   }
@@ -765,6 +779,7 @@ function parseMachOImage(bytes, magic, label) {
   }
 
   const architectures = [];
+  const fileTypes = [];
   const imageRanges = [];
   for (const slice of slices) {
     const sliceMagic = readUInt32(bytes, slice.offset, "be", label);
@@ -788,10 +803,12 @@ function parseMachOImage(bytes, magic, label) {
     }
     const architecture = architectureForCpuType(slice.cpuType, label);
     if (!architectures.includes(architecture)) architectures.push(architecture);
+    if (!fileTypes.includes(parsed.fileType)) fileTypes.push(parsed.fileType);
     imageRanges.push(...parsed.imageRanges);
   }
   return {
     architectures,
+    fileTypes,
     imageRanges,
   };
 }
@@ -1026,32 +1043,62 @@ export function inspectNativeModuleBytes(
     );
   }
   const abi = parseNativeModuleAbi(bytes, label, parsed.imageRanges);
-  if (abi === null) {
-    throw new Error(`native module ${label} ABI marker is missing`);
-  }
-  if (abi !== expectedElectronAbi) {
+  const napiVersions = napiMarkers(bytes, parsed.imageRanges);
+  if (abi !== null && napiVersions.size > 0) {
     throw new Error(
-      `native module ${label} ABI ${abi} differs from Electron ABI ${expectedElectronAbi}`,
+      `native module ${label} has mixed Node-ABI and N-API registration markers`,
+    );
+  }
+  if (napiVersions.size > 1) {
+    throw new Error(
+      `native module ${label} has multiple N-API registration markers`,
+    );
+  }
+  const architectures = parsed.architectures;
+  if (abi !== null) {
+    if (
+      parsed.format === "mach-o" &&
+      parsed.fileTypes?.some((value) => value !== 8)
+    ) {
+      throw new Error(
+        `native module ${label} Mach-O bundle file type is required for Node-ABI modules`,
+      );
+    }
+    if (abi !== expectedElectronAbi) {
+      throw new Error(
+        `native module ${label} ABI ${abi} differs from Electron ABI ${expectedElectronAbi}`,
+      );
+    }
+    if (architectures.length !== 1) {
+      throw new Error(
+        `native module ${label} has mixed architectures ${architectures.join(",")}`,
+      );
+    }
+  } else if (napiVersions.size === 0) {
+    throw new Error(`native module ${label} ABI marker is missing`);
+  } else if (![...napiVersions].every((value) => value === "1")) {
+    throw new Error(
+      `native module ${label} N-API registration version is unsupported`,
+    );
+  }
+  if (!architectures.includes(expectedArchitecture)) {
+    if (architectures.length === 1) {
+      throw new Error(
+        `native module ${label} architecture ${architectures[0]} differs from target ${expectedArchitecture}`,
+      );
+    }
+    throw new Error(
+      `native module ${label} architectures ${architectures.join(",")} do not include target ${expectedArchitecture}`,
     );
   }
 
-  const architectures = parsed.architectures;
-  if (architectures.length !== 1) {
-    throw new Error(
-      `native module ${label} has mixed architectures ${architectures.join(",")}`,
-    );
-  }
-  const architecture = architectures[0];
-  if (architecture !== expectedArchitecture) {
-    throw new Error(
-      `native module ${label} architecture ${architecture} differs from target ${expectedArchitecture}`,
-    );
-  }
+  const registrationAbi = abi ?? `napi-v${[...napiVersions][0]}`;
 
   return {
     sha256: createHash("sha256").update(bytes).digest("hex"),
-    abi,
-    architecture,
+    abi: registrationAbi,
+    architecture: expectedArchitecture,
+    architectures,
     format: parsed.format,
   };
 }

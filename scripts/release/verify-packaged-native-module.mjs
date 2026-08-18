@@ -203,13 +203,17 @@ export async function verifyPackagedNativeModule(context, options = {}) {
       expectedArchitecture: targetArchitecture,
       expectedPlatform: platform,
     });
-    inventory.push({
+    const inventoryEntry = {
       path: entry.relativePath,
       sha256: inspected.sha256,
       abi: inspected.abi,
       architecture: inspected.architecture,
       format: inspected.format,
-    });
+    };
+    if (inspected.architectures.length > 1) {
+      inventoryEntry.architectures = inspected.architectures;
+    }
+    inventory.push(inventoryEntry);
   }
 
   const finalScan = await scanUnpackedNativeModules(unpackedRoot, scanOptions);
