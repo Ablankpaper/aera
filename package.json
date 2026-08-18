@@ -36,6 +36,7 @@
     "test:e2e:chat-stream-integrity-boundaries": "npm run build && playwright test tests/e2e/chat-stream-integrity-boundaries.e2e.ts",
     "test:e2e:image-generation": "npm run build && playwright test tests/e2e/image-generation-config.e2e.ts",
     "test:coverage": "vitest run --coverage",
+    "test:windows-model-recovery": "node scripts/release/windows-model-recovery-harness.test.mjs",
     "test:sandbox": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/hermes-sandbox.ps1 test",
     "test:live-visual": "node scripts/drive-live-regression-suite.js",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",

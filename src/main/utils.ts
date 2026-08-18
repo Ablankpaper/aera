@@ -1,14 +1,23 @@
 import { execFileSync } from "child_process";
 import { join, dirname, basename } from "path";
 import {
+  chmodSync,
+  closeSync,
   existsSync,
+  fsyncSync,
   mkdirSync,
+  openSync,
   readFileSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "fs";
 import { HERMES_HOME } from "./installer";
+import {
+  assertManagedWritePath,
+  currentManagedModelProfileRoot,
+} from "./model-configuration-write-authority";
 
 const PROFILE_NAME_RE = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
 export const PROFILE_NAME_ERROR =
@@ -53,7 +62,11 @@ export function normalizeProfileName(profile?: unknown): string | undefined {
  */
 export function profileHome(profile?: unknown): string {
   const normalized = normalizeProfileName(profile);
-  return normalized ? join(HERMES_HOME, "profiles", normalized) : HERMES_HOME;
+  if (!normalized) return HERMES_HOME;
+  return (
+    currentManagedModelProfileRoot(normalized) ??
+    join(HERMES_HOME, "profiles", normalized)
+  );
 }
 
 /**
@@ -210,31 +223,143 @@ export function escapeRegex(str: string): string {
  * Write a file, creating parent directories if they don't exist.
  * Prevents ENOENT crashes when ~/.hermes has been deleted or doesn't exist yet.
  */
-export function safeWriteFile(
-  filePath: string,
-  content: string,
-  mode?: number,
-): void {
-  const dir = dirname(filePath);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+/**
+ * The replace boundary used by safeWriteFile.  Keeping this injectable makes
+ * the ordering observable in tests and gives platform-specific callers one
+ * narrow place to provide a different same-volume replacement primitive.
+ *
+ * `writeTemporary` must return only after its file descriptor is closed and
+ * the temporary bytes have been flushed.  `flushParent` is intentionally a
+ * no-op on Windows, where Node has no portable directory-fsync operation;
+ * restart recovery is then backed by the durable model journal.
+ */
+export interface SafeWriteDurableReplaceAdapter {
+  writeTemporary(path: string, bytes: Buffer, mode: number): string;
+  replace(temporaryPath: string, targetPath: string): void;
+  flushTarget(targetPath: string): void;
+  flushParent(parentPath: string): void;
+}
 
-  const tempPath = join(
-    dir,
-    `.${basename(filePath)}.${process.pid}.${Date.now()}.${Math.random()
+function safeWriteTemporaryPath(path: string): string {
+  return join(
+    dirname(path),
+    `.${basename(path)}.${process.pid}.${Date.now()}.${Math.random()
       .toString(16)
       .slice(2)}.tmp`,
   );
+}
 
-  let tempWritten = false;
+function writeSafeTemporary(
+  path: string,
+  bytes: Buffer,
+  mode: number,
+): string {
+  mkdirSync(dirname(path), { recursive: true });
+  const temporaryPath = safeWriteTemporaryPath(path);
+  const descriptor = openSync(temporaryPath, "wx", mode);
+  let closed = false;
   try {
-    writeFileSync(tempPath, content, {
-      encoding: "utf-8",
-      ...(mode === undefined ? {} : { mode }),
-    });
-    tempWritten = true;
-    renameSync(tempPath, filePath);
+    writeFileSync(descriptor, bytes);
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    closed = true;
+    return temporaryPath;
+  } catch (error) {
+    if (!closed) {
+      try {
+        closeSync(descriptor);
+      } catch {
+        // Preserve the original write/fsync error.
+      }
+    }
+    try {
+      unlinkSync(temporaryPath);
+    } catch {
+      // Preserve the original write/fsync error.
+    }
+    throw error;
+  }
+}
+
+function replaceSafeTemporary(
+  temporaryPath: string,
+  targetPath: string,
+): void {
+  try {
+    renameSync(temporaryPath, targetPath);
+  } catch (error) {
+    // Windows can reject rename when the destination exists.  Keep the
+    // fallback narrowly scoped to this resolved target; the caller still
+    // flushes and verifies the replacement afterwards.
+    if (process.platform !== "win32" || !existsSync(targetPath)) throw error;
+    unlinkSync(targetPath);
+    renameSync(temporaryPath, targetPath);
+  }
+}
+
+export function durableFileFlushOpenFlag(
+  platform: NodeJS.Platform = process.platform,
+): "r" | "r+" {
+  // Windows FlushFileBuffers requires GENERIC_WRITE. Node's read-only "r"
+  // handle lacks that access and fsyncSync fails with EPERM.
+  return platform === "win32" ? "r+" : "r";
+}
+
+export function flushDurableFileTarget(path: string): void {
+  const descriptor = openSync(path, durableFileFlushOpenFlag());
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function flushSafeParent(path: string): void {
+  if (process.platform === "win32") return;
+  const descriptor = openSync(path, "r");
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+export const defaultSafeWriteDurableReplaceAdapter: SafeWriteDurableReplaceAdapter =
+  {
+    writeTemporary: writeSafeTemporary,
+    replace: replaceSafeTemporary,
+    flushTarget: flushDurableFileTarget,
+    flushParent: flushSafeParent,
+  };
+
+export function safeWriteFile(
+  filePath: string,
+  content: string | Uint8Array,
+  mode?: number,
+  adapter: SafeWriteDurableReplaceAdapter =
+    defaultSafeWriteDurableReplaceAdapter,
+): void {
+  assertManagedWritePath(filePath);
+  const dir = dirname(filePath);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+  // Preserve the old default permission behavior for callers that omit mode:
+  // a new file follows the process umask, while an existing file keeps its
+  // current mode across the replacement. Explicit modes remain authoritative.
+  const effectiveMode =
+    mode ??
+    (existsSync(filePath) ? statSync(filePath).mode & 0o777 : 0o666);
+  const bytes = Buffer.from(content);
+  let tempPath: string | null = null;
+  try {
+    tempPath = adapter.writeTemporary(filePath, bytes, effectiveMode);
+    adapter.replace(tempPath, filePath);
+    tempPath = null;
+    if (mode !== undefined) chmodSync(filePath, mode);
+    adapter.flushTarget(filePath);
+    adapter.flushParent(dir);
   } catch (err) {
-    if (tempWritten) {
+    if (tempPath !== null && existsSync(tempPath)) {
       try {
         unlinkSync(tempPath);
       } catch {

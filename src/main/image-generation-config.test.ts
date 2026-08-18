@@ -44,6 +44,11 @@ vi.mock("./utils", async () => {
 
 import { createImageGenerationConfigService } from "./image-generation-config";
 import { invalidateSecretsCache } from "./config";
+import {
+  ModelConfigurationWriteAuthority,
+  registerManagedModelFileRoots,
+} from "./model-configuration-write-authority";
+import type { ManagedModelMutationPort } from "./model-configuration-mutation-port";
 
 const PROFILE = "work";
 const PROFILE_HOME = join(TEST_HOME, "profiles", PROFILE);
@@ -60,12 +65,70 @@ const draft = {
   aspectRatio: "square" as const,
 };
 
+const testWriteAuthority = new ModelConfigurationWriteAuthority();
+const testModelMutationPort: ManagedModelMutationPort = {
+  async mutate(input) {
+    const beforeConfig = existsSync(CONFIG_FILE)
+      ? readFileSync(CONFIG_FILE)
+      : null;
+    const beforeEnv = existsSync(ENV_FILE) ? readFileSync(ENV_FILE) : null;
+    try {
+      return await testWriteAuthority.run(
+        {
+          globalCatalog: input.globalCatalog,
+          profileIds: input.profileIds,
+        },
+        async (permit) => {
+          const plan = await input.prepare();
+          const value = await plan.write(permit);
+          return {
+            status: "executed" as const,
+            value,
+            catalog: {
+              revision: "0".repeat(64),
+              targetProfileId: input.profileIds[0],
+              routes: [],
+            },
+          };
+        },
+      );
+    } catch {
+      if (beforeConfig === null) rmSync(CONFIG_FILE, { force: true });
+      else writeFileSync(CONFIG_FILE, beforeConfig);
+      if (beforeEnv === null) rmSync(ENV_FILE, { force: true });
+      else writeFileSync(ENV_FILE, beforeEnv);
+      return {
+        status: "rejected" as const,
+        stage: input.stage,
+        code: `model_save_${input.stage}_failed` as const,
+        rollback: "restored" as const,
+      };
+    }
+  },
+};
+
+function managedService(
+  dependencies: Omit<
+    NonNullable<Parameters<typeof createImageGenerationConfigService>[0]>,
+    "modelMutationPort"
+  > = {},
+): ReturnType<typeof createImageGenerationConfigService> {
+  return createImageGenerationConfigService({
+    ...dependencies,
+    modelMutationPort: testModelMutationPort,
+  });
+}
+
 beforeEach(() => {
   WRITE_FAILURES.config = false;
   invalidateSecretsCache();
   rmSync(TEST_HOME, { recursive: true, force: true });
   mkdirSync(PROFILE_HOME, { recursive: true });
   writeFileSync(CONFIG_FILE, "model:\n  default: chat-model\n", "utf-8");
+  registerManagedModelFileRoots({
+    globalRoot: TEST_HOME,
+    profiles: { [PROFILE]: PROFILE_HOME },
+  });
 });
 
 afterEach(() => {
@@ -75,6 +138,33 @@ afterEach(() => {
 });
 
 describe("ImageGenerationConfigService", () => {
+  it("leaves config and credential bytes unchanged when managed persistence is refused", async () => {
+    const beforeConfig = readFileSync(CONFIG_FILE);
+    const beforeEnv = existsSync(ENV_FILE) ? readFileSync(ENV_FILE) : null;
+    const mutationPort = {
+      mutate: vi.fn(async () => ({
+        status: "rejected" as const,
+        stage: "recovery" as const,
+        code: "model_configuration_recovery_required" as const,
+        rollback: "recovery_required" as const,
+        diagnosticId: "0123456789ab",
+      })),
+    };
+    const service = createImageGenerationConfigService({
+      modelMutationPort: mutationPort,
+    });
+
+    await expect(Promise.resolve(service.save(PROFILE, draft))).rejects.toThrow(
+      "model_configuration_recovery_required",
+    );
+
+    expect(mutationPort.mutate).toHaveBeenCalledTimes(1);
+    expect(readFileSync(CONFIG_FILE)).toEqual(beforeConfig);
+    expect(existsSync(ENV_FILE) ? readFileSync(ENV_FILE) : null).toEqual(
+      beforeEnv,
+    );
+  });
+
   it("defaults image generation on without exposing a credential", () => {
     const service = createImageGenerationConfigService();
 
@@ -89,11 +179,11 @@ describe("ImageGenerationConfigService", () => {
     expect(JSON.stringify(status)).not.toContain("apiKey");
   });
 
-  it("saves a secret-free Profile status without making a network request", () => {
+  it("saves a secret-free Profile status without making a network request", async () => {
     const fetcher = vi.fn<typeof fetch>();
-    const service = createImageGenerationConfigService({ fetch: fetcher });
+    const service = managedService({ fetch: fetcher });
 
-    const result = service.save(PROFILE, draft);
+    const result = await service.save(PROFILE, draft);
 
     expect(result).toMatchObject({
       success: true,
@@ -116,11 +206,11 @@ describe("ImageGenerationConfigService", () => {
   });
 
   // @lat: [[image-generation#Secret-free configuration]]
-  it("preserves the existing image credential when its replacement is blank", () => {
-    const service = createImageGenerationConfigService();
-    expect(service.save(PROFILE, draft).success).toBe(true);
+  it("preserves the existing image credential when its replacement is blank", async () => {
+    const service = managedService();
+    expect((await service.save(PROFILE, draft)).success).toBe(true);
 
-    const result = service.save(PROFILE, {
+    const result = await service.save(PROFILE, {
       ...draft,
       apiKey: "   ",
       model: "gpt-image-2",
@@ -135,8 +225,8 @@ describe("ImageGenerationConfigService", () => {
 
   it("does not send or preserve a saved credential for a different relay", async () => {
     const fetcher = vi.fn<typeof fetch>();
-    const service = createImageGenerationConfigService({ fetch: fetcher });
-    expect(service.save(PROFILE, draft).success).toBe(true);
+    const service = managedService({ fetch: fetcher });
+    expect((await service.save(PROFILE, draft)).success).toBe(true);
     const beforeConfig = readFileSync(CONFIG_FILE, "utf-8");
     const beforeEnv = readFileSync(ENV_FILE, "utf-8");
     const changedRelay = {
@@ -146,7 +236,7 @@ describe("ImageGenerationConfigService", () => {
     };
 
     const discovery = await service.discover(PROFILE, changedRelay);
-    const saved = service.save(PROFILE, changedRelay);
+    const saved = await service.save(PROFILE, changedRelay);
 
     expect(discovery).toEqual({
       success: false,
@@ -175,7 +265,7 @@ describe("ImageGenerationConfigService", () => {
     expect(JSON.stringify(status)).not.toContain("secret");
   });
 
-  it("does not write a typed credential into .env for a command-backed Profile", () => {
+  it("does not write a typed credential into .env for a command-backed Profile", async () => {
     writeFileSync(
       CONFIG_FILE,
       [
@@ -189,9 +279,9 @@ describe("ImageGenerationConfigService", () => {
       "utf-8",
     );
     const beforeConfig = readFileSync(CONFIG_FILE, "utf-8");
-    const service = createImageGenerationConfigService();
+    const service = managedService();
 
-    const result = service.save(PROFILE, draft);
+    const result = await service.save(PROFILE, draft);
 
     expect(result).toEqual({
       success: false,
@@ -201,11 +291,11 @@ describe("ImageGenerationConfigService", () => {
     expect(existsSync(ENV_FILE)).toBe(false);
   });
 
-  it("classifies invalid save input without changing the Profile", () => {
+  it("classifies invalid save input without changing the Profile", async () => {
     const beforeConfig = readFileSync(CONFIG_FILE, "utf-8");
-    const service = createImageGenerationConfigService();
+    const service = managedService();
 
-    const result = service.save(PROFILE, {
+    const result = await service.save(PROFILE, {
       ...draft,
       baseUrl: "relay.example/v1",
     });
@@ -218,20 +308,20 @@ describe("ImageGenerationConfigService", () => {
     expect(existsSync(ENV_FILE)).toBe(false);
   });
 
-  it("preserves the prior complete configuration when YAML persistence fails", () => {
-    const service = createImageGenerationConfigService();
-    expect(service.save(PROFILE, draft).success).toBe(true);
+  it("preserves the prior complete configuration when YAML persistence fails", async () => {
+    const service = managedService();
+    expect((await service.save(PROFILE, draft)).success).toBe(true);
     const beforeConfig = readFileSync(CONFIG_FILE, "utf-8");
     const beforeEnv = readFileSync(ENV_FILE, "utf-8");
     WRITE_FAILURES.config = true;
 
-    const result = service.save(PROFILE, {
-      ...draft,
-      apiKey: "replacement-secret",
-      model: "gpt-image-2",
-    });
-
-    expect(result).toEqual({ success: false, errorCode: "write_failed" });
+    await expect(
+      service.save(PROFILE, {
+        ...draft,
+        apiKey: "replacement-secret",
+        model: "gpt-image-2",
+      }),
+    ).rejects.toThrow("model_save_credential_failed");
     expect(readFileSync(CONFIG_FILE, "utf-8")).toBe(beforeConfig);
     expect(readFileSync(ENV_FILE, "utf-8")).toBe(beforeEnv);
   });

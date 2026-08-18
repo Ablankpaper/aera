@@ -141,6 +141,12 @@ export type ModelConfigurationMutationResult =
         | `model_save_${ModelConfigurationStage}_failed`
         | ModelConfigurationStartupFailureCode;
       rollback: "not_needed" | "restored" | "recovery_required";
+      /**
+       * The managed bytes and journal reached a verified terminal rollback,
+       * but one or more in-memory consumers could not be notified to discard
+       * their stale projection. This warning never reopens recovery lock state.
+       */
+      rollbackWarning?: "model_rollback_refresh_failed";
       /** Opaque correlation id for startup/unavailable-runtime failures. */
       diagnosticId?: string;
       /**

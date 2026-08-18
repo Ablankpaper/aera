@@ -48,7 +48,10 @@ vi.mock("./config", () => ({
     generated: true,
     key: "generated-internal-token",
   })),
-  getApiServerKey: vi.fn(() => null),
+  // Direct startGatewayDetailed() tests model a credential that was already
+  // prepared by the managed bootstrap transaction. The launch path must not
+  // create or persist credentials itself.
+  getApiServerKey: vi.fn(() => "generated-internal-token"),
   getConnectionConfig: vi.fn(() => ({ mode: "local" })),
   getConfigValue: vi.fn(() => null),
   getModelConfig: vi.fn(() => ({ provider: "auto", model: "", baseUrl: "" })),

@@ -34,6 +34,170 @@ afterEach(() => {
 });
 
 describe("model-configuration runtime", () => {
+  // @lat: [[beta27-reliability-plan#Recoverable model configuration#Staged Profile activation protects live state]]
+  it("recovers staged Profile activations before opening the model journal", async () => {
+    const root = mkdtempSync(join(tmpdir(), "aera-model-runtime-staged-"));
+    roots.push(root);
+    const hermesHome = join(root, "hermes");
+    const userData = join(root, "user-data");
+    mkdirSync(join(hermesHome, "profiles"), { recursive: true });
+    process.env.HERMES_HOME = hermesHome;
+    vi.resetModules();
+    vi.doUnmock("./installer");
+    const actualInstaller =
+      await vi.importActual<typeof import("./installer")>("./installer");
+    vi.doMock("./installer", () => actualInstaller);
+    const [{ AgenteraProfileBindingStore }, runtime, modelDatabase] =
+      await Promise.all([
+        import("./agentera-profile-binding"),
+        import("./model-configuration-runtime"),
+        import("./model-configuration-database"),
+      ]);
+    const bindings = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage: {
+        isEncryptionAvailable: () => true,
+        encryptString: (value: string) => Buffer.from(value, "utf8"),
+        decryptString: (value: Buffer) => value.toString("utf8"),
+      },
+    });
+    bindings.bindExistingProfile(hermesHome, OWNER);
+    const events: string[] = [];
+
+    const handle = await runtime.prepareModelConfigurationRuntime({
+      userDataPath: userData,
+      getOwner: () => OWNER,
+      profileBindings: bindings,
+      getConnectionConfig: () => ({ mode: "local" }),
+      recoverStagedProfileActivations: async ({ profilesRoot }) => {
+        expect(profilesRoot).toBe(join(hermesHome, "profiles"));
+        events.push("staged-recovery");
+      },
+      openDatabase: (path) => {
+        events.push("database-open");
+        return modelDatabase.openModelConfigurationDatabase(path, {
+          databaseFactory: (databasePath) =>
+            new DatabaseSync(
+              databasePath,
+            ) as unknown as ModelConfigurationSqliteDatabase,
+        });
+      },
+    });
+
+    try {
+      expect(handle.startupFailure).toBeNull();
+      expect(events.slice(0, 2)).toEqual(["staged-recovery", "database-open"]);
+    } finally {
+      handle.close();
+    }
+  });
+
+  it("fails model mutations closed when staged Profile recovery is ambiguous", async () => {
+    const root = mkdtempSync(join(tmpdir(), "aera-model-runtime-staged-"));
+    roots.push(root);
+    const hermesHome = join(root, "hermes");
+    const userData = join(root, "user-data");
+    mkdirSync(join(hermesHome, "profiles"), { recursive: true });
+    process.env.HERMES_HOME = hermesHome;
+    vi.resetModules();
+    vi.doUnmock("./installer");
+    const actualInstaller =
+      await vi.importActual<typeof import("./installer")>("./installer");
+    vi.doMock("./installer", () => actualInstaller);
+    const runtime = await import("./model-configuration-runtime");
+    const openDatabase = vi.fn();
+    const stagedFailure = new Error("ambiguous staged activation");
+
+    const handle = await runtime.prepareModelConfigurationRuntime({
+      userDataPath: userData,
+      getOwner: () => OWNER,
+      profileBindings: { verifyProfileBinding: vi.fn() },
+      getConnectionConfig: () => ({ mode: "local" }),
+      recoverStagedProfileActivations: async () => {
+        throw stagedFailure;
+      },
+      openDatabase,
+    });
+
+    expect(handle.database).toBeNull();
+    expect(handle.coordinator).toBeNull();
+    expect(handle.startupFailure).toMatchObject({
+      code: "model_configuration_recovery_required",
+    });
+    expect(handle.recoveryError).toBe(stagedFailure);
+    expect(openDatabase).not.toHaveBeenCalled();
+  });
+
+  // @lat: [[beta27-reliability-plan#Recoverable model configuration#Explicit model catalog initialization]]
+  it("initializes a missing model catalog once before exposing the coordinator", async () => {
+    const root = mkdtempSync(join(tmpdir(), "aera-model-runtime-initialize-"));
+    roots.push(root);
+    const hermesHome = join(root, "hermes");
+    const userData = join(root, "user-data");
+    mkdirSync(hermesHome, { recursive: true });
+    process.env.HERMES_HOME = hermesHome;
+    vi.resetModules();
+    vi.doUnmock("./installer");
+    const actualInstaller =
+      await vi.importActual<typeof import("./installer")>("./installer");
+    vi.doMock("./installer", () => actualInstaller);
+    const [{ AgenteraProfileBindingStore }, runtime, models, modelDatabase] =
+      await Promise.all([
+        import("./agentera-profile-binding"),
+        import("./model-configuration-runtime"),
+        import("./models"),
+        import("./model-configuration-database"),
+      ]);
+    const bindings = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage: {
+        isEncryptionAvailable: () => true,
+        encryptString: (value: string) => Buffer.from(value, "utf8"),
+        decryptString: (value: Buffer) => value.toString("utf8"),
+      },
+    });
+    bindings.bindExistingProfile(hermesHome, OWNER);
+
+    const handle = await runtime.prepareModelConfigurationRuntime({
+      userDataPath: userData,
+      getOwner: () => OWNER,
+      profileBindings: bindings,
+      getConnectionConfig: () => ({ mode: "local" }),
+      openDatabase: (path) =>
+        modelDatabase.openModelConfigurationDatabase(path, {
+          databaseFactory: (databasePath) =>
+            new DatabaseSync(
+              databasePath,
+            ) as unknown as ModelConfigurationSqliteDatabase,
+        }),
+    });
+
+    try {
+      expect(handle.startupFailure).toBeNull();
+      expect(handle.coordinator).not.toBeNull();
+      expect(models.listModels().length).toBeGreaterThan(0);
+      const operationCount = (): number =>
+        Number(
+          (
+            handle
+              .database!.sqlite.prepare(
+                "SELECT COUNT(*) AS count FROM desktop_model_configuration_operations",
+              )
+              .get() as { count: number | bigint }
+          ).count,
+        );
+      expect(operationCount()).toBe(1);
+
+      await models.initializeModelCatalog(
+        handle.coordinator!,
+        models.planModelCatalogInitialization(["default"]),
+      );
+      expect(operationCount()).toBe(1);
+    } finally {
+      handle.close();
+    }
+  });
+
   it("does not treat a different named provider at the same endpoint as active", async () => {
     const { isActiveProviderRoute } =
       await import("./model-configuration-runtime");
@@ -73,20 +237,36 @@ describe("model-configuration runtime", () => {
       listResolvedAgentRuntimeModelRoutes: vi.fn(() => []),
     }));
 
-    const [{ AgenteraProfileBindingStore }, runtime, config, modelDatabase] =
-      await Promise.all([
-        import("./agentera-profile-binding"),
-        import("./model-configuration-runtime"),
-        import("./config"),
-        import("./model-configuration-database"),
-      ]);
-    config.setModelConfig(
-      "custom:old",
-      "old-model",
-      "https://old.invalid/v1",
-      "default",
-      null,
-      "chat_completions",
+    const [
+      { AgenteraProfileBindingStore },
+      runtime,
+      config,
+      modelDatabase,
+      managed,
+      authority,
+    ] = await Promise.all([
+      import("./agentera-profile-binding"),
+      import("./model-configuration-runtime"),
+      import("./config"),
+      import("./model-configuration-database"),
+      import("./model-configuration-managed-files"),
+      import("./model-configuration-write-authority"),
+    ]);
+    managed.registerManagedModelFileRoots({
+      globalRoot: hermesHome,
+      profiles: { default: hermesHome },
+    });
+    await new authority.ModelConfigurationWriteAuthority().run(
+      { globalCatalog: false, profileIds: ["default"] },
+      () =>
+        config.setModelConfig(
+          "custom:old",
+          "old-model",
+          "https://old.invalid/v1",
+          "default",
+          null,
+          "chat_completions",
+        ),
     );
     const beforeConfig = readFileSync(join(hermesHome, "config.yaml"), "utf8");
     const bindings = new AgenteraProfileBindingStore({
@@ -98,11 +278,19 @@ describe("model-configuration runtime", () => {
       },
     });
     bindings.bindExistingProfile(hermesHome, OWNER);
+    const notifyModelLibraryChanged = vi.fn();
+    const notifyCustomProvidersChanged = vi.fn();
+    const notifyConnectionConfigChanged = vi.fn();
+    const notifyRuntimeSnapshotChanged = vi.fn();
     const handle = await runtime.prepareModelConfigurationRuntime({
       userDataPath: userData,
       getOwner: () => OWNER,
       profileBindings: bindings,
       getConnectionConfig: () => ({ mode: "local" }),
+      notifyModelLibraryChanged,
+      notifyCustomProvidersChanged,
+      notifyConnectionConfigChanged,
+      notifyRuntimeSnapshotChanged,
       openDatabase: (path) =>
         modelDatabase.openModelConfigurationDatabase(path, {
           databaseFactory: (databasePath) =>
@@ -141,6 +329,17 @@ describe("model-configuration runtime", () => {
         model: "old-model",
       });
       expect(handle.operationStore!.listIncomplete()).toEqual([]);
+      for (const listener of [
+        notifyModelLibraryChanged,
+        notifyCustomProvidersChanged,
+        notifyConnectionConfigChanged,
+        notifyRuntimeSnapshotChanged,
+      ]) {
+        expect(listener).toHaveBeenCalledOnce();
+        expect(listener).toHaveBeenCalledWith(
+          expect.stringMatching(/^[0-9a-f]{64}$/),
+        );
+      }
     } finally {
       handle.close();
     }
@@ -226,8 +425,44 @@ describe("model-configuration runtime", () => {
         ],
         activeModel: "fixture-model",
       };
+      const [providers, models, nativeProviders] = await Promise.all([
+        import("./providers-store"),
+        import("./models"),
+        import("./native-custom-provider"),
+      ]);
+      const legacyWriters = [
+        vi.spyOn(config, "setEnvValue").mockImplementation(() => {
+          throw new Error("legacy setEnvValue called");
+        }),
+        vi.spyOn(config, "setModelConfig").mockImplementation(() => {
+          throw new Error("legacy setModelConfig called");
+        }),
+        vi.spyOn(providers, "upsertCustomProvider").mockImplementation(() => {
+          throw new Error("legacy upsertCustomProvider called");
+        }),
+        vi
+          .spyOn(models, "migrateModelsForCustomProvider")
+          .mockImplementation(() => {
+            throw new Error("legacy migrateModelsForCustomProvider called");
+          }),
+        vi.spyOn(models, "addModel").mockImplementation(() => {
+          throw new Error("legacy addModel called");
+        }),
+        vi.spyOn(models, "updateModel").mockImplementation(() => {
+          throw new Error("legacy updateModel called");
+        }),
+        vi
+          .spyOn(nativeProviders, "upsertNativeCustomProvider")
+          .mockImplementation(() => {
+            throw new Error("legacy upsertNativeCustomProvider called");
+          }),
+      ];
       const result = await handle.coordinator!.mutate(request);
       expect(result).toMatchObject({ status: "committed" });
+      for (const writer of legacyWriters) {
+        expect(writer).not.toHaveBeenCalled();
+        writer.mockRestore();
+      }
       expect(JSON.stringify(result)).not.toContain(SECRET);
       expect(config.getModelConfig("default")).toEqual({
         provider: "custom:fixture",
@@ -275,24 +510,31 @@ describe("model-configuration runtime", () => {
       const originalProvider = listCustomProviders("default")[0];
       expect(originalProvider).toMatchObject({ name: "Fixture" });
 
-      const duplicateProvider = listCustomProviders("default").length
-        ? (await import("./providers-store")).upsertCustomProvider("default", {
+      const { ModelConfigurationWriteAuthority } =
+        await import("./model-configuration-write-authority");
+      const { addModel, readModelsRaw } = await import("./models");
+      let duplicateProvider: ReturnType<typeof providers.upsertCustomProvider> =
+        null;
+      await new ModelConfigurationWriteAuthority().run(
+        { globalCatalog: true, profileIds: ["default"] },
+        () => {
+          duplicateProvider = providers.upsertCustomProvider("default", {
             name: "123456",
             baseUrl: request.baseUrl,
-          })
-        : null;
-      expect(duplicateProvider).toBeTruthy();
-      const { addModel, readModelsRaw } = await import("./models");
-      addModel(
-        "Fixture Model",
-        "custom",
-        "fixture-model",
-        request.baseUrl,
-        undefined,
-        "123456",
-        request.apiMode,
-        duplicateProvider!.id,
+          });
+          addModel(
+            "Fixture Model",
+            "custom",
+            "fixture-model",
+            request.baseUrl,
+            undefined,
+            "123456",
+            request.apiMode,
+            duplicateProvider!.id,
+          );
+        },
       );
+      expect(duplicateProvider).toBeTruthy();
       const deleteCatalog = handle.catalog!.snapshot("default");
       const deleteResult = await handle.coordinator!.mutate({
         intent: "delete",
@@ -305,7 +547,9 @@ describe("model-configuration runtime", () => {
       expect(listCustomProviders("default")).toEqual([
         expect.objectContaining({ id: originalProvider.id, name: "Fixture" }),
       ]);
-      expect(readModelsRaw()).toHaveLength(1);
+      expect(
+        readModelsRaw().filter((row) => row.providerId === originalProvider.id),
+      ).toHaveLength(1);
       expect(config.getModelConfig("default")).toMatchObject({
         provider: "custom:fixture",
       });
@@ -336,7 +580,11 @@ describe("model-configuration runtime", () => {
           baseUrl: "https://renamed.invalid/v1",
         }),
       ]);
-      expect(readModels()).toEqual([
+      expect(
+        readModels().filter(
+          (model) => model.providerId === originalProvider.id,
+        ),
+      ).toEqual([
         expect.objectContaining({
           providerId: originalProvider.id,
           providerLabel: "123456",

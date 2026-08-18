@@ -119,6 +119,8 @@ import {
   isRemoteOnlyMode,
   sendMessage,
   transcribeAudio,
+  configureGatewayManagedConfiguration,
+  prepareGatewayForLaunch,
   startGateway,
   startGatewayWithRecovery,
   startGatewayDetailed,
@@ -132,7 +134,6 @@ import {
   resolvePendingClarify,
 } from "../hermes";
 import type { ChatCallbacks } from "../hermes";
-import { ensureProfilePortAvailable } from "../gateway-ports";
 import {
   freshDashboardWebSocketUrl,
   getDashboardStatus,
@@ -174,12 +175,15 @@ import {
 import { startOfficeStack } from "../office-start";
 import {
   readEnv,
-  setEnvValue,
+  planEnvValueWrite,
+  planConfigValueWrite,
+  planModelConfigWrite,
+  planLocalApiServerKeyWrite,
+  planPlatformEnabledWrite,
+  persistConfigWritePlan,
   getConfigValue,
-  setConfigValue,
   getHermesHome,
   getModelConfig,
-  setModelConfig,
   getCredentialPool,
   setCredentialPool,
   addCredentialPoolEntry,
@@ -190,14 +194,17 @@ import {
   rotateConnectionContextId,
   setConnectionConfig,
   getPlatformEnabled,
-  setPlatformEnabled,
-  ensureLocalApiServerKey,
   getApiServerKeyStatus,
   invalidateSecretsCache,
+  appendConfigFixLog,
   type ConnectionConfig,
 } from "../config";
 import { getSecret } from "../secrets";
-import type { OwnerModelRouteSelection } from "../../shared/model-configuration";
+import {
+  canonicalPublicRouteKey,
+  type OwnerModelRouteSelection,
+} from "../../shared/model-configuration";
+import { canonicalProviderBaseUrl } from "../provider-registry";
 import {
   createAgentModelExecutionLease,
   composeAgentModelSegmentCallbacks,
@@ -258,20 +265,22 @@ import {
 } from "../remote-models";
 import {
   listModels,
-  addModel,
-  removeModel,
-  removeModelsForCustomProvider,
-  updateModel,
+  planAddModel,
+  planRemoveModel,
+  planRemoveModelsForCustomProvider,
+  planUpdateModel,
   listModelDefinitions,
   getModelDefinition,
-  setModelDefinition,
-  removeModelDefinition,
+  planSetModelDefinition,
+  planRemoveModelDefinition,
+  persistModelCatalogWritePlan,
   type SavedModel,
 } from "../models";
 import { validateChatReadiness } from "../validation";
 import {
   runConfigHealthCheck,
-  autoFixIssue,
+  planConfigHealthAutoFix,
+  persistConfigHealthAutoFix,
   readConfigFixLog,
   type IssueCode,
 } from "../config-health";
@@ -432,11 +441,20 @@ import {
 import {
   coordinatorUnavailableMutation,
   createModelConfigurationIpcBridge,
+  type ManagedModelConfigurationWriteBridgeOptions,
   type ModelConfigurationIpcBridgeDependencies,
 } from "./model-configuration-bridge";
-import type { ModelConfigurationCoordinator } from "../model-configuration-coordinator";
+import { createManagedModelMutationPort } from "../model-configuration-mutation-port";
+import type {
+  ManagedModelConfigurationWriteContext,
+  ManagedModelConfigurationWritePlan,
+  ManagedModelConfigurationWriteRequest,
+  ModelConfigurationCoordinator,
+} from "../model-configuration-coordinator";
 import type { ModelConfigurationStartupFailure } from "../../shared/model-configuration";
 import type { OwnerModelRouteCatalog } from "../agentera-agent-control/owner-model-route-catalog";
+import { configureAgentModelProfileSeedMutationPort } from "../agentera-agent-control/model-profile-seed";
+import { configureHermesProjectionMutationPort } from "../agentera-agent-control/hermes-projection";
 import {
   setProfileColor,
   setProfileAvatar,
@@ -468,12 +486,15 @@ import {
 } from "../wallet-store";
 import {
   listCustomProviders,
-  removeCustomProvider,
-  upsertCustomProvider,
+  persistCustomProviderPlan,
+  planCustomProviderRemoval,
+  planCustomProviderUpsert,
 } from "../providers-store";
 import {
-  removeNativeCustomProvider,
-  upsertNativeCustomProvider,
+  persistNativeCustomProviderPlan,
+  planNativeCustomProviderRemoval,
+  planNativeCustomProviderUpsert,
+  type NativeCustomProviderInput,
 } from "../native-custom-provider";
 import {
   isCustomProviderRoute,
@@ -496,10 +517,9 @@ import { readSoul, writeSoul, resetSoul } from "../soul";
 import {
   getPlatformToolsets,
   getToolsets,
-  setMessagingPlatformToolsetEnabled,
-  setToolsetEnabled,
+  setToolsetEnabledManaged,
 } from "../tools";
-import { imageGenerationConfigService } from "../image-generation-config";
+import { createImageGenerationConfigService } from "../image-generation-config";
 import {
   saveImageGenerationConfigAndRefresh,
   setToolsetEnabledAndRefreshImageGeneration,
@@ -530,6 +550,7 @@ import {
   triggerCronJob,
 } from "../cronjobs";
 import {
+  applyManagedMessagingPlatformUpdate,
   applyMessagingPlatformUpdate,
   buildDesktopMessagingPlatforms,
   fetchRemoteMessagingPlatforms,
@@ -931,15 +952,20 @@ function normalizedBaseUrl(value: string | undefined): string {
  * without a providerLabel keep their existing route; this bridge only runs
  * when the model can be tied to a first-class named provider.
  */
-function persistNativeCustomRouteForModel(
+interface NativeCustomRoutePlan {
+  runtimeProvider: string;
+  input: NativeCustomProviderInput | null;
+}
+
+function planNativeCustomRouteForModel(
   provider: string,
   model: string,
   baseUrl: string,
   profile: string | undefined,
   libraryEntry: SavedModel | undefined,
-): string {
+): NativeCustomRoutePlan {
   if (!isCustomProviderRoute(provider)) {
-    return provider;
+    return { runtimeProvider: provider, input: null };
   }
 
   const targetUrl = normalizedBaseUrl(baseUrl);
@@ -960,7 +986,7 @@ function persistNativeCustomRouteForModel(
       )?.name || "";
   }
   if (!providerName || !targetUrl) {
-    return provider;
+    return { runtimeProvider: provider, input: null };
   }
 
   const providerAnchor = customProviderEnvKey(providerName);
@@ -974,13 +1000,16 @@ function persistNativeCustomRouteForModel(
     .map((candidate) => candidate.model);
   if (!models.includes(model)) models.unshift(model);
 
-  return upsertNativeCustomProvider(profile, {
-    name: providerName,
-    baseUrl,
-    model,
-    models,
-    apiMode: libraryEntry?.apiMode ?? null,
-  });
+  return {
+    runtimeProvider: `custom:${normalizeCustomProviderRuntimeName(providerName)}`,
+    input: {
+      name: providerName,
+      baseUrl,
+      model,
+      models,
+      apiMode: libraryEntry?.apiMode ?? null,
+    },
+  };
 }
 
 function isRuntimeCredentialEnvKey(key: string): boolean {
@@ -1233,6 +1262,9 @@ export function registerIpcHandlers(context: IpcContext): void {
     productAccessGuard,
     assertChannelProfileTarget,
   );
+  const modelConfigurationMutationCoordinator =
+    modelConfigurationCoordinator ??
+    coordinatorUnavailableMutation(modelConfigurationStartupFailure ?? null);
   const modelConfigurationBridge = createModelConfigurationIpcBridge({
     catalog: ownerModelRouteCatalog ?? {
       snapshot: () => {
@@ -1242,9 +1274,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         );
       },
     },
-    coordinator:
-      modelConfigurationCoordinator ??
-      coordinatorUnavailableMutation(modelConfigurationStartupFailure ?? null),
+    coordinator: modelConfigurationMutationCoordinator,
     assertRequestedProfile: (profile) => {
       const connection = getConnectionConfig();
       if (connection.mode === "local") {
@@ -1255,6 +1285,94 @@ export function registerIpcHandlers(context: IpcContext): void {
       }
     },
   } satisfies ModelConfigurationIpcBridgeDependencies);
+  const managedModelMutationPort = createManagedModelMutationPort(
+    modelConfigurationMutationCoordinator,
+  );
+  configureAgentModelProfileSeedMutationPort(managedModelMutationPort);
+  configureHermesProjectionMutationPort(managedModelMutationPort);
+  configureGatewayManagedConfiguration({
+    modelMutationPort: managedModelMutationPort,
+  });
+  const imageGenerationConfigService = createImageGenerationConfigService({
+    modelMutationPort: managedModelMutationPort,
+  });
+  const managedModelConfigurationProfile = (profile?: string): string =>
+    profile || getActiveProfileNameSync();
+  const runManagedModelConfigurationWrite = <T>(
+    profile: string | undefined,
+    scope: ManagedModelConfigurationWriteRequest["scope"],
+    stage: ManagedModelConfigurationWriteRequest["stage"],
+    prepare: (
+      context: ManagedModelConfigurationWriteContext,
+    ) =>
+      | ManagedModelConfigurationWritePlan<T>
+      | Promise<ManagedModelConfigurationWritePlan<T>>,
+    options?: ManagedModelConfigurationWriteBridgeOptions,
+  ): Promise<T> =>
+    modelConfigurationBridge.runManagedModelConfigurationWrite(
+      {
+        requestedProfileId: managedModelConfigurationProfile(profile),
+        scope,
+        stage,
+      },
+      prepare,
+      options,
+    );
+  const prepareLocalModelActivation = (
+    provider: string,
+    model: string,
+    baseUrl: string,
+    profile?: string,
+  ): ManagedModelConfigurationWritePlan<boolean> => {
+    const previous = getModelConfig(profile);
+    const libraryEntry = resolveLibraryModelEntry(provider, model, baseUrl);
+    const nativeRoute = planNativeCustomRouteForModel(
+      provider,
+      model,
+      baseUrl,
+      profile,
+      libraryEntry,
+    );
+    const effectiveBaseUrl =
+      baseUrl || canonicalProviderBaseUrl(nativeRoute.runtimeProvider) || "";
+    const apiMode = libraryEntry?.apiMode ?? null;
+    const nativePlan = nativeRoute.input
+      ? planNativeCustomProviderUpsert(profile, nativeRoute.input)
+      : undefined;
+    const configPlan = planModelConfigWrite(
+      nativeRoute.runtimeProvider,
+      model,
+      baseUrl,
+      profile,
+      libraryEntry?.contextLength ?? null,
+      apiMode,
+      nativePlan,
+    );
+    return {
+      newRouteKey: canonicalPublicRouteKey({
+        provider: nativeRoute.runtimeProvider,
+        model,
+        baseUrl: effectiveBaseUrl,
+        apiMode,
+      }),
+      write: (permit) => {
+        persistConfigWritePlan(permit, configPlan);
+        return true;
+      },
+      refreshPresentation: () => {
+        const changed = refreshLocalModelRuntimeSnapshot(
+          previous,
+          {
+            provider: nativeRoute.runtimeProvider,
+            model,
+            baseUrl: effectiveBaseUrl,
+          },
+          profile,
+        );
+        if (changed) notifyRuntimeSnapshotChanged();
+      },
+    };
+  };
   ipcMain.handle("get-owner-model-route-catalog", (_event, profile?: string) =>
     modelConfigurationBridge.getOwnerModelRouteCatalog(profile),
   );
@@ -2607,7 +2725,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         getCurrentOwner: getAgenteraRuntimeOwner,
       });
     const recoveredFreshProfiles =
-      agenteraProfileBindings.reconcileActivatingFreshProfiles({
+      await agenteraProfileBindings.reconcileActivatingFreshProfiles({
         owner,
         createProfile,
         resolveProfilePath: (profileId) => profileHome(profileId),
@@ -2683,7 +2801,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       `Aera Space ${Date.now().toString(36)}`;
     const profileId =
       pendingReservation?.profileId ?? profileIdForAgentName(name);
-    const created = agenteraProfileBindings.createAndBindFreshProfile({
+    const created = await agenteraProfileBindings.createAndBindFreshProfile({
       operationId,
       name,
       owner,
@@ -2735,29 +2853,32 @@ export function registerIpcHandlers(context: IpcContext): void {
     );
     return { status: "bound", runtimeProfileId: binding.runtimeProfileId };
   });
-  ipcMain.handle("agentera-profile-create-fresh", (_event, name: string) => {
-    const config = getConnectionConfig();
-    if (config.mode !== "local") {
-      throw new Error("Fresh local Profiles require local Runtime mode.");
-    }
-    const created = agenteraProfileBindings.createAndBindFreshProfile({
-      operationId: randomUUID(),
-      name,
-      owner: getAgenteraRuntimeOwner(),
-      profileId: profileIdForAgentName(name),
-      createProfile,
-      resolveProfilePath: (profileId) => profileHome(profileId),
-      activateProfile: (profileId) => {
-        setActiveProfile(profileId);
-        notifyProfileSwitched();
-      },
-    });
-    return {
-      status: "bound",
-      profileId: created.profileId,
-      runtimeProfileId: created.binding.runtimeProfileId,
-    };
-  });
+  ipcMain.handle(
+    "agentera-profile-create-fresh",
+    async (_event, name: string) => {
+      const config = getConnectionConfig();
+      if (config.mode !== "local") {
+        throw new Error("Fresh local Profiles require local Runtime mode.");
+      }
+      const created = await agenteraProfileBindings.createAndBindFreshProfile({
+        operationId: randomUUID(),
+        name,
+        owner: getAgenteraRuntimeOwner(),
+        profileId: profileIdForAgentName(name),
+        createProfile,
+        resolveProfilePath: (profileId) => profileHome(profileId),
+        activateProfile: (profileId) => {
+          setActiveProfile(profileId);
+          notifyProfileSwitched();
+        },
+      });
+      return {
+        status: "bound",
+        profileId: created.profileId,
+        runtimeProfileId: created.binding.runtimeProfileId,
+      };
+    },
+  );
   ipcMain.handle("agentera-profile-list-unbound", async () => {
     const locations = await listLocalProfileLocations();
     return agenteraProfileBindings
@@ -3063,7 +3184,9 @@ export function registerIpcHandlers(context: IpcContext): void {
   // account's cloud agents. `agent-sync-updated` tells the renderer to reload
   // its profile list (pull-created profiles appear without a manual refresh).
   ipcMain.handle("agent-sync-run", async (event) => {
-    const result = await syncAgents();
+    const result = await syncAgents({
+      modelMutationPort: managedModelMutationPort,
+    });
     if (!event.sender.isDestroyed()) {
       event.sender.send("agent-sync-updated", result);
     }
@@ -3115,7 +3238,29 @@ export function registerIpcHandlers(context: IpcContext): void {
       profile?: string,
       context?: Record<string, string>,
     ) => {
-      return autoFixIssue(code, profile, context);
+      const stage: ManagedModelConfigurationWriteRequest["stage"] =
+        code === "API_SERVER_KEY_NON_CANONICAL" ||
+        code === "UI_RUNTIME_ENVKEY_MISMATCH" ||
+        code === "NON_ASCII_CREDENTIAL" ||
+        code === "SIBLING_HERMES_HOME_DRIFT"
+          ? "credential"
+          : "activation";
+      return runManagedModelConfigurationWrite(
+        profile,
+        "profile",
+        stage,
+        () => {
+          const plan = planConfigHealthAutoFix(code, profile, context);
+          return {
+            write: (permit) => persistConfigHealthAutoFix(permit, plan),
+            refreshPresentation: () => {
+              for (const entry of plan.auditEntries) {
+                appendConfigFixLog(entry);
+              }
+            },
+          };
+        },
+      );
     },
   );
 
@@ -3131,35 +3276,27 @@ export function registerIpcHandlers(context: IpcContext): void {
         await sshSetEnvValue(conn.ssh, key, value, profile);
         return true;
       }
-      setEnvValue(key, value, profile);
-      // Every local Runtime process receives a snapshot of the profile env at
-      // spawn. Retire the managed dashboard as soon as a credential changes so
-      // the next chat starts it with the new key; model discovery uses the key
-      // directly and therefore must not be mistaken for proof that an older
-      // dashboard process has the same credential.
       const looksLikeCredential = isRuntimeCredentialEnvKey(key);
-      if (looksLikeCredential) {
-        stopDashboard(profile);
-        // Tell every mounted chat to retire its WebSocket immediately. This
-        // payload-free lifecycle signal is separate from account connection
-        // config, so guest chats do not receive Remote/SSH account details. A
-        // dashboard process can take time to finish after SIGTERM (especially
-        // after a provider error); without the signal the renderer may keep
-        // submitting to it even after a fresh dashboard has started.
-        notifyRuntimeSnapshotChanged();
-      }
-      // Restart gateway so it picks up the new API key.
-      // The earlier condition had a precedence bug —
-      //   `(isGatewayRunning() && _API_KEY) || _TOKEN || HF_TOKEN`
-      // — that triggered a restart for `_TOKEN`/`HF_TOKEN` writes even
-      // when no local gateway was running, which in remote mode hit the
-      // `startGateway` path with no local install (issue #266).
-      // restartGateway() now also self-gates on isRemoteMode(), so this
-      // is belt-and-braces, but the condition is fixed too for clarity.
-      if (isGatewayRunning(profile) && looksLikeCredential) {
-        void restartGateway(profile);
-      }
-      return true;
+      return runManagedModelConfigurationWrite(
+        profile,
+        "profile",
+        "credential",
+        () => {
+          const plan = planEnvValueWrite(key, value, profile);
+          return {
+            write: (permit) => {
+              persistConfigWritePlan(permit, plan);
+              return true;
+            },
+            refreshPresentation: () => {
+              if (!looksLikeCredential) return;
+              stopDashboard(profile);
+              notifyRuntimeSnapshotChanged();
+              if (isGatewayRunning(profile)) void restartGateway(profile);
+            },
+          };
+        },
+      );
     },
   );
 
@@ -3178,8 +3315,20 @@ export function registerIpcHandlers(context: IpcContext): void {
         await sshSetConfigValue(conn.ssh, key, value, profile);
         return true;
       }
-      setConfigValue(key, value, profile);
-      return true;
+      return runManagedModelConfigurationWrite(
+        profile,
+        "profile",
+        "activation",
+        () => {
+          const plan = planConfigValueWrite(key, value, profile);
+          return {
+            write: (permit) => {
+              persistConfigWritePlan(permit, plan);
+              return true;
+            },
+          };
+        },
+      );
     },
   );
 
@@ -3228,35 +3377,14 @@ export function registerIpcHandlers(context: IpcContext): void {
         return withRemoteDashboard(
           conn,
           () => remoteSetModelConfig(conn, provider, model, baseUrl),
-          () => {
-            const prev = getModelConfig(profile);
-            // Same library-mirroring as the pure-local path below: carry the
-            // activated model's context-window and api_mode into config.yaml
-            // so this local fallback write doesn't leave a stale transport.
-            const libEntry = resolveLibraryModelEntry(provider, model, baseUrl);
-            const runtimeProvider = persistNativeCustomRouteForModel(
-              provider,
-              model,
-              baseUrl,
+          () =>
+            runManagedModelConfigurationWrite(
               profile,
-              libEntry,
-            );
-            setModelConfig(
-              runtimeProvider,
-              model,
-              baseUrl,
-              profile,
-              libEntry?.contextLength ?? null,
-              libEntry?.apiMode ?? null,
-            );
-            const changed = refreshLocalModelRuntimeSnapshot(
-              prev,
-              { provider: runtimeProvider, model, baseUrl },
-              profile,
-            );
-            if (changed) notifyRuntimeSnapshotChanged();
-            return true;
-          },
+              "profile",
+              "activation",
+              () =>
+                prepareLocalModelActivation(provider, model, baseUrl, profile),
+            ),
         );
       }
       if (conn.mode === "ssh" && conn.ssh) {
@@ -3286,38 +3414,12 @@ export function registerIpcHandlers(context: IpcContext): void {
           activeSshProfile(profile),
         );
       }
-      const prev = getModelConfig(profile);
-      // Mirror the activated model's context-window override and API-protocol
-      // mode (if any) into config.yaml so the gauge, the agent's
-      // auto-compaction threshold, and the runtime transport all match the
-      // model being activated. Passing `null` when the library entry has none
-      // clears any stale value left by a previously-active model — critical for
-      // `api_mode`, since a leftover `anthropic_messages`/`chat_completions`
-      // would otherwise route the new endpoint over the wrong protocol.
-      const libEntry = resolveLibraryModelEntry(provider, model, baseUrl);
-      const runtimeProvider = persistNativeCustomRouteForModel(
-        provider,
-        model,
-        baseUrl,
+      return runManagedModelConfigurationWrite(
         profile,
-        libEntry,
+        "profile",
+        "activation",
+        () => prepareLocalModelActivation(provider, model, baseUrl, profile),
       );
-      setModelConfig(
-        runtimeProvider,
-        model,
-        baseUrl,
-        profile,
-        libEntry?.contextLength ?? null,
-        libEntry?.apiMode ?? null,
-      );
-      const changed = refreshLocalModelRuntimeSnapshot(
-        prev,
-        { provider: runtimeProvider, model, baseUrl },
-        profile,
-      );
-      if (changed) notifyRuntimeSnapshotChanged();
-
-      return true;
     },
   );
 
@@ -3344,7 +3446,9 @@ export function registerIpcHandlers(context: IpcContext): void {
         // TODO: SSH path for auxiliary config (requires sshSetAuxiliaryTask)
         return false;
       }
-      setAuxiliaryTask(task, cfg, profile);
+      await setAuxiliaryTask(task, cfg, profile, {
+        modelMutationPort: managedModelMutationPort,
+      });
 
       // Restart gateway so it picks up the new auxiliary config
       if (isGatewayRunning(profile)) {
@@ -3361,7 +3465,9 @@ export function registerIpcHandlers(context: IpcContext): void {
       // TODO: SSH path for auxiliary config (requires sshResetAuxiliaryConfig)
       return false;
     }
-    resetAuxiliaryToAuto(profile);
+    await resetAuxiliaryToAuto(profile, {
+      modelMutationPort: managedModelMutationPort,
+    });
 
     // Restart gateway so it picks up the reset
     if (isGatewayRunning(profile)) {
@@ -3390,17 +3496,37 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle(
     "generate-api-server-key",
     async (_event, profile?: string) => {
-      const result = ensureLocalApiServerKey(profile);
-      // Restart gateway so it picks up the new key immediately.
-      if (result.generated && isGatewayRunning(profile)) {
-        const restarted = await restartGateway(profile);
-        if (!restarted) {
-          throw new Error(
-            "The local gateway credential was created, but the gateway could not restart with it.",
-          );
-        }
-      }
-      return { generated: result.generated };
+      let generated = false;
+      return runManagedModelConfigurationWrite(
+        profile,
+        "profile",
+        "credential",
+        () => {
+          const plan = planLocalApiServerKeyWrite(profile);
+          return {
+            write: (permit) => {
+              const result = persistConfigWritePlan(permit, plan);
+              generated = result.generated;
+              return { generated };
+            },
+            refreshPresentation: async () => {
+              if (!generated || !isGatewayRunning(profile)) return;
+              const restarted = await restartGateway(profile);
+              if (!restarted) {
+                throw new Error(
+                  "The local gateway credential was created, but the gateway could not restart with it.",
+                );
+              }
+            },
+          };
+        },
+        {
+          refreshWarningToError: () =>
+            new Error(
+              "The local gateway credential was created, but the gateway could not restart with it.",
+            ),
+        },
+      );
     },
   );
 
@@ -3710,7 +3836,7 @@ export function registerIpcHandlers(context: IpcContext): void {
             // A named Agent Profile may inherit a port already occupied by a
             // different local Aera instance. Reconcile and await the real
             // profile gateway before beginning a bound Agent turn.
-            await ensureProfilePortAvailable(profile);
+            await prepareGatewayForLaunch(profile);
             startGateway(profile);
             await startGatewayWithRecovery(
               profile,
@@ -4152,6 +4278,7 @@ export function registerIpcHandlers(context: IpcContext): void {
           "Remote mode points at an already-running Aera Runtime server. Start or restart the gateway on that remote host.",
       };
     }
+    await prepareGatewayForLaunch();
     return startGatewayDetailed();
   });
   ipcMain.handle("stop-gateway", async () => {
@@ -4217,12 +4344,23 @@ export function registerIpcHandlers(context: IpcContext): void {
         await sshSetPlatformEnabled(conn.ssh, platform, enabled, profile);
         return true;
       }
-      setPlatformEnabled(platform, enabled, profile);
-      // Restart gateway so it picks up the new platform config
-      if (isGatewayRunning(profile)) {
-        restartGateway(profile);
-      }
-      return true;
+      return runManagedModelConfigurationWrite(
+        profile,
+        "profile",
+        "activation",
+        () => {
+          const plan = planPlatformEnabledWrite(platform, enabled, profile);
+          return {
+            write: (permit) => {
+              persistConfigWritePlan(permit, plan);
+              return true;
+            },
+            refreshPresentation: () => {
+              if (isGatewayRunning(profile)) void restartGateway(profile);
+            },
+          };
+        },
+      );
     },
   );
 
@@ -4285,23 +4423,14 @@ export function registerIpcHandlers(context: IpcContext): void {
         );
         return { ok: true, platform };
       }
-      await applyMessagingPlatformUpdate(
+      const result = await applyManagedMessagingPlatformUpdate(
         platform,
         update,
-        (key, value) => setEnvValue(key, value, profile),
-        (key, enabled) => setPlatformEnabled(key, enabled, profile),
-        (platformKey, toolsetKey, enabled) =>
-          setMessagingPlatformToolsetEnabled(
-            platformKey,
-            toolsetKey,
-            enabled,
-            profile,
-          ),
+        profile,
+        { modelMutationPort: managedModelMutationPort },
       );
-      if (isGatewayRunning(profile)) {
-        restartGateway(profile);
-      }
-      return { ok: true, platform };
+      if (isGatewayRunning(profile)) void restartGateway(profile);
+      return result;
     },
   );
 
@@ -4673,7 +4802,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
   ipcMain.handle(
     "create-profile",
-    (_event, name: string, cloneFrom: string | null) => {
+    async (_event, name: string, cloneFrom: string | null) => {
       const conn = getConnectionConfig();
       if (conn.mode === "ssh" && conn.ssh)
         return sshCreateProfile(conn.ssh, name, cloneFrom);
@@ -4684,7 +4813,7 @@ export function registerIpcHandlers(context: IpcContext): void {
           owner,
         );
       }
-      const created = createProfile(name, cloneFrom);
+      const created = await createProfile(name, cloneFrom);
       if (created.success && created.id) {
         agenteraProfileBindings.bindExistingProfile(
           profileHome(created.id),
@@ -4729,6 +4858,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         await sshStartGateway(conn.ssh, name);
       }
     } else if (!isRemoteMode() && !isGatewayRunning(name)) {
+      await prepareGatewayForLaunch(name);
       startGateway(name);
     }
     return true;
@@ -4798,53 +4928,94 @@ export function registerIpcHandlers(context: IpcContext): void {
       _event,
       profile: string | undefined,
       input: { id?: string; name: string; baseUrl: string },
-    ) => {
-      const record = upsertCustomProvider(profile, input);
-      notifyCustomProvidersChanged();
-      return record;
-    },
+    ) =>
+      runManagedModelConfigurationWrite(profile, "profile", "provider", () => {
+        const plan = planCustomProviderUpsert(profile, input);
+        return {
+          write: (permit) => persistCustomProviderPlan(permit, plan),
+          refreshPresentation: () => notifyCustomProvidersChanged(),
+        };
+      }),
   );
   ipcMain.handle(
     "remove-custom-provider",
-    (_event, profile: string | undefined, name: string) => {
-      const anchor = customProviderEnvKey(name);
-      const provider = listCustomProviders(profile).find(
-        (candidate) => customProviderEnvKey(candidate.name) === anchor,
-      );
-      removeCustomProvider(profile, name);
-      removeNativeCustomProvider(profile, name);
-      const removedModels = removeModelsForCustomProvider(
-        provider?.name || name,
-        provider?.baseUrl,
-        provider?.id,
-      );
-      const currentModel = getModelConfig(profile);
-      const currentCustomName = namedCustomProviderRuntimeName(
-        currentModel.provider,
-      );
-      const deletedCustomName = normalizeCustomProviderRuntimeName(
-        provider?.name || name,
-      );
-      const currentUsesDeletedProvider =
-        isCustomProviderRoute(currentModel.provider) &&
-        (currentCustomName
-          ? currentCustomName === deletedCustomName
-          : Boolean(provider?.baseUrl) &&
-            normalizedBaseUrl(currentModel.baseUrl) ===
-              normalizedBaseUrl(provider?.baseUrl));
-      if (currentUsesDeletedProvider) {
-        setModelConfig("auto", "", "", profile);
-      }
-      stopDashboard(profile);
-      notifyConnectionConfigChanged();
-      notifyCustomProvidersChanged();
-      if (removedModels > 0) notifyModelLibraryChanged();
-    },
+    (_event, profile: string | undefined, name: string) =>
+      runManagedModelConfigurationWrite(
+        profile,
+        "global",
+        "activation",
+        ({ oldRouteKey }) => {
+          const anchor = customProviderEnvKey(name);
+          const provider = listCustomProviders(profile).find(
+            (candidate) => customProviderEnvKey(candidate.name) === anchor,
+          );
+          const currentModel = getModelConfig(profile);
+          const currentCustomName = namedCustomProviderRuntimeName(
+            currentModel.provider,
+          );
+          const deletedCustomName = normalizeCustomProviderRuntimeName(
+            provider?.name || name,
+          );
+          const currentUsesDeletedProvider =
+            isCustomProviderRoute(currentModel.provider) &&
+            (currentCustomName
+              ? currentCustomName === deletedCustomName
+              : Boolean(provider?.baseUrl) &&
+                normalizedBaseUrl(currentModel.baseUrl) ===
+                  normalizedBaseUrl(provider?.baseUrl));
+          const providerPlan = planCustomProviderRemoval(profile, name);
+          const nativePlan = planNativeCustomProviderRemoval(profile, name);
+          const modelPlan = planRemoveModelsForCustomProvider(
+            provider?.name || name,
+            provider?.baseUrl,
+            provider?.id,
+          );
+          const configPlan = currentUsesDeletedProvider
+            ? planModelConfigWrite(
+                "auto",
+                "",
+                "",
+                profile,
+                undefined,
+                undefined,
+                nativePlan,
+              )
+            : null;
+          const removedModels = modelPlan.value;
+          return {
+            newRouteKey: currentUsesDeletedProvider
+              ? canonicalPublicRouteKey({
+                  provider: "auto",
+                  model: "",
+                  baseUrl: "",
+                  apiMode: null,
+                })
+              : oldRouteKey,
+            write: (permit) => {
+              persistCustomProviderPlan(permit, providerPlan);
+              persistModelCatalogWritePlan(permit, modelPlan);
+              if (configPlan) {
+                persistConfigWritePlan(permit, configPlan);
+              } else {
+                persistNativeCustomProviderPlan(permit, nativePlan);
+              }
+            },
+            refreshPresentation: () => {
+              stopDashboard(profile);
+              notifyConnectionConfigChanged();
+              notifyCustomProvidersChanged();
+              if (removedModels > 0) notifyModelLibraryChanged();
+            },
+          };
+        },
+      ),
   );
   // Cloud wallets provisioned by the backend for the profile's linked agent.
   // Read-only here; the desktop no longer mints wallets locally.
   ipcMain.handle("wallet-sync", (_event, profile?: string) =>
-    syncWalletsForProfile(profile),
+    syncWalletsForProfile(profile, {
+      modelMutationPort: managedModelMutationPort,
+    }),
   );
   // Backend-driven wallet ops used by the Office's space representatives
   // (bank tellers): balances and provisioning both live server-side.
@@ -4984,7 +5155,10 @@ export function registerIpcHandlers(context: IpcContext): void {
         return sshSetToolsetEnabled(conn.ssh, key, enabled, profile);
       if (conn.mode !== "local") return false;
       return setToolsetEnabledAndRefreshImageGeneration(key, enabled, profile, {
-        setToolsetEnabled,
+        setToolsetEnabled: (targetKey, targetEnabled, targetProfile) =>
+          setToolsetEnabledManaged(targetKey, targetEnabled, targetProfile, {
+            modelMutationPort: managedModelMutationPort,
+          }),
         stopDashboard,
         retireTuiGatewayClient,
         notifyRuntimeSnapshotChanged: (targetProfile) =>
@@ -5241,7 +5415,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       providerId?: string,
     ) => {
       const conn = getConnectionConfig();
-      let addedModel: Awaited<ReturnType<typeof addModel>>;
+      let addedModel: SavedModel;
       if (conn.mode === "remote") {
         if (conn.remoteChatTransport === "legacy") {
           throw new Error(
@@ -5259,15 +5433,25 @@ export function registerIpcHandlers(context: IpcContext): void {
           getActiveProfileNameSync(),
         );
       } else {
-        addedModel = addModel(
-          name,
-          provider,
-          model,
-          baseUrl,
-          contextLength,
-          providerLabel,
-          apiMode,
-          providerId,
+        addedModel = await runManagedModelConfigurationWrite(
+          undefined,
+          "global",
+          "model_library",
+          () => {
+            const plan = planAddModel(
+              name,
+              provider,
+              model,
+              baseUrl,
+              contextLength,
+              providerLabel,
+              apiMode,
+              providerId,
+            );
+            return {
+              write: (permit) => persistModelCatalogWritePlan(permit, plan),
+            };
+          },
         );
       }
       notifyModelLibraryChanged();
@@ -5292,7 +5476,17 @@ export function registerIpcHandlers(context: IpcContext): void {
         getActiveProfileNameSync(),
       );
     } else {
-      removed = removeModel(id);
+      removed = await runManagedModelConfigurationWrite(
+        undefined,
+        "global",
+        "model_library",
+        () => {
+          const plan = planRemoveModel(id);
+          return {
+            write: (permit) => persistModelCatalogWritePlan(permit, plan),
+          };
+        },
+      );
     }
     if (removed) notifyModelLibraryChanged();
     return removed;
@@ -5324,9 +5518,21 @@ export function registerIpcHandlers(context: IpcContext): void {
           getActiveProfileNameSync(),
         );
       } else {
-        updated = updateModel(
-          id,
-          contextLength === undefined ? fields : { ...fields, contextLength },
+        updated = await runManagedModelConfigurationWrite(
+          undefined,
+          "global",
+          "model_library",
+          () => {
+            const plan = planUpdateModel(
+              id,
+              contextLength === undefined
+                ? fields
+                : { ...fields, contextLength },
+            );
+            return {
+              write: (permit) => persistModelCatalogWritePlan(permit, plan),
+            };
+          },
         );
       }
       if (updated) notifyModelLibraryChanged();
@@ -5363,17 +5569,36 @@ export function registerIpcHandlers(context: IpcContext): void {
     ) => {
       const conn = getConnectionConfig();
       if (conn.mode === "remote" || conn.mode === "ssh") return null;
-      const def = setModelDefinition(model, patch);
-      // The gauge/picker read the merged model shape, so a definition change is
-      // a library change from the renderer's perspective.
-      notifyModelLibraryChanged();
-      return def;
+      return runManagedModelConfigurationWrite(
+        undefined,
+        "global",
+        "model_library",
+        () => {
+          const plan = planSetModelDefinition(model, patch);
+          return {
+            write: (permit) => persistModelCatalogWritePlan(permit, plan),
+            // The gauge/picker read the merged model shape, so a definition
+            // change is a library change from the renderer's perspective.
+            refreshPresentation: () => notifyModelLibraryChanged(),
+          };
+        },
+      );
     },
   );
-  ipcMain.handle("remove-model-definition", (_event, model: string) => {
+  ipcMain.handle("remove-model-definition", async (_event, model: string) => {
     const conn = getConnectionConfig();
     if (conn.mode === "remote" || conn.mode === "ssh") return false;
-    const removed = removeModelDefinition(model);
+    const removed = await runManagedModelConfigurationWrite(
+      undefined,
+      "global",
+      "model_library",
+      () => {
+        const plan = planRemoveModelDefinition(model);
+        return {
+          write: (permit) => persistModelCatalogWritePlan(permit, plan),
+        };
+      },
+    );
     if (removed) notifyModelLibraryChanged();
     return removed;
   });
@@ -5407,6 +5632,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     startOfficeStack(profile, {
       getConnectionConfig,
       isGatewayRunning,
+      prepareGateway: prepareGatewayForLaunch,
       startGateway,
       sshGatewayStatus,
       sshStartGateway,
@@ -5723,16 +5949,23 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle(
     "add-mcp-server",
     (_event, input: McpServerInput, profile?: string) =>
-      addMcpServer(input, profile),
+      addMcpServer(input, profile, {
+        modelMutationPort: managedModelMutationPort,
+      }),
   );
   ipcMain.handle(
     "remove-mcp-server",
-    (_event, name: string, profile?: string) => removeMcpServer(name, profile),
+    (_event, name: string, profile?: string) =>
+      removeMcpServer(name, profile, {
+        modelMutationPort: managedModelMutationPort,
+      }),
   );
   ipcMain.handle(
     "set-mcp-server-enabled",
     (_event, name: string, enabled: boolean, profile?: string) =>
-      setMcpServerEnabled(name, enabled, profile),
+      setMcpServerEnabled(name, enabled, profile, {
+        modelMutationPort: managedModelMutationPort,
+      }),
   );
   ipcMain.handle("test-mcp-server", (_event, name: string, profile?: string) =>
     testMcpServer(name, profile),
@@ -5764,7 +5997,9 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle(
     "registry-install",
     (_event, kind: RegistryKind, item: RegistryItem, profile?: string) =>
-      installRegistryItem(kind, item, profile),
+      installRegistryItem(kind, item, profile, {
+        modelMutationPort: managedModelMutationPort,
+      }),
   );
 
   // Memory providers

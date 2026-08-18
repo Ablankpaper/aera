@@ -40,6 +40,78 @@ An owned row whose five files and route exactly equal before/old becomes `rolled
 
 An owned row whose complete files and route exactly equal after/new becomes `committed`; no partial after state is accepted.
 
+### Managed lock order is deterministic
+
+Mixed model mutations acquire the global catalog before stable-sorted, unique Profile locks, and a nested Profile-to-global acquisition fails before its callback runs.
+
+### Opaque permits fence managed files
+
+Low-level writes to the five managed roles require an active permit whose global and Profile scope exactly covers the resolved target.
+
+The permit exists only inside the ordered write-authority callback; callers cannot construct, retain, or reuse it to bypass the transaction journal.
+
+### Platform-specific durable replacement
+
+Temporary bytes are flushed before same-volume replacement, then the replaced target is reopened and flushed before the parent directory where supported.
+
+[[src/main/utils.ts#flushDurableFileTarget]] opens the target with write access on Windows because `FlushFileBuffers` requires `GENERIC_WRITE`. POSIX keeps a read-only flush handle and parent-directory fsync; Windows relies on the journal instead of claiming unsupported directory fsync.
+
+### Rollback refresh follows terminal recovery
+
+A verified rollback reaches its terminal journal state before provider, model, config, and model-definition consumers are notified.
+
+Notification failure returns a refresh warning without changing restored bytes, relocking the Profile, or rewriting the terminal recovery decision.
+
+### Managed writer inventory rejects bypasses
+
+The release verifier rejects raw writes, removals, aliased wrappers, and Profile lifecycle subprocesses unless the exact function is registered at the managed transaction boundary.
+
+### Windows process-crash recovery gate
+
+Real Windows CI terminates a child mutation at every modeled journal window and requires deterministic recovery plus bounded evidence rooted only in a generated temporary directory.
+
+### Model reads are byte side-effect free
+
+Model/config list and get functions never seed, migrate, or rewrite managed files; startup maintenance is planned separately from ordinary reads.
+
+### Explicit model catalog initialization
+
+[[src/main/models.ts#planModelCatalogInitialization]] computes a read-only plan, and [[src/main/model-configuration-coordinator.ts#ModelConfigurationCoordinator#initializeManagedModelFiles]] applies needed changes through the five-file journal. A verified no-op takes the same ordered locks but writes no journal row.
+
+### Indirect feature writers use the managed boundary
+
+Agent Sync, auxiliary tasks, toolsets, image generation, registry, messaging, Gateway, wallet sync, and Agent Profile seeding submit changes through [[src/main/model-configuration-mutation-port.ts#createManagedModelMutationPort]].
+
+A recovery or ownership refusal occurs before the feature write callback and therefore leaves `.env`, `providers.json`, `models.json`, `model-definitions.json`, and `config.yaml` unchanged.
+
+### Hermes projection config activation is transactional
+
+[[src/main/agentera-agent-control/hermes-projection.ts#HermesProjectionManager#activateForProfile]] waits for managed admission before switching the active Skill projection or updating Profile `config.yaml`.
+
+Installation, managed update, restore, and rollback paths await activation; an asynchronous projection failure cannot be recorded as a successful installation or update.
+
+### Staged Profile activation protects live state
+
+Profile lifecycle operations materialize in app-owned same-volume staging and activate only after validation.
+
+[[src/main/model-configuration-staged-profile.ts#createStagedProfileCandidate]] stages Runtime clones, fresh Agent Profiles, and encrypted-backup restores. It strictly parses every present managed role, rejects escaping links, rechecks the owner reservation and destination collision under the ordered write authority, then publishes the candidate with one directory rename.
+
+The activation journal records only a random transaction id, Profile id, source kind, and terminal state; it stores no filesystem path or file body. A refused candidate removes only its own staging directory, while a committed candidate dynamically registers its live Profile root so later managed writes still require a coordinator permit.
+
+[[src/main/profiles.ts#prepareProfile]] keeps the Runtime subprocess on the staged `HERMES_HOME`. [[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager#activateVerifiedRestore]] merges decrypted backup bytes into that candidate and revalidates it before activation, rather than copying files into an already-live Profile.
+
+### Profile clone snapshots preserve provider identity
+
+Profile clones read one stable source snapshot before Runtime materialization begins.
+
+[[src/main/profiles.ts#prepareProfile]] copies the global catalog and the source Profile under the ordered write authority. The staged snapshot includes `providers.json` alongside credentials and route configuration, so cloning a named custom provider cannot lose its provider identity or observe a cross-file save in progress.
+
+### Profile deletion shares the managed write authority
+
+Profile deletion waits behind every managed write targeting that Profile.
+
+[[src/main/profiles.ts#deleteProfile]] preserves the existing Runtime deletion command but executes it only after acquiring the ordered write authority. The structural writer gate treats raw remove APIs and every `profile delete` subprocess as managed mutations; only the explicitly registered serialized deletion function is accepted.
+
 ## Legacy installation recovery
 
 Cold recovery accepts a fresh Installation operation that names only its source Profile and intentionally inherits that Profile's current or default model.

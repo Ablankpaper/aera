@@ -18,6 +18,11 @@ import {
   type ModelConfigurationOperationRecord,
   type ModelConfigurationOperationStore,
 } from "./model-configuration-operation-store";
+import {
+  defaultModelConfigurationWriteAuthority,
+  type ModelConfigurationWritePermit,
+  type ModelConfigurationWriteAuthority,
+} from "./model-configuration-write-authority";
 
 type Awaitable<T> = T | Promise<T>;
 
@@ -71,10 +76,71 @@ export interface PreparedModelConfigurationMutation {
   location:
     | LocalModelConfigurationMutationLocation
     | RemoteModelConfigurationMutationLocation;
-  applyStage(stage: ModelConfigurationCommitStage): Awaitable<void>;
+  applyStage(
+    stage: ModelConfigurationCommitStage,
+    permit: ModelConfigurationWritePermit | null,
+  ): Awaitable<void>;
   verify(catalog: OwnerModelRouteCatalogSnapshot): Awaitable<boolean>;
   refreshPresentation?(): Awaitable<void>;
 }
+
+/**
+ * Main-only startup maintenance that may update the same five files as a
+ * user-initiated model mutation. The caller computes the plan without writing;
+ * the coordinator owns admission, snapshotting, journalling, rollback, and
+ * final verification.
+ */
+export interface ManagedModelFileInitialization {
+  targetProfileId: string;
+  changesRequired: boolean;
+  applyStage(
+    stage: ModelConfigurationCommitStage,
+    permit: ModelConfigurationWritePermit | null,
+  ): Awaitable<void>;
+  verify(): Awaitable<boolean>;
+  refreshPresentation?(): Awaitable<void>;
+}
+
+export type ManagedModelConfigurationWriteScope = "profile" | "global";
+
+/**
+ * Main-only adapter for legacy product surfaces that still expose one focused
+ * config/model command instead of the public multi-stage model-service
+ * mutation. The coordinator still owns admission, snapshotting, journalling,
+ * rollback, verification, and the write permit.
+ */
+export interface ManagedModelConfigurationWriteRequest {
+  requestedProfileId: string;
+  scope: ManagedModelConfigurationWriteScope;
+  stage: ModelConfigurationCommitStage;
+}
+
+export interface ManagedModelConfigurationWriteContext {
+  ownerHandle: string;
+  targetProfileId: string;
+  catalog: OwnerModelRouteCatalogSnapshot;
+  oldRouteKey: string;
+}
+
+export interface ManagedModelConfigurationWritePlan<T> {
+  /** Omit when the focused command must preserve the active route. */
+  newRouteKey?: string;
+  write(permit: ModelConfigurationWritePermit): Awaitable<T>;
+  verify?(
+    catalog: OwnerModelRouteCatalogSnapshot,
+    value: T,
+  ): Awaitable<boolean>;
+  refreshPresentation?(): Awaitable<void>;
+}
+
+export type ManagedModelConfigurationWriteResult<T> =
+  | {
+      status: "executed";
+      value: T;
+      catalog: OwnerModelRouteCatalogSnapshot;
+      warning?: "model_save_refresh_failed";
+    }
+  | Extract<ModelConfigurationMutationResult, { status: "rejected" }>;
 
 export interface ModelConfigurationMutationAdapter {
   prepare(
@@ -114,6 +180,13 @@ export interface ModelConfigurationCoordinatorDependencies {
     ownerHandle: string,
     profileId: string,
   ) => Awaitable<boolean>;
+  writeAuthority?: ModelConfigurationWriteAuthority;
+  /**
+   * Runs only after a rollback has restored and verified all managed bytes and
+   * the journal is terminal. A notification failure degrades presentation but
+   * must never reclassify the operation as recovery-required.
+   */
+  notifyRolledBack?: () => Awaitable<void>;
 }
 
 const DEFAULT_FILE_ADAPTER: ModelConfigurationFileAdapter = {
@@ -129,7 +202,7 @@ function rejected(
   stage: ModelConfigurationStage,
   rollback: "not_needed" | "restored" | "recovery_required",
   recoveryRequired = false,
-): ModelConfigurationMutationResult {
+): Extract<ModelConfigurationMutationResult, { status: "rejected" }> {
   return {
     status: "rejected",
     stage,
@@ -391,6 +464,8 @@ export class ModelConfigurationCoordinator {
     ownerHandle: string,
     profileId: string,
   ) => Awaitable<boolean>;
+  private readonly writeAuthority: ModelConfigurationWriteAuthority;
+  private readonly notifyRolledBack: (() => Awaitable<void>) | undefined;
   private readonly locks = new Map<string, Promise<void>>();
   private readonly recoveryRequired = new Set<string>();
 
@@ -402,6 +477,9 @@ export class ModelConfigurationCoordinator {
     this.files = dependencies.fileAdapter ?? DEFAULT_FILE_ADAPTER;
     this.operationId = dependencies.operationId ?? randomUUID;
     this.isProfileOwned = dependencies.isProfileOwned ?? (() => true);
+    this.writeAuthority =
+      dependencies.writeAuthority ?? defaultModelConfigurationWriteAuthority;
+    this.notifyRolledBack = dependencies.notifyRolledBack;
   }
 
   async mutate(
@@ -500,71 +578,319 @@ export class ModelConfigurationCoordinator {
     });
   }
 
+  async initializeManagedModelFiles(
+    input: ManagedModelFileInitialization,
+  ): Promise<ModelConfigurationMutationResult> {
+    let ownerHandle: string;
+    let preliminaryTarget: string;
+    try {
+      if (
+        !input ||
+        typeof input !== "object" ||
+        typeof input.changesRequired !== "boolean" ||
+        typeof input.applyStage !== "function" ||
+        typeof input.verify !== "function"
+      ) {
+        throw new Error("Invalid managed model initialization.");
+      }
+      ownerHandle = validateOwnerHandle(this.ownerHandle());
+      preliminaryTarget = validateProfileId(input.targetProfileId);
+      if (
+        this.catalog.canonicalTargetProfileId(preliminaryTarget) !==
+        preliminaryTarget
+      ) {
+        throw new Error("Managed model initialization target changed.");
+      }
+    } catch {
+      return rejected("validation", "not_needed");
+    }
+
+    const lockKey = `${ownerHandle}\0${preliminaryTarget}`;
+    return this.withLock(lockKey, async () => {
+      try {
+        const currentOwner = validateOwnerHandle(this.ownerHandle());
+        const targetProfileId = validateProfileId(
+          this.catalog.canonicalTargetProfileId(preliminaryTarget),
+        );
+        if (
+          currentOwner !== ownerHandle ||
+          targetProfileId !== preliminaryTarget ||
+          !(await this.isProfileOwned(ownerHandle, targetProfileId))
+        ) {
+          return rejected("validation", "not_needed");
+        }
+        if (this.profileNeedsRecovery(ownerHandle, targetProfileId)) {
+          return rejected("recovery", "recovery_required", true);
+        }
+
+        if (!input.changesRequired) {
+          return this.writeAuthority.run(
+            { globalCatalog: true, profileIds: [targetProfileId] },
+            async () => {
+              if (!(await input.verify())) {
+                return rejected("verification", "not_needed");
+              }
+              const catalog = this.catalog.snapshot(targetProfileId);
+              if (catalog.targetProfileId !== targetProfileId) {
+                return rejected("validation", "not_needed");
+              }
+              return { status: "committed", catalog };
+            },
+          );
+        }
+
+        const routeKey = boundedRouteKey(
+          await this.mutationAdapter.getActiveRouteKey(targetProfileId),
+        );
+        return this.executeLocalMutation(
+          {
+            targetProfileId,
+            oldRouteKey: routeKey,
+            newRouteKey: routeKey,
+            location: { kind: "local" },
+            applyStage: input.applyStage,
+            verify: async (catalog) =>
+              catalog.targetProfileId === targetProfileId &&
+              (await input.verify()),
+            refreshPresentation: input.refreshPresentation,
+          },
+          ownerHandle,
+          targetProfileId,
+        );
+      } catch {
+        return rejected("recovery", "recovery_required", true);
+      }
+    });
+  }
+
+  async runManagedWrite<T>(
+    input: ManagedModelConfigurationWriteRequest,
+    prepare: (
+      context: ManagedModelConfigurationWriteContext,
+    ) => Awaitable<ManagedModelConfigurationWritePlan<T>>,
+  ): Promise<ManagedModelConfigurationWriteResult<T>> {
+    let ownerHandle: string;
+    let preliminaryTarget: string;
+    try {
+      if (
+        !input ||
+        typeof input !== "object" ||
+        (input.scope !== "profile" && input.scope !== "global") ||
+        !COMMIT_STAGES.includes(input.stage) ||
+        typeof prepare !== "function"
+      ) {
+        throw new Error("Invalid managed model write request.");
+      }
+      ownerHandle = validateOwnerHandle(this.ownerHandle());
+      preliminaryTarget = validateProfileId(
+        this.catalog.canonicalTargetProfileId(input.requestedProfileId),
+      );
+    } catch {
+      return rejected("validation", "not_needed");
+    }
+
+    const lockKey = `${ownerHandle}\0${preliminaryTarget}`;
+    return this.withLock(lockKey, async () => {
+      try {
+        const currentOwner = validateOwnerHandle(this.ownerHandle());
+        const targetProfileId = validateProfileId(
+          this.catalog.canonicalTargetProfileId(input.requestedProfileId),
+        );
+        if (
+          currentOwner !== ownerHandle ||
+          targetProfileId !== preliminaryTarget ||
+          !(await this.isProfileOwned(ownerHandle, targetProfileId))
+        ) {
+          return rejected("validation", "not_needed");
+        }
+        if (
+          this.profileNeedsRecovery(ownerHandle, targetProfileId) ||
+          (input.scope === "global" && this.anyProfileNeedsRecovery())
+        ) {
+          return rejected("recovery", "recovery_required", true);
+        }
+
+        const paths = this.files.paths(targetProfileId);
+        let catalog: OwnerModelRouteCatalogSnapshot;
+        let oldRouteKey: string;
+        let plannedDigests: Record<ModelConfigurationFileRole, string>;
+        let plan: ManagedModelConfigurationWritePlan<T>;
+        let newRouteKey: string;
+        try {
+          catalog = this.catalog.snapshot(input.requestedProfileId);
+          if (catalog.targetProfileId !== targetProfileId) {
+            return rejected("validation", "not_needed");
+          }
+          oldRouteKey = boundedRouteKey(
+            await this.mutationAdapter.getActiveRouteKey(targetProfileId),
+          );
+          plannedDigests = await this.files.readDigests(paths);
+          // Planning deliberately runs before an authority permit exists. A
+          // planner that calls any protected writer therefore fails before a
+          // backup, journal row, or managed byte can be created.
+          plan = await prepare({
+            ownerHandle,
+            targetProfileId,
+            catalog,
+            oldRouteKey,
+          });
+          if (!plan || typeof plan.write !== "function") {
+            throw new Error("Invalid managed model write plan.");
+          }
+          newRouteKey = boundedRouteKey(plan.newRouteKey ?? oldRouteKey);
+        } catch {
+          return rejected("validation", "not_needed");
+        }
+
+        return this.writeAuthority.run(
+          {
+            globalCatalog: input.scope === "global",
+            profileIds: [targetProfileId],
+          },
+          async (permit): Promise<ManagedModelConfigurationWriteResult<T>> => {
+            // The global authority may have been queued behind another Profile.
+            // Recheck ownership, recovery, catalog, route, and all five byte
+            // digests before journalling the read-only plan.
+            if (
+              this.profileNeedsRecovery(ownerHandle, targetProfileId) ||
+              (input.scope === "global" && this.anyProfileNeedsRecovery())
+            ) {
+              return rejected("recovery", "recovery_required", true);
+            }
+            const admittedOwner = validateOwnerHandle(this.ownerHandle());
+            const admittedTarget = validateProfileId(
+              this.catalog.canonicalTargetProfileId(input.requestedProfileId),
+            );
+            const admittedCatalog = this.catalog.snapshot(
+              input.requestedProfileId,
+            );
+            const admittedRouteKey = boundedRouteKey(
+              await this.mutationAdapter.getActiveRouteKey(targetProfileId),
+            );
+            const admittedDigests = await this.files.readDigests(paths);
+            if (
+              admittedOwner !== ownerHandle ||
+              admittedTarget !== targetProfileId ||
+              !(await this.isProfileOwned(ownerHandle, targetProfileId)) ||
+              admittedCatalog.targetProfileId !== targetProfileId ||
+              admittedCatalog.revision !== catalog.revision ||
+              admittedRouteKey !== oldRouteKey ||
+              !digestsEqual(admittedDigests, plannedDigests)
+            ) {
+              return rejected("validation", "not_needed");
+            }
+            let value!: T;
+            let executed = false;
+            const prepared: PreparedModelConfigurationMutation = {
+              targetProfileId,
+              oldRouteKey,
+              newRouteKey,
+              location: { kind: "local" },
+              applyStage: async (stage) => {
+                if (stage !== input.stage) return;
+                value = await plan.write(permit);
+                executed = true;
+              },
+              verify: async (nextCatalog) =>
+                executed &&
+                (plan.verify ? await plan.verify(nextCatalog, value) : true),
+              refreshPresentation: plan.refreshPresentation,
+            };
+            const result = await this.executeLocalMutationWithinPermit(
+              prepared,
+              ownerHandle,
+              targetProfileId,
+              permit,
+            );
+            if (result.status === "rejected") return result;
+            return {
+              status: "executed",
+              value,
+              catalog: result.catalog,
+              ...(result.status === "committed_refresh_warning"
+                ? { warning: result.warning }
+                : {}),
+            };
+          },
+        );
+      } catch {
+        return rejected("recovery", "recovery_required", true);
+      }
+    });
+  }
+
   async recoverIncompleteOperations(): Promise<void> {
     const records = this.operationStore.listIncomplete();
     for (const record of records) {
       const lockKey = `${record.ownerHandle}\0${record.profileId}`;
       await this.withLock(lockKey, async () => {
-        try {
-          validateOwnerHandle(record.ownerHandle);
-          validateProfileId(record.profileId);
-          if (
-            !(await this.isProfileOwned(record.ownerHandle, record.profileId))
-          ) {
-            throw new Error("Model configuration recovery owner mismatch.");
-          }
-          const paths = this.files.paths(record.profileId);
-          const snapshot = reconstructSnapshot(record, paths);
-          const currentDigests = await this.files.readDigests(paths);
-          const activeRouteKey = boundedRouteKey(
-            await this.mutationAdapter.getActiveRouteKey(record.profileId),
-          );
-          if (
-            completeDigests(record.afterDigests) &&
-            digestsEqual(currentDigests, record.afterDigests) &&
-            activeRouteKey === record.newRouteKey
-          ) {
-            this.operationStore.finish(record.operationId, "committed");
-            await this.removeBackupsSafely(snapshot);
-            this.recoveryRequired.delete(lockKey);
-            return;
-          }
+        await this.writeAuthority.run(
+          { globalCatalog: true, profileIds: [record.profileId] },
+          async () => {
+            try {
+              validateOwnerHandle(record.ownerHandle);
+              validateProfileId(record.profileId);
+              if (
+                !(await this.isProfileOwned(record.ownerHandle, record.profileId))
+              ) {
+                throw new Error("Model configuration recovery owner mismatch.");
+              }
+              const paths = this.files.paths(record.profileId);
+              const snapshot = reconstructSnapshot(record, paths);
+              const currentDigests = await this.files.readDigests(paths);
+              const activeRouteKey = boundedRouteKey(
+                await this.mutationAdapter.getActiveRouteKey(record.profileId),
+              );
+              if (
+                completeDigests(record.afterDigests) &&
+                digestsEqual(currentDigests, record.afterDigests) &&
+                activeRouteKey === record.newRouteKey
+              ) {
+                this.operationStore.finish(record.operationId, "committed");
+                await this.removeBackupsSafely(snapshot);
+                this.recoveryRequired.delete(lockKey);
+                return;
+              }
 
-          if (
-            digestsEqual(currentDigests, record.beforeDigests) &&
-            activeRouteKey === record.oldRouteKey
-          ) {
-            this.operationStore.finish(record.operationId, "rolled_back");
-            await this.removeBackupsSafely(snapshot);
-            this.recoveryRequired.delete(lockKey);
-            return;
-          }
+              if (
+                digestsEqual(currentDigests, record.beforeDigests) &&
+                activeRouteKey === record.oldRouteKey
+              ) {
+                this.operationStore.finish(record.operationId, "rolled_back");
+                await this.removeBackupsSafely(snapshot);
+                this.recoveryRequired.delete(lockKey);
+                await this.notifyRolledBackOrLog();
+                return;
+              }
 
-          await this.files.restore(snapshot);
-          const restoredDigests = await this.files.readDigests(paths);
-          const restoredRouteKey = boundedRouteKey(
-            await this.mutationAdapter.getActiveRouteKey(record.profileId),
-          );
-          if (
-            !digestsEqual(restoredDigests, record.beforeDigests) ||
-            restoredRouteKey !== record.oldRouteKey
-          ) {
-            throw new Error(
-              "Model configuration recovery verification failed.",
-            );
-          }
-          this.operationStore.finish(record.operationId, "rolled_back");
-          await this.removeBackupsSafely(snapshot);
-          this.recoveryRequired.delete(lockKey);
-        } catch {
-          try {
-            this.operationStore.finish(record.operationId, "recovery_required");
-          } catch {
-            // The caller will fail startup closed if even the recovery journal
-            // cannot record the terminal recovery-required state.
-          }
-          this.recoveryRequired.add(lockKey);
-        }
+              await this.files.restore(snapshot);
+              const restoredDigests = await this.files.readDigests(paths);
+              const restoredRouteKey = boundedRouteKey(
+                await this.mutationAdapter.getActiveRouteKey(record.profileId),
+              );
+              if (
+                !digestsEqual(restoredDigests, record.beforeDigests) ||
+                restoredRouteKey !== record.oldRouteKey
+              ) {
+                throw new Error(
+                  "Model configuration recovery verification failed.",
+                );
+              }
+              this.operationStore.finish(record.operationId, "rolled_back");
+              await this.removeBackupsSafely(snapshot);
+              this.recoveryRequired.delete(lockKey);
+              await this.notifyRolledBackOrLog();
+            } catch {
+              try {
+                this.operationStore.finish(record.operationId, "recovery_required");
+              } catch {
+                // The caller will fail startup closed if even the recovery journal
+                // cannot record the terminal recovery-required state.
+              }
+              this.recoveryRequired.add(lockKey);
+            }
+          },
+        );
       });
     }
   }
@@ -574,16 +900,34 @@ export class ModelConfigurationCoordinator {
     ownerHandle: string,
     targetProfileId: string,
   ): Promise<ModelConfigurationMutationResult> {
+    return this.writeAuthority.run(
+      { globalCatalog: true, profileIds: [targetProfileId] },
+      (permit) =>
+        this.executeLocalMutationWithinPermit(
+          prepared,
+          ownerHandle,
+          targetProfileId,
+          permit,
+        ),
+    );
+  }
+
+  private async executeLocalMutationWithinPermit(
+    prepared: PreparedModelConfigurationMutation,
+    ownerHandle: string,
+    targetProfileId: string,
+    permit: ModelConfigurationWritePermit,
+  ): Promise<ModelConfigurationMutationResult> {
     const operationId = this.operationId();
     const paths = this.files.paths(targetProfileId);
-    let snapshot: ModelConfigurationFilesSnapshot;
+    let snapshot: ModelConfigurationFilesSnapshot | undefined;
+    let journalStarted = false;
     try {
       snapshot = await this.files.capture({
         profileId: targetProfileId,
         operationId,
         paths,
       });
-      await this.files.persistBackups(snapshot);
       this.operationStore.begin({
         operationId,
         ownerHandle,
@@ -592,14 +936,31 @@ export class ModelConfigurationCoordinator {
         newRouteKey: prepared.newRouteKey,
         snapshot,
       });
+      journalStarted = true;
+      // The journal is the recovery authority. It must exist before any
+      // backup or managed byte is touched, so a crash in backup creation is
+      // represented by a recoverable prepared row rather than an orphaned
+      // filesystem artifact.
+      await this.files.persistBackups(snapshot);
     } catch {
-      if (snapshot!) await this.removeBackupsSafely(snapshot);
+      if (journalStarted) {
+        const lockKey = `${ownerHandle}\0${targetProfileId}`;
+        try {
+          this.operationStore.finish(operationId, "recovery_required");
+        } catch {
+          // Preserve the in-memory fail-closed lock if the journal itself is
+          // unavailable; startup will remain closed until it can be read.
+        }
+        this.recoveryRequired.add(lockKey);
+        return rejected("recovery", "recovery_required", true);
+      }
+      if (snapshot) await this.removeBackupsSafely(snapshot);
       return rejected("validation", "not_needed");
     }
 
     for (const stage of COMMIT_STAGES) {
       try {
-        await prepared.applyStage(stage);
+        await prepared.applyStage(stage, permit);
         const afterDigests = await this.files.readDigests(paths);
         this.operationStore.advance({
           operationId,
@@ -690,7 +1051,12 @@ export class ModelConfigurationCoordinator {
       ) {
         this.operationStore.finish(operationId, "rolled_back");
         await this.removeBackupsSafely(snapshot);
-        return rejected(failedStage, "not_needed");
+        this.recoveryRequired.delete(lockKey);
+        const rollbackWarning = await this.notifyRolledBackSafely();
+        return {
+          ...rejected(failedStage, "not_needed"),
+          ...(rollbackWarning ? { rollbackWarning } : {}),
+        };
       }
 
       await this.files.restore(snapshot);
@@ -707,7 +1073,11 @@ export class ModelConfigurationCoordinator {
       this.operationStore.finish(operationId, "rolled_back");
       await this.removeBackupsSafely(snapshot);
       this.recoveryRequired.delete(lockKey);
-      return rejected(failedStage, "restored");
+      const rollbackWarning = await this.notifyRolledBackSafely();
+      return {
+        ...rejected(failedStage, "restored"),
+        ...(rollbackWarning ? { rollbackWarning } : {}),
+      };
     } catch {
       try {
         this.operationStore.finish(operationId, "recovery_required");
@@ -731,7 +1101,7 @@ export class ModelConfigurationCoordinator {
     try {
       for (const stage of COMMIT_STAGES) {
         failedStage = stage;
-        await prepared.applyStage(stage);
+        await prepared.applyStage(stage, null);
       }
       failedStage = "verification";
       const catalog = this.catalog.snapshot(targetProfileId);
@@ -780,6 +1150,15 @@ export class ModelConfigurationCoordinator {
     }
   }
 
+  private anyProfileNeedsRecovery(): boolean {
+    if (this.recoveryRequired.size > 0) return true;
+    try {
+      return this.operationStore.listIncomplete().length > 0;
+    } catch {
+      return true;
+    }
+  }
+
   private async removeBackupsSafely(
     snapshot: ModelConfigurationFilesSnapshot,
   ): Promise<void> {
@@ -788,6 +1167,26 @@ export class ModelConfigurationCoordinator {
     } catch {
       // A verified terminal product state is not reclassified as a failed save
       // solely because restrictive sibling evidence could not yet be removed.
+    }
+  }
+
+  private async notifyRolledBackSafely(): Promise<
+    "model_rollback_refresh_failed" | undefined
+  > {
+    if (!this.notifyRolledBack) return undefined;
+    try {
+      await this.notifyRolledBack();
+      return undefined;
+    } catch {
+      return "model_rollback_refresh_failed";
+    }
+  }
+
+  private async notifyRolledBackOrLog(): Promise<void> {
+    if (await this.notifyRolledBackSafely()) {
+      console.error(
+        "[MODEL_CONFIGURATION] rollback refresh notification failed",
+      );
     }
   }
 

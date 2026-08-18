@@ -5,8 +5,13 @@ import {
   normalizeCustomProviderRuntimeName,
 } from "../shared/custom-providers";
 import { customProviderEnvKey } from "../shared/url-key-map";
-import { profilePaths, safeWriteFile } from "./utils";
+import { profilePaths } from "./utils";
 import { migrateModelConfigFormat } from "./config-model-migration";
+import {
+  currentModelConfigurationWritePermit,
+  writeManagedModelFile,
+  type ModelConfigurationWritePermit,
+} from "./model-configuration-managed-files";
 
 export interface NativeCustomProviderInput {
   name: string;
@@ -18,6 +23,51 @@ export interface NativeCustomProviderInput {
 }
 
 type UnknownRecord = Record<string, unknown>;
+
+export interface NativeCustomProviderWritePlan<T> {
+  readonly profileId: string;
+  readonly target: string;
+  readonly before: Buffer | null;
+  readonly after: Buffer | null;
+  readonly value: T;
+}
+
+function fileBytes(path: string): Buffer | null {
+  return existsSync(path) ? readFileSync(path) : null;
+}
+
+function sameBytes(left: Buffer | null, right: Buffer | null): boolean {
+  return left === null ? right === null : right !== null && left.equals(right);
+}
+
+function nativeProviderPlan<T>(
+  profile: string | undefined,
+  target: string,
+  before: Buffer | null,
+  after: string | null,
+  value: T,
+): NativeCustomProviderWritePlan<T> {
+  return Object.freeze({
+    profileId: profile || "default",
+    target,
+    before,
+    after: after === null ? null : Buffer.from(after),
+    value,
+  });
+}
+
+export function persistNativeCustomProviderPlan<T>(
+  permit: ModelConfigurationWritePermit | null | undefined,
+  plan: NativeCustomProviderWritePlan<T>,
+): T {
+  if (!sameBytes(fileBytes(plan.target), plan.before)) {
+    throw new Error("Native custom provider write plan is stale.");
+  }
+  if (plan.after !== null) {
+    writeManagedModelFile(permit, plan.target, plan.after);
+  }
+  return plan.value;
+}
 
 function asRecord(value: unknown): UnknownRecord | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -85,6 +135,17 @@ export function upsertNativeCustomProvider(
   profile: string | undefined,
   input: NativeCustomProviderInput,
 ): string {
+  const plan = planNativeCustomProviderUpsert(profile, input);
+  return persistNativeCustomProviderPlan(
+    currentModelConfigurationWritePermit(),
+    plan,
+  );
+}
+
+export function planNativeCustomProviderUpsert(
+  profile: string | undefined,
+  input: NativeCustomProviderInput,
+): NativeCustomProviderWritePlan<string> {
   const name = (input.name || "").trim();
   const baseUrl = (input.baseUrl || "").trim();
   if (!name || !baseUrl) {
@@ -94,6 +155,7 @@ export function upsertNativeCustomProvider(
   const providerName = normalizeCustomProviderRuntimeName(name);
   const keyEnv = customProviderEnvKey(name);
   const { configFile, content } = readConfig(profile);
+  const before = fileBytes(configFile);
   const { document, root } = configDocument(content);
   const providers = asRecord(root.providers) ?? {};
 
@@ -141,8 +203,13 @@ export function upsertNativeCustomProvider(
     );
   }
 
-  safeWriteFile(configFile, document.toString({ lineWidth: 0 }));
-  return customProviderRuntimeRoute(name);
+  return nativeProviderPlan(
+    profile,
+    configFile,
+    before,
+    document.toString({ lineWidth: 0 }),
+    customProviderRuntimeRoute(name),
+  );
 }
 
 /** Remove every native entry bound to this named provider's credential. */
@@ -150,14 +217,32 @@ export function removeNativeCustomProvider(
   profile: string | undefined,
   name: string,
 ): void {
+  const plan = planNativeCustomProviderRemoval(profile, name);
+  persistNativeCustomProviderPlan(
+    currentModelConfigurationWritePermit(),
+    plan,
+  );
+}
+
+export function planNativeCustomProviderRemoval(
+  profile: string | undefined,
+  name: string,
+): NativeCustomProviderWritePlan<void> {
   const normalizedName = normalizeCustomProviderRuntimeName(name);
-  if (!normalizedName) return;
-  const keyEnv = customProviderEnvKey(name);
   const { configFile, content } = readConfig(profile);
-  if (!content.trim()) return;
+  const before = fileBytes(configFile);
+  if (!normalizedName) {
+    return nativeProviderPlan(profile, configFile, before, null, undefined);
+  }
+  const keyEnv = customProviderEnvKey(name);
+  if (!content.trim()) {
+    return nativeProviderPlan(profile, configFile, before, null, undefined);
+  }
   const { document, root } = configDocument(content);
   const providers = asRecord(root.providers);
-  if (!providers) return;
+  if (!providers) {
+    return nativeProviderPlan(profile, configFile, before, null, undefined);
+  }
 
   let changed = false;
   for (const [key, value] of Object.entries(providers)) {
@@ -176,6 +261,13 @@ export function removeNativeCustomProvider(
     }
   }
   if (changed) {
-    safeWriteFile(configFile, document.toString({ lineWidth: 0 }));
+    return nativeProviderPlan(
+      profile,
+      configFile,
+      before,
+      document.toString({ lineWidth: 0 }),
+      undefined,
+    );
   }
+  return nativeProviderPlan(profile, configFile, before, null, undefined);
 }

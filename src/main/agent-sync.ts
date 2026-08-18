@@ -11,7 +11,18 @@ import { apiHeaders } from "./hermes-account";
 import { listProfiles, createProfile, type ProfileInfo } from "./profiles";
 import { setProfileColor } from "./profile-meta";
 import { readSoul, writeSoul } from "./soul";
-import { getModelConfig, setModelConfig } from "./config";
+import {
+  getConfigValue,
+  getModelConfig,
+  persistConfigWritePlan,
+  planModelConfigWrite,
+} from "./config";
+import { canonicalProviderBaseUrl } from "./provider-registry";
+import { canonicalPublicRouteKey } from "../shared/model-configuration";
+import {
+  requireManagedModelMutationValue,
+  type ManagedModelMutationPort,
+} from "./model-configuration-mutation-port";
 import { profileHome, safeWriteFile } from "./utils";
 import type {
   AgentSyncOutcome,
@@ -308,11 +319,16 @@ export function getAgentSyncStatus(): AgentSyncStatus {
   };
 }
 
-function applyPull(
+export interface AgentSyncDependencies {
+  modelMutationPort?: ManagedModelMutationPort;
+}
+
+async function applyPull(
   profileName: string,
   part: SyncPart,
   remote: PartValues,
-): void {
+  dependencies: AgentSyncDependencies,
+): Promise<void> {
   switch (part) {
     case "color":
       void setProfileColor(profileName, remote.color);
@@ -322,14 +338,39 @@ function applyPull(
       break;
     case "config": {
       if (!remote.config.model) break;
+      if (!dependencies.modelMutationPort) {
+        throw new Error("model_configuration_mutation_unavailable");
+      }
       // Only model/provider sync; keep whatever base URL is configured locally.
       const current = getModelConfig(profileName);
-      setModelConfig(
-        remote.config.provider || "auto",
-        remote.config.model,
-        current.baseUrl,
-        profileName,
-      );
+      const provider = remote.config.provider || "auto";
+      const effectiveBaseUrl =
+        current.baseUrl || canonicalProviderBaseUrl(provider) || "";
+      const apiMode = getConfigValue("model.api_mode", profileName);
+      const result = await dependencies.modelMutationPort.mutate({
+        operation: "agent_sync_config_pull",
+        globalCatalog: false,
+        profileIds: [profileName],
+        stage: "activation",
+        prepare: () => {
+          const plan = planModelConfigWrite(
+            provider,
+            remote.config.model,
+            current.baseUrl,
+            profileName,
+          );
+          return {
+            newRouteKey: canonicalPublicRouteKey({
+              provider,
+              model: remote.config.model,
+              baseUrl: effectiveBaseUrl,
+              apiMode,
+            }),
+            write: (permit) => persistConfigWritePlan(permit, plan),
+          };
+        },
+      });
+      requireManagedModelMutationValue(result);
       break;
     }
   }
@@ -341,7 +382,9 @@ function applyPull(
  * and local profiles for cloud-only agents, and unlink mappings whose cloud
  * agent disappeared. Never deletes anything on either side.
  */
-export async function syncAgents(): Promise<AgentSyncResult> {
+export async function syncAgents(
+  dependencies: AgentSyncDependencies = {},
+): Promise<AgentSyncResult> {
   if (running) {
     return (
       lastResult ?? {
@@ -354,7 +397,7 @@ export async function syncAgents(): Promise<AgentSyncResult> {
   }
   running = true;
   try {
-    const result = await runSyncPass();
+    const result = await runSyncPass(dependencies);
     lastResult = result;
     return result;
   } finally {
@@ -362,7 +405,9 @@ export async function syncAgents(): Promise<AgentSyncResult> {
   }
 }
 
-async function runSyncPass(): Promise<AgentSyncResult> {
+async function runSyncPass(
+  dependencies: AgentSyncDependencies,
+): Promise<AgentSyncResult> {
   const finished = (
     r: Omit<AgentSyncResult, "finishedAt">,
   ): AgentSyncResult => ({
@@ -533,7 +578,9 @@ async function runSyncPass(): Promise<AgentSyncResult> {
           }
         }
       }
-      for (const part of toPull) applyPull(profile.id, part, remote);
+      for (const part of toPull) {
+        await applyPull(profile.id, part, remote, dependencies);
+      }
 
       // New base per part: whichever side won is now common ground. Parts
       // that failed to push (or were skipped as oversize) keep their old base
@@ -630,7 +677,7 @@ async function runSyncPass(): Promise<AgentSyncResult> {
   for (const agent of remotes) {
     if (claimed.has(agent.id)) continue;
     const warnings: string[] = [];
-    const createRes = createProfile(agent.name, null);
+    const createRes = await createProfile(agent.name, null);
     if (!createRes.success || !createRes.id) {
       outcomes.push({
         profile: agent.name,
@@ -642,7 +689,19 @@ async function runSyncPass(): Promise<AgentSyncResult> {
     }
     const id = createRes.id;
     const remote = remotePartValues(agent);
-    for (const part of PARTS) applyPull(id, part, remote);
+    try {
+      for (const part of PARTS) {
+        await applyPull(id, part, remote, dependencies);
+      }
+    } catch (err) {
+      outcomes.push({
+        profile: id,
+        agentId: agent.id,
+        action: "error",
+        warnings: [...warnings, (err as Error).message],
+      });
+      continue;
+    }
     writeSyncState(id, {
       version: 1,
       agentId: agent.id,

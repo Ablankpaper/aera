@@ -210,18 +210,27 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
     expect(hashTree(profilePath)).toEqual(before);
   });
 
-  it("creates a fresh non-cloned Profile while preserving an existing unbound Profile", () => {
+  it("creates a fresh non-cloned Profile while preserving an existing unbound Profile", async () => {
     const before = hashTree(profilePath);
     const freshPath = join(root, "profiles", "fresh-space");
-    const createProfile = vi.fn((name: string, cloneFrom: string | null) => {
-      expect(name).toBe("Fresh Space");
-      expect(cloneFrom).toBeNull();
-      mkdirSync(freshPath, { recursive: true });
-      return { success: true, id: basename(freshPath) };
-    });
+    const createProfile = vi.fn(
+      async (
+        name: string,
+        cloneFrom: string | null,
+        _reservedProfileId?: string,
+        activation?: { authorize: () => boolean | Promise<boolean> },
+      ) => {
+        expect(name).toBe("Fresh Space");
+        expect(cloneFrom).toBeNull();
+        expect(activation).toBeDefined();
+        expect(await activation?.authorize()).toBe(true);
+        mkdirSync(freshPath, { recursive: true });
+        return { success: true, id: basename(freshPath) };
+      },
+    );
     const activateProfile = vi.fn();
 
-    const created = store.createAndBindFreshProfile({
+    const created = await store.createAndBindFreshProfile({
       operationId: AGENT_INSTALLATION_ID,
       name: "Fresh Space",
       owner,
@@ -239,6 +248,7 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
       "Fresh Space",
       null,
       "fresh-space",
+      expect.objectContaining({ authorize: expect.any(Function) }),
     );
     expect(activateProfile).toHaveBeenCalledOnce();
     expect(activateProfile).toHaveBeenCalledWith("fresh-space");
@@ -253,7 +263,7 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
     expect(hashTree(profilePath)).toEqual(before);
   });
 
-  it("recovers one exact reserved Profile after creation is interrupted", () => {
+  it("recovers one exact reserved Profile after creation is interrupted", async () => {
     const reservedPath = join(root, "profiles", "reserved-fresh");
     const reservation = store.reserveFreshProfile({
       operationId: AGENT_INSTALLATION_ID,
@@ -277,14 +287,14 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
         throw new Error("injected creation interruption");
       },
     );
-    expect(() =>
+    await expect(
       store.reconcileFreshProfile(AGENT_INSTALLATION_ID, {
         owner,
         createProfile: interruptedCreate,
         resolveProfilePath: () => reservedPath,
         activateProfile: vi.fn(),
       }),
-    ).toThrow("injected creation interruption");
+    ).rejects.toThrow("injected creation interruption");
 
     const restarted = new AgenteraProfileBindingStore({
       userDataPath: userData,
@@ -295,15 +305,18 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
     const duplicateCreate = vi.fn(() => {
       throw new Error("must not create a second Profile");
     });
-    const recovered = restarted.reconcileFreshProfile(AGENT_INSTALLATION_ID, {
-      owner,
-      createProfile: duplicateCreate,
-      resolveProfilePath: (profileId) => {
-        expect(profileId).toBe("reserved-fresh");
-        return reservedPath;
+    const recovered = await restarted.reconcileFreshProfile(
+      AGENT_INSTALLATION_ID,
+      {
+        owner,
+        createProfile: duplicateCreate,
+        resolveProfilePath: (profileId) => {
+          expect(profileId).toBe("reserved-fresh");
+          return reservedPath;
+        },
+        activateProfile: vi.fn(),
       },
-      activateProfile: vi.fn(),
-    });
+    );
 
     expect(duplicateCreate).not.toHaveBeenCalled();
     expect(recovered).toMatchObject({
@@ -376,7 +389,7 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
     ).toThrow(/reservation conflict/i);
   });
 
-  it("retries activating reservations after restart and completes them only after activation", () => {
+  it("retries activating reservations after restart and completes them only after activation", async () => {
     const reservedPath = join(root, "profiles", "activate-after-restart");
     store.reserveFreshProfile({
       operationId: AGENT_INSTALLATION_ID,
@@ -388,7 +401,7 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
       throw new Error("injected activation interruption");
     });
 
-    expect(() =>
+    await expect(
       store.reconcileFreshProfile(AGENT_INSTALLATION_ID, {
         owner,
         createProfile: (_name, _cloneFrom, reservedProfileId) => {
@@ -399,7 +412,7 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
         resolveProfilePath: () => reservedPath,
         activateProfile: failedActivation,
       }),
-    ).toThrow("injected activation interruption");
+    ).rejects.toThrow("injected activation interruption");
     expect(
       store.getFreshProfileReservation(AGENT_INSTALLATION_ID, owner),
     ).not.toBeNull();
@@ -410,14 +423,14 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
       randomUUID: () => OTHER_RUNTIME_PROFILE_ID,
     });
     const activateProfile = vi.fn();
-    expect(
+    await expect(
       restarted.reconcileActivatingFreshProfiles({
         owner,
         createProfile: vi.fn(),
         resolveProfilePath: () => reservedPath,
         activateProfile,
       }),
-    ).toEqual([
+    ).resolves.toEqual([
       expect.objectContaining({
         profileId: "activate-after-restart",
         binding: expect.objectContaining({
@@ -431,7 +444,7 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
     ).toBeNull();
   });
 
-  it("completes a non-activating reservation only for its exact Runtime Profile", () => {
+  it("completes a non-activating reservation only for its exact Runtime Profile", async () => {
     const reservedPath = join(root, "profiles", "installation-reserved");
     store.reserveFreshProfile({
       operationId: AGENT_INSTALLATION_ID,
@@ -440,15 +453,18 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
       profileId: "installation-reserved",
       activate: false,
     });
-    const reconciled = store.reconcileFreshProfile(AGENT_INSTALLATION_ID, {
-      owner,
-      createProfile: (_name, _cloneFrom, reservedProfileId) => {
-        mkdirSync(reservedPath, { recursive: true });
-        return { success: true, id: reservedProfileId };
+    const reconciled = await store.reconcileFreshProfile(
+      AGENT_INSTALLATION_ID,
+      {
+        owner,
+        createProfile: (_name, _cloneFrom, reservedProfileId) => {
+          mkdirSync(reservedPath, { recursive: true });
+          return { success: true, id: reservedProfileId };
+        },
+        resolveProfilePath: () => reservedPath,
+        activateProfile: vi.fn(),
       },
-      resolveProfilePath: () => reservedPath,
-      activateProfile: vi.fn(),
-    });
+    );
 
     expect(() =>
       store.completeFreshProfileReservation(
@@ -473,7 +489,7 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
     ).toBe(false);
   });
 
-  it("does not claim a reserved path already bound to another owner", () => {
+  it("does not claim a reserved path already bound to another owner", async () => {
     const reservedPath = join(root, "profiles", "foreign-reserved");
     mkdirSync(reservedPath, { recursive: true });
     store.bindExistingProfile(reservedPath, otherOwner);
@@ -491,20 +507,20 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
       activate: false,
     });
 
-    expect(() =>
+    await expect(
       store.reconcileFreshProfile(AGENT_INSTALLATION_ID, {
         owner,
         createProfile: vi.fn(),
         resolveProfilePath: () => reservedPath,
         activateProfile: vi.fn(),
       }),
-    ).toThrow(/another Aera owner|cannot be reassigned/i);
+    ).rejects.toThrow(/another Aera owner|cannot be reassigned/i);
     expect(store.verifyProfileBinding(reservedPath, otherOwner).ownerId).toBe(
       otherOwner.ownerId,
     );
   });
 
-  it("fails closed when an interrupted reserved Profile contains private markers", () => {
+  it("fails closed when an interrupted reserved Profile contains private markers", async () => {
     const reservedPath = join(root, "profiles", "private-reserved");
     mkdirSync(reservedPath, { recursive: true });
     writeFileSync(join(reservedPath, "MEMORY.md"), "private memory\n");
@@ -516,14 +532,14 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
       activate: false,
     });
 
-    expect(() =>
+    await expect(
       store.reconcileFreshProfile(AGENT_INSTALLATION_ID, {
         owner,
         createProfile: vi.fn(),
         resolveProfilePath: () => reservedPath,
         activateProfile: vi.fn(),
       }),
-    ).toThrow(/private data/i);
+    ).rejects.toThrow(/private data/i);
     expect(() => store.verifyProfileBinding(reservedPath, owner)).toThrow(
       /binding is required/i,
     );
@@ -576,9 +592,9 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
     );
   });
 
-  it("allows only the immediate Runtime scaffold on the fresh Profile path", () => {
+  it("allows only the immediate Runtime scaffold on the fresh Profile path", async () => {
     const freshPath = join(root, "profiles", "runtime-scaffold");
-    const created = store.createAndBindFreshProfile({
+    const created = await store.createAndBindFreshProfile({
       operationId: AGENT_INSTALLATION_ID,
       name: "Runtime Scaffold",
       owner,
@@ -610,7 +626,7 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
       now: () => new Date("2026-07-18T03:00:00.000Z"),
       randomUUID: () => OTHER_RUNTIME_PROFILE_ID,
     });
-    expect(() =>
+    await expect(
       store.createAndBindFreshProfile({
         operationId: OTHER_AGENT_INSTALLATION_ID,
         name: "Unsafe Fresh",
@@ -625,7 +641,7 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
         resolveProfilePath: () => unsafePath,
         activateProfile: vi.fn(),
       }),
-    ).toThrow(/private data/i);
+    ).rejects.toThrow(/private data/i);
   });
 
   it("never permits a physical Profile to be reassigned, including after cloud deletion", () => {

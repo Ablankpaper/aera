@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { withManagedModelTestWrite } from "./helpers/managed-model-test-writer";
 
 /**
  * Workaround coverage for fathah/hermes-desktop#260:
@@ -18,6 +19,21 @@ async function loadConfig(): Promise<typeof import("../src/main/config")> {
   vi.resetModules();
   vi.stubEnv("HERMES_HOME", testHome);
   return await import("../src/main/config");
+}
+
+async function writeDefaultProfile<T>(
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  return await withManagedModelTestWrite(
+    {
+      roots: {
+        globalRoot: testHome,
+        profiles: { default: testHome },
+      },
+      scope: { globalCatalog: false, profileIds: ["default"] },
+    },
+    callback,
+  );
 }
 
 function writeBaseFiles(env: string, yaml: string): void {
@@ -45,10 +61,12 @@ describe("setModelConfig — known-host custom provider auto-api-key (issue #260
     writeBaseFiles("DEEPSEEK_API_KEY=sk-deepseek-real-key\n", SEED_YAML);
     const { setModelConfig } = await loadConfig();
 
-    setModelConfig(
-      "custom",
-      "deepseek-reasoner",
-      "https://api.deepseek.com/v1",
+    await writeDefaultProfile(() =>
+      setModelConfig(
+        "custom",
+        "deepseek-reasoner",
+        "https://api.deepseek.com/v1",
+      ),
     );
 
     const out = readFileSync(join(testHome, "config.yaml"), "utf-8");
@@ -62,10 +80,12 @@ describe("setModelConfig — known-host custom provider auto-api-key (issue #260
     writeBaseFiles('DEEPSEEK_API_KEY="sk-quoted-key"\n', SEED_YAML);
     const { setModelConfig } = await loadConfig();
 
-    setModelConfig(
-      "custom",
-      "deepseek-reasoner",
-      "https://api.deepseek.com/v1",
+    await writeDefaultProfile(() =>
+      setModelConfig(
+        "custom",
+        "deepseek-reasoner",
+        "https://api.deepseek.com/v1",
+      ),
     );
 
     const out = readFileSync(join(testHome, "config.yaml"), "utf-8");
@@ -77,7 +97,13 @@ describe("setModelConfig — known-host custom provider auto-api-key (issue #260
     writeBaseFiles("GROQ_API_KEY=gsk_test_value\n", SEED_YAML);
     const { setModelConfig } = await loadConfig();
 
-    setModelConfig("custom", "llama-3.1-70b", "https://api.groq.com/openai/v1");
+    await writeDefaultProfile(() =>
+      setModelConfig(
+        "custom",
+        "llama-3.1-70b",
+        "https://api.groq.com/openai/v1",
+      ),
+    );
 
     const out = readFileSync(join(testHome, "config.yaml"), "utf-8");
     expect(out).toContain('api_key: "gsk_test_value"');
@@ -87,10 +113,12 @@ describe("setModelConfig — known-host custom provider auto-api-key (issue #260
     writeBaseFiles("UNRELATED=x\n", SEED_YAML);
     const { setModelConfig } = await loadConfig();
 
-    setModelConfig(
-      "custom",
-      "deepseek-reasoner",
-      "https://api.deepseek.com/v1",
+    await writeDefaultProfile(() =>
+      setModelConfig(
+        "custom",
+        "deepseek-reasoner",
+        "https://api.deepseek.com/v1",
+      ),
     );
 
     const out = readFileSync(join(testHome, "config.yaml"), "utf-8");
@@ -104,7 +132,9 @@ describe("setModelConfig — known-host custom provider auto-api-key (issue #260
     writeBaseFiles("OPENAI_API_KEY=sk-something\n", SEED_YAML);
     const { setModelConfig } = await loadConfig();
 
-    setModelConfig("custom", "llama3", "http://localhost:11434/v1");
+    await writeDefaultProfile(() =>
+      setModelConfig("custom", "llama3", "http://localhost:11434/v1"),
+    );
 
     const out = readFileSync(join(testHome, "config.yaml"), "utf-8");
     expect(out).not.toContain("api_key:");
@@ -116,10 +146,12 @@ describe("setModelConfig — known-host custom provider auto-api-key (issue #260
 
     // Built-in providers go through their own gateway path; the workaround
     // is scoped strictly to bare-`custom`.
-    setModelConfig(
-      "deepseek",
-      "deepseek-reasoner",
-      "https://api.deepseek.com/v1",
+    await writeDefaultProfile(() =>
+      setModelConfig(
+        "deepseek",
+        "deepseek-reasoner",
+        "https://api.deepseek.com/v1",
+      ),
     );
 
     const out = readFileSync(join(testHome, "config.yaml"), "utf-8");
@@ -139,7 +171,9 @@ describe("setModelConfig — known-host custom provider auto-api-key (issue #260
 
     // User switches to Anthropic (built-in provider) — the leftover
     // api_key for the prior custom provider should not linger.
-    setModelConfig("anthropic", "claude-3-5-sonnet", "");
+    await writeDefaultProfile(() =>
+      setModelConfig("anthropic", "claude-3-5-sonnet", ""),
+    );
 
     const out = readFileSync(join(testHome, "config.yaml"), "utf-8");
     expect(out).not.toContain("api_key:");
@@ -171,10 +205,12 @@ auxiliary:
     writeBaseFiles("DEEPSEEK_API_KEY=sk-deepseek-real\n", realisticYaml);
     const { setModelConfig } = await loadConfig();
 
-    setModelConfig(
-      "custom",
-      "deepseek-reasoner",
-      "https://api.deepseek.com/v1",
+    await writeDefaultProfile(() =>
+      setModelConfig(
+        "custom",
+        "deepseek-reasoner",
+        "https://api.deepseek.com/v1",
+      ),
     );
 
     const out = readFileSync(join(testHome, "config.yaml"), "utf-8");
@@ -203,10 +239,12 @@ auxiliary:
     writeBaseFiles("DEEPSEEK_API_KEY=sk-deepseek-new\n", initial);
     const { setModelConfig } = await loadConfig();
 
-    setModelConfig(
-      "custom",
-      "deepseek-reasoner",
-      "https://api.deepseek.com/v1",
+    await writeDefaultProfile(() =>
+      setModelConfig(
+        "custom",
+        "deepseek-reasoner",
+        "https://api.deepseek.com/v1",
+      ),
     );
 
     const out = readFileSync(join(testHome, "config.yaml"), "utf-8");

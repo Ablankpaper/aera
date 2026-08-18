@@ -1,8 +1,8 @@
 import { execFileSync } from "child_process";
-import { join } from "path";
+import { dirname, join } from "path";
 import { homedir } from "os";
 import { promises as fs } from "fs";
-import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, writeFileSync } from "fs";
 import { HERMES_HOME, getEnhancedPath } from "./installer";
 import { getRuntimeInvocation } from "./agentera-runtime-distribution/invocation";
 import {
@@ -15,6 +15,13 @@ import {
 } from "./utils";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 import { readProfileMeta, defaultColorForName } from "./profile-meta";
+import {
+  createStagedProfileCandidate,
+  StagedProfileError,
+  type StagedProfileCandidate,
+  type StagedProfileSourceKind,
+} from "./model-configuration-staged-profile";
+import { defaultModelConfigurationWriteAuthority } from "./model-configuration-write-authority";
 
 const PROFILES_DIR = join(HERMES_HOME, "profiles");
 
@@ -61,6 +68,14 @@ export interface CreateProfileResult {
   id?: string;
 }
 
+export interface ProfileActivationGuard {
+  authorize(): boolean | Promise<boolean>;
+}
+
+export interface PreparedProfileResult extends CreateProfileResult {
+  candidate?: StagedProfileCandidate;
+}
+
 export interface LocalProfileLocation {
   id: string;
   path: string;
@@ -102,6 +117,57 @@ export function profileIdForAgentName(agentName: string): string {
     if (!profileIdExists(candidate)) return candidate;
   }
   return `${base.slice(0, 55)}-${Date.now().toString(36)}`;
+}
+
+const CLONE_SOURCE_FILES = [
+  "config.yaml",
+  ".env",
+  "providers.json",
+  "SOUL.md",
+] as const;
+const CLONE_SOURCE_SUBDIR_FILES = [
+  "memories/MEMORY.md",
+  "memories/USER.md",
+] as const;
+
+const STAGED_GLOBAL_FILES = ["models.json", "model-definitions.json"] as const;
+
+function stageGlobalCatalog(stagingHome: string): void {
+  for (const filename of STAGED_GLOBAL_FILES) {
+    const sourcePath = join(HERMES_HOME, filename);
+    if (existsSync(sourcePath)) {
+      copyFileSync(sourcePath, join(stagingHome, filename));
+    }
+  }
+}
+
+function stageCloneSource(sourceProfileId: string, stagingHome: string): void {
+  const source = profileHome(sourceProfileId);
+  const destination =
+    sourceProfileId === "default"
+      ? stagingHome
+      : join(stagingHome, "profiles", sourceProfileId);
+  mkdirSync(destination, { recursive: true, mode: 0o700 });
+  for (const filename of CLONE_SOURCE_FILES) {
+    const sourcePath = join(source, filename);
+    if (!existsSync(sourcePath)) continue;
+    copyFileSync(sourcePath, join(destination, filename));
+  }
+  const sourceSkills = join(source, "skills");
+  if (existsSync(sourceSkills)) {
+    cpSync(sourceSkills, join(destination, "skills"), {
+      recursive: true,
+      dereference: false,
+      preserveTimestamps: true,
+    });
+  }
+  for (const relativePath of CLONE_SOURCE_SUBDIR_FILES) {
+    const sourcePath = join(source, relativePath);
+    if (!existsSync(sourcePath)) continue;
+    const destinationPath = join(destination, relativePath);
+    mkdirSync(dirname(destinationPath), { recursive: true, mode: 0o700 });
+    copyFileSync(sourcePath, destinationPath);
+  }
 }
 
 async function readProfileConfig(profilePath: string): Promise<{
@@ -316,11 +382,31 @@ export async function listLocalProfileLocations(): Promise<
   return profiles;
 }
 
-export function createProfile(
+function stagedProfileFailure(error: unknown): CreateProfileResult {
+  if (
+    error instanceof StagedProfileError &&
+    error.code === "staged_profile_invalid"
+  ) {
+    return { success: false, error: "Staged Profile validation failed." };
+  }
+  if (
+    error instanceof StagedProfileError &&
+    error.code === "staged_profile_owner_changed"
+  ) {
+    return {
+      success: false,
+      error: "Staged Profile owner changed before activation.",
+    };
+  }
+  return { success: false, error: commandErrorMessage(error) };
+}
+
+export async function prepareProfile(
   name: string,
   cloneFrom: string | null,
   reservedProfileId?: string,
-): CreateProfileResult {
+  sourceKind: StagedProfileSourceKind = cloneFrom ? "clone" : "import",
+): Promise<PreparedProfileResult> {
   const agentName = normalizeAgentName(name);
   if (!agentName) {
     return { success: false, error: "Agent name is required" };
@@ -355,43 +441,75 @@ export function createProfile(
   }
 
   try {
-    execFileSync(invocation.python, invocation.cliArgs(args), {
-      cwd: invocation.workingDirectory,
-      env: invocation.environment({
-        ...process.env,
-        PATH: getEnhancedPath(),
-        HOME: homedir(),
-        HERMES_HOME,
-      }),
-      stdio: "pipe",
-      timeout: 30000,
-      ...HIDDEN_SUBPROCESS_OPTIONS,
+    const candidate = await createStagedProfileCandidate({
+      profilesRoot: PROFILES_DIR,
+      destinationProfileId: id,
+      sourceKind,
+      materialize: async ({ stagingHome, stagingPath }) => {
+        await defaultModelConfigurationWriteAuthority.run(
+          {
+            globalCatalog: true,
+            profileIds: cloneFrom ? [cloneFrom] : [],
+          },
+          () => {
+            stageGlobalCatalog(stagingHome);
+            if (cloneFrom) stageCloneSource(cloneFrom, stagingHome);
+          },
+        );
+        execFileSync(invocation.python, invocation.cliArgs(args), {
+          cwd: invocation.workingDirectory,
+          env: invocation.environment({
+            ...process.env,
+            PATH: getEnhancedPath(),
+            HOME: homedir(),
+            HERMES_HOME: stagingHome,
+          }),
+          stdio: "pipe",
+          timeout: 30000,
+          ...HIDDEN_SUBPROCESS_OPTIONS,
+        });
+        try {
+          writeFileSync(
+            join(stagingPath, "profile-meta.json"),
+            JSON.stringify({ name: agentName }, null, 2),
+            "utf-8",
+          );
+        } catch (err) {
+          console.warn(
+            `Created profile "${id}" but failed to write profile metadata:`,
+            err,
+          );
+        }
+      },
     });
+    return { success: true, id, candidate };
   } catch (err) {
-    return { success: false, error: commandErrorMessage(err) };
+    return stagedProfileFailure(err);
   }
-
-  try {
-    mkdirSync(profileHome(id), { recursive: true });
-    writeFileSync(
-      join(profileHome(id), "profile-meta.json"),
-      JSON.stringify({ name: agentName }, null, 2),
-      "utf-8",
-    );
-  } catch (err) {
-    console.warn(
-      `Created profile "${id}" but failed to write profile metadata:`,
-      err,
-    );
-  }
-
-  return { success: true, id };
 }
 
-export function deleteProfile(name: string): {
+export async function createProfile(
+  name: string,
+  cloneFrom: string | null,
+  reservedProfileId?: string,
+  activation?: ProfileActivationGuard,
+): Promise<CreateProfileResult> {
+  const prepared = await prepareProfile(name, cloneFrom, reservedProfileId);
+  if (!prepared.success || !prepared.id || !prepared.candidate) {
+    return prepared;
+  }
+  try {
+    await prepared.candidate.activate(activation);
+    return { success: true, id: prepared.id };
+  } catch (error) {
+    return stagedProfileFailure(error);
+  }
+}
+
+export async function deleteProfile(name: string): Promise<{
   success: boolean;
   error?: string;
-} {
+}> {
   if (name === "default")
     return { success: false, error: "Cannot delete the default profile" };
   if (!isValidNamedProfileName(name)) {
@@ -403,23 +521,28 @@ export function deleteProfile(name: string): {
   }
 
   try {
-    execFileSync(
-      invocation.python,
-      invocation.cliArgs(["profile", "delete", name, "--yes"]),
-      {
-        cwd: invocation.workingDirectory,
-        env: invocation.environment({
-          ...process.env,
-          PATH: getEnhancedPath(),
-          HOME: homedir(),
-          HERMES_HOME,
-        }),
-        stdio: "pipe",
-        timeout: 30000,
-        ...HIDDEN_SUBPROCESS_OPTIONS,
+    return await defaultModelConfigurationWriteAuthority.run(
+      { globalCatalog: false, profileIds: [name] },
+      () => {
+        execFileSync(
+          invocation.python,
+          invocation.cliArgs(["profile", "delete", name, "--yes"]),
+          {
+            cwd: invocation.workingDirectory,
+            env: invocation.environment({
+              ...process.env,
+              PATH: getEnhancedPath(),
+              HOME: homedir(),
+              HERMES_HOME,
+            }),
+            stdio: "pipe",
+            timeout: 30000,
+            ...HIDDEN_SUBPROCESS_OPTIONS,
+          },
+        );
+        return { success: true };
       },
     );
-    return { success: true };
   } catch (err) {
     return { success: false, error: commandErrorMessage(err) };
   }

@@ -2,13 +2,139 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { HERMES_HOME } from "./installer";
-import { safeWriteFile, profilePaths } from "./utils";
+import { profilePaths } from "./utils";
 import { hostDerivedEnvKeyForUrl } from "./host-derived-env";
 import { customProviderEnvKey } from "../shared/url-key-map";
+import type { ModelConfigurationMutationResult } from "../shared/model-configuration";
 import DEFAULT_MODELS from "./default-models";
+import {
+  planApiServerKeyMigration,
+  planEnvValueWrite,
+  persistConfigWritePlan,
+  readEnv,
+  recordApiServerKeyMigration,
+  type ApiServerKeyMigrationPlan,
+} from "./config";
+import type { ManagedModelFileInitialization } from "./model-configuration-coordinator";
+import {
+  currentModelConfigurationWritePermit,
+  writeManagedModelFile,
+  type ManagedModelFileRole,
+  type ModelConfigurationWritePermit,
+} from "./model-configuration-managed-files";
 
 const MODELS_FILE = join(HERMES_HOME, "models.json");
 const MODEL_DEFS_FILE = join(HERMES_HOME, "model-definitions.json");
+
+export interface ModelCatalogFilePatch {
+  readonly role: Extract<ManagedModelFileRole, "models" | "modelDefinitions">;
+  readonly target: string;
+  readonly before: Buffer | null;
+  readonly after: Buffer;
+}
+
+export interface ModelCatalogWritePlan<T> {
+  readonly patches: readonly ModelCatalogFilePatch[];
+  readonly value: T;
+}
+
+function modelCatalogPatch(
+  role: ModelCatalogFilePatch["role"],
+  target: string,
+  value: unknown,
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): ModelCatalogFilePatch {
+  const basePatch = basePlan?.patches.find(
+    (candidate) => candidate.role === role,
+  );
+  return Object.freeze({
+    role,
+    target,
+    before: basePatch
+      ? basePatch.before
+      : existsSync(target)
+        ? readFileSync(target)
+        : null,
+    after: Buffer.from(JSON.stringify(value, null, 2)),
+  });
+}
+
+function modelCatalogPlan<T>(
+  patches: readonly ModelCatalogFilePatch[],
+  value: T,
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): ModelCatalogWritePlan<T> {
+  const merged = new Map<
+    ModelCatalogFilePatch["role"],
+    ModelCatalogFilePatch
+  >();
+  for (const patch of basePlan?.patches ?? []) merged.set(patch.role, patch);
+  for (const patch of patches) merged.set(patch.role, patch);
+  return Object.freeze({
+    patches: Object.freeze([...merged.values()]),
+    value,
+  });
+}
+
+function plannedModels(
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): SavedModelRow[] {
+  const patch = basePlan?.patches.find(
+    (candidate) => candidate.role === "models",
+  );
+  if (!patch) return readModelsRaw();
+  const parsed = JSON.parse(patch.after.toString("utf8")) as unknown;
+  if (!Array.isArray(parsed)) throw new Error("Invalid planned model catalog.");
+  return parsed as SavedModelRow[];
+}
+
+function plannedModelDefinitions(
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): Record<string, ModelDefinition> {
+  const patch = basePlan?.patches.find(
+    (candidate) => candidate.role === "modelDefinitions",
+  );
+  if (!patch) return readModelDefinitions();
+  const parsed = JSON.parse(patch.after.toString("utf8")) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Invalid planned model definitions.");
+  }
+  return parsed as Record<string, ModelDefinition>;
+}
+
+function modelCatalogBytesEqual(
+  left: Buffer | null,
+  right: Buffer | null,
+): boolean {
+  return left === null ? right === null : right !== null && left.equals(right);
+}
+
+export function persistModelCatalogWritePlan<T>(
+  permit: ModelConfigurationWritePermit | null | undefined,
+  plan: ModelCatalogWritePlan<T>,
+): T {
+  for (const patch of plan.patches) {
+    const current = existsSync(patch.target)
+      ? readFileSync(patch.target)
+      : null;
+    if (!modelCatalogBytesEqual(current, patch.before)) {
+      throw new Error("Model catalog write plan is stale.");
+    }
+  }
+  for (const patch of plan.patches) {
+    writeManagedModelFile(permit, patch.target, patch.after);
+  }
+  return plan.value;
+}
+
+function persistLegacyModelCatalogWritePlan<T>(
+  plan: ModelCatalogWritePlan<T>,
+): T {
+  return persistModelCatalogWritePlan(
+    currentModelConfigurationWritePermit(),
+    plan,
+  );
+}
 
 /**
  * A persisted `models.json` row — a pure *attachment* of a model id to a
@@ -76,6 +202,42 @@ export interface ModelDefinition {
   updatedAt: number;
 }
 
+export interface ModelCatalogDerivedCredential {
+  profileId: string;
+  key: string;
+  value: string;
+}
+
+export interface ModelCatalogInitializationPlan {
+  targetProfileId: string;
+  profileIds: readonly string[];
+  seedDefaultModels: boolean;
+  migrateModelDefinitions: boolean;
+  persistDerivedCredentials: readonly ModelCatalogDerivedCredential[];
+}
+
+export interface ModelCatalogInitializationCoordinator {
+  initializeManagedModelFiles(
+    input: ManagedModelFileInitialization,
+  ): Promise<ModelConfigurationMutationResult>;
+}
+
+interface InternalModelCatalogInitializationPlan {
+  before: {
+    models: Buffer | null;
+    modelDefinitions: Buffer | null;
+    env: Buffer | null;
+  };
+  modelsAfter: SavedModelRow[] | null;
+  definitionsAfter: Record<string, ModelDefinition> | null;
+  apiServerKeyMigration: ApiServerKeyMigrationPlan | null;
+}
+
+const internalInitializationPlans = new WeakMap<
+  ModelCatalogInitializationPlan,
+  InternalModelCatalogInitializationPlan
+>();
+
 /** Coerce an arbitrary value to a positive integer token count, or undefined. */
 function normalizeContextLength(value: unknown): number | undefined {
   const n =
@@ -103,6 +265,15 @@ export function readModelsRaw(): SavedModelRow[] {
   }
 }
 
+function readModelsRawStrict(): SavedModelRow[] {
+  if (!existsSync(MODELS_FILE)) return [];
+  const parsed = JSON.parse(readFileSync(MODELS_FILE, "utf-8")) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error("The model catalog is not a JSON array.");
+  }
+  return parsed as SavedModelRow[];
+}
+
 /**
  * Public read: raw rows with their matching {@link ModelDefinition} merged on.
  * `contextLength` comes from the definition (source of truth); a row's own
@@ -128,8 +299,11 @@ export function readModels(): SavedModel[] {
   });
 }
 
-function writeModels(models: SavedModelRow[]): void {
-  safeWriteFile(MODELS_FILE, JSON.stringify(models, null, 2));
+function writeModels(
+  permit: ModelConfigurationWritePermit | null,
+  models: SavedModelRow[],
+): void {
+  writeManagedModelFile(permit, MODELS_FILE, JSON.stringify(models, null, 2));
 }
 
 /** Read the definitions map (`{ [modelId]: ModelDefinition }`), tolerant of a
@@ -144,8 +318,24 @@ export function readModelDefinitions(): Record<string, ModelDefinition> {
   }
 }
 
-function writeModelDefinitions(defs: Record<string, ModelDefinition>): void {
-  safeWriteFile(MODEL_DEFS_FILE, JSON.stringify(defs, null, 2));
+function readModelDefinitionsStrict(): Record<string, ModelDefinition> {
+  if (!existsSync(MODEL_DEFS_FILE)) return {};
+  const parsed = JSON.parse(readFileSync(MODEL_DEFS_FILE, "utf-8")) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("The model definition catalog is not a JSON object.");
+  }
+  return parsed as Record<string, ModelDefinition>;
+}
+
+function writeModelDefinitions(
+  permit: ModelConfigurationWritePermit | null,
+  defs: Record<string, ModelDefinition>,
+): void {
+  writeManagedModelFile(
+    permit,
+    MODEL_DEFS_FILE,
+    JSON.stringify(defs, null, 2),
+  );
 }
 
 export function listModelDefinitions(): ModelDefinition[] {
@@ -170,7 +360,19 @@ export function setModelDefinition(
     modalities?: { input?: string[]; output?: string[] };
   },
 ): ModelDefinition {
-  const defs = readModelDefinitions();
+  return persistLegacyModelCatalogWritePlan(
+    planSetModelDefinition(model, patch),
+  );
+}
+
+type ModelDefinitionPatch = Parameters<typeof setModelDefinition>[1];
+
+function applyModelDefinitionPatch(
+  definitions: Record<string, ModelDefinition>,
+  model: string,
+  patch: ModelDefinitionPatch,
+): ModelDefinition {
+  const defs = definitions;
   const now = Date.now();
   const prev = defs[model];
   const next: ModelDefinition = prev
@@ -188,16 +390,39 @@ export function setModelDefinition(
       : undefined;
   if (patch.modalities !== undefined) next.modalities = patch.modalities;
   defs[model] = next;
-  writeModelDefinitions(defs);
   return next;
 }
 
+export function planSetModelDefinition(
+  model: string,
+  patch: ModelDefinitionPatch,
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): ModelCatalogWritePlan<ModelDefinition> {
+  const defs = plannedModelDefinitions(basePlan);
+  const next = applyModelDefinitionPatch(defs, model, patch);
+  return modelCatalogPlan(
+    [modelCatalogPatch("modelDefinitions", MODEL_DEFS_FILE, defs, basePlan)],
+    next,
+    basePlan,
+  );
+}
+
 export function removeModelDefinition(model: string): boolean {
-  const defs = readModelDefinitions();
-  if (!(model in defs)) return false;
+  return persistLegacyModelCatalogWritePlan(planRemoveModelDefinition(model));
+}
+
+export function planRemoveModelDefinition(
+  model: string,
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): ModelCatalogWritePlan<boolean> {
+  const defs = plannedModelDefinitions(basePlan);
+  if (!(model in defs)) return modelCatalogPlan([], false, basePlan);
   delete defs[model];
-  writeModelDefinitions(defs);
-  return true;
+  return modelCatalogPlan(
+    [modelCatalogPatch("modelDefinitions", MODEL_DEFS_FILE, defs, basePlan)],
+    true,
+    basePlan,
+  );
 }
 
 /**
@@ -208,16 +433,20 @@ export function removeModelDefinition(model: string): boolean {
  * into any existing definitions file and is idempotent — after it runs no row
  * has `contextLength`, so a re-run hoists nothing.
  */
-export function ensureModelDefinitionsMigrated(): void {
-  const rawRows = readModelsRaw() as Array<
-    SavedModelRow & { contextLength?: number }
-  >;
+function planModelDefinitionMigration(
+  rows: readonly SavedModelRow[],
+  existingDefinitions: Readonly<Record<string, ModelDefinition>>,
+): {
+  rows: SavedModelRow[];
+  definitions: Record<string, ModelDefinition>;
+} | null {
+  const rawRows = rows as Array<SavedModelRow & { contextLength?: number }>;
   const legacy = rawRows.filter(
     (r) => normalizeContextLength(r.contextLength) !== undefined,
   );
-  if (legacy.length === 0) return;
+  if (legacy.length === 0) return null;
 
-  const defs = readModelDefinitions();
+  const defs = { ...existingDefinitions };
   const now = Date.now();
   for (const row of legacy) {
     const ctx = normalizeContextLength(row.contextLength)!;
@@ -234,15 +463,23 @@ export function ensureModelDefinitionsMigrated(): void {
       updatedAt: now,
     };
   }
-  writeModelDefinitions(defs);
-
-  // Strip the now-redundant field from every row.
   const stripped = rawRows.map((r) => {
     const { contextLength: _drop, ...rest } = r;
     void _drop;
     return rest as SavedModelRow;
   });
-  writeModels(stripped);
+  return { rows: stripped, definitions: defs };
+}
+
+export function ensureModelDefinitionsMigrated(): void {
+  const migration = planModelDefinitionMigration(
+    readModelsRawStrict(),
+    readModelDefinitionsStrict(),
+  );
+  if (!migration) return;
+  const permit = currentModelConfigurationWritePermit();
+  writeModelDefinitions(permit, migration.definitions);
+  writeModels(permit, migration.rows);
 }
 
 interface CustomProviderEntry {
@@ -302,99 +539,246 @@ function loadCustomProviders(profile?: string): CustomProviderEntry[] {
   return result;
 }
 
-function seedDefaults(profile?: string): SavedModelRow[] {
-  const models: SavedModelRow[] = DEFAULT_MODELS.map((m) => ({
+function credentialKeysForCustomProvider(
+  provider: CustomProviderEntry,
+): string[] {
+  const customPrefixKey = customProviderEnvKey(provider.name);
+  const keys = [customPrefixKey];
+  const hostKey = hostDerivedEnvKeyForUrl(provider.baseUrl);
+  if (
+    hostKey &&
+    hostKey !== "OPENAI_API_KEY" &&
+    hostKey !== "ANTHROPIC_API_KEY" &&
+    hostKey !== customPrefixKey
+  ) {
+    keys.push(hostKey);
+  }
+  return keys;
+}
+
+function buildDefaultModelSeed(profileIds: readonly string[]): {
+  rows: SavedModelRow[];
+  credentials: ModelCatalogDerivedCredential[];
+} {
+  const now = Date.now();
+  const rows: SavedModelRow[] = DEFAULT_MODELS.map((model) => ({
     id: randomUUID(),
-    name: m.name,
-    provider: m.provider,
-    model: m.model,
-    baseUrl: m.baseUrl,
-    createdAt: Date.now(),
+    name: model.name,
+    provider: model.provider,
+    model: model.model,
+    baseUrl: model.baseUrl,
+    createdAt: now,
   }));
-  try {
-    const { envFile } = profilePaths(profile);
-    const cpModels = loadCustomProviders(profile);
-    for (const cp of cpModels) {
-      models.push({
+  const credentials = new Map<string, ModelCatalogDerivedCredential>();
+
+  for (const profileId of profileIds) {
+    const existingEnv = readEnv(profileId);
+    for (const provider of loadCustomProviders(profileId)) {
+      rows.push({
         id: randomUUID(),
-        name: cp.name,
-        provider: cp.provider,
-        model: cp.model,
-        baseUrl: cp.baseUrl,
-        apiMode: cp.apiMode || null,
-        createdAt: Date.now(),
+        name: provider.name,
+        provider: provider.provider,
+        model: provider.model,
+        baseUrl: provider.baseUrl,
+        apiMode: provider.apiMode || null,
+        createdAt: now,
       });
-      if (cp.apiKey && cp.apiKey !== "no-key-required") {
-        try {
-          let envContent = existsSync(envFile)
-            ? readFileSync(envFile, "utf-8")
-            : "";
-          // Names to persist for this custom-provider key:
-          //   1. CUSTOM_PROVIDER_<NAME>_KEY — the historical desktop
-          //      contract; the runtime spawn in `hermes.ts` reads it
-          //      via the models.json baseUrl match.
-          //   2. <VENDOR>_API_KEY when the URL matches a known vendor
-          //      host (e.g. api.deepseek.com → DEEPSEEK_API_KEY) —
-          //      required for dual-engine compat: upstream-main's
-          //      `_host_derived_api_key()` won't accept the custom-
-          //      prefix form. Old engine (≤ v2026.5.16) doesn't have
-          //      the host-derive resolver and ignores this extra var,
-          //      so writing both is additive and safe.
-          // The gateway path in `hermes.ts:startGateway` ingests ALL
-          // profile env vars at spawn, so the host-derived form has
-          // to live in .env (not just be set at chat-time) for the
-          // long-running gateway flow to work on the new engine.
-          const customPrefixKey = customProviderEnvKey(cp.name);
-          const namesToWrite: string[] = [customPrefixKey];
-          const hostKey = hostDerivedEnvKeyForUrl(cp.baseUrl);
-          // Don't shadow real OPENAI / ANTHROPIC keys via this path —
-          // those belong to a separately-configured provider, not a
-          // custom-provider key. The persistence guard mirrors the
-          // runtime guard in `hermes.ts`.
-          if (
-            hostKey &&
-            hostKey !== "OPENAI_API_KEY" &&
-            hostKey !== "ANTHROPIC_API_KEY" &&
-            hostKey !== customPrefixKey
-          ) {
-            namesToWrite.push(hostKey);
-          }
-          let modified = false;
-          for (const envKey of namesToWrite) {
-            const keyRegex = new RegExp(
-              "^" + envKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "=.*$",
-              "m",
-            );
-            if (!keyRegex.test(envContent)) {
-              envContent =
-                envContent.trimEnd() + "\n" + envKey + "=" + cp.apiKey + "\n";
-              modified = true;
-            }
-          }
-          if (modified) {
-            safeWriteFile(envFile, envContent);
-          }
-        } catch {
-          /* best-effort */
+      if (!provider.apiKey || provider.apiKey === "no-key-required") continue;
+      for (const key of credentialKeysForCustomProvider(provider)) {
+        if (existingEnv[key] || credentials.has(`${profileId}\0${key}`)) {
+          continue;
         }
+        credentials.set(`${profileId}\0${key}`, {
+          profileId,
+          key,
+          value: provider.apiKey,
+        });
       }
     }
-  } catch (e) {
-    console.error("Failed to load custom providers:", e);
   }
-  writeModels(models);
-  return models;
+
+  return { rows, credentials: [...credentials.values()] };
+}
+
+function fileBytes(path: string): Buffer | null {
+  return existsSync(path) ? readFileSync(path) : null;
+}
+
+function bytesEqual(left: Buffer | null, right: Buffer | null): boolean {
+  return left === null ? right === null : right !== null && left.equals(right);
+}
+
+const PROFILE_ID_PATTERN = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
+
+function normalizedInitializationProfiles(
+  profileIds: readonly string[],
+): string[] {
+  const normalized = [
+    ...new Set(profileIds.map((profileId) => profileId.trim())),
+  ]
+    .filter(Boolean)
+    .sort();
+  if (
+    normalized.length === 0 ||
+    normalized.some((profileId) => !PROFILE_ID_PATTERN.test(profileId))
+  ) {
+    throw new Error("Invalid model catalog initialization Profile.");
+  }
+  return normalized;
+}
+
+export function planModelCatalogInitialization(
+  profileIds: readonly string[],
+): ModelCatalogInitializationPlan {
+  const normalizedProfiles = normalizedInitializationProfiles(profileIds);
+  const targetProfileId = normalizedProfiles.includes("default")
+    ? "default"
+    : normalizedProfiles[0];
+  const seedDefaultModels = !existsSync(MODELS_FILE);
+  const seed = seedDefaultModels
+    ? buildDefaultModelSeed([targetProfileId])
+    : { rows: readModelsRawStrict(), credentials: [] };
+  const definitions = readModelDefinitionsStrict();
+  const definitionMigration = planModelDefinitionMigration(
+    seed.rows,
+    definitions,
+  );
+  const apiServerKeyMigration = planApiServerKeyMigration(targetProfileId);
+  const persistDerivedCredentials = [...seed.credentials];
+  if (apiServerKeyMigration) {
+    persistDerivedCredentials.push({
+      profileId: apiServerKeyMigration.profileId,
+      key: "API_SERVER_KEY",
+      value: apiServerKeyMigration.value,
+    });
+  }
+
+  const plan: ModelCatalogInitializationPlan = Object.freeze({
+    targetProfileId,
+    profileIds: Object.freeze(normalizedProfiles.slice()),
+    seedDefaultModels,
+    migrateModelDefinitions: definitionMigration !== null,
+    persistDerivedCredentials: Object.freeze(
+      persistDerivedCredentials.map((credential) =>
+        Object.freeze({ ...credential }),
+      ),
+    ),
+  });
+  const { envFile } = profilePaths(targetProfileId);
+  internalInitializationPlans.set(plan, {
+    before: {
+      models: fileBytes(MODELS_FILE),
+      modelDefinitions: fileBytes(MODEL_DEFS_FILE),
+      env: fileBytes(envFile),
+    },
+    modelsAfter:
+      definitionMigration?.rows ?? (seedDefaultModels ? seed.rows : null),
+    definitionsAfter: definitionMigration?.definitions ?? null,
+    apiServerKeyMigration,
+  });
+  return plan;
+}
+
+function initializationInput(
+  plan: ModelCatalogInitializationPlan,
+  internal: InternalModelCatalogInitializationPlan,
+): ManagedModelFileInitialization {
+  const { envFile } = profilePaths(plan.targetProfileId);
+  let checkedBefore = false;
+  const verifyBefore = (): void => {
+    if (checkedBefore) return;
+    checkedBefore = true;
+    if (
+      !bytesEqual(fileBytes(MODELS_FILE), internal.before.models) ||
+      !bytesEqual(
+        fileBytes(MODEL_DEFS_FILE),
+        internal.before.modelDefinitions,
+      ) ||
+      !bytesEqual(fileBytes(envFile), internal.before.env)
+    ) {
+      throw new Error("Model catalog initialization plan is stale.");
+    }
+  };
+  const changesRequired =
+    internal.modelsAfter !== null ||
+    internal.definitionsAfter !== null ||
+    plan.persistDerivedCredentials.length > 0;
+  return {
+    targetProfileId: plan.targetProfileId,
+    changesRequired,
+    applyStage: (stage, permit) => {
+      verifyBefore();
+      if (stage === "credential") {
+        for (const credential of plan.persistDerivedCredentials) {
+          persistConfigWritePlan(
+            permit,
+            planEnvValueWrite(
+              credential.key,
+              credential.value,
+              credential.profileId,
+            ),
+          );
+        }
+      }
+      if (stage === "model_library") {
+        if (internal.definitionsAfter) {
+          writeModelDefinitions(permit, internal.definitionsAfter);
+        }
+        if (internal.modelsAfter) writeModels(permit, internal.modelsAfter);
+      }
+    },
+    verify: () => {
+      const modelsMatch = internal.modelsAfter
+        ? JSON.stringify(readModelsRawStrict()) ===
+          JSON.stringify(internal.modelsAfter)
+        : bytesEqual(fileBytes(MODELS_FILE), internal.before.models);
+      if (!modelsMatch) {
+        return false;
+      }
+      const definitionsMatch = internal.definitionsAfter
+        ? JSON.stringify(readModelDefinitionsStrict()) ===
+          JSON.stringify(internal.definitionsAfter)
+        : bytesEqual(
+            fileBytes(MODEL_DEFS_FILE),
+            internal.before.modelDefinitions,
+          );
+      if (!definitionsMatch) {
+        return false;
+      }
+      if (plan.persistDerivedCredentials.length === 0) {
+        return bytesEqual(fileBytes(envFile), internal.before.env);
+      }
+      return plan.persistDerivedCredentials.every((credential) => {
+        return (
+          readEnv(credential.profileId)[credential.key] === credential.value
+        );
+      });
+    },
+  };
+}
+
+export async function initializeModelCatalog(
+  coordinator: ModelCatalogInitializationCoordinator,
+  plan: ModelCatalogInitializationPlan,
+): Promise<ModelConfigurationMutationResult> {
+  const internal = internalInitializationPlans.get(plan);
+  if (!internal) {
+    throw new Error("Model catalog initialization plan was not created here.");
+  }
+  const result = await coordinator.initializeManagedModelFiles(
+    initializationInput(plan, internal),
+  );
+  if (
+    internal.apiServerKeyMigration &&
+    (result.status === "committed" ||
+      result.status === "committed_refresh_warning")
+  ) {
+    recordApiServerKeyMigration(internal.apiServerKeyMigration);
+  }
+  return result;
 }
 
 export function listModels(): SavedModel[] {
-  if (!existsSync(MODELS_FILE)) {
-    seedDefaults();
-  }
-  // Hoist any legacy per-row context overrides into shared definitions before
-  // the merged read. This is the renderer-facing entry point (Providers screen),
-  // which already performs writes via seedDefaults; the runtime path uses
-  // readModels() directly and never triggers this migration write.
-  ensureModelDefinitionsMigrated();
   return readModels();
 }
 
@@ -408,13 +792,50 @@ export function addModel(
   apiMode?: string | null,
   providerId?: string,
 ): SavedModel {
-  const models = readModelsRaw();
+  return persistLegacyModelCatalogWritePlan(
+    planAddModel(
+      name,
+      provider,
+      model,
+      baseUrl,
+      contextLength,
+      providerLabel,
+      apiMode,
+      providerId,
+    ),
+  );
+}
+
+export function planAddModel(
+  name: string,
+  provider: string,
+  model: string,
+  baseUrl: string,
+  contextLength?: number,
+  providerLabel?: string,
+  apiMode?: string | null,
+  providerId?: string,
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): ModelCatalogWritePlan<SavedModel> {
+  const models = plannedModels(basePlan);
+  const patches: ModelCatalogFilePatch[] = [];
 
   // A context-window override is shared metadata keyed by model id — persist it
   // to the definition, not onto this attachment row, so every provider serving
   // this model id reuses it.
   const ctx = normalizeContextLength(contextLength);
-  if (ctx !== undefined) setModelDefinition(model, { contextLength: ctx });
+  if (ctx !== undefined) {
+    const definitions = plannedModelDefinitions(basePlan);
+    applyModelDefinitionPatch(definitions, model, { contextLength: ctx });
+    patches.push(
+      modelCatalogPatch(
+        "modelDefinitions",
+        MODEL_DEFS_FILE,
+        definitions,
+        basePlan,
+      ),
+    );
+  }
 
   // Stable named providers remain distinct even when they expose the same
   // model at the same endpoint. A stable request may absorb only its own row or
@@ -441,12 +862,16 @@ export function addModel(
     if (apiMode !== undefined) {
       const normalizedApiMode = (apiMode || "").trim() || null;
       models[existingIndex] = { ...existing, apiMode: normalizedApiMode };
-      writeModels(models);
+      patches.push(modelCatalogPatch("models", MODELS_FILE, models, basePlan));
     }
-    return {
-      ...models[existingIndex],
-      ...(ctx !== undefined ? { contextLength: ctx } : {}),
-    };
+    return modelCatalogPlan(
+      patches,
+      {
+        ...models[existingIndex],
+        ...(ctx !== undefined ? { contextLength: ctx } : {}),
+      },
+      basePlan,
+    );
   }
 
   const entry: SavedModelRow = {
@@ -463,8 +888,15 @@ export function addModel(
     createdAt: Date.now(),
   };
   models.push(entry);
-  writeModels(models);
-  return { ...entry, ...(ctx !== undefined ? { contextLength: ctx } : {}) };
+  patches.push(modelCatalogPatch("models", MODELS_FILE, models, basePlan));
+  return modelCatalogPlan(
+    patches,
+    {
+      ...entry,
+      ...(ctx !== undefined ? { contextLength: ctx } : {}),
+    },
+    basePlan,
+  );
 }
 
 function normalizedModelEndpoint(value: string): string {
@@ -484,7 +916,23 @@ export function migrateModelsForCustomProvider(input: {
   newBaseUrl: string;
   apiMode?: string | null;
 }): number {
-  const rows = readModelsRaw();
+  return persistLegacyModelCatalogWritePlan(
+    planMigrateModelsForCustomProvider(input),
+  );
+}
+
+export function planMigrateModelsForCustomProvider(
+  input: {
+    providerId: string;
+    oldName: string;
+    oldBaseUrl: string;
+    newName: string;
+    newBaseUrl: string;
+    apiMode?: string | null;
+  },
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): ModelCatalogWritePlan<number> {
+  const rows = plannedModels(basePlan);
   const oldAnchor = customProviderEnvKey(input.oldName);
   const newAnchor = customProviderEnvKey(input.newName);
   const oldEndpoint = normalizedModelEndpoint(input.oldBaseUrl);
@@ -533,10 +981,15 @@ export function migrateModelsForCustomProvider(input: {
     next.some(
       (row, index) => JSON.stringify(row) !== JSON.stringify(rows[index]),
     );
-  if (changed) writeModels(deduped);
   // Report the number of retained attachments after a rename. Duplicate
   // legacy rows may have been absorbed into one stable-id row.
-  return deduped.filter((row) => row.providerId === input.providerId).length;
+  return modelCatalogPlan(
+    changed
+      ? [modelCatalogPatch("models", MODELS_FILE, deduped, basePlan)]
+      : [],
+    deduped.filter((row) => row.providerId === input.providerId).length,
+    basePlan,
+  );
 }
 
 function isCustomProviderAttachment(row: SavedModelRow): boolean {
@@ -545,11 +998,23 @@ function isCustomProviderAttachment(row: SavedModelRow): boolean {
 }
 
 export function removeModel(id: string): boolean {
-  const models = readModelsRaw();
+  return persistLegacyModelCatalogWritePlan(planRemoveModel(id));
+}
+
+export function planRemoveModel(
+  id: string,
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): ModelCatalogWritePlan<boolean> {
+  const models = plannedModels(basePlan);
   const filtered = models.filter((m) => m.id !== id);
-  if (filtered.length === models.length) return false;
-  writeModels(filtered);
-  return true;
+  if (filtered.length === models.length) {
+    return modelCatalogPlan([], false, basePlan);
+  }
+  return modelCatalogPlan(
+    [modelCatalogPatch("models", MODELS_FILE, filtered, basePlan)],
+    true,
+    basePlan,
+  );
 }
 
 /**
@@ -565,7 +1030,18 @@ export function removeModelsForCustomProvider(
   baseUrl?: string,
   providerId?: string,
 ): number {
-  const rows = readModelsRaw();
+  return persistLegacyModelCatalogWritePlan(
+    planRemoveModelsForCustomProvider(name, baseUrl, providerId),
+  );
+}
+
+export function planRemoveModelsForCustomProvider(
+  name: string,
+  baseUrl?: string,
+  providerId?: string,
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): ModelCatalogWritePlan<number> {
+  const rows = plannedModels(basePlan);
   const providerAnchor = customProviderEnvKey(name.trim());
   const endpoint = (baseUrl || "")
     .trim()
@@ -594,8 +1070,13 @@ export function removeModelsForCustomProvider(
     );
   });
   const removed = rows.length - next.length;
-  if (removed > 0) writeModels(next);
-  return removed;
+  return modelCatalogPlan(
+    removed > 0
+      ? [modelCatalogPatch("models", MODELS_FILE, next, basePlan)]
+      : [],
+    removed,
+    basePlan,
+  );
 }
 
 export function updateModel(
@@ -613,20 +1094,50 @@ export function updateModel(
     >
   > & { contextLength?: number | null },
 ): boolean {
-  const models = readModelsRaw();
+  return persistLegacyModelCatalogWritePlan(planUpdateModel(id, fields));
+}
+
+export function planUpdateModel(
+  id: string,
+  fields: Partial<
+    Pick<
+      SavedModelRow,
+      | "name"
+      | "provider"
+      | "model"
+      | "baseUrl"
+      | "apiMode"
+      | "providerLabel"
+      | "providerId"
+    >
+  > & { contextLength?: number | null },
+  basePlan?: ModelCatalogWritePlan<unknown>,
+): ModelCatalogWritePlan<boolean> {
+  const models = plannedModels(basePlan);
   const idx = models.findIndex((m) => m.id === id);
-  if (idx === -1) return false;
+  if (idx === -1) return modelCatalogPlan([], false, basePlan);
 
   const { contextLength, ...rest } = fields;
   const next: SavedModelRow = { ...models[idx], ...rest };
   models[idx] = next;
-  writeModels(models);
+  const patches: ModelCatalogFilePatch[] = [
+    modelCatalogPatch("models", MODELS_FILE, models, basePlan),
+  ];
 
   // `contextLength` is shared metadata: route it to the definition keyed by the
   // (possibly updated) model id, not onto the row. A positive value sets the
   // override; anything else clears it.
   if (contextLength !== undefined) {
-    setModelDefinition(next.model, { contextLength });
+    const definitions = plannedModelDefinitions(basePlan);
+    applyModelDefinitionPatch(definitions, next.model, { contextLength });
+    patches.push(
+      modelCatalogPatch(
+        "modelDefinitions",
+        MODEL_DEFS_FILE,
+        definitions,
+        basePlan,
+      ),
+    );
   }
-  return true;
+  return modelCatalogPlan(patches, true, basePlan);
 }

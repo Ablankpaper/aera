@@ -22,6 +22,27 @@ async function importHealthWithHome(
   return await import("../src/main/config-health");
 }
 
+async function withManagedProfileWrite<T>(
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  const [managed, authority] = await Promise.all([
+    import("../src/main/model-configuration-managed-files"),
+    import("../src/main/model-configuration-write-authority"),
+  ]);
+  managed.registerManagedModelFileRoots({
+    globalRoot: TEST_DIR,
+    profiles: { default: TEST_DIR },
+  });
+  try {
+    return await new authority.ModelConfigurationWriteAuthority().run(
+      { globalCatalog: false, profileIds: ["default"] },
+      callback,
+    );
+  } finally {
+    managed.clearManagedModelFileRoots();
+  }
+}
+
 const CORRUPTED = [
   "model: old-model",
   "model:",
@@ -68,7 +89,9 @@ describe("config health — duplicate top-level model key", () => {
     writeFileSync(configFile, CORRUPTED, "utf-8");
     const health = await importHealthWithHome(TEST_DIR);
 
-    const result = health.autoFixIssue("MODEL_CONFIG_DUPLICATE_KEY");
+    const result = await withManagedProfileWrite(() =>
+      health.autoFixIssue("MODEL_CONFIG_DUPLICATE_KEY"),
+    );
     expect(result.ok).toBe(true);
 
     const content = readFileSync(configFile, "utf-8");
@@ -81,6 +104,25 @@ describe("config health — duplicate top-level model key", () => {
       .runConfigHealthCheck()
       .issues.find((entry) => entry.code === "MODEL_CONFIG_DUPLICATE_KEY");
     expect(rescan).toBeUndefined();
+  });
+
+  it("plans the duplicate-key repair without changing the live file", async () => {
+    const configFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(configFile, CORRUPTED, "utf-8");
+    const health = await importHealthWithHome(TEST_DIR);
+
+    const plan = health.planConfigHealthAutoFix(
+      "MODEL_CONFIG_DUPLICATE_KEY",
+      "default",
+    );
+
+    expect(plan.result).toMatchObject({ ok: true });
+    expect(plan.auditEntries).toHaveLength(1);
+    expect(readFileSync(configFile, "utf8")).toBe(CORRUPTED);
+    expect(plan.writePlan?.after?.toString("utf8")).toContain("providers:");
+    expect(
+      plan.writePlan?.after?.toString("utf8").match(/^model:[^\r\n]*$/gm),
+    ).toHaveLength(1);
   });
 
   // @lat: [[legacy-model-config-migration#Config health repair#Reports invalid YAML under its own code]]

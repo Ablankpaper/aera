@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { join } from "path";
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "fs";
+import {
+  mkdirSync,
+  writeFileSync,
+  copyFileSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+  readdirSync,
+} from "fs";
 
 const execFileSyncMock = vi.hoisted(() => vi.fn());
 
@@ -49,15 +57,31 @@ import {
   createProfile,
   deleteProfile,
   listProfiles,
+  prepareProfile,
   profileIdForAgentName,
   setActiveProfile,
 } from "../src/main/profiles";
+import { defaultModelConfigurationWriteAuthority } from "../src/main/model-configuration-write-authority";
 import { setProfileName } from "../src/main/profile-meta";
 
 const PROFILES_DIR = join(TEST_HOME, "profiles");
 
 beforeEach(() => {
   execFileSyncMock.mockReset();
+  execFileSyncMock.mockImplementation((_python, args, options) => {
+    const createIndex = (args as string[]).indexOf("create");
+    if (createIndex >= 0) {
+      const profileId = (args as string[])[createIndex + 1];
+      const candidate = join(
+        String(options.env.HERMES_HOME),
+        "profiles",
+        profileId,
+      );
+      mkdirSync(candidate, { recursive: true });
+      writeFileSync(join(candidate, ".env"), "# profile credentials\n");
+    }
+    return Buffer.from("");
+  });
   mkdirSync(TEST_HOME, { recursive: true });
   mkdirSync(PROFILES_DIR, { recursive: true });
 });
@@ -209,8 +233,8 @@ describe("listProfiles", () => {
     expect(def?.isActive).toBe(false);
   });
 
-  it("rejects invalid profile names before invoking the Hermes CLI", () => {
-    expect(deleteProfile("../outside").success).toBe(false);
+  it("rejects invalid profile names before invoking the Hermes CLI", async () => {
+    expect((await deleteProfile("../outside")).success).toBe(false);
     expect(() => setActiveProfile("../outside")).toThrow(
       "Profile names may contain lowercase letters",
     );
@@ -218,9 +242,7 @@ describe("listProfiles", () => {
   });
 
   it("creates a safe profile id behind a user-facing agent name", async () => {
-    execFileSyncMock.mockReturnValue(Buffer.from(""));
-
-    const result = createProfile("  卢姐  ", null);
+    const result = await createProfile("  卢姐  ", null);
 
     expect(result).toEqual({ success: true, id: "agent" });
     expect(execFileSyncMock).toHaveBeenCalledWith(
@@ -233,11 +255,10 @@ describe("listProfiles", () => {
     expect(created?.name).toBe("卢姐");
   });
 
-  it("creates a fresh Profile with the exact pre-reserved id", () => {
-    execFileSyncMock.mockReturnValue(Buffer.from(""));
+  it("creates a fresh Profile with the exact pre-reserved id", async () => {
     expect(profileIdForAgentName("Fresh Agent")).toBe("fresh-agent");
 
-    const result = createProfile("Fresh Agent", null, "fresh-agent");
+    const result = await createProfile("Fresh Agent", null, "fresh-agent");
 
     expect(result).toEqual({ success: true, id: "fresh-agent" });
     expect(execFileSyncMock).toHaveBeenCalledWith(
@@ -247,10 +268,10 @@ describe("listProfiles", () => {
     );
   });
 
-  it("rejects a reserved Profile id that is not the current safe id", () => {
-    execFileSyncMock.mockReturnValue(Buffer.from(""));
-
-    expect(createProfile("Fresh Agent", null, "different-id")).toEqual({
+  it("rejects a reserved Profile id that is not the current safe id", async () => {
+    await expect(
+      createProfile("Fresh Agent", null, "different-id"),
+    ).resolves.toEqual({
       success: false,
       error: "Reserved Profile ID is unavailable.",
     });
@@ -258,15 +279,22 @@ describe("listProfiles", () => {
   });
 
   it("keeps a successful CLI-created profile when metadata cannot be written", async () => {
-    execFileSyncMock.mockImplementation(() => {
-      mkdirSync(join(PROFILES_DIR, "agent", "profile-meta.json"), {
+    execFileSyncMock.mockImplementation((_python, _args, options) => {
+      const candidate = join(
+        String(options.env.HERMES_HOME),
+        "profiles",
+        "agent",
+      );
+      mkdirSync(candidate, { recursive: true });
+      writeFileSync(join(candidate, ".env"), "# profile credentials\n");
+      mkdirSync(join(candidate, "profile-meta.json"), {
         recursive: true,
       });
       return Buffer.from("");
     });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const result = createProfile("  卢姐  ", null);
+    const result = await createProfile("  卢姐  ", null);
 
     expect(result).toEqual({ success: true, id: "agent" });
     expect(existsSync(join(PROFILES_DIR, "agent"))).toBe(true);
@@ -281,7 +309,7 @@ describe("listProfiles", () => {
     warn.mockRestore();
   });
 
-  it("surfaces Hermes Agent profile-create errors written to stdout", () => {
+  it("surfaces Hermes Agent profile-create errors written to stdout", async () => {
     const err = new Error("Command failed");
     Object.assign(err, {
       stdout: Buffer.from(
@@ -293,14 +321,14 @@ describe("listProfiles", () => {
       throw err;
     });
 
-    const result = createProfile("test", null);
+    const result = await createProfile("test", null);
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("reserved");
     expect(result.error).toContain("common system binary");
   });
 
-  it("uses Hermes Agent stdout for duplicate profile-create errors", () => {
+  it("uses Hermes Agent stdout for duplicate profile-create errors", async () => {
     const err = new Error("Command failed");
     Object.assign(err, {
       stdout: Buffer.from(
@@ -312,7 +340,7 @@ describe("listProfiles", () => {
       throw err;
     });
 
-    const result = createProfile("test2", null);
+    const result = await createProfile("test2", null);
 
     expect(result.success).toBe(false);
     expect(result.error).toBe(
@@ -320,10 +348,8 @@ describe("listProfiles", () => {
     );
   });
 
-  it("allows slower cloned profile creation before timing out", () => {
-    execFileSyncMock.mockReturnValue(Buffer.from(""));
-
-    expect(createProfile("slow-clone", "default").success).toBe(true);
+  it("allows slower cloned profile creation before timing out", async () => {
+    expect((await createProfile("slow-clone", "default")).success).toBe(true);
 
     expect(execFileSyncMock).toHaveBeenCalledWith(
       "/usr/bin/python3",
@@ -340,16 +366,263 @@ describe("listProfiles", () => {
     );
   });
 
-  it("bounds profile deletion with the same timeout as profile creation", () => {
+  // @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Recoverable model configuration#Staged Profile activation protects live state]]
+  it("materializes a cloned Profile in an isolated HERMES_HOME before one activation", async () => {
+    mkdirSync(join(TEST_HOME, "skills", "local"), { recursive: true });
+    writeFileSync(
+      join(TEST_HOME, "config.yaml"),
+      "model:\n  default: source-model\n",
+    );
+    writeFileSync(join(TEST_HOME, ".env"), "SOURCE_KEY=secret\n");
+    writeFileSync(
+      join(TEST_HOME, "skills", "local", "SKILL.md"),
+      "source skill\n",
+    );
+
+    let runtimeHome = "";
+    execFileSyncMock.mockImplementation((_python, _args, options) => {
+      runtimeHome = String(options.env.HERMES_HOME);
+      expect(runtimeHome).not.toBe(TEST_HOME);
+      expect(existsSync(join(PROFILES_DIR, "isolated-clone"))).toBe(false);
+      expect(readFileSync(join(runtimeHome, "config.yaml"), "utf8")).toContain(
+        "source-model",
+      );
+      expect(
+        readFileSync(join(runtimeHome, "skills", "local", "SKILL.md"), "utf8"),
+      ).toBe("source skill\n");
+
+      const candidate = join(runtimeHome, "profiles", "isolated-clone");
+      mkdirSync(candidate, { recursive: true });
+      writeFileSync(join(candidate, ".env"), "SOURCE_KEY=secret\n");
+      writeFileSync(
+        join(candidate, "config.yaml"),
+        "model:\n  default: source-model\n",
+      );
+      return Buffer.from("");
+    });
+
+    const result = await createProfile("isolated-clone", "default");
+
+    expect(result).toEqual({ success: true, id: "isolated-clone" });
+    expect(existsSync(join(PROFILES_DIR, "isolated-clone"))).toBe(true);
+    expect(runtimeHome).not.toBe("");
+    const stagingRoot = join(TEST_HOME, ".aera-profile-staging");
+    expect(existsSync(stagingRoot) ? readdirSync(stagingRoot) : []).toEqual([]);
+  });
+
+  // @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Recoverable model configuration#Profile clone snapshots preserve provider identity]]
+  it("preserves a named custom provider when cloning an existing Profile", async () => {
+    writeFileSync(
+      join(TEST_HOME, "providers.json"),
+      JSON.stringify({
+        version: 1,
+        providers: [
+          {
+            id: "provider-1",
+            name: "Petoi",
+            baseUrl: "https://api.petoi.cn/v1",
+            createdAt: 1,
+          },
+        ],
+      }),
+    );
+    writeFileSync(
+      join(TEST_HOME, "models.json"),
+      JSON.stringify([
+        {
+          id: "model-1",
+          name: "Petoi Model",
+          provider: "custom:petoi",
+          providerLabel: "Petoi",
+          model: "petoi-model",
+          baseUrl: "https://api.petoi.cn/v1",
+          createdAt: 1,
+        },
+      ]),
+    );
+    writeFileSync(
+      join(TEST_HOME, "config.yaml"),
+      [
+        "model:",
+        "  provider: custom:petoi",
+        "  default: petoi-model",
+        "  base_url: https://api.petoi.cn/v1",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(TEST_HOME, ".env"),
+      "CUSTOM_PROVIDER_PETOI_KEY=secret\n",
+    );
+
+    execFileSyncMock.mockImplementation((_python, _args, options) => {
+      const runtimeHome = String(options.env.HERMES_HOME);
+      const candidate = join(runtimeHome, "profiles", "provider-clone");
+      mkdirSync(candidate, { recursive: true });
+      for (const filename of [".env", "config.yaml", "providers.json"]) {
+        copyFileSync(join(runtimeHome, filename), join(candidate, filename));
+      }
+      return Buffer.from("");
+    });
+
+    const result = await createProfile("provider-clone", "default");
+
+    expect(result).toEqual({ success: true, id: "provider-clone" });
+    expect(
+      JSON.parse(
+        readFileSync(
+          join(PROFILES_DIR, "provider-clone", "providers.json"),
+          "utf8",
+        ),
+      ),
+    ).toMatchObject({
+      providers: [
+        expect.objectContaining({
+          name: "Petoi",
+          baseUrl: "https://api.petoi.cn/v1",
+        }),
+      ],
+    });
+  });
+
+  // @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Recoverable model configuration#Profile clone snapshots preserve provider identity]]
+  it("waits for a stable source snapshot before materializing a cloned Profile", async () => {
+    writeFileSync(
+      join(TEST_HOME, "config.yaml"),
+      "model:\n  default: source-model\n",
+    );
+    writeFileSync(join(TEST_HOME, ".env"), "SOURCE_KEY=secret\n");
+    let materialized = false;
+    execFileSyncMock.mockImplementation((_python, args, options) => {
+      materialized = true;
+      const createIndex = (args as string[]).indexOf("create");
+      const profileId = (args as string[])[createIndex + 1];
+      const candidate = join(
+        String(options.env.HERMES_HOME),
+        "profiles",
+        profileId,
+      );
+      mkdirSync(candidate, { recursive: true });
+      writeFileSync(join(candidate, ".env"), "SOURCE_KEY=secret\n");
+      writeFileSync(
+        join(candidate, "config.yaml"),
+        "model:\n  default: source-model\n",
+      );
+      return Buffer.from("");
+    });
+
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const acquired = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const blocker = defaultModelConfigurationWriteAuthority.run(
+      { globalCatalog: true, profileIds: ["default"] },
+      async () => {
+        entered();
+        await held;
+      },
+    );
+    await acquired;
+
+    const preparing = prepareProfile("stable-clone", "default");
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(materialized).toBe(false);
+    } finally {
+      release();
+      await blocker;
+    }
+
+    const prepared = await preparing;
+    expect(prepared).toMatchObject({ success: true, id: "stable-clone" });
+    expect(materialized).toBe(true);
+    await prepared.candidate?.cleanup();
+  });
+
+  it("rejects a malformed staged Profile without creating the live destination", async () => {
+    execFileSyncMock.mockImplementation((_python, _args, options) => {
+      const candidate = join(
+        String(options.env.HERMES_HOME),
+        "profiles",
+        "malformed-profile",
+      );
+      mkdirSync(candidate, { recursive: true });
+      writeFileSync(join(candidate, ".env"), "SAFE_KEY=value\n");
+      writeFileSync(join(candidate, "config.yaml"), "model: [unterminated\n");
+      return Buffer.from("");
+    });
+
+    const result = await createProfile("malformed-profile", null);
+
+    expect(result).toEqual({
+      success: false,
+      error: "Staged Profile validation failed.",
+    });
+    expect(existsSync(join(PROFILES_DIR, "malformed-profile"))).toBe(false);
+  });
+
+  it("rechecks activation authorization before publishing a staged Profile", async () => {
+    const result = await (
+      createProfile as unknown as (
+        name: string,
+        cloneFrom: string | null,
+        reservedProfileId: string | undefined,
+        activation: { authorize: () => boolean },
+      ) => Promise<{ success: boolean; error?: string; id?: string }>
+    )("owner-change", null, undefined, { authorize: () => false });
+
+    expect(result).toEqual({
+      success: false,
+      error: "Staged Profile owner changed before activation.",
+    });
+    expect(existsSync(join(PROFILES_DIR, "owner-change"))).toBe(false);
+  });
+
+  it("bounds profile deletion with the same timeout as profile creation", async () => {
     execFileSyncMock.mockReturnValue(Buffer.from(""));
 
-    expect(deleteProfile("slow-delete").success).toBe(true);
+    expect((await deleteProfile("slow-delete")).success).toBe(true);
 
     expect(execFileSyncMock).toHaveBeenCalledWith(
       "/usr/bin/python3",
       ["-m", "hermes_cli.main", "profile", "delete", "slow-delete", "--yes"],
       expect.objectContaining({ timeout: 30000 }),
     );
+  });
+
+  // @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Recoverable model configuration#Profile deletion shares the managed write authority]]
+  it("waits for the managed Profile write boundary before deleting a Profile", async () => {
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const acquired = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const blocker = defaultModelConfigurationWriteAuthority.run(
+      { globalCatalog: false, profileIds: ["serialized-delete"] },
+      async () => {
+        entered();
+        await held;
+      },
+    );
+    await acquired;
+
+    const deleting = Promise.resolve(deleteProfile("serialized-delete"));
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(execFileSyncMock).not.toHaveBeenCalled();
+    } finally {
+      release();
+      await blocker;
+    }
+    await expect(deleting).resolves.toEqual({ success: true });
+    expect(execFileSyncMock).toHaveBeenCalledTimes(1);
   });
 });
 

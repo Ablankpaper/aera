@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
@@ -36,6 +36,13 @@ import {
   type ModelConfigurationDatabase,
   type ModelConfigurationSqliteDatabase,
 } from "./model-configuration-database";
+import {
+  clearManagedModelFileRoots,
+  registerManagedModelFileRoots,
+  writeManagedModelFile,
+  type ModelConfigurationWritePermit,
+} from "./model-configuration-managed-files";
+import { safeWriteFile } from "./utils";
 
 const REVISION = "a".repeat(64);
 const OWNER = "owner-hash";
@@ -72,6 +79,7 @@ interface Fixture {
     preparedTargets: string[];
   };
   snapshotBytes(): Record<string, string | null>;
+  operationCount(): number;
 }
 
 function routeSnapshot(revision = REVISION): OwnerModelRouteCatalogSnapshot {
@@ -243,6 +251,16 @@ function makeFixture(): Fixture {
           existsSync(path) ? readFileSync(path).toString("base64") : null,
         ]),
       ),
+    operationCount: () =>
+      Number(
+        (
+          database.sqlite
+            .prepare(
+              "SELECT COUNT(*) AS count FROM desktop_model_configuration_operations",
+            )
+            .get() as { count: number | bigint }
+        ).count,
+      ),
   };
 }
 
@@ -297,12 +315,236 @@ function writeAttemptedState(fixture: Fixture): void {
 }
 
 afterEach(() => {
+  clearManagedModelFileRoots();
   for (const database of databases.splice(0)) database.close();
   for (const root of roots.splice(0))
     rmSync(root, { recursive: true, force: true });
 });
 
 describe("ModelConfigurationCoordinator", () => {
+  it("journals a permitted Profile write before committing managed bytes", async () => {
+    const fixture = makeFixture();
+    registerManagedModelFileRoots({
+      globalRoot: dirname(fixture.paths.models),
+      profiles: { account: dirname(fixture.paths.env) },
+    });
+    const before = fixture.snapshotBytes();
+    const coordinator = subject(fixture) as ModelConfigurationCoordinator & {
+      runManagedWrite<T>(
+        request: {
+          requestedProfileId: string;
+          scope: "profile" | "global";
+          stage: ModelConfigurationCommitStage;
+        },
+        prepare: (context: {
+          oldRouteKey: string;
+        }) => {
+          newRouteKey?: string;
+          write(permit: ModelConfigurationWritePermit): T | Promise<T>;
+          verify?(): boolean | Promise<boolean>;
+        },
+      ): Promise<
+        | { status: "executed"; value: T }
+        | { status: "rejected"; code: string }
+      >;
+    };
+
+    const result = await coordinator.runManagedWrite(
+      {
+        requestedProfileId: "account",
+        scope: "profile",
+        stage: "credential",
+      },
+      ({ oldRouteKey }) => ({
+        newRouteKey: oldRouteKey,
+        write: (permit) => {
+          writeManagedModelFile(
+            permit,
+            fixture.paths.env,
+            "MANAGED_KEY=value\n",
+            0o600,
+          );
+          return "saved";
+        },
+        verify: () =>
+          readFileSync(fixture.paths.env, "utf8") === "MANAGED_KEY=value\n",
+      }),
+    );
+
+    expect(result).toMatchObject({ status: "executed", value: "saved" });
+    expect(fixture.operationCount()).toBe(1);
+    expect(readFileSync(fixture.paths.env, "utf8")).toBe(
+      "MANAGED_KEY=value\n",
+    );
+    expect(fixture.snapshotBytes()).not.toEqual(before);
+    expect(fixture.store.listIncomplete()).toEqual([]);
+  });
+
+  it("rejects a planner that attempts managed writes before journalling", async () => {
+    const fixture = makeFixture();
+    registerManagedModelFileRoots({
+      globalRoot: dirname(fixture.paths.models),
+      profiles: { account: dirname(fixture.paths.env) },
+    });
+    const before = fixture.snapshotBytes();
+    const coordinator = subject(fixture) as ModelConfigurationCoordinator & {
+      runManagedWrite<T>(
+        request: {
+          requestedProfileId: string;
+          scope: "profile" | "global";
+          stage: ModelConfigurationCommitStage;
+        },
+        prepare: (context: { oldRouteKey: string }) => {
+          newRouteKey?: string;
+          write(): T;
+        },
+      ): Promise<{ status: string; code?: string }>;
+    };
+
+    const result = await coordinator.runManagedWrite(
+      {
+        requestedProfileId: "account",
+        scope: "profile",
+        stage: "credential",
+      },
+      ({ oldRouteKey }) => {
+        safeWriteFile(fixture.paths.env, "PLANNER_WROTE=value\n", 0o600);
+        return { newRouteKey: oldRouteKey, write: () => "unreachable" };
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "rejected",
+      stage: "validation",
+      rollback: "not_needed",
+    });
+    expect(fixture.snapshotBytes()).toEqual(before);
+    expect(fixture.operationCount()).toBe(0);
+  });
+
+  it("denies a global catalog write from a Profile-only transaction", async () => {
+    const fixture = makeFixture();
+    registerManagedModelFileRoots({
+      globalRoot: dirname(fixture.paths.models),
+      profiles: { account: dirname(fixture.paths.env) },
+    });
+    const before = fixture.snapshotBytes();
+
+    const result = await subject(fixture).runManagedWrite(
+      {
+        requestedProfileId: "account",
+        scope: "profile",
+        stage: "model_library",
+      },
+      ({ oldRouteKey }) => ({
+        newRouteKey: oldRouteKey,
+        write: () => safeWriteFile(fixture.paths.models, "[]\n"),
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: "rejected",
+      stage: "model_library",
+      rollback: "not_needed",
+    });
+    expect(fixture.snapshotBytes()).toEqual(before);
+    expect(fixture.store.listIncomplete()).toEqual([]);
+  });
+
+  it("restores all managed bytes when a permitted focused writer throws", async () => {
+    const fixture = makeFixture();
+    registerManagedModelFileRoots({
+      globalRoot: dirname(fixture.paths.models),
+      profiles: { account: dirname(fixture.paths.env) },
+    });
+    const before = fixture.snapshotBytes();
+
+    const result = await subject(fixture).runManagedWrite(
+      {
+        requestedProfileId: "account",
+        scope: "profile",
+        stage: "credential",
+      },
+      ({ oldRouteKey }) => ({
+        newRouteKey: oldRouteKey,
+        write: () => {
+          safeWriteFile(fixture.paths.env, "PARTIAL_KEY=value\n", 0o600);
+          throw new Error("injected focused writer failure");
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: "rejected",
+      stage: "credential",
+      rollback: "restored",
+    });
+    expect(fixture.snapshotBytes()).toEqual(before);
+    expect(fixture.store.listIncomplete()).toEqual([]);
+  });
+
+  it("journals explicit managed-file initialization once and skips a no-op replay", async () => {
+    const fixture = makeFixture();
+    const coordinator = subject(fixture);
+    const applyStage = vi.fn((stage: ModelConfigurationCommitStage) => {
+      if (stage === "model_library") {
+        writeFileSync(fixture.paths.models, '[{"model":"initialized"}]\n');
+      }
+    });
+
+    const first = await coordinator.initializeManagedModelFiles({
+      targetProfileId: "account",
+      changesRequired: true,
+      applyStage,
+      verify: () =>
+        readFileSync(fixture.paths.models, "utf8").includes("initialized"),
+    });
+
+    expect(first).toMatchObject({ status: "committed" });
+    expect(applyStage).toHaveBeenCalledTimes(5);
+    expect(fixture.operationCount()).toBe(1);
+
+    applyStage.mockClear();
+    const second = await coordinator.initializeManagedModelFiles({
+      targetProfileId: "account",
+      changesRequired: false,
+      applyStage,
+      verify: () => true,
+    });
+
+    expect(second).toMatchObject({ status: "committed" });
+    expect(applyStage).not.toHaveBeenCalled();
+    expect(fixture.operationCount()).toBe(1);
+  });
+
+  it("restores every managed byte when explicit initialization fails", async () => {
+    const fixture = makeFixture();
+    const before = fixture.snapshotBytes();
+
+    const result = await subject(fixture).initializeManagedModelFiles({
+      targetProfileId: "account",
+      changesRequired: true,
+      applyStage: (stage) => {
+        if (stage === "credential") {
+          writeFileSync(fixture.paths.env, "INITIALIZED_KEY=value\n");
+        }
+        if (stage === "model_library") {
+          writeFileSync(fixture.paths.models, '[{"model":"partial"}]\n');
+          throw new Error("injected initialization failure");
+        }
+      },
+      verify: () => true,
+    });
+
+    expect(result).toMatchObject({
+      status: "rejected",
+      stage: "model_library",
+      rollback: "restored",
+    });
+    expect(fixture.snapshotBytes()).toEqual(before);
+    expect(fixture.store.listIncomplete()).toEqual([]);
+  });
+
   it("accepts opaque owner handles with NUL separators", async () => {
     const fixture = makeFixture();
     const ownerHandle = "tenant\0owner\0device";
@@ -360,6 +602,57 @@ describe("ModelConfigurationCoordinator", () => {
     expect(fixture.adapter.getActiveRouteKey("account")).toBe(OLD_ROUTE);
   });
 
+  // @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Recoverable model configuration#Rollback refresh follows terminal recovery]]
+  it("notifies consumers only after a verified rollback is terminal", async () => {
+    const fixture = makeFixture();
+    const before = fixture.snapshotBytes();
+    fixture.adapter.failAt = "provider";
+    let stateWhenNotified: string | null = null;
+    let bytesWhenNotified: Record<string, string | null> | null = null;
+    const notifyRolledBack = vi.fn(() => {
+      stateWhenNotified =
+        fixture.store.get("10000000-0000-4000-8000-000000000001")?.state ??
+        null;
+      bytesWhenNotified = fixture.snapshotBytes();
+    });
+
+    const result = await subject(fixture, { notifyRolledBack }).mutate(
+      request(),
+    );
+
+    expect(result).toMatchObject({
+      status: "rejected",
+      stage: "provider",
+      rollback: "restored",
+    });
+    expect(notifyRolledBack).toHaveBeenCalledOnce();
+    expect(stateWhenNotified).toBe("rolled_back");
+    expect(bytesWhenNotified).toEqual(before);
+  });
+
+  it("keeps the verified rolled_back state when notification fails", async () => {
+    const fixture = makeFixture();
+    fixture.adapter.failAt = "provider";
+    const notifyRolledBack = vi.fn(() => {
+      throw new Error("runtime refresh unavailable");
+    });
+
+    const result = await subject(fixture, { notifyRolledBack }).mutate(
+      request(),
+    );
+
+    expect(result).toMatchObject({
+      status: "rejected",
+      stage: "provider",
+      rollback: "restored",
+      rollbackWarning: "model_rollback_refresh_failed",
+    });
+    expect(fixture.store.listIncomplete()).toEqual([]);
+    expect(
+      fixture.store.get("10000000-0000-4000-8000-000000000001")?.state,
+    ).toBe("rolled_back");
+  });
+
   it("reports committed_refresh_warning after authoritative commit", async () => {
     const fixture = makeFixture();
     const before = fixture.snapshotBytes();
@@ -373,6 +666,151 @@ describe("ModelConfigurationCoordinator", () => {
     });
     expect(fixture.adapter.getActiveRouteKey("account")).toBe(NEW_ROUTE);
     expect(fixture.snapshotBytes()).not.toEqual(before);
+  });
+
+  it("creates the journal before backups and any managed-file write", async () => {
+    const fixture = makeFixture();
+    const events: string[] = [];
+    const originalBegin = fixture.store.begin.bind(fixture.store);
+    const begin = vi
+      .spyOn(fixture.store, "begin")
+      .mockImplementation((input) => {
+        events.push("begin");
+        return originalBegin(input);
+      });
+    const originalPersist = persistModelConfigurationBackups;
+    const originalPrepare = fixture.adapter.prepare.getMockImplementation()!;
+    fixture.adapter.prepare.mockImplementation(async (input, context) => {
+      const prepared = await originalPrepare(input, context);
+      const originalApply = prepared.applyStage;
+      prepared.applyStage = async (stage, permit) => {
+        events.push(`write:${stage}`);
+        return originalApply(stage, permit);
+      };
+      return prepared;
+    });
+    const coordinator = subject(fixture, {
+      fileAdapter: {
+        paths: () => fixture.paths,
+        capture: async (input) => {
+          events.push("capture");
+          return captureModelConfigurationFiles(input);
+        },
+        persistBackups: async (snapshot) => {
+          events.push("backup");
+          originalPersist(snapshot);
+        },
+        restore: async (snapshot) => {
+          const { restoreModelConfigurationFiles } = await import(
+            "./model-configuration-operation-store"
+          );
+          restoreModelConfigurationFiles(snapshot);
+        },
+        removeBackups: async (snapshot) => {
+          const { removeModelConfigurationBackups } = await import(
+            "./model-configuration-operation-store"
+          );
+          removeModelConfigurationBackups(snapshot);
+        },
+        readDigests: readModelConfigurationFileDigests,
+      },
+    });
+
+    const result = await coordinator.mutate(request());
+
+    expect(result).toMatchObject({ status: "committed" });
+    expect(events.slice(0, 4)).toEqual([
+      "capture",
+      "begin",
+      "backup",
+      "write:credential",
+    ]);
+    expect(begin).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a recoverable journal when backup creation is partial", async () => {
+    const fixture = makeFixture();
+    const before = fixture.snapshotBytes();
+    let failBackup = true;
+    const coordinator = subject(fixture, {
+      fileAdapter: {
+        paths: () => fixture.paths,
+        capture: captureModelConfigurationFiles,
+        persistBackups: async (snapshot) => {
+          if (failBackup) {
+            const env = snapshot.files.env;
+            mkdirSync(dirname(env.backupPath), { recursive: true });
+            writeFileSync(env.backupPath, env.bytes);
+            throw new Error("injected partial backup failure");
+          }
+          persistModelConfigurationBackups(snapshot);
+        },
+        restore: async (snapshot) => {
+          const { restoreModelConfigurationFiles } = await import(
+            "./model-configuration-operation-store"
+          );
+          restoreModelConfigurationFiles(snapshot);
+        },
+        removeBackups: async (snapshot) => {
+          const { removeModelConfigurationBackups } = await import(
+            "./model-configuration-operation-store"
+          );
+          removeModelConfigurationBackups(snapshot);
+        },
+        readDigests: readModelConfigurationFileDigests,
+      },
+    });
+
+    const failed = await coordinator.mutate(request());
+
+    expect(failed).toMatchObject({
+      status: "rejected",
+      stage: "recovery",
+      code: "model_configuration_recovery_required",
+      rollback: "recovery_required",
+    });
+    expect(fixture.snapshotBytes()).toEqual(before);
+    expect(fixture.store.listIncomplete()).toHaveLength(1);
+    const incomplete = fixture.store.listIncomplete()[0];
+    expect(incomplete.state).toBe("recovery_required");
+    const partialBackup = `${fixture.paths.env}.aera-model-config-backup.${incomplete.operationId}`;
+
+    failBackup = false;
+    await coordinator.recoverIncompleteOperations();
+
+    expect(fixture.snapshotBytes()).toEqual(before);
+    expect(fixture.store.listIncomplete()).toEqual([]);
+    expect(existsSync(partialBackup)).toBe(false);
+  });
+
+  it("keeps a committed terminal row when backup cleanup fails", async () => {
+    const fixture = makeFixture();
+    const coordinator = subject(fixture, {
+      fileAdapter: {
+        paths: () => fixture.paths,
+        capture: captureModelConfigurationFiles,
+        persistBackups: persistModelConfigurationBackups,
+        restore: async (snapshot) => {
+          const { restoreModelConfigurationFiles } = await import(
+            "./model-configuration-operation-store"
+          );
+          restoreModelConfigurationFiles(snapshot);
+        },
+        removeBackups: async () => {
+          throw new Error("injected cleanup failure");
+        },
+        readDigests: readModelConfigurationFileDigests,
+      },
+    });
+
+    const result = await coordinator.mutate(request());
+
+    expect(result).toMatchObject({ status: "committed" });
+    expect(fixture.store.listIncomplete()).toEqual([]);
+    expect(
+      fixture.store.get("10000000-0000-4000-8000-000000000001")?.state,
+    ).toBe("committed");
+    expect(fixture.adapter.getActiveRouteKey("account")).toBe(NEW_ROUTE);
   });
 
   it("rejects a stale revision before any write", async () => {
@@ -467,12 +905,12 @@ describe("ModelConfigurationCoordinator", () => {
       if (first) {
         first = false;
         const applyStage = prepared.applyStage;
-        prepared.applyStage = async (stage) => {
+        prepared.applyStage = async (stage, permit) => {
           if (stage === "credential") {
             firstStarted();
             await firstGate;
           }
-          return applyStage(stage);
+          return applyStage(stage, permit);
         };
       }
       return prepared;
@@ -607,6 +1045,66 @@ describe("ModelConfigurationCoordinator", () => {
     await subject(fixture).recoverIncompleteOperations();
 
     expect(fixture.snapshotBytes()).toEqual(before);
+    expect(fixture.store.listIncomplete()).toEqual([]);
+  });
+
+  it("notifies consumers after cold recovery reaches rolled_back", async () => {
+    const fixture = makeFixture();
+    const before = fixture.snapshotBytes();
+    const operationId = "10000000-0000-4000-8000-000000000098";
+    const snapshot = captureModelConfigurationFiles({
+      profileId: "account",
+      operationId,
+      paths: fixture.paths,
+    });
+    fixture.store.begin({
+      operationId,
+      ownerHandle: OWNER,
+      profileId: "account",
+      oldRouteKey: OLD_ROUTE,
+      newRouteKey: NEW_ROUTE,
+      snapshot,
+    });
+    fixture.store.finish(operationId, "recovery_required");
+    let stateWhenNotified: string | null = null;
+    let bytesWhenNotified: Record<string, string | null> | null = null;
+    const notifyRolledBack = vi.fn(() => {
+      stateWhenNotified = fixture.store.require(operationId).state;
+      bytesWhenNotified = fixture.snapshotBytes();
+    });
+
+    await subject(fixture, { notifyRolledBack }).recoverIncompleteOperations();
+
+    expect(notifyRolledBack).toHaveBeenCalledOnce();
+    expect(stateWhenNotified).toBe("rolled_back");
+    expect(bytesWhenNotified).toEqual(before);
+    expect(fixture.store.listIncomplete()).toEqual([]);
+  });
+
+  it("does not relock cold recovery when its notification fails", async () => {
+    const fixture = makeFixture();
+    const operationId = "10000000-0000-4000-8000-000000000097";
+    const snapshot = captureModelConfigurationFiles({
+      profileId: "account",
+      operationId,
+      paths: fixture.paths,
+    });
+    fixture.store.begin({
+      operationId,
+      ownerHandle: OWNER,
+      profileId: "account",
+      oldRouteKey: OLD_ROUTE,
+      newRouteKey: NEW_ROUTE,
+      snapshot,
+    });
+    fixture.store.finish(operationId, "recovery_required");
+    const notifyRolledBack = vi.fn(() => {
+      throw new Error("injected cold refresh failure");
+    });
+
+    await subject(fixture, { notifyRolledBack }).recoverIncompleteOperations();
+
+    expect(fixture.store.require(operationId).state).toBe("rolled_back");
     expect(fixture.store.listIncomplete()).toEqual([]);
   });
 

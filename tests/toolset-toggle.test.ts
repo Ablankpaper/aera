@@ -48,6 +48,22 @@ vi.mock("../src/main/utils", async () => {
   };
 });
 
+vi.mock("../src/main/model-configuration-managed-files", () => ({
+  writeManagedModelFile: (
+    _permit: unknown,
+    target: string,
+    bytes: string | Uint8Array,
+  ) => {
+    WRITE_CONTROL.count += 1;
+    if (WRITE_CONTROL.failAt === WRITE_CONTROL.count) {
+      throw new Error("fixture write failure");
+    }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require("fs") as typeof import("fs");
+    fs.writeFileSync(target, bytes);
+  },
+}));
+
 vi.mock("../src/shared/i18n", () => ({
   t: (key: string) => key.split(".").pop() || key,
 }));
@@ -61,6 +77,7 @@ import {
   getToolsets,
   setMessagingPlatformToolsetEnabled,
   setToolsetEnabled,
+  setToolsetEnabledManaged,
 } from "../src/main/tools";
 
 const CONFIG_FILE = join(TEST_HOME, "config.yaml");
@@ -182,6 +199,29 @@ describe("setToolsetEnabled — no config file", () => {
 });
 
 describe("setToolsetEnabled — no platform_toolsets section (C1)", () => {
+  it("leaves config.yaml unchanged when coordinated persistence is refused", async () => {
+    writeConfig("model:\n  default: gpt-4o\n");
+    const before = readConfig();
+    const mutationPort = {
+      mutate: vi.fn(async () => ({
+        status: "rejected" as const,
+        stage: "recovery" as const,
+        code: "model_configuration_recovery_required" as const,
+        rollback: "recovery_required" as const,
+        diagnosticId: "0123456789ab",
+      })),
+    };
+
+    await expect(
+      setToolsetEnabledManaged("web", false, undefined, {
+        modelMutationPort: mutationPort,
+      }),
+    ).rejects.toThrow("model_configuration_recovery_required");
+
+    expect(mutationPort.mutate).toHaveBeenCalledTimes(1);
+    expect(readConfig()).toBe(before);
+  });
+
   // @lat: [[image-generation#Default conversation admission]]
   it("keeps image generation enabled when a first unrelated toggle materializes cli", () => {
     writeConfig("model:\n  default: gpt-4o\n");
@@ -230,7 +270,9 @@ describe("setToolsetEnabled — no platform_toolsets section (C1)", () => {
     const before = readConfig();
     WRITE_CONTROL.failAt = 1;
 
-    expect(setToolsetEnabled("image_gen", false)).toBe(false);
+    expect(() => setToolsetEnabled("image_gen", false)).toThrow(
+      "fixture write failure",
+    );
 
     expect(readConfig()).toBe(before);
     expect(WRITE_CONTROL.count).toBe(1);

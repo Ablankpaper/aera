@@ -1,8 +1,13 @@
 import { execFile } from "child_process";
 import { existsSync, readFileSync } from "fs";
-import { profilePaths, safeWriteFile } from "./utils";
+import { profilePaths } from "./utils";
 import { getApiUrl, getRemoteAuthHeader, isRemoteMode } from "./hermes";
 import { getApiServerKey } from "./config";
+import { persistConfigWritePlan, planConfigDocumentWrite } from "./config";
+import {
+  requireManagedModelMutationValue,
+  type ManagedModelMutationPort,
+} from "./model-configuration-mutation-port";
 import { getEnhancedPath } from "./installer";
 import { getRuntimeInvocation } from "./agentera-runtime-distribution/invocation";
 
@@ -30,6 +35,10 @@ export interface McpServerInput {
   args?: string[];
   env?: Record<string, string>;
   auth?: string;
+}
+
+export interface McpServerMutationDependencies {
+  modelMutationPort: ManagedModelMutationPort;
 }
 
 export interface McpCatalogEntry {
@@ -144,9 +153,46 @@ function readConfig(profile?: string): string {
   return readFileSync(file, "utf-8");
 }
 
-function writeConfig(content: string, profile?: string): void {
-  const file = configFilePath(profile);
-  safeWriteFile(file, content.endsWith("\n") ? content : `${content}\n`);
+function unavailableMutation(): McpOperationResult {
+  return {
+    success: false,
+    error: "model_configuration_mutation_unavailable",
+  };
+}
+
+async function persistLocalConfigMutation(
+  operation: string,
+  profile: string | undefined,
+  transform: (content: string) => string,
+  dependencies: McpServerMutationDependencies | undefined,
+): Promise<McpOperationResult> {
+  if (!dependencies) return unavailableMutation();
+  const plan = planConfigDocumentWrite(
+    profile,
+    (content) => {
+      const next = transform(content);
+      return next.endsWith("\n") ? next : `${next}\n`;
+    },
+    undefined,
+  );
+  try {
+    const result = await dependencies.modelMutationPort.mutate({
+      operation,
+      globalCatalog: false,
+      profileIds: [profile || "default"],
+      stage: "activation",
+      prepare: () => ({
+        write: (permit) => persistConfigWritePlan(permit, plan),
+      }),
+    });
+    requireManagedModelMutationValue(result);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function runHermesMcpCli(
@@ -755,6 +801,7 @@ export async function listMcpServers(
 export async function addMcpServer(
   input: McpServerInput,
   profile?: string,
+  dependencies?: McpServerMutationDependencies,
 ): Promise<McpOperationResult> {
   const validated = validateServerInput(input);
   if (!validated.ok) return { success: false, error: validated.error };
@@ -790,11 +837,12 @@ export async function addMcpServer(
         error: `MCP server "${validated.value.name}" already exists.`,
       };
     }
-    writeConfig(
-      upsertMcpServerInConfig(readConfig(profile), validated.value),
+    return await persistLocalConfigMutation(
+      "mcp_server_add",
       profile,
+      (content) => upsertMcpServerInConfig(content, validated.value),
+      dependencies,
     );
-    return { success: true };
   } catch (err) {
     return {
       success: false,
@@ -806,6 +854,7 @@ export async function addMcpServer(
 export async function removeMcpServer(
   name: string,
   profile?: string,
+  dependencies?: McpServerMutationDependencies,
 ): Promise<McpOperationResult> {
   try {
     if (isRemoteMode()) {
@@ -818,8 +867,12 @@ export async function removeMcpServer(
       );
       return { success: true };
     }
-    writeConfig(removeMcpServerFromConfig(readConfig(profile), name), profile);
-    return { success: true };
+    return await persistLocalConfigMutation(
+      "mcp_server_remove",
+      profile,
+      (content) => removeMcpServerFromConfig(content, name),
+      dependencies,
+    );
   } catch (err) {
     return {
       success: false,
@@ -832,6 +885,7 @@ export async function setMcpServerEnabled(
   name: string,
   enabled: boolean,
   profile?: string,
+  dependencies?: McpServerMutationDependencies,
 ): Promise<McpOperationResult> {
   try {
     if (isRemoteMode()) {
@@ -842,11 +896,12 @@ export async function setMcpServerEnabled(
       );
       return { success: true };
     }
-    writeConfig(
-      setMcpServerEnabledInConfig(readConfig(profile), name, enabled),
+    return await persistLocalConfigMutation(
+      "mcp_server_toggle",
       profile,
+      (content) => setMcpServerEnabledInConfig(content, name, enabled),
+      dependencies,
     );
-    return { success: true };
   } catch (err) {
     return {
       success: false,

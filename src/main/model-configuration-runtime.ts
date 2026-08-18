@@ -33,26 +33,33 @@ import {
   getModelConfig,
   getModelConfigFresh,
   hasOAuthCredentials,
-  setEnvValue,
-  setModelConfig,
+  planEnvValueWrite,
+  planModelConfigWrite,
+  persistConfigWritePlan,
 } from "./config";
 import { validateModelConfiguration } from "./config-model-migration";
 import {
-  addModel,
-  migrateModelsForCustomProvider,
+  initializeModelCatalog,
+  planAddModel,
+  planModelCatalogInitialization,
+  planMigrateModelsForCustomProvider,
+  planRemoveModel,
+  planRemoveModelsForCustomProvider,
+  planUpdateModel,
+  persistModelCatalogWritePlan,
   readModels,
-  removeModel,
-  removeModelsForCustomProvider,
-  updateModel,
+  type ModelCatalogWritePlan,
 } from "./models";
 import {
   listCustomProviders,
-  removeCustomProvider,
-  upsertCustomProvider,
+  persistCustomProviderPlan,
+  planCustomProviderRemoval,
+  planCustomProviderUpsert,
 } from "./providers-store";
 import {
-  removeNativeCustomProvider,
-  upsertNativeCustomProvider,
+  persistNativeCustomProviderPlan,
+  planNativeCustomProviderRemoval,
+  planNativeCustomProviderUpsert,
 } from "./native-custom-provider";
 import { canonicalProviderBaseUrl } from "./provider-registry";
 import { getSecret } from "./secrets";
@@ -79,6 +86,10 @@ import {
   openModelConfigurationDatabase,
   type ModelConfigurationDatabase,
 } from "./model-configuration-database";
+import { registerManagedModelFileRoots } from "./model-configuration-managed-files";
+import {
+  recoverStagedProfileActivations as recoverStagedProfileActivationJournal,
+} from "./model-configuration-staged-profile";
 
 /** Minimal connection shape needed to fail closed for remote/SSH writes. */
 export interface ModelConfigurationRuntimeConnection {
@@ -97,6 +108,7 @@ export interface ModelConfigurationRuntimeOptions {
   notifyModelLibraryChanged?: (catalogRevision?: string) => void;
   notifyCustomProvidersChanged?: (catalogRevision?: string) => void;
   openDatabase?: typeof openModelConfigurationDatabase;
+  recoverStagedProfileActivations?: typeof recoverStagedProfileActivationJournal;
 }
 
 export interface ModelConfigurationRuntimeHandle {
@@ -352,7 +364,6 @@ function createMutationAdapter(
         }
         const previousProviderName = existingProvider?.name || "";
         const previousProviderBaseUrl = existingProvider?.baseUrl || "";
-        let persistedProviderId = existingProvider?.id;
         const credentialRef = custom
           ? customProviderEnvKey(providerLabel)
           : expectedEnvKeyForModel(provider, baseUrl);
@@ -391,106 +402,126 @@ function createMutationAdapter(
         const activeModel = request.models.find(
           (model) => model.model.trim() === request.activeModel.trim(),
         );
+        let credentialPlan: ReturnType<typeof planEnvValueWrite> | undefined;
+        if (credentialRef && (request.apiKey.trim() || existingCredential)) {
+          credentialPlan = planEnvValueWrite(
+            credentialRef,
+            request.apiKey.trim() || existingCredential,
+            context.targetProfileId,
+          );
+        }
+        if (previousCredentialRef && previousCredentialRef !== credentialRef) {
+          credentialPlan = planEnvValueWrite(
+            previousCredentialRef,
+            "",
+            context.targetProfileId,
+            credentialPlan,
+          );
+        }
+
+        const providerPlan = custom
+          ? planCustomProviderUpsert(context.targetProfileId, {
+              id: existingProvider?.id,
+              name: providerLabel,
+              baseUrl,
+            })
+          : null;
+        const persistedProviderId = providerPlan?.value?.id;
+
+        let modelPlan: ModelCatalogWritePlan<unknown> | undefined;
+        if (custom && persistedProviderId) {
+          modelPlan = planMigrateModelsForCustomProvider(
+            {
+              providerId: persistedProviderId,
+              oldName: previousProviderName,
+              oldBaseUrl: previousProviderBaseUrl,
+              newName: providerLabel,
+              newBaseUrl: baseUrl,
+              apiMode: request.apiMode,
+            },
+            modelPlan,
+          );
+        }
+        for (const model of request.models) {
+          const addPlan = planAddModel(
+            model.displayName.trim() || model.model.trim(),
+            modelLibraryProvider(provider),
+            model.model.trim(),
+            baseUrl,
+            model.contextLength,
+            custom ? providerLabel : undefined,
+            request.apiMode,
+            persistedProviderId,
+            modelPlan,
+          );
+          const saved = addPlan.value;
+          modelPlan = addPlan;
+          // A stable provider may absorb a legacy row. Normalize the absorbed
+          // attachment in the same virtual catalog before the single write.
+          if (
+            custom &&
+            ((saved.providerLabel || "") !== providerLabel ||
+              (saved.providerId || "") !== (persistedProviderId || ""))
+          ) {
+            modelPlan = planUpdateModel(
+              saved.id,
+              {
+                providerId: persistedProviderId,
+                providerLabel,
+                name: model.displayName.trim() || model.model.trim(),
+                apiMode: request.apiMode,
+              },
+              modelPlan,
+            );
+          }
+        }
+
+        const nativePlan = custom
+          ? planNativeCustomProviderUpsert(context.targetProfileId, {
+              name: providerLabel,
+              baseUrl,
+              previousName: previousProviderName || undefined,
+              model: request.activeModel.trim(),
+              models: request.models.map((model) => model.model.trim()),
+              apiMode: request.apiMode,
+            })
+          : undefined;
+        // Native provider metadata and active route share config.yaml. Compose
+        // both edits into one stale-checked plan and persist it once at the
+        // activation stage so neither edit can overwrite the other.
+        const activationPlan = planModelConfigWrite(
+          runtimeProvider,
+          request.activeModel.trim(),
+          baseUrl,
+          context.targetProfileId,
+          activeModel?.contextLength ?? null,
+          request.apiMode,
+          nativePlan,
+        );
         const applyStage = async (
           stage: ModelConfigurationCommitStage,
+          permit: Parameters<typeof persistConfigWritePlan>[0],
         ): Promise<void> => {
           switch (stage) {
             case "credential":
-              if (
-                credentialRef &&
-                (request.apiKey.trim() || existingCredential)
-              ) {
-                setEnvValue(
-                  credentialRef,
-                  request.apiKey.trim() || existingCredential,
-                  context.targetProfileId,
-                );
-              }
-              if (
-                previousCredentialRef &&
-                previousCredentialRef !== credentialRef
-              ) {
-                setEnvValue(previousCredentialRef, "", context.targetProfileId);
+              if (credentialPlan) {
+                persistConfigWritePlan(permit, credentialPlan);
               }
               return;
             case "provider":
-              if (custom) {
-                const persisted = upsertCustomProvider(
-                  context.targetProfileId,
-                  {
-                    id: existingProvider?.id,
-                    name: providerLabel,
-                    baseUrl,
-                  },
-                );
-                persistedProviderId = persisted?.id;
+              if (providerPlan) {
+                persistCustomProviderPlan(permit, providerPlan);
               }
               return;
             case "model_library":
-              if (custom && persistedProviderId) {
-                migrateModelsForCustomProvider({
-                  providerId: persistedProviderId,
-                  oldName: previousProviderName,
-                  oldBaseUrl: previousProviderBaseUrl,
-                  newName: providerLabel,
-                  newBaseUrl: baseUrl,
-                  apiMode: request.apiMode,
-                });
-              }
-              for (const model of request.models) {
-                const saved = addModel(
-                  model.displayName.trim() || model.model.trim(),
-                  modelLibraryProvider(provider),
-                  model.model.trim(),
-                  baseUrl,
-                  model.contextLength,
-                  custom ? providerLabel : undefined,
-                  request.apiMode,
-                  persistedProviderId,
-                );
-                // `addModel` intentionally deduplicates legacy rows without
-                // rewriting their provider label. Repair that identity here so
-                // a cosmetic provider rename cannot leave a stale catalog.
-                if (
-                  custom &&
-                  ((saved.providerLabel || "") !== providerLabel ||
-                    (saved.providerId || "") !== (persistedProviderId || ""))
-                ) {
-                  const row = readModels().find(
-                    (candidate) => candidate.id === saved.id,
-                  );
-                  if (row) {
-                    updateModel(saved.id, {
-                      providerId: persistedProviderId,
-                      providerLabel,
-                      name: model.displayName.trim() || model.model.trim(),
-                      apiMode: request.apiMode,
-                    });
-                  }
-                }
+              if (modelPlan) {
+                persistModelCatalogWritePlan(permit, modelPlan);
               }
               return;
             case "native_route":
-              if (custom) {
-                upsertNativeCustomProvider(context.targetProfileId, {
-                  name: providerLabel,
-                  baseUrl,
-                  previousName: previousProviderName || undefined,
-                  model: request.activeModel.trim(),
-                  models: request.models.map((model) => model.model.trim()),
-                  apiMode: request.apiMode,
-                });
-              }
               return;
             case "activation":
-              setModelConfig(
-                runtimeProvider,
-                request.activeModel.trim(),
-                baseUrl,
-                context.targetProfileId,
-                activeModel?.contextLength ?? null,
-                request.apiMode,
-              );
+              persistConfigWritePlan(permit, activationPlan);
               return;
           }
         };
@@ -587,52 +618,73 @@ function createMutationAdapter(
       const credentialRef = providerRecord
         ? customProviderEnvKey(providerRecord.name)
         : expectedEnvKeyForModel(active.provider, active.baseUrl);
+      const credentialPlan = credentialRef
+        ? planEnvValueWrite(credentialRef, "", context.targetProfileId)
+        : undefined;
+      const providerPlan = providerRecord
+        ? planCustomProviderRemoval(
+            context.targetProfileId,
+            providerRecord.name,
+          )
+        : undefined;
+      let modelPlan: ModelCatalogWritePlan<unknown> | undefined;
+      if (providerRecord) {
+        modelPlan = planRemoveModelsForCustomProvider(
+          providerRecord.name,
+          providerRecord.baseUrl,
+          providerRecord.id,
+          modelPlan,
+        );
+      } else {
+        for (const row of matchingRows) {
+          modelPlan = planRemoveModel(row.id, modelPlan);
+        }
+      }
+      const nativePlan = providerRecord
+        ? planNativeCustomProviderRemoval(
+            context.targetProfileId,
+            providerRecord.name,
+          )
+        : undefined;
+      const activationPlan = replacement
+        ? planModelConfigWrite(
+            replacement.provider,
+            replacement.model,
+            replacement.baseUrl,
+            context.targetProfileId,
+            null,
+            replacement.apiMode,
+            nativePlan,
+          )
+        : undefined;
       const applyStage = async (
         stage: ModelConfigurationCommitStage,
+        permit: Parameters<typeof persistConfigWritePlan>[0],
       ): Promise<void> => {
         switch (stage) {
           case "credential":
-            if (credentialRef) {
-              setEnvValue(credentialRef, "", context.targetProfileId);
+            if (credentialPlan) {
+              persistConfigWritePlan(permit, credentialPlan);
             }
             return;
           case "provider":
-            if (providerRecord) {
-              removeCustomProvider(
-                context.targetProfileId,
-                providerRecord.name,
-              );
+            if (providerPlan) {
+              persistCustomProviderPlan(permit, providerPlan);
             }
             return;
           case "model_library":
-            if (providerRecord) {
-              removeModelsForCustomProvider(
-                providerRecord.name,
-                providerRecord.baseUrl,
-                providerRecord.id,
-              );
-            } else {
-              for (const row of matchingRows) removeModel(row.id);
+            if (modelPlan) {
+              persistModelCatalogWritePlan(permit, modelPlan);
             }
             return;
           case "native_route":
-            if (providerRecord) {
-              removeNativeCustomProvider(
-                context.targetProfileId,
-                providerRecord.name,
-              );
+            if (nativePlan && !activationPlan) {
+              persistNativeCustomProviderPlan(permit, nativePlan);
             }
             return;
           case "activation":
-            if (replacement) {
-              setModelConfig(
-                replacement.provider,
-                replacement.model,
-                replacement.baseUrl,
-                context.targetProfileId,
-                null,
-                replacement.apiMode,
-              );
+            if (activationPlan) {
+              persistConfigWritePlan(permit, activationPlan);
             }
             return;
         }
@@ -724,40 +776,108 @@ export async function prepareModelConfigurationRuntime(
   let unavailable: ModelConfigurationStartupFailure | null = null;
 
   try {
-    catalog = createCatalog(options);
-    database = (options.openDatabase ?? openModelConfigurationDatabase)(
-      options.userDataPath,
-    );
-    operationStore = new ModelConfigurationOperationStore(database);
-    mutationAdapter = createMutationAdapter(options, catalog);
-    coordinator = new ModelConfigurationCoordinator({
-      catalog,
-      ownerHandle: () => runtimeComponentKey(options.getOwner()),
-      operationStore,
-      mutationAdapter,
-      isProfileOwned: (ownerHandle, profileId) => {
-        const owner = ownerFromComponentKey(ownerHandle);
-        if (!owner) return false;
-        try {
-          options.profileBindings.verifyProfileBinding(
-            profileHome(profileId),
-            owner,
-          );
-          return true;
-        } catch {
-          return false;
-        }
-      },
+    await (
+      options.recoverStagedProfileActivations ??
+      recoverStagedProfileActivationJournal
+    )({
+      profilesRoot: join(HERMES_HOME, "profiles"),
     });
   } catch (error) {
     recoveryError = error;
-    unavailable = startupFailure(initializationFailureCode(error));
-    coordinator = null;
+    unavailable = startupFailure("model_configuration_recovery_required");
+  }
+
+  if (unavailable === null) {
+    try {
+      registerManagedModelFileRoots({
+        globalRoot: HERMES_HOME,
+        profiles: Object.fromEntries(
+          profileIdsSync().map((profileId) => [
+            profileId,
+            profileHome(profileId),
+          ]),
+        ),
+      });
+      catalog = createCatalog(options);
+      database = (options.openDatabase ?? openModelConfigurationDatabase)(
+        options.userDataPath,
+      );
+      operationStore = new ModelConfigurationOperationStore(database);
+      mutationAdapter = createMutationAdapter(options, catalog);
+      coordinator = new ModelConfigurationCoordinator({
+        catalog,
+        ownerHandle: () => runtimeComponentKey(options.getOwner()),
+        operationStore,
+        mutationAdapter,
+        isProfileOwned: (ownerHandle, profileId) => {
+          const owner = ownerFromComponentKey(ownerHandle);
+          if (!owner) return false;
+          try {
+            options.profileBindings.verifyProfileBinding(
+              profileHome(profileId),
+              owner,
+            );
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        // A rollback is authoritative only after all five bytes and the
+        // journal have been verified. Notify every in-memory consumer even if
+        // one listener fails; the coordinator records a presentation warning
+        // without reopening the recovery lock.
+        notifyRolledBack: () => {
+          let revision: string | undefined;
+          const failures: unknown[] = [];
+          try {
+            revision = catalog!.snapshot(getActiveProfileNameSync()).revision;
+          } catch (error) {
+            failures.push(error);
+          }
+          const listeners = [
+            options.notifyModelLibraryChanged,
+            options.notifyCustomProvidersChanged,
+            options.notifyConnectionConfigChanged,
+            options.notifyRuntimeSnapshotChanged,
+          ];
+          for (const listener of listeners) {
+            if (!listener) continue;
+            try {
+              listener(revision);
+            } catch (error) {
+              failures.push(error);
+            }
+          }
+          if (failures.length > 0) throw failures[0];
+        },
+      });
+    } catch (error) {
+      recoveryError = error;
+      unavailable = startupFailure(initializationFailureCode(error));
+      coordinator = null;
+    }
   }
 
   if (coordinator !== null) {
     try {
       await coordinator.recoverIncompleteOperations();
+    } catch (error) {
+      recoveryError = error;
+      unavailable = startupFailure("model_configuration_recovery_required");
+      coordinator = null;
+    }
+  }
+
+  if (coordinator !== null && catalog !== null) {
+    try {
+      const targetProfileId = catalog.canonicalTargetProfileId("default");
+      const initialization = await initializeModelCatalog(
+        coordinator,
+        planModelCatalogInitialization([targetProfileId]),
+      );
+      if (initialization.status === "rejected") {
+        throw new Error("Managed model catalog initialization was rejected.");
+      }
     } catch (error) {
       recoveryError = error;
       unavailable = startupFailure("model_configuration_recovery_required");

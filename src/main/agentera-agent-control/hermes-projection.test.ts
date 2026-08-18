@@ -14,23 +14,58 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AgentDraftAssetInput,
   AgentEditableManifest,
 } from "../../shared/agentera-agent-control";
 import type { AgentVersion } from "./client";
 import {
+  configureHermesProjectionMutationPort,
   HermesProjectionError,
   HermesProjectionManager,
 } from "./hermes-projection";
 import { canonicalizeEditableAgent } from "./manifest";
+import type { ManagedModelMutationPort } from "../model-configuration-mutation-port";
+import {
+  clearManagedModelFileRoots,
+  ModelConfigurationWriteAuthority,
+  registerManagedModelFileRoots,
+} from "../model-configuration-write-authority";
 
 const DEFINITION_ID = "11111111-1111-4111-8111-111111111111";
 const VERSION_ID = "22222222-2222-4222-8222-222222222222";
 const AGENT_INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
 const STAGING_ID = "44444444-4444-4444-8444-444444444444";
 const VERSION_2_ID = "55555555-5555-4555-8555-555555555555";
+const PROFILE_ID = "hermes-profile";
+
+function executingModelMutationPort(): ManagedModelMutationPort {
+  const authority = new ModelConfigurationWriteAuthority();
+  return {
+    async mutate(input) {
+      return authority.run(
+        {
+          globalCatalog: input.globalCatalog,
+          profileIds: input.profileIds,
+        },
+        async (permit) => {
+          const plan = await input.prepare();
+          const value = await plan.write(permit);
+          return {
+            status: "executed" as const,
+            value,
+            catalog: {
+              revision: "0".repeat(64),
+              targetProfileId: input.profileIds[0],
+              routes: [],
+            },
+          };
+        },
+      );
+    },
+  };
+}
 
 function makeTreeWritable(path: string): void {
   if (!existsSync(path)) return;
@@ -122,21 +157,28 @@ describe("deterministic read-only Hermes Agent projection", () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "agentera-hermes-projection-"));
     userDataPath = join(root, "user-data");
-    profilePath = join(root, "hermes-profile");
+    profilePath = join(root, PROFILE_ID);
     mkdirSync(userDataPath, { recursive: true });
     mkdirSync(profilePath, { recursive: true });
+    registerManagedModelFileRoots({
+      globalRoot: join(root, "hermes-home"),
+      profiles: { [PROFILE_ID]: profilePath },
+    });
     manager = new HermesProjectionManager({
       userDataPath,
       randomUUID: () => STAGING_ID,
     });
+    configureHermesProjectionMutationPort(executingModelMutationPort());
   });
 
   afterEach(() => {
+    configureHermesProjectionMutationPort(null);
+    clearManagedModelFileRoots();
     makeTreeWritable(root);
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("materializes reproducible versioned assets and patches only external_dirs", () => {
+  it("materializes reproducible versioned assets and patches only external_dirs", async () => {
     const config = [
       "# formatting and private settings stay byte-identical",
       "model:",
@@ -158,8 +200,9 @@ describe("deterministic read-only Hermes Agent projection", () => {
       agentInstallationId: AGENT_INSTALLATION_ID,
       version: version(),
     });
-    const activated = manager.activateForProfile({
+    const activated = await manager.activateForProfile({
       projection: built,
+      profileId: PROFILE_ID,
       profilePath,
     });
 
@@ -255,13 +298,17 @@ describe("deterministic read-only Hermes Agent projection", () => {
       "private user\n",
     );
 
-    manager.activateForProfile({ projection: built, profilePath });
+    await manager.activateForProfile({
+      projection: built,
+      profileId: PROFILE_ID,
+      profilePath,
+    });
     expect(readFileSync(join(profilePath, "config.yaml"), "utf8")).toBe(
       expectedConfig,
     );
   });
 
-  it("keeps an Organization version projection outside the writable Profile and preserves private learning bytes", () => {
+  it("keeps an Organization version projection outside the writable Profile and preserves private learning bytes", async () => {
     writeFileSync(join(profilePath, "config.yaml"), "tools:\n  allowed: []\n");
     writeFileSync(join(profilePath, "MEMORY.md"), "private memory\n");
     writeFileSync(join(profilePath, "USER.md"), "private user\n");
@@ -283,8 +330,9 @@ describe("deterministic read-only Hermes Agent projection", () => {
       agentInstallationId: AGENT_INSTALLATION_ID,
       version: version(),
     });
-    const activated = manager.activateForProfile({
+    const activated = await manager.activateForProfile({
       projection: built,
+      profileId: PROFILE_ID,
       profilePath,
     });
 
@@ -301,7 +349,7 @@ describe("deterministic read-only Hermes Agent projection", () => {
     }
   });
 
-  it("lets a same-name Profile-local Skill win without changing it", () => {
+  it("lets a same-name Profile-local Skill win without changing it", async () => {
     const localSkill = join(
       profilePath,
       "skills",
@@ -319,8 +367,9 @@ describe("deterministic read-only Hermes Agent projection", () => {
       version: version(),
     });
 
-    const activated = manager.activateForProfile({
+    const activated = await manager.activateForProfile({
       projection: built,
+      profileId: PROFILE_ID,
       profilePath,
     });
 
@@ -335,7 +384,7 @@ describe("deterministic read-only Hermes Agent projection", () => {
     expect(readFileSync(localSkill)).toEqual(before);
   });
 
-  it("appends to an existing YAML sequence without reformatting prior entries", () => {
+  it("appends to an existing YAML sequence without reformatting prior entries", async () => {
     const existingExternal = join(root, "existing-external-skills");
     mkdirSync(existingExternal);
     const config = [
@@ -353,8 +402,9 @@ describe("deterministic read-only Hermes Agent projection", () => {
       version: version(),
     });
 
-    const activated = manager.activateForProfile({
+    const activated = await manager.activateForProfile({
       projection: built,
+      profileId: PROFILE_ID,
       profilePath,
     });
 
@@ -368,12 +418,16 @@ describe("deterministic read-only Hermes Agent projection", () => {
     );
   });
 
-  it("switches the stable active projection while retaining the prior version", () => {
+  it("switches the stable active projection while retaining the prior version", async () => {
     const first = manager.materializeVersion({
       agentInstallationId: AGENT_INSTALLATION_ID,
       version: version(),
     });
-    manager.activateForProfile({ projection: first, profilePath });
+    await manager.activateForProfile({
+      projection: first,
+      profileId: PROFILE_ID,
+      profilePath,
+    });
     const configAfterFirst = readFileSync(
       join(profilePath, "config.yaml"),
       "utf8",
@@ -383,7 +437,11 @@ describe("deterministic read-only Hermes Agent projection", () => {
       agentInstallationId: AGENT_INSTALLATION_ID,
       version: version(2, VERSION_2_ID),
     });
-    manager.activateForProfile({ projection: second, profilePath });
+    await manager.activateForProfile({
+      projection: second,
+      profileId: PROFILE_ID,
+      profilePath,
+    });
 
     expect(readFileSync(join(profilePath, "config.yaml"), "utf8")).toBe(
       configAfterFirst,
@@ -395,7 +453,7 @@ describe("deterministic read-only Hermes Agent projection", () => {
     expect(existsSync(second.versionRoot)).toBe(true);
   });
 
-  it("rolls back generated activation when the allowlisted config write fails", () => {
+  it("rolls back generated activation when the allowlisted config write fails", async () => {
     const configPath = join(profilePath, "config.yaml");
     const config = "provider: auto\n";
     writeFileSync(configPath, config);
@@ -411,9 +469,49 @@ describe("deterministic read-only Hermes Agent projection", () => {
       version: version(),
     });
 
-    expect(() =>
-      failing.activateForProfile({ projection: built, profilePath }),
-    ).toThrow(/config write failure/);
+    await expect(
+      failing.activateForProfile({
+        projection: built,
+        profileId: PROFILE_ID,
+        profilePath,
+      }),
+    ).rejects.toThrow(/config write failure/);
+    expect(readFileSync(configPath, "utf8")).toBe(config);
+    expect(existsSync(built.externalSkillsDirectory)).toBe(false);
+  });
+
+  // @lat: [[beta27-reliability-plan#Recoverable model configuration#Hermes projection config activation is transactional]]
+  it("does not activate or write config when model recovery refuses the projection", async () => {
+    const configPath = join(profilePath, "config.yaml");
+    const config = "provider: auto\n";
+    writeFileSync(configPath, config);
+    const mutate = vi.fn(async () => ({
+      status: "rejected" as const,
+      stage: "recovery" as const,
+      code: "model_configuration_recovery_required" as const,
+      rollback: "recovery_required" as const,
+      diagnosticId: "0123456789ab",
+    }));
+    const blocked = new HermesProjectionManager({
+      userDataPath,
+      randomUUID: () => STAGING_ID,
+      modelMutationPort: { mutate } as unknown as ManagedModelMutationPort,
+    });
+    const built = blocked.materializeVersion({
+      agentInstallationId: AGENT_INSTALLATION_ID,
+      version: version(),
+    });
+
+    await expect(
+      blocked.activateForProfile({
+        projection: built,
+        profileId: "hermes-profile",
+        profilePath,
+      }),
+    ).rejects.toMatchObject({
+      code: "model_configuration_recovery_required",
+    });
+    expect(mutate).toHaveBeenCalledTimes(1);
     expect(readFileSync(configPath, "utf8")).toBe(config);
     expect(existsSync(built.externalSkillsDirectory)).toBe(false);
   });
@@ -423,16 +521,20 @@ describe("deterministic read-only Hermes Agent projection", () => {
     "shared: &shared\n  - /tmp/shared\nskills:\n  external_dirs: *shared\n",
     "skills:\n  external_dirs: !private\n    - /tmp/shared\n",
     "defaults: &defaults\n  external_dirs:\n    - /tmp/shared\nskills:\n  <<: *defaults\n",
-  ])("rejects aliases, anchors, and tags on external_dirs", (config) => {
+  ])("rejects aliases, anchors, and tags on external_dirs", async (config) => {
     const configPath = join(profilePath, "config.yaml");
     writeFileSync(configPath, config);
     const built = manager.materializeVersion({
       agentInstallationId: AGENT_INSTALLATION_ID,
       version: version(),
     });
-    expect(() =>
-      manager.activateForProfile({ projection: built, profilePath }),
-    ).toThrowError(
+    await expect(
+      manager.activateForProfile({
+        projection: built,
+        profileId: PROFILE_ID,
+        profilePath,
+      }),
+    ).rejects.toThrowError(
       expect.objectContaining<Partial<HermesProjectionError>>({
         code: "unsafe_external_dirs",
       }),

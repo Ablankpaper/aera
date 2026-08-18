@@ -315,8 +315,17 @@ vi.mock("../src/main/config", () => ({
   getModelConfig: () => modelConfig,
   getConfigValue: () => "",
   readEnv: () => profileEnv,
-  getApiServerKey: () => "",
+  // Gateway launch now consumes a credential prepared by the managed
+  // bootstrap transaction; this fixture represents that prepared state.
+  getApiServerKey: () => "internal-test-token",
   getConnectionConfig: () => ({ mode: "local" as const }),
+}));
+
+vi.mock("../src/main/gateway-managed-config", () => ({
+  prepareGatewayManagedConfiguration: async () => ({
+    key: "internal-test-token",
+    port: 8642,
+  }),
 }));
 
 vi.mock("../src/main/ssh-tunnel", () => ({
@@ -379,6 +388,7 @@ vi.mock("../src/main/gateway-process-ownership", async (importOriginal) => {
 });
 
 import {
+  configureGatewayManagedConfiguration,
   configureGatewayProcessOwnership,
   sendMessage,
   startGateway,
@@ -391,6 +401,9 @@ describe("CLI fallback session id propagation", () => {
     rmSync(TEST_HOME, { recursive: true, force: true });
     mkdirSync(TEST_HOME, { recursive: true });
     configureGatewayProcessOwnership(TEST_HOME);
+    configureGatewayManagedConfiguration({
+      modelMutationPort: { mutate: vi.fn() },
+    });
     healthStatuses.length = 0;
     healthSteadyStatusRef.value = 503;
     apiRequests.length = 0;
@@ -437,6 +450,7 @@ describe("CLI fallback session id propagation", () => {
   });
 
   afterEach(() => {
+    configureGatewayManagedConfiguration(null);
     stopGateway(undefined, true);
     stopHealthPolling();
     spawned.length = 0;

@@ -29,6 +29,11 @@ import { resolveAgenteraControlPlanePaths } from "./db";
 import { normalizeAgentAssetPath } from "./manifest";
 import { canonicalizeAgentVersionContent } from "./trust";
 import { safeWriteFile } from "../utils";
+import { currentModelConfigurationWritePermit } from "../model-configuration-managed-files";
+import {
+  requireManagedModelMutationValue,
+  type ManagedModelMutationPort,
+} from "../model-configuration-mutation-port";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -80,6 +85,15 @@ export interface HermesProjectionManagerOptions {
   randomUUID?: () => string;
   rename?: (source: string, destination: string) => void;
   writeConfig?: (path: string, content: string) => void;
+  modelMutationPort?: ManagedModelMutationPort;
+}
+
+let configuredModelMutationPort: ManagedModelMutationPort | null = null;
+
+export function configureHermesProjectionMutationPort(
+  modelMutationPort: ManagedModelMutationPort | null,
+): void {
+  configuredModelMutationPort = modelMutationPort;
 }
 
 interface ProjectionFile {
@@ -518,6 +532,7 @@ export class HermesProjectionManager {
   private readonly randomUUID: () => string;
   private readonly rename: (source: string, destination: string) => void;
   private readonly writeConfig: (path: string, content: string) => void;
+  private readonly modelMutationPort: ManagedModelMutationPort | null;
 
   constructor(options: HermesProjectionManagerOptions) {
     this.projectionsRoot = resolveAgenteraControlPlanePaths(
@@ -527,6 +542,7 @@ export class HermesProjectionManager {
     this.randomUUID = options.randomUUID ?? nodeRandomUUID;
     this.rename = options.rename ?? renameSync;
     this.writeConfig = options.writeConfig ?? safeWriteFile;
+    this.modelMutationPort = options.modelMutationPort ?? null;
   }
 
   materializeVersion(input: {
@@ -697,7 +713,44 @@ export class HermesProjectionManager {
     };
   }
 
-  activateForProfile(input: {
+  async activateForProfile(input: {
+    projection: HermesVersionProjection;
+    profileId: string;
+    profilePath: string;
+  }): Promise<ActivatedHermesProjection> {
+    const profileId = input.profileId.trim();
+    if (!profileId) throw new HermesProjectionError("profile_invalid");
+    if (currentModelConfigurationWritePermit()) {
+      return this.activateForProfileWithinManagedWrite({
+        projection: input.projection,
+        profilePath: input.profilePath,
+      });
+    }
+    const modelMutationPort =
+      this.modelMutationPort ?? configuredModelMutationPort;
+    if (!modelMutationPort) {
+      throw Object.assign(
+        new Error("model_configuration_mutation_unavailable"),
+        { code: "model_configuration_mutation_unavailable" },
+      );
+    }
+    const result = await modelMutationPort.mutate({
+      operation: "agent_hermes_projection_activation",
+      globalCatalog: false,
+      profileIds: [profileId],
+      stage: "activation",
+      prepare: () => ({
+        write: () =>
+          this.activateForProfileWithinManagedWrite({
+            projection: input.projection,
+            profilePath: input.profilePath,
+          }),
+      }),
+    });
+    return requireManagedModelMutationValue(result);
+  }
+
+  private activateForProfileWithinManagedWrite(input: {
     projection: HermesVersionProjection;
     profilePath: string;
   }): ActivatedHermesProjection {

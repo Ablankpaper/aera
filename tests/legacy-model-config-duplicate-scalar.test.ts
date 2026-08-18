@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { join } from "path";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
+import { withManagedModelTestWrite } from "./helpers/managed-model-test-writer";
 
 /**
  * Regression suite for the duplicate-key shapes the first migration missed.
@@ -26,6 +27,21 @@ async function importWithHome(home: string): Promise<{
     config: await import("../src/main/config"),
     migration: await import("../src/main/config-model-migration"),
   };
+}
+
+async function writeDefaultProfile<T>(
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  return await withManagedModelTestWrite(
+    {
+      roots: {
+        globalRoot: TEST_DIR,
+        profiles: { default: TEST_DIR },
+      },
+      scope: { globalCatalog: false, profileIds: ["default"] },
+    },
+    callback,
+  );
 }
 
 function topLevelModelKeys(content: string): number {
@@ -53,7 +69,9 @@ describe("legacy model config — duplicate scalar recovery", () => {
     );
 
     const { config } = await importWithHome(TEST_DIR);
-    config.setModelConfig("openai", "gpt-4", "https://api.openai.com/v1");
+    await writeDefaultProfile(() =>
+      config.setModelConfig("openai", "gpt-4", "https://api.openai.com/v1"),
+    );
 
     const content = readFileSync(configFile, "utf-8");
     // The bug: the write used to append a mapping beside a surviving scalar.
@@ -82,10 +100,12 @@ describe("legacy model config — duplicate scalar recovery", () => {
     );
 
     const { config } = await importWithHome(TEST_DIR);
-    config.setModelConfig(
-      "deepseek",
-      "deepseek-v4-pro",
-      "https://api.deepseek.com/v1",
+    await writeDefaultProfile(() =>
+      config.setModelConfig(
+        "deepseek",
+        "deepseek-v4-pro",
+        "https://api.deepseek.com/v1",
+      ),
     );
 
     const content = readFileSync(configFile, "utf-8");
@@ -109,9 +129,11 @@ describe("legacy model config — duplicate scalar recovery", () => {
     writeFileSync(configFile, broken, "utf-8");
 
     const { config } = await importWithHome(TEST_DIR);
-    expect(() =>
-      config.setModelConfig("openai", "gpt-4", "https://api.openai.com/v1"),
-    ).toThrow();
+    await writeDefaultProfile(() => {
+      expect(() =>
+        config.setModelConfig("openai", "gpt-4", "https://api.openai.com/v1"),
+      ).toThrow();
+    });
 
     // Half-repaired content must never reach disk.
     expect(readFileSync(configFile, "utf-8")).toBe(broken);

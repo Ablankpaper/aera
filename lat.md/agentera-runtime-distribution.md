@@ -80,7 +80,7 @@ Desktop starts each POSIX TUI child as a dedicated process-group leader and reco
 
 Shutdown targets only that dedicated group. Windows instead captures the exact root and child tree with invariant UTC file-time identities, using bounded root/parent CIM filters rather than enumerating the machine process table. No path selects processes by name, port, Profile label, command line, or environment.
 
-Windows initial ownership capture shares one six-second deadline across the primary CIM query and one explicit WMI fallback. Every returned row must have valid PID/parent fields and an invariant creation identity; timeout, unavailable, malformed, empty, or partial output remains fail-closed. Optional hosted-runner diagnostics contain only the phase, attempt, elapsed time, outcome, sanitized Profile key, and root PID.
+Windows initial ownership capture shares one six-second deadline across the primary CIM query and one explicit WMI fallback. The cold-start-sensitive CIM attempt may consume at most one third of that deadline, preserving the remaining budget for WMI on loaded hosts. Every returned row must have valid PID/parent fields and an invariant creation identity; timeout, unavailable, malformed, empty, or partial output remains fail-closed. Optional hosted-runner diagnostics contain only the phase, attempt, elapsed time, outcome, sanitized Profile key, and root PID.
 
 ### Bounded force escalation
 

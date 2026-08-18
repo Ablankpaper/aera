@@ -708,7 +708,7 @@ describe("terminateProcessTree", () => {
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
-  it("shares one deadline across hanging Windows snapshot attempts and never falls back to PID-only force", async () => {
+  it("gives the WMI fallback most of the shared Windows snapshot budget", async () => {
     const platform = vi
       .spyOn(process, "platform", "get")
       .mockReturnValue("win32");
@@ -745,12 +745,12 @@ describe("terminateProcessTree", () => {
         expect.objectContaining({
           attempt: 1,
           strategy: "cim",
-          timeoutMs: 25,
+          timeoutMs: 13,
         }),
         expect.objectContaining({
           attempt: 2,
           strategy: "wmi",
-          timeoutMs: 15,
+          timeoutMs: 27,
         }),
       ]);
 

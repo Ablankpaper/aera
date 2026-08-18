@@ -6,6 +6,12 @@ import type {
   OwnerModelRouteCatalogSnapshot,
   OwnerModelRouteSummary,
 } from "../../shared/model-configuration";
+import type {
+  ManagedModelConfigurationWriteContext,
+  ManagedModelConfigurationWritePlan,
+  ManagedModelConfigurationWriteRequest,
+  ManagedModelConfigurationWriteResult,
+} from "../model-configuration-coordinator";
 
 const PROFILE_ID_PATTERN = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
 const REVISION_PATTERN = /^[0-9a-f]{64}$/i;
@@ -19,6 +25,14 @@ export interface ModelConfigurationIpcBridgeDependencies {
     mutate(
       request: ModelConfigurationMutationRequest,
     ): Promise<ModelConfigurationMutationResult>;
+    runManagedWrite<T>(
+      request: ManagedModelConfigurationWriteRequest,
+      prepare: (
+        context: ManagedModelConfigurationWriteContext,
+      ) =>
+        | ManagedModelConfigurationWritePlan<T>
+        | Promise<ManagedModelConfigurationWritePlan<T>>,
+    ): Promise<ManagedModelConfigurationWriteResult<T>>;
   };
   /** Main-only ownership check for the optional catalog target. */
   assertRequestedProfile?(profileId: string): void;
@@ -46,6 +60,17 @@ export function coordinatorUnavailableMutation(
         diagnosticId: failure.diagnosticId,
       };
     },
+    async runManagedWrite<T>(): Promise<
+      ManagedModelConfigurationWriteResult<T>
+    > {
+      return {
+        status: "rejected",
+        stage: recoveryRequired ? "recovery" : "validation",
+        code: failure.code,
+        rollback: recoveryRequired ? "recovery_required" : "not_needed",
+        diagnosticId: failure.diagnosticId,
+      };
+    },
   };
 }
 
@@ -53,6 +78,30 @@ function invalidRequest(): Error {
   return Object.assign(new Error("Invalid model configuration request."), {
     code: "invalid_request",
   });
+}
+
+function managedWriteBlocked(
+  result: Extract<
+    ManagedModelConfigurationWriteResult<never>,
+    { status: "rejected" }
+  >,
+): Error {
+  return Object.assign(new Error(result.code), {
+    code: result.code,
+    stage: result.stage,
+    rollback: result.rollback,
+    ...(result.diagnosticId ? { diagnosticId: result.diagnosticId } : {}),
+  });
+}
+
+const MANAGED_WRITE_STAGES = new Set<
+  ManagedModelConfigurationWriteRequest["stage"]
+>(["credential", "provider", "model_library", "native_route", "activation"]);
+
+export interface ManagedModelConfigurationWriteBridgeOptions {
+  refreshWarningToError?(
+    warning: "model_save_refresh_failed",
+  ): Error;
 }
 
 function profileId(value: unknown): string {
@@ -218,6 +267,15 @@ export function createModelConfigurationIpcBridge(
   mutateModelConfiguration(
     input: unknown,
   ): Promise<ModelConfigurationMutationResult>;
+  runManagedModelConfigurationWrite<T>(
+    request: ManagedModelConfigurationWriteRequest,
+    prepare: (
+      context: ManagedModelConfigurationWriteContext,
+    ) =>
+      | ManagedModelConfigurationWritePlan<T>
+      | Promise<ManagedModelConfigurationWritePlan<T>>,
+    options?: ManagedModelConfigurationWriteBridgeOptions,
+  ): Promise<T>;
 } {
   return {
     getOwnerModelRouteCatalog(requestedProfileId?: unknown) {
@@ -238,6 +296,31 @@ export function createModelConfigurationIpcBridge(
       const request = parseMutationRequest(input);
       const result = await dependencies.coordinator.mutate(request);
       return redactMutationResult(result);
+    },
+    async runManagedModelConfigurationWrite<T>(
+      request,
+      prepare,
+      options: ManagedModelConfigurationWriteBridgeOptions = {},
+    ): Promise<T> {
+      const requestedProfileId = profileId(request.requestedProfileId);
+      if (
+        (request.scope !== "profile" && request.scope !== "global") ||
+        !MANAGED_WRITE_STAGES.has(request.stage) ||
+        typeof prepare !== "function"
+      ) {
+        throw invalidRequest();
+      }
+      const result = await dependencies.coordinator.runManagedWrite<T>(
+        { ...request, requestedProfileId },
+        prepare,
+      );
+      if (result.status === "rejected") throw managedWriteBlocked(result);
+      if (result.warning && options.refreshWarningToError) {
+        const error = options.refreshWarningToError(result.warning);
+        if (!(error instanceof Error)) throw invalidRequest();
+        throw error;
+      }
+      return result.value;
     },
   };
 }

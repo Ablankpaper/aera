@@ -59,15 +59,42 @@ function upsertRequest(
 function subject(): {
   bridge: ReturnType<typeof createModelConfigurationIpcBridge>;
   coordinator: ModelConfigurationIpcBridgeDependencies["coordinator"];
+  managedWriteMock: ReturnType<typeof vi.fn>;
   assertRequestedProfile: NonNullable<
     ModelConfigurationIpcBridgeDependencies["assertRequestedProfile"]
   >;
 } {
-  const coordinator = {
+  const managedWriteMock = vi.fn(
+    async (
+      _request: unknown,
+      prepare: (context: {
+        ownerHandle: string;
+        targetProfileId: string;
+        catalog: OwnerModelRouteCatalogSnapshot;
+        oldRouteKey: string;
+      }) => Promise<{ write(): unknown }> | { write(): unknown },
+    ) => {
+      const plan = await prepare({
+        ownerHandle: "owner",
+        targetProfileId: "account",
+        catalog: publicSnapshot(),
+        oldRouteKey:
+          "custom:petoi\0gpt-5.6-sol\0https://api.petoi.cn/v1\0codex_responses",
+      });
+      return {
+        status: "executed" as const,
+        value: await plan.write(),
+        catalog: publicSnapshot(),
+      };
+    },
+  );
+  const coordinator: ModelConfigurationIpcBridgeDependencies["coordinator"] = {
     mutate: vi.fn(async () => ({
       status: "committed" as const,
       catalog: publicSnapshot(),
     })),
+    runManagedWrite:
+      managedWriteMock as unknown as ModelConfigurationIpcBridgeDependencies["coordinator"]["runManagedWrite"],
   };
   const assertRequestedProfile = vi.fn((profile: string) => {
     if (profile === "foreign") throw new Error("foreign Profile");
@@ -80,11 +107,113 @@ function subject(): {
   return {
     bridge: createModelConfigurationIpcBridge(dependencies),
     coordinator,
+    managedWriteMock,
     assertRequestedProfile,
   };
 }
 
 describe("coordinated model configuration IPC bridge", () => {
+  it("delegates a focused managed writer through the coordinator", async () => {
+    const { bridge, managedWriteMock } = subject();
+    const focusedBridge = bridge as typeof bridge & {
+      runManagedModelConfigurationWrite<T>(
+        request: {
+          requestedProfileId: string;
+          scope: "profile" | "global";
+          stage:
+            | "credential"
+            | "provider"
+            | "model_library"
+            | "native_route"
+            | "activation";
+        },
+        prepare: (context: { oldRouteKey: string }) => {
+          newRouteKey?: string;
+          write(): T | Promise<T>;
+        },
+      ): Promise<T>;
+    };
+    const write = vi.fn(() => "saved");
+
+    await expect(
+      focusedBridge.runManagedModelConfigurationWrite(
+        {
+          requestedProfileId: "account",
+          scope: "profile",
+          stage: "credential",
+        },
+        ({ oldRouteKey }) => ({ newRouteKey: oldRouteKey, write }),
+      ),
+    ).resolves.toBe("saved");
+    expect(managedWriteMock).toHaveBeenCalledTimes(1);
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it("can preserve a legacy caller's refresh-failure error after the bytes commit", async () => {
+    const { bridge, managedWriteMock } = subject();
+    managedWriteMock.mockResolvedValueOnce({
+      status: "executed",
+      value: { generated: true },
+      catalog: publicSnapshot(),
+      warning: "model_save_refresh_failed",
+    });
+    const legacyMessage =
+      "The local gateway credential was created, but the gateway could not restart with it.";
+    const focusedBridge = bridge as typeof bridge & {
+      runManagedModelConfigurationWrite<T>(
+        request: {
+          requestedProfileId: string;
+          scope: "profile" | "global";
+          stage:
+            | "credential"
+            | "provider"
+            | "model_library"
+            | "native_route"
+            | "activation";
+        },
+        prepare: () => { write(): T | Promise<T> },
+        options: {
+          refreshWarningToError(warning: "model_save_refresh_failed"): Error;
+        },
+      ): Promise<T>;
+    };
+
+    await expect(
+      focusedBridge.runManagedModelConfigurationWrite(
+        {
+          requestedProfileId: "account",
+          scope: "profile",
+          stage: "credential",
+        },
+        () => ({ write: () => ({ generated: true }) }),
+        {
+          refreshWarningToError: () => new Error(legacyMessage),
+        },
+      ),
+    ).rejects.toThrow(legacyMessage);
+  });
+
+  it("keeps refresh warnings non-throwing for callers without a legacy error contract", async () => {
+    const { bridge, managedWriteMock } = subject();
+    managedWriteMock.mockResolvedValueOnce({
+      status: "executed",
+      value: "saved",
+      catalog: publicSnapshot(),
+      warning: "model_save_refresh_failed",
+    });
+
+    await expect(
+      bridge.runManagedModelConfigurationWrite(
+        {
+          requestedProfileId: "account",
+          scope: "profile",
+          stage: "provider",
+        },
+        () => ({ write: () => "saved" }),
+      ),
+    ).resolves.toBe("saved");
+  });
+
   it("returns a redacted owner catalog and delegates one mutation", async () => {
     const { bridge, coordinator } = subject();
     const snapshot = bridge.getOwnerModelRouteCatalog("account");

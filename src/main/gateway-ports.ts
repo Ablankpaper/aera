@@ -3,7 +3,7 @@ import { createServer } from "node:net";
 import { join } from "path";
 import { HERMES_HOME } from "./installer";
 import { normalizeProfileName } from "./utils";
-import { getConfigValue, setConfigValue } from "./config";
+import { getConfigValue } from "./config";
 
 function envPort(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -121,8 +121,9 @@ export async function firstBindablePort(
  *  - named profile with no configured port → allocate a free port and persist
  *    it (the api_server block is written by ensureApiServerConfig).
  *  - named profile whose configured port collides with the default or another
- *    profile (a profile cloned from default inherits 8642) → reassign to a
- *    free port and rewrite config.yaml in place.
+ *    profile (a profile cloned from default inherits 8642) → resolve a free
+ *    port without writing from this read API. The managed gateway bootstrap
+ *    persists the resolution before process launch.
  *
  * Idempotent: once a non-colliding port is persisted, later calls return it
  * without touching the file.
@@ -137,11 +138,7 @@ export function getProfilePort(profile?: string): number {
       configured === DEFAULT_API_SERVER_PORT ||
       portsInUse(name).has(configured);
     if (!collides) return configured;
-    const port = allocateFreePort(name);
-    // setConfigValue replaces the existing nested value in place — the common
-    // case here is a profile cloned from default that carries port 8642.
-    setConfigValue(API_SERVER_PORT_PATH, String(port), name);
-    return port;
+    return allocateFreePort(name);
   }
 
   // No port (and possibly no api_server block) yet. ensureApiServerConfig
@@ -169,6 +166,5 @@ export async function ensureProfilePortAvailable(
   }
   const available = await firstBindablePort(candidates);
   if (available === null) return current;
-  setConfigValue(API_SERVER_PORT_PATH, String(available), name);
   return available;
 }

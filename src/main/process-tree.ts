@@ -169,6 +169,11 @@ function processRecords(): ProcessRecord[] {
 const DEFAULT_SNAPSHOT_TIMEOUT_MS = 750;
 const DEFAULT_COMMAND_TIMEOUT_MS = 750;
 const MAX_PROCESS_SNAPSHOT_BYTES = 8 * 1024 * 1024;
+// CIM is normally fast, but its first provider activation can consume the
+// whole timeout on a loaded hosted Windows runner. Reserve most of the shared
+// deadline for the explicit WMI fallback instead of letting CIM starve it.
+const WINDOWS_PRIMARY_SNAPSHOT_BUDGET_NUMERATOR = 1;
+const WINDOWS_PRIMARY_SNAPSHOT_BUDGET_DENOMINATOR = 3;
 
 function sanitizeDiagnosticProfileKey(value: string | undefined): string {
   const normalized = (value ?? "unknown")
@@ -930,6 +935,16 @@ export async function terminateProcessTree(
       snapshotTimeoutMs * 2,
     ),
   );
+  const windowsPrimarySnapshotBudgetMs = Math.max(
+    1,
+    Math.min(
+      snapshotTimeoutMs,
+      Math.floor(
+        (snapshotTotalBudgetMs * WINDOWS_PRIMARY_SNAPSHOT_BUDGET_NUMERATOR) /
+          WINDOWS_PRIMARY_SNAPSHOT_BUDGET_DENOMINATOR,
+      ),
+    ),
+  );
   const commandTimeoutMs = Math.max(
     1,
     options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
@@ -959,7 +974,17 @@ export async function terminateProcessTree(
     return captureForPhase(
       {
         rootPid,
-        timeoutMs: Math.max(1, Math.min(snapshotTimeoutMs, remainingBudget)),
+        timeoutMs: Math.max(
+          1,
+          Math.min(
+            process.platform !== "win32"
+              ? snapshotTimeoutMs
+              : strategy === "cim" && attempt === 1
+                ? windowsPrimarySnapshotBudgetMs
+                : snapshotTotalBudgetMs,
+            remainingBudget,
+          ),
+        ),
         phase: "initial-snapshot",
         attempt,
         strategy,

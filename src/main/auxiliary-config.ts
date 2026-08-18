@@ -5,8 +5,13 @@
 // model per task. We only write the routing fields (provider/model/base_url/
 // api_key) and never touch timeout/extra_body, which the agent defaults.
 import { existsSync, readFileSync } from "fs";
-import { profilePaths, safeWriteFile } from "./utils";
+import { profilePaths } from "./utils";
 import { getYamlPath } from "./yaml-path";
+import { writeManagedModelFile } from "./model-configuration-managed-files";
+import {
+  requireManagedModelMutationValue,
+  type ManagedModelMutationPort,
+} from "./model-configuration-mutation-port";
 
 // Canonical task slots, ordered to match the agent dashboard UI.
 export const AUX_TASK_SLOTS = [
@@ -30,6 +35,49 @@ export interface AuxTaskConfig {
   provider: string;
   model: string;
   baseUrl: string;
+}
+
+export interface AuxiliaryConfigMutationDependencies {
+  modelMutationPort: ManagedModelMutationPort;
+}
+
+interface AuxiliaryConfigWritePlan {
+  readonly profileId: string;
+  readonly target: string;
+  readonly before: Buffer | null;
+  readonly after: Buffer;
+}
+
+function configBytes(path: string): Buffer | null {
+  return existsSync(path) ? readFileSync(path) : null;
+}
+
+function planAuxiliaryConfigWrite(
+  profile: string | undefined,
+  transform: (content: string) => string,
+): AuxiliaryConfigWritePlan {
+  const { configFile } = profilePaths(profile);
+  const before = configBytes(configFile);
+  return {
+    profileId: profile || "default",
+    target: configFile,
+    before,
+    after: Buffer.from(transform(before?.toString("utf-8") ?? "")),
+  };
+}
+
+function persistAuxiliaryConfigWrite(
+  permit: Parameters<typeof writeManagedModelFile>[0],
+  plan: AuxiliaryConfigWritePlan,
+): void {
+  const current = configBytes(plan.target);
+  if (
+    (current === null) !== (plan.before === null) ||
+    (current !== null && plan.before !== null && !current.equals(plan.before))
+  ) {
+    throw new Error("Managed auxiliary config write plan is stale.");
+  }
+  writeManagedModelFile(permit, plan.target, plan.after);
 }
 
 function isAuxSlot(task: string): task is AuxTaskSlot {
@@ -136,33 +184,62 @@ export function setAuxiliaryField(
   return lines.join("\n");
 }
 
-export function setAuxiliaryTask(
+export async function setAuxiliaryTask(
   task: string,
   cfg: { provider: string; model: string; baseUrl: string },
   profile?: string,
-): void {
+  dependencies?: AuxiliaryConfigMutationDependencies,
+): Promise<void> {
   if (!isAuxSlot(task)) throw new Error(`unknown auxiliary task: ${task}`);
-  const { configFile } = profilePaths(profile);
-  let content = existsSync(configFile) ? readFileSync(configFile, "utf-8") : "";
-  content = setAuxiliaryField(
-    content,
-    task,
-    "provider",
-    cfg.provider || "auto",
-  );
-  content = setAuxiliaryField(content, task, "model", cfg.model || "");
-  content = setAuxiliaryField(content, task, "base_url", cfg.baseUrl || "");
-  safeWriteFile(configFile, content);
+  if (!dependencies)
+    throw new Error("model_configuration_mutation_unavailable");
+  const plan = planAuxiliaryConfigWrite(profile, (initial) => {
+    let content = setAuxiliaryField(
+      initial,
+      task,
+      "provider",
+      cfg.provider || "auto",
+    );
+    content = setAuxiliaryField(content, task, "model", cfg.model || "");
+    return setAuxiliaryField(content, task, "base_url", cfg.baseUrl || "");
+  });
+  const result = await dependencies.modelMutationPort.mutate({
+    operation: "auxiliary_task_update",
+    globalCatalog: false,
+    profileIds: [plan.profileId],
+    stage: "activation",
+    prepare: () => ({
+      write: (permit) => persistAuxiliaryConfigWrite(permit, plan),
+    }),
+  });
+  requireManagedModelMutationValue(result);
 }
 
-export function resetAuxiliaryToAuto(profile?: string): void {
+export async function resetAuxiliaryToAuto(
+  profile?: string,
+  dependencies?: AuxiliaryConfigMutationDependencies,
+): Promise<void> {
   const { configFile } = profilePaths(profile);
   if (!existsSync(configFile)) return;
-  let content = readFileSync(configFile, "utf-8");
-  for (const task of AUX_TASK_SLOTS) {
-    content = setAuxiliaryField(content, task, "provider", "auto");
-    content = setAuxiliaryField(content, task, "model", "");
-    content = setAuxiliaryField(content, task, "base_url", "");
-  }
-  safeWriteFile(configFile, content);
+  if (!dependencies)
+    throw new Error("model_configuration_mutation_unavailable");
+  const plan = planAuxiliaryConfigWrite(profile, (initial) => {
+    let content = initial;
+    for (const task of AUX_TASK_SLOTS) {
+      content = setAuxiliaryField(content, task, "provider", "auto");
+      content = setAuxiliaryField(content, task, "model", "");
+      content = setAuxiliaryField(content, task, "base_url", "");
+    }
+    return content;
+  });
+  const result = await dependencies.modelMutationPort.mutate({
+    operation: "auxiliary_reset",
+    globalCatalog: false,
+    profileIds: [plan.profileId],
+    stage: "activation",
+    prepare: () => ({
+      write: (permit) => persistAuxiliaryConfigWrite(permit, plan),
+    }),
+  });
+  requireManagedModelMutationValue(result);
 }

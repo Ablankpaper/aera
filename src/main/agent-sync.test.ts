@@ -5,6 +5,9 @@ import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProfileInfo } from "./profiles";
+import type { AgentSyncResult } from "../shared/agent-sync";
+import type { ManagedModelMutationPort } from "./model-configuration-mutation-port";
+import type { ModelConfigurationWritePermit } from "./model-configuration-managed-files";
 
 // The sync engine's fs/profile/config surface is faked so the tests exercise
 // the reconciliation logic (linking, part decisions, state files) without a
@@ -100,13 +103,27 @@ vi.mock("./config", () => ({
       provider: "auto",
       baseUrl: "",
     },
-  setModelConfig: (
+  getConfigValue: () => null,
+  planModelConfigWrite: (
     provider: string,
     model: string,
-    _baseUrl: string,
+    baseUrl: string,
     profile?: string,
+  ) => ({ provider, model, baseUrl, profile }),
+  persistConfigWritePlan: (
+    _permit: ModelConfigurationWritePermit,
+    plan: {
+      provider: string;
+      model: string;
+      baseUrl: string;
+      profile?: string;
+    },
   ) => {
-    mockState.writtenModels.push({ profile, model, provider });
+    mockState.writtenModels.push({
+      profile: plan.profile,
+      model: plan.model,
+      provider: plan.provider,
+    });
   },
 }));
 
@@ -189,8 +206,34 @@ function stubFetch(
   return calls;
 }
 
+const modelMutationPort: ManagedModelMutationPort = {
+  async mutate(input) {
+    const plan = await input.prepare();
+    const value = await plan.write(
+      null as unknown as ModelConfigurationWritePermit,
+    );
+    return {
+      status: "executed",
+      value,
+      catalog: {
+        revision: "0".repeat(64),
+        targetProfileId: input.profileIds[0],
+        routes: [],
+      },
+    };
+  },
+};
+
 async function engine(): Promise<typeof import("./agent-sync")> {
-  return import("./agent-sync");
+  const module = await import("./agent-sync");
+  return {
+    ...module,
+    syncAgents: (
+      dependencies: Parameters<typeof module.syncAgents>[0] = {
+        modelMutationPort,
+      },
+    ) => module.syncAgents(dependencies),
+  };
 }
 
 beforeEach(() => {
@@ -428,6 +471,56 @@ describe("syncAgents", () => {
       content: "cloud-soul",
     });
     expect(mockState.writtenMemories).toEqual([]);
+  });
+
+  it("leaves managed model state unchanged when coordinated config pull is refused", async () => {
+    mockState.profiles = [fakeProfile("alpha")];
+    mockState.models.set("alpha", {
+      model: "local-model",
+      provider: "local-provider",
+      baseUrl: "https://local.example/v1",
+    });
+    stubFetch([
+      remoteAgent({
+        id: "agent-1",
+        name: "alpha",
+        model: "cloud-model",
+        provider: "cloud-provider",
+        updatedAt: new Date(Date.now() + 60_000).toISOString(),
+      }),
+    ]);
+    const mutationPort = {
+      mutate: vi.fn(async (input: { prepare: () => unknown }) => {
+        expect(input.prepare).toEqual(expect.any(Function));
+        return {
+          status: "rejected" as const,
+          stage: "recovery" as const,
+          code: "model_configuration_recovery_required" as const,
+          rollback: "recovery_required" as const,
+          diagnosticId: "0123456789ab",
+        };
+      }),
+    };
+
+    const { syncAgents } = await engine();
+    const result = await (
+      syncAgents as unknown as (input: {
+        modelMutationPort: typeof mutationPort;
+      }) => Promise<AgentSyncResult>
+    )({
+      modelMutationPort: mutationPort,
+    });
+
+    expect(mutationPort.mutate).toHaveBeenCalledTimes(1);
+    expect(mockState.writtenModels).toEqual([]);
+    expect(result.outcomes[0]).toMatchObject({
+      profile: "alpha",
+      agentId: "agent-1",
+      action: "error",
+    });
+    expect(result.outcomes[0]?.warnings).toContain(
+      "model_configuration_recovery_required",
+    );
   });
 
   // @lat: [[agent-sync#Tests#Pull-creates cloud-only agents]]

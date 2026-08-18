@@ -112,7 +112,8 @@ export interface FreshProfileBindingRequest {
     name: string,
     cloneFrom: string | null,
     reservedProfileId?: string,
-  ) => ProfileCreationResult;
+    activation?: { authorize: () => boolean | Promise<boolean> },
+  ) => ProfileCreationResult | Promise<ProfileCreationResult>;
   resolveProfilePath: (profileId: string) => string;
   activateProfile: (profileId: string) => void;
   activate?: boolean;
@@ -132,7 +133,8 @@ export interface FreshProfileReconciliationAdapters {
     name: string,
     cloneFrom: string | null,
     reservedProfileId?: string,
-  ) => ProfileCreationResult;
+    activation?: { authorize: () => boolean | Promise<boolean> },
+  ) => ProfileCreationResult | Promise<ProfileCreationResult>;
   resolveProfilePath: (profileId: string) => string;
   activateProfile: (profileId: string) => void;
 }
@@ -702,9 +704,9 @@ export class AgenteraProfileBindingStore {
     return true;
   }
 
-  reconcileActivatingFreshProfiles(
+  async reconcileActivatingFreshProfiles(
     adapters: FreshProfileReconciliationAdapters,
-  ): Array<{ profileId: string; binding: RuntimeOwnerBinding }> {
+  ): Promise<Array<{ profileId: string; binding: RuntimeOwnerBinding }>> {
     assertOwner(adapters.owner);
     const operationIds = this.readState()
       .freshProfileOperations.filter(
@@ -718,18 +720,23 @@ export class AgenteraProfileBindingStore {
           left.operationId.localeCompare(right.operationId),
       )
       .map((reservation) => reservation.operationId);
-    return operationIds.map((operationId) =>
-      this.reconcileFreshProfile(operationId, adapters),
-    );
+    const reconciled: Array<{
+      profileId: string;
+      binding: RuntimeOwnerBinding;
+    }> = [];
+    for (const operationId of operationIds) {
+      reconciled.push(await this.reconcileFreshProfile(operationId, adapters));
+    }
+    return reconciled;
   }
 
-  reconcileFreshProfile(
+  async reconcileFreshProfile(
     operationId: string,
     adapters: FreshProfileReconciliationAdapters,
-  ): {
+  ): Promise<{
     profileId: string;
     binding: RuntimeOwnerBinding;
-  } {
+  }> {
     assertOwner(adapters.owner);
     if (!validUuid(operationId)) {
       throw new Error("Aera fresh Profile reservation identity is invalid.");
@@ -749,10 +756,23 @@ export class AgenteraProfileBindingStore {
       // This is deliberately the only call shape: no source Profile or
       // private path can enter the generic Hermes cloning argument. The
       // reservation reached durable encrypted storage before this callback.
-      const created = adapters.createProfile(
+      const created = await adapters.createProfile(
         reservation.displayName,
         null,
         reservation.profileId,
+        {
+          authorize: () => {
+            const current = this.readState().freshProfileOperations.find(
+              (candidate) => candidate.operationId === reservation?.operationId,
+            );
+            return (
+              current !== undefined &&
+              reservationHasOwner(current, adapters.owner) &&
+              current.profileId === reservation?.profileId &&
+              current.runtimeProfileId === reservation?.runtimeProfileId
+            );
+          },
+        },
       );
       if (
         !created.success ||
@@ -860,10 +880,12 @@ export class AgenteraProfileBindingStore {
     };
   }
 
-  createAndBindFreshProfile(request: FreshProfileBindingRequest): {
+  async createAndBindFreshProfile(
+    request: FreshProfileBindingRequest,
+  ): Promise<{
     profileId: string;
     binding: RuntimeOwnerBinding;
-  } {
+  }> {
     this.reserveFreshProfile({
       operationId: request.operationId,
       name: request.name,

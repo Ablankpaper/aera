@@ -47,6 +47,27 @@ async function freshHealth(): Promise<
   return await import("../src/main/config-health");
 }
 
+async function withManagedWindowsProfileWrite<T>(
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  const [managed, authority] = await Promise.all([
+    import("../src/main/model-configuration-managed-files"),
+    import("../src/main/model-configuration-write-authority"),
+  ]);
+  managed.registerManagedModelFileRoots({
+    globalRoot: WIN_HOME,
+    profiles: { default: WIN_HOME },
+  });
+  try {
+    return await new authority.ModelConfigurationWriteAuthority().run(
+      { globalCatalog: false, profileIds: ["default"] },
+      callback,
+    );
+  } finally {
+    managed.clearManagedModelFileRoots();
+  }
+}
+
 beforeEach(() => {
   mkdirSync(WIN_HOME, { recursive: true });
   mkdirSync(WSL_HOME, { recursive: true });
@@ -177,13 +198,15 @@ describe("fixSiblingHermesHomeDrift", () => {
     writeWslEnv("CUSTOM_API_KEY=sk-copy-this-one\n");
 
     const { fixSiblingHermesHomeDrift } = await freshHealth();
-    const result = fixSiblingHermesHomeDrift(undefined, {
-      field: "CUSTOM_API_KEY",
-      wslHome: WSL_HOME,
-      direction: "wsl-to-windows",
-      distro: "Ubuntu",
-      user: "tester",
-    });
+    const result = await withManagedWindowsProfileWrite(() =>
+      fixSiblingHermesHomeDrift(undefined, {
+        field: "CUSTOM_API_KEY",
+        wslHome: WSL_HOME,
+        direction: "wsl-to-windows",
+        distro: "Ubuntu",
+        user: "tester",
+      }),
+    );
 
     expect(result.ok).toBe(true);
     const winEnv = readFileSync(join(WIN_HOME, ".env"), "utf-8");
@@ -202,13 +225,15 @@ describe("fixSiblingHermesHomeDrift", () => {
     );
 
     const { fixSiblingHermesHomeDrift } = await freshHealth();
-    const result = fixSiblingHermesHomeDrift(undefined, {
-      field: "model.api_key",
-      wslHome: WSL_HOME,
-      direction: "wsl-to-windows",
-      distro: "Ubuntu",
-      user: "tester",
-    });
+    const result = await withManagedWindowsProfileWrite(() =>
+      fixSiblingHermesHomeDrift(undefined, {
+        field: "model.api_key",
+        wslHome: WSL_HOME,
+        direction: "wsl-to-windows",
+        distro: "Ubuntu",
+        user: "tester",
+      }),
+    );
 
     expect(result.ok).toBe(true);
     const winYaml = readFileSync(join(WIN_HOME, "config.yaml"), "utf-8");
@@ -235,13 +260,15 @@ describe("fixSiblingHermesHomeDrift", () => {
     writeWindowsEnv("");
     writeWslEnv("OPENROUTER_API_KEY=sk-or-full-secret-12345\n");
     const { fixSiblingHermesHomeDrift } = await freshHealth();
-    fixSiblingHermesHomeDrift(undefined, {
-      field: "OPENROUTER_API_KEY",
-      wslHome: WSL_HOME,
-      direction: "wsl-to-windows",
-      distro: "Ubuntu",
-      user: "tester",
-    });
+    await withManagedWindowsProfileWrite(() =>
+      fixSiblingHermesHomeDrift(undefined, {
+        field: "OPENROUTER_API_KEY",
+        wslHome: WSL_HOME,
+        direction: "wsl-to-windows",
+        distro: "Ubuntu",
+        user: "tester",
+      }),
+    );
     const logPath = join(WIN_HOME, "logs", "config-fixes.log");
     expect(existsSync(logPath)).toBe(true);
     const lastLine = readFileSync(logPath, "utf-8")

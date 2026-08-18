@@ -1,10 +1,12 @@
 // @vitest-environment node
-import { existsSync, mkdtempSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockState = vi.hoisted(() => ({ hermesHome: "" }));
+
+let writeAuthority: import("./model-configuration-write-authority").ModelConfigurationWriteAuthority;
 
 vi.mock("./installer", () => ({
   get HERMES_HOME() {
@@ -13,12 +15,27 @@ vi.mock("./installer", () => ({
 }));
 
 describe("providers store", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockState.hermesHome = mkdtempSync(join(tmpdir(), "hermes-providers-"));
     vi.resetModules();
+    const [managed, authority] = await Promise.all([
+      import("./model-configuration-managed-files"),
+      import("./model-configuration-write-authority"),
+    ]);
+    managed.registerManagedModelFileRoots({
+      globalRoot: mockState.hermesHome,
+      profiles: {
+        default: mockState.hermesHome,
+        coder: join(mockState.hermesHome, "profiles", "coder"),
+      },
+    });
+    writeAuthority = new authority.ModelConfigurationWriteAuthority();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    const { clearManagedModelFileRoots } =
+      await import("./model-configuration-managed-files");
+    clearManagedModelFileRoots();
     rmSync(mockState.hermesHome, { recursive: true, force: true });
   });
 
@@ -36,10 +53,14 @@ describe("providers store", () => {
 
   it("upserts a custom provider and lists it", async () => {
     const s = await store();
-    const record = s.upsertCustomProvider("default", {
-      name: "faab.ai",
-      baseUrl: "https://api.faab.ai/v1",
-    });
+    const record = await writeAuthority.run(
+      { globalCatalog: false, profileIds: ["default"] },
+      () =>
+        s.upsertCustomProvider("default", {
+          name: "faab.ai",
+          baseUrl: "https://api.faab.ai/v1",
+        }),
+    );
 
     expect(record).toMatchObject({
       name: "faab.ai",
@@ -50,16 +71,44 @@ describe("providers store", () => {
     expect(s.listCustomProviders("default")).toEqual([record]);
   });
 
-  it("updates in place on re-save, preserving id/createdAt", async () => {
+  it("plans without writing and requires the explicit Profile permit to persist", async () => {
     const s = await store();
-    const first = s.upsertCustomProvider("default", {
-      name: "faab.ai",
-      baseUrl: "https://old.example.com/v1",
-    });
-    const second = s.upsertCustomProvider("default", {
+    const file = join(mockState.hermesHome, "providers.json");
+
+    const plan = s.planCustomProviderUpsert("default", {
       name: "faab.ai",
       baseUrl: "https://api.faab.ai/v1",
     });
+
+    expect(existsSync(file)).toBe(false);
+    expect(() => s.persistCustomProviderPlan(null, plan)).toThrow(/permit/i);
+    expect(existsSync(file)).toBe(false);
+
+    const record = await writeAuthority.run(
+      { globalCatalog: false, profileIds: ["default"] },
+      (permit) => s.persistCustomProviderPlan(permit, plan),
+    );
+
+    expect(record).toMatchObject({ name: "faab.ai" });
+    expect(JSON.parse(readFileSync(file, "utf8")).providers).toHaveLength(1);
+  });
+
+  it("updates in place on re-save, preserving id/createdAt", async () => {
+    const s = await store();
+    const [first, second] = await writeAuthority.run(
+      { globalCatalog: false, profileIds: ["default"] },
+      () => {
+        const firstRecord = s.upsertCustomProvider("default", {
+          name: "faab.ai",
+          baseUrl: "https://old.example.com/v1",
+        });
+        const secondRecord = s.upsertCustomProvider("default", {
+          name: "faab.ai",
+          baseUrl: "https://api.faab.ai/v1",
+        });
+        return [firstRecord, secondRecord] as const;
+      },
+    );
 
     const list = s.listCustomProviders("default");
     expect(list).toHaveLength(1);
@@ -70,15 +119,21 @@ describe("providers store", () => {
 
   it("renames an existing provider by stable id instead of creating a second record", async () => {
     const s = await store();
-    const first = s.upsertCustomProvider("default", {
-      name: "petoi.cn",
-      baseUrl: "https://api.petoi.cn/v1",
-    });
-    const renamed = s.upsertCustomProvider("default", {
-      id: first!.id,
-      name: "123456",
-      baseUrl: "https://www.api-codex.cn",
-    });
+    const [first, renamed] = await writeAuthority.run(
+      { globalCatalog: false, profileIds: ["default"] },
+      () => {
+        const firstRecord = s.upsertCustomProvider("default", {
+          name: "petoi.cn",
+          baseUrl: "https://api.petoi.cn/v1",
+        });
+        const renamedRecord = s.upsertCustomProvider("default", {
+          id: firstRecord!.id,
+          name: "123456",
+          baseUrl: "https://www.api-codex.cn",
+        });
+        return [firstRecord, renamedRecord] as const;
+      },
+    );
 
     expect(s.listCustomProviders("default")).toHaveLength(1);
     expect(renamed).toMatchObject({
@@ -96,14 +151,19 @@ describe("providers store", () => {
     // "faab.ai" and "FAAB_AI" both sanitize to CUSTOM_PROVIDER_FAAB_AI_KEY, so
     // the second save must update the first record rather than duplicate it.
     const s = await store();
-    s.upsertCustomProvider("default", {
-      name: "faab.ai",
-      baseUrl: "https://a.example.com/v1",
-    });
-    s.upsertCustomProvider("default", {
-      name: "FAAB_AI",
-      baseUrl: "https://b.example.com/v1",
-    });
+    await writeAuthority.run(
+      { globalCatalog: false, profileIds: ["default"] },
+      () => {
+        s.upsertCustomProvider("default", {
+          name: "faab.ai",
+          baseUrl: "https://a.example.com/v1",
+        });
+        s.upsertCustomProvider("default", {
+          name: "FAAB_AI",
+          baseUrl: "https://b.example.com/v1",
+        });
+      },
+    );
     expect(s.listCustomProviders("default")).toHaveLength(1);
   });
 
@@ -120,24 +180,34 @@ describe("providers store", () => {
 
   it("removes a provider by name via its env-key anchor", async () => {
     const s = await store();
-    s.upsertCustomProvider("default", {
-      name: "faab.ai",
-      baseUrl: "https://api.faab.ai/v1",
-    });
-    s.removeCustomProvider("default", "FAAB.AI"); // different casing, same anchor
+    await writeAuthority.run(
+      { globalCatalog: false, profileIds: ["default"] },
+      () => {
+        s.upsertCustomProvider("default", {
+          name: "faab.ai",
+          baseUrl: "https://api.faab.ai/v1",
+        });
+        s.removeCustomProvider("default", "FAAB.AI"); // different casing, same anchor
+      },
+    );
     expect(s.listCustomProviders("default")).toEqual([]);
   });
 
   it("isolates providers per profile", async () => {
     const s = await store();
-    s.upsertCustomProvider("default", {
-      name: "faab.ai",
-      baseUrl: "https://api.faab.ai/v1",
-    });
-    s.upsertCustomProvider("coder", {
-      name: "other.ai",
-      baseUrl: "https://api.other.ai/v1",
-    });
+    await writeAuthority.run(
+      { globalCatalog: false, profileIds: ["default", "coder"] },
+      () => {
+        s.upsertCustomProvider("default", {
+          name: "faab.ai",
+          baseUrl: "https://api.faab.ai/v1",
+        });
+        s.upsertCustomProvider("coder", {
+          name: "other.ai",
+          baseUrl: "https://api.other.ai/v1",
+        });
+      },
+    );
 
     expect(s.listCustomProviders("default")).toHaveLength(1);
     expect(s.listCustomProviders("coder")).toHaveLength(1);
