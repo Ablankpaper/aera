@@ -18,6 +18,10 @@ contracts/agentera-cloud.openapi.yaml text eol=lf
 contracts/experience-candidate-v1-vectors.json text eol=lf
 src/shared/agentera-cloud-api.generated.ts text eol=lf
 
+# The sanitized Beta.29 route fixture verifies exact reviewed bytes. Preserve
+# its manifest hashes when Git checks the fixture out on Windows.
+tests/fixtures/beta29-dirty-route/** text eol=lf
+
 # Vitest imports these CLI modules directly; keep their hashbang lines parseable
 # when Windows Git is configured to convert text files to CRLF.
 scripts/prepare-agentera-runtime-seed.mjs text eol=lf
