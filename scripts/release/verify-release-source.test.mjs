@@ -2,7 +2,14 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,17 +18,26 @@ import test from "node:test";
 const scriptPath = fileURLToPath(
   new URL("./verify-release-source.mjs", import.meta.url),
 );
+const fullScanHookPath = fileURLToPath(
+  new URL("./fsmonitor-full-scan.sh", import.meta.url),
+);
 const repository = "Ablankpaper/aera";
 const workflowRef =
   "Ablankpaper/aera/.github/workflows/release-candidate.yml@refs/heads/main";
+const workflowPath = new URL(
+  "../../.github/workflows/release-candidate.yml",
+  import.meta.url,
+);
+const packagePath = new URL("../../package.json", import.meta.url);
 
 function runGit(cwd, args) {
-  const result = spawnSync("git", args, {
+  const result = spawnSync("git", ["--no-replace-objects", ...args], {
     cwd,
     encoding: "utf8",
     env: {
       ...process.env,
       GIT_CONFIG_NOSYSTEM: "1",
+      GIT_NO_REPLACE_OBJECTS: "1",
     },
   });
   assert.equal(
@@ -152,8 +168,8 @@ for (const fixtureCase of [
 }
 
 // @lat: [[release-source-governance#Release Source Governance#Retired remote rejection]]
-test("rejects the retired repository in either a fetch or push remote", async () => {
-  for (const direction of ["fetch", "push", "rewrite"]) {
+test("rejects the retired repository in raw and rewritten fetch or push remotes", async () => {
+  for (const direction of ["fetch", "push", "rewrite", "push-instead-of"]) {
     const fixture = await createFixture(
       "https://github.com/Ablankpaper/aera.git",
     );
@@ -174,10 +190,16 @@ test("rejects the retired repository in either a fetch or push remote", async ()
           "origin",
           "https://github.com/bignormal/aera.git",
         ]);
-      } else {
+      } else if (direction === "rewrite") {
         runGit(fixture.checkout, [
           "config",
           "url.https://github.com/bignormal/aera.git.insteadOf",
+          "https://github.com/Ablankpaper/aera.git",
+        ]);
+      } else {
+        runGit(fixture.checkout, [
+          "config",
+          "url.https://github.com/bignormal/aera.git.pushInsteadOf",
           "https://github.com/Ablankpaper/aera.git",
         ]);
       }
@@ -297,6 +319,149 @@ test("rejects tracked and untracked checkout changes", async () => {
   }
 });
 
+// @lat: [[release-source-governance#Release Source Governance#Replacement object rejection]]
+test("rejects replace refs that make altered bytes look like the reviewed commit", async () => {
+  const fixture = await createFixture(
+    "https://github.com/Ablankpaper/aera.git",
+  );
+  try {
+    await writeFile(
+      join(fixture.checkout, "tracked.txt"),
+      "replacement source\n",
+      "utf8",
+    );
+    runGit(fixture.checkout, ["add", "tracked.txt"]);
+    const replacementTree = runGit(fixture.checkout, ["write-tree"]);
+    const replacementCommit = runGit(fixture.checkout, [
+      "-c",
+      "user.name=Aera Fixture",
+      "-c",
+      "user.email=fixture@invalid.example",
+      "-c",
+      "commit.gpgSign=false",
+      "commit-tree",
+      replacementTree,
+      "-p",
+      fixture.sourceSha,
+      "-m",
+      "replacement source",
+    ]);
+    runGit(fixture.checkout, ["replace", fixture.sourceSha, replacementCommit]);
+
+    const result = verify(fixture);
+    assert.notEqual(result.status, 0, "replace ref was accepted");
+    assert.match(result.stderr, /replace/u);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a non-empty replace namespace even when its ref is malformed", async () => {
+  const fixture = await createFixture(
+    "https://github.com/Ablankpaper/aera.git",
+  );
+  try {
+    await mkdir(join(fixture.checkout, ".git", "refs", "replace"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(fixture.checkout, ".git", "refs", "replace", "sentinel"),
+      "not-a-replacement-object\n",
+      "utf8",
+    );
+
+    const result = verify(fixture);
+    assert.notEqual(result.status, 0, "malformed replace ref was accepted");
+    assert.match(result.stderr, /replace|inspect/u);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+// @lat: [[release-source-governance#Release Source Governance#Index trust flag rejection]]
+test("rejects assume-unchanged and skip-worktree tracked files", async () => {
+  for (const flag of ["assume-unchanged", "skip-worktree"]) {
+    const fixture = await createFixture(
+      "https://github.com/Ablankpaper/aera.git",
+    );
+    try {
+      await writeFile(
+        join(fixture.checkout, "tracked.txt"),
+        `${flag} source change\n`,
+        "utf8",
+      );
+      runGit(fixture.checkout, ["update-index", `--${flag}`, "tracked.txt"]);
+
+      const result = verify(fixture);
+      assert.notEqual(result.status, 0, `${flag} change was accepted`);
+      assert.match(result.stderr, /index|clean/u);
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  }
+});
+
+// @lat: [[release-source-governance#Release Source Governance#Filesystem monitor isolation]]
+test("bypasses an fsmonitor hook that falsely reports a clean checkout", async () => {
+  const fixture = await createFixture(
+    "https://github.com/Ablankpaper/aera.git",
+  );
+  try {
+    const hook = join(fixture.root, "false-clean-fsmonitor.sh");
+    await writeFile(hook, "#!/bin/sh\nprintf 'fake-token\\n'\n", "utf8");
+    await chmod(hook, 0o755);
+    runGit(fixture.checkout, ["config", "core.fsmonitor", hook]);
+    assert.equal(runGit(fixture.checkout, ["status", "--porcelain=v1"]), "");
+    await writeFile(
+      join(fixture.checkout, "tracked.txt"),
+      "fsmonitor-hidden change\n",
+      "utf8",
+    );
+
+    const result = verify(fixture);
+    assert.notEqual(result.status, 0, "fsmonitor-hidden change was accepted");
+    assert.match(result.stderr, /clean/u);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("forces full scans for both legacy and modern fsmonitor hook protocols", () => {
+  for (const [version, expected] of [
+    ["1", Buffer.from("/\0")],
+    ["2", Buffer.from("aera-release-source-full-scan\0/\0")],
+  ]) {
+    const result = spawnSync(fullScanHookPath, [version, "previous-token"]);
+    assert.equal(result.status, 0, result.error?.message);
+    assert.deepEqual(result.stdout, expected);
+  }
+});
+
+// @lat: [[release-source-governance#Release Source Governance#Ignored input rejection]]
+test("rejects an untracked build input hidden by git info exclude", async () => {
+  const fixture = await createFixture(
+    "https://github.com/Ablankpaper/aera.git",
+  );
+  try {
+    await writeFile(
+      join(fixture.checkout, ".git", "info", "exclude"),
+      "hidden-build-input.bin\n",
+      "utf8",
+    );
+    await writeFile(
+      join(fixture.checkout, "hidden-build-input.bin"),
+      "unreviewed build input\n",
+      "utf8",
+    );
+
+    const result = verify(fixture);
+    assert.notEqual(result.status, 0, "ignored build input was accepted");
+    assert.match(result.stderr, /ignored|clean/u);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 // @lat: [[release-source-governance#Release Source Governance#Required origin identity]]
 test("rejects a checkout without origin or a usable push URL", async () => {
   for (const variant of ["missing-origin", "empty-push-url"]) {
@@ -376,4 +541,29 @@ test("emits canonical evidence without checkout paths or raw remote URLs", async
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
+});
+
+// @lat: [[release-source-governance#Release Source Governance#Candidate workflow enforcement]]
+test("runs the exact source gate before the production candidate build path", async () => {
+  const [workflow, packageDocument] = await Promise.all([
+    readFile(workflowPath, "utf8"),
+    readFile(packagePath, "utf8").then((raw) => JSON.parse(raw)),
+  ]);
+  assert.equal(
+    packageDocument.scripts["verify:release-source"],
+    "node scripts/release/verify-release-source.mjs",
+  );
+  const gateIndex = workflow.indexOf(
+    "npm run --silent verify:release-source --",
+  );
+  const buildIndex = workflow.indexOf("npm run build");
+  assert.ok(gateIndex >= 0, "release candidate must invoke the source gate");
+  assert.ok(buildIndex >= 0, "release candidate must contain a build step");
+  assert.ok(gateIndex < buildIndex, "source gate must precede candidate build");
+  assert.match(workflow, /--checkout "\$GITHUB_WORKSPACE"/u);
+  assert.match(workflow, /--repository "\$GITHUB_REPOSITORY"/u);
+  assert.match(workflow, /--source-sha "\$SOURCE_SHA"/u);
+  assert.match(workflow, /--workflow-ref "\$GITHUB_WORKFLOW_REF"/u);
+  assert.match(workflow, /macos:[\s\S]*?needs: validate/u);
+  assert.match(workflow, /windows:[\s\S]*?needs: validate/u);
 });

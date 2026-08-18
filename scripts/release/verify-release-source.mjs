@@ -2,13 +2,18 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 
 import { spawnSync } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { readdirSync, realpathSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const AUTHORITATIVE_REPOSITORY = "Ablankpaper/aera";
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const WORKFLOW_REF_PATTERN =
   /^Ablankpaper\/aera\/\.github\/workflows\/[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml@refs\/heads\/main$/u;
 const REMOTE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
+const FSMONITOR_FULL_SCAN_HOOK = fileURLToPath(
+  new URL("./fsmonitor-full-scan.sh", import.meta.url),
+);
 
 function fail(message) {
   throw new Error(`Release source verification failed: ${message}`);
@@ -57,14 +62,19 @@ function git(checkout, args, { allowMissing = false } = {}) {
   const environment = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
   );
-  const result = spawnSync("git", ["-C", checkout, ...args], {
-    encoding: "utf8",
-    env: {
-      ...environment,
-      GIT_OPTIONAL_LOCKS: "0",
-      LC_ALL: "C",
+  const result = spawnSync(
+    "git",
+    ["--no-replace-objects", "-C", checkout, ...args],
+    {
+      encoding: "utf8",
+      env: {
+        ...environment,
+        GIT_NO_REPLACE_OBJECTS: "1",
+        GIT_OPTIONAL_LOCKS: "0",
+        LC_ALL: "C",
+      },
     },
-  });
+  );
   if (allowMissing && result.status === 1) return null;
   if (result.status !== 0) fail("cannot inspect the Git checkout");
   return result.stdout;
@@ -162,6 +172,69 @@ function canonicalJSONStringify(value) {
   return `${JSON.stringify(sortJSON(value))}\n`;
 }
 
+function rejectReplaceRefs(checkout) {
+  let gitCommonDir;
+  try {
+    gitCommonDir = realpathSync(
+      resolve(
+        checkout,
+        git(checkout, ["rev-parse", "--git-common-dir"]).trim(),
+      ),
+    );
+    if (readdirSync(join(gitCommonDir, "refs", "replace")).length !== 0) {
+      fail("release checkout must not contain replace refs");
+    }
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      fail("cannot inspect the Git replace namespace");
+    }
+  }
+  if (
+    lines(
+      git(checkout, ["for-each-ref", "--format=%(refname)", "refs/replace"]),
+    ).length !== 0
+  ) {
+    fail("release checkout must not contain replace refs");
+  }
+}
+
+function rejectIndexTrustFlags(checkout) {
+  const flagged = git(checkout, ["ls-files", "-v", "-z"])
+    .split("\0")
+    .filter(Boolean)
+    .some((entry) => entry[0] === "S" || /^[a-z]$/u.test(entry[0]));
+  if (flagged) {
+    fail("release checkout must not use index trust flags");
+  }
+}
+
+function checkoutIsClean(checkout) {
+  // A trusted hook invalidates every path for both protocols. This bypasses
+  // configured hooks and daemons without older Git treating "false" as a
+  // pathname and silently trusting an empty protocol-v1 response.
+  const status = git(checkout, [
+    "-c",
+    `core.fsmonitor=${FSMONITOR_FULL_SCAN_HOOK}`,
+    "-c",
+    "core.untrackedCache=false",
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=all",
+    "--ignore-submodules=none",
+  ]);
+  const ignoredUntracked = git(checkout, [
+    "ls-files",
+    "--others",
+    "--ignored",
+    "--exclude-standard",
+    "-z",
+  ]);
+  if (ignoredUntracked.length !== 0) {
+    fail("release checkout must not contain ignored untracked files");
+  }
+  return status.length === 0;
+}
+
 function main() {
   const options = parseArguments(process.argv.slice(2));
   if (options.repository !== AUTHORITATIVE_REPOSITORY) {
@@ -184,6 +257,8 @@ function main() {
     fail("GitHub workflow ref differs from the expected workflow ref");
   }
 
+  rejectReplaceRefs(options.checkout);
+  rejectIndexTrustFlags(options.checkout);
   const headSha = git(options.checkout, [
     "rev-parse",
     "--verify",
@@ -193,13 +268,7 @@ function main() {
     git(options.checkout, ["symbolic-ref", "-q", "HEAD"], {
       allowMissing: true,
     }) === null;
-  const clean =
-    git(options.checkout, [
-      "status",
-      "--porcelain=v1",
-      "--untracked-files=all",
-      "--ignore-submodules=none",
-    ]).length === 0;
+  const clean = checkoutIsClean(options.checkout);
   const remotes = remoteEvidence(options.checkout);
 
   if (!SHA_PATTERN.test(headSha) || headSha !== options.sourceSha) {

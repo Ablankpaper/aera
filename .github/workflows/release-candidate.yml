@@ -53,12 +53,27 @@ jobs:
         with:
           ref: ${{ inputs.source_sha }}
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+
+      - name: Verify authoritative release source
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          npm run --silent verify:release-source -- \
+            --checkout "$GITHUB_WORKSPACE" \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "$SOURCE_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" \
+            > "$RUNNER_TEMP/release-source.json"
+          test -s "$RUNNER_TEMP/release-source.json"
 
       - name: Validate source identity
         id: identity
@@ -70,7 +85,6 @@ jobs:
           set -euo pipefail
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           VERSION=$(node -p "require('./package.json').version")
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"

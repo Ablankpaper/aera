@@ -70,6 +70,8 @@ The release contract covers signed metadata, exact artifact bytes, persisted sta
 
 [[release-source-governance#Release Source Governance]] defines the fail-closed repository, workflow, checkout, and remote identity boundary that must precede candidate or promotion operations.
 
+The candidate `validate` job runs that source verifier before the macOS or Windows build job becomes eligible, and rejects replacement objects, index trust flags, fsmonitor shortcuts, and ignored untracked inputs.
+
 The protected `staging` jobs produce only macOS arm64 and Windows x64 candidates. macOS requires Developer ID signing, accepted notarization IDs for the final DMG and ZIP, stapled app and DMG tickets, Gatekeeper acceptance, and an arm64 native module. Windows requires Authenticode and trusted timestamp verification for both NSIS and portable executables plus an x64 native module. Both platforms embed and independently verify the exact locked Runtime Seed.
 
 `scripts/release/candidate-manifest.mjs` generates public updater metadata with base64 SHA-512, an SPDX 2.3 dependency/Runtime Seed SBOM, and a canonical manifest binding artifact names, sizes, SHA-256/SHA-512 values, source/version, signing identities, notarization IDs, Runtime Seed manifests, CI, and provenance. `scripts/release/verify-candidate.mjs` rejects any mismatch or releasable Linux artifact before GitHub attests and stores the candidate.

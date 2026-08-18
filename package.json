@@ -8,6 +8,7 @@
   "scripts": {
     "prepare:runtime-seed": "node scripts/prepare-agentera-runtime-seed.mjs",
     "verify:packaged-runtime-seed": "node scripts/verify-packaged-runtime-seed.mjs",
+    "verify:release-source": "node scripts/release/verify-release-source.mjs",
     "generate:agentera-cloud": "node scripts/generate-agentera-cloud-types.mjs",
     "check:agentera-cloud-contract": "node scripts/check-agentera-cloud-contract.mjs",
     "check:official-quality-boundary": "node scripts/check-official-quality-boundary.mjs",
