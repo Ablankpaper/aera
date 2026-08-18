@@ -1208,6 +1208,7 @@ export async function terminateProcessTree(
   );
   remaining = remaining.filter((pid) => {
     if (!forcedPids.has(pid)) return true;
+    if (!finalByPid.has(pid)) return false;
     const finalIdentity = finalByPid.get(pid);
     return !finalIdentity || finalIdentity === capturedByPid.get(pid);
   });
