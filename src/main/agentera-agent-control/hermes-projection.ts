@@ -29,6 +29,7 @@ import { resolveAgenteraControlPlanePaths } from "./db";
 import { normalizeAgentAssetPath } from "./manifest";
 import { canonicalizeAgentVersionContent } from "./trust";
 import { safeWriteFile } from "../utils";
+import { currentModelConfigurationWritePermit } from "../model-configuration-managed-files";
 import {
   requireManagedModelMutationValue,
   type ManagedModelMutationPort,
@@ -719,6 +720,12 @@ export class HermesProjectionManager {
   }): Promise<ActivatedHermesProjection> {
     const profileId = input.profileId.trim();
     if (!profileId) throw new HermesProjectionError("profile_invalid");
+    if (currentModelConfigurationWritePermit()) {
+      return this.activateForProfileWithinManagedWrite({
+        projection: input.projection,
+        profilePath: input.profilePath,
+      });
+    }
     const modelMutationPort =
       this.modelMutationPort ?? configuredModelMutationPort;
     if (!modelMutationPort) {

@@ -113,6 +113,7 @@ import { AgenteraProductSpaceManager } from "../agentera-product-space/manager";
 import {
   createProfile,
   deleteProfile,
+  prepareProfile,
   profileIdForAgentName,
   setActiveProfile,
 } from "../profiles";
@@ -527,6 +528,7 @@ export async function startMainProcess(
       profiles: {
         profileIdForAgentName,
         createProfile,
+        prepareProfile,
         deleteProfile,
         resolveProfilePath: (profileId) => profileHome(profileId),
         activateProfile: setActiveProfile,

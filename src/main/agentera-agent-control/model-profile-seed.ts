@@ -17,6 +17,7 @@ import {
 } from "../../shared/custom-providers";
 import { canonicalPublicRouteKey } from "../../shared/model-configuration";
 import { customProviderEnvKey } from "../../shared/url-key-map";
+import { currentModelConfigurationWritePermit } from "../model-configuration-managed-files";
 import {
   requireManagedModelMutationValue,
   type ManagedModelMutationPort,
@@ -80,6 +81,14 @@ async function executeManagedProfileSeed(
   write: () => void,
   dependencies: ModelProfileSeedDependencies,
 ): Promise<void> {
+  // A staged Profile already holds the opaque ordered-write permit supplied by
+  // the candidate. Re-entering the coordinator here would reject nested lock
+  // acquisition; the candidate still scopes every managed path to its isolated
+  // root and revalidates the complete tree before activation.
+  if (currentModelConfigurationWritePermit()) {
+    write();
+    return;
+  }
   const modelMutationPort =
     dependencies.modelMutationPort ?? configuredModelMutationPort;
   if (!modelMutationPort) {

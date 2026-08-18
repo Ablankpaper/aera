@@ -2725,7 +2725,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         getCurrentOwner: getAgenteraRuntimeOwner,
       });
     const recoveredFreshProfiles =
-      agenteraProfileBindings.reconcileActivatingFreshProfiles({
+      await agenteraProfileBindings.reconcileActivatingFreshProfiles({
         owner,
         createProfile,
         resolveProfilePath: (profileId) => profileHome(profileId),
@@ -2801,7 +2801,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       `Aera Space ${Date.now().toString(36)}`;
     const profileId =
       pendingReservation?.profileId ?? profileIdForAgentName(name);
-    const created = agenteraProfileBindings.createAndBindFreshProfile({
+    const created = await agenteraProfileBindings.createAndBindFreshProfile({
       operationId,
       name,
       owner,
@@ -2853,29 +2853,32 @@ export function registerIpcHandlers(context: IpcContext): void {
     );
     return { status: "bound", runtimeProfileId: binding.runtimeProfileId };
   });
-  ipcMain.handle("agentera-profile-create-fresh", (_event, name: string) => {
-    const config = getConnectionConfig();
-    if (config.mode !== "local") {
-      throw new Error("Fresh local Profiles require local Runtime mode.");
-    }
-    const created = agenteraProfileBindings.createAndBindFreshProfile({
-      operationId: randomUUID(),
-      name,
-      owner: getAgenteraRuntimeOwner(),
-      profileId: profileIdForAgentName(name),
-      createProfile,
-      resolveProfilePath: (profileId) => profileHome(profileId),
-      activateProfile: (profileId) => {
-        setActiveProfile(profileId);
-        notifyProfileSwitched();
-      },
-    });
-    return {
-      status: "bound",
-      profileId: created.profileId,
-      runtimeProfileId: created.binding.runtimeProfileId,
-    };
-  });
+  ipcMain.handle(
+    "agentera-profile-create-fresh",
+    async (_event, name: string) => {
+      const config = getConnectionConfig();
+      if (config.mode !== "local") {
+        throw new Error("Fresh local Profiles require local Runtime mode.");
+      }
+      const created = await agenteraProfileBindings.createAndBindFreshProfile({
+        operationId: randomUUID(),
+        name,
+        owner: getAgenteraRuntimeOwner(),
+        profileId: profileIdForAgentName(name),
+        createProfile,
+        resolveProfilePath: (profileId) => profileHome(profileId),
+        activateProfile: (profileId) => {
+          setActiveProfile(profileId);
+          notifyProfileSwitched();
+        },
+      });
+      return {
+        status: "bound",
+        profileId: created.profileId,
+        runtimeProfileId: created.binding.runtimeProfileId,
+      };
+    },
+  );
   ipcMain.handle("agentera-profile-list-unbound", async () => {
     const locations = await listLocalProfileLocations();
     return agenteraProfileBindings
@@ -4799,7 +4802,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
   ipcMain.handle(
     "create-profile",
-    (_event, name: string, cloneFrom: string | null) => {
+    async (_event, name: string, cloneFrom: string | null) => {
       const conn = getConnectionConfig();
       if (conn.mode === "ssh" && conn.ssh)
         return sshCreateProfile(conn.ssh, name, cloneFrom);
@@ -4810,7 +4813,7 @@ export function registerIpcHandlers(context: IpcContext): void {
           owner,
         );
       }
-      const created = createProfile(name, cloneFrom);
+      const created = await createProfile(name, cloneFrom);
       if (created.success && created.id) {
         agenteraProfileBindings.bindExistingProfile(
           profileHome(created.id),
@@ -5946,16 +5949,23 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle(
     "add-mcp-server",
     (_event, input: McpServerInput, profile?: string) =>
-      addMcpServer(input, profile),
+      addMcpServer(input, profile, {
+        modelMutationPort: managedModelMutationPort,
+      }),
   );
   ipcMain.handle(
     "remove-mcp-server",
-    (_event, name: string, profile?: string) => removeMcpServer(name, profile),
+    (_event, name: string, profile?: string) =>
+      removeMcpServer(name, profile, {
+        modelMutationPort: managedModelMutationPort,
+      }),
   );
   ipcMain.handle(
     "set-mcp-server-enabled",
     (_event, name: string, enabled: boolean, profile?: string) =>
-      setMcpServerEnabled(name, enabled, profile),
+      setMcpServerEnabled(name, enabled, profile, {
+        modelMutationPort: managedModelMutationPort,
+      }),
   );
   ipcMain.handle("test-mcp-server", (_event, name: string, profile?: string) =>
     testMcpServer(name, profile),

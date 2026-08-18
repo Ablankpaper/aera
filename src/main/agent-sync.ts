@@ -677,7 +677,7 @@ async function runSyncPass(
   for (const agent of remotes) {
     if (claimed.has(agent.id)) continue;
     const warnings: string[] = [];
-    const createRes = createProfile(agent.name, null);
+    const createRes = await createProfile(agent.name, null);
     if (!createRes.success || !createRes.id) {
       outcomes.push({
         profile: agent.name,

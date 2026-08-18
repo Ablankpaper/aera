@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -396,6 +397,9 @@ describe("Agent installation orchestration", () => {
     AgentInstallationProfileAdapter["profileIdForAgentName"]
   >;
   let createProfile: Mock<AgentInstallationProfileAdapter["createProfile"]>;
+  let prepareProfile: Mock<
+    NonNullable<AgentInstallationProfileAdapter["prepareProfile"]>
+  >;
   let deleteProfile: Mock<
     NonNullable<AgentInstallationProfileAdapter["deleteProfile"]>
   >;
@@ -571,9 +575,50 @@ describe("Agent installation orchestration", () => {
       rmSync(freshProfilePath, { recursive: true, force: true });
       return { success: true };
     });
+    prepareProfile = vi.fn(
+      async (name, cloneFrom, reservedProfileId, sourceKind) => {
+        expect(name).toBe("Fresh Agent");
+        expect(cloneFrom).toBeNull();
+        const id = reservedProfileId ?? "fresh-agent";
+        const destinationPath = join(profilesRoot, id);
+        const candidatePath = join(root, `prepared-${id}-${sourceKind}`);
+        mkdirSync(candidatePath, { recursive: true });
+        writeFileSync(join(candidatePath, ".env"), "# staged\n");
+        events.push(`profile:prepare:${sourceKind}`);
+        return {
+          success: true,
+          id,
+          candidate: {
+            stagingPath: candidatePath,
+            destinationPath,
+            materialize: async <T>(
+              callback: (context: {
+                stagingHome: string;
+                stagingPath: string;
+              }) => T | Promise<T>,
+            ): Promise<T> =>
+              callback({ stagingHome: root, stagingPath: candidatePath }),
+            activate: async (activation?: {
+              authorize?: () => boolean | Promise<boolean>;
+            }) => {
+              if (activation?.authorize && !(await activation.authorize())) {
+                throw new Error("staged owner changed");
+              }
+              renameSync(candidatePath, destinationPath);
+              events.push(`profile:publish:${sourceKind}`);
+              return destinationPath;
+            },
+            cleanup: async () => {
+              rmSync(candidatePath, { recursive: true, force: true });
+            },
+          },
+        };
+      },
+    );
     profiles = {
       profileIdForAgentName,
       createProfile,
+      prepareProfile,
       deleteProfile,
       resolveProfilePath: (id) => {
         expect(id).toBe("fresh-agent");
@@ -684,19 +729,22 @@ describe("Agent installation orchestration", () => {
       OPERATION_ID,
     );
     expect(profileIdForAgentName).toHaveBeenCalledWith("Fresh Agent");
-    expect(createProfile).toHaveBeenCalledWith(
+    expect(prepareProfile).toHaveBeenCalledWith(
       "Fresh Agent",
       null,
       "fresh-agent",
+      "agent_projection",
     );
+    expect(createProfile).not.toHaveBeenCalled();
     expect(events).toEqual([
       "cloud:create-pending",
       "cloud:get-version",
       "verify-cache:version",
       "verify:policy",
       `project:${VERSION_ID}`,
-      "profile:create:null",
+      "profile:prepare:agent_projection",
       `profile:project:${VERSION_ID}`,
+      "profile:publish:agent_projection",
       "cloud:activate",
       "profile:activate:fresh-agent",
     ]);
@@ -716,6 +764,91 @@ describe("Agent installation orchestration", () => {
     ).toMatchObject({
       agentInstallationId: AGENT_INSTALLATION_ID,
       runtimeProfileId: RUNTIME_PROFILE_ID,
+    });
+  });
+
+  it("materializes a fresh Agent projection in staging before one live activation", async () => {
+    const candidatePath = join(root, "fresh-agent-candidate");
+    const prepare = vi.fn(async (...args: unknown[]) => {
+      expect(args.slice(0, 4)).toEqual([
+        "Fresh Agent",
+        null,
+        "fresh-agent",
+        "agent_projection",
+      ]);
+      mkdirSync(candidatePath, { recursive: true });
+      writeFileSync(join(candidatePath, ".env"), "# staged\n");
+      return {
+        success: true,
+        id: "fresh-agent",
+        candidate: {
+          stagingPath: candidatePath,
+          destinationPath: freshProfilePath,
+          materialize: async <T>(
+            callback: (context: {
+              stagingHome: string;
+              stagingPath: string;
+            }) => T | Promise<T>,
+          ): Promise<T> => {
+            expect(existsSync(freshProfilePath)).toBe(false);
+            return callback({ stagingHome: root, stagingPath: candidatePath });
+          },
+          activate: async (activation?: {
+            authorize?: () => boolean | Promise<boolean>;
+          }) => {
+            expect(await activation?.authorize?.()).toBe(true);
+            expect(existsSync(join(candidatePath, "projection.json"))).toBe(
+              true,
+            );
+            expect(existsSync(freshProfilePath)).toBe(false);
+            renameSync(candidatePath, freshProfilePath);
+            events.push("profile:activate-staged:agent_projection");
+            return freshProfilePath;
+          },
+          cleanup: async () => {
+            rmSync(candidatePath, { recursive: true, force: true });
+          },
+        },
+      };
+    });
+    profiles.prepareProfile = prepare as AgentInstallationProfileAdapter["prepareProfile"];
+    createProfile.mockImplementation(() => {
+      throw new Error("live createProfile must not be used for Agent projection");
+    });
+    activateForProfile.mockImplementationOnce(({ profilePath, projection }) => {
+      expect(profilePath).toBe(candidatePath);
+      expect(existsSync(freshProfilePath)).toBe(false);
+      writeFileSync(join(candidatePath, "projection.json"), "{}\n");
+      events.push(`profile:project:${projection.versionId}`);
+      return {
+        externalSkillsDirectory: projection.externalSkillsDirectory,
+        diagnostics: [],
+      };
+    });
+
+    const installed = await manager().install({
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      profile: { kind: "fresh", name: "Fresh Agent" },
+    });
+
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(createProfile).not.toHaveBeenCalled();
+    expect(existsSync(join(freshProfilePath, "projection.json"))).toBe(true);
+    expect(events).toEqual([
+      "cloud:create-pending",
+      "cloud:get-version",
+      "verify-cache:version",
+      "verify:policy",
+      `project:${VERSION_ID}`,
+      `profile:project:${VERSION_ID}`,
+      "profile:activate-staged:agent_projection",
+      "cloud:activate",
+      "profile:activate:fresh-agent",
+    ]);
+    expect(installed).toMatchObject({
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+      status: "active",
     });
   });
 
@@ -899,12 +1032,8 @@ describe("Agent installation orchestration", () => {
   });
 
   it("recovers a reserved Profile after creation is interrupted and Desktop cold-restarts", async () => {
-    createProfile.mockImplementationOnce(
-      (_name, _cloneFrom, reservedProfileId) => {
-        expect(reservedProfileId).toBe("fresh-agent");
-        mkdirSync(freshProfilePath, { recursive: true });
-        throw new Error("injected creation interruption");
-      },
+    prepareProfile.mockRejectedValueOnce(
+      new Error("injected staging interruption"),
     );
 
     await expect(
@@ -932,7 +1061,8 @@ describe("Agent installation orchestration", () => {
         status: "active",
       }),
     ]);
-    expect(createProfile).toHaveBeenCalledOnce();
+    expect(prepareProfile).toHaveBeenCalledTimes(2);
+    expect(createProfile).not.toHaveBeenCalled();
     expect(
       bindings.verifyProfileBinding(freshProfilePath, owner),
     ).toMatchObject({
@@ -943,12 +1073,8 @@ describe("Agent installation orchestration", () => {
 
   // @lat: [[lat.md/agentera-agent-control-plane#Installation and binding#Installation reconciliation isolation]]
   it("does not let a missing-installation operation block later recovery", async () => {
-    createProfile.mockImplementationOnce(
-      (_name, _cloneFrom, reservedProfileId) => {
-        expect(reservedProfileId).toBe("fresh-agent");
-        mkdirSync(freshProfilePath, { recursive: true });
-        throw new Error("injected creation interruption");
-      },
+    prepareProfile.mockRejectedValueOnce(
+      new Error("injected staging interruption"),
     );
 
     await expect(
@@ -1064,9 +1190,10 @@ describe("Agent installation orchestration", () => {
       "verify-cache:version",
       "verify:policy",
       `project:${VERSION_ID}`,
-      "profile:create:null",
+      "profile:prepare:agent_projection",
       "profile:model:fresh-agent",
       `profile:project:${VERSION_ID}`,
+      "profile:publish:agent_projection",
       "cloud:activate",
       "profile:activate:fresh-agent",
     ]);
@@ -1117,11 +1244,12 @@ describe("Agent installation orchestration", () => {
     });
 
     expect(deleteProfile).not.toHaveBeenCalled();
-    expect(existsSync(freshProfilePath)).toBe(true);
+    expect(existsSync(freshProfilePath)).toBe(false);
     expect(
-      bindings.verifyProfileBinding(freshProfilePath, owner),
+      bindings.getFreshProfileReservation(AGENT_INSTALLATION_ID, owner),
     ).toMatchObject({
-      agentInstallationId: null,
+      operationId: AGENT_INSTALLATION_ID,
+      profileId: "fresh-agent",
       runtimeProfileId: RUNTIME_PROFILE_ID,
     });
     expect(events).not.toContain("profile:activate:fresh-agent");
@@ -1148,7 +1276,8 @@ describe("Agent installation orchestration", () => {
         status: "active",
       }),
     ]);
-    expect(createProfile).toHaveBeenCalledOnce();
+    expect(prepareProfile).toHaveBeenCalledTimes(2);
+    expect(createProfile).not.toHaveBeenCalled();
   });
 
   it("repairs an active installation model only from a verified current-owner Profile", async () => {
@@ -1408,6 +1537,67 @@ describe("Agent installation orchestration", () => {
     expect(deleteProfile).not.toHaveBeenCalled();
   });
 
+  // @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Recoverable model configuration#Staged Profile activation protects live state]]
+  it("merges encrypted restore bytes in staging before one live Profile activation", async () => {
+    const restoreSource = join(root, "restore-source-isolated");
+    const provenancePath = join(root, "runtime-bindings-isolated.enc");
+    const candidatePath = join(root, "profile-candidate");
+    mkdirSync(join(restoreSource, "memories"), { recursive: true });
+    writeFileSync(
+      join(restoreSource, "memories", "MEMORY.md"),
+      "isolated restored memory\n",
+    );
+    writeFileSync(provenancePath, "encrypted historical bindings");
+    getVersion.mockImplementationOnce(async () => v1);
+    const activate = vi.fn(
+      async (activation?: { authorize?: () => boolean | Promise<boolean> }) => {
+        expect(activation?.authorize).toEqual(expect.any(Function));
+        expect(await activation?.authorize?.()).toBe(true);
+        expect(existsSync(freshProfilePath)).toBe(false);
+        expect(
+          readFileSync(join(candidatePath, "memories", "MEMORY.md"), "utf8"),
+        ).toBe("isolated restored memory\n");
+        renameSync(candidatePath, freshProfilePath);
+        return freshProfilePath;
+      },
+    );
+    Object.assign(profiles as object, {
+      prepareProfile: vi.fn(async () => {
+        mkdirSync(candidatePath, { recursive: true });
+        writeFileSync(join(candidatePath, ".env"), "# staged\n");
+        return {
+          success: true,
+          id: "fresh-agent",
+          candidate: {
+            stagingPath: candidatePath,
+            destinationPath: freshProfilePath,
+            activate,
+            cleanup: vi.fn(async () => {
+              rmSync(candidatePath, { recursive: true, force: true });
+            }),
+          },
+        };
+      }),
+    });
+    createProfile.mockImplementation(() => {
+      throw new Error("live createProfile must not be used by restore");
+    });
+
+    await manager().activateVerifiedRestore({
+      backupId: BACKUP_ID,
+      sourceInstallationId: SOURCE_INSTALLATION_ID,
+      definitionId: DEFINITION_ID,
+      versionId: VERSION_ID,
+      profileLineageId: PROFILE_LINEAGE_ID,
+      name: "Fresh Agent",
+      stagedProfilePath: restoreSource,
+      encryptedRuntimeBindingProvenancePath: provenancePath,
+    });
+
+    expect(activate).toHaveBeenCalledOnce();
+    expect(existsSync(freshProfilePath)).toBe(true);
+  });
+
   it("removes the transaction-owned Profile and binding when restore activation fails", async () => {
     const stagingPath = join(root, "restore-staging-failure");
     const provenancePath = join(root, "runtime-bindings-failure.enc");
@@ -1636,11 +1826,13 @@ describe("Agent installation orchestration", () => {
       } satisfies CreateAgentInstallationRequest,
       OPERATION_ID,
     );
-    expect(createProfile).toHaveBeenCalledWith(
+    expect(prepareProfile).toHaveBeenCalledWith(
       "Fresh Agent",
       null,
       "fresh-agent",
+      "agent_projection",
     );
+    expect(createProfile).not.toHaveBeenCalled();
     expect(installed).toMatchObject({
       sourceScope: "PLATFORM",
       sourceWorkspaceId: null,
@@ -1828,7 +2020,8 @@ describe("Agent installation orchestration", () => {
       selectedReleaseRevisionId: OFFICIAL_RELEASE_REVISION_ID,
       status: "active",
     });
-    expect(createProfile).toHaveBeenCalledOnce();
+    expect(prepareProfile).toHaveBeenCalledOnce();
+    expect(createProfile).not.toHaveBeenCalled();
     expect(createInstallation).toHaveBeenCalledOnce();
     expect(readFileSync(join(freshProfilePath, "MEMORY.md"), "utf8")).toBe(
       "official local memory\n",
@@ -2449,7 +2642,8 @@ describe("Agent installation orchestration", () => {
     expect(createInstallation).toHaveBeenCalledTimes(2);
     expect(createInstallation.mock.calls[0][1]).toBe(OPERATION_ID);
     expect(createInstallation.mock.calls[1][1]).toBe(OPERATION_ID);
-    expect(createProfile).toHaveBeenCalledOnce();
+    expect(prepareProfile).toHaveBeenCalledOnce();
+    expect(createProfile).not.toHaveBeenCalled();
     expect(
       database.sqlite
         .prepare(
@@ -2566,11 +2760,13 @@ describe("Agent installation orchestration", () => {
     expect(createInstallation).toHaveBeenCalledTimes(2);
     expect(createInstallation.mock.calls[0][1]).toBe(OPERATION_ID);
     expect(createInstallation.mock.calls[1][1]).toBe(OPERATION_ID);
-    expect(createProfile).toHaveBeenCalledWith(
+    expect(prepareProfile).toHaveBeenCalledWith(
       "Fresh Agent",
       null,
       "fresh-agent",
+      "agent_projection",
     );
+    expect(createProfile).not.toHaveBeenCalled();
   });
 
   it("leaves a failed download pending and retries without creating another cloud installation", async () => {
@@ -2636,7 +2832,8 @@ describe("Agent installation orchestration", () => {
           status: "active",
         }),
       ]);
-      expect(createProfile).toHaveBeenCalledOnce();
+      expect(prepareProfile).toHaveBeenCalledOnce();
+      expect(createProfile).not.toHaveBeenCalled();
       expect(activateInstallation).toHaveBeenCalledTimes(cloudActivationCalls);
       expect(
         new Set(activateInstallation.mock.calls.map((call) => call[3])),
@@ -2710,7 +2907,8 @@ describe("Agent installation orchestration", () => {
 
     expect(first[0]).toMatchObject({ status: "active" });
     expect(second[0]).toMatchObject({ status: "active" });
-    expect(createProfile).toHaveBeenCalledOnce();
+    expect(prepareProfile).toHaveBeenCalledOnce();
+    expect(createProfile).not.toHaveBeenCalled();
     expect(activateInstallation).toHaveBeenCalledTimes(2);
     expect(
       new Set(activateInstallation.mock.calls.map((call) => call[3])),
@@ -2831,11 +3029,8 @@ describe("Agent installation orchestration", () => {
   });
 
   it("marks unexpected private data in a reserved fresh Profile as repair_required without deleting it", async () => {
-    createProfile.mockImplementationOnce((_name, _cloneFrom, profileId) => {
-      mkdirSync(freshProfilePath, { recursive: true });
-      writeFileSync(join(freshProfilePath, "MEMORY.md"), "private marker\n");
-      return { success: true, id: profileId };
-    });
+    mkdirSync(freshProfilePath, { recursive: true });
+    writeFileSync(join(freshProfilePath, "MEMORY.md"), "private marker\n");
 
     await expect(
       manager().install({
@@ -2862,7 +3057,8 @@ describe("Agent installation orchestration", () => {
     await expect(
       coldRestartManager().reconcilePendingInstallations(),
     ).resolves.toEqual([]);
-    expect(createProfile).toHaveBeenCalledOnce();
+    expect(prepareProfile).not.toHaveBeenCalled();
+    expect(createProfile).not.toHaveBeenCalled();
   });
 
   it("preserves and reuses an attached Profile after activation failure", async () => {
@@ -2890,7 +3086,8 @@ describe("Agent installation orchestration", () => {
       },
     });
     expect(retried.status).toBe("active");
-    expect(createProfile).toHaveBeenCalledOnce();
+    expect(prepareProfile).toHaveBeenCalledOnce();
+    expect(createProfile).not.toHaveBeenCalled();
     expect(activateInstallation).toHaveBeenCalledTimes(2);
     expect(readFileSync(join(freshProfilePath, "MEMORY.md"), "utf8")).toBe(
       "learned locally\n",

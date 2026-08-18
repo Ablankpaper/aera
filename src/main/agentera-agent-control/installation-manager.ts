@@ -197,7 +197,32 @@ export interface AgentInstallationProfileAdapter {
     name: string,
     cloneFrom: string | null,
     reservedProfileId?: string,
-  ): ProfileCreationResult;
+    activation?: { authorize: () => boolean | Promise<boolean> },
+  ): ProfileCreationResult | Promise<ProfileCreationResult>;
+  prepareProfile?: (
+    name: string,
+    cloneFrom: string | null,
+    reservedProfileId: string | undefined,
+    sourceKind: "clone" | "agent_projection" | "encrypted_backup" | "import",
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+    id?: string;
+    candidate?: {
+      stagingPath: string;
+      destinationPath: string;
+      materialize<T>(
+        callback: (context: {
+          stagingHome: string;
+          stagingPath: string;
+        }) => T | Promise<T>,
+      ): Promise<T>;
+      activate(input?: {
+        authorize?: () => boolean | Promise<boolean>;
+      }): Promise<string>;
+      cleanup(): Promise<void>;
+    };
+  }>;
   deleteProfile(profileId: string): { success: boolean; error?: string };
   resolveProfilePath(profileId: string): string;
   activateProfile(profileId: string): void;
@@ -258,6 +283,7 @@ export interface AgentInstallationManagerOptions {
   profileBindings: AgenteraProfileBindingStore;
   profiles: AgentInstallationProfileAdapter;
   owner: AgenteraRuntimeOwner;
+  isCurrentOwner?: (owner: AgenteraRuntimeOwner) => boolean;
   runtimeVersion: string;
   capabilityBindingStore?: CapabilityBindingStore;
   getProfileMcpCapabilities?: (
@@ -1229,6 +1255,7 @@ export class AgentInstallationManager {
   private readonly profileBindings: AgenteraProfileBindingStore;
   private readonly profiles: AgentInstallationProfileAdapter;
   private readonly owner: AgenteraRuntimeOwner;
+  private readonly isCurrentOwner: (owner: AgenteraRuntimeOwner) => boolean;
   private readonly runtimeVersion: string;
   private readonly now: () => Date;
   private readonly randomUUID: () => string;
@@ -1267,6 +1294,7 @@ export class AgentInstallationManager {
       ownerId: uuid(options.owner.ownerId),
       deviceInstallationId: uuid(options.owner.deviceInstallationId),
     };
+    this.isCurrentOwner = options.isCurrentOwner ?? (() => true);
     this.runtimeVersion = options.runtimeVersion;
     this.now = options.now ?? (() => new Date());
     this.randomUUID = options.randomUUID ?? nodeRandomUUID;
@@ -1560,12 +1588,29 @@ export class AgentInstallationManager {
     let installed: LocalAgentInstallation | null = null;
     let binding: RuntimeOwnerBinding | null = null;
     let provenance: Buffer | null = null;
+    let candidate: NonNullable<
+      Awaited<
+        ReturnType<
+          NonNullable<AgentInstallationProfileAdapter["prepareProfile"]>
+        >
+      >["candidate"]
+    > | null = null;
+    let profileActivated = false;
     try {
-      const created = this.profiles.createProfile(input.name, null);
+      if (!this.profiles.prepareProfile) {
+        throw restoreFailure("activation_failed");
+      }
+      const created = await this.profiles.prepareProfile(
+        input.name,
+        null,
+        undefined,
+        "encrypted_backup",
+      );
       if (
         !created.success ||
         typeof created.id !== "string" ||
-        !PROFILE_ID_PATTERN.test(created.id)
+        !PROFILE_ID_PATTERN.test(created.id) ||
+        !created.candidate
       ) {
         if (
           typeof created.error === "string" &&
@@ -1576,21 +1621,32 @@ export class AgentInstallationManager {
         throw restoreFailure("activation_failed");
       }
       profileId = created.id;
-      profilePath = this.profiles.resolveProfilePath(profileId);
+      candidate = created.candidate;
+      profilePath = candidate.destinationPath;
       if (
         !isAbsolute(profilePath) ||
-        basename(resolve(profilePath)) !== profileId
+        basename(resolve(profilePath)) !== profileId ||
+        !isAbsolute(candidate.stagingPath) ||
+        resolve(profilePath) !==
+          resolve(this.profiles.resolveProfilePath(profileId))
       ) {
         throw restoreFailure("activation_failed");
       }
       materializeRestoredProfile(
         input.stagedProfilePath,
-        profilePath,
+        candidate.stagingPath,
         this.randomUUID,
       );
       provenance = readEncryptedRestoreProvenance(
         input.encryptedRuntimeBindingProvenancePath,
       );
+      const activatedPath = await candidate.activate({
+        authorize: () => this.isCurrentOwner(this.owner),
+      });
+      if (resolve(activatedPath) !== resolve(profilePath)) {
+        throw restoreFailure("activation_failed");
+      }
+      profileActivated = true;
       installed = await this.install({
         definitionId,
         versionId,
@@ -1676,15 +1732,23 @@ export class AgentInstallationManager {
       }
       await this.rollbackVerifiedRestore({
         backupId,
-        profileId,
-        profilePath,
+        profileId: profileActivated ? profileId : null,
+        profilePath: profileActivated ? profilePath : null,
         installed,
         binding,
       });
       if (
         (error as { code?: unknown })?.code === "destination_exists" ||
+        (error as { code?: unknown })?.code ===
+          "staged_profile_destination_exists" ||
         error instanceof AgentInstallationManagerError
       ) {
+        if (
+          (error as { code?: unknown })?.code ===
+          "staged_profile_destination_exists"
+        ) {
+          throw restoreFailure("destination_exists");
+        }
         throw error;
       }
       if ((error as { code?: unknown })?.code === "ENOSPC") {
@@ -1692,6 +1756,7 @@ export class AgentInstallationManager {
       }
       throw restoreFailure("activation_failed");
     } finally {
+      await candidate?.cleanup();
       provenance?.fill(0);
     }
   }
@@ -2672,6 +2737,7 @@ export class AgentInstallationManager {
     const profilePath = this.profiles.resolveProfilePath(operation.profileId);
     let binding: RuntimeOwnerBinding;
     let profileStage: AgentInstallationRetryCode = "profile_creation_failed";
+    let projectionActivatedInStaging = false;
     try {
       operation =
         this.operations.get(operation.operationId) ??
@@ -2686,18 +2752,90 @@ export class AgentInstallationManager {
               this.owner,
             );
           }
-          const created = this.profileBindings.createAndBindFreshProfile({
+          const reservation = this.profileBindings.reserveFreshProfile({
             operationId: operation.operationId,
             name: target.name,
             owner: this.owner,
             profileId: operation.profileId,
-            createProfile: this.profiles.createProfile,
-            resolveProfilePath: this.profiles.resolveProfilePath,
-            activateProfile: this.profiles.activateProfile,
             activate: false,
           });
-          binding = created.binding;
-          if (target.modelSourceProfileId) {
+          const authorizeStagedActivation = (): boolean => {
+            if (!this.isCurrentOwner(this.owner)) return false;
+            try {
+              const current = this.profileBindings.getFreshProfileReservation(
+                operation.operationId,
+                this.owner,
+              );
+              if (!current) return false;
+              return (
+                current.operationId === reservation.operationId &&
+                current.profileId === reservation.profileId &&
+                current.runtimeProfileId === reservation.runtimeProfileId
+              );
+            } catch {
+              return false;
+            }
+          };
+
+          if (!existsSync(profilePath)) {
+            if (!this.profiles.prepareProfile) {
+              throw new Error("Staged Profile preparation is unavailable.");
+            }
+            const prepared = await this.profiles.prepareProfile(
+              target.name,
+              null,
+              operation.profileId,
+              "agent_projection",
+            );
+            if (
+              !prepared.success ||
+              prepared.id !== operation.profileId ||
+              !prepared.candidate
+            ) {
+              throw new Error(
+                prepared.error || "Fresh staged Profile preparation failed.",
+              );
+            }
+            const candidate = prepared.candidate;
+            try {
+              if (target.modelSourceProfileId) {
+                profileStage = "profile_model_configuration_failed";
+                if (!this.profiles.configureFreshProfileModel) {
+                  throw new Error(
+                    "Fresh Profile model configuration is unavailable.",
+                  );
+                }
+                await candidate.materialize(() =>
+                  this.profiles.configureFreshProfileModel!({
+                    sourceProfileId: target.modelSourceProfileId!,
+                    targetProfileId: operation.profileId,
+                    version,
+                    policy,
+                    ...(target.modelSourceModelId
+                      ? { sourceModelId: target.modelSourceModelId }
+                      : {}),
+                  }),
+                );
+              }
+              profileStage = "profile_projection_failed";
+              await candidate.materialize(({ stagingPath }) =>
+                this.projection.activateForProfile({
+                  projection,
+                  profileId: operation.profileId,
+                  profilePath: stagingPath,
+                }),
+              );
+              await candidate.activate({
+                authorize: authorizeStagedActivation,
+              });
+              projectionActivatedInStaging = true;
+            } finally {
+              await candidate.cleanup();
+            }
+          } else if (target.modelSourceProfileId) {
+            // A restart may observe a Profile that was already activated before
+            // the installation journal advanced. It is now a live, owned
+            // target, so the normal coordinator-backed path is safe.
             profileStage = "profile_model_configuration_failed";
             if (!this.profiles.configureFreshProfileModel) {
               throw new Error(
@@ -2706,7 +2844,7 @@ export class AgentInstallationManager {
             }
             await this.profiles.configureFreshProfileModel({
               sourceProfileId: target.modelSourceProfileId,
-              targetProfileId: created.profileId,
+              targetProfileId: operation.profileId,
               version,
               policy,
               ...(target.modelSourceModelId
@@ -2714,6 +2852,21 @@ export class AgentInstallationManager {
                 : {}),
             });
           }
+          const created = await this.profileBindings.reconcileFreshProfile(
+            operation.operationId,
+            {
+              owner: this.owner,
+              // The candidate must have been activated before this point. Do
+              // not fall back to a live subprocess if it disappeared.
+              createProfile: async () => ({
+                success: false,
+                error: "Staged Profile activation is missing.",
+              }),
+              resolveProfilePath: this.profiles.resolveProfilePath,
+              activateProfile: this.profiles.activateProfile,
+            },
+          );
+          binding = created.binding;
         } else {
           binding = this.profileBindings.bindExistingProfile(
             profilePath,
@@ -2794,11 +2947,13 @@ export class AgentInstallationManager {
       }
       if (operation.phase === "profile_attached") {
         profileStage = "profile_projection_failed";
-        await this.projection.activateForProfile({
-          projection,
-          profileId: operation.profileId,
-          profilePath,
-        });
+        if (!projectionActivatedInStaging) {
+          await this.projection.activateForProfile({
+            projection,
+            profileId: operation.profileId,
+            profilePath,
+          });
+        }
         operation = this.operations.advance({
           operationId: operation.operationId,
           expectedRevision: operation.revision,

@@ -2369,6 +2369,9 @@ export class AgenteraAgentControlManager {
       profileBindings: this.profileBindings,
       profiles: installationProfiles,
       owner,
+      isCurrentOwner: (expectedOwner) =>
+        runtimeComponentKey(full.getOwner()) ===
+        runtimeComponentKey(expectedOwner),
       runtimeVersion,
       capabilityBindingStore,
       getProfileMcpCapabilities,

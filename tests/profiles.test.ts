@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { join } from "path";
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "fs";
+import {
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+  readdirSync,
+} from "fs";
 
 const execFileSyncMock = vi.hoisted(() => vi.fn());
 
@@ -58,6 +65,20 @@ const PROFILES_DIR = join(TEST_HOME, "profiles");
 
 beforeEach(() => {
   execFileSyncMock.mockReset();
+  execFileSyncMock.mockImplementation((_python, args, options) => {
+    const createIndex = (args as string[]).indexOf("create");
+    if (createIndex >= 0) {
+      const profileId = (args as string[])[createIndex + 1];
+      const candidate = join(
+        String(options.env.HERMES_HOME),
+        "profiles",
+        profileId,
+      );
+      mkdirSync(candidate, { recursive: true });
+      writeFileSync(join(candidate, ".env"), "# profile credentials\n");
+    }
+    return Buffer.from("");
+  });
   mkdirSync(TEST_HOME, { recursive: true });
   mkdirSync(PROFILES_DIR, { recursive: true });
 });
@@ -218,9 +239,7 @@ describe("listProfiles", () => {
   });
 
   it("creates a safe profile id behind a user-facing agent name", async () => {
-    execFileSyncMock.mockReturnValue(Buffer.from(""));
-
-    const result = createProfile("  卢姐  ", null);
+    const result = await createProfile("  卢姐  ", null);
 
     expect(result).toEqual({ success: true, id: "agent" });
     expect(execFileSyncMock).toHaveBeenCalledWith(
@@ -233,11 +252,10 @@ describe("listProfiles", () => {
     expect(created?.name).toBe("卢姐");
   });
 
-  it("creates a fresh Profile with the exact pre-reserved id", () => {
-    execFileSyncMock.mockReturnValue(Buffer.from(""));
+  it("creates a fresh Profile with the exact pre-reserved id", async () => {
     expect(profileIdForAgentName("Fresh Agent")).toBe("fresh-agent");
 
-    const result = createProfile("Fresh Agent", null, "fresh-agent");
+    const result = await createProfile("Fresh Agent", null, "fresh-agent");
 
     expect(result).toEqual({ success: true, id: "fresh-agent" });
     expect(execFileSyncMock).toHaveBeenCalledWith(
@@ -247,10 +265,10 @@ describe("listProfiles", () => {
     );
   });
 
-  it("rejects a reserved Profile id that is not the current safe id", () => {
-    execFileSyncMock.mockReturnValue(Buffer.from(""));
-
-    expect(createProfile("Fresh Agent", null, "different-id")).toEqual({
+  it("rejects a reserved Profile id that is not the current safe id", async () => {
+    await expect(
+      createProfile("Fresh Agent", null, "different-id"),
+    ).resolves.toEqual({
       success: false,
       error: "Reserved Profile ID is unavailable.",
     });
@@ -258,15 +276,22 @@ describe("listProfiles", () => {
   });
 
   it("keeps a successful CLI-created profile when metadata cannot be written", async () => {
-    execFileSyncMock.mockImplementation(() => {
-      mkdirSync(join(PROFILES_DIR, "agent", "profile-meta.json"), {
+    execFileSyncMock.mockImplementation((_python, _args, options) => {
+      const candidate = join(
+        String(options.env.HERMES_HOME),
+        "profiles",
+        "agent",
+      );
+      mkdirSync(candidate, { recursive: true });
+      writeFileSync(join(candidate, ".env"), "# profile credentials\n");
+      mkdirSync(join(candidate, "profile-meta.json"), {
         recursive: true,
       });
       return Buffer.from("");
     });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const result = createProfile("  卢姐  ", null);
+    const result = await createProfile("  卢姐  ", null);
 
     expect(result).toEqual({ success: true, id: "agent" });
     expect(existsSync(join(PROFILES_DIR, "agent"))).toBe(true);
@@ -281,7 +306,7 @@ describe("listProfiles", () => {
     warn.mockRestore();
   });
 
-  it("surfaces Hermes Agent profile-create errors written to stdout", () => {
+  it("surfaces Hermes Agent profile-create errors written to stdout", async () => {
     const err = new Error("Command failed");
     Object.assign(err, {
       stdout: Buffer.from(
@@ -293,14 +318,14 @@ describe("listProfiles", () => {
       throw err;
     });
 
-    const result = createProfile("test", null);
+    const result = await createProfile("test", null);
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("reserved");
     expect(result.error).toContain("common system binary");
   });
 
-  it("uses Hermes Agent stdout for duplicate profile-create errors", () => {
+  it("uses Hermes Agent stdout for duplicate profile-create errors", async () => {
     const err = new Error("Command failed");
     Object.assign(err, {
       stdout: Buffer.from(
@@ -312,7 +337,7 @@ describe("listProfiles", () => {
       throw err;
     });
 
-    const result = createProfile("test2", null);
+    const result = await createProfile("test2", null);
 
     expect(result.success).toBe(false);
     expect(result.error).toBe(
@@ -320,10 +345,8 @@ describe("listProfiles", () => {
     );
   });
 
-  it("allows slower cloned profile creation before timing out", () => {
-    execFileSyncMock.mockReturnValue(Buffer.from(""));
-
-    expect(createProfile("slow-clone", "default").success).toBe(true);
+  it("allows slower cloned profile creation before timing out", async () => {
+    expect((await createProfile("slow-clone", "default")).success).toBe(true);
 
     expect(execFileSyncMock).toHaveBeenCalledWith(
       "/usr/bin/python3",
@@ -338,6 +361,89 @@ describe("listProfiles", () => {
       ],
       expect.objectContaining({ timeout: 30000 }),
     );
+  });
+
+  // @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Recoverable model configuration#Staged Profile activation protects live state]]
+  it("materializes a cloned Profile in an isolated HERMES_HOME before one activation", async () => {
+    mkdirSync(join(TEST_HOME, "skills", "local"), { recursive: true });
+    writeFileSync(
+      join(TEST_HOME, "config.yaml"),
+      "model:\n  default: source-model\n",
+    );
+    writeFileSync(join(TEST_HOME, ".env"), "SOURCE_KEY=secret\n");
+    writeFileSync(
+      join(TEST_HOME, "skills", "local", "SKILL.md"),
+      "source skill\n",
+    );
+
+    let runtimeHome = "";
+    execFileSyncMock.mockImplementation((_python, _args, options) => {
+      runtimeHome = String(options.env.HERMES_HOME);
+      expect(runtimeHome).not.toBe(TEST_HOME);
+      expect(existsSync(join(PROFILES_DIR, "isolated-clone"))).toBe(false);
+      expect(readFileSync(join(runtimeHome, "config.yaml"), "utf8")).toContain(
+        "source-model",
+      );
+      expect(
+        readFileSync(join(runtimeHome, "skills", "local", "SKILL.md"), "utf8"),
+      ).toBe("source skill\n");
+
+      const candidate = join(runtimeHome, "profiles", "isolated-clone");
+      mkdirSync(candidate, { recursive: true });
+      writeFileSync(join(candidate, ".env"), "SOURCE_KEY=secret\n");
+      writeFileSync(
+        join(candidate, "config.yaml"),
+        "model:\n  default: source-model\n",
+      );
+      return Buffer.from("");
+    });
+
+    const result = await createProfile("isolated-clone", "default");
+
+    expect(result).toEqual({ success: true, id: "isolated-clone" });
+    expect(existsSync(join(PROFILES_DIR, "isolated-clone"))).toBe(true);
+    expect(runtimeHome).not.toBe("");
+    const stagingRoot = join(TEST_HOME, ".aera-profile-staging");
+    expect(existsSync(stagingRoot) ? readdirSync(stagingRoot) : []).toEqual([]);
+  });
+
+  it("rejects a malformed staged Profile without creating the live destination", async () => {
+    execFileSyncMock.mockImplementation((_python, _args, options) => {
+      const candidate = join(
+        String(options.env.HERMES_HOME),
+        "profiles",
+        "malformed-profile",
+      );
+      mkdirSync(candidate, { recursive: true });
+      writeFileSync(join(candidate, ".env"), "SAFE_KEY=value\n");
+      writeFileSync(join(candidate, "config.yaml"), "model: [unterminated\n");
+      return Buffer.from("");
+    });
+
+    const result = await createProfile("malformed-profile", null);
+
+    expect(result).toEqual({
+      success: false,
+      error: "Staged Profile validation failed.",
+    });
+    expect(existsSync(join(PROFILES_DIR, "malformed-profile"))).toBe(false);
+  });
+
+  it("rechecks activation authorization before publishing a staged Profile", async () => {
+    const result = await (
+      createProfile as unknown as (
+        name: string,
+        cloneFrom: string | null,
+        reservedProfileId: string | undefined,
+        activation: { authorize: () => boolean },
+      ) => Promise<{ success: boolean; error?: string; id?: string }>
+    )("owner-change", null, undefined, { authorize: () => false });
+
+    expect(result).toEqual({
+      success: false,
+      error: "Staged Profile owner changed before activation.",
+    });
+    expect(existsSync(join(PROFILES_DIR, "owner-change"))).toBe(false);
   });
 
   it("bounds profile deletion with the same timeout as profile creation", () => {
