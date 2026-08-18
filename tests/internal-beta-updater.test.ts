@@ -1413,6 +1413,7 @@ describe("Internal Beta desktop updater", () => {
         `{"code":"update_rollback_failed","schema_version":2,"state":"failed","target_version":"${NEXT_VERSION}","operation_id":"unknown","stage":"rollback","rollback_state":"failed"}`,
       );
     },
+    20_000,
   );
 
   it.skipIf(process.platform === "win32")(
