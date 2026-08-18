@@ -512,4 +512,151 @@ describe("planModelRouteDirectoryRepair", () => {
     snapshot.files.models = json(rows);
     expectRepairRequired(snapshot, "metadata_conflict");
   });
+
+  // @lat: [[beta27-reliability-plan#Recoverable model configuration#Config-only active route reconstruction]]
+  describe("config-only route reconstruction", () => {
+    function configOnlySnapshot(): PlannerSnapshot {
+      const snapshot = validSnapshot();
+      snapshot.files.models = json([]);
+      snapshot.files.config = Buffer.from(
+        snapshot.files
+          .config!.toString("utf8")
+          .replace(
+            '  base_url: "https://current.fixture.invalid/v1"',
+            '  base_url: "https://config-only.fixture.invalid/v1"',
+          ),
+        "utf8",
+      );
+      return snapshot;
+    }
+
+    it("reconstructs one deterministic row when every route input is unique", () => {
+      const snapshot = configOnlySnapshot();
+
+      const first = requirePlanner()(snapshot);
+      const second = requirePlanner()(snapshot);
+
+      expect(first).toMatchObject({
+        status: "repair",
+        activeRoute: {
+          providerId: "fixture-provider-01",
+          modelId: "fixture-model",
+          endpoint: "https://config-only.fixture.invalid/v1",
+          apiMode: "chat_completions",
+        },
+      });
+      expect(plannedModelBytes(second)).toEqual(plannedModelBytes(first));
+      expect(plannedModels(first)).toEqual([
+        expect.objectContaining({
+          id: expect.stringMatching(/^recovered-[a-f0-9]{32}$/u),
+          name: "Fixture Model",
+          provider: "custom",
+          model: "fixture-model",
+          baseUrl: "https://config-only.fixture.invalid/v1",
+          apiMode: "chat_completions",
+          providerLabel: "Fixture",
+          providerId: "fixture-provider-01",
+          createdAt: 1,
+        }),
+      ]);
+    });
+
+    it("retargets an existing valid row without replacing its id", () => {
+      const snapshot = configOnlySnapshot();
+      const existing = JSON.parse(
+        validSnapshot().files.models!.toString("utf8"),
+      ) as Array<Record<string, unknown>>;
+      snapshot.files.models = json(existing);
+
+      const result = requirePlanner()(snapshot);
+
+      expect(result).toMatchObject({ status: "repair" });
+      expect(plannedModels(result)).toEqual([
+        expect.objectContaining({
+          id: "fixture-row-01",
+          baseUrl: "https://config-only.fixture.invalid/v1",
+        }),
+      ]);
+    });
+
+    it("fails closed when the config has no credential reference", () => {
+      const snapshot = configOnlySnapshot();
+      snapshot.files.config = Buffer.from(
+        snapshot.files
+          .config!.toString("utf8")
+          .replace('    key_env: "CUSTOM_PROVIDER_FIXTURE_KEY"\n', ""),
+        "utf8",
+      );
+      expectRepairRequired(snapshot, "credential_reference_missing");
+    });
+
+    it("fails closed when config omits a mode and two protocols remain", () => {
+      const snapshot = configOnlySnapshot();
+      snapshot.files.config = Buffer.from(
+        snapshot.files
+          .config!.toString("utf8")
+          .replace('  api_mode: "chat_completions"\n', ""),
+        "utf8",
+      );
+      snapshot.files.models = json([
+        {
+          id: "fixture-chat",
+          name: "Fixture Model",
+          provider: "custom",
+          model: "fixture-model",
+          baseUrl: "https://legacy.fixture.invalid/v1",
+          apiMode: "chat_completions",
+          providerLabel: "Fixture",
+          providerId: "fixture-provider-01",
+          createdAt: 1,
+        },
+        {
+          id: "fixture-responses",
+          name: "Fixture Model",
+          provider: "custom",
+          model: "fixture-model",
+          baseUrl: "https://legacy.fixture.invalid/v1",
+          apiMode: "responses",
+          providerLabel: "Fixture",
+          providerId: "fixture-provider-01",
+          createdAt: 2,
+        },
+      ]);
+      expectRepairRequired(snapshot, "active_route_protocol_ambiguous");
+    });
+
+    it("fails closed when a bare custom route matches two providers", () => {
+      const snapshot = configOnlySnapshot();
+      snapshot.files.config = Buffer.from(
+        snapshot.files
+          .config!.toString("utf8")
+          .replace('  provider: "custom:fixture"', '  provider: "custom"'),
+        "utf8",
+      );
+      snapshot.files.providers = json({
+        version: 1,
+        providers: [
+          {
+            id: "fixture-provider-01",
+            name: "Fixture",
+            baseUrl: "https://config-only.fixture.invalid/v1",
+            createdAt: 1,
+          },
+          {
+            id: "fixture-provider-02",
+            name: "Other",
+            baseUrl: "https://config-only.fixture.invalid/v1",
+            createdAt: 2,
+          },
+        ],
+      });
+      expectRepairRequired(snapshot, "active_provider_ambiguous");
+    });
+
+    it("fails closed when the active model has no definition", () => {
+      const snapshot = configOnlySnapshot();
+      snapshot.files.modelDefinitions = json({});
+      expectRepairRequired(snapshot, "model_definition_unresolved");
+    });
+  });
 });

@@ -1,5 +1,9 @@
-import type { ModelRouteIdentityV2 } from "../shared/model-configuration";
-import { canonicalModelEndpointV2 } from "../shared/model-configuration";
+import { createHash } from "node:crypto";
+import {
+  canonicalModelEndpointV2,
+  routeKeyV2,
+  type ModelRouteIdentityV2,
+} from "../shared/model-configuration";
 import {
   customProviderRuntimeRoute,
   isCustomProviderRoute,
@@ -63,6 +67,12 @@ interface StrictModelRecord {
   providerId: string | null;
   createdAt: number;
   raw: UnknownRecord;
+}
+
+interface StrictModelDefinition {
+  model: string;
+  name: string;
+  createdAt: number;
 }
 
 interface StrictActiveConfig {
@@ -208,31 +218,43 @@ function parseModels(bytes: Buffer | null): StrictModelRecord[] | string {
   return result;
 }
 
-function parseModelDefinitions(bytes: Buffer | null): boolean {
+function parseModelDefinitions(
+  bytes: Buffer | null,
+): Map<string, StrictModelDefinition> | null {
   let value: unknown;
   try {
     value = parseJson(bytes);
   } catch {
-    return false;
+    return null;
   }
-  if (value === null) return true;
+  if (value === null) return new Map();
   const definitions = asRecord(value);
-  if (!definitions) return false;
+  if (!definitions) return null;
+  const result = new Map<string, StrictModelDefinition>();
   for (const [model, item] of Object.entries(definitions)) {
     const definition = asRecord(item);
+    const rawName = definition?.name;
+    const name =
+      rawName === undefined || rawName === "" ? model : nonEmptyString(rawName);
     if (
       !model.trim() ||
       !definition ||
       (definition.model !== undefined && definition.model !== model) ||
+      !name ||
       !Number.isSafeInteger(definition.createdAt) ||
       (definition.createdAt as number) < 0 ||
       !Number.isSafeInteger(definition.updatedAt) ||
       (definition.updatedAt as number) < 0
     ) {
-      return false;
+      return null;
     }
+    result.set(model, {
+      model,
+      name,
+      createdAt: definition.createdAt as number,
+    });
   }
-  return true;
+  return result;
 }
 
 function parseEnv(bytes: Buffer | null): Set<string> | null {
@@ -526,7 +548,14 @@ function plannedModelRows(
       }
       return candidate.row;
     });
-    const merged = mergeResolvedRows(group, provider);
+    const activeProviderEndpoint =
+      config !== null &&
+      config.model === first.row.model &&
+      config.apiMode === first.row.apiMode &&
+      customProviderRuntimeRoute(provider.name) === config.provider
+        ? config.endpoint
+        : provider.baseUrl;
+    const merged = mergeResolvedRows(group, provider, activeProviderEndpoint);
     if (typeof merged === "string") return merged;
     const primaryIndex =
       indexes.find((index) => models[index].providerId === provider.id) ??
@@ -578,6 +607,7 @@ function emptyMetadata(value: unknown): boolean {
 function mergeResolvedRows(
   group: readonly StrictModelRecord[],
   provider: StrictProviderRecord,
+  targetEndpoint: string,
 ):
   | { row: StrictModelRecord; changed: boolean; absorbedRowIds: string[] }
   | string {
@@ -620,14 +650,14 @@ function mergeResolvedRows(
   const nextRaw: UnknownRecord = {
     ...mergedRaw,
     ...(primaryName ? { name: primaryName } : {}),
-    baseUrl: provider.baseUrl,
+    baseUrl: targetEndpoint,
     providerId: provider.id,
     providerLabel: provider.name,
     createdAt: ordered[0].createdAt,
   };
   const next: StrictModelRecord = {
     ...primary,
-    baseUrl: provider.baseUrl,
+    baseUrl: targetEndpoint,
     providerId: provider.id,
     providerLabel: provider.name,
     createdAt: ordered[0].createdAt,
@@ -636,13 +666,100 @@ function mergeResolvedRows(
   const changed =
     group.length > 1 ||
     stableValue(primary.raw) !== stableValue(nextRaw) ||
-    primary.baseUrl !== provider.baseUrl ||
+    primary.baseUrl !== targetEndpoint ||
     primary.providerId !== provider.id ||
     primary.providerLabel !== provider.name;
   return {
     row: next,
     changed,
     absorbedRowIds: ordered.slice(1).map((row) => row.id),
+  };
+}
+
+function activeProviderForConfig(
+  config: StrictActiveConfig,
+  providers: readonly StrictProviderRecord[],
+): StrictProviderRecord | string {
+  if (!isCustomProviderRoute(config.provider)) {
+    return "active_provider_unresolved";
+  }
+  const namedProvider = namedCustomProviderRuntimeName(config.provider);
+  const matches = providers.filter((provider) =>
+    namedProvider === null
+      ? provider.baseUrl === config.endpoint
+      : customProviderRuntimeRoute(provider.name) === config.provider,
+  );
+  if (matches.length === 1) return matches[0];
+  return matches.length === 0
+    ? "active_provider_unresolved"
+    : "active_provider_ambiguous";
+}
+
+function reconstructedModelId(identity: ModelRouteIdentityV2): string {
+  const digest = createHash("sha256")
+    .update(routeKeyV2(identity), "utf8")
+    .digest("hex");
+  return `recovered-${digest.slice(0, 32)}`;
+}
+
+function reconstructConfigOnlyRow(
+  config: StrictActiveConfig,
+  providers: readonly StrictProviderRecord[],
+  models: readonly StrictModelRecord[],
+  definitions: ReadonlyMap<string, StrictModelDefinition>,
+): StrictModelRecord | string {
+  const provider = activeProviderForConfig(config, providers);
+  if (typeof provider === "string") return provider;
+  if (!isLocalBaseUrl(config.endpoint) && config.credentialRef === null) {
+    return "credential_reference_missing";
+  }
+  if (!config.apiMode) {
+    const protocols = new Set(
+      models
+        .filter(
+          (row) => row.providerId === provider.id && row.model === config.model,
+        )
+        .map((row) => row.apiMode)
+        .filter(Boolean),
+    );
+    return protocols.size > 1
+      ? "active_route_protocol_ambiguous"
+      : "active_route_protocol_unresolved";
+  }
+  const definition = definitions.get(config.model);
+  if (!definition) return "model_definition_unresolved";
+
+  const identity: ModelRouteIdentityV2 = {
+    providerId: provider.id,
+    modelId: config.model,
+    endpoint: config.endpoint,
+    apiMode: config.apiMode,
+  };
+  const id = reconstructedModelId(identity);
+  if (models.some((row) => row.id === id)) {
+    return "reconstructed_model_identity_conflict";
+  }
+  const raw: UnknownRecord = {
+    id,
+    name: definition.name,
+    provider: "custom",
+    model: definition.model,
+    baseUrl: config.endpoint,
+    apiMode: config.apiMode,
+    providerLabel: provider.name,
+    providerId: provider.id,
+    createdAt: definition.createdAt,
+  };
+  return {
+    id,
+    provider: "custom",
+    model: definition.model,
+    baseUrl: config.endpoint,
+    apiMode: config.apiMode,
+    providerLabel: provider.name,
+    providerId: provider.id,
+    createdAt: definition.createdAt,
+    raw,
   };
 }
 
@@ -659,16 +776,16 @@ export function planModelRouteDirectoryRepair(
   if (snapshot.incompleteOperation) {
     return repairRequired("incomplete_operation");
   }
-  if (parseEnv(snapshot.files.env) === null) {
+  if (parseEnv(snapshot.files.env) === null)
     return repairRequired("env_invalid");
-  }
   const providers = parseProviders(snapshot.files.providers);
   if (providers === null) return repairRequired("providers_json_invalid");
   const providerIssue = providerConflict(providers);
   if (providerIssue) return repairRequired(providerIssue);
   const models = parseModels(snapshot.files.models);
   if (typeof models === "string") return repairRequired(models);
-  if (!parseModelDefinitions(snapshot.files.modelDefinitions)) {
+  const definitions = parseModelDefinitions(snapshot.files.modelDefinitions);
+  if (definitions === null) {
     return repairRequired("model_definitions_json_invalid");
   }
   const config = parseConfig(snapshot.files.config);
@@ -677,7 +794,22 @@ export function planModelRouteDirectoryRepair(
   if (typeof plannedModels === "string") {
     return repairRequired(plannedModels);
   }
-  const identity = activeIdentity(config, providers, plannedModels.rows);
+  let identity = activeIdentity(config, providers, plannedModels.rows);
+  if (identity === "active_route_unresolved" && config !== null) {
+    const reconstructed = reconstructConfigOnlyRow(
+      config,
+      providers,
+      plannedModels.rows,
+      definitions,
+    );
+    if (typeof reconstructed === "string") {
+      return repairRequired(reconstructed);
+    }
+    plannedModels.rows.push(reconstructed);
+    plannedModels.raw.push(reconstructed.raw);
+    plannedModels.changed = true;
+    identity = activeIdentity(config, providers, plannedModels.rows);
+  }
   if (typeof identity === "string") return repairRequired(identity);
   if (!plannedModels.changed) {
     return { status: "unchanged", activeRoute: identity };
