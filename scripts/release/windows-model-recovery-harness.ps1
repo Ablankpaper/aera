@@ -35,9 +35,21 @@ $arguments = @(
   $resolvedHarnessRoot,
   "--force-windows-kill"
 )
-$output = & $node @arguments 2>&1
-if ($LASTEXITCODE -ne 0) {
-  throw "Windows recovery harness failed (exit $LASTEXITCODE): $($output -join [Environment]::NewLine)"
+$previousTemp = $env:TEMP
+$previousTmp = $env:TMP
+$output = @()
+$nodeExitCode = 1
+try {
+  $env:TEMP = $tempRoot
+  $env:TMP = $tempRoot
+  $output = & $node @arguments 2>&1
+  $nodeExitCode = $LASTEXITCODE
+} finally {
+  $env:TEMP = $previousTemp
+  $env:TMP = $previousTmp
+}
+if ($nodeExitCode -ne 0) {
+  throw "Windows recovery harness failed (exit $nodeExitCode): $($output -join [Environment]::NewLine)"
 }
 
 $jsonText = $output -join [Environment]::NewLine

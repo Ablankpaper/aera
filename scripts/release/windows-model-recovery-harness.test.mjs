@@ -380,6 +380,8 @@ if (!CLI_MODE) {
     assert.match(source, /--force-windows-kill/u);
     assert.match(source, /HarnessRoot/u);
     assert.match(source, /GetTempPath/u);
+    assert.match(source, /\$env:TEMP\s*=\s*\$tempRoot/u);
+    assert.match(source, /\$env:TMP\s*=\s*\$tempRoot/u);
     assert.doesNotMatch(source, /Remove-Item\s+.*ProjectRoot/u);
   });
 
