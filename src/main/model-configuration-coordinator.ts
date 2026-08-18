@@ -80,6 +80,20 @@ export interface PreparedModelConfigurationMutation {
   refreshPresentation?(): Awaitable<void>;
 }
 
+/**
+ * Main-only startup maintenance that may update the same five files as a
+ * user-initiated model mutation. The caller computes the plan without writing;
+ * the coordinator owns admission, snapshotting, journalling, rollback, and
+ * final verification.
+ */
+export interface ManagedModelFileInitialization {
+  targetProfileId: string;
+  changesRequired: boolean;
+  applyStage(stage: ModelConfigurationCommitStage): Awaitable<void>;
+  verify(): Awaitable<boolean>;
+  refreshPresentation?(): Awaitable<void>;
+}
+
 export interface ModelConfigurationMutationAdapter {
   prepare(
     request: ModelConfigurationMutationRequest,
@@ -499,6 +513,91 @@ export class ModelConfigurationCoordinator {
         }
         return this.executeLocalMutation(
           prepared,
+          ownerHandle,
+          targetProfileId,
+        );
+      } catch {
+        return rejected("recovery", "recovery_required", true);
+      }
+    });
+  }
+
+  async initializeManagedModelFiles(
+    input: ManagedModelFileInitialization,
+  ): Promise<ModelConfigurationMutationResult> {
+    let ownerHandle: string;
+    let preliminaryTarget: string;
+    try {
+      if (
+        !input ||
+        typeof input !== "object" ||
+        typeof input.changesRequired !== "boolean" ||
+        typeof input.applyStage !== "function" ||
+        typeof input.verify !== "function"
+      ) {
+        throw new Error("Invalid managed model initialization.");
+      }
+      ownerHandle = validateOwnerHandle(this.ownerHandle());
+      preliminaryTarget = validateProfileId(input.targetProfileId);
+      if (
+        this.catalog.canonicalTargetProfileId(preliminaryTarget) !==
+        preliminaryTarget
+      ) {
+        throw new Error("Managed model initialization target changed.");
+      }
+    } catch {
+      return rejected("validation", "not_needed");
+    }
+
+    const lockKey = `${ownerHandle}\0${preliminaryTarget}`;
+    return this.withLock(lockKey, async () => {
+      try {
+        const currentOwner = validateOwnerHandle(this.ownerHandle());
+        const targetProfileId = validateProfileId(
+          this.catalog.canonicalTargetProfileId(preliminaryTarget),
+        );
+        if (
+          currentOwner !== ownerHandle ||
+          targetProfileId !== preliminaryTarget ||
+          !(await this.isProfileOwned(ownerHandle, targetProfileId))
+        ) {
+          return rejected("validation", "not_needed");
+        }
+        if (this.profileNeedsRecovery(ownerHandle, targetProfileId)) {
+          return rejected("recovery", "recovery_required", true);
+        }
+
+        if (!input.changesRequired) {
+          return this.writeAuthority.run(
+            { globalCatalog: true, profileIds: [targetProfileId] },
+            async () => {
+              if (!(await input.verify())) {
+                return rejected("verification", "not_needed");
+              }
+              const catalog = this.catalog.snapshot(targetProfileId);
+              if (catalog.targetProfileId !== targetProfileId) {
+                return rejected("validation", "not_needed");
+              }
+              return { status: "committed", catalog };
+            },
+          );
+        }
+
+        const routeKey = boundedRouteKey(
+          await this.mutationAdapter.getActiveRouteKey(targetProfileId),
+        );
+        return this.executeLocalMutation(
+          {
+            targetProfileId,
+            oldRouteKey: routeKey,
+            newRouteKey: routeKey,
+            location: { kind: "local" },
+            applyStage: input.applyStage,
+            verify: async (catalog) =>
+              catalog.targetProfileId === targetProfileId &&
+              (await input.verify()),
+            refreshPresentation: input.refreshPresentation,
+          },
           ownerHandle,
           targetProfileId,
         );

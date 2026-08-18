@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 
 /**
- * Migration on read: when getApiServerKey() resolves the key from a
+ * Explicit startup migration: when getApiServerKey() resolves the key from a
  * non-canonical source (config.yaml top-level, or nested
  * api_server.token), copy the value into the canonical .env so future
  * reads — and crucially the gateway's own os.getenv("API_SERVER_KEY")
@@ -31,6 +31,40 @@ async function freshConfig(
   return await import("../src/main/config");
 }
 
+async function initializeExplicitly(
+  profileIds: readonly string[] = ["default"],
+): Promise<void> {
+  const models = await import("../src/main/models");
+  const coordinator: Parameters<typeof models.initializeModelCatalog>[0] = {
+    initializeManagedModelFiles: async (input) => {
+      if (input.changesRequired) {
+        for (const stage of [
+          "credential",
+          "provider",
+          "model_library",
+          "native_route",
+          "activation",
+        ] as const) {
+          await input.applyStage(stage);
+        }
+      }
+      if (!(await input.verify())) throw new Error("initialization verification failed");
+      return {
+        status: "committed",
+        catalog: {
+          revision: "a".repeat(64),
+          targetProfileId: profileIds[0] ?? "default",
+          routes: [],
+        },
+      };
+    },
+  };
+  await models.initializeModelCatalog(
+    coordinator,
+    models.planModelCatalogInitialization(profileIds),
+  );
+}
+
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });
 });
@@ -51,6 +85,7 @@ describe("getApiServerKey migration (default profile)", () => {
     const { getApiServerKey } = await freshConfig(TEST_DIR);
 
     expect(getApiServerKey()).toBe("sk-from-config-token");
+    await initializeExplicitly();
 
     // .env should now exist and contain the key
     const envFile = join(TEST_DIR, ".env");
@@ -67,6 +102,7 @@ describe("getApiServerKey migration (default profile)", () => {
     const { getApiServerKey } = await freshConfig(TEST_DIR);
 
     expect(getApiServerKey()).toBe("sk-legacy-top-level");
+    await initializeExplicitly();
 
     const envContent = readFileSync(join(TEST_DIR, ".env"), "utf-8");
     expect(envContent).toMatch(/^API_SERVER_KEY=sk-legacy-top-level/m);
@@ -78,6 +114,7 @@ describe("getApiServerKey migration (default profile)", () => {
     const { getApiServerKey } = await freshConfig(TEST_DIR);
 
     getApiServerKey();
+    await initializeExplicitly();
 
     // Original config.yaml unchanged
     expect(readFileSync(join(TEST_DIR, "config.yaml"), "utf-8")).toBe(original);
@@ -90,12 +127,12 @@ describe("getApiServerKey migration (default profile)", () => {
     );
     const { getApiServerKey } = await freshConfig(TEST_DIR);
 
-    getApiServerKey();
+    await initializeExplicitly();
     const envAfterFirst = readFileSync(join(TEST_DIR, ".env"), "utf-8");
 
     // Second call (caches in memory; that's fine — we're checking the
     // file on disk isn't double-written)
-    getApiServerKey();
+    await initializeExplicitly();
     const envAfterSecond = readFileSync(join(TEST_DIR, ".env"), "utf-8");
 
     expect(envAfterSecond).toBe(envAfterFirst);
@@ -113,6 +150,7 @@ describe("getApiServerKey migration (default profile)", () => {
     const { getApiServerKey } = await freshConfig(TEST_DIR);
 
     expect(getApiServerKey()).toBe("sk-already-in-env");
+    await initializeExplicitly();
 
     // .env unchanged
     const envContent = readFileSync(join(TEST_DIR, ".env"), "utf-8");
@@ -127,7 +165,7 @@ describe("getApiServerKey migration (default profile)", () => {
     );
     const { getApiServerKey } = await freshConfig(TEST_DIR);
 
-    getApiServerKey();
+    await initializeExplicitly();
 
     const logFile = join(TEST_DIR, "logs", "config-fixes.log");
     expect(existsSync(logFile)).toBe(true);
@@ -155,6 +193,7 @@ describe("getApiServerKey migration (default profile)", () => {
     const { getApiServerKey } = await freshConfig(TEST_DIR);
 
     expect(getApiServerKey()).toBe("");
+    await initializeExplicitly();
     expect(existsSync(join(TEST_DIR, ".env"))).toBe(false);
   });
 
@@ -171,6 +210,7 @@ describe("getApiServerKey migration (default profile)", () => {
     const { getApiServerKey } = await freshConfig(TEST_DIR);
 
     expect(getApiServerKey("work")).toBe("sk-default-token");
+    await initializeExplicitly(["work"]);
     expect(existsSync(join(TEST_DIR, "profiles", "work", ".env"))).toBe(false);
     expect(existsSync(join(TEST_DIR, "logs", "config-fixes.log"))).toBe(false);
   });

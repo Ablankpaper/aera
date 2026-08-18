@@ -40,6 +40,14 @@ An owned row whose five files and route exactly equal before/old becomes `rolled
 
 An owned row whose complete files and route exactly equal after/new becomes `committed`; no partial after state is accepted.
 
+### Model reads are byte side-effect free
+
+Model/config list and get functions never seed, migrate, or rewrite managed files; startup maintenance is planned separately from ordinary reads.
+
+### Explicit model catalog initialization
+
+[[src/main/models.ts#planModelCatalogInitialization]] computes a read-only plan, and [[src/main/model-configuration-coordinator.ts#ModelConfigurationCoordinator#initializeManagedModelFiles]] applies needed changes through the five-file journal. A verified no-op takes the same ordered locks but writes no journal row.
+
 ## Legacy installation recovery
 
 Cold recovery accepts a fresh Installation operation that names only its source Profile and intentionally inherits that Profile's current or default model.

@@ -72,6 +72,7 @@ interface Fixture {
     preparedTargets: string[];
   };
   snapshotBytes(): Record<string, string | null>;
+  operationCount(): number;
 }
 
 function routeSnapshot(revision = REVISION): OwnerModelRouteCatalogSnapshot {
@@ -243,6 +244,16 @@ function makeFixture(): Fixture {
           existsSync(path) ? readFileSync(path).toString("base64") : null,
         ]),
       ),
+    operationCount: () =>
+      Number(
+        (
+          database.sqlite
+            .prepare(
+              "SELECT COUNT(*) AS count FROM desktop_model_configuration_operations",
+            )
+            .get() as { count: number | bigint }
+        ).count,
+      ),
   };
 }
 
@@ -303,6 +314,68 @@ afterEach(() => {
 });
 
 describe("ModelConfigurationCoordinator", () => {
+  it("journals explicit managed-file initialization once and skips a no-op replay", async () => {
+    const fixture = makeFixture();
+    const coordinator = subject(fixture);
+    const applyStage = vi.fn((stage: ModelConfigurationCommitStage) => {
+      if (stage === "model_library") {
+        writeFileSync(fixture.paths.models, '[{"model":"initialized"}]\n');
+      }
+    });
+
+    const first = await coordinator.initializeManagedModelFiles({
+      targetProfileId: "account",
+      changesRequired: true,
+      applyStage,
+      verify: () =>
+        readFileSync(fixture.paths.models, "utf8").includes("initialized"),
+    });
+
+    expect(first).toMatchObject({ status: "committed" });
+    expect(applyStage).toHaveBeenCalledTimes(5);
+    expect(fixture.operationCount()).toBe(1);
+
+    applyStage.mockClear();
+    const second = await coordinator.initializeManagedModelFiles({
+      targetProfileId: "account",
+      changesRequired: false,
+      applyStage,
+      verify: () => true,
+    });
+
+    expect(second).toMatchObject({ status: "committed" });
+    expect(applyStage).not.toHaveBeenCalled();
+    expect(fixture.operationCount()).toBe(1);
+  });
+
+  it("restores every managed byte when explicit initialization fails", async () => {
+    const fixture = makeFixture();
+    const before = fixture.snapshotBytes();
+
+    const result = await subject(fixture).initializeManagedModelFiles({
+      targetProfileId: "account",
+      changesRequired: true,
+      applyStage: (stage) => {
+        if (stage === "credential") {
+          writeFileSync(fixture.paths.env, "INITIALIZED_KEY=value\n");
+        }
+        if (stage === "model_library") {
+          writeFileSync(fixture.paths.models, '[{"model":"partial"}]\n');
+          throw new Error("injected initialization failure");
+        }
+      },
+      verify: () => true,
+    });
+
+    expect(result).toMatchObject({
+      status: "rejected",
+      stage: "model_library",
+      rollback: "restored",
+    });
+    expect(fixture.snapshotBytes()).toEqual(before);
+    expect(fixture.store.listIncomplete()).toEqual([]);
+  });
+
   it("accepts opaque owner handles with NUL separators", async () => {
     const fixture = makeFixture();
     const ownerHandle = "tenant\0owner\0device";

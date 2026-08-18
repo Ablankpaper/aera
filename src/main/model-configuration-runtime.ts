@@ -39,7 +39,9 @@ import {
 import { validateModelConfiguration } from "./config-model-migration";
 import {
   addModel,
+  initializeModelCatalog,
   migrateModelsForCustomProvider,
+  planModelCatalogInitialization,
   readModels,
   removeModel,
   removeModelsForCustomProvider,
@@ -765,6 +767,23 @@ export async function prepareModelConfigurationRuntime(
   if (coordinator !== null) {
     try {
       await coordinator.recoverIncompleteOperations();
+    } catch (error) {
+      recoveryError = error;
+      unavailable = startupFailure("model_configuration_recovery_required");
+      coordinator = null;
+    }
+  }
+
+  if (coordinator !== null && catalog !== null) {
+    try {
+      const targetProfileId = catalog.canonicalTargetProfileId("default");
+      const initialization = await initializeModelCatalog(
+        coordinator,
+        planModelCatalogInitialization([targetProfileId]),
+      );
+      if (initialization.status === "rejected") {
+        throw new Error("Managed model catalog initialization was rejected.");
+      }
     } catch (error) {
       recoveryError = error;
       unavailable = startupFailure("model_configuration_recovery_required");

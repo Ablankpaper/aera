@@ -34,6 +34,80 @@ afterEach(() => {
 });
 
 describe("model-configuration runtime", () => {
+  // @lat: [[beta27-reliability-plan#Recoverable model configuration#Explicit model catalog initialization]]
+  it("initializes a missing model catalog once before exposing the coordinator", async () => {
+    const root = mkdtempSync(join(tmpdir(), "aera-model-runtime-initialize-"));
+    roots.push(root);
+    const hermesHome = join(root, "hermes");
+    const userData = join(root, "user-data");
+    mkdirSync(hermesHome, { recursive: true });
+    process.env.HERMES_HOME = hermesHome;
+    vi.resetModules();
+    vi.doUnmock("./installer");
+    const actualInstaller =
+      await vi.importActual<typeof import("./installer")>("./installer");
+    vi.doMock("./installer", () => actualInstaller);
+    const [
+      { AgenteraProfileBindingStore },
+      runtime,
+      models,
+      modelDatabase,
+    ] = await Promise.all([
+      import("./agentera-profile-binding"),
+      import("./model-configuration-runtime"),
+      import("./models"),
+      import("./model-configuration-database"),
+    ]);
+    const bindings = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage: {
+        isEncryptionAvailable: () => true,
+        encryptString: (value: string) => Buffer.from(value, "utf8"),
+        decryptString: (value: Buffer) => value.toString("utf8"),
+      },
+    });
+    bindings.bindExistingProfile(hermesHome, OWNER);
+
+    const handle = await runtime.prepareModelConfigurationRuntime({
+      userDataPath: userData,
+      getOwner: () => OWNER,
+      profileBindings: bindings,
+      getConnectionConfig: () => ({ mode: "local" }),
+      openDatabase: (path) =>
+        modelDatabase.openModelConfigurationDatabase(path, {
+          databaseFactory: (databasePath) =>
+            new DatabaseSync(
+              databasePath,
+            ) as unknown as ModelConfigurationSqliteDatabase,
+        }),
+    });
+
+    try {
+      expect(handle.startupFailure).toBeNull();
+      expect(handle.coordinator).not.toBeNull();
+      expect(models.listModels().length).toBeGreaterThan(0);
+      const operationCount = (): number =>
+        Number(
+          (
+            handle.database!.sqlite
+              .prepare(
+                "SELECT COUNT(*) AS count FROM desktop_model_configuration_operations",
+              )
+              .get() as { count: number | bigint }
+          ).count,
+        );
+      expect(operationCount()).toBe(1);
+
+      await models.initializeModelCatalog(
+        handle.coordinator!,
+        models.planModelCatalogInitialization(["default"]),
+      );
+      expect(operationCount()).toBe(1);
+    } finally {
+      handle.close();
+    }
+  });
+
   it("does not treat a different named provider at the same endpoint as active", async () => {
     const { isActiveProviderRoute } =
       await import("./model-configuration-runtime");
@@ -305,7 +379,11 @@ describe("model-configuration runtime", () => {
       expect(listCustomProviders("default")).toEqual([
         expect.objectContaining({ id: originalProvider.id, name: "Fixture" }),
       ]);
-      expect(readModelsRaw()).toHaveLength(1);
+      expect(
+        readModelsRaw().filter(
+          (row) => row.providerId === originalProvider.id,
+        ),
+      ).toHaveLength(1);
       expect(config.getModelConfig("default")).toMatchObject({
         provider: "custom:fixture",
       });
@@ -336,7 +414,11 @@ describe("model-configuration runtime", () => {
           baseUrl: "https://renamed.invalid/v1",
         }),
       ]);
-      expect(readModels()).toEqual([
+      expect(
+        readModels().filter(
+          (model) => model.providerId === originalProvider.id,
+        ),
+      ).toEqual([
         expect.objectContaining({
           providerId: originalProvider.id,
           providerLabel: "123456",

@@ -1209,6 +1209,60 @@ export function getHermesHome(profile?: string): string {
  */
 const warnedUnresolvedApiKey = new Set<string>();
 
+interface ApiServerKeyProfileResolution extends ApiKeyResolution {
+  providerId: string;
+  envForProfile: Record<string, string>;
+}
+
+function resolveApiServerKeyForProfile(
+  profile?: string,
+  emitDiagnostics = false,
+): ApiServerKeyProfileResolution {
+  const envForProfile: Record<string, string> = { ...readEnv(profile) };
+  let providerId = "env";
+  try {
+    providerId = getSecretsProvider(profile).id;
+    let contributed = 0;
+    for (const [key, value] of Object.entries(providerListSafe(profile))) {
+      if (value && !envForProfile[key] && !(process.env[key] ?? "").trim()) {
+        envForProfile[key] = value;
+        contributed += 1;
+      }
+    }
+    if (emitDiagnostics) {
+      console.debug(
+        `[secrets] API_SERVER_KEY overlay: provider=${providerId}, contributed ${contributed} keys`,
+      );
+    }
+  } catch {
+    // Secrets provider unavailable: preserve the env-only resolution path.
+  }
+
+  const sources: ApiKeySources = {
+    configTopLevelProfile: getConfigValue("API_SERVER_KEY", profile),
+    configTopLevelDefault:
+      profile && profile !== "default"
+        ? getConfigValue("API_SERVER_KEY")
+        : null,
+    envProfile:
+      envForProfile.API_SERVER_KEY ?? process.env.API_SERVER_KEY ?? null,
+    envDefault:
+      profile && profile !== "default"
+        ? (readEnv().API_SERVER_KEY ?? null)
+        : null,
+    apiServerTokenProfile: getConfigValue("api_server.token", profile),
+    apiServerTokenDefault:
+      profile && profile !== "default"
+        ? getConfigValue("api_server.token")
+        : null,
+  };
+  return {
+    ...resolveApiServerKeyWithSource(sources),
+    providerId,
+    envForProfile,
+  };
+}
+
 /**
  * Resolve the API server's shared secret. Honoured by the local hermes
  * gateway (`api_server.token` in `config.yaml` / `API_SERVER_KEY` in
@@ -1251,56 +1305,7 @@ export function getApiServerKey(profile?: string): string {
   const cached = getCached<string>(cacheKey);
   if (cached !== undefined) return cached;
 
-  // Overlay the secrets provider's enumerable map BENEATH the `.env` file view,
-  // mirroring the process.env > .env > provider resolution order used
-  // everywhere else: a key is filled from the provider only when neither the
-  // `.env` file nor process.env already has it. A no-op for the default env
-  // provider (its list() IS the `.env` map); for a `command`-provider user this
-  // is what lets a vault-stored API_SERVER_KEY reach the 6-source resolver (as
-  // its canonical `envProfile` arm — deliberately NOT a 7th source, so the
-  // env-provider resolve-precedence policy is unchanged). Copy before
-  // overlaying: readEnv() returns a shared cached object that must not be
-  // mutated with provider values.
-  const envForProfile: Record<string, string> = { ...readEnv(profile) };
-  let providerId = "env";
-  try {
-    providerId = getSecretsProvider(profile).id;
-    let contributed = 0;
-    for (const [k, v] of Object.entries(providerListSafe(profile))) {
-      if (v && !envForProfile[k] && !(process.env[k] ?? "").trim()) {
-        envForProfile[k] = v;
-        contributed++;
-      }
-    }
-    // Visible under --enable-logging so an overlay user can see it happening.
-    console.debug(
-      `[secrets] API_SERVER_KEY overlay: provider=${providerId}, contributed ${contributed} keys`,
-    );
-  } catch {
-    // secrets module not available — fall through to the env-only view
-  }
-  const sources: ApiKeySources = {
-    configTopLevelProfile: getConfigValue("API_SERVER_KEY", profile),
-    configTopLevelDefault:
-      profile && profile !== "default"
-        ? getConfigValue("API_SERVER_KEY")
-        : null,
-    // Prefer the .env file value, then a runtime-injected one (e.g. a vault that
-    // unseals API_SERVER_KEY into the process environment rather than writing it
-    // to .env). This is the env arm of the secrets-provider resolution order.
-    envProfile:
-      envForProfile.API_SERVER_KEY ?? process.env.API_SERVER_KEY ?? null,
-    envDefault:
-      profile && profile !== "default"
-        ? (readEnv().API_SERVER_KEY ?? null)
-        : null,
-    apiServerTokenProfile: getConfigValue("api_server.token", profile),
-    apiServerTokenDefault:
-      profile && profile !== "default"
-        ? getConfigValue("api_server.token")
-        : null,
-  };
-  const { value, source } = resolveApiServerKeyWithSource(sources);
+  const { value, providerId } = resolveApiServerKeyForProfile(profile, true);
 
   // Diagnostic for "why is the key missing": one line naming the active
   // provider, rate-limited per (provider, profile) so the hot path can't spam.
@@ -1311,51 +1316,6 @@ export function getApiServerKey(profile?: string): string {
       console.warn(
         `[secrets] API_SERVER_KEY not resolved (provider=${providerId}, env=${profile || "default"})`,
       );
-    }
-  }
-
-  // Migration on read — if we resolved the key from a non-canonical
-  // location AND the canonical `.env` slot is empty for this profile,
-  // copy the value into `.env`. Keeps the original copy alone (additive
-  // only — never deletes), so a user who explicitly wrote to
-  // `api_server.token:` can still see their original entry there.
-  //
-  // The point of the migration is to make the gateway's own
-  // `os.getenv("API_SERVER_KEY")` lookup find the value: the gateway's
-  // env hydration at spawn time also injects it (Piece 0), but a
-  // user-edited `.env` is the canonical, file-of-record storage.
-  //
-  // Per-profile scope: cross-profile migration (e.g. copy default .env
-  // value into a profile that has neither) is out of scope — a user
-  // running multiple profiles may have intentionally per-profile keys.
-  const isNamedProfile = Boolean(profile && profile !== "default");
-  const sourceBelongsToProfile =
-    !isNamedProfile ||
-    source === "configTopLevelProfile" ||
-    source === "apiServerTokenProfile";
-  if (
-    value &&
-    source &&
-    sourceBelongsToProfile &&
-    !CANONICAL_API_KEY_SOURCES.has(source) &&
-    !(envForProfile.API_SERVER_KEY ?? "").trim()
-  ) {
-    try {
-      setEnvValue("API_SERVER_KEY", value, profile);
-      appendConfigFixLog({
-        ts: Date.now(),
-        issueCode: "API_SERVER_KEY_NON_CANONICAL",
-        action: "migrate",
-        from: source,
-        to:
-          profile && profile !== "default"
-            ? `~/.hermes/profiles/${profile}/.env`
-            : "~/.hermes/.env",
-        profile: profile || "default",
-        valueMasked: maskKey(value),
-      });
-    } catch {
-      // best-effort — don't block the read on a failed migration
     }
   }
 
@@ -1524,6 +1484,67 @@ export function resolveApiServerKey(sources: ApiKeySources): string {
  */
 export const CANONICAL_API_KEY_SOURCES: ReadonlySet<ApiKeySource> =
   new Set<ApiKeySource>(["envProfile", "envDefault"]);
+
+export interface ApiServerKeyMigrationPlan {
+  profileId: string;
+  value: string;
+  source: ApiKeySource;
+  destination: string;
+}
+
+/** Read-only planner for the former migration-on-read behavior. */
+export function planApiServerKeyMigration(
+  profile?: string,
+): ApiServerKeyMigrationPlan | null {
+  const profileId = profile && profile !== "default" ? profile : "default";
+  const { value, source, envForProfile } = resolveApiServerKeyForProfile(
+    profileId,
+  );
+  const sourceBelongsToProfile =
+    profileId === "default" ||
+    source === "configTopLevelProfile" ||
+    source === "apiServerTokenProfile";
+  if (
+    !value ||
+    !source ||
+    !sourceBelongsToProfile ||
+    CANONICAL_API_KEY_SOURCES.has(source) ||
+    (envForProfile.API_SERVER_KEY ?? "").trim()
+  ) {
+    return null;
+  }
+  return {
+    profileId,
+    value,
+    source,
+    destination:
+      profileId === "default"
+        ? "~/.hermes/.env"
+        : `~/.hermes/profiles/${profileId}/.env`,
+  };
+}
+
+/** Persist a precomputed migration; callers must place this behind admission. */
+export function persistApiServerKeyMigration(
+  plan: ApiServerKeyMigrationPlan,
+): void {
+  setEnvValue("API_SERVER_KEY", plan.value, plan.profileId);
+}
+
+/** Record an audit entry only after the enclosing transaction commits. */
+export function recordApiServerKeyMigration(
+  plan: ApiServerKeyMigrationPlan,
+): void {
+  appendConfigFixLog({
+    ts: Date.now(),
+    issueCode: "API_SERVER_KEY_NON_CANONICAL",
+    action: "migrate",
+    from: plan.source,
+    to: plan.destination,
+    profile: plan.profileId,
+    valueMasked: maskKey(plan.value),
+  });
+}
 
 /**
  * Mask a credential for safe logging: keep the first 4 and last 4

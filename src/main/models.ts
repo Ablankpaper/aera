@@ -5,7 +5,17 @@ import { HERMES_HOME } from "./installer";
 import { safeWriteFile, profilePaths } from "./utils";
 import { hostDerivedEnvKeyForUrl } from "./host-derived-env";
 import { customProviderEnvKey } from "../shared/url-key-map";
+import type { ModelConfigurationMutationResult } from "../shared/model-configuration";
 import DEFAULT_MODELS from "./default-models";
+import {
+  planApiServerKeyMigration,
+  persistApiServerKeyMigration,
+  readEnv,
+  recordApiServerKeyMigration,
+  setEnvValue,
+  type ApiServerKeyMigrationPlan,
+} from "./config";
+import type { ManagedModelFileInitialization } from "./model-configuration-coordinator";
 
 const MODELS_FILE = join(HERMES_HOME, "models.json");
 const MODEL_DEFS_FILE = join(HERMES_HOME, "model-definitions.json");
@@ -76,6 +86,42 @@ export interface ModelDefinition {
   updatedAt: number;
 }
 
+export interface ModelCatalogDerivedCredential {
+  profileId: string;
+  key: string;
+  value: string;
+}
+
+export interface ModelCatalogInitializationPlan {
+  targetProfileId: string;
+  profileIds: readonly string[];
+  seedDefaultModels: boolean;
+  migrateModelDefinitions: boolean;
+  persistDerivedCredentials: readonly ModelCatalogDerivedCredential[];
+}
+
+export interface ModelCatalogInitializationCoordinator {
+  initializeManagedModelFiles(
+    input: ManagedModelFileInitialization,
+  ): Promise<ModelConfigurationMutationResult>;
+}
+
+interface InternalModelCatalogInitializationPlan {
+  before: {
+    models: Buffer | null;
+    modelDefinitions: Buffer | null;
+    env: Buffer | null;
+  };
+  modelsAfter: SavedModelRow[] | null;
+  definitionsAfter: Record<string, ModelDefinition> | null;
+  apiServerKeyMigration: ApiServerKeyMigrationPlan | null;
+}
+
+const internalInitializationPlans = new WeakMap<
+  ModelCatalogInitializationPlan,
+  InternalModelCatalogInitializationPlan
+>();
+
 /** Coerce an arbitrary value to a positive integer token count, or undefined. */
 function normalizeContextLength(value: unknown): number | undefined {
   const n =
@@ -101,6 +147,15 @@ export function readModelsRaw(): SavedModelRow[] {
   } catch {
     return [];
   }
+}
+
+function readModelsRawStrict(): SavedModelRow[] {
+  if (!existsSync(MODELS_FILE)) return [];
+  const parsed = JSON.parse(readFileSync(MODELS_FILE, "utf-8")) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error("The model catalog is not a JSON array.");
+  }
+  return parsed as SavedModelRow[];
 }
 
 /**
@@ -142,6 +197,15 @@ export function readModelDefinitions(): Record<string, ModelDefinition> {
   } catch {
     return {};
   }
+}
+
+function readModelDefinitionsStrict(): Record<string, ModelDefinition> {
+  if (!existsSync(MODEL_DEFS_FILE)) return {};
+  const parsed = JSON.parse(readFileSync(MODEL_DEFS_FILE, "utf-8")) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("The model definition catalog is not a JSON object.");
+  }
+  return parsed as Record<string, ModelDefinition>;
 }
 
 function writeModelDefinitions(defs: Record<string, ModelDefinition>): void {
@@ -208,16 +272,22 @@ export function removeModelDefinition(model: string): boolean {
  * into any existing definitions file and is idempotent — after it runs no row
  * has `contextLength`, so a re-run hoists nothing.
  */
-export function ensureModelDefinitionsMigrated(): void {
-  const rawRows = readModelsRaw() as Array<
+function planModelDefinitionMigration(
+  rows: readonly SavedModelRow[],
+  existingDefinitions: Readonly<Record<string, ModelDefinition>>,
+): {
+  rows: SavedModelRow[];
+  definitions: Record<string, ModelDefinition>;
+} | null {
+  const rawRows = rows as Array<
     SavedModelRow & { contextLength?: number }
   >;
   const legacy = rawRows.filter(
     (r) => normalizeContextLength(r.contextLength) !== undefined,
   );
-  if (legacy.length === 0) return;
+  if (legacy.length === 0) return null;
 
-  const defs = readModelDefinitions();
+  const defs = { ...existingDefinitions };
   const now = Date.now();
   for (const row of legacy) {
     const ctx = normalizeContextLength(row.contextLength)!;
@@ -234,15 +304,22 @@ export function ensureModelDefinitionsMigrated(): void {
       updatedAt: now,
     };
   }
-  writeModelDefinitions(defs);
-
-  // Strip the now-redundant field from every row.
   const stripped = rawRows.map((r) => {
     const { contextLength: _drop, ...rest } = r;
     void _drop;
     return rest as SavedModelRow;
   });
-  writeModels(stripped);
+  return { rows: stripped, definitions: defs };
+}
+
+export function ensureModelDefinitionsMigrated(): void {
+  const migration = planModelDefinitionMigration(
+    readModelsRawStrict(),
+    readModelDefinitionsStrict(),
+  );
+  if (!migration) return;
+  writeModelDefinitions(migration.definitions);
+  writeModels(migration.rows);
 }
 
 interface CustomProviderEntry {
@@ -302,99 +379,245 @@ function loadCustomProviders(profile?: string): CustomProviderEntry[] {
   return result;
 }
 
-function seedDefaults(profile?: string): SavedModelRow[] {
-  const models: SavedModelRow[] = DEFAULT_MODELS.map((m) => ({
+function credentialKeysForCustomProvider(
+  provider: CustomProviderEntry,
+): string[] {
+  const customPrefixKey = customProviderEnvKey(provider.name);
+  const keys = [customPrefixKey];
+  const hostKey = hostDerivedEnvKeyForUrl(provider.baseUrl);
+  if (
+    hostKey &&
+    hostKey !== "OPENAI_API_KEY" &&
+    hostKey !== "ANTHROPIC_API_KEY" &&
+    hostKey !== customPrefixKey
+  ) {
+    keys.push(hostKey);
+  }
+  return keys;
+}
+
+function buildDefaultModelSeed(profileIds: readonly string[]): {
+  rows: SavedModelRow[];
+  credentials: ModelCatalogDerivedCredential[];
+} {
+  const now = Date.now();
+  const rows: SavedModelRow[] = DEFAULT_MODELS.map((model) => ({
     id: randomUUID(),
-    name: m.name,
-    provider: m.provider,
-    model: m.model,
-    baseUrl: m.baseUrl,
-    createdAt: Date.now(),
+    name: model.name,
+    provider: model.provider,
+    model: model.model,
+    baseUrl: model.baseUrl,
+    createdAt: now,
   }));
-  try {
-    const { envFile } = profilePaths(profile);
-    const cpModels = loadCustomProviders(profile);
-    for (const cp of cpModels) {
-      models.push({
+  const credentials = new Map<string, ModelCatalogDerivedCredential>();
+
+  for (const profileId of profileIds) {
+    const existingEnv = readEnv(profileId);
+    for (const provider of loadCustomProviders(profileId)) {
+      rows.push({
         id: randomUUID(),
-        name: cp.name,
-        provider: cp.provider,
-        model: cp.model,
-        baseUrl: cp.baseUrl,
-        apiMode: cp.apiMode || null,
-        createdAt: Date.now(),
+        name: provider.name,
+        provider: provider.provider,
+        model: provider.model,
+        baseUrl: provider.baseUrl,
+        apiMode: provider.apiMode || null,
+        createdAt: now,
       });
-      if (cp.apiKey && cp.apiKey !== "no-key-required") {
-        try {
-          let envContent = existsSync(envFile)
-            ? readFileSync(envFile, "utf-8")
-            : "";
-          // Names to persist for this custom-provider key:
-          //   1. CUSTOM_PROVIDER_<NAME>_KEY — the historical desktop
-          //      contract; the runtime spawn in `hermes.ts` reads it
-          //      via the models.json baseUrl match.
-          //   2. <VENDOR>_API_KEY when the URL matches a known vendor
-          //      host (e.g. api.deepseek.com → DEEPSEEK_API_KEY) —
-          //      required for dual-engine compat: upstream-main's
-          //      `_host_derived_api_key()` won't accept the custom-
-          //      prefix form. Old engine (≤ v2026.5.16) doesn't have
-          //      the host-derive resolver and ignores this extra var,
-          //      so writing both is additive and safe.
-          // The gateway path in `hermes.ts:startGateway` ingests ALL
-          // profile env vars at spawn, so the host-derived form has
-          // to live in .env (not just be set at chat-time) for the
-          // long-running gateway flow to work on the new engine.
-          const customPrefixKey = customProviderEnvKey(cp.name);
-          const namesToWrite: string[] = [customPrefixKey];
-          const hostKey = hostDerivedEnvKeyForUrl(cp.baseUrl);
-          // Don't shadow real OPENAI / ANTHROPIC keys via this path —
-          // those belong to a separately-configured provider, not a
-          // custom-provider key. The persistence guard mirrors the
-          // runtime guard in `hermes.ts`.
-          if (
-            hostKey &&
-            hostKey !== "OPENAI_API_KEY" &&
-            hostKey !== "ANTHROPIC_API_KEY" &&
-            hostKey !== customPrefixKey
-          ) {
-            namesToWrite.push(hostKey);
-          }
-          let modified = false;
-          for (const envKey of namesToWrite) {
-            const keyRegex = new RegExp(
-              "^" + envKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "=.*$",
-              "m",
-            );
-            if (!keyRegex.test(envContent)) {
-              envContent =
-                envContent.trimEnd() + "\n" + envKey + "=" + cp.apiKey + "\n";
-              modified = true;
-            }
-          }
-          if (modified) {
-            safeWriteFile(envFile, envContent);
-          }
-        } catch {
-          /* best-effort */
+      if (!provider.apiKey || provider.apiKey === "no-key-required") continue;
+      for (const key of credentialKeysForCustomProvider(provider)) {
+        if (existingEnv[key] || credentials.has(`${profileId}\0${key}`)) {
+          continue;
         }
+        credentials.set(`${profileId}\0${key}`, {
+          profileId,
+          key,
+          value: provider.apiKey,
+        });
       }
     }
-  } catch (e) {
-    console.error("Failed to load custom providers:", e);
   }
-  writeModels(models);
-  return models;
+
+  return { rows, credentials: [...credentials.values()] };
+}
+
+function fileBytes(path: string): Buffer | null {
+  return existsSync(path) ? readFileSync(path) : null;
+}
+
+function bytesEqual(left: Buffer | null, right: Buffer | null): boolean {
+  return left === null ? right === null : right !== null && left.equals(right);
+}
+
+const PROFILE_ID_PATTERN = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
+
+function normalizedInitializationProfiles(
+  profileIds: readonly string[],
+): string[] {
+  const normalized = [...new Set(profileIds.map((profileId) => profileId.trim()))]
+    .filter(Boolean)
+    .sort();
+  if (
+    normalized.length === 0 ||
+    normalized.some((profileId) => !PROFILE_ID_PATTERN.test(profileId))
+  ) {
+    throw new Error("Invalid model catalog initialization Profile.");
+  }
+  return normalized;
+}
+
+export function planModelCatalogInitialization(
+  profileIds: readonly string[],
+): ModelCatalogInitializationPlan {
+  const normalizedProfiles = normalizedInitializationProfiles(profileIds);
+  const targetProfileId = normalizedProfiles.includes("default")
+    ? "default"
+    : normalizedProfiles[0];
+  const seedDefaultModels = !existsSync(MODELS_FILE);
+  const seed = seedDefaultModels
+    ? buildDefaultModelSeed([targetProfileId])
+    : { rows: readModelsRawStrict(), credentials: [] };
+  const definitions = readModelDefinitionsStrict();
+  const definitionMigration = planModelDefinitionMigration(
+    seed.rows,
+    definitions,
+  );
+  const apiServerKeyMigration = planApiServerKeyMigration(targetProfileId);
+  const persistDerivedCredentials = [...seed.credentials];
+  if (apiServerKeyMigration) {
+    persistDerivedCredentials.push({
+      profileId: apiServerKeyMigration.profileId,
+      key: "API_SERVER_KEY",
+      value: apiServerKeyMigration.value,
+    });
+  }
+
+  const plan: ModelCatalogInitializationPlan = Object.freeze({
+    targetProfileId,
+    profileIds: Object.freeze(normalizedProfiles.slice()),
+    seedDefaultModels,
+    migrateModelDefinitions: definitionMigration !== null,
+    persistDerivedCredentials: Object.freeze(
+      persistDerivedCredentials.map((credential) =>
+        Object.freeze({ ...credential }),
+      ),
+    ),
+  });
+  const { envFile } = profilePaths(targetProfileId);
+  internalInitializationPlans.set(plan, {
+    before: {
+      models: fileBytes(MODELS_FILE),
+      modelDefinitions: fileBytes(MODEL_DEFS_FILE),
+      env: fileBytes(envFile),
+    },
+    modelsAfter: definitionMigration?.rows ?? (seedDefaultModels ? seed.rows : null),
+    definitionsAfter: definitionMigration?.definitions ?? null,
+    apiServerKeyMigration,
+  });
+  return plan;
+}
+
+function initializationInput(
+  plan: ModelCatalogInitializationPlan,
+  internal: InternalModelCatalogInitializationPlan,
+): ManagedModelFileInitialization {
+  const { envFile } = profilePaths(plan.targetProfileId);
+  let checkedBefore = false;
+  const verifyBefore = (): void => {
+    if (checkedBefore) return;
+    checkedBefore = true;
+    if (
+      !bytesEqual(fileBytes(MODELS_FILE), internal.before.models) ||
+      !bytesEqual(
+        fileBytes(MODEL_DEFS_FILE),
+        internal.before.modelDefinitions,
+      ) ||
+      !bytesEqual(fileBytes(envFile), internal.before.env)
+    ) {
+      throw new Error("Model catalog initialization plan is stale.");
+    }
+  };
+  const changesRequired =
+    internal.modelsAfter !== null ||
+    internal.definitionsAfter !== null ||
+    plan.persistDerivedCredentials.length > 0;
+  return {
+    targetProfileId: plan.targetProfileId,
+    changesRequired,
+    applyStage: (stage) => {
+      verifyBefore();
+      if (stage === "credential") {
+        for (const credential of plan.persistDerivedCredentials) {
+          if (
+            credential.key === "API_SERVER_KEY" &&
+            internal.apiServerKeyMigration?.profileId === credential.profileId
+          ) {
+            persistApiServerKeyMigration(internal.apiServerKeyMigration);
+          } else {
+            setEnvValue(
+              credential.key,
+              credential.value,
+              credential.profileId,
+            );
+          }
+        }
+      }
+      if (stage === "model_library") {
+        if (internal.definitionsAfter) {
+          writeModelDefinitions(internal.definitionsAfter);
+        }
+        if (internal.modelsAfter) writeModels(internal.modelsAfter);
+      }
+    },
+    verify: () => {
+      const modelsMatch = internal.modelsAfter
+        ? JSON.stringify(readModelsRawStrict()) ===
+          JSON.stringify(internal.modelsAfter)
+        : bytesEqual(fileBytes(MODELS_FILE), internal.before.models);
+      if (!modelsMatch) {
+        return false;
+      }
+      const definitionsMatch = internal.definitionsAfter
+        ? JSON.stringify(readModelDefinitionsStrict()) ===
+          JSON.stringify(internal.definitionsAfter)
+        : bytesEqual(
+            fileBytes(MODEL_DEFS_FILE),
+            internal.before.modelDefinitions,
+          );
+      if (!definitionsMatch) {
+        return false;
+      }
+      if (plan.persistDerivedCredentials.length === 0) {
+        return bytesEqual(fileBytes(envFile), internal.before.env);
+      }
+      return plan.persistDerivedCredentials.every((credential) => {
+        return readEnv(credential.profileId)[credential.key] === credential.value;
+      });
+    },
+  };
+}
+
+export async function initializeModelCatalog(
+  coordinator: ModelCatalogInitializationCoordinator,
+  plan: ModelCatalogInitializationPlan,
+): Promise<ModelConfigurationMutationResult> {
+  const internal = internalInitializationPlans.get(plan);
+  if (!internal) {
+    throw new Error("Model catalog initialization plan was not created here.");
+  }
+  const result = await coordinator.initializeManagedModelFiles(
+    initializationInput(plan, internal),
+  );
+  if (
+    internal.apiServerKeyMigration &&
+    (result.status === "committed" ||
+      result.status === "committed_refresh_warning")
+  ) {
+    recordApiServerKeyMigration(internal.apiServerKeyMigration);
+  }
+  return result;
 }
 
 export function listModels(): SavedModel[] {
-  if (!existsSync(MODELS_FILE)) {
-    seedDefaults();
-  }
-  // Hoist any legacy per-row context overrides into shared definitions before
-  // the merged read. This is the renderer-facing entry point (Providers screen),
-  // which already performs writes via seedDefaults; the runtime path uses
-  // readModels() directly and never triggers this migration write.
-  ensureModelDefinitionsMigrated();
   return readModels();
 }
 

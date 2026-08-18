@@ -30,6 +30,38 @@ async function freshModels(): Promise<typeof import("../src/main/models")> {
   return await import("../src/main/models");
 }
 
+async function initializeExplicitly(): Promise<void> {
+  const models = await freshModels();
+  const coordinator: Parameters<typeof models.initializeModelCatalog>[0] = {
+    initializeManagedModelFiles: async (input) => {
+      if (input.changesRequired) {
+        for (const stage of [
+          "credential",
+          "provider",
+          "model_library",
+          "native_route",
+          "activation",
+        ] as const) {
+          await input.applyStage(stage);
+        }
+      }
+      if (!(await input.verify())) throw new Error("initialization verification failed");
+      return {
+        status: "committed",
+        catalog: {
+          revision: "a".repeat(64),
+          targetProfileId: "default",
+          routes: [],
+        },
+      };
+    },
+  };
+  await models.initializeModelCatalog(
+    coordinator,
+    models.planModelCatalogInitialization(["default"]),
+  );
+}
+
 interface ProviderEntry {
   name: string;
   provider: string;
@@ -76,8 +108,7 @@ describe("custom-provider env persistence — dual-engine compat", () => {
       },
     ]);
 
-    const { listModels } = await freshModels();
-    listModels(); // triggers seedDefaults → persists env
+    await initializeExplicitly();
 
     const envContent = readFileSync(join(testHome, ".env"), "utf-8");
     expect(envContent).toMatch(
@@ -104,8 +135,7 @@ describe("custom-provider env persistence — dual-engine compat", () => {
       },
     ]);
 
-    const { listModels } = await freshModels();
-    listModels();
+    await initializeExplicitly();
 
     const envContent = readFileSync(join(testHome, ".env"), "utf-8");
     expect(envContent).toMatch(/^GROQ_API_KEY=gsk-groq-test$/m);
@@ -123,8 +153,7 @@ describe("custom-provider env persistence — dual-engine compat", () => {
       },
     ]);
 
-    const { listModels } = await freshModels();
-    listModels();
+    await initializeExplicitly();
 
     const envContent = readFileSync(join(testHome, ".env"), "utf-8");
     expect(envContent).toMatch(/^PETOI_API_KEY=sk-petoi-test$/m);
@@ -141,8 +170,7 @@ describe("custom-provider env persistence — dual-engine compat", () => {
       },
     ]);
 
-    const { listModels } = await freshModels();
-    listModels();
+    await initializeExplicitly();
 
     const envContent = readFileSync(join(testHome, ".env"), "utf-8");
     expect(envContent).toMatch(
@@ -163,8 +191,7 @@ describe("custom-provider env persistence — dual-engine compat", () => {
       },
     ]);
 
-    const { listModels } = await freshModels();
-    listModels();
+    await initializeExplicitly();
 
     const envContent = readFileSync(join(testHome, ".env"), "utf-8");
     expect(envContent).toMatch(
@@ -188,8 +215,7 @@ describe("custom-provider env persistence — dual-engine compat", () => {
       },
     ]);
 
-    const { listModels } = await freshModels();
-    listModels();
+    await initializeExplicitly();
 
     const envContent = readFileSync(join(testHome, ".env"), "utf-8");
     expect(envContent).toMatch(
@@ -209,13 +235,8 @@ describe("custom-provider env persistence — dual-engine compat", () => {
       },
     ]);
 
-    // First listModels call seeds
-    let { listModels } = await freshModels();
-    listModels();
-
-    // Second listModels call after a fresh module load should not append.
-    ({ listModels } = await freshModels());
-    listModels();
+    await initializeExplicitly();
+    await initializeExplicitly();
 
     const envContent = readFileSync(join(testHome, ".env"), "utf-8");
     const customMatches =
@@ -236,8 +257,7 @@ describe("custom-provider env persistence — dual-engine compat", () => {
       },
     ]);
 
-    const { listModels } = await freshModels();
-    listModels();
+    await initializeExplicitly();
 
     const envFile = join(testHome, ".env");
     const envContent = existsSync(envFile)
