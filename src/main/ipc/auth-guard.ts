@@ -344,6 +344,7 @@ const BOUND_PROFILE_CHANNELS = [
   "agent-sync-run",
   "agent-sync-status",
   "autofix-config-issue",
+  "cancel-provider-model-discovery",
   "clarify-respond",
   "claw3d-get-logs",
   "claw3d-get-port",
