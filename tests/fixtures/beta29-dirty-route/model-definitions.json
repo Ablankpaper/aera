@@ -1,0 +1,16 @@
+{
+  "fixture-model-01": {
+    "model": "fixture-model-01",
+    "name": "Fixture Model 01",
+    "contextLength": 32768,
+    "createdAt": 1723507200401,
+    "updatedAt": 1723507200401
+  },
+  "fixture-model-12": {
+    "model": "fixture-model-12",
+    "name": "Fixture Model 12",
+    "contextLength": 65536,
+    "createdAt": 1723507200412,
+    "updatedAt": 1723507200412
+  }
+}

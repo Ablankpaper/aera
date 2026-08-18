@@ -40,6 +40,10 @@ An owned row whose five files and route exactly equal before/old becomes `rolled
 
 An owned row whose complete files and route exactly equal after/new becomes `committed`; no partial after state is accepted.
 
+### Sanitized Beta.29 dirty-route fixture
+
+The immutable fixture preserves only the third capture's route counts, duplicate-endpoint topology, managed roles, and terminal journal states; real credentials, identities, domains, paths, logs, and database pages are excluded.
+
 ### Managed lock order is deterministic
 
 Mixed model mutations acquire the global catalog before stable-sorted, unique Profile locks, and a nested Profile-to-global acquisition fails before its callback runs.

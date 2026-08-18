@@ -1,0 +1,9 @@
+model:
+  provider: "custom:fixture"
+  default: "fixture-model-01"
+  base_url: "https://config-only.fixture.invalid/v1"
+  api_mode: "chat_completions"
+providers:
+  fixture:
+    api: "https://current.fixture.invalid/v1"
+    key_env: "CUSTOM_PROVIDER_FIXTURE_KEY"

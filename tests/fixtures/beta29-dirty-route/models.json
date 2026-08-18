@@ -1,0 +1,249 @@
+[
+  {
+    "id": "fixture-builtin-01",
+    "name": "Fixture Builtin 01",
+    "provider": "openai",
+    "model": "fixture-builtin-model-01",
+    "baseUrl": "",
+    "createdAt": 1723507200001
+  },
+  {
+    "id": "fixture-builtin-02",
+    "name": "Fixture Builtin 02",
+    "provider": "anthropic",
+    "model": "fixture-builtin-model-02",
+    "baseUrl": "",
+    "createdAt": 1723507200002
+  },
+  {
+    "id": "fixture-builtin-03",
+    "name": "Fixture Builtin 03",
+    "provider": "google",
+    "model": "fixture-builtin-model-03",
+    "baseUrl": "",
+    "createdAt": 1723507200003
+  },
+  {
+    "id": "fixture-builtin-04",
+    "name": "Fixture Builtin 04",
+    "provider": "qwen",
+    "model": "fixture-builtin-model-04",
+    "baseUrl": "",
+    "createdAt": 1723507200004
+  },
+  {
+    "id": "fixture-builtin-05",
+    "name": "Fixture Builtin 05",
+    "provider": "deepseek",
+    "model": "fixture-builtin-model-05",
+    "baseUrl": "",
+    "createdAt": 1723507200005
+  },
+  {
+    "id": "fixture-builtin-06",
+    "name": "Fixture Builtin 06",
+    "provider": "openrouter",
+    "model": "fixture-builtin-model-06",
+    "baseUrl": "",
+    "createdAt": 1723507200006
+  },
+  {
+    "id": "fixture-route-01-legacy",
+    "name": "Fixture Model 01",
+    "provider": "custom",
+    "model": "fixture-model-01",
+    "baseUrl": "https://legacy.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200101
+  },
+  {
+    "id": "fixture-route-01-current",
+    "name": "Fixture Model 01",
+    "provider": "custom",
+    "model": "fixture-model-01",
+    "baseUrl": "https://current.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200201
+  },
+  {
+    "id": "fixture-route-02-legacy",
+    "name": "Fixture Model 02",
+    "provider": "custom",
+    "model": "fixture-model-02",
+    "baseUrl": "https://legacy.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200102
+  },
+  {
+    "id": "fixture-route-02-current",
+    "name": "Fixture Model 02",
+    "provider": "custom",
+    "model": "fixture-model-02",
+    "baseUrl": "https://current.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200202
+  },
+  {
+    "id": "fixture-route-03-legacy",
+    "name": "Fixture Model 03",
+    "provider": "custom",
+    "model": "fixture-model-03",
+    "baseUrl": "https://legacy.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200103
+  },
+  {
+    "id": "fixture-route-03-current",
+    "name": "Fixture Model 03",
+    "provider": "custom",
+    "model": "fixture-model-03",
+    "baseUrl": "https://current.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200203
+  },
+  {
+    "id": "fixture-route-04-legacy",
+    "name": "Fixture Model 04",
+    "provider": "custom",
+    "model": "fixture-model-04",
+    "baseUrl": "https://legacy.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200104
+  },
+  {
+    "id": "fixture-route-04-current",
+    "name": "Fixture Model 04",
+    "provider": "custom",
+    "model": "fixture-model-04",
+    "baseUrl": "https://current.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200204
+  },
+  {
+    "id": "fixture-route-05-legacy",
+    "name": "Fixture Model 05",
+    "provider": "custom",
+    "model": "fixture-model-05",
+    "baseUrl": "https://legacy.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200105
+  },
+  {
+    "id": "fixture-route-05-current",
+    "name": "Fixture Model 05",
+    "provider": "custom",
+    "model": "fixture-model-05",
+    "baseUrl": "https://current.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200205
+  },
+  {
+    "id": "fixture-route-06-legacy",
+    "name": "Fixture Model 06",
+    "provider": "custom",
+    "model": "fixture-model-06",
+    "baseUrl": "https://legacy.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200106
+  },
+  {
+    "id": "fixture-route-06-current",
+    "name": "Fixture Model 06",
+    "provider": "custom",
+    "model": "fixture-model-06",
+    "baseUrl": "https://current.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200206
+  },
+  {
+    "id": "fixture-route-07-legacy",
+    "name": "Fixture Model 07",
+    "provider": "custom",
+    "model": "fixture-model-07",
+    "baseUrl": "https://legacy.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200107
+  },
+  {
+    "id": "fixture-route-07-current",
+    "name": "Fixture Model 07",
+    "provider": "custom",
+    "model": "fixture-model-07",
+    "baseUrl": "https://current.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200207
+  },
+  {
+    "id": "fixture-route-08-legacy",
+    "name": "Fixture Model 08",
+    "provider": "custom",
+    "model": "fixture-model-08",
+    "baseUrl": "https://legacy.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200108
+  },
+  {
+    "id": "fixture-route-08-current",
+    "name": "Fixture Model 08",
+    "provider": "custom",
+    "model": "fixture-model-08",
+    "baseUrl": "https://current.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200208
+  },
+  {
+    "id": "fixture-route-09-current",
+    "name": "Fixture Model 09",
+    "provider": "custom",
+    "model": "fixture-model-09",
+    "baseUrl": "https://current.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200209
+  },
+  {
+    "id": "fixture-route-10-current",
+    "name": "Fixture Model 10",
+    "provider": "custom",
+    "model": "fixture-model-10",
+    "baseUrl": "https://current.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200210
+  },
+  {
+    "id": "fixture-route-11-current",
+    "name": "Fixture Model 11",
+    "provider": "custom",
+    "model": "fixture-model-11",
+    "baseUrl": "https://current.fixture.invalid/v1",
+    "apiMode": "chat_completions",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200211
+  },
+  {
+    "id": "fixture-route-12-alternate",
+    "name": "Fixture Model 12",
+    "provider": "custom",
+    "model": "fixture-model-12",
+    "baseUrl": "https://alternate.fixture.invalid/v1",
+    "providerLabel": "Fixture",
+    "createdAt": 1723507200312
+  }
+]
