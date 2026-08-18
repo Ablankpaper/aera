@@ -440,48 +440,210 @@ function plannedModelRows(
       absorbedRowIds: string[];
     }
   | string {
-  const rows: StrictModelRecord[] = [];
-  const raw: UnknownRecord[] = [];
+  type Resolved = {
+    row: StrictModelRecord;
+    provider: StrictProviderRecord;
+  };
+  const direct: Array<Resolved | null | string> = models.map((row) => {
+    const provider = providerForRow(row, providers, config);
+    if (provider === null || typeof provider === "string") return provider;
+    return { row, provider };
+  });
+
+  // A stale legacy row may carry the same provider label and model as an
+  // authoritative row, but its old endpoint is no longer in providers.json.
+  // Resolve it from that already-proven peer instead of guessing from the
+  // first provider in the file.
+  for (let index = 0; index < models.length; index += 1) {
+    if (typeof direct[index] !== "string") continue;
+    if (direct[index] !== "legacy_provider_unresolved") {
+      return direct[index] as string;
+    }
+    const row = models[index];
+    const candidates = providers.filter((provider) =>
+      direct.some((candidate, peerIndex) => {
+        if (!candidate || typeof candidate === "string") return false;
+        if (candidate.provider.id !== provider.id) return false;
+        const peer = candidate.row;
+        if (peer.model !== row.model || peer.apiMode !== row.apiMode) {
+          return false;
+        }
+        if (
+          row.providerLabel !== null &&
+          customProviderEnvKey(row.providerLabel) !==
+            customProviderEnvKey(provider.name)
+        ) {
+          return false;
+        }
+        if (
+          namedCustomProviderRuntimeName(row.provider) !== null &&
+          customProviderRuntimeRoute(
+            namedCustomProviderRuntimeName(row.provider)!,
+          ) !== customProviderRuntimeRoute(provider.name)
+        ) {
+          return false;
+        }
+        return peerIndex !== index;
+      }),
+    );
+    if (candidates.length !== 1) {
+      return candidates.length === 0
+        ? "legacy_provider_unresolved"
+        : "legacy_provider_ambiguous";
+    }
+    direct[index] = {
+      row,
+      provider: candidates[0],
+    };
+  }
+
+  const resolvedGroups = new Map<string, number[]>();
+  for (let index = 0; index < direct.length; index += 1) {
+    const candidate = direct[index];
+    if (!candidate || typeof candidate === "string") continue;
+    const key = [
+      candidate.provider.id,
+      candidate.row.model,
+      candidate.row.apiMode,
+    ].join("\0");
+    const group = resolvedGroups.get(key) ?? [];
+    group.push(index);
+    resolvedGroups.set(key, group);
+  }
+
+  const placement = new Map<number, StrictModelRecord>();
   const absorbedRowIds: string[] = [];
   let changed = false;
 
-  for (const row of models) {
-    const provider = providerForRow(row, providers, config);
-    if (typeof provider === "string") return provider;
-    if (provider === null) {
-      rows.push(row);
-      raw.push(row.raw);
-      continue;
-    }
-
-    const adopted = row.providerId === null;
-    const rowChanged =
-      adopted ||
-      row.providerLabel !== provider.name ||
-      row.baseUrl !== provider.baseUrl;
-    if (!rowChanged) {
-      rows.push(row);
-      raw.push(row.raw);
-      continue;
-    }
-    changed = true;
-    if (adopted) absorbedRowIds.push(row.id);
-    const nextRaw: UnknownRecord = {
-      ...row.raw,
-      baseUrl: provider.baseUrl,
-      providerLabel: provider.name,
-      providerId: provider.id,
-    };
-    rows.push({
-      ...row,
-      baseUrl: provider.baseUrl,
-      providerLabel: provider.name,
-      providerId: provider.id,
-      raw: nextRaw,
+  for (const indexes of resolvedGroups.values()) {
+    const first = direct[indexes[0]];
+    if (!first || typeof first === "string") continue;
+    const provider = first.provider;
+    const group = indexes.map((index) => {
+      const candidate = direct[index];
+      if (!candidate || typeof candidate === "string") {
+        throw new Error("Unresolved model row group.");
+      }
+      return candidate.row;
     });
-    raw.push(nextRaw);
+    const merged = mergeResolvedRows(group, provider);
+    if (typeof merged === "string") return merged;
+    const primaryIndex =
+      indexes.find((index) => models[index].providerId === provider.id) ??
+      indexes[0];
+    placement.set(primaryIndex, merged.row);
+    if (merged.changed) changed = true;
+    absorbedRowIds.push(...merged.absorbedRowIds);
   }
+
+  // Built-in and otherwise unowned rows are intentionally untouched.
+  for (let index = 0; index < models.length; index += 1) {
+    if (!direct[index]) placement.set(index, models[index]);
+  }
+
+  const rows: StrictModelRecord[] = [];
+  const raw: UnknownRecord[] = [];
+  for (let index = 0; index < models.length; index += 1) {
+    const row = placement.get(index);
+    if (!row) continue;
+    rows.push(row);
+    raw.push(row.raw);
+  }
+  absorbedRowIds.sort(
+    (left, right) =>
+      models.findIndex((row) => row.id === left) -
+      models.findIndex((row) => row.id === right),
+  );
   return { rows, raw, changed, absorbedRowIds };
+}
+
+function stableValue(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableValue).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value as UnknownRecord)
+      .sort()
+      .map(
+        (key) =>
+          `${JSON.stringify(key)}:${stableValue((value as UnknownRecord)[key])}`,
+      )
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function emptyMetadata(value: unknown): boolean {
+  return value === undefined || value === null || value === "";
+}
+
+function mergeResolvedRows(
+  group: readonly StrictModelRecord[],
+  provider: StrictProviderRecord,
+):
+  | { row: StrictModelRecord; changed: boolean; absorbedRowIds: string[] }
+  | string {
+  const ordered = [...group].sort(
+    (left, right) =>
+      left.createdAt - right.createdAt || left.id.localeCompare(right.id),
+  );
+  const stable = ordered.filter((row) => row.providerId === provider.id);
+  const primary = stable[0] ?? ordered[0];
+  const protectedKeys = new Set([
+    "id",
+    "createdAt",
+    "provider",
+    "model",
+    "baseUrl",
+    "apiMode",
+    "providerLabel",
+    "providerId",
+    "name",
+  ]);
+  const mergedRaw: UnknownRecord = { ...primary.raw };
+  const keys = new Set(group.flatMap((row) => Object.keys(row.raw)));
+  for (const key of keys) {
+    if (protectedKeys.has(key)) continue;
+    const values = group
+      .map((row) => row.raw[key])
+      .filter((value) => !emptyMetadata(value));
+    const unique = new Map(values.map((value) => [stableValue(value), value]));
+    if (unique.size > 1) return "metadata_conflict";
+    if (emptyMetadata(mergedRaw[key]) && values.length > 0) {
+      mergedRaw[key] = values[0];
+    }
+  }
+  const primaryName =
+    typeof primary.raw.name === "string" && primary.raw.name.trim()
+      ? primary.raw.name
+      : ordered.find(
+          (row) => typeof row.raw.name === "string" && row.raw.name.trim(),
+        )?.raw.name;
+  const nextRaw: UnknownRecord = {
+    ...mergedRaw,
+    ...(primaryName ? { name: primaryName } : {}),
+    baseUrl: provider.baseUrl,
+    providerId: provider.id,
+    providerLabel: provider.name,
+    createdAt: ordered[0].createdAt,
+  };
+  const next: StrictModelRecord = {
+    ...primary,
+    baseUrl: provider.baseUrl,
+    providerId: provider.id,
+    providerLabel: provider.name,
+    createdAt: ordered[0].createdAt,
+    raw: nextRaw,
+  };
+  const changed =
+    group.length > 1 ||
+    stableValue(primary.raw) !== stableValue(nextRaw) ||
+    primary.baseUrl !== provider.baseUrl ||
+    primary.providerId !== provider.id ||
+    primary.providerLabel !== provider.name;
+  return {
+    row: next,
+    changed,
+    absorbedRowIds: ordered.slice(1).map((row) => row.id),
+  };
 }
 
 /**

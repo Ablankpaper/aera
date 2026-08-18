@@ -138,14 +138,18 @@ function expectRepairRequired(
   expect(digests(snapshot)).toEqual(before);
 }
 
+function plannedModelBytes(result: ReturnType<Planner>): Buffer {
+  expect(result.status).toBe("repair");
+  if (result.status !== "repair") return Buffer.alloc(0);
+  const patch = result.patches.find((candidate) => candidate.role === "models");
+  expect(patch, "repair must include a models patch").toBeDefined();
+  return patch!.after;
+}
+
 function plannedModels(
   result: ReturnType<Planner>,
 ): Array<Record<string, unknown>> {
-  expect(result.status).toBe("repair");
-  if (result.status !== "repair") return [];
-  const patch = result.patches.find((candidate) => candidate.role === "models");
-  expect(patch, "repair must include a models patch").toBeDefined();
-  return JSON.parse(patch!.after.toString("utf8")) as Array<
+  return JSON.parse(plannedModelBytes(result).toString("utf8")) as Array<
     Record<string, unknown>
   >;
 }
@@ -309,7 +313,7 @@ describe("planModelRouteDirectoryRepair", () => {
 
     expect(result).toMatchObject({
       status: "repair",
-      absorbedRowIds: ["fixture-row-01"],
+      absorbedRowIds: [],
     });
     expect(plannedModels(result)[0]).toMatchObject({
       id: "fixture-row-01",
@@ -361,5 +365,151 @@ describe("planModelRouteDirectoryRepair", () => {
     });
     multiple.files.models = json(multipleRows);
     expectRepairRequired(multiple, "legacy_provider_ambiguous");
+  });
+
+  it("converges duplicate endpoints, retains unique stale models, and preserves metadata", () => {
+    const snapshot = validSnapshot();
+    const rows = JSON.parse(snapshot.files.models!.toString("utf8")) as Array<
+      Record<string, unknown>
+    >;
+    rows[0] = {
+      ...rows[0],
+      name: "Primary display name",
+      createdAt: 10,
+    };
+    rows.push({
+      ...rows[0],
+      id: "fixture-row-02",
+      name: "Secondary display name",
+      baseUrl: "https://legacy.fixture.invalid/v1",
+      createdAt: 20,
+      description: "retained optional metadata",
+    });
+    rows.push({
+      ...rows[0],
+      id: "fixture-row-unique",
+      model: "fixture-model-unique",
+      baseUrl: "https://legacy.fixture.invalid/v1",
+      createdAt: 30,
+    });
+    snapshot.files.models = json(rows);
+
+    const result = requirePlanner()(snapshot);
+    expect(result).toMatchObject({ status: "repair" });
+    if (result.status !== "repair") return;
+    expect(result.absorbedRowIds).toEqual(["fixture-row-02"]);
+    const repaired = plannedModels(result);
+    expect(repaired).toHaveLength(2);
+    expect(repaired[0]).toMatchObject({
+      id: "fixture-row-01",
+      createdAt: 10,
+      baseUrl: "https://current.fixture.invalid/v1",
+      description: "retained optional metadata",
+    });
+    expect(repaired[1]).toMatchObject({
+      id: "fixture-row-unique",
+      baseUrl: "https://current.fixture.invalid/v1",
+    });
+  });
+
+  it("selects the same survivor when duplicate rows arrive in reverse order", () => {
+    const rows = [
+      {
+        id: "fixture-row-01",
+        name: "Primary display name",
+        provider: "custom",
+        model: "fixture-model",
+        baseUrl: "https://current.fixture.invalid/v1",
+        apiMode: "chat_completions",
+        providerLabel: "Fixture",
+        providerId: "fixture-provider-01",
+        createdAt: 10,
+      },
+      {
+        id: "fixture-row-02",
+        name: "Secondary display name",
+        provider: "custom",
+        model: "fixture-model",
+        baseUrl: "https://legacy.fixture.invalid/v1",
+        apiMode: "chat_completions",
+        providerLabel: "Fixture",
+        providerId: "fixture-provider-01",
+        createdAt: 20,
+        description: "retained optional metadata",
+      },
+    ];
+    const forward = validSnapshot();
+    forward.files.models = json(rows);
+    const reverse = validSnapshot();
+    reverse.files.models = json([...rows].reverse());
+
+    const forwardResult = requirePlanner()(forward);
+    const reverseResult = requirePlanner()(reverse);
+
+    expect(plannedModelBytes(reverseResult)).toEqual(
+      plannedModelBytes(forwardResult),
+    );
+    expect(reverseResult).toMatchObject({
+      status: "repair",
+      absorbedRowIds: ["fixture-row-02"],
+    });
+  });
+
+  it("keeps same-name models belonging to different stable providers separate", () => {
+    const snapshot = validSnapshot();
+    snapshot.files.providers = json({
+      version: 1,
+      providers: [
+        {
+          id: "fixture-provider-01",
+          name: "Fixture",
+          baseUrl: "https://current.fixture.invalid/v1",
+          createdAt: 1,
+        },
+        {
+          id: "fixture-provider-02",
+          name: "Other",
+          baseUrl: "https://other.fixture.invalid/v1",
+          createdAt: 2,
+        },
+      ],
+    });
+    const rows = JSON.parse(snapshot.files.models!.toString("utf8")) as Array<
+      Record<string, unknown>
+    >;
+    rows.push({
+      ...rows[0],
+      id: "fixture-row-other",
+      providerId: "fixture-provider-02",
+      providerLabel: "Other",
+      baseUrl: "https://old-other.fixture.invalid/v1",
+    });
+    snapshot.files.models = json(rows);
+
+    const result = requirePlanner()(snapshot);
+    expect(result).toMatchObject({ status: "repair" });
+    const repaired = plannedModels(result);
+    expect(repaired).toHaveLength(2);
+    expect(repaired.map((row) => row.providerId).sort()).toEqual([
+      "fixture-provider-01",
+      "fixture-provider-02",
+    ]);
+  });
+
+  it("refuses conflicting non-empty metadata instead of choosing one silently", () => {
+    const snapshot = validSnapshot();
+    const rows = JSON.parse(snapshot.files.models!.toString("utf8")) as Array<
+      Record<string, unknown>
+    >;
+    rows.push({
+      ...rows[0],
+      id: "fixture-row-conflict",
+      baseUrl: "https://legacy.fixture.invalid/v1",
+      description: "different metadata",
+      createdAt: 20,
+    });
+    rows[0].description = "original metadata";
+    snapshot.files.models = json(rows);
+    expectRepairRequired(snapshot, "metadata_conflict");
   });
 });

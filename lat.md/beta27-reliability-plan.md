@@ -48,6 +48,10 @@ The fixture preserves the capture's counts, duplicate endpoints, one unrelated r
 
 [[src/main/model-configuration-reconciler.ts#planModelRouteDirectoryRepair]] parses one in-memory five-file snapshot and either returns deterministic patches or a fail-closed repair code; it never reads disk, resolves secret values, writes files, or opens the operation journal.
 
+### Stable provider endpoint updates
+
+[[src/main/models.ts#planAddModel]] retains Hermes endpoint-distinct append behavior for legacy rows, while a stable provider id makes the endpoint mutable within one provider, model, and protocol group so endpoint changes replace and converge only that owned group.
+
 ### Managed lock order is deterministic
 
 Mixed model mutations acquire the global catalog before stable-sorted, unique Profile locks, and a nested Profile-to-global acquisition fails before its callback runs.
