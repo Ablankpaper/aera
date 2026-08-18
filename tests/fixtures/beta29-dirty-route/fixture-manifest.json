@@ -12,7 +12,7 @@
     "rolledBackOperations": 1
   },
   "files": {
-    ".env.redacted": "3e65f1fb8a21bfe96d061f45e1457e1b274a59424bd6eaa6f1336296a31c0de8",
+    "env.redacted": "3e65f1fb8a21bfe96d061f45e1457e1b274a59424bd6eaa6f1336296a31c0de8",
     "providers.json": "c01a05e559f97ddba8501f2ab9d926ed0e528b0cc5d7f9f5b5dd567b0394334c",
     "models.json": "36dc92528689412bfbd4374e580506a4033a38d2766f4b3934680604141976ac",
     "model-definitions.json": "c918d6d84f710a98097def18bf3e27a41b3e5e2aca24e4e1708cdc839d0464bc",

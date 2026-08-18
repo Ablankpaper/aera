@@ -14,7 +14,7 @@ const FIXTURE_ROOT = join(
 );
 
 const DATA_FILES = [
-  ".env.redacted",
+  "env.redacted",
   "providers.json",
   "models.json",
   "model-definitions.json",
@@ -213,7 +213,7 @@ describe("Beta.29 dirty-route fixture", () => {
       ),
     ).toBe(false);
 
-    expect(readFixture(".env.redacted").toString("utf8")).toBe(
+    expect(readFixture("env.redacted").toString("utf8")).toBe(
       "CUSTOM_PROVIDER_FIXTURE_KEY=<redacted>\n",
     );
     const allFixtureText = DATA_FILES.map((name) =>
@@ -231,7 +231,7 @@ describe("Beta.29 dirty-route fixture", () => {
       expectedOwnerHandle: "fixture-owner",
       incompleteOperation: false,
       files: {
-        env: readFixture(".env.redacted"),
+        env: readFixture("env.redacted"),
         providers: readFixture("providers.json"),
         models: readFixture("models.json"),
         modelDefinitions: readFixture("model-definitions.json"),
