@@ -602,6 +602,56 @@ describe("ModelConfigurationCoordinator", () => {
     expect(fixture.adapter.getActiveRouteKey("account")).toBe(OLD_ROUTE);
   });
 
+  it("notifies consumers only after a verified rollback is terminal", async () => {
+    const fixture = makeFixture();
+    const before = fixture.snapshotBytes();
+    fixture.adapter.failAt = "provider";
+    let stateWhenNotified: string | null = null;
+    let bytesWhenNotified: Record<string, string | null> | null = null;
+    const notifyRolledBack = vi.fn(() => {
+      stateWhenNotified =
+        fixture.store.get("10000000-0000-4000-8000-000000000001")?.state ??
+        null;
+      bytesWhenNotified = fixture.snapshotBytes();
+    });
+
+    const result = await subject(fixture, { notifyRolledBack }).mutate(
+      request(),
+    );
+
+    expect(result).toMatchObject({
+      status: "rejected",
+      stage: "provider",
+      rollback: "restored",
+    });
+    expect(notifyRolledBack).toHaveBeenCalledOnce();
+    expect(stateWhenNotified).toBe("rolled_back");
+    expect(bytesWhenNotified).toEqual(before);
+  });
+
+  it("keeps the verified rolled_back state when notification fails", async () => {
+    const fixture = makeFixture();
+    fixture.adapter.failAt = "provider";
+    const notifyRolledBack = vi.fn(() => {
+      throw new Error("runtime refresh unavailable");
+    });
+
+    const result = await subject(fixture, { notifyRolledBack }).mutate(
+      request(),
+    );
+
+    expect(result).toMatchObject({
+      status: "rejected",
+      stage: "provider",
+      rollback: "restored",
+      rollbackWarning: "model_rollback_refresh_failed",
+    });
+    expect(fixture.store.listIncomplete()).toEqual([]);
+    expect(
+      fixture.store.get("10000000-0000-4000-8000-000000000001")?.state,
+    ).toBe("rolled_back");
+  });
+
   it("reports committed_refresh_warning after authoritative commit", async () => {
     const fixture = makeFixture();
     const before = fixture.snapshotBytes();
@@ -615,6 +665,151 @@ describe("ModelConfigurationCoordinator", () => {
     });
     expect(fixture.adapter.getActiveRouteKey("account")).toBe(NEW_ROUTE);
     expect(fixture.snapshotBytes()).not.toEqual(before);
+  });
+
+  it("creates the journal before backups and any managed-file write", async () => {
+    const fixture = makeFixture();
+    const events: string[] = [];
+    const originalBegin = fixture.store.begin.bind(fixture.store);
+    const begin = vi
+      .spyOn(fixture.store, "begin")
+      .mockImplementation((input) => {
+        events.push("begin");
+        return originalBegin(input);
+      });
+    const originalPersist = persistModelConfigurationBackups;
+    const originalPrepare = fixture.adapter.prepare.getMockImplementation()!;
+    fixture.adapter.prepare.mockImplementation(async (input, context) => {
+      const prepared = await originalPrepare(input, context);
+      const originalApply = prepared.applyStage;
+      prepared.applyStage = async (stage, permit) => {
+        events.push(`write:${stage}`);
+        return originalApply(stage, permit);
+      };
+      return prepared;
+    });
+    const coordinator = subject(fixture, {
+      fileAdapter: {
+        paths: () => fixture.paths,
+        capture: async (input) => {
+          events.push("capture");
+          return captureModelConfigurationFiles(input);
+        },
+        persistBackups: async (snapshot) => {
+          events.push("backup");
+          originalPersist(snapshot);
+        },
+        restore: async (snapshot) => {
+          const { restoreModelConfigurationFiles } = await import(
+            "./model-configuration-operation-store"
+          );
+          restoreModelConfigurationFiles(snapshot);
+        },
+        removeBackups: async (snapshot) => {
+          const { removeModelConfigurationBackups } = await import(
+            "./model-configuration-operation-store"
+          );
+          removeModelConfigurationBackups(snapshot);
+        },
+        readDigests: readModelConfigurationFileDigests,
+      },
+    });
+
+    const result = await coordinator.mutate(request());
+
+    expect(result).toMatchObject({ status: "committed" });
+    expect(events.slice(0, 4)).toEqual([
+      "capture",
+      "begin",
+      "backup",
+      "write:credential",
+    ]);
+    expect(begin).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a recoverable journal when backup creation is partial", async () => {
+    const fixture = makeFixture();
+    const before = fixture.snapshotBytes();
+    let failBackup = true;
+    const coordinator = subject(fixture, {
+      fileAdapter: {
+        paths: () => fixture.paths,
+        capture: captureModelConfigurationFiles,
+        persistBackups: async (snapshot) => {
+          if (failBackup) {
+            const env = snapshot.files.env;
+            mkdirSync(dirname(env.backupPath), { recursive: true });
+            writeFileSync(env.backupPath, env.bytes);
+            throw new Error("injected partial backup failure");
+          }
+          persistModelConfigurationBackups(snapshot);
+        },
+        restore: async (snapshot) => {
+          const { restoreModelConfigurationFiles } = await import(
+            "./model-configuration-operation-store"
+          );
+          restoreModelConfigurationFiles(snapshot);
+        },
+        removeBackups: async (snapshot) => {
+          const { removeModelConfigurationBackups } = await import(
+            "./model-configuration-operation-store"
+          );
+          removeModelConfigurationBackups(snapshot);
+        },
+        readDigests: readModelConfigurationFileDigests,
+      },
+    });
+
+    const failed = await coordinator.mutate(request());
+
+    expect(failed).toMatchObject({
+      status: "rejected",
+      stage: "recovery",
+      code: "model_configuration_recovery_required",
+      rollback: "recovery_required",
+    });
+    expect(fixture.snapshotBytes()).toEqual(before);
+    expect(fixture.store.listIncomplete()).toHaveLength(1);
+    const incomplete = fixture.store.listIncomplete()[0];
+    expect(incomplete.state).toBe("recovery_required");
+    const partialBackup = `${fixture.paths.env}.aera-model-config-backup.${incomplete.operationId}`;
+
+    failBackup = false;
+    await coordinator.recoverIncompleteOperations();
+
+    expect(fixture.snapshotBytes()).toEqual(before);
+    expect(fixture.store.listIncomplete()).toEqual([]);
+    expect(existsSync(partialBackup)).toBe(false);
+  });
+
+  it("keeps a committed terminal row when backup cleanup fails", async () => {
+    const fixture = makeFixture();
+    const coordinator = subject(fixture, {
+      fileAdapter: {
+        paths: () => fixture.paths,
+        capture: captureModelConfigurationFiles,
+        persistBackups: persistModelConfigurationBackups,
+        restore: async (snapshot) => {
+          const { restoreModelConfigurationFiles } = await import(
+            "./model-configuration-operation-store"
+          );
+          restoreModelConfigurationFiles(snapshot);
+        },
+        removeBackups: async () => {
+          throw new Error("injected cleanup failure");
+        },
+        readDigests: readModelConfigurationFileDigests,
+      },
+    });
+
+    const result = await coordinator.mutate(request());
+
+    expect(result).toMatchObject({ status: "committed" });
+    expect(fixture.store.listIncomplete()).toEqual([]);
+    expect(
+      fixture.store.get("10000000-0000-4000-8000-000000000001")?.state,
+    ).toBe("committed");
+    expect(fixture.adapter.getActiveRouteKey("account")).toBe(NEW_ROUTE);
   });
 
   it("rejects a stale revision before any write", async () => {
@@ -849,6 +1044,66 @@ describe("ModelConfigurationCoordinator", () => {
     await subject(fixture).recoverIncompleteOperations();
 
     expect(fixture.snapshotBytes()).toEqual(before);
+    expect(fixture.store.listIncomplete()).toEqual([]);
+  });
+
+  it("notifies consumers after cold recovery reaches rolled_back", async () => {
+    const fixture = makeFixture();
+    const before = fixture.snapshotBytes();
+    const operationId = "10000000-0000-4000-8000-000000000098";
+    const snapshot = captureModelConfigurationFiles({
+      profileId: "account",
+      operationId,
+      paths: fixture.paths,
+    });
+    fixture.store.begin({
+      operationId,
+      ownerHandle: OWNER,
+      profileId: "account",
+      oldRouteKey: OLD_ROUTE,
+      newRouteKey: NEW_ROUTE,
+      snapshot,
+    });
+    fixture.store.finish(operationId, "recovery_required");
+    let stateWhenNotified: string | null = null;
+    let bytesWhenNotified: Record<string, string | null> | null = null;
+    const notifyRolledBack = vi.fn(() => {
+      stateWhenNotified = fixture.store.require(operationId).state;
+      bytesWhenNotified = fixture.snapshotBytes();
+    });
+
+    await subject(fixture, { notifyRolledBack }).recoverIncompleteOperations();
+
+    expect(notifyRolledBack).toHaveBeenCalledOnce();
+    expect(stateWhenNotified).toBe("rolled_back");
+    expect(bytesWhenNotified).toEqual(before);
+    expect(fixture.store.listIncomplete()).toEqual([]);
+  });
+
+  it("does not relock cold recovery when its notification fails", async () => {
+    const fixture = makeFixture();
+    const operationId = "10000000-0000-4000-8000-000000000097";
+    const snapshot = captureModelConfigurationFiles({
+      profileId: "account",
+      operationId,
+      paths: fixture.paths,
+    });
+    fixture.store.begin({
+      operationId,
+      ownerHandle: OWNER,
+      profileId: "account",
+      oldRouteKey: OLD_ROUTE,
+      newRouteKey: NEW_ROUTE,
+      snapshot,
+    });
+    fixture.store.finish(operationId, "recovery_required");
+    const notifyRolledBack = vi.fn(() => {
+      throw new Error("injected cold refresh failure");
+    });
+
+    await subject(fixture, { notifyRolledBack }).recoverIncompleteOperations();
+
+    expect(fixture.store.require(operationId).state).toBe("rolled_back");
     expect(fixture.store.listIncomplete()).toEqual([]);
   });
 

@@ -440,20 +440,99 @@ export function captureModelConfigurationFiles(input: {
   };
 }
 
-function writeExclusive(path: string, bytes: Buffer, mode: number): void {
+/**
+ * Platform boundary for replacing one managed file. The journal is the
+ * recovery authority, but the file/parent flushes close the normal crash
+ * window on POSIX. Windows does not expose a portable directory-fsync
+ * primitive through Node, so its adapter deliberately leaves flushParent as a
+ * documented no-op and relies on the journal during restart recovery.
+ */
+export interface DurableReplaceAdapter {
+  writeTemporary(path: string, bytes: Buffer, mode: number): string;
+  replace(temporaryPath: string, targetPath: string): void;
+  flushTarget(targetPath: string): void;
+  flushParent(parentPath: string): void;
+}
+
+function temporaryPathFor(path: string): string {
+  return join(
+    dirname(path),
+    `.${basename(path)}.${process.pid}.${Date.now()}.${Math.random()
+      .toString(16)
+      .slice(2)}.model-config.tmp`,
+  );
+}
+
+function writeDurableTemporary(
+  path: string,
+  bytes: Buffer,
+  mode: number,
+): string {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const descriptor = openSync(path, "wx", mode);
+  const temporaryPath = temporaryPathFor(path);
+  const descriptor = openSync(temporaryPath, "wx", mode || 0o600);
   try {
     writeFileSync(descriptor, bytes);
+    fsyncSync(descriptor);
+  } catch (error) {
+    try {
+      unlinkSync(temporaryPath);
+    } catch {
+      // Preserve the original write error.
+    }
+    throw error;
+  } finally {
+    closeSync(descriptor);
+  }
+  chmodSync(temporaryPath, mode || 0o600);
+  return temporaryPath;
+}
+
+function replaceDurableTemporary(
+  temporaryPath: string,
+  targetPath: string,
+): void {
+  try {
+    renameSync(temporaryPath, targetPath);
+  } catch (error) {
+    // Node's rename can reject an existing target on Windows. Keep the
+    // fallback narrowly scoped to the resolved target; callers still verify
+    // bytes and the durable journal on restart.
+    if (process.platform !== "win32" || !existsSync(targetPath)) throw error;
+    unlinkSync(targetPath);
+    renameSync(temporaryPath, targetPath);
+  }
+}
+
+function flushDurableTarget(path: string): void {
+  const descriptor = openSync(path, "r");
+  try {
     fsyncSync(descriptor);
   } finally {
     closeSync(descriptor);
   }
-  chmodSync(path, mode);
 }
+
+function flushDurableParent(path: string): void {
+  if (process.platform === "win32") return;
+  const descriptor = openSync(path, "r");
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+export const defaultDurableReplaceAdapter: DurableReplaceAdapter = {
+  writeTemporary: writeDurableTemporary,
+  replace: replaceDurableTemporary,
+  flushTarget: flushDurableTarget,
+  flushParent: flushDurableParent,
+};
 
 export function persistModelConfigurationBackups(
   snapshot: ModelConfigurationFilesSnapshot,
+  adapter: DurableReplaceAdapter = defaultDurableReplaceAdapter,
 ): void {
   for (const role of FILE_ROLES) {
     const file = snapshot.files[role];
@@ -464,20 +543,49 @@ export function persistModelConfigurationBackups(
       }
       continue;
     }
-    writeExclusive(file.backupPath, file.bytes, 0o600);
+    const temporaryPath = adapter.writeTemporary(
+      file.backupPath,
+      file.bytes,
+      0o600,
+    );
+    try {
+      // A concurrent writer may have created the evidence after the initial
+      // check. Never overwrite a backup whose digest we did not capture.
+      if (existsSync(file.backupPath)) {
+        if (digest(readFileSync(file.backupPath)) !== file.digest) {
+          throw new Error("Model configuration backup digest mismatch.");
+        }
+        unlinkSync(temporaryPath);
+        continue;
+      }
+      adapter.replace(temporaryPath, file.backupPath);
+      adapter.flushTarget(file.backupPath);
+      adapter.flushParent(dirname(file.backupPath));
+    } catch (error) {
+      if (existsSync(temporaryPath)) {
+        try {
+          unlinkSync(temporaryPath);
+        } catch {
+          // Preserve the original backup error.
+        }
+      }
+      throw error;
+    }
   }
 }
 
-function atomicWriteBytes(path: string, bytes: Buffer, mode: number): void {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const temporary = join(
-    dirname(path),
-    `.${basename(path)}.${process.pid}.${Date.now()}.model-config.tmp`,
-  );
-  writeExclusive(temporary, bytes, mode || 0o600);
+function atomicWriteBytes(
+  path: string,
+  bytes: Buffer,
+  mode: number,
+  adapter: DurableReplaceAdapter,
+): void {
+  const temporary = adapter.writeTemporary(path, bytes, mode || 0o600);
   try {
-    renameSync(temporary, path);
+    adapter.replace(temporary, path);
     chmodSync(path, mode || 0o600);
+    adapter.flushTarget(path);
+    adapter.flushParent(dirname(path));
   } catch (error) {
     if (existsSync(temporary)) unlinkSync(temporary);
     throw error;
@@ -486,6 +594,7 @@ function atomicWriteBytes(path: string, bytes: Buffer, mode: number): void {
 
 export function restoreModelConfigurationFiles(
   snapshot: ModelConfigurationFilesSnapshot,
+  adapter: DurableReplaceAdapter = defaultDurableReplaceAdapter,
 ): void {
   for (const role of [...FILE_ROLES].reverse()) {
     const file = snapshot.files[role];
@@ -500,7 +609,7 @@ export function restoreModelConfigurationFiles(
     if (digest(bytes) !== file.digest) {
       throw new Error("Model configuration backup digest mismatch.");
     }
-    atomicWriteBytes(file.path, bytes, file.mode);
+    atomicWriteBytes(file.path, bytes, file.mode, adapter);
   }
   for (const role of FILE_ROLES) {
     const file = snapshot.files[role];

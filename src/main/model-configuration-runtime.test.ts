@@ -34,6 +34,100 @@ afterEach(() => {
 });
 
 describe("model-configuration runtime", () => {
+  // @lat: [[beta27-reliability-plan#Recoverable model configuration#Staged Profile activation protects live state]]
+  it("recovers staged Profile activations before opening the model journal", async () => {
+    const root = mkdtempSync(join(tmpdir(), "aera-model-runtime-staged-"));
+    roots.push(root);
+    const hermesHome = join(root, "hermes");
+    const userData = join(root, "user-data");
+    mkdirSync(join(hermesHome, "profiles"), { recursive: true });
+    process.env.HERMES_HOME = hermesHome;
+    vi.resetModules();
+    vi.doUnmock("./installer");
+    const actualInstaller =
+      await vi.importActual<typeof import("./installer")>("./installer");
+    vi.doMock("./installer", () => actualInstaller);
+    const [{ AgenteraProfileBindingStore }, runtime, modelDatabase] =
+      await Promise.all([
+        import("./agentera-profile-binding"),
+        import("./model-configuration-runtime"),
+        import("./model-configuration-database"),
+      ]);
+    const bindings = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage: {
+        isEncryptionAvailable: () => true,
+        encryptString: (value: string) => Buffer.from(value, "utf8"),
+        decryptString: (value: Buffer) => value.toString("utf8"),
+      },
+    });
+    bindings.bindExistingProfile(hermesHome, OWNER);
+    const events: string[] = [];
+
+    const handle = await runtime.prepareModelConfigurationRuntime({
+      userDataPath: userData,
+      getOwner: () => OWNER,
+      profileBindings: bindings,
+      getConnectionConfig: () => ({ mode: "local" }),
+      recoverStagedProfileActivations: async ({ profilesRoot }) => {
+        expect(profilesRoot).toBe(join(hermesHome, "profiles"));
+        events.push("staged-recovery");
+      },
+      openDatabase: (path) => {
+        events.push("database-open");
+        return modelDatabase.openModelConfigurationDatabase(path, {
+          databaseFactory: (databasePath) =>
+            new DatabaseSync(
+              databasePath,
+            ) as unknown as ModelConfigurationSqliteDatabase,
+        });
+      },
+    });
+
+    try {
+      expect(handle.startupFailure).toBeNull();
+      expect(events.slice(0, 2)).toEqual(["staged-recovery", "database-open"]);
+    } finally {
+      handle.close();
+    }
+  });
+
+  it("fails model mutations closed when staged Profile recovery is ambiguous", async () => {
+    const root = mkdtempSync(join(tmpdir(), "aera-model-runtime-staged-"));
+    roots.push(root);
+    const hermesHome = join(root, "hermes");
+    const userData = join(root, "user-data");
+    mkdirSync(join(hermesHome, "profiles"), { recursive: true });
+    process.env.HERMES_HOME = hermesHome;
+    vi.resetModules();
+    vi.doUnmock("./installer");
+    const actualInstaller =
+      await vi.importActual<typeof import("./installer")>("./installer");
+    vi.doMock("./installer", () => actualInstaller);
+    const runtime = await import("./model-configuration-runtime");
+    const openDatabase = vi.fn();
+    const stagedFailure = new Error("ambiguous staged activation");
+
+    const handle = await runtime.prepareModelConfigurationRuntime({
+      userDataPath: userData,
+      getOwner: () => OWNER,
+      profileBindings: { verifyProfileBinding: vi.fn() },
+      getConnectionConfig: () => ({ mode: "local" }),
+      recoverStagedProfileActivations: async () => {
+        throw stagedFailure;
+      },
+      openDatabase,
+    });
+
+    expect(handle.database).toBeNull();
+    expect(handle.coordinator).toBeNull();
+    expect(handle.startupFailure).toMatchObject({
+      code: "model_configuration_recovery_required",
+    });
+    expect(handle.recoveryError).toBe(stagedFailure);
+    expect(openDatabase).not.toHaveBeenCalled();
+  });
+
   // @lat: [[beta27-reliability-plan#Recoverable model configuration#Explicit model catalog initialization]]
   it("initializes a missing model catalog once before exposing the coordinator", async () => {
     const root = mkdtempSync(join(tmpdir(), "aera-model-runtime-initialize-"));
@@ -143,20 +237,36 @@ describe("model-configuration runtime", () => {
       listResolvedAgentRuntimeModelRoutes: vi.fn(() => []),
     }));
 
-    const [{ AgenteraProfileBindingStore }, runtime, config, modelDatabase] =
-      await Promise.all([
-        import("./agentera-profile-binding"),
-        import("./model-configuration-runtime"),
-        import("./config"),
-        import("./model-configuration-database"),
-      ]);
-    config.setModelConfig(
-      "custom:old",
-      "old-model",
-      "https://old.invalid/v1",
-      "default",
-      null,
-      "chat_completions",
+    const [
+      { AgenteraProfileBindingStore },
+      runtime,
+      config,
+      modelDatabase,
+      managed,
+      authority,
+    ] = await Promise.all([
+      import("./agentera-profile-binding"),
+      import("./model-configuration-runtime"),
+      import("./config"),
+      import("./model-configuration-database"),
+      import("./model-configuration-managed-files"),
+      import("./model-configuration-write-authority"),
+    ]);
+    managed.registerManagedModelFileRoots({
+      globalRoot: hermesHome,
+      profiles: { default: hermesHome },
+    });
+    await new authority.ModelConfigurationWriteAuthority().run(
+      { globalCatalog: false, profileIds: ["default"] },
+      () =>
+        config.setModelConfig(
+          "custom:old",
+          "old-model",
+          "https://old.invalid/v1",
+          "default",
+          null,
+          "chat_completions",
+        ),
     );
     const beforeConfig = readFileSync(join(hermesHome, "config.yaml"), "utf8");
     const bindings = new AgenteraProfileBindingStore({
@@ -168,11 +278,19 @@ describe("model-configuration runtime", () => {
       },
     });
     bindings.bindExistingProfile(hermesHome, OWNER);
+    const notifyModelLibraryChanged = vi.fn();
+    const notifyCustomProvidersChanged = vi.fn();
+    const notifyConnectionConfigChanged = vi.fn();
+    const notifyRuntimeSnapshotChanged = vi.fn();
     const handle = await runtime.prepareModelConfigurationRuntime({
       userDataPath: userData,
       getOwner: () => OWNER,
       profileBindings: bindings,
       getConnectionConfig: () => ({ mode: "local" }),
+      notifyModelLibraryChanged,
+      notifyCustomProvidersChanged,
+      notifyConnectionConfigChanged,
+      notifyRuntimeSnapshotChanged,
       openDatabase: (path) =>
         modelDatabase.openModelConfigurationDatabase(path, {
           databaseFactory: (databasePath) =>
@@ -211,6 +329,17 @@ describe("model-configuration runtime", () => {
         model: "old-model",
       });
       expect(handle.operationStore!.listIncomplete()).toEqual([]);
+      for (const listener of [
+        notifyModelLibraryChanged,
+        notifyCustomProvidersChanged,
+        notifyConnectionConfigChanged,
+        notifyRuntimeSnapshotChanged,
+      ]) {
+        expect(listener).toHaveBeenCalledOnce();
+        expect(listener).toHaveBeenCalledWith(
+          expect.stringMatching(/^[0-9a-f]{64}$/),
+        );
+      }
     } finally {
       handle.close();
     }

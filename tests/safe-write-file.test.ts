@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, readFileSync, readdirSync } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { safeWriteFile } from "../src/main/utils";
@@ -28,5 +36,41 @@ describe("safeWriteFile", () => {
     expect(readdirSync(dir).filter((name) => name.endsWith(".tmp"))).toEqual(
       [],
     );
+  });
+
+  it("flushes the temporary file, target, and parent after replacement", () => {
+    const dir = join(TEST_DIR, "durable");
+    const filePath = join(dir, "config.yaml");
+    mkdirSync(dir, { recursive: true });
+    const events: string[] = [];
+    const adapter = {
+      writeTemporary(target: string, content: string | Uint8Array): string {
+        const temporary = `${target}.injected-temp`;
+        events.push(`write:${target}`);
+        writeFileSync(temporary, content);
+        return temporary;
+      },
+      replace(temporary: string, target: string): void {
+        events.push(`replace:${target}`);
+        rmSync(target, { force: true });
+        renameSync(temporary, target);
+      },
+      flushTarget(target: string): void {
+        events.push(`flush-target:${target}`);
+      },
+      flushParent(parent: string): void {
+        events.push(`flush-parent:${parent}`);
+      },
+    };
+
+    safeWriteFile(filePath, "durable\n", undefined, adapter);
+
+    expect(readFileSync(filePath, "utf8")).toBe("durable\n");
+    expect(events).toEqual([
+      `write:${filePath}`,
+      `replace:${filePath}`,
+      `flush-target:${filePath}`,
+      `flush-parent:${dir}`,
+    ]);
   });
 });

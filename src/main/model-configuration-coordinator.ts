@@ -181,6 +181,12 @@ export interface ModelConfigurationCoordinatorDependencies {
     profileId: string,
   ) => Awaitable<boolean>;
   writeAuthority?: ModelConfigurationWriteAuthority;
+  /**
+   * Runs only after a rollback has restored and verified all managed bytes and
+   * the journal is terminal. A notification failure degrades presentation but
+   * must never reclassify the operation as recovery-required.
+   */
+  notifyRolledBack?: () => Awaitable<void>;
 }
 
 const DEFAULT_FILE_ADAPTER: ModelConfigurationFileAdapter = {
@@ -459,6 +465,7 @@ export class ModelConfigurationCoordinator {
     profileId: string,
   ) => Awaitable<boolean>;
   private readonly writeAuthority: ModelConfigurationWriteAuthority;
+  private readonly notifyRolledBack: (() => Awaitable<void>) | undefined;
   private readonly locks = new Map<string, Promise<void>>();
   private readonly recoveryRequired = new Set<string>();
 
@@ -472,6 +479,7 @@ export class ModelConfigurationCoordinator {
     this.isProfileOwned = dependencies.isProfileOwned ?? (() => true);
     this.writeAuthority =
       dependencies.writeAuthority ?? defaultModelConfigurationWriteAuthority;
+    this.notifyRolledBack = dependencies.notifyRolledBack;
   }
 
   async mutate(
@@ -851,6 +859,7 @@ export class ModelConfigurationCoordinator {
                 this.operationStore.finish(record.operationId, "rolled_back");
                 await this.removeBackupsSafely(snapshot);
                 this.recoveryRequired.delete(lockKey);
+                await this.notifyRolledBackOrLog();
                 return;
               }
 
@@ -870,6 +879,7 @@ export class ModelConfigurationCoordinator {
               this.operationStore.finish(record.operationId, "rolled_back");
               await this.removeBackupsSafely(snapshot);
               this.recoveryRequired.delete(lockKey);
+              await this.notifyRolledBackOrLog();
             } catch {
               try {
                 this.operationStore.finish(record.operationId, "recovery_required");
@@ -910,14 +920,14 @@ export class ModelConfigurationCoordinator {
   ): Promise<ModelConfigurationMutationResult> {
     const operationId = this.operationId();
     const paths = this.files.paths(targetProfileId);
-    let snapshot: ModelConfigurationFilesSnapshot;
+    let snapshot: ModelConfigurationFilesSnapshot | undefined;
+    let journalStarted = false;
     try {
       snapshot = await this.files.capture({
         profileId: targetProfileId,
         operationId,
         paths,
       });
-      await this.files.persistBackups(snapshot);
       this.operationStore.begin({
         operationId,
         ownerHandle,
@@ -926,8 +936,25 @@ export class ModelConfigurationCoordinator {
         newRouteKey: prepared.newRouteKey,
         snapshot,
       });
+      journalStarted = true;
+      // The journal is the recovery authority. It must exist before any
+      // backup or managed byte is touched, so a crash in backup creation is
+      // represented by a recoverable prepared row rather than an orphaned
+      // filesystem artifact.
+      await this.files.persistBackups(snapshot);
     } catch {
-      if (snapshot!) await this.removeBackupsSafely(snapshot);
+      if (journalStarted) {
+        const lockKey = `${ownerHandle}\0${targetProfileId}`;
+        try {
+          this.operationStore.finish(operationId, "recovery_required");
+        } catch {
+          // Preserve the in-memory fail-closed lock if the journal itself is
+          // unavailable; startup will remain closed until it can be read.
+        }
+        this.recoveryRequired.add(lockKey);
+        return rejected("recovery", "recovery_required", true);
+      }
+      if (snapshot) await this.removeBackupsSafely(snapshot);
       return rejected("validation", "not_needed");
     }
 
@@ -1024,7 +1051,12 @@ export class ModelConfigurationCoordinator {
       ) {
         this.operationStore.finish(operationId, "rolled_back");
         await this.removeBackupsSafely(snapshot);
-        return rejected(failedStage, "not_needed");
+        this.recoveryRequired.delete(lockKey);
+        const rollbackWarning = await this.notifyRolledBackSafely();
+        return {
+          ...rejected(failedStage, "not_needed"),
+          ...(rollbackWarning ? { rollbackWarning } : {}),
+        };
       }
 
       await this.files.restore(snapshot);
@@ -1041,7 +1073,11 @@ export class ModelConfigurationCoordinator {
       this.operationStore.finish(operationId, "rolled_back");
       await this.removeBackupsSafely(snapshot);
       this.recoveryRequired.delete(lockKey);
-      return rejected(failedStage, "restored");
+      const rollbackWarning = await this.notifyRolledBackSafely();
+      return {
+        ...rejected(failedStage, "restored"),
+        ...(rollbackWarning ? { rollbackWarning } : {}),
+      };
     } catch {
       try {
         this.operationStore.finish(operationId, "recovery_required");
@@ -1131,6 +1167,26 @@ export class ModelConfigurationCoordinator {
     } catch {
       // A verified terminal product state is not reclassified as a failed save
       // solely because restrictive sibling evidence could not yet be removed.
+    }
+  }
+
+  private async notifyRolledBackSafely(): Promise<
+    "model_rollback_refresh_failed" | undefined
+  > {
+    if (!this.notifyRolledBack) return undefined;
+    try {
+      await this.notifyRolledBack();
+      return undefined;
+    } catch {
+      return "model_rollback_refresh_failed";
+    }
+  }
+
+  private async notifyRolledBackOrLog(): Promise<void> {
+    if (await this.notifyRolledBackSafely()) {
+      console.error(
+        "[MODEL_CONFIGURATION] rollback refresh notification failed",
+      );
     }
   }
 

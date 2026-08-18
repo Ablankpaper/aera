@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -153,5 +154,51 @@ describe("ModelConfigurationOperationStore", () => {
         existsSync(backupPath),
       ),
     ).toBe(false);
+  });
+
+  it("uses the durable replace protocol for every restored managed file", () => {
+    const { paths, root } = fixture();
+    const original = Buffer.from("model:\n  provider: openai\n", "utf8");
+    writeFileSync(paths.config, original, { mode: 0o640 });
+    const snapshot = captureModelConfigurationFiles({
+      profileId: "default",
+      operationId: OPERATION_ID,
+      paths,
+    });
+    persistModelConfigurationBackups(snapshot);
+    writeFileSync(paths.config, "model:\n  provider: broken\n");
+
+    const events: string[] = [];
+    const adapter = {
+      writeTemporary(target: string, bytes: Buffer, mode: number): string {
+        const temporary = `${target}.injected-temp`;
+        events.push(`write:${target}`);
+        writeFileSync(temporary, bytes, { mode });
+        return temporary;
+      },
+      replace(temporary: string, target: string): void {
+        events.push(`replace:${target}`);
+        rmSync(target, { force: true });
+        // The injected adapter intentionally models a same-volume replace;
+        // the production adapter supplies the platform-specific primitive.
+        renameSync(temporary, target);
+      },
+      flushTarget(target: string): void {
+        events.push(`flush-target:${target}`);
+      },
+      flushParent(parent: string): void {
+        events.push(`flush-parent:${parent}`);
+      },
+    };
+
+    restoreModelConfigurationFiles(snapshot, adapter);
+
+    expect(readFileSync(paths.config)).toEqual(original);
+    expect(events).toEqual([
+      `write:${paths.config}`,
+      `replace:${paths.config}`,
+      `flush-target:${paths.config}`,
+      `flush-parent:${join(root, "hermes", "profiles", "default")}`,
+    ]);
   });
 });

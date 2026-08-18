@@ -87,6 +87,9 @@ import {
   type ModelConfigurationDatabase,
 } from "./model-configuration-database";
 import { registerManagedModelFileRoots } from "./model-configuration-managed-files";
+import {
+  recoverStagedProfileActivations as recoverStagedProfileActivationJournal,
+} from "./model-configuration-staged-profile";
 
 /** Minimal connection shape needed to fail closed for remote/SSH writes. */
 export interface ModelConfigurationRuntimeConnection {
@@ -105,6 +108,7 @@ export interface ModelConfigurationRuntimeOptions {
   notifyModelLibraryChanged?: (catalogRevision?: string) => void;
   notifyCustomProvidersChanged?: (catalogRevision?: string) => void;
   openDatabase?: typeof openModelConfigurationDatabase;
+  recoverStagedProfileActivations?: typeof recoverStagedProfileActivationJournal;
 }
 
 export interface ModelConfigurationRuntimeHandle {
@@ -772,44 +776,86 @@ export async function prepareModelConfigurationRuntime(
   let unavailable: ModelConfigurationStartupFailure | null = null;
 
   try {
-    registerManagedModelFileRoots({
-      globalRoot: HERMES_HOME,
-      profiles: Object.fromEntries(
-        profileIdsSync().map((profileId) => [
-          profileId,
-          profileHome(profileId),
-        ]),
-      ),
-    });
-    catalog = createCatalog(options);
-    database = (options.openDatabase ?? openModelConfigurationDatabase)(
-      options.userDataPath,
-    );
-    operationStore = new ModelConfigurationOperationStore(database);
-    mutationAdapter = createMutationAdapter(options, catalog);
-    coordinator = new ModelConfigurationCoordinator({
-      catalog,
-      ownerHandle: () => runtimeComponentKey(options.getOwner()),
-      operationStore,
-      mutationAdapter,
-      isProfileOwned: (ownerHandle, profileId) => {
-        const owner = ownerFromComponentKey(ownerHandle);
-        if (!owner) return false;
-        try {
-          options.profileBindings.verifyProfileBinding(
-            profileHome(profileId),
-            owner,
-          );
-          return true;
-        } catch {
-          return false;
-        }
-      },
+    await (
+      options.recoverStagedProfileActivations ??
+      recoverStagedProfileActivationJournal
+    )({
+      profilesRoot: join(HERMES_HOME, "profiles"),
     });
   } catch (error) {
     recoveryError = error;
-    unavailable = startupFailure(initializationFailureCode(error));
-    coordinator = null;
+    unavailable = startupFailure("model_configuration_recovery_required");
+  }
+
+  if (unavailable === null) {
+    try {
+      registerManagedModelFileRoots({
+        globalRoot: HERMES_HOME,
+        profiles: Object.fromEntries(
+          profileIdsSync().map((profileId) => [
+            profileId,
+            profileHome(profileId),
+          ]),
+        ),
+      });
+      catalog = createCatalog(options);
+      database = (options.openDatabase ?? openModelConfigurationDatabase)(
+        options.userDataPath,
+      );
+      operationStore = new ModelConfigurationOperationStore(database);
+      mutationAdapter = createMutationAdapter(options, catalog);
+      coordinator = new ModelConfigurationCoordinator({
+        catalog,
+        ownerHandle: () => runtimeComponentKey(options.getOwner()),
+        operationStore,
+        mutationAdapter,
+        isProfileOwned: (ownerHandle, profileId) => {
+          const owner = ownerFromComponentKey(ownerHandle);
+          if (!owner) return false;
+          try {
+            options.profileBindings.verifyProfileBinding(
+              profileHome(profileId),
+              owner,
+            );
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        // A rollback is authoritative only after all five bytes and the
+        // journal have been verified. Notify every in-memory consumer even if
+        // one listener fails; the coordinator records a presentation warning
+        // without reopening the recovery lock.
+        notifyRolledBack: () => {
+          let revision: string | undefined;
+          const failures: unknown[] = [];
+          try {
+            revision = catalog!.snapshot(getActiveProfileNameSync()).revision;
+          } catch (error) {
+            failures.push(error);
+          }
+          const listeners = [
+            options.notifyModelLibraryChanged,
+            options.notifyCustomProvidersChanged,
+            options.notifyConnectionConfigChanged,
+            options.notifyRuntimeSnapshotChanged,
+          ];
+          for (const listener of listeners) {
+            if (!listener) continue;
+            try {
+              listener(revision);
+            } catch (error) {
+              failures.push(error);
+            }
+          }
+          if (failures.length > 0) throw failures[0];
+        },
+      });
+    } catch (error) {
+      recoveryError = error;
+      unavailable = startupFailure(initializationFailureCode(error));
+      coordinator = null;
+    }
   }
 
   if (coordinator !== null) {
