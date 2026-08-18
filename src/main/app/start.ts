@@ -58,7 +58,9 @@ import {
 } from "../agentera-profile-binding";
 import {
   AgenteraConnectionOwnerStore,
+  AgenteraOwnerTransitionError,
   createAgenteraOwnerSwitchCoordinator,
+  type AgenteraOwnerStopContext,
 } from "../agentera-connection-owner";
 import { createProductAccessGuard } from "../ipc/auth-guard";
 import { getActiveProfileNameSync, profileHome } from "../utils";
@@ -655,27 +657,17 @@ export async function startMainProcess(
       agenteraAgentControl?.notifyAgentContextChanged();
     }) ?? (() => undefined);
   const ownerSwitchCoordinator = createAgenteraOwnerSwitchCoordinator({
-    stopRuntimeContext: () => {
-      void stopActiveRuntimeContext().catch((error) => {
-        console.error(
-          "[AGENTERA_RUNTIME_OWNER_TRANSITION] cleanup failed",
-          error instanceof Error ? error.message : String(error),
-        );
-      });
+    stopRuntimeContext: (context) =>
+      stopActiveRuntimeContext({ ownerTransition: context }),
+    onEvent: ({ phase, epoch, diagnosticId }) => {
+      console.info(
+        `[AGENTERA_OWNER_TRANSITION] ${diagnosticId} ${epoch} ${phase}`,
+      );
     },
   });
+  let ownerTransitionQueue = Promise.resolve();
   let runtimeUpdateCheckedUserId: string | null = null;
   const unsubscribeAgenteraAuth = agenteraAuth.subscribe((state) => {
-    agenteraAgentControl?.notifyAccessStateChanged();
-    void agenteraWorkspace?.notifyAccessStateChanged();
-    void agenteraOrganization?.notifyAccessStateChanged();
-    void agenteraProductSpace?.notifyAccessStateChanged();
-    const qualityPrincipal = getOfficialQualityPrincipal();
-    agenteraOfficialQuality?.notifyPrincipalChanged(qualityPrincipal);
-    agenteraEncryptedBackup?.notifyPrincipalChanged();
-    if (state.status === "authenticated" && state.cloudAvailable) {
-      void agenteraOfficialQuality?.uploadPending();
-    }
     let runtimeOwnerId: string | null = null;
     if (hasAgenteraSignedInAccess(state)) {
       runtimeOwnerId = state.userId;
@@ -686,20 +678,57 @@ export async function startMainProcess(
         // Secure-storage failure stays unmounted and is surfaced by AuthGate.
       }
     }
-    ownerSwitchCoordinator.transitionTo(runtimeOwnerId);
-    if (
-      state.status === "authenticated" &&
-      state.cloudAvailable &&
-      runtimeDistribution !== null &&
-      runtimeUpdateCheckedUserId !== state.userId
-    ) {
-      runtimeUpdateCheckedUserId = state.userId;
-      void runtimeDistribution.check().catch(() => {
-        console.error("[AGENTERA_RUNTIME_UPDATE_CHECK] unavailable");
-      });
-    } else if (state.status !== "authenticated" && state.status !== "offline") {
-      runtimeUpdateCheckedUserId = null;
-    }
+    const transitionWork = ownerTransitionQueue.then(async () => {
+      let transitioned = false;
+      try {
+        await ownerSwitchCoordinator.transitionTo(runtimeOwnerId);
+        transitioned = true;
+      } catch (error) {
+        const code =
+          error instanceof AgenteraOwnerTransitionError
+            ? error.code
+            : "owner_transition_failed";
+        const diagnosticId =
+          error instanceof AgenteraOwnerTransitionError
+            ? (error.diagnosticId ?? "unknown")
+            : "unknown";
+        console.error(`[AGENTERA_OWNER_TRANSITION] ${diagnosticId} ${code}`);
+      }
+      if (!transitioned) return;
+
+      // Account-scoped managers and Runtime update checks must observe the
+      // newly mounted owner only after the old Runtime context has drained.
+      // Keeping these calls inside the transition queue prevents a late
+      // refresh from reopening the previous Profile while teardown is still
+      // in progress.
+      agenteraAgentControl?.notifyAccessStateChanged();
+      void agenteraWorkspace?.notifyAccessStateChanged();
+      void agenteraOrganization?.notifyAccessStateChanged();
+      void agenteraProductSpace?.notifyAccessStateChanged();
+      const qualityPrincipal = getOfficialQualityPrincipal();
+      agenteraOfficialQuality?.notifyPrincipalChanged(qualityPrincipal);
+      agenteraEncryptedBackup?.notifyPrincipalChanged();
+      if (state.status === "authenticated" && state.cloudAvailable) {
+        void agenteraOfficialQuality?.uploadPending();
+      }
+      if (
+        state.status === "authenticated" &&
+        state.cloudAvailable &&
+        runtimeDistribution !== null &&
+        runtimeUpdateCheckedUserId !== state.userId
+      ) {
+        runtimeUpdateCheckedUserId = state.userId;
+        void runtimeDistribution.check().catch(() => {
+          console.error("[AGENTERA_RUNTIME_UPDATE_CHECK] unavailable");
+        });
+      } else if (
+        state.status !== "authenticated" &&
+        state.status !== "offline"
+      ) {
+        runtimeUpdateCheckedUserId = null;
+      }
+    });
+    ownerTransitionQueue = transitionWork.catch(() => undefined);
     if (!mainWindow || mainWindow.isDestroyed()) return;
     mainWindow.webContents.send("agentera-auth-state-changed", state);
   });
@@ -747,6 +776,7 @@ export async function startMainProcess(
     modelConfigurationCoordinator: modelConfigurationRuntime.coordinator,
     modelConfigurationStartupFailure: modelConfigurationRuntime.startupFailure,
     ownerModelRouteCatalog: modelConfigurationRuntime.catalog,
+    ownerSwitchCoordinator,
   });
 
   setupUpdater({ getMainWindow: () => mainWindow });
@@ -836,22 +866,69 @@ export async function startMainProcess(
 export async function stopActiveRuntimeContext(
   options: {
     closeTuiGatewayPool?: boolean;
+    ownerTransition?: AgenteraOwnerStopContext;
   } = {},
 ): Promise<void> {
-  const tuiShutdown = stopAllTuiGatewayClients({
-    closePool: options.closeTuiGatewayPool,
-  });
+  const transition = options.ownerTransition;
+  const logCleanup = (
+    step: string,
+    phase: "begin" | "complete" | "failed",
+  ): void => {
+    if (!transition) return;
+    console.info(
+      `[AGENTERA_OWNER_TRANSITION] ${transition.diagnosticId} ${transition.epoch} cleanup_${step}_${phase}`,
+    );
+  };
+  const runCleanupStep = async <T>(
+    step: string,
+    operation: () => T | Promise<T>,
+  ): Promise<T> => {
+    logCleanup(step, "begin");
+    try {
+      const result = await operation();
+      logCleanup(step, "complete");
+      return result;
+    } catch (error) {
+      logCleanup(step, "failed");
+      throw error;
+    }
+  };
+
+  const tuiShutdown = runCleanupStep("tui", () =>
+    stopAllTuiGatewayClients({
+      closePool: options.closeTuiGatewayPool,
+    }),
+  );
   stopHealthPolling();
   runtimeActivity.abortAll();
+  // Aborting a run only signals its transport.  Do not tear down the
+  // owner-scoped stores or let the next owner mount until every run has
+  // released its activity lease; otherwise a late completion can still write
+  // into the newly mounted context.
+  await runCleanupStep("runtime_activity", () => runtimeActivity.waitForIdle());
   cleanupTempMediaFiles();
   stopAllDashboards();
   // A Profile or connection context must never remain mounted across an
   // Aera owner transition. Stop local execution, remote/SSH transport,
   // and cached SQLite access before the next owner can claim a context.
+  logCleanup("gateway", "begin");
   const gatewayShutdown = stopAeraOwnedGateways();
-  stopSshTunnel();
-  closeDbConnection();
-  const results = await Promise.allSettled([tuiShutdown, gatewayShutdown]);
+  const observedGatewayShutdown = gatewayShutdown.then(
+    (result) => {
+      logCleanup("gateway", "complete");
+      return result;
+    },
+    (error) => {
+      logCleanup("gateway", "failed");
+      throw error;
+    },
+  );
+  await runCleanupStep("ssh_transport", () => stopSshTunnel());
+  await runCleanupStep("database", () => closeDbConnection());
+  const results = await Promise.allSettled([
+    tuiShutdown,
+    observedGatewayShutdown,
+  ]);
   const errors = results.flatMap((result) =>
     result.status === "rejected" ? [result.reason] : [],
   );

@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { randomBytes, randomUUID } from "crypto";
 import { join } from "path";
+import type { RuntimeCredentialEligibility } from "./provider-credential-refresh";
 import { HERMES_HOME, expectedEnvKeyForModel } from "./installer";
 import {
   escapeRegex,
@@ -2187,6 +2188,113 @@ export function getCredentialPool(
   const pool = store.credential_pool;
   if (!pool || typeof pool !== "object") return {};
   return pool as Record<string, CredentialEntry[]>;
+}
+
+/**
+ * Classify the credential source without returning any token value. Only an
+ * OAuth row owned by Runtime and carrying a refresh token may enter the
+ * bounded provider-refresh port; static or renderer-provided keys never do.
+ */
+export function getRuntimeCredentialRefreshEligibility(
+  provider: string,
+  profile?: string,
+): RuntimeCredentialEligibility {
+  const cleanProvider = provider.trim();
+  if (!cleanProvider) {
+    return { source: "unknown", authType: "", hasRefreshToken: false };
+  }
+  const stores = [readAuthStore(profile)];
+  if (profile && profile !== "default") stores.push(readAuthStore());
+  let sawStatic = false;
+  for (const store of stores) {
+    const providerRecord = store.providers;
+    const direct =
+      providerRecord && typeof providerRecord === "object"
+        ? (providerRecord as Record<string, CredentialEntry>)[cleanProvider]
+        : undefined;
+    const candidates = [
+      ...(direct ? [direct] : []),
+      ...(() => {
+        const pool = store.credential_pool;
+        const entries =
+          pool && typeof pool === "object"
+            ? (pool as Record<string, CredentialEntry[]>)[cleanProvider]
+            : undefined;
+        return Array.isArray(entries) ? entries : [];
+      })(),
+    ];
+    for (const entry of candidates) {
+      const authType = String(entry?.auth_type || "")
+        .trim()
+        .toLowerCase();
+      const hasRefreshToken = Boolean(
+        String(entry?.refresh_token || "").trim(),
+      );
+      if (authType === "oauth" && hasRefreshToken) {
+        return {
+          source: "runtime_pool",
+          authType: "oauth",
+          hasRefreshToken: true,
+        };
+      }
+      if (
+        String(entry?.access_token || entry?.api_key || entry?.key || "").trim()
+      ) {
+        sawStatic = true;
+      }
+    }
+  }
+  return {
+    source: sawStatic ? "static_key" : "unknown",
+    authType: sawStatic ? "api_key" : "",
+    hasRefreshToken: false,
+  };
+}
+
+/**
+ * Read one Runtime-owned OAuth access token for a provider without exposing
+ * the surrounding auth store. When `previousCredential` is supplied, only a
+ * rotated token is accepted; this prevents a 401 retry from reusing the exact
+ * credential that just failed.
+ */
+export function getRuntimeProviderCredential(
+  provider: string,
+  profile?: string,
+  previousCredential?: string,
+): string | null {
+  const cleanProvider = provider.trim();
+  if (!cleanProvider) return null;
+  const previous = previousCredential?.trim() || null;
+  const stores = [readAuthStore(profile)];
+  if (profile && profile !== "default") stores.push(readAuthStore());
+  for (const store of stores) {
+    const providerRecord = store.providers;
+    const direct =
+      providerRecord && typeof providerRecord === "object"
+        ? (providerRecord as Record<string, CredentialEntry>)[cleanProvider]
+        : undefined;
+    const pool = store.credential_pool;
+    const entries =
+      pool && typeof pool === "object"
+        ? (pool as Record<string, CredentialEntry[]>)[cleanProvider]
+        : undefined;
+    const candidates = [
+      ...(direct ? [direct] : []),
+      ...(Array.isArray(entries) ? entries : []),
+    ];
+    for (const entry of candidates) {
+      if (
+        String(entry?.auth_type || "")
+          .trim()
+          .toLowerCase() !== "oauth"
+      ) {
+        continue;
+      }
+      const accessToken = String(entry?.access_token || "").trim();
+      if (accessToken && accessToken !== previous) return accessToken;
+    }
+  }
+  return null;
 }
 
 export function setCredentialPool(

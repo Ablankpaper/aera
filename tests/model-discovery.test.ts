@@ -4,6 +4,8 @@ import { tmpdir } from "os";
 import { join } from "path";
 import http from "http";
 import type { AddressInfo } from "net";
+import type { AgenteraOwnerEpochLease } from "../src/main/agentera-connection-owner";
+import type { ProviderCredentialRefreshPort } from "../src/main/provider-credential-refresh";
 
 /**
  * model-discovery is a small HTTP client; we spin up a real loopback
@@ -37,6 +39,37 @@ function listen(): Promise<void> {
 
 function close(): Promise<void> {
   return new Promise((resolve) => server.close(() => resolve()));
+}
+
+function ownerLease(
+  signal = new AbortController().signal,
+): AgenteraOwnerEpochLease {
+  return {
+    epoch: 1,
+    signal,
+    assertCurrent: vi.fn(),
+  };
+}
+
+function writeRuntimeOAuthCredential(
+  provider: string,
+  accessToken: string,
+): void {
+  writeFileSync(
+    join(testHome, "auth.json"),
+    JSON.stringify({
+      credential_pool: {
+        [provider]: [
+          {
+            id: "oauth-1",
+            auth_type: "oauth",
+            access_token: accessToken,
+            refresh_token: "refresh-token",
+          },
+        ],
+      },
+    }),
+  );
 }
 
 describe("model-discovery", () => {
@@ -1017,5 +1050,441 @@ describe("model-discovery", () => {
       undefined,
     );
     expect(ctx).toBeNull();
+  });
+  describe("V2 HTTP catalogue classification", () => {
+    // @lat: [[beta27-reliability-plan#Provider model discovery protocol#Verified success bodies]]
+    const cases = [
+      [200, { data: [{ id: "model-a" }] }, "success_with_models"],
+      [200, { data: [] }, "success_empty"],
+      [204, null, "success_empty"],
+      [200, { unexpected: [] }, "malformed_response"],
+      [200, "not-json", "malformed_response"],
+      [200, { data: [{}] }, "malformed_response"],
+      [401, {}, "authentication_rejected"],
+      [403, {}, "forbidden"],
+      [404, {}, "not_found"],
+      [429, {}, "rate_limited"],
+      [500, {}, "upstream_error"],
+      [502, {}, "upstream_error"],
+      [503, {}, "upstream_error"],
+    ] as const;
+
+    it.each(cases)(
+      "classifies HTTP %s as %s without claiming a model list",
+      async (statusCode, body, expectedStatus) => {
+        server = http.createServer((_req, res) => {
+          res.writeHead(statusCode, { "Content-Type": "application/json" });
+          if (body !== null)
+            res.end(typeof body === "string" ? body : JSON.stringify(body));
+          else res.end();
+        });
+        await listen();
+
+        const { discoverProviderModels } = await loadDiscovery();
+        const result = await discoverProviderModels(
+          "custom",
+          baseUrl,
+          "sk-test",
+          undefined,
+        );
+
+        expect(result.status).toBe(expectedStatus);
+        expect(result.cached).toBe(false);
+        if (expectedStatus === "success_with_models") {
+          expect(result.models).toEqual(["model-a"]);
+        } else {
+          expect(result.models).toEqual([]);
+        }
+        expect(result.statusCode).toBe(statusCode);
+      },
+    );
+
+    it("rejects an oversized 2xx body as malformed without caching it", async () => {
+      server = http.createServer((_req, res) => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(`{"data":[{"id":"${"x".repeat(2 * 1024 * 1024)}"}]}`);
+      });
+      await listen();
+      const { discoverProviderModels } = await loadDiscovery();
+      const result = await discoverProviderModels(
+        "custom",
+        baseUrl,
+        "sk-oversized",
+        undefined,
+      );
+      expect(result.status).toBe("malformed_response");
+      expect(result.models).toEqual([]);
+      expect(result.cached).toBe(false);
+    });
+  });
+
+  describe("success-only cache isolation", () => {
+    // @lat: [[beta27-reliability-plan#Provider model discovery protocol#Success-only discovery caches]]
+    it("does not cache an HTTP failure and does not turn the next success into a cache hit", async () => {
+      let calls = 0;
+      let statusCode = 401;
+      server = http.createServer((_req, res) => {
+        calls += 1;
+        res.writeHead(statusCode, { "Content-Type": "application/json" });
+        res.end(
+          statusCode === 200
+            ? JSON.stringify({ data: [{ id: "recovered-model" }] })
+            : JSON.stringify({ error: "unauthorized" }),
+        );
+      });
+      await listen();
+      const { discoverProviderModels } = await loadDiscovery();
+
+      const failed = await discoverProviderModels(
+        "custom",
+        baseUrl,
+        "sk-cache-test",
+        undefined,
+      );
+      statusCode = 200;
+      const recovered = await discoverProviderModels(
+        "custom",
+        baseUrl,
+        "sk-cache-test",
+        undefined,
+      );
+
+      expect(failed.status).toBe("authentication_rejected");
+      expect(failed.cached).toBe(false);
+      expect(recovered.status).toBe("success_with_models");
+      expect(recovered.cached).toBe(false);
+      expect(recovered.models).toEqual(["recovered-model"]);
+      expect(calls).toBe(2);
+    });
+
+    it("preserves a successful snapshot when a different credential later fails", async () => {
+      const calls: string[] = [];
+      server = http.createServer((req, res) => {
+        const auth = String(req.headers.authorization || "");
+        calls.push(auth);
+        if (auth === "Bearer sk-bad") {
+          res.writeHead(401);
+          res.end();
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ data: [{ id: "stable-model" }] }));
+      });
+      await listen();
+      const { discoverProviderModels } = await loadDiscovery();
+
+      const first = await discoverProviderModels(
+        "custom",
+        baseUrl,
+        "sk-good",
+        undefined,
+      );
+      const failed = await discoverProviderModels(
+        "custom",
+        baseUrl,
+        "sk-bad",
+        undefined,
+      );
+      const cached = await discoverProviderModels(
+        "custom",
+        baseUrl,
+        "sk-good",
+        undefined,
+      );
+
+      expect(first.status).toBe("success_with_models");
+      expect(failed.status).toBe("authentication_rejected");
+      expect(cached).toMatchObject({
+        status: "success_with_models",
+        cached: true,
+        models: ["stable-model"],
+      });
+      expect(calls).toEqual(["Bearer sk-good", "Bearer sk-bad"]);
+    });
+
+    it("does not mark a malformed response as a fetched context catalogue", async () => {
+      let calls = 0;
+      let malformed = true;
+      server = http.createServer((_req, res) => {
+        calls += 1;
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          malformed
+            ? JSON.stringify({ error: "temporary gateway page" })
+            : JSON.stringify({
+                data: [{ id: "ctx-model", context_length: 64000 }],
+              }),
+        );
+      });
+      await listen();
+      const { getModelContextWindow } = await loadDiscovery();
+
+      const first = await getModelContextWindow(
+        "custom",
+        "ctx-model",
+        baseUrl,
+        "sk-context",
+        undefined,
+      );
+      malformed = false;
+      const second = await getModelContextWindow(
+        "custom",
+        "ctx-model",
+        baseUrl,
+        "sk-context",
+        undefined,
+      );
+
+      expect(first).toBeNull();
+      expect(second).toBe(64000);
+      expect(calls).toBe(2);
+    });
+  });
+
+  describe("bounded Runtime-owned 401 recovery", () => {
+    it("refreshes once, rereads the rotated credential, and retries once", async () => {
+      const receivedAuth: string[] = [];
+      server = http.createServer((req, res) => {
+        const auth = String(req.headers.authorization || "");
+        receivedAuth.push(auth);
+        if (auth === "Bearer rotated-access") {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ data: [{ id: "recovered-model" }] }));
+          return;
+        }
+        res.writeHead(401);
+        res.end();
+      });
+      await listen();
+      writeRuntimeOAuthCredential("custom", "expired-access");
+      const refreshPort: ProviderCredentialRefreshPort = {
+        refresh: vi.fn(async () => {
+          writeRuntimeOAuthCredential("custom", "rotated-access");
+          return { status: "refreshed" as const };
+        }),
+      };
+      const { discoverProviderModelsForOwner } = await loadDiscovery();
+
+      const result = await discoverProviderModelsForOwner(
+        "custom",
+        baseUrl,
+        undefined,
+        undefined,
+        { ownerLease: ownerLease(), refreshPort },
+      );
+
+      expect(result).toMatchObject({
+        status: "success_with_models",
+        models: ["recovered-model"],
+      });
+      expect(refreshPort.refresh).toHaveBeenCalledTimes(1);
+      expect(receivedAuth).toEqual([
+        "Bearer expired-access",
+        "Bearer rotated-access",
+      ]);
+    });
+
+    it("stops after a second 401 and returns the stable final code", async () => {
+      const receivedAuth: string[] = [];
+      server = http.createServer((req, res) => {
+        receivedAuth.push(String(req.headers.authorization || ""));
+        res.writeHead(401);
+        res.end();
+      });
+      await listen();
+      writeRuntimeOAuthCredential("custom", "expired-access");
+      const refreshPort: ProviderCredentialRefreshPort = {
+        refresh: vi.fn(async () => {
+          writeRuntimeOAuthCredential("custom", "rotated-access");
+          return { status: "refreshed" as const };
+        }),
+      };
+      const { discoverProviderModelsForOwner } = await loadDiscovery();
+
+      const result = await discoverProviderModelsForOwner(
+        "custom",
+        baseUrl,
+        undefined,
+        undefined,
+        { ownerLease: ownerLease(), refreshPort },
+      );
+
+      expect(result).toMatchObject({
+        status: "authentication_rejected",
+        statusCode: 401,
+        code: "provider_authentication_rejected",
+        models: [],
+        cached: false,
+      });
+      expect(refreshPort.refresh).toHaveBeenCalledTimes(1);
+      expect(receivedAuth).toEqual([
+        "Bearer expired-access",
+        "Bearer rotated-access",
+      ]);
+      expect(JSON.stringify(result)).not.toContain("access");
+    });
+
+    it("does not retry when Runtime refresh fails", async () => {
+      let calls = 0;
+      server = http.createServer((_req, res) => {
+        calls += 1;
+        res.writeHead(401);
+        res.end();
+      });
+      await listen();
+      writeRuntimeOAuthCredential("custom", "expired-access");
+      const refreshPort: ProviderCredentialRefreshPort = {
+        refresh: vi.fn(async () => ({ status: "rejected" as const })),
+      };
+      const { discoverProviderModelsForOwner } = await loadDiscovery();
+
+      const result = await discoverProviderModelsForOwner(
+        "custom",
+        baseUrl,
+        undefined,
+        undefined,
+        { ownerLease: ownerLease(), refreshPort },
+      );
+
+      expect(result).toMatchObject({
+        status: "authentication_rejected",
+        code: "provider_authentication_rejected",
+      });
+      expect(calls).toBe(1);
+      expect(refreshPort.refresh).toHaveBeenCalledTimes(1);
+    });
+
+    it("never refreshes or retries an explicit static API key", async () => {
+      let calls = 0;
+      server = http.createServer((_req, res) => {
+        calls += 1;
+        res.writeHead(401);
+        res.end();
+      });
+      await listen();
+      writeRuntimeOAuthCredential("custom", "runtime-access");
+      const refreshPort: ProviderCredentialRefreshPort = {
+        refresh: vi.fn(async () => ({ status: "refreshed" as const })),
+      };
+      const { discoverProviderModelsForOwner } = await loadDiscovery();
+
+      const result = await discoverProviderModelsForOwner(
+        "custom",
+        baseUrl,
+        "renderer-static-key",
+        undefined,
+        { ownerLease: ownerLease(), refreshPort },
+      );
+
+      expect(result).toMatchObject({
+        status: "authentication_rejected",
+        statusCode: 401,
+        code: "provider_authentication_rejected",
+      });
+      expect(calls).toBe(1);
+      expect(refreshPort.refresh).not.toHaveBeenCalled();
+    });
+
+    it("does not refresh or retry a timed-out discovery request", async () => {
+      let calls = 0;
+      server = http.createServer((_req, res) => {
+        calls += 1;
+        setTimeout(() => {
+          res.writeHead(401);
+          res.end();
+        }, 100);
+      });
+      await listen();
+      writeRuntimeOAuthCredential("custom", "runtime-access");
+      const refreshPort: ProviderCredentialRefreshPort = {
+        refresh: vi.fn(async () => ({ status: "refreshed" as const })),
+      };
+      const { discoverProviderModelsForOwner } = await loadDiscovery();
+
+      const result = await discoverProviderModelsForOwner(
+        "custom",
+        baseUrl,
+        undefined,
+        undefined,
+        { ownerLease: ownerLease(), refreshPort, timeoutMs: 10 },
+      );
+
+      expect(result.status).toBe("timeout");
+      expect(calls).toBe(1);
+      expect(refreshPort.refresh).not.toHaveBeenCalled();
+    });
+
+    it("fails closed when the owner signal is cancelled without retrying", async () => {
+      const controller = new AbortController();
+      let calls = 0;
+      server = http.createServer((_req, res) => {
+        calls += 1;
+        setTimeout(() => {
+          res.writeHead(401);
+          res.end();
+        }, 100);
+      });
+      await listen();
+      writeRuntimeOAuthCredential("custom", "runtime-access");
+      const refreshPort: ProviderCredentialRefreshPort = {
+        refresh: vi.fn(async () => ({ status: "refreshed" as const })),
+      };
+      const { discoverProviderModelsForOwner } = await loadDiscovery();
+      const pending = discoverProviderModelsForOwner(
+        "custom",
+        baseUrl,
+        undefined,
+        undefined,
+        {
+          ownerLease: ownerLease(controller.signal),
+          refreshPort,
+          timeoutMs: 1_000,
+        },
+      );
+      controller.abort();
+
+      await expect(pending).rejects.toMatchObject({ code: "cancelled" });
+      expect(calls).toBeLessThanOrEqual(1);
+      expect(refreshPort.refresh).not.toHaveBeenCalled();
+    });
+
+    it("cancels an in-flight refresh from the caller signal without retrying", async () => {
+      const controller = new AbortController();
+      let releaseRefresh:
+        | ((value: { status: "refreshed" }) => void)
+        | undefined;
+      const refreshPending = new Promise<{ status: "refreshed" }>((resolve) => {
+        releaseRefresh = resolve;
+      });
+      let calls = 0;
+      server = http.createServer((_req, res) => {
+        calls += 1;
+        res.writeHead(401);
+        res.end();
+      });
+      await listen();
+      writeRuntimeOAuthCredential("custom", "expired-access");
+      const refreshPort: ProviderCredentialRefreshPort = {
+        refresh: vi.fn(() => refreshPending),
+      };
+      const { discoverProviderModelsForOwner } = await loadDiscovery();
+      const pending = discoverProviderModelsForOwner(
+        "custom",
+        baseUrl,
+        undefined,
+        undefined,
+        {
+          ownerLease: ownerLease(),
+          refreshPort,
+          signal: controller.signal,
+        },
+      );
+
+      await vi.waitFor(() => expect(refreshPort.refresh).toHaveBeenCalled());
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({ code: "cancelled" });
+      expect(calls).toBe(1);
+      releaseRefresh?.({ status: "refreshed" });
+    });
   });
 });

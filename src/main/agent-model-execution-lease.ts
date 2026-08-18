@@ -1,4 +1,5 @@
 import type { AgenteraRuntimeOwner } from "./agentera-profile-binding";
+import type { AgenteraOwnerEpochLease } from "./agentera-connection-owner";
 import type { FrozenAgentModelRoute } from "./agentera-agent-control/frozen-agent-model-route";
 import {
   parseFrozenAgentModelRoute,
@@ -20,8 +21,10 @@ export type AgentModelSegmentTransition =
 export type AgentModelExecutionLeaseErrorCode =
   | "model_switch_source_unavailable"
   | "model_switch_route_drift"
+  | "model_switch_route_ambiguous"
   | "model_switch_credential_unavailable"
-  | "model_switch_remote_unavailable";
+  | "model_switch_remote_unavailable"
+  | "model_switch_owner_changed";
 
 export class AgentModelExecutionLeaseError extends Error {
   readonly code: AgentModelExecutionLeaseErrorCode;
@@ -50,6 +53,7 @@ export interface AgentModelExecutionLease {
 
 export interface CreateAgentModelExecutionLeaseInput {
   route: FrozenAgentExecutionRoute;
+  ownerLease: AgenteraOwnerEpochLease;
   mode?: "local" | "remote" | "ssh";
   routeMode?: "configured" | "dynamic";
   disableTransportReplay?: boolean;
@@ -64,11 +68,19 @@ export interface CreateAgentModelExecutionLeaseInput {
     | FrozenAgentExecutionRoute
     | null
     | Promise<FrozenAgentExecutionRoute | null>;
+  resolveLegacyRoute?: (
+    identity: Readonly<PublicModelRouteIdentity>,
+  ) => LegacyRouteResolution | Promise<LegacyRouteResolution>;
   getSecret?: (credentialRef: string, sourceProfileId: string) => string | null;
   routeAvailable?:
     | boolean
     | ((route: PublicModelRouteIdentity) => boolean | Promise<boolean>);
 }
+
+export type LegacyRouteResolution =
+  | { status: "resolved"; route: FrozenAgentExecutionRoute }
+  | { status: "missing" }
+  | { status: "ambiguous" };
 
 function publicIdentity(
   route: FrozenAgentExecutionRoute,
@@ -79,6 +91,19 @@ function publicIdentity(
     baseUrl: route.baseUrl,
     apiMode: route.apiMode,
   };
+}
+
+function samePublicIdentity(
+  left: PublicModelRouteIdentity,
+  right: PublicModelRouteIdentity,
+): boolean {
+  return (
+    left.provider.trim().toLocaleLowerCase() ===
+      right.provider.trim().toLocaleLowerCase() &&
+    left.model.trim() === right.model.trim() &&
+    left.baseUrl.trim().replace(/\/+$/, "").toLocaleLowerCase() ===
+      right.baseUrl.trim().replace(/\/+$/, "").toLocaleLowerCase()
+  );
 }
 
 function sameFrozenRoute(
@@ -105,11 +130,39 @@ export function createAgentModelExecutionLease(
     async run<T>(
       callback: (execution: AgentModelExecution) => T | Promise<T>,
     ): Promise<T> {
+      input.ownerLease.assertCurrent();
+      let executionRoute = route;
+      if (route.legacy) {
+        const resolution = input.resolveLegacyRoute
+          ? await input.resolveLegacyRoute(identity)
+          : { status: "missing" as const };
+        input.ownerLease.assertCurrent();
+        if (resolution.status === "ambiguous") {
+          throw new AgentModelExecutionLeaseError(
+            "model_switch_route_ambiguous",
+          );
+        }
+        if (
+          resolution.status !== "resolved" ||
+          parseFrozenAgentModelRoute(resolution.route).legacy
+        ) {
+          throw new AgentModelExecutionLeaseError(
+            "model_switch_source_unavailable",
+          );
+        }
+        const resolved = parseFrozenAgentModelRoute(resolution.route);
+        if (!samePublicIdentity(identity, publicIdentity(resolved))) {
+          throw new AgentModelExecutionLeaseError("model_switch_route_drift");
+        }
+        executionRoute = resolved;
+      }
+
       if (mode !== "local") {
         const available =
           typeof input.routeAvailable === "function"
-            ? await input.routeAvailable(identity)
+            ? await input.routeAvailable(publicIdentity(executionRoute))
             : input.routeAvailable === true;
+        input.ownerLease.assertCurrent();
         if (!available) {
           throw new AgentModelExecutionLeaseError(
             "model_switch_remote_unavailable",
@@ -117,9 +170,9 @@ export function createAgentModelExecutionLease(
         }
       }
 
-      if (!route.legacy) {
-        const sourceProfileId = route.sourceProfileId!;
-        const modelLibraryId = route.modelLibraryId!;
+      if (!executionRoute.legacy) {
+        const sourceProfileId = executionRoute.sourceProfileId!;
+        const modelLibraryId = executionRoute.modelLibraryId!;
         if (
           input.verifySourceProfile &&
           !(await input.verifySourceProfile(sourceProfileId, modelLibraryId))
@@ -135,18 +188,24 @@ export function createAgentModelExecutionLease(
           );
           if (
             current === null ||
-            !sameFrozenRoute(route, parseFrozenAgentModelRoute(current))
+            !sameFrozenRoute(
+              executionRoute,
+              parseFrozenAgentModelRoute(current),
+            )
           ) {
             throw new AgentModelExecutionLeaseError("model_switch_route_drift");
           }
         }
+        input.ownerLease.assertCurrent();
       }
 
       let credential: string | null = null;
-      if (mode === "local" && route.credentialRef !== null) {
+      if (mode === "local" && executionRoute.credentialRef !== null) {
         credential =
-          input.getSecret?.(route.credentialRef, route.sourceProfileId ?? "") ??
-          null;
+          input.getSecret?.(
+            executionRoute.credentialRef,
+            executionRoute.sourceProfileId ?? "",
+          ) ?? null;
         if (!credential?.trim()) {
           throw new AgentModelExecutionLeaseError(
             "model_switch_credential_unavailable",
@@ -154,9 +213,9 @@ export function createAgentModelExecutionLease(
         }
       } else if (
         mode === "local" &&
-        !route.legacy &&
-        route.credentialRef === null &&
-        !isLocalBaseUrl(route.baseUrl)
+        !executionRoute.legacy &&
+        executionRoute.credentialRef === null &&
+        !isLocalBaseUrl(executionRoute.baseUrl)
       ) {
         throw new AgentModelExecutionLeaseError(
           "model_switch_credential_unavailable",
@@ -164,14 +223,17 @@ export function createAgentModelExecutionLease(
       }
 
       const execution: AgentModelExecution = {
-        modelOverride: sessionModelOverrideFromFrozenRoute(route),
-        apiMode: route.apiMode,
+        modelOverride: sessionModelOverrideFromFrozenRoute(executionRoute),
+        apiMode: executionRoute.apiMode,
         credential,
         routeMode: input.routeMode ?? "configured",
         disableTransportReplay: input.disableTransportReplay ?? false,
       };
       try {
-        return await callback(execution);
+        input.ownerLease.assertCurrent();
+        const result = await callback(execution);
+        input.ownerLease.assertCurrent();
+        return result;
       } finally {
         execution.credential = null;
         credential = null;

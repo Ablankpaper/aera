@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AgenteraConnectionOwnerStore,
   createAgenteraOwnerSwitchCoordinator,
+  type AgenteraOwnerTransitionEvent,
 } from "../src/main/agentera-connection-owner";
 import type { SecureStorageAdapter } from "../src/main/agentera-auth/store";
 import type { AgenteraRuntimeOwner } from "../src/main/agentera-profile-binding";
@@ -170,19 +171,181 @@ describe("Aera remote/SSH connection ownership", () => {
     );
   });
 
-  it("tears down cached and running Runtime state before changing owners", () => {
+  it("tears down cached and running Runtime state before changing owners", async () => {
     const events: string[] = [];
     const coordinator = createAgenteraOwnerSwitchCoordinator({
       stopRuntimeContext: () => events.push("stopped"),
     });
 
-    coordinator.transitionTo("owner-a");
+    await coordinator.transitionTo("owner-a");
     expect(events).toEqual([]);
-    coordinator.transitionTo("owner-a");
+    await coordinator.transitionTo("owner-a");
     expect(events).toEqual([]);
-    coordinator.transitionTo("owner-b");
+    await coordinator.transitionTo("owner-b");
     expect(events).toEqual(["stopped"]);
-    coordinator.transitionTo(null);
+    await coordinator.transitionTo(null);
     expect(events).toEqual(["stopped", "stopped"]);
+  });
+
+  it("aborts the old lease before teardown and exposes no owner identity", async () => {
+    let release: (() => void) | undefined;
+    const cleanup = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const events: AgenteraOwnerTransitionEvent[] = [];
+    const coordinator = createAgenteraOwnerSwitchCoordinator({
+      stopRuntimeContext: () => cleanup,
+      onEvent: (event) => events.push(event),
+    });
+
+    const first = await coordinator.transitionTo("owner-a");
+    const lease = await coordinator.acquireLease();
+    const switching = coordinator.transitionTo("owner-b");
+
+    expect(lease.signal.aborted).toBe(true);
+    expect(() => lease.assertCurrent()).toThrowError(
+      expect.objectContaining({ code: "model_owner_transition_in_progress" }),
+    );
+    expect(coordinator.snapshot().epoch).toBe(first.epoch + 1);
+    expect(JSON.stringify(coordinator.snapshot())).not.toContain("owner-a");
+    expect(JSON.stringify(coordinator.snapshot())).not.toContain("owner-b");
+    expect(events.map((event) => event.phase)).toEqual([
+      "begin",
+      "ready",
+      "begin",
+    ]);
+
+    release?.();
+    const result = await switching;
+    expect(result.state).toBe("ready");
+    expect(result.epoch).toBe(first.epoch + 1);
+    expect(result.diagnosticId).toMatch(/^[0-9a-f]{12}$/);
+    expect(events.map((event) => event.phase)).toEqual([
+      "begin",
+      "ready",
+      "begin",
+      "ready",
+    ]);
+  });
+
+  it("serializes concurrent transitions and mounts only the final owner after cleanup", async () => {
+    const cleanups: Array<() => void> = [];
+    const stopRuntimeContext = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          cleanups.push(resolve);
+        }),
+    );
+    const coordinator = createAgenteraOwnerSwitchCoordinator({
+      stopRuntimeContext,
+      timeoutMs: 500,
+    });
+
+    await coordinator.transitionTo("owner-a");
+    const toB = coordinator.transitionTo("owner-b");
+    const toC = coordinator.transitionTo("owner-c");
+    await vi.waitFor(() => expect(stopRuntimeContext).toHaveBeenCalledTimes(1));
+    expect(coordinator.snapshot().state).toBe("transitioning");
+    cleanups.shift()?.();
+    await vi.waitFor(() => expect(stopRuntimeContext).toHaveBeenCalledTimes(2));
+    expect(coordinator.snapshot().state).toBe("transitioning");
+    cleanups.shift()?.();
+
+    await expect(toB).resolves.toMatchObject({ state: "ready" });
+    await expect(toC).resolves.toMatchObject({ state: "ready" });
+    expect(coordinator.snapshot().state).toBe("ready");
+    expect(stopRuntimeContext).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a third transition behind the second transition's cleanup", async () => {
+    const cleanups: Array<() => void> = [];
+    const stopRuntimeContext = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          cleanups.push(resolve);
+        }),
+    );
+    const coordinator = createAgenteraOwnerSwitchCoordinator({
+      stopRuntimeContext,
+      timeoutMs: 500,
+    });
+
+    await coordinator.transitionTo("owner-a");
+    const toB = coordinator.transitionTo("owner-b");
+    const toC = coordinator.transitionTo("owner-c");
+    await vi.waitFor(() => expect(stopRuntimeContext).toHaveBeenCalledTimes(1));
+    cleanups.shift()?.();
+    await vi.waitFor(() => expect(stopRuntimeContext).toHaveBeenCalledTimes(2));
+
+    const toD = coordinator.transitionTo("owner-d");
+    expect(stopRuntimeContext).toHaveBeenCalledTimes(2);
+    cleanups.shift()?.();
+    await expect(toB).resolves.toMatchObject({ state: "ready" });
+    await expect(toC).resolves.toMatchObject({ state: "ready" });
+    await vi.waitFor(() => expect(stopRuntimeContext).toHaveBeenCalledTimes(3));
+    cleanups.shift()?.();
+    await expect(toD).resolves.toMatchObject({ state: "ready" });
+    expect(stopRuntimeContext).toHaveBeenCalledTimes(3);
+  });
+
+  it("fails closed on teardown timeout and never activates the requested owner", async () => {
+    const events: AgenteraOwnerTransitionEvent[] = [];
+    const coordinator = createAgenteraOwnerSwitchCoordinator({
+      stopRuntimeContext: () => new Promise<void>(() => undefined),
+      timeoutMs: 10,
+      onEvent: (event) => events.push(event),
+    });
+
+    await coordinator.transitionTo("owner-a");
+    await expect(coordinator.transitionTo("owner-b")).rejects.toMatchObject({
+      code: "owner_transition_timeout",
+    });
+    expect(coordinator.snapshot().state).toBe("blocked");
+    expect(events.at(-1)?.phase).toBe("timeout");
+    await expect(coordinator.acquireLease()).rejects.toMatchObject({
+      code: "owner_transition_timeout",
+    });
+  });
+
+  it("keeps a failed teardown unmounted when the cleanup rejects", async () => {
+    const events: AgenteraOwnerTransitionEvent[] = [];
+    const coordinator = createAgenteraOwnerSwitchCoordinator({
+      stopRuntimeContext: async () => {
+        throw new Error("private cleanup detail");
+      },
+      onEvent: (event) => events.push(event),
+    });
+
+    await coordinator.transitionTo("owner-a");
+    await expect(coordinator.transitionTo("owner-b")).rejects.toMatchObject({
+      code: "owner_transition_failed",
+    });
+    expect(coordinator.snapshot().state).toBe("blocked");
+    expect(JSON.stringify(events)).not.toContain("private cleanup detail");
+    await expect(coordinator.acquireLease()).rejects.toMatchObject({
+      code: "owner_transition_failed",
+    });
+  });
+
+  it("waits for an in-flight transition before issuing a new lease", async () => {
+    let release: (() => void) | undefined;
+    const cleanup = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const coordinator = createAgenteraOwnerSwitchCoordinator({
+      stopRuntimeContext: () => cleanup,
+    });
+    await coordinator.transitionTo("owner-a");
+    const switching = coordinator.transitionTo("owner-b");
+    let settled = false;
+    const nextLease = coordinator.acquireLease().then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+    release?.();
+    await switching;
+    await nextLease;
+    expect(settled).toBe(true);
   });
 });

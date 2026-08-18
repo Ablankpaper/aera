@@ -36,7 +36,7 @@ import type {
 import { stageAttachment, clearStagedAttachments } from "../attachment-staging";
 import { persistPromptImageAttachments } from "../session-attachment-store";
 import {
-  discoverProviderModels,
+  discoverProviderModelsForOwner,
   getModelContextWindow,
 } from "../model-discovery";
 import {
@@ -203,12 +203,14 @@ import { getSecret } from "../secrets";
 import {
   canonicalPublicRouteKey,
   type OwnerModelRouteSelection,
+  type PublicModelRouteIdentity,
 } from "../../shared/model-configuration";
 import { canonicalProviderBaseUrl } from "../provider-registry";
 import {
   createAgentModelExecutionLease,
   composeAgentModelSegmentCallbacks,
   createAgentModelSegmentLifecycle,
+  type LegacyRouteResolution,
 } from "../agent-model-execution-lease";
 import {
   classifyAgentModelRoute,
@@ -299,7 +301,10 @@ import {
   type AgenteraProfileBindingStore,
   type AgenteraRuntimeOwner,
 } from "../agentera-profile-binding";
-import type { AgenteraConnectionOwnerStore } from "../agentera-connection-owner";
+import type {
+  AgenteraConnectionOwnerStore,
+  AgenteraOwnerSwitchCoordinator,
+} from "../agentera-connection-owner";
 import type { AgenteraAgentControlManager } from "../agentera-agent-control/manager";
 import type { AgenteraOfficialQualityManager } from "../agentera-official-quality/manager";
 import { createOfficialQualityChatObserver } from "../agentera-official-quality/collector";
@@ -673,6 +678,7 @@ export interface IpcContext {
   modelConfigurationCoordinator?: ModelConfigurationCoordinator | null;
   modelConfigurationStartupFailure?: ModelConfigurationStartupFailure | null;
   ownerModelRouteCatalog?: OwnerModelRouteCatalog | null;
+  ownerSwitchCoordinator: AgenteraOwnerSwitchCoordinator;
 }
 
 const RUNTIME_DISTRIBUTION_UNAVAILABLE_STATE: RuntimeDistributionPublicState = {
@@ -1088,6 +1094,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     modelConfigurationCoordinator,
     modelConfigurationStartupFailure,
     ownerModelRouteCatalog,
+    ownerSwitchCoordinator,
   } = context;
   const globalProfileChangedChannel = "agentera-global-profile-changed";
   const notifyGlobalProfileChanged = (profile: unknown): void => {
@@ -3727,6 +3734,8 @@ export function registerIpcHandlers(context: IpcContext): void {
       modelOverride?: SessionModelOverride,
       agentModelSelection?: OwnerModelRouteSelection,
     ) => {
+      const ownerLease = await ownerSwitchCoordinator.acquireLease();
+      ownerLease.assertCurrent();
       // Each conversation has a stable runId minted by the renderer. Fall back
       // to a generated id for legacy callers so the run is still tracked.
       const chatRunId = runId || `run-${randomUUID()}`;
@@ -3779,6 +3788,7 @@ export function registerIpcHandlers(context: IpcContext): void {
                 requestedModelSelection: agentModelSelection,
               })
             : null;
+        ownerLease.assertCurrent();
         if (!agenteraAgentControl && hasSignedInAccess) {
           throw new Error("Aera conversation boundary is unavailable.");
         }
@@ -3838,6 +3848,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         }
         const conn = getConnectionConfig();
         await runAgentModelSegmentPreflight(segmentLifecycle, async () => {
+          ownerLease.assertCurrent();
           if (!isRemoteMode() && !isGatewayRunning(profile)) {
             // A named Agent Profile may inherit a port already occupied by a
             // different local Aera instance. Reconcile and await the real
@@ -3858,6 +3869,7 @@ export function registerIpcHandlers(context: IpcContext): void {
             // so all SSH paths agree on one tunnel target.
             await prepareSshTunnel(conn, profile);
           }
+          ownerLease.assertCurrent();
         });
 
         let fullResponse = "";
@@ -3899,12 +3911,51 @@ export function registerIpcHandlers(context: IpcContext): void {
                   }
                 }
               : undefined;
+            const resolveLegacyRoute = ownerModelRouteCatalog
+              ? (
+                  identity: Readonly<PublicModelRouteIdentity>,
+                ): LegacyRouteResolution => {
+                  try {
+                    ownerLease.assertCurrent();
+                    const snapshot = ownerModelRouteCatalog.snapshot();
+                    const matches = snapshot.routes.filter(
+                      (candidate) =>
+                        candidate.provider.trim().toLocaleLowerCase() ===
+                          identity.provider.trim().toLocaleLowerCase() &&
+                        candidate.model.trim() === identity.model.trim() &&
+                        candidate.baseUrl
+                          .trim()
+                          .replace(/\/+$/, "")
+                          .toLocaleLowerCase() ===
+                          identity.baseUrl
+                            .trim()
+                            .replace(/\/+$/, "")
+                            .toLocaleLowerCase(),
+                    );
+                    if (matches.length === 0) return { status: "missing" };
+                    if (matches.length !== 1) return { status: "ambiguous" };
+                    const selected = matches[0];
+                    const resolved = ownerModelRouteCatalog.resolve(
+                      selected.selection,
+                    );
+                    ownerLease.assertCurrent();
+                    return {
+                      status: "resolved",
+                      route: freezeResolvedOwnerModelRoute(resolved),
+                    };
+                  } catch {
+                    return { status: "missing" };
+                  }
+                }
+              : undefined;
             executionLease = createAgentModelExecutionLease({
               route: frozenRoute,
+              ownerLease,
               mode: conn.mode,
               routeMode,
               disableTransportReplay: segmentTransition !== null,
               resolveSourceRoute,
+              resolveLegacyRoute,
               getSecret,
               routeAvailable:
                 conn.mode === "local" ? true : routeMode === "configured",
@@ -3985,66 +4036,72 @@ export function registerIpcHandlers(context: IpcContext): void {
             }
           },
           onDone: (sessionId) => {
-            runtimeRun.finish();
-            officialQualityObserver.onDone();
-            if (sessionId) {
-              try {
-                bindControlPlaneSession(sessionId);
-              } catch {
-                const message =
-                  "Aera conversation boundary session attachment failed.";
-                safeSend("chat-error", message);
-                rejectChat(new Error(message));
-                return;
+            try {
+              officialQualityObserver.onDone();
+              if (sessionId) {
+                try {
+                  bindControlPlaneSession(sessionId);
+                } catch {
+                  const message =
+                    "Aera conversation boundary session attachment failed.";
+                  safeSend("chat-error", message);
+                  rejectChat(new Error(message));
+                  return;
+                }
+                bindGlobalProfileSnapshotToSession(sessionId);
+                const recorded = agentIdentity.recordSessionRevision(
+                  identityProfileId,
+                  sessionId,
+                );
+                if (!recorded.success) {
+                  console.warn(
+                    "[agent-identity] Failed to record completed session:",
+                    recorded.error,
+                  );
+                }
               }
-              bindGlobalProfileSnapshotToSession(sessionId);
-              const recorded = agentIdentity.recordSessionRevision(
-                identityProfileId,
-                sessionId,
-              );
-              if (!recorded.success) {
+              try {
+                persistPromptImageAttachments(sessionId, message, attachments);
+              } catch (err) {
                 console.warn(
-                  "[agent-identity] Failed to record completed session:",
-                  recorded.error,
+                  "[sessions] Failed to persist prompt image attachments:",
+                  err,
                 );
               }
-            }
-            try {
-              persistPromptImageAttachments(sessionId, message, attachments);
-            } catch (err) {
-              console.warn(
-                "[sessions] Failed to persist prompt image attachments:",
-                err,
-              );
-            }
-            safeSend("chat-done", sessionId || "");
-            resolveChat({ response: fullResponse, sessionId });
-            // Desktop notification when window is not focused and response took >10s
-            if (
-              mainWindow &&
-              !mainWindow.isFocused() &&
-              Date.now() - chatStartTime > 10000
-            ) {
-              const preview = fullResponse
-                .replace(/[#*_`~\n]+/g, " ")
-                .trim()
-                .slice(0, 80);
-              new Notification({
-                title: APP_NAME,
-                body: preview || "Response ready",
-              }).show();
+              safeSend("chat-done", sessionId || "");
+              resolveChat({ response: fullResponse, sessionId });
+              // Desktop notification when window is not focused and response took >10s
+              if (
+                mainWindow &&
+                !mainWindow.isFocused() &&
+                Date.now() - chatStartTime > 10000
+              ) {
+                const preview = fullResponse
+                  .replace(/[#*_`~\n]+/g, " ")
+                  .trim()
+                  .slice(0, 80);
+                new Notification({
+                  title: APP_NAME,
+                  body: preview || "Response ready",
+                }).show();
+              }
+            } finally {
+              // Keep the activity lease until all completion-side persistence
+              // and owner-scoped observers have finished. Owner teardown may
+              // begin immediately after this callback returns.
+              runtimeRun.finish();
             }
           },
           onSessionStarted: (sessionId) => {
             try {
               bindControlPlaneSession(sessionId);
             } catch {
-              runtimeRun.finish();
               abortThisRun();
               const message =
                 "Aera conversation boundary session attachment failed.";
               safeSend("chat-error", message);
               rejectChat(new Error(message));
+              runtimeRun.finish();
               return;
             }
             bindGlobalProfileSnapshotToSession(sessionId);
@@ -4061,16 +4118,19 @@ export function registerIpcHandlers(context: IpcContext): void {
             safeSend("chat-session-started", sessionId);
           },
           onError: (error) => {
-            runtimeRun.finish();
-            officialQualityObserver.onError(error);
-            safeSend("chat-error", error);
-            rejectChat(new Error(error));
-            // Notify on error too if window not focused
-            if (mainWindow && !mainWindow.isFocused()) {
-              new Notification({
-                title: `${APP_NAME} — Error`,
-                body: error.slice(0, 100),
-              }).show();
+            try {
+              officialQualityObserver.onError(error);
+              safeSend("chat-error", error);
+              rejectChat(new Error(error));
+              // Notify on error too if window not focused
+              if (mainWindow && !mainWindow.isFocused()) {
+                new Notification({
+                  title: `${APP_NAME} — Error`,
+                  body: error.slice(0, 100),
+                }).show();
+              }
+            } finally {
+              runtimeRun.finish();
             }
           },
           onToolProgress: (tool) => {
@@ -4093,6 +4153,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         );
         let handle;
         try {
+          ownerLease.assertCurrent();
           handle = executionLease
             ? await executionLease.run((execution) =>
                 sendMessage(
@@ -4233,7 +4294,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   // Model discovery — fetch the provider's /v1/models for autocomplete.
   ipcMain.handle(
     "discover-provider-models",
-    (
+    async (
       event,
       provider: string,
       baseUrl: string | undefined,
@@ -4241,16 +4302,27 @@ export function registerIpcHandlers(context: IpcContext): void {
       profile?: string,
       requestId?: string,
     ) => {
+      const ownerLease = await ownerSwitchCoordinator.acquireLease();
       if (!requestId || requestId.length > 128) {
-        return discoverProviderModels(provider, baseUrl, apiKey, profile);
+        return discoverProviderModelsForOwner(
+          provider,
+          baseUrl,
+          apiKey,
+          profile,
+          { ownerLease },
+        );
       }
       const key = discoveryRequestKey(event.sender.id, requestId);
       const controller = new AbortController();
       discoveryRequests.get(key)?.abort();
       discoveryRequests.set(key, controller);
-      return discoverProviderModels(provider, baseUrl, apiKey, profile, {
-        signal: controller.signal,
-      }).finally(() => {
+      return discoverProviderModelsForOwner(
+        provider,
+        baseUrl,
+        apiKey,
+        profile,
+        { ownerLease, signal: controller.signal },
+      ).finally(() => {
         if (discoveryRequests.get(key) === controller) {
           discoveryRequests.delete(key);
         }
@@ -4272,20 +4344,23 @@ export function registerIpcHandlers(context: IpcContext): void {
   // returns null when unavailable so the renderer falls back to its heuristic.
   ipcMain.handle(
     "get-model-context-window",
-    (
+    async (
       _event,
       provider: string,
       model: string,
       baseUrl: string | undefined,
       profile?: string,
     ) => {
-      return getModelContextWindow(
+      const ownerLease = await ownerSwitchCoordinator.acquireLease();
+      const result = await getModelContextWindow(
         provider,
         model,
         baseUrl,
         undefined,
         profile,
       );
+      ownerLease.assertCurrent();
+      return result;
     },
   );
 

@@ -75,4 +75,19 @@ describe("Runtime activity coordination", () => {
     expect(activity.activeRunCount).toBe(0);
     expect(activity.beginTransition()).toBe(true);
   });
+
+  it("waits for aborted Runtime runs to finish before declaring the context drained", async () => {
+    const activity = new RuntimeActivityCoordinator();
+    const run = activity.beginRun("run-drain")!;
+    activity.abortAll();
+    let settled = false;
+    const waiting = activity.waitForIdle().then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+    run.finish();
+    await waiting;
+    expect(settled).toBe(true);
+  });
 });
