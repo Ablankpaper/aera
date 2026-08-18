@@ -1,11 +1,23 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { profileHome, safeWriteFile } from "./utils";
+import { profileHome } from "./utils";
 import { t } from "../shared/i18n";
 import { getAppLocale } from "./locale";
 import { DEFAULT_MESSAGING_PLATFORM_TOOLSETS } from "../shared/messaging-platforms";
 import { getYamlPath } from "./yaml-path";
 import { parseDocument } from "yaml";
+import type { ModelConfigurationWritePermit } from "./model-configuration-managed-files";
+import { currentModelConfigurationWritePermit } from "./model-configuration-write-authority";
+import {
+  persistConfigWritePlan,
+  planConfigDocumentWrite,
+  type ConfigWritePlan,
+  type ConfigWritePlanBase,
+} from "./config";
+import {
+  requireManagedModelMutationValue,
+  type ManagedModelMutationPort,
+} from "./model-configuration-mutation-port";
 
 export interface ToolsetInfo {
   key: string;
@@ -117,6 +129,45 @@ const TOOLSET_DEFS: {
 ];
 
 const IMPLICIT_CLI_TOOLSETS = TOOLSET_DEFS.map(({ key }) => key);
+
+export interface ToolsetMutationDependencies {
+  modelMutationPort: ManagedModelMutationPort;
+}
+
+type ToolsetConfigWritePlan = ConfigWritePlan<boolean>;
+
+function createToolsetWritePlan(
+  profile: string | undefined,
+  after: string,
+  basePlan?: ConfigWritePlanBase,
+): ToolsetConfigWritePlan {
+  return planConfigDocumentWrite(profile, () => after, true, basePlan);
+}
+
+function persistToolsetWritePlan(
+  permit: ModelConfigurationWritePermit | null,
+  plan: ToolsetConfigWritePlan,
+): boolean {
+  return persistConfigWritePlan(permit, plan);
+}
+
+async function executeManagedToolsetWrite(
+  operation: string,
+  plan: ToolsetConfigWritePlan | null,
+  dependencies: ToolsetMutationDependencies,
+): Promise<boolean> {
+  if (!plan) return false;
+  const result = await dependencies.modelMutationPort.mutate({
+    operation,
+    globalCatalog: false,
+    profileIds: [plan.profileId],
+    stage: "activation",
+    prepare: () => ({
+      write: (permit) => persistToolsetWritePlan(permit, plan),
+    }),
+  });
+  return requireManagedModelMutationValue(result);
+}
 
 function localizeToolDefs(
   enabled: boolean | ((key: string) => boolean),
@@ -243,10 +294,33 @@ export function setToolsetEnabled(
   key: string,
   enabled: boolean,
   profile?: string,
+  permit: ModelConfigurationWritePermit | null = currentModelConfigurationWritePermit(),
 ): boolean {
+  const plan = planToolsetEnabled(key, enabled, profile);
+  return plan ? persistToolsetWritePlan(permit, plan) : false;
+}
+
+export function setToolsetEnabledManaged(
+  key: string,
+  enabled: boolean,
+  profile: string | undefined,
+  dependencies: ToolsetMutationDependencies,
+): Promise<boolean> {
+  return executeManagedToolsetWrite(
+    "toolset_toggle",
+    planToolsetEnabled(key, enabled, profile),
+    dependencies,
+  );
+}
+
+function planToolsetEnabled(
+  key: string,
+  enabled: boolean,
+  profile?: string,
+): ToolsetConfigWritePlan | null {
   if (key === "image_gen") {
     const configFile = join(profileHome(profile), "config.yaml");
-    if (!existsSync(configFile)) return false;
+    if (!existsSync(configFile)) return null;
     try {
       const content = readFileSync(configFile, "utf-8");
       const parsed = parsePlatformToolsets(content);
@@ -261,16 +335,15 @@ export function setToolsetEnabled(
       else selected.delete(key);
 
       const document = parseDocument(content);
-      if (document.errors.length > 0) return false;
+      if (document.errors.length > 0) return null;
       document.setIn(["image_gen", "enabled"], enabled);
       document.setIn(["platform_toolsets", "cli"], Array.from(selected).sort());
-      safeWriteFile(configFile, document.toString());
-      return true;
+      return createToolsetWritePlan(profile, document.toString());
     } catch {
-      return false;
+      return null;
     }
   }
-  return setPlatformToolsetEnabled(
+  return planPlatformToolsetEnabled(
     "cli",
     key,
     enabled,
@@ -284,34 +357,82 @@ export function setMessagingPlatformToolsetEnabled(
   key: string,
   enabled: boolean,
   profile?: string,
+  permit: ModelConfigurationWritePermit | null = currentModelConfigurationWritePermit(),
 ): boolean {
-  return setPlatformToolsetEnabled(
+  const plan = planPlatformToolsetEnabled(
     platform,
     key,
     enabled,
     profile,
     DEFAULT_MESSAGING_PLATFORM_TOOLSETS,
   );
+  return plan ? persistToolsetWritePlan(permit, plan) : false;
 }
 
-function setPlatformToolsetEnabled(
+export function setMessagingPlatformToolsetEnabledManaged(
+  platform: string,
+  key: string,
+  enabled: boolean,
+  profile: string | undefined,
+  dependencies: ToolsetMutationDependencies,
+): Promise<boolean> {
+  return executeManagedToolsetWrite(
+    "messaging_toolset_toggle",
+    planPlatformToolsetEnabled(
+      platform,
+      key,
+      enabled,
+      profile,
+      DEFAULT_MESSAGING_PLATFORM_TOOLSETS,
+    ),
+    dependencies,
+  );
+}
+
+export function planMessagingPlatformToolsetEnabled(
+  platform: string,
+  key: string,
+  enabled: boolean,
+  profile: string | undefined,
+  basePlan?: ConfigWritePlanBase,
+): ToolsetConfigWritePlan | null {
+  return planPlatformToolsetEnabled(
+    platform,
+    key,
+    enabled,
+    profile,
+    DEFAULT_MESSAGING_PLATFORM_TOOLSETS,
+    basePlan,
+  );
+}
+
+function planPlatformToolsetEnabled(
   platform: string,
   key: string,
   enabled: boolean,
   profile?: string,
   defaultEnabled: string[] = [],
-): boolean {
+  basePlan?: ConfigWritePlanBase,
+): ToolsetConfigWritePlan | null {
   const configFile = join(profileHome(profile), "config.yaml");
-  if (!existsSync(configFile)) return false;
+  if (basePlan && basePlan.target !== configFile) {
+    throw new Error("Toolset base plan targets a different file.");
+  }
+  const startingBytes = basePlan
+    ? (basePlan.after ?? basePlan.before)
+    : existsSync(configFile)
+      ? readFileSync(configFile)
+      : null;
+  if (startingBytes === null) return null;
   if (
     !validatePlatformToolsetKey(platform) ||
     !validatePlatformToolsetKey(key)
   ) {
-    return false;
+    return null;
   }
 
   try {
-    const content = readFileSync(configFile, "utf-8");
+    const content = startingBytes.toString("utf-8");
     const parsed = parsePlatformToolsets(content);
     const hasPlatformConfig = Object.prototype.hasOwnProperty.call(
       parsed,
@@ -403,16 +524,14 @@ function setPlatformToolsetEnabled(
         result.push(newSection);
       }
 
-      safeWriteFile(configFile, result.join("\n"));
+      return createToolsetWritePlan(profile, result.join("\n"), basePlan);
     } else {
       // Append platform_toolsets section at end
       const newContent =
         content.trimEnd() + "\n\nplatform_toolsets:\n" + newSection + "\n";
-      safeWriteFile(configFile, newContent);
+      return createToolsetWritePlan(profile, newContent, basePlan);
     }
-
-    return true;
   } catch {
-    return false;
+    return null;
   }
 }

@@ -7,7 +7,7 @@ interface ImageGenerationRuntimeRefreshDependencies {
   save: (
     profile: string | undefined,
     request: ImageGenerationConfigDraft,
-  ) => ImageGenerationSaveResult;
+  ) => ImageGenerationSaveResult | Promise<ImageGenerationSaveResult>;
   stopDashboard: (profile?: string) => unknown;
   retireTuiGatewayClient: (profile?: string) => Promise<void>;
   notifyRuntimeSnapshotChanged: (profile?: string) => void;
@@ -23,7 +23,7 @@ interface ImageGenerationToolsetRefreshDependencies extends Omit<
     key: string,
     enabled: boolean,
     profile?: string,
-  ) => boolean;
+  ) => boolean | Promise<boolean>;
 }
 
 async function refreshImageGenerationRuntime(
@@ -48,7 +48,7 @@ export async function saveImageGenerationConfigAndRefresh(
   request: ImageGenerationConfigDraft,
   dependencies: ImageGenerationRuntimeRefreshDependencies,
 ): Promise<ImageGenerationSaveResult> {
-  const result = dependencies.save(profile, request);
+  const result = await dependencies.save(profile, request);
   if (!result.success) return result;
 
   await refreshImageGenerationRuntime(profile, dependencies);
@@ -61,7 +61,7 @@ export async function setToolsetEnabledAndRefreshImageGeneration(
   profile: string | undefined,
   dependencies: ImageGenerationToolsetRefreshDependencies,
 ): Promise<boolean> {
-  const changed = dependencies.setToolsetEnabled(key, enabled, profile);
+  const changed = await dependencies.setToolsetEnabled(key, enabled, profile);
   if (!changed || key !== "image_gen") return changed;
 
   await refreshImageGenerationRuntime(profile, dependencies);

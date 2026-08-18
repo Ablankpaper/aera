@@ -90,6 +90,29 @@ function createConfigWritePlan<T>(input: {
   });
 }
 
+/** Build one stale-safe config.yaml plan for feature-owned YAML sections. */
+export function planConfigDocumentWrite<T>(
+  profile: string | undefined,
+  transform: (content: string) => string,
+  value: T,
+  basePlan?: ConfigWritePlanBase,
+): ConfigWritePlan<T> {
+  const { configFile } = profilePaths(profile);
+  if (basePlan && basePlan.target !== configFile) {
+    throw new Error("Config document base plan targets a different file.");
+  }
+  const before = basePlan ? basePlan.before : configFileBytes(configFile);
+  const startingBytes = basePlan ? (basePlan.after ?? basePlan.before) : before;
+  return createConfigWritePlan({
+    role: "config",
+    profile,
+    target: configFile,
+    before,
+    after: transform(startingBytes?.toString("utf-8") ?? ""),
+    value,
+  });
+}
+
 function finishConfigWritePlan<T>(plan: ConfigWritePlan<T>): T {
   for (const key of plan.cacheKeys) invalidateCache(key);
   plan.verify?.();
@@ -1987,9 +2010,14 @@ export function planPlatformEnabledWrite(
   platform: string,
   enabled: boolean,
   profile?: string,
+  basePlan?: ConfigWritePlanBase,
 ): ConfigWritePlan<void> {
   const { configFile } = profilePaths(profile);
-  const before = configFileBytes(configFile);
+  if (basePlan && basePlan.target !== configFile) {
+    throw new Error("Platform base plan targets a different file.");
+  }
+  const before = basePlan ? basePlan.before : configFileBytes(configFile);
+  const startingBytes = basePlan ? (basePlan.after ?? before) : before;
   const plan = (after: string | null): ConfigWritePlan<void> =>
     createConfigWritePlan({
       role: "config",
@@ -2005,14 +2033,14 @@ export function planPlatformEnabledWrite(
   // desktop's display key (matters for home_assistant → homeassistant).
   const configKey = rule.configKey || platform;
 
-  if (before === null) {
+  if (startingBytes === null) {
     // Only need to write a file when we're recording a disable override;
     // enabling a platform that has no config is the default.
     if (enabled) return plan(null);
     return plan(`${configKey}:\n  enabled: false\n`);
   }
 
-  let content = before.toString("utf-8");
+  let content = startingBytes.toString("utf-8");
   const enabledLineRe = new RegExp(
     `^([ \\t]+enabled:[ \\t]*)(true|false)\\b([ \\t]*)$`,
     "m",

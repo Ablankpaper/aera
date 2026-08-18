@@ -1,4 +1,3 @@
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { parseDocument } from "yaml";
 import type {
   ImageGenerationAspectRatio,
@@ -16,9 +15,17 @@ import {
   IMAGE_GENERATION_ASPECT_RATIOS,
   IMAGE_GENERATION_QUALITIES,
 } from "../shared/image-generation";
-import { getConfigValue, setEnvValue } from "./config";
+import {
+  getConfigValue,
+  persistConfigWritePlan,
+  planConfigDocumentWrite,
+  planEnvValueWrite,
+} from "./config";
 import { getSecret, getSecretsProvider } from "./secrets";
-import { profilePaths, safeWriteFile } from "./utils";
+import {
+  requireManagedModelMutationValue,
+  type ManagedModelMutationPort,
+} from "./model-configuration-mutation-port";
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "gpt-image-1";
@@ -33,6 +40,7 @@ const IMAGE_MODEL_PATTERN = /(image|dall-e|flux|ideogram|recraft)/i;
 interface ServiceDependencies {
   fetch?: typeof fetch;
   timeoutMs?: number;
+  modelMutationPort?: ManagedModelMutationPort;
 }
 
 interface ValidatedRequest {
@@ -201,7 +209,7 @@ export function createImageGenerationConfigService(
   save(
     profile: string | undefined,
     request: ImageGenerationConfigDraft,
-  ): ImageGenerationSaveResult;
+  ): Promise<ImageGenerationSaveResult>;
   discover(
     profile: string | undefined,
     request: ImageGenerationConfigDraft,
@@ -245,10 +253,10 @@ export function createImageGenerationConfigService(
     };
   }
 
-  function save(
+  async function save(
     profile: string | undefined,
     request: ImageGenerationConfigDraft,
-  ): ImageGenerationSaveResult {
+  ): Promise<ImageGenerationSaveResult> {
     let validated: ValidatedRequest;
     try {
       validated = validateRequest(request);
@@ -268,40 +276,52 @@ export function createImageGenerationConfigService(
       return failure("credential_required");
     }
 
+    if (!dependencies.modelMutationPort) {
+      throw new Error("model_configuration_mutation_unavailable");
+    }
+    let configPlan: ReturnType<typeof planConfigDocumentWrite<void>>;
     try {
-      const { configFile } = profilePaths(profile);
-      const hadConfig = existsSync(configFile);
-      const content = hadConfig ? readFileSync(configFile, "utf-8") : "";
-      const document = parseDocument(content);
-      if (document.errors.length > 0) return failure("write_failed");
-      document.setIn(["image_gen", "enabled"], validated.enabled);
-      document.setIn(["image_gen", "provider"], "openai");
-      document.setIn(["image_gen", "model"], validated.model);
-      document.setIn(["image_gen", "aspect_ratio"], validated.aspectRatio);
-      document.setIn(["image_gen", "openai", "base_url"], validated.baseUrl);
-      document.setIn(["image_gen", "openai", "model"], validated.model);
-      document.setIn(["image_gen", "openai", "quality"], validated.quality);
-      safeWriteFile(configFile, document.toString());
-      if (validated.apiKey) {
-        try {
-          setEnvValue("IMAGE_GEN_OPENAI_API_KEY", validated.apiKey, profile);
-        } catch {
-          try {
-            if (hadConfig) {
-              safeWriteFile(configFile, content);
-            } else {
-              unlinkSync(configFile);
-            }
-          } catch {
-            // The original secret-write failure remains the public result.
+      configPlan = planConfigDocumentWrite(
+        profile,
+        (content) => {
+          const document = parseDocument(content);
+          if (document.errors.length > 0) {
+            throw new Error("invalid image generation YAML");
           }
-          return failure("write_failed");
-        }
-      }
-      return { success: true, config: get(profile) };
+          document.setIn(["image_gen", "enabled"], validated.enabled);
+          document.setIn(["image_gen", "provider"], "openai");
+          document.setIn(["image_gen", "model"], validated.model);
+          document.setIn(["image_gen", "aspect_ratio"], validated.aspectRatio);
+          document.setIn(
+            ["image_gen", "openai", "base_url"],
+            validated.baseUrl,
+          );
+          document.setIn(["image_gen", "openai", "model"], validated.model);
+          document.setIn(["image_gen", "openai", "quality"], validated.quality);
+          return document.toString();
+        },
+        undefined,
+      );
     } catch {
       return failure("write_failed");
     }
+    const credentialPlan = validated.apiKey
+      ? planEnvValueWrite("IMAGE_GEN_OPENAI_API_KEY", validated.apiKey, profile)
+      : null;
+    const result = await dependencies.modelMutationPort.mutate({
+      operation: "image_generation_config_save",
+      globalCatalog: false,
+      profileIds: [profile || "default"],
+      stage: credentialPlan ? "credential" : "activation",
+      prepare: () => ({
+        write: (permit) => {
+          if (credentialPlan) persistConfigWritePlan(permit, credentialPlan);
+          persistConfigWritePlan(permit, configPlan);
+        },
+      }),
+    });
+    requireManagedModelMutationValue(result);
+    return { success: true, config: get(profile) };
   }
 
   async function requestJson(

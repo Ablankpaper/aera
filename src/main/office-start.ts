@@ -5,6 +5,7 @@ type StartResult = { success: boolean; error?: string };
 export interface OfficeStartDependencies {
   getConnectionConfig: () => ConnectionConfig;
   isGatewayRunning: (profile?: string) => boolean;
+  prepareGateway: (profile?: string) => Promise<unknown>;
   startGateway: (profile?: string) => boolean;
   sshGatewayStatus: (config: SshConnectionConfig) => Promise<boolean>;
   sshStartGateway: (config: SshConnectionConfig) => Promise<void>;
@@ -37,6 +38,7 @@ export async function startOfficeStack(
       sshTunnelStarted = true;
       deps.setSshRemoteApiKey(await deps.sshReadRemoteApiKey(conn.ssh));
     } else if (conn.mode === "local" && !deps.isGatewayRunning(profile)) {
+      await deps.prepareGateway(profile);
       deps.startGateway(profile);
     }
 

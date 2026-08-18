@@ -1,4 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it, expect, vi } from "vitest";
 import {
   PROVIDER_BASE_URLS,
   canonicalProviderBaseUrl,
@@ -110,5 +113,80 @@ describe("provider-registry", () => {
         expect(PROVIDER_BASE_URLS[provider]).toBeTruthy();
       }
     });
+  });
+});
+
+describe("registry MCP managed configuration", () => {
+  it("keeps config.yaml unchanged when coordinated MCP install is refused", async () => {
+    const home = mkdtempSync(join(tmpdir(), "aera-registry-mcp-"));
+    const configFile = join(home, "config.yaml");
+    writeFileSync(configFile, "model:\n  default: local-model\n", "utf-8");
+    const before = readFileSync(configFile);
+    const mutationPort = {
+      mutate: vi.fn(async () => ({
+        status: "rejected" as const,
+        stage: "recovery" as const,
+        code: "model_configuration_recovery_required" as const,
+        rollback: "recovery_required" as const,
+        diagnosticId: "0123456789ab",
+      })),
+    };
+    vi.resetModules();
+    vi.doMock("../src/main/installer", () => ({
+      HERMES_HOME: home,
+      listMcpServers: () => [],
+    }));
+    vi.doMock("../src/main/skills", () => ({
+      installSkill: () => ({ success: true }),
+      listInstalledSkills: () => [],
+    }));
+    vi.doMock("../src/main/profiles", () => ({
+      createProfile: () => ({ success: true, id: "unused" }),
+    }));
+    vi.doMock("../src/main/soul", () => ({ writeSoul: () => true }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({ url: "https://mcp.example.test/stream" }),
+      ),
+    );
+
+    try {
+      const { installRegistryItem } = await import("../src/main/registry");
+      const result = await (
+        installRegistryItem as unknown as (
+          kind: "mcps",
+          item: {
+            id: string;
+            name: string;
+            description: string;
+            path: string;
+          },
+          profile: string | undefined,
+          dependencies: { modelMutationPort: typeof mutationPort },
+        ) => Promise<{ success: boolean; error?: string }>
+      )(
+        "mcps",
+        {
+          id: "fixture-mcp",
+          name: "Fixture MCP",
+          description: "fixture",
+          path: "mcps/fixture-mcp",
+        },
+        undefined,
+        { modelMutationPort: mutationPort },
+      );
+
+      expect(result).toEqual({
+        success: false,
+        error: "model_configuration_recovery_required",
+      });
+      expect(mutationPort.mutate).toHaveBeenCalledTimes(1);
+      expect(readFileSync(configFile)).toEqual(before);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.resetModules();
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

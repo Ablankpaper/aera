@@ -2339,26 +2339,27 @@ export class AgenteraAgentControlManager {
         }),
       );
     };
-    const installationProfiles: AgentInstallationProfileAdapter = full.profiles
-      .configureFreshProfileModel
-      ? {
-          ...full.profiles,
-          configureFreshProfileModel: (input) => {
-            const resolved = input.sourceModelId
-              ? this.resolvePersistedModelSelection(
-                  input.sourceProfileId,
-                  input.sourceModelId,
-                )
-              : null;
-            full.profiles.configureFreshProfileModel?.({
-              ...input,
-              sourceProfileId:
-                resolved?.sourceProfileId ?? input.sourceProfileId,
-              ...(resolved ? { sourceModelId: resolved.modelLibraryId } : {}),
-            });
-          },
-        }
-      : full.profiles;
+    const configureFreshProfileModel = full.profiles.configureFreshProfileModel;
+    const installationProfiles: AgentInstallationProfileAdapter =
+      configureFreshProfileModel
+        ? {
+            ...full.profiles,
+            configureFreshProfileModel: async (input) => {
+              const resolved = input.sourceModelId
+                ? this.resolvePersistedModelSelection(
+                    input.sourceProfileId,
+                    input.sourceModelId,
+                  )
+                : null;
+              await configureFreshProfileModel({
+                ...input,
+                sourceProfileId:
+                  resolved?.sourceProfileId ?? input.sourceProfileId,
+                ...(resolved ? { sourceModelId: resolved.modelLibraryId } : {}),
+              });
+            },
+          }
+        : full.profiles;
     const installations = new AgentInstallationManager({
       database: full.database,
       client: full.client,

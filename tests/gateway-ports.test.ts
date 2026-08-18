@@ -61,16 +61,12 @@ describe("getProfilePort", () => {
     expect(getProfilePort("coder")).toBe(8643);
   });
 
-  it("reassigns a cloned profile that inherited the default's 8642", () => {
+  it("resolves a cloned profile collision without writing during the read", () => {
     dirEntries.push("coder");
     configuredPorts.set("coder", "8642");
     const port = getProfilePort("coder");
     expect(port).toBe(8643);
-    expect(setConfigValueSpy).toHaveBeenCalledWith(
-      "platforms.api_server.extra.port",
-      "8643",
-      "coder",
-    );
+    expect(setConfigValueSpy).not.toHaveBeenCalled();
   });
 
   it("keeps an already-unique configured port and does not rewrite it", () => {

@@ -186,8 +186,9 @@ export interface AgentInstallationProjection {
   }): HermesVersionProjection;
   activateForProfile(input: {
     projection: HermesVersionProjection;
+    profileId: string;
     profilePath: string;
-  }): ActivatedHermesProjection;
+  }): ActivatedHermesProjection | Promise<ActivatedHermesProjection>;
 }
 
 export interface AgentInstallationProfileAdapter {
@@ -207,7 +208,7 @@ export interface AgentInstallationProfileAdapter {
     version: AgentVersion;
     policy: AgentPolicySnapshot;
     sourceModelId?: string;
-  }) => void;
+  }) => void | Promise<void>;
 }
 
 export type AgentInstallationProfileTarget =
@@ -2032,8 +2033,9 @@ export class AgentInstallationManager {
         throw new AgentInstallationManagerError("installation_conflict");
       }
       this.cache.cacheVerifiedPolicySnapshot(version.id, selectedPolicy);
-      this.projection.activateForProfile({
+      await this.projection.activateForProfile({
         projection,
+        profileId: local.runtimeProfileId,
         profilePath: input.profilePath,
       });
     } catch {
@@ -2111,7 +2113,7 @@ export class AgentInstallationManager {
       if (!this.profiles.configureFreshProfileModel) {
         throw new Error("Runtime Profile model configuration is unavailable.");
       }
-      this.profiles.configureFreshProfileModel({
+      await this.profiles.configureFreshProfileModel({
         sourceProfileId: input.modelSourceProfileId,
         targetProfileId: input.localProfileId,
         version,
@@ -2319,7 +2321,11 @@ export class AgentInstallationManager {
         local.agentInstallationId,
         this.owner,
       );
-      this.projection.activateForProfile({ projection, profilePath });
+      await this.projection.activateForProfile({
+        projection,
+        profileId: local.runtimeProfileId,
+        profilePath,
+      });
     } catch (error) {
       reportStageFailure("managed-update-activation", error);
       this.recordManagedUpdateFailure(
@@ -2368,11 +2374,12 @@ export class AgentInstallationManager {
           local.definitionId,
           local.selectedVersionId,
         );
-        this.projection.activateForProfile({
+        await this.projection.activateForProfile({
           projection: this.projection.materializeVersion({
             agentInstallationId: local.agentInstallationId,
             version: previousVersion,
           }),
+          profileId: local.runtimeProfileId,
           profilePath,
         });
       } catch (restoreError) {
@@ -2697,7 +2704,7 @@ export class AgentInstallationManager {
                 "Fresh Profile model configuration is unavailable.",
               );
             }
-            this.profiles.configureFreshProfileModel({
+            await this.profiles.configureFreshProfileModel({
               sourceProfileId: target.modelSourceProfileId,
               targetProfileId: created.profileId,
               version,
@@ -2787,7 +2794,11 @@ export class AgentInstallationManager {
       }
       if (operation.phase === "profile_attached") {
         profileStage = "profile_projection_failed";
-        this.projection.activateForProfile({ projection, profilePath });
+        await this.projection.activateForProfile({
+          projection,
+          profileId: operation.profileId,
+          profilePath,
+        });
         operation = this.operations.advance({
           operationId: operation.operationId,
           expectedRevision: operation.revision,

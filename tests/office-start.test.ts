@@ -42,11 +42,21 @@ function sshConnection(): ConnectionConfig {
 function makeDeps(
   connection: ConnectionConfig,
   overrides: Partial<OfficeStartDependencies> = {},
-): { calls: string[]; deps: OfficeStartDependencies } {
+): {
+  calls: string[];
+  deps: OfficeStartDependencies & {
+    prepareGateway(profile?: string): Promise<void>;
+  };
+} {
   const calls: string[] = [];
-  const deps: OfficeStartDependencies = {
+  const deps: OfficeStartDependencies & {
+    prepareGateway(profile?: string): Promise<void>;
+  } = {
     getConnectionConfig: () => connection,
     isGatewayRunning: () => false,
+    prepareGateway: async (profile) => {
+      calls.push(`prepareGateway:${profile ?? ""}`);
+    },
     startGateway: (profile) => {
       calls.push(`startGateway:${profile ?? ""}`);
       return true;
@@ -89,6 +99,7 @@ describe("startOfficeStack", () => {
 
     expect(result).toEqual({ success: true });
     expect(calls).toEqual([
+      "prepareGateway:research",
       "startGateway:research",
       "startClaw3dAll",
       "waitForClaw3dReady",
@@ -137,6 +148,7 @@ describe("startOfficeStack", () => {
         "Office started but did not become ready in time. Check Office logs and try again.",
     });
     expect(calls).toEqual([
+      "prepareGateway:research",
       "startGateway:research",
       "startClaw3dAll",
       "waitForClaw3dReady",

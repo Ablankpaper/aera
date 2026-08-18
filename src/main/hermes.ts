@@ -21,7 +21,6 @@ import WebSocket from "ws";
 import { HERMES_HOME, getEnhancedPath } from "./installer";
 import { getRuntimeInvocation } from "./agentera-runtime-distribution/invocation";
 import {
-  ensureLocalApiServerKey,
   getApiServerKey,
   getConnectionConfig,
   getConfigValue,
@@ -38,11 +37,14 @@ import {
   pidIsAliveAs,
   stripAnsi,
   profileHome,
-  profilePaths,
   normalizeProfileName,
   getActiveProfileNameSync,
 } from "./utils";
-import { ensureProfilePortAvailable, getProfilePort } from "./gateway-ports";
+import { getProfilePort } from "./gateway-ports";
+import {
+  prepareGatewayManagedConfiguration,
+  type GatewayManagedConfigurationDependencies,
+} from "./gateway-managed-config";
 import { promptSudoPassword, promptSecretValue } from "./gatewayPrompt";
 import { getSecret } from "./secrets";
 import { readModels } from "./models";
@@ -108,6 +110,27 @@ function resolveProfile(profile?: string): string | undefined {
 /** Map a resolved profile to the key used in the per-profile process maps. */
 function profileKey(profile?: string): string {
   return resolveProfile(profile) ?? "default";
+}
+
+let gatewayManagedConfigurationDependencies: GatewayManagedConfigurationDependencies | null =
+  null;
+
+export function configureGatewayManagedConfiguration(
+  dependencies: GatewayManagedConfigurationDependencies | null,
+): void {
+  gatewayManagedConfigurationDependencies = dependencies;
+}
+
+export async function prepareGatewayForLaunch(
+  profile?: string,
+): Promise<{ key: string; port: number }> {
+  if (!gatewayManagedConfigurationDependencies) {
+    throw new Error("model_configuration_mutation_unavailable");
+  }
+  return prepareGatewayManagedConfiguration(
+    resolveProfile(profile),
+    gatewayManagedConfigurationDependencies,
+  );
 }
 
 /**
@@ -1280,37 +1303,6 @@ async function waitForApiServerReady(
     await delay(pollMs);
   }
   return false;
-}
-
-// ────────────────────────────────────────────────────
-//  Ensure API server is enabled in config
-// ────────────────────────────────────────────────────
-
-function ensureApiServerConfig(profile?: string): void {
-  try {
-    const { configFile } = profilePaths(resolveProfile(profile));
-    if (!existsSync(configFile)) return;
-    const content = readFileSync(configFile, "utf-8");
-    // If api_server is already configured, skip — the port is then governed
-    // by the existing block (reconciled for collisions by getProfilePort) and
-    // by the API_SERVER_PORT env we pass at spawn.
-    if (/api_server/i.test(content)) return;
-    // Bind this profile's gateway to its own allocated port so profiles can
-    // run concurrently without fighting over 8642.
-    const port = getProfilePort(profile);
-    const addition = `
-# Desktop app API server (auto-configured)
-platforms:
-  api_server:
-    enabled: true
-    extra:
-      port: ${port}
-      host: "127.0.0.1"
-`;
-    appendFileSync(configFile, addition, "utf-8");
-  } catch {
-    /* non-fatal */
-  }
 }
 
 // ────────────────────────────────────────────────────
@@ -3685,10 +3677,12 @@ function gatewayLogPath(profile?: string): string {
 
 export function buildGatewayEnv(profile?: string): Record<string, string> {
   const resolved = resolveProfile(profile);
-  // Make sure this profile's config.yaml enables the api_server and binds the
-  // profile's own port before we spawn.
-  ensureApiServerConfig(resolved);
-  const ensuredApiServerKey = ensureLocalApiServerKey(resolved);
+  const apiServerKey = getApiServerKey(resolved).trim();
+  if (!apiServerKey) {
+    throw new Error(
+      "The local gateway credential must be prepared before process launch.",
+    );
+  }
   const port = getProfilePort(resolved);
 
   const invocation = getRuntimeInvocation();
@@ -3737,7 +3731,7 @@ export function buildGatewayEnv(profile?: string): Record<string, string> {
   // gateway's `os.getenv("API_SERVER_KEY")` fallback see whatever the
   // desktop sees, regardless of source. This is the canonical fix until
   // upstream learns to read `api_server.token` directly.
-  gatewayEnv.API_SERVER_KEY = ensuredApiServerKey.key;
+  gatewayEnv.API_SERVER_KEY = apiServerKey;
 
   return gatewayEnv;
 }
@@ -4715,8 +4709,7 @@ async function restartGatewayLocallyOnce(
       return false;
     }
 
-    ensureApiServerConfig(resolveProfile(profile));
-    await ensureProfilePortAvailable(resolveProfile(profile));
+    await prepareGatewayForLaunch(profile);
     const startResult = startGatewayDetailed(profile);
     if (!startResult.success && !startResult.alreadyRunning) {
       setApiCacheFor(profile, false);
@@ -4839,8 +4832,7 @@ export async function startGatewayWithRecovery(
     );
   }
 
-  ensureApiServerConfig(resolveProfile(profile));
-  await ensureProfilePortAvailable(resolveProfile(profile));
+  await prepareGatewayForLaunch(profile);
   const startResult = startGatewayDetailed(profile);
   if (!startResult.success && !startResult.alreadyRunning) return false;
 
@@ -4902,6 +4894,7 @@ async function restartGatewayViaCliOnce(
     if (!canSpawnGateway()) return false;
     const invocation = getRuntimeInvocation();
     if (!invocation) return false;
+    await prepareGatewayForLaunch(profile);
 
     const key = profileKey(profile);
     const previousProcess = gatewayProcesses.get(key) ?? null;

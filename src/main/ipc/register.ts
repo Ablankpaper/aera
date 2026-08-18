@@ -119,6 +119,8 @@ import {
   isRemoteOnlyMode,
   sendMessage,
   transcribeAudio,
+  configureGatewayManagedConfiguration,
+  prepareGatewayForLaunch,
   startGateway,
   startGatewayWithRecovery,
   startGatewayDetailed,
@@ -132,7 +134,6 @@ import {
   resolvePendingClarify,
 } from "../hermes";
 import type { ChatCallbacks } from "../hermes";
-import { ensureProfilePortAvailable } from "../gateway-ports";
 import {
   freshDashboardWebSocketUrl,
   getDashboardStatus,
@@ -174,7 +175,6 @@ import {
 import { startOfficeStack } from "../office-start";
 import {
   readEnv,
-  setEnvValue,
   planEnvValueWrite,
   planConfigValueWrite,
   planModelConfigWrite,
@@ -194,7 +194,6 @@ import {
   rotateConnectionContextId,
   setConnectionConfig,
   getPlatformEnabled,
-  setPlatformEnabled,
   getApiServerKeyStatus,
   invalidateSecretsCache,
   appendConfigFixLog,
@@ -445,6 +444,7 @@ import {
   type ManagedModelConfigurationWriteBridgeOptions,
   type ModelConfigurationIpcBridgeDependencies,
 } from "./model-configuration-bridge";
+import { createManagedModelMutationPort } from "../model-configuration-mutation-port";
 import type {
   ManagedModelConfigurationWriteContext,
   ManagedModelConfigurationWritePlan,
@@ -453,6 +453,8 @@ import type {
 } from "../model-configuration-coordinator";
 import type { ModelConfigurationStartupFailure } from "../../shared/model-configuration";
 import type { OwnerModelRouteCatalog } from "../agentera-agent-control/owner-model-route-catalog";
+import { configureAgentModelProfileSeedMutationPort } from "../agentera-agent-control/model-profile-seed";
+import { configureHermesProjectionMutationPort } from "../agentera-agent-control/hermes-projection";
 import {
   setProfileColor,
   setProfileAvatar,
@@ -515,10 +517,9 @@ import { readSoul, writeSoul, resetSoul } from "../soul";
 import {
   getPlatformToolsets,
   getToolsets,
-  setMessagingPlatformToolsetEnabled,
-  setToolsetEnabled,
+  setToolsetEnabledManaged,
 } from "../tools";
-import { imageGenerationConfigService } from "../image-generation-config";
+import { createImageGenerationConfigService } from "../image-generation-config";
 import {
   saveImageGenerationConfigAndRefresh,
   setToolsetEnabledAndRefreshImageGeneration,
@@ -549,6 +550,7 @@ import {
   triggerCronJob,
 } from "../cronjobs";
 import {
+  applyManagedMessagingPlatformUpdate,
   applyMessagingPlatformUpdate,
   buildDesktopMessagingPlatforms,
   fetchRemoteMessagingPlatforms,
@@ -1260,6 +1262,9 @@ export function registerIpcHandlers(context: IpcContext): void {
     productAccessGuard,
     assertChannelProfileTarget,
   );
+  const modelConfigurationMutationCoordinator =
+    modelConfigurationCoordinator ??
+    coordinatorUnavailableMutation(modelConfigurationStartupFailure ?? null);
   const modelConfigurationBridge = createModelConfigurationIpcBridge({
     catalog: ownerModelRouteCatalog ?? {
       snapshot: () => {
@@ -1269,9 +1274,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         );
       },
     },
-    coordinator:
-      modelConfigurationCoordinator ??
-      coordinatorUnavailableMutation(modelConfigurationStartupFailure ?? null),
+    coordinator: modelConfigurationMutationCoordinator,
     assertRequestedProfile: (profile) => {
       const connection = getConnectionConfig();
       if (connection.mode === "local") {
@@ -1282,6 +1285,17 @@ export function registerIpcHandlers(context: IpcContext): void {
       }
     },
   } satisfies ModelConfigurationIpcBridgeDependencies);
+  const managedModelMutationPort = createManagedModelMutationPort(
+    modelConfigurationMutationCoordinator,
+  );
+  configureAgentModelProfileSeedMutationPort(managedModelMutationPort);
+  configureHermesProjectionMutationPort(managedModelMutationPort);
+  configureGatewayManagedConfiguration({
+    modelMutationPort: managedModelMutationPort,
+  });
+  const imageGenerationConfigService = createImageGenerationConfigService({
+    modelMutationPort: managedModelMutationPort,
+  });
   const managedModelConfigurationProfile = (profile?: string): string =>
     profile || getActiveProfileNameSync();
   const runManagedModelConfigurationWrite = <T>(
@@ -3167,7 +3181,9 @@ export function registerIpcHandlers(context: IpcContext): void {
   // account's cloud agents. `agent-sync-updated` tells the renderer to reload
   // its profile list (pull-created profiles appear without a manual refresh).
   ipcMain.handle("agent-sync-run", async (event) => {
-    const result = await syncAgents();
+    const result = await syncAgents({
+      modelMutationPort: managedModelMutationPort,
+    });
     if (!event.sender.isDestroyed()) {
       event.sender.send("agent-sync-updated", result);
     }
@@ -3427,7 +3443,9 @@ export function registerIpcHandlers(context: IpcContext): void {
         // TODO: SSH path for auxiliary config (requires sshSetAuxiliaryTask)
         return false;
       }
-      setAuxiliaryTask(task, cfg, profile);
+      await setAuxiliaryTask(task, cfg, profile, {
+        modelMutationPort: managedModelMutationPort,
+      });
 
       // Restart gateway so it picks up the new auxiliary config
       if (isGatewayRunning(profile)) {
@@ -3444,7 +3462,9 @@ export function registerIpcHandlers(context: IpcContext): void {
       // TODO: SSH path for auxiliary config (requires sshResetAuxiliaryConfig)
       return false;
     }
-    resetAuxiliaryToAuto(profile);
+    await resetAuxiliaryToAuto(profile, {
+      modelMutationPort: managedModelMutationPort,
+    });
 
     // Restart gateway so it picks up the reset
     if (isGatewayRunning(profile)) {
@@ -3813,7 +3833,7 @@ export function registerIpcHandlers(context: IpcContext): void {
             // A named Agent Profile may inherit a port already occupied by a
             // different local Aera instance. Reconcile and await the real
             // profile gateway before beginning a bound Agent turn.
-            await ensureProfilePortAvailable(profile);
+            await prepareGatewayForLaunch(profile);
             startGateway(profile);
             await startGatewayWithRecovery(
               profile,
@@ -4255,6 +4275,7 @@ export function registerIpcHandlers(context: IpcContext): void {
           "Remote mode points at an already-running Aera Runtime server. Start or restart the gateway on that remote host.",
       };
     }
+    await prepareGatewayForLaunch();
     return startGatewayDetailed();
   });
   ipcMain.handle("stop-gateway", async () => {
@@ -4399,32 +4420,14 @@ export function registerIpcHandlers(context: IpcContext): void {
         );
         return { ok: true, platform };
       }
-      return runManagedModelConfigurationWrite(
+      const result = await applyManagedMessagingPlatformUpdate(
+        platform,
+        update,
         profile,
-        "profile",
-        "activation",
-        () => ({
-          write: async () => {
-            await applyMessagingPlatformUpdate(
-              platform,
-              update,
-              (key, value) => setEnvValue(key, value, profile),
-              (key, enabled) => setPlatformEnabled(key, enabled, profile),
-              (platformKey, toolsetKey, enabled) =>
-                setMessagingPlatformToolsetEnabled(
-                  platformKey,
-                  toolsetKey,
-                  enabled,
-                  profile,
-                ),
-            );
-            return { ok: true, platform };
-          },
-          refreshPresentation: () => {
-            if (isGatewayRunning(profile)) void restartGateway(profile);
-          },
-        }),
+        { modelMutationPort: managedModelMutationPort },
       );
+      if (isGatewayRunning(profile)) void restartGateway(profile);
+      return result;
     },
   );
 
@@ -4852,6 +4855,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         await sshStartGateway(conn.ssh, name);
       }
     } else if (!isRemoteMode() && !isGatewayRunning(name)) {
+      await prepareGatewayForLaunch(name);
       startGateway(name);
     }
     return true;
@@ -5006,7 +5010,9 @@ export function registerIpcHandlers(context: IpcContext): void {
   // Cloud wallets provisioned by the backend for the profile's linked agent.
   // Read-only here; the desktop no longer mints wallets locally.
   ipcMain.handle("wallet-sync", (_event, profile?: string) =>
-    syncWalletsForProfile(profile),
+    syncWalletsForProfile(profile, {
+      modelMutationPort: managedModelMutationPort,
+    }),
   );
   // Backend-driven wallet ops used by the Office's space representatives
   // (bank tellers): balances and provisioning both live server-side.
@@ -5146,7 +5152,10 @@ export function registerIpcHandlers(context: IpcContext): void {
         return sshSetToolsetEnabled(conn.ssh, key, enabled, profile);
       if (conn.mode !== "local") return false;
       return setToolsetEnabledAndRefreshImageGeneration(key, enabled, profile, {
-        setToolsetEnabled,
+        setToolsetEnabled: (targetKey, targetEnabled, targetProfile) =>
+          setToolsetEnabledManaged(targetKey, targetEnabled, targetProfile, {
+            modelMutationPort: managedModelMutationPort,
+          }),
         stopDashboard,
         retireTuiGatewayClient,
         notifyRuntimeSnapshotChanged: (targetProfile) =>
@@ -5620,6 +5629,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     startOfficeStack(profile, {
       getConnectionConfig,
       isGatewayRunning,
+      prepareGateway: prepareGatewayForLaunch,
       startGateway,
       sshGatewayStatus,
       sshStartGateway,
@@ -5977,7 +5987,9 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle(
     "registry-install",
     (_event, kind: RegistryKind, item: RegistryItem, profile?: string) =>
-      installRegistryItem(kind, item, profile),
+      installRegistryItem(kind, item, profile, {
+        modelMutationPort: managedModelMutationPort,
+      }),
   );
 
   // Memory providers

@@ -1094,8 +1094,9 @@ describe("Agent installation orchestration", () => {
       now: () => NOW,
       randomUUID: () => RUNTIME_PROFILE_ID,
     });
-    profiles.configureFreshProfileModel = vi.fn(() => {
+    profiles.configureFreshProfileModel = vi.fn(async () => {
       events.push("profile:model:failed");
+      await Promise.resolve();
       throw new Error(
         "The source Profile model is not allowed by the signed Agent version.",
       );
@@ -1268,7 +1269,8 @@ describe("Agent installation orchestration", () => {
             }
           : originalVerifyProfileBinding(profilePath, requestedOwner),
     );
-    profiles.configureFreshProfileModel = vi.fn(() => {
+    profiles.configureFreshProfileModel = vi.fn(async () => {
+      await Promise.resolve();
       throw new Error(
         "The source Profile model is not allowed by the signed Agent version.",
       );
@@ -1669,8 +1671,8 @@ describe("Agent installation orchestration", () => {
       expect(recordDeliveryVerification).toHaveBeenCalledTimes(5);
     });
     expect(
-      recordDeliveryVerification.mock.calls.map(([receipt]) =>
-        receipt.verificationStatus,
+      recordDeliveryVerification.mock.calls.map(
+        ([receipt]) => receipt.verificationStatus,
       ),
     ).toEqual([
       "catalog_visible",
@@ -1699,7 +1701,9 @@ describe("Agent installation orchestration", () => {
     activateInstallation.mockResolvedValueOnce(
       pendingOfficialInstallation("active"),
     );
-    recordDeliveryVerification.mockRejectedValue(new Error("cloud unavailable"));
+    recordDeliveryVerification.mockRejectedValue(
+      new Error("cloud unavailable"),
+    );
 
     await expect(
       manager().install({
@@ -1714,7 +1718,9 @@ describe("Agent installation orchestration", () => {
         profile: { kind: "fresh", name: "Fresh Agent" },
       }),
     ).resolves.toMatchObject({ status: "active" });
-    await vi.waitFor(() => expect(recordDeliveryVerification).toHaveBeenCalled());
+    await vi.waitFor(() =>
+      expect(recordDeliveryVerification).toHaveBeenCalled(),
+    );
     expect(
       database.sqlite
         .prepare(
@@ -2062,7 +2068,8 @@ describe("Agent installation orchestration", () => {
     getPolicySnapshot.mockResolvedValue(policy2);
     policy = policy2;
     activateForProfile
-      .mockImplementationOnce(() => {
+      .mockImplementationOnce(async () => {
+        await Promise.resolve();
         throw new Error("local activation failed");
       })
       .mockImplementationOnce(({ projection }) => ({

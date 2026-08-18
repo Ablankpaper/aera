@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { join } from "path";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
+import type { ManagedModelMutationPort } from "../src/main/model-configuration-mutation-port";
 
 // Tests for auxiliary config nested YAML writer and get/set/reset functions.
 
@@ -12,7 +13,52 @@ async function importAuxConfigWithHome(
 ): Promise<typeof import("../src/main/auxiliary-config")> {
   vi.resetModules();
   process.env.HERMES_HOME = home;
-  return await import("../src/main/auxiliary-config");
+  const module = await import("../src/main/auxiliary-config");
+  const writeAuthority =
+    await import("../src/main/model-configuration-write-authority");
+  writeAuthority.registerManagedModelFileRoots({
+    globalRoot: home,
+    profiles: { default: home },
+  });
+  const authority = new writeAuthority.ModelConfigurationWriteAuthority();
+  const defaultDependencies: { modelMutationPort: ManagedModelMutationPort } = {
+    modelMutationPort: {
+      async mutate(input) {
+        return authority.run(
+          {
+            globalCatalog: input.globalCatalog,
+            profileIds: input.profileIds,
+          },
+          async (permit) => {
+            const plan = await input.prepare();
+            const value = await plan.write(permit);
+            return {
+              status: "executed" as const,
+              value,
+              catalog: {
+                revision: "0".repeat(64),
+                targetProfileId: input.profileIds[0],
+                routes: [],
+              },
+            };
+          },
+        );
+      },
+    },
+  };
+  return {
+    ...module,
+    setAuxiliaryTask: (
+      task: string,
+      cfg: { provider: string; model: string; baseUrl: string },
+      profile?: string,
+      dependencies = defaultDependencies,
+    ) => module.setAuxiliaryTask(task, cfg, profile, dependencies),
+    resetAuxiliaryToAuto: (
+      profile?: string,
+      dependencies = defaultDependencies,
+    ) => module.resetAuxiliaryToAuto(profile, dependencies),
+  };
 }
 
 beforeEach(() => {
@@ -213,11 +259,52 @@ describe("setAuxiliaryField", () => {
 });
 
 describe("setAuxiliaryTask", () => {
+  it("leaves config.yaml unchanged when coordinated persistence is refused", async () => {
+    const configFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(configFile, "model:\n  default: local-model\n", "utf-8");
+    const before = readFileSync(configFile);
+    const mutationPort = {
+      mutate: vi.fn(async () => ({
+        status: "rejected" as const,
+        stage: "recovery" as const,
+        code: "model_configuration_recovery_required" as const,
+        rollback: "recovery_required" as const,
+        diagnosticId: "0123456789ab",
+      })),
+    };
+    const { setAuxiliaryTask } = await importAuxConfigWithHome(TEST_DIR);
+
+    await expect(
+      Promise.resolve(
+        (
+          setAuxiliaryTask as unknown as (
+            task: string,
+            cfg: { provider: string; model: string; baseUrl: string },
+            profile: string | undefined,
+            dependencies: { modelMutationPort: typeof mutationPort },
+          ) => unknown
+        )(
+          "vision",
+          {
+            provider: "openai",
+            model: "gpt-4o-mini",
+            baseUrl: "https://api.openai.com/v1",
+          },
+          undefined,
+          { modelMutationPort: mutationPort },
+        ),
+      ),
+    ).rejects.toThrow("model_configuration_recovery_required");
+
+    expect(mutationPort.mutate).toHaveBeenCalledTimes(1);
+    expect(readFileSync(configFile)).toEqual(before);
+  });
+
   it("writes all three fields to config.yaml", async () => {
     const { setAuxiliaryTask, getAuxiliaryConfig } =
       await importAuxConfigWithHome(TEST_DIR);
 
-    setAuxiliaryTask("vision", {
+    await setAuxiliaryTask("vision", {
       provider: "openai",
       model: "gpt-4o-mini",
       baseUrl: "https://api.openai.com/v1",
@@ -240,7 +327,7 @@ describe("setAuxiliaryTask", () => {
     const { setAuxiliaryTask, getAuxiliaryConfig } =
       await importAuxConfigWithHome(TEST_DIR);
 
-    setAuxiliaryTask("compression", {
+    await setAuxiliaryTask("compression", {
       provider: "anthropic",
       model: "claude-haiku",
       baseUrl: "",
@@ -272,7 +359,7 @@ describe("setAuxiliaryTask", () => {
     const { setAuxiliaryTask, getAuxiliaryConfig } =
       await importAuxConfigWithHome(TEST_DIR);
 
-    setAuxiliaryTask("vision", {
+    await setAuxiliaryTask("vision", {
       provider: "anthropic",
       model: "claude-sonnet",
       baseUrl: "",
@@ -291,20 +378,20 @@ describe("setAuxiliaryTask", () => {
   it("throws for unknown task", async () => {
     const { setAuxiliaryTask } = await importAuxConfigWithHome(TEST_DIR);
 
-    expect(() =>
+    await expect(
       setAuxiliaryTask("unknown_task", {
         provider: "auto",
         model: "",
         baseUrl: "",
       }),
-    ).toThrow("unknown auxiliary task: unknown_task");
+    ).rejects.toThrow("unknown auxiliary task: unknown_task");
   });
 
   it("handles empty values (sets to auto/empty)", async () => {
     const { setAuxiliaryTask, getAuxiliaryConfig } =
       await importAuxConfigWithHome(TEST_DIR);
 
-    setAuxiliaryTask("vision", {
+    await setAuxiliaryTask("vision", {
       provider: "",
       model: "",
       baseUrl: "",
@@ -340,7 +427,7 @@ describe("resetAuxiliaryToAuto", () => {
     const { resetAuxiliaryToAuto, getAuxiliaryConfig } =
       await importAuxConfigWithHome(TEST_DIR);
 
-    resetAuxiliaryToAuto();
+    await resetAuxiliaryToAuto();
 
     const config = getAuxiliaryConfig();
     for (const task of config) {
@@ -355,7 +442,7 @@ describe("resetAuxiliaryToAuto", () => {
 
     const { resetAuxiliaryToAuto } = await importAuxConfigWithHome(TEST_DIR);
 
-    expect(() => resetAuxiliaryToAuto()).not.toThrow();
+    await expect(resetAuxiliaryToAuto()).resolves.toBeUndefined();
     expect(existsSync(configFile)).toBe(false);
   });
 
@@ -376,7 +463,7 @@ describe("resetAuxiliaryToAuto", () => {
 
     const { resetAuxiliaryToAuto } = await importAuxConfigWithHome(TEST_DIR);
 
-    resetAuxiliaryToAuto();
+    await resetAuxiliaryToAuto();
 
     const content = readFileSync(join(TEST_DIR, "config.yaml"), "utf-8");
     expect(content).toContain('  default: "gpt-4o"');

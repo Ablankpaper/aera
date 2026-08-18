@@ -11,6 +11,7 @@ const mockState = vi.hoisted(() => ({
   /** Owner recorded in the profile's sync state (null = legacy/untagged). */
   linkedAccountId: null as string | null,
   syncAgentsCalls: 0,
+  syncAgentsDependencies: null as unknown,
   // A value the auto-sync "creates" — returned by getLinkedAgentId after sync.
   linkAfterSync: null as string | null,
   // Owner the sync pass stamps onto the state (null = pass couldn't adopt).
@@ -37,8 +38,9 @@ vi.mock("./hermes-account", () => ({
 vi.mock("./agent-sync", () => ({
   getLinkedAgentId: () => mockState.linkedAgentId,
   getLinkedAgentAccountId: () => mockState.linkedAccountId,
-  syncAgents: vi.fn(async () => {
+  syncAgents: vi.fn(async (dependencies?: unknown) => {
     mockState.syncAgentsCalls++;
+    mockState.syncAgentsDependencies = dependencies;
     if (mockState.linkAfterSync) {
       mockState.linkedAgentId = mockState.linkAfterSync;
     }
@@ -87,6 +89,7 @@ beforeEach(() => {
   mockState.linkAfterSync = null;
   mockState.ownerAfterSync = null;
   mockState.syncAgentsCalls = 0;
+  mockState.syncAgentsDependencies = null;
   vi.resetModules();
 });
 
@@ -152,8 +155,12 @@ describe("syncWalletsForProfile", () => {
     mockState.ownerAfterSync = "u1";
     const calls = stubFetch([rawWallet()]);
     const { syncWalletsForProfile } = await engine();
-    const result = await syncWalletsForProfile("default");
+    const modelMutationPort = { mutate: vi.fn() };
+    const result = await syncWalletsForProfile("default", {
+      modelMutationPort,
+    });
     expect(mockState.syncAgentsCalls).toBe(1);
+    expect(mockState.syncAgentsDependencies).toEqual({ modelMutationPort });
     expect(result.status).toBe("ok");
     expect(calls[0]).toContain("agentId=agent-new");
   });

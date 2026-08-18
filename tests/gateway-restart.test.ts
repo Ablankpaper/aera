@@ -14,6 +14,7 @@ const {
   healthRequests,
   restartScript,
   hermesCliArgsSpy,
+  prepareGatewayManagedConfigurationSpy,
 } = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const path = require("path");
@@ -45,6 +46,10 @@ const {
     }>,
     restartScript: script,
     hermesCliArgsSpy: vi.fn(),
+    prepareGatewayManagedConfigurationSpy: vi.fn(async (_profile?: string) => ({
+      key: "unit-test-internal-token",
+      port: 8642,
+    })),
   };
 });
 
@@ -76,6 +81,10 @@ vi.mock("../src/main/config", () => ({
   getConnectionConfig: () => ({ mode: connModeRef.mode }),
   getConfigValue: () => "",
   setConfigValue: vi.fn(),
+}));
+
+vi.mock("../src/main/gateway-managed-config", () => ({
+  prepareGatewayManagedConfiguration: prepareGatewayManagedConfigurationSpy,
 }));
 
 vi.mock("../src/main/ssh-tunnel", () => ({
@@ -156,6 +165,7 @@ vi.mock("http", () => {
 });
 
 import {
+  configureGatewayManagedConfiguration,
   configureGatewayProcessOwnership,
   isGatewayHealthy,
   isGatewayRunning,
@@ -239,11 +249,16 @@ describe("restartGatewayViaCli", () => {
     realGatewayPids.clear();
     pidAliveProbeRef.onProbe = null;
     ensureLocalApiServerKeySpy.mockClear();
+    prepareGatewayManagedConfigurationSpy.mockClear();
+    configureGatewayManagedConfiguration({
+      modelMutationPort: { mutate: vi.fn() },
+    });
     hermesCliArgsSpy.mockReset();
     hermesCliArgsSpy.mockImplementation(() => ["-e", restartScript]);
   });
 
   afterEach(async () => {
+    configureGatewayManagedConfiguration(null);
     await stopAeraOwnedGateways().catch(() => undefined);
     stopGateway(true);
     stopGateway("work", true);
@@ -275,7 +290,7 @@ describe("restartGatewayViaCli", () => {
     });
   });
 
-  it("injects the exact ensured credential into the spawned gateway process", async () => {
+  it("injects the prepared credential without writing from the spawn path", async () => {
     const authProofFile = join(TEST_HOME, "spawn-auth-proof.txt");
     hermesCliArgsSpy.mockImplementation(() => [
       "-e",
@@ -287,7 +302,7 @@ describe("restartGatewayViaCli", () => {
     expect(readFileSync(authProofFile, "utf-8")).toBe(
       "unit-test-internal-token",
     );
-    expect(ensureLocalApiServerKeySpy).toHaveBeenCalledWith("work");
+    expect(ensureLocalApiServerKeySpy).not.toHaveBeenCalled();
   });
 
   it("clears the durable launch intent when spawn setup fails", () => {

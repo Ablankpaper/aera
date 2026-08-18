@@ -1,6 +1,8 @@
 // @vitest-environment node
 
 import { describe, expect, it, vi, type Mocked } from "vitest";
+import type { ManagedModelMutationPort } from "../model-configuration-mutation-port";
+import type { ModelConfigurationWritePermit } from "../model-configuration-write-authority";
 import type { AgentPolicySnapshot, AgentVersion } from "./client";
 import { seedAgentModelProfile } from "./model-profile-seed";
 
@@ -66,6 +68,23 @@ function policyV1(providers: string[], models: string[]): AgentPolicySnapshot {
 }
 
 function dependencies(): Mocked<SeedDependencies> {
+  const modelMutationPort: ManagedModelMutationPort = {
+    async mutate(input) {
+      const plan = await input.prepare();
+      const value = await plan.write(
+        null as unknown as ModelConfigurationWritePermit,
+      );
+      return {
+        status: "executed",
+        value,
+        catalog: {
+          revision: "0".repeat(64),
+          targetProfileId: input.profileIds[0],
+          routes: [],
+        },
+      };
+    },
+  };
   return {
     getModelConfig: vi.fn(() => ({
       provider: "custom:anhepro.com",
@@ -106,11 +125,46 @@ function dependencies(): Mocked<SeedDependencies> {
     upsertNativeCustomProvider: vi.fn(() => "custom:anhepro.com"),
     setModelConfig: vi.fn(),
     setEnvValue: vi.fn(),
-  };
+    modelMutationPort,
+  } as Mocked<SeedDependencies>;
 }
 
 describe("Agent Profile model seeding", () => {
-  it("copies the exact selected library route instead of the source Profile default", () => {
+  // @lat: [[beta27-reliability-plan#Recoverable model configuration#Indirect feature writers use the managed boundary]]
+  it("does not write any target model file when recovery refuses the seed", async () => {
+    const deps = Object.assign(dependencies(), {
+      modelMutationPort: {
+        mutate: vi.fn(async () => ({
+          status: "rejected" as const,
+          stage: "recovery" as const,
+          code: "model_configuration_recovery_required" as const,
+          rollback: "recovery_required" as const,
+          diagnosticId: "0123456789ab",
+        })),
+      },
+    });
+
+    await expect(
+      Promise.resolve(
+        seedAgentModelProfile(
+          {
+            sourceProfileId: "source-profile",
+            targetProfileId: "target-profile",
+            version: version(["custom:anhepro.com"], ["gpt-5.6-sol"]),
+            policy: policyV1(["custom:anhepro.com"], ["gpt-5.6-sol"]),
+          },
+          deps,
+        ),
+      ),
+    ).rejects.toThrow("model_configuration_recovery_required");
+    expect(deps.modelMutationPort.mutate).toHaveBeenCalledTimes(1);
+    expect(deps.upsertCustomProvider).not.toHaveBeenCalled();
+    expect(deps.upsertNativeCustomProvider).not.toHaveBeenCalled();
+    expect(deps.setModelConfig).not.toHaveBeenCalled();
+    expect(deps.setEnvValue).not.toHaveBeenCalled();
+  });
+
+  it("copies the exact selected library route instead of the source Profile default", async () => {
     const deps = dependencies();
     deps.getModelConfig.mockReturnValue({
       provider: "custom:yundu.lat",
@@ -139,7 +193,7 @@ describe("Agent Profile model seeding", () => {
     ]);
     deps.upsertNativeCustomProvider.mockReturnValue("custom:petoi");
 
-    seedAgentModelProfile(
+    await seedAgentModelProfile(
       {
         sourceProfileId: "source-profile",
         sourceModelId: "selected-petoi-model",
@@ -164,7 +218,7 @@ describe("Agent Profile model seeding", () => {
     );
   });
 
-  it("rejects a legacy custom model row that has no provider identity", () => {
+  it("rejects a legacy custom model row that has no provider identity", async () => {
     const deps = dependencies();
     deps.readModels.mockReturnValue([
       {
@@ -177,7 +231,7 @@ describe("Agent Profile model seeding", () => {
       },
     ]);
 
-    expect(() =>
+    await expect(
       seedAgentModelProfile(
         {
           sourceProfileId: "source-profile",
@@ -188,15 +242,15 @@ describe("Agent Profile model seeding", () => {
         },
         deps,
       ),
-    ).toThrow(/identity is unavailable/i);
+    ).rejects.toThrow(/identity is unavailable/i);
     expect(deps.getSecret).not.toHaveBeenCalled();
     expect(deps.setModelConfig).not.toHaveBeenCalled();
   });
 
-  it("uses the current owner's live route for a V2 user_select Agent", () => {
+  it("uses the current owner's live route for a V2 user_select Agent", async () => {
     const deps = dependencies();
 
-    seedAgentModelProfile(
+    await seedAgentModelProfile(
       {
         sourceProfileId: "source-profile",
         targetProfileId: "target-profile",
@@ -216,10 +270,10 @@ describe("Agent Profile model seeding", () => {
     );
   });
 
-  it("enforces the signed effective tenant policy in addition to the version manifest", () => {
+  it("enforces the signed effective tenant policy in addition to the version manifest", async () => {
     const deps = dependencies();
 
-    expect(() =>
+    await expect(
       seedAgentModelProfile(
         {
           sourceProfileId: "source-profile",
@@ -229,17 +283,17 @@ describe("Agent Profile model seeding", () => {
         },
         deps,
       ),
-    ).toThrow(/effective policy/i);
+    ).rejects.toThrow(/effective policy/i);
 
     expect(deps.getSecret).not.toHaveBeenCalled();
     expect(deps.setModelConfig).not.toHaveBeenCalled();
     expect(deps.setEnvValue).not.toHaveBeenCalled();
   });
 
-  it("validates a compatible installed Agent Profile without copying its model route onto itself", () => {
+  it("validates a compatible installed Agent Profile without copying its model route onto itself", async () => {
     const deps = dependencies();
 
-    seedAgentModelProfile(
+    await seedAgentModelProfile(
       {
         sourceProfileId: "installed-agent",
         targetProfileId: "installed-agent",
@@ -259,10 +313,10 @@ describe("Agent Profile model seeding", () => {
     expect(deps.setEnvValue).not.toHaveBeenCalled();
   });
 
-  it("copies only the signed named-provider route and its exact credential", () => {
+  it("copies only the signed named-provider route and its exact credential", async () => {
     const deps = dependencies();
 
-    seedAgentModelProfile(
+    await seedAgentModelProfile(
       {
         sourceProfileId: "source-profile",
         targetProfileId: "target-profile",
@@ -302,7 +356,7 @@ describe("Agent Profile model seeding", () => {
     );
   });
 
-  it("reconfigures an in-place Agent Profile when the new signed version selects another model", () => {
+  it("reconfigures an in-place Agent Profile when the new signed version selects another model", async () => {
     const deps = dependencies();
     deps.getModelConfig.mockReturnValue({
       provider: "custom:anhepro.com",
@@ -334,7 +388,7 @@ describe("Agent Profile model seeding", () => {
       },
     ]);
 
-    seedAgentModelProfile(
+    await seedAgentModelProfile(
       {
         sourceProfileId: "source-profile",
         targetProfileId: "source-profile",
@@ -364,10 +418,10 @@ describe("Agent Profile model seeding", () => {
     );
   });
 
-  it("fails closed before target writes when the signed version disallows the source model", () => {
+  it("fails closed before target writes when the signed version disallows the source model", async () => {
     const deps = dependencies();
 
-    expect(() =>
+    await expect(
       seedAgentModelProfile(
         {
           sourceProfileId: "source-profile",
@@ -377,7 +431,7 @@ describe("Agent Profile model seeding", () => {
         },
         deps,
       ),
-    ).toThrow(/not allowed/);
+    ).rejects.toThrow(/not allowed/);
 
     expect(deps.getSecret).not.toHaveBeenCalled();
     expect(deps.upsertCustomProvider).not.toHaveBeenCalled();
@@ -385,11 +439,11 @@ describe("Agent Profile model seeding", () => {
     expect(deps.setEnvValue).not.toHaveBeenCalled();
   });
 
-  it("fails closed before target writes when a remote route has no credential", () => {
+  it("fails closed before target writes when a remote route has no credential", async () => {
     const deps = dependencies();
     deps.getSecret.mockReturnValue(null);
 
-    expect(() =>
+    await expect(
       seedAgentModelProfile(
         {
           sourceProfileId: "source-profile",
@@ -399,7 +453,7 @@ describe("Agent Profile model seeding", () => {
         },
         deps,
       ),
-    ).toThrow(/credential is unavailable/);
+    ).rejects.toThrow(/credential is unavailable/);
 
     expect(deps.upsertCustomProvider).not.toHaveBeenCalled();
     expect(deps.setModelConfig).not.toHaveBeenCalled();

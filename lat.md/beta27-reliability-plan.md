@@ -48,6 +48,18 @@ Model/config list and get functions never seed, migrate, or rewrite managed file
 
 [[src/main/models.ts#planModelCatalogInitialization]] computes a read-only plan, and [[src/main/model-configuration-coordinator.ts#ModelConfigurationCoordinator#initializeManagedModelFiles]] applies needed changes through the five-file journal. A verified no-op takes the same ordered locks but writes no journal row.
 
+### Indirect feature writers use the managed boundary
+
+Agent Sync, auxiliary tasks, toolsets, image generation, registry, messaging, Gateway, wallet sync, and Agent Profile seeding submit changes through [[src/main/model-configuration-mutation-port.ts#createManagedModelMutationPort]].
+
+A recovery or ownership refusal occurs before the feature write callback and therefore leaves `.env`, `providers.json`, `models.json`, `model-definitions.json`, and `config.yaml` unchanged.
+
+### Hermes projection config activation is transactional
+
+[[src/main/agentera-agent-control/hermes-projection.ts#HermesProjectionManager#activateForProfile]] waits for managed admission before switching the active Skill projection or updating Profile `config.yaml`.
+
+Installation, managed update, restore, and rollback paths await activation; an asynchronous projection failure cannot be recorded as a successful installation or update.
+
 ## Legacy installation recovery
 
 Cold recovery accepts a fresh Installation operation that names only its source Profile and intentionally inherits that Profile's current or default model.

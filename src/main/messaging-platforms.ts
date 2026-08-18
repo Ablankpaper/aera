@@ -12,6 +12,17 @@ import {
   validateMessagingPlatformUpdate,
 } from "../shared/messaging-platforms";
 import { getApiUrl, getRemoteAuthHeader } from "./hermes";
+import {
+  persistConfigWritePlan,
+  planEnvValueWrite,
+  planPlatformEnabledWrite,
+  type ConfigWritePlan,
+} from "./config";
+import { planMessagingPlatformToolsetEnabled } from "./tools";
+import {
+  requireManagedModelMutationValue,
+  type ManagedModelMutationPort,
+} from "./model-configuration-mutation-port";
 
 export function buildDesktopMessagingPlatforms(
   env: Record<string, string>,
@@ -90,6 +101,82 @@ export function applyMessagingPlatformUpdate(
     setEnabled,
     setToolset,
   );
+}
+
+export interface ManagedMessagingPlatformUpdatePlan {
+  readonly envPlan: ConfigWritePlan<void> | null;
+  readonly configPlan: ConfigWritePlan<void | boolean> | null;
+}
+
+export interface ManagedMessagingPlatformUpdateDependencies {
+  readonly modelMutationPort: ManagedModelMutationPort;
+}
+
+export function planManagedMessagingPlatformUpdate(
+  platformId: string,
+  update: MessagingPlatformUpdate,
+  profile?: string,
+): ManagedMessagingPlatformUpdatePlan {
+  validateMessagingPlatformUpdate(platformId, update);
+
+  let envPlan: ConfigWritePlan<void> | null = null;
+  for (const key of update.clear_env ?? []) {
+    envPlan = planEnvValueWrite(key, "", profile, envPlan ?? undefined);
+  }
+  for (const [key, value] of Object.entries(update.env ?? {})) {
+    const trimmed = value.trim();
+    if (trimmed) {
+      envPlan = planEnvValueWrite(key, trimmed, profile, envPlan ?? undefined);
+    }
+  }
+
+  let configPlan: ConfigWritePlan<void | boolean> | null = null;
+  if (update.enabled !== undefined) {
+    configPlan = planPlatformEnabledWrite(
+      platformId,
+      update.enabled,
+      profile,
+      configPlan ?? undefined,
+    );
+  }
+  for (const [toolset, enabled] of Object.entries(update.toolsets ?? {})) {
+    const nextPlan = planMessagingPlatformToolsetEnabled(
+      platformId,
+      toolset,
+      enabled,
+      profile,
+      configPlan ?? undefined,
+    );
+    if (!nextPlan) {
+      throw new Error(`Could not update ${platformId} ${toolset} toolset.`);
+    }
+    configPlan = nextPlan;
+  }
+
+  return { envPlan, configPlan };
+}
+
+export async function applyManagedMessagingPlatformUpdate(
+  platformId: string,
+  update: MessagingPlatformUpdate,
+  profile: string | undefined,
+  dependencies: ManagedMessagingPlatformUpdateDependencies,
+): Promise<{ ok: boolean; platform: string }> {
+  const plan = planManagedMessagingPlatformUpdate(platformId, update, profile);
+  const result = await dependencies.modelMutationPort.mutate({
+    operation: "messaging_platform_update",
+    globalCatalog: false,
+    profileIds: [profile || "default"],
+    stage: plan.envPlan ? "credential" : "activation",
+    prepare: () => ({
+      write: (permit) => {
+        if (plan.envPlan) persistConfigWritePlan(permit, plan.envPlan);
+        if (plan.configPlan) persistConfigWritePlan(permit, plan.configPlan);
+        return { ok: true, platform: platformId };
+      },
+    }),
+  });
+  return requireManagedModelMutationValue(result);
 }
 
 async function applyValidatedMessagingPlatformUpdate(

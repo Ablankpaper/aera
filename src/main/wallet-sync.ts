@@ -9,6 +9,7 @@ import {
   getLinkedAgentAccountId,
   getLinkedAgentId,
   syncAgents,
+  type AgentSyncDependencies,
 } from "./agent-sync";
 import { BASE_NETWORK_ID } from "../shared/wallets";
 import type {
@@ -48,6 +49,8 @@ export type LinkedAgentResolution =
   | { status: "signed-out" | "unlinked" | "foreign" }
   | { status: "ok"; apiUrl: string; token: string; agentId: string };
 
+export type WalletSyncDependencies = AgentSyncDependencies;
+
 /**
  * Resolve the signed-in account and the profile's linked cloud-agent id, the
  * common preamble of every backend wallet call. A profile that has never
@@ -58,6 +61,7 @@ export type LinkedAgentResolution =
  */
 export async function resolveLinkedAgent(
   profile?: string,
+  dependencies: WalletSyncDependencies = {},
 ): Promise<LinkedAgentResolution> {
   const name = profile || "default";
   const accountProfile = findAccountProfile();
@@ -68,7 +72,7 @@ export async function resolveLinkedAgent(
   let agentId = getLinkedAgentId(name);
   if (!agentId) {
     // Never synced: create/link the cloud agent, then read its id.
-    await syncAgents();
+    await syncAgents(dependencies);
     agentId = getLinkedAgentId(name);
   }
   if (!agentId) return { status: "unlinked" };
@@ -80,7 +84,7 @@ export async function resolveLinkedAgent(
     // leaves foreign/ambiguous ones untagged. Without this, a stale agent id
     // from a previously signed-in account would be sent under the new
     // account's token and surface as a generic error.
-    await syncAgents();
+    await syncAgents(dependencies);
     agentId = getLinkedAgentId(name);
     if (!agentId) return { status: "unlinked" };
     owner = getLinkedAgentAccountId(name);
@@ -95,8 +99,9 @@ export async function resolveLinkedAgent(
  */
 export async function syncWalletsForProfile(
   profile?: string,
+  dependencies: WalletSyncDependencies = {},
 ): Promise<WalletSyncResult> {
-  const resolved = await resolveLinkedAgent(profile);
+  const resolved = await resolveLinkedAgent(profile, dependencies);
   if (resolved.status !== "ok") {
     return { status: resolved.status, wallets: [] };
   }

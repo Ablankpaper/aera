@@ -15,7 +15,12 @@ import {
   namedCustomProviderRuntimeName,
   normalizeCustomProviderRuntimeName,
 } from "../../shared/custom-providers";
+import { canonicalPublicRouteKey } from "../../shared/model-configuration";
 import { customProviderEnvKey } from "../../shared/url-key-map";
+import {
+  requireManagedModelMutationValue,
+  type ManagedModelMutationPort,
+} from "../model-configuration-mutation-port";
 import type { AgentPolicySnapshot, AgentVersion } from "./client";
 import {
   agentModelPolicyAllowsRoute,
@@ -31,7 +36,7 @@ export interface AgentModelProfileSeedInput {
   policy: AgentPolicySnapshot;
 }
 
-interface ModelProfileSeedDependencies {
+export interface ModelProfileSeedDependencies {
   getModelConfig: typeof getModelConfig;
   hasOAuthCredentials: typeof hasOAuthCredentials;
   readModels: typeof readModels;
@@ -41,6 +46,7 @@ interface ModelProfileSeedDependencies {
   upsertNativeCustomProvider: typeof upsertNativeCustomProvider;
   setModelConfig: typeof setModelConfig;
   setEnvValue: typeof setEnvValue;
+  modelMutationPort?: ManagedModelMutationPort;
 }
 
 const DEFAULT_DEPENDENCIES: ModelProfileSeedDependencies = {
@@ -54,6 +60,43 @@ const DEFAULT_DEPENDENCIES: ModelProfileSeedDependencies = {
   setModelConfig,
   setEnvValue,
 };
+
+let configuredModelMutationPort: ManagedModelMutationPort | null = null;
+
+export function configureAgentModelProfileSeedMutationPort(
+  modelMutationPort: ManagedModelMutationPort | null,
+): void {
+  configuredModelMutationPort = modelMutationPort;
+}
+
+async function executeManagedProfileSeed(
+  targetProfileId: string,
+  route: {
+    provider: string;
+    model: string;
+    baseUrl: string;
+    apiMode: string | null;
+  },
+  write: () => void,
+  dependencies: ModelProfileSeedDependencies,
+): Promise<void> {
+  const modelMutationPort =
+    dependencies.modelMutationPort ?? configuredModelMutationPort;
+  if (!modelMutationPort) {
+    throw new Error("model_configuration_mutation_unavailable");
+  }
+  const result = await modelMutationPort.mutate({
+    operation: "agent_model_profile_seed",
+    globalCatalog: false,
+    profileIds: [targetProfileId],
+    stage: "activation",
+    prepare: () => ({
+      newRouteKey: canonicalPublicRouteKey(route),
+      write: () => write(),
+    }),
+  });
+  requireManagedModelMutationValue(result);
+}
 
 function normalizedEndpoint(value: string): string {
   return value.trim().replace(/\/+$/, "").toLowerCase();
@@ -172,10 +215,10 @@ function requireRemoteCredential(
  * entries. It resolves exactly one provider credential from a same-owner source
  * Profile and writes only that credential plus the matching model route.
  */
-export function seedAgentModelProfile(
+export async function seedAgentModelProfile(
   input: AgentModelProfileSeedInput,
   dependencies: ModelProfileSeedDependencies = DEFAULT_DEPENDENCIES,
-): void {
+): Promise<void> {
   const source = dependencies.getModelConfig(input.sourceProfileId);
   const models = dependencies.readModels();
   const selected = input.sourceModelId
@@ -272,36 +315,47 @@ export function seedAgentModelProfile(
     );
     if (alreadyCompatibleInPlace) return;
 
-    dependencies.upsertCustomProvider(input.targetProfileId, {
-      name: providerName,
-      baseUrl,
-    });
-    const nativeRoute = dependencies.upsertNativeCustomProvider(
+    const targetProvider = namedProvider
+      ? `custom:${normalizeCustomProviderRuntimeName(providerName)}`
+      : "custom";
+    await executeManagedProfileSeed(
       input.targetProfileId,
       {
-        name: providerName,
-        baseUrl,
+        provider: targetProvider,
         model,
-        models: [model],
-        apiMode: saved?.apiMode ?? undefined,
+        baseUrl,
+        apiMode: saved?.apiMode ?? null,
       },
+      () => {
+        if (credential) {
+          dependencies.setEnvValue(
+            credentialKey,
+            credential,
+            input.targetProfileId,
+          );
+        }
+        dependencies.upsertCustomProvider(input.targetProfileId, {
+          name: providerName,
+          baseUrl,
+        });
+        dependencies.upsertNativeCustomProvider(input.targetProfileId, {
+          name: providerName,
+          baseUrl,
+          model,
+          models: [model],
+          apiMode: saved?.apiMode ?? undefined,
+        });
+        dependencies.setModelConfig(
+          targetProvider,
+          model,
+          baseUrl,
+          input.targetProfileId,
+          saved?.contextLength,
+          saved?.apiMode ?? undefined,
+        );
+      },
+      dependencies,
     );
-    const targetProvider = namedProvider ? nativeRoute : "custom";
-    dependencies.setModelConfig(
-      targetProvider,
-      model,
-      baseUrl,
-      input.targetProfileId,
-      saved?.contextLength,
-      saved?.apiMode ?? undefined,
-    );
-    if (credential) {
-      dependencies.setEnvValue(
-        credentialKey,
-        credential,
-        input.targetProfileId,
-      );
-    }
     return;
   }
 
@@ -316,15 +370,31 @@ export function seedAgentModelProfile(
       )
     : null;
   if (alreadyCompatibleInPlace) return;
-  dependencies.setModelConfig(
-    provider,
-    model,
-    baseUrl,
+  await executeManagedProfileSeed(
     input.targetProfileId,
-    saved?.contextLength,
-    saved?.apiMode ?? undefined,
+    {
+      provider,
+      model,
+      baseUrl,
+      apiMode: saved?.apiMode ?? null,
+    },
+    () => {
+      if (credentialKey && credential) {
+        dependencies.setEnvValue(
+          credentialKey,
+          credential,
+          input.targetProfileId,
+        );
+      }
+      dependencies.setModelConfig(
+        provider,
+        model,
+        baseUrl,
+        input.targetProfileId,
+        saved?.contextLength,
+        saved?.apiMode ?? undefined,
+      );
+    },
+    dependencies,
   );
-  if (credentialKey && credential) {
-    dependencies.setEnvValue(credentialKey, credential, input.targetProfileId);
-  }
 }

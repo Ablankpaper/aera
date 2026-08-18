@@ -5,6 +5,11 @@ import { installSkill, listInstalledSkills } from "./skills";
 import { createProfile } from "./profiles";
 import { writeSoul } from "./soul";
 import { listMcpServers } from "./installer";
+import { persistConfigWritePlan, planConfigDocumentWrite } from "./config";
+import {
+  requireManagedModelMutationValue,
+  type ManagedModelMutationPort,
+} from "./model-configuration-mutation-port";
 import type {
   RegistryKind,
   RegistryItem,
@@ -20,6 +25,10 @@ export type {
   RegistryItem,
   RegistryCatalog,
 } from "../shared/registry";
+
+export interface RegistryInstallDependencies {
+  modelMutationPort: ManagedModelMutationPort;
+}
 
 /**
  * The "Discover" marketplace reads its catalog from a public GitHub repo:
@@ -442,6 +451,7 @@ function renderMcpYaml(id: string, m: EntryManifest): string {
 async function installMcp(
   item: RegistryItem,
   profile?: string,
+  dependencies?: RegistryInstallDependencies,
 ): Promise<InstallResult> {
   if (!item.path) return { success: false, error: "MCP entry has no path" };
   const m = await fetchManifest(item.path);
@@ -449,30 +459,51 @@ async function installMcp(
     return { success: false, error: "MCP manifest has no connection config" };
   }
 
+  if (!dependencies) {
+    return {
+      success: false,
+      error: "model_configuration_mutation_unavailable",
+    };
+  }
   const configPath = join(profileHome(profile), "config.yaml");
-  let content = existsSync(configPath) ? readFileSync(configPath, "utf-8") : "";
+  const content = existsSync(configPath)
+    ? readFileSync(configPath, "utf-8")
+    : "";
   const block = renderMcpYaml(item.id, m);
   const sectionRe = /^mcp_servers:\s*\n/m;
 
-  if (sectionRe.test(content)) {
-    if (new RegExp(`^[ ]{2}${item.id}:\\s*$`, "m").test(content)) {
-      return { success: false, error: "Already configured" };
-    }
-    content = content.replace(sectionRe, (mm) => mm + block);
-  } else {
-    if (content.length && !content.endsWith("\n")) content += "\n";
-    content += `mcp_servers:\n${block}`;
+  if (
+    sectionRe.test(content) &&
+    new RegExp(`^[ ]{2}${item.id}:\\s*$`, "m").test(content)
+  ) {
+    return { success: false, error: "Already configured" };
   }
+  const plan = planConfigDocumentWrite(
+    profile,
+    (initial) => {
+      let next = initial;
+      if (sectionRe.test(next)) {
+        next = next.replace(sectionRe, (match) => match + block);
+      } else {
+        if (next.length && !next.endsWith("\n")) next += "\n";
+        next += `mcp_servers:\n${block}`;
+      }
+      return next;
+    },
+    undefined,
+  );
 
-  try {
-    safeWriteFile(configPath, content);
-    return { success: true };
-  } catch (err) {
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : "Failed to write config",
-    };
-  }
+  const result = await dependencies.modelMutationPort.mutate({
+    operation: "registry_mcp_install",
+    globalCatalog: false,
+    profileIds: [profile || "default"],
+    stage: "activation",
+    prepare: () => ({
+      write: (permit) => persistConfigWritePlan(permit, plan),
+    }),
+  });
+  requireManagedModelMutationValue(result);
+  return { success: true };
 }
 
 /** Download a registry skill's folder into <profile>/skills/<category>/<id>/. */
@@ -535,6 +566,7 @@ export async function installRegistryItem(
   kind: RegistryKind,
   item: RegistryItem,
   profile?: string,
+  dependencies?: RegistryInstallDependencies,
 ): Promise<InstallResult> {
   try {
     switch (kind) {
@@ -543,7 +575,7 @@ export async function installRegistryItem(
           ? await installRegistrySkill(item, profile)
           : installSkill(item.source || item.id, profile);
       case "mcps":
-        return await installMcp(item, profile);
+        return await installMcp(item, profile, dependencies);
       case "agents":
         return await installAgent(item);
       case "workflows":
