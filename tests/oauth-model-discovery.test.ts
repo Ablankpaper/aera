@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { sep } from "node:path";
 
 /**
  * Coverage for OAuth/subscription-provider model discovery.
@@ -223,8 +224,10 @@ describe("OAuth provider model discovery", () => {
         env: NodeJS.ProcessEnv;
       }
     ).env;
-    expect(firstEnv.HERMES_HOME).toContain("profiles/profile-a");
-    expect(secondEnv.HERMES_HOME).toContain("profiles/profile-b");
+    const normalizePath = (value: string | undefined): string =>
+      value?.split(sep).join("/") ?? "";
+    expect(normalizePath(firstEnv.HERMES_HOME)).toContain("profiles/profile-a");
+    expect(normalizePath(secondEnv.HERMES_HOME)).toContain("profiles/profile-b");
     expect(firstEnv.HERMES_HOME).not.toBe(secondEnv.HERMES_HOME);
   });
 
