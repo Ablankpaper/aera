@@ -403,6 +403,15 @@ if (!CLI_MODE) {
     assert.match(workflow, /windows-model-recovery-harness\.ps1/u);
     assert.match(workflow, /actions\/upload-artifact@v4/u);
     assert.match(workflow, /windows-recovery-evidence\.json/u);
+    assert.match(
+      workflow,
+      /\$harnessRoot\s*=\s*Join-Path\s+\(\[System\.IO\.Path\]::GetTempPath\(\)\)/u,
+      "the harness root must match the PowerShell safety check on hosted Windows runners",
+    );
+    assert.doesNotMatch(
+      workflow,
+      /\$harnessRoot\s*=\s*Join-Path\s+\$env:RUNNER_TEMP/u,
+    );
   });
 }
 

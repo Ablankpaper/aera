@@ -143,7 +143,7 @@ jobs:
       - name: Run bounded process-crash recovery harness
         shell: pwsh
         run: |
-          $harnessRoot = Join-Path $env:RUNNER_TEMP "aera-windows-model-recovery-root"
+          $harnessRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("aera-windows-model-recovery-root-" + [Guid]::NewGuid().ToString("N"))
           $evidenceRoot = Join-Path $env:RUNNER_TEMP "aera-windows-model-recovery-evidence"
           New-Item -ItemType Directory -Force -Path $harnessRoot, $evidenceRoot | Out-Null
           ./scripts/release/windows-model-recovery-harness.ps1 `
