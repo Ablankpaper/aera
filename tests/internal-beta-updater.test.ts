@@ -29,6 +29,7 @@ import {
   extractDesktopUpdateZip,
   InternalBetaDesktopUpdater,
   resolveCurrentMacAppPath,
+  validateWindowsInstallPreflight,
   validatePackagedMacRuntimeEntries,
   validatePackagedWindowsRuntimeEntries,
   verifyDesktopUpdateMetadata,
@@ -1672,6 +1673,96 @@ describe("Internal Beta desktop updater", () => {
     },
   );
 
+  it.skipIf(process.platform !== "win32")(
+    "relaunches the unchanged Windows app after a pre-swap validation failure",
+    async () => {
+      const root = await createUserData();
+      const install = join(root, "installed");
+      const missingStaged = join(root, "staged-missing");
+      const backup = join(root, "backup");
+      const marker = join(root, "health-marker");
+      const journal = join(root, "install-journal.json");
+      const failure = join(root, "install-failure.json");
+      const helper = join(root, "update-helper.ps1");
+      const executable = join(install, "Aera.cmd");
+      const restartLog = join(root, "old-restarted.log");
+      await mkdir(install, { recursive: true });
+      await Promise.all([
+        writeFile(
+          executable,
+          '@echo off\r\necho restarted>>"%AERA_TEST_RESTART_LOG%"\r\n',
+        ),
+        writeFile(
+          journal,
+          JSON.stringify({ state: "prepared", rollback_state: "not_started" }),
+        ),
+        writeFile(marker, ""),
+        writeFile(failure, ""),
+        writeFile(
+          helper,
+          buildWindowsUpdateHelperScript({ processWaitAttempts: 2 }),
+        ),
+      ]);
+
+      const powershell = join(
+        process.env.SystemRoot ?? "C:\\Windows",
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe",
+      );
+      await expect(
+        execFile(
+          powershell,
+          [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            helper,
+            "-ProcessId",
+            "99999999",
+            "-InstallDirectory",
+            install,
+            "-StagedDirectory",
+            missingStaged,
+            "-BackupDirectory",
+            backup,
+            "-TargetExecutable",
+            executable,
+            "-MarkerPath",
+            marker,
+            "-JournalPath",
+            journal,
+            "-FailurePath",
+            failure,
+            "-HelperPath",
+            helper,
+            "-TargetVersion",
+            NEXT_VERSION,
+            "-OperationId",
+            "12345678-1234-4234-9234-123456789abc",
+          ],
+          { env: { ...process.env, AERA_TEST_RESTART_LOG: restartLog } },
+        ),
+      ).rejects.toThrow();
+
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        try {
+          await access(restartLog);
+          break;
+        } catch {
+          await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+        }
+      }
+      await expect(readFile(restartLog, "utf8")).resolves.toContain(
+        "restarted",
+      );
+      await expect(access(journal)).rejects.toThrow();
+    },
+  );
+
   it("leaves a stable macOS failure marker after health rollback", () => {
     const script = buildMacUpdateHelperScript();
     expect(script).toContain("update_health_timeout");
@@ -1737,6 +1828,86 @@ describe("Internal Beta desktop updater", () => {
     ).toBeGreaterThanOrEqual(2);
     expect(script).toContain("$newProcess = $null");
   });
+
+  it("relaunches the old Windows app when preparation fails after it exited", () => {
+    const script = buildWindowsUpdateHelperScript();
+    const preSwapCatch = script.slice(script.indexOf("if (-not $swapped)"));
+
+    expect(preSwapCatch).toContain("$oldProcessExited");
+    expect(preSwapCatch).toMatch(
+      /Remove-IfExists \$JournalPath[\s\S]*Start-Process -FilePath \$TargetExecutable/u,
+    );
+  });
+
+  it("checks the sibling-backup parent before the Windows install directory", async () => {
+    const executable = "/opt/Aera/Aera.exe";
+    const checks: Array<{ path: string; mode: number | undefined }> = [];
+
+    await validateWindowsInstallPreflight(executable, async (path, mode) => {
+      checks.push({ path, mode });
+    });
+
+    expect(checks).toEqual([
+      { path: "/opt", mode: expect.any(Number) },
+      { path: "/opt/Aera", mode: expect.any(Number) },
+    ]);
+    expect(checks[0]?.mode).toBe(checks[1]?.mode);
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "checks the Windows install parent before spawning the swap helper",
+    async () => {
+      const userDataPath = await createUserData();
+      const installParent = await mkdtemp(
+        join(tmpdir(), "aera-install-parent-"),
+      );
+      createdDirectories.push(installParent);
+      const installDirectory = join(installParent, "Aera");
+      const executable = join(installDirectory, "Aera.exe");
+      await mkdir(installDirectory, { recursive: true });
+      await writeFile(executable, "old");
+      await chmod(installDirectory, 0o700);
+      await chmod(installParent, 0o500);
+
+      const release = signedRelease();
+      const spawnDetachedProcess = vi.fn(async () => {});
+      const updater = new InternalBetaDesktopUpdater({
+        currentVersion: CURRENT_VERSION,
+        platform: "win32",
+        arch: "x64",
+        userDataPath,
+        currentAppPath: executable,
+        baseUrl: BASE_URL,
+        trustedPublicKeys: new Map([[KEY_ID, release.publicKeyPem]]),
+        autoDownload: false,
+        onState: vi.fn(),
+        log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        metadataTransport: transportFor(
+          release.manifestBytes,
+          release.signatureBytes,
+        ),
+        downloadArtifact: async (request) => {
+          await writeFile(request.destination, release.windowsBytes);
+          request.onProgress(
+            release.windowsBytes.length,
+            release.windowsBytes.length,
+          );
+        },
+        prepareArtifact: async () => {},
+        spawnDetachedProcess,
+      });
+
+      try {
+        await updater.initialize();
+        await updater.check();
+        await updater.download();
+        await expect(updater.install()).rejects.toThrow();
+        expect(spawnDetachedProcess).not.toHaveBeenCalled();
+      } finally {
+        await chmod(installParent, 0o700);
+      }
+    },
+  );
 
   it("rejects invalid Windows helper limits", () => {
     expect(() =>

@@ -41,6 +41,7 @@ const packagedUpdaterVerifierPath = new URL(
   "./verify-packaged-updater-extraction.mjs",
   import.meta.url,
 );
+const windowsSmokePath = new URL("./windows-update-smoke.ps1", import.meta.url);
 const execFileAsync = promisify(execFile);
 const sourceSha = "a".repeat(40);
 
@@ -477,3 +478,50 @@ test(
     );
   },
 );
+
+test(
+  "Windows runner accepts the internal-Beta smoke PowerShell syntax",
+  { skip: process.platform !== "win32" },
+  async () => {
+    await execFileAsync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-Command",
+        "$tokens = $null; $errors = $null; [System.Management.Automation.Language.Parser]::ParseFile($env:WINDOWS_SMOKE_PATH, [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }",
+      ],
+      {
+        env: {
+          ...process.env,
+          WINDOWS_SMOKE_PATH: fileURLToPath(windowsSmokePath),
+        },
+      },
+    );
+  },
+);
+
+test("Internal Beta Windows candidate runs disposable install/start/update/rollback smoke", async () => {
+  const raw = await readFile(workflowPath, "utf8");
+  const workflow = parseYAML(raw);
+  const step = workflow.jobs.windows.steps.find(
+    (candidate) =>
+      candidate.name === "Exercise Windows install/start/update/rollback smoke",
+  );
+  assert.ok(step, "Windows candidate must run the disposable smoke gate");
+  assert.match(step.run, /scripts\/internal-beta\/windows-update-smoke\.ps1/u);
+  for (const argument of [
+    "-AppDirectory",
+    "-SetupPath",
+    "-PortablePath",
+    "-Version",
+    "-HelperScript",
+  ]) {
+    assert.match(step.run, new RegExp(argument, "u"));
+  }
+  const smokeScript = await readFile(windowsSmokePath, "utf8");
+  assert.match(smokeScript, /HERMES_DESKTOP_USER_DATA_DIR/u);
+  assert.match(smokeScript, /Start-Process/u);
+  assert.match(smokeScript, /rollback|Restore/u);
+  assert.match(smokeScript, /synthetic|disposable/u);
+  assert.doesNotMatch(smokeScript, /\?\?/u);
+});

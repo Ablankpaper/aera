@@ -668,6 +668,30 @@ jobs:
           if ($manifests.Count -ne 1) { throw "Expected one Runtime Seed manifest" }
           Copy-Item $manifests[0].FullName -Destination (Join-Path $destination "runtime-seed")
 
+      - name: Exercise Windows install/start/update/rollback smoke
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          HELPER_OUTPUT: ${{ runner.temp }}\windows-update-helper.ps1
+        run: |
+          $unpacked = @(Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*unpacked" })
+          if ($unpacked.Count -ne 1) { throw "Expected exactly one unpacked Windows app" }
+          $setup = Join-Path "dist" "Aera-Internal-Beta-$env:VERSION-windows-x64-setup.exe"
+          $portable = Join-Path "dist" "Aera-Internal-Beta-$env:VERSION-windows-x64-portable.exe"
+          if (-not (Test-Path -LiteralPath $setup -PathType Leaf)) { throw "Windows setup artifact is missing" }
+          if (-not (Test-Path -LiteralPath $portable -PathType Leaf)) { throw "Windows portable artifact is missing" }
+          node --input-type=module -e "import { writeFileSync } from 'node:fs'; import { buildWindowsUpdateHelperScript } from './out/main/internal-beta-updater.js'; writeFileSync(process.env.HELPER_OUTPUT, buildWindowsUpdateHelperScript({ processWaitAttempts: 300, healthyWaitAttempts: 300 }), 'utf8');"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path -LiteralPath $env:HELPER_OUTPUT -PathType Leaf)) { throw "Compiled Windows helper was not generated" }
+          & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+            -File scripts/internal-beta/windows-update-smoke.ps1 `
+            -AppDirectory $unpacked[0].FullName `
+            -SetupPath $setup `
+            -PortablePath $portable `
+            -Version $env:VERSION `
+            -HelperScript $env:HELPER_OUTPUT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Upload Windows internal-Beta bytes
         uses: actions/upload-artifact@v4
         with:

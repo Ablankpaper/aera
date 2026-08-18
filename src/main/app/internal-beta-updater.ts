@@ -1529,6 +1529,21 @@ function safeWindowsExecutablePath(path: string | null): string {
   return executable;
 }
 
+type WindowsInstallPathAccess = (path: string, mode?: number) => Promise<void>;
+
+export async function validateWindowsInstallPreflight(
+  executablePath: string,
+  accessPath: WindowsInstallPathAccess = access,
+): Promise<void> {
+  const executable = safeWindowsExecutablePath(executablePath);
+  const installDirectory = dirname(executable);
+  // The swap moves the whole install directory to a sibling backup.  The
+  // parent therefore needs create/rename permission in addition to the
+  // install directory itself being writable.
+  await accessPath(dirname(installDirectory), fsConstants.W_OK);
+  await accessPath(installDirectory, fsConstants.W_OK);
+}
+
 function windowsPowerShellPath(): string {
   const systemRoot = process.env.SystemRoot;
   return systemRoot
@@ -1811,9 +1826,11 @@ export function buildWindowsUpdateHelperScript(options?: {
     "  exit 1",
     "}",
     "$swapped = $false",
+    "$oldProcessExited = $false",
     "try {",
     "  Write-Journal 'waiting_for_exit' 'not_started'",
     "  Wait-ForProcessTreeExit",
+    "  $oldProcessExited = $true",
     "  if (Test-Path -LiteralPath $BackupDirectory) { throw 'backup_exists' }",
     "  if (-not (Test-Path -LiteralPath $InstallDirectory -PathType Container)) { throw 'install_directory_missing' }",
     "  if (-not (Test-Path -LiteralPath $StagedDirectory -PathType Container)) { throw 'staged_directory_missing' }",
@@ -1848,6 +1865,15 @@ export function buildWindowsUpdateHelperScript(options?: {
     "    Remove-IfExists $JournalPath",
     "    Remove-IfExists $MarkerPath",
     "    Remove-IfExists $HelperPath",
+    "    if ($oldProcessExited) {",
+    "      try {",
+    "        if (-not (Test-Path -LiteralPath $TargetExecutable -PathType Leaf)) { throw 'old_executable_missing' }",
+    "        [void](Start-Process -FilePath $TargetExecutable)",
+    "      } catch {",
+    "        Write-Failure 'update_rollback_failed' 'failed'",
+    "        exit 75",
+    "      }",
+    "    }",
     "    exit 1",
     "  }",
     "  $code = if ($_.Exception.Message -eq 'health_timeout' -or $_.Exception.Message -eq 'new_process_exited_before_health') { 'update_health_timeout' } else { 'update_swap_failed' }",
@@ -1864,7 +1890,7 @@ async function defaultInstallArtifact(
   if (context.platform === "win32") {
     const currentExecutable = safeWindowsExecutablePath(context.currentAppPath);
     const installDirectory = dirname(currentExecutable);
-    await access(installDirectory, fsConstants.W_OK);
+    await validateWindowsInstallPreflight(currentExecutable);
     const backupDirectory = `${installDirectory}.aera-update-backup-${process.pid}`;
     const markerPath = assertOwnedPath(
       context.root,
