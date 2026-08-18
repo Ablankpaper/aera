@@ -82,7 +82,7 @@ describe("OAuth provider model discovery", () => {
       undefined,
       undefined,
     );
-    expect(result.status).toBe("ok");
+    expect(result.status).toBe("success_with_models");
     // sorted + de-duped
     expect(result.models).toEqual([
       "gpt-5.2-codex",
@@ -104,7 +104,7 @@ describe("OAuth provider model discovery", () => {
       undefined,
       undefined,
     );
-    expect(result.status).toBe("ok");
+    expect(result.status).toBe("success_with_models");
     expect(result.models).toContain("gpt-5.3-codex");
     expect(result.models.length).toBeGreaterThan(0);
   });

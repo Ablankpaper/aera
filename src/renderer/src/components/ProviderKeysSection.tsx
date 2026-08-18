@@ -214,7 +214,7 @@ function ProviderModelsManager({
     await reload();
   }
 
-  // Derive the key-status line from live discovery. `ok` means the endpoint
+  // Derive the key-status line from live discovery. A non-empty 2xx catalogue
   // accepted the key and returned a model list, so "verified" is truthful;
   // providers that don't expose /models fall back to a plain "Connected".
   const hasKey = !!apiKey.trim();
@@ -222,14 +222,13 @@ function ProviderModelsManager({
     ? { tone: "muted", text: t("providers.keys.status.needsKey") }
     : discovery.status === "loading"
       ? { tone: "loading", text: t("providers.keys.status.verifying") }
-      : discovery.status === "ok"
+      : discovery.status === "success_with_models"
         ? { tone: "ok", text: t("providers.keys.status.verified") }
-        : discovery.status === "unsupported" ||
+        : discovery.status === "success_empty" ||
+            discovery.status === "unsupported" ||
             discovery.status === "unknown-host"
           ? { tone: "ok", text: t("providers.keys.status.connected") }
-          : discovery.status === "error"
-            ? { tone: "muted", text: t("providers.keys.status.failed") }
-            : { tone: "ok", text: t("providers.keys.status.connected") };
+          : { tone: "muted", text: t("providers.keys.status.failed") };
 
   return (
     <>

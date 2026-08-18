@@ -47,7 +47,7 @@ describe("ModelCenter", () => {
     listCustomProviders.mockResolvedValue([]);
     discoverProviderModels.mockResolvedValue({
       models: ["gpt-5.6-sol"],
-      status: "ok",
+      status: "success_with_models",
       cached: false,
     });
     addModel.mockResolvedValue({
@@ -92,7 +92,7 @@ describe("ModelCenter", () => {
     });
   });
 
-  async function completePetoiForm(): Promise<void> {
+  async function openPetoiFormAndFetch(): Promise<void> {
     await waitFor(() => expect(listModels).toHaveBeenCalled());
     fireEvent.click(
       screen.getAllByRole("button", {
@@ -108,6 +108,10 @@ describe("ModelCenter", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "providers.center.connect" }),
     );
+  }
+
+  async function completePetoiForm(): Promise<void> {
+    await openPetoiFormAndFetch();
     await waitFor(() =>
       expect(
         (
@@ -121,6 +125,90 @@ describe("ModelCenter", () => {
       screen.getByRole("button", { name: "providers.center.addAndUse" }),
     );
   }
+
+  it.each([
+    ["authentication_rejected", "providers.center.errors.authentication"],
+    ["forbidden", "providers.center.errors.forbidden"],
+    ["not_found", "providers.center.errors.notFound"],
+    ["rate_limited", "providers.center.errors.rateLimited"],
+    ["upstream_error", "providers.center.errors.upstream"],
+    ["malformed_response", "providers.center.errors.malformed"],
+    ["timeout", "providers.center.errors.timeout"],
+    ["network_error", "providers.center.errors.network"],
+  ])("shows the exact %s discovery failure", async (status, message) => {
+    discoverProviderModels.mockResolvedValue({
+      models: [],
+      status,
+      cached: false,
+    });
+    render(
+      <ModelCenter
+        profile="acceptance"
+        env={{}}
+        activeModel={{ provider: "auto", model: "", baseUrl: "" }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    await openPetoiFormAndFetch();
+
+    expect(await screen.findByText(message)).toBeVisible();
+    expect(
+      screen.queryByText("providers.center.manualModelHint"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a network error when model discovery rejects", async () => {
+    discoverProviderModels.mockRejectedValue(new Error("socket closed"));
+    render(
+      <ModelCenter
+        profile="acceptance"
+        env={{}}
+        activeModel={{ provider: "auto", model: "", baseUrl: "" }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    await openPetoiFormAndFetch();
+
+    expect(
+      await screen.findByText("providers.center.errors.network"),
+    ).toBeVisible();
+  });
+
+  it("keeps a valid empty catalogue separate from discovery failures", async () => {
+    discoverProviderModels.mockResolvedValue({
+      models: [],
+      status: "success_empty",
+      cached: false,
+    });
+    render(
+      <ModelCenter
+        profile="acceptance"
+        env={{}}
+        activeModel={{ provider: "auto", model: "", baseUrl: "" }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    await openPetoiFormAndFetch();
+
+    expect(
+      await screen.findByText("providers.center.manualModelHint"),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("providers.center.errors.connection"),
+    ).not.toBeInTheDocument();
+  });
 
   it("uses the Petoi preset to connect, discover, save, and activate a model", async () => {
     const onSaveKey = vi.fn().mockResolvedValue(undefined);
@@ -377,11 +465,60 @@ describe("ModelCenter", () => {
     await completePetoiForm();
 
     expect(
-      await screen.findByText("providers.center.errors.stage"),
+      await screen.findByText("providers.center.errors.provider"),
     ).toBeVisible();
     expect(screen.getByLabelText(/providers\.center\.apiKey/)).toHaveValue(
       "petoi-test-key",
     );
+  });
+
+  it.each([
+    ["native_module_abi_mismatch", "providers.center.errors.runtimeNative"],
+    [
+      "model_configuration_database_unavailable",
+      "providers.center.errors.database",
+    ],
+    [
+      "model_configuration_schema_unsupported",
+      "providers.center.errors.schema",
+    ],
+    [
+      "model_configuration_recovery_required",
+      "providers.center.errors.recovery",
+    ],
+  ])("shows the real %s save failure", async (code, message) => {
+    const mutateModelConfiguration = vi.fn().mockResolvedValue({
+      status: "rejected",
+      stage:
+        code === "model_configuration_recovery_required"
+          ? "recovery"
+          : "validation",
+      code,
+      rollback:
+        code === "model_configuration_recovery_required"
+          ? "recovery_required"
+          : "not_needed",
+      diagnosticId: "abc123def456",
+    });
+    Object.assign(window.hermesAPI, {
+      getOwnerModelRouteCatalog: vi.fn().mockResolvedValue(emptyCatalog),
+      mutateModelConfiguration,
+    });
+    render(
+      <ModelCenter
+        profile="acceptance"
+        env={{}}
+        activeModel={{ provider: "auto", model: "", baseUrl: "" }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    await completePetoiForm();
+
+    expect(await screen.findByText(`${message} (abc123def456)`)).toBeVisible();
   });
 
   it("shows context length and API mode only in custom mode", async () => {
@@ -609,7 +746,7 @@ describe("ModelCenter", () => {
     ]);
     discoverProviderModels.mockResolvedValue({
       models: ["gpt-5.6-sol", "gpt-5.6-terra"],
-      status: "ok",
+      status: "success_with_models",
       cached: false,
     });
 
@@ -654,6 +791,46 @@ describe("ModelCenter", () => {
       undefined,
       "chat_completions",
     );
+  });
+
+  it("shows a network error when refreshing a service rejects", async () => {
+    listModels.mockResolvedValue([
+      {
+        id: "model-1",
+        name: "gpt-5.6-sol",
+        provider: "custom",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://api.petoi.cn/v1",
+        apiMode: "chat_completions",
+        createdAt: 1,
+      },
+    ]);
+    discoverProviderModels.mockRejectedValue(new Error("socket closed"));
+    render(
+      <ModelCenter
+        profile="acceptance"
+        env={{ PETOI_API_KEY: "configured" }}
+        activeModel={{
+          provider: "custom",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://api.petoi.cn/v1",
+        }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "providers.center.refreshModels",
+      }),
+    );
+
+    expect(
+      await screen.findByText("providers.center.errors.network"),
+    ).toBeVisible();
   });
 
   it("keeps a named custom provider's credential when its URL matches a preset", async () => {
@@ -841,6 +1018,99 @@ describe("ModelCenter", () => {
     expect(screen.getByLabelText(/providers\.center\.baseUrl/)).toHaveValue(
       "https://api.petoi.cn/v1",
     );
+  });
+
+  it("separates saved models from a failed live discovery", async () => {
+    listModels.mockResolvedValue([
+      {
+        id: "model-1",
+        name: "saved-model",
+        provider: "custom",
+        model: "saved-model",
+        baseUrl: "https://api.petoi.cn/v1",
+        apiMode: "chat_completions",
+        createdAt: 1,
+      },
+    ]);
+    discoverProviderModels.mockResolvedValue({
+      models: [],
+      status: "authentication_rejected",
+      cached: false,
+    });
+    render(
+      <ModelCenter
+        env={{ PETOI_API_KEY: "configured" }}
+        activeModel={{
+          provider: "custom",
+          model: "saved-model",
+          baseUrl: "https://api.petoi.cn/v1",
+        }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "common.edit" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "providers.center.connect" }),
+    );
+
+    expect(
+      await screen.findByText("providers.center.errors.authentication"),
+    ).toBeVisible();
+    expect(
+      screen.getByText("providers.center.savedModelsCount:1"),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("providers.center.modelsFound:1"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows live discovery count separately from saved models", async () => {
+    listModels.mockResolvedValue([
+      {
+        id: "model-1",
+        name: "saved-model",
+        provider: "custom",
+        model: "saved-model",
+        baseUrl: "https://api.petoi.cn/v1",
+        apiMode: "chat_completions",
+        createdAt: 1,
+      },
+    ]);
+    discoverProviderModels.mockResolvedValue({
+      models: ["live-one", "live-two"],
+      status: "success_with_models",
+      cached: false,
+    });
+    render(
+      <ModelCenter
+        env={{ PETOI_API_KEY: "configured" }}
+        activeModel={{
+          provider: "custom",
+          model: "saved-model",
+          baseUrl: "https://api.petoi.cn/v1",
+        }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "common.edit" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "providers.center.connect" }),
+    );
+
+    expect(
+      await screen.findByText("providers.center.fetchedModelsCount:2"),
+    ).toBeVisible();
+    expect(
+      screen.getByText("providers.center.savedModelsCount:1"),
+    ).toBeVisible();
   });
 
   it("carries the stable custom-provider id when saving a renamed service", async () => {

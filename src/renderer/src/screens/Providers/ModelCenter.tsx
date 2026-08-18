@@ -419,6 +419,92 @@ export default function ModelCenter({
   onBrowseRegistry,
 }: ModelCenterProps): React.JSX.Element {
   const { t } = useI18n();
+  type DiscoveryStatus = Awaited<
+    ReturnType<typeof window.hermesAPI.discoverProviderModels>
+  >["status"];
+  const discoveryFailureMessage = (status: DiscoveryStatus): string => {
+    switch (status) {
+      case "no-key":
+        return t("providers.center.errors.apiKey");
+      case "authentication_rejected":
+        return t("providers.center.errors.authentication");
+      case "forbidden":
+        return t("providers.center.errors.forbidden");
+      case "not_found":
+        return t("providers.center.errors.notFound");
+      case "rate_limited":
+        return t("providers.center.errors.rateLimited");
+      case "upstream_error":
+        return t("providers.center.errors.upstream");
+      case "malformed_response":
+        return t("providers.center.errors.malformed");
+      case "timeout":
+        return t("providers.center.errors.timeout");
+      case "network_error":
+      default:
+        return t("providers.center.errors.network");
+    }
+  };
+  type RejectedMutation = Extract<
+    ModelConfigurationMutationResult,
+    { status: "rejected" }
+  >;
+  const mutationFailureMessage = (result: RejectedMutation): string => {
+    let message: string;
+    switch (result.code) {
+      case "native_module_abi_mismatch":
+      case "native_module_architecture_mismatch":
+      case "native_module_dependency_missing":
+      case "native_module_load_denied":
+      case "native_module_load_failed":
+        message = t("providers.center.errors.runtimeNative");
+        break;
+      case "model_configuration_database_unavailable":
+        message = t("providers.center.errors.database");
+        break;
+      case "model_configuration_schema_unsupported":
+        message = t("providers.center.errors.schema");
+        break;
+      case "model_configuration_recovery_required":
+        message = t("providers.center.errors.recovery");
+        break;
+      default:
+        switch (result.stage) {
+          case "credential":
+            message = t("providers.center.errors.credential");
+            break;
+          case "provider":
+            message = t("providers.center.errors.provider");
+            break;
+          case "model_library":
+            message = t("providers.center.errors.modelLibrary");
+            break;
+          case "native_route":
+            message = t("providers.center.errors.route");
+            break;
+          case "activation":
+            message = t("providers.center.errors.activation");
+            break;
+          case "verification":
+            message = t("providers.center.errors.verification");
+            break;
+          case "rollback":
+            message = t("providers.center.errors.rollback");
+            break;
+          case "recovery":
+            message = t("providers.center.errors.recovery");
+            break;
+          case "validation":
+          default:
+            message = t("providers.center.errors.validation");
+            break;
+        }
+        break;
+    }
+    return result.diagnosticId
+      ? `${message} (${result.diagnosticId})`
+      : message;
+  };
   // The active chat `profile` (a named/installed agent profile) is not
   // necessarily where the coordinated catalog writes model configuration.
   // `canonicalTargetProfileId` resolves an installed profile down to the
@@ -451,6 +537,10 @@ export default function ModelCenter({
   const [nameEdited, setNameEdited] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [modelOptions, setModelOptions] = useState<string[]>([]);
+  const [savedModelCount, setSavedModelCount] = useState(0);
+  const [fetchedModelCount, setFetchedModelCount] = useState<number | null>(
+    null,
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const [connectionState, setConnectionState] =
@@ -696,6 +786,7 @@ export default function ModelCenter({
 
   const resetTransientState = (): void => {
     setConnectionState("idle");
+    setFetchedModelCount(null);
     setFormError("");
     setFormWarning("");
     setShowKey(false);
@@ -705,6 +796,7 @@ export default function ModelCenter({
     setEditingService(null);
     setForm(EMPTY_FORM);
     setModelOptions([]);
+    setSavedModelCount(0);
     setNameEdited(false);
     resetTransientState();
     setDialogOpen(true);
@@ -730,6 +822,9 @@ export default function ModelCenter({
     });
     setModelOptions(
       Array.from(new Set(attachedModels.map((model) => model.model))),
+    );
+    setSavedModelCount(
+      new Set(attachedModels.map((model) => model.model)).size,
     );
     setNameEdited(false);
     resetTransientState();
@@ -764,6 +859,9 @@ export default function ModelCenter({
     setModelOptions(
       Array.from(new Set(attachedModels.map((model) => model.model))),
     );
+    setSavedModelCount(
+      new Set(attachedModels.map((model) => model.model)).size,
+    );
     setNameEdited(true);
     resetTransientState();
     setDialogOpen(true);
@@ -780,6 +878,7 @@ export default function ModelCenter({
     setEditingService(null);
     setForm({ ...EMPTY_FORM, mode });
     setModelOptions([]);
+    setSavedModelCount(0);
     setNameEdited(false);
     resetTransientState();
   };
@@ -792,6 +891,7 @@ export default function ModelCenter({
     if (!preset) {
       setForm({ ...EMPTY_FORM, mode: "preset" });
       setModelOptions([]);
+      setSavedModelCount(0);
       resetTransientState();
       return;
     }
@@ -809,6 +909,9 @@ export default function ModelCenter({
     });
     setModelOptions(
       Array.from(new Set(attachedModels.map((model) => model.model))),
+    );
+    setSavedModelCount(
+      new Set(attachedModels.map((model) => model.model)).size,
     );
     resetTransientState();
   };
@@ -847,6 +950,7 @@ export default function ModelCenter({
     }
 
     setConnectionState("loading");
+    setFetchedModelCount(null);
     setFormError("");
     try {
       const result = await window.hermesAPI.discoverProviderModels(
@@ -855,7 +959,8 @@ export default function ModelCenter({
         form.apiKey.trim() || undefined,
         targetProfileRef.current ?? profile,
       );
-      if (result.status === "ok") {
+      if (result.status === "success_with_models") {
+        setFetchedModelCount(result.models.length);
         const nextOptions = Array.from(
           new Set([...modelOptions, ...result.models]),
         );
@@ -867,19 +972,20 @@ export default function ModelCenter({
         setConnectionState(result.models.length > 0 ? "connected" : "manual");
         return;
       }
+      if (result.status === "success_empty") {
+        setFetchedModelCount(0);
+        setConnectionState("manual");
+        return;
+      }
       if (result.status === "unsupported") {
         setConnectionState("manual");
         return;
       }
       setConnectionState("failed");
-      setFormError(
-        result.status === "no-key"
-          ? t("providers.center.errors.apiKey")
-          : t("providers.center.errors.connection"),
-      );
+      setFormError(discoveryFailureMessage(result.status));
     } catch {
       setConnectionState("failed");
-      setFormError(t("providers.center.errors.connection"));
+      setFormError(t("providers.center.errors.network"));
     }
   };
 
@@ -1099,7 +1205,7 @@ export default function ModelCenter({
         if (result.status === "rejected") {
           updateServiceFeedback(service.key, {
             tone: "error",
-            message: t("providers.center.errors.activate"),
+            message: mutationFailureMessage(result),
           });
           return;
         }
@@ -1162,7 +1268,7 @@ export default function ModelCenter({
         apiKey || undefined,
         targetProfileRef.current ?? profile,
       );
-      if (result.status === "ok") {
+      if (result.status === "success_with_models") {
         for (const modelId of result.models) {
           const modelArgs = [
             modelId.split("/").pop() || modelId,
@@ -1194,6 +1300,13 @@ export default function ModelCenter({
         });
         return;
       }
+      if (result.status === "success_empty") {
+        updateServiceFeedback(service.key, {
+          tone: "neutral",
+          message: t("providers.center.refreshEmpty"),
+        });
+        return;
+      }
       if (result.status === "unsupported" || result.status === "unknown-host") {
         updateServiceFeedback(service.key, {
           tone: "neutral",
@@ -1203,15 +1316,12 @@ export default function ModelCenter({
       }
       updateServiceFeedback(service.key, {
         tone: "error",
-        message:
-          result.status === "no-key"
-            ? t("providers.center.errors.apiKey")
-            : t("providers.center.errors.connection"),
+        message: discoveryFailureMessage(result.status),
       });
     } catch {
       updateServiceFeedback(service.key, {
         tone: "error",
-        message: t("providers.center.errors.connection"),
+        message: t("providers.center.errors.network"),
       });
     } finally {
       setBusyService(null);
@@ -1266,7 +1376,7 @@ export default function ModelCenter({
           setDeleteError(
             service.isActive && !attempt.replacement
               ? t("providers.center.errors.replacementRequired")
-              : t("providers.center.errors.delete"),
+              : mutationFailureMessage(result),
           );
           return;
         }
@@ -1395,9 +1505,7 @@ export default function ModelCenter({
           activeModel: modelId,
         });
         if (result.status === "rejected") {
-          setFormError(
-            t("providers.center.errors.stage", { stage: result.stage }),
-          );
+          setFormError(mutationFailureMessage(result));
           return;
         }
         applyCommittedResult(result, {
@@ -1787,6 +1895,7 @@ export default function ModelCenter({
                           : autoProviderName(baseUrl),
                     }));
                     setConnectionState("idle");
+                    setFetchedModelCount(null);
                     setFormError("");
                   }}
                   placeholder={t("providers.center.baseUrlPlaceholder")}
@@ -1821,6 +1930,7 @@ export default function ModelCenter({
                         apiKey: event.target.value,
                       }));
                       setConnectionState("idle");
+                      setFetchedModelCount(null);
                       setFormError("");
                     }}
                     placeholder={t("providers.center.apiKeyPlaceholder")}
@@ -1880,12 +1990,19 @@ export default function ModelCenter({
                   ))}
                 </datalist>
                 <span className="models-modal-hint">
-                  {modelOptions.length > 0
-                    ? t("providers.center.modelsFound", {
-                        count: modelOptions.length,
+                  {savedModelCount > 0
+                    ? t("providers.center.savedModelsCount", {
+                        count: savedModelCount,
                       })
                     : t("providers.center.modelHint")}
                 </span>
+                {fetchedModelCount !== null && (
+                  <span className="models-modal-hint">
+                    {t("providers.center.fetchedModelsCount", {
+                      count: fetchedModelCount,
+                    })}
+                  </span>
+                )}
               </div>
 
               {connectionState === "manual" && (

@@ -316,15 +316,14 @@ function AuxiliaryTasksSection({
                         <span className="models-modal-hint">
                           {auxDiscovery.status === "loading"
                             ? t("settings.discoveringModels")
-                            : auxDiscovery.status === "ok"
+                            : auxDiscovery.status === "success_with_models" ||
+                                auxDiscovery.status === "success_empty"
                               ? t("settings.discoveredCount", {
                                   count: auxDiscovery.models.length,
                                 })
                               : auxDiscovery.status === "no-key"
                                 ? t("settings.discoveryNoKey")
-                                : auxDiscovery.status === "error"
-                                  ? t("settings.discoveryError")
-                                  : ""}
+                                : t("settings.discoveryError")}
                         </span>
                       )}
                   </div>

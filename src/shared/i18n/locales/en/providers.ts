@@ -60,6 +60,8 @@ export default {
       "No model catalog was detected. Check the Base URL or enter the model ID below.",
     modelPlaceholder: "Select or enter a model ID",
     modelsFound: "{{count}} models found",
+    savedModelsCount: "Saved locally: {{count}} models",
+    fetchedModelsCount: "Fetched this time: {{count}} models",
     modelHint:
       "Connect to load available models. You can also enter an ID manually.",
     contextLength: "Context length",
@@ -102,6 +104,17 @@ export default {
       apiKey: "Enter an API key.",
       connection:
         "Connection failed. Check the API key, network, and endpoint.",
+      authentication: "The model service rejected this API key.",
+      forbidden: "The model service denied access. Check account permissions.",
+      notFound: "The model-list endpoint was not found. Check the Base URL.",
+      rateLimited:
+        "The model service is rate limiting requests. Try again later.",
+      upstream:
+        "The model service is temporarily unavailable. Try again later.",
+      malformed: "The model service returned an invalid model catalogue.",
+      timeout: "Fetching models timed out. Check the network and try again.",
+      network:
+        "Could not reach the model service. Check the network and Base URL.",
       name: "Enter a service name.",
       model: "Choose or enter a default model.",
       activate: "Could not switch the default model. Try again.",
@@ -109,6 +122,29 @@ export default {
       save: "Could not save the model service. Try again.",
       stage:
         "The model service was not saved. No partial configuration was kept.",
+      runtimeNative:
+        "The local model configuration component could not load. Reinstall this version and try again. Diagnostic",
+      database:
+        "The local model configuration database is unavailable. Restart Aera and try again. Diagnostic",
+      schema:
+        "This model configuration requires a newer Aera version. Diagnostic",
+      recovery:
+        "Model configuration is being recovered safely. Try again shortly. Diagnostic",
+      validation:
+        "Model configuration changed. Refresh the page and try again.",
+      credential:
+        "The API key was not saved. The previous configuration was kept.",
+      provider:
+        "The model service was not saved. The previous configuration was kept.",
+      modelLibrary:
+        "The model list was not saved. The previous configuration was kept.",
+      route:
+        "The model route was not saved. The previous configuration was kept.",
+      activation: "The model was saved but could not be made the default.",
+      verification:
+        "The saved model configuration did not verify. The previous configuration was restored.",
+      rollback:
+        "Model configuration recovery did not finish, so Aera stopped further writes.",
       replacementRequired:
         "Choose another configured model before deleting the active service.",
     },

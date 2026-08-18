@@ -75,7 +75,7 @@ describe("model-discovery", () => {
       undefined,
     );
 
-    expect(result.status).toBe("ok");
+    expect(result.status).toBe("success_with_models");
     expect(result.cached).toBe(false);
     // Sorted alphabetically
     expect(result.models).toEqual(["alpha", "beta", "gamma"]);
@@ -118,7 +118,7 @@ describe("model-discovery", () => {
       undefined,
     );
 
-    expect(result.status).toBe("ok");
+    expect(result.status).toBe("success_with_models");
     expect(result.models).toEqual(["llama3.2:latest"]);
     expect(receivedAuth).toBe("");
   });
@@ -141,7 +141,7 @@ describe("model-discovery", () => {
       undefined,
     );
 
-    expect(result.status).toBe("ok");
+    expect(result.status).toBe("success_with_models");
     expect(result.models).toEqual(["qwen2.5-coder:7b"]);
     expect(receivedAuth).toBe("");
   });
@@ -170,7 +170,7 @@ describe("model-discovery", () => {
     );
 
     expect(receivedAuth).toBe("Bearer sk-mimo-test");
-    expect(result.status).toBe("ok");
+    expect(result.status).toBe("success_with_models");
     expect(result.models).toEqual(["mimo-v2.5-pro"]);
   });
 
@@ -230,7 +230,7 @@ describe("model-discovery", () => {
     expect(result.models).toEqual(["claude-3-5-sonnet"]);
   });
 
-  it("returns status=ok with empty list when upstream returns malformed JSON", async () => {
+  it("distinguishes malformed JSON from a valid empty model list", async () => {
     server = http.createServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end("not-json-at-all");
@@ -243,28 +243,101 @@ describe("model-discovery", () => {
       "sk-test",
       undefined,
     );
-    expect(result.status).toBe("ok");
+    expect(result.status).toBe("malformed_response");
     expect(result.models).toEqual([]);
   });
 
-  it("returns status=ok with empty list when upstream returns 4xx/5xx", async () => {
+  it("returns success_empty for a valid empty model catalogue", async () => {
     server = http.createServer((_req, res) => {
-      res.writeHead(401);
-      res.end(JSON.stringify({ error: "unauthorized" }));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ data: [] }));
     });
     await listen();
     const { discoverProviderModels } = await loadDiscovery();
-    const result = await discoverProviderModels(
+    const first = await discoverProviderModels(
       "custom",
       baseUrl,
-      "sk-bad",
+      "sk-test",
       undefined,
     );
-    expect(result.status).toBe("ok");
-    expect(result.models).toEqual([]);
+    const second = await discoverProviderModels(
+      "custom",
+      baseUrl,
+      "sk-test",
+      undefined,
+    );
+
+    expect(first.status).toBe("success_empty");
+    expect(first.cached).toBe(false);
+    expect(second.status).toBe("success_empty");
+    expect(second.cached).toBe(true);
   });
 
-  it("returns status=error when the local provider cannot be reached", async () => {
+  it.each([
+    [401, "authentication_rejected"],
+    [403, "forbidden"],
+    [404, "not_found"],
+    [429, "rate_limited"],
+    [500, "upstream_error"],
+  ] as const)(
+    "classifies HTTP %i without reporting success",
+    async (code, status) => {
+      server = http.createServer((_req, res) => {
+        res.writeHead(code, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "redacted" }));
+      });
+      await listen();
+      const { discoverProviderModels } = await loadDiscovery();
+      const result = await discoverProviderModels(
+        "custom",
+        baseUrl,
+        "sk-bad",
+        undefined,
+      );
+
+      expect(result.status).toBe(status);
+      expect(result.models).toEqual([]);
+      expect(result).not.toHaveProperty("body");
+      expect(result).not.toHaveProperty("error");
+    },
+  );
+
+  it("does not cache an HTTP failure as an empty successful catalogue", async () => {
+    let calls = 0;
+    server = http.createServer((_req, res) => {
+      calls += 1;
+      res.writeHead(calls === 1 ? 401 : 200, {
+        "Content-Type": "application/json",
+      });
+      res.end(
+        calls === 1
+          ? JSON.stringify({ error: "unauthorized" })
+          : JSON.stringify({ data: [{ id: "recovered-model" }] }),
+      );
+    });
+    await listen();
+    const { discoverProviderModels } = await loadDiscovery();
+
+    const first = await discoverProviderModels(
+      "custom",
+      baseUrl,
+      "sk-test",
+      undefined,
+    );
+    const second = await discoverProviderModels(
+      "custom",
+      baseUrl,
+      "sk-test",
+      undefined,
+    );
+
+    expect(first.status).toBe("authentication_rejected");
+    expect(second.status).toBe("success_with_models");
+    expect(second.models).toEqual(["recovered-model"]);
+    expect(calls).toBe(2);
+  });
+
+  it("returns network_error when the local provider cannot be reached", async () => {
     server = http.createServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ data: [{ id: "lmstudio-model" }] }));
@@ -280,9 +353,28 @@ describe("model-discovery", () => {
       undefined,
       undefined,
     );
-    expect(result.status).toBe("error");
+    expect(result.status).toBe("network_error");
     expect(result.models).toEqual([]);
   });
+
+  it("returns timeout when a reachable model endpoint never responds", async () => {
+    server = http.createServer(() => {
+      // Keep the real loopback response open so the production request
+      // timeout, rather than a synthetic request mock, ends discovery.
+    });
+    await listen();
+
+    const { discoverProviderModels } = await loadDiscovery();
+    const result = await discoverProviderModels(
+      "custom",
+      baseUrl,
+      "sk-test",
+      undefined,
+    );
+
+    expect(result.status).toBe("timeout");
+    expect(result.models).toEqual([]);
+  }, 15_000);
 
   it("dedupes model ids that appear twice in the response", async () => {
     server = http.createServer((_req, res) => {
@@ -405,7 +497,7 @@ describe("model-discovery", () => {
       undefined,
     );
 
-    expect(result.status).toBe("ok");
+    expect(result.status).toBe("success_with_models");
     expect(result.models).toEqual(["m"]);
     expect(receivedAuth).toBe("Bearer sk-from-dotenv");
   });
@@ -479,10 +571,9 @@ describe("model-discovery", () => {
       "deepseek/deepseek-v4-flash:free",
       "openrouter/owl-alpha",
     ]);
-    // Status stays "ok" regardless of the Python provider_model_ids
-    // call (which may fail under tests — that path returns the
-    // curated fallback or an empty list, but `status:ok` either way).
-    expect(result.status).toBe("ok");
+    expect(result.status).toBe(
+      result.models.length > 0 ? "success_with_models" : "success_empty",
+    );
   });
 
   it("nous discovery returns empty freeModels when auth.json is missing", async () => {
@@ -500,7 +591,9 @@ describe("model-discovery", () => {
       undefined,
     );
     expect(result.freeModels).toEqual([]);
-    expect(result.status).toBe("ok");
+    expect(result.status).toBe(
+      result.models.length > 0 ? "success_with_models" : "success_empty",
+    );
   });
 
   // Issue #597 — the context gauge reads `getModelContextWindow`, which must
