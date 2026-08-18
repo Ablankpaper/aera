@@ -47,6 +47,29 @@ test("rejects an unregistered writer that resolves config.yaml", () => {
   }
 });
 
+// @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Recoverable model configuration#Profile deletion shares the managed write authority]]
+test("rejects an unregistered remover that resolves a managed file", () => {
+  const f = fixture();
+  try {
+    f.write(
+      "delete-bypass.ts",
+      [
+        'import { rmSync } from "node:fs";',
+        'import { join } from "node:path";',
+        'const target = join("/tmp/aera-fixture", "config.yaml");',
+        "rmSync(target, { force: true });",
+      ].join("\n"),
+    );
+    const report = verifyManagedModelWriters({ root: f.root, includeRoot: "" });
+    assert.equal(report.ok, false);
+    assert.equal(report.issues.length, 1);
+    assert.equal(report.issues[0].role, "config");
+    assert.equal(report.issues[0].kind, "raw_managed_writer");
+  } finally {
+    f.cleanup();
+  }
+});
+
 test("accepts a managed raw writer only at an explicit boundary function", () => {
   const f = fixture();
   try {
@@ -130,6 +153,71 @@ test("rejects profile clone subprocesses without staging capability", () => {
       report.issues.some(
         (issue) => issue.kind === "profile_materialization_subprocess",
       ),
+    );
+  } finally {
+    f.cleanup();
+  }
+});
+
+// @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Recoverable model configuration#Profile deletion shares the managed write authority]]
+test("rejects profile deletion subprocesses without a serialized deletion capability", () => {
+  const f = fixture();
+  try {
+    f.write(
+      "delete-profile.ts",
+      [
+        'import { execFileSync } from "node:child_process";',
+        "export function removeProfile() {",
+        '  execFileSync("hermes", ["profile", "delete", "agent"]);',
+        "}",
+      ].join("\n"),
+    );
+    const report = verifyManagedModelWriters({ root: f.root, includeRoot: "" });
+    assert.equal(report.ok, false);
+    assert.ok(
+      report.issues.some(
+        (issue) => issue.kind === "profile_deletion_subprocess",
+      ),
+      JSON.stringify(report.issues, null, 2),
+    );
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("does not let a serialized deletion capability hide another delete function", () => {
+  const f = fixture();
+  try {
+    f.write(
+      "delete-profile.ts",
+      [
+        'import { execFileSync } from "node:child_process";',
+        "export async function deleteProfile() {",
+        "  return { success: true };",
+        "}",
+        "export function unsafeDelete() {",
+        '  execFileSync("hermes", ["profile", "delete", "agent", "--yes"]);',
+        "}",
+      ].join("\n"),
+    );
+    const report = verifyManagedModelWriters({
+      root: f.root,
+      includeRoot: "",
+      capabilities: {
+        "delete-profile.ts": {
+          capability: "test-serialized-profile-deletion",
+          profileDeletionFunctions: ["deleteProfile"],
+        },
+      },
+    });
+    assert.equal(report.ok, false);
+    assert.ok(
+      report.issues.some(
+        (issue) =>
+          issue.kind === "profile_deletion_subprocess" &&
+          issue.functionName === "unsafeDelete",
+      ),
+      JSON.stringify(report.issues, null, 2),
     );
   } finally {
     f.cleanup();

@@ -21,6 +21,7 @@ import {
   type StagedProfileCandidate,
   type StagedProfileSourceKind,
 } from "./model-configuration-staged-profile";
+import { defaultModelConfigurationWriteAuthority } from "./model-configuration-write-authority";
 
 const PROFILES_DIR = join(HERMES_HOME, "profiles");
 
@@ -118,7 +119,12 @@ export function profileIdForAgentName(agentName: string): string {
   return `${base.slice(0, 55)}-${Date.now().toString(36)}`;
 }
 
-const CLONE_SOURCE_FILES = ["config.yaml", ".env", "SOUL.md"] as const;
+const CLONE_SOURCE_FILES = [
+  "config.yaml",
+  ".env",
+  "providers.json",
+  "SOUL.md",
+] as const;
 const CLONE_SOURCE_SUBDIR_FILES = [
   "memories/MEMORY.md",
   "memories/USER.md",
@@ -439,9 +445,17 @@ export async function prepareProfile(
       profilesRoot: PROFILES_DIR,
       destinationProfileId: id,
       sourceKind,
-      materialize: ({ stagingHome, stagingPath }) => {
-        stageGlobalCatalog(stagingHome);
-        if (cloneFrom) stageCloneSource(cloneFrom, stagingHome);
+      materialize: async ({ stagingHome, stagingPath }) => {
+        await defaultModelConfigurationWriteAuthority.run(
+          {
+            globalCatalog: true,
+            profileIds: cloneFrom ? [cloneFrom] : [],
+          },
+          () => {
+            stageGlobalCatalog(stagingHome);
+            if (cloneFrom) stageCloneSource(cloneFrom, stagingHome);
+          },
+        );
         execFileSync(invocation.python, invocation.cliArgs(args), {
           cwd: invocation.workingDirectory,
           env: invocation.environment({
@@ -492,10 +506,10 @@ export async function createProfile(
   }
 }
 
-export function deleteProfile(name: string): {
+export async function deleteProfile(name: string): Promise<{
   success: boolean;
   error?: string;
-} {
+}> {
   if (name === "default")
     return { success: false, error: "Cannot delete the default profile" };
   if (!isValidNamedProfileName(name)) {
@@ -507,23 +521,28 @@ export function deleteProfile(name: string): {
   }
 
   try {
-    execFileSync(
-      invocation.python,
-      invocation.cliArgs(["profile", "delete", name, "--yes"]),
-      {
-        cwd: invocation.workingDirectory,
-        env: invocation.environment({
-          ...process.env,
-          PATH: getEnhancedPath(),
-          HOME: homedir(),
-          HERMES_HOME,
-        }),
-        stdio: "pipe",
-        timeout: 30000,
-        ...HIDDEN_SUBPROCESS_OPTIONS,
+    return await defaultModelConfigurationWriteAuthority.run(
+      { globalCatalog: false, profileIds: [name] },
+      () => {
+        execFileSync(
+          invocation.python,
+          invocation.cliArgs(["profile", "delete", name, "--yes"]),
+          {
+            cwd: invocation.workingDirectory,
+            env: invocation.environment({
+              ...process.env,
+              PATH: getEnhancedPath(),
+              HOME: homedir(),
+              HERMES_HOME,
+            }),
+            stdio: "pipe",
+            timeout: 30000,
+            ...HIDDEN_SUBPROCESS_OPTIONS,
+          },
+        );
+        return { success: true };
       },
     );
-    return { success: true };
   } catch (err) {
     return { success: false, error: commandErrorMessage(err) };
   }

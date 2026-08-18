@@ -70,6 +70,18 @@ The activation journal records only a random transaction id, Profile id, source 
 
 [[src/main/profiles.ts#prepareProfile]] keeps the Runtime subprocess on the staged `HERMES_HOME`. [[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager#activateVerifiedRestore]] merges decrypted backup bytes into that candidate and revalidates it before activation, rather than copying files into an already-live Profile.
 
+### Profile clone snapshots preserve provider identity
+
+Profile clones read one stable source snapshot before Runtime materialization begins.
+
+[[src/main/profiles.ts#prepareProfile]] copies the global catalog and the source Profile under the ordered write authority. The staged snapshot includes `providers.json` alongside credentials and route configuration, so cloning a named custom provider cannot lose its provider identity or observe a cross-file save in progress.
+
+### Profile deletion shares the managed write authority
+
+Profile deletion waits behind every managed write targeting that Profile.
+
+[[src/main/profiles.ts#deleteProfile]] preserves the existing Runtime deletion command but executes it only after acquiring the ordered write authority. The structural writer gate treats raw remove APIs and every `profile delete` subprocess as managed mutations; only the explicitly registered serialized deletion function is accepted.
+
 ## Legacy installation recovery
 
 Cold recovery accepts a fresh Installation operation that names only its source Profile and intentionally inherits that Profile's current or default model.

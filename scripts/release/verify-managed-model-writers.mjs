@@ -213,19 +213,30 @@ export const MANAGED_WRITER_CAPABILITIES = Object.freeze({
       setActiveProfile: UNKNOWN_RAW_WRITER,
     },
     profileMaterializationFunctions: ["prepareProfile"],
+    profileDeletionFunctions: ["deleteProfile"],
   },
 });
 
+const RAW_REMOVER_NAMES = new Set([
+  "unlinkSync",
+  "unlink",
+  "rmSync",
+  "rm",
+  "rmdirSync",
+  "rmdir",
+]);
 const RAW_WRITER_NAMES = new Set([
   "safeWriteFile",
   "writeFileSync",
   "writeFile",
   "copyFileSync",
   "renameSync",
+  ...RAW_REMOVER_NAMES,
 ]);
 
-const SUBPROCESS_MARKER =
+const PROFILE_MATERIALIZATION_SUBPROCESS_MARKER =
   /\bprofile\b[\s\S]{0,80}\bcreate\b[\s\S]{0,200}--clone-from/i;
+const PROFILE_DELETION_SUBPROCESS_MARKER = /\bprofile\b[\s\S]{0,80}\bdelete\b/i;
 const SOURCE_EXTENSIONS = new Set([
   ".ts",
   ".tsx",
@@ -385,6 +396,10 @@ function capabilityAllowsProfileMaterialization(capability, functionName) {
   );
 }
 
+function capabilityAllowsProfileDeletion(capability, functionName) {
+  return Boolean(capability?.profileDeletionFunctions?.includes(functionName));
+}
+
 function importBindingsFor(sourceFile) {
   const imports = new Map();
   for (const statement of sourceFile.statements) {
@@ -508,6 +523,12 @@ function inspectFile(file, root, capabilities) {
     ) {
       return;
     }
+    if (
+      kind === "profile_deletion_subprocess" &&
+      capabilityAllowsProfileDeletion(capability, functionName)
+    ) {
+      return;
+    }
     issues.push({
       file: relativeFile,
       line: lineOf(sourceFile, node),
@@ -525,7 +546,12 @@ function inspectFile(file, root, capabilities) {
         const target = node.arguments[0];
         const hints = expressionHints(target, bindings);
         const role = [...hints.roles][0] ?? null;
-        if (role || (hints.unknown && sourceMentionsManagedBoundary)) {
+        if (
+          role ||
+          (!RAW_REMOVER_NAMES.has(name) &&
+            hints.unknown &&
+            sourceMentionsManagedBoundary)
+        ) {
           report(
             node,
             "raw_managed_writer",
@@ -541,7 +567,7 @@ function inspectFile(file, root, capabilities) {
           name === "spawnSync" ||
           name === "execFile" ||
           name === "execFileSync") &&
-        SUBPROCESS_MARKER.test(
+        PROFILE_MATERIALIZATION_SUBPROCESS_MARKER.test(
           node.arguments
             .flatMap((argument) => staticStrings(argument, bindings))
             .join(" "),
@@ -552,6 +578,24 @@ function inspectFile(file, root, capabilities) {
           "profile_materialization_subprocess",
           null,
           "profile create --clone-from must use staging capability",
+        );
+      }
+      if (
+        (name === "spawn" ||
+          name === "spawnSync" ||
+          name === "execFile" ||
+          name === "execFileSync") &&
+        PROFILE_DELETION_SUBPROCESS_MARKER.test(
+          node.arguments
+            .flatMap((argument) => staticStrings(argument, bindings))
+            .join(" "),
+        )
+      ) {
+        report(
+          node,
+          "profile_deletion_subprocess",
+          null,
+          "profile delete must use the serialized Profile deletion capability",
         );
       }
     }

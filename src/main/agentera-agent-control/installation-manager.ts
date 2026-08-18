@@ -223,7 +223,11 @@ export interface AgentInstallationProfileAdapter {
       cleanup(): Promise<void>;
     };
   }>;
-  deleteProfile(profileId: string): { success: boolean; error?: string };
+  deleteProfile(
+    profileId: string,
+  ):
+    | { success: boolean; error?: string }
+    | Promise<{ success: boolean; error?: string }>;
   resolveProfilePath(profileId: string): string;
   activateProfile(profileId: string): void;
   readProfileModelConfig?: (profilePath: string) => SessionModelOverride;
@@ -3164,7 +3168,7 @@ export class AgentInstallationManager {
     }
     if (input.profileId !== null) {
       try {
-        const deleted = this.profiles.deleteProfile(input.profileId);
+        const deleted = await this.profiles.deleteProfile(input.profileId);
         if (!deleted.success) {
           throw new Error(deleted?.error ?? "Profile deletion is unavailable.");
         }
