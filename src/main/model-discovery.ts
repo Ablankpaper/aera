@@ -874,9 +874,8 @@ export async function discoverProviderModels(
           _freeCache.get(cacheKey(lowerProvider, "", "", profile)) || [],
       });
       if (lowerProvider === "nous") {
-        cachedResult.freeModels = _freeCache.get(
-          cacheKey(lowerProvider, "", "", profile),
-        ) || [];
+        cachedResult.freeModels =
+          _freeCache.get(cacheKey(lowerProvider, "", "", profile)) || [];
       }
       return cachedResult;
     }

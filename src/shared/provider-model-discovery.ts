@@ -272,14 +272,15 @@ export function parseProviderDiscoveryResult(
     schemaVersion: 2,
     status,
     models,
-    cached: status === "success_with_models" || status === "success_empty"
-      ? value.cached
-      : false,
+    cached:
+      status === "success_with_models" || status === "success_empty"
+        ? value.cached
+        : false,
   };
   if (value.statusCode !== undefined) result.statusCode = value.statusCode;
-  const freeModels = normalizeModels((value.freeModels as string[]) ?? []).filter(
-    (id) => models.includes(id),
-  );
+  const freeModels = normalizeModels(
+    (value.freeModels as string[]) ?? [],
+  ).filter((id) => models.includes(id));
   if (freeModels.length > 0) result.freeModels = freeModels;
   if (value.code === "provider_authentication_rejected") {
     if (status !== "authentication_rejected") return invalidDiscoveryResult();
