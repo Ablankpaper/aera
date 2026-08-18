@@ -16,6 +16,12 @@ async function loadModels(): Promise<{
   write<T>(callback: () => T | Promise<T>): Promise<T>;
 }> {
   vi.resetModules();
+  // This suite dynamically imports the real model catalog. Clear any
+  // worker-level module mocks left by a preceding test file before resolving
+  // HERMES_HOME and the managed-write boundary.
+  vi.doUnmock("../src/main/installer");
+  vi.doUnmock("../src/main/model-configuration-managed-files");
+  vi.doUnmock("../src/main/model-configuration-write-authority");
   vi.stubEnv("HERMES_HOME", testHome);
   const [models, managed, authority] = await Promise.all([
     import("../src/main/models"),
