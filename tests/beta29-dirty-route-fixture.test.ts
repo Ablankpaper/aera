@@ -4,6 +4,7 @@ import { join } from "path";
 import { parse as parseYaml } from "yaml";
 import { describe, expect, it } from "vitest";
 import { canonicalModelEndpointV2 } from "../src/shared/model-configuration";
+import * as runtime from "../src/main/model-configuration-runtime";
 
 const FIXTURE_ROOT = join(
   process.cwd(),
@@ -221,5 +222,46 @@ describe("Beta.29 dirty-route fixture", () => {
     expect(allFixtureText).not.toMatch(
       /\/Users\/|Bearer\s|\bsk-|refresh_token|api[_-]?key[^<]*[=:][^<]/i,
     );
+  });
+
+  it("repairs anchored provider rows while preserving the standalone relation", () => {
+    const result = runtime.planModelRouteDirectoryRepair({
+      profileId: "fixture-profile",
+      ownerHandle: "fixture-owner",
+      expectedOwnerHandle: "fixture-owner",
+      incompleteOperation: false,
+      files: {
+        env: readFixture(".env.redacted"),
+        providers: readFixture("providers.json"),
+        models: readFixture("models.json"),
+        modelDefinitions: readFixture("model-definitions.json"),
+        config: readFixture("config.yaml"),
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: "repair",
+      activeRoute: {
+        providerId: "fixture-provider-01",
+        modelId: "fixture-model-01",
+        endpoint: "https://config-only.fixture.invalid/v1",
+        apiMode: "chat_completions",
+      },
+    });
+    if (result.status !== "repair") return;
+    const modelsPatch = result.patches.find((patch) => patch.role === "models");
+    expect(modelsPatch).toBeDefined();
+    const repaired = JSON.parse(
+      modelsPatch!.after.toString("utf8"),
+    ) as ModelRow[];
+    expect(repaired).toHaveLength(18);
+    expect(repaired).toContainEqual(
+      expect.objectContaining({
+        id: "fixture-route-12-alternate",
+        model: "fixture-model-12",
+        baseUrl: "https://alternate.fixture.invalid/v1",
+      }),
+    );
+    expect(result.absorbedRowIds).not.toContain("fixture-route-12-alternate");
   });
 });

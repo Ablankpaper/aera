@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import {
@@ -30,8 +30,10 @@ import {
 } from "./utils";
 import { HERMES_HOME, expectedEnvKeyForModel } from "./installer";
 import {
+  getConfigValue,
   getModelConfig,
   getModelConfigFresh,
+  invalidateModelConfigCache,
   hasOAuthCredentials,
   planEnvValueWrite,
   planModelConfigWrite,
@@ -74,20 +76,33 @@ import {
 import {
   ModelConfigurationCoordinator,
   type ModelConfigurationCommitStage,
+  type ManagedModelFileInitialization,
   type ModelConfigurationMutationAdapter,
   type PreparedModelConfigurationMutation,
 } from "./model-configuration-coordinator";
 import {
   ModelConfigurationOperationStore,
   type ModelConfigurationOperationStore as ModelConfigurationOperationStoreType,
+  captureModelConfigurationFiles,
+  defaultModelConfigurationFilePaths,
+  type ModelConfigurationFilePaths,
+  type ModelConfigurationFileRole,
 } from "./model-configuration-operation-store";
 import {
   ModelConfigurationRuntimeError,
   openModelConfigurationDatabase,
   type ModelConfigurationDatabase,
 } from "./model-configuration-database";
-import { registerManagedModelFileRoots } from "./model-configuration-managed-files";
+import {
+  registerManagedModelFileRoots,
+  writeManagedModelFile,
+} from "./model-configuration-managed-files";
 import { recoverStagedProfileActivations as recoverStagedProfileActivationJournal } from "./model-configuration-staged-profile";
+import {
+  planModelRouteDirectoryRepair,
+  type ModelRouteDirectorySnapshot,
+  type RouteRepairPlan,
+} from "./model-configuration-reconciler";
 
 export {
   planModelRouteDirectoryRepair,
@@ -264,7 +279,7 @@ function activeRouteIdentity(
     provider: config.provider,
     model: config.model,
     baseUrl: config.baseUrl || canonicalProviderBaseUrl(config.provider) || "",
-    apiMode: library?.apiMode ?? null,
+    apiMode: library?.apiMode ?? getConfigValue("model.api_mode", profileId),
   };
 }
 
@@ -763,6 +778,131 @@ function initializationFailureCode(
     : "model_configuration_database_unavailable";
 }
 
+const ROUTE_REPAIR_REQUIRED_ROLES: readonly ModelConfigurationFileRole[] = [
+  "providers",
+  "models",
+  "modelDefinitions",
+  "config",
+];
+
+function sameBytes(left: Buffer | null, right: Buffer | null): boolean {
+  return left === null ? right === null : right !== null && left.equals(right);
+}
+
+function freshRouteDirectorySnapshot(profileId: string): {
+  paths: ModelConfigurationFilePaths;
+  snapshot: ModelRouteDirectorySnapshot;
+} | null {
+  const paths = defaultModelConfigurationFilePaths(profileId);
+  const captured = captureModelConfigurationFiles({
+    profileId,
+    operationId: randomUUID(),
+    paths,
+  });
+  if (
+    ROUTE_REPAIR_REQUIRED_ROLES.some((role) => !captured.files[role].existed)
+  ) {
+    return null;
+  }
+  return {
+    paths,
+    snapshot: {
+      profileId,
+      ownerHandle: "",
+      expectedOwnerHandle: "",
+      incompleteOperation: false,
+      files: Object.fromEntries(
+        (Object.keys(captured.files) as ModelConfigurationFileRole[]).map(
+          (role) => [
+            role,
+            captured.files[role].existed
+              ? Buffer.from(captured.files[role].bytes)
+              : null,
+          ],
+        ),
+      ) as ModelRouteDirectorySnapshot["files"],
+    },
+  };
+}
+
+function planFreshRouteRepair(
+  profileId: string,
+  ownerHandle: string,
+): RouteRepairPlan | null {
+  const current = freshRouteDirectorySnapshot(profileId);
+  if (!current) return null;
+  current.snapshot.ownerHandle = ownerHandle;
+  current.snapshot.expectedOwnerHandle = ownerHandle;
+  return planModelRouteDirectoryRepair(current.snapshot);
+}
+
+function sameActiveRoute(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function routeRepairInitialization(
+  options: ModelConfigurationRuntimeOptions,
+  catalog: OwnerModelRouteCatalog,
+  targetProfileId: string,
+  ownerHandle: string,
+  initial: {
+    plan: Extract<RouteRepairPlan, { status: "repair" }>;
+  },
+): ManagedModelFileInitialization {
+  const patches = initial.plan.patches;
+  return {
+    targetProfileId,
+    changesRequired: true,
+    applyStage: async (
+      stage: ModelConfigurationCommitStage,
+      permit: Parameters<typeof writeManagedModelFile>[0],
+    ): Promise<void> => {
+      if (stage !== "model_library") return;
+      const current = freshRouteDirectorySnapshot(targetProfileId);
+      if (!current) throw new Error("Route repair files disappeared.");
+      for (const patch of patches) {
+        const actual = current.snapshot.files[patch.role];
+        if (!sameBytes(actual, patch.before)) {
+          throw new Error("Route repair plan became stale.");
+        }
+      }
+      for (const patch of patches) {
+        writeManagedModelFile(permit, current.paths[patch.role], patch.after);
+      }
+      invalidateModelConfigCache(targetProfileId);
+    },
+    verify: async (): Promise<boolean> => {
+      const current = planFreshRouteRepair(targetProfileId, ownerHandle);
+      if (!current || current.status !== "unchanged") return false;
+      return sameActiveRoute(current.activeRoute, initial.plan.activeRoute);
+    },
+    refreshPresentation: (): void => {
+      let revision: string | undefined;
+      const failures: unknown[] = [];
+      try {
+        revision = catalog.snapshot(targetProfileId).revision;
+      } catch (error) {
+        failures.push(error);
+      }
+      const listeners = [
+        options.notifyModelLibraryChanged,
+        options.notifyCustomProvidersChanged,
+        options.notifyConnectionConfigChanged,
+        options.notifyRuntimeSnapshotChanged,
+      ];
+      for (const listener of listeners) {
+        if (!listener) continue;
+        try {
+          listener(revision);
+        } catch (error) {
+          failures.push(error);
+        }
+      }
+      if (failures.length > 0) throw failures[0];
+    },
+  };
+}
+
 /**
  * Open the independent journal and finish crash recovery before the caller
  * registers the coordinated IPC channels. A failure intentionally leaves the
@@ -876,6 +1016,31 @@ export async function prepareModelConfigurationRuntime(
   if (coordinator !== null && catalog !== null) {
     try {
       const targetProfileId = catalog.canonicalTargetProfileId("default");
+      const ownerHandle = runtimeComponentKey(options.getOwner());
+      const routeRepair = planFreshRouteRepair(targetProfileId, ownerHandle);
+      if (routeRepair?.status === "repair_required") {
+        console.error(
+          "[MODEL_CONFIGURATION] route repair required",
+          routeRepair.conflict,
+        );
+        throw new Error("Model route directory repair is ambiguous.");
+      }
+      if (routeRepair?.status === "repair") {
+        const repairResult = await coordinator.initializeManagedModelFiles(
+          routeRepairInitialization(
+            options,
+            catalog,
+            targetProfileId,
+            ownerHandle,
+            {
+              plan: routeRepair,
+            },
+          ),
+        );
+        if (repairResult.status === "rejected") {
+          throw new Error("Managed model route repair was rejected.");
+        }
+      }
       const initialization = await initializeModelCatalog(
         coordinator,
         planModelCatalogInitialization([targetProfileId]),
