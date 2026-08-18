@@ -1,3 +1,16 @@
+import { routeKeyV2 } from "./model-route-identity";
+
+export {
+  MODEL_ROUTE_KEY_VERSION,
+  canonicalModelEndpointV2,
+  isLegacyModelRouteKeyV1,
+  isModelRouteKeyV2,
+  routeKeyMatches,
+  routeKeysMatch,
+  routeKeyV2,
+  type ModelRouteIdentityV2,
+} from "./model-route-identity";
+
 /**
  * Public model-route identity shared by Main and Renderer. Credential values
  * and Main-only credential references intentionally do not belong here.
@@ -188,10 +201,10 @@ export function isSafeToRetryStaleRevision(
 export function canonicalPublicRouteKey(
   route: PublicModelRouteIdentity,
 ): string {
-  return [
-    route.provider.trim().toLocaleLowerCase(),
-    route.model.trim(),
-    route.baseUrl.trim().replace(/\/+$/, "").toLocaleLowerCase(),
-    route.apiMode?.trim().toLocaleLowerCase() || "",
-  ].join("\0");
+  return routeKeyV2({
+    providerId: route.provider,
+    modelId: route.model,
+    endpoint: route.baseUrl,
+    apiMode: route.apiMode ?? "",
+  });
 }

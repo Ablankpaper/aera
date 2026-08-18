@@ -36,6 +36,25 @@ describe("model configuration contract", () => {
     );
   });
 
+  it("emits the versioned route identity used by new journal rows", () => {
+    expect(
+      canonicalPublicRouteKey({
+        provider: "Custom:Petoi",
+        model: "gpt-5.6-sol",
+        baseUrl: "HTTPS://API.Example.COM:443/v1/",
+        apiMode: "Codex_Responses",
+      }),
+    ).toBe(
+      [
+        "v2",
+        "custom:petoi",
+        "gpt-5.6-sol",
+        "https://api.example.com/v1",
+        "codex_responses",
+      ].join("\0"),
+    );
+  });
+
   it("keeps startup failures distinct from a replayable stale revision", () => {
     const startupCodes: ModelConfigurationStartupFailureCode[] = [
       "native_module_abi_mismatch",

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "providers": [
+    {
+      "id": "fixture-provider-01",
+      "name": "Fixture",
+      "baseUrl": "https://current.fixture.invalid/v1",
+      "createdAt": 1723507200000
+    }
+  ]
+}

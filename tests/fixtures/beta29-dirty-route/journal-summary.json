@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "operations": [
+    {
+      "operationId": "fixture-operation-01",
+      "owner": "fixture-owner-01",
+      "profileId": "fixture-profile-01",
+      "state": "committed",
+      "stage": "verification",
+      "fileRoles": ["env", "providers", "models", "modelDefinitions", "config"]
+    },
+    {
+      "operationId": "fixture-operation-02",
+      "owner": "fixture-owner-01",
+      "profileId": "fixture-profile-01",
+      "state": "committed",
+      "stage": "verification",
+      "fileRoles": ["env", "providers", "models", "modelDefinitions", "config"]
+    },
+    {
+      "operationId": "fixture-operation-03",
+      "owner": "fixture-owner-01",
+      "profileId": "fixture-profile-01",
+      "state": "committed",
+      "stage": "verification",
+      "fileRoles": ["env", "providers", "models", "modelDefinitions", "config"]
+    },
+    {
+      "operationId": "fixture-operation-04",
+      "owner": "fixture-owner-01",
+      "profileId": "fixture-profile-01",
+      "state": "committed",
+      "stage": "verification",
+      "fileRoles": ["env", "providers", "models", "modelDefinitions", "config"]
+    },
+    {
+      "operationId": "fixture-operation-05",
+      "owner": "fixture-owner-01",
+      "profileId": "fixture-profile-01",
+      "state": "rolled_back",
+      "stage": "rollback",
+      "fileRoles": ["env", "providers", "models", "modelDefinitions", "config"]
+    }
+  ]
+}

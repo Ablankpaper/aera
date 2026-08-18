@@ -1,6 +1,12 @@
 // @vitest-environment node
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -195,6 +201,214 @@ describe("model-configuration runtime", () => {
       expect(operationCount()).toBe(1);
     } finally {
       handle.close();
+    }
+  });
+
+  it("journals and verifies a config-only route repair, then stays byte-idempotent", async () => {
+    const root = mkdtempSync(join(tmpdir(), "aera-model-runtime-reconcile-"));
+    roots.push(root);
+    const hermesHome = join(root, "hermes");
+    const userData = join(root, "user-data");
+    mkdirSync(hermesHome, { recursive: true });
+    process.env.HERMES_HOME = hermesHome;
+    writeFileSync(
+      join(hermesHome, ".env"),
+      "CUSTOM_PROVIDER_FIXTURE_KEY=<redacted>\n",
+    );
+    writeFileSync(
+      join(hermesHome, "providers.json"),
+      `${JSON.stringify(
+        {
+          version: 1,
+          providers: [
+            {
+              id: "fixture-provider-01",
+              name: "Fixture",
+              baseUrl: "https://current.fixture.invalid/v1",
+              createdAt: 1,
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    writeFileSync(join(hermesHome, "models.json"), "[]\n");
+    writeFileSync(
+      join(hermesHome, "model-definitions.json"),
+      `${JSON.stringify(
+        {
+          "fixture-model": {
+            model: "fixture-model",
+            name: "Fixture Model",
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    writeFileSync(
+      join(hermesHome, "config.yaml"),
+      [
+        "model:",
+        '  provider: "custom:fixture"',
+        '  default: "fixture-model"',
+        '  base_url: "https://config-only.fixture.invalid/v1"',
+        '  api_mode: "chat_completions"',
+        "providers:",
+        "  fixture:",
+        '    api: "https://current.fixture.invalid/v1"',
+        '    key_env: "CUSTOM_PROVIDER_FIXTURE_KEY"',
+        "",
+      ].join("\n"),
+    );
+
+    vi.resetModules();
+    vi.doUnmock("./installer");
+    const actualInstaller =
+      await vi.importActual<typeof import("./installer")>("./installer");
+    vi.doMock("./installer", () => actualInstaller);
+    const [{ AgenteraProfileBindingStore }, runtime, modelDatabase, config] =
+      await Promise.all([
+        import("./agentera-profile-binding"),
+        import("./model-configuration-runtime"),
+        import("./model-configuration-database"),
+        import("./config"),
+      ]);
+    const bindings = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage: {
+        isEncryptionAvailable: () => true,
+        encryptString: (value: string) => Buffer.from(value, "utf8"),
+        decryptString: (value: Buffer) => value.toString("utf8"),
+      },
+    });
+    bindings.bindExistingProfile(hermesHome, OWNER);
+
+    // Prime the normal read cache with the stale route, then change only the
+    // on-disk config. Startup reconciliation must inspect current file bytes,
+    // not reconstruct from a cached model selection.
+    expect(config.getModelConfig()).toMatchObject({
+      baseUrl: "https://config-only.fixture.invalid/v1",
+    });
+    writeFileSync(
+      join(hermesHome, "config.yaml"),
+      readFileSync(join(hermesHome, "config.yaml"), "utf8").replace(
+        "https://config-only.fixture.invalid/v1",
+        "https://fresh.fixture.invalid/v1",
+      ),
+    );
+
+    const openDatabase = (
+      path: string,
+    ): ReturnType<typeof modelDatabase.openModelConfigurationDatabase> =>
+      modelDatabase.openModelConfigurationDatabase(path, {
+        databaseFactory: (databasePath) =>
+          new DatabaseSync(
+            databasePath,
+          ) as unknown as ModelConfigurationSqliteDatabase,
+      });
+    const prepare: () => ReturnType<
+      typeof runtime.prepareModelConfigurationRuntime
+    > = () =>
+      runtime.prepareModelConfigurationRuntime({
+        userDataPath: userData,
+        getOwner: () => OWNER,
+        profileBindings: bindings,
+        getConnectionConfig: () => ({ mode: "local" }),
+        openDatabase,
+      });
+
+    let repairedBytes: Buffer;
+    const first = await prepare();
+    try {
+      expect(first.startupFailure).toBeNull();
+      expect(
+        JSON.parse(readFileSync(join(hermesHome, "models.json"), "utf8")),
+      ).toEqual([
+        expect.objectContaining({
+          id: expect.stringMatching(/^recovered-[a-f0-9]{32}$/u),
+          baseUrl: "https://fresh.fixture.invalid/v1",
+        }),
+      ]);
+      const operationCount = (): number =>
+        Number(
+          (
+            first
+              .database!.sqlite.prepare(
+                "SELECT COUNT(*) AS count FROM desktop_model_configuration_operations",
+              )
+              .get() as { count: number | bigint }
+          ).count,
+        );
+      expect(operationCount()).toBe(1);
+      repairedBytes = readFileSync(join(hermesHome, "models.json"));
+    } finally {
+      first.close();
+    }
+
+    const second = await prepare();
+    try {
+      expect(second.startupFailure).toBeNull();
+      expect(readFileSync(join(hermesHome, "models.json"))).toEqual(
+        repairedBytes,
+      );
+      expect(
+        Number(
+          (
+            second
+              .database!.sqlite.prepare(
+                "SELECT COUNT(*) AS count FROM desktop_model_configuration_operations",
+              )
+              .get() as { count: number | bigint }
+          ).count,
+        ),
+      ).toBe(1);
+
+      const catalog = second.catalog!.snapshot("default");
+      const saveResult = await second.coordinator!.mutate({
+        intent: "upsert",
+        expectedCatalogRevision: catalog.revision,
+        requestedProfileId: "default",
+        providerId: "fixture-provider-01",
+        provider: "custom",
+        providerLabel: "Fixture",
+        baseUrl: "https://saved.fixture.invalid/v1",
+        apiMode: "chat_completions",
+        apiKey: "",
+        models: [
+          {
+            model: "fixture-model",
+            displayName: "Fixture Model",
+          },
+        ],
+        activeModel: "fixture-model",
+      });
+      expect(saveResult).toMatchObject({ status: "committed" });
+      expect(
+        JSON.parse(readFileSync(join(hermesHome, "models.json"), "utf8")),
+      ).toEqual([
+        expect.objectContaining({
+          id: expect.stringMatching(/^recovered-[a-f0-9]{32}$/u),
+          providerId: "fixture-provider-01",
+          baseUrl: "https://saved.fixture.invalid/v1",
+        }),
+      ]);
+      expect(
+        Number(
+          (
+            second
+              .database!.sqlite.prepare(
+                "SELECT COUNT(*) AS count FROM desktop_model_configuration_operations",
+              )
+              .get() as { count: number | bigint }
+          ).count,
+        ),
+      ).toBe(2);
+    } finally {
+      second.close();
     }
   });
 

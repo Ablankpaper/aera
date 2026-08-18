@@ -40,6 +40,24 @@ An owned row whose five files and route exactly equal before/old becomes `rolled
 
 An owned row whose complete files and route exactly equal after/new becomes `committed`; no partial after state is accepted.
 
+### Sanitized Beta.29 dirty-route fixture
+
+The fixture preserves the capture's counts, duplicate endpoints, one unrelated route, managed roles, and journal states; it excludes credentials, identities, domains, paths, logs, and database pages.
+
+Git keeps the fixture's reviewed bytes LF-stable on every CI platform.
+
+### Strict route repair planning
+
+[[src/main/model-configuration-reconciler.ts#planModelRouteDirectoryRepair]] parses one in-memory five-file snapshot and either returns deterministic patches or a fail-closed repair code; it never reads disk, resolves secret values, writes files, or opens the operation journal.
+
+### Stable provider endpoint updates
+
+[[src/main/models.ts#planAddModel]] retains Hermes endpoint-distinct append behavior for legacy rows, while a stable provider id makes the endpoint mutable within one provider, model, and protocol group so endpoint changes replace and converge only that owned group.
+
+### Config-only active route reconstruction
+
+A uniquely resolved config route keeps an existing model-row id or receives one deterministic V2-derived row; missing credential, protocol, provider, or model-definition evidence leaves every managed byte unchanged and requires repair.
+
 ### Managed lock order is deterministic
 
 Mixed model mutations acquire the global catalog before stable-sorted, unique Profile locks, and a nested Profile-to-global acquisition fails before its callback runs.

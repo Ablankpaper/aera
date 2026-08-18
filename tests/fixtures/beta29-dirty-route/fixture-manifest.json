@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "captureId": "5a60ac3b",
+  "sourceArchiveSha256": "dad414de6996b1cc8e1239983bbfac5cd89b655eafee66fb96d5102624dfc4f5",
+  "sanitizerVersion": "beta29-dirty-route-v1",
+  "structuralCounts": {
+    "modelRows": 26,
+    "routeEntries": 20,
+    "duplicateEndpointGroups": 8,
+    "managedFileRoles": 5,
+    "committedOperations": 4,
+    "rolledBackOperations": 1
+  },
+  "files": {
+    "env.redacted": "3e65f1fb8a21bfe96d061f45e1457e1b274a59424bd6eaa6f1336296a31c0de8",
+    "providers.json": "c01a05e559f97ddba8501f2ab9d926ed0e528b0cc5d7f9f5b5dd567b0394334c",
+    "models.json": "36dc92528689412bfbd4374e580506a4033a38d2766f4b3934680604141976ac",
+    "model-definitions.json": "c918d6d84f710a98097def18bf3e27a41b3e5e2aca24e4e1708cdc839d0464bc",
+    "config.yaml": "b6110a8e3c248ccdb3d1858adaa7aaadb07058ac6a5826cafeca2d6f4cbee7f0",
+    "journal-summary.json": "8da765621a5158195b82fa16f31974b5c827d85a28f78d7ca85e057166dfe61f",
+    "expected-relations.json": "788101e39ebde6abd467f979978ca449c46a12f5eaa34708bf449fc53e393106"
+  }
+}

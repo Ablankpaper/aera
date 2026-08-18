@@ -15,6 +15,10 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { ModelConfigurationStage } from "../shared/model-configuration";
+import {
+  isLegacyModelRouteKeyV1,
+  isModelRouteKeyV2,
+} from "../shared/model-route-identity";
 import { HERMES_HOME } from "./installer";
 import type { ModelConfigurationDatabase } from "./model-configuration-database";
 import { flushDurableFileTarget, profilePaths } from "./utils";
@@ -182,16 +186,24 @@ function bounded(value: unknown, label: string, maximum: number): string {
 const ROUTE_STORAGE_PREFIX = "b64v1:";
 const OWNER_STORAGE_PREFIX = "nulv1:";
 
-function canonicalRouteKey(value: unknown, label: string): string {
+function readableRouteKey(value: unknown, label: string): string {
   const route = bounded(value, label, 4096);
-  if (route.split("\0").length !== 4) {
+  if (!isModelRouteKeyV2(route) && !isLegacyModelRouteKeyV1(route)) {
+    throw new Error(`Invalid model configuration ${label}.`);
+  }
+  return route;
+}
+
+function newRouteKey(value: unknown, label: string): string {
+  const route = bounded(value, label, 4096);
+  if (!isModelRouteKeyV2(route)) {
     throw new Error(`Invalid model configuration ${label}.`);
   }
   return route;
 }
 
 function encodeRouteKey(value: unknown, label: string): string {
-  const route = canonicalRouteKey(value, label);
+  const route = newRouteKey(value, label);
   const encoded = `${ROUTE_STORAGE_PREFIX}${Buffer.from(route, "utf8").toString("base64url")}`;
   if (encoded.length > 4096) {
     throw new Error(`Invalid model configuration ${label}.`);
@@ -249,7 +261,7 @@ function decodeRouteKeyHex(value: unknown, label: string): string {
     // Compatibility for operations written by the unreleased v1 coordinator:
     // SQLite TEXT readers stop at NUL, while hex() preserves the complete
     // canonical identity needed for deterministic recovery.
-    return canonicalRouteKey(stored, label);
+    return readableRouteKey(stored, label);
   }
   const payload = stored.slice(ROUTE_STORAGE_PREFIX.length);
   if (!payload || !/^[A-Za-z0-9_-]+$/.test(payload)) {
@@ -263,7 +275,7 @@ function decodeRouteKeyHex(value: unknown, label: string): string {
   if (!decodedBytes.equals(Buffer.from(decoded, "utf8"))) {
     throw new Error(`Model configuration operation ${label} is corrupt.`);
   }
-  return canonicalRouteKey(decoded, label);
+  return readableRouteKey(decoded, label);
 }
 
 function isoDate(value: unknown): string {

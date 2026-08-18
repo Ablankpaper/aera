@@ -5,7 +5,10 @@ import { HERMES_HOME } from "./installer";
 import { profilePaths } from "./utils";
 import { hostDerivedEnvKeyForUrl } from "./host-derived-env";
 import { customProviderEnvKey } from "../shared/url-key-map";
-import type { ModelConfigurationMutationResult } from "../shared/model-configuration";
+import {
+  canonicalModelEndpointV2,
+  type ModelConfigurationMutationResult,
+} from "../shared/model-configuration";
 import DEFAULT_MODELS from "./default-models";
 import {
   planApiServerKeyMigration,
@@ -331,11 +334,7 @@ function writeModelDefinitions(
   permit: ModelConfigurationWritePermit | null,
   defs: Record<string, ModelDefinition>,
 ): void {
-  writeManagedModelFile(
-    permit,
-    MODEL_DEFS_FILE,
-    JSON.stringify(defs, null, 2),
-  );
+  writeManagedModelFile(permit, MODEL_DEFS_FILE, JSON.stringify(defs, null, 2));
 }
 
 export function listModelDefinitions(): ModelDefinition[] {
@@ -837,15 +836,86 @@ export function planAddModel(
     );
   }
 
-  // Stable named providers remain distinct even when they expose the same
-  // model at the same endpoint. A stable request may absorb only its own row or
-  // a legacy row whose name anchor clearly identifies that provider; ambiguous
-  // legacy rows and rows owned by another stable id remain separate.
-  const norm = (u: string): string =>
-    (u || "").trim().replace(/\/+$/, "").toLowerCase();
+  // Upstream keeps endpoint in the legacy dedup key. Once a named provider has
+  // a stable id, its endpoint is mutable: one provider/model/protocol group is
+  // replaced in place. This is the smallest delta that prevents historical
+  // endpoint changes from accumulating duplicate attachments.
+  const norm = canonicalModelEndpointV2;
+  const normalizedApiMode = (apiMode || "").trim().toLocaleLowerCase();
   const providerAnchor = providerId
     ? customProviderEnvKey(providerLabel || name)
     : "";
+  if (providerId) {
+    const sameProtocol = (row: SavedModelRow): boolean =>
+      (row.apiMode || "").trim().toLocaleLowerCase() === normalizedApiMode;
+    const stableIndexes = models
+      .map((row, index) => ({ row, index }))
+      .filter(
+        ({ row }) =>
+          row.providerId === providerId &&
+          row.model === model &&
+          sameProtocol(row),
+      )
+      .map(({ index }) => index);
+    const anchoredLegacyIndexes = models
+      .map((row, index) => ({ row, index }))
+      .filter(
+        ({ row }) =>
+          !row.providerId &&
+          row.provider === provider &&
+          row.model === model &&
+          sameProtocol(row) &&
+          customProviderEnvKey(row.providerLabel || row.name) ===
+            providerAnchor,
+      )
+      .map(({ index }) => index);
+    const hasExactLegacyAnchor = anchoredLegacyIndexes.some(
+      (index) => norm(models[index].baseUrl) === norm(baseUrl),
+    );
+    const candidateIndexes = [
+      ...stableIndexes,
+      ...(stableIndexes.length > 0 || hasExactLegacyAnchor
+        ? anchoredLegacyIndexes
+        : []),
+    ];
+    if (candidateIndexes.length > 0) {
+      const byOldest = (left: number, right: number): number =>
+        models[left].createdAt - models[right].createdAt ||
+        models[left].id.localeCompare(models[right].id);
+      const primaryIndex =
+        [...stableIndexes].sort(byOldest)[0] ??
+        [...candidateIndexes].sort(byOldest)[0];
+      const primary = models[primaryIndex];
+      const earliestCreatedAt = Math.min(
+        ...candidateIndexes.map((index) => models[index].createdAt),
+      );
+      const replacement: SavedModelRow = {
+        ...primary,
+        name,
+        provider,
+        model,
+        baseUrl: baseUrl || "",
+        apiMode: normalizedApiMode || null,
+        ...(providerLabel ? { providerLabel } : {}),
+        providerId,
+        createdAt: earliestCreatedAt,
+      };
+      const candidates = new Set(candidateIndexes);
+      const next = models.flatMap((row, index) => {
+        if (index === primaryIndex) return [replacement];
+        return candidates.has(index) ? [] : [row];
+      });
+      patches.push(modelCatalogPatch("models", MODELS_FILE, next, basePlan));
+      return modelCatalogPlan(
+        patches,
+        {
+          ...replacement,
+          ...(ctx !== undefined ? { contextLength: ctx } : {}),
+        },
+        basePlan,
+      );
+    }
+  }
   const existingIndex = models.findIndex(
     (m) =>
       m.model === model &&
@@ -860,8 +930,8 @@ export function planAddModel(
   if (existingIndex !== -1) {
     const existing = models[existingIndex];
     if (apiMode !== undefined) {
-      const normalizedApiMode = (apiMode || "").trim() || null;
-      models[existingIndex] = { ...existing, apiMode: normalizedApiMode };
+      const nextApiMode = (apiMode || "").trim() || null;
+      models[existingIndex] = { ...existing, apiMode: nextApiMode };
       patches.push(modelCatalogPatch("models", MODELS_FILE, models, basePlan));
     }
     return modelCatalogPlan(

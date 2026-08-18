@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "managedFileRoles": [
+    "env",
+    "providers",
+    "models",
+    "modelDefinitions",
+    "config"
+  ],
+  "endpointDistribution": [11, 8, 1],
+  "configExactRoute": {
+    "provider": "custom:fixture",
+    "model": "fixture-model-01",
+    "endpoint": "https://config-only.fixture.invalid/v1",
+    "apiMode": "chat_completions"
+  }
+}
