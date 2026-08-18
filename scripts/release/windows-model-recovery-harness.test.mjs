@@ -322,6 +322,7 @@ if (CLI_MODE) {
 }
 
 if (!CLI_MODE) {
+  // @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Recoverable model configuration#Windows process-crash recovery gate]]
   test(
     "recovers every modeled Windows process-crash journal window",
     { timeout: 60_000 },

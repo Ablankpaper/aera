@@ -40,6 +40,36 @@ An owned row whose five files and route exactly equal before/old becomes `rolled
 
 An owned row whose complete files and route exactly equal after/new becomes `committed`; no partial after state is accepted.
 
+### Managed lock order is deterministic
+
+Mixed model mutations acquire the global catalog before stable-sorted, unique Profile locks, and a nested Profile-to-global acquisition fails before its callback runs.
+
+### Opaque permits fence managed files
+
+Low-level writes to the five managed roles require an active permit whose global and Profile scope exactly covers the resolved target.
+
+The permit exists only inside the ordered write-authority callback; callers cannot construct, retain, or reuse it to bypass the transaction journal.
+
+### Platform-specific durable replacement
+
+Temporary bytes are flushed before same-volume replacement, then the replaced target is reopened and flushed before the parent directory where supported.
+
+[[src/main/utils.ts#flushDurableFileTarget]] opens the target with write access on Windows because `FlushFileBuffers` requires `GENERIC_WRITE`. POSIX keeps a read-only flush handle and parent-directory fsync; Windows relies on the journal instead of claiming unsupported directory fsync.
+
+### Rollback refresh follows terminal recovery
+
+A verified rollback reaches its terminal journal state before provider, model, config, and model-definition consumers are notified.
+
+Notification failure returns a refresh warning without changing restored bytes, relocking the Profile, or rewriting the terminal recovery decision.
+
+### Managed writer inventory rejects bypasses
+
+The release verifier rejects raw writes, removals, aliased wrappers, and Profile lifecycle subprocesses unless the exact function is registered at the managed transaction boundary.
+
+### Windows process-crash recovery gate
+
+Real Windows CI terminates a child mutation at every modeled journal window and requires deterministic recovery plus bounded evidence rooted only in a generated temporary directory.
+
 ### Model reads are byte side-effect free
 
 Model/config list and get functions never seed, migrate, or rewrite managed files; startup maintenance is planned separately from ordinary reads.

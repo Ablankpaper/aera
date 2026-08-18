@@ -1,9 +1,7 @@
 import {
   appendFileSync,
   chmodSync,
-  closeSync,
   existsSync,
-  fsyncSync,
   lstatSync,
   mkdirSync,
   readFileSync,
@@ -11,7 +9,6 @@ import {
   readdirSync,
   renameSync,
   rmSync,
-  openSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import {
@@ -37,6 +34,7 @@ import {
   unregisterManagedModelProfileRoot,
   type ModelConfigurationWriteAuthority,
 } from "./model-configuration-write-authority";
+import { flushDurableFileTarget } from "./utils";
 
 const PROFILE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const MAX_MANAGED_FILE_BYTES = 32 * 1024 * 1024;
@@ -481,12 +479,7 @@ function appendActivationRecord(
     { encoding: "utf8", mode: 0o600 },
   );
   chmodSync(journalPath, 0o600);
-  const descriptor = openSync(journalPath, "r");
-  try {
-    fsyncSync(descriptor);
-  } finally {
-    closeSync(descriptor);
-  }
+  flushDurableFileTarget(journalPath);
 }
 
 export async function createStagedProfileCandidate(

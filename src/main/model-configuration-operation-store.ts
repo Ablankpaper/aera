@@ -17,7 +17,7 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { ModelConfigurationStage } from "../shared/model-configuration";
 import { HERMES_HOME } from "./installer";
 import type { ModelConfigurationDatabase } from "./model-configuration-database";
-import { profilePaths } from "./utils";
+import { flushDurableFileTarget, profilePaths } from "./utils";
 
 const OPERATION_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -504,15 +504,6 @@ function replaceDurableTemporary(
   }
 }
 
-function flushDurableTarget(path: string): void {
-  const descriptor = openSync(path, "r");
-  try {
-    fsyncSync(descriptor);
-  } finally {
-    closeSync(descriptor);
-  }
-}
-
 function flushDurableParent(path: string): void {
   if (process.platform === "win32") return;
   const descriptor = openSync(path, "r");
@@ -526,7 +517,7 @@ function flushDurableParent(path: string): void {
 export const defaultDurableReplaceAdapter: DurableReplaceAdapter = {
   writeTemporary: writeDurableTemporary,
   replace: replaceDurableTemporary,
-  flushTarget: flushDurableTarget,
+  flushTarget: flushDurableFileTarget,
   flushParent: flushDurableParent,
 };
 

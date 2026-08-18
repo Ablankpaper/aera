@@ -297,8 +297,16 @@ function replaceSafeTemporary(
   }
 }
 
-function flushSafeTarget(path: string): void {
-  const descriptor = openSync(path, "r");
+export function durableFileFlushOpenFlag(
+  platform: NodeJS.Platform = process.platform,
+): "r" | "r+" {
+  // Windows FlushFileBuffers requires GENERIC_WRITE. Node's read-only "r"
+  // handle lacks that access and fsyncSync fails with EPERM.
+  return platform === "win32" ? "r+" : "r";
+}
+
+export function flushDurableFileTarget(path: string): void {
+  const descriptor = openSync(path, durableFileFlushOpenFlag());
   try {
     fsyncSync(descriptor);
   } finally {
@@ -320,7 +328,7 @@ export const defaultSafeWriteDurableReplaceAdapter: SafeWriteDurableReplaceAdapt
   {
     writeTemporary: writeSafeTemporary,
     replace: replaceSafeTemporary,
-    flushTarget: flushSafeTarget,
+    flushTarget: flushDurableFileTarget,
     flushParent: flushSafeParent,
   };
 

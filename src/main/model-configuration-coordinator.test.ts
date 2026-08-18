@@ -602,6 +602,7 @@ describe("ModelConfigurationCoordinator", () => {
     expect(fixture.adapter.getActiveRouteKey("account")).toBe(OLD_ROUTE);
   });
 
+  // @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Recoverable model configuration#Rollback refresh follows terminal recovery]]
   it("notifies consumers only after a verified rollback is terminal", async () => {
     const fixture = makeFixture();
     const before = fixture.snapshotBytes();

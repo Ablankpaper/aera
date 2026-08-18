@@ -19,6 +19,7 @@ afterEach(() => {
 });
 
 describe("managed model file boundary", () => {
+  // @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Recoverable model configuration#Opaque permits fence managed files]]
   it("rejects writes without an active permit before bytes change", () => {
     const root = mkdtempSync(join(tmpdir(), "aera-managed-files-"));
     roots.push(root);

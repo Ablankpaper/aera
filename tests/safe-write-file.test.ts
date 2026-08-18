@@ -10,11 +10,18 @@ import {
 } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { safeWriteFile } from "../src/main/utils";
+import { durableFileFlushOpenFlag, safeWriteFile } from "../src/main/utils";
 
 const TEST_DIR = join(tmpdir(), `hermes-safe-write-${Date.now()}`);
 
 describe("safeWriteFile", () => {
+  // @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Recoverable model configuration#Platform-specific durable replacement]]
+  it("opens Windows flush handles with write access", () => {
+    expect(durableFileFlushOpenFlag("win32")).toBe("r+");
+    expect(durableFileFlushOpenFlag("darwin")).toBe("r");
+    expect(durableFileFlushOpenFlag("linux")).toBe("r");
+  });
+
   it("creates parent directories before writing", () => {
     const filePath = join(TEST_DIR, "nested", "config.yaml");
 

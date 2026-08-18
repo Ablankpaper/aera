@@ -24,6 +24,7 @@ afterEach(() => {
 });
 
 describe("ModelConfigurationWriteAuthority", () => {
+  // @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Recoverable model configuration#Managed lock order is deterministic]]
   it("acquires the global catalog before sorted unique Profile locks", async () => {
     const authority = new ModelConfigurationWriteAuthority();
     const events: string[] = [];

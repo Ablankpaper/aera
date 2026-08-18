@@ -342,6 +342,7 @@ test("rejects profile clone outside the exact registered staging function", () =
   }
 });
 
+// @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Recoverable model configuration#Managed writer inventory rejects bypasses]]
 test("the current production source tree has no unregistered managed writer", () => {
   const report = verifyManagedModelWriters({ root: repoRoot });
   assert.equal(report.ok, true, JSON.stringify(report.issues, null, 2));
