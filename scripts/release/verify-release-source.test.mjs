@@ -28,6 +28,14 @@ const workflowPath = new URL(
   "../../.github/workflows/release-candidate.yml",
   import.meta.url,
 );
+const internalBetaWorkflowPath = new URL(
+  "../../.github/workflows/internal-beta.yml",
+  import.meta.url,
+);
+const internalBetaPromoteWorkflowPath = new URL(
+  "../../.github/workflows/internal-beta-promote.yml",
+  import.meta.url,
+);
 const packagePath = new URL("../../package.json", import.meta.url);
 
 function runGit(cwd, args) {
@@ -566,4 +574,33 @@ test("runs the exact source gate before the production candidate build path", as
   assert.match(workflow, /--workflow-ref "\$GITHUB_WORKFLOW_REF"/u);
   assert.match(workflow, /macos:[\s\S]*?needs: validate/u);
   assert.match(workflow, /windows:[\s\S]*?needs: validate/u);
+});
+
+// @lat: [[release-source-governance#Release Source Governance#Internal Beta workflow enforcement]]
+test("runs the exact source gate before internal-Beta candidate and promotion work", async () => {
+  const [candidate, promotion] = await Promise.all([
+    readFile(internalBetaWorkflowPath, "utf8"),
+    readFile(internalBetaPromoteWorkflowPath, "utf8"),
+  ]);
+
+  for (const [workflow, identityStep] of [
+    [candidate, "Validate source and workflow identity"],
+    [promotion, "Verify exact source and successful candidate run"],
+  ]) {
+    const gateIndex = workflow.indexOf(
+      "npm run --silent verify:release-source --",
+    );
+    const identityIndex = workflow.indexOf(identityStep);
+    assert.ok(gateIndex >= 0, "internal-Beta workflow must invoke source gate");
+    assert.ok(identityIndex >= 0, "internal-Beta identity step is required");
+    assert.ok(
+      gateIndex < identityIndex,
+      "source gate must precede internal-Beta identity and publication work",
+    );
+    assert.match(workflow, /--checkout "\$GITHUB_WORKSPACE"/u);
+    assert.match(workflow, /--repository "\$GITHUB_REPOSITORY"/u);
+    assert.match(workflow, /--source-sha "\$SOURCE_SHA"/u);
+    assert.match(workflow, /--workflow-ref "\$GITHUB_WORKFLOW_REF"/u);
+    assert.match(workflow, /test -s "\$RUNNER_TEMP\/release-source\.json"/u);
+  }
 });

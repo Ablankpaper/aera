@@ -82,3 +82,7 @@ Successful evidence uses schema version 1 with sorted JSON keys and normalized r
 The signed production candidate workflow runs the exact release source gate before either platform build can start.
 
 `package.json` exposes the verifier as `verify:release-source`; the `validate` job records its canonical output under `RUNNER_TEMP`, and both macOS and Windows candidate jobs depend on that successful job.
+
+## Internal Beta workflow enforcement
+
+The internal-Beta candidate and promotion workflows run the same source gate before identity checks, artifact assembly, or publication, so an internal dispatch cannot bypass the authoritative checkout and retired-remote protections.
