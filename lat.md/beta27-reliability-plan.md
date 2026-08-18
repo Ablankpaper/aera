@@ -44,6 +44,8 @@ An owned row whose complete files and route exactly equal after/new becomes `com
 
 The fixture preserves the capture's counts, duplicate endpoints, one unrelated route, managed roles, and journal states; it excludes credentials, identities, domains, paths, logs, and database pages.
 
+Git keeps the fixture's reviewed bytes LF-stable on every CI platform.
+
 ### Strict route repair planning
 
 [[src/main/model-configuration-reconciler.ts#planModelRouteDirectoryRepair]] parses one in-memory five-file snapshot and either returns deterministic patches or a fail-closed repair code; it never reads disk, resolves secret values, writes files, or opens the operation journal.
