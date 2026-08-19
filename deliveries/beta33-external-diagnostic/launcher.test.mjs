@@ -20,7 +20,8 @@ test("macOS launcher uses the signed app Electron runtime and no global Node", (
   assert.match(script, /ELECTRON_RUN_AS_NODE=1/);
   assert.match(script, /aera-diagnostic\.mjs/);
   assert.doesNotMatch(script, /command -v node|node "/);
-  assert.equal(statSync(join(root, "run-macos.sh")).mode & 0o111, 0o111);
+  if (process.platform !== "win32")
+    assert.equal(statSync(join(root, "run-macos.sh")).mode & 0o111, 0o111);
 });
 
 test("Windows wrappers forward to PowerShell and preserve arguments", () => {
@@ -50,6 +51,12 @@ test("Windows PowerShell launcher remains ASCII for Windows PowerShell 5.1", () 
     [...powershell].some((character) => character.codePointAt(0) > 0x7f),
     false,
   );
+});
+
+test("Windows self-test hashes files without requiring Get-FileHash", () => {
+  const powershell = readFileSync(join(root, "run-windows.ps1"), "utf8");
+  assert.doesNotMatch(powershell, /Get-FileHash/u);
+  assert.match(powershell, /SHA256\]::Create/u);
 });
 
 test("PR-H command entrypoints convert file URLs to filesystem paths", () => {

@@ -16,6 +16,19 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
+function Get-Sha256Hex {
+  param([Parameter(Mandatory = $true)][string]$Path)
+  $stream = [System.IO.File]::OpenRead($Path)
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $bytes = $sha256.ComputeHash($stream)
+    return ([System.BitConverter]::ToString($bytes)).Replace("-", "").ToLowerInvariant()
+  } finally {
+    $sha256.Dispose()
+    $stream.Dispose()
+  }
+}
+
 if ($SelfTest) {
   $sumsPath = Join-Path $scriptDir "SHASUMS.txt"
   if (-not (Test-Path -LiteralPath $sumsPath -PathType Leaf)) {
@@ -30,7 +43,7 @@ if ($SelfTest) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
       throw "Collector file is missing"
     }
-    $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+    $actual = Get-Sha256Hex -Path $file
     if ($actual -ne $expected) { throw "Collector integrity check failed" }
   }
   Write-Output "Aera Windows collector self-test passed"
