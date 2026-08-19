@@ -95,6 +95,23 @@ test("accepts a closed target descriptor and rejects unsafe values", () => {
   );
 });
 
+test("requires candidate-bound descriptors to carry complete package identities", () => {
+  const bound = {
+    ...target,
+    bindingStatus: "candidate-bound",
+    artifactSha256: "e".repeat(64),
+    appAsarSha256: "f".repeat(64),
+    mainSha256: "1".repeat(64),
+    preloadSha256: "2".repeat(64),
+    rendererSha256: "3".repeat(64),
+  };
+  assert.deepEqual(parseDiagnosticTargetV1(bound), bound);
+  assert.throws(
+    () => parseDiagnosticTargetV1({ ...target, bindingStatus: "candidate-bound" }),
+    /candidate-bound.*artifactSha256/i,
+  );
+});
+
 test("validates a V4 bundle with explicit missing evidence", () => {
   const sections = REQUIRED_DIAGNOSTIC_SECTIONS.map((name) => ({
     name,

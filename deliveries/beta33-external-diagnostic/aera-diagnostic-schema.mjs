@@ -145,6 +145,18 @@ export function parseDiagnosticTargetV1(input) {
     )
       throw new Error("target bindingStatus is invalid");
   }
+  if (input.bindingStatus === "candidate-bound") {
+    for (const field of [
+      "artifactSha256",
+      "appAsarSha256",
+      "mainSha256",
+      "preloadSha256",
+      "rendererSha256",
+    ]) {
+      if (input[field] == null)
+        throw new Error(`candidate-bound target requires ${field}`);
+    }
+  }
   return input;
 }
 

@@ -7,6 +7,12 @@
     { "required": ["bundleId"] },
     { "required": ["applicationId"] }
   ],
+  "allOf": [
+    {
+      "if": { "properties": { "bindingStatus": { "const": "candidate-bound" } }, "required": ["bindingStatus"] },
+      "then": { "required": ["artifactSha256", "appAsarSha256", "mainSha256", "preloadSha256", "rendererSha256"] }
+    }
+  ],
   "required": [
     "schemaVersion",
     "platform",

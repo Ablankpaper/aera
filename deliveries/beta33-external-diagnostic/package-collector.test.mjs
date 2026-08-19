@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -88,5 +89,19 @@ test("uses wildcard-aware PowerShell packaging instead of LiteralPath star", () 
     const source = readFileSync(new URL(name, import.meta.url), "utf8");
     assert.match(source, /Compress-Archive -Path/);
     assert.doesNotMatch(source, /Compress-Archive -LiteralPath[^\n]*\\\\\*/);
+  }
+});
+
+test("writes and verifies a deterministic committed SHASUMS inventory", () => {
+  const committed = readFileSync(new URL("SHASUMS.txt", import.meta.url), "utf8");
+  const rows = committed.trim().split(/\r?\n/u);
+  assert.ok(rows.length >= 16);
+  assert.deepEqual(rows, [...rows].sort());
+  for (const row of rows) {
+    const match = row.match(/^([0-9a-f]{64})  ([A-Za-z0-9._-]+)$/u);
+    assert.ok(match, `invalid checksum row: ${row}`);
+    const bytes = readFileSync(new URL(match[2], import.meta.url));
+    const actual = createHash("sha256").update(bytes).digest("hex");
+    assert.equal(actual, match[1], match[2]);
   }
 });
