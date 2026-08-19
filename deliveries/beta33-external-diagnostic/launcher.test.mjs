@@ -35,6 +35,15 @@ test("Windows wrappers forward to PowerShell and preserve arguments", () => {
   assert.doesNotMatch(bat, /node\.exe .*beta29/);
 });
 
+test("native launchers expose a package integrity self-test", () => {
+  const macos = readFileSync(join(root, "run-macos.sh"), "utf8");
+  const powershell = readFileSync(join(root, "run-windows.ps1"), "utf8");
+  assert.match(macos, /--self-test/u);
+  assert.match(macos, /SHASUMS\.txt/u);
+  assert.match(powershell, /SelfTest/u);
+  assert.match(powershell, /SHASUMS\.txt/u);
+});
+
 test("collector main executes when its path contains spaces", () => {
   const root = mkdtempSync(join(tmpdir(), "aera collector launcher "));
   try {

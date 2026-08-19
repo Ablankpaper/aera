@@ -29,6 +29,7 @@ const SHARED_FILES = [
   "aera-diagnostic-redaction.mjs",
   "aera-diagnostic-environment.mjs",
   "aera-diagnostic-schema.mjs",
+  "aera-diagnostic-target.mjs",
   "aera-diagnostic-bundle-v4.schema.json",
   "aera-diagnostic-target-v1.schema.json",
   "README.txt",

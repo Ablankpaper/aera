@@ -19,6 +19,7 @@ test("packages a macOS-only collector bundle without product source or legacy CL
     assert.ok(entries.includes("run-macos.sh"));
     assert.ok(entries.includes("aera-diagnostic-bundle-v4.schema.json"));
     assert.ok(entries.includes("aera-diagnostic-environment.mjs"));
+    assert.ok(entries.includes("aera-diagnostic-target.mjs"));
     assert.ok(!entries.includes("beta29-external-model-save-diagnostic.mjs"));
     assert.ok(!entries.some((name) => name.startsWith("src")));
     assert.ok(readdirSync(output).some((name) => name.endsWith(".zip")));
@@ -40,6 +41,7 @@ test("packages a Windows collector from a non-Windows release host", () => {
     const entries = readdirSync(join(output, "staging")).sort();
     assert.ok(entries.includes("run-windows.ps1"));
     assert.ok(entries.includes("run-windows.bat"));
+    assert.ok(entries.includes("aera-diagnostic-target.mjs"));
     assert.ok(!entries.includes("run-macos.sh"));
     assert.ok(readdirSync(output).some((name) => name.endsWith(".zip")));
   } finally {

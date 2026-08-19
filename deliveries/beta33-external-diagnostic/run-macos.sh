@@ -4,6 +4,17 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 [ "$(uname -s)" = "Darwin" ] || { echo "此采集器只支持 macOS" >&2; exit 2; }
 
+if [ "${1:-}" = "--self-test" ]; then
+  [ "$#" -eq 1 ] || { echo "--self-test 不接受其他参数" >&2; exit 2; }
+  [ -f "$SCRIPT_DIR/SHASUMS.txt" ] || { echo "采集器校验清单缺失" >&2; exit 1; }
+  (
+    cd "$SCRIPT_DIR"
+    shasum -a 256 -c SHASUMS.txt >/dev/null
+  ) || { echo "采集器完整性校验失败" >&2; exit 1; }
+  echo "Aera macOS 采集器自检通过"
+  exit 0
+fi
+
 app_path=""
 previous=""
 for arg in "$@"; do
