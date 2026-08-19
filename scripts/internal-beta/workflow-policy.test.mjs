@@ -361,8 +361,9 @@ test("internal-Beta candidate is exact-SHA, notarized on macOS, explicitly unsig
   );
   assert.match(
     raw,
-    /--win nsis portable dir --x64 --publish never[\s\\`]*-c\.forceCodeSigning=false/u,
+    /--win nsis portable dir --x64 --publish never[\s\\`]*--config\.forceCodeSigning=false/u,
   );
+  assert.doesNotMatch(raw, /-c\.forceCodeSigning=false/u);
   assert.match(raw, /CSC_IDENTITY_AUTO_DISCOVERY:\s*"false"/u);
   assert.match(raw, /Aera-Internal-Beta-\$env:VERSION-windows-x64-app\.zip/u);
   assert.match(raw, /verify-packaged-windows-app-zip\.mjs/u);
