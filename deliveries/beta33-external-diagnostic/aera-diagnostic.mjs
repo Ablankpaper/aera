@@ -54,6 +54,11 @@ import {
   validateDiagnosticBundleV4,
 } from "./aera-diagnostic-schema.mjs";
 import {
+  assertTargetMatches,
+  inspectTargetIdentity,
+  resolveTargetExecutable,
+} from "./aera-diagnostic-target.mjs";
+import {
   redactStructured,
   redactText,
   redactionCounters,
@@ -588,15 +593,19 @@ export async function runDiagnostic(args) {
     args.timeoutSeconds > 1800
   )
     return fail("--timeout-seconds 必须是 10 到 1800 的整数");
-  const executable = findExecutable(appPath, platform);
+  const executable = resolveTargetExecutable(appPath, platform);
   if (!existsSync(executable)) return fail("应用主可执行文件不存在");
-  const identity = appIdentity(appPath, executable, platform, args.version);
+  const identity = inspectTargetIdentity({
+    appPath,
+    platform,
+    version: args.version,
+  });
   if (!identity.version) return fail("无法读取应用版本");
   let target;
   if (args.target) {
     try {
       target = loadTarget(assertAbsolute(args.target, "--target"));
-      validateTarget(identity, target);
+      assertTargetMatches(identity, target);
     } catch (error) {
       return fail(error?.message || "target descriptor invalid");
     }

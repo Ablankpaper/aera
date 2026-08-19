@@ -8,7 +8,7 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
-import { basename, join, relative, resolve } from "node:path";
+import { basename, join, normalize, resolve } from "node:path";
 
 import { runBoundedCommand } from "./aera-diagnostic-core.mjs";
 
@@ -117,6 +117,15 @@ export function inspectTargetIdentity({ appPath, platform, version = null, appli
     architecture: detectArchitecture(executable, platform),
     executable,
     executableSha256,
+    executablePathSha256: createHash("sha256")
+      .update(
+        `aera-diagnostic-executable-path-v1\0${normalize(
+          platform === "darwin" && String(appPath).endsWith(".app")
+            ? join(resolve(appPath), "Contents", "MacOS", basename(executable))
+            : resolve(appPath),
+        )}`,
+      )
+      .digest("hex"),
     packageSha256,
     packagePath: resolvedApp,
   };
