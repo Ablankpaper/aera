@@ -52,6 +52,21 @@ test("requires the packaged Main, Preload, Renderer, and package identity", () =
   );
 });
 
+test("accepts Windows-style ASAR entry separators", () => {
+  assert.doesNotThrow(() =>
+    validateWindowsAppAsarEntries(
+      [
+        "\\out\\main\\index.js",
+        "\\out\\preload\\index.js",
+        "\\out\\renderer\\index.html",
+        "\\package.json",
+      ],
+      { name: "agentera-studio", version: VERSION },
+      VERSION,
+    ),
+  );
+});
+
 test("rejects a packaged app with a missing Renderer entry or wrong version", () => {
   assert.throws(
     () =>

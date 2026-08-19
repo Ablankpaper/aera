@@ -73,7 +73,7 @@ export function validateWindowsAppAsarEntries(
   const normalized = new Set(
     entries
       .filter((entry) => typeof entry === "string")
-      .map((entry) => entry.replace(/^\/+/, "")),
+      .map((entry) => entry.replaceAll("\\", "/").replace(/^\/+/, "")),
   );
   const requiredEntries = [
     "out/main/index.js",
