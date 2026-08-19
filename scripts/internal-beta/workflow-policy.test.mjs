@@ -19,6 +19,10 @@ const productionCandidatePath = new URL(
   "../../.github/workflows/release-candidate.yml",
   import.meta.url,
 );
+const ciWorkflowPath = new URL(
+  "../../.github/workflows/ci.yml",
+  import.meta.url,
+);
 const promotionWorkflowPath = new URL(
   "../../.github/workflows/internal-beta-promote.yml",
   import.meta.url,
@@ -103,6 +107,7 @@ const fullMatrixJobs = [
   successfulJob("check (ubuntu-latest)"),
   successfulJob("check (macos-latest)"),
   successfulJob("check (windows-latest)"),
+  successfulJob("windows-model-recovery"),
 ];
 
 const skippedDiagnosticJob = {
@@ -156,6 +161,59 @@ test("candidate CI validators reject a missing required platform", async () => {
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /matrix|job/u);
   }
+});
+
+test("CI and candidate workflows execute and keep collectors separate from product artifacts", async () => {
+  const [ci, internalBeta, releaseCandidate] = await Promise.all([
+    readFile(ciWorkflowPath, "utf8"),
+    readFile(workflowPath, "utf8"),
+    readFile(productionCandidatePath, "utf8"),
+  ]);
+  assert.match(
+    ci,
+    /node --test\s+deliveries\/beta33-external-diagnostic\/\*\.test\.mjs/u,
+  );
+  for (const raw of [internalBeta, releaseCandidate]) {
+    assert.match(raw, /package-diagnostic-collectors\.mjs/u);
+    assert.match(raw, /diagnostic-collectors/u);
+    assert.doesNotMatch(
+      raw,
+      /cp[^\n]*(?:Aera\.app|resources)[^\n]*beta33-external-diagnostic/iu,
+    );
+  }
+
+  const production = parseYAML(releaseCandidate);
+  const assembleSteps = production.jobs.assemble.steps;
+  const assembleInputs = assembleSteps.find(
+    (step) => step.name === "Assemble candidate inputs",
+  );
+  assert.ok(assembleInputs);
+  assert.doesNotMatch(
+    assembleInputs.run,
+    /^\s+candidate\/(?:evidence\/diagnostic-collectors\.json|diagnostic-collectors\/\*)$/mu,
+  );
+
+  const attestation = assembleSteps.find(
+    (step) => step.name === "Attest candidate bytes",
+  );
+  assert.ok(attestation);
+  assert.match(
+    attestation.with["subject-path"],
+    /candidate\/diagnostic-collectors\/\*/u,
+  );
+  assert.match(
+    attestation.with["subject-path"],
+    /candidate\/evidence\/diagnostic-collectors\.json/u,
+  );
+
+  const verifyAttestation = assembleSteps.find(
+    (step) => step.name === "Verify GitHub attestation and preserve bundle",
+  );
+  assert.ok(verifyAttestation);
+  assert.match(
+    verifyAttestation.run,
+    /find candidate\/diagnostic-collectors -type f -print0/u,
+  );
 });
 
 test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublished, and Sigstore-bound", async () => {

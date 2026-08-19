@@ -32,7 +32,7 @@ test("binds an exact candidate manifest to a target descriptor", () => {
   assert.equal(result.packageSha256, SHA("b"));
 });
 
-test("rejects conflicting platform hashes and never reads process secrets", () => {
+test("rejects unknown fields and never reads process secrets", () => {
   assert.throws(
     () =>
       buildDiagnosticTarget({
@@ -52,8 +52,29 @@ test("rejects conflicting platform hashes and never reads process secrets", () =
         candidateManifestSha256: SHA("e"),
         executable: "fixture-secret-token",
       }),
-    /unknown|conflict/i,
+    /unknown/i,
   );
+});
+
+test("keeps distinct container and installed-package hashes", () => {
+  const result = buildDiagnosticTarget({
+    schemaVersion: 1,
+    platform: "darwin",
+    version: "0.7.4-internal-beta.33",
+    bundleId: "com.example.aera",
+    architecture: "arm64",
+    executableSha256: SHA("a"),
+    packageSha256: SHA("b"),
+    artifactSha256: SHA("c"),
+    appAsarSha256: SHA("d"),
+    mainSha256: SHA("e"),
+    preloadSha256: SHA("f"),
+    rendererSha256: SHA("1"),
+    sourceSha: "2".repeat(40),
+    candidateManifestSha256: SHA("3"),
+  });
+  assert.equal(result.packageSha256, SHA("b"));
+  assert.equal(result.artifactSha256, SHA("c"));
 });
 
 test("CLI writes canonical descriptor bytes", () => {

@@ -100,6 +100,7 @@ jobs:
             "check (ubuntu-latest)",
             "check (macos-latest)",
             "check (windows-latest)",
+            "windows-model-recovery",
           ]);
           const allowedSkippedJobs = new Set(["windows-process-tree-diagnostic"]);
           for (const job of run.jobs) {
@@ -390,6 +391,16 @@ jobs:
             --output "$RUNNER_TEMP/packaged-startup-macos.json"
           test -s "$RUNNER_TEMP/packaged-startup-macos.json"
 
+      - name: Record path-free macOS collector identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/internal-beta/inspect-diagnostic-identity.mjs \
+            --app "${{ steps.mac_paths.outputs.app }}" \
+            --platform darwin \
+            --version "${{ needs.validate.outputs.version }}" \
+            --output "$RUNNER_TEMP/diagnostic-macos-identity.json"
+
       - name: Exercise packaged updater against final macOS ZIP
         shell: bash
         env:
@@ -584,6 +595,8 @@ jobs:
           cp "$RUNNER_TEMP/macos-evidence.json" "$destination/evidence/"
           cp "$RUNNER_TEMP/packaged-startup-macos.json" \
             "$destination/evidence/"
+          cp "$RUNNER_TEMP/diagnostic-macos-identity.json" \
+            "$destination/evidence/"
           cp "$RUNNER_TEMP/native-inventory-macos-dmg.json" \
             "$RUNNER_TEMP/native-inventory-macos-zip.json" \
             "$destination/evidence/"
@@ -706,6 +719,21 @@ jobs:
             throw "Packaged Windows startup evidence is missing"
           }
 
+      - name: Record path-free Windows collector identity
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          $unpacked = @(Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*unpacked" })
+          if ($unpacked.Count -ne 1) { throw "Expected exactly one unpacked Windows app" }
+          node scripts/internal-beta/inspect-diagnostic-identity.mjs `
+            --app $unpacked[0].FullName `
+            --platform win32 `
+            --version $env:VERSION `
+            --application-id com.bignormal.agentera.studio `
+            --output "$env:RUNNER_TEMP/diagnostic-windows-identity.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Verify packaged Runtime Seed, app ZIP, and stage immutable bytes
         shell: pwsh
         env:
@@ -762,6 +790,9 @@ jobs:
           Copy-Item $manifests[0].FullName -Destination (Join-Path $destination "runtime-seed")
           Copy-Item `
             (Join-Path $env:RUNNER_TEMP "packaged-startup-windows.json") `
+            -Destination (Join-Path $destination "evidence")
+          Copy-Item `
+            (Join-Path $env:RUNNER_TEMP "diagnostic-windows-identity.json") `
             -Destination (Join-Path $destination "evidence")
 
       - name: Bind native inventories to final Windows containers
@@ -952,6 +983,10 @@ jobs:
           done
           cp build/agentera-runtime-seed.lock.json \
             candidate/evidence/agentera-runtime-seed.lock.json
+          cp "$RUNNER_TEMP/internal-beta-macos/evidence/diagnostic-macos-identity.json" \
+            candidate/evidence/
+          cp "$RUNNER_TEMP/internal-beta-windows/evidence/diagnostic-windows-identity.json" \
+            candidate/evidence/
 
       - name: Install exact Cosign and Syft versions
         shell: bash
@@ -1060,6 +1095,31 @@ jobs:
             "${common_args[@]}" \
             --manifest candidate/internal-beta-manifest.json
 
+      - name: Package candidate-bound external diagnostic collectors
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from "node:fs/promises";
+          const manifest = JSON.parse(await readFile("candidate/internal-beta-manifest.json", "utf8"));
+          const mac = manifest.artifacts.find((entry) => entry.platform === "macos" && entry.kind === "macos_zip");
+          const windows = manifest.artifacts.find((entry) => entry.platform === "windows" && entry.kind === "windows_app_zip");
+          if (!mac || !windows) throw new Error("collector target artifact is missing");
+          await writeFile(`${process.env.RUNNER_TEMP}/macos-artifact.json`, JSON.stringify({ sha256: mac.sha256 }));
+          await writeFile(`${process.env.RUNNER_TEMP}/windows-artifact.json`, JSON.stringify({ sha256: windows.sha256 }));
+          NODE
+          mkdir -p candidate/diagnostic-collectors
+          node scripts/internal-beta/package-diagnostic-collectors.mjs \
+            --manifest candidate/internal-beta-manifest.json \
+            --macos-identity candidate/evidence/diagnostic-macos-identity.json \
+            --macos-startup candidate/evidence/packaged-startup-macos.json \
+            --macos-artifact "$RUNNER_TEMP/macos-artifact.json" \
+            --windows-identity candidate/evidence/diagnostic-windows-identity.json \
+            --windows-startup candidate/evidence/packaged-startup-windows.json \
+            --windows-artifact "$RUNNER_TEMP/windows-artifact.json" \
+            --output candidate/diagnostic-collectors \
+            --ledger candidate/evidence/diagnostic-collectors.json
+
       - name: Keyless-sign and verify manifest and provenance
         shell: bash
         run: |
@@ -1093,7 +1153,7 @@ jobs:
           set -euo pipefail
           (
             cd candidate
-            find artifacts desktop-update evidence runtime-seed -type f -print0 \
+            find artifacts desktop-update evidence runtime-seed diagnostic-collectors -type f -print0 \
               | LC_ALL=C sort -z \
               | xargs -0 sha256sum
             sha256sum internal-beta-manifest.json

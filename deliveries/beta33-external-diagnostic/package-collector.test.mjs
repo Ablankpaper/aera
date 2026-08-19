@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -50,6 +56,60 @@ test("packages a Windows collector from a non-Windows release host", () => {
   }
 });
 
+test(
+  "packaged macOS collector passes launcher integrity self-test",
+  { skip: process.platform !== "darwin" },
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "aera-macos-collector-self-test-"));
+    try {
+      const packaged = packageCollector({
+        platform: "darwin",
+        outputDir: root,
+      });
+      const result = spawnSync(
+        "sh",
+        [join(packaged.staging, "run-macos.sh"), "--self-test"],
+        {
+          encoding: "utf8",
+        },
+      );
+      assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+      assert.match(result.stdout, /自检通过/u);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "packaged Windows collector passes launcher integrity self-test",
+  { skip: process.platform !== "win32" },
+  () => {
+    const root = mkdtempSync(
+      join(tmpdir(), "aera-windows-collector-self-test-"),
+    );
+    try {
+      const packaged = packageCollector({ platform: "win32", outputDir: root });
+      const result = spawnSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          join(packaged.staging, "run-windows.ps1"),
+          "-SelfTest",
+        ],
+        { encoding: "utf8" },
+      );
+      assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+      assert.match(result.stdout, /自检通过/u);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
 test("rejects unknown platform before creating an artifact", () => {
   assert.throws(
     () => packageCollector({ platform: "linux", outputDir: "/tmp/no" }),
@@ -93,12 +153,15 @@ test("uses wildcard-aware PowerShell packaging instead of LiteralPath star", () 
 });
 
 test("writes and verifies a deterministic committed SHASUMS inventory", () => {
-  const committed = readFileSync(new URL("SHASUMS.txt", import.meta.url), "utf8");
+  const committed = readFileSync(
+    new URL("SHASUMS.txt", import.meta.url),
+    "utf8",
+  );
   const rows = committed.trim().split(/\r?\n/u);
   assert.ok(rows.length >= 16);
   assert.deepEqual(rows, [...rows].sort());
   for (const row of rows) {
-    const match = row.match(/^([0-9a-f]{64})  ([A-Za-z0-9._-]+)$/u);
+    const match = row.match(/^([0-9a-f]{64}) {2}([A-Za-z0-9._-]+)$/u);
     assert.ok(match, `invalid checksum row: ${row}`);
     const bytes = readFileSync(new URL(match[2], import.meta.url));
     const actual = createHash("sha256").update(bytes).digest("hex");

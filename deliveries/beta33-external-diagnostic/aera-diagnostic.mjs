@@ -6,7 +6,6 @@ import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 import {
   existsSync,
-  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -40,9 +39,7 @@ import {
   collectMacOpenFilePaths,
   collectMacPlatformEvidence,
 } from "./aera-diagnostic-platform-macos.mjs";
-import {
-  discoverRuntimeLogEvidence,
-} from "./aera-diagnostic-platform.mjs";
+import { discoverRuntimeLogEvidence } from "./aera-diagnostic-platform.mjs";
 import { collectWindowsPlatformEvidence } from "./aera-diagnostic-platform-windows.mjs";
 import {
   collectCloudOriginEvidence,
@@ -151,130 +148,12 @@ function assertAbsolute(value, label) {
   return resolve(value);
 }
 
-function plistValue(appPath, key) {
-  const path = join(appPath, "Contents", "Info.plist");
-  try {
-    const value = readFileSync(path, "utf8");
-    const match = value.match(
-      new RegExp(`<key>${key}</key>\\s*<string>([^<]+)</string>`, "i"),
-    );
-    return match?.[1]?.trim() || null;
-  } catch {
-    return null;
-  }
-}
-
-function windowsProductVersion(executable) {
-  if (process.platform !== "win32") return null;
-  const literal = `'${String(executable).replaceAll("'", "''")}'`;
-  const result = runBoundedCommand(
-    "powershell.exe",
-    [
-      "-NoProfile",
-      "-Command",
-      `(Get-Item -LiteralPath ${literal}).VersionInfo.ProductVersion`,
-    ],
-    { timeoutMs: 5_000, maximumBytes: 8 * 1024 },
-  );
-  if (result.code !== 0) return null;
-  const version = result.stdout.trim().split(/\r?\n/).at(-1)?.trim() || "";
-  return /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(version) ? version : null;
-}
-
-function findExecutable(appPath, platform) {
-  if (platform === "darwin" && appPath.endsWith(".app")) {
-    const directory = join(appPath, "Contents", "MacOS");
-    try {
-      const entries = readdirSync(directory).filter(
-        (name) => !name.startsWith("."),
-      );
-      const preferred = entries.find((name) => /aera|agentera/i.test(name));
-      return join(directory, preferred || entries[0] || "Aera");
-    } catch {
-      return join(directory, "Aera");
-    }
-  }
-  return appPath;
-}
-
 function hashFile(path) {
   try {
     return createHash("sha256").update(readFileSync(path)).digest("hex");
   } catch {
     return null;
   }
-}
-
-function hashPath(path) {
-  return createHash("sha256")
-    .update(`aera-diagnostic-executable-path-v1\0${normalize(path)}`)
-    .digest("hex");
-}
-
-function hashDirectory(root) {
-  const hash = createHash("sha256");
-  const walk = (path, relative = "") => {
-    let entries;
-    try {
-      entries = readdirSync(path).sort();
-    } catch {
-      return;
-    }
-    for (const name of entries) {
-      const child = join(path, name);
-      const childRelative = `${relative}/${name}`;
-      let info;
-      try {
-        info = lstatSync(child);
-      } catch {
-        continue;
-      }
-      if (info.isDirectory()) walk(child, childRelative);
-      else if (info.isFile()) {
-        hash.update(childRelative);
-        hash.update(readFileSync(child));
-      }
-    }
-  };
-  walk(root);
-  return hash.digest("hex");
-}
-
-function appIdentity(appPath, executable, platform, versionOverride) {
-  const version =
-    versionOverride ||
-    (platform === "darwin"
-      ? plistValue(appPath, "CFBundleShortVersionString")
-      : windowsProductVersion(executable)) ||
-    "unknown";
-  const bundleId =
-    platform === "darwin" ? plistValue(appPath, "CFBundleIdentifier") : null;
-  const executableSha256 = hashFile(executable);
-  const packageSha256 =
-    existsSync(appPath) && lstatSync(appPath).isDirectory()
-      ? hashDirectory(appPath)
-      : executableSha256;
-  let architecture = process.arch === "arm64" ? "arm64" : "x64";
-  const file = runBoundedCommand("file", [executable], {
-    timeoutMs: 5000,
-    maximumBytes: 8192,
-  });
-  if (/arm64|aarch64/i.test(file.stdout)) architecture = "arm64";
-  else if (/x86_64|amd64/i.test(file.stdout)) architecture = "x64";
-  return {
-    platform,
-    version,
-    bundleId,
-    architecture,
-    executableSha256,
-    packageSha256,
-    executablePathSha256: hashPath(executable),
-    file: {
-      code: file.code,
-      stdoutBytes: file.stdoutBytes,
-      truncated: file.stdoutTruncated,
-    },
-  };
 }
 
 function targetDescriptor(identity, source = "runtime-unbound") {
@@ -301,26 +180,6 @@ function loadTarget(path) {
       `target descriptor invalid (${classifyCollectorError(error)})`,
     );
   }
-}
-
-function validateTarget(identity, target) {
-  const mismatches = [];
-  if (target.platform !== identity.platform) mismatches.push("platform");
-  if (target.version !== identity.version) mismatches.push("version");
-  if (target.architecture !== identity.architecture)
-    mismatches.push("architecture");
-  if (target.executableSha256 !== identity.executableSha256)
-    mismatches.push("executableSha256");
-  if (target.packageSha256 !== identity.packageSha256)
-    mismatches.push("packageSha256");
-  if (
-    target.bundleId &&
-    identity.bundleId &&
-    target.bundleId !== identity.bundleId
-  )
-    mismatches.push("bundleId");
-  if (mismatches.length)
-    throw new Error(`target identity mismatch: ${mismatches.join(",")}`);
 }
 
 export function parseExistingAeraProcessRows(text) {
@@ -395,8 +254,7 @@ function packageCapture(captureDir, outputDir, platform, captureId) {
   const name = `aera-beta33-${platform === "darwin" ? "macos" : "windows"}-external-diagnostic-${captureId}.zip`;
   const zip = join(outputDir, name);
   rmSync(zip, { force: true });
-  const quotePowerShell = (value) =>
-    `'${String(value).replaceAll("'", "''")}'`;
+  const quotePowerShell = (value) => `'${String(value).replaceAll("'", "''")}'`;
   const result =
     process.platform === "win32"
       ? runBoundedCommand(
@@ -1069,9 +927,10 @@ function isMainModulePath(value) {
   };
   const left = normalize(canonical(value));
   const right = normalize(canonical(fileURLToPath(import.meta.url)));
-  const pathMatches = process.platform === "win32"
-    ? left.toLowerCase() === right.toLowerCase()
-    : left === right;
+  const pathMatches =
+    process.platform === "win32"
+      ? left.toLowerCase() === right.toLowerCase()
+      : left === right;
   return pathMatches || pathToFileURL(left).href === import.meta.url;
 }
 

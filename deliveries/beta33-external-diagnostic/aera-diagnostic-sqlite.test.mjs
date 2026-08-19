@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,12 +10,12 @@ import {
   collectModelJournal,
   createReadOnlySqliteSnapshot,
 } from "./aera-diagnostic-sqlite.mjs";
+import { DatabaseSync } from "node:sqlite";
 
 function makeDatabase(root) {
   const db = join(root, "model-configuration.db");
-  execFileSync("sqlite3", [
-    db,
-    `
+  const database = new DatabaseSync(db);
+  database.exec(`
     CREATE TABLE desktop_model_configuration_operations (
       operation_id TEXT PRIMARY KEY,
       profile_id TEXT,
@@ -33,8 +32,8 @@ function makeDatabase(root) {
       'owner-secret', 'route-old-secret', 'route-new-secret',
       '2026-08-17T01:00:00.000Z', '2026-08-17T01:00:01.000Z'
     );
-  `,
-  ]);
+  `);
+  database.close();
   return db;
 }
 

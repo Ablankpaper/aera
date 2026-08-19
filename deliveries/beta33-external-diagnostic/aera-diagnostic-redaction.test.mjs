@@ -7,6 +7,7 @@ import {
   scanShareableText,
 } from "./aera-diagnostic-redaction.mjs";
 
+// @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Acceptance and release boundary#Beta.33 external diagnostic collector V4#Privacy and forensic limits]]
 test("redacts credentials, paths and URLs while preserving safe metadata", () => {
   const input =
     "Authorization: Bearer fixture-secret-token; API_KEY=fixture-api-key url=https://example.test/path?q=secret";

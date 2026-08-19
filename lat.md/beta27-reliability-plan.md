@@ -262,11 +262,13 @@ macOS `ps`/`lsof` and the bounded Windows PowerShell query retain exit, timeout,
 
 The V1 target descriptor prevents a capture from being attributed to the wrong candidate package.
 
-It binds platform, version, architecture, bundle identity, executable/package digests, source revision, and candidate-manifest digest. A mismatched descriptor fails closed. Without it, the manifest is `runtime-unbound` and cannot serve as candidate-package acceptance evidence.
+It binds platform, version, architecture, bundle identity, executable digest, installed `app.asar` digest, final artifact digest, Main/Preload/Renderer digests, source revision, and candidate-manifest digest. The installed version, executable, architecture, and `app.asar` must agree with packaged-startup evidence before a candidate-bound collector is produced. A mismatched or incomplete descriptor fails closed. Without it, the manifest is `runtime-unbound` and cannot serve as candidate-package acceptance evidence.
 
 The macOS and Windows wrappers execute the Aera-bundled Electron runtime (`ELECTRON_RUN_AS_NODE=1` on macOS) rather than a global Node installation. They launch one verified application process, reject an already-running Aera instance, stop on one user-confirmed reproduction, and never click, retry, repair, upload, or publish.
 
 Windows ProductVersion is read from the executable when available; an unbound capture records `unknown` rather than inventing a version, while a candidate-bound target rejects that mismatch. Both platform ZIPs can be built on the release host's native archiver without requiring the other platform's shell.
+
+The candidate workflow publishes the two collector ZIPs only under the separate `diagnostic-collectors` artifact directory. Their ledger is path-free and records exact size, SHA-256, SHA-512, target digest, schema, and collector version; their bytes and ledger join the candidate checksum and attestation subjects but never Aera.app, setup, portable, app ZIP, desktop-update payload, or Runtime Seed. Native CI runs each platform launcher's checksum self-test before candidate publication.
 
 #### Privacy and forensic limits
 

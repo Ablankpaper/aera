@@ -35,12 +35,6 @@ export function buildDiagnosticTarget(candidate) {
   }
   const artifact = candidate.artifactSha256;
   const packageSha256 = candidate.packageSha256 || artifact;
-  if (
-    artifact &&
-    candidate.packageSha256 &&
-    artifact !== candidate.packageSha256
-  )
-    throw new Error("artifactSha256 and packageSha256 conflict");
   const target = {
     schemaVersion: 1,
     platform: candidate.platform,

@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
@@ -18,6 +18,7 @@ import { test } from "node:test";
 
 import { parseExistingAeraProcessRows } from "./aera-diagnostic.mjs";
 import { createDiagnosticSessionFixture } from "./fixtures/session-fixture.mjs";
+import { DatabaseSync } from "node:sqlite";
 
 const cli = new URL("./aera-diagnostic.mjs", import.meta.url).pathname;
 
@@ -39,8 +40,20 @@ function createFixture(root) {
   const app = join(root, "Aera.app");
   const executable = join(app, "Contents", "MacOS", "Aera");
   mkdirSync(join(app, "Contents", "MacOS"), { recursive: true });
+  mkdirSync(join(app, "Contents", "Resources"), { recursive: true });
+  mkdirSync(join(app, "Contents", "resources"), { recursive: true });
+  mkdirSync(join(app, "Contents", "MacOS", "resources"), { recursive: true });
   writeFileSync(executable, "fixture executable");
   chmodSync(executable, 0o755);
+  writeFileSync(join(app, "Contents", "Resources", "app.asar"), "fixture asar");
+  writeFileSync(
+    join(app, "Contents", "resources", "app.asar"),
+    "fixture windows asar",
+  );
+  writeFileSync(
+    join(app, "Contents", "MacOS", "resources", "app.asar"),
+    "fixture windows asar",
+  );
   writeFileSync(
     join(app, "Contents", "Info.plist"),
     `<?xml version="1.0"?><plist><dict><key>CFBundleIdentifier</key><string>com.example.aera</string><key>CFBundleShortVersionString</key><string>0.7.4-internal-beta.32</string><key>CFBundleExecutable</key><string>Aera</string></dict></plist>`,
@@ -98,27 +111,29 @@ function createFixture(root) {
     }),
   );
   const db = join(userData, "model-configuration", "model-configuration.db");
-  execFileSync("sqlite3", [
-    db,
+  const database = new DatabaseSync(db);
+  database.exec(
     "CREATE TABLE desktop_model_configuration_operations (operation_id TEXT, profile_id TEXT, state TEXT, stage TEXT, owner_handle TEXT, old_route_key TEXT, new_route_key TEXT, created_at TEXT, updated_at TEXT);",
-  ]);
+  );
+  database.close();
   return { app, hermesHome, userData };
 }
 
+// @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Acceptance and release boundary#Beta.33 external diagnostic collector V4#Evidence contract]]
 test("fixed session fixture contains one complete safe reproduction chain", () => {
   const root = mkdtempSync(join(tmpdir(), "aera-fixed-session-fixture-"));
   try {
     const created = createDiagnosticSessionFixture(root);
     assert.equal(created.version, "0.7.4-internal-beta.33");
     assert.equal(created.events.length, 5);
-    assert.deepEqual(created.events.map((entry) => entry.family), [
-      "main",
-      "owner",
-      "model_configuration",
-      "runtime",
-      "updater",
-    ]);
-    assert.doesNotMatch(JSON.stringify(created), /api[_-]?key|authorization|bearer/iu);
+    assert.deepEqual(
+      created.events.map((entry) => entry.family),
+      ["main", "owner", "model_configuration", "runtime", "updater"],
+    );
+    assert.doesNotMatch(
+      JSON.stringify(created),
+      /api[_-]?key|authorization|bearer/iu,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -425,7 +440,8 @@ test("keeps live PID open-file evidence after the observed process exits", () =>
     );
     assert.equal(
       events.events.some(
-        (event) => event.code === "transport_failed" && event.stage === "manifest",
+        (event) =>
+          event.code === "transport_failed" && event.stage === "manifest",
       ),
       true,
     );
