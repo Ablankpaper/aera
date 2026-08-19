@@ -53,6 +53,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Test external diagnostic collector on native platform
+        env:
+          NODE_NO_WARNINGS: "1"
+        run: >-
+          node --test
+          deliveries/beta33-external-diagnostic/*.test.mjs
+          scripts/internal-beta/build-diagnostic-target.test.mjs
+          scripts/internal-beta/inspect-diagnostic-identity.test.mjs
+          scripts/internal-beta/package-diagnostic-collectors.test.mjs
+
       - name: Verify pinned Aera cloud contract
         run: npm run check:agentera-cloud-contract
 

@@ -238,4 +238,50 @@ Collection retains each file's device, inode, type, and size; reading opens that
 
 Every shipped native module is inspected through `scripts/release/native-module-abi.mjs` and `scripts/release/verify-packaged-native-module.mjs`.
 
+### Beta.33 external diagnostic collector V4
+
+The standalone V4 collector records one bounded, redacted session for model-configuration failures without changing Aera state or pretending that external evidence proves an internal IPC call.
+
+#### Evidence contract
+
+V4 uses a closed manifest and a single bounded evidence timeline.
+
+It contains Main/Preload/Renderer/IPC stable events, the verified Aera PID tree, process-owned network endpoints and open-file evidence, native-module ABI inventory, SQLite database/WAL/SHM read evidence, journal summaries, five managed model files before and after plus backups, route candidates, owner/profile associations, updater events, Runtime logs, Cloud-origin observability, bounded environment flags, macOS signature/Quarantine/DNS/route evidence, Windows platform evidence, and both exact macOS unified-log requests.
+
+Journal reads prefer the system SQLite CLI and fall back to Electron's built-in read-only SQLite only when the default CLI is absent. Both paths use the immutable or copied-sidecar snapshot and verify the source database, WAL, and SHM fingerprints remain unchanged.
+
+Event coverage is admitted only from the emitted `[MODEL_CONFIGURATION]`, `[AGENTERA_RUNTIME_UPDATE]`, and `[AGENTERA_RUNTIME_OWNER_TRANSITION]` labels. A label occurring after a `CHAT user|assistant|system:` marker is treated as chat content and cannot confer coverage. Synthetic family names do not prove IPC, owner, or updater coverage, and `internal_stage_visibility=external_only` still excludes invisible Coordinator stages.
+
+Runtime log eligibility ignores file mtime. Only timestamped lines inside the exact capture window from a log-like file observed open by a verified Runtime PID contribute structured text; known Profile and Desktop paths may be inventoried but cannot supply text without that PID/open-handle binding.
+
+Every readable process executable is identified by a content SHA-256, distinct from its hashed path. macOS Runtime identity must resolve through the process `lsof -d txt` handle, while Windows hashes bytes at the process-reported executable path and keeps an unavailable identity explicit.
+
+The collector keeps a closed section status for every requested source, including each stable event family and the final redaction scan. Missing route JSON is `missing`; invalid or unreadable route evidence and backup traversal are `failed`, and an unavailable, stale, or identity-mismatched source is named in `missingEvidence`.
+
+macOS `ps`/`lsof` and the bounded Windows PowerShell query retain exit, timeout, byte-count, and truncation metadata. Open-file or network command failures are `failed` even when partial entries survive; Windows Runtime handle calls retain PID/exit code, and absent `handle.exe` is `handle_tool_unavailable`, never inferred evidence or an installation request.
+
+#### Candidate binding and launch boundary
+
+The V1 target descriptor prevents a capture from being attributed to the wrong candidate package.
+
+It binds platform, version, architecture, bundle identity, executable digest, installed `app.asar` digest, final artifact digest, Main/Preload/Renderer digests, source revision, and candidate-manifest digest. The installed version, executable, architecture, and `app.asar` must agree with packaged-startup evidence before a candidate-bound collector is produced. A mismatched or incomplete descriptor fails closed. Without it, the manifest is `runtime-unbound` and cannot serve as candidate-package acceptance evidence.
+
+The macOS and Windows wrappers execute the Aera-bundled Electron runtime (`ELECTRON_RUN_AS_NODE=1` on macOS) rather than a global Node installation. They launch one verified application process, reject an already-running Aera instance, stop on one user-confirmed reproduction, and never click, retry, repair, upload, or publish.
+
+Windows ProductVersion is read from the executable when available; an unbound capture records `unknown` rather than inventing a version, while a candidate-bound target rejects that mismatch. Both platform ZIPs can be built on the release host's native archiver without requiring the other platform's shell.
+
+The Windows launcher stays ASCII-compatible with Windows PowerShell 5.1, and every committed collector delivery file is checked out with LF bytes so its cross-platform checksum self-test verifies the reviewed source exactly.
+
+The candidate workflow publishes the two collector ZIPs only under the separate `diagnostic-collectors` artifact directory. Their ledger is path-free and records exact size, SHA-256, SHA-512, target digest, schema, and collector version; their bytes and ledger join the candidate checksum and attestation subjects but never Aera.app, setup, portable, app ZIP, desktop-update payload, or Runtime Seed. Native CI runs each platform launcher's checksum self-test before candidate publication.
+
+#### Privacy and forensic limits
+
+The shareable ZIP has a fail-closed secret boundary.
+
+It excludes credentials, tokens, cookies, private keys, full `.env` or configuration bodies, raw SQLite pages, chat content, HTTP bodies, and URL queries. Runtime, unified-log, child-process, and Windows Event Log inputs yield only allowlisted timestamps, labels, stages, stable codes, diagnostic IDs, hashes, and bounded command metadata; raw stdout/stderr and messages are not packaged.
+
+Paths, profile/owner/route identities, command lines, and endpoint details are domain-separated hashes or bounded enumerations. The final scan also rejects `CHAT user:`, `CHAT assistant:`, and `CHAT system:` transcript markers and fails closed before ZIP creation.
+
+Native inventory records the actual content SHA-256 of each readable `.node` file in addition to a domain-separated path hash. A read failure remains explicit in the inventory rather than being replaced by a metadata-derived digest, so ABI evidence cannot be mistaken for a stale or synthetic fingerprint.
+
 The source-stage inventory is not final-artifact binding. `scripts/release/final-artifact-native-inventory.mjs` independently extracts every final DMG, macOS ZIP, Windows setup, portable, and app ZIP, re-hashes the complete application payload, and binds every native-module ABI, architecture, format, and digest to the exact container bytes. The canonical Internal Beta manifest rejects a missing or substituted inventory and requires every container for one platform to contain the same payload and native inventory.

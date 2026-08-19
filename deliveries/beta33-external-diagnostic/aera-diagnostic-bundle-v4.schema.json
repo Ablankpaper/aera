@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aera-diagnostic-bundle-v4",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "collectorVersion",
+    "captureId",
+    "target",
+    "startedAt",
+    "endedAt",
+    "sections",
+    "missingEvidence",
+    "files",
+    "redaction"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 4 },
+    "collectorVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "captureId": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+    },
+    "target": { "$ref": "aera-diagnostic-target-v1.schema.json" },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "endedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "platform": { "enum": ["darwin", "win32"] },
+    "mode": { "enum": ["external", "internal"] },
+    "finishReason": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "reproductionConfirmed": { "type": "boolean" },
+    "processContinuityConfirmed": { "type": "boolean" },
+    "internal_stage_visibility": { "const": "external_only" },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "finalScan",
+        "replacements",
+        "dropped",
+        "truncated"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "finalScan": { "const": "passed" },
+        "replacements": { "type": "integer", "minimum": 0 },
+        "dropped": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "sections": {
+      "type": "array",
+      "minItems": 31,
+      "maxItems": 31,
+      "allOf": [
+        { "contains": { "properties": { "name": { "const": "target" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "process" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "pid_continuity" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "network" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "dns_routes" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "open_files" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "signature" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "quarantine" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "environment" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "native_abi" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "runtime_logs" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "unified_log" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "platform_events" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "database" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "journal" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "model_chain" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "managed_files" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "backups" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "model_comparison" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "route_catalog" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "owner" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "cloud_origin" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "main_events" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "preload_events" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "renderer_events" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "runtime_events" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "owner_events" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "updater_events" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "updater" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "main_renderer_ipc" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "redaction" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 }
+      ],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "status", "reason"],
+        "properties": {
+          "name": {
+            "enum": [
+              "target",
+              "process",
+              "pid_continuity",
+              "network",
+              "dns_routes",
+              "open_files",
+              "signature",
+              "quarantine",
+              "environment",
+              "native_abi",
+              "runtime_logs",
+              "unified_log",
+              "platform_events",
+              "database",
+              "journal",
+              "model_chain",
+              "managed_files",
+              "backups",
+              "model_comparison",
+              "route_catalog",
+              "owner",
+              "cloud_origin",
+              "main_events",
+              "preload_events",
+              "renderer_events",
+              "runtime_events",
+              "owner_events",
+              "updater_events",
+              "updater",
+              "main_renderer_ipc",
+              "redaction"
+            ]
+          },
+          "status": { "enum": ["collected", "missing", "failed"] },
+          "reason": { "type": ["string", "null"] }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "status": { "const": "collected" } }, "required": ["status"] },
+            "then": { "properties": { "reason": { "type": "null" } } }
+          },
+          {
+            "if": { "properties": { "status": { "enum": ["missing", "failed"] } }, "required": ["status"] },
+            "then": { "properties": { "reason": { "type": "string", "minLength": 1, "maxLength": 128 } } }
+          }
+        ]
+      }
+    },
+    "missingEvidence": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "target", "process", "pid_continuity", "network", "dns_routes",
+          "open_files", "signature", "quarantine", "environment", "native_abi",
+          "runtime_logs", "unified_log", "platform_events", "database", "journal",
+          "model_chain", "managed_files", "backups", "model_comparison", "route_catalog",
+          "owner", "cloud_origin", "main_events", "preload_events", "renderer_events",
+          "runtime_events", "owner_events", "updater_events", "updater",
+          "main_renderer_ipc", "redaction"
+        ]
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "size", "sha256"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^(?![A-Za-z]:[\\\\/])(?![\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))(?!.*[\\\\/]{2})(?!.*[\\\\/]$).+$"
+          },
+          "size": { "type": "integer", "minimum": 0 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" }
+        }
+      }
+    }
+  }
+}

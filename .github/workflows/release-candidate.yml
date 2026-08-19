@@ -113,6 +113,7 @@ jobs:
             "check (ubuntu-latest)",
             "check (macos-latest)",
             "check (windows-latest)",
+            "windows-model-recovery",
           ]);
           const allowedSkippedJobs = new Set(["windows-process-tree-diagnostic"]);
           for (const job of run.jobs) {
@@ -310,6 +311,16 @@ jobs:
             --notarization-evidence "$RUNNER_TEMP/notarizations.json" \
             --output "$RUNNER_TEMP/macos-evidence.json"
 
+      - name: Record path-free macOS collector identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/internal-beta/inspect-diagnostic-identity.mjs \
+            --app "${{ steps.mac_paths.outputs.app }}" \
+            --platform darwin \
+            --version "${{ needs.validate.outputs.version }}" \
+            --output "$RUNNER_TEMP/diagnostic-macos-identity.json"
+
       - name: Stage macOS candidate bytes
         shell: bash
         run: |
@@ -318,6 +329,8 @@ jobs:
           cp "${{ steps.mac_paths.outputs.dmg }}" "$RUNNER_TEMP/macos-candidate/"
           cp "${{ steps.mac_paths.outputs.zip }}" "$RUNNER_TEMP/macos-candidate/"
           cp "$RUNNER_TEMP/macos-evidence.json" "$RUNNER_TEMP/macos-candidate/"
+          cp "$RUNNER_TEMP/packaged-startup-macos.json" "$RUNNER_TEMP/macos-candidate/"
+          cp "$RUNNER_TEMP/diagnostic-macos-identity.json" "$RUNNER_TEMP/macos-candidate/"
           cp "${{ steps.mac_paths.outputs.runtime_manifest }}" \
             "$RUNNER_TEMP/macos-candidate/runtime-seed/"
 
@@ -411,6 +424,21 @@ jobs:
             -Output "$env:RUNNER_TEMP/windows-evidence.json"
           "RUNTIME_MANIFEST=$($manifests[0].FullName)" >> $env:GITHUB_ENV
 
+      - name: Record path-free Windows collector identity
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          $unpacked = @(Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*unpacked" })
+          if ($unpacked.Count -ne 1) { throw "Expected exactly one unpacked Windows app" }
+          node scripts/internal-beta/inspect-diagnostic-identity.mjs `
+            --app $unpacked[0].FullName `
+            --platform win32 `
+            --version $env:VERSION `
+            --application-id com.bignormal.agentera.studio `
+            --output "$env:RUNNER_TEMP/diagnostic-windows-identity.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Stage Windows candidate bytes
         shell: pwsh
         env:
@@ -425,7 +453,9 @@ jobs:
           }
           Copy-Item $setup[0].FullName, $portable[0].FullName -Destination $destination
           Copy-Item "$env:RUNNER_TEMP/windows-evidence.json" -Destination $destination
+          Copy-Item "$env:RUNNER_TEMP/packaged-startup-windows.json" -Destination $destination
           Copy-Item $env:RUNTIME_MANIFEST -Destination (Join-Path $destination "runtime-seed")
+          Copy-Item "$env:RUNNER_TEMP/diagnostic-windows-identity.json" -Destination $destination
 
       - name: Upload Windows candidate bytes
         uses: actions/upload-artifact@v4
@@ -489,12 +519,20 @@ jobs:
           copy_one "$RUNNER_TEMP/macos-candidate" '*.zip' candidate/artifacts/
           copy_one "$RUNNER_TEMP/macos-candidate" 'macos-evidence.json' \
             candidate/evidence/macos.json
+          copy_one "$RUNNER_TEMP/macos-candidate" 'packaged-startup-macos.json' \
+            candidate/evidence/packaged-startup-macos.json
           copy_one "$RUNNER_TEMP/macos-candidate" '*.manifest.json' \
             candidate/evidence/runtime-seed/
           copy_one "$RUNNER_TEMP/windows-candidate" '*-setup.exe' candidate/artifacts/
           copy_one "$RUNNER_TEMP/windows-candidate" '*-portable.exe' candidate/artifacts/
           copy_one "$RUNNER_TEMP/windows-candidate" 'windows-evidence.json' \
             candidate/evidence/windows.json
+          copy_one "$RUNNER_TEMP/windows-candidate" 'packaged-startup-windows.json' \
+            candidate/evidence/packaged-startup-windows.json
+          copy_one "$RUNNER_TEMP/macos-candidate" 'diagnostic-macos-identity.json' \
+            candidate/evidence/diagnostic-macos-identity.json
+          copy_one "$RUNNER_TEMP/windows-candidate" 'diagnostic-windows-identity.json' \
+            candidate/evidence/diagnostic-windows-identity.json
           copy_one "$RUNNER_TEMP/windows-candidate" '*.manifest.json' \
             candidate/evidence/runtime-seed/
           cp build/agentera-runtime-seed.lock.json \
@@ -588,10 +626,35 @@ jobs:
             --provenance candidate/evidence/provenance.json \
             --expected-source-sha "$SOURCE_SHA" \
             --expected-version "$VERSION"
+
+      - name: Package candidate-bound external diagnostic collectors
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from "node:fs/promises";
+          const manifest = JSON.parse(await readFile("candidate/candidate-manifest.json", "utf8"));
+          const mac = manifest.artifacts.find((entry) => entry.platform === "macos" && entry.kind === "macos_zip");
+          const windows = manifest.artifacts.find((entry) => entry.platform === "windows" && entry.kind === "windows_setup");
+          if (!mac || !windows) throw new Error("collector target artifact is missing");
+          await writeFile(`${process.env.RUNNER_TEMP}/macos-artifact.json`, JSON.stringify({ sha256: mac.sha256 }));
+          await writeFile(`${process.env.RUNNER_TEMP}/windows-artifact.json`, JSON.stringify({ sha256: windows.sha256 }));
+          NODE
+          mkdir -p candidate/diagnostic-collectors
+          node scripts/internal-beta/package-diagnostic-collectors.mjs \
+            --manifest candidate/candidate-manifest.json \
+            --macos-identity candidate/evidence/diagnostic-macos-identity.json \
+            --macos-startup candidate/evidence/packaged-startup-macos.json \
+            --macos-artifact "$RUNNER_TEMP/macos-artifact.json" \
+            --windows-identity candidate/evidence/diagnostic-windows-identity.json \
+            --windows-startup candidate/evidence/packaged-startup-windows.json \
+            --windows-artifact "$RUNNER_TEMP/windows-artifact.json" \
+            --output candidate/diagnostic-collectors \
+            --ledger candidate/evidence/diagnostic-collectors.json
           CHECKSUMS="$RUNNER_TEMP/desktop-candidate-SHA256SUMS"
           (
             cd candidate
-            find artifacts evidence -type f ! -name SHA256SUMS -print0 \
+            find artifacts evidence diagnostic-collectors -type f ! -name SHA256SUMS -print0 \
               | LC_ALL=C sort -z \
               | xargs -0 sha256sum
             sha256sum candidate-manifest.json
@@ -612,6 +675,8 @@ jobs:
             candidate/evidence/runtime-seed/*
             candidate/evidence/sbom.spdx.json
             candidate/evidence/windows.json
+            candidate/evidence/diagnostic-collectors.json
+            candidate/diagnostic-collectors/*
 
       - name: Verify GitHub attestation and preserve bundle
         shell: bash
@@ -628,6 +693,7 @@ jobs:
               github.com/Ablankpaper/aera/.github/workflows/release-candidate.yml
           done < <(
             find candidate/artifacts -type f -print0
+            find candidate/diagnostic-collectors -type f -print0
             printf '%s\0' candidate/candidate-manifest.json
             find candidate/evidence -type f \
               ! -name github-attestation.json -print0

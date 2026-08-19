@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "platform": "darwin",
+  "version": "0.7.4-internal-beta.33",
+  "bundleId": "com.example.aera",
+  "architecture": "arm64",
+  "executableSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "packageSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "sourceSha": "cccccccccccccccccccccccccccccccccccccccc",
+  "candidateManifestSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "bindingStatus": "candidate-bound"
+}
