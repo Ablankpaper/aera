@@ -366,16 +366,13 @@ describe("ModelConfigurationCoordinator", () => {
           scope: "profile" | "global";
           stage: ModelConfigurationCommitStage;
         },
-        prepare: (context: {
-          oldRouteKey: string;
-        }) => {
+        prepare: (context: { oldRouteKey: string }) => {
           newRouteKey?: string;
           write(permit: ModelConfigurationWritePermit): T | Promise<T>;
           verify?(): boolean | Promise<boolean>;
         },
       ): Promise<
-        | { status: "executed"; value: T }
-        | { status: "rejected"; code: string }
+        { status: "executed"; value: T } | { status: "rejected"; code: string }
       >;
     };
 
@@ -403,9 +400,7 @@ describe("ModelConfigurationCoordinator", () => {
 
     expect(result).toMatchObject({ status: "executed", value: "saved" });
     expect(fixture.operationCount()).toBe(1);
-    expect(readFileSync(fixture.paths.env, "utf8")).toBe(
-      "MANAGED_KEY=value\n",
-    );
+    expect(readFileSync(fixture.paths.env, "utf8")).toBe("MANAGED_KEY=value\n");
     expect(fixture.snapshotBytes()).not.toEqual(before);
     expect(fixture.store.listIncomplete()).toEqual([]);
   });
@@ -632,6 +627,92 @@ describe("ModelConfigurationCoordinator", () => {
     expect(fixture.adapter.getActiveRouteKey("account")).toBe(OLD_ROUTE);
   });
 
+  it("rolls back instead of committing when the owner epoch changes", async () => {
+    const fixture = makeFixture();
+    const before = fixture.snapshotBytes();
+    let ownerCurrent = true;
+    const originalPrepare = fixture.adapter.prepare.getMockImplementation()!;
+    fixture.adapter.prepare.mockImplementation(async (input, context) => {
+      const prepared = await originalPrepare(input, context);
+      const originalApply = prepared.applyStage;
+      prepared.applyStage = async (stage, permit) => {
+        await originalApply(stage, permit);
+        if (stage === "provider") ownerCurrent = false;
+      };
+      return prepared;
+    });
+
+    const result = await subject(fixture).mutate(request(), () => {
+      if (!ownerCurrent) {
+        throw Object.assign(new Error("owner changed"), {
+          code: "model_owner_changed",
+          diagnosticId: "abcdef012345",
+        });
+      }
+    });
+
+    expect(result).toMatchObject({
+      status: "rejected",
+      code: "model_owner_changed",
+      stage: "owner",
+      retryability: "retryable",
+      rollback: "restored",
+      diagnosticId: "abcdef012345",
+    });
+    expect(fixture.snapshotBytes()).toEqual(before);
+    expect(fixture.store.listIncomplete()).toEqual([]);
+  });
+
+  it("closes the journal when the owner changes after backups but before the first write", async () => {
+    const fixture = makeFixture();
+    const before = fixture.snapshotBytes();
+    let ownerCurrent = true;
+    const coordinator = subject(fixture, {
+      fileAdapter: {
+        paths: () => fixture.paths,
+        capture: captureModelConfigurationFiles,
+        persistBackups: async (snapshot) => {
+          await persistModelConfigurationBackups(snapshot);
+          ownerCurrent = false;
+        },
+        restore: (snapshot) => {
+          return import("./model-configuration-operation-store").then(
+            ({ restoreModelConfigurationFiles }) =>
+              restoreModelConfigurationFiles(snapshot),
+          );
+        },
+        removeBackups: (snapshot) => {
+          return import("./model-configuration-operation-store").then(
+            ({ removeModelConfigurationBackups }) =>
+              removeModelConfigurationBackups(snapshot),
+          );
+        },
+        readDigests: readModelConfigurationFileDigests,
+      },
+    });
+
+    const result = await coordinator.mutate(request(), () => {
+      if (!ownerCurrent) {
+        throw Object.assign(new Error("owner changed"), {
+          code: "model_owner_changed",
+          diagnosticId: "abcdef012345",
+        });
+      }
+    });
+
+    expect(result).toMatchObject({
+      status: "rejected",
+      code: "model_owner_changed",
+      stage: "owner",
+      retryability: "retryable",
+      rollback: "not_needed",
+      diagnosticId: "abcdef012345",
+    });
+    expect(fixture.snapshotBytes()).toEqual(before);
+    expect(fixture.adapter.stageLog).toEqual([]);
+    expect(fixture.store.listIncomplete()).toEqual([]);
+  });
+
   // @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Recoverable model configuration#Rollback refresh follows terminal recovery]]
   it("notifies consumers only after a verified rollback is terminal", async () => {
     const fixture = makeFixture();
@@ -731,15 +812,13 @@ describe("ModelConfigurationCoordinator", () => {
           originalPersist(snapshot);
         },
         restore: async (snapshot) => {
-          const { restoreModelConfigurationFiles } = await import(
-            "./model-configuration-operation-store"
-          );
+          const { restoreModelConfigurationFiles } =
+            await import("./model-configuration-operation-store");
           restoreModelConfigurationFiles(snapshot);
         },
         removeBackups: async (snapshot) => {
-          const { removeModelConfigurationBackups } = await import(
-            "./model-configuration-operation-store"
-          );
+          const { removeModelConfigurationBackups } =
+            await import("./model-configuration-operation-store");
           removeModelConfigurationBackups(snapshot);
         },
         readDigests: readModelConfigurationFileDigests,
@@ -776,15 +855,13 @@ describe("ModelConfigurationCoordinator", () => {
           persistModelConfigurationBackups(snapshot);
         },
         restore: async (snapshot) => {
-          const { restoreModelConfigurationFiles } = await import(
-            "./model-configuration-operation-store"
-          );
+          const { restoreModelConfigurationFiles } =
+            await import("./model-configuration-operation-store");
           restoreModelConfigurationFiles(snapshot);
         },
         removeBackups: async (snapshot) => {
-          const { removeModelConfigurationBackups } = await import(
-            "./model-configuration-operation-store"
-          );
+          const { removeModelConfigurationBackups } =
+            await import("./model-configuration-operation-store");
           removeModelConfigurationBackups(snapshot);
         },
         readDigests: readModelConfigurationFileDigests,
@@ -821,9 +898,8 @@ describe("ModelConfigurationCoordinator", () => {
         capture: captureModelConfigurationFiles,
         persistBackups: persistModelConfigurationBackups,
         restore: async (snapshot) => {
-          const { restoreModelConfigurationFiles } = await import(
-            "./model-configuration-operation-store"
-          );
+          const { restoreModelConfigurationFiles } =
+            await import("./model-configuration-operation-store");
           restoreModelConfigurationFiles(snapshot);
         },
         removeBackups: async () => {
@@ -853,7 +929,7 @@ describe("ModelConfigurationCoordinator", () => {
 
     expect(result).toMatchObject({
       status: "rejected",
-      stage: "validation",
+      stage: "revision",
       rollback: "not_needed",
       reason: "stale_catalog_revision",
     });

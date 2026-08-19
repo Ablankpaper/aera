@@ -214,6 +214,38 @@ describe("coordinated model configuration IPC bridge", () => {
     ).resolves.toBe("saved");
   });
 
+  it("does not guess a managed writer operation from its commit stage", async () => {
+    const { bridge, managedWriteMock } = subject();
+    managedWriteMock.mockResolvedValueOnce({
+      status: "rejected",
+      stage: "provider",
+      code: "model_save_provider_failed",
+      rollback: "not_needed",
+      diagnosticId: "abcdef012345",
+    });
+    const error = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    try {
+      await expect(
+        bridge.runManagedModelConfigurationWrite(
+          {
+            requestedProfileId: "account",
+            scope: "profile",
+            stage: "provider",
+          },
+          () => ({ write: () => "saved" }),
+        ),
+      ).rejects.toMatchObject({ code: "model_save_provider_failed" });
+      expect(error).toHaveBeenCalledWith(
+        "[MODEL_CONFIGURATION] rejected abcdef012345 save_model provider model_save_provider_failed",
+      );
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it("returns a redacted owner catalog and delegates one mutation", async () => {
     const { bridge, coordinator } = subject();
     const snapshot = bridge.getOwnerModelRouteCatalog("account");
@@ -237,6 +269,65 @@ describe("coordinated model configuration IPC bridge", () => {
     await bridge.mutateModelConfiguration(request);
 
     expect(coordinator.mutate).toHaveBeenCalledWith(request);
+  });
+
+  it("passes the Owner epoch guard into the coordinated mutation", async () => {
+    const { bridge, coordinator } = subject();
+    const ownerGuard = vi.fn();
+
+    await bridge.mutateModelConfiguration(upsertRequest(), ownerGuard);
+
+    expect(coordinator.mutate).toHaveBeenCalledWith(
+      upsertRequest(),
+      ownerGuard,
+    );
+  });
+
+  it("upgrades every rejected mutation to the redacted V2 failure envelope", async () => {
+    const { bridge, coordinator } = subject();
+    vi.mocked(coordinator.mutate).mockResolvedValueOnce({
+      status: "rejected",
+      stage: "provider",
+      code: "model_save_provider_failed",
+      rollback: "restored",
+    });
+
+    const result = await bridge.mutateModelConfiguration(upsertRequest());
+
+    expect(result).toEqual({
+      status: "rejected",
+      schemaVersion: 2,
+      operation: "save_provider",
+      stage: "provider",
+      code: "model_save_provider_failed",
+      retryability: "not_retryable",
+      diagnosticId: expect.stringMatching(/^[0-9a-f]{12}$/u),
+      rollback: "restored",
+    });
+    expect(JSON.stringify(result)).not.toMatch(/message|detail|path|context/i);
+  });
+
+  it("logs a redacted rejection with its diagnostic identity", async () => {
+    const { bridge, coordinator } = subject();
+    vi.mocked(coordinator.mutate).mockResolvedValueOnce({
+      status: "rejected",
+      stage: "provider",
+      code: "model_save_provider_failed",
+      rollback: "restored",
+      diagnosticId: "abcdef012345",
+    });
+    const error = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    try {
+      await bridge.mutateModelConfiguration(upsertRequest());
+      expect(error).toHaveBeenCalledWith(
+        "[MODEL_CONFIGURATION] rejected abcdef012345 save_provider provider model_save_provider_failed",
+      );
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it("checks an explicit catalog Profile target but leaves mutation target resolution in Main", async () => {
@@ -282,23 +373,34 @@ describe("coordinatorUnavailableMutation", () => {
     "model_configuration_database_unavailable",
     "model_configuration_schema_unsupported",
     "route_catalog_repair_required",
-  ] as const)("maps the exact %s identity to validation", async (code) => {
-    const factory = await unavailableMutationFactory();
-    const startupFailure = {
-      code,
-      diagnosticId: "abcdef012345",
-    } satisfies ModelConfigurationStartupFailure;
-    const result = await factory(startupFailure).mutate(upsertRequest());
+  ] as const)(
+    "maps the exact %s identity to its V2 startup stage",
+    async (code) => {
+      const factory = await unavailableMutationFactory();
+      const startupFailure = {
+        code,
+        diagnosticId: "abcdef012345",
+      } satisfies ModelConfigurationStartupFailure;
+      const result = await factory(startupFailure).mutate(upsertRequest());
 
-    expect(result).toMatchObject({
-      status: "rejected",
-      stage: "validation",
-      code,
-      rollback: "not_needed",
-      diagnosticId: startupFailure.diagnosticId,
-    });
-    expect(JSON.stringify(result)).not.toMatch(/detail|message|secret/iu);
-  });
+      expect(result).toMatchObject({
+        status: "rejected",
+        schemaVersion: 2,
+        operation: "startup",
+        stage: code.startsWith("native_module_")
+          ? "native_load"
+          : code === "model_configuration_database_unavailable"
+            ? "database_open"
+            : code === "model_configuration_schema_unsupported"
+              ? "schema"
+              : "route_repair",
+        code,
+        rollback: "not_needed",
+        diagnosticId: startupFailure.diagnosticId,
+      });
+      expect(JSON.stringify(result)).not.toMatch(/detail|message|secret/iu);
+    },
+  );
 
   it("maps an explicit recovery-required identity to recovery", async () => {
     const factory = await unavailableMutationFactory();
@@ -343,7 +445,7 @@ describe("coordinatorUnavailableMutation", () => {
     }).mutate(upsertRequest());
 
     expect(result).toMatchObject({
-      stage: "validation",
+      stage: "native_load",
       code: "native_module_load_failed",
       rollback: "not_needed",
       diagnosticId: expect.stringMatching(/^[0-9a-f]{12}$/u),

@@ -135,11 +135,90 @@ export type ModelConfigurationStartupFailureCode =
   | "route_catalog_repair_required"
   | "model_configuration_recovery_required";
 
+export type ModelConfigurationOwnerTransitionCode =
+  | "model_owner_transition_in_progress"
+  | "model_owner_changed"
+  | "owner_transition_timeout"
+  | "owner_transition_failed";
+
+export type ModelConfigurationOperation =
+  | "startup"
+  | "save_provider"
+  | "remove_provider"
+  | "save_model"
+  | "remove_model"
+  | "activate_route"
+  | "repair_route_catalog"
+  | "rollback"
+  | "refresh";
+
+export type ModelConfigurationFailureStage =
+  | "native_load"
+  | "database_open"
+  | "schema"
+  | "recovery"
+  | "route_repair"
+  | "revision"
+  | "owner"
+  | ModelConfigurationStage;
+
+export type ModelConfigurationFailureCode =
+  | ModelConfigurationStartupFailureCode
+  | ModelConfigurationOwnerTransitionCode
+  | "model_save_stale_catalog_revision"
+  | "model_save_validation_failed"
+  | "model_save_credential_failed"
+  | "model_save_provider_failed"
+  | "model_save_model_library_failed"
+  | "model_save_native_route_failed"
+  | "model_save_activation_failed"
+  | "model_save_verification_failed"
+  | "model_save_rollback_failed"
+  | "model_rollback_refresh_failed";
+
+export type ModelConfigurationRetryability =
+  | "retryable"
+  | "after_restart"
+  | "after_user_action"
+  | "not_retryable";
+
+export interface ModelConfigurationFailureV2 {
+  schemaVersion: 2;
+  operation: ModelConfigurationOperation;
+  stage: ModelConfigurationFailureStage;
+  code: ModelConfigurationFailureCode;
+  retryability: ModelConfigurationRetryability;
+  diagnosticId: string;
+}
+
 /** Public startup failure identity. Raw native/database errors stay in Main. */
 export interface ModelConfigurationStartupFailure {
   code: ModelConfigurationStartupFailureCode;
   diagnosticId: string;
 }
+
+export type ModelConfigurationMutationFailure = ModelConfigurationFailureV2 & {
+  status: "rejected";
+  rollback: "not_needed" | "restored" | "recovery_required";
+  /** Compatibility hint retained for callers that can safely re-read once. */
+  reason?: "stale_catalog_revision";
+  rollbackWarning?: "model_rollback_refresh_failed";
+};
+
+/** @deprecated Main now emits ModelConfigurationFailureV2; kept for internal
+ * test doubles and legacy feature adapters until their next type-only cleanup. */
+export type LegacyModelConfigurationMutationFailure = {
+  status: "rejected";
+  stage: ModelConfigurationStage;
+  code: Exclude<
+    ModelConfigurationFailureCode,
+    "model_save_stale_catalog_revision" | "model_rollback_refresh_failed"
+  >;
+  rollback: "not_needed" | "restored" | "recovery_required";
+  diagnosticId?: string;
+  rollbackWarning?: "model_rollback_refresh_failed";
+  reason?: "stale_catalog_revision";
+};
 
 export type ModelConfigurationMutationResult =
   | { status: "committed"; catalog: OwnerModelRouteCatalogSnapshot }
@@ -148,30 +227,7 @@ export type ModelConfigurationMutationResult =
       catalog: OwnerModelRouteCatalogSnapshot;
       warning: "model_save_refresh_failed";
     }
-  | {
-      status: "rejected";
-      stage: ModelConfigurationStage;
-      code:
-        | `model_save_${ModelConfigurationStage}_failed`
-        | ModelConfigurationStartupFailureCode;
-      rollback: "not_needed" | "restored" | "recovery_required";
-      /**
-       * The managed bytes and journal reached a verified terminal rollback,
-       * but one or more in-memory consumers could not be notified to discard
-       * their stale projection. This warning never reopens recovery lock state.
-       */
-      rollbackWarning?: "model_rollback_refresh_failed";
-      /** Opaque correlation id for startup/unavailable-runtime failures. */
-      diagnosticId?: string;
-      /**
-       * Set only when the caller's `expectedCatalogRevision` did not match the
-       * coordinator's current catalog — the one rejection a caller can fix by
-       * re-reading the catalog. Every other refusal (illegal request, unowned
-       * profile, missing replacement, moved active route) leaves this absent,
-       * because replaying those would fail again in exactly the same way.
-       */
-      reason?: "stale_catalog_revision";
-    };
+  | ModelConfigurationMutationFailure;
 
 /**
  * Whether a rejected mutation may be safely replayed against a fresh catalog.
@@ -179,17 +235,20 @@ export type ModelConfigurationMutationResult =
  * Requires all three of:
  *   - an explicit `stale_catalog_revision` reason, so only a revision mismatch
  *     qualifies and never some other validation refusal;
- *   - the `validation` stage, which runs before any adapter work;
+ *   - the V2 `revision` stage (or legacy `validation`), which runs before any
+ *     adapter work;
  *   - `rollback: "not_needed"`, proving nothing was written and a replay
  *     therefore cannot double-apply.
  */
 export function isSafeToRetryStaleRevision(
-  result: ModelConfigurationMutationResult,
+  result:
+    | ModelConfigurationMutationResult
+    | LegacyModelConfigurationMutationFailure,
 ): boolean {
   return (
     result.status === "rejected" &&
     result.reason === "stale_catalog_revision" &&
-    result.stage === "validation" &&
+    (result.stage === "revision" || result.stage === "validation") &&
     result.rollback === "not_needed"
   );
 }

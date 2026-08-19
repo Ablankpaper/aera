@@ -2,6 +2,7 @@ import type {
   ManagedModelConfigurationWritePlan,
   ManagedModelConfigurationWriteResult,
   ModelConfigurationCommitStage,
+  ModelConfigurationOwnerGuard,
 } from "./model-configuration-coordinator";
 
 export interface ManagedModelMutationInput<T> {
@@ -33,8 +34,18 @@ export interface ManagedModelMutationCoordinator {
       stage: ModelConfigurationCommitStage;
     },
     prepare: ManagedModelMutationInput<T>["prepare"],
+    ownerGuard?: ModelConfigurationOwnerGuard,
   ): Promise<ManagedModelConfigurationWriteResult<T>>;
 }
+
+export interface ManagedModelMutationOwnerLease {
+  guard: ModelConfigurationOwnerGuard;
+  finish(): void;
+}
+
+export type ManagedModelMutationOwnerGuardFactory = () =>
+  | ManagedModelMutationOwnerLease
+  | Promise<ManagedModelMutationOwnerLease>;
 
 export function requireManagedModelMutationValue<T>(
   result: ManagedModelConfigurationWriteResult<T>,
@@ -50,9 +61,10 @@ export function requireManagedModelMutationValue<T>(
 
 export function createManagedModelMutationPort(
   coordinator: ManagedModelMutationCoordinator,
+  ownerGuardFactory?: ManagedModelMutationOwnerGuardFactory,
 ): ManagedModelMutationPort {
   return {
-    mutate<T>(input: ManagedModelMutationInput<T>) {
+    async mutate<T>(input: ManagedModelMutationInput<T>) {
       const operation = input.operation.trim();
       const profileIds = [...new Set(input.profileIds.map((id) => id.trim()))]
         .filter(Boolean)
@@ -60,14 +72,24 @@ export function createManagedModelMutationPort(
       if (!operation || profileIds.length !== 1) {
         throw new TypeError("Managed model mutation input is invalid.");
       }
-      return coordinator.runManagedWrite<T>(
-        {
-          requestedProfileId: profileIds[0],
-          scope: input.globalCatalog ? "global" : "profile",
-          stage: input.stage,
-        },
-        input.prepare,
-      );
+      const request = {
+        requestedProfileId: profileIds[0],
+        scope: input.globalCatalog ? ("global" as const) : ("profile" as const),
+        stage: input.stage,
+      };
+      if (!ownerGuardFactory) {
+        return coordinator.runManagedWrite<T>(request, input.prepare);
+      }
+      const ownerLease = await ownerGuardFactory();
+      try {
+        return await coordinator.runManagedWrite<T>(
+          request,
+          input.prepare,
+          ownerLease.guard,
+        );
+      } finally {
+        ownerLease.finish();
+      }
     },
   };
 }

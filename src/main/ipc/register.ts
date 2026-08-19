@@ -301,9 +301,10 @@ import {
   type AgenteraProfileBindingStore,
   type AgenteraRuntimeOwner,
 } from "../agentera-profile-binding";
-import type {
-  AgenteraConnectionOwnerStore,
-  AgenteraOwnerSwitchCoordinator,
+import {
+  AgenteraOwnerTransitionError,
+  type AgenteraConnectionOwnerStore,
+  type AgenteraOwnerSwitchCoordinator,
 } from "../agentera-connection-owner";
 import type { AgenteraAgentControlManager } from "../agentera-agent-control/manager";
 import type { AgenteraOfficialQualityManager } from "../agentera-official-quality/manager";
@@ -1298,8 +1299,26 @@ export function registerIpcHandlers(context: IpcContext): void {
       }
     },
   } satisfies ModelConfigurationIpcBridgeDependencies);
+  const acquireModelConfigurationOwnerLease = async (): Promise<{
+    guard(): void;
+    finish(): void;
+  }> => {
+    const ownerLease = await ownerSwitchCoordinator.acquireLease();
+    const activity = runtimeActivity.beginRun(`model-config-${randomUUID()}`);
+    if (!activity) {
+      throw new AgenteraOwnerTransitionError(
+        "model_owner_transition_in_progress",
+        ownerSwitchCoordinator.snapshot().diagnosticId,
+      );
+    }
+    return {
+      guard: () => ownerLease.assertCurrent(),
+      finish: () => activity.finish(),
+    };
+  };
   const managedModelMutationPort = createManagedModelMutationPort(
     modelConfigurationMutationCoordinator,
+    acquireModelConfigurationOwnerLease,
   );
   configureAgentModelProfileSeedMutationPort(managedModelMutationPort);
   configureHermesProjectionMutationPort(managedModelMutationPort);
@@ -1311,7 +1330,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
   const managedModelConfigurationProfile = (profile?: string): string =>
     profile || getActiveProfileNameSync();
-  const runManagedModelConfigurationWrite = <T>(
+  const runManagedModelConfigurationWrite = async <T>(
     profile: string | undefined,
     scope: ManagedModelConfigurationWriteRequest["scope"],
     stage: ManagedModelConfigurationWriteRequest["stage"],
@@ -1321,16 +1340,23 @@ export function registerIpcHandlers(context: IpcContext): void {
       | ManagedModelConfigurationWritePlan<T>
       | Promise<ManagedModelConfigurationWritePlan<T>>,
     options?: ManagedModelConfigurationWriteBridgeOptions,
-  ): Promise<T> =>
-    modelConfigurationBridge.runManagedModelConfigurationWrite(
-      {
-        requestedProfileId: managedModelConfigurationProfile(profile),
-        scope,
-        stage,
-      },
-      prepare,
-      options,
-    );
+  ): Promise<T> => {
+    const ownerLease = await acquireModelConfigurationOwnerLease();
+    try {
+      return await modelConfigurationBridge.runManagedModelConfigurationWrite(
+        {
+          requestedProfileId: managedModelConfigurationProfile(profile),
+          scope,
+          stage,
+        },
+        prepare,
+        options,
+        ownerLease.guard,
+      );
+    } finally {
+      ownerLease.finish();
+    }
+  };
   const prepareLocalModelActivation = (
     provider: string,
     model: string,
@@ -1386,11 +1412,30 @@ export function registerIpcHandlers(context: IpcContext): void {
       },
     };
   };
-  ipcMain.handle("get-owner-model-route-catalog", (_event, profile?: string) =>
-    modelConfigurationBridge.getOwnerModelRouteCatalog(profile),
+  ipcMain.handle(
+    "get-owner-model-route-catalog",
+    async (_event, profile?: string) => {
+      const ownerLease = await ownerSwitchCoordinator.acquireLease();
+      ownerLease.assertCurrent();
+      const catalog =
+        modelConfigurationBridge.getOwnerModelRouteCatalog(profile);
+      ownerLease.assertCurrent();
+      return catalog;
+    },
   );
-  ipcMain.handle("mutate-model-configuration", (_event, request: unknown) =>
-    modelConfigurationBridge.mutateModelConfiguration(request),
+  ipcMain.handle(
+    "mutate-model-configuration",
+    async (_event, request: unknown) => {
+      const ownerLease = await acquireModelConfigurationOwnerLease();
+      try {
+        return await modelConfigurationBridge.mutateModelConfiguration(
+          request,
+          ownerLease.guard,
+        );
+      } finally {
+        ownerLease.finish();
+      }
+    },
   );
   ipcMain.handle("agentera-official-quality-get-consent", () =>
     requireOfficialQuality().getConsent(),

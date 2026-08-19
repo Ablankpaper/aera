@@ -291,6 +291,32 @@ afterEach(() => {
 });
 
 describe("AgenteraWorkspaceManager", () => {
+  it("does not retain a Product Space coordinator whose subscription fails", () => {
+    const database = databaseFor(temporaryUserData());
+    const manager = new AgenteraWorkspaceManager({
+      database,
+      client: cloudClient(),
+      getAuthState: () => authState(),
+      now: () => NOW,
+    });
+    managers.push(manager);
+    const coordinator = selectionCoordinatorFor(database, () => authState());
+    const subscribe = vi
+      .spyOn(coordinator, "subscribe")
+      .mockImplementationOnce(() => {
+        throw new Error("injected Product Space subscription failure");
+      });
+
+    expect(() => manager.attachProductSpaceCoordinator(coordinator)).toThrow(
+      "injected Product Space subscription failure",
+    );
+
+    expect(() =>
+      manager.attachProductSpaceCoordinator(coordinator),
+    ).not.toThrow();
+    expect(subscribe).toHaveBeenCalledTimes(2);
+  });
+
   it("defaults to personal space without making a cloud request", async () => {
     let auth: AgenteraAuthPublicState = authState();
     const client = cloudClient();

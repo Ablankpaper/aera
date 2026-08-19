@@ -1,10 +1,16 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   isModelRouteKeyV2,
   routeKeysMatch,
   ModelConfigurationMutationRequest,
   ModelConfigurationMutationResult,
   ModelConfigurationStage,
+  type ModelConfigurationFailureCode,
+  type ModelConfigurationFailureStage,
+  type ModelConfigurationOperation,
+  type ModelConfigurationMutationFailure,
+  type ModelConfigurationOwnerTransitionCode,
+  type LegacyModelConfigurationMutationFailure,
   OwnerModelRouteCatalogSnapshot,
 } from "../shared/model-configuration";
 import {
@@ -27,6 +33,8 @@ import {
 } from "./model-configuration-write-authority";
 
 type Awaitable<T> = T | Promise<T>;
+
+export type ModelConfigurationOwnerGuard = () => void;
 
 export type ModelConfigurationCommitStage =
   | "credential"
@@ -142,7 +150,8 @@ export type ManagedModelConfigurationWriteResult<T> =
       catalog: OwnerModelRouteCatalogSnapshot;
       warning?: "model_save_refresh_failed";
     }
-  | Extract<ModelConfigurationMutationResult, { status: "rejected" }>;
+  | ModelConfigurationMutationFailure
+  | LegacyModelConfigurationMutationFailure;
 
 export interface ModelConfigurationMutationAdapter {
   prepare(
@@ -204,15 +213,152 @@ function rejected(
   stage: ModelConfigurationStage,
   rollback: "not_needed" | "restored" | "recovery_required",
   recoveryRequired = false,
-): Extract<ModelConfigurationMutationResult, { status: "rejected" }> {
+  codeOverride?: ModelConfigurationOwnerTransitionCode,
+  operation: ModelConfigurationOperation = "save_model",
+  diagnosticId?: string,
+): ModelConfigurationMutationFailure {
+  const code: ModelConfigurationFailureCode =
+    codeOverride ??
+    (recoveryRequired
+      ? "model_configuration_recovery_required"
+      : failureCodeForStage(stage));
   return {
     status: "rejected",
-    stage,
-    code: recoveryRequired
-      ? "model_configuration_recovery_required"
-      : `model_save_${stage}_failed`,
+    schemaVersion: 2,
+    operation,
+    stage: failureStageFor(stage, code),
+    code,
+    retryability: retryabilityFor(code),
+    diagnosticId:
+      diagnosticId && /^[0-9a-f]{12}$/u.test(diagnosticId)
+        ? diagnosticId
+        : modelConfigurationDiagnosticId(),
     rollback,
   };
+}
+
+function failureCodeForStage(
+  stage: ModelConfigurationStage,
+): ModelConfigurationFailureCode {
+  switch (stage) {
+    case "validation":
+      return "model_save_validation_failed";
+    case "credential":
+      return "model_save_credential_failed";
+    case "provider":
+      return "model_save_provider_failed";
+    case "model_library":
+      return "model_save_model_library_failed";
+    case "native_route":
+      return "model_save_native_route_failed";
+    case "activation":
+      return "model_save_activation_failed";
+    case "verification":
+      return "model_save_verification_failed";
+    case "rollback":
+      return "model_save_rollback_failed";
+    case "recovery":
+      return "model_configuration_recovery_required";
+  }
+}
+
+function modelConfigurationDiagnosticId(): string {
+  return randomBytes(6).toString("hex");
+}
+
+function failureStageFor(
+  stage: ModelConfigurationStage,
+  code: ModelConfigurationFailureCode,
+): ModelConfigurationFailureStage {
+  if (code.startsWith("native_module_")) return "native_load";
+  if (code === "model_configuration_database_unavailable") {
+    return "database_open";
+  }
+  if (code === "model_configuration_schema_unsupported") return "schema";
+  if (code === "route_catalog_repair_required") return "route_repair";
+  if (code === "model_save_stale_catalog_revision") return "revision";
+  if (
+    code === "model_owner_transition_in_progress" ||
+    code === "model_owner_changed" ||
+    code === "owner_transition_timeout" ||
+    code === "owner_transition_failed"
+  ) {
+    return "owner";
+  }
+  return stage;
+}
+
+function retryabilityFor(
+  code: ModelConfigurationFailureCode,
+): ModelConfigurationMutationFailure["retryability"] {
+  if (
+    code === "model_save_stale_catalog_revision" ||
+    code === "model_owner_changed" ||
+    code === "model_owner_transition_in_progress"
+  ) {
+    return "retryable";
+  }
+  if (
+    code === "native_module_abi_mismatch" ||
+    code === "native_module_architecture_mismatch" ||
+    code === "native_module_dependency_missing" ||
+    code === "native_module_load_denied" ||
+    code === "native_module_load_failed" ||
+    code === "model_configuration_database_unavailable" ||
+    code === "model_configuration_schema_unsupported"
+  ) {
+    return "after_restart";
+  }
+  if (
+    code === "model_configuration_recovery_required" ||
+    code === "route_catalog_repair_required" ||
+    code === "owner_transition_timeout" ||
+    code === "owner_transition_failed"
+  ) {
+    return "after_user_action";
+  }
+  return "not_retryable";
+}
+
+function ownerTransitionCode(
+  error: unknown,
+): ModelConfigurationOwnerTransitionCode | null {
+  if (!error || typeof error !== "object") return null;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" &&
+    [
+      "model_owner_transition_in_progress",
+      "model_owner_changed",
+      "owner_transition_timeout",
+      "owner_transition_failed",
+    ].includes(code)
+    ? (code as ModelConfigurationOwnerTransitionCode)
+    : null;
+}
+
+function ownerTransitionDiagnosticId(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const diagnosticId = (error as { diagnosticId?: unknown }).diagnosticId;
+  return typeof diagnosticId === "string" &&
+    /^[0-9a-f]{12}$/u.test(diagnosticId)
+    ? diagnosticId
+    : undefined;
+}
+
+function rejectedForError(
+  error: unknown,
+  stage: ModelConfigurationStage,
+  rollback: "not_needed" | "restored" | "recovery_required",
+  recoveryRequired = false,
+): Extract<ModelConfigurationMutationResult, { status: "rejected" }> {
+  return rejected(
+    stage,
+    rollback,
+    recoveryRequired,
+    ownerTransitionCode(error) ?? undefined,
+    "save_model",
+    ownerTransitionDiagnosticId(error),
+  );
 }
 
 /**
@@ -220,14 +366,31 @@ function rejected(
  * re-reading it and replaying once may succeed. Kept separate from [[rejected]]
  * so no other validation path can accidentally claim retryability.
  */
-function rejectedStaleRevision(): ModelConfigurationMutationResult {
+function rejectedStaleRevision(
+  operation: ModelConfigurationOperation,
+): ModelConfigurationMutationResult {
   return {
-    status: "rejected",
-    stage: "validation",
-    code: "model_save_validation_failed",
-    rollback: "not_needed",
+    ...rejected("validation", "not_needed", false, undefined, operation),
+    code: "model_save_stale_catalog_revision",
+    stage: "revision",
+    retryability: "retryable",
     reason: "stale_catalog_revision",
   };
+}
+
+function withOperation(
+  result: ModelConfigurationMutationResult,
+  operation: ModelConfigurationOperation,
+): ModelConfigurationMutationResult {
+  return result.status === "rejected" ? { ...result, operation } : result;
+}
+
+function operationForMutation(
+  request: ModelConfigurationMutationRequest,
+): ModelConfigurationOperation {
+  return request && request.intent === "delete"
+    ? "remove_provider"
+    : "save_provider";
 }
 
 function boundedString(
@@ -486,21 +649,28 @@ export class ModelConfigurationCoordinator {
 
   async mutate(
     request: ModelConfigurationMutationRequest,
+    ownerGuard?: ModelConfigurationOwnerGuard,
   ): Promise<ModelConfigurationMutationResult> {
+    const operation = operationForMutation(request);
     let ownerHandle: string;
     let preliminaryTarget: string;
     try {
+      ownerGuard?.();
       validateMutationRequest(request);
       ownerHandle = validateOwnerHandle(this.ownerHandle());
       preliminaryTarget = validateProfileId(
         this.catalog.canonicalTargetProfileId(request.requestedProfileId),
       );
-    } catch {
-      return rejected("validation", "not_needed");
+    } catch (error) {
+      return {
+        ...rejectedForError(error, "validation", "not_needed"),
+        operation,
+      };
     }
     const lockKey = `${ownerHandle}\0${preliminaryTarget}`;
     return this.withLock(lockKey, async () => {
       try {
+        ownerGuard?.();
         const currentOwner = validateOwnerHandle(this.ownerHandle());
         const targetProfileId = validateProfileId(
           this.catalog.canonicalTargetProfileId(request.requestedProfileId),
@@ -510,23 +680,41 @@ export class ModelConfigurationCoordinator {
           targetProfileId !== preliminaryTarget ||
           !(await this.isProfileOwned(ownerHandle, targetProfileId))
         ) {
-          return rejected("validation", "not_needed");
+          return rejected(
+            "validation",
+            "not_needed",
+            false,
+            undefined,
+            operation,
+          );
         }
         if (this.profileNeedsRecovery(ownerHandle, targetProfileId)) {
-          return rejected("recovery", "recovery_required", true);
+          return rejected(
+            "recovery",
+            "recovery_required",
+            true,
+            undefined,
+            operation,
+          );
         }
         const catalog = this.catalog.snapshot(request.requestedProfileId);
         // The profile the caller resolved to must still be the profile we would
         // write. A mismatch means the caller is looking at another profile, and
         // replaying the same request would resolve the same wrong way.
         if (catalog.targetProfileId !== targetProfileId) {
-          return rejected("validation", "not_needed");
+          return rejected(
+            "validation",
+            "not_needed",
+            false,
+            undefined,
+            operation,
+          );
         }
         // Checked before the replacement below: when the revision is stale the
         // replacement's revision is stale too, and reporting that as a plain
         // rejection would deny the caller its one legitimate retry.
         if (catalog.revision !== request.expectedCatalogRevision) {
-          return rejectedStaleRevision();
+          return rejectedStaleRevision(operation);
         }
         // Revision matches, so a replacement pinned to a different revision is
         // an internally inconsistent request rather than staleness.
@@ -535,11 +723,18 @@ export class ModelConfigurationCoordinator {
           request.replacement !== null &&
           request.replacement.catalogRevision !== catalog.revision
         ) {
-          return rejected("validation", "not_needed");
+          return rejected(
+            "validation",
+            "not_needed",
+            false,
+            undefined,
+            operation,
+          );
         }
 
         let prepared: PreparedModelConfigurationMutation;
         try {
+          ownerGuard?.();
           prepared = await this.mutationAdapter.prepare(request, {
             ownerHandle,
             targetProfileId,
@@ -553,11 +748,21 @@ export class ModelConfigurationCoordinator {
           const activeRoute = boundedRouteKey(
             await this.mutationAdapter.getActiveRouteKey(targetProfileId),
           );
+          ownerGuard?.();
           if (activeRoute !== prepared.oldRouteKey) {
-            return rejected("validation", "not_needed");
+            return rejected(
+              "validation",
+              "not_needed",
+              false,
+              undefined,
+              operation,
+            );
           }
-        } catch {
-          return rejected("validation", "not_needed");
+        } catch (error) {
+          return {
+            ...rejectedForError(error, "validation", "not_needed"),
+            operation,
+          };
         }
 
         if (prepared.location.kind === "remote") {
@@ -565,27 +770,55 @@ export class ModelConfigurationCoordinator {
             prepared.location.transport === "legacy" ||
             !prepared.location.snapshotComplete
           ) {
-            return rejected("validation", "not_needed");
+            return rejected(
+              "validation",
+              "not_needed",
+              false,
+              undefined,
+              operation,
+            );
           }
-          return this.executeRemoteMutation(prepared, targetProfileId);
+          return withOperation(
+            await this.executeRemoteMutation(
+              prepared,
+              targetProfileId,
+              ownerGuard,
+            ),
+            operation,
+          );
         }
-        return this.executeLocalMutation(
-          prepared,
-          ownerHandle,
-          targetProfileId,
+        return withOperation(
+          await this.executeLocalMutation(
+            prepared,
+            ownerHandle,
+            targetProfileId,
+            ownerGuard,
+          ),
+          operation,
         );
-      } catch {
-        return rejected("recovery", "recovery_required", true);
+      } catch (error) {
+        const ownerCode = ownerTransitionCode(error);
+        return ownerCode
+          ? rejected("validation", "not_needed", false, ownerCode, operation)
+          : rejected(
+              "recovery",
+              "recovery_required",
+              true,
+              undefined,
+              operation,
+            );
       }
     });
   }
 
   async initializeManagedModelFiles(
     input: ManagedModelFileInitialization,
+    ownerGuard?: ModelConfigurationOwnerGuard,
   ): Promise<ModelConfigurationMutationResult> {
     let ownerHandle: string;
     let preliminaryTarget: string;
     try {
+      ownerGuard?.();
       if (
         !input ||
         typeof input !== "object" ||
@@ -603,13 +836,14 @@ export class ModelConfigurationCoordinator {
       ) {
         throw new Error("Managed model initialization target changed.");
       }
-    } catch {
-      return rejected("validation", "not_needed");
+    } catch (error) {
+      return rejectedForError(error, "validation", "not_needed");
     }
 
     const lockKey = `${ownerHandle}\0${preliminaryTarget}`;
     return this.withLock(lockKey, async () => {
       try {
+        ownerGuard?.();
         const currentOwner = validateOwnerHandle(this.ownerHandle());
         const targetProfileId = validateProfileId(
           this.catalog.canonicalTargetProfileId(preliminaryTarget),
@@ -633,6 +867,7 @@ export class ModelConfigurationCoordinator {
                 return rejected("verification", "not_needed");
               }
               const catalog = this.catalog.snapshot(targetProfileId);
+              ownerGuard?.();
               if (catalog.targetProfileId !== targetProfileId) {
                 return rejected("validation", "not_needed");
               }
@@ -658,9 +893,13 @@ export class ModelConfigurationCoordinator {
           },
           ownerHandle,
           targetProfileId,
+          ownerGuard,
         );
-      } catch {
-        return rejected("recovery", "recovery_required", true);
+      } catch (error) {
+        const ownerCode = ownerTransitionCode(error);
+        return ownerCode
+          ? rejected("validation", "not_needed", false, ownerCode)
+          : rejected("recovery", "recovery_required", true);
       }
     });
   }
@@ -670,10 +909,12 @@ export class ModelConfigurationCoordinator {
     prepare: (
       context: ManagedModelConfigurationWriteContext,
     ) => Awaitable<ManagedModelConfigurationWritePlan<T>>,
+    ownerGuard?: ModelConfigurationOwnerGuard,
   ): Promise<ManagedModelConfigurationWriteResult<T>> {
     let ownerHandle: string;
     let preliminaryTarget: string;
     try {
+      ownerGuard?.();
       if (
         !input ||
         typeof input !== "object" ||
@@ -687,13 +928,14 @@ export class ModelConfigurationCoordinator {
       preliminaryTarget = validateProfileId(
         this.catalog.canonicalTargetProfileId(input.requestedProfileId),
       );
-    } catch {
-      return rejected("validation", "not_needed");
+    } catch (error) {
+      return rejectedForError(error, "validation", "not_needed");
     }
 
     const lockKey = `${ownerHandle}\0${preliminaryTarget}`;
     return this.withLock(lockKey, async () => {
       try {
+        ownerGuard?.();
         const currentOwner = validateOwnerHandle(this.ownerHandle());
         const targetProfileId = validateProfileId(
           this.catalog.canonicalTargetProfileId(input.requestedProfileId),
@@ -719,6 +961,7 @@ export class ModelConfigurationCoordinator {
         let plan: ManagedModelConfigurationWritePlan<T>;
         let newRouteKey: string;
         try {
+          ownerGuard?.();
           catalog = this.catalog.snapshot(input.requestedProfileId);
           if (catalog.targetProfileId !== targetProfileId) {
             return rejected("validation", "not_needed");
@@ -740,8 +983,9 @@ export class ModelConfigurationCoordinator {
             throw new Error("Invalid managed model write plan.");
           }
           newRouteKey = boundedRouteKey(plan.newRouteKey ?? oldRouteKey);
-        } catch {
-          return rejected("validation", "not_needed");
+          ownerGuard?.();
+        } catch (error) {
+          return rejectedForError(error, "validation", "not_needed");
         }
 
         return this.writeAuthority.run(
@@ -750,6 +994,7 @@ export class ModelConfigurationCoordinator {
             profileIds: [targetProfileId],
           },
           async (permit): Promise<ManagedModelConfigurationWriteResult<T>> => {
+            ownerGuard?.();
             // The global authority may have been queued behind another Profile.
             // Recheck ownership, recovery, catalog, route, and all five byte
             // digests before journalling the read-only plan.
@@ -770,6 +1015,7 @@ export class ModelConfigurationCoordinator {
               await this.mutationAdapter.getActiveRouteKey(targetProfileId),
             );
             const admittedDigests = await this.files.readDigests(paths);
+            ownerGuard?.();
             if (
               admittedOwner !== ownerHandle ||
               admittedTarget !== targetProfileId ||
@@ -803,6 +1049,7 @@ export class ModelConfigurationCoordinator {
               ownerHandle,
               targetProfileId,
               permit,
+              ownerGuard,
             );
             if (result.status === "rejected") return result;
             return {
@@ -815,8 +1062,11 @@ export class ModelConfigurationCoordinator {
             };
           },
         );
-      } catch {
-        return rejected("recovery", "recovery_required", true);
+      } catch (error) {
+        const ownerCode = ownerTransitionCode(error);
+        return ownerCode
+          ? rejected("validation", "not_needed", false, ownerCode)
+          : rejected("recovery", "recovery_required", true);
       }
     });
   }
@@ -833,7 +1083,10 @@ export class ModelConfigurationCoordinator {
               validateOwnerHandle(record.ownerHandle);
               validateProfileId(record.profileId);
               if (
-                !(await this.isProfileOwned(record.ownerHandle, record.profileId))
+                !(await this.isProfileOwned(
+                  record.ownerHandle,
+                  record.profileId,
+                ))
               ) {
                 throw new Error("Model configuration recovery owner mismatch.");
               }
@@ -884,7 +1137,10 @@ export class ModelConfigurationCoordinator {
               await this.notifyRolledBackOrLog();
             } catch {
               try {
-                this.operationStore.finish(record.operationId, "recovery_required");
+                this.operationStore.finish(
+                  record.operationId,
+                  "recovery_required",
+                );
               } catch {
                 // The caller will fail startup closed if even the recovery journal
                 // cannot record the terminal recovery-required state.
@@ -901,6 +1157,7 @@ export class ModelConfigurationCoordinator {
     prepared: PreparedModelConfigurationMutation,
     ownerHandle: string,
     targetProfileId: string,
+    ownerGuard?: ModelConfigurationOwnerGuard,
   ): Promise<ModelConfigurationMutationResult> {
     return this.writeAuthority.run(
       { globalCatalog: true, profileIds: [targetProfileId] },
@@ -910,6 +1167,7 @@ export class ModelConfigurationCoordinator {
           ownerHandle,
           targetProfileId,
           permit,
+          ownerGuard,
         ),
     );
   }
@@ -919,17 +1177,20 @@ export class ModelConfigurationCoordinator {
     ownerHandle: string,
     targetProfileId: string,
     permit: ModelConfigurationWritePermit,
+    ownerGuard?: ModelConfigurationOwnerGuard,
   ): Promise<ModelConfigurationMutationResult> {
     const operationId = this.operationId();
     const paths = this.files.paths(targetProfileId);
     let snapshot: ModelConfigurationFilesSnapshot | undefined;
     let journalStarted = false;
     try {
+      ownerGuard?.();
       snapshot = await this.files.capture({
         profileId: targetProfileId,
         operationId,
         paths,
       });
+      ownerGuard?.();
       this.operationStore.begin({
         operationId,
         ownerHandle,
@@ -944,7 +1205,21 @@ export class ModelConfigurationCoordinator {
       // represented by a recoverable prepared row rather than an orphaned
       // filesystem artifact.
       await this.files.persistBackups(snapshot);
-    } catch {
+      ownerGuard?.();
+    } catch (error) {
+      if (journalStarted && snapshot && ownerTransitionCode(error)) {
+        return this.rollbackLocalMutation(
+          operationId,
+          snapshot,
+          paths,
+          prepared.oldRouteKey,
+          ownerHandle,
+          targetProfileId,
+          "validation",
+          ownerTransitionCode(error) ?? undefined,
+          ownerTransitionDiagnosticId(error),
+        );
+      }
       if (journalStarted) {
         const lockKey = `${ownerHandle}\0${targetProfileId}`;
         try {
@@ -957,20 +1232,23 @@ export class ModelConfigurationCoordinator {
         return rejected("recovery", "recovery_required", true);
       }
       if (snapshot) await this.removeBackupsSafely(snapshot);
-      return rejected("validation", "not_needed");
+      return rejectedForError(error, "validation", "not_needed");
     }
 
     for (const stage of COMMIT_STAGES) {
       try {
+        ownerGuard?.();
         await prepared.applyStage(stage, permit);
+        ownerGuard?.();
         const afterDigests = await this.files.readDigests(paths);
+        ownerGuard?.();
         this.operationStore.advance({
           operationId,
           state: stage,
           stage,
           afterDigests,
         });
-      } catch {
+      } catch (error) {
         return this.rollbackLocalMutation(
           operationId,
           snapshot,
@@ -979,12 +1257,15 @@ export class ModelConfigurationCoordinator {
           ownerHandle,
           targetProfileId,
           stage,
+          ownerTransitionCode(error) ?? undefined,
+          ownerTransitionDiagnosticId(error),
         );
       }
     }
 
     let catalog: OwnerModelRouteCatalogSnapshot;
     try {
+      ownerGuard?.();
       catalog = this.catalog.snapshot(targetProfileId);
       if (
         catalog.targetProfileId !== targetProfileId ||
@@ -995,19 +1276,22 @@ export class ModelConfigurationCoordinator {
       const activeRoute = boundedRouteKey(
         await this.mutationAdapter.getActiveRouteKey(targetProfileId),
       );
+      ownerGuard?.();
       if (activeRoute !== prepared.newRouteKey) {
         throw new Error("Model configuration activation verification failed.");
       }
       const afterDigests = await this.files.readDigests(paths);
+      ownerGuard?.();
       this.operationStore.advance({
         operationId,
         state: "verification",
         stage: "verification",
         afterDigests,
       });
+      ownerGuard?.();
       this.operationStore.finish(operationId, "committed");
       await this.removeBackupsSafely(snapshot);
-    } catch {
+    } catch (error) {
       return this.rollbackLocalMutation(
         operationId,
         snapshot,
@@ -1016,6 +1300,7 @@ export class ModelConfigurationCoordinator {
         ownerHandle,
         targetProfileId,
         "verification",
+        ownerTransitionCode(error) ?? undefined,
       );
     }
 
@@ -1039,6 +1324,8 @@ export class ModelConfigurationCoordinator {
     ownerHandle: string,
     targetProfileId: string,
     failedStage: ModelConfigurationStage,
+    failureCode?: ModelConfigurationOwnerTransitionCode,
+    failureDiagnosticId?: string,
   ): Promise<ModelConfigurationMutationResult> {
     const lockKey = `${ownerHandle}\0${targetProfileId}`;
     try {
@@ -1057,6 +1344,18 @@ export class ModelConfigurationCoordinator {
         const rollbackWarning = await this.notifyRolledBackSafely();
         return {
           ...rejected(failedStage, "not_needed"),
+          ...(failureCode
+            ? {
+                ...rejected(
+                  failedStage,
+                  "not_needed",
+                  false,
+                  failureCode,
+                  "save_model",
+                  failureDiagnosticId,
+                ),
+              }
+            : {}),
           ...(rollbackWarning ? { rollbackWarning } : {}),
         };
       }
@@ -1078,6 +1377,18 @@ export class ModelConfigurationCoordinator {
       const rollbackWarning = await this.notifyRolledBackSafely();
       return {
         ...rejected(failedStage, "restored"),
+        ...(failureCode
+          ? {
+              ...rejected(
+                failedStage,
+                "restored",
+                false,
+                failureCode,
+                "save_model",
+                failureDiagnosticId,
+              ),
+            }
+          : {}),
         ...(rollbackWarning ? { rollbackWarning } : {}),
       };
     } catch {
@@ -1094,6 +1405,7 @@ export class ModelConfigurationCoordinator {
   private async executeRemoteMutation(
     prepared: PreparedModelConfigurationMutation,
     targetProfileId: string,
+    ownerGuard?: ModelConfigurationOwnerGuard,
   ): Promise<ModelConfigurationMutationResult> {
     const location = prepared.location;
     if (location.kind !== "remote") {
@@ -1103,13 +1415,17 @@ export class ModelConfigurationCoordinator {
     try {
       for (const stage of COMMIT_STAGES) {
         failedStage = stage;
+        ownerGuard?.();
         await prepared.applyStage(stage, null);
+        ownerGuard?.();
       }
       failedStage = "verification";
+      ownerGuard?.();
       const catalog = this.catalog.snapshot(targetProfileId);
       if (!(await prepared.verify(catalog))) {
         throw new Error("Remote model configuration verification failed.");
       }
+      ownerGuard?.();
       try {
         await prepared.refreshPresentation?.();
         return { status: "committed", catalog };
@@ -1120,13 +1436,13 @@ export class ModelConfigurationCoordinator {
           warning: "model_save_refresh_failed",
         };
       }
-    } catch {
+    } catch (error) {
       try {
         await location.restore();
         if (!(await location.verifyRestore())) {
           throw new Error("Remote model configuration restore failed.");
         }
-        return rejected(failedStage, "restored");
+        return rejectedForError(error, failedStage, "restored");
       } catch {
         return rejected("recovery", "recovery_required", true);
       }

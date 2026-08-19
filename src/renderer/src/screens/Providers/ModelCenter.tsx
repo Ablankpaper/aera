@@ -32,6 +32,7 @@ import {
 } from "../../../../shared/url-key-map";
 import { isSafeToRetryStaleRevision } from "../../../../shared/model-configuration";
 import type {
+  ModelConfigurationFailureCode,
   ModelConfigurationMutationRequest,
   ModelConfigurationMutationResult,
   OwnerModelRouteCatalogSnapshot,
@@ -47,6 +48,7 @@ import {
   type ModelApiMode,
   type ModelProviderPreset,
 } from "./modelProviderPresets";
+import { modelConfigurationFeedback } from "./model-center-feedback";
 
 interface LibraryModel {
   id: string;
@@ -457,60 +459,13 @@ export default function ModelCenter({
     { status: "rejected" }
   >;
   const mutationFailureMessage = (result: RejectedMutation): string => {
-    let message: string;
-    switch (result.code) {
-      case "native_module_abi_mismatch":
-      case "native_module_architecture_mismatch":
-      case "native_module_dependency_missing":
-      case "native_module_load_denied":
-      case "native_module_load_failed":
-        message = t("providers.center.errors.runtimeNative");
-        break;
-      case "model_configuration_database_unavailable":
-        message = t("providers.center.errors.database");
-        break;
-      case "model_configuration_schema_unsupported":
-        message = t("providers.center.errors.schema");
-        break;
-      case "route_catalog_repair_required":
-        message = t("providers.center.errors.routeCatalog");
-        break;
-      case "model_configuration_recovery_required":
-        message = t("providers.center.errors.recovery");
-        break;
-      default:
-        switch (result.stage) {
-          case "credential":
-            message = t("providers.center.errors.credential");
-            break;
-          case "provider":
-            message = t("providers.center.errors.provider");
-            break;
-          case "model_library":
-            message = t("providers.center.errors.modelLibrary");
-            break;
-          case "native_route":
-            message = t("providers.center.errors.route");
-            break;
-          case "activation":
-            message = t("providers.center.errors.activation");
-            break;
-          case "verification":
-            message = t("providers.center.errors.verification");
-            break;
-          case "rollback":
-            message = t("providers.center.errors.rollback");
-            break;
-          case "recovery":
-            message = t("providers.center.errors.recovery");
-            break;
-          case "validation":
-          default:
-            message = t("providers.center.errors.validation");
-            break;
-        }
-        break;
-    }
+    const feedback = modelConfigurationFeedback(
+      result.code as ModelConfigurationFailureCode,
+      "retryability" in result ? result.retryability : "not_retryable",
+    );
+    const message = `${t(feedback.messageKey)}${
+      "retryability" in result ? ` ${t(feedback.actionKey)}` : ""
+    }`;
     return result.diagnosticId
       ? `${message} (${result.diagnosticId})`
       : message;

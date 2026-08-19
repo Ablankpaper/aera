@@ -413,14 +413,15 @@ export class AgenteraWorkspaceManager implements AgenteraWorkspaceManagerSurface
     if (this.selectionCoordinator !== null) {
       throw codedError("selection_coordinator_already_attached");
     }
-    this.selectionCoordinator = coordinator;
-    this.unsubscribeSelectionCoordinator = coordinator.subscribe(() => {
+    const unsubscribe = coordinator.subscribe(() => {
       try {
         this.emit(this.buildState(this.readAccess()));
       } catch {
         // No product-space state is exposed while the account is unavailable.
       }
     });
+    this.selectionCoordinator = coordinator;
+    this.unsubscribeSelectionCoordinator = unsubscribe;
   }
 
   async create(input: CreateWorkspaceInput): Promise<WorkspaceSummary> {
