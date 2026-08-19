@@ -64,6 +64,10 @@ function parseBakedOfflineTrust(sources) {
   };
 }
 
+export function normalizeAsarEntryPath(entry) {
+  return entry.replaceAll("\\", "/").replace(/^\/+/, "");
+}
+
 export function verifyBakedAuthConfigSources(sources, options = {}) {
   if (
     !Array.isArray(sources) ||
@@ -109,7 +113,7 @@ export function verifyBakedAuthConfigSources(sources, options = {}) {
 export function verifyPackagedAsarAuthConfig(appAsar, expectedCloudOrigin) {
   const entries = listPackage(appAsar, { isPack: false })
     .filter((entry) => typeof entry === "string")
-    .map((entry) => entry.replace(/^\/+/, ""))
+    .map(normalizeAsarEntryPath)
     .filter((entry) => entry.startsWith("out/main/") && entry.endsWith(".js"));
   const sources = entries.map((entry) =>
     extractFile(appAsar, entry).toString("utf8"),
