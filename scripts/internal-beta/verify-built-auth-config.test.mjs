@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import verifyBuiltPackage, {
+  normalizeAsarEntryPath,
   verifyBuiltAuthConfig,
 } from "./verify-built-auth-config.mjs";
 
@@ -18,6 +19,13 @@ const verifierPath = fileURLToPath(
 const testOrigin = "https://203.0.113.10";
 const otherTestOrigin = "https://203.0.113.11";
 const testPublicKey = Buffer.alloc(32, 73).toString("base64url");
+
+test("normalizes Windows ASAR entry separators before filtering main sources", () => {
+  assert.equal(
+    normalizeAsarEntryPath("\\out\\main\\chunks\\start.js"),
+    "out/main/chunks/start.js",
+  );
+});
 
 test("internal-Beta packaging rejects a build without a baked Cloud origin", async () => {
   const root = await mkdtemp(join(tmpdir(), "aera-beta-auth-build-"));
