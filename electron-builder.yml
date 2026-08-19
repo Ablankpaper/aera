@@ -14,6 +14,9 @@ files:
   - "resources/icon.png"
   - "resources/agentera-runtime-trust.json"
   - "!resources/agentera-runtime-seed/**"
+  # better-sqlite3 builds this fixture beside the production binding when
+  # rebuilt from source. It is not loaded by Aera and must not be shipped.
+  - "!node_modules/better-sqlite3/build/Release/test_extension.node"
 asarUnpack:
   - resources/**
   # Ship only the production database binding. The package also contains

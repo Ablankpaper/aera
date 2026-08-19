@@ -373,7 +373,7 @@ describe("Runtime Seed packaging scripts", () => {
     }
   });
 
-  it("embeds only the verified Seed staging directory through extraResources", () => {
+  it("embeds only the verified Seed staging directory and excludes native test fixtures", () => {
     const config = YAML.parse(
       readFileSync(join(process.cwd(), "electron-builder.yml"), "utf8"),
     );
@@ -390,6 +390,7 @@ describe("Runtime Seed packaging scripts", () => {
       "resources/icon.png",
       "resources/agentera-runtime-trust.json",
       "!resources/agentera-runtime-seed/**",
+      "!node_modules/better-sqlite3/build/Release/test_extension.node",
     ]);
     const scripts = JSON.parse(
       readFileSync(join(process.cwd(), "package.json"), "utf8"),
