@@ -1694,7 +1694,11 @@ describe("Internal Beta desktop updater", () => {
         copyFile(shellExecutable, executable),
         writeFile(
           journal,
-          JSON.stringify({ state: "prepared", rollback_state: "not_started" }),
+          JSON.stringify({
+            state: "prepared",
+            rollback_state: "not_started",
+            updated_at: "2026-08-18T07:00:00Z",
+          }),
         ),
         writeFile(marker, ""),
         writeFile(failure, ""),
