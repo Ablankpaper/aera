@@ -13,7 +13,7 @@ const hash = "a".repeat(64);
 const target = {
   schemaVersion: 1,
   platform: "darwin",
-  version: "0.7.4-internal-beta.32",
+  version: "0.7.4-internal-beta.33",
   bundleId: "com.example.aera",
   architecture: "arm64",
   executableSha256: hash,

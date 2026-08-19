@@ -22,6 +22,7 @@ import {
   validateLiveEvidence,
   validateLiveEvidenceSchema,
 } from "./verify-live-evidence.mjs";
+import { BETA33_ACCEPTANCE_SCENARIOS } from "./verify-beta33-acceptance.mjs";
 
 const DESKTOP_SHA = "a".repeat(40);
 const CLOUD_SHA = "b".repeat(40);
@@ -55,6 +56,134 @@ afterEach(async () => {
 
 function digest(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+const ACCEPTANCE_SUCCESS_SEQUENCE = [
+  ["metadata", "started"],
+  ["metadata", "succeeded"],
+  ["verify", "started"],
+  ["verify", "succeeded"],
+  ["download", "started"],
+  ["download", "succeeded"],
+  ["verify", "started"],
+  ["verify", "succeeded"],
+  ["extract", "started"],
+  ["extract", "succeeded"],
+  ["stage", "started"],
+  ["stage", "succeeded"],
+  ["swap", "started"],
+  ["swap", "succeeded"],
+  ["launch", "started"],
+  ["launch", "succeeded"],
+  ["health", "started"],
+  ["health", "succeeded"],
+  ["finalize", "started"],
+  ["finalize", "succeeded"],
+];
+const ACCEPTANCE_ROLLBACK_SEQUENCE = [
+  ...ACCEPTANCE_SUCCESS_SEQUENCE.slice(0, -4),
+  ["health", "started"],
+  ["health", "failed", "update_health_timeout", "after_restart"],
+  ["rollback", "started"],
+  ["rollback", "rolled_back", "update_health_timeout", "after_restart"],
+];
+
+function acceptanceScenario(key, index, artifacts) {
+  const isWindows = key.startsWith("windows_");
+  const isBridge = key === "macos_beta29_manual_bridge";
+  const isRollback = key.endsWith("health_failure_rollback");
+  const sourceVersion = isBridge
+    ? "0.7.4-internal-beta.29"
+    : key.includes("beta31")
+      ? "0.7.4-internal-beta.31"
+      : "0.7.4-internal-beta.32";
+  const artifactIndex = isBridge ? 0 : isWindows ? 4 : 1;
+  const startedAt = new Date(
+    Date.parse("2026-07-24T01:00:00Z") + index * 60_000,
+  )
+    .toISOString()
+    .replace(".000Z", "Z");
+  const operationId = `019f0000-0000-4000-8000-${String(index + 33).padStart(12, "0")}`;
+  const diagnosticId = (index + 1).toString(16).padStart(12, "0");
+  const sequence = isRollback
+    ? ACCEPTANCE_ROLLBACK_SEQUENCE
+    : ACCEPTANCE_SUCCESS_SEQUENCE;
+  const timeline = isBridge
+    ? []
+    : sequence.map(
+        (
+          [stage, state, code = null, retryability = "not_retryable"],
+          eventIndex,
+        ) => ({
+          at: new Date(Date.parse(startedAt) + eventIndex * 1_000)
+            .toISOString()
+            .replace(".000Z", "Z"),
+          schemaVersion: 2,
+          operationId,
+          stage,
+          state,
+          code,
+          retryability,
+          diagnosticId,
+          targetVersion:
+            stage === "metadata" && eventIndex < 2
+              ? null
+              : "0.7.4-internal-beta.33",
+        }),
+      );
+  return {
+    platform: isWindows ? "win32" : "darwin",
+    architecture: isWindows ? "x64" : "arm64",
+    environment: isRollback ? "isolated_ci" : "physical",
+    sourceVersion,
+    targetVersion: "0.7.4-internal-beta.33",
+    method: isBridge
+      ? "manual_dmg_bridge"
+      : isRollback
+        ? "injected_health_failure"
+        : "online_update",
+    installedArtifact: {
+      name: artifacts[artifactIndex].name,
+      sha256: artifacts[artifactIndex].sha256,
+    },
+    executableSha256: String((index % 8) + 1).repeat(64),
+    protectedUserDataBeforeSha256: "c".repeat(64),
+    protectedUserDataAfterSha256: "c".repeat(64),
+    startupPassed: true,
+    modelSavePassed: true,
+    startedAt,
+    completedAt: new Date(Date.parse(startedAt) + 30_000)
+      .toISOString()
+      .replace(".000Z", "Z"),
+    operationId: isBridge ? null : operationId,
+    diagnosticId: isBridge ? null : diagnosticId,
+    timeline,
+    evidenceFileDigests: {
+      modelSave: String((index % 7) + 1).repeat(64),
+      processLog: String(((index + 1) % 7) + 1).repeat(64),
+      updateTimeline: String(((index + 2) % 7) + 1).repeat(64),
+    },
+  };
+}
+
+function buildAcceptanceLedger(desktopManifestRaw, artifacts) {
+  return canonicalJSONStringify({
+    schemaVersion: 1,
+    status: "BETA33_ACCEPTED",
+    candidate: {
+      repository: "Ablankpaper/aera",
+      sourceSha: DESKTOP_SHA,
+      version: INTERNAL_BETA_VERSION,
+      manifestSha256: digest(desktopManifestRaw),
+    },
+    scenarios: Object.fromEntries(
+      BETA33_ACCEPTANCE_SCENARIOS.map((key, index) => [
+        key,
+        acceptanceScenario(key, index, artifacts),
+      ]),
+    ),
+    completedAt: "2026-07-24T03:00:00Z",
+  });
 }
 
 async function fixture() {
@@ -310,6 +439,7 @@ async function fixture() {
       desktopManifestRaw,
       now: NOW,
       schema,
+      beta33AcceptanceRaw: buildAcceptanceLedger(desktopManifestRaw, artifacts),
     },
     schema,
   };

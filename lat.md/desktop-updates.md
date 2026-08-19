@@ -16,6 +16,8 @@ When a newer release is available, [[src/renderer/src/screens/Layout/Layout.tsx#
 
 Internal Beta update trust is independent from GitHub and offline entitlements. The app bundles only a reviewed Ed25519 public key; private signing material never enters source or artifacts.
 
+The current release integration identity is `0.7.4-internal-beta.33`; Beta.31 and Beta.32 remain explicit source versions for supported update and rollback scenarios, while Beta.29 remains a manual-DMG bridge only.
+
 [[src/main/app/update-channel.ts#INTERNAL_BETA_UPDATE_PUBLIC_KEYS]] is the application trust root. Private signing material also stays out of update metadata and logs.
 
 [[src/main/app/internal-beta-updater.ts#verifyDesktopUpdateMetadata]] accepts only canonical JSON with the exact channel, key ID, monotonically increasing `X.Y.Z-internal-beta.N` version, HTTPS Origin, immutable versioned artifact URLs, and the complete Darwin arm64 ZIP plus Windows x64 app-directory ZIP pair. It verifies the detached Ed25519 signature before selecting an artifact. Downloads do not follow redirects and must match the signed byte size, SHA-256, and SHA-512 values before becoming pending.

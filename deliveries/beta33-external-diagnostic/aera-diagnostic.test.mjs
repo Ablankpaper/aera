@@ -57,7 +57,7 @@ function createFixture(root) {
   );
   writeFileSync(
     join(app, "Contents", "Info.plist"),
-    `<?xml version="1.0"?><plist><dict><key>CFBundleIdentifier</key><string>com.example.aera</string><key>CFBundleShortVersionString</key><string>0.7.4-internal-beta.32</string><key>CFBundleExecutable</key><string>Aera</string></dict></plist>`,
+    `<?xml version="1.0"?><plist><dict><key>CFBundleIdentifier</key><string>com.example.aera</string><key>CFBundleShortVersionString</key><string>0.7.4-internal-beta.33</string><key>CFBundleExecutable</key><string>Aera</string></dict></plist>`,
   );
 
   const hermesHome = join(root, "hermes");
@@ -160,7 +160,7 @@ test("creates a V4 bundle with all chain sections and explicit missing evidence"
         "--output",
         output,
         "--version",
-        "0.7.4-internal-beta.32",
+        "0.7.4-internal-beta.33",
         "--no-launch",
         "--timeout-seconds",
         "10",
@@ -307,7 +307,7 @@ test("rejects unsupported platform/version before launching", () => {
       "--app",
       "/tmp/Aera.app",
       "--version",
-      "0.7.4-internal-beta.32",
+      "0.7.4-internal-beta.33",
       "--no-launch",
     ],
     { encoding: "utf8" },

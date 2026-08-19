@@ -226,10 +226,10 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
     ]);
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.32"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.33"/u);
   assert.ok(
     raw.includes(
-      '--release-notes "Beta.32 修复 Beta.31 多入口打包将主进程启动代码移入 Rollup chunks 后，Renderer 和 Preload 路径失效导致 macOS 启动白屏的问题；Beta.31 用户需手动覆盖安装一次 Beta.32，之后恢复在线升级。Beta.31 的 macOS 更新解压修复与 Beta.30 的模型配置自愈继续保留；Runtime 仍为 0.20.0-agentera.2 签名候选，Windows 提供内测包。"',
+      '--release-notes "Beta.33 修复模型配置恢复与保存、Owner 切换写入屏障、模型发现错误分类、Product Space 降级和更新器恢复链路；保留 Beta.32 的 macOS 启动路径修复与 Beta.31 的更新解压修复。Beta.29 故障机使用 DMG 桥接安装，Beta.31/Beta.32 支持在线升级。"',
     ),
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
@@ -391,7 +391,7 @@ test("internal-Beta promotion publishes one verified candidate without rebuildin
   const raw = await readFile(promotionWorkflowPath, "utf8");
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.32"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.33"/u);
 
   assert.equal(workflow.name, "Promote Desktop internal Beta");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
