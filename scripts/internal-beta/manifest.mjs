@@ -17,7 +17,7 @@ export { canonicalJSONStringify };
 
 export const INTERNAL_BETA_VERSION = "0.7.4-internal-beta.33";
 export const INTERNAL_BETA_SIGNING_STATUS =
-  "macos_developer_id_notarized_windows_authenticode";
+  "macos_developer_id_notarized_windows_unsigned_internal_beta";
 export const INTERNAL_BETA_ELECTRON_ABI = "145";
 export const INTERNAL_BETA_RUNTIME_SOURCE_SHA =
   "b890d7de940c02a06da73f6a421d3867a63db8e6";
@@ -151,13 +151,11 @@ const MACOS_ARTIFACT_KEYS = [...ARTIFACT_KEYS, "sha512"];
 const WINDOWS_EVIDENCE_KEYS = [
   "arch",
   "artifacts",
-  "authenticodeVerifiedArtifacts",
   "nativeModuleArchitecture",
   "runtimeSeedManifest",
   "runtimeSeedVerifiedArtifacts",
-  "signerSubject",
-  "signerThumbprint",
-  "timestampVerifiedArtifacts",
+  "signingMode",
+  "unsignedVerifiedArtifacts",
 ];
 const WINDOWS_ARTIFACT_KEYS = [...ARTIFACT_KEYS, "sha512"];
 const PACKAGED_STARTUP_KEYS = [
@@ -557,16 +555,12 @@ function validateWindowsEvidence(
   artifactDigests,
   runtimeTargets,
 ) {
-  exactObject(evidence, WINDOWS_EVIDENCE_KEYS, "Windows signing evidence");
+  exactObject(evidence, WINDOWS_EVIDENCE_KEYS, "Windows package evidence");
   if (evidence.arch !== "x64" || evidence.nativeModuleArchitecture !== "x64") {
-    throw new Error("Windows signing evidence architecture is invalid");
+    throw new Error("Windows package evidence architecture is invalid");
   }
-  if (
-    typeof evidence.signerSubject !== "string" ||
-    evidence.signerSubject.trim().length === 0 ||
-    !/^[0-9A-F]{40}$/u.test(evidence.signerThumbprint ?? "")
-  ) {
-    throw new Error("Windows Authenticode signer evidence is invalid");
+  if (evidence.signingMode !== "unsigned_internal_beta") {
+    throw new Error("Windows signing mode is invalid for this internal Beta");
   }
 
   const windowsArtifacts = artifacts
@@ -576,14 +570,9 @@ function validateWindowsEvidence(
     .slice(0, 2);
   const requiredNames = windowsArtifacts.map(({ name }) => name);
   exactNames(
-    evidence.authenticodeVerifiedArtifacts,
+    evidence.unsignedVerifiedArtifacts,
     requiredNames,
-    "Windows Authenticode",
-  );
-  exactNames(
-    evidence.timestampVerifiedArtifacts,
-    requiredNames,
-    "Windows Authenticode timestamp",
+    "Windows unsigned package",
   );
   exactNames(
     evidence.runtimeSeedVerifiedArtifacts,
@@ -595,14 +584,14 @@ function validateWindowsEvidence(
     !Array.isArray(evidence.artifacts) ||
     evidence.artifacts.length !== windowsArtifacts.length
   ) {
-    throw new Error("Windows signing artifact evidence is incomplete");
+    throw new Error("Windows package artifact evidence is incomplete");
   }
   const evidenceKinds = ["windows_setup", "windows_portable"];
   for (let index = 0; index < windowsArtifacts.length; index += 1) {
     const actual = exactObject(
       evidence.artifacts[index],
       WINDOWS_ARTIFACT_KEYS,
-      `Windows signing artifact ${index}`,
+      `Windows package artifact ${index}`,
     );
     const expected = windowsArtifacts[index];
     const digest = artifactDigests.get(expected.name);
@@ -616,7 +605,7 @@ function validateWindowsEvidence(
       !SHA512_PATTERN.test(actual.sha512 ?? "") ||
       actual.sha512 !== digest?.sha512
     ) {
-      throw new Error("Windows signing evidence differs from candidate bytes");
+      throw new Error("Windows package evidence differs from candidate bytes");
     }
   }
 
@@ -889,7 +878,7 @@ export function validateInternalBetaManifest(document) {
   validateSupplyFile(
     document.supplyChain.windowsEvidence,
     "windows-evidence.json",
-    "Windows signing evidence",
+    "Windows package evidence",
   );
   if (
     !Array.isArray(document.supplyChain.nativeEvidence) ||
@@ -1005,7 +994,7 @@ export async function buildInternalBetaManifest(options) {
     runtimeTargets,
   );
   validateWindowsEvidence(
-    await readJson(options.windowsEvidence, "Windows signing evidence"),
+    await readJson(options.windowsEvidence, "Windows package evidence"),
     artifacts,
     artifactDigests,
     runtimeTargets,

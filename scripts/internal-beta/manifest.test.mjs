@@ -182,10 +182,8 @@ async function createFixture(runtimePatch = {}) {
     windowsEvidence,
     canonicalJSONStringify({
       arch: "x64",
-      signerSubject: "CN=Aera Test Code Signing",
-      signerThumbprint: "A".repeat(40),
-      authenticodeVerifiedArtifacts: windowsArtifacts.map(({ name }) => name),
-      timestampVerifiedArtifacts: windowsArtifacts.map(({ name }) => name),
+      signingMode: "unsigned_internal_beta",
+      unsignedVerifiedArtifacts: windowsArtifacts.map(({ name }) => name),
       runtimeSeedVerifiedArtifacts: windowsArtifacts.map(({ name }) => name),
       nativeModuleArchitecture: "x64",
       runtimeSeedManifest: {
@@ -331,7 +329,7 @@ test("builds one canonical internal-Beta manifest with exact identities and hash
   assert.equal(document.schemaVersion, 3);
   assert.equal(
     INTERNAL_BETA_SIGNING_STATUS,
-    "macos_developer_id_notarized_windows_authenticode",
+    "macos_developer_id_notarized_windows_unsigned_internal_beta",
   );
   assert.equal(document.signingStatus, INTERNAL_BETA_SIGNING_STATUS);
   assert.equal(document.supplyChain.macosEvidence.name, "macos-evidence.json");
@@ -525,13 +523,13 @@ test("rejects semantic macOS evidence that is unsigned or mismatched", async () 
   }
 });
 
-test("rejects unsigned, untimestamped, or byte-mismatched Windows evidence", async () => {
+test("rejects signed, unverified-unsigned, or byte-mismatched Windows internal-Beta evidence", async () => {
   for (const mutate of [
     (evidence) => {
-      evidence.signerThumbprint = "not-a-thumbprint";
+      evidence.signingMode = "authenticode";
     },
     (evidence) => {
-      evidence.timestampVerifiedArtifacts = [];
+      evidence.unsignedVerifiedArtifacts = [];
     },
     (evidence) => {
       evidence.artifacts[0].sha256 = "f".repeat(64);
@@ -546,7 +544,7 @@ test("rejects unsigned, untimestamped, or byte-mismatched Windows evidence", asy
 
     await assert.rejects(
       () => buildInternalBetaManifest(options),
-      /Windows.*(Authenticode|timestamp|evidence|bytes)/u,
+      /Windows.*(unsigned|signing|evidence|bytes)/u,
     );
   }
 });
