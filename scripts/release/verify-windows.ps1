@@ -22,7 +22,7 @@ function Get-ArtifactHash([System.IO.FileInfo]$File) {
   }
 }
 
-function Assert-X64PE([string]$Path) {
+function Get-PEMachine([string]$Path) {
   $stream = [System.IO.File]::OpenRead($Path)
   try {
     $reader = [System.IO.BinaryReader]::new($stream)
@@ -34,11 +34,26 @@ function Assert-X64PE([string]$Path) {
     }
     $stream.Position = $peOffset
     if ($reader.ReadUInt32() -ne 0x00004550) { throw "PE signature is invalid: $Path" }
-    if ($reader.ReadUInt16() -ne 0x8664) { throw "PE machine is not x64: $Path" }
+    return $reader.ReadUInt16()
   }
   finally {
     $stream.Dispose()
   }
+}
+
+function Assert-X64PE([string]$Path) {
+  if ((Get-PEMachine $Path) -ne 0x8664) { throw "PE machine is not x64: $Path" }
+}
+
+function Assert-WindowsSetupPE([string]$Path) {
+  $machine = Get-PEMachine $Path
+  # NSIS commonly emits a 32-bit bootstrapper for an x64 application. The
+  # installer is still the x64 artifact; the unpacked app and portable build
+  # remain strict x64 checks below.
+  if ($machine -ne 0x014c -and $machine -ne 0x8664) {
+    throw "Windows setup PE machine is unsupported (expected x86 bootstrapper or x64): $Path"
+  }
+  return $machine
 }
 
 function Verify-RuntimeSeed([string]$Directory, [string]$Reference) {
@@ -104,7 +119,13 @@ $timestampedNames = @()
 $unsignedNames = @()
 foreach ($item in $artifacts) {
   $file = $item.file
-  Assert-X64PE $file.FullName
+  if ($item.kind -eq "windows_setup") {
+    $item.peMachine = Assert-WindowsSetupPE $file.FullName
+  }
+  else {
+    Assert-X64PE $file.FullName
+    $item.peMachine = 0x8664
+  }
   $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
   if ($SigningMode -eq "authenticode") {
     if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
@@ -169,6 +190,7 @@ foreach ($item in $artifacts) {
     platform = "windows"
     arch = "x64"
     kind = $item.kind
+    peMachine = ("0x{0:X4}" -f $item.peMachine)
     size = $hash.size
     sha256 = $hash.sha256
     sha512 = $hash.sha512
