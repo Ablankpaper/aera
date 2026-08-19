@@ -110,13 +110,27 @@ export function verifyBakedAuthConfigSources(sources, options = {}) {
   return { cloudOrigin, trust };
 }
 
-export function verifyPackagedAsarAuthConfig(appAsar, expectedCloudOrigin) {
-  const entries = listPackage(appAsar, { isPack: false })
+export function verifyPackagedAsarAuthConfig(
+  appAsar,
+  expectedCloudOrigin,
+  dependencies = {},
+) {
+  const entries = (dependencies.listPackage ?? listPackage)(appAsar, {
+    isPack: false,
+  })
     .filter((entry) => typeof entry === "string")
-    .map(normalizeAsarEntryPath)
-    .filter((entry) => entry.startsWith("out/main/") && entry.endsWith(".js"));
-  const sources = entries.map((entry) =>
-    extractFile(appAsar, entry).toString("utf8"),
+    .map((entry) => ({
+      extractionPath: entry.replace(/^[\\/]+/u, ""),
+      normalizedPath: normalizeAsarEntryPath(entry),
+    }))
+    .filter(
+      ({ normalizedPath }) =>
+        normalizedPath.startsWith("out/main/") &&
+        normalizedPath.endsWith(".js"),
+    );
+  const extract = dependencies.extractFile ?? extractFile;
+  const sources = entries.map(({ extractionPath }) =>
+    extract(appAsar, extractionPath).toString("utf8"),
   );
   return verifyBakedAuthConfigSources(sources, { expectedCloudOrigin });
 }

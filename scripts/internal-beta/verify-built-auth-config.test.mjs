@@ -11,6 +11,7 @@ import { test } from "node:test";
 import verifyBuiltPackage, {
   normalizeAsarEntryPath,
   verifyBuiltAuthConfig,
+  verifyPackagedAsarAuthConfig,
 } from "./verify-built-auth-config.mjs";
 
 const verifierPath = fileURLToPath(
@@ -25,6 +26,39 @@ test("normalizes Windows ASAR entry separators before filtering main sources", (
     normalizeAsarEntryPath("\\out\\main\\chunks\\start.js"),
     "out/main/chunks/start.js",
   );
+});
+
+test("reads Windows ASAR main sources with their native extraction path", () => {
+  const source = `const BUNDLED_AGENTERA_OFFLINE_PUBLIC_KEYS = resolveBundledAgenteraOfflinePublicKeys({
+    buildOfflinePublicKeysJson: '{"issuer":"${testOrigin}","keys":[{"keyId":"offline-internal-beta-v1","publicKey":"${testPublicKey}"}]}',
+    buildPublicUrl: "${testOrigin}"
+  });
+  function getAgenteraCloudOrigin() {
+    return resolveAgenteraCloudOrigin({
+      runtimePublicUrl: process.env.AGENTERA_CLOUD_PUBLIC_URL,
+      buildPublicUrl: "${testOrigin}"?.trim(),
+    });
+  }`;
+  const extracted = [];
+
+  assert.deepEqual(
+    verifyPackagedAsarAuthConfig("app.asar", testOrigin, {
+      listPackage: () => ["\\out\\main\\chunks\\start.js"],
+      extractFile: (_appAsar, entry) => {
+        extracted.push(entry);
+        return Buffer.from(source, "utf8");
+      },
+    }),
+    {
+      cloudOrigin: testOrigin,
+      trust: {
+        issuer: testOrigin,
+        keyId: "offline-internal-beta-v1",
+        publicKey: testPublicKey,
+      },
+    },
+  );
+  assert.deepEqual(extracted, ["out\\main\\chunks\\start.js"]);
 });
 
 test("internal-Beta packaging rejects a build without a baked Cloud origin", async () => {
