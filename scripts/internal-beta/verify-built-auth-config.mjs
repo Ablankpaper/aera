@@ -5,6 +5,8 @@ import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { extractFile, listPackage } from "@electron/asar";
+
 import { validateInternalBetaTrustInputs } from "./manifest.mjs";
 import {
   resolveElectronAbi,
@@ -62,13 +64,18 @@ function parseBakedOfflineTrust(sources) {
   };
 }
 
-export async function verifyBuiltAuthConfig(mainDirectory, options = {}) {
-  const sources = await readJavaScriptSources(mainDirectory);
+export function verifyBakedAuthConfigSources(sources, options = {}) {
+  if (
+    !Array.isArray(sources) ||
+    sources.some((source) => typeof source !== "string")
+  ) {
+    throw new Error("baked auth source inventory is invalid");
+  }
   const cloudResolver = sources
     .map(
       (source) =>
         source.match(
-          /function getAgenteraCloudOrigin\(\)\s*\{[\s\S]*?\n\}/u,
+          /function getAgenteraCloudOrigin\(\)\s*\{[\s\S]*?\n\s*\}/u,
         )?.[0],
     )
     .find(Boolean);
@@ -77,6 +84,14 @@ export async function verifyBuiltAuthConfig(mainDirectory, options = {}) {
   )?.groups?.origin;
   if (!cloudOrigin) {
     throw new Error("baked Cloud origin is missing");
+  }
+  if (
+    options.expectedCloudOrigin !== undefined &&
+    cloudOrigin !== options.expectedCloudOrigin
+  ) {
+    throw new Error(
+      "baked Cloud origin differs from the expected Cloud origin",
+    );
   }
   const trust = parseBakedOfflineTrust(sources);
   if (trust.issuer !== cloudOrigin) {
@@ -88,6 +103,23 @@ export async function verifyBuiltAuthConfig(mainDirectory, options = {}) {
     offlineKeyId: trust.keyId,
     offlinePublicKey: trust.publicKey,
   });
+  return { cloudOrigin, trust };
+}
+
+export function verifyPackagedAsarAuthConfig(appAsar, expectedCloudOrigin) {
+  const entries = listPackage(appAsar, { isPack: false })
+    .filter((entry) => typeof entry === "string")
+    .map((entry) => entry.replace(/^\/+/, ""))
+    .filter((entry) => entry.startsWith("out/main/") && entry.endsWith(".js"));
+  const sources = entries.map((entry) =>
+    extractFile(appAsar, entry).toString("utf8"),
+  );
+  return verifyBakedAuthConfigSources(sources, { expectedCloudOrigin });
+}
+
+export async function verifyBuiltAuthConfig(mainDirectory, options = {}) {
+  const sources = await readJavaScriptSources(mainDirectory);
+  verifyBakedAuthConfigSources(sources, options);
   if (options.projectDirectory && options.expectedElectronAbi) {
     await verifyNativeModuleAbi(
       resolveProjectNativeModule(options.projectDirectory),

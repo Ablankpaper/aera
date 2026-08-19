@@ -51,7 +51,7 @@ async function fixture({ tamperArtifact = false } = {}) {
   ]);
   const names = [
     `Aera-Internal-Beta-${VERSION}-macos-arm64.zip`,
-    `Aera-Internal-Beta-${VERSION}-windows-x64-setup.exe`,
+    `Aera-Internal-Beta-${VERSION}-windows-x64-app.zip`,
   ];
   await Promise.all(
     names.map((name, index) =>

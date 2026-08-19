@@ -158,6 +158,21 @@ function fatMachO(architectures, ...abis) {
   return fatMachOWithKind("fat32", architectures, abis);
 }
 
+function napiUniversalDylib(architectures) {
+  const bytes = Buffer.from(fatMachO(architectures, "145"));
+  const nodeMarker = Buffer.from("node_register_module_v145", "latin1");
+  const napiMarker = Buffer.from("napi_register_module_v1", "latin1");
+  for (let index = 0; index < architectures.length; index += 1) {
+    const sliceOffset = bytes.readUInt32BE(8 + index * 20 + 8);
+    bytes.writeUInt32LE(6, sliceOffset + 12);
+    const markerOffset = bytes.indexOf(nodeMarker, sliceOffset);
+    assert.notEqual(markerOffset, -1);
+    bytes.fill(0, markerOffset, markerOffset + nodeMarker.length);
+    napiMarker.copy(bytes, markerOffset);
+  }
+  return bytes;
+}
+
 function fat64MachO(architectures, ...abis) {
   return fatMachOWithKind("fat64", architectures, abis);
 }
@@ -539,6 +554,35 @@ test("accepts a structurally valid fat64 Mach-O", async () => {
     );
     assert.equal(result.inventory[0].architecture, "arm64");
     assert.equal(result.inventory[0].abi, "145");
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+test("accepts a universal N-API dylib when it contains the packaged target", async () => {
+  const fixture = await createPackage();
+  const relativePath = join(
+    "node_modules",
+    "@electron-internal",
+    "extract-zip",
+    "index.darwin-universal.node",
+  );
+  await addNativeModule(
+    fixture,
+    relativePath,
+    napiUniversalDylib(["x64", "arm64"]),
+  );
+  try {
+    const result = await verifyPackagedNativeModule(
+      context(fixture),
+      verificationOptions(fixture),
+    );
+    const napiModule = result.inventory.find(
+      (entry) => entry.path === relativePath,
+    );
+    assert.equal(napiModule.abi, "napi-v1");
+    assert.equal(napiModule.architecture, "arm64");
+    assert.deepEqual(napiModule.architectures, ["x64", "arm64"]);
   } finally {
     await removeFixture(fixture);
   }

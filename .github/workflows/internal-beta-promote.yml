@@ -40,6 +40,20 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Verify authoritative release source
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          npm run --silent verify:release-source -- \
+            --checkout "$GITHUB_WORKSPACE" \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "$SOURCE_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" \
+            > "$RUNNER_TEMP/release-source.json"
+          test -s "$RUNNER_TEMP/release-source.json"
+
       - name: Verify exact source and successful candidate run
         shell: bash
         env:
@@ -195,7 +209,7 @@ jobs:
           cp candidate/desktop-update/manifest.sig "$publish_root/manifest.sig"
           for name in \
             "Aera-Internal-Beta-$VERSION-macos-arm64.zip" \
-            "Aera-Internal-Beta-$VERSION-windows-x64-setup.exe"
+            "Aera-Internal-Beta-$VERSION-windows-x64-app.zip"
           do
             cp "candidate/artifacts/$name" "$release_dir/$name"
           done
@@ -205,7 +219,7 @@ jobs:
               manifest.json \
               manifest.sig \
               "releases/$VERSION/Aera-Internal-Beta-$VERSION-macos-arm64.zip" \
-              "releases/$VERSION/Aera-Internal-Beta-$VERSION-windows-x64-setup.exe"
+              "releases/$VERSION/Aera-Internal-Beta-$VERSION-windows-x64-app.zip"
           ) | ssh \
             -i "$key" \
             -o BatchMode=yes \
@@ -229,7 +243,7 @@ jobs:
             "$RUNNER_TEMP/live-update-manifest.sig"
           for name in \
             "Aera-Internal-Beta-$VERSION-macos-arm64.zip" \
-            "Aera-Internal-Beta-$VERSION-windows-x64-setup.exe"
+            "Aera-Internal-Beta-$VERSION-windows-x64-app.zip"
           do
             curl --fail --silent --show-error \
               --proto '=https' --tlsv1.2 \

@@ -142,8 +142,8 @@ expected = [
     (
         "win32",
         "x64",
-        "nsis",
-        f"Aera-Internal-Beta-{version}-windows-x64-setup.exe",
+        "app_zip",
+        f"Aera-Internal-Beta-{version}-windows-x64-app.zip",
     ),
 ]
 artifacts = manifest["artifacts"]
@@ -267,7 +267,7 @@ PY
     done < <(
       printf '%s\n' \
         "Aera-Internal-Beta-$version-macos-arm64.zip" \
-        "Aera-Internal-Beta-$version-windows-x64-setup.exe"
+        "Aera-Internal-Beta-$version-windows-x64-app.zip"
     )
     printf 'desktop update already published: %s\n' "$version"
     exit 0

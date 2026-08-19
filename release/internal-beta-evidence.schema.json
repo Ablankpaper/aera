@@ -106,7 +106,8 @@
             "macos_arm64_dmg",
             "macos_arm64_zip",
             "windows_x64_setup",
-            "windows_x64_portable"
+            "windows_x64_portable",
+            "windows_x64_app_zip"
           ]
         },
         "sha256": {
@@ -334,8 +335,8 @@
       "items": {
         "$ref": "#/$defs/package"
       },
-      "maxItems": 4,
-      "minItems": 4,
+      "maxItems": 5,
+      "minItems": 5,
       "type": "array"
     },
     "platforms": {

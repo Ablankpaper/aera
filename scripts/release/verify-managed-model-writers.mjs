@@ -167,6 +167,13 @@ export const MANAGED_WRITER_CAPABILITIES = Object.freeze({
     capability: "updater-state-writer",
     rawWriters: { setAutoUpgradeEnabled: UNKNOWN_RAW_WRITER },
   },
+  "src/main/app/internal-beta-updater.ts": {
+    capability: "internal-beta-install-journal-writer",
+    rawWriters: {
+      defaultInstallArtifact: UNKNOWN_RAW_WRITER,
+      signalHealthyInstall: UNKNOWN_RAW_WRITER,
+    },
+  },
   "src/main/claw3d.ts": {
     capability: "runtime-port-state-writer",
     rawWriters: {

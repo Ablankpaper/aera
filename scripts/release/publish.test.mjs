@@ -424,18 +424,9 @@ async function promotionFixture() {
 
   const artifactPaths = {
     macDmg: join(artifactsDirectory, `Aera-${VERSION}-arm64.dmg`),
-    macZip: join(
-      artifactsDirectory,
-      `Aera-${VERSION}-arm64-mac.zip`,
-    ),
-    windowsSetup: join(
-      artifactsDirectory,
-      `Aera-${VERSION}-setup.exe`,
-    ),
-    windowsPortable: join(
-      artifactsDirectory,
-      `Aera-${VERSION}-portable.exe`,
-    ),
+    macZip: join(artifactsDirectory, `Aera-${VERSION}-arm64-mac.zip`),
+    windowsSetup: join(artifactsDirectory, `Aera-${VERSION}-setup.exe`),
+    windowsPortable: join(artifactsDirectory, `Aera-${VERSION}-portable.exe`),
     latestMac: join(artifactsDirectory, "latest-mac.yml"),
     latestWindows: join(artifactsDirectory, "latest.yml"),
   };
@@ -852,7 +843,7 @@ function productionDeploymentEvidence() {
     repository: "Ablankpaper/aera-cloud",
     commitSha: CLOUD_SHA,
     image: {
-      reference: `ghcr.io/ablankpaper/aera-cloud@${CLOUD_DIGEST}`,
+      reference: `ghcr.io/Ablankpaper/aera-cloud@${CLOUD_DIGEST}`,
       digest: CLOUD_DIGEST,
     },
   });
@@ -861,7 +852,7 @@ function productionDeploymentEvidence() {
     repository: "Ablankpaper/aera-admin",
     commitSha: ADMIN_SHA,
     image: {
-      reference: `ghcr.io/ablankpaper/aera-admin@${ADMIN_DIGEST}`,
+      reference: `ghcr.io/Ablankpaper/aera-admin@${ADMIN_DIGEST}`,
       digest: ADMIN_DIGEST,
     },
   });
@@ -870,7 +861,7 @@ function productionDeploymentEvidence() {
       environment: "production",
       current: {
         commitSha: CLOUD_SHA,
-        imageReference: `ghcr.io/ablankpaper/aera-cloud@${CLOUD_DIGEST}`,
+        imageReference: `ghcr.io/Ablankpaper/aera-cloud@${CLOUD_DIGEST}`,
         imageDigest: CLOUD_DIGEST,
         deployedAt: "2026-07-23T10:30:00Z",
       },
@@ -882,7 +873,7 @@ function productionDeploymentEvidence() {
       environment: "production",
       current: {
         commitSha: ADMIN_SHA,
-        imageReference: `ghcr.io/ablankpaper/aera-admin@${ADMIN_DIGEST}`,
+        imageReference: `ghcr.io/Ablankpaper/aera-admin@${ADMIN_DIGEST}`,
         imageDigest: ADMIN_DIGEST,
         deployedAt: "2026-07-23T10:40:00Z",
       },

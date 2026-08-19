@@ -7,8 +7,8 @@ import { getAgenteraCloudOrigin } from "../agentera-auth/config";
 import { updaterLogger } from "../updater-log";
 import {
   InternalBetaDesktopUpdater,
+  createDesktopUpdateFailureSnapshot,
   resolveCurrentMacAppPath,
-  tryCreateInternalBetaDesktopUpdater,
   type DesktopUpdateSnapshot,
 } from "./internal-beta-updater";
 import {
@@ -19,6 +19,8 @@ import {
 interface UpdaterDeps {
   getMainWindow: () => BrowserWindow | null;
 }
+
+export type RendererReadyHandler = () => Promise<boolean>;
 
 const UPDATE_CHECK_DELAY_MS = 5_000;
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000;
@@ -31,6 +33,10 @@ let updateSnapshot: DesktopUpdateSnapshot = {
   releaseNotes: null,
   percent: null,
   error: null,
+  errorCode: null,
+  stage: null,
+  diagnosticId: null,
+  stageEvent: null,
 };
 
 function updatePreferencesPath(): string {
@@ -78,11 +84,29 @@ function releaseNotesText(value: unknown): string {
 
 function publishSnapshot(
   getMainWindow: UpdaterDeps["getMainWindow"],
-  snapshot: DesktopUpdateSnapshot,
+  snapshot: Omit<
+    DesktopUpdateSnapshot,
+    "errorCode" | "stage" | "diagnosticId" | "stageEvent"
+  > &
+    Partial<
+      Pick<
+        DesktopUpdateSnapshot,
+        "errorCode" | "stage" | "diagnosticId" | "stageEvent"
+      >
+    >,
 ): void {
-  updateSnapshot = { ...snapshot };
+  updateSnapshot = {
+    ...snapshot,
+    errorCode: snapshot.errorCode ?? null,
+    stage: snapshot.stage ?? null,
+    diagnosticId: snapshot.diagnosticId ?? null,
+    stageEvent: snapshot.stageEvent ?? null,
+  };
   const webContents = getMainWindow()?.webContents;
   if (!webContents) return;
+  if (updateSnapshot.stageEvent) {
+    webContents.send("desktop-update-stage", updateSnapshot.stageEvent);
+  }
   if (snapshot.state === "available") {
     webContents.send("update-available", {
       version: snapshot.version,
@@ -108,7 +132,9 @@ function setupDisabledUpdater(): void {
   ipcMain.handle("install-update", async () => {});
 }
 
-function setupInternalBetaUpdater({ getMainWindow }: UpdaterDeps): boolean {
+function setupInternalBetaUpdater({
+  getMainWindow,
+}: UpdaterDeps): RendererReadyHandler | null {
   const platform =
     process.platform === "darwin"
       ? "darwin"
@@ -123,35 +149,58 @@ function setupInternalBetaUpdater({ getMainWindow }: UpdaterDeps): boolean {
     (platform === "darwin" && arch !== "arm64") ||
     (platform === "win32" && arch !== "x64")
   ) {
-    return false;
+    return null;
   }
 
   let origin: string;
   try {
     origin = getAgenteraCloudOrigin();
   } catch (error) {
-    updaterLogger.error(
-      `Internal Beta update origin is unavailable: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+    updaterLogger.error("Internal Beta update origin is unavailable");
+    publishSnapshot(
+      getMainWindow,
+      createDesktopUpdateFailureSnapshot({
+        error,
+        fallbackCode: "update_origin_unavailable",
+        fallbackStage: "metadata",
+        version: null,
+        releaseNotes: null,
+      }),
     );
-    return false;
+    return null;
   }
 
-  const updater = tryCreateInternalBetaDesktopUpdater({
-    currentVersion: app.getVersion(),
-    platform,
-    arch,
-    userDataPath: app.getPath("userData"),
-    currentAppPath:
-      platform === "darwin" ? resolveCurrentMacAppPath(process.execPath) : null,
-    baseUrl: new URL("/desktop-updates/internal-beta", origin),
-    trustedPublicKeys: INTERNAL_BETA_UPDATE_PUBLIC_KEYS,
-    autoDownload: getAutoUpgradeEnabled(),
-    onState: (snapshot) => publishSnapshot(getMainWindow, snapshot),
-    log: updaterLogger,
-  });
-  if (updater === null) return false;
+  let updater: InternalBetaDesktopUpdater;
+  try {
+    updater = new InternalBetaDesktopUpdater({
+      currentVersion: app.getVersion(),
+      platform,
+      arch,
+      userDataPath: app.getPath("userData"),
+      currentAppPath:
+        platform === "darwin"
+          ? resolveCurrentMacAppPath(process.execPath)
+          : process.execPath,
+      baseUrl: new URL("/desktop-updates/internal-beta", origin),
+      trustedPublicKeys: INTERNAL_BETA_UPDATE_PUBLIC_KEYS,
+      autoDownload: getAutoUpgradeEnabled(),
+      onState: (snapshot) => publishSnapshot(getMainWindow, snapshot),
+      log: updaterLogger,
+    });
+  } catch (error) {
+    updaterLogger.error("Internal Beta updater configuration is invalid");
+    publishSnapshot(
+      getMainWindow,
+      createDesktopUpdateFailureSnapshot({
+        error,
+        fallbackCode: "update_metadata_invalid",
+        fallbackStage: "metadata",
+        version: null,
+        releaseNotes: null,
+      }),
+    );
+    return null;
+  }
   internalBetaUpdaterInstance = updater;
 
   ipcMain.handle("check-for-updates", () => updater.check());
@@ -164,33 +213,33 @@ function setupInternalBetaUpdater({ getMainWindow }: UpdaterDeps): boolean {
       await updater.install();
       app.quit();
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "更新失败，请稍后重试。";
       publishSnapshot(getMainWindow, {
-        state: "error",
-        version: updateSnapshot.version,
-        releaseNotes: updateSnapshot.releaseNotes,
-        percent: null,
-        error: message,
+        ...createDesktopUpdateFailureSnapshot({
+          error,
+          fallbackCode: "update_swap_failed",
+          fallbackStage: "swap",
+          version: updateSnapshot.version,
+          releaseNotes: updateSnapshot.releaseNotes,
+        }),
       });
     }
   });
 
-  void app.whenReady().then(async () => {
+  let initializationError: unknown = null;
+  const initializationPromise = app.whenReady().then(async () => {
     try {
       await updater.initialize();
     } catch (error) {
-      updaterLogger.error(
-        `Internal Beta updater initialization failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
+      initializationError = error;
+      updaterLogger.error("Internal Beta updater initialization failed");
       publishSnapshot(getMainWindow, {
-        state: "error",
-        version: null,
-        releaseNotes: null,
-        percent: null,
-        error: "更新服务初始化失败，请稍后重试。",
+        ...createDesktopUpdateFailureSnapshot({
+          error,
+          fallbackCode: "update_metadata_unavailable",
+          fallbackStage: "metadata",
+          version: null,
+          releaseNotes: null,
+        }),
       });
       return;
     }
@@ -208,7 +257,26 @@ function setupInternalBetaUpdater({ getMainWindow }: UpdaterDeps): boolean {
       updater.dispose();
     });
   });
-  return true;
+  return async () => {
+    await initializationPromise;
+    if (initializationError !== null) return false;
+    try {
+      await updater.markRendererReady();
+      return true;
+    } catch (error) {
+      updaterLogger.error("Internal Beta updater health handshake failed");
+      publishSnapshot(getMainWindow, {
+        ...createDesktopUpdateFailureSnapshot({
+          error,
+          fallbackCode: "update_health_timeout",
+          fallbackStage: "health",
+          version: updateSnapshot.version,
+          releaseNotes: updateSnapshot.releaseNotes,
+        }),
+      });
+      return false;
+    }
+  };
 }
 
 function setupPublicUpdater({ getMainWindow }: UpdaterDeps): void {
@@ -323,8 +391,20 @@ function setupPublicUpdater({ getMainWindow }: UpdaterDeps): void {
 }
 
 export function setupUpdater({ getMainWindow }: UpdaterDeps): void {
+  let markRendererReady: RendererReadyHandler = async () => true;
   ipcMain.handle("get-app-version", () => app.getVersion());
   ipcMain.handle("get-desktop-update-state", () => ({ ...updateSnapshot }));
+  ipcMain.handle("desktop-renderer-ready", async (event) => {
+    const window = getMainWindow();
+    if (
+      !window ||
+      window.isDestroyed() ||
+      event.sender !== window.webContents
+    ) {
+      return false;
+    }
+    return markRendererReady();
+  });
   ipcMain.handle("get-auto-upgrade-enabled", () => getAutoUpgradeEnabled());
   ipcMain.handle("set-auto-upgrade-enabled", (_event, enabled: boolean) => {
     setAutoUpgradeEnabled(enabled);
@@ -339,7 +419,12 @@ export function setupUpdater({ getMainWindow }: UpdaterDeps): void {
     return;
   }
   if (isInternalBetaDesktopVersion(app.getVersion())) {
-    if (!setupInternalBetaUpdater({ getMainWindow })) setupDisabledUpdater();
+    const internalRendererReady = setupInternalBetaUpdater({ getMainWindow });
+    if (!internalRendererReady) {
+      setupDisabledUpdater();
+      return;
+    }
+    markRendererReady = internalRendererReady;
     return;
   }
   setupPublicUpdater({ getMainWindow });

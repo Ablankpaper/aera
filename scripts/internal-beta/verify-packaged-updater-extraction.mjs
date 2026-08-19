@@ -9,6 +9,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 import electronPath from "electron";
+import { listPackage } from "@electron/asar";
+
+import { verifyPackagedAsarAuthConfig } from "./verify-built-auth-config.mjs";
 
 const execFileAsync = promisify(execFile);
 const PROBE_PATH = fileURLToPath(
@@ -56,10 +59,68 @@ async function plistValue(infoPlist, key, runCommand) {
   return result.stdout.trim();
 }
 
+export function validatePackagedRuntimeEntries(asarEntries, nativeEntries) {
+  if (!Array.isArray(asarEntries) || !Array.isArray(nativeEntries)) {
+    throw new Error("Packaged runtime entry inventory is invalid");
+  }
+  const normalizedAsar = new Set(
+    asarEntries
+      .filter((entry) => typeof entry === "string")
+      .map((entry) => entry.replace(/^\/+/, "")),
+  );
+  const required = [
+    "out/main/index.js",
+    "out/preload/index.js",
+    "out/renderer/index.html",
+  ];
+  const missing = required.filter((entry) => !normalizedAsar.has(entry));
+  const normalizedNative = nativeEntries
+    .filter((entry) => typeof entry === "string")
+    .map((entry) => entry.replace(/^\/+/, ""))
+    .filter((entry) => entry.endsWith(".node"))
+    .sort();
+  if (
+    missing.length > 0 ||
+    !normalizedNative.some((entry) =>
+      entry.endsWith("better-sqlite3/build/Release/better_sqlite3.node"),
+    )
+  ) {
+    throw new Error(
+      `Packaged runtime entries are incomplete: ${[
+        ...missing,
+        ...(normalizedNative.length === 0 ? ["native module"] : []),
+      ].join(", ")}`,
+    );
+  }
+  return { required, nativeModules: normalizedNative };
+}
+
+async function collectNativeEntries(root, prefix = "") {
+  const entries = await readdir(root, { withFileTypes: true });
+  const result = [];
+  for (const entry of entries) {
+    const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isSymbolicLink()) {
+      throw new Error(
+        `Packaged native entry is a symbolic link: ${relativePath}`,
+      );
+    }
+    if (entry.isDirectory()) {
+      result.push(
+        ...(await collectNativeEntries(join(root, entry.name), relativePath)),
+      );
+    } else if (entry.isFile() && entry.name.endsWith(".node")) {
+      result.push(relativePath);
+    }
+  }
+  return result;
+}
+
 export async function validateExtractedMacApp(
   stagingDirectory,
   desktopVersion,
   runCommand = run,
+  options = {},
 ) {
   const entries = await readdir(stagingDirectory, { withFileTypes: true });
   const apps = entries.filter(
@@ -116,6 +177,20 @@ export async function validateExtractedMacApp(
   }
   if (!appAsarInfo.isFile() || appAsarInfo.size === 0) {
     throw new Error("Packaged updater app.asar is missing or empty");
+  }
+  if (options.requireRuntimeEntries === true) {
+    const asarEntries = listPackage(appAsar, { isPack: false });
+    const unpackedRoot = join(
+      app,
+      "Contents",
+      "Resources",
+      "app.asar.unpacked",
+    );
+    const nativeEntries = await collectNativeEntries(unpackedRoot);
+    validatePackagedRuntimeEntries(asarEntries, nativeEntries);
+  }
+  if (options.expectedCloudOrigin) {
+    verifyPackagedAsarAuthConfig(appAsar, options.expectedCloudOrigin);
   }
   await runCommand("/usr/bin/codesign", [
     "--verify",
@@ -194,6 +269,10 @@ export async function verifyPackagedUpdaterExtraction(
       staging,
       desktopVersion,
       dependencies.runCommand ?? run,
+      {
+        requireRuntimeEntries: options.requireRuntimeEntries === true,
+        expectedCloudOrigin: options.expectedCloudOrigin,
+      },
     );
     return { version: desktopVersion, archive: basename(zip) };
   } finally {
@@ -202,13 +281,25 @@ export async function verifyPackagedUpdaterExtraction(
 }
 
 function parseOptions(arguments_) {
-  if (arguments_.length === 0 || arguments_.length % 2 !== 0) {
+  if (arguments_.length === 0) {
     throw new Error("Packaged updater options must be flag/value pairs");
   }
-  const allowed = new Set(["app", "zip", "desktop_version"]);
+  const allowed = new Set([
+    "app",
+    "zip",
+    "desktop_version",
+    "expected_cloud_origin",
+  ]);
   const values = {};
-  for (let index = 0; index < arguments_.length; index += 2) {
+  for (let index = 0; index < arguments_.length; index += 1) {
     const flag = arguments_[index];
+    if (flag === "--require-runtime-entries") {
+      if (values.require_runtime_entries === true) {
+        throw new Error(`Duplicate option: ${flag}`);
+      }
+      values.require_runtime_entries = true;
+      continue;
+    }
     const value = arguments_[index + 1];
     if (!flag.startsWith("--") || value === undefined) {
       throw new Error("Packaged updater options must be flag/value pairs");
@@ -219,6 +310,7 @@ function parseOptions(arguments_) {
       throw new Error(`Duplicate option: ${flag}`);
     }
     values[key] = value;
+    index += 1;
   }
   return values;
 }
@@ -229,6 +321,11 @@ async function runCli(arguments_) {
     app: values.app,
     zip: values.zip,
     desktopVersion: values.desktop_version,
+    requireRuntimeEntries: values.require_runtime_entries === true,
+    expectedCloudOrigin: required(
+      values.expected_cloud_origin,
+      "expected Cloud origin",
+    ),
   });
   process.stdout.write("packaged macOS updater extracted the final ZIP\n");
 }

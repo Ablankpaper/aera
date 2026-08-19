@@ -10,6 +10,7 @@ This directory defines the high-level concepts, business logic, and architecture
 - [[code-blocks]] — collapsible long code blocks, and why expansion state is keyed on source position to survive react-markdown's streaming remounts.
 - [[window-chrome]] — the browser-style title bar where open-conversation tabs sit on top of the window drag region, clickable while empty space still drags.
 - [[desktop-updates]] — GitHub release checks, startup upgrade button behavior, and the Settings auto-upgrade preference.
+- [[release-source-governance]] — the exact `Ablankpaper/aera` workflow, detached clean checkout, immutable SHA, and Git remote allowlist required before release operations.
 - [[agentera-branding]] — the Aera product identity, visible naming rules, icon contract, and retained internal compatibility boundary.
 - [[system-locale]] — first-use operating-system language selection, locale normalization, and saved-preference precedence.
 - [[agentera-self-evolution]] — the release-blocking Hermes compatibility rule, local self-learning boundary, immutable Agent versions, and explicit candidate-promotion path.

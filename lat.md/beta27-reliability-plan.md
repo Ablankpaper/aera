@@ -150,6 +150,28 @@ One stale local draft reference will be quarantined per Cloud submission instead
 
 The parent Agent control panel will own one list request, while the child panel becomes presentational. A confirmed Owner/Admin detach removes only the local link and preserves the Cloud submission, draft, Version, Installation, Profile, and Hermes state.
 
+## Provider model discovery protocol
+
+Model discovery reports transport and upstream outcomes without turning failures into an empty successful model list.
+
+### Transport and cancellation ownership
+
+Each discovery request has one bounded transport owner that aborts on timeout and maps DNS, connection, TLS, and timeout failures to stable secret-free classes.
+
+The caller cannot receive a later success after cancellation, and transport errors never become a cacheable response.
+
+### Verified success bodies
+
+Only a bounded, structurally valid 2xx response can produce `success_with_models` or `success_empty`.
+
+Authentication, authorization, missing route, throttling, upstream failure, malformed JSON, invalid entries, and oversized response bodies retain separate result classes without returning response bodies to Renderer.
+
+### Success-only discovery caches
+
+Only validated `success_with_models` and `success_empty` results enter the short-lived discovery cache.
+
+Failures are never cached, so a corrected credential or endpoint immediately performs a fresh request; cache keys continue to isolate provider, endpoint, and credential identity without storing secret values.
+
 ## Immutable Agent conversation segments
 
 Installed-Agent model changes will keep one visible thread while creating immutable local segments in [[agentera-agent-control-plane]].
@@ -180,6 +202,14 @@ The planned gate uses fresh Electron/Hermes roots, fixture Cloud state, and two 
 
 Focused tests, build, and isolated Electron evidence remain separate from exact-head CI, merged-main CI, artifact publication, updater delivery, and physical internal-client acceptance.
 
+### Beta.33 fault-machine and update ledger
+
+Beta.33 physical acceptance is one canonical ledger tied to the exact candidate, supported upgrade paths, preserved user data, and completed cross-platform rollback drills.
+
+The original Beta.29 macOS fault machine uses a manual DMG bridge because its installed extractor cannot be repaired by publishing different online bytes. Installed Beta.31 and Beta.32 clients must complete the full V2 online-update sequence on macOS arm64 and Windows x64, and an injected post-swap health failure must reach a completed rollback on both platforms. The ledger binds the exact schema-3 candidate manifest, source SHA, package hashes, executable hashes, and unchanged protected-user-data digests.
+
+Every scenario also requires packaged startup and model-save success plus bounded redacted evidence digests. Missing or reordered updater stages, a false rollback, a Beta.28/Beta.29 online-success claim, substituted candidate bytes, arbitrary paths, or free-form evidence fail closed. Code tests, synthetic package smoke, and screenshots do not substitute for this ledger.
+
 ### Native startup failure classification
 
 Native/database startup failures are classified by [[src/main/model-configuration-database.ts#classifyNativeLoadFailure]] into stable secret-free causes; only two distinct `NODE_MODULE_VERSION` values establish an ABI mismatch.
@@ -208,4 +238,4 @@ Collection retains each file's device, inode, type, and size; reading opens that
 
 Every shipped native module is inspected through `scripts/release/native-module-abi.mjs` and `scripts/release/verify-packaged-native-module.mjs`.
 
-This source-stage inventory is not final-artifact binding; DMG, updater ZIP, setup, and portable bytes still require independent extraction and binding before a candidate can be accepted.
+The source-stage inventory is not final-artifact binding. `scripts/release/final-artifact-native-inventory.mjs` independently extracts every final DMG, macOS ZIP, Windows setup, portable, and app ZIP, re-hashes the complete application payload, and binds every native-module ABI, architecture, format, and digest to the exact container bytes. The canonical Internal Beta manifest rejects a missing or substituted inventory and requires every container for one platform to contain the same payload and native inventory.

@@ -41,6 +41,7 @@ const packagedUpdaterVerifierPath = new URL(
   "./verify-packaged-updater-extraction.mjs",
   import.meta.url,
 );
+const windowsSmokePath = new URL("./windows-update-smoke.ps1", import.meta.url);
 const execFileAsync = promisify(execFile);
 const sourceSha = "a".repeat(40);
 
@@ -205,6 +206,8 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   ]) {
     assert.match(raw, new RegExp(`vars\\.${variable}`, "u"));
   }
+  assert.match(raw, /test -n "\$BETA_ORIGIN"[\s\S]*AERA_INTERNAL_BETA_ORIGIN/u);
+  assert.match(raw, /test -n "\$MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL"/u);
   assert.match(
     raw,
     /go install github\.com\/sigstore\/cosign\/v3\/cmd\/cosign@v3\.0\.6/iu,
@@ -253,9 +256,13 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   );
   assert.ok(packagedUpdaterGateIndex >= 0);
   assert.ok(packagedUpdaterGateIndex < containerSubmissionIndex);
+  assert.equal(
+    workflow.jobs.macos.steps[packagedUpdaterGateIndex].env.BETA_ORIGIN,
+    "${{ vars.AERA_INTERNAL_BETA_ORIGIN }}",
+  );
   assert.match(
     workflow.jobs.macos.steps[packagedUpdaterGateIndex].run,
-    /node scripts\/internal-beta\/verify-packaged-updater-extraction\.mjs\s+--app "\$\{\{ steps\.mac_paths\.outputs\.app \}\}"\s+--zip "\$\{\{ steps\.mac_paths\.outputs\.zip \}\}"\s+--desktop-version "\$VERSION"/u,
+    /node scripts\/internal-beta\/verify-packaged-updater-extraction\.mjs\s+--app "\$\{\{ steps\.mac_paths\.outputs\.app \}\}"\s+--zip "\$\{\{ steps\.mac_paths\.outputs\.zip \}\}"\s+--desktop-version "\$VERSION"\s+--expected-cloud-origin "\$BETA_ORIGIN"\s+--require-runtime-entries/u,
   );
   assert.match(
     packagedUpdaterVerifierRaw,
@@ -283,14 +290,25 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   assert.match(macVerifierRaw, /resolvePackagedNativeModule/iu);
   assert.match(macVerifierRaw, /verifyNativeModuleAbi/iu);
   assert.match(raw, /candidate\/evidence\/macos-evidence\.json/u);
-  assert.match(raw, /Build unsigned Windows x64 internal Beta/u);
-  assert.match(raw, /CSC_IDENTITY_AUTO_DISCOVERY:\s*"false"/u);
-  assert.match(raw, /Package unsigned Windows setup and portable executables/u);
-  assert.doesNotMatch(
+  assert.match(raw, /Build and Authenticode-sign Windows x64 internal Beta/u);
+  assert.match(
     raw,
-    /secrets\.WIN_CSC_LINK|secrets\.WIN_CSC_KEY_PASSWORD/u,
+    /Package signed Windows setup, portable, and app ZIP payload/u,
   );
-  assert.doesNotMatch(raw, /candidate\/evidence\/windows-evidence\.json/u);
+  assert.match(
+    raw,
+    /--win nsis portable dir --x64 --publish never[\s\\`]*-c\.forceCodeSigning=true/u,
+  );
+  assert.match(raw, /Aera-Internal-Beta-\$env:VERSION-windows-x64-app\.zip/u);
+  assert.match(raw, /verify-packaged-windows-app-zip\.mjs/u);
+  assert.match(
+    raw,
+    /verify-packaged-windows-app-zip\.mjs[\s\S]*--expected-cloud-origin \$env:BETA_ORIGIN/u,
+  );
+  assert.match(raw, /secrets\.WIN_CSC_LINK/u);
+  assert.match(raw, /secrets\.WIN_CSC_KEY_PASSWORD/u);
+  assert.match(raw, /scripts\/release\/verify-windows\.ps1/u);
+  assert.match(raw, /candidate\/evidence\/windows-evidence\.json/u);
 
   assert.match(productionRaw, /Build and Authenticode-sign Windows x64/u);
   assert.match(
@@ -304,7 +322,7 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   assert.doesNotMatch(raw, /actions\/attest/iu);
   assert.doesNotMatch(raw, /attestations:\s*write/iu);
   assert.doesNotMatch(raw, /\bgh\s+release\b|create[-_ ]tag|refs\/tags/iu);
-  assert.doesNotMatch(raw, /WIN_CSC|signtool/iu);
+  assert.match(raw, /WIN_CSC_LINK/u);
   assert.doesNotMatch(
     raw,
     /repository:\s*Ablankpaper\/aera-runtime|git\s+clone[\s\S]*aera-runtime/iu,
@@ -337,6 +355,11 @@ test("internal-Beta promotion publishes one verified candidate without rebuildin
   assert.match(raw, /run-id:\s*\$\{\{ inputs\.candidate_run_id \}\}/u);
   assert.match(raw, /sha256sum --check SHA256SUMS/u);
   assert.match(raw, /desktop-update\.mjs verify/u);
+  assert.match(raw, /Aera-Internal-Beta-\$VERSION-windows-x64-app\.zip/u);
+  assert.doesNotMatch(
+    raw,
+    /releases\/\$VERSION\/Aera-Internal-Beta-\$VERSION-windows-x64-setup\.exe/u,
+  );
   assert.match(raw, /AERA_DESKTOP_UPDATE_PUBLISH_SSH_PRIVATE_KEY/u);
   assert.match(raw, /AERA_DESKTOP_UPDATE_PUBLISH_SSH_KNOWN_HOSTS/u);
   assert.match(raw, /"aera-updates@\$PUBLISH_HOST" publish/u);
@@ -436,6 +459,19 @@ test("internal-Beta overlays separate unsigned Windows from strict macOS signing
   );
 });
 
+test("packaging excludes foreign extract-zip prebuilds before native verification", async () => {
+  const config = parseYAML(await readFile(baseBuilderPath, "utf8"));
+  assert.deepEqual(config.mac.files, [
+    "!node_modules/@electron-internal/extract-zip/index.linux-*.node",
+    "!node_modules/@electron-internal/extract-zip/index.win32-*.node",
+  ]);
+  assert.deepEqual(config.win.files, [
+    "!node_modules/@electron-internal/extract-zip/index.darwin-*.node",
+    "!node_modules/@electron-internal/extract-zip/index.linux-*.node",
+    "!node_modules/@electron-internal/extract-zip/index.win32-arm64-msvc.node",
+  ]);
+});
+
 test(
   "Windows runner accepts the production Authenticode verifier PowerShell syntax",
   { skip: process.platform !== "win32" },
@@ -456,3 +492,90 @@ test(
     );
   },
 );
+
+test(
+  "Windows runner accepts the internal-Beta smoke PowerShell syntax",
+  { skip: process.platform !== "win32" },
+  async () => {
+    await execFileAsync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-Command",
+        "$tokens = $null; $errors = $null; [System.Management.Automation.Language.Parser]::ParseFile($env:WINDOWS_SMOKE_PATH, [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }",
+      ],
+      {
+        env: {
+          ...process.env,
+          WINDOWS_SMOKE_PATH: fileURLToPath(windowsSmokePath),
+        },
+      },
+    );
+  },
+);
+
+test("Internal Beta Windows candidate runs disposable install/start/update/rollback smoke", async () => {
+  const raw = await readFile(workflowPath, "utf8");
+  const workflow = parseYAML(raw);
+  const step = workflow.jobs.windows.steps.find(
+    (candidate) =>
+      candidate.name === "Exercise Windows install/start/update/rollback smoke",
+  );
+  assert.ok(step, "Windows candidate must run the disposable smoke gate");
+  assert.match(step.run, /scripts\/internal-beta\/windows-update-smoke\.ps1/u);
+  for (const argument of [
+    "-AppDirectory",
+    "-SetupPath",
+    "-PortablePath",
+    "-Version",
+    "-HelperScript",
+  ]) {
+    assert.match(step.run, new RegExp(argument, "u"));
+  }
+  const smokeScript = await readFile(windowsSmokePath, "utf8");
+  assert.match(smokeScript, /HERMES_DESKTOP_USER_DATA_DIR/u);
+  assert.match(smokeScript, /Start-Process/u);
+  assert.match(smokeScript, /rollback|Restore/u);
+  assert.match(smokeScript, /synthetic|disposable/u);
+  assert.doesNotMatch(smokeScript, /\?\?/u);
+});
+
+test("Internal Beta candidate proves packaged Main Preload and Renderer startup on both platforms", async () => {
+  const raw = await readFile(workflowPath, "utf8");
+  const workflow = parseYAML(raw);
+  for (const jobName of ["macos", "windows"]) {
+    const step = workflow.jobs[jobName].steps.find(
+      (candidate) =>
+        candidate.name === "Verify exact packaged application startup",
+    );
+    assert.ok(step, `${jobName} must verify the exact packaged startup`);
+    assert.match(step.run, /scripts\/release\/verify-packaged-startup\.mjs/u);
+    assert.match(step.run, /--source-sha/u);
+    assert.match(step.run, /--desktop-version/u);
+    assert.match(step.run, /--output/u);
+  }
+  assert.match(raw, /packaged-startup-macos\.json/u);
+  assert.match(raw, /packaged-startup-windows\.json/u);
+});
+
+test("Internal Beta binds native inventories to every final distributable", async () => {
+  const raw = await readFile(workflowPath, "utf8");
+  for (const name of [
+    "native-inventory-macos-dmg.json",
+    "native-inventory-macos-zip.json",
+    "native-inventory-windows-setup.json",
+    "native-inventory-windows-portable.json",
+    "native-inventory-windows-app-zip.json",
+  ]) {
+    assert.match(raw, new RegExp(name.replaceAll(".", "\\."), "u"));
+  }
+  assert.equal(
+    [
+      ...raw.matchAll(
+        /scripts\/release\/final-artifact-native-inventory\.mjs/gu,
+      ),
+    ].length,
+    3,
+  );
+  assert.match(raw, /--native-evidence-dir candidate\/evidence/u);
+});

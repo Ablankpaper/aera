@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { hashArtifact } from "../release/candidate-manifest.mjs";
+import { validateBeta33AcceptanceForRelease } from "./verify-beta33-acceptance.mjs";
 import {
   INTERNAL_BETA_RUNTIME_SOURCE_SHA,
   canonicalJSONStringify,
@@ -63,6 +64,7 @@ const PACKAGE_ROLES = Object.freeze([
   "macos_arm64_zip",
   "windows_x64_setup",
   "windows_x64_portable",
+  "windows_x64_app_zip",
 ]);
 
 function fail(message) {
@@ -509,8 +511,8 @@ function validateDeployment(deployment, context, completedAt) {
 }
 
 async function validatePackages(packages, context) {
-  if (!Array.isArray(packages) || packages.length !== 4) {
-    fail("package evidence requires exactly four artifacts");
+  if (!Array.isArray(packages) || packages.length !== PACKAGE_ROLES.length) {
+    fail("package evidence requires the complete candidate artifact set");
   }
   if (
     typeof context.artifactsDirectory !== "string" ||
@@ -663,6 +665,13 @@ export async function validateLiveEvidence(document, options) {
   const packageMap = await validatePackages(document.packages, context);
   validatePlatforms(document.platforms, packageMap);
   validateOutcomes(document.outcomes);
+  validateBeta33AcceptanceForRelease({
+    acceptanceRaw: options?.beta33AcceptanceRaw,
+    candidateManifestRaw: desktopManifestRaw,
+    releaseCompletedAt: document.completedAt,
+    sourceSha: desktop.sourceSha,
+    version: desktop.version,
+  });
   return document;
 }
 
@@ -685,6 +694,7 @@ function parseArguments(argv) {
         "--admin-manifest",
         "--artifacts",
         "--schema",
+        "--beta33-acceptance",
       ].includes(key) ||
       typeof value !== "string"
     ) {
@@ -717,16 +727,21 @@ async function main(argv) {
     cloudManifestRaw,
     adminManifestRaw,
     schemaRaw,
+    beta33AcceptanceRaw,
   ] = await Promise.all([
     readFile(values["--evidence"], "utf8"),
     readFile(values["--desktop-manifest"], "utf8"),
     readFile(values["--cloud-manifest"], "utf8"),
     readFile(values["--admin-manifest"], "utf8"),
     readFile(values["--schema"] ?? DEFAULT_SCHEMA, "utf8"),
+    values["--beta33-acceptance"]
+      ? readFile(values["--beta33-acceptance"], "utf8")
+      : Promise.resolve(undefined),
   ]);
   await parseAndValidateLiveEvidence(evidenceRaw, {
     adminManifestRaw,
     artifactsDirectory: path.resolve(values["--artifacts"]),
+    beta33AcceptanceRaw,
     cloudManifestRaw,
     desktopManifestRaw,
     schema: JSON.parse(schemaRaw),

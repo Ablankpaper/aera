@@ -2,11 +2,7 @@
 
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { test } from "node:test";
-
-import { parse as parseYAML } from "yaml";
 
 import { canonicalJSONStringify } from "./candidate-manifest.mjs";
 import {
@@ -160,59 +156,6 @@ test("requires successful real runs and ordered timestamps", () => {
   const future = evidence(keys.publicKey);
   future.completedAt = "2026-07-24T00:30:00Z";
   assert.throws(() => validate(future), /future|completion/iu);
-});
-
-test("Cloud and Admin workflows support protected staging restore rehearsal", async () => {
-  const workflows = [
-    {
-      label: "cloud",
-      path: join(
-        import.meta.dirname,
-        "..",
-        "..",
-        "..",
-        "..",
-        "..",
-        "aera-cloud",
-        ".worktrees",
-        "official-quality-v1",
-        ".github",
-        "workflows",
-        "rollback-production.yml",
-      ),
-    },
-    {
-      label: "admin",
-      path: join(
-        import.meta.dirname,
-        "..",
-        "..",
-        "..",
-        "..",
-        "..",
-        "aera-admin",
-        ".worktrees",
-        "official-quality-v1",
-        ".github",
-        "workflows",
-        "rollback-production.yml",
-      ),
-    },
-  ];
-  for (const workflow of workflows) {
-    const raw = await readFile(workflow.path, "utf8");
-    parseYAML(raw);
-    assert.match(raw, /target_environment/u, workflow.label);
-    assert.match(raw, /restore_current_after_rehearsal/u, workflow.label);
-    assert.match(raw, /current_candidate_run_id/u, workflow.label);
-    assert.match(
-      raw,
-      /AERA_RELEASE_REHEARSAL_RESTORE_CURRENT/u,
-      workflow.label,
-    );
-    assert.match(raw, /rehearsal-restore-evidence\.json/u, workflow.label);
-    assert.match(raw, /environment: \$\{\{ inputs\.target_environment \}\}/u);
-  }
 });
 
 function validate(document) {

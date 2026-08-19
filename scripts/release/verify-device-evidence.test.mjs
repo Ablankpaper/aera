@@ -173,6 +173,18 @@ test("rejects private fields and unredacted evidence links", () => {
   assert.throws(() => verify(secretLink, candidateDocument), /redacted|link/u);
 });
 
+test("requires the dedicated acceptance ledger for a Beta.33 device claim", () => {
+  const candidateDocument = candidate();
+  candidateDocument.version = "0.7.4-internal-beta.33";
+  candidateDocument.updateMetadata.macos.version = candidateDocument.version;
+  candidateDocument.updateMetadata.windows.version = candidateDocument.version;
+  const document = evidence(candidateDocument);
+  assert.throws(
+    () => verify(document, candidateDocument),
+    /Beta\.33 acceptance/iu,
+  );
+});
+
 function verify(document, candidateDocument) {
   return validateDeviceEvidence(document, {
     candidate: candidateDocument,
@@ -309,27 +321,9 @@ function evidence(candidateDocument) {
 
 function candidate() {
   const artifacts = [
-    artifact(
-      "Aera-0.7.3-arm64.dmg",
-      "macos",
-      "arm64",
-      "macos_dmg",
-      "1",
-    ),
-    artifact(
-      "Aera-0.7.3-arm64-mac.zip",
-      "macos",
-      "arm64",
-      "macos_zip",
-      "2",
-    ),
-    artifact(
-      "Aera-0.7.3-setup.exe",
-      "windows",
-      "x64",
-      "windows_setup",
-      "3",
-    ),
+    artifact("Aera-0.7.3-arm64.dmg", "macos", "arm64", "macos_dmg", "1"),
+    artifact("Aera-0.7.3-arm64-mac.zip", "macos", "arm64", "macos_zip", "2"),
+    artifact("Aera-0.7.3-setup.exe", "windows", "x64", "windows_setup", "3"),
     artifact(
       "Aera-0.7.3-portable.exe",
       "windows",

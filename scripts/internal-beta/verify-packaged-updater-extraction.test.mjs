@@ -8,11 +8,18 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { createPackage } from "@electron/asar";
 import electronPath from "electron";
 
-import { validateExtractedMacApp } from "./verify-packaged-updater-extraction.mjs";
+import {
+  validateExtractedMacApp,
+  validatePackagedRuntimeEntries,
+} from "./verify-packaged-updater-extraction.mjs";
 
 const VERSION = "0.7.4-internal-beta.32";
+const TEST_ORIGIN = "https://203.0.113.10";
+const OTHER_TEST_ORIGIN = "https://203.0.113.11";
+const TEST_PUBLIC_KEY = Buffer.alloc(32, 73).toString("base64url");
 const probePath = fileURLToPath(
   new URL("./packaged-updater-extraction-probe.cjs", import.meta.url),
 );
@@ -30,7 +37,7 @@ async function createFixture(options = {}) {
   await Promise.all([
     writeFile(join(app, "Contents", "Info.plist"), "fixture plist"),
     writeFile(join(macos, "Aera"), "fixture executable"),
-    ...(options.appAsar === false
+    ...(options.appAsar === false || options.bakedAuthOrigin
       ? []
       : [
           writeFile(
@@ -39,6 +46,26 @@ async function createFixture(options = {}) {
           ),
         ]),
   ]);
+  if (options.bakedAuthOrigin) {
+    const asarSource = join(root, "asar-source");
+    const mainDirectory = join(asarSource, "out", "main");
+    await mkdir(mainDirectory, { recursive: true });
+    await writeFile(
+      join(mainDirectory, "index.js"),
+      `const BUNDLED_AGENTERA_OFFLINE_PUBLIC_KEYS = resolveBundledAgenteraOfflinePublicKeys({
+        buildOfflinePublicKeysJson: '{"issuer":"${options.bakedAuthOrigin}","keys":[{"keyId":"offline-internal-beta-v1","publicKey":"${TEST_PUBLIC_KEY}"}]}',
+        buildPublicUrl: "${options.bakedAuthOrigin}"
+      });
+      function getAgenteraCloudOrigin() {
+        return resolveAgenteraCloudOrigin({
+          runtimePublicUrl: process.env.AGENTERA_CLOUD_PUBLIC_URL,
+          buildPublicUrl: "${options.bakedAuthOrigin}"?.trim(),
+        });
+      }\n`,
+      "utf8",
+    );
+    await createPackage(asarSource, join(resources, "app.asar"));
+  }
   if (options.secondApp === true) {
     await mkdir(join(staging, "Other.app"));
   }
@@ -121,6 +148,41 @@ test("accepts one signed arm64 Beta.32 app with app.asar", async () => {
   }
 });
 
+test("requires the packaged main, preload, renderer, and native runtime entries", () => {
+  assert.deepEqual(
+    validatePackagedRuntimeEntries(
+      [
+        "out/main/index.js",
+        "out/preload/index.js",
+        "out/renderer/index.html",
+        "out/renderer/assets/index.js",
+      ],
+      ["node_modules/better-sqlite3/build/Release/better_sqlite3.node"],
+    ),
+    {
+      required: [
+        "out/main/index.js",
+        "out/preload/index.js",
+        "out/renderer/index.html",
+      ],
+      nativeModules: [
+        "node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+      ],
+    },
+  );
+});
+
+test("rejects a packaged app with a missing runtime entry", () => {
+  assert.throws(
+    () =>
+      validatePackagedRuntimeEntries(
+        ["out/main/index.js", "out/renderer/index.html"],
+        [],
+      ),
+    /preload|native/u,
+  );
+});
+
 test("rejects a missing packaged app.asar", async () => {
   const fixture = await createFixture({ appAsar: false });
   try {
@@ -167,6 +229,20 @@ test("rejects a different bundle identity", async () => {
         commandRunner({ bundleIdentifier: "invalid.example" }),
       ),
       /identity differs/u,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a final macOS package whose baked Cloud origin differs from the candidate origin", async () => {
+  const fixture = await createFixture({ bakedAuthOrigin: OTHER_TEST_ORIGIN });
+  try {
+    await assert.rejects(
+      validateExtractedMacApp(fixture.staging, VERSION, commandRunner(), {
+        expectedCloudOrigin: TEST_ORIGIN,
+      }),
+      /baked Cloud origin differs from the expected Cloud origin/u,
     );
   } finally {
     await rm(fixture.root, { recursive: true, force: true });

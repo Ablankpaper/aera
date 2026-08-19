@@ -77,7 +77,7 @@ async function fixture() {
   }
 
   const desktopManifest = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     repository: "Ablankpaper/aera",
     sourceSha: DESKTOP_SHA,
     version: INTERNAL_BETA_VERSION,
@@ -131,6 +131,22 @@ async function fixture() {
         sha256: "f".repeat(64),
         size: 10,
       },
+      windowsEvidence: {
+        name: "windows-evidence.json",
+        sha256: "e".repeat(64),
+        size: 10,
+      },
+      nativeEvidence: [
+        "native-inventory-macos-dmg.json",
+        "native-inventory-macos-zip.json",
+        "native-inventory-windows-setup.json",
+        "native-inventory-windows-portable.json",
+        "native-inventory-windows-app-zip.json",
+      ].map((name) => ({ name, sha256: "d".repeat(64), size: 10 })),
+      packagedStartupEvidence: [
+        "packaged-startup-macos.json",
+        "packaged-startup-windows.json",
+      ].map((name) => ({ name, sha256: "c".repeat(64), size: 10 })),
       sbom: {
         name: "internal-beta.spdx.json",
         sha256: "6".repeat(64),
@@ -206,6 +222,7 @@ async function fixture() {
     "macos_arm64_zip",
     "windows_x64_setup",
     "windows_x64_portable",
+    "windows_x64_app_zip",
   ];
   const evidence = {
     schemaVersion: 1,
@@ -411,4 +428,13 @@ test("rejects noncanonical evidence JSON", async () => {
     parseAndValidateLiveEvidence(noncanonical, options),
     /canonical/i,
   );
+});
+
+test("wires the Beta.33 acceptance ledger into live evidence verification", async () => {
+  const source = await readFile(
+    new URL("./verify-live-evidence.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /--beta33-acceptance/u);
+  assert.match(source, /validateBeta33AcceptanceForRelease/u);
 });
