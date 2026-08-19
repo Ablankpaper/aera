@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -198,4 +198,30 @@ test("compares before and after snapshots and records exact changed roles", () =
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("ships one fixed five-file model-chain replay fixture", () => {
+  const fixtureRoot = new URL("fixtures/model-chain/", import.meta.url);
+  const manifest = JSON.parse(
+    readFileSync(new URL("fixture-manifest.json", fixtureRoot), "utf8"),
+  );
+  const before = JSON.parse(
+    readFileSync(new URL("redacted-before.json", fixtureRoot), "utf8"),
+  );
+  const after = JSON.parse(
+    readFileSync(new URL("redacted-after.json", fixtureRoot), "utf8"),
+  );
+  assert.deepEqual(manifest.requiredRoles, [
+    "env",
+    "providers",
+    "models",
+    "modelDefinitions",
+    "config",
+  ]);
+  assert.deepEqual(before.files.map((entry) => entry.role), manifest.requiredRoles);
+  assert.deepEqual(after.files.map((entry) => entry.role), manifest.requiredRoles);
+  assert.equal(before.journal.state, "recovery_required");
+  assert.equal(after.journal.state, "rolled_back");
+  assert.equal(after.route.authoritativeEndpointCount, 1);
+  assert.doesNotMatch(JSON.stringify({ manifest, before, after }), /api[_-]?key|authorization|bearer|https?:\/\//iu);
 });

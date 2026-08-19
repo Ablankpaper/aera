@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "files": [
+    {"role": "env", "present": true, "sha256": "1111111111111111111111111111111111111111111111111111111111111111"},
+    {"role": "providers", "present": true, "sha256": "2222222222222222222222222222222222222222222222222222222222222222"},
+    {"role": "models", "present": true, "sha256": "3333333333333333333333333333333333333333333333333333333333333333"},
+    {"role": "modelDefinitions", "present": true, "sha256": "4444444444444444444444444444444444444444444444444444444444444444"},
+    {"role": "config", "present": true, "sha256": "5555555555555555555555555555555555555555555555555555555555555555"}
+  ],
+  "journal": {"state": "recovery_required", "rowCount": 1},
+  "route": {"candidateCount": 2, "authoritativeEndpointCount": 1}
+}

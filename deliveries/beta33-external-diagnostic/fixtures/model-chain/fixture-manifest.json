@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "scenario": "beta29-recovery-required-dirty-route",
+  "requiredRoles": ["env", "providers", "models", "modelDefinitions", "config"],
+  "expectedTransition": "recovery_required_to_rolled_back",
+  "containsSecrets": false
+}

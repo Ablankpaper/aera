@@ -17,6 +17,7 @@ import { join, normalize } from "node:path";
 import { test } from "node:test";
 
 import { parseExistingAeraProcessRows } from "./aera-diagnostic.mjs";
+import { createDiagnosticSessionFixture } from "./fixtures/session-fixture.mjs";
 
 const cli = new URL("./aera-diagnostic.mjs", import.meta.url).pathname;
 
@@ -103,6 +104,25 @@ function createFixture(root) {
   ]);
   return { app, hermesHome, userData };
 }
+
+test("fixed session fixture contains one complete safe reproduction chain", () => {
+  const root = mkdtempSync(join(tmpdir(), "aera-fixed-session-fixture-"));
+  try {
+    const created = createDiagnosticSessionFixture(root);
+    assert.equal(created.version, "0.7.4-internal-beta.33");
+    assert.equal(created.events.length, 5);
+    assert.deepEqual(created.events.map((entry) => entry.family), [
+      "main",
+      "owner",
+      "model_configuration",
+      "runtime",
+      "updater",
+    ]);
+    assert.doesNotMatch(JSON.stringify(created), /api[_-]?key|authorization|bearer/iu);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("creates a V4 bundle with all chain sections and explicit missing evidence", () => {
   const root = mkdtempSync(join(tmpdir(), "aera-v4-capture-test-"));
