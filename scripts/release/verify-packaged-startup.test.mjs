@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildPackagedStartupEnvironment,
   buildPackagedStartupEvidence,
+  removePackagedStartupDirectory,
   validateRendererProbe,
 } from "./verify-packaged-startup.mjs";
 
@@ -23,6 +24,28 @@ test("isolates packaged startup from the daily Hermes home", () => {
       CDP_PORT: "9337",
     },
   );
+});
+
+test("retries Windows-style busy handles while removing isolated startup data", async () => {
+  const calls = [];
+  await removePackagedStartupDirectory(
+    "C:\\isolated\\startup",
+    async (...args) => {
+      calls.push(args);
+    },
+  );
+
+  assert.deepEqual(calls, [
+    [
+      "C:\\isolated\\startup",
+      {
+        recursive: true,
+        force: true,
+        maxRetries: 10,
+        retryDelay: 250,
+      },
+    ],
+  ]);
 });
 
 // @lat: [[desktop-updates#Desktop Updates#Internal Beta signed update channel#Test specifications]]
