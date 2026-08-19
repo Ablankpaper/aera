@@ -113,6 +113,10 @@ import {
 } from "../agentera-product-space/db";
 import { AgenteraProductSpaceManager } from "../agentera-product-space/manager";
 import {
+  closeAgenteraProductSpaceStartupResources,
+  logAgenteraProductSpaceUnavailable,
+} from "../agentera-product-space/startup";
+import {
   createProfile,
   deleteProfile,
   prepareProfile,
@@ -485,10 +489,13 @@ export async function startMainProcess(
     console.error("[AGENTERA_ORGANIZATION] unavailable");
   }
   if (agenteraWorkspace && agenteraOrganization) {
+    let productSpaceStartupStage: "database" | "manager" | "attachment" =
+      "database";
     try {
       agenteraProductSpaceDatabase = openAgenteraProductSpaceDatabase(
         app.getPath("userData"),
       );
+      productSpaceStartupStage = "manager";
       agenteraProductSpace = new AgenteraProductSpaceManager({
         database: agenteraProductSpaceDatabase,
         workspaceSource: agenteraWorkspace,
@@ -498,13 +505,16 @@ export async function startMainProcess(
           null,
         getAuthState: () => agenteraAuth.getPublicState(),
       });
+      productSpaceStartupStage = "attachment";
       agenteraWorkspace.attachProductSpaceCoordinator(agenteraProductSpace);
-    } catch {
-      agenteraProductSpace?.close();
-      if (!agenteraProductSpace) agenteraProductSpaceDatabase?.close();
+    } catch (error) {
+      closeAgenteraProductSpaceStartupResources({
+        manager: agenteraProductSpace,
+        database: agenteraProductSpaceDatabase,
+      });
       agenteraProductSpaceDatabase = null;
       agenteraProductSpace = null;
-      console.error("[AGENTERA_PRODUCT_SPACE] unavailable");
+      logAgenteraProductSpaceUnavailable(productSpaceStartupStage, error);
     }
   }
   try {

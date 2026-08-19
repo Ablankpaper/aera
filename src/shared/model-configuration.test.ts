@@ -2,13 +2,25 @@ import { describe, expect, it } from "vitest";
 import {
   canonicalPublicRouteKey,
   isSafeToRetryStaleRevision,
-  type ModelConfigurationMutationResult,
+  type LegacyModelConfigurationMutationFailure,
   type ModelConfigurationStage,
   type ModelConfigurationStartupFailureCode,
   type OwnerModelRouteCatalogSnapshot,
 } from "./model-configuration";
 
 describe("model configuration contract", () => {
+  it("keeps legacy adapters from inventing a recovery-stage save code", () => {
+    const failure: LegacyModelConfigurationMutationFailure = {
+      status: "rejected",
+      stage: "recovery",
+      // @ts-expect-error Recovery has one stable public identity.
+      code: "model_save_recovery_failed",
+      rollback: "recovery_required",
+    };
+
+    expect(failure.code).toBe("model_save_recovery_failed");
+  });
+
   it("uses API mode in public identity without exposing credentials", () => {
     expect(
       canonicalPublicRouteKey({
@@ -92,10 +104,16 @@ describe("stale catalog revision retry policy", () => {
     stage: ModelConfigurationStage,
     rollback: "not_needed" | "restored" | "recovery_required",
     reason?: "stale_catalog_revision",
-  ): ModelConfigurationMutationResult => ({
+  ): LegacyModelConfigurationMutationFailure => ({
     status: "rejected",
     stage,
-    code: `model_save_${stage}_failed`,
+    code:
+      stage === "recovery"
+        ? "model_configuration_recovery_required"
+        : (`model_save_${stage}_failed` as Exclude<
+            LegacyModelConfigurationMutationFailure["code"],
+            "model_configuration_recovery_required"
+          >),
     rollback,
     ...(reason ? { reason } : {}),
   });

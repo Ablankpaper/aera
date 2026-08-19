@@ -1,7 +1,12 @@
 import { randomBytes } from "node:crypto";
 import type {
+  ModelConfigurationFailureCode,
+  ModelConfigurationFailureStage,
+  ModelConfigurationOperation,
+  ModelConfigurationRetryability,
   ModelConfigurationMutationRequest,
   ModelConfigurationMutationResult,
+  LegacyModelConfigurationMutationFailure,
   ModelConfigurationStartupFailure,
   OwnerModelRouteCatalogSnapshot,
   OwnerModelRouteSummary,
@@ -11,11 +16,20 @@ import type {
   ManagedModelConfigurationWritePlan,
   ManagedModelConfigurationWriteRequest,
   ManagedModelConfigurationWriteResult,
+  ModelConfigurationOwnerGuard,
 } from "../model-configuration-coordinator";
 
 const PROFILE_ID_PATTERN = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
 const REVISION_PATTERN = /^[0-9a-f]{64}$/i;
 const DIAGNOSTIC_ID_PATTERN = /^[0-9a-f]{12}$/u;
+
+type InternalMutationResult =
+  | ModelConfigurationMutationResult
+  | LegacyModelConfigurationMutationFailure;
+type InternalMutationFailure = Extract<
+  InternalMutationResult,
+  { status: "rejected" }
+>;
 
 export interface ModelConfigurationIpcBridgeDependencies {
   catalog: {
@@ -24,7 +38,8 @@ export interface ModelConfigurationIpcBridgeDependencies {
   coordinator: {
     mutate(
       request: ModelConfigurationMutationRequest,
-    ): Promise<ModelConfigurationMutationResult>;
+      ownerGuard?: ModelConfigurationOwnerGuard,
+    ): Promise<InternalMutationResult>;
     runManagedWrite<T>(
       request: ManagedModelConfigurationWriteRequest,
       prepare: (
@@ -32,10 +47,13 @@ export interface ModelConfigurationIpcBridgeDependencies {
       ) =>
         | ManagedModelConfigurationWritePlan<T>
         | Promise<ManagedModelConfigurationWritePlan<T>>,
+      ownerGuard?: ModelConfigurationOwnerGuard,
     ): Promise<ManagedModelConfigurationWriteResult<T>>;
   };
   /** Main-only ownership check for the optional catalog target. */
   assertRequestedProfile?(profileId: string): void;
+  /** Main-only sink for one-line, already-redacted mutation rejection events. */
+  logRejected?(line: string): void;
 }
 
 export function coordinatorUnavailableMutation(
@@ -50,12 +68,26 @@ export function coordinatorUnavailableMutation(
   } satisfies ModelConfigurationStartupFailure;
   const recoveryRequired =
     failure.code === "model_configuration_recovery_required";
+  const stage: ModelConfigurationFailureStage = failure.code.startsWith(
+    "native_module_",
+  )
+    ? "native_load"
+    : failure.code === "model_configuration_database_unavailable"
+      ? "database_open"
+      : failure.code === "model_configuration_schema_unsupported"
+        ? "schema"
+        : failure.code === "route_catalog_repair_required"
+          ? "route_repair"
+          : "recovery";
   return {
     async mutate() {
       return {
         status: "rejected",
-        stage: recoveryRequired ? "recovery" : "validation",
+        schemaVersion: 2,
+        operation: "startup",
+        stage,
         code: failure.code,
+        retryability: recoveryRequired ? "after_user_action" : "after_restart",
         rollback: recoveryRequired ? "recovery_required" : "not_needed",
         diagnosticId: failure.diagnosticId,
       };
@@ -65,8 +97,11 @@ export function coordinatorUnavailableMutation(
     > {
       return {
         status: "rejected",
-        stage: recoveryRequired ? "recovery" : "validation",
+        schemaVersion: 2,
+        operation: "startup",
+        stage,
         code: failure.code,
+        retryability: recoveryRequired ? "after_user_action" : "after_restart",
         rollback: recoveryRequired ? "recovery_required" : "not_needed",
         diagnosticId: failure.diagnosticId,
       };
@@ -99,9 +134,7 @@ const MANAGED_WRITE_STAGES = new Set<
 >(["credential", "provider", "model_library", "native_route", "activation"]);
 
 export interface ManagedModelConfigurationWriteBridgeOptions {
-  refreshWarningToError?(
-    warning: "model_save_refresh_failed",
-  ): Error;
+  refreshWarningToError?(warning: "model_save_refresh_failed"): Error;
 }
 
 function profileId(value: unknown): string {
@@ -252,10 +285,121 @@ export function redactOwnerModelRouteCatalog(
 }
 
 function redactMutationResult(
-  result: ModelConfigurationMutationResult,
+  result: InternalMutationResult,
 ): ModelConfigurationMutationResult {
-  if (result.status === "rejected") return result;
+  if (result.status === "rejected") return sanitizeMutationFailure(result);
   return { ...result, catalog: redactOwnerModelRouteCatalog(result.catalog) };
+}
+
+function rejectionLogLine(
+  result: Extract<ModelConfigurationMutationResult, { status: "rejected" }>,
+): string {
+  return `[MODEL_CONFIGURATION] rejected ${result.diagnosticId} ${result.operation} ${result.stage} ${result.code}`;
+}
+
+function logRejectedMutation(
+  logRejected: (line: string) => void,
+  result: Extract<ModelConfigurationMutationResult, { status: "rejected" }>,
+): void {
+  logRejected(rejectionLogLine(result));
+}
+
+function failureOperation(
+  result: InternalMutationFailure,
+): ModelConfigurationOperation {
+  if (result.code === "route_catalog_repair_required") {
+    return "repair_route_catalog";
+  }
+  if (result.stage === "rollback") return "rollback";
+  return "save_model";
+}
+
+function requestOperation(
+  request: ModelConfigurationMutationRequest,
+): ModelConfigurationOperation {
+  return request.intent === "delete" ? "remove_provider" : "save_provider";
+}
+
+function failureStage(
+  result: InternalMutationFailure,
+): ModelConfigurationFailureStage {
+  if (result.code.startsWith("native_module_")) return "native_load";
+  if (result.code === "model_configuration_database_unavailable") {
+    return "database_open";
+  }
+  if (result.code === "model_configuration_schema_unsupported") return "schema";
+  if (result.code === "route_catalog_repair_required") return "route_repair";
+  if (result.reason === "stale_catalog_revision") return "revision";
+  if (
+    result.code === "model_owner_transition_in_progress" ||
+    result.code === "model_owner_changed" ||
+    result.code === "owner_transition_timeout" ||
+    result.code === "owner_transition_failed"
+  ) {
+    return "owner";
+  }
+  return result.stage;
+}
+
+function failureRetryability(
+  result: InternalMutationFailure,
+): ModelConfigurationRetryability {
+  if (
+    result.reason === "stale_catalog_revision" ||
+    result.code === "model_owner_changed" ||
+    result.code === "model_owner_transition_in_progress"
+  ) {
+    return "retryable";
+  }
+  if (
+    result.code.startsWith("native_module_") ||
+    result.code === "model_configuration_database_unavailable" ||
+    result.code === "model_configuration_schema_unsupported"
+  ) {
+    return "after_restart";
+  }
+  if (
+    result.code === "model_configuration_recovery_required" ||
+    result.code === "route_catalog_repair_required" ||
+    result.code === "owner_transition_timeout" ||
+    result.code === "owner_transition_failed"
+  ) {
+    return "after_user_action";
+  }
+  return "not_retryable";
+}
+
+function sanitizeMutationFailure(
+  result: InternalMutationFailure,
+  operationOverride?: ModelConfigurationOperation,
+): Extract<ModelConfigurationMutationResult, { status: "rejected" }> {
+  const diagnosticId =
+    typeof result.diagnosticId === "string" &&
+    DIAGNOSTIC_ID_PATTERN.test(result.diagnosticId)
+      ? result.diagnosticId
+      : randomBytes(6).toString("hex");
+  return {
+    status: "rejected",
+    schemaVersion: 2,
+    operation:
+      operationOverride ??
+      ("operation" in result ? result.operation : failureOperation(result)),
+    stage:
+      "schemaVersion" in result && result.schemaVersion === 2
+        ? result.stage
+        : failureStage(result),
+    code: result.code as ModelConfigurationFailureCode,
+    retryability:
+      "retryability" in result
+        ? result.retryability
+        : failureRetryability(result),
+    diagnosticId,
+    rollback: result.rollback,
+    ...(result.rollbackWarning
+      ? { rollbackWarning: result.rollbackWarning }
+      : {}),
+    ...(result.reason ? { reason: result.reason } : {}),
+  };
 }
 
 export function createModelConfigurationIpcBridge(
@@ -266,6 +410,7 @@ export function createModelConfigurationIpcBridge(
   ): OwnerModelRouteCatalogSnapshot;
   mutateModelConfiguration(
     input: unknown,
+    ownerGuard?: ModelConfigurationOwnerGuard,
   ): Promise<ModelConfigurationMutationResult>;
   runManagedModelConfigurationWrite<T>(
     request: ManagedModelConfigurationWriteRequest,
@@ -275,8 +420,11 @@ export function createModelConfigurationIpcBridge(
       | ManagedModelConfigurationWritePlan<T>
       | Promise<ManagedModelConfigurationWritePlan<T>>,
     options?: ManagedModelConfigurationWriteBridgeOptions,
+    ownerGuard?: ModelConfigurationOwnerGuard,
   ): Promise<T>;
 } {
+  const logRejected =
+    dependencies.logRejected ?? ((line: string) => console.error(line));
   return {
     getOwnerModelRouteCatalog(requestedProfileId?: unknown) {
       let profile: string | undefined;
@@ -292,15 +440,26 @@ export function createModelConfigurationIpcBridge(
         dependencies.catalog.snapshot(profile),
       );
     },
-    async mutateModelConfiguration(input: unknown) {
+    async mutateModelConfiguration(input: unknown, ownerGuard) {
       const request = parseMutationRequest(input);
-      const result = await dependencies.coordinator.mutate(request);
+      const result = ownerGuard
+        ? await dependencies.coordinator.mutate(request, ownerGuard)
+        : await dependencies.coordinator.mutate(request);
+      if (result.status === "rejected") {
+        const failure = sanitizeMutationFailure(
+          result,
+          requestOperation(request),
+        );
+        logRejectedMutation(logRejected, failure);
+        return failure;
+      }
       return redactMutationResult(result);
     },
     async runManagedModelConfigurationWrite<T>(
       request,
       prepare,
       options: ManagedModelConfigurationWriteBridgeOptions = {},
+      ownerGuard,
     ): Promise<T> {
       const requestedProfileId = profileId(request.requestedProfileId);
       if (
@@ -310,11 +469,21 @@ export function createModelConfigurationIpcBridge(
       ) {
         throw invalidRequest();
       }
-      const result = await dependencies.coordinator.runManagedWrite<T>(
-        { ...request, requestedProfileId },
-        prepare,
-      );
-      if (result.status === "rejected") throw managedWriteBlocked(result);
+      const result = ownerGuard
+        ? await dependencies.coordinator.runManagedWrite<T>(
+            { ...request, requestedProfileId },
+            prepare,
+            ownerGuard,
+          )
+        : await dependencies.coordinator.runManagedWrite<T>(
+            { ...request, requestedProfileId },
+            prepare,
+          );
+      if (result.status === "rejected") {
+        const failure = sanitizeMutationFailure(result);
+        logRejectedMutation(logRejected, failure);
+        throw managedWriteBlocked(failure);
+      }
       if (result.warning && options.refreshWarningToError) {
         const error = options.refreshWarningToError(result.warning);
         if (!(error instanceof Error)) throw invalidRequest();

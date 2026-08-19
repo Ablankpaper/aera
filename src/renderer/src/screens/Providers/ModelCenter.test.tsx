@@ -474,19 +474,25 @@ describe("ModelCenter", () => {
   });
 
   it.each([
-    ["native_module_abi_mismatch", "providers.center.errors.runtimeNative"],
+    [
+      "native_module_abi_mismatch",
+      "providers.center.errors.nativeModuleAbiMismatch",
+    ],
     [
       "model_configuration_database_unavailable",
-      "providers.center.errors.database",
+      "providers.center.errors.databaseUnavailable",
     ],
     [
       "model_configuration_schema_unsupported",
-      "providers.center.errors.schema",
+      "providers.center.errors.schemaUnsupported",
     ],
-    ["route_catalog_repair_required", "providers.center.errors.routeCatalog"],
+    [
+      "route_catalog_repair_required",
+      "providers.center.errors.routeCatalogRepairRequired",
+    ],
     [
       "model_configuration_recovery_required",
-      "providers.center.errors.recovery",
+      "providers.center.errors.recoveryRequired",
     ],
   ])("shows the real %s save failure", async (code, message) => {
     const mutateModelConfiguration = vi.fn().mockResolvedValue({
@@ -521,6 +527,42 @@ describe("ModelCenter", () => {
     await completePetoiForm();
 
     expect(await screen.findByText(`${message} (abc123def456)`)).toBeVisible();
+  });
+
+  it("shows the safe next action for an Owner transition rejection", async () => {
+    const mutateModelConfiguration = vi.fn().mockResolvedValue({
+      status: "rejected",
+      schemaVersion: 2,
+      operation: "save_provider",
+      stage: "owner",
+      code: "model_owner_transition_in_progress",
+      retryability: "retryable",
+      rollback: "not_needed",
+      diagnosticId: "abc123def456",
+    });
+    Object.assign(window.hermesAPI, {
+      getOwnerModelRouteCatalog: vi.fn().mockResolvedValue(emptyCatalog),
+      mutateModelConfiguration,
+    });
+    render(
+      <ModelCenter
+        profile="acceptance"
+        env={{}}
+        activeModel={{ provider: "auto", model: "", baseUrl: "" }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    await completePetoiForm();
+
+    expect(
+      await screen.findByText(
+        "providers.center.errors.ownerTransitionInProgress providers.center.actions.retry (abc123def456)",
+      ),
+    ).toBeVisible();
   });
 
   it("shows context length and API mode only in custom mode", async () => {

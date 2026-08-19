@@ -18,6 +18,10 @@ Owner changes drain the old Runtime and invalidate its leases before another own
 
 [[src/main/provider-credential-refresh.ts#createProviderCredentialRefreshPort]] is the only Desktop-to-Runtime refresh boundary. It admits only `source=runtime_pool`, OAuth, refresh-token-bearing credentials, passes a provider name to Runtime's own pool implementation, bounds process time/output, and returns status words without secrets. [[src/main/provider-authentication-recovery.ts#runProviderAuthenticationRecovery]] caps recovery at one refresh and one retry; static keys, rejected refreshes, owner changes, and a second 401 remain fail-closed.
 
+### Product Space startup degradation
+
+[[src/main/agentera-product-space/startup.ts#closeAgenteraProductSpaceStartupResources]] closes constructed resources and preserves the startup cause. [[src/main/agentera-workspace/manager.ts#AgenteraWorkspaceManager#attachProductSpaceCoordinator]] records a coordinator only after subscription succeeds, so partial attachment can be retried safely.
+
 ## Recoverable model configuration
 
 Provider/model edits will cross one typed Main mutation instead of several independent renderer calls, with dependency writes committed before activation and exact stage-aware outcomes.
@@ -221,6 +225,8 @@ Main emits structured `loading` then `loaded` or `failed` evidence around the da
 ### Database startup identity reaches IPC
 
 [[src/main/model-configuration-runtime.ts#prepareModelConfigurationRuntime]] creates one opaque diagnostic ID and [[src/main/ipc/model-configuration-bridge.ts#coordinatorUnavailableMutation]] preserves the exact cause without exposing raw native or database errors.
+
+Every rejected public mutation is sanitized to the V2 envelope and emits one redacted `[MODEL_CONFIGURATION] rejected` line containing only its diagnostic ID, operation, stage, and stable code; raw errors, paths, credentials, and request bodies remain Main-only causes.
 
 The propagation keeps `model_configuration_schema_unsupported` distinct from a general database-unavailable failure while leaving the journal rejection itself fail-closed.
 

@@ -98,6 +98,12 @@ export default {
       refresh:
         "The model service was saved, but one screen refresh did not complete. The saved configuration is still active.",
     },
+    actions: {
+      retry: "Retry",
+      restart: "Restart Aera",
+      review: "Review settings",
+      support: "Contact support",
+    },
     errors: {
       selectProvider: "Choose a model provider first.",
       baseUrl: "Enter a valid Base URL.",
@@ -124,6 +130,38 @@ export default {
         "The model service was not saved. No partial configuration was kept.",
       runtimeNative:
         "The local model configuration component could not load. Reinstall this version and try again. Diagnostic",
+      nativeModuleAbiMismatch:
+        "A packaged model component does not match this Aera version. Reinstall Aera.",
+      nativeModuleArchitectureMismatch:
+        "A packaged model component is for a different computer architecture. Install the correct Aera build.",
+      nativeModuleDependencyMissing:
+        "A required packaged model component is missing. Reinstall Aera.",
+      nativeModuleLoadDenied:
+        "macOS or Windows blocked a packaged model component. Reinstall the signed Aera build.",
+      nativeModuleLoadFailed:
+        "A packaged model component could not load. Restart or reinstall Aera.",
+      databaseUnavailable:
+        "The local model configuration database is unavailable. Restart Aera.",
+      schemaUnsupported:
+        "This model configuration requires a newer Aera version.",
+      routeCatalogRepairRequired:
+        "The local model route catalogue has an ambiguous conflict and was left unchanged.",
+      recoveryRequired:
+        "Model configuration requires safe recovery before another save.",
+      staleCatalogRevision:
+        "The model list changed while editing. Refresh and retry.",
+      ownerTransitionInProgress:
+        "Account switching is still in progress. Retry when it completes.",
+      ownerChanged:
+        "The signed-in account changed during this save. Review the active account and retry.",
+      ownerTransitionTimeout:
+        "The previous account did not close in time. Restart Aera before retrying.",
+      ownerTransitionFailed:
+        "The previous account could not close safely. Restart Aera before retrying.",
+      refreshFailed:
+        "The configuration was restored, but one screen could not refresh. Restart Aera.",
+      unknownFailure:
+        "Model configuration failed for an unrecognized reason. Use the diagnostic ID when contacting support.",
       database:
         "The local model configuration database is unavailable. Restart Aera and try again. Diagnostic",
       schema:
