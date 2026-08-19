@@ -16,7 +16,11 @@ files:
   - "!resources/agentera-runtime-seed/**"
 asarUnpack:
   - resources/**
-  - node_modules/better-sqlite3/build/Release/*.node
+  # Ship only the production database binding. The package also contains
+  # better-sqlite3's test_extension.node, which is not loaded by Aera and has
+  # no Electron ABI marker; unpacking it makes the all-native-module gate
+  # reject an otherwise valid production bundle.
+  - node_modules/better-sqlite3/build/Release/better_sqlite3.node
 extraResources:
   - from: resources/agentera-runtime-seed
     to: agentera-runtime-seed
