@@ -4,11 +4,23 @@ import test from "node:test";
 import {
   buildPackagedStartupEnvironment,
   buildPackagedStartupEvidence,
+  packagedAsarEntryPath,
   removePackagedStartupDirectory,
   validateRendererProbe,
 } from "./verify-packaged-startup.mjs";
 
 const HASH = "a".repeat(64);
+
+test("uses Windows separators when locating packaged ASAR entries", () => {
+  assert.equal(
+    packagedAsarEntryPath("win32", "out", "main", "index.js"),
+    "out\\main\\index.js",
+  );
+  assert.equal(
+    packagedAsarEntryPath("darwin", "out", "main", "index.js"),
+    "out/main/index.js",
+  );
+});
 
 test("isolates packaged startup from the daily Hermes home", () => {
   assert.deepEqual(

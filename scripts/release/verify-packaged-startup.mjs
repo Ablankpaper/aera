@@ -14,7 +14,7 @@ import {
 } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 
@@ -306,6 +306,10 @@ export function buildPackagedStartupEnvironment(
   };
 }
 
+export function packagedAsarEntryPath(platform, ...segments) {
+  return (platform === "win32" ? win32 : posix).join(...segments);
+}
+
 export async function removePackagedStartupDirectory(path, remove = rm) {
   await remove(path, {
     recursive: true,
@@ -355,7 +359,10 @@ async function main() {
   );
   try {
     const renderer = await waitForRenderer(port, version, child, 60_000);
-    const entry = (path) => sha256Bytes(extractFile(appAsarPath, path));
+    const entry = (...segments) =>
+      sha256Bytes(
+        extractFile(appAsarPath, packagedAsarEntryPath(platform, ...segments)),
+      );
     const evidence = buildPackagedStartupEvidence({
       sourceSha,
       version,
@@ -364,9 +371,9 @@ async function main() {
       executableSha256: await sha256File(executablePath),
       appAsarSha256: await sha256File(appAsarPath),
       entryHashes: {
-        main: entry("out/main/index.js"),
-        preload: entry("out/preload/index.js"),
-        renderer: entry("out/renderer/index.html"),
+        main: entry("out", "main", "index.js"),
+        preload: entry("out", "preload", "index.js"),
+        renderer: entry("out", "renderer", "index.html"),
       },
       renderer,
     });
