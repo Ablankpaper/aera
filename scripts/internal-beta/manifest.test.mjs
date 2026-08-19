@@ -171,6 +171,7 @@ async function createFixture(runtimePatch = {}) {
       platform: artifact.platform,
       arch: artifact.arch,
       kind: index === 0 ? "windows_setup" : "windows_portable",
+      peMachine: index === 0 ? "0x014C" : "0x8664",
       ...(await hashArtifact(join(artifactsDirectory, artifact.name))),
     })),
   );
@@ -547,6 +548,18 @@ test("rejects signed, unverified-unsigned, or byte-mismatched Windows internal-B
       /Windows.*(unsigned|signing|evidence|bytes)/u,
     );
   }
+});
+
+test("rejects an unsupported Windows package PE machine", async () => {
+  const { options } = await createFixture();
+  const evidence = JSON.parse(await readFile(options.windowsEvidence, "utf8"));
+  evidence.artifacts[0].peMachine = "0x01C0";
+  await writeFile(options.windowsEvidence, canonicalJSONStringify(evidence));
+
+  await assert.rejects(
+    () => buildInternalBetaManifest(options),
+    /Windows package artifact PE machine is invalid/u,
+  );
 });
 
 test("rejects a missing or substituted final-container native inventory", async () => {

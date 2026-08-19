@@ -67,6 +67,7 @@ const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/u;
 const ISO_SECONDS_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const WINDOWS_PACKAGE_PE_MACHINES = new Set(["0x014C", "0x8664"]);
 
 const TOP_LEVEL_KEYS = [
   "artifacts",
@@ -157,7 +158,7 @@ const WINDOWS_EVIDENCE_KEYS = [
   "signingMode",
   "unsignedVerifiedArtifacts",
 ];
-const WINDOWS_ARTIFACT_KEYS = [...ARTIFACT_KEYS, "sha512"];
+const WINDOWS_ARTIFACT_KEYS = [...ARTIFACT_KEYS, "peMachine", "sha512"];
 const PACKAGED_STARTUP_KEYS = [
   "appAsar",
   "architecture",
@@ -595,6 +596,9 @@ function validateWindowsEvidence(
     );
     const expected = windowsArtifacts[index];
     const digest = artifactDigests.get(expected.name);
+    if (!WINDOWS_PACKAGE_PE_MACHINES.has(actual.peMachine)) {
+      throw new Error("Windows package artifact PE machine is invalid");
+    }
     if (
       actual.name !== expected.name ||
       actual.platform !== expected.platform ||
