@@ -306,6 +306,15 @@ export function buildPackagedStartupEnvironment(
   };
 }
 
+export async function removePackagedStartupDirectory(path, remove = rm) {
+  await remove(path, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 250,
+  });
+}
+
 async function main() {
   const values = parseArguments(process.argv.slice(2));
   const platform = values.platform ?? process.platform;
@@ -371,7 +380,7 @@ async function main() {
     );
   } finally {
     await stopApplication(child, platform);
-    await rm(userData, { recursive: true, force: true });
+    await removePackagedStartupDirectory(userData);
   }
 }
 
