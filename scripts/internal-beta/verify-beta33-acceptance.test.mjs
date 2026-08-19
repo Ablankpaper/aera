@@ -75,7 +75,8 @@ function manifest() {
     repository: "Ablankpaper/aera",
     sourceSha: SOURCE_SHA,
     version: TARGET_VERSION,
-    signingStatus: "macos_developer_id_notarized_windows_authenticode",
+    signingStatus:
+      "macos_developer_id_notarized_windows_unsigned_internal_beta",
     artifacts: artifactSpecs.map(([kind, name, digit], index) => ({
       arch: kind.startsWith("macos") ? "arm64" : "x64",
       kind:

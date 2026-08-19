@@ -216,20 +216,26 @@ test("CI and candidate workflows execute and keep collectors separate from produ
   );
 });
 
-test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublished, and Sigstore-bound", async () => {
-  const [raw, productionRaw, macVerifierRaw, packagedUpdaterVerifierRaw] =
-    await Promise.all([
-      readFile(workflowPath, "utf8"),
-      readFile(productionCandidatePath, "utf8"),
-      readFile(macVerifierPath, "utf8"),
-      readFile(packagedUpdaterVerifierPath, "utf8"),
-    ]);
+test("internal-Beta candidate is exact-SHA, notarized on macOS, explicitly unsigned on Windows, update-signed, unpublished, and Sigstore-bound", async () => {
+  const [
+    raw,
+    productionRaw,
+    macVerifierRaw,
+    windowsVerifierRaw,
+    packagedUpdaterVerifierRaw,
+  ] = await Promise.all([
+    readFile(workflowPath, "utf8"),
+    readFile(productionCandidatePath, "utf8"),
+    readFile(macVerifierPath, "utf8"),
+    readFile(windowsVerifierPath, "utf8"),
+    readFile(packagedUpdaterVerifierPath, "utf8"),
+  ]);
   const workflow = parseYAML(raw);
 
   assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.33"/u);
   assert.ok(
     raw.includes(
-      '--release-notes "Beta.33 修复模型配置恢复与保存、Owner 切换写入屏障、模型发现错误分类、Product Space 降级和更新器恢复链路；保留 Beta.32 的 macOS 启动路径修复与 Beta.31 的更新解压修复。Beta.29 故障机使用 DMG 桥接安装，Beta.31/Beta.32 支持在线升级。"',
+      '--release-notes "Beta.33 修复模型配置恢复与保存、Owner 切换写入屏障、模型发现错误分类、Product Space 降级和更新器恢复链路；保留 Beta.32 的 macOS 启动路径修复与 Beta.31 的更新解压修复。Beta.29 故障机使用 DMG 桥接安装，Beta.31/Beta.32 支持在线升级。macOS 内测包已签名并公证；Windows 内测包未进行 Authenticode 签名，仅供受控内测使用。"',
     ),
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
@@ -348,24 +354,34 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   assert.match(macVerifierRaw, /resolvePackagedNativeModule/iu);
   assert.match(macVerifierRaw, /verifyNativeModuleAbi/iu);
   assert.match(raw, /candidate\/evidence\/macos-evidence\.json/u);
-  assert.match(raw, /Build and Authenticode-sign Windows x64 internal Beta/u);
+  assert.match(raw, /Build unsigned Windows x64 internal Beta/u);
   assert.match(
     raw,
-    /Package signed Windows setup, portable, and app ZIP payload/u,
+    /Package unsigned Windows setup, portable, and app ZIP payload/u,
   );
   assert.match(
     raw,
-    /--win nsis portable dir --x64 --publish never[\s\\`]*-c\.forceCodeSigning=true/u,
+    /--win nsis portable dir --x64 --publish never[\s\\`]*-c\.forceCodeSigning=false/u,
   );
+  assert.match(raw, /CSC_IDENTITY_AUTO_DISCOVERY:\s*"false"/u);
   assert.match(raw, /Aera-Internal-Beta-\$env:VERSION-windows-x64-app\.zip/u);
   assert.match(raw, /verify-packaged-windows-app-zip\.mjs/u);
   assert.match(
     raw,
     /verify-packaged-windows-app-zip\.mjs[\s\S]*--expected-cloud-origin \$env:BETA_ORIGIN/u,
   );
-  assert.match(raw, /secrets\.WIN_CSC_LINK/u);
-  assert.match(raw, /secrets\.WIN_CSC_KEY_PASSWORD/u);
+  assert.doesNotMatch(raw, /secrets\.WIN_CSC_LINK/u);
+  assert.doesNotMatch(raw, /secrets\.WIN_CSC_KEY_PASSWORD/u);
+  assert.doesNotMatch(raw, /Require Authenticode credentials/u);
   assert.match(raw, /scripts\/release\/verify-windows\.ps1/u);
+  assert.match(raw, /-SigningMode unsigned_internal_beta/u);
+  assert.match(
+    windowsVerifierRaw,
+    /ValidateSet\("authenticode", "unsigned_internal_beta"\)/u,
+  );
+  assert.match(windowsVerifierRaw, /\[string\]\$SigningMode = "authenticode"/u);
+  assert.match(windowsVerifierRaw, /SignatureStatus\]::NotSigned/u);
+  assert.match(windowsVerifierRaw, /unsignedVerifiedArtifacts/u);
   assert.match(raw, /candidate\/evidence\/windows-evidence\.json/u);
 
   assert.match(productionRaw, /Build and Authenticode-sign Windows x64/u);
@@ -376,11 +392,12 @@ test("internal-Beta candidate is exact-SHA, notarized, update-signed, unpublishe
   assert.match(productionRaw, /secrets\.WIN_CSC_LINK/u);
   assert.match(productionRaw, /secrets\.WIN_CSC_KEY_PASSWORD/u);
   assert.match(productionRaw, /scripts\/release\/verify-windows\.ps1/u);
+  assert.doesNotMatch(productionRaw, /-SigningMode unsigned_internal_beta/u);
 
   assert.doesNotMatch(raw, /actions\/attest/iu);
   assert.doesNotMatch(raw, /attestations:\s*write/iu);
   assert.doesNotMatch(raw, /\bgh\s+release\b|create[-_ ]tag|refs\/tags/iu);
-  assert.match(raw, /WIN_CSC_LINK/u);
+  assert.doesNotMatch(raw, /WIN_CSC_LINK/u);
   assert.doesNotMatch(
     raw,
     /repository:\s*Ablankpaper\/aera-runtime|git\s+clone[\s\S]*aera-runtime/iu,

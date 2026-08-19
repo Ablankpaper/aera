@@ -4,6 +4,9 @@ param(
   [Parameter(Mandatory = $true)][string]$RuntimeSeedManifest,
   [Parameter(Mandatory = $true)][string]$DesktopVersion,
   [Parameter(Mandatory = $true)][string]$Output,
+  [Parameter(Mandatory = $false)]
+  [ValidateSet("authenticode", "unsigned_internal_beta")]
+  [string]$SigningMode = "authenticode",
   [Parameter(Mandatory = $false)][string]$SetupArtifactName = "",
   [Parameter(Mandatory = $false)][string]$PortableArtifactName = ""
 )
@@ -98,32 +101,44 @@ $signerSubject = $null
 $signerThumbprint = $null
 $verifiedNames = @()
 $timestampedNames = @()
+$unsignedNames = @()
 foreach ($item in $artifacts) {
   $file = $item.file
   Assert-X64PE $file.FullName
   $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
-  if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
-    throw "Authenticode is not valid for $($file.Name): $($signature.Status)"
+  if ($SigningMode -eq "authenticode") {
+    if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+      throw "Authenticode is not valid for $($file.Name): $($signature.Status)"
+    }
+    if (-not $signature.SignerCertificate -or -not $signature.TimeStamperCertificate) {
+      throw "Authenticode signer or trusted timestamp is missing for $($file.Name)"
+    }
+    if ($null -eq $signerSubject) {
+      $signerSubject = $signature.SignerCertificate.Subject
+      $signerThumbprint = $signature.SignerCertificate.Thumbprint.ToUpperInvariant()
+    }
+    elseif (
+      $signerSubject -ne $signature.SignerCertificate.Subject -or
+      $signerThumbprint -ne $signature.SignerCertificate.Thumbprint.ToUpperInvariant()
+    ) {
+      throw "Windows artifacts use different Authenticode identities"
+    }
+    & signtool verify /pa /all /v $file.FullName
+    if ($LASTEXITCODE -ne 0) { throw "signtool rejected $($file.Name)" }
+    & signtool verify /pa /all /tw /v $file.FullName
+    if ($LASTEXITCODE -ne 0) { throw "signtool timestamp verification rejected $($file.Name)" }
+    $verifiedNames += $file.Name
+    $timestampedNames += $file.Name
   }
-  if (-not $signature.SignerCertificate -or -not $signature.TimeStamperCertificate) {
-    throw "Authenticode signer or trusted timestamp is missing for $($file.Name)"
+  else {
+    if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::NotSigned) {
+      throw "Unsigned internal-Beta artifact has unexpected Authenticode status for $($file.Name): $($signature.Status)"
+    }
+    if ($signature.SignerCertificate -or $signature.TimeStamperCertificate) {
+      throw "Unsigned internal-Beta artifact contains signer metadata: $($file.Name)"
+    }
+    $unsignedNames += $file.Name
   }
-  if ($null -eq $signerSubject) {
-    $signerSubject = $signature.SignerCertificate.Subject
-    $signerThumbprint = $signature.SignerCertificate.Thumbprint.ToUpperInvariant()
-  }
-  elseif (
-    $signerSubject -ne $signature.SignerCertificate.Subject -or
-    $signerThumbprint -ne $signature.SignerCertificate.Thumbprint.ToUpperInvariant()
-  ) {
-    throw "Windows artifacts use different Authenticode identities"
-  }
-  & signtool verify /pa /all /v $file.FullName
-  if ($LASTEXITCODE -ne 0) { throw "signtool rejected $($file.Name)" }
-  & signtool verify /pa /all /tw /v $file.FullName
-  if ($LASTEXITCODE -ne 0) { throw "signtool timestamp verification rejected $($file.Name)" }
-  $verifiedNames += $file.Name
-  $timestampedNames += $file.Name
 }
 
 $unpackedSeed = Join-Path $dist "win-unpacked/resources/agentera-runtime-seed"
@@ -160,19 +175,33 @@ foreach ($item in $artifacts) {
   }
 }
 
-$evidence = [ordered]@{
-  arch = "x64"
-  signerSubject = $signerSubject
-  signerThumbprint = $signerThumbprint
-  authenticodeVerifiedArtifacts = @($verifiedNames)
-  timestampVerifiedArtifacts = @($timestampedNames)
-  runtimeSeedVerifiedArtifacts = @($runtimeVerified)
-  nativeModuleArchitecture = "x64"
-  runtimeSeedManifest = [ordered]@{
-    manifest = $manifest.Name
-    manifestSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $manifest.FullName).Hash.ToLowerInvariant()
+$runtimeSeedManifest = [ordered]@{
+  manifest = $manifest.Name
+  manifestSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $manifest.FullName).Hash.ToLowerInvariant()
+}
+if ($SigningMode -eq "authenticode") {
+  $evidence = [ordered]@{
+    arch = "x64"
+    signerSubject = $signerSubject
+    signerThumbprint = $signerThumbprint
+    authenticodeVerifiedArtifacts = @($verifiedNames)
+    timestampVerifiedArtifacts = @($timestampedNames)
+    runtimeSeedVerifiedArtifacts = @($runtimeVerified)
+    nativeModuleArchitecture = "x64"
+    runtimeSeedManifest = $runtimeSeedManifest
+    artifacts = @($artifactEvidence)
   }
-  artifacts = @($artifactEvidence)
+}
+else {
+  $evidence = [ordered]@{
+    arch = "x64"
+    signingMode = "unsigned_internal_beta"
+    unsignedVerifiedArtifacts = @($unsignedNames)
+    runtimeSeedVerifiedArtifacts = @($runtimeVerified)
+    nativeModuleArchitecture = "x64"
+    runtimeSeedManifest = $runtimeSeedManifest
+    artifacts = @($artifactEvidence)
+  }
 }
 
 $parent = Split-Path -Parent $Output
@@ -180,4 +209,9 @@ if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
 if (Test-Path $Output) { throw "Windows evidence output already exists" }
 $json = $evidence | ConvertTo-Json -Depth 8 -Compress
 [System.IO.File]::WriteAllText($Output, "$json`n", [System.Text.UTF8Encoding]::new($false))
-Write-Output "Windows Authenticode, timestamp, x64, and Runtime Seed verification passed"
+if ($SigningMode -eq "authenticode") {
+  Write-Output "Windows Authenticode, timestamp, x64, and Runtime Seed verification passed"
+}
+else {
+  Write-Output "Windows unsigned internal-Beta, x64, and Runtime Seed verification passed"
+}

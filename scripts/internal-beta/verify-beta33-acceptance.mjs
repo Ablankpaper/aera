@@ -9,7 +9,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { canonicalJSONStringify } from "./manifest.mjs";
 
 export const BETA33_TARGET_VERSION = "0.7.4-internal-beta.33";
-const SIGNING_STATUS = "macos_developer_id_notarized_windows_authenticode";
+const SIGNING_STATUS =
+  "macos_developer_id_notarized_windows_unsigned_internal_beta";
 const SHA = /^[0-9a-f]{40}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const UUID_V4 =
@@ -252,7 +253,7 @@ function validateCandidateManifest(raw) {
     manifest.version !== BETA33_TARGET_VERSION ||
     manifest.signingStatus !== SIGNING_STATUS
   ) {
-    fail("candidate manifest is not the signed Beta.33 identity");
+    fail("candidate manifest is not the approved Beta.33 signing identity");
   }
   if (!Array.isArray(manifest.artifacts) || manifest.artifacts.length !== 5) {
     fail("candidate artifact set is incomplete");
