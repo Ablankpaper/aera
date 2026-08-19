@@ -513,22 +513,28 @@ test("parses only process-owned TCP endpoints without payload", () => {
   ]);
 });
 
-test("collects bounded macOS process, network and native inventory sections", () => {
-  const result = collectMacPlatformEvidence({
-    rootPid: process.pid,
-    executable: process.execPath,
-    appPath: "/Applications/Aera.app",
-    startedAt: new Date(Date.now() - 1000).toISOString(),
-    endedAt: new Date().toISOString(),
-  });
-  assert.equal(result.platform, "darwin");
-  assert.equal(result.process.status, "collected");
-  assert.ok(result.process.tree.some((entry) => entry.pid === process.pid));
-  assert.ok(["collected", "missing", "failed"].includes(result.network.status));
-  assert.equal(Array.isArray(result.nativeInventory.entries), true);
-  assert.equal(typeof result.nativeInventory.electronModulesAbi, "string");
-  assert.doesNotMatch(JSON.stringify(result), /Applications\/Aera\.app/);
-});
+test(
+  "collects bounded macOS process, network and native inventory sections",
+  { skip: process.platform !== "darwin" },
+  () => {
+    const result = collectMacPlatformEvidence({
+      rootPid: process.pid,
+      executable: process.execPath,
+      appPath: "/Applications/Aera.app",
+      startedAt: new Date(Date.now() - 1000).toISOString(),
+      endedAt: new Date().toISOString(),
+    });
+    assert.equal(result.platform, "darwin");
+    assert.equal(result.process.status, "collected");
+    assert.ok(result.process.tree.some((entry) => entry.pid === process.pid));
+    assert.ok(
+      ["collected", "missing", "failed"].includes(result.network.status),
+    );
+    assert.equal(Array.isArray(result.nativeInventory.entries), true);
+    assert.equal(typeof result.nativeInventory.electronModulesAbi, "string");
+    assert.doesNotMatch(JSON.stringify(result), /Applications\/Aera\.app/);
+  },
+);
 
 test("records the SHA-256 of native module bytes, not path or metadata", () => {
   const root = mkdtempSync(join(tmpdir(), "aera-native-inventory-test-"));

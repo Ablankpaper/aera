@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, normalize } from "node:path";
+import { isAbsolute, join, normalize } from "node:path";
 
 import {
   buildProcessTree,
@@ -162,19 +162,15 @@ function parsePs(text) {
 }
 
 function collectOpenFiles(pid, runCommand = runBoundedCommand) {
-  const result = runCommand(
-    "lsof",
-    ["-nP", "-a", "-p", String(pid), "-Fn"],
-    {
-      timeoutMs: 5000,
-      maximumBytes: 512 * 1024,
-    },
-  );
+  const result = runCommand("lsof", ["-nP", "-a", "-p", String(pid), "-Fn"], {
+    timeoutMs: 5000,
+    maximumBytes: 512 * 1024,
+  });
   const paths = [];
   for (const line of result.stdout.split(/\r?\n/)) {
     if (!line.startsWith("n")) continue;
     const path = line.slice(1);
-    if (path.startsWith("/") && !paths.includes(path)) paths.push(path);
+    if (isAbsolute(path) && !paths.includes(path)) paths.push(path);
   }
   return {
     command: {
@@ -221,7 +217,7 @@ function collectExecutableIdentity(pid, fallbackPath, runCommand) {
     .split(/\r?\n/u)
     .filter((line) => line.startsWith("n"))
     .map((line) => line.slice(1))
-    .filter((path) => path.startsWith("/"));
+    .filter((path) => isAbsolute(path));
   const candidates = [...new Set([...paths, fallbackPath].filter(Boolean))];
   for (const path of candidates) {
     try {
@@ -229,10 +225,7 @@ function collectExecutableIdentity(pid, fallbackPath, runCommand) {
       if (!info.isFile()) continue;
       return {
         sha256: createHash("sha256").update(readFileSync(path)).digest("hex"),
-        pathSha256: hash(
-          "aera-diagnostic-executable-path-v1",
-          normalize(path),
-        ),
+        pathSha256: hash("aera-diagnostic-executable-path-v1", normalize(path)),
         status: "collected",
         source: paths.includes(path) ? "lsof_txt_handle" : "verified_fallback",
         command: commandSummary(result),
@@ -352,15 +345,11 @@ export function collectMacPlatformEvidence({
   const openFileFailed = openFileCommands.some(
     (command) => command.code !== 0 || command.timedOut,
   );
-  const openFileTimedOut = openFileCommands.some(
-    (command) => command.timedOut,
-  );
+  const openFileTimedOut = openFileCommands.some((command) => command.timedOut);
   const networkFailed = networkCommands.some(
     (command) => command.code !== 0 || command.timedOut,
   );
-  const networkTimedOut = networkCommands.some(
-    (command) => command.timedOut,
-  );
+  const networkTimedOut = networkCommands.some((command) => command.timedOut);
   const uniqueNetwork = [
     ...new Map(
       networkRows.map((row) => [

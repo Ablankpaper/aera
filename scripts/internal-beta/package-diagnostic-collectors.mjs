@@ -4,6 +4,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { canonicalDiagnosticJson } from "../../deliveries/beta33-external-diagnostic/aera-diagnostic-schema.mjs";
 import { packageCollector } from "../../deliveries/beta33-external-diagnostic/package-collector.mjs";
@@ -137,7 +138,7 @@ function parseArgs(argv) {
 
 if (
   process.argv[1] &&
-  resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)
+  resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))
 ) {
   try {
     const values = parseArgs(process.argv.slice(2));

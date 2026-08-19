@@ -3,6 +3,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   parseDiagnosticTargetV1,
   canonicalDiagnosticJson,
@@ -81,7 +82,7 @@ export function main(argv = process.argv.slice(2)) {
 
 if (
   process.argv[1] &&
-  resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)
+  resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))
 ) {
   try {
     process.exitCode = main();

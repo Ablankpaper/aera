@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
-const root = new URL(".", import.meta.url).pathname;
+const root = fileURLToPath(new URL(".", import.meta.url));
 
 test("macOS launcher uses the signed app Electron runtime and no global Node", () => {
   const script = readFileSync(join(root, "run-macos.sh"), "utf8");
@@ -44,13 +44,43 @@ test("native launchers expose a package integrity self-test", () => {
   assert.match(powershell, /SHASUMS\.txt/u);
 });
 
+test("Windows PowerShell launcher remains ASCII for Windows PowerShell 5.1", () => {
+  const powershell = readFileSync(join(root, "run-windows.ps1"), "utf8");
+  assert.equal(
+    [...powershell].some((character) => character.codePointAt(0) > 0x7f),
+    false,
+  );
+});
+
+test("PR-H command entrypoints convert file URLs to filesystem paths", () => {
+  for (const path of [
+    new URL(
+      "../../scripts/internal-beta/build-diagnostic-target.mjs",
+      import.meta.url,
+    ),
+    new URL(
+      "../../scripts/internal-beta/inspect-diagnostic-identity.mjs",
+      import.meta.url,
+    ),
+    new URL(
+      "../../scripts/internal-beta/package-diagnostic-collectors.mjs",
+      import.meta.url,
+    ),
+  ]) {
+    const source = readFileSync(path, "utf8");
+    assert.doesNotMatch(source, /new URL\(import\.meta\.url\)\.pathname/u);
+  }
+});
+
 test("collector main executes when its path contains spaces", () => {
   const root = mkdtempSync(join(tmpdir(), "aera collector launcher "));
   try {
     const copied = join(root, "collector with spaces.mjs");
     const sourceDir = fileURLToPath(new URL(".", import.meta.url));
     for (const name of readdirSync(sourceDir)) {
-      if (/^(?:aera-diagnostic[^/]*\.mjs|aera-diagnostic-[^/]*\.json)$/.test(name))
+      if (
+        /^(?:aera-diagnostic[^/]*\.mjs|aera-diagnostic-[^/]*\.json)$/.test(name)
+      )
         cpSync(join(sourceDir, name), join(root, name));
     }
     cpSync(join(sourceDir, "aera-diagnostic.mjs"), copied);

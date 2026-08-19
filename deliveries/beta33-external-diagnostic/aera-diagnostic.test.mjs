@@ -14,13 +14,14 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, normalize } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import { parseExistingAeraProcessRows } from "./aera-diagnostic.mjs";
 import { createDiagnosticSessionFixture } from "./fixtures/session-fixture.mjs";
 import { DatabaseSync } from "node:sqlite";
 
-const cli = new URL("./aera-diagnostic.mjs", import.meta.url).pathname;
+const cli = fileURLToPath(new URL("./aera-diagnostic.mjs", import.meta.url));
 
 test("existing-process detection ignores tools that only mention Aera paths", () => {
   const rows = parseExistingAeraProcessRows(

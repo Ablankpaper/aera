@@ -248,6 +248,8 @@ V4 uses a closed manifest and a single bounded evidence timeline.
 
 It contains Main/Preload/Renderer/IPC stable events, the verified Aera PID tree, process-owned network endpoints and open-file evidence, native-module ABI inventory, SQLite database/WAL/SHM read evidence, journal summaries, five managed model files before and after plus backups, route candidates, owner/profile associations, updater events, Runtime logs, Cloud-origin observability, bounded environment flags, macOS signature/Quarantine/DNS/route evidence, Windows platform evidence, and both exact macOS unified-log requests.
 
+Journal reads prefer the system SQLite CLI and fall back to Electron's built-in read-only SQLite only when the default CLI is absent. Both paths use the immutable or copied-sidecar snapshot and verify the source database, WAL, and SHM fingerprints remain unchanged.
+
 Event coverage is admitted only from the emitted `[MODEL_CONFIGURATION]`, `[AGENTERA_RUNTIME_UPDATE]`, and `[AGENTERA_RUNTIME_OWNER_TRANSITION]` labels. A label occurring after a `CHAT user|assistant|system:` marker is treated as chat content and cannot confer coverage. Synthetic family names do not prove IPC, owner, or updater coverage, and `internal_stage_visibility=external_only` still excludes invisible Coordinator stages.
 
 Runtime log eligibility ignores file mtime. Only timestamped lines inside the exact capture window from a log-like file observed open by a verified Runtime PID contribute structured text; known Profile and Desktop paths may be inventoried but cannot supply text without that PID/open-handle binding.
@@ -267,6 +269,8 @@ It binds platform, version, architecture, bundle identity, executable digest, in
 The macOS and Windows wrappers execute the Aera-bundled Electron runtime (`ELECTRON_RUN_AS_NODE=1` on macOS) rather than a global Node installation. They launch one verified application process, reject an already-running Aera instance, stop on one user-confirmed reproduction, and never click, retry, repair, upload, or publish.
 
 Windows ProductVersion is read from the executable when available; an unbound capture records `unknown` rather than inventing a version, while a candidate-bound target rejects that mismatch. Both platform ZIPs can be built on the release host's native archiver without requiring the other platform's shell.
+
+The Windows launcher stays ASCII-compatible with Windows PowerShell 5.1, and every committed collector delivery file is checked out with LF bytes so its cross-platform checksum self-test verifies the reviewed source exactly.
 
 The candidate workflow publishes the two collector ZIPs only under the separate `diagnostic-collectors` artifact directory. Their ledger is path-free and records exact size, SHA-256, SHA-512, target digest, schema, and collector version; their bytes and ledger join the candidate checksum and attestation subjects but never Aera.app, setup, portable, app ZIP, desktop-update payload, or Runtime Seed. Native CI runs each platform launcher's checksum self-test before candidate publication.
 

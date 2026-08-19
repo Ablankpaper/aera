@@ -19,21 +19,21 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 if ($SelfTest) {
   $sumsPath = Join-Path $scriptDir "SHASUMS.txt"
   if (-not (Test-Path -LiteralPath $sumsPath -PathType Leaf)) {
-    throw "采集器校验清单缺失"
+    throw "Collector checksum inventory is missing"
   }
   foreach ($line in Get-Content -LiteralPath $sumsPath) {
     if ($line -notmatch '^([0-9a-fA-F]{64})  ([A-Za-z0-9._-]+)$') {
-      throw "采集器校验清单格式错误"
+      throw "Collector checksum inventory is invalid"
     }
     $expected = $Matches[1].ToLowerInvariant()
     $file = Join-Path $scriptDir $Matches[2]
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
-      throw "采集器文件缺失"
+      throw "Collector file is missing"
     }
     $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($actual -ne $expected) { throw "采集器完整性校验失败" }
+    if ($actual -ne $expected) { throw "Collector integrity check failed" }
   }
-  Write-Output "Aera Windows 采集器自检通过"
+  Write-Output "Aera Windows collector self-test passed"
   exit 0
 }
 
@@ -48,18 +48,18 @@ function Resolve-AbsolutePath {
     $resolved = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $Value))
   }
   if (-not [System.IO.Path]::IsPathRooted($resolved)) {
-    throw "路径必须是绝对路径: $Value"
+    throw "Path must be absolute: $Value"
   }
   if ($MustExist -and -not (Test-Path -LiteralPath $resolved)) {
-    throw "路径不存在: $resolved"
+    throw "Path does not exist: $resolved"
   }
   return $resolved
 }
 
-if (-not $App) { throw "请提供 -App C:\\Program Files\\Aera\\Aera.exe" }
+if (-not $App) { throw "Provide -App C:\\Program Files\\Aera\\Aera.exe" }
 $appPath = Resolve-AbsolutePath -Value $App -MustExist
 if (-not (Test-Path -LiteralPath $appPath -PathType Leaf)) {
-  throw "找不到 Aera 可执行文件: $appPath"
+  throw "Aera executable was not found: $appPath"
 }
 
 $collectorScript = Join-Path $scriptDir "aera-diagnostic.mjs"

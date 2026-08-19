@@ -2,6 +2,8 @@
 
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 
 import {
   prepareSqliteReadSnapshot,
@@ -71,6 +73,26 @@ function normalizeRow(row) {
   };
 }
 
+const JOURNAL_QUERY =
+  "SELECT operation_id, profile_id, state, stage, owner_handle, old_route_key, new_route_key, created_at, updated_at FROM desktop_model_configuration_operations ORDER BY created_at, operation_id LIMIT 500;";
+
+function queryWithBuiltInSqlite(sqliteTarget) {
+  const path = String(sqliteTarget).startsWith("file:")
+    ? fileURLToPath(sqliteTarget)
+    : sqliteTarget;
+  const database = new DatabaseSync(path, { readOnly: true });
+  try {
+    return database.prepare(JOURNAL_QUERY).all();
+  } finally {
+    database.close();
+  }
+}
+
+function builtInFailureReason(error) {
+  const message = String(error?.message || error || "");
+  return failureReason({ error: null, timedOut: false, stderr: message });
+}
+
 /**
  * Query only the stable journal fields from a private immutable/snapshot view.
  * Source paths and raw owner/profile/route/operation values never leave here.
@@ -106,16 +128,30 @@ export function collectModelJournal(dbPath, options = {}) {
   }
 
   let command;
+  let builtInRows = null;
+  let builtInError = null;
+  const runCommand = options.runCommand || runBoundedCommand;
   try {
-    command = runBoundedCommand(
+    command = runCommand(
       options.sqliteExecutable || "sqlite3",
       [
         "-json",
         snapshot.sqliteTarget,
-        "PRAGMA query_only=ON; SELECT operation_id, profile_id, state, stage, owner_handle, old_route_key, new_route_key, created_at, updated_at FROM desktop_model_configuration_operations ORDER BY created_at, operation_id LIMIT 500;",
+        `PRAGMA query_only=ON; ${JOURNAL_QUERY}`,
       ],
       { timeoutMs: options.timeoutMs ?? 5000, maximumBytes: 2 * 1024 * 1024 },
     );
+    if (
+      command.code !== 0 &&
+      failureReason(command) === "sqlite_cli_unavailable" &&
+      options.sqliteExecutable == null
+    ) {
+      try {
+        builtInRows = queryWithBuiltInSqlite(snapshot.sqliteTarget);
+      } catch (error) {
+        builtInError = error;
+      }
+    }
   } finally {
     snapshot.cleanup();
   }
@@ -128,6 +164,30 @@ export function collectModelJournal(dbPath, options = {}) {
       publicFingerprint(entry, dbPath),
     ),
   };
+  if (builtInRows) {
+    return {
+      status: "collected",
+      reason: null,
+      ...common,
+      rows: builtInRows.map(normalizeRow),
+      command: {
+        code: command.code,
+        timedOut: command.timedOut,
+        stdoutBytes: command.stdoutBytes,
+        stderrBytes: command.stderrBytes,
+        stdoutTruncated: command.stdoutTruncated,
+        stderrTruncated: command.stderrTruncated,
+      },
+    };
+  }
+  if (builtInError) {
+    return {
+      status: "failed",
+      reason: builtInFailureReason(builtInError),
+      ...common,
+      rows: [],
+    };
+  }
   if (command.code !== 0) {
     return {
       status: "failed",

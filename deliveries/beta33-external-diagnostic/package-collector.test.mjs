@@ -103,7 +103,7 @@ test(
         { encoding: "utf8" },
       );
       assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-      assert.match(result.stdout, /自检通过/u);
+      assert.match(result.stdout, /collector self-test passed/u);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -167,4 +167,15 @@ test("writes and verifies a deterministic committed SHASUMS inventory", () => {
     const actual = createHash("sha256").update(bytes).digest("hex");
     assert.equal(actual, match[1], match[2]);
   }
+});
+
+test("keeps every external collector delivery byte stable across checkouts", () => {
+  const attributes = readFileSync(
+    new URL("../../.gitattributes", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    attributes,
+    /^deliveries\/beta33-external-diagnostic\/\*\* text eol=lf$/mu,
+  );
 });

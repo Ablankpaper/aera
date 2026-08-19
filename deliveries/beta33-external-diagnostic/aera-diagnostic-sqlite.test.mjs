@@ -96,3 +96,34 @@ test("reports missing DB and sqlite CLI explicitly", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("uses the built-in read-only SQLite fallback when the default CLI is unavailable", () => {
+  const root = mkdtempSync(join(tmpdir(), "aera-sqlite-fallback-test-"));
+  try {
+    const db = makeDatabase(root);
+    let invocations = 0;
+    const result = collectModelJournal(db, {
+      runCommand() {
+        invocations += 1;
+        return {
+          code: null,
+          timedOut: false,
+          stdout: "",
+          stderr: "",
+          stdoutBytes: 0,
+          stderrBytes: 0,
+          stdoutTruncated: false,
+          stderrTruncated: false,
+          error: "spawn sqlite3 ENOENT",
+        };
+      },
+    });
+    assert.equal(invocations, 1);
+    assert.equal(result.status, "collected");
+    assert.equal(result.readStrategy, "immutable");
+    assert.equal(result.rows.length, 1);
+    assert.equal(result.rows[0].state, "rolled_back");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
