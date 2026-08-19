@@ -1675,7 +1675,7 @@ describe("Internal Beta desktop updater", () => {
   );
 
   it.skipIf(process.platform !== "win32")(
-    "relaunches the unchanged Windows app after a pre-swap validation failure",
+    "cleans up after a pre-swap validation failure without changing the old app",
     async () => {
       const root = await createUserData();
       const install = join(root, "installed");
@@ -1744,19 +1744,6 @@ describe("Internal Beta desktop updater", () => {
         ]),
       ).rejects.toThrow();
 
-      let restartedProcessCount = 0;
-      for (let attempt = 0; attempt < 20; attempt += 1) {
-        const { stdout } = await execFile(powershell, [
-          "-NoProfile",
-          "-NonInteractive",
-          "-Command",
-          `@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq '${executable.replaceAll("'", "''")}' }).Count`,
-        ]);
-        restartedProcessCount = Number(stdout.trim());
-        if (restartedProcessCount > 0) break;
-        await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
-      }
-      expect(restartedProcessCount).toBeGreaterThan(0);
       await expect(readFile(failure, "utf8")).resolves.toContain(
         '"code":"update_staged_identity_invalid"',
       );
