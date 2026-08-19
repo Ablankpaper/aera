@@ -383,6 +383,18 @@ test("internal-Beta candidate is exact-SHA, notarized on macOS, explicitly unsig
   assert.match(windowsVerifierRaw, /\[string\]\$SigningMode = "authenticode"/u);
   assert.match(windowsVerifierRaw, /SignatureStatus\]::NotSigned/u);
   assert.match(windowsVerifierRaw, /unsignedVerifiedArtifacts/u);
+  assert.match(
+    windowsVerifierRaw,
+    /function Assert-WindowsArtifactWrapperPE[\s\S]*\$machine -ne 0x014c -and \$machine -ne 0x8664/u,
+  );
+  assert.match(
+    windowsVerifierRaw,
+    /\$item\.peMachine = Assert-WindowsArtifactWrapperPE \$file\.FullName/u,
+  );
+  assert.match(
+    windowsVerifierRaw,
+    /\$nativeModule = Join-Path[\s\S]*Assert-X64PE \$nativeModule/u,
+  );
   assert.match(raw, /candidate\/evidence\/windows-evidence\.json/u);
 
   assert.match(productionRaw, /Build and Authenticode-sign Windows x64/u);
