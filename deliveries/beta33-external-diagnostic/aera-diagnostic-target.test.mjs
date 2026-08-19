@@ -19,7 +19,7 @@ import {
   inspectTargetIdentity,
   isProcessIdentityStable,
   resolveTargetExecutable,
-  windowsProductVersion,
+  windowsFileVersion,
 } from "./aera-diagnostic-target.mjs";
 
 const SHA = (char) => char.repeat(64);
@@ -162,9 +162,9 @@ test("rejects an installed package without app.asar identity", () => {
   }
 });
 
-test("reads a bounded Windows ProductVersion", () => {
+test("reads the full prerelease version from bounded Windows FileVersion metadata", () => {
   const calls = [];
-  const version = windowsProductVersion(
+  const version = windowsFileVersion(
     "C:\\Program Files\\Aera\\Aera.exe",
     (command, args, options) => {
       calls.push({ command, args, options });
@@ -174,6 +174,7 @@ test("reads a bounded Windows ProductVersion", () => {
   );
   assert.equal(version, "0.7.4-internal-beta.33");
   assert.equal(calls[0].command, "powershell.exe");
+  assert.match(calls[0].args.at(-1), /\.VersionInfo\.FileVersion/u);
   assert.ok(calls[0].options.timeoutMs <= 5_000);
   assert.ok(calls[0].options.maximumBytes <= 8 * 1024);
 });

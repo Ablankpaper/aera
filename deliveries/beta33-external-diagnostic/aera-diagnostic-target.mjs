@@ -14,7 +14,7 @@ import { runBoundedCommand } from "./aera-diagnostic-core.mjs";
 
 const SHA256 = /^[0-9a-f]{64}$/iu;
 
-export function windowsProductVersion(
+export function windowsFileVersion(
   executable,
   commandRunner = runBoundedCommand,
   hostPlatform = process.platform,
@@ -26,7 +26,7 @@ export function windowsProductVersion(
     [
       "-NoProfile",
       "-Command",
-      `(Get-Item -LiteralPath ${literal}).VersionInfo.ProductVersion`,
+      `(Get-Item -LiteralPath ${literal}).VersionInfo.FileVersion`,
     ],
     { timeoutMs: 5_000, maximumBytes: 8 * 1024 },
   );
@@ -171,7 +171,7 @@ export function inspectTargetIdentity({
   const detectedVersion =
     platform === "darwin"
       ? plistValue(resolvedApp, "CFBundleShortVersionString")
-      : windowsProductVersion(executable);
+      : windowsFileVersion(executable);
   if (version && detectedVersion && version !== detectedVersion)
     throw new Error("target installed version differs from expected version");
   const identity =
