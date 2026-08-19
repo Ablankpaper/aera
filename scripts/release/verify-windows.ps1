@@ -45,13 +45,13 @@ function Assert-X64PE([string]$Path) {
   if ((Get-PEMachine $Path) -ne 0x8664) { throw "PE machine is not x64: $Path" }
 }
 
-function Assert-WindowsSetupPE([string]$Path) {
+function Assert-WindowsArtifactWrapperPE([string]$Path) {
   $machine = Get-PEMachine $Path
-  # NSIS commonly emits a 32-bit bootstrapper for an x64 application. The
-  # installer is still the x64 artifact; the unpacked app and portable build
-  # remain strict x64 checks below.
+  # NSIS commonly emits 32-bit setup and portable bootstrapper executables for
+  # an x64 application. The unpacked app and native module remain strict x64
+  # checks below, so accepting the wrapper does not weaken the payload gate.
   if ($machine -ne 0x014c -and $machine -ne 0x8664) {
-    throw "Windows setup PE machine is unsupported (expected x86 bootstrapper or x64): $Path"
+    throw "Windows artifact wrapper PE machine is unsupported (expected x86 bootstrapper or x64): $Path"
   }
   return $machine
 }
@@ -119,13 +119,7 @@ $timestampedNames = @()
 $unsignedNames = @()
 foreach ($item in $artifacts) {
   $file = $item.file
-  if ($item.kind -eq "windows_setup") {
-    $item.peMachine = Assert-WindowsSetupPE $file.FullName
-  }
-  else {
-    Assert-X64PE $file.FullName
-    $item.peMachine = 0x8664
-  }
+  $item.peMachine = Assert-WindowsArtifactWrapperPE $file.FullName
   $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
   if ($SigningMode -eq "authenticode") {
     if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
