@@ -16,7 +16,7 @@ import {
   validatePackagedRuntimeEntries,
 } from "./verify-packaged-updater-extraction.mjs";
 
-const VERSION = "0.7.4-internal-beta.32";
+const VERSION = "0.7.4-internal-beta.33";
 const TEST_ORIGIN = "https://203.0.113.10";
 const OTHER_TEST_ORIGIN = "https://203.0.113.11";
 const TEST_PUBLIC_KEY = Buffer.alloc(32, 73).toString("base64url");
@@ -134,7 +134,7 @@ function commandRunner(options = {}) {
   };
 }
 
-test("accepts one signed arm64 Beta.32 app with app.asar", async () => {
+test("accepts one signed arm64 Beta.33 app with app.asar", async () => {
   const fixture = await createFixture();
   try {
     const app = await validateExtractedMacApp(

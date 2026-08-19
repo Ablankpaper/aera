@@ -36,14 +36,14 @@ test("accepts one live packaged Main Preload Renderer startup", () => {
       hasHermesApi: true,
       hasRendererReadyBridge: true,
       rendererReadyAccepted: true,
-      appVersion: "0.7.4-internal-beta.32",
+      appVersion: "0.7.4-internal-beta.33",
     },
-    "0.7.4-internal-beta.32",
+    "0.7.4-internal-beta.33",
   );
 
   const evidence = buildPackagedStartupEvidence({
     sourceSha: "1".repeat(40),
-    version: "0.7.4-internal-beta.32",
+    version: "0.7.4-internal-beta.33",
     platform: "darwin",
     architecture: "arm64",
     executableSha256: HASH,
@@ -79,9 +79,9 @@ test("rejects a blank Renderer or missing Preload bridge", () => {
           hasHermesApi: true,
           hasRendererReadyBridge: true,
           rendererReadyAccepted: true,
-          appVersion: "0.7.4-internal-beta.32",
+          appVersion: "0.7.4-internal-beta.33",
         },
-        "0.7.4-internal-beta.32",
+        "0.7.4-internal-beta.33",
       ),
     /Renderer body is blank/u,
   );
@@ -98,7 +98,7 @@ test("rejects a blank Renderer or missing Preload bridge", () => {
           rendererReadyAccepted: false,
           appVersion: null,
         },
-        "0.7.4-internal-beta.32",
+        "0.7.4-internal-beta.33",
       ),
     /Preload bridge is unavailable/u,
   );
@@ -118,7 +118,7 @@ test("rejects a packaged Renderer from a different version", () => {
           rendererReadyAccepted: true,
           appVersion: "0.7.4-internal-beta.31",
         },
-        "0.7.4-internal-beta.32",
+        "0.7.4-internal-beta.33",
       ),
     /version differs/u,
   );
