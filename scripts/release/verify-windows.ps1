@@ -191,7 +191,7 @@ foreach ($item in $artifacts) {
   }
 }
 
-$runtimeSeedManifest = [ordered]@{
+$runtimeSeedManifestEvidence = [ordered]@{
   manifest = $manifest.Name
   manifestSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $manifest.FullName).Hash.ToLowerInvariant()
 }
@@ -204,7 +204,7 @@ if ($SigningMode -eq "authenticode") {
     timestampVerifiedArtifacts = @($timestampedNames)
     runtimeSeedVerifiedArtifacts = @($runtimeVerified)
     nativeModuleArchitecture = "x64"
-    runtimeSeedManifest = $runtimeSeedManifest
+    runtimeSeedManifest = $runtimeSeedManifestEvidence
     artifacts = @($artifactEvidence)
   }
 }
@@ -215,7 +215,7 @@ else {
     unsignedVerifiedArtifacts = @($unsignedNames)
     runtimeSeedVerifiedArtifacts = @($runtimeVerified)
     nativeModuleArchitecture = "x64"
-    runtimeSeedManifest = $runtimeSeedManifest
+    runtimeSeedManifest = $runtimeSeedManifestEvidence
     artifacts = @($artifactEvidence)
   }
 }
@@ -225,6 +225,31 @@ if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
 if (Test-Path $Output) { throw "Windows evidence output already exists" }
 $json = $evidence | ConvertTo-Json -Depth 8 -Compress
 [System.IO.File]::WriteAllText($Output, "$json`n", [System.Text.UTF8Encoding]::new($false))
+
+# Round-trip verification: ensure runtimeSeedManifest is an object with correct structure
+$roundTrip = $evidence | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+if ($roundTrip.runtimeSeedManifest -isnot [PSCustomObject]) {
+  throw "Round-trip check failed: runtimeSeedManifest is not an object"
+}
+if (-not $roundTrip.runtimeSeedManifest.manifest) {
+  throw "Round-trip check failed: runtimeSeedManifest.manifest is missing"
+}
+if (-not $roundTrip.runtimeSeedManifest.manifestSha256) {
+  throw "Round-trip check failed: runtimeSeedManifest.manifestSha256 is missing"
+}
+if ($roundTrip.runtimeSeedManifest.manifestSha256 -notmatch '^[0-9a-f]{64}$') {
+  throw "Round-trip check failed: manifestSha256 is not a valid 64-char lowercase SHA-256"
+}
+if ($roundTrip.runtimeSeedManifest.manifest -ne $manifest.Name) {
+  throw "Round-trip check failed: manifest filename mismatch"
+}
+$expectedProps = @('manifest', 'manifestSha256')
+$actualProps = $roundTrip.runtimeSeedManifest.PSObject.Properties.Name
+$extraProps = $actualProps | Where-Object { $_ -notin $expectedProps }
+if ($extraProps) {
+  throw "Round-trip check failed: runtimeSeedManifest contains unexpected properties: $($extraProps -join ', ')"
+}
+
 if ($SigningMode -eq "authenticode") {
   Write-Output "Windows Authenticode, timestamp, x64, and Runtime Seed verification passed"
 }
