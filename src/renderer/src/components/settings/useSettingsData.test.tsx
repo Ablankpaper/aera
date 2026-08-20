@@ -37,9 +37,11 @@ describe("useSettingsData remote OAuth", () => {
   let desktopUpdateStageListener:
     | ((event: DesktopUpdateStageV2) => void)
     | null;
+  let updateNotAvailableListener: (() => void) | null;
 
   beforeEach(() => {
     desktopUpdateStageListener = null;
+    updateNotAvailableListener = null;
     const values = new Map<string, string>();
     Object.defineProperty(globalThis, "localStorage", {
       configurable: true,
@@ -64,6 +66,10 @@ describe("useSettingsData remote OAuth", () => {
         onUpdateAvailable: vi.fn(() => vi.fn()),
         onUpdateDownloadProgress: vi.fn(() => vi.fn()),
         onUpdateDownloaded: vi.fn(() => vi.fn()),
+        onUpdateNotAvailable: vi.fn((listener: () => void) => {
+          updateNotAvailableListener = listener;
+          return vi.fn();
+        }),
         onUpdateError: vi.fn(() => vi.fn()),
         onDesktopUpdateStage: vi.fn(
           (listener: (event: DesktopUpdateStageV2) => void) => {
@@ -156,5 +162,33 @@ describe("useSettingsData remote OAuth", () => {
       "settings.updateSignatureInvalid",
     );
     expect(result.current.desktopUpdateError).not.toContain("https://");
+  });
+
+  it("clears a metadata-verification progress projection when Main reports no update", async () => {
+    const { result } = renderHook(() => useSettingsData());
+    await waitFor(() => expect(result.current.remoteAuthMode).toBe("oauth"));
+
+    desktopUpdateStageListener?.({
+      schemaVersion: 2,
+      operationId: "op-0123456789ab",
+      stage: "verify",
+      state: "started",
+      code: null,
+      retryability: "not_retryable",
+      diagnosticId: "0123456789ab",
+      targetVersion: null,
+    });
+    await waitFor(() =>
+      expect(result.current.desktopUpdateState).toBe("checking"),
+    );
+
+    expect(updateNotAvailableListener).not.toBeNull();
+    act(() => updateNotAvailableListener?.());
+
+    await waitFor(() =>
+      expect(result.current.desktopUpdateState).toBe("uptodate"),
+    );
+    expect(result.current.desktopUpdatePercent).toBeNull();
+    expect(result.current.desktopUpdateStageEvent).toBeNull();
   });
 });

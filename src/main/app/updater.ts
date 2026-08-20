@@ -112,6 +112,8 @@ function publishSnapshot(
       version: snapshot.version,
       releaseNotes: snapshot.releaseNotes ?? "",
     });
+  } else if (snapshot.state === "uptodate") {
+    webContents.send("update-not-available");
   } else if (snapshot.state === "downloading") {
     webContents.send("update-download-progress", {
       percent: snapshot.percent ?? 0,

@@ -1,6 +1,7 @@
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import {
   expect,
@@ -24,6 +25,7 @@ const RENAMED_PROVIDER = "123456";
 const TWIN_PROVIDER = "Twin provider";
 const ORIGINAL_MODEL = "original-model-e2e";
 const ORIGINAL_KEY = "provider-lifecycle-original-key";
+const RECOVERY_KEY = "provider-lifecycle-recovery-key";
 const RENAMED_KEY = "provider-lifecycle-renamed-key";
 const UPDATED_KEY = "provider-lifecycle-updated-key";
 const TWIN_KEY = "provider-lifecycle-twin-key";
@@ -33,17 +35,37 @@ interface DiscoveryRelay {
   baseUrl: string;
   alternateBaseUrl: string;
   authorizationHeaders: string[];
+  respond(statusCode: number, models?: string[]): void;
   server: Server;
 }
 
 async function startEmptyDiscoveryRelay(): Promise<DiscoveryRelay> {
   const authorizationHeaders: string[] = [];
+  let statusCode = 200;
+  let models: string[] = [];
   const server = createServer((request, response) => {
     const url = new URL(request.url || "/", "http://127.0.0.1");
     if (request.method === "GET" && url.pathname.endsWith("/models")) {
       authorizationHeaders.push(request.headers.authorization ?? "");
+      if (statusCode >= 400) {
+        response.writeHead(statusCode, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            error: {
+              message: "Fixture discovery failure",
+              type: "server_error",
+            },
+          }),
+        );
+        return;
+      }
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ object: "list", data: [] }));
+      response.end(
+        JSON.stringify({
+          object: "list",
+          data: models.map((id) => ({ id, object: "model" })),
+        }),
+      );
       return;
     }
     response.writeHead(404).end();
@@ -61,8 +83,40 @@ async function startEmptyDiscoveryRelay(): Promise<DiscoveryRelay> {
     baseUrl: `${origin}/v1`,
     alternateBaseUrl: `${origin}/alternate/v1`,
     authorizationHeaders,
+    respond(nextStatusCode, nextModels = []) {
+      statusCode = nextStatusCode;
+      models = [...nextModels];
+    },
     server,
   };
+}
+
+function modelOperationState(userDataPath: string): {
+  count: number;
+  latestState: string | null;
+} {
+  const sqlite = new DatabaseSync(
+    join(userDataPath, "model-configuration", "model-configuration.db"),
+  );
+  try {
+    const count = Number(
+      (
+        sqlite
+          .prepare(
+            "SELECT COUNT(*) AS count FROM desktop_model_configuration_operations",
+          )
+          .get() as { count: number | bigint }
+      ).count,
+    );
+    const latest = sqlite
+      .prepare(
+        "SELECT state FROM desktop_model_configuration_operations ORDER BY rowid DESC LIMIT 1",
+      )
+      .get() as { state: string } | undefined;
+    return { count, latestState: latest?.state ?? null };
+  } finally {
+    sqlite.close();
+  }
 }
 
 async function closeServer(server: Server | null): Promise<void> {
@@ -192,6 +246,25 @@ test("renames, reroutes, and deletes one stable custom provider in Electron", as
     await page.reload();
     await expect(page.locator(".layout")).toBeVisible({ timeout: 60_000 });
     await dismissStartupModelPrompt(page);
+
+    // Exercise the real Main -> preload -> Renderer event path that previously
+    // left an up-to-date client permanently showing "Downloading 0%".
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.webContents.send(
+        "update-download-progress",
+        { percent: 0 },
+      );
+    });
+    await expect(page.locator(".sidebar-update-btn")).toContainText(
+      "Downloading 0%",
+    );
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.webContents.send(
+        "update-not-available",
+      );
+    });
+    await expect(page.locator(".sidebar-update-btn")).toHaveCount(0);
+
     await openModelSettings(page);
 
     const originalDialog = await openAddCustomDialog(page);
@@ -201,11 +274,72 @@ test("renames, reroutes, and deletes one stable custom provider in Electron", as
       apiKey: ORIGINAL_KEY,
       model: ORIGINAL_MODEL,
     });
+    const journalBeforeOriginalSave = modelOperationState(harness.userData);
     await originalDialog
       .getByRole("button", { name: "Add and use", exact: true })
       .click();
     await expect(originalDialog).toBeHidden();
     await expect(serviceCard(page, ORIGINAL_PROVIDER)).toHaveCount(1);
+    expect(modelOperationState(harness.userData)).toEqual({
+      count: journalBeforeOriginalSave.count + 1,
+      latestState: "committed",
+    });
+
+    // Reproduce the stale-card sequence from the Beta.33 report: a card first
+    // records a discovery failure, then its edit dialog successfully fetches
+    // 21 models. The old card error must disappear immediately and the save
+    // must persist the complete catalog.
+    const originalCardAfterSave = serviceCard(page, ORIGINAL_PROVIDER);
+    await originalCardAfterSave
+      .getByRole("button", { name: "Edit", exact: true })
+      .click();
+    const cacheBustDialog = page.getByRole("dialog", {
+      name: "Edit model service",
+    });
+    await cacheBustDialog.locator("#provider-api-key").fill(RECOVERY_KEY);
+    await cacheBustDialog
+      .getByRole("button", { name: "Save and use", exact: true })
+      .click();
+    await expect(cacheBustDialog).toBeHidden();
+    relay.respond(503);
+    await originalCardAfterSave
+      .getByRole("button", { name: "Refresh models", exact: true })
+      .click();
+    await expect(
+      originalCardAfterSave.locator(".model-service-feedback.error"),
+    ).toBeVisible();
+
+    const discoveredModels = [
+      ORIGINAL_MODEL,
+      ...Array.from(
+        { length: 20 },
+        (_, index) => `discovered-model-${index + 1}`,
+      ),
+    ];
+    relay.respond(200, discoveredModels);
+    await originalCardAfterSave
+      .getByRole("button", { name: "Edit", exact: true })
+      .click();
+    const discoveryRecoveryDialog = page.getByRole("dialog", {
+      name: "Edit model service",
+    });
+    await discoveryRecoveryDialog
+      .getByRole("button", { name: "Fetch", exact: true })
+      .click();
+    await expect(
+      discoveryRecoveryDialog.getByText("Fetched this time: 21 models", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      originalCardAfterSave.locator(".model-service-feedback.error"),
+    ).toHaveCount(0);
+    await discoveryRecoveryDialog
+      .getByRole("button", { name: "Save and use", exact: true })
+      .click();
+    await expect(discoveryRecoveryDialog).toBeHidden();
+    await expect(originalCardAfterSave).toContainText("21 models");
+    relay.respond(200);
 
     const originalRecord = await page.evaluate(async (providerName) => {
       const profiles = await window.hermesAPI.listProfiles();

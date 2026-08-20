@@ -786,6 +786,16 @@ function startupFailureCode(
   return fallback;
 }
 
+function deferredOwnerInitializationCode(error: unknown): string | null {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return null;
+  }
+  return error.code === "model_configuration_auth_required" ||
+    error.code === "model_catalog_empty"
+    ? error.code
+    : null;
+}
+
 const ROUTE_REPAIR_REQUIRED_ROLES: readonly ModelConfigurationFileRole[] = [
   "providers",
   "models",
@@ -1064,11 +1074,19 @@ export async function prepareModelConfigurationRuntime(
         throw new Error("Managed model catalog initialization was rejected.");
       }
     } catch (error) {
-      recoveryError = error;
-      unavailable = startupFailure(
-        startupFailureCode(error, routeStartupFailureCode),
-      );
-      coordinator = null;
+      const deferredCode = deferredOwnerInitializationCode(error);
+      if (deferredCode !== null) {
+        console.info(
+          "[MODEL_CONFIGURATION] owner initialization deferred",
+          deferredCode,
+        );
+      } else {
+        recoveryError = error;
+        unavailable = startupFailure(
+          startupFailureCode(error, routeStartupFailureCode),
+        );
+        coordinator = null;
+      }
     }
   }
 
