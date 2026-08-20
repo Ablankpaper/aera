@@ -66,6 +66,12 @@ The **model** dropdown merges that provider's saved models with live discovery (
 
 The debounced auto-save keeps a guard from the grid era that still applies: `saveModelConfig` skips persisting a `custom` selection whose `base_url` is empty (writing it would clobber config.yaml with a dead endpoint) — **unless** config.yaml already holds a custom endpoint, tracked by the `persistedCustomUrl` ref (refreshed on load and after each save). In that case the empty value IS persisted, so deliberately clearing a configured custom endpoint doesn't leave the UI (empty) and config.yaml (old URL) disagreeing after navigation/relaunch.
 
+### Coordinated activation suppresses legacy auto-save
+
+After Model Center commits a coordinated mutation, its canonical route may update the parent form but must not replay through the older debounced `setModelConfig` writer.
+
+The parent pauses that writer for the commit render and restores it on the next frame.
+
 ## LLM-provider keys are configured-only, via modals
 
 The `SETTINGS_SECTIONS` "LLM Providers" section no longer renders a static key card for every known provider (an overwhelming wall of empty inputs). It shows only providers with a key set, plus an **Add provider** action.

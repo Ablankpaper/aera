@@ -588,8 +588,13 @@ export function createProductAccessGuard(options: {
           "sign_in_required",
         );
       }
-      options.assertCurrentEntitlement?.();
+      // Guest-level operations only prepare or inspect access (for example,
+      // resolving the current account's local Profile after a macOS window is
+      // reopened). They never start a task and are already available to an
+      // isolated Guest, so a signed-in/offline session must not be held behind
+      // the new-task entitlement check here.
       if (level === "guest") return;
+      options.assertCurrentEntitlement?.();
       if (
         level === "online" &&
         (state.status !== "authenticated" || !state.cloudAvailable)
