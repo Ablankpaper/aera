@@ -1730,6 +1730,12 @@ const hermesAPI = {
     return () => ipcRenderer.removeListener("update-downloaded", handler);
   },
 
+  onUpdateNotAvailable: (callback: () => void): (() => void) => {
+    const handler = (): void => callback();
+    ipcRenderer.on("update-not-available", handler);
+    return () => ipcRenderer.removeListener("update-not-available", handler);
+  },
+
   onUpdateError: (callback: (message: string) => void): (() => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,

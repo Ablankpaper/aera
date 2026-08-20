@@ -486,6 +486,13 @@ function Layout({
       setUpdatePercent(null);
       setUpdateError(null);
     });
+    const cleanupNotAvailable = window.hermesAPI.onUpdateNotAvailable(() => {
+      setUpdateState(null);
+      setUpdateVersion(null);
+      setUpdatePercent(null);
+      setUpdateStageEvent(null);
+      setUpdateError(null);
+    });
     const cleanupError = window.hermesAPI.onUpdateError((message) => {
       setUpdateState("error");
       void message;
@@ -522,6 +529,7 @@ function Layout({
       cleanupAvailable();
       cleanupProgress();
       cleanupDownloaded();
+      cleanupNotAvailable();
       cleanupError();
       cleanupStage?.();
     };

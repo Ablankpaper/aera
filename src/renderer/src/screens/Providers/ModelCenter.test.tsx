@@ -878,6 +878,80 @@ describe("ModelCenter", () => {
     ).toBeVisible();
   });
 
+  it("clears a stale card error when the edit dialog fetch succeeds", async () => {
+    listModels.mockResolvedValue([
+      {
+        id: "model-1",
+        name: "gpt-5.6-sol",
+        provider: "custom",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://api.petoi.cn/v1",
+        providerLabel: "Petoi Acceptance",
+        apiMode: "chat_completions",
+        createdAt: 1,
+      },
+    ]);
+    listCustomProviders.mockResolvedValue([
+      {
+        id: "petoi-acceptance",
+        name: "Petoi Acceptance",
+        baseUrl: "https://api.petoi.cn/v1",
+        createdAt: 1,
+      },
+    ]);
+    discoverProviderModels
+      .mockRejectedValueOnce(new Error("socket closed"))
+      .mockResolvedValueOnce({
+        models: ["gpt-5.6-sol", "gpt-5.5"],
+        status: "success_with_models",
+        cached: false,
+      });
+
+    const { container } = render(
+      <ModelCenter
+        profile="acceptance"
+        env={{ CUSTOM_PROVIDER_PETOI_ACCEPTANCE_KEY: "configured" }}
+        activeModel={{
+          provider: "custom:petoi-acceptance",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://api.petoi.cn/v1",
+        }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    const card = await waitFor(() => {
+      const element = container.querySelector(
+        '[data-service-key="custom:petoi-acceptance"]',
+      );
+      expect(element).toBeInTheDocument();
+      return element as HTMLElement;
+    });
+    fireEvent.click(
+      within(card).getByRole("button", {
+        name: "providers.center.refreshModels",
+      }),
+    );
+    expect(
+      await within(card).findByText("providers.center.errors.network"),
+    ).toBeVisible();
+
+    fireEvent.click(within(card).getByRole("button", { name: "common.edit" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "providers.center.connect" }),
+    );
+    await waitFor(() =>
+      expect(discoverProviderModels).toHaveBeenCalledTimes(2),
+    );
+
+    expect(
+      within(card).queryByText("providers.center.errors.network"),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps a named custom provider's credential when its URL matches a preset", async () => {
     listModels.mockResolvedValue([
       {

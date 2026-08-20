@@ -926,6 +926,7 @@ export default function ModelCenter({
         "model-center",
       );
       if (result.status === "success_with_models") {
+        if (editingService) updateServiceFeedback(editingService);
         setFetchedModelCount(result.models.length);
         const nextOptions = Array.from(
           new Set([...modelOptions, ...result.models]),

@@ -118,6 +118,7 @@ type HermesAPIMockName =
   | "onUpdateAvailable"
   | "onUpdateDownloadProgress"
   | "onUpdateDownloaded"
+  | "onUpdateNotAvailable"
   | "onUpdateError"
   | "onMenuNewChat"
   | "onMenuSearchSessions"
@@ -147,6 +148,7 @@ function installHermesAPI(model = "", provider = "auto"): InstalledHermesAPI {
     onUpdateAvailable: vi.fn(() => vi.fn()),
     onUpdateDownloadProgress: vi.fn(() => vi.fn()),
     onUpdateDownloaded: vi.fn(() => vi.fn()),
+    onUpdateNotAvailable: vi.fn(() => vi.fn()),
     onUpdateError: vi.fn(() => vi.fn()),
     onMenuNewChat: vi.fn(() => vi.fn()),
     onMenuSearchSessions: vi.fn(() => vi.fn()),

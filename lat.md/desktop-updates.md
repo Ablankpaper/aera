@@ -10,6 +10,8 @@ The production dependency gate runs `npm audit --omit=dev --audit-level=high`. E
 
 When a newer release is available, [[src/renderer/src/screens/Layout/Layout.tsx#Layout]] shows an upgrade button in the sidebar footer. The button downloads the update when needed, shows progress, and becomes a restart action after verified bytes are ready.
 
+An authoritative up-to-date result clears any transient download progress in both the sidebar and About settings. Metadata verification without a target remains a checking state until that result arrives, so an already-current client cannot stay labeled as downloading at zero percent.
+
 [[src/renderer/src/components/settings/AboutPane.tsx#AboutPane]] presents the desktop app as its own card, separate from the Hermes Agent engine card. [[src/renderer/src/components/settings/useSettingsData.ts#useSettingsData]] subscribes to the same lifecycle events, restores the main-process snapshot, exposes a manual check, and honors the same auto-upgrade preference.
 
 ## Internal Beta signed update channel

@@ -311,6 +311,13 @@ export function useSettingsData(profile?: string) {
       setDesktopUpdatePercent(null);
       setDesktopUpdateError(null);
     });
+    const cleanupNotAvailable = window.hermesAPI.onUpdateNotAvailable(() => {
+      setDesktopUpdateState("uptodate");
+      setDesktopUpdateVersion(null);
+      setDesktopUpdatePercent(null);
+      setDesktopUpdateStageEvent(null);
+      setDesktopUpdateError(null);
+    });
     const cleanupError = window.hermesAPI.onUpdateError((message) => {
       setDesktopUpdateState("error");
       // The legacy channel is retained for older Main processes, but its raw
@@ -342,6 +349,7 @@ export function useSettingsData(profile?: string) {
       cleanupAvailable();
       cleanupProgress();
       cleanupDownloaded();
+      cleanupNotAvailable();
       cleanupError();
       cleanupStage?.();
     };

@@ -28,6 +28,28 @@ const SECRET = "runtime-fixture-private-key";
 const roots: string[] = [];
 const originalHermesHome = process.env.HERMES_HOME;
 
+function fixtureUpsertRequest(
+  expectedCatalogRevision: string,
+): UpsertModelServiceRequest {
+  return {
+    intent: "upsert",
+    expectedCatalogRevision,
+    requestedProfileId: "default",
+    provider: "custom",
+    providerLabel: "Deferred Owner",
+    baseUrl: "https://deferred-owner.invalid/v1",
+    apiMode: "chat_completions",
+    apiKey: SECRET,
+    models: [
+      {
+        model: "deferred-owner-model",
+        displayName: "Deferred Owner Model",
+      },
+    ],
+    activeModel: "deferred-owner-model",
+  };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.doUnmock("./agentera-agent-control/runtime-model-routes");
@@ -1035,7 +1057,7 @@ describe("model-configuration runtime", () => {
     handle.close();
   });
 
-  it("classifies a missing authenticated owner separately from recovery", async () => {
+  it("keeps the coordinator available until an authenticated owner is ready", async () => {
     const root = mkdtempSync(join(tmpdir(), "aera-model-runtime-auth-"));
     roots.push(root);
     const hermesHome = join(root, "hermes");
@@ -1047,10 +1069,21 @@ describe("model-configuration runtime", () => {
     const actualInstaller =
       await vi.importActual<typeof import("./installer")>("./installer");
     vi.doMock("./installer", () => actualInstaller);
-    const [runtime, modelDatabase] = await Promise.all([
-      import("./model-configuration-runtime"),
-      import("./model-configuration-database"),
-    ]);
+    const [{ AgenteraProfileBindingStore }, runtime, modelDatabase] =
+      await Promise.all([
+        import("./agentera-profile-binding"),
+        import("./model-configuration-runtime"),
+        import("./model-configuration-database"),
+      ]);
+    const bindings = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage: {
+        isEncryptionAvailable: () => true,
+        encryptString: (value: string) => Buffer.from(value, "utf8"),
+        decryptString: (value: Buffer) => value.toString("utf8"),
+      },
+    });
+    let currentOwner: typeof OWNER | null = null;
     const authError = Object.assign(new Error("private auth state"), {
       code: "model_configuration_auth_required",
     });
@@ -1059,9 +1092,10 @@ describe("model-configuration runtime", () => {
     const handle = await runtime.prepareModelConfigurationRuntime({
       userDataPath: userData,
       getOwner: () => {
-        throw authError;
+        if (currentOwner === null) throw authError;
+        return currentOwner;
       },
-      profileBindings: { verifyProfileBinding: vi.fn() },
+      profileBindings: bindings,
       getConnectionConfig: () => ({ mode: "local" }),
       openDatabase: (path) =>
         modelDatabase.openModelConfigurationDatabase(path, {
@@ -1072,18 +1106,85 @@ describe("model-configuration runtime", () => {
         }),
     });
 
-    expect(handle.coordinator).toBeNull();
-    expect(handle.startupFailure).toEqual({
-      code: "model_configuration_auth_required",
-      diagnosticId: expect.stringMatching(/^[0-9a-f]{12}$/u),
+    try {
+      expect(handle.coordinator).not.toBeNull();
+      expect(handle.startupFailure).toBeNull();
+      expect(handle.recoveryError).toBeNull();
+      expect(log).not.toHaveBeenCalledWith(
+        "[MODEL_CONFIGURATION] unavailable",
+        expect.anything(),
+        expect.anything(),
+      );
+
+      currentOwner = OWNER;
+      bindings.bindExistingProfile(hermesHome, OWNER);
+      const catalog = handle.catalog!.snapshot("default");
+      const result = await handle.coordinator!.mutate(
+        fixtureUpsertRequest(catalog.revision),
+      );
+      expect(result).toMatchObject({ status: "committed" });
+      expect(handle.operationStore!.listIncomplete()).toEqual([]);
+    } finally {
+      handle.close();
+    }
+  });
+
+  it("keeps the coordinator available while the current Profile is not yet bound", async () => {
+    const root = mkdtempSync(join(tmpdir(), "aera-model-runtime-binding-"));
+    roots.push(root);
+    const hermesHome = join(root, "hermes");
+    const userData = join(root, "user-data");
+    mkdirSync(hermesHome, { recursive: true });
+    process.env.HERMES_HOME = hermesHome;
+    vi.resetModules();
+    vi.doUnmock("./installer");
+    const actualInstaller =
+      await vi.importActual<typeof import("./installer")>("./installer");
+    vi.doMock("./installer", () => actualInstaller);
+    const [{ AgenteraProfileBindingStore }, runtime, modelDatabase] =
+      await Promise.all([
+        import("./agentera-profile-binding"),
+        import("./model-configuration-runtime"),
+        import("./model-configuration-database"),
+      ]);
+    const bindings = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage: {
+        isEncryptionAvailable: () => true,
+        encryptString: (value: string) => Buffer.from(value, "utf8"),
+        decryptString: (value: Buffer) => value.toString("utf8"),
+      },
     });
-    expect(handle.recoveryError).toBe(authError);
-    expect(log).toHaveBeenCalledWith(
-      "[MODEL_CONFIGURATION] unavailable",
-      handle.startupFailure!.diagnosticId,
-      "model_configuration_auth_required",
-    );
-    handle.close();
+
+    const handle = await runtime.prepareModelConfigurationRuntime({
+      userDataPath: userData,
+      getOwner: () => OWNER,
+      profileBindings: bindings,
+      getConnectionConfig: () => ({ mode: "local" }),
+      openDatabase: (path) =>
+        modelDatabase.openModelConfigurationDatabase(path, {
+          databaseFactory: (databasePath) =>
+            new DatabaseSync(
+              databasePath,
+            ) as unknown as ModelConfigurationSqliteDatabase,
+        }),
+    });
+
+    try {
+      expect(handle.coordinator).not.toBeNull();
+      expect(handle.startupFailure).toBeNull();
+      expect(handle.recoveryError).toBeNull();
+
+      bindings.bindExistingProfile(hermesHome, OWNER);
+      const catalog = handle.catalog!.snapshot("default");
+      const result = await handle.coordinator!.mutate(
+        fixtureUpsertRequest(catalog.revision),
+      );
+      expect(result).toMatchObject({ status: "committed" });
+      expect(handle.operationStore!.listIncomplete()).toEqual([]);
+    } finally {
+      handle.close();
+    }
   });
 
   it.each([

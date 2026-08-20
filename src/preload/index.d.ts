@@ -1775,6 +1775,7 @@ interface HermesAPI {
     callback: (info: { percent: number }) => void,
   ) => () => void;
   onUpdateDownloaded: (callback: () => void) => () => void;
+  onUpdateNotAvailable: (callback: () => void) => () => void;
   onUpdateError: (callback: (message: string) => void) => () => void;
   onDesktopUpdateStage: (
     callback: (event: DesktopUpdateStageV2) => void,

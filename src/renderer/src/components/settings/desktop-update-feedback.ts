@@ -105,6 +105,13 @@ export function projectDesktopUpdateState(
     return "checking";
   }
   if (
+    event.stage === "verify" &&
+    event.targetVersion === null &&
+    (event.state === "started" || event.state === "succeeded")
+  ) {
+    return "checking";
+  }
+  if (
     (event.stage === "download" ||
       event.stage === "verify" ||
       event.stage === "extract" ||
