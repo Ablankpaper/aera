@@ -133,6 +133,7 @@ export type ModelConfigurationStartupFailureCode =
   | "model_configuration_database_unavailable"
   | "model_configuration_schema_unsupported"
   | "route_catalog_repair_required"
+  | "model_configuration_auth_required"
   | "model_configuration_recovery_required";
 
 export type ModelConfigurationOwnerTransitionCode =

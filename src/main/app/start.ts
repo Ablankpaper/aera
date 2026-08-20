@@ -156,6 +156,7 @@ import {
 import { DesktopControlJournal } from "../agentera-desktop-control/store";
 import { prepareModelConfigurationRuntime } from "../model-configuration-runtime";
 import type { OwnerModelRouteCatalog } from "../agentera-agent-control/owner-model-route-catalog";
+import { prepareModelConfigurationAfterAuth } from "./model-configuration-startup";
 
 const APP_NAME =
   process.env.HERMES_DESKTOP_APP_NAME?.trim() || DESKTOP_PRODUCT_NAME;
@@ -301,7 +302,9 @@ export async function startMainProcess(
   const getAgenteraRuntimeOwner = (): AgenteraRuntimeOwner => {
     const state = agenteraAuth.getPublicState();
     if (!hasAgenteraSignedInAccess(state) && !hasAgenteraGuestAccess(state)) {
-      throw new Error("Aera product sign-in is required.");
+      throw Object.assign(new Error("Aera product sign-in is required."), {
+        code: "model_configuration_auth_required" as const,
+      });
     }
     const installation =
       agenteraAuthStore.getInstallation() ??
@@ -309,7 +312,10 @@ export async function startMainProcess(
         ? getOrCreateAgenteraDeviceIdentity(agenteraAuthStore)
         : null);
     if (!installation) {
-      throw new Error("Aera installation identity is unavailable.");
+      throw Object.assign(
+        new Error("Aera installation identity is unavailable."),
+        { code: "model_configuration_auth_required" as const },
+      );
     }
     if (hasAgenteraGuestAccess(state)) {
       return createAgenteraGuestRuntimeOwner(installation.installationId);
@@ -743,16 +749,22 @@ export async function startMainProcess(
     mainWindow.webContents.send("agentera-auth-state-changed", state);
   });
 
-  const modelConfigurationRuntime = await prepareModelConfigurationRuntime({
-    userDataPath: app.getPath("userData"),
-    getOwner: getAgenteraRuntimeOwner,
-    profileBindings: agenteraProfileBindings,
-    getConnectionConfig,
-    notifyConnectionConfigChanged,
-    notifyRuntimeSnapshotChanged,
-    notifyModelLibraryChanged,
-    notifyCustomProvidersChanged,
-  });
+  await app.whenReady();
+  const modelConfigurationRuntime = await prepareModelConfigurationAfterAuth(
+    () => agenteraAuth.initialize(),
+    () => ownerTransitionQueue,
+    () =>
+      prepareModelConfigurationRuntime({
+        userDataPath: app.getPath("userData"),
+        getOwner: getAgenteraRuntimeOwner,
+        profileBindings: agenteraProfileBindings,
+        getConnectionConfig,
+        notifyConnectionConfigChanged,
+        notifyRuntimeSnapshotChanged,
+        notifyModelLibraryChanged,
+        notifyCustomProvidersChanged,
+      }),
+  );
   ownerModelRouteCatalog = modelConfigurationRuntime.catalog;
 
   registerIpcHandlers({
@@ -833,7 +845,6 @@ export async function startMainProcess(
     });
 
     createWindow();
-    void agenteraAuth.initialize();
     buildMenu({ getMainWindow: () => mainWindow, openExternalUrl });
 
     app.on("activate", () => {

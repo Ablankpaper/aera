@@ -141,6 +141,7 @@ export default {
       routeCatalogRepairRequired:
         "本机模型路由目录存在无法唯一判断的冲突，原数据未被修改。",
       recoveryRequired: "模型配置需要完成安全恢复后才能继续保存。",
+      authRequired: "请先完成 Aera 账号登录，再保存模型配置。",
       staleCatalogRevision: "编辑期间模型列表已变化，请刷新后重试。",
       ownerTransitionInProgress: "账号切换仍在进行，请完成后重试。",
       ownerChanged: "保存期间登录账号发生变化，请确认当前账号后重试。",

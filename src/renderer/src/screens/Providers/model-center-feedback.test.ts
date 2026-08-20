@@ -39,6 +39,7 @@ const cases: Array<[ModelConfigurationFailureCode, string]> = [
     "model_configuration_recovery_required",
     "providers.center.errors.recoveryRequired",
   ],
+  ["model_configuration_auth_required", "providers.center.errors.authRequired"],
   [
     "model_save_stale_catalog_revision",
     "providers.center.errors.staleCatalogRevision",

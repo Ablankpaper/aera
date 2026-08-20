@@ -148,6 +148,8 @@ export default {
         "The local model route catalogue has an ambiguous conflict and was left unchanged.",
       recoveryRequired:
         "Model configuration requires safe recovery before another save.",
+      authRequired:
+        "Sign in to your Aera account before saving model configuration.",
       staleCatalogRevision:
         "The model list changed while editing. Refresh and retry.",
       ownerTransitionInProgress:
