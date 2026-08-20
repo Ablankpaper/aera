@@ -402,4 +402,32 @@ describe("Aera central IPC product-access guard", () => {
     bound = true;
     expect(() => guard.assert("bound-profile")).not.toThrow();
   });
+
+  // @lat: [[agentera-app-authentication#Startup gate#IPC enforcement#Window reopening does not start a new task]]
+  it("does not require task entitlement to resolve ownership for an existing signed-in session", () => {
+    const assertCurrentEntitlement = vi.fn(() => {
+      throw new Error("Aera offline access could not be verified.");
+    });
+    const guard = createProductAccessGuard({
+      getAuthState: () => ({
+        status: "offline",
+        userId: "11111111-1111-4111-8111-111111111111",
+        personalSpaceId: "22222222-2222-4222-8222-222222222222",
+        deviceId: "33333333-3333-4333-8333-333333333333",
+        offlineExpiresAt: "2026-07-25T00:00:00.000Z",
+        cloudAvailable: false,
+      }),
+      isRuntimeContextBound: () => true,
+      assertCurrentEntitlement,
+    });
+
+    // The guest policy is used by the local Profile ownership-resolution IPC.
+    // It verifies the existing account/guest identity and local binding; it
+    // does not start a new task and must remain available to reopen a window.
+    expect(() => guard.assert("guest")).not.toThrow();
+    expect(assertCurrentEntitlement).not.toHaveBeenCalled();
+
+    expect(() => guard.assert("bound-profile")).toThrow(/offline access/i);
+    expect(assertCurrentEntitlement).toHaveBeenCalledOnce();
+  });
 });

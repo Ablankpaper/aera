@@ -830,6 +830,140 @@ describe("model-configuration runtime", () => {
     }
   });
 
+  // @lat: [[beta27-reliability-plan#Recoverable model configuration#Prepared route and validation share one disk snapshot]]
+  it("prepares a save from the same fresh route that validation reads", async () => {
+    const root = mkdtempSync(join(tmpdir(), "aera-model-runtime-fresh-route-"));
+    roots.push(root);
+    const hermesHome = join(root, "hermes");
+    const userData = join(root, "user-data");
+    mkdirSync(hermesHome, { recursive: true });
+    process.env.HERMES_HOME = hermesHome;
+    vi.resetModules();
+    vi.doUnmock("./installer");
+    const actualInstaller =
+      await vi.importActual<typeof import("./installer")>("./installer");
+    vi.doMock("./installer", () => actualInstaller);
+
+    const [
+      { AgenteraProfileBindingStore },
+      runtime,
+      config,
+      providers,
+      modelDatabase,
+    ] = await Promise.all([
+      import("./agentera-profile-binding"),
+      import("./model-configuration-runtime"),
+      import("./config"),
+      import("./providers-store"),
+      import("./model-configuration-database"),
+    ]);
+    const bindings = new AgenteraProfileBindingStore({
+      userDataPath: userData,
+      secureStorage: {
+        isEncryptionAvailable: () => true,
+        encryptString: (value: string) => Buffer.from(value, "utf8"),
+        decryptString: (value: Buffer) => value.toString("utf8"),
+      },
+    });
+    bindings.bindExistingProfile(hermesHome, OWNER);
+    const handle = await runtime.prepareModelConfigurationRuntime({
+      userDataPath: userData,
+      getOwner: () => OWNER,
+      profileBindings: bindings,
+      getConnectionConfig: () => ({ mode: "local" }),
+      openDatabase: (path) =>
+        modelDatabase.openModelConfigurationDatabase(path, {
+          databaseFactory: (databasePath) =>
+            new DatabaseSync(
+              databasePath,
+            ) as unknown as ModelConfigurationSqliteDatabase,
+        }),
+    });
+
+    try {
+      const initialCatalog = handle.catalog!.snapshot("default");
+      const initial = await handle.coordinator!.mutate({
+        intent: "upsert",
+        expectedCatalogRevision: initialCatalog.revision,
+        requestedProfileId: "default",
+        provider: "custom",
+        providerLabel: "Fixture",
+        baseUrl: "https://cached.fixture.invalid/v1",
+        apiMode: "chat_completions",
+        apiKey: SECRET,
+        models: [{ model: "fixture-model", displayName: "Fixture Model" }],
+        activeModel: "fixture-model",
+      });
+      expect(initial).toMatchObject({ status: "committed" });
+
+      // Reproduce an out-of-band activation landing between the normal
+      // five-second read cache and the coordinator's mandatory disk read.
+      expect(config.getModelConfig("default")).toMatchObject({
+        baseUrl: "https://cached.fixture.invalid/v1",
+      });
+      const configFile = join(hermesHome, "config.yaml");
+      writeFileSync(
+        configFile,
+        readFileSync(configFile, "utf8").replaceAll(
+          "https://cached.fixture.invalid/v1",
+          "https://disk.fixture.invalid/v1",
+        ),
+      );
+      expect(config.getModelConfig("default")).toMatchObject({
+        baseUrl: "https://cached.fixture.invalid/v1",
+      });
+      expect(config.getModelConfigFresh("default")).toMatchObject({
+        baseUrl: "https://disk.fixture.invalid/v1",
+      });
+      // Re-prime the stale value explicitly; production reaches the same
+      // state when an older Renderer writer races a coordinated mutation.
+      writeFileSync(
+        configFile,
+        readFileSync(configFile, "utf8").replaceAll(
+          "https://disk.fixture.invalid/v1",
+          "https://cached.fixture.invalid/v1",
+        ),
+      );
+      expect(config.getModelConfigFresh("default")).toMatchObject({
+        baseUrl: "https://cached.fixture.invalid/v1",
+      });
+      writeFileSync(
+        configFile,
+        readFileSync(configFile, "utf8").replaceAll(
+          "https://cached.fixture.invalid/v1",
+          "https://disk.fixture.invalid/v1",
+        ),
+      );
+
+      const providerId = providers.listCustomProviders("default")[0]?.id;
+      expect(providerId).toBeTruthy();
+      const catalog = handle.catalog!.snapshot("default");
+      const result = await handle.coordinator!.mutate({
+        intent: "upsert",
+        expectedCatalogRevision: catalog.revision,
+        requestedProfileId: "default",
+        providerId,
+        provider: "custom",
+        providerLabel: "Fixture",
+        baseUrl: "https://saved.fixture.invalid/v1",
+        apiMode: "chat_completions",
+        apiKey: "",
+        models: [{ model: "fixture-model", displayName: "Fixture Model" }],
+        activeModel: "fixture-model",
+      });
+
+      expect(result).toMatchObject({ status: "committed" });
+      expect(config.getModelConfigFresh("default")).toMatchObject({
+        provider: "custom:fixture",
+        model: "fixture-model",
+        baseUrl: "https://saved.fixture.invalid/v1",
+      });
+      expect(handle.operationStore!.listIncomplete()).toEqual([]);
+    } finally {
+      handle.close();
+    }
+  });
+
   it("preserves an ambiguous route-directory startup cause", async () => {
     const root = mkdtempSync(join(tmpdir(), "aera-model-runtime-route-"));
     roots.push(root);

@@ -685,6 +685,7 @@ function Providers({
           }}
           onSaveKey={saveEnvValue}
           onActivated={(nextModel) => {
+            modelLoaded.current = false;
             setModelProvider(
               displayProviderFromConfig(nextModel.provider, nextModel.baseUrl),
             );
@@ -692,6 +693,9 @@ function Providers({
             setModelBaseUrl(nextModel.baseUrl);
             setModelSaved(true);
             setTimeout(() => setModelSaved(false), 2000);
+            requestAnimationFrame(() => {
+              modelLoaded.current = true;
+            });
           }}
           onEnvironmentChanged={reloadEnvironment}
           onOpenModelPicker={openModelPicker}

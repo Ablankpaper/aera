@@ -416,7 +416,7 @@ function createMutationAdapter(
           ? customProviderRuntimeRoute(providerLabel)
           : provider;
         const oldRouteKey = canonicalPublicRouteKey(
-          activeRouteIdentity(context.targetProfileId),
+          activeRouteIdentity(context.targetProfileId, true),
         );
         const newRouteKey = routeKeyForRequest(request, runtimeProvider);
         const activeModel = request.models.find(

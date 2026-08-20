@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Providers from "./Providers";
 
@@ -28,12 +28,32 @@ vi.mock("../../components/AuxiliaryTasksSection", () => ({
 vi.mock("./ModelCenter", () => ({
   default: ({
     onEnvironmentChanged,
+    onActivated,
   }: {
     onEnvironmentChanged?: () => void | Promise<void>;
+    onActivated: (model: {
+      provider: string;
+      model: string;
+      baseUrl: string;
+    }) => void;
   }) => (
-    <button type="button" onClick={() => void onEnvironmentChanged?.()}>
-      model-center
-    </button>
+    <>
+      <button type="button" onClick={() => void onEnvironmentChanged?.()}>
+        model-center
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          onActivated({
+            provider: "custom:fixture",
+            model: "fixture-model",
+            baseUrl: "https://fixture.invalid/v1",
+          })
+        }
+      >
+        coordinated-activation
+      </button>
+    </>
   ),
 }));
 vi.mock("../../hooks/useDiscoveredModels", () => ({
@@ -102,5 +122,25 @@ describe("Providers advanced settings", () => {
 
     await waitFor(() => expect(getEnv).toHaveBeenCalledTimes(2));
     expect(getEnv).toHaveBeenLastCalledWith("fish");
+  });
+
+  // @lat: [[provider-setup#Active model is picked from configured providers#Coordinated activation suppresses legacy auto-save]]
+  it("does not replay a coordinated activation through set-model-config", async () => {
+    render(<Providers profile="fish" visible />);
+
+    await waitFor(() =>
+      expect(window.hermesAPI.getModelConfig).toHaveBeenCalled(),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const setModelConfig = vi.mocked(window.hermesAPI.setModelConfig);
+    setModelConfig.mockClear();
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "coordinated-activation" }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 650));
+    });
+
+    expect(setModelConfig).not.toHaveBeenCalled();
   });
 });

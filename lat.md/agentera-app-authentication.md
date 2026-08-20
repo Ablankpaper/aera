@@ -64,6 +64,12 @@ The separate `window.agenteraRuntimeAccess` preload namespace returns only sanit
 
 The separate `window.agenteraRuntimeDistribution` lifecycle namespace is authenticated rather than bound-Profile because it manages the product-owned executable capability layer, never Profile data. Its main-process handlers serialize an exact public state before every reply or event; archive locations, filesystem paths, signatures, keys, tokens, and ownership identifiers remain main-process-only.
 
+#### Window reopening does not start a new task
+
+Reopening a macOS window may resolve the signed-in account's local Profile through a guest-level preparation channel without validating new-task entitlement.
+
+Bound-Profile reads, model writes, chat, and private data remain entitlement-gated.
+
 ### Renderer state machine
 
 [[src/renderer/src/App.tsx#App]] applies the sanitized startup target only after signed account access and Runtime ownership checks.

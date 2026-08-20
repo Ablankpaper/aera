@@ -40,6 +40,10 @@ The NUL-delimited owner handle and composite route ID are opaque Main-only ident
 
 Commit, rollback, and cold-recovery route comparisons read current Profile bytes rather than the five-second presentation cache.
 
+### Prepared route and validation share one disk snapshot
+
+A coordinated save derives its old route from the same fresh Profile bytes used by validation, so a stale presentation-cache entry cannot turn an otherwise valid save into a validation refusal.
+
 ### Rollback verification reads restored route
 
 After exact snapshot restoration, route verification observes the restored route immediately and cannot misclassify it from an attempted cached route.
