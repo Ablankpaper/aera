@@ -62,6 +62,7 @@ jobs:
           scripts/internal-beta/build-diagnostic-target.test.mjs
           scripts/internal-beta/inspect-diagnostic-identity.test.mjs
           scripts/internal-beta/package-diagnostic-collectors.test.mjs
+          scripts/internal-beta/workflow-artifact-kinds.test.mjs
 
       - name: Verify pinned Aera cloud contract
         run: npm run check:agentera-cloud-contract

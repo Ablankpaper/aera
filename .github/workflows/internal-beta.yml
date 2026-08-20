@@ -1089,8 +1089,8 @@ jobs:
           node --input-type=module <<'NODE'
           import { readFile, writeFile } from "node:fs/promises";
           const manifest = JSON.parse(await readFile("candidate/internal-beta-manifest.json", "utf8"));
-          const mac = manifest.artifacts.find((entry) => entry.platform === "macos" && entry.kind === "macos_zip");
-          const windows = manifest.artifacts.find((entry) => entry.platform === "windows" && entry.kind === "windows_app_zip");
+          const mac = manifest.artifacts.find((entry) => entry.platform === "macos" && entry.kind === "zip");
+          const windows = manifest.artifacts.find((entry) => entry.platform === "windows" && entry.kind === "app_zip");
           if (!mac || !windows) throw new Error("collector target artifact is missing");
           await writeFile(`${process.env.RUNNER_TEMP}/macos-artifact.json`, JSON.stringify({ sha256: mac.sha256 }));
           await writeFile(`${process.env.RUNNER_TEMP}/windows-artifact.json`, JSON.stringify({ sha256: windows.sha256 }));

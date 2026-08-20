@@ -86,3 +86,17 @@ The signed production candidate workflow runs the exact release source gate befo
 ## Internal Beta workflow enforcement
 
 The internal-Beta candidate and promotion workflows run the same source gate before identity checks, artifact assembly, or publication, so an internal dispatch cannot bypass the authoritative checkout and retired-remote protections.
+
+## Internal Beta collector artifact kinds
+
+The internal-Beta workflow resolves collector target artifacts by `platform` and `kind`, so those literals must stay identical to the `INTERNAL_BETA_ARTIFACTS` table in `scripts/internal-beta/manifest.mjs`.
+
+A kind name that the manifest never declares silently resolves to `undefined` and fails candidate assembly after macOS notarization and Windows smoke work has already succeeded, so the mismatch is caught by CI instead of by a dispatched candidate run.
+
+### Collector artifact kinds match manifest
+
+Every `platform`/`kind` pair queried by `internal-beta.yml` must appear in the manifest's canonical artifact table; a query for a non-existent kind such as `macos_zip` instead of `zip` is rejected with the declared kinds listed.
+
+### Collector targets resolve to a single artifact
+
+The macOS and Windows collector lookups must each be present and match exactly one canonical artifact, so `package-diagnostic-collectors.mjs` receives one unambiguous SHA-256 per platform.
