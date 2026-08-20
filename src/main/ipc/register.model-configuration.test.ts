@@ -373,6 +373,7 @@ describe("coordinatorUnavailableMutation", () => {
     "model_configuration_database_unavailable",
     "model_configuration_schema_unsupported",
     "route_catalog_repair_required",
+    "model_configuration_auth_required",
   ] as const)(
     "maps the exact %s identity to its V2 startup stage",
     async (code) => {
@@ -393,7 +394,9 @@ describe("coordinatorUnavailableMutation", () => {
             ? "database_open"
             : code === "model_configuration_schema_unsupported"
               ? "schema"
-              : "route_repair",
+              : code === "route_catalog_repair_required"
+                ? "route_repair"
+                : "owner",
         code,
         rollback: "not_needed",
         diagnosticId: startupFailure.diagnosticId,
@@ -401,6 +404,22 @@ describe("coordinatorUnavailableMutation", () => {
       expect(JSON.stringify(result)).not.toMatch(/detail|message|secret/iu);
     },
   );
+
+  it("maps sign-in-required startup to an owner failure without a recovery lock", async () => {
+    const factory = await unavailableMutationFactory();
+    const result = await factory({
+      code: "model_configuration_auth_required",
+      diagnosticId: "abcdef012345",
+    }).mutate(upsertRequest());
+
+    expect(result).toMatchObject({
+      status: "rejected",
+      stage: "owner",
+      code: "model_configuration_auth_required",
+      retryability: "after_user_action",
+      rollback: "not_needed",
+    });
+  });
 
   it("maps an explicit recovery-required identity to recovery", async () => {
     const factory = await unavailableMutationFactory();

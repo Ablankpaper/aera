@@ -880,7 +880,7 @@ describe("restartGatewayViaCli", () => {
       join(__dirname, "../src/main/app/start.ts"),
       "utf8",
     );
-    const recovery = start.indexOf("await prepareModelConfigurationRuntime(");
+    const recovery = start.indexOf("await prepareModelConfigurationAfterAuth(");
     const register = start.indexOf("registerIpcHandlers({");
     expect(recovery).toBeGreaterThan(-1);
     expect(register).toBeGreaterThan(recovery);

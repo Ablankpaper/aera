@@ -78,7 +78,14 @@ export function coordinatorUnavailableMutation(
         ? "schema"
         : failure.code === "route_catalog_repair_required"
           ? "route_repair"
-          : "recovery";
+          : failure.code === "model_configuration_auth_required"
+            ? "owner"
+            : "recovery";
+  const retryability: ModelConfigurationRetryability = recoveryRequired
+    ? "after_user_action"
+    : failure.code === "model_configuration_auth_required"
+      ? "after_user_action"
+      : "after_restart";
   return {
     async mutate() {
       return {
@@ -87,7 +94,7 @@ export function coordinatorUnavailableMutation(
         operation: "startup",
         stage,
         code: failure.code,
-        retryability: recoveryRequired ? "after_user_action" : "after_restart",
+        retryability,
         rollback: recoveryRequired ? "recovery_required" : "not_needed",
         diagnosticId: failure.diagnosticId,
       };
@@ -101,7 +108,7 @@ export function coordinatorUnavailableMutation(
         operation: "startup",
         stage,
         code: failure.code,
-        retryability: recoveryRequired ? "after_user_action" : "after_restart",
+        retryability,
         rollback: recoveryRequired ? "recovery_required" : "not_needed",
         diagnosticId: failure.diagnosticId,
       };
@@ -331,6 +338,7 @@ function failureStage(
   if (result.code === "route_catalog_repair_required") return "route_repair";
   if (result.reason === "stale_catalog_revision") return "revision";
   if (
+    result.code === "model_configuration_auth_required" ||
     result.code === "model_owner_transition_in_progress" ||
     result.code === "model_owner_changed" ||
     result.code === "owner_transition_timeout" ||
@@ -360,6 +368,7 @@ function failureRetryability(
   }
   if (
     result.code === "model_configuration_recovery_required" ||
+    result.code === "model_configuration_auth_required" ||
     result.code === "route_catalog_repair_required" ||
     result.code === "owner_transition_timeout" ||
     result.code === "owner_transition_failed"

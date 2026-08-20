@@ -901,6 +901,57 @@ describe("model-configuration runtime", () => {
     handle.close();
   });
 
+  it("classifies a missing authenticated owner separately from recovery", async () => {
+    const root = mkdtempSync(join(tmpdir(), "aera-model-runtime-auth-"));
+    roots.push(root);
+    const hermesHome = join(root, "hermes");
+    const userData = join(root, "user-data");
+    mkdirSync(hermesHome, { recursive: true });
+    process.env.HERMES_HOME = hermesHome;
+    vi.resetModules();
+    vi.doUnmock("./installer");
+    const actualInstaller =
+      await vi.importActual<typeof import("./installer")>("./installer");
+    vi.doMock("./installer", () => actualInstaller);
+    const [runtime, modelDatabase] = await Promise.all([
+      import("./model-configuration-runtime"),
+      import("./model-configuration-database"),
+    ]);
+    const authError = Object.assign(new Error("private auth state"), {
+      code: "model_configuration_auth_required",
+    });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const handle = await runtime.prepareModelConfigurationRuntime({
+      userDataPath: userData,
+      getOwner: () => {
+        throw authError;
+      },
+      profileBindings: { verifyProfileBinding: vi.fn() },
+      getConnectionConfig: () => ({ mode: "local" }),
+      openDatabase: (path) =>
+        modelDatabase.openModelConfigurationDatabase(path, {
+          databaseFactory: (databasePath) =>
+            new DatabaseSync(
+              databasePath,
+            ) as unknown as ModelConfigurationSqliteDatabase,
+        }),
+    });
+
+    expect(handle.coordinator).toBeNull();
+    expect(handle.startupFailure).toEqual({
+      code: "model_configuration_auth_required",
+      diagnosticId: expect.stringMatching(/^[0-9a-f]{12}$/u),
+    });
+    expect(handle.recoveryError).toBe(authError);
+    expect(log).toHaveBeenCalledWith(
+      "[MODEL_CONFIGURATION] unavailable",
+      handle.startupFailure!.diagnosticId,
+      "model_configuration_auth_required",
+    );
+    handle.close();
+  });
+
   it.each([
     "native_module_abi_mismatch",
     "native_module_architecture_mismatch",

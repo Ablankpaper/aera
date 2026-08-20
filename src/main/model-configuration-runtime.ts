@@ -770,12 +770,20 @@ function startupFailure(
   return { code, diagnosticId: modelConfigurationDiagnosticId() };
 }
 
-function initializationFailureCode(
+function startupFailureCode(
   error: unknown,
+  fallback: ModelConfigurationStartupFailureCode,
 ): ModelConfigurationStartupFailureCode {
-  return error instanceof ModelConfigurationRuntimeError
-    ? error.code
-    : "model_configuration_database_unavailable";
+  if (error instanceof ModelConfigurationRuntimeError) return error.code;
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "model_configuration_auth_required"
+  ) {
+    return "model_configuration_auth_required";
+  }
+  return fallback;
 }
 
 const ROUTE_REPAIR_REQUIRED_ROLES: readonly ModelConfigurationFileRole[] = [
@@ -998,7 +1006,9 @@ export async function prepareModelConfigurationRuntime(
       });
     } catch (error) {
       recoveryError = error;
-      unavailable = startupFailure(initializationFailureCode(error));
+      unavailable = startupFailure(
+        startupFailureCode(error, "model_configuration_database_unavailable"),
+      );
       coordinator = null;
     }
   }
@@ -1008,7 +1018,9 @@ export async function prepareModelConfigurationRuntime(
       await coordinator.recoverIncompleteOperations();
     } catch (error) {
       recoveryError = error;
-      unavailable = startupFailure("model_configuration_recovery_required");
+      unavailable = startupFailure(
+        startupFailureCode(error, "model_configuration_recovery_required"),
+      );
       coordinator = null;
     }
   }
@@ -1053,7 +1065,9 @@ export async function prepareModelConfigurationRuntime(
       }
     } catch (error) {
       recoveryError = error;
-      unavailable = startupFailure(routeStartupFailureCode);
+      unavailable = startupFailure(
+        startupFailureCode(error, routeStartupFailureCode),
+      );
       coordinator = null;
     }
   }
