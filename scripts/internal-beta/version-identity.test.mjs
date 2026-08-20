@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const EXPECTED_VERSION = "0.7.4-internal-beta.33";
+const EXPECTED_VERSION = "0.7.4-internal-beta.34";
 
 const packageJsonPath = new URL("../../package.json", import.meta.url);
 const packageLockPath = new URL("../../package-lock.json", import.meta.url);
@@ -16,7 +16,7 @@ const promotionWorkflowPath = new URL(
   import.meta.url,
 );
 
-test("Beta.33 package, manifest, and release workflows share one version identity", async () => {
+test("Beta.34 package, manifest, and release workflows share one version identity", async () => {
   const [
     packageJsonRaw,
     packageLockRaw,
