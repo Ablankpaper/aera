@@ -223,7 +223,7 @@ export default {
     title: "多智能体协作",
     description:
       "把一个目标交给多个隔离智能体协作处理，并在同一个任务看板中查看执行状态。",
-    hermesBoardStatus: "由 Hermes 任务看板执行",
+    hermesBoardStatus: "由 Aera 任务看板执行",
     capabilities: "支持目标拆解、任务分配、进度跟踪与结果总结",
     startTask: "发起团队任务",
   },

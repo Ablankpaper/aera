@@ -204,7 +204,7 @@ export default {
     title: "Multi-Agent collaboration",
     description:
       "Give one goal to multiple isolated Agents and follow their work on a single task board.",
-    hermesBoardStatus: "Runs on the Hermes task board",
+    hermesBoardStatus: "Runs on the Aera task board",
     capabilities:
       "Goal decomposition, task assignment, progress tracking, and result summaries",
     startTask: "Start a team task",
