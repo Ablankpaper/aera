@@ -199,10 +199,8 @@ export const ModelPicker = memo(function ModelPicker({
     .sort((a, b) => rank(a.m) - rank(b.m) || a.i - b.i)
     .map((x) => x.m);
 
-  const fixedPolicy = agentConversation?.policyMode === "fixed";
   const pickerDisabled =
     disabled ||
-    fixedPolicy ||
     agentSwitchState === "preparing" ||
     agentSwitchState === "active";
 
@@ -245,11 +243,6 @@ export const ModelPicker = memo(function ModelPicker({
         <ChevronDown size={12} />
       </button>
 
-      {fixedPolicy && (
-        <span className="chat-model-policy-hint">
-          {t("chat.modelSwitch.fixedPolicy")}
-        </span>
-      )}
       {(agentSwitchState === "pending" || agentSwitchState === "preparing") && (
         <span className="chat-model-switch-state">
           {t("chat.modelSwitch.pending")}

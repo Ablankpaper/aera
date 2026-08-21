@@ -136,4 +136,53 @@ describe("Agent runtime model routes", () => {
       listAgentRuntimeModelRoutes("account-home", dependencies)[0],
     ).not.toHaveProperty("credentialRef");
   });
+
+  it("does not require a provider credential for loopback routes", () => {
+    const dependencies: RouteDependencies = {
+      readModels: vi.fn(() => [
+        {
+          id: "local-model",
+          name: "Local model",
+          provider: "openai",
+          model: "local-model",
+          baseUrl: "http://127.0.0.1:9120/v1",
+          createdAt: 1,
+        },
+        {
+          id: "local-custom-model",
+          name: "Local custom model",
+          provider: "custom",
+          providerLabel: "Local",
+          model: "local-custom-model",
+          baseUrl: "http://localhost:9120/v1",
+          createdAt: 2,
+        },
+      ]),
+      listCustomProviders: vi.fn(() => [
+        {
+          id: "local",
+          name: "Local",
+          baseUrl: "http://localhost:9120/v1",
+          createdAt: 1,
+        },
+      ]),
+      getSecret: vi.fn(() => null),
+      hasOAuthCredentials: vi.fn(() => false),
+    };
+
+    expect(
+      listResolvedAgentRuntimeModelRoutes("account-home", dependencies),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          modelLibraryId: "local-model",
+          credentialRef: null,
+        }),
+        expect.objectContaining({
+          modelLibraryId: "local-custom-model",
+          credentialRef: null,
+        }),
+      ]),
+    );
+  });
 });

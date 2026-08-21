@@ -127,8 +127,15 @@ export async function prepareGatewayForLaunch(
   if (!gatewayManagedConfigurationDependencies) {
     throw new Error("model_configuration_mutation_unavailable");
   }
+  // Preserve an explicit "default" target. `resolveProfile("default")`
+  // intentionally returns undefined for file helpers, but passing that
+  // undefined across this boundary makes the managed-config layer interpret
+  // it as "use the active Profile". That can prepare a credential for the
+  // active account space while the caller starts the default Agent Profile.
+  const targetProfile =
+    profile === undefined ? resolveProfile(undefined) ?? "default" : profile;
   return prepareGatewayManagedConfiguration(
-    resolveProfile(profile),
+    targetProfile,
     gatewayManagedConfigurationDependencies,
   );
 }

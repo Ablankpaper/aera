@@ -66,7 +66,35 @@ describe("Manifest V3 model policy", () => {
 });
 
 describe("Agent model route decisions", () => {
-  // @lat: [[model-selection#Installed-Agent switch policy and immutable resume#Policy intersection and bounded denials]]
+  it("treats every verified signed model mode as user-selected at runtime", () => {
+    const fixed = {
+      mode: "fixed" as const,
+      allowedProviders: ["openai"],
+      allowedModels: ["gpt-5.6"],
+    };
+    const allowlist = {
+      mode: "allowlist" as const,
+      allowedProviders: ["openai"],
+      allowedModels: ["gpt-5.6"],
+    };
+
+    expect(
+      decideAgentModelRoute(
+        fixed,
+        { provider: "custom:petoi", model: "gpt-5.6-sol" },
+        "switch",
+      ),
+    ).toEqual({ allowed: true, reason: null });
+    expect(
+      decideAgentModelRoute(
+        allowlist,
+        { provider: "custom:petoi", model: "gpt-5.6-sol" },
+        "continue",
+      ),
+    ).toEqual({ allowed: true, reason: null });
+  });
+
+  // @lat: [[model-selection#Installed-Agent switch policy and immutable resume#User-selected routes and legacy policy compatibility]]
   it.each([
     {
       mode: "user_select" as const,
@@ -86,8 +114,8 @@ describe("Agent model route decisions", () => {
       mode: "fixed" as const,
       allowedProviders: ["openai"] as string[],
       allowedModels: ["gpt-5.6"] as string[],
-      allowed: false,
-      reason: "model_switch_fixed_policy",
+      allowed: true,
+      reason: null,
     },
   ])("applies $mode when switching a route", (policy) => {
     expect(
@@ -99,7 +127,7 @@ describe("Agent model route decisions", () => {
     ).toEqual({ allowed: policy.allowed, reason: policy.reason });
   });
 
-  it("returns bounded provider and model denial reasons", () => {
+  it("does not use historical provider and model lists as runtime denials", () => {
     const policy = {
       mode: "allowlist" as const,
       allowedProviders: ["openai"],
@@ -112,13 +140,13 @@ describe("Agent model route decisions", () => {
         { provider: "custom:petoi", model: "gpt-5.6" },
         "switch",
       ),
-    ).toEqual({ allowed: false, reason: "model_switch_provider_denied" });
+    ).toEqual({ allowed: true, reason: null });
     expect(
       decideAgentModelRoute(
         policy,
         { provider: "openai", model: "gpt-5.6-sol" },
         "continue",
       ),
-    ).toEqual({ allowed: false, reason: "model_switch_model_denied" });
+    ).toEqual({ allowed: true, reason: null });
   });
 });

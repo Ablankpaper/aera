@@ -474,7 +474,7 @@ describe("AgentDraftEditor", () => {
     ).toBeInTheDocument();
   });
 
-  it("lists every model from the active named custom service and excludes other routes", async () => {
+  it("does not expose legacy allowlist controls as an Agent model lock", async () => {
     const catalogModels = [
       "gpt-5.6-sol",
       "codex-auto-review",
@@ -537,27 +537,14 @@ describe("AgentDraftEditor", () => {
       />,
     );
 
-    await waitFor(() =>
-      expect(screen.getAllByRole("checkbox")).toHaveLength(18),
-    );
+    await screen.findByText("agents.control.runtimeModelChosenOnUse");
     expect(
-      screen.getByRole("checkbox", {
-        name: "gpt-5.6-sol · GPT",
-      }),
-    ).toBeChecked();
-    expect(
-      screen.getByRole("checkbox", {
-        name: "catalog-model-18 · GPT",
-      }),
-    ).not.toBeChecked();
-    expect(
-      screen.queryByRole("checkbox", {
-        name: "Old route model · Old GPT",
-      }),
+      screen.queryByLabelText("agents.control.modelPolicyMode"),
     ).toBeNull();
+    expect(screen.queryByLabelText("agents.control.runtimeModel")).toBeNull();
   });
 
-  it("publishes a real multi-route allowlist instead of collapsing it to one model", async () => {
+  it("normalizes an editable legacy allowlist to user-selected runtime models", async () => {
     const saved = detail(2);
     const api = installAPI({
       updateDraft: vi.fn(async () => success(saved)),
@@ -596,17 +583,9 @@ describe("AgentDraftEditor", () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText("agents.control.modelPolicyMode"), {
-      target: { value: "allowlist" },
+    fireEvent.change(screen.getByLabelText("agents.control.name"), {
+      target: { value: "Research Agent Updated" },
     });
-    const petoi = await screen.findByRole("checkbox", {
-      name: "gpt-5.6-sol · Petoi",
-    });
-    const yundu = screen.getByRole("checkbox", {
-      name: "claude-opus-4-6 · yundu.lat",
-    });
-    expect(petoi).toBeChecked();
-    fireEvent.click(yundu);
     fireEvent.click(
       screen.getByRole("button", { name: "agents.control.saveLocal" }),
     );
@@ -616,9 +595,9 @@ describe("AgentDraftEditor", () => {
       expect.objectContaining({
         manifest: expect.objectContaining({
           modelPolicy: {
-            mode: "allowlist",
-            allowedProviders: ["custom:petoi", "custom:yundu.lat"],
-            allowedModels: ["gpt-5.6-sol", "claude-opus-4-6"],
+            mode: "user_select",
+            allowedProviders: [],
+            allowedModels: [],
           },
         }),
       }),
@@ -1105,7 +1084,7 @@ describe("AgentDraftEditor", () => {
     expect(onRequestInstall).toHaveBeenCalledTimes(1);
   });
 
-  it("moves a stale named custom draft onto the current Runtime provider identity", async () => {
+  it("does not bind a legacy fixed draft to its historical Runtime model", async () => {
     Object.defineProperty(window, "hermesAPI", {
       configurable: true,
       value: {
@@ -1150,11 +1129,8 @@ describe("AgentDraftEditor", () => {
       />,
     );
 
-    await waitFor(() =>
-      expect(screen.getByLabelText("agents.control.runtimeModel")).toHaveValue(
-        "custom:aera-e2e\u0000aera-e2e-model",
-      ),
-    );
+    await screen.findByText("agents.control.runtimeModelChosenOnUse");
+    expect(screen.queryByLabelText("agents.control.runtimeModel")).toBeNull();
   });
 
   it("keeps publish and publish-and-use available before a model is selected", () => {

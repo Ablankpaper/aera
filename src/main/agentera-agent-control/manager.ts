@@ -130,11 +130,7 @@ import {
   type OrganizationWithdrawalPreview,
 } from "./organization-publication-service";
 import { OfficialAgentService } from "./official-agent-service";
-import {
-  decideAgentModelRoute,
-  modelPolicyForManifest,
-  modelPolicyForPolicyDocument,
-} from "./model-policy";
+import { modelPolicyForManifest } from "./model-policy";
 import {
   CapabilityAuthoringService,
   type CapabilityAuthoringServiceOptions,
@@ -1568,15 +1564,6 @@ export class AgenteraAgentControlManager {
     version: AgentVersion;
     policy: AgentPolicySnapshot;
   }): AgentConversationModelContext {
-    const manifestPolicy = modelPolicyForManifest(input.version.manifest);
-    const tenantPolicy = modelPolicyForPolicyDocument(input.policy.document);
-    const policyMode =
-      manifestPolicy.mode === "fixed" || tenantPolicy.mode === "fixed"
-        ? "fixed"
-        : manifestPolicy.mode === "allowlist" ||
-            tenantPolicy.mode === "allowlist"
-          ? "allowlist"
-          : "user_select";
     const catalogOwner = this.options.getOwnerModelRouteCatalog?.() ?? null;
     let catalog: OwnerModelRouteCatalogSnapshot = {
       revision: "",
@@ -1586,15 +1573,7 @@ export class AgenteraAgentControlManager {
     if (catalogOwner) {
       try {
         const snapshot = catalogOwner.snapshot();
-        catalog = {
-          ...snapshot,
-          routes: snapshot.routes.filter(
-            (route) =>
-              decideAgentModelRoute(manifestPolicy, route, "continue")
-                .allowed &&
-              decideAgentModelRoute(tenantPolicy, route, "continue").allowed,
-          ),
-        };
+        catalog = snapshot;
       } catch {
         // A legacy binding remains resumable even while the current catalog
         // is unavailable; switching stays unavailable until Main can resolve
@@ -1603,12 +1582,11 @@ export class AgenteraAgentControlManager {
     }
     return {
       threadId: input.thread.thread.id,
-      policyMode,
+      policyMode: "user_select",
       activeRoute: input.thread.segment.route,
       activeSegmentOrdinal: input.thread.segment.ordinal,
       catalog,
-      switchDisabledCode:
-        policyMode === "fixed" ? "model_switch_fixed_policy" : null,
+      switchDisabledCode: null,
     };
   }
 
@@ -1781,8 +1759,20 @@ export class AgenteraAgentControlManager {
         historyBoundaryCount,
       });
       try {
+        // prepareSegment assigns the durable segment conversation key. The
+        // adapter plan intentionally used a temporary key while resolving
+        // the active binding, so normalize only that key before the strict
+        // final binding consistency check. All other immutable fields remain
+        // validated by finalizeInstalledTurn.
+        const finalizedPlan = {
+          ...plan,
+          bindingInput: {
+            ...plan.bindingInput,
+            conversationKey: preparedCandidate.runtimeBinding.conversationKey,
+          },
+        };
         const preparedAgentTurn = adapter.finalizeInstalledTurn(
-          plan,
+          finalizedPlan,
           preparedCandidate.runtimeBinding,
         );
         if (preparedCandidate.runtimeBinding)

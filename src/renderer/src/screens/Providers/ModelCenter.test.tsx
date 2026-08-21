@@ -708,6 +708,94 @@ describe("ModelCenter", () => {
     });
   });
 
+  it("activates an existing service without replaying a stale catalog upsert", async () => {
+    listModels.mockResolvedValue([
+      {
+        id: "model-1",
+        name: "gpt-5.6-sol",
+        provider: "custom",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://www.api-codex.cn/v1",
+        providerLabel: "www.api-codex.cn",
+        apiMode: "chat_completions",
+        createdAt: 1,
+      },
+    ]);
+    listCustomProviders.mockResolvedValue([
+      {
+        id: "api-codex",
+        name: "www.api-codex.cn",
+        baseUrl: "https://www.api-codex.cn/v1",
+        createdAt: 1,
+      },
+    ]);
+    getModelConfig.mockResolvedValue({
+      provider: "custom:www.api-codex.cn",
+      model: "gpt-5.6-sol",
+      baseUrl: "https://www.api-codex.cn/v1",
+    });
+    const getOwnerModelRouteCatalog = vi.fn().mockResolvedValue(emptyCatalog);
+    const mutateModelConfiguration = vi.fn().mockResolvedValue({
+      status: "rejected",
+      schemaVersion: 2,
+      operation: "save_provider",
+      stage: "revision",
+      code: "model_save_stale_catalog_revision",
+      retryability: "retryable",
+      diagnosticId: "7aafdaa8a645",
+      rollback: "not_needed",
+      reason: "stale_catalog_revision",
+    });
+    Object.assign(window.hermesAPI, {
+      getOwnerModelRouteCatalog,
+      mutateModelConfiguration,
+    });
+    const onActivated = vi.fn();
+    const { container } = render(
+      <ModelCenter
+        profile="acceptance"
+        env={{ CUSTOM_PROVIDER_WWW_API_CODEX_CN_KEY: "configured" }}
+        activeModel={{
+          provider: "custom:petoi.cn",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://petoi.cn/v1",
+        }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={onActivated}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    const card = await waitFor(() => {
+      const element = container.querySelector(
+        '[data-service-key="custom:api-codex"]',
+      );
+      expect(element).toBeInTheDocument();
+      return element as HTMLElement;
+    });
+    fireEvent.click(
+      within(card).getByRole("button", {
+        name: "providers.center.setDefault",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(setModelConfig).toHaveBeenCalledWith(
+        "custom",
+        "gpt-5.6-sol",
+        "https://www.api-codex.cn/v1",
+        "acceptance",
+      ),
+    );
+    expect(mutateModelConfiguration).not.toHaveBeenCalled();
+    expect(onActivated).toHaveBeenCalledWith({
+      provider: "custom:www.api-codex.cn",
+      model: "gpt-5.6-sol",
+      baseUrl: "https://www.api-codex.cn/v1",
+    });
+  });
+
   it("uses Main's canonical named-custom route after activating a service", async () => {
     listModels.mockResolvedValue([
       {

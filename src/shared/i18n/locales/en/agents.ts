@@ -143,7 +143,7 @@ export default {
     publishedCardDescription:
       "Published and ready to use. Aera completes setup automatically.",
     modelCompatibilityPendingCardDescription:
-      "The current model is incompatible with this signed version. Configure a compatible model or publish a compatible version before retrying.",
+      "Aera could not prepare this Agent's isolated model setup. Confirm that a configured model and its credential are available, then retry.",
     installedCardDescription:
       "Ready to use. Open the details to start a conversation.",
     pendingCardDescription:
@@ -680,7 +680,7 @@ export default {
       runtime_incompatible:
         "This Agent version is not compatible with this device's local environment.",
       profile_model_configuration_failed:
-        "The current model is incompatible with this signed Agent version. Configure a model allowed by the version, or ask the publisher to release a version compatible with the current model.",
+        "Aera could not configure the selected model in this isolated Agent Profile. Confirm that the model service and credential are still available, then retry.",
       model_route_stale:
         "The selected model changed while this Agent was being prepared. Refresh the model list and select it again.",
       model_route_unavailable:

@@ -167,7 +167,7 @@ export default {
     personalCardFallback: "这个智能体已准备好根据你的要求完成专属任务。",
     publishedCardDescription: "已发布并可使用，系统会自动完成准备。",
     modelCompatibilityPendingCardDescription:
-      "当前模型与该签名版本不兼容，请配置匹配模型或发布兼容版本后重试。",
+      "系统未能完成该智能体的隔离模型配置，请确认已有可用模型和凭据后重试。",
     installedCardDescription: "已准备就绪，点击查看详情并开始使用。",
     pendingCardDescription: "智能体尚未准备完成，可在详情中继续启用。",
     localProfileDescription:
@@ -633,7 +633,7 @@ export default {
         "本机智能体版本缓存未能完成自动恢复，本次发布已安全停止。请重试或重启 Aera。",
       runtime_incompatible: "该智能体版本暂不支持此电脑上的本地运行环境。",
       profile_model_configuration_failed:
-        "当前模型与该智能体的签名版本不兼容。请配置版本允许的模型，或由发布者发布兼容当前模型的新版本。",
+        "系统未能把所选模型配置到该智能体的隔离运行空间。请确认模型服务和凭据仍然可用后重试。",
       model_route_stale:
         "准备智能体期间所选模型已发生变化，请刷新模型列表后重新选择。",
       model_route_unavailable:

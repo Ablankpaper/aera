@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -46,10 +48,104 @@ const PRIVATE_MARKERS = [
 
 const DEVICE_A_MEMORY_SECRET = "DEVICE_A_NATIVE_MEMORY_SECRET_2026_07_19";
 const DEVICE_A_SKILL_SECRET = "DEVICE_A_LEARNED_SKILL_SECRET_2026_07_19";
+const PRIMARY_MODEL = "gpt-5.6";
+const ALTERNATE_MODEL = "gpt-4.1-mini";
 
 let harness: AgentControlHarness | null = null;
 let deviceA: AgentControlDevice | null = null;
 let deviceB: AgentControlDevice | null = null;
+let modelServer: Server | null = null;
+let modelBaseUrl = "";
+const requestedModels: string[] = [];
+
+async function startModelServer(): Promise<string> {
+  modelServer = createServer((request, response) => {
+    void (async () => {
+      const url = new URL(request.url || "/", "http://127.0.0.1");
+      if (request.method === "GET" && url.pathname === "/v1/models") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            object: "list",
+            data: [PRIMARY_MODEL, ALTERNATE_MODEL].map((id) => ({
+              id,
+              object: "model",
+            })),
+          }),
+        );
+        return;
+      }
+      if (
+        request.method !== "POST" ||
+        url.pathname !== "/v1/chat/completions"
+      ) {
+        response.writeHead(404).end();
+        return;
+      }
+      let body = "";
+      for await (const chunk of request) body += String(chunk);
+      const payload = JSON.parse(body) as { model?: unknown; stream?: unknown };
+      const model =
+        typeof payload.model === "string" ? payload.model : PRIMARY_MODEL;
+      requestedModels.push(model);
+      if (payload.stream !== true) {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            id: "agent-model-choice-e2e",
+            object: "chat.completion",
+            model,
+            choices: [
+              {
+                index: 0,
+                message: { role: "assistant", content: "MODEL_CHOICE_OK" },
+                finish_reason: "stop",
+              },
+            ],
+          }),
+        );
+        return;
+      }
+      response.writeHead(200, {
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+        "content-type": "text/event-stream; charset=utf-8",
+      });
+      response.write(
+        `data: ${JSON.stringify({
+          id: "agent-model-choice-e2e",
+          object: "chat.completion.chunk",
+          model,
+          choices: [
+            {
+              index: 0,
+              delta: { role: "assistant", content: "MODEL_CHOICE_OK" },
+              finish_reason: null,
+            },
+          ],
+        })}\n\n`,
+      );
+      response.write(
+        `data: ${JSON.stringify({
+          id: "agent-model-choice-e2e",
+          object: "chat.completion.chunk",
+          model,
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        })}\n\n`,
+      );
+      response.end("data: [DONE]\n\n");
+    })().catch(() => {
+      if (!response.headersSent) response.writeHead(500);
+      response.end();
+    });
+  });
+  await new Promise<void>((resolveListen, rejectListen) => {
+    modelServer!.once("error", rejectListen);
+    modelServer!.listen(0, "127.0.0.1", () => resolveListen());
+  });
+  const address = modelServer.address() as AddressInfo;
+  return `http://127.0.0.1:${address.port}/v1`;
+}
 
 function unwrap<T>(result: AgenteraAgentControlResult<T>): T {
   if (!result.ok) {
@@ -174,11 +270,16 @@ async function writeDeviceALearning(profilePath: string): Promise<void> {
 }
 
 test.beforeAll(async () => {
+  modelBaseUrl = await startModelServer();
   harness = await createAgentControlHarness();
 });
 
 test.afterAll(async () => {
   await closeAgentControlHarness(harness);
+  await new Promise<void>((resolveClose) =>
+    modelServer?.close(() => resolveClose()) ?? resolveClose(),
+  );
+  modelServer = null;
   harness = null;
   deviceA = null;
   deviceB = null;
@@ -193,10 +294,22 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
   const compatibleModelConfig = [
     "model:",
     "  provider: openai",
-    "  default: gpt-5.6",
-    '  base_url: "http://127.0.0.1:9/v1"',
+    `  default: ${PRIMARY_MODEL}`,
+    `  base_url: "${modelBaseUrl}"`,
     "",
   ].join("\n");
+  const modelCatalog = `${JSON.stringify(
+    [PRIMARY_MODEL, ALTERNATE_MODEL].map((model, index) => ({
+      id: `agent-model-choice-${index + 1}`,
+      name: model,
+      provider: "openai",
+      model,
+      baseUrl: modelBaseUrl,
+      createdAt: 1_787_274_971_000 + index,
+    })),
+    null,
+    2,
+  )}\n`;
   await Promise.all([
     writeFile(
       join(harness.deviceRoots.A.hermesHome, "config.yaml"),
@@ -206,6 +319,16 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
     writeFile(
       join(harness.deviceRoots.B.hermesHome, "config.yaml"),
       compatibleModelConfig,
+      "utf8",
+    ),
+    writeFile(
+      join(harness.deviceRoots.A.hermesHome, "models.json"),
+      modelCatalog,
+      "utf8",
+    ),
+    writeFile(
+      join(harness.deviceRoots.B.hermesHome, "models.json"),
+      modelCatalog,
       "utf8",
     ),
   ]);
@@ -416,6 +539,80 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
     bV1.bindings[0].localAdaptiveStateRevision,
   );
 
+  // A signed legacy fixed policy remains part of the immutable publication
+  // record, but Desktop exposes the complete current-owner catalog and lets
+  // this installed Agent start a new immutable segment with either model.
+  const beforeSwitch = await deviceA.page.evaluate(() =>
+    window.agenteraGlobalProfile.prepareConversationContext({
+      runId: "device-a-v1",
+      profile: "default",
+    }),
+  );
+  expect(beforeSwitch.agentConversation).toMatchObject({
+    policyMode: "user_select",
+    switchDisabledCode: null,
+  });
+  expect(beforeSwitch.agentConversation?.catalog.routes.map(({ model }) => model)).toEqual(
+    expect.arrayContaining([PRIMARY_MODEL, ALTERNATE_MODEL]),
+  );
+  const alternate = beforeSwitch.agentConversation?.catalog.routes.find(
+    ({ model }) => model === ALTERNATE_MODEL,
+  );
+  expect(alternate).toBeTruthy();
+  let switched: { events: Array<{ state: string; to: { model: string } }> };
+  try {
+    switched = await deviceA.page.evaluate(
+      async ({ selection }) => {
+        const events: Array<{ state: string; to: { model: string } }> = [];
+        const dispose = window.hermesAPI.onChatAgentSegment((_runId, event) => {
+          events.push(event);
+        });
+        try {
+          await window.hermesAPI.sendMessage(
+            "Use the newly selected model for this isolated Agent.",
+            "default",
+            undefined,
+            [],
+            undefined,
+            undefined,
+            "device-a-v1",
+            undefined,
+            selection,
+          );
+          return { events };
+        } finally {
+          dispose();
+        }
+      },
+      { selection: alternate!.selection },
+    );
+  } catch (error) {
+    throw new Error(
+      `Model switch failed: ${error instanceof Error ? error.message : String(error)}; processOutput=${deviceA.processOutput.slice(-12000)}`,
+    );
+  }
+  expect(switched.events).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        state: "active",
+        to: expect.objectContaining({ model: ALTERNATE_MODEL }),
+      }),
+    ]),
+  );
+  expect(requestedModels).toContain(ALTERNATE_MODEL);
+  const afterSwitch = await deviceA.page.evaluate(() =>
+    window.agenteraGlobalProfile.prepareConversationContext({
+      runId: "device-a-v1",
+      profile: "default",
+    }),
+  );
+  expect(afterSwitch.agentConversation).toMatchObject({
+    policyMode: "user_select",
+    activeRoute: { model: ALTERNATE_MODEL },
+    activeSegmentOrdinal: 2,
+    switchDisabledCode: null,
+  });
+
   const bBeforeLearning = await privateProfileSnapshot(
     bProfile,
     PRIVATE_MARKERS,
@@ -522,7 +719,10 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
       definitions: 1,
       versions: 2,
       installations: 2,
-      runtimeBindings: 3,
+      // The model switch is an immutable Agent segment transition, so it
+      // creates one additional sanitized Runtime binding while preserving
+      // the original segment bindings for both devices.
+      runtimeBindings: 4,
     });
 
   const requests = agentControlRequests(harness);

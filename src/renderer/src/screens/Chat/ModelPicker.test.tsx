@@ -158,7 +158,7 @@ describe("ModelPicker", () => {
     switchDisabledCode: null,
   };
 
-  // @lat: [[model-selection#Installed-Agent switch policy and immutable resume#Policy-filtered staged selection]]
+  // @lat: [[model-selection#Installed-Agent switch policy and immutable resume#User-selected staged selection]]
   it("stages an installed-Agent selection without invoking ordinary session override selection", () => {
     const onSelectAgentModel = vi.fn();
     const { container, onSelectModel } = renderPicker({
@@ -175,20 +175,27 @@ describe("ModelPicker", () => {
     expect(onSelectModel).not.toHaveBeenCalled();
   });
 
-  it("disables a fixed-policy Agent picker and explains why", () => {
+  it("keeps the picker enabled for an Agent carrying a legacy fixed policy", () => {
+    const onSelectAgentModel = vi.fn();
     const { container } = renderPicker({
       agentConversation: {
         ...agentContext,
         policyMode: "fixed",
         switchDisabledCode: "model_switch_fixed_policy",
       },
+      onSelectAgentModel,
     });
     const trigger = container.querySelector(
       ".chat-model-trigger",
     ) as HTMLButtonElement;
 
-    expect(trigger.disabled).toBe(true);
-    expect(container.textContent).toContain("chat.modelSwitch.fixedPolicy");
+    expect(trigger.disabled).toBe(false);
+    const dropdown = openPicker(container);
+    fireEvent.click(within(dropdown).getByText("Petoi Sol"));
+    expect(onSelectAgentModel).toHaveBeenCalledWith(
+      agentContext.catalog.routes[1].selection,
+    );
+    expect(container.textContent).not.toContain("chat.modelSwitch.fixedPolicy");
   });
 
   // ── initial render ──────────────────────────────────────────────

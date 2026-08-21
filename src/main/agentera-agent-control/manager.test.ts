@@ -821,9 +821,9 @@ describe("Agent control Organization Foundation context", () => {
       manifest: {
         schema_version: 2,
         model_policy: {
-          mode: "user_select",
-          allowed_providers: [],
-          allowed_models: [],
+          mode: "fixed",
+          allowed_providers: ["openai"],
+          allowed_models: ["gpt-5.6"],
         },
       },
     } as unknown as AgentVersion;
@@ -831,9 +831,9 @@ describe("Agent control Organization Foundation context", () => {
       document: {
         schema_version: 2,
         model_policy: {
-          mode: "user_select",
-          allowed_providers: [],
-          allowed_models: [],
+          mode: "allowlist",
+          allowed_providers: ["openai"],
+          allowed_models: ["gpt-5.6"],
         },
       },
     } as unknown as AgentPolicySnapshot;
@@ -873,6 +873,22 @@ describe("Agent control Organization Foundation context", () => {
               catalogRevision: "a".repeat(64),
             },
           },
+          {
+            id: PETOI_MODEL_ROUTE.id,
+            provider: PETOI_MODEL_ROUTE.provider,
+            model: PETOI_MODEL_ROUTE.model,
+            baseUrl: PETOI_MODEL_ROUTE.baseUrl,
+            apiMode: PETOI_MODEL_ROUTE.apiMode,
+            providerLabel: PETOI_MODEL_ROUTE.providerLabel,
+            displayName: PETOI_MODEL_ROUTE.displayName,
+            sourceProfileId: PETOI_MODEL_ROUTE.sourceProfileId,
+            sourceKind: "account" as const,
+            selection: {
+              sourceProfileId: PETOI_MODEL_ROUTE.sourceProfileId,
+              modelLibraryId: PETOI_MODEL_ROUTE.modelLibraryId,
+              catalogRevision: "a".repeat(64),
+            },
+          },
         ],
       })),
       resolve: vi.fn(() => ACCOUNT_MODEL_ROUTE),
@@ -909,6 +925,12 @@ describe("Agent control Organization Foundation context", () => {
       },
       activeSegmentOrdinal: 1,
       switchDisabledCode: null,
+      catalog: {
+        routes: [
+          expect.objectContaining({ model: ACCOUNT_MODEL_ROUTE.model }),
+          expect.objectContaining({ model: PETOI_MODEL_ROUTE.model }),
+        ],
+      },
     });
     expect(
       database.sqlite
@@ -1192,7 +1214,7 @@ describe("Agent control Organization Foundation context", () => {
     await expect(
       manager.prepareConversationRuntime({
         conversationKey: initialBindingInput.conversationKey,
-        profilePath: "/isolated/profile",
+      profilePath: "/isolated/profile",
         owner: OWNER,
         resumeSessionId: null,
         requestedModelSelection: {

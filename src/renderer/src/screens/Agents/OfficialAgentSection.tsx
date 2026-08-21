@@ -192,9 +192,6 @@ export default function OfficialAgentSection({
       if (detail.allowedToolCount > 0) {
         tags.push(t("agents.hub.toolTag", { count: detail.allowedToolCount }));
       }
-      for (const model of detail.allowedModels.slice(0, 2)) {
-        tags.push(model.split("/").pop() ?? model);
-      }
     }
     if (tags.length === 0) {
       tags.push(

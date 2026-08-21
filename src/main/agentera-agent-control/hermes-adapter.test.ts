@@ -564,6 +564,8 @@ describe("Aera adapter around the real Hermes transport", () => {
     expect(first.envelope.instructions).toContain(
       "Profile-local SOUL and Skills take precedence",
     );
+    expect(first.envelope.instructions).not.toContain("allowedProviders");
+    expect(first.envelope.instructions).not.toContain("allowedModels");
     expect(first.envelope.instructions).not.toContain("MEMORY.md");
     expect(first.envelope.instructions).not.toContain("USER.md");
 
@@ -644,7 +646,7 @@ describe("Aera adapter around the real Hermes transport", () => {
     );
   });
 
-  it("applies the effective tenant model policy after the Manifest policy", async () => {
+  it("keeps a tenant's historical model policy signed without using it as a runtime model lock", async () => {
     const agentVersion = versionV2("user_select");
     const baseTenantPolicy = policyV2(agentVersion);
     if (baseTenantPolicy.document.schema_version !== 2) {
@@ -663,19 +665,21 @@ describe("Aera adapter around the real Hermes transport", () => {
     };
     useV2(agentVersion, tenantPolicy);
 
-    await expect(
-      adapter().prepareInstalledTurnPlan({
-        conversationKey: "tenant-policy-denied",
-        profilePath: PROFILE_PATH,
-        owner,
-        resumeSessionId: null,
-        requestedModelRoute: PETOI_ROUTE,
-      }),
-    ).rejects.toMatchObject({ code: "model_switch_provider_denied" });
+    const plan = await adapter().prepareInstalledTurnPlan({
+      conversationKey: "tenant-policy-user-selected",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+      requestedModelRoute: PETOI_ROUTE,
+    });
+
+    expect(plan.bindingInput.modelRoute).toEqual(
+      freezeResolvedOwnerModelRoute(PETOI_ROUTE),
+    );
   });
 
   // @lat: [[model-selection#Installed-Agent switch policy and immutable resume#Candidate route versus current segment]]
-  it("rejects a requested route when the active Agent policy is fixed", async () => {
+  it("allows a user-selected route when a legacy Agent policy is fixed", async () => {
     useV2(versionV2("fixed", ["openai"], ["gpt-5.6"]));
     const subject = adapter();
     const first = await subject.prepareInstalledTurn({
@@ -686,17 +690,19 @@ describe("Aera adapter around the real Hermes transport", () => {
       requestedModelRoute: OPENAI_ROUTE,
     });
 
-    await expect(
-      subject.prepareInstalledTurnPlan({
-        conversationKey:
-          "aera-segment:11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222",
-        profilePath: PROFILE_PATH,
-        owner,
-        resumeSessionId: null,
-        existingBinding: first.binding,
-        requestedModelRoute: PETOI_ROUTE,
-      }),
-    ).rejects.toMatchObject({ code: "model_switch_fixed_policy" });
+    const switched = await subject.prepareInstalledTurnPlan({
+      conversationKey:
+        "aera-segment:11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222",
+      profilePath: PROFILE_PATH,
+      owner,
+      resumeSessionId: null,
+      existingBinding: first.binding,
+      requestedModelRoute: PETOI_ROUTE,
+    });
+
+    expect(switched.bindingInput.modelRoute).toEqual(
+      freezeResolvedOwnerModelRoute(PETOI_ROUTE),
+    );
   });
 
   // @lat: [[model-selection#Installed-Agent switch policy and immutable resume#Current full-route and legacy validation]]

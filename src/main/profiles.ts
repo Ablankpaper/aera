@@ -441,6 +441,11 @@ export async function prepareProfile(
   }
 
   try {
+    // Hermes does not create the named-profile parent when the first Profile
+    // is created. The staged activation path renames into this directory, so
+    // create it before preparing the candidate. This is also required for a
+    // fresh installation whose HERMES_HOME only contains the default Profile.
+    mkdirSync(PROFILES_DIR, { recursive: true, mode: 0o700 });
     const candidate = await createStagedProfileCandidate({
       profilesRoot: PROFILES_DIR,
       destinationProfileId: id,

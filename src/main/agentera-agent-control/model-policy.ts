@@ -61,31 +61,9 @@ export function agentModelPolicyAllowsRoute(
 }
 
 export function decideAgentModelRoute(
-  policy: AgentModelPolicy,
-  route: { provider: string; model: string },
-  intent: "continue" | "switch",
+  _policy: AgentModelPolicy,
+  _route: { provider: string; model: string },
+  _intent: "continue" | "switch",
 ): AgentModelRouteDecision {
-  if (policy.mode === "user_select") {
-    return { allowed: true, reason: null };
-  }
-  if (policy.mode === "fixed" && intent === "switch") {
-    return { allowed: false, reason: "model_switch_fixed_policy" };
-  }
-
-  const normalizedProvider = route.provider.trim().toLowerCase();
-  const providerAllowed = policy.allowedProviders.some((allowed) => {
-    const normalizedAllowed = allowed.trim().toLowerCase();
-    return (
-      normalizedAllowed === normalizedProvider ||
-      (normalizedAllowed === "custom" &&
-        normalizedProvider.startsWith("custom:"))
-    );
-  });
-  if (!providerAllowed) {
-    return { allowed: false, reason: "model_switch_provider_denied" };
-  }
-  if (!policy.allowedModels.includes(route.model.trim())) {
-    return { allowed: false, reason: "model_switch_model_denied" };
-  }
   return { allowed: true, reason: null };
 }

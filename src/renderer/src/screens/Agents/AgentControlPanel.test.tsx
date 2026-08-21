@@ -1920,13 +1920,14 @@ describe("AgentControlPanel", () => {
     });
   });
 
-  it("routes an incompatible published Agent to editing instead of attempting an invalid model repair", async () => {
+  it("repairs a published Agent with the user's selected model even when its legacy signature names another model", async () => {
     const activeInstallation = installation("active");
     const incompatibleDraft = publishedDraft();
     const api = installAPI({
       listDrafts: vi.fn(async () => success([incompatibleDraft as AgentDraft])),
       getDraft: vi.fn(async () => success(incompatibleDraft)),
       listInstallations: vi.fn(async () => success([activeInstallation])),
+      repairInstallationModel: vi.fn(async () => success(activeInstallation)),
     });
     render(
       <AgentControlPanel
@@ -1955,24 +1956,23 @@ describe("AgentControlPanel", () => {
     const detailDialog = screen.getByRole("dialog", {
       name: "Research Agent",
     });
-    expect(
-      within(detailDialog).queryByRole("button", {
-        name: "agents.hub.useAgent",
-      }),
-    ).toBeNull();
     fireEvent.click(
       within(detailDialog).getByRole("button", {
-        name: "agents.control.edit",
+        name: "agents.hub.useAgent",
       }),
     );
 
     await waitFor(() =>
-      expect(api.getDraft).toHaveBeenCalledWith(
-        incompatibleDraft.id,
+      expect(api.repairInstallationModel).toHaveBeenCalledWith(
+        {
+          id: INSTALLATION_ID,
+          localProfileId: "installed-agent",
+          modelProfileId: "configured-source",
+        },
         undefined,
       ),
     );
-    expect(api.repairInstallationModel).not.toHaveBeenCalled();
+    expect(api.getDraft).not.toHaveBeenCalled();
   });
 
   it("selects a compatible newly published version before repairing its existing Runtime Profile", async () => {

@@ -85,6 +85,22 @@ describe("shared i18n", () => {
     );
   });
 
+  it("describes isolated Profile setup failures without claiming a signed model lock", () => {
+    const english = t(
+      "agents.control.errors.profile_model_configuration_failed",
+      "en",
+    );
+    const chinese = t(
+      "agents.control.errors.profile_model_configuration_failed",
+      "zh-CN",
+    );
+
+    expect(english).not.toMatch(/signed|allowed by the version/i);
+    expect(chinese).not.toMatch(/签名版本|版本允许/);
+    expect(english).toMatch(/isolated Agent Profile/i);
+    expect(chinese).toMatch(/隔离运行空间/);
+  });
+
   it("provides complete Simplified Chinese copy for every source key", () => {
     const source = new Map(leafEntries(resources.en.translation));
     const simplifiedChinese = new Map(

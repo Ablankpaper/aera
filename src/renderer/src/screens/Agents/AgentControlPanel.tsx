@@ -18,7 +18,6 @@ import type {
   OrganizationSubmissionListIssue,
   OrganizationWithdrawalPreview,
 } from "../../../../shared/agentera-agent-control";
-import { runtimeModelPolicyForEditableManifest } from "../../../../shared/agentera-agent-control";
 import {
   Bot,
   Check,
@@ -202,23 +201,7 @@ function publishedDraftAllowsModel(
   }
   const provider = providerValue.trim().toLocaleLowerCase();
   const model = modelValue.trim();
-  const policy = runtimeModelPolicyForEditableManifest(draft.manifest);
-  if (policy.mode === "user_select") {
-    return provider.length > 0 && provider !== "auto" && model.length > 0;
-  }
-  const allowedProviders = policy.allowedProviders.map((value) =>
-    value.trim().toLocaleLowerCase(),
-  );
-  const providerAllowed =
-    allowedProviders.includes(provider) ||
-    (provider.startsWith("custom:") && allowedProviders.includes("custom"));
-  return (
-    provider.length > 0 &&
-    provider !== "auto" &&
-    model.length > 0 &&
-    providerAllowed &&
-    policy.allowedModels.includes(model)
-  );
+  return provider.length > 0 && provider !== "auto" && model.length > 0;
 }
 
 function automaticRuntimeName(

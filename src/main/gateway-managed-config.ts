@@ -14,9 +14,30 @@ import {
   requireManagedModelMutationValue,
   type ManagedModelMutationPort,
 } from "./model-configuration-mutation-port";
-import { profilePaths } from "./utils";
+import {
+  getActiveProfileNameSync,
+  normalizeProfileName,
+  profilePaths,
+} from "./utils";
 
 const API_SERVER_PORT_PATH = "platforms.api_server.extra.port";
+
+/**
+ * Resolve the profile once for the whole Gateway write plan. The Gateway
+ * launcher treats an omitted profile as the file-backed active Profile, while
+ * the config planners previously treated the same value as the default
+ * Profile. That produced a mixed plan (.env in the active Profile and
+ * config.yaml in the default Profile) and the coordinator correctly rejected
+ * the cross-Profile write. Keep every plan and the mutation scope on one
+ * canonical Profile identity.
+ */
+function resolveGatewayProfile(profile?: string): string | undefined {
+  // Keep the explicit default sentinel through the mutation boundary. The
+  // file helpers intentionally normalize `default` to the root home, but an
+  // omitted profile means "active Profile" and must remain distinct here.
+  if (profile === "default") return "default";
+  return normalizeProfileName(profile ?? getActiveProfileNameSync());
+}
 
 export interface GatewayManagedConfigurationDependencies {
   readonly modelMutationPort: ManagedModelMutationPort;
@@ -32,8 +53,9 @@ export function planGatewayManagedConfiguration(
   profile: string | undefined,
   port: number,
 ): GatewayManagedConfigurationPlan {
-  const credentialPlan = planLocalApiServerKeyWrite(profile);
-  const { configFile } = profilePaths(profile);
+  const targetProfile = resolveGatewayProfile(profile);
+  const credentialPlan = planLocalApiServerKeyWrite(targetProfile);
+  const { configFile } = profilePaths(targetProfile);
   if (!existsSync(configFile)) {
     return { credentialPlan, configPlan: null };
   }
@@ -42,7 +64,7 @@ export function planGatewayManagedConfiguration(
   let configPlan: ConfigWritePlan<void> | null = null;
   if (!/api_server/i.test(content)) {
     configPlan = planConfigDocumentWrite(
-      profile,
+      targetProfile,
       (current) => {
         const separator = current.endsWith("\n") ? "" : "\n";
         return `${current}${separator}
@@ -58,12 +80,16 @@ platforms:
       undefined,
     );
   } else {
-    const configuredPort = getConfigValue(API_SERVER_PORT_PATH, profile);
+    const configuredPort = getConfigValue(API_SERVER_PORT_PATH, targetProfile);
     if (configuredPort?.trim() !== String(port)) {
       configPlan = configuredPort
-        ? planConfigValueWrite(API_SERVER_PORT_PATH, String(port), profile)
+        ? planConfigValueWrite(
+            API_SERVER_PORT_PATH,
+            String(port),
+            targetProfile,
+          )
         : planConfigDocumentWrite(
-            profile,
+            targetProfile,
             (current) => {
               const document = parseDocument(current);
               if (document.errors.length > 0) {
@@ -109,11 +135,12 @@ export async function prepareGatewayManagedConfiguration(
   const port = await (
     dependencies.resolvePort ?? ensureProfilePortAvailable
   )(profile);
+  const targetProfile = resolveGatewayProfile(profile);
   const plan = planGatewayManagedConfiguration(profile, port);
   const result = await dependencies.modelMutationPort.mutate({
     operation: "gateway_configuration_prepare",
     globalCatalog: false,
-    profileIds: [profile || "default"],
+    profileIds: [targetProfile || "default"],
     stage: plan.credentialPlan.value.generated ? "credential" : "activation",
     prepare: () => ({
       write: (permit) => {
