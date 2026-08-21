@@ -637,13 +637,42 @@ test("Internal Beta Windows candidate runs disposable install/start/update/rollb
   );
   assert.match(
     smokeScript,
-    /function Stop-DisposableApp\([\s\S]*?taskkill\.exe[\s\S]*?Stop-ExecutableProcesses \$ExecutablePath[\s\S]*?Wait-NoExecutable \$ExecutablePath \$WaitSeconds[\s\S]*?\n\}/u,
+    /function Stop-DisposableApp\([\s\S]*?Stop-DisposableRoot \$RootId[\s\S]*?Stop-ExecutableUntilGone \$ExecutablePath[\s\S]*?\n\}/u,
     "the smoke must stop the launched tree and prove the same executable has no survivors",
+  );
+  assert.match(
+    smokeScript,
+    /function Stop-ExecutableUntilGone\([\s\S]*?for \(\$attempt = 0; \$attempt -lt \$WaitSeconds; \$attempt\+\+\)[\s\S]*?Stop-ExecutableProcesses \$ExecutablePath[\s\S]*?Get-ExecutableProcessIds \$ExecutablePath[\s\S]*?Start-Sleep -Seconds 1[\s\S]*?\n\}/u,
+    "Electron children can appear or reparent after one process snapshot, so the smoke must terminate the exact executable repeatedly until none remain",
+  );
+  assert.match(
+    smokeScript,
+    /function Stop-DisposableRoot\([\s\S]*?taskkill\.exe[\s\S]*?Stop-ProcessTree \$RootId[\s\S]*?Wait-NoProcess \$RootId[\s\S]*?\n\}/u,
+    "helper-driven swaps must stop only the old root while the helper owns the same-path process gate",
+  );
+  const rootStop = smokeScript.match(
+    /function Stop-DisposableRoot\([\s\S]*?\n\}/u,
+  )?.[0];
+  assert.ok(rootStop, "the smoke must define a root-only stop boundary");
+  assert.doesNotMatch(
+    rootStop,
+    /Stop-ExecutableUntilGone/u,
+    "the old-root stop must not race the helper by killing the newly swapped executable",
+  );
+  assert.match(
+    smokeScript,
+    /\$script:smokeStage = "healthy_stop_old"[\s\S]*?Stop-DisposableRoot \$oldProcessId[\s\S]*?\$script:smokeStage = "healthy_wait_helper"/u,
+    "healthy-swap failures must distinguish old-process cleanup from the helper health gate without exposing paths",
   );
   assert.equal(
     [...smokeScript.matchAll(/Stop-DisposableApp /gu)].length,
-    4,
-    "setup, portable, and helper-driven old apps must use bounded root cleanup",
+    2,
+    "setup and portable start checks must use full same-executable cleanup",
+  );
+  assert.equal(
+    [...smokeScript.matchAll(/Stop-DisposableRoot /gu)].length,
+    3,
+    "the full cleanup wrapper plus healthy and rollback swaps must use the root-only stop",
   );
   assert.match(
     smokeScript,
