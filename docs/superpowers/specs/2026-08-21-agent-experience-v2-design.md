@@ -1,10 +1,10 @@
 # Aera Agent Experience v2 Design
 
-This design fixes the Beta.35 isolated-Agent installation failure and reduces the model and multi-Agent interaction burden without weakening Aera's ownership or Profile isolation.
+This design fixes the Beta.36 isolated-Agent installation failure and reduces the model and multi-Agent interaction burden without weakening Aera's ownership or Profile isolation.
 
 ## Baseline and scope
 
-The Desktop implementation baseline is `origin/main` at `bb3ea33af57d7a13f4b08c73f35471944bdd0f5b` (`0.7.4-internal-beta.35`) in the isolated worktree `aera/.worktrees/agent-experience-v2`. The Runtime implementation baseline is `origin/main` at `fb42016967ad934c55e9da5af1896d5c7206b445` in `aera-runtime/.worktrees/agent-experience-v2-runtime`.
+The Desktop implementation baseline is `origin/main` at `bb3ea33af57d7a13f4b08c73f35471944bdd0f5b` (`0.7.4-internal-beta.35`) in the isolated worktree `aera/.worktrees/agent-experience-v2`; this release integration carries the resulting changes as Beta.36. The Runtime implementation baseline is `origin/main` at `fb42016967ad934c55e9da5af1896d5c7206b445` in `aera-runtime/.worktrees/agent-experience-v2-runtime`.
 
 The observed failure is a cross-repository path bug followed by an unsafe Desktop retry decision:
 
@@ -57,7 +57,7 @@ The installation manager must use durable state plus validated filesystem state;
 
 Recovery may adopt a durable destination only when all of these match: operation ID, reserved Profile ID, reserved Runtime Profile ID, current Owner/device, and the expected safe scaffold. A path with meaningful private data, a foreign binding, a missing reservation, or an ambiguous owner is fail-closed and untouched.
 
-For the known Beta.35 partial scaffold, recovery records a bounded diagnostic, verifies that the directory contains only operation-created safe files, and retries materialization through the staging path. It may remove or replace only that verified operation-owned partial scaffold; it must not delete a user-created Profile, database rows, credentials, Memory, sessions, or arbitrary directories. The retry is idempotent and must not create a suffixed Profile.
+For the known Beta.35 partial scaffold, recovery records a bounded diagnostic, verifies that the directory contains only operation-created safe files, and retries materialization through the staging path. Beta.36 carries this recovery behavior; it may remove or replace only that verified operation-owned partial scaffold; it must not delete a user-created Profile, database rows, credentials, Memory, sessions, or arbitrary directories. The retry is idempotent and must not create a suffixed Profile.
 
 The ready state shown to the renderer requires all of: active Installation, non-null `runtime_profile_id`, a current-owner Profile binding, a complete Profile scaffold, and a successful model route projection. Any missing condition is represented as pending/degraded with a local retry or model configuration action.
 
@@ -133,7 +133,7 @@ The implementation is intentionally staged so each boundary can be verified befo
 
 ### Regression and delivery boundary
 
-- Beta.32/Beta.35 existing Agent, chat, provider, updater, and workspace behavior remains covered by the unchanged regression suite.
+- Beta.32/Beta.35 existing Agent, chat, provider, updater, and workspace behavior remains covered by the unchanged regression suite; Beta.36 adds the Windows process-race fix and the Agent experience changes described here.
 - The implementation does not change the version, release metadata, Cloud/Admin deployment, update channel, or candidate artifacts.
 - Production code is not considered complete until the actual Electron flow passes; unit/typecheck success alone is insufficient.
 
@@ -142,4 +142,3 @@ The implementation is intentionally staged so each boundary can be verified befo
 - **Only repair the visible error:** leaves the root-path and existence-as-activation class of bugs in place and keeps the user-facing flow confusing.
 - **Full WorkBuddy clone:** would replace unrelated Aera navigation and introduce a new orchestration architecture, increasing regression and release risk.
 - **Remove Profile/Owner isolation:** would hide the symptom by weakening the security boundary and is not acceptable.
-

@@ -232,10 +232,10 @@ test("internal-Beta candidate is exact-SHA, notarized on macOS, explicitly unsig
   ]);
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.35"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.36"/u);
   assert.ok(
     raw.includes(
-      '--release-notes "Beta.35 修复设为默认模型时的旧 catalog/stale revision 冲突，并允许用户在同一 Agent 中自由切换模型；每次切换创建新的不可变 RuntimeBinding 段，同时保留 Profile、Memory、USER、Skills、凭据、Owner 和会话隔离。保留 Beta.34 的首次登录、模型发现和更新状态修复，以及 Beta.33 的模型配置可靠性修复。Beta.29 故障机使用 DMG 桥接安装，Beta.31/Beta.32/Beta.33/Beta.34 支持在线升级。macOS 内测包已签名并公证；Windows 内测包未进行 Authenticode 签名，仅供受控内测使用。"',
+      '--release-notes "Beta.36 包含 Beta.35 的智能体能力优先界面、卡片局部错误、现有 Hermes 任务看板入口、会话级模型切换与 Profile 隔离修复；同时修复 Windows 更新健康交换时的进程退出竞态，避免重启安装阶段失败。保留 Beta.35 的默认模型和智能体模型选择修复、Beta.34 的首次登录/模型发现/更新状态修复，以及 Beta.33 的模型配置可靠性修复。Beta.29 故障机使用 DMG 桥接安装，Beta.31/Beta.32/Beta.33/Beta.34/Beta.35 支持在线升级。macOS 内测包已签名并公证；Windows 内测包未进行 Authenticode 签名，仅供受控内测使用。"',
     ),
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
@@ -421,7 +421,7 @@ test("internal-Beta promotion publishes one verified candidate without rebuildin
   const raw = await readFile(promotionWorkflowPath, "utf8");
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.35"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.36"/u);
 
   assert.equal(workflow.name, "Promote Desktop internal Beta");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
