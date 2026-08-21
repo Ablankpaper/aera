@@ -15,7 +15,7 @@ import {
 } from "./verify-packaged-windows-app-zip.mjs";
 
 const execFile = promisify(execFileCallback);
-const VERSION = "0.7.4-internal-beta.34";
+const VERSION = "0.7.4-internal-beta.35";
 
 test("accepts an app ZIP whose root is the Windows application directory", () => {
   assert.deepEqual(
@@ -46,8 +46,8 @@ test("requires the packaged Main, Preload, Renderer, and package identity", () =
         "out/renderer/index.html",
         "package.json",
       ],
-      { name: "agentera-studio", version: "0.7.4-internal-beta.34" },
-      "0.7.4-internal-beta.34",
+      { name: "agentera-studio", version: "0.7.4-internal-beta.35" },
+      "0.7.4-internal-beta.35",
     ),
   );
 });
@@ -73,7 +73,7 @@ test("rejects a packaged app with a missing Renderer entry or wrong version", ()
       validateWindowsAppAsarEntries(
         ["out/main/index.js", "out/preload/index.js", "package.json"],
         { name: "agentera-studio", version: "0.7.4-internal-beta.31" },
-        "0.7.4-internal-beta.34",
+        "0.7.4-internal-beta.35",
       ),
     /renderer|identity|version/u,
   );

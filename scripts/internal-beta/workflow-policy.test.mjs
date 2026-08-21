@@ -232,10 +232,10 @@ test("internal-Beta candidate is exact-SHA, notarized on macOS, explicitly unsig
   ]);
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.34"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.35"/u);
   assert.ok(
     raw.includes(
-      '--release-notes "Beta.34 修复首次登录后 Profile Owner 尚未绑定时模型保存被误报为恢复锁、成功获取模型后卡片残留旧连接错误，以及已是最新版仍常驻“下载中 0%”。保留 Beta.33 的模型配置可靠性修复、Beta.32 的 macOS 启动路径修复与 Beta.31 的更新解压修复。Beta.29 故障机使用 DMG 桥接安装，Beta.31/Beta.32/Beta.33 支持在线升级。macOS 内测包已签名并公证；Windows 内测包未进行 Authenticode 签名，仅供受控内测使用。"',
+      '--release-notes "Beta.35 修复设为默认模型时的旧 catalog/stale revision 冲突，并允许用户在同一 Agent 中自由切换模型；每次切换创建新的不可变 RuntimeBinding 段，同时保留 Profile、Memory、USER、Skills、凭据、Owner 和会话隔离。保留 Beta.34 的首次登录、模型发现和更新状态修复，以及 Beta.33 的模型配置可靠性修复。Beta.29 故障机使用 DMG 桥接安装，Beta.31/Beta.32/Beta.33/Beta.34 支持在线升级。macOS 内测包已签名并公证；Windows 内测包未进行 Authenticode 签名，仅供受控内测使用。"',
     ),
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");
@@ -421,7 +421,7 @@ test("internal-Beta promotion publishes one verified candidate without rebuildin
   const raw = await readFile(promotionWorkflowPath, "utf8");
   const workflow = parseYAML(raw);
 
-  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.34"/u);
+  assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.35"/u);
 
   assert.equal(workflow.name, "Promote Desktop internal Beta");
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [

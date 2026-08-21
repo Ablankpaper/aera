@@ -27,9 +27,9 @@ import {
   verifyInternalBetaManifestFiles,
 } from "./manifest.mjs";
 
-const VERSION = "0.7.4-internal-beta.34";
+const VERSION = "0.7.4-internal-beta.35";
 const SOURCE_SHA = "a".repeat(40);
-const RUNTIME_SHA = "b890d7de940c02a06da73f6a421d3867a63db8e6";
+const RUNTIME_SHA = "fb42016967ad934c55e9da5af1896d5c7206b445";
 const ORIGIN = "https://203.0.113.10";
 const KEY_ID = "offline-beta-2026-07";
 const PUBLIC_KEY = Buffer.alloc(32, 73).toString("base64url");
@@ -80,28 +80,28 @@ async function createFixture(runtimePatch = {}) {
   const runtimeDocument = {
     schema_version: 1,
     repository: "Ablankpaper/aera-runtime",
-    release_tag: "runtime-v0.20.0-agentera.2-rc.1",
+    release_tag: "runtime-v0.20.0-agentera.3",
     source_commit: RUNTIME_SHA,
-    runtime_version: "0.20.0-agentera.2",
-    channel: "candidate",
+    runtime_version: "0.20.0-agentera.3",
+    channel: "stable",
     assets: {
       "darwin-arm64": {
         platform: "darwin",
         arch: "arm64",
-        archive: "agentera-runtime-0.20.0-agentera.2-darwin-arm64.tar.zst",
+        archive: "agentera-runtime-0.20.0-agentera.3-darwin-arm64.tar.zst",
         manifest:
-          "agentera-runtime-0.20.0-agentera.2-darwin-arm64.manifest.json",
+          "agentera-runtime-0.20.0-agentera.3-darwin-arm64.manifest.json",
         signature:
-          "agentera-runtime-0.20.0-agentera.2-darwin-arm64.manifest.sig",
+          "agentera-runtime-0.20.0-agentera.3-darwin-arm64.manifest.sig",
       },
       "windows-x64": {
         platform: "windows",
         arch: "x64",
-        archive: "agentera-runtime-0.20.0-agentera.2-windows-x64.zip",
+        archive: "agentera-runtime-0.20.0-agentera.3-windows-x64.zip",
         manifest:
-          "agentera-runtime-0.20.0-agentera.2-windows-x64.manifest.json",
+          "agentera-runtime-0.20.0-agentera.3-windows-x64.manifest.json",
         signature:
-          "agentera-runtime-0.20.0-agentera.2-windows-x64.manifest.sig",
+          "agentera-runtime-0.20.0-agentera.3-windows-x64.manifest.sig",
       },
     },
     ...runtimePatch,
@@ -350,7 +350,7 @@ test("builds one canonical internal-Beta manifest with exact identities and hash
   );
   assert.match(document.runtimeSeed.lockSha256, /^[0-9a-f]{64}$/u);
   assert.equal(document.runtimeSeed.sourceCommit, RUNTIME_SHA);
-  assert.equal(document.runtimeSeed.channel, "candidate");
+  assert.equal(document.runtimeSeed.channel, "stable");
   assert.deepEqual(
     document.runtimeSeed.targets.map(({ platform, arch }) => ({
       platform,
@@ -436,10 +436,10 @@ test("rejects mutable package names, duplicates, missing platforms, mismatched t
   }
 });
 
-test("rejects an unapproved Runtime commit or non-candidate channel", async () => {
+test("rejects an unapproved Runtime commit or non-stable channel", async () => {
   for (const runtimePatch of [
     { source_commit: "b".repeat(40) },
-    { channel: "stable" },
+    { channel: "candidate" },
   ]) {
     const { options } = await createFixture(runtimePatch);
     await assert.rejects(
