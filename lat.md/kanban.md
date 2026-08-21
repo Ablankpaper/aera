@@ -4,6 +4,8 @@ The Kanban tab ([[src/renderer/src/screens/Kanban/Kanban.tsx]]) is a JIRA-style 
 
 It is a **thin client over the `hermes kanban` CLI** — every read and mutation shells out through [[src/main/kanban.ts]] (local exec, or SSH-tunnelled via `sshRunKanban` when in tunnel mode). Plain remote HTTP mode is unsupported and shows a "switch modes" notice. The renderer holds no domain logic; it renders board state and routes actions to the CLI.
 
+The My Agents page exposes this existing board as its multi-Agent team workflow. [[src/renderer/src/screens/Agents/AgentControlPanel.tsx#AgentControlPanel]] describes only the board's real goal decomposition, assignment, progress, and result-summary workflow, while [[src/renderer/src/screens/Layout/Layout.tsx#Layout]] routes its call to action to the `kanban` view without adding another dispatcher or persistence layer.
+
 ## Statuses and columns
 
 The board renders the agent's canonical statuses, kept in sync with the agent's `kanban_db.VALID_STATUSES` and the dashboard plugin's `BOARD_COLUMNS`. Mis-syncing here silently mis-buckets cards into To-do.

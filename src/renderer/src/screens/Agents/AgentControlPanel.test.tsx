@@ -396,6 +396,22 @@ function installAPI(
 describe("AgentControlPanel", () => {
   beforeEach(() => vi.restoreAllMocks());
 
+  it("opens the existing Hermes task board from the honest team entry", async () => {
+    installAPI({ listDefinitions: vi.fn(async () => success([])) });
+    const onOpenTeams = vi.fn();
+    render(<AgentControlPanel profiles={[]} onOpenTeams={onOpenTeams} />);
+
+    expect(await screen.findByText("agents.teams.title")).toBeVisible();
+    expect(screen.getByText("agents.teams.hermesBoardStatus")).toBeVisible();
+    expect(screen.getByText("agents.teams.capabilities")).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.teams.startTask" }),
+    );
+
+    expect(onOpenTeams).toHaveBeenCalledOnce();
+    expect(screen.queryByText("agents.teams.fakeProgress")).toBeNull();
+  });
+
   // @lat: [[sidebar-navigation#Agents page]]
   it("keeps governance closed by default while allowing an Owner to open it", async () => {
     installAPI({

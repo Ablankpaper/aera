@@ -26,6 +26,7 @@ import {
   Refresh,
   Search,
   Sparkles,
+  Workflow,
 } from "../../assets/icons";
 import ProfileAvatar from "../../components/common/ProfileAvatar";
 import { useI18n } from "../../components/useI18n";
@@ -73,6 +74,7 @@ export interface AgentControlPanelProps {
     options?: AgentChatOpenOptions,
   ) => boolean | Promise<boolean>;
   onConfigureModels?: () => void;
+  onOpenTeams?: () => void;
   modelProfileId?: string;
 }
 
@@ -236,6 +238,7 @@ export default function AgentControlPanel({
   onProfilesChanged,
   onAgentReady,
   onConfigureModels,
+  onOpenTeams,
   modelProfileId,
 }: AgentControlPanelProps): React.JSX.Element {
   const { t } = useI18n();
@@ -1956,6 +1959,40 @@ export default function AgentControlPanel({
               ))}
             </div>
           </div>
+
+          {activeTab === "mine" && onOpenTeams ? (
+            <section
+              className="agent-team-entry"
+              aria-labelledby="agent-team-entry-title"
+            >
+              <div className="agent-team-entry-icon" aria-hidden="true">
+                <Workflow size={24} />
+              </div>
+              <div className="agent-team-entry-content">
+                <div className="agent-team-entry-heading">
+                  <div>
+                    <h3 id="agent-team-entry-title">
+                      {t("agents.teams.title")}
+                    </h3>
+                    <p>{t("agents.teams.description")}</p>
+                  </div>
+                  <span className="agent-team-entry-status">
+                    {t("agents.teams.hermesBoardStatus")}
+                  </span>
+                </div>
+                <div className="agent-team-entry-footer">
+                  <span>{t("agents.teams.capabilities")}</span>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={onOpenTeams}
+                  >
+                    {t("agents.teams.startTask")}
+                  </button>
+                </div>
+              </div>
+            </section>
+          ) : null}
 
           {filteredPersonalCards.length === 0 ? (
             <div className="agent-hub-empty">

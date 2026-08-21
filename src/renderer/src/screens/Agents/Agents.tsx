@@ -30,6 +30,7 @@ interface AgentsProps {
   activeProfile: string;
   onChatWith: (name: string, options?: AgentChatOpenOptions) => void;
   onConfigureModels?: () => void;
+  onOpenTeams?: () => void;
 }
 
 export function selectAgentModelProfileId(
@@ -58,6 +59,7 @@ function Agents({
   activeProfile,
   onChatWith,
   onConfigureModels,
+  onOpenTeams,
 }: AgentsProps): React.JSX.Element {
   const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
   const [runtimeModelRoutes, setRuntimeModelRoutes] = useState<
@@ -256,6 +258,7 @@ function Agents({
         onProfilesChanged={loadProfiles}
         onAgentReady={handleAgentReady}
         onConfigureModels={onConfigureModels}
+        onOpenTeams={onOpenTeams}
         modelProfileId={modelProfileId}
       />
     </div>
