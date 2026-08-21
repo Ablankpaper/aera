@@ -1513,6 +1513,7 @@ export async function createAgentControlHarness(
     desktopFleet?: boolean;
     contentDelivery?: boolean;
     encryptedBackup?: boolean;
+    emptyDevices?: readonly AgentControlDeviceName[];
   } = {},
 ): Promise<AgentControlHarness> {
   await assertPublicPortAvailable();
@@ -1588,7 +1589,9 @@ export async function createAgentControlHarness(
   for (const name of ["A", "B", "C", "D"] as const) {
     await mkdir(deviceRoots[name].userData, { recursive: true });
     await mkdir(deviceRoots[name].hermesHome, { recursive: true });
-    await writePrivateFixture(deviceRoots[name].hermesHome, name);
+    if (!options.emptyDevices?.includes(name)) {
+      await writePrivateFixture(deviceRoots[name].hermesHome, name);
+    }
   }
 
   const capture = await createCaptureServer();
@@ -1899,6 +1902,7 @@ async function makeTreeWritable(path: string): Promise<void> {
 export async function launchAgentControlDevice(
   harness: AgentControlHarness,
   name: AgentControlDeviceName,
+  options: { environment?: NodeJS.ProcessEnv } = {},
 ): Promise<AgentControlDevice> {
   const roots = harness.deviceRoots[name];
   const executablePath = process.env.AGENTERA_E2E_EXECUTABLE_PATH?.trim();
@@ -1920,6 +1924,7 @@ export async function launchAgentControlDevice(
       HERMES_DESKTOP_OPEN_DEVTOOLS: "0",
       LANG: "en_US.UTF-8",
       LC_ALL: "en_US.UTF-8",
+      ...options.environment,
     },
   });
   let processOutput = "";
@@ -2138,7 +2143,7 @@ export async function claimDefaultProfile(
     .poll(() =>
       device.page.evaluate(() => window.agenteraRuntimeDistribution.getState()),
     )
-    .toMatchObject({ phase: "current" });
+    .toMatchObject({ phase: expect.stringMatching(/^(current|external)$/u) });
 
   // @lat: [[agentera-agent-control-plane#AgentEra Agent control plane V1#Trusted Workspace Agent context#Product-facing Agent projection]]
   // Fresh installations now bind their empty local Runtime automatically. The

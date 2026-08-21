@@ -1,8 +1,16 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { expect, test } from "playwright/test";
@@ -54,6 +62,7 @@ const ALTERNATE_MODEL = "gpt-4.1-mini";
 let harness: AgentControlHarness | null = null;
 let deviceA: AgentControlDevice | null = null;
 let deviceB: AgentControlDevice | null = null;
+let deviceC: AgentControlDevice | null = null;
 let modelServer: Server | null = null;
 let modelBaseUrl = "";
 const requestedModels: string[] = [];
@@ -204,6 +213,171 @@ function draftInput(content: string): CreateAgentDraftInput {
   };
 }
 
+interface FreshProfileReservationEvidence {
+  operationId: string;
+  profileId: string;
+  runtimeProfileId: string;
+  displayName: string;
+}
+
+async function decryptedProfileBindingState(
+  device: AgentControlDevice,
+): Promise<{
+  bindings: unknown;
+  freshProfileOperations: unknown;
+}> {
+  const envelope = JSON.parse(
+    await readFile(
+      join(device.userData, "agentera-auth", "profile-bindings.json"),
+      "utf8",
+    ),
+  ) as { encryptedBindings?: unknown };
+  if (typeof envelope.encryptedBindings !== "string") {
+    throw new Error("Fresh Profile binding envelope is unavailable.");
+  }
+  const plaintext = await device.app.evaluate(
+    ({ safeStorage }, encryptedBindings) =>
+      safeStorage.decryptString(Buffer.from(encryptedBindings, "base64")),
+    envelope.encryptedBindings,
+  );
+  const parsed = JSON.parse(plaintext) as Record<string, unknown>;
+  return {
+    bindings: parsed.bindings,
+    freshProfileOperations: parsed.freshProfileOperations,
+  };
+}
+
+async function freshProfileReservations(
+  device: AgentControlDevice,
+): Promise<FreshProfileReservationEvidence[]> {
+  const parsed = await decryptedProfileBindingState(device);
+  if (!Array.isArray(parsed.freshProfileOperations)) {
+    throw new Error("Fresh Profile reservation state is invalid.");
+  }
+  return parsed.freshProfileOperations.map((value) => {
+    if (!value || typeof value !== "object") {
+      throw new Error("Fresh Profile reservation entry is invalid.");
+    }
+    const entry = value as Record<string, unknown>;
+    for (const key of [
+      "operationId",
+      "profileId",
+      "runtimeProfileId",
+      "displayName",
+    ]) {
+      if (typeof entry[key] !== "string") {
+        throw new Error(`Fresh Profile reservation ${key} is invalid.`);
+      }
+    }
+    return {
+      operationId: entry.operationId as string,
+      profileId: entry.profileId as string,
+      runtimeProfileId: entry.runtimeProfileId as string,
+      displayName: entry.displayName as string,
+    };
+  });
+}
+
+async function boundProfilePaths(
+  device: AgentControlDevice,
+): Promise<string[]> {
+  const parsed = await decryptedProfileBindingState(device);
+  if (!Array.isArray(parsed.bindings)) {
+    throw new Error("Profile binding state is invalid.");
+  }
+  return parsed.bindings.map((value) => {
+    if (!value || typeof value !== "object") {
+      throw new Error("Profile binding entry is invalid.");
+    }
+    const profilePath = (value as Record<string, unknown>).profilePath;
+    if (typeof profilePath !== "string") {
+      throw new Error("Profile binding path is invalid.");
+    }
+    return resolve(profilePath);
+  });
+}
+
+async function prepareInterruptedManagedRuntime(
+  device: Pick<AgentControlDevice, "hermesHome" | "userData">,
+  runtimeSourceRoot: string,
+  markerPath: string,
+  tracePath: string,
+): Promise<() => Promise<void>> {
+  const source = resolve(runtimeSourceRoot);
+  await readFile(join(source, "hermes_constants.py"));
+  const currentPointer = JSON.parse(
+    await readFile(join(device.userData, "runtime", "current.json"), "utf8"),
+  ) as { versionDirectory?: unknown };
+  if (typeof currentPointer.versionDirectory !== "string") {
+    throw new Error("Managed Runtime current pointer is unavailable.");
+  }
+  const pythonWrapper = join(
+    device.userData,
+    "runtime",
+    "versions",
+    currentPointer.versionDirectory,
+    "python",
+    "bin",
+    "python3",
+  );
+  const originalPython = `${pythonWrapper}.e2e-original`;
+  await rename(pythonWrapper, originalPython);
+  const sourcePython = join(source, ".venv", "bin", "python");
+  const wrapper = `#!/bin/sh
+set -eu
+trace_file="\${AGENTERA_E2E_RUNTIME_TRACE_FILE:-${tracePath}}"
+trace() {
+  if [ -n "$trace_file" ]; then
+    printf '%s\\n' "$*" >> "$trace_file"
+  fi
+}
+  trace "wrapper pid=$$ stage=entry HERMES_HOME=\${HERMES_HOME:-} HOME=\${HOME:-} PYTHONPATH=\${PYTHONPATH:-} PWD=\${PWD:-} sourcePython=${sourcePython} args=$*"
+set +e
+(cd "${source}" && "${sourcePython}" -c 'import os, hermes_constants; print("probe hermes_constants=" + str(hermes_constants.__file__)); print("probe HERMES_HOME=" + str(os.environ.get("HERMES_HOME"))); print("probe default_root=" + str(hermes_constants.get_default_hermes_root()))') >> "$trace_file" 2>&1
+probe_status=$?
+set -e
+trace "wrapper pid=$$ stage=probe-exit status=$probe_status"
+if [ "\${1:-}" = "-m" ] && [ "\${2:-}" = "hermes_cli.main" ] && [ "\${3:-}" = "profile" ] && [ "\${4:-}" = "create" ] && [ ! -e "\${AGENTERA_E2E_INTERRUPT_PROFILE_CREATE_ONCE_MARKER:-}" ]; then
+  profile="\${5:-}"
+  if [ -z "$profile" ]; then exit 64; fi
+  export PYTHONPATH="${source}:\${PYTHONPATH:-}"
+  set +e
+  (cd "${source}" && "${sourcePython}" -c 'import os, hermes_constants, hermes_cli.profiles; print("profile-probe hermes_constants=" + str(hermes_constants.__file__)); print("profile-probe profiles=" + str(hermes_cli.profiles.__file__)); print("profile-probe HERMES_HOME=" + str(os.environ.get("HERMES_HOME"))); print("profile-probe default_root=" + str(hermes_constants.get_default_hermes_root())); print("profile-probe profiles_root=" + str(hermes_cli.profiles._get_profiles_root()))') >> "$trace_file" 2>&1
+  profile_probe_status=$?
+  set -e
+  trace "wrapper pid=$$ stage=profile-probe-exit status=$profile_probe_status"
+  trace "wrapper pid=$$ stage=before-profile-create HERMES_HOME=\${HERMES_HOME:-} HOME=\${HOME:-} PYTHONPATH=\${PYTHONPATH:-} PWD=\${PWD:-}"
+  set +e
+  (cd "${source}" && "${sourcePython}" "$@")
+  source_status=$?
+  set -e
+  trace "wrapper pid=$$ stage=after-profile-create status=$source_status HERMES_HOME=\${HERMES_HOME:-}"
+  if [ "$source_status" -ne 0 ]; then exit "$source_status"; fi
+  staging_target="\${HERMES_HOME}/profiles/$profile"
+  if [ ! -d "$staging_target" ]; then exit 70; fi
+  trace "wrapper pid=$$ stage=staging-profile-created target=$staging_target entries=$(find "$staging_target" -mindepth 1 -maxdepth 1 -print | sort | tr '\\n' ',')"
+  target="\${AGENTERA_E2E_DURABLE_HERMES_HOME}/profiles/$profile"
+  trace "wrapper pid=$$ stage=durable-before target=$target entries=$(if [ -d "$target" ]; then find "$target" -mindepth 1 -maxdepth 1 -print | sort | tr '\\n' ','; else printf '<missing>'; fi)"
+  mkdir -p "$target/sessions" "$target/skills"
+  : > "$target/.env"
+  printf '%s\\n' '{"name":"interrupted-e2e-profile"}' > "$target/profile-meta.json"
+  printf '%s\\n' '# Interrupted fresh Profile scaffold' > "$target/SOUL.md"
+  trace "wrapper pid=$$ stage=durable-scaffold-created target=$target entries=$(find "$target" -mindepth 1 -maxdepth 1 -print | sort | tr '\\n' ',')"
+  : > "\${AGENTERA_E2E_INTERRUPT_PROFILE_CREATE_ONCE_MARKER}"
+  exit 75
+fi
+export PYTHONPATH="${source}:\${PYTHONPATH:-}"
+trace "wrapper pid=$$ stage=before-normal-exec HERMES_HOME=\${HERMES_HOME:-} HOME=\${HOME:-} PYTHONPATH=\${PYTHONPATH:-} PWD=\${PWD:-}"
+(cd "${source}" && exec "${sourcePython}" "$@")
+`;
+  await writeFile(pythonWrapper, wrapper, { encoding: "utf8", mode: 0o700 });
+  await chmod(pythonWrapper, 0o700);
+  return async () => {
+    await rm(pythonWrapper, { force: true });
+    await rename(originalPython, pythonWrapper);
+  };
+}
+
 async function publish(
   device: AgentControlDevice,
   draftId: string,
@@ -271,18 +445,22 @@ async function writeDeviceALearning(profilePath: string): Promise<void> {
 
 test.beforeAll(async () => {
   modelBaseUrl = await startModelServer();
-  harness = await createAgentControlHarness();
+  harness = await createAgentControlHarness({ emptyDevices: ["C"] });
+  harness.deviceRoots.C.hermesHome = join(harness.root, "device-c", ".hermes");
+  await mkdir(harness.deviceRoots.C.hermesHome, { recursive: true });
 });
 
 test.afterAll(async () => {
   await closeAgentControlHarness(harness);
-  await new Promise<void>((resolveClose) =>
-    modelServer?.close(() => resolveClose()) ?? resolveClose(),
+  await new Promise<void>(
+    (resolveClose) =>
+      modelServer?.close(() => resolveClose()) ?? resolveClose(),
   );
   modelServer = null;
   harness = null;
   deviceA = null;
   deviceB = null;
+  deviceC = null;
 });
 
 // @lat: [[agentera-agent-control-plane#Release gate#Two-device boundary]]
@@ -322,12 +500,22 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
       "utf8",
     ),
     writeFile(
+      join(harness.deviceRoots.C.hermesHome, "config.yaml"),
+      compatibleModelConfig,
+      "utf8",
+    ),
+    writeFile(
       join(harness.deviceRoots.A.hermesHome, "models.json"),
       modelCatalog,
       "utf8",
     ),
     writeFile(
       join(harness.deviceRoots.B.hermesHome, "models.json"),
+      modelCatalog,
+      "utf8",
+    ),
+    writeFile(
+      join(harness.deviceRoots.C.hermesHome, "models.json"),
       modelCatalog,
       "utf8",
     ),
@@ -418,6 +606,283 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
   await expect
     .poll(() => cloudAgentControlCounts(harness))
     .toMatchObject({ definitions: 1, versions: 1, installations: 0 });
+
+  const runtimeSourceRoot =
+    process.env.AGENTERA_E2E_RUNTIME_SOURCE_ROOT?.trim();
+  if (!runtimeSourceRoot) {
+    throw new Error(
+      "AGENTERA_E2E_RUNTIME_SOURCE_ROOT is required for the interrupted staging E2E.",
+    );
+  }
+  const interruptMarker = join(
+    harness.root,
+    "device-c-profile-create-interrupted.once",
+  );
+  const runtimeTracePath = join(harness.root, "device-c-runtime-wrapper.log");
+  const defaultRootMarkers = [
+    "config.yaml",
+    "models.json",
+    "model-definitions.json",
+    ".env",
+  ] as const;
+  deviceC = await launchAgentControlDevice(harness, "C", {
+    environment: {
+      HOME: dirname(harness.deviceRoots.C.hermesHome),
+      AGENTERA_E2E_INTERRUPT_PROFILE_CREATE_ONCE_MARKER: interruptMarker,
+      AGENTERA_E2E_DURABLE_HERMES_HOME: harness.deviceRoots.C.hermesHome,
+    },
+  });
+  await authenticateExistingAgentControlDevice(harness, deviceC);
+  await claimDefaultProfile(deviceC);
+  const restoreManagedPython = await prepareInterruptedManagedRuntime(
+    deviceC,
+    runtimeSourceRoot,
+    interruptMarker,
+    runtimeTracePath,
+  );
+  const defaultRootBefore = await privateProfileSnapshot(
+    deviceC.hermesHome,
+    defaultRootMarkers,
+  );
+  const interruptedInstall = await invokeAgentera(deviceC, "installVersion", {
+    definitionId: versionOne.definitionId,
+    versionId: versionOne.versionId,
+    profileName: "device-c-recovery",
+  });
+  expect(interruptedInstall.ok).toBe(false);
+  const defaultRootAfterFailure = await privateProfileSnapshot(
+    deviceC.hermesHome,
+    defaultRootMarkers,
+  );
+  if (
+    JSON.stringify(defaultRootAfterFailure) !==
+    JSON.stringify(defaultRootBefore)
+  ) {
+    throw new Error(
+      `Default Hermes root changed during interrupted attempt: ${JSON.stringify(
+        {
+          before: defaultRootBefore,
+          after: defaultRootAfterFailure,
+        },
+      )}`,
+    );
+  }
+  const interruptedState = await localAgentControlState(deviceC);
+  if (interruptedState.installations.length === 0) {
+    throw new Error(
+      `Interrupted install did not persist locally: ${JSON.stringify({
+        result: interruptedInstall,
+        process: deviceProcessDiagnostics(deviceC),
+      })}`,
+    );
+  }
+  expect(interruptedState.installations).toEqual([
+    expect.objectContaining({
+      status: "pending",
+      retryCode: "profile_creation_failed",
+    }),
+  ]);
+  const reservationsBeforeRestart = await freshProfileReservations(deviceC);
+  expect(reservationsBeforeRestart).toHaveLength(1);
+  const reservation = reservationsBeforeRestart[0];
+  expect(reservation.displayName).toBe("device-c-recovery");
+  const interruptedProfilePath = deviceProfilePath(
+    deviceC,
+    reservation.profileId,
+  );
+  const interruptedScaffold = await privateProfileSnapshot(
+    interruptedProfilePath,
+    [".env", "SOUL.md", "profile-meta.json", "sessions", "skills"],
+  );
+  expect(interruptedScaffold).not.toHaveProperty("MEMORY.md");
+  const interruptedEntries = (await readdir(interruptedProfilePath)).sort();
+  const expectedInterruptedEntries = [
+    ".env",
+    "SOUL.md",
+    "profile-meta.json",
+    "sessions",
+    "skills",
+  ];
+  if (
+    JSON.stringify(interruptedEntries) !==
+    JSON.stringify(expectedInterruptedEntries)
+  ) {
+    let runtimeTrace = "<trace unavailable>";
+    try {
+      runtimeTrace = await readFile(runtimeTracePath, "utf8");
+    } catch (error) {
+      runtimeTrace = `<trace read failed: ${String(error)}>`;
+    }
+    throw new Error(
+      `Interrupted Profile contains unexpected entries: ${JSON.stringify({
+        interruptedProfilePath,
+        interruptedEntries,
+        expectedInterruptedEntries,
+        runtimeTrace,
+      })}`,
+    );
+  }
+  const foreignProfilePath = deviceProfilePath(deviceC, "foreign-profile");
+  await mkdir(foreignProfilePath, { recursive: true });
+  await writeFile(
+    join(foreignProfilePath, "MEMORY.md"),
+    "FOREIGN_PROFILE_MUST_REMAIN_UNTOUCHED\n",
+    "utf8",
+  );
+  const foreignBeforeRetry = await privateProfileSnapshot(foreignProfilePath, [
+    "MEMORY.md",
+  ]);
+
+  await restoreManagedPython();
+
+  await deviceC.app.close();
+  const restoreManagedPythonAfterRestart =
+    await prepareInterruptedManagedRuntime(
+      {
+        userData: harness.deviceRoots.C.userData,
+        hermesHome: harness.deviceRoots.C.hermesHome,
+      },
+      runtimeSourceRoot,
+      interruptMarker,
+      runtimeTracePath,
+    );
+  deviceC = await launchAgentControlDevice(harness, "C", {
+    environment: {
+      HOME: dirname(harness.deviceRoots.C.hermesHome),
+      AGENTERA_E2E_INTERRUPT_PROFILE_CREATE_ONCE_MARKER: interruptMarker,
+      AGENTERA_E2E_DURABLE_HERMES_HOME: harness.deviceRoots.C.hermesHome,
+      AGENTERA_E2E_RUNTIME_TRACE_FILE: runtimeTracePath,
+    },
+  });
+  await authenticateExistingAgentControlDevice(harness, deviceC);
+  await claimDefaultProfile(deviceC);
+  const defaultRootBeforeRetry = await privateProfileSnapshot(
+    deviceC.hermesHome,
+    defaultRootMarkers,
+  );
+  if (
+    JSON.stringify(defaultRootBeforeRetry) !== JSON.stringify(defaultRootBefore)
+  ) {
+    throw new Error(
+      `Default Hermes root changed during restart before retry: ${JSON.stringify(
+        {
+          before: defaultRootBefore,
+          after: defaultRootBeforeRetry,
+        },
+      )}`,
+    );
+  }
+  const retryAfterRestart = await invokeAgentera(
+    deviceC,
+    "retryPendingInstallation",
+    {
+      id: interruptedState.installations[0].id,
+      target: { kind: "fresh", profileName: "device-c-recovery" },
+    },
+  );
+  if (!retryAfterRestart.ok) {
+    const failedRetryState = await localAgentControlState(deviceC);
+    const failedOperationDatabase = new DatabaseSync(
+      join(deviceC.userData, "agentera-control-plane", "control-plane.db"),
+      { readOnly: true },
+    );
+    let failedOperation: unknown;
+    try {
+      failedOperation = failedOperationDatabase
+        .prepare(
+          `SELECT operation_id, agent_installation_id, target_profile_id,
+                  target_kind, display_name, phase, revision,
+                  runtime_profile_id, retry_code
+           FROM installation_operations
+           WHERE agent_installation_id = ?`,
+        )
+        .get(interruptedState.installations[0].id);
+    } finally {
+      failedOperationDatabase.close();
+    }
+    const runtimeTrace = await readFile(runtimeTracePath, "utf8").catch(
+      (error) => `<trace read failed: ${String(error)}>`,
+    );
+    const profileEntries = await readdir(interruptedProfilePath).catch(
+      () => [],
+    );
+    const markerEntries = await Promise.all(
+      ["auth.json", "MEMORY.md", "USER.md", "files", "curator", ".curator"].map(
+        async (marker) => ({
+          marker,
+          entries: await readdir(join(interruptedProfilePath, marker)).catch(
+            () => [],
+          ),
+        }),
+      ),
+    );
+    throw new Error(
+      `Retry failed after fresh Profile staging: ${JSON.stringify({
+        result: retryAfterRestart,
+        failedRetryState,
+        failedOperation,
+        profileEntries,
+        markerEntries,
+        runtimeTrace,
+        process: deviceProcessDiagnostics(deviceC),
+        rawProcessOutput: deviceC.processOutput.slice(-16_000),
+      })}`,
+    );
+  }
+  if (retryAfterRestart.ok) {
+    expect(retryAfterRestart.data.status).toBe("active");
+  }
+  await restoreManagedPythonAfterRestart();
+  const recoveredState = await localAgentControlState(deviceC);
+  expect(recoveredState.installations).toEqual([
+    expect.objectContaining({
+      id: interruptedState.installations[0].id,
+      status: "active",
+      runtimeProfileId: reservation.runtimeProfileId,
+    }),
+  ]);
+  expect(await freshProfileReservations(deviceC)).toEqual([]);
+  const operationDatabase = new DatabaseSync(
+    join(deviceC.userData, "agentera-control-plane", "control-plane.db"),
+    { readOnly: true },
+  );
+  try {
+    expect(
+      operationDatabase
+        .prepare(
+          `SELECT operation_id, target_profile_id, runtime_profile_id, phase
+           FROM installation_operations
+           WHERE agent_installation_id = ?`,
+        )
+        .get(interruptedState.installations[0].id),
+    ).toEqual({
+      operation_id: reservation.operationId,
+      target_profile_id: reservation.profileId,
+      runtime_profile_id: reservation.runtimeProfileId,
+      phase: "committed",
+    });
+  } finally {
+    operationDatabase.close();
+  }
+  expect(
+    await privateProfileSnapshot(deviceC.hermesHome, defaultRootMarkers),
+  ).toEqual(defaultRootBefore);
+  expect(
+    await privateProfileSnapshot(foreignProfilePath, ["MEMORY.md"]),
+  ).toEqual(foreignBeforeRetry);
+  expect(
+    await privateProfileSnapshot(interruptedProfilePath, ["MEMORY.md"]),
+  ).toEqual({
+    "MEMORY.md": null,
+  });
+  expect(await boundProfilePaths(deviceC)).not.toContain(
+    resolve(foreignProfilePath),
+  );
+  expect(
+    (await readdir(join(deviceC.hermesHome, "profiles"))).filter((name) =>
+      name.startsWith(`${reservation.profileId}-`),
+    ),
+  ).toEqual([]);
 
   const aProfile = deviceProfilePath(deviceA, "default");
   const aBeforeClaim = await privateProfileSnapshot(aProfile, PRIVATE_MARKERS);
@@ -552,9 +1017,9 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
     policyMode: "user_select",
     switchDisabledCode: null,
   });
-  expect(beforeSwitch.agentConversation?.catalog.routes.map(({ model }) => model)).toEqual(
-    expect.arrayContaining([PRIMARY_MODEL, ALTERNATE_MODEL]),
-  );
+  expect(
+    beforeSwitch.agentConversation?.catalog.routes.map(({ model }) => model),
+  ).toEqual(expect.arrayContaining([PRIMARY_MODEL, ALTERNATE_MODEL]));
   const alternate = beforeSwitch.agentConversation?.catalog.routes.find(
     ({ model }) => model === ALTERNATE_MODEL,
   );
@@ -718,7 +1183,9 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
     .toMatchObject({
       definitions: 1,
       versions: 2,
-      installations: 2,
+      // Device C is a third device in this recovery scenario; its recovered
+      // installation is intentionally included in the shared Cloud count.
+      installations: 3,
       // The model switch is an immutable Agent segment transition, so it
       // creates one additional sanitized Runtime binding while preserving
       // the original segment bindings for both devices.

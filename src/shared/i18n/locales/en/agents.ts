@@ -172,6 +172,11 @@ export default {
     pending: "Needs attention",
     localDraft: "Local draft",
     ready: "Ready",
+    setupIncomplete: "Setup incomplete",
+    needsModel: "Model required",
+    draftNeedsReview: "Draft",
+    viewDetails: "View details",
+    viewAgentDetails: "View {{name}} details",
     readyToInstall: "Ready to use",
     running: "Running",
     updateAvailable: "Update available",
@@ -194,6 +199,15 @@ export default {
     advancedTitle: "Agent governance",
     advancedSubtitle:
       "Experience promotion, enterprise review, and access governance",
+  },
+  teams: {
+    title: "Multi-Agent collaboration",
+    description:
+      "Give one goal to multiple isolated Agents and follow their work on a single task board.",
+    hermesBoardStatus: "Runs on the Aera task board",
+    capabilities:
+      "Goal decomposition, task assignment, progress tracking, and result summaries",
+    startTask: "Start a team task",
   },
   capabilityBinding: {
     title: "Configure local capabilities",

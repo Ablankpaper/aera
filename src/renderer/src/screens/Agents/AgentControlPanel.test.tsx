@@ -396,6 +396,22 @@ function installAPI(
 describe("AgentControlPanel", () => {
   beforeEach(() => vi.restoreAllMocks());
 
+  it("opens the existing Hermes task board from the honest team entry", async () => {
+    installAPI({ listDefinitions: vi.fn(async () => success([])) });
+    const onOpenTeams = vi.fn();
+    render(<AgentControlPanel profiles={[]} onOpenTeams={onOpenTeams} />);
+
+    expect(await screen.findByText("agents.teams.title")).toBeVisible();
+    expect(screen.getByText("agents.teams.hermesBoardStatus")).toBeVisible();
+    expect(screen.getByText("agents.teams.capabilities")).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "agents.teams.startTask" }),
+    );
+
+    expect(onOpenTeams).toHaveBeenCalledOnce();
+    expect(screen.queryByText("agents.teams.fakeProgress")).toBeNull();
+  });
+
   // @lat: [[sidebar-navigation#Agents page]]
   it("keeps governance closed by default while allowing an Owner to open it", async () => {
     installAPI({
@@ -518,28 +534,29 @@ describe("AgentControlPanel", () => {
     "capability_dlp_blocked",
     "organization_agent_forbidden",
     "conflict",
-  ] as const)("keeps the fail-closed %s error informational", async (errorCode) => {
-    installAPI({
-      listDefinitions: vi.fn(async () => ({
-        ok: false as const,
-        errorCode,
-      })),
-    });
+  ] as const)(
+    "keeps the fail-closed %s error informational",
+    async (errorCode) => {
+      installAPI({
+        listDefinitions: vi.fn(async () => ({
+          ok: false as const,
+          errorCode,
+        })),
+      });
 
-    render(
-      <AgentControlPanel profiles={[]} onConfigureModels={vi.fn()} />,
-    );
+      render(<AgentControlPanel profiles={[]} onConfigureModels={vi.fn()} />);
 
-    expect(
-      await screen.findByText(`agents.control.errors.${errorCode}`),
-    ).toBeVisible();
-    expect(
-      screen.queryByRole("button", { name: "agents.control.tryAgain" }),
-    ).toBeNull();
-    expect(
-      screen.queryByRole("button", { name: "agents.hub.configureModel" }),
-    ).toBeNull();
-  });
+      expect(
+        await screen.findByText(`agents.control.errors.${errorCode}`),
+      ).toBeVisible();
+      expect(
+        screen.queryByRole("button", { name: "agents.control.tryAgain" }),
+      ).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "agents.hub.configureModel" }),
+      ).toBeNull();
+    },
+  );
 
   it("keeps local drafts/installations available offline and pauses cloud discovery", async () => {
     const api = installAPI({
@@ -674,6 +691,111 @@ describe("AgentControlPanel", () => {
       screen.getByRole("button", { name: "agents.hub.mineFilter.ready" }),
     );
     expect(screen.getByText("agents.hub.noFilteredResults")).toBeTruthy();
+  });
+
+  it("renders one card-local primary action and keeps retry failure on its card", async () => {
+    const pendingDefinitionId = "12121212-1212-4212-8212-121212121212";
+    const pendingInstallationId = "13131313-1313-4313-8313-131313131313";
+    const pendingVersionId = "14141414-1414-4414-8414-141414141414";
+    const readyInstallation = installation("active");
+    const pendingInstallation = {
+      ...installation("pending"),
+      id: pendingInstallationId,
+      definitionId: pendingDefinitionId,
+      selectedVersionId: pendingVersionId,
+      retryCode: "activation_failed",
+    } satisfies AgenteraAgentInstallationSummary;
+    const api = installAPI({
+      listDefinitions: vi.fn(async () =>
+        success([
+          definition(),
+          {
+            ...definition(),
+            id: pendingDefinitionId,
+            displayName: "Pending Agent",
+            latestVersionId: pendingVersionId,
+          },
+        ]),
+      ),
+      listInstallations: vi.fn(async () =>
+        success([readyInstallation, pendingInstallation]),
+      ),
+      retryPendingInstallation: vi.fn(async () => ({
+        ok: false as const,
+        errorCode: "cloud_unavailable" as const,
+      })),
+    });
+    const onConfigureModels = vi.fn();
+    render(
+      <AgentControlPanel
+        profiles={[
+          {
+            ...configuredModelProfile("ready-profile"),
+            name: "Ready Agent",
+            agentInstallationId: INSTALLATION_ID,
+          },
+          {
+            id: "missing-model-profile",
+            name: "Missing Model Agent",
+            provider: "auto",
+            model: "",
+          },
+        ]}
+        onChatWithProfile={vi.fn()}
+        onConfigureModels={onConfigureModels}
+      />,
+    );
+
+    const grid = await screen.findByTestId("personal-agent-grid");
+    const cards = within(grid).getAllByTestId("agent-capability-card");
+    const readyCard = cards.find((card) =>
+      within(card).queryByText("Research Agent"),
+    )!;
+    const pendingCard = cards.find((card) =>
+      within(card).queryByText("Pending Agent"),
+    )!;
+    const missingModelCard = cards.find((card) =>
+      within(card).queryByText("Missing Model Agent"),
+    )!;
+
+    expect(
+      within(readyCard).getAllByTestId("agent-card-primary-action"),
+    ).toHaveLength(1);
+    expect(
+      within(readyCard).getByRole("button", { name: "agents.hub.useAgent" }),
+    ).toBeVisible();
+    expect(
+      within(pendingCard).getAllByTestId("agent-card-primary-action"),
+    ).toHaveLength(1);
+    expect(
+      within(pendingCard).getByRole("button", {
+        name: "agents.control.retryAgent",
+      }),
+    ).toBeVisible();
+    expect(
+      within(missingModelCard).getAllByTestId("agent-card-primary-action"),
+    ).toHaveLength(1);
+    expect(
+      within(missingModelCard).getByRole("button", {
+        name: "agents.hub.configureModel",
+      }),
+    ).toBeVisible();
+
+    fireEvent.click(
+      within(pendingCard).getByRole("button", {
+        name: "agents.control.retryAgent",
+      }),
+    );
+    expect(
+      await within(pendingCard).findByText(
+        "agents.control.errors.cloud_unavailable",
+      ),
+    ).toBeVisible();
+    expect(
+      within(readyCard).queryByText("agents.control.errors.cloud_unavailable"),
+    ).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(api.retryPendingInstallation).toHaveBeenCalledOnce();
   });
 
   it("opens model configuration instead of installing a published Agent without a model", async () => {

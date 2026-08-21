@@ -121,6 +121,7 @@ import {
   deleteProfile,
   prepareProfile,
   profileIdForAgentName,
+  resetInterruptedFreshProfile,
   setActiveProfile,
 } from "../profiles";
 import { seedAgentModelProfile } from "../agentera-agent-control/model-profile-seed";
@@ -547,6 +548,7 @@ export async function startMainProcess(
         profileIdForAgentName,
         createProfile,
         prepareProfile,
+        resetInterruptedFreshProfile,
         deleteProfile,
         resolveProfilePath: (profileId) => profileHome(profileId),
         activateProfile: setActiveProfile,

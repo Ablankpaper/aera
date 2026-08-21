@@ -192,6 +192,11 @@ export default {
     pending: "待完成",
     localDraft: "本地草稿",
     ready: "可使用",
+    setupIncomplete: "待完成配置",
+    needsModel: "需要配置模型",
+    draftNeedsReview: "草稿",
+    viewDetails: "查看详情",
+    viewAgentDetails: "查看 {{name}} 详情",
     readyToInstall: "可使用",
     running: "运行中",
     updateAvailable: "有新版本",
@@ -213,6 +218,14 @@ export default {
     localProfileUnavailable: "此智能体在本机尚未准备好",
     advancedTitle: "智能体治理",
     advancedSubtitle: "经验提升、企业审核与权限治理",
+  },
+  teams: {
+    title: "多智能体协作",
+    description:
+      "把一个目标交给多个隔离智能体协作处理，并在同一个任务看板中查看执行状态。",
+    hermesBoardStatus: "由 Aera 任务看板执行",
+    capabilities: "支持目标拆解、任务分配、进度跟踪与结果总结",
+    startTask: "发起团队任务",
   },
   capabilityBinding: {
     title: "配置本机能力",

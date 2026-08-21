@@ -232,6 +232,28 @@ function installAgenteraAPI(
 }
 
 describe("Agents unified product surface", () => {
+  it("forwards the team task entry without invoking an Agent operation", async () => {
+    const hermes = installHermesAPI();
+    hermes.listProfiles.mockResolvedValue([]);
+    const agentera = installAgenteraAPI();
+    const onOpenTeams = vi.fn();
+    render(
+      <Agents
+        activeProfile="default"
+        onChatWith={vi.fn()}
+        onOpenTeams={onOpenTeams}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "agents.teams.startTask" }),
+    );
+
+    expect(onOpenTeams).toHaveBeenCalledOnce();
+    expect(agentera.installVersion).not.toHaveBeenCalled();
+    expect(hermes.setActiveProfile).not.toHaveBeenCalled();
+  });
+
   // @lat: [[provider-setup#Owner-scoped model route catalog]]
   it("offers a model saved on the active installed Profile from the owner catalog", async () => {
     const hermes = installHermesAPI();

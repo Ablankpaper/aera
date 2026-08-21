@@ -400,6 +400,9 @@ describe("Agent installation orchestration", () => {
   let prepareProfile: Mock<
     NonNullable<AgentInstallationProfileAdapter["prepareProfile"]>
   >;
+  let resetInterruptedFreshProfile: Mock<
+    NonNullable<AgentInstallationProfileAdapter["resetInterruptedFreshProfile"]>
+  >;
   let deleteProfile: Mock<
     NonNullable<AgentInstallationProfileAdapter["deleteProfile"]>
   >;
@@ -615,10 +618,16 @@ describe("Agent installation orchestration", () => {
         };
       },
     );
+    resetInterruptedFreshProfile = vi.fn(async (id: string) => {
+      expect(id).toBe("fresh-agent");
+      rmSync(freshProfilePath, { recursive: true, force: true });
+      events.push(`profile:reset-interrupted:${id}`);
+    });
     profiles = {
       profileIdForAgentName,
       createProfile,
       prepareProfile,
+      resetInterruptedFreshProfile,
       deleteProfile,
       resolveProfilePath: (id) => {
         expect(id).toBe("fresh-agent");
@@ -1062,6 +1071,7 @@ describe("Agent installation orchestration", () => {
       }),
     ]);
     expect(prepareProfile).toHaveBeenCalledTimes(2);
+    expect(resetInterruptedFreshProfile).not.toHaveBeenCalled();
     expect(createProfile).not.toHaveBeenCalled();
     expect(
       bindings.verifyProfileBinding(freshProfilePath, owner),
@@ -1278,6 +1288,123 @@ describe("Agent installation orchestration", () => {
     ]);
     expect(prepareProfile).toHaveBeenCalledTimes(2);
     expect(createProfile).not.toHaveBeenCalled();
+  });
+
+  // @lat: [[lat.md/agentera-agent-control-plane#Installation and binding#Installation reconciliation isolation#Interrupted fresh Profile retry evidence]]
+  it("retries a known safe Beta.35 half-Profile through staged activation", async () => {
+    const sourceProfilePath = join(profilesRoot, "source-profile");
+    mkdirSync(sourceProfilePath, { recursive: true });
+    const originalResolveProfilePath = profiles.resolveProfilePath;
+    profiles.resolveProfilePath = vi.fn((id: string) =>
+      id === "source-profile"
+        ? sourceProfilePath
+        : originalResolveProfilePath(id),
+    );
+    bindings = new AgenteraProfileBindingStore({
+      userDataPath,
+      secureStorage: new FakeSecureStorage(),
+      now: () => NOW,
+      randomUUID: () => "19191919-1919-4919-8919-191919191919",
+    });
+    bindings.bindExistingProfile(sourceProfilePath, owner);
+    bindings = new AgenteraProfileBindingStore({
+      userDataPath,
+      secureStorage: new FakeSecureStorage(),
+      now: () => NOW,
+      randomUUID: () => RUNTIME_PROFILE_ID,
+    });
+    prepareProfile.mockImplementationOnce(async () => {
+      mkdirSync(join(freshProfilePath, "sessions"), { recursive: true });
+      mkdirSync(join(freshProfilePath, "skills"), { recursive: true });
+      writeFileSync(join(freshProfilePath, ".env"), "# interrupted seed\n");
+      writeFileSync(join(freshProfilePath, "SOUL.md"), "# Fresh Agent\n");
+      throw new Error("injected Runtime staging interruption");
+    });
+    profiles.configureFreshProfileModel = vi.fn(async () => {
+      if (existsSync(freshProfilePath)) {
+        throw new Error("model_configuration_mutation_unavailable");
+      }
+    });
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: {
+          kind: "fresh",
+          name: "Fresh Agent",
+          modelSourceProfileId: "source-profile",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "profile_binding_failed" });
+    expect(
+      database.sqlite
+        .prepare(
+          `SELECT retry_code FROM local_agent_installations
+           WHERE agent_installation_id = ?`,
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({ retry_code: "profile_creation_failed" });
+    const reservation = bindings.getFreshProfileReservation(
+      AGENT_INSTALLATION_ID,
+      owner,
+    );
+    expect(reservation).toMatchObject({
+      profileId: "fresh-agent",
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+    });
+
+    const retried = await manager().retryPendingInstallation({
+      agentInstallationId: AGENT_INSTALLATION_ID,
+      profile: {
+        kind: "fresh",
+        name: "Fresh Agent",
+        modelSourceProfileId: "source-profile",
+      },
+    });
+
+    expect(retried).toMatchObject({
+      status: "active",
+      runtimeProfileId: RUNTIME_PROFILE_ID,
+    });
+    expect(prepareProfile).toHaveBeenCalledTimes(2);
+    expect(resetInterruptedFreshProfile).toHaveBeenCalledOnce();
+    expect(
+      bindings.verifyProfileBinding(freshProfilePath, owner),
+    ).toMatchObject({
+      runtimeProfileId: reservation?.runtimeProfileId,
+      agentInstallationId: AGENT_INSTALLATION_ID,
+    });
+  });
+
+  it("preserves a pre-existing scaffold without durable interruption evidence", async () => {
+    mkdirSync(join(freshProfilePath, "sessions"), { recursive: true });
+    mkdirSync(join(freshProfilePath, "skills"), { recursive: true });
+    writeFileSync(join(freshProfilePath, ".env"), "user-owned value\n");
+    writeFileSync(join(freshProfilePath, "SOUL.md"), "# Existing\n");
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "profile_binding_failed" });
+
+    expect(readFileSync(join(freshProfilePath, ".env"), "utf8")).toBe(
+      "user-owned value\n",
+    );
+    expect(resetInterruptedFreshProfile).not.toHaveBeenCalled();
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT phase, retry_code FROM installation_operations WHERE operation_id = ?",
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({
+      phase: "repair_required",
+      retry_code: "profile_private_data_conflict",
+    });
   });
 
   it("repairs an active installation model only from a verified current-owner Profile", async () => {
@@ -3059,6 +3186,37 @@ describe("Agent installation orchestration", () => {
     ).resolves.toEqual([]);
     expect(prepareProfile).not.toHaveBeenCalled();
     expect(createProfile).not.toHaveBeenCalled();
+  });
+
+  it("preserves an unknown reserved fresh Profile instead of taking it over", async () => {
+    mkdirSync(freshProfilePath, { recursive: true });
+    const unknownPath = join(freshProfilePath, "unexpected.json");
+    writeFileSync(unknownPath, '{"private":true}\n');
+
+    await expect(
+      manager().install({
+        definitionId: DEFINITION_ID,
+        versionId: VERSION_ID,
+        profile: { kind: "fresh", name: "Fresh Agent" },
+      }),
+    ).rejects.toMatchObject({ code: "profile_binding_failed" });
+
+    expect(
+      database.sqlite
+        .prepare(
+          "SELECT phase, retry_code FROM installation_operations WHERE operation_id = ?",
+        )
+        .get(AGENT_INSTALLATION_ID),
+    ).toEqual({
+      phase: "repair_required",
+      retry_code: "profile_private_data_conflict",
+    });
+    expect(readFileSync(unknownPath, "utf8")).toBe('{"private":true}\n');
+    expect(resetInterruptedFreshProfile).not.toHaveBeenCalled();
+    expect(deleteProfile).not.toHaveBeenCalled();
+    expect(() =>
+      bindings.verifyProfileBinding(freshProfilePath, owner),
+    ).toThrow(/binding is required/i);
   });
 
   it("preserves and reuses an attached Profile after activation failure", async () => {

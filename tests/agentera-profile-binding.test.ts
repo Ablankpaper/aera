@@ -10,6 +10,7 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,6 +22,7 @@ import {
   createAgenteraGuestRuntimeOwner,
   discoverProfilesForCurrentOwner,
   hasMeaningfulHermesProfileData,
+  inspectFreshProfileScaffold,
   type AgenteraRuntimeOwner,
   type RuntimeOwnerBinding,
 } from "../src/main/agentera-profile-binding";
@@ -132,6 +134,58 @@ describe("Aera non-destructive Runtime Profile ownership", () => {
       operationId,
     );
     expect(operationId).not.toBe(owner.ownerId);
+  });
+
+  // @lat: [[lat.md/agentera-agent-control-plane#Installation and binding#Installation reconciliation isolation#Interrupted fresh Profile scaffold]]
+  it("recognizes only the bounded interrupted fresh-Profile scaffold", () => {
+    const interrupted = join(root, "profiles", "interrupted-fresh");
+    mkdirSync(join(interrupted, "sessions"), { recursive: true });
+    mkdirSync(join(interrupted, "skills"), { recursive: true });
+    writeFileSync(join(interrupted, ".env"), "# staged provider\n");
+    writeFileSync(join(interrupted, "SOUL.md"), "# Fresh Agent\n");
+    writeFileSync(
+      join(interrupted, "profile-meta.json"),
+      '{"name":"Fresh Agent"}\n',
+    );
+
+    expect(inspectFreshProfileScaffold(interrupted)).toEqual({
+      status: "safe_interrupted_scaffold",
+    });
+  });
+
+  it("treats unknown files, non-empty private directories, and symlinks as meaningful", () => {
+    const fixtures = [
+      {
+        name: "unknown-file",
+        prepare(path: string) {
+          writeFileSync(join(path, "unexpected.json"), "{}\n");
+        },
+      },
+      {
+        name: "non-empty-sessions",
+        prepare(path: string) {
+          mkdirSync(join(path, "sessions"), { recursive: true });
+          writeFileSync(join(path, "sessions", "private.json"), "{}\n");
+        },
+      },
+      {
+        name: "symlink",
+        prepare(path: string) {
+          const outside = join(root, "outside-private.txt");
+          writeFileSync(outside, "private\n");
+          symlinkSync(outside, join(path, "SOUL.md"));
+        },
+      },
+    ];
+
+    for (const fixture of fixtures) {
+      const path = join(root, "profiles", fixture.name);
+      mkdirSync(path, { recursive: true });
+      fixture.prepare(path);
+      expect(inspectFreshProfileScaffold(path), fixture.name).toEqual({
+        status: "meaningful_or_unknown",
+      });
+    }
   });
 
   // @lat: [[agentera-app-authentication#Startup gate#Guest Profile isolation#Profile discovery owner freshness]]

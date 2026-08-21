@@ -243,14 +243,19 @@ export const ModelPicker = memo(function ModelPicker({
         <ChevronDown size={12} />
       </button>
 
-      {(agentSwitchState === "pending" || agentSwitchState === "preparing") && (
+      {agentSwitchState === "pending" && (
         <span className="chat-model-switch-state">
-          {t("chat.modelSwitch.pending")}
+          {t("chat.modelSwitch.nextMessage")}
+        </span>
+      )}
+      {agentSwitchState === "preparing" && (
+        <span className="chat-model-switch-state">
+          {t("chat.modelSwitch.preparing")}
         </span>
       )}
       {agentSwitchState === "failed" && (
         <span className="chat-model-switch-state chat-model-switch-state-error">
-          {t("chat.modelSwitch.failed")}
+          {t("chat.modelSwitch.failedKeepsCurrent")}
         </span>
       )}
 

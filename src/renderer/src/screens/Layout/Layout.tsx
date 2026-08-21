@@ -1093,6 +1093,7 @@ function Layout({
                 activeProfile={activeProfile}
                 onChatWith={handleChatWithProfile}
                 onConfigureModels={handleConfigureAgentModels}
+                onOpenTeams={() => goTo("kanban")}
               />
             )}
           </div>
