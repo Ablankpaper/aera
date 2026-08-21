@@ -643,7 +643,7 @@ function Chat({
       }
       setPendingAgentModelSelection(undefined);
       setAgentSwitchState("failed");
-      toast(t("chat.modelSwitch.failed"), {
+      toast(t("chat.modelSwitch.failedKeepsCurrent"), {
         id: `model-switch-failed-${event.segmentId}`,
         duration: 7000,
       });
@@ -655,7 +655,7 @@ function Chat({
     (error: unknown): void => {
       setPendingAgentModelSelection(undefined);
       setAgentSwitchState("failed");
-      toast(t("chat.modelSwitch.failed"), {
+      toast(t("chat.modelSwitch.failedKeepsCurrent"), {
         id: "model-switch-send-failed",
         duration: 7000,
       });

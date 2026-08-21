@@ -68,6 +68,8 @@ A candidate must leave `preparing` when any pre-output send initialization fails
 
 [[src/renderer/src/screens/Chat/ModelPicker.tsx#ModelPicker]] uses the installed Agent catalog instead of ordinary model groups, keeps historical fixed/allowlist Agents selectable, disables only in-flight switches, and stages the opaque selection for the next send without writing an ordinary session override.
 
+The picker keeps the current active model label until Main activates the candidate. It distinguishes “next message”, “preparing”, and “failed, current model retained” states; a failed candidate clears only the opaque pending selection and leaves the active route, Segment ordinal, transcript, and global model settings unchanged.
+
 ### Authoritative resume context
 
 [[src/renderer/src/screens/Chat/Chat.tsx#Chat]] waits for Main's conversation context before restoring an ordinary session override and retains the last verified Agent route while a refresh is pending, preventing model-picker flicker or cross-path persistence.

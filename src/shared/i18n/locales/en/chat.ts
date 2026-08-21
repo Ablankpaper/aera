@@ -4,8 +4,9 @@ export default {
   noModel: "No model set",
   auto: "Auto",
   modelSwitch: {
-    pending: "Switching on the next message…",
-    failed:
+    nextMessage: "Your selected model will apply from the next message.",
+    preparing: "Preparing the selected model for this conversation…",
+    failedKeepsCurrent:
       "The model switch failed. The previous model remains active; check the model configuration and try again.",
     marker: "Model changed",
     fixedPolicy: "This Agent uses a fixed model policy.",

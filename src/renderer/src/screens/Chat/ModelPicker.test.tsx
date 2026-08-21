@@ -73,9 +73,14 @@ function renderPicker(
       modelLibraryId: string;
       catalogRevision: string;
     }) => void;
-    agentSwitchState?: "idle" | "preparing" | "active" | "failed";
+    agentSwitchState?: "idle" | "pending" | "preparing" | "active" | "failed";
   } = {},
-): { container: HTMLElement; onOpen: Mock; onSelectModel: Mock } {
+): {
+  container: HTMLElement;
+  unmount: () => void;
+  onOpen: Mock;
+  onSelectModel: Mock;
+} {
   const onOpen = vi.fn();
   const onSelectModel = vi.fn();
   const utils = render(
@@ -196,6 +201,38 @@ describe("ModelPicker", () => {
       agentContext.catalog.routes[1].selection,
     );
     expect(container.textContent).not.toContain("chat.modelSwitch.fixedPolicy");
+  });
+
+  it("explains next-message, preparing, and failure-retention states", () => {
+    const pending = renderPicker({
+      agentConversation: agentContext,
+      agentSwitchState: "pending",
+    });
+    expect(pending.container.textContent).toContain(
+      "chat.modelSwitch.nextMessage",
+    );
+    pending.unmount();
+
+    const preparing = renderPicker({
+      agentConversation: agentContext,
+      agentSwitchState: "preparing",
+    });
+    expect(preparing.container.textContent).toContain(
+      "chat.modelSwitch.preparing",
+    );
+    preparing.unmount();
+
+    const failed = renderPicker({
+      agentConversation: agentContext,
+      displayModel: "GPT-5.6",
+      agentSwitchState: "failed",
+    });
+    expect(failed.container.textContent).toContain(
+      "chat.modelSwitch.failedKeepsCurrent",
+    );
+    expect(
+      failed.container.querySelector(".chat-model-name")?.textContent,
+    ).toBe("GPT-5.6");
   });
 
   // ── initial render ──────────────────────────────────────────────

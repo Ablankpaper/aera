@@ -445,7 +445,7 @@ describe("Chat global-profile transport freeze", () => {
     expect(
       chatHarness.messageListProps
         .at(-1)
-        ?.messages?.filter((message) => message.kind === "model_switch"),
+        ?.messages?.filter((message) => message.kind === "model_switch") ?? [],
     ).toHaveLength(0);
 
     const activeEvent = {
@@ -477,6 +477,82 @@ describe("Chat global-profile transport freeze", () => {
       chatHarness.modelPickerProps.at(-1)?.agentConversation
         ?.activeSegmentOrdinal,
     ).toBe(2);
+  });
+
+  it("keeps the active Agent route when a prepared model switch fails", async () => {
+    const selection = {
+      sourceProfileId: "account",
+      modelLibraryId: "petoi-gpt",
+      catalogRevision: "a".repeat(64),
+    };
+    const activeRoute = {
+      provider: "openai",
+      model: "gpt-5.6",
+      baseUrl: "https://api.openai.com/v1",
+      apiMode: "responses",
+    };
+    const agentConversation = {
+      threadId: "thread-failed-switch",
+      policyMode: "user_select",
+      activeRoute,
+      activeSegmentOrdinal: 1,
+      catalog: {
+        revision: "a".repeat(64),
+        targetProfileId: "account",
+        routes: [],
+      },
+      switchDisabledCode: null,
+    };
+    prepareConversationContext.mockResolvedValueOnce({
+      globalProfileVersion: 3,
+      requiresBoundApiTransport: true,
+      degraded: false,
+      conversationBoundary: null,
+      agentConversation,
+    });
+    render(<Chat runId="agent-switch-failed" profile="installed-agent" />);
+
+    await waitFor(() =>
+      expect(chatHarness.modelPickerProps.at(-1)?.agentConversation).toEqual(
+        agentConversation,
+      ),
+    );
+    await act(async () => {
+      chatHarness.modelPickerProps.at(-1)?.onSelectAgentModel?.(selection);
+    });
+    expect(chatHarness.modelPickerProps.at(-1)?.agentSwitchState).toBe(
+      "pending",
+    );
+
+    await act(async () => {
+      chatHarness.ipcArgs.at(-1)?.onAgentSegment?.("agent-switch-failed", {
+        state: "failed",
+        threadId: agentConversation.threadId,
+        segmentId: "segment-failed",
+        from: activeRoute,
+        to: {
+          provider: "custom:petoi",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://api.petoi.cn/v1",
+          apiMode: "codex_responses",
+        },
+        historyBoundaryCount: 0,
+        code: "model_switch_transport_failed",
+      });
+    });
+
+    expect(chatHarness.modelPickerProps.at(-1)?.agentSwitchState).toBe(
+      "failed",
+    );
+    expect(chatHarness.actionArgs.at(-1)?.agentModelSelection).toBeUndefined();
+    expect(chatHarness.modelPickerProps.at(-1)?.agentConversation).toEqual(
+      agentConversation,
+    );
+    expect(
+      chatHarness.messageListProps
+        .at(-1)
+        ?.messages?.filter((message) => message.kind === "model_switch") ?? [],
+    ).toHaveLength(0);
   });
 
   // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Account-required routing#Chat transport privacy]]

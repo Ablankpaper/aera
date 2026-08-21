@@ -4,8 +4,10 @@ export default {
   noModel: "未设置模型",
   auto: "自动",
   modelSwitch: {
-    pending: "将在下一条消息中切换模型…",
-    failed: "模型切换失败，之前的模型仍然有效。请检查模型配置后重试。",
+    nextMessage: "已选择新模型，将从下一条消息开始使用。",
+    preparing: "正在为当前对话准备所选模型…",
+    failedKeepsCurrent:
+      "模型切换失败，当前对话仍使用之前的模型。请检查模型配置后重试。",
     marker: "模型已切换",
     fixedPolicy: "此智能体使用固定模型策略，无法切换模型。",
   },
