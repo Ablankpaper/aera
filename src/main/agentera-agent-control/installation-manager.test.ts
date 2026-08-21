@@ -1291,7 +1291,7 @@ describe("Agent installation orchestration", () => {
   });
 
   // @lat: [[lat.md/agentera-agent-control-plane#Installation and binding#Installation reconciliation isolation#Interrupted fresh Profile retry evidence]]
-  it("retries a known safe Beta.36 half-Profile through staged activation", async () => {
+  it("retries a known safe Beta.37 half-Profile through staged activation", async () => {
     const sourceProfilePath = join(profilesRoot, "source-profile");
     mkdirSync(sourceProfilePath, { recursive: true });
     const originalResolveProfilePath = profiles.resolveProfilePath;

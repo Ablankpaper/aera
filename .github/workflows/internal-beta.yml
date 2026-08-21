@@ -73,7 +73,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain=v1)"
           VERSION=$(node -p "require('./package.json').version")
-          test "$VERSION" = "0.7.4-internal-beta.36"
+          test "$VERSION" = "0.7.4-internal-beta.37"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Verify successful CI belongs to the exact source
@@ -1031,7 +1031,7 @@ jobs:
             --manifest candidate/desktop-update/manifest.json \
             --private-key-env DESKTOP_UPDATE_SIGNING_PRIVATE_KEY \
             --published-at "$CREATED_AT" \
-            --release-notes "Beta.36 包含 Beta.35 的智能体能力优先界面、卡片局部错误、现有 Hermes 任务看板入口、会话级模型切换与 Profile 隔离修复；同时修复 Windows 更新健康交换时的进程退出竞态，避免重启安装阶段失败。保留 Beta.35 的默认模型和智能体模型选择修复、Beta.34 的首次登录/模型发现/更新状态修复，以及 Beta.33 的模型配置可靠性修复。Beta.29 故障机使用 DMG 桥接安装，Beta.31/Beta.32/Beta.33/Beta.34/Beta.35 支持在线升级。macOS 内测包已签名并公证；Windows 内测包未进行 Authenticode 签名，仅供受控内测使用。" \
+            --release-notes "Beta.37 修复创建或克隆智能体 Profile 时 staging 环境误用真实 Hermes 用户目录的问题：为每次事务隔离 HOME、USERPROFILE、LOCALAPPDATA，并禁用 Hermes alias，避免中断创建污染持久 Profile。保留 Beta.36 的智能体能力优先界面、会话级模型切换、Profile 隔离和 Windows 更新健康交换修复，以及 Beta.35 的默认模型和智能体模型选择修复、Beta.34 的首次登录/模型发现/更新状态修复、Beta.33 的模型配置可靠性修复。Beta.29 故障机使用 DMG 桥接安装，Beta.31/Beta.32/Beta.33/Beta.34/Beta.35/Beta.36 支持在线升级。macOS 内测包已签名并公证；Windows 内测包未进行 Authenticode 签名，仅供受控内测使用。" \
             --signature candidate/desktop-update/manifest.sig \
             --version "$VERSION"
           node scripts/internal-beta/desktop-update.mjs verify \
