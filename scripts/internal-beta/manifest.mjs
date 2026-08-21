@@ -15,12 +15,12 @@ import { validateFinalArtifactNativeInventoryDocument } from "../release/final-a
 
 export { canonicalJSONStringify };
 
-export const INTERNAL_BETA_VERSION = "0.7.4-internal-beta.34";
+export const INTERNAL_BETA_VERSION = "0.7.4-internal-beta.35";
 export const INTERNAL_BETA_SIGNING_STATUS =
   "macos_developer_id_notarized_windows_unsigned_internal_beta";
 export const INTERNAL_BETA_ELECTRON_ABI = "145";
 export const INTERNAL_BETA_RUNTIME_SOURCE_SHA =
-  "b890d7de940c02a06da73f6a421d3867a63db8e6";
+  "fb42016967ad934c55e9da5af1896d5c7206b445";
 export const INTERNAL_BETA_WORKFLOW_IDENTITY =
   "https://github.com/Ablankpaper/aera/.github/workflows/internal-beta.yml@refs/heads/main";
 export const INTERNAL_BETA_OIDC_ISSUER =
@@ -385,9 +385,9 @@ function validateRuntimeLock(lock) {
     lock.schema_version !== 1 ||
     lock.repository !== "Ablankpaper/aera-runtime" ||
     lock.source_commit !== INTERNAL_BETA_RUNTIME_SOURCE_SHA ||
-    lock.channel !== "candidate" ||
-    lock.runtime_version !== "0.20.0-agentera.2" ||
-    lock.release_tag !== "runtime-v0.20.0-agentera.2-rc.1"
+    lock.channel !== "stable" ||
+    lock.runtime_version !== "0.20.0-agentera.3" ||
+    lock.release_tag !== "runtime-v0.20.0-agentera.3"
   ) {
     throw new Error(
       "Runtime Seed commit, channel, version, or release is not approved for internal Beta",
@@ -823,9 +823,9 @@ export function validateInternalBetaManifest(document) {
   if (
     document.runtimeSeed.repository !== "Ablankpaper/aera-runtime" ||
     document.runtimeSeed.sourceCommit !== INTERNAL_BETA_RUNTIME_SOURCE_SHA ||
-    document.runtimeSeed.channel !== "candidate" ||
-    document.runtimeSeed.runtimeVersion !== "0.20.0-agentera.2" ||
-    document.runtimeSeed.releaseTag !== "runtime-v0.20.0-agentera.2-rc.1"
+    document.runtimeSeed.channel !== "stable" ||
+    document.runtimeSeed.runtimeVersion !== "0.20.0-agentera.3" ||
+    document.runtimeSeed.releaseTag !== "runtime-v0.20.0-agentera.3"
   ) {
     throw new Error("Runtime Seed identity is not approved for internal Beta");
   }

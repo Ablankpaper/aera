@@ -10,7 +10,7 @@ const electronMock = vi.hoisted(() => {
     app: {
       isPackaged: false,
       getPath: vi.fn(() => "/tmp/aera-updater-test"),
-      getVersion: vi.fn(() => "0.7.4-internal-beta.34"),
+      getVersion: vi.fn(() => "0.7.4-internal-beta.35"),
       once: vi.fn(),
     },
     ipcMain: {
