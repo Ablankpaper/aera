@@ -1,8 +1,15 @@
 import { execFileSync } from "child_process";
-import { dirname, join } from "path";
+import { dirname, join, resolve } from "path";
 import { homedir } from "os";
 import { promises as fs } from "fs";
-import { copyFileSync, cpSync, existsSync, mkdirSync, writeFileSync } from "fs";
+import {
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
 import { HERMES_HOME, getEnhancedPath } from "./installer";
 import { getRuntimeInvocation } from "./agentera-runtime-distribution/invocation";
 import {
@@ -22,6 +29,7 @@ import {
   type StagedProfileSourceKind,
 } from "./model-configuration-staged-profile";
 import { defaultModelConfigurationWriteAuthority } from "./model-configuration-write-authority";
+import { inspectFreshProfileScaffold } from "./agentera-profile-binding";
 
 const PROFILES_DIR = join(HERMES_HOME, "profiles");
 
@@ -491,6 +499,25 @@ export async function prepareProfile(
   } catch (err) {
     return stagedProfileFailure(err);
   }
+}
+
+export function resetInterruptedFreshProfile(profileId: string): Promise<void> {
+  if (!isValidNamedProfileName(profileId)) {
+    throw new Error(PROFILE_NAME_ERROR);
+  }
+  const profilesRoot = resolve(PROFILES_DIR);
+  const destination = resolve(PROFILES_DIR, profileId);
+  if (dirname(destination) !== profilesRoot) {
+    throw new Error(PROFILE_NAME_ERROR);
+  }
+  if (
+    inspectFreshProfileScaffold(destination).status !==
+    "safe_interrupted_scaffold"
+  ) {
+    throw new Error("Interrupted fresh Profile is not safe to rebuild.");
+  }
+  rmSync(destination, { recursive: true, force: false });
+  return Promise.resolve();
 }
 
 export async function createProfile(

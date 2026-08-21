@@ -450,6 +450,18 @@ If fresh Profile reservation completion fails after Cloud activation, the local 
 
 If local Profile activation fails after its reservation is completed, the same `cloud_activated` journal resumes activation on cold restart before committing the local Installation.
 
+#### Interrupted fresh Profile scaffold
+
+A failed fresh-Profile preparation may be rebuilt only when the destination is the exact durable reservation and contains solely the known non-private scaffold.
+
+[[src/main/agentera-profile-binding.ts#inspectFreshProfileScaffold]] accepts regular `.env`, `SOUL.md`, and `profile-meta.json` files plus empty `sessions` and `skills` directories. It never opens their contents. Symlinks, special nodes, unknown names, or non-empty directories are meaningful or unknown and remain untouched.
+
+#### Interrupted fresh Profile retry evidence
+
+Automatic reset requires the same Owner, operation, Profile ID, Runtime Profile ID, and a prior `profile_creation_failed` local retry record.
+
+[[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager]] reuses the existing `prepareProfile -> materialize -> activate` transaction only after those checks. [[src/main/profiles.ts#resetInterruptedFreshProfile]] canonicalizes the named destination and repeats the scaffold inspection immediately before deleting that one directory. A matching already-owned target resumes without reset; any foreign, mismatched, private, unknown, or first-seen destination becomes `repair_required` without model write, binding, or deletion.
+
 Manual selection downloads and verifies the immutable version, calls the cloud selection transaction, retrieves the newly signed policy through `GET /api/v1/policy-snapshots/{policy_snapshot_id}`, and only then atomically activates the read-only projection for later conversations. A missing or invalid policy leaves the last local version selected.
 
 [[src/main/agentera-agent-control/runtime-binding-store.ts#RuntimeBindingStore]] persists a complete local binding and its sanitized cloud outbox record in one transaction. [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager]] retries that outbox after installed turns, session attachment, and authentication changes, but delivery failure cannot delay or roll back Hermes.

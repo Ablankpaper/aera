@@ -148,6 +148,19 @@ export type ProfileClaimInspection =
       binding: RuntimeOwnerBinding;
     };
 
+export type FreshProfileScaffoldInspection =
+  | { status: "missing" }
+  | { status: "safe_interrupted_scaffold" }
+  | { status: "meaningful_or_unknown" };
+
+export type FreshProfileDestinationState =
+  | FreshProfileScaffoldInspection
+  | {
+      status: "owned";
+      isCurrentOwner: boolean;
+      binding: RuntimeOwnerBinding;
+    };
+
 export type AgenteraProfileBindingRepairCode =
   | "profile_owner_conflict"
   | "profile_reservation_conflict"
@@ -178,6 +191,12 @@ const PRIVATE_PROFILE_MARKERS = [
 const FRESH_PROFILE_FORBIDDEN_MARKERS = PRIVATE_PROFILE_MARKERS.filter(
   (marker) => marker !== ".env" && marker !== "sessions" && marker !== "skills",
 );
+const INTERRUPTED_FRESH_PROFILE_FILES = new Set([
+  ".env",
+  "SOUL.md",
+  "profile-meta.json",
+]);
+const INTERRUPTED_FRESH_PROFILE_DIRECTORIES = new Set(["sessions", "skills"]);
 
 function validUuid(value: unknown): value is string {
   return typeof value === "string" && UUID_PATTERN.test(value);
@@ -386,6 +405,66 @@ function canonicalProfilePath(profilePath: string): string {
   return canonical;
 }
 
+/**
+ * Classify only the small scaffold a failed fresh-Profile creation may leave.
+ * File contents are never opened. Any unfamiliar node fails closed.
+ */
+export function inspectFreshProfileScaffold(
+  profilePath: string,
+): FreshProfileScaffoldInspection {
+  if (typeof profilePath !== "string" || !isAbsolute(profilePath)) {
+    return { status: "meaningful_or_unknown" };
+  }
+  const candidate = resolve(profilePath);
+  let rootStats;
+  try {
+    rootStats = lstatSync(candidate);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT"
+      ? { status: "missing" }
+      : { status: "meaningful_or_unknown" };
+  }
+  if (rootStats.isSymbolicLink() || !rootStats.isDirectory()) {
+    return { status: "meaningful_or_unknown" };
+  }
+
+  let names: string[];
+  try {
+    names = readdirSync(candidate);
+  } catch {
+    return { status: "meaningful_or_unknown" };
+  }
+  for (const name of names) {
+    const entryPath = join(candidate, name);
+    let stats;
+    try {
+      stats = lstatSync(entryPath);
+    } catch {
+      return { status: "meaningful_or_unknown" };
+    }
+    if (
+      INTERRUPTED_FRESH_PROFILE_FILES.has(name) &&
+      stats.isFile() &&
+      !stats.isSymbolicLink()
+    ) {
+      continue;
+    }
+    if (
+      INTERRUPTED_FRESH_PROFILE_DIRECTORIES.has(name) &&
+      stats.isDirectory() &&
+      !stats.isSymbolicLink()
+    ) {
+      try {
+        if (readdirSync(entryPath).length === 0) continue;
+      } catch {
+        // Fall through to the fail-closed result.
+      }
+    }
+    return { status: "meaningful_or_unknown" };
+  }
+  return { status: "safe_interrupted_scaffold" };
+}
+
 function markerHasData(markerPath: string): boolean {
   let stats;
   try {
@@ -492,6 +571,42 @@ export class AgenteraProfileBindingStore {
     return {
       status: "owned",
       meaningfulData,
+      isCurrentOwner: sameOwner(stored.binding, owner),
+      binding: { ...stored.binding },
+    };
+  }
+
+  inspectFreshProfileDestination(
+    profilePath: string,
+    owner: AgenteraRuntimeOwner,
+  ): FreshProfileDestinationState {
+    assertOwner(owner);
+    const filesystem = inspectFreshProfileScaffold(profilePath);
+    if (filesystem.status === "missing") return filesystem;
+    if (filesystem.status === "meaningful_or_unknown") {
+      let canonical: string;
+      try {
+        canonical = canonicalProfilePath(profilePath);
+      } catch {
+        return filesystem;
+      }
+      const stored = this.readBindings().find(
+        (entry) => entry.profilePath === canonical,
+      );
+      if (!stored) return filesystem;
+      return {
+        status: "owned",
+        isCurrentOwner: sameOwner(stored.binding, owner),
+        binding: { ...stored.binding },
+      };
+    }
+    const canonical = canonicalProfilePath(profilePath);
+    const stored = this.readBindings().find(
+      (entry) => entry.profilePath === canonical,
+    );
+    if (!stored) return filesystem;
+    return {
+      status: "owned",
       isCurrentOwner: sameOwner(stored.binding, owner),
       binding: { ...stored.binding },
     };

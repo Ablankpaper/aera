@@ -223,6 +223,7 @@ export interface AgentInstallationProfileAdapter {
       cleanup(): Promise<void>;
     };
   }>;
+  resetInterruptedFreshProfile?: (profileId: string) => Promise<void>;
   deleteProfile(
     profileId: string,
   ):
@@ -2781,7 +2782,79 @@ export class AgentInstallationManager {
             }
           };
 
-          if (!existsSync(profilePath)) {
+          if (!this.isCurrentOwner(this.owner)) {
+            throw new AgenteraProfileBindingRepairError(
+              "profile_owner_conflict",
+              "The Aera owner changed before fresh Profile recovery.",
+            );
+          }
+          let destination =
+            this.profileBindings.inspectFreshProfileDestination(
+              profilePath,
+              this.owner,
+            );
+          if (destination.status === "safe_interrupted_scaffold") {
+            if (local.retryCode !== "profile_creation_failed") {
+              throw new AgenteraProfileBindingRepairError(
+                "profile_private_data_conflict",
+                "Reserved fresh Profile has no matching interruption record.",
+              );
+            }
+            if (!this.profiles.resetInterruptedFreshProfile) {
+              throw new Error(
+                "Interrupted fresh Profile recovery is unavailable.",
+              );
+            }
+            await this.profiles.resetInterruptedFreshProfile(
+              operation.profileId,
+            );
+            destination =
+              this.profileBindings.inspectFreshProfileDestination(
+                profilePath,
+                this.owner,
+              );
+            if (destination.status !== "missing") {
+              throw new AgenteraProfileBindingRepairError(
+                "profile_private_data_conflict",
+                "Interrupted fresh Profile changed during recovery.",
+              );
+            }
+          }
+          if (destination.status === "meaningful_or_unknown") {
+            throw new AgenteraProfileBindingRepairError(
+              "profile_private_data_conflict",
+              "Reserved fresh Profile contains meaningful or unknown data.",
+            );
+          }
+          if (destination.status === "owned") {
+            if (!destination.isCurrentOwner) {
+              throw new AgenteraProfileBindingRepairError(
+                "profile_owner_conflict",
+                "Reserved fresh Profile belongs to another Aera owner.",
+              );
+            }
+            if (
+              destination.binding.runtimeProfileId !==
+              reservation.runtimeProfileId
+            ) {
+              throw new AgenteraProfileBindingRepairError(
+                "runtime_profile_conflict",
+                "Reserved fresh Profile has another Runtime Profile identity.",
+              );
+            }
+            if (
+              destination.binding.agentInstallationId !== null &&
+              destination.binding.agentInstallationId !==
+                local.agentInstallationId
+            ) {
+              throw new AgenteraProfileBindingRepairError(
+                "profile_reservation_conflict",
+                "Reserved fresh Profile is attached to another installation.",
+              );
+            }
+          }
+
+          if (destination.status === "missing") {
             if (!this.profiles.prepareProfile) {
               throw new Error("Staged Profile preparation is unavailable.");
             }
@@ -2836,7 +2909,10 @@ export class AgentInstallationManager {
             } finally {
               await candidate.cleanup();
             }
-          } else if (target.modelSourceProfileId) {
+          } else if (
+            destination.status === "owned" &&
+            target.modelSourceProfileId
+          ) {
             // A restart may observe a Profile that was already activated before
             // the installation journal advanced. It is now a live, owned
             // target, so the normal coordinator-backed path is safe.
