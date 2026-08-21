@@ -625,6 +625,31 @@ test("Internal Beta Windows candidate runs disposable install/start/update/rollb
   assert.match(smokeScript, /Start-Process/u);
   assert.match(smokeScript, /rollback|Restore/u);
   assert.match(smokeScript, /synthetic|disposable/u);
+  assert.match(
+    smokeScript,
+    /Wait-Executable\s+\$ExecutablePath\s+\$WaitSeconds\s+\$process\.Id/u,
+    "the smoke must bind cleanup and update waits to the launched Electron root PID",
+  );
+  assert.doesNotMatch(
+    smokeScript,
+    /Wait-Executable\s+\$ExecutablePath\s+\$WaitSeconds\s*$/mu,
+    "the smoke must not select an arbitrary same-path Electron child process",
+  );
+  assert.match(
+    smokeScript,
+    /function Stop-DisposableApp\([\s\S]*?taskkill\.exe[\s\S]*?Stop-ExecutableProcesses \$ExecutablePath[\s\S]*?Wait-NoExecutable \$ExecutablePath \$WaitSeconds[\s\S]*?\n\}/u,
+    "the smoke must stop the launched tree and prove the same executable has no survivors",
+  );
+  assert.equal(
+    [...smokeScript.matchAll(/Stop-DisposableApp /gu)].length,
+    4,
+    "setup, portable, and helper-driven old apps must use bounded root cleanup",
+  );
+  assert.match(
+    smokeScript,
+    /\[Console\]::Error\.WriteLine\("Windows internal-Beta disposable smoke failed: stage=\$smokeStage code=windows_smoke_failed"\)/u,
+    "a failed native smoke must expose a path-free stable stage instead of only exit code 1",
+  );
   assert.doesNotMatch(smokeScript, /\?\?/u);
 });
 

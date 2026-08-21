@@ -70,17 +70,46 @@ function Stop-ExecutableProcesses([string]$ExecutablePath) {
   }
 }
 
-function Wait-Executable([string]$ExecutablePath, [int]$TimeoutSeconds) {
+function Wait-NoExecutable([string]$ExecutablePath, [int]$TimeoutSeconds) {
+  $expected = [System.IO.Path]::GetFullPath($ExecutablePath)
+  for ($attempt = 0; $attempt -lt $TimeoutSeconds; $attempt++) {
+    $matches = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.ExecutablePath -and
+        ([System.IO.Path]::GetFullPath([string]$_.ExecutablePath) -eq $expected)
+      })
+    if ($matches.Count -eq 0) { return }
+    Start-Sleep -Seconds 1
+  }
+  Fail "launched executable left running processes"
+}
+
+function Stop-DisposableApp([int]$RootId, [string]$ExecutablePath) {
+  # taskkill /T owns the Windows process-tree boundary. The CIM sweep catches
+  # an Electron child that was reparented while the tree was being stopped.
+  $taskkill = Start-Process -FilePath "taskkill.exe" -ArgumentList @(
+    "/PID", $RootId, "/T", "/F"
+  ) -Wait -PassThru -WindowStyle Hidden
+  Stop-ProcessTree $RootId
+  Stop-ExecutableProcesses $ExecutablePath
+  Wait-NoExecutable $ExecutablePath $WaitSeconds
+}
+
+function Wait-Executable(
+  [string]$ExecutablePath,
+  [int]$TimeoutSeconds,
+  [int]$RootId
+) {
   $expected = [System.IO.Path]::GetFullPath($ExecutablePath)
   for ($attempt = 0; $attempt -lt $TimeoutSeconds; $attempt++) {
     $match = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+      ([int]$_.ProcessId -eq $RootId) -and
       $_.ExecutablePath -and
       ([System.IO.Path]::GetFullPath([string]$_.ExecutablePath) -eq $expected)
     } | Select-Object -First 1
-    if ($null -ne $match) { return [int]$match.ProcessId }
+    if ($null -ne $match) { return $RootId }
     Start-Sleep -Seconds 1
   }
-  Fail "process did not start: $ExecutablePath"
+  Fail "launched root process did not stay running"
 }
 
 function Start-DisposableApp([string]$ExecutablePath, [string]$UserDataPath) {
@@ -88,7 +117,7 @@ function Start-DisposableApp([string]$ExecutablePath, [string]$UserDataPath) {
   $env:HERMES_DESKTOP_USER_DATA_DIR = $UserDataPath
   New-Item -ItemType Directory -Force -Path $UserDataPath | Out-Null
   $process = Start-Process -FilePath $ExecutablePath -WorkingDirectory (Split-Path -Parent $ExecutablePath) -PassThru -WindowStyle Hidden
-  $processId = Wait-Executable $ExecutablePath $WaitSeconds
+  $processId = Wait-Executable $ExecutablePath $WaitSeconds $process.Id
   return $processId
 }
 
@@ -201,13 +230,14 @@ function Assert-HealthySwap(
   $journal = Write-InstallJournal $userData $install $staging $backup $Version
   $helperPath = Join-Path $RunRoot "success-helper.ps1"
   $helper = Invoke-Helper $HelperSource $oldProcessId $install $staging $backup (Join-Path $install "Aera.exe") $journal.MarkerPath $journal.JournalPath $journal.FailurePath $Version $journal.OperationId $helperPath
-  Stop-ProcessTree $oldProcessId
+  Stop-DisposableApp $oldProcessId (Join-Path $install "Aera.exe")
   $helper.WaitForExit()
   if ($helper.ExitCode -ne 0) { Fail "healthy update helper exited with $($helper.ExitCode)" }
   if ((Get-Content -LiteralPath (Join-Path $install "smoke-generation.txt") -Raw) -ne "new") { Fail "healthy update did not install staged bytes" }
   if (Test-Path -LiteralPath $backup) { Fail "healthy update left a backup" }
   if (Test-Path -LiteralPath $journal.JournalPath) { Fail "healthy update left a journal" }
   Stop-ExecutableProcesses (Join-Path $install "Aera.exe")
+  Wait-NoExecutable (Join-Path $install "Aera.exe") $WaitSeconds
 }
 
 function Assert-Rollback(
@@ -231,12 +261,13 @@ function Assert-Rollback(
   $journal = Write-InstallJournal $userData $install $staging $backup $Version
   $helperPath = Join-Path $RunRoot "rollback-helper.ps1"
   $helper = Invoke-Helper $HelperSource $oldProcessId $install $staging $backup (Join-Path $install "Aera.exe") $journal.MarkerPath $journal.JournalPath $journal.FailurePath $Version $journal.OperationId $helperPath
-  Stop-ProcessTree $oldProcessId
+  Stop-DisposableApp $oldProcessId (Join-Path $install "Aera.exe")
   $helper.WaitForExit()
   if ($helper.ExitCode -eq 0) { Fail "broken candidate unexpectedly succeeded" }
   if ((Get-Content -LiteralPath (Join-Path $install "smoke-generation.txt") -Raw) -ne "keep") { Fail "rollback did not restore the old directory" }
   if (Test-Path -LiteralPath $backup) { Fail "rollback left a backup" }
   Stop-ExecutableProcesses (Join-Path $install "Aera.exe")
+  Wait-NoExecutable (Join-Path $install "Aera.exe") $WaitSeconds
 }
 
 $originalUserData = $env:HERMES_DESKTOP_USER_DATA_DIR
@@ -245,6 +276,7 @@ if ([string]::IsNullOrWhiteSpace($temporaryRoot)) {
   $temporaryRoot = $env:TEMP
 }
 $smokeRoot = Join-Path $temporaryRoot "aera-internal-beta-windows-smoke-$PID"
+$smokeStage = "preflight"
 try {
   Require-Path $AppDirectory "packaged Windows app directory"
   Require-Path $SetupPath "Windows setup artifact"
@@ -253,25 +285,34 @@ try {
   New-Item -ItemType Directory -Force -Path $smokeRoot | Out-Null
 
   # Install/start smoke for the NSIS payload on a disposable per-user path.
+  $smokeStage = "setup_install"
   $setupInstall = Join-Path $smokeRoot "setup-install"
   $setupResult = Start-Process -FilePath $SetupPath -ArgumentList @("/S", "/D=$setupInstall") -Wait -PassThru -WindowStyle Hidden
   if ($setupResult.ExitCode -ne 0) { Fail "setup installer exited with $($setupResult.ExitCode)" }
   $setupExecutable = Join-Path $setupInstall "Aera.exe"
   Require-Path $setupExecutable "silent setup installation"
+  $smokeStage = "setup_start"
   $setupUserData = Join-Path $smokeRoot "setup-user-data"
   $setupProcessId = Start-DisposableApp $setupExecutable $setupUserData
-  Stop-ProcessTree $setupProcessId
+  Stop-DisposableApp $setupProcessId $setupExecutable
 
   # Start smoke for the portable payload; it must not be used as an updater.
+  $smokeStage = "portable_start"
   $portableUserData = Join-Path $smokeRoot "portable-user-data"
   $portableProcessId = Start-DisposableApp $PortablePath $portableUserData
-  Stop-ProcessTree $portableProcessId
+  Stop-DisposableApp $portableProcessId $PortablePath
 
   # Synthetic candidate swap exercises the same compiled helper used by the app.
   # It is disposable CI evidence, not a substitute for a physical-user upgrade.
+  $smokeStage = "healthy_swap"
   Assert-HealthySwap $AppDirectory $Version $smokeRoot $HelperScript
+  $smokeStage = "rollback"
   Assert-Rollback $AppDirectory $Version $smokeRoot $HelperScript
+  $smokeStage = "complete"
   Write-Host "Windows internal-Beta disposable install/start/update/rollback smoke passed."
+} catch {
+  [Console]::Error.WriteLine("Windows internal-Beta disposable smoke failed: stage=$smokeStage code=windows_smoke_failed")
+  exit 1
 } finally {
   if ($null -eq $originalUserData) {
     Remove-Item Env:HERMES_DESKTOP_USER_DATA_DIR -ErrorAction SilentlyContinue
