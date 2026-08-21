@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { join } from "path";
+import { dirname, join } from "path";
 import {
   mkdirSync,
   writeFileSync,
@@ -247,7 +247,7 @@ describe("listProfiles", () => {
     expect(result).toEqual({ success: true, id: "agent" });
     expect(execFileSyncMock).toHaveBeenCalledWith(
       "/usr/bin/python3",
-      ["-m", "hermes_cli.main", "profile", "create", "agent"],
+      ["-m", "hermes_cli.main", "profile", "create", "agent", "--no-alias"],
       expect.objectContaining({ timeout: 30000 }),
     );
     const profiles = await listProfiles();
@@ -263,7 +263,14 @@ describe("listProfiles", () => {
     expect(result).toEqual({ success: true, id: "fresh-agent" });
     expect(execFileSyncMock).toHaveBeenCalledWith(
       "/usr/bin/python3",
-      ["-m", "hermes_cli.main", "profile", "create", "fresh-agent"],
+      [
+        "-m",
+        "hermes_cli.main",
+        "profile",
+        "create",
+        "fresh-agent",
+        "--no-alias",
+      ],
       expect.objectContaining({ timeout: 30000 }),
     );
   });
@@ -361,6 +368,7 @@ describe("listProfiles", () => {
         "slow-clone",
         "--clone-from",
         "default",
+        "--no-alias",
       ],
       expect.objectContaining({ timeout: 30000 }),
     );
@@ -408,6 +416,52 @@ describe("listProfiles", () => {
     expect(runtimeHome).not.toBe("");
     const stagingRoot = join(TEST_HOME, ".aera-profile-staging");
     expect(existsSync(stagingRoot) ? readdirSync(stagingRoot) : []).toEqual([]);
+  });
+
+  // @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Recoverable model configuration#Staged Profile activation protects live state#Runtime staging isolates native homes]]
+  it("isolates staged Hermes profile creation from every native user home", async () => {
+    let subprocessBoundary:
+      | {
+          home: unknown;
+          userProfile: unknown;
+          localAppData: unknown;
+          transactionRoot: string;
+          aliasSuppressed: boolean;
+        }
+      | undefined;
+    execFileSyncMock.mockImplementation((_python, args, options) => {
+      const runtimeHome = String(options.env.HERMES_HOME);
+      const transactionRoot = dirname(runtimeHome);
+      subprocessBoundary = {
+        home: options.env.HOME,
+        userProfile: options.env.USERPROFILE,
+        localAppData: options.env.LOCALAPPDATA,
+        transactionRoot,
+        aliasSuppressed: (args as string[]).includes("--no-alias"),
+      };
+      const candidate = join(runtimeHome, "profiles", "isolated-native-home");
+      mkdirSync(candidate, { recursive: true });
+      writeFileSync(join(candidate, ".env"), "# isolated\n");
+      return Buffer.from("");
+    });
+
+    const result = await createProfile("isolated-native-home", null);
+
+    expect(result).toEqual({ success: true, id: "isolated-native-home" });
+    expect(subprocessBoundary).toEqual({
+      home: expect.any(String),
+      userProfile: expect.any(String),
+      localAppData: expect.any(String),
+      transactionRoot: expect.any(String),
+      aliasSuppressed: true,
+    });
+    expect(subprocessBoundary?.home).toBe(subprocessBoundary?.transactionRoot);
+    expect(subprocessBoundary?.userProfile).toBe(
+      subprocessBoundary?.transactionRoot,
+    );
+    expect(subprocessBoundary?.localAppData).toBe(
+      subprocessBoundary?.transactionRoot,
+    );
   });
 
   // @lat: [[lat.md/beta27-reliability-plan#Beta.27 Reliability Plan#Recoverable model configuration#Profile clone snapshots preserve provider identity]]
