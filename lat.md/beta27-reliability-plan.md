@@ -136,6 +136,12 @@ The activation journal records only a random transaction id, Profile id, source 
 
 [[src/main/profiles.ts#prepareProfile]] keeps the Runtime subprocess on the staged `HERMES_HOME`. [[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager#activateVerifiedRestore]] merges decrypted backup bytes into that candidate and revalidates it before activation, rather than copying files into an already-live Profile.
 
+#### Runtime staging isolates native homes
+
+Runtime Profile creation cannot reinterpret a staged home as the live native Hermes root.
+
+[[src/main/profiles.ts#prepareProfile]] launches the managed `profile create` command with transaction-private `HOME`, `USERPROFILE`, and `LOCALAPPDATA` values plus `--no-alias`. Hermes therefore resolves the staged `HERMES_HOME` as an isolated root on macOS and Windows and cannot write Profile bytes or shell wrappers outside the transaction before activation.
+
 ### Profile clone snapshots preserve provider identity
 
 Profile clones read one stable source snapshot before Runtime materialization begins.

@@ -441,8 +441,8 @@ export async function prepareProfile(
   // `--clone-from <source>` copies that profile's config/keys/skills and
   // implies `--clone`; omitting it creates a fresh profile.
   const args = cloneFrom
-    ? ["profile", "create", id, "--clone-from", cloneFrom]
-    : ["profile", "create", id];
+    ? ["profile", "create", id, "--clone-from", cloneFrom, "--no-alias"]
+    : ["profile", "create", id, "--no-alias"];
   const invocation = getRuntimeInvocation();
   if (invocation === null) {
     return { success: false, error: "Aera Runtime is not prepared." };
@@ -459,6 +459,7 @@ export async function prepareProfile(
       destinationProfileId: id,
       sourceKind,
       materialize: async ({ stagingHome, stagingPath }) => {
+        const stagingSystemHome = dirname(stagingHome);
         await defaultModelConfigurationWriteAuthority.run(
           {
             globalCatalog: true,
@@ -474,7 +475,9 @@ export async function prepareProfile(
           env: invocation.environment({
             ...process.env,
             PATH: getEnhancedPath(),
-            HOME: homedir(),
+            HOME: stagingSystemHome,
+            USERPROFILE: stagingSystemHome,
+            LOCALAPPDATA: stagingSystemHome,
             HERMES_HOME: stagingHome,
           }),
           stdio: "pipe",
