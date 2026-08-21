@@ -110,6 +110,12 @@ interface AgentRuntimeModelOption {
   sourceKind?: "account" | "legacy_agent";
 }
 
+interface AgentCardPresentation {
+  tone: "ready" | "pending" | "attention";
+  statusKey: string;
+  primary: "chat" | "retry" | "configure_model" | "details";
+}
+
 function errorKey(code: AgenteraAgentControlErrorCode): string {
   return `agents.control.errors.${code}`;
 }
@@ -276,6 +282,9 @@ export default function AgentControlPanel({
   const [archiving, setArchiving] = useState(false);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [busyPersonalKey, setBusyPersonalKey] = useState<string | null>(null);
+  const [personalCardErrors, setPersonalCardErrors] = useState<
+    Record<string, string>
+  >({});
   const [capabilityBinding, setCapabilityBinding] =
     useState<AgentCapabilityBindingConfiguration | null>(null);
   const [capabilityBindingBusy, setCapabilityBindingBusy] = useState(false);
@@ -331,6 +340,7 @@ export default function AgentControlPanel({
         setCapabilityBinding(null);
         setCapabilityBindingBusy(false);
         setSelectedPersonalKey(null);
+        setPersonalCardErrors({});
       }
       let nextError: string | null = null;
       const operationScope: AgenteraAgentOperationScope | undefined =
@@ -700,6 +710,18 @@ export default function AgentControlPanel({
     [onAgentReady, onProfilesChanged],
   );
 
+  const setPersonalCardError = (key: string, value: string | null): void => {
+    setPersonalCardErrors((current) => {
+      if (value === null) {
+        if (!(key in current)) return current;
+        const next = { ...current };
+        delete next[key];
+        return next;
+      }
+      return current[key] === value ? current : { ...current, [key]: value };
+    });
+  };
+
   const openCapabilityBinding = async (
     installationId: string,
   ): Promise<void> => {
@@ -743,7 +765,7 @@ export default function AgentControlPanel({
   ): Promise<void> => {
     if (busyPersonalKey) return;
     setBusyPersonalKey(target.key);
-    setError(null);
+    setPersonalCardError(target.key, null);
     setNotice(null);
     try {
       let installation = target.installation;
@@ -783,7 +805,7 @@ export default function AgentControlPanel({
               personalOperationScope,
             );
           if (!selected.ok) {
-            setError(errorKey(selected.errorCode));
+            setPersonalCardError(target.key, errorKey(selected.errorCode));
             return null;
           }
           aligned = selected.data;
@@ -793,7 +815,7 @@ export default function AgentControlPanel({
         }
         if (versionChanged || !ready || modelSelectionRequested) {
           if (!sourceModelProfileId) {
-            setError("agents.hub.modelRequired");
+            setPersonalCardError(target.key, "agents.hub.modelRequired");
             return null;
           }
           const repaired = await window.agenteraAgents.repairInstallationModel(
@@ -805,7 +827,7 @@ export default function AgentControlPanel({
             personalOperationScope,
           );
           if (!repaired.ok) {
-            setError(errorKey(repaired.errorCode));
+            setPersonalCardError(target.key, errorKey(repaired.errorCode));
             return null;
           }
           aligned = repaired.data;
@@ -853,13 +875,13 @@ export default function AgentControlPanel({
           personalOperationScope,
         );
         if (!archived.ok) {
-          setError(errorKey(archived.errorCode));
+          setPersonalCardError(target.key, errorKey(archived.errorCode));
           return;
         }
         installation = null;
       }
       if (!sourceModelProfileId) {
-        setError("agents.hub.modelRequired");
+        setPersonalCardError(target.key, "agents.hub.modelRequired");
         return;
       }
       const result =
@@ -899,7 +921,7 @@ export default function AgentControlPanel({
               personalOperationScope,
             );
       if (!result.ok) {
-        setError(errorKey(result.errorCode));
+        setPersonalCardError(target.key, errorKey(result.errorCode));
         return;
       }
       installation = result.data;
@@ -921,7 +943,10 @@ export default function AgentControlPanel({
         await finishAgentActivation(installation.id);
       }
     } catch {
-      setError("agents.control.errors.operation_failed");
+      setPersonalCardError(
+        target.key,
+        "agents.control.errors.operation_failed",
+      );
     } finally {
       setBusyPersonalKey(null);
     }
@@ -1214,6 +1239,7 @@ export default function AgentControlPanel({
     }));
   }, [runtimeModelRoutes, selectableModelProfiles]);
   const requestInstall = (target: {
+    key?: string;
     definitionId: string;
     versionId: string;
     displayName?: string;
@@ -1232,7 +1258,7 @@ export default function AgentControlPanel({
     const displayName =
       target.displayName ?? definitionName(target.definitionId);
     const activationTarget: AgentActivationTarget = {
-      key: `definition:${target.definitionId}`,
+      key: target.key ?? `definition:${target.definitionId}`,
       displayName,
       definitionId: target.definitionId,
       versionId: target.versionId,
@@ -1271,6 +1297,120 @@ export default function AgentControlPanel({
       ...(preferred.modelSelection
         ? { modelSelection: preferred.modelSelection }
         : { modelProfileId: preferred.modelProfileId }),
+    });
+  };
+
+  const cardPresentation = (card: PersonalAgentCard): AgentCardPresentation => {
+    if (
+      card.installation?.status === "pending" &&
+      card.installation.retryCode ===
+        "profile_capability_configuration_required"
+    ) {
+      return {
+        tone: "pending",
+        statusKey: "agents.hub.setupIncomplete",
+        primary: "details",
+      };
+    }
+    if (card.installation?.status === "pending") {
+      const needsModel =
+        card.installation.retryCode === "profile_model_configuration_failed" ||
+        selectableModelSources.length === 0;
+      return needsModel
+        ? {
+            tone: "attention",
+            statusKey: "agents.hub.needsModel",
+            primary: "configure_model",
+          }
+        : {
+            tone: "pending",
+            statusKey: "agents.hub.setupIncomplete",
+            primary: "retry",
+          };
+    }
+    if (isRunnableAgentProfile(card.profile)) {
+      return {
+        tone: "ready",
+        statusKey: "agents.hub.ready",
+        primary: "chat",
+      };
+    }
+    if (card.profile) {
+      return {
+        tone: "attention",
+        statusKey: "agents.hub.needsModel",
+        primary: "configure_model",
+      };
+    }
+    if (card.definition || card.draft?.publishedRevision) {
+      return selectableModelSources.length > 0
+        ? {
+            tone: "pending",
+            statusKey: "agents.hub.readyToInstall",
+            primary: "chat",
+          }
+        : {
+            tone: "attention",
+            statusKey: "agents.hub.needsModel",
+            primary: "configure_model",
+          };
+    }
+    return {
+      tone: "attention",
+      statusKey: "agents.hub.draftNeedsReview",
+      primary: "details",
+    };
+  };
+
+  const cardPrimaryLabel = (presentation: AgentCardPresentation): string => {
+    switch (presentation.primary) {
+      case "chat":
+        return t("agents.hub.useAgent");
+      case "retry":
+        return t("agents.control.retryAgent");
+      case "configure_model":
+        return t("agents.hub.configureModel");
+      case "details":
+        return t("agents.hub.viewDetails");
+    }
+  };
+
+  const runCardPrimary = (
+    card: PersonalAgentCard,
+    presentation: AgentCardPresentation,
+  ): void => {
+    if (presentation.primary === "details") {
+      setSelectedPersonalKey(card.key);
+      return;
+    }
+    if (presentation.primary === "configure_model") {
+      if (onConfigureModels) onConfigureModels();
+      else setPersonalCardError(card.key, "agents.hub.modelRequired");
+      return;
+    }
+    if (!card.installation && card.profile) {
+      onChatWithProfile?.(card.profile.id);
+      return;
+    }
+    const definitionId =
+      card.definition?.id ??
+      card.draft?.publishedRevision?.definitionId ??
+      card.installation?.definitionId ??
+      null;
+    const versionId =
+      card.definition?.latestVersionId ??
+      card.draft?.publishedRevision?.versionId ??
+      card.installation?.selectedVersionId ??
+      null;
+    if (!definitionId || !versionId) {
+      setSelectedPersonalKey(card.key);
+      return;
+    }
+    requestInstall({
+      key: card.key,
+      displayName: card.name,
+      definitionId,
+      versionId,
     });
   };
 
@@ -1840,50 +1980,82 @@ export default function AgentControlPanel({
             </div>
           ) : (
             <div className="agent-hub-grid" data-testid="personal-agent-grid">
-              {filteredPersonalCards.map((card) => (
-                <button
-                  key={card.key}
-                  type="button"
-                  className="agent-hub-card"
-                  onClick={() => setSelectedPersonalKey(card.key)}
-                >
-                  <div className="agent-hub-card-heading">
-                    <div
-                      className="agent-hub-card-avatar"
-                      style={{ color: card.profile?.color }}
+              {filteredPersonalCards.map((card) => {
+                const presentation = cardPresentation(card);
+                const localError = personalCardErrors[card.key] ?? null;
+                return (
+                  <article
+                    key={card.key}
+                    className={`agent-hub-card ${presentation.tone}`}
+                    data-testid="agent-capability-card"
+                  >
+                    <button
+                      type="button"
+                      className="agent-hub-card-details"
+                      aria-label={t("agents.hub.viewAgentDetails", {
+                        name: card.name,
+                      })}
+                      onClick={() => setSelectedPersonalKey(card.key)}
                     >
-                      {card.iconSrc ? (
-                        <img src={card.iconSrc} alt="" />
-                      ) : card.profile ? (
-                        <ProfileAvatar
-                          name={card.profile.id}
-                          color={card.profile.color}
-                          avatar={card.profile.avatar}
-                          size={46}
-                        />
-                      ) : (
-                        <Bot size={24} />
-                      )}
-                    </div>
-                    <div className="agent-hub-card-title-group">
-                      <strong>{card.name}</strong>
-                      <span>{card.tags[0]}</span>
-                    </div>
-                    {isRunnableAgentProfile(card.profile) ? (
-                      <span className="agent-hub-card-state installed">
-                        <Check size={12} />
-                        {t("agents.hub.ready")}
-                      </span>
+                      <div className="agent-hub-card-heading">
+                        <div
+                          className="agent-hub-card-avatar"
+                          style={{ color: card.profile?.color }}
+                        >
+                          {card.iconSrc ? (
+                            <img src={card.iconSrc} alt="" />
+                          ) : card.profile ? (
+                            <ProfileAvatar
+                              name={card.profile.id}
+                              color={card.profile.color}
+                              avatar={card.profile.avatar}
+                              size={46}
+                            />
+                          ) : (
+                            <Bot size={24} />
+                          )}
+                        </div>
+                        <div className="agent-hub-card-title-group">
+                          <strong>{card.name}</strong>
+                          <span>{card.tags[0]}</span>
+                        </div>
+                        <span
+                          className={`agent-hub-card-status ${presentation.tone}`}
+                        >
+                          {presentation.tone === "ready" ? (
+                            <Check size={12} />
+                          ) : null}
+                          {t(presentation.statusKey)}
+                        </span>
+                      </div>
+                      <p>{card.description}</p>
+                      <div className="agent-hub-card-tags">
+                        {card.tags.slice(1).map((tag) => (
+                          <span key={tag}>{tag}</span>
+                        ))}
+                      </div>
+                    </button>
+                    {localError ? (
+                      <p className="agent-hub-card-local-error">
+                        {t(localError)}
+                      </p>
                     ) : null}
-                  </div>
-                  <p>{card.description}</p>
-                  <div className="agent-hub-card-tags">
-                    {card.tags.slice(1).map((tag) => (
-                      <span key={tag}>{tag}</span>
-                    ))}
-                  </div>
-                </button>
-              ))}
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm agent-hub-card-primary"
+                      data-testid="agent-card-primary-action"
+                      disabled={
+                        busyPersonalKey === card.key ||
+                        (presentation.primary === "configure_model" &&
+                          !onConfigureModels)
+                      }
+                      onClick={() => runCardPrimary(card, presentation)}
+                    >
+                      {cardPrimaryLabel(presentation)}
+                    </button>
+                  </article>
+                );
+              })}
             </div>
           )}
 
