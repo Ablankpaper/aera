@@ -27,7 +27,7 @@ import {
   verifyInternalBetaManifestFiles,
 } from "./manifest.mjs";
 
-const VERSION = "0.7.4-internal-beta.36";
+const VERSION = "0.7.4-internal-beta.37";
 const SOURCE_SHA = "a".repeat(40);
 const RUNTIME_SHA = "fb42016967ad934c55e9da5af1896d5c7206b445";
 const ORIGIN = "https://203.0.113.10";
