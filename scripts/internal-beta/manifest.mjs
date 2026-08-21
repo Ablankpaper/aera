@@ -15,7 +15,7 @@ import { validateFinalArtifactNativeInventoryDocument } from "../release/final-a
 
 export { canonicalJSONStringify };
 
-export const INTERNAL_BETA_VERSION = "0.7.4-internal-beta.35";
+export const INTERNAL_BETA_VERSION = "0.7.4-internal-beta.36";
 export const INTERNAL_BETA_SIGNING_STATUS =
   "macos_developer_id_notarized_windows_unsigned_internal_beta";
 export const INTERNAL_BETA_ELECTRON_ABI = "145";

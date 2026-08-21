@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Repair Beta.35 fresh-Agent staging/retry failures and make Agent, model-switch, and team entry points capability-first without weakening Owner/Profile isolation.
+**Goal:** Carry the Beta.35 fresh-Agent staging/retry fixes into Beta.36 and make Agent, model-switch, and team entry points capability-first without weakening Owner/Profile isolation.
 
 **Architecture:** Fix the cross-repository root cause at the Runtime's existing Hermes-root resolver, then make Desktop fresh-Profile recovery depend on the durable reservation, owner binding, runtime Profile identity, and a bounded safe-scaffold inspection rather than directory existence. Keep the existing Owner model catalog, immutable conversation segments, and Hermes Kanban dispatcher; the renderer only simplifies actions, localizes errors, and exposes an honest team entry point.
 
@@ -458,4 +458,4 @@ Expected: only internal type/test fixtures appear; no new UI copy or IPC payload
 
 - [ ] **Step 3: Record exact verification evidence**
 
-Record Desktop/Runtime HEADs, commands, pass counts, Electron test result, and explicit non-claims: no package was built, signed, pushed, deployed, or released; the version remains Beta.35 until a separate release decision.
+Record Desktop/Runtime HEADs, commands, pass counts, Electron test result, and explicit release evidence for Beta.36; do not claim promotion until the immutable candidate is separately verified and explicitly approved.
