@@ -1785,6 +1785,10 @@ describe("Internal Beta desktop updater", () => {
     expect(script).toContain("Start-Process -FilePath $TargetExecutable");
     expect(script).toContain("$HealthyWaitAttempts = 11");
     expect(script).toContain("$ProcessWaitAttempts = 7");
+    expect(script).toContain("function Get-TargetExecutableProcessIds");
+    expect(script).toMatch(
+      /function Wait-ForProcessTreeExit[\s\S]*?Get-TargetExecutableProcessIds[\s\S]*?if \(-not \$running\) \{ return \}/u,
+    );
     for (const state of [
       "waiting_for_exit",
       "backup_created",

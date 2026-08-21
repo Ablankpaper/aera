@@ -59,39 +59,52 @@ function Stop-ProcessTree([int]$RootId) {
   }
 }
 
-function Stop-ExecutableProcesses([string]$ExecutablePath) {
+function Get-ExecutableProcessIds([string]$ExecutablePath) {
   $expected = [System.IO.Path]::GetFullPath($ExecutablePath)
-  $matches = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+  $matches = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
       $_.ExecutablePath -and
       ([System.IO.Path]::GetFullPath([string]$_.ExecutablePath) -eq $expected)
     })
-  foreach ($match in $matches) {
-    Stop-ProcessTree ([int]$match.ProcessId)
+  return @($matches | ForEach-Object { [int]$_.ProcessId })
+}
+
+function Stop-ExecutableProcesses([string]$ExecutablePath) {
+  foreach ($processId in @(Get-ExecutableProcessIds $ExecutablePath)) {
+    Stop-ProcessTree $processId
   }
 }
 
-function Wait-NoExecutable([string]$ExecutablePath, [int]$TimeoutSeconds) {
-  $expected = [System.IO.Path]::GetFullPath($ExecutablePath)
-  for ($attempt = 0; $attempt -lt $TimeoutSeconds; $attempt++) {
-    $matches = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-        $_.ExecutablePath -and
-        ([System.IO.Path]::GetFullPath([string]$_.ExecutablePath) -eq $expected)
-      })
-    if ($matches.Count -eq 0) { return }
+function Stop-ExecutableUntilGone([string]$ExecutablePath) {
+  # Electron children may appear or reparent after one CIM snapshot. Re-query
+  # the exact disposable executable on every bounded attempt so no late child
+  # can keep the install directory locked during the swap.
+  for ($attempt = 0; $attempt -lt $WaitSeconds; $attempt++) {
+    Stop-ExecutableProcesses $ExecutablePath
+    if (@(Get-ExecutableProcessIds $ExecutablePath).Count -eq 0) { return }
     Start-Sleep -Seconds 1
   }
   Fail "launched executable left running processes"
 }
 
-function Stop-DisposableApp([int]$RootId, [string]$ExecutablePath) {
-  # taskkill /T owns the Windows process-tree boundary. The CIM sweep catches
-  # an Electron child that was reparented while the tree was being stopped.
+function Wait-NoProcess([int]$RootId) {
+  for ($attempt = 0; $attempt -lt $WaitSeconds; $attempt++) {
+    if (-not (Get-Process -Id $RootId -ErrorAction SilentlyContinue)) { return }
+    Start-Sleep -Seconds 1
+  }
+  Fail "launched root process left running"
+}
+
+function Stop-DisposableRoot([int]$RootId) {
   $taskkill = Start-Process -FilePath "taskkill.exe" -ArgumentList @(
     "/PID", $RootId, "/T", "/F"
   ) -Wait -PassThru -WindowStyle Hidden
   Stop-ProcessTree $RootId
-  Stop-ExecutableProcesses $ExecutablePath
-  Wait-NoExecutable $ExecutablePath $WaitSeconds
+  Wait-NoProcess $RootId
+}
+
+function Stop-DisposableApp([int]$RootId, [string]$ExecutablePath) {
+  Stop-DisposableRoot $RootId
+  Stop-ExecutableUntilGone $ExecutablePath
 }
 
 function Wait-Executable(
@@ -113,7 +126,7 @@ function Wait-Executable(
 }
 
 function Start-DisposableApp([string]$ExecutablePath, [string]$UserDataPath) {
-  Stop-ExecutableProcesses $ExecutablePath
+  Stop-ExecutableUntilGone $ExecutablePath
   $env:HERMES_DESKTOP_USER_DATA_DIR = $UserDataPath
   New-Item -ItemType Directory -Force -Path $UserDataPath | Out-Null
   $process = Start-Process -FilePath $ExecutablePath -WorkingDirectory (Split-Path -Parent $ExecutablePath) -PassThru -WindowStyle Hidden
@@ -216,6 +229,7 @@ function Assert-HealthySwap(
   [string]$RunRoot,
   [string]$HelperSource
 ) {
+  $script:smokeStage = "healthy_prepare"
   $install = Join-Path $RunRoot "update-installed"
   $staging = Join-Path (Join-Path $RunRoot "success-user-data") "desktop-updates\staging\$Version"
   $userData = Join-Path $RunRoot "success-user-data"
@@ -225,19 +239,26 @@ function Assert-HealthySwap(
   Set-Content -LiteralPath (Join-Path $staging "smoke-generation.txt") -Value "new" -NoNewline
 
   $env:HERMES_DESKTOP_USER_DATA_DIR = $userData
+  $script:smokeStage = "healthy_start_old"
   $oldProcessId = Start-DisposableApp (Join-Path $install "Aera.exe") $userData
   $backup = "$install.aera-update-backup-$PID"
   $journal = Write-InstallJournal $userData $install $staging $backup $Version
   $helperPath = Join-Path $RunRoot "success-helper.ps1"
+  $script:smokeStage = "healthy_launch_helper"
   $helper = Invoke-Helper $HelperSource $oldProcessId $install $staging $backup (Join-Path $install "Aera.exe") $journal.MarkerPath $journal.JournalPath $journal.FailurePath $Version $journal.OperationId $helperPath
-  Stop-DisposableApp $oldProcessId (Join-Path $install "Aera.exe")
+  $script:smokeStage = "healthy_stop_old"
+  # The helper owns the same-executable zero-process gate. Sweeping by path
+  # here could kill the freshly swapped candidate after the old root exits.
+  Stop-DisposableRoot $oldProcessId
+  $script:smokeStage = "healthy_wait_helper"
   $helper.WaitForExit()
+  $script:smokeStage = "healthy_assert"
   if ($helper.ExitCode -ne 0) { Fail "healthy update helper exited with $($helper.ExitCode)" }
   if ((Get-Content -LiteralPath (Join-Path $install "smoke-generation.txt") -Raw) -ne "new") { Fail "healthy update did not install staged bytes" }
   if (Test-Path -LiteralPath $backup) { Fail "healthy update left a backup" }
   if (Test-Path -LiteralPath $journal.JournalPath) { Fail "healthy update left a journal" }
-  Stop-ExecutableProcesses (Join-Path $install "Aera.exe")
-  Wait-NoExecutable (Join-Path $install "Aera.exe") $WaitSeconds
+  $script:smokeStage = "healthy_cleanup"
+  Stop-ExecutableUntilGone (Join-Path $install "Aera.exe")
 }
 
 function Assert-Rollback(
@@ -246,6 +267,7 @@ function Assert-Rollback(
   [string]$RunRoot,
   [string]$HelperSource
 ) {
+  $script:smokeStage = "rollback_prepare"
   $install = Join-Path $RunRoot "rollback-installed"
   $staging = Join-Path (Join-Path $RunRoot "rollback-user-data") "desktop-updates\staging\$Version"
   $userData = Join-Path $RunRoot "rollback-user-data"
@@ -256,18 +278,23 @@ function Assert-Rollback(
   Remove-Item -LiteralPath (Join-Path $staging "resources\app.asar") -Force
 
   $env:HERMES_DESKTOP_USER_DATA_DIR = $userData
+  $script:smokeStage = "rollback_start_old"
   $oldProcessId = Start-DisposableApp (Join-Path $install "Aera.exe") $userData
   $backup = "$install.aera-update-backup-$PID"
   $journal = Write-InstallJournal $userData $install $staging $backup $Version
   $helperPath = Join-Path $RunRoot "rollback-helper.ps1"
+  $script:smokeStage = "rollback_launch_helper"
   $helper = Invoke-Helper $HelperSource $oldProcessId $install $staging $backup (Join-Path $install "Aera.exe") $journal.MarkerPath $journal.JournalPath $journal.FailurePath $Version $journal.OperationId $helperPath
-  Stop-DisposableApp $oldProcessId (Join-Path $install "Aera.exe")
+  $script:smokeStage = "rollback_stop_old"
+  Stop-DisposableRoot $oldProcessId
+  $script:smokeStage = "rollback_wait_helper"
   $helper.WaitForExit()
+  $script:smokeStage = "rollback_assert"
   if ($helper.ExitCode -eq 0) { Fail "broken candidate unexpectedly succeeded" }
   if ((Get-Content -LiteralPath (Join-Path $install "smoke-generation.txt") -Raw) -ne "keep") { Fail "rollback did not restore the old directory" }
   if (Test-Path -LiteralPath $backup) { Fail "rollback left a backup" }
-  Stop-ExecutableProcesses (Join-Path $install "Aera.exe")
-  Wait-NoExecutable (Join-Path $install "Aera.exe") $WaitSeconds
+  $script:smokeStage = "rollback_cleanup"
+  Stop-ExecutableUntilGone (Join-Path $install "Aera.exe")
 }
 
 $originalUserData = $env:HERMES_DESKTOP_USER_DATA_DIR
