@@ -626,6 +626,17 @@ describe("listProfiles", () => {
   });
 });
 
+describe("prepareProfile", () => {
+  it("creates the named-profile parent for a first fresh Profile", async () => {
+    rmSync(PROFILES_DIR, { recursive: true, force: true });
+
+    const result = await createProfile("first-agent", null);
+
+    expect(result).toEqual({ success: true, id: "first-agent" });
+    expect(existsSync(join(PROFILES_DIR, "first-agent"))).toBe(true);
+  });
+});
+
 describe("setActiveProfile persistence", () => {
   const activeFile = join(TEST_HOME, "active_profile");
 

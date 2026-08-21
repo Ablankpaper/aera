@@ -136,7 +136,7 @@ describe("RuntimeBinding integration at the main-process conversation boundary",
     );
     expect(handler.indexOf("prepareConversationRuntime")).toBeGreaterThan(-1);
     expect(handler.indexOf("prepareConversationRuntime")).toBeLessThan(
-      handler.indexOf("startGateway(profile)"),
+      handler.indexOf("startGatewayDetailed(gatewayProfile, preparedGateway)"),
     );
     expect(handler.indexOf("prepareConversationRuntime")).toBeLessThan(
       handler.indexOf("await sendMessage("),

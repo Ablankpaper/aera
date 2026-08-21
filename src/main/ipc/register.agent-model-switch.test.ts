@@ -9,6 +9,7 @@ import type { PreparedAgenteraConversationRuntime } from "../agentera-agent-cont
 import {
   classifyAgentModelRoute,
   prepareAgentModelSend,
+  resolveAgentGatewayProfile,
   runAgentModelSegmentPreflight,
 } from "./agent-model-send";
 
@@ -63,6 +64,23 @@ function lifecycleHarness(): {
 }
 
 describe("installed-Agent send IPC segment lifecycle", () => {
+  it("uses the Main-resolved route Profile for an installed Agent gateway", () => {
+    expect(
+      resolveAgentGatewayProfile("default", {
+        modelRoute: { sourceProfileId: "aera-space-owner" },
+      }),
+    ).toBe("aera-space-owner");
+  });
+
+  it("keeps ordinary and legacy Agent sends on their requested Profile", () => {
+    expect(resolveAgentGatewayProfile("default", null)).toBe("default");
+    expect(
+      resolveAgentGatewayProfile("default", {
+        modelRoute: { sourceProfileId: null },
+      }),
+    ).toBe("default");
+  });
+
   it("uses the configured transport only when the frozen route exactly matches the active profile", () => {
     expect(
       classifyAgentModelRoute(transition.to, {

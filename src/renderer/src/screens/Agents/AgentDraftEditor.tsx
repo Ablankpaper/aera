@@ -5,7 +5,6 @@ import type {
   AgentDraftDetail,
   AgentEditableManifest,
   AgentMcpRequirementV3,
-  AgentModelSelectionMode,
   AgentRuntimeModelRouteSource,
   AgentRuntimeModelSelection,
   AgenteraAgentControlErrorCode,
@@ -16,7 +15,6 @@ import type {
   PublicationPreview,
   PublishedRevision,
 } from "../../../../shared/agentera-agent-control";
-import { runtimeModelPolicyForEditableManifest } from "../../../../shared/agentera-agent-control";
 import { Plus, X } from "../../assets/icons";
 import { AppModal, AppModalTitle } from "../../components/modal/AppModal";
 import { useI18n } from "../../components/useI18n";
@@ -132,30 +130,6 @@ function modelBelongsToConfiguredRoute(
   return candidateProvider === configuredProvider;
 }
 
-function currentModelChoice(
-  draft: AgentDraftDetail | null,
-): ModelChoice | null {
-  if (!draft) return null;
-  const policy = runtimeModelPolicyForEditableManifest(draft.manifest);
-  const provider = policy.allowedProviders[0];
-  const model = policy.allowedModels[0];
-  if (!provider || !model) return null;
-  return {
-    key: modelKey(provider, model),
-    provider,
-    model,
-    label: `${model} · ${provider}`,
-  };
-}
-
-function currentModelPolicyMode(
-  draft: AgentDraftDetail | null,
-): AgentModelSelectionMode {
-  return draft
-    ? runtimeModelPolicyForEditableManifest(draft.manifest).mode
-    : "user_select";
-}
-
 function slugFromFileName(fileName: string): string {
   const withoutExtension = fileName.replace(/\.[^.]+$/, "");
   const normalized = withoutExtension
@@ -240,15 +214,8 @@ export default function AgentDraftEditor({
     draft?.manifest.identity.systemPrompt ?? "",
   );
   const [identityFileName, setIdentityFileName] = useState<string | null>(null);
-  const [selectedModelKey, setSelectedModelKey] = useState(
-    currentModelChoice(draft)?.key ?? "",
-  );
-  const [selectedAllowlistKeys, setSelectedAllowlistKeys] = useState<string[]>(
-    [],
-  );
+  const [selectedModelKey, setSelectedModelKey] = useState("");
   const [modelChoices, setModelChoices] = useState<ModelChoice[]>([]);
-  const [modelPolicyMode, setModelPolicyMode] =
-    useState<AgentModelSelectionMode>(currentModelPolicyMode(draft));
   const [assets, setAssets] = useState<EditableAssetRow[]>(assetRows(draft));
   const [mcpRequirements, setMcpRequirements] = useState<
     AgentMcpRequirementV3[]
@@ -270,11 +237,8 @@ export default function AgentDraftEditor({
     setName(draft?.displayName ?? "");
     setSystemPrompt(draft?.manifest.identity.systemPrompt ?? "");
     setIdentityFileName(null);
-    const initialChoice = currentModelChoice(draft);
-    setSelectedModelKey(initialChoice?.key ?? "");
-    setSelectedAllowlistKeys([]);
+    setSelectedModelKey("");
     setModelChoices([]);
-    setModelPolicyMode(currentModelPolicyMode(draft));
     setAssets(assetRows(draft));
     setMcpRequirements(draftMcpRequirements(draft));
     setCapabilityBusy(false);
@@ -307,46 +271,21 @@ export default function AgentDraftEditor({
       }
       const nextChoices = [...byKey.values()];
       setModelChoices(nextChoices);
-      const draftKey = currentModelChoice(draft)?.key;
       const preferredRoute = runtimeModelRoutes.find(
         (route) => route.sourceProfileId === modelProfileId,
       );
       const preferredKey = preferredRoute
         ? modelKey(preferredRoute.provider, preferredRoute.model)
         : "";
-      const nextSelectedKey =
-        draftKey && byKey.has(draftKey)
-          ? draftKey
-          : byKey.has(preferredKey)
-            ? preferredKey
-            : (nextChoices[0]?.key ?? "");
+      const nextSelectedKey = byKey.has(preferredKey)
+        ? preferredKey
+        : (nextChoices[0]?.key ?? "");
       setSelectedModelKey(nextSelectedKey);
-      const draftPolicy = draft
-        ? runtimeModelPolicyForEditableManifest(draft.manifest)
-        : null;
-      const draftAllowlistKeys =
-        draftPolicy?.mode === "allowlist"
-          ? nextChoices
-              .filter(
-                (choice) =>
-                  draftPolicy.allowedProviders.includes(choice.provider) &&
-                  draftPolicy.allowedModels.includes(choice.model),
-              )
-              .map((choice) => choice.key)
-          : [];
-      setSelectedAllowlistKeys(
-        draftAllowlistKeys.length > 0
-          ? draftAllowlistKeys
-          : nextSelectedKey
-            ? [nextSelectedKey]
-            : [],
-      );
       return;
     }
     if (!modelProfileId) {
       setModelChoices([]);
       setSelectedModelKey("");
-      setSelectedAllowlistKeys([]);
       return;
     }
     let cancelled = false;
@@ -399,39 +338,14 @@ export default function AgentDraftEditor({
           configured.provider.trim(),
           configured.model.trim(),
         );
-        const draftKey = currentModelChoice(draft)?.key;
-        const nextSelectedKey =
-          draftKey && byKey.has(draftKey)
-            ? draftKey
-            : byKey.has(configuredKey)
-              ? configuredKey
-              : (nextChoices[0]?.key ?? "");
+        const nextSelectedKey = byKey.has(configuredKey)
+          ? configuredKey
+          : (nextChoices[0]?.key ?? "");
         setSelectedModelKey(nextSelectedKey);
-        const draftPolicy = draft
-          ? runtimeModelPolicyForEditableManifest(draft.manifest)
-          : null;
-        const draftAllowlistKeys =
-          draftPolicy?.mode === "allowlist"
-            ? nextChoices
-                .filter(
-                  (choice) =>
-                    draftPolicy.allowedProviders.includes(choice.provider) &&
-                    draftPolicy.allowedModels.includes(choice.model),
-                )
-                .map((choice) => choice.key)
-            : [];
-        setSelectedAllowlistKeys(
-          draftAllowlistKeys.length > 0
-            ? draftAllowlistKeys
-            : nextSelectedKey
-              ? [nextSelectedKey]
-              : [],
-        );
       } catch {
         if (!cancelled) {
           setModelChoices([]);
           setSelectedModelKey("");
-          setSelectedAllowlistKeys([]);
         }
       }
     };
@@ -441,28 +355,11 @@ export default function AgentDraftEditor({
     };
   }, [draft, modelProfileId, open, runtimeModelRoutes]);
 
-  const selectedModel =
-    modelChoices.find((choice) => choice.key === selectedModelKey) ?? null;
-  const selectedAllowlistModels = useMemo(
-    () =>
-      modelChoices.filter((choice) =>
-        selectedAllowlistKeys.includes(choice.key),
-      ),
-    [modelChoices, selectedAllowlistKeys],
-  );
-  const preservesV1 = current?.manifest.schemaVersion === 1;
-  const requiresModelSelection =
-    preservesV1 || modelPolicyMode !== "user_select";
-
   const canSave =
     !readOnly &&
     !capabilityBusy &&
     name.trim().length > 0 &&
     systemPrompt.trim().length > 0 &&
-    (!requiresModelSelection ||
-      (modelPolicyMode === "allowlist" && !preservesV1
-        ? selectedAllowlistModels.length > 0
-        : selectedModel !== null)) &&
     assets.every((asset) => asset.path.trim() && asset.content.length > 0);
 
   const manifest = useMemo<AgentEditableManifest>(() => {
@@ -480,38 +377,12 @@ export default function AgentDraftEditor({
       return {
         ...base,
         ...common,
-        modelConstraints: {
-          allowedProviders: selectedModel ? [selectedModel.provider] : [],
-          allowedModels: selectedModel ? [selectedModel.model] : [],
-        },
       };
     }
     const modelPolicy = {
-      mode: modelPolicyMode,
-      allowedProviders:
-        modelPolicyMode === "user_select"
-          ? []
-          : modelPolicyMode === "allowlist"
-            ? [
-                ...new Set(
-                  selectedAllowlistModels.map((choice) => choice.provider),
-                ),
-              ]
-            : selectedModel
-              ? [selectedModel.provider]
-              : [],
-      allowedModels:
-        modelPolicyMode === "user_select"
-          ? []
-          : modelPolicyMode === "allowlist"
-            ? [
-                ...new Set(
-                  selectedAllowlistModels.map((choice) => choice.model),
-                ),
-              ]
-            : selectedModel
-              ? [selectedModel.model]
-              : [],
+      mode: "user_select" as const,
+      allowedProviders: [],
+      allowedModels: [],
     };
     if (base.schemaVersion !== 3 && mcpRequirements.length === 0) {
       return {
@@ -545,15 +416,7 @@ export default function AgentDraftEditor({
       dependencies: [...base.dependencies],
       runtimeCompatibility: { ...base.runtimeCompatibility },
     };
-  }, [
-    assets,
-    current?.manifest,
-    mcpRequirements,
-    modelPolicyMode,
-    selectedAllowlistModels,
-    selectedModel,
-    systemPrompt,
-  ]);
+  }, [assets, current?.manifest, mcpRequirements, systemPrompt]);
 
   const editableAssets = useMemo(
     () =>
@@ -922,106 +785,9 @@ export default function AgentDraftEditor({
                 : t("agents.control.identityUploadHint")}
             </span>
           </div>
-          {!preservesV1 ? (
-            <label className="agents-create-field agent-control-wide-field">
-              <span>{t("agents.control.modelPolicyMode")}</span>
-              <select
-                className="input"
-                aria-label={t("agents.control.modelPolicyMode")}
-                value={modelPolicyMode}
-                disabled={readOnly}
-                onChange={(event) => {
-                  const nextMode = event.target
-                    .value as AgentModelSelectionMode;
-                  setModelPolicyMode(nextMode);
-                  if (
-                    nextMode === "allowlist" &&
-                    selectedAllowlistKeys.length === 0 &&
-                    selectedModelKey
-                  ) {
-                    setSelectedAllowlistKeys([selectedModelKey]);
-                  }
-                  if (
-                    nextMode === "fixed" &&
-                    !selectedModelKey &&
-                    selectedAllowlistKeys[0]
-                  ) {
-                    setSelectedModelKey(selectedAllowlistKeys[0]);
-                  }
-                }}
-              >
-                <option value="user_select">
-                  {t("agents.control.modelPolicy.userSelect")}
-                </option>
-                <option value="fixed">
-                  {t("agents.control.modelPolicy.fixed")}
-                </option>
-                <option value="allowlist">
-                  {t("agents.control.modelPolicy.allowlist")}
-                </option>
-              </select>
-              <small>{t("agents.control.modelPolicyHint")}</small>
-            </label>
-          ) : null}
-          {requiresModelSelection &&
-          modelPolicyMode === "allowlist" &&
-          !preservesV1 ? (
-            <fieldset
-              className="agents-create-field agent-control-wide-field"
-              aria-label={t("agents.control.runtimeModel")}
-              disabled={readOnly || modelChoices.length === 0}
-            >
-              <legend>{t("agents.control.runtimeModel")}</legend>
-              {modelChoices.length === 0 ? (
-                <span>{t("agents.control.runtimeModelUnavailable")}</span>
-              ) : (
-                modelChoices.map((choice) => (
-                  <label key={choice.key}>
-                    <input
-                      type="checkbox"
-                      checked={selectedAllowlistKeys.includes(choice.key)}
-                      onChange={(event) => {
-                        setSelectedAllowlistKeys((currentKeys) =>
-                          event.target.checked
-                            ? [...new Set([...currentKeys, choice.key])]
-                            : currentKeys.filter((key) => key !== choice.key),
-                        );
-                      }}
-                    />
-                    <span>{choice.label}</span>
-                  </label>
-                ))
-              )}
-              <small>{t("agents.control.runtimeModelHint")}</small>
-            </fieldset>
-          ) : requiresModelSelection ? (
-            <label className="agents-create-field agent-control-wide-field">
-              <span>{t("agents.control.runtimeModel")}</span>
-              <select
-                className="input"
-                aria-label={t("agents.control.runtimeModel")}
-                value={selectedModelKey}
-                disabled={readOnly || modelChoices.length === 0}
-                onChange={(event) => setSelectedModelKey(event.target.value)}
-              >
-                {modelChoices.length === 0 ? (
-                  <option value="">
-                    {t("agents.control.runtimeModelUnavailable")}
-                  </option>
-                ) : null}
-                {modelChoices.map((choice) => (
-                  <option key={choice.key} value={choice.key}>
-                    {choice.label}
-                  </option>
-                ))}
-              </select>
-              <small>{t("agents.control.runtimeModelHint")}</small>
-            </label>
-          ) : (
-            <p className="agent-control-sequence agent-control-wide-field">
-              {t("agents.control.runtimeModelChosenOnUse")}
-            </p>
-          )}
+          <p className="agent-control-sequence agent-control-wide-field">
+            {t("agents.control.runtimeModelChosenOnUse")}
+          </p>
 
           {!readOnly ? (
             <AgentCapabilityPicker

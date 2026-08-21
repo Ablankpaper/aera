@@ -138,7 +138,7 @@ While the shell remains in an Organization, “我的智能体” explicitly sen
 
 [[src/renderer/src/screens/Layout/ProfileSwitcher.tsx#ProfileSwitcher]] presents the same internal records only as Agents. Users may switch Agents, open the Agent screen, or open product-level Agent settings; provider routing, gateway state, internal Profile IDs, Installations, and RuntimeBindings remain hidden.
 
-[[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] imports identity and capability Markdown and derives safe asset paths without requiring a Runtime model. New drafts default to a signed user-select model policy; allowlist and fixed-model policies are explicit advanced authoring choices.
+[[src/renderer/src/screens/Agents/AgentDraftEditor.tsx#AgentDraftEditor]] imports identity and capability Markdown and derives safe asset paths without requiring a Runtime model. Editable V2/V3 drafts always emit `user_select`; historical allowlist and fixed fields remain readable for signature compatibility but are no longer authoring choices or runtime model locks.
 
 Publishing an Agent and choosing a local model are separate actions. Publish-and-use may continue as one explicit product action, but it first publishes the immutable version and then resolves a current-owner Profile model during installation; publishing alone never requires a configured Runtime model.
 
@@ -312,17 +312,17 @@ A required missing, disabled, or drifted mapping leaves installation pending wit
 
 ### Model policy and runtime selection
 
-An immutable AgentVersion signs a model policy, while the user's Installation selects the concrete local route that satisfies it.
+An immutable AgentVersion may contain historical signed model-policy fields, while the user independently selects the concrete local route for each Agent conversation.
 
-Manifest V1 remains byte-for-byte compatible and keeps its required provider/model constraints. Manifest V2 uses one of three modes: `user_select` permits any current-owner configured route, `allowlist` permits only listed providers and models, and `fixed` requires exactly one provider and model. Provider endpoints, display names, credentials, Profile paths, and secret fingerprints never enter the shared AgentVersion.
+Manifest V1 remains byte-for-byte compatible and keeps its required provider/model fields. V2/V3 still parse and verify `user_select`, `allowlist`, and `fixed` so old immutable versions and signatures remain valid. Desktop runtime treats all three as user-selected and new drafts emit only `user_select`. Provider endpoints, display names, credentials, Profile paths, and secret fingerprints never enter the shared AgentVersion.
 
-The concrete route is resolved only when the user starts using or repairs an Agent. The main process validates the selected route against the signed model policy and effective tenant policy, copies only that route and its same-owner credential into the isolated target Profile, and freezes the resolved route in each new RuntimeBinding. Changing the user's selected model affects only later conversations.
+The concrete route is resolved only when the user starts using, repairs, or switches an Agent. Main validates Owner, catalog revision, model row, endpoint, and credential, copies only that route and its same-owner credential into the isolated target Profile, and freezes it in a new RuntimeBinding segment. Changing models never rewrites an earlier segment or its Hermes history.
 
-#### Signed switch decisions and immutable resume
+#### User-selected switch decisions and immutable resume
 
 Candidate selection and current-segment validation are separate Main operations.
 
-[[model-selection#Installed-Agent switch policy and immutable resume]] intersects Manifest and tenant policy, never rewrites an old RuntimeBinding, reuses an identical full route, and fails closed when a current full route's source model or credential disappears.
+[[model-selection#Installed-Agent switch policy and immutable resume]] accepts every Main-resolved current-owner route, never rewrites an old RuntimeBinding, reuses an identical full route, and fails closed when a current full route's source model, endpoint, credential, or Runtime support disappears.
 
 [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#prepareConversationRuntime]] adopts the first active segment, resolves opaque selections only through the owner catalog, and exposes only public route identity, thread/segment state, and bounded transition metadata to later IPC layers.
 
@@ -398,19 +398,19 @@ Deleting any segment removes every attached Hermes session before the thread, se
 
 ##### Renderer acknowledgement without prompt mutation
 
-[[model-selection#Installed-Agent switch policy and immutable resume#Policy-filtered staged selection]] keeps selection opaque until Main validates it, and [[model-selection#Installed-Agent switch policy and immutable resume#Main-acknowledged local marker]] displays the transition only after activation without adding instructions to model history.
+[[model-selection#Installed-Agent switch policy and immutable resume#User-selected staged selection]] keeps selection opaque until Main validates it, and [[model-selection#Installed-Agent switch policy and immutable resume#Main-acknowledged local marker]] displays the transition only after activation without adding instructions to model history.
 
 An installed or shared Agent never treats an empty successful transport as a usable response. If the Runs API reports completion without text, reasoning, or tool activity, the main process performs the bounded Chat Completions compatibility fallback; any observed tool activity suppresses replay so side effects cannot run twice. If the compatibility path also returns no content, the turn fails instead of rendering a false success.
 
-Creating a Hermes Runtime Profile directly is not equivalent to creating a product Agent. A usable Agent additionally requires a verified immutable AgentVersion, USER-owned Installation, Profile binding, and RuntimeBinding. [[src/main/agentera-agent-control/model-profile-seed.ts#seedAgentModelProfile]] copies only the selected provider route and same-owner credential into the isolated target Profile after validating the signed model policy.
+Creating a Hermes Runtime Profile directly is not equivalent to creating a product Agent. A usable Agent additionally requires a verified immutable AgentVersion, USER-owned Installation, Profile binding, and RuntimeBinding. [[src/main/agentera-agent-control/model-profile-seed.ts#seedAgentModelProfile]] copies only the user's selected provider route and same-owner credential into the isolated target Profile.
 
-When the active installed Agent Profile is also the selected model source, repair verifies the same-owner binding, credential availability, and signed model constraints in place. An already compatible route is not copied onto itself; a different allowed signed model is reconfigured on that Profile, while an unavailable credential or incompatible route still fails closed. After a version change, [[src/renderer/src/screens/Layout/chatRuns.ts#openProfileRunTransition]] forces a new run even for a same-Profile blank tab, so the previous conversation keeps its original RuntimeBinding and only the new run can freeze the selected version.
+When the active installed Agent Profile is also the selected model source, repair verifies the same-owner binding, model row, endpoint, and credential in place. An already identical route is not copied onto itself; an explicit different user selection is reconfigured for the next run. After a version change, [[src/renderer/src/screens/Layout/chatRuns.ts#openProfileRunTransition]] forces a new run even for a same-Profile blank tab, so the previous conversation keeps its original RuntimeBinding.
 
 Every installation and repair model choice now crosses the owner-scoped [[src/main/agentera-agent-control/owner-model-route-catalog.ts#OwnerModelRouteCatalog]]. Renderer selections carry a revision-bearing opaque handle; [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#resolveModelSelection]] re-resolves it before delegating to [[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager#install]], retry, or repair. This keeps a model saved on an installed Profile available without trusting renderer Profile arbitration.
 
-[[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager#install]] and [[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager#repairInstallationModel]] preserve `profile_model_configuration_failed` when the signed provider/model constraints cannot be projected. [[src/main/agentera-agent-control/ipc-contract.ts#mappedCode]] exposes only that allowlisted reason, and [[src/renderer/src/screens/Agents/AgentControlPanel.tsx#AgentControlPanel]] keeps the pending Agent non-runnable while showing model-compatibility guidance instead of a generic safety error or “published and usable” claim.
+[[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager#install]] and [[src/main/agentera-agent-control/installation-manager.ts#AgentInstallationManager#repairInstallationModel]] preserve `profile_model_configuration_failed` when the selected route or credential cannot be projected into the isolated Profile. [[src/main/agentera-agent-control/ipc-contract.ts#mappedCode]] exposes only that bounded reason, and [[src/renderer/src/screens/Agents/AgentControlPanel.tsx#AgentControlPanel]] keeps the pending Agent non-runnable while showing accurate isolated-model setup guidance.
 
-Installation activation is fail-closed until model projection succeeds. A pending Installation that already owns a prepared Profile is retried by explicitly claiming that Profile, not by opening chat or creating a second Profile. A profile-less pending Installation for an older version is archived before installing the newly published version. An active Profile whose selected version differs from the requested version must select the new immutable version and re-seed its signed model route before chat.
+Installation activation is fail-closed until model projection succeeds. A pending Installation that already owns a prepared Profile is retried by explicitly claiming that Profile, not by opening chat or creating a second Profile. A profile-less pending Installation for an older version is archived before installing the newly published version. An active Profile whose selected version differs from the requested version selects the new immutable version and prepares the user's chosen route before chat.
 
 Fresh Installation materialization reserves the exact local Profile ID and opaque Runtime Profile ID under the stable Agent Installation ID before Hermes creates any Profile bytes. If creation is interrupted, the next attempt reads that encrypted reservation and adopts only the same Owner's safe scaffold; it never chooses a suffixed replacement or claims private or foreign data.
 

@@ -107,6 +107,35 @@ describe("managed gateway bootstrap", () => {
     expect(configAfter).toContain('host: "127.0.0.1"');
   });
 
+  it("keeps an explicit default target on default files when another profile is active", async () => {
+    mkdirSync(join(TEST_HOME, "profiles", "active-space"), { recursive: true });
+    writeFileSync(join(TEST_HOME, "active_profile"), "active-space\n");
+    writeFileSync(
+      join(TEST_HOME, "profiles", "active-space", ".env"),
+      "API_SERVER_KEY=active-key\n",
+    );
+    writeFileSync(
+      join(TEST_HOME, "profiles", "active-space", "config.yaml"),
+      "model:\n  default: active\n",
+    );
+    const gatewayManagedConfig = await loadGatewayManagedConfig();
+    const planner = (
+      gatewayManagedConfig as unknown as {
+        planGatewayManagedConfiguration?: PlanGatewayManagedConfiguration;
+      }
+    ).planGatewayManagedConfiguration;
+    expect(planner).toBeTypeOf("function");
+    if (!planner) return;
+
+    const plan = planner("default", 8642);
+
+    expect(plan.credentialPlan.profileId).toBe("default");
+    expect(plan.credentialPlan.target).toBe(join(TEST_HOME, ".env"));
+    expect(plan.credentialPlan.value.key).toBe("existing-key");
+    expect(plan.configPlan?.target).toBe(join(TEST_HOME, "config.yaml"));
+    expect(plan.configPlan?.after?.toString("utf-8")).toContain("port: 8642");
+  });
+
   it("uses one managed mutation and leaves both files unchanged on recovery refusal", async () => {
     const gatewayManagedConfig = await loadGatewayManagedConfig();
     const prepare = (

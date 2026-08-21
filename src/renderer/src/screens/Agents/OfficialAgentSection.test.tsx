@@ -105,6 +105,7 @@ describe("OfficialAgentSection", () => {
       await screen.findByRole("dialog", { name: "Official Research Agent" }),
     ).toBeTruthy();
     expect(await screen.findByText("Official capability summary")).toBeTruthy();
+    expect(screen.queryByText("gpt-5.6")).toBeNull();
     expect(getOfficialAgentDetail).toHaveBeenCalledWith(DEFINITION_ID);
     fireEvent.click(
       screen.getByRole("button", {

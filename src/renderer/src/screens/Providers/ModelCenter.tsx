@@ -1149,53 +1149,6 @@ export default function ModelCenter({
     setBusyService({ key: service.key, action: "activate" });
     updateServiceFeedback(service.key);
     try {
-      if (hasCoordinatedModelConfiguration) {
-        const result = await coordinatedUpsert({
-          provider: service.provider,
-          providerLabel: service.providerLabel || service.label,
-          baseUrl: service.baseUrl,
-          apiMode:
-            (service.models.find((candidate) => candidate.model === model)
-              ?.apiMode as ModelApiMode | null | undefined) ??
-            service.apiMode ??
-            null,
-          apiKey: service.envKey ? env[service.envKey]?.trim() || "" : "",
-          models: service.models.map((candidate) => ({
-            model: candidate.model,
-            displayName: candidate.name || candidate.model,
-            ...(candidate.contextLength
-              ? { contextLength: candidate.contextLength }
-              : {}),
-          })),
-          activeModel: model,
-        });
-        if (result.status === "rejected") {
-          updateServiceFeedback(service.key, {
-            tone: "error",
-            message: mutationFailureMessage(result),
-          });
-          return;
-        }
-        applyCommittedResult(result, {
-          provider: service.provider,
-          providerLabel: service.providerLabel || service.label,
-          model,
-          baseUrl: service.baseUrl,
-        });
-        await refreshParentEnvironment();
-        updateServiceFeedback(service.key, {
-          tone:
-            result.status === "committed_refresh_warning"
-              ? "neutral"
-              : "success",
-          message:
-            result.status === "committed_refresh_warning"
-              ? t("providers.center.warnings.refresh")
-              : t("providers.center.defaultUpdated"),
-        });
-        void reload(false);
-        return;
-      }
       const persisted = await persistAndReadActiveModel(
         service.provider,
         model,

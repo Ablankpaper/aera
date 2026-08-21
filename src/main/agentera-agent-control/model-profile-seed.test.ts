@@ -130,6 +130,29 @@ function dependencies(): Mocked<SeedDependencies> {
 }
 
 describe("Agent Profile model seeding", () => {
+  it("seeds the user's selected route even when a legacy signature names another model", async () => {
+    const deps = dependencies();
+
+    await seedAgentModelProfile(
+      {
+        sourceProfileId: "source-profile",
+        targetProfileId: "target-profile",
+        version: versionV2("fixed", ["openai"], ["gpt-5.6"]),
+        policy: policyV2("allowlist", ["openai"], ["gpt-5.6"]),
+      },
+      deps,
+    );
+
+    expect(deps.setModelConfig).toHaveBeenCalledWith(
+      "custom:anhepro.com",
+      "gpt-5.6-sol",
+      "https://api.anhepro.com/v1",
+      "target-profile",
+      64_000,
+      "chat_completions",
+    );
+  });
+
   // @lat: [[beta27-reliability-plan#Recoverable model configuration#Indirect feature writers use the managed boundary]]
   it("does not write any target model file when recovery refuses the seed", async () => {
     const deps = Object.assign(dependencies(), {
@@ -270,24 +293,27 @@ describe("Agent Profile model seeding", () => {
     );
   });
 
-  it("enforces the signed effective tenant policy in addition to the version manifest", async () => {
+  it("uses the user's route even when a legacy tenant policy names another model", async () => {
     const deps = dependencies();
 
-    await expect(
-      seedAgentModelProfile(
-        {
-          sourceProfileId: "source-profile",
-          targetProfileId: "target-profile",
-          version: versionV2("user_select"),
-          policy: policyV2("allowlist", ["openai"], ["gpt-5.6"]),
-        },
-        deps,
-      ),
-    ).rejects.toThrow(/effective policy/i);
+    await seedAgentModelProfile(
+      {
+        sourceProfileId: "source-profile",
+        targetProfileId: "target-profile",
+        version: versionV2("user_select"),
+        policy: policyV2("allowlist", ["openai"], ["gpt-5.6"]),
+      },
+      deps,
+    );
 
-    expect(deps.getSecret).not.toHaveBeenCalled();
-    expect(deps.setModelConfig).not.toHaveBeenCalled();
-    expect(deps.setEnvValue).not.toHaveBeenCalled();
+    expect(deps.setModelConfig).toHaveBeenCalledWith(
+      "custom:anhepro.com",
+      "gpt-5.6-sol",
+      "https://api.anhepro.com/v1",
+      "target-profile",
+      64_000,
+      "chat_completions",
+    );
   });
 
   it("validates a compatible installed Agent Profile without copying its model route onto itself", async () => {
@@ -356,7 +382,7 @@ describe("Agent Profile model seeding", () => {
     );
   });
 
-  it("reconfigures an in-place Agent Profile when the new signed version selects another model", async () => {
+  it("keeps the user's in-place model when a legacy signed version names another model", async () => {
     const deps = dependencies();
     deps.getModelConfig.mockReturnValue({
       provider: "custom:anhepro.com",
@@ -398,45 +424,31 @@ describe("Agent Profile model seeding", () => {
       deps,
     );
 
-    expect(deps.upsertNativeCustomProvider).toHaveBeenCalledWith(
-      "source-profile",
+    expect(deps.upsertNativeCustomProvider).not.toHaveBeenCalled();
+    expect(deps.setModelConfig).not.toHaveBeenCalled();
+  });
+
+  it("copies the user's route when a legacy signed version names a different provider", async () => {
+    const deps = dependencies();
+
+    await seedAgentModelProfile(
       {
-        name: "anhepro.com",
-        baseUrl: "https://api.anhepro.com/v1",
-        model: "signed-model",
-        models: ["signed-model"],
-        apiMode: "chat_completions",
+        sourceProfileId: "source-profile",
+        targetProfileId: "target-profile",
+        version: version(["openai"], ["gpt-5.6"]),
+        policy: policyV1(["openai"], ["gpt-5.6"]),
       },
+      deps,
     );
+
     expect(deps.setModelConfig).toHaveBeenCalledWith(
       "custom:anhepro.com",
-      "signed-model",
+      "gpt-5.6-sol",
       "https://api.anhepro.com/v1",
-      "source-profile",
+      "target-profile",
       64_000,
       "chat_completions",
     );
-  });
-
-  it("fails closed before target writes when the signed version disallows the source model", async () => {
-    const deps = dependencies();
-
-    await expect(
-      seedAgentModelProfile(
-        {
-          sourceProfileId: "source-profile",
-          targetProfileId: "target-profile",
-          version: version(["openai"], ["gpt-5.6"]),
-          policy: policyV1(["openai"], ["gpt-5.6"]),
-        },
-        deps,
-      ),
-    ).rejects.toThrow(/not allowed/);
-
-    expect(deps.getSecret).not.toHaveBeenCalled();
-    expect(deps.upsertCustomProvider).not.toHaveBeenCalled();
-    expect(deps.setModelConfig).not.toHaveBeenCalled();
-    expect(deps.setEnvValue).not.toHaveBeenCalled();
   });
 
   it("fails closed before target writes when a remote route has no credential", async () => {

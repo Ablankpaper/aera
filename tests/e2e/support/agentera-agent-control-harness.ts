@@ -2631,8 +2631,8 @@ export async function startBoundConversation(
   conversationKey: string,
 ): Promise<void> {
   await device.page.evaluate(
-    ({ profile, runId }) => {
-      void window.hermesAPI
+    async ({ profile, runId }) => {
+      await window.hermesAPI
         .sendMessage(
           "Create the immutable Aera RuntimeBinding for this conversation.",
           profile,

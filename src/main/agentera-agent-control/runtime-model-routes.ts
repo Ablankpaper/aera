@@ -100,7 +100,13 @@ export function listResolvedAgentRuntimeModelRoutes(
         displayName: row.name || row.model,
         baseUrl: provider.baseUrl,
         apiMode: row.apiMode ?? null,
-        credentialRef: customProviderEnvKey(provider.name),
+        // Loopback gateways authenticate through the locally prepared
+        // API-server key, not a provider API key. Keep the credential anchor
+        // null so the execution lease does not incorrectly require a remote
+        // provider secret for a local test/runtime endpoint.
+        credentialRef: isLocalBaseUrl(provider.baseUrl)
+          ? null
+          : customProviderEnvKey(provider.name),
       });
       continue;
     }
@@ -130,7 +136,9 @@ export function listResolvedAgentRuntimeModelRoutes(
       displayName: row.name || row.model,
       baseUrl,
       apiMode: row.apiMode ?? null,
-      credentialRef: expectedEnvKeyForModel(rowProvider, baseUrl),
+      credentialRef: isLocalBaseUrl(baseUrl)
+        ? null
+        : expectedEnvKeyForModel(rowProvider, baseUrl),
     });
   }
 

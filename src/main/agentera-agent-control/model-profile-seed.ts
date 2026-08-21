@@ -23,11 +23,6 @@ import {
   type ManagedModelMutationPort,
 } from "../model-configuration-mutation-port";
 import type { AgentPolicySnapshot, AgentVersion } from "./client";
-import {
-  agentModelPolicyAllowsRoute,
-  modelPolicyForManifest,
-  modelPolicyForPolicyDocument,
-} from "./model-policy";
 
 export interface AgentModelProfileSeedInput {
   sourceProfileId: string;
@@ -158,45 +153,6 @@ function matchingSavedModel(
   );
 }
 
-function resolveSignedSourceModel(
-  version: AgentVersion,
-  policy: AgentPolicySnapshot,
-  provider: string,
-  currentModel: string,
-  baseUrl: string,
-  models: readonly SavedModel[],
-  exactSelection: boolean,
-): string {
-  const versionPolicy = modelPolicyForManifest(version.manifest);
-  const effectivePolicy = modelPolicyForPolicyDocument(policy.document);
-  const allows = (candidate: string): boolean =>
-    agentModelPolicyAllowsRoute(versionPolicy, provider, candidate) &&
-    agentModelPolicyAllowsRoute(effectivePolicy, provider, candidate);
-  if (allows(currentModel)) return currentModel;
-  if (exactSelection) {
-    throw new Error(
-      "The selected model route is not allowed by the signed effective policy.",
-    );
-  }
-  const candidates = [
-    ...new Set([
-      ...versionPolicy.allowedModels,
-      ...effectivePolicy.allowedModels,
-    ]),
-  ];
-  const signedModel = candidates.find(
-    (candidate) =>
-      allows(candidate) &&
-      matchingSavedModel(models, provider, candidate, baseUrl) !== null,
-  );
-  if (!signedModel) {
-    throw new Error(
-      "The source Profile model is not allowed by the signed effective policy.",
-    );
-  }
-  return signedModel;
-}
-
 function requireRemoteCredential(
   value: string | null,
   provider: string,
@@ -217,7 +173,7 @@ function requireRemoteCredential(
 }
 
 /**
- * Seed only the signed model route required by one installed Agent.
+ * Seed only the user-selected model route required by one installed Agent.
  *
  * The target remains a `cloneFrom=null` Profile: this function does not read or
  * copy Memory, USER, sessions, files, Skills, auth.json, or arbitrary env
@@ -274,15 +230,7 @@ export async function seedAgentModelProfile(
   if (!provider || provider.toLowerCase() === "auto" || !currentModel) {
     throw new Error("The source Profile has no configured model.");
   }
-  const model = resolveSignedSourceModel(
-    input.version,
-    input.policy,
-    provider,
-    currentModel,
-    baseUrl,
-    models,
-    Boolean(selected),
-  );
+  const model = currentModel;
   const alreadyCompatibleInPlace =
     input.sourceProfileId === input.targetProfileId &&
     model === source.model.trim() &&

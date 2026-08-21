@@ -12,6 +12,21 @@ import type { AgentModelSegmentLifecycle } from "../agent-model-execution-lease"
 
 export type AgentModelRouteMode = "configured" | "dynamic";
 
+/**
+ * Resolve the local Gateway Profile for a bound Agent turn. The visible chat
+ * Profile is a logical conversation namespace; an installed Agent may resolve
+ * its model from a different owner Profile. Main has already authenticated
+ * that source Profile in the immutable binding, so startup must use it too.
+ * Legacy bindings and ordinary chats retain the caller's requested Profile.
+ */
+export function resolveAgentGatewayProfile(
+  requestedProfile: string | undefined,
+  binding: { modelRoute?: { sourceProfileId?: string | null } | null } | null,
+): string | undefined {
+  const sourceProfileId = binding?.modelRoute?.sourceProfileId?.trim();
+  return sourceProfileId || requestedProfile;
+}
+
 function normalizeBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, "").toLocaleLowerCase();
 }

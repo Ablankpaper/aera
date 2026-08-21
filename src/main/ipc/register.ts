@@ -215,6 +215,7 @@ import {
 import {
   classifyAgentModelRoute,
   prepareConversationRuntime,
+  resolveAgentGatewayProfile,
   runAgentModelSegmentPreflight,
 } from "./agent-model-send";
 import { deleteConversationSessions } from "./conversation-session-deletion";
@@ -3839,6 +3840,14 @@ export function registerIpcHandlers(context: IpcContext): void {
         }
         const preparedAgentTurn =
           preparedConversationRuntime?.preparedAgentTurn ?? null;
+        // A bound Agent's visible conversation Profile can differ from the
+        // owner Profile that supplied its frozen model route. Use the latter
+        // for the local Gateway/config transaction; keep identity/session
+        // bookkeeping on `profile` below.
+        const gatewayProfile = resolveAgentGatewayProfile(
+          profile,
+          preparedAgentTurn?.binding ?? null,
+        );
         const conversationBoundary =
           preparedConversationRuntime?.conversationBoundary ?? null;
         const segmentTransition =
@@ -3894,14 +3903,14 @@ export function registerIpcHandlers(context: IpcContext): void {
         const conn = getConnectionConfig();
         await runAgentModelSegmentPreflight(segmentLifecycle, async () => {
           ownerLease.assertCurrent();
-          if (!isRemoteMode() && !isGatewayRunning(profile)) {
+          if (!isRemoteMode() && !isGatewayRunning(gatewayProfile)) {
             // A named Agent Profile may inherit a port already occupied by a
             // different local Aera instance. Reconcile and await the real
             // profile gateway before beginning a bound Agent turn.
-            await prepareGatewayForLaunch(profile);
-            startGateway(profile);
+            const preparedGateway = await prepareGatewayForLaunch(gatewayProfile);
+            startGatewayDetailed(gatewayProfile, preparedGateway);
             await startGatewayWithRecovery(
-              profile,
+              gatewayProfile,
               preparedAgentTurn?.envelope.requireBoundApiTransport
                 ? 30_000
                 : 8_000,
@@ -3912,7 +3921,7 @@ export function registerIpcHandlers(context: IpcContext): void {
             // Tunnel to the dashboard (/api/* + chat WS; NOT /v1) and cache its
             // token, else the gateway api_server (/v1) — via the shared preparer
             // so all SSH paths agree on one tunnel target.
-            await prepareSshTunnel(conn, profile);
+            await prepareSshTunnel(conn, gatewayProfile);
           }
           ownerLease.assertCurrent();
         });
@@ -3935,7 +3944,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         if (frozenRoute) {
           try {
             const configuredRoute = getModelConfig(
-              profile,
+              gatewayProfile,
             ) as SessionModelOverride;
             const routeMode = classifyAgentModelRoute(
               frozenRoute,
@@ -4204,7 +4213,7 @@ export function registerIpcHandlers(context: IpcContext): void {
                 sendMessage(
                   message,
                   transportCallbacks,
-                  profile,
+                  gatewayProfile,
                   preparedAgentTurn?.resumeSessionId ?? identityResumeSessionId,
                   history,
                   attachments,
@@ -4217,7 +4226,7 @@ export function registerIpcHandlers(context: IpcContext): void {
             : await sendMessage(
                 message,
                 transportCallbacks,
-                profile,
+                gatewayProfile,
                 preparedAgentTurn?.resumeSessionId ?? identityResumeSessionId,
                 history,
                 attachments,
@@ -4427,8 +4436,8 @@ export function registerIpcHandlers(context: IpcContext): void {
           "Remote mode points at an already-running Aera Runtime server. Start or restart the gateway on that remote host.",
       };
     }
-    await prepareGatewayForLaunch();
-    return startGatewayDetailed();
+    const preparedGateway = await prepareGatewayForLaunch();
+    return startGatewayDetailed(undefined, preparedGateway);
   });
   ipcMain.handle("stop-gateway", async () => {
     const conn = getConnectionConfig();
@@ -5007,8 +5016,8 @@ export function registerIpcHandlers(context: IpcContext): void {
         await sshStartGateway(conn.ssh, name);
       }
     } else if (!isRemoteMode() && !isGatewayRunning(name)) {
-      await prepareGatewayForLaunch(name);
-      startGateway(name);
+      const preparedGateway = await prepareGatewayForLaunch(name);
+      startGatewayDetailed(name, preparedGateway);
     }
     return true;
   });

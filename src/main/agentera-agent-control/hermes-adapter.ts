@@ -495,7 +495,6 @@ function composePublishedInstructions(input: {
     `Published version-scoped Skills (read-only): ${stableJson(skills)}.`,
     `Published assets (read-only): ${stableJson(assets)}.`,
     `Effective policy constraints: ${stableJson({
-      model: modelPolicyForPolicyDocument(policy.document),
       runtime: policy.document.runtime_compatibility,
       tools: policy.document.tools,
       denyRules: policy.document.deny_rules,

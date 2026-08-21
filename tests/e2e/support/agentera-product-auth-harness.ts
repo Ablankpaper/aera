@@ -20,6 +20,7 @@ const cloudRoot = resolve(
     resolve(desktopRoot, "../aera-cloud"),
 );
 export const productAuthCloudOrigin = "http://127.0.0.1:8086";
+const encryptedBackupMinioPort = 59010;
 const password = "Aera Runtime E2E battery staple 2026";
 
 export function productAuthorizationLanding(
@@ -129,7 +130,11 @@ function command(
   });
   if (result.status !== 0) {
     throw new Error(
-      `${executable} ${args.join(" ")} failed\n${result.stdout}\n${result.stderr}`,
+      `${executable} ${args.join(" ")} failed (status=${String(
+        result.status,
+      )}, signal=${String(result.signal)}, error=${String(
+        result.error?.message ?? "",
+      )})\n${result.stdout ?? ""}\n${result.stderr ?? ""}`,
     );
   }
 }
@@ -355,8 +360,8 @@ export async function createProductAuthHarness(): Promise<ProductAuthHarness> {
       userData,
       hermesHome,
       cloudBinary: join(root, "aera-cloud"),
-      postgresPort: await freePort(),
-      redisPort: await freePort(),
+      postgresPort: await freePortExcluding(encryptedBackupMinioPort),
+      redisPort: await freePortExcluding(encryptedBackupMinioPort),
       composeProject: `agentera-runtime-e2e-${process.pid}`,
       captureServer: capture.server,
       captureOrigin: capture.origin,
@@ -403,6 +408,12 @@ export async function createProductAuthHarness(): Promise<ProductAuthHarness> {
     }
     throw error;
   }
+}
+
+async function freePortExcluding(...excluded: number[]): Promise<number> {
+  let port = await freePort();
+  while (excluded.includes(port)) port = await freePort();
+  return port;
 }
 
 export async function closeProductAuthHarness(

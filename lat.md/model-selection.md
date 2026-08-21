@@ -4,7 +4,7 @@ The in-chat (bottom) model picker selects a model for the **current conversation
 
 The override is held in renderer state on each `<Chat>` run ([[src/renderer/src/screens/Chat/Chat.tsx]]), persisted by session id, and sent with every message; it is cleared when the conversation is cleared/reset and is absent on a fresh chat, so new conversations start on the global default. This is distinct from the persisted [[model-context]] default that non-chat surfaces read.
 
-Settings → Models uses a different path: each service card in [[src/renderer/src/screens/Providers/ModelCenter.tsx#ModelCenter]] has a default-model selector that immediately calls `setModelConfig` with the full provider, model, and Base URL identity. That selection changes the global default for future conversations; it never mutates an active chat's session override.
+Settings → Models uses a different path: each service card in [[src/renderer/src/screens/Providers/ModelCenter.tsx#ModelCenter]] has a default-model selector that immediately calls `setModelConfig` with the full provider, model, and Base URL identity. Activating an existing model never replays a service-catalog upsert or depends on its cached revision. It changes the global default for future conversations without mutating an active chat's session override.
 
 ## Two-pane picker grouped by display brand
 
@@ -36,9 +36,11 @@ The picker builds it via [[src/renderer/src/screens/Chat/hooks/useModelConfig.ts
 
 Installed-Agent model changes use a Main-resolved route and a new immutable RuntimeBinding; an existing segment is validated and reused without route mutation.
 
-### Policy intersection and bounded denials
+### User-selected routes and legacy policy compatibility
 
-[[src/main/agentera-agent-control/model-policy.ts#decideAgentModelRoute]] applies the signed Manifest policy and effective tenant policy independently. `fixed` rejects a real switch, while allowlist provider/model failures keep distinct bounded codes; `custom` permits a configured `custom:<name>` route.
+[[src/main/agentera-agent-control/model-policy.ts#decideAgentModelRoute]] treats every verified historical policy mode as `user_select` at Desktop runtime.
+
+Signed V1/V2/V3 fields remain parseable for byte and signature compatibility, but `fixed` and `allowlist` no longer filter installation, repair, resume, or switching. Owner, catalog, endpoint, credential, Runtime capability, and immutable-segment checks remain fail-closed.
 
 ### Candidate route versus current segment
 
@@ -46,7 +48,9 @@ Installed-Agent model changes use a Main-resolved route and a new immutable Runt
 
 ### Current full-route and legacy validation
 
-A current full route must still resolve to the exact source Profile/model row and usable credential before resume. Exact Beta.26 three-field routes skip unavailable source metadata checks but still pass signed Manifest and tenant policy checks.
+A current full route must still resolve to the exact source Profile/model row and usable credential before resume.
+
+Exact Beta.26 three-field routes skip unavailable source metadata checks; historical signed model fields do not become a runtime route lock.
 
 ### Manager thread adoption and candidate preparation
 
@@ -60,9 +64,9 @@ A candidate must leave `preparing` when any pre-output send initialization fails
 
 [[src/main/ipc/agent-model-send.ts#runAgentModelSegmentPreflight]] emits the preparing event and fails the candidate when local Gateway startup or SSH tunnel preparation rejects. Execution-lease creation and synchronous transport setup use the same idempotent lifecycle fallback in [[src/main/ipc/register.ts#registerIpcHandlers]], so the old active Segment remains authoritative and the user can retry the switch.
 
-### Policy-filtered staged selection
+### User-selected staged selection
 
-[[src/renderer/src/screens/Chat/ModelPicker.tsx#ModelPicker]] uses the installed Agent catalog instead of ordinary model groups, disables fixed or in-flight switches, and stages only the opaque selection for the next send without writing a session override.
+[[src/renderer/src/screens/Chat/ModelPicker.tsx#ModelPicker]] uses the installed Agent catalog instead of ordinary model groups, keeps historical fixed/allowlist Agents selectable, disables only in-flight switches, and stages the opaque selection for the next send without writing an ordinary session override.
 
 ### Authoritative resume context
 
