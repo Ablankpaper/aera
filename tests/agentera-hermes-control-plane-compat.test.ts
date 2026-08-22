@@ -45,6 +45,25 @@ describe("Aera control plane remains outside the Hermes adaptive core", () => {
     expect(hermes).toMatch(/return (?:await )?sendMessageViaCli\(/);
   });
 
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Port reuse across restarts]]
+  it("launches the send-message gateway through recovery only", () => {
+    const register = source("src/main/ipc/register.ts");
+    const start = register.indexOf(
+      "await runAgentModelSegmentPreflight(segmentLifecycle,",
+    );
+    expect(start).toBeGreaterThan(-1);
+    const preflight = register.slice(
+      start,
+      register.indexOf('if (conn.mode === "ssh" && conn.ssh)', start),
+    );
+    expect(preflight.length).toBeGreaterThan(0);
+    expect(preflight).toContain("await startGatewayWithRecovery(");
+    // Recovery reconciles the port and spawns itself. A plain launch in front of
+    // it makes recovery SIGTERM the gateway it just created, and the replacement
+    // then races the dying process for the same port.
+    expect(preflight).not.toContain("startGatewayDetailed(");
+  });
+
   it("keeps legacy Hermes One sync separate from Aera versions, installations and bindings", () => {
     const legacySync = source("src/main/agent-sync.ts");
     expect(legacySync).not.toContain("agentera-agent-control");

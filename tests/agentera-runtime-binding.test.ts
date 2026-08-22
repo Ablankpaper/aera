@@ -135,8 +135,12 @@ describe("RuntimeBinding integration at the main-process conversation boundary",
       source.indexOf('ipcMain.handle("abort-chat"'),
     );
     expect(handler.indexOf("prepareConversationRuntime")).toBeGreaterThan(-1);
+    // The gateway is launched via recovery, which prepares config and spawns in
+    // one step; the binding must still be resolved before that launch.
+    const gatewayLaunch = handler.indexOf("await startGatewayWithRecovery(");
+    expect(gatewayLaunch).toBeGreaterThan(-1);
     expect(handler.indexOf("prepareConversationRuntime")).toBeLessThan(
-      handler.indexOf("startGatewayDetailed(gatewayProfile, preparedGateway)"),
+      gatewayLaunch,
     );
     expect(handler.indexOf("prepareConversationRuntime")).toBeLessThan(
       handler.indexOf("await sendMessage("),

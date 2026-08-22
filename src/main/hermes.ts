@@ -11,6 +11,7 @@ import {
   mkdtempSync,
   openSync,
   closeSync,
+  statSync,
 } from "fs";
 import { join } from "path";
 import { homedir, tmpdir } from "os";
@@ -18,6 +19,7 @@ import http from "http";
 import https from "https";
 import net from "net";
 import WebSocket from "ws";
+import { app } from "electron";
 import { HERMES_HOME, getEnhancedPath } from "./installer";
 import { getRuntimeInvocation } from "./agentera-runtime-distribution/invocation";
 import {
@@ -40,7 +42,7 @@ import {
   normalizeProfileName,
   getActiveProfileNameSync,
 } from "./utils";
-import { getProfilePort } from "./gateway-ports";
+import { getProfilePort, isLoopbackPortReleased } from "./gateway-ports";
 import {
   prepareGatewayManagedConfiguration,
   type GatewayManagedConfigurationDependencies,
@@ -114,6 +116,11 @@ function profileKey(profile?: string): string {
 
 let gatewayManagedConfigurationDependencies: GatewayManagedConfigurationDependencies | null =
   null;
+// The managed bootstrap transaction can create API_SERVER_KEY and invalidate
+// config.ts's read cache before the next readiness probe runs. Keep the exact
+// prepared value for this Profile while its Gateway is alive so a later
+// bound-send health check cannot treat a healthy process as unauthenticated.
+const preparedGatewayKeys = new Map<string, string>();
 
 export function configureGatewayManagedConfiguration(
   dependencies: GatewayManagedConfigurationDependencies | null,
@@ -134,10 +141,12 @@ export async function prepareGatewayForLaunch(
   // active account space while the caller starts the default Agent Profile.
   const targetProfile =
     profile === undefined ? resolveProfile(undefined) ?? "default" : profile;
-  return prepareGatewayManagedConfiguration(
+  const prepared = await prepareGatewayManagedConfiguration(
     targetProfile,
     gatewayManagedConfigurationDependencies,
   );
+  preparedGatewayKeys.set(profileKey(targetProfile), prepared.key);
+  return prepared;
 }
 
 export interface PreparedGatewayLaunch {
@@ -216,7 +225,10 @@ export function getRemoteAuthHeader(): Record<string, string> {
   return {};
 }
 
-function getApiAuthHeaders(profile?: string): Record<string, string> {
+function getApiAuthHeaders(
+  profile?: string,
+  preparedApiServerKey?: string,
+): Record<string, string> {
   const headers: Record<string, string> = {
     ...getRemoteAuthHeader(),
   };
@@ -224,7 +236,10 @@ function getApiAuthHeaders(profile?: string): Record<string, string> {
   // config.yaml) only applies in local mode — in remote/SSH mode the
   // remote endpoint's own auth header is authoritative.
   if (!isRemoteMode()) {
-    const apiServerKey = getApiServerKey(profile);
+    const apiServerKey =
+      preparedApiServerKey?.trim() ||
+      preparedGatewayKeys.get(profileKey(profile)) ||
+      getApiServerKey(profile);
     if (apiServerKey) {
       headers.Authorization = `Bearer ${apiServerKey}`;
     }
@@ -277,6 +292,12 @@ async function getApiCapabilities(
         method: "GET",
         headers: getApiAuthHeaders(profile),
         timeout: CAPABILITIES_TIMEOUT_MS,
+        // Readiness/capability probes are short-lived lifecycle traffic. Do
+        // not leave an idle keep-alive socket on the gateway port that can be
+        // closed by the gateway during a restart and become TIME_WAIT there.
+        agent: isLoopbackGatewayUrl(url)
+          ? gatewayAgentFor(url, profile)
+          : undefined,
       },
       (res) => {
         let raw = "";
@@ -1264,7 +1285,87 @@ const capabilitiesCache = new Map<
 //  API Server health check
 // ────────────────────────────────────────────────────
 
-function isApiServerReady(profile?: string): Promise<boolean> {
+// Every loopback request to a gateway we manage goes through these agents so
+// the sockets are ours to close. Node's global agent has kept connections
+// alive by default since v19, and a still-ESTABLISHED connection at SIGTERM is
+// closed by the *gateway*, which parks a TIME_WAIT socket on its own port. That
+// socket blocks the next gateway's bind for a full MSL (~30s measured on
+// darwin) because aiohttp deliberately sets `reuse_address=False` there, and
+// the runtime treats EADDRINUSE as fatal and non-retryable. Draining these
+// pools before SIGTERM makes the desktop close first, so the TIME_WAIT lands on
+// our ephemeral port instead and the gateway port is reusable immediately.
+// Built on first use rather than at import: this module is imported by tests
+// that stub `http`/`https` with partial shapes, and an agent is only ever needed
+// once something actually talks to a gateway.
+type GatewayConnectionAgents = {
+  http?: http.Agent;
+  https?: https.Agent;
+};
+
+const gatewayConnectionAgents = new Map<
+  string,
+  GatewayConnectionAgents
+>();
+
+function gatewayAgentFor(
+  url: string,
+  profile?: string,
+): http.Agent | https.Agent | undefined {
+  const key = profileKey(profile);
+  const agents = gatewayConnectionAgents.get(key) ?? {};
+  gatewayConnectionAgents.set(key, agents);
+  try {
+    if (url.startsWith("https")) {
+      agents.https ??= new https.Agent({ keepAlive: true, maxSockets: 8 });
+      return agents.https;
+    }
+    agents.http ??= new http.Agent({ keepAlive: true, maxSockets: 8 });
+    return agents.http;
+  } catch {
+    // No usable Agent (stubbed module). Fall back to the default agent; the
+    // drain below then has nothing of ours to close, which is correct.
+    return undefined;
+  }
+}
+
+/** Only gateways we spawn are ours to drain; remote and SSH targets are not. */
+function isLoopbackGatewayUrl(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return (
+      hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1"
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Close every idle *and* active socket the desktop holds against a gateway.
+ *
+ * Must run before the SIGTERM in {@link stopGateway}: after the signal the
+ * gateway wins the race to close and the port is lost to TIME_WAIT.
+ */
+function drainGatewayConnections(profile?: string): void {
+  const key = profileKey(profile);
+  const agents = gatewayConnectionAgents.get(key);
+  if (!agents) return;
+  for (const agent of [agents.http, agents.https]) {
+    if (!agent) continue;
+    try {
+      agent.destroy();
+    } catch {
+      // Best effort: a failed drain only costs us the fast rebind.
+    }
+  }
+  gatewayConnectionAgents.delete(key);
+}
+
+function isApiServerReady(
+  profile?: string,
+  preparedApiServerKey?: string,
+  preparedApiServerPort?: number,
+): Promise<boolean> {
   return new Promise((resolve) => {
     try {
       const resolved = resolveProfile(profile);
@@ -1272,7 +1373,11 @@ function isApiServerReady(profile?: string): Promise<boolean> {
       // `/health` is intentionally public and proves only that a listener is
       // alive. Local readiness must exercise a Bearer-protected route so a
       // mismatched desktop/gateway key is detected before the first chat.
-      const url = `${getApiUrl(resolved)}${
+      const baseUrl =
+        local && Number.isInteger(preparedApiServerPort)
+          ? `http://127.0.0.1:${preparedApiServerPort}`
+          : getApiUrl(resolved);
+      const url = `${baseUrl}${
         local ? "/v1/capabilities" : "/health"
       }`;
       const mod = url.startsWith("https") ? https : http;
@@ -1281,11 +1386,26 @@ function isApiServerReady(profile?: string): Promise<boolean> {
         {
           method: "GET",
           timeout: 1500,
-          headers: local ? getApiAuthHeaders(resolved) : getRemoteAuthHeader(),
+          // This is lifecycle traffic, not an application stream. Keep it on
+          // the profile pool so shutdown can drain it, and close the response
+          // from the Desktop as soon as headers arrive; otherwise the Gateway
+          // can be the first peer to close and leave TIME_WAIT on its fixed
+          // listening port.
+          agent: local ? gatewayAgentFor(url, profile) : undefined,
+          ...(local
+            ? {
+                headers: {
+                  ...getApiAuthHeaders(resolved, preparedApiServerKey),
+                  Connection: "close",
+                },
+              }
+            : { headers: getRemoteAuthHeader() }),
         },
         (res) => {
-          resolve(res.statusCode === 200);
-          res.resume();
+          const ready = res.statusCode === 200;
+          if (typeof res.destroy === "function") res.destroy();
+          else res.resume();
+          resolve(ready);
         },
       );
       req.on("error", () => resolve(false));
@@ -1308,10 +1428,19 @@ async function waitForApiServerReady(
   timeoutMs = 8000,
   profile?: string,
   pollMs = 250,
+  preparedApiServerKey?: string,
+  preparedApiServerPort?: number,
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await isApiServerReady(profile)) return true;
+    if (
+      await isApiServerReady(
+        profile,
+        preparedApiServerKey,
+        preparedApiServerPort,
+      )
+    )
+      return true;
     await delay(pollMs);
   }
   return false;
@@ -1850,7 +1979,13 @@ function sendMessageViaApi(
     const probeMod = probeUrl.startsWith("https") ? https : http;
     const probeReq = probeMod.request(
       probeUrl,
-      { method: "POST", headers: probeHeaders },
+      {
+        method: "POST",
+        headers: probeHeaders,
+        agent: isLoopbackGatewayUrl(probeUrl)
+          ? gatewayAgentFor(probeUrl, profile)
+          : undefined,
+      },
       (res) => {
         let raw = "";
         res.on("data", (d) => {
@@ -1983,6 +2118,9 @@ function sendMessageViaApi(
       headers,
       signal: controller.signal,
       timeout: 120000,
+      agent: isLoopbackGatewayUrl(chatUrl)
+        ? gatewayAgentFor(chatUrl, profile)
+        : undefined,
     },
     (res) => {
       const sid = res.headers["x-hermes-session-id"];
@@ -2117,6 +2255,9 @@ function postRunStop(
     method: "POST",
     headers: getApiAuthHeaders(profile),
     timeout: 3000,
+    agent: isLoopbackGatewayUrl(url)
+      ? gatewayAgentFor(url, profile)
+      : undefined,
   });
   req.on("error", () => undefined);
   req.on("timeout", () => req.destroy());
@@ -2300,6 +2441,9 @@ function sendMessageViaRuns(
         headers: getApiAuthHeaders(profile),
         signal: controller.signal,
         timeout: 120000,
+        agent: isLoopbackGatewayUrl(eventsUrl)
+          ? gatewayAgentFor(eventsUrl, profile)
+          : undefined,
       },
       (res) => {
         if (res.statusCode !== 200) {
@@ -2376,6 +2520,9 @@ function sendMessageViaRuns(
       headers,
       signal: controller.signal,
       timeout: 30000,
+      agent: isLoopbackGatewayUrl(startUrl)
+        ? gatewayAgentFor(startUrl, profile)
+        : undefined,
     },
     (res) => {
       let raw = "";
@@ -3630,6 +3777,10 @@ const gatewayOwnershipTerminationTimers = new Map<
   string,
   ReturnType<typeof setTimeout>
 >();
+// `hermes gateway` starts a short-lived CLI wrapper which writes gateway.pid
+// from the long-lived Python listener. Keep a small adoption window so the
+// durable ownership record follows that listener PID before the wrapper exits.
+const gatewayPidAdoptionTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let gatewayProcessOwnership: GatewayProcessOwnershipLedger | null = null;
 
 export function configureGatewayProcessOwnership(userDataPath: string): void {
@@ -3637,6 +3788,10 @@ export function configureGatewayProcessOwnership(userDataPath: string): void {
     clearTimeout(timer);
   }
   gatewayOwnershipTerminationTimers.clear();
+  for (const timer of gatewayPidAdoptionTimers.values()) {
+    clearTimeout(timer);
+  }
+  gatewayPidAdoptionTimers.clear();
   gatewayProcessOwnership = new GatewayProcessOwnershipLedger({
     userDataPath,
   });
@@ -3659,6 +3814,15 @@ export interface GatewayStartResult {
 function invalidateApiCacheFor(profile?: string): void {
   if (profileKey(profile) === profileKey(undefined)) {
     apiServerAvailable = false;
+  }
+  try {
+    const prefix = `${getApiUrl(profile)}|`;
+    for (const key of capabilitiesCache.keys()) {
+      if (key.startsWith(prefix)) capabilitiesCache.delete(key);
+    }
+  } catch {
+    // A transiently unavailable SSH tunnel has no capability-cache key to
+    // invalidate. The next successful probe will populate a fresh entry.
   }
 }
 
@@ -3813,6 +3977,9 @@ export function startGatewayDetailed(
   // default profile's log. stdout is ignored (the gateway daemonizes and
   // writes its own logs).
   const logPath = gatewayLogPath(profile);
+  // A previous failed process may have cached a null /v1/capabilities result.
+  // Do not carry that failure into the newly spawned gateway.
+  invalidateApiCacheFor(profile);
   // Open the log synchronously and hand spawn a real fd. A createWriteStream
   // opens its fd asynchronously, so passing the stream to stdio races: when
   // the fd hasn't resolved yet (fd: null) Electron's Node rejects it with
@@ -3880,6 +4047,9 @@ export function startGatewayDetailed(
       }
     }
     const message = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[gateway:${key}] start ownership/spawn failure code=${err instanceof GatewayProcessOwnershipError ? err.code : "unknown"} message=${message}`,
+    );
     const error = `Failed to start the gateway process: ${message}`;
     console.error(`[gateway:${key}] ${error}`);
     return { success: false, running: false, error, logPath };
@@ -3917,6 +4087,7 @@ export function startGatewayDetailed(
       }
     }
     invalidateApiCacheFor(profile);
+    preparedGatewayKeys.delete(key);
   });
 
   proc.on("close", (code, signal) => {
@@ -3930,6 +4101,7 @@ export function startGatewayDetailed(
     appStartedProfiles.delete(key);
     reconcileCompletedGatewayOwnership(profile, ownership);
     invalidateApiCacheFor(profile);
+    preparedGatewayKeys.delete(key);
     // Restart health polling to detect if gateway comes back
     startHealthPolling();
   });
@@ -3937,13 +4109,18 @@ export function startGatewayDetailed(
   proc.unref();
   gatewayProcesses.set(key, proc);
   appStartedProfiles.add(key);
+  if (ownership !== null) scheduleGatewayPidAdoption(profile, ownership);
   warmTuiGatewayClient(profile);
 
   // Wait a bit then check if API server came up (only meaningful for the
   // active profile, whose URL getApiUrl() resolves to).
   setTimeout(async () => {
     if (profileKey(profile) === profileKey(undefined)) {
-      apiServerAvailable = await isApiServerReady(profile);
+      apiServerAvailable = await isApiServerReady(
+        profile,
+        prepared?.key,
+        prepared?.port,
+      );
     }
   }, 3000);
 
@@ -3991,6 +4168,61 @@ function readPidFileEntry(
   return pid === null ? null : { path: pidFile, pid };
 }
 
+function adoptGatewayPidFromFile(
+  profile: string | undefined,
+  ownership: GatewayLaunchOwnershipRecord | null,
+): GatewayLaunchOwnershipRecord | null {
+  if (ownership === null || gatewayProcessOwnership === null) return ownership;
+  const pidEntry = readPidFileEntry(profile);
+  if (
+    pidEntry === null ||
+    pidEntry.pid === ownership.preLaunchPid ||
+    pidEntry.pid === ownership.spawnedPid ||
+    !pidIsAliveAs(pidEntry.pid, GATEWAY_IMAGE_PREFIXES)
+  ) {
+    return ownership;
+  }
+  try {
+    return gatewayProcessOwnership.markSpawned({
+      profileId: ownership.profileId,
+      launchId: ownership.launchId,
+      spawnedPid: pidEntry.pid,
+    });
+  } catch {
+    // A concurrent cold-start/restart owns the record now; keep the existing
+    // evidence and let the normal ownership checks fail closed.
+    return ownership;
+  }
+}
+
+function scheduleGatewayPidAdoption(
+  profile: string | undefined,
+  ownership: GatewayLaunchOwnershipRecord,
+): void {
+  const key = ownership.profileId;
+  const previous = gatewayPidAdoptionTimers.get(key);
+  if (previous) clearTimeout(previous);
+  const deadline = Date.now() + 5_000;
+  const tick = (): void => {
+    gatewayPidAdoptionTimers.delete(key);
+    const current = gatewayProcessOwnership?.get(key) ?? null;
+    if (current === null || current.launchId !== ownership.launchId) return;
+    const adopted = adoptGatewayPidFromFile(profile, current);
+    if (adopted !== current) return;
+    if (Date.now() >= deadline) return;
+    const timer = setTimeout(tick, 50);
+    timer.unref?.();
+    gatewayPidAdoptionTimers.set(key, timer);
+  };
+  tick();
+}
+
+function cancelGatewayPidAdoption(profile: string | undefined): void {
+  const timer = gatewayPidAdoptionTimers.get(profileKey(profile));
+  if (timer) clearTimeout(timer);
+  gatewayPidAdoptionTimers.delete(profileKey(profile));
+}
+
 function reconcileCompletedGatewayOwnership(
   profile: string | undefined,
   ownership: GatewayLaunchOwnershipRecord | null,
@@ -4031,6 +4263,7 @@ function retainFailedSpawnOwnershipUntilExit(
     gatewayOwnershipTerminationTimers.delete(key);
     if (gatewayProcesses.get(key) === proc) gatewayProcesses.delete(key);
     appStartedProfiles.delete(key);
+    preparedGatewayKeys.delete(key);
     clearCompletedGatewayOwnership(profile, trackedOwnership);
     invalidateApiCacheFor(profile);
   };
@@ -4070,13 +4303,19 @@ export function stopGateway(
     typeof profileOrForce === "boolean" ? profileOrForce : force;
   const key = profileKey(profile);
   if (!shouldForce && !appStartedProfiles.has(key)) return;
+  cancelGatewayPidAdoption(profile);
 
   let ownership: GatewayLaunchOwnershipRecord | null = null;
   try {
     ownership = gatewayProcessOwnership?.get(key) ?? null;
+    ownership = adoptGatewayPidFromFile(profile, ownership);
   } catch {
     // Without valid durable evidence, retain the legacy exact-profile stop.
   }
+
+  // Close our sockets while the gateway is still listening. Once it starts
+  // shutting down it closes them itself and parks a TIME_WAIT on its own port.
+  drainGatewayConnections(profile);
 
   const proc = gatewayProcesses.get(key);
   if (proc && isChildProcessAlive(proc)) {
@@ -4099,6 +4338,7 @@ export function stopGateway(
     }
   }
   appStartedProfiles.delete(key);
+  preparedGatewayKeys.delete(key);
   if (
     ownership !== null &&
     ownership.spawnedPid !== null &&
@@ -4151,10 +4391,16 @@ export async function stopAeraOwnedGateways(): Promise<void> {
 
 async function stopAeraOwnedGateway(profile: string): Promise<void> {
   const key = profileKey(profile);
+  cancelGatewayPidAdoption(profile);
   const proc = gatewayProcesses.get(key) ?? null;
+  // App shutdown uses the process-tree path rather than stopGateway(). Drain
+  // the same loopback pools here while the listener is still alive, otherwise
+  // a fast Electron relaunch can recreate the TIME_WAIT bind collision.
+  drainGatewayConnections(profile);
   let ownership: GatewayLaunchOwnershipRecord | null = null;
   try {
     ownership = gatewayProcessOwnership?.get(key) ?? null;
+    ownership = adoptGatewayPidFromFile(profile, ownership);
   } catch {
     // Without a valid durable record, only the exact in-memory child is owned.
   }
@@ -4209,6 +4455,7 @@ async function stopAeraOwnedGateway(profile: string): Promise<void> {
   }
 
   appStartedProfiles.delete(key);
+  preparedGatewayKeys.delete(key);
   invalidateApiCacheFor(profile);
   if (ownership !== null) {
     const spawnedPid = ownership.spawnedPid;
@@ -4363,6 +4610,7 @@ function reapRecoveredAeraOwnedGateway(
 const GATEWAY_TERMINATION_RETRY_MS = 100;
 const GATEWAY_TERMINATION_GRACE_ATTEMPTS = 10;
 const GATEWAY_TERMINATION_FORCE_ATTEMPTS = 20;
+const GATEWAY_EADDRINUSE_RETRY_DELAY_MS = 35_000;
 
 async function waitForGatewayOwnershipTermination(
   ownership: GatewayLaunchOwnershipRecord,
@@ -4379,6 +4627,20 @@ async function waitForGatewayOwnershipTermination(
     await delay(GATEWAY_TERMINATION_RETRY_MS);
   }
   throw new Error("Aera gateway ownership cleanup did not finish in time.");
+}
+
+function gatewayLogReportsAddressInUse(
+  profile?: string,
+  fromByteOffset = 0,
+): boolean {
+  try {
+    const log = readFileSync(gatewayLogPath(profile));
+    return /EADDRINUSE|address already in use|already in use/iu.test(
+      log.subarray(Math.max(0, fromByteOffset)).toString("utf8"),
+    );
+  } catch {
+    return false;
+  }
 }
 
 interface GatewayOwnershipTerminationTracking {
@@ -4615,12 +4877,62 @@ async function waitForGatewayOwnershipReleased(
   return false;
 }
 
+// The spawn wrapper exits as soon as the gateway daemonizes, and the health
+// endpoint stops answering before the listener socket is torn down. Neither
+// signal proves the listener is gone, so give it a bounded chance to clear.
+//
+// This is advisory only — never a gate on launching. Node always sets
+// SO_REUSEADDR, so a probe here cannot see the TIME_WAIT sockets that actually
+// block the gateway's non-reuse bind on darwin; treating a failed probe as
+// fatal would refuse valid launches for a full MSL. That exact regression is
+// why upstream removed its own pre-bind check (hermes#10297). Prevention lives
+// in drainGatewayConnections(); this only avoids racing a live listener.
+async function waitForGatewayPortReleased(
+  port: number,
+  profile?: string,
+  timeoutMs = 5000,
+  pollMs = 250,
+): Promise<boolean> {
+  const key = profileKey(profile);
+  const deadline = Date.now() + timeoutMs;
+  let attempts = 0;
+  for (;;) {
+    attempts += 1;
+    if (await isLoopbackPortReleased(port)) return true;
+    if (Date.now() >= deadline) {
+      console.warn(
+        `[gateway:${key}] Port ${String(port)} not confirmed free after ${String(timeoutMs)}ms (${String(attempts)} probes); launching anyway`,
+      );
+      return false;
+    }
+    await delay(pollMs);
+  }
+}
+
 function gatewayRestartProfileKey(profile?: string): string {
   return profileKey(profile);
 }
 
 let gatewayRestartQueueTail: Promise<unknown> = Promise.resolve();
 const gatewayRestartByProfile = new Map<string, Promise<boolean>>();
+const GATEWAY_RECOVERY_REGISTRY_KEY = "__aeraGatewayRecoveryByProfile";
+type GatewayRecoveryRegistry = Map<string, Promise<boolean>>;
+const gatewayRecoveryByProfile: GatewayRecoveryRegistry = (() => {
+  // Keep this on the Node process object rather than module/global scope. The
+  // Electron main bundle can evaluate the Gateway module through more than
+  // one loader context; those contexts share `process` but not module-level
+  // state. A profile must still have one recovery flight across all of them.
+  const globalState = (app ?? process) as typeof app & {
+    [GATEWAY_RECOVERY_REGISTRY_KEY]?: unknown;
+  };
+  const existing = globalState[GATEWAY_RECOVERY_REGISTRY_KEY];
+  if (existing instanceof Map) {
+    return existing as GatewayRecoveryRegistry;
+  }
+  const created: GatewayRecoveryRegistry = new Map();
+  globalState[GATEWAY_RECOVERY_REGISTRY_KEY] = created;
+  return created;
+})();
 
 function markGatewayRestartFailed(profile?: string): void {
   const key = profileKey(profile);
@@ -4678,7 +4990,7 @@ async function restartGatewayLocallyOnce(
   profile?: string,
   healthTimeoutMs = 30000,
   healthPollMs = 250,
-  stopTimeoutMs = 5000,
+  stopTimeoutMs = 30000,
 ): Promise<boolean> {
   try {
     if (isRemoteMode()) return false;
@@ -4728,6 +5040,25 @@ async function restartGatewayLocallyOnce(
     }
 
     const prepared = await prepareGatewayForLaunch(profile);
+    const gatewayLog = gatewayLogPath(profile);
+    let gatewayLogOffset = 0;
+    try {
+      gatewayLogOffset = statSync(gatewayLog).size;
+    } catch {
+      // The launch path creates the log below; an absent file means there is
+      // no historical content to exclude.
+    }
+    const portReleased = await waitForGatewayPortReleased(
+      prepared.port,
+      profile,
+      stopTimeoutMs,
+      healthPollMs,
+    );
+    if (!portReleased) {
+      console.warn(
+        `[gateway:${key}] Port ${String(prepared.port)} not confirmed free; restarting anyway`,
+      );
+    }
     const startResult = startGatewayDetailed(profile, prepared);
     if (!startResult.success && !startResult.alreadyRunning) {
       setApiCacheFor(profile, false);
@@ -4739,12 +5070,35 @@ async function restartGatewayLocallyOnce(
       healthTimeoutMs,
       profile,
       healthPollMs,
+      prepared.key,
+      prepared.port,
     );
     setApiCacheFor(profile, ready);
-    if (!ready) {
-      markGatewayRestartFailed(profile);
+    if (ready) return true;
+
+    // uvicorn/aiohttp on macOS may reject a rebind while the old listener's
+    // TIME_WAIT entries are still inside the kernel, even after the port has
+    // stopped accepting connections. Retry the same prepared launch once
+    // after the measured MSL window instead of recursively starting another
+    // recovery flight against the same port.
+    if (gatewayLogReportsAddressInUse(profile, gatewayLogOffset)) {
+      stopGateway(profile, true);
+      await delay(GATEWAY_EADDRINUSE_RETRY_DELAY_MS);
+      const retryStart = startGatewayDetailed(profile, prepared);
+      if (retryStart.success && !retryStart.alreadyRunning) {
+        const retryReady = await waitForApiServerReady(
+          healthTimeoutMs,
+          profile,
+          healthPollMs,
+          prepared.key,
+          prepared.port,
+        );
+        setApiCacheFor(profile, retryReady);
+        if (retryReady) return true;
+      }
     }
-    return ready;
+    markGatewayRestartFailed(profile);
+    return false;
   } catch (err) {
     console.error("[gateway] Native restart failed:", (err as Error).message);
     markGatewayRestartFailed(profile);
@@ -4756,7 +5110,7 @@ export function restartGateway(
   profile?: string,
   healthTimeoutMs = 30000,
   healthPollMs = 250,
-  stopTimeoutMs = 5000,
+  stopTimeoutMs = 30000,
 ): Promise<boolean> {
   // Same defensive gate as startGateway — the local gateway has no role
   // in remote/SSH mode. Cheap to check; catches IPC paths that don't
@@ -4797,13 +5151,13 @@ export function restartGateway(
   return promise;
 }
 
-export async function startGatewayWithRecovery(
+async function startGatewayWithRecoveryOnce(
   profile?: string,
   healthTimeoutMs = 8000,
   healthPollMs = 250,
   restartCommandTimeoutMs = 15000,
   restartHealthTimeoutMs = 30000,
-  restartStopTimeoutMs = 5000,
+  restartStopTimeoutMs = 30000,
 ): Promise<boolean> {
   // Fourth argument kept for call-site compatibility with the earlier CLI
   // restart implementation.
@@ -4851,6 +5205,35 @@ export async function startGatewayWithRecovery(
   }
 
   const prepared = await prepareGatewayForLaunch(profile);
+  // A process can exit after its close event while its durable ownership
+  // record is still being reconciled by the bounded termination timer. Wait
+  // for that exact record to clear before beginLaunch(), otherwise a healthy
+  // recovery is rejected as ownership_conflict.
+  const ownershipReleased = await waitForGatewayOwnershipReleased(
+    profile,
+    restartStopTimeoutMs,
+    Math.max(50, Math.min(250, healthPollMs)),
+  );
+  if (!ownershipReleased) return false;
+
+  const portReleased = await waitForGatewayPortReleased(
+    prepared.port,
+    profile,
+    restartStopTimeoutMs,
+    Math.max(50, Math.min(250, healthPollMs)),
+  );
+  if (!portReleased) {
+    // A gateway whose pid file was lost still answers health checks while
+    // holding the port. Adopt it instead of spawning a doomed duplicate.
+    if (await isGatewayHealthy(profile)) {
+      setApiCacheFor(profile, true);
+      return true;
+    }
+    // Nothing is serving, so the port is held by a socket we cannot observe
+    // (TIME_WAIT) or one that is still closing. Fall through and launch: a
+    // real EADDRINUSE surfaces as a start failure with the gateway's own log,
+    // which is far more actionable than silently refusing to start.
+  }
   const startResult = startGatewayDetailed(profile, prepared);
   if (!startResult.success && !startResult.alreadyRunning) return false;
 
@@ -4858,6 +5241,8 @@ export async function startGatewayWithRecovery(
     healthTimeoutMs,
     profile,
     healthPollMs,
+    prepared.key,
+    prepared.port,
   );
   if (ready) {
     setApiCacheFor(profile, true);
@@ -4870,6 +5255,50 @@ export async function startGatewayWithRecovery(
     healthPollMs,
     restartStopTimeoutMs,
   );
+}
+
+/**
+ * Recovery is a single-flight operation per Gateway Profile. Several UI
+ * surfaces can request readiness for the same Agent turn at once; allowing
+ * each caller to prepare config and spawn independently races on the fixed
+ * profile port and makes one healthy process look like an ownership/port
+ * failure.
+ */
+export function startGatewayWithRecovery(
+  profile?: string,
+  healthTimeoutMs = 8000,
+  healthPollMs = 250,
+  restartCommandTimeoutMs = 15000,
+  restartHealthTimeoutMs = 30000,
+  restartStopTimeoutMs = 5000,
+): Promise<boolean> {
+  const key = gatewayRestartProfileKey(profile);
+  const existing = gatewayRecoveryByProfile.get(key);
+  if (existing) return existing;
+
+  // Publish the in-flight promise before starting the async body. This avoids
+  // a same-turn re-entry (two IPC sends can reach this function together)
+  // creating two managed plans with different collision-free ports.
+  let resolveRecovery!: (value: boolean) => void;
+  let rejectRecovery!: (reason?: unknown) => void;
+  const promise = new Promise<boolean>((resolve, reject) => {
+    resolveRecovery = resolve;
+    rejectRecovery = reject;
+  }).finally(() => {
+    if (gatewayRecoveryByProfile.get(key) === promise) {
+      gatewayRecoveryByProfile.delete(key);
+    }
+  });
+  gatewayRecoveryByProfile.set(key, promise);
+  void startGatewayWithRecoveryOnce(
+    profile,
+    healthTimeoutMs,
+    healthPollMs,
+    restartCommandTimeoutMs,
+    restartHealthTimeoutMs,
+    restartStopTimeoutMs,
+  ).then(resolveRecovery, rejectRecovery);
+  return promise;
 }
 
 export function restartGatewayViaCli(

@@ -90,6 +90,16 @@ POSIX force targets only the same dedicated PGID, including when its leader alre
 
 Windows uses an exact-root tree kill while the root remains alive and individually terminates captured descendants when the root exits before escalation. After force, it condition-polls the captured tree for up to three seconds, then refreshes the creation identity of every still-live PID that was actually forced so an immediately reused PID is not mistaken for the terminated process. An unavailable final snapshot or creation identity, or any still-matching forced identity, remains a fail-closed cleanup error; an unforced PID is never cleared by this final reuse check.
 
+### Port reuse across restarts
+
+Desktop closes per-Profile pooled Gateway connections before signalling shutdown, so a restart can rebind the same port immediately without interrupting another Profile. Bindability is probed only as an advisory hint and never blocks a launch.
+
+Desktop talks to a local Gateway over keep-alive sockets. If those sockets are still established when the Gateway exits, the Gateway is the peer that closes first and the kernel parks a `TIME_WAIT` on *its* listening port; the port then rejects `bind()` for the full MSL window, which outlasts any practical restart deadline. Closing from the Desktop side first moves that `TIME_WAIT` onto an ephemeral client port, where it costs nothing. The health, capability, run, probe, and chat requests use the Profile's dedicated loopback agents; `stopGateway` and the app-shutdown process-tree path drain that Profile's agents while the listener is still up, ahead of every Gateway termination signal.
+
+Runtime treats `EADDRINUSE` as fatal and never retries the bind itself, so a doomed spawn cannot recover in place. Desktop still refuses to gate a launch on a pre-bind probe: a strict gate turns a transient `TIME_WAIT` into a hard startup stall. The probe only reports an already-healthy Gateway worth adopting, and a spawn otherwise proceeds and surfaces the real bind result.
+
+Recovery both reconciles the port and spawns, so one call site never spawns ahead of it. A plain launch followed by a recovery launch makes recovery observe the process it just created as running-but-not-yet-healthy and restart it, and the replacement then races the dying Gateway for the same port — the identical collision, from a single request.
+
 ### Cancelled startup cannot outlive Desktop
 
 Every asynchronous TUI start belongs to one generation. Stop invalidates that generation before releasing ownership, so a pending port or readiness continuation cannot publish a late process.

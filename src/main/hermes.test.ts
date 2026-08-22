@@ -56,6 +56,9 @@ vi.mock("./utils", () => ({
 vi.mock("./gateway-ports", () => ({
   ensureProfilePortAvailable: vi.fn(async () => 8642),
   getProfilePort: vi.fn(() => 8642),
+  canBindLoopbackPort: vi.fn(async () => true),
+  isLoopbackPortAccepting: vi.fn(async () => false),
+  isLoopbackPortReleased: vi.fn(async () => true),
 }));
 vi.mock("./models", () => ({ readModels: vi.fn(() => []) }));
 vi.mock("./secrets", () => ({ providerListSafe: vi.fn(() => ({})) }));

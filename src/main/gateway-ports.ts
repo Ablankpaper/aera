@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, statSync } from "fs";
-import { createServer } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { join } from "path";
 import { HERMES_HOME } from "./installer";
 import { normalizeProfileName } from "./utils";
@@ -82,7 +82,7 @@ function allocateFreePort(profile: string): number {
   return DEFAULT_API_SERVER_PORT;
 }
 
-async function canBindLoopbackPort(port: number): Promise<boolean> {
+export async function canBindLoopbackPort(port: number): Promise<boolean> {
   return await new Promise<boolean>((resolve) => {
     const server = createServer();
     let settled = false;
@@ -101,6 +101,46 @@ async function canBindLoopbackPort(port: number): Promise<boolean> {
     server.unref();
     server.listen({ host: "127.0.0.1", port, exclusive: true });
   });
+}
+
+/**
+ * True when a TCP connect to `port` on loopback is accepted, i.e. something is
+ * still listening there.
+ *
+ * {@link canBindLoopbackPort} alone is not enough to decide a gateway released
+ * its port: Node sets SO_REUSEADDR on listening sockets, so it happily binds a
+ * port whose previous owner is in TIME_WAIT or still shutting down. uvicorn
+ * (the gateway's server) does not set it, so it would then fail the same bind
+ * with EADDRINUSE. A refused connect is the signal that matches uvicorn's
+ * stricter semantics.
+ */
+export async function isLoopbackPortAccepting(port: number): Promise<boolean> {
+  return await new Promise<boolean>((resolve) => {
+    const socket = createConnection({ host: "127.0.0.1", port });
+    let settled = false;
+    const finish = (accepting: boolean): void => {
+      if (settled) return;
+      settled = true;
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(accepting);
+    };
+    // A timeout means the TCP handshake did not complete. It is not evidence
+    // that a listener accepted the connection; on macOS this is also how a
+    // recently-closed port can look while its old connection is draining.
+    socket.setTimeout(1000, () => finish(false));
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+  });
+}
+
+/**
+ * True when `port` is fully released: nothing is listening AND a fresh bind
+ * succeeds. Both checks are required — see {@link isLoopbackPortAccepting}.
+ */
+export async function isLoopbackPortReleased(port: number): Promise<boolean> {
+  if (await isLoopbackPortAccepting(port)) return false;
+  return await canBindLoopbackPort(port);
 }
 
 export async function firstBindablePort(
