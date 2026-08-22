@@ -95,7 +95,7 @@ describe("OwnerModelRouteCatalog", () => {
     );
 
     const snapshot = catalog.snapshot();
-    expect(snapshot.targetProfileId).toBe("account");
+    expect(snapshot.targetProfileId).toBe("installed");
     expect(snapshot.routes.map((candidate) => candidate.model)).toEqual([
       "old-model",
       "new-model",
@@ -153,6 +153,24 @@ describe("OwnerModelRouteCatalog", () => {
     const issued = catalog.snapshot("secondary");
 
     expect(() => catalog.resolve(issued.routes[0].selection)).not.toThrow();
+  });
+
+  it("keeps an explicitly requested installed Agent Profile as the mutation target", () => {
+    const { catalog } = subject(
+      [
+        profile("account", { isDefault: true }),
+        profile("installed", {
+          agentInstallationId: "installation-1",
+          isActive: true,
+        }),
+      ],
+      {
+        account: [route("account", "account-model")],
+        installed: [route("installed", "agent-model")],
+      },
+    );
+
+    expect(catalog.canonicalTargetProfileId("installed")).toBe("installed");
   });
 
   it("rejects a foreign profile before exposing its route", () => {
