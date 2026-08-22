@@ -3905,10 +3905,11 @@ export function registerIpcHandlers(context: IpcContext): void {
           ownerLease.assertCurrent();
           if (!isRemoteMode() && !isGatewayRunning(gatewayProfile)) {
             // A named Agent Profile may inherit a port already occupied by a
-            // different local Aera instance. Reconcile and await the real
-            // profile gateway before beginning a bound Agent turn.
-            const preparedGateway = await prepareGatewayForLaunch(gatewayProfile);
-            startGatewayDetailed(gatewayProfile, preparedGateway);
+            // different local Aera instance. Recovery reconciles the port and
+            // spawns itself, so it must be the only launch here: spawning first
+            // and then recovering makes recovery observe its own freshly-spawned
+            // gateway as running-but-not-yet-healthy and SIGTERM it, and the
+            // replacement then races the dying process for the profile port.
             await startGatewayWithRecovery(
               gatewayProfile,
               preparedAgentTurn?.envelope.requireBoundApiTransport

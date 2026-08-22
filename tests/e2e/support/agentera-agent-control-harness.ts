@@ -1905,6 +1905,14 @@ export async function launchAgentControlDevice(
   options: { environment?: NodeJS.ProcessEnv } = {},
 ): Promise<AgentControlDevice> {
   const roots = harness.deviceRoots[name];
+  const defaultApiPort = {
+    // Keep E2E gateways away from the user's normal Desktop port (8642).
+    // Each device still receives its own deterministic port.
+    A: "18642",
+    B: "18643",
+    C: "18644",
+    D: "18645",
+  }[name];
   const executablePath = process.env.AGENTERA_E2E_EXECUTABLE_PATH?.trim();
   const app = await electron.launch({
     ...(executablePath ? { executablePath } : {}),
@@ -1918,6 +1926,8 @@ export async function launchAgentControlDevice(
       AGENTERA_OFFICIAL_AGENT_CHANNEL: "internal",
       AGENTERA_RUNTIME_SEED_DIR: harness.runtimeSeedDirectory,
       HERMES_DESKTOP_USER_DATA_DIR: roots.userData,
+      HERMES_DESKTOP_DEFAULT_API_PORT: defaultApiPort,
+      HERMES_DESKTOP_PORT_RANGE_START: String(Number(defaultApiPort) + 1),
       HERMES_HOME: roots.hermesHome,
       HERMES_DISABLE_GPU: "1",
       HERMES_OPEN_DEVTOOLS: "0",
@@ -1933,11 +1943,11 @@ export async function launchAgentControlDevice(
       -64 * 1024,
     );
   };
+  // Only the stdio pipes are captured. Adding an app.on("console") listener
+  // would record every main-process console line a second time, which makes
+  // single-flight diagnostics read as duplicate concurrent requests.
   app.process().stdout?.on("data", appendProcessOutput);
   app.process().stderr?.on("data", appendProcessOutput);
-  app.on("console", (message) => {
-    appendProcessOutput(Buffer.from(`${message.text()}\n`, "utf8"));
-  });
   const page = await app.firstWindow();
   await app.evaluate(({ shell }) => {
     const state = globalThis as typeof globalThis & {
