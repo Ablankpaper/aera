@@ -165,8 +165,7 @@ export class OwnerModelRouteCatalog {
       .sort(profileSort);
     const requested = profiles.find(
       (profile) =>
-        profile.id === (requestedProfileId ?? this.defaultRequestedProfileId) &&
-        profile.agentInstallationId === null,
+        profile.id === (requestedProfileId ?? this.defaultRequestedProfileId),
     );
     if (requested) return requested.id;
     const defaultProfile = accountProfiles.find((profile) => profile.isDefault);

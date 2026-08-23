@@ -772,18 +772,25 @@ export default function AgentControlPanel({
     setNotice(null);
     try {
       let installation = target.installation;
+      const explicitModelSelection = Boolean(
+        target.modelSelection || target.modelProfileId,
+      );
+      const preserveActiveUserModel = Boolean(
+        installation?.status === "active" &&
+        installation.sourceScope === "USER" &&
+        target.profile &&
+        isRunnableAgentProfile(target.profile),
+      );
       const sourceModelProfileId =
         target.modelSelection?.sourceProfileId ??
         target.modelProfileId ??
-        modelProfileId;
+        (preserveActiveUserModel ? target.profile?.id : modelProfileId);
       const modelSourceInput = target.modelSelection
         ? { modelSelection: target.modelSelection }
         : sourceModelProfileId
           ? { modelProfileId: sourceModelProfileId }
           : {};
-      const modelSelectionRequested = Boolean(
-        target.modelSelection || target.modelProfileId,
-      );
+      const modelSelectionRequested = explicitModelSelection;
       let profileReady = isRunnableAgentProfile(target.profile);
       let forceNewRun = false;
       const alignActiveProfileVersion = async (
@@ -1274,6 +1281,20 @@ export default function AgentControlPanel({
         modelProfileId: target.modelProfileId,
         modelSelection: target.modelSelection,
       });
+      return;
+    }
+    // An already configured Agent owns its current route. A normal "Use
+    // Agent" click is not a model switch, so do not inject the account's
+    // preferred model and trigger a repair transaction. Explicit model
+    // choices still take the branch above; version changes still use the
+    // normal alignment/seed path below.
+    if (
+      installation?.status === "active" &&
+      installation.sourceScope === "USER" &&
+      profile &&
+      isRunnableAgentProfile(profile)
+    ) {
+      void activateAgent(activationTarget);
       return;
     }
     if (

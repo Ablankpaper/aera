@@ -123,6 +123,7 @@ export interface AgentControlHarness {
   browserPage: Page;
   composeStarted: boolean;
   runtimeSeedDirectory: string;
+  externalRuntimeSeedDirectory: string;
   desktopControlClockFile: string | null;
   desktopFleet: boolean;
   deviceRoots: Record<
@@ -348,6 +349,112 @@ async function listen(server: Server, port = 0): Promise<void> {
 async function closeServer(server: Server): Promise<void> {
   if (!server.listening) return;
   await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Prepare an isolated, source-backed Runtime for the local Electron gate.
+ *
+ * The release Seed is intentionally immutable and must continue to be used by
+ * the packaged/runtime-distribution tests. Agent model-routing E2E needs the
+ * just-edited Runtime checkout before a signed candidate exists, so this
+ * helper uses the already-supported external Runtime selection boundary. It
+ * copies source files into the run-owned Hermes home and keeps the dependency
+ * interpreter outside the copied tree behind a regular wrapper file; the
+ * production invocation validator therefore exercises the same real external
+ * layout without weakening managed Seed verification.
+ */
+async function prepareExternalRuntime(
+  hermesHome: string,
+  userData: string,
+  sourceRoot: string,
+  emptySeedDirectory: string,
+): Promise<void> {
+  const source = resolve(sourceRoot);
+  const runtimeRoot = join(hermesHome, "hermes-agent");
+  if (!(await pathExists(join(source, "hermes_cli", "main.py")))) {
+    throw new Error(
+      "AGENTERA_E2E_RUNTIME_SOURCE_ROOT lacks hermes_cli/main.py",
+    );
+  }
+  const sourcePythonCandidates = [
+    join(source, ".venv", "bin", "python"),
+    join(source, "venv", "bin", "python"),
+  ];
+  let selectedPython: string | null = null;
+  for (const candidate of sourcePythonCandidates) {
+    if (await pathExists(candidate)) {
+      selectedPython = candidate;
+      break;
+    }
+  }
+  if (selectedPython === null) {
+    throw new Error(
+      "AGENTERA_E2E_RUNTIME_SOURCE_ROOT lacks .venv/bin/python or venv/bin/python",
+    );
+  }
+
+  if (!(await pathExists(runtimeRoot))) {
+    await mkdir(runtimeRoot, { recursive: true, mode: 0o700 });
+    await cp(source, runtimeRoot, {
+      recursive: true,
+      filter: (entry) => {
+        const relativeEntry = entry.slice(source.length + 1);
+        return ![
+          ".git",
+          ".venv",
+          "venv",
+          "node_modules",
+          "__pycache__",
+          ".pytest_cache",
+          ".mypy_cache",
+          "dist",
+          "build",
+          ".next",
+        ].some(
+          (excluded) =>
+            relativeEntry === excluded ||
+            relativeEntry.startsWith(`${excluded}/`),
+        );
+      },
+    });
+  }
+  await mkdir(join(runtimeRoot, "hermes_cli", "web_dist"), {
+    recursive: true,
+    mode: 0o700,
+  });
+  const runtimePython = join(runtimeRoot, "venv", "bin", "python");
+  await mkdir(dirname(runtimePython), { recursive: true, mode: 0o700 });
+  if (!(await pathExists(runtimePython))) {
+    await writeFile(
+      runtimePython,
+      `#!/bin/sh\nexec ${JSON.stringify(selectedPython)} "$@"\n`,
+      { encoding: "utf8", mode: 0o700 },
+    );
+    await chmod(runtimePython, 0o700);
+  }
+  await mkdir(emptySeedDirectory, { recursive: true, mode: 0o700 });
+  await writeFile(
+    join(userData, "hermes-home.json"),
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        mode: "external",
+        hermesHome,
+      },
+      null,
+      2,
+    )}\n`,
+    { encoding: "utf8", mode: 0o600 },
+  );
 }
 
 async function requestBody(request: IncomingMessage): Promise<Buffer> {
@@ -1582,6 +1689,7 @@ export async function createAgentControlHarness(
   const runtimeSeedDirectory = options.desktopFleet
     ? join(root, "runtime-seed")
     : runtimeSeedSource;
+  const externalRuntimeSeedDirectory = join(root, "external-runtime-seed");
   if (options.desktopFleet) {
     await cp(runtimeSeedSource, runtimeSeedDirectory, { recursive: true });
   }
@@ -1651,6 +1759,7 @@ export async function createAgentControlHarness(
     browserPage,
     composeStarted: false,
     runtimeSeedDirectory,
+    externalRuntimeSeedDirectory,
     desktopControlClockFile: options.desktopFleet
       ? join(root, "desktop-control-clock.txt")
       : null,
@@ -1905,6 +2014,29 @@ export async function launchAgentControlDevice(
   options: { environment?: NodeJS.ProcessEnv } = {},
 ): Promise<AgentControlDevice> {
   const roots = harness.deviceRoots[name];
+  const runtimeSourceRoot =
+    process.env.AGENTERA_E2E_RUNTIME_SOURCE_ROOT?.trim();
+  // Device C deliberately remains on the locked managed Seed: its scenario
+  // mutates the managed Python wrapper to verify interrupted fresh-Profile
+  // recovery. A/B/D use the current source-backed external Runtime so the
+  // Electron gate exercises the just-fixed request-route protocol.
+  const useExternalRuntime = Boolean(runtimeSourceRoot && name !== "C");
+  if (useExternalRuntime) {
+    await prepareExternalRuntime(
+      roots.hermesHome,
+      roots.userData,
+      runtimeSourceRoot!,
+      harness.externalRuntimeSeedDirectory,
+    );
+  }
+  const defaultApiPort = {
+    // Keep E2E gateways away from the user's normal Desktop port (8642).
+    // Each device still receives its own deterministic port.
+    A: "18642",
+    B: "18643",
+    C: "18644",
+    D: "18645",
+  }[name];
   const executablePath = process.env.AGENTERA_E2E_EXECUTABLE_PATH?.trim();
   const app = await electron.launch({
     ...(executablePath ? { executablePath } : {}),
@@ -1916,8 +2048,14 @@ export async function launchAgentControlDevice(
       ...process.env,
       AGENTERA_CLOUD_PUBLIC_URL: cloudPublicOrigin,
       AGENTERA_OFFICIAL_AGENT_CHANNEL: "internal",
-      AGENTERA_RUNTIME_SEED_DIR: harness.runtimeSeedDirectory,
+      AGENTERA_E2E_RUNTIME_VERSION: "0.20.0-agentera.3",
+      AGENTERA_E2E_DIAGNOSTICS: "1",
+      AGENTERA_RUNTIME_SEED_DIR: useExternalRuntime
+        ? harness.externalRuntimeSeedDirectory
+        : harness.runtimeSeedDirectory,
       HERMES_DESKTOP_USER_DATA_DIR: roots.userData,
+      HERMES_DESKTOP_DEFAULT_API_PORT: defaultApiPort,
+      HERMES_DESKTOP_PORT_RANGE_START: String(Number(defaultApiPort) + 1),
       HERMES_HOME: roots.hermesHome,
       HERMES_DISABLE_GPU: "1",
       HERMES_OPEN_DEVTOOLS: "0",
@@ -1933,11 +2071,11 @@ export async function launchAgentControlDevice(
       -64 * 1024,
     );
   };
+  // Only the stdio pipes are captured. Adding an app.on("console") listener
+  // would record every main-process console line a second time, which makes
+  // single-flight diagnostics read as duplicate concurrent requests.
   app.process().stdout?.on("data", appendProcessOutput);
   app.process().stderr?.on("data", appendProcessOutput);
-  app.on("console", (message) => {
-    appendProcessOutput(Buffer.from(`${message.text()}\n`, "utf8"));
-  });
   const page = await app.firstWindow();
   await app.evaluate(({ shell }) => {
     const state = globalThis as typeof globalThis & {

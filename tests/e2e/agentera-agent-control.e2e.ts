@@ -8,12 +8,13 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { createServer, type Server } from "node:http";
+import { createServer, get as httpGet, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { expect, test } from "playwright/test";
+import { parse as parseYaml } from "yaml";
 
 import type {
   AgentDraftDetail,
@@ -58,17 +59,143 @@ const DEVICE_A_MEMORY_SECRET = "DEVICE_A_NATIVE_MEMORY_SECRET_2026_07_19";
 const DEVICE_A_SKILL_SECRET = "DEVICE_A_LEARNED_SKILL_SECRET_2026_07_19";
 const PRIMARY_MODEL = "gpt-5.6";
 const ALTERNATE_MODEL = "gpt-4.1-mini";
+const SECOND_PROVIDER_NAME = "E2E Provider B";
+const SECOND_PROVIDER_MODEL = "claude-sonnet-4-6";
+const SECOND_PROVIDER_API_KEY = "e2e-provider-b-profile-only-key";
+const SECOND_PROVIDER_ENV_KEY = "CUSTOM_PROVIDER_E2E_PROVIDER_B_KEY";
 
 let harness: AgentControlHarness | null = null;
 let deviceA: AgentControlDevice | null = null;
 let deviceB: AgentControlDevice | null = null;
 let deviceC: AgentControlDevice | null = null;
-let modelServer: Server | null = null;
+const modelServers: Server[] = [];
 let modelBaseUrl = "";
-const requestedModels: string[] = [];
+let secondModelBaseUrl = "";
+const requestedModelRoutes: Array<{
+  provider: string;
+  model: string;
+}> = [];
+let unauthorizedModelRequests = 0;
 
-async function startModelServer(): Promise<string> {
-  modelServer = createServer((request, response) => {
+async function readFailureEvidence(path: string): Promise<string> {
+  try {
+    return (await readFile(path, "utf8")).slice(-16_000);
+  } catch (error) {
+    return `<unavailable: ${error instanceof Error ? error.message : String(error)}>`;
+  }
+}
+
+async function gatewayFailureEvidence(
+  device: AgentControlDevice,
+  profileId: string,
+  port?: number,
+): Promise<string> {
+  const profileRoot = deviceProfilePath(device, profileId);
+  const pidPath = join(profileRoot, "gateway.pid");
+  let pidLiveness = "unavailable";
+  try {
+    const parsed = JSON.parse(await readFile(pidPath, "utf8")) as {
+      pid?: unknown;
+    };
+    if (typeof parsed.pid === "number") {
+      try {
+        process.kill(parsed.pid, 0);
+        pidLiveness = `alive:${parsed.pid}`;
+      } catch (error) {
+        pidLiveness = `not-alive:${parsed.pid}:${error instanceof Error ? error.message : String(error)}`;
+      }
+    }
+  } catch (error) {
+    pidLiveness = `unreadable:${error instanceof Error ? error.message : String(error)}`;
+  }
+  const files = [
+    join(profileRoot, "gateway-stderr.log"),
+    join(profileRoot, "gateway.log"),
+    pidPath,
+    join(device.userData, "gateway-process-ownership.json"),
+  ];
+  const entries = await Promise.all(
+    files.map(async (path) => `${path}\n${await readFailureEvidence(path)}`),
+  );
+  return [
+    `processOutput\n${device.processOutput.slice(-16_000)}`,
+    `gatewayPort\n${port ?? "unknown"}`,
+    `pidLiveness\n${pidLiveness}`,
+    ...entries,
+  ].join("\n---\n");
+}
+
+/**
+ * Named Hermes Profiles do not use the device's default API port.  The
+ * Desktop allocator persists the collision-free port in the Profile's
+ * config.yaml before launching its Gateway.  Read that source of truth rather
+ * than assuming the device-level default (which made the 401 health assertion
+ * probe the wrong listener).
+ */
+async function readGatewayPort(
+  device: AgentControlDevice,
+  profileId: string,
+): Promise<number> {
+  const configPath = join(deviceProfilePath(device, profileId), "config.yaml");
+  const config = parseYaml(await readFile(configPath, "utf8")) as {
+    platforms?: {
+      api_server?: {
+        extra?: { port?: unknown };
+      };
+    };
+  };
+  const port = config.platforms?.api_server?.extra?.port;
+  if (
+    typeof port !== "number" ||
+    !Number.isInteger(port) ||
+    port <= 0 ||
+    port >= 65_536
+  ) {
+    throw new Error(
+      `Gateway port is missing from ${configPath}; profile=${profileId}`,
+    );
+  }
+  return port;
+}
+
+async function probeGatewayHealth(port: number): Promise<{
+  status: number;
+  error: string;
+}> {
+  return new Promise((resolveProbe) => {
+    const request = httpGet(
+      {
+        hostname: "127.0.0.1",
+        port,
+        path: "/health",
+        agent: false,
+        headers: { connection: "close" },
+      },
+      (response) => {
+        response.resume();
+        response.once("end", () =>
+          resolveProbe({ status: response.statusCode ?? 0, error: "" }),
+        );
+      },
+    );
+    request.setTimeout(3_000, () => {
+      request.destroy(new Error("health probe timed out"));
+    });
+    request.once("error", (error) => {
+      const code = (error as NodeJS.ErrnoException).code;
+      resolveProbe({
+        status: 0,
+        error: code ? `${code}: ${error.message}` : error.message,
+      });
+    });
+  });
+}
+
+async function startModelServer(
+  provider: string,
+  models: readonly string[],
+): Promise<string> {
+  const modelServer = createServer((request, response) => {
     void (async () => {
       const url = new URL(request.url || "/", "http://127.0.0.1");
       if (request.method === "GET" && url.pathname === "/v1/models") {
@@ -76,7 +203,7 @@ async function startModelServer(): Promise<string> {
         response.end(
           JSON.stringify({
             object: "list",
-            data: [PRIMARY_MODEL, ALTERNATE_MODEL].map((id) => ({
+            data: models.map((id) => ({
               id,
               object: "model",
             })),
@@ -95,8 +222,21 @@ async function startModelServer(): Promise<string> {
       for await (const chunk of request) body += String(chunk);
       const payload = JSON.parse(body) as { model?: unknown; stream?: unknown };
       const model =
-        typeof payload.model === "string" ? payload.model : PRIMARY_MODEL;
-      requestedModels.push(model);
+        typeof payload.model === "string" ? payload.model : models[0];
+      requestedModelRoutes.push({ provider, model });
+      if (unauthorizedModelRequests > 0) {
+        unauthorizedModelRequests -= 1;
+        response.writeHead(401, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            error: {
+              message: "Invalid API key",
+              type: "authentication_error",
+            },
+          }),
+        );
+        return;
+      }
       if (payload.stream !== true) {
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
@@ -149,9 +289,10 @@ async function startModelServer(): Promise<string> {
     });
   });
   await new Promise<void>((resolveListen, rejectListen) => {
-    modelServer!.once("error", rejectListen);
-    modelServer!.listen(0, "127.0.0.1", () => resolveListen());
+    modelServer.once("error", rejectListen);
+    modelServer.listen(0, "127.0.0.1", () => resolveListen());
   });
+  modelServers.push(modelServer);
   const address = modelServer.address() as AddressInfo;
   return `http://127.0.0.1:${address.port}/v1`;
 }
@@ -164,7 +305,14 @@ function unwrap<T>(result: AgenteraAgentControlResult<T>): T {
       )}; process=${JSON.stringify([
         ...deviceProcessDiagnostics(deviceA),
         ...deviceProcessDiagnostics(deviceB),
-      ])}`,
+      ])}; raw=${JSON.stringify(
+        [deviceA, deviceB]
+          .filter((device): device is AgentControlDevice => device !== null)
+          .map((device) => ({
+            name: device.name,
+            output: device.processOutput.slice(-16_000),
+          })),
+      )}`,
     );
   }
   expect(result.ok).toBe(true);
@@ -444,7 +592,10 @@ async function writeDeviceALearning(profilePath: string): Promise<void> {
 }
 
 test.beforeAll(async () => {
-  modelBaseUrl = await startModelServer();
+  [modelBaseUrl, secondModelBaseUrl] = await Promise.all([
+    startModelServer("provider-a", [PRIMARY_MODEL, ALTERNATE_MODEL]),
+    startModelServer("provider-b", [SECOND_PROVIDER_MODEL]),
+  ]);
   harness = await createAgentControlHarness({ emptyDevices: ["C"] });
   harness.deviceRoots.C.hermesHome = join(harness.root, "device-c", ".hermes");
   await mkdir(harness.deviceRoots.C.hermesHome, { recursive: true });
@@ -452,11 +603,18 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await closeAgentControlHarness(harness);
-  await new Promise<void>(
-    (resolveClose) =>
-      modelServer?.close(() => resolveClose()) ?? resolveClose(),
+  await Promise.all(
+    modelServers
+      .splice(0)
+      .map(
+        (server) =>
+          new Promise<void>((resolveClose) =>
+            server.close(() => resolveClose()),
+          ),
+      ),
   );
-  modelServer = null;
+  requestedModelRoutes.splice(0);
+  unauthorizedModelRequests = 0;
   harness = null;
   deviceA = null;
   deviceB = null;
@@ -476,18 +634,18 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
     `  base_url: "${modelBaseUrl}"`,
     "",
   ].join("\n");
-  const modelCatalog = `${JSON.stringify(
-    [PRIMARY_MODEL, ALTERNATE_MODEL].map((model, index) => ({
+  const primaryModelCatalog = [PRIMARY_MODEL, ALTERNATE_MODEL].map(
+    (model, index) => ({
       id: `agent-model-choice-${index + 1}`,
       name: model,
       provider: "openai",
       model,
       baseUrl: modelBaseUrl,
       createdAt: 1_787_274_971_000 + index,
-    })),
-    null,
-    2,
-  )}\n`;
+    }),
+  );
+  const modelCatalog = `${JSON.stringify(primaryModelCatalog, null, 2)}\n`;
+  const providerCredential = `${SECOND_PROVIDER_ENV_KEY}=${SECOND_PROVIDER_API_KEY}\n`;
   await Promise.all([
     writeFile(
       join(harness.deviceRoots.A.hermesHome, "config.yaml"),
@@ -535,6 +693,20 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
     .toBe(true);
   if (await modelSetupLater.isVisible()) await modelSetupLater.click();
   await expect(chatInput).toBeEnabled();
+  // External source-backed Runtime startup can finish the first renderer
+  // paint before the one-per-launch model reminder mounts. Drain that modal
+  // before sending so the acceptance step is testing Agent creation rather
+  // than racing Radix's focus overlay.
+  const startupPrompt = deviceA.page.locator(".startup-model-prompt");
+  await startupPrompt
+    .waitFor({ state: "visible", timeout: 5_000 })
+    .then(async () => {
+      await startupPrompt
+        .getByRole("button", { name: /稍后|Later/iu })
+        .click({ force: true });
+    })
+    .catch(() => undefined);
+  await expect(deviceA.page.locator(".app-modal-overlay")).toHaveCount(0);
   await chatInput.fill("帮我创建一个叫林二的智能体，负责整理客户资料");
   await deviceA.page.locator("button.chat-send-btn").click();
   const creationGuide = deviceA.page.locator(".chat-agent-creation");
@@ -584,6 +756,60 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
   deviceB = await launchAgentControlDevice(harness, "B");
   await authenticateExistingAgentControlDevice(harness, deviceB);
   await claimDefaultProfile(deviceB);
+
+  // Configure provider B through the same coordinated Main contract as the
+  // Settings surface. Authentication mounts an owner-scoped account Profile
+  // (`aera-space-*`), so writing a physical default-profile fixture here would
+  // not exercise the real account -> isolated Agent projection boundary.
+  const sourceAccountCatalog = await deviceB.page.evaluate(() =>
+    window.hermesAPI.getOwnerModelRouteCatalog(),
+  );
+  const providerBMutation = await deviceB.page.evaluate(
+    async ({ catalog, providerName, baseUrl, apiKey, model }) =>
+      window.hermesAPI.mutateModelConfiguration({
+        intent: "upsert",
+        expectedCatalogRevision: catalog.revision,
+        requestedProfileId: catalog.targetProfileId,
+        provider: "custom",
+        providerLabel: providerName,
+        baseUrl,
+        apiMode: "chat_completions",
+        apiKey,
+        models: [{ model, displayName: model }],
+        activeModel: model,
+      }),
+    {
+      catalog: sourceAccountCatalog,
+      providerName: SECOND_PROVIDER_NAME,
+      baseUrl: secondModelBaseUrl,
+      apiKey: SECOND_PROVIDER_API_KEY,
+      model: SECOND_PROVIDER_MODEL,
+    },
+  );
+  expect(providerBMutation.status).toMatch(/^committed/u);
+  expect(
+    await deviceB.page.evaluate(
+      async ({ profile, provider, model, baseUrl }) => {
+        await window.hermesAPI.setModelConfig(
+          provider,
+          model,
+          baseUrl,
+          profile,
+        );
+        return window.hermesAPI.getModelConfig(profile);
+      },
+      {
+        profile: sourceAccountCatalog.targetProfileId,
+        provider: "openai",
+        model: PRIMARY_MODEL,
+        baseUrl: modelBaseUrl,
+      },
+    ),
+  ).toMatchObject({
+    provider: "openai",
+    model: PRIMARY_MODEL,
+    baseUrl: modelBaseUrl,
+  });
 
   expect(deviceA.userData).not.toBe(deviceB.userData);
   expect(deviceA.hermesHome).not.toBe(deviceB.hermesHome);
@@ -1005,28 +1231,65 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
   );
 
   // A signed legacy fixed policy remains part of the immutable publication
-  // record, but Desktop exposes the complete current-owner catalog and lets
-  // this installed Agent start a new immutable segment with either model.
-  const beforeSwitch = await deviceA.page.evaluate(() =>
+  // record, but Desktop exposes the complete current-owner catalog. Exercise
+  // one isolated Agent Profile through provider A/model A -> provider A/model
+  // B -> provider B/model C so a same-provider-only E2E cannot hide missing
+  // credential/metadata projection into that Profile.
+  const beforeSwitch = await deviceB.page.evaluate(() =>
     window.agenteraGlobalProfile.prepareConversationContext({
-      runId: "device-a-v1",
-      profile: "default",
+      runId: "device-b-v1",
+      profile: "device-b-agent",
     }),
   );
   expect(beforeSwitch.agentConversation).toMatchObject({
     policyMode: "user_select",
     switchDisabledCode: null,
   });
-  expect(
-    beforeSwitch.agentConversation?.catalog.routes.map(({ model }) => model),
-  ).toEqual(expect.arrayContaining([PRIMARY_MODEL, ALTERNATE_MODEL]));
+  const catalogModels =
+    beforeSwitch.agentConversation?.catalog.routes.map(({ model }) => model) ??
+    [];
+  if (!catalogModels.includes(SECOND_PROVIDER_MODEL)) {
+    const [persistedModels, persistedProviders, persistedEnv] =
+      await Promise.all([
+        readFile(join(deviceB.hermesHome, "models.json"), "utf8"),
+        readFile(join(deviceB.hermesHome, "providers.json"), "utf8").catch(
+          () => "<missing>",
+        ),
+        readFile(join(deviceB.hermesHome, ".env"), "utf8").catch(() => ""),
+      ]);
+    throw new Error(
+      `Cross-provider fixture is absent from the owner catalog: ${JSON.stringify(
+        {
+          catalog: beforeSwitch.agentConversation?.catalog,
+          persistedModels: JSON.parse(persistedModels) as unknown,
+          persistedProviders:
+            persistedProviders === "<missing>"
+              ? persistedProviders
+              : (JSON.parse(persistedProviders) as unknown),
+          persistedEnvKeys: persistedEnv
+            .split(/\r?\n/u)
+            .map((line) => line.trim())
+            .filter((line) => line && !line.startsWith("#"))
+            .map((line) => line.split("=", 1)[0]),
+          processOutput: deviceB.processOutput.slice(-16_000),
+        },
+      )}`,
+    );
+  }
+  expect(catalogModels).toEqual(
+    expect.arrayContaining([
+      PRIMARY_MODEL,
+      ALTERNATE_MODEL,
+      SECOND_PROVIDER_MODEL,
+    ]),
+  );
   const alternate = beforeSwitch.agentConversation?.catalog.routes.find(
     ({ model }) => model === ALTERNATE_MODEL,
   );
   expect(alternate).toBeTruthy();
   let switched: { events: Array<{ state: string; to: { model: string } }> };
   try {
-    switched = await deviceA.page.evaluate(
+    switched = await deviceB.page.evaluate(
       async ({ selection }) => {
         const events: Array<{ state: string; to: { model: string } }> = [];
         const dispose = window.hermesAPI.onChatAgentSegment((_runId, event) => {
@@ -1035,12 +1298,12 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
         try {
           await window.hermesAPI.sendMessage(
             "Use the newly selected model for this isolated Agent.",
-            "default",
+            "device-b-agent",
             undefined,
             [],
             undefined,
             undefined,
-            "device-a-v1",
+            "device-b-v1",
             undefined,
             selection,
           );
@@ -1053,7 +1316,7 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
     );
   } catch (error) {
     throw new Error(
-      `Model switch failed: ${error instanceof Error ? error.message : String(error)}; processOutput=${deviceA.processOutput.slice(-12000)}`,
+      `Same-provider model switch failed: ${error instanceof Error ? error.message : String(error)}; processOutput=${deviceB.processOutput.slice(-12000)}`,
     );
   }
   expect(switched.events).toEqual(
@@ -1064,17 +1327,286 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
       }),
     ]),
   );
-  expect(requestedModels).toContain(ALTERNATE_MODEL);
-  const afterSwitch = await deviceA.page.evaluate(() =>
+  expect(requestedModelRoutes).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        provider: "provider-a",
+        model: ALTERNATE_MODEL,
+      }),
+    ]),
+  );
+
+  const beforeProviderSwitch = await deviceB.page.evaluate(() =>
+    window.agenteraGlobalProfile.prepareConversationContext({
+      runId: "device-b-v1",
+      profile: "device-b-agent",
+    }),
+  );
+  const secondProvider =
+    beforeProviderSwitch.agentConversation?.catalog.routes.find(
+      ({ model, baseUrl }) =>
+        model === SECOND_PROVIDER_MODEL && baseUrl === secondModelBaseUrl,
+    );
+  expect(secondProvider).toBeTruthy();
+  expect(secondProvider?.sourceProfileId).toBe(
+    sourceAccountCatalog.targetProfileId,
+  );
+  const bConfigBeforeProviderSwitch = await readFile(
+    join(bProfile, "config.yaml"),
+    "utf8",
+  );
+  const bEnvBeforeProviderSwitch = await readFile(
+    join(bProfile, ".env"),
+    "utf8",
+  );
+  expect(bEnvBeforeProviderSwitch).not.toContain(SECOND_PROVIDER_API_KEY);
+
+  let providerSwitched: {
+    events: Array<{
+      state: string;
+      to: { provider: string; model: string; baseUrl: string };
+    }>;
+  };
+  try {
+    providerSwitched = await deviceB.page.evaluate(
+      async ({ selection }) => {
+        const events: Array<{
+          state: string;
+          to: { provider: string; model: string; baseUrl: string };
+        }> = [];
+        const dispose = window.hermesAPI.onChatAgentSegment((_runId, event) => {
+          events.push(event);
+        });
+        try {
+          await window.hermesAPI.sendMessage(
+            "Switch this isolated Agent to provider B and model C.",
+            "device-b-agent",
+            undefined,
+            [],
+            undefined,
+            undefined,
+            "device-b-v1",
+            undefined,
+            selection,
+          );
+          return { events };
+        } finally {
+          dispose();
+        }
+      },
+      { selection: secondProvider!.selection },
+    );
+  } catch (error) {
+    throw new Error(
+      `Cross-provider model switch failed: ${error instanceof Error ? error.message : String(error)}; processOutput=${deviceB.processOutput.slice(-16000)}`,
+    );
+  }
+  expect(providerSwitched.events).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        state: "active",
+        to: expect.objectContaining({
+          provider: "custom:e2e-provider-b",
+          model: SECOND_PROVIDER_MODEL,
+          baseUrl: secondModelBaseUrl,
+        }),
+      }),
+    ]),
+  );
+  expect(requestedModelRoutes).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        provider: "provider-b",
+        model: SECOND_PROVIDER_MODEL,
+      }),
+    ]),
+  );
+
+  const bConfigAfterProviderSwitch = parseYaml(
+    await readFile(join(bProfile, "config.yaml"), "utf8"),
+  ) as {
+    model?: { provider?: unknown; default?: unknown; base_url?: unknown };
+    providers?: Record<
+      string,
+      {
+        api?: unknown;
+        key_env?: unknown;
+        default_model?: unknown;
+        models?: unknown;
+      }
+    >;
+  };
+  expect(bConfigBeforeProviderSwitch).toContain(`default: ${PRIMARY_MODEL}`);
+  expect(bConfigAfterProviderSwitch.model).toMatchObject({
+    provider: "openai",
+    default: PRIMARY_MODEL,
+    base_url: modelBaseUrl,
+  });
+  expect(
+    bConfigAfterProviderSwitch.providers?.["e2e-provider-b"],
+  ).toMatchObject({
+    api: secondModelBaseUrl,
+    key_env: SECOND_PROVIDER_ENV_KEY,
+  });
+  expect(
+    bConfigAfterProviderSwitch.providers?.["e2e-provider-b"]?.default_model,
+  ).toBeUndefined();
+  expect(
+    bConfigAfterProviderSwitch.providers?.["e2e-provider-b"]?.models,
+  ).toBeUndefined();
+  const projectedProviderCatalog = JSON.parse(
+    await readFile(join(bProfile, "providers.json"), "utf8"),
+  ) as { providers?: Array<{ name?: unknown; baseUrl?: unknown }> };
+  expect(projectedProviderCatalog.providers).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        name: SECOND_PROVIDER_NAME,
+        baseUrl: secondModelBaseUrl,
+      }),
+    ]),
+  );
+  expect(await readFile(join(bProfile, ".env"), "utf8")).toContain(
+    providerCredential.trim(),
+  );
+
+  const afterProviderSwitch = await deviceB.page.evaluate(() =>
+    window.agenteraGlobalProfile.prepareConversationContext({
+      runId: "device-b-v1",
+      profile: "device-b-agent",
+    }),
+  );
+  expect(afterProviderSwitch.agentConversation).toMatchObject({
+    policyMode: "user_select",
+    activeRoute: {
+      provider: "custom:e2e-provider-b",
+      model: SECOND_PROVIDER_MODEL,
+      baseUrl: secondModelBaseUrl,
+    },
+    activeSegmentOrdinal: 3,
+    switchDisabledCode: null,
+  });
+  const localRecordDatabase = new DatabaseSync(
+    join(deviceB.userData, "agentera-control-plane", "control-plane.db"),
+    { readOnly: true },
+  );
+  try {
+    const durableDefinitionVersionInstallationRecords = JSON.stringify([
+      localRecordDatabase
+        .prepare("SELECT * FROM cached_agent_versions WHERE version_id = ?")
+        .get(versionOne.versionId),
+      localRecordDatabase
+        .prepare(
+          `SELECT * FROM local_agent_installations
+           WHERE agent_installation_id = ?`,
+        )
+        .get(bInstallation.id),
+    ]);
+    for (const requestOnlyValue of [
+      SECOND_PROVIDER_MODEL,
+      secondModelBaseUrl,
+      SECOND_PROVIDER_API_KEY,
+    ]) {
+      expect(durableDefinitionVersionInstallationRecords).not.toContain(
+        requestOnlyValue,
+      );
+    }
+  } finally {
+    localRecordDatabase.close();
+  }
+  const unchangedDeviceAConversation = await deviceA.page.evaluate(() =>
     window.agenteraGlobalProfile.prepareConversationContext({
       runId: "device-a-v1",
       profile: "default",
     }),
   );
+  expect(unchangedDeviceAConversation.agentConversation).toMatchObject({
+    activeRoute: { provider: "openai", model: PRIMARY_MODEL },
+    activeSegmentOrdinal: 1,
+  });
+
+  // A provider can reject one request after the Agent/Gateway has already
+  // been running (for example, a revoked static key). The failure must stay
+  // local to that turn: do not restart the bound Gateway, poison its port, or
+  // make the next turn unusable.
+  unauthorizedModelRequests = 1;
+  const failedAuthTurn = await deviceB.page.evaluate(
+    async ({ profile, runId }) => {
+      try {
+        await window.hermesAPI.sendMessage(
+          "Trigger one provider authentication failure.",
+          profile,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          runId,
+        );
+        return { ok: true, error: "" };
+      } catch (error) {
+        return {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    { profile: "device-b-agent", runId: "device-b-v1" },
+  );
+  expect(failedAuthTurn.ok).toBe(false);
+  expect(failedAuthTurn.error).toMatch(
+    /401|authentication|credential|API error/iu,
+  );
+  // Use a fresh non-browser HTTP connection. Renderer fetch carries an Origin
+  // header, while Electron's global fetch pool can reuse a socket that the
+  // preceding SSE response just closed; neither condition proves the Gateway
+  // listener is down.
+  const gatewayPort = await readGatewayPort(deviceB, "device-b-agent");
+  const gatewayHealthAfter401 = await probeGatewayHealth(gatewayPort);
+  expect(
+    gatewayHealthAfter401.status,
+    `${gatewayHealthAfter401.error}\n${await gatewayFailureEvidence(
+      deviceB,
+      "device-b-agent",
+      gatewayPort,
+    )}`,
+  ).toBe(200);
+
+  const recoveredTurn = await deviceB.page.evaluate(
+    async ({ profile, runId }) => {
+      try {
+        const result = await window.hermesAPI.sendMessage(
+          "Continue after the provider authentication failure.",
+          profile,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          runId,
+        );
+        return { ok: true, response: result.response };
+      } catch (error) {
+        return {
+          ok: false,
+          response: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    { profile: "device-b-agent", runId: "device-b-v1" },
+  );
+  expect(recoveredTurn.ok).toBe(true);
+  expect(recoveredTurn.response).toContain("MODEL_CHOICE_OK");
+  const afterSwitch = await deviceB.page.evaluate(() =>
+    window.agenteraGlobalProfile.prepareConversationContext({
+      runId: "device-b-v1",
+      profile: "device-b-agent",
+    }),
+  );
   expect(afterSwitch.agentConversation).toMatchObject({
     policyMode: "user_select",
-    activeRoute: { model: ALTERNATE_MODEL },
-    activeSegmentOrdinal: 2,
+    activeRoute: {
+      provider: "custom:e2e-provider-b",
+      model: SECOND_PROVIDER_MODEL,
+    },
+    activeSegmentOrdinal: 3,
     switchDisabledCode: null,
   });
 
@@ -1134,13 +1666,20 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
       )}; process=${JSON.stringify(deviceProcessDiagnostics(deviceB))}`,
     );
   }
-  const oldBinding = (await localAgentControlState(deviceB)).bindings[0];
-  expect(oldBinding.agentVersionId).toBe(versionOne.versionId);
+  const oldBindings = await localAgentControlState(deviceB);
+  const oldBinding = oldBindings.bindings.find(
+    (binding) => binding.conversationKey === "device-b-v1",
+  );
+  expect(oldBinding).toMatchObject({
+    agentVersionId: versionOne.versionId,
+    agentInstallationId: bInstallation.id,
+  });
   await startBoundConversation(deviceB, "device-b-agent", "device-b-v2");
   await expect
     .poll(async () => (await localAgentControlState(deviceB)).bindings.length)
-    .toBe(2);
+    .toBe(4);
   const bUpdated = await localAgentControlState(deviceB);
+  expect(bUpdated.bindings).toHaveLength(4);
   expect(
     bUpdated.bindings.find(
       (binding) => binding.conversationKey === "device-b-v2",
@@ -1151,6 +1690,19 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
       (binding) => binding.conversationKey === "device-b-v1",
     )?.agentVersionId,
   ).toBe(versionOne.versionId);
+  const switchBindings = bUpdated.bindings.filter((binding) =>
+    binding.conversationKey.startsWith("aera-segment:"),
+  );
+  expect(switchBindings).toHaveLength(2);
+  expect(
+    switchBindings.every(
+      (binding) =>
+        binding.agentVersionId === versionOne.versionId &&
+        binding.agentInstallationId === bInstallation.id &&
+        binding.runtimeProfileId === bInstallation.runtimeProfileId,
+    ),
+  ).toBe(true);
+  expect(new Set(bUpdated.bindings.map((binding) => binding.id)).size).toBe(4);
 
   failNextAgentControlRequest(
     harness,
@@ -1186,10 +1738,10 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
       // Device C is a third device in this recovery scenario; its recovered
       // installation is intentionally included in the shared Cloud count.
       installations: 3,
-      // The model switch is an immutable Agent segment transition, so it
-      // creates one additional sanitized Runtime binding while preserving
-      // the original segment bindings for both devices.
-      runtimeBindings: 4,
+      // The two model switches are immutable Agent segment transitions, so
+      // they create two additional sanitized Runtime bindings while
+      // preserving the original segment bindings for both devices.
+      runtimeBindings: 5,
     });
 
   const requests = agentControlRequests(harness);
@@ -1210,6 +1762,9 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
     "filePath",
     "curator/state.json",
     "sessions/authoring.json",
+    SECOND_PROVIDER_API_KEY,
+    SECOND_PROVIDER_MODEL,
+    secondModelBaseUrl,
   ]) {
     expect(captured).not.toContain(forbidden);
   }

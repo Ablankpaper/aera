@@ -1963,6 +1963,107 @@ describe("AgentControlPanel", () => {
     });
   });
 
+  it("opens an already configured active Agent without repairing the global model", async () => {
+    const activeInstallation = installation("active");
+    const api = installAPI({
+      listInstallations: vi.fn(async () => success([activeInstallation])),
+    });
+    const onChatWithProfile = vi.fn();
+    render(
+      <AgentControlPanel
+        profiles={[
+          {
+            id: "installed-agent",
+            name: "Research Agent",
+            provider: "custom:petoi",
+            model: "gpt-5.6-sol",
+            agentInstallationId: INSTALLATION_ID,
+          },
+          configuredModelProfile(),
+        ]}
+        modelProfileId="configured-source"
+        onChatWithProfile={onChatWithProfile}
+      />,
+    );
+
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    const detailDialog = screen.getByRole("dialog", {
+      name: "Research Agent",
+    });
+    fireEvent.click(
+      within(detailDialog).getByRole("button", {
+        name: "agents.hub.useAgent",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(onChatWithProfile).toHaveBeenCalledWith("installed-agent"),
+    );
+    expect(api.repairInstallationModel).not.toHaveBeenCalled();
+  });
+
+  it("keeps an active user's Agent model when selecting a new published version", async () => {
+    const activeInstallation = installation("active");
+    const updatedInstallation = {
+      ...activeInstallation,
+      selectedVersionId: NEXT_VERSION_ID,
+    };
+    const api = installAPI({
+      listDefinitions: vi.fn(async () =>
+        success([{ ...definition(), latestVersionId: NEXT_VERSION_ID }]),
+      ),
+      listInstallations: vi.fn(async () => success([activeInstallation])),
+      selectInstallationVersion: vi.fn(async () =>
+        success(updatedInstallation),
+      ),
+      repairInstallationModel: vi.fn(async () => success(updatedInstallation)),
+    });
+    const onChatWithProfile = vi.fn();
+    render(
+      <AgentControlPanel
+        profiles={[
+          {
+            id: "installed-agent",
+            name: "Research Agent",
+            provider: "custom:petoi",
+            model: "gpt-5.6-sol",
+            agentInstallationId: INSTALLATION_ID,
+          },
+          configuredModelProfile(),
+        ]}
+        modelProfileId="configured-source"
+        onChatWithProfile={onChatWithProfile}
+      />,
+    );
+
+    fireEvent.click(
+      (await screen.findByText("Research Agent")).closest("button")!,
+    );
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Research Agent" })).getByRole(
+        "button",
+        { name: "agents.hub.useAgent" },
+      ),
+    );
+
+    await waitFor(() =>
+      expect(api.selectInstallationVersion).toHaveBeenCalled(),
+    );
+    expect(api.repairInstallationModel).toHaveBeenCalledWith(
+      {
+        id: INSTALLATION_ID,
+        localProfileId: "installed-agent",
+        modelProfileId: "installed-agent",
+      },
+      undefined,
+    );
+    expect(onChatWithProfile).toHaveBeenCalledWith("installed-agent", {
+      forceNewRun: true,
+    });
+  });
+
   it("revalidates an active shared Agent with the model chosen for this new run", async () => {
     const context: AgenteraAgentControlPublicState["context"] = {
       scope: "ORGANIZATION",
@@ -2264,7 +2365,7 @@ describe("AgentControlPanel", () => {
     });
   });
 
-  it("re-seeds a configured Runtime Profile after selecting a newly published model route", async () => {
+  it("keeps a configured Runtime Profile route when selecting a new published version", async () => {
     const oldInstallation = installation("active");
     const updatedInstallation = {
       ...oldInstallation,
@@ -2343,7 +2444,7 @@ describe("AgentControlPanel", () => {
       {
         id: INSTALLATION_ID,
         localProfileId: "installed-agent",
-        modelProfileId: "configured-source",
+        modelProfileId: "installed-agent",
       },
       undefined,
     );

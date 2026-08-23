@@ -56,6 +56,9 @@ vi.mock("./utils", () => ({
 vi.mock("./gateway-ports", () => ({
   ensureProfilePortAvailable: vi.fn(async () => 8642),
   getProfilePort: vi.fn(() => 8642),
+  canBindLoopbackPort: vi.fn(async () => true),
+  isLoopbackPortAccepting: vi.fn(async () => false),
+  isLoopbackPortReleased: vi.fn(async () => true),
 }));
 vi.mock("./models", () => ({ readModels: vi.fn(() => []) }));
 vi.mock("./secrets", () => ({ providerListSafe: vi.fn(() => ({})) }));
@@ -76,6 +79,7 @@ import { providerListSafe } from "./secrets";
 import {
   buildAgentModelRequestBody,
   buildAgentModelTransportRoute,
+  prepareBoundAgentCapabilities,
   assertHermesAgentModelRouteSupported,
   assertHermesAgentToolPolicySupported,
   conversationSystemMessage,
@@ -85,6 +89,7 @@ import {
   supportsHermesAgentToolPolicy,
   shouldProbeAgentModelTransport,
   shouldFallbackFromEmptyRunCompletion,
+  classifyChatErrorRecovery,
   shouldForceCliForSessionOverride,
   stopHealthPolling,
   transcribeAudio,
@@ -143,14 +148,16 @@ describe("installed-Agent model transport route", () => {
     disableTransportReplay: true,
   };
 
-  it("copies the candidate provider, endpoint, API mode, and credential into the internal request route", () => {
+  it("copies only non-secret route fields into the internal request route", () => {
     expect(buildAgentModelTransportRoute(execution)).toEqual({
       provider: "custom:petoi",
       model: "gpt-5.6-sol",
       base_url: "https://api.petoi.cn/v1",
       api_mode: "codex_responses",
-      api_key: "petoi-secret-value",
     });
+    expect(buildAgentModelTransportRoute(execution)).not.toHaveProperty(
+      "api_key",
+    );
   });
 
   it("requires an explicit Runtime capability before sending a dynamic route", () => {
@@ -188,9 +195,9 @@ describe("installed-Agent model transport route", () => {
         model: "gpt-5.6-sol",
         base_url: "https://api.petoi.cn/v1",
         api_mode: "codex_responses",
-        api_key: "petoi-secret-value",
       },
     });
+    expect(JSON.stringify(body)).not.toContain("petoi-secret-value");
     expect(JSON.stringify(body)).not.toContain("credentialRef");
   });
 
@@ -263,6 +270,65 @@ describe("installed-Agent model transport route", () => {
         denied: ["image_generate"],
       },
     });
+  });
+});
+
+describe("bound Agent Runtime capability readiness", () => {
+  const capabilities = {
+    features: {
+      request_tool_policy: true,
+      request_model_route: true,
+    },
+    endpoints: {
+      chat_completions: { path: "/v1/chat/completions" },
+    },
+  };
+
+  it("starts the bound Gateway before probing request-scoped capabilities", async () => {
+    const events: string[] = [];
+    await expect(
+      prepareBoundAgentCapabilities("agent-a", {
+        ensureReady: async () => {
+          events.push("gateway-ready");
+          return true;
+        },
+        getCapabilities: async () => {
+          events.push("capabilities");
+          return capabilities;
+        },
+      }),
+    ).resolves.toEqual(capabilities);
+    expect(events).toEqual(["gateway-ready", "capabilities"]);
+  });
+
+  it("does not probe capabilities when the bound Gateway cannot become ready", async () => {
+    const getCapabilities = vi.fn(async () => capabilities);
+    await expect(
+      prepareBoundAgentCapabilities("agent-a", {
+        ensureReady: async () => false,
+        getCapabilities,
+      }),
+    ).rejects.toMatchObject({ code: "bound_runtime_unavailable" });
+    expect(getCapabilities).not.toHaveBeenCalled();
+  });
+});
+
+describe("Provider authentication error recovery", () => {
+  it("does not recover or replay a Gateway after a stable provider auth rejection", () => {
+    expect(
+      classifyChatErrorRecovery(
+        "provider_authentication_rejected: The model provider rejected the current credential.",
+      ),
+    ).toBe("report_only");
+  });
+
+  it("keeps transport failures retryable and other failures restartable", () => {
+    expect(
+      classifyChatErrorRecovery("API request failed: connect ECONNRESET"),
+    ).toBe("retry_transport");
+    expect(classifyChatErrorRecovery("API server returned 502: unavailable")).toBe(
+      "restart_gateway",
+    );
   });
 });
 

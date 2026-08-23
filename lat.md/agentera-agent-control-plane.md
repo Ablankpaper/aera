@@ -592,4 +592,6 @@ The end-to-end gate exercises one USER account through two physically isolated l
 
 [[tests/e2e/agentera-agent-control.e2e.ts]] launches two isolated Electron devices against a real local PostgreSQL/Redis-backed cloud. It proves draft-zero-cloud behavior, v1 publish and distinct installation, A-only Memory/Skill learning, v2 manual selection, old-conversation v1 stability, new-conversation v2 binding, sanitized requests, failure non-destruction, and absence of `/api/agents` calls.
 
+The route-switch portion intentionally creates four local Device B RuntimeBindings: the original `device-b-v1` binding, two immutable model-switch segments, and the post-update `device-b-v2` binding. Device A's original binding makes the corresponding sanitized Cloud total five; these are distinct conversation keys, not duplicate rows.
+
 The executable gate is `npm run test:e2e:agent-control`; contract drift is blocked by `npm run check:agentera-cloud-contract`. The test harness owns and removes only its temporary userData, `HERMES_HOME`, device keys, Runtime Seed copy, cloud process, containers, and database volume.

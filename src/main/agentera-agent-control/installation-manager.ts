@@ -238,6 +238,7 @@ export interface AgentInstallationProfileAdapter {
     version: AgentVersion;
     policy: AgentPolicySnapshot;
     sourceModelId?: string;
+    activateDefault?: boolean;
   }) => void | Promise<void>;
 }
 

@@ -87,6 +87,11 @@ vi.mock("../src/main/gateway-managed-config", () => ({
   prepareGatewayManagedConfiguration: prepareGatewayManagedConfigurationSpy,
 }));
 
+vi.mock("../src/main/gateway-ports", () => ({
+  getProfilePort: vi.fn(() => 8642),
+  isLoopbackPortReleased: vi.fn(async () => true),
+}));
+
 vi.mock("../src/main/ssh-tunnel", () => ({
   getSshTunnelUrl: () => null,
   isSshTunnelActive: () => false,
@@ -892,7 +897,10 @@ describe("restartGatewayViaCli", () => {
     await expect(isGatewayHealthy("work")).resolves.toBe(true);
 
     expect(healthRequests.at(-1)).toEqual({
-      headers: { Authorization: "Bearer unit-test-internal-token" },
+      headers: {
+        Authorization: "Bearer unit-test-internal-token",
+        Connection: "close",
+      },
       url: expect.stringMatching(/\/v1\/capabilities$/),
     });
   });

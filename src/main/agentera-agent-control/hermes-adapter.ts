@@ -105,10 +105,19 @@ export interface AgenteraHermesAdapterOptions {
     policy: AgentPolicySnapshot,
   ) => string | Promise<string>;
   getProfileModelConfig: (profilePath: string) => SessionModelOverride;
+  getLocalProfileId: (profilePath: string) => string;
   resolveCurrentModelRoute?: (
     sourceProfileId: string,
     modelLibraryId: string,
   ) => ResolvedOwnerModelRoute | null;
+  projectModelRoute: (input: {
+    sourceProfileId: string;
+    sourceModelId: string;
+    targetProfileId: string;
+    version: AgentVersion;
+    policy: AgentPolicySnapshot;
+    activateDefault: false;
+  }) => Promise<void>;
   getProfileMcpCapabilities: (
     profilePath: string,
   ) => LocalMcpCapabilityServer[] | Promise<LocalMcpCapabilityServer[]>;
@@ -797,6 +806,17 @@ export class AgenteraHermesAdapter {
           decision.reason ?? "model_policy_drift",
         );
       }
+    }
+
+    if (input.requestedModelRoute && (!existing || changesExistingRoute)) {
+      await this.options.projectModelRoute({
+        sourceProfileId: input.requestedModelRoute.sourceProfileId,
+        sourceModelId: input.requestedModelRoute.modelLibraryId,
+        targetProfileId: this.options.getLocalProfileId(input.profilePath),
+        version,
+        policy,
+        activateDefault: false,
+      });
     }
 
     let projection: HermesVersionProjection;

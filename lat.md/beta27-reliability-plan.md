@@ -212,6 +212,13 @@ A dynamic provider or endpoint switch is admitted only when the connected Runtim
 
 [[src/main/hermes.ts#supportsHermesAgentModelRoute]] requires both `features.request_model_route=true` and the canonical `/v1/chat/completions` endpoint. [[src/main/hermes.ts#sendMessage]] rejects an unsupported dynamic route before serializing `aera_model_route`, while an already configured frozen route stays on the ordinary bound transport.
 
+The request route is intentionally secretless: only provider, model, base URL,
+and API mode cross the Desktop/Runtime request boundary. Runtime resolves
+credentials inside the target Profile and fails closed rather than borrowing a
+process-global credential. OAuth recovery is bounded to one attempt; a static
+API-key 401 is reported as `provider_authentication_rejected` without Gateway
+restart or turn replay, including after visible output or tool side effects.
+
 ## Acceptance and release boundary
 
 The planned gate uses fresh Electron/Hermes roots, fixture Cloud state, and two loopback providers to cover save/restart, catalog consistency, A-to-B switching, policy modes, attachments, remote failure, and one Organization conflict.

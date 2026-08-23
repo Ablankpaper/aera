@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   chatToolEventFromRunEvent,
   parseRunSseBlock,
+  runFailureCode,
+  shouldFallbackFromRunFailure,
   runCompletedUsage,
   runEventReasoningText,
   supportsHermesRunsTransport,
@@ -61,6 +63,31 @@ describe("supportsHermesRunsTransport", () => {
 });
 
 describe("run stream event mapping", () => {
+  // @lat: [[model-selection#Request-scoped Agent authentication boundary]]
+  it("accepts only the bounded provider authentication failure code", () => {
+    expect(
+      runFailureCode({
+        event: "run.failed",
+        error_code: "provider_authentication_rejected",
+      }),
+    ).toBe("provider_authentication_rejected");
+    expect(
+      runFailureCode({
+        event: "run.failed",
+        error_code: "some-arbitrary-provider-error",
+      }),
+    ).toBe("");
+    expect(
+      shouldFallbackFromRunFailure(
+        { event: "run.failed", error_code: "provider_authentication_rejected" },
+        false,
+      ),
+    ).toBe(false);
+    expect(shouldFallbackFromRunFailure({ event: "run.failed" }, false)).toBe(
+      true,
+    );
+  });
+
   it("maps reasoning events to reasoning text", () => {
     expect(
       runEventReasoningText({

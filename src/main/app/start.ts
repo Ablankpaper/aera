@@ -566,6 +566,16 @@ export async function startMainProcess(
       getRuntimeVersion: async () => {
         const invocationVersion = getRuntimeInvocation()?.version;
         if (invocationVersion) return invocationVersion;
+        // Local source-backed Runtime E2E intentionally selects the external
+        // invocation, whose version is not part of the external compatibility
+        // contract. Keep the test-only version explicit so publication and
+        // installation paths can still exercise their real runtime checks;
+        // packaged builds never honor this escape hatch.
+        if (!app.isPackaged) {
+          const e2eRuntimeVersion =
+            process.env.AGENTERA_E2E_RUNTIME_VERSION?.trim();
+          if (e2eRuntimeVersion) return e2eRuntimeVersion;
+        }
         const state = await runtimeDistribution?.getState();
         if (!state?.currentVersion) {
           throw new Error("Aera Runtime version is unavailable.");
