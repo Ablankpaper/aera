@@ -1,11 +1,12 @@
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
   waitFor,
 } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AgentDraftDetail,
   AgenteraAgentControlResult,
@@ -129,6 +130,14 @@ function installAPI(
 }
 
 describe("AgentDraftEditor", () => {
+  afterEach(async () => {
+    // Radix FocusScope defers its unmount autofocus event with setTimeout(0).
+    // Drain it before Vitest replaces this jsdom realm so the old element and
+    // its CustomEvent always use the same Event implementation.
+    cleanup();
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
     Reflect.deleteProperty(window, "hermesAPI");

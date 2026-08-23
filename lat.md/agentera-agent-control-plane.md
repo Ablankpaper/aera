@@ -202,7 +202,7 @@ The renderer keeps promotion, review, draft import, and publication as separate 
 
 [[src/renderer/src/screens/Agents/ExperiencePromotionDialog.tsx#ExperiencePromotionDialog]] exposes preparation and upload as separate user actions. It renders eligible names and safe preview metadata but never receives a Profile path, source path, Workspace ID, owner tuple, bundle bytes, DLP override, or cloud origin. Offline preparation remains available; upload failure remains an explicit manual retry with no background timer.
 
-Its renderer test drains Radix FocusScope's deferred unmount event before Vitest replaces the jsdom realm, preventing a cross-realm `CustomEvent` failure without changing the dialog's product behavior.
+Its renderer tests, including the draft editor that shares the same modal shell, drain Radix FocusScope's deferred unmount event before Vitest replaces the jsdom realm. This prevents cross-realm `CustomEvent` failures without changing product behavior.
 
 [[src/renderer/src/screens/Agents/ExperienceCandidatePanel.tsx#ExperienceCandidatePanel]] calls the own-status list for every Workspace role and does not call review-list or review-detail methods for Member. [[src/renderer/src/screens/Agents/ExperienceReviewDialog.tsx#ExperienceReviewDialog]] commits a bounded terminal decision before requesting an approved import preview, confirms same-name replacement, refreshes a stale base without a draft mutation, and passes only the returned draft to the existing editor.
 
