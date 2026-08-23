@@ -277,6 +277,345 @@ describe("Agent Profile model seeding", () => {
     expect(plan.newRouteKey).toBeUndefined();
   });
 
+  it("projects an OpenAI-compatible third-party endpoint with a dedicated Profile credential reference", async () => {
+    const deps = dependencies();
+    if (!deps.modelMutationPort) throw new Error("missing mutation port");
+    const mutate = vi.spyOn(deps.modelMutationPort, "mutate");
+    deps.getModelConfig.mockReturnValue({
+      provider: "openai",
+      model: "source-default",
+      baseUrl: "https://api.openai.com/v1",
+    });
+    deps.readModels.mockReturnValue([
+      {
+        id: "third-party-openai-model",
+        name: "gpt-5.6-sol",
+        provider: "openai",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://api.petoi.cn/v1",
+        apiMode: "chat_completions",
+        createdAt: 1,
+      },
+    ]);
+    deps.listCustomProviders.mockReturnValue([]);
+    deps.getSecret.mockImplementation((key) => {
+      if (key === "PETOI_API_KEY") return "source-route-key";
+      if (key === "OPENAI_API_KEY") return "must-not-copy-global-openai";
+      return null;
+    });
+
+    await seedAgentModelProfile(
+      {
+        sourceProfileId: "source-profile",
+        sourceModelId: "third-party-openai-model",
+        targetProfileId: "target-profile",
+        version: versionV2("user_select"),
+        policy: policyV2("user_select"),
+        activateDefault: false,
+      },
+      deps,
+    );
+
+    expect(deps.setEnvValue).toHaveBeenCalledTimes(1);
+    const [credentialRef, credential, profileId] =
+      deps.setEnvValue.mock.calls[0];
+    expect(credentialRef).toMatch(
+      /^CUSTOM_PROVIDER_AERA_ROUTE_API_PETOI_CN_[A-F0-9]{12}_KEY$/,
+    );
+    expect(credentialRef).not.toBe("OPENAI_API_KEY");
+    expect(credential).toBe("source-route-key");
+    expect(profileId).toBe("target-profile");
+    expect(deps.upsertCustomProvider).toHaveBeenCalledWith(
+      "target-profile",
+      expect.objectContaining({
+        name: expect.stringMatching(/^aera-route-api\.petoi\.cn-[a-f0-9]{12}$/),
+        baseUrl: "https://api.petoi.cn/v1",
+      }),
+    );
+    expect(deps.upsertNativeCustomProvider).toHaveBeenCalledWith(
+      "target-profile",
+      {
+        name: expect.stringMatching(/^aera-route-api\.petoi\.cn-[a-f0-9]{12}$/),
+        baseUrl: "https://api.petoi.cn/v1",
+        apiMode: "chat_completions",
+      },
+    );
+    expect(deps.setModelConfig).not.toHaveBeenCalled();
+    const plan = await mutate.mock.calls[0][0].prepare();
+    expect(plan.newRouteKey).toBeUndefined();
+    expect(deps.getSecret).not.toHaveBeenCalledWith(
+      "OPENAI_API_KEY",
+      expect.anything(),
+    );
+  });
+
+  it("activates a third-party OpenAI-compatible endpoint through its dedicated named provider", async () => {
+    const deps = dependencies();
+    if (!deps.modelMutationPort) throw new Error("missing mutation port");
+    const mutate = vi.spyOn(deps.modelMutationPort, "mutate");
+    deps.getModelConfig.mockReturnValue({
+      provider: "openai",
+      model: "source-default",
+      baseUrl: "https://api.openai.com/v1",
+    });
+    deps.readModels.mockReturnValue([
+      {
+        id: "third-party-openai-model",
+        name: "gpt-5.6-sol",
+        provider: "openai",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://api.petoi.cn/v1",
+        apiMode: "chat_completions",
+        createdAt: 1,
+      },
+    ]);
+    deps.listCustomProviders.mockReturnValue([]);
+    deps.getSecret.mockImplementation((key) =>
+      key === "PETOI_API_KEY" ? "source-route-key" : null,
+    );
+
+    await seedAgentModelProfile(
+      {
+        sourceProfileId: "source-profile",
+        sourceModelId: "third-party-openai-model",
+        targetProfileId: "target-profile",
+        version: versionV2("user_select"),
+        policy: policyV2("user_select"),
+      },
+      deps,
+    );
+
+    expect(deps.setModelConfig).toHaveBeenCalledWith(
+      expect.stringMatching(/^custom:aera-route-api\.petoi\.cn-[a-f0-9]{12}$/),
+      "gpt-5.6-sol",
+      "https://api.petoi.cn/v1",
+      "target-profile",
+      undefined,
+      "chat_completions",
+    );
+    const plan = await mutate.mock.calls[0][0].prepare();
+    expect(plan.newRouteKey?.split("\0")[1]).toMatch(
+      /^custom:aera-route-api\.petoi\.cn-[a-f0-9]{12}$/,
+    );
+  });
+
+  it("rejects an ambiguous third-party endpoint before choosing one provider credential", async () => {
+    const deps = dependencies();
+    deps.getModelConfig.mockReturnValue({
+      provider: "openai",
+      model: "source-default",
+      baseUrl: "https://api.openai.com/v1",
+    });
+    deps.readModels.mockReturnValue([
+      {
+        id: "ambiguous-third-party-model",
+        name: "shared-model",
+        provider: "openai",
+        model: "shared-model",
+        baseUrl: "https://shared-relay.example/v1",
+        apiMode: "chat_completions",
+        createdAt: 1,
+      },
+    ]);
+    deps.listCustomProviders.mockReturnValue([
+      {
+        id: "relay-a",
+        name: "Relay A",
+        baseUrl: "https://shared-relay.example/v1",
+        createdAt: 1,
+      },
+      {
+        id: "relay-b",
+        name: "Relay B",
+        baseUrl: "https://shared-relay.example/v1",
+        createdAt: 2,
+      },
+    ]);
+
+    await expect(
+      seedAgentModelProfile(
+        {
+          sourceProfileId: "source-profile",
+          sourceModelId: "ambiguous-third-party-model",
+          targetProfileId: "target-profile",
+          version: versionV2("user_select"),
+          policy: policyV2("user_select"),
+          activateDefault: false,
+        },
+        deps,
+      ),
+    ).rejects.toThrow(/ambiguous/i);
+
+    expect(deps.getSecret).not.toHaveBeenCalled();
+    expect(deps.setEnvValue).not.toHaveBeenCalled();
+    expect(deps.upsertNativeCustomProvider).not.toHaveBeenCalled();
+  });
+
+  it("uses an existing exact endpoint provider credential instead of the global OpenAI key", async () => {
+    const deps = dependencies();
+    deps.getModelConfig.mockReturnValue({
+      provider: "openai",
+      model: "source-default",
+      baseUrl: "https://api.openai.com/v1",
+    });
+    deps.readModels.mockReturnValue([
+      {
+        id: "third-party-openai-model",
+        name: "gpt-5.6-sol",
+        provider: "openai",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://relay.example/v1",
+        apiMode: "chat_completions",
+        createdAt: 1,
+      },
+    ]);
+    deps.listCustomProviders.mockReturnValue([
+      {
+        id: "relay-provider",
+        name: "Relay Example",
+        baseUrl: "https://relay.example/v1",
+        createdAt: 1,
+      },
+    ]);
+    deps.getSecret.mockImplementation((key) => {
+      if (key === "CUSTOM_PROVIDER_RELAY_EXAMPLE_KEY") {
+        return "exact-relay-key";
+      }
+      if (key === "OPENAI_API_KEY") return "must-not-copy-global-openai";
+      return null;
+    });
+
+    await seedAgentModelProfile(
+      {
+        sourceProfileId: "source-profile",
+        sourceModelId: "third-party-openai-model",
+        targetProfileId: "target-profile",
+        version: versionV2("user_select"),
+        policy: policyV2("user_select"),
+        activateDefault: false,
+      },
+      deps,
+    );
+
+    expect(deps.getSecret).toHaveBeenCalledWith(
+      "CUSTOM_PROVIDER_RELAY_EXAMPLE_KEY",
+      "source-profile",
+    );
+    expect(deps.getSecret).not.toHaveBeenCalledWith(
+      "OPENAI_API_KEY",
+      expect.anything(),
+    );
+    expect(deps.setEnvValue).toHaveBeenCalledWith(
+      "CUSTOM_PROVIDER_RELAY_EXAMPLE_KEY",
+      "exact-relay-key",
+      "target-profile",
+    );
+    expect(deps.setModelConfig).not.toHaveBeenCalled();
+  });
+
+  it("repairs an in-place legacy OpenAI-compatible endpoint without changing its default route", async () => {
+    const deps = dependencies();
+    deps.getModelConfig.mockReturnValue({
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      baseUrl: "https://api.petoi.cn/v1",
+    });
+    deps.readModels.mockReturnValue([
+      {
+        id: "legacy-agent-profile-model",
+        name: "gpt-5.6-sol",
+        provider: "openai",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://api.petoi.cn/v1",
+        apiMode: "chat_completions",
+        createdAt: 1,
+      },
+    ]);
+    deps.listCustomProviders.mockReturnValue([]);
+    deps.getSecret.mockImplementation((key) => {
+      if (key === "PETOI_API_KEY") return "legacy-agent-profile-key";
+      if (key === "OPENAI_API_KEY") return "must-not-copy-global-openai";
+      return null;
+    });
+
+    await seedAgentModelProfile(
+      {
+        sourceProfileId: "installed-agent",
+        sourceModelId: "legacy-agent-profile-model",
+        targetProfileId: "installed-agent",
+        version: versionV2("user_select"),
+        policy: policyV2("user_select"),
+        activateDefault: false,
+      },
+      deps,
+    );
+
+    expect(deps.upsertNativeCustomProvider).toHaveBeenCalledWith(
+      "installed-agent",
+      expect.objectContaining({
+        name: expect.stringMatching(/^aera-route-api\.petoi\.cn-/),
+        baseUrl: "https://api.petoi.cn/v1",
+      }),
+    );
+    expect(deps.setEnvValue).toHaveBeenCalledWith(
+      expect.stringMatching(/^CUSTOM_PROVIDER_AERA_ROUTE_API_PETOI_CN_/),
+      "legacy-agent-profile-key",
+      "installed-agent",
+    );
+    expect(deps.setModelConfig).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for an unknown third-party endpoint instead of copying a global OpenAI key", async () => {
+    const deps = dependencies();
+    deps.getModelConfig.mockReturnValue({
+      provider: "openai",
+      model: "source-default",
+      baseUrl: "https://api.openai.com/v1",
+    });
+    deps.readModels.mockReturnValue([
+      {
+        id: "unknown-third-party-model",
+        name: "gpt-compatible-model",
+        provider: "openai",
+        model: "gpt-compatible-model",
+        baseUrl: "https://unknown-relay.example/v1",
+        apiMode: "chat_completions",
+        createdAt: 1,
+      },
+    ]);
+    deps.listCustomProviders.mockReturnValue([]);
+    deps.getSecret.mockImplementation((key) => {
+      if (key === "OPENAI_API_KEY") return "global-openai-secret";
+      if (key === "CUSTOM_API_KEY") return "ambiguous-custom-secret";
+      return null;
+    });
+
+    await expect(
+      seedAgentModelProfile(
+        {
+          sourceProfileId: "source-profile",
+          sourceModelId: "unknown-third-party-model",
+          targetProfileId: "target-profile",
+          version: versionV2("user_select"),
+          policy: policyV2("user_select"),
+          activateDefault: false,
+        },
+        deps,
+      ),
+    ).rejects.toThrow(/credential is unavailable/i);
+
+    expect(deps.getSecret).not.toHaveBeenCalledWith(
+      "OPENAI_API_KEY",
+      expect.anything(),
+    );
+    expect(deps.getSecret).not.toHaveBeenCalledWith(
+      "CUSTOM_API_KEY",
+      expect.anything(),
+    );
+    expect(deps.setEnvValue).not.toHaveBeenCalled();
+    expect(deps.upsertNativeCustomProvider).not.toHaveBeenCalled();
+  });
+
   it("rejects a legacy custom model row that has no provider identity", async () => {
     const deps = dependencies();
     deps.readModels.mockReturnValue([

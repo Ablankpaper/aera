@@ -74,6 +74,12 @@ let secondModelBaseUrl = "";
 const requestedModelRoutes: Array<{
   provider: string;
   model: string;
+  credentialAccepted: boolean;
+}> = [];
+const modelServerRequests: Array<{
+  provider: string;
+  method: string;
+  path: string;
 }> = [];
 let unauthorizedModelRequests = 0;
 
@@ -194,10 +200,19 @@ async function probeGatewayHealth(port: number): Promise<{
 async function startModelServer(
   provider: string,
   models: readonly string[],
+  options: {
+    expectedApiKey?: string;
+    strictRequestRoute?: boolean;
+  } = {},
 ): Promise<string> {
   const modelServer = createServer((request, response) => {
     void (async () => {
       const url = new URL(request.url || "/", "http://127.0.0.1");
+      modelServerRequests.push({
+        provider,
+        method: request.method || "",
+        path: url.pathname,
+      });
       if (request.method === "GET" && url.pathname === "/v1/models") {
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
@@ -223,7 +238,22 @@ async function startModelServer(
       const payload = JSON.parse(body) as { model?: unknown; stream?: unknown };
       const model =
         typeof payload.model === "string" ? payload.model : models[0];
-      requestedModelRoutes.push({ provider, model });
+      const credentialAccepted = options.expectedApiKey
+        ? request.headers.authorization === `Bearer ${options.expectedApiKey}`
+        : true;
+      requestedModelRoutes.push({ provider, model, credentialAccepted });
+      if (!credentialAccepted) {
+        response.writeHead(401, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            error: {
+              message: "Invalid API key",
+              type: "authentication_error",
+            },
+          }),
+        );
+        return;
+      }
       if (unauthorizedModelRequests > 0) {
         unauthorizedModelRequests -= 1;
         response.writeHead(401, { "content-type": "application/json" });
@@ -290,11 +320,21 @@ async function startModelServer(
   });
   await new Promise<void>((resolveListen, rejectListen) => {
     modelServer.once("error", rejectListen);
-    modelServer.listen(0, "127.0.0.1", () => resolveListen());
+    modelServer.listen(0, options.strictRequestRoute ? "::" : "127.0.0.1", () =>
+      resolveListen(),
+    );
   });
   modelServers.push(modelServer);
   const address = modelServer.address() as AddressInfo;
-  return `http://127.0.0.1:${address.port}/v1`;
+  // IPv6-mapped loopback reaches the run-owned local server, but neither
+  // Desktop nor Runtime classifies it as a no-key loopback shortcut. Provider
+  // B therefore exercises the real secretless request route: Main projects a
+  // named Provider and its dedicated key into the isolated Agent Profile,
+  // then Runtime resolves that Profile-local key from the four public route
+  // fields. No public DNS or live provider is required.
+  return options.strictRequestRoute
+    ? `http://[::ffff:7f00:1]:${address.port}/v1`
+    : `http://127.0.0.1:${address.port}/v1`;
 }
 
 function unwrap<T>(result: AgenteraAgentControlResult<T>): T {
@@ -594,7 +634,10 @@ async function writeDeviceALearning(profilePath: string): Promise<void> {
 test.beforeAll(async () => {
   [modelBaseUrl, secondModelBaseUrl] = await Promise.all([
     startModelServer("provider-a", [PRIMARY_MODEL, ALTERNATE_MODEL]),
-    startModelServer("provider-b", [SECOND_PROVIDER_MODEL]),
+    startModelServer("provider-b", [SECOND_PROVIDER_MODEL], {
+      expectedApiKey: SECOND_PROVIDER_API_KEY,
+      strictRequestRoute: true,
+    }),
   ]);
   harness = await createAgentControlHarness({ emptyDevices: ["C"] });
   harness.deviceRoots.C.hermesHome = join(harness.root, "device-c", ".hermes");
@@ -614,6 +657,7 @@ test.afterAll(async () => {
       ),
   );
   requestedModelRoutes.splice(0);
+  modelServerRequests.splice(0);
   unauthorizedModelRequests = 0;
   harness = null;
   deviceA = null;
@@ -753,7 +797,16 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
     "林二",
   );
 
-  deviceB = await launchAgentControlDevice(harness, "B");
+  deviceB = await launchAgentControlDevice(harness, "B", {
+    environment: {
+      // The strict local endpoint must never use the developer machine's
+      // proxy, and the deliberately wrong global key proves Runtime uses the
+      // isolated Agent Profile's named-provider credential instead.
+      NO_PROXY: "*",
+      no_proxy: "*",
+      OPENAI_API_KEY: "e2e-global-openai-key-must-not-be-used",
+    },
+  });
   await authenticateExistingAgentControlDevice(harness, deviceB);
   await claimDefaultProfile(deviceB);
 
@@ -833,11 +886,17 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
     .poll(() => cloudAgentControlCounts(harness))
     .toMatchObject({ definitions: 1, versions: 1, installations: 0 });
 
+  // The interruption fixture needs Runtime source code to replace only the
+  // managed Python wrapper on device C. Keep that source independent from
+  // AGENTERA_E2E_RUNTIME_SOURCE_ROOT, which deliberately switches A/B/D to an
+  // external Runtime. Candidate acceptance sets only the fixture variable so
+  // every device still executes the signed packaged Seed.
   const runtimeSourceRoot =
+    process.env.AGENTERA_E2E_RUNTIME_FIXTURE_SOURCE_ROOT?.trim() ||
     process.env.AGENTERA_E2E_RUNTIME_SOURCE_ROOT?.trim();
   if (!runtimeSourceRoot) {
     throw new Error(
-      "AGENTERA_E2E_RUNTIME_SOURCE_ROOT is required for the interrupted staging E2E.",
+      "AGENTERA_E2E_RUNTIME_FIXTURE_SOURCE_ROOT (or the legacy AGENTERA_E2E_RUNTIME_SOURCE_ROOT) is required for the interrupted staging E2E.",
     );
   }
   const interruptMarker = join(
@@ -853,7 +912,6 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
   ] as const;
   deviceC = await launchAgentControlDevice(harness, "C", {
     environment: {
-      HOME: dirname(harness.deviceRoots.C.hermesHome),
       AGENTERA_E2E_INTERRUPT_PROFILE_CREATE_ONCE_MARKER: interruptMarker,
       AGENTERA_E2E_DURABLE_HERMES_HOME: harness.deviceRoots.C.hermesHome,
     },
@@ -974,7 +1032,6 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
     );
   deviceC = await launchAgentControlDevice(harness, "C", {
     environment: {
-      HOME: dirname(harness.deviceRoots.C.hermesHome),
       AGENTERA_E2E_INTERRUPT_PROFILE_CREATE_ONCE_MARKER: interruptMarker,
       AGENTERA_E2E_DURABLE_HERMES_HOME: harness.deviceRoots.C.hermesHome,
       AGENTERA_E2E_RUNTIME_TRACE_FILE: runtimeTracePath,
@@ -1316,7 +1373,15 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
     );
   } catch (error) {
     throw new Error(
-      `Same-provider model switch failed: ${error instanceof Error ? error.message : String(error)}; processOutput=${deviceB.processOutput.slice(-12000)}`,
+      `Same-provider model switch failed: ${error instanceof Error ? error.message : String(error)}; selectedRoute=${JSON.stringify(
+        {
+          provider: alternate!.provider,
+          model: alternate!.model,
+          baseUrl: alternate!.baseUrl,
+          apiMode: alternate!.apiMode,
+          sourceProfileId: alternate!.sourceProfileId,
+        },
+      )}; processOutput=${deviceB.processOutput.slice(-12000)}`,
     );
   }
   expect(switched.events).toEqual(
@@ -1397,8 +1462,16 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
       { selection: secondProvider!.selection },
     );
   } catch (error) {
+    const gatewayPort = await readGatewayPort(deviceB, "device-b-agent").catch(
+      () => undefined,
+    );
+    const gatewayEvidence = await gatewayFailureEvidence(
+      deviceB,
+      "device-b-agent",
+      gatewayPort,
+    );
     throw new Error(
-      `Cross-provider model switch failed: ${error instanceof Error ? error.message : String(error)}; processOutput=${deviceB.processOutput.slice(-16000)}`,
+      `Cross-provider model switch failed: ${error instanceof Error ? error.message : String(error)}; selectedRoute=${JSON.stringify(secondProvider)}; processOutput=${deviceB.processOutput.slice(-16000)}; modelServerRequests=${JSON.stringify(modelServerRequests)}; gatewayEvidence=${gatewayEvidence}`,
     );
   }
   expect(providerSwitched.events).toEqual(
@@ -1418,6 +1491,7 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
       expect.objectContaining({
         provider: "provider-b",
         model: SECOND_PROVIDER_MODEL,
+        credentialAccepted: true,
       }),
     ]),
   );

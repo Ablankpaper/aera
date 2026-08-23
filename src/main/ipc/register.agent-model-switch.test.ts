@@ -103,6 +103,21 @@ describe("installed-Agent send IPC segment lifecycle", () => {
     ).toBe("dynamic");
   });
 
+  it("uses a request-scoped route for a logical openai provider on a third-party endpoint", () => {
+    const thirdPartyRoute = {
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      baseUrl: "https://relay.example/v1",
+      apiMode: "chat_completions" as const,
+    };
+
+    expect(classifyAgentModelRoute(thirdPartyRoute, {
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      baseUrl: "https://relay.example/v1",
+    })).toBe("dynamic");
+  });
+
   it("passes the opaque selection and visible history count to Manager", async () => {
     const prepareConversationRuntime = vi.fn<
       (input: never) => Promise<PreparedAgenteraConversationRuntime>

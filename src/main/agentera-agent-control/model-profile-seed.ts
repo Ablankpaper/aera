@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   getModelConfig,
   hasOAuthCredentials,
@@ -16,7 +17,11 @@ import {
   normalizeCustomProviderRuntimeName,
 } from "../../shared/custom-providers";
 import { canonicalPublicRouteKey } from "../../shared/model-configuration";
-import { customProviderEnvKey } from "../../shared/url-key-map";
+import {
+  CUSTOM_API_KEY_ENV,
+  customProviderEnvKey,
+  expectedEnvKeyForUrl,
+} from "../../shared/url-key-map";
 import { currentModelConfigurationWritePermit } from "../model-configuration-managed-files";
 import {
   requireManagedModelMutationValue,
@@ -127,6 +132,34 @@ function isLocalNoKeyEndpoint(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isOfficialOpenAiEndpoint(value: string): boolean {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return (
+      hostname === "api.openai.com" ||
+      hostname.endsWith(".api.openai.com") ||
+      hostname === "openai.azure.com" ||
+      hostname.endsWith(".openai.azure.com")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function requestScopedEndpointProviderName(baseUrl: string): string {
+  let hostname: string;
+  try {
+    hostname = new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    throw new Error("The selected model endpoint is invalid.");
+  }
+  const endpointDigest = createHash("sha256")
+    .update(normalizedEndpoint(baseUrl))
+    .digest("hex")
+    .slice(0, 12);
+  return `aera-route-${hostname}-${endpointDigest}`;
 }
 
 function matchingSavedModel(
@@ -328,37 +361,97 @@ export async function seedAgentModelProfile(
     return;
   }
 
-  const credentialKey = expectedEnvKeyForModel(provider, baseUrl);
-  const credential = credentialKey
+  const requiresEndpointAuthorization =
+    provider.toLowerCase() === "openai" &&
+    Boolean(baseUrl) &&
+    !isLocalNoKeyEndpoint(baseUrl) &&
+    !isOfficialOpenAiEndpoint(baseUrl);
+  const endpointProviders = requiresEndpointAuthorization
+    ? dependencies
+        .listCustomProviders(input.sourceProfileId)
+        .filter(
+          (candidate) =>
+            normalizedEndpoint(candidate.baseUrl) ===
+            normalizedEndpoint(baseUrl),
+        )
+    : [];
+  if (endpointProviders.length > 1) {
+    throw new Error(
+      "The selected model endpoint is ambiguous in the source Profile.",
+    );
+  }
+  const existingEndpointProvider = endpointProviders[0] ?? null;
+  const endpointProviderName = requiresEndpointAuthorization
+    ? existingEndpointProvider?.name ||
+      requestScopedEndpointProviderName(baseUrl)
+    : null;
+  const targetProvider = endpointProviderName
+    ? `custom:${normalizeCustomProviderRuntimeName(endpointProviderName)}`
+    : provider;
+  const endpointCredentialKey = requiresEndpointAuthorization
+    ? expectedEnvKeyForUrl(baseUrl)
+    : null;
+  const sourceCredentialKey = existingEndpointProvider
+    ? customProviderEnvKey(existingEndpointProvider.name)
+    : requiresEndpointAuthorization
+      ? endpointCredentialKey !== CUSTOM_API_KEY_ENV &&
+        endpointCredentialKey !== "OPENAI_API_KEY"
+        ? endpointCredentialKey
+        : null
+      : expectedEnvKeyForModel(provider, baseUrl);
+  const credential = sourceCredentialKey
     ? requireRemoteCredential(
-        dependencies.getSecret(credentialKey, input.sourceProfileId),
+        dependencies.getSecret(sourceCredentialKey, input.sourceProfileId),
         provider,
         baseUrl,
         input.sourceProfileId,
         dependencies,
       )
-    : null;
-  if (alreadyCompatibleInPlace) return;
+    : requiresEndpointAuthorization
+      ? requireRemoteCredential(
+          null,
+          provider,
+          baseUrl,
+          input.sourceProfileId,
+          dependencies,
+        )
+      : null;
+  const targetCredentialKey = endpointProviderName
+    ? customProviderEnvKey(endpointProviderName)
+    : sourceCredentialKey;
+  if (alreadyCompatibleInPlace && !endpointProviderName) return;
   await executeManagedProfileSeed(
     input.targetProfileId,
     {
-      provider,
+      provider: targetProvider,
       model,
       baseUrl,
       apiMode: saved?.apiMode ?? null,
     },
     activateDefault,
     () => {
-      if (credentialKey && credential) {
+      if (targetCredentialKey && credential) {
         dependencies.setEnvValue(
-          credentialKey,
+          targetCredentialKey,
           credential,
           input.targetProfileId,
         );
       }
+      if (endpointProviderName) {
+        dependencies.upsertCustomProvider(input.targetProfileId, {
+          name: endpointProviderName,
+          baseUrl,
+        });
+        dependencies.upsertNativeCustomProvider(input.targetProfileId, {
+          name: endpointProviderName,
+          baseUrl,
+          apiMode: saved?.apiMode ?? undefined,
+          ...(activateDefault ? { model, models: [model] } : {}),
+        });
+      }
       if (activateDefault) {
         dependencies.setModelConfig(
-          provider,
+          targetProvider,
           model,
           baseUrl,
           input.targetProfileId,

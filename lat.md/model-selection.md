@@ -129,3 +129,7 @@ and is never replayed after output or tool activity. The same code is carried
 on `/v1/runs` `run.failed` events, so the Runs transport reports the failure
 directly instead of falling back to Chat Completions. Provider exception text
 is redacted before either API responses or Runtime logs can observe it.
+
+Before a switched route is sent, [[src/main/agentera-agent-control/model-profile-seed.ts#seedAgentModelProfile]] projects only that route's credential and endpoint metadata into the installed Agent Profile without changing its default model. A logical `openai` row on a third-party endpoint must resolve an exact named provider or a dedicated known-host credential; global `OPENAI_API_KEY` and ambiguous `CUSTOM_API_KEY` values are never copied to that endpoint. Unknown endpoints fail before any target write.
+
+Runtime then reverse-matches the request `base_url` to that Profile's named provider and requires its exact `key_env`, credential pool, or external command. Missing metadata, missing credentials, and provider/endpoint mismatches all fail closed before agent creation, so a credential authorized for one endpoint cannot be sent to another.
