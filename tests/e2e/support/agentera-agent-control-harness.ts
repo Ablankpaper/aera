@@ -2048,7 +2048,7 @@ export async function launchAgentControlDevice(
       ...process.env,
       AGENTERA_CLOUD_PUBLIC_URL: cloudPublicOrigin,
       AGENTERA_OFFICIAL_AGENT_CHANNEL: "internal",
-      AGENTERA_E2E_RUNTIME_VERSION: "0.20.0-agentera.3",
+      AGENTERA_E2E_RUNTIME_VERSION: "0.20.0-agentera.4",
       AGENTERA_E2E_DIAGNOSTICS: "1",
       AGENTERA_RUNTIME_SEED_DIR: useExternalRuntime
         ? harness.externalRuntimeSeedDirectory

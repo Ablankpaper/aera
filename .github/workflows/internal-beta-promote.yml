@@ -70,7 +70,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain=v1)"
           VERSION=$(node -p "require('./package.json').version")
-          test "$VERSION" = "0.7.4-internal-beta.37"
+          test "$VERSION" = "0.7.4-internal-beta.38"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
           gh run view "$CANDIDATE_RUN_ID" --repo Ablankpaper/aera \
