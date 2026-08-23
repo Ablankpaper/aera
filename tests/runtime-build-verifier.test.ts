@@ -101,7 +101,7 @@ describe("independent Runtime build verifier", () => {
     }
   });
 
-  it("pins an exact stable tag, source commit, and native asset set", () => {
+  it("pins an exact candidate tag, source commit, and native asset set", () => {
     const lock = JSON.parse(
       readFileSync(
         join(process.cwd(), "build", "agentera-runtime-seed.lock.json"),
@@ -111,10 +111,10 @@ describe("independent Runtime build verifier", () => {
     expect(lock).toMatchObject({
       schema_version: 1,
       repository: "Ablankpaper/aera-runtime",
-      release_tag: "runtime-v0.20.0-agentera.3",
-      source_commit: "fb42016967ad934c55e9da5af1896d5c7206b445",
-      runtime_version: "0.20.0-agentera.3",
-      channel: "stable",
+      release_tag: "runtime-v0.20.0-agentera.4-rc.1",
+      source_commit: "301cc632d93d15ca3d060ed1ab62d508692d9acf",
+      runtime_version: "0.20.0-agentera.4",
+      channel: "candidate",
     });
     expect(Object.keys(lock.assets).sort()).toEqual([
       "darwin-arm64",
@@ -124,20 +124,20 @@ describe("independent Runtime build verifier", () => {
       "darwin-arm64": {
         platform: "darwin",
         arch: "arm64",
-        archive: "agentera-runtime-0.20.0-agentera.3-darwin-arm64.tar.zst",
+        archive: "agentera-runtime-0.20.0-agentera.4-darwin-arm64.tar.zst",
         manifest:
-          "agentera-runtime-0.20.0-agentera.3-darwin-arm64.manifest.json",
+          "agentera-runtime-0.20.0-agentera.4-darwin-arm64.manifest.json",
         signature:
-          "agentera-runtime-0.20.0-agentera.3-darwin-arm64.manifest.sig",
+          "agentera-runtime-0.20.0-agentera.4-darwin-arm64.manifest.sig",
       },
       "windows-x64": {
         platform: "windows",
         arch: "x64",
-        archive: "agentera-runtime-0.20.0-agentera.3-windows-x64.zip",
+        archive: "agentera-runtime-0.20.0-agentera.4-windows-x64.zip",
         manifest:
-          "agentera-runtime-0.20.0-agentera.3-windows-x64.manifest.json",
+          "agentera-runtime-0.20.0-agentera.4-windows-x64.manifest.json",
         signature:
-          "agentera-runtime-0.20.0-agentera.3-windows-x64.manifest.sig",
+          "agentera-runtime-0.20.0-agentera.4-windows-x64.manifest.sig",
       },
     });
     expect(JSON.stringify(lock)).not.toMatch(/latest|\/releases\/latest/i);

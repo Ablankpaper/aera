@@ -13,7 +13,7 @@ import {
 
 const roots = [];
 const SOURCE_SHA = "a".repeat(40);
-const VERSION = "0.7.4-internal-beta.37";
+const VERSION = "0.7.4-internal-beta.38";
 
 afterEach(async () => {
   await Promise.all(
