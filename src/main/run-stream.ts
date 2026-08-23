@@ -5,6 +5,23 @@ export interface HermesApiCapabilities {
   endpoints?: Record<string, { path?: unknown } | unknown>;
 }
 
+const RUN_FAILURE_CODES = new Set(["provider_authentication_rejected"]);
+
+/** Return only failure codes explicitly shared by Runtime and Desktop. */
+export function runFailureCode(event: Record<string, unknown>): string {
+  if (event.event !== "run.failed") return "";
+  const value = event.error_code;
+  return typeof value === "string" && RUN_FAILURE_CODES.has(value) ? value : "";
+}
+
+/** Provider authentication failures are request errors, never transport fallbacks. */
+export function shouldFallbackFromRunFailure(
+  event: Record<string, unknown>,
+  hasActivity: boolean,
+): boolean {
+  return !hasActivity && !runFailureCode(event);
+}
+
 function boolFeature(
   capabilities: HermesApiCapabilities | null | undefined,
   name: string,

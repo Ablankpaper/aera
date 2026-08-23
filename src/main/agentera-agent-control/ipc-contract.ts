@@ -1002,6 +1002,15 @@ export async function executeAgentControlIpc<T>(
     return { ok: true, data: await task() };
   } catch (error) {
     const errorCode = mappedCode(error);
+    if (process.env.AGENTERA_E2E_DIAGNOSTICS === "1") {
+      const detail =
+        error instanceof Error
+          ? error.message.replace(/\s+/gu, " ").slice(0, 240)
+          : "unknown";
+      console.error(
+        `[AGENTERA_AGENT_CONTROL] code=${errorCode} detail=${detail}`,
+      );
+    }
     if (
       errorCode === "candidate_dlp_blocked" ||
       errorCode === "capability_dlp_blocked"

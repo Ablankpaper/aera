@@ -241,6 +241,42 @@ describe("Agent Profile model seeding", () => {
     );
   });
 
+  it("projects a user-selected route without replacing the Agent Profile default", async () => {
+    const deps = dependencies();
+    if (!deps.modelMutationPort) throw new Error("missing mutation port");
+    const mutate = vi.spyOn(deps.modelMutationPort, "mutate");
+
+    await seedAgentModelProfile(
+      {
+        sourceProfileId: "source-profile",
+        sourceModelId: "model-1",
+        targetProfileId: "target-profile",
+        version: versionV2("user_select"),
+        policy: policyV2("user_select"),
+        activateDefault: false,
+      },
+      deps,
+    );
+
+    expect(deps.setEnvValue).toHaveBeenCalledWith(
+      "CUSTOM_PROVIDER_ANHEPRO_COM_KEY",
+      "private-value",
+      "target-profile",
+    );
+    expect(deps.upsertCustomProvider).toHaveBeenCalled();
+    expect(deps.upsertNativeCustomProvider).toHaveBeenCalledWith(
+      "target-profile",
+      {
+        name: "anhepro.com",
+        baseUrl: "https://api.anhepro.com/v1",
+        apiMode: "chat_completions",
+      },
+    );
+    expect(deps.setModelConfig).not.toHaveBeenCalled();
+    const plan = await mutate.mock.calls[0][0].prepare();
+    expect(plan.newRouteKey).toBeUndefined();
+  });
+
   it("rejects a legacy custom model row that has no provider identity", async () => {
     const deps = dependencies();
     deps.readModels.mockReturnValue([

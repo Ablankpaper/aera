@@ -72,6 +72,8 @@ import {
   parseRunSseBlock,
   runCompletedUsage,
   runEventReasoningText,
+  runFailureCode,
+  shouldFallbackFromRunFailure,
   supportsHermesRunsTransport,
   type HermesApiCapabilities,
 } from "./run-stream";
@@ -1574,7 +1576,6 @@ export interface HermesAgentModelTransportRoute {
   model: string;
   base_url: string;
   api_mode: string | null;
-  api_key: string | null;
 }
 
 /** Build the short-lived upstream route consumed only by a transport request. */
@@ -1586,7 +1587,6 @@ export function buildAgentModelTransportRoute(
     model: execution.modelOverride.model,
     base_url: execution.modelOverride.baseUrl,
     api_mode: execution.apiMode,
-    api_key: execution.credential,
   };
 }
 
@@ -1649,6 +1649,39 @@ const BOUND_API_TRANSPORT_UNAVAILABLE =
   "Aera bound runtime connection is unavailable.";
 const AGENT_MODEL_EMPTY_RESPONSE =
   "Aera Agent model route returned no output; the candidate segment was not replayed.";
+
+export interface BoundAgentCapabilitiesDependencies {
+  ensureReady: () => Promise<boolean>;
+  getCapabilities: () => Promise<HermesApiCapabilities | null>;
+}
+
+/**
+ * A bound Agent must establish the profile Gateway before asking it for the
+ * request-scoped contract.  Probing first creates a false "unsupported"
+ * result whenever a newly-installed profile has not started its Gateway yet;
+ * that result is then cached and blocks the first real turn.  Keeping this
+ * ordering in one small seam makes the lifecycle contract testable without
+ * booting Electron.
+ */
+export async function prepareBoundAgentCapabilities(
+  profile: string | undefined,
+  dependencies?: BoundAgentCapabilitiesDependencies,
+): Promise<HermesApiCapabilities | null> {
+  const ensureReady =
+    dependencies?.ensureReady ??
+    (async () =>
+      (await isApiServerReady(profile)) ||
+      (await startGatewayWithRecovery(profile, 30_000)));
+  const getCapabilities =
+    dependencies?.getCapabilities ?? (() => getApiCapabilities(profile));
+
+  if (!(await ensureReady())) {
+    throw Object.assign(new Error(BOUND_API_TRANSPORT_UNAVAILABLE), {
+      code: "bound_runtime_unavailable",
+    });
+  }
+  return getCapabilities();
+}
 
 type ChatContent =
   | string
@@ -2051,15 +2084,35 @@ function sendMessageViaApi(
     }
     try {
       const parsed = JSON.parse(data);
+      const stableFailureCode =
+        parsed.error?.code === "provider_authentication_rejected" ||
+        parsed.hermes?.error_code === "provider_authentication_rejected"
+          ? "provider_authentication_rejected"
+          : "";
 
       // Capture error responses forwarded through SSE
       if (parsed.error) {
-        lastError = parsed.error.message || JSON.stringify(parsed.error);
+        const message = parsed.error.message || JSON.stringify(parsed.error);
+        lastError = stableFailureCode
+          ? `${stableFailureCode}: ${message}`
+          : message;
         return false;
       }
 
       const choice = parsed.choices?.[0];
       const delta = choice?.delta;
+
+      // A failed stream may carry its stable code in the final Hermes
+      // metadata rather than an OpenAI ``error`` object. Capture it before
+      // the [DONE] sentinel so we do not issue an empty-stream probe (which
+      // would replay the failed provider request).
+      if (stableFailureCode) {
+        const message =
+          typeof parsed.hermes.error === "string"
+            ? parsed.hermes.error
+            : "The model provider rejected the current credential.";
+        lastError = `${stableFailureCode}: ${message}`;
+      }
 
       // Extract usage from final chunk (with optional cost + rate limit info)
       if (parsed.usage && cb.onUsage) {
@@ -2135,14 +2188,7 @@ function sendMessageViaApi(
           errBody += d.toString();
         });
         res.on("end", () => {
-          try {
-            const err = JSON.parse(errBody);
-            finish(err.error?.message || `API error ${res.statusCode}`);
-          } catch {
-            finish(
-              `API server returned ${res.statusCode}: ${errBody.slice(0, 200)}`,
-            );
-          }
+          finish(formatApiErrorResponse(res.statusCode || 0, errBody));
         });
         return;
       }
@@ -2409,11 +2455,21 @@ function sendMessageViaRuns(
         typeof raw.error === "string" && raw.error
           ? raw.error
           : "Aera Runtime run failed.";
-      if (!hasRunActivity) {
+      const failureCode = runFailureCode(raw);
+      const reportedError = failureCode ? `${failureCode}: ${err}` : err;
+      // A bounded provider-auth failure is a request-level result. Reporting
+      // it directly prevents the empty-run compatibility fallback from
+      // replaying the same rejected credential and keeps the healthy Gateway
+      // alive for the next turn.
+      if (failureCode) {
+        finish(reportedError);
+        return;
+      }
+      if (shouldFallbackFromRunFailure(raw, hasRunActivity)) {
         fallbackToChatCompletions();
         return;
       }
-      finish(err);
+      finish(reportedError);
       return;
     }
 
@@ -3320,6 +3376,53 @@ function isLocalApiTransportError(error: string): boolean {
   );
 }
 
+export type ChatErrorRecoveryAction =
+  | "report_only"
+  | "retry_transport"
+  | "restart_gateway";
+
+/**
+ * Keep provider authentication failures separate from local Gateway failures.
+ * The Runtime includes this bounded code in its HTTP/SSE error envelope; a
+ * provider rejecting a credential does not mean the healthy local Gateway
+ * needs to be restarted, and the failed turn must never be replayed.
+ */
+export function classifyChatErrorRecovery(
+  error: string,
+): ChatErrorRecoveryAction {
+  if (/(^|[^a-z0-9_])provider_authentication_rejected([^a-z0-9_]|$)/i.test(error)) {
+    return "report_only";
+  }
+  if (isLocalApiTransportError(error)) return "retry_transport";
+  return "restart_gateway";
+}
+
+function formatApiErrorResponse(
+  statusCode: number,
+  rawBody: string,
+): string {
+  try {
+    const parsed = JSON.parse(rawBody) as Record<string, unknown>;
+    const error =
+      parsed.error && typeof parsed.error === "object"
+        ? (parsed.error as Record<string, unknown>)
+        : null;
+    const message =
+      typeof error?.message === "string" && error.message
+        ? error.message
+        : `API error ${statusCode}`;
+    const code =
+      error?.code === "provider_authentication_rejected"
+        ? error.code
+        : null;
+    return code ? `${code}: ${message}` : message;
+  } catch {
+    return rawBody
+      ? `API server returned ${statusCode}: ${rawBody.slice(0, 200)}`
+      : `API error ${statusCode}`;
+  }
+}
+
 async function sendMessageViaNonGatewayApi(
   message: string,
   cb: ChatCallbacks,
@@ -3546,6 +3649,15 @@ async function sendMessageViaBestApiWithLocalRecovery(
       cb.onDone(sessionId);
     },
     onError: (error) => {
+      // Provider authentication is a request-level failure. Do not mark a
+      // healthy Gateway unavailable, restart it, or replay the turn (whether
+      // or not the provider emitted partial output).
+      if (classifyChatErrorRecovery(error) === "report_only") {
+        settled = true;
+        cb.onError(error);
+        return;
+      }
+
       if (sawOutput) {
         recoverAfterPartialOutput(error);
         return;
@@ -3589,8 +3701,17 @@ export async function sendMessage(
 ): Promise<ChatHandle> {
   ensureInitialized();
 
-  const capabilities =
-    envelope?.toolPolicy || execution?.routeMode === "dynamic"
+  const needsBoundCapabilities = Boolean(
+    envelope?.requireBoundApiTransport &&
+      (envelope.toolPolicy || execution?.routeMode === "dynamic"),
+  );
+  const boundCapabilities = needsBoundCapabilities
+    ? await prepareBoundAgentCapabilities(profile)
+    : null;
+  const boundTransportReady = needsBoundCapabilities ? true : null;
+  const capabilities = needsBoundCapabilities
+    ? boundCapabilities
+    : envelope?.toolPolicy || execution?.routeMode === "dynamic"
       ? await getApiCapabilities(profile)
       : null;
   if (envelope?.toolPolicy) {
@@ -3653,11 +3774,12 @@ export async function sendMessage(
   // text-only CLI fallback. Probe the bound profile directly and give a new or
   // slow-starting profile the full recovery window before sending.
   if (envelope?.requireBoundApiTransport) {
-    const boundTransportReady =
-      (await isApiServerReady(profile)) ||
-      (await startGatewayWithRecovery(profile, 30_000));
-    setApiCacheFor(profile, boundTransportReady);
-    if (!boundTransportReady) {
+    const ready =
+      boundTransportReady ??
+      ((await isApiServerReady(profile)) ||
+        (await startGatewayWithRecovery(profile, 30_000)));
+    setApiCacheFor(profile, ready);
+    if (!ready) {
       throw new Error(BOUND_API_TRANSPORT_UNAVAILABLE);
     }
     return sendMessageViaBestApiWithLocalRecovery(

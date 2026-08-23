@@ -64,12 +64,17 @@ function lifecycleHarness(): {
 }
 
 describe("installed-Agent send IPC segment lifecycle", () => {
-  it("uses the Main-resolved route Profile for an installed Agent gateway", () => {
+  it("keeps an installed Agent gateway on its bound target Profile", () => {
     expect(
       resolveAgentGatewayProfile("default", {
         modelRoute: { sourceProfileId: "aera-space-owner" },
       }),
-    ).toBe("aera-space-owner");
+    ).toBe("default");
+    expect(
+      resolveAgentGatewayProfile("device-b-agent", {
+        modelRoute: { sourceProfileId: "default" },
+      }),
+    ).toBe("device-b-agent");
   });
 
   it("keeps ordinary and legacy Agent sends on their requested Profile", () => {

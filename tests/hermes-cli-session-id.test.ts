@@ -178,6 +178,47 @@ vi.mock("http", () => ({
               });
               return;
             }
+            if (requestError === "STREAM_AUTH_REJECTED") {
+              apiRequests.push({
+                body,
+                headers: (_options.headers as Record<string, string>) || {},
+              });
+              const res = new EventEmitter() as EventEmitter & {
+                statusCode: number;
+                headers: Record<string, string>;
+              };
+              res.statusCode = 200;
+              res.headers = { "x-hermes-session-id": "desk-cold-gateway" };
+              cb?.(res);
+              queueMicrotask(() => {
+                res.emit(
+                  "data",
+                  Buffer.from(
+                    `data: ${JSON.stringify({
+                      choices: [
+                        { index: 0, delta: {}, finish_reason: "error" },
+                      ],
+                      error: {
+                        message:
+                          "The model provider rejected the current credential.",
+                        type: "agent_error",
+                      },
+                      hermes: {
+                        completed: false,
+                        partial: false,
+                        failed: true,
+                        error:
+                          "The model provider rejected the current credential.",
+                        error_code: "provider_authentication_rejected",
+                      },
+                    })}\n\n`,
+                  ),
+                );
+                res.emit("data", Buffer.from("data: [DONE]\n\n"));
+                res.emit("end");
+              });
+              return;
+            }
             if (requestError) {
               queueMicrotask(() => {
                 handlers.get("error")?.(new Error(requestError));
@@ -787,6 +828,41 @@ describe("CLI fallback session id propagation", () => {
       messages: [{ role: "user", content: "bad key" }],
       stream: true,
     });
+  });
+
+  it("keeps the live Gateway untouched when an SSE auth failure carries its stable Hermes code", async () => {
+    mkdirSync(TEST_REPO, { recursive: true });
+    expect(startGateway()).toBe(true);
+    healthStatuses.push(200);
+
+    await expect(
+      new Promise<string | undefined>((resolve, reject) => {
+        sendMessage("warmup", {
+          onChunk: () => {},
+          onDone: resolve,
+          onError: reject,
+        }).catch(reject);
+      }),
+    ).resolves.toBe("desk-cold-gateway");
+
+    apiRequestErrors.push("STREAM_AUTH_REJECTED");
+    healthStatuses.push(503, 503, 503, 200);
+    const secondSendStart = requestEvents.length;
+
+    await expect(
+      new Promise<string | undefined>((resolve, reject) => {
+        sendMessage("bad provider credential", {
+          onChunk: () => {},
+          onDone: resolve,
+          onError: reject,
+        }).catch(reject);
+      }),
+    ).rejects.toThrow("provider_authentication_rejected");
+
+    expect(requestEvents.slice(secondSendStart)).toEqual(["chat"]);
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0].kill).not.toHaveBeenCalled();
+    expect(healthStatuses).toEqual([503, 503, 503, 200]);
   });
 
   it("reports a mid-stream API disconnect without replaying partial output", async () => {

@@ -4,7 +4,15 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type Mock,
+} from "vitest";
 import type { AgentPolicySnapshot, AgentVersion } from "./client";
 import {
   openAgenteraControlPlaneDatabase,
@@ -17,6 +25,7 @@ import {
   AgenteraHermesAdapterError,
   digestToolPermissionDeclaration,
   type AgenteraHermesProfileBindings,
+  type AgenteraHermesAdapterOptions,
   type AgenteraHermesVerifiedCache,
 } from "./hermes-adapter";
 import {
@@ -38,6 +47,7 @@ const VERSION_ID = "55555555-5555-4555-8555-555555555555";
 const VERSION_2_ID = "56565656-5656-4565-8565-565656565656";
 const INSTALLATION_ID = "66666666-6666-4666-8666-666666666666";
 const RUNTIME_PROFILE_ID = "77777777-7777-4777-8777-777777777777";
+const LOCAL_PROFILE_ID = "device-b-agent";
 const POLICY_ID = "88888888-8888-4888-8888-888888888888";
 const POLICY_2_ID = "89898989-8989-4898-8989-898989898989";
 const POLICY_3_ID = "8a8a8a8a-8a8a-4a8a-8a8a-8a8a8a8a8a8a";
@@ -372,6 +382,7 @@ describe("Aera adapter around the real Hermes transport", () => {
       ) => ResolvedOwnerModelRoute | null
     >
   >;
+  let projectModelRoute: Mock<AgenteraHermesAdapterOptions["projectModelRoute"]>;
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "agentera-hermes-adapter-"));
@@ -463,6 +474,7 @@ describe("Aera adapter around the real Hermes transport", () => {
             route.modelLibraryId === modelLibraryId,
         ) ?? null,
     );
+    projectModelRoute = vi.fn(async () => undefined);
   });
 
   afterEach(() => {
@@ -484,7 +496,9 @@ describe("Aera adapter around the real Hermes transport", () => {
       getRuntimeVersion,
       getCurrentToolPermissionDigest,
       getProfileModelConfig: () => currentModelRoute,
+      getLocalProfileId: () => LOCAL_PROFILE_ID,
       resolveCurrentModelRoute,
+      projectModelRoute,
       getProfileMcpCapabilities,
       isVersionRevoked,
       assertEntitled,
@@ -609,7 +623,7 @@ describe("Aera adapter around the real Hermes transport", () => {
     materializeVersion.mockReturnValue(projection(agentVersion));
   }
 
-  it("accepts a Main-resolved requested route under user_select", async () => {
+  it("projects a Main-resolved route into the local disk Profile instead of the Runtime UUID", async () => {
     useV2(versionV2("user_select"));
 
     const plan = await adapter().prepareInstalledTurnPlan({
@@ -627,6 +641,14 @@ describe("Aera adapter around the real Hermes transport", () => {
       provider: PETOI_ROUTE.provider,
       model: PETOI_ROUTE.model,
       baseUrl: PETOI_ROUTE.baseUrl,
+    });
+    expect(projectModelRoute).toHaveBeenCalledWith({
+      sourceProfileId: PETOI_ROUTE.sourceProfileId,
+      sourceModelId: PETOI_ROUTE.modelLibraryId,
+      targetProfileId: LOCAL_PROFILE_ID,
+      version: expect.objectContaining({ id: VERSION_ID }),
+      policy: expect.objectContaining({ id: POLICY_ID }),
+      activateDefault: false,
     });
   });
 
@@ -781,6 +803,7 @@ describe("Aera adapter around the real Hermes transport", () => {
         .prepare("SELECT COUNT(*) AS count FROM runtime_bindings")
         .get(),
     ).toEqual({ count: 1 });
+    expect(projectModelRoute).toHaveBeenCalledTimes(1);
   });
 
   it("blocks a new V3 conversation when a required MCP requirement is not mapped", async () => {

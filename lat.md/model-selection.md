@@ -113,3 +113,19 @@ The upstream desktop model applies the session switch on the active gateway sess
 Attachment turns must not be forced through the CLI override fallback because the CLI path cannot carry multimodal input.
 
 [[src/main/hermes.ts#sendMessageViaCli]] can inline text-file attachments but ignores images, while the gateway/API path preserves image parts and path refs through [[src/main/hermes.ts#buildUserContent]]. When a session override is active and the user sends attachments, [[src/main/hermes.ts#shouldForceCliForSessionOverride]] leaves the turn eligible for the dashboard/gateway or API transport instead of silently dropping media.
+
+## Request-scoped Agent authentication boundary
+
+Dynamic Agent turns send only non-secret route fields; credentials stay in the
+target Profile's Runtime.
+
+The route contains `provider`, `model`, `base_url`, and `api_mode`. Runtime
+resolves its own API key, OAuth pool, or external credential command; missing
+target credentials fail closed and never fall back to process-wide/default
+credentials. A provider authentication rejection is a request failure, not a
+local Gateway failure: it uses the bounded
+`provider_authentication_rejected` code, does not mark the Gateway unhealthy,
+and is never replayed after output or tool activity. The same code is carried
+on `/v1/runs` `run.failed` events, so the Runs transport reports the failure
+directly instead of falling back to Chat Completions. Provider exception text
+is redacted before either API responses or Runtime logs can observe it.

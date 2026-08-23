@@ -30,6 +30,12 @@ export interface AgentModelProfileSeedInput {
   targetProfileId: string;
   version: AgentVersion;
   policy: AgentPolicySnapshot;
+  /**
+   * Installation bootstraps a usable default route. A conversation switch
+   * only projects the selected provider credential/metadata into the isolated
+   * Agent Profile and must not replace that Profile's default model.
+   */
+  activateDefault?: boolean;
 }
 
 export interface ModelProfileSeedDependencies {
@@ -73,6 +79,7 @@ async function executeManagedProfileSeed(
     baseUrl: string;
     apiMode: string | null;
   },
+  activateDefault: boolean,
   write: () => void,
   dependencies: ModelProfileSeedDependencies,
 ): Promise<void> {
@@ -95,7 +102,9 @@ async function executeManagedProfileSeed(
     profileIds: [targetProfileId],
     stage: "activation",
     prepare: () => ({
-      newRouteKey: canonicalPublicRouteKey(route),
+      ...(activateDefault
+        ? { newRouteKey: canonicalPublicRouteKey(route) }
+        : {}),
       write: () => write(),
     }),
   });
@@ -184,6 +193,7 @@ export async function seedAgentModelProfile(
   input: AgentModelProfileSeedInput,
   dependencies: ModelProfileSeedDependencies = DEFAULT_DEPENDENCIES,
 ): Promise<void> {
+  const activateDefault = input.activateDefault !== false;
   const source = dependencies.getModelConfig(input.sourceProfileId);
   const models = dependencies.readModels();
   const selected = input.sourceModelId
@@ -283,6 +293,7 @@ export async function seedAgentModelProfile(
         baseUrl,
         apiMode: saved?.apiMode ?? null,
       },
+      activateDefault,
       () => {
         if (credential) {
           dependencies.setEnvValue(
@@ -298,18 +309,19 @@ export async function seedAgentModelProfile(
         dependencies.upsertNativeCustomProvider(input.targetProfileId, {
           name: providerName,
           baseUrl,
-          model,
-          models: [model],
           apiMode: saved?.apiMode ?? undefined,
+          ...(activateDefault ? { model, models: [model] } : {}),
         });
-        dependencies.setModelConfig(
-          targetProvider,
-          model,
-          baseUrl,
-          input.targetProfileId,
-          saved?.contextLength,
-          saved?.apiMode ?? undefined,
-        );
+        if (activateDefault) {
+          dependencies.setModelConfig(
+            targetProvider,
+            model,
+            baseUrl,
+            input.targetProfileId,
+            saved?.contextLength,
+            saved?.apiMode ?? undefined,
+          );
+        }
       },
       dependencies,
     );
@@ -335,6 +347,7 @@ export async function seedAgentModelProfile(
       baseUrl,
       apiMode: saved?.apiMode ?? null,
     },
+    activateDefault,
     () => {
       if (credentialKey && credential) {
         dependencies.setEnvValue(
@@ -343,14 +356,16 @@ export async function seedAgentModelProfile(
           input.targetProfileId,
         );
       }
-      dependencies.setModelConfig(
-        provider,
-        model,
-        baseUrl,
-        input.targetProfileId,
-        saved?.contextLength,
-        saved?.apiMode ?? undefined,
-      );
+      if (activateDefault) {
+        dependencies.setModelConfig(
+          provider,
+          model,
+          baseUrl,
+          input.targetProfileId,
+          saved?.contextLength,
+          saved?.apiMode ?? undefined,
+        );
+      }
     },
     dependencies,
   );

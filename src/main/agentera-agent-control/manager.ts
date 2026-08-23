@@ -2408,6 +2408,10 @@ export class AgenteraAgentControlManager {
         }
         return full.profiles.readProfileModelConfig(profilePath);
       },
+      getLocalProfileId: (profilePath) =>
+        localProfileHandleForPath(profilePath, (profileId) =>
+          full.profiles.resolveProfilePath(profileId),
+        ),
       resolveCurrentModelRoute: (sourceProfileId, modelLibraryId) => {
         const catalog = this.options.getOwnerModelRouteCatalog?.() ?? null;
         if (!catalog) return null;
@@ -2423,6 +2427,12 @@ export class AgenteraAgentControlManager {
         } catch {
           return null;
         }
+      },
+      projectModelRoute: async (input) => {
+        if (!installationProfiles.configureFreshProfileModel) {
+          throw codedError("model_route_unavailable");
+        }
+        await installationProfiles.configureFreshProfileModel(input);
       },
       getProfileMcpCapabilities,
       isVersionRevoked: full.isVersionRevoked ?? (() => false),

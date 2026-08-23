@@ -13,18 +13,22 @@ import type { AgentModelSegmentLifecycle } from "../agent-model-execution-lease"
 export type AgentModelRouteMode = "configured" | "dynamic";
 
 /**
- * Resolve the local Gateway Profile for a bound Agent turn. The visible chat
- * Profile is a logical conversation namespace; an installed Agent may resolve
- * its model from a different owner Profile. Main has already authenticated
- * that source Profile in the immutable binding, so startup must use it too.
+ * Resolve the local Gateway Profile for a bound Agent turn.
+ *
+ * The visible chat Profile is also the installed Agent's isolated Runtime
+ * Profile. `modelRoute.sourceProfileId` is provenance for the selected route
+ * (and is used to re-resolve credentials), not the Profile whose config or
+ * Gateway should be started: installation seeding has already materialized
+ * the route into the target Profile. Using the source id here can silently
+ * start the account/default Gateway and make two Agents contend for one port.
  * Legacy bindings and ordinary chats retain the caller's requested Profile.
  */
 export function resolveAgentGatewayProfile(
   requestedProfile: string | undefined,
   binding: { modelRoute?: { sourceProfileId?: string | null } | null } | null,
 ): string | undefined {
-  const sourceProfileId = binding?.modelRoute?.sourceProfileId?.trim();
-  return sourceProfileId || requestedProfile;
+  void binding;
+  return requestedProfile;
 }
 
 function normalizeBaseUrl(value: string): string {
