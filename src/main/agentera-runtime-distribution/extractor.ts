@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
+import { appendFileSync, createReadStream, createWriteStream } from "node:fs";
 import {
   chmod,
   lstat,
@@ -45,6 +45,33 @@ const INSTALLED_METADATA_FILES = new Set([
   RUNTIME_MANIFEST_METADATA_NAME,
   RUNTIME_SIGNATURE_METADATA_NAME,
 ]);
+
+let activeRuntimeExtractions = 0;
+const runtimeExtractionDiagnosticStartedAt = Date.now();
+
+function runtimeExtractionDiagnostic(
+  event: string,
+  fields: Readonly<Record<string, boolean | number | string | null>> = {},
+): void {
+  if (process.env.AGENTERA_E2E_DIAGNOSTICS !== "1") return;
+  const output = process.env.AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT;
+  if (!output) return;
+  try {
+    appendFileSync(
+      output,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        event,
+        elapsedMs: Date.now() - runtimeExtractionDiagnosticStartedAt,
+        pid: process.pid,
+        ...fields,
+      })}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+  } catch {
+    // Diagnostics must never affect Runtime installation.
+  }
+}
 
 export interface ExtractRuntimeArchiveOptions {
   archivePath: string;
@@ -301,6 +328,7 @@ async function validateZipArchive(
   maxExtractedBytes: number,
   signal?: AbortSignal,
 ): Promise<void> {
+  runtimeExtractionDiagnostic("zip-validation-start");
   const validator = new ArchiveInventoryValidator(manifest, maxExtractedBytes);
   const zipfile = await openRuntimeZip(archivePath);
   try {
@@ -313,6 +341,7 @@ async function validateZipArchive(
   } finally {
     zipfile.close();
   }
+  runtimeExtractionDiagnostic("zip-validation-complete");
 }
 
 function validateSymlinkTarget(path: string, target: string): void {
@@ -565,12 +594,17 @@ async function extractZipArchive(
   maxExtractedBytes: number,
   signal?: AbortSignal,
 ): Promise<void> {
+  runtimeExtractionDiagnostic("zip-extraction-start", {
+    activeExtractions: activeRuntimeExtractions,
+  });
   await validateZipArchive(archivePath, manifest, maxExtractedBytes, signal);
   const validator = new ArchiveInventoryValidator(manifest, maxExtractedBytes);
   const zipfile = await openRuntimeZip(archivePath);
   try {
     throwIfAborted(signal);
+    let entryCount = 0;
     for await (const entry of zipEntries(zipfile, signal)) {
+      entryCount += 1;
       const metadata = zipEntryMetadata(entry);
       if ("root" in metadata) {
         validator.addRoot(metadata.kind, metadata.mode);
@@ -619,6 +653,9 @@ async function extractZipArchive(
     }
     validator.finish();
     throwIfAborted(signal);
+    runtimeExtractionDiagnostic("zip-extraction-stream-complete", {
+      entryCount,
+    });
     const children = await readdir(workDirectory);
     if (children.length !== 1 || children[0] !== ARCHIVE_ROOT) {
       throw new RuntimeExtractionError(
@@ -649,6 +686,9 @@ async function extractZipArchive(
       seenArchivePaths.add(comparable);
     }
     await rename(join(workDirectory, ARCHIVE_ROOT), destination);
+    runtimeExtractionDiagnostic("zip-extraction-rename-complete", {
+      entryCount,
+    });
   } finally {
     zipfile.close();
     await rm(workDirectory, { recursive: true, force: true }).catch(
@@ -885,75 +925,92 @@ export async function extractRuntimeArchive({
   maxExtractedBytes,
   signal,
 }: ExtractRuntimeArchiveOptions): Promise<RuntimeExtractionResult> {
-  requireExtractionBudget(maxExtractedBytes);
-  throwIfAborted(signal);
-  const declaredBytes = manifestExtractedBytes(manifest);
-  if (declaredBytes > maxExtractedBytes) {
-    throw new RuntimeExtractionError(
-      "Runtime manifest exceeds the signed extraction budget",
-    );
-  }
-  const target = resolve(destination);
-  if (!isAbsolute(destination)) {
-    throw new RuntimeExtractionError(
-      "Runtime extraction destination must be absolute",
-    );
-  }
-  const zipWorkDirectory = `${target}.zip-extracting`;
-  if ((await pathExists(target)) || (await pathExists(zipWorkDirectory))) {
-    throw new RuntimeExtractionError(
-      "Runtime extraction destination must not already exist",
-    );
-  }
+  activeRuntimeExtractions += 1;
+  runtimeExtractionDiagnostic("extract-start", {
+    activeExtractions: activeRuntimeExtractions,
+  });
   try {
-    if (manifest.platform === "darwin") {
-      if (!manifest.archive_name.endsWith(".tar.zst")) {
-        throw new RuntimeExtractionError(
-          "macOS Runtime Seed must use TAR/Zstandard",
-        );
-      }
-      await validateTarArchive(
-        archivePath,
-        manifest,
-        maxExtractedBytes,
-        signal,
-      );
-      throwIfAborted(signal);
-      await extractTarArchive(archivePath, target, signal);
-    } else {
-      if (!manifest.archive_name.endsWith(".zip")) {
-        throw new RuntimeExtractionError("Windows Runtime Seed must use ZIP");
-      }
-      await mkdir(zipWorkDirectory, { recursive: false, mode: 0o700 });
-      await extractZipArchive(
-        archivePath,
-        target,
-        zipWorkDirectory,
-        manifest,
-        maxExtractedBytes,
-        signal,
+    requireExtractionBudget(maxExtractedBytes);
+    throwIfAborted(signal);
+    const declaredBytes = manifestExtractedBytes(manifest);
+    if (declaredBytes > maxExtractedBytes) {
+      throw new RuntimeExtractionError(
+        "Runtime manifest exceeds the signed extraction budget",
       );
     }
-    throwIfAborted(signal);
-    return await verifyExtractedRuntimeInventory(
-      target,
-      manifest,
-      maxExtractedBytes,
-      signal,
-    );
-  } catch (error) {
-    await rm(target, { recursive: true, force: true }).catch(() => undefined);
-    await rm(zipWorkDirectory, { recursive: true, force: true }).catch(
-      () => undefined,
-    );
-    if (isAbortError(error)) throw error;
-    if (error instanceof RuntimeExtractionError) throw error;
-    throw new RuntimeExtractionError("cannot safely extract Runtime Seed", {
-      cause: error,
-    });
+    const target = resolve(destination);
+    if (!isAbsolute(destination)) {
+      throw new RuntimeExtractionError(
+        "Runtime extraction destination must be absolute",
+      );
+    }
+    const zipWorkDirectory = `${target}.zip-extracting`;
+    if ((await pathExists(target)) || (await pathExists(zipWorkDirectory))) {
+      throw new RuntimeExtractionError(
+        "Runtime extraction destination must not already exist",
+      );
+    }
+    try {
+      if (manifest.platform === "darwin") {
+        if (!manifest.archive_name.endsWith(".tar.zst")) {
+          throw new RuntimeExtractionError(
+            "macOS Runtime Seed must use TAR/Zstandard",
+          );
+        }
+        await validateTarArchive(
+          archivePath,
+          manifest,
+          maxExtractedBytes,
+          signal,
+        );
+        throwIfAborted(signal);
+        await extractTarArchive(archivePath, target, signal);
+      } else {
+        if (!manifest.archive_name.endsWith(".zip")) {
+          throw new RuntimeExtractionError("Windows Runtime Seed must use ZIP");
+        }
+        await mkdir(zipWorkDirectory, { recursive: false, mode: 0o700 });
+        await extractZipArchive(
+          archivePath,
+          target,
+          zipWorkDirectory,
+          manifest,
+          maxExtractedBytes,
+          signal,
+        );
+      }
+      throwIfAborted(signal);
+      const result = await verifyExtractedRuntimeInventory(
+        target,
+        manifest,
+        maxExtractedBytes,
+        signal,
+      );
+      runtimeExtractionDiagnostic("extract-complete", {
+        activeExtractions: activeRuntimeExtractions,
+        fileCount: result.fileCount,
+        extractedBytes: result.extractedBytes,
+      });
+      return result;
+    } catch (error) {
+      await rm(target, { recursive: true, force: true }).catch(() => undefined);
+      await rm(zipWorkDirectory, { recursive: true, force: true }).catch(
+        () => undefined,
+      );
+      if (isAbortError(error)) throw error;
+      if (error instanceof RuntimeExtractionError) throw error;
+      throw new RuntimeExtractionError("cannot safely extract Runtime Seed", {
+        cause: error,
+      });
+    } finally {
+      await rm(zipWorkDirectory, { recursive: true, force: true }).catch(
+        () => undefined,
+      );
+    }
   } finally {
-    await rm(zipWorkDirectory, { recursive: true, force: true }).catch(
-      () => undefined,
-    );
+    activeRuntimeExtractions -= 1;
+    runtimeExtractionDiagnostic("extract-finally", {
+      activeExtractions: activeRuntimeExtractions,
+    });
   }
 }
