@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { lstat, mkdir, readdir, rename, rm } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Writable } from "node:stream";
@@ -8,7 +8,8 @@ import { createZstdDecompress } from "node:zlib";
 import { extract as extractZip } from "@electron-internal/extract-zip";
 import { Parser, x as extractTar, type ReadEntry } from "tar";
 import {
-  openPromise as openZip,
+  fromRandomAccessReaderPromise,
+  RandomAccessReader,
   type Entry as ZipEntry,
   type ZipFile,
 } from "yauzl";
@@ -50,6 +51,121 @@ export interface ExtractRuntimeArchiveOptions {
   manifest: RuntimeManifest;
   maxExtractedBytes: number;
   signal?: AbortSignal;
+  archiveFileSystemLoader?: RuntimeArchiveFileSystemLoader;
+}
+
+export interface RuntimeArchiveFileHandle {
+  stat(): Promise<{ isFile(): boolean; size: number }>;
+  read(
+    buffer: Buffer,
+    offset: number,
+    length: number,
+    position: number,
+  ): Promise<{ bytesRead: number; buffer: Buffer }>;
+  createReadStream(options: {
+    start: number;
+    end: number;
+    autoClose: false;
+  }): ReturnType<typeof createReadStream>;
+  close(): Promise<void>;
+}
+
+export interface RuntimeArchiveFileSystem {
+  open(path: string, flags: string): Promise<RuntimeArchiveFileHandle>;
+}
+
+export type RuntimeArchiveFileSystemLoader = () => Promise<unknown>;
+
+const NODE_RUNTIME_ARCHIVE_FILE_SYSTEM: RuntimeArchiveFileSystem = {
+  open,
+};
+
+const ORIGINAL_FS_MODULE = "original-fs";
+const loadElectronOriginalFs: RuntimeArchiveFileSystemLoader = () =>
+  import(/* @vite-ignore */ ORIGINAL_FS_MODULE);
+
+function archiveFileSystemCandidate(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object") return {};
+  const record = value as Record<string, unknown>;
+  return record.default && typeof record.default === "object"
+    ? (record.default as Record<string, unknown>)
+    : record;
+}
+
+export async function resolveRuntimeArchiveFileSystem(
+  electronVersion: string | undefined = process.versions.electron,
+  loadOriginalFs?: RuntimeArchiveFileSystemLoader,
+): Promise<RuntimeArchiveFileSystem> {
+  if (!electronVersion && !loadOriginalFs) {
+    return NODE_RUNTIME_ARCHIVE_FILE_SYSTEM;
+  }
+  const candidate = archiveFileSystemCandidate(
+    await (loadOriginalFs ?? loadElectronOriginalFs)(),
+  );
+  const promises = candidate.promises;
+  if (!promises || typeof promises !== "object") {
+    throw new RuntimeExtractionError(
+      "Electron original filesystem is unavailable",
+    );
+  }
+  const promiseRecord = promises as Record<string, unknown>;
+  if (typeof promiseRecord.open !== "function") {
+    throw new RuntimeExtractionError(
+      "Electron original filesystem is unavailable",
+    );
+  }
+  return {
+    open: promiseRecord.open.bind(promises) as RuntimeArchiveFileSystem["open"],
+  };
+}
+
+class RuntimeZipRandomAccessReader extends RandomAccessReader {
+  private closed = false;
+
+  constructor(private readonly handle: RuntimeArchiveFileHandle) {
+    super();
+  }
+
+  override _readStreamForRange(
+    start: number,
+    end: number,
+  ): ReturnType<typeof createReadStream> {
+    return this.handle.createReadStream({
+      start,
+      end: end - 1,
+      autoClose: false,
+    });
+  }
+
+  override read(
+    buffer: Buffer,
+    offset: number,
+    length: number,
+    position: number,
+    callback: (error: Error | null, bytesRead?: number) => void,
+  ): void {
+    void this.handle
+      .read(buffer, offset, length, position)
+      .then(({ bytesRead }) => callback(null, bytesRead))
+      .catch((error: unknown) =>
+        callback(error instanceof Error ? error : new Error("ZIP read failed")),
+      );
+  }
+
+  override close(callback: (error: Error | null) => void): void {
+    if (this.closed) {
+      setImmediate(callback, null);
+      return;
+    }
+    this.closed = true;
+    void this.handle.close().then(
+      () => callback(null),
+      (error: unknown) =>
+        callback(
+          error instanceof Error ? error : new Error("ZIP close failed"),
+        ),
+    );
+  }
 }
 
 interface ArchiveInventoryEntry {
@@ -131,7 +247,7 @@ function zipEntryMetadata(entry: {
 }
 
 async function* zipEntries(
-  zipfile: Awaited<ReturnType<typeof openZip>>,
+  zipfile: ZipFile,
   signal?: AbortSignal,
 ): AsyncGenerator<ZipEntry> {
   let next: (() => void) | null = null;
@@ -180,16 +296,31 @@ async function* zipEntries(
   }
 }
 
-const openRuntimeZip = (archivePath: string): Promise<ZipFile> =>
-  openZip(archivePath, {
-    lazyEntries: true,
-    decodeStrings: true,
-    validateEntrySizes: true,
-    strictFileNames: true,
-  });
+async function openRuntimeZip(
+  archivePath: string,
+  fileSystem: RuntimeArchiveFileSystem,
+): Promise<ZipFile> {
+  const handle = await fileSystem.open(archivePath, "r");
+  const reader = new RuntimeZipRandomAccessReader(handle);
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile()) {
+      throw new RuntimeExtractionError("Runtime ZIP archive must be a file");
+    }
+    return await fromRandomAccessReaderPromise(reader, metadata.size, {
+      lazyEntries: true,
+      decodeStrings: true,
+      validateEntrySizes: true,
+      strictFileNames: true,
+    });
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    throw error;
+  }
+}
 
 async function readZipSymlinkTarget(
-  zipfile: Awaited<ReturnType<typeof openZip>>,
+  zipfile: ZipFile,
   entry: ZipEntry,
   path: string,
   signal?: AbortSignal,
@@ -222,9 +353,13 @@ async function validateZipArchive(
   manifest: RuntimeManifest,
   maxExtractedBytes: number,
   signal?: AbortSignal,
+  fileSystem?: RuntimeArchiveFileSystem,
 ): Promise<void> {
   const validator = new ArchiveInventoryValidator(manifest, maxExtractedBytes);
-  const zipfile = await openRuntimeZip(archivePath);
+  const zipfile = await openRuntimeZip(
+    archivePath,
+    fileSystem ?? (await resolveRuntimeArchiveFileSystem()),
+  );
   try {
     for await (const entry of zipEntries(zipfile, signal)) {
       const metadata = zipEntryMetadata(entry);
@@ -472,8 +607,15 @@ async function extractZipArchive(
   manifest: RuntimeManifest,
   maxExtractedBytes: number,
   signal?: AbortSignal,
+  fileSystem?: RuntimeArchiveFileSystem,
 ): Promise<void> {
-  await validateZipArchive(archivePath, manifest, maxExtractedBytes, signal);
+  await validateZipArchive(
+    archivePath,
+    manifest,
+    maxExtractedBytes,
+    signal,
+    fileSystem,
+  );
   try {
     throwIfAborted(signal);
     await extractZip(archivePath, { dir: workDirectory });
@@ -535,6 +677,7 @@ export async function extractRuntimeArchive({
   manifest,
   maxExtractedBytes,
   signal,
+  archiveFileSystemLoader,
 }: ExtractRuntimeArchiveOptions): Promise<RuntimeExtractionResult> {
   requireExtractionBudget(maxExtractedBytes);
   throwIfAborted(signal);
@@ -560,6 +703,13 @@ export async function extractRuntimeArchive({
   const previousNoAsar = electronProcess.noAsar;
   if (manifest.platform === "windows") electronProcess.noAsar = true;
   try {
+    const archiveFileSystem =
+      manifest.platform === "windows"
+        ? await resolveRuntimeArchiveFileSystem(
+            process.versions.electron,
+            archiveFileSystemLoader,
+          )
+        : undefined;
     if (manifest.platform === "darwin") {
       if (!manifest.archive_name.endsWith(".tar.zst")) {
         throw new RuntimeExtractionError(
@@ -586,6 +736,7 @@ export async function extractRuntimeArchive({
         manifest,
         maxExtractedBytes,
         signal,
+        archiveFileSystem,
       );
     }
     throwIfAborted(signal);
