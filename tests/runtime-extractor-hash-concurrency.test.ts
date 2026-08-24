@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   chmod,
   lstat,
+  mkdir,
   mkdtemp,
   open,
   readFile,
@@ -76,6 +77,75 @@ it("allows the isolated Electron Node helper to use ordinary Node fs", async () 
     if (previousNodeFs === undefined)
       delete process.env.AGENTERA_RUNTIME_INVENTORY_USE_NODE_FS;
     else process.env.AGENTERA_RUNTIME_INVENTORY_USE_NODE_FS = previousNodeFs;
+  }
+});
+
+it("uses one recursive enumeration in the isolated Windows helper path", async () => {
+  const { verifyExtractedRuntimeInventoryInProcess } =
+    await import("../src/main/agentera-runtime-distribution/inventory");
+  const root = await mkdtemp(join(tmpdir(), "aera-runtime-recursive-helper-"));
+  const contents = Buffer.from("recursive helper bytes");
+  const physicalPath = join(root, "runtime", "hermes.exe");
+  await mkdir(join(root, "runtime"), { recursive: true });
+  await writeFile(physicalPath, contents);
+  const manifest = {
+    platform: "windows",
+    files: [
+      {
+        path: "runtime",
+        kind: "directory",
+        size: 0,
+        sha256: null,
+        mode: 0o755,
+        link_target: null,
+      },
+      {
+        path: "runtime/hermes.exe",
+        kind: "file",
+        size: contents.length,
+        sha256: createHash("sha256").update(contents).digest("hex"),
+        mode: 0o755,
+        link_target: null,
+      },
+    ],
+  } as RuntimeManifest;
+  const readDirectory = vi.fn(readdir);
+  const previousHelper = process.env.AGENTERA_RUNTIME_INVENTORY_HELPER;
+  const previousNodeFs = process.env.AGENTERA_RUNTIME_INVENTORY_USE_NODE_FS;
+  process.env.AGENTERA_RUNTIME_INVENTORY_HELPER = "1";
+  process.env.AGENTERA_RUNTIME_INVENTORY_USE_NODE_FS = "1";
+  try {
+    await expect(
+      verifyExtractedRuntimeInventoryInProcess(
+        root,
+        manifest,
+        contents.length,
+        undefined,
+        "win32",
+        undefined,
+        {
+          chmod,
+          lstat,
+          open,
+          readFile,
+          readlink,
+          readdir: readDirectory,
+          realpath,
+        } satisfies RuntimeInventoryFileSystem,
+      ),
+    ).resolves.toEqual({ fileCount: 1, extractedBytes: contents.length });
+    expect(readDirectory).toHaveBeenCalledWith(await realpath(root), {
+      recursive: true,
+      withFileTypes: true,
+    });
+  } finally {
+    if (previousHelper === undefined)
+      delete process.env.AGENTERA_RUNTIME_INVENTORY_HELPER;
+    else process.env.AGENTERA_RUNTIME_INVENTORY_HELPER = previousHelper;
+    if (previousNodeFs === undefined)
+      delete process.env.AGENTERA_RUNTIME_INVENTORY_USE_NODE_FS;
+    else process.env.AGENTERA_RUNTIME_INVENTORY_USE_NODE_FS = previousNodeFs;
+    await rm(root, { recursive: true, force: true });
   }
 });
 

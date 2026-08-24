@@ -50,6 +50,7 @@ export type RuntimeFileHasher = (
 
 export type RuntimeInventoryDiagnosticEvent =
   | "inventory-walk-start"
+  | "inventory-recursive-read-complete"
   | "inventory-walk-complete"
   | "inventory-hash-start"
   | "inventory-hash-complete";
@@ -177,12 +178,22 @@ async function hashFileWithHandle(
   path: string,
   signal: AbortSignal | undefined,
   openFile: typeof open,
+  expectedSize?: number,
 ): Promise<string> {
   const hash = createHash("sha256");
   const handle = await openFile(path, "r");
   const buffer = Buffer.allocUnsafe(RUNTIME_HASH_BUFFER_BYTES);
   let position = 0;
   try {
+    const metadata = await handle.stat();
+    if (
+      !metadata.isFile() ||
+      (expectedSize !== undefined && metadata.size !== expectedSize)
+    ) {
+      throw new RuntimeExtractionError(
+        `extracted Runtime size differs from the manifest: ${path}`,
+      );
+    }
     while (true) {
       throwIfAborted(signal);
       const { bytesRead } = await handle.read(
@@ -323,6 +334,179 @@ export function shouldEnforceExtractedRuntimeMode(
   return manifestPlatform !== "windows" && hostPlatform !== "win32";
 }
 
+/**
+ * Windows packaged helper path.  Recursive readdir gives us the complete
+ * staging tree in one filesystem enumeration; the normal path otherwise
+ * performs one directory enumeration plus a lstat for every entry.  File
+ * handles still stat and hash every file, so a replacement cannot pass the
+ * signed size/hash check.  This path is enabled only for the isolated helper
+ * diagnostic while the packaged Electron boundary is being measured.
+ */
+async function verifyExtractedRuntimeInventoryRecursive(
+  destination: string,
+  manifest: RuntimeManifest,
+  maxExtractedBytes: number,
+  signal: AbortSignal | undefined,
+  hostPlatform: NodeJS.Platform,
+  onDiagnostic: RuntimeInventoryDiagnosticObserver | undefined,
+  fileSystem: RuntimeInventoryFileSystem,
+): Promise<RuntimeExtractionResult> {
+  requireExtractionBudget(maxExtractedBytes);
+  const root = await fileSystem.realpath(destination);
+  const expected = new Map(manifest.files.map((entry) => [entry.path, entry]));
+  const expectedComparable = new Set(
+    manifest.files.map((entry) =>
+      normalizedComparablePath(entry.path, manifest.platform === "windows"),
+    ),
+  );
+  const seen = new Set<string>();
+  const comparableSeen = new Set<string>();
+  const fileHashChecks: RuntimeFileHashCheck[] = [];
+  let fileCount = 0;
+  let extractedBytes = 0;
+  const children = (await fileSystem.readdir(root, {
+    recursive: true,
+    withFileTypes: true,
+  })) as Array<{
+    name: string;
+    parentPath?: string;
+    isDirectory(): boolean;
+    isFile(): boolean;
+    isSymbolicLink(): boolean;
+  }>;
+  if (children.some((child) => typeof child.parentPath !== "string")) {
+    throw new RuntimeExtractionError(
+      "recursive Runtime inventory enumeration is unavailable",
+    );
+  }
+  const entries = children
+    .map((child) => {
+      const physicalPath = join(child.parentPath as string, child.name);
+      const relativePath = relative(root, physicalPath).split(sep).join("/");
+      return { child, physicalPath, relativePath };
+    })
+    .sort((left, right) =>
+      Buffer.from(left.relativePath).compare(Buffer.from(right.relativePath)),
+    );
+  onDiagnostic?.("inventory-recursive-read-complete");
+  for (const { child, physicalPath, relativePath } of entries) {
+    throwIfAborted(signal);
+    if (
+      relativePath.length === 0 ||
+      (relativePath.includes("/") === false &&
+        INSTALLED_METADATA_FILES.has(relativePath))
+    ) {
+      if (!relativePath.includes("/") && INSTALLED_METADATA_FILES.has(relativePath)) {
+        const metadata = await fileSystem.lstat(physicalPath);
+        if (!metadata.isFile() || metadata.isSymbolicLink()) {
+          throw new RuntimeExtractionError(
+            "installed Runtime metadata must be a regular file",
+          );
+        }
+        continue;
+      }
+    }
+    validateRelativePath(relativePath, "extracted Runtime path");
+    const comparablePath = normalizedComparablePath(
+      relativePath,
+      manifest.platform === "windows",
+    );
+    if (comparableSeen.has(comparablePath)) {
+      throw new RuntimeExtractionError(
+        `extracted Runtime contains a duplicate path: ${relativePath}`,
+      );
+    }
+    comparableSeen.add(comparablePath);
+    const expectedEntry = expected.get(relativePath);
+    if (!expectedEntry) {
+      if (expectedComparable.has(comparablePath)) {
+        throw new RuntimeExtractionError(
+          `extracted Runtime contains a duplicate path: ${relativePath}`,
+        );
+      }
+      throw new RuntimeExtractionError(
+        `extracted Runtime contains an unexpected path: ${relativePath}`,
+      );
+    }
+    const kind: RuntimeInventoryKind = child.isSymbolicLink()
+      ? "symlink"
+      : child.isDirectory()
+        ? "directory"
+        : child.isFile()
+          ? "file"
+          : (() => {
+              throw new RuntimeExtractionError(
+                `extracted Runtime contains a special file: ${relativePath}`,
+              );
+            })();
+    if (kind !== expectedEntry.kind) {
+      throw new RuntimeExtractionError(
+        `extracted Runtime kind differs from the manifest: ${relativePath}`,
+      );
+    }
+    if (kind === "file") {
+      extractedBytes += expectedEntry.size;
+      fileCount += 1;
+      if (
+        !Number.isSafeInteger(extractedBytes) ||
+        extractedBytes > maxExtractedBytes
+      ) {
+        throw new RuntimeExtractionError(
+          "extracted Runtime exceeds the signed extraction budget",
+        );
+      }
+      fileHashChecks.push({
+        physicalPath,
+        relativePath,
+        expectedSha256: expectedEntry.sha256,
+        size: expectedEntry.size,
+      });
+    } else if (kind === "symlink") {
+      const target = await fileSystem.readlink(physicalPath);
+      validateSymlinkTarget(relativePath, target);
+      if (target !== expectedEntry.link_target) {
+        throw new RuntimeExtractionError(
+          `extracted Runtime symlink differs from the manifest: ${relativePath}`,
+        );
+      }
+      const resolvedTarget = await fileSystem.realpath(physicalPath).catch(
+        (error: unknown) => {
+          throw new RuntimeExtractionError(
+            `extracted Runtime symlink is broken: ${relativePath}`,
+            { cause: error },
+          );
+        },
+      );
+      if (pathEscapes(root, resolvedTarget)) {
+        throw new RuntimeExtractionError(
+          `extracted Runtime symlink escapes its root: ${relativePath}`,
+        );
+      }
+    }
+    seen.add(relativePath);
+  }
+  const missing = manifest.files.find((entry) => !seen.has(entry.path));
+  if (missing) {
+    throw new RuntimeExtractionError(
+      `extracted Runtime is missing a manifest path: ${missing.path}`,
+    );
+  }
+  if (extractedBytes !== manifestExtractedBytes(manifest)) {
+    throw new RuntimeExtractionError(
+      "extracted Runtime byte count differs from the manifest",
+    );
+  }
+  onDiagnostic?.("inventory-hash-start");
+  await verifyRuntimeFileHashes(
+    fileHashChecks,
+    signal,
+    (path, hashSignal, size) =>
+      hashFileWithHandle(path, hashSignal, fileSystem.open, size),
+  );
+  onDiagnostic?.("inventory-hash-complete");
+  return { fileCount, extractedBytes };
+}
+
 export async function verifyExtractedRuntimeInventoryInProcess(
   destination: string,
   manifest: RuntimeManifest,
@@ -335,6 +519,21 @@ export async function verifyExtractedRuntimeInventoryInProcess(
   requireExtractionBudget(maxExtractedBytes);
   const inventoryFileSystem =
     fileSystem ?? (await resolveRuntimeInventoryFileSystem());
+  if (
+    hostPlatform === "win32" &&
+    process.env.AGENTERA_RUNTIME_INVENTORY_HELPER === "1" &&
+    process.env.AGENTERA_RUNTIME_INVENTORY_USE_NODE_FS === "1"
+  ) {
+    return verifyExtractedRuntimeInventoryRecursive(
+      destination,
+      manifest,
+      maxExtractedBytes,
+      signal,
+      hostPlatform,
+      onDiagnostic,
+      inventoryFileSystem,
+    );
+  }
   const root = await inventoryFileSystem.realpath(destination);
   const enforceExtractedModes = shouldEnforceExtractedRuntimeMode(
     manifest.platform,
