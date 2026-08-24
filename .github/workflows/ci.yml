@@ -18,6 +18,7 @@ on:
         options:
           - full
           - windows-process-tree-diagnostic
+          - windows-runtime-install-diagnostic
 
 permissions:
   contents: read
@@ -139,6 +140,7 @@ jobs:
         continue-on-error: true
 
   windows-model-recovery:
+    if: github.event_name != 'workflow_dispatch' || inputs.mode == 'full'
     name: windows-model-recovery
     runs-on: windows-latest
     timeout-minutes: 10
@@ -206,3 +208,58 @@ jobs:
           --maxWorkers=1
           --testTimeout=20000
           --reporter=verbose
+
+  windows-runtime-install-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'windows-runtime-install-diagnostic'
+    name: windows-runtime-install-diagnostic
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare and verify locked Windows Runtime Seed
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.AERA_CROSS_REPO_READ_TOKEN || github.token }}
+        run: |
+          npm run prepare:runtime-seed -- --platform windows --arch x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run verify:packaged-runtime-seed -- `
+            resources/agentera-runtime-seed `
+            --desktop-version "0.7.4-internal-beta.38"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Measure locked Runtime Seed installation
+        shell: pwsh
+        env:
+          AGENTERA_RUNTIME_INSTALL_DIAGNOSTIC: "1"
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "runtime-install-diagnostic"
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          $env:AGENTERA_RUNTIME_SEED_DIR = Join-Path $env:GITHUB_WORKSPACE "resources/agentera-runtime-seed"
+          $env:AGENTERA_RUNTIME_INSTALL_DIAGNOSTIC_OUTPUT = Join-Path $evidence "events.jsonl"
+          npx vitest run tests/runtime-seed-install-live-diagnostic.test.ts `
+            --maxWorkers=1 `
+            --testTimeout=420000 `
+            --reporter=verbose 2>&1 | Tee-Object -FilePath (Join-Path $evidence "vitest.log")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload bounded Runtime install diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-runtime-install-diagnostic-${{ github.run_id }}
+          path: ${{ runner.temp }}/runtime-install-diagnostic
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

@@ -147,6 +147,44 @@ test("candidate CI validators reject a diagnostic-only run", async () => {
   }
 });
 
+test("CI exposes one bounded Windows Runtime Seed install diagnostic", async () => {
+  const raw = await readFile(ciWorkflowPath, "utf8");
+  const workflow = parseYAML(raw);
+  const modes = workflow.on.workflow_dispatch.inputs.mode.options;
+  assert.ok(modes.includes("windows-runtime-install-diagnostic"));
+
+  const diagnostic = workflow.jobs["windows-runtime-install-diagnostic"];
+  assert.ok(
+    diagnostic,
+    "CI must define the Windows Runtime install diagnostic",
+  );
+  assert.equal(diagnostic["runs-on"], "windows-2025");
+  assert.match(
+    diagnostic.if,
+    /inputs\.mode == 'windows-runtime-install-diagnostic'/u,
+  );
+  const run = diagnostic.steps.find(
+    (step) => step.name === "Measure locked Runtime Seed installation",
+  );
+  assert.ok(run, "diagnostic must execute the real locked Seed installer");
+  assert.match(run.run, /runtime-seed-install-live-diagnostic\.test\.ts/u);
+  assert.match(run.run, /AGENTERA_RUNTIME_INSTALL_DIAGNOSTIC/u);
+  assert.match(run.run, /AGENTERA_RUNTIME_INSTALL_DIAGNOSTIC_OUTPUT/u);
+
+  const upload = diagnostic.steps.find(
+    (step) => step.name === "Upload bounded Runtime install diagnostics",
+  );
+  assert.ok(upload, "diagnostic must preserve evidence even on failure");
+  assert.equal(upload.if, "always()");
+  assert.equal(upload.uses, "actions/upload-artifact@v4");
+
+  assert.match(
+    workflow.jobs["windows-model-recovery"].if,
+    /inputs\.mode == 'full'/u,
+    "diagnostic dispatches must not spend a second Windows job on recovery",
+  );
+});
+
 test("candidate CI validators reject a missing required platform", async () => {
   const workflows = await Promise.all([
     readFile(workflowPath, "utf8"),

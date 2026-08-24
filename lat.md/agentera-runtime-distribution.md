@@ -192,6 +192,12 @@ Each macOS and Windows Internal Beta job launches the exact packaged Electron ex
 
 [[tests/e2e/agentera-runtime-contract.e2e.ts]] follows `current.json` to the installed manifest, requires its SHA-256 to equal the packaged Seed manifest SHA-256, hashes the installed Python and Hermes entrypoint, starts the real Gateway, binds its PID and listening port to that Python, and requires `request_tool_policy` plus `request_model_route`. The emitted candidate evidence contains only bounded identities, hashes, PID, port, and capabilities; it excludes local paths and credentials.
 
+### Windows Seed install timing diagnostic
+
+A manual Windows-only CI mode isolates the locked Seed installer from packaging so a candidate timeout can be assigned to one bounded installation stage without repeating the release build.
+
+[[tests/runtime-seed-install-live-diagnostic.test.ts]] runs only when explicitly enabled, records path-free progress and individual health-probe timings, aborts after a bounded deadline, and removes its isolated Runtime root. Full CI and candidate validation cannot treat this diagnostic-only run as release evidence.
+
 ## Independent verification
 
 The main process verifies canonical manifest bytes, Ed25519 trust, signed context, archive size, and SHA-256 before accepting a Runtime artifact.
