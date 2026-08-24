@@ -271,6 +271,22 @@ describe("coordinated model configuration IPC bridge", () => {
     expect(coordinator.mutate).toHaveBeenCalledWith(request);
   });
 
+  it("passes an explicit save-only flag and rejects non-boolean activation", async () => {
+    const { bridge, coordinator } = subject();
+    const request = upsertRequest({ activate: false });
+
+    await bridge.mutateModelConfiguration(request);
+    expect(coordinator.mutate).toHaveBeenCalledWith(request);
+
+    await expect(
+      bridge.mutateModelConfiguration({
+        ...request,
+        activate: "false",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    expect(coordinator.mutate).toHaveBeenCalledTimes(1);
+  });
+
   it("passes the Owner epoch guard into the coordinated mutation", async () => {
     const { bridge, coordinator } = subject();
     const ownerGuard = vi.fn();

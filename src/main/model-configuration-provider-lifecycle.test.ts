@@ -25,7 +25,10 @@ afterEach(() => {
   else process.env.HERMES_HOME = originalHermesHome;
 });
 
-async function makeRuntime(active: "petoi" | "codex"): Promise<{
+async function makeRuntime(
+  active: "petoi" | "codex",
+  options: { dropModelCatalogWrites?: boolean } = {},
+): Promise<{
   handle: import("./model-configuration-runtime").ModelConfigurationRuntimeHandle;
   config: typeof import("./config");
 }> {
@@ -137,6 +140,16 @@ async function makeRuntime(active: "petoi" | "codex"): Promise<{
   const actualInstaller =
     await vi.importActual<typeof import("./installer")>("./installer");
   vi.doMock("./installer", () => actualInstaller);
+  vi.doUnmock("./models");
+  const actualModels = await vi.importActual<typeof import("./models")>(
+    "./models",
+  );
+  vi.doMock("./models", () => ({
+    ...actualModels,
+    ...(options.dropModelCatalogWrites
+      ? { persistModelCatalogWritePlan: vi.fn() }
+      : {}),
+  }));
   const [{ AgenteraProfileBindingStore }, runtime, modelDatabase, config] =
     await Promise.all([
       import("./agentera-profile-binding"),
@@ -252,6 +265,36 @@ describe("multiple custom provider lifecycle", () => {
         activate: false,
       });
       expect(result).toMatchObject({ status: "committed" });
+      expect(config.getModelConfigFresh("default")).toMatchObject({
+        provider: "custom:petoi.cn",
+        baseUrl: "https://petoi.cn/v1",
+      });
+    } finally {
+      handle.close();
+    }
+  });
+
+  it("rejects a save-only mutation when the new provider route was not persisted", async () => {
+    const { handle, config } = await makeRuntime("petoi", {
+      dropModelCatalogWrites: true,
+    });
+    try {
+      const catalog = handle.catalog!.snapshot("default");
+      const result = await handle.coordinator!.mutate({
+        ...updateRequest(
+          catalog.revision,
+          "",
+          "missing-provider.example",
+          "https://missing-provider.example/v1",
+        ),
+        providerId: undefined,
+        apiKey: "missing-provider-secret",
+        activate: false,
+      });
+      expect(result).toMatchObject({
+        status: "rejected",
+        stage: "verification",
+      });
       expect(config.getModelConfigFresh("default")).toMatchObject({
         provider: "custom:petoi.cn",
         baseUrl: "https://petoi.cn/v1",

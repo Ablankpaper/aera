@@ -588,6 +588,13 @@ function createMutationAdapter(
           location: { kind: "local" },
           applyStage,
           verify: async (snapshot) => {
+            const requestedRouteExists = snapshot.routes.some(
+              (route) =>
+                route.sourceProfileId === context.targetProfileId &&
+                canonicalPublicRouteKey(route) === requestedRouteKey,
+            );
+            if (!requestedRouteExists) return false;
+
             const routeExists = snapshot.routes.some(
               (route) =>
                 route.sourceProfileId === context.targetProfileId &&

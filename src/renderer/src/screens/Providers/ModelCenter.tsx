@@ -818,7 +818,7 @@ export default function ModelCenter({
       modelBelongsToCustomProvider(model, provider),
     );
     const selectedModel =
-      normalizeUrl(activeModel.baseUrl) === normalizeUrl(provider.baseUrl)
+      activeCustomProvider?.id === provider.id
         ? activeModel.model
         : attachedModels[0]?.model || "";
     const selected = attachedModels.find(

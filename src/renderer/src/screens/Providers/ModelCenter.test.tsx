@@ -1780,6 +1780,80 @@ describe("ModelCenter", () => {
     ).not.toHaveClass("active");
   });
 
+  it("edits an inactive provider with its own model when providers share an endpoint", async () => {
+    listModels.mockResolvedValue([
+      {
+        id: "shared-model-a",
+        name: "model-a",
+        provider: "custom",
+        providerLabel: "Provider A",
+        providerId: "provider-a",
+        model: "model-a",
+        baseUrl: "https://shared.example/v1",
+        createdAt: 1,
+      },
+      {
+        id: "shared-model-b",
+        name: "model-b",
+        provider: "custom",
+        providerLabel: "Provider B",
+        providerId: "provider-b",
+        model: "model-b",
+        baseUrl: "https://shared.example/v1",
+        createdAt: 2,
+      },
+    ]);
+    listCustomProviders.mockResolvedValue([
+      {
+        id: "provider-a",
+        name: "Provider A",
+        baseUrl: "https://shared.example/v1",
+        createdAt: 1,
+      },
+      {
+        id: "provider-b",
+        name: "Provider B",
+        baseUrl: "https://shared.example/v1",
+        createdAt: 2,
+      },
+    ]);
+
+    const { container } = render(
+      <ModelCenter
+        profile="acceptance"
+        env={{
+          CUSTOM_PROVIDER_PROVIDER_A_KEY: "configured-a",
+          CUSTOM_PROVIDER_PROVIDER_B_KEY: "configured-b",
+        }}
+        activeModel={{
+          provider: "custom:provider-a",
+          model: "model-a",
+          baseUrl: "https://shared.example/v1",
+        }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    const inactiveCard = await waitFor(() => {
+      const card = container.querySelector(
+        '[data-service-key="custom:provider-b"]',
+      );
+      expect(card).toBeInTheDocument();
+      return card as HTMLElement;
+    });
+    fireEvent.click(
+      within(inactiveCard).getByRole("button", { name: "common.edit" }),
+    );
+
+    expect(document.getElementById("provider-model")).toHaveValue("model-b");
+    expect(
+      screen.getByRole("button", { name: /^common\.save$/ }),
+    ).toBeVisible();
+  });
+
   it("filters configured services and keeps model previews compact", async () => {
     listModels.mockResolvedValue([
       ...Array.from({ length: 8 }, (_, index) => ({
