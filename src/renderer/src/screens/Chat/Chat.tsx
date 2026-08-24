@@ -29,6 +29,8 @@ import {
 import { useI18n } from "../../components/useI18n";
 import { buildChatTranscript } from "./transcriptUtils";
 import { insertModelSwitchMarker } from "./chatMessages";
+import { modelSwitchErrorKey } from "./agentModelSwitchError";
+import { chatErrorMessageKey } from "./chatErrorPresentation";
 import { ConfigHealthBanner } from "../../components/ConfigHealthBanner";
 import { ConversationBoundaryIndicator } from "./ConversationBoundaryIndicator";
 import type { Attachment } from "../../../../shared/attachments";
@@ -643,7 +645,7 @@ function Chat({
       }
       setPendingAgentModelSelection(undefined);
       setAgentSwitchState("failed");
-      toast(t("chat.modelSwitch.failedKeepsCurrent"), {
+      toast(t(modelSwitchErrorKey(event.code)), {
         id: `model-switch-failed-${event.segmentId}`,
         duration: 7000,
       });
@@ -655,11 +657,10 @@ function Chat({
     (error: unknown): void => {
       setPendingAgentModelSelection(undefined);
       setAgentSwitchState("failed");
-      toast(t("chat.modelSwitch.failedKeepsCurrent"), {
+      toast(t(modelSwitchErrorKey(error)), {
         id: "model-switch-send-failed",
         duration: 7000,
       });
-      void error;
     },
     [t],
   );
@@ -675,6 +676,7 @@ function Chat({
     activeTurnRef,
     onSessionStarted: handleChatSessionStarted,
     onAgentSegment: handleAgentSegment,
+    formatChatError: (event) => t(chatErrorMessageKey(event)),
   });
 
   // Once a successfully switched turn finishes, allow another selection. A

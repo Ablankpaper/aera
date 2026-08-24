@@ -235,7 +235,7 @@ test("internal-Beta candidate is exact-SHA, notarized on macOS, explicitly unsig
   assert.match(raw, /test "\$VERSION" = "0\.7\.4-internal-beta\.38"/u);
   assert.ok(
     raw.includes(
-      '--release-notes "Beta.38 更新 AgentEra Runtime 至 0.20.0-agentera.4，修复请求级模型路由与工具策略能力协商、移除请求中的 API Key，并修复模型切换后的 Gateway 重启端口复用和界面焦点时序问题。保留 Beta.37 的 Profile staging 隔离、Beta.36 的智能体能力优先界面与会话级模型切换、Beta.35 的默认模型和智能体模型选择修复、Beta.34 的首次登录/模型发现/更新状态修复、Beta.33 的模型配置可靠性修复。Beta.29 故障机使用 DMG 桥接安装，Beta.31/Beta.32/Beta.33/Beta.34/Beta.35/Beta.36/Beta.37 支持在线升级。macOS 内测包已签名并公证；Windows 内测包未进行 Authenticode 签名，仅供受控内测使用。"',
+      '--release-notes "Beta.38 更新 AgentEra Runtime 至 0.20.0-agentera.5，修复请求级模型路由与工具策略能力协商、移除请求中的 API Key，并修复模型切换后的 Gateway 重启端口复用和界面焦点时序问题。保留 Beta.37 的 Profile staging 隔离、Beta.36 的智能体能力优先界面与会话级模型切换、Beta.35 的默认模型和智能体模型选择修复、Beta.34 的首次登录/模型发现/更新状态修复、Beta.33 的模型配置可靠性修复。Beta.29 故障机使用 DMG 桥接安装，Beta.31/Beta.32/Beta.33/Beta.34/Beta.35/Beta.36/Beta.37 支持在线升级。macOS 内测包已签名并公证；Windows 内测包未进行 Authenticode 签名，仅供受控内测使用。"',
     ),
   );
   assert.equal(workflow.name, "Desktop internal Beta candidate");

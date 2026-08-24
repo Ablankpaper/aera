@@ -135,6 +135,11 @@ import {
 } from "../hermes";
 import type { ChatCallbacks } from "../hermes";
 import {
+  classifyRendererChatError,
+  rendererChatErrorRejection,
+  rendererChatErrorNotificationBody,
+} from "../chat-error-contract";
+import {
   freshDashboardWebSocketUrl,
   getDashboardStatus,
   startDashboard,
@@ -4099,8 +4104,9 @@ export function registerIpcHandlers(context: IpcContext): void {
                 } catch {
                   const message =
                     "Aera conversation boundary session attachment failed.";
-                  safeSend("chat-error", message);
-                  rejectChat(new Error(message));
+                  const rendererError = classifyRendererChatError(message);
+                  safeSend("chat-error", rendererError);
+                  rejectChat(rendererChatErrorRejection(rendererError));
                   return;
                 }
                 bindGlobalProfileSnapshotToSession(sessionId);
@@ -4154,8 +4160,9 @@ export function registerIpcHandlers(context: IpcContext): void {
               abortThisRun();
               const message =
                 "Aera conversation boundary session attachment failed.";
-              safeSend("chat-error", message);
-              rejectChat(new Error(message));
+              const rendererError = classifyRendererChatError(message);
+              safeSend("chat-error", rendererError);
+              rejectChat(rendererChatErrorRejection(rendererError));
               runtimeRun.finish();
               return;
             }
@@ -4175,13 +4182,14 @@ export function registerIpcHandlers(context: IpcContext): void {
           onError: (error) => {
             try {
               officialQualityObserver.onError(error);
-              safeSend("chat-error", error);
-              rejectChat(new Error(error));
+              const rendererError = classifyRendererChatError(error);
+              safeSend("chat-error", rendererError);
+              rejectChat(rendererChatErrorRejection(rendererError));
               // Notify on error too if window not focused
               if (mainWindow && !mainWindow.isFocused()) {
                 new Notification({
                   title: `${APP_NAME} — Error`,
-                  body: error.slice(0, 100),
+                  body: rendererChatErrorNotificationBody(rendererError),
                 }).show();
               }
             } finally {

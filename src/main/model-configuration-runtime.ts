@@ -64,6 +64,7 @@ import {
   planNativeCustomProviderUpsert,
 } from "./native-custom-provider";
 import { canonicalProviderBaseUrl } from "./provider-registry";
+import { runtimeProviderMatchesPublicRoute } from "./runtime-provider-compat";
 import { getSecret } from "./secrets";
 import {
   listResolvedAgentRuntimeModelRoutes,
@@ -240,6 +241,15 @@ function routeMatchesConfig(
   );
   const routeEndpoint = normalizedEndpoint(route.baseUrl);
   if (configEndpoint !== routeEndpoint) return false;
+  if (
+    runtimeProviderMatchesPublicRoute(
+      route.provider,
+      route.baseUrl,
+      config.provider,
+    )
+  ) {
+    return true;
+  }
   if (providerEquivalent(route.provider, config.provider)) return true;
   if (isCustomProviderRoute(config.provider) && route.providerLabel) {
     const named = namedCustomProviderRuntimeName(config.provider);
@@ -273,7 +283,11 @@ function activeRouteIdentity(
       candidate.model === config.model &&
       normalizedEndpoint(candidate.baseUrl || "") ===
         normalizedEndpoint(config.baseUrl || "") &&
-      providerEquivalent(candidate.provider, config.provider),
+      (runtimeProviderMatchesPublicRoute(
+        candidate.provider,
+        candidate.baseUrl || "",
+        config.provider,
+      ) || providerEquivalent(candidate.provider, config.provider)),
   );
   return {
     provider: config.provider,

@@ -12,7 +12,7 @@ interface ChatIpcCallbacks {
   chunk?: Callback<[string, string]>;
   reasoning?: Callback<[string, string]>;
   done?: Callback<[string, string]>;
-  error?: Callback<[string, string]>;
+  error?: Callback<[string, unknown]>;
   toolProgress?: Callback<[string, string]>;
   toolEvent?: Callback<[string, unknown]>;
   usage?: Callback<[string, UsageState]>;
@@ -53,7 +53,7 @@ function installHermesApi(callbacks: ChatIpcCallbacks): {
         callbacks.done = cb;
         return vi.fn();
       },
-      onChatError: (cb: Callback<[string, string]>) => {
+      onChatError: (cb: Callback<[string, unknown]>) => {
         callbacks.error = cb;
         return vi.fn();
       },
@@ -89,6 +89,42 @@ function installHermesApi(callbacks: ChatIpcCallbacks): {
   });
 
   return { getSessionMessages };
+}
+
+function ErrorHarness(): React.JSX.Element {
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: "user-live",
+      role: "user",
+      content: "private prompt",
+      turnId: "turn-live",
+    },
+  ]);
+  const [, setHermesSessionId] = useState<string | null>(null);
+  const [, setToolProgress] = useState<string | null>(null);
+  const [, setIsLoading] = useState(true);
+  const [, setUsage] = useState<UsageState | null>(null);
+  const activeTurnRef = useRef<ActiveTurn | null>({
+    startIndex: 0,
+    status: "running",
+    turnId: "turn-live",
+    userId: "user-live",
+  });
+  const input = {
+    runId: "run-1",
+    sessionScopeId: null,
+    setMessages,
+    setHermesSessionId,
+    setToolProgress,
+    setIsLoading,
+    setUsage,
+    activeTurnRef,
+    formatChatError: () => "Provider credential is invalid or expired.",
+  } as Parameters<typeof useChatIPC>[0] & {
+    formatChatError: (event: unknown) => string;
+  };
+  useChatIPC(input);
+  return <output data-testid="chat-errors">{JSON.stringify(messages)}</output>;
 }
 
 function QualityHarness(): React.JSX.Element {
@@ -227,6 +263,26 @@ describe("useChatIPC session scoping", () => {
     expect(screen.getByTestId("ids")).toHaveTextContent(
       JSON.stringify(["db-1", "db-2"]),
     );
+  });
+});
+
+describe("useChatIPC error presentation", () => {
+  it("renders only the safe mapped message from a structured error event", async () => {
+    const callbacks: ChatIpcCallbacks = {};
+    installHermesApi(callbacks);
+    render(<ErrorHarness />);
+
+    await act(async () => {
+      callbacks.error?.("run-1", {
+        code: "provider_authentication_rejected",
+        detail: "sk-private /Users/alice/.hermes/.env",
+      });
+    });
+
+    const rendered = screen.getByTestId("chat-errors").textContent ?? "";
+    expect(rendered).toContain("Provider credential is invalid or expired.");
+    expect(rendered).not.toContain("sk-private");
+    expect(rendered).not.toContain("/Users/alice");
   });
 });
 

@@ -297,12 +297,23 @@ function segmentEvent(
 }
 
 function safeFailureCode(error: unknown): string {
+  const providerAuthenticationCode = "provider_authentication_rejected";
+  if (
+    typeof error === "string" &&
+    new RegExp(
+      `(^|[^a-z0-9_])${providerAuthenticationCode}([^a-z0-9_]|$)`,
+      "i",
+    ).test(error)
+  ) {
+    return providerAuthenticationCode;
+  }
   if (
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
     typeof error.code === "string" &&
-    /^model_switch_[a-z0-9_]{1,96}$/.test(error.code)
+    (/^model_switch_[a-z0-9_]{1,96}$/.test(error.code) ||
+      error.code === providerAuthenticationCode)
   ) {
     return error.code;
   }

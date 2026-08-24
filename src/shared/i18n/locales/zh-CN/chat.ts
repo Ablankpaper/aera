@@ -8,8 +8,37 @@ export default {
     preparing: "正在为当前对话准备所选模型…",
     failedKeepsCurrent:
       "模型切换失败，当前对话仍使用之前的模型。请检查模型配置后重试。",
+    sourceUnavailable:
+      "所选模型已不可用，当前对话仍使用之前的模型。请刷新模型列表后重试。",
+    routeDrift:
+      "所选模型配置在切换期间发生变化，当前对话仍使用之前的模型。请重新选择。",
+    routeAmbiguous:
+      "所选模型对应多个冲突的服务端点，当前对话仍使用之前的模型。请在模型中心整理配置。",
+    credentialUnavailable:
+      "所选模型的 API Key 不可用，当前对话仍使用之前的模型。请检查提供商凭据。",
+    remoteUnavailable:
+      "当前连接不支持所选模型，当前对话仍使用之前的模型。请切换到可用连接。",
+    ownerChanged:
+      "账号或工作区已切换，模型切换已取消。当前对话仍使用之前的模型。",
+    runtimeRouteUnsupported:
+      "当前 Aera Runtime 不支持按消息切换模型，请先升级应用后重试。",
+    transportFailed:
+      "模型服务启动或连接失败，当前对话仍使用之前的模型。请检查网关后重试。",
+    providerAuthenticationRejected:
+      "提供商拒绝了当前 API Key。请更新凭据后重试；网关仍在运行。",
     marker: "模型已切换",
     fixedPolicy: "此智能体使用固定模型策略，无法切换模型。",
+  },
+  errors: {
+    providerAuthenticationRejected:
+      "提供商的 API Key 无效或已过期，请更新凭据后重试。网关仍在运行。",
+    runtimeRouteUnsupported:
+      "当前 Aera Runtime 不支持按请求切换模型，请先升级应用后重试。",
+    runtimeToolPolicyUnsupported:
+      "当前 Aera Runtime 不支持此智能体所需的工具策略，请先升级应用后重试。",
+    runtimeUnavailable: "当前智能体运行环境暂时不可用，请稍后重试。",
+    transportUnavailable: "无法连接本地智能体运行环境，请稍后重试。",
+    runtimeFailed: "本次请求失败，请重试；如持续失败请运行诊断采集器。",
   },
   commandsTitle: "命令",
   typeMessage: "输入消息...（Shift+Enter 换行）",

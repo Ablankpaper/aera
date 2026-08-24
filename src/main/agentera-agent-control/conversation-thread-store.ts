@@ -137,6 +137,11 @@ interface SegmentRow {
   thread_device_installation_id?: unknown;
 }
 
+interface ActiveRouteRow extends SegmentRow {
+  binding_id?: unknown;
+  binding_json?: unknown;
+}
+
 interface RuntimePairRow {
   binding_conversation_key?: unknown;
   binding_session_id?: unknown;
@@ -992,6 +997,93 @@ export class ConversationThreadStore {
     const thread = this.getThread(segment.threadId);
     if (thread === null) throw storeError("model_switch_segment_corrupt");
     return { thread, segment };
+  }
+
+  /**
+   * Resolve the last verified active route for one installed Agent without
+   * exposing the route or credential reference to the renderer.  A new
+   * conversation has no root key or Hermes session to resume, so this is the
+   * durable hand-off point for the user's most recent model choice.
+   */
+  getLatestActiveRouteForInstallation(
+    agentInstallationIdValue: string,
+  ): FrozenAgentModelRoute | null {
+    const agentInstallationId = uuid(
+      agentInstallationIdValue,
+      "invalid_model_switch_segment",
+    );
+    const rows = this.database.sqlite
+      .prepare(
+        `SELECT segment.id, segment.thread_id, segment.ordinal,
+                segment.segment_conversation_key, segment.state,
+                segment.route_json, segment.source_profile_id,
+                segment.source_model_id, segment.runtime_binding_id,
+                segment.conversation_boundary_id, segment.hermes_session_id,
+                segment.history_boundary_count, segment.created_at,
+                segment.activated_at, segment.failed_at, segment.failure_code,
+                thread.tenant_id AS thread_tenant_id,
+                thread.owner_id AS thread_owner_id,
+                thread.device_installation_id AS thread_device_installation_id,
+                binding.id AS binding_id, binding.binding_json AS binding_json
+         FROM conversation_segments AS segment
+         INNER JOIN conversation_threads AS thread
+           ON thread.id = segment.thread_id
+         INNER JOIN runtime_bindings AS binding
+           ON binding.id = segment.runtime_binding_id
+         WHERE segment.state = 'active'
+           AND thread.active_segment_id = segment.id
+           AND thread.tenant_id = ? AND thread.owner_id = ?
+           AND thread.device_installation_id = ?
+           AND binding.tenant_id = ? AND binding.owner_id = ?
+           AND binding.device_installation_id = ?
+           AND json_extract(binding.binding_json, '$.agentInstallationId') = ?
+         ORDER BY COALESCE(segment.activated_at, segment.created_at) DESC,
+                  segment.created_at DESC, segment.id DESC`,
+      )
+      .all(
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+        this.owner.tenantId,
+        this.owner.ownerId,
+        this.owner.deviceInstallationId,
+        agentInstallationId,
+      ) as ActiveRouteRow[];
+
+    for (const row of rows) {
+      const segment = parseSegment(row, this.owner);
+      if (row.binding_id !== segment.runtimeBindingId) {
+        throw storeError("model_switch_segment_corrupt");
+      }
+      if (typeof row.binding_json !== "string") {
+        throw storeError("model_switch_segment_corrupt");
+      }
+      let bindingValue: unknown;
+      try {
+        bindingValue = JSON.parse(row.binding_json);
+      } catch {
+        throw storeError("model_switch_segment_corrupt");
+      }
+      if (
+        bindingValue === null ||
+        typeof bindingValue !== "object" ||
+        Array.isArray(bindingValue)
+      ) {
+        throw storeError("model_switch_segment_corrupt");
+      }
+      const binding = bindingValue as Record<string, unknown>;
+      if (binding.agentInstallationId !== agentInstallationId) continue;
+      if (
+        binding.id !== segment.runtimeBindingId ||
+        binding.tenantId !== this.owner.tenantId ||
+        binding.ownerId !== this.owner.ownerId ||
+        binding.deviceId !== this.owner.deviceInstallationId
+      ) {
+        throw storeError("model_switch_segment_corrupt");
+      }
+      return this.frozenRouteForSegment(segment.id);
+    }
+    return null;
   }
 
   listSegments(threadIdValue: string): ConversationSegment[] {

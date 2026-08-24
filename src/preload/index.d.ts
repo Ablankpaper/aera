@@ -42,6 +42,7 @@ import type {
   MessagingPlatformUpdate,
 } from "../shared/messaging-platforms";
 import type { ChatToolEvent } from "../shared/chat-stream";
+import type { ChatErrorEvent } from "../shared/chat-error";
 import type { GpuPreferenceMode, GpuStatus } from "../shared/gpu";
 import type {
   AgenteraAuthPublicState,
@@ -1214,7 +1215,9 @@ interface HermesAPI {
       },
     ) => void,
   ) => () => void;
-  onChatError: (callback: (runId: string, error: string) => void) => () => void;
+  onChatError: (
+    callback: (runId: string, error: ChatErrorEvent) => void,
+  ) => () => void;
   onChatAgentSegment: (
     callback: (runId: string, event: AgentConversationSegmentEvent) => void,
   ) => () => void;

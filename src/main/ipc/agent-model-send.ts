@@ -9,6 +9,11 @@ import type {
 } from "../../shared/model-configuration";
 import type { SessionModelOverride } from "../../shared/model-override";
 import type { AgentModelSegmentLifecycle } from "../agent-model-execution-lease";
+import { canonicalProviderBaseUrl } from "../provider-registry";
+import {
+  runtimeProviderForRoute,
+  runtimeProviderMatchesPublicRoute,
+} from "../runtime-provider-compat";
 
 export type AgentModelRouteMode = "configured" | "dynamic";
 
@@ -44,7 +49,24 @@ export function classifyAgentModelRoute(
   route: PublicModelRouteIdentity,
   configured: SessionModelOverride,
 ): AgentModelRouteMode {
-  return route.provider === configured.provider &&
+  const provider = route.provider.trim().toLocaleLowerCase();
+  const runtimeProvider = runtimeProviderForRoute(
+    route.provider,
+    route.baseUrl,
+  );
+  const canonicalBaseUrl = canonicalProviderBaseUrl(provider);
+  const logicalOpenAiThirdPartyEndpoint =
+    provider === "openai" &&
+    runtimeProvider === "openai" &&
+    canonicalBaseUrl !== null &&
+    normalizeBaseUrl(route.baseUrl) !== normalizeBaseUrl(canonicalBaseUrl);
+
+  return !logicalOpenAiThirdPartyEndpoint &&
+    runtimeProviderMatchesPublicRoute(
+      route.provider,
+      route.baseUrl,
+      configured.provider,
+    ) &&
     route.model === configured.model &&
     normalizeBaseUrl(route.baseUrl) === normalizeBaseUrl(configured.baseUrl)
     ? "configured"

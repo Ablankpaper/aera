@@ -26,6 +26,15 @@ import {
   stopProductAuthCloud,
   type ProductAuthHarness,
 } from "./support/agentera-product-auth-harness";
+import {
+  inspectActiveGatewayProfile,
+  inspectInstalledRuntimeContract,
+  inspectLiveGatewayEndpoint,
+  inspectLiveGatewayProcess,
+  probeRuntimeCapabilities,
+  type LiveGatewayEndpointEvidence,
+  type LiveGatewayProcessEvidence,
+} from "./support/agentera-runtime-contract-evidence";
 
 type BoundaryEntry =
   | { kind: "directory"; mode: number }
@@ -50,6 +59,23 @@ let desktopApp: ElectronApplication | null = null;
 let desktopPage: Page | null = null;
 let expectedBoundary: Record<string, BoundaryEntry> = {};
 let expectedRuntimeVersion = "";
+let expectedRuntimeSourceCommit = "";
+
+function dotenvValue(contents: string, name: string): string | null {
+  const match = contents.match(
+    new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}=(.*)$`, "mu"),
+  );
+  if (!match) return null;
+  const value = match[1]?.trim() ?? "";
+  if (
+    value.length >= 2 &&
+    ((value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'")))
+  ) {
+    return value.slice(1, -1);
+  }
+  return value || null;
+}
 
 async function writeBoundaryFile(
   root: string,
@@ -199,11 +225,15 @@ test.beforeAll(async () => {
       join(desktopRoot, "build", "agentera-runtime-seed.lock.json"),
       "utf8",
     ),
-  ) as { runtime_version?: unknown };
-  if (typeof lock.runtime_version !== "string") {
-    throw new Error("Runtime Seed lock does not contain a Runtime version.");
+  ) as { runtime_version?: unknown; source_commit?: unknown };
+  if (
+    typeof lock.runtime_version !== "string" ||
+    typeof lock.source_commit !== "string"
+  ) {
+    throw new Error("Runtime Seed lock does not contain an exact identity.");
   }
   expectedRuntimeVersion = lock.runtime_version;
+  expectedRuntimeSourceCommit = lock.source_commit;
   const seedEntries = (await readdir(runtimeSeedDirectory)).filter(
     (entry) => entry !== ".gitkeep",
   );
@@ -226,7 +256,9 @@ test.afterAll(async () => {
 });
 
 // @lat: [[agentera-runtime-distribution#Release gate]]
-test("online auth followed by offline packaged Seed preparation survives restart without public downloads", async () => {
+// Playwright requires its fixtures argument to use object destructuring.
+// eslint-disable-next-line no-empty-pattern
+test("online auth followed by offline packaged Seed preparation survives restart without public downloads", async ({}, testInfo) => {
   if (!harness) throw new Error("Runtime E2E harness is unavailable.");
 
   ({ app: desktopApp, page: desktopPage } = await launchRuntimeDesktop(
@@ -262,11 +294,108 @@ test("online auth followed by offline packaged Seed preparation survives restart
   expect(firstState).toMatchObject({
     phase: "current",
     currentVersion: expectedRuntimeVersion,
+    currentSourceCommit: expectedRuntimeSourceCommit,
   });
   const firstVersionOutput = await desktopPage.evaluate(() =>
     window.hermesAPI.getHermesVersion(),
   );
   expect(firstVersionOutput).toContain(expectedRuntimeVersion);
+
+  const installedRuntime = await inspectInstalledRuntimeContract(
+    harness.userData,
+  );
+  expect(installedRuntime).toMatchObject({
+    runtimeVersion: expectedRuntimeVersion,
+    sourceCommit: expectedRuntimeSourceCommit,
+    manifestSourceCommit: expectedRuntimeSourceCommit,
+  });
+
+  const gatewayStart = await desktopPage.evaluate(() =>
+    window.hermesAPI.startGateway(),
+  );
+  expect(gatewayStart).toMatchObject({ success: true, running: true });
+  const activeGateway = await inspectActiveGatewayProfile(
+    await desktopPage.evaluate(() => window.hermesAPI.listProfiles()),
+  );
+  const apiKey = dotenvValue(
+    await readFile(join(activeGateway.profilePath, ".env"), "utf8"),
+    "API_SERVER_KEY",
+  );
+  expect(apiKey).not.toBeNull();
+  let liveProcess: LiveGatewayProcessEvidence | null = null;
+  await expect
+    .poll(
+      async () => {
+        try {
+          liveProcess = await inspectLiveGatewayProcess(
+            activeGateway.profilePath,
+            installedRuntime.pythonExecutable.path,
+          );
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true);
+  expect(liveProcess).not.toBeNull();
+  let liveEndpoint: LiveGatewayEndpointEvidence | null = null;
+  await expect
+    .poll(
+      async () => {
+        try {
+          liveEndpoint = await inspectLiveGatewayEndpoint(liveProcess!.pid);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true);
+  expect(liveEndpoint).not.toBeNull();
+  await expect
+    .poll(
+      async () => {
+        try {
+          await probeRuntimeCapabilities(liveEndpoint!.origin, apiKey ?? "");
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 120_000 },
+    )
+    .toBe(true);
+  const capabilities = await probeRuntimeCapabilities(
+    liveEndpoint!.origin,
+    apiKey ?? "",
+  );
+  await testInfo.attach("packaged-runtime-contract-evidence", {
+    body: Buffer.from(
+      JSON.stringify(
+        {
+          currentJson: installedRuntime.currentJson,
+          runtimeVersion: installedRuntime.runtimeVersion,
+          sourceCommit: installedRuntime.sourceCommit,
+          versionDirectory: installedRuntime.versionDirectory,
+          versionRoot: installedRuntime.versionRoot,
+          manifestPath: installedRuntime.manifestPath,
+          manifestSourceCommit: installedRuntime.manifestSourceCommit,
+          pythonExecutable: installedRuntime.pythonExecutable,
+          hermesEntrypoint: installedRuntime.hermesEntrypoint,
+          activeGateway,
+          liveProcess,
+          liveEndpoint,
+          capabilities,
+        },
+        null,
+        2,
+      ),
+    ),
+    contentType: "application/json",
+  });
   expectExistingBoundaryUnchanged(
     await boundarySnapshot(harness.hermesHome),
     expectedBoundary,

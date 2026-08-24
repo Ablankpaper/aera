@@ -47,6 +47,7 @@ import {
   prepareGatewayManagedConfiguration,
   type GatewayManagedConfigurationDependencies,
 } from "./gateway-managed-config";
+import { runtimeProviderForRoute } from "./runtime-provider-compat";
 import { promptSudoPassword, promptSecretValue } from "./gatewayPrompt";
 import { getSecret } from "./secrets";
 import { readModels } from "./models";
@@ -1583,7 +1584,10 @@ export function buildAgentModelTransportRoute(
   execution: HermesAgentModelExecution,
 ): HermesAgentModelTransportRoute {
   return {
-    provider: execution.modelOverride.provider,
+    provider: runtimeProviderForRoute(
+      execution.modelOverride.provider,
+      execution.modelOverride.baseUrl,
+    ),
     model: execution.modelOverride.model,
     base_url: execution.modelOverride.baseUrl,
     api_mode: execution.apiMode,
@@ -5286,6 +5290,28 @@ async function startGatewayWithRecoveryOnce(
   void restartCommandTimeoutMs;
 
   if (isRemoteMode()) return false;
+
+  // A model/configuration commit can retire the old Gateway and schedule an
+  // asynchronous restart from its presentation-refresh hook. A send that
+  // arrives during that small window must join the restart flight instead of
+  // preparing a second credential/configuration transaction in parallel. The
+  // two operations used to have separate single-flight registries, which made
+  // both plans read the same pre-restart `.env` and left the loser with a
+  // stale-plan rejection.
+  const pendingRestart = gatewayRestartByProfile.get(
+    gatewayRestartProfileKey(profile),
+  );
+  if (pendingRestart) {
+    try {
+      if (await pendingRestart) {
+        setApiCacheFor(profile, true);
+        return true;
+      }
+    } catch {
+      // The restart failed; continue through the normal bounded recovery path
+      // so a fresh launch can still repair the Profile.
+    }
+  }
 
   if (isGatewayRunning(profile)) {
     const key = profileKey(profile);

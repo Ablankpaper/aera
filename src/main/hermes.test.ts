@@ -160,6 +160,29 @@ describe("installed-Agent model transport route", () => {
     );
   });
 
+  it("translates legacy local and official openai route identities for Hermes", () => {
+    expect(
+      buildAgentModelTransportRoute({
+        ...execution,
+        modelOverride: {
+          provider: "openai",
+          model: "fixture-model",
+          baseUrl: "http://127.0.0.1:19001/v1",
+        },
+      }),
+    ).toMatchObject({ provider: "custom" });
+    expect(
+      buildAgentModelTransportRoute({
+        ...execution,
+        modelOverride: {
+          provider: "openai",
+          model: "gpt-5.6",
+          baseUrl: "https://api.openai.com/v1",
+        },
+      }),
+    ).toMatchObject({ provider: "openai-api" });
+  });
+
   it("requires an explicit Runtime capability before sending a dynamic route", () => {
     expect(
       supportsHermesAgentModelRoute({

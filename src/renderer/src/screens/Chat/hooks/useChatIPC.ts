@@ -14,6 +14,7 @@ import { upsertLiveReasoningChunk } from "../liveReasoningEvents";
 import { attachOfficialQualityEligibility } from "./useDashboardChatTransport";
 import type { OfficialQualityFeedbackEligibility } from "../../../../../shared/agentera-official-quality";
 import type { AgentConversationSegmentEvent } from "../../../../../shared/model-configuration";
+import type { ChatErrorEvent } from "../../../../../shared/chat-error";
 
 interface UseChatIPCArgs {
   /** This conversation's run id. Events tagged with a different runId belong
@@ -34,6 +35,8 @@ interface UseChatIPCArgs {
     runId: string,
     event: AgentConversationSegmentEvent,
   ) => void;
+  /** Maps a stable Main error event to localized copy. */
+  formatChatError?: (event: ChatErrorEvent) => string;
 }
 
 /**
@@ -63,6 +66,7 @@ export function useChatIPC({
   activeTurnRef,
   onSessionStarted,
   onAgentSegment,
+  formatChatError,
 }: UseChatIPCArgs): void {
   const reasoningSegmentClosedRef = useRef(false);
   const dbPollRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
@@ -278,7 +282,10 @@ export function useChatIPC({
       if (!activeTurn) return;
       qualityEligibilityRef.current = null;
       activeTurn.status = "failed";
-      setMessages((prev) => markActiveTurnFailed(prev, error, activeTurn));
+      const safeMessage = formatChatError?.(error) ?? "Aera Runtime reported an error";
+      setMessages((prev) =>
+        markActiveTurnFailed(prev, safeMessage, activeTurn),
+      );
       setToolProgress(null);
       setIsLoading(false);
     });
@@ -426,6 +433,7 @@ export function useChatIPC({
     activeTurnRef,
     stopDbPolling,
     onAgentSegment,
+    formatChatError,
     onSessionStarted,
   ]);
 }

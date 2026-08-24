@@ -1249,6 +1249,179 @@ describe("Agent control Organization Foundation context", () => {
     );
   });
 
+  // @lat: [[model-selection#Session model override#Installed-Agent switch policy and immutable resume#Manager thread adoption and candidate preparation]]
+  it("uses the latest active Agent route for a fresh conversation", async () => {
+    const frozen = (route: ResolvedOwnerModelRoute): FrozenAgentModelRoute => ({
+      provider: route.provider,
+      model: route.model,
+      baseUrl: route.baseUrl,
+      apiMode: route.apiMode,
+      sourceProfileId: route.sourceProfileId,
+      modelLibraryId: route.modelLibraryId,
+      credentialRef: route.credentialRef,
+      legacy: false,
+    });
+    const routeA = frozen(ACCOUNT_MODEL_ROUTE);
+    const routeB = frozen(PETOI_MODEL_ROUTE);
+    const snapshot = {
+      revision: "e".repeat(64),
+      targetProfileId: ACCOUNT_MODEL_ROUTE.sourceProfileId,
+      routes: [
+        {
+          id: ACCOUNT_MODEL_ROUTE.id,
+          provider: ACCOUNT_MODEL_ROUTE.provider,
+          model: ACCOUNT_MODEL_ROUTE.model,
+          baseUrl: ACCOUNT_MODEL_ROUTE.baseUrl,
+          apiMode: ACCOUNT_MODEL_ROUTE.apiMode,
+          providerLabel: ACCOUNT_MODEL_ROUTE.providerLabel,
+          displayName: ACCOUNT_MODEL_ROUTE.displayName,
+          sourceProfileId: ACCOUNT_MODEL_ROUTE.sourceProfileId,
+          sourceKind: "account" as const,
+          selection: {
+            sourceProfileId: ACCOUNT_MODEL_ROUTE.sourceProfileId,
+            modelLibraryId: ACCOUNT_MODEL_ROUTE.modelLibraryId,
+            catalogRevision: "e".repeat(64),
+          },
+        },
+        {
+          id: PETOI_MODEL_ROUTE.id,
+          provider: PETOI_MODEL_ROUTE.provider,
+          model: PETOI_MODEL_ROUTE.model,
+          baseUrl: PETOI_MODEL_ROUTE.baseUrl,
+          apiMode: PETOI_MODEL_ROUTE.apiMode,
+          providerLabel: PETOI_MODEL_ROUTE.providerLabel,
+          displayName: PETOI_MODEL_ROUTE.displayName,
+          sourceProfileId: PETOI_MODEL_ROUTE.sourceProfileId,
+          sourceKind: "account" as const,
+          selection: {
+            sourceProfileId: PETOI_MODEL_ROUTE.sourceProfileId,
+            modelLibraryId: PETOI_MODEL_ROUTE.modelLibraryId,
+            catalogRevision: "e".repeat(64),
+          },
+        },
+      ],
+    };
+    const catalog = {
+      snapshot: vi.fn(() => snapshot),
+      resolve: vi.fn((selection: OwnerModelRouteSelection) =>
+        selection.modelLibraryId === PETOI_MODEL_ROUTE.modelLibraryId
+          ? PETOI_MODEL_ROUTE
+          : ACCOUNT_MODEL_ROUTE,
+      ),
+    } as unknown as OwnerModelRouteCatalog;
+    const prepareInstalledTurnPlan = vi.fn(async (input: {
+      conversationKey: string;
+      requestedModelRoute?: ResolvedOwnerModelRoute;
+    }) => ({
+      bindingInput: {
+        conversationKey: input.conversationKey,
+        tenantId: OWNER.tenantId,
+        ownerScope: "USER" as const,
+        ownerId: OWNER.ownerId,
+        deviceId: OWNER.deviceInstallationId,
+        agentDefinitionId: OFFICIAL_DEFINITION_ID,
+        agentVersionId: PERSONAL_VERSION_ID,
+        agentInstallationId: PERSONAL_INSTALLATION_ID,
+        runtimeProfileId: PERSONAL_PROFILE_ID,
+        runtimeVersion: "v0.18.2-agentera.1",
+        modelRoute: input.requestedModelRoute
+          ? frozen(input.requestedModelRoute)
+          : routeA,
+        policySnapshotId: PERSONAL_POLICY_ID,
+        officialReleaseRevisionId: null,
+        toolPermissionDigest: "1".repeat(64),
+        publishedBaseDigest: "2".repeat(64),
+      },
+      version: {
+        manifest: { schema_version: 1 },
+      },
+      policy: { document: { schema_version: 1 } },
+    }));
+    const finalizeInstalledTurn = vi.fn(
+      (_plan: unknown, binding: { modelRoute: FrozenAgentModelRoute }) => ({
+        binding,
+        profilePath: "/isolated/profile",
+        resumeSessionId: undefined,
+        envelope: { instructions: "fixed", requireBoundApiTransport: true },
+        modelOverride: binding.modelRoute,
+      }),
+    );
+    const { manager } = fullManager(
+      () => ({ scope: "USER" }),
+      {},
+      {
+        verifyProfileBinding: () => ({
+          agentInstallationId: PERSONAL_INSTALLATION_ID,
+        }),
+        hermesAdapter: {
+          prepareInstalledTurnPlan,
+          finalizeInstalledTurn,
+        } as unknown as AgenteraHermesAdapter,
+        getOwnerModelRouteCatalog: () => catalog,
+      },
+    );
+
+    const first = await manager.prepareConversationRuntime({
+      conversationKey: "fresh-route-source",
+      profilePath: "/isolated/profile",
+      owner: OWNER,
+      resumeSessionId: null,
+    });
+    const firstSession = manager.attachConversationRuntimeSession({
+      runtimeBindingId: first.preparedAgentTurn?.binding.id ?? null,
+      boundaryId: first.conversationBoundary.id,
+      segmentId: first.agentSegmentId,
+      sessionId: "hermes-route-a",
+      owner: OWNER,
+    });
+    expect(firstSession).toHaveProperty("segment");
+
+    const switched = await manager.prepareConversationRuntime({
+      conversationKey: "fresh-route-source",
+      profilePath: "/isolated/profile",
+      owner: OWNER,
+      resumeSessionId: null,
+      requestedModelSelection: {
+        sourceProfileId: PETOI_MODEL_ROUTE.sourceProfileId,
+        modelLibraryId: PETOI_MODEL_ROUTE.modelLibraryId,
+        catalogRevision: snapshot.revision,
+      },
+    });
+    if (!switched.segmentTransition) {
+      throw new Error("expected model route transition");
+    }
+    manager.attachConversationRuntimeSession({
+      runtimeBindingId: switched.segmentTransition.runtimeBindingId,
+      boundaryId: switched.segmentTransition.boundaryId,
+      segmentId: switched.segmentTransition.segmentId,
+      sessionId: "hermes-route-b",
+      owner: OWNER,
+    });
+    manager.activateConversationSegment({
+      threadId: switched.segmentTransition.threadId,
+      segmentId: switched.segmentTransition.segmentId,
+      expectedThreadRevision: switched.segmentTransition.expectedThreadRevision,
+      owner: OWNER,
+    });
+
+    await manager.prepareConversationRuntime({
+      conversationKey: "fresh-route-after-switch",
+      profilePath: "/isolated/profile",
+      owner: OWNER,
+      resumeSessionId: null,
+    });
+    expect(prepareInstalledTurnPlan).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        requestedModelRoute: expect.objectContaining({
+          provider: PETOI_MODEL_ROUTE.provider,
+          model: PETOI_MODEL_ROUTE.model,
+          baseUrl: PETOI_MODEL_ROUTE.baseUrl,
+        }),
+      }),
+    );
+    expect(routeB.model).toBe(PETOI_MODEL_ROUTE.model);
+  });
+
   it.each([
     ["model_switch_route_stale", "stale catalog revision"],
     ["model_switch_credential_unavailable", "missing selected credential"],

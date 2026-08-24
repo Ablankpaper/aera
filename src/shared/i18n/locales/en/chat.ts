@@ -8,8 +8,38 @@ export default {
     preparing: "Preparing the selected model for this conversation…",
     failedKeepsCurrent:
       "The model switch failed. The previous model remains active; check the model configuration and try again.",
+    sourceUnavailable:
+      "The selected model is no longer available. The previous model remains active; refresh the model list and try again.",
+    routeDrift:
+      "The selected model changed while switching. The previous model remains active; choose it again.",
+    routeAmbiguous:
+      "The selected model maps to conflicting endpoints. The previous model remains active; fix the provider in Model Center.",
+    credentialUnavailable:
+      "The selected model's API key is unavailable. The previous model remains active; check the provider credentials.",
+    remoteUnavailable:
+      "This connection does not support the selected model. The previous model remains active; choose an available connection.",
+    ownerChanged:
+      "The account or workspace changed, so the model switch was cancelled. The previous model remains active.",
+    runtimeRouteUnsupported:
+      "This Aera Runtime cannot switch models per request. Upgrade the app and try again.",
+    transportFailed:
+      "The model service could not start or connect. The previous model remains active; check the Gateway and try again.",
+    providerAuthenticationRejected:
+      "The provider rejected the current API key. Update the credential and try again; the Gateway is still running.",
     marker: "Model changed",
     fixedPolicy: "This Agent uses a fixed model policy.",
+  },
+  errors: {
+    providerAuthenticationRejected:
+      "The provider API key is invalid or expired. Update the credential and try again; the Gateway is still running.",
+    runtimeRouteUnsupported:
+      "This Aera Runtime cannot switch models per request. Upgrade the app and try again.",
+    runtimeToolPolicyUnsupported:
+      "This Aera Runtime does not support the Agent's required tool policy. Upgrade the app and try again.",
+    runtimeUnavailable: "The Agent Runtime is temporarily unavailable. Try again.",
+    transportUnavailable: "Aera could not connect to the local Agent Runtime. Try again.",
+    runtimeFailed:
+      "The request failed. Try again, or run the diagnostic collector if it keeps failing.",
   },
   commandsTitle: "Commands",
   typeMessage: "Ask anything",

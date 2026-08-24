@@ -1016,15 +1016,34 @@ export class ModelConfigurationCoordinator {
             );
             const admittedDigests = await this.files.readDigests(paths);
             ownerGuard?.();
-            if (
+            const admittedProfileOwned = await this.isProfileOwned(
+              ownerHandle,
+              targetProfileId,
+            );
+            const digestMismatches = FILE_ROLES.filter(
+              (role) => admittedDigests[role] !== plannedDigests[role],
+            );
+            const admissionMismatch =
               admittedOwner !== ownerHandle ||
               admittedTarget !== targetProfileId ||
-              !(await this.isProfileOwned(ownerHandle, targetProfileId)) ||
+              !admittedProfileOwned ||
               admittedCatalog.targetProfileId !== targetProfileId ||
               admittedCatalog.revision !== catalog.revision ||
               admittedRouteKey !== oldRouteKey ||
-              !digestsEqual(admittedDigests, plannedDigests)
-            ) {
+              digestMismatches.length > 0;
+            if (admissionMismatch) {
+              if (process.env.AGENTERA_E2E_DIAGNOSTICS === "1") {
+                console.error("[MODEL_CONFIGURATION_E2E_ADMISSION_MISMATCH]", {
+                  profileId: targetProfileId,
+                  owner: admittedOwner === ownerHandle,
+                  target: admittedTarget === targetProfileId,
+                  owned: admittedProfileOwned,
+                  catalog: admittedCatalog.targetProfileId === targetProfileId,
+                  revision: admittedCatalog.revision === catalog.revision,
+                  route: admittedRouteKey === oldRouteKey,
+                  digestRoles: digestMismatches,
+                });
+              }
               return rejected("validation", "not_needed");
             }
             let value!: T;
@@ -1249,6 +1268,29 @@ export class ModelConfigurationCoordinator {
           afterDigests,
         });
       } catch (error) {
+        if (process.env.AGENTERA_E2E_DIAGNOSTICS === "1") {
+          const diagnostic = error as {
+            name?: unknown;
+            code?: unknown;
+            message?: unknown;
+          };
+          console.error("[MODEL_CONFIGURATION_E2E_STAGE_FAILURE]", {
+            stage,
+            profileId: targetProfileId,
+            name:
+              typeof diagnostic?.name === "string"
+                ? diagnostic.name
+                : "unknown",
+            code:
+              typeof diagnostic?.code === "string"
+                ? diagnostic.code
+                : "unknown",
+            message:
+              typeof diagnostic?.message === "string"
+                ? diagnostic.message.slice(0, 256)
+                : "unknown",
+          });
+        }
         return this.rollbackLocalMutation(
           operationId,
           snapshot,
