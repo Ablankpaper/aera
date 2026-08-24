@@ -33,6 +33,17 @@ extraResources:
 win:
   executableName: Aera
   icon: build/icon.ico
+  extraResources:
+    # Windows runs the final Runtime Seed inventory verifier through the same
+    # packaged executable with ELECTRON_RUN_AS_NODE. Ship the helper and its
+    # generated chunks outside app.asar so plain Node can load them without
+    # Electron's ASAR filesystem interception.
+    - from: out/main
+      to: runtime-inventory-helper
+      filter:
+        - "runtime-inventory-helper.js"
+        - "chunks/inventory-*.js"
+        - "chunks/manifest-*.js"
   files:
     - "!node_modules/@electron-internal/extract-zip/index.darwin-*.node"
     - "!node_modules/@electron-internal/extract-zip/index.linux-*.node"

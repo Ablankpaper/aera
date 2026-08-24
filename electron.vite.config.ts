@@ -15,6 +15,9 @@ export default defineConfig({
           "internal-beta-updater": resolve(
             "src/main/app/internal-beta-updater.ts",
           ),
+          "runtime-inventory-helper": resolve(
+            "src/main/runtime-inventory-helper.ts",
+          ),
         },
       },
     },
