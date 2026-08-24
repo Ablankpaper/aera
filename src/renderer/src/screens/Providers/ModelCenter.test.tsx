@@ -438,9 +438,7 @@ describe("ModelCenter", () => {
         },
       ],
     };
-    const getOwnerModelRouteCatalog = vi
-      .fn()
-      .mockResolvedValue(initialCatalog);
+    const getOwnerModelRouteCatalog = vi.fn().mockResolvedValue(initialCatalog);
     const mutateModelConfiguration = vi
       .fn()
       .mockResolvedValue({ status: "committed", catalog: nextCatalog });

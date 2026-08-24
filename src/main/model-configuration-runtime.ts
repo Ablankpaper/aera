@@ -287,7 +287,8 @@ function activeRouteIdentity(
         candidate.provider,
         candidate.baseUrl || "",
         config.provider,
-      ) || providerEquivalent(candidate.provider, config.provider)),
+      ) ||
+        providerEquivalent(candidate.provider, config.provider)),
   );
   return {
     provider: config.provider,
@@ -429,7 +430,10 @@ function createMutationAdapter(
         const runtimeProvider = custom
           ? customProviderRuntimeRoute(providerLabel)
           : provider;
-        const currentActive = activeRouteIdentity(context.targetProfileId, true);
+        const currentActive = activeRouteIdentity(
+          context.targetProfileId,
+          true,
+        );
         const oldRouteKey = canonicalPublicRouteKey(currentActive);
         const shouldActivate = request.activate !== false;
         const requestedRouteKey = routeKeyForRequest(request, runtimeProvider);
@@ -537,7 +541,7 @@ function createMutationAdapter(
           ? request.apiMode
           : currentActive.apiMode;
         const activationContextLength = shouldActivate
-          ? activeModel?.contextLength ?? null
+          ? (activeModel?.contextLength ?? null)
           : undefined;
         const activationPlan = planModelConfigWrite(
           activationProvider,
@@ -548,9 +552,7 @@ function createMutationAdapter(
           activationApiMode,
           nativePlan,
         );
-        const newRouteKey = shouldActivate
-          ? requestedRouteKey
-          : oldRouteKey;
+        const newRouteKey = shouldActivate ? requestedRouteKey : oldRouteKey;
         const applyStage = async (
           stage: ModelConfigurationCommitStage,
           permit: Parameters<typeof persistConfigWritePlan>[0],

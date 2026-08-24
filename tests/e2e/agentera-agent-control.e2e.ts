@@ -44,6 +44,11 @@ import {
   type AgentControlHarness,
 } from "./support/agentera-agent-control-harness";
 
+// A packaged run installs and verifies the signed Runtime Seed for four
+// isolated Electron devices. The global 240-second budget can cancel the
+// fourth healthy installation before this acceptance reaches model routing.
+test.setTimeout(600_000);
+
 const PRIVATE_MARKERS = [
   ".env",
   "MEMORY.md",
