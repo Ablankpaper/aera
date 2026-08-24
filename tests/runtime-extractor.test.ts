@@ -294,6 +294,29 @@ async function writeZip(
   return path;
 }
 
+async function recordNoAsarAssignments(
+  operation: () => Promise<void>,
+): Promise<unknown[]> {
+  const descriptor = Object.getOwnPropertyDescriptor(process, "noAsar");
+  const assignments: unknown[] = [];
+  let current = false;
+  Object.defineProperty(process, "noAsar", {
+    configurable: true,
+    get: () => current,
+    set: (value: unknown) => {
+      assignments.push(value);
+      current = value === true;
+    },
+  });
+  try {
+    await operation();
+    return assignments;
+  } finally {
+    if (descriptor) Object.defineProperty(process, "noAsar", descriptor);
+    else Reflect.deleteProperty(process, "noAsar");
+  }
+}
+
 describe("Runtime Seed extractor", () => {
   // @lat: [[agentera-runtime-distribution#Offline Seed installation and repair]]
   it("performs one full extracted-inventory pass for a Windows ZIP", async () => {
@@ -383,6 +406,47 @@ describe("Runtime Seed extractor", () => {
     ).rejects.toMatchObject({
       code: "ENOENT",
     });
+  });
+
+  it("bypasses Electron ASAR interception for Windows extraction and restores it", async () => {
+    const root = await workspace();
+    const value = manifest("windows");
+    const archivePath = await writeZip(root, archiveEntries(value.files));
+
+    const assignments = await recordNoAsarAssignments(async () => {
+      await extractRuntimeArchive({
+        archivePath,
+        destination: join(root, "payload"),
+        manifest: value,
+        maxExtractedBytes: 1024 * 1024,
+      });
+    });
+
+    expect(assignments).toEqual([true, false]);
+  });
+
+  it("restores Electron ASAR interception after Windows verification fails", async () => {
+    const root = await workspace();
+    const files = baseFiles().map((entry) =>
+      entry.path === "runtime/hermes"
+        ? { ...entry, sha256: "0".repeat(64) }
+        : entry,
+    );
+    const value = manifest("windows", files);
+    const archivePath = await writeZip(root, archiveEntries(baseFiles()));
+
+    const assignments = await recordNoAsarAssignments(async () => {
+      await expect(
+        extractRuntimeArchive({
+          archivePath,
+          destination: join(root, "payload"),
+          manifest: value,
+          maxExtractedBytes: 1024 * 1024,
+        }),
+      ).rejects.toThrow(/hash|manifest/i);
+    });
+
+    expect(assignments).toEqual([true, false]);
   });
 
   it("rejects archive path traversal before files can escape staging", async () => {
