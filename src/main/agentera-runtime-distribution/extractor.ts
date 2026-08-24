@@ -901,6 +901,9 @@ export async function extractRuntimeArchive({
         "Runtime extraction destination must not already exist",
       );
     }
+    const electronProcess = process as NodeJS.Process & { noAsar?: boolean };
+    const previousNoAsar = electronProcess.noAsar;
+    if (manifest.platform === "windows") electronProcess.noAsar = true;
     try {
       if (manifest.platform === "darwin") {
         if (!manifest.archive_name.endsWith(".tar.zst")) {
@@ -957,6 +960,9 @@ export async function extractRuntimeArchive({
       await rm(zipWorkDirectory, { recursive: true, force: true }).catch(
         () => undefined,
       );
+      if (manifest.platform === "windows") {
+        electronProcess.noAsar = previousNoAsar;
+      }
     }
   } finally {
     activeRuntimeExtractions -= 1;
