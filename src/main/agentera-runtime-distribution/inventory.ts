@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { chmod, lstat, readlink, readdir, realpath } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  open,
+  readlink,
+  readdir,
+  realpath,
+} from "node:fs/promises";
 import { isAbsolute, join, posix, relative, sep } from "node:path";
 
 import {
@@ -12,6 +18,7 @@ import {
 
 export const MAX_SYMLINK_TARGET_BYTES = 16 * 1024;
 const RUNTIME_HASH_CONCURRENCY = 8;
+const RUNTIME_HASH_BUFFER_BYTES = 1024 * 1024;
 const INSTALLED_METADATA_FILES = new Set([
   RUNTIME_MANIFEST_METADATA_NAME,
   RUNTIME_SIGNATURE_METADATA_NAME,
@@ -34,9 +41,9 @@ export type RuntimeFileHasher = (
 ) => Promise<string>;
 
 export interface RuntimeInventoryFileSystem {
-  createReadStream: typeof createReadStream;
   chmod: typeof chmod;
   lstat: typeof lstat;
+  open: typeof open;
   readlink: typeof readlink;
   readdir: typeof readdir;
   realpath: typeof realpath;
@@ -147,27 +154,42 @@ function pathEscapes(parent: string, child: string): boolean {
   return value === ".." || value.startsWith(`..${sep}`) || isAbsolute(value);
 }
 
-async function hashFileWithStream(
+async function hashFileWithHandle(
   path: string,
   signal: AbortSignal | undefined,
-  readStream: typeof createReadStream,
+  openFile: typeof open,
 ): Promise<string> {
   const hash = createHash("sha256");
-  for await (const chunk of readStream(path)) {
-    throwIfAborted(signal);
-    hash.update(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  const handle = await openFile(path, "r");
+  const buffer = Buffer.allocUnsafe(RUNTIME_HASH_BUFFER_BYTES);
+  let position = 0;
+  try {
+    while (true) {
+      throwIfAborted(signal);
+      const { bytesRead } = await handle.read(
+        buffer,
+        0,
+        buffer.length,
+        position,
+      );
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+      position += bytesRead;
+    }
+  } finally {
+    await handle.close();
   }
   return hash.digest("hex");
 }
 
 async function hashFile(path: string, signal?: AbortSignal): Promise<string> {
-  return hashFileWithStream(path, signal, createReadStream);
+  return hashFileWithHandle(path, signal, open);
 }
 
 const NODE_RUNTIME_INVENTORY_FILE_SYSTEM: RuntimeInventoryFileSystem = {
-  createReadStream,
   chmod,
   lstat,
+  open,
   readlink,
   readdir,
   realpath,
@@ -199,9 +221,9 @@ export async function resolveRuntimeInventoryFileSystem(
   }
   const promiseRecord = promises as Record<string, unknown>;
   if (
-    typeof candidate.createReadStream !== "function" ||
     typeof promiseRecord.chmod !== "function" ||
     typeof promiseRecord.lstat !== "function" ||
+    typeof promiseRecord.open !== "function" ||
     typeof promiseRecord.readlink !== "function" ||
     typeof promiseRecord.readdir !== "function" ||
     typeof promiseRecord.realpath !== "function"
@@ -211,11 +233,9 @@ export async function resolveRuntimeInventoryFileSystem(
     );
   }
   return {
-    createReadStream: candidate.createReadStream.bind(
-      candidate,
-    ) as typeof createReadStream,
     chmod: promiseRecord.chmod.bind(promises) as typeof chmod,
     lstat: promiseRecord.lstat.bind(promises) as typeof lstat,
+    open: promiseRecord.open.bind(promises) as typeof open,
     readlink: promiseRecord.readlink.bind(promises) as typeof readlink,
     readdir: promiseRecord.readdir.bind(promises) as typeof readdir,
     realpath: promiseRecord.realpath.bind(promises) as typeof realpath,
@@ -431,7 +451,7 @@ export async function verifyExtractedRuntimeInventoryInProcess(
     );
   }
   await verifyRuntimeFileHashes(fileHashChecks, signal, (path, hashSignal) =>
-    hashFileWithStream(path, hashSignal, inventoryFileSystem.createReadStream),
+    hashFileWithHandle(path, hashSignal, inventoryFileSystem.open),
   );
   return { fileCount, extractedBytes };
 }
