@@ -33,6 +33,17 @@ export type RuntimeFileHasher = (
   signal?: AbortSignal,
 ) => Promise<string>;
 
+export interface RuntimeInventoryFileSystem {
+  createReadStream: typeof createReadStream;
+  chmod: typeof chmod;
+  lstat: typeof lstat;
+  readlink: typeof readlink;
+  readdir: typeof readdir;
+  realpath: typeof realpath;
+}
+
+export type RuntimeOriginalFsLoader = () => Promise<unknown>;
+
 export class RuntimeExtractionError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -136,13 +147,79 @@ function pathEscapes(parent: string, child: string): boolean {
   return value === ".." || value.startsWith(`..${sep}`) || isAbsolute(value);
 }
 
-async function hashFile(path: string, signal?: AbortSignal): Promise<string> {
+async function hashFileWithStream(
+  path: string,
+  signal: AbortSignal | undefined,
+  readStream: typeof createReadStream,
+): Promise<string> {
   const hash = createHash("sha256");
-  for await (const chunk of createReadStream(path)) {
+  for await (const chunk of readStream(path)) {
     throwIfAborted(signal);
     hash.update(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return hash.digest("hex");
+}
+
+async function hashFile(path: string, signal?: AbortSignal): Promise<string> {
+  return hashFileWithStream(path, signal, createReadStream);
+}
+
+const NODE_RUNTIME_INVENTORY_FILE_SYSTEM: RuntimeInventoryFileSystem = {
+  createReadStream,
+  chmod,
+  lstat,
+  readlink,
+  readdir,
+  realpath,
+};
+
+const ORIGINAL_FS_MODULE = "original-fs";
+const loadElectronOriginalFs: RuntimeOriginalFsLoader = () =>
+  import(/* @vite-ignore */ ORIGINAL_FS_MODULE);
+
+function originalFsCandidate(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object") return {};
+  const record = value as Record<string, unknown>;
+  return record.default && typeof record.default === "object"
+    ? (record.default as Record<string, unknown>)
+    : record;
+}
+
+export async function resolveRuntimeInventoryFileSystem(
+  electronVersion: string | undefined = process.versions.electron,
+  loadOriginalFs: RuntimeOriginalFsLoader = loadElectronOriginalFs,
+): Promise<RuntimeInventoryFileSystem> {
+  if (!electronVersion) return NODE_RUNTIME_INVENTORY_FILE_SYSTEM;
+  const candidate = originalFsCandidate(await loadOriginalFs());
+  const promises = candidate.promises;
+  if (!promises || typeof promises !== "object") {
+    throw new RuntimeExtractionError(
+      "Electron original filesystem is unavailable",
+    );
+  }
+  const promiseRecord = promises as Record<string, unknown>;
+  if (
+    typeof candidate.createReadStream !== "function" ||
+    typeof promiseRecord.chmod !== "function" ||
+    typeof promiseRecord.lstat !== "function" ||
+    typeof promiseRecord.readlink !== "function" ||
+    typeof promiseRecord.readdir !== "function" ||
+    typeof promiseRecord.realpath !== "function"
+  ) {
+    throw new RuntimeExtractionError(
+      "Electron original filesystem is unavailable",
+    );
+  }
+  return {
+    createReadStream: candidate.createReadStream.bind(
+      candidate,
+    ) as typeof createReadStream,
+    chmod: promiseRecord.chmod.bind(promises) as typeof chmod,
+    lstat: promiseRecord.lstat.bind(promises) as typeof lstat,
+    readlink: promiseRecord.readlink.bind(promises) as typeof readlink,
+    readdir: promiseRecord.readdir.bind(promises) as typeof readdir,
+    realpath: promiseRecord.realpath.bind(promises) as typeof realpath,
+  };
 }
 
 export async function verifyRuntimeFileHashes(
@@ -189,9 +266,12 @@ export async function verifyExtractedRuntimeInventoryInProcess(
   maxExtractedBytes: number,
   signal?: AbortSignal,
   hostPlatform: NodeJS.Platform = process.platform,
+  fileSystem?: RuntimeInventoryFileSystem,
 ): Promise<RuntimeExtractionResult> {
   requireExtractionBudget(maxExtractedBytes);
-  const root = await realpath(destination);
+  const inventoryFileSystem =
+    fileSystem ?? (await resolveRuntimeInventoryFileSystem());
+  const root = await inventoryFileSystem.realpath(destination);
   const enforceExtractedModes = shouldEnforceExtractedRuntimeMode(
     manifest.platform,
     hostPlatform,
@@ -213,7 +293,9 @@ export async function verifyExtractedRuntimeInventoryInProcess(
     relativeDirectory = "",
   ): Promise<void> {
     throwIfAborted(signal);
-    const children = await readdir(directory, { withFileTypes: true });
+    const children = await inventoryFileSystem.readdir(directory, {
+      withFileTypes: true,
+    });
     children.sort((left, right) =>
       Buffer.from(left.name).compare(Buffer.from(right.name)),
     );
@@ -223,7 +305,9 @@ export async function verifyExtractedRuntimeInventoryInProcess(
         relativeDirectory.length === 0 &&
         INSTALLED_METADATA_FILES.has(child.name)
       ) {
-        const metadata = await lstat(join(directory, child.name));
+        const metadata = await inventoryFileSystem.lstat(
+          join(directory, child.name),
+        );
         if (!metadata.isFile() || metadata.isSymbolicLink()) {
           throw new RuntimeExtractionError(
             "installed Runtime metadata must be a regular file",
@@ -257,7 +341,7 @@ export async function verifyExtractedRuntimeInventoryInProcess(
         );
       }
       const physicalPath = join(directory, child.name);
-      const metadata = await lstat(physicalPath);
+      const metadata = await inventoryFileSystem.lstat(physicalPath);
       const kind: RuntimeInventoryKind = metadata.isSymbolicLink()
         ? "symlink"
         : metadata.isDirectory()
@@ -275,8 +359,9 @@ export async function verifyExtractedRuntimeInventoryInProcess(
         );
       }
       if (kind !== "symlink" && enforceExtractedModes) {
-        await chmod(physicalPath, expectedEntry.mode);
-        const normalizedMode = (await lstat(physicalPath)).mode & 0o777;
+        await inventoryFileSystem.chmod(physicalPath, expectedEntry.mode);
+        const normalizedMode =
+          (await inventoryFileSystem.lstat(physicalPath)).mode & 0o777;
         if (normalizedMode !== expectedEntry.mode) {
           throw new RuntimeExtractionError(
             `extracted Runtime mode differs from the manifest: ${relativePath}`,
@@ -305,7 +390,7 @@ export async function verifyExtractedRuntimeInventoryInProcess(
           expectedSha256: expectedEntry.sha256,
         });
       } else if (kind === "symlink") {
-        const target = await readlink(physicalPath);
+        const target = await inventoryFileSystem.readlink(physicalPath);
         validateSymlinkTarget(relativePath, target);
         if (target !== expectedEntry.link_target) {
           throw new RuntimeExtractionError(
@@ -314,7 +399,7 @@ export async function verifyExtractedRuntimeInventoryInProcess(
         }
         let resolvedTarget: string;
         try {
-          resolvedTarget = await realpath(physicalPath);
+          resolvedTarget = await inventoryFileSystem.realpath(physicalPath);
         } catch (error) {
           throw new RuntimeExtractionError(
             `extracted Runtime symlink is broken: ${relativePath}`,
@@ -345,6 +430,8 @@ export async function verifyExtractedRuntimeInventoryInProcess(
       "extracted Runtime byte count differs from the manifest",
     );
   }
-  await verifyRuntimeFileHashes(fileHashChecks, signal);
+  await verifyRuntimeFileHashes(fileHashChecks, signal, (path, hashSignal) =>
+    hashFileWithStream(path, hashSignal, inventoryFileSystem.createReadStream),
+  );
   return { fileCount, extractedBytes };
 }
