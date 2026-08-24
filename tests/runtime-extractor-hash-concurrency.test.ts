@@ -153,7 +153,7 @@ it("bounds and overlaps final Runtime inventory hashes", async () => {
   expect(maximum).toBe(8);
 });
 
-it("uses the bounded readFile path for small Runtime entries", async () => {
+it("uses positional handles for small Windows Runtime entries", async () => {
   const { verifyExtractedRuntimeInventoryInProcess } =
     await import("../src/main/agentera-runtime-distribution/inventory");
   const root = await mkdtemp(join(tmpdir(), "aera-runtime-small-hash-"));
@@ -185,6 +185,57 @@ it("uses the bounded readFile path for small Runtime entries", async () => {
         contents.length,
         undefined,
         "win32",
+        undefined,
+        {
+          chmod,
+          lstat,
+          open: openFile,
+          readFile: readFilePath,
+          readlink,
+          readdir,
+          realpath,
+        } satisfies RuntimeInventoryFileSystem,
+      ),
+    ).resolves.toEqual({ fileCount: 1, extractedBytes: contents.length });
+    expect(openFile).toHaveBeenCalledWith(resolvedPhysicalPath, "r");
+    expect(readFilePath).not.toHaveBeenCalled();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("keeps the bounded readFile path for small POSIX Runtime entries", async () => {
+  const { verifyExtractedRuntimeInventoryInProcess } =
+    await import("../src/main/agentera-runtime-distribution/inventory");
+  const root = await mkdtemp(join(tmpdir(), "aera-runtime-small-posix-hash-"));
+  const contents = Buffer.from("small verified runtime bytes");
+  const physicalPath = join(root, "small.bin");
+  await writeFile(physicalPath, contents);
+  const manifest = {
+    platform: "darwin",
+    files: [
+      {
+        path: "small.bin",
+        kind: "file",
+        size: contents.length,
+        sha256: createHash("sha256").update(contents).digest("hex"),
+        mode: 0o644,
+        link_target: null,
+      },
+    ],
+  } as RuntimeManifest;
+  const readFilePath = vi.fn(readFile);
+  const openFile = vi.fn(open);
+  const resolvedPhysicalPath = join(await realpath(root), "small.bin");
+
+  try {
+    await expect(
+      verifyExtractedRuntimeInventoryInProcess(
+        root,
+        manifest,
+        contents.length,
+        undefined,
+        "darwin",
         undefined,
         {
           chmod,
