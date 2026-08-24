@@ -63,6 +63,11 @@ const SECOND_PROVIDER_NAME = "E2E Provider B";
 const SECOND_PROVIDER_MODEL = "claude-sonnet-4-6";
 const SECOND_PROVIDER_API_KEY = "e2e-provider-b-profile-only-key";
 const SECOND_PROVIDER_ENV_KEY = "CUSTOM_PROVIDER_E2E_PROVIDER_B_KEY";
+const GLOBAL_TOOL_PROMPT = "AERA_BETA38_GLOBAL_TOOL_REGRESSION";
+const GLOBAL_TOOL_RESULT = "AERA_BETA38_TOOL_OK";
+const GLOBAL_TOOL_CALL_ID = "call_aera_beta38_global_tool";
+const IMAGE_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
 let harness: AgentControlHarness | null = null;
 let deviceA: AgentControlDevice | null = null;
@@ -82,6 +87,9 @@ const modelServerRequests: Array<{
   path: string;
 }> = [];
 let unauthorizedModelRequests = 0;
+let globalToolCallRequests = 0;
+let globalToolFinalRequests = 0;
+let imageModelRequests = 0;
 
 async function readFailureEvidence(path: string): Promise<string> {
   try {
@@ -235,7 +243,12 @@ async function startModelServer(
       }
       let body = "";
       for await (const chunk of request) body += String(chunk);
-      const payload = JSON.parse(body) as { model?: unknown; stream?: unknown };
+      const payload = JSON.parse(body) as {
+        messages?: Array<{ role?: unknown; content?: unknown }>;
+        model?: unknown;
+        stream?: unknown;
+        tools?: Array<{ function?: { name?: unknown } }>;
+      };
       const model =
         typeof payload.model === "string" ? payload.model : models[0];
       const credentialAccepted = options.expectedApiKey
@@ -266,6 +279,94 @@ async function startModelServer(
           }),
         );
         return;
+      }
+      const serializedMessages = JSON.stringify(payload.messages ?? []);
+      if (serializedMessages.includes("data:image/png;base64,")) {
+        imageModelRequests += 1;
+      }
+      const isGlobalToolTurn = serializedMessages.includes(GLOBAL_TOOL_PROMPT);
+      const hasGlobalToolResult = (payload.messages ?? []).some(
+        (message) =>
+          message.role === "tool" &&
+          JSON.stringify(message.content).includes(GLOBAL_TOOL_RESULT),
+      );
+      if (isGlobalToolTurn && !hasGlobalToolResult) {
+        const exposesTerminal = (payload.tools ?? []).some(
+          (tool) => tool.function?.name === "terminal",
+        );
+        if (!exposesTerminal) {
+          response
+            .writeHead(400, { "content-type": "application/json" })
+            .end(JSON.stringify({ error: { message: "terminal is missing" } }));
+          return;
+        }
+        globalToolCallRequests += 1;
+        const toolCall = {
+          index: 0,
+          id: GLOBAL_TOOL_CALL_ID,
+          type: "function",
+          function: {
+            name: "terminal",
+            arguments: JSON.stringify({
+              command: `printf ${GLOBAL_TOOL_RESULT}`,
+              timeout: 30,
+            }),
+          },
+        };
+        if (payload.stream !== true) {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(
+            JSON.stringify({
+              id: "agent-model-choice-e2e",
+              object: "chat.completion",
+              model,
+              choices: [
+                {
+                  index: 0,
+                  message: {
+                    role: "assistant",
+                    content: null,
+                    tool_calls: [toolCall],
+                  },
+                  finish_reason: "tool_calls",
+                },
+              ],
+            }),
+          );
+          return;
+        }
+        response.writeHead(200, {
+          "cache-control": "no-cache",
+          connection: "keep-alive",
+          "content-type": "text/event-stream; charset=utf-8",
+        });
+        response.write(
+          `data: ${JSON.stringify({
+            id: "agent-model-choice-e2e",
+            object: "chat.completion.chunk",
+            model,
+            choices: [
+              {
+                index: 0,
+                delta: { role: "assistant", tool_calls: [toolCall] },
+                finish_reason: null,
+              },
+            ],
+          })}\n\n`,
+        );
+        response.write(
+          `data: ${JSON.stringify({
+            id: "agent-model-choice-e2e",
+            object: "chat.completion.chunk",
+            model,
+            choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+          })}\n\n`,
+        );
+        response.end("data: [DONE]\n\n");
+        return;
+      }
+      if (isGlobalToolTurn && hasGlobalToolResult) {
+        globalToolFinalRequests += 1;
       }
       if (payload.stream !== true) {
         response.writeHead(200, { "content-type": "application/json" });
@@ -659,6 +760,9 @@ test.afterAll(async () => {
   requestedModelRoutes.splice(0);
   modelServerRequests.splice(0);
   unauthorizedModelRequests = 0;
+  globalToolCallRequests = 0;
+  globalToolFinalRequests = 0;
+  imageModelRequests = 0;
   harness = null;
   deviceA = null;
   deviceB = null;
@@ -863,6 +967,49 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
     model: PRIMARY_MODEL,
     baseUrl: modelBaseUrl,
   });
+
+  const globalToolTurn = await deviceB.page.evaluate(
+    async ({ profile, prompt }) => {
+      try {
+        const result = await window.hermesAPI.sendMessage(
+          prompt,
+          profile,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          "device-b-global-tool",
+        );
+        return { ok: true as const, result };
+      } catch (error) {
+        return {
+          ok: false as const,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    {
+      profile: sourceAccountCatalog.targetProfileId,
+      prompt: GLOBAL_TOOL_PROMPT,
+    },
+  );
+  if (!globalToolTurn.ok) {
+    const gatewayPort = await readGatewayPort(
+      deviceB,
+      sourceAccountCatalog.targetProfileId,
+    ).catch(() => undefined);
+    const gatewayEvidence = await gatewayFailureEvidence(
+      deviceB,
+      sourceAccountCatalog.targetProfileId,
+      gatewayPort,
+    );
+    throw new Error(
+      `Global default-model tool turn failed: ${globalToolTurn.error}; profile=${sourceAccountCatalog.targetProfileId}; toolCallRequests=${globalToolCallRequests}; toolFinalRequests=${globalToolFinalRequests}; modelServerRequests=${JSON.stringify(modelServerRequests)}; requestedModelRoutes=${JSON.stringify(requestedModelRoutes)}; gatewayEvidence=${gatewayEvidence}`,
+    );
+  }
+  expect(globalToolTurn.result.response).toContain("MODEL_CHOICE_OK");
+  expect(globalToolCallRequests).toBe(1);
+  expect(globalToolFinalRequests).toBe(1);
 
   expect(deviceA.userData).not.toBe(deviceB.userData);
   expect(deviceA.hermesHome).not.toBe(deviceB.hermesHome);
@@ -1256,6 +1403,31 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
   await mkdir(dirname(bAdaptiveMarker), { recursive: true });
   await writeFile(bAdaptiveMarker, "DEVICE_B_ADAPTIVE_MARKER\n", "utf8");
 
+  // Install a second, independent Agent on the same Electron device. This is
+  // the boundary a two-device test alone cannot prove: both Agents share one
+  // Main process but must keep separate Profiles, gateways, credentials,
+  // conversations, and provider failures.
+  const peerDraft = unwrap<AgentDraftDetail>(
+    await invokeAgentera(deviceA, "createDraft", {
+      ...draftInput("Published same-device peer Agent"),
+      displayName: "Same-device peer Agent",
+    }),
+  );
+  const peerVersion = await publish(deviceA, peerDraft.id);
+  const peerInstallation = unwrap(
+    await invokeAgentera(deviceB, "installVersion", {
+      definitionId: peerVersion.definitionId,
+      versionId: peerVersion.versionId,
+      profileName: "device-b-peer-agent",
+    }),
+  );
+  const peerProfile = deviceProfilePath(deviceB, "device-b-peer-agent");
+  await writeFile(
+    join(peerProfile, "config.yaml"),
+    compatibleModelConfig,
+    "utf8",
+  );
+
   expect(aInstallation.id).not.toBe(bInstallation.id);
   expect(aInstallation.runtimeProfileId).not.toBe(
     bInstallation.runtimeProfileId,
@@ -1267,24 +1439,46 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
 
   await startBoundConversation(deviceA, "default", "device-a-v1");
   await startBoundConversation(deviceB, "device-b-agent", "device-b-v1");
+  await startBoundConversation(
+    deviceB,
+    "device-b-peer-agent",
+    "device-b-peer-v1",
+  );
   await expect
     .poll(async () => (await localAgentControlState(deviceA)).bindings.length)
     .toBe(1);
   await expect
     .poll(async () => (await localAgentControlState(deviceB)).bindings.length)
-    .toBe(1);
+    .toBe(2);
   const aV1 = await localAgentControlState(deviceA);
   const bV1 = await localAgentControlState(deviceB);
   expect(aV1.bindings[0]).toMatchObject({
     agentVersionId: versionOne.versionId,
     agentInstallationId: aInstallation.id,
   });
-  expect(bV1.bindings[0]).toMatchObject({
+  const bPrimaryV1 = bV1.bindings.find(
+    (binding) => binding.conversationKey === "device-b-v1",
+  );
+  const bPeerV1 = bV1.bindings.find(
+    (binding) => binding.conversationKey === "device-b-peer-v1",
+  );
+  expect(bPrimaryV1).toMatchObject({
     agentVersionId: versionOne.versionId,
     agentInstallationId: bInstallation.id,
   });
+  expect(bPeerV1).toMatchObject({
+    agentVersionId: peerVersion.versionId,
+    agentInstallationId: peerInstallation.id,
+  });
+  expect(peerInstallation.runtimeProfileId).not.toBe(
+    bInstallation.runtimeProfileId,
+  );
+  expect(peerProfile).not.toBe(bProfile);
+  expect(await readFile(join(peerProfile, ".env"), "utf8")).not.toContain(
+    SECOND_PROVIDER_API_KEY,
+  );
   expect(aV1.bindings[0].localAdaptiveStateRevision).not.toBe(
-    bV1.bindings[0].localAdaptiveStateRevision,
+    bPrimaryV1?.localAdaptiveStateRevision,
   );
 
   // A signed legacy fixed policy remains part of the immutable publication
@@ -1511,8 +1705,13 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
     >;
   };
   expect(bConfigBeforeProviderSwitch).toContain(`default: ${PRIMARY_MODEL}`);
+  // The public catalog keeps the historical `openai` identity (see the
+  // conversation assertions below), but Hermes cannot start a bare
+  // `openai` provider for a loopback OpenAI-compatible endpoint.  Startup
+  // migration therefore persists the Runtime-native `custom` identity while
+  // preserving the selected model and endpoint.
   expect(bConfigAfterProviderSwitch.model).toMatchObject({
-    provider: "openai",
+    provider: "custom",
     default: PRIMARY_MODEL,
     base_url: modelBaseUrl,
   });
@@ -1559,6 +1758,109 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
     activeSegmentOrdinal: 3,
     switchDisabledCode: null,
   });
+
+  // A model chosen for an installed user-select Agent must remain the user's
+  // current route when a brand-new conversation is opened.  In particular,
+  // the Agent's creation-time model (provider A / PRIMARY_MODEL) must not be
+  // silently resurrected merely because the new conversation has no existing
+  // segment to resume.
+  const freshConversationRouteStart = requestedModelRoutes.length;
+  const freshConversationTurn = await deviceB.page.evaluate(
+    async ({ profile, runId }) => {
+      try {
+        const result = await window.hermesAPI.sendMessage(
+          "Start a fresh conversation on the currently selected provider.",
+          profile,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          runId,
+        );
+        return { ok: true as const, result };
+      } catch (error) {
+        return {
+          ok: false as const,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    { profile: "device-b-agent", runId: "device-b-v3" },
+  );
+  expect(
+    freshConversationTurn,
+    `fresh conversation send failed: ${JSON.stringify(freshConversationTurn)}; ` +
+      `modelRoutes=${JSON.stringify(requestedModelRoutes.slice(freshConversationRouteStart))}; ` +
+      `process=${deviceB.processOutput.slice(-12000)}`,
+  ).toMatchObject({
+    ok: true,
+    result: { response: expect.stringContaining("MODEL_CHOICE_OK") },
+  });
+  expect(requestedModelRoutes.slice(freshConversationRouteStart)).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        provider: "provider-b",
+        model: SECOND_PROVIDER_MODEL,
+        credentialAccepted: true,
+      }),
+    ]),
+  );
+  const freshConversationContext = await deviceB.page.evaluate(
+    ({ profile, runId }) =>
+      window.agenteraGlobalProfile.prepareConversationContext({
+        runId,
+        profile,
+      }),
+    { profile: "device-b-agent", runId: "device-b-v3" },
+  );
+  expect(freshConversationContext.agentConversation).toMatchObject({
+    policyMode: "user_select",
+    activeRoute: {
+      provider: "custom:e2e-provider-b",
+      model: SECOND_PROVIDER_MODEL,
+      baseUrl: secondModelBaseUrl,
+    },
+    switchDisabledCode: null,
+  });
+
+  const imageTurn = await deviceB.page.evaluate(
+    async ({ profile, runId, attachment }) => {
+      try {
+        const result = await window.hermesAPI.sendMessage(
+          "Describe this test image through the selected Provider.",
+          profile,
+          undefined,
+          undefined,
+          [attachment],
+          undefined,
+          runId,
+        );
+        return { ok: true as const, result };
+      } catch (error) {
+        return {
+          ok: false as const,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    {
+      profile: "device-b-agent",
+      runId: "device-b-v1",
+      attachment: {
+        id: "beta38-model-switch-image",
+        kind: "image" as const,
+        name: "pixel.png",
+        mime: "image/png",
+        size: 68,
+        dataUrl: IMAGE_DATA_URL,
+      },
+    },
+  );
+  expect(imageTurn).toMatchObject({
+    ok: true,
+    result: { response: expect.stringContaining("MODEL_CHOICE_OK") },
+  });
+  expect(imageModelRequests).toBe(1);
   const localRecordDatabase = new DatabaseSync(
     join(deviceB.userData, "agentera-control-plane", "control-plane.db"),
     { readOnly: true },
@@ -1605,6 +1907,10 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
   unauthorizedModelRequests = 1;
   const failedAuthTurn = await deviceB.page.evaluate(
     async ({ profile, runId }) => {
+      const errors: unknown[] = [];
+      const dispose = window.hermesAPI.onChatError((eventRunId, event) => {
+        if (eventRunId === runId) errors.push(event);
+      });
       try {
         await window.hermesAPI.sendMessage(
           "Trigger one provider authentication failure.",
@@ -1615,12 +1921,18 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
           undefined,
           runId,
         );
-        return { ok: true, error: "" };
+        return { ok: true, error: "", errors };
       } catch (error) {
+        // The IPC event is delivered independently of the invoke rejection;
+        // yield once so the real Preload listener has observed it.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
         return {
           ok: false,
           error: error instanceof Error ? error.message : String(error),
+          errors,
         };
+      } finally {
+        dispose();
       }
     },
     { profile: "device-b-agent", runId: "device-b-v1" },
@@ -1629,11 +1941,34 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
   expect(failedAuthTurn.error).toMatch(
     /401|authentication|credential|API error/iu,
   );
+  // The invoke/rejection channel is independent from `chat-error`; it must
+  // carry only the same stable code and never the provider response, key, or
+  // local Runtime path.
+  // Electron prefixes rejected IPC Errors with its transport context; the
+  // only application detail allowed after that prefix is the stable code.
+  expect(failedAuthTurn.error).toMatch(
+    /^Error invoking remote method 'send-message': Error: provider_authentication_rejected$/u,
+  );
+  expect(failedAuthTurn.error).not.toContain(SECOND_PROVIDER_API_KEY);
+  expect(failedAuthTurn.error).not.toMatch(
+    /(?:\/Users\/|\\Users\\|\.hermes[\\/])/iu,
+  );
+  expect(failedAuthTurn.errors).toEqual(
+    expect.arrayContaining([{ code: "provider_authentication_rejected" }]),
+  );
+  expect(JSON.stringify(failedAuthTurn.errors)).not.toContain(
+    SECOND_PROVIDER_API_KEY,
+  );
+  expect(JSON.stringify(failedAuthTurn.errors)).not.toMatch(
+    /(?:\/Users\/|\\Users\\|\.hermes[\\/])/iu,
+  );
   // Use a fresh non-browser HTTP connection. Renderer fetch carries an Origin
   // header, while Electron's global fetch pool can reuse a socket that the
   // preceding SSE response just closed; neither condition proves the Gateway
   // listener is down.
   const gatewayPort = await readGatewayPort(deviceB, "device-b-agent");
+  const peerGatewayPort = await readGatewayPort(deviceB, "device-b-peer-agent");
+  expect(peerGatewayPort).not.toBe(gatewayPort);
   const gatewayHealthAfter401 = await probeGatewayHealth(gatewayPort);
   expect(
     gatewayHealthAfter401.status,
@@ -1643,6 +1978,64 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
       gatewayPort,
     )}`,
   ).toBe(200);
+  const peerGatewayHealthAfter401 = await probeGatewayHealth(peerGatewayPort);
+  expect(
+    peerGatewayHealthAfter401.status,
+    `${peerGatewayHealthAfter401.error}\n${await gatewayFailureEvidence(
+      deviceB,
+      "device-b-peer-agent",
+      peerGatewayPort,
+    )}`,
+  ).toBe(200);
+
+  const peerRouteStart = requestedModelRoutes.length;
+  const peerTurnAfterPrimary401 = await deviceB.page.evaluate(async () => {
+    try {
+      const result = await window.hermesAPI.sendMessage(
+        "Continue the peer Agent after the other Agent provider failure.",
+        "device-b-peer-agent",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "device-b-peer-v1",
+      );
+      return { ok: true as const, response: result.response };
+    } catch (error) {
+      return {
+        ok: false as const,
+        response: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+  expect(peerTurnAfterPrimary401).toMatchObject({
+    ok: true,
+    response: expect.stringContaining("MODEL_CHOICE_OK"),
+  });
+  expect(requestedModelRoutes.slice(peerRouteStart)).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        provider: "provider-a",
+        model: PRIMARY_MODEL,
+        credentialAccepted: true,
+      }),
+    ]),
+  );
+  const peerContextAfterPrimary401 = await deviceB.page.evaluate(() =>
+    window.agenteraGlobalProfile.prepareConversationContext({
+      runId: "device-b-peer-v1",
+      profile: "device-b-peer-agent",
+    }),
+  );
+  expect(peerContextAfterPrimary401.agentConversation).toMatchObject({
+    policyMode: "user_select",
+    activeRoute: { provider: "openai", model: PRIMARY_MODEL },
+    activeSegmentOrdinal: 1,
+    switchDisabledCode: null,
+  });
+  expect(await readFile(join(peerProfile, ".env"), "utf8")).not.toContain(
+    SECOND_PROVIDER_API_KEY,
+  );
 
   const recoveredTurn = await deviceB.page.evaluate(
     async ({ profile, runId }) => {
@@ -1751,9 +2144,9 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
   await startBoundConversation(deviceB, "device-b-agent", "device-b-v2");
   await expect
     .poll(async () => (await localAgentControlState(deviceB)).bindings.length)
-    .toBe(4);
+    .toBe(6);
   const bUpdated = await localAgentControlState(deviceB);
-  expect(bUpdated.bindings).toHaveLength(4);
+  expect(bUpdated.bindings).toHaveLength(6);
   expect(
     bUpdated.bindings.find(
       (binding) => binding.conversationKey === "device-b-v2",
@@ -1776,7 +2169,7 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
         binding.runtimeProfileId === bInstallation.runtimeProfileId,
     ),
   ).toBe(true);
-  expect(new Set(bUpdated.bindings.map((binding) => binding.id)).size).toBe(4);
+  expect(new Set(bUpdated.bindings.map((binding) => binding.id)).size).toBe(6);
 
   failNextAgentControlRequest(
     harness,
@@ -1801,21 +2194,21 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
   const finalA = await localAgentControlState(deviceA);
   const finalB = await localAgentControlState(deviceB);
   expect(finalA.installations).toHaveLength(1);
-  expect(finalB.installations).toHaveLength(1);
+  expect(finalB.installations).toHaveLength(2);
   expect(finalA.projectionRoots[0]).not.toBe(finalB.projectionRoots[0]);
 
   await expect
     .poll(() => cloudAgentControlCounts(harness))
     .toMatchObject({
-      definitions: 1,
-      versions: 2,
+      definitions: 2,
+      versions: 3,
       // Device C is a third device in this recovery scenario; its recovered
       // installation is intentionally included in the shared Cloud count.
-      installations: 3,
-      // The two model switches are immutable Agent segment transitions, so
-      // they create two additional sanitized Runtime bindings while
-      // preserving the original segment bindings for both devices.
-      runtimeBindings: 5,
+      installations: 4,
+      // The two model switches are immutable Agent segment transitions, and
+      // the fresh post-switch conversation gets its own binding; all remain
+      // sanitized while the original segment bindings stay immutable.
+      runtimeBindings: 7,
     });
 
   const requests = agentControlRequests(harness);

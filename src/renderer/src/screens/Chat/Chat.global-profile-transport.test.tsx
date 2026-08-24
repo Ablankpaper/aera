@@ -26,6 +26,8 @@ const chatActions = vi.hoisted(() => ({
   handleAbort: vi.fn(),
 }));
 
+const toast = vi.hoisted(() => vi.fn());
+
 interface CapturedChatIpcArgs {
   onSessionStarted?: (runId: string, sessionId: string) => void;
   onAgentSegment?: (runId: string, event: unknown) => void;
@@ -101,7 +103,7 @@ vi.mock("./hooks/useLocalCommands", () => ({ useLocalCommands: () => ({}) }));
 vi.mock("../../components/useI18n", () => ({
   useI18n: () => ({ t: (key: string) => key }),
 }));
-vi.mock("react-hot-toast", () => ({ default: vi.fn() }));
+vi.mock("react-hot-toast", () => ({ default: toast }));
 
 vi.mock("./ChatInput", () => ({
   ChatInput: ({ toolbarExtras }: { toolbarExtras?: React.ReactNode }) => (
@@ -145,6 +147,7 @@ describe("Chat global-profile transport freeze", () => {
     chatHarness.actionArgs.length = 0;
     chatHarness.modelPickerProps.length = 0;
     chatHarness.messageListProps.length = 0;
+    toast.mockClear();
     emitIdentityChanged = null;
     emitGlobalProfileChanged = null;
     prepareConversationContext = vi.fn(async () => ({
@@ -553,6 +556,65 @@ describe("Chat global-profile transport freeze", () => {
         .at(-1)
         ?.messages?.filter((message) => message.kind === "model_switch") ?? [],
     ).toHaveLength(0);
+  });
+
+  it("shows the stable cause when a model switch fails", async () => {
+    const activeRoute = {
+      provider: "openai",
+      model: "gpt-5.6",
+      baseUrl: "https://api.openai.com/v1",
+      apiMode: "responses",
+    };
+    const agentConversation = {
+      threadId: "thread-specific-switch-error",
+      policyMode: "user_select",
+      activeRoute,
+      activeSegmentOrdinal: 1,
+      catalog: {
+        revision: "a".repeat(64),
+        targetProfileId: "account",
+        routes: [],
+      },
+      switchDisabledCode: null,
+    };
+    prepareConversationContext.mockResolvedValueOnce({
+      globalProfileVersion: 3,
+      requiresBoundApiTransport: true,
+      degraded: false,
+      conversationBoundary: null,
+      agentConversation,
+    });
+    render(<Chat runId="agent-switch-specific-error" profile="installed-agent" />);
+
+    await waitFor(() =>
+      expect(chatHarness.modelPickerProps.at(-1)?.agentConversation).toEqual(
+        agentConversation,
+      ),
+    );
+    await act(async () => {
+      chatHarness.ipcArgs.at(-1)?.onAgentSegment?.(
+        "agent-switch-specific-error",
+        {
+          state: "failed",
+          threadId: agentConversation.threadId,
+          segmentId: "segment-credential-failed",
+          from: activeRoute,
+          to: {
+            provider: "custom:petoi",
+            model: "gpt-5.6-sol",
+            baseUrl: "https://api.petoi.cn/v1",
+            apiMode: "chat_completions",
+          },
+          historyBoundaryCount: 0,
+          code: "model_switch_credential_unavailable",
+        },
+      );
+    });
+
+    expect(toast).toHaveBeenCalledWith(
+      "chat.modelSwitch.credentialUnavailable",
+      expect.objectContaining({ id: "model-switch-failed-segment-credential-failed" }),
+    );
   });
 
   // @lat: [[lat.md/agentera-app-authentication#AgentEra application authentication#Startup gate#Account-required routing#Chat transport privacy]]

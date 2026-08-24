@@ -203,6 +203,37 @@ describe("core managed model writers", () => {
     expect(persisted).toContain("CUSTOM_PROVIDER_OLD_KEY=");
   });
 
+  // @lat: [[beta27-reliability-plan#Recoverable model configuration#Dotenv plans match Hermes sanitizer]]
+  it("emits a terminal newline so Hermes env sanitization is byte-stable", async () => {
+    const [managed, config] = await Promise.all([
+      import("./model-configuration-managed-files"),
+      import("./config"),
+    ]);
+    managed.registerManagedModelFileRoots({
+      globalRoot: home,
+      profiles: { default: home },
+    });
+    // Hermes normalizes a non-empty dotenv file to a final newline during
+    // Gateway startup. The Desktop plan must already contain that byte, or
+    // the stale-plan guard will reject the same transaction after startup.
+    writeFileSync(join(home, ".env"), "EXISTING_KEY=value");
+
+    const plan = config.planEnvValueWrite(
+      "CUSTOM_PROVIDER_KEY",
+      "synthetic-secret",
+      "default",
+    );
+    const planned = plan.after?.toString("utf8") ?? "";
+
+    expect(planned).toBe(
+      "EXISTING_KEY=value\nCUSTOM_PROVIDER_KEY=synthetic-secret\n",
+    );
+    const hermesSanitized = planned.endsWith("\n")
+      ? planned
+      : `${planned}\n`;
+    expect(hermesSanitized).toBe(planned);
+  });
+
   it("keeps model catalog planners byte-pure and requires the global permit", async () => {
     const [managed, authority, models] = await Promise.all([
       import("./model-configuration-managed-files"),

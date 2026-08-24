@@ -29,7 +29,7 @@ import {
 
 const VERSION = "0.7.4-internal-beta.38";
 const SOURCE_SHA = "a".repeat(40);
-const RUNTIME_SHA = "301cc632d93d15ca3d060ed1ab62d508692d9acf";
+const RUNTIME_SHA = "88e569614a07aee3036ab36c034798e5a4a2b884";
 const ORIGIN = "https://203.0.113.10";
 const KEY_ID = "offline-beta-2026-07";
 const PUBLIC_KEY = Buffer.alloc(32, 73).toString("base64url");
@@ -80,28 +80,28 @@ async function createFixture(runtimePatch = {}) {
   const runtimeDocument = {
     schema_version: 1,
     repository: "Ablankpaper/aera-runtime",
-    release_tag: "runtime-v0.20.0-agentera.4-rc.1",
+    release_tag: "runtime-v0.20.0-agentera.5-rc.1",
     source_commit: RUNTIME_SHA,
-    runtime_version: "0.20.0-agentera.4",
+    runtime_version: "0.20.0-agentera.5",
     channel: "candidate",
     assets: {
       "darwin-arm64": {
         platform: "darwin",
         arch: "arm64",
-        archive: "agentera-runtime-0.20.0-agentera.4-darwin-arm64.tar.zst",
+        archive: "agentera-runtime-0.20.0-agentera.5-darwin-arm64.tar.zst",
         manifest:
-          "agentera-runtime-0.20.0-agentera.4-darwin-arm64.manifest.json",
+          "agentera-runtime-0.20.0-agentera.5-darwin-arm64.manifest.json",
         signature:
-          "agentera-runtime-0.20.0-agentera.4-darwin-arm64.manifest.sig",
+          "agentera-runtime-0.20.0-agentera.5-darwin-arm64.manifest.sig",
       },
       "windows-x64": {
         platform: "windows",
         arch: "x64",
-        archive: "agentera-runtime-0.20.0-agentera.4-windows-x64.zip",
+        archive: "agentera-runtime-0.20.0-agentera.5-windows-x64.zip",
         manifest:
-          "agentera-runtime-0.20.0-agentera.4-windows-x64.manifest.json",
+          "agentera-runtime-0.20.0-agentera.5-windows-x64.manifest.json",
         signature:
-          "agentera-runtime-0.20.0-agentera.4-windows-x64.manifest.sig",
+          "agentera-runtime-0.20.0-agentera.5-windows-x64.manifest.sig",
       },
     },
     ...runtimePatch,

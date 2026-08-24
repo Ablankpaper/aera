@@ -111,9 +111,9 @@ describe("independent Runtime build verifier", () => {
     expect(lock).toMatchObject({
       schema_version: 1,
       repository: "Ablankpaper/aera-runtime",
-      release_tag: "runtime-v0.20.0-agentera.4-rc.1",
-      source_commit: "301cc632d93d15ca3d060ed1ab62d508692d9acf",
-      runtime_version: "0.20.0-agentera.4",
+      release_tag: "runtime-v0.20.0-agentera.5-rc.1",
+      source_commit: "88e569614a07aee3036ab36c034798e5a4a2b884",
+      runtime_version: "0.20.0-agentera.5",
       channel: "candidate",
     });
     expect(Object.keys(lock.assets).sort()).toEqual([
@@ -124,20 +124,20 @@ describe("independent Runtime build verifier", () => {
       "darwin-arm64": {
         platform: "darwin",
         arch: "arm64",
-        archive: "agentera-runtime-0.20.0-agentera.4-darwin-arm64.tar.zst",
+        archive: "agentera-runtime-0.20.0-agentera.5-darwin-arm64.tar.zst",
         manifest:
-          "agentera-runtime-0.20.0-agentera.4-darwin-arm64.manifest.json",
+          "agentera-runtime-0.20.0-agentera.5-darwin-arm64.manifest.json",
         signature:
-          "agentera-runtime-0.20.0-agentera.4-darwin-arm64.manifest.sig",
+          "agentera-runtime-0.20.0-agentera.5-darwin-arm64.manifest.sig",
       },
       "windows-x64": {
         platform: "windows",
         arch: "x64",
-        archive: "agentera-runtime-0.20.0-agentera.4-windows-x64.zip",
+        archive: "agentera-runtime-0.20.0-agentera.5-windows-x64.zip",
         manifest:
-          "agentera-runtime-0.20.0-agentera.4-windows-x64.manifest.json",
+          "agentera-runtime-0.20.0-agentera.5-windows-x64.manifest.json",
         signature:
-          "agentera-runtime-0.20.0-agentera.4-windows-x64.manifest.sig",
+          "agentera-runtime-0.20.0-agentera.5-windows-x64.manifest.sig",
       },
     });
     expect(JSON.stringify(lock)).not.toMatch(/latest|\/releases\/latest/i);

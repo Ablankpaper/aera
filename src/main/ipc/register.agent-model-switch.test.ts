@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   composeAgentModelSegmentCallbacks,
@@ -64,6 +66,23 @@ function lifecycleHarness(): {
 }
 
 describe("installed-Agent send IPC segment lifecycle", () => {
+  it("keeps raw chat failures out of the renderer IPC boundary", () => {
+    const registerSource = readFileSync(
+      resolve(process.cwd(), "src/main/ipc/register.ts"),
+      "utf8",
+    );
+
+    expect(registerSource).toContain("classifyRendererChatError");
+    expect(registerSource).not.toMatch(
+      /safeSend\("chat-error",\s*(?:error|message)\)/u,
+    );
+    expect(registerSource).not.toMatch(/body:\s*error\.slice\(/u);
+    expect(registerSource).not.toMatch(
+      /rejectChat\(new Error\((?:error|message)\)\)/u,
+    );
+    expect(registerSource).toContain("rendererChatErrorRejection");
+  });
+
   it("keeps an installed Agent gateway on its bound target Profile", () => {
     expect(
       resolveAgentGatewayProfile("default", {
@@ -111,11 +130,46 @@ describe("installed-Agent send IPC segment lifecycle", () => {
       apiMode: "chat_completions" as const,
     };
 
-    expect(classifyAgentModelRoute(thirdPartyRoute, {
-      provider: "openai",
-      model: "gpt-5.6-sol",
-      baseUrl: "https://relay.example/v1",
-    })).toBe("dynamic");
+    expect(
+      classifyAgentModelRoute(thirdPartyRoute, {
+        provider: "openai",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://relay.example/v1",
+      }),
+    ).toBe("dynamic");
+  });
+
+  it("treats migrated local and official openai runtime providers as the same configured route", () => {
+    expect(
+      classifyAgentModelRoute(
+        {
+          provider: "openai",
+          model: "fixture-model",
+          baseUrl: "http://127.0.0.1:19001/v1",
+          apiMode: "chat_completions",
+        },
+        {
+          provider: "custom",
+          model: "fixture-model",
+          baseUrl: "http://127.0.0.1:19001/v1",
+        },
+      ),
+    ).toBe("configured");
+    expect(
+      classifyAgentModelRoute(
+        {
+          provider: "openai",
+          model: "gpt-5.6",
+          baseUrl: "https://api.openai.com/v1",
+          apiMode: "chat_completions",
+        },
+        {
+          provider: "openai-api",
+          model: "gpt-5.6",
+          baseUrl: "https://api.openai.com/v1",
+        },
+      ),
+    ).toBe("configured");
   });
 
   it("passes the opaque selection and visible history count to Manager", async () => {
@@ -218,6 +272,27 @@ describe("installed-Agent send IPC segment lifecycle", () => {
         code: "model_switch_credential_unavailable",
       }),
     );
+  });
+
+  it("keeps a provider 401 as an authentication failure before activation", () => {
+    const { control, events, lifecycle } = lifecycleHarness();
+    lifecycle.emitPreparing();
+    lifecycle.callbacks.onError?.(
+      "provider_authentication_rejected: Incorrect API key sk-private",
+    );
+
+    expect(control.failConversationSegment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: "provider_authentication_rejected",
+      }),
+    );
+    expect(events.at(-1)).toEqual(
+      expect.objectContaining({
+        state: "failed",
+        code: "provider_authentication_rejected",
+      }),
+    );
+    expect(JSON.stringify(events)).not.toContain("sk-private");
   });
 
   it("activates once before forwarding the first tool event and never replays", () => {

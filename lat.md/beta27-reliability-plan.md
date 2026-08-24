@@ -36,6 +36,10 @@ Canonical route identities contain NUL separators, so [[src/main/model-configura
 
 The NUL-delimited owner handle and composite route ID are opaque Main-only identities. Their validation permits the delimiter while still bounding length and rejecting line controls, so a real runtime owner can reach the journal and an owner catalog can expose route selections without leaking credentials.
 
+### Dotenv plans match Hermes sanitizer
+
+[[src/main/config.ts#planEnvValueWrite]] emits a terminal LF for every non-empty `.env` plan, matching Hermes startup sanitization so the Runtime cannot rewrite the planned bytes and trigger a false stale-plan rejection.
+
 [[src/renderer/src/screens/Providers/ModelCenter.tsx#ModelCenter]] uses the coordinated mutation whenever the Beta.27 bridge is present: one request saves dependencies and activation, a rejected stage keeps the editor open, and a post-commit refresh warning is shown as a warning rather than a failed save. The returned catalog supplies the canonical active route and target Profile. A feature-detected Beta.26 low-level bridge remains only as an older-client compatibility fallback.
 
 ### Transactional route reads bypass cache

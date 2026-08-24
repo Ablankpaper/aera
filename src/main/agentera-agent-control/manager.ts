@@ -157,6 +157,7 @@ import type {
   OwnerModelRouteCatalog,
   ResolvedOwnerModelRoute,
 } from "./owner-model-route-catalog";
+import type { FrozenAgentModelRoute } from "./frozen-agent-model-route";
 
 export interface PrepareAgenteraHermesTurnInput {
   conversationKey: string;
@@ -319,6 +320,50 @@ function candidateSetupFailureCode(error: unknown): string {
     return error.code;
   }
   return "model_switch_candidate_setup_failed";
+}
+
+function normalizedRouteBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, "").toLocaleLowerCase();
+}
+
+function sameStoredAndCatalogRoute(
+  stored: FrozenAgentModelRoute,
+  candidate: {
+    provider: string;
+    model: string;
+    baseUrl: string;
+    apiMode: string | null;
+  },
+): boolean {
+  return (
+    stored.provider.trim().toLocaleLowerCase() ===
+      candidate.provider.trim().toLocaleLowerCase() &&
+    stored.model.trim() === candidate.model.trim() &&
+    normalizedRouteBaseUrl(stored.baseUrl) ===
+      normalizedRouteBaseUrl(candidate.baseUrl) &&
+    (stored.legacy || stored.apiMode === candidate.apiMode)
+  );
+}
+
+function resolveStoredActiveRoute(
+  catalog: OwnerModelRouteCatalog,
+  stored: FrozenAgentModelRoute,
+): ResolvedOwnerModelRoute {
+  const snapshot = catalog.snapshot(
+    stored.sourceProfileId === null ? undefined : stored.sourceProfileId,
+  );
+  const candidate = snapshot.routes.find((route) => {
+    if (
+      stored.sourceProfileId !== null &&
+      (route.selection.sourceProfileId !== stored.sourceProfileId ||
+        route.selection.modelLibraryId !== stored.modelLibraryId)
+    ) {
+      return false;
+    }
+    return sameStoredAndCatalogRoute(stored, route);
+  });
+  if (!candidate) throw codedError("model_route_unavailable");
+  return catalog.resolve(candidate.selection);
 }
 
 export function localProfileHandleForPath(
@@ -1646,6 +1691,27 @@ export class AgenteraAgentControlManager {
           existingThread.segment.runtimeBindingId,
         );
         if (!activeBindingForPlan) throw codedError("binding_required");
+      }
+    }
+
+    // A fresh conversation has no root key or Hermes session to resume.  For
+    // an installed user-select Agent, continue from the last active immutable
+    // segment instead of reading the creation-time Profile default.  The
+    // route is re-resolved through the current owner catalog so credentials
+    // and source rows are still checked in Main.
+    if (
+      threadStore &&
+      profile.agentInstallationId !== null &&
+      existingThread === null &&
+      requestedModelRoute === undefined
+    ) {
+      const latestRoute = threadStore.getLatestActiveRouteForInstallation(
+        profile.agentInstallationId,
+      );
+      if (latestRoute !== null) {
+        const catalog = this.options.getOwnerModelRouteCatalog?.() ?? null;
+        if (!catalog) throw codedError("model_route_unavailable");
+        requestedModelRoute = resolveStoredActiveRoute(catalog, latestRoute);
       }
     }
 

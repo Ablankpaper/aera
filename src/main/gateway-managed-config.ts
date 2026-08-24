@@ -1,10 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
 import { parseDocument } from "yaml";
 import {
-  getConfigValue,
   persistConfigWritePlan,
   planConfigDocumentWrite,
-  planConfigValueWrite,
   planLocalApiServerKeyWrite,
   type ConfigWritePlan,
   type EnsureLocalApiServerKeyResult,
@@ -14,13 +11,11 @@ import {
   requireManagedModelMutationValue,
   type ManagedModelMutationPort,
 } from "./model-configuration-mutation-port";
+import { migrateLegacyOpenAiModelRoute } from "./runtime-provider-compat";
 import {
   getActiveProfileNameSync,
   normalizeProfileName,
-  profilePaths,
 } from "./utils";
-
-const API_SERVER_PORT_PATH = "platforms.api_server.extra.port";
 
 /**
  * Resolve the profile once for the whole Gateway write plan. The Gateway
@@ -55,19 +50,13 @@ export function planGatewayManagedConfiguration(
 ): GatewayManagedConfigurationPlan {
   const targetProfile = resolveGatewayProfile(profile);
   const credentialPlan = planLocalApiServerKeyWrite(targetProfile);
-  const { configFile } = profilePaths(targetProfile);
-  if (!existsSync(configFile)) {
-    return { credentialPlan, configPlan: null };
-  }
-
-  const content = readFileSync(configFile, "utf-8");
-  let configPlan: ConfigWritePlan<void> | null = null;
-  if (!/api_server/i.test(content)) {
-    configPlan = planConfigDocumentWrite(
-      targetProfile,
-      (current) => {
-        const separator = current.endsWith("\n") ? "" : "\n";
-        return `${current}${separator}
+  const configPlan = planConfigDocumentWrite(
+    targetProfile,
+    (current) => {
+      const next = migrateLegacyOpenAiModelRoute(current);
+      if (!/api_server/i.test(next)) {
+        const separator = next.endsWith("\n") || next === "" ? "" : "\n";
+        return `${next}${separator}
 # Desktop app API server (auto-configured)
 platforms:
   api_server:
@@ -76,56 +65,46 @@ platforms:
       port: ${port}
       host: "127.0.0.1"
 `;
-      },
-      undefined,
-    );
-  } else {
-    const configuredPort = getConfigValue(API_SERVER_PORT_PATH, targetProfile);
-    if (configuredPort?.trim() !== String(port)) {
-      configPlan = configuredPort
-        ? planConfigValueWrite(
-            API_SERVER_PORT_PATH,
-            String(port),
-            targetProfile,
-          )
-        : planConfigDocumentWrite(
-            targetProfile,
-            (current) => {
-              const document = parseDocument(current);
-              if (document.errors.length > 0) {
-                throw new Error("Cannot repair invalid gateway YAML.");
-              }
-              if (
-                document.getIn(["platforms", "api_server", "enabled"]) ===
-                undefined
-              ) {
-                document.setIn(["platforms", "api_server", "enabled"], true);
-              }
-              if (
-                document.getIn([
-                  "platforms",
-                  "api_server",
-                  "extra",
-                  "host",
-                ]) === undefined
-              ) {
-                document.setIn(
-                  ["platforms", "api_server", "extra", "host"],
-                  "127.0.0.1",
-                );
-              }
-              document.setIn(
-                ["platforms", "api_server", "extra", "port"],
-                port,
-              );
-              return document.toString();
-            },
-            undefined,
-          );
-    }
-  }
+      }
 
-  return { credentialPlan, configPlan };
+      const document = parseDocument(next);
+      if (document.errors.length > 0) {
+        throw new Error("Cannot repair invalid gateway YAML.");
+      }
+      if (
+        String(
+          document.getIn(["platforms", "api_server", "extra", "port"]) ??
+            "",
+        ).trim() === String(port)
+      ) {
+        return next;
+      }
+      if (
+        document.getIn(["platforms", "api_server", "enabled"]) ===
+        undefined
+      ) {
+        document.setIn(["platforms", "api_server", "enabled"], true);
+      }
+      if (
+        document.getIn(["platforms", "api_server", "extra", "host"]) ===
+        undefined
+      ) {
+        document.setIn(
+          ["platforms", "api_server", "extra", "host"],
+          "127.0.0.1",
+        );
+      }
+      document.setIn(["platforms", "api_server", "extra", "port"], port);
+      return document.toString();
+    },
+    undefined,
+  );
+
+  const unchanged =
+    configPlan.before === null
+      ? configPlan.after === null
+      : configPlan.after !== null && configPlan.before.equals(configPlan.after);
+  return { credentialPlan, configPlan: unchanged ? null : configPlan };
 }
 
 export async function prepareGatewayManagedConfiguration(
@@ -136,22 +115,28 @@ export async function prepareGatewayManagedConfiguration(
     dependencies.resolvePort ?? ensureProfilePortAvailable
   )(profile);
   const targetProfile = resolveGatewayProfile(profile);
-  const plan = planGatewayManagedConfiguration(profile, port);
   const result = await dependencies.modelMutationPort.mutate({
     operation: "gateway_configuration_prepare",
     globalCatalog: false,
     profileIds: [targetProfile || "default"],
-    stage: plan.credentialPlan.value.generated ? "credential" : "activation",
-    prepare: () => ({
-      write: (permit) => {
-        const credential = persistConfigWritePlan(
-          permit,
-          plan.credentialPlan,
-        );
-        if (plan.configPlan) persistConfigWritePlan(permit, plan.configPlan);
-        return { key: credential.key, port };
-      },
-    }),
+    // API-server credential preparation is the invariant purpose of this
+    // transaction. Build every file plan only after the coordinator has taken
+    // its Profile lock; account/Profile materialization may update config.yaml
+    // between the caller entering this function and mutation admission.
+    stage: "credential",
+    prepare: () => {
+      const plan = planGatewayManagedConfiguration(profile, port);
+      return {
+        write: (permit) => {
+          const credential = persistConfigWritePlan(
+            permit,
+            plan.credentialPlan,
+          );
+          if (plan.configPlan) persistConfigWritePlan(permit, plan.configPlan);
+          return { key: credential.key, port };
+        },
+      };
+    },
   });
   return requireManagedModelMutationValue(result);
 }

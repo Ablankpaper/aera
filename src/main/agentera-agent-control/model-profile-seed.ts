@@ -9,6 +9,7 @@ import { expectedEnvKeyForModel } from "../installer";
 import { readModels, type SavedModel } from "../models";
 import { upsertNativeCustomProvider } from "../native-custom-provider";
 import { canonicalProviderBaseUrl } from "../provider-registry";
+import { runtimeProviderForRoute } from "../runtime-provider-compat";
 import { listCustomProviders, upsertCustomProvider } from "../providers-store";
 import { getSecret } from "../secrets";
 import {
@@ -387,18 +388,20 @@ export async function seedAgentModelProfile(
     : null;
   const targetProvider = endpointProviderName
     ? `custom:${normalizeCustomProviderRuntimeName(endpointProviderName)}`
-    : provider;
+    : runtimeProviderForRoute(provider, baseUrl);
   const endpointCredentialKey = requiresEndpointAuthorization
     ? expectedEnvKeyForUrl(baseUrl)
     : null;
-  const sourceCredentialKey = existingEndpointProvider
-    ? customProviderEnvKey(existingEndpointProvider.name)
-    : requiresEndpointAuthorization
-      ? endpointCredentialKey !== CUSTOM_API_KEY_ENV &&
-        endpointCredentialKey !== "OPENAI_API_KEY"
-        ? endpointCredentialKey
-        : null
-      : expectedEnvKeyForModel(provider, baseUrl);
+  const sourceCredentialKey = isLocalNoKeyEndpoint(baseUrl)
+    ? null
+    : existingEndpointProvider
+      ? customProviderEnvKey(existingEndpointProvider.name)
+      : requiresEndpointAuthorization
+        ? endpointCredentialKey !== CUSTOM_API_KEY_ENV &&
+          endpointCredentialKey !== "OPENAI_API_KEY"
+          ? endpointCredentialKey
+          : null
+        : expectedEnvKeyForModel(provider, baseUrl);
   const credential = sourceCredentialKey
     ? requireRemoteCredential(
         dependencies.getSecret(sourceCredentialKey, input.sourceProfileId),
@@ -419,7 +422,13 @@ export async function seedAgentModelProfile(
   const targetCredentialKey = endpointProviderName
     ? customProviderEnvKey(endpointProviderName)
     : sourceCredentialKey;
-  if (alreadyCompatibleInPlace && !endpointProviderName) return;
+  if (
+    alreadyCompatibleInPlace &&
+    !endpointProviderName &&
+    targetProvider.toLowerCase() === source.provider.trim().toLowerCase()
+  ) {
+    return;
+  }
   await executeManagedProfileSeed(
     input.targetProfileId,
     {

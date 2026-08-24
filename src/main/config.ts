@@ -474,12 +474,18 @@ export function planEnvValueWrite(
     lines.push(`${key}=${value}`);
   }
 
+  // Hermes normalizes non-empty dotenv files to a terminal newline when the
+  // Gateway starts. Emit that stable representation in the Desktop plan so
+  // the Runtime cannot rewrite the bytes between planning and persistence.
+  const serialized = lines.join("\n");
+  const after = serialized.endsWith("\n") ? serialized : `${serialized}\n`;
+
   return createConfigWritePlan({
     role: "env",
     profile,
     target: envFile,
     before,
-    after: lines.join("\n"),
+    after,
     // `.env` contains provider credentials as well as the local gateway token.
     // Keep the rewritten file private to the current OS user.
     mode: 0o600,

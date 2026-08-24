@@ -322,6 +322,54 @@ describe("owner-scoped conversation thread store", () => {
     );
   });
 
+  // @lat: [[model-selection#Session model override#Installed-Agent switch policy and immutable resume#Cold resume projects the active segment]]
+  it("returns the latest active route for an Agent installation and ignores failed candidates", () => {
+    const active = store.adopt(adoption());
+    expect(
+      store.getLatestActiveRouteForInstallation(
+        "60000000-0000-4000-8000-000000000003",
+      ),
+    ).toEqual(currentRoute({
+      provider: "openai",
+      model: "gpt-5.6",
+      baseUrl: "",
+      apiMode: null,
+      sourceProfileId: null,
+      modelLibraryId: null,
+      credentialRef: null,
+      legacy: true,
+    }));
+    expect(
+      store.getLatestActiveRouteForInstallation(
+        "60000000-0000-4000-8000-000000000004",
+      ),
+    ).toBeNull();
+
+    const candidate = store.prepareCandidate(
+      candidateInput(active.thread.id, active.thread.revision),
+    );
+    store.fail({
+      threadId: active.thread.id,
+      segmentId: candidate.segment.id,
+      expectedThreadRevision: active.thread.revision,
+      code: "provider_unavailable",
+    });
+    expect(
+      store.getLatestActiveRouteForInstallation(
+        "60000000-0000-4000-8000-000000000003",
+      ),
+    ).toEqual({
+      provider: "openai",
+      model: "gpt-5.6",
+      baseUrl: "",
+      apiMode: null,
+      sourceProfileId: null,
+      modelLibraryId: null,
+      credentialRef: null,
+      legacy: true,
+    });
+  });
+
   // @lat: [[agentera-agent-control-plane#Installation and binding#Model policy and runtime selection#Immutable Agent conversation segments#Corrupt row fail-closed]]
   it("parses the frozen route on every read and rejects corrupt rows", () => {
     const adopted = store.adopt(adoption());

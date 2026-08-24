@@ -2016,11 +2016,17 @@ export async function launchAgentControlDevice(
   const roots = harness.deviceRoots[name];
   const runtimeSourceRoot =
     process.env.AGENTERA_E2E_RUNTIME_SOURCE_ROOT?.trim();
+  const packagedExecutable =
+    process.env.AGENTERA_E2E_EXECUTABLE_PATH?.trim() || "";
   // Device C deliberately remains on the locked managed Seed: its scenario
   // mutates the managed Python wrapper to verify interrupted fresh-Profile
-  // recovery. A/B/D use the current source-backed external Runtime so the
-  // Electron gate exercises the just-fixed request-route protocol.
-  const useExternalRuntime = Boolean(runtimeSourceRoot && name !== "C");
+  // recovery. Source-backed runs use the external Runtime for A/B/D, while a
+  // packaged executable must always exercise the Runtime Seed embedded in its
+  // own Resources directory. Passing a source root as the fixture input must
+  // not silently switch a packaged Electron process away from that Seed.
+  const useExternalRuntime = Boolean(
+    runtimeSourceRoot && name !== "C" && !packagedExecutable,
+  );
   if (useExternalRuntime) {
     await prepareExternalRuntime(
       roots.hermesHome,
@@ -2037,7 +2043,7 @@ export async function launchAgentControlDevice(
     C: "18644",
     D: "18645",
   }[name];
-  const executablePath = process.env.AGENTERA_E2E_EXECUTABLE_PATH?.trim();
+  const executablePath = packagedExecutable;
   const app = await electron.launch({
     ...(executablePath ? { executablePath } : {}),
     args: executablePath
@@ -2048,7 +2054,7 @@ export async function launchAgentControlDevice(
       ...process.env,
       AGENTERA_CLOUD_PUBLIC_URL: cloudPublicOrigin,
       AGENTERA_OFFICIAL_AGENT_CHANNEL: "internal",
-      AGENTERA_E2E_RUNTIME_VERSION: "0.20.0-agentera.4",
+      AGENTERA_E2E_RUNTIME_VERSION: "0.20.0-agentera.5",
       AGENTERA_E2E_DIAGNOSTICS: "1",
       AGENTERA_RUNTIME_SEED_DIR: useExternalRuntime
         ? harness.externalRuntimeSeedDirectory

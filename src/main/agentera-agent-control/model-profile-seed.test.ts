@@ -349,6 +349,54 @@ describe("Agent Profile model seeding", () => {
     );
   });
 
+  it("activates a loopback openai-compatible route without copying a global OpenAI key", async () => {
+    const deps = dependencies();
+    deps.getModelConfig.mockReturnValue({
+      provider: "openai",
+      model: "fixture-model",
+      baseUrl: "http://127.0.0.1:19001/v1",
+    });
+    deps.readModels.mockReturnValue([
+      {
+        id: "local-openai-compatible-model",
+        name: "fixture-model",
+        provider: "openai",
+        model: "fixture-model",
+        baseUrl: "http://127.0.0.1:19001/v1",
+        apiMode: "chat_completions",
+        createdAt: 1,
+      },
+    ]);
+    deps.getSecret.mockImplementation((key) =>
+      key === "OPENAI_API_KEY" ? "must-not-copy-global-openai" : null,
+    );
+
+    await seedAgentModelProfile(
+      {
+        sourceProfileId: "source-profile",
+        sourceModelId: "local-openai-compatible-model",
+        targetProfileId: "target-profile",
+        version: versionV2("user_select"),
+        policy: policyV2("user_select"),
+      },
+      deps,
+    );
+
+    expect(deps.getSecret).not.toHaveBeenCalledWith(
+      "OPENAI_API_KEY",
+      expect.anything(),
+    );
+    expect(deps.setEnvValue).not.toHaveBeenCalled();
+    expect(deps.setModelConfig).toHaveBeenCalledWith(
+      "custom",
+      "fixture-model",
+      "http://127.0.0.1:19001/v1",
+      "target-profile",
+      undefined,
+      "chat_completions",
+    );
+  });
+
   it("activates a third-party OpenAI-compatible endpoint through its dedicated named provider", async () => {
     const deps = dependencies();
     if (!deps.modelMutationPort) throw new Error("missing mutation port");

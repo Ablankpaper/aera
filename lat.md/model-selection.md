@@ -2,7 +2,7 @@
 
 The in-chat (bottom) model picker selects a model for the **current conversation only** — it never rewrites `config.yaml`, so the Settings global default is preserved (#688), and carries the full model identity so cross-provider switches route correctly.
 
-The override is held in renderer state on each `<Chat>` run ([[src/renderer/src/screens/Chat/Chat.tsx]]), persisted by session id, and sent with every message; it is cleared when the conversation is cleared/reset and is absent on a fresh chat, so new conversations start on the global default. This is distinct from the persisted [[model-context]] default that non-chat surfaces read.
+The override is held in renderer state on each `<Chat>` run ([[src/renderer/src/screens/Chat/Chat.tsx]]), persisted by session id, and sent with every message; it is cleared when the conversation is cleared/reset. Ordinary fresh chats start on the global default, while an installed `user_select` Agent fresh chat resumes that Agent's latest verified active route through Main without changing the global default. This is distinct from the persisted [[model-context]] default that non-chat surfaces read.
 
 Settings → Models uses a different path: each service card in [[src/renderer/src/screens/Providers/ModelCenter.tsx#ModelCenter]] has a default-model selector that immediately calls `setModelConfig` with the full provider, model, and Base URL identity. Activating an existing model never replays a service-catalog upsert or depends on its cached revision. It changes the global default for future conversations without mutating an active chat's session override.
 
@@ -57,6 +57,12 @@ Exact Beta.26 three-field routes skip unavailable source metadata checks; histor
 [[src/main/agentera-agent-control/manager.ts#AgenteraAgentControlManager#prepareConversationRuntime]] adopts the first verified binding, resolves opaque selections in Main, reuses an identical route, and leaves a different route `preparing`.
 
 If durable candidate finalization fails, Main marks that candidate `failed`, preserves the prior active Segment, and permits a later retry.
+
+### Fresh conversation route continuity
+
+An installed user-select Agent carries its latest verified model route into a fresh conversation.
+
+When no explicit model selection is supplied, Main reads the most recent owner/device-scoped active Segment for that Agent installation, re-resolves its route through the current Owner Model Catalog, and creates a new immutable Binding. Failed or preparing candidates, other Agents, and other owners/devices are never used; a missing or changed route fails closed instead of falling back to the Agent's creation-time Profile default.
 
 ### Send initialization failure boundary
 
@@ -114,6 +120,12 @@ Attachment turns must not be forced through the CLI override fallback because th
 
 [[src/main/hermes.ts#sendMessageViaCli]] can inline text-file attachments but ignores images, while the gateway/API path preserves image parts and path refs through [[src/main/hermes.ts#buildUserContent]]. When a session override is active and the user sends attachments, [[src/main/hermes.ts#shouldForceCliForSessionOverride]] leaves the turn eligible for the dashboard/gateway or API transport instead of silently dropping media.
 
+## Renderer chat error contract
+
+Chat failures cross Main, Preload, and Renderer as a small allow-listed code event, so provider credentials, response bodies, and local paths never become user-facing text.
+
+[[src/main/chat-error-contract.ts#classifyRendererChatError]] maps provider authentication, Runtime capability, transport, and unknown failures to stable codes. [[src/main/ipc/register.ts#registerIpcHandlers]] applies the mapping at the Main IPC boundary and uses fixed notification copy; [[src/preload/index.ts]] parses the event again before Renderer presentation.
+
 ## Request-scoped Agent authentication boundary
 
 Dynamic Agent turns send only non-secret route fields; credentials stay in the
@@ -133,3 +145,5 @@ is redacted before either API responses or Runtime logs can observe it.
 Before a switched route is sent, [[src/main/agentera-agent-control/model-profile-seed.ts#seedAgentModelProfile]] projects only that route's credential and endpoint metadata into the installed Agent Profile without changing its default model. A logical `openai` row on a third-party endpoint must resolve an exact named provider or a dedicated known-host credential; global `OPENAI_API_KEY` and ambiguous `CUSTOM_API_KEY` values are never copied to that endpoint. Unknown endpoints fail before any target write.
 
 Runtime then reverse-matches the request `base_url` to that Profile's named provider and requires its exact `key_env`, credential pool, or external command. Missing metadata, missing credentials, and provider/endpoint mismatches all fail closed before agent creation, so a credential authorized for one endpoint cannot be sent to another.
+
+Historical Aera rows may still expose the public provider label `openai`. [[src/main/runtime-provider-compat.ts#runtimeProviderForRoute]] translates only at the Hermes boundary: official OpenAI becomes `openai-api`, loopback-compatible endpoints become `custom`, and third-party remote endpoints retain `openai` for exact named-Profile resolution. Gateway startup migrates an old configured route in the same managed transaction as API-server preparation, while catalogs and immutable Agent bindings keep their public identity.

@@ -107,6 +107,34 @@ describe("managed gateway bootstrap", () => {
     expect(configAfter).toContain('host: "127.0.0.1"');
   });
 
+  it("migrates a legacy openai-compatible model route before Gateway startup", async () => {
+    writeFileSync(
+      join(TEST_HOME, "config.yaml"),
+      [
+        "model:",
+        "  provider: openai",
+        "  default: fixture-model",
+        '  base_url: "http://127.0.0.1:19001/v1"',
+        "",
+      ].join("\n"),
+    );
+    const gatewayManagedConfig = await loadGatewayManagedConfig();
+    const planner = (
+      gatewayManagedConfig as unknown as {
+        planGatewayManagedConfiguration?: PlanGatewayManagedConfiguration;
+      }
+    ).planGatewayManagedConfiguration;
+    expect(planner).toBeTypeOf("function");
+    if (!planner) return;
+
+    const plan = planner(undefined, 8642);
+    const configAfter = plan.configPlan?.after?.toString("utf-8") ?? "";
+
+    expect(configAfter).toContain('provider: "custom"');
+    expect(configAfter).toContain('base_url: "http://127.0.0.1:19001/v1"');
+    expect(configAfter).toContain("api_server:");
+  });
+
   it("keeps an explicit default target on default files when another profile is active", async () => {
     mkdirSync(join(TEST_HOME, "profiles", "active-space"), { recursive: true });
     writeFileSync(join(TEST_HOME, "active_profile"), "active-space\n");
@@ -168,5 +196,71 @@ describe("managed gateway bootstrap", () => {
     expect(mutationPort.mutate).toHaveBeenCalledTimes(1);
     expect(readFileSync(configPath)).toEqual(configBefore);
     expect(readFileSync(envPath)).toEqual(envBefore);
+  });
+
+  it("plans from the locked bytes when config changes before mutation admission", async () => {
+    const gatewayManagedConfig = await loadGatewayManagedConfig();
+    const prepare = (
+      gatewayManagedConfig as unknown as {
+        prepareGatewayManagedConfiguration?: PrepareGatewayManagedConfiguration;
+      }
+    ).prepareGatewayManagedConfiguration;
+    expect(prepare).toBeTypeOf("function");
+    if (!prepare) return;
+
+    const authorityModule = await import(
+      "../src/main/model-configuration-write-authority"
+    );
+    const authority = new authorityModule.ModelConfigurationWriteAuthority();
+    authorityModule.registerManagedModelFileRoots({
+      globalRoot: TEST_HOME,
+      profiles: { default: TEST_HOME },
+    });
+    const configPath = join(TEST_HOME, "config.yaml");
+    const mutationPort = {
+      mutate: vi.fn(async (input: { prepare: () => PromiseLike<unknown> | unknown }) => {
+        writeFileSync(
+          configPath,
+          [
+            "model:",
+            "  provider: openai",
+            "  default: fixture-model",
+            '  base_url: "http://127.0.0.1:19001/v1"',
+            "feature_flag: true",
+            "",
+          ].join("\n"),
+        );
+        const planned = (await input.prepare()) as {
+          write: (permit: unknown) => unknown;
+        };
+        return authority.run(
+          { globalCatalog: false, profileIds: ["default"] },
+          async (permit) => ({
+            status: "executed" as const,
+            value: await planned.write(permit),
+            catalog: {
+              revision: "0".repeat(64),
+              targetProfileId: "default",
+              routes: [],
+            },
+          }),
+        );
+      }),
+    };
+
+    try {
+      await expect(
+        prepare("default", {
+          modelMutationPort: mutationPort,
+          resolvePort: async () => 8642,
+        }),
+      ).resolves.toMatchObject({ port: 8642 });
+      const finalConfig = readFileSync(configPath, "utf8");
+      expect(finalConfig).toContain("feature_flag: true");
+      expect(finalConfig).toContain('provider: "custom"');
+      expect(finalConfig).toContain("api_server:");
+    } finally {
+      authorityModule.clearManagedModelFileRoots();
+    }
   });
 });

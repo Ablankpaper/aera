@@ -33,6 +33,10 @@ import type {
   MessagingPlatformUpdate,
 } from "../shared/messaging-platforms";
 import type { ChatToolEvent } from "../shared/chat-stream";
+import {
+  parseChatErrorEvent,
+  type ChatErrorEvent,
+} from "../shared/chat-error";
 import type {
   DeviceCodeInfo,
   HermesAccount,
@@ -980,13 +984,13 @@ const hermesAPI = {
   },
 
   onChatError: (
-    callback: (runId: string, error: string) => void,
+    callback: (runId: string, error: ChatErrorEvent) => void,
   ): (() => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
       runId: string,
-      error: string,
-    ): void => callback(runId, error);
+      error: unknown,
+    ): void => callback(runId, parseChatErrorEvent(error));
     ipcRenderer.on("chat-error", handler);
     return () => ipcRenderer.removeListener("chat-error", handler);
   },
