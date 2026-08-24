@@ -484,12 +484,14 @@ describe("ModelCenter", () => {
     fireEvent.change(screen.getByLabelText(/providers\.center\.apiKey/), {
       target: { value: "codex-key" },
     });
-    fireEvent.change(screen.getByPlaceholderText("providers.center.modelPlaceholder"), {
-      target: { value: "gpt-5.6-sol" },
-    });
-    fireEvent.click(
-      screen.getByRole("button", { name: "providers.center.addAndUse" }),
+    fireEvent.change(
+      screen.getByPlaceholderText("providers.center.modelPlaceholder"),
+      {
+        target: { value: "gpt-5.6-sol" },
+      },
     );
+    expect(screen.getByRole("button", { name: /^common\.add$/ })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /^common\.add$/ }));
 
     await waitFor(() => expect(mutateModelConfiguration).toHaveBeenCalled());
     expect(mutateModelConfiguration).toHaveBeenCalledWith(
@@ -602,8 +604,11 @@ describe("ModelCenter", () => {
       return element as HTMLElement;
     });
     fireEvent.click(within(card).getByRole("button", { name: "common.edit" }));
+    expect(
+      await screen.findByRole("button", { name: /^common\.save$/ }),
+    ).toBeVisible();
     fireEvent.click(
-      await screen.findByRole("button", { name: "providers.center.saveAndUse" }),
+      await screen.findByRole("button", { name: /^common\.save$/ }),
     );
 
     await waitFor(() =>

@@ -361,9 +361,10 @@ test("renames, reroutes, and deletes one stable custom provider in Electron", as
       apiKey: TWIN_KEY,
       model: ORIGINAL_MODEL,
     });
-    await twinDialog
-      .getByRole("button", { name: "Add and use", exact: true })
-      .click();
+    await expect(
+      twinDialog.getByRole("button", { name: "Add", exact: true }),
+    ).toBeVisible();
+    await twinDialog.getByRole("button", { name: "Add", exact: true }).click();
     await expect(twinDialog).toBeHidden();
     await expect(page.locator(".model-service-card")).toHaveCount(2);
     // Saving a second provider is additive. It must not silently replace the
@@ -424,8 +425,11 @@ test("renames, reroutes, and deletes one stable custom provider in Electron", as
         { exact: true },
       ),
     ).toBeVisible();
+    await expect(
+      renameDialog.getByRole("button", { name: "Save", exact: true }),
+    ).toBeVisible();
     await renameDialog
-      .getByRole("button", { name: "Save and use", exact: true })
+      .getByRole("button", { name: "Save", exact: true })
       .click();
     await expect(renameDialog).toBeHidden();
     expect(modelOperationState(harness.userData).latestState).toBe("committed");
@@ -489,8 +493,11 @@ test("renames, reroutes, and deletes one stable custom provider in Electron", as
         { exact: true },
       ),
     ).toBeVisible();
+    await expect(
+      rerouteDialog.getByRole("button", { name: "Save", exact: true }),
+    ).toBeVisible();
     await rerouteDialog
-      .getByRole("button", { name: "Save and use", exact: true })
+      .getByRole("button", { name: "Save", exact: true })
       .click();
     await expect(rerouteDialog).toBeHidden();
     await expect(page.locator(".model-service-card")).toHaveCount(2);

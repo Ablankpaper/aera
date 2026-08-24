@@ -681,6 +681,22 @@ export default function ModelCenter({
     activeModel.provider ||
     t("providers.center.notConfigured");
 
+  // Saving a provider and activating the global default are separate actions.
+  // Keep the dialog's primary action honest: a secondary custom provider is
+  // saved with `activate: false`, so it must say "Add"/"Save" rather than
+  // claiming that it will immediately be used. Preset providers retain the
+  // historical save-and-use behaviour, and an explicitly edited active
+  // custom provider remains active after its save.
+  const hasActiveConfiguredModel =
+    Boolean(activeModel.model.trim()) &&
+    activeModel.provider.trim().toLowerCase() !== "auto";
+  const saveWillActivate =
+    form.mode !== "custom"
+      ? true
+      : editingService?.startsWith("custom:")
+        ? editingService === `custom:${activeCustomProvider?.id || ""}`
+        : !hasActiveConfiguredModel;
+
   const services = useMemo<ModelService[]>(
     () => [
       ...configuredPresets.map((preset): ModelService => {
@@ -1464,15 +1480,7 @@ export default function ModelCenter({
         // This prevents adding or editing a secondary provider from silently
         // replacing the user's current default. The card's explicit
         // "Set default" action always passes activate=true separately.
-        const hasActiveModel =
-          Boolean(activeModel.model.trim()) &&
-          activeModel.provider.trim().toLowerCase() !== "auto";
-        const shouldActivate =
-          form.mode !== "custom"
-            ? true
-            : editedProvider
-              ? editedProvider.id === activeCustomProvider?.id
-              : !hasActiveModel;
+        const shouldActivate = saveWillActivate;
         const result = await coordinatedUpsert({
           providerId: editedProvider?.id,
           provider: route.provider,
@@ -2092,8 +2100,16 @@ export default function ModelCenter({
               >
                 {saving && <Loader2 size={15} className="spin" aria-hidden />}
                 {editingService
-                  ? t("providers.center.saveAndUse")
-                  : t("providers.center.addAndUse")}
+                  ? t(
+                      saveWillActivate
+                        ? "providers.center.saveAndUse"
+                        : "common.save",
+                    )
+                  : t(
+                      saveWillActivate
+                        ? "providers.center.addAndUse"
+                        : "common.add",
+                    )}
               </button>
             </div>
           </div>
