@@ -76,7 +76,9 @@ describe("packaged Runtime contract evidence", () => {
       }),
     );
 
-    await expect(inspectInstalledRuntimeContract(userData)).resolves.toEqual(
+    await expect(
+      inspectInstalledRuntimeContract(userData, { platform: "darwin" }),
+    ).resolves.toEqual(
       expect.objectContaining({
         runtimeVersion: "0.20.0-agentera.5",
         sourceCommit: SOURCE_COMMIT,
