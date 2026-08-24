@@ -213,6 +213,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'windows-runtime-install-diagnostic'
     name: windows-runtime-install-diagnostic
     runs-on: windows-2025
+    environment: internal-beta
     timeout-minutes: 12
     steps:
       - name: Checkout
@@ -258,7 +259,17 @@ jobs:
         shell: pwsh
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          VITE_ANALYTICS_BASE_URL: ${{ vars.VITE_ANALYTICS_BASE_URL }}
+          VITE_ANALYTICS_API_KEY: ${{ secrets.VITE_ANALYTICS_API_KEY }}
+          MAIN_VITE_HERMES_API_URL: ${{ vars.HERMES_API_URL }}
+          MAIN_VITE_HERMES_API_KEY: ${{ secrets.HERMES_API_KEY }}
+          MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL: ${{ vars.AERA_INTERNAL_BETA_ORIGIN }}
+          MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON: >-
+            {"issuer":"${{ vars.AERA_INTERNAL_BETA_ORIGIN }}","keys":[{"keyId":"${{ vars.AERA_INTERNAL_BETA_OFFLINE_KEY_ID }}","publicKey":"${{ vars.AERA_INTERNAL_BETA_OFFLINE_PUBLIC_KEY }}"}]}
         run: |
+          if ([string]::IsNullOrWhiteSpace($env:MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL)) {
+            throw "Internal Beta Cloud origin is missing"
+          }
           npm run build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npx electron-builder `

@@ -159,6 +159,11 @@ test("CI exposes one bounded Windows Runtime Seed install diagnostic", async () 
     "CI must define the Windows Runtime install diagnostic",
   );
   assert.equal(diagnostic["runs-on"], "windows-2025");
+  assert.equal(
+    diagnostic.environment,
+    "internal-beta",
+    "diagnostic must use the same protected build environment as the candidate",
+  );
   assert.match(
     diagnostic.if,
     /inputs\.mode == 'windows-runtime-install-diagnostic'/u,
@@ -175,6 +180,24 @@ test("CI exposes one bounded Windows Runtime Seed install diagnostic", async () 
     (step) => step.name === "Probe packaged Electron Runtime installation",
   );
   assert.ok(packaged, "diagnostic must isolate the packaged Electron boundary");
+  for (const variable of [
+    "VITE_ANALYTICS_BASE_URL",
+    "VITE_ANALYTICS_API_KEY",
+    "MAIN_VITE_HERMES_API_URL",
+    "MAIN_VITE_HERMES_API_KEY",
+    "MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL",
+    "MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON",
+  ]) {
+    assert.ok(
+      packaged.env?.[variable],
+      `diagnostic packaged build must pass ${variable}`,
+    );
+  }
+  assert.match(
+    packaged.run,
+    /Internal Beta Cloud origin is missing/u,
+    "diagnostic must fail clearly when the protected origin is unavailable",
+  );
   assert.match(packaged.run, /electron-builder[\s\S]*--win dir --x64/u);
   assert.match(packaged.run, /agentera-runtime-contract\.e2e\.ts/u);
   assert.match(
