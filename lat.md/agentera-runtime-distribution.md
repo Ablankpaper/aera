@@ -196,7 +196,7 @@ Each macOS and Windows Internal Beta job launches the exact packaged Electron ex
 
 A manual Windows-only CI mode isolates the locked Seed installer from packaging so a candidate timeout can be assigned to one bounded installation stage without repeating the release build.
 
-[[tests/runtime-seed-install-live-diagnostic.test.ts]] runs only when explicitly enabled, records path-free progress and individual health-probe timings, aborts after a bounded deadline, and removes its isolated Runtime root. The same job builds only an unpacked Electron app with the protected `internal-beta` environment and the candidate's public configuration contract, then records the Renderer-visible installation stage through [[tests/e2e/agentera-runtime-contract.e2e.ts]]; it does not create candidate containers. Full CI and candidate validation cannot treat this diagnostic-only run as release evidence.
+[[tests/runtime-seed-install-live-diagnostic.test.ts]] runs only when explicitly enabled, records path-free progress and individual health-probe timings, aborts after a bounded deadline, and removes its isolated Runtime root. The same job builds only an unpacked Electron app with the protected `internal-beta` environment and the candidate's public configuration contract, then records the Renderer-visible installation stage through [[tests/e2e/agentera-runtime-contract.e2e.ts]]. Its optional credential-free inventory trace distinguishes parent spawn, helper entry, directory walk, content hashing, and structured-result return without recording paths or manifest contents. The job does not create candidate containers, and full CI or candidate validation cannot treat this diagnostic-only run as release evidence.
 
 ## Independent verification
 

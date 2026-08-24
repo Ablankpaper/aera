@@ -204,6 +204,7 @@ test("CI exposes one bounded Windows Runtime Seed install diagnostic", async () 
     packaged.run,
     /AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT/u,
   );
+  assert.match(packaged.run, /AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT/u);
 
   const upload = diagnostic.steps.find(
     (step) => step.name === "Upload bounded Runtime install diagnostics",

@@ -33,6 +33,16 @@ export type RuntimeFileHasher = (
   signal?: AbortSignal,
 ) => Promise<string>;
 
+export type RuntimeInventoryDiagnosticEvent =
+  | "inventory-walk-start"
+  | "inventory-walk-complete"
+  | "inventory-hash-start"
+  | "inventory-hash-complete";
+
+export type RuntimeInventoryDiagnosticObserver = (
+  event: RuntimeInventoryDiagnosticEvent,
+) => void;
+
 export class RuntimeExtractionError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -189,6 +199,7 @@ export async function verifyExtractedRuntimeInventoryInProcess(
   maxExtractedBytes: number,
   signal?: AbortSignal,
   hostPlatform: NodeJS.Platform = process.platform,
+  onDiagnostic?: RuntimeInventoryDiagnosticObserver,
 ): Promise<RuntimeExtractionResult> {
   requireExtractionBudget(maxExtractedBytes);
   const root = await realpath(destination);
@@ -333,7 +344,9 @@ export async function verifyExtractedRuntimeInventoryInProcess(
     }
   }
 
+  onDiagnostic?.("inventory-walk-start");
   await walk(root);
+  onDiagnostic?.("inventory-walk-complete");
   const missing = manifest.files.find((entry) => !seen.has(entry.path));
   if (missing) {
     throw new RuntimeExtractionError(
@@ -345,6 +358,8 @@ export async function verifyExtractedRuntimeInventoryInProcess(
       "extracted Runtime byte count differs from the manifest",
     );
   }
+  onDiagnostic?.("inventory-hash-start");
   await verifyRuntimeFileHashes(fileHashChecks, signal);
+  onDiagnostic?.("inventory-hash-complete");
   return { fileCount, extractedBytes };
 }

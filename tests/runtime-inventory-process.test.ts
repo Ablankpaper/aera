@@ -1,4 +1,6 @@
-import { readFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -129,6 +131,69 @@ describe("isolated Runtime inventory verification", () => {
       TEMP: "C:\\Temp",
       TMP: "C:\\Temp",
     });
+  });
+
+  it("forwards the bounded inventory diagnostic output without forwarding credentials", () => {
+    expect(
+      buildRuntimeInventoryHelperEnvironment({
+        SystemRoot: "C:\\Windows",
+        AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT:
+          "C:\\Temp\\runtime-inventory-events.jsonl",
+        OPENAI_API_KEY: "must-not-cross-process-boundary",
+      }),
+    ).toEqual({
+      ELECTRON_RUN_AS_NODE: "1",
+      AGENTERA_RUNTIME_INVENTORY_HELPER: "1",
+      SystemRoot: "C:\\Windows",
+      AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT:
+        "C:\\Temp\\runtime-inventory-events.jsonl",
+    });
+  });
+
+  it("records the parent spawn and result boundaries", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aera-inventory-parent-"));
+    const diagnosticPath = join(root, "events.jsonl");
+    try {
+      await expect(
+        verifyRuntimeInventoryWithHelper(
+          {
+            destination: "C:\\runtime\\staging",
+            manifest,
+            maxExtractedBytes: 4096,
+            hostPlatform: "win32",
+          },
+          {
+            executablePath: "Aera.exe",
+            helperPath: "runtime-inventory-helper.js",
+            sourceEnvironment: {
+              AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT: diagnosticPath,
+            },
+            execute: async () => ({
+              stdout: `${JSON.stringify({
+                schemaVersion: 1,
+                ok: true,
+                fileCount: 0,
+                extractedBytes: 0,
+              })}\n`,
+              stderr: "",
+            }),
+          },
+        ),
+      ).resolves.toEqual({ fileCount: 0, extractedBytes: 0 });
+
+      const events = (await readFile(diagnosticPath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { event: string })
+        .map(({ event }) => event);
+      expect(events).toEqual([
+        "helper-spawn-start",
+        "helper-process-complete",
+        "helper-result-parsed",
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("fails closed when the helper returns an invalid result", async () => {

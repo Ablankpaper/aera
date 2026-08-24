@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
@@ -9,6 +10,7 @@ import {
 } from "./agentera-runtime-distribution/manifest";
 
 const MAX_REQUEST_BYTES = 32 * 1024 * 1024;
+const DIAGNOSTIC_OUTPUT = "AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT";
 const EXPECTED_REQUEST_FIELDS = new Set([
   "schemaVersion",
   "destination",
@@ -23,6 +25,25 @@ interface RuntimeInventoryHelperRequest {
   manifest: RuntimeManifest;
   maxExtractedBytes: number;
   hostPlatform: NodeJS.Platform;
+}
+
+function helperDiagnostic(event: string): void {
+  const outputPath = process.env[DIAGNOSTIC_OUTPUT]?.trim();
+  if (!outputPath || !isAbsolute(outputPath)) return;
+  try {
+    appendFileSync(
+      outputPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        event,
+        timestampMs: Date.now(),
+        pid: process.pid,
+      })}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+  } catch {
+    // Diagnostic evidence must never change Runtime installation behavior.
+  }
 }
 
 function parseRequest(value: unknown): RuntimeInventoryHelperRequest {
@@ -58,6 +79,7 @@ function parseRequest(value: unknown): RuntimeInventoryHelperRequest {
 }
 
 async function main(): Promise<void> {
+  helperDiagnostic("helper-main-start");
   if (
     process.env.AGENTERA_RUNTIME_INVENTORY_HELPER !== "1" ||
     process.argv.length !== 3
@@ -76,19 +98,23 @@ async function main(): Promise<void> {
   const request = parseRequest(
     JSON.parse(await readFile(requestPath, "utf8")) as unknown,
   );
+  helperDiagnostic("helper-request-complete");
   const result = await verifyExtractedRuntimeInventoryInProcess(
     request.destination,
     request.manifest,
     request.maxExtractedBytes,
     undefined,
     request.hostPlatform,
+    helperDiagnostic,
   );
   process.stdout.write(
     `${JSON.stringify({ schemaVersion: 1, ok: true, ...result })}\n`,
   );
+  helperDiagnostic("helper-result-written");
 }
 
 void main().catch(() => {
+  helperDiagnostic("helper-failed");
   process.stdout.write(
     `${JSON.stringify({
       schemaVersion: 1,

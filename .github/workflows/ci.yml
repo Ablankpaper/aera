@@ -284,6 +284,7 @@ jobs:
           $env:AGENTERA_RUNTIME_SEED_DIR = Join-Path $unpacked[0].FullName "resources/agentera-runtime-seed"
           $env:AGENTERA_E2E_RUNTIME_CONTRACT_OUTPUT = Join-Path $evidence "packaged-runtime-contract.json"
           $env:AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT = Join-Path $evidence "packaged-events.jsonl"
+          $env:AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT = Join-Path $evidence "inventory-events.jsonl"
           $env:AGENTERA_E2E_SOURCE_SHA = "${{ github.sha }}"
           npx playwright test tests/e2e/agentera-runtime-contract.e2e.ts 2>&1 | `
             Tee-Object -FilePath (Join-Path $evidence "packaged-playwright.log")

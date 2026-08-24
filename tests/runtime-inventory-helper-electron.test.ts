@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -92,6 +92,7 @@ electronTest(
       ],
     });
     const requestPath = join(root, "request.json");
+    const diagnosticPath = join(root, "inventory-events.jsonl");
     await writeFile(
       requestPath,
       JSON.stringify({
@@ -119,6 +120,7 @@ electronTest(
             env: {
               ELECTRON_RUN_AS_NODE: "1",
               AGENTERA_RUNTIME_INVENTORY_HELPER: "1",
+              AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT: diagnosticPath,
             },
             maxBuffer: 64 * 1024,
           },
@@ -137,5 +139,19 @@ electronTest(
       extractedBytes: python.length + hermes.length,
     });
     expect(result.stderr).toBe("");
+    const events = (await readFile(diagnosticPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { event: string })
+      .map(({ event }) => event);
+    expect(events).toEqual([
+      "helper-main-start",
+      "helper-request-complete",
+      "inventory-walk-start",
+      "inventory-walk-complete",
+      "inventory-hash-start",
+      "inventory-hash-complete",
+      "helper-result-written",
+    ]);
   },
 );

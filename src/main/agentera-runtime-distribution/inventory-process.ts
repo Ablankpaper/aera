@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
+import { appendFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, win32 } from "node:path";
+import { isAbsolute, join, win32 } from "node:path";
 
 import type { RuntimeManifest } from "./manifest";
 import {
@@ -11,11 +12,13 @@ import {
 } from "./inventory";
 
 const HELPER_MARKER = "AGENTERA_RUNTIME_INVENTORY_HELPER";
+const HELPER_DIAGNOSTIC_OUTPUT = "AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT";
 const HELPER_ENVIRONMENT_KEYS = [
   "SystemRoot",
   "WINDIR",
   "TEMP",
   "TMP",
+  HELPER_DIAGNOSTIC_OUTPUT,
 ] as const;
 
 export interface RuntimeInventoryHelperRequest {
@@ -55,6 +58,28 @@ function helperAbortError(): Error {
   const error = new Error("Runtime extraction was cancelled");
   error.name = "AbortError";
   return error;
+}
+
+function runtimeInventoryProcessDiagnostic(
+  sourceEnvironment: NodeJS.ProcessEnv,
+  event: string,
+): void {
+  const outputPath = sourceEnvironment[HELPER_DIAGNOSTIC_OUTPUT]?.trim();
+  if (!outputPath || !isAbsolute(outputPath)) return;
+  try {
+    appendFileSync(
+      outputPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        event,
+        timestampMs: Date.now(),
+        pid: process.pid,
+      })}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+  } catch {
+    // Diagnostic evidence must never change Runtime installation behavior.
+  }
 }
 
 function executeRuntimeInventoryHelper(
@@ -180,6 +205,7 @@ export async function verifyRuntimeInventoryWithHelper(
     join(tmpdir(), "aera-runtime-inventory-"),
   );
   const requestPath = join(temporaryDirectory, "request.json");
+  const sourceEnvironment = options.sourceEnvironment ?? process.env;
   try {
     if (options.signal?.aborted) throw helperAbortError();
     await writeFile(
@@ -190,24 +216,39 @@ export async function verifyRuntimeInventoryWithHelper(
     const execute = options.execute ?? executeRuntimeInventoryHelper;
     let execution: RuntimeInventoryHelperExecutionResult;
     try {
+      runtimeInventoryProcessDiagnostic(
+        sourceEnvironment,
+        "helper-spawn-start",
+      );
       execution = await execute(
         options.executablePath ?? process.execPath,
         [options.helperPath ?? defaultHelperPath(), requestPath],
         {
-          env: buildRuntimeInventoryHelperEnvironment(
-            options.sourceEnvironment,
-          ),
+          env: buildRuntimeInventoryHelperEnvironment(sourceEnvironment),
           windowsHide: true,
           signal: options.signal,
         },
       );
+      runtimeInventoryProcessDiagnostic(
+        sourceEnvironment,
+        "helper-process-complete",
+      );
     } catch (error) {
+      runtimeInventoryProcessDiagnostic(
+        sourceEnvironment,
+        "helper-process-failed",
+      );
       if (error instanceof Error && error.name === "AbortError") throw error;
       throw new RuntimeExtractionError(
         "isolated Runtime inventory verification failed",
       );
     }
-    return parseHelperResult(execution.stdout);
+    const result = parseHelperResult(execution.stdout);
+    runtimeInventoryProcessDiagnostic(
+      sourceEnvironment,
+      "helper-result-parsed",
+    );
+    return result;
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true }).catch(
       () => undefined,
