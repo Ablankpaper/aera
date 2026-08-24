@@ -4,7 +4,7 @@ The in-chat (bottom) model picker selects a model for the **current conversation
 
 The override is held in renderer state on each `<Chat>` run ([[src/renderer/src/screens/Chat/Chat.tsx]]), persisted by session id, and sent with every message; it is cleared when the conversation is cleared/reset. Ordinary fresh chats start on the global default, while an installed `user_select` Agent fresh chat resumes that Agent's latest verified active route through Main without changing the global default. This is distinct from the persisted [[model-context]] default that non-chat surfaces read.
 
-Settings → Models uses a different path: each service card in [[src/renderer/src/screens/Providers/ModelCenter.tsx#ModelCenter]] has a default-model selector that immediately calls `setModelConfig` with the full provider, model, and Base URL identity. Activating an existing model never replays a service-catalog upsert or depends on its cached revision. It changes the global default for future conversations without mutating an active chat's session override.
+Settings → Models uses a different path: each service card in [[src/renderer/src/screens/Providers/ModelCenter.tsx#ModelCenter]] has a default-model selector that activates the full provider, model, and Base URL identity. Named custom rows carry their stable `providerId` through the coordinated Main mutation; preset and legacy rows retain the compatible `setModelConfig` path. Saving a second named provider or editing a non-default one persists its catalog without changing the global default, while an explicit selector action changes the global default. Activation never replays a stale service-catalog upsert or mutates an active chat's session override.
 
 ## Two-pane picker grouped by display brand
 

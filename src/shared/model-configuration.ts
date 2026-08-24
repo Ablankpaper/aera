@@ -109,6 +109,11 @@ export interface UpsertModelServiceRequest {
     contextLength?: number;
   }>;
   activeModel: string;
+  /**
+   * Persist the provider and its model rows without changing the active route
+   * when false. Omitted keeps the historical save-and-use behaviour.
+   */
+  activate?: boolean;
 }
 
 export interface DeleteModelServiceRequest {

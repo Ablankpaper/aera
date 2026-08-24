@@ -1109,6 +1109,7 @@ export default function ModelCenter({
     apiKey: string;
     models: UpsertModelServiceRequest["models"];
     activeModel: string;
+    activate?: boolean;
   }): Promise<ModelConfigurationMutationResult> =>
     mutateWithRevisionRetry((catalog) => ({
       intent: "upsert",
@@ -1149,6 +1150,55 @@ export default function ModelCenter({
     setBusyService({ key: service.key, action: "activate" });
     updateServiceFeedback(service.key);
     try {
+      if (hasCoordinatedModelConfiguration && service.customProvider) {
+        const result = await coordinatedUpsert({
+          providerId: service.customProvider.id,
+          provider: service.provider,
+          providerLabel: service.providerLabel || service.label,
+          baseUrl: service.baseUrl,
+          apiMode:
+            (service.models.find((candidate) => candidate.model === model)
+              ?.apiMode as ModelApiMode | null | undefined) ??
+            service.apiMode ??
+            null,
+          apiKey: service.envKey ? env[service.envKey]?.trim() || "" : "",
+          models: service.models.map((candidate) => ({
+            model: candidate.model,
+            displayName: candidate.name || candidate.model,
+            ...(candidate.contextLength
+              ? { contextLength: candidate.contextLength }
+              : {}),
+          })),
+          activeModel: model,
+          activate: true,
+        });
+        if (result.status === "rejected") {
+          updateServiceFeedback(service.key, {
+            tone: "error",
+            message: mutationFailureMessage(result),
+          });
+          return;
+        }
+        applyCommittedResult(result, {
+          provider: service.provider,
+          providerLabel: service.providerLabel || service.label,
+          model,
+          baseUrl: service.baseUrl,
+        });
+        await refreshParentEnvironment();
+        updateServiceFeedback(service.key, {
+          tone:
+            result.status === "committed_refresh_warning"
+              ? "neutral"
+              : "success",
+          message:
+            result.status === "committed_refresh_warning"
+              ? t("providers.center.warnings.refresh")
+              : t("providers.center.defaultUpdated"),
+        });
+        void reload(false);
+        return;
+      }
       const persisted = await persistAndReadActiveModel(
         service.provider,
         model,
@@ -1407,6 +1457,22 @@ export default function ModelCenter({
         new Set([modelId, ...modelOptions].filter(Boolean)),
       );
       if (hasCoordinatedModelConfiguration) {
+        // Saving a provider and activating the global default are separate
+        // operations. A new custom provider is only activated when there is no
+        // current route yet; editing a custom provider only keeps/changes the
+        // default when that exact stable provider identity is already active.
+        // This prevents adding or editing a secondary provider from silently
+        // replacing the user's current default. The card's explicit
+        // "Set default" action always passes activate=true separately.
+        const hasActiveModel =
+          Boolean(activeModel.model.trim()) &&
+          activeModel.provider.trim().toLowerCase() !== "auto";
+        const shouldActivate =
+          form.mode !== "custom"
+            ? true
+            : editedProvider
+              ? editedProvider.id === activeCustomProvider?.id
+              : !hasActiveModel;
         const result = await coordinatedUpsert({
           providerId: editedProvider?.id,
           provider: route.provider,
@@ -1427,17 +1493,22 @@ export default function ModelCenter({
               : {}),
           })),
           activeModel: modelId,
+          activate: shouldActivate,
         });
         if (result.status === "rejected") {
           setFormError(mutationFailureMessage(result));
           return;
         }
-        applyCommittedResult(result, {
-          provider: route.provider,
-          providerLabel: providerLabel || providerName,
-          model: modelId,
-          baseUrl: route.baseUrl,
-        });
+        if (shouldActivate) {
+          applyCommittedResult(result, {
+            provider: route.provider,
+            providerLabel: providerLabel || providerName,
+            model: modelId,
+            baseUrl: route.baseUrl,
+          });
+        } else {
+          commitCatalogFromMutation(result.catalog);
+        }
         await refreshParentEnvironment();
         if (result.status === "committed_refresh_warning") {
           setFormWarning(t("providers.center.warnings.refresh"));

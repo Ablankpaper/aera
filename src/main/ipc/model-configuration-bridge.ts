@@ -214,6 +214,10 @@ function parseMutationRequest(
     }
     const providerId =
       value.providerId === undefined ? undefined : text(value.providerId, 128);
+    const activate = value.activate;
+    if (activate !== undefined && typeof activate !== "boolean") {
+      throw invalidRequest();
+    }
     return {
       intent: "upsert",
       expectedCatalogRevision,
@@ -226,6 +230,7 @@ function parseMutationRequest(
       apiKey: text(value.apiKey, 65_536, true),
       models,
       activeModel: text(value.activeModel, 512),
+      ...(activate === undefined ? {} : { activate }),
     };
   }
   if (intent === "delete") {
