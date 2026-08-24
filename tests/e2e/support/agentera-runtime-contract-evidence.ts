@@ -40,6 +40,7 @@ export interface InstalledRuntimeContractEvidence {
   versionDirectory: string;
   versionRoot: string;
   manifestPath: string;
+  manifestSha256: string;
   manifestSourceCommit: string;
   pythonExecutable: RuntimeContractFileEvidence;
   hermesEntrypoint: RuntimeContractFileEvidence;
@@ -260,6 +261,7 @@ export async function inspectInstalledRuntimeContract(
     versionDirectory: pointer.versionDirectory,
     versionRoot,
     manifestPath,
+    manifestSha256,
     manifestSourceCommit: manifest.source_commit,
     pythonExecutable: await inspectManifestFile(
       versionRoot,

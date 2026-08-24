@@ -91,6 +91,7 @@ const modelServerRequests: Array<{
   method: string;
   path: string;
 }> = [];
+const providerRequestBodies: string[] = [];
 let unauthorizedModelRequests = 0;
 let globalToolCallRequests = 0;
 let globalToolFinalRequests = 0;
@@ -248,6 +249,7 @@ async function startModelServer(
       }
       let body = "";
       for await (const chunk of request) body += String(chunk);
+      providerRequestBodies.push(body);
       const payload = JSON.parse(body) as {
         messages?: Array<{ role?: unknown; content?: unknown }>;
         model?: unknown;
@@ -1866,10 +1868,14 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
     result: { response: expect.stringContaining("MODEL_CHOICE_OK") },
   });
   expect(imageModelRequests).toBe(1);
-  const localRecordDatabase = new DatabaseSync(
-    join(deviceB.userData, "agentera-control-plane", "control-plane.db"),
-    { readOnly: true },
+  const localRecordPath = join(
+    deviceB.userData,
+    "agentera-control-plane",
+    "control-plane.db",
   );
+  const localRecordDatabase = new DatabaseSync(localRecordPath, {
+    readOnly: true,
+  });
   try {
     const durableDefinitionVersionInstallationRecords = JSON.stringify([
       localRecordDatabase
@@ -1891,8 +1897,31 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
         requestOnlyValue,
       );
     }
+    const bindingAndSegmentRecords = JSON.stringify([
+      ...localRecordDatabase
+        .prepare("SELECT binding_json FROM runtime_bindings")
+        .all(),
+      ...localRecordDatabase
+        .prepare("SELECT route_json FROM conversation_segments")
+        .all(),
+    ]);
+    expect(bindingAndSegmentRecords).not.toContain(SECOND_PROVIDER_API_KEY);
   } finally {
     localRecordDatabase.close();
+  }
+  const databaseFiles = (await readdir(dirname(localRecordPath))).filter(
+    (name) => name.startsWith("control-plane.db"),
+  );
+  for (const name of databaseFiles) {
+    expect(
+      (await readFile(join(dirname(localRecordPath), name))).includes(
+        Buffer.from(SECOND_PROVIDER_API_KEY),
+      ),
+    ).toBe(false);
+  }
+  for (const requestBody of providerRequestBodies) {
+    expect(requestBody).not.toContain(SECOND_PROVIDER_API_KEY);
+    expect(requestBody).not.toMatch(/"(?:api_key|aera_model_route)"\s*:/u);
   }
   const unchangedDeviceAConversation = await deviceA.page.evaluate(() =>
     window.agenteraGlobalProfile.prepareConversationContext({
@@ -1967,6 +1996,17 @@ test("shares immutable Agent versions while every Hermes adaptive state remains 
   expect(JSON.stringify(failedAuthTurn.errors)).not.toMatch(
     /(?:\/Users\/|\\Users\\|\.hermes[\\/])/iu,
   );
+  expect(deviceB.processOutput).not.toContain(SECOND_PROVIDER_API_KEY);
+  for (const profile of ["device-b-agent", "device-b-peer-agent"]) {
+    const gatewayLogs = await Promise.all(
+      ["gateway-stderr.log", "gateway.log"].map((name) =>
+        readFile(join(deviceProfilePath(deviceB, profile), name), "utf8").catch(
+          () => "",
+        ),
+      ),
+    );
+    expect(gatewayLogs.join("\n")).not.toContain(SECOND_PROVIDER_API_KEY);
+  }
   // Use a fresh non-browser HTTP connection. Renderer fetch carries an Origin
   // header, while Electron's global fetch pool can reuse a socket that the
   // preceding SSE response just closed; neither condition proves the Gateway

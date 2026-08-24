@@ -186,6 +186,12 @@ The gate proves stable conversations, background learning, next-conversation rec
 
 [[tests/runtime-data-boundary.test.ts]] hashes realistic default and named Profiles, modes, symlink targets, sessions, Memory, learned Skills, Curator state, Gateway/Cron state, logs, attachments, and workspaces after every install/update/activation/rollback/cleanup/selection/repair transition. [[tests/e2e/agentera-runtime-seed.e2e.ts]] adds the product-level proof: enter through the account-required product, complete explicit online browser authentication, automatically prepare and invoke the native packaged Seed with public Runtime HTTP blocked and no Runtime-choice controls, stop the control plane, restart under the signed offline entitlement, and confirm the same Runtime version plus every pre-existing Hermes-owned entry survives unchanged. It also follows `current.json` into the installed version, binds the installed manifest and executable hashes to the locked source commit, resolves the one active Profile's PID and configured port, proves that the live Gateway uses that installed Python, and requires both request-scoped model-route and tool-policy capabilities. Runtime-owned logs may append while their original prefix and permissions remain intact; other pre-existing entries remain byte-identical. The E2E command rebuilds first so stale `out/` assets cannot reintroduce removed startup screens.
 
+### Packaged live Runtime contract
+
+Each macOS and Windows Internal Beta job launches the exact packaged Electron executable in an isolated data root and installs only the Seed inside that same package.
+
+[[tests/e2e/agentera-runtime-contract.e2e.ts]] follows `current.json` to the installed manifest, requires its SHA-256 to equal the packaged Seed manifest SHA-256, hashes the installed Python and Hermes entrypoint, starts the real Gateway, binds its PID and listening port to that Python, and requires `request_tool_policy` plus `request_model_route`. The emitted candidate evidence contains only bounded identities, hashes, PID, port, and capabilities; it excludes local paths and credentials.
+
 ## Independent verification
 
 The main process verifies canonical manifest bytes, Ed25519 trust, signed context, archive size, and SHA-256 before accepting a Runtime artifact.

@@ -700,6 +700,24 @@ test("Internal Beta candidate proves packaged Main Preload and Renderer startup 
   assert.match(raw, /packaged-startup-windows\.json/u);
 });
 
+test("Internal Beta candidate probes the live packaged Runtime contract on both platforms", async () => {
+  const raw = await readFile(workflowPath, "utf8");
+  const workflow = parseYAML(raw);
+  for (const jobName of ["macos", "windows"]) {
+    const step = workflow.jobs[jobName].steps.find(
+      (candidate) => candidate.name === "Verify live packaged Runtime contract",
+    );
+    assert.ok(step, `${jobName} must probe the packaged Runtime contract`);
+    assert.match(step.run, /tests\/e2e\/agentera-runtime-contract\.e2e\.ts/u);
+    assert.match(step.run, /AGENTERA_E2E_EXECUTABLE_PATH/u);
+    assert.match(step.run, /AGENTERA_RUNTIME_SEED_DIR/u);
+    assert.match(step.run, /AGENTERA_E2E_RUNTIME_CONTRACT_OUTPUT/u);
+    assert.match(step.run, /AGENTERA_E2E_SOURCE_SHA/u);
+  }
+  assert.match(raw, /packaged-runtime-contract-macos/u);
+  assert.match(raw, /packaged-runtime-contract-windows/u);
+});
+
 test("Internal Beta binds native inventories to every final distributable", async () => {
   const raw = await readFile(workflowPath, "utf8");
   for (const name of [
