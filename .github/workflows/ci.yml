@@ -254,12 +254,38 @@ jobs:
             --reporter=verbose 2>&1 | Tee-Object -FilePath (Join-Path $evidence "vitest.log")
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Probe packaged Electron Runtime installation
+        shell: pwsh
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          npm run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npx electron-builder `
+            --config build/electron-builder.internal-beta.yml `
+            --win dir --x64 --publish never `
+            --config.forceCodeSigning=false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $unpacked = @(Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*unpacked" })
+          if ($unpacked.Count -ne 1) { throw "Expected exactly one unpacked Windows app" }
+          $evidence = Join-Path $env:RUNNER_TEMP "runtime-install-diagnostic"
+          $env:AGENTERA_E2E_EXECUTABLE_PATH = Join-Path $unpacked[0].FullName "Aera.exe"
+          $env:AGENTERA_RUNTIME_SEED_DIR = Join-Path $unpacked[0].FullName "resources/agentera-runtime-seed"
+          $env:AGENTERA_E2E_RUNTIME_CONTRACT_OUTPUT = Join-Path $evidence "packaged-runtime-contract.json"
+          $env:AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT = Join-Path $evidence "packaged-events.jsonl"
+          $env:AGENTERA_E2E_SOURCE_SHA = "${{ github.sha }}"
+          npx playwright test tests/e2e/agentera-runtime-contract.e2e.ts 2>&1 | `
+            Tee-Object -FilePath (Join-Path $evidence "packaged-playwright.log")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Upload bounded Runtime install diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: windows-runtime-install-diagnostic-${{ github.run_id }}
-          path: ${{ runner.temp }}/runtime-install-diagnostic
+          path: |
+            ${{ runner.temp }}/runtime-install-diagnostic
+            test-results
           if-no-files-found: error
           retention-days: 14
           compression-level: 0

@@ -171,12 +171,24 @@ test("CI exposes one bounded Windows Runtime Seed install diagnostic", async () 
   assert.match(run.run, /AGENTERA_RUNTIME_INSTALL_DIAGNOSTIC/u);
   assert.match(run.run, /AGENTERA_RUNTIME_INSTALL_DIAGNOSTIC_OUTPUT/u);
 
+  const packaged = diagnostic.steps.find(
+    (step) => step.name === "Probe packaged Electron Runtime installation",
+  );
+  assert.ok(packaged, "diagnostic must isolate the packaged Electron boundary");
+  assert.match(packaged.run, /electron-builder[\s\S]*--win dir --x64/u);
+  assert.match(packaged.run, /agentera-runtime-contract\.e2e\.ts/u);
+  assert.match(
+    packaged.run,
+    /AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT/u,
+  );
+
   const upload = diagnostic.steps.find(
     (step) => step.name === "Upload bounded Runtime install diagnostics",
   );
   assert.ok(upload, "diagnostic must preserve evidence even on failure");
   assert.equal(upload.if, "always()");
   assert.equal(upload.uses, "actions/upload-artifact@v4");
+  assert.match(upload.with.path, /test-results/u);
 
   assert.match(
     workflow.jobs["windows-model-recovery"].if,

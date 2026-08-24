@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { createServer } from "node:net";
+import { appendFileSync } from "node:fs";
 import {
   mkdir,
   mkdtemp,
@@ -11,6 +12,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
 
 import {
   _electron as electron,
@@ -49,6 +51,25 @@ interface SeedManifestIdentity {
 let app: ElectronApplication | null = null;
 let page: Page | null = null;
 let temporaryRoot = "";
+let diagnosticOutput: string | null = null;
+let diagnosticStartedAt = 0;
+
+function runtimeContractDiagnostic(
+  event: string,
+  fields: Readonly<Record<string, boolean | number | string | null>> = {},
+): void {
+  if (diagnosticOutput === null) return;
+  appendFileSync(
+    diagnosticOutput,
+    `${JSON.stringify({
+      schemaVersion: 1,
+      event,
+      elapsedMs: Math.round(performance.now() - diagnosticStartedAt),
+      ...fields,
+    })}\n`,
+    { encoding: "utf8", mode: 0o600 },
+  );
+}
 
 function requiredEnvironment(name: string): string {
   const value = process.env[name]?.trim();
@@ -255,6 +276,18 @@ test("packaged Electron runs its installed locked Runtime and advertises Agent r
     mkdir(hermesHome, { recursive: true, mode: 0o700 }),
     mkdir(dirname(evidenceOutput), { recursive: true }),
   ]);
+  const requestedDiagnosticOutput =
+    process.env.AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT?.trim();
+  if (requestedDiagnosticOutput) {
+    diagnosticOutput = resolve(requestedDiagnosticOutput);
+    await mkdir(dirname(diagnosticOutput), { recursive: true });
+    await writeFile(diagnosticOutput, "", { flag: "w", mode: 0o600 });
+    diagnosticStartedAt = performance.now();
+    runtimeContractDiagnostic("test-start", {
+      platform: process.platform,
+      architecture: process.arch,
+    });
+  }
   const gatewayPort = await freeLoopbackPort();
 
   app = await electron.launch({
@@ -276,12 +309,64 @@ test("packaged Electron runs its installed locked Runtime and advertises Agent r
       LC_ALL: "en_US.UTF-8",
     },
   });
+  app.process().once("exit", (code, signal) => {
+    runtimeContractDiagnostic("electron-exit", {
+      code,
+      signal,
+    });
+  });
   page = await app.firstWindow();
+
+  await page.exposeFunction(
+    "__aeraRecordRuntimeInstallProgress",
+    (value: unknown) => {
+      if (typeof value !== "object" || value === null) return;
+      const progress = value as Record<string, unknown>;
+      runtimeContractDiagnostic("install-progress", {
+        step: typeof progress.step === "number" ? progress.step : -1,
+        totalSteps:
+          typeof progress.totalSteps === "number" ? progress.totalSteps : -1,
+        detail:
+          typeof progress.detail === "string"
+            ? progress.detail.slice(0, 160)
+            : "invalid",
+      });
+    },
+  );
+  await page.evaluate(() => {
+    const exposed = (
+      window as unknown as {
+        __aeraRecordRuntimeInstallProgress: (value: unknown) => Promise<void>;
+      }
+    ).__aeraRecordRuntimeInstallProgress;
+    window.hermesAPI.onInstallProgress((progress) => {
+      void exposed(progress);
+    });
+  });
 
   const desktopVersion = await app.evaluate(({ app: electronApp }) =>
     electronApp.getVersion(),
   );
-  const install = await page.evaluate(() => window.hermesAPI.startInstall());
+  runtimeContractDiagnostic("install-invoke-start");
+  const installHeartbeat = setInterval(
+    () => runtimeContractDiagnostic("install-heartbeat"),
+    15_000,
+  );
+  let install;
+  try {
+    install = await page.evaluate(() => window.hermesAPI.startInstall());
+    runtimeContractDiagnostic("install-invoke-complete", {
+      success: install.success,
+      errorCode: install.errorCode ?? null,
+    });
+  } catch (error) {
+    runtimeContractDiagnostic("install-invoke-failed", {
+      name: error instanceof Error ? error.name.slice(0, 80) : "unknown",
+    });
+    throw error;
+  } finally {
+    clearInterval(installHeartbeat);
+  }
   expect(install).toEqual({ success: true });
   await expect
     .poll(() =>
