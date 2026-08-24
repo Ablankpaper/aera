@@ -18,6 +18,8 @@ import { Header } from "tar";
 import {
   RuntimeExtractionError,
   extractRuntimeArchive,
+  type RuntimeArchiveFileSystem,
+  type RuntimeArchiveFileSystemLoader,
   shouldEnforceExtractedRuntimeMode,
   verifyExtractedRuntimeInventory,
 } from "../src/main/agentera-runtime-distribution/extractor";
@@ -318,6 +320,63 @@ async function recordNoAsarAssignments(
 }
 
 describe("Runtime Seed extractor", () => {
+  it("opens ZIP metadata through the supplied native filesystem adapter", async () => {
+    const source = await readFile(
+      join(
+        process.cwd(),
+        "src/main/agentera-runtime-distribution/extractor.ts",
+      ),
+      "utf8",
+    );
+    expect(source).toMatch(/fromRandomAccessReaderPromise/u);
+    expect(source).not.toMatch(/openPromise as openZip/u);
+
+    const root = await workspace();
+    const value = manifest("windows");
+    const archivePath = await writeZip(root, archiveEntries(value.files));
+    const destination = join(root, "payload");
+    const calls: string[] = [];
+    const adapter = (await import("node:fs")).promises;
+    const nativeAdapter: RuntimeArchiveFileSystem = {
+      open: async (path, flags) => {
+        calls.push(`open:${path}:${flags}`);
+        const handle = await adapter.open(path, flags);
+        return {
+          stat: async () => {
+            calls.push("stat");
+            return handle.stat();
+          },
+          read: async (buffer, offset, length, position) => {
+            calls.push(`read:${position}:${length}`);
+            return handle.read(buffer, offset, length, position);
+          },
+          createReadStream: (options) => {
+            calls.push("stream");
+            return handle.createReadStream(options);
+          },
+          close: () => handle.close(),
+        };
+      },
+    };
+    const loader: RuntimeArchiveFileSystemLoader = async () => ({
+      promises: {
+        open: nativeAdapter.open,
+      },
+    });
+
+    await extractRuntimeArchive({
+      archivePath,
+      destination,
+      manifest: value,
+      maxExtractedBytes: 1024 * 1024,
+      archiveFileSystemLoader: loader,
+    });
+
+    expect(calls.some((call) => call.startsWith("open:"))).toBe(true);
+    expect(calls).toContain("stat");
+    expect(calls.some((call) => call.startsWith("read:"))).toBe(true);
+  });
+
   // @lat: [[agentera-runtime-distribution#Offline Seed installation and repair]]
   it("performs one full extracted-inventory pass for a Windows ZIP", async () => {
     const source = await readFile(
