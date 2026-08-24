@@ -33,6 +33,7 @@ import {
 
 const ARCHIVE_ROOT = "agentera-runtime";
 const MAX_SYMLINK_TARGET_BYTES = 16 * 1024;
+const RUNTIME_HASH_CONCURRENCY = 8;
 const INSTALLED_METADATA_FILES = new Set([
   RUNTIME_MANIFEST_METADATA_NAME,
   RUNTIME_SIGNATURE_METADATA_NAME,
@@ -50,6 +51,17 @@ export interface RuntimeExtractionResult {
   fileCount: number;
   extractedBytes: number;
 }
+
+export interface RuntimeFileHashCheck {
+  physicalPath: string;
+  relativePath: string;
+  expectedSha256: string | null;
+}
+
+export type RuntimeFileHasher = (
+  path: string,
+  signal?: AbortSignal,
+) => Promise<string>;
 
 export class RuntimeExtractionError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -578,29 +590,6 @@ async function extractZipArchive(
         "ZIP extraction produced content outside the Runtime archive root",
       );
     }
-    const archiveEntries = await readdir(join(workDirectory, ARCHIVE_ROOT), {
-      recursive: true,
-      withFileTypes: true,
-    });
-    const seenArchivePaths = new Set<string>();
-    for (const entry of archiveEntries) {
-      const entryPath = entry.parentPath
-        ? relative(
-            join(workDirectory, ARCHIVE_ROOT),
-            join(entry.parentPath, entry.name),
-          )
-        : entry.name;
-      const comparable = normalizedComparablePath(
-        entryPath,
-        manifest.platform === "windows",
-      );
-      if (seenArchivePaths.has(comparable)) {
-        throw new RuntimeExtractionError(
-          `ZIP archive contains a duplicate path: ${entryPath}`,
-        );
-      }
-      seenArchivePaths.add(comparable);
-    }
     await rename(join(workDirectory, ARCHIVE_ROOT), destination);
   } finally {
     await rm(workDirectory, { recursive: true, force: true }).catch(
@@ -659,6 +648,37 @@ async function hashFile(path: string, signal?: AbortSignal): Promise<string> {
   return hash.digest("hex");
 }
 
+export async function verifyRuntimeFileHashes(
+  checks: readonly RuntimeFileHashCheck[],
+  signal?: AbortSignal,
+  fileHasher: RuntimeFileHasher = hashFile,
+): Promise<void> {
+  for (
+    let offset = 0;
+    offset < checks.length;
+    offset += RUNTIME_HASH_CONCURRENCY
+  ) {
+    throwIfAborted(signal);
+    const batch = checks.slice(offset, offset + RUNTIME_HASH_CONCURRENCY);
+    const results = await Promise.allSettled(
+      batch.map(async (check) => {
+        if (
+          (await fileHasher(check.physicalPath, signal)) !==
+          check.expectedSha256
+        ) {
+          throw new RuntimeExtractionError(
+            `extracted Runtime hash differs from the manifest: ${check.relativePath}`,
+          );
+        }
+      }),
+    );
+    const failure = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (failure) throw failure.reason;
+  }
+}
+
 export function shouldEnforceExtractedRuntimeMode(
   manifestPlatform: RuntimeManifest["platform"],
   hostPlatform: NodeJS.Platform = process.platform,
@@ -686,6 +706,7 @@ export async function verifyExtractedRuntimeInventory(
   );
   const seen = new Set<string>();
   const comparableSeen = new Set<string>();
+  const fileHashChecks: RuntimeFileHashCheck[] = [];
   let fileCount = 0;
   let extractedBytes = 0;
 
@@ -780,11 +801,11 @@ export async function verifyExtractedRuntimeInventory(
             "extracted Runtime exceeds the signed extraction budget",
           );
         }
-        if ((await hashFile(physicalPath, signal)) !== expectedEntry.sha256) {
-          throw new RuntimeExtractionError(
-            `extracted Runtime hash differs from the manifest: ${relativePath}`,
-          );
-        }
+        fileHashChecks.push({
+          physicalPath,
+          relativePath,
+          expectedSha256: expectedEntry.sha256,
+        });
       } else if (kind === "symlink") {
         const target = await readlink(physicalPath);
         validateSymlinkTarget(relativePath, target);
@@ -826,6 +847,7 @@ export async function verifyExtractedRuntimeInventory(
       "extracted Runtime byte count differs from the manifest",
     );
   }
+  await verifyRuntimeFileHashes(fileHashChecks, signal);
   return { fileCount, extractedBytes };
 }
 

@@ -330,6 +330,9 @@ describe("Runtime Seed extractor", () => {
     const calls = source.match(/await verifyExtractedRuntimeInventory\(/gu);
 
     expect(calls).toHaveLength(1);
+    expect(source).not.toMatch(
+      /readdir\(join\(workDirectory,\s*ARCHIVE_ROOT\),\s*\{\s*recursive:\s*true/gu,
+    );
   });
 
   it("uses the packaged native parallel extractor for Windows ZIP writes", async () => {
