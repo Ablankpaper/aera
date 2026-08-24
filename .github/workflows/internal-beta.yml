@@ -391,6 +391,17 @@ jobs:
             --output "$RUNNER_TEMP/packaged-startup-macos.json"
           test -s "$RUNNER_TEMP/packaged-startup-macos.json"
 
+      - name: Verify live packaged Runtime contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          AGENTERA_E2E_EXECUTABLE_PATH="${{ steps.mac_paths.outputs.app }}/Contents/MacOS/Aera" \
+          AGENTERA_RUNTIME_SEED_DIR="${{ steps.mac_paths.outputs.app }}/Contents/Resources/agentera-runtime-seed" \
+          AGENTERA_E2E_RUNTIME_CONTRACT_OUTPUT="$RUNNER_TEMP/packaged-runtime-contract-macos.json" \
+          AGENTERA_E2E_SOURCE_SHA="${{ inputs.source_sha }}" \
+            npx playwright test tests/e2e/agentera-runtime-contract.e2e.ts
+          test -s "$RUNNER_TEMP/packaged-runtime-contract-macos.json"
+
       - name: Record path-free macOS collector identity
         shell: bash
         run: |
@@ -595,6 +606,8 @@ jobs:
           cp "$RUNNER_TEMP/macos-evidence.json" "$destination/evidence/"
           cp "$RUNNER_TEMP/packaged-startup-macos.json" \
             "$destination/evidence/"
+          cp "$RUNNER_TEMP/packaged-runtime-contract-macos.json" \
+            "$destination/evidence/"
           cp "$RUNNER_TEMP/diagnostic-macos-identity.json" \
             "$destination/evidence/"
           cp "$RUNNER_TEMP/native-inventory-macos-dmg.json" \
@@ -705,6 +718,21 @@ jobs:
             throw "Packaged Windows startup evidence is missing"
           }
 
+      - name: Verify live packaged Runtime contract
+        shell: pwsh
+        run: |
+          $unpacked = @(Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*unpacked" })
+          if ($unpacked.Count -ne 1) { throw "Expected exactly one unpacked Windows app" }
+          $env:AGENTERA_E2E_EXECUTABLE_PATH = Join-Path $unpacked[0].FullName "Aera.exe"
+          $env:AGENTERA_RUNTIME_SEED_DIR = Join-Path $unpacked[0].FullName "resources/agentera-runtime-seed"
+          $env:AGENTERA_E2E_RUNTIME_CONTRACT_OUTPUT = Join-Path $env:RUNNER_TEMP "packaged-runtime-contract-windows.json"
+          $env:AGENTERA_E2E_SOURCE_SHA = "${{ inputs.source_sha }}"
+          npx playwright test tests/e2e/agentera-runtime-contract.e2e.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path -LiteralPath $env:AGENTERA_E2E_RUNTIME_CONTRACT_OUTPUT -PathType Leaf)) {
+            throw "Packaged Windows Runtime contract evidence is missing"
+          }
+
       - name: Record path-free Windows collector identity
         shell: pwsh
         env:
@@ -776,6 +804,9 @@ jobs:
           Copy-Item $manifests[0].FullName -Destination (Join-Path $destination "runtime-seed")
           Copy-Item `
             (Join-Path $env:RUNNER_TEMP "packaged-startup-windows.json") `
+            -Destination (Join-Path $destination "evidence")
+          Copy-Item `
+            (Join-Path $env:RUNNER_TEMP "packaged-runtime-contract-windows.json") `
             -Destination (Join-Path $destination "evidence")
           Copy-Item `
             (Join-Path $env:RUNNER_TEMP "diagnostic-windows-identity.json") `
@@ -952,6 +983,11 @@ jobs:
           test -f "$RUNNER_TEMP/internal-beta-windows/evidence/packaged-startup-windows.json"
           cp "$RUNNER_TEMP/internal-beta-macos/evidence/packaged-startup-macos.json" \
             "$RUNNER_TEMP/internal-beta-windows/evidence/packaged-startup-windows.json" \
+            candidate/evidence/
+          test -f "$RUNNER_TEMP/internal-beta-macos/evidence/packaged-runtime-contract-macos.json"
+          test -f "$RUNNER_TEMP/internal-beta-windows/evidence/packaged-runtime-contract-windows.json"
+          cp "$RUNNER_TEMP/internal-beta-macos/evidence/packaged-runtime-contract-macos.json" \
+            "$RUNNER_TEMP/internal-beta-windows/evidence/packaged-runtime-contract-windows.json" \
             candidate/evidence/
           test -f "$RUNNER_TEMP/internal-beta-windows/evidence/windows-evidence.json"
           cp "$RUNNER_TEMP/internal-beta-windows/evidence/windows-evidence.json" \

@@ -681,6 +681,22 @@ export default function ModelCenter({
     activeModel.provider ||
     t("providers.center.notConfigured");
 
+  // Saving a provider and activating the global default are separate actions.
+  // Keep the dialog's primary action honest: a secondary custom provider is
+  // saved with `activate: false`, so it must say "Add"/"Save" rather than
+  // claiming that it will immediately be used. Preset providers retain the
+  // historical save-and-use behaviour, and an explicitly edited active
+  // custom provider remains active after its save.
+  const hasActiveConfiguredModel =
+    Boolean(activeModel.model.trim()) &&
+    activeModel.provider.trim().toLowerCase() !== "auto";
+  const saveWillActivate =
+    form.mode !== "custom"
+      ? true
+      : editingService?.startsWith("custom:")
+        ? editingService === `custom:${activeCustomProvider?.id || ""}`
+        : !hasActiveConfiguredModel;
+
   const services = useMemo<ModelService[]>(
     () => [
       ...configuredPresets.map((preset): ModelService => {
@@ -802,7 +818,7 @@ export default function ModelCenter({
       modelBelongsToCustomProvider(model, provider),
     );
     const selectedModel =
-      normalizeUrl(activeModel.baseUrl) === normalizeUrl(provider.baseUrl)
+      activeCustomProvider?.id === provider.id
         ? activeModel.model
         : attachedModels[0]?.model || "";
     const selected = attachedModels.find(
@@ -1109,6 +1125,7 @@ export default function ModelCenter({
     apiKey: string;
     models: UpsertModelServiceRequest["models"];
     activeModel: string;
+    activate?: boolean;
   }): Promise<ModelConfigurationMutationResult> =>
     mutateWithRevisionRetry((catalog) => ({
       intent: "upsert",
@@ -1149,6 +1166,55 @@ export default function ModelCenter({
     setBusyService({ key: service.key, action: "activate" });
     updateServiceFeedback(service.key);
     try {
+      if (hasCoordinatedModelConfiguration && service.customProvider) {
+        const result = await coordinatedUpsert({
+          providerId: service.customProvider.id,
+          provider: service.provider,
+          providerLabel: service.providerLabel || service.label,
+          baseUrl: service.baseUrl,
+          apiMode:
+            (service.models.find((candidate) => candidate.model === model)
+              ?.apiMode as ModelApiMode | null | undefined) ??
+            service.apiMode ??
+            null,
+          apiKey: service.envKey ? env[service.envKey]?.trim() || "" : "",
+          models: service.models.map((candidate) => ({
+            model: candidate.model,
+            displayName: candidate.name || candidate.model,
+            ...(candidate.contextLength
+              ? { contextLength: candidate.contextLength }
+              : {}),
+          })),
+          activeModel: model,
+          activate: true,
+        });
+        if (result.status === "rejected") {
+          updateServiceFeedback(service.key, {
+            tone: "error",
+            message: mutationFailureMessage(result),
+          });
+          return;
+        }
+        applyCommittedResult(result, {
+          provider: service.provider,
+          providerLabel: service.providerLabel || service.label,
+          model,
+          baseUrl: service.baseUrl,
+        });
+        await refreshParentEnvironment();
+        updateServiceFeedback(service.key, {
+          tone:
+            result.status === "committed_refresh_warning"
+              ? "neutral"
+              : "success",
+          message:
+            result.status === "committed_refresh_warning"
+              ? t("providers.center.warnings.refresh")
+              : t("providers.center.defaultUpdated"),
+        });
+        void reload(false);
+        return;
+      }
       const persisted = await persistAndReadActiveModel(
         service.provider,
         model,
@@ -1407,6 +1473,14 @@ export default function ModelCenter({
         new Set([modelId, ...modelOptions].filter(Boolean)),
       );
       if (hasCoordinatedModelConfiguration) {
+        // Saving a provider and activating the global default are separate
+        // operations. A new custom provider is only activated when there is no
+        // current route yet; editing a custom provider only keeps/changes the
+        // default when that exact stable provider identity is already active.
+        // This prevents adding or editing a secondary provider from silently
+        // replacing the user's current default. The card's explicit
+        // "Set default" action always passes activate=true separately.
+        const shouldActivate = saveWillActivate;
         const result = await coordinatedUpsert({
           providerId: editedProvider?.id,
           provider: route.provider,
@@ -1427,17 +1501,22 @@ export default function ModelCenter({
               : {}),
           })),
           activeModel: modelId,
+          activate: shouldActivate,
         });
         if (result.status === "rejected") {
           setFormError(mutationFailureMessage(result));
           return;
         }
-        applyCommittedResult(result, {
-          provider: route.provider,
-          providerLabel: providerLabel || providerName,
-          model: modelId,
-          baseUrl: route.baseUrl,
-        });
+        if (shouldActivate) {
+          applyCommittedResult(result, {
+            provider: route.provider,
+            providerLabel: providerLabel || providerName,
+            model: modelId,
+            baseUrl: route.baseUrl,
+          });
+        } else {
+          commitCatalogFromMutation(result.catalog);
+        }
         await refreshParentEnvironment();
         if (result.status === "committed_refresh_warning") {
           setFormWarning(t("providers.center.warnings.refresh"));
@@ -2021,8 +2100,16 @@ export default function ModelCenter({
               >
                 {saving && <Loader2 size={15} className="spin" aria-hidden />}
                 {editingService
-                  ? t("providers.center.saveAndUse")
-                  : t("providers.center.addAndUse")}
+                  ? t(
+                      saveWillActivate
+                        ? "providers.center.saveAndUse"
+                        : "common.save",
+                    )
+                  : t(
+                      saveWillActivate
+                        ? "providers.center.addAndUse"
+                        : "common.add",
+                    )}
               </button>
             </div>
           </div>

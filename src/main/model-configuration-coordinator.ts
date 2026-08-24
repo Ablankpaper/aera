@@ -495,6 +495,9 @@ function validateMutationRequest(
   if (!models.has(active)) {
     throw new Error("Active model is absent from the model catalog.");
   }
+  if (request.activate !== undefined && typeof request.activate !== "boolean") {
+    throw new Error("Invalid model configuration activation flag.");
+  }
 }
 
 function validateOwnerHandle(value: unknown): string {

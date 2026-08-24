@@ -57,6 +57,9 @@ describe("packaged Runtime contract evidence", () => {
       ],
     };
     const manifestBytes = Buffer.from(JSON.stringify(manifest));
+    const manifestSha256 = createHash("sha256")
+      .update(manifestBytes)
+      .digest("hex");
     await writeFile(
       join(versionRoot, ".agentera-runtime-manifest.json"),
       manifestBytes,
@@ -69,9 +72,7 @@ describe("packaged Runtime contract evidence", () => {
         runtimeVersion: manifest.runtime_version,
         sourceCommit: SOURCE_COMMIT,
         versionDirectory,
-        manifestSha256: createHash("sha256")
-          .update(manifestBytes)
-          .digest("hex"),
+        manifestSha256,
         installedAt: "2026-08-23T00:00:00.000Z",
       }),
     );
@@ -83,6 +84,7 @@ describe("packaged Runtime contract evidence", () => {
         runtimeVersion: "0.20.0-agentera.5",
         sourceCommit: SOURCE_COMMIT,
         versionDirectory,
+        manifestSha256,
         manifestSourceCommit: SOURCE_COMMIT,
         pythonExecutable: expect.objectContaining({
           sha256: pythonSha256,

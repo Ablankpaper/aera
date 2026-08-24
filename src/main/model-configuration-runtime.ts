@@ -287,7 +287,8 @@ function activeRouteIdentity(
         candidate.provider,
         candidate.baseUrl || "",
         config.provider,
-      ) || providerEquivalent(candidate.provider, config.provider)),
+      ) ||
+        providerEquivalent(candidate.provider, config.provider)),
   );
   return {
     provider: config.provider,
@@ -429,10 +430,13 @@ function createMutationAdapter(
         const runtimeProvider = custom
           ? customProviderRuntimeRoute(providerLabel)
           : provider;
-        const oldRouteKey = canonicalPublicRouteKey(
-          activeRouteIdentity(context.targetProfileId, true),
+        const currentActive = activeRouteIdentity(
+          context.targetProfileId,
+          true,
         );
-        const newRouteKey = routeKeyForRequest(request, runtimeProvider);
+        const oldRouteKey = canonicalPublicRouteKey(currentActive);
+        const shouldActivate = request.activate !== false;
+        const requestedRouteKey = routeKeyForRequest(request, runtimeProvider);
         const activeModel = request.models.find(
           (model) => model.model.trim() === request.activeModel.trim(),
         );
@@ -520,18 +524,35 @@ function createMutationAdapter(
               apiMode: request.apiMode,
             })
           : undefined;
-        // Native provider metadata and active route share config.yaml. Compose
-        // both edits into one stale-checked plan and persist it once at the
-        // activation stage so neither edit can overwrite the other.
+        // Native provider metadata and the active route share config.yaml.
+        // Compose both edits into one stale-checked plan. A provider can be
+        // saved without becoming the default; in that case retain the current
+        // model block while still recording the new provider's native entry.
+        const activationProvider = shouldActivate
+          ? runtimeProvider
+          : currentActive.provider;
+        const activationModel = shouldActivate
+          ? request.activeModel.trim()
+          : currentActive.model;
+        const activationBaseUrl = shouldActivate
+          ? baseUrl
+          : currentActive.baseUrl;
+        const activationApiMode = shouldActivate
+          ? request.apiMode
+          : currentActive.apiMode;
+        const activationContextLength = shouldActivate
+          ? (activeModel?.contextLength ?? null)
+          : undefined;
         const activationPlan = planModelConfigWrite(
-          runtimeProvider,
-          request.activeModel.trim(),
-          baseUrl,
+          activationProvider,
+          activationModel,
+          activationBaseUrl,
           context.targetProfileId,
-          activeModel?.contextLength ?? null,
-          request.apiMode,
+          activationContextLength,
+          activationApiMode,
           nativePlan,
         );
+        const newRouteKey = shouldActivate ? requestedRouteKey : oldRouteKey;
         const applyStage = async (
           stage: ModelConfigurationCommitStage,
           permit: Parameters<typeof persistConfigWritePlan>[0],
@@ -567,6 +588,13 @@ function createMutationAdapter(
           location: { kind: "local" },
           applyStage,
           verify: async (snapshot) => {
+            const requestedRouteExists = snapshot.routes.some(
+              (route) =>
+                route.sourceProfileId === context.targetProfileId &&
+                canonicalPublicRouteKey(route) === requestedRouteKey,
+            );
+            if (!requestedRouteExists) return false;
+
             const routeExists = snapshot.routes.some(
               (route) =>
                 route.sourceProfileId === context.targetProfileId &&

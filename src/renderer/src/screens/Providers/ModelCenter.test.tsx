@@ -375,6 +375,252 @@ describe("ModelCenter", () => {
     });
   });
 
+  it("does not replace the active provider when adding a second custom provider", async () => {
+    listModels.mockResolvedValue([
+      {
+        id: "petoi-model",
+        name: "gpt-5.6-sol",
+        provider: "custom",
+        providerLabel: "petoi.cn",
+        providerId: "petoi-provider",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://petoi.cn/v1",
+        apiMode: "chat_completions",
+        createdAt: 1,
+      },
+    ]);
+    listCustomProviders.mockResolvedValue([
+      {
+        id: "petoi-provider",
+        name: "petoi.cn",
+        baseUrl: "https://petoi.cn/v1",
+        createdAt: 1,
+      },
+    ]);
+    const initialCatalog = {
+      revision: catalogRevision,
+      targetProfileId: "acceptance",
+      routes: [
+        {
+          id: "acceptance\0petoi-model",
+          provider: "custom:petoi-cn",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://petoi.cn/v1",
+          apiMode: "chat_completions",
+          providerLabel: "petoi.cn",
+          displayName: "gpt-5.6-sol",
+          sourceProfileId: "acceptance",
+          sourceKind: "account",
+          selection: {
+            sourceProfileId: "acceptance",
+            modelLibraryId: "petoi-model",
+            catalogRevision: catalogRevision,
+          },
+        },
+      ],
+    };
+    const nextCatalog = {
+      ...initialCatalog,
+      revision: "b".repeat(64),
+      routes: [
+        ...initialCatalog.routes,
+        {
+          ...initialCatalog.routes[0],
+          id: "acceptance\0codex-model",
+          provider: "custom:api-codex-cn",
+          baseUrl: "https://www.api-codex.cn/v1",
+          providerLabel: "www.api-codex.cn",
+          selection: {
+            sourceProfileId: "acceptance",
+            modelLibraryId: "codex-model",
+            catalogRevision: "b".repeat(64),
+          },
+        },
+      ],
+    };
+    const getOwnerModelRouteCatalog = vi.fn().mockResolvedValue(initialCatalog);
+    const mutateModelConfiguration = vi
+      .fn()
+      .mockResolvedValue({ status: "committed", catalog: nextCatalog });
+    Object.assign(window.hermesAPI, {
+      getOwnerModelRouteCatalog,
+      mutateModelConfiguration,
+    });
+    const onActivated = vi.fn();
+
+    render(
+      <ModelCenter
+        profile="acceptance"
+        env={{ CUSTOM_PROVIDER_PETOI_CN_KEY: "petoi-key" }}
+        activeModel={{
+          provider: "custom:petoi-cn",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://petoi.cn/v1",
+        }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={onActivated}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(listModels).toHaveBeenCalled());
+    fireEvent.click(
+      screen.getAllByRole("button", {
+        name: /providers\.center\.addModel/,
+      })[0],
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "providers.center.custom" }),
+    );
+    fireEvent.change(screen.getByLabelText("providers.center.name"), {
+      target: { value: "www.api-codex.cn" },
+    });
+    fireEvent.change(screen.getByLabelText(/providers\.center\.baseUrl/), {
+      target: { value: "https://www.api-codex.cn/v1" },
+    });
+    fireEvent.change(screen.getByLabelText(/providers\.center\.apiKey/), {
+      target: { value: "codex-key" },
+    });
+    fireEvent.change(
+      screen.getByPlaceholderText("providers.center.modelPlaceholder"),
+      {
+        target: { value: "gpt-5.6-sol" },
+      },
+    );
+    expect(screen.getByRole("button", { name: /^common\.add$/ })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /^common\.add$/ }));
+
+    await waitFor(() => expect(mutateModelConfiguration).toHaveBeenCalled());
+    expect(mutateModelConfiguration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerLabel: "www.api-codex.cn",
+        baseUrl: "https://www.api-codex.cn/v1",
+        activate: false,
+      }),
+    );
+    expect(onActivated).not.toHaveBeenCalled();
+  });
+
+  it("saves an inactive custom provider without activating it", async () => {
+    listModels.mockResolvedValue([
+      {
+        id: "petoi-model",
+        name: "gpt-5.6-sol",
+        provider: "custom",
+        providerLabel: "petoi.cn",
+        providerId: "petoi-provider",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://petoi.cn/v1",
+        apiMode: "chat_completions",
+        createdAt: 1,
+      },
+      {
+        id: "codex-model",
+        name: "gpt-5.6-sol",
+        provider: "custom",
+        providerLabel: "www.api-codex.cn",
+        providerId: "codex-provider",
+        model: "gpt-5.6-sol",
+        baseUrl: "https://www.api-codex.cn/v1",
+        apiMode: "chat_completions",
+        createdAt: 2,
+      },
+    ]);
+    listCustomProviders.mockResolvedValue([
+      {
+        id: "petoi-provider",
+        name: "petoi.cn",
+        baseUrl: "https://petoi.cn/v1",
+        createdAt: 1,
+      },
+      {
+        id: "codex-provider",
+        name: "www.api-codex.cn",
+        baseUrl: "https://www.api-codex.cn/v1",
+        createdAt: 2,
+      },
+    ]);
+    const initialCatalog = {
+      revision: catalogRevision,
+      targetProfileId: "acceptance",
+      routes: [
+        {
+          id: "acceptance\\0petoi-model",
+          provider: "custom:petoi.cn",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://petoi.cn/v1",
+          apiMode: "chat_completions",
+          providerLabel: "petoi.cn",
+          displayName: "gpt-5.6-sol",
+          sourceProfileId: "acceptance",
+          sourceKind: "account",
+          selection: {
+            sourceProfileId: "acceptance",
+            modelLibraryId: "petoi-model",
+            catalogRevision: catalogRevision,
+          },
+        },
+      ],
+    };
+    const mutateModelConfiguration = vi.fn().mockResolvedValue({
+      status: "committed",
+      catalog: {
+        ...initialCatalog,
+        revision: "b".repeat(64),
+      },
+    });
+    Object.assign(window.hermesAPI, {
+      getOwnerModelRouteCatalog: vi.fn().mockResolvedValue(initialCatalog),
+      mutateModelConfiguration,
+    });
+    const onActivated = vi.fn();
+    const { container } = render(
+      <ModelCenter
+        profile="acceptance"
+        env={{
+          CUSTOM_PROVIDER_PETOI_CN_KEY: "petoi-key",
+          CUSTOM_PROVIDER_WWW_API_CODEX_CN_KEY: "codex-key",
+        }}
+        activeModel={{
+          provider: "custom:petoi.cn",
+          model: "gpt-5.6-sol",
+          baseUrl: "https://petoi.cn/v1",
+        }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={onActivated}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    const card = await waitFor(() => {
+      const element = container.querySelector(
+        '[data-service-key="custom:codex-provider"]',
+      );
+      expect(element).toBeInTheDocument();
+      return element as HTMLElement;
+    });
+    fireEvent.click(within(card).getByRole("button", { name: "common.edit" }));
+    expect(
+      await screen.findByRole("button", { name: /^common\.save$/ }),
+    ).toBeVisible();
+    fireEvent.click(
+      await screen.findByRole("button", { name: /^common\.save$/ }),
+    );
+
+    await waitFor(() =>
+      expect(mutateModelConfiguration).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providerId: "codex-provider",
+          providerLabel: "www.api-codex.cn",
+          activate: false,
+        }),
+      ),
+    );
+    expect(onActivated).not.toHaveBeenCalled();
+  });
+
   it("refreshes the parent environment after a coordinated save", async () => {
     const mutateModelConfiguration = vi.fn().mockResolvedValue({
       status: "committed",
@@ -736,15 +982,29 @@ describe("ModelCenter", () => {
     });
     const getOwnerModelRouteCatalog = vi.fn().mockResolvedValue(emptyCatalog);
     const mutateModelConfiguration = vi.fn().mockResolvedValue({
-      status: "rejected",
-      schemaVersion: 2,
-      operation: "save_provider",
-      stage: "revision",
-      code: "model_save_stale_catalog_revision",
-      retryability: "retryable",
-      diagnosticId: "7aafdaa8a645",
-      rollback: "not_needed",
-      reason: "stale_catalog_revision",
+      status: "committed",
+      catalog: {
+        ...emptyCatalog,
+        revision: "b".repeat(64),
+        routes: [
+          {
+            id: "acceptance\\0model-1",
+            provider: "custom:www.api-codex.cn",
+            model: "gpt-5.6-sol",
+            baseUrl: "https://www.api-codex.cn/v1",
+            apiMode: "chat_completions",
+            providerLabel: "www.api-codex.cn",
+            displayName: "gpt-5.6-sol",
+            sourceProfileId: "acceptance",
+            sourceKind: "account",
+            selection: {
+              sourceProfileId: "acceptance",
+              modelLibraryId: "model-1",
+              catalogRevision: "b".repeat(64),
+            },
+          },
+        ],
+      },
     });
     Object.assign(window.hermesAPI, {
       getOwnerModelRouteCatalog,
@@ -781,14 +1041,18 @@ describe("ModelCenter", () => {
     );
 
     await waitFor(() =>
-      expect(setModelConfig).toHaveBeenCalledWith(
-        "custom",
-        "gpt-5.6-sol",
-        "https://www.api-codex.cn/v1",
-        "acceptance",
+      expect(mutateModelConfiguration).toHaveBeenCalledWith(
+        expect.objectContaining({
+          intent: "upsert",
+          providerId: "api-codex",
+          providerLabel: "www.api-codex.cn",
+          baseUrl: "https://www.api-codex.cn/v1",
+          activeModel: "gpt-5.6-sol",
+          activate: true,
+        }),
       ),
     );
-    expect(mutateModelConfiguration).not.toHaveBeenCalled();
+    expect(setModelConfig).not.toHaveBeenCalled();
     expect(onActivated).toHaveBeenCalledWith({
       provider: "custom:www.api-codex.cn",
       model: "gpt-5.6-sol",
@@ -1514,6 +1778,80 @@ describe("ModelCenter", () => {
     expect(
       container.querySelector('[data-service-key="custom:provider-b"]'),
     ).not.toHaveClass("active");
+  });
+
+  it("edits an inactive provider with its own model when providers share an endpoint", async () => {
+    listModels.mockResolvedValue([
+      {
+        id: "shared-model-a",
+        name: "model-a",
+        provider: "custom",
+        providerLabel: "Provider A",
+        providerId: "provider-a",
+        model: "model-a",
+        baseUrl: "https://shared.example/v1",
+        createdAt: 1,
+      },
+      {
+        id: "shared-model-b",
+        name: "model-b",
+        provider: "custom",
+        providerLabel: "Provider B",
+        providerId: "provider-b",
+        model: "model-b",
+        baseUrl: "https://shared.example/v1",
+        createdAt: 2,
+      },
+    ]);
+    listCustomProviders.mockResolvedValue([
+      {
+        id: "provider-a",
+        name: "Provider A",
+        baseUrl: "https://shared.example/v1",
+        createdAt: 1,
+      },
+      {
+        id: "provider-b",
+        name: "Provider B",
+        baseUrl: "https://shared.example/v1",
+        createdAt: 2,
+      },
+    ]);
+
+    const { container } = render(
+      <ModelCenter
+        profile="acceptance"
+        env={{
+          CUSTOM_PROVIDER_PROVIDER_A_KEY: "configured-a",
+          CUSTOM_PROVIDER_PROVIDER_B_KEY: "configured-b",
+        }}
+        activeModel={{
+          provider: "custom:provider-a",
+          model: "model-a",
+          baseUrl: "https://shared.example/v1",
+        }}
+        onSaveKey={vi.fn().mockResolvedValue(undefined)}
+        onActivated={vi.fn()}
+        onOpenModelPicker={vi.fn()}
+        onBrowseRegistry={vi.fn()}
+      />,
+    );
+
+    const inactiveCard = await waitFor(() => {
+      const card = container.querySelector(
+        '[data-service-key="custom:provider-b"]',
+      );
+      expect(card).toBeInTheDocument();
+      return card as HTMLElement;
+    });
+    fireEvent.click(
+      within(inactiveCard).getByRole("button", { name: "common.edit" }),
+    );
+
+    expect(document.getElementById("provider-model")).toHaveValue("model-b");
+    expect(
+      screen.getByRole("button", { name: /^common\.save$/ }),
+    ).toBeVisible();
   });
 
   it("filters configured services and keeps model previews compact", async () => {

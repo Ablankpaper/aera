@@ -24,6 +24,7 @@ const ORIGINAL_PROVIDER = "Original provider";
 const RENAMED_PROVIDER = "123456";
 const TWIN_PROVIDER = "Twin provider";
 const ORIGINAL_MODEL = "original-model-e2e";
+const TWIN_MODEL = "twin-model-e2e";
 const ORIGINAL_KEY = "provider-lifecycle-original-key";
 const RECOVERY_KEY = "provider-lifecycle-recovery-key";
 const RENAMED_KEY = "provider-lifecycle-renamed-key";
@@ -359,21 +360,64 @@ test("renames, reroutes, and deletes one stable custom provider in Electron", as
       name: TWIN_PROVIDER,
       baseUrl: relay.baseUrl,
       apiKey: TWIN_KEY,
-      model: ORIGINAL_MODEL,
+      model: TWIN_MODEL,
     });
-    await twinDialog
-      .getByRole("button", { name: "Add and use", exact: true })
-      .click();
+    await expect(
+      twinDialog.getByRole("button", { name: "Add", exact: true }),
+    ).toBeVisible();
+    await twinDialog.getByRole("button", { name: "Add", exact: true }).click();
     await expect(twinDialog).toBeHidden();
     await expect(page.locator(".model-service-card")).toHaveCount(2);
     await expect(
-      serviceCard(page, TWIN_PROVIDER).locator(".model-service-badge.current"),
+      serviceCard(page, ORIGINAL_PROVIDER).getByTitle(ORIGINAL_MODEL),
     ).toBeVisible();
+    await expect(
+      serviceCard(page, ORIGINAL_PROVIDER).getByTitle(TWIN_MODEL),
+    ).toHaveCount(0);
+    await expect(
+      serviceCard(page, TWIN_PROVIDER).getByTitle(TWIN_MODEL),
+    ).toBeVisible();
+    await expect(
+      serviceCard(page, TWIN_PROVIDER).getByTitle(ORIGINAL_MODEL),
+    ).toHaveCount(0);
+    // Saving a second provider is additive. It must not silently replace the
+    // route that was already the user's default.
     await expect(
       serviceCard(page, ORIGINAL_PROVIDER).locator(
         ".model-service-badge.current",
       ),
+    ).toBeVisible();
+    await expect(
+      serviceCard(page, TWIN_PROVIDER).locator(".model-service-badge.current"),
     ).toHaveCount(0);
+
+    // An explicit card action carries the stable provider identity through the
+    // coordinator. First make the new provider active, then switch back to the
+    // older provider; this exercises the formerly failing named-provider path.
+    await serviceCard(page, TWIN_PROVIDER)
+      .getByRole("button", { name: "Set as default", exact: true })
+      .click();
+    await expect(
+      serviceCard(page, TWIN_PROVIDER).locator(".model-service-badge.current"),
+    ).toBeVisible();
+    await serviceCard(page, ORIGINAL_PROVIDER)
+      .getByRole("button", { name: "Set as default", exact: true })
+      .click();
+    await expect(
+      serviceCard(page, ORIGINAL_PROVIDER).locator(
+        ".model-service-badge.current",
+      ),
+    ).toBeVisible();
+
+    // Make the original provider non-default again, then edit/save it. This
+    // is the exact regression that used to fail final route verification and
+    // restore the whole configuration.
+    await serviceCard(page, TWIN_PROVIDER)
+      .getByRole("button", { name: "Set as default", exact: true })
+      .click();
+    await expect(
+      serviceCard(page, TWIN_PROVIDER).locator(".model-service-badge.current"),
+    ).toBeVisible();
 
     const originalCard = serviceCard(page, ORIGINAL_PROVIDER);
     await originalCard
@@ -394,15 +438,27 @@ test("renames, reroutes, and deletes one stable custom provider in Electron", as
         { exact: true },
       ),
     ).toBeVisible();
+    await expect(
+      renameDialog.getByRole("button", { name: "Save", exact: true }),
+    ).toBeVisible();
     await renameDialog
-      .getByRole("button", { name: "Save and use", exact: true })
+      .getByRole("button", { name: "Save", exact: true })
       .click();
     await expect(renameDialog).toBeHidden();
+    expect(modelOperationState(harness.userData).latestState).toBe("committed");
 
     await expect(page.locator(".model-service-card")).toHaveCount(2);
     await expect(serviceCard(page, ORIGINAL_PROVIDER)).toHaveCount(0);
     await expect(serviceCard(page, RENAMED_PROVIDER)).toHaveCount(1);
     await expect(serviceCard(page, TWIN_PROVIDER)).toHaveCount(1);
+    await expect(
+      serviceCard(page, TWIN_PROVIDER).locator(".model-service-badge.current"),
+    ).toBeVisible();
+    await expect(
+      serviceCard(page, RENAMED_PROVIDER).locator(
+        ".model-service-badge.current",
+      ),
+    ).toHaveCount(0);
 
     const renamedRecord = await page.evaluate(async (providerName) => {
       const profiles = await window.hermesAPI.listProfiles();
@@ -450,8 +506,11 @@ test("renames, reroutes, and deletes one stable custom provider in Electron", as
         { exact: true },
       ),
     ).toBeVisible();
+    await expect(
+      rerouteDialog.getByRole("button", { name: "Save", exact: true }),
+    ).toBeVisible();
     await rerouteDialog
-      .getByRole("button", { name: "Save and use", exact: true })
+      .getByRole("button", { name: "Save", exact: true })
       .click();
     await expect(rerouteDialog).toBeHidden();
     await expect(page.locator(".model-service-card")).toHaveCount(2);
@@ -460,9 +519,6 @@ test("renames, reroutes, and deletes one stable custom provider in Electron", as
     ).toBeVisible();
 
     const twinCard = serviceCard(page, TWIN_PROVIDER);
-    await twinCard
-      .getByRole("button", { name: "Set as default", exact: true })
-      .click();
     await expect(
       twinCard.locator(".model-service-badge.current"),
     ).toBeVisible();
@@ -502,7 +558,7 @@ test("renames, reroutes, and deletes one stable custom provider in Electron", as
       "",
     );
     expect(finalState.env[customProviderEnvKey(TWIN_PROVIDER)]).toBe(TWIN_KEY);
-    expect(finalState.modelConfig.model).toBe(ORIGINAL_MODEL);
+    expect(finalState.modelConfig.model).toBe(TWIN_MODEL);
     expect(relay.authorizationHeaders).toContain(`Bearer ${ORIGINAL_KEY}`);
     expect(relay.authorizationHeaders).toContain(`Bearer ${RENAMED_KEY}`);
     expect(relay.authorizationHeaders).toContain(`Bearer ${UPDATED_KEY}`);
