@@ -4,6 +4,7 @@ import {
   lstat,
   mkdtemp,
   open,
+  readFile,
   readlink,
   readdir,
   realpath,
@@ -26,6 +27,7 @@ it("uses Electron original-fs for final Runtime inventory verification", async (
       chmod: vi.fn(),
       lstat: vi.fn(),
       open: vi.fn(),
+      readFile: vi.fn(),
       readlink: vi.fn(),
       readdir: vi.fn(),
       realpath: vi.fn(),
@@ -42,6 +44,7 @@ it("uses Electron original-fs for final Runtime inventory verification", async (
   expect(fileSystem.chmod).toBeTypeOf("function");
   expect(fileSystem.lstat).toBeTypeOf("function");
   expect(fileSystem.open).toBeTypeOf("function");
+  expect(fileSystem.readFile).toBeTypeOf("function");
   expect(fileSystem.readlink).toBeTypeOf("function");
   expect(fileSystem.readdir).toBeTypeOf("function");
   expect(fileSystem.realpath).toBeTypeOf("function");
@@ -53,7 +56,7 @@ it("hashes the final Runtime inventory through file handles instead of streams",
   const { verifyExtractedRuntimeInventoryInProcess } =
     await import("../src/main/agentera-runtime-distribution/inventory");
   const root = await mkdtemp(join(tmpdir(), "aera-runtime-handle-hash-"));
-  const contents = Buffer.from("verified runtime bytes");
+  const contents = Buffer.alloc(262_145, 0x61);
   const physicalPath = join(root, "runtime.bin");
   await writeFile(physicalPath, contents);
   const manifest = {
@@ -85,6 +88,7 @@ it("hashes the final Runtime inventory through file handles instead of streams",
           chmod,
           lstat,
           open: openFile,
+          readFile,
           readlink,
           readdir,
           realpath,
@@ -104,6 +108,7 @@ it("bounds and overlaps final Runtime inventory hashes", async () => {
     physicalPath: `/runtime/file-${index}.bin`,
     relativePath: `file-${index}.bin`,
     expectedSha256: "a".repeat(64),
+    size: 1,
   }));
   let active = 0;
   let maximum = 0;
@@ -118,4 +123,54 @@ it("bounds and overlaps final Runtime inventory hashes", async () => {
     }),
   ).resolves.toBeUndefined();
   expect(maximum).toBe(8);
+});
+
+it("uses the bounded readFile path for small Runtime entries", async () => {
+  const { verifyExtractedRuntimeInventoryInProcess } =
+    await import("../src/main/agentera-runtime-distribution/inventory");
+  const root = await mkdtemp(join(tmpdir(), "aera-runtime-small-hash-"));
+  const contents = Buffer.from("small verified runtime bytes");
+  const physicalPath = join(root, "small.bin");
+  await writeFile(physicalPath, contents);
+  const manifest = {
+    platform: "windows",
+    files: [
+      {
+        path: "small.bin",
+        kind: "file",
+        size: contents.length,
+        sha256: createHash("sha256").update(contents).digest("hex"),
+        mode: 0o644,
+        link_target: null,
+      },
+    ],
+  } as RuntimeManifest;
+  const readFilePath = vi.fn(readFile);
+  const openFile = vi.fn(open);
+  const resolvedPhysicalPath = join(await realpath(root), "small.bin");
+
+  try {
+    await expect(
+      verifyExtractedRuntimeInventoryInProcess(
+        root,
+        manifest,
+        contents.length,
+        undefined,
+        "win32",
+        {
+          chmod,
+          lstat,
+          open: openFile,
+          readFile: readFilePath,
+          readlink,
+          readdir,
+          realpath,
+        } satisfies RuntimeInventoryFileSystem,
+      ),
+    ).resolves.toEqual({ fileCount: 1, extractedBytes: contents.length });
+    expect(readFilePath).toHaveBeenCalledWith(resolvedPhysicalPath);
+    expect(openFile).not.toHaveBeenCalled();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
