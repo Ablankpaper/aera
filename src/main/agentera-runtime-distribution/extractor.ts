@@ -625,12 +625,6 @@ async function extractZipArchive(
         "ZIP extraction produced content outside the Runtime archive root",
       );
     }
-    await verifyExtractedRuntimeInventory(
-      join(workDirectory, ARCHIVE_ROOT),
-      manifest,
-      maxExtractedBytes,
-      signal,
-    );
     const archiveEntries = await readdir(join(workDirectory, ARCHIVE_ROOT), {
       recursive: true,
       withFileTypes: true,

@@ -295,6 +295,20 @@ async function writeZip(
 }
 
 describe("Runtime Seed extractor", () => {
+  // @lat: [[agentera-runtime-distribution#Offline Seed installation and repair]]
+  it("performs one full extracted-inventory pass for a Windows ZIP", async () => {
+    const source = await readFile(
+      join(
+        process.cwd(),
+        "src/main/agentera-runtime-distribution/extractor.ts",
+      ),
+      "utf8",
+    );
+    const calls = source.match(/await verifyExtractedRuntimeInventory\(/gu);
+
+    expect(calls).toHaveLength(1);
+  });
+
   it("extracts TAR/Zstandard, verifies hashes, and preserves executable modes where supported", async () => {
     const root = await workspace();
     const value = manifest();
