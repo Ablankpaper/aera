@@ -3,6 +3,7 @@ import {
   chmod,
   lstat,
   open,
+  readFile,
   readlink,
   readdir,
   realpath,
@@ -19,6 +20,11 @@ import {
 export const MAX_SYMLINK_TARGET_BYTES = 16 * 1024;
 const RUNTIME_HASH_CONCURRENCY = 8;
 const RUNTIME_HASH_BUFFER_BYTES = 1024 * 1024;
+// Most Runtime entries are tiny Python/package metadata files.  Reading those
+// through one bounded original-fs operation avoids thousands of open/read/close
+// round trips in packaged Electron on Windows.  Larger files retain the
+// positional handle path so hashing never allocates an unbounded buffer.
+const RUNTIME_HASH_READ_FILE_THRESHOLD_BYTES = 256 * 1024;
 const INSTALLED_METADATA_FILES = new Set([
   RUNTIME_MANIFEST_METADATA_NAME,
   RUNTIME_SIGNATURE_METADATA_NAME,
@@ -33,17 +39,20 @@ export interface RuntimeFileHashCheck {
   physicalPath: string;
   relativePath: string;
   expectedSha256: string | null;
+  size?: number;
 }
 
 export type RuntimeFileHasher = (
   path: string,
   signal?: AbortSignal,
+  size?: number,
 ) => Promise<string>;
 
 export interface RuntimeInventoryFileSystem {
   chmod: typeof chmod;
   lstat: typeof lstat;
   open: typeof open;
+  readFile: typeof readFile;
   readlink: typeof readlink;
   readdir: typeof readdir;
   realpath: typeof realpath;
@@ -182,6 +191,16 @@ async function hashFileWithHandle(
   return hash.digest("hex");
 }
 
+async function hashFileWithReadFile(
+  path: string,
+  signal: AbortSignal | undefined,
+  readFilePath: typeof readFile,
+): Promise<string> {
+  const contents = await readFilePath(path);
+  throwIfAborted(signal);
+  return createHash("sha256").update(contents).digest("hex");
+}
+
 async function hashFile(path: string, signal?: AbortSignal): Promise<string> {
   return hashFileWithHandle(path, signal, open);
 }
@@ -190,6 +209,7 @@ const NODE_RUNTIME_INVENTORY_FILE_SYSTEM: RuntimeInventoryFileSystem = {
   chmod,
   lstat,
   open,
+  readFile,
   readlink,
   readdir,
   realpath,
@@ -224,6 +244,7 @@ export async function resolveRuntimeInventoryFileSystem(
     typeof promiseRecord.chmod !== "function" ||
     typeof promiseRecord.lstat !== "function" ||
     typeof promiseRecord.open !== "function" ||
+    typeof promiseRecord.readFile !== "function" ||
     typeof promiseRecord.readlink !== "function" ||
     typeof promiseRecord.readdir !== "function" ||
     typeof promiseRecord.realpath !== "function"
@@ -236,6 +257,7 @@ export async function resolveRuntimeInventoryFileSystem(
     chmod: promiseRecord.chmod.bind(promises) as typeof chmod,
     lstat: promiseRecord.lstat.bind(promises) as typeof lstat,
     open: promiseRecord.open.bind(promises) as typeof open,
+    readFile: promiseRecord.readFile.bind(promises) as typeof readFile,
     readlink: promiseRecord.readlink.bind(promises) as typeof readlink,
     readdir: promiseRecord.readdir.bind(promises) as typeof readdir,
     realpath: promiseRecord.realpath.bind(promises) as typeof realpath,
@@ -257,7 +279,7 @@ export async function verifyRuntimeFileHashes(
     const results = await Promise.allSettled(
       batch.map(async (check) => {
         if (
-          (await fileHasher(check.physicalPath, signal)) !==
+          (await fileHasher(check.physicalPath, signal, check.size)) !==
           check.expectedSha256
         ) {
           throw new RuntimeExtractionError(
@@ -408,6 +430,7 @@ export async function verifyExtractedRuntimeInventoryInProcess(
           physicalPath,
           relativePath,
           expectedSha256: expectedEntry.sha256,
+          size: metadata.size,
         });
       } else if (kind === "symlink") {
         const target = await inventoryFileSystem.readlink(physicalPath);
@@ -450,8 +473,13 @@ export async function verifyExtractedRuntimeInventoryInProcess(
       "extracted Runtime byte count differs from the manifest",
     );
   }
-  await verifyRuntimeFileHashes(fileHashChecks, signal, (path, hashSignal) =>
-    hashFileWithHandle(path, hashSignal, inventoryFileSystem.open),
+  await verifyRuntimeFileHashes(
+    fileHashChecks,
+    signal,
+    (path, hashSignal, size) =>
+      size !== undefined && size <= RUNTIME_HASH_READ_FILE_THRESHOLD_BYTES
+        ? hashFileWithReadFile(path, hashSignal, inventoryFileSystem.readFile)
+        : hashFileWithHandle(path, hashSignal, inventoryFileSystem.open),
   );
   return { fileCount, extractedBytes };
 }
