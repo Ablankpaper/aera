@@ -80,6 +80,7 @@ it("hashes the final Runtime inventory through file handles instead of streams",
         contents.length,
         undefined,
         "win32",
+        undefined,
         {
           chmod,
           lstat,
