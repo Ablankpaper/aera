@@ -347,7 +347,6 @@ async function verifyExtractedRuntimeInventoryRecursive(
   manifest: RuntimeManifest,
   maxExtractedBytes: number,
   signal: AbortSignal | undefined,
-  hostPlatform: NodeJS.Platform,
   onDiagnostic: RuntimeInventoryDiagnosticObserver | undefined,
   fileSystem: RuntimeInventoryFileSystem,
 ): Promise<RuntimeExtractionResult> {
@@ -529,7 +528,6 @@ export async function verifyExtractedRuntimeInventoryInProcess(
       manifest,
       maxExtractedBytes,
       signal,
-      hostPlatform,
       onDiagnostic,
       inventoryFileSystem,
     );
