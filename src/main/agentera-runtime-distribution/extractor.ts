@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
+import { createReadStream } from "node:fs";
 import {
   chmod,
   lstat,
@@ -9,21 +9,13 @@ import {
   realpath,
   rename,
   rm,
-  symlink,
 } from "node:fs/promises";
-import {
-  dirname,
-  isAbsolute,
-  join,
-  posix,
-  relative,
-  resolve,
-  sep,
-} from "node:path";
+import { isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Writable } from "node:stream";
 import { createZstdDecompress } from "node:zlib";
 
+import { extract as extractZip } from "@electron-internal/extract-zip";
 import { Parser, x as extractTar, type ReadEntry } from "tar";
 import {
   openPromise as openZip,
@@ -307,7 +299,17 @@ async function validateZipArchive(
     for await (const entry of zipEntries(zipfile, signal)) {
       const metadata = zipEntryMetadata(entry);
       if ("root" in metadata) validator.addRoot(metadata.kind, metadata.mode);
-      else validator.add(metadata);
+      else if (metadata.kind === "symlink") {
+        validator.add({
+          ...metadata,
+          linkTarget: await readZipSymlinkTarget(
+            zipfile,
+            entry,
+            metadata.path,
+            signal,
+          ),
+        });
+      } else validator.add(metadata);
     }
     validator.finish();
   } finally {
@@ -566,58 +568,9 @@ async function extractZipArchive(
   signal?: AbortSignal,
 ): Promise<void> {
   await validateZipArchive(archivePath, manifest, maxExtractedBytes, signal);
-  const validator = new ArchiveInventoryValidator(manifest, maxExtractedBytes);
-  const zipfile = await openRuntimeZip(archivePath);
   try {
     throwIfAborted(signal);
-    for await (const entry of zipEntries(zipfile, signal)) {
-      const metadata = zipEntryMetadata(entry);
-      if ("root" in metadata) {
-        validator.addRoot(metadata.kind, metadata.mode);
-        await mkdir(join(workDirectory, ARCHIVE_ROOT), {
-          recursive: true,
-          mode: metadata.mode,
-        });
-        continue;
-      }
-
-      const target = join(
-        workDirectory,
-        ARCHIVE_ROOT,
-        ...metadata.path.split("/"),
-      );
-      if (metadata.kind === "directory") {
-        validator.add(metadata);
-        await mkdir(target, { recursive: true, mode: metadata.mode });
-        continue;
-      }
-
-      await mkdir(dirname(target), { recursive: true, mode: 0o755 });
-      if (metadata.kind === "symlink") {
-        const linkTarget = await readZipSymlinkTarget(
-          zipfile,
-          entry,
-          metadata.path,
-          signal,
-        );
-        const linkedMetadata = { ...metadata, linkTarget };
-        validator.add(linkedMetadata);
-        await symlink(linkTarget, target);
-        continue;
-      }
-
-      validator.add(metadata);
-      const stream = await zipfile.openReadStreamPromise(entry);
-      await pipeline(
-        stream,
-        createWriteStream(target, {
-          flags: "wx",
-          mode: metadata.mode,
-        }),
-        signal ? { signal } : {},
-      );
-    }
-    validator.finish();
+    await extractZip(archivePath, { dir: workDirectory });
     throwIfAborted(signal);
     const children = await readdir(workDirectory);
     if (children.length !== 1 || children[0] !== ARCHIVE_ROOT) {
@@ -650,7 +603,6 @@ async function extractZipArchive(
     }
     await rename(join(workDirectory, ARCHIVE_ROOT), destination);
   } finally {
-    zipfile.close();
     await rm(workDirectory, { recursive: true, force: true }).catch(
       () => undefined,
     );

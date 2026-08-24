@@ -309,6 +309,26 @@ describe("Runtime Seed extractor", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("uses the packaged native parallel extractor for Windows ZIP writes", async () => {
+    const source = await readFile(
+      join(
+        process.cwd(),
+        "src/main/agentera-runtime-distribution/extractor.ts",
+      ),
+      "utf8",
+    );
+
+    expect(source).toMatch(
+      /import\s*\{\s*extract\s+as\s+extractZip\s*\}\s*from\s*"@electron-internal\/extract-zip"/u,
+    );
+    expect(source).not.toMatch(
+      /import\s+extractZip\s+from\s+"@electron-internal\/extract-zip"/u,
+    );
+    expect(source).toMatch(
+      /await\s+extractZip\(archivePath,\s*\{\s*dir:\s*workDirectory\s*\}\)/u,
+    );
+  });
+
   it("extracts TAR/Zstandard, verifies hashes, and preserves executable modes where supported", async () => {
     const root = await workspace();
     const value = manifest();
