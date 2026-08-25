@@ -529,7 +529,6 @@ export async function verifyExtractedRuntimeInventoryInProcess(
     fileHashChecks,
     signal,
     (path, hashSignal, size) =>
-      hostPlatform !== "win32" &&
       size !== undefined &&
       size <= RUNTIME_HASH_READ_FILE_THRESHOLD_BYTES
         ? hashFileWithReadFile(

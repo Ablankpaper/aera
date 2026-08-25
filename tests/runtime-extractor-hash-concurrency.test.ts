@@ -148,7 +148,7 @@ it("bounds and overlaps final Runtime inventory hashes", async () => {
   expect(maximum).toBe(8);
 });
 
-it("uses positional handles for small Windows Runtime entries", async () => {
+it("uses one bounded read for small Windows Runtime entries", async () => {
   const { verifyExtractedRuntimeInventoryInProcess } =
     await import("../src/main/agentera-runtime-distribution/inventory");
   const root = await mkdtemp(join(tmpdir(), "aera-runtime-small-hash-"));
@@ -192,8 +192,8 @@ it("uses positional handles for small Windows Runtime entries", async () => {
         } satisfies RuntimeInventoryFileSystem,
       ),
     ).resolves.toEqual({ fileCount: 1, extractedBytes: contents.length });
-    expect(openFile).toHaveBeenCalledWith(resolvedPhysicalPath, "r");
-    expect(readFilePath).not.toHaveBeenCalled();
+    expect(readFilePath).toHaveBeenCalledWith(resolvedPhysicalPath);
+    expect(openFile).not.toHaveBeenCalled();
   } finally {
     await rm(root, { recursive: true, force: true });
   }
