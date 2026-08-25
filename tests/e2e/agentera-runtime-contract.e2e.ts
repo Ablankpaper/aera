@@ -593,10 +593,35 @@ test("packaged Electron runs its installed locked Runtime and advertises Agent r
     clearInterval(installHeartbeat);
   }
   expect(install).toEqual({ success: true });
+  let runtimeStateAttempt = 0;
+  let previousRuntimeStateSnapshot = "";
   await expect
-    .poll(() =>
-      page?.evaluate(() => window.agenteraRuntimeDistribution.getState()),
-    )
+    .poll(async () => {
+      runtimeStateAttempt += 1;
+      const state = await page?.evaluate(() =>
+        window.agenteraRuntimeDistribution.getState(),
+      );
+      const snapshot = state
+        ? [
+            state.phase,
+            state.currentVersion === lock.runtime_version,
+            state.currentSourceCommit === lock.source_commit,
+            state.lastErrorCode,
+          ].join(":")
+        : "unavailable";
+      if (snapshot !== previousRuntimeStateSnapshot) {
+        previousRuntimeStateSnapshot = snapshot;
+        runtimeContractDiagnostic("runtime-state-probe", {
+          attempt: runtimeStateAttempt,
+          phase: state?.phase ?? null,
+          currentVersionMatches: state?.currentVersion === lock.runtime_version,
+          currentSourceCommitMatches:
+            state?.currentSourceCommit === lock.source_commit,
+          lastErrorCode: state?.lastErrorCode ?? null,
+        });
+      }
+      return state;
+    })
     .toMatchObject({
       phase: "current",
       currentVersion: lock.runtime_version,

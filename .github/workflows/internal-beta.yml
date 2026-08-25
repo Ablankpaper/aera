@@ -392,15 +392,33 @@ jobs:
           test -s "$RUNNER_TEMP/packaged-startup-macos.json"
 
       - name: Verify live packaged Runtime contract
+        id: runtime_contract
         shell: bash
         run: |
           set -euo pipefail
+          evidence="$RUNNER_TEMP/runtime-contract-diagnostics-macos"
+          mkdir -p "$evidence"
           AGENTERA_E2E_EXECUTABLE_PATH="${{ steps.mac_paths.outputs.app }}/Contents/MacOS/Aera" \
           AGENTERA_RUNTIME_SEED_DIR="${{ steps.mac_paths.outputs.app }}/Contents/Resources/agentera-runtime-seed" \
           AGENTERA_E2E_RUNTIME_CONTRACT_OUTPUT="$RUNNER_TEMP/packaged-runtime-contract-macos.json" \
+          AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT="$evidence/events.jsonl" \
           AGENTERA_E2E_SOURCE_SHA="${{ inputs.source_sha }}" \
-            npx playwright test tests/e2e/agentera-runtime-contract.e2e.ts
+            npx playwright test tests/e2e/agentera-runtime-contract.e2e.ts \
+              2>&1 | tee "$evidence/playwright.log"
           test -s "$RUNNER_TEMP/packaged-runtime-contract-macos.json"
+
+      - name: Preserve failed macOS Runtime contract diagnostics
+        if: ${{ always() && steps.runtime_contract.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-runtime-contract-diagnostics-${{ inputs.source_sha }}
+          path: |
+            ${{ runner.temp }}/runtime-contract-diagnostics-macos
+            ${{ runner.temp }}/packaged-runtime-contract-macos.json
+            test-results
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
 
       - name: Record path-free macOS collector identity
         shell: bash
@@ -730,6 +748,7 @@ jobs:
           $env:AGENTERA_RUNTIME_SEED_DIR = Join-Path $unpacked[0].FullName "resources/agentera-runtime-seed"
           $env:AGENTERA_E2E_RUNTIME_CONTRACT_OUTPUT = Join-Path $env:RUNNER_TEMP "packaged-runtime-contract-windows.json"
           $env:AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT = Join-Path $evidence "events.jsonl"
+          $env:AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT = Join-Path $evidence "inventory-events.jsonl"
           $env:AGENTERA_E2E_SOURCE_SHA = "${{ inputs.source_sha }}"
           npx playwright test tests/e2e/agentera-runtime-contract.e2e.ts 2>&1 | `
             Tee-Object -FilePath (Join-Path $evidence "playwright.log")

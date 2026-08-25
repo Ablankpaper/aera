@@ -738,6 +738,10 @@ test("Windows packaged Runtime failures preserve bounded stage diagnostics", asy
     runtimeStep.run,
     /AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT/u,
   );
+  assert.match(
+    runtimeStep.run,
+    /AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT/u,
+  );
   assert.match(runtimeStep.run, /Tee-Object/u);
 
   const preserveStep = steps.find(
@@ -773,6 +777,38 @@ test("Windows packaged Runtime failures preserve bounded stage diagnostics", asy
     runtimeContractTest,
     /withDiagnosticTimeout\([\s\S]*?window\.hermesAPI\.startGateway\(\)[\s\S]*?180_000/u,
   );
+});
+
+test("macOS packaged Runtime failures preserve bounded state diagnostics", async () => {
+  const [raw, runtimeContractTest] = await Promise.all([
+    readFile(workflowPath, "utf8"),
+    readFile(runtimeContractTestPath, "utf8"),
+  ]);
+  const workflow = parseYAML(raw);
+  const steps = workflow.jobs.macos.steps;
+  const runtimeStep = steps.find(
+    (candidate) => candidate.name === "Verify live packaged Runtime contract",
+  );
+  assert.ok(runtimeStep, "macOS must execute the packaged Runtime contract");
+  assert.equal(runtimeStep.id, "runtime_contract");
+  assert.match(
+    runtimeStep.run,
+    /AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT/u,
+  );
+  assert.match(runtimeStep.run, /\btee\b/u);
+
+  const preserveStep = steps.find(
+    (candidate) =>
+      candidate.name === "Preserve failed macOS Runtime contract diagnostics",
+  );
+  assert.ok(preserveStep, "macOS must preserve the failed Runtime evidence");
+  assert.equal(preserveStep.uses, "actions/upload-artifact@v4");
+  assert.match(String(preserveStep.if), /always\(\)/u);
+  assert.match(String(preserveStep.if), /runtime_contract\.outcome/u);
+  assert.match(String(preserveStep.if), /failure/u);
+  assert.match(preserveStep.with.path, /runtime-contract-diagnostics/u);
+  assert.match(preserveStep.with.path, /test-results/u);
+  assert.match(runtimeContractTest, /runtime-state-probe/u);
 });
 
 test("Internal Beta binds native inventories to every final distributable", async () => {
