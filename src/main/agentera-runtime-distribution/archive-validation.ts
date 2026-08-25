@@ -1,61 +1,30 @@
 import { createReadStream } from "node:fs";
-import { lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
-import { pipeline } from "node:stream/promises";
-import { Writable } from "node:stream";
-import { createZstdDecompress } from "node:zlib";
-
-import { extract as extractZip } from "@electron-internal/extract-zip";
-import { Parser, x as extractTar, type ReadEntry } from "tar";
+import { open } from "node:fs/promises";
 import {
   fromRandomAccessReaderPromise,
   RandomAccessReader,
   type Entry as ZipEntry,
   type ZipFile,
 } from "yauzl";
+
 import {
   type RuntimeInventoryKind,
   type RuntimeManifest,
   type RuntimeManifestFile,
 } from "./manifest";
 import {
-  shouldUseIsolatedRuntimeArchiveValidation,
-  verifyRuntimeArchiveWithHelper,
-} from "./archive-validation-process";
-import {
   MAX_SYMLINK_TARGET_BYTES,
   RuntimeExtractionError,
-  isAbortError,
   manifestExtractedBytes,
   normalizedComparablePath,
-  requireExtractionBudget,
   throwIfAborted,
   validateRelativePath,
   validateSymlinkTarget,
-  type RuntimeExtractionResult,
 } from "./inventory";
-import { verifyExtractedRuntimeInventory } from "./inventory-process";
-
-export {
-  RuntimeExtractionError,
-  shouldEnforceExtractedRuntimeMode,
-  verifyRuntimeFileHashes,
-  type RuntimeExtractionResult,
-  type RuntimeFileHashCheck,
-  type RuntimeFileHasher,
-} from "./inventory";
-export { verifyExtractedRuntimeInventory } from "./inventory-process";
 
 const ARCHIVE_ROOT = "agentera-runtime";
-
-export interface ExtractRuntimeArchiveOptions {
-  archivePath: string;
-  destination: string;
-  manifest: RuntimeManifest;
-  maxExtractedBytes: number;
-  signal?: AbortSignal;
-  archiveFileSystemLoader?: RuntimeArchiveFileSystemLoader;
-}
+const ARCHIVE_VALIDATION_HELPER_MARKER =
+  "AGENTERA_RUNTIME_ARCHIVE_VALIDATION_HELPER";
 
 export interface RuntimeArchiveFileHandle {
   stat(): Promise<{ isFile(): boolean; size: number }>;
@@ -79,6 +48,10 @@ export interface RuntimeArchiveFileSystem {
 
 export type RuntimeArchiveFileSystemLoader = () => Promise<unknown>;
 
+export type RuntimeArchiveValidationDiagnosticObserver = (
+  event: "zip-validation-start" | "zip-validation-complete",
+) => void;
+
 const NODE_RUNTIME_ARCHIVE_FILE_SYSTEM: RuntimeArchiveFileSystem = {
   open,
 };
@@ -99,7 +72,10 @@ export async function resolveRuntimeArchiveFileSystem(
   electronVersion: string | undefined = process.versions.electron,
   loadOriginalFs?: RuntimeArchiveFileSystemLoader,
 ): Promise<RuntimeArchiveFileSystem> {
-  if (!electronVersion && !loadOriginalFs) {
+  if (
+    process.env[ARCHIVE_VALIDATION_HELPER_MARKER] === "1" ||
+    (!electronVersion && !loadOriginalFs)
+  ) {
     return NODE_RUNTIME_ARCHIVE_FILE_SYSTEM;
   }
   const candidate = archiveFileSystemCandidate(
@@ -351,83 +327,6 @@ async function readZipSymlinkTarget(
   return Buffer.concat(chunks).toString("utf8");
 }
 
-async function validateZipArchive(
-  archivePath: string,
-  manifest: RuntimeManifest,
-  maxExtractedBytes: number,
-  signal?: AbortSignal,
-  fileSystem?: RuntimeArchiveFileSystem,
-): Promise<void> {
-  if (shouldUseIsolatedRuntimeArchiveValidation()) {
-    await verifyRuntimeArchiveWithHelper(
-      {
-        archivePath,
-        manifest,
-        maxExtractedBytes,
-        hostPlatform: "win32",
-      },
-      { signal },
-    );
-    return;
-  }
-  const validator = new ArchiveInventoryValidator(manifest, maxExtractedBytes);
-  const zipfile = await openRuntimeZip(
-    archivePath,
-    fileSystem ?? (await resolveRuntimeArchiveFileSystem()),
-  );
-  try {
-    for await (const entry of zipEntries(zipfile, signal)) {
-      const metadata = zipEntryMetadata(entry);
-      if ("root" in metadata) validator.addRoot(metadata.kind, metadata.mode);
-      else if (metadata.kind === "symlink") {
-        validator.add({
-          ...metadata,
-          linkTarget: await readZipSymlinkTarget(
-            zipfile,
-            entry,
-            metadata.path,
-            signal,
-          ),
-        });
-      } else validator.add(metadata);
-    }
-    validator.finish();
-  } finally {
-    zipfile.close();
-  }
-}
-
-function tarParserWritable(parser: Parser): Writable {
-  const sink = new Writable({
-    write(chunk: Buffer, _encoding, callback) {
-      try {
-        if (parser.write(chunk)) callback();
-        else parser.once("drain", callback);
-      } catch (error) {
-        callback(error as Error);
-      }
-    },
-    final(callback) {
-      parser.once("end", callback);
-      parser.end();
-    },
-    destroy(error, callback) {
-      parser.off("error", onParserError);
-      if (error) {
-        parser.once("error", () => undefined);
-        parser.abort(error);
-      }
-      callback(error);
-    },
-  });
-  const onParserError = (error: Error): void => {
-    sink.destroy(error);
-  };
-  parser.on("error", onParserError);
-  sink.once("close", () => parser.off("error", onParserError));
-  return sink;
-}
-
 function assertNoSymlinkAncestors(
   entries: readonly RuntimeManifestFile[],
 ): void {
@@ -557,229 +456,39 @@ class ArchiveInventoryValidator {
   }
 }
 
-function tarEntryKind(entry: ReadEntry): RuntimeInventoryKind {
-  if (entry.type === "Directory") return "directory";
-  if (entry.type === "SymbolicLink") return "symlink";
-  if (entry.type === "File" || entry.type === "OldFile") return "file";
-  throw new RuntimeExtractionError(
-    `unsupported TAR member type ${entry.type}: ${entry.path}`,
-  );
-}
-
-async function validateTarArchive(
+export async function validateRuntimeZipArchive(
   archivePath: string,
-  manifest: RuntimeManifest,
-  maxExtractedBytes: number,
-  signal?: AbortSignal,
-): Promise<void> {
-  const validator = new ArchiveInventoryValidator(manifest, maxExtractedBytes);
-  let validationError: Error | null = null;
-  const parser = new Parser({
-    strict: true,
-    onReadEntry: (entry) => {
-      try {
-        if (validationError) return;
-        throwIfAborted(signal);
-        const kind = tarEntryKind(entry);
-        const path = archiveRelativePath(entry.path, kind === "directory");
-        const mode = (entry.mode ?? 0) & 0o777;
-        if (path === null) {
-          validator.addRoot(kind, mode);
-        } else {
-          validator.add({
-            path,
-            kind,
-            size: kind === "file" ? entry.size : 0,
-            mode,
-            linkTarget: kind === "symlink" ? (entry.linkpath ?? "") : null,
-          });
-        }
-      } catch (error) {
-        validationError =
-          error instanceof Error
-            ? error
-            : new RuntimeExtractionError("cannot validate TAR member");
-      } finally {
-        entry.resume();
-      }
-    },
-  });
-  await pipeline(
-    createReadStream(archivePath),
-    createZstdDecompress(),
-    tarParserWritable(parser),
-    signal ? { signal } : {},
-  );
-  if (validationError) throw validationError;
-  throwIfAborted(signal);
-  validator.finish();
-}
-
-async function extractZipArchive(
-  archivePath: string,
-  destination: string,
-  workDirectory: string,
   manifest: RuntimeManifest,
   maxExtractedBytes: number,
   signal?: AbortSignal,
   fileSystem?: RuntimeArchiveFileSystem,
+  onDiagnostic?: RuntimeArchiveValidationDiagnosticObserver,
 ): Promise<void> {
-  await validateZipArchive(
+  onDiagnostic?.("zip-validation-start");
+  const validator = new ArchiveInventoryValidator(manifest, maxExtractedBytes);
+  const zipfile = await openRuntimeZip(
     archivePath,
-    manifest,
-    maxExtractedBytes,
-    signal,
-    fileSystem,
+    fileSystem ?? (await resolveRuntimeArchiveFileSystem()),
   );
   try {
-    throwIfAborted(signal);
-    await extractZip(archivePath, { dir: workDirectory });
-    throwIfAborted(signal);
-    const children = await readdir(workDirectory);
-    if (children.length !== 1 || children[0] !== ARCHIVE_ROOT) {
-      throw new RuntimeExtractionError(
-        "ZIP extraction produced content outside the Runtime archive root",
-      );
+    for await (const entry of zipEntries(zipfile, signal)) {
+      const metadata = zipEntryMetadata(entry);
+      if ("root" in metadata) validator.addRoot(metadata.kind, metadata.mode);
+      else if (metadata.kind === "symlink") {
+        validator.add({
+          ...metadata,
+          linkTarget: await readZipSymlinkTarget(
+            zipfile,
+            entry,
+            metadata.path,
+            signal,
+          ),
+        });
+      } else validator.add(metadata);
     }
-    await rename(join(workDirectory, ARCHIVE_ROOT), destination);
+    validator.finish();
   } finally {
-    await rm(workDirectory, { recursive: true, force: true }).catch(
-      () => undefined,
-    );
+    zipfile.close();
   }
-}
-
-async function extractTarArchive(
-  archivePath: string,
-  destination: string,
-  signal?: AbortSignal,
-): Promise<void> {
-  await mkdir(destination, { recursive: false, mode: 0o700 });
-  const unpack = extractTar({
-    cwd: destination,
-    strip: 1,
-    preservePaths: false,
-    strict: true,
-  });
-  await pipeline(
-    createReadStream(archivePath),
-    createZstdDecompress(),
-    tarParserWritable(unpack),
-    signal ? { signal } : {},
-  );
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await lstat(path);
-    return true;
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      "code" in error &&
-      (error as NodeJS.ErrnoException).code === "ENOENT"
-    ) {
-      return false;
-    }
-    throw error;
-  }
-}
-
-// @lat: [[agentera-runtime-distribution#Offline Seed installation and repair]]
-export async function extractRuntimeArchive({
-  archivePath,
-  destination,
-  manifest,
-  maxExtractedBytes,
-  signal,
-  archiveFileSystemLoader,
-}: ExtractRuntimeArchiveOptions): Promise<RuntimeExtractionResult> {
-  requireExtractionBudget(maxExtractedBytes);
-  throwIfAborted(signal);
-  const declaredBytes = manifestExtractedBytes(manifest);
-  if (declaredBytes > maxExtractedBytes) {
-    throw new RuntimeExtractionError(
-      "Runtime manifest exceeds the signed extraction budget",
-    );
-  }
-  const target = resolve(destination);
-  if (!isAbsolute(destination)) {
-    throw new RuntimeExtractionError(
-      "Runtime extraction destination must be absolute",
-    );
-  }
-  const zipWorkDirectory = `${target}.zip-extracting`;
-  if ((await pathExists(target)) || (await pathExists(zipWorkDirectory))) {
-    throw new RuntimeExtractionError(
-      "Runtime extraction destination must not already exist",
-    );
-  }
-  const electronProcess = process as NodeJS.Process & { noAsar?: boolean };
-  const previousNoAsar = electronProcess.noAsar;
-  if (manifest.platform === "windows") electronProcess.noAsar = true;
-  try {
-    const useArchiveValidationHelper =
-      manifest.platform === "windows" &&
-      shouldUseIsolatedRuntimeArchiveValidation();
-    const archiveFileSystem =
-      manifest.platform === "windows" && !useArchiveValidationHelper
-        ? await resolveRuntimeArchiveFileSystem(
-            process.versions.electron,
-            archiveFileSystemLoader,
-          )
-        : undefined;
-    if (manifest.platform === "darwin") {
-      if (!manifest.archive_name.endsWith(".tar.zst")) {
-        throw new RuntimeExtractionError(
-          "macOS Runtime Seed must use TAR/Zstandard",
-        );
-      }
-      await validateTarArchive(
-        archivePath,
-        manifest,
-        maxExtractedBytes,
-        signal,
-      );
-      throwIfAborted(signal);
-      await extractTarArchive(archivePath, target, signal);
-    } else {
-      if (!manifest.archive_name.endsWith(".zip")) {
-        throw new RuntimeExtractionError("Windows Runtime Seed must use ZIP");
-      }
-      await mkdir(zipWorkDirectory, { recursive: false, mode: 0o700 });
-      await extractZipArchive(
-        archivePath,
-        target,
-        zipWorkDirectory,
-        manifest,
-        maxExtractedBytes,
-        signal,
-        archiveFileSystem,
-      );
-    }
-    throwIfAborted(signal);
-    return await verifyExtractedRuntimeInventory(
-      target,
-      manifest,
-      maxExtractedBytes,
-      signal,
-    );
-  } catch (error) {
-    await rm(target, { recursive: true, force: true }).catch(() => undefined);
-    await rm(zipWorkDirectory, { recursive: true, force: true }).catch(
-      () => undefined,
-    );
-    if (isAbortError(error)) throw error;
-    if (error instanceof RuntimeExtractionError) throw error;
-    throw new RuntimeExtractionError("cannot safely extract Runtime Seed", {
-      cause: error,
-    });
-  } finally {
-    await rm(zipWorkDirectory, { recursive: true, force: true }).catch(
-      () => undefined,
-    );
-    if (manifest.platform === "windows") {
-      electronProcess.noAsar = previousNoAsar;
-    }
-  }
+  onDiagnostic?.("zip-validation-complete");
 }
