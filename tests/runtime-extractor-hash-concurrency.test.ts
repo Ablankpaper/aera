@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   chmod,
   lstat,
+  mkdir,
   mkdtemp,
   open,
   readFile,
@@ -142,6 +143,164 @@ it("bounds and overlaps final Runtime inventory hashes", async () => {
     }),
   ).resolves.toBeUndefined();
   expect(maximum).toBe(8);
+});
+
+it("uses a higher bounded hash pool for a Windows Runtime inventory", async () => {
+  const { verifyExtractedRuntimeInventoryInProcess } =
+    await import("../src/main/agentera-runtime-distribution/inventory");
+  const root = await mkdtemp(join(tmpdir(), "aera-runtime-windows-hash-pool-"));
+  const contents = Buffer.from("verified Runtime entry");
+  const entries = Array.from({ length: 64 }, (_, index) => ({
+    path: `runtime-${index}.bin`,
+    kind: "file" as const,
+    size: contents.length,
+    sha256: createHash("sha256").update(contents).digest("hex"),
+    mode: 0o644,
+    link_target: null,
+  }));
+  await Promise.all(
+    entries.map((entry) => writeFile(join(root, entry.path), contents)),
+  );
+  let active = 0;
+  let maximum = 0;
+  const readFilePath = vi.fn(async (path: string) => {
+    active += 1;
+    maximum = Math.max(maximum, active);
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    try {
+      return await readFile(path);
+    } finally {
+      active -= 1;
+    }
+  });
+
+  try {
+    await expect(
+      verifyExtractedRuntimeInventoryInProcess(
+        root,
+        { platform: "windows", files: entries } as RuntimeManifest,
+        contents.length * entries.length,
+        undefined,
+        "win32",
+        {
+          chmod,
+          lstat,
+          open,
+          readFile: readFilePath as typeof readFile,
+          readlink,
+          readdir,
+          realpath,
+        } satisfies RuntimeInventoryFileSystem,
+      ),
+    ).resolves.toEqual({
+      fileCount: entries.length,
+      extractedBytes: contents.length * entries.length,
+    });
+    expect(maximum).toBe(32);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("does not repeat lstat for Windows Runtime entries", async () => {
+  const { verifyExtractedRuntimeInventoryInProcess } =
+    await import("../src/main/agentera-runtime-distribution/inventory");
+  const root = await mkdtemp(join(tmpdir(), "aera-runtime-dirent-walk-"));
+  const contents = Buffer.from("verified Runtime bytes");
+  await mkdir(join(root, "runtime"), { recursive: true });
+  await writeFile(join(root, "runtime", "hermes.exe"), contents);
+  const statPath = vi.fn(lstat);
+  const manifest = {
+    platform: "windows",
+    files: [
+      {
+        path: "runtime",
+        kind: "directory",
+        size: 0,
+        sha256: null,
+        mode: 0o755,
+        link_target: null,
+      },
+      {
+        path: "runtime/hermes.exe",
+        kind: "file",
+        size: contents.length,
+        sha256: createHash("sha256").update(contents).digest("hex"),
+        mode: 0o755,
+        link_target: null,
+      },
+    ],
+  } as RuntimeManifest;
+
+  try {
+    await expect(
+      verifyExtractedRuntimeInventoryInProcess(
+        root,
+        manifest,
+        contents.length,
+        undefined,
+        "win32",
+        {
+          chmod,
+          lstat: statPath,
+          open,
+          readFile,
+          readlink,
+          readdir,
+          realpath,
+        } satisfies RuntimeInventoryFileSystem,
+      ),
+    ).resolves.toEqual({ fileCount: 1, extractedBytes: contents.length });
+    expect(statPath).not.toHaveBeenCalled();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("checks a Windows Runtime file size during its content read", async () => {
+  const { verifyExtractedRuntimeInventoryInProcess } =
+    await import("../src/main/agentera-runtime-distribution/inventory");
+  const root = await mkdtemp(join(tmpdir(), "aera-runtime-size-check-"));
+  const contents = Buffer.from("unexpectedly long Runtime bytes");
+  await writeFile(join(root, "runtime.bin"), contents);
+  const manifest = {
+    platform: "windows",
+    files: [
+      {
+        path: "runtime.bin",
+        kind: "file",
+        size: contents.length - 1,
+        sha256: createHash("sha256").update(contents).digest("hex"),
+        mode: 0o644,
+        link_target: null,
+      },
+    ],
+  } as RuntimeManifest;
+
+  try {
+    await expect(
+      verifyExtractedRuntimeInventoryInProcess(
+        root,
+        manifest,
+        contents.length,
+        undefined,
+        "win32",
+        {
+          chmod,
+          lstat: vi.fn(async () => {
+            throw new Error("Windows inventory must not lstat this file");
+          }) as typeof lstat,
+          open,
+          readFile,
+          readlink,
+          readdir,
+          realpath,
+        } satisfies RuntimeInventoryFileSystem,
+      ),
+    ).rejects.toThrow(/size differs from the manifest/i);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 it("uses the bounded readFile path for small Runtime entries", async () => {

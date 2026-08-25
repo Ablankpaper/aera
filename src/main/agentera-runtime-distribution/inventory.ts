@@ -19,6 +19,7 @@ import {
 
 export const MAX_SYMLINK_TARGET_BYTES = 16 * 1024;
 const RUNTIME_HASH_CONCURRENCY = 8;
+const RUNTIME_WINDOWS_HASH_CONCURRENCY = 32;
 const RUNTIME_HASH_BUFFER_BYTES = 1024 * 1024;
 // Most Runtime entries are tiny Python/package metadata files.  Reading those
 // through one bounded original-fs operation avoids thousands of open/read/close
@@ -168,12 +169,22 @@ async function hashFileWithHandle(
   path: string,
   signal: AbortSignal | undefined,
   openFile: typeof open,
+  expectedSize?: number,
 ): Promise<string> {
   const hash = createHash("sha256");
   const handle = await openFile(path, "r");
   const buffer = Buffer.allocUnsafe(RUNTIME_HASH_BUFFER_BYTES);
   let position = 0;
   try {
+    const metadata = await handle.stat();
+    if (
+      !metadata.isFile() ||
+      (expectedSize !== undefined && metadata.size !== expectedSize)
+    ) {
+      throw new RuntimeExtractionError(
+        `extracted Runtime size differs from the manifest: ${path}`,
+      );
+    }
     while (true) {
       throwIfAborted(signal);
       const { bytesRead } = await handle.read(
@@ -196,9 +207,15 @@ async function hashFileWithReadFile(
   path: string,
   signal: AbortSignal | undefined,
   readFilePath: typeof readFile,
+  expectedSize?: number,
 ): Promise<string> {
   const contents = await readFilePath(path);
   throwIfAborted(signal);
+  if (expectedSize !== undefined && contents.length !== expectedSize) {
+    throw new RuntimeExtractionError(
+      `extracted Runtime size differs from the manifest: ${path}`,
+    );
+  }
   return createHash("sha256").update(contents).digest("hex");
 }
 
@@ -278,14 +295,16 @@ export async function verifyRuntimeFileHashes(
   checks: readonly RuntimeFileHashCheck[],
   signal?: AbortSignal,
   fileHasher: RuntimeFileHasher = hashFile,
+  concurrency = RUNTIME_HASH_CONCURRENCY,
 ): Promise<void> {
-  for (
-    let offset = 0;
-    offset < checks.length;
-    offset += RUNTIME_HASH_CONCURRENCY
-  ) {
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+    throw new RuntimeExtractionError(
+      "Runtime inventory hash concurrency must be a positive integer",
+    );
+  }
+  for (let offset = 0; offset < checks.length; offset += concurrency) {
     throwIfAborted(signal);
-    const batch = checks.slice(offset, offset + RUNTIME_HASH_CONCURRENCY);
+    const batch = checks.slice(offset, offset + concurrency);
     const results = await Promise.allSettled(
       batch.map(async (check) => {
         if (
@@ -393,12 +412,20 @@ export async function verifyExtractedRuntimeInventoryInProcess(
         );
       }
       const physicalPath = join(directory, child.name);
-      const metadata = await inventoryFileSystem.lstat(physicalPath);
-      const kind: RuntimeInventoryKind = metadata.isSymbolicLink()
+      // On Windows, directory enumeration already supplies the entry kind.
+      // Avoiding a second serial stat for each of the Runtime's thousands of
+      // entries keeps first-install verification bounded. Every file is still
+      // opened/read and checked against its signed size and SHA-256 below.
+      const metadata =
+        hostPlatform === "win32"
+          ? null
+          : await inventoryFileSystem.lstat(physicalPath);
+      const kindSource = metadata ?? child;
+      const kind: RuntimeInventoryKind = kindSource.isSymbolicLink()
         ? "symlink"
-        : metadata.isDirectory()
+        : kindSource.isDirectory()
           ? "directory"
-          : metadata.isFile()
+          : kindSource.isFile()
             ? "file"
             : (() => {
                 throw new RuntimeExtractionError(
@@ -421,12 +448,12 @@ export async function verifyExtractedRuntimeInventoryInProcess(
         }
       }
       if (kind === "file") {
-        if (metadata.size !== expectedEntry.size) {
+        if (metadata !== null && metadata.size !== expectedEntry.size) {
           throw new RuntimeExtractionError(
             `extracted Runtime size differs from the manifest: ${relativePath}`,
           );
         }
-        extractedBytes += metadata.size;
+        extractedBytes += expectedEntry.size;
         fileCount += 1;
         if (
           !Number.isSafeInteger(extractedBytes) ||
@@ -440,7 +467,7 @@ export async function verifyExtractedRuntimeInventoryInProcess(
           physicalPath,
           relativePath,
           expectedSha256: expectedEntry.sha256,
-          size: metadata.size,
+          size: expectedEntry.size,
         });
       } else if (kind === "symlink") {
         const target = await inventoryFileSystem.readlink(physicalPath);
@@ -488,8 +515,14 @@ export async function verifyExtractedRuntimeInventoryInProcess(
     signal,
     (path, hashSignal, size) =>
       size !== undefined && size <= RUNTIME_HASH_READ_FILE_THRESHOLD_BYTES
-        ? hashFileWithReadFile(path, hashSignal, inventoryFileSystem.readFile)
-        : hashFileWithHandle(path, hashSignal, inventoryFileSystem.open),
+        ? hashFileWithReadFile(
+            path,
+            hashSignal,
+            inventoryFileSystem.readFile,
+            size,
+          )
+        : hashFileWithHandle(path, hashSignal, inventoryFileSystem.open, size),
+    hostPlatform === "win32" ? RUNTIME_WINDOWS_HASH_CONCURRENCY : undefined,
   );
   return { fileCount, extractedBytes };
 }
