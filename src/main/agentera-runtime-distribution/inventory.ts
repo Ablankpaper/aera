@@ -29,6 +29,7 @@ const INSTALLED_METADATA_FILES = new Set([
   RUNTIME_MANIFEST_METADATA_NAME,
   RUNTIME_SIGNATURE_METADATA_NAME,
 ]);
+const RUNTIME_INVENTORY_HELPER_MARKER = "AGENTERA_RUNTIME_INVENTORY_HELPER";
 
 export interface RuntimeExtractionResult {
   fileCount: number;
@@ -231,7 +232,16 @@ export async function resolveRuntimeInventoryFileSystem(
   electronVersion: string | undefined = process.versions.electron,
   loadOriginalFs: RuntimeOriginalFsLoader = loadElectronOriginalFs,
 ): Promise<RuntimeInventoryFileSystem> {
-  if (!electronVersion) return NODE_RUNTIME_INVENTORY_FILE_SYSTEM;
+  // The packaged inventory helper already runs outside app.asar.  Force it
+  // onto Node's native filesystem instead of loading Electron's original-fs
+  // shim; the latter adds an unnecessary Electron boundary during the large
+  // post-extraction hash pass on Windows.
+  if (
+    process.env[RUNTIME_INVENTORY_HELPER_MARKER] === "1" ||
+    !electronVersion
+  ) {
+    return NODE_RUNTIME_INVENTORY_FILE_SYSTEM;
+  }
   const candidate = originalFsCandidate(await loadOriginalFs());
   const promises = candidate.promises;
   if (!promises || typeof promises !== "object") {

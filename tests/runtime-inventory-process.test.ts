@@ -39,9 +39,11 @@ describe("isolated Runtime inventory verification", () => {
 
   it("starts the packaged executable in credential-free Node mode and removes its request", async () => {
     let requestPath = "";
+    let executionTimeout: number | undefined;
     const execute = vi.fn<RuntimeInventoryHelperExecutor>(
       async (executable, arguments_, options) => {
         requestPath = arguments_[1] ?? "";
+        executionTimeout = options.timeoutMs;
         const request = JSON.parse(await readFile(requestPath, "utf8"));
         expect(executable).toBe("C:\\Program Files\\Aera\\Aera.exe");
         expect(arguments_[0]).toBe(
@@ -95,6 +97,7 @@ describe("isolated Runtime inventory verification", () => {
     ).resolves.toEqual({ fileCount: 0, extractedBytes: 0 });
 
     expect(execute).toHaveBeenCalledOnce();
+    expect(executionTimeout).toBe(8 * 60 * 1000);
     await expect(stat(requestPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -157,10 +160,11 @@ describe("isolated Runtime inventory verification", () => {
   it("forwards cancellation to the helper and still removes its request", async () => {
     let requestPath = "";
     const controller = new AbortController();
+    let helperSignal: AbortSignal | undefined;
     const execute = vi.fn<RuntimeInventoryHelperExecutor>(
       async (_executable, arguments_, options) => {
         requestPath = arguments_[1] ?? "";
-        expect(options.signal).toBe(controller.signal);
+        helperSignal = options.signal;
         const error = new Error("cancelled");
         error.name = "AbortError";
         throw error;
@@ -183,7 +187,33 @@ describe("isolated Runtime inventory verification", () => {
         },
       ),
     ).rejects.toMatchObject({ name: "AbortError" });
+    expect(helperSignal).not.toBe(controller.signal);
     await expect(stat(requestPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("returns a bounded timeout when the inventory helper ignores AbortSignal", async () => {
+    const startedAt = Date.now();
+    const execute = vi.fn<RuntimeInventoryHelperExecutor>(
+      async () => await new Promise<never>(() => undefined),
+    );
+
+    await expect(
+      verifyRuntimeInventoryWithHelper(
+        {
+          destination: "C:\\runtime\\staging",
+          manifest,
+          maxExtractedBytes: 4096,
+          hostPlatform: "win32",
+        },
+        {
+          executablePath: "Aera.exe",
+          helperPath: "runtime-inventory-helper.js",
+          timeoutMs: 20,
+          execute,
+        },
+      ),
+    ).rejects.toThrow(/timed out/i);
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
   });
 
   it("does not create a request or spawn when already cancelled", async () => {

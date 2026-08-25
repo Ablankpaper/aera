@@ -25,6 +25,9 @@ export default defineConfig({
           "runtime-archive-validation-helper": resolve(
             "src/main/runtime-archive-validation-helper.ts",
           ),
+          "runtime-archive-extraction-helper": resolve(
+            "src/main/runtime-archive-extraction-helper.ts",
+          ),
         },
       },
     },

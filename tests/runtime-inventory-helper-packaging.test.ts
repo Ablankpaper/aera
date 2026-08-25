@@ -7,7 +7,7 @@ const enabled = process.env.AGENTERA_RUNTIME_HELPER_BUILD_TEST === "1";
 const buildTest = enabled ? it : it.skip;
 
 buildTest(
-  "limits the packaged Electron Node helper to original-fs",
+  "limits the packaged Electron Node helper to native Node filesystem APIs",
   async () => {
     const main = await readFile("out/main/runtime-inventory-helper.js", "utf8");
     const chunkNames = await readdir("out/main/chunks");
@@ -24,7 +24,10 @@ buildTest(
     expect(helperChunks).toHaveLength(2);
     expect(builtHelper).not.toContain("@electron-internal/extract-zip");
     expect(builtHelper).not.toContain('require("electron")');
-    expect(builtHelper).toContain("original-fs");
+    expect(builtHelper).toContain(
+      'process.env[RUNTIME_INVENTORY_HELPER_MARKER] === "1"',
+    );
+    expect(builtHelper).toContain("AGENTERA_RUNTIME_INVENTORY_HELPER");
     expect(builtHelper).not.toContain("better-sqlite3");
   },
 );

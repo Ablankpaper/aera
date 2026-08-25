@@ -405,6 +405,11 @@ describe("Runtime Seed packaging scripts", () => {
           "chunks/manifest-*.js",
         ],
       },
+      {
+        from: "out/main",
+        to: "runtime-archive-extraction-helper",
+        filter: ["runtime-archive-extraction-helper.js"],
+      },
     ]);
     expect(config.files).toEqual([
       "out/**/*",

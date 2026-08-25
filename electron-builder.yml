@@ -52,6 +52,10 @@ win:
         - "chunks/index-*.js"
         - "chunks/inventory-*.js"
         - "chunks/manifest-*.js"
+    - from: out/main
+      to: runtime-archive-extraction-helper
+      filter:
+        - "runtime-archive-extraction-helper.js"
   files:
     - "!node_modules/@electron-internal/extract-zip/index.darwin-*.node"
     - "!node_modules/@electron-internal/extract-zip/index.linux-*.node"

@@ -23,6 +23,10 @@ import {
   verifyRuntimeArchiveWithHelper,
 } from "./archive-validation-process";
 import {
+  extractRuntimeArchiveWithHelper,
+  shouldUseIsolatedRuntimeArchiveExtraction,
+} from "./archive-extraction-process";
+import {
   MAX_SYMLINK_TARGET_BYTES,
   RuntimeExtractionError,
   isAbortError,
@@ -633,7 +637,18 @@ async function extractZipArchive(
   );
   try {
     throwIfAborted(signal);
-    await extractZip(archivePath, { dir: workDirectory });
+    if (shouldUseIsolatedRuntimeArchiveExtraction()) {
+      await extractRuntimeArchiveWithHelper(
+        {
+          archivePath,
+          destination: workDirectory,
+          hostPlatform: "win32",
+        },
+        { signal },
+      );
+    } else {
+      await extractZip(archivePath, { dir: workDirectory });
+    }
     throwIfAborted(signal);
     const children = await readdir(workDirectory);
     if (children.length !== 1 || children[0] !== ARCHIVE_ROOT) {

@@ -52,6 +52,26 @@ it("uses Electron original-fs for final Runtime inventory verification", async (
   expect(originalFs.promises.chmod).toHaveBeenCalledWith("runtime.exe", 0o755);
 });
 
+it("uses native Node fs inside the packaged inventory helper", async () => {
+  const { resolveRuntimeInventoryFileSystem } =
+    await import("../src/main/agentera-runtime-distribution/inventory");
+  const loadOriginalFs = vi.fn(async () => {
+    throw new Error("helper must not load Electron original-fs");
+  });
+  vi.stubEnv("AGENTERA_RUNTIME_INVENTORY_HELPER", "1");
+  try {
+    const fileSystem = await resolveRuntimeInventoryFileSystem(
+      "41.10.5",
+      loadOriginalFs,
+    );
+    expect(loadOriginalFs).not.toHaveBeenCalled();
+    expect(fileSystem.open).toBeTypeOf("function");
+    expect(fileSystem.readFile).toBeTypeOf("function");
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
 it("hashes the final Runtime inventory through file handles instead of streams", async () => {
   const { verifyExtractedRuntimeInventoryInProcess } =
     await import("../src/main/agentera-runtime-distribution/inventory");
