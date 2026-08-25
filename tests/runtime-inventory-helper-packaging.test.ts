@@ -7,7 +7,7 @@ const enabled = process.env.AGENTERA_RUNTIME_HELPER_BUILD_TEST === "1";
 const buildTest = enabled ? it : it.skip;
 
 buildTest(
-  "limits the packaged Electron Node helper to original-fs",
+  "limits the packaged Electron Node helper to Runtime-safe dependencies",
   async () => {
     const main = await readFile("out/main/runtime-inventory-helper.js", "utf8");
     const chunkNames = await readdir("out/main/chunks");

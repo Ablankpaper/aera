@@ -258,14 +258,11 @@ export async function resolveRuntimeInventoryFileSystem(
   loadOriginalFs: RuntimeOriginalFsLoader = loadElectronOriginalFs,
 ): Promise<RuntimeInventoryFileSystem> {
   // The packaged verifier runs as an ELECTRON_RUN_AS_NODE helper and only
-  // touches the user-data extraction directory, never an ASAR path.  Keep a
-  // diagnostic-only switch so Windows CI can distinguish Electron's
-  // original-fs layer from ordinary Node file I/O without changing the main
-  // process behavior.
-  if (
-    process.env.AGENTERA_RUNTIME_INVENTORY_HELPER === "1" &&
-    process.env.AGENTERA_RUNTIME_INVENTORY_USE_NODE_FS === "1"
-  ) {
+  // touches its fresh user-data staging directory, never an ASAR path. Use
+  // ordinary Node fs in that isolated process; Electron's original-fs layer
+  // adds a large per-file cost on Windows and is not needed outside the main
+  // process. The helper marker is set only by inventory-process.ts.
+  if (process.env.AGENTERA_RUNTIME_INVENTORY_HELPER === "1") {
     return NODE_RUNTIME_INVENTORY_FILE_SYSTEM;
   }
   if (!electronVersion) return NODE_RUNTIME_INVENTORY_FILE_SYSTEM;

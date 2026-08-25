@@ -57,9 +57,7 @@ it("allows the isolated Electron Node helper to use ordinary Node fs", async () 
   const { resolveRuntimeInventoryFileSystem } =
     await import("../src/main/agentera-runtime-distribution/inventory");
   const previousHelper = process.env.AGENTERA_RUNTIME_INVENTORY_HELPER;
-  const previousNodeFs = process.env.AGENTERA_RUNTIME_INVENTORY_USE_NODE_FS;
   process.env.AGENTERA_RUNTIME_INVENTORY_HELPER = "1";
-  process.env.AGENTERA_RUNTIME_INVENTORY_USE_NODE_FS = "1";
   const loadOriginalFs = vi.fn(async () => {
     throw new Error("original-fs must not be loaded in the helper probe");
   });
@@ -74,9 +72,6 @@ it("allows the isolated Electron Node helper to use ordinary Node fs", async () 
     if (previousHelper === undefined)
       delete process.env.AGENTERA_RUNTIME_INVENTORY_HELPER;
     else process.env.AGENTERA_RUNTIME_INVENTORY_HELPER = previousHelper;
-    if (previousNodeFs === undefined)
-      delete process.env.AGENTERA_RUNTIME_INVENTORY_USE_NODE_FS;
-    else process.env.AGENTERA_RUNTIME_INVENTORY_USE_NODE_FS = previousNodeFs;
   }
 });
 
