@@ -1,11 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildGatewayStartCommand,
   upsertEnvLine,
   buildGatewayStatusCommand,
   buildGatewayStopCommand,
   isUsableApiServerKey,
+  sshGatewayApiReady,
   sshResolveDashboardPort,
+  sshStartGatewayAndWaitApiReady,
+  sshWaitGatewayApiReady,
 } from "./ssh-remote";
 import type { SshConfig } from "./ssh-tunnel";
 
@@ -79,6 +82,63 @@ describe("SSH api_server key provisioning", () => {
       isUsableApiServerKey("hermes-remote-test-key-0123456789abcdef"),
     ).toBe(true);
     expect(isUsableApiServerKey(`  ${"a".repeat(48)}  `)).toBe(true);
+  });
+});
+
+describe("SSH gateway API readiness", () => {
+  it("performs one API probe even when the status timeout has no retry window", async () => {
+    const now = vi
+      .fn<() => number>()
+      .mockReturnValueOnce(100)
+      .mockReturnValue(101);
+    const exec = vi.fn(async () => "200\n");
+
+    await expect(
+      sshWaitGatewayApiReady(dummySsh, 9751, 0, {
+        now,
+        exec,
+        delay: vi.fn(async () => undefined),
+      }),
+    ).resolves.toBe(true);
+
+    expect(exec).toHaveBeenCalledOnce();
+  });
+
+  it("does not treat a live remote PID as ready when the API is unhealthy", async () => {
+    const gatewayStatus = vi.fn(async () => true);
+    const resolveApiServerPort = vi.fn(async () => 9751);
+    const waitGatewayApiReady = vi.fn(async () => false);
+
+    await expect(
+      sshGatewayApiReady(dummySsh, "research", 0, {
+        gatewayStatus,
+        startGateway: vi.fn(),
+        resolveApiServerPort,
+        waitGatewayApiReady,
+      }),
+    ).resolves.toBe(false);
+
+    expect(gatewayStatus).toHaveBeenCalledWith(dummySsh, "research");
+    expect(resolveApiServerPort).toHaveBeenCalledWith(dummySsh, "research");
+    expect(waitGatewayApiReady).toHaveBeenCalledWith(dummySsh, 9751, 0);
+  });
+
+  it("reports a remote start as ready only after the API health probe", async () => {
+    const startGateway = vi.fn(async () => undefined);
+    const resolveApiServerPort = vi.fn(async () => 9751);
+    const waitGatewayApiReady = vi.fn(async () => false);
+
+    await expect(
+      sshStartGatewayAndWaitApiReady(dummySsh, "research", 30_000, {
+        gatewayStatus: vi.fn(),
+        startGateway,
+        resolveApiServerPort,
+        waitGatewayApiReady,
+      }),
+    ).resolves.toEqual({ ready: false, port: 9751 });
+
+    expect(startGateway).toHaveBeenCalledWith(dummySsh, "research");
+    expect(waitGatewayApiReady).toHaveBeenCalledWith(dummySsh, 9751, 30_000);
   });
 });
 

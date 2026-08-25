@@ -2378,21 +2378,36 @@ export async function sshEnsureApiServerKey(
 // answers or the deadline passes. Runs on the remote via python3 (no curl
 // dependency). Lets a freshly (re)started gateway finish binding before we open
 // the tunnel, so the first chat doesn't race "tunnel health check failed".
+export interface SshGatewayApiProbeDependencies {
+  now: () => number;
+  exec: typeof sshExec;
+  delay: (ms: number) => Promise<void>;
+}
+
+const defaultSshGatewayApiProbeDependencies: SshGatewayApiProbeDependencies = {
+  now: Date.now,
+  exec: sshExec,
+  delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+};
+
 export async function sshWaitGatewayApiReady(
   config: SshConfig,
   port: number,
   timeoutMs = 20000,
+  dependencies: SshGatewayApiProbeDependencies = defaultSshGatewayApiProbeDependencies,
 ): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
+  const deadline = dependencies.now() + timeoutMs;
   const script =
     `import urllib.request as u\n` +
     `try:\n` +
     ` print(u.urlopen("http://127.0.0.1:${port}/health", timeout=3).status)\n` +
     `except Exception:\n` +
     ` print(0)`;
-  while (Date.now() <= deadline) {
+  // Always probe once. A zero timeout is the status path's single-shot mode,
+  // not a request to skip evidence entirely.
+  for (;;) {
     try {
-      const out = await sshExec(
+      const out = await dependencies.exec(
         config,
         `python3 -c ${shellQuote(script)}`,
         undefined,
@@ -2402,9 +2417,53 @@ export async function sshWaitGatewayApiReady(
     } catch {
       // transient — keep polling until the deadline
     }
-    await new Promise((r) => setTimeout(r, 1000));
+    if (dependencies.now() >= deadline) break;
+    await dependencies.delay(1000);
   }
   return false;
+}
+
+export interface SshGatewayReadinessDependencies {
+  gatewayStatus: typeof sshGatewayStatus;
+  startGateway: typeof sshStartGateway;
+  resolveApiServerPort: typeof sshResolveApiServerPort;
+  waitGatewayApiReady: typeof sshWaitGatewayApiReady;
+}
+
+const defaultSshGatewayReadinessDependencies: SshGatewayReadinessDependencies =
+  {
+    gatewayStatus: sshGatewayStatus,
+    startGateway: sshStartGateway,
+    resolveApiServerPort: sshResolveApiServerPort,
+    waitGatewayApiReady: sshWaitGatewayApiReady,
+  };
+
+/**
+ * Remote process liveness is necessary but not sufficient: only report ready
+ * after the profile's api_server answers /health on its resolved port.
+ */
+export async function sshGatewayApiReady(
+  config: SshConfig,
+  profile?: string,
+  timeoutMs = 0,
+  dependencies: SshGatewayReadinessDependencies = defaultSshGatewayReadinessDependencies,
+): Promise<boolean> {
+  if (!(await dependencies.gatewayStatus(config, profile))) return false;
+  const port = await dependencies.resolveApiServerPort(config, profile);
+  return dependencies.waitGatewayApiReady(config, port, timeoutMs);
+}
+
+/** Start one remote profile and hold the result until its API is serving. */
+export async function sshStartGatewayAndWaitApiReady(
+  config: SshConfig,
+  profile?: string,
+  timeoutMs = 30_000,
+  dependencies: SshGatewayReadinessDependencies = defaultSshGatewayReadinessDependencies,
+): Promise<{ ready: boolean; port: number }> {
+  const port = await dependencies.resolveApiServerPort(config, profile);
+  await dependencies.startGateway(config, profile);
+  const ready = await dependencies.waitGatewayApiReady(config, port, timeoutMs);
+  return { ready, port };
 }
 
 // ── Dashboard lifecycle ─────────────────────────────────────────────────────

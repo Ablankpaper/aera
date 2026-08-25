@@ -68,6 +68,10 @@ export interface MarkGatewaySpawnedInput {
   spawnedPid: number;
 }
 
+export interface AdoptGatewaySpawnedPidInput extends MarkGatewaySpawnedInput {
+  previousSpawnedPid: number;
+}
+
 export interface GatewayColdStartRecoveryInput {
   readCurrentPid: (profileId: string) => number | null;
   isAlive: (pid: number) => boolean;
@@ -248,6 +252,39 @@ export class GatewayProcessOwnershipLedger {
       current.launchId !== launchId ||
       current.desktopInstanceId !== this.desktopInstanceId ||
       (current.spawnedPid !== null && current.spawnedPid !== spawnedPid)
+    ) {
+      throw new GatewayProcessOwnershipError("ownership_conflict");
+    }
+    const updated = { ...current, spawnedPid };
+    const entries = [...this.state.entries];
+    entries[index] = updated;
+    this.replaceState({ version: 1, entries });
+    return { ...updated };
+  }
+
+  /**
+   * Atomically transfer one current launch from its short-lived CLI wrapper to
+   * the daemonized listener published by gateway.pid. The caller must name the
+   * exact wrapper PID it previously recorded; stale or concurrent transitions
+   * fail closed instead of adopting a replacement process.
+   */
+  adoptSpawnedPid(
+    input: AdoptGatewaySpawnedPidInput,
+  ): GatewayLaunchOwnershipRecord {
+    const normalizedProfileId = profileId(input.profileId);
+    const launchId = uuid(input.launchId);
+    const previousSpawnedPid = pid(input.previousSpawnedPid, false);
+    const spawnedPid = pid(input.spawnedPid, false);
+    const index = this.state.entries.findIndex(
+      (entry) => entry.profileId === normalizedProfileId,
+    );
+    const current = this.state.entries[index];
+    if (
+      !current ||
+      current.launchId !== launchId ||
+      current.desktopInstanceId !== this.desktopInstanceId ||
+      current.spawnedPid !== previousSpawnedPid ||
+      spawnedPid === current.preLaunchPid
     ) {
       throw new GatewayProcessOwnershipError("ownership_conflict");
     }

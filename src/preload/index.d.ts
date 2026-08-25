@@ -793,12 +793,34 @@ interface ConfigFixLogEntry {
   detail?: string;
 }
 
+interface GatewayStartDiagnostics {
+  pid?: number;
+  command?: string;
+  args?: string[];
+  logPath?: string;
+  exitCode?: number | null;
+  signal?: string | null;
+  stderrTail?: string;
+  capabilities?: {
+    requestToolPolicy: boolean;
+    requestModelRoute: boolean;
+  };
+  termination?: {
+    forced: boolean;
+    remainingPids: number[];
+  };
+}
+
 interface GatewayStartResult {
   success: boolean;
   running: boolean;
   alreadyRunning?: boolean;
+  // True only after the gateway's authenticated API readiness probe answers;
+  // `running` alone only means the process was spawned.
+  ready?: boolean;
   error?: string;
   logPath?: string;
+  diagnostics?: GatewayStartDiagnostics;
 }
 
 interface DashboardConnection {

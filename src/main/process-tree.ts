@@ -1216,6 +1216,34 @@ export async function terminateProcessTree(
 }
 
 /**
+ * Terminate a verified managed process tree when the durable listener exposes
+ * only its PID rather than a Node ChildProcess handle. The adapter deliberately
+ * keeps lifecycle fields live and routes root signals through the same injected
+ * operations as the snapshot/identity checks, so Windows still reaches taskkill
+ * and POSIX signals the exact captured root instead of treating it as exited.
+ */
+export function terminateProcessTreeByPid(
+  pid: number,
+  options: TerminateProcessTreeOptions = {},
+): Promise<ProcessTreeTerminationResult> {
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    return Promise.resolve({ forced: false, remainingPids: [] });
+  }
+  const rootSignal = options.operations?.signalPid ?? signalPid;
+  const target = {
+    pid,
+    exitCode: null,
+    signalCode: null,
+    killed: false,
+    kill: (signal: NodeJS.Signals = "SIGTERM") => {
+      rootSignal(pid, signal);
+      return true;
+    },
+  } as unknown as ChildProcess;
+  return terminateProcessTree(target, options);
+}
+
+/**
  * Terminate one managed child and all subprocesses it launched.
  *
  * Windows has no POSIX process groups, so taskkill /T is the canonical tree

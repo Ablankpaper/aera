@@ -68,7 +68,9 @@ Chat and Gateway, Dashboard, Skills, Profiles, Cron, model discovery, MCP, accou
 
 ## Desktop TUI backend lifecycle
 
-Desktop owns every local headless TUI backend independently from the ordinary Gateway ownership ledger, including backends warmed only by a named Profile switch.
+Desktop owns every local headless TUI backend independently from the ordinary Gateway ownership ledger. Warm-up happens only on demand or after the owning Profile's Gateway is readiness-gated serving.
+
+A TUI backend never cold-starts concurrently with a primary Gateway launch: both share the Runtime's Python interpreter, and a dual cold start (first Windows launch under Defender scan) starves the primary Gateway before it can write its pid file or bind its port. A Profile switch warms nothing.
 
 ### Runtime 0.20 headless contract
 
@@ -80,7 +82,7 @@ Desktop starts each POSIX TUI child as a dedicated process-group leader and reco
 
 Shutdown targets only that dedicated group. Windows instead captures the exact root and child tree with invariant UTC file-time identities, using bounded root/parent CIM filters rather than enumerating the machine process table. No path selects processes by name, port, Profile label, command line, or environment.
 
-Windows initial ownership capture shares one six-second deadline across the primary CIM query and one explicit WMI fallback. The cold-start-sensitive CIM attempt may consume at most one third of that deadline, preserving the remaining budget for WMI on loaded hosts. Every returned row must have valid PID/parent fields and an invariant creation identity; timeout, unavailable, malformed, empty, or partial output remains fail-closed. Optional hosted-runner diagnostics contain only the phase, attempt, elapsed time, outcome, sanitized Profile key, and root PID.
+Windows initial ownership capture shares one six-second deadline across the primary CIM query and one explicit WMI fallback. The cold-start-sensitive CIM attempt may consume at most one third of that deadline, preserving the remaining budget for WMI on loaded hosts. Every returned row must have valid PID/parent fields and an invariant creation identity; timeout, unavailable, malformed, empty, or partial output remains fail-closed. Optional hosted-runner diagnostics contain only the phase, attempt, elapsed time, outcome, sanitized Profile key, and root PID. A daemon listener represented only by its verified pid uses the same snapshot, identity, graceful-tree, and force-escalation path through [[src/main/process-tree.ts#terminateProcessTreeByPid]]; it is never cast to an already-exited synthetic child.
 
 ### Bounded force escalation
 
@@ -103,6 +105,20 @@ Recovery both reconciles the port and spawns, so one call site never spawns ahea
 ### Cancelled startup cannot outlive Desktop
 
 Every asynchronous TUI start belongs to one generation. Stop invalidates that generation before releasing ownership, so a pending port or readiness continuation cannot publish a late process.
+
+### Gateway readiness evidence
+
+Readiness-gated launch holds its answer until the listener's verified `gateway.pid` exists and the authenticated `/v1/capabilities` route answers on the prepared port.
+
+A spawned Gateway process is never reported as serving on process identity alone. [[src/main/hermes.ts#startGatewayWithReadiness]], used by the `start-gateway` IPC, requires the daemonized listener's `gateway.pid` to parse, to differ from the pre-launch stale pid, and to resolve to a live Python process, plus the Bearer-protected `/v1/capabilities` route to answer with the launch's prepared credential. The dashboard backend warms only after that proof, never concurrently with a cold-starting primary Gateway, and the local Dashboard spawn path joins the same readiness gate before it launches its own Runtime Python process.
+
+A readiness timeout terminates what the launch actually left behind: the wrapper child while it lives, and the verified listener pid from `gateway.pid` once the short-lived wrapper has exited — both with the same bounded force escalation as ordinary shutdown. Durable ownership transfers atomically from the exact recorded wrapper PID to a fresh, live Python listener PID that differs from the pre-launch snapshot, but only after the tracked wrapper has exited; a changed pid file while that wrapper remains live is an unverified replacement and is never adopted or signalled. App shutdown uses the PID-only tree terminator for the adopted listener. A Gateway the call did not spawn is reported, never killed. The result carries the listener PID (not the short-lived wrapper's), the launch command, the wrapper's exit code or signal when it died, a bounded stderr tail, and the parsed capabilities document as evidence. Feature flags remain evidence for the caller's acceptance check and never gate readiness, so an older Runtime still counts as serving.
+
+Dashboard startup is fail-closed: if the shared primary-Gateway recovery returns false, it returns `running:false` before allocating a Dashboard token or port and before spawning another Runtime Python process.
+
+Local `gateway-status` answers from an authenticated readiness probe instead of process liveness, and the Gateway screen consumes `ready`, so neither surface can present a cold-starting process as a running Gateway. SSH start, restart, and status resolve the selected Profile's api-server port and require the remote `/health` probe; PID/systemd liveness is necessary but never sufficient, and the zero-retry status path still performs exactly one API probe.
+
+`set-active-profile` propagates Gateway readiness instead of unconditionally returning success. A live local process enters bounded recovery, a stopped local Profile uses the pid-plus-authenticated-API launch gate, and an SSH Profile waits for its resolved remote API; any false readiness result returns false to the caller.
 
 ### Pool-wide App shutdown
 

@@ -421,6 +421,44 @@ describe("terminateProcessTree", () => {
     }
   });
 
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
+  it("terminates a verified Windows listener when only its PID is available", async () => {
+    const terminateProcessTreeByPid = (
+      processTree as unknown as {
+        terminateProcessTreeByPid?: typeof terminateProcessTree;
+      }
+    ).terminateProcessTreeByPid;
+    expect(terminateProcessTreeByPid).toBeTypeOf("function");
+    if (!terminateProcessTreeByPid) return;
+
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
+    const alive = new Set([100]);
+    const gracefulWindowsTree = vi.fn(() => {
+      alive.delete(100);
+    });
+
+    try {
+      const result = await terminateProcessTreeByPid(100 as never, {
+        detachedProcessGroup: false,
+        forceAfterMs: 0,
+        operations: {
+          captureSnapshot: vi.fn(async () => [
+            { pid: 100, parentPid: 1, identity: "windows:listener-start" },
+          ]),
+          pidIsAlive: (pid) => alive.has(pid),
+          gracefulWindowsTree,
+        } as never,
+      });
+
+      expect(gracefulWindowsTree).toHaveBeenCalledWith(100, expect.any(Number));
+      expect(result).toEqual({ forced: false, remainingPids: [] });
+    } finally {
+      platform.mockRestore();
+    }
+  });
+
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Bounded force escalation]]
   it("escalates the exact live Windows root tree after the grace window", async () => {
     const platform = vi
