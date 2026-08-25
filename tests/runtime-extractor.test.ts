@@ -414,6 +414,19 @@ describe("Runtime Seed extractor", () => {
     );
   });
 
+  it("moves packaged Windows ZIP validation into the isolated Node helper", async () => {
+    const source = await readFile(
+      join(
+        process.cwd(),
+        "src/main/agentera-runtime-distribution/extractor.ts",
+      ),
+      "utf8",
+    );
+
+    expect(source).toMatch(/shouldUseIsolatedRuntimeArchiveValidation\(\)/u);
+    expect(source).toMatch(/verifyRuntimeArchiveWithHelper\(/u);
+  });
+
   it("extracts TAR/Zstandard, verifies hashes, and preserves executable modes where supported", async () => {
     const root = await workspace();
     const value = manifest();

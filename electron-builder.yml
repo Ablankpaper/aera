@@ -44,6 +44,14 @@ win:
         - "runtime-inventory-helper.js"
         - "chunks/inventory-*.js"
         - "chunks/manifest-*.js"
+    - from: out/main
+      to: runtime-archive-validation-helper
+      filter:
+        - "runtime-archive-validation-helper.js"
+        - "chunks/archive-validation-*.js"
+        - "chunks/index-*.js"
+        - "chunks/inventory-*.js"
+        - "chunks/manifest-*.js"
   files:
     - "!node_modules/@electron-internal/extract-zip/index.darwin-*.node"
     - "!node_modules/@electron-internal/extract-zip/index.linux-*.node"
