@@ -206,6 +206,8 @@ Diagnostic Electron runs record each isolated Python probe and sandbox-cleanup b
 
 [[src/main/agentera-runtime-distribution/health.ts#runIsolatedRuntimeHealthCheck]] writes only when explicit E2E diagnostics and an absolute evidence path are both present. Each event contains a probe label, executable basename, duration, bounded process outcome, and a classified, redacted stderr tail; normal installation results and health requirements remain unchanged.
 
+[[src/main/agentera-runtime-distribution/health.ts#runIsolatedRuntimeHealthCheck]] keeps every offline version, command-surface, and required-import probe fail-closed. Windows receives a bounded 120-second cold-start allowance because Defender can keep a newly extracted 14k-entry Runtime busy after inventory verification; macOS and Linux remain bounded at 45 seconds, and explicit test timeouts still override either platform default.
+
 ## Independent verification
 
 The main process verifies canonical manifest bytes, Ed25519 trust, signed context, archive size, and SHA-256 before accepting a Runtime artifact.

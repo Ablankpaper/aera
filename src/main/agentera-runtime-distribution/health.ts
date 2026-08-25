@@ -5,7 +5,8 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 
 import type { RuntimeManifest } from "./manifest";
 
-const HEALTH_TIMEOUT_MS = 45_000;
+const POSIX_HEALTH_TIMEOUT_MS = 45_000;
+const WINDOWS_HEALTH_TIMEOUT_MS = 120_000;
 const HEALTH_MAX_OUTPUT_BYTES = 1024 * 1024;
 const HEALTH_DIAGNOSTIC_MAX_STDERR_CHARS = 512;
 const HEALTH_DIAGNOSTIC_OUTPUT =
@@ -318,15 +319,20 @@ export async function runIsolatedRuntimeHealthCheck({
   sandboxParent,
   signal,
   runner = defaultRunner,
-  timeoutMs = HEALTH_TIMEOUT_MS,
+  timeoutMs,
 }: RuntimeHealthCheckOptions): Promise<RuntimeHealthCheckResult> {
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+  const probeTimeoutMs =
+    timeoutMs ??
+    (manifest.platform === "windows"
+      ? WINDOWS_HEALTH_TIMEOUT_MS
+      : POSIX_HEALTH_TIMEOUT_MS);
+  if (!Number.isSafeInteger(probeTimeoutMs) || probeTimeoutMs <= 0) {
     throw new RuntimeHealthError("Runtime health timeout must be positive");
   }
   runtimeHealthDiagnostic("health-check-start", {
     platform: manifest.platform,
     probes: 3,
-    timeoutMs,
+    timeoutMs: probeTimeoutMs,
   });
   const python = join(runtimeRoot, ...manifest.entrypoints.python.split("/"));
   const hermes = join(runtimeRoot, ...manifest.entrypoints.hermes.split("/"));
@@ -391,14 +397,14 @@ export async function runIsolatedRuntimeHealthCheck({
         probe,
         name: command.name,
         executable: basename(python),
-        timeoutMs,
+        timeoutMs: probeTimeoutMs,
       });
       let result: { stdout: string; stderr: string };
       try {
         result = await runner(python, command.args, {
           cwd: runtimeRoot,
           env,
-          timeoutMs,
+          timeoutMs: probeTimeoutMs,
           signal,
         });
       } catch (error) {
@@ -406,7 +412,7 @@ export async function runIsolatedRuntimeHealthCheck({
         const failure = commandFailureDiagnostic(
           error,
           probeElapsedMs,
-          timeoutMs,
+          probeTimeoutMs,
         );
         runtimeHealthDiagnostic("health-probe-failed", {
           probe,

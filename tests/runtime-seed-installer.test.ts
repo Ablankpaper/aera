@@ -410,6 +410,7 @@ describe("packaged Runtime Seed discovery and installation", () => {
           );
           expect(options.env.HERMES_HOME).not.toBe(process.env.HERMES_HOME);
           expect(options.env.AGENTERA_PRIVATE_TEST_TOKEN).toBeUndefined();
+          expect(options.timeoutMs).toBe(45_000);
           expect(args.slice(0, 3)).toEqual(["-I", "-B", "-c"]);
           expect(args[3]).toContain("socket.socket.connect=blocked");
           return { stdout: TEST_RUNTIME_VERSION, stderr: "" };
@@ -419,6 +420,30 @@ describe("packaged Runtime Seed discovery and installation", () => {
       delete process.env.AGENTERA_PRIVATE_TEST_TOKEN;
     }
     expect(calls).toHaveLength(3);
+  });
+
+  it("allows bounded Windows cold-start probes to outlast Defender scanning", async () => {
+    const root = await temporaryDirectory();
+    const runtimeRoot = join(root, "transaction", "payload");
+    await createRuntimeLayout(runtimeRoot);
+    const setup = await harness();
+    const seed = await verifyPackagedRuntimeSeed({
+      packagedSeedDirectory: setup.paths.packagedSeed,
+      trustedPublicKeys: setup.options.trustedPublicKeys,
+      manifestContext,
+    });
+    const timeouts: number[] = [];
+
+    await runIsolatedRuntimeHealthCheck({
+      runtimeRoot,
+      manifest: { ...seed.manifest, platform: "windows" },
+      runner: async (_executable, _args, options) => {
+        timeouts.push(options.timeoutMs);
+        return { stdout: TEST_RUNTIME_VERSION, stderr: "" };
+      },
+    });
+
+    expect(timeouts).toEqual([120_000, 120_000, 120_000]);
   });
 
   it("performs no HTTP, Git, or legacy shell installer call on success", async () => {
