@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { EventEmitter } from "node:events";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import type { ChildProcess } from "node:child_process";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
@@ -11,6 +11,7 @@ const {
   invocation,
   spawnRef,
   terminateRef,
+  terminatePidRef,
   pidAliveRef,
   apiKeyRef,
   agentDestroyCalls,
@@ -34,6 +35,9 @@ const {
   spawnRef: { value: vi.fn() },
   agentDestroyCalls: { value: 0 },
   terminateRef: {
+    value: vi.fn(),
+  },
+  terminatePidRef: {
     value: vi.fn(),
   },
   pidAliveRef: {
@@ -165,6 +169,8 @@ vi.mock("./gatewayPrompt", () => ({
 }));
 vi.mock("./process-tree", () => ({
   terminateProcessTree: (...args: unknown[]) => terminateRef.value(...args),
+  terminateProcessTreeByPid: (...args: unknown[]) =>
+    terminatePidRef.value(...args),
 }));
 vi.mock("./gateway-managed-config", () => ({
   prepareGatewayManagedConfiguration: vi.fn(async () => ({
@@ -207,6 +213,11 @@ describe("ordinary gateway shutdown lifecycle", () => {
     mkdirSync(TEST_OWNERSHIP_ROOT, { recursive: true });
     spawnRef.value.mockReset();
     terminateRef.value.mockReset();
+    terminatePidRef.value.mockReset();
+    terminatePidRef.value.mockResolvedValue({
+      forced: false,
+      remainingPids: [],
+    });
     pidAliveRef.value.mockReset();
     pidAliveRef.value.mockReturnValue(false);
     apiKeyRef.value = "generated-internal-token";
@@ -383,6 +394,46 @@ describe("ordinary gateway shutdown lifecycle", () => {
     child.emit("close", 0, null);
     await shutdown;
     expect(settled).toBe(true);
+  });
+
+  it("adopts and terminates the daemon listener after its wrapper exits", async () => {
+    const wrapper = fakeChildProcess(process.pid);
+    spawnRef.value.mockReturnValue(wrapper);
+    let listenerAlive = true;
+    pidAliveRef.value.mockImplementation(
+      (pid: unknown) => pid === 9876 && listenerAlive,
+    );
+    terminatePidRef.value.mockImplementation(async (pid: number) => {
+      if (pid === 9876) listenerAlive = false;
+      return { forced: false, remainingPids: [] };
+    });
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+    expect(startGatewayDetailed("research").success).toBe(true);
+
+    mkdirSync(`${TEST_HOME}/profiles/research`, { recursive: true });
+    writeFileSync(
+      `${TEST_HOME}/profiles/research/gateway.pid`,
+      JSON.stringify({ pid: 9876 }),
+    );
+    Object.defineProperty(wrapper, "exitCode", {
+      configurable: true,
+      value: 0,
+    });
+    wrapper.emit("close", 0, null);
+    await vi.advanceTimersByTimeAsync(50);
+
+    const shutdown = stopAeraOwnedGateways();
+    await vi.runAllTimersAsync();
+    await shutdown;
+
+    expect(terminatePidRef.value).toHaveBeenCalledWith(
+      9876,
+      expect.objectContaining({
+        detachedProcessGroup: false,
+        forceAfterMs: 3_000,
+      }),
+    );
+    expect(listenerAlive).toBe(false);
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Port reuse across restarts]]

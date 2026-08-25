@@ -9,6 +9,8 @@ const {
   httpRequestSpy,
   killProcessTreeSpy,
   spawnSpy,
+  isGatewayHealthySpy,
+  startGatewayWithRecoverySpy,
   modelConfig,
   profileEnv,
   modelRows,
@@ -23,6 +25,8 @@ const {
   const home = path.join(os.tmpdir(), `dashboard-runtime-${Date.now()}`);
   const runtime = path.join(home, "runtime");
   const killProcessTreeSpy = vi.fn();
+  const isGatewayHealthySpy = vi.fn(async () => true);
+  const startGatewayWithRecoverySpy = vi.fn(async () => true);
 
   const spawnSpy = vi.fn(() => {
     const proc = new EventEmitter();
@@ -74,6 +78,8 @@ const {
     httpRequestSpy,
     killProcessTreeSpy,
     spawnSpy,
+    isGatewayHealthySpy,
+    startGatewayWithRecoverySpy,
     modelConfig: {
       provider: "auto",
       model: "",
@@ -100,6 +106,12 @@ vi.mock("child_process", () => ({
 
 vi.mock("../src/main/process-tree", () => ({
   killProcessTree: killProcessTreeSpy,
+  // dashboard.ts reaches hermes.ts for the shared readiness gate; hermes
+  // references this export when wiring its default TUI client dependencies.
+  terminateProcessTree: vi.fn(async () => ({
+    forced: false,
+    remainingPids: [],
+  })),
 }));
 
 vi.mock("http", () => ({
@@ -168,6 +180,14 @@ vi.mock("../src/main/remote-oauth", () => ({
   requestRemoteOAuthJson: vi.fn(),
 }));
 
+// dashboard.ts gates its local spawn on the shared gateway readiness path.
+// These tests exercise the dashboard invocation, not gateway recovery, so
+// the gate observes an already-healthy gateway and passes straight through.
+vi.mock("../src/main/hermes", () => ({
+  isGatewayHealthy: isGatewayHealthySpy,
+  startGatewayWithRecovery: startGatewayWithRecoverySpy,
+}));
+
 vi.mock("../src/main/ssh-tunnel", () => ({
   ensureSshTunnel: vi.fn(),
   getSshTunnelUrl: vi.fn(),
@@ -191,6 +211,10 @@ describe("Dashboard Runtime invocation", () => {
     spawnSpy.mockClear();
     httpRequestSpy.mockClear();
     killProcessTreeSpy.mockClear();
+    isGatewayHealthySpy.mockReset();
+    isGatewayHealthySpy.mockResolvedValue(true);
+    startGatewayWithRecoverySpy.mockReset();
+    startGatewayWithRecoverySpy.mockResolvedValue(true);
     modelConfig.provider = "auto";
     modelConfig.model = "";
     modelConfig.baseUrl = "";
@@ -229,6 +253,27 @@ describe("Dashboard Runtime invocation", () => {
         }),
       }),
     );
+  });
+
+  it("does not spawn a Dashboard Runtime when Gateway recovery fails", async () => {
+    isGatewayHealthySpy.mockResolvedValue(false);
+    startGatewayWithRecoverySpy.mockResolvedValue(false);
+
+    const result = await startDashboard("work");
+
+    expect(startGatewayWithRecoverySpy).toHaveBeenCalledWith(
+      "work",
+      90_000,
+      500,
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        supported: true,
+        running: false,
+        error: expect.stringContaining("Gateway"),
+      }),
+    );
+    expect(spawnSpy).not.toHaveBeenCalled();
   });
 
   it("does not signal a host process while disposing the mocked Runtime", async () => {

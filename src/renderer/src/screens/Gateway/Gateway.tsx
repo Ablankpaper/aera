@@ -140,7 +140,9 @@ function Gateway({ profile }: { profile?: string }): React.JSX.Element {
     } else {
       try {
         const result = await window.hermesAPI.startGateway();
-        setGatewayRunning(result.running);
+        // Only a readiness-proven gateway counts as running: a spawned but
+        // still cold-starting process must not light up the running state.
+        setGatewayRunning(result.ready === true);
         if (!result.success) {
           setGatewayError(
             result.logPath

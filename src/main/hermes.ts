@@ -12,6 +12,8 @@ import {
   openSync,
   closeSync,
   statSync,
+  fstatSync,
+  readSync,
 } from "fs";
 import { join } from "path";
 import { homedir, tmpdir } from "os";
@@ -55,6 +57,7 @@ import { providerListSafe } from "./secrets";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 import {
   terminateProcessTree,
+  terminateProcessTreeByPid,
   type ProcessTreeTerminationResult,
 } from "./process-tree";
 import { type Attachment, escapeXmlAttr } from "../shared/attachments";
@@ -261,17 +264,23 @@ function getJsonApiHeaders(
   };
 }
 
-function capabilityCacheKey(profile?: string): string {
-  const auth = getApiAuthHeaders(profile).Authorization ? "auth" : "anon";
+function capabilityCacheKey(
+  profile?: string,
+  preparedApiServerKey?: string,
+): string {
+  const auth = getApiAuthHeaders(profile, preparedApiServerKey).Authorization
+    ? "auth"
+    : "anon";
   return `${getApiUrl(profile)}|${auth}`;
 }
 
 async function getApiCapabilities(
   profile?: string,
+  preparedApiServerKey?: string,
 ): Promise<HermesApiCapabilities | null> {
   let key: string;
   try {
-    key = capabilityCacheKey(profile);
+    key = capabilityCacheKey(profile, preparedApiServerKey);
   } catch {
     return null;
   }
@@ -293,7 +302,7 @@ async function getApiCapabilities(
       url,
       {
         method: "GET",
-        headers: getApiAuthHeaders(profile),
+        headers: getApiAuthHeaders(profile, preparedApiServerKey),
         timeout: CAPABILITIES_TIMEOUT_MS,
         // Readiness/capability probes are short-lived lifecycle traffic. Do
         // not leave an idle keep-alive socket on the gateway port that can be
@@ -3864,9 +3873,10 @@ function ensureInitialized(): void {
   _initialized = true;
   // Note: api_server config is written per-profile by startGateway() now
   // (each profile needs its own port), so ensureInitialized only owns the
-  // shared health poller.
+  // shared health poller. The dashboard backend is intentionally not warmed
+  // here: it shares the Runtime's Python interpreter with the primary
+  // gateway, and cold-starting both together starves the primary gateway.
   startHealthPolling();
-  warmTuiGatewayClient();
 }
 
 function startHealthPolling(): void {
@@ -3923,12 +3933,40 @@ export function configureGatewayProcessOwnership(userDataPath: string): void {
   });
 }
 
+export interface GatewayStartDiagnostics {
+  pid?: number;
+  command?: string;
+  args?: string[];
+  logPath?: string;
+  exitCode?: number | null;
+  signal?: string | null;
+  stderrTail?: string;
+  /** Parsed /v1/capabilities evidence captured once the API served. */
+  capabilities?: {
+    requestToolPolicy: boolean;
+    requestModelRoute: boolean;
+  };
+  /** Outcome of the bounded cleanup after a readiness timeout. */
+  termination?: {
+    forced: boolean;
+    remainingPids: number[];
+  };
+}
+
 export interface GatewayStartResult {
   success: boolean;
   running: boolean;
   alreadyRunning?: boolean;
+  /**
+   * True only when the gateway's Bearer-protected API actually answered a
+   * readiness probe. A spawned-but-still-cold-starting process reports
+   * `running: true` with `ready` unset/false — never treat `running` alone
+   * as proof the API is serving.
+   */
+  ready?: boolean;
   error?: string;
   logPath?: string;
+  diagnostics?: GatewayStartDiagnostics;
 }
 
 /**
@@ -4052,6 +4090,16 @@ function gatewayCliCommandArgs(
 export function startGatewayDetailed(
   profile?: string,
   prepared?: PreparedGatewayLaunch,
+  options?: {
+    /**
+     * Launch-scoped hook fired synchronously once the wrapper process has a
+     * PID. The wrapper is short-lived by design (the daemonized listener
+     * writes gateway.pid), so its `close` handler removes the tracked map
+     * entry; a caller that must keep process evidence through a longer
+     * operation (readiness, cleanup) captures the reference here.
+     */
+    onSpawn?: (proc: ChildProcess) => void;
+  },
 ): GatewayStartResult {
   // Defensive: the local gateway is never the right thing to spawn in
   // remote/SSH mode — the user is pointing at an off-machine server.
@@ -4069,7 +4117,15 @@ export function startGatewayDetailed(
   }
   ensureInitialized();
   if (isGatewayRunning(profile)) {
-    return { success: true, running: true, alreadyRunning: true };
+    return {
+      success: true,
+      running: true,
+      alreadyRunning: true,
+      diagnostics: {
+        pid: readPidFile(profile) ?? undefined,
+        logPath: gatewayLogPath(profile),
+      },
+    };
   }
 
   // Pre-flight: verify the Python interpreter exists before attempting to
@@ -4126,6 +4182,7 @@ export function startGatewayDetailed(
   const cliArgs = gatewayCliCommandArgs(profile, ["gateway"]);
   let proc: ChildProcess | null = null;
   let ownership: GatewayLaunchOwnershipRecord | null = null;
+  let spawnArgs: string[] | undefined;
   try {
     if (gatewayProcessOwnership === null) {
       throw new Error("Aera gateway ownership is unavailable.");
@@ -4134,7 +4191,8 @@ export function startGatewayDetailed(
       profileId: key,
       preLaunchPid: readPidFile(profile),
     });
-    proc = spawn(invocation.python, invocation.cliArgs(cliArgs), {
+    spawnArgs = invocation.cliArgs(cliArgs);
+    proc = spawn(invocation.python, spawnArgs, {
       cwd: invocation.workingDirectory,
       env: gatewayEnv,
       stdio: ["ignore", "ignore", stderrFd >= 0 ? stderrFd : "ignore"],
@@ -4149,6 +4207,7 @@ export function startGatewayDetailed(
       launchId: ownership.launchId,
       spawnedPid: proc.pid,
     });
+    options?.onSpawn?.(proc);
   } catch (err) {
     if (ownership !== null && proc !== null && typeof proc.pid === "number") {
       retainFailedSpawnOwnershipUntilExit(profile, proc, ownership);
@@ -4236,7 +4295,11 @@ export function startGatewayDetailed(
   gatewayProcesses.set(key, proc);
   appStartedProfiles.add(key);
   if (ownership !== null) scheduleGatewayPidAdoption(profile, ownership);
-  warmTuiGatewayClient(profile);
+  // The dashboard backend is intentionally NOT warmed here: it shares this
+  // Runtime's Python interpreter, and cold-starting both processes together
+  // (first Windows launch + Defender scan) starves the primary gateway so it
+  // never reaches its pid-file/listening milestones. Readiness-gated callers
+  // warm the dashboard only after the primary API is actually serving.
 
   // Wait a bit then check if API server came up (only meaningful for the
   // active profile, whose URL getApiUrl() resolves to).
@@ -4250,12 +4313,292 @@ export function startGatewayDetailed(
     }
   }, 3000);
 
-  return { success: true, running: true, logPath };
+  return {
+    success: true,
+    running: true,
+    logPath,
+    diagnostics: {
+      pid: proc.pid,
+      command: invocation.python,
+      args: spawnArgs,
+      logPath,
+    },
+  };
 }
 
 export function startGateway(profile?: string): boolean {
   const result = startGatewayDetailed(profile);
   return result.success && !result.alreadyRunning;
+}
+
+const DEFAULT_GATEWAY_READY_TIMEOUT_MS = 90_000;
+const GATEWAY_STDERR_TAIL_BYTES = 4096;
+
+function gatewayReadyTimeoutMs(): number {
+  const override = Number(process.env.AERA_GATEWAY_READY_TIMEOUT_MS);
+  return Number.isFinite(override) && override > 0
+    ? override
+    : DEFAULT_GATEWAY_READY_TIMEOUT_MS;
+}
+
+function readGatewayLogTail(logPath: string | undefined): string | undefined {
+  if (!logPath) return undefined;
+  let fd: number | null = null;
+  try {
+    fd = openSync(logPath, "r");
+    const { size } = fstatSync(fd);
+    if (size <= 0) return undefined;
+    const length = Math.min(size, GATEWAY_STDERR_TAIL_BYTES);
+    const buffer = Buffer.alloc(length);
+    readSync(fd, buffer, 0, length, Math.max(0, size - length));
+    return buffer.toString("utf-8");
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        // best-effort
+      }
+    }
+  }
+}
+
+export interface StartGatewayWithReadinessOptions {
+  /** Total readiness budget; defaults to 90s (AERA_GATEWAY_READY_TIMEOUT_MS). */
+  readyTimeoutMs?: number;
+  pollMs?: number;
+  /** Test seam: defaults to the real dashboard warm-up. */
+  warmDashboard?: (profile?: string) => void;
+}
+
+/**
+ * Readiness is two facts, not one: the daemonized listener has written its
+ * gateway.pid (so the OS-level identity exists) AND the Bearer-protected API
+ * answers on the prepared port (so the HTTP surface serves). A live socket
+ * without the pid file still fails the acceptance's pid evidence check; a
+ * pid file without a serving API is a dead process.
+ */
+async function waitForGatewayServing(
+  profile: string | undefined,
+  timeoutMs: number,
+  pollMs: number,
+  preparedApiServerKey?: string,
+  preparedApiServerPort?: number,
+  preLaunchPid?: number | null,
+): Promise<{ ready: boolean; listenerPid: number | null }> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    // A pid file alone is not evidence: the listener PID must parse, differ
+    // from the pre-launch stale pid, and resolve to a live Python process.
+    const candidate = readPidFile(profile);
+    const listenerPid =
+      candidate !== null &&
+      candidate !== preLaunchPid &&
+      pidIsAliveAs(candidate, GATEWAY_IMAGE_PREFIXES)
+        ? candidate
+        : null;
+    if (
+      listenerPid !== null &&
+      (await isApiServerReady(
+        profile,
+        preparedApiServerKey,
+        preparedApiServerPort,
+      ))
+    ) {
+      return { ready: true, listenerPid };
+    }
+    if (Date.now() >= deadline) {
+      return { ready: false, listenerPid };
+    }
+    await delay(pollMs);
+  }
+}
+
+/**
+ * Launch the local gateway and hold the answer until its API is actually
+ * serving. `startGatewayDetailed` resolves as soon as the Python process
+ * spawns; on a first Windows launch that cold start can outlast any naive
+ * caller-side timeout, so callers that act on "the gateway is up" must gate
+ * on `ready` here instead of `running` there.
+ *
+ * The dashboard backend is warmed only after the primary gateway answers an
+ * authenticated readiness probe, and that probe authenticates with the same
+ * prepared credential the process was launched with.
+ *
+ * A readiness timeout terminates the process tree we spawned (bounded);
+ * leaving a never-ready Python process behind is exactly the residue that
+ * later fails temp-dir cleanup (EBUSY) and blocks Electron quit. A gateway
+ * this call did NOT spawn (`alreadyRunning`) is reported, never killed.
+ */
+export async function startGatewayWithReadiness(
+  profile?: string,
+  prepared?: PreparedGatewayLaunch,
+  options: StartGatewayWithReadinessOptions = {},
+): Promise<GatewayStartResult> {
+  // Snapshot the stale listener identity before launch so readiness can
+  // reject a leftover gateway.pid, and keep a launch-scoped reference to the
+  // wrapper process: its `close` handler removes the tracked map entry, but
+  // the readiness operation still needs the wrapper's exit code/signal and
+  // must be able to terminate a never-ready tree after the wrapper exits.
+  const preLaunchPid = readPidFile(profile);
+  // An object cell: TS control-flow cannot track closure assignment into a
+  // plain `let`, which would narrow the later reads to `null`/`never`.
+  const launchRef: { proc: ChildProcess | null } = { proc: null };
+  const startResult = startGatewayDetailed(profile, prepared, {
+    onSpawn: (proc) => {
+      launchRef.proc = proc;
+    },
+  });
+  if (!startResult.success) {
+    return { ...startResult, ready: false };
+  }
+
+  const readyTimeoutMs = options.readyTimeoutMs ?? gatewayReadyTimeoutMs();
+  const pollMs = options.pollMs ?? 500;
+  const probeKey =
+    prepared?.key ?? preparedGatewayKeys.get(profileKey(profile));
+  const serving = await waitForGatewayServing(
+    profile,
+    readyTimeoutMs,
+    pollMs,
+    probeKey,
+    prepared?.port,
+    // An already-running gateway legitimately keeps its existing pid; the
+    // stale-pid rejection only applies to a launch this call made.
+    startResult.alreadyRunning ? null : preLaunchPid,
+  );
+
+  if (serving.ready) {
+    setApiCacheFor(profile, true);
+    (options.warmDashboard ?? warmTuiGatewayClient)(profile);
+    // Carry the capabilities document as acceptance evidence. This is
+    // evidence, not a gate: older Runtimes legitimately lack these feature
+    // flags and must still count as ready.
+    const capabilities = await getApiCapabilities(profile, probeKey);
+    return {
+      ...startResult,
+      ready: true,
+      diagnostics: {
+        ...startResult.diagnostics,
+        pid: serving.listenerPid ?? startResult.diagnostics?.pid,
+        capabilities: {
+          requestToolPolicy:
+            capabilities?.features?.request_tool_policy === true,
+          requestModelRoute:
+            capabilities?.features?.request_model_route === true,
+        },
+      },
+    };
+  }
+
+  const key = profileKey(profile);
+  let termination: GatewayStartDiagnostics["termination"];
+  let terminated = false;
+  if (!startResult.alreadyRunning) {
+    // Terminate both identities the launch can leave behind: the wrapper we
+    // spawned (while it is still alive) and the verified listener it may have
+    // published. The listener has no Node ChildProcess handle, so it must use
+    // the PID-specific tree API; casting `{ pid }` to ChildProcess makes the
+    // Windows liveness gate treat it as already exited and silently skip it.
+    const targets: Array<
+      { kind: "child"; proc: ChildProcess } | { kind: "pid"; pid: number }
+    > = [];
+    const launchProc = launchRef.proc;
+    if (
+      launchProc !== null &&
+      typeof launchProc.pid === "number" &&
+      isChildProcessAlive(launchProc)
+    ) {
+      targets.push({ kind: "child", proc: launchProc });
+    }
+    if (
+      serving.listenerPid !== null &&
+      serving.listenerPid !== launchProc?.pid
+    ) {
+      targets.push({ kind: "pid", pid: serving.listenerPid });
+    }
+    const remainingPids: number[] = [];
+    let forced = false;
+    let cleanupFailed = false;
+    for (const target of targets) {
+      try {
+        const terminationOptions = {
+          // Only the wrapper is spawned as a dedicated POSIX process group.
+          // The daemonized listener is an exact PID/tree target.
+          detachedProcessGroup:
+            target.kind === "child" && process.platform !== "win32",
+          forceAfterMs: 3_000,
+          ...(process.platform === "win32"
+            ? {
+                commandTimeoutMs: 3_000,
+                snapshotTimeoutMs: 3_000,
+                snapshotTotalBudgetMs: 6_000,
+                diagnosticProfileKey: key,
+              }
+            : {}),
+        };
+        const result =
+          target.kind === "child"
+            ? await terminateProcessTree(target.proc, terminationOptions)
+            : await terminateProcessTreeByPid(target.pid, terminationOptions);
+        forced ||= result.forced;
+        remainingPids.push(...result.remainingPids);
+      } catch (cleanupError) {
+        cleanupFailed = true;
+        const targetPid =
+          target.kind === "child" ? target.proc.pid : target.pid;
+        const stillAlive =
+          typeof targetPid === "number" &&
+          (target.kind === "child"
+            ? isChildProcessAlive(target.proc)
+            : pidIsAliveAs(target.pid, GATEWAY_IMAGE_PREFIXES));
+        if (stillAlive && typeof targetPid === "number") {
+          remainingPids.push(targetPid);
+        }
+        console.error(
+          `[gateway:${key}] Never-ready gateway cleanup failed:`,
+          cleanupError instanceof Error
+            ? cleanupError.message
+            : String(cleanupError),
+        );
+      }
+    }
+    // Even when the wrapper has already exited and no listener PID was ever
+    // published, record an explicit empty cleanup result. Conversely, a
+    // thrown cleanup operation must never be reported as a clean stop: retain
+    // any still-live target PID in the diagnostics and keep running=true so a
+    // caller cannot mistake an unverified process for a stopped one.
+    termination = { forced, remainingPids: [...new Set(remainingPids)] };
+    terminated = !cleanupFailed && termination.remainingPids.length === 0;
+  }
+  const launchProc = launchRef.proc;
+  const error =
+    `The gateway process launched but its API did not become ready within ${readyTimeoutMs}ms. ` +
+    "See the gateway log for details.";
+  // Process diagnostics only — never user paths or credentials.
+  console.error(
+    `[gateway:${key}] ${error} pid=${startResult.diagnostics?.pid ?? "unknown"} exitCode=${launchProc?.exitCode ?? "still-running"}`,
+  );
+  return {
+    ...startResult,
+    success: false,
+    running:
+      !startResult.alreadyRunning && terminated ? false : startResult.running,
+    ready: false,
+    error,
+    diagnostics: {
+      ...startResult.diagnostics,
+      pid: serving.listenerPid ?? startResult.diagnostics?.pid,
+      exitCode: launchProc?.exitCode ?? null,
+      signal: launchProc?.signalCode ?? null,
+      stderrTail: readGatewayLogTail(
+        startResult.logPath ?? startResult.diagnostics?.logPath,
+      ),
+      termination,
+    },
+  };
 }
 
 function parsePidFromFile(pidFile: string): number | null {
@@ -4299,9 +4642,13 @@ function adoptGatewayPidFromFile(
   ownership: GatewayLaunchOwnershipRecord | null,
 ): GatewayLaunchOwnershipRecord | null {
   if (ownership === null || gatewayProcessOwnership === null) return ownership;
+  const trackedWrapper = gatewayProcesses.get(ownership.profileId) ?? null;
   const pidEntry = readPidFileEntry(profile);
   if (
     pidEntry === null ||
+    ownership.spawnedPid === null ||
+    (trackedWrapper?.pid === ownership.spawnedPid &&
+      isChildProcessAlive(trackedWrapper)) ||
     pidEntry.pid === ownership.preLaunchPid ||
     pidEntry.pid === ownership.spawnedPid ||
     !pidIsAliveAs(pidEntry.pid, GATEWAY_IMAGE_PREFIXES)
@@ -4309,9 +4656,10 @@ function adoptGatewayPidFromFile(
     return ownership;
   }
   try {
-    return gatewayProcessOwnership.markSpawned({
+    return gatewayProcessOwnership.adoptSpawnedPid({
       profileId: ownership.profileId,
       launchId: ownership.launchId,
+      previousSpawnedPid: ownership.spawnedPid,
       spawnedPid: pidEntry.pid,
     });
   } catch {
@@ -4573,10 +4921,22 @@ async function stopAeraOwnedGateway(profile: string): Promise<void> {
     pidEntry.pid !== proc?.pid &&
     pidIsAliveAs(pidEntry.pid, GATEWAY_IMAGE_PREFIXES)
   ) {
-    try {
-      process.kill(pidEntry.pid, "SIGTERM");
-    } catch {
-      // already dead
+    const result = await terminateProcessTreeByPid(pidEntry.pid, {
+      detachedProcessGroup: false,
+      forceAfterMs: 3_000,
+      ...(process.platform === "win32"
+        ? {
+            commandTimeoutMs: 3_000,
+            snapshotTimeoutMs: 3_000,
+            snapshotTotalBudgetMs: 6_000,
+            diagnosticProfileKey: key,
+          }
+        : {}),
+    });
+    if (result.remainingPids.length > 0) {
+      throw new Error(
+        `Aera gateway listener process tree did not fully exit: ${result.remainingPids.join(",")}`,
+      );
     }
   }
 
@@ -5648,5 +6008,7 @@ async function restartGatewayViaCliOnce(
  */
 export function notifyProfileSwitched(): void {
   apiServerAvailable = null;
-  warmTuiGatewayClient();
+  // No dashboard warm-up here: the dashboard backend starts on demand (or
+  // after a readiness-gated gateway launch), never concurrently with a
+  // cold-starting primary gateway.
 }

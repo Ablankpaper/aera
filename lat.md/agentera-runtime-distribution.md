@@ -28,7 +28,7 @@ A missing or invalid seed enters a repair state. Only then may the desktop show 
 
 Packaged Seed installation is verified, transactional, local-only, and isolated from Hermes-owned adaptive state.
 
-[[src/main/agentera-runtime-distribution/extractor.ts#extractRuntimeArchive]] accepts only the signed platform format: TAR/Zstandard for macOS ARM64 and ZIP for Windows x64. Archive paths, normalized metadata, case-folded Windows duplicates, symlink targets, entry types, modes, sizes, and the decompression budget are checked against the signed inventory before a version can be published. Runtime ZIP members are pre-scanned without writing, then streamed to a fresh transaction with `yauzl`; every path and symlink target is validated again before its bytes are written. The extracted tree is then walked without following links, re-hashed, and compared path-for-path with the manifest. POSIX hosts normalize and recheck non-Windows filesystem modes; Windows hosts skip that unrepresentable post-extraction check while retaining the signed archive-mode validation.
+[[src/main/agentera-runtime-distribution/extractor.ts#extractRuntimeArchive]] accepts only the signed platform format: TAR/Zstandard for macOS ARM64 and ZIP for Windows x64. Archive paths, normalized metadata, case-folded Windows duplicates, symlink targets, entry types, modes, sizes, and the decompression budget are checked against the signed inventory before a version can be published. Runtime ZIP members are pre-scanned without writing; packaged Electron supplies yauzl with a random-access reader backed by `original-fs` file-handle reads instead of Electron's path-intercepted `fs`, then Electron's packaged native extractor writes the already verified archive into a fresh transaction with a bounded worker pool. Windows extraction temporarily disables Electron ASAR interception and always restores the prior setting. The packaged Windows app runs the final external staging-tree inventory verifier through the same Aera executable in `ELECTRON_RUN_AS_NODE` mode, with a generated helper outside `app.asar`, a one-use request file, and a credential-free environment; the helper's recursive walk and bounded SHA-256 checks use Electron's `original-fs` directory/stat calls, one bounded `readFile` for entries no larger than 256 KiB, and positional file-handle reads for larger entries, while plain Node and macOS retain the in-process verifier. This avoids Electron main-process filesystem interception and excessive per-file handle round trips while preserving the same path, size, symlink, byte-budget, and SHA-256 checks. The fresh staging tree is walked exactly once without following links; every file is re-hashed in bounded batches and compared path-for-path with the manifest. POSIX hosts normalize and recheck non-Windows filesystem modes; Windows hosts skip that unrepresentable post-extraction check while retaining the signed archive-mode validation.
 
 Extraction occurs only below a fresh `userData/runtime/staging/seed-*` transaction. Failure or cancellation deletes the destination owned by that transaction; it cannot clean another staging child, a current version, or `HERMES_HOME`.
 
@@ -68,7 +68,9 @@ Chat and Gateway, Dashboard, Skills, Profiles, Cron, model discovery, MCP, accou
 
 ## Desktop TUI backend lifecycle
 
-Desktop owns every local headless TUI backend independently from the ordinary Gateway ownership ledger, including backends warmed only by a named Profile switch.
+Desktop owns every local headless TUI backend independently from the ordinary Gateway ownership ledger. Warm-up happens only on demand or after the owning Profile's Gateway is readiness-gated serving.
+
+A TUI backend never cold-starts concurrently with a primary Gateway launch: both share the Runtime's Python interpreter, and a dual cold start (first Windows launch under Defender scan) starves the primary Gateway before it can write its pid file or bind its port. A Profile switch warms nothing.
 
 ### Runtime 0.20 headless contract
 
@@ -80,7 +82,7 @@ Desktop starts each POSIX TUI child as a dedicated process-group leader and reco
 
 Shutdown targets only that dedicated group. Windows instead captures the exact root and child tree with invariant UTC file-time identities, using bounded root/parent CIM filters rather than enumerating the machine process table. No path selects processes by name, port, Profile label, command line, or environment.
 
-Windows initial ownership capture shares one six-second deadline across the primary CIM query and one explicit WMI fallback. The cold-start-sensitive CIM attempt may consume at most one third of that deadline, preserving the remaining budget for WMI on loaded hosts. Every returned row must have valid PID/parent fields and an invariant creation identity; timeout, unavailable, malformed, empty, or partial output remains fail-closed. Optional hosted-runner diagnostics contain only the phase, attempt, elapsed time, outcome, sanitized Profile key, and root PID.
+Windows initial ownership capture shares one six-second deadline across the primary CIM query and one explicit WMI fallback. The cold-start-sensitive CIM attempt may consume at most one third of that deadline, preserving the remaining budget for WMI on loaded hosts. Every returned row must have valid PID/parent fields and an invariant creation identity; timeout, unavailable, malformed, empty, or partial output remains fail-closed. Optional hosted-runner diagnostics contain only the phase, attempt, elapsed time, outcome, sanitized Profile key, and root PID. A daemon listener represented only by its verified pid uses the same snapshot, identity, graceful-tree, and force-escalation path through [[src/main/process-tree.ts#terminateProcessTreeByPid]]; it is never cast to an already-exited synthetic child.
 
 ### Bounded force escalation
 
@@ -103,6 +105,20 @@ Recovery both reconciles the port and spawns, so one call site never spawns ahea
 ### Cancelled startup cannot outlive Desktop
 
 Every asynchronous TUI start belongs to one generation. Stop invalidates that generation before releasing ownership, so a pending port or readiness continuation cannot publish a late process.
+
+### Gateway readiness evidence
+
+Readiness-gated launch holds its answer until the listener's verified `gateway.pid` exists and the authenticated `/v1/capabilities` route answers on the prepared port.
+
+A spawned Gateway process is never reported as serving on process identity alone. [[src/main/hermes.ts#startGatewayWithReadiness]], used by the `start-gateway` IPC, requires the daemonized listener's `gateway.pid` to parse, to differ from the pre-launch stale pid, and to resolve to a live Python process, plus the Bearer-protected `/v1/capabilities` route to answer with the launch's prepared credential. The dashboard backend warms only after that proof, never concurrently with a cold-starting primary Gateway, and the local Dashboard spawn path joins the same readiness gate before it launches its own Runtime Python process.
+
+A readiness timeout terminates what the launch actually left behind: the wrapper child while it lives, and the verified listener pid from `gateway.pid` once the short-lived wrapper has exited — both with the same bounded force escalation as ordinary shutdown. Durable ownership transfers atomically from the exact recorded wrapper PID to a fresh, live Python listener PID that differs from the pre-launch snapshot, but only after the tracked wrapper has exited; a changed pid file while that wrapper remains live is an unverified replacement and is never adopted or signalled. App shutdown uses the PID-only tree terminator for the adopted listener. A Gateway the call did not spawn is reported, never killed. The result carries the listener PID (not the short-lived wrapper's), the launch command, the wrapper's exit code or signal when it died, a bounded stderr tail, and the parsed capabilities document as evidence. Feature flags remain evidence for the caller's acceptance check and never gate readiness, so an older Runtime still counts as serving.
+
+Dashboard startup is fail-closed: if the shared primary-Gateway recovery returns false, it returns `running:false` before allocating a Dashboard token or port and before spawning another Runtime Python process.
+
+Local `gateway-status` answers from an authenticated readiness probe instead of process liveness, and the Gateway screen consumes `ready`, so neither surface can present a cold-starting process as a running Gateway. SSH start, restart, and status resolve the selected Profile's api-server port and require the remote `/health` probe; PID/systemd liveness is necessary but never sufficient, and the zero-retry status path still performs exactly one API probe.
+
+`set-active-profile` propagates Gateway readiness instead of unconditionally returning success. A live local process enters bounded recovery, a stopped local Profile uses the pid-plus-authenticated-API launch gate, and an SSH Profile waits for its resolved remote API; any false readiness result returns false to the caller.
 
 ### Pool-wide App shutdown
 
@@ -192,6 +208,10 @@ Each macOS and Windows Internal Beta job launches the exact packaged Electron ex
 
 [[tests/e2e/agentera-runtime-contract.e2e.ts]] follows `current.json` to the installed manifest, requires its SHA-256 to equal the packaged Seed manifest SHA-256, hashes the installed Python and Hermes entrypoint, starts the real Gateway, binds its PID and listening port to that Python, and requires `request_tool_policy` plus `request_model_route`. The emitted candidate evidence contains only bounded identities, hashes, PID, port, and capabilities; it excludes local paths and credentials.
 
+[[src/main/agentera-runtime-distribution/health.ts#runIsolatedRuntimeHealthCheck]] keeps every offline version, command-surface, and required-import probe fail-closed. Windows receives a bounded 120-second cold-start allowance because Defender can keep a newly extracted 14k-entry Runtime busy after inventory verification; macOS and Linux remain bounded at 45 seconds, and explicit test timeouts still override either platform default.
+
+On packaged Windows, ZIP extraction runs in the credential-free `ELECTRON_RUN_AS_NODE` archive-extraction helper outside the Electron main process. The parent still performs signed archive validation and the complete post-extraction inventory/hash verification; the helper only receives absolute archive/staging paths and returns a strict `{schemaVersion:1,ok:true}` result. Both the extraction helper and the existing final inventory/hash helper use native Node filesystem calls and independent eight-minute deadlines, so a filesystem/Defender stall becomes a recoverable install failure instead of leaving the renderer and Electron process waiting indefinitely. Development and POSIX paths retain the direct extractor.
+
 ## Independent verification
 
 The main process verifies canonical manifest bytes, Ed25519 trust, signed context, archive size, and SHA-256 before accepting a Runtime artifact.
@@ -204,7 +224,7 @@ Native packaging embeds one exact verified Seed and fails closed if any required
 
 `scripts/prepare-agentera-runtime-seed.mjs` selects exactly one locked native target, obtains only its archive, manifest, and signature, runs the independent verifier, compares the verified repository, Runtime version, and full source commit with the lock, then atomically replaces the ignored build-staging directory. An explicit `AGENTERA_RUNTIME_SEED_DIR` is development-only; CI rejects it, and failed verification leaves the previous stage unchanged. Both importable Runtime packaging CLI modules are pinned to LF checkout bytes so their hashbang lines remain parseable under Windows Git configurations that otherwise convert text files to CRLF.
 
-Electron Builder excludes the staging directory from `app.asar`, then copies only the three verified files from `resources/agentera-runtime-seed` into the application `Resources/agentera-runtime-seed` directory. `scripts/verify-packaged-runtime-seed.mjs` rejects partial, mixed-target, or extra contents and can prove every packaged byte matches the verified staging reference.
+Electron Builder excludes the staging directory from `app.asar`, then copies only the three verified files from `resources/agentera-runtime-seed` into the application `Resources/agentera-runtime-seed` directory. Windows additionally packages the generated credential-free archive-validation, archive-extraction, and inventory helpers outside `app.asar`; macOS does not carry these Windows-only helpers. `scripts/verify-packaged-runtime-seed.mjs` rejects partial, mixed-target, or extra Seed contents and can prove every packaged Seed byte matches the verified staging reference.
 
 [[src/main/agentera-runtime-distribution/seed-path.ts#resolvePackagedRuntimeSeedDirectory]] resolves packaged resources from Electron `resourcesPath`. Development and native E2E resolve the same verified staging directory, with an absolute explicit override allowed only outside packaged builds, so source runs exercise the real local installer instead of reporting a false missing-Seed failure.
 

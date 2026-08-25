@@ -18,6 +18,7 @@ import { ensureLocalDashboardCompatibility } from "./hermes-agent-compat";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 import { killProcessTree } from "./process-tree";
 import { hydrateProfileRuntimeEnv } from "./profile-runtime-env";
+import { isGatewayHealthy, startGatewayWithRecovery } from "./hermes";
 import {
   buildRemoteOAuthWsUrl,
   mintRemoteOAuthWsTicket,
@@ -674,6 +675,20 @@ async function startLocalDashboard(
       : compat.detail;
 
   const resolvedProfile = resolveProfile(profile);
+  // A local dashboard shares the Runtime's Python interpreter with the
+  // primary gateway. Never cold-start one while the gateway itself is still
+  // cold-starting: join the readiness-gated recovery path first so the two
+  // Python processes never compete (first Windows launch + Defender scan).
+  if (
+    !(await isGatewayHealthy(resolvedProfile)) &&
+    !(await startGatewayWithRecovery(resolvedProfile, 90_000, 500))
+  ) {
+    return {
+      supported: true,
+      running: false,
+      error: "Primary Gateway did not become ready; Dashboard was not started.",
+    };
+  }
   const token = randomBytes(24).toString("hex");
   const port = await getFreePort();
   if (dashboardStartGeneration(key) !== generation) {

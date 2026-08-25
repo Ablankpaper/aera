@@ -384,6 +384,33 @@ describe("Runtime Seed packaging scripts", () => {
         filter: ["**/*", "!.gitkeep"],
       },
     ]);
+    expect(config.win.extraResources).toEqual([
+      {
+        from: "out/main",
+        to: "runtime-inventory-helper",
+        filter: [
+          "runtime-inventory-helper.js",
+          "chunks/inventory-*.js",
+          "chunks/manifest-*.js",
+        ],
+      },
+      {
+        from: "out/main",
+        to: "runtime-archive-validation-helper",
+        filter: [
+          "runtime-archive-validation-helper.js",
+          "chunks/archive-validation-*.js",
+          "chunks/index-*.js",
+          "chunks/inventory-*.js",
+          "chunks/manifest-*.js",
+        ],
+      },
+      {
+        from: "out/main",
+        to: "runtime-archive-extraction-helper",
+        filter: ["runtime-archive-extraction-helper.js"],
+      },
+    ]);
     expect(config.files).toEqual([
       "out/**/*",
       "package.json",

@@ -49,6 +49,7 @@ vi.mock("node:fs", async (importOriginal) => {
 import {
   GatewayProcessOwnershipLedger,
   GatewayProcessOwnershipError,
+  type GatewayLaunchOwnershipRecord,
 } from "./gateway-process-ownership";
 
 const NOW = new Date("2026-08-03T10:00:00.000Z");
@@ -127,6 +128,41 @@ describe("GatewayProcessOwnershipLedger", () => {
       "default",
       "research",
     ]);
+  });
+
+  it("atomically transfers wrapper ownership to its daemonized listener", () => {
+    const current = ledger();
+    const intent = current.beginLaunch({
+      profileId: "research",
+      preLaunchPid: 42,
+    });
+    current.markSpawned({
+      profileId: "research",
+      launchId: intent.launchId,
+      spawnedPid: 201,
+    });
+    const adoptSpawnedPid = (
+      current as unknown as {
+        adoptSpawnedPid?: (input: {
+          profileId: string;
+          launchId: string;
+          previousSpawnedPid: number;
+          spawnedPid: number;
+        }) => GatewayLaunchOwnershipRecord;
+      }
+    ).adoptSpawnedPid;
+    expect(adoptSpawnedPid).toBeTypeOf("function");
+    if (!adoptSpawnedPid) return;
+
+    const adopted = adoptSpawnedPid.call(current, {
+      profileId: "research",
+      launchId: intent.launchId,
+      previousSpawnedPid: 201,
+      spawnedPid: 202,
+    });
+
+    expect(adopted.spawnedPid).toBe(202);
+    expect(current.get("research")?.spawnedPid).toBe(202);
   });
 
   it("clears a failed spawn but rejects immutable launch replay drift", () => {

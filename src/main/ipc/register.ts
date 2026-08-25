@@ -122,9 +122,10 @@ import {
   configureGatewayManagedConfiguration,
   prepareGatewayForLaunch,
   startGateway,
+  startGatewayWithReadiness,
   startGatewayWithRecovery,
-  startGatewayDetailed,
   stopGateway,
+  isGatewayHealthy,
   isGatewayRunning,
   testRemoteConnection,
   restartGateway,
@@ -456,6 +457,7 @@ import {
   type ManagedModelConfigurationWriteBridgeOptions,
   type ModelConfigurationIpcBridgeDependencies,
 } from "./model-configuration-bridge";
+import { ensureActivatedProfileGatewayReady } from "./profile-gateway-readiness";
 import { createManagedModelMutationPort } from "../model-configuration-mutation-port";
 import type {
   ManagedModelConfigurationWriteContext,
@@ -626,8 +628,10 @@ import {
   sshListProfiles,
   sshCreateProfile,
   sshDeleteProfile,
+  sshGatewayApiReady,
   sshGatewayStatus,
   sshStartGateway,
+  sshStartGatewayAndWaitApiReady,
   sshStopGateway,
   sshEnsureDashboard,
   sshEnsureApiServerKey,
@@ -4431,8 +4435,20 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle("start-gateway", async () => {
     const conn = getConnectionConfig();
     if (conn.mode === "ssh" && conn.ssh) {
-      await sshStartGateway(conn.ssh);
-      return { success: true, running: true };
+      const result = await sshStartGatewayAndWaitApiReady(
+        conn.ssh,
+        undefined,
+        30_000,
+      );
+      if (result.ready) {
+        return { success: true, running: true, ready: true };
+      }
+      return {
+        success: false,
+        running: false,
+        ready: false,
+        error: `The remote gateway process was asked to start, but its API did not become ready on port ${result.port} within 30s.`,
+      };
     }
     if (conn.mode === "remote") {
       // The remote server runs its own gateway; nothing to start locally.
@@ -4446,7 +4462,11 @@ export function registerIpcHandlers(context: IpcContext): void {
       };
     }
     const preparedGateway = await prepareGatewayForLaunch();
-    return startGatewayDetailed(undefined, preparedGateway);
+    // Hold the IPC answer until the gateway API is actually serving. A bare
+    // startGatewayDetailed() resolves at process spawn, which made callers
+    // treat a cold-starting Python process as a running gateway (Windows
+    // first-install: no pid file, no listening port for 45s+).
+    return startGatewayWithReadiness(undefined, preparedGateway);
   });
   ipcMain.handle("stop-gateway", async () => {
     const conn = getConnectionConfig();
@@ -4467,18 +4487,25 @@ export function registerIpcHandlers(context: IpcContext): void {
     const conn = getConnectionConfig();
     if (conn.mode === "ssh" && conn.ssh) {
       await sshStopGateway(conn.ssh);
-      await sshStartGateway(conn.ssh);
-      return sshGatewayStatus(conn.ssh);
+      const result = await sshStartGatewayAndWaitApiReady(
+        conn.ssh,
+        undefined,
+        30_000,
+      );
+      return result.ready;
     }
     if (conn.mode === "remote") {
       return false;
     }
     return restartGateway(profile);
   });
-  ipcMain.handle("gateway-status", () => {
+  ipcMain.handle("gateway-status", async () => {
     const conn = getConnectionConfig();
-    if (conn.mode === "ssh" && conn.ssh) return sshGatewayStatus(conn.ssh);
-    return isGatewayRunning();
+    if (conn.mode === "ssh" && conn.ssh) return sshGatewayApiReady(conn.ssh);
+    // Status is readiness, not process liveness: a cold-starting or wedged
+    // process that never serves the authenticated API must read as stopped.
+    if (!isGatewayRunning()) return false;
+    return isGatewayHealthy();
   });
 
   // Dashboard/WebSocket transport probe. This is intentionally separate from
@@ -5015,20 +5042,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     }
     setActiveProfile(name);
     notifyProfileSwitched();
-    // Bring the activated profile's own gateway up if it isn't already —
-    // without stopping any other profile's gateway (their bots stay online).
-    if (conn.mode === "ssh" && conn.ssh) {
-      // Per-profile gateway lives on the remote; start it over SSH. (Previously
-      // SSH was skipped entirely, so selecting/Chatting a profile in the Agents
-      // page never started its gateway and the status spun on "Starting…".)
-      if (!(await sshGatewayStatus(conn.ssh, name))) {
-        await sshStartGateway(conn.ssh, name);
-      }
-    } else if (!isRemoteMode() && !isGatewayRunning(name)) {
-      const preparedGateway = await prepareGatewayForLaunch(name);
-      startGatewayDetailed(name, preparedGateway);
-    }
-    return true;
+    // Bring the activated profile's own gateway up without stopping any other
+    // profile. A live PID is not enough: propagate API readiness failure to
+    // the caller instead of reporting a successful activation.
+    return ensureActivatedProfileGatewayReady(conn, name);
   });
 
   // Profile appearance (desktop-only avatar + accent colour). Local-only —
